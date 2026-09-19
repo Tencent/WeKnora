@@ -77,10 +77,30 @@ export interface WikiGraphMeta {
   center?: string;
   depth?: number;
   familiar_count?: number;
+  /** 引导视图是否开启：开启时节点按掌握状态水位着色。 */
+  mastery_enabled?: boolean;
+}
+
+export interface WikiGraphNode {
+  slug: string;
+  title: string;
+  page_type: string;
+  link_count: number;
+  familiar?: boolean;
+  /** 个人知识状态水位（0~100，十档）。缺省表示引导视图无数据。 */
+  mastery?: number;
+  /** 是否处于知识边界（值得探索的相邻低证据节点）。 */
+  boundary?: boolean;
+  /** PPR 边界分数，用于对一跳邻居排序，选出「下一步推荐」。 */
+  boundary_score?: number;
+  /** 最近一次交互时间（引用/浏览/点赞），用于画像解释与调试。 */
+  last_active?: string;
+  /** 后端计算：最近交互是否在活跃窗口内，决定是否播放水波。 */
+  recently_active?: boolean;
 }
 
 export interface WikiGraphData {
-  nodes: { slug: string; title: string; page_type: string; link_count: number; familiar?: boolean }[];
+  nodes: WikiGraphNode[];
   edges: { source: string; target: string }[];
   meta: WikiGraphMeta;
 }
@@ -305,6 +325,8 @@ export interface WikiGraphQueryParams {
   depth?: number;
   types?: string[];
   limit?: number;
+  /** 知识引导视图：true 时后端返回每个节点的掌握状态水位。 */
+  mastery?: boolean;
 }
 
 // getWikiGraph fetches a slice of the wiki link graph. Without params the
@@ -322,6 +344,7 @@ export function getWikiGraph(kbId: string, params?: WikiGraphQueryParams) {
     if (params.types && params.types.length > 0) {
       query.set('types', params.types.join(','));
     }
+    if (params.mastery !== undefined) query.set('mastery', String(params.mastery));
   }
   const qs = query.toString();
   return get(`/api/v1/knowledgebase/${kbId}/wiki/graph${qs ? '?' + qs : ''}`);

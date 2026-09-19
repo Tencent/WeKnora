@@ -47,6 +47,7 @@ type wikiPageService struct {
 	kbService       interfaces.KnowledgeBaseService
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 	redisClient     *redis.Client
+	masteryService  interfaces.MasteryService // knowledge-guidance overlay (may be nil)
 }
 
 // NewWikiPageService creates a new wiki page service
@@ -56,6 +57,7 @@ func NewWikiPageService(
 	kbService interfaces.KnowledgeBaseService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
+	masteryService interfaces.MasteryService,
 ) interfaces.WikiPageService {
 	return &wikiPageService{
 		repo:            repo,
@@ -63,6 +65,7 @@ func NewWikiPageService(
 		kbService:       kbService,
 		taskPendingRepo: taskPendingRepo,
 		redisClient:     redisClient,
+		masteryService:  masteryService,
 	}
 }
 
@@ -582,6 +585,60 @@ func (s *wikiPageService) GetGraph(ctx context.Context, req *types.WikiGraphRequ
 	if err != nil {
 		return nil, err
 	}
+
+	// Project the guidance water level onto pages when the overlay is enabled.
+	if s.masteryService != nil && req.MasteryEnabled {
+		slugSources := make(map[string][]string, len(pages))
+		adjacency := make(map[string][]string, len(pages))
+		for _, p := range pages {
+			if p == nil {
+				continue
+			}
+			// 所有页面都纳入投影：无 SourceRefs 的页面（synthesis/comparison）
+			// 依赖浏览证据，用空切片占位即可被 NodeMastery 遍历到。
+			slugSources[p.Slug] = p.SourceKnowledgeIDs()
+			// 无向邻接（出链 + 入链），供 PPR 边界计算使用。同一页面可能同时
+			// 出现在 OutLinks 与 InLinks（自环/双向），去重避免重复计入出度、
+			// 改变 PPR 传播概率。
+			nbrs := make([]string, 0, len(p.OutLinks)+len(p.InLinks))
+			seen := make(map[string]struct{}, len(p.OutLinks)+len(p.InLinks))
+			for _, link := range append(append([]string{}, p.OutLinks...), p.InLinks...) {
+				if _, dup := seen[link]; dup {
+					continue
+				}
+				seen[link] = struct{}{}
+				nbrs = append(nbrs, link)
+			}
+			adjacency[p.Slug] = nbrs
+		}
+		if states, err := s.masteryService.NodeStates(ctx, req.KnowledgeBaseID, slugSources); err == nil {
+			req.Mastery = make(map[string]int, len(states))
+			req.LastActive = make(map[string]time.Time, len(states))
+			req.RecentlyActive = make(map[string]bool, len(states))
+			for slug, st := range states {
+				req.Mastery[slug] = st.Level
+				if !st.LastActive.IsZero() {
+					req.LastActive[slug] = st.LastActive
+				}
+				if st.RecentlyActive {
+					req.RecentlyActive[slug] = true
+				}
+			}
+			// Boundary 计算全局 PPR 候选集（含分数）。前端据此识别哪些节点
+			// 属于知识边界，并在用户点击中心节点后，对一跳邻居 ∩ 候选集按分数
+			// 排序，取 top-3 渲染涟漪与「下一步推荐」。
+			scores := s.masteryService.Boundary(req.Mastery, adjacency)
+			req.BoundaryScores = scores
+			boundary := make(map[string]bool, len(scores))
+			for slug, score := range scores {
+				if score > 0 {
+					boundary[slug] = true
+				}
+			}
+			req.BoundarySlugs = boundary
+		}
+	}
+
 	return computeGraphSubset(pages, req)
 }
 
@@ -666,12 +723,22 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	nodes := make([]types.WikiGraphNode, 0, len(selected))
 	for slug := range selected {
 		p := pageBySlug[slug]
+		var lastActive *time.Time
+		if la, ok := req.LastActive[slug]; ok {
+			la := la
+			lastActive = &la
+		}
 		nodes = append(nodes, types.WikiGraphNode{
-			Slug:      p.Slug,
-			Title:     p.Title,
-			PageType:  p.PageType,
-			LinkCount: linkCount[slug],
-			Familiar:  p.BuiltFrom(familiarSet),
+			Slug:           p.Slug,
+			Title:          p.Title,
+			PageType:       p.PageType,
+			LinkCount:      linkCount[slug],
+			Familiar:       p.BuiltFrom(familiarSet),
+			Mastery:        req.Mastery[slug],
+			Boundary:       req.BoundarySlugs[slug],
+			BoundaryScore:  req.BoundaryScores[slug],
+			LastActive:     lastActive,
+			RecentlyActive: req.RecentlyActive[slug],
 		})
 	}
 	// Deterministic node ordering — the map iteration above is random.
@@ -715,10 +782,11 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	}
 
 	meta := types.WikiGraphMeta{
-		Mode:      mode,
-		Total:     total,
-		Returned:  len(nodes),
-		Truncated: len(nodes) < total,
+		Mode:           mode,
+		Total:          total,
+		Returned:       len(nodes),
+		Truncated:      len(nodes) < total,
+		MasteryEnabled: req.Mastery != nil,
 	}
 	for _, n := range nodes {
 		if n.Familiar {

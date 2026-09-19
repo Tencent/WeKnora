@@ -46,7 +46,8 @@ type Handler struct {
 	workspaceCheckpointer *service.WorkspaceCheckpointer
 	// sandboxIDLookup resolves a session's bound sandbox without provisioning.
 	sandboxIDLookup SandboxIDLookup
-	memoryService   interfaces.MemoryService // Service for cross-session long-term memory
+	memoryService   interfaces.MemoryService  // Service for cross-session long-term memory
+	masteryService  interfaces.MasteryService // Knowledge-guidance ledgers (may be nil)
 	// userService / memberService back the sandbox terminal's self-contained
 	// handshake (browser WebSocket upgrades cannot send Authorization).
 	userService   interfaces.UserService
@@ -90,6 +91,7 @@ func NewHandler(
 	workspaceCheckpointer *service.WorkspaceCheckpointer,
 	sandboxIDLookup SandboxIDLookup,
 	memoryService interfaces.MemoryService,
+	masteryService interfaces.MasteryService,
 	userService interfaces.UserService,
 	memberService interfaces.TenantMemberService,
 	terminalService *service.SandboxTerminalService,
@@ -121,6 +123,7 @@ func NewHandler(
 		workspaceCheckpointer: workspaceCheckpointer,
 		sandboxIDLookup:       sandboxIDLookup,
 		memoryService:         memoryService,
+		masteryService:        masteryService,
 		userService:           userService,
 		memberService:         memberService,
 		terminalService:       terminalService,

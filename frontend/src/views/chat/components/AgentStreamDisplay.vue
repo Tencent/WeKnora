@@ -393,6 +393,11 @@
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
                 </t-button>
+                <t-button size="small" variant="outline" shape="round"
+                  :class="{ 'answer-toolbar__like--active': answerLiked }" @click.stop="handleLikeAnswer"
+                  :title="answerLiked ? $t('agentStream.like.cancelTitle') : $t('agentStream.like.title')">
+                  <t-icon :name="answerLiked ? 'thumb-up-filled' : 'thumb-up'" />
+                </t-button>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
@@ -674,6 +679,7 @@ import {
   type CachedMermaidSvgHtml,
 } from '@/utils/chatMessageShared';
 import { copyWithToast } from '@/utils/clipboard';
+import { recordAnswerLike, cancelAnswerLike } from '@/api/memory';
 import {
   configureMarkedForChatMarkdown,
   renderChatMarkdown,
@@ -3128,6 +3134,31 @@ const handleCopyAnswer = async (answerEvent: any) => {
   await copyWithToast(content, 'agentStream.copy.success', 'agentStream.copy.failed');
 };
 
+// 知识引导点赞：点赞一条回答，并把其引用文档作为掌握证据上报。
+const answerLiked = ref(false)
+
+const handleLikeAnswer = async () => {
+  const messageId = resolveAssistantMessageId(props.session)
+  const sessionId = props.sessionId || ''
+  if (!messageId || !sessionId) {
+    MessagePlugin.warning(t('agentStream.like.noKnowledge'))
+    return
+  }
+  try {
+    if (answerLiked.value) {
+      await cancelAnswerLike(messageId)
+      answerLiked.value = false
+      MessagePlugin.info(t('agentStream.like.cancelled'))
+    } else {
+      await recordAnswerLike({ session_id: sessionId, message_id: messageId })
+      answerLiked.value = true
+      MessagePlugin.success(t('agentStream.like.success'))
+    }
+  } catch (e) {
+    console.error('Failed to toggle answer like:', e)
+  }
+};
+
 const handleAddToKnowledge = (answerEvent: any) => {
   const content = getActualContent(answerEvent);
   if (!content) {
@@ -3365,6 +3396,12 @@ const handleAddToKnowledge = (answerEvent: any) => {
   .answer-toolbar {
     margin-top: 10px;
   }
+}
+
+// 知识引导点赞激活态
+.answer-toolbar__like--active {
+  color: var(--td-brand-color);
+  border-color: var(--td-brand-color);
 }
 
 // Tool Event

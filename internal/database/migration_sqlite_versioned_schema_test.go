@@ -29,26 +29,33 @@ var versionedSQLiteTables = []string{
 	"fork_snapshot_leases",
 	"mcp_endpoints",
 	"message_artifacts",
+	"memory_citations",
+	"memory_page_views",
+	"memory_answer_likes",
+	"memory_guide_exposures",
+	"memory_mastery_daily",
+	"memory_spread_views",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"memory_subjects":    {"extraction_state"},                                                 // 000094
-	"memory_items":       {"replaces_id"},                                                      // 000094
-	"tenants":            {"api_principal_config"},                                             // 000064
-	"users":              {"is_system_admin"},                                                  // 000053
-	"knowledges":         {"pending_subtasks_count", "profile"},                                // 000056, 000101
-	"knowledge_bases":    {"profile_config", "generated_profile"},                              // 000101
-	"messages":           {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
-	"sessions":           {"parent_session_id", "forked_from_message_id", "fork_bootstrap"},    // 000097
-	"tenant_invitations": {"token", "accepted_count"},                                          // 000054
-	"embed_channels":     {"allow_memory"},                                                     // 000060
-	"mcp_oauth_tokens":   {"principal_type", "principal_id"},                                   // 000064
-	"mcp_tool_approvals": {"enabled"},                                                          // 000091
+	"memory_subjects":        {"extraction_state"},                                                 // 000094
+	"memory_items":           {"replaces_id"},                                                      // 000094
+	"tenants":                {"api_principal_config"},                                             // 000064
+	"users":                  {"is_system_admin"},                                                  // 000053
+	"knowledges":             {"pending_subtasks_count", "profile"},                                // 000056, 000101
+	"knowledge_bases":        {"profile_config", "generated_profile"},                              // 000101
+	"messages":               {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
+	"sessions":               {"parent_session_id", "forked_from_message_id", "fork_bootstrap"},    // 000097
+	"tenant_invitations":     {"token", "accepted_count"},                                          // 000054
+	"embed_channels":         {"allow_memory"},                                                     // 000060
+	"mcp_oauth_tokens":       {"principal_type", "principal_id"},                                   // 000064
+	"mcp_tool_approvals":     {"enabled"},                                                          // 000091
+	"memory_guide_exposures": {"knowledge_base_id"},                                                // 000108 / Lite 000027
 }
 
-const expectedSQLiteMigrationVersion = 25
+const expectedSQLiteMigrationVersion = 29
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -80,6 +87,11 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	require.True(t, sqliteIndexExists(t, db, "idx_messages_session_created_id"),
 		"SQLite migrations must add the session/created_at index") // 000106
 	assertSQLiteAgentHistoryQueriesUseTheIndex(t, db)
+
+	// 引导曝光按候选查询的索引（000109 / Lite 000028）：每次有效浏览都会按
+	// (kb, candidate_slug) 回填 qualified_view_at，缺索引会退化成扫描。
+	require.True(t, sqliteIndexExists(t, db, "idx_mastery_exposure_candidate"),
+		"SQLite migrations must create idx_mastery_exposure_candidate")
 
 	assertSQLiteShareLinkInvitationsWork(t, db)
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
