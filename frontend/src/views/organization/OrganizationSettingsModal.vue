@@ -860,7 +860,6 @@ function clearAvatarEmoji() {
 
 // Computed
 const isCreateMode = computed(() => props.mode === 'create')
-const isEditMode = computed(() => props.mode === 'edit' || props.mode === 'create')
 // 后端组织相关变更接口（保存设置、邀请、搜索用户、改/删成员、审核加入申请、
 // 升级申请、刷新邀请码、移除共享等）在路由层都要求当前空间角色 ≥ admin（见
 // internal/router/router.go 的 RegisterOrganizationRoutes）。跨空间超管可绕过。

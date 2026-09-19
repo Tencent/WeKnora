@@ -29,7 +29,7 @@
       <ResourceListToolbar mode="organization" :model-value="spaceSelection" @update:model-value="value => spaceSelection = value === 'created' || value === 'joined' ? value : 'all'" v-model:query="keyword" :count-all="organizations.length"
       :count-created="createdCount" :count-joined="joinedCount" />
       <div class="org-list-main">
-        <EmptyState v-if="keyword.trim() && !(loading) && visibleResultCount === 0" icon="search"
+        <EmptyState v-if="keyword.trim() && !loading && filteredOrganizations.length === 0" icon="search"
           :title="$t('common.noResult')">
           <t-button variant="outline" @click="keyword = ''">{{ $t('common.clear') }}</t-button>
         </EmptyState>
@@ -80,7 +80,6 @@
             </div>
             <div v-show="!isOrgRowHidden(org)" class="org-card"
             :class="{ 'joined-org': !org.is_owner }" role="link" tabindex="0" @keydown.enter.self.prevent="handleCardClick(org)" @keydown.space.self.prevent="handleCardClick(org)" @click="handleCardClick(org)">
-
 
             <!-- 卡片头部 -->
             <div class="card-header">
@@ -650,7 +649,7 @@ const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'j
   }
 }) as EventListener
 
-// 左侧筛选：'all' | 'created' | 'joined'
+// 分类筛选：'all' | 'created' | 'joined'
 const spaceSelection = ref<'all' | 'created' | 'joined'>('all')
 const keyword = ref('')
 
@@ -712,14 +711,6 @@ const emptyStateDesc = computed(() => {
 })
 
 // Methods
-function getRoleTheme(role: string) {
-  switch (role) {
-    case 'admin': return 'primary'
-    case 'editor': return 'warning'
-    default: return 'default'
-  }
-}
-
 const onVisibleChange = (visible: boolean, org: OrgWithUI) => {
   if (!visible) {
     organizationMenuVisibility[org.id] = false
@@ -977,13 +968,6 @@ function previewSearchableOrg(org: SearchableOrganizationItem) {
   inviteCode.value = ''
 }
 
-// 查看搜索到的空间（已是成员时，打开空间设置；不关闭加入弹窗，关闭设置后仍回到搜索）
-function viewSearchableOrg(org: SearchableOrganizationItem) {
-  settingsOrgId.value = org.id
-  settingsMode.value = 'edit'
-  showSettingsModal.value = true
-}
-
 // 从预览弹框中查看空间（已是成员时；不关闭加入弹窗，关闭设置后仍回到搜索）
 function viewOrganizationFromPreview() {
   if (!invitePreviewData.value) return
@@ -1067,7 +1051,6 @@ onUnmounted(() => {
   window.removeEventListener('openOrganizationDialog', handleOrganizationDialogEvent)
   teardownInviteBodyResizeObserver()
 })
-const visibleResultCount = computed(() => filteredOrganizations.value.length)
 // A new search reveals matching rows even if their group was previously collapsed.
 watch(keyword, () => { collapsedOrgSections.value = new Set() })
 </script>
@@ -1193,59 +1176,6 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
   }
 }
 
-// Tab 切换样式（下划线式，与整体协作感一致）
-.org-tabs {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  margin-bottom: 24px;
-
-  .tab-item {
-    padding: 12px 0;
-    cursor: pointer;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-base);
-    font-weight: 400;
-    user-select: none;
-    position: relative;
-    transition: color var(--app-motion-base) ease;
-
-    &:hover {
-      color: var(--td-text-color-secondary);
-    }
-
-    &.active {
-      color: var(--td-brand-color);
-      font-weight: 500;
-
-      &::after {
-        content: '';
-        position: absolute;
-        bottom: -1px;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: var(--td-brand-color);
-        border-radius: 1px;
-      }
-    }
-  }
-}
-
-@keyframes contentFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .org-card-wrap {
   .resource-card-grid();
 }
@@ -1259,8 +1189,6 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
 .org-card {
   .resource-card();
 }
-
-
 
 // 空间头像容器（SpaceAvatar 自带样式）
 .org-avatar {
@@ -1412,39 +1340,17 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
   }
 }
 
-
 // 删除/离开确认对话框样式
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
 
-
 .resource-list-header();
-@media (prefers-reduced-motion: reduce) {
-  .org-card-wrap { animation: none; }
-}
 
 </style>
 
 <style lang="less">
 /* 下拉菜单样式已统一至 @/assets/dropdown-menu.less */
-
-// 创建对话框样式优化
-.create-org-dialog,
-.join-org-dialog {
-  .t-form-item__label {
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-base);
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .t-input,
-  .t-textarea {
-    font-family: var(--app-font-family);
-  }
-
-}
 
 // 邀请预览弹框 - 参考 FAQ 导入弹窗风格，更紧凑
 .invite-preview-overlay {
@@ -1664,10 +1570,6 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
 
 .join-tab-content {
   width: 100%;
-}
-
-.search-input-wrap {
-  margin-bottom: 16px;
 }
 
 // 搜索空间列表容器（与主列表一致：无外框，卡片间距）

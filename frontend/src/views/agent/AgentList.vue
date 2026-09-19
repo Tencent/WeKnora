@@ -73,8 +73,7 @@
             :key="agent.isMine ? agent.id : `shared-${agent.share_id}`">
             <!-- 内置：始终置顶。filteredAgents 在 all 视图里已经把
                  builtin 排到最前；这里只在第一张 builtin 之前打一次标题。 -->
-            <div v-if="showShareGroupHeaders
-              && agent.isMine
+            <div v-if="agent.isMine
               && agent.is_builtin
               && (index === 0
                 || !filteredAgents[index - 1].isMine
@@ -91,8 +90,7 @@
             <!-- 我创建的：当前 agent 是本空间 + 非内置 + 我亲手创建，且前一张
                  要么不存在、要么不是本空间、要么是内置（builtin → mine 过渡）、
                  要么是同事创建。与 KB 列表对齐。 -->
-            <div v-if="showShareGroupHeaders
-              && agent.isMine
+            <div v-if="agent.isMine
               && !agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
@@ -109,8 +107,7 @@
                 :name="isAgentSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 本空间 · 仅查看 / 其他成员：本空间里非内置且非我创建的同事 agent。 -->
-            <div v-if="showShareGroupHeaders
-              && agent.isMine
+            <div v-if="agent.isMine
               && !agent.is_builtin
               && !isMyAgent(agent)
               && (index === 0
@@ -127,8 +124,7 @@
                 :name="isAgentSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 可编辑：仅在「全部」视图过渡处显示分组标题 -->
-            <div v-if="showShareGroupHeaders
-              && !agent.isMine
+            <div v-if="!agent.isMine
               && isSharedAgentEditable((agent as any).permission)
               && (index === 0 || filteredAgents[index - 1].isMine)" class="agent-section-header" role="button"
               tabindex="0" :aria-expanded="!isAgentSectionCollapsed('sharedEditable')" @click="toggleAgentSection('sharedEditable')"
@@ -142,8 +138,7 @@
                 :name="isAgentSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看 -->
-            <div v-if="showShareGroupHeaders
-              && !agent.isMine
+            <div v-if="!agent.isMine
               && !isSharedAgentEditable((agent as any).permission)
               && (index === 0
                 || filteredAgents[index - 1].isMine
@@ -299,8 +294,7 @@
         <div v-if="spaceSelection === 'mine' && sortedMineAgents.length > 0" class="agent-card-wrap">
           <template v-for="(agent, index) in sortedMineAgents" :key="agent.id">
             <!-- 内置：始终置顶。sortedMineAgents 已按 内置→我→同事 排序。 -->
-            <div v-if="showShareGroupHeaders
-              && agent.is_builtin
+            <div v-if="agent.is_builtin
               && (index === 0 || !sortedMineAgents[index - 1].is_builtin)" class="agent-section-header" role="button"
               tabindex="0" :aria-expanded="!isAgentSectionCollapsed('builtin')" @click="toggleAgentSection('builtin')"
               @keydown.enter.prevent="toggleAgentSection('builtin')"
@@ -312,8 +306,7 @@
                 :name="isAgentSectionCollapsed('builtin') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 我创建的：第一张非内置且我亲手创建的卡片前打标题 -->
-            <div v-if="showShareGroupHeaders
-              && !agent.is_builtin
+            <div v-if="!agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
                 || sortedMineAgents[index - 1].is_builtin
@@ -328,8 +321,7 @@
                 :name="isAgentSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 本空间 · 仅查看 / 其他成员：非内置且非我创建的同事 agent -->
-            <div v-if="showShareGroupHeaders
-              && !agent.is_builtin
+            <div v-if="!agent.is_builtin
               && !isMyAgent(agent)
               && (index === 0
                 || sortedMineAgents[index - 1].is_builtin
@@ -472,7 +464,7 @@
         <div v-else-if="spaceSelectionOrgId && sortedSpaceAgentsList.length > 0" class="agent-card-wrap">
           <template v-for="(shared, index) in sortedSpaceAgentsList" :key="'shared-' + shared.share_id">
             <!-- 我共享的：当前用户共享进本空间的智能体，只在首条 is_mine 上挂标题 -->
-            <div v-if="showShareGroupHeaders && shared.is_mine && index === 0" class="agent-section-header"
+            <div v-if="shared.is_mine && index === 0" class="agent-section-header"
               role="button" tabindex="0" :aria-expanded="!isAgentSectionCollapsed('sharedByMe')" @click="toggleAgentSection('sharedByMe')"
               @keydown.enter.prevent="toggleAgentSection('sharedByMe')"
               @keydown.space.prevent="toggleAgentSection('sharedByMe')">
@@ -483,8 +475,7 @@
                 :name="isAgentSectionCollapsed('sharedByMe') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 可编辑：首次从 is_mine 进入共享 + editable -->
-            <div v-if="showShareGroupHeaders
-              && !shared.is_mine
+            <div v-if="!shared.is_mine
               && isSharedAgentEditable(shared.permission)
               && (index === 0 || sortedSpaceAgentsList[index - 1].is_mine)" class="agent-section-header" role="button"
               tabindex="0" :aria-expanded="!isAgentSectionCollapsed('sharedEditable')" @click="toggleAgentSection('sharedEditable')"
@@ -498,8 +489,7 @@
                 :name="isAgentSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看：首次从可编辑 / is_mine 进入 viewer -->
-            <div v-if="showShareGroupHeaders
-              && !shared.is_mine
+            <div v-if="!shared.is_mine
               && !isSharedAgentEditable(shared.permission)
               && (index === 0
                 || sortedSpaceAgentsList[index - 1].is_mine
@@ -744,7 +734,6 @@ import EmptyState from '@/components/EmptyState.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
-import { formatStringDate } from '@/utils/index'
 import { useI18n } from 'vue-i18n'
 import { createSessions } from '@/api/chat/index'
 import { useOrganizationStore } from '@/stores/organization'
@@ -820,12 +809,6 @@ const RESERVED_SCOPES = new Set(['all', 'mine', 'shared', 'favorites', 'recents'
 const spaceSelectionOrgId = computed(() => {
   const s = spaceSelection.value
   return !!s && !RESERVED_SCOPES.has(s)
-})
-
-const sharedAgentsByOrg = computed(() => {
-  const orgId = spaceSelection.value
-  if (orgId === 'all' || orgId === 'mine') return []
-  return sharedAgents.value.filter(s => s.organization_id === orgId)
 })
 
 // 空间视角：该空间内全部智能体（含我共享的），选中空间时请求新接口
@@ -1177,7 +1160,6 @@ onUnmounted(() => {
   window.removeEventListener('openAgentEditor', handleOpenAgentEditor as EventListener)
 })
 
-
 const handleCardClick = (agent: DisplayAgent | AgentWithUI) => {
   if (openMoreAgentId.value === agent.id) return
   // Track recency before any branch — Recents should reflect what the
@@ -1295,7 +1277,7 @@ function showAgentOriginBadge(agent: { created_by?: string; creator_name?: strin
     section: agentSectionOf(agent),
     variant: agentOriginVariant(agent),
     creatorName: (agent as any).creator_name,
-    showSectionHeaders: showShareGroupHeaders.value,
+    showSectionHeaders: true,
   })
 }
 
@@ -1304,20 +1286,15 @@ function showAgentBuiltinBadge(agent: { is_builtin?: boolean }): boolean {
   return shouldShowResourceOriginBadge({
     section: agentSectionOf(agent),
     variant: 'mine',
-    showSectionHeaders: showShareGroupHeaders.value,
+    showSectionHeaders: true,
   })
 }
 
-// 共享 agent 的可编辑/只读分组开关，与 KB 列表逻辑保持一致：仅对
-// contributor / editor 中间档展示分组标题。Viewer / Admin+ 不分组。
+// 按共享资源的实际权限划分可编辑和只读分组。
 const AGENT_EDITABLE_PERMS = new Set(['admin', 'editor'])
 function isSharedAgentEditable(perm: string | undefined): boolean {
   return !!perm && AGENT_EDITABLE_PERMS.has(perm)
 }
-// 与 KnowledgeBaseList 同理：分组标题对所有角色生效，依据"创建者 + 来源"
-// 这种客观信息分段，不再按当前用户的可写权限筛掉。
-const showShareGroupHeaders = computed(() => true)
-
 // 同空间、非当前用户创建的 Agent 分组标题。
 // contributor / viewer 在本空间里对这些 Agent 没有写权限，所以打"仅查看"；
 // admin / owner 对整个空间都有编辑权限，"仅查看"反而误导，统一改成
@@ -1497,11 +1474,6 @@ const handleEditorSuccess = (agent?: CustomAgent) => {
   fetchList(true)
 }
 
-const formatDate = (dateStr: string) => {
-  if (!dateStr) return ''
-  return formatStringDate(new Date(dateStr))
-}
-
 // 暴露创建方法供外部调用
 const openCreateModal = () => {
   editingAgent.value = null
@@ -1552,17 +1524,6 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   min-height: 200px;
   padding: 12px;
   background: var(--td-bg-color-container);
-}
-
-.shared-by-me-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 6px;
-  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  border-radius: var(--app-radius-xs);
-  font-size: var(--app-text-sm);
-  color: var(--td-brand-color);
-  margin-left: 6px;
 }
 
 .header {
@@ -1642,39 +1603,6 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   }
 }
 
-.agent-tabs {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  margin-bottom: 20px;
-
-  .tab-item {
-    padding: 12px 0;
-    cursor: pointer;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-base);
-    font-weight: 400;
-    transition: color var(--app-motion-base);
-
-    &:hover {
-      color: var(--td-text-color-primary);
-    }
-
-    &.active {
-      color: var(--td-brand-color);
-      font-weight: 600;
-      border-bottom: 2px solid var(--td-brand-color);
-      margin-bottom: -1px;
-    }
-  }
-}
-
-.shared-badge {
-  flex-shrink: 0;
-}
-
 .card-bottom-source {
   display: inline-flex;
   align-items: center;
@@ -1699,36 +1627,9 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   flex-shrink: 0;
 }
 
-.custom-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 8px;
-  border-radius: var(--app-radius-lg);
-  background: var(--td-bg-color-container-hover);
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: var(--app-text-xs);
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
 // 共享给我 · 可编辑 / 仅查看 分组标题，与 KB 列表 .kb-section-header 对齐。
 .agent-section-header {
   .resource-section-header();
-}
-
-
-@keyframes contentFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .agent-card-wrap {
@@ -1740,21 +1641,7 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   .resource-card();
 
   .agent-favorite-star { .resource-favorite-button(); }
-
-  .builtin-avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--app-radius-md);
-  }
-
-  .edit-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--app-radius-md);
-  }
 }
-
-
 
 .builtin-badge {
   display: inline-flex;
@@ -1771,13 +1658,7 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
 }
 
 .builtin-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
   border-radius: var(--app-radius-md);
-  flex-shrink: 0;
 
   &.agent-emoji {
     font-size: var(--app-text-2xl);
@@ -1792,24 +1673,6 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
 
   &.agent {
     background: linear-gradient(135deg, color-mix(in srgb, var(--app-accent-purple) 15%, transparent) 0%, color-mix(in srgb, var(--app-accent-purple) 8%, transparent) 100%);
-    color: var(--td-brand-color);
-  }
-}
-
-.edit-btn {
-  display: flex;
-  width: 32px;
-  height: 32px;
-  justify-content: center;
-  align-items: center;
-  border-radius: var(--app-radius-md);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all var(--app-motion-base) ease;
-  color: var(--td-text-color-disabled);
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
     color: var(--td-brand-color);
   }
 }
@@ -1880,17 +1743,12 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   }
 }
 
-
 // 删除确认对话框样式
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
 
-
 .resource-list-header();
-@media (prefers-reduced-motion: reduce) {
-  .agent-card-wrap { animation: none; }
-}
 
 </style>
 

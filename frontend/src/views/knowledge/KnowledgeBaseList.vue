@@ -77,12 +77,9 @@
                仅查看 / 共享给我）各自打自己的标题；原本的「其他」过渡标题
                在 per-user 置顶模型下已无意义，删除以免和具体子段标题叠加。 -->
           <template v-for="(kb, index) in filteredKnowledgeBases" :key="kb.id">
-            <!-- 我创建的：第一张「我创建」非置顶卡片前打标题，统一展示
-                 不管上方是否存在「已置顶」段。与「本空间 · 仅查看」同样
-                 仅在 contributor 视图下出现——admin/owner 视图原本就没有
-                 任何分段标题，单独冒一个反而失衡。 -->
-            <div v-if="showShareGroupHeaders
-              && kb.isMine
+            <!-- 我创建的：第一张「我创建」非置顶卡片前打标题，
+                 对所有角色显示，不受上方是否存在「已置顶」分组影响。 -->
+            <div v-if="kb.isMine
               && isMyKb(kb as KB)
               && !kb.is_pinned
               && (index === 0
@@ -100,8 +97,7 @@
                  当前卡片必须是非置顶（否则归在「已置顶」），且前一张要么
                  不存在、要么是「共享给我」、要么是我创建、要么是置顶卡片
                  （置顶→非置顶的过渡同样要打这个标题）。 -->
-            <div v-if="showShareGroupHeaders
-              && kb.isMine
+            <div v-if="kb.isMine
               && !isMyKb(kb as KB)
               && !kb.is_pinned
               && (index === 0
@@ -118,8 +114,7 @@
                 :name="isKbSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 可编辑：从「我的（含同事）」首次过渡到共享 + 可编辑 -->
-            <div v-if="showShareGroupHeaders
-              && !kb.isMine
+            <div v-if="!kb.isMine
               && isSharedKbEditable((kb as any).permission)
               && (index === 0 || filteredKnowledgeBases[index - 1].isMine)" class="kb-section-header" role="button"
               tabindex="0" :aria-expanded="!isKbSectionCollapsed('sharedEditable')" @click="toggleKbSection('sharedEditable')"
@@ -133,8 +128,7 @@
                 :name="isKbSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看：从「可编辑共享 / 我的」过渡到 viewer 共享 -->
-            <div v-if="showShareGroupHeaders
-              && !kb.isMine
+            <div v-if="!kb.isMine
               && !isSharedKbEditable((kb as any).permission)
               && (index === 0
                 || filteredKnowledgeBases[index - 1].isMine
@@ -356,8 +350,7 @@
             <!-- 我创建的：第一张非置顶的我创建卡片前打标题，无论上方是否
                  有「已置顶」段都要显示，和「本空间 · 仅查看」对齐——见
                  「全部」tab 同处注释。 -->
-            <div v-if="showShareGroupHeaders
-              && isMyKb(kb)
+            <div v-if="isMyKb(kb)
               && !kb.is_pinned
               && (index === 0 || sortedMineKbs[index - 1].is_pinned)" class="kb-section-header" role="button"
               tabindex="0" :aria-expanded="!isKbSectionCollapsed('mine')" @click="toggleKbSection('mine')"
@@ -371,8 +364,7 @@
             </div>
             <!-- 本空间 · 仅查看：当前非置顶的同事 KB，且前一张要么不存在、
                  要么是我创建、要么是置顶卡片（置顶→非置顶过渡）。 -->
-            <div v-if="showShareGroupHeaders
-              && !isMyKb(kb)
+            <div v-if="!isMyKb(kb)
               && !kb.is_pinned
               && (index === 0
                 || isMyKb(sortedMineKbs[index - 1])
@@ -505,7 +497,7 @@
           <template v-for="(shared, index) in sortedSpaceKbsList"
             :key="'shared-' + (shared.share_id || `agent-${shared.knowledge_base?.id}-${shared.source_from_agent?.agent_id || ''}`)">
             <!-- 我共享的：本空间下我自己创建并共享进来的条目，只在第一条 is_mine 上挂标题 -->
-            <div v-if="showShareGroupHeaders && shared.is_mine && index === 0" class="kb-section-header"
+            <div v-if="shared.is_mine && index === 0" class="kb-section-header"
               role="button" tabindex="0" :aria-expanded="!isKbSectionCollapsed('sharedByMe')" @click="toggleKbSection('sharedByMe')"
               @keydown.enter.prevent="toggleKbSection('sharedByMe')"
               @keydown.space.prevent="toggleKbSection('sharedByMe')">
@@ -516,8 +508,7 @@
                 :name="isKbSectionCollapsed('sharedByMe') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 可编辑：从「我的」首次进入「共享 + 可编辑」 -->
-            <div v-if="showShareGroupHeaders
-              && !shared.is_mine
+            <div v-if="!shared.is_mine
               && isSharedKbEditable(shared.permission)
               && (index === 0 || sortedSpaceKbsList[index - 1].is_mine)" class="kb-section-header"
               role="button" tabindex="0" :aria-expanded="!isKbSectionCollapsed('sharedEditable')" @click="toggleKbSection('sharedEditable')"
@@ -531,8 +522,7 @@
                 :name="isKbSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看：从「可编辑共享 / 我的」首次进入「viewer」 -->
-            <div v-if="showShareGroupHeaders
-              && !shared.is_mine
+            <div v-if="!shared.is_mine
               && !isSharedKbEditable(shared.permission)
               && (index === 0
                 || sortedSpaceKbsList[index - 1].is_mine
@@ -635,10 +625,6 @@
       :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
       @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 
-    <!-- 共享知识库对话框 -->
-    <ShareKnowledgeBaseDialog v-model:visible="shareDialogVisible" :knowledge-base-id="sharingKbId"
-      :knowledge-base-name="sharingKbName" @shared="handleShareSuccess" />
-
     <!-- 右侧：共享知识库详情面板 -->
     <Teleport to="body">
       <Transition name="shared-detail-drawer">
@@ -727,7 +713,6 @@ import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type Or
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import KbWikiBadge from './components/KbWikiBadge.vue'
-import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
@@ -811,11 +796,6 @@ const highlightedKbId = ref<string | null>(null)
 const highlightedCardRef = ref<HTMLElement | null>(null)
 let uploadRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
-// Share dialog state
-const shareDialogVisible = ref(false)
-const sharingKbId = ref('')
-const sharingKbName = ref('')
-
 // Shared knowledge bases (everything cross-tenant shared to me, including
 // viewer-only). Used by the per-space views and the "all" aggregate so
 // readers still see read-only shares — those are valid resources, just
@@ -833,13 +813,6 @@ const RESERVED_SCOPES = new Set(['all', 'mine', 'favorites', 'recents'])
 const spaceSelectionOrgId = computed(() => {
   const s = spaceSelection.value
   return !!s && !RESERVED_SCOPES.has(s)
-})
-
-// 当前空间下共享给我的知识库（旧：仅他人共享；保留用于兼容）
-const sharedKbsByOrg = computed(() => {
-  const orgId = spaceSelection.value
-  if (orgId === 'all' || orgId === 'mine') return []
-  return sharedKbs.value.filter(s => s.organization_id === orgId)
 })
 
 // 空间视角：该空间内全部知识库（含我共享的），选中空间时请求新接口
@@ -993,17 +966,6 @@ const EDITABLE_PERMS = new Set(['admin', 'editor'])
 function isSharedKbEditable(perm: string | undefined): boolean {
   return !!perm && EDITABLE_PERMS.has(perm)
 }
-
-// 是否在共享区展示「可编辑 / 仅查看」二级分组：仅对中间档（contributor / editor）
-// 有意义。viewer 反正都是只读，admin / owner 视角统一管理，分组反而碎。
-// 这里只是 UI 呈现，权限由后端兜底，不要把它当成安全边界。
-// 分组标题对所有角色生效——置顶 / 我创建的 / 本空间 · 仅查看 / 共享给我
-// 都是基于"创建者 + 来源"的客观信息，不依赖当前用户的可写权限。
-// 原本只对 contributor 显示是为了在 admin/owner 那里隐藏"仅查看"这个权限
-// 暗示——但实际上 admin/owner 也会想区分自己创建 vs 同事创建的卡片，所以
-// 现在统一打开。如果哪天需要把权限色彩从标题里拿掉，就改 i18n 文案即可，
-// 不需要再回头碰这个 computed。
-const showShareGroupHeaders = computed(() => true)
 
 // 同空间、非当前用户创建的 KB 分组标题。
 // contributor / viewer 在本空间里对这些 KB 没有写权限，所以打"仅查看"；
@@ -1293,7 +1255,7 @@ function showKbOriginBadge(kb: { creator_id?: string; creator_name?: string }): 
     section: kbSectionOf(kb),
     variant: kbOriginVariant(kb),
     creatorName: kb.creator_name,
-    showSectionHeaders: showShareGroupHeaders.value,
+    showSectionHeaders: true,
   })
 }
 
@@ -1362,19 +1324,6 @@ const duplicateKB = async (id: string) => {
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeList.messages.duplicateFailed'))
   }
-}
-
-const handleShare = (kb: KB) => {
-  // 手动关闭弹窗
-  kb.showMore = false
-  sharingKbId.value = kb.id
-  sharingKbName.value = kb.name
-  shareDialogVisible.value = true
-}
-
-const handleShareSuccess = () => {
-  // 共享成功后可刷新列表
-  fetchList(true)
 }
 
 const handleSharedKbClick = (sharedKb: SharedKnowledgeBase) => {
@@ -1621,17 +1570,6 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   background: var(--td-bg-color-container);
 }
 
-.shared-by-me-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 6px;
-  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  border-radius: var(--app-radius-xs);
-  font-size: var(--app-text-sm);
-  color: var(--td-brand-color);
-  margin-left: 6px;
-}
-
 .header-subtitle {
   margin: 0;
   color: var(--td-text-color-placeholder);
@@ -1669,68 +1607,6 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   }
 }
 
-// Tab 切换样式（已由左侧菜单替代，保留以备兼容）
-.kb-tabs {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  margin-bottom: 20px;
-
-  .tab-item {
-    padding: 12px 0;
-    cursor: pointer;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-base);
-    font-weight: 400;
-    user-select: none;
-    position: relative;
-    transition: color var(--app-motion-base) ease;
-
-    &:hover {
-      color: var(--td-text-color-primary);
-    }
-
-    &.active {
-      color: var(--td-brand-color);
-      font-weight: 500;
-
-      &::after {
-        content: '';
-        position: absolute;
-        bottom: -1px;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: var(--td-brand-color);
-        border-radius: 1px;
-      }
-    }
-  }
-}
-
-// 共享知识库卡片样式
-// 共享标识（文档类型默认绿色，位置贴右上角）
-.shared-badge {
-  position: absolute;
-  top: 8px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  border-radius: var(--app-radius-xs);
-  font-size: var(--app-text-sm);
-  color: var(--td-brand-color);
-  font-weight: 500;
-
-  .t-icon {
-    color: var(--td-brand-color);
-  }
-}
-
 // 来源组织（空间图标 + 空间名）
 .org-source {
   display: inline-flex;
@@ -1757,30 +1633,6 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
     height: 14px;
     flex-shrink: 0;
     vertical-align: middle;
-  }
-
-  .t-icon {
-    color: var(--td-brand-color);
-    flex-shrink: 0;
-  }
-}
-
-// 「我的」知识库标签（与 .org-source 同套样式：灰字 + 绿标 + 浅绿底）
-.personal-source {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-  border-radius: var(--app-radius-sm);
-  font-size: var(--app-text-xs);
-  line-height: 1.4;
-  color: var(--td-text-color-secondary);
-  font-weight: 500;
-  transition: background-color var(--app-motion-fast) ease;
-
-  span {
-    font-weight: 500;
   }
 
   .t-icon {
@@ -1823,18 +1675,6 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   .t-icon {
     color: var(--td-warning-color);
     flex-shrink: 0;
-  }
-}
-
-@keyframes contentFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -2013,17 +1853,12 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   box-shadow: 0 0 12px color-mix(in srgb, var(--td-brand-color) 30%, transparent) !important;
 }
 
-
 // 删除确认对话框样式
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
 
-
 .resource-list-header();
-@media (prefers-reduced-motion: reduce) {
-  .kb-card-wrap { animation: none; }
-}
 
 </style>
 
@@ -2194,19 +2029,4 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   }
 }
 
-// 创建对话框样式优化
-.create-kb-dialog {
-  .t-form-item__label {
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-base);
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .t-input,
-  .t-textarea {
-    font-family: var(--app-font-family);
-  }
-
-}
 </style>
