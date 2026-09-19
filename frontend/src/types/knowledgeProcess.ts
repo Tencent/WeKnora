@@ -1,3 +1,5 @@
+import type { ImageClassPolicy } from '@/api/knowledge-base'
+
 /** Matches backend types.KnowledgeProcessOverrides (snake_case JSON). */
 
 export interface ParserEngineRule {
@@ -69,5 +71,11 @@ export interface KnowledgeProcessOverrides {
   question_generation_config?: QuestionGenerationConfigOverride
   graph_enabled?: boolean
   extract_config?: ExtractConfigOverride
+  // Per-upload override of the knowledge base's image post-processing switch.
+  post_process_image_enabled?: boolean
+  // Per-task image pipeline settings; omitted fields keep the knowledge base's.
+  image_batch_size?: number
+  image_classify_downscale_enabled?: boolean
+  image_class_policies?: Record<string, ImageClassPolicy>
   parser_engine_overrides?: Record<string, string>
 }

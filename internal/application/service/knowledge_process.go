@@ -706,10 +706,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
 	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+		// Counts only, no policy claims: whether a given image is OCR'd is
+		// decided per image once its class is known, so a boolean here would
+		// assert something the pipeline has not decided yet — and would drift
+		// from what actually happened.
+		multimodalBatch := imageMultimodalTaskBatchSize(kb, knowledge)
 		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
-			"image_count":    len(options.StoredImages),
-			"enable_ocr":     true,
-			"enable_caption": true,
+			"image_count": len(options.StoredImages),
+			"batch_count": (len(options.StoredImages) + multimodalBatch - 1) / multimodalBatch,
 		})
 		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
 	} else {
@@ -4054,6 +4058,62 @@ func (s *knowledgeService) failKnowledge(
 	return nil, fmt.Errorf(format, args...)
 }
 
+// imageMultimodalBatchSize is how many images one multimodal task carries into
+// a single VLM request. It is read from the knowledge base's image processing
+// config and defaults to 1, which reproduces the historical one-task-per-image
+// behaviour exactly: an unconfigured knowledge base is unaffected by batching.
+func imageMultimodalBatchSize(kb *types.KnowledgeBase) int {
+	if kb == nil {
+		return 1
+	}
+	return types.NormalizeImageBatchSize(kb.ImageProcessingConfig.BatchSize)
+}
+
+// imageClassifyMaxEdge resolves the longest edge images are scaled down to
+// before the batch describe round. It tolerates a nil knowledge base, which
+// yields 0 ("no downscaling").
+func imageClassifyMaxEdge(kb *types.KnowledgeBase) int {
+	if kb == nil {
+		return 0
+	}
+	return types.NormalizeImageClassifyMaxEdge(kb.ImageProcessingConfig.ClassifyMaxEdge)
+}
+
+// imagePipelineEnabled resolves whether this document runs the classified
+// image pipeline (describe round, per-class OCR, post-process rules) or the
+// upstream legacy behaviour. A per-upload override wins over the KB default.
+func imagePipelineEnabled(kb *types.KnowledgeBase, knowledge *types.Knowledge) bool {
+	if kb == nil {
+		return false
+	}
+	overrides, _ := knowledge.ProcessOverrides()
+	return ResolveProcessConfig(kb, overrides).PostProcessImageEnabled
+}
+
+// imageMultimodalTaskBatchSize resolves the batch size a document's multimodal
+// tasks run with. Legacy mode (post-processing off) always reports 1: upstream
+// processed one image per task, and the stage's batch_count is derived from
+// this value, so it must agree with what enqueueImageMultimodalTasks uses.
+func imageMultimodalTaskBatchSize(kb *types.KnowledgeBase, knowledge *types.Knowledge) int {
+	if !imagePipelineEnabled(kb, knowledge) {
+		return 1
+	}
+	overrides, _ := knowledge.ProcessOverrides()
+	return ResolveProcessConfig(kb, overrides).ImageBatchSize
+}
+
+// imageClassPolicies resolves the class→work table for a knowledge base,
+// folded on top of the built-in defaults. The table travels with the task so
+// the worker does not need a second config lookup per image, and so a task
+// keeps the policy it was enqueued with even if the KB is reconfigured
+// meanwhile.
+func imageClassPolicies(kb *types.KnowledgeBase) map[string]types.ImageClassPolicy {
+	if kb == nil {
+		return types.DefaultImageClassPolicies()
+	}
+	return types.MergeImageClassPolicies(kb.ImageProcessingConfig.ClassPolicies)
+}
+
 // enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
 func (s *knowledgeService) enqueueImageMultimodalTasks(
 	ctx context.Context,
@@ -4075,33 +4135,56 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 	}
 
+	refs := make([]types.ImageBatchRef, 0, len(images))
 	for idx, img := range images {
-		// Match image to the ParsedChunk whose content contains the image URL.
-		// ChunkID was populated by processChunks with the real DB UUID.
-		chunkID := ""
-		for _, c := range chunks {
-			if strings.Contains(c.Content, img.ServingURL) {
-				chunkID = c.ChunkID
-				break
-			}
-		}
-		if chunkID == "" && len(chunks) > 0 {
-			chunkID = chunks[0].ChunkID
-		}
+		// Resolve each image to the ParsedChunk that references it, then group
+		// the refs into tasks below, so the grouping step never has to
+		// re-derive a chunk id.
+		refs = append(refs, types.ImageBatchRef{
+			Index:   idx,
+			URL:     img.ServingURL,
+			ChunkID: matchImageToChunk(chunks, img.ServingURL),
+		})
+	}
 
-		lang := types.LanguageFromContextOrDefault(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
+	// Legacy mode pins every knob to the upstream behaviour: one image per
+	// task, no downscaling. Only the classified pipeline reads batch_size,
+	// the downscale switch, and the class table.
+	overrides, _ := knowledge.ProcessOverrides()
+	eff := ResolveProcessConfig(kb, overrides)
+	postProcessEnabled := eff.PostProcessImageEnabled
+	batchSize := 1
+	classifyMaxEdge := 0
+	if postProcessEnabled {
+		batchSize = eff.ImageBatchSize
+		if eff.ImageClassifyDownscaleEnabled {
+			classifyMaxEdge = imageClassifyMaxEdge(kb)
+		}
+	}
+	for batchStart := 0; batchStart < len(refs); batchStart += batchSize {
+		batchEnd := batchStart + batchSize
+		if batchEnd > len(refs) {
+			batchEnd = len(refs)
+		}
+		batch := refs[batchStart:batchEnd]
+
 		payload := types.ImageMultimodalPayload{
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: kb.ID,
-			ChunkID:         chunkID,
-			ImageURL:        img.ServingURL,
-			EnableOCR:       true,
-			EnableCaption:   true,
-			Language:        lang,
-			ImageSourceType: metadata["image_source_type"],
-			Attempt:         attempt,
-			ImageIndex:      idx,
+			TenantID:                knowledge.TenantID,
+			KnowledgeID:             knowledge.ID,
+			KnowledgeBaseID:         kb.ID,
+			ChunkID:                 batch[0].ChunkID,
+			ImageURL:                batch[0].URL,
+			EnableOCR:               true,
+			EnableCaption:           true,
+			PostProcessImageEnabled: postProcessEnabled,
+			ClassPolicies:           eff.ImageClassPolicies,
+			Language:                lang,
+			ImageSourceType:         metadata["image_source_type"],
+			Attempt:                 attempt,
+			ImageIndex:              batch[0].Index,
+			Images:                  batch,
+			ClassifyMaxEdge:         classifyMaxEdge,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)
@@ -4114,11 +4197,26 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes,
 			asynq.Queue(types.QueueMultimodal), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 		if _, err := s.task.Enqueue(task); err != nil {
-			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
+			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", batch[0].URL, err)
 		} else {
-			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
+			logger.Infof(ctx, "Enqueued image:multimodal task for %s (%d image(s))", batch[0].URL, len(batch))
 		}
 	}
+}
+
+// matchImageToChunk returns the id of the ParsedChunk whose content references
+// the given image URL, falling back to the first chunk when the document has
+// chunks but none of them mentions the image.
+func matchImageToChunk(chunks []types.ParsedChunk, servingURL string) string {
+	for _, c := range chunks {
+		if strings.Contains(c.Content, servingURL) {
+			return c.ChunkID
+		}
+	}
+	if len(chunks) > 0 {
+		return chunks[0].ChunkID
+	}
+	return ""
 }
 
 // ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.

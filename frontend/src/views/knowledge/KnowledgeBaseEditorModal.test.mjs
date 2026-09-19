@@ -30,3 +30,23 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /settings-footer-note/)
   assert.match(source, /knowledgeEditor\.postCreateHint\.followUpDesc/)
 })
+
+test('create mode seeds the full default class policy table', () => {
+  // Regression: an empty imageClassPolicies in initFormData made the policy
+  // table read `undefined.disabled` the moment the post-process switch was
+  // turned on in the create dialog, crashing the modal.
+  const initBlock = source.match(/const initFormData[\s\S]*?imageClassPolicies: ([^,]+),/)?.[1]
+  assert.ok(initBlock, 'expected to find imageClassPolicies in initFormData')
+  assert.match(initBlock, /mergeImageClassPolicies\(\)/)
+})
+
+test('edit mode forwards image_processing_config in the update payload', () => {
+  // Regression: the edit branch built data.image_processing_config but never
+  // put it into updateConfig, so KB-editor changes to the image post-process
+  // settings were silently dropped (create worked, later edits did not).
+  const editBranch = source.match(
+    /(\/\/ 编辑模式：分别更新基本信息[\s\S]*?await updateKnowledgeBase\(kbId, \{)/
+  )?.[1]
+  assert.ok(editBranch, 'expected to find the edit-mode update block')
+  assert.match(editBranch, /if \(data\.image_processing_config\) \{\s*updateConfig\.image_processing_config = data\.image_processing_config\s*\}/)
+})

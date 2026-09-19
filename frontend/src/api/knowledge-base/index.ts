@@ -69,6 +69,80 @@ export function listKnowledgeBases(params?: {
 //                       (deleted row, registry miss, transient infra
 //                       failure). Operators recover via the global
 //                       Vector Stores settings page.
+// Mirrors backend types.ImageClassPolicy (snake_case JSON tags).
+export interface ImageClassPolicy {
+  ocr: boolean;
+  caption: boolean;
+  // True retires images of this class after ingestion: references removed
+  // from the text, descriptions kept out of retrieval. Only decorative is
+  // disabled by default.
+  disabled?: boolean;
+}
+
+// Display order for the class policy table; the keys match the backend enum.
+export const IMAGE_CLASS_ORDER = [
+  'chart',
+  'decorative',
+  'logo',
+  'photo',
+  'table_image',
+  'text_screenshot',
+  'other',
+] as const;
+
+// Mirrors backend types.DefaultImageClassPolicies. The frontend seeds the
+// policy table from this so a KB that never customized the table still shows
+// the effective defaults, and saving writes the full merged table.
+export const DEFAULT_IMAGE_CLASS_POLICIES: Record<string, Required<ImageClassPolicy>> = {
+  chart: { ocr: true, caption: true, disabled: false },
+  decorative: { ocr: false, caption: true, disabled: true },
+  logo: { ocr: false, caption: true, disabled: false },
+  photo: { ocr: false, caption: true, disabled: false },
+  table_image: { ocr: true, caption: true, disabled: false },
+  text_screenshot: { ocr: true, caption: true, disabled: false },
+  other: { ocr: true, caption: true, disabled: false },
+};
+
+// Mirrors backend types.MergeImageClassPolicies: a class the custom table
+// mentions replaces the default row entirely; the rest keep the defaults.
+// The result has every field spelled out — that is what the switch bindings
+// read, and what makes the table safe to seed a form with.
+export function mergeImageClassPolicies(
+  custom?: Record<string, ImageClassPolicy> | null,
+): Record<string, Required<ImageClassPolicy>> {
+  const merged: Record<string, Required<ImageClassPolicy>> = {};
+  for (const cls of IMAGE_CLASS_ORDER) {
+    merged[cls] = { ...DEFAULT_IMAGE_CLASS_POLICIES[cls] };
+  }
+  if (custom) {
+    for (const [cls, policy] of Object.entries(custom)) {
+      const base = merged[cls];
+      merged[cls] = {
+        ocr: policy.ocr ?? base?.ocr ?? true,
+        caption: policy.caption ?? base?.caption ?? true,
+        // An omitted flag keeps whatever the row already carried, so a caller
+        // that predates the column cannot silently un-retire a class.
+        disabled: policy.disabled ?? base?.disabled ?? false,
+      };
+    }
+  }
+  return merged;
+}
+
+// Mirrors backend types.ImageProcessingConfig (snake_case JSON). The UI edits
+// the post-process switch, batch size, downscale switch, and class policies;
+// saving sends the snapshot back with those fields updated so API-side
+// settings (rules JSON, classify_max_edge) survive a UI edit.
+export interface ImageProcessingConfig {
+  model_id?: string;
+  batch_size?: number;
+  classify_max_edge?: number;
+  classify_downscale_enabled?: boolean;
+  class_policies?: Record<string, ImageClassPolicy>;
+  post_process_image_enabled?: boolean;
+  post_process_image_rules?: Array<Record<string, unknown>>;
+}
+
 export type VectorStoreSource = 'env' | 'user' | 'shared' | 'unavailable';
 export type VectorStoreStatus = 'available' | 'unavailable';
 
@@ -141,7 +215,7 @@ export function updateKnowledgeBase(id: string, data: {
   description?: string;
   config?: {
     chunking_config?: any;
-    image_processing_config?: any;
+    image_processing_config?: ImageProcessingConfig;
     faq_config?: any;
     wiki_config?: {
       synthesis_model_id?: string;

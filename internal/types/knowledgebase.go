@@ -159,8 +159,15 @@ type KnowledgeBase struct {
 type KnowledgeBaseConfig struct {
 	// Chunking configuration
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"`
-	// Image processing configuration
-	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config"`
+	// Image processing configuration.
+	//
+	// nil means "no change" when updating, the same contract IndexingStrategy
+	// uses. A request that does not mention this field must leave the image
+	// settings alone: batching, the classify downscale, the class policies and
+	// the post-processing mode are all things a knowledge base accumulates, and
+	// a client that predates them would otherwise reset the lot on any save.
+	// Sending an object — empty included — replaces the whole configuration.
+	ImageProcessingConfig *ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config"`
 	// FAQ configuration (only for FAQ type knowledge bases)
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"`
 	// Wiki configuration (only for wiki-enabled knowledge bases)
@@ -533,6 +540,156 @@ func ParseProviderScheme(filePath string) string {
 type ImageProcessingConfig struct {
 	// Model ID
 	ModelID string `yaml:"model_id" json:"model_id"`
+	// BatchSize is how many images a single multimodal task carries into one
+	// VLM request. Zero or one keeps the historical one-image-per-request
+	// behaviour, so an unconfigured knowledge base is unaffected by batching.
+	// Values are clamped to [1, ImageBatchSizeMax] at use time.
+	BatchSize int `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`
+	// ClassifyMaxEdge is the longest edge, in pixels, that an image is scaled
+	// down to before the describe round. Zero selects DefaultClassifyMaxEdge;
+	// a negative value disables downscaling. OCR always runs on the original
+	// bytes, never on the downscaled copy.
+	ClassifyMaxEdge int `yaml:"classify_max_edge,omitempty" json:"classify_max_edge,omitempty"`
+	// ClassifyDownscaleEnabled turns the describe-round downscaling on or
+	// off. Nil selects the recommended default (on): the measured token
+	// saving is large and the classification is unchanged. A model that
+	// handles full-resolution images well can switch it off by setting it
+	// to false.
+	ClassifyDownscaleEnabled *bool `yaml:"classify_downscale_enabled,omitempty" json:"classify_downscale_enabled,omitempty"` //nolint:lll // one-line struct tag
+	// ClassPolicies overrides the built-in class→work table (see
+	// DefaultImageClassPolicies). A class the map does not mention keeps the
+	// conservative default: run OCR and keep the caption.
+	ClassPolicies map[string]ImageClassPolicy `yaml:"class_policies,omitempty" json:"class_policies,omitempty"`
+	// PostProcessImageEnabled turns the image rule engine on for this knowledge
+	// base. It is off by default on purpose: the engine is opt-in, so upgrading
+	// an existing deployment never changes what happens to documents already
+	// being ingested. A single upload can override it per document through
+	// KnowledgeProcessOverrides.PostProcessImageEnabled.
+	PostProcessImageEnabled bool `yaml:"post_process_image_enabled,omitempty" json:"post_process_image_enabled,omitempty"` //nolint:lll // one-line struct tag
+	// PostProcessImageRules are the declarative rules the engine evaluates, in order.
+	// A rule naming an action that is not registered is reported and skipped
+	// rather than failing the document.
+	PostProcessImageRules []ImageRule `yaml:"post_process_image_rules,omitempty" json:"post_process_image_rules,omitempty"` //nolint:lll // one-line struct tag
+}
+
+// ImageClassPolicy declares which per-image work is worth doing for a class of
+// image. It is what turns "classify first" into fewer calls: a class whose text
+// is known to be absent, or to be covered by the description, does not need
+// OCR.
+type ImageClassPolicy struct {
+	// OCR runs text extraction on images of this class.
+	OCR bool `yaml:"ocr" json:"ocr"`
+	// Caption keeps the image description as a retrievable chunk.
+	Caption bool `yaml:"caption" json:"caption"`
+	// Disabled retires images of this class after ingestion: the rule engine
+	// drops their references from the text blocks and switches the derived
+	// caption blocks off. It is the class-level form of the drop-reference
+	// action; the declarative rules JSON, when configured, runs on top of it.
+	Disabled bool `yaml:"disabled" json:"disabled"`
+}
+
+// ImageBatchSizeMax bounds how many images one multimodal request may carry.
+// Larger batches trim request count but grow the prompt linearly, so the cap
+// keeps a single request within what current VLMs handle comfortably.
+const ImageBatchSizeMax = 16
+
+// DefaultClassifyMaxEdge is the longest edge, in pixels, that images are scaled
+// down to before the describe round. It was measured to cut prompt tokens to
+// roughly a seventh while leaving the classification unchanged.
+const DefaultClassifyMaxEdge = 640
+
+// NormalizeImageBatchSize clamps a configured batch size into the supported
+// range. Zero (unset) maps to 1, which preserves the historical
+// one-image-per-request behaviour so existing knowledge bases are unaffected.
+func NormalizeImageBatchSize(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > ImageBatchSizeMax {
+		return ImageBatchSizeMax
+	}
+	return n
+}
+
+// NormalizeImageClassifyMaxEdge resolves the configured describe-round edge length.
+// Zero means "unset" and selects the recommended default; a negative value
+// disables downscaling (reported as 0); anything else is used as configured.
+func NormalizeImageClassifyMaxEdge(n int) int {
+	switch {
+	case n == 0:
+		return DefaultClassifyMaxEdge
+	case n < 0:
+		return 0
+	default:
+		return n
+	}
+}
+
+// DefaultImageClassPolicies is the built-in class→work table. It is deliberately
+// conservative: when a class may carry text, OCR still runs, because a missed
+// block of text is worse than one extra call. Only the classes whose text is
+// reliably absent or already captured by the description skip OCR. Decorative
+// is also the only class disabled by default: it carries no information, so
+// retiring it is the one removal the pipeline is allowed to do unasked.
+func DefaultImageClassPolicies() map[string]ImageClassPolicy {
+	return map[string]ImageClassPolicy{
+		string(ImageClassDecorative):     {OCR: false, Caption: true, Disabled: true},
+		string(ImageClassLogo):           {OCR: false, Caption: true},
+		string(ImageClassPhoto):          {OCR: false, Caption: true},
+		string(ImageClassTextScreenshot): {OCR: true, Caption: true},
+		string(ImageClassTableImage):     {OCR: true, Caption: true},
+		string(ImageClassChart):          {OCR: true, Caption: true},
+		string(ImageClassOther):          {OCR: true, Caption: true},
+	}
+}
+
+// DefaultImageClassPolicy is the fallback for a class the table does not
+// mention: run OCR and keep the caption.
+func DefaultImageClassPolicy() ImageClassPolicy {
+	return ImageClassPolicy{OCR: true, Caption: true}
+}
+
+// NormalizeImageClassifyDownscale resolves the describe-round downscaling
+// switch. Nil (unset) selects the recommended default: on.
+func NormalizeImageClassifyDownscale(p *bool) bool {
+	return p == nil || *p
+}
+
+// MergeImageClassPolicies folds a knowledge base's custom class table on top
+// of the built-in one, per class. A class the custom table mentions replaces
+// the default row entirely; a class it does not mention keeps the default.
+// This is what lets a knowledge base disable photo images without having to
+// spell out the other six rows — and what keeps a row saved by an older
+// frontend, before disabled existed, from silently un-retiring decorative
+// images.
+func MergeImageClassPolicies(custom map[string]ImageClassPolicy) map[string]ImageClassPolicy {
+	merged := DefaultImageClassPolicies()
+	for class, policy := range custom {
+		merged[class] = policy
+	}
+	return merged
+}
+
+// DisabledImageClasses lists the classes a merged table marks disabled, in the
+// stable order of the class enum so derived rules apply deterministically.
+func DisabledImageClasses(policies map[string]ImageClassPolicy) []ImageClass {
+	var disabled []ImageClass
+	for _, class := range ImageClasses {
+		if policies[string(class)].Disabled {
+			disabled = append(disabled, class)
+		}
+	}
+	return disabled
+}
+
+// ResolveImageClassPolicy looks up one class in a class table, falling back to
+// the conservative default. An unknown or empty class must never silently skip
+// text extraction, so the fallback always runs OCR.
+func ResolveImageClassPolicy(policies map[string]ImageClassPolicy, class string) ImageClassPolicy {
+	if policy, ok := policies[class]; ok {
+		return policy
+	}
+	return DefaultImageClassPolicy()
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value

@@ -129,6 +129,39 @@ func PruneMarkdownImagesByImageInfo(content, imageInfoJSON string) string {
 	return collapseBlankLines(filtered)
 }
 
+// DropMarkdownImagesByURLs removes every image reference whose URL appears in
+// dropURLs, covering both Markdown image links and HTML <img> tags.
+//
+// It is the blacklist mirror of PruneMarkdownImagesByImageInfo. Both syntaxes
+// have to go: removing only the Markdown link would leave the HTML tag behind,
+// and the chunk would still reference an image whose extraction was retired.
+// That is not only untidy — whether an image's caption and OCR children are
+// switched off is decided by whether the body still references them, so a
+// surviving tag means the children stay live.
+func DropMarkdownImagesByURLs(content string, dropURLs map[string]bool) string {
+	if content == "" || len(dropURLs) == 0 {
+		return content
+	}
+	filtered := MarkdownImageRegex.ReplaceAllStringFunc(content, func(image string) string {
+		match := MarkdownImageRegex.FindStringSubmatch(image)
+		if len(match) >= 3 && dropURLs[match[2]] {
+			return ""
+		}
+		return image
+	})
+	filtered = HTMLImageSrcRegex.ReplaceAllStringFunc(filtered, func(tag string) string {
+		match := HTMLImageSrcRegex.FindStringSubmatch(tag)
+		if len(match) <= HTMLImageSrcURLGroup {
+			return tag
+		}
+		if dropURLs[strings.TrimSpace(match[HTMLImageSrcURLGroup])] {
+			return ""
+		}
+		return tag
+	})
+	return collapseBlankLines(filtered)
+}
+
 // FilterImageInfoByMatchRange keeps image_info entries whose image reference
 // falls within the document rune range [matchStart, matchEnd).
 // Used when parent content is expanded for context but multimodal enrichment

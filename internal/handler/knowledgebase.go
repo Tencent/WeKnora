@@ -757,10 +757,12 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	}
 	if req.Config != nil {
 		probe := &types.KnowledgeBase{
-			ChunkingConfig:        req.Config.ChunkingConfig,
-			ImageProcessingConfig: req.Config.ImageProcessingConfig,
-			WikiConfig:            req.Config.WikiConfig,
-			ProfileConfig:         req.Config.ProfileConfig,
+			ChunkingConfig: req.Config.ChunkingConfig,
+			WikiConfig:     req.Config.WikiConfig,
+			ProfileConfig:  req.Config.ProfileConfig,
+		}
+		if req.Config.ImageProcessingConfig != nil {
+			probe.ImageProcessingConfig = *req.Config.ImageProcessingConfig
 		}
 		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
 			c.Error(err)

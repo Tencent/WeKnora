@@ -3599,7 +3599,25 @@ export default {
         descriptionLanguageAuto: 'ドキュメントの言語に従う',
         customInstructionsLabel: '画像処理の指示',
         customInstructionsDescription: 'OCRとMarkdown出力の仕様は固定したまま、視覚的に優先する対象を追加できます',
-        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…'
+        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…',
+        imagePostProcessLabel: '画像後処理',
+        imagePostProcessDescription: 'オンにすると2段階パイプラインを実行：まずバッチで「分類＋説明」し、次に下のカテゴリポリシーでOCRを判断し、選択カテゴリを自動無効化します。オフは基本モード：全画像を1枚ずつ説明し全てOCRします',
+        imageBatchSizeLabel: '認識バッチサイズ',
+        imageBatchSizeDescription: '1回の認識リクエストにまとめる画像枚数。リクエスト数を節約します（トークンは不変）。リクエスト課金のAPIに有効。1＝1枚ずつ、最大16',
+        imageDownscaleLabel: '認識前の縮小',
+        imageDownscaleDescription: '認識前に画像を長辺640pxへ縮小し、トークン消費を大幅削減。高解像度に強いモデルではオフにできます',
+        imageClassPoliciesLabel: 'カテゴリポリシー',
+        imageClassPoliciesDescription: 'カテゴリごとの後処理：「無効化」は本文から参照を除去し、画像が本文経由でモデルに渡らなくなります（説明と OCR テキストは生成され、検索対象に残ります）。「OCR」は画像内テキストの抽出を実行します',
+        policyDisabledCol: '無効化',
+        policyOcrCol: 'OCR',
+        imageClassChart: 'チャート',
+        imageClassDecorative: '装飾画像',
+        imageClassLogo: 'ロゴ',
+        imageClassPhoto: '写真',
+        imageClassTableImage: '表スクリーンショット',
+        imageClassTextScreenshot: 'テキストスクリーンショット',
+        imageClassOther: 'その他',
+        imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
   },

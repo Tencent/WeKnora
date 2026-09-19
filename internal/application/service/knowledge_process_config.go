@@ -38,15 +38,20 @@ func normalizeParserFileType(fileType string) string {
 
 // ResolveProcessConfig merges KB defaults with per-upload overrides for the parse pipeline.
 func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgeProcessOverrides) types.EffectiveProcessConfig {
+	imageCfg := kb.ImageProcessingConfig
 	eff := types.EffectiveProcessConfig{
-		SummaryEnabled:           true,
-		ChunkingConfig:           kb.ChunkingConfig,
-		EnableMultimodel:         kb.IsMultimodalEnabled(),
-		VLMConfig:                kb.VLMConfig,
-		ASRConfig:                kb.ASRConfig,
-		QuestionGenerationConfig: defaultQuestionGenerationConfig(kb),
-		GraphEnabled:             kb.IsGraphEnabled(),
-		ExtractConfig:            derefExtractConfig(kb.ExtractConfig),
+		SummaryEnabled:                true,
+		ChunkingConfig:                kb.ChunkingConfig,
+		EnableMultimodel:              kb.IsMultimodalEnabled(),
+		VLMConfig:                     kb.VLMConfig,
+		ASRConfig:                     kb.ASRConfig,
+		QuestionGenerationConfig:      defaultQuestionGenerationConfig(kb),
+		GraphEnabled:                  kb.IsGraphEnabled(),
+		ExtractConfig:                 derefExtractConfig(kb.ExtractConfig),
+		PostProcessImageEnabled:       imageCfg.PostProcessImageEnabled,
+		ImageBatchSize:                types.NormalizeImageBatchSize(imageCfg.BatchSize),
+		ImageClassifyDownscaleEnabled: types.NormalizeImageClassifyDownscale(imageCfg.ClassifyDownscaleEnabled),
+		ImageClassPolicies:            types.MergeImageClassPolicies(imageCfg.ClassPolicies),
 	}
 	if overrides == nil {
 		return eff
@@ -86,6 +91,25 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	}
 	if overrides.GraphEnabled != nil {
 		eff.GraphEnabled = *overrides.GraphEnabled
+	}
+	if overrides.PostProcessImageEnabled != nil {
+		eff.PostProcessImageEnabled = *overrides.PostProcessImageEnabled
+	}
+	if overrides.ImageBatchSize != nil {
+		eff.ImageBatchSize = types.NormalizeImageBatchSize(*overrides.ImageBatchSize)
+	}
+	if overrides.ImageClassifyDownscaleEnabled != nil {
+		eff.ImageClassifyDownscaleEnabled = *overrides.ImageClassifyDownscaleEnabled
+	}
+	if len(overrides.ImageClassPolicies) > 0 {
+		merged := make(map[string]types.ImageClassPolicy, len(eff.ImageClassPolicies)+len(overrides.ImageClassPolicies))
+		for class, policy := range eff.ImageClassPolicies {
+			merged[class] = policy
+		}
+		for class, policy := range overrides.ImageClassPolicies {
+			merged[class] = policy
+		}
+		eff.ImageClassPolicies = merged
 	}
 	if overrides.ExtractConfig != nil {
 		eff.ExtractConfig = mergeExtractConfig(eff.ExtractConfig, overrides.ExtractConfig)

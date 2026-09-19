@@ -531,7 +531,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	kb.Description = description
 	if config != nil {
 		kb.ChunkingConfig = config.ChunkingConfig
-		kb.ImageProcessingConfig = config.ImageProcessingConfig
+		// Replaced only when the request carried one, so a caller that does not
+		// know about the image settings cannot wipe them.
+		if config.ImageProcessingConfig != nil {
+			kb.ImageProcessingConfig = *config.ImageProcessingConfig
+		}
 		if config.FAQConfig != nil {
 			kb.FAQConfig = config.FAQConfig
 		}
