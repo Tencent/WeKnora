@@ -6,15 +6,16 @@
 import { computed } from 'vue'
 import knowledgeIcon from '@/assets/img/zhishiku.svg'
 import agentIcon from '@/assets/img/agent.svg'
+import artifactIcon from '@/assets/img/artifact.svg'
 import organizationIcon from '@/assets/img/organization.svg'
 
 const props = withDefaults(defineProps<{
-  type: 'knowledge' | 'agent' | 'organization'
+  type: 'knowledge' | 'agent' | 'artifact' | 'organization'
   size?: number
 }>(), { size: 20 })
 
 // Reuse the navigation assets while inheriting the surrounding theme color.
-const icons = { knowledge: knowledgeIcon, agent: agentIcon, organization: organizationIcon }
+const icons = { knowledge: knowledgeIcon, agent: agentIcon, artifact: artifactIcon, organization: organizationIcon }
 const iconStyle = computed(() => ({
   width: `${props.size}px`,
   height: `${props.size}px`,

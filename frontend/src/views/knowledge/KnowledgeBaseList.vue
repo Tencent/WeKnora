@@ -4,7 +4,10 @@
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
-            <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
+            <h2 style="--wails-draggable: drag">
+              <ResourceIcon type="knowledge" :size="24" />
+              {{ $t('knowledgeBase.title') }}
+            </h2>
             <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
               <t-button variant="text" theme="default" size="small" class="header-action-btn"
                 data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
@@ -1554,6 +1557,9 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   }
 
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);

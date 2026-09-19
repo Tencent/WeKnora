@@ -4,7 +4,10 @@
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
-            <h2 style="--wails-draggable: drag">{{ $t('organization.title') }}</h2>
+            <h2 style="--wails-draggable: drag">
+              <ResourceIcon type="organization" :size="24" />
+              {{ $t('organization.title') }}
+            </h2>
             <div class="header-actions" style="--wails-draggable: no-drag">
               <t-tooltip :content="canManageOrg ? $t('organization.joinOrg') : noPermissionTip" placement="bottom">
                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
@@ -1092,6 +1095,9 @@ watch(keyword, () => { collapsedOrgSections.value = new Set() })
   }
 
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);

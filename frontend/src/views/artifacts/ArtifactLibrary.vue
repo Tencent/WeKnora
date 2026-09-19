@@ -2,7 +2,10 @@
   <div class="artifact-library">
     <div class="header" style="--wails-draggable: drag">
       <div class="header-title" style="--wails-draggable: drag">
-        <h2 style="--wails-draggable: drag">{{ $t('artifactLibrary.title') }}</h2>
+        <h2 style="--wails-draggable: drag">
+          <ResourceIcon type="artifact" :size="24" />
+          {{ $t('artifactLibrary.title') }}
+        </h2>
         <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('artifactLibrary.subtitle') }}</p>
       </div>
     </div>
@@ -206,6 +209,7 @@ import {
 import { formatArtifactDateTime, formatArtifactSize } from '@/utils/sessionArtifacts'
 import { resolveFilePreviewExt } from '@/utils/filePreview'
 import EmptyState from '@/components/EmptyState.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
 
@@ -410,6 +414,9 @@ onBeforeUnmount(() => {
   }
 
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);

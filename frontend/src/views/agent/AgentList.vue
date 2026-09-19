@@ -4,7 +4,10 @@
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
-            <h2 style="--wails-draggable: drag">{{ $t('agent.title') }}</h2>
+            <h2 style="--wails-draggable: drag">
+              <ResourceIcon type="agent" :size="24" />
+              {{ $t('agent.title') }}
+            </h2>
             <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
               <t-button variant="text" theme="default" size="small" class="header-action-btn"
                 data-guide="agent-list-create" style="--wails-draggable: no-drag" @click="handleCreateAgent">
@@ -1551,6 +1554,9 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   }
 
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);

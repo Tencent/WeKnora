@@ -12,7 +12,9 @@
         :value="selectedSpace" :options="spaceOptions" :placeholder="$t('listSpaceSidebar.spaces')"
         :aria-label="$t('listSpaceSidebar.spaces')" filterable clearable
         @change="(value: unknown) => $emit('update:modelValue', String(value || 'all'))">
-        <template #prefixIcon><ResourceIcon type="organization" :size="16" /></template>
+        <template #prefixIcon>
+          <ResourceIcon type="organization" :size="16" :class="{ 'space-filter-icon-active': !!selectedSpace }" />
+        </template>
       </t-select>
     </div>
     <t-input :model-value="query" class="search-input" :placeholder="$t('menu.search')"
@@ -86,6 +88,7 @@ onMounted(() => { if (!props.hideScopes) orgStore.fetchOrganizations() })
 .category-tabs { .artifact-filter-tabs(); }
 .scope-count { margin-left: 5px; font-size: var(--app-text-xs); opacity: 0.65; font-variant-numeric: tabular-nums; }
 .space-filter { width: 180px; }
+.space-filter-icon-active { color: var(--td-brand-color); }
 .search-input { width: 260px; max-width: 100%; margin-left: auto; }
 @media (max-width: 720px) {
   .search-input { width: 100%; }
