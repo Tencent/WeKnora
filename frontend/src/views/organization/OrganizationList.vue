@@ -167,8 +167,9 @@
         </div>
 
         <!-- 空状态（按筛选显示不同文案） -->
-        <EmptyState v-if="!keyword.trim() && !loading && filteredOrganizations.length === 0" icon="usergroup" :title="emptyStateTitle"
+        <EmptyState v-if="!keyword.trim() && !loading && filteredOrganizations.length === 0" :title="emptyStateTitle"
           :description="emptyStateDesc">
+          <template #icon><ResourceIcon type="organization" :size="32" /></template>
           <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
             <t-button theme="default" variant="outline" class="org-join-btn" :disabled="!canManageOrg"
               @click="handleJoinOrganization">
@@ -430,6 +431,7 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'

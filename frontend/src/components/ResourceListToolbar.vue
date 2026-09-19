@@ -11,7 +11,9 @@
       <t-select v-if="mode === 'resource' && spaceOptions.length" class="space-filter"
         :value="selectedSpace" :options="spaceOptions" :placeholder="$t('listSpaceSidebar.spaces')"
         :aria-label="$t('listSpaceSidebar.spaces')" filterable clearable
-        @change="(value: unknown) => $emit('update:modelValue', String(value || 'all'))" />
+        @change="(value: unknown) => $emit('update:modelValue', String(value || 'all'))">
+        <template #prefixIcon><ResourceIcon type="organization" :size="16" /></template>
+      </t-select>
     </div>
     <t-input :model-value="query" class="search-input" :placeholder="$t('menu.search')"
       :aria-label="$t('menu.search')" clearable @update:model-value="(value: unknown) => $emit('update:query', String(value ?? ''))">
@@ -24,6 +26,7 @@
 import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOrganizationStore } from '@/stores/organization'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 
 const props = withDefaults(defineProps<{
   modelValue: string

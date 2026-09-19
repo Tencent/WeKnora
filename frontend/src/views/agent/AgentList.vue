@@ -583,8 +583,9 @@
         </div>
 
         <!-- 空状态：全部（保留创建 CTA） -->
-        <EmptyState v-if="!keyword.trim() && spaceSelection === 'all' && filteredAgents.length === 0 && !loading" icon="chat-bubble-1" :title="$t('agent.empty.title')"
+        <EmptyState v-if="!keyword.trim() && spaceSelection === 'all' && filteredAgents.length === 0 && !loading" :title="$t('agent.empty.title')"
           :description="$t('agent.empty.description')">
+          <template #icon><ResourceIcon type="agent" :size="32" /></template>
           <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn"
             data-guide="agent-list-create" @click="handleCreateAgent">
             <template #icon>
@@ -616,8 +617,9 @@
         <EmptyState v-if="!keyword.trim() && spaceSelection === 'recents' && filteredAgents.length === 0 && !loading" icon="history" :title="$t('agent.empty.recentsTitle')"
           :description="$t('agent.empty.recentsDescription')" />
         <!-- 空状态：我的 -->
-        <EmptyState v-if="!keyword.trim() && spaceSelection === 'mine' && agents.length === 0 && !loading" icon="chat-bubble-1" :title="$t('agent.empty.title')"
+        <EmptyState v-if="!keyword.trim() && spaceSelection === 'mine' && agents.length === 0 && !loading" :title="$t('agent.empty.title')"
           :description="$t('agent.empty.description')">
+          <template #icon><ResourceIcon type="agent" :size="32" /></template>
           <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn"
             @click="handleCreateAgent">
             <template #icon>
@@ -643,8 +645,10 @@
           </t-button>
         </EmptyState>
         <!-- 空状态：空间下 -->
-        <EmptyState v-if="!keyword.trim() && spaceSelectionOrgId && !spaceAgentsLoading && spaceAgentsList.length === 0" icon="chat-bubble-1" :title="$t('agent.empty.sharedTitle')"
-          :description="$t('agent.empty.sharedDescription')" />
+        <EmptyState v-if="!keyword.trim() && spaceSelectionOrgId && !spaceAgentsLoading && spaceAgentsList.length === 0" :title="$t('agent.empty.sharedTitle')"
+          :description="$t('agent.empty.sharedDescription')">
+          <template #icon><ResourceIcon type="agent" :size="32" /></template>
+        </EmptyState>
       </div>
     </div>
 
@@ -731,6 +735,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'

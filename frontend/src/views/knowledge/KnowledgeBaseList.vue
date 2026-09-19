@@ -586,8 +586,9 @@
         </div>
 
         <!-- 全部空状态：保留「新建知识库」CTA，因为是空间没有任何 KB 的真空场景 -->
-        <EmptyState v-if="!keyword.trim() && spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" icon="folder-open" :title="$t('knowledgeList.empty.title')"
+        <EmptyState v-if="!keyword.trim() && spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" :title="$t('knowledgeList.empty.title')"
           :description="$t('knowledgeList.empty.description')">
+          <template #icon><ResourceIcon type="knowledge" :size="32" /></template>
           <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="kb-create-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
@@ -605,8 +606,9 @@
           :description="$t('knowledgeList.empty.recentsDescription')" />
 
         <!-- 我的知识库空状态 -->
-        <EmptyState v-if="!keyword.trim() && spaceSelection === 'mine' && kbs.length === 0 && !loading" icon="folder-open" :title="$t('knowledgeList.empty.title')"
+        <EmptyState v-if="!keyword.trim() && spaceSelection === 'mine' && kbs.length === 0 && !loading" :title="$t('knowledgeList.empty.title')"
           :description="$t('knowledgeList.empty.description')">
+          <template #icon><ResourceIcon type="knowledge" :size="32" /></template>
           <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="kb-create-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
@@ -615,8 +617,10 @@
         </EmptyState>
 
         <!-- 空间下知识库空状态 -->
-        <EmptyState v-if="!keyword.trim() && spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" icon="folder-open" :title="$t('knowledgeList.empty.sharedTitle')"
-          :description="$t('knowledgeList.empty.sharedDescription')" />
+        <EmptyState v-if="!keyword.trim() && spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" :title="$t('knowledgeList.empty.sharedTitle')"
+          :description="$t('knowledgeList.empty.sharedDescription')">
+          <template #icon><ResourceIcon type="knowledge" :size="32" /></template>
+        </EmptyState>
       </div>
     </div>
 
@@ -702,6 +706,7 @@ import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { deleteKnowledgeBase, duplicateKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { useChatResourcesStore } from '@/stores/chatResources'
