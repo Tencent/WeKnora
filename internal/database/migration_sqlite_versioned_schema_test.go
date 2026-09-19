@@ -49,7 +49,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"sync_logs":          {"task_id", "task_payload", "dispatched_at", "dispatch_attempts", "next_dispatch_at", "last_dispatch_error"}, // 000093
 }
 
-const expectedSQLiteMigrationVersion = 25
+const expectedSQLiteMigrationVersion = 26
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
