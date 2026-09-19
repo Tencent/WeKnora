@@ -27,7 +27,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -141,11 +140,7 @@ func NewGuardedTransport() *http.Transport {
 
 func NewGuardedTransportWithPolicy(policy OutboundURLPolicy) *http.Transport {
 	return &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-			Control:   SafeDialControlForPolicy(policy),
-		}).DialContext,
+		DialContext:         GuardedDialContext(policy),
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 4,
 		IdleConnTimeout:     90 * time.Second,
