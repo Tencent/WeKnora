@@ -1,37 +1,25 @@
-# Live host-port check evidence — 
-Commit: `0209eb1a`
+# Live Docker + host-port evidence — 2026-09-19 21:32 CST
 
-## A — standalone APP_PORT=8888, SEARXNG_PORT unset (must PASS)
-```
-OK: host-port check passed
-exit:0
-```
+Commit: `49383691`
+Docker: `27.5.1` (static install, storage-driver=vfs)
 
-## B — local SearXNG enabled, APP_PORT=SEARXNG_PORT=8080 (must FATAL)
-```
-exit:2
-```
+## Process-level (same helper as cmd/server)
+See earlier smoke: standalone APP_PORT=8888 PASS; enabled collision FATAL; distinct PASS.
 
-## C — local SearXNG enabled, 8080 vs 8888 (must PASS)
+## Docker Compose `--profile searxng` / `searxng-init`
+
+### F1 — APP_PORT=8888 SEARXNG_PORT=8888 (must FAIL)
 ```
-OK: host-port check passed
-exit:0
+ERROR: SEARXNG_PORT=8888 collides with APP_PORT=8888.
+On Linux this makes localhost:8888 hit SearXNG instead of WeKnora.
+Keep SEARXNG_PORT at 8888 (or another free port), distinct from APP_PORT.
+exit:1
 ```
 
-## D — APP_PORT=8888 SEARXNG_PORT=8888 (must FATAL)
+### F2 — APP_PORT=8080 SEARXNG_PORT=8888 (must PASS)
 ```
-exit:2
-```
-
-## E — independently deployed SearXNG (no SEARXNG_PORT), APP_PORT=8080 (must PASS)
-```
-OK: host-port check passed
-exit:0
+exit:0 (searxng-init completed)
 ```
 
-## Unit tests
-```
-ok  	github.com/Tencent/WeKnora/internal/runtime	0.643s
-```
-
-Note: Docker Engine was unavailable on this cloud box (apt 502 / no docker binary), so compose `--profile searxng` was not exercised live; searxng-init collision script remains profile-gated in docker-compose.yml.
+### F3 — no searxng profile
+searxng / searxng-init not selected without `--profile searxng`.
