@@ -22,7 +22,7 @@
 
 ## 选择连接器
 
-飞书、Lark、Notion 和语雀用于同步协作文档，GitLab 用于同步仓库中的文档目录，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章。各连接器支持的格式、认证与删除检测见参考部分。
+飞书、Lark、Notion 和语雀用于同步协作文档；飞书/Lark 另提供云盘文件夹与「链接列表」（按单篇 URL 同步）。GitLab 用于同步仓库中的文档目录，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章。各连接器支持的格式、认证与删除检测见参考部分。
 
 ## 检查变更与失败
 
@@ -62,6 +62,15 @@
 - **增量逻辑**：游标 `feishuCursor.SpaceNodeTimes`（`resourceID → nodeToken → editTime`）。变更判定用 `obj_edit_time`（文档内容编辑时间），而**不是** `node_edit_time`（只反映改标题/挪位置）。抓取失败的节点**不推进游标**（保留旧 editTime，下次必然 prev != current 而重试），避免瞬时导出失败导致文档被永久跳过。
 - **FetchStream**：统一全量/增量路径（cursor==nil 即全量），每处理 `feishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `feishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
 - **错误分类**（`feishuFailure`）：把原始错误归类为稳定 i18n code（`feishu_auth_or_permission` / `feishu_rate_limited` / `feishu_timeout` / `feishu_server_unavailable` / `feishu_api_error`(+code) / `sync_failed`），前端本地化展示；原始 status/body/log_id 只留在服务端日志。
+
+#### 飞书 / Lark 链接列表（`feishu_links` / `lark_links`）
+
+按用户粘贴的单篇文档 URL 同步，不枚举 Wiki 空间、不遍历云盘文件夹。类型标识为 `feishu_links` / `lark_links`，源码在 `internal/datasource/connector/feishu/links/`，与 Wiki/云盘共用 `core.Client`、Region 与 `FetchDocxWithBlocks`。
+
+- **支持的 URL**：`/wiki/{node_token}`（只拉这一篇，不递归子页）、`/docx/{token}`、`/docs/{token}`、`/sheets/{token}`、`/base/{token}`、`/file/{token}`。
+- **拒绝**：`/wiki/space/`（整库请用 `feishu`）、`/drive/folder/`（整夹请用 `feishu_drive`）、mindnote / slides。
+- **解析与去重**：wiki 走 `get_node`，云文档走 `POST /drive/v1/metas/batch_query`。先按规范化 URL 去重，再按 `{obj_type}:{obj_token}` 去重（同一篇的 wiki copylink 与 `/docx/` 会合并）。
+- **权限**：`wiki:wiki:readonly`（wiki copylink）、`drive:drive.metadata:readonly` 或 `drive:drive`（云文档 URL 的 `metas/batch_query`；`drive:drive:readonly` 不够）、`drive:drive:readonly`、`drive:export:readonly`、`docx:document:readonly`。开通后须发布应用版本。把应用加为该文档协作者即可，不必进群分享整库或整夹。
 
 #### GitLab（`connector/gitlab/`）
 
@@ -332,6 +341,8 @@ registry.Register(feishuConnector.NewConnector(feishuConnector.RegionFeishu))  /
 registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark))    // lark（国际版，同一实现不同 Region）
 registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive))             // feishu_drive
 registry.Register(drive.NewDriveConnector(core.RegionLarkDrive))               // lark_drive
+registry.Register(links.NewConnector(core.RegionFeishuLinks))                  // feishu_links
+registry.Register(links.NewConnector(core.RegionLarkLinks))                    // lark_links
 registry.Register(notionConnector.NewConnector())                              // notion
 registry.Register(yuqueConnector.NewConnector())                               // yuque
 registry.Register(dingtalkConnector.NewConnector())                            // dingtalk
@@ -340,7 +351,7 @@ registry.Register(rssConnector.NewConnector())                                 /
 registry.Register(gitlabConnector.NewConnector())                              // gitlab
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（Confluence、GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（Confluence、GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`feishu_links`、`lark_links`、`notion`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

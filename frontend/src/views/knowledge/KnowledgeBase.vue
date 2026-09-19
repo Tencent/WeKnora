@@ -641,6 +641,8 @@ const sourceOptions = computed(() => [
   { label: t('knowledgeBase.sourceBrowserExtension'), value: 'browser_extension' },
   { label: t('knowledgeBase.channelFeishu'), value: 'feishu' },
   { label: t('knowledgeBase.channelFeishuDrive'), value: 'feishu_drive' },
+  { label: t('knowledgeBase.channelFeishuLinks'), value: 'feishu_links' },
+  { label: t('knowledgeBase.channelLarkLinks'), value: 'lark_links' },
   { label: t('knowledgeBase.channelNotion'), value: 'notion' },
   { label: t('knowledgeBase.channelYuque'), value: 'yuque' },
   { label: t('knowledgeBase.channelConfluence'), value: 'confluence' },

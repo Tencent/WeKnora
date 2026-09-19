@@ -60,6 +60,7 @@ import (
 	dingtalkConnector "github.com/Tencent/WeKnora/internal/datasource/connector/dingtalk"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/links"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
 	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
 	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
@@ -1782,6 +1783,12 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(drive.NewDriveConnector(core.RegionLarkDrive)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register lark_drive connector: %w", err))
+	}
+	if err := registry.Register(links.NewConnector(core.RegionFeishuLinks)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu_links connector: %w", err))
+	}
+	if err := registry.Register(links.NewConnector(core.RegionLarkLinks)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark_links connector: %w", err))
 	}
 	if err := registry.Register(notionConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
