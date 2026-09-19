@@ -134,10 +134,10 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact } from '@/api/chat'
-import { resolveFilePreviewExt } from '@/utils/filePreview'
 import {
   formatArtifactDateTime,
   formatArtifactSize,
+  resolveArtifactPreviewExt,
   type SessionArtifactItem,
 } from '@/utils/sessionArtifacts'
 import { useChatSandboxPanel, type ArtifactPanelFocusState } from '@/composables/useChatSandboxPanel'
@@ -176,7 +176,7 @@ const visibleItems = computed(() => {
 const previewFileType = computed(() => {
   const item = previewItem.value
   if (!item) return ''
-  return resolveFilePreviewExt(item.file_name, item.file_type)
+  return resolveArtifactPreviewExt(item)
 })
 
 function downloadKey(item: SessionArtifactItem): string {
