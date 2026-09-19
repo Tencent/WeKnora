@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	typesLocal "github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v7/esapi"
 	"github.com/google/uuid"
@@ -716,7 +717,7 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	params typesLocal.RetrieveParams,
 ) ([]*typesLocal.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
-	log.Infof("[ElasticsearchV7] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
+	log.Infof("[ElasticsearchV7] Keywords retrieval: query=%s, topK=%d", secutils.SanitizeForLog(params.Query), params.TopK)
 
 	// Build search query
 	query, err := e.buildKeywordSearchQuery(ctx, params)

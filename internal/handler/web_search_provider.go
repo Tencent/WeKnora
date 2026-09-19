@@ -87,7 +87,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 	var req CreateProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Warnf(ctx, "Invalid create provider request: %v", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -105,7 +105,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 
 	if err := h.service.CreateProvider(ctx, provider); err != nil {
 		logger.Warnf(ctx, "Failed to create web search provider: %v", err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -128,7 +128,7 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 	providers, err := h.repo.List(ctx, tenantID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list web search providers: %v", err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -209,7 +209,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 
 	var req UpdateProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -256,7 +256,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 
 	if err := h.service.UpdateProvider(ctx, provider); err != nil {
 		logger.Warnf(ctx, "Failed to update web search provider %s: %v", id, err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -301,7 +301,7 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 
 	if err := h.service.DeleteProvider(ctx, tenantID, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete web search provider %s: %v", id, err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -357,7 +357,7 @@ func (h *WebSearchProviderHandler) TestProviderByID(c *gin.Context) {
 
 	if err := h.doTestSearch(ctx, string(provider.Provider), provider.Parameters); err != nil {
 		logger.Warnf(ctx, "Web search provider test failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Search test failed"})
 		return
 	}
 
@@ -389,13 +389,13 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 
 	var req TestProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
 	if err := h.doTestSearch(ctx, req.Provider, req.Parameters); err != nil {
 		logger.Warnf(ctx, "Web search provider test failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Search test failed"})
 		return
 	}
 

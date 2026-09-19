@@ -68,11 +68,11 @@ func (h *UserResourceFavoriteHandler) ListFavorites(c *gin.Context) {
 	list, err := h.service.List(ctx, userID, tenantID, resourceType)
 	if err != nil {
 		if stderrors.Is(err, service.ErrFavoriteInvalidType) {
-			c.Error(apperrors.NewBadRequestError(err.Error()))
+			c.Error(apperrors.NewBadRequestError("Invalid request parameters"))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		c.Error(apperrors.NewInternalServerError("internal server error"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": list})
@@ -100,16 +100,16 @@ func (h *UserResourceFavoriteHandler) AddFavorite(c *gin.Context) {
 	}
 	var req AddFavoriteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError("invalid request body").WithDetails(err.Error()))
+		c.Error(apperrors.NewBadRequestError("invalid request body"))
 		return
 	}
 	if err := h.service.Add(ctx, userID, tenantID, req.ResourceType, req.ResourceID); err != nil {
 		if stderrors.Is(err, service.ErrFavoriteInvalidType) || stderrors.Is(err, service.ErrFavoriteEmptyID) {
-			c.Error(apperrors.NewBadRequestError(err.Error()))
+			c.Error(apperrors.NewBadRequestError("Invalid request parameters"))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		c.Error(apperrors.NewInternalServerError("internal server error"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -133,11 +133,11 @@ func (h *UserResourceFavoriteHandler) RemoveFavorite(c *gin.Context) {
 
 	if err := h.service.Remove(ctx, userID, tenantID, resourceType, resourceID); err != nil {
 		if stderrors.Is(err, service.ErrFavoriteInvalidType) || stderrors.Is(err, service.ErrFavoriteEmptyID) {
-			c.Error(apperrors.NewBadRequestError(err.Error()))
+			c.Error(apperrors.NewBadRequestError("Invalid request parameters"))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		c.Error(apperrors.NewInternalServerError("internal server error"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})

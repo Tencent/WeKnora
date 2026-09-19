@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
@@ -294,6 +295,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "kb_not_wiki_enabled"
 		return fmt.Errorf("wiki ingest: KB %s is not wiki type", kb.ID)
 	}
+	if kb.TenantID != payload.TenantID {
+		exitStatus = "tenant_mismatch"
+		logger.Warnf(ctx, "wiki ingest: rejecting task for KB %s: task tenant %d does not match KB tenant %d", kb.ID, payload.TenantID, kb.TenantID)
+		return fmt.Errorf("wiki ingest: tenant mismatch for KB %s", kb.ID)
+	}
 
 	var synthesisModelID string
 	if kb.WikiConfig != nil {
@@ -511,7 +517,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			ingestOps++
 			mapMu.Unlock()
 
-			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", op.DocTitle, op.KnowledgeID)
+			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", secutils.SanitizeForLog(op.DocTitle), op.KnowledgeID)
 			result, updates, err := s.mapOneDocument(mapCtx, chatModel, payload, op, batchCtx)
 			if err != nil {
 				mapMu.Lock()
@@ -1019,9 +1025,11 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		}
 		if row.Change != nil {
 			if row.Change.Action == wikiFinalizeRemoved {
-				fmt.Fprintf(&changeDesc, "<document_removed>\n<title>%s</title>\n<summary>%s</summary>\n</document_removed>\n\n", row.Change.DocTitle, row.Change.DocSummary)
+				fmt.Fprintf(&changeDesc, "<document_removed>\n<title>%s</title>\n<summary>%s</summary>\n</document_removed>\n\n",
+					xmlEscape(row.Change.DocTitle), xmlEscape(row.Change.DocSummary))
 			} else {
-				fmt.Fprintf(&changeDesc, "<document_added>\n<title>%s</title>\n<summary>%s</summary>\n</document_added>\n\n", row.Change.DocTitle, row.Change.DocSummary)
+				fmt.Fprintf(&changeDesc, "<document_added>\n<title>%s</title>\n<summary>%s</summary>\n</document_added>\n\n",
+					xmlEscape(row.Change.DocTitle), xmlEscape(row.Change.DocSummary))
 			}
 			continue
 		}
@@ -1870,7 +1878,8 @@ func (s *wikiIngestService) reduceSlugUpdates(
 
 	if len(retracts) > 0 {
 		for _, r := range retracts {
-			fmt.Fprintf(&deletedContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n", r.DocTitle, r.RetractDocContent)
+			fmt.Fprintf(&deletedContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n",
+				xmlEscape(r.DocTitle), xmlEscape(r.RetractDocContent))
 		}
 
 		retractKIDs := make(map[string]bool)
@@ -1894,9 +1903,11 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 
 			if content := batchCtx.SummaryContentByKnowledgeID(ctx, refKnowledgeID); content != "" {
-				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n", refTitle, content)
+				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n",
+					xmlEscape(refTitle), xmlEscape(content))
 			} else {
-				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n(summary not available)\n</content>\n</document>\n\n", refTitle)
+				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n(summary not available)\n</content>\n</document>\n\n",
+					xmlEscape(refTitle))
 			}
 		}
 		if remainingSourcesContent.Len() == 0 {
@@ -1940,20 +1951,20 @@ func (s *wikiIngestService) reduceSlugUpdates(
 				}
 				sourceContextByRef[contextKey] = fmt.Sprintf(
 					"<document>\n<title>%s</title>\n<context>\n%s\n</context>\n</document>\n",
-					add.DocTitle, sourceCtx,
+					xmlEscape(add.DocTitle), xmlEscape(sourceCtx),
 				)
 			}
 			if cited != "" {
 				fmt.Fprintf(&newContentBuilder,
 					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-					add.DocTitle, add.Item.Name, add.Item.Description, cited)
+					xmlEscape(add.DocTitle), xmlEscape(add.Item.Name), xmlEscape(add.Item.Description), xmlEscape(cited))
 			} else {
 				// Fallback: no citations available (legacy path, citation pass
 				// failed, or bad chunk IDs were filtered out) — stick with
 				// the short Details summary so the page still gets real text.
 				fmt.Fprintf(&newContentBuilder,
 					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-					add.DocTitle, add.Item.Name, add.Item.Description, add.Item.Details)
+					xmlEscape(add.DocTitle), xmlEscape(add.Item.Name), xmlEscape(add.Item.Description), xmlEscape(add.Item.Details))
 			}
 			docTitles = appendUnique(docTitles, add.DocTitle)
 

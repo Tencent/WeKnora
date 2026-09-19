@@ -382,25 +382,25 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 		logger.Infof(ctx, "[DocReader] Chunk #%d (seq=%d): 内容长度=%d, 图片数=%d, 范围=[%d-%d]",
 			idx, chunkData.Seq, len(chunkData.Content), len(chunkData.Images), chunkData.Start, chunkData.End)
-		logger.Debugf(ctx, "[DocReader] Chunk #%d 内容预览: %s", idx, contentPreview)
+		logger.Debugf(ctx, "[DocReader] Chunk #%d 内容预览: %s", idx, secutils.SanitizeForLog(contentPreview))
 
 		// 打印图片详细信息
 		for imgIdx, img := range chunkData.Images {
-			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, img.URL)
-			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalURL)
+			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, secutils.SanitizeForLog(img.URL))
+			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, secutils.SanitizeForLog(img.OriginalURL))
 			if img.Caption != "" {
 				captionPreview := img.Caption
 				if len(captionPreview) > 100 {
 					captionPreview = captionPreview[:100] + "..."
 				}
-				logger.Infof(ctx, "[DocReader]   图片 #%d: Caption=%s", imgIdx, captionPreview)
+				logger.Infof(ctx, "[DocReader]   图片 #%d: Caption=%s", imgIdx, secutils.SanitizeForLog(captionPreview))
 			}
 			if img.OCRText != "" {
 				ocrPreview := img.OCRText
 				if len(ocrPreview) > 100 {
 					ocrPreview = ocrPreview[:100] + "..."
 				}
-				logger.Infof(ctx, "[DocReader]   图片 #%d: OCRText=%s", imgIdx, ocrPreview)
+				logger.Infof(ctx, "[DocReader]   图片 #%d: OCRText=%s", imgIdx, secutils.SanitizeForLog(ocrPreview))
 			}
 			logger.Infof(ctx, "[DocReader]   图片 #%d: 位置=[%d-%d]", imgIdx, img.Start, img.End)
 		}

@@ -159,7 +159,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	var request CreateSessionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to validate session creation parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -280,7 +280,7 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Error(ctx, "Failed to parse pagination parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -345,7 +345,7 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 	var session types.Session
 	if err := c.ShouldBindJSON(&session); err != nil {
 		logger.Error(ctx, "Failed to parse session data", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -498,7 +498,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 	if req.DeleteAll {
 		if err := h.sessionService.DeleteAllSessions(ctx); err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError(err.Error()))
+			c.Error(errors.NewInternalServerError("internal server error"))
 			return
 		}
 		h.browserSkill.ForgetAll(browserSkillScope(ctx))

@@ -469,7 +469,7 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 	var req SteerMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	query := strings.TrimSpace(req.Query)
@@ -483,7 +483,7 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 	}
 	delivery, err := parseSteerDelivery(req.Delivery)
 	if err != nil {
-		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 

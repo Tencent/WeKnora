@@ -10,11 +10,11 @@ import (
 )
 
 // auth_public_ratelimit.go — sliding-window IP rate limiter for the
-// unauthenticated share-link endpoints (/auth/invitations/lookup and
-// /auth/register-by-invite). Both surfaces accept a plaintext token
-// from the request and either reveal tenant context (lookup) or
-// create an account (register-by-invite); without a limiter an
-// attacker can brute-force token guesses and hammer registration.
+// unauthenticated auth endpoints (/auth/login, /auth/invitations/lookup
+// and /auth/register-by-invite). Login is limited to bound password
+// spraying; share-link surfaces accept a plaintext token from the
+// request and either reveal tenant context (lookup) or create an
+// account (register-by-invite).
 //
 // The token is 256-bit so guessing the space is infeasible regardless,
 // but the limiter still narrows the abuse window for partial-token

@@ -136,6 +136,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
+	r.Use(middleware.SecurityHeaders())
 
 	// 健康检查（不需要认证）
 	r.GET("/health", func(c *gin.Context) {

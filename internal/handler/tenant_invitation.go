@@ -222,7 +222,7 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 	rows, total, err := h.invitationService.ListTenantInvitationsPage(ctx, tenantID, includeTerminal, page, pageSize)
 	if err != nil {
 		logger.Errorf(ctx, "ListTenantInvitationsPage failed: tenant=%d err=%v", tenantID, err)
-		c.Error(apperrors.NewInternalServerError("failed to list invitations").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to list invitations"))
 		return
 	}
 
@@ -271,7 +271,7 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 
 	var req createInvitationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("invalid request body"))
 		return
 	}
 	if !req.Role.IsValid() {
@@ -288,7 +288,7 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 		}
 		logger.Errorf(ctx, "GetUserByEmail failed: email=%s err=%v",
 			secutils.SanitizeForLog(req.Email), err)
-		c.Error(apperrors.NewInternalServerError("failed to look up user").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to look up user"))
 		return
 	}
 
@@ -315,17 +315,17 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidTenantRole):
-			c.Error(apperrors.NewValidationError(err.Error()))
+			c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
-			c.Error(apperrors.NewForbiddenError(err.Error()))
+			c.Error(apperrors.NewForbiddenError("Permission denied"))
 		case errors.Is(err, service.ErrPendingInvitationExists):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		case errors.Is(err, service.ErrAlreadyMember):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		default:
 			logger.Errorf(ctx, "CreateInvitation failed: user=%s tenant=%d err=%v",
 				user.ID, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to create invitation").WithDetails(err.Error()))
+			c.Error(apperrors.NewInternalServerError("failed to create invitation"))
 		}
 		return
 	}
@@ -376,7 +376,7 @@ func (h *TenantInvitationHandler) autoAcceptInvitationAndRespond(
 				"auto_accept: member added but default tenant update failed: user=%s tenant=%d err=%v",
 				user.ID, tenantID, updateErr)
 			c.Error(apperrors.NewInternalServerError(
-				"member added but default workspace update failed").WithDetails(updateErr.Error()))
+				"member added but default workspace update failed"))
 			return
 		}
 	}
@@ -413,7 +413,7 @@ func (h *TenantInvitationHandler) RevokeInvitation(c *gin.Context) {
 	inv, err := h.invitationService.GetByID(ctx, invID)
 	if err != nil {
 		logger.Errorf(ctx, "GetByID invitation failed: id=%d err=%v", invID, err)
-		c.Error(apperrors.NewInternalServerError("failed to load invitation").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to load invitation"))
 		return
 	}
 	if inv == nil {
@@ -432,10 +432,10 @@ func (h *TenantInvitationHandler) RevokeInvitation(c *gin.Context) {
 		case errors.Is(err, service.ErrInvitationNotFound):
 			c.Error(apperrors.NewNotFoundError("invitation not found"))
 		case errors.Is(err, service.ErrInvitationNotPending):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		default:
 			logger.Errorf(ctx, "RevokeInvitation failed: id=%d err=%v", invID, err)
-			c.Error(apperrors.NewInternalServerError("failed to revoke invitation").WithDetails(err.Error()))
+			c.Error(apperrors.NewInternalServerError("failed to revoke invitation"))
 		}
 		return
 	}
@@ -464,7 +464,7 @@ func (h *TenantInvitationHandler) ListMyInvitations(c *gin.Context) {
 	rows, err := h.invitationService.ListByInvitee(ctx, caller, includeTerminal)
 	if err != nil {
 		logger.Errorf(ctx, "ListByInvitee invitations failed: user=%s err=%v", caller, err)
-		c.Error(apperrors.NewInternalServerError("failed to list invitations").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to list invitations"))
 		return
 	}
 
@@ -502,7 +502,7 @@ func (h *TenantInvitationHandler) CountMyPendingInvitations(c *gin.Context) {
 	count, err := h.invitationService.CountPendingByInvitee(ctx, caller)
 	if err != nil {
 		logger.Errorf(ctx, "CountPendingByInvitee failed: user=%s err=%v", caller, err)
-		c.Error(apperrors.NewInternalServerError("failed to count pending invitations").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to count pending invitations"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -538,15 +538,15 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 		case errors.Is(err, service.ErrInvitationNotFound):
 			c.Error(apperrors.NewNotFoundError("invitation not found"))
 		case errors.Is(err, service.ErrInvitationForbidden):
-			c.Error(apperrors.NewForbiddenError(err.Error()))
+			c.Error(apperrors.NewForbiddenError("Permission denied"))
 		case errors.Is(err, service.ErrInvitationNotPending):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		case errors.Is(err, service.ErrInvitationExpired):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		default:
 			logger.Errorf(ctx, "AcceptMyInvitation failed: id=%d user=%s err=%v",
 				invID, caller, err)
-			c.Error(apperrors.NewInternalServerError("failed to accept invitation").WithDetails(err.Error()))
+			c.Error(apperrors.NewInternalServerError("failed to accept invitation"))
 		}
 		return
 	}
@@ -559,7 +559,7 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
 			logger.Errorf(ctx, "AcceptMyInvitation failed to set default tenant: user=%s tenant=%d err=%v",
 				caller, member.TenantID, updateErr)
-			c.Error(apperrors.NewInternalServerError("invitation accepted but default workspace update failed").WithDetails(updateErr.Error()))
+			c.Error(apperrors.NewInternalServerError("invitation accepted but default workspace update failed"))
 			return
 		}
 	}
@@ -604,7 +604,7 @@ func (h *TenantInvitationHandler) AcceptMyInvitationByToken(c *gin.Context) {
 
 	var req acceptInvitationByTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("token is required").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("token is required"))
 		return
 	}
 	token := strings.TrimSpace(req.Token)
@@ -625,7 +625,7 @@ func (h *TenantInvitationHandler) AcceptMyInvitationByToken(c *gin.Context) {
 			})
 		default:
 			logger.Errorf(ctx, "AcceptMyInvitationByToken failed: user=%s err=%v", caller, err)
-			c.Error(apperrors.NewInternalServerError("failed to accept invitation").WithDetails(err.Error()))
+			c.Error(apperrors.NewInternalServerError("failed to accept invitation"))
 		}
 		return
 	}
@@ -636,7 +636,7 @@ func (h *TenantInvitationHandler) AcceptMyInvitationByToken(c *gin.Context) {
 		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
 			logger.Errorf(ctx, "AcceptMyInvitationByToken failed to set default tenant: user=%s tenant=%d err=%v",
 				caller, member.TenantID, updateErr)
-			c.Error(apperrors.NewInternalServerError("invitation accepted but default workspace update failed").WithDetails(updateErr.Error()))
+			c.Error(apperrors.NewInternalServerError("invitation accepted but default workspace update failed"))
 			return
 		}
 	}
@@ -687,15 +687,15 @@ func (h *TenantInvitationHandler) DeclineMyInvitation(c *gin.Context) {
 		case errors.Is(err, service.ErrInvitationNotFound):
 			c.Error(apperrors.NewNotFoundError("invitation not found"))
 		case errors.Is(err, service.ErrInvitationForbidden):
-			c.Error(apperrors.NewForbiddenError(err.Error()))
+			c.Error(apperrors.NewForbiddenError("Permission denied"))
 		case errors.Is(err, service.ErrInvitationNotPending):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		case errors.Is(err, service.ErrInvitationExpired):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		default:
 			logger.Errorf(ctx, "DeclineMyInvitation failed: id=%d user=%s err=%v",
 				invID, caller, err)
-			c.Error(apperrors.NewInternalServerError("failed to decline invitation").WithDetails(err.Error()))
+			c.Error(apperrors.NewInternalServerError("failed to decline invitation"))
 		}
 		return
 	}

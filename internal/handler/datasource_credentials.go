@@ -79,7 +79,7 @@ func (h *DataSourceCredentialsHandler) Put(c *gin.Context) {
 		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{
 			"data_source_id": secutils.SanitizeForLog(ds.ID),
 		})
-		c.Error(errors.NewBadRequestError("failed to update credentials: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to update credentials"))
 		return
 	}
 	configured := false
@@ -108,7 +108,7 @@ func (h *DataSourceCredentialsHandler) DeleteField(c *gin.Context) {
 		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{
 			"data_source_id": secutils.SanitizeForLog(ds.ID),
 		})
-		c.Error(errors.NewInternalServerError("failed to clear credentials: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to clear credentials"))
 		return
 	}
 	c.Status(http.StatusNoContent)

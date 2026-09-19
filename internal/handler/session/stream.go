@@ -68,10 +68,10 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			c.Error(errors.NewNotFoundError("Not found"))
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError(err.Error()))
+			c.Error(errors.NewInternalServerError("internal server error"))
 		}
 		return
 	}
@@ -85,7 +85,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			// surface as ErrSessionNotFound. Map to 404 so clients can tell
 			// "wrong URL" from a real 5xx instead of seeing a generic 500.
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			c.Error(errors.NewNotFoundError("Not found"))
 			return
 		}
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -95,7 +95,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			// they must not retry) instead of a retryable 5xx. Mirrors the
 			// ErrSessionNotFound branch above and the kb/doc/chunk not-found fix.
 			logger.Warnf(ctx, "Message not found, session ID: %s, message ID: %s", sessionID, messageID)
-			c.Error(errors.NewNotFoundError(err.Error()))
+			c.Error(errors.NewNotFoundError("Not found"))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)

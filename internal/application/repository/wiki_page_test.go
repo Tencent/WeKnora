@@ -773,13 +773,13 @@ func TestUpdateIssueStatus_ScopedToKnowledgeBase(t *testing.T) {
 		return got
 	}
 
-	err := repo.UpdateIssueStatus(context.Background(), "kb-b", "issue-1", "resolved")
+	err := repo.UpdateIssueStatus(context.Background(), 7, "kb-b", "issue-1", "resolved")
 	require.ErrorIs(t, err, ErrWikiIssueNotFound)
 	assert.Equal(t, "pending", status())
 
-	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
+	require.NoError(t, repo.UpdateIssueStatus(context.Background(), 7, "kb-a", "issue-1", "resolved"))
 	assert.Equal(t, "resolved", status())
 	// Setting the same status again is not "not found": both supported
 	// databases count matched rows, and updated_at changes anyway.
-	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
+	require.NoError(t, repo.UpdateIssueStatus(context.Background(), 7, "kb-a", "issue-1", "resolved"))
 }

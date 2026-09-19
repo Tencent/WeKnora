@@ -87,7 +87,7 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 	entries, err := h.auditService.List(ctx, tenantID, q)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -157,7 +157,7 @@ func (h *AuditLogHandler) ListKnowledgeBaseActivity(c *gin.Context) {
 	entries, err := h.auditService.List(ctx, access.KnowledgeBase.TenantID, q)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_base_id": kbID})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 	var nextCursor uint64
@@ -240,7 +240,7 @@ func (h *AuditLogHandler) ListSystemAuditLog(c *gin.Context) {
 	entries, err := h.auditService.List(ctx, 0, q)
 	if err != nil {
 		logger.Error(ctx, err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 

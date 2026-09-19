@@ -117,7 +117,7 @@ func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 		}
 		entity, err := h.sandboxConfigSvc.Get(ctx, tenant.ID, req.ConfigID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "Internal error"})
 			return
 		}
 		if entity == nil {
@@ -134,19 +134,19 @@ func (h *SystemHandler) CheckSandboxConfig(c *gin.Context) {
 	}
 	merged, err := service.SanitizeSandboxConfig(incoming, stored)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "Invalid sandbox configuration"})
 		return
 	}
 	effective, err := sandbox.ResolveEffectiveConfig(merged, sandbox.DefaultConfig())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "Invalid sandbox configuration"})
 		return
 	}
 
 	result := &SandboxCheckResponse{OK: true, Provider: string(effective.Type)}
 	client, err := sandbox.NewRemoteClientForCheck(effective)
 	if err != nil {
-		result.add("client_build", false, err.Error(), 0)
+		result.add("client_build", false, "internal error", 0)
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 		return
 	}
@@ -541,7 +541,7 @@ func sandboxCheckReason(err error) string {
 	}
 	var remoteErr *sandbox.RemoteError
 	if !stderrors.As(err, &remoteErr) {
-		return err.Error()
+		return "internal error"
 	}
 	switch remoteErr.Kind {
 	case sandbox.RemoteErrorKindAuthentication:

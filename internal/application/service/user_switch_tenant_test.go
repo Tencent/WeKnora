@@ -46,6 +46,9 @@ func (s *countingAuthTokenRepo) CreateToken(context.Context, *types.AuthToken) e
 	s.createCalls++
 	return nil
 }
+func (s *countingAuthTokenRepo) RevokeTokenByValue(context.Context, string) (bool, error) {
+	return true, nil
+}
 
 func newSwitchTenantTestService(repo *switchTenantUserRepo, memberSvc interfaces.TenantMemberService) *userService {
 	return &userService{

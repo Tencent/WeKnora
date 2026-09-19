@@ -30,7 +30,7 @@ func (h *IMHandler) WeChatGetQRCode(c *gin.Context) {
 	result, err := qrCodeService.GetLoginQRCode(ctx)
 	if err != nil {
 		logger.Errorf(ctx, "[WeChat] Failed to generate QR code: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate QR code: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate QR code"})
 		return
 	}
 

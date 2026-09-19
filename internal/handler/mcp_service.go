@@ -78,7 +78,7 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	var service types.MCPService
 	if err := c.ShouldBindJSON(&service); err != nil {
 		logger.Error(ctx, "Failed to parse MCP service request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -100,13 +100,13 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	}
 	if err := mcpsecurity.ValidateServiceOutboundURLs(&service); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for MCP service configuration: %v", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("MCP service URL validation failed"))
 		return
 	}
 
 	if err := h.mcpServiceService.CreateMCPService(ctx, &service); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_name": secutils.SanitizeForLog(service.Name)})
-		c.Error(errors.NewInternalServerError("Failed to create MCP service: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to create MCP service"))
 		return
 	}
 
@@ -142,7 +142,7 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	services, err := h.mcpServiceService.ListMCPServices(ctx, tenantID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
-		c.Error(errors.NewInternalServerError("Failed to list MCP services: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to list MCP services"))
 		return
 	}
 
@@ -219,7 +219,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	var updateData map[string]interface{}
 	if err := c.ShouldBindJSON(&updateData); err != nil {
 		logger.Error(ctx, "Failed to parse MCP service update request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -377,13 +377,13 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	}
 	if err := mcpsecurity.ValidateServiceOutboundURLs(&service); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for MCP service update: %v", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("MCP service URL validation failed"))
 		return
 	}
 
 	if err := h.mcpServiceService.UpdateMCPService(ctx, &service, updateFields); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
-		c.Error(errors.NewInternalServerError("Failed to update MCP service: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to update MCP service"))
 		return
 	}
 
@@ -393,7 +393,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	// and respond with the full current state via the secret-free DTO.
 	stored, err := h.mcpServiceService.GetMCPServiceByID(ctx, tenantID, serviceID)
 	if err != nil {
-		c.Error(errors.NewInternalServerError("Failed to fetch updated MCP service: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to fetch updated MCP service"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -427,7 +427,7 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 
 	if err := h.mcpServiceService.DeleteMCPService(ctx, tenantID, serviceID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
-		c.Error(errors.NewInternalServerError("Failed to delete MCP service: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to delete MCP service"))
 		return
 	}
 
@@ -468,10 +468,7 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data": types.MCPTestResult{
-				Success: false,
-				Message: "Test failed: " + err.Error(),
-			},
+			"data":    types.MCPTestResult{Success: false, Message: "Test failed: connection or initialization failed"},
 		})
 		return
 	}
@@ -509,7 +506,7 @@ func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 	tools, err := h.mcpServiceService.GetMCPServiceTools(ctx, tenantID, serviceID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
-		c.Error(errors.NewInternalServerError("Failed to get MCP service tools: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to get MCP service tools"))
 		return
 	}
 
@@ -545,7 +542,7 @@ func (h *MCPServiceHandler) GetMCPServiceResources(c *gin.Context) {
 	resources, err := h.mcpServiceService.GetMCPServiceResources(ctx, tenantID, serviceID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
-		c.Error(errors.NewInternalServerError("Failed to get MCP service resources: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to get MCP service resources"))
 		return
 	}
 
@@ -573,11 +570,11 @@ func (h *MCPServiceHandler) ListMCPToolApprovals(c *gin.Context) {
 		// Distinguish "service not found" from internal errors so the client
 		// gets an accurate status code instead of an opaque 404.
 		if strings.Contains(err.Error(), "not found") {
-			c.Error(errors.NewNotFoundError(err.Error()))
+			c.Error(errors.NewNotFoundError("Not found"))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": serviceID})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
@@ -623,7 +620,7 @@ func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 	}
 	var body setMCPToolApprovalBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	if body.RequireApproval == nil && body.Enabled == nil {
@@ -634,10 +631,10 @@ func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 		ctx, tenantID, serviceID, toolName, body.RequireApproval, body.Enabled,
 	); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			c.Error(errors.NewNotFoundError(err.Error()))
+			c.Error(errors.NewNotFoundError("Not found"))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -679,7 +676,7 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 	}
 	var body resolveToolApprovalBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	dec := approval.Decision{Reason: body.Reason}
@@ -725,7 +722,7 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this approval"))
 		default:
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"pending_id": pendingID})
-			c.Error(errors.NewInternalServerError(err.Error()))
+			c.Error(errors.NewInternalServerError("internal server error"))
 		}
 		return
 	}

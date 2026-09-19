@@ -143,7 +143,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	var request CreateKnowledgeQARequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
-		return nil, nil, errors.NewBadRequestError(err.Error())
+		return nil, nil, errors.NewBadRequestError("Invalid request parameters")
 	}
 
 	// Validate query content
@@ -369,7 +369,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
 	requestTagIDs := dedupRequestStrings(request.TagIDs)
 	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(kbIDs)); err != nil {
-		return nil, nil, errors.NewBadRequestError(err.Error())
+		return nil, nil, errors.NewBadRequestError("Invalid request parameters")
 	}
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
@@ -804,7 +804,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	var request SearchKnowledgeRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -843,8 +843,8 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
 	requestTagIDs := dedupRequestStrings(request.TagIDs)
 	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(knowledgeBaseIDs)); err != nil {
-		logger.Error(ctx, err.Error())
-		c.Error(errors.NewBadRequestError(err.Error()))
+		logger.Error(ctx, "Validation failed")
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(knowledgeBaseIDs))
@@ -1121,7 +1121,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// reload shows the attachments even though their content is selected later.
 	if err := h.persistTurnMessages(ctx, reqCtx); err != nil {
 		if reqCtx.c != nil && !reqCtx.skipSSE {
-			_ = reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
+			_ = reqCtx.c.Error(errors.NewInternalServerError("internal server error"))
 		} else {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		}

@@ -80,7 +80,7 @@ func (h *MCPEndpointHandler) CreateMCPEndpoint(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	var req mcpEndpointRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 	enabled := true
@@ -179,7 +179,7 @@ func (h *MCPEndpointHandler) UpdateMCPEndpoint(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("endpoint_id"))
 	var req mcpEndpointRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 	ep, err := h.svc.Update(c.Request.Context(), tenantID, id, interfaces.MCPEndpointUpdate{

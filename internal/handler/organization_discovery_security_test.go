@@ -38,6 +38,7 @@ func TestInviteCandidatesRequireExactID(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
 		c.Params = gin.Params{{Key: "id", Value: "org"}}
+		c.Set(types.TenantIDContextKey.String(), uint64(42))
 		c.Request = httptest.NewRequest("GET", "/search", nil)
 		q := c.Request.URL.Query()
 		q.Set("q", query)
@@ -52,4 +53,59 @@ func TestInviteCandidatesRequireExactID(t *testing.T) {
 			require.Contains(t, recorder.Body.String(), "Target workspace")
 		}
 	}
+}
+
+// Organization admins must be able to resolve workspaces other than their
+// own: inviting an existing workspace into the organization is the core
+// "add member" workflow. Anti-enumeration comes from requiring an exact
+// numeric ID plus the admin permission check, not from self-only resolution.
+func TestInviteCandidatesAllowCrossWorkspaceForAdmin(t *testing.T) {
+	tenants := &inviteTestTenants{}
+	handler := &OrganizationHandler{orgService: &inviteTestOrg{}, tenantService: tenants}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "org"}}
+	c.Set(types.TenantIDContextKey.String(), uint64(7))
+	c.Request = httptest.NewRequest("GET", "/search", nil)
+	q := c.Request.URL.Query()
+	q.Set("q", "42")
+	c.Request.URL.RawQuery = q.Encode()
+
+	handler.SearchTenantsForInvite(c)
+
+	require.Empty(t, c.Errors)
+	require.Equal(t, []uint64{42}, tenants.queried)
+	require.Contains(t, recorder.Body.String(), "Target workspace")
+}
+
+// inviteTestOrgNonAdmin is the denial half of the anti-enumeration contract:
+// the cross-workspace resolution is only safe because it sits behind the
+// org-admin check, so that check must actually reject non-admins.
+type inviteTestOrgNonAdmin struct {
+	interfaces.OrganizationService
+}
+
+func (*inviteTestOrgNonAdmin) IsTenantOrgAdmin(context.Context, string, uint64) (bool, error) {
+	return false, nil
+}
+
+func TestInviteCandidatesRejectNonOrgAdmin(t *testing.T) {
+	tenants := &inviteTestTenants{}
+	handler := &OrganizationHandler{orgService: &inviteTestOrgNonAdmin{}, tenantService: tenants}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "org"}}
+	c.Set(types.TenantIDContextKey.String(), uint64(7))
+	c.Request = httptest.NewRequest("GET", "/search", nil)
+	q := c.Request.URL.Query()
+	q.Set("q", "42")
+	c.Request.URL.RawQuery = q.Encode()
+
+	handler.SearchTenantsForInvite(c)
+
+	require.Empty(t, tenants.queried, "a non-admin must not resolve any workspace")
+	require.NotEmpty(t, c.Errors)
+	require.Contains(t, c.Errors.Last().Error(), "Only organization admins can invite members")
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -21,12 +22,20 @@ import (
 )
 
 const (
-	maxBatchDownloadFiles             = 200
-	maxBatchDownloadBytes       int64 = 512 * 1024 * 1024
-	maxConcurrentBatchDownloads       = 4
+	maxBatchDownloadFiles                      = 200
+	maxBatchDownloadBytes                int64 = 512 * 1024 * 1024
+	maxConcurrentBatchDownloads                = 4
+	maxConcurrentBatchDownloadsPerTenant       = 2
 )
 
-var batchDownloadSlots = make(chan struct{}, maxConcurrentBatchDownloads)
+var (
+	batchDownloadSlots = make(chan struct{}, maxConcurrentBatchDownloads)
+	// batchDownloadTenantSlots maps tenantID -> chan struct{} with capacity
+	// maxConcurrentBatchDownloadsPerTenant. Each token in the channel is one
+	// in-flight batch download for that tenant, so the per-tenant limit is
+	// enforced atomically by the channel itself.
+	batchDownloadTenantSlots sync.Map
+)
 
 // BatchDownloadKnowledgeRequest 指定同一知识库中需要下载的文档。
 type BatchDownloadKnowledgeRequest struct {
@@ -109,11 +118,11 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 		return
 	}
 
-	if !tryAcquireBatchDownloadSlot() {
+	if !tryAcquireBatchDownloadSlot(tenantID) {
 		_ = c.Error(errors.NewTooManyRequestsError("当前批量下载过多，请稍后重试"))
 		return
 	}
-	defer releaseBatchDownloadSlot()
+	defer releaseBatchDownloadSlot(tenantID)
 
 	// 先在临时文件中完整生成压缩包，避免读取失败时向用户返回残缺 ZIP。
 	archive, err := os.CreateTemp("", "weknora-download-*.zip")
@@ -148,7 +157,45 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 	}
 }
 
-func tryAcquireBatchDownloadSlot() bool {
+// tenantBatchDownloadSlots returns the tenant's bounded slot channel,
+// creating it on first use. LoadOrStore guarantees every caller observes the
+// same channel instance.
+func tenantBatchDownloadSlots(tenantID uint64) chan struct{} {
+	actual, _ := batchDownloadTenantSlots.LoadOrStore(tenantID,
+		make(chan struct{}, maxConcurrentBatchDownloadsPerTenant))
+	slots, _ := actual.(chan struct{})
+	return slots
+}
+
+func tryAcquireBatchDownloadSlot(tenantID uint64) bool {
+	if !tryAcquireGlobalSlot() {
+		return false
+	}
+	select {
+	case tenantBatchDownloadSlots(tenantID) <- struct{}{}:
+		return true
+	default:
+		// Per-tenant limit reached; give the global slot back.
+		releaseGlobalSlot()
+		return false
+	}
+}
+
+func releaseBatchDownloadSlot(tenantID uint64) {
+	releaseGlobalSlot()
+	// Drain exactly one token of this tenant so the release matches the
+	// acquire. Non-blocking on purpose: a correctly paired release always
+	// finds its token, and an unpaired one (a bug) must fail fast instead of
+	// blocking the request goroutine forever.
+	if slots := tenantBatchDownloadSlots(tenantID); slots != nil {
+		select {
+		case <-slots:
+		default:
+		}
+	}
+}
+
+func tryAcquireGlobalSlot() bool {
 	select {
 	case batchDownloadSlots <- struct{}{}:
 		return true
@@ -157,8 +204,13 @@ func tryAcquireBatchDownloadSlot() bool {
 	}
 }
 
-func releaseBatchDownloadSlot() {
-	<-batchDownloadSlots
+func releaseGlobalSlot() {
+	// Non-blocking for the same reason as the tenant slot: an over-release is
+	// a bug to surface, not a deadlock to hang the handler on.
+	select {
+	case <-batchDownloadSlots:
+	default:
+	}
 }
 
 func uniqueKnowledgeDownloadIDs(input []string) []string {

@@ -71,7 +71,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		Enabled         *bool      `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 
@@ -127,7 +127,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	if err := h.imService.CreateChannel(channel); err != nil {
 		logger.Errorf(c.Request.Context(), "[IM] Create channel failed: %v", err)
 		if strings.HasPrefix(err.Error(), "duplicate_bot:") {
-			c.JSON(http.StatusConflict, gin.H{"error": strings.TrimPrefix(err.Error(), "duplicate_bot: ")})
+			c.JSON(http.StatusConflict, gin.H{"error": "Duplicate bot"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create channel"})
@@ -225,7 +225,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		AgentID         *string    `json:"agent_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 
@@ -268,7 +268,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	if err := h.imService.UpdateChannel(channel); err != nil {
 		logger.Errorf(c.Request.Context(), "[IM] Update channel failed: %v", err)
 		if strings.HasPrefix(err.Error(), "duplicate_bot:") {
-			c.JSON(http.StatusConflict, gin.H{"error": strings.TrimPrefix(err.Error(), "duplicate_bot: ")})
+			c.JSON(http.StatusConflict, gin.H{"error": "Duplicate bot"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update channel"})
@@ -366,6 +366,12 @@ func writeIMCallbackACK(c *gin.Context, platform string) {
 
 // ── Callback handlers ──
 
+// maxIMCallbackBodyBytes bounds the request body for unauthenticated IM
+// webhook callbacks. The JSON event payloads from Feishu/Slack/... are well
+// under this cap; it exists to prevent unbounded memory allocation before
+// VerifyCallback / ParseCallback run.
+const maxIMCallbackBodyBytes = 1 << 20
+
 // IMCallback handles IM platform callback requests for a specific channel.
 // Route: POST /api/v1/im/callback/:channel_id
 //
@@ -382,6 +388,7 @@ func writeIMCallbackACK(c *gin.Context, platform string) {
 // @Router       /im/callback/{channel_id} [get]
 // @Router       /im/callback/{channel_id} [post]
 func (h *IMHandler) IMCallback(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxIMCallbackBodyBytes)
 	ctx := c.Request.Context()
 	channelID := c.Param("channel_id")
 

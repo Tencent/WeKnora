@@ -345,3 +345,16 @@ func (r *authTokenRepository) DeleteExpiredTokens(ctx context.Context) error {
 func (r *authTokenRepository) RevokeTokensByUserID(ctx context.Context, userID string) error {
 	return r.db.WithContext(ctx).Model(&types.AuthToken{}).Where("user_id = ?", userID).Update("is_revoked", true).Error
 }
+
+// RevokeTokenByValue atomically revokes a single token by its value only
+// when it is not already revoked. Returns true when a row was updated, false
+// when the token was already revoked or not found.
+func (r *authTokenRepository) RevokeTokenByValue(ctx context.Context, tokenValue string) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.AuthToken{}).
+		Where("token = ? AND is_revoked = ?", tokenValue, false).
+		Update("is_revoked", true)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}

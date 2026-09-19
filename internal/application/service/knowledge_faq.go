@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -229,10 +230,12 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 
 	// Build tag seq_id map for conversion
 	tagSeqIDMap := make(map[string]int64)
+	var tagName string
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
 		if tagErr == nil && tag != nil {
 			tagSeqIDMap[tag.ID] = tag.SeqID
+			tagName = tag.Name
 		}
 	}
 
@@ -242,12 +245,8 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 查询TagName
-	if chunk.TagID != "" {
-		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
-		if tagErr == nil && tag != nil {
-			entry.TagName = tag.Name
-		}
+	if tagName != "" {
+		entry.TagName = tagName
 	}
 	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeCreated,
 		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
@@ -290,10 +289,12 @@ func (s *knowledgeService) GetFAQEntry(ctx context.Context,
 
 	// Build tag seq_id map for conversion
 	tagSeqIDMap := make(map[string]int64)
+	var tagName string
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
 		if tagErr == nil && tag != nil {
 			tagSeqIDMap[tag.ID] = tag.SeqID
+			tagName = tag.Name
 		}
 	}
 
@@ -303,13 +304,10 @@ func (s *knowledgeService) GetFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 查询TagName
-	if chunk.TagID != "" {
-		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
-		if tagErr == nil && tag != nil {
-			entry.TagName = tag.Name
-		}
+	if tagName != "" {
+		entry.TagName = tagName
 	}
+
 	return entry, nil
 }
 
@@ -452,10 +450,12 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 
 	// Build tag seq_id map for conversion
 	tagSeqIDMap := make(map[string]int64)
+	var tagName string
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
 		if tagErr == nil && tag != nil {
 			tagSeqIDMap[tag.ID] = tag.SeqID
+			tagName = tag.Name
 		}
 	}
 
@@ -465,12 +465,8 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 查询TagName
-	if chunk.TagID != "" {
-		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
-		if tagErr == nil && tag != nil {
-			entry.TagName = tag.Name
-		}
+	if tagName != "" {
+		entry.TagName = tagName
 	}
 	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeUpdated,
 		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
@@ -607,10 +603,12 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 
 	// Build response
 	tagSeqIDMap := make(map[string]int64)
+	var tagName string
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
 		if tagErr == nil && tag != nil {
 			tagSeqIDMap[tag.ID] = tag.SeqID
+			tagName = tag.Name
 		}
 	}
 
@@ -619,11 +617,8 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 		return nil, err
 	}
 
-	if chunk.TagID != "" {
-		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
-		if tagErr == nil && tag != nil {
-			entry.TagName = tag.Name
-		}
+	if tagName != "" {
+		entry.TagName = tagName
 	}
 
 	return entry, nil
@@ -998,6 +993,11 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 		if hasFirstPriority {
 			wg.Add(1)
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						firstErr = fmt.Errorf("first-priority search panic: %v", r)
+					}
+				}()
 				defer wg.Done()
 				firstParams := types.SearchParams{
 					QueryText:            secutils.SanitizeForLog(req.QueryText),
@@ -1014,6 +1014,11 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 		if hasSecondPriority {
 			wg.Add(1)
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						secondErr = fmt.Errorf("second-priority search panic: %v", r)
+					}
+				}()
 				defer wg.Done()
 				secondParams := types.SearchParams{
 					QueryText:            secutils.SanitizeForLog(req.QueryText),
@@ -1483,7 +1488,11 @@ func (s *knowledgeService) buildFAQCSV(chunks []*types.Chunk, tagMap map[string]
 
 // escapeCSVField escapes a field for CSV format.
 func escapeCSVField(field string) string {
-	// If field contains comma, newline, or quote, wrap in quotes and escape internal quotes
+	if strings.HasPrefix(field, "=") || strings.HasPrefix(field, "+") ||
+		strings.HasPrefix(field, "-") || strings.HasPrefix(field, "@") ||
+		strings.HasPrefix(field, "\t") || strings.HasPrefix(field, "\r") {
+		field = "'" + field
+	}
 	if strings.ContainsAny(field, ",\"\n\r") {
 		return "\"" + strings.ReplaceAll(field, "\"", "\"\"") + "\""
 	}
@@ -1818,8 +1827,28 @@ func (s *knowledgeService) buildFAQTagResolver(
 
 // hashQuestion 计算问题内容的哈希值，用于生成稳定的 sourceID。
 func hashQuestion(question string) string {
+	h := sha256.Sum256([]byte(question))
+	return hex.EncodeToString(h[:8])
+}
+
+// hashQuestionLegacy 是 hashQuestion 升级前的算法（MD5 前 4 字节）。
+// 升级前经增量索写入的相似问向量仍以该哈希作为 sourceID 后缀；删除/更新
+// 这些历史向量时必须同时覆盖旧 ID，否则会残留继续参与检索的孤儿向量。
+func hashQuestionLegacy(question string) string {
 	h := md5.Sum([]byte(question))
 	return hex.EncodeToString(h[:4])
+}
+
+// faqSimilarQuestionSourceIDs 返回某个相似问可能占用的全部 sourceID：
+// 当前哈希与旧（升级前）哈希各一个。删除时用于覆盖历史向量，避免升级
+// 前后哈希算法变更导致的孤儿向量；索引（upsert）仍只写当前哈希的 ID。
+func faqSimilarQuestionSourceIDs(chunkID, question string) []string {
+	current := hashQuestion(question)
+	ids := []string{fmt.Sprintf("%s-%s", chunkID, current)}
+	if legacy := hashQuestionLegacy(question); legacy != current {
+		ids = append(ids, fmt.Sprintf("%s-%s", chunkID, legacy))
+	}
+	return ids
 }
 
 // resolveTagID resolves tag ID (UUID) from payload, prioritizing tag_id (seq_id) over tag_name

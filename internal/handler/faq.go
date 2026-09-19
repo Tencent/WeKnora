@@ -85,7 +85,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	var page types.Pagination
 	if err := c.ShouldBindQuery(&page); err != nil {
 		logger.Error(ctx, "Failed to bind pagination query", err)
-		c.Error(errors.NewBadRequestError("分页参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("分页参数不合法"))
 		return
 	}
 

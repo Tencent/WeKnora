@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
@@ -1217,7 +1218,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 				logger.Warnf(ctx, "wiki ingest: failed to release claim for retry id=%d: %v", op.dbID, err)
 				settleErrs = append(settleErrs, fmt.Errorf("release retry claim id=%d: %w", op.dbID, err))
 			}
-			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, secutils.SanitizeForLog(op.DocTitle), count, wikiMaxFailRetries)
 			continue
 		}
 
@@ -1229,7 +1230,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		if op.Op == WikiOpIngest {
 			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
 		}
-		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, secutils.SanitizeForLog(op.DocTitle), count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
 			payloadBytes, _ := json.Marshal(op)
 			if dlErr := s.deadLetterRepo.Insert(ctx, &types.TaskDeadLetter{
@@ -2256,7 +2257,7 @@ func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, 
 func writeDedupCandidateGroup(
 	buf *strings.Builder, item extractedItem, itemType string, candidates []*types.WikiPageLite,
 ) {
-	fmt.Fprintf(buf, "  <item slug=%q type=%q>\n", item.Slug, itemType)
+	fmt.Fprintf(buf, "  <item slug=%q type=%q>\n", xmlEscapeAttr(item.Slug), xmlEscapeAttr(itemType))
 	fmt.Fprintf(buf, "    <name>%s</name>\n", xmlEscape(item.Name))
 	for _, alias := range item.Aliases {
 		if alias == "" {
@@ -2269,7 +2270,7 @@ func writeDedupCandidateGroup(
 		if p == nil {
 			continue
 		}
-		fmt.Fprintf(buf, "      <page slug=%q type=%q>\n", p.Slug, p.PageType)
+		fmt.Fprintf(buf, "      <page slug=%q type=%q>\n", xmlEscapeAttr(p.Slug), xmlEscapeAttr(p.PageType))
 		fmt.Fprintf(buf, "        <name>%s</name>\n", xmlEscape(p.Title))
 		for _, alias := range []string(p.Aliases) {
 			if alias == "" {
@@ -2290,6 +2291,19 @@ func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// xmlEscapeAttr escapes characters that can break XML attribute values
+// (those delimited by double quotes). This is needed for values interpolated
+// into %q-formatted attribute positions, where Go's %q escaping is not XML
+// escaping and does not prevent attribute injection.
+func xmlEscapeAttr(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
 	return s
 }
 
@@ -2929,8 +2943,10 @@ func slugify(s string) string {
 		s = strings.ReplaceAll(s, "--", "-")
 	}
 	s = strings.Trim(s, "-")
-	if len(s) > 200 {
-		s = s[:200]
+	// Truncate by runes, not bytes, to avoid splitting multi-byte UTF-8 sequences.
+	if runeCount := utf8.RuneCountInString(s); runeCount > 200 {
+		runes := []rune(s)
+		s = string(runes[:200])
 	}
 	return s
 }

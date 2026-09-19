@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // KnowledgeQA performs knowledge base question answering with LLM summarization
@@ -30,7 +31,7 @@ func (s *sessionService) KnowledgeQA(
 		ctx,
 		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",
 		req.Session.ID,
-		req.Query,
+		secutils.SanitizeForLog(req.Query),
 		webSearchEnabled,
 	)
 
@@ -672,7 +673,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 ) error {
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
 	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
-		chatManage.SessionID, chatManage.Query)
+		chatManage.SessionID, secutils.SanitizeForLog(chatManage.Query))
 
 	methods := make([]string, len(eventList))
 	for i, event := range eventList {
@@ -814,7 +815,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
-		knowledgeBaseIDs, knowledgeIDs, len(tagScopes), query)
+		knowledgeBaseIDs, knowledgeIDs, len(tagScopes), secutils.SanitizeForLog(query))
 
 	// Get tenant ID from context
 	tenantID, ok := types.TenantIDFromContext(ctx)

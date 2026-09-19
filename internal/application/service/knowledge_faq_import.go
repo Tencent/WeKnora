@@ -319,6 +319,11 @@ func (s *knowledgeService) generateFailedEntriesCSV(ctx context.Context,
 
 // csvEscape 转义 CSV 字段
 func csvEscape(s string) string {
+	if strings.HasPrefix(s, "=") || strings.HasPrefix(s, "+") ||
+		strings.HasPrefix(s, "-") || strings.HasPrefix(s, "@") ||
+		strings.HasPrefix(s, "\t") || strings.HasPrefix(s, "\r") {
+		s = "'" + s
+	}
 	if strings.ContainsAny(s, ",\"\n\r") {
 		// 将内部引号替换为两个引号，并用引号包裹整个字段
 		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
@@ -554,7 +559,7 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 		if chunk, exists := existingStdQToChunk[standardQ]; exists {
 			// 标准问在 KB 中已存在 → 标记为合并候选
 			mergeChunkMap[i] = chunk
-			logger.Infof(ctx, "FAQ entry %d: standard question '%s' exists in KB, marking as merge candidate (chunk_id=%s)", i, standardQ, chunk.ID)
+			logger.Infof(ctx, "FAQ entry %d: standard question '%s' exists in KB, marking as merge candidate (chunk_id=%s)", i, secutils.SanitizeForLog(standardQ), chunk.ID)
 		} else if conflictChunkID, hit := existingQuestionToChunkID[standardQ]; hit {
 			// 标准问未与任何已有标准问重复，但撞上了 KB 中其他条目的相似问
 			// → 前置校验失败，避免下游 calculateAppendOperations 静默丢弃导致统计失真
@@ -567,7 +572,7 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			progress.FailedEntries = append(progress.FailedEntries, fe)
 			logger.Infof(ctx,
 				"FAQ entry %d: standard question '%s' conflicts with existing similar question of chunk_id=%s (std='%s')",
-				i, standardQ, conflictChunkID, conflictStdQ)
+				i, secutils.SanitizeForLog(standardQ), conflictChunkID, secutils.SanitizeForLog(conflictStdQ))
 			continue
 		}
 
@@ -868,13 +873,13 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			// 相似问校验：对比所有标准问+相似问 → 单条问法失败「相似问冲突」
 			// 如果该相似问与其他条目的标准问或相似问冲突（且不是自己的标准问），则移除
 			if firstIdx, exists := batchAllQuestions[q]; exists && firstIdx != i {
-				logger.Infof(ctx, "FAQ entry %d: similar question '%s' conflicts with entry %d, removing", i, q, firstIdx+1)
+				logger.Infof(ctx, "FAQ entry %d: similar question '%s' conflicts with entry %d, removing", i, secutils.SanitizeForLog(q), firstIdx+1)
 				removedSimilarQuestions = append(removedSimilarQuestions, fmt.Sprintf(`「相似问冲突」："%s"与第 %d 行"标准问/相似问"冲突`, q, firstIdx+1))
 				continue
 			}
 			// 相似问不能与自己的标准问相同
 			if q == standardQ {
-				logger.Infof(ctx, "FAQ entry %d: similar question '%s' same as standard question, removing", i, q)
+				logger.Infof(ctx, "FAQ entry %d: similar question '%s' same as standard question, removing", i, secutils.SanitizeForLog(q))
 				removedSimilarQuestions = append(removedSimilarQuestions, fmt.Sprintf(`「相似问冲突」："%s"与本条"标准问"冲突`, q))
 				continue
 			}
@@ -919,7 +924,7 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			}
 			// 反例校验：对比当前QA下所有标准问+相似问 → 单条问法失败「反例冲突」
 			if currentQAQuestions[q] {
-				logger.Infof(ctx, "FAQ entry %d: negative question '%s' conflicts with current QA's questions, removing", i, q)
+				logger.Infof(ctx, "FAQ entry %d: negative question '%s' conflicts with current QA's questions, removing", i, secutils.SanitizeForLog(q))
 				removedNegativeQuestions = append(removedNegativeQuestions, fmt.Sprintf(`「反例冲突」："%s"与本条"标准问/相似问"冲突`, q))
 				continue
 			}
@@ -1194,7 +1199,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		// 检查标准问是否在同批次中重复
 		if batchQuestions[meta.StandardQuestion] {
 			batchSkippedCount++
-			logger.Infof(ctx, "Skipping FAQ entry with duplicate standard question in batch: %s", meta.StandardQuestion)
+			logger.Infof(ctx, "Skipping FAQ entry with duplicate standard question in batch: %s", secutils.SanitizeForLog(meta.StandardQuestion))
 			continue
 		}
 
@@ -1203,7 +1208,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		for _, q := range meta.SimilarQuestions {
 			if batchQuestions[q] {
 				hasDuplicateSimilar = true
-				logger.Infof(ctx, "Skipping FAQ entry with duplicate similar question in batch: %s (standard: %s)", q, meta.StandardQuestion)
+				logger.Infof(ctx, "Skipping FAQ entry with duplicate similar question in batch: %s (standard: %s)", secutils.SanitizeForLog(q), secutils.SanitizeForLog(meta.StandardQuestion))
 				break
 			}
 		}
@@ -1929,8 +1934,9 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	var deletedQuestions []string
 	for oldQ := range oldQuestionsSet {
 		if _, exists := newQuestionsSet[oldQ]; !exists {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(oldQ))
-			sourceIDsToDelete = append(sourceIDsToDelete, sourceID)
+			// 同时覆盖当前哈希与升级前（MD5）哈希的 sourceID：
+			// hashQuestion 算法变更后，仅按新哈希删除会留下孤儿向量。
+			sourceIDsToDelete = append(sourceIDsToDelete, faqSimilarQuestionSourceIDs(chunk.ID, oldQ)...)
 			deletedQuestions = append(deletedQuestions, oldQ)
 		}
 	}
@@ -1944,6 +1950,12 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		// 2. 答案变化（需要重新embedding）
 		if !existedBefore || answersChanged {
 			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(newQ))
+			// 无论纯新增还是答案变化，升级前按旧（MD5）哈希写入的向量都不会被
+			// 本次 upsert 覆盖，需一并删除：否则同一相似问会残留新旧两份向量、
+			// 旧答案继续参与检索（典型场景：升级前删了某问、修复版又加回同一问）。
+			// 删除先于索引执行，误撞当前哈希时也是先删后建，不会丢新内容。
+			sourceIDsToDelete = append(sourceIDsToDelete,
+				fmt.Sprintf("%s-%s", chunk.ID, hashQuestionLegacy(newQ)))
 			indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
 				Content:         buildContent(newQ, normalizedNewMeta.Answers),
 				SourceID:        sourceID,

@@ -40,12 +40,12 @@ type weKnoraCloudCredentialsRequest struct {
 func (h *WeKnoraCloudHandler) SaveCredentials(c *gin.Context) {
 	var req weKnoraCloudCredentialsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 
 	if err := h.svc.SaveCredentials(c.Request.Context(), req.AppID, req.AppSecret); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *WeKnoraCloudHandler) SaveCredentials(c *gin.Context) {
 func (h *WeKnoraCloudHandler) Status(c *gin.Context) {
 	result, err := h.svc.CheckStatus(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 	c.JSON(http.StatusOK, result)

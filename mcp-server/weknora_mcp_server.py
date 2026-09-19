@@ -17,7 +17,6 @@ import sys
 import threading
 from typing import Any, Dict
 
-import urllib3
 import requests
 from mcp.server import MCPServer
 from requests.exceptions import RequestException
@@ -130,15 +129,11 @@ class WeKnoraClient:
         """Initialize the WeKnora API client with base URL and authentication"""
         self.base_url = base_url
         self.api_key = api_key
-        # SSL verification: enabled by default. Set WEKNORA_VERIFY_SSL=false to disable
-        # (e.g. for self-signed certs in dev environments — NOT recommended for production).
-        self.verify_ssl = os.getenv("WEKNORA_VERIFY_SSL", "true").lower() != "false"
-        if not self.verify_ssl:
-            logger.warning(
-                "SSL certificate verification is DISABLED (WEKNORA_VERIFY_SSL=false). "
-                "This is insecure and should not be used in production."
-            )
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        # SSL verification must remain enabled. Disabling it globally via env var
+        # weakens every WeKnora API call and leaks the API key to MitM attackers.
+        # If the deployment uses a self-signed CA, install it in the container's
+        # trust store instead of turning verification off.
+        self.verify_ssl = True
         # MCP 2.x runs sync @mcp.tool() handlers on worker threads; use a
         # thread-local Session because requests.Session is not thread-safe.
         self._session_local = threading.local()

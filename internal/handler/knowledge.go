@@ -170,12 +170,23 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 	if dupErr, ok := err.(*types.DuplicateKnowledgeError); ok {
 		ctx := c.Request.Context()
 		logger.Warnf(ctx, "Detected duplicate %s: %s", duplicateType, secutils.SanitizeForLog(dupErr.Error()))
-		c.JSON(http.StatusConflict, gin.H{
+		response := gin.H{
 			"success": false,
-			"message": dupErr.Error(),
-			"data":    knowledge, // knowledge contains the existing document
+			"message": "Document already exists",
 			"code":    fmt.Sprintf("duplicate_%s", duplicateType),
-		})
+		}
+		// Keep the minimal identifier clients need to open the existing
+		// document (the upload UI's "open" action reads data.id). The record
+		// is only surfaced after KB access validation, so this exposes
+		// nothing the caller could not already read.
+		existing := knowledge
+		if existing == nil {
+			existing = dupErr.Knowledge
+		}
+		if existing != nil && existing.ID != "" {
+			response["data"] = gin.H{"id": existing.ID}
+		}
+		c.JSON(http.StatusConflict, response)
 		return true
 	}
 	return false
@@ -290,7 +301,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 			return
 		}
 		logger.Error(ctx, "File upload failed", err)
-		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("File upload failed"))
 		return
 	}
 	if file.Size > maxSize {
@@ -318,7 +329,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	if metadataStr != "" {
 		if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
 			logger.Error(ctx, "Failed to parse metadata", err)
-			c.Error(errors.NewBadRequestError("Invalid metadata format").WithDetails(err.Error()))
+			c.Error(errors.NewBadRequestError("Invalid metadata format"))
 			return
 		}
 		logger.Infof(ctx, "Received file metadata: %s", secutils.SanitizeForLog(fmt.Sprintf("%v", metadata)))
@@ -330,7 +341,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		parseBool, err := strconv.ParseBool(enableMultimodelForm)
 		if err != nil {
 			logger.Error(ctx, "Failed to parse enable_multimodel", err)
-			c.Error(errors.NewBadRequestError("Invalid enable_multimodel format").WithDetails(err.Error()))
+			c.Error(errors.NewBadRequestError("Invalid enable_multimodel format"))
 			return
 		}
 		enableMultimodel = &parseBool
@@ -341,7 +352,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		processOverrides = &types.KnowledgeProcessOverrides{}
 		if err := json.Unmarshal([]byte(raw), processOverrides); err != nil {
 			logger.Error(ctx, "Failed to parse process_config", err)
-			c.Error(errors.NewBadRequestError("Invalid process_config format").WithDetails(err.Error()))
+			c.Error(errors.NewBadRequestError("Invalid process_config format"))
 			return
 		}
 	}
@@ -370,7 +381,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -431,7 +442,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -468,7 +479,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -518,7 +529,7 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	var req types.ManualKnowledgePayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse manual knowledge request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -531,7 +542,7 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"kb_id": kbID,
 		})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -899,7 +910,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Error(ctx, "Failed to parse pagination parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -913,7 +924,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
 		if err != nil {
-			c.Error(errors.NewBadRequestError("invalid start_time: " + err.Error()))
+			c.Error(errors.NewBadRequestError("invalid start_time"))
 			return
 		}
 		filter.UpdatedFrom = t
@@ -921,7 +932,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	if raw := c.Query("end_time"); raw != "" {
 		t, err := parseFilterTime(raw)
 		if err != nil {
-			c.Error(errors.NewBadRequestError("invalid end_time: " + err.Error()))
+			c.Error(errors.NewBadRequestError("invalid end_time"))
 			return
 		}
 		filter.UpdatedTo = t
@@ -959,7 +970,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	result, err := h.kgService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &pagination, filter)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -1005,7 +1016,7 @@ func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	tree, err := h.kgService.ListKnowledgeFolderTree(ctx, kbID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -1045,7 +1056,7 @@ func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 
 	var req MoveKnowledgeToFolderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -1081,7 +1092,7 @@ func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -1120,7 +1131,7 @@ func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
 
 	var req RenameKnowledgeFolderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -1146,7 +1157,7 @@ func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -1208,7 +1219,7 @@ func (h *KnowledgeHandler) requireKnowledgeInKB(
 	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, tenantID, ids)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		return errors.NewInternalServerError(err.Error())
+		return errors.NewInternalServerError("internal server error")
 	}
 	if len(knowledgeList) != len(ids) {
 		return errors.NewBadRequestError("One or more knowledge entries not found")
@@ -1311,7 +1322,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 
 	var req BatchDeleteKnowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -1347,7 +1358,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 	if len(knowledgeList) != len(ids) {
@@ -1422,7 +1433,7 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 	knowledgeList, err := h.kgService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError("Failed to list knowledge entries").WithDetails(err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to list knowledge entries"))
 		return
 	}
 
@@ -1499,7 +1510,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError("Failed to retrieve file").WithDetails(err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to retrieve file"))
 		return
 	}
 	c.Header("Content-Description", "File Transfer")
@@ -1542,7 +1553,7 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError("Failed to retrieve file").WithDetails(err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to retrieve file"))
 		return
 	}
 	if err := filetransport.Serve(c.Writer, c.Request, file, filetransport.Options{
@@ -1586,7 +1597,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	var req GetKnowledgeBatchRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	if _, parseErr := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam)); parseErr != nil {
@@ -1647,7 +1658,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		_ = c.Error(errors.NewInternalServerError("Failed to retrieve knowledge list").WithDetails(err.Error()))
+		_ = c.Error(errors.NewInternalServerError("Failed to retrieve knowledge list"))
 		return
 	}
 
@@ -1717,7 +1728,7 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	var req UpdateKnowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	knowledge := types.Knowledge{ID: id, CustomMetadata: types.JSON(req.CustomMetadata)}
@@ -1735,7 +1746,7 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		if goerrors.As(err, &appErr) {
 			_ = c.Error(appErr)
 		} else {
-			_ = c.Error(errors.NewInternalServerError(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("internal server error"))
 		}
 		return
 	}
@@ -1772,7 +1783,7 @@ func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
 		if goerrors.As(err, &appErr) {
 			_ = c.Error(appErr)
 		} else {
-			_ = c.Error(errors.NewInternalServerError(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("internal server error"))
 		}
 		return
 	}
@@ -1790,7 +1801,7 @@ func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
 		if goerrors.As(err, &appErr) {
 			_ = c.Error(appErr)
 		} else {
-			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			_ = c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		}
 		return
 	}
@@ -1830,7 +1841,7 @@ func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 	var req types.ManualKnowledgePayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse manual knowledge update request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -1843,7 +1854,7 @@ func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_id": id,
 		})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -1895,7 +1906,7 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			logger.Error(ctx, "Failed to parse reparse request body", err)
-			c.Error(errors.NewBadRequestError("Invalid reparse request body").WithDetails(err.Error()))
+			c.Error(errors.NewBadRequestError("Invalid reparse request body"))
 			return
 		}
 		processOverrides = req.ProcessConfig
@@ -1911,7 +1922,7 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_id": id,
 		})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -1964,7 +1975,7 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_id": id,
 		})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -2007,7 +2018,7 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	var req knowledgeTagBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse knowledge tag batch request", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("请求参数不合法"))
 		return
 	}
 	// Resolve effective tenant and the authorized KB scope.
@@ -2015,7 +2026,16 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
 		_, _, effID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, kbID)
 		if err != nil {
-			c.Error(err)
+			// Preserve the typed access error (401/403/404/503 ...) so
+			// clients keep their existing handling — e.g. the frontend
+			// refreshes the token on 401. Only non-typed internal errors
+			// fall back to a generic message.
+			var appErr *errors.AppError
+			if goerrors.As(err, &appErr) {
+				_ = c.Error(appErr)
+			} else {
+				_ = c.Error(errors.NewBadRequestError("Invalid knowledge base access"))
+			}
 			return
 		}
 		if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
@@ -2099,7 +2119,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -2111,7 +2131,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 		if goerrors.As(err, &appErr) {
 			_ = c.Error(appErr)
 		} else {
-			_ = c.Error(errors.NewInternalServerError(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("internal server error"))
 		}
 		return
 	}
@@ -2205,7 +2225,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 			kbs, err := h.kbService.ListKnowledgeBasesByTenantID(ctx, sourceTenantID)
 			if err != nil {
 				logger.ErrorWithFields(ctx, err, nil)
-				c.Error(errors.NewInternalServerError("Failed to list knowledge bases").WithDetails(err.Error()))
+				c.Error(errors.NewInternalServerError("Failed to list knowledge bases"))
 				return
 			}
 			for _, kb := range filterKnowledgeBasesForSharedAgent(kbs, agent) {
@@ -2227,7 +2247,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to search knowledge"))
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -2252,7 +2272,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
+			c.Error(errors.NewInternalServerError("Failed to search knowledge"))
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -2268,7 +2288,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	knowledges, hasMore, total, err := h.kgService.SearchKnowledge(ctx, keyword, offset, limit, fileTypes)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to search knowledge"))
 		return
 	}
 
@@ -2317,7 +2337,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	var req MoveKnowledgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "MoveKnowledge: failed to parse request", err)
-		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -2329,6 +2349,11 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
+		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	tenantIDUint, ok := tenantID.(uint64)
+	if !ok {
 		c.Error(errors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
@@ -2344,10 +2369,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
-	if sourceKB.TenantID != tenantID.(uint64) {
+	if sourceKB.TenantID != tenantIDUint {
 		c.Error(errors.NewForbiddenError("No permission to access source knowledge base"))
 		return
 	}
@@ -2363,10 +2388,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 			c.Error(errors.NewNotFoundError("Target knowledge base not found"))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
-	if targetKB.TenantID != tenantID.(uint64) {
+	if targetKB.TenantID != tenantIDUint {
 		c.Error(errors.NewForbiddenError("No permission to access target knowledge base"))
 		return
 	}
@@ -2384,7 +2409,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
-	taskID := utils.GenerateTaskID("kg_move", tenantID.(uint64), req.SourceKBID)
+	taskID := utils.GenerateTaskID("kg_move", tenantIDUint, req.SourceKBID)
 	ctx, err = access.WithKBTransfer(c.Request.Context(), sourceKB, targetKB, access.KBTransferMove, taskID, false)
 	if err != nil {
 		_ = c.Error(kbAccessHTTPError(err))
@@ -2396,6 +2421,14 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		access.KBTransferMove,
 		req.Mode,
 		tenant); err != nil {
+		// These are user-facing validation messages (cross-store
+		// reuse_vectors must use reparse mode, embedding-model mismatch,
+		// ...) with no internal detail; flattening them into one opaque
+		// string would hide the actionable cause from API clients.
+		if goerrors.Is(err, access.ErrNotFound) {
+			_ = c.Error(errors.NewNotFoundError("Knowledge base not found"))
+			return
+		}
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
@@ -2420,7 +2453,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 			c.Error(errors.NewBadRequestError(fmt.Sprintf("Knowledge item %s not found", kID)))
 			return
 		}
-		if knowledge == nil || knowledge.ID != kID || knowledge.TenantID != tenantID.(uint64) ||
+		if knowledge == nil || knowledge.ID != kID || knowledge.TenantID != tenantIDUint ||
 			knowledge.KnowledgeBaseID != req.SourceKBID {
 			_ = c.Error(
 				errors.NewBadRequestError(
@@ -2437,7 +2470,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 
 	// Create move payload
 	payload := types.KnowledgeMovePayload{
-		TenantID:     tenantID.(uint64),
+		TenantID:     tenantIDUint,
 		TaskID:       taskID,
 		KnowledgeIDs: req.KnowledgeIDs,
 		SourceKBID:   req.SourceKBID,

@@ -293,6 +293,66 @@ func TestBatchDownloadKnowledgeRejectsWhenBusy(t *testing.T) {
 	require.Empty(t, svc.opened)
 }
 
+// The per-tenant limit must actually hold: with two unreleased downloads for
+// the caller's tenant, a third is rejected even though global slots remain.
+func TestBatchDownloadKnowledgeRejectsThirdConcurrentTenantDownload(t *testing.T) {
+	// Release exactly what was acquired so a failed assertion above cannot
+	// over-drain the shared global slots and break later tests.
+	held := 0
+	defer func() {
+		for i := 0; i < held; i++ {
+			releaseBatchDownloadSlot(7)
+		}
+	}()
+	require.True(t, tryAcquireBatchDownloadSlot(7))
+	held++
+	require.True(t, tryAcquireBatchDownloadSlot(7))
+	held++
+
+	svc := &downloadKnowledgeStub{
+		items:          []*types.Knowledge{{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "a"}},
+		names:          map[string]string{"a": "a.txt"},
+		expectedTenant: 7,
+	}
+	w := runBatchDownload(t, svc, []string{"a"},
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7}, nil, nil)
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+	require.Empty(t, svc.opened)
+}
+
+func TestBatchDownloadTenantSlotLimitIsEnforcedPerTenant(t *testing.T) {
+	const tenantA, tenantB uint64 = 4242, 4243
+	// Release exactly what was acquired (per tenant) so a failed assertion
+	// cannot over-drain the shared slots and break later tests.
+	heldA, heldB := 0, 0
+	defer func() {
+		for i := 0; i < heldA; i++ {
+			releaseBatchDownloadSlot(tenantA)
+		}
+		for i := 0; i < heldB; i++ {
+			releaseBatchDownloadSlot(tenantB)
+		}
+	}()
+
+	// Balance accounting: successful acquires are A, A, B, then A again
+	// after a release — three global/tenant tokens remain held at the end.
+	require.True(t, tryAcquireBatchDownloadSlot(tenantA))
+	heldA++
+	require.True(t, tryAcquireBatchDownloadSlot(tenantA))
+	heldA++
+	require.False(t, tryAcquireBatchDownloadSlot(tenantA),
+		"third concurrent download for the same tenant must be rejected")
+	require.True(t, tryAcquireBatchDownloadSlot(tenantB),
+		"the per-tenant limit must not affect other tenants")
+	heldB++
+
+	releaseBatchDownloadSlot(tenantA)
+	heldA--
+	require.True(t, tryAcquireBatchDownloadSlot(tenantA),
+		"a released slot must be reusable")
+	heldA++
+}
+
 func TestKnowledgeDownloadArchiveEnforcesActualByteLimitAndClosesFiles(t *testing.T) {
 	for _, limit := range []int64{4, 5} {
 		var output bytes.Buffer

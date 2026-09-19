@@ -140,7 +140,7 @@ type UserRepository interface {
 
 // AuthTokenRepository defines the auth token repository interface
 type AuthTokenRepository interface {
-	// CreateToken creates an auth token
+	// CreateToken creates a auth token
 	CreateToken(ctx context.Context, token *types.AuthToken) error
 	// GetTokenByValue gets a token by its value
 	GetTokenByValue(ctx context.Context, tokenValue string) (*types.AuthToken, error)
@@ -156,4 +156,7 @@ type AuthTokenRepository interface {
 	DeleteExpiredTokens(ctx context.Context) error
 	// RevokeTokensByUserID revokes all tokens for a user
 	RevokeTokensByUserID(ctx context.Context, userID string) error
+	// RevokeTokenByValue atomically revokes a token by its value if not already revoked.
+	// Returns true if the token was revoked, false if it was already revoked.
+	RevokeTokenByValue(ctx context.Context, tokenValue string) (bool, error)
 }

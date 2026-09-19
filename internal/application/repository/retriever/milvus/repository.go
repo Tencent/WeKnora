@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
@@ -814,7 +815,7 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
-	log.Infof("[Milvus] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
+	log.Infof("[Milvus] Performing keywords retrieval with query: %s, topK: %d", secutils.SanitizeForLog(params.Query), params.TopK)
 
 	// Get all collections
 	collections, err := m.client.ListCollections(ctx, client.NewListCollectionOption())
@@ -903,7 +904,7 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 	}
 
 	if len(allResults) == 0 {
-		log.Warnf("[Milvus] No keyword matches found for query: %s", params.Query)
+		log.Warnf("[Milvus] No keyword matches found for query: %s", secutils.SanitizeForLog(params.Query))
 	} else {
 		log.Infof("[Milvus] Keywords retrieval found %d results", len(allResults))
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/go-openapi/strfmt"
 	"github.com/google/uuid"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
@@ -399,25 +400,15 @@ func (w *weaviateRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, 
 			continue
 		}
 		for chunkID, enabled := range chunkStatusMap {
-			if err != nil {
-				log.Errorf("[Weaviate] Failed to search ID by chunk ID %s in %s: %v", chunkID, collectionName, err)
-				continue
-			}
-			err = w.client.Data().Updater().
+			if err := w.client.Data().Updater().
 				WithClassName(collectionName).
 				WithID(chunkID).
 				WithProperties(map[string]interface{}{
 					fieldIsEnabled: enabled,
 				}).
-				Do(ctx)
-
-			isEnabled := "enabled"
-			if !enabled {
-				isEnabled = "disabled"
-			}
-
-			if err != nil {
-				log.Errorf("[Weaviate] Failed to update chunk %s status in %s: %v", isEnabled, collectionName, err)
+				Do(ctx); err != nil {
+				log.Errorf("[Weaviate] Failed to update chunk %s status in %s: %v",
+					chunkID, collectionName, err)
 				continue
 			}
 		}
@@ -451,18 +442,13 @@ func (w *weaviateRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTag
 		}
 
 		for chunkID, tagID := range chunkTagMap {
-			if err != nil {
-				log.Warnf("[Weaviate] Failed to search ID by chunk ID %s in %s: %v", chunkID, collectionName, err)
-				continue
-			}
-			err = w.client.Data().Updater().
+			if err := w.client.Data().Updater().
 				WithClassName(collectionName).
 				WithID(chunkID).
 				WithProperties(map[string]interface{}{
 					fieldTagID: tagID,
 				}).
-				Do(ctx)
-			if err != nil {
+				Do(ctx); err != nil {
 				log.Warnf("[Weaviate] Failed to update chunk %s tag ID in %s: %v", chunkID, collectionName, err)
 				continue
 			}
@@ -581,12 +567,26 @@ func (w *weaviateRepository) VectorRetrieve(ctx context.Context,
 		return nil, fmt.Errorf("graphql search failed: %s", result.Errors[0].Message)
 	}
 
-	data, ok := result.Data["Get"].(map[string]interface{})
-	if !ok || data[collectionName] == nil {
+	rawGet, getExists := result.Data["Get"]
+	if !getExists || rawGet == nil {
 		log.Warnf("[Weaviate] No vector matches found that meet threshold %.4f", params.Threshold)
 		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
 	}
-	items := data[collectionName].([]interface{})
+	data, ok := rawGet.(map[string]interface{})
+	if !ok {
+		log.Warnf("[Weaviate] No vector matches found that meet threshold %.4f", params.Threshold)
+		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
+	}
+	rawItems, itemsExist := data[collectionName]
+	if !itemsExist || rawItems == nil {
+		log.Warnf("[Weaviate] No vector matches found that meet threshold %.4f", params.Threshold)
+		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
+	}
+	items, ok := rawItems.([]interface{})
+	if !ok {
+		log.Warnf("[Weaviate] No vector matches found that meet threshold %.4f", params.Threshold)
+		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
+	}
 	results := parseGraphQLResponse(items, collectionName, types.MatchTypeEmbedding)
 
 	if len(results) == 0 {
@@ -605,7 +605,7 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
-	log.Infof("[Weaviate] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
+	log.Infof("[Weaviate] Performing keywords retrieval with query: %s, topK: %d", secutils.SanitizeForLog(params.Query), params.TopK)
 
 	// Get all collections that match our base name pattern
 	collections, err := w.ListCollections(ctx)
@@ -649,12 +649,26 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 			log.Errorf("[Weaviate] keywords search failed: %v", result.Errors)
 			return nil, fmt.Errorf("graphql search failed: %s", result.Errors[0].Message)
 		}
-		data, ok := result.Data["Get"].(map[string]interface{})
-		if !ok || data[collectionName] == nil {
-			log.Warnf("[Weaviate] No keywords matches found that meet threshold %.4f", params.Threshold)
+		rawGet, getExists := result.Data["Get"]
+		if !getExists || rawGet == nil {
+			log.Warnf("[Weaviate] No keywords matches found for collection %s", collectionName)
 			continue
 		}
-		items := data[collectionName].([]interface{})
+		data, ok := rawGet.(map[string]interface{})
+		if !ok {
+			log.Warnf("[Weaviate] No keywords matches found for collection %s", collectionName)
+			continue
+		}
+		rawItems, itemsExist := data[collectionName]
+		if !itemsExist || rawItems == nil {
+			log.Warnf("[Weaviate] No keywords matches found for collection %s", collectionName)
+			continue
+		}
+		items, ok := rawItems.([]interface{})
+		if !ok {
+			log.Warnf("[Weaviate] No keywords matches found for collection %s", collectionName)
+			continue
+		}
 		results := parseGraphQLResponse(items, collectionName, types.MatchTypeKeywords)
 		allResults = append(allResults, results...)
 	}
@@ -665,7 +679,7 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 	}
 
 	if len(allResults) == 0 {
-		log.Warnf("[Weaviate] No keyword matches found for query: %s", params.Query)
+		log.Warnf("[Weaviate] No keyword matches found for query: %s", secutils.SanitizeForLog(params.Query))
 	} else {
 		log.Infof("[Weaviate] Keywords retrieval found %d results", len(allResults))
 	}
@@ -710,8 +724,20 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 			log.Errorf("[Weaviate] Failed to query source points: %v", err)
 			return err
 		}
+		if len(result.Errors) > 0 {
+			log.Errorf("[Weaviate] CopyIndices GraphQL errors: %v", result.Errors)
+			return fmt.Errorf("graphql search failed: %s", result.Errors[0].Message)
+		}
 
-		objects, ok := result.Data["Get"].(map[string]interface{})[collectionName].([]interface{})
+		rawGet, getExists := result.Data["Get"]
+		if !getExists || rawGet == nil {
+			break
+		}
+		get, ok := rawGet.(map[string]interface{})
+		if !ok {
+			break
+		}
+		objects, ok := get[collectionName].([]interface{})
 		if !ok || len(objects) == 0 {
 			break
 		}
@@ -726,12 +752,24 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 			if !ok {
 				continue
 			}
-			additional, ok := data["_additional"].(map[string]interface{})
+			rawAdditional, additionalExists := data["_additional"]
+			if !additionalExists || rawAdditional == nil {
+				continue
+			}
+			additional, ok := rawAdditional.(map[string]interface{})
 			if !ok {
 				continue
 			}
 
-			lastID = additional["id"].(string)
+			rawID, idExists := additional["id"]
+			if !idExists || rawID == nil {
+				continue
+			}
+			idVal, ok := rawID.(string)
+			if !ok {
+				continue
+			}
+			lastID = idVal
 
 			sourceChunkID, ok := data[fieldChunkID].(string)
 			if !ok {
@@ -768,13 +806,24 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 				targetSourceID = uuid.New().String()
 			}
 
-			vectorRaw, ok := additional["vector"].([]interface{})
+			vectorRawVal, vectorExists := additional["vector"]
+			if !vectorExists || vectorRawVal == nil {
+				continue
+			}
+			vectorRaw, ok := vectorRawVal.([]interface{})
 			if !ok {
 				continue
 			}
 			vector := make([]float32, len(vectorRaw))
 			for i, v := range vectorRaw {
-				vector[i] = float32(v.(float64))
+				if v == nil {
+					continue
+				}
+				fv, ok := v.(float64)
+				if !ok {
+					continue
+				}
+				vector[i] = float32(fv)
 			}
 
 			isEnabled := true
@@ -919,10 +968,18 @@ func parseGraphQLResponse(items []interface{}, collectionName string, matchType 
 		additionalName = "score"
 	}
 	for _, item := range items {
-		obj := item.(map[string]interface{})
-		additional := obj["_additional"].(map[string]interface{})
-
-		pointID := additional["id"].(string)
+		obj, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		additional, ok := obj["_additional"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		pointID, ok := additional["id"].(string)
+		if !ok {
+			continue
+		}
 		score := 0.0
 		if s, ok := additional[additionalName].(float64); ok {
 			if matchType == types.MatchTypeKeywords {

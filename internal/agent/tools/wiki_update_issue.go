@@ -66,9 +66,9 @@ func (t *wikiUpdateIssueTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	// Update only after the issue has been proven to belong to an allowed KB.
-	err = t.wikiService.UpdateIssueStatus(ctx, issue.KnowledgeBaseID, params.IssueID, params.Status)
+	err = t.wikiService.UpdateIssueStatus(ctx, issue.TenantID, issue.KnowledgeBaseID, params.IssueID, params.Status)
 	if err != nil {
-		return &types.ToolResult{Success: false, Error: "Failed to update issue status: " + err.Error()}, nil
+		return &types.ToolResult{Success: false, Error: "Failed to update issue status"}, nil
 	}
 
 	return &types.ToolResult{

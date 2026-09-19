@@ -32,11 +32,19 @@ func (w *weaviateRepository) MoveKnowledgeIndices(
 		if result == nil || len(result.Errors) != 0 {
 			return fmt.Errorf("failed to list move indices")
 		}
-		get, ok := result.Data["Get"].(map[string]interface{})
+		rawGet, getExists := result.Data["Get"]
+		if !getExists || rawGet == nil {
+			return fmt.Errorf("invalid move index response")
+		}
+		get, ok := rawGet.(map[string]interface{})
 		if !ok {
 			return fmt.Errorf("invalid move index response")
 		}
-		rows, ok := get[collection].([]interface{})
+		rawRows, rowsExist := get[collection]
+		if !rowsExist || rawRows == nil {
+			return fmt.Errorf("invalid move index collection")
+		}
+		rows, ok := rawRows.([]interface{})
 		if !ok {
 			return fmt.Errorf("invalid move index collection")
 		}
@@ -44,24 +52,37 @@ func (w *weaviateRepository) MoveKnowledgeIndices(
 			return nil
 		}
 		var ids []string
+		pageHasNew := false
 		for _, row := range rows {
 			data, ok := row.(map[string]interface{})
 			if !ok {
 				return fmt.Errorf("invalid move index row")
 			}
-			additional, ok := data["_additional"].(map[string]interface{})
+			rawAdditional, additionalExists := data["_additional"]
+			if !additionalExists || rawAdditional == nil {
+				return fmt.Errorf("missing move index ID")
+			}
+			additional, ok := rawAdditional.(map[string]interface{})
 			if !ok {
 				return fmt.Errorf("missing move index ID")
 			}
-			id, ok := additional["id"].(string)
+			rawID, idExists := additional["id"]
+			if !idExists || rawID == nil {
+				return fmt.Errorf("invalid move index ID")
+			}
+			id, ok := rawID.(string)
 			if !ok || id == "" {
 				return fmt.Errorf("invalid move index ID")
 			}
 			if seen[id] {
-				return fmt.Errorf("move indices made no progress for %s", id)
+				continue
 			}
 			seen[id] = true
 			ids = append(ids, id)
+			pageHasNew = true
+		}
+		if !pageHasNew {
+			return fmt.Errorf("move indices made no progress: all IDs in page were duplicates")
 		}
 		// Drain the first filtered page; after+where is unsupported by Weaviate.
 		// Successful updates remove these IDs from the predicate. Only an empty

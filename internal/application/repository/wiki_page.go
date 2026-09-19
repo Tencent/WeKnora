@@ -1421,11 +1421,9 @@ func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug s
 	return issues, nil
 }
 
-func (r *wikiPageRepository) UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error {
-	// Scoped to the knowledge base the caller was authorized for: issue IDs are
-	// listed to readers, so an ID alone must not reach another KB's issue.
+func (r *wikiPageRepository) UpdateIssueStatus(ctx context.Context, tenantID uint64, kbID string, issueID string, status string) error {
 	result := r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
-		Where("id = ? AND knowledge_base_id = ?", issueID, kbID).
+		Where("id = ? AND knowledge_base_id = ? AND tenant_id = ?", issueID, kbID, tenantID).
 		Update("status", status)
 	if result.Error != nil {
 		return result.Error

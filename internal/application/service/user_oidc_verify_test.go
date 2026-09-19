@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -401,5 +402,64 @@ func TestResolveOIDCUserInfo_VerifiedIDTokenUsedWhenUserinfoFails(t *testing.T) 
 	}
 	if info.Email != "user@example.com" {
 		t.Fatalf("email = %q, want verified id_token email", info.Email)
+	}
+}
+
+func TestRequireVerifiedOIDCEmail(t *testing.T) {
+	if err := requireVerifiedOIDCEmail(nil); err == nil {
+		t.Fatal("nil info was accepted")
+	}
+	if err := requireVerifiedOIDCEmail(&types.OIDCUserInfo{Email: "user@example.com"}); err == nil {
+		t.Fatal("unverified email was accepted")
+	}
+	if err := requireVerifiedOIDCEmail(&types.OIDCUserInfo{Email: "user@example.com", EmailVerified: true}); err != nil {
+		t.Fatalf("verified email rejected: %v", err)
+	}
+}
+
+func TestResolveOIDCUserInfo_SetsEmailVerified(t *testing.T) {
+	withOIDCSSRFWhitelist(t, "127.0.0.1")
+
+	userinfo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"sub":            "real-user",
+			"email":          "real@example.com",
+			"email_verified": true,
+			"name":           "Real User",
+		})
+	}))
+	defer userinfo.Close()
+
+	cfg := oidcVerifyCfg("")
+	cfg.JwksURI = ""
+	cfg.UserInfoEndpoint = userinfo.URL
+
+	svc := &userService{}
+	info, err := svc.resolveOIDCUserInfo(context.Background(), cfg, &oidcTokenResponse{
+		AccessToken: "access-token",
+	})
+	if err != nil {
+		t.Fatalf("resolveOIDCUserInfo: %v", err)
+	}
+	if !info.EmailVerified {
+		t.Fatal("email_verified claim was not copied onto OIDCUserInfo")
+	}
+	if err := requireVerifiedOIDCEmail(info); err != nil {
+		t.Fatalf("verified userinfo rejected: %v", err)
+	}
+}
+
+func TestExtractClaimAsBool(t *testing.T) {
+	if !extractClaimAsBool(map[string]interface{}{"email_verified": true}, "email_verified") {
+		t.Fatal("bool true was not accepted")
+	}
+	if !extractClaimAsBool(map[string]interface{}{"email_verified": "true"}, "email_verified") {
+		t.Fatal("string true was not accepted")
+	}
+	if extractClaimAsBool(map[string]interface{}{"email_verified": "false"}, "email_verified") {
+		t.Fatal("string false was accepted")
+	}
+	if extractClaimAsBool(map[string]interface{}{}, "email_verified") {
+		t.Fatal("missing claim was accepted")
 	}
 }

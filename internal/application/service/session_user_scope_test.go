@@ -46,6 +46,7 @@ func newTestSessionService(t *testing.T) (*sessionService, *gorm.DB) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Session{}))
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
 
 	return &sessionService{
 		sessionRepo: repository.NewSessionRepository(db),
@@ -505,6 +506,126 @@ func TestGetSessionDeniesEmbedRuntimeFromReadingForeignEmbedSession(t *testing.T
 
 	_, err := svc.GetSession(ctx, foreignSession.ID)
 	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+}
+
+func TestDeleteSessionDeniesViewerOnIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	err := svc.DeleteSession(testSessionScopeContext(1, "alice"), imSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+
+	var remaining types.Session
+	require.NoError(t, db.First(&remaining, "id = ?", imSession.ID).Error)
+	require.Equal(t, imSession.ID, remaining.ID)
+}
+
+func TestUpdateSessionDeniesViewerOnIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	err := svc.UpdateSession(testSessionScopeContext(1, "alice"), &types.Session{
+		ID:       imSession.ID,
+		TenantID: 1,
+		Title:    "hijacked",
+	})
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+
+	var remaining types.Session
+	require.NoError(t, db.First(&remaining, "id = ?", imSession.ID).Error)
+	require.Equal(t, "feishu chat", remaining.Title)
+}
+
+func TestSetSessionPinnedDeniesViewerOnIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	rows, err := svc.SetSessionPinned(testSessionScopeContext(1, "alice"), imSession.ID, true)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, rows)
+
+	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	rows, err = svc.SetSessionPinned(adminCtx, imSession.ID, true)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, rows)
+}
+
+func TestBatchDeleteSessionsDeniesViewerOnIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	err := svc.BatchDeleteSessions(testSessionScopeContext(1, "alice"), []string{imSession.ID})
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+
+	var remaining types.Session
+	require.NoError(t, db.First(&remaining, "id = ?", imSession.ID).Error)
+	require.Equal(t, imSession.ID, remaining.ID)
+}
+
+func TestDeleteAllSessionsSkipsIMSessionForViewer(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+	ownSession := &types.Session{TenantID: 1, UserID: "alice", Title: "alice web"}
+	require.NoError(t, db.Create(ownSession).Error)
+
+	require.NoError(t, svc.DeleteAllSessions(testSessionScopeContext(1, "alice")))
+
+	var remaining types.Session
+	require.NoError(t, db.First(&remaining, "id = ?", imSession.ID).Error)
+	require.Equal(t, imSession.ID, remaining.ID)
+	require.Error(t, db.First(&types.Session{}, "id = ?", ownSession.ID).Error)
+}
+
+func TestUpdateSessionAllowsAdminOnIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	require.NoError(t, svc.UpdateSession(adminCtx, &types.Session{
+		ID:       imSession.ID,
+		TenantID: 1,
+		Title:    "renamed by admin",
+	}))
+
+	var remaining types.Session
+	require.NoError(t, db.First(&remaining, "id = ?", imSession.ID).Error)
+	require.Equal(t, "renamed by admin", remaining.Title)
 }
 
 // testListSessionsIMChannelSession lets QueryPaged's LEFT JOIN resolve against a

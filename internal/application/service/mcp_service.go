@@ -367,9 +367,10 @@ func mcpTestFailure(err error, prefix string) *types.MCPTestResult {
 				"Switch the auth method to OAuth 2.0 and authorize.",
 		}
 	}
+	logger.GetLogger(context.Background()).Errorf("MCP service test failed: %v", err)
 	return &types.MCPTestResult{
 		Success: false,
-		Message: fmt.Sprintf("%s: %v", prefix, err),
+		Message: fmt.Sprintf("%s: %v", prefix, "connection or initialization failed"),
 	}
 }
 
