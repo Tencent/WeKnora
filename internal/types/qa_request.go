@@ -76,4 +76,8 @@ type QARequest struct {
 	// persists accepted ones through this sink. A structural interface so
 	// neither package imports the other; handler-owned, nil for IM/embed.
 	SteerSink SteerSink
+	// SkillInstallCards is set when the client renders skill install cards: a
+	// console chat. IM, embed and API callers leave it false, since a card
+	// they cannot show would only have the model point at nothing.
+	SkillInstallCards bool
 }

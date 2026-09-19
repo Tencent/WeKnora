@@ -8,7 +8,7 @@ func CanRunConcurrently(name string) bool {
 	case ToolSearchKnowledge, ToolReadDocument, ToolListDocuments,
 		ToolQueryKnowledgeGraph, ToolSearchConversations,
 		ToolSearchMemory, ToolDataSchema, ToolWebSearch, ToolWebFetch,
-		ToolReadFile, ToolListSandboxFiles,
+		ToolReadFile, ToolListSandboxFiles, ToolSearchSkills,
 		ToolWikiSearch, ToolWikiReadPage, ToolWikiReadIssue:
 		return true
 	default:
