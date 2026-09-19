@@ -1,0 +1,30 @@
+{
+  "_comment": "门禁演示 fixture：M1 真实评测基线结果（embedding_top_k=5，30 问默认数据集，precision/recall/ndcg/mrr/map 为真实评测实测值）——所有检索指标等于 baseline，门禁应判定 passed（exit 0）。与 eval_gate_regression_fixture.json 构成对照：退化→阻断，基线→放行，两路共用同一个 evalgate 判定核心。",
+  "data": {
+    "task": {
+      "id": "real-baseline-30q",
+      "status": 2,
+      "dataset_id": "default",
+      "total": 30,
+      "finished": 30
+    },
+    "metric": {
+      "retrieval_metrics": {
+        "precision": 0.108,
+        "recall": 0.5,
+        "ndcg3": 0.488,
+        "ndcg10": 0.488,
+        "mrr": 0.483,
+        "map": 0.483
+      },
+      "generation_metrics": {
+        "bleu1": 0.0,
+        "bleu2": 0.0,
+        "bleu4": 0.0,
+        "rouge1": 0.0,
+        "rouge2": 0.0,
+        "rougel": 0.0
+      }
+    }
+  }
+}

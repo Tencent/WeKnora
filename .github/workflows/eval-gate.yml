@@ -1,0 +1,81 @@
+name: Eval Quality Gate
+
+# 评测质量门禁：CI 里自证「降召回改动会被自动拦下」。
+#   unit      — 跑判定核心 + CLI 的单元测试（internal/evalgate 零依赖，不 import types，
+#                因此 go test 不会被 gojieba 的 cgo 依赖拖垮，可在 CI 干净运行）。
+#   gate-demo — 用两个 fixture 自证门禁行为：降召回结果期望退出码 1（阻断），
+#                健康结果期望退出码 0（放行）。无需任何模型 Key / secret。
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "internal/evalgate/**"
+      - "cmd/evalgate/**"
+      - "eval_gate.json"
+      - "docs/eval_gate_regression_fixture.json"
+      - "docs/eval_gate_baseline_fixture.json"
+      - ".github/workflows/eval-gate.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  unit:
+    name: evalgate unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+      - name: Test evalgate package + CLI
+        run: go test ./internal/evalgate/ ./cmd/evalgate/
+
+  gate-demo:
+    name: gate blocks recall regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+      - name: Build evalgate
+        run: go build -o evalgate ./cmd/evalgate
+
+      - name: Gate must FAIL a recall regression
+        run: |
+          set +e
+          ./evalgate -config eval_gate.json -result docs/eval_gate_regression_fixture.json
+          code=$?
+          set -e
+          echo "gate exit=$code"
+          if [ "$code" -ne 1 ]; then
+            echo "::error::expected exit 1 (gate fail) for the regression fixture, got $code"
+            exit 1
+          fi
+          echo "gate correctly blocked the recall regression"
+
+      - name: Gate must PASS a healthy result
+        run: |
+          set +e
+          ./evalgate -config eval_gate.json -result docs/eval_gate_baseline_fixture.json
+          code=$?
+          set -e
+          echo "gate exit=$code"
+          if [ "$code" -ne 0 ]; then
+            echo "::error::expected exit 0 (gate pass) for a healthy result, got $code"
+            exit 1
+          fi
+          echo "gate correctly passed the healthy result"
