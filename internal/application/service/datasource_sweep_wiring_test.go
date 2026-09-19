@@ -18,6 +18,7 @@ type sweepFakeRepo struct {
 	interfaces.KnowledgeRepository
 	prefixCalls  []string           // recorded prefix arguments
 	prefixReturn []*types.Knowledge // children to return from FindByMetadataKeyPrefix
+	existingAll  []*types.Knowledge // versions to return from FindAllByDataSourceExternalID
 }
 
 func (r *sweepFakeRepo) FindByMetadataKey(ctx context.Context, tenantID uint64, kbID, key, value string) (*types.Knowledge, error) {
@@ -28,6 +29,12 @@ func (r *sweepFakeRepo) FindByDataSourceExternalID(
 	_ context.Context, _ uint64, _, _, _ string,
 ) (*types.Knowledge, error) {
 	return nil, nil // no existing main item -> skip the case-1 update delete
+}
+
+func (r *sweepFakeRepo) FindAllByDataSourceExternalID(
+	_ context.Context, _ uint64, _, _, _ string,
+) ([]*types.Knowledge, error) {
+	return r.existingAll, nil
 }
 
 func (r *sweepFakeRepo) HardDeleteKnowledge(context.Context, uint64, string) error {
@@ -49,6 +56,7 @@ type sweepFakeKS struct {
 	events             []string // ordered log of "delete:<id>" and "create:<fname>"
 	deleted            []string
 	createErr          error            // if set, CreateKnowledgeFromFile returns it after logging
+	createURLErr       error            // if set, CreateKnowledgeFromURL returns it
 	deleteErr          error            // if set, DeleteKnowledge returns it after logging
 	createURLKnowledge *types.Knowledge // if set, CreateKnowledgeFromURL returns it
 }
@@ -59,6 +67,12 @@ func (k *sweepFakeKS) CreateKnowledgeFromURL(
 	_ context.Context, _ string, _ string, _ string, _ string, _ *bool,
 	_ string, _ []string, _ string, _ *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
+	if k.createURLErr != nil {
+		return nil, k.createURLErr
+	}
+	if k.createURLErr != nil {
+		return nil, k.createURLErr
+	}
 	return k.createURLKnowledge, nil
 }
 

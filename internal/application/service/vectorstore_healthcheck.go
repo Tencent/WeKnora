@@ -55,8 +55,27 @@ func (s *vectorStoreService) TestConnection(
 		// SQLite is file-based, no remote connection to test
 		return "", nil
 	default:
-		return "", errors.NewBadRequestError(
-			fmt.Sprintf("connection test not supported for engine type: %s", engineType))
+		// External retriever plugins: build the engine (which opens a store
+		// session over the plugin protocol) and immediately close it. This is
+		// the real connectivity probe — OpenStore failing means the backend or
+		// config is wrong. Built-in-but-unmapped and truly unknown types still
+		// fail closed.
+		if types.IsBuiltinEngineType(engineType) || !types.IsValidEngineType(engineType) {
+			return "", errors.NewBadRequestError(
+				fmt.Sprintf("connection test not supported for engine type: %s", engineType))
+		}
+		if s.factory == nil {
+			return "", errors.NewBadRequestError("external plugin connection test unavailable")
+		}
+		tmpStore := types.VectorStore{EngineType: engineType, ConnectionConfig: config}
+		svc, err := s.factory(ctx, tmpStore)
+		if err != nil {
+			return "", err
+		}
+		if closer, ok := svc.(interface{ Close(context.Context) error }); ok {
+			_ = closer.Close(ctx)
+		}
+		return "", nil
 	}
 }
 

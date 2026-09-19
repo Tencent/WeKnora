@@ -62,6 +62,15 @@ func (r *modelRepository) List(
 	return models, nil
 }
 
+// ListBySource lists every model of the given source across all tenants.
+func (r *modelRepository) ListBySource(ctx context.Context, source types.ModelSource) ([]*types.Model, error) {
+	var models []*types.Model
+	if err := r.db.WithContext(ctx).Where("source = ?", source).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	return models, nil
+}
+
 // Update updates a model
 func (r *modelRepository) Update(ctx context.Context, m *types.Model) error {
 	// Use Select to explicitly update all fields, including zero values like false

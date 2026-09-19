@@ -179,6 +179,11 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 		c, err = NewOllamaChat(config, ollamaService)
 	case string(types.ModelSourceRemote):
 		c, err = NewRemoteChat(config)
+	case string(types.ModelSourcePlugin):
+		if !provider.HasExternalModel(config.Provider) {
+			return nil, fmt.Errorf("external model plugin %q is not loaded", config.Provider)
+		}
+		c, err = newPluginChat(config), nil
 	default:
 		return nil, fmt.Errorf("unsupported chat model source: %s", config.Source)
 	}

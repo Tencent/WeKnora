@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
+	pluginPkg "github.com/Tencent/WeKnora/internal/plugin"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -41,6 +42,7 @@ func TestRetrieveEngineRegistryWiring(t *testing.T) {
 	provide(func() *config.Config { return &config.Config{} })
 	provide(func() interfaces.AuditLogService { return &fakeAuditSvc{} })
 	provide(repository.NewVectorStoreRepository)
+	provide(pluginPkg.NewRetrieverProviderRegistry)
 	provide(NewEngineFactory)
 	provide(initRetrieveEngineRegistry)
 

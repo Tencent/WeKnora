@@ -59,6 +59,14 @@ type ModelRepository interface {
 		modelType types.ModelType,
 		source types.ModelSource,
 	) ([]*types.Model, error)
+	// ListBySource lists every model of the given source across all tenants.
+	// Unlike List, it is not tenant-scoped: it is used by cross-tenant
+	// operations such as re-pushing saved configuration to a model plugin
+	// after its runtime restarts.
+	ListBySource(
+		ctx context.Context,
+		source types.ModelSource,
+	) ([]*types.Model, error)
 	// Update updates a model
 	Update(ctx context.Context, model *types.Model) error
 	// Delete deletes a model

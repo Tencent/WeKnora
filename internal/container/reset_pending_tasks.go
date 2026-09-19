@@ -120,7 +120,8 @@ func resetPendingTasks(db *gorm.DB) {
 		}
 	}
 
-	// 3. Reset data source sync tasks
+	// 3. Reset genuinely running data source sync tasks. Pending rows are
+	// durable outbox records and are intentionally left for the dispatcher.
 	now := time.Now()
 	resultSync := stuckSyncLogQuery(db, distributed, staleCutoff).Updates(map[string]interface{}{
 		"status":        types.SyncLogStatusFailed,
@@ -161,6 +162,9 @@ func stuckKnowledgeSummaryQuery(db *gorm.DB) *gorm.DB {
 
 func stuckSyncLogQuery(db *gorm.DB, distributed bool, staleCutoff time.Time) *gorm.DB {
 	q := db.Model(&types.SyncLog{}).
+		// Pending rows are durable Sync Outbox intents. They must never be
+		// failed by startup cleanup: the dispatcher is responsible for replaying
+		// them into Asynq after a DB→queue crash window.
 		Where("status = ?", types.SyncLogStatusRunning)
 	if distributed {
 		q = q.Where("started_at < ?", staleCutoff)

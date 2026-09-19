@@ -1,4 +1,4 @@
-export type ModelEditorSource = 'local' | 'remote'
+export type ModelEditorSource = 'local' | 'remote' | 'plugin'
 
 export type ModelEditorType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 

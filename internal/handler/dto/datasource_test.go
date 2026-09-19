@@ -8,7 +8,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// testDataSourceAESKey mirrors the key other suites use. DataSourceConfig.ToJSON
+// encrypts string credentials and refuses to persist plaintext when
+// SYSTEM_AES_KEY is unset, so any test that round-trips a config must set it.
+const testDataSourceAESKey = "0123456789abcdef0123456789abcdef"
+
 func TestDataSourceResponse_OmitsCredentials(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", testDataSourceAESKey)
 	cfg := types.DataSourceConfig{
 		Type: "github",
 		Credentials: map[string]interface{}{
@@ -54,6 +60,7 @@ func TestDataSourceResponse_NilSafe(t *testing.T) {
 }
 
 func TestDataSourceResponse_RSSFeedURLsFromCredentials(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", testDataSourceAESKey)
 	cfg := types.DataSourceConfig{
 		Type: types.ConnectorTypeRSS,
 		Credentials: map[string]interface{}{
@@ -80,6 +87,7 @@ func TestDataSourceResponse_RSSFeedURLsFromCredentials(t *testing.T) {
 }
 
 func TestDataSourceResponse_RSSAuthHeadersConfigured(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", testDataSourceAESKey)
 	cfg := types.DataSourceConfig{
 		Type: types.ConnectorTypeRSS,
 		Credentials: map[string]interface{}{

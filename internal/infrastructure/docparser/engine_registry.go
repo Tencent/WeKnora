@@ -3,6 +3,7 @@ package docparser
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -25,6 +26,14 @@ type EngineRegistration interface {
 	NewReader(ctx context.Context, deps ReaderDeps) (interfaces.DocReader, error)
 }
 
+// ExternalPluginEngineMetadata is implemented only by parser engines backed
+// by an independently loaded plugin. Keeping it optional lets all existing
+// built-in registrations keep the small EngineRegistration contract.
+type ExternalPluginEngineMetadata interface {
+	PluginID() string
+	ConfigSchema() map[string]any
+}
+
 // ReaderDeps carries everything an engine may need to build its reader but
 // cannot construct itself: tenant configuration, tenant credentials, and the
 // shared docreader connection.
@@ -44,14 +53,103 @@ type ReaderDeps struct {
 // localEngines holds all locally registered parser engines, in registration
 // order — which is also the order the engine list is shown in.
 var localEngines []EngineRegistration
+var localEnginesMu sync.RWMutex
 
-// RegisterEngine adds an engine to the local registry. Called from init().
-func RegisterEngine(e EngineRegistration) {
+// RegisterEngine adds an engine to the local registry. Called from init() and
+// by the external plugin loader. Duplicate names are rejected so an external
+// plugin cannot silently shadow an existing engine.
+func RegisterEngine(e EngineRegistration) error {
+	if e == nil {
+		return fmt.Errorf("parser engine registration is nil")
+	}
+	localEnginesMu.Lock()
+	defer localEnginesMu.Unlock()
+	for _, existing := range localEngines {
+		if existing.Name() == e.Name() {
+			return fmt.Errorf("parser engine %q is already registered", e.Name())
+		}
+	}
 	localEngines = append(localEngines, e)
+	return nil
+}
+
+// UnregisterEngine removes the first locally registered engine with the given
+// name. Built-in engines are registered during package initialization and are
+// not removed by normal plugin lifecycle code; external plugin managers use
+// this when rolling back a failed discovery pass or unloading a plugin.
+func UnregisterEngine(name string) bool {
+	localEnginesMu.Lock()
+	defer localEnginesMu.Unlock()
+	for i := len(localEngines) - 1; i >= 0; i-- {
+		engine := localEngines[i]
+		if engine.Name() != name {
+			continue
+		}
+		localEngines = append(localEngines[:i], localEngines[i+1:]...)
+		return true
+	}
+	return false
+}
+
+// ListRegisteredEngines returns a snapshot of the local engine registrations.
+// It lets the common plugin control plane expose built-in parser engines
+// without giving the control plane ownership of the parser implementation.
+func ListRegisteredEngines() []EngineRegistration {
+	localEnginesMu.RLock()
+	defer localEnginesMu.RUnlock()
+	return append([]EngineRegistration(nil), localEngines...)
+}
+
+// ExternalPluginMetadata returns the stable plugin identity and declared
+// configuration schema for a locally registered external parser engine.
+// Callers use the plugin ID to isolate tenant configuration by plugin rather
+// than by a user-facing engine name.
+func ExternalPluginMetadata(engineName string) (pluginID string, configSchema map[string]any, ok bool) {
+	registration, found := lookupEngine(engineName)
+	if !found {
+		return "", nil, false
+	}
+	metadata, isExternal := registration.(ExternalPluginEngineMetadata)
+	if !isExternal || metadata.PluginID() == "" {
+		return "", nil, false
+	}
+	return metadata.PluginID(), metadata.ConfigSchema(), true
+}
+
+// ExternalPluginMetadataByID resolves the engine metadata from a manifest
+// plugin ID. It is used when validating tenant settings submitted from the
+// dynamic parser-plugin form.
+func ExternalPluginMetadataByID(pluginID string) (engineName string, configSchema map[string]any, ok bool) {
+	if pluginID == "" {
+		return "", nil, false
+	}
+	for _, registration := range ListRegisteredEngines() {
+		metadata, isExternal := registration.(ExternalPluginEngineMetadata)
+		if !isExternal || metadata.PluginID() != pluginID {
+			continue
+		}
+		return registration.Name(), metadata.ConfigSchema(), true
+	}
+	return "", nil, false
+}
+
+// OverridesForEngine returns the tenant configuration that belongs to one
+// parser engine. Built-in engines retain the historical flat override map;
+// external engines receive only the configuration scoped to their plugin ID.
+func OverridesForEngine(config *types.ParserEngineConfig, engineName string) map[string]string {
+	if config == nil {
+		return nil
+	}
+	if pluginID, _, ok := ExternalPluginMetadata(engineName); ok {
+		return config.ExternalPluginOverrides(pluginID)
+	}
+	return config.ToOverridesMap()
 }
 
 // lookupEngine returns the locally registered engine with this name.
 func lookupEngine(name string) (EngineRegistration, bool) {
+	localEnginesMu.RLock()
+	defer localEnginesMu.RUnlock()
 	for _, engine := range localEngines {
 		if engine.Name() == name {
 			return engine, true
@@ -105,10 +203,14 @@ func ListAllEngines(
 		remoteMap[re.Name] = re
 	}
 
-	seen := make(map[string]bool, len(localEngines))
-	result := make([]types.ParserEngineInfo, 0, len(localEngines)+len(remoteEngines))
+	localEnginesMu.RLock()
+	engines := append([]EngineRegistration(nil), localEngines...)
+	localEnginesMu.RUnlock()
 
-	for _, e := range localEngines {
+	seen := make(map[string]bool, len(engines))
+	result := make([]types.ParserEngineInfo, 0, len(engines)+len(remoteEngines))
+
+	for _, e := range engines {
 		name := e.Name()
 		seen[name] = true
 
@@ -125,13 +227,19 @@ func ListAllEngines(
 		}
 
 		available, reason := e.CheckAvailable(docreaderConnected, overrides)
-		result = append(result, types.ParserEngineInfo{
+		info := types.ParserEngineInfo{
 			Name:              name,
 			Description:       description,
 			FileTypes:         fileTypes,
 			Available:         available,
 			UnavailableReason: reason,
-		})
+		}
+		if metadata, ok := e.(ExternalPluginEngineMetadata); ok && metadata.PluginID() != "" {
+			info.External = true
+			info.PluginID = metadata.PluginID()
+			info.ConfigSchema = metadata.ConfigSchema()
+		}
+		result = append(result, info)
 	}
 
 	for _, re := range remoteEngines {

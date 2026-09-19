@@ -123,6 +123,9 @@ func (s *stubModelRepoForDelete) GetByID(_ context.Context, _ uint64, id string)
 func (s *stubModelRepoForDelete) List(context.Context, uint64, types.ModelType, types.ModelSource) ([]*types.Model, error) {
 	return nil, nil
 }
+func (s *stubModelRepoForDelete) ListBySource(context.Context, types.ModelSource) ([]*types.Model, error) {
+	return nil, nil
+}
 func (s *stubModelRepoForDelete) Update(_ context.Context, model *types.Model) error {
 	if s.update != nil {
 		return s.update(model)

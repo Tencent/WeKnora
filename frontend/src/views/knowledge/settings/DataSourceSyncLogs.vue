@@ -67,9 +67,10 @@ const stats = computed(() => {
 
 // --- Helpers ---
 function statusIcon(status: string) {
-  switch (status) {
-    case 'success': return 'check-circle-filled'
-    case 'running': return 'loading'
+	switch (status) {
+		case 'success': return 'check-circle-filled'
+		case 'pending': return 'time-filled'
+		case 'running': return 'loading'
     case 'failed': return 'close-circle-filled'
     case 'partial': return 'error-circle-filled'
     case 'canceled': return 'minus-circle-filled'
@@ -78,9 +79,10 @@ function statusIcon(status: string) {
 }
 
 function statusColor(status: string) {
-  switch (status) {
-    case 'success': return 'var(--td-success-color)'
-    case 'running': return 'var(--td-brand-color)'
+	switch (status) {
+		case 'success': return 'var(--td-success-color)'
+		case 'pending': return 'var(--td-brand-color)'
+		case 'running': return 'var(--td-brand-color)'
     case 'failed': return 'var(--td-error-color)'
     case 'partial': return 'var(--td-warning-color)'
     default: return 'var(--td-text-color-placeholder)'
@@ -239,7 +241,8 @@ const groupedLogs = computed(() => {
             <!-- Dot -->
             <div class="tl-dot-col">
               <span class="tl-dot" :style="{ background: statusColor(log.status) }">
-                <t-icon v-if="log.status === 'running'" name="loading" size="10px" class="tl-spin" />
+				<t-icon v-if="log.status === 'running'" name="loading" size="10px" class="tl-spin" />
+				<t-icon v-else-if="log.status === 'pending'" name="time-filled" size="10px" />
               </span>
               <span class="tl-line"></span>
             </div>

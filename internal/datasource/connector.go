@@ -2,6 +2,7 @@ package datasource
 
 import (
 	"context"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -121,12 +122,14 @@ type FullSyncWithCursor interface {
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
 	connectors map[string]Connector
+	factories  map[string]ConnectorFactory
 }
 
 // NewConnectorRegistry creates a new connector registry
 func NewConnectorRegistry() *ConnectorRegistry {
 	return &ConnectorRegistry{
 		connectors: make(map[string]Connector),
+		factories:  make(map[string]ConnectorFactory),
 	}
 }
 
@@ -140,6 +143,41 @@ func (r *ConnectorRegistry) Register(connector Connector) error {
 	}
 	r.connectors[connector.Type()] = connector
 	return nil
+}
+
+// RegisterFactory registers an instance-aware connector provider. The factory
+// is used by external plugins and may create a lease bound to one datasource
+// invocation while preserving the cursor in WeKnora's durable datasource row.
+func (r *ConnectorRegistry) RegisterFactory(connectorType string, factory ConnectorFactory) error {
+	if connectorType == "" {
+		return ErrConnectorTypeEmpty
+	}
+	if factory == nil {
+		return ErrConnectorNil
+	}
+	if r.factories == nil {
+		r.factories = make(map[string]ConnectorFactory)
+	}
+	r.factories[connectorType] = factory
+	return nil
+}
+
+func (r *ConnectorRegistry) UnregisterFactory(connectorType string) {
+	delete(r.factories, connectorType)
+}
+
+// GetForScope resolves an instance-aware lease, falling back to the existing
+// built-in singleton registry. This keeps old connectors working while making
+// the new lifecycle boundary available to the sync service.
+func (r *ConnectorRegistry) GetForScope(ctx context.Context, connectorType string, scope ConnectorScope, config *types.DataSourceConfig) (ConnectorLease, error) {
+	if factory, ok := r.factories[connectorType]; ok {
+		return factory(ctx, scope, config)
+	}
+	connector, err := r.Get(connectorType)
+	if err != nil {
+		return nil, err
+	}
+	return staticConnectorLease{connector: connector}, nil
 }
 
 // Get retrieves a connector by type
@@ -166,9 +204,18 @@ type ConnectorMetadata struct {
 	Name         string   `json:"name"`
 	Description  string   `json:"description"`
 	Icon         string   `json:"icon,omitempty"`
+	DocsURL      string   `json:"docs_url,omitempty"`
 	Priority     int      `json:"priority"`     // Priority order for UI display (lower = higher priority)
 	AuthType     string   `json:"auth_type"`    // "oauth2", "api_key", "token", etc.
 	Capabilities []string `json:"capabilities"` // "incremental", "webhook", "deletion_sync", etc.
+	// ConfigSchema is the JSON-Schema for the connector's config envelope
+	// (settings/credentials). Populated for external plugins so the frontend can
+	// render a generic form; empty for built-in connectors that keep their
+	// dedicated forms.
+	ConfigSchema map[string]any `json:"config_schema,omitempty"`
+	// External marks connectors backed by a plugin loaded at runtime (as opposed
+	// to built-in connectors compiled into the main repository).
+	External bool `json:"external"`
 }
 
 // GetConnectorMetadata returns metadata for all available connectors
@@ -312,13 +359,80 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	},
 }
 
+// externalConnectorMetadata holds metadata for connectors provided by external
+// plugins. It is populated by the plugin framework at load time (derived from
+// each plugin manifest) rather than hard-coded here, so installing a new
+// datasource plugin requires no change to this package. Built-in connectors
+// stay in ConnectorMetadataRegistry; external ones flow through this map.
+var externalConnectorMetadata = struct {
+	sync.RWMutex
+	items map[string]ConnectorMetadata
+}{items: make(map[string]ConnectorMetadata)}
+
+// externalConnectorIconFiles records the on-disk icon file for an external
+// connector, keyed by connector type. It is populated alongside
+// RegisterExternalConnectorMetadata so the HTTP icon endpoint can stream the
+// plugin-bundled icon without exposing the plugin directory path in the API.
+// Keys are connector types that carry a local (relative) icon; a nil/empty
+// path means the connector has no local icon file.
+var externalConnectorIconFiles = struct {
+	sync.RWMutex
+	items map[string]string
+}{items: make(map[string]string)}
+
+// RegisterExternalConnectorMetadata records metadata for a connector backed by
+// an external plugin. The plugin framework calls this when a datasource plugin
+// is loaded; the type must match the connector type the plugin registered.
+func RegisterExternalConnectorMetadata(meta ConnectorMetadata) {
+	externalConnectorMetadata.Lock()
+	defer externalConnectorMetadata.Unlock()
+	externalConnectorMetadata.items[meta.Type] = meta
+}
+
+// RegisterExternalConnectorIconFile records the absolute path of a plugin's
+// local icon file for a connector type. Call this after
+// RegisterExternalConnectorMetadata so the icon endpoint can serve it.
+func RegisterExternalConnectorIconFile(connectorType, iconFile string) {
+	externalConnectorIconFiles.Lock()
+	defer externalConnectorIconFiles.Unlock()
+	if iconFile == "" {
+		delete(externalConnectorIconFiles.items, connectorType)
+		return
+	}
+	externalConnectorIconFiles.items[connectorType] = iconFile
+}
+
+// ResolveExternalConnectorIconFile returns the on-disk icon file path for an
+// external connector type, or "" when the connector has no local icon.
+func ResolveExternalConnectorIconFile(connectorType string) string {
+	externalConnectorIconFiles.RLock()
+	defer externalConnectorIconFiles.RUnlock()
+	return externalConnectorIconFiles.items[connectorType]
+}
+
+// UnregisterExternalConnectorMetadata removes metadata for an external plugin
+// connector (used on plugin unload).
+func UnregisterExternalConnectorMetadata(connectorType string) {
+	externalConnectorMetadata.Lock()
+	defer externalConnectorMetadata.Unlock()
+	delete(externalConnectorMetadata.items, connectorType)
+	externalConnectorIconFiles.Lock()
+	delete(externalConnectorIconFiles.items, connectorType)
+	externalConnectorIconFiles.Unlock()
+}
+
 // ListAvailableConnectors returns all available connector metadata
 // sorted by priority
 func ListAvailableConnectors() []ConnectorMetadata {
-	metadata := make([]ConnectorMetadata, 0, len(ConnectorMetadataRegistry))
+	metadata := make([]ConnectorMetadata, 0, len(ConnectorMetadataRegistry)+len(externalConnectorMetadata.items))
 	for _, meta := range ConnectorMetadataRegistry {
 		metadata = append(metadata, meta)
 	}
+	externalConnectorMetadata.RLock()
+	for _, meta := range externalConnectorMetadata.items {
+		metadata = append(metadata, meta)
+	}
+	externalConnectorMetadata.RUnlock()
 
 	// Sort by priority (insertion sort for simplicity)
 	for i := 1; i < len(metadata); i++ {

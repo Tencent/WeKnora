@@ -2,7 +2,9 @@ package asr
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -36,6 +38,7 @@ type Config struct {
 	APIKey    string
 	ModelID   string
 	Language  string // optional: specify language for transcription
+	Provider  string // external model plugin id, used when Source == ModelSourcePlugin
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
 }
@@ -53,6 +56,7 @@ func ConfigFromModel(m *types.Model) *Config {
 		BaseURL:       m.Parameters.BaseURL,
 		ModelName:     m.Name,
 		Source:        m.Source,
+		Provider:      m.Parameters.Provider,
 		CustomHeaders: m.Parameters.CustomHeaders,
 	}
 }
@@ -60,6 +64,12 @@ func ConfigFromModel(m *types.Model) *Config {
 // NewASR creates an ASR instance based on the provided configuration.
 // All ASR vendors use the OpenAI-compatible /v1/audio/transcriptions API.
 func NewASR(config *Config) (ASR, error) {
+	if config.Source == types.ModelSourcePlugin {
+		if !provider.HasExternalModel(config.Provider) {
+			return nil, fmt.Errorf("external model plugin %q is not loaded", config.Provider)
+		}
+		return newPluginASR(config), nil
+	}
 	a, err := NewOpenAIASR(config)
 	return wrapASRLangfuse(a, err)
 }

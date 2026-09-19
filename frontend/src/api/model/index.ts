@@ -13,7 +13,7 @@ export interface ModelConfig {
   name: string;
   display_name?: string;
   type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR';
-  source: 'local' | 'remote';
+  source: 'local' | 'remote' | 'plugin';
   description?: string;
   parameters: {
     base_url?: string;

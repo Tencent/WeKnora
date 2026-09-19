@@ -307,8 +307,12 @@ type ParserEngineConfig struct {
 	// ChatParserEngineRules selects parser engines for session-scoped chat
 	// documents. Knowledge bases keep their own rules in ChunkingConfig.
 	ChatParserEngineRules []ParserEngineRule `json:"chat_parser_engine_rules,omitempty"`
-	MinerUEndpoint        string             `json:"mineru_endpoint"` // MinerU 自建服务端点
-	MinerUAPIKey          string             `json:"mineru_api_key"`  // MinerU 云 API Key
+	// ExternalPluginConfigs holds tenant-level configuration for independently
+	// loaded parser plugins. The outer key is the stable manifest plugin ID,
+	// not the display/engine name, so plugins cannot collide on custom keys.
+	ExternalPluginConfigs map[string]ExternalParserPluginConfig `json:"external_plugin_configs,omitempty"`
+	MinerUEndpoint        string                                `json:"mineru_endpoint"` // MinerU 自建服务端点
+	MinerUAPIKey          string                                `json:"mineru_api_key"`  // MinerU 云 API Key
 
 	// MinerU 自建解析参数
 	MinerUModel         string `json:"mineru_model,omitempty"`          // backend: pipeline, vlm-*, hybrid-*
@@ -345,6 +349,14 @@ type ParserEngineConfig struct {
 	PaddleOCRVLCloudModel               string `json:"paddleocr_vl_cloud_model,omitempty"` // e.g. PaddleOCR-VL-1.6
 	PaddleOCRVLCloudUseSealRecognition  *bool  `json:"paddleocr_vl_cloud_use_seal_recognition,omitempty"`
 	PaddleOCRVLCloudUseChartRecognition *bool  `json:"paddleocr_vl_cloud_use_chart_recognition,omitempty"`
+}
+
+// ExternalParserPluginConfig is the persisted configuration envelope for one
+// parser plugin. Settings are normal typed plugin options; credentials are
+// kept separate so they can be encrypted at rest and redacted in API output.
+type ExternalParserPluginConfig struct {
+	Settings    map[string]any    `json:"settings,omitempty"`
+	Credentials map[string]string `json:"credentials,omitempty"`
 }
 
 const (
@@ -478,12 +490,85 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	return m
 }
 
-// Value implements the driver.Valuer interface for ParserEngineConfig
+// ExternalPluginOverrides serializes the configuration for exactly one
+// external parser plugin into the existing v1 ParserEngineOverrides transport.
+// Scalars retain their natural text form; compound values use JSON so plugins
+// can recover arrays or objects deterministically if they opt into them.
+func (c *ParserEngineConfig) ExternalPluginOverrides(pluginID string) map[string]string {
+	if c == nil || pluginID == "" || len(c.ExternalPluginConfigs) == 0 {
+		return nil
+	}
+	config, ok := c.ExternalPluginConfigs[pluginID]
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, len(config.Settings)+len(config.Credentials))
+	for key, value := range config.Settings {
+		if encoded, ok := parserOverrideValue(value); ok {
+			result[key] = encoded
+		}
+	}
+	for key, value := range config.Credentials {
+		result[key] = value
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func parserOverrideValue(value any) (string, bool) {
+	if value == nil {
+		return "", false
+	}
+	switch v := value.(type) {
+	case string:
+		return v, true
+	case bool:
+		return fmt.Sprintf("%t", v), true
+	case float64:
+		return fmt.Sprintf("%v", v), true
+	case float32:
+		return fmt.Sprintf("%v", v), true
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%v", v), true
+	default:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "", false
+		}
+		return string(encoded), true
+	}
+}
+
+// Value implements the driver.Valuer interface for ParserEngineConfig.
+// 内置引擎凭证键（mineru_api_key / paddleocr_vl_cloud_token 等顶层字段）走统一
+// 加密；外部插件凭证（ExternalPluginConfigs[*].Credentials）走整体 map 加密。
 func (c *ParserEngineConfig) Value() (driver.Value, error) {
 	if c == nil {
 		return nil, nil
 	}
-	return json.Marshal(c)
+	cp := *c
+	cp.ExternalPluginConfigs = cloneExternalParserPluginConfigs(c.ExternalPluginConfigs)
+	key := utils.GetAESKey()
+	// 外部插件凭证（嵌套 map）：凭证非空时必须有 key 且加密成功，拒绝明文落库
+	for pluginID, config := range cp.ExternalPluginConfigs {
+		for field, plain := range config.Credentials {
+			if plain == "" {
+				continue
+			}
+			if key == nil {
+				return nil, fmt.Errorf("refusing to persist plaintext credential %s.%s: SYSTEM_AES_KEY is not configured", pluginID, field)
+			}
+			encrypted, err := utils.EncryptAESGCM(plain, key)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt parser credential %s.%s: %w", pluginID, field, err)
+			}
+			config.Credentials[field] = encrypted
+		}
+		cp.ExternalPluginConfigs[pluginID] = config
+	}
+	return utils.MarshalWithSecrets(&cp, "mineru_api_key", "paddleocr_vl_cloud_token")
 }
 
 // Scan implements the sql.Scanner interface for ParserEngineConfig
@@ -495,7 +580,48 @@ func (c *ParserEngineConfig) Scan(value interface{}) error {
 	if !ok {
 		return nil
 	}
-	return json.Unmarshal(b, c)
+	if err := utils.UnmarshalWithSecrets(b, c, "mineru_api_key", "paddleocr_vl_cloud_token"); err != nil {
+		return err
+	}
+	for pluginID, config := range c.ExternalPluginConfigs {
+		for field, stored := range config.Credentials {
+			if stored == "" {
+				continue
+			}
+			if plain, ok := utils.DecryptStoredSecretLenient(stored); ok {
+				config.Credentials[field] = plain
+			} else {
+				log.Printf("[crypto] parser_engine_config.external_plugin_configs.%s.%s: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured", pluginID, field)
+				config.Credentials[field] = ""
+			}
+		}
+		c.ExternalPluginConfigs[pluginID] = config
+	}
+	return nil
+}
+
+func cloneExternalParserPluginConfigs(source map[string]ExternalParserPluginConfig) map[string]ExternalParserPluginConfig {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make(map[string]ExternalParserPluginConfig, len(source))
+	for pluginID, config := range source {
+		copyConfig := ExternalParserPluginConfig{}
+		if len(config.Settings) > 0 {
+			copyConfig.Settings = make(map[string]any, len(config.Settings))
+			for key, value := range config.Settings {
+				copyConfig.Settings[key] = value
+			}
+		}
+		if len(config.Credentials) > 0 {
+			copyConfig.Credentials = make(map[string]string, len(config.Credentials))
+			for key, value := range config.Credentials {
+				copyConfig.Credentials[key] = value
+			}
+		}
+		cloned[pluginID] = copyConfig
+	}
+	return cloned
 }
 
 // StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, OSS, KS3, and OBS.

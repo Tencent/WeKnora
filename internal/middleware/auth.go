@@ -60,6 +60,13 @@ var noAuthAPI = map[string][]string{
 	// before GET to validate Content-Type / Content-Length when rendering
 	// image previews — both verbs must be allowed for image links to work.
 	"/api/v1/files/presigned": {"GET", "HEAD"},
+	// Plugin-bundled icons are rendered by plain <img> tags, which cannot
+	// attach auth headers. The endpoints only stream icon files registered
+	// by loaded plugins (extension- and size-bounded), so serving them
+	// anonymously is safe — same reasoning as the presigned file route.
+	"/api/v1/datasource/icon/*":           {"GET", "HEAD"},
+	"/api/v1/web-search-providers/icon/*": {"GET", "HEAD"},
+	"/api/v1/vector-stores/icon/*":        {"GET", "HEAD"},
 }
 
 // 检查请求是否在无需认证的API列表中

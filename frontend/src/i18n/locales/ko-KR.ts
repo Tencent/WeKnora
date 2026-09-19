@@ -825,6 +825,7 @@ export default {
     connectionFailed: '연결 실패',
     isRequired: '은(는) 필수입니다',
     credentialsLabel: '자격 증명',
+    pluginSettingsLabel: '플러그인 설정',
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: '개인 액세스 토큰', projects: 'GitLab 프로젝트',
       projectsHint: '프로젝트 ID 또는 네임스페이스 경로(예: group/project)를 입력하고, 필요에 따라 브랜치와 디렉터리를 지정하세요.',
@@ -1011,6 +1012,7 @@ export default {
       failed: '실패'
     },
     logStatus: {
+      pending: '대기 중',
       running: '동기화 중',
       success: '성공',
       partial: '부분 성공',
@@ -2771,6 +2773,8 @@ export default {
       sourceLabel: '모델 소스',
       sourceLocal: 'Ollama',
       sourceRemote: 'API',
+      sourcePlugin: '플러그인',
+      pluginBaseUrlDesc: '선택 사항. 비워두면 플러그인 기본값을 사용합니다.',
       baseUrlLabel: 'Base URL',
       displayNameLabel: '표시 이름 (선택)',
       displayNamePlaceholder: '예: 고객지원 QA 모델',

@@ -62,13 +62,35 @@
         <div class="url-input-tip">{{ t('knowledgeBase.urlTip') }}</div>
       </div>
     </t-dialog>
+
+    <t-dialog
+      v-model:visible="localDirDialogVisible"
+      :header="t('knowledgeBase.importLocalDirTitle')"
+      :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
+      :cancel-btn="{ content: t('common.cancel') }"
+      width="500px"
+      @confirm="handleLocalDirDialogConfirm"
+      @cancel="handleLocalDirDialogCancel"
+    >
+      <div class="url-import-form">
+        <div class="url-input-label">{{ t('knowledgeBase.localDirLabel') }}</div>
+        <t-input
+          v-model="localDirInputValue"
+          :placeholder="t('knowledgeBase.localDirPlaceholder')"
+          clearable
+          autofocus
+          @enter="handleLocalDirDialogConfirm"
+        />
+        <div class="url-input-tip">{{ t('knowledgeBase.localDirTip') }}</div>
+      </div>
+    </t-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { AddIcon, FileAddIcon, UploadIcon, FolderAddIcon, LinkIcon, EditIcon } from 'tdesign-icons-vue-next'
 import { filterUploadFiles } from '../utils/uploadSources'
 
@@ -97,6 +119,7 @@ const emit = defineEmits<{
   files: [files: File[]]
   url: [url: string]
   manual: []
+  localDir: [path: string]
 }>()
 
 const { t } = useI18n()
@@ -105,6 +128,8 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const urlDialogVisible = ref(false)
 const urlInputValue = ref('')
+const localDirDialogVisible = ref(false)
+const localDirInputValue = ref('')
 
 const tooltipText = computed(() => props.tooltip || t('knowledgeBase.addDocument'))
 
@@ -133,6 +158,11 @@ const dropdownOptions = computed(() => {
       value: 'importURL',
       prefixIcon: () => h(LinkIcon, sourceIconProps),
     },
+    {
+      content: t('knowledgeBase.importLocalDir'),
+      value: 'localDir',
+      prefixIcon: () => h(TIcon, { name: 'folder-open', size: '16px' }),
+    },
   ]
   if (props.includeManual) {
     options.push({
@@ -155,6 +185,10 @@ const handleActionSelect = (data: { value: string }) => {
     case 'importURL':
       urlInputValue.value = ''
       urlDialogVisible.value = true
+      break
+    case 'localDir':
+      localDirInputValue.value = ''
+      localDirDialogVisible.value = true
       break
     case 'manualCreate':
       emit('manual')
@@ -221,6 +255,22 @@ const handleUrlDialogConfirm = () => {
 const handleUrlDialogCancel = () => {
   urlDialogVisible.value = false
   urlInputValue.value = ''
+}
+
+const handleLocalDirDialogConfirm = () => {
+  const path = localDirInputValue.value.trim()
+  if (!path) {
+    MessagePlugin.warning(t('knowledgeBase.localDirRequired'))
+    return
+  }
+  localDirDialogVisible.value = false
+  emit('localDir', path)
+  localDirInputValue.value = ''
+}
+
+const handleLocalDirDialogCancel = () => {
+  localDirDialogVisible.value = false
+  localDirInputValue.value = ''
 }
 
 const openUrlDialog = () => {

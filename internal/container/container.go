@@ -88,6 +88,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	pluginPkg "github.com/Tencent/WeKnora/internal/plugin"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -273,6 +274,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Web search service (needed by AgentService)
 	logger.Debugf(ctx, "[Container] Registering web search registry and providers...")
 	must(container.Provide(infra_web_search.NewRegistry))
+	// plugin.Manager is needed by registerWebSearchProviders (RegisterBuiltinWebSearch),
+	// so it must be provided before the Invoke below. It is the single shared
+	// plugin control-plane instance; later wiring blocks reuse the same one.
+	must(container.Provide(func() *pluginPkg.Manager { return pluginPkg.NewManager(pluginPkg.HostVersion) }))
+	must(container.Provide(func() *pluginPkg.RetrieverProviderRegistry { return pluginPkg.NewRetrieverProviderRegistry() }))
 	must(container.Invoke(registerWebSearchProviders))
 	must(container.Provide(repository.NewWebSearchProviderRepository))
 	must(container.Provide(repository.NewVectorStoreRepository))
@@ -441,10 +447,21 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Data source sync framework
 	logger.Debugf(ctx, "[Container] Registering data source sync framework...")
+	// *plugin.Manager is provided earlier (before registerWebSearchProviders);
+	// reuse the same singleton so built-in and external plugins share one
+	// control plane instead of registering a second manager.
 	must(container.Provide(initConnectorRegistry))
-	must(container.Provide(datasource.NewScheduler))
+	must(container.Invoke(startBuiltinPlugins))
+	// Register the model-service config re-pusher before any external plugin is
+	// loaded so boot-time model plugin starts (and later supervisor restarts)
+	// re-deliver saved api_key/base_url config into the plugin's in-memory cache.
+	must(container.Invoke(registerModelConfigRepusher))
+	must(container.Invoke(loadExternalPlugins))
+	must(container.Provide(datasource.NewSyncCoordinator))
+	must(container.Provide(datasource.NewSchedulerWithCoordinator))
 	must(container.Provide(service.NewDataSourceService))
 	must(container.Invoke(startDataSourceScheduler))
+	must(container.Invoke(startPluginHealthSupervisor))
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
@@ -523,6 +540,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewDataSourceCredentialsHandler))
 	must(container.Provide(handler.NewWebSearchHandler))
 	must(container.Provide(handler.NewWebSearchProviderHandler))
+	must(container.Provide(handler.NewPluginHandler))
 	must(container.Provide(handler.NewVectorStoreHandler))
 	must(container.Provide(handler.NewStorageBackendHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
@@ -1217,6 +1235,7 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
 	storeRepo interfaces.VectorStoreRepository, engineFactory interfaces.EngineFactory,
+	retrieverRegistry *pluginPkg.RetrieverProviderRegistry,
 ) (interfaces.RetrieveEngineRegistry, error) {
 	// storeRepo and engineFactory let the registry rebuild a store engine that
 	// is absent from this process, which happens when startup skipped it after
@@ -1523,7 +1542,7 @@ func initRetrieveEngineRegistry(
 	}
 	// ─── DB store registration (byStoreID) ───
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
-		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink)
+		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink, retrieverRegistry)
 	}
 
 	return registry, nil
@@ -1533,6 +1552,7 @@ func initRetrieveEngineRegistry(
 // in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
 func loadDBStoresIntoRegistry(
 	storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config, auditSink openSearchRepo.AuditSink,
+	retrieverRegistry *pluginPkg.RetrieverProviderRegistry,
 ) {
 	ctx := context.Background()
 	log := logger.GetLogger(ctx)
@@ -1550,7 +1570,7 @@ func loadDBStoresIntoRegistry(
 
 	log.Infof("Loading %d vector store(s) from database", len(stores))
 	for _, store := range stores {
-		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink)
+		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink, retrieverRegistry)
 		if err != nil {
 			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
 			continue
@@ -1720,7 +1740,7 @@ func NewDuckDB() (*sql.DB, error) {
 // registerWebSearchProviders registers all web search provider types to the registry.
 // Each provider type is registered with its factory function that accepts parameters.
 // Provider instances are created on-demand when tenants configure them.
-func registerWebSearchProviders(registry *infra_web_search.Registry) {
+func registerWebSearchProviders(registry *infra_web_search.Registry, manager *pluginPkg.Manager) error {
 	registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
 	registry.Register("google", infra_web_search.NewGoogleProvider)
 	registry.Register("bing", infra_web_search.NewBingProvider)
@@ -1735,6 +1755,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("bocha", infra_web_search.NewBochaProvider)
 	registry.Register("brave", infra_web_search.NewBraveProvider)
 	registry.Register("serply", infra_web_search.NewSerplyProvider)
+	return pluginPkg.RegisterBuiltinWebSearch(manager, registry)
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and
@@ -1767,7 +1788,7 @@ func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceClea
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
 // Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
 // container initialization loudly instead of silently disabling the feature at runtime.
-func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
+func initConnectorRegistry(manager *pluginPkg.Manager) (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
@@ -1815,7 +1836,60 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	if errs != nil {
 		return nil, errs
 	}
+	if err := pluginPkg.RegisterBuiltins(manager, registry); err != nil {
+		return nil, fmt.Errorf("register built-in plugin lifecycle entries: %w", err)
+	}
 	return registry, nil
+}
+
+func startBuiltinPlugins(manager *pluginPkg.Manager) error {
+	if err := pluginPkg.RegisterBuiltinParsers(manager); err != nil {
+		return err
+	}
+	return pluginPkg.StartAll(context.Background(), manager)
+}
+
+// registerModelConfigRepusher wires the model service into the plugin manager
+// as the sink that re-delivers saved model configuration after a model plugin
+// (re)starts. The assertion is structural: the model service gains a
+// RepushModelConfigs method, while the plugin manager stays generic.
+func registerModelConfigRepusher(manager *pluginPkg.Manager, modelService interfaces.ModelService) error {
+	if repusher, ok := modelService.(pluginPkg.ModelConfigRepusher); ok {
+		manager.SetModelConfigRepusher(repusher)
+	}
+	return nil
+}
+
+func loadExternalPlugins(manager *pluginPkg.Manager, registry *datasource.ConnectorRegistry, searchRegistry *infra_web_search.Registry, retrieverRegistry *pluginPkg.RetrieverProviderRegistry, settings interfaces.SystemSettingService) error {
+	ctx := context.Background()
+	raw := settings.GetString(ctx, "plugins.trust_levels", "WEKNORA_PLUGIN_TRUST_LEVELS", "")
+	if err := pluginPkg.ConfigureManagerTrust(manager, raw); err != nil {
+		logger.Errorf(ctx, "[Plugin] invalid persisted trust configuration; all external plugins will start offline: %v", err)
+		manager.SetPluginTrustConfig(pluginPkg.PluginTrustConfig{})
+	}
+	return pluginPkg.LoadExternalFromEnvWithRegistries(ctx, manager, registry, searchRegistry, retrieverRegistry)
+}
+
+// startPluginHealthSupervisor activates the manager-wide control-plane health
+// loop after built-in and external plugins have both been registered and
+// started. The same supervisor covers every extension type. Bounded automatic
+// restart handles transient plugin crashes without allowing an endlessly
+// flapping runtime to consume lifecycle resources forever.
+func startPluginHealthSupervisor(manager *pluginPkg.Manager, cleaner interfaces.ResourceCleaner) {
+	if manager == nil {
+		return
+	}
+	if err := manager.StartHealthSupervisor(context.Background(), pluginPkg.HealthSupervisorConfig{
+		RestartEnabled:  true,
+		MaxRestartCount: 3,
+	}); err != nil {
+		logger.Warnf(context.Background(), "[Container] plugin health supervisor start failed: %v", err)
+		return
+	}
+	cleaner.RegisterWithName("PluginHealthSupervisor", func() error {
+		manager.StopHealthSupervisor()
+		return nil
+	})
 }
 
 // startDataSourceScheduler starts the data source cron scheduler and registers cleanup.

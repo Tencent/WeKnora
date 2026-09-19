@@ -70,6 +70,7 @@ type RouterParams struct {
 	WebSearchHandler             *handler.WebSearchHandler
 	WebSearchProviderHandler     *handler.WebSearchProviderHandler
 	WebSearchCredentialsHandler  *handler.WebSearchProviderCredentialsHandler
+	PluginHandler                *handler.PluginHandler
 	VectorStoreHandler           *handler.VectorStoreHandler
 	StorageBackendHandler        *handler.StorageBackendHandler
 	StorageBackendResolver       interfaces.StorageBackendResolver
@@ -308,6 +309,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
+		RegisterPluginRoutes(v1, params.PluginHandler, rbacGuards)
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterStorageBackendRoutes(v1, params.StorageBackendHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)

@@ -109,15 +109,23 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 
 	// 5. Auto-detect server version via connection test.
 	// This is required for engines where the version determines the SDK (e.g., ES v7 vs v8).
-	// Without it, the wrong SDK may be used causing protocol errors (406, etc.).
-	version, err := s.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
-	if err != nil {
-		return errors.NewBadRequestError(
-			fmt.Sprintf("connection test failed: %s. Ensure the server is reachable before saving.", err.Error()))
+	// External retriever plugins have no SDK-version concept; their real
+	// connectivity is probed when the engine is built in registerInRegistry
+	// (step 7), so skip the host-side version probe for them.
+	if types.IsBuiltinEngineType(store.EngineType) {
+		version, err := s.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
+		if err != nil {
+			return errors.NewBadRequestError(
+				fmt.Sprintf("connection test failed: %s. Ensure the server is reachable before saving.", err.Error()))
+		}
+		if version != "" {
+			store.ConnectionConfig.Version = version
+		}
 	}
-	if version != "" {
-		store.ConnectionConfig.Version = version
-	}
+
+	// 5.5. 把外部插件声明为 secret 的动态凭证字段从 Extra 分离到
+	// ExtraCredentials，确保它们走加密存储而不是摊平的明文 Extra。
+	store.ConnectionConfig.PartitionCredentials(store.EngineType)
 
 	// 6. Persist
 	logger.Infof(ctx, "Creating vector store: tenant=%d, name=%s, engine=%s",
@@ -530,11 +538,17 @@ func validateConnectionAddrSSRF(engineType types.RetrieverEngineType, config typ
 		// File-based engine; no remote address to validate.
 		return nil
 	default:
+		// External retriever plugins have no fixed address fields for the host
+		// to validate, and they enforce their own network policy (their
+		// manifest declares a destination allowlist enforced by the plugin
+		// runtime sandbox). Let them through rather than fail-closed. Truly
+		// unknown types (not built-in, not registered) still fail closed below.
+		if !types.IsBuiltinEngineType(engineType) && types.IsValidEngineType(engineType) {
+			return nil
+		}
 		// Fail closed. Engines without a DB-store address mapping (postgres,
 		// infinity, elasticfaiss, and any future engine) must not silently
-		// bypass SSRF validation. The guarded callers (CreateStore,
-		// TestRawConnection) already restrict to validEngineTypes, so this is
-		// defence-in-depth rather than a user-facing path.
+		// bypass SSRF validation.
 		return errors.NewValidationError(
 			fmt.Sprintf("SSRF validation is not configured for engine type: %s", engineType))
 	}

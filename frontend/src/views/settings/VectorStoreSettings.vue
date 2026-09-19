@@ -194,7 +194,7 @@
             <template v-if="selectedType">
               <template v-for="field in selectedType.connection_fields" :key="field.name">
                 <div v-if="field.sensitive || form.connection_config[field.name]" class="readonly-row">
-                  <span class="readonly-label">{{ fieldLabel(field.name) }}</span>
+                  <span class="readonly-label">{{ fieldLabel(field) }}</span>
                   <span class="readonly-value">
                     {{ field.sensitive ? '********' : form.connection_config[field.name] }}
                   </span>
@@ -204,7 +204,7 @@
             <template v-if="selectedType?.index_fields?.length">
               <template v-for="field in selectedType.index_fields" :key="field.name">
                 <div v-if="form.index_config[field.name]" class="readonly-row">
-                  <span class="readonly-label">{{ fieldLabel(field.name) }}</span>
+                  <span class="readonly-label">{{ fieldLabel(field) }}</span>
                   <span class="readonly-value">{{ form.index_config[field.name] }}</span>
                 </div>
               </template>
@@ -226,7 +226,18 @@
                   :key="st.type"
                   :value="st.type"
                   :label="st.display_name"
-                />
+                >
+                  <div class="engine-option">
+                    <img
+                      v-if="st.icon"
+                      :src="st.icon"
+                      class="engine-option__icon"
+                      alt=""
+                    />
+                    <span v-else class="engine-option__monogram">{{ st.display_name.charAt(0) }}</span>
+                    <span class="engine-option__label">{{ st.display_name }}</span>
+                  </div>
+                </t-option>
               </t-select>
             </div>
 
@@ -248,7 +259,7 @@
               <label
                 class="form-label"
                 :class="{ required: field.required }"
-              >{{ fieldLabel(field.name) }}</label>
+              >{{ fieldLabel(field) }}</label>
 
               <!-- boolean 字段：switch + 行内描述 / TLS 警告 -->
               <template v-if="field.type === 'boolean'">
@@ -262,6 +273,15 @@
                   {{ t('vectorStoreSettings.insecureSkipVerifyWarning') }}
                 </p>
               </template>
+
+              <!-- 枚举 → 下拉 -->
+              <t-select
+                v-else-if="field.enum && field.enum.length"
+                v-model="form.connection_config[field.name]"
+                :placeholder="field.default?.toString() || ''"
+              >
+                <t-option v-for="opt in field.enum" :key="opt" :value="opt" :label="opt" />
+              </t-select>
 
               <!-- 敏感字段（password / api key 等）：lock prefix + password -->
               <t-input
@@ -311,7 +331,7 @@
                 :key="field.name"
                 class="form-item"
               >
-                <label class="form-label">{{ fieldLabel(field.name) }}</label>
+                <label class="form-label">{{ fieldLabel(field) }}</label>
 
                 <!-- 枚举 → 下拉 -->
                 <t-select
@@ -466,7 +486,7 @@ const formRules = computed(() => {
       for (const field of selectedType.value.connection_fields) {
         if (field.required) {
           rules[`connection_config.${field.name}`] = [
-            { required: true, message: t('vectorStoreSettings.validation.fieldRequired', { field: fieldLabel(field.name) }) },
+            { required: true, message: t('vectorStoreSettings.validation.fieldRequired', { field: fieldLabel(field) }) },
           ]
         }
       }
@@ -491,11 +511,14 @@ const formRules = computed(() => {
 const indexNamePattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/
 
 // ===== Methods =====
-const fieldLabel = (name: string): string => {
-  const key = `vectorStoreSettings.fields.${name}`
+const fieldLabel = (field: { name: string; title?: string }): string => {
+  // External plugin fields carry a human-readable title from config_schema;
+  // prefer it over the raw field name / i18n lookup.
+  if (field.title) return field.title
+  const key = `vectorStoreSettings.fields.${field.name}`
   const translated = t(key)
   // If i18n key not found, vue-i18n returns the key itself — fall back to field name
-  return translated === key ? name : translated
+  return translated === key ? field.name : translated
 }
 
 // Distinguish replica fields (max 10) from shard fields (max 64) for input bounds
@@ -1169,6 +1192,39 @@ onMounted(async () => {
   list-card → drawer hand-off stays visually continuous.
 -->
 <style lang="less">
+// 引擎类型下拉里的图标选项（dropdown 渲染在 body，故用非 scoped 样式）
+.engine-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  &__icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+
+  &__monogram {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--td-bg-color-component);
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  &__label {
+    line-height: 20px;
+  }
+}
+
 // 彩色 logo 时给 header-icon 容器一个白底 + 1px 边
 .vectorstore-drawer .setting-drawer__header-icon:has(.header-icon__img) {
   background: var(--td-bg-color-container);

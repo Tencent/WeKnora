@@ -336,13 +336,23 @@ func (r *RetrieveEngineRegistry) GetOrLoadByStoreID(
 // Phase 2 should add Close() to RetrieveEngineService interface and call it here.
 func (r *RetrieveEngineRegistry) UnregisterByStoreID(storeID string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
+	svc, existed := r.byStoreID[storeID]
 	delete(r.byStoreID, storeID)
 	r.bumpGenerationLocked(storeID)
 	// Let an operator retry immediately after removing a store rather than
 	// waiting out a cooldown left over from the previous configuration.
 	delete(r.failedUntil, storeID)
+	r.mu.Unlock()
+
+	// Release the engine's resources outside the lock: closing an external
+	// retriever plugin's store session is a network round-trip that must not
+	// block registry mutations. Built-in engines have no Close and are skipped
+	// via the optional-interface assertion.
+	if existed {
+		if closer, ok := svc.(interface{ Close(context.Context) error }); ok {
+			_ = closer.Close(context.Background())
+		}
+	}
 }
 
 // Compile-time assertion: *RetrieveEngineRegistry satisfies the

@@ -56,7 +56,7 @@ async function loadList(silent = false) {
     dataSources.value = res?.data || res || []
     emit('count', dataSources.value.length)
 
-    const hasRunningSync = dataSources.value.some(ds => ds.latest_sync_log?.status === 'running')
+    const hasRunningSync = dataSources.value.some(ds => ['pending', 'running'].includes(ds.latest_sync_log?.status || ''))
     if (hasRunningSync) {
       schedulePolling()
     } else {
@@ -169,7 +169,7 @@ function lastSyncStatusLabel(ds: DataSource) {
 }
 
 function isSyncRunning(ds: DataSource) {
-  return ds.latest_sync_log?.status === 'running'
+  return ['pending', 'running'].includes(ds.latest_sync_log?.status || '')
 }
 
 function onEditorSaved() {

@@ -1646,6 +1646,35 @@ const handleUploadSourceUrl = (url: string) => {
   openUploadConfirmDialog([], [url]);
 };
 
+const handleUploadSourceLocalDir = async (path: string) => {
+  if (!ensureDocumentKbReady()) return;
+  try {
+    const { createDataSource, triggerSync } = await import('@/api/datasource');
+    const res: any = await createDataSource({
+      knowledge_base_id: kbId.value,
+      name: '本地目录',
+      type: 'weknora.localdir',
+      config: { type: 'weknora.localdir', settings: { root: path } },
+      sync_mode: 'incremental',
+      sync_deletions: true,
+    });
+    const ds: any = res?.data ?? res;
+    const dsId = ds?.id;
+    if (!dsId) {
+      MessagePlugin.error('创建数据源失败');
+      return;
+    }
+    MessagePlugin.success('本地目录数据源已创建，开始同步');
+    try {
+      await triggerSync(dsId);
+    } catch (_) {
+      // 同步触发失败不阻塞流程，用户可在数据源列表手动同步
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || '创建数据源失败');
+  }
+};
+
 const handleManualCreate = () => {
   if (!ensureDocumentKbReady()) return;
   uiStore.openManualEditor({
@@ -2333,7 +2362,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
                       :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
-                      @url="handleUploadSourceUrl" @manual="handleManualCreate" />
+                      @url="handleUploadSourceUrl" @manual="handleManualCreate" @local-dir="handleUploadSourceLocalDir" />
                   </div>
                 </div>
               </div>

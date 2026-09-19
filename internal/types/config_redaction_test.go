@@ -73,6 +73,29 @@ func TestMergeParserEngineConfigForUpdate_PreservesLegacyChatParserRules(t *test
 	assert.Equal(t, "mineru", merged.ChatParserEngineRules[0].Engine)
 }
 
+func TestParserEngineConfigExternalPluginCredentialsAreRedactedAndPreserved(t *testing.T) {
+	existing := &ParserEngineConfig{ExternalPluginConfigs: map[string]ExternalParserPluginConfig{
+		"example.parser": {
+			Settings:    map[string]any{"timeout": float64(30)},
+			Credentials: map[string]string{"api_key": "stored-secret"},
+		},
+	}}
+	response := ParserEngineConfigForResponse(existing, true)
+	require.NotNil(t, response)
+	assert.Equal(t, RedactedSecretPlaceholder, response.ExternalPluginConfigs["example.parser"].Credentials["api_key"])
+
+	incoming := &ParserEngineConfig{ExternalPluginConfigs: map[string]ExternalParserPluginConfig{
+		"example.parser": {
+			Settings:    map[string]any{"timeout": float64(45)},
+			Credentials: map[string]string{"api_key": RedactedSecretPlaceholder},
+		},
+	}}
+	merged := MergeParserEngineConfigForUpdate(incoming, existing)
+	require.NotNil(t, merged)
+	assert.Equal(t, "stored-secret", merged.ExternalPluginConfigs["example.parser"].Credentials["api_key"])
+	assert.Equal(t, float64(45), merged.ExternalPluginConfigs["example.parser"].Settings["timeout"])
+}
+
 func TestMergeStorageEngineConfigForUpdate_PreservesRedactedSecrets(t *testing.T) {
 	existing := &StorageEngineConfig{
 		DefaultProvider: "minio",

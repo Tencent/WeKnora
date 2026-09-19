@@ -1,0 +1,391 @@
+syntax = "proto3";
+
+package weknora.plugin.v1;
+
+option go_package = "github.com/Tencent/WeKnora/pkg/pluginapi/proto;pluginproto";
+
+import "google/protobuf/struct.proto";
+
+message HandshakeRequest {}
+message HandshakeResponse {
+  string protocol_version = 1;
+  string plugin_id = 2;
+  repeated string capabilities = 3;
+  string extension_type = 4;
+  repeated string services = 5;
+}
+message HealthRequest {}
+message HealthResponse {
+  string state = 1;
+  string message = 2;
+}
+message Cursor {
+  bytes data = 1;
+  string content_type = 2;
+}
+message DataSourceRequest {
+  google.protobuf.Struct config = 1;
+  repeated string resource_ids = 2;
+  string parent_id = 3;
+  Cursor cursor = 4;
+}
+message Resource {
+  string external_id = 1;
+  string name = 2;
+  string parent_id = 3;
+  string type = 4;
+  map<string, string> metadata = 5;
+}
+message FetchedItem {
+  string external_id = 1;
+  string title = 2;
+  bytes content = 3;
+  string url = 4;
+  string mime_type = 5;
+  string updated_at = 6;
+  map<string, string> metadata = 7;
+  bool is_deleted = 8;
+  bool replaces_subtree = 9;
+  repeated string subtree_keep = 10;
+  // file_name is the portable filename (with extension) that downstream
+  // parsing uses to select the right parser. It is separate from title so
+  // plugin authors are not forced to encode an extension into the title.
+  string file_name = 11;
+}
+message DataSourceResponse {
+  string error = 1;
+  repeated Resource resources = 2;
+  repeated string ancestors = 3;
+  repeated FetchedItem items = 4;
+  Cursor cursor = 5;
+  repeated string warnings = 6;
+}
+message ParserRequest {
+  bytes file_content = 1;
+  string file_name = 2;
+  string file_type = 3;
+  string url = 4;
+  string title = 5;
+  string parser_engine = 6;
+  string request_id = 7;
+  map<string, string> parser_engine_overrides = 8;
+}
+message ParserImageRef {
+  string filename = 1;
+  string original_ref = 2;
+  string mime_type = 3;
+  string storage_key = 4;
+  bytes image_data = 5;
+  bool is_original = 6;
+}
+message ParserResponse {
+  string markdown_content = 1;
+  repeated ParserImageRef image_refs = 2;
+  string image_dir_path = 3;
+  map<string, string> metadata = 4;
+  string error = 5;
+  bool is_audio = 6;
+  bytes audio_data = 7;
+}
+message WebSearchRequest {
+  string query = 1;
+  int32 max_results = 2;
+  bool include_date = 3;
+  string api_key = 4;
+  string engine_id = 5;
+  string base_url = 6;
+  string proxy_url = 7;
+  map<string, string> extra_config = 8;
+}
+message WebSearchResult {
+  string title = 1;
+  string url = 2;
+  string snippet = 3;
+  string content = 4;
+  string source = 5;
+  string published_at = 6;
+}
+message WebSearchResponse {
+  repeated WebSearchResult results = 1;
+  string error = 2;
+}
+
+// PluginControl is the shared control-plane contract implemented by every
+// plugin regardless of extension type. The lifecycle manager depends only on
+// this service, never on type-specific clients.
+service PluginControl {
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+service DataSourcePlugin {
+  rpc Validate(DataSourceRequest) returns (DataSourceResponse);
+  rpc ListResources(DataSourceRequest) returns (DataSourceResponse);
+  rpc ResolveResourceAncestors(DataSourceRequest) returns (DataSourceResponse);
+  rpc FetchAll(DataSourceRequest) returns (DataSourceResponse);
+  rpc FetchIncremental(DataSourceRequest) returns (DataSourceResponse);
+  // Streaming variants keep item batches bounded and carry a cursor in each
+  // response so the host can persist progress during a long sync. The unary
+  // methods above remain for v1 compatibility.
+  rpc FetchAllStream(DataSourceRequest) returns (stream DataSourceResponse);
+  rpc FetchIncrementalStream(DataSourceRequest) returns (stream DataSourceResponse);
+}
+service ParserPlugin {
+  rpc Parse(ParserRequest) returns (ParserResponse);
+}
+service WebSearchPlugin {
+  rpc Search(WebSearchRequest) returns (WebSearchResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Model plugin: a provider that serves one or more model capabilities
+// (chat / embedding / rerank / vllm / asr). A single plugin process may
+// implement any subset; the host dispatches per capability.
+// ---------------------------------------------------------------------------
+
+message ModelValidateRequest {
+  google.protobuf.Struct config = 1;
+}
+message ModelValidateResponse {
+  string error = 1;
+}
+message ModelInfoRequest {}
+message ModelInfoResponse {
+  repeated string capabilities = 1; // chat, embedding, rerank, vllm, asr
+}
+
+message ModelChatMessage {
+  string role = 1;                          // system / user / assistant / tool
+  string content = 2;
+  string name = 3;
+  string tool_call_id = 4;
+  repeated ModelChatToolCall tool_calls = 5;
+  repeated string images = 6;               // image URLs for the current user message
+  string reasoning_content = 7;             // thinking-model reasoning (assistant message)
+  repeated ModelChatContentPart multi_content = 8;
+}
+message ModelChatContentPart {
+  string type = 1;   // "text" or "image_url"
+  string text = 2;
+  string image_url = 3;
+}
+message ModelChatToolCall {
+  string id = 1;
+  string type = 2;             // "function"
+  string function_name = 3;
+  string function_arguments = 4; // JSON string
+}
+message ModelChatTool {
+  string type = 1;
+  string function_name = 2;
+  string function_description = 3;
+  string function_parameters = 4; // JSON schema string
+}
+message ModelChatOptions {
+  double temperature = 1;
+  double top_p = 2;
+  int32 seed = 3;
+  int32 max_tokens = 4;
+  int32 max_completion_tokens = 5;
+  double frequency_penalty = 6;
+  double presence_penalty = 7;
+  bool thinking = 8;
+  repeated ModelChatTool tools = 9;
+  string tool_choice = 10;
+  bool parallel_tool_calls = 11;
+  string format = 12; // JSON string
+}
+message ModelTokenUsage {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 total_tokens = 3;
+}
+message ModelChatRequest {
+  repeated ModelChatMessage messages = 1;
+  ModelChatOptions options = 2;
+}
+message ModelChatResponse {
+  string content = 1;
+  string reasoning_content = 2;
+  repeated ModelChatToolCall tool_calls = 3;
+  string finish_reason = 4;
+  ModelTokenUsage usage = 5;
+  string error = 6;
+}
+message ModelStreamResponse {
+  string content = 1;
+  bool done = 2;
+  repeated ModelChatToolCall tool_calls = 3;
+  string finish_reason = 4;
+  ModelTokenUsage usage = 5;
+  string error = 6;
+  // reasoning_content carries thinking-model reasoning (OpenAI o1, DeepSeek
+  // reasoner, MiMo, etc.) so streaming responses preserve the same content as
+  // the unary Chat path.
+  string reasoning_content = 7;
+}
+
+message ModelEmbedRequest {
+  string text = 1;
+}
+message ModelEmbedResponse {
+  repeated float vector = 1;
+  int32 dimensions = 2;
+  string error = 3;
+}
+message ModelBatchEmbedRequest {
+  repeated string texts = 1;
+}
+message ModelFloatVector {
+  repeated float values = 1;
+}
+message ModelBatchEmbedResponse {
+  repeated ModelFloatVector vectors = 1;
+  int32 dimensions = 2;
+  string error = 3;
+}
+
+message ModelRerankRequest {
+  string query = 1;
+  repeated string documents = 2;
+}
+message ModelRankResult {
+  int32 index = 1;
+  double relevance_score = 2;
+}
+message ModelRerankResponse {
+  repeated ModelRankResult results = 1;
+  string error = 2;
+}
+
+message ModelVLMRequest {
+  repeated bytes images = 1;
+  string prompt = 2;
+}
+message ModelVLMResponse {
+  string text = 1;
+  string error = 2;
+}
+
+message ModelASRRequest {
+  bytes audio = 1;
+  string file_name = 2;
+}
+message ModelASRResponse {
+  string text = 1;
+  string error = 2;
+}
+
+service ModelPlugin {
+  rpc ValidateConfig(ModelValidateRequest) returns (ModelValidateResponse);
+  rpc ModelInfo(ModelInfoRequest) returns (ModelInfoResponse);
+  rpc Chat(ModelChatRequest) returns (ModelChatResponse);
+  rpc ChatStream(ModelChatRequest) returns (stream ModelStreamResponse);
+  rpc Embed(ModelEmbedRequest) returns (ModelEmbedResponse);
+  rpc BatchEmbed(ModelBatchEmbedRequest) returns (ModelBatchEmbedResponse);
+  rpc Rerank(ModelRerankRequest) returns (ModelRerankResponse);
+  rpc PredictVLM(ModelVLMRequest) returns (ModelVLMResponse);
+  rpc Transcribe(ModelASRRequest) returns (ModelASRResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Retriever plugin: a vector/keyword storage backend. The host keeps a minimal,
+// stable contract (open/put/search/delete/patch/close); the plugin owns all
+// backend-specific internals (collections, indexes, dimensions, transactions,
+// retries). A single plugin runtime may host multiple store sessions, each
+// addressed by an opaque store_handle generated by the plugin SDK.
+// ---------------------------------------------------------------------------
+
+message RetrieverDescribeRequest {}
+message RetrieverDescribeResponse {
+  string engine_type = 1;
+  repeated string capabilities = 2; // "vector", "keywords", "filter", ...
+  // score_semantics declares what a raw score means so the host can normalize
+  // results across engines. One of:
+  //   similarity_higher_better, distance_lower_better, rank_only
+  string score_semantics = 3;
+}
+
+message RetrieverOpenStoreRequest {
+  google.protobuf.Struct config = 1; // settings + credentials + index_config
+}
+message RetrieverOpenStoreResponse {
+  string store_handle = 1; // opaque, generated by the plugin SDK
+  string error = 2;
+}
+
+message RetrieverCloseStoreRequest {
+  string store_handle = 1;
+}
+
+// RetrieverRecord is one unit written to the backend. embedding is strongly
+// typed and computed host-side; metadata carries filter fields (enabled,
+// tag_id, ...) as strings.
+message RetrieverRecord {
+  string record_id = 1;
+  string content = 2;
+  repeated float embedding = 3;
+  map<string, string> metadata = 4;
+}
+
+message RetrieverBatchPutRequest {
+  string store_handle = 1;
+  repeated RetrieverRecord records = 2;
+}
+message RetrieverBatchPutResponse {
+  string error = 1;
+}
+
+// RetrieverStringList is a multi-value filter operand: a field matches when its
+// value is in the list (an "IN" match). Internal repositories delete and patch
+// by filtering metadata fields (chunk_id, source_id, knowledge_id, ...) with
+// lists of values, so the plugin filter must express that.
+message RetrieverStringList {
+  repeated string values = 1;
+}
+
+message RetrieverSearchRequest {
+  string store_handle = 1;
+  string query = 2;
+  repeated float embedding = 3;
+  map<string, RetrieverStringList> filter = 4;
+  int32 top_k = 5;
+  double threshold = 6;
+  string retriever_type = 7; // "vector" or "keywords"
+}
+message RetrieverHit {
+  string record_id = 1;
+  double score = 2;
+  map<string, string> metadata = 3;
+}
+message RetrieverSearchResponse {
+  repeated RetrieverHit hits = 1;
+  string error = 2;
+}
+
+message RetrieverDeleteRequest {
+  string store_handle = 1;
+  repeated string record_ids = 2; // delete by exact record ids
+  map<string, RetrieverStringList> filter = 3; // delete by logical filter scope
+}
+
+message RetrieverPatchRequest {
+  string store_handle = 1;
+  repeated string record_ids = 2;
+  map<string, RetrieverStringList> filter = 3; // locate records to patch
+  map<string, string> patch = 4;               // fields to update (enabled, tag_id, ...)
+}
+
+message RetrieverResponse {
+  string error = 1;
+}
+
+service RetrieverPlugin {
+  rpc Describe(RetrieverDescribeRequest) returns (RetrieverDescribeResponse);
+  rpc OpenStore(RetrieverOpenStoreRequest) returns (RetrieverOpenStoreResponse);
+  rpc CloseStore(RetrieverCloseStoreRequest) returns (RetrieverResponse);
+  rpc BatchPut(RetrieverBatchPutRequest) returns (RetrieverBatchPutResponse);
+  rpc Search(RetrieverSearchRequest) returns (RetrieverSearchResponse);
+  rpc Delete(RetrieverDeleteRequest) returns (RetrieverResponse);
+  rpc Patch(RetrieverPatchRequest) returns (RetrieverResponse);
+}

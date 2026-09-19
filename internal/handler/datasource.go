@@ -3,7 +3,10 @@ package handler
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
@@ -609,4 +612,49 @@ func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 func (h *DataSourceHandler) GetAvailableConnectors(c *gin.Context) {
 	connectors := datasource.ListAvailableConnectors()
 	c.JSON(http.StatusOK, connectors)
+}
+
+// maxConnectorIconBytes caps the size of a served plugin icon (5 MB).
+const maxConnectorIconBytes = 5 * 1024 * 1024
+
+// connectorIconContentTypes maps a lowercase file extension to its Content-Type.
+// Only these image types are served; anything else is rejected.
+var connectorIconContentTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".svg":  "image/svg+xml",
+	".webp": "image/webp",
+	".gif":  "image/gif",
+	".ico":  "image/x-icon",
+}
+
+// GetConnectorIcon streams a plugin-bundled connector icon. The connector type
+// is looked up in the external icon registry, so only icons registered by a
+// loaded external plugin are served — never arbitrary files. Size and extension
+// are both bounded to keep the endpoint from becoming a file-read primitive.
+func (h *DataSourceHandler) GetConnectorIcon(c *gin.Context) {
+	connectorType := c.Param("type")
+	iconFile := datasource.ResolveExternalConnectorIconFile(connectorType)
+	if iconFile == "" {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(iconFile))
+	contentType, ok := connectorIconContentTypes[ext]
+	if !ok {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	info, err := os.Stat(iconFile)
+	if err != nil || info.IsDir() || info.Size() > maxConnectorIconBytes {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	data, err := os.ReadFile(iconFile)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Data(http.StatusOK, contentType, data)
 }

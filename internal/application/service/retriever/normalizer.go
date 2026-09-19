@@ -121,6 +121,24 @@ func (EngineAwareNormalizer) Normalize(
 		return score
 	}
 
+	// External retriever plugins declare their own score semantics via the
+	// Describe RPC; honor that before falling back to the built-in
+	// hard-coded engine-type branches below. This is what lets a plugin
+	// alias an engine (e.g. "milvus_ext") and still normalize correctly.
+	if sem, ok := types.GetExternalEngineScoreSemantics(engineType); ok {
+		switch sem {
+		case types.ScoreSemanticsSimilarityHigherBetter:
+			// Plugin already normalized to [0,1] similarity.
+			return clamp01(score)
+		case types.ScoreSemanticsDistanceLowerBetter:
+			// Distance (lower better) → similarity (higher better).
+			return clamp01(1 - score)
+		case types.ScoreSemanticsRankOnly:
+			// No meaningful magnitude; RRF rank fusion handles ordering.
+			return score
+		}
+	}
+
 	switch engineType {
 	case types.MilvusRetrieverEngineType:
 		// Raw cosine in [-1, 1] → [0, 1]. Milvus is the only engine in

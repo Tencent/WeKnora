@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -455,4 +457,33 @@ func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "version": version})
+}
+
+// GetStoreIcon streams a plugin-bundled engine icon. The engine type is looked
+// up in the external icon-file map, so only icons registered by a loaded
+// external retriever plugin are served — never arbitrary files.
+func (h *VectorStoreHandler) GetStoreIcon(c *gin.Context) {
+	engineType := c.Param("type")
+	iconFile := types.ResolveExternalVectorStoreIconFile(types.RetrieverEngineType(engineType))
+	if iconFile == "" {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(iconFile))
+	contentType, ok := pluginIconContentTypes[ext]
+	if !ok {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	info, err := os.Stat(iconFile)
+	if err != nil || info.IsDir() || info.Size() > maxPluginIconBytes {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	data, err := os.ReadFile(iconFile)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Data(http.StatusOK, contentType, data)
 }

@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -110,7 +111,7 @@ type SyncLogRepository interface {
 	// FindLatest retrieves the most recent sync log for a data source
 	FindLatest(ctx context.Context, dsID string) (*types.SyncLog, error)
 
-	// HasRunningSync checks if a data source has any sync currently in "running" status.
+	// HasRunningSync checks if a data source has any pending or running sync.
 	// Used to prevent overlapping sync executions.
 	HasRunningSync(ctx context.Context, dsID string) (bool, error)
 
@@ -125,4 +126,13 @@ type SyncLogRepository interface {
 
 	// CleanupOldLogs deletes sync logs older than the retention period
 	CleanupOldLogs(ctx context.Context, retentionDays int) error
+}
+
+// SyncLogOutboxRepository is the durable DB→queue delivery extension used by
+// production repositories. It is separate so lightweight test doubles and
+// alternate repositories can opt in incrementally.
+type SyncLogOutboxRepository interface {
+	FindUndispatched(ctx context.Context, limit int) ([]*types.SyncLog, error)
+	MarkDispatched(ctx context.Context, id string, at time.Time) error
+	MarkDispatchFailure(ctx context.Context, id string, attempts int, next time.Time, message string) error
 }

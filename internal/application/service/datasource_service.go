@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
@@ -20,21 +21,46 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // DataSourceService implements the DataSourceService interface
 type DataSourceService struct {
-	dsRepo            interfaces.DataSourceRepository
-	syncLogRepo       interfaces.SyncLogRepository
-	knowledgeService  interfaces.KnowledgeService
-	kbService         interfaces.KnowledgeBaseService
-	taskEnqueuer      interfaces.TaskEnqueuer
-	connectorRegistry *datasource.ConnectorRegistry
-	scheduler         *datasource.Scheduler
-	tenantRepo        interfaces.TenantRepository
-	tagService        interfaces.KnowledgeTagService
-	audit             interfaces.AuditLogService
+	dsRepo              interfaces.DataSourceRepository
+	syncLogRepo         interfaces.SyncLogRepository
+	knowledgeService    interfaces.KnowledgeService
+	kbService           interfaces.KnowledgeBaseService
+	taskEnqueuer        interfaces.TaskEnqueuer
+	connectorRegistry   *datasource.ConnectorRegistry
+	connectorResolver   datasource.ConnectorResolver
+	scheduler           *datasource.Scheduler
+	tenantRepo          interfaces.TenantRepository
+	tagService          interfaces.KnowledgeTagService
+	audit               interfaces.AuditLogService
+	syncCoordinator     *datasource.SyncCoordinator
+	syncCoordinatorOnce sync.Once
+	syncDispatcher      *datasource.SyncOutboxDispatcher
+	syncDispatcherOnce  sync.Once
+}
+
+func (s *DataSourceService) dispatcher() *datasource.SyncOutboxDispatcher {
+	s.syncDispatcherOnce.Do(func() {
+		if s.syncDispatcher == nil {
+			s.syncDispatcher = datasource.NewSyncOutboxDispatcher(s.syncLogRepo, s.taskEnqueuer)
+		}
+	})
+	return s.syncDispatcher
+}
+
+func (s *DataSourceService) coordinator() *datasource.SyncCoordinator {
+	s.syncCoordinatorOnce.Do(func() {
+		if s.syncCoordinator == nil {
+			s.syncCoordinator = datasource.NewSyncCoordinator(nil)
+		}
+	})
+	return s.syncCoordinator
 }
 
 // NewDataSourceService creates a new data source service
@@ -49,7 +75,11 @@ func NewDataSourceService(
 	tenantRepo interfaces.TenantRepository,
 	tagService interfaces.KnowledgeTagService,
 	audit interfaces.AuditLogService,
+	syncCoordinator *datasource.SyncCoordinator,
 ) interfaces.DataSourceService {
+	if syncCoordinator == nil {
+		syncCoordinator = datasource.NewSyncCoordinator(nil)
+	}
 	return &DataSourceService{
 		dsRepo:            dsRepo,
 		syncLogRepo:       syncLogRepo,
@@ -57,10 +87,13 @@ func NewDataSourceService(
 		kbService:         kbService,
 		taskEnqueuer:      taskEnqueuer,
 		connectorRegistry: connectorRegistry,
+		connectorResolver: datasource.NewRegistryResolver(connectorRegistry),
 		scheduler:         scheduler,
 		tenantRepo:        tenantRepo,
 		tagService:        tagService,
 		audit:             audit,
+		syncCoordinator:   syncCoordinator,
+		syncDispatcher:    datasource.NewSyncOutboxDispatcher(syncLogRepo, taskEnqueuer),
 	}
 }
 
@@ -77,12 +110,6 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	}
 	if kb.TenantID != ds.TenantID {
 		return nil, datasource.ErrKnowledgeBaseNotFound
-	}
-
-	// Validate connector type
-	_, err = s.connectorRegistry.Get(ds.Type)
-	if err != nil {
-		return nil, err
 	}
 
 	// Validate configuration
@@ -355,17 +382,17 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 		return err
 	}
 
-	// Get connector
-	connector, err := s.connectorRegistry.Get(ds.Type)
-	if err != nil {
-		return err
-	}
-
 	// Parse configuration
 	config, err := ds.ParseConfig()
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
+	lease, err := s.resolveConnector(ctx, ds, config)
+	if err != nil {
+		return err
+	}
+	defer lease.Close()
+	connector := lease.Connector()
 
 	// Validate connection
 	if err := connector.Validate(ctx, config); err != nil {
@@ -397,17 +424,17 @@ func (s *DataSourceService) ListAvailableResources(
 		return nil, err
 	}
 
-	// Get connector
-	connector, err := s.connectorRegistry.Get(ds.Type)
-	if err != nil {
-		return nil, err
-	}
-
 	// Parse configuration
 	config, err := ds.ParseConfig()
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
 	}
+	lease, err := s.resolveConnector(ctx, ds, config)
+	if err != nil {
+		return nil, err
+	}
+	defer lease.Close()
+	connector := lease.Connector()
 
 	// List resources
 	resources, err := connector.ListResources(ctx, config, parentID)
@@ -433,15 +460,16 @@ func (s *DataSourceService) ResolveResourceAncestors(
 		return nil, err
 	}
 
-	connector, err := s.connectorRegistry.Get(ds.Type)
-	if err != nil {
-		return nil, err
-	}
-
 	config, err := ds.ParseConfig()
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
 	}
+	lease, err := s.resolveConnector(ctx, ds, config)
+	if err != nil {
+		return nil, err
+	}
+	defer lease.Close()
+	connector := lease.Connector()
 
 	ancestors, err := connector.ResolveResourceAncestors(ctx, config, resourceIDs)
 	if err != nil {
@@ -464,21 +492,31 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		ds.Status != types.DataSourceStatusPaused {
 		return nil, datasource.ErrDataSourceNotActive
 	}
-
-	// Create sync log
-	syncLog := &types.SyncLog{
-		DataSourceID: dsID,
-		TenantID:     ds.TenantID,
-		Status:       types.SyncLogStatusRunning,
-		StartedAt:    time.Now().UTC(),
-	}
-
-	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
-		logger.Errorf(ctx, "failed to create sync log: %v", err)
+	triggerLock, err := s.coordinator().TryAcquireTrigger(ctx, dsID)
+	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if releaseErr := triggerLock.Release(); releaseErr != nil {
+			logger.Errorf(context.Background(), "release data source trigger lock: %v", releaseErr)
+		}
+	}()
+	ctx = triggerLock.Context()
+	if running, err := s.syncLogRepo.HasRunningSync(ctx, dsID); err != nil {
+		return nil, err
+	} else if running {
+		return nil, datasource.ErrSyncAlreadyRunning
+	}
 
-	// Enqueue sync task
+	// Persist the queue intent first. The pending SyncLog doubles as a durable
+	// outbox row, closing the DB-commit→Asynq-enqueue crash window.
+	syncLog := &types.SyncLog{
+		ID:           uuid.NewString(),
+		DataSourceID: dsID,
+		TenantID:     ds.TenantID,
+		Status:       types.SyncLogStatusPending,
+		StartedAt:    time.Now().UTC(),
+	}
 	payload := &types.DataSourceSyncPayload{
 		DataSourceID: dsID,
 		TenantID:     ds.TenantID,
@@ -488,36 +526,30 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		Trigger:      "manual",
 	}
 	langfuse.InjectTracing(ctx, payload)
-
-	payloadJSON, _ := json.Marshal(payload)
-	task := asynq.NewTask(types.TypeDataSourceSync, payloadJSON,
-		asynq.Queue(types.QueueSync), asynq.MaxRetry(5), asynq.Timeout(2*time.Hour))
-
-	info, err := s.taskEnqueuer.Enqueue(task)
+	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		logger.Errorf(ctx, "failed to enqueue sync task: %v", err)
-		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = err.Error()
-		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if ds.Status != types.DataSourceStatusPaused {
-			ds.Status = types.DataSourceStatusError
-		}
-		ds.ErrorMessage = fmt.Sprintf("Failed to enqueue sync: %v", err)
-		_ = s.dsRepo.Update(ctx, ds)
-		recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncFailed,
-			"data_source", ds.ID, types.AuditOutcomeFailed,
-			map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID, "trigger": "manual"})
 		return nil, err
+	}
+	syncLog.TaskID = datasource.SyncTaskID(dsID, syncLog.ID)
+	syncLog.TaskPayload = types.JSON(payloadJSON)
+	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
+		logger.Errorf(ctx, "failed to create sync outbox row: %v", err)
+		return nil, err
+	}
+
+	info, dispatchErr := s.dispatcher().Dispatch(ctx, syncLog)
+	if dispatchErr != nil {
+		// The DB row is durable and the background dispatcher will retry. Do not
+		// report the sync as lost or terminal merely because Redis is transiently down.
+		logger.Warnf(ctx, "sync persisted but immediate queue dispatch failed: ds=%s log=%s err=%v", dsID, syncLog.ID, dispatchErr)
 	}
 
 	logger.Infof(ctx, "sync task enqueued: ds=%s syncLog=%s", dsID, syncLog.ID)
 	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncStarted,
 		"data_source", ds.ID, types.AuditOutcomeAccepted,
-		map[string]any{
-			"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID,
-			"task_id": info.ID, "trigger": "manual", "processing_status": "pending",
-		})
+		map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID,
+			"task_id": syncLog.TaskID, "trigger": "manual", "processing_status": "pending",
+			"dispatched": info != nil && dispatchErr == nil})
 	return syncLog, nil
 }
 
@@ -587,12 +619,38 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 }
 
 // ProcessSync handles the actual sync operation (called by asynq task)
-func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
+func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (resultErr error) {
 	var payload types.DataSourceSyncPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal sync payload: %v", err)
 		return err
 	}
+	executionLock, err := s.coordinator().TryAcquireExecution(ctx, payload.DataSourceID)
+	if err != nil {
+		if errors.Is(err, datasource.ErrSyncAlreadyRunning) {
+			if syncLog, findErr := s.syncLogRepo.FindByID(ctx, payload.SyncLogID); findErr == nil && syncLog != nil {
+				// A pending log belongs to a distinct trigger that lost the
+				// execution race and can be canceled. A running log may be a
+				// duplicate delivery of the SAME Asynq task; never overwrite the
+				// original worker's log while it is still executing.
+				if syncLog.Status == types.SyncLogStatusPending {
+					syncLog.Status = types.SyncLogStatusCanceled
+					syncLog.FinishedAt = timePtr(time.Now().UTC())
+					syncLog.ErrorMessage = err.Error()
+					_ = s.syncLogRepo.Update(ctx, syncLog)
+				}
+			}
+			return nil
+		}
+		return err
+	}
+	defer func() {
+		if releaseErr := executionLock.Release(); releaseErr != nil {
+			logger.Errorf(context.Background(), "release data source sync lock: %v", releaseErr)
+			resultErr = errors.Join(resultErr, releaseErr)
+		}
+	}()
+	ctx = executionLock.Context()
 	ctx = payload.Initiator.Apply(ctx)
 	taskID, _ := asynq.GetTaskID(ctx)
 	ctx = withKBActivityTask(ctx, taskID, payload.Trigger)
@@ -618,6 +676,16 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		logger.Errorf(ctx, "failed to get sync log: %v", err)
 		return nil
 	}
+	if syncLog.Status != types.SyncLogStatusPending && syncLog.Status != types.SyncLogStatusRunning {
+		logger.Infof(ctx, "data source sync log is already terminal, skipping task: log=%s status=%s", syncLog.ID, syncLog.Status)
+		return nil
+	}
+	if syncLog.Status == types.SyncLogStatusPending {
+		syncLog.Status = types.SyncLogStatusRunning
+		if err := s.syncLogRepo.Update(ctx, syncLog); err != nil {
+			return fmt.Errorf("mark data source sync running: %w", err)
+		}
+	}
 
 	kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
 	if kbErr != nil {
@@ -636,40 +704,32 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 	wasPaused := ds.Status == types.DataSourceStatusPaused
 
-	// Get connector
-	connector, err := s.connectorRegistry.Get(ds.Type)
-	if err != nil {
-		logger.Errorf(ctx, "connector not found: type=%s", ds.Type)
-		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = fmt.Sprintf("Connector not found: %s", ds.Type)
-		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
-			ds.Status = types.DataSourceStatusError
-		}
-		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
-		return err
-	}
-
 	// Parse configuration
 	config, err := ds.ParseConfig()
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse config: %v", err)
-		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = fmt.Sprintf("Invalid configuration: %v", err)
-		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
-			ds.Status = types.DataSourceStatusError
+		if perr := s.failSyncRun(ctx, ds, syncLog, fmt.Sprintf("Invalid configuration: %v", err), wasPaused); perr != nil {
+			return errors.Join(err, perr)
 		}
-		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
 	// Surface the KB's multimodal/VLM state to the connector so it only extracts
 	// embedded images for OCR when the KB can actually ingest them (never persisted).
 	config.MultimodalEnabled = kb.IsMultimodalEnabled()
+
+	// Resolve through the instance-aware factory. Built-in connectors are
+	// returned as static leases; external plugins receive the datasource scope
+	// and are free to bind a runtime for this invocation.
+	lease, err := s.resolveConnector(ctx, ds, config)
+	if err != nil {
+		logger.Errorf(ctx, "connector not found: type=%s: %v", ds.Type, err)
+		if perr := s.failSyncRun(ctx, ds, syncLog, fmt.Sprintf("Connector not found: %s", ds.Type), wasPaused); perr != nil {
+			return errors.Join(err, perr)
+		}
+		return err
+	}
+	defer lease.Close()
+	connector := lease.Connector()
 
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
@@ -706,26 +766,15 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	if fetchErr != nil {
-		// Persist connector cursor even when fetch failed so transient outages
-		// (e.g. RSS feed downtime) do not force a full re-ingest on recovery.
-		if nextCursor != nil {
-			if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
-				ds.LastSyncCursor = cursorJSON
-				if uerr := s.dsRepo.UpdateSyncState(ctx, ds); uerr != nil {
-					logger.Warnf(ctx, "failed to persist sync cursor after fetch error: %v", uerr)
-				}
-			}
-		}
+		// A fatal fetch error must NOT advance the cursor: the connector may
+		// have returned items alongside nextCursor, and persisting it would
+		// permanently skip those unprocessed documents on the next run
+		// (at-least-once beats silent data loss). Transient partial outages
+		// belong to PartialFetchError, not a fatal error carrying a cursor.
 		logger.Errorf(ctx, "fetch operation failed: %v", fetchErr)
-		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
-		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
-			ds.Status = types.DataSourceStatusError
+		if perr := s.failSyncRun(ctx, ds, syncLog, fmt.Sprintf("Fetch failed: %v", fetchErr), wasPaused); perr != nil {
+			return errors.Join(fetchErr, perr)
 		}
-		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
 		return fetchErr
 	}
 
@@ -740,15 +789,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, ds.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant info: %v", err)
-		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = fmt.Sprintf("Failed to get tenant info: %v", err)
-		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
-			ds.Status = types.DataSourceStatusError
+		if perr := s.failSyncRun(ctx, ds, syncLog, fmt.Sprintf("Failed to get tenant info: %v", err), wasPaused); perr != nil {
+			return errors.Join(err, perr)
 		}
-		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
@@ -764,12 +807,17 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	resultJSON, _ := result.ToJSON()
 	if err := allFetchedItemsFailedError(result); err != nil {
 		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
-		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		if perr := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused); perr != nil {
+			return errors.Join(err, perr)
+		}
 		return err
 	}
 
-	// Update cursor for next incremental sync
-	if nextCursor != nil {
+	// Update cursor for next incremental sync. On partial failure, keep the
+	// previous cursor so the failed documents are re-fetched on the next
+	// incremental run (at-least-once) instead of being skipped forever past a
+	// cursor that already moved beyond them.
+	if nextCursor != nil && result.Failed == 0 {
 		cursorJSON, _ := nextCursor.ToJSON()
 		ds.LastSyncCursor = cursorJSON
 	}
@@ -799,7 +847,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 				"; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
 		}
 	}
-	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused)
+	if err := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused); err != nil {
+		return err
+	}
 
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
@@ -812,6 +862,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 // non-fatal: the sync proceeds untagged.
 func (s *DataSourceService) resolveAutoTagIDs(ctx context.Context, ds *types.DataSource) []string {
 	autoTagIDs := []string{}
+	if s.tagService == nil || ds == nil {
+		return autoTagIDs
+	}
 	if autoTag, tagErr := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, ds.Name); tagErr != nil {
 		logger.Warnf(ctx, "failed to find/create auto-tag %q: %v (proceeding without tag)", ds.Name, tagErr)
 	} else if autoTag != nil {
@@ -943,6 +996,17 @@ func (s *DataSourceService) applyFetchedItem(
 		return
 	}
 
+	if errMsg, hasErr := item.Metadata["error"]; hasErr && errMsg != "" {
+		// The item carries a failure marker but also has content or a URL, so the
+		// branch above did not classify it as failed: it is about to be ingested
+		// as an ordinary document. Plugins should build placeholders with
+		// pluginapi.FailedItem, which leaves both fields empty; a hand-rolled item
+		// that fills either silently hides the failure. Warn so the mistake shows
+		// up in logs instead of as a document whose body is an error message.
+		logger.Warnf(ctx, "item %q (external_id=%s) carries Metadata[\"error\"] (%s) but also content/url; ingesting it as a normal document — failure placeholders must leave Content and URL empty (see docs/plugin-development-datasource.md 3.6)",
+			item.Title, item.ExternalID, errMsg)
+	}
+
 	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
 	if err != nil {
 		var dupErr *types.DuplicateKnowledgeError
@@ -998,6 +1062,9 @@ type streamSyncHandler struct {
 	tagIDs  []string
 	result  *types.SyncResult
 	syncLog *types.SyncLog
+	// lastCheckpointFailed is the failure count at the last persisted cursor,
+	// so Checkpoint can refuse to advance past a page that produced failures.
+	lastCheckpointFailed int
 }
 
 // Emit ingests one streamed item. A canceled context aborts the stream so the
@@ -1020,14 +1087,6 @@ func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCu
 	if cursor == nil {
 		return nil
 	}
-	cursorJSON, err := cursor.ToJSON()
-	if err != nil {
-		return err
-	}
-	h.ds.LastSyncCursor = cursorJSON
-	if err := h.svc.dsRepo.UpdateSyncState(ctx, h.ds); err != nil {
-		return err
-	}
 
 	// Best-effort live progress; a failure here must not abort the sync.
 	h.syncLog.ItemsTotal = h.result.Total
@@ -1039,6 +1098,24 @@ func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCu
 	if err := h.svc.syncLogRepo.UpdateResult(ctx, h.syncLog); err != nil {
 		logger.Warnf(ctx, "failed to persist sync log progress at checkpoint: %v", err)
 	}
+
+	// Do not advance the cursor past a page that produced ingest failures:
+	// persisting it would make the next incremental run skip the failed
+	// documents forever. The previous clean checkpoint stays authoritative, so
+	// a retry re-streams from there (at-least-once).
+	if h.result.Failed > h.lastCheckpointFailed {
+		return nil
+	}
+
+	cursorJSON, err := cursor.ToJSON()
+	if err != nil {
+		return err
+	}
+	h.ds.LastSyncCursor = cursorJSON
+	if err := h.svc.dsRepo.UpdateSyncState(ctx, h.ds); err != nil {
+		return err
+	}
+	h.lastCheckpointFailed = h.result.Failed
 	return nil
 }
 
@@ -1076,8 +1153,10 @@ func (s *DataSourceService) processSyncStreaming(
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, ds.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant info: %v", err)
-		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
-			types.SyncLogStatusFailed, fmt.Sprintf("Failed to get tenant info: %v", err), wasPaused)
+		if perr := s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
+			types.SyncLogStatusFailed, fmt.Sprintf("Failed to get tenant info: %v", err), wasPaused); perr != nil {
+			return errors.Join(err, perr)
+		}
 		return err
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
@@ -1089,8 +1168,10 @@ func (s *DataSourceService) processSyncStreaming(
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse sync cursor: %v", err)
-		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
-			types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", err), wasPaused)
+		if perr := s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
+			types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", err), wasPaused); perr != nil {
+			return errors.Join(err, perr)
+		}
 		return err
 	}
 
@@ -1117,20 +1198,32 @@ func (s *DataSourceService) processSyncStreaming(
 		// it in place so the Asynq retry resumes from there. Persist counts.
 		logger.Errorf(ctx, "streaming fetch failed: %v", fetchErr)
 		resultJSON, _ := result.ToJSON()
-		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
-			types.SyncLogStatusFailed, fmt.Sprintf("Fetch failed: %v", fetchErr), wasPaused)
+		if perr := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
+			types.SyncLogStatusFailed, fmt.Sprintf("Fetch failed: %v", fetchErr), wasPaused); perr != nil {
+			return errors.Join(fetchErr, perr)
+		}
 		return fetchErr
 	}
 
 	resultJSON, _ := result.ToJSON()
 	if err := allFetchedItemsFailedError(result); err != nil {
+		// A streaming plugin may have emitted its final checkpoint even though
+		// every fetched item failed during local ingestion. That cursor would
+		// make the next incremental run skip those documents forever, so discard
+		// it and let the repaired pipeline retry the complete source.
+		ds.LastSyncCursor = nil
 		logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
-		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		if perr := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused); perr != nil {
+			return errors.Join(err, perr)
+		}
 		return err
 	}
 
-	// Persist the final cursor for the next incremental sync.
-	if nextCursor != nil {
+	// Persist the final cursor for the next incremental sync only when no
+	// document failed. On partial failure the last clean checkpoint is already
+	// authoritative, so leaving it in place makes the next run re-stream the
+	// failed page (at-least-once) instead of skipping it.
+	if nextCursor != nil && result.Failed == 0 {
 		if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
 			ds.LastSyncCursor = cursorJSON
 		}
@@ -1153,10 +1246,45 @@ func (s *DataSourceService) processSyncStreaming(
 			errMsg += fmt.Sprintf("; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
 		}
 	}
-	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused)
+	if err := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused); err != nil {
+		return err
+	}
 	logger.Infof(ctx, "streaming sync completed: ds=%s created=%d updated=%d deleted=%d skipped=%d failed=%d",
 		payload.DataSourceID, result.Created, result.Updated, result.Deleted, result.Skipped, result.Failed)
 	return nil
+}
+
+// failSyncRun marks a sync run failed before any items were processed (config
+// parse, connector resolution, fatal fetch) and commits the terminal state
+// transactionally, so a later retry never observes a terminal sync log
+// alongside a stale data-source state. The persistence error is joined with the
+// original cause when returned by callers.
+func (s *DataSourceService) failSyncRun(ctx context.Context, ds *types.DataSource, syncLog *types.SyncLog, message string, wasPaused bool) error {
+	syncLog.Status = types.SyncLogStatusFailed
+	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	syncLog.ErrorMessage = message
+	if !wasPaused {
+		ds.Status = types.DataSourceStatusError
+	}
+	ds.ErrorMessage = message
+
+	if f, ok := s.dsRepo.(syncFinalizer); ok {
+		if err := f.FinalizeSync(ctx, ds, syncLog); err != nil {
+			logger.Errorf(ctx, "failed to finalize failed sync run: %v", err)
+			return err
+		}
+		return nil
+	}
+	var persistErr error
+	if err := s.syncLogRepo.Update(ctx, syncLog); err != nil {
+		logger.Errorf(ctx, "failed to update sync log: %v", err)
+		persistErr = err
+	}
+	if err := s.dsRepo.Update(ctx, ds); err != nil {
+		logger.Errorf(ctx, "failed to update data source: %v", err)
+		persistErr = errors.Join(persistErr, err)
+	}
+	return persistErr
 }
 
 func (s *DataSourceService) updateSyncRunResult(
@@ -1168,7 +1296,7 @@ func (s *DataSourceService) updateSyncRunResult(
 	status string,
 	errorMessage string,
 	wasPaused bool,
-) {
+) error {
 	syncLog.ItemsTotal = result.Total
 	syncLog.ItemsCreated = result.Created
 	syncLog.ItemsUpdated = result.Updated
@@ -1179,9 +1307,6 @@ func (s *DataSourceService) updateSyncRunResult(
 	syncLog.FinishedAt = timePtr(time.Now().UTC())
 	syncLog.ErrorMessage = errorMessage
 	syncLog.Result = resultJSON
-	if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
-		logger.Errorf(ctx, "failed to update sync log: %v", err)
-	}
 
 	if status == types.SyncLogStatusFailed {
 		if !wasPaused {
@@ -1194,8 +1319,26 @@ func (s *DataSourceService) updateSyncRunResult(
 	}
 	ds.ErrorMessage = errorMessage
 	ds.LastSyncResult = resultJSON
-	if err := s.dsRepo.UpdateSyncState(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to update data source: %v", err)
+
+	// Commit the terminal state. The production repository finalizes the data
+	// source and the sync log in one transaction so a retry never observes a
+	// terminal sync log alongside a stale cursor; test doubles fall back to two
+	// best-effort writes.
+	var persistErr error
+	if f, ok := s.dsRepo.(syncFinalizer); ok {
+		if err := f.FinalizeSync(ctx, ds, syncLog); err != nil {
+			logger.Errorf(ctx, "failed to finalize sync run: %v", err)
+			persistErr = err
+		}
+	} else {
+		if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
+			logger.Errorf(ctx, "failed to update sync log: %v", err)
+			persistErr = err
+		}
+		if err := s.dsRepo.UpdateSyncState(ctx, ds); err != nil {
+			logger.Errorf(ctx, "failed to update data source: %v", err)
+			persistErr = errors.Join(persistErr, err)
+		}
 	}
 	action := types.AuditActionDataSourceSyncCompleted
 	outcome := types.AuditOutcomeSuccess
@@ -1212,6 +1355,7 @@ func (s *DataSourceService) updateSyncRunResult(
 			"total": result.Total, "created": result.Created, "updated": result.Updated,
 			"deleted": result.Deleted, "skipped": result.Skipped, "failed": result.Failed,
 		})
+	return persistErr
 }
 
 func allFetchedItemsFailedError(result *types.SyncResult) error {
@@ -1239,14 +1383,16 @@ func allFetchedItemsFailedError(result *types.SyncResult) error {
 
 // ValidateCredentials tests connectivity using raw credentials without persisting anything.
 func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorType string, credentials map[string]interface{}) error {
-	connector, err := s.connectorRegistry.Get(connectorType)
-	if err != nil {
-		return err
-	}
 	config := &types.DataSourceConfig{
 		Type:        connectorType,
 		Credentials: credentials,
 	}
+	lease, err := s.resolveConnector(ctx, nil, config)
+	if err != nil {
+		return err
+	}
+	defer lease.Close()
+	connector := lease.Connector()
 	if err := connector.Validate(ctx, config); err != nil {
 		return err
 	}
@@ -1257,21 +1403,54 @@ func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorTy
 // Helper functions
 
 func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *types.DataSource) error {
-	connector, err := s.connectorRegistry.Get(ds.Type)
-	if err != nil {
-		return err
-	}
-
 	config, err := ds.ParseConfig()
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
+	lease, err := s.resolveConnector(ctx, ds, config)
+	if err != nil {
+		return err
+	}
+	defer lease.Close()
+	connector := lease.Connector()
 
 	return connector.Validate(ctx, config)
 }
 
+func (s *DataSourceService) resolveConnector(ctx context.Context, ds *types.DataSource, config *types.DataSourceConfig) (datasource.ConnectorLease, error) {
+	if config == nil {
+		return nil, datasource.ErrInvalidConfig
+	}
+	resolver := s.connectorResolver
+	if resolver == nil {
+		if s.connectorRegistry == nil {
+			return nil, datasource.ErrConnectorNotFound
+		}
+		resolver = datasource.NewRegistryResolver(s.connectorRegistry)
+	}
+	scope := datasource.ConnectorScope{}
+	if ds != nil {
+		scope.TenantID = ds.TenantID
+		scope.KnowledgeBaseID = ds.KnowledgeBaseID
+		scope.DataSourceID = ds.ID
+	}
+	if taskID, ok := asynq.GetTaskID(ctx); ok && taskID != "" {
+		scope.OperationID = taskID
+	} else if requestID, ok := types.RequestIDFromContext(ctx); ok && requestID != "" {
+		scope.OperationID = requestID
+	} else {
+		scope.OperationID = uuid.NewString()
+	}
+	if spanContext := trace.SpanContextFromContext(ctx); spanContext.IsValid() {
+		scope.TraceID = spanContext.TraceID().String()
+	}
+	return resolver.Resolve(ctx, config.Type, scope, config)
+}
+
 // ingestItem writes a single FetchedItem into the knowledge base.
-// If a knowledge item with the same external_id already exists, it is deleted first (update = delete + re-create).
+// If a knowledge item with the same external_id already exists, the new version
+// is created first and the old one is removed only after the write succeeds
+// (update = create replacement, then delete the old copy).
 //
 // Routing logic:
 //   - Has Content bytes → CreateKnowledgeFromFile (走完整的文档解析 pipeline)
@@ -1309,29 +1488,37 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		metadata[k] = v
 	}
 
-	// Check if a knowledge item with this external_id already exists → delete it first (update)
+	// Look up every existing version up front but do NOT delete any yet. The
+	// replacement is created first and the old versions are removed only after
+	// the new one is safely written, so a mid-update failure (validation,
+	// object storage, enqueue) leaves the previous usable content in place
+	// instead of deleting it first and losing the only good copy. Listing ALL
+	// versions (not just the newest) is what lets a retry converge even after a
+	// previous replacement failed to delete its old row.
 	isUpdate := false
+	var existingIDs []string
 	if item.ExternalID != "" {
 		repo := s.knowledgeService.GetRepository()
 		// Scope the lookup to items owned by this data source so identical
 		// external IDs from two data sources cannot collide or overwrite each
 		// other during updates.
-		existing, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
+		existing, err := repo.FindAllByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
 		if err != nil {
 			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
 			// Non-fatal: proceed with creation (may produce duplicate)
-		} else if existing != nil {
-			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
-			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
-				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
-			} else {
-				if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
-					logger.Warnf(ctx, "failed to hard-delete replaced knowledge %s: %v", existing.ID, herr)
+		} else {
+			for _, k := range existing {
+				if k != nil && k.ID != "" {
+					existingIDs = append(existingIDs, k.ID)
 				}
-				isUpdate = true
 			}
 		}
 	}
+
+	// The replacement create must skip the rows being replaced during
+	// deduplication, otherwise a same-URL / same-content update is rejected as
+	// a duplicate against the very rows it is about to supersede.
+	createCtx := withExcludeKnowledgeIDs(ctx, existingIDs)
 
 	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile
 	if len(item.Content) > 0 {
@@ -1340,7 +1527,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			return isUpdate, fmt.Errorf("build file header: %w", err)
 		}
 		if _, err := s.knowledgeService.CreateKnowledgeFromFile(
-			ctx,
+			createCtx,
 			ds.KnowledgeBaseID,
 			fh,
 			metadata,
@@ -1360,13 +1547,17 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			return isUpdate, err
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
+		if len(existingIDs) > 0 {
+			s.deleteReplacedKnowledge(ctx, ds, existingIDs)
+			isUpdate = true
+		}
 		return isUpdate, nil
 	}
 
 	// Case 2: only a remote URL — let WeKnora handle downloading and parsing
 	if item.URL != "" {
 		created, err := s.knowledgeService.CreateKnowledgeFromURL(
-			ctx,
+			createCtx,
 			ds.KnowledgeBaseID,
 			item.URL,
 			item.FileName,
@@ -1401,10 +1592,59 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			}
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
+		if len(existingIDs) > 0 {
+			s.deleteReplacedKnowledge(ctx, ds, existingIDs)
+			isUpdate = true
+		}
 		return isUpdate, nil
 	}
 
 	return isUpdate, fmt.Errorf("item has neither content nor URL")
+}
+
+// deleteReplacedKnowledge removes the previous versions of a data-source item
+// after its replacement has been created successfully. Best-effort: a failed
+// removal leaves a stale duplicate rather than losing data, and the warning is
+// surfaced in logs for a later cleanup pass.
+func (s *DataSourceService) deleteReplacedKnowledge(ctx context.Context, ds *types.DataSource, knowledgeIDs []string) {
+	repo := s.knowledgeService.GetRepository()
+	for _, knowledgeID := range knowledgeIDs {
+		if knowledgeID == "" {
+			continue
+		}
+		if err := s.knowledgeService.DeleteKnowledge(ctx, knowledgeID); err != nil {
+			logger.Warnf(ctx, "failed to delete replaced knowledge %s (ds=%s): %v", knowledgeID, ds.ID, err)
+			continue
+		}
+		if err := repo.HardDeleteKnowledge(ctx, ds.TenantID, knowledgeID); err != nil {
+			logger.Warnf(ctx, "failed to hard-delete replaced knowledge %s (ds=%s): %v", knowledgeID, ds.ID, err)
+		}
+	}
+}
+
+// excludeKnowledgeIDKey carries the IDs of the knowledge rows being replaced so
+// the replacement create can skip them during deduplication. It is scoped to
+// the datasource update path and is never persisted.
+type excludeKnowledgeIDKey struct{}
+
+func withExcludeKnowledgeIDs(ctx context.Context, ids []string) context.Context {
+	if len(ids) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, excludeKnowledgeIDKey{}, ids)
+}
+
+func excludeKnowledgeIDsFrom(ctx context.Context) []string {
+	v, _ := ctx.Value(excludeKnowledgeIDKey{}).([]string)
+	return v
+}
+
+// syncFinalizer is the optional transactional commit path for a sync run's
+// terminal state. The production DataSourceRepository implements it; test
+// doubles that embed the repository interface fall back to two best-effort
+// writes in updateSyncRunResult.
+type syncFinalizer interface {
+	FinalizeSync(ctx context.Context, ds *types.DataSource, log *types.SyncLog) error
 }
 
 // dupIsSameNode reports whether a duplicate-content error means the parent still

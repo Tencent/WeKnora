@@ -53,6 +53,11 @@ func TestSkillPythonPackageRecoveryInstallsWithoutPip(t *testing.T) {
 					t.Skip("uv is required")
 				}
 			}
+			if variant.name == "ensurepip" {
+				if err := exec.Command("python3", "-c", "import ensurepip").Run(); err != nil {
+					t.Skip("python3 without the ensurepip module (install python3-venv)")
+				}
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			dir := t.TempDir()

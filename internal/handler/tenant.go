@@ -15,7 +15,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -1507,6 +1509,10 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 		c.Error(errors.NewValidationError(err.Error()))
 		return
 	}
+	if err := validateExternalParserPluginConfigs(merged); err != nil {
+		c.Error(errors.NewValidationError(err.Error()))
+		return
+	}
 	tenant.ParserEngineConfig = merged
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
@@ -1924,6 +1930,39 @@ func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
 	if endpoint := strings.TrimSpace(cfg.PaddleOCRVLEndpoint); endpoint != "" {
 		if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 			return fmt.Errorf("paddleocr_vl_endpoint failed SSRF validation: %v", err)
+		}
+	}
+	return nil
+}
+
+// validateExternalParserPluginConfigs applies each loaded external parser's
+// manifest schema before its tenant configuration is persisted. Orphaned
+// plugin entries are deliberately left untouched: removing a plugin must not
+// make an administrator unable to edit the remaining parser settings, and the
+// entry becomes valid again if that plugin is reinstalled.
+func validateExternalParserPluginConfigs(cfg *types.ParserEngineConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	for pluginID, config := range cfg.ExternalPluginConfigs {
+		_, schema, loaded := docparser.ExternalPluginMetadataByID(pluginID)
+		if !loaded {
+			continue
+		}
+		settings := config.Settings
+		if settings == nil {
+			settings = make(map[string]any)
+		}
+		credentials := make(map[string]any, len(config.Credentials))
+		for key, value := range config.Credentials {
+			credentials[key] = value
+		}
+		envelope := map[string]any{
+			"settings":    settings,
+			"credentials": credentials,
+		}
+		if err := plugin.ValidateConfigSchema(schema, envelope); err != nil {
+			return fmt.Errorf("external parser plugin %q configuration: %w", pluginID, err)
 		}
 	}
 	return nil

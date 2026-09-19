@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS sync_logs (
     started_at      DATETIME,
     finished_at     DATETIME,
     error_message   TEXT,
+    task_id         VARCHAR(255) NOT NULL DEFAULT '',
+    task_payload    TEXT,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -257,6 +259,23 @@ func TestResetPendingTasks_SyncLogStaleRunning(t *testing.T) {
 	).Row().Scan(&status, &finishedAt))
 	assert.Equal(t, types.SyncLogStatusFailed, status)
 	require.NotNil(t, finishedAt)
+}
+
+func TestResetPendingTasks_PreservesSyncOutboxPending(t *testing.T) {
+	db := setupResetPendingDB(t)
+	stale := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, db.Exec(
+		`INSERT INTO sync_logs (id, status, started_at, task_id, task_payload)
+		 VALUES (?, ?, ?, ?, ?)`,
+		"sync-outbox", types.SyncLogStatusPending, stale, "dssync:ds:sync-outbox", `{}`,
+	).Error)
+
+	t.Setenv("REDIS_ADDR", "redis:6379")
+	resetPendingTasks(db)
+
+	var status string
+	require.NoError(t, db.Raw(`SELECT status FROM sync_logs WHERE id = ?`, "sync-outbox").Row().Scan(&status))
+	assert.Equal(t, types.SyncLogStatusPending, status)
 }
 
 func TestResetPendingTasks_SyncLogLiteMode(t *testing.T) {

@@ -58,6 +58,16 @@ func (v *KeywordsVectorHybridRetrieveEngineService) EngineType() types.Retriever
 	return v.engineType
 }
 
+// Close releases the underlying repository's resources when it supports
+// closing. External retriever plugins hold a gRPC store session that must be
+// torn down on unregistration; built-in repositories are no-ops and return nil.
+func (v *KeywordsVectorHybridRetrieveEngineService) Close(ctx context.Context) error {
+	if closer, ok := v.indexRepository.(interface{ Close(context.Context) error }); ok {
+		return closer.Close(ctx)
+	}
+	return nil
+}
+
 // Retrieve performs retrieval based on the provided parameters
 func (v *KeywordsVectorHybridRetrieveEngineService) Retrieve(ctx context.Context,
 	params types.RetrieveParams,

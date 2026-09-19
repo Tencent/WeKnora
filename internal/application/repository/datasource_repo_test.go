@@ -20,6 +20,54 @@ func setupDataSourceRepoTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestSyncLogRepositoryDispatchStateTransitionsAreConditional(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewSyncLogRepository(db).(*SyncLogRepository)
+	ctx := context.Background()
+
+	pending := &types.SyncLog{
+		ID:                "outbox-pending",
+		DataSourceID:      "ds-1",
+		TenantID:          1,
+		Status:            types.SyncLogStatusPending,
+		TaskID:            "dssync:ds-1:outbox-pending",
+		DispatchAttempts:  2,
+		LastDispatchError: "old error",
+	}
+	terminal := &types.SyncLog{
+		ID:           "outbox-terminal",
+		DataSourceID: "ds-1",
+		TenantID:     1,
+		Status:       types.SyncLogStatusCanceled,
+		TaskID:       "dssync:ds-1:outbox-terminal",
+	}
+	require.NoError(t, repo.Create(ctx, pending))
+	require.NoError(t, repo.Create(ctx, terminal))
+
+	dispatchedAt := time.Now().UTC()
+	require.NoError(t, repo.MarkDispatched(ctx, pending.ID, dispatchedAt))
+
+	// A late queue failure from another dispatcher must not make the already
+	// delivered row eligible for another attempt.
+	retryAt := dispatchedAt.Add(time.Minute)
+	require.NoError(t, repo.MarkDispatchFailure(ctx, pending.ID, 99, retryAt, "late failure"))
+
+	var storedPending, storedTerminal types.SyncLog
+	require.NoError(t, db.First(&storedPending, "id = ?", pending.ID).Error)
+	require.NoError(t, db.First(&storedTerminal, "id = ?", terminal.ID).Error)
+	assert.NotNil(t, storedPending.DispatchedAt)
+	assert.Equal(t, 2, storedPending.DispatchAttempts)
+	assert.Empty(t, storedPending.LastDispatchError)
+	assert.Nil(t, storedPending.NextDispatchAt)
+
+	// A terminal row can still need the delivery marker when the worker raced
+	// ahead of the producer. Marking delivery does not change its status.
+	require.NoError(t, repo.MarkDispatched(ctx, terminal.ID, dispatchedAt))
+	var reloadedTerminal types.SyncLog
+	require.NoError(t, db.First(&reloadedTerminal, "id = ?", terminal.ID).Error)
+	assert.NotNil(t, reloadedTerminal.DispatchedAt)
+}
+
 func TestDataSourceRepositoryUpdateSyncStateClearsErrorMessage(t *testing.T) {
 	db := setupDataSourceRepoTestDB(t)
 	repo := NewDataSourceRepository(db)
@@ -165,6 +213,55 @@ func TestDataSourceRepositoryDeleteSoftDeletesOnSQLite(t *testing.T) {
 	untouched, err := repo.FindByID(ctx, other.ID)
 	require.NoError(t, err)
 	assert.Equal(t, other.ID, untouched.ID)
+}
+
+func TestDataSourceRepositoryFinalizeSyncCommitsBothTables(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db).(*DataSourceRepository)
+	ctx := context.Background()
+
+	ds := &types.DataSource{
+		ID: "ds-finalize", TenantID: 1, KnowledgeBaseID: "kb-1",
+		Name: "Feishu", Type: types.ConnectorTypeFeishu,
+	}
+	log := &types.SyncLog{
+		ID: "log-finalize", DataSourceID: ds.ID, TenantID: 1,
+		Status: types.SyncLogStatusRunning,
+	}
+	require.NoError(t, repo.Create(ctx, ds))
+	require.NoError(t, NewSyncLogRepository(db).Create(ctx, log))
+
+	finished := time.Now().UTC()
+	ds.Status = types.DataSourceStatusActive
+	ds.LastSyncCursor = types.JSON(`{"connector_cursor":{"page":"2"}}`)
+	log.Status = types.SyncLogStatusSuccess
+	log.FinishedAt = &finished
+	log.ItemsCreated = 3
+	require.NoError(t, repo.FinalizeSync(ctx, ds, log))
+
+	var storedDS types.DataSource
+	var storedLog types.SyncLog
+	require.NoError(t, db.First(&storedDS, "id = ?", ds.ID).Error)
+	require.NoError(t, db.First(&storedLog, "id = ?", log.ID).Error)
+	assert.Equal(t, types.DataSourceStatusActive, storedDS.Status)
+	assert.Equal(t, `{"connector_cursor":{"page":"2"}}`, string(storedDS.LastSyncCursor))
+	assert.Equal(t, types.SyncLogStatusSuccess, storedLog.Status)
+	assert.Equal(t, 3, storedLog.ItemsCreated)
+	require.NotNil(t, storedLog.FinishedAt)
+}
+
+func TestDataSourceRepositoryFinalizeSyncRejectsNilInputs(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db).(*DataSourceRepository)
+	ctx := context.Background()
+
+	ds := &types.DataSource{ID: "ds-finalize-nil", TenantID: 1, KnowledgeBaseID: "kb-1"}
+	require.NoError(t, repo.Create(ctx, ds))
+
+	assert.Error(t, repo.FinalizeSync(ctx, nil, &types.SyncLog{ID: "l"}))
+	assert.Error(t, repo.FinalizeSync(ctx, ds, nil))
+	assert.Error(t, repo.FinalizeSync(ctx, &types.DataSource{}, &types.SyncLog{ID: "l"}))
+	assert.Error(t, repo.FinalizeSync(ctx, ds, &types.SyncLog{}))
 }
 
 func TestSyncLogRepositoryUpdateResultClearsErrorMessage(t *testing.T) {

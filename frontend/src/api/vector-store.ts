@@ -20,6 +20,10 @@ export interface VectorStoreTypeInfo {
   display_name: string
   connection_fields: FieldSchema[]
   index_fields: FieldSchema[]
+  // Icon URL for the engine logo. For external plugins with a bundled icon
+  // file this is a host route (e.g. /api/v1/vector-stores/icon/milvux);
+  // built-in engines leave it empty and use providerLogos mapping.
+  icon?: string
 }
 
 export interface FieldSchema {
@@ -28,6 +32,9 @@ export interface FieldSchema {
   required: boolean
   sensitive?: boolean
   description?: string
+  // Human-readable label from an external plugin's config_schema. When
+  // present it is shown in place of the raw field name.
+  title?: string
   default?: any
   // Inclusive bounds for number fields (omitempty on the backend). When
   // absent the UI falls back to per-field heuristics (isReplicaField).

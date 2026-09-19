@@ -236,7 +236,7 @@
             />
           </div>
           <div class="form-item">
-            <label class="form-label">Backend</label>
+            <label class="form-label">{{ t('settings.parser.backend') }}</label>
             <t-select v-model="config.mineru_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
               <t-option value="pipeline" label="pipeline" />
               <t-option value="vlm-auto-engine" label="vlm-auto-engine" />
@@ -285,7 +285,7 @@
           <h4 class="setting-drawer__section-title">{{ $t('settings.parser.configSection', '配置') }}</h4>
 
           <div class="form-item">
-            <label class="form-label required">API Key</label>
+            <label class="form-label required">{{ t('settings.parser.apiKey') }}</label>
             <t-input
               v-model="config.mineru_api_key"
               type="password"
@@ -296,7 +296,7 @@
             </t-input>
           </div>
           <div class="form-item">
-            <label class="form-label">Model Version</label>
+            <label class="form-label">{{ t('settings.parser.modelVersion') }}</label>
             <t-select v-model="config.mineru_cloud_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
               <t-option value="pipeline" label="pipeline" />
               <t-option value="vlm" :label="$t('settings.parser.vlmLabel')" />
@@ -308,7 +308,7 @@
             <div class="form-toggles">
               <t-checkbox v-model="config.mineru_cloud_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
               <t-checkbox v-model="config.mineru_cloud_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
-              <t-checkbox v-model="config.mineru_cloud_enable_ocr">OCR</t-checkbox>
+              <t-checkbox v-model="config.mineru_cloud_enable_ocr">{{ t('settings.parser.ocr') }}</t-checkbox>
             </div>
           </div>
           <div class="form-item">
@@ -348,7 +348,7 @@
           <h4 class="setting-drawer__section-title">{{ $t('settings.parser.configSection', '配置') }}</h4>
 
           <div class="form-item">
-            <label class="form-label required">Token</label>
+            <label class="form-label required">{{ t('settings.parser.token') }}</label>
             <t-input
               v-model="config.paddleocr_vl_cloud_token"
               type="password"
@@ -359,7 +359,7 @@
             </t-input>
           </div>
           <div class="form-item">
-            <label class="form-label">Model</label>
+            <label class="form-label">{{ t('settings.parser.model') }}</label>
             <t-input
               v-model="config.paddleocr_vl_cloud_model"
               placeholder="PaddleOCR-VL-1.6"
@@ -373,6 +373,74 @@
               <t-checkbox v-model="config.paddleocr_vl_cloud_use_chart_recognition">{{ $t('settings.parser.chartRecognition') }}</t-checkbox>
             </div>
           </div>
+        </section>
+
+        <!-- 外部 Parser：完全由 plugin.yaml 的 config_schema 驱动。内置
+             引擎继续使用上面的专用表单，不受这一区域影响。 -->
+        <section
+          v-if="currentEngine.External && externalPluginConfig && (externalSettingFields.length || externalCredentialFields.length)"
+          class="setting-drawer__section"
+        >
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.configSection', '配置') }}</h4>
+
+          <div v-for="field in externalSettingFields" :key="field.key" class="form-item">
+            <label class="form-label" :class="{ required: field.required }">{{ field.label }}</label>
+            <t-select
+              v-if="field.enum.length"
+              v-model="externalPluginConfig.settings[field.key]"
+              clearable
+            >
+              <t-option v-for="option in field.enum" :key="option" :value="option" :label="option" />
+            </t-select>
+            <t-switch
+              v-else-if="field.kind === 'boolean'"
+              v-model="externalPluginConfig.settings[field.key]"
+            />
+            <t-input-number
+              v-else-if="field.kind === 'number'"
+              v-model="externalPluginConfig.settings[field.key]"
+            />
+            <t-input
+              v-else-if="field.kind === 'array'"
+              :value="externalArrayText(field.key)"
+              :placeholder="field.description"
+              @change="(value: string) => updateExternalArray(field.key, value)"
+            />
+            <t-input
+              v-else
+              v-model="externalPluginConfig.settings[field.key]"
+              :type="field.secret ? 'password' : 'text'"
+              :placeholder="field.description"
+              clearable
+            >
+              <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+            <p v-if="field.description" class="form-desc">{{ field.description }}</p>
+          </div>
+
+          <template v-if="externalCredentialFields.length">
+            <h4 class="setting-drawer__section-subtitle">{{ $t('datasource.credentialsLabel', '凭证') }}</h4>
+            <div v-for="field in externalCredentialFields" :key="field.key" class="form-item">
+              <label class="form-label" :class="{ required: field.required }">{{ field.label }}</label>
+              <t-select
+                v-if="field.enum.length"
+                v-model="externalPluginConfig.credentials[field.key]"
+                clearable
+              >
+                <t-option v-for="option in field.enum" :key="option" :value="option" :label="option" />
+              </t-select>
+              <t-input
+                v-else
+                v-model="externalPluginConfig.credentials[field.key]"
+                :type="field.secret ? 'password' : 'text'"
+                :placeholder="field.description"
+                clearable
+              >
+                <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+              <p v-if="field.description" class="form-desc">{{ field.description }}</p>
+            </div>
+          </template>
         </section>
       </div>
     </SettingDrawer>
@@ -437,6 +505,7 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   paddleocr_vl_cloud_model: 'PaddleOCR-VL-1.6',
   paddleocr_vl_cloud_use_seal_recognition: true,
   paddleocr_vl_cloud_use_chart_recognition: false,
+  external_plugin_configs: {},
 }
 
 const engines = ref<ParserEngineInfo[]>([])
@@ -459,6 +528,55 @@ const drawerVisible = ref(false)
 const currentEngine = ref<ParserEngineInfo | null>(null)
 const drawerTitle = computed(() => {
   return currentEngine.value ? getEngineDisplayName(currentEngine.value.Name) : ''
+})
+
+interface ExternalSchemaField {
+  key: string
+  label: string
+  description: string
+  kind: 'string' | 'array' | 'boolean' | 'number'
+  required: boolean
+  secret: boolean
+  default?: unknown
+  enum: string[]
+}
+
+function parseExternalSchemaProperties(schema: Record<string, any> | undefined): ExternalSchemaField[] {
+  if (!schema?.properties) return []
+  const required = Array.isArray(schema.required) ? schema.required : []
+  return Object.entries(schema.properties as Record<string, any>).map(([key, raw]) => {
+    const type = raw?.type
+    let kind: ExternalSchemaField['kind'] = 'string'
+    if (type === 'boolean') kind = 'boolean'
+    else if (type === 'integer' || type === 'number') kind = 'number'
+    else if (type === 'array' || type === 'string[]') kind = 'array'
+    return {
+      key,
+      label: raw?.title || key,
+      description: raw?.description || '',
+      kind,
+      required: required.includes(key),
+      secret: !!raw?.secret,
+      default: raw?.default,
+      enum: Array.isArray(raw?.enum) ? raw.enum.filter((value: unknown): value is string => typeof value === 'string') : [],
+    }
+  })
+}
+
+const externalSettingFields = computed(() => {
+  const schema = currentEngine.value?.ConfigSchema
+  return parseExternalSchemaProperties(schema?.properties?.settings)
+})
+
+const externalCredentialFields = computed(() => {
+  const schema = currentEngine.value?.ConfigSchema
+  return parseExternalSchemaProperties(schema?.properties?.credentials)
+})
+
+const externalPluginConfig = computed(() => {
+  const pluginID = currentEngine.value?.External ? currentEngine.value.PluginID : ''
+  if (!pluginID) return null
+  return config.value.external_plugin_configs?.[pluginID] || null
 })
 
 // SettingDrawer 头部图标走 #headerIcon 槽（首字母 monogram + per-engine
@@ -496,7 +614,7 @@ const sortedEngines = computed(() => {
 })
 
 function hasConfigFields(engineName: string): boolean {
-  return CONFIGURABLE_ENGINES.has(engineName)
+  return CONFIGURABLE_ENGINES.has(engineName) || !!engines.value.find(engine => engine.Name === engineName)?.External
 }
 
 function engineDocLink(name: string): string | undefined {
@@ -527,10 +645,61 @@ function getEngineDisplayDesc(engineName: string, fallback: string): string {
 }
 
 function openDrawer(engine: ParserEngineInfo) {
+  ensureExternalPluginConfig(engine)
   currentEngine.value = engine
   drawerVisible.value = true
   saveMessage.value = ''
   checkMessage.value = ''
+}
+
+function ensureExternalPluginConfig(engine: ParserEngineInfo) {
+  if (!engine.External || !engine.PluginID) return
+  if (!config.value.external_plugin_configs) config.value.external_plugin_configs = {}
+  const existing = config.value.external_plugin_configs[engine.PluginID] || { settings: {}, credentials: {} }
+  existing.settings ||= {}
+  existing.credentials ||= {}
+  const schema = engine.ConfigSchema
+  for (const field of parseExternalSchemaProperties(schema?.properties?.settings)) {
+    if (existing.settings[field.key] === undefined && field.default !== undefined) {
+      existing.settings[field.key] = field.default
+    }
+  }
+  for (const field of parseExternalSchemaProperties(schema?.properties?.credentials)) {
+    if (!field.secret && existing.credentials[field.key] === undefined && typeof field.default === 'string') {
+      existing.credentials[field.key] = field.default
+    }
+  }
+  config.value.external_plugin_configs[engine.PluginID] = existing
+}
+
+function externalArrayText(key: string): string {
+  const value = externalPluginConfig.value?.settings?.[key]
+  return Array.isArray(value) ? value.join(', ') : ''
+}
+
+function updateExternalArray(key: string, value: string) {
+  if (!externalPluginConfig.value) return
+  externalPluginConfig.value.settings[key] = value.split(',').map(item => item.trim()).filter(Boolean)
+}
+
+function validateExternalPluginConfig(): boolean {
+  for (const field of externalSettingFields.value) {
+    if (!field.required) continue
+    const value = externalPluginConfig.value?.settings[field.key]
+    if (value === undefined || value === null || value === '') {
+      MessagePlugin.warning(`${field.label} is required`)
+      return false
+    }
+  }
+  for (const field of externalCredentialFields.value) {
+    if (!field.required) continue
+    const value = externalPluginConfig.value?.credentials[field.key]
+    if (value === undefined || value === null || value === '') {
+      MessagePlugin.warning(`${field.label} is required`)
+      return false
+    }
+  }
+  return true
 }
 
 async function loadEngines() {
@@ -576,6 +745,7 @@ async function loadConfig() {
       paddleocr_vl_cloud_model: data?.paddleocr_vl_cloud_model ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_model ?? 'PaddleOCR-VL-1.6',
       paddleocr_vl_cloud_use_seal_recognition: data?.paddleocr_vl_cloud_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_seal_recognition ?? true,
       paddleocr_vl_cloud_use_chart_recognition: data?.paddleocr_vl_cloud_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_chart_recognition ?? false,
+      external_plugin_configs: data?.external_plugin_configs ?? {},
     }
   } catch {
     config.value = { ...DEFAULT_PARSER_CONFIG }
@@ -615,6 +785,7 @@ function buildConfigPayload(): ParserEngineConfig {
     paddleocr_vl_cloud_model: config.value.paddleocr_vl_cloud_model?.trim() ?? '',
     paddleocr_vl_cloud_use_seal_recognition: config.value.paddleocr_vl_cloud_use_seal_recognition,
     paddleocr_vl_cloud_use_chart_recognition: config.value.paddleocr_vl_cloud_use_chart_recognition,
+    external_plugin_configs: config.value.external_plugin_configs ?? {},
   }
 }
 
@@ -672,6 +843,7 @@ async function onCheck() {
 }
 
 async function onSave() {
+  if (currentEngine.value?.External && !validateExternalPluginConfig()) return
   saving.value = true
   saveMessage.value = ''
   try {

@@ -375,6 +375,8 @@ function convertToLegacyFormat(model: ModelConfig) {
     lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
     // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
     thinkingControl: model.parameters.extra_config?.thinking_control,
+    // 插件 config_fields 的原始存库值（字符串），编辑弹窗内按字段类型反序列化
+    extraConfig: model.parameters.extra_config || {},
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -606,6 +608,14 @@ const handleModelSave = async (modelData: any) => {
       && modelData.thinkingControl
     ) {
       extraConfig.thinking_control = modelData.thinkingControl
+    }
+    // 插件 config_fields 的值：序列化为字符串合并进 extra_config（非空才写入）
+    if (modelData.source === 'plugin' && modelData.extraConfig) {
+      for (const [key, value] of Object.entries(modelData.extraConfig)) {
+        if (value !== '' && value !== undefined && value !== null) {
+          extraConfig[key] = String(value)
+        }
+      }
     }
     const extraConfigFields = Object.keys(extraConfig).length > 0
       ? { extra_config: extraConfig }
