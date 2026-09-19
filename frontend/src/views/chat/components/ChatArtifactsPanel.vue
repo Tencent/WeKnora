@@ -302,6 +302,8 @@ async function handleDownload(item: SessionArtifactItem) {
 </script>
 
 <style scoped lang="less">
+@import '@/components/css/artifact-filter-tabs.less';
+
 .chat-artifacts-panel {
   flex: 1;
   min-height: 0;
@@ -421,40 +423,18 @@ async function handleDownload(item: SessionArtifactItem) {
 }
 
 .artifact-scope {
-  display: inline-flex;
+  .artifact-filter-tabs();
   align-self: flex-start;
-  gap: 2px;
-  padding: 3px;
-  border-radius: var(--app-radius-md);
-  background: var(--td-bg-color-secondarycontainer);
 
   button {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 10px;
-    border: 0;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--td-text-color-secondary);
-    font: inherit;
-    font-size: var(--app-text-sm);
-    cursor: pointer;
-
-    &[aria-pressed='true'] {
-      background: var(--td-bg-color-container);
-      color: var(--td-text-color-primary);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
 
     span {
-      color: var(--td-text-color-placeholder);
-      font-size: var(--app-text-xs);
+      color: inherit;
+      opacity: 0.7;
+      font-size: var(--app-text-sm);
       font-variant-numeric: tabular-nums;
     }
   }

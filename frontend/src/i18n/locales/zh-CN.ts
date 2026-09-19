@@ -3824,6 +3824,7 @@ export default {
         authRevoked: '登录状态已失效，终端已断开。请重新登录后再连接。',
     },
     questionMinimapTitle: '问答',
+    questionMinimapPosition: '第 {current} 轮 · 共 {total} 轮',
     questionMinimapAriaLabel: '提问目录',
     questionMinimapAttachmentPlaceholder: '（附件）',
     referenceChunkCount: '{count}个片段',

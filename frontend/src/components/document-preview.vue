@@ -1018,7 +1018,7 @@ onUnmounted(() => {
 // ── Deep styles (v-html / third-party components) ──
 
 // Shared table mixin for v-html content
-.preview-table() {
+.preview-table(@header-bg: @accent-bg; @hover-bg: @accent-bg) {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--app-text-md);
@@ -1028,12 +1028,12 @@ onUnmounted(() => {
     text-align: left;
   }
   th {
-    background: @accent-bg;
+    background: @header-bg;
     font-weight: 600;
     color: @text-primary;
   }
   tr:hover td {
-    background: @accent-bg;
+    background: @hover-bg;
     transition: @transition;
   }
 }
@@ -1058,14 +1058,17 @@ onUnmounted(() => {
   blockquote {
     margin: 12px 0;
     padding: 8px 16px;
-    border-left: 4px solid @accent;
+    border-left: 4px solid @border-color;
     background: @bg-subtle;
     color: var(--td-text-color-secondary);
   }
   ul, ol { padding-left: 24px; margin: 8px 0; }
   li { margin: 4px 0; }
 
-  table { .preview-table(); margin: 12px 0; }
+  table {
+    .preview-table(@bg-muted; var(--td-bg-color-container-hover));
+    margin: 12px 0;
+  }
 
   pre {
     margin: 12px 0;

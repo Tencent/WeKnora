@@ -4,6 +4,7 @@
     !batchMode && activePath === item.path ? 'submenu_item_active' : '',
     batchMode && selectedIds.includes(item.id) ? 'submenu_item_selected' : '',
     batchMode ? 'submenu_item_batch' : '',
+    menuOpen ? 'submenu_item--menu-open' : '',
   ]" @mouseenter="emit('hover-in')" @mouseleave="emit('hover-out')"
     @click="batchMode ? emit('toggle-select') : emit('navigate')">
     <t-checkbox v-if="batchMode" class="batch-checkbox" :checked="selectedIds.includes(item.id)" @click.stop
@@ -26,17 +27,17 @@
     <div v-if="!batchMode" class="session-row-menu-wrap" @click.stop>
       <t-popup v-model:visible="menuOpen" :overlay-class-name="menuOverlayClass" trigger="click" destroy-on-close
         placement="bottom-right" @visible-change="onMenuVisibleChange">
-        <button type="button" class="menu-more-wrap" aria-haspopup="menu" :aria-expanded="menuOpen" @click.stop>
+        <button type="button" class="menu-more-wrap" :aria-label="t('chatHeader.moreActions')" aria-haspopup="menu" :aria-expanded="menuOpen" @click.stop>
           <t-icon name="ellipsis" class="menu-more" />
         </button>
         <template #content>
-          <div class="session-action-menu" @click.stop>
+          <div class="card-menu" @click.stop>
             <template v-if="menuMode === 'menu'">
               <template v-for="(option, index) in menuOptions" :key="option.value">
                 <div v-if="shouldShowDividerBefore(option.value, index)" class="session-action-menu__divider" />
-                <button type="button" class="session-action-menu__item"
-                  :class="{ 'is-danger': option.theme === 'error' }" @click="handleMenuClick(option)">
-                  <component :is="option.prefixIcon" v-if="option.prefixIcon" class="session-action-menu__icon" />
+                <button type="button" class="card-menu-item"
+                  :class="{ danger: option.theme === 'error' }" @click="handleMenuClick(option)">
+                  <component :is="option.prefixIcon" v-if="option.prefixIcon" class="icon" />
                   <span>{{ option.content }}</span>
                 </button>
               </template>
@@ -109,8 +110,8 @@ const titleInputRef = ref<HTMLInputElement | null>(null)
 
 const menuOverlayClass = computed(() => (
   menuMode.value === 'menu'
-    ? 'session-action-menu-popup'
-    : 'session-action-menu-popup is-confirm'
+    ? 'card-more session-action-menu-popup'
+    : 'card-more session-action-menu-popup is-confirm'
 ))
 
 /**
@@ -147,7 +148,7 @@ const backToMenu = (): void => {
 
 const shouldShowDividerBefore = (value: string, index: number): boolean => {
   if (index === 0) return false
-  return value === 'clearMessages' || value === 'delete'
+  return value === 'clearMessages'
 }
 
 const startTitleEdit = (): void => {
@@ -238,7 +239,31 @@ const confirmDangerAction = (): void => {
 
 .session-row-menu-wrap {
   position: relative;
-  flex: 0 0 auto;
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.submenu_item:hover,
+.submenu_item:focus-within,
+.submenu_item--menu-open {
+  .session-row-menu-wrap {
+    flex-basis: 24px;
+    width: 24px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (hover: none) {
+  .session-row-menu-wrap {
+    flex-basis: 24px;
+    width: 24px;
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .session-title-edit {
@@ -311,79 +336,13 @@ const confirmDangerAction = (): void => {
 </style>
 
 <style lang="less">
-.session-action-menu-popup {
+.card-more.session-action-menu-popup {
   z-index: 3000 !important;
-
-  .t-popup__content {
-    padding: 4px !important;
-    margin-top: 2px !important;
-    min-width: 160px !important;
-    width: max-content !important;
-    border-radius: var(--app-radius-md) !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 6px rgba(0, 0, 0, 0.08) !important;
-    overflow: hidden;
-  }
 
   &.is-confirm .t-popup__content {
     padding: 12px !important;
     width: 260px !important;
     min-width: 260px !important;
-  }
-}
-
-.session-action-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 152px;
-}
-
-.session-action-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 5px;
-  color: var(--td-text-color-primary);
-  background: transparent;
-  font-size: var(--app-text-base);
-  line-height: 20px;
-  text-align: left;
-  white-space: nowrap;
-  box-sizing: border-box;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &.is-danger {
-    color: var(--td-error-color-6);
-
-    .session-action-menu__icon {
-      color: var(--td-error-color-6);
-    }
-
-    &:hover {
-      background: var(--td-error-color-1);
-    }
-  }
-}
-
-.session-action-menu__icon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  color: var(--td-text-color-secondary);
-
-  .t-icon {
-    font-size: var(--app-text-xl);
   }
 }
 
@@ -450,11 +409,4 @@ const confirmDangerAction = (): void => {
   }
 }
 
-:root[theme-mode='dark'] .session-action-menu-popup .t-popup__content {
-  background: rgba(36, 36, 36, 0.92) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  box-shadow:
-    0 0 0 0.5px rgba(255, 255, 255, 0.05),
-    0 2px 6px rgba(0, 0, 0, 0.2) !important;
-}
 </style>

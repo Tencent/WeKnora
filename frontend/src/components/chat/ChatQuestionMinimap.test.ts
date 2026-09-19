@@ -15,7 +15,7 @@ test('opens a following preview card to the right of the left-side rail', () => 
   assert.match(component, /question-minimap__question/)
   assert.match(component, /question-minimap__answer/)
   assert.doesNotMatch(component, /question-minimap__kicker/)
-  assert.match(component, /CLOSE_DELAY_MS = 150/)
+  assert.match(component, /CLOSE_DELAY_MS = 180/)
   assert.match(component, /left: var\(--chat-content-inset, 20px\)/)
   assert.match(component, /top: `\$\{peakYPx\}px`/)
   assert.doesNotMatch(component, /flex-direction: row-reverse/)
@@ -76,9 +76,9 @@ test('does not paint the first question green on hover-open', () => {
 
 test('highlights visible messages without losing them when previewing another tick', () => {
   assert.match(component, /peakId/)
-  assert.match(component, /highlightedIds\.has\(tick\.id\)/)
-  assert.match(component, /new Set\(visibleIds\.value\)/)
-  assert.match(composable, /visibleMessageIds\(measured, el\.scrollTop, el\.clientHeight\)/)
+  assert.match(component, /visibleIds\.has\(tick\.id\)/)
+  assert.doesNotMatch(component, /ids\.add\(peakId/)
+  assert.match(composable, /visibleMessageIds\(measured, el\.scrollTop, el\.clientHeight, bottomInset\)/)
 })
 
 test('keeps the preview card at 13px instead of inheriting the chat 20px type', () => {

@@ -1,7 +1,6 @@
 <template>
     <div class="chat" :class="{
         'is-embedded': embeddedMode,
-        'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
         'has-sandbox-panel': sandboxPanel.visible.value,
     }" :style="{ '--sandbox-panel-width': `${sandboxPanel.width.value}px` }">
@@ -23,149 +22,155 @@
                 </t-tooltip>
             </div>
         </div>
-        <div class="chat_thread">
+        <div class="chat_thread" :style="{ '--chat-composer-height': `${composerHeight}px` }">
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
-                <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
-                    <!-- 消息列表骨架屏 -->
-                    <div v-if="historyLoading && messagesList.length === 0" class="msg-skeleton-list">
-                        <div class="msg-skeleton msg-skeleton-user">
-                            <t-skeleton animation="gradient"
-                                :row-col="[{ width: '45%', height: '36px', type: 'rect' }]" />
-                        </div>
-                        <div class="msg-skeleton msg-skeleton-bot">
-                            <t-skeleton animation="gradient"
-                                :row-col="[{ width: '80%', height: '16px' }, { width: '100%', height: '16px' }, { width: '60%', height: '16px' }]" />
-                        </div>
-                        <div class="msg-skeleton msg-skeleton-user">
-                            <t-skeleton animation="gradient"
-                                :row-col="[{ width: '35%', height: '36px', type: 'rect' }]" />
-                        </div>
-                        <div class="msg-skeleton msg-skeleton-bot">
-                            <t-skeleton animation="gradient"
-                                :row-col="[{ width: '70%', height: '16px' }, { width: '90%', height: '16px' }]" />
-                        </div>
-                    </div>
-                    <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
-                    <div v-if="!embeddedMode && messagesList.length === 0 && !loading"
-                        class="suggested-questions-container"
-                        :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
-                        <!-- 骨架屏占位 -->
-                        <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0"
-                            class="suggested-questions-inner">
-                            <div class="suggested-questions-title"><t-skeleton animation="gradient"
-                                    :row-col="[{ width: '120px', height: '14px' }]" /></div>
-                            <div class="suggested-questions-grid">
-                                <div v-for="n in 6" :key="'sq-skel-' + n"
-                                    class="suggested-question-card sq-card-skeleton">
-                                    <t-skeleton animation="gradient"
-                                        :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
-                                </div>
+                <div class="chat_scroll_content">
+                    <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
+                        <!-- 消息列表骨架屏 -->
+                        <div v-if="historyLoading && messagesList.length === 0" class="msg-skeleton-list">
+                            <div class="msg-skeleton msg-skeleton-user">
+                                <t-skeleton animation="gradient"
+                                    :row-col="[{ width: '45%', height: '36px', type: 'rect' }]" />
+                            </div>
+                            <div class="msg-skeleton msg-skeleton-bot">
+                                <t-skeleton animation="gradient"
+                                    :row-col="[{ width: '80%', height: '16px' }, { width: '100%', height: '16px' }, { width: '60%', height: '16px' }]" />
+                            </div>
+                            <div class="msg-skeleton msg-skeleton-user">
+                                <t-skeleton animation="gradient"
+                                    :row-col="[{ width: '35%', height: '36px', type: 'rect' }]" />
+                            </div>
+                            <div class="msg-skeleton msg-skeleton-bot">
+                                <t-skeleton animation="gradient"
+                                    :row-col="[{ width: '70%', height: '16px' }, { width: '90%', height: '16px' }]" />
                             </div>
                         </div>
-                        <transition v-else appear name="sq-fade">
-                            <div v-if="suggestedQuestions.length > 0" class="suggested-questions-inner">
-                                <div class="suggested-questions-title-row">
-                                    <p class="suggested-questions-caption">
-                                        <span class="suggested-questions-title">{{ t('chat.suggestedQuestions')
-                                            }}</span>
-                                        <button type="button" class="suggested-questions-refresh"
-                                            :disabled="suggestedQuestionsLoading"
-                                            :title="t('chat.refreshSuggestedQuestions')"
-                                            :aria-label="t('chat.refreshSuggestedQuestions')"
-                                            @click="fetchSuggestedQuestions">
-                                            <t-icon :name="suggestedQuestionsLoading ? 'loading' : 'refresh'"
-                                                :class="{ 'sq-refresh-spin': suggestedQuestionsLoading }" />
-                                        </button>
-                                    </p>
-                                </div>
+                        <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
+                        <div v-if="!embeddedMode && messagesList.length === 0 && !loading"
+                            class="suggested-questions-container"
+                            :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
+                            <!-- 骨架屏占位 -->
+                            <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0"
+                                class="suggested-questions-inner">
+                                <div class="suggested-questions-title"><t-skeleton animation="gradient"
+                                        :row-col="[{ width: '120px', height: '14px' }]" /></div>
                                 <div class="suggested-questions-grid">
-                                    <div v-for="(item, index) in suggestedQuestions" :key="item.question"
-                                        class="suggested-question-card"
-                                        @click="handleSuggestedQuestionClick(item)">
-                                        <span class="suggested-question-text">{{ item.question }}</span>
-                                        <span v-if="item.source === 'faq'"
-                                            class="suggested-question-badge faq">FAQ</span>
+                                    <div v-for="n in 6" :key="'sq-skel-' + n"
+                                        class="suggested-question-card sq-card-skeleton">
+                                        <t-skeleton animation="gradient"
+                                            :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
                                     </div>
                                 </div>
                             </div>
-                        </transition>
-                    </div>
-                    <!--
-                  关键：必须用 session.id 作为 key，不能用 v-for 的索引。
-                  向上滚动加载历史时会插入一批消息（push/unshift）到列表，
-                  若用索引作 key 会让所有已渲染消息的 key 漂移，触发整个列表的销毁重建
-                  （botmsg / AgentStreamDisplay 全部重新挂载、markdown 重新渲染），
-                  这是历史加载时白屏 + layout shift 蔓延到 session 列表的根因。
-                  仅对极少数尚未拿到 id 的本地占位消息 fallback 到 role+created_at+index。
-                -->
-                    <div v-for="(session, index) in messagesList"
-                        :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper"
-                        :class="{ 'is-steer-prefix': session.steerForked, 'is-empty-segment': session.role === 'assistant' && !shouldRenderAssistantMessage(session) }">
-                        <MessageTimestamp v-if="shouldShowConversationTimestamp(messagesList, index)"
-                            :value="session.created_at" />
+                            <transition v-else appear name="sq-fade">
+                                <div v-if="suggestedQuestions.length > 0" class="suggested-questions-inner">
+                                    <div class="suggested-questions-title-row">
+                                        <p class="suggested-questions-caption">
+                                            <span class="suggested-questions-title">{{ t('chat.suggestedQuestions')
+                                                }}</span>
+                                            <button type="button" class="suggested-questions-refresh"
+                                                :disabled="suggestedQuestionsLoading"
+                                                :title="t('chat.refreshSuggestedQuestions')"
+                                                :aria-label="t('chat.refreshSuggestedQuestions')"
+                                                @click="fetchSuggestedQuestions">
+                                                <t-icon :name="suggestedQuestionsLoading ? 'loading' : 'refresh'"
+                                                    :class="{ 'sq-refresh-spin': suggestedQuestionsLoading }" />
+                                            </button>
+                                        </p>
+                                    </div>
+                                    <div class="suggested-questions-grid">
+                                        <div v-for="(item, index) in suggestedQuestions" :key="item.question"
+                                            class="suggested-question-card"
+                                            @click="handleSuggestedQuestionClick(item)">
+                                            <span class="suggested-question-text">{{ item.question }}</span>
+                                            <span v-if="item.source === 'faq'"
+                                                class="suggested-question-badge faq">FAQ</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </transition>
+                        </div>
+                        <!--
+                      关键：必须用 session.id 作为 key，不能用 v-for 的索引。
+                      向上滚动加载历史时会插入一批消息（push/unshift）到列表，
+                      若用索引作 key 会让所有已渲染消息的 key 漂移，触发整个列表的销毁重建
+                      （botmsg / AgentStreamDisplay 全部重新挂载、markdown 重新渲染），
+                      这是历史加载时白屏 + layout shift 蔓延到 session 列表的根因。
+                      仅对极少数尚未拿到 id 的本地占位消息 fallback 到 role+created_at+index。
+                    -->
+                        <div v-for="(session, index) in messagesList"
+                            :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper"
+                            :class="{ 'is-steer-prefix': session.steerForked, 'is-empty-segment': session.role === 'assistant' && !shouldRenderAssistantMessage(session) }">
+                            <MessageTimestamp v-if="shouldShowConversationTimestamp(messagesList, index)"
+                                :value="session.created_at" />
 
-                        <div v-if="session.role == 'user'" class="message-row"
-                            :data-message-id="session.id || undefined"
-                            :class="{ 'is-minimap-target': session.id && session.id === minimapTargetId }">
-                            <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
-                                :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
-                                :session-id="session_id"
-                                :message-id="session.id"
-                                :created-at="session.created_at"
-                                :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
-                                :steer-failed="Boolean(session._steerFailed)"
-                                @retry-steer="handleRetrySteer(session.steer_id)"
-                                @remove-steer="handleRemoveSteer(session.steer_id)"
-                                @fork="handleFork">
-                            </usermsg>
+                            <div v-if="session.role == 'user'" class="message-row"
+                                :data-message-id="session.id || undefined">
+                                <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
+                                    :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
+                                    :session-id="session_id"
+                                    :message-id="session.id"
+                                    :created-at="session.created_at"
+                                    :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :steer-failed="Boolean(session._steerFailed)"
+                                    @retry-steer="handleRetrySteer(session.steer_id)"
+                                    @remove-steer="handleRemoveSteer(session.steer_id)"
+                                    @fork="handleFork">
+                                </usermsg>
+                            </div>
+                            <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
+                                class="message-row"
+                                :data-message-id="session.id || undefined">
+                                <botmsg :content="session.content" :session="session" :session-id="session_id"
+                                    :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
+                                    :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
+                                    :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
+                                    :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    @fork="handleFork"
+                                    @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
+                                </botmsg>
+                                <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
+                                    :suggestion-set="session.suggestionSet"
+                                    :loading="session.suggestionLoading"
+                                    :allow-regenerate="session.suggestionSet?.allow_regenerate"
+                                    @select="(item) => handleFollowUpSelect(session, item)"
+                                    @regenerate="loadFollowUpSuggestions(session, true, true)"
+                                    @impression="(set) => recordSuggestionEvent(session, set, 'impression')"
+                                    @dismiss="(set) => dismissSuggestions(session, set)" />
+                            </div>
                         </div>
-                        <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
-                            class="message-row">
-                            <botmsg :content="session.content" :session="session" :session-id="session_id"
-                                :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
-                                :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
-                                :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
-                                :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
-                                @fork="handleFork"
-                                @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
-                            </botmsg>
-                            <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
-                                :suggestion-set="session.suggestionSet"
-                                :loading="session.suggestionLoading"
-                                :allow-regenerate="session.suggestionSet?.allow_regenerate"
-                                @select="(item) => handleFollowUpSelect(session, item)"
-                                @regenerate="loadFollowUpSuggestions(session, true, true)"
-                                @impression="(set) => recordSuggestionEvent(session, set, 'impression')"
-                                @dismiss="(set) => dismissSuggestions(session, set)" />
+                        <div v-if="showGlobalTypingIndicator" class="chat-global-wait" role="status"
+                            :aria-label="t('chat.thinkingAlt')">
+                            <span class="chat-global-wait__spinner" aria-hidden="true"></span>
                         </div>
                     </div>
-                    <div v-if="showGlobalTypingIndicator" class="chat-global-wait" role="status"
-                        :aria-label="t('chat.thinkingAlt')">
-                        <span class="chat-global-wait__spinner" aria-hidden="true"></span>
+                    <div ref="composerElement" class="chat_composer">
+                        <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
+                            <transition name="scroll-btn-fade">
+                                <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
+                                    <t-icon name="chevron-down" size="18px" />
+                                </div>
+                            </transition>
+                            <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
+                                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
+                                @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
+                                @promote-steer="handlePromoteSteer"
+                                @remove-steer="handleRemoveSteer"
+                                @retry-steer="handleRetrySteer"
+                                @stop-generation="handleStopGeneration"
+                                @stop-confirmed="handleStopConfirmed"
+                                @stop-failed="handleStopFailed" :isReplying="isReplying" :sessionId="session_id"
+                                :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
+                                :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
+                        </div>
                     </div>
                 </div>
             </div>
-            <BrowserTaskPreview v-if="!embeddedMode && session_id" :key="session_id" :session-id="session_id" />
-            <ChatQuestionMinimap v-if="!embeddedMode" :scroll-container="scrollContainer" :messages="messagesList"
-                @jump="jumpToQuestion" />
-        </div>
-        <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
-            <transition name="scroll-btn-fade">
-                <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
-                    <t-icon name="chevron-down" size="18px" />
-                </div>
-            </transition>
-            <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
-                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
-                @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
-                @promote-steer="handlePromoteSteer"
-                @remove-steer="handleRemoveSteer"
-                @retry-steer="handleRetrySteer"
-                @stop-generation="handleStopGeneration"
-                @stop-confirmed="handleStopConfirmed"
-                @stop-failed="handleStopFailed" :isReplying="isReplying" :sessionId="session_id"
-                :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
-                :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
+            <div v-if="!embeddedMode" class="chat_overlays">
+                <BrowserTaskPreview v-if="session_id" :key="session_id" :session-id="session_id" />
+                <ChatQuestionMinimap :scroll-container="scrollContainer" :messages="messagesList"
+                    @jump="jumpToQuestion" />
+            </div>
         </div>
     </div>
     <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
@@ -448,23 +453,25 @@ watch(historyLoading, (loading) => {
 }, { flush: 'post' })
 let fullContent = ref('')
 const scrollContainer = ref(null)
+const composerElement = ref(null)
+const composerHeight = ref(0)
+// Keep floating previews above the sticky composer, including when its controls
+// wrap after a drawer opens or the user adds multiple lines/attachments.
+watch(composerElement, (element, _, onCleanup) => {
+    if (!element) return
+    const measure = () => { composerHeight.value = element.offsetHeight }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    onCleanup(() => observer.disconnect())
+}, { flush: 'post' })
 const userHasScrolledUp = ref(false)
 const SCROLL_BOTTOM_THRESHOLD = 80
-const minimapTargetId = ref('')
-let minimapFlashTimer = null
 
 const isNearBottom = () => {
     if (!scrollContainer.value) return true;
     const { scrollTop, scrollHeight, clientHeight } = scrollContainer.value;
     return scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
-}
-
-const clearMinimapFlash = () => {
-    if (minimapFlashTimer) {
-        clearTimeout(minimapFlashTimer)
-        minimapFlashTimer = null
-    }
-    minimapTargetId.value = ''
 }
 
 const jumpToQuestion = (id) => {
@@ -479,12 +486,6 @@ const jumpToQuestion = (id) => {
 
     el.scrollIntoView({ block: 'start', behavior: 'smooth' })
 
-    minimapTargetId.value = id
-    if (minimapFlashTimer) clearTimeout(minimapFlashTimer)
-    minimapFlashTimer = setTimeout(() => {
-        minimapTargetId.value = ''
-        minimapFlashTimer = null
-    }, 1200)
 }
 
 const handleKBEditorSuccess = (kbId) => {
@@ -1574,7 +1575,6 @@ const clearData = () => {
     referencesDrawer.close();
     isReplying.value = false;
     fullContent.value = '';
-    clearMinimapFlash();
     // Stop any IM-reply recovery poll for the session we're leaving/switching.
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
     isImRecovering.value = false;
@@ -1583,7 +1583,6 @@ onUnmounted(() => {
     if (!props.embeddedMode) sessionActivity.detach(activitySessionId.value);
     activitySessionId.value = '';
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
-    clearMinimapFlash();
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
 });
 onBeforeRouteLeave((to, from, next) => {
@@ -1603,25 +1602,20 @@ onBeforeRouteUpdate((to, from, next) => {
 .chat {
     // 水平方向不留 padding，让滚动条贴到内容区最右缘；
     // 消息列与输入列各自用 --chat-content-inset 做左右对称的留白（窄屏时才可见）。
-    padding: 0 0 max(8px, env(safe-area-inset-bottom)) 0;
+    padding: 0;
     --chat-content-inset: 20px;
     box-sizing: border-box;
     flex: 1;
     // The parent .platform-route-outlet is a flex column with min-height:0
     // and overflow:hidden — we also need min-height:0 here so that our
-    // own flex:1 child (.chat_thread) can shrink below its content
-    // height and keep the input container in view.
+    // own flex:1 child (.chat_thread) can shrink below its content height.
     min-height: 0;
     position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
-    max-width: calc(100vw - 260px);
+    max-width: 100%;
     min-width: 400px;
-
-    &.is-sidebar-collapsed {
-        max-width: calc(100vw - 60px);
-    }
 
     &.is-embedded {
         max-width: 100%;
@@ -1754,26 +1748,68 @@ onBeforeRouteUpdate((to, from, next) => {
     flex: 1;
     min-height: 0;
     width: 100%;
-    padding-top: 8px;
+    padding: 8px 0 0;
     box-sizing: border-box;
     overflow-y: auto;
-    // 使用系统原生滚动条（macOS 滚动时自动显示 overlay 滚动条，类似 ChatGPT）
-    scrollbar-width: auto;
-    scrollbar-color: auto;
-}
+    overscroll-behavior-y: contain;
+    scroll-padding-bottom: var(--chat-composer-height, 0px);
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--td-component-stroke) transparent;
 
-// 深色模式下 theme.css 对 * 做了 webkit 滚动条着色，这里恢复为系统默认
-:global(:root[theme-mode="dark"]) .chat_scroll_box {
-    &::-webkit-scrollbar-thumb {
-        background-color: initial !important;
+    &:hover,
+    &:focus-within {
+        scrollbar-color: var(--td-scrollbar-color) transparent;
     }
 
-    &::-webkit-scrollbar-thumb:hover {
-        background-color: initial !important;
+    &::-webkit-scrollbar {
+        width: 6px;
     }
 
     &::-webkit-scrollbar-track {
-        background-color: initial !important;
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        border-radius: 6px;
+        background: var(--td-component-stroke);
+    }
+
+    &:hover::-webkit-scrollbar-thumb,
+    &:focus-within::-webkit-scrollbar-thumb {
+        background: var(--td-scrollbar-color);
+    }
+}
+
+// One scroll viewport spans the messages and composer, so the scrollbar reaches
+// the bottom of the chat column. The composer stays in flow to reserve its own
+// height, and sticks to the bottom while reading earlier messages.
+.chat_scroll_content {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+}
+
+.chat_composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 12;
+    flex-shrink: 0;
+    padding: 16px 0 max(8px, env(safe-area-inset-bottom));
+    background: var(--td-bg-color-container);
+}
+
+.is-embedded .chat_composer {
+    padding: 0;
+}
+
+.chat_overlays {
+    position: absolute;
+    inset: 0 0 var(--chat-composer-height, 0px);
+    pointer-events: none;
+
+    :deep(.browser-task-preview) {
+        pointer-events: auto;
     }
 }
 
@@ -1914,9 +1950,6 @@ onBeforeRouteUpdate((to, from, next) => {
         flex-direction: column;
         width: 100%;
 
-        &.is-minimap-target {
-            animation: minimap-target-flash 1.2s ease;
-        }
     }
 
     .botanswer_laoding_gif {
@@ -1940,16 +1973,6 @@ onBeforeRouteUpdate((to, from, next) => {
         border-top-color: var(--td-text-color-secondary);
         border-radius: 50%;
         animation: wk-spin 0.8s linear infinite;
-    }
-}
-
-@keyframes minimap-target-flash {
-    0% {
-        background: color-mix(in srgb, var(--td-brand-color) 18%, transparent);
-    }
-
-    100% {
-        background: transparent;
     }
 }
 

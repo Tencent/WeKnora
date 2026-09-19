@@ -5,7 +5,8 @@ import { onMounted, onUnmounted, type Ref } from 'vue'
  *
  * Streaming text already requests scrolling when chunks arrive, but images,
  * Mermaid diagrams, and other rich content can change height later. Observe the
- * message list itself so all delayed layout changes share the same behavior.
+ * content wrapper and scroll viewport so delayed content, drawer resizing, and
+ * composer height changes share the same behavior.
  * A user who has intentionally scrolled up is never pulled back down.
  */
 export function useStickyBottomOnResize(
@@ -22,16 +23,17 @@ export function useStickyBottomOnResize(
     // ResizeObserver runs after layout, before paint. Deferring to rAF here
     // paints one frame with a trailing steer bubble displaced by the growing
     // answer, then snaps it back on the next frame. Correct the scroll offset
-    // now; changing scrollTop does not resize the observed message list.
+    // now; changing scrollTop does not resize the observed content wrapper.
     container.scrollTop = container.scrollHeight
   }
 
   onMounted(() => {
-    const messageList = scrollContainer.value?.firstElementChild
-    if (!messageList || typeof ResizeObserver === 'undefined') return
+    const container = scrollContainer.value
+    if (!container || typeof ResizeObserver === 'undefined') return
 
     resizeObserver = new ResizeObserver(followResize)
-    resizeObserver.observe(messageList)
+    resizeObserver.observe(container)
+    if (container.firstElementChild) resizeObserver.observe(container.firstElementChild)
   })
 
   onUnmounted(() => {

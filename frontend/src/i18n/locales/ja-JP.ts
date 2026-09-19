@@ -3680,6 +3680,7 @@ export default {
         authRevoked: 'ログイン状態が無効になったため、ターミナルが切断されました。再度サインインしてから接続してください。',
     },
     questionMinimapTitle: 'Q&A',
+    questionMinimapPosition: '全 {total} ターン中 {current} ターン目',
     questionMinimapAriaLabel: '質問一覧',
     questionMinimapAttachmentPlaceholder: '（添付ファイル）',
     referenceChunkCount: '{count}件のチャンク',
