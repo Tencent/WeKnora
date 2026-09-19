@@ -186,7 +186,7 @@ type Provider interface {
 
 #### 支持的厂商清单
 
-`AllProviders()`（`provider/provider.go`）返回的完整列表（共 27 个，每个厂商在自己的文件里 `init()` 注册）。表格最后一行的 Ollama 不在其中，它走 `source=local` 这条独立路径，列在这里只为方便对照：
+`AllProviders()`（`provider/provider.go`）返回的完整列表（共 28 个，每个厂商在自己的文件里 `init()` 注册）。表格最后一行的 Ollama 不在其中，它走 `source=local` 这条独立路径，列在这里只为方便对照：
 
 | Provider 标识 | 名称 | 说明 |
 |---------------|------|------|
@@ -208,6 +208,7 @@ type Provider interface {
 | `gemini` | Google Gemini | Embedding 走专用 API |
 | `openrouter` | OpenRouter | |
 | `litellm` | LiteLLM（自托管 OpenAI 兼容代理） | 默认 URL 为占位符，loopback 需加入 `SSRF_WHITELIST` |
+| `daoxe` | Daoxe（OpenAI 兼容多模型网关） | Chat / Embedding / VLLM，一个端点接入数百个模型 |
 | `requesty` | Requesty | |
 | `jina` | Jina AI | Embedding 与 Rerank |
 | `mimo` | 小米 MiMo | |

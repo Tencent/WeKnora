@@ -28,6 +28,7 @@ func TestResolveProvider(t *testing.T) {
 		{"qwen thinking", provider.ProviderAliyun, "qwen3-32b", qwenThinkingProvider{}},
 		{"generic", provider.ProviderGeneric, "anything", genericProvider{}},
 		{"litellm", provider.ProviderLiteLLM, "anything", liteLLMProvider{}},
+		{"daoxe", provider.ProviderDaoxe, "anything", daoxeProvider{}},
 		{"gemini", provider.ProviderGemini, "gemini-3-flash-preview", geminiProvider{}},
 		{"nvidia", provider.ProviderNvidia, "anything", nvidiaProvider{}},
 		{"volcengine", provider.ProviderVolcengine, "doubao", volcengineProvider{}},
