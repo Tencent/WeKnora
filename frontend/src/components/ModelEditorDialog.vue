@@ -1058,6 +1058,7 @@ watch(() => props.visible && saving.value, (locked) => {
 // affordance for everyday use. Reset every time the drawer closes (see
 // reset block in the visible watcher) so we never leak the previous value
 // across editor sessions.
+const showApiKey = ref(false)
 const modelChecked = ref(false)
 const modelAvailable = ref(false)
 const checking = ref(false)
@@ -1426,6 +1427,7 @@ const resetForm = () => {
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''
+  showApiKey.value = false
 }
 
 // 处理厂商选择变化 (自动填充默认 URL)

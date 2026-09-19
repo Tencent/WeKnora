@@ -90,7 +90,7 @@
 <script setup lang="ts">
 import { ref, computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { AddIcon, FileAddIcon, UploadIcon, FolderAddIcon, LinkIcon, EditIcon } from 'tdesign-icons-vue-next'
 import { filterUploadFiles } from '../utils/uploadSources'
 
