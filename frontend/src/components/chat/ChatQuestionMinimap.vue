@@ -3,7 +3,7 @@
     v-if="visible"
     ref="rootRef"
     class="question-minimap"
-    :style="{ left: `${RAIL_INSET_PX}px`, height: `${trackHeight}px` }"
+    :style="{ height: `${trackHeight}px` }"
     :aria-label="t('chat.questionMinimapAriaLabel')"
     @mouseenter="handleMouseEnter"
     @mouseleave="handleMouseLeave"
@@ -69,7 +69,6 @@ import {
 } from '@/utils/chatQuestionMinimap'
 
 const CLOSE_DELAY_MS = 150
-const RAIL_INSET_PX = 0
 
 const props = defineProps<{
   scrollContainer: HTMLElement | null
@@ -298,7 +297,7 @@ onBeforeUnmount(() => {
 .question-minimap {
   position: absolute;
   top: 50%;
-  left: 0;
+  left: var(--chat-content-inset, 20px);
   z-index: 11;
   display: flex;
   align-items: stretch;

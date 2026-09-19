@@ -41,7 +41,7 @@
           :aria-label="t('common.close')"
           @click="panel?.close()"
         >
-          <t-icon name="close" size="20px" />
+          <t-icon name="close" size="16px" />
         </button>
       </div>
 
@@ -312,8 +312,8 @@ function startResize(event: MouseEvent) {
   border: 0;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--app-radius-md);
   cursor: pointer;
   display: inline-flex;
@@ -332,7 +332,9 @@ function startResize(event: MouseEvent) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  height: var(--app-chat-header-height);
+  box-sizing: border-box;
+  padding: 0 12px;
   border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
 }
@@ -349,7 +351,9 @@ function startResize(event: MouseEvent) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  height: 28px;
+  padding: 0 8px;
+  line-height: 20px;
   border: 0;
   border-radius: var(--app-radius-sm);
   background: transparent;

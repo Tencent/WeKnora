@@ -20,7 +20,7 @@
             :aria-label="t('common.close')"
             @click="close"
           >
-            <t-icon name="close" size="20px" />
+            <t-icon name="close" size="16px" />
           </button>
         </header>
 
@@ -357,7 +357,10 @@ watch(visible, (open) => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px 16px 12px;
+  height: var(--app-chat-header-height);
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0 12px;
   border-bottom: 1px solid var(--td-component-stroke);
 }
 
@@ -373,7 +376,10 @@ watch(visible, (open) => {
   font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-secondary);
-  line-height: 1.4;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-references-panel__count {
@@ -385,19 +391,15 @@ watch(visible, (open) => {
   border: 0;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  width: 36px;
-  height: 36px;
-  border-radius: var(--app-radius-lg);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
-
-  :deep(.t-icon) {
-    font-size: var(--app-text-3xl);
-  }
 
   &:hover {
     background: color-mix(in srgb, var(--td-text-color-primary) 8%, var(--td-bg-color-secondarycontainer));

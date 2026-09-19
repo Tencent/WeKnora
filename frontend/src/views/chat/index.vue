@@ -5,22 +5,23 @@
         'has-references-panel': referencesDrawerVisible,
         'has-sandbox-panel': sandboxPanel.visible.value,
     }" :style="{ '--sandbox-panel-width': `${sandboxPanel.width.value}px` }">
-        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
-        <!-- 沙箱面板收起时：图标与左侧栏展开按钮同一套，位置镜像会话左上角三个点。 -->
-        <div v-if="!embeddedMode && !sandboxPanel.visible.value" class="sandbox-header-toggle">
-            <t-tooltip placement="bottom">
-                <template #content>{{ t('chatHeader.toggleSandboxPanel') }}</template>
-                <button type="button" class="sandbox-header-toggle__btn"
-                    :aria-label="t('chatHeader.toggleSandboxPanel')" @click="sandboxPanel.open()">
-                    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg"
-                        aria-hidden="true">
-                        <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
-                        <line x1="12.5" y1="1.5" x2="12.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
-                        <line x1="16" y1="7.5" x2="16" y2="12.5" stroke="currentColor" stroke-width="1.2"
-                            stroke-linecap="round" />
-                    </svg>
-                </button>
-            </t-tooltip>
+        <div v-if="!embeddedMode" class="chat-topbar">
+            <ChatHeader :session="currentSession" />
+            <div v-if="!sandboxPanel.visible.value" class="sandbox-header-toggle">
+                <t-tooltip placement="bottom">
+                    <template #content>{{ t('chatHeader.toggleSandboxPanel') }}</template>
+                    <button type="button" class="sandbox-header-toggle__btn"
+                        :aria-label="t('chatHeader.toggleSandboxPanel')" @click="sandboxPanel.open()">
+                        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"
+                            aria-hidden="true">
+                            <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
+                            <line x1="12.5" y1="1.5" x2="12.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
+                            <line x1="16" y1="7.5" x2="16" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                                stroke-linecap="round" />
+                        </svg>
+                    </button>
+                </t-tooltip>
+            </div>
         </div>
         <div class="chat_thread">
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
@@ -148,13 +149,13 @@
             <ChatQuestionMinimap v-if="!embeddedMode" :scroll-container="scrollContainer" :messages="messagesList"
                 @jump="jumpToQuestion" />
         </div>
-        <transition name="scroll-btn-fade">
-            <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
-                <t-icon name="chevron-down" size="20px" />
-            </div>
-        </transition>
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
-            <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount"
+            <transition name="scroll-btn-fade">
+                <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
+                    <t-icon name="chevron-down" size="18px" />
+                </div>
+            </transition>
+            <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
                 @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
                 @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
                 @promote-steer="handlePromoteSteer"
@@ -1602,10 +1603,8 @@ onBeforeRouteUpdate((to, from, next) => {
 .chat {
     // 水平方向不留 padding，让滚动条贴到内容区最右缘；
     // 消息列与输入列各自用 --chat-content-inset 做左右对称的留白（窄屏时才可见）。
-    padding: 0 0 20px 0;
+    padding: 0 0 max(8px, env(safe-area-inset-bottom)) 0;
     --chat-content-inset: 20px;
-    // 右侧抽屉让出的宽度。回到底部按钮按「剩余聊天列」居中，而不是整页 50%。
-    --chat-right-inset: 0px;
     box-sizing: border-box;
     flex: 1;
     // The parent .platform-route-outlet is a flex column with min-height:0
@@ -1639,16 +1638,11 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.has-references-panel:not(.is-embedded) {
         @media (min-width: 960px) {
-            --chat-right-inset: 420px;
             padding-right: 420px;
             box-sizing: border-box;
 
             .chat_scroll_box {
                 padding-top: 0;
-            }
-
-            .sandbox-header-toggle {
-                right: 432px;
             }
         }
     }
@@ -1657,7 +1651,6 @@ onBeforeRouteUpdate((to, from, next) => {
     // composable 持久化），聊天区 padding 跟随面板宽度让位。
     &.has-sandbox-panel:not(.is-embedded) {
         @media (min-width: 960px) {
-            --chat-right-inset: var(--sandbox-panel-width, 420px);
             padding-right: var(--sandbox-panel-width, 420px);
             box-sizing: border-box;
         }
@@ -1665,12 +1658,10 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.has-sandbox-panel.has-references-panel:not(.is-embedded) {
         @media (min-width: 1400px) {
-            --chat-right-inset: calc(420px + var(--sandbox-panel-width, 420px));
             padding-right: calc(420px + var(--sandbox-panel-width, 420px));
         }
 
         @media (max-width: 1399.98px) and (min-width: 960px) {
-            --chat-right-inset: var(--sandbox-panel-width, 420px);
             padding-right: var(--sandbox-panel-width, 420px);
         }
     }
@@ -1715,22 +1706,24 @@ onBeforeRouteUpdate((to, from, next) => {
     overflow: hidden;
 }
 
-// 沙箱面板入口：chrome 对齐会话左上角三个点（毛玻璃底 + 24px 图标按钮），
-// 图标是左侧栏 sidebar-toggle 的水平镜像（栏在右侧）。
+.chat-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 var(--app-chat-header-height);
+    width: 100%;
+    min-width: 0;
+    padding: 0 12px 0 var(--chat-content-inset, 20px);
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-container);
+}
+
 .sandbox-header-toggle {
-    position: absolute;
-    top: 10px;
-    right: 12px;
-    z-index: 6;
     display: inline-flex;
     align-items: center;
-    padding: 2px;
-    border-radius: var(--app-radius-md);
-    box-sizing: border-box;
-    background: color-mix(in srgb, var(--td-bg-color-container) 88%, transparent);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    pointer-events: auto;
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .sandbox-header-toggle__btn {
@@ -1786,12 +1779,12 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .scroll-to-bottom-btn {
     position: absolute;
-    left: calc((100% - var(--chat-right-inset, 0px)) / 2);
+    left: 50%;
     transform: translateX(-50%);
-    bottom: 140px;
+    bottom: calc(100% + 8px);
     z-index: 10;
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     background: var(--td-bg-color-container);
     border: 1px solid var(--td-component-stroke);
@@ -1801,7 +1794,7 @@ onBeforeRouteUpdate((to, from, next) => {
     justify-content: center;
     cursor: pointer;
     color: var(--td-text-color-secondary);
-    transition: left var(--app-motion-slow) cubic-bezier(0.22, 0.61, 0.36, 1), background-color var(--app-motion-base) ease, color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
+    transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
 
     &:hover {
         background: var(--td-bg-color-container-hover);
@@ -1859,7 +1852,7 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 .input-container {
-    min-height: 115px;
+    min-height: 0;
     flex-shrink: 0;
     margin: 0 auto;
     width: 100%;
@@ -1879,7 +1872,7 @@ onBeforeRouteUpdate((to, from, next) => {
         padding: 12px 16px 16px;
         min-height: auto;
         box-sizing: border-box;
-        overflow-x: hidden;
+        overflow-x: clip;
     }
 }
 

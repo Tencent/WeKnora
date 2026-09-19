@@ -16,7 +16,7 @@ test('opens a following preview card to the right of the left-side rail', () => 
   assert.match(component, /question-minimap__answer/)
   assert.doesNotMatch(component, /question-minimap__kicker/)
   assert.match(component, /CLOSE_DELAY_MS = 150/)
-  assert.match(component, /left: `\$\{RAIL_INSET_PX\}px`/)
+  assert.match(component, /left: var\(--chat-content-inset, 20px\)/)
   assert.match(component, /top: `\$\{peakYPx\}px`/)
   assert.doesNotMatch(component, /flex-direction: row-reverse/)
   assert.doesNotMatch(component, /right: `\$\{scrollbarGutterPx \+ RAIL_INSET_PX\}px`/)
@@ -32,7 +32,6 @@ test('grows nearby ticks into a mountain under the pointer', () => {
 test('centers the rail in the thread instead of stretching top to bottom', () => {
   assert.match(component, /top: 50%/)
   assert.match(component, /transform: translateY\(-50%\)/)
-  assert.match(component, /RAIL_INSET_PX = 0/)
   assert.match(component, /height: `\$\{trackHeight\}px`/)
   assert.doesNotMatch(component, /inset-block: 0/)
   assert.doesNotMatch(component, /align-self: flex-start/)
@@ -66,7 +65,6 @@ test('keeps scroll-driven active question changes from clobbering keyboard navig
 
 test('does not draw a second scrollbar thumb next to the native scrollbar', () => {
   assert.doesNotMatch(component, /question-minimap__viewport/)
-  assert.match(component, /RAIL_INSET_PX = 0/)
   assert.match(component, /scrollbar-width: none/)
 })
 

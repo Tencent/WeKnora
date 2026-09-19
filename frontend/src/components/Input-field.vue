@@ -507,6 +507,10 @@ const sharedAgentOrgName = computed(() => {
 });
 
 const props = defineProps({
+  compact: {
+    type: Boolean,
+    default: false
+  },
   autoFocus: {
     type: Boolean,
     default: false
@@ -2634,7 +2638,7 @@ defineExpose({
 
 </script>
 <template>
-  <div class="answers-input" :class="{ 'is-embedded': embeddedMode }" @drop="onDrop" @dragover="onDragOver">
+  <div class="answers-input" :class="{ 'is-embedded': embeddedMode, 'is-compact': compact }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
     <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
@@ -3216,7 +3220,7 @@ const getImgSrc = (url: string) => {
 :deep(.t-textarea__inner) {
   width: 100%;
   max-height: 152px !important;
-  min-height: 72px !important;
+  min-height: var(--composer-input-min-height, 72px) !important;
   resize: none;
   color: var(--td-text-color-primary);
   font-size: var(--app-text-xl);
@@ -3265,6 +3269,24 @@ const getImgSrc = (url: string) => {
 
   &.is-embedded {
     justify-content: flex-end;
+  }
+}
+
+.answers-input.is-compact {
+  --composer-input-min-height: 56px;
+
+  .rich-input-container :deep(.t-textarea__inner) {
+    padding: 12px 14px;
+  }
+
+  .control-bar {
+    margin: 0 12px 8px;
+    padding-top: 4px;
+  }
+
+  .control-icon {
+    width: 16px;
+    height: 16px;
   }
 }
 
