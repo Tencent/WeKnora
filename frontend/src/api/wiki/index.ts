@@ -77,11 +77,38 @@ export interface WikiGraphMeta {
   center?: string;
   depth?: number;
   familiar_count?: number;
+  learning_evidence_count?: number;
+  unseen_count?: number;
+}
+
+export interface WikiNodeLearning {
+  state: 'unseen' | 'exploring' | 'familiar';
+  mastery_score: number;
+  evidence_kind: 'answer_source_use' | string;
+  evidence_count: number;
+  source_count: number;
+  last_evidence_at?: string;
+}
+
+export interface WikiLearningRecommendation {
+  slug: string;
+  title: string;
+  page_type: string;
+  known_neighbor_count: number;
+  link_count: number;
 }
 
 export interface WikiGraphData {
-  nodes: { slug: string; title: string; page_type: string; link_count: number; familiar?: boolean }[];
+  nodes: {
+    slug: string;
+    title: string;
+    page_type: string;
+    link_count: number;
+    familiar?: boolean;
+    learning?: WikiNodeLearning;
+  }[];
   edges: { source: string; target: string }[];
+  recommendations?: WikiLearningRecommendation[];
   meta: WikiGraphMeta;
 }
 

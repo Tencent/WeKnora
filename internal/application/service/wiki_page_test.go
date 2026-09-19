@@ -473,6 +473,61 @@ func TestComputeGraphSubset_MarksFamiliarSourcePages(t *testing.T) {
 	}
 }
 
+func TestGuidedLearningOfflineEvaluation(t *testing.T) {
+	pages := makeGraphFixture()
+	pages[0].SourceRefs = types.StringArray{"doc-1|排班手册"}
+	pages[5].PageType = types.WikiPageTypeSummary
+	pages[5].SourceRefs = types.StringArray{"doc-2|值班说明"}
+	lastUsed := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
+
+	got, err := computeGraphSubset(pages, &types.WikiGraphRequest{
+		Mode:  types.WikiGraphModeOverview,
+		Limit: 0,
+		LearningDocuments: []*types.MemoryDocView{
+			{KnowledgeID: "doc-1", Hits: types.MemoryDocAffinityMinHits, LastUsedAt: lastUsed},
+			{KnowledgeID: "doc-2", Hits: 1, LastUsedAt: lastUsed.Add(-time.Hour)},
+		},
+	})
+	require.NoError(t, err)
+
+	bySlug := make(map[string]types.WikiGraphNode, len(got.Nodes))
+	for _, node := range got.Nodes {
+		bySlug[node.Slug] = node
+	}
+	require.Equal(t, types.WikiLearningStateFamiliar, bySlug["hub"].Learning.State)
+	require.Equal(t, 35, bySlug["hub"].Learning.MasteryScore)
+	require.Equal(t, types.MemoryDocAffinityMinHits, bySlug["hub"].Learning.EvidenceCount)
+	require.NotNil(t, bySlug["hub"].Learning.LastEvidenceAt)
+	require.Equal(t, lastUsed, *bySlug["hub"].Learning.LastEvidenceAt)
+	require.True(t, bySlug["hub"].Familiar)
+	require.Equal(t, types.WikiLearningStateUnseen, bySlug["a"].Learning.State,
+		"document evidence must not over-light every generated concept")
+	require.Equal(t, 0, bySlug["a"].Learning.MasteryScore)
+	require.Equal(t, types.WikiLearningStateExploring, bySlug["x"].Learning.State)
+	require.Equal(t, 20, bySlug["x"].Learning.MasteryScore)
+	require.Equal(t, 2, got.Meta.LearningEvidenceCount)
+	require.Equal(t, len(pages)-2, got.Meta.UnseenCount)
+
+	require.Len(t, got.Recommendations, 4)
+	require.Equal(t, "a", got.Recommendations[0].Slug)
+	for _, recommendation := range got.Recommendations {
+		require.NotEqual(t, "x", recommendation.Slug,
+			"disconnected blind spots are not next-step recommendations")
+		require.Equal(t, 1, recommendation.KnownNeighborCount)
+	}
+}
+
+func TestComputeGraphSubsetOmitsLearningOverlayWithoutPersonalEvidenceProvider(t *testing.T) {
+	got, err := computeGraphSubset(makeGraphFixture(), &types.WikiGraphRequest{
+		Mode: types.WikiGraphModeOverview,
+	})
+	require.NoError(t, err)
+	require.Empty(t, got.Recommendations)
+	for _, node := range got.Nodes {
+		require.Nil(t, node.Learning)
+	}
+}
+
 // TestComputeGraphSubset_OverviewUncapped ensures the Limit<=0 escape hatch
 // still works for internal callers (wiki lint) that need every page.
 func TestComputeGraphSubset_OverviewUncapped(t *testing.T) {
