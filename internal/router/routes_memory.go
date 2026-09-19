@@ -38,3 +38,23 @@ func RegisterMemoryRoutes(r *gin.RouterGroup, memoryHandler *handler.MemoryHandl
 		memoryGroup.POST("/consolidate", memoryHandler.Consolidate)
 	}
 }
+
+// RegisterMasteryRoutes registers the knowledge-guidance endpoints under the
+// same /memory prefix and role gate: the guidance ledger is a personal overlay
+// derived from the caller's principal, so no subject id appears in any path.
+func RegisterMasteryRoutes(r *gin.RouterGroup, masteryHandler *handler.MasteryHandler, g *rbacGuards) {
+	if masteryHandler == nil {
+		return
+	}
+	masteryGroup := g.apiKeyGroup(r.Group("/memory", g.Viewer()), apiKeyFullAccess())
+	{
+		masteryGroup.POST("/page-view", masteryHandler.RecordPageView)
+		masteryGroup.POST("/answer-like", masteryHandler.RecordAnswerLike)
+		masteryGroup.DELETE("/answer-like/:message_id", masteryHandler.CancelAnswerLike)
+		masteryGroup.POST("/exposure", masteryHandler.RecordExposure)
+		masteryGroup.POST("/exposure/click", masteryHandler.ExposureClick)
+		masteryGroup.GET("/mastery", masteryHandler.Profile)
+		masteryGroup.GET("/mastery/export", masteryHandler.ExportProfile)
+		masteryGroup.DELETE("/mastery", masteryHandler.DeleteMastery)
+	}
+}

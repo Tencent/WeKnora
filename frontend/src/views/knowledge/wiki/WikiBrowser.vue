@@ -78,9 +78,43 @@
               <span class="legend-familiar-ring"></span>
               {{ $t('knowledgeEditor.wikiBrowser.legendFamiliar') }}
             </div>
+            <template v-if="masteryEnabled">
+              <div class="legend-divider legend-divider--inline"></div>
+              <div class="legend-item clickable" :class="{ active: masteryTierFilter === 'touch' }"
+                @click="setMasteryTier('touch')">
+                <span class="legend-dot" style="background: #EDF4FA; box-shadow: inset 0 0 0 1px #C9D3DD"></span>
+                {{ $t('knowledgeEditor.wikiBrowser.tierTouch') || '接触' }}
+              </div>
+              <div class="legend-item clickable" :class="{ active: masteryTierFilter === 'familiar' }"
+                @click="setMasteryTier('familiar')">
+                <span class="legend-dot" style="background: #5FAEC8"></span>
+                {{ $t('knowledgeEditor.wikiBrowser.tierFamiliar') || '熟悉' }}
+              </div>
+              <div class="legend-item clickable" :class="{ active: masteryTierFilter === 'mastered' }"
+                @click="setMasteryTier('mastered')">
+                <span class="legend-dot" style="background: #D9A93F"></span>
+                {{ $t('knowledgeEditor.wikiBrowser.tierMastered') || '掌握' }}
+              </div>
+              <div class="legend-item clickable" :class="{ active: masteryTierFilter === 'all' }"
+                @click="setMasteryTier('all')">
+                <span class="legend-dot legend-dot--all"></span>
+                {{ $t('knowledgeEditor.wikiBrowser.tierAll') || '全部' }}
+              </div>
+            </template>
           </div>
           <div class="legend-divider"></div>
           <div class="legend-actions">
+            <div class="legend-action" :class="{ active: masteryEnabled }" @click="toggleMastery"
+              :title="$t('knowledgeEditor.wikiBrowser.masteryToggleTitle') || '切换到知识引导视图'">
+              <span class="legend-action-icon"><t-icon name="chart-line" /></span>
+              <span>{{ masteryEnabled ? ($t('knowledgeEditor.wikiBrowser.exitMastery') || '退出引导') :
+                ($t('knowledgeEditor.wikiBrowser.masteryToggle') || '知识引导') }}</span>
+            </div>
+            <div v-if="masteryEnabled" class="legend-action" @click="openMasteryProfile"
+              :title="$t('knowledgeEditor.wikiBrowser.profileTitle') || '个人知识画像'">
+              <span class="legend-action-icon"><t-icon name="user-circle" /></span>
+              <span>{{ $t('knowledgeEditor.wikiBrowser.profileEntry') || '个人画像' }}</span>
+            </div>
             <div class="legend-action" @click="fitGraphToView" title="Fit to View">
               <span class="legend-action-icon"><t-icon name="focus" /></span>
               <span>{{ $t('knowledgeEditor.wikiBrowser.fitView') || '适应屏幕' }}</span>
@@ -139,6 +173,12 @@
                 ver:
                   graphDrawerPage.version
               }) }}</span>
+              <span v-if="masteryEnabled && drawerActiveSeconds > 0" class="wiki-reader-meta-text">
+                · 本次阅读 {{ formatViewSeconds(drawerActiveSeconds) }}
+                <template v-if="drawerActiveSeconds > PAGE_VIEW_MAX_SECONDS">
+                  （计分按 {{ formatViewSeconds(PAGE_VIEW_MAX_SECONDS) }} 封顶）
+                </template>
+              </span>
               <t-button v-if="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug" size="small"
                 variant="outline" theme="default" style="margin-left: auto;" :disabled="!graphDrawerCanBloom"
                 @click="loadBloomNeighbors(graphDrawerPage.slug)">
@@ -154,10 +194,81 @@
             <div v-if="graphDrawerNeighborHint" class="wiki-drawer-neighbor-hint" style="margin-bottom: 16px;">
               {{ graphDrawerNeighborHint }}
             </div>
+            <div v-if="masteryEnabled && graphRecommendations.length > 0" class="wiki-drawer-recommendations" style="margin-bottom: 16px;">
+              <div class="wiki-drawer-recommendations-title">
+                {{ $t('knowledgeEditor.wikiBrowser.recommendNext') || '继续探索' }}
+              </div>
+              <div class="wiki-drawer-recommendations-list">
+                <button
+                  v-for="(rec, idx) in graphRecommendations"
+                  :key="rec.slug"
+                  type="button"
+                  class="wiki-recommendation-item"
+                  @click="handleGraphSearchSelect(rec.slug)"
+                >
+                  <span class="wiki-recommendation-rank">{{ idx + 1 }}</span>
+                  <span class="wiki-recommendation-title">{{ rec.title }}</span>
+                </button>
+              </div>
+            </div>
             <div ref="drawerBodyRef" class="wiki-reader-body" v-html="graphDrawerContent"
               @click="handleGraphDrawerClick"></div>
           </template>
         </t-drawer>
+
+        <!-- 个人知识画像：查看 / 导出 / 删除 -->
+        <t-dialog v-model:visible="showProfileDialog"
+          :header="$t('knowledgeEditor.wikiBrowser.profileTitle') || '个人知识画像'" width="680px" :footer="false"
+          class="mastery-profile-dialog">
+          <div v-if="profileLoading" class="mp-loading"><t-loading /></div>
+          <template v-else>
+            <div class="mp-overview">
+              <div class="mp-card mp-mastered">
+                <div class="mp-num">{{ profileTierCount.mastered }}</div>
+                <div class="mp-lbl">{{ $t('knowledgeEditor.wikiBrowser.tierMastered') || '掌握' }}</div>
+              </div>
+              <div class="mp-card mp-familiar">
+                <div class="mp-num">{{ profileTierCount.familiar }}</div>
+                <div class="mp-lbl">{{ $t('knowledgeEditor.wikiBrowser.tierFamiliar') || '熟悉' }}</div>
+              </div>
+              <div class="mp-card mp-touch">
+                <div class="mp-num">{{ profileTierCount.touch }}</div>
+                <div class="mp-lbl">{{ $t('knowledgeEditor.wikiBrowser.tierTouch') || '接触' }}</div>
+              </div>
+              <div class="mp-card mp-none">
+                <div class="mp-num">{{ profileTierCount.none }}</div>
+                <div class="mp-lbl">{{ $t('knowledgeEditor.wikiBrowser.tierNone') || '不了解' }}</div>
+              </div>
+            </div>
+            <div class="mp-hint">
+              {{ $t('knowledgeEditor.wikiBrowser.profileHint') || '水位高度表示十档掌握程度，颜色表示状态区间。删除画像只清空你的个人知识状态，不影响知识库内容与其他用户。' }}
+            </div>
+            <div v-if="profileRows.length === 0" class="mp-empty">
+              {{ $t('knowledgeEditor.wikiBrowser.profileEmpty') || '暂无行为证据。浏览、引用或点赞后，这里会生成你的知识画像。' }}
+            </div>
+            <div v-else class="mp-list">
+              <div v-for="row in profileRows" :key="row.slug" class="mp-row">
+                <span class="mp-name" :title="row.title || row.slug">{{ row.title || row.slug }}</span>
+                <span class="mp-tier" :class="'mp-tier-' + row.tier">{{ tierLabel(row.tier) }}</span>
+                <span class="mp-level">{{ row.level }}%</span>
+              </div>
+            </div>
+            <div class="mp-actions">
+              <t-button variant="outline" :loading="profileExporting" @click="handleExportProfile">
+                <template #icon><t-icon name="download" /></template>
+                {{ $t('knowledgeEditor.wikiBrowser.profileExport') || '导出 HTML' }}
+              </t-button>
+              <t-popconfirm theme="danger"
+                :content="$t('knowledgeEditor.wikiBrowser.profileDeleteConfirm') || '将清空你的全部个人知识状态，图谱回到初始灰色；不影响知识库内容、其他用户与检索个性化。此操作不可撤销，确定删除？'"
+                @confirm="handleDeleteProfile">
+                <t-button theme="danger" variant="outline" :loading="profileDeleting">
+                  <template #icon><t-icon name="delete" /></template>
+                  {{ $t('knowledgeEditor.wikiBrowser.profileDelete') || '删除画像' }}
+                </t-button>
+              </t-popconfirm>
+            </div>
+          </template>
+        </t-dialog>
       </div>
     </template>
 
@@ -836,6 +947,7 @@ import {
   type WikiIndexGroup,
   type WikiIndexEntryDTO,
 } from '@/api/wiki'
+import { recordPageView, recordExposure, markExposureClicked, getMasteryProfile, deleteMasteryProfile, exportMasteryProfile, type MasteryNodeDetail } from '@/api/memory'
 
 const router = useRouter()
 const route = useRoute()
@@ -993,6 +1105,111 @@ const loading = ref(false)
 const graphLoading = ref(false)
 const graphReady = ref(false)
 const showArrows = ref(true)
+// 知识引导视图开关：开启后节点按掌握状态水位着色，并显示边界涟漪。
+// 持久化到 localStorage（与 stores/ui.ts 的 sidebar_collapsed 同一写法），
+// 避免用户每次进 Wiki 都要重新关一次——那本身就是设计文档 §十一.3 要避免的打扰。
+// 注意：「关闭」只是不显示，并不删除画像数据（对应 §十二 的独立删除入口）。
+const MASTERY_ENABLED_KEY = 'weknora_mastery_enabled'
+const masteryEnabled = ref(localStorage.getItem(MASTERY_ENABLED_KEY) === 'true')
+// 状态档筛选：'all' 不过滤，'touch'/'familiar'/'mastered' 只看对应掌握档的节点。
+const masteryTierFilter = ref<'all' | 'touch' | 'familiar' | 'mastered'>('all')
+// 点击中心节点后生成的「下一步推荐」（最多 3 个一跳边界候选），供抽屉展示，
+// 与地图涟漪共用同一批候选。
+const graphRecommendations = ref<{ slug: string; title: string; type: string }[]>([])
+
+// ─── 个人知识画像：查看 / 导出 / 删除 ───
+const showProfileDialog = ref(false)
+const profileLoading = ref(false)
+const profileExporting = ref(false)
+const profileDeleting = ref(false)
+const profileRows = ref<MasteryNodeDetail[]>([])
+
+const MASTERY_TIER_LABEL: Record<string, string> = {
+  mastered: '掌握',
+  familiar: '熟悉',
+  touch: '接触',
+  none: '不了解',
+}
+function tierLabel(tier: string): string {
+  return MASTERY_TIER_LABEL[tier] || tier
+}
+
+const profileTierCount = computed(() => {
+  const c = { mastered: 0, familiar: 0, touch: 0, none: 0 }
+  for (const r of profileRows.value) {
+    if (r.tier in c) c[r.tier as keyof typeof c]++
+  }
+  return c
+})
+
+// openMasteryProfile 拉取画像明细并按水位降序展示。
+async function openMasteryProfile() {
+  showProfileDialog.value = true
+  profileLoading.value = true
+  try {
+    const res = (await getMasteryProfile(props.knowledgeBaseId)) as
+      | { data?: MasteryNodeDetail[] }
+      | MasteryNodeDetail[]
+    const rows = (Array.isArray(res) ? res : res?.data ?? []) as MasteryNodeDetail[]
+    profileRows.value = [...rows].sort(
+      (a, b) => b.level - a.level || (a.title || a.slug).localeCompare(b.title || b.slug),
+    )
+  } catch (e) {
+    console.error('Failed to load mastery profile:', e)
+    profileRows.value = []
+    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.profileLoadFailed') || '加载个人画像失败')
+  } finally {
+    profileLoading.value = false
+  }
+}
+
+// handleExportProfile 下载后端渲染的 HTML 报告（带鉴权，走 blob）。
+async function handleExportProfile() {
+  profileExporting.value = true
+  try {
+    const blob = await exportMasteryProfile(props.knowledgeBaseId)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'mastery-profile.html'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.profileExportSuccess') || '画像已导出')
+  } catch (e) {
+    console.error('Failed to export mastery profile:', e)
+    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.profileExportFailed') || '导出失败')
+  } finally {
+    profileExporting.value = false
+  }
+}
+
+// handleDeleteProfile 清空个人知识画像，成功后重拉图谱让水位归零。
+async function handleDeleteProfile() {
+  profileDeleting.value = true
+  try {
+    await deleteMasteryProfile()
+    profileRows.value = []
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.profileDeleteSuccess') || '画像已删除')
+    showProfileDialog.value = false
+    if (masteryEnabled.value && props.view === 'graph') {
+      loadGraph()
+    }
+  } catch (e) {
+    console.error('Failed to delete mastery profile:', e)
+    MessagePlugin.error(t('knowledgeEditor.wikiBrowser.profileDeleteFailed') || '删除失败')
+  } finally {
+    profileDeleting.value = false
+  }
+}
+
+// 掌握水位 → 状态档区间（左闭右开），与后端 Level 的十档划分一致。
+const MASTERY_TIER_RANGE: Record<'touch' | 'familiar' | 'mastered', [number, number]> = {
+  touch: [10, 40],
+  familiar: [40, 70],
+  mastered: [70, 101],
+}
 
 // Graph filtering
 const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index']))
@@ -1138,6 +1355,10 @@ function fitGraphToView() {
 
 const graphDrawerVisible = ref(false)
 const graphDrawerPage = ref<WikiPage | null>(null)
+// 浏览埋点：drawer 打开时按活跃秒数计时（失焦暂停），关闭时结算上报。
+const drawerActiveSeconds = ref(0)
+let drawerOpenSlug = ''
+let drawerTimer: number | null = null
 const navHistory = ref<WikiPage[]>([])
 // navFromSystemView remembers that the user was viewing the Index when they
 // clicked into a slug, so goBack can restore it
@@ -1539,11 +1760,209 @@ async function openGraphDrawer(slug: string) {
   try {
     const res = await getWikiPage(props.knowledgeBaseId, slug)
     graphDrawerPage.value = (res as any).data || res as any
+    // 抽屉内连续换页（推荐/内容链接）时先结算上一页，时长不被覆盖丢弃。
+    flushPageView()
+    startPageViewTimer(slug)
     graphDrawerVisible.value = true
   } catch (e) {
     console.error(`Failed to load page ${slug}:`, e)
   }
 }
+
+// 有效浏览的最短时长（秒），低于此值视为误触/扫视，不上报。
+const PAGE_VIEW_MIN_SECONDS = 5
+// 单次有效浏览的计分上限（秒），只约束「上报与计分」，不约束计时显示。
+// 取 300 而非更长：单次满分 = 浏览 2 分 + 时长 300/60 = 5 分，共 7 分，
+// 低于饱和阈值 12 分（mastery.SatScore），因此「掌握」只能来自多次回访，
+// 一次长时间挂机无法把水位直接顶到 100。
+// 改动时必须与后端 types.MasteryMaxPageViewSeconds 同步（服务端会再次钳制）。
+const PAGE_VIEW_MAX_SECONDS = 300
+
+// 启动活跃计时：失焦或标签页隐藏时暂停，只累计真正停留在页面上的秒数。
+//
+// 计时器不会因到达计分上限而停止：上限只决定「这一次能记多少分」（结算时取
+// min(实际, 上限)），而用户有权利看到自己到底读了多久。读到第 6 分钟就冻在
+// 5:00 会让人以为计时坏了，也让「计分封顶」这件事变得不可见。
+function startPageViewTimer(slug: string) {
+  drawerActiveSeconds.value = 0
+  drawerOpenSlug = slug
+  stopPageViewTimer()
+  drawerTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      drawerActiveSeconds.value++
+    }
+  }, 1000)
+}
+
+function stopPageViewTimer() {
+  if (drawerTimer !== null) {
+    clearInterval(drawerTimer)
+    drawerTimer = null
+  }
+}
+
+// formatViewSeconds 把本次阅读秒数格式化为 m:ss，展示在抽屉 meta 区。
+function formatViewSeconds(total: number): string {
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+// 上报一次有效浏览：阅读框（图谱抽屉 / 普通阅读器）关闭或换页时结算，
+// 满足最短时长才写入埋点。同步读取计时状态后再 await 网络请求，因此
+// 「先 flush 旧页、再 startPageViewTimer 新页」的调用顺序是安全的。
+// 返回 Promise：切回图谱前可 await 它，确保先写完证据再拉图，避免竞态。
+async function flushPageView(): Promise<void> {
+  if (!drawerOpenSlug) return
+  const slug = drawerOpenSlug
+  const seconds = Math.min(drawerActiveSeconds.value, PAGE_VIEW_MAX_SECONDS)
+  drawerOpenSlug = ''
+  drawerActiveSeconds.value = 0
+  stopPageViewTimer()
+  if (seconds < PAGE_VIEW_MIN_SECONDS) return
+  try {
+    const res = await recordPageView({
+      knowledge_base_id: props.knowledgeBaseId,
+      slug,
+      duration: seconds,
+    })
+    const body = (res as any)?.data ?? res
+    applyFreshMastery(slug, body?.mastery, body?.recently_active)
+    // 被读页面的一跳邻居也在这次上报里拿到了预热（后端已写入），但响应只回传
+    // 本页状态，邻居的水位仍停在旧值——不补这一次刷新，用户读完关掉抽屉看到的
+    // 就是「邻居毫无变化」。故意不 await：结算不该被这次刷新拖慢。
+    void refreshGraphMastery()
+  } catch (e) {
+    console.error('Failed to record page view:', e)
+  }
+}
+
+// applyFreshMastery 把后端回传的最新水位写回节点，并就地刷新水体几何。
+// 结构无法就地切换时（无水→有水、满格↔非满格）退化为保留布局的局部重绘。
+// 图谱不可见（正在 browser 视图阅读）时不重绘：节点数据已更新，切回图谱
+// 时 loadGraph 会拉到同一份最新状态，避免在隐藏画布上做无谓的全量重排。
+function applyFreshMastery(slug: string, mastery?: number, recentlyActive?: boolean) {
+  if (mastery === undefined) return
+  const node = graphNodes.find((n) => n.slug === slug)
+  const changed = !!node && (node.mastery !== mastery || node.recentlyActive !== !!recentlyActive)
+  patchMasteryData(slug, mastery, !!recentlyActive)
+  if (!changed) return
+  if (props.view !== 'graph') return
+  redrawMasteryNodes([slug])
+}
+
+// patchMasteryData 只写水位数据，不碰画布。
+// 同步回源数据：档位筛选读的是 graphData.nodes，只更新渲染层 graphNodes
+// 会让「刚涨了水位的节点」在按档位筛选时仍被当成 0 档而消失。
+function patchMasteryData(slug: string, mastery: number, recentlyActive: boolean) {
+  const src = graphData.value?.nodes?.find((n) => n.slug === slug)
+  if (src) {
+    src.mastery = mastery
+    src.recently_active = recentlyActive
+  }
+  const node = graphNodes.find((n) => n.slug === slug)
+  if (node) {
+    node.mastery = mastery
+    node.recentlyActive = recentlyActive
+    node.lastActive = Date.now()
+  }
+}
+
+// redrawMasteryNodes 批量刷新水体：能就地改渐变与几何的逐个刷；一旦出现
+// 「无水↔有水」「满格↔非满格」这类结构变化，就用 preserveLayout 整体重绘一次
+// ——布局不重排，画面不跳。
+function redrawMasteryNodes(slugs: string[]) {
+  let needsFullRedraw = false
+  for (const slug of slugs) {
+    const node = graphNodes.find((n) => n.slug === slug)
+    if (!node) continue
+    if (!refreshNodeWater(node)) {
+      needsFullRedraw = true
+      break
+    }
+  }
+  if (needsFullRedraw) renderGraph({ preserveLayout: true })
+  grantWaterAnimation()
+}
+
+// refreshGraphMastery 重拉当前视图，把已有节点的水位与最近活跃同步过来。
+//
+// 为什么需要：读一个页面会给它的一跳邻居记「预热」（设计文档 §16.2），但
+// recordPageView 的响应只回传被读页面自己的状态。少了这一次刷新，用户读完
+// 关掉抽屉看到的就是「邻居毫无变化」——而此刻邻居其实已经从 0% 涨到 10%。
+//
+// 只改水位、不替换节点集合：视图结构（模式、中心、bloom 出来的节点）由用户的
+// 操作决定，水位更新不该动它。ego 视图按当前中心与默认深度重拉，因此够不到的
+// 只是更远的 bloom 节点——它们的旧值留在原地，下次整图加载会纠正。
+let masteryRefreshInFlight = false
+
+async function refreshGraphMastery(): Promise<void> {
+  // 连续换页会连着触发结算，同一时刻只允许一次重拉。
+  if (masteryRefreshInFlight) return
+  if (!masteryEnabled.value || !graphReady.value || graphLoading.value) return
+  if (props.view !== 'graph') return
+  masteryRefreshInFlight = true
+  try {
+    let fresh: any
+    if (graphMode.value === 'ego' && graphCenter.value) {
+      const res = await getWikiGraph(props.knowledgeBaseId, {
+        mode: 'ego',
+        center: graphCenter.value,
+        depth: GRAPH_EGO_DEFAULT_DEPTH,
+        limit: GRAPH_EGO_LIMIT,
+        types: graphFilterTypesToArray(),
+        mastery: true,
+      })
+      fresh = (res as any)?.data ?? res
+    } else {
+      const res = await getWikiGraph(props.knowledgeBaseId, {
+        mode: 'overview',
+        limit: GRAPH_OVERVIEW_LIMIT,
+        types: graphFilterTypesToArray(),
+        mastery: true,
+      })
+      fresh = (res as any)?.data ?? res
+    }
+    const changed: string[] = []
+    for (const n of (fresh?.nodes ?? []) as Array<{ slug: string; mastery?: number; recently_active?: boolean }>) {
+      const node = graphNodes.find((x) => x.slug === n.slug)
+      if (!node) continue
+      if (node.mastery === (n.mastery ?? 0) && node.recentlyActive === !!n.recently_active) continue
+      patchMasteryData(n.slug, n.mastery ?? 0, !!n.recently_active)
+      changed.push(n.slug)
+    }
+    if (changed.length === 0) return
+    redrawMasteryNodes(changed)
+  } catch (e) {
+    console.error('Failed to refresh graph mastery:', e)
+  } finally {
+    masteryRefreshInFlight = false
+  }
+}
+
+// refreshNodeWater 就地刷新一个节点的水体（渐变 + 水位几何）。返回 false 表示
+// 需要结构级重绘（该球原本无水，或满格与非满格之间切换）。
+function refreshNodeWater(node: GNode): boolean {
+  const w = waterEls.get(node.slug)
+  if (!w) return false
+  const geo = waterGeometry(w.radius, node.mastery)
+  const tone = waterTone(node.mastery)
+  if (geo.full !== !!w.fullCircle) return false
+  w.level = node.mastery
+  const grad = `url(#${tone.gradId})`
+  if (w.fullCircle) {
+    w.fullCircle.setAttribute('fill', grad)
+    return true
+  }
+  if (w.body) w.body.setAttribute('fill', grad)
+  updateWaterGeometry(node.slug, w.radius)
+  return true
+}
+
+// drawer 关闭时结算浏览时长并上报。
+watch(graphDrawerVisible, (visible) => {
+  if (!visible) flushPageView()
+})
 
 function handleGraphDrawerClick(e: MouseEvent) {
   const target = e.target as HTMLElement
@@ -2638,6 +3057,8 @@ async function loadIndex() {
 // overview. Re-uses the intro already fetched during loadPages(); only
 // re-fetches on first ever open or if a prior attempt failed.
 async function openIndexView() {
+  // 离开页面阅读进入 Index 概览 → 结算本次有效浏览。
+  flushPageView()
   selectedPage.value = null
   activeSystemView.value = 'index'
   if (!indexMarkdown.value) {
@@ -3170,6 +3591,7 @@ async function loadGraph() {
       mode: 'overview',
       limit: GRAPH_OVERVIEW_LIMIT,
       types: graphFilterTypesToArray(),
+      mastery: masteryEnabled.value,
     })
     graphData.value = (res as any).data || res as any
     // Seed the search dropdown's empty-state with this overview snapshot
@@ -3223,6 +3645,7 @@ async function loadEgoGraph(slug: string, depth = GRAPH_EGO_DEFAULT_DEPTH) {
       depth,
       limit: GRAPH_EGO_LIMIT,
       types: graphFilterTypesToArray(),
+      mastery: masteryEnabled.value,
     })
     graphData.value = (res as any).data || res as any
     graphMode.value = 'ego'
@@ -3292,6 +3715,7 @@ async function loadBloomNeighbors(anchorSlug: string, depth = GRAPH_EGO_DEFAULT_
       depth,
       limit: GRAPH_EGO_LIMIT,
       types: graphFilterTypesToArray(),
+      mastery: masteryEnabled.value,
     })
     const incoming = (res as any).data || res as any
     if (!incoming || !Array.isArray(incoming.nodes)) return
@@ -3335,8 +3759,10 @@ function mergeGraphData(
     if (!existing) {
       nodeBySlug.set(n.slug, n)
       bloomGenerations.set(n.slug, gen)
-    } else if (n.familiar) {
-      existing.familiar = true
+    } else {
+      if (n.familiar) existing.familiar = true
+      if (n.mastery !== undefined) existing.mastery = n.mastery
+      if (n.boundary) existing.boundary = true
     }
   }
   const edgeKey = (e: { source: string; target: string }) => `${e.source}→${e.target}`
@@ -3483,6 +3909,7 @@ async function growFrontier() {
             depth: GRAPH_EGO_DEFAULT_DEPTH,
             limit: GRAPH_EGO_LIMIT,
             types: graphFilterTypesToArray(),
+            mastery: masteryEnabled.value,
           })
           const data = (res as any).data || res as any
           if (data?.nodes) responses.push(data)
@@ -3547,9 +3974,15 @@ async function selectPage(page: WikiPage) {
       navFromSystemView.value = activeSystemView.value
     }
     activeSystemView.value = ''
+    const samePage = selectedPage.value?.slug === page.slug
     const res = await getWikiPage(props.knowledgeBaseId, page.slug)
     selectedPage.value = (res as any).data || res as any
     await loadPageIssues(page.slug)
+    // 阅读埋点：换页才结算并重新计时；重复点当前页不打断已累计的时长。
+    if (!samePage) {
+      flushPageView()
+      startPageViewTimer(page.slug)
+    }
   } catch (e) {
     console.error('Failed to load wiki page:', e)
   }
@@ -3557,7 +3990,8 @@ async function selectPage(page: WikiPage) {
 
 async function navigateToSlug(slug: string) {
   try {
-    if (selectedPage.value && selectedPage.value.slug !== slug) {
+    const samePage = selectedPage.value?.slug === slug
+    if (selectedPage.value && !samePage) {
       navHistory.value.push(selectedPage.value)
     } else if (!selectedPage.value && activeSystemView.value) {
       // Clicking a [[slug]] from inside Index / Log — same rationale
@@ -3569,6 +4003,11 @@ async function navigateToSlug(slug: string) {
     const res = await getWikiPage(props.knowledgeBaseId, slug)
     selectedPage.value = (res as any).data || res as any
     await loadPageIssues(slug)
+    // 阅读埋点：站内链接跳转同样结算上一页、开始本页计时。
+    if (!samePage) {
+      flushPageView()
+      startPageViewTimer(slug)
+    }
   } catch (e) {
     console.error(`Failed to navigate to ${slug}:`, e)
   }
@@ -3577,6 +4016,9 @@ async function navigateToSlug(slug: string) {
 function goBack() {
   const prev = navHistory.value.pop()
   if (prev) {
+    // 阅读埋点：结算当前页，回到上一页后重新计时。
+    flushPageView()
+    startPageViewTimer(prev.slug)
     selectedPage.value = prev
     loadPageIssues(prev.slug)
     return
@@ -3687,6 +4129,22 @@ function toggleArrows() {
   }
 }
 
+// 切换知识引导视图：重新拉取图数据（带 mastery 参数），节点按掌握状态着色。
+function toggleMastery() {
+  masteryEnabled.value = !masteryEnabled.value
+  // 记住用户的选择，下次进 Wiki 不用再关一次。
+  localStorage.setItem(MASTERY_ENABLED_KEY, String(masteryEnabled.value))
+  // 切换视图时重置状态档筛选，避免带着旧筛选进入/退出引导视图。
+  masteryTierFilter.value = 'all'
+  loadGraph()
+}
+
+// 切换状态档筛选：前端按掌握水位过滤，无需重新请求后端。
+function setMasteryTier(tier: 'all' | 'touch' | 'familiar' | 'mastered') {
+  masteryTierFilter.value = tier
+  if (graphReady.value) nextTick(() => renderGraph({ preserveLayout: true }))
+}
+
 function formatDate(dateStr: string) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
@@ -3712,6 +4170,11 @@ interface GNode {
   slug: string; title: string; type: string
   linkCount: number; pinned: boolean
   familiar: boolean
+  mastery: number
+  boundary: boolean
+  boundaryScore: number
+  recentlyActive: boolean
+  lastActive?: number
 }
 
 // Persistent graph state so it survives re-renders
@@ -3740,6 +4203,205 @@ const nodeColorMap: Record<string, string> = {
   synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c',
 }
 
+// ─── 知识水位球：色板与几何 ───
+// 高度表达十档水位，颜色表达状态区间，波纹表达近期活跃。
+// 空球 = 无证据；白水 = 接触；蓝水 = 熟悉；金水 = 高证据活跃 / 饱和。
+
+const WATER_EMPTY = '#D9DEE7'
+const WATER_GLASS_STROKE = '#F2F5F8'
+
+const WATER_GRAD_WHITE = 'water-grad-white'
+const WATER_GRAD_BLUE = 'water-grad-blue'
+const WATER_GRAD_GOLD = 'water-grad-gold'
+
+interface WaterTone { gradId: string; top: string; bottom: string; wave: string }
+
+// waterTone 根据水位档位返回水体渐变色板。wave 是水面线的颜色，比顶部略深，
+// 让水面在浅色水上依然可见（尤其白水档）。
+function waterTone(level: number): WaterTone {
+  if (level >= 70) return { gradId: WATER_GRAD_GOLD, top: '#F5D978', bottom: '#C98B18', wave: '#E5C15A' }
+  if (level >= 40) return { gradId: WATER_GRAD_BLUE, top: '#8DCAE0', bottom: '#3C93B6', wave: '#A9E0EC' }
+  return { gradId: WATER_GRAD_WHITE, top: '#FFFFFF', bottom: '#DCE8F2', wave: '#B8CFDD' }
+}
+
+interface WaterGeometry {
+  pct: number
+  full: boolean
+  waterTop: number   // 水面线 y（圆心为原点，向下为正）
+  amp: number        // 波浪幅度（px），水位越接近球壁越小
+}
+
+// waterGeometry 由半径 + 水位算出水面高度与波幅。
+function waterGeometry(r: number, mastery: number): WaterGeometry {
+  const pct = Math.max(0, Math.min(1, mastery / 100))
+  const waterTop = r - 2 * r * pct
+  // 波幅随「水面到球壁的余量」收窄：水位极高时波峰会顶出球顶，极低时波谷
+  // 会穿出球底，两侧都要留余量，否则水位球看上去像在漏水。
+  const headroom = Math.max(0, Math.min(r + waterTop, r - waterTop))
+  return {
+    pct,
+    full: pct >= 0.995,
+    waterTop,
+    amp: Math.max(1, Math.min(2, r * 0.06, headroom * 0.7)),
+  }
+}
+
+// waterSurfacePathD 生成水面线：两端固定在水面与球体的交点上，中间用带包络
+// 的正弦波起伏。包络（端点为 0）保证波形永远收回交点，不会越出球体；phase
+// 让波形沿水面平移，形成真正的流动感——比旧版「超宽波浪 + clip-path 裁剪」
+// 安全得多（后者一旦被合成层绕过就漏水）。
+function waterSurfacePathD(r: number, waterTop: number, amp: number, phase = 0): string {
+  const y = Math.max(-r, Math.min(r, waterTop))
+  const dx = Math.sqrt(Math.max(0, r * r - y * y))
+  if (dx <= 0.01) return `M 0,${y.toFixed(2)}`
+  const segs = 24
+  const span = 2 * dx
+  // 疏密对齐旧版波浪：波长约 2r/3（旧版那条 4r 宽的波浪线上有 12 个凸起）。
+  const k = (3 * Math.PI) / r
+  const parts: string[] = []
+  for (let i = 0; i <= segs; i++) {
+    const x = -dx + (span * i) / segs
+    const envelope = Math.sin((Math.PI * i) / segs) // 端点 0 → 中间 1
+    const yy = y + amp * envelope * Math.sin(k * (x - phase))
+    parts.push(`${i === 0 ? 'M' : 'L'} ${x.toFixed(2)},${yy.toFixed(2)}`)
+  }
+  return parts.join(' ')
+}
+
+// waterBodyPathD 生成「水体」的封闭轮廓：水面（带波浪）以下、球体以内的区域。
+// 底边直接画成圆的下弧、水面两端落在圆上，所以任意水位、任意缩放下水体都恰好
+// 被球体兜住，不再需要 clip-path。水面在赤道以上时下弧是大弧，需置 large-arc。
+function waterBodyPathD(r: number, waterTop: number, amp: number, phase = 0): string {
+  const y = Math.max(-r, Math.min(r, waterTop))
+  const dx = Math.sqrt(Math.max(0, r * r - y * y))
+  const largeArc = y < 0 ? 1 : 0
+  return `${waterSurfacePathD(r, y, amp, phase)} A ${r.toFixed(2)},${r.toFixed(2)} 0 ${largeArc} 1 ${(-dx).toFixed(2)},${y.toFixed(2)} Z`
+}
+
+// glossArcPathD 返回顶部高光弧线（模拟玻璃容器顶光），很淡。
+function glossArcPathD(r: number): string {
+  const rr = Math.max(1, r - 2)
+  const x = rr * 0.72
+  const y = -rr * 0.55
+  return `M ${-x},${y} A ${rr},${rr} 0 0 1 ${x},${y}`
+}
+
+// 每个有水节点的可同步几何引用，用于选中放大时按新半径重算。
+interface WaterEls {
+  body: SVGPathElement | null          // 水体轮廓，满格时为 null
+  gloss: SVGPathElement                // 顶部玻璃高光
+  fullCircle: SVGCircleElement | null  // 满格时使用
+  level: number
+  radius: number
+  phase: number                        // 各球独立的波形相位，避免整屏同步起伏
+}
+const waterEls = new Map<string, WaterEls>()
+
+// updateWaterGeometry 按新半径重算一个节点水体的所有几何。
+function updateWaterGeometry(slug: string, r: number) {
+  const w = waterEls.get(slug)
+  if (!w) return
+  w.radius = r
+  const geo = waterGeometry(r, w.level)
+  w.gloss.setAttribute('d', glossArcPathD(r))
+  if (geo.full) {
+    if (w.fullCircle) w.fullCircle.setAttribute('r', String(r))
+    return
+  }
+  if (w.body) w.body.setAttribute('d', waterBodyPathD(r, geo.waterTop, geo.amp, w.phase))
+}
+
+// WATER_ANIM_MAX 是同一时刻播放水波的最大节点数，防止几百个球同时逐帧重算
+// 路径拖垮渲染。超出时按「选中优先 → 邻居优先 → 最近活跃 → 水位高」录取，
+// 其余保持静态水面。
+const WATER_ANIM_MAX = 24
+
+// 水波横移「一个球径」所需的秒数，越大越慢。旧版 CSS 动画是 5.5s；
+// 4s 左右体感比较合适——既看得出在流动，又不显得着急。
+const WATER_FLOW_SECONDS = 4
+
+function grantWaterAnimation() {
+  if (!graphSvg) return
+  const candidates: { slug: string; node: GNode }[] = []
+  for (const n of graphNodes) {
+    // 满格（100）是实心金球、无水（0）是空球，都没有水面可晃；只有最近有过
+    // 交互的节点才流动——「活水」表达近期活跃，久未触碰的球保持静止。
+    if (n.mastery <= 0 || n.mastery >= 100) continue
+    if (!n.recentlyActive) continue
+    candidates.push({ slug: n.slug, node: n })
+  }
+  const selected = graphSelectedSlug.value
+  const selectedNeighbors = selected ? (graphAdjacencyRef.get(selected) || new Set<string>()) : new Set<string>()
+  candidates.sort((a, b) => {
+    const aSel = a.slug === selected ? 1 : 0
+    const bSel = b.slug === selected ? 1 : 0
+    if (aSel !== bSel) return bSel - aSel
+    const aNbr = selectedNeighbors.has(a.slug) ? 1 : 0
+    const bNbr = selectedNeighbors.has(b.slug) ? 1 : 0
+    if (aNbr !== bNbr) return bNbr - aNbr
+    const aT = a.node.lastActive ?? 0
+    const bT = b.node.lastActive ?? 0
+    if (aT !== bT) return bT - aT
+    if (a.node.mastery !== b.node.mastery) return b.node.mastery - a.node.mastery
+    return a.slug.localeCompare(b.slug)
+  })
+  const granted = new Set(candidates.slice(0, WATER_ANIM_MAX).map((c) => c.slug))
+  for (const [slug, w] of waterEls) {
+    const on = granted.has(slug)
+    if (w.body) w.body.classList.toggle('water-live', on)
+  }
+  ensureWaterFlow()
+}
+
+// ── 水面流动：按帧推进波形相位 ──
+// 只重写 path 的 d（波形在弦内平移），既不移动元素也不依赖裁剪，所以水位
+// 永远被球体兜住。只有拿到 water-live 的节点参与，无节点参与时自动停下。
+let waterRafId = 0
+let lastWaterTs = 0
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function tickWaterFlow(ts: number) {
+  waterRafId = 0
+  if (!graphSvg) {
+    lastWaterTs = 0
+    return
+  }
+  // 用时间差推进相位（而非固定步长），不同刷新率下流速一致。
+  const dt = lastWaterTs ? Math.min(64, ts - lastWaterTs) : 16
+  lastWaterTs = ts
+  const dtSec = dt / 1000
+  let active = false
+  for (const w of waterEls.values()) {
+    if (!w.body || !w.body.classList.contains('water-live')) continue
+    active = true
+    // 流速与球半径成比例：小球慢、大球快，整屏节奏才统一。
+    w.phase = (w.phase + dtSec * ((2 * w.radius) / WATER_FLOW_SECONDS)) % 1e6
+    const geo = waterGeometry(w.radius, w.level)
+    w.body.setAttribute('d', waterBodyPathD(w.radius, geo.waterTop, geo.amp, w.phase))
+  }
+  // 没有节点需要动画就自然停下，避免空转。
+  if (active) waterRafId = requestAnimationFrame(tickWaterFlow)
+}
+
+function ensureWaterFlow() {
+  if (waterRafId || prefersReducedMotion()) return
+  lastWaterTs = 0
+  waterRafId = requestAnimationFrame(tickWaterFlow)
+}
+
+function stopWaterFlow() {
+  if (waterRafId) {
+    cancelAnimationFrame(waterRafId)
+    waterRafId = 0
+  }
+  lastWaterTs = 0
+}
+
 // RenderGraphOpts tweaks how renderGraph initializes node positions when
 // repainting the canvas. The default (no opts) does a full layout reset —
 // every node gets a fresh circular starting position and the force
@@ -3764,7 +4426,23 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     container.innerHTML = ''
     return
   }
-  const graph = data
+  let graph = data
+
+  // 引导视图是否开启：开启时节点按掌握状态水位着色，否则按页面类型着色。
+  const masteryEnabled = !!graph.meta?.mastery_enabled
+
+  // 状态档筛选：引导视图下按掌握水位过滤节点，边随节点联动裁剪。
+  if (masteryTierFilter.value !== 'all' && masteryEnabled) {
+    const [lo, hi] = MASTERY_TIER_RANGE[masteryTierFilter.value]
+    const keep = new Set<string>()
+    for (const n of graph.nodes) {
+      const lv = n.mastery ?? 0
+      if (lv >= lo && lv < hi) keep.add(n.slug)
+    }
+    const nodes = graph.nodes.filter((n) => keep.has(n.slug))
+    const edges = graph.edges.filter((e) => keep.has(e.source) && keep.has(e.target))
+    graph = { ...graph, nodes, edges }
+  }
 
   // Stop any previous animation
   if (graphAnimFrame) { cancelAnimationFrame(graphAnimFrame); graphAnimFrame = 0 }
@@ -3864,6 +4542,11 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       slug: n.slug, title: n.title, type: n.page_type,
       linkCount: n.link_count || 0, pinned,
       familiar: !!n.familiar,
+      mastery: n.mastery ?? 0,
+      boundary: !!n.boundary,
+      boundaryScore: n.boundary_score ?? 0,
+      recentlyActive: !!n.recently_active,
+      lastActive: n.last_active ? Date.parse(n.last_active) : undefined,
     }
     nodeMap.set(n.slug, node)
     return node
@@ -3934,6 +4617,30 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   filter.innerHTML = `<feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.15"/>`
   defs.appendChild(filter)
 
+  // 水体纵向渐变（顶浅底深），白/蓝/金三段，供水位球的水体矩形与满格球引用。
+  const waterGrads: [string, string, string][] = [
+    [WATER_GRAD_WHITE, '#FFFFFF', '#DCE8F2'],
+    [WATER_GRAD_BLUE, '#8DCAE0', '#3C93B6'],
+    [WATER_GRAD_GOLD, '#F5D978', '#C98B18'],
+  ]
+  for (const [id, top, bottom] of waterGrads) {
+    const lg = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient')
+    lg.setAttribute('id', id)
+    lg.setAttribute('x1', '0')
+    lg.setAttribute('y1', '0')
+    lg.setAttribute('x2', '0')
+    lg.setAttribute('y2', '1')
+    const s1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop')
+    s1.setAttribute('offset', '0%')
+    s1.setAttribute('stop-color', top)
+    const s2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop')
+    s2.setAttribute('offset', '100%')
+    s2.setAttribute('stop-color', bottom)
+    lg.appendChild(s1)
+    lg.appendChild(s2)
+    defs.appendChild(lg)
+  }
+
   svg.appendChild(defs)
 
   // Detect bidirectional edges (A→B and B→A both exist)
@@ -3969,6 +4676,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Create SVG elements for nodes
   const nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[] = []
+  stopWaterFlow()
+  waterEls.clear()
   for (const n of graphNodes) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
     g.style.cursor = 'pointer'
@@ -4021,6 +4730,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       g.appendChild(familiarRing)
     }
 
+    // 知识边界涟漪已移除：仅在节点详情抽屉内列出「继续探索」即可。
+
     // Pulse ring for selected state
     const activeRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
     activeRing.setAttribute('r', String(r + 5))
@@ -4034,12 +4745,64 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
     circle.setAttribute('r', String(r))
-    circle.setAttribute('fill', nodeColorMap[n.type] || '#8c8c8c')
-    circle.setAttribute('stroke', '#fff')
-    circle.setAttribute('stroke-width', '2')
+    if (masteryEnabled) {
+      // 引导视图：雾灰空球作为容器底，水位作为独立水体叠加上来。
+      circle.setAttribute('fill', WATER_EMPTY)
+      circle.setAttribute('stroke', WATER_GLASS_STROKE)
+      circle.setAttribute('stroke-width', '1.5')
+    } else {
+      circle.setAttribute('fill', nodeColorMap[n.type] || '#8c8c8c')
+      circle.setAttribute('stroke', '#fff')
+      circle.setAttribute('stroke-width', '2')
+    }
     // circle.setAttribute('filter', 'url(#node-shadow)')
     circle.style.transition = 'r 0.2s, stroke-width 0.2s, opacity 0.2s'
     g.appendChild(circle)
+
+    // 水体：球内水位。满格 = 静态金水整球；否则 = 一条几何自洽的水体路径
+    // （波浪水面 + 圆的下弧闭合），因此不需要 clip-path、也不会溢出球体。
+    if (masteryEnabled && n.mastery > 0) {
+      const geo = waterGeometry(r, n.mastery)
+      const tone = waterTone(n.mastery)
+
+      let body: SVGPathElement | null = null
+      let fullCircle: SVGCircleElement | null = null
+
+      if (geo.full) {
+        fullCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+        fullCircle.setAttribute('r', String(r))
+        fullCircle.setAttribute('fill', `url(#${tone.gradId})`)
+        fullCircle.classList.add('node-water-full')
+        g.appendChild(fullCircle)
+      } else {
+        body = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+        body.setAttribute('d', waterBodyPathD(r, geo.waterTop, geo.amp))
+        body.setAttribute('fill', `url(#${tone.gradId})`)
+        body.classList.add('node-water-body')
+        g.appendChild(body)
+      }
+
+      const gloss = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      gloss.setAttribute('d', glossArcPathD(r))
+      gloss.setAttribute('fill', 'none')
+      gloss.setAttribute('stroke', '#FFFFFF')
+      gloss.setAttribute('stroke-width', '1.2')
+      gloss.setAttribute('stroke-opacity', '0.55')
+      gloss.setAttribute('stroke-linecap', 'round')
+      gloss.setAttribute('pointer-events', 'none')
+      gloss.classList.add('node-water-gloss')
+      g.appendChild(gloss)
+
+      waterEls.set(n.slug, {
+        body,
+        gloss,
+        fullCircle,
+        level: n.mastery,
+        radius: r,
+        // 初始相位错开，避免满屏球体像同一个节拍器一起晃。
+        phase: (waterEls.size * 7) % 60,
+      })
+    }
 
     // Text label wrapper for better readability
     const textBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
@@ -4198,6 +4961,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
         // Select and highlight
         graphSelectedSlug.value = n.slug
         applyHighlight(n.slug, adjacency, nodeEls, edgeEls)
+        // 边界引导：点击中心节点后渲染局部涟漪、记录曝光与点击。
+        handleBoundaryActivation(n.slug, adjacency)
 
         // Auto pan to center the node, shifted left for drawer
         if (graphPanZoomRef) {
@@ -4237,7 +5002,11 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   let alpha = 1.0
   function tick() {
     alpha *= 0.985
-    if (alpha < 0.02) { graphAnimFrame = 0; return }
+    if (alpha < 0.02) {
+      graphAnimFrame = 0
+      grantWaterAnimation()
+      return
+    }
 
     // Repulsion: Optimized using 1D spatial sorting (X-axis) to reduce O(n²) to O(n log n)
     // This allows smooth rendering even for > 1000 nodes
@@ -4347,6 +5116,9 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   graphAnimFrame = requestAnimationFrame(tick)
   graphReady.value = true
+  // 立即授予水波动画名额，不等力导向衰减结束（那要 4s 以上，体感上就像
+  // 「动画没生效」）。tick() 结束时还会再调一次，幂等。
+  grantWaterAnimation()
 }
 
 // Set edge line positions, shortened to stop at node circle boundary so arrows are visible
@@ -4446,6 +5218,8 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
   function applyTransform() {
     rootG.setAttribute('transform', `translate(${translateX},${translateY}) scale(${scale})`)
     updateLabelsVisibility()
+    // 缩放过小时暂停水波，只保留静态水位（避免远观时无意义的重绘）。
+    svg.classList.toggle('graph-low-zoom', scale < 0.55)
   }
 
   function updateLabelsVisibility() {
@@ -4554,6 +5328,75 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
   })
 }
 
+// ─── 下一步推荐（点击中心节点后，生成最多 3 个一跳边界候选） ───
+
+// 页面类型优先级：summary/entity/concept 更适合作为下一步阅读，synthesis/
+// comparison 是聚合/对比页，放到后面。
+const RECOMMEND_TYPE_ORDER: Record<string, number> = {
+  summary: 0, entity: 1, concept: 2, synthesis: 3, comparison: 4,
+}
+
+interface Recommendation {
+  slug: string
+  title: string
+  type: string
+  score: number
+}
+
+// computeRecommendations 返回 centerSlug 的一跳邻居中「位于 PPR 边界候选集、
+// 低状态（水位 < 40）、非 index 页」的节点，按 PPR 分数降序 → 状态升序 →
+// 类型优先级 → 标题排序，最多取 3 个。远端多跳候选不纳入。
+function computeRecommendations(centerSlug: string, adjacency: Map<string, Set<string>>): Recommendation[] {
+  const neighbors = adjacency.get(centerSlug)
+  if (!neighbors) return []
+  const recs: Recommendation[] = []
+  for (const nb of neighbors) {
+    if (nb === centerSlug) continue
+    const n = graphNodes.find(g => g.slug === nb)
+    if (!n) continue
+    if (!n.boundary) continue
+    if (n.type === 'index') continue
+    if (n.mastery >= 40) continue
+    recs.push({ slug: n.slug, title: n.title, type: n.type, score: n.boundaryScore })
+  }
+  recs.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    const ma = graphNodes.find(g => g.slug === a.slug)?.mastery ?? 0
+    const mb = graphNodes.find(g => g.slug === b.slug)?.mastery ?? 0
+    if (ma !== mb) return ma - mb
+    const ta = RECOMMEND_TYPE_ORDER[a.type] ?? 9
+    const tb = RECOMMEND_TYPE_ORDER[b.type] ?? 9
+    if (ta !== tb) return ta - tb
+    return a.slug.localeCompare(b.slug)
+  })
+  return recs.slice(0, 3)
+}
+
+// handleBoundaryActivation 是「节点被激活为中心」时统一执行的边界引导逻辑：
+// 生成下一步推荐 → 仅刷新抽屉内「继续探索」列表 → 写入曝光，并在被激活节点本身
+// 是边界候选时标记点击。直接点击 / 搜索选中共用，确保两条路径都记录曝光点击。
+function handleBoundaryActivation(slug: string, adjacency: Map<string, Set<string>>) {
+  if (!masteryEnabled.value) {
+    graphRecommendations.value = []
+    return
+  }
+  const recs = computeRecommendations(slug, adjacency)
+  graphRecommendations.value = recs.map(r => ({ slug: r.slug, title: r.title, type: r.type }))
+  const node = graphNodes.find(n => n.slug === slug)
+  if (node && node.boundary) {
+    markExposureClicked({ knowledge_base_id: props.knowledgeBaseId, candidate_slug: slug }).catch(() => {})
+  }
+  if (recs.length > 0) {
+    recordExposure({
+      knowledge_base_id: props.knowledgeBaseId,
+      trigger_slug: slug,
+      candidate_slugs: recs.map(r => r.slug),
+    }).catch(() => {})
+  }
+  // 选中变化后重新分配水波动画名额（选中节点优先）。
+  grantWaterAnimation()
+}
+
 // ─── Hover Highlight ───
 function applyHighlight(
   slug: string,
@@ -4570,12 +5413,15 @@ function applyHighlight(
 
   for (const { g, circle, activeRing, node } of nodeEls) {
     const r = getRadius(node)
+    let rUsed = r
     if (node.slug === slug) {
-      circle.setAttribute('r', String(r + 3))
+      rUsed = r + 3
+      circle.setAttribute('r', String(rUsed))
       circle.setAttribute('stroke-width', '3')
       g.style.opacity = '1'
     } else if (hoverSlug && node.slug === hoverSlug) {
-      circle.setAttribute('r', String(r + 3))
+      rUsed = r + 3
+      circle.setAttribute('r', String(rUsed))
       circle.setAttribute('stroke-width', '3')
       g.style.opacity = '1'
     } else if (neighbors.has(node.slug) || (hoverSlug && hoverNeighbors.has(node.slug))) {
@@ -4587,6 +5433,9 @@ function applyHighlight(
       circle.setAttribute('stroke-width', '2')
       g.style.opacity = '0.2'
     }
+
+    // 同步水体几何（选中放大改变半径时，水位球内部也要跟着变）。
+    updateWaterGeometry(node.slug, rUsed)
 
     if (node.slug === graphSelectedSlug.value) {
       activeRing.style.opacity = '1'
@@ -4627,13 +5476,18 @@ function clearHighlight(
     return
   }
 
+  // 无选中时清空下一步推荐抽屉列表（地图上不再有涟漪）。
+  graphRecommendations.value = []
+
   const getRadius = (n: GNode) => Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4))
 
   for (const { g, circle, activeRing, node } of nodeEls) {
-    circle.setAttribute('r', String(getRadius(node)))
+    const r = getRadius(node)
+    circle.setAttribute('r', String(r))
     circle.setAttribute('stroke-width', '2')
     g.style.opacity = '1'
     activeRing.style.opacity = '0'
+    updateWaterGeometry(node.slug, r)
   }
   for (const e of edgeEls) {
     e.line.setAttribute('stroke', '#c0c4cc')
@@ -4769,6 +5623,8 @@ async function handleGraphSearchSelect(value: string) {
   if (graphNodeElsRef.length > 0) {
     applyHighlight(value, graphAdjacencyRef, graphNodeElsRef, graphEdgeElsRef)
   }
+  // 边界引导：搜索选中同样走统一点击埋点，记录局部涟漪曝光与点击。
+  handleBoundaryActivation(value, graphAdjacencyRef)
 
   // Open drawer automatically when searching
   openGraphDrawer(value)
@@ -4823,10 +5679,19 @@ watch(searchQuery, (val) => {
   }, 300)
 })
 
-watch(() => props.view, (v) => {
+watch(() => props.view, async (v) => {
   if (v === 'graph') {
+    // 先结算阅读器里的有效浏览（若刚从 browser 切来），再拉图：上报与拉图
+    // 若并发，拉图很可能先返回旧水位，导致「切回来掌握度没变」。
+    await flushPageView()
     loadGraph()
   } else if (v === 'browser') {
+    // 离开图谱视图前结算本次浏览，避免抽屉随视图卸载导致时长丢失。
+    await flushPageView()
+    // 切回阅读器时若正停留在某页，恢复计时（切走时计时器已被结算清除）。
+    if (selectedPage.value?.slug) {
+      startPageViewTimer(selectedPage.value.slug)
+    }
     nextTick(async () => {
       if (readerBodyRef.value && renderedContent.value) {
         await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
@@ -4854,6 +5719,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // 组件卸载前结算未上报的浏览时长，防止直接离开页面丢数据。
+  flushPageView()
   if (statsTimer) {
     clearInterval(statsTimer)
   }
@@ -4865,6 +5732,7 @@ onUnmounted(() => {
     cancelAnimationFrame(graphAnimFrame)
     graphAnimFrame = 0
   }
+  stopWaterFlow()
   if (groupSentinelObserver) {
     groupSentinelObserver.disconnect()
     groupSentinelObserver = null
@@ -6258,6 +7126,11 @@ onUnmounted(() => {
     text-decoration: line-through;
     opacity: 0.5;
   }
+
+  &.active {
+    color: var(--td-brand-color);
+    font-weight: 600;
+  }
 }
 
 .legend-dot {
@@ -6266,6 +7139,12 @@ onUnmounted(() => {
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
+}
+
+.legend-dot--all {
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px dashed var(--td-text-color-secondary);
 }
 
 .legend-familiar-ring {
@@ -6283,6 +7162,10 @@ onUnmounted(() => {
   height: 1px;
   background: var(--td-component-stroke);
   margin: 0 -12px;
+}
+
+.legend-divider--inline {
+  margin: 2px 0;
 }
 
 .legend-actions {
@@ -6409,6 +7292,176 @@ onUnmounted(() => {
 .node-active-ring {
   transform-origin: 0 0;
   animation: node-active-pulse 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
+}
+
+// ── 知识水位球：水面流动 ──
+// 波形由 JS 逐帧推进相位（tickWaterFlow），这里刻意不用 CSS transform 动画：
+// 那会把元素提升为合成层并绕过祖先的 SVG 裁剪，正是旧版「水流出球外」的原因。
+// 缩放过小与「减少动态效果」的降级也在 JS 侧处理。
+
+// ── 下一步推荐（抽屉内轻量列表） ──
+.wiki-drawer-recommendations {
+  border: 1px solid var(--td-component-border, #e7e7e7);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--td-bg-color-container, #fff);
+}
+
+.wiki-drawer-recommendations-title {
+  font-size: 12px;
+  color: var(--td-text-color-secondary, #999);
+  margin-bottom: 8px;
+}
+
+.wiki-drawer-recommendations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wiki-recommendation-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--td-bg-color-component, #f5f5f5);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: #efe6c9; // 淡金，呼应边界涟漪
+  }
+}
+
+.wiki-recommendation-rank {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 50%;
+  font-size: 12px;
+  color: #fff;
+  background: #d4af37;
+}
+
+.wiki-recommendation-title {
+  font-size: 13px;
+  color: var(--td-text-color-primary, #1a1a1a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ── 个人知识画像弹窗 ──
+.mp-loading {
+  padding: 40px 0;
+  text-align: center;
+}
+
+.mp-overview {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.mp-card {
+  flex: 1;
+  text-align: center;
+  padding: 12px 0;
+  border-radius: 10px;
+  background: var(--td-bg-color-container-hover, #f7f8fa);
+  border: 1px solid var(--td-component-border, #e7e7e7);
+}
+
+.mp-card .mp-num {
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mp-card .mp-lbl {
+  font-size: 12px;
+  color: var(--td-text-color-secondary, #666);
+  margin-top: 2px;
+}
+
+.mp-mastered .mp-num { color: #a8700d; }
+.mp-familiar .mp-num { color: #1f6b8a; }
+.mp-touch .mp-num { color: #4f6b85; }
+.mp-none .mp-num { color: #59636f; }
+
+.mp-hint {
+  font-size: 12px;
+  color: var(--td-text-color-secondary, #666);
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+
+.mp-empty {
+  text-align: center;
+  color: var(--td-text-color-placeholder, #999);
+  padding: 32px 0;
+  font-size: 13px;
+}
+
+.mp-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--td-component-border, #e7e7e7);
+  border-radius: 8px;
+}
+
+.mp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 60px 52px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--td-bg-color-container-hover, #f7f8fa);
+  }
+}
+
+.mp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mp-tier {
+  font-size: 12px;
+  text-align: center;
+  border-radius: 4px;
+  padding: 1px 0;
+}
+
+.mp-tier-mastered { color: #a8700d; background: #fdf6e3; }
+.mp-tier-familiar { color: #1f6b8a; background: #eaf4f9; }
+.mp-tier-touch { color: #4f6b85; background: #eef3f7; }
+.mp-tier-none { color: #59636f; background: #f2f3f5; }
+
+.mp-level {
+  text-align: right;
+  color: var(--td-text-color-secondary, #666);
+  font-variant-numeric: tabular-nums;
+}
+
+.mp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 // ── Issues Popup ──

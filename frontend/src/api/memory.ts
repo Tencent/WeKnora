@@ -1,4 +1,4 @@
-import { get, put, post, del } from '@/utils/request'
+import { get, put, post, del, getDown } from '@/utils/request'
 
 // Kinds mirror internal/types/memory.go. profile and preference make up the
 // block injected on every turn; fact and task are pulled in only when the
@@ -197,4 +197,66 @@ export function getTenantMemoryConfig() {
 
 export function updateTenantMemoryConfig(config: MemoryConfig) {
   return put<{ success: boolean; data: MemoryConfig }>('/api/v1/tenants/kv/memory-config', config)
+}
+
+// ---------------------------------------------------------------------------
+// 知识引导（课题四）：记录有效浏览、点赞回答、清除个人知识画像。
+// ---------------------------------------------------------------------------
+
+/** 记录一次有效页面浏览（duration 为前端清洗后的有效阅读秒数）。返回该节点最新状态，供就地更新水位球。 */
+export function recordPageView(payload: { knowledge_base_id: string; slug: string; duration: number }) {
+  return post<{ success: boolean; mastery?: number; recently_active?: boolean; last_active?: string }>(
+    '/api/v1/memory/page-view',
+    payload,
+  )
+}
+
+/** 点赞一条 AI 回答。后端按 session+message 加载真实引用，客户端不传文档列表。 */
+export function recordAnswerLike(payload: { session_id: string; message_id: string }) {
+  return post<{ success: boolean }>('/api/v1/memory/answer-like', payload)
+}
+
+/** 取消点赞。 */
+export function cancelAnswerLike(messageId: string) {
+  return del<{ success: boolean }>(`/api/v1/memory/answer-like/${encodeURIComponent(messageId)}`)
+}
+
+/** 删除当前用户的知识画像（只清个人状态，不影响知识库与 Wiki）。 */
+export function deleteMasteryProfile() {
+  return del<{ success: boolean }>('/api/v1/memory/mastery')
+}
+
+/** 查看个人知识画像（每个节点的证据明细）。 */
+export function getMasteryProfile(kbId: string) {
+  return get<{ data: MasteryNodeDetail[]; total: number }>(
+    `/api/v1/memory/mastery?kb_id=${encodeURIComponent(kbId)}`,
+  )
+}
+
+/** 记录一次边界候选曝光（点击中心节点后展示的局部涟漪候选，rank 由后端按顺序编号）。 */
+export function recordExposure(payload: { knowledge_base_id: string; trigger_slug: string; candidate_slugs: string[] }) {
+  return post<{ success: boolean }>('/api/v1/memory/exposure', payload)
+}
+
+/** 记录一次边界候选点击（供 PPR 点击率验证）。 */
+export function markExposureClicked(payload: { knowledge_base_id: string; candidate_slug: string }) {
+  return post<{ success: boolean }>('/api/v1/memory/exposure/click', payload)
+}
+
+export interface MasteryNodeDetail {
+  slug: string
+  title: string
+  page_type: string
+  level: number
+  tier: 'none' | 'touch' | 'familiar' | 'mastered'
+  citations: number
+  views: number
+  duration: number
+  likes: number
+  last_active: string
+}
+
+/** 导出个人知识画像（HTML 报告，按页面类型 → 掌握档位分组）。返回 Blob 供前端触发下载。 */
+export function exportMasteryProfile(kbId: string): Promise<Blob> {
+  return getDown(`/api/v1/memory/mastery/export?kb_id=${encodeURIComponent(kbId)}`)
 }

@@ -89,7 +89,10 @@ func readFrontendDeploymentCapabilityKeys() ([]string, error) {
 
 	var keys []string
 	for _, line := range strings.Split(string(match[1]), "\n") {
-		line = strings.TrimSpace(strings.TrimRight(line, ","))
+		// Trim whitespace (including the \r of CRLF files) before trimming the
+		// trailing comma, so a CRLF-checked-out file doesn't leave "key'," behind.
+		line = strings.TrimSpace(line)
+		line = strings.TrimRight(line, ",")
 		if line == "" {
 			continue
 		}
