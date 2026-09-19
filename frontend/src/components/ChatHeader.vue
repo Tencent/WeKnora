@@ -24,7 +24,7 @@
       @dblclick="startTitleEdit"
     >
       <t-icon v-if="session?.is_pinned" name="pin" size="12px" class="chat-header__pin" />
-      <span class="chat-header__title-text">{{ displayTitle }}</span>
+      <span ref="titleTextRef" class="chat-header__title-text">{{ displayTitle }}</span>
     </h1>
     <t-popup
       v-if="!titleEditing"
@@ -103,6 +103,7 @@ import {
 } from './sessionMutations'
 import { normalizeSessionTitleDraft, SESSION_TITLE_MAX_LENGTH } from './sessionTitleEdit'
 import { buildSessionMarkdown, collectAllSessionMessages } from '@/utils/sessionMarkdown'
+import { useSessionTitleMotion } from '@/composables/useSessionTitleMotion'
 
 interface ChatHeaderSession {
   id: string
@@ -127,6 +128,8 @@ const titleDraft = ref('')
 const titleInputRef = ref<HTMLInputElement | null>(null)
 
 const displayTitle = computed(() => props.session?.title?.trim() || t('menu.newSession'))
+const titleTextRef = ref<HTMLElement | null>(null)
+useSessionTitleMotion(titleTextRef, () => props.session?.id, () => displayTitle.value)
 const menuOverlayClass = computed(() => (
   menuMode.value === 'menu' ? 'card-more chat-header-menu-popup' : 'card-more chat-header-menu-popup is-confirm'
 ))

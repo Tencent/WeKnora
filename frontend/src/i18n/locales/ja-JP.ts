@@ -2626,11 +2626,7 @@ export default {
   },
   input: {
     addModel: 'モデルを追加',
-    placeholder: 'モデルに直接質問できます',
-    placeholderWithContext: '質問を入力してください。上で選択したナレッジベース／ファイルに基づいて回答します',
-    placeholderWebOnly: '質問を入力してください。Web検索に基づいて回答します',
-    placeholderKbAndWeb: '質問を入力してください。ナレッジベースとWeb検索に基づいて回答します',
-    placeholderAgent: '{name}に質問',
+    placeholder: '質問や依頼内容を入力…',
     agentMode: 'スマート推論',
     normalMode: 'クイック回答',
     normalModeDesc: 'ナレッジベースに基づくRAG Q&A',

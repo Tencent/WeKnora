@@ -18,7 +18,7 @@
       <t-tooltip v-if="item.parent_session_id" content="由其他会话分叉而来">
         <t-icon name="git-branch" class="submenu_fork_icon" />
       </t-tooltip>
-      <span class="submenu_title-text">{{ item.title }}</span>
+      <span ref="titleTextRef" class="submenu_title-text">{{ item.title }}</span>
       <span v-if="apiOwnerTag" class="session-owner-tag" :class="`session-owner-tag--${apiOwnerTag.kind}`"
         :title="apiOwnerTag.full">{{ apiOwnerTag.label }}</span>
     </span>
@@ -70,6 +70,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { normalizeSessionTitleDraft, SESSION_TITLE_MAX_LENGTH } from './sessionTitleEdit'
+import { useSessionTitleMotion } from '@/composables/useSessionTitleMotion'
 
 interface SessionMenuOption {
   content: string
@@ -107,6 +108,8 @@ const menuMode = ref<MenuMode>('menu')
 const titleEditing = ref(false)
 const titleDraft = ref('')
 const titleInputRef = ref<HTMLInputElement | null>(null)
+const titleTextRef = ref<HTMLElement | null>(null)
+useSessionTitleMotion(titleTextRef, () => props.item.id, () => props.item.title)
 
 const menuOverlayClass = computed(() => (
   menuMode.value === 'menu'

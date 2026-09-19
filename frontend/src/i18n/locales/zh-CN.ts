@@ -4858,11 +4858,7 @@ export default {
   },
   input: {
     addModel: '添加模型',
-    placeholder: '直接向模型提问',
-    placeholderWithContext: '输入问题，将基于上方选中的知识库/文件回答',
-    placeholderWebOnly: '输入问题，将结合网络搜索回答',
-    placeholderKbAndWeb: '输入问题，将基于知识库和网络搜索回答',
-    placeholderAgent: '向 {name} 提问',
+    placeholder: '输入问题或描述任务…',
     agentMode: '智能推理',
     normalMode: '快速问答',
     normalModeDesc: '基于知识库的 RAG 问答',

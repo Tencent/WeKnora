@@ -2626,11 +2626,7 @@ export default {
   },
   input: {
     addModel: 'Add Model',
-    placeholder: 'Ask questions directly to the model',
-    placeholderWithContext: 'Enter your question, will answer based on selected knowledge bases/files above',
-    placeholderWebOnly: 'Enter your question, will answer with web search',
-    placeholderKbAndWeb: 'Enter your question, will answer based on knowledge base and web search',
-    placeholderAgent: 'Ask {name}',
+    placeholder: 'Ask a question or describe a task…',
     agentMode: 'Smart Reasoning',
     normalMode: 'Quick Answer',
     normalModeDesc: 'Knowledge base RAG Q&A',

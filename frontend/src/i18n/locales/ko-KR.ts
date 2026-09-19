@@ -4856,11 +4856,7 @@ export default {
   },
   input: {
     addModel: '모델 추가',
-    placeholder: '모델에 직접 질문',
-    placeholderWithContext: '질문을 입력하면 위에서 선택한 지식베이스/파일을 기반으로 답변합니다',
-    placeholderWebOnly: '질문을 입력하면 웹 검색을 결합하여 답변합니다',
-    placeholderKbAndWeb: '질문을 입력하면 지식베이스와 웹 검색을 기반으로 답변합니다',
-    placeholderAgent: '{name} 질문하기',
+    placeholder: '질문이나 작업 내용을 입력하세요…',
     agentMode: 'Agent 모드',
     normalMode: '일반 모드',
     normalModeDesc: '지식베이스 기반 RAG Q&A',

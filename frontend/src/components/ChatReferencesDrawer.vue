@@ -33,6 +33,7 @@
             v-for="section in sections"
             :key="section.id"
             class="chat-references-panel__section"
+            :class="{ 'chat-references-panel__section--documents': section.id === 'documents' }"
           >
             <h4 v-if="sections.length > 1" class="chat-references-panel__section-title">
               {{ sectionTitle(section.id) }}
@@ -66,10 +67,10 @@
               >
                 <template v-if="item.kind === 'document'">
                   <div class="reference-item__document">
-                    <t-icon name="file" class="reference-item__doc-icon" />
+                    <ArtifactFileIcon :file-name="item.fileName || item.title" />
                     <div class="reference-item__document-main">
                       <div class="reference-item__title-row">
-                        <h5 class="reference-item__title">{{ item.title }}</h5>
+                        <h5 class="reference-item__title" :title="item.title">{{ item.title }}</h5>
                         <a
                           v-if="item.knowledgeBaseId && !embeddedMode"
                           class="reference-item__open"
@@ -139,6 +140,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
 import {
   buildReferenceSections,
   formatReferenceSnippet,
@@ -430,6 +432,11 @@ watch(visible, (open) => {
   margin-top: 16px;
 }
 
+.chat-references-panel__section--documents {
+  gap: 0;
+  padding-top: var(--app-space-2);
+}
+
 .chat-references-panel__section-title {
   margin: 0 0 8px;
   padding: 0 4px;
@@ -466,17 +473,49 @@ watch(visible, (open) => {
 
 .reference-item__document {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: var(--app-space-3);
   min-width: 0;
 }
 
-.reference-item__doc-icon {
-  flex-shrink: 0;
-  width: 18px;
-  margin-top: 3px;
-  font-size: var(--app-text-xl);
-  color: var(--td-text-color-primary);
+.reference-item--document {
+  border-radius: var(--app-radius-md);
+
+  &:hover:not(.is-highlighted) {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  .reference-item__body {
+    padding: 10px var(--app-space-2);
+    border-radius: inherit;
+
+    &:focus-visible {
+      outline: 2px solid var(--td-text-color-secondary);
+      outline-offset: -2px;
+    }
+  }
+
+  .reference-item__title {
+    display: block;
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .reference-item__snippet {
+    display: block;
+    margin-top: 2px;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-sm);
+    line-height: 1.3;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  &:has(.reference-item__content) .reference-item__document {
+    align-items: flex-start;
+  }
 }
 
 .reference-item__document-main {
@@ -543,6 +582,7 @@ watch(visible, (open) => {
 }
 
 .reference-item:hover .reference-item__open,
+.reference-item:focus-within .reference-item__open,
 .reference-item.is-highlighted .reference-item__open {
   opacity: 1;
 }
