@@ -98,3 +98,27 @@ func TestCastParams_StringToStringArray(t *testing.T) {
 		t.Fatalf("expected [OpenClaw], got %v", patterns)
 	}
 }
+
+// jsonschema-go v0.4 emits nilable Go types as a type union, e.g. a []PlanStep
+// field becomes {"type":["null","array"]}. Reading only a string type made
+// CastParams skip those parameters entirely, so a model that stringified the
+// array reached the tool and failed to decode (todo_write's steps).
+func TestCastParams_NullableArrayTypeUnion(t *testing.T) {
+	schema := json.RawMessage(
+		`{"type":"object","properties":{"steps":{"type":["null","array"],"items":{"type":"object"}}}}`,
+	)
+	args := json.RawMessage(`{"steps":"[{\"id\":\"s1\",\"status\":\"pending\"}]"}`)
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(CastParams(args, schema), &parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	steps, ok := parsed["steps"].([]interface{})
+	if !ok {
+		t.Fatalf("expected steps to be array, got %T", parsed["steps"])
+	}
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(steps))
+	}
+}

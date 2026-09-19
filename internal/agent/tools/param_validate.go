@@ -88,7 +88,7 @@ func validateProperty(name string, val any, prop map[string]any) []ValidationErr
 
 	var errs []ValidationError
 
-	targetType, _ := prop["type"].(string)
+	targetType := schemaType(prop)
 
 	// Type check
 	if targetType != "" && !checkType(val, targetType) {
