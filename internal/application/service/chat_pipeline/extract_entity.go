@@ -417,6 +417,117 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 	return itemsList, nil
 }
 
+// normalizeGroup maps common LLM output aliases to the canonical Formater
+// keys so graph extraction is robust to variations of the same triple schema
+// (e.g. RDF-style subject/predicate/object, or head_entity/tail_entity/relation)
+// instead of the canonical entity1/entity2/relation. It is a pure key-
+// normalization pass: the canonical keys themselves are in the alias lists,
+// so existing output passes through unchanged.
+func (f *Formater) normalizeGroup(group map[string]interface{}) map[string]interface{} {
+	source, hasSource := graphValueByAlias(group, f.relationSource, "subject", "head_entity", "head", "source", "from")
+	target, hasTarget := graphValueByAlias(group, f.relationTarget, "object", "tail_entity", "tail", "target", "to")
+	if hasSource && hasTarget {
+		out := map[string]interface{}{
+			f.relationSource: graphName(source),
+			f.relationTarget: graphName(target),
+		}
+		relation, ok := graphValueByAlias(
+			group,
+			f.relationPrefix,
+			"predicate",
+			"relation_type",
+			"relationship_type",
+			"type",
+			"rel",
+			"edge",
+		)
+		if ok {
+			out[f.relationPrefix] = graphName(relation)
+		}
+		return out
+	}
+
+	entity, hasEntity := graphValueByAlias(group, f.nodePrefix, "node", "subject", "object", "name", "title", "id")
+	if hasEntity {
+		out := map[string]interface{}{
+			f.nodePrefix: graphName(entity),
+		}
+		attributes, ok := graphValueByAlias(
+			group,
+			f.nodePrefix+f.attributeSuffix,
+			"attributes",
+			"node_attributes",
+			"attrs",
+			"properties",
+			"props",
+		)
+		if ok {
+			out[f.nodePrefix+f.attributeSuffix] = graphAttributes(attributes)
+		}
+		return out
+	}
+
+	return group
+}
+
+func graphValueByAlias(group map[string]interface{}, aliases ...string) (interface{}, bool) {
+	for _, alias := range aliases {
+		for key, value := range group {
+			if value != nil && strings.EqualFold(key, alias) {
+				return value, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func graphName(value interface{}) string {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if nested, ok := graphValueByAlias(typed, "text", "name", "title", "id", "label", "entity"); ok {
+			return graphName(nested)
+		}
+	case map[string]string:
+		for _, alias := range []string{"text", "name", "title", "id", "label", "entity"} {
+			for key, nested := range typed {
+				if strings.EqualFold(key, alias) {
+					return strings.TrimSpace(nested)
+				}
+			}
+		}
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func graphAttributes(value interface{}) []interface{} {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case []interface{}:
+		return typed
+	case []string:
+		out := make([]interface{}, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	case map[string]interface{}:
+		out := make([]interface{}, 0, len(typed))
+		for key, item := range typed {
+			out = append(out, fmt.Sprintf("%s: %v", key, item))
+		}
+		return out
+	case map[string]string:
+		out := make([]interface{}, 0, len(typed))
+		for key, item := range typed {
+			out = append(out, fmt.Sprintf("%s: %s", key, item))
+		}
+		return out
+	default:
+		return []interface{}{fmt.Sprintf("%v", value)}
+	}
+}
+
 func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphData, error) {
 	matchData, err := f.parseOutput(ctx, text)
 	if err != nil {
@@ -433,6 +544,7 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 	var relations []*types.GraphRelation
 
 	for _, group := range matchData {
+		group = f.normalizeGroup(group)
 		switch {
 		case group[f.nodePrefix] != nil:
 			attributes := make([]string, 0)
