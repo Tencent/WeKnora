@@ -1004,9 +1004,14 @@ services:
       - "${MCP_PORT:-8082}:8000"
     environment:
       - WEKNORA_BASE_URL=http://app:8080/api/v1
+      # 进程级回落身份：仅当请求未携带个人 key 时使用（stdio/单用户部署）。
+      # 多用户共享部署建议留空，并在下方开启 MCP_REQUIRE_USER_KEY。
       - WEKNORA_API_KEY=${WEKNORA_API_KEY:-}
-      # HTTP/SSE 传输必填：mcp-server 启动时若缺少此项会拒绝启动（客户端以 Authorization: Bearer 携带）
-      - MCP_SERVER_AUTH_TOKEN=${MCP_SERVER_AUTH_TOKEN:-}
+      # 设为 1 时强制所有网络请求携带个人 API Key（Authorization: Bearer 或 X-WeKnora-Key），
+      # 未携带者 401。共享部署推荐开启。
+      - MCP_REQUIRE_USER_KEY=${MCP_REQUIRE_USER_KEY:-}
+      # 个人 key 的自定义入站头名（默认 X-WeKnora-Key）
+      - MCP_USER_API_KEY_HEADER=${MCP_USER_API_KEY_HEADER:-}
       # 调用 WeKnora REST 的读超时（秒，默认 300）
       - WEKNORA_CHAT_TIMEOUT=${WEKNORA_CHAT_TIMEOUT:-300}
       # 是否校验 WeKnora 后端 TLS 证书（默认 true；自签证书可设 false）
