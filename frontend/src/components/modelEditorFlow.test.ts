@@ -111,6 +111,25 @@ for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
   })
 }
 
+test('remote chat connection tests send the draft thinking config', async () => {
+  const f = await fixture({ type: 'chat' })
+  try {
+    f.vm.formData.thinkingControl = 'enable_thinking'
+    await f.vm.checkRemoteAPI()
+    assert.equal(f.requests[0].extraConfig?.thinking_control, 'enable_thinking')
+    assert.deepEqual(Object.keys(f.requests[0].extraConfig ?? {}), ['thinking_control'])
+  } finally { f.close() }
+})
+
+test('VLLM connection tests omit chat thinking config', async () => {
+  const f = await fixture({ type: 'vllm' })
+  try {
+    f.vm.formData.thinkingControl = 'enable_thinking'
+    await f.vm.checkRemoteAPI()
+    assert.equal(f.requests[0].extraConfig, undefined)
+  } finally { f.close() }
+})
+
 test('editing keeps the saved-key fallback and invalidates results after credential changes', async () => {
   const f = await fixture({ edit: true })
   try {

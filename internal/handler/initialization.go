@@ -1758,19 +1758,14 @@ type ModelTestRequest struct {
 // fillSecretsFromStoredModel mutates req in place: if req.ModelID is set
 // and a secret field on the request is empty, the corresponding value from
 // the stored (and decrypted) model is copied in. The stored ExtraConfig is
-// filled in as well when the request does not carry one — provider-specific
-// settings (thinking_control, api_version, remote_model_name, ...) must
-// apply to the connection test exactly as they apply to real traffic, and
-// the frontend only sends extraConfig when the user actively edits it.
-// Non-empty request values are always preferred — they represent the user
-// actively typing a new key they want to verify. Missing or inaccessible
-// model is treated as a no-op (the connection test will fail downstream
-// with a clearer "missing apiKey" error than we could produce here).
+// merged when the provider is unchanged — provider-specific settings
+// (thinking_control, api_version, remote_model_name, ...) must apply to the
+// connection test exactly as they apply to real traffic. Request values are
+// preferred per key. Missing or inaccessible model is treated as a no-op
+// (the connection test will fail downstream with a clearer "missing apiKey"
+// error than we could produce here).
 func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, req *ModelTestRequest) {
 	if req == nil || req.ModelID == "" {
-		return
-	}
-	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil {
 		return
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
@@ -1785,8 +1780,23 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req.AppSecret == "" {
 		req.AppSecret = stored.Parameters.AppSecret
 	}
-	if req.ExtraConfig == nil {
-		req.ExtraConfig = stored.Parameters.ExtraConfig
+	requestedProvider := strings.TrimSpace(req.Provider)
+	storedProvider := strings.TrimSpace(stored.Parameters.Provider)
+	providerUnchanged := requestedProvider == "" || strings.EqualFold(requestedProvider, storedProvider)
+	if providerUnchanged && req.ExtraConfig == nil && len(stored.Parameters.ExtraConfig) > 0 {
+		req.ExtraConfig = make(map[string]string, len(stored.Parameters.ExtraConfig))
+		for key, value := range stored.Parameters.ExtraConfig {
+			req.ExtraConfig[key] = value
+		}
+	} else if providerUnchanged && len(stored.Parameters.ExtraConfig) > 0 {
+		merged := make(map[string]string, len(stored.Parameters.ExtraConfig)+len(req.ExtraConfig))
+		for key, value := range stored.Parameters.ExtraConfig {
+			merged[key] = value
+		}
+		for key, value := range req.ExtraConfig {
+			merged[key] = value
+		}
+		req.ExtraConfig = merged
 	}
 }
 

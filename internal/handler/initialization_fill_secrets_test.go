@@ -83,6 +83,65 @@ func TestFillSecretsFromStoredModel_RequestExtraConfigWins(t *testing.T) {
 	}
 }
 
+func TestFillSecretsFromStoredModel_MergesStoredExtraConfigPerKey(t *testing.T) {
+	stored := &types.Model{
+		Parameters: types.ModelParameters{
+			Provider: "generic",
+			ExtraConfig: map[string]string{
+				"thinking_control": "none",
+				"api_version":      "2024-10-21",
+			},
+		},
+	}
+	h := &InitializationHandler{
+		modelService: &stubFillSecretsModelService{
+			getModelByID: func(context.Context, string) (*types.Model, error) { return stored, nil },
+		},
+	}
+	req := &ModelTestRequest{
+		ModelID:     "m-1",
+		Provider:    "generic",
+		ExtraConfig: map[string]string{"thinking_control": "enabled"},
+	}
+
+	h.fillSecretsFromStoredModel(context.Background(), req)
+
+	if req.ExtraConfig["thinking_control"] != "enabled" {
+		t.Fatalf("request ExtraConfig overwritten: %v", req.ExtraConfig)
+	}
+	if req.ExtraConfig["api_version"] != "2024-10-21" {
+		t.Fatalf("stored ExtraConfig not retained: %v", req.ExtraConfig)
+	}
+}
+
+func TestFillSecretsFromStoredModel_ProviderChangeDoesNotMergeExtraConfig(t *testing.T) {
+	stored := &types.Model{
+		Parameters: types.ModelParameters{
+			Provider:    "azure",
+			ExtraConfig: map[string]string{"api_version": "2024-10-21"},
+		},
+	}
+	h := &InitializationHandler{
+		modelService: &stubFillSecretsModelService{
+			getModelByID: func(context.Context, string) (*types.Model, error) { return stored, nil },
+		},
+	}
+	req := &ModelTestRequest{
+		ModelID:     "m-1",
+		Provider:    "generic",
+		ExtraConfig: map[string]string{"thinking_control": "enabled"},
+	}
+
+	h.fillSecretsFromStoredModel(context.Background(), req)
+
+	if _, ok := req.ExtraConfig["api_version"]; ok {
+		t.Fatalf("stored ExtraConfig leaked across providers: %v", req.ExtraConfig)
+	}
+	if req.ExtraConfig["thinking_control"] != "enabled" {
+		t.Fatalf("request ExtraConfig changed: %v", req.ExtraConfig)
+	}
+}
+
 // TestFillSecretsFromStoredModel_SecretsStillFilledWithoutExtraConfig:
 // regression guard for the early-return — a request that already carries
 // both secrets but no extraConfig must still pick up the stored
