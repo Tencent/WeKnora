@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
@@ -40,6 +41,22 @@ import (
 )
 
 func main() {
+	// Load .env files before any config is read. Server mode previously
+	// relied on the caller exporting every variable (make run-lite sources
+	// .env.lite before exec), so launching the built binary directly (e.g.
+	// WeKnora-lite.exe on Windows) came up with DB_DRIVER / JWT_SECRET
+	// unset. Set ENV_FILE to load a specific file; otherwise .env.lite
+	// (Lite deployment default) and .env are loaded when present. godotenv
+	// never overrides variables already set in the process environment, so
+	// shell-exported values keep priority. The two Load calls stay separate
+	// because godotenv aborts the remaining filenames once one is missing.
+	if envFile := os.Getenv("ENV_FILE"); envFile != "" {
+		_ = godotenv.Load(envFile)
+	} else {
+		_ = godotenv.Load(".env.lite")
+		_ = godotenv.Load(".env")
+	}
+
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
