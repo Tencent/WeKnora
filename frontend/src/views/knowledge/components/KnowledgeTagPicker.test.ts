@@ -118,6 +118,26 @@ test('rename saves in place without changing selection', async t => {
   assert.ok(textOf(f.root).includes('Renamed'))
 })
 
+test('selected tags move above unselected tags and search preserves selection', async t => {
+  const f = await fixture(); t.after(f.close)
+  const headings = () => all(f.root, el => hasClass(el, 'tag-picker-group-title')).map(textOf)
+  const labels = () => all(f.root, el => el.type === 'checkbox').map(textOf)
+  assert.deepEqual(headings(), ['knowledgeBase.tagPickerUnselected2'])
+  await f.fire(f.find(el => el.type === 'checkbox' && textOf(el) === 'Free'), 'onChange', true)
+  assert.deepEqual(headings(), ['knowledgeBase.tagPickerSelected1', 'knowledgeBase.tagPickerUnselected1'])
+  assert.deepEqual(labels(), ['Free', 'Used'])
+  await f.search('Used')
+  assert.deepEqual(headings(), ['knowledgeBase.tagPickerUnselected1'])
+  assert.deepEqual([...f.selectedIds.value], ['free'])
+  await f.search('')
+  assert.deepEqual(labels(), ['Free', 'Used'])
+  await f.fire(f.find(el => el.type === 'checkbox' && textOf(el) === 'Used'), 'onChange', true)
+  assert.deepEqual(headings(), ['knowledgeBase.tagPickerSelected2'])
+  await f.fire(f.find(el => el.type === 'checkbox' && textOf(el) === 'Free'), 'onChange', false)
+  assert.deepEqual(headings(), ['knowledgeBase.tagPickerSelected1', 'knowledgeBase.tagPickerUnselected1'])
+  assert.deepEqual(labels(), ['Used', 'Free'])
+})
+
 test('used tags cannot be deleted; unused deletion never requests cascading content removal', async t => {
   const f = await fixture(); t.after(f.close)
   await f.fire(f.find(el => el.type === 'popup'), 'onOpen')

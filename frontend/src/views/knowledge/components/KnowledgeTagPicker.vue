@@ -5,36 +5,42 @@
     </t-input>
     <div class="tag-picker-list" :aria-label="$t('knowledgeBase.columnTag')">
       <t-loading v-if="loading && !tags.length" size="small" />
-      <div v-for="tag in tags" :key="tag.id" class="tag-picker-row">
-        <template v-if="editingId === tag.id">
-          <t-input v-model="editingName" autofocus :maxlength="40" size="small" :disabled="busy"
-            :aria-label="$t('knowledgeBase.tagEditAction')" @enter="saveName(tag)"
-            @keydown="(_v: string, ctx: { e: KeyboardEvent }) => { if (ctx.e.key === 'Escape') cancelEdit() }" />
-          <t-button variant="text" shape="square" size="small" :loading="busy" :aria-label="$t('common.save')" @click="saveName(tag)"><t-icon name="check" size="14px" /></t-button>
-          <t-button theme="default" variant="text" shape="square" size="small" :disabled="busy" :aria-label="$t('common.cancel')" @click="cancelEdit"><t-icon name="close" size="14px" /></t-button>
-        </template>
-        <template v-else>
-          <t-checkbox :checked="selectedIds.includes(tag.id)" :disabled="busy" @change="toggle(tag.id)"><span :title="tag.name">{{ tag.name }}</span></t-checkbox>
-          <t-popup attach="body" trigger="click" placement="bottom-right" :visible="menuTagId === tag.id"
-            @visible-change="(visible: boolean) => { if (visible) menuTagId = tag.id; else if (menuTagId === tag.id) menuTagId = '' }">
-            <button type="button" class="tag-picker-more" :class="{ 'is-open': menuTagId === tag.id }" :disabled="busy"
-              :aria-label="`${tag.name} · ${$t('knowledgeBase.columnActions')}`" :aria-expanded="menuTagId === tag.id"><t-icon name="ellipsis" size="16px" /></button>
-            <template #content>
-              <div class="tag-picker-menu">
-                <button type="button" @click="startEdit(tag)">{{ $t('knowledgeBase.tagEditAction') }}</button>
-                <t-tooltip v-if="isUsed(tag)" :content="$t('knowledgeBase.tagPickerInUse')">
-                  <span><button type="button" disabled>{{ $t('knowledgeBase.tagDeleteAction') }}</button></span>
-                </t-tooltip>
-                <t-popconfirm v-else attach="body" :content="$t('knowledgeBase.tagPickerDeleteConfirm', { name: tag.name })"
-                  :confirm-btn="{ content: $t('common.delete'), theme: 'danger', loading: busy }"
-                  :cancel-btn="{ content: $t('common.cancel') }" @confirm="removeTag(tag)">
-                  <button type="button" class="tag-picker-delete" :disabled="busy">{{ $t('knowledgeBase.tagDeleteAction') }}</button>
-                </t-popconfirm>
-              </div>
-            </template>
-          </t-popup>
-        </template>
-      </div>
+      <template v-for="(tag, index) in orderedTags" :key="tag.id">
+        <div v-if="index === 0 || index === selectedTags.length" class="tag-picker-group-title" role="heading" aria-level="3">
+          <span>{{ $t(selectedIds.includes(tag.id) ? 'knowledgeBase.tagPickerSelected' : 'knowledgeBase.tagPickerUnselected') }}</span>
+          <span class="tag-picker-group-count">{{ selectedIds.includes(tag.id) ? selectedTags.length : unselectedTags.length }}</span>
+        </div>
+        <div class="tag-picker-row">
+          <template v-if="editingId === tag.id">
+            <t-input v-model="editingName" autofocus :maxlength="40" size="small" :disabled="busy"
+              :aria-label="$t('knowledgeBase.tagEditAction')" @enter="saveName(tag)"
+              @keydown="(_v: string, ctx: { e: KeyboardEvent }) => { if (ctx.e.key === 'Escape') cancelEdit() }" />
+            <t-button variant="text" shape="square" size="small" :loading="busy" :aria-label="$t('common.save')" @click="saveName(tag)"><t-icon name="check" size="14px" /></t-button>
+            <t-button theme="default" variant="text" shape="square" size="small" :disabled="busy" :aria-label="$t('common.cancel')" @click="cancelEdit"><t-icon name="close" size="14px" /></t-button>
+          </template>
+          <template v-else>
+            <t-checkbox :checked="selectedIds.includes(tag.id)" :disabled="busy" @change="toggle(tag.id)"><span :title="tag.name">{{ tag.name }}</span></t-checkbox>
+            <t-popup attach="body" trigger="click" placement="bottom-right" :visible="menuTagId === tag.id"
+              @visible-change="(visible: boolean) => { if (visible) menuTagId = tag.id; else if (menuTagId === tag.id) menuTagId = '' }">
+              <button type="button" class="tag-picker-more" :class="{ 'is-open': menuTagId === tag.id }" :disabled="busy"
+                :aria-label="`${tag.name} · ${$t('knowledgeBase.columnActions')}`" :aria-expanded="menuTagId === tag.id"><t-icon name="ellipsis" size="16px" /></button>
+              <template #content>
+                <div class="tag-picker-menu">
+                  <button type="button" @click="startEdit(tag)">{{ $t('knowledgeBase.tagEditAction') }}</button>
+                  <t-tooltip v-if="isUsed(tag)" :content="$t('knowledgeBase.tagPickerInUse')">
+                    <span><button type="button" disabled>{{ $t('knowledgeBase.tagDeleteAction') }}</button></span>
+                  </t-tooltip>
+                  <t-popconfirm v-else attach="body" :content="$t('knowledgeBase.tagPickerDeleteConfirm', { name: tag.name })"
+                    :confirm-btn="{ content: $t('common.delete'), theme: 'danger', loading: busy }"
+                    :cancel-btn="{ content: $t('common.cancel') }" @confirm="removeTag(tag)">
+                    <button type="button" class="tag-picker-delete" :disabled="busy">{{ $t('knowledgeBase.tagDeleteAction') }}</button>
+                  </t-popconfirm>
+                </div>
+              </template>
+            </t-popup>
+          </template>
+        </div>
+      </template>
       <button v-if="canCreate && !loading" type="button" class="tag-picker-create" :disabled="busy" @click="createTag">
         <t-icon :name="busy ? 'loading' : 'add'" size="16px" />
         <span :title="query.trim()">{{ $t('knowledgeBase.tagCreateAction') }} “{{ query.trim() }}”</span>
@@ -71,6 +77,10 @@ const editingName = ref('');
 let requestVersion = 0;
 let debounce: ReturnType<typeof setTimeout> | undefined;
 const canCreate = computed(() => query.value.trim() && !tags.value.some(tag => tag.name === query.value.trim()));
+const selectedTagIds = computed(() => new Set(props.selectedIds));
+const selectedTags = computed(() => tags.value.filter(tag => selectedTagIds.value.has(tag.id)));
+const unselectedTags = computed(() => tags.value.filter(tag => !selectedTagIds.value.has(tag.id)));
+const orderedTags = computed(() => [...selectedTags.value, ...unselectedTags.value]);
 const isUsed = (tag: Tag) => !!(tag.knowledge_count || tag.chunk_count);
 const reportError = (error: any) => MessagePlugin.error(error?.message || t('common.operationFailed'));
 watch(busy, value => emit('busy-change', value), { flush: 'sync' });
@@ -154,6 +164,12 @@ async function removeTag(tag: Tag) {
 <style scoped lang="less">
 .knowledge-tag-picker { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
 .tag-picker-list { max-height: min(280px, 40vh); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-gutter: stable; padding: 2px 4px 2px 0; }
+.tag-picker-group-title {
+  display: flex; align-items: center; gap: 6px; padding: 5px 4px;
+  color: var(--td-text-color-secondary); font-size: var(--app-text-xs); line-height: 18px;
+  &:not(:first-child) { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--td-component-stroke); }
+}
+.tag-picker-group-count { color: var(--td-text-color-placeholder); font-variant-numeric: tabular-nums; }
 .tag-picker-row {
   display: flex; align-items: center; gap: 4px; min-width: 0; box-sizing: border-box; min-height: 34px; padding: 2px 4px; border-radius: var(--app-radius-xs);
   &:hover { background: var(--td-bg-color-container-hover); }

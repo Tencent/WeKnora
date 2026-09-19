@@ -575,6 +575,8 @@ export default {
     tagManageListSection: 'Tags',
     tagManageDocCount: '{count} documents',
     tagManageFaqCount: '{count} FAQ entries',
+    tagPickerSelected: 'Selected',
+    tagPickerUnselected: 'Not selected',
     tagSelectedCount: '{count} selected',
     tagPickerSearch: "Search or create a tag",
     tagPickerInUse: "This tag is in use. Remove its document associations before deleting it.",

@@ -332,7 +332,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     >
       <div class="card-content">
         <div class="card-content-nav">
-          <div class="card-file-icon">
+          <div class="card-file-icon" :title="[getKnowledgeType(item), formatFileSize(Number(item.file_size))].filter(Boolean).join(' · ')">
             <DocumentFileIcon :source-type="item.type"
               :file-name="item.file_type ? `document.${item.file_type.toLowerCase()}` : (item.original_file_name || item.file_name || '')" />
           </div>
@@ -365,7 +365,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
               @click.stop
               :class="[activeMenuIndex === index ? 'active-more' : '']"
             >
-              <t-icon name="more" size="18px" />
+              <t-icon name="more" size="16px" />
             </button>
             <template #content>
               <!-- Move: folder picker (must win over the normal menu while open) -->
@@ -541,36 +541,31 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
         </div>
       </div>
 
-      <KnowledgeTagPopover :kb-id="kbId" :knowledge-id="item.id" :tags="item.tags || []" :disabled="!canEdit"
-        :visible="tagEditorId === item.id"
-        @update:visible="(visible: boolean) => { if (visible) tagEditorId = item.id; else if (tagEditorId === item.id) tagEditorId = null }"
-        @changed="emit('tags-changed', $event)">
-        <div class="card-tags">
-          <template v-if="item.tags?.length">
-            <button v-for="tag in item.tags.slice(0, 3)" :key="tag.id" type="button" class="card-tag-chip"
-              :disabled="!canEdit" :title="tag.name">{{ tag.name }}</button>
-            <button v-if="item.tags.length > 3" type="button" class="card-tag-overflow" :disabled="!canEdit"
-              :title="item.tags.slice(3).map(tag => tag.name).join('、')">+{{ item.tags.length - 3 }}</button>
-          </template>
-          <button v-else-if="canEdit" type="button" class="card-tag-add">
-            <t-icon name="add" size="12px" />{{ t('knowledgeBase.tagAddAction') }}
-          </button>
-        </div>
-      </KnowledgeTagPopover>
-
       <div class="card-bottom">
+        <KnowledgeTagPopover v-if="canEdit || item.tags?.length" class="card-tags-anchor"
+          :kb-id="kbId" :knowledge-id="item.id" :tags="item.tags || []" :disabled="!canEdit"
+          :visible="tagEditorId === item.id"
+          @update:visible="(visible: boolean) => { if (visible) tagEditorId = item.id; else if (tagEditorId === item.id) tagEditorId = null }"
+          @changed="emit('tags-changed', $event)">
+          <div class="card-tags">
+            <template v-if="item.tags?.length">
+              <button v-for="tag in item.tags.slice(0, 1)" :key="tag.id" type="button" class="card-tag-chip"
+                :disabled="!canEdit" :title="tag.name">{{ tag.name }}</button>
+              <button v-if="item.tags.length > 1" type="button" class="card-tag-overflow" :disabled="!canEdit"
+                :title="item.tags.slice(1).map(tag => tag.name).join('、')">+{{ item.tags.length - 1 }}</button>
+            </template>
+            <button v-else-if="canEdit" type="button" class="card-tag-add">
+              <t-icon name="add" size="12px" />{{ t('knowledgeBase.tagAddAction') }}
+            </button>
+          </div>
+        </KnowledgeTagPopover>
+
         <button v-if="showFolderPath && item.folder_path" type="button" class="card-folder"
           :title="item.folder_path" @click.stop="onOpenFolder(item.folder_path)">
           <t-icon name="folder" />
           <span>{{ item.folder_path }}</span>
         </button>
         <span v-else class="card-time" :title="t('knowledgeBase.columnUpdatedAt')">{{ formatDocTime(item.updated_at) }}</span>
-        <span class="card-type">
-          {{ getKnowledgeType(item) }}
-          <template v-if="item.type !== 'manual' && item.type !== 'url' && Number(item.file_size) > 0">
-            <span class="card-meta-separator">·</span>{{ formatFileSize(Number(item.file_size)) }}
-          </template>
-        </span>
       </div>
     </div>
     </div>
@@ -664,7 +659,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 
 .knowledge-card {
   min-width: 0;
-  height: 164px;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   padding: 10px;
@@ -682,7 +677,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   &.is-selected { border-color: var(--app-selection-border); background: var(--td-bg-color-container); box-shadow: none; }
 
   .card-content { min-width: 0; }
-  .card-content-nav { display: flex; align-items: flex-start; gap: 8px; height: 40px; margin-bottom: 6px; }
+  .card-content-nav { display: flex; align-items: flex-start; gap: 7px; height: 36px; margin-bottom: 4px; }
   .card-content-title {
     flex: 1;
     min-width: 0;
@@ -698,7 +693,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     font: inherit;
     font-size: var(--app-text-base);
     font-weight: 600;
-    line-height: 20px;
+    line-height: 18px;
     text-align: left;
     cursor: pointer;
   }
@@ -716,13 +711,22 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     background: transparent;
     color: var(--td-text-color-placeholder);
     cursor: pointer;
-    &:hover, &.active-more { background: var(--td-bg-color-component-hover); color: var(--td-text-color-primary); }
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+    &:hover, &.active-more {
+      background: var(--td-bg-color-container-hover);
+      color: var(--td-text-color-secondary);
+    }
+    &:focus-visible {
+      outline: 2px solid var(--app-focus-border);
+      outline-offset: 2px;
+    }
   }
   .card-file-icon {
     position: relative;
-    flex: 0 0 32px;
-    width: 32px;
-    height: 38px;
+    flex: 0 0 26px;
+    width: 26px;
+    height: 31px;
+    > :deep(*) { transform: scale(0.8125); transform-origin: top left; }
   }
   .card-nav-check {
     flex-shrink: 0;
@@ -735,7 +739,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     .card-select-checkbox { display: flex; margin: 0; padding: 0; line-height: 1; }
     :deep(.t-checkbox__label) { display: none; }
   }
-  .card-preview { height: 40px; }
+  .card-preview { min-height: 32px; }
   .card-content-txt {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -744,7 +748,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     overflow-wrap: anywhere;
     color: var(--td-text-color-secondary);
     font-size: var(--app-text-sm);
-    line-height: 20px;
+    line-height: 16px;
     &.is-empty { color: var(--td-text-color-placeholder); }
   }
   .card-bottom {
@@ -753,19 +757,20 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     justify-content: space-between;
     gap: 8px;
     margin-top: auto;
+    padding-top: 6px;
     color: var(--td-text-color-placeholder);
     font-size: var(--app-text-xs);
     line-height: 18px;
   }
-  .card-time { flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .card-type { display: flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
-  .card-meta-separator { opacity: 0.6; }
+  .card-time { flex-shrink: 0; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .card-tags-anchor { flex: 1; min-width: 0; width: auto; }
   .card-folder {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     min-width: 0;
-    max-width: 60%;
+    max-width: 50%;
+    margin-left: auto;
     padding: 0;
     border: 0;
     background: transparent;
@@ -785,13 +790,12 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   flex-wrap: nowrap;
   gap: 5px;
   height: 20px;
-  margin-top: 6px;
   overflow: hidden;
   button {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    max-width: min(90px, calc((100% - 40px) / 3));
+    max-width: 100%;
     height: 20px;
     padding: 0 6px;
     border: 1px solid var(--td-component-stroke);
@@ -808,8 +812,8 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     &:disabled { cursor: default; }
     &:not(:disabled):hover { color: var(--td-brand-color); border-color: var(--app-selection-border); background: var(--app-selection-bg); }
   }
-  .card-tag-chip { display: block; }
-  .card-tag-add { max-width: none; border-style: dashed; color: var(--td-text-color-placeholder); background: transparent; }
+  .card-tag-chip { display: block; min-width: 0; }
+  .card-tag-add { max-width: none; padding: 0; border-color: transparent; color: var(--td-text-color-placeholder); background: transparent; }
   .card-tag-overflow { flex-shrink: 0; }
 }
 .card-tag-menu-action { width: 100%; border: 0; background: transparent; font-family: inherit; text-align: left; }

@@ -6778,6 +6778,8 @@ export default {
     tagManageListSection: 'Список тегов',
     tagManageDocCount: '{count} документов',
     tagManageFaqCount: '{count} записей FAQ',
+    tagPickerSelected: 'Выбранные',
+    tagPickerUnselected: 'Не выбранные',
     tagSelectedCount: 'Выбрано: {count}',
     tagPickerSearch: "Найти или создать тег",
     tagPickerInUse: "Тег используется. Сначала удалите его связи с документами.",

@@ -6780,6 +6780,8 @@ export default {
     tagManageListSection: '标签列表',
     tagManageDocCount: '{count} 个文档',
     tagManageFaqCount: '{count} 个 FAQ',
+    tagPickerSelected: '已选择',
+    tagPickerUnselected: '未选择',
     tagSelectedCount: '已选 {count} 个标签',
     tagPickerSearch: "搜索或新建标签",
     tagPickerInUse: "此标签仍被使用，请先移除文档上的关联再删除",

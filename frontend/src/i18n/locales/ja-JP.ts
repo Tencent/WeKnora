@@ -575,6 +575,8 @@ export default {
     tagManageListSection: 'タグ',
     tagManageDocCount: '{count}件のドキュメント',
     tagManageFaqCount: '{count}件のFAQ',
+    tagPickerSelected: '選択済み',
+    tagPickerUnselected: '未選択',
     tagSelectedCount: '{count}件選択中',
     tagPickerSearch: "タグを検索または作成",
     tagPickerInUse: "使用中のタグです。先にドキュメントとの関連付けを解除してください。",

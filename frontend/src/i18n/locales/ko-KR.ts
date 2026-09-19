@@ -6778,6 +6778,8 @@ export default {
     tagManageListSection: '태그 목록',
     tagManageDocCount: '문서 {count}개',
     tagManageFaqCount: 'FAQ {count}개',
+    tagPickerSelected: '선택됨',
+    tagPickerUnselected: '선택 안 됨',
     tagSelectedCount: '{count}개 선택됨',
     tagPickerSearch: "태그 검색 또는 만들기",
     tagPickerInUse: "사용 중인 태그입니다. 먼저 문서 연결을 해제하세요.",
