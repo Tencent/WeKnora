@@ -38,6 +38,8 @@ const (
 	ConnectorTypeRSS         = "rss"
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
+	// ConnectorTypeOutline is Outline (getoutline.com), cloud or self-hosted.
+	ConnectorTypeOutline = "outline"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
