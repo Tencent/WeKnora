@@ -49,6 +49,12 @@ func main() {
 	// Mute Gin's per-route registration spam (one line per route × ~150
 	// routes) — replaced by a single summary printed after router build.
 	runtime.SilenceGinRouteSpam()
+	// When local SearXNG host publishing is configured (SEARXNG_PORT set),
+	// fail fast on APP_PORT collision. Unset SEARXNG_PORT skips the check so
+	// standalone APP_PORT=8888 (or independently deployed SearXNG) still boots.
+	if err := runtime.CheckAppSearxngHostPortsFromEnv(); err != nil {
+		logger.Fatalf(context.Background(), "%v", err)
+	}
 	// Print the env banner before container build so operators see what
 	// config landed even when DB / storage init fails.
 	runtime.LogStartupEnv(context.Background())
