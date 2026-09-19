@@ -163,3 +163,56 @@ func TestCountKnowledgeByKnowledgeBaseID_ExcludesDeleting(t *testing.T) {
 	// the hidden mid-deletion row drops out.
 	require.Equal(t, int64(2), count)
 }
+
+// TestMarkKnowledgeDeleting_UnblocksReuploadAndDropsCount pins the remaining
+// #3338 hole: the UI toasts "delete submitted" before the worker runs, so a
+// processing row keeps matching CheckKnowledgeExists and inflating the KB
+// count until parse_status flips to deleting. Marking at admit-time closes
+// that window — the worker still finishes the delete; this only makes the
+// row immediately non-blocking and uncounted, matching the list filter.
+func TestMarkKnowledgeDeleting_UnblocksReuploadAndDropsCount(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	const (
+		tenantID = uint64(1)
+		kbID     = "kb-mark"
+		hash     = "hash-processing"
+	)
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, file_name, file_type, file_size, file_hash, parse_status)
+		VALUES
+			('k-processing', ?, ?, 'file', 'stuck.md', 'md', 10, ?, 'processing'),
+			('k-done', ?, ?, 'file', 'ok.md', 'md', 10, 'hash-ok', 'completed')
+	`, tenantID, kbID, hash, tenantID, kbID).Error)
+
+	params := &types.KnowledgeCheckParams{Type: "file", FileHash: hash, FileType: "md"}
+	exists, _, err := repo.CheckKnowledgeExists(ctx, tenantID, kbID, params)
+	require.NoError(t, err)
+	require.True(t, exists, "a live processing row must still be a duplicate before delete is admitted")
+
+	count, err := repo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), count)
+
+	require.NoError(t, repo.MarkKnowledgeDeleting(ctx, tenantID, []string{"k-processing"}))
+
+	exists, _, err = repo.CheckKnowledgeExists(ctx, tenantID, kbID, params)
+	require.NoError(t, err)
+	require.False(t, exists, "admitted delete must not block re-upload of the same file")
+
+	count, err = repo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count, "the processing ghost must drop out of the KB count immediately")
+
+	var status string
+	require.NoError(t, db.Raw(`SELECT parse_status FROM knowledges WHERE id = ?`, "k-processing").Scan(&status).Error)
+	require.Equal(t, types.ParseStatusDeleting, status)
+
+	// Sibling completed row is untouched: still a duplicate, still counted.
+	exists, _, err = repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+		Type: "file", FileHash: "hash-ok", FileType: "md",
+	})
+	require.NoError(t, err)
+	require.True(t, exists)
+}
