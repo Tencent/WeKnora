@@ -48,10 +48,8 @@ git_ws clean -fdx`, gitWorkspacePreamble(workspace, gitDir), sha), nil
 }
 
 // gitWorkspacePreamble is shared by checkpoint and reset so fork and rewind
-// cannot drift onto different git layouts. Every git call goes through git_ws:
-// GIT_DIR stays outside /workspace, while --work-tree still edits the session
-// files. A leftover in-tree .git from before this split is moved once so
-// old sandboxes keep their checkpoint SHAs.
+// cannot drift onto different git layouts. GIT_DIR is outside /workspace;
+// --work-tree still edits the session files.
 func gitWorkspacePreamble(workspace, gitDir string) string {
 	return fmt.Sprintf(`WORK_TREE=%[1]s
 GIT_DIR=%[2]s
@@ -59,12 +57,6 @@ git_ws() {
   git -c safe.directory='*' --git-dir="$GIT_DIR" --work-tree="$WORK_TREE" "$@"
 }
 mkdir -p "$WORK_TREE"
-if [ ! -e "$GIT_DIR" ] && [ -d "$WORK_TREE/.git" ]; then
-  mkdir -p "$(dirname "$GIT_DIR")"
-  mv "$WORK_TREE/.git" "$GIT_DIR"
-elif [ -e "$GIT_DIR" ] && [ -e "$WORK_TREE/.git" ]; then
-  rm -rf "$WORK_TREE/.git"
-fi
 `, shellSingleQuote(workspace), shellSingleQuote(gitDir))
 }
 

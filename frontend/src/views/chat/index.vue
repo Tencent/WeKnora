@@ -113,7 +113,7 @@
                                     :message-id="session.id"
                                     :created-at="session.created_at"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
-                                    :can-rewind="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="!embeddedMode && !outgoingWorkBlocksRewind && forkAffordanceOf(session.id).canFork"
                                     :steer-failed="Boolean(session._steerFailed)"
                                     @retry-steer="handleRetrySteer(session.steer_id)"
                                     @remove-steer="handleRemoveSteer(session.steer_id)"
@@ -129,7 +129,7 @@
                                     :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                                     :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
-                                    :can-rewind="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="!embeddedMode && !outgoingWorkBlocksRewind && forkAffordanceOf(session.id).canFork"
                                     @fork="handleFork"
                                     @rewind="handleRewind"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
@@ -201,7 +201,7 @@ import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
 import { rewindSkipMessage } from './rewindNotice';
-import { rewindPrefillText, shouldApplyRewindLocally } from './rewindView';
+import { rewindPrefillText, rewindBlockedByOutgoingWork, canReplaceRewindTranscript, shouldApplyRewindLocally } from './rewindView';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -430,6 +430,11 @@ async function handleFork(messageId) {
 async function handleRewind(messageId) {
     if (props.embeddedMode) return
     if (forkInFlight || composerLocked.value) return
+    if (rewindBlockedByOutgoingWork({
+        isReplying: isReplying.value,
+        isStreaming: isStreaming.value,
+        isRecovering: isImRecovering.value,
+    })) return
     if (!messageId || !session_id.value) return
     const source = messagesList.find((m) => m.id === messageId || persistedAssistantId(m) === messageId)
     if (!source) return
@@ -445,17 +450,36 @@ async function handleRewind(messageId) {
         if (!data) return
         if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
 
+        let batch
+        try {
+            const history = await fetchMessageList({
+                session_id: sourceSessionId,
+                created_at: '',
+                limit: limit.value,
+            })
+            batch = history?.data
+            if (!Array.isArray(batch)) {
+                throw new Error('rewind history reload returned no list')
+            }
+        } catch {
+            MessagePlugin.error(t('chat.rewind.failed'))
+            return
+        }
+        if (!canReplaceRewindTranscript(String(session_id.value || ''), sourceSessionId, undefined)) return
+
         created_at.value = ''
         messagesList.splice(0)
         steerQueue.value = []
-        historyLoading.value = true
-        hasMoreHistory.value = true
-        await getmsgList({
-            session_id: sourceSessionId,
-            created_at: '',
-            limit: limit.value,
-        })
-        if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
+        historyLoading.value = false
+        if (batch.length) {
+            created_at.value = batch[0].created_at
+            if (batch.length < limit.value) {
+                hasMoreHistory.value = false
+            }
+            await handleMsgList(batch, false)
+        } else {
+            hasMoreHistory.value = false
+        }
 
         const prefill = rewindPrefillText(sourceRole, sourceContent)
         if (prefill) {
@@ -504,6 +528,11 @@ let recoverPollTimer = null;
 // the same "generating" typing indicator the normal reply path shows, so the wait
 // isn't a silent gap. IM-only: false everywhere else, so other flows are unchanged.
 const isImRecovering = ref(false);
+const outgoingWorkBlocksRewind = computed(() => rewindBlockedByOutgoingWork({
+    isReplying: isReplying.value,
+    isStreaming: isStreaming.value,
+    isRecovering: isImRecovering.value,
+}))
 const scrollLock = ref(false);
 const isFirstEnter = ref(true);
 const loading = ref(false);

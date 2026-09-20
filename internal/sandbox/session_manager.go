@@ -1129,6 +1129,27 @@ func (m *SessionBoundManager) HasActiveTurn(ctx context.Context, sessionID strin
 	return active, err
 }
 
+// TryLockRewind takes an exclusive rewind lock for sessionID. Stores that do
+// not implement rewind locking succeed as a no-op so local tests without a
+// lease store still rewind.
+func (m *SessionBoundManager) TryLockRewind(ctx context.Context, sessionID string) (func(), error) {
+	noop := func() {}
+	if m == nil {
+		return noop, nil
+	}
+	locker, ok := m.bindings.(interface {
+		TryLockRewind(context.Context, SessionSandboxKey) (func(), error)
+	})
+	if !ok {
+		return noop, nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return locker.TryLockRewind(ctx, key)
+}
+
 // CreateForkSnapshot snapshots the session's already-bound sandbox. It never
 // provisions: an unbound session or a backend without snapshots returns an
 // error so fork can degrade.

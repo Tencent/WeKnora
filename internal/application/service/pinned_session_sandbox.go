@@ -118,6 +118,19 @@ func (a *PinnedSessionSandbox) HasActiveTurn(ctx context.Context, sessionID stri
 	return false, nil
 }
 
+// TryLockRewind takes an exclusive rewind lock through the session's pinned
+// manager. Managers that do not expose the method succeed as a no-op.
+func (a *PinnedSessionSandbox) TryLockRewind(ctx context.Context, sessionID string) (func(), error) {
+	mgr := a.manager(ctx, sessionID)
+	type locker interface {
+		TryLockRewind(context.Context, string) (func(), error)
+	}
+	if l, ok := mgr.(locker); ok {
+		return l.TryLockRewind(ctx, sessionID)
+	}
+	return func() {}, nil
+}
+
 // CreateForkSnapshot snapshots the session's already-bound sandbox through the
 // pinned manager. Managers that do not expose the method return an error so
 // fork can degrade to SNAPSHOT_UNSUPPORTED.

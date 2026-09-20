@@ -18,6 +18,7 @@ import (
 const (
 	redisLifecycleLockLease         = 60 * time.Second
 	redisLifecycleLockRenewInterval = 20 * time.Second
+	sessionRewindLockTTL            = 2 * time.Minute
 )
 
 var deleteBindingIfMatchScript = redis.NewScript(`
@@ -435,6 +436,36 @@ func (s *RedisSessionSandboxBindingStore) ConsumeTurnRebuild(
 
 func (s *RedisSessionSandboxBindingStore) turnKey(key SessionSandboxKey) string {
 	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:turn"
+}
+
+func (s *RedisSessionSandboxBindingStore) rewindKey(key SessionSandboxKey) string {
+	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:rewind"
+}
+
+// TryLockRewind takes a distributed exclusive rewind lock for key.
+func (s *RedisSessionSandboxBindingStore) TryLockRewind(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (func(), error) {
+	if err := key.Validate(); err != nil {
+		return nil, err
+	}
+	token, err := redislock.NewToken()
+	if err != nil {
+		return nil, err
+	}
+	acquired, err := redislock.TryAcquire(ctx, s.client, s.rewindKey(key), token, sessionRewindLockTTL)
+	if err != nil {
+		return nil, fmt.Errorf("lock session rewind: %w", err)
+	}
+	if !acquired {
+		return nil, ErrSessionRewindLocked
+	}
+	return func() {
+		relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_, _ = redislock.Release(relCtx, s.client, s.rewindKey(key), token)
+	}, nil
 }
 
 func (s *RedisSessionSandboxBindingStore) bindingKey(key SessionSandboxKey) string {

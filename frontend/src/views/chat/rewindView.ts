@@ -13,3 +13,23 @@ export function rewindPrefillText(role: unknown, content: unknown): string {
   }
   return String(content ?? '')
 }
+
+export function rewindBlockedByOutgoingWork(state: {
+  isReplying?: boolean
+  isStreaming?: boolean
+  isRecovering?: boolean
+}): boolean {
+  return Boolean(state.isReplying || state.isStreaming || state.isRecovering)
+}
+
+/** Empty history is success (the conversation was cleared). A thrown reload is not. */
+export function canReplaceRewindTranscript(
+  currentSessionId: string,
+  sourceSessionId: string,
+  reloadError: unknown,
+): boolean {
+  if (reloadError) {
+    return false
+  }
+  return shouldApplyRewindLocally(currentSessionId, sourceSessionId)
+}

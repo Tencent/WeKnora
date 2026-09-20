@@ -294,6 +294,7 @@ type MemorySessionSandboxBindingStore struct {
 	bindings map[SessionSandboxKey]SessionSandboxBinding
 	locks    map[SessionSandboxKey]*memoryLifecycleLock
 	turns    map[SessionSandboxKey]*memoryTurnLease
+	rewinds  map[SessionSandboxKey]struct{}
 }
 
 // NewMemorySessionSandboxBindingStore creates an empty in-memory store.
@@ -302,6 +303,7 @@ func NewMemorySessionSandboxBindingStore() *MemorySessionSandboxBindingStore {
 		bindings: make(map[SessionSandboxKey]SessionSandboxBinding),
 		locks:    make(map[SessionSandboxKey]*memoryLifecycleLock),
 		turns:    make(map[SessionSandboxKey]*memoryTurnLease),
+		rewinds:  make(map[SessionSandboxKey]struct{}),
 	}
 }
 
@@ -571,6 +573,33 @@ func (s *MemorySessionSandboxBindingStore) EndTurn(
 		delete(s.turns, key)
 	}
 	return nil
+}
+
+// TryLockRewind takes a process-local exclusive rewind lock for key.
+func (s *MemorySessionSandboxBindingStore) TryLockRewind(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (func(), error) {
+	if err := key.Validate(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rewinds == nil {
+		s.rewinds = make(map[SessionSandboxKey]struct{})
+	}
+	if _, held := s.rewinds[key]; held {
+		return nil, ErrSessionRewindLocked
+	}
+	s.rewinds[key] = struct{}{}
+	return func() {
+		s.mu.Lock()
+		delete(s.rewinds, key)
+		s.mu.Unlock()
+	}, nil
 }
 
 // TurnState reports whether a chat turn is open and whether its first

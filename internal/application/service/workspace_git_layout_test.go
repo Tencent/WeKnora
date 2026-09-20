@@ -58,27 +58,29 @@ func TestCheckpointInitLeavesGitDirOutsideWorkTree(t *testing.T) {
 	require.Equal(t, "v1", string(body))
 }
 
-func TestCheckpointMigratesLegacyInTreeRepo(t *testing.T) {
+func TestCheckpointKeepsAgentGitOnceWeKnoraRepoExists(t *testing.T) {
 	requireGit(t)
 	workspace, gitDir, env := splitGitDirs(t)
 
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "keep.txt"), []byte("v1"), 0o644))
+	runWorkspaceGitScript(t, env, checkpointScript(workspace, gitDir, "msg-1"))
+
 	runGitAt(t, env, workspace, "init", "-q")
-	runGitAt(t, env, workspace, "config", "user.email", "agent@weknora.local")
-	runGitAt(t, env, workspace, "config", "user.name", "WeKnora Agent")
-	require.NoError(t, os.WriteFile(filepath.Join(workspace, "keep.txt"), []byte("legacy"), 0o644))
+	runGitAt(t, env, workspace, "config", "user.email", "dev@example.com")
+	runGitAt(t, env, workspace, "config", "user.name", "Dev")
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "app.txt"), []byte("mine"), 0o644))
 	runGitAt(t, env, workspace, "add", "-A")
-	runGitAt(t, env, workspace, "commit", "-q", "-m", "legacy")
-	oldSHA := strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD"))
+	runGitAt(t, env, workspace, "commit", "-q", "-m", "agent")
+	agentHEAD := strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD"))
 
 	runWorkspaceGitScript(t, env, checkpointScript(workspace, gitDir, "msg-2"))
 
-	_, err := os.Stat(filepath.Join(workspace, ".git"))
-	require.True(t, os.IsNotExist(err), "legacy .git must move out of the work tree")
+	require.DirExists(t, filepath.Join(workspace, ".git"))
+	gotAgent := strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD"))
+	require.Equal(t, agentHEAD, gotAgent, "WeKnora must not delete or rewrite the agent's work-tree git")
 	require.FileExists(t, filepath.Join(gitDir, "HEAD"))
-	got := strings.TrimSpace(runGitSplit(t, env, workspace, gitDir, "rev-parse", "HEAD"))
-	require.NotEqual(t, oldSHA, got, "migrated repo should still accept a new checkpoint commit")
-	cat := runGitSplit(t, env, workspace, gitDir, "cat-file", "-t", oldSHA)
-	require.Equal(t, "commit", strings.TrimSpace(cat), "pre-migration commits must remain reachable")
+	ls := runGitSplit(t, env, workspace, gitDir, "ls-files")
+	require.NotContains(t, ls, ".git/", "checkpoint must not ingest the agent's .git as tracked files")
 }
 
 func TestResetPrunesLaterCommitsFromExternalGitDir(t *testing.T) {
@@ -140,35 +142,6 @@ func TestCheckpointSurvivesWipedWorkTree(t *testing.T) {
 	require.Equal(t, "commit", strings.TrimSpace(
 		runGitSplit(t, env, workspace, gitDir, "cat-file", "-t", first),
 	), "wiping /workspace must not drop earlier checkpoint objects")
-}
-
-func TestResetMigratesLegacyInTreeRepoThenPrunes(t *testing.T) {
-	requireGit(t)
-	workspace, gitDir, env := splitGitDirs(t)
-
-	runGitAt(t, env, workspace, "init", "-q")
-	runGitAt(t, env, workspace, "config", "user.email", "agent@weknora.local")
-	runGitAt(t, env, workspace, "config", "user.name", "WeKnora Agent")
-	require.NoError(t, os.WriteFile(filepath.Join(workspace, "keep.txt"), []byte("early"), 0o644))
-	runGitAt(t, env, workspace, "add", "-A")
-	runGitAt(t, env, workspace, "commit", "-q", "-m", "early")
-	early := strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD"))
-	if !gitSHAPattern.MatchString(early) {
-		t.Skip("host git is not using SHA-1 object names")
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(workspace, "secret.txt"), []byte("later-secret"), 0o644))
-	runGitAt(t, env, workspace, "add", "-A")
-	runGitAt(t, env, workspace, "commit", "-q", "-m", "later")
-
-	script, err := workspaceResetScript(workspace, gitDir, early)
-	require.NoError(t, err)
-	runWorkspaceGitScript(t, env, script)
-
-	_, err = os.Stat(filepath.Join(workspace, ".git"))
-	require.True(t, os.IsNotExist(err), "fork/rewind of a pre-migration sandbox must move .git out")
-	require.FileExists(t, filepath.Join(gitDir, "HEAD"))
-	_, err = os.Stat(filepath.Join(workspace, "secret.txt"))
-	require.True(t, os.IsNotExist(err))
 }
 
 func assertWorkspaceGitLayout(t *testing.T, script string) {

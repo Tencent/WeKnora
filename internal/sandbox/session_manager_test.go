@@ -624,6 +624,27 @@ func TestHasActiveTurnReportsLeaseState(t *testing.T) {
 	require.True(t, busy)
 }
 
+func TestTryLockRewindIsExclusive(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          newFakeRemoteClient(SandboxTypeCube),
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	unlock, err := mgr.TryLockRewind(ctx, "sess-1")
+	require.NoError(t, err)
+	_, err = mgr.TryLockRewind(ctx, "sess-1")
+	require.ErrorIs(t, err, ErrSessionRewindLocked)
+	unlock()
+}
+
 func TestHasActiveTurnWithoutLeaseStoreIsNotBusy(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
 	store := leaseFreeBindingStore{SessionSandboxBindingStore: NewMemorySessionSandboxBindingStore()}

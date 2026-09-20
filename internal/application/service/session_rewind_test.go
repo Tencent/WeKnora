@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +27,9 @@ type fakeRewindSandboxPort struct {
 	busyAfterCalls     int
 	hasActiveTurnCalls int
 	runner             *fakeShellRunner
+	execBlock          func()
+	rewindMu           sync.Mutex
+	rewindHeld         bool
 }
 
 func newFakeRewindPort() *fakeRewindSandboxPort {
@@ -52,10 +57,27 @@ func (f *fakeRewindSandboxPort) HasActiveTurn(context.Context, string) (bool, er
 	return f.activeTurn, nil
 }
 
+func (f *fakeRewindSandboxPort) TryLockRewind(context.Context, string) (func(), error) {
+	f.rewindMu.Lock()
+	defer f.rewindMu.Unlock()
+	if f.rewindHeld {
+		return nil, ErrRewindSourceBusy
+	}
+	f.rewindHeld = true
+	return func() {
+		f.rewindMu.Lock()
+		f.rewindHeld = false
+		f.rewindMu.Unlock()
+	}, nil
+}
+
 func (f *fakeRewindSandboxPort) ExecShellCommand(
 	ctx context.Context, sessionID, command, workDir string,
 	timeout time.Duration, env map[string]string,
 ) (*sandbox.ExecuteResult, error) {
+	if f.execBlock != nil {
+		f.execBlock()
+	}
 	if f.runner == nil {
 		return &sandbox.ExecuteResult{ExitCode: 0}, nil
 	}
@@ -534,6 +556,91 @@ func TestRewindUnopenedForkBootstrapUpdateFailureDoesNotDeleteMessages(t *testin
 	require.Equal(t, []string{"u-1", "a-1", "u-2", "a-2"}, messageIDs(msgs.messages))
 	require.Empty(t, port.runner.calls)
 	require.Equal(t, rewindSHA2, sessions.source.ForkBootstrap.CommitSHA)
+}
+
+func TestRewindUnopenedForkRejectsInvalidCheckpointSHA(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", "not-a-git-object-name", 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	svc, sessions, msgs, port := newUnopenedForkRewindFixture(
+		t, append(turn1, later...), pendingForkBootstrap(rewindSHA2),
+	)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.Contains(t, err.Error(), "invalid")
+	require.Equal(t, 0, msgs.deleteFromCalls)
+	require.Equal(t, []string{"u-1", "a-1", "u-2", "a-2"}, messageIDs(msgs.messages))
+	require.Empty(t, port.runner.calls)
+	require.Equal(t, rewindSHA2, sessions.source.ForkBootstrap.CommitSHA)
+	require.Nil(t, sessions.updatedBootstrap)
+}
+
+func TestRewindConcurrentSecondIsBusy(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	port := newFakeRewindPort()
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	var blocked atomic.Int32
+	port.execBlock = func() {
+		if blocked.Add(1) == 1 {
+			close(started)
+			<-unblock
+		}
+	}
+	svc, msgs := newRewindFixture(t, port, append(turn1, later...))
+
+	done := make(chan struct{})
+	var firstErr error
+	go func() {
+		defer close(done)
+		_, firstErr = svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+	}()
+	<-started
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "a-1")
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+
+	close(unblock)
+	<-done
+	require.NoError(t, firstErr)
+	require.Equal(t, 1, msgs.deleteFromCalls)
+}
+
+func TestRewindLockIsSharedAcrossServiceInstances(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	history := append(turn1, later...)
+	port := newFakeRewindPort()
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	var blocked atomic.Int32
+	port.execBlock = func() {
+		if blocked.Add(1) == 1 {
+			close(started)
+			<-unblock
+		}
+	}
+	svc1, _ := newRewindFixture(t, port, history)
+	svc2, msgs2 := newRewindFixture(t, port, append([]*types.Message(nil), history...))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = svc1.Rewind(context.Background(), 1, "u1", "src", "u-2")
+	}()
+	<-started
+
+	got, err := svc2.Rewind(context.Background(), 1, "u1", "src", "a-1")
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs2.deleteFromCalls)
+
+	close(unblock)
+	<-done
 }
 
 func TestRewindUnopenedForkBootstrapClearFailureDoesNotDeleteMessages(t *testing.T) {

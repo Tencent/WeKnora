@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -80,6 +81,7 @@ type RewindResult struct {
 type SessionRewindSandboxPort interface {
 	BoundSandboxID(ctx context.Context, sessionID string) (string, bool)
 	HasActiveTurn(ctx context.Context, sessionID string) (bool, error)
+	TryLockRewind(ctx context.Context, sessionID string) (unlock func(), err error)
 	SandboxShellRunner
 }
 
@@ -115,6 +117,7 @@ type SessionRewindService struct {
 	knowledge   rewindKnowledgeCleaner
 	suggestions rewindSuggestionCleaner
 	snapshots   ForkSnapshotDeleter
+	inflight    sync.Map
 }
 
 // NewSessionRewindService wires the service. A nil sandbox port skips the
@@ -215,6 +218,11 @@ func (s *SessionRewindService) Rewind(
 	// Once we are past the cheap busy reject, finish reset+truncate even if
 	// the HTTP request is gone.
 	persistCtx := context.WithoutCancel(ctx)
+	unlock, err := s.lockRewind(persistCtx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	workspaceReset, reason, resetErr := s.resetWorkspaceIfPossible(persistCtx, sessionID, history)
 	if resetErr != nil {
@@ -284,6 +292,30 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 	return true, "", nil
 }
 
+func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string) (func(), error) {
+	if _, loaded := s.inflight.LoadOrStore(sessionID, struct{}{}); loaded {
+		return nil, ErrRewindSourceBusy
+	}
+	unlockPort := func() {}
+	if s.sandbox != nil {
+		unlock, err := s.sandbox.TryLockRewind(ctx, sessionID)
+		if err != nil {
+			s.inflight.Delete(sessionID)
+			if errors.Is(err, sandbox.ErrSessionRewindLocked) || errors.Is(err, ErrRewindSourceBusy) {
+				return nil, ErrRewindSourceBusy
+			}
+			return nil, fmt.Errorf("session rewind: lock session: %w", err)
+		}
+		if unlock != nil {
+			unlockPort = unlock
+		}
+	}
+	return func() {
+		unlockPort()
+		s.inflight.Delete(sessionID)
+	}, nil
+}
+
 func (s *SessionRewindService) rejectIfBusy(ctx context.Context, sessionID string) error {
 	if s.sandbox == nil {
 		return nil
@@ -316,6 +348,9 @@ func (s *SessionRewindService) syncPendingForkBootstrap(
 		return s.abandonPendingForkBootstrap(ctx, session, &pending)
 	}
 	sha := strings.TrimSpace(checkpoint.CommitSHA)
+	if !gitSHAPattern.MatchString(sha) {
+		return fmt.Errorf("session rewind: invalid checkpoint sha %q", truncateForLog(sha))
+	}
 	if sha == strings.TrimSpace(pending.CommitSHA) {
 		return nil
 	}
