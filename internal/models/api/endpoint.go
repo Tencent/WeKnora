@@ -143,11 +143,14 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 // marshalling, SSRF, transport, non-2xx, decoding — returns an error, so a
 // caller cannot mistake an empty result for a successful empty answer.
 func (e Endpoint) PostJSON(ctx context.Context, url string, body, out any) error {
-	req, data, err := e.NewRequest(ctx, url, body, false)
+	req, _, err := e.NewRequest(ctx, url, body, false)
 	if err != nil {
 		return err
 	}
-	LogRequest(ctx, url, e.Model, data, false)
+	// No LogRequest here: the chat protocols log their own bodies because a
+	// prompt is what an operator debugs, while a rerank body is a query plus
+	// every candidate chunk. The rerank layer logs a truncated line at Debug
+	// instead, so this would have duplicated it at Info.
 	resp, err := e.Do(req)
 	if err != nil {
 		return err

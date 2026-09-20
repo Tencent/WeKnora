@@ -72,6 +72,12 @@ func init() {
 			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				// Any OpenAI-compatible endpoint an operator points here is most
+				// often a vLLM or SGLang server, which is where
+				// truncate_prompt_tokens comes from.
+				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),

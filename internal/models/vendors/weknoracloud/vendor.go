@@ -92,6 +92,10 @@ func init() {
 		Compat: catalog.VendorCompat{
 			Rerank: catalog.RerankCompat{
 				Path: catalog.Ptr("/api/v1/rerank"),
+				// The only rerank vendor that has ever had a client deadline
+				// here. Without it a hung endpoint holds the retrieval stage
+				// for as long as the caller's context allows.
+				RequestTimeout: catalog.Ptr(60),
 			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				SupportsMultiContent:  catalog.Ptr(false),

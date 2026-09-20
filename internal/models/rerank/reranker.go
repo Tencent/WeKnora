@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
@@ -134,11 +135,6 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 	return wrapRerankerLangfuse(r, nil)
 }
 
-// customHeaderSetter 表示支持注入自定义 HTTP header 的 reranker 实现。
-type customHeaderSetter interface {
-	SetCustomHeaders(map[string]string)
-}
-
 // newReranker resolves the catalog and returns the protocol client for the
 // configured model, wrapped in the shared batching and score-scaling layer.
 // It mirrors chat.NewRemoteChat: the vendor's facts decide the protocol, the
@@ -163,6 +159,9 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 
 	vendor := resolved.Vendor
 	creds := catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret}
+	if creds.APIKey == "" {
+		creds.APIKey = vendor.DefaultAPIKey
+	}
 	// A signing vendor with no identity pair would otherwise send unsigned
 	// requests and fail at the far end, which is a worse error than this one.
 	if vendor.Auth == catalog.AuthSigned {
@@ -173,13 +172,26 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 			return nil, fmt.Errorf("%s rerank: AppSecret is required", vendor.Name)
 		}
 	}
+	// Vendor headers first so a user header cannot silently replace a vendor
+	// beta flag, matching chat.NewRemoteChat.
+	headers := make(map[string]string, len(vendor.Headers)+len(config.CustomHeaders))
+	for k, v := range vendor.Headers {
+		headers[k] = v
+	}
+	for k, v := range config.CustomHeaders {
+		headers[k] = v
+	}
 	endpoint := api.Endpoint{
 		BaseURL: resolved.BaseURL,
 		Model:   resolved.RemoteModel,
 		ModelID: config.ModelID,
 		Auth:    vendor.AuthFunc(vendor.API, creds),
-		Headers: config.CustomHeaders,
-		Client:  newRerankHTTPClient(0),
+		Headers: headers,
+		// Most vendors have always run without a client deadline here and let
+		// the caller's context govern; the ones that declare a timeout get it.
+		Client: newRerankHTTPClient(
+			time.Duration(resolved.Rerank.RequestTimeout) * time.Second,
+		),
 	}
 	if vendor.Endpoint != nil {
 		if url, query := vendor.Endpoint(catalog.EndpointRequest{

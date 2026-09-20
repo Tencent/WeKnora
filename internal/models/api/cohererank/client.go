@@ -53,11 +53,15 @@ func (c *Client) url() string {
 }
 
 type request struct {
-	Model           string   `json:"model"`
-	Query           string   `json:"query"`
-	Documents       []string `json:"documents"`
-	TopN            int      `json:"top_n,omitempty"`
-	ReturnDocuments *bool    `json:"return_documents,omitempty"`
+	Model     string   `json:"model"`
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
+	TopN      int      `json:"top_n,omitempty"`
+	// TruncatePromptTokens is a vLLM extension, not part of any vendor's
+	// documented schema. It is sent only when the operator opted in, because
+	// a gateway that does not implement it rejects the unknown field.
+	TruncatePromptTokens int   `json:"truncate_prompt_tokens,omitempty"`
+	ReturnDocuments      *bool `json:"return_documents,omitempty"`
 }
 
 type response struct {
@@ -100,6 +104,9 @@ func (c *Client) BuildRequestBody(query string, documents []string) (map[string]
 		Model:     c.cfg.Endpoint.Model,
 		Query:     query,
 		Documents: documents,
+	}
+	if c.cfg.Settings.AcceptsTruncatePromptTokens {
+		body.TruncatePromptTokens = c.cfg.Settings.TruncatePromptTokens
 	}
 	if c.cfg.Settings.SendTopN {
 		body.TopN = len(documents)

@@ -82,6 +82,11 @@ func init() {
 			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				// GPUStack's built-in backends are vLLM, SGLang, Ascend MindIE and
+				// VoxBox, so the vLLM rerank extension reaches the model.
+				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),

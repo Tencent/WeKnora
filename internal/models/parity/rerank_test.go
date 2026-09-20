@@ -183,7 +183,10 @@ func TestNvidiaRerankScoresAreComparable(t *testing.T) {
 		assert.GreaterOrEqual(t, item.RelevanceScore, 0.0)
 		assert.LessOrEqual(t, item.RelevanceScore, 1.0)
 	}
-	assert.Less(t, got[0].RelevanceScore, got[1].RelevanceScore, "order must survive the conversion")
+	// Results come back ranked, so the logit of 4.0 leads and the negative
+	// one follows: the conversion is monotonic and the ranking is preserved.
+	assert.Equal(t, 1, got[0].Index)
+	assert.Greater(t, got[0].RelevanceScore, got[1].RelevanceScore)
 }
 
 // TestSignedRerankVendorRequiresItsIdentityPair keeps the pre-catalog
@@ -202,4 +205,96 @@ func TestSignedRerankVendorRequiresItsIdentityPair(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "AppSecret")
+}
+
+// TestTruncatePromptTokensOnlyReachesVLLMClassVendors pins the gate on the
+// vLLM extension restored from the pre-catalog client. It is opt-in per row,
+// but the row can only opt into it on a runtime that implements it: no
+// managed vendor documents the field, and sending it to one is how an
+// undocumented parameter ends up on every request.
+func TestTruncatePromptTokensOnlyReachesVLLMClassVendors(t *testing.T) {
+	optIn := map[string]string{catalog.ExtraTruncatePromptTokens: "512"}
+
+	for _, id := range []string{"generic", "gpustack"} {
+		t.Run(id+" accepts it", func(t *testing.T) {
+			resolved, err := catalog.Resolve(catalog.Ref{
+				Provider: id, Model: "m", ModelType: types.ModelTypeRerank,
+				BaseURL: "http://127.0.0.1:9/v1", Extra: optIn,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 512, resolved.Rerank.TruncatePromptTokens)
+		})
+	}
+
+	for _, id := range []string{"jina", "zhipu", "siliconflow", "qianfan", "weknoracloud", "aliyun", "nvidia"} {
+		t.Run(id+" rejects it", func(t *testing.T) {
+			_, err := catalog.Resolve(catalog.Ref{
+				Provider: id, Model: "m", ModelType: types.ModelTypeRerank, Extra: optIn,
+			})
+			require.Error(t, err, "a managed vendor must not silently accept a vLLM extension")
+			assert.Contains(t, err.Error(), "vLLM extension")
+		})
+	}
+}
+
+func TestTruncatePromptTokensRejectsAnInvalidValue(t *testing.T) {
+	for _, raw := range []string{"0", "-1", "abc"} {
+		_, err := catalog.Resolve(catalog.Ref{
+			Provider: "generic", Model: "m", ModelType: types.ModelTypeRerank,
+			BaseURL: "http://127.0.0.1:9/v1",
+			Extra:   map[string]string{catalog.ExtraTruncatePromptTokens: raw},
+		})
+		require.Error(t, err, "value %q", raw)
+	}
+}
+
+// TestRerankCeilingsAreTheDocumentedOnes pins the numbers the shared batching
+// layer enforces. They used to live inside each client, where a dedicated
+// test watched them; now they are declarations, so they need their own guard —
+// TestEveryRerankVendorResolvesToAKnownProtocol only checks they are sane.
+func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
+	for id, want := range map[string]catalog.RerankSettings{
+		// docs.bigmodel.cn: 最多 128 条，query 与单条文档各 4096 字符
+		"zhipu": {MaxDocuments: 128, MaxQueryChars: 4096, MaxDocumentChars: 4096},
+		// cloud.tencent.com/document/product/1772: RunRerank 60 docs,
+		// Query + Docs together 2000 characters, one request at a time.
+		"lkeap": {MaxDocuments: 60, MaxRequestChars: 2000, MaxConcurrency: 1},
+		// Ark Knowledge Service rerank: 50 per request.
+		"volcengine": {MaxDocuments: 50, MaxConcurrency: 4},
+		// NIM reranking: passages is capped at 512 items.
+		"nvidia": {MaxDocuments: 512},
+	} {
+		t.Run(id, func(t *testing.T) {
+			resolved, err := catalog.Resolve(catalog.Ref{
+				Provider: id, Model: "m", ModelType: types.ModelTypeRerank,
+			})
+			require.NoError(t, err)
+			got := resolved.Rerank
+			assert.Equal(t, want.MaxDocuments, got.MaxDocuments, "max documents")
+			assert.Equal(t, want.MaxQueryChars, got.MaxQueryChars, "max query characters")
+			assert.Equal(t, want.MaxDocumentChars, got.MaxDocumentChars, "max document characters")
+			assert.Equal(t, want.MaxRequestChars, got.MaxRequestChars, "max request characters")
+			assert.Equal(t, want.MaxConcurrency, got.MaxConcurrency, "max concurrency")
+		})
+	}
+}
+
+// TestWeKnoraCloudRerankKeepsItsDeadline pins the one rerank vendor that has
+// ever had a client-level timeout. Without it a hung endpoint holds the
+// retrieval stage open for as long as the caller's context allows.
+func TestWeKnoraCloudRerankKeepsItsDeadline(t *testing.T) {
+	resolved, err := catalog.Resolve(catalog.Ref{
+		Provider: "weknoracloud", Model: "rerank", ModelType: types.ModelTypeRerank,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 60, resolved.Rerank.RequestTimeout)
+
+	// Everyone else has always run without one and relies on the caller.
+	for _, id := range []string{"zhipu", "jina", "siliconflow", "aliyun", "nvidia", "generic"} {
+		other, err := catalog.Resolve(catalog.Ref{
+			Provider: id, Model: "m", ModelType: types.ModelTypeRerank,
+		})
+		require.NoError(t, err)
+		assert.Zero(t, other.Rerank.RequestTimeout, "%s did not have a client deadline before", id)
+	}
 }

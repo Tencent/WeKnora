@@ -16,7 +16,10 @@ type RerankCompat struct {
 	MaxDocumentChars *int            `json:"max_document_chars,omitempty"`
 	MaxRequestChars  *int            `json:"max_request_chars,omitempty"`
 	MaxConcurrency   *int            `json:"max_concurrency,omitempty"`
-	ExtraBody        map[string]any  `json:"extra_body,omitempty"`
+	RequestTimeout   *int            `json:"request_timeout_seconds,omitempty"`
+	// AcceptsTruncatePromptTokens marks a vLLM-class runtime.
+	AcceptsTruncatePromptTokens *bool          `json:"accepts_truncate_prompt_tokens,omitempty"`
+	ExtraBody                   map[string]any `json:"extra_body,omitempty"`
 }
 
 // RerankSettings is the resolved (fully defaulted) form.
@@ -36,7 +39,9 @@ type RerankSettings struct {
 	// Truncate is the vendor's server-side truncation setting for
 	// over-long input ("END" on NIM). Empty sends nothing.
 	Truncate string
-	// Limits carry the documented per-request ceilings.
+	// Limits carry the documented per-request ceilings. MaxQueryChars is
+	// checked on its own rather than through BatchLimits: the query is not an
+	// item to be split, so an over-long one cannot be made to fit by batching.
 	MaxDocuments     int
 	MaxQueryChars    int
 	MaxDocumentChars int
@@ -44,7 +49,22 @@ type RerankSettings struct {
 	// MaxConcurrency bounds in-flight batches when the input is split. 0
 	// means the caller's default.
 	MaxConcurrency int
-	ExtraBody      map[string]any
+	// RequestTimeout caps one request, in seconds. 0 leaves the HTTP client
+	// without its own deadline and lets the caller's context govern, which is
+	// what every vendor but WeKnora Cloud has always done here.
+	RequestTimeout int
+	// AcceptsTruncatePromptTokens reports that this vendor is a vLLM-class
+	// runtime, which is the only kind that implements the
+	// `truncate_prompt_tokens` extension. It is not part of the Cohere shape
+	// and appears in no managed vendor's schema, so it must never be sent to
+	// one: that is how an undocumented field ends up on every request.
+	AcceptsTruncatePromptTokens bool
+	// TruncatePromptTokens is the budget the operator opted into on this row,
+	// honoured only where AcceptsTruncatePromptTokens is set. It is a row
+	// setting rather than a vendor fact because one runtime serves models
+	// with different context windows. Zero sends nothing.
+	TruncatePromptTokens int
+	ExtraBody            map[string]any
 }
 
 // BatchLimits renders the documented ceilings for api.SplitBatches.

@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
@@ -21,6 +22,10 @@ const (
 	// ExtraThinkingControl is the legacy thinking encoding selector written
 	// by older UIs: none | enable_thinking | thinking_type | chat_template_kwargs.
 	ExtraThinkingControl = "thinking_control"
+	// ExtraTruncatePromptTokens is the vLLM-only server-side truncation
+	// budget for rerank, opt-in per row. It is never sent unless the operator
+	// set it: vendors that do not implement it reject the unknown field.
+	ExtraTruncatePromptTokens = "truncate_prompt_tokens"
 )
 
 // Ref identifies one configured model.
@@ -373,6 +378,20 @@ func resolveRerank(
 
 	settings := DefaultRerank()
 	apply(&settings, &vendor.Compat.Rerank)
+	if raw := strings.TrimSpace(ref.Extra[ExtraTruncatePromptTokens]); raw != "" {
+		if !settings.AcceptsTruncatePromptTokens {
+			return nil, fmt.Errorf(
+				"catalog: %s is a vLLM extension and %s does not implement it; "+
+					"remove it from extra_config (it is accepted by self-hosted runtimes only)",
+				ExtraTruncatePromptTokens, vendor.ID,
+			)
+		}
+		budget, err := strconv.Atoi(raw)
+		if err != nil || budget <= 0 {
+			return nil, fmt.Errorf("catalog: invalid %s in extra_config: %q", ExtraTruncatePromptTokens, raw)
+		}
+		settings.TruncatePromptTokens = budget
+	}
 	if len(spec.Compat) > 0 {
 		overlay := &RerankCompat{}
 		if err := decodeCompat(spec.Compat, overlay); err != nil {

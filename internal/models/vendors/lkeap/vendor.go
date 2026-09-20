@@ -136,6 +136,11 @@ func init() {
 				// together at most 2000 characters.
 				MaxDocuments:    catalog.Ptr(60),
 				MaxRequestChars: catalog.Ptr(2000),
+				// Batches went out one at a time before the shared batching
+				// layer existed. A 2000-character budget splits a large
+				// candidate set into many requests, so the default fan-out of
+				// four would be a new burst against RunRerank.
+				MaxConcurrency: catalog.Ptr(1),
 			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),

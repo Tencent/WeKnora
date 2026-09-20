@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -40,14 +41,26 @@ func (r *protocolReranker) Rerank(
 	}
 	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, r.endpoint, query, documents))
 
+	// The query travels in every request, so an over-long one cannot be made
+	// to fit by splitting the documents. SplitBatches charges it to each
+	// batch but only against a whole-request budget; a vendor that caps the
+	// query on its own is checked here.
+	if limit := r.settings.MaxQueryChars; limit > 0 {
+		if length := utf8.RuneCountInString(query); length > limit {
+			return nil, fmt.Errorf(
+				"%s rerank: query is %d characters; the limit is %d",
+				r.modelName, length, limit,
+			)
+		}
+	}
+
 	batches, err := api.SplitBatches(documents, utf8.RuneCountInString(query), r.settings.BatchLimits())
 	if err != nil {
 		return nil, fmt.Errorf("%s rerank: %w", r.modelName, err)
 	}
 
-	// Scores are only comparable within one request: a vendor scores each
-	// batch against the same query independently, so concatenating them is
-	// the same thing the pre-catalog batching clients did.
+	// Each batch is scored against the same query independently, so the
+	// per-batch results are comparable and are merged and re-ranked below.
 	scored := make([][]api.RerankResult, len(batches))
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(r.concurrency())
@@ -88,6 +101,14 @@ func (r *protocolReranker) Rerank(
 			})
 		}
 	}
+	// A single request comes back ranked, and the retrieval pipeline reads
+	// the slice as ranked: it takes results[0] as the best candidate for its
+	// threshold fallback. Concatenating per-batch results would make that the
+	// best of the first batch only, so the merged set is ordered once here.
+	// Ties keep the lower index, which keeps the order stable.
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].RelevanceScore > results[j].RelevanceScore
+	})
 	return results, nil
 }
 
@@ -111,5 +132,11 @@ func normalizeScore(score float64, scale api.ScoreScale) float64 {
 	if scale != api.ScoreLogit {
 		return score
 	}
-	return 1 / (1 + math.Exp(-score))
+	// Two branches so neither exponential overflows: this is the form the
+	// pre-catalog NVIDIA client used, kept verbatim.
+	if score >= 0 {
+		return 1 / (1 + math.Exp(-score))
+	}
+	exp := math.Exp(score)
+	return exp / (1 + exp)
 }
