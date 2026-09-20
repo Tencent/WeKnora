@@ -247,12 +247,23 @@ func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
 	return opts, nil
 }
 
+// redactedDebugConfig masks the credentials inside an extra_config before it
+// is echoed in the debug preview. The catalog's own Secret declaration is the
+// source of truth — the same one the read path uses — so a new vendor field
+// is covered by declaring it, whatever it is called. The name heuristic stays
+// as a net under it, for keys no vendor declares (deployment overlays,
+// hand-written rows).
 func redactedDebugConfig(config map[string]string) map[string]string {
 	if len(config) == 0 {
 		return nil
 	}
+	declared := dto.AllSecretExtraConfigKeys()
 	out := make(map[string]string, len(config))
 	for key, value := range config {
+		if declared[key] {
+			out[key] = "[REDACTED]"
+			continue
+		}
 		lower := strings.ToLower(key)
 		if strings.Contains(lower, "secret") ||
 			strings.Contains(lower, "token") ||
@@ -666,9 +677,12 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	// secret extra fields (dto.NewModelResponse), so a UI round-trip carries
 	// no value for them — keep the stored secret unless the caller sent a new
 	// one. This also covers the request that omits extra_config entirely.
+	// Both vendor identities are passed: moving the row to another vendor
+	// must drop the old credential, not merge it back in.
 	newParams.ExtraConfig = dto.PreserveStoredSecretExtras(
 		model.Parameters.ExtraConfig, newParams.ExtraConfig,
-		model.Parameters.Provider, model.Parameters.BaseURL,
+		dto.VendorRef{Provider: model.Parameters.Provider, BaseURL: model.Parameters.BaseURL},
+		dto.VendorRef{Provider: newParams.Provider, BaseURL: newParams.BaseURL},
 	)
 	model.Parameters = newParams
 

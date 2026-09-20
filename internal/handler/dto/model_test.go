@@ -202,29 +202,92 @@ func TestModelResponse_RedactsSecretExtraConfigForLegacyRowWithoutProvider(t *te
 func TestPreserveStoredSecretExtras(t *testing.T) {
 	provider := registerSecretExtraVendor(t)
 	stored := map[string]string{"secret_key": "cam-secret-stored", "region": "ap-guangzhou"}
+	sameVendor := VendorRef{Provider: provider}
 
 	t.Run("incoming omits the key", func(t *testing.T) {
-		got := PreserveStoredSecretExtras(stored, map[string]string{"region": "ap-beijing"}, provider, "")
+		got := PreserveStoredSecretExtras(
+			stored, map[string]string{"region": "ap-beijing"}, sameVendor, sameVendor)
 		assert.Equal(t, "cam-secret-stored", got["secret_key"])
 		assert.Equal(t, "ap-beijing", got["region"], "non-secret edits still apply")
 	})
 	t.Run("incoming carries an empty or masked value", func(t *testing.T) {
 		for _, masked := range []string{"", "   ", "******", "••••"} {
-			got := PreserveStoredSecretExtras(stored, map[string]string{"secret_key": masked}, provider, "")
+			got := PreserveStoredSecretExtras(
+				stored, map[string]string{"secret_key": masked}, sameVendor, sameVendor)
 			assert.Equal(t, "cam-secret-stored", got["secret_key"], "masked value %q means unchanged", masked)
 		}
 	})
 	t.Run("incoming carries a new value", func(t *testing.T) {
-		got := PreserveStoredSecretExtras(stored, map[string]string{"secret_key": "cam-secret-rotated"}, provider, "")
+		got := PreserveStoredSecretExtras(
+			stored, map[string]string{"secret_key": "cam-secret-rotated"}, sameVendor, sameVendor)
 		assert.Equal(t, "cam-secret-rotated", got["secret_key"])
 	})
 	t.Run("nil incoming keeps the whole stored map", func(t *testing.T) {
-		assert.Equal(t, stored, PreserveStoredSecretExtras(stored, nil, provider, ""))
+		assert.Equal(t, stored, PreserveStoredSecretExtras(stored, nil, sameVendor, sameVendor))
 	})
-	t.Run("unknown provider passes the map through", func(t *testing.T) {
+	t.Run("unknown stored provider passes the map through", func(t *testing.T) {
 		in := map[string]string{"secret_key": ""}
-		assert.Equal(t, in, PreserveStoredSecretExtras(stored, in, "no-such-vendor", ""))
+		assert.Equal(t, in,
+			PreserveStoredSecretExtras(stored, in, VendorRef{Provider: "no-such-vendor"}, sameVendor))
 	})
+	t.Run("a request naming no vendor is not a vendor change", func(t *testing.T) {
+		got := PreserveStoredSecretExtras(stored, map[string]string{}, sameVendor, VendorRef{})
+		assert.Equal(t, "cam-secret-stored", got["secret_key"])
+	})
+
+	// Switching the row to another vendor leaves the credential behind: it
+	// authenticates the account of the integration being replaced.
+	t.Run("vendor change drops the stored secret", func(t *testing.T) {
+		other := VendorRef{Provider: "openai"}
+		got := PreserveStoredSecretExtras(stored, map[string]string{"api": "openai_completions"}, sameVendor, other)
+		assert.NotContains(t, got, "secret_key")
+		assert.Equal(t, "openai_completions", got["api"])
+	})
+	t.Run("vendor change drops a masked secret instead of refilling it", func(t *testing.T) {
+		other := VendorRef{Provider: "openai"}
+		got := PreserveStoredSecretExtras(stored, map[string]string{"secret_key": "****"}, sameVendor, other)
+		assert.NotContains(t, got, "secret_key")
+	})
+	t.Run("vendor change keeps a value the user typed", func(t *testing.T) {
+		other := VendorRef{Provider: "openai"}
+		got := PreserveStoredSecretExtras(stored, map[string]string{"secret_key": "typed-now"}, sameVendor, other)
+		assert.Equal(t, "typed-now", got["secret_key"])
+	})
+	t.Run("vendor change with no extra_config at all", func(t *testing.T) {
+		got := PreserveStoredSecretExtras(stored, nil, sameVendor, VendorRef{Provider: "openai"})
+		assert.NotContains(t, got, "secret_key")
+		assert.Equal(t, "ap-guangzhou", got["region"], "non-secret settings are not credentials")
+		assert.Equal(t, "cam-secret-stored", stored["secret_key"], "the stored map is not mutated")
+	})
+	t.Run("a legacy row is matched by endpoint, not treated as a switch", func(t *testing.T) {
+		legacy := VendorRef{BaseURL: "https://secret-extra-vendor.example.com/v1"}
+		got := PreserveStoredSecretExtras(stored, map[string]string{}, legacy, legacy)
+		assert.Equal(t, "cam-secret-stored", got["secret_key"])
+	})
+}
+
+// Redaction may not depend on the row's provider being the one that declared
+// the key: a hand-edited or emptied provider would otherwise echo a stored
+// credential in plaintext.
+func TestModelResponse_RedactsSecretExtraDeclaredByAnotherVendor(t *testing.T) {
+	registerSecretExtraVendor(t)
+	for _, provider := range []string{"openai", ""} {
+		m := &types.Model{
+			ID:   "m-switched",
+			Type: types.ModelTypeRerank,
+			Parameters: types.ModelParameters{
+				Provider:    provider,
+				ExtraConfig: map[string]string{"secret_key": "cam-secret-do-not-leak", "region": "ap-beijing"},
+			},
+		}
+		resp := NewModelResponse(adminContext(), m)
+		body, err := json.Marshal(resp)
+		require.NoError(t, err)
+		assert.NotContains(t, string(body), "cam-secret-do-not-leak", "provider %q", provider)
+		assert.Equal(t, "ap-beijing", resp.Parameters.ExtraConfig["region"])
+		assert.True(t, resp.Credentials["secret_key"].Configured,
+			"a withheld value is still reported as present")
+	}
 }
 
 func TestHasAllSecretExtras(t *testing.T) {
@@ -238,4 +301,40 @@ func TestHasAllSecretExtras(t *testing.T) {
 func TestModelResponse_NilSafe(t *testing.T) {
 	assert.Nil(t, NewModelResponse(adminContext(), nil))
 	assert.Equal(t, []*ModelResponse{}, NewModelResponses(adminContext(), nil))
+}
+
+func TestNewModelResponseStripsSpecFromNonAdmins(t *testing.T) {
+	// Spec pins the protocol and carries the compat overlay, whose
+	// extra_body is merged verbatim into every request. It is deployment
+	// configuration, like base_url and extra_config beside it, not part of
+	// the capability surface a viewer is shown.
+	spec := &types.ModelSpecOverride{
+		API:    "anthropic-messages",
+		Compat: map[string]any{"extra_body": map[string]any{"internal_route": "eu-gateway"}},
+	}
+	model := &types.Model{
+		ID: "m1", Name: "claude-sonnet-4-5", Type: types.ModelTypeKnowledgeQA,
+		Source: types.ModelSourceRemote,
+		Parameters: types.ModelParameters{
+			Provider: "anthropic", BaseURL: "https://gateway.internal/v1", Spec: spec,
+		},
+	}
+
+	admin := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	if got := NewModelResponse(admin, model).Parameters.Spec; got == nil {
+		t.Fatalf("an admin configures this; it must still be returned")
+	}
+
+	viewer := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleViewer)
+	params := NewModelResponse(viewer, model).Parameters
+	if params.Spec != nil {
+		t.Errorf("viewer should not see the protocol override, got %+v", params.Spec)
+	}
+	if params.BaseURL != "" || params.ExtraConfig != nil {
+		t.Errorf("the neighbouring fields should still be stripped")
+	}
+	// The stored model is shared; stripping must not mutate it.
+	if model.Parameters.Spec == nil {
+		t.Errorf("NewModelResponse must not clear the stored spec")
+	}
 }
