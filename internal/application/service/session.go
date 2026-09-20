@@ -980,38 +980,49 @@ func (s *sessionService) GenerateTitleAsync(
 // a skill-image change mid-turn cannot rebuild the VM between tool calls.
 // The first resolve of this turn may still pick up a stale mark from the
 // previous turn. The returned closer must be called.
+//
+// A rewind in progress is a hard failure: the agent must not start on a
+// workspace that git reset is about to rewrite.
 func (s *sessionService) holdSandboxTurn(
 	ctx context.Context, sessionID, configID string,
-) func() {
+) (func(), error) {
+	noop := func() {}
 	if strings.TrimSpace(sessionID) == "" {
-		return func() {}
+		return noop, nil
 	}
-	begin := func(mgr sandbox.Manager) sandbox.SessionTurnHolder {
+	begin := func(mgr sandbox.Manager) (sandbox.SessionTurnHolder, error) {
 		if mgr == nil {
-			return nil
+			return nil, nil
 		}
 		holder, ok := mgr.(sandbox.SessionTurnHolder)
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		if err := holder.BeginSessionTurn(ctx, sessionID); err != nil {
+			if stderrors.Is(err, sandbox.ErrSessionRewindLocked) {
+				return nil, err
+			}
 			logger.Warnf(ctx, "[sandbox] begin turn for session %s failed: %v", sessionID, err)
-			return nil
+			return nil, nil
 		}
-		return holder
+		return holder, nil
 	}
 
-	if holder := begin(s.sandboxMgr); holder != nil {
+	holder, err := begin(s.sandboxMgr)
+	if err != nil {
+		return noop, err
+	}
+	if holder != nil {
 		return func() {
 			if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
 				logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
 			}
-		}
+		}, nil
 	}
 
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	if s.sandboxResolver == nil || tenantID == 0 {
-		return func() {}
+		return noop, nil
 	}
 	mgr, err := resolveTenantSandboxForConfig(
 		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
@@ -1019,15 +1030,48 @@ func (s *sessionService) holdSandboxTurn(
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] resolve config %s to begin turn of session %s failed: %v",
 			configID, sessionID, err)
-		return func() {}
+		return noop, nil
 	}
-	holder := begin(mgr)
+	holder, err = begin(mgr)
+	if err != nil {
+		return noop, err
+	}
 	if holder == nil {
-		return func() {}
+		return noop, nil
 	}
 	return func() {
 		if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
 			logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
 		}
+	}, nil
+}
+
+// RejectSendIfRewinding fails when rewind currently holds sessionID, so
+// knowledge-chat (no sandbox turn lease) cannot persist a new turn on a
+// session that is about to delete those messages.
+func (s *sessionService) RejectSendIfRewinding(ctx context.Context, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
 	}
+	type rewindLockReader interface {
+		HasRewindLock(context.Context, string) (bool, error)
+	}
+	check := func(mgr sandbox.Manager) error {
+		if mgr == nil {
+			return nil
+		}
+		reader, ok := mgr.(rewindLockReader)
+		if !ok {
+			return nil
+		}
+		held, err := reader.HasRewindLock(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if held {
+			return sandbox.ErrSessionRewindLocked
+		}
+		return nil
+	}
+	return check(s.sandboxMgr)
 }

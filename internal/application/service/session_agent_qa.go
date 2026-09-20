@@ -170,7 +170,10 @@ func (s *sessionService) AgentQA(
 	// are running cannot rebuild the VM between tool calls. Staging below is
 	// the first resolve: if the previous turn left a stale mark, that is
 	// where the new image is picked up.
-	releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+	releaseTurn, err := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+	if err != nil {
+		return err
+	}
 	defer releaseTurn()
 
 	// Reconcile all durable session attachments into the session's remote

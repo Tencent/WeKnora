@@ -77,6 +77,9 @@ return 1
 const sessionTurnLeaseTTL = 30 * time.Minute
 
 var beginTurnScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[2]) == 1 then
+	return redis.error_reply('ERR_SESSION_REWIND_LOCKED')
+end
 local refs = redis.call('HINCRBY', KEYS[1], 'refs', 1)
 if refs == 1 then
 	redis.call('HSET', KEYS[1], 'rebuild', '1')
@@ -373,7 +376,10 @@ func (s *RedisSessionSandboxBindingStore) BeginTurn(
 	if ttlMS <= 0 {
 		ttlMS = (30 * time.Minute).Milliseconds()
 	}
-	if err := beginTurnScript.Run(ctx, s.client, []string{s.turnKey(key)}, ttlMS).Err(); err != nil {
+	if err := beginTurnScript.Run(ctx, s.client, []string{s.turnKey(key), s.rewindKey(key)}, ttlMS).Err(); err != nil {
+		if isRewindLockedRedisErr(err) {
+			return ErrSessionRewindLocked
+		}
 		return fmt.Errorf("begin sandbox turn lease: %w", err)
 	}
 	return nil
@@ -466,6 +472,25 @@ func (s *RedisSessionSandboxBindingStore) TryLockRewind(
 		defer cancel()
 		_, _ = redislock.Release(relCtx, s.client, s.rewindKey(key), token)
 	}, nil
+}
+
+// HasRewindLock reports whether rewind currently holds key.
+func (s *RedisSessionSandboxBindingStore) HasRewindLock(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (bool, error) {
+	if err := key.Validate(); err != nil {
+		return false, err
+	}
+	n, err := s.client.Exists(ctx, s.rewindKey(key)).Result()
+	if err != nil {
+		return false, fmt.Errorf("read session rewind lock: %w", err)
+	}
+	return n > 0, nil
+}
+
+func isRewindLockedRedisErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "ERR_SESSION_REWIND_LOCKED")
 }
 
 func (s *RedisSessionSandboxBindingStore) bindingKey(key SessionSandboxKey) string {

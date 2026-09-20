@@ -541,6 +541,9 @@ func (s *MemorySessionSandboxBindingStore) BeginTurn(
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, held := s.rewinds[key]; held {
+		return ErrSessionRewindLocked
+	}
 	lease := s.turns[key]
 	if lease == nil {
 		lease = &memoryTurnLease{}
@@ -600,6 +603,23 @@ func (s *MemorySessionSandboxBindingStore) TryLockRewind(
 		delete(s.rewinds, key)
 		s.mu.Unlock()
 	}, nil
+}
+
+// HasRewindLock reports whether rewind currently holds key.
+func (s *MemorySessionSandboxBindingStore) HasRewindLock(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (bool, error) {
+	if err := key.Validate(); err != nil {
+		return false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, held := s.rewinds[key]
+	return held, nil
 }
 
 // TurnState reports whether a chat turn is open and whether its first

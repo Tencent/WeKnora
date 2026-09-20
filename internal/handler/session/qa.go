@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -1073,6 +1074,24 @@ func (h *Handler) rejectIfOtherAgentRunLive(ctx context.Context, reqCtx *qaReque
 	return errors.NewConflictError("another turn is already running in this session")
 }
 
+func (h *Handler) rejectIfSessionRewinding(ctx context.Context, sessionID string) error {
+	type rewindSendGuard interface {
+		RejectSendIfRewinding(context.Context, string) error
+	}
+	guard, ok := h.sessionService.(rewindSendGuard)
+	if !ok {
+		return nil
+	}
+	err := guard.RejectSendIfRewinding(ctx, sessionID)
+	if err == nil {
+		return nil
+	}
+	if stderrors.Is(err, sandbox.ErrSessionRewindLocked) {
+		return errors.NewConflictError("session rewind is in progress")
+	}
+	return errors.NewInternalServerError(err.Error())
+}
+
 // executeQA is the unified execution flow for both KnowledgeQA and AgentQA modes.
 // It handles message creation, SSE setup, VLM analysis, service invocation, and error handling.
 func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle bool) {
@@ -1095,6 +1114,14 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			}
 			return
 		}
+	}
+	if err := h.rejectIfSessionRewinding(ctx, sessionID); err != nil {
+		if reqCtx.c != nil && !reqCtx.skipSSE {
+			_ = reqCtx.c.Error(err)
+		} else {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
+		}
+		return
 	}
 
 	// Agent mode: emit agent query event before message creation

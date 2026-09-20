@@ -61,6 +61,23 @@ func TestRedisSessionSandboxBindingStoreTurnLease(t *testing.T) {
 	require.Zero(t, exists, "consuming a missing turn must not create a lease key")
 }
 
+func TestRedisSessionSandboxBindingStoreBeginTurnFailsWhenRewindLocked(t *testing.T) {
+	store, _, _ := newRedisBindingTestStore(t)
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-rewind-turn"}
+
+	unlock, err := store.TryLockRewind(ctx, key)
+	require.NoError(t, err)
+	held, err := store.HasRewindLock(ctx, key)
+	require.NoError(t, err)
+	require.True(t, held)
+	require.ErrorIs(t, store.BeginTurn(ctx, key), ErrSessionRewindLocked)
+	unlock()
+
+	require.NoError(t, store.BeginTurn(ctx, key))
+	require.NoError(t, store.EndTurn(ctx, key))
+}
+
 func TestRedisSessionSandboxBindingStoreInvalidatesByConfig(t *testing.T) {
 	store, _, _ := newRedisBindingTestStore(t)
 	testSessionSandboxBindingInvalidateByConfig(t, store)

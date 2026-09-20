@@ -33,6 +33,9 @@ func (s *sessionService) KnowledgeQA(
 		req.Query,
 		webSearchEnabled,
 	)
+	if err := s.RejectSendIfRewinding(ctx, req.Session.ID); err != nil {
+		return err
+	}
 
 	// Span the request setup (KB / model resolution, search target building,
 	// agent override application). This covers the visible gap between trace

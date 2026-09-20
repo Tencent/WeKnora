@@ -1150,6 +1150,24 @@ func (m *SessionBoundManager) TryLockRewind(ctx context.Context, sessionID strin
 	return locker.TryLockRewind(ctx, key)
 }
 
+// HasRewindLock reports whether rewind currently holds sessionID.
+func (m *SessionBoundManager) HasRewindLock(ctx context.Context, sessionID string) (bool, error) {
+	if m == nil {
+		return false, nil
+	}
+	reader, ok := m.bindings.(interface {
+		HasRewindLock(context.Context, SessionSandboxKey) (bool, error)
+	})
+	if !ok {
+		return false, nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return reader.HasRewindLock(ctx, key)
+}
+
 // CreateForkSnapshot snapshots the session's already-bound sandbox. It never
 // provisions: an unbound session or a backend without snapshots returns an
 // error so fork can degrade.
