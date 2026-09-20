@@ -2483,6 +2483,8 @@ export default {
       discard: 'Discard changes',
       keepEditing: 'Keep editing',
     },
+    fullscreen: 'Full screen',
+    exitFullscreen: 'Exit full screen',
     save: 'Save',
     delete: 'Delete',
     edit: 'Edit',
@@ -2588,8 +2590,11 @@ export default {
       horizontalRule: 'Horizontal rule'
     },
     view: {
-      editLabel: 'Back to edit',
-      previewLabel: 'Preview content'
+      edit: 'Edit',
+      split: 'Split',
+      preview: 'Preview',
+      splitUnavailable: 'Widen the drawer or go full screen to split the view',
+      groupLabel: 'Editor view'
     },
     preview: {
       empty: 'No content yet'
@@ -2632,7 +2637,9 @@ export default {
     status: {
       draftTag: 'Status: Draft',
       publishedTag: 'Status: Published',
-      lastUpdated: 'Last updated: {time}'
+      lastUpdated: 'Last updated: {time}',
+      counter: '{chars} characters · {lines} lines',
+      shortcutHint: '{mod}B bold · {mod}I italic · {mod}K link · {mod}S save draft'
     },
     loading: {
       content: 'Loading content...',
@@ -3797,6 +3804,7 @@ export default {
     processError: 'Processing error',
     sessionExcerpt: 'Session Excerpt',
     noAnswerContent: '(No answer content)',
+    manualSourcesHeading: 'Sources',
     noMatchFound: 'No matching content found',
     deleteSessionFailed: 'Delete failed, please try again later!',
     imageTooMany: 'Maximum 5 images allowed',

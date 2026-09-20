@@ -3923,6 +3923,7 @@ export default {
     processError: 'Ошибка обработки',
     sessionExcerpt: 'Выдержка из сессии',
     noAnswerContent: '(Нет содержимого ответа)',
+    manualSourcesHeading: 'Источники',
     noMatchFound: 'Совпадений не найдено',
     deleteSessionFailed: 'Ошибка удаления, попробуйте позже!',
     imageTooMany: 'Максимум 5 изображений',
@@ -4934,7 +4935,9 @@ export default {
     status: {
       draftTag: 'Статус: Черновик',
       publishedTag: 'Статус: Опубликовано',
-      lastUpdated: 'Последнее обновление: {time}'
+      lastUpdated: 'Последнее обновление: {time}',
+      counter: 'Символов: {chars} · Строк: {lines}',
+      shortcutHint: '{mod}B жирный · {mod}I курсив · {mod}K ссылка · {mod}S черновик'
     },
     form: {
       knowledgeBaseLabel: 'Целевая база знаний',
@@ -4972,8 +4975,11 @@ export default {
       empty: 'Пока нет содержимого'
     },
     view: {
-      editLabel: 'Вернуться к редактированию',
-      previewLabel: 'Предпросмотр'
+      edit: 'Редактор',
+      split: 'Разделить',
+      preview: 'Предпросмотр',
+      splitUnavailable: 'Расширьте панель или включите полный экран, чтобы разделить вид',
+      groupLabel: 'Вид редактора'
     },
     toolbar: {
       bold: 'Жирный',
@@ -5037,6 +5043,8 @@ export default {
       discard: 'Отменить изменения',
       keepEditing: 'Продолжить редактирование',
     },
+    fullscreen: 'Полный экран',
+    exitFullscreen: 'Выйти из полного экрана',
     save: 'Сохранить',
     delete: 'Удалить',
     edit: 'Редактировать',

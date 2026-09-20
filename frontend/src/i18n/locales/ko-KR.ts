@@ -3923,6 +3923,7 @@ export default {
     processError: '처리 오류',
     sessionExcerpt: '대화 발췌',
     noAnswerContent: '(답변 내용 없음)',
+    manualSourcesHeading: '참고 출처',
     noMatchFound: '일치하는 내용을 찾을 수 없습니다',
     deleteSessionFailed: '삭제 실패, 나중에 다시 시도해주세요!',
     imageTooMany: '최대 5장까지 업로드 가능합니다',
@@ -4934,7 +4935,9 @@ export default {
     status: {
       draftTag: '현재 상태: 임시 저장',
       publishedTag: '현재 상태: 게시됨',
-      lastUpdated: '최근 업데이트: {time}'
+      lastUpdated: '최근 업데이트: {time}',
+      counter: '{chars}자 · {lines}줄',
+      shortcutHint: '{mod}B 굵게 · {mod}I 기울임 · {mod}K 링크 · {mod}S 임시 저장'
     },
     form: {
       knowledgeBaseLabel: '대상 지식베이스',
@@ -4972,8 +4975,11 @@ export default {
       empty: '내용 없음'
     },
     view: {
-      editLabel: '편집으로 돌아가기',
-      previewLabel: '내용 미리보기'
+      edit: '편집',
+      split: '분할',
+      preview: '미리보기',
+      splitUnavailable: '너비가 부족합니다. 서랍을 넓히거나 전체 화면으로 전환하세요',
+      groupLabel: '편집기 보기'
     },
     toolbar: {
       bold: '굵게',
@@ -5037,6 +5043,8 @@ export default {
       discard: '변경 사항 버리기',
       keepEditing: '계속 편집',
     },
+    fullscreen: '전체 화면',
+    exitFullscreen: '전체 화면 종료',
     save: '저장',
     delete: '삭제',
     edit: '편집',

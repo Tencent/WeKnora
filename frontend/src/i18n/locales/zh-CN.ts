@@ -3925,6 +3925,7 @@ export default {
     processError: '处理出错',
     sessionExcerpt: '会话摘录',
     noAnswerContent: '（无回答内容）',
+    manualSourcesHeading: '参考来源',
     noMatchFound: '未找到匹配的内容',
     deleteSessionFailed: '删除失败，请稍后再试！',
     imageTooMany: '最多上传5张图片',
@@ -4936,7 +4937,9 @@ export default {
     status: {
       draftTag: '当前状态：草稿',
       publishedTag: '当前状态：已发布',
-      lastUpdated: '最近更新：{time}'
+      lastUpdated: '最近更新：{time}',
+      counter: '{chars} 字 · {lines} 行',
+      shortcutHint: '{mod}B 加粗 · {mod}I 斜体 · {mod}K 链接 · {mod}S 存草稿'
     },
     form: {
       knowledgeBaseLabel: '目标知识库',
@@ -4974,8 +4977,11 @@ export default {
       empty: '暂无内容'
     },
     view: {
-      editLabel: '返回编辑',
-      previewLabel: '预览内容'
+      edit: '编辑',
+      split: '分屏',
+      preview: '预览',
+      splitUnavailable: '宽度不足，拖宽抽屉或全屏后可用分屏',
+      groupLabel: '编辑区视图'
     },
     toolbar: {
       bold: '加粗',
@@ -5039,6 +5045,8 @@ export default {
       discard: '放弃更改',
       keepEditing: '继续编辑',
     },
+    fullscreen: '全屏',
+    exitFullscreen: '退出全屏',
     save: '保存',
     delete: '删除',
     edit: '编辑',
