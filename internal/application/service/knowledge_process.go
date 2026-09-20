@@ -3732,6 +3732,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			storedImages = append(storedImages, remoteImages...)
 		}
 
+		bindKnowledgeImageResources(ctx, s.resourceCatalog, knowledge.TenantID, knowledge.ID, storedImages)
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
