@@ -1019,7 +1019,6 @@ onBeforeUnmount(() => {
                     <button
                       type="button"
                       class="toolbar-btn"
-                      :class="`btn-${btn.key}`"
                       :aria-label="btn.tooltip"
                       @mousedown.prevent
                       @click="handleToolbarAction(btn.action)"

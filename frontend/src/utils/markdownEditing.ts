@@ -16,7 +16,7 @@ export interface EditorState {
 export type EditorPatch = EditorState | null
 
 /** Indent unit: two spaces, the width Markdown nests a list item with. */
-export const INDENT = '  '
+const INDENT = '  '
 
 /** `- `, `* `, `+ `, `1. `, `1) `, optionally followed by a `[ ]` checkbox. */
 const LIST_LINE_RE = /^([ \t]*)([-*+]|\d+[.)])[ \t]+(\[[ xX]\][ \t]+)?(.*)$/
@@ -105,7 +105,7 @@ export function indentOnTab(state: EditorState, outdent: boolean): EditorPatch {
   return { ...indented, start: caret, end: caret + (end - start) }
 }
 
-/** Reading stats for the editor status bar. */
+/** Reading stats shown next to the draft tag in the footer. */
 export function countContent(value: string): { characters: number; lines: number } {
   const text = value ?? ''
   return {
