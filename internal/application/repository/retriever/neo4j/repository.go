@@ -17,6 +17,16 @@ type Neo4jRepository struct {
 	nodePrefix string
 }
 
+const (
+	// graphSearchMaxSeedNodes bounds how many entities a single graph search
+	// expands from. The match is a substring match, so this is the knob that
+	// keeps one vague entity name from pulling in the whole graph.
+	graphSearchMaxSeedNodes = 200
+	// graphSearchMaxRows bounds returned (node, relation) rows as a backstop
+	// for hub entities whose neighbourhood alone is huge.
+	graphSearchMaxRows = 2000
+)
+
 // NewNeo4jRepository creates a new Neo4j repository
 func NewNeo4jRepository(driver neo4j.Driver) interfaces.RetrieveGraphRepository {
 	return &Neo4jRepository{driver: driver, nodePrefix: "ENTITY"}
@@ -175,12 +185,25 @@ func (n *Neo4jRepository) SearchNode(
 
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		labelExpr := n.Label(namespace)
+		// The WHERE clause is a substring match, so a short entity name (or a
+		// name that is a component of many others) matches a large slice of the
+		// graph. Without a bound this returned 1309 nodes / 1917 relations for a
+		// single query, which then exceeded the reranker's per-request limit and
+		// made chunk_merge walk the entire set. Cap the seed entities, then cap
+		// the rows as a backstop for hub entities.
 		query := `
-			MATCH (n:` + labelExpr + `)-[r]-(m:` + labelExpr + `)
+			MATCH (n:` + labelExpr + `)
 			WHERE ANY(nodeText IN $nodes WHERE n.name CONTAINS nodeText)
+			WITH n ORDER BY n.name LIMIT $maxSeedNodes
+			MATCH (n)-[r]-(m:` + labelExpr + `)
 			RETURN n, r, m
+			LIMIT $maxRows
 		`
-		params := map[string]interface{}{"nodes": nodes}
+		params := map[string]interface{}{
+			"nodes":        nodes,
+			"maxSeedNodes": graphSearchMaxSeedNodes,
+			"maxRows":      graphSearchMaxRows,
+		}
 		result, err := tx.Run(ctx, query, params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to run query: %v", err)
@@ -217,6 +240,20 @@ func (n *Neo4jRepository) SearchNode(
 				Node2: targetNodeData.Props["name"].(string),
 				Type:  relData.Type,
 			})
+		}
+		// Make truncation visible. A silent cap reads as "the graph has no more
+		// matches" when in fact candidates were dropped.
+		if len(graphData.Relation) >= graphSearchMaxRows {
+			logger.Warnf(ctx,
+				"graph search hit the row cap: %d nodes / %d relations returned "+
+					"(seed cap %d, row cap %d) — results are truncated; "+
+					"narrow the entity or raise graphSearchMaxRows",
+				len(graphData.Node), len(graphData.Relation),
+				graphSearchMaxSeedNodes, graphSearchMaxRows)
+		} else {
+			logger.Infof(ctx, "graph search: %d nodes / %d relations (seed cap %d, row cap %d)",
+				len(graphData.Node), len(graphData.Relation),
+				graphSearchMaxSeedNodes, graphSearchMaxRows)
 		}
 		return graphData, nil
 	})
