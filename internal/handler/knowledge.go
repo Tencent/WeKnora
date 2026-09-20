@@ -731,22 +731,8 @@ func knowledgeSpansLastError(
 	}
 }
 
-// missingStageStatusFunc decides what a canonical stage with no row should
-// render as. The parse_status-derived fallback cannot tell "this stage ran and
-// failed" from "this stage never ran", so once a stage actually recorded a
-// failure it paints every rows-less stage `failed` too: the UI picks the first
-// failed stage in canonical order and names the wrong one, and the blast radius
-// looks total rather than "one stage broke, the rest never started" (#3452).
-//
-// With a real stage failure on record the position of that failure is known, so:
-//
-//   - downstream of it, per StageDependencies or canonical order → cancelled
-//     ("not run because an upstream span failed")
-//   - before it → skipped; the stage either did not apply (a text passage has no
-//     docreader step) or its row was never written, and neither is a failure
-//
-// Without one, the parse_status fallback stands unchanged, which is the case it
-// was written for: legacy knowledge parsed before span tracking existed.
+// missingStageStatusFunc resolves a rowless stage against the real failure:
+// earlier → skipped, downstream → cancelled, none → the parse_status fallback (#3452).
 func missingStageStatusFunc(
 	stageRowByName map[string]*types.KnowledgeProcessingSpan, fallback string,
 ) func(string) string {
@@ -761,10 +747,7 @@ func missingStageStatusFunc(
 		return func(string) string { return fallback }
 	}
 
-	// Transitive dependents of the failed stage. Today these are always later
-	// in AllStages too, so the canonical-order check below already covers them;
-	// consulting the DAG keeps the answer right if the stage list is ever
-	// reordered or a stage gains an upstream that is not its predecessor.
+	// Redundant with canonical order today; keeps holding if stages are reordered.
 	cancelled := map[string]bool{}
 	var markDependents func(string)
 	markDependents = func(stage string) {

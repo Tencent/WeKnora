@@ -184,13 +184,8 @@ func stageStatuses(t *testing.T, tree *types.SpanTreeNode) map[string]string {
 	return got
 }
 
-// TestBuildSpanTree_MissingStagesAroundRealFailure records #3452: a text
-// passage is chunked without ever opening a docreader stage, so when
-// embedding fails the rows-less stages used to synthesize as "failed" too.
-// The frontend names the failed stage by taking the first failed one in
-// canonical order, so it reported docreader — a stage that never ran, for
-// content that has no document to parse — and four of five segments showed
-// as broken.
+// #3452: a text passage has no docreader stage, so an embedding failure used to
+// synthesize docreader as failed and the UI named it as the broken step.
 func TestBuildSpanTree_MissingStagesAroundRealFailure(t *testing.T) {
 	now := time.Now()
 	finished := now.Add(2 * time.Second)
@@ -213,8 +208,7 @@ func TestBuildSpanTree_MissingStagesAroundRealFailure(t *testing.T) {
 	a.Equal(types.SpanStatusCancelled, got[types.StagePostProcess],
 		"postprocess depends on embedding, so it is cancelled rather than failed")
 
-	// The frontend picks the focused stage with the first `failed` in
-	// canonical order; embedding must be the only candidate.
+	// The UI focuses the first failed stage in canonical order.
 	var firstFailed string
 	for _, name := range types.AllStages {
 		if got[name] == types.SpanStatusFailed {
@@ -228,9 +222,7 @@ func TestBuildSpanTree_MissingStagesAroundRealFailure(t *testing.T) {
 	a.Equal(types.StageEmbedding, lastFail.Name)
 }
 
-// TestBuildSpanTree_MissingStagesWithoutFailureKeepFallback pins the case the
-// parse_status rule was written for: no stage recorded a failure, so there is
-// no position to reason from and the inferred terminal state still applies.
+// No failed row means no position to reason from, so the fallback still applies.
 func TestBuildSpanTree_MissingStagesWithoutFailureKeepFallback(t *testing.T) {
 	now := time.Now()
 	rows := []types.KnowledgeProcessingSpan{
@@ -246,9 +238,8 @@ func TestBuildSpanTree_MissingStagesWithoutFailureKeepFallback(t *testing.T) {
 	a.Equal(types.SpanStatusPending, got[types.StagePostProcess])
 }
 
-// TestBuildSpanTree_CancelledParseRendersCancelled records that a cancelled
-// document no longer shows pending spinners for the stages it never reached:
-// parse_status "cancelled" used to fall through the switch to pending.
+// parse_status "cancelled" fell through to pending, leaving spinners on
+// stages the document never reached.
 func TestBuildSpanTree_CancelledParseRendersCancelled(t *testing.T) {
 	tree, _, _ := buildSpanTree("kid-cancelled", 0, nil, types.ParseStatusCancelled)
 	a := assert.New(t)
@@ -260,9 +251,7 @@ func TestBuildSpanTree_CancelledParseRendersCancelled(t *testing.T) {
 	}
 }
 
-// TestBuildSpanTree_DocReaderFailureCancelsEverythingAfter covers the failure
-// at the first stage: nothing precedes it, so no stage should be skipped and
-// every later rows-less stage is cancelled.
+// Failure at the first stage: nothing precedes it, so nothing is skipped.
 func TestBuildSpanTree_DocReaderFailureCancelsEverythingAfter(t *testing.T) {
 	now := time.Now()
 	rows := []types.KnowledgeProcessingSpan{
