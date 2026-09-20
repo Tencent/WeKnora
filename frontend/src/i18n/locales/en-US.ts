@@ -4625,6 +4625,7 @@ export default {
         catalog: 'Catalog',
         catalogedYes: 'In catalog',
         catalogedNo: 'Not in catalog, vendor defaults',
+        endpoint: 'Request endpoint',
         thinkingFormat: 'Thinking format',
         thinkingLevels: 'Supported levels',
         noThinking: 'Cannot think',

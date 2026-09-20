@@ -693,13 +693,23 @@ export interface ResolveModelCatalogParams {
     api?: string;
     thinking_control?: string;
     remote_model_name?: string;
+    // Vendor-declared non-secret extra fields (Azure api_version, ...) are
+    // forwarded by key so the preview resolves the same request the runtime
+    // will make. The backend only accepts keys the vendor declares.
+    [extraField: string]: string | undefined;
 }
 
 // 目录解析结果。Mirrors handler.ResolveModelCatalog response data.
 export interface ResolvedModelCatalog {
     provider: string;
     api: string;
-    base_url: string;
+    // base_url and url are only returned to callers who may configure
+    // integrations; a viewer gets the capability answer without the endpoint.
+    base_url?: string;
+    // url is the endpoint the row will actually call, and only vendors that
+    // compute their own URL report one (Azure, whose api_version picks
+    // between the v1 data plane and the dated deployments path).
+    url?: string;
     remote_model: string;
     cataloged: boolean;
     model: Record<string, unknown>;

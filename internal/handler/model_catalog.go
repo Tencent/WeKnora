@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
@@ -199,9 +200,19 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	} else {
 		vendors = catalog.List()
 	}
+	// Default base URLs are the editor's prefill, and only a caller who may
+	// configure integrations can use them. A deployment overlay may also
+	// repoint a vendor at an internal gateway, which would otherwise reach
+	// every viewer here while the same URL is stripped from the model rows
+	// themselves (dto.NewModelResponse).
+	includeURLs := dto.CanViewIntegrationSecrets(ctx)
 	result := make([]ModelProviderDTO, 0, len(vendors))
 	for _, v := range vendors {
-		result = append(result, providerDTO(v, backendType, true))
+		p := providerDTO(v, backendType, true)
+		if !includeURLs {
+			p.DefaultURLs = nil
+		}
+		result = append(result, p)
 	}
 	logger.Infof(ctx, "Retrieved %d providers", len(result))
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
@@ -222,6 +233,7 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /models/catalog/resolve [get]
 func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
+	ctx := c.Request.Context()
 	providerID := strings.TrimSpace(c.Query("provider"))
 	modelName := strings.TrimSpace(c.Query("model"))
 	baseURL := strings.TrimSpace(c.Query("base_url"))
@@ -231,10 +243,27 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 			modelType = parsed
 		}
 	}
+	// The preview must resolve against the same inputs the runtime will see,
+	// or it describes a different request than the one the row will make —
+	// Azure is the sharp case: api_version alone decides between the v1 data
+	// plane and the dated deployments path. Forward the vendor's own declared
+	// fields rather than a hardcoded list, so a new vendor needs no change
+	// here. Secret fields are never accepted: this is a GET, and a credential
+	// in a query string lands in access logs and browser history.
 	extra := map[string]string{}
 	for _, key := range []string{catalog.ExtraAPI, catalog.ExtraThinkingControl, catalog.ExtraRemoteModelName} {
 		if v := strings.TrimSpace(c.Query(key)); v != "" {
 			extra[key] = v
+		}
+	}
+	if vendor, ok := catalog.Get(providerID); ok {
+		for _, field := range vendor.ExtraFields {
+			if field.Secret || field.Type == "password" {
+				continue
+			}
+			if v := strings.TrimSpace(c.Query(field.Key)); v != "" {
+				extra[field.Key] = v
+			}
 		}
 	}
 	resolved, err := catalog.Resolve(catalog.Ref{
@@ -245,16 +274,39 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 		return
 	}
 	caps := resolved.Capabilities()
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data": gin.H{
-			"provider":     resolved.Vendor.ID,
-			"api":          resolved.API,
-			"base_url":     resolved.BaseURL,
-			"remote_model": resolved.RemoteModel,
-			"cataloged":    resolved.Cataloged,
-			"model":        resolved.Spec,
-			"capabilities": caps,
-		},
-	})
+	data := gin.H{
+		"provider":     resolved.Vendor.ID,
+		"api":          resolved.API,
+		"remote_model": resolved.RemoteModel,
+		"cataloged":    resolved.Cataloged,
+		"model":        resolved.Spec,
+		"capabilities": caps,
+	}
+	// base_url and the resolved endpoint are configuration, and with no
+	// base_url in the query they fall back to the vendor default — which a
+	// deployment overlay may have repointed at an internal gateway. Same
+	// gate as the vendor list and as the model rows themselves.
+	if dto.CanViewIntegrationSecrets(ctx) {
+		data["base_url"] = resolved.BaseURL
+		// Only the vendors that compute their own URL report one. Azure is
+		// why this is here: api_version alone decides between the v1 data
+		// plane and the dated deployments path, and nothing else in this
+		// response would show which one the row will call. The protocols
+		// that build their URL inside the client (Anthropic, Gemini
+		// normalise several base-URL shapes) report nothing rather than a
+		// path this endpoint would have to guess.
+		if resolved.Vendor.Endpoint != nil {
+			endpointURL, query := resolved.Vendor.Endpoint(catalog.EndpointRequest{
+				BaseURL:   resolved.BaseURL,
+				Model:     resolved.RemoteModel,
+				ModelType: modelType,
+				API:       resolved.API,
+				Extra:     extra,
+			})
+			if endpointURL != "" {
+				data["url"] = api.Endpoint{URL: endpointURL, Query: query}.Resolve("")
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }

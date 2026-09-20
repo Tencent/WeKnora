@@ -2800,6 +2800,7 @@ export default {
         catalog: 'Каталог',
         catalogedYes: 'В каталоге',
         catalogedNo: 'Вне каталога, настройки поставщика',
+        endpoint: 'Адрес запроса',
         thinkingFormat: 'Формат размышлений',
         thinkingLevels: 'Поддерживаемые уровни',
         noThinking: 'Размышления не поддерживаются',

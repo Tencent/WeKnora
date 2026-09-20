@@ -4625,6 +4625,7 @@ export default {
         catalog: 'カタログ',
         catalogedYes: 'カタログ内',
         catalogedNo: 'カタログ外（ベンダー既定）',
+        endpoint: 'リクエスト先',
         thinkingFormat: '思考形式',
         thinkingLevels: '対応レベル',
         noThinking: '思考非対応',

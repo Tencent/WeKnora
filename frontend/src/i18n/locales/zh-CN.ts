@@ -2802,6 +2802,7 @@ export default {
         catalog: '目录',
         catalogedYes: '目录内模型',
         catalogedNo: '目录外，按厂商默认',
+        endpoint: '请求地址',
         thinkingFormat: '思考格式',
         thinkingLevels: '支持等级',
         noThinking: '不支持思考',

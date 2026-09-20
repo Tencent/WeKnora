@@ -2800,6 +2800,7 @@ export default {
         catalog: '카탈로그',
         catalogedYes: '카탈로그 내',
         catalogedNo: '카탈로그 외(공급사 기본값)',
+        endpoint: '요청 엔드포인트',
         thinkingFormat: '사고 형식',
         thinkingLevels: '지원 수준',
         noThinking: '사고 미지원',

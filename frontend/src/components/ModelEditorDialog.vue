@@ -405,6 +405,10 @@
                     {{ resolved.cataloged ? $t('model.editor.resolved.catalogedYes') : $t('model.editor.resolved.catalogedNo') }}
                   </span>
                 </dd>
+                <template v-if="resolved.url">
+                  <dt>{{ $t('model.editor.resolved.endpoint') }}</dt>
+                  <dd><code class="resolved-endpoint">{{ resolved.url }}</code></dd>
+                </template>
                 <template v-if="resolved.remote_model && resolved.remote_model !== formData.modelName">
                   <dt>{{ $t('model.editor.advanced.remoteModelName.label') }}</dt>
                   <dd><code>{{ resolved.remote_model }}</code></dd>
@@ -920,6 +924,16 @@ const runResolve = async () => {
       api: formData.value.extraConfig?.api || '',
       thinking_control: formData.value.thinkingControl || '',
       remote_model_name: formData.value.extraConfig?.remote_model_name || '',
+      // Vendor fields decide the request too — Azure's api_version picks
+      // between the v1 data plane and the dated deployments path — so the
+      // preview has to see them or it describes a different request than
+      // the one this row will make. Secret fields never travel in a query
+      // string; plainExtraFields already excludes them.
+      ...Object.fromEntries(
+        plainExtraFields.value
+          .map(field => [field.key, formData.value.extraConfig?.[field.key] || ''])
+          .filter(([, value]) => !!value),
+      ),
     })
     if (revision !== resolveRevision) return
     resolved.value = result
