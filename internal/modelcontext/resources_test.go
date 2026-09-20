@@ -108,3 +108,35 @@ func TestResourceVersionsStayImmutableAcrossRounds(t *testing.T) {
 	require.Equal(t, "res://0001", nextRequest.EncodeText(latest))
 	require.Equal(t, old, r.DecodeText("res://0003"))
 }
+
+func TestEncodeMessagesDropsSignatureOnlyWhenReasoningIsRewritten(t *testing.T) {
+	r := newResourceRegistry()
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	messages := []chat.Message{
+		{
+			Role:               "assistant",
+			Content:            "answer",
+			ReasoningContent:   "I looked at " + ref,
+			ReasoningSignature: "anthropic-messages:sig-1",
+		},
+		{
+			Role:               "assistant",
+			Content:            "see " + ref,
+			ReasoningContent:   "plain thought with nothing to encode",
+			ReasoningSignature: "anthropic-messages:sig-2",
+		},
+	}
+
+	encoded := r.EncodeMessages(messages)
+
+	// The first message's thinking text was rewritten, so its signature no
+	// longer covers what would go on the wire.
+	require.Equal(t, "I looked at res://0001", encoded[0].ReasoningContent)
+	require.Empty(t, encoded[0].ReasoningSignature)
+	// The second one's thinking text is untouched (only Content changed), so
+	// the block stays replayable.
+	require.Equal(t, "plain thought with nothing to encode", encoded[1].ReasoningContent)
+	require.Equal(t, "anthropic-messages:sig-2", encoded[1].ReasoningSignature)
+	// Callers' own slice is never mutated.
+	require.Equal(t, "anthropic-messages:sig-1", messages[0].ReasoningSignature)
+}

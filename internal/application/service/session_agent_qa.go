@@ -320,6 +320,7 @@ func (s *sessionService) buildAgentConfig(
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
+		ReasoningEffort:             customAgent.Config.ReasoningEffort,
 		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,

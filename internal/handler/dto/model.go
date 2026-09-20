@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -32,6 +33,9 @@ type ModelResponse struct {
 	// Per-field "configured?" map. Omitted for builtin models unless the
 	// caller is a system administrator. See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
+	// Capabilities is the catalog view of the model: protocol, whether it
+	// can think and at which levels, context window. Chat models only.
+	Capabilities *catalog.Capabilities `json:"capabilities,omitempty"`
 }
 
 // ModelParametersDTO carries every parameter field EXCEPT the two secret
@@ -51,6 +55,7 @@ type ModelParametersDTO struct {
 	MaxOutputTokens     int                       `json:"max_output_tokens,omitempty"`
 	MaxConcurrency      int                       `json:"max_concurrency,omitempty"`
 	AppID               string                    `json:"app_id,omitempty"`
+	Spec                *types.ModelSpecOverride  `json:"spec,omitempty"`
 }
 
 // NewModelResponse converts a stored Model into its response shape.
@@ -74,6 +79,7 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		MaxOutputTokens:     m.Parameters.MaxOutputTokens,
 		MaxConcurrency:      m.Parameters.MaxConcurrency,
 		AppID:               m.Parameters.AppID,
+		Spec:                m.Parameters.Spec,
 	}
 	canManageBuiltin := m.IsBuiltin && types.IsSystemAdminFromContext(ctx)
 	if !CanViewIntegrationSecrets(ctx) && !canManageBuiltin {
@@ -99,21 +105,32 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 			"app_secret": {Configured: m.Parameters.AppSecret != ""},
 		}
 	}
+	var caps *catalog.Capabilities
+	if m.Type == types.ModelTypeKnowledgeQA || m.Type == types.ModelTypeVLLM {
+		if resolved, err := catalog.Resolve(catalog.Ref{
+			Provider: m.Parameters.Provider, Model: m.Name, BaseURL: m.Parameters.BaseURL,
+			ModelType: m.Type, Extra: m.Parameters.ExtraConfig, Override: m.Parameters.Spec,
+		}); err == nil && m.Source == types.ModelSourceRemote {
+			c := resolved.Capabilities()
+			caps = &c
+		}
+	}
 	return &ModelResponse{
-		ID:          m.ID,
-		TenantID:    m.TenantID,
-		Name:        m.Name,
-		DisplayName: m.DisplayName,
-		Type:        m.Type,
-		Source:      m.Source,
-		Description: m.Description,
-		Parameters:  params,
-		IsDefault:   m.IsDefault,
-		IsBuiltin:   m.IsBuiltin,
-		Status:      m.Status,
-		CreatedAt:   m.CreatedAt,
-		UpdatedAt:   m.UpdatedAt,
-		Credentials: creds,
+		ID:           m.ID,
+		TenantID:     m.TenantID,
+		Name:         m.Name,
+		DisplayName:  m.DisplayName,
+		Type:         m.Type,
+		Source:       m.Source,
+		Description:  m.Description,
+		Parameters:   params,
+		IsDefault:    m.IsDefault,
+		IsBuiltin:    m.IsBuiltin,
+		Status:       m.Status,
+		CreatedAt:    m.CreatedAt,
+		UpdatedAt:    m.UpdatedAt,
+		Credentials:  creds,
+		Capabilities: caps,
 	}
 }
 

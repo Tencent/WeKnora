@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -36,7 +38,7 @@ func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*Ol
 func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
 	ollamaMessages := make([]ollamaapi.Message, 0, len(messages))
 	for _, msg := range messages {
-		msg = neutralizeMessageSpecialTokens(msg)
+		msg = api.NeutralizeMessageSpecialTokens(msg)
 		msgOllama := ollamaapi.Message{
 			Role:      msg.Role,
 			Content:   msg.Content,
@@ -60,7 +62,7 @@ func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
 // resolveImageForOllama resolves an image URL into raw bytes for Ollama.
 // Handles local serving paths (/files/...), data URIs, and remote HTTP URLs.
 func resolveImageForOllama(imageURL string) ollamaapi.ImageData {
-	if data := resolveImageURLForOllama(imageURL); data != nil {
+	if data := api.ResolveImageURLForOllama(imageURL); data != nil {
 		return data
 	}
 	if strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://") {
@@ -107,10 +109,10 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 		if budget := opts.CompletionBudget(); budget > 0 {
 			chatReq.Options["num_predict"] = budget
 		}
-		if opts.Thinking != nil {
-			chatReq.Think = &ollamaapi.ThinkValue{
-				Value: *opts.Thinking,
-			}
+		if level, requested := opts.Reasoning(); requested {
+			// Ollama accepts a boolean switch; graded levels only exist for a
+			// few models, so they collapse to on/off here.
+			chatReq.Think = &ollamaapi.ThinkValue{Value: level.Enabled()}
 		}
 		if len(opts.Format) > 0 {
 			chatReq.Format = opts.Format
@@ -167,7 +169,7 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		TotalTokens:      promptTokens + completionTokens,
 	}
 	usage.MarkPromptCacheUnsupported()
-	logUsage(ctx, c.modelName, &usage)
+	api.LogUsage(ctx, c.modelName, &usage)
 
 	return &types.ChatResponse{
 		Content:   responseContent,
@@ -200,16 +202,16 @@ func (c *OllamaChat) ChatStream(
 	go func() {
 		defer close(streamChan)
 
-		var thinking thinkingEmitter
+		var thinking api.ThinkingEmitter
 		err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
 			// 发送思考内容（支持 Qwen3、DeepSeek 等推理模型）
 			if resp.Message.Thinking != "" {
-				thinking.emit(streamChan, resp.Message.Thinking)
+				thinking.Emit(streamChan, resp.Message.Thinking)
 			}
 
 			if resp.Message.Content != "" {
 				// 思考阶段结束后，发送思考完成事件
-				thinking.finish(streamChan)
+				thinking.Finish(streamChan)
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      resp.Message.Content,
@@ -264,7 +266,7 @@ func (c *OllamaChat) ChatStream(
 					}
 					usage.MarkPromptCacheUnsupported()
 				}
-				logUsage(ctx, c.modelName, usage)
+				api.LogUsage(ctx, c.modelName, usage)
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Done:         true,

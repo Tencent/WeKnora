@@ -175,7 +175,14 @@ func (r *Registry) DecodeResponse(response *types.ChatResponse) {
 		return
 	}
 	response.Content = r.DecodeOutputText(response.Content)
+	reasoningBefore := response.ReasoningContent
 	response.ReasoningContent = r.DecodeOutputText(response.ReasoningContent)
+	if response.ReasoningSignature != "" && response.ReasoningContent != reasoningBefore {
+		// Same reason as dropStaleReasoningSignature: the decoded text is no
+		// longer what the provider signed, and this response is what lands on
+		// the agent step and is replayed next turn.
+		response.ReasoningSignature = ""
+	}
 	r.DecodeToolCalls(response.ToolCalls)
 }
 

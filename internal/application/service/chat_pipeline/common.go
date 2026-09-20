@@ -52,11 +52,13 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
+		ReasoningEffort:     chat.ReasoningEffort(chatManage.SummaryConfig.ReasoningEffort),
 		PromptCacheKey:      chatManage.SessionID,
 	}
-	if opt.Thinking != nil {
+	if level, requested := opt.Reasoning(); requested {
 		pipelineInfo(ctx, "Stream", "thinking_option", map[string]interface{}{
-			"enabled": *opt.Thinking,
+			"enabled": level.Enabled(),
+			"level":   string(level),
 		})
 	}
 

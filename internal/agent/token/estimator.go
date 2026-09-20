@@ -22,6 +22,7 @@ package token
 import (
 	"fmt"
 	"math"
+	"strings"
 	"sync/atomic"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -137,6 +138,13 @@ func (e *Estimator) EstimateString(s string) int {
 // 26k — compaction then cut in the wrong place, freed almost nothing, and ran
 // again the next round. Reasoning content is counted alongside text and tool
 // calls for that reason.
+//
+// The reasoning artifacts that travel with it are counted too. They are opaque
+// to us but not to the provider's billing: an Anthropic thinking signature is a
+// few hundred base64 characters, and an OpenAI Responses encrypted reasoning
+// item (or an OpenRouter reasoning_details blob) is several kilobytes replayed
+// on every assistant turn. Leaving them out reproduces exactly the
+// under-measurement described above, one replayed turn at a time.
 func (e *Estimator) EstimateMessage(msg *chat.Message) int {
 	tokens := perMessageOverhead
 	tokens += e.EstimateString(msg.Role)
@@ -144,6 +152,7 @@ func (e *Estimator) EstimateMessage(msg *chat.Message) int {
 	tokens += e.EstimateString(msg.Name)
 	tokens += e.EstimateString(msg.ToolCallID)
 	tokens += e.EstimateString(msg.ReasoningContent)
+	tokens += e.EstimateReasoningArtifacts(msg)
 	tokens += e.estimateImageParts(msg)
 
 	for _, tc := range msg.ToolCalls {
@@ -152,6 +161,25 @@ func (e *Estimator) EstimateMessage(msg *chat.Message) int {
 		tokens += perToolCallOverhead
 	}
 
+	return tokens
+}
+
+// EstimateReasoningArtifacts counts the opaque provider state replayed with an
+// assistant turn. The signature carries a protocol tag that is stripped before
+// it goes out, so only the payload after the tag is billed; the metadata is
+// sent as-is, one JSON value per namespace key.
+func (e *Estimator) EstimateReasoningArtifacts(msg *chat.Message) int {
+	tokens := 0
+	if sig := msg.ReasoningSignature; sig != "" {
+		if _, payload, found := strings.Cut(sig, ":"); found {
+			sig = payload
+		}
+		tokens += e.EstimateString(sig)
+	}
+	for key, raw := range msg.ReasoningMetadata {
+		tokens += e.EstimateString(key)
+		tokens += e.EstimateString(string(raw))
+	}
 	return tokens
 }
 

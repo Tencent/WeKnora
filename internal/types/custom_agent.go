@@ -153,6 +153,10 @@ type CustomAgentConfig struct {
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
+	// ReasoningEffort selects the thinking intensity (off | auto | minimal |
+	// low | medium | high | xhigh | max). Empty keeps the boolean Thinking
+	// semantics: true means "auto". See internal/models/api.ReasoningEffort.
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty" json:"reasoning_effort,omitempty"`
 	// Whether final answers include knowledge/web source citations. Nil defaults to true
 	// so agents saved before this option was introduced keep their existing behavior.
 	CitationEnabled *bool `yaml:"citation_enabled" json:"citation_enabled"`
@@ -490,6 +494,19 @@ func (CustomAgent) TableName() string {
 	return "custom_agents"
 }
 
+// reasoningEffortEnablesThinking mirrors api.ReasoningEffort.Enabled() for the
+// strings this package can see. internal/types cannot import
+// internal/models/api (api imports types), so the "thinking is off" vocabulary
+// — the canonical "off" plus the aliases api.ParseReasoningEffort accepts — is
+// restated here. Keep the two in sync.
+func reasoningEffortEnablesThinking(level string) bool {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "", "off", "none", "false", "disabled":
+		return false
+	}
+	return true
+}
+
 // EnsureDefaults sets default values for the agent
 func (a *CustomAgent) EnsureDefaults() {
 	if a == nil {
@@ -559,6 +576,15 @@ func (a *CustomAgent) EnsureDefaults() {
 	// Agent mode should always enable multi-turn conversation
 	if a.Config.AgentMode == AgentModeSmartReasoning {
 		a.Config.MultiTurnEnabled = true
+	}
+	// Keep the legacy boolean consistent with the graded level. ReasoningEffort
+	// wins wherever both are read (api.Options.Reasoning), but everything that
+	// still reads only Thinking — the agent editor, the pipeline logs, the
+	// "thinking is off" warning in applyAgentOverridesToChatManage — would
+	// otherwise report an agent configured for `high` as thinking-off.
+	if a.Config.ReasoningEffort != "" {
+		enabled := reasoningEffortEnablesThinking(a.Config.ReasoningEffort)
+		a.Config.Thinking = &enabled
 	}
 	// Pin thinking to an explicit false when unset so provider-specific wire
 	// formats (e.g. thinking_control=thinking_type) always receive a value.

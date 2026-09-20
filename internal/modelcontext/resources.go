@@ -99,7 +99,9 @@ func (r *resourceRegistry) EncodeMessages(messages []chat.Message) []chat.Messag
 	copy(encoded, messages)
 	for i := range encoded {
 		encoded[i].Content = r.EncodeText(encoded[i].Content)
+		reasoningBefore := encoded[i].ReasoningContent
 		encoded[i].ReasoningContent = r.EncodeText(encoded[i].ReasoningContent)
+		dropStaleReasoningSignature(&encoded[i], reasoningBefore)
 		if len(encoded[i].MultiContent) > 0 {
 			encoded[i].MultiContent = append([]chat.MessageContentPart(nil), encoded[i].MultiContent...)
 			for j := range encoded[i].MultiContent {
@@ -154,4 +156,24 @@ func (r *resourceRegistry) handles() []string {
 		handles = append(handles, item.handle)
 	}
 	return handles
+}
+
+// dropStaleReasoningSignature clears a provider reasoning signature whose
+// text this registry just rewrote.
+//
+// Anthropic signs the exact thinking text it returned and rejects a replayed
+// block whose text no longer matches its signature; Gemini's thoughtSignature
+// works the same way. Handle encoding and citation compaction both rewrite
+// ReasoningContent, so a signature that survives such a rewrite is a 400
+// waiting to happen. Clearing it makes the protocol layer omit the thinking
+// block entirely (see anthropicmessages.assistantBlocks, which only emits a
+// block when a signature survives) — a degradation instead of a failure.
+//
+// Opaque artifacts in ReasoningMetadata (redacted_thinking, Responses
+// encrypted items) are deliberately kept: they are self-contained and do not
+// cover the plaintext this registry touched.
+func dropStaleReasoningSignature(msg *chat.Message, before string) {
+	if msg.ReasoningSignature != "" && msg.ReasoningContent != before {
+		msg.ReasoningSignature = ""
+	}
 }

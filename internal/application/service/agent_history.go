@@ -507,15 +507,20 @@ func buildAgentStepMessages(step types.AgentStep) []chat.Message {
 	nonTerminalCalls := filterNonTerminalToolCalls(step.ToolCalls)
 	if len(nonTerminalCalls) == 0 {
 		if step.IntermediateAnswer && strings.TrimSpace(step.Thought) != "" {
-			return []chat.Message{{Role: "assistant", Content: step.Thought, ReasoningContent: step.ReasoningContent}}
+			return []chat.Message{{
+				Role: "assistant", Content: step.Thought, ReasoningContent: step.ReasoningContent,
+				ReasoningSignature: step.ReasoningSignature, ReasoningMetadata: step.ReasoningMetadata,
+			}}
 		}
 		return nil
 	}
 	assistantMsg := chat.Message{
-		Role:             "assistant",
-		Content:          step.Thought,
-		ReasoningContent: step.ReasoningContent,
-		ToolCalls:        make([]chat.ToolCall, 0, len(nonTerminalCalls)),
+		Role:               "assistant",
+		Content:            step.Thought,
+		ReasoningContent:   step.ReasoningContent,
+		ReasoningSignature: step.ReasoningSignature,
+		ReasoningMetadata:  step.ReasoningMetadata,
+		ToolCalls:          make([]chat.ToolCall, 0, len(nonTerminalCalls)),
 	}
 	for _, tc := range nonTerminalCalls {
 		argsJSON, _ := json.Marshal(tc.Args)

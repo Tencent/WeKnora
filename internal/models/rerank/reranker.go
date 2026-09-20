@@ -7,6 +7,12 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
+	// provider.DetectProvider answers from the vendor catalog, which is empty
+	// until the vendor packages have run their init. Without this import every
+	// URL detects as "generic" and newReranker below falls through to the
+	// OpenAI-compatible reranker for LKEAP / Volcengine / Jina / … rows that
+	// carry no explicit provider id.
+	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 

@@ -22,6 +22,8 @@ func RegisterModelRoutes(
 	{
 		// 获取模型厂商列表 — Viewer+
 		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		// 解析模型的有效接入配置（协议 / 思考等级 / 上下文）— Viewer+
+		models.GET("/catalog/resolve", g.Viewer(), handler.ResolveModelCatalog)
 		// 创建模型 — Admin+
 		models.POST("", g.Admin(), handler.CreateModel)
 		// 获取模型列表 — Viewer+

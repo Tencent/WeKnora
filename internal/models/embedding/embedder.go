@@ -8,6 +8,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	// provider.DetectProvider answers from the vendor catalog, which is empty
+	// until the vendor packages have run their init. Without this import every
+	// URL detects as "generic" and the per-vendor embedders below are never
+	// selected — silently, and only in builds that do not already link the
+	// container (leaf tests, future tools).
+	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
