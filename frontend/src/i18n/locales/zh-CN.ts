@@ -4942,7 +4942,7 @@ export default {
     form: {
       knowledgeBasePlaceholder: '请选择知识库',
       titleLabel: '知识标题',
-      destinationLabel: '存入',
+      knowledgeBaseLabel: '目标知识库',
       titlePlaceholder: '请输入标题',
       contentPlaceholder: '支持 Markdown 语法，可使用 # 标题、列表、代码块等'
     },

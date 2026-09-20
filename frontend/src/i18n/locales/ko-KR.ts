@@ -4940,7 +4940,7 @@ export default {
     form: {
       knowledgeBasePlaceholder: '지식베이스를 선택해주세요',
       titleLabel: '지식 제목',
-      destinationLabel: '저장 위치',
+      knowledgeBaseLabel: '대상 지식베이스',
       titlePlaceholder: '제목을 입력해주세요',
       contentPlaceholder: 'Markdown 구문을 지원합니다. # 제목, 목록, 코드 블록 등을 사용할 수 있습니다'
     },

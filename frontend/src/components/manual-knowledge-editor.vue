@@ -108,6 +108,13 @@ const viewMode = ref<ViewMode>(readStoredViewMode())
 const editorAreaRef = ref<HTMLElement | null>(null)
 const editorAreaWidth = ref(SPLIT_MIN_WIDTH)
 const canSplit = computed(() => editorAreaWidth.value >= SPLIT_MIN_WIDTH)
+/**
+ * Narrow-layout switch, driven from the same measurement rather than a
+ * `@container` query: this project's scoped-style pipeline drops `@container`
+ * blocks, so those rules never reach the page.
+ */
+const NARROW_WIDTH = 620
+const isNarrow = computed(() => editorAreaWidth.value > 0 && editorAreaWidth.value < NARROW_WIDTH)
 /** Split silently falls back to edit-only while the drawer is too narrow for it. */
 const activeView = computed<ViewMode>(() =>
   viewMode.value === 'split' && !canSplit.value ? 'edit' : viewMode.value,
@@ -965,7 +972,7 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
-    <div class="manual-editor" v-if="initialLoaded">
+    <div class="manual-editor" :class="{ 'manual-editor--narrow': isNarrow }" v-if="initialLoaded">
       <!-- Document head: the title reads as the document's title, not as a form
            field, and the destination is a sentence instead of a labelled row. -->
       <div class="doc-head">
@@ -979,7 +986,9 @@ onBeforeUnmount(() => {
           :aria-label="$t('manualEditor.form.titleLabel')"
         />
         <div class="doc-meta">
-          <span class="doc-meta__label">{{ $t('manualEditor.form.destinationLabel') }}</span>
+          <t-tooltip :content="$t('manualEditor.form.knowledgeBaseLabel')" placement="top">
+            <t-icon name="folder" class="doc-meta__icon" />
+          </t-tooltip>
           <t-select
             class="doc-meta__kb"
             v-model="form.kbId"
@@ -989,6 +998,7 @@ onBeforeUnmount(() => {
             :loading="kbLoading"
             :options="kbOptions"
             :placeholder="$t('manualEditor.form.knowledgeBasePlaceholder')"
+            :aria-label="$t('manualEditor.form.knowledgeBaseLabel')"
             :popup-props="{ attach: 'body', zIndex: 2600 }"
           >
             <template #empty>
@@ -1172,12 +1182,14 @@ onBeforeUnmount(() => {
 .doc-head {
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 12px;
 }
 
 /* 标题按“文档标题”排版，不做成表单控件；hover/聚焦才显出输入框的边界 */
 :deep(.doc-title) {
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 0;
   background: transparent;
   /* 负外边距抵掉内边距：文字和下方编辑卡左对齐，hover 底色仍有呼吸空间 */
@@ -1207,16 +1219,17 @@ onBeforeUnmount(() => {
 }
 
 .doc-meta {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
-.doc-meta__label {
+.doc-meta__icon {
   flex-shrink: 0;
+  font-size: var(--app-text-md);
 }
 
 :deep(.doc-meta__kb) {
@@ -1225,7 +1238,6 @@ onBeforeUnmount(() => {
   width: auto;
   min-width: 132px;
   max-width: 260px;
-  margin-left: -4px;
 
   .t-input {
     border-color: transparent;
@@ -1254,6 +1266,34 @@ onBeforeUnmount(() => {
   padding: 20px;
   text-align: center;
   color: var(--td-text-color-placeholder);
+}
+
+/* 窄抽屉：标题和去处各占一行；工具栏换行而不是横向滚动——滚动条是隐藏的，
+   溢出的按钮等于消失 */
+.manual-editor--narrow {
+  .doc-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .doc-meta {
+    padding-left: 8px;
+  }
+
+  .editor-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .editor-toolbar__format {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .editor-toolbar__view {
+    padding-left: 0;
+    border-left: none;
+  }
 }
 
 /* ---------- 编辑区 ---------- */
@@ -1628,9 +1668,6 @@ onBeforeUnmount(() => {
   .setting-drawer__body {
     flex: 1;
     min-height: 0;
-    /* 元信息行按抽屉宽度换行，而不是按窗口宽度 */
-    container-type: inline-size;
-    container-name: manual-editor;
   }
 }
 </style>

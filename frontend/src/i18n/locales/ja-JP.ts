@@ -2634,7 +2634,7 @@ export default {
     form: {
       knowledgeBasePlaceholder: 'ナレッジベースを選択',
       titleLabel: 'ナレッジのタイトル',
-      destinationLabel: '保存先',
+      knowledgeBaseLabel: '対象のナレッジベース',
       titlePlaceholder: 'タイトルを入力',
       contentPlaceholder: 'Markdownに対応しています。#見出し、リスト、コードブロックなどが使えます。'
     },

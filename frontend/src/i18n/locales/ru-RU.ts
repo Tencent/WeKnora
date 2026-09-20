@@ -4940,7 +4940,7 @@ export default {
     form: {
       knowledgeBasePlaceholder: 'Выберите базу знаний',
       titleLabel: 'Заголовок знания',
-      destinationLabel: 'Сохранить в',
+      knowledgeBaseLabel: 'Целевая база знаний',
       titlePlaceholder: 'Введите заголовок',
       contentPlaceholder: 'Поддерживается Markdown. Используйте # заголовки, списки, блоки кода и т.д.'
     },

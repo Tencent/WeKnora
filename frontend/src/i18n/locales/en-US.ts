@@ -2634,7 +2634,7 @@ export default {
     form: {
       knowledgeBasePlaceholder: 'Select knowledge base',
       titleLabel: 'Knowledge title',
-      destinationLabel: 'Save to',
+      knowledgeBaseLabel: 'Target knowledge base',
       titlePlaceholder: 'Enter title',
       contentPlaceholder: 'Supports Markdown. Use # headings, lists, code blocks, etc.'
     },
