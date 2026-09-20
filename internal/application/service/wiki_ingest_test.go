@@ -335,12 +335,13 @@ func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 }
 
 type templateCaptureChatModel struct {
-	prompt   string
-	response string
-	messages []chat.Message
-	options  chat.ChatOptions
-	purpose  string
-	prefix   string
+	prompt       string
+	response     string
+	finishReason string
+	messages     []chat.Message
+	options      chat.ChatOptions
+	purpose      string
+	prefix       string
 }
 
 func (m *templateCaptureChatModel) Chat(
@@ -356,7 +357,7 @@ func (m *templateCaptureChatModel) Chat(
 		m.options = *opts
 	}
 	m.purpose, m.prefix = types.LLMCallMetadataFromContext(ctx)
-	return &types.ChatResponse{Content: m.response}, nil
+	return &types.ChatResponse{Content: m.response, FinishReason: m.finishReason}, nil
 }
 
 func (m *templateCaptureChatModel) ChatStream(

@@ -2590,6 +2590,17 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
 			response, callErr := chatModel.Chat(ctx, messages, opts)
 			if callErr == nil && response != nil {
+				// A length-truncated rewrite must never flow into a page
+				// write-back: callers store generateWithTemplate output on
+				// success, so swallowing finish_reason=length silently
+				// shrinks the page (Tencent/WeKnora#3468). Fail fast
+				// instead of retrying — the same prompt truncates
+				// deterministically, and the batch err path already keeps
+				// the existing page.
+				if response.FinishReason == "length" {
+					logger.Warnf(ctx, "wiki ingest: LLM rewrite truncated (finish_reason=length), keeping existing content")
+					return "", errors.New("LLM rewrite truncated (finish_reason=length)")
+				}
 				return response.Content, nil
 			}
 			if callErr == nil {
