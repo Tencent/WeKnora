@@ -1101,13 +1101,18 @@ onMounted(() => {
 }
 
 .model-card__subtitle {
+  // A flex row, not inline text: .model-card__vendor is an inline-flex box
+  // whose baseline comes from its first item — the 14px icon, whose baseline
+  // is its bottom edge — so as inline content it sat a couple of pixels off
+  // the "· 200K" beside it. Aligning the row by centre instead of by
+  // baseline puts every part of the line on one optical line.
+  display: flex;
+  align-items: center;
+  min-width: 0;
   margin: 2px 0 0;
   font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .model-card__vendor {
@@ -1115,6 +1120,21 @@ onMounted(() => {
   align-items: center;
   gap: 5px;
   min-width: 0;
+
+  // The vendor name is the only part long enough to need truncating; the
+  // context window and the badges after it must stay readable.
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.model-card__sep,
+.model-card__ctx,
+.model-card__vision {
+  flex: none;
+  white-space: nowrap;
 }
 
 .model-card__vendor-icon {

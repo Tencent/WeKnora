@@ -173,7 +173,8 @@
             <label class="form-label">{{ $t('model.editor.providerLabel') }}</label>
             <t-select v-model="formData.provider" :placeholder="$t('model.editor.providerPlaceholder')"
               :loading="loadingProviders" filterable
-              @change="handleProviderChange" :popup-props="{ overlayClassName: 'provider-select-popup' }">
+              @change="handleProviderChange"
+              :popup-props="{ overlayClassName: 'wk-popover provider-select-popup', overlayInnerStyle: matchTriggerWidth }">
               <!--
                 已选值：图标 + 本地化名称（描述只在下拉里展示，避免输入框过长）。
                 目录里已经没有这个 provider 时（厂商下线 / 旧数据）退回显示原始 id，
@@ -261,7 +262,7 @@
               clearable
               :placeholder="getModelNamePlaceholder()"
               :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
-              :popup-props="{ overlayClassName: 'catalog-model-select-popup' }"
+              :popup-props="{ overlayClassName: 'wk-popover catalog-model-select-popup', overlayInnerStyle: matchTriggerWidth }"
               @create="handleCatalogModelCreate"
               @change="handleCatalogModelChange"
             >
@@ -736,6 +737,21 @@ const selectedProviderDisplayLabel = computed(() => (
     ? providerDisplayLabel(selectedProvider.value)
     : (formData.value.provider || '')
 ))
+/**
+ * Pin a select's dropdown to the width of its input.
+ *
+ * TDesign sizes a select popup as max(popup content, trigger)
+ * (select-input/hooks/useOverlayInnerStyle), so one long option — a vendor
+ * whose description lists half a dozen model ids — stretches the whole menu
+ * past the field it belongs to, leaving a wide band of empty space and
+ * pushing the tick mark far from the text. Passing a function here replaces
+ * that matching outright (the hook keeps a function as-is), and the option
+ * rows already ellipsize, so the long ones simply truncate.
+ */
+const matchTriggerWidth = (triggerElement: HTMLElement) => ({
+  width: `${triggerElement.offsetWidth}px`,
+})
+
 const extraFieldDisplayLabel = (field: ModelProviderExtraField) => extraFieldLabel(field, currentLocale.value)
 
 /**
@@ -2891,33 +2907,15 @@ const handleCancel = () => {
       outline: none;
     }
 
-    // hover 态：用浅 brand 色而非强灰，跟主题色调一致
-    &:hover:not(.t-is-selected) {
-      background-color: var(--td-bg-color-container-hover);
-    }
+
   }
 
-  // 命中态：浅一点的底色 + 左侧主题色条作为 affordance，不再用全填的灰底
-  .t-select-option.t-is-selected {
-    background-color: var(--td-brand-color-light);
-    color: var(--td-text-color-primary);
-    font-weight: 500;
-    position: relative;
-
-    &::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 8px;
-      bottom: 8px;
-      width: 3px;
-      background: var(--td-brand-color);
-      border-radius: 0 2px 2px 0;
-    }
-
-    .provider-name {
-      color: var(--td-brand-color);
-    }
+  // 命中态不在这里定义：assets/theme/tdesign-overrides.less 已经把 TDesign
+  // 默认那条整行铺满的 --td-brand-color-light 换成了中性底色 + 一个主题色小
+  // 对勾，全站一致。这里再写一版只会让这个下拉跟「模型类型 / 模型来源」那两
+  // 排筛选对不上。选中行的主名称仍然点一下主题色，作为双行排版里的锚点。
+  .t-select-option.t-is-selected .provider-name {
+    color: var(--td-brand-color);
   }
 
   .provider-option {
@@ -2949,6 +2947,7 @@ const handleCancel = () => {
       display: flex;
       flex-direction: column;
       gap: 2px;
+      // 允许收缩，描述才能在浮层宽度内省略（浮层宽度由 matchTriggerWidth 钉死）。
       min-width: 0;
       flex: 1;
     }
