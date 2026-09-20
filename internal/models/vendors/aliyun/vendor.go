@@ -36,8 +36,10 @@
 //     qwen3.7-max-2026-05-17, qwen3-next-80b-a3b-thinking. Those carry
 //     "off": null;
 //   - `reasoning_effort` IS accepted in the compatible mode, but only on some
-//     families: qwen3.8 takes low | medium | xhigh (default xhigh, and it may
-//     not be combined with `thinking_budget`), DeepSeek-V4 takes high | max
+//     families: qwen3.8 takes low | medium | xhigh (default xhigh; "不支持
+//     reasoning_effort 与 thinking_budget 同时设置，同时设置会报错", which
+//     those entries carry as thinking_budget_excludes_effort so the budget
+//     yields to the level), DeepSeek-V4 takes high | max
 //     (plus low on the dated -0813 / -0731 snapshots), glm-5.3 takes
 //     low | high | max. It is therefore off at the vendor level and enabled
 //     per entry;

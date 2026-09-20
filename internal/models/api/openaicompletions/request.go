@@ -342,8 +342,18 @@ func (c *Client) applyThinking(body map[string]any, opts *api.Options, stream bo
 		effort = levels.Value(level)
 	}
 	effortField := orDefault(s.ReasoningEffortField, "reasoning_effort")
-	if enabled && opts != nil && opts.ThinkingBudgetTokens > 0 && s.ThinkingBudgetField != "" {
-		body[s.ThinkingBudgetField] = opts.ThinkingBudgetTokens
+	budget := 0
+	if enabled && opts != nil && s.ThinkingBudgetField != "" {
+		budget = opts.ThinkingBudgetTokens
+	}
+	if effort != "" && s.ThinkingBudgetExcludesEffort {
+		// The two fields are mutually exclusive on this vendor and sending
+		// both is an error; the graded level wins because it is what the
+		// caller picked.
+		budget = 0
+	}
+	if budget > 0 {
+		body[s.ThinkingBudgetField] = budget
 	}
 
 	switch s.ThinkingFormat {

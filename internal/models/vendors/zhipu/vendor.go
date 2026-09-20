@@ -19,7 +19,10 @@
 //     off -> "none";
 //   - per-model effort ladders narrow that set: GLM-5.3 and GLM-5.3-Flash
 //     only take low / high / max, and GLM-5.2 maps none|minimal to "no
-//     thinking", low|medium to high and xhigh to max;
+//     thinking", low|medium to high and xhigh to max. That folding is the
+//     platform's own, so GLM-5.2 keeps sending "minimal" and "low"
+//     verbatim: rewriting minimal to "low" here would turn the weakest rung
+//     into the strongest one, because the platform then folds it to high;
 //   - GLM-5.3 and GLM-5.3-Flash/FlashX always think: `thinking.type` "限制只
 //     能开启", so both carry "off": null
 //     (https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3,

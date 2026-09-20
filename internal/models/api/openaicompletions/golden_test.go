@@ -168,6 +168,36 @@ func TestGolden(t *testing.T) {
 			want:   map[string]any{"enable_thinking": false, "thinking_budget": nil},
 		},
 		{
+			name: "dashscope qwen3.8: effort and budget are mutually exclusive, budget yields",
+			mutate: func(c *Config) {
+				c.Settings.ThinkingFormat = catalog.ThinkingFormatEnableThinking
+				c.Settings.ThinkingBudgetField = "thinking_budget"
+				c.Settings.ThinkingBudgetExcludesEffort = true
+				c.Settings.SupportsReasoningEffort = true
+				c.ThinkingLevels = api.ThinkingLevelMap{api.ReasoningMax: api.StringPtr("xhigh")}
+			},
+			opts: &api.Options{
+				Thinking: ptrBool(true), ReasoningEffort: api.ReasoningMax, ThinkingBudgetTokens: 4096,
+			},
+			stream: true,
+			want: map[string]any{
+				"enable_thinking": true, "reasoning_effort": "xhigh", "thinking_budget": nil,
+			},
+		},
+		{
+			name: "dashscope qwen3.8: budget still rides along when no effort is graded",
+			mutate: func(c *Config) {
+				c.Settings.ThinkingFormat = catalog.ThinkingFormatEnableThinking
+				c.Settings.ThinkingBudgetField = "thinking_budget"
+				c.Settings.ThinkingBudgetExcludesEffort = true
+			},
+			opts:   &api.Options{Thinking: ptrBool(true), ThinkingBudgetTokens: 4096},
+			stream: true,
+			want: map[string]any{
+				"enable_thinking": true, "reasoning_effort": nil, "thinking_budget": float64(4096),
+			},
+		},
+		{
 			name: "dashscope hybrid streaming: enable_thinking true with budget",
 			mutate: func(c *Config) {
 				c.Settings.ThinkingFormat = catalog.ThinkingFormatEnableThinking

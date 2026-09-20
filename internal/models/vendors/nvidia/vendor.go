@@ -21,7 +21,10 @@
 //     defaulting to max, MiniMax M3 takes `thinking_mode`, and Gemma 4
 //     switches thinking with a `<|think|>` token in the system prompt rather
 //     than any parameter — which is why the gemma entry sets thinking_format
-//     "none" instead of pretending a switch exists;
+//     "none" instead of pretending a switch exists. The entries that grade
+//     with a top-level `reasoning_effort` carry thinking_format "openai";
+//     without it the vendor default would emit a chat-template switch and
+//     drop the level, leaving the picker's rungs inert;
 //   - most hosted endpoints are metered at zero cost; the Nemotron and
 //     DeepSeek endpoints are priced.
 //
@@ -39,7 +42,11 @@
 //     current llama-nemotron-rerank-vl-1b-v2;
 //   - DeepSeek on NIM wants `reasoning_effort` nested inside
 //     chat_template_kwargs, which this compat model cannot express: it emits
-//     either a chat-template switch or a top-level effort, never both.
+//     either a chat-template switch or a top-level effort, never both;
+//   - the kimi-k3 card states "Thinking is always enabled" and advertises
+//     "configurable low, high, or max reasoning effort", but none of its
+//     samples show the parameter. The entry assumes the top-level
+//     `reasoning_effort` its first-party API documents.
 package nvidia
 
 import (

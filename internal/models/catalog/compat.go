@@ -36,31 +36,32 @@ const (
 // Chat Completions settings. JSON keys are the documented names used in
 // models.json and config/models.json.
 type OpenAICompletionsCompat struct {
-	MaxTokensField             *string         `json:"max_tokens_field,omitempty"`
-	ThinkingFormat             *ThinkingFormat `json:"thinking_format,omitempty"`
-	ThinkingEnabledValue       *string         `json:"thinking_enabled_value,omitempty"`
-	ThinkingAlwaysSend         *bool           `json:"thinking_always_send,omitempty"`
-	ThinkingDisableOnNonStream *bool           `json:"thinking_disable_on_non_stream,omitempty"`
-	ThinkingBudgetField        *string         `json:"thinking_budget_field,omitempty"`
-	ReasoningEffortField       *string         `json:"reasoning_effort_field,omitempty"`
-	SupportsReasoningEffort    *bool           `json:"supports_reasoning_effort,omitempty"`
-	SupportsDeveloperRole      *bool           `json:"supports_developer_role,omitempty"`
-	SupportsStore              *bool           `json:"supports_store,omitempty"`
-	SupportsUsageInStreaming   *bool           `json:"supports_usage_in_streaming,omitempty"`
-	SupportsTemperature        *bool           `json:"supports_temperature,omitempty"`
-	FixedTemperature           *float64        `json:"fixed_temperature,omitempty"`
-	SupportsSeed               *bool           `json:"supports_seed,omitempty"`
-	ToolChoiceModes            []string        `json:"tool_choice_modes,omitempty"`
-	SupportsParallelToolCalls  *bool           `json:"supports_parallel_tool_calls,omitempty"`
-	SupportsResponseFormat     *bool           `json:"supports_response_format,omitempty"`
-	SupportsMultiContent       *bool           `json:"supports_multi_content,omitempty"`
-	ReplayReasoningContent     *bool           `json:"replay_reasoning_content,omitempty"`
-	PromptCacheKey             *bool           `json:"prompt_cache_key,omitempty"`
-	CacheControlFormat         *string         `json:"cache_control_format,omitempty"`
-	PromptCacheAccounting      *bool           `json:"prompt_cache_accounting,omitempty"`
-	ToolCallExtraFields        []string        `json:"tool_call_extra_fields,omitempty"`
-	ExtraBody                  map[string]any  `json:"extra_body,omitempty"`
-	ReasoningFields            []string        `json:"reasoning_fields,omitempty"`
+	MaxTokensField               *string         `json:"max_tokens_field,omitempty"`
+	ThinkingFormat               *ThinkingFormat `json:"thinking_format,omitempty"`
+	ThinkingEnabledValue         *string         `json:"thinking_enabled_value,omitempty"`
+	ThinkingAlwaysSend           *bool           `json:"thinking_always_send,omitempty"`
+	ThinkingDisableOnNonStream   *bool           `json:"thinking_disable_on_non_stream,omitempty"`
+	ThinkingBudgetField          *string         `json:"thinking_budget_field,omitempty"`
+	ThinkingBudgetExcludesEffort *bool           `json:"thinking_budget_excludes_effort,omitempty"`
+	ReasoningEffortField         *string         `json:"reasoning_effort_field,omitempty"`
+	SupportsReasoningEffort      *bool           `json:"supports_reasoning_effort,omitempty"`
+	SupportsDeveloperRole        *bool           `json:"supports_developer_role,omitempty"`
+	SupportsStore                *bool           `json:"supports_store,omitempty"`
+	SupportsUsageInStreaming     *bool           `json:"supports_usage_in_streaming,omitempty"`
+	SupportsTemperature          *bool           `json:"supports_temperature,omitempty"`
+	FixedTemperature             *float64        `json:"fixed_temperature,omitempty"`
+	SupportsSeed                 *bool           `json:"supports_seed,omitempty"`
+	ToolChoiceModes              []string        `json:"tool_choice_modes,omitempty"`
+	SupportsParallelToolCalls    *bool           `json:"supports_parallel_tool_calls,omitempty"`
+	SupportsResponseFormat       *bool           `json:"supports_response_format,omitempty"`
+	SupportsMultiContent         *bool           `json:"supports_multi_content,omitempty"`
+	ReplayReasoningContent       *bool           `json:"replay_reasoning_content,omitempty"`
+	PromptCacheKey               *bool           `json:"prompt_cache_key,omitempty"`
+	CacheControlFormat           *string         `json:"cache_control_format,omitempty"`
+	PromptCacheAccounting        *bool           `json:"prompt_cache_accounting,omitempty"`
+	ToolCallExtraFields          []string        `json:"tool_call_extra_fields,omitempty"`
+	ExtraBody                    map[string]any  `json:"extra_body,omitempty"`
+	ReasoningFields              []string        `json:"reasoning_fields,omitempty"`
 }
 
 // OpenAICompletionsSettings is the resolved (fully defaulted) form.
@@ -79,6 +80,12 @@ type OpenAICompletionsSettings struct {
 	ThinkingDisableOnNonStream bool
 	// ThinkingBudgetField carries Options.ThinkingBudgetTokens ("thinking_budget").
 	ThinkingBudgetField string
+	// ThinkingBudgetExcludesEffort marks a vendor that rejects a request
+	// carrying both the budget and the effort (DashScope's qwen3.8-max
+	// series: "不支持 reasoning_effort 与 thinking_budget 同时设置，同时设置
+	// 会报错"). The graded level is what the caller actually picked, so the
+	// budget is the field that yields.
+	ThinkingBudgetExcludesEffort bool
 	// ReasoningEffortField is "reasoning_effort" unless a vendor renames it.
 	ReasoningEffortField    string
 	SupportsReasoningEffort bool

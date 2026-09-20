@@ -16,8 +16,11 @@
 //     effect in thinking mode, where values below 0.95 are treated as 0.95;
 //     presence_penalty / frequency_penalty are "no longer supported" and are
 //     silently dropped by the vendor;
-//   - tool_choice accepts none / auto / required / a named function, i.e. the
-//     plain OpenAI set, so no restriction is configured here;
+//   - tool_choice lists none / auto / required / a named function, but the
+//     reference adds that "required and named tool choices are not supported
+//     in thinking mode; the API returns a 400 error". Thinking is the
+//     documented default, and the compat model cannot make the restriction
+//     conditional on it, so only none / auto are ever sent;
 //   - assistant turns must replay `reasoning_content` when the request
 //     carries `tools`; without `tools` the vendor ignores it;
 //   - usage reports `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
@@ -91,6 +94,9 @@ func init() {
 				SupportsReasoningEffort: catalog.Ptr(true),
 				PromptCacheAccounting:   catalog.Ptr(true),
 				SupportsStore:           catalog.Ptr(false),
+				// `required` and named functions 400 while thinking is on,
+				// which is the default on every current model.
+				ToolChoiceModes: []string{"none", "auto"},
 			},
 		},
 		// DeepSeek grades effort as low / high / max (plus `none`, which the

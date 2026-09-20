@@ -199,6 +199,7 @@ builtin_models:
 | `thinking_format` | `openai`（`reasoning_effort`）、`thinking-type`（`thinking.type`）、`enable-thinking`（`enable_thinking` + `thinking_budget`）、`chat-template-kwargs`（vLLM）、`openrouter`（`reasoning`）、`none` | 见各厂商 |
 | `supports_reasoning_effort` | 是否额外发 `reasoning_effort` | DeepSeek、智谱、火山、OpenAI |
 | `thinking_always_send` / `thinking_disable_on_non_stream` | 每次请求都钉开关；非流式强制关 | 百炼混合思考模型 |
+| `thinking_budget_excludes_effort` | 厂商禁止 `thinking_budget` 与 `reasoning_effort` 同发，发了报错；置真时按档位优先、丢掉预算 | 百炼 qwen3.8 系列 |
 | `supports_temperature` / `fixed_temperature` | 推理模型拒绝采样参数；Moonshot v1 固定 1 | GPT-5 / o 系列、Kimi K2.5+ |
 | `tool_choice_modes` | 允许的 `tool_choice` 取值 | DeepSeek 思考模式不支持 `required` |
 | `replay_reasoning_content` | 多轮回传 `reasoning_content` | DeepSeek、MiMo、Kimi |

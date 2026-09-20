@@ -268,6 +268,40 @@ func TestFamilyExpectations(t *testing.T) {
 	if r := resolve(t, "deepseek", "deepseek-reasoner"); r.ThinkingLevels.Supports(api.ReasoningOff) {
 		t.Error("deepseek/deepseek-reasoner should not allow thinking off")
 	}
+	// required / named tool choices 400 in thinking mode, which is the
+	// DeepSeek default, so neither may reach the wire.
+	if r := resolve(t, "deepseek", "deepseek-v4-pro"); r.OpenAICompletions.AllowsToolChoice("required") ||
+		r.OpenAICompletions.AllowsToolChoice("function") {
+		t.Error("deepseek should not send required or named tool choices")
+	}
+	// GLM-5.2 reads "minimal" as give-up-thinking and folds "low" to high, so
+	// rewriting minimal to low here would send the weakest rung as the
+	// strongest one.
+	if r := resolve(t, "zhipu", "glm-5.2"); r.ThinkingLevels.Value(api.ReasoningMinimal) != "minimal" {
+		t.Errorf("zhipu/glm-5.2 minimal should stay minimal, got %q", r.ThinkingLevels.Value(api.ReasoningMinimal))
+	}
+	// Both entries grade with a top-level reasoning_effort; the vendor
+	// default (chat_template_kwargs) would silently drop the level.
+	for _, model := range []string{"z-ai/glm-5.3", "moonshotai/kimi-k3"} {
+		r := resolve(t, "nvidia", model)
+		if r.OpenAICompletions.ThinkingFormat != catalog.ThinkingFormatOpenAI ||
+			!r.OpenAICompletions.SupportsReasoningEffort {
+			t.Errorf("nvidia/%s should grade with a top-level reasoning_effort", model)
+		}
+	}
+	if r := resolve(t, "nvidia", "nvidia/nemotron-3-ultra-550b-a55b"); r.OpenAICompletions.ThinkingFormat !=
+		catalog.ThinkingFormatChatTemplateKwargs {
+		t.Error("nvidia nemotron should keep the chat-template switch")
+	}
+	// DashScope errors when qwen3.8-max gets both fields.
+	for _, model := range []string{"qwen3.8-max", "qwen3.8-flash", "qwen3.8-plus-2026-09-01"} {
+		if r := resolve(t, "aliyun", model); !r.OpenAICompletions.ThinkingBudgetExcludesEffort {
+			t.Errorf("aliyun/%s should not send thinking_budget next to reasoning_effort", model)
+		}
+	}
+	if r := resolve(t, "aliyun", "qwen3-max"); r.OpenAICompletions.ThinkingBudgetExcludesEffort {
+		t.Error("aliyun/qwen3-max has no effort to conflict with and should keep the budget")
+	}
 }
 
 func TestHooks(t *testing.T) {
