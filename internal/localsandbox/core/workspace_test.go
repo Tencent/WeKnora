@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -111,4 +112,40 @@ func TestResolveSessionWorkspaceIsPerSession(t *testing.T) {
 func TestResolveRejectsEmptySessionID(t *testing.T) {
 	_, err := workspaceFixture(t, "").Resolve(context.Background(), "")
 	require.Error(t, err)
+}
+
+func TestResolveSessionWorkspaceKeepsPathAfterMidnight(t *testing.T) {
+	base := t.TempDir()
+	r := NewWorkspaceResolver(DirLayout{
+		SessionRoot: filepath.Join(base, "Documents", "WeKnora"),
+	}, fakeProjects{}).(*workspaceResolver)
+
+	day1 := time.Date(2026, 9, 20, 23, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return day1 }
+	first, err := r.Resolve(context.Background(), "sess-keep")
+	require.NoError(t, err)
+
+	r.now = func() time.Time { return day1.Add(2 * time.Hour) }
+	second, err := r.Resolve(context.Background(), "sess-keep")
+	require.NoError(t, err)
+	require.Equal(t, first.Root, second.Root)
+}
+
+func TestResolveSessionWorkspaceUsesFullSessionID(t *testing.T) {
+	r := workspaceFixture(t, "")
+	a, err := r.Resolve(context.Background(), "session-abcdef123456")
+	require.NoError(t, err)
+	b, err := r.Resolve(context.Background(), "session-abcdef999999")
+	require.NoError(t, err)
+	require.NotEqual(t, a.Root, b.Root)
+	require.Contains(t, a.Root, "session-abcdef123456")
+	require.Contains(t, b.Root, "session-abcdef999999")
+}
+
+func TestResolveSessionWorkspaceIsOwnerPrivate(t *testing.T) {
+	ws, err := workspaceFixture(t, "").Resolve(context.Background(), "sess-mode")
+	require.NoError(t, err)
+	info, err := os.Stat(ws.Root)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 }

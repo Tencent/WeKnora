@@ -125,6 +125,10 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		logger.Errorf(ctx, "[LocalSandbox] backend unavailable: %v", err)
 		return nil, err
 	}
+	if err := s.backend.EnsureReady(ctx); err != nil {
+		logger.Errorf(ctx, "[LocalSandbox] backend not ready: %v", err)
+		return nil, fmt.Errorf("ensure sandbox ready: %w", err)
+	}
 	ws, policy, err := s.workspaceFor(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
@@ -136,7 +140,7 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	if req.WorkDir != "" {
 		// work_dir is a convenience for the model, not a privilege boundary;
 		// it is checked against the same guard the file tools use.
-		resolved, err := NewPathGuard(policy).CheckWrite(req.WorkDir)
+		resolved, err := NewPathGuard(policy).CheckDir(req.WorkDir)
 		if err != nil {
 			logger.Warnf(ctx, "[LocalSandbox] work_dir denied session=%s work_dir=%q: %v",
 				req.SessionID, req.WorkDir, err)
@@ -184,11 +188,7 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	watchDone := make(chan struct{})
 	go func() {
 		defer close(watchDone)
-		select {
-		case <-runCtx.Done():
-			_ = proc.Kill()
-		case <-done:
-		}
+		watchKill(runCtx, done, proc)
 	}()
 
 	stdout, stderr := drain(proc)
@@ -215,6 +215,20 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		Exit:   status,
 		Denial: denial,
 	}, nil
+}
+
+func watchKill(ctx context.Context, done <-chan struct{}, proc Process) {
+	select {
+	case <-done:
+		return
+	case <-ctx.Done():
+	}
+	select {
+	case <-done:
+		return
+	default:
+		_ = proc.Kill()
+	}
 }
 
 const commandLogLimit = 240

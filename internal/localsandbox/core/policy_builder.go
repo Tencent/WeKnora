@@ -44,14 +44,12 @@ func (m ApprovalMode) Shipped() bool {
 
 // ParseApprovalMode normalizes a stored preference.
 //
-// This is the lenient input boundary: the value comes from a file the user can
-// hand-edit, and a typo there must not stop the agent from running. Anything
-// unknown or not yet shipped becomes ModeAuto, which is the only mode that
-// currently runs. Enforcement is strict elsewhere — Service refuses a mode it
-// cannot honour rather than substituting one.
+// Unknown values fall back to ModeAuto so a typo cannot stop the agent.
+// Known-but-unshipped modes are returned unchanged: mapping ask→auto would
+// widen access, and Service refuses a mode it cannot honour.
 func ParseApprovalMode(raw string) ApprovalMode {
 	mode := ApprovalMode(strings.ToLower(strings.TrimSpace(raw)))
-	if mode.Shipped() {
+	if mode.Known() {
 		return mode
 	}
 	return ModeAuto
@@ -71,7 +69,7 @@ var ErrApprovalModeNotShipped = errors.New("localsandbox: approval mode is not a
 // the motivating case).
 var credentialDirNames = []string{
 	".ssh", ".aws", ".gnupg", ".kube", ".docker", ".npmrc", ".config/gh",
-	".netrc", ".git-credentials", ".pypirc", ".password-store",
+	".netrc", ".git-credentials", ".config/git/credentials", ".pypirc", ".password-store",
 	".config/gcloud", ".azure", ".terraform.d",
 	".cargo/credentials", ".cargo/credentials.toml", ".gem/credentials",
 	".m2/settings.xml", ".gradle/gradle.properties",
@@ -85,10 +83,9 @@ var credentialDirNames = []string{
 // about build tooling: it is the smallest set that keeps ordinary development
 // working, and anything not on it stays invisible.
 var homeReadableNames = []string{
-	".asdf", ".bun", ".cache", ".cargo", ".deno", ".gem", ".gradle",
-	".local", ".npm", ".nvm", ".pnpm-store", ".pyenv", ".rbenv", ".rustup",
-	".sdkman", ".volta", ".yarn", "go",
-	"Library/Caches",
+	".asdf", ".bun", ".cargo", ".deno", ".gem", ".gradle",
+	".npm", ".nvm", ".pnpm-store", ".pyenv", ".rbenv", ".rustup",
+	".sdkman", ".volta", ".yarn",
 }
 
 // shellStartupNames are the files a login shell reads. Service runs commands
@@ -186,10 +183,12 @@ func (b *PolicyBuilder) denyRead() []string {
 	for _, name := range credentialDirNames {
 		deny = append(deny, filepath.Join(b.homeDir, filepath.FromSlash(name)))
 	}
-	// WeKnora's database, stored files and signing key. Deny this subtree
-	// rather than the whole app data directory: a deny-read entry covering a
-	// writable root is rejected by Validate.
-	deny = append(deny, filepath.Join(b.appDataDir, "data"))
+	// The whole app-data tree, not just data/: rewriting prefs or keys
+	// here would let the sandbox lift its own constraints. Validate
+	// rejects a workspace that sits inside this path.
+	if b.appDataDir != "" && b.appDataDir != string(filepath.Separator) {
+		deny = append(deny, b.appDataDir)
+	}
 	return deny
 }
 

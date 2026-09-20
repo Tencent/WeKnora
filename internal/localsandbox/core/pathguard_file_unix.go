@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -49,14 +51,36 @@ func (g *PathGuard) mkdirRel(root, rel, orig string, perm os.FileMode) error {
 	return unix.Close(fd)
 }
 
+func (g *PathGuard) dirRel(root, rel, orig string) error {
+	fd, err := walkOpen(root, rel, false, unix.O_RDONLY|unix.O_DIRECTORY, 0)
+	if err != nil {
+		return mapWalkErr(orig, err)
+	}
+	return unix.Close(fd)
+}
+
 func (g *PathGuard) lstatRel(root, rel, orig string) (os.FileInfo, error) {
-	fd, err := walkOpen(root, rel, false, unix.O_RDONLY, 0)
+	parts := relParts(rel)
+	if len(parts) == 0 {
+		info, err := os.Lstat(root)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("%w: %q", ErrPathDenied, orig)
+		}
+		return info, nil
+	}
+	parentRel := strings.Join(parts[:len(parts)-1], string(os.PathSeparator))
+	if parentRel == "" {
+		parentRel = "."
+	}
+	fd, err := walkOpen(root, parentRel, false, unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if err != nil {
 		return nil, mapWalkErr(orig, err)
 	}
-	f := os.NewFile(uintptr(fd), orig)
-	defer f.Close()
-	return f.Stat()
+	_ = unix.Close(fd)
+	return os.Lstat(filepath.Join(root, rel))
 }
 
 func walkOpen(root, rel string, mkdir bool, lastFlags int, lastPerm uint32) (int, error) {

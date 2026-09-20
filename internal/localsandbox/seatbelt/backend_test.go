@@ -230,6 +230,35 @@ func TestSeatbeltDoesNotKillAfterSuccessfulWait(t *testing.T) {
 	require.False(t, killed, "spawn-context cancel after Wait must not Kill(-pid)")
 }
 
+func TestSeatbeltKillAfterWaitDoesNotSignal(t *testing.T) {
+	backend, p, _ := darwinFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	prep, err := backend.Prepare(ctx, p)
+	require.NoError(t, err)
+	defer prep.Close()
+
+	proc, err := backend.Spawn(ctx, prep, core.Command{
+		Argv: []string{"/bin/bash", "-c", "echo hi"},
+		Cwd:  p.Cwd,
+	})
+	require.NoError(t, err)
+
+	go func() { _, _ = io.ReadAll(proc.Stdout()) }()
+	go func() { _, _ = io.ReadAll(proc.Stderr()) }()
+	status, err := proc.Wait(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, status.Code)
+
+	require.NoError(t, proc.Kill())
+	sp := proc.(*seatbeltProcess)
+	sp.mu.Lock()
+	killed := sp.killed
+	sp.mu.Unlock()
+	require.False(t, killed, "Kill after Wait must be a no-op")
+}
+
 // When the workspace is the home directory, credential files sit inside the
 // writable root. subpath deny does not match a file, so without a literal
 // write deny `echo pwned > ~/.cargo/credentials.toml` succeeds.
@@ -262,6 +291,33 @@ func TestSeatbeltDeniesWritingCredentialFileInsideWritableHome(t *testing.T) {
 
 	status, out = runSandboxed(t, backend, p, `echo x > `+filepath.Join(cargo, "config.toml"))
 	require.Equal(t, 0, status.Code, out)
+}
+
+func TestSeatbeltDeniesWritingAppDataInsideWritableHome(t *testing.T) {
+	backend, err := New()
+	require.NoError(t, err)
+	require.NoError(t, backend.Available())
+
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	appData := filepath.Join(home, "Library", "App")
+	require.NoError(t, os.MkdirAll(appData, 0o755))
+	prefs := filepath.Join(appData, "prefs.json")
+	require.NoError(t, os.WriteFile(prefs, []byte("keep"), 0o600))
+
+	builder := core.NewPolicyBuilder(home, appData)
+	p, err := builder.Build(core.ModeAuto, core.Workspace{
+		Kind:       core.WorkspaceProject,
+		Root:       home,
+		ProtectGit: true,
+	})
+	require.NoError(t, err)
+
+	status, out := runSandboxed(t, backend, p, `echo pwned > `+prefs)
+	require.NotEqual(t, 0, status.Code, out)
+	got, err := os.ReadFile(prefs)
+	require.NoError(t, err)
+	require.Equal(t, "keep", string(got))
 }
 
 func TestSeatbeltDeniesNetwork(t *testing.T) {
@@ -297,6 +353,19 @@ func TestSeatbeltInjectsTMPDIR(t *testing.T) {
 	status, out := runSandboxed(t, backend, p, `printf '%s\n' "$TMPDIR"`)
 	require.Equal(t, 0, status.Code, out)
 	require.Contains(t, out, p.Cwd)
+}
+
+func TestSeatbeltDoesNotInheritSecretEnv(t *testing.T) {
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "super-secret")
+	t.Setenv("GITHUB_TOKEN", "gho_secret")
+
+	backend, p, _ := darwinFixture(t)
+	status, out := runSandboxed(t, backend, p, `printenv`)
+	require.Equal(t, 0, status.Code, out)
+	require.NotContains(t, out, "super-secret")
+	require.NotContains(t, out, "gho_secret")
+	require.NotContains(t, out, "AWS_SECRET_ACCESS_KEY")
+	require.NotContains(t, out, "GITHUB_TOKEN")
 }
 
 func TestSeatbeltKillsProcessTreeOnContextCancel(t *testing.T) {

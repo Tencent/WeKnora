@@ -38,7 +38,10 @@ func NewPathGuard(p Policy) *PathGuard {
 	return g
 }
 
-// CheckWrite returns the resolved absolute path when writing is permitted.
+// CheckWrite reports whether writing path is permitted after following
+// symlinks. It is a policy probe, not a safe I/O primitive: a parent can be
+// replaced between this check and a later os.WriteFile. Trusted file tools
+// must use WriteFile / ReadFile / MkdirAll / Lstat / CheckDir instead.
 func (g *PathGuard) CheckWrite(path string) (string, error) {
 	resolved, err := g.resolve(path)
 	if err != nil {

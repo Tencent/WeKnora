@@ -71,3 +71,32 @@ func TestPathGuardReadFileDoesNotFollowSymlinkEscape(t *testing.T) {
 	_, err := g.ReadFile(filepath.Join(root, "stolen"))
 	require.ErrorIs(t, err, ErrPathDenied)
 }
+
+func TestPathGuardLstatReportsFinalSymlink(t *testing.T) {
+	root, g := guardFixture(t)
+	target := filepath.Join(root, "real.txt")
+	require.NoError(t, os.WriteFile(target, []byte("hi"), 0o644))
+	link := filepath.Join(root, "alias.txt")
+	require.NoError(t, os.Symlink(target, link))
+
+	info, err := g.Lstat(link)
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode()&os.ModeSymlink)
+}
+
+func TestPathGuardCheckDirDoesNotFollowReplacedParent(t *testing.T) {
+	root, g := guardFixture(t)
+	inner := filepath.Join(root, "out")
+	require.NoError(t, os.Mkdir(inner, 0o755))
+	secrets := filepath.Join(filepath.Dir(root), "secrets")
+
+	got, err := g.CheckDir(inner)
+	require.NoError(t, err)
+	require.Equal(t, inner, got)
+
+	require.NoError(t, os.Remove(inner))
+	require.NoError(t, os.Symlink(secrets, inner))
+
+	_, err = g.CheckDir(inner)
+	require.ErrorIs(t, err, ErrPathDenied)
+}

@@ -137,3 +137,41 @@ func (g *PathGuard) Lstat(path string) (os.FileInfo, error) {
 	}
 	return g.lstatRel(root, rel, path)
 }
+
+// CheckDir returns path after walking from a workspace root without following
+// symlinks. Service uses this for work_dir so a swapped parent cannot move
+// the child process's cwd outside the workspace.
+func (g *PathGuard) CheckDir(path string) (string, error) {
+	root, rel, err := g.allowDir(path)
+	if err != nil {
+		return "", err
+	}
+	if err := g.dirRel(root, rel, path); err != nil {
+		return "", err
+	}
+	if rel == "." {
+		return root, nil
+	}
+	return filepath.Join(root, rel), nil
+}
+
+func (g *PathGuard) allowDir(path string) (root, rel string, err error) {
+	path, err = cleanAbs(path)
+	if err != nil {
+		return "", "", err
+	}
+	if g.denied(path) {
+		return "", "", fmt.Errorf("%w: %q", ErrPathDenied, path)
+	}
+	for _, wr := range g.writable {
+		if !PathUnder(path, wr.Path) {
+			continue
+		}
+		rel, err = relativeInside(wr.Path, path)
+		if err != nil {
+			continue
+		}
+		return wr.Path, rel, nil
+	}
+	return "", "", fmt.Errorf("%w: %q", ErrPathDenied, path)
+}

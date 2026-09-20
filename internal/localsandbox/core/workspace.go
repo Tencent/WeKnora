@@ -41,7 +41,7 @@ type ProjectLookup interface {
 // DirLayout names the roots the resolver allocates under.
 type DirLayout struct {
 	// SessionRoot is where session workspaces are created, by default
-	// ~/Documents/WeKnora. It is user-visible on purpose.
+	// ~/Documents/WeKnoraLite. It is user-visible on purpose.
 	SessionRoot string
 }
 
@@ -58,9 +58,6 @@ type workspaceResolver struct {
 func NewWorkspaceResolver(layout DirLayout, projects ProjectLookup) WorkspaceResolver {
 	return &workspaceResolver{layout: layout, projects: projects, now: time.Now}
 }
-
-// sessionDirSuffixLen bounds the directory name derived from a session ID.
-const sessionDirSuffixLen = 12
 
 func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Workspace, error) {
 	sessionID = strings.TrimSpace(sessionID)
@@ -87,11 +84,23 @@ func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Work
 	}
 
 	day := r.now().Format("2006-01-02")
-	root := filepath.Join(r.layout.SessionRoot, day, "session-"+sanitizeSegment(sessionID))
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	seg := sanitizeSegment(sessionID)
+	if existing, ok := r.existingSessionDir(seg); ok {
+		logger.Infof(ctx, "[LocalSandbox] workspace session=%s kind=session root=%s", sessionID, existing)
+		return Workspace{
+			Kind:       WorkspaceSession,
+			Root:       existing,
+			ProtectGit: false,
+		}, nil
+	}
+	root := filepath.Join(r.layout.SessionRoot, day, "session-"+seg)
+	if err := os.MkdirAll(root, 0o700); err != nil {
 		logger.Errorf(ctx, "[LocalSandbox] create session workspace session=%s root=%s: %v",
 			sessionID, root, err)
 		return Workspace{}, fmt.Errorf("localsandbox: create session workspace: %w", err)
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		return Workspace{}, fmt.Errorf("localsandbox: restrict session workspace: %w", err)
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -119,12 +128,28 @@ func sanitizeSegment(id string) string {
 		default:
 			b.WriteRune('-')
 		}
-		if b.Len() >= sessionDirSuffixLen {
-			break
-		}
 	}
 	if b.Len() == 0 {
 		return "session"
 	}
 	return b.String()
+}
+
+func (r *workspaceResolver) existingSessionDir(seg string) (string, bool) {
+	if r.layout.SessionRoot == "" || seg == "" {
+		return "", false
+	}
+	matches, err := filepath.Glob(filepath.Join(r.layout.SessionRoot, "*", "session-"+seg))
+	if err != nil || len(matches) == 0 {
+		return "", false
+	}
+	info, err := os.Lstat(matches[0])
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", false
+	}
+	resolved, err := filepath.EvalSymlinks(matches[0])
+	if err != nil {
+		return "", false
+	}
+	return resolved, true
 }

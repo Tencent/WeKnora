@@ -87,12 +87,15 @@ func TestApprovalModeShippedIsAutoOnly(t *testing.T) {
 	require.False(t, ApprovalMode("yolo").Known())
 }
 
-// Stored preferences are user input: a hand-edited file must not be able to
-// stop the agent from running, so parsing falls back to the one shipped mode.
-func TestParseApprovalModeNormalizesToShippedMode(t *testing.T) {
+// Unknown values fall back to Auto so a typo cannot stop the agent.
+// Known-but-unshipped modes stay themselves: mapping ask→auto would widen
+// access past what was asked for, and Service refuses them instead.
+func TestParseApprovalModeKeepsKnownModes(t *testing.T) {
 	require.Equal(t, ModeAuto, ParseApprovalMode("auto"))
 	require.Equal(t, ModeAuto, ParseApprovalMode(" AUTO "))
-	for _, raw := range []string{"", "ask", "full", "yolo"} {
+	require.Equal(t, ModeAsk, ParseApprovalMode("ask"))
+	require.Equal(t, ModeFull, ParseApprovalMode("full"))
+	for _, raw := range []string{"", "yolo"} {
 		require.Equal(t, ModeAuto, ParseApprovalMode(raw), raw)
 	}
 }
@@ -110,8 +113,8 @@ func TestBuildDeniesReadingCredentialDirectories(t *testing.T) {
 
 	require.Contains(t, p.DenyRead, filepath.Join(b.homeDir, ".ssh"))
 	require.Contains(t, p.DenyRead, filepath.Join(b.homeDir, ".aws"))
-	require.Contains(t, p.DenyRead, filepath.Join(b.appDataDir, "data"))
-	require.NotContains(t, p.DenyRead, b.appDataDir)
+	require.Contains(t, p.DenyRead, filepath.Join(b.homeDir, ".config", "git", "credentials"))
+	require.Contains(t, p.DenyRead, b.appDataDir)
 }
 
 // Seatbelt cannot enforce a read allowlist on darwin (dropping the blanket
@@ -146,6 +149,9 @@ func TestBuildReAllowsToolchainsAndShellStartupFiles(t *testing.T) {
 	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".nvm"))
 	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".cargo"))
 	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".zshrc"))
+	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".cache"))
+	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".local"))
+	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, "Library", "Caches"))
 }
 
 // A re-opened toolchain directory must not carry its credential file back in.
@@ -204,5 +210,38 @@ func TestRelaxRefusesToGrantDeniedPath(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = b.Relax(base, Grant{WritePath: filepath.Join(b.homeDir, ".ssh")})
+	require.Error(t, err)
+}
+
+func TestBuildDeniesAppDataWhenWorkspaceIsHome(t *testing.T) {
+	b, ws := builderFixture(t)
+	ws.Root = b.homeDir
+	ws.ProtectGit = true
+
+	p, err := b.Build(ModeAuto, ws)
+	require.NoError(t, err)
+	require.Contains(t, p.DenyRead, b.appDataDir)
+	for _, deny := range p.DenyRead {
+		require.False(t, PathUnder(ws.Root, deny),
+			"home workspace %q must not be covered by deny-read %q", ws.Root, deny)
+	}
+}
+
+func TestBuildRefusesWorkspaceInsideAppData(t *testing.T) {
+	b, _ := builderFixture(t)
+	ws := Workspace{
+		Kind: WorkspaceSession,
+		Root: filepath.Join(b.appDataDir, "sessions", "s1"),
+	}
+	_, err := b.Build(ModeAuto, ws)
+	require.ErrorIs(t, err, ErrDenyReadCoversRoot)
+}
+
+func TestRelaxRefusesToGrantAppData(t *testing.T) {
+	b, ws := builderFixture(t)
+	base, err := b.Build(ModeAuto, ws)
+	require.NoError(t, err)
+
+	_, err = b.Relax(base, Grant{WritePath: b.appDataDir})
 	require.Error(t, err)
 }

@@ -22,14 +22,29 @@ type fakeBackend struct {
 	stderr    string
 	exit      ExitStatus
 	spawnErr  error
-	available error
-	proc      Process
+	available   error
+	ensureReady error
+	calls       []string
+	proc        Process
 	onSpawn   func()
 }
 
 func (f *fakeBackend) Name() string                      { return "fake" }
-func (f *fakeBackend) Available() error                  { return f.available }
-func (f *fakeBackend) EnsureReady(context.Context) error { return nil }
+func (f *fakeBackend) Available() error {
+	f.mu.Lock()
+	f.calls = append(f.calls, "available")
+	err := f.available
+	f.mu.Unlock()
+	return err
+}
+
+func (f *fakeBackend) EnsureReady(context.Context) error {
+	f.mu.Lock()
+	f.calls = append(f.calls, "ready")
+	err := f.ensureReady
+	f.mu.Unlock()
+	return err
+}
 func (f *fakeBackend) TearDown(context.Context) error    { return nil }
 
 type fakePrepared struct{ fp string }
@@ -39,6 +54,7 @@ func (p fakePrepared) Close() error        { return nil }
 
 func (f *fakeBackend) Prepare(_ context.Context, p Policy) (Prepared, error) {
 	f.mu.Lock()
+	f.calls = append(f.calls, "prepare")
 	f.prepared = append(f.prepared, p.Fingerprint())
 	f.mu.Unlock()
 	return fakePrepared{fp: p.Fingerprint()}, nil
@@ -328,6 +344,26 @@ func TestServiceRunDoesNotKillAfterSuccess(t *testing.T) {
 	// The deferred timeout cancel must not race a leftover watcher into Kill.
 	time.Sleep(20 * time.Millisecond)
 	require.Equal(t, 0, proc.killCount())
+}
+
+func TestWatchKillSkipsWhenDoneAlreadyClosed(t *testing.T) {
+	proc := newRecordingProcess(ExitStatus{Code: 0})
+	done := make(chan struct{})
+	close(done)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	watchKill(ctx, done, proc)
+	require.Equal(t, 0, proc.killCount())
+}
+
+func TestServiceRunCallsEnsureReadyBeforePrepare(t *testing.T) {
+	backend := &fakeBackend{exit: ExitStatus{Code: 0}}
+	svc := serviceFixture(t, backend, ModeAuto)
+
+	_, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "echo hi"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"available", "ready", "prepare"}, backend.calls)
 }
 
 func TestServiceRunKillsOnParentCancel(t *testing.T) {

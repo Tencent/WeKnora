@@ -53,9 +53,9 @@ var (
 	ErrPathDenied             = core.ErrPathDenied
 )
 
-// ParseApprovalMode normalizes a stored preference into a mode this build can
-// serve. Callers reading user input go through it so the shipped-mode list
-// stays in one place.
+// ParseApprovalMode normalizes a stored preference. Unknown values become
+// Auto; known-but-unshipped modes are returned unchanged so Service can refuse
+// them instead of silently widening access.
 func ParseApprovalMode(raw string) ApprovalMode { return core.ParseApprovalMode(raw) }
 
 // Constructors are forwarded as thin functions rather than function-valued

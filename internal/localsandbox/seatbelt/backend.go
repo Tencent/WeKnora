@@ -211,13 +211,33 @@ func resolveExisting(path string) (string, error) {
 	return filepath.Join(resolvedParent, filepath.Base(cleaned)), nil
 }
 
+var inheritedEnvNames = map[string]struct{}{
+	"PATH": {}, "HOME": {}, "USER": {}, "LOGNAME": {}, "SHELL": {},
+	"TERM": {}, "LANG": {}, "LC_ALL": {}, "LC_CTYPE": {}, "LC_MESSAGES": {},
+	"TZ": {},
+}
+
 func mergedEnv(env map[string]string) []string {
-	// Nil means inherit. An empty map would otherwise wipe PATH and break
-	// anything that is not an absolute path.
+	// Nil means a filtered inherit. An empty map would otherwise wipe PATH
+	// and break anything that is not an absolute path.
 	if env == nil {
-		return append([]string(nil), os.Environ()...)
+		return filterInheritedEnv(os.Environ())
 	}
 	return envSlice(env)
+}
+
+func filterInheritedEnv(environ []string) []string {
+	out := make([]string, 0, len(inheritedEnvNames))
+	for _, kv := range environ {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if _, allowed := inheritedEnvNames[name]; allowed || strings.HasPrefix(name, "LC_") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 func withSandboxTemp(env []string, cwd string, explicit map[string]string) []string {
@@ -261,6 +281,7 @@ type seatbeltProcess struct {
 
 	mu     sync.Mutex
 	killed bool
+	reaped bool
 }
 
 func (p *seatbeltProcess) Stdout() io.Reader { return p.stdout }
@@ -287,6 +308,10 @@ func (p *seatbeltProcess) watchContext(ctx context.Context) {
 // descendants running after a timeout.
 func (p *seatbeltProcess) Kill() error {
 	p.mu.Lock()
+	if p.reaped {
+		p.mu.Unlock()
+		return nil
+	}
 	p.killed = true
 	p.mu.Unlock()
 
@@ -302,12 +327,12 @@ func (p *seatbeltProcess) Kill() error {
 
 func (p *seatbeltProcess) Wait(context.Context) (core.ExitStatus, error) {
 	err := p.cmd.Wait()
-	close(p.waitDone)
-	duration := time.Since(p.started)
-
 	p.mu.Lock()
+	p.reaped = true
 	killed := p.killed
 	p.mu.Unlock()
+	close(p.waitDone)
+	duration := time.Since(p.started)
 
 	status := core.ExitStatus{Code: p.cmd.ProcessState.ExitCode(), Killed: killed, Duration: duration}
 	// A non-zero exit is a normal result, not a transport failure: only errors
