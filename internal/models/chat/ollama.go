@@ -151,10 +151,12 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		}
 		toolCalls = c.toolCallTo(resp.Message.ToolCalls)
 
-		// 获取token计数
+		// 获取token计数。eval_count 本身就是回答的 token 数，不含 prompt
+		// (https://github.com/ollama/ollama/blob/main/docs/api.md)，所以不能再
+		// 减去 prompt_eval_count —— 流式分支一直是直接采用的，这里对齐它。
 		if resp.EvalCount > 0 {
 			promptTokens = resp.PromptEvalCount
-			completionTokens = resp.EvalCount - promptTokens
+			completionTokens = resp.EvalCount
 		}
 
 		return nil

@@ -253,7 +253,7 @@ make model-catalog-diff VENDOR=deepseek # 只看一家
 
 #### 部署叠加 `config/models.json`
 
-不改代码也能加厂商、改地址、补模型：复制 `config/models.json.example` 到 `config/models.json`（或用 `MODELS_CONFIG` 指定路径），结构与 PI 的 `~/.pi/agent/models.json` 一致：`providers` 按厂商 id 键入，已知 id 打补丁，新 id 声明新厂商；支持 `base_url` / `base_urls`、`api_key`（`${ENV}` 插值）、`headers`、`compat`、`thinking_levels`、`models`（按 id upsert）、`model_overrides`、`icon`。未知键在启动时报错。运行时不会自动从外部拉取模型数据：字段名、思考格式这类行为事实必须由人维护。
+不改代码也能加厂商、改地址、补模型：复制 `config/models.json.example` 到 `config/models.json`（或用 `MODELS_CONFIG` 指定路径），结构与 PI 的 `~/.pi/agent/models.json` 一致：`providers` 按厂商 id 键入，已知 id 打补丁，新 id 声明新厂商；支持 `base_url` / `base_urls`、`api_key`（`${ENV}` 插值）、`headers`、`compat`、`thinking_levels`、`models`（按 id upsert：已存在的 id 只覆盖你写出来的字段，没写的 `reasoning`、`thinking_levels`、`compat`、`input` 保持原样；新 id 则整条新建）、`model_overrides`、`icon`（内联 `<svg …>` 字符串，或相对于叠加文件所在目录的 `.svg` 路径——不接受绝对路径、不能越出该目录、必须是 256 KB 以内的 SVG，因为图标会以 data URI 下发给所有能打开模型页的人）。未知键在启动时报错。运行时不会自动从外部拉取模型数据：字段名、思考格式这类行为事实必须由人维护。
 
 #### 升级到目录化实现的注意事项
 
