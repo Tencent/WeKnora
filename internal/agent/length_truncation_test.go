@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -292,4 +293,127 @@ func TestFinishStalledTurn_ReusesTheLiveAnswerStream(t *testing.T) {
 	assert.True(t, emitted[0].Done)
 	assert.True(t, emitted[0].Truncated)
 	assert.Equal(t, "already on screen", state.FinalAnswer)
+}
+
+// A model that writes its reasoning inline as <think> can be cut off before
+// the closing tag. The pair regex leaves such a block whole, so the round
+// looks like it produced an answer when all it produced was reasoning —
+// which would both leak the chain of thought into the answer area and skip
+// the empty-content retry this case is supposed to use.
+func TestAnalyzeResponse_UnterminatedThinkCountsAsNoAnswer(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	recorder := &truncationRecorder{}
+	recorder.attach(engine.eventBus)
+
+	verdict := engine.analyzeResponse(
+		context.Background(),
+		&types.ChatResponse{
+			FinishReason: "length",
+			Content:      "<think>First I should enumerate the eight steps, then for each one",
+		},
+		types.AgentStep{}, 0, "sess-1", time.Now(),
+	)
+
+	assert.True(t, verdict.isDone)
+	assert.True(t, verdict.emptyContent, "reasoning is not an answer; this must reach the empty-content retry")
+	assert.False(t, verdict.truncated)
+	assert.Empty(t, verdict.finalAnswer)
+	assert.Empty(t, recorder.snapshot(), "the chain of thought must not be emitted as the answer")
+}
+
+// The same guard on a closed block followed by real text: the answer survives.
+func TestAnalyzeResponse_ClosedThinkKeepsTheAnswerAfterIt(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	verdict := engine.analyzeResponse(
+		context.Background(),
+		&types.ChatResponse{
+			FinishReason: "length",
+			Content:      "<think>planning</think>1. First point. 2. Second po",
+		},
+		types.AgentStep{}, 0, "sess-1", time.Now(),
+	)
+	assert.True(t, verdict.truncated)
+	assert.Equal(t, "1. First point. 2. Second po", verdict.finalAnswer)
+}
+
+// The truncation has to survive the round trip through agent_steps: history is
+// rebuilt from those, never from the live answer events.
+func TestAnalyzeResponse_TruncatedVerdictMarksItsStep(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	verdict := engine.analyzeResponse(
+		context.Background(),
+		&types.ChatResponse{FinishReason: "length", Content: "half an answer"},
+		types.AgentStep{Iteration: 3}, 3, "sess-1", time.Now(),
+	)
+	require.True(t, verdict.truncated)
+	assert.True(t, verdict.step.Truncated, "the step is what a reloaded conversation reads")
+
+	// And it must survive the storage sanitizer that runs before the write.
+	stored := agenttools.SanitizeAgentStepsForStorage([]types.AgentStep{verdict.step})
+	require.Len(t, stored, 1)
+	assert.True(t, stored[0].Truncated)
+}
+
+// Text that came with tool calls is a preamble, not an answer. The guard must
+// not hand "let me look that up" to the user as the final answer.
+func TestFinishStalledTurn_IgnoresAToolCallPreamble(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	recorder := &truncationRecorder{}
+	recorder.attach(engine.eventBus)
+	state := &types.AgentState{}
+
+	engine.finishStalledTurn(context.Background(), state, "sess-1", &types.ChatResponse{
+		Content:        "let me look that up",
+		AnswerStreamed: true,
+		AnswerEventID:  "answer-live",
+		ToolCalls: []types.LLMToolCall{{
+			ID: "c1", Type: "function",
+			Function: types.FunctionCall{Name: "wiki_read_page", Arguments: `{"slugs":["a`},
+		}},
+	}, true)
+
+	assert.Equal(t, truncatedAnswerFallback, state.FinalAnswer,
+		"a preamble must not become the answer")
+	emitted := recorder.snapshot()
+	require.Len(t, emitted, 2)
+	assert.Equal(t, truncatedAnswerFallback, emitted[0].Content)
+	assert.True(t, emitted[1].Done)
+}
+
+// The round that trips the consecutive-length guard is recorded like any
+// other, and its refused tool calls are what let the UI retract the preamble
+// from the answer area.
+func TestExecuteLoop_ConsecutiveLengthRecordsTheFinalRound(t *testing.T) {
+	truncatedToolRound := mockResponse{chunks: []types.StreamResponse{{
+		ResponseType: types.ResponseTypeAnswer,
+		Content:      "let me look that up",
+		ToolCalls: []types.LLMToolCall{{
+			ID: "c1", Type: "function",
+			Function: types.FunctionCall{Name: "wiki_read_page", Arguments: `{"slugs":["very-long`},
+		}},
+		Done:         true,
+		FinishReason: "length",
+	}}}
+	rounds := make([]mockResponse, maxConsecutiveLengthRounds)
+	for i := range rounds {
+		rounds[i] = truncatedToolRound
+	}
+	engine := newTestEngine(t, &mockChat{responses: rounds},
+		func(cfg *types.AgentConfig) { cfg.MaxIterations = 30 })
+
+	state := &types.AgentState{}
+	_, err := engine.executeLoop(
+		context.Background(), state, "read every page",
+		emptyMessages(), emptyTools(), "sess-1", "msg-1",
+	)
+
+	require.NoError(t, err)
+	require.Len(t, state.RoundSteps, maxConsecutiveLengthRounds,
+		"the round that tripped the guard must not vanish from the transcript")
+	last := state.RoundSteps[len(state.RoundSteps)-1]
+	assert.True(t, last.Truncated)
+	require.Len(t, last.ToolCalls, 1, "its tool calls are recorded as refused")
+	require.NotNil(t, last.ToolCalls[0].Result)
+	assert.False(t, last.ToolCalls[0].Result.Success)
+	assert.Equal(t, truncatedAnswerFallback, state.FinalAnswer)
 }

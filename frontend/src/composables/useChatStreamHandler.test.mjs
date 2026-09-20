@@ -236,3 +236,65 @@ test('a superseded prior round does not block or re-seed the new round', () => {
   assert.equal(message._eventMap.get('r2').content, '正式答案')
   assert.equal(message.content, '正式答案')
 })
+
+// A round the completion cap cut off marks its agent step. History is rebuilt
+// from agent_steps and never replays the live answer events, so the rebuilt
+// answer event has to carry the flag forward or a reloaded half-written answer
+// looks finished.
+const buildReconstruct = () => {
+  const helperStart = source.indexOf('const agentStepsAreTruncated =')
+  const start = source.indexOf('const reconstructEventStreamFromSteps = (')
+  const end = source.indexOf('const handleMsgList = async (', start)
+  const block = source.slice(helperStart, end)
+  return vm.runInNewContext(
+    ts.transpile(`(() => { ${block}; return reconstructEventStreamFromSteps })()`),
+    { markRaw: (v) => v, steerStepEvents: () => [] },
+  )
+}
+
+test('a truncated agent step marks the rebuilt answer event', () => {
+  const reconstruct = buildReconstruct()
+  const steps = [
+    { iteration: 0, thought: 'looking it up', tool_calls: [{ id: 'c1', name: 'wiki_read_page' }] },
+    { iteration: 1, thought: '', tool_calls: [], truncated: true },
+  ]
+  const events = reconstruct(steps, '1. First point. 2. Second po', true, false, 0, undefined)
+  const answer = events.filter((e) => e.type === 'answer').at(-1)
+  assert.equal(answer.content, '1. First point. 2. Second po')
+  assert.equal(answer.truncated, true)
+})
+
+test('an ordinary finished turn is not marked truncated', () => {
+  const reconstruct = buildReconstruct()
+  const steps = [{ iteration: 0, thought: '', tool_calls: [] }]
+  const events = reconstruct(steps, 'a complete answer', true, false, 0, undefined)
+  const answer = events.filter((e) => e.type === 'answer').at(-1)
+  assert.equal(answer.content, 'a complete answer')
+  assert.equal(answer.truncated, undefined)
+})
+
+test('the live answer path carries truncated onto the event and the message', () => {
+  const chunkStart = source.indexOf("case 'answer':")
+  const chunk = source.slice(chunkStart, source.indexOf("case 'artifacts_pending'", chunkStart))
+  const state = { fullContent: { value: '' } }
+  const process = vm.runInNewContext(
+    ts.transpile(`(message, data, dataPayload) => { switch ('answer') { ${chunk} } }`),
+    {
+      ...state,
+      recomposeAgentAnswer: (m) =>
+        (m.agentEventStream || []).filter((e) => e.type === 'answer' && !e.superseded).map((e) => e.content || '').join(''),
+      log() {},
+      onAgentAnswerDone() {},
+      isAgentStreamSession: () => true,
+      loading: { value: true },
+      isReplying: { value: true },
+    },
+  )
+  const message = { agentEventStream: [], _eventMap: new Map(), content: '' }
+  process(message, { content: 'half an answer' }, { event_id: 'r1' })
+  assert.equal(message.truncated, undefined)
+  // The cap is only known at the close, so the Done marker carries it too.
+  process(message, { content: '' }, { event_id: 'r1', done: true, truncated: true })
+  assert.equal(message._eventMap.get('r1').truncated, true)
+  assert.equal(message.truncated, true)
+})

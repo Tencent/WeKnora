@@ -547,6 +547,7 @@ func (e *AgentEngine) analyzeResponse(
 			})
 		}
 
+		step.Truncated = true
 		return responseVerdict{
 			isDone:      true,
 			finalAnswer: response.Content,

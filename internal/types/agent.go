@@ -444,6 +444,12 @@ type AgentStep struct {
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall `json:"tool_calls"` // Tools called in this step (Act phase)
 	Timestamp        time.Time  `json:"timestamp"`  // When this step occurred
+	// Truncated marks the round the completion-token cap cut off. It rides in
+	// the agent_steps JSON so a reloaded, shared or re-opened conversation can
+	// still show that the answer stops mid-sentence by design, rather than
+	// looking finished. Live streaming carries the same fact on the answer
+	// event; this is what survives the round trip.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // GetObservations returns observations from all tool calls in this step

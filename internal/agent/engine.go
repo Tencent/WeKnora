@@ -519,9 +519,16 @@ func (e *AgentEngine) finishStalledTurn(
 	response *types.ChatResponse,
 	truncated bool,
 ) {
+	// Text that arrived alongside tool calls is a preamble — "let me look that
+	// up" — from a round that meant to keep working. Presenting it as the final
+	// answer would show an opening line and call the turn finished, so the
+	// fallback speaks for it instead.
 	answer := response.Content
+	if len(response.ToolCalls) > 0 {
+		answer = ""
+	}
 	answerID := ""
-	if response.AnswerStreamed {
+	if response.AnswerStreamed && answer != "" {
 		answerID = response.AnswerEventID
 	}
 	if strings.TrimSpace(answer) == "" {
@@ -832,6 +839,23 @@ func (e *AgentEngine) runReActIteration(
 				"round":              round,
 				"consecutive_length": guards.consecutiveLength,
 			})
+			// Record the round the way every other round is recorded. The
+			// refused tool calls are also what tells the UI that this round's
+			// plain text was a preamble: without them the "let me look that
+			// up" line stays sitting in the answer area, exactly as if it were
+			// the answer.
+			step := types.AgentStep{
+				Iteration:        state.CurrentRound,
+				Thought:          response.Content,
+				ReasoningContent: response.ReasoningContent,
+				ToolCalls:        make([]types.ToolCall, 0),
+				Timestamp:        time.Now(),
+				Truncated:        true,
+			}
+			if len(response.ToolCalls) > 0 {
+				e.failTruncatedToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
+			}
+			state.RoundSteps = append(state.RoundSteps, step)
 			e.finishStalledTurn(ctx, state, sessionID, response, true)
 			return iterOutcomeBreak, nil
 		}
