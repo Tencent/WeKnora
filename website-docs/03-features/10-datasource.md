@@ -54,7 +54,7 @@
 
 - **认证**（`client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。
-- **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。飞书侧移动节点后下一次同步文档自动落到新目录；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式节点按其指向的实体去重，不重复入库。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
+- **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。Wiki 侧节点改名/移动会更新节点编辑时间，下一次增量同步文档自动落到新目录；Drive 侧目录改名/文件移动不改变文件修改时间，增量同步不感知，需手动全量同步刷新目录结构；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式节点按其指向的实体去重，不重复入库。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
 - **docx 解析模式**（数据源编辑页 → 解析模式，配置存于数据源级 `settings.parse_mode`，默认 `blocks`）：
   - `blocks`（默认）→ blocks API 逐块读取并转为 GFM Markdown（`core/blocks.go`/`markdown.go`），保留代码块语言、LaTeX 公式、原生表格（合并单元格以左上值填充）等；覆盖不到的块类型（画板思维笔记等少数）降级为占位标记，不影响文档其余部分；
   - `export` → 异步导出 API（`POST /drive/v1/export_tasks`）导出 `.docx` 走通用文档解析。
@@ -64,6 +64,10 @@
   - **文档类附件**（PDF/Markdown/Excel/PPT/Word 等）：下载后作为独立知识入库，落在父文档同目录，文件名用附件自身名称；父文档元数据与附件元数据互相记录对方 ID，正文中附件位置以文件名列表展示。同字节文件在多个文档出现时共享同一份知识（去重）。
   - **电子表格/多维表格块**：转为 GFM 内联表格（非独立文件），检索时保持文档上下文。
   - **视频**：不存储不解析，正文留占位与飞书原链接。
+- **mention 渲染增强**（blocks 模式，缺权限时同步不失败，仅降级展示）：
+  - `mention_user`（@成员）：经 contacts API 反查 open_id 显示真实姓名，需 `contact:user.base:readonly`，缺失时降级为「@成员」；
+  - `mention_doc`（云文档引用）：经 `POST /drive/v1/metas/batch_query` 批量回填文档标题（≤200/次），需 `drive:drive.metadata:readonly`；无权限（970003）、文档已删（970005）或接口失败时回退为 `[URL](URL)` 形式；
+  - 时间轴等文档小组件块无公开读取 API，渲染为占位注记，不影响文档其余部分。
 - **内容抓取**（`fetchNodeContent`）按 `obj_type` 分派：
   - `docx`/`doc` → 按上述解析模式分派；
   - `sheet`/`bitable` → 导出 `.xlsx`；
