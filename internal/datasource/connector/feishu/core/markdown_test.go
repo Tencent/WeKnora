@@ -594,6 +594,72 @@ func TestBlocksToMarkdown_CodeBlockLanguage(t *testing.T) {
 	}
 }
 
+// TestBlocksToMarkdown_CodeFenceClosingBare pins the CommonMark rule that the
+// closing fence carries no info string: reusing the tagged opening fence left
+// a final "```java" line and the block never terminated.
+func TestBlocksToMarkdown_CodeFenceClosingBare(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "c", BlockType: BlockTypeCode,
+			Code: &BlockText{Style: &BlockTextStyle{Language: 29}, Elements: []TextElement{{TextRun: &TextRun{Content: "System.out.print(1);"}}}}},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got, want := strings.TrimRight(string(md), "\n"), "```java\nSystem.out.print(1);\n```"; got != want {
+		t.Errorf("code block:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestBlocksToMarkdown_Heading7to9DegradeToBold pins the GFM cap: Feishu
+// heading7-9 render as bold text — a 7-hash "heading" is invalid GFM and
+// every renderer shows the raw hashes as literal text.
+func TestBlocksToMarkdown_Heading7to9DegradeToBold(t *testing.T) {
+	cases := map[int]string{
+		9:  "**七级**",
+		10: "**八级**",
+		11: "**九级**",
+	}
+	for bt, want := range cases {
+		blocks := []DocxBlock{
+			{BlockID: "root", BlockType: BlockTypePage},
+			{BlockID: "h", BlockType: bt, Text: txt(strings.Trim(want, "*"))},
+		}
+		md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+		if err != nil {
+			t.Fatalf("block %d: err: %v", bt, err)
+		}
+		if !strings.Contains(string(md), want) {
+			t.Errorf("block %d: want %q in output, got:\n%s", bt, want, md)
+		}
+		if strings.Contains(string(md), "#######") {
+			t.Errorf("block %d: emitted invalid 7-hash heading:\n%s", bt, md)
+		}
+	}
+}
+
+// TestBlocksToMarkdown_LinkURLPercentDecoded pins that the docx API's
+// percent-encoded link targets are reversed before markdown escaping:
+// "http%3A%2F%2Fwww.baidu.com" must render as a usable http:// URL.
+func TestBlocksToMarkdown_LinkURLPercentDecoded(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "p", BlockType: BlockTypeText, Text: &BlockText{
+			Elements: []TextElement{{TextRun: &TextRun{Content: "百度", TextElementStyle: &TextElementStyle{
+				Link: &TextElementLink{URL: "http%3A%2F%2Fwww.baidu.com"},
+			}}}},
+		}},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(string(md), "[百度](http://www.baidu.com)") {
+		t.Errorf("encoded URL not decoded, got:\n%s", md)
+	}
+}
+
 func TestBlocksToMarkdown_OrderedListRealSequence(t *testing.T) {
 	ord := func(seq string, content string) DocxBlock {
 		b := DocxBlock{BlockID: content, BlockType: BlockTypeOrdered}

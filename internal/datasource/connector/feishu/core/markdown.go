@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -263,7 +264,12 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 	default:
 		if b.BlockType >= BlockTypeHeading1 && b.BlockType <= blockTypeHeading9 {
 			level := b.BlockType - BlockTypeHeading1 + 1
-			return strings.Repeat("#", level) + " " + r.richText(headingText(b))
+			if level <= 6 {
+				return strings.Repeat("#", level) + " " + r.richText(headingText(b))
+			}
+			// GFM headings stop at H6; Feishu heading7-9 degrade to bold text
+			// (a 7-hash "heading" is plain text to every Markdown renderer).
+			return "**" + r.richText(headingText(b)) + "**"
 		}
 		return unsupportedBlockNote(b)
 	}
@@ -372,13 +378,15 @@ func plainText(bt *BlockText) string {
 	return sb.String()
 }
 
-// richText renders the inline elements of a text-bearing block: styled text
-// runs, @-mentions, and inline KaTeX equations.
-// escapeURL makes a raw URL safe inside a Markdown link target: spaces and
-// unbalanced closing parens would otherwise terminate the [...](&#46;..) early
-// and truncate the link. Percent-encoding keeps the target byte-identical
-// after Markdown decoding.
+// escapeURL renders a Feishu-provided URL as a safe Markdown href. The docx
+// API percent-encodes link targets (e.g. http%3A%2F%2F...), so that encoding
+// is reversed first — a value that does not decode cleanly passes through
+// untouched — and only then are characters that would break the inline-link
+// syntax re-escaped.
 func escapeURL(u string) string {
+	if d, err := url.PathUnescape(u); err == nil {
+		u = d
+	}
 	r := strings.NewReplacer(" ", "%20", ")", "%29", "(", "%28")
 	return r.Replace(u)
 }
@@ -467,11 +475,14 @@ func (r *mdRenderer) renderCode(b DocxBlock) string {
 		lang = gfmCodeLanguages[b.Code.Style.Language]
 	}
 	content := r.richText(b.Code)
-	fence := strings.Repeat("`", codeFenceLength(content))
+	n := codeFenceLength(content)
+	open := strings.Repeat("`", n)
 	if lang != "" {
-		fence += lang
+		open += lang
 	}
-	return fence + "\n" + content + "\n" + fence
+	// CommonMark: the closing fence carries no info string — reusing the
+	// opening fence (with language) would leave the block unterminated.
+	return open + "\n" + content + "\n" + strings.Repeat("`", n)
 }
 
 // codeFenceLength returns a fence length strictly longer than the longest
