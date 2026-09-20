@@ -121,8 +121,13 @@ func (e *JinaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) 
 			}
 		}
 
-		// Rebuild request each time to ensure Body is valid
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		// Rebuild request each time to ensure Body is valid.
+		// Declare req separately: with `req, err := ...` the `:=` introduces a
+		// loop-local err, so the `resp, err = client.Do(req)` below writes to
+		// that copy and the outer err stays nil. Every retry failing then
+		// returns (nil, nil) and the caller dereferences resp.Body → SIGSEGV.
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("JinaEmbedder failed to create request: %v", err)
 			continue
