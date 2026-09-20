@@ -913,7 +913,6 @@ onBeforeUnmount(() => {
     class="manual-editor-drawer"
     :visible="visible"
     :title="dialogTitle"
-    :description="$t('manualEditor.description')"
     icon="edit-1"
     width="960px"
     :min-width="600"
@@ -931,7 +930,7 @@ onBeforeUnmount(() => {
         <t-tag size="small" theme="success" variant="light" v-else>
           {{ $t('manualEditor.status.publishedTag') }}
         </t-tag>
-        <span v-if="lastUpdatedText" class="manual-editor-footer-time">{{ lastUpdatedText }}</span>
+        <span class="manual-editor-footer-count">{{ counterText }}</span>
       </div>
     </template>
 
@@ -967,26 +966,25 @@ onBeforeUnmount(() => {
     </template>
 
     <div class="manual-editor" v-if="initialLoaded">
-      <!-- Title + target KB share one row: the editor below is what the user
-           came here for, so the metadata stays a single band at the top. -->
-      <div class="manual-editor__meta">
-        <div class="meta-field meta-field--title">
-          <label class="meta-label required" for="manual-editor-title">
-            {{ $t('manualEditor.form.titleLabel') }}
-          </label>
-          <t-input
-            id="manual-editor-title"
-            v-model="form.title"
-            maxlength="100"
-            :placeholder="$t('manualEditor.form.titlePlaceholder')"
-            showLimitNumber
-          />
-        </div>
-
-        <div class="meta-field meta-field--kb">
-          <label class="meta-label required">{{ $t('manualEditor.form.knowledgeBaseLabel') }}</label>
+      <!-- Document head: the title reads as the document's title, not as a form
+           field, and the destination is a sentence instead of a labelled row. -->
+      <div class="doc-head">
+        <t-input
+          id="manual-editor-title"
+          class="doc-title"
+          v-model="form.title"
+          maxlength="100"
+          borderless
+          :placeholder="$t('manualEditor.form.titlePlaceholder')"
+          :aria-label="$t('manualEditor.form.titleLabel')"
+        />
+        <div class="doc-meta">
+          <span class="doc-meta__label">{{ $t('manualEditor.form.destinationLabel') }}</span>
           <t-select
+            class="doc-meta__kb"
             v-model="form.kbId"
+            size="small"
+            auto-width
             :disabled="kbDisabled"
             :loading="kbLoading"
             :options="kbOptions"
@@ -997,6 +995,7 @@ onBeforeUnmount(() => {
               <div class="kb-empty">{{ $t('manualEditor.noDocumentKnowledgeBases') }}</div>
             </template>
           </t-select>
+          <span v-if="lastUpdatedText" class="doc-meta__time">{{ lastUpdatedText }}</span>
         </div>
       </div>
 
@@ -1040,6 +1039,25 @@ onBeforeUnmount(() => {
             </template>
           </div>
           <div class="editor-toolbar__view">
+            <t-tooltip placement="top-right" :show-arrow="false">
+              <template #content>
+                <div class="shortcut-sheet">
+                  <div class="shortcut-sheet__title">{{ $t('manualEditor.shortcuts.title') }}</div>
+                  <div v-for="row in shortcutRows" :key="row.keys" class="shortcut-sheet__row">
+                    <kbd>{{ row.keys }}</kbd>
+                    <span>{{ row.label }}</span>
+                  </div>
+                </div>
+              </template>
+              <button
+                type="button"
+                class="toolbar-shortcuts"
+                :aria-label="$t('manualEditor.shortcuts.title')"
+                @mousedown.prevent
+              >
+                <t-icon name="keyboard" />
+              </button>
+            </t-tooltip>
             <div class="view-switch" role="group" :aria-label="$t('manualEditor.view.groupLabel')">
               <t-tooltip v-for="option in viewOptions" :key="option.value" :content="option.tooltip" placement="top">
                 <!-- aria-disabled, not disabled: a disabled button swallows hover,
@@ -1086,28 +1104,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="editor-status">
-          <span class="editor-status__count">{{ counterText }}</span>
-          <t-tooltip placement="top-right" :show-arrow="false">
-            <template #content>
-              <div class="shortcut-sheet">
-                <div class="shortcut-sheet__title">{{ $t('manualEditor.shortcuts.title') }}</div>
-                <div v-for="row in shortcutRows" :key="row.keys" class="shortcut-sheet__row">
-                  <kbd>{{ row.keys }}</kbd>
-                  <span>{{ row.label }}</span>
-                </div>
-              </div>
-            </template>
-            <button
-              type="button"
-              class="editor-status__shortcuts"
-              :aria-label="$t('manualEditor.shortcuts.title')"
-              @mousedown.prevent
-            >
-              <t-icon name="keyboard" />
-            </button>
-          </t-tooltip>
-        </div>
       </div>
     </div>
     <div v-else class="loading-wrapper">
@@ -1141,11 +1137,9 @@ onBeforeUnmount(() => {
   }
 }
 
-.manual-editor-footer-time {
+.manual-editor-footer-count {
   font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1174,72 +1168,92 @@ onBeforeUnmount(() => {
   }
 }
 
-/* ---------- 元信息行：标题 + 目标知识库 ---------- */
-.manual-editor__meta {
+/* ---------- 文档头：标题 + 存入位置 ---------- */
+.doc-head {
   flex-shrink: 0;
   display: flex;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.meta-field {
-  min-width: 0;
-  display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
 
-.meta-field--title {
-  flex: 1 1 auto;
-}
+/* 标题按“文档标题”排版，不做成表单控件；hover/聚焦才显出输入框的边界 */
+:deep(.doc-title) {
+  padding: 0;
+  background: transparent;
+  /* 负外边距抵掉内边距：文字和下方编辑卡左对齐，hover 底色仍有呼吸空间 */
+  margin: 0 -8px;
 
-.meta-field--kb {
-  flex: 0 0 260px;
-}
-
-.meta-label {
-  font-size: var(--app-text-sm);
-  font-weight: 500;
-  color: var(--td-text-color-secondary);
-
-  &.required::after {
-    content: '*';
-    margin-left: 4px;
-    color: var(--td-error-color);
+  .t-input {
+    padding: 4px 8px;
+    border-radius: var(--app-radius-sm);
+    background: transparent;
+    transition: background var(--app-motion-fast) ease;
   }
+
+  .t-input__inner {
+    font-size: var(--app-text-xl);
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
+
+  &:hover .t-input {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  .t-input.t-is-focused {
+    background: var(--td-bg-color-container-hover);
+  }
+}
+
+.doc-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
+}
+
+.doc-meta__label {
+  flex-shrink: 0;
+}
+
+:deep(.doc-meta__kb) {
+  /* TDesign 的 select 根节点是块级，这里要它跟在“存入”后面像个行内控件 */
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 132px;
+  max-width: 260px;
+  margin-left: -4px;
+
+  .t-input {
+    border-color: transparent;
+    background: transparent;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .t-input__inner {
+    color: var(--td-text-color-secondary);
+  }
+
+  &:hover .t-input {
+    border-color: var(--td-component-border);
+    background: var(--td-bg-color-container);
+  }
+}
+
+.doc-meta__time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kb-empty {
   padding: 20px;
   text-align: center;
   color: var(--td-text-color-placeholder);
-}
-
-/* 窄抽屉里两个字段各自太挤，改为上下堆叠 */
-@container manual-editor (max-width: 620px) {
-  .manual-editor__meta {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .meta-field--kb {
-    flex: 1 1 auto;
-  }
-
-  /* 工具栏放不下时换行，而不是横向滚动——滚动条是隐藏的，按钮等于消失 */
-  .editor-toolbar {
-    flex-wrap: wrap;
-  }
-
-  .editor-toolbar__format {
-    flex-wrap: wrap;
-    overflow-x: visible;
-  }
-
-  .editor-toolbar__view {
-    padding-left: 0;
-    border-left: none;
-  }
 }
 
 /* ---------- 编辑区 ---------- */
@@ -1290,6 +1304,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  gap: 6px;
   padding-left: 8px;
   border-left: 1px solid var(--td-component-stroke);
 }
@@ -1335,6 +1350,33 @@ onBeforeUnmount(() => {
   &.is-disabled {
     color: var(--td-text-color-disabled);
     cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
+}
+
+/* 快捷键速查：和视图切换同处工具栏右端，省掉一整条状态栏 */
+.toolbar-shortcuts {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-md);
+  cursor: help;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-secondary);
   }
 
   &:focus-visible {
@@ -1525,46 +1567,6 @@ onBeforeUnmount(() => {
 
   :deep(img) {
     max-width: 100%;
-  }
-}
-
-/* 状态条：字数 / 行数 + 快捷键提示，替掉原先无处可看的隐藏交互 */
-.editor-status {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 5px 12px;
-  border-top: 1px solid var(--td-component-stroke);
-  background: var(--td-bg-color-secondarycontainer);
-  font-size: var(--app-text-xs);
-  color: var(--td-text-color-placeholder);
-}
-
-.editor-status__shortcuts {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: var(--app-radius-xs);
-  background: transparent;
-  color: var(--td-text-color-placeholder);
-  font-size: var(--app-text-md);
-  cursor: help;
-  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-    color: var(--td-text-color-secondary);
-  }
-
-  &:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
   }
 }
 

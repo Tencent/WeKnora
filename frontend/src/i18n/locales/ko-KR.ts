@@ -4920,7 +4920,6 @@ export default {
     }
   },
   manualEditor: {
-    description: 'Markdown으로 지식을 작성하고 실시간 미리보기 지원',
     defaultTitlePrefix: '새 문서',
     noDocumentKnowledgeBases: '사용 가능한 문서형 지식베이스가 없습니다. 먼저 문서형 지식베이스를 생성해주세요',
     actions: {
@@ -4939,9 +4938,9 @@ export default {
       counter: '{chars}자 · {lines}줄'
     },
     form: {
-      knowledgeBaseLabel: '대상 지식베이스',
       knowledgeBasePlaceholder: '지식베이스를 선택해주세요',
       titleLabel: '지식 제목',
+      destinationLabel: '저장 위치',
       titlePlaceholder: '제목을 입력해주세요',
       contentPlaceholder: 'Markdown 구문을 지원합니다. # 제목, 목록, 코드 블록 등을 사용할 수 있습니다'
     },
@@ -4963,7 +4962,6 @@ export default {
       currentKnowledgeBase: '현재 지식베이스'
     },
     section: {
-      basic: '기본 정보',
       content: '지식 내용'
     },
     title: {

@@ -4920,7 +4920,6 @@ export default {
     }
   },
   manualEditor: {
-    description: 'Пишите знания в Markdown с предпросмотром в реальном времени',
     defaultTitlePrefix: 'Новый документ',
     noDocumentKnowledgeBases: 'Нет доступных баз знаний типа "документ". Пожалуйста, создайте одну сначала',
     actions: {
@@ -4939,9 +4938,9 @@ export default {
       counter: 'Символов: {chars} · Строк: {lines}'
     },
     form: {
-      knowledgeBaseLabel: 'Целевая база знаний',
       knowledgeBasePlaceholder: 'Выберите базу знаний',
       titleLabel: 'Заголовок знания',
+      destinationLabel: 'Сохранить в',
       titlePlaceholder: 'Введите заголовок',
       contentPlaceholder: 'Поддерживается Markdown. Используйте # заголовки, списки, блоки кода и т.д.'
     },
@@ -4963,7 +4962,6 @@ export default {
       currentKnowledgeBase: 'Текущая база знаний'
     },
     section: {
-      basic: 'Основная информация',
       content: 'Содержимое'
     },
     title: {

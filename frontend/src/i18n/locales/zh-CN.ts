@@ -4922,7 +4922,6 @@ export default {
     }
   },
   manualEditor: {
-    description: '使用 Markdown 编写知识内容，支持实时预览',
     defaultTitlePrefix: '新建文档',
     noDocumentKnowledgeBases: '暂无可用的文档型知识库，请先创建一个文档型知识库',
     actions: {
@@ -4941,9 +4940,9 @@ export default {
       counter: '{chars} 字 · {lines} 行'
     },
     form: {
-      knowledgeBaseLabel: '目标知识库',
       knowledgeBasePlaceholder: '请选择知识库',
       titleLabel: '知识标题',
+      destinationLabel: '存入',
       titlePlaceholder: '请输入标题',
       contentPlaceholder: '支持 Markdown 语法，可使用 # 标题、列表、代码块等'
     },
@@ -4965,7 +4964,6 @@ export default {
       currentKnowledgeBase: '当前知识库'
     },
     section: {
-      basic: '基本信息',
       content: '知识内容'
     },
     title: {

@@ -2610,9 +2610,7 @@ export default {
       edit: 'Markdownナレッジを編集',
       create: 'Markdownナレッジを作成'
     },
-    description: 'Markdownでナレッジを記述し、リアルタイムでプレビューできます',
     section: {
-      basic: '基本情報',
       content: '内容'
     },
     labels: {
@@ -2634,9 +2632,9 @@ export default {
       published: 'ナレッジを公開し、インデックス作成を開始しました'
     },
     form: {
-      knowledgeBaseLabel: '対象のナレッジベース',
       knowledgeBasePlaceholder: 'ナレッジベースを選択',
       titleLabel: 'ナレッジのタイトル',
+      destinationLabel: '保存先',
       titlePlaceholder: 'タイトルを入力',
       contentPlaceholder: 'Markdownに対応しています。#見出し、リスト、コードブロックなどが使えます。'
     },

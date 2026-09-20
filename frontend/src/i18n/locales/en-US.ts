@@ -2610,9 +2610,7 @@ export default {
       edit: 'Edit Markdown Knowledge',
       create: 'Create Markdown Knowledge'
     },
-    description: 'Write knowledge in Markdown with live preview',
     section: {
-      basic: 'Basic Info',
       content: 'Content'
     },
     labels: {
@@ -2634,9 +2632,9 @@ export default {
       published: 'Knowledge published and indexing started'
     },
     form: {
-      knowledgeBaseLabel: 'Target knowledge base',
       knowledgeBasePlaceholder: 'Select knowledge base',
       titleLabel: 'Knowledge title',
+      destinationLabel: 'Save to',
       titlePlaceholder: 'Enter title',
       contentPlaceholder: 'Supports Markdown. Use # headings, lists, code blocks, etc.'
     },
