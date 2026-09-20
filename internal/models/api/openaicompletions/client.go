@@ -339,8 +339,13 @@ func (c *Client) processStream(
 
 		var env rawEnvelope
 		if err := json.Unmarshal(event.Data, &env); err != nil {
-			logger.Errorf(ctx, "Failed to parse stream response: %v", err)
-			continue
+			// Fail rather than skip, as the Anthropic and Gemini loops do. A
+			// chunk we cannot decode is a hole in the answer: skipping it ends
+			// the stream on EOF, which reaches the caller as a *successful*
+			// truncated reply and gets persisted as the model's answer. An
+			// error at least surfaces the proxy that corrupted the stream.
+			assembler.Fail(ch, fmt.Errorf("decode stream chunk: %w", err))
+			return
 		}
 		if env.Error != nil && env.Error.Message != "" {
 			assembler.Fail(ch, fmt.Errorf("API stream error: %s", env.Error.Message))

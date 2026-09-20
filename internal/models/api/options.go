@@ -1,6 +1,27 @@
 package api
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+)
+
+// SanitizeReasoningEffort validates a stored or configured level on its way
+// into Options. Callers that read the level out of a database row, a YAML
+// agent or a session config cast a plain string, so this is where a typo is
+// caught and dropped: an unknown level must never reach the vendor, and must
+// never be mistaken for "thinking on". Returning "" means "no preference",
+// leaving the legacy Thinking boolean to decide.
+func SanitizeReasoningEffort(ctx context.Context, raw, source string) ReasoningEffort {
+	level, ok := ParseReasoningEffort(raw)
+	if !ok {
+		logger.Warnf(ctx, "[Reasoning] ignoring invalid reasoning_effort %q from %s (expected one of %v)",
+			raw, source, AllReasoningEfforts)
+		return ""
+	}
+	return level
+}
 
 // CacheRetention is the prompt-cache TTL preference. Empty means short (the
 // default 5-minute provider cache). Compaction/summarization uses none so a
@@ -71,12 +92,20 @@ func (o *Options) CompletionBudget() int {
 // Reasoning resolves the requested thinking level from ReasoningEffort and
 // the legacy Thinking boolean. The bool result reports whether the caller
 // expressed any preference at all; when false the model default applies.
+//
+// The stored level is re-parsed here rather than trusted: the write paths
+// validate, but rows persisted before that validation existed, builtin YAML
+// agents and SummaryConfig all reach this struct through a plain string cast.
+// An unparseable value ("hgih") is non-empty, so Enabled() would read it as
+// "thinking on" and the protocol packages would send the vendor a level it
+// never defined. Ignoring it falls back to the legacy boolean, which is what
+// "no usable preference" has always meant.
 func (o *Options) Reasoning() (ReasoningEffort, bool) {
 	if o == nil {
 		return "", false
 	}
-	if o.ReasoningEffort != "" {
-		return o.ReasoningEffort, true
+	if level, ok := ParseReasoningEffort(string(o.ReasoningEffort)); ok && level != "" {
+		return level, true
 	}
 	if o.Thinking != nil {
 		if *o.Thinking {

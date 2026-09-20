@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -91,5 +92,61 @@ func TestStreamAssembler_ThinkingHandoffSequence(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("chunk %d = %#v, want %#v", i, got[i], want[i])
 		}
+	}
+}
+
+// Tool-call indices belong to the vendor: gateways number from 1 and parallel
+// calls arrive with gaps. Walking 0..len(map) dropped every call outside that
+// range, and a round whose calls vanish reaches the agent as a plain answer.
+func TestStreamAssembler_OrderedToolCallsNonContiguousIndices(t *testing.T) {
+	cases := []struct {
+		name    string
+		indices []int
+		want    []string
+	}{
+		{name: "zero based", indices: []int{0, 1}, want: []string{"f0", "f1"}},
+		{name: "one based", indices: []int{1, 2}, want: []string{"f1", "f2"}},
+		{name: "gapped", indices: []int{0, 3, 7}, want: []string{"f0", "f3", "f7"}},
+		{name: "out of order arrival", indices: []int{5, 2}, want: []string{"f2", "f5"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewStreamAssembler(context.Background(), "m")
+			ch := make(chan types.StreamResponse, 64)
+			for _, idx := range tc.indices {
+				a.Process(ch, Delta{ToolCalls: []ToolCallDelta{{
+					Index:     idx,
+					ID:        fmt.Sprintf("call_%d", idx),
+					Name:      fmt.Sprintf("f%d", idx),
+					Arguments: `{}`,
+				}}})
+			}
+
+			calls := a.OrderedToolCalls()
+			if len(calls) != len(tc.want) {
+				t.Fatalf("got %d calls %#v, want %d", len(calls), calls, len(tc.want))
+			}
+			for i, name := range tc.want {
+				if calls[i].Function.Name != name {
+					t.Fatalf("call %d = %q, want %q (order must follow the vendor index)",
+						i, calls[i].Function.Name, name)
+				}
+			}
+		})
+	}
+}
+
+// Metadata-only entries (a thought signature that arrives before its call)
+// are kept too, whatever index the vendor gave them.
+func TestStreamAssembler_OrderedToolCallsIncludesMetadataOnlyIndex(t *testing.T) {
+	a := NewStreamAssembler(context.Background(), "m")
+	a.SetToolCallMetadata(4, types.ToolCallMetadata{"thought_signature": []byte(`"sig"`)})
+
+	calls := a.OrderedToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	if calls[0].ProviderMetadata["thought_signature"] == nil {
+		t.Fatal("provider metadata lost")
 	}
 }

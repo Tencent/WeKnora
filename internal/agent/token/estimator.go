@@ -20,6 +20,7 @@
 package token
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -158,6 +159,7 @@ func (e *Estimator) EstimateMessage(msg *chat.Message) int {
 	for _, tc := range msg.ToolCalls {
 		tokens += e.EstimateString(tc.Function.Name)
 		tokens += e.EstimateString(tc.Function.Arguments)
+		tokens += e.estimateProviderMetadata(tc.ProviderMetadata)
 		tokens += perToolCallOverhead
 	}
 
@@ -176,7 +178,21 @@ func (e *Estimator) EstimateReasoningArtifacts(msg *chat.Message) int {
 		}
 		tokens += e.EstimateString(sig)
 	}
-	for key, raw := range msg.ReasoningMetadata {
+	tokens += e.estimateProviderMetadata(msg.ReasoningMetadata)
+	return tokens
+}
+
+// estimateProviderMetadata counts one opaque provider-state map, one JSON
+// value per namespace key, the way it goes out on the wire.
+//
+// The same accounting applies per tool call as it does per turn: a Gemini
+// thought signature and an OpenAI Responses item id ride on the tool call, not
+// on the message, and are replayed on every subsequent turn. A signature runs
+// to kilobytes, so a round of parallel calls left uncounted under-measures the
+// context exactly the way the missing reasoning content did.
+func (e *Estimator) estimateProviderMetadata(md map[string]json.RawMessage) int {
+	tokens := 0
+	for key, raw := range md {
 		tokens += e.EstimateString(key)
 		tokens += e.EstimateString(string(raw))
 	}

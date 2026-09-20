@@ -537,3 +537,40 @@ func TestChatStream_TolerantDoneSentinel(t *testing.T) {
 	}
 	assert.Equal(t, "hi", answer.String())
 }
+
+// A chunk that will not decode is a hole in the answer. Skipping it (the old
+// behaviour) ended the stream on EOF, so a proxy that corrupted one packet
+// produced a truncated reply that every caller recorded as a successful one.
+// The Anthropic and Gemini loops fail in this situation; so does this one.
+func TestChatStream_UndecodableChunkFailsTheStream(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\n" +
+				"data: <html>502 Bad Gateway</html>\n\n" +
+				"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	c := New(Config{
+		Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
+		Settings: catalog.DefaultOpenAICompletions(),
+	})
+	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+	require.NoError(t, err)
+
+	var sawError bool
+	var answer strings.Builder
+	for chunk := range ch {
+		if chunk.ResponseType == types.ResponseTypeError {
+			sawError = true
+			assert.Contains(t, chunk.Content, "decode stream chunk")
+			continue
+		}
+		answer.WriteString(chunk.Content)
+	}
+	assert.True(t, sawError, "a truncated stream must surface as an error, not as a short answer")
+	assert.Equal(t, "Hel", answer.String(), "decoding stops at the bad chunk")
+}

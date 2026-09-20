@@ -50,6 +50,10 @@ const (
 	CacheRetentionLong           = api.CacheRetentionLong
 )
 
+// SanitizeReasoningEffort is re-exported for the callers that build
+// ChatOptions from stored strings (agent config, session SummaryConfig).
+var SanitizeReasoningEffort = api.SanitizeReasoningEffort
+
 // Prompt-cache helpers re-exported for the application layer.
 var (
 	FingerprintPromptPrefix = api.FingerprintPromptPrefix

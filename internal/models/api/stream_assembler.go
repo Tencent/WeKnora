@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -115,13 +116,23 @@ func (a *StreamAssembler) elapsedMs() int64 {
 }
 
 // OrderedToolCalls returns the assembled calls in index order, or nil.
+//
+// The indices are the vendor's, not ours: gateways number calls from 1, and
+// parallel calls can arrive with gaps. Walking 0..len(map) would silently drop
+// every call outside that range — and a round that loses its calls reaches the
+// agent as a plain answer — so the keys are sorted instead.
 func (a *StreamAssembler) OrderedToolCalls() []types.LLMToolCall {
 	if len(a.toolCallMap) == 0 {
 		return nil
 	}
+	indices := make([]int, 0, len(a.toolCallMap))
+	for idx := range a.toolCallMap {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
 	result := make([]types.LLMToolCall, 0, len(a.toolCallMap))
-	for i := 0; i < len(a.toolCallMap); i++ {
-		if tc, ok := a.toolCallMap[i]; ok && tc != nil {
+	for _, idx := range indices {
+		if tc := a.toolCallMap[idx]; tc != nil {
 			result = append(result, *tc)
 		}
 	}
