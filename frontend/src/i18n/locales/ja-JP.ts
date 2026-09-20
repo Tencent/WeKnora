@@ -194,7 +194,7 @@ export default {
   },
   chatHeader: {
     moreActions: 'その他の会話操作',
-    toggleSandboxPanel: 'サイドバーを展開',
+    toggleSandboxPanel: 'サンドボックスターミナル',
     copySessionId: 'セッションIDをコピー',
     copyLink: '会話リンクをコピー',
     copyMarkdown: 'Markdownとしてコピー',
@@ -3715,7 +3715,6 @@ export default {
     truncatedHint: 'モデルの1回あたりの出力上限で回答が途中で打ち切られました。上記は打ち切り前に生成された内容です。',
     rewind: {
       tooltip: 'ここに巻き戻す',
-      confirmTitle: 'セッションを巻き戻す',
       confirmBody: 'これより後の会話を削除します。質問から巻き戻すとその質問自体も消え、入力欄に戻します。チェックポイントがあればワークスペースも戻します。この操作は元に戻せません。',
       confirmButton: '巻き戻す',
       cancelButton: 'キャンセル',
@@ -3728,7 +3727,6 @@ export default {
       skipped: '会話は巻き戻しましたが、ワークスペースは変更していません',
       skipNoSandbox: '会話は巻き戻しましたが、ワークスペースは変更していません（サンドボックスがありません）',
       skipNoCheckpoint: '会話は巻き戻しましたが、ワークスペースは変更していません（戻せるチェックポイントがありません）',
-      skipSandboxReplaced: '会話は巻き戻しましたが、ワークスペースは変更していません（サンドボックスが置き換わったため、古いチェックポイントに戻せません）',
     },
     requestInfoTitle: 'リクエスト情報',
     requestInfoRequestId: 'Request ID',

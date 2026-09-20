@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   canReplaceRewindTranscript,
   keepMessagesThroughRewindPoint,
+  rewindableMessageIds,
   resolveRewindAffordance,
   rewindBlockedByOutgoingWork,
   rewindConflictI18nKey,
@@ -87,4 +88,23 @@ test('maps rewind HTTP conflicts onto dedicated copy', () => {
   assert.equal(rewindConflictI18nKey('REWIND_SANDBOX_REPLACED'), 'chat.rewind.sandboxReplaced')
   assert.equal(rewindConflictI18nKey('REWIND_SOURCE_BUSY'), 'chat.rewind.busy')
   assert.equal(rewindConflictI18nKey(''), 'chat.rewind.busy')
+})
+
+// The transcript resolves every row's control from this one set, so it has to
+// answer exactly what the per-message check answers — and only walk once.
+test('resolves every rewindable id in a single pass', () => {
+  const messages = [
+    { id: 'u1', role: 'user' },
+    { id: 'a1', role: 'assistant', is_completed: true },
+    { id: 'sys', role: 'system' },
+    { id: '', role: 'user' },
+  ]
+  assert.deepEqual([...rewindableMessageIds(messages)], ['u1', 'a1'])
+  assert.deepEqual([...rewindableMessageIds(messages, { embeddedMode: true })], [])
+  assert.deepEqual([...rewindableMessageIds(messages, { outgoingWork: true })], [])
+  assert.deepEqual(
+    [...rewindableMessageIds([...messages, { id: 'a2', role: 'assistant', is_completed: false }])],
+    [],
+    'an unfinished turn withdraws the control from the whole transcript',
+  )
 })

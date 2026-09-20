@@ -3830,7 +3830,6 @@ export default {
     truncatedHint: '모델의 응답당 출력 한도에서 답변이 잘렸습니다. 위 내용은 잘리기 전까지 생성된 부분입니다.',
     rewind: {
       tooltip: '여기로 되돌리기',
-      confirmTitle: '세션 되돌리기',
       confirmBody: '이 메시지 이후의 대화를 삭제합니다. 질문에서 되돌리면 해당 질문도 지워지고 입력창에 다시 채워집니다. 체크포인트가 있으면 작업 영역도 되돌립니다. 이 작업은 취소할 수 없습니다.',
       confirmButton: '되돌리기',
       cancelButton: '취소',
@@ -3843,7 +3842,6 @@ export default {
       skipped: '대화는 되돌렸지만 작업 영역은 변경하지 않았습니다',
       skipNoSandbox: '대화는 되돌렸지만 작업 영역은 변경하지 않았습니다(샌드박스가 없음)',
       skipNoCheckpoint: '대화는 되돌렸지만 작업 영역은 변경하지 않았습니다(되돌릴 체크포인트가 없음)',
-      skipSandboxReplaced: '대화는 되돌렸지만 작업 영역은 변경하지 않았습니다(샌드박스가 교체되어 이전 체크포인트에 도달할 수 없음)',
     },
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
@@ -7372,7 +7370,7 @@ export default {
   },
   chatHeader: {
     moreActions: '대화 추가 작업',
-    toggleSandboxPanel: '사이드바 펼치기',
+    toggleSandboxPanel: '샌드박스 터미널',
     copySessionId: '세션 ID 복사',
     copyLink: '대화 링크 복사',
     copyMarkdown: 'Markdown으로 복사',

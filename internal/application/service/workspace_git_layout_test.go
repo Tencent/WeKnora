@@ -222,3 +222,100 @@ func runGitSplit(t *testing.T, env []string, workspace, gitDir string, args ...s
 	require.NoError(t, err, string(out))
 	return string(out)
 }
+
+// A sandbox provisioned before GIT_DIR moved out of /workspace still has its
+// checkpoints in the work tree, and the SHAs on those turns only resolve
+// there. Rewind and fork must still be able to reset to them.
+func TestAdoptsLegacyWorkTreeCheckpointRepo(t *testing.T) {
+	requireGit(t)
+	workspace, gitDir, env := splitGitDirs(t)
+
+	// The pre-move layout: checkpoints committed into $WORK_TREE/.git under
+	// the checkpointer's identity.
+	runGitAt(t, env, workspace, "init", "-q")
+	runGitAt(t, env, workspace, "config", "user.email", "agent@weknora.local")
+	runGitAt(t, env, workspace, "config", "user.name", "WeKnora Agent")
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "keep.txt"), []byte("early"), 0o644))
+	runGitAt(t, env, workspace, "add", "-A")
+	runGitAt(t, env, workspace, "commit", "-q", "-m", "turn:msg-1")
+	legacy := strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD"))
+	if !gitSHAPattern.MatchString(legacy) {
+		t.Skip("host git is not using SHA-1 object names")
+	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "later.txt"), []byte("later"), 0o644))
+	runGitAt(t, env, workspace, "add", "-A")
+	runGitAt(t, env, workspace, "commit", "-q", "-m", "turn:msg-2")
+
+	script, err := workspaceResetScript(workspace, gitDir, legacy)
+	require.NoError(t, err)
+	runWorkspaceGitScript(t, env, script)
+
+	require.FileExists(t, filepath.Join(gitDir, "HEAD"), "legacy repo must move to the new git dir")
+	_, statErr := os.Stat(filepath.Join(workspace, ".git"))
+	require.True(t, os.IsNotExist(statErr), "adopted repo must not be left in the work tree")
+	require.Equal(t, legacy, strings.TrimSpace(
+		runGitSplit(t, env, workspace, gitDir, "rev-parse", "HEAD"),
+	), "reset must land on the pre-move checkpoint instead of failing on a bad object")
+	body, err := os.ReadFile(filepath.Join(workspace, "keep.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "early", string(body))
+	_, statErr = os.Stat(filepath.Join(workspace, "later.txt"))
+	require.True(t, os.IsNotExist(statErr))
+}
+
+// Adoption keys on the checkpointer's committer identity, so a repository the
+// agent created for its own work in /workspace is never swallowed.
+func TestDoesNotAdoptAgentOwnedWorkTreeRepo(t *testing.T) {
+	requireGit(t)
+	workspace, gitDir, env := splitGitDirs(t)
+
+	runGitAt(t, env, workspace, "init", "-q")
+	runGitAt(t, env, workspace, "config", "user.email", "dev@example.com")
+	runGitAt(t, env, workspace, "config", "user.name", "Dev")
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "app.txt"), []byte("mine"), 0o644))
+	runGitAt(t, env, workspace, "add", "-A")
+	runGitAt(t, env, workspace, "commit", "-q", "-m", "agent")
+	agentHEAD := strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD"))
+
+	runWorkspaceGitScript(t, env, checkpointScript(workspace, gitDir, "msg-1"))
+
+	require.DirExists(t, filepath.Join(workspace, ".git"))
+	require.Equal(t, agentHEAD, strings.TrimSpace(
+		runGitAt(t, env, workspace, "rev-parse", "HEAD"),
+	), "the agent's own repository must be left exactly as it was")
+	require.FileExists(t, filepath.Join(gitDir, "HEAD"))
+	require.NotEqual(t, agentHEAD, strings.TrimSpace(
+		runGitSplit(t, env, workspace, gitDir, "rev-parse", "HEAD"),
+	))
+}
+
+// Once adopted, the work tree has no .git left, so a later turn must not try
+// to adopt anything again.
+func TestAdoptionIsOnlyAttemptedWhileTheNewGitDirIsMissing(t *testing.T) {
+	requireGit(t)
+	workspace, gitDir, env := splitGitDirs(t)
+
+	runGitAt(t, env, workspace, "init", "-q")
+	runGitAt(t, env, workspace, "config", "user.email", "agent@weknora.local")
+	runGitAt(t, env, workspace, "config", "user.name", "WeKnora Agent")
+	runGitAt(t, env, workspace, "commit", "-q", "--allow-empty", "-m", "turn:msg-0")
+	legacy := strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD"))
+
+	runWorkspaceGitScript(t, env, checkpointScript(workspace, gitDir, "msg-1"))
+	require.Equal(t, "commit", strings.TrimSpace(
+		runGitSplit(t, env, workspace, gitDir, "cat-file", "-t", legacy),
+	), "the adopted history must still be reachable")
+
+	// The agent now starts its own repository in the work tree.
+	runGitAt(t, env, workspace, "init", "-q")
+	runGitAt(t, env, workspace, "config", "user.email", "agent@weknora.local")
+	runGitAt(t, env, workspace, "config", "user.name", "WeKnora Agent")
+	runGitAt(t, env, workspace, "commit", "-q", "--allow-empty", "-m", "agent")
+	agentHEAD := strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD"))
+
+	runWorkspaceGitScript(t, env, checkpointScript(workspace, gitDir, "msg-2"))
+
+	require.DirExists(t, filepath.Join(workspace, ".git"))
+	require.Equal(t, agentHEAD, strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD")))
+}

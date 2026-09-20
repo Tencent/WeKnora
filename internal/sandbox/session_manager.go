@@ -64,6 +64,11 @@ const SessionWorkspaceRoot = "/workspace"
 // still copies the object store, but outside SessionWorkspaceRoot so
 // `rm -rf /workspace` (or an agent cleaning the work tree) cannot drop
 // checkpoint history that rewind and fork later reset to.
+//
+// Checkpoints used to live in SessionWorkspaceRoot/.git, and sandboxes
+// provisioned before this constant existed still hold theirs there. The
+// shared git preamble adopts that repository on first use so SHAs recorded
+// before the move keep resolving; see gitWorkspaceAdoptLegacyRepo.
 const SessionGitDir = "/var/lib/weknora/workspace.git"
 
 // sessionArtifactDirBootstrapTimeout bounds directory creation and access

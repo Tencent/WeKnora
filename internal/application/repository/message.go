@@ -234,6 +234,30 @@ func (r *messageRepository) ListMessagesBySessionUpTo(
 	return messages, nil
 }
 
+// ListAssistantCheckpointsUpTo returns the assistant messages strictly before
+// the (boundary, boundaryID) cursor, oldest first, carrying only the columns
+// that identify a workspace checkpoint.
+//
+// Rewind asks "does kept history still reach a commit SHA, and did it contain
+// an assistant turn at all". ListMessagesBySessionUpTo can answer that, but it
+// selects every column and joins artifacts for the whole conversation to do
+// so. This is the same question against a fraction of the rows and bytes.
+func (r *messageRepository) ListAssistantCheckpointsUpTo(
+	ctx context.Context, sessionID string, boundary time.Time, boundaryID string,
+) ([]*types.Message, error) {
+	var messages []*types.Message
+	if err := r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Select("id", "session_id", "role", "created_at", "sandbox_checkpoint").
+		Where("session_id = ? AND role = ?", sessionID, "assistant").
+		Where("created_at < ? OR (created_at = ? AND id < ?)", boundary, boundary, boundaryID).
+		Order("created_at ASC, id ASC").
+		Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
 // UpdateMessage updates an existing message. Artifacts are rewritten only
 // when message.Artifacts is non-nil (see writeMessageArtifacts).
 func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Message) error {

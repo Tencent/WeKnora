@@ -65,21 +65,34 @@ export function resolveRewindAffordance(
   messageId: string,
   opts: { embeddedMode?: boolean; outgoingWork?: boolean } = {},
 ): { canRewind: boolean } {
-  if (opts.embeddedMode || opts.outgoingWork || !messageId) {
-    return { canRewind: false }
+  return { canRewind: rewindableMessageIds(messages, opts).has(messageId) }
+}
+
+/**
+ * The ids a rewind control may be offered on, resolved in one pass.
+ *
+ * The transcript asks this per rendered message and re-asks on every streamed
+ * token, so the whole-list conditions (is any turn still generating?) are
+ * hoisted out of the per-message check instead of rescanning for each row.
+ */
+export function rewindableMessageIds(
+  messages: RewindCandidateMessage[],
+  opts: { embeddedMode?: boolean; outgoingWork?: boolean } = {},
+): Set<string> {
+  const ids = new Set<string>()
+  if (opts.embeddedMode || opts.outgoingWork) {
+    return ids
   }
-  const index = messages.findIndex((m) => String(m.id || '') === messageId)
-  if (index < 0) {
-    return { canRewind: false }
+  for (const message of messages) {
+    if (message.role === 'assistant' && message.is_completed === false) {
+      return new Set<string>()
+    }
+    const id = String(message.id || '')
+    if (id && (message.role === 'assistant' || message.role === 'user')) {
+      ids.add(id)
+    }
   }
-  if (messages.some((m) => m.role === 'assistant' && m.is_completed === false)) {
-    return { canRewind: false }
-  }
-  const target = messages[index]
-  if (target.role === 'assistant' || target.role === 'user') {
-    return { canRewind: true }
-  }
-  return { canRewind: false }
+  return ids
 }
 
 export function rewindHttpConflictCode(err: unknown): string {

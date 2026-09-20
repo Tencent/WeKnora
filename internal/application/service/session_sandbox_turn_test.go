@@ -21,12 +21,14 @@ func TestHoldSandboxTurnOpensAndClosesTheLease(t *testing.T) {
 	require.Equal(t, 1, holder.ends)
 }
 
-func TestHoldSandboxTurnFailsWhenBeginFails(t *testing.T) {
+// A lease-store blip must not reject the user's message: only a rewind lock
+// is fatal, everything else degrades to running the turn without a lease.
+func TestHoldSandboxTurnDegradesWhenBeginFails(t *testing.T) {
 	holder := &turnLeaseManager{beginErr: context.Canceled}
 	svc := &sessionService{sandboxMgr: holder}
 
 	release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
-	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, err)
 	require.Equal(t, 1, holder.begins)
 	release()
 	require.Zero(t, holder.ends)

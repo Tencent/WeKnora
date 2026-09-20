@@ -3832,7 +3832,6 @@ export default {
     truncatedHint: '回答在模型单次输出上限处被截断，以上为截断前已生成的内容',
     rewind: {
       tooltip: '回滚到这里',
-      confirmTitle: '回滚会话',
       confirmBody: '将删除此条之后的对话。从用户消息回滚时会删掉该问题本身，并填回输入框。若有可用检查点，工作区会一并回退。此操作不可撤销。',
       confirmButton: '回滚',
       cancelButton: '取消',
@@ -3845,7 +3844,6 @@ export default {
       skipped: '对话已回滚，工作区未改动',
       skipNoSandbox: '对话已回滚，工作区未改动（当前没有沙箱）',
       skipNoCheckpoint: '对话已回滚，工作区未改动（没有可回退的检查点）',
-      skipSandboxReplaced: '对话已回滚，工作区未改动（沙箱已更换，无法回退到旧检查点）',
     },
     requestInfoTitle: '请求信息',
     requestInfoRequestId: 'Request ID',
@@ -7374,7 +7372,7 @@ export default {
   },
   chatHeader: {
     moreActions: '更多对话操作',
-    toggleSandboxPanel: '展开侧边栏',
+    toggleSandboxPanel: '沙箱终端',
     copySessionId: '复制会话 ID',
     copyLink: '复制对话链接',
     copyMarkdown: '复制为 Markdown',

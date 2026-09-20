@@ -41,11 +41,6 @@ const (
 	// RewindSkipNoCheckpoint means the history being kept has no git
 	// checkpoint (the image has no git, or every kept turn failed to commit).
 	RewindSkipNoCheckpoint RewindSkipReason = "NO_CHECKPOINT"
-
-	// RewindSkipSandboxReplaced is kept for clients that still understand the
-	// old skip reason. Current rewind fail-closes with ErrRewindSandboxReplaced
-	// instead of truncating while the live workspace is unreachable.
-	RewindSkipSandboxReplaced RewindSkipReason = "SANDBOX_REPLACED"
 )
 
 var (
@@ -112,7 +107,6 @@ type rewindSessionStore interface {
 
 type rewindMessageStore interface {
 	GetMessage(ctx context.Context, sessionID, messageID string) (*types.Message, error)
-	GetMessagesBySession(ctx context.Context, sessionID string, page, pageSize int) ([]*types.Message, error)
 	GetRecentMessagesBySession(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
 	ListMessagesBySessionUpTo(
 		ctx context.Context, sessionID string, boundary time.Time, boundaryID string,
@@ -124,6 +118,16 @@ type rewindMessageStore interface {
 
 type rewindIncompleteFinder interface {
 	SessionHasIncompleteAssistant(ctx context.Context, sessionID string) (bool, error)
+}
+
+// rewindCheckpointLister is the cheap path for "which checkpoint does kept
+// history still reach". Rewind never reads message bodies, so a store that
+// can return the assistant turns alone — no content, no artifact join —
+// answers it without dragging the whole conversation into memory.
+type rewindCheckpointLister interface {
+	ListAssistantCheckpointsUpTo(
+		ctx context.Context, sessionID string, boundary time.Time, boundaryID string,
+	) ([]*types.Message, error)
 }
 
 type rewindArtifactJanitor interface {
@@ -149,6 +153,11 @@ type rewindKnowledgeCleaner interface {
 
 type rewindSuggestionCleaner interface {
 	DeleteByMessageID(ctx context.Context, tenantID uint64, sessionID, messageID string) error
+}
+
+// rewindSuggestionBatchCleaner is the one-statement form of the above.
+type rewindSuggestionBatchCleaner interface {
+	DeleteByMessageIDs(ctx context.Context, tenantID uint64, sessionID string, messageIDs []string) error
 }
 
 // SessionRewindService implements in-place rewind.
@@ -256,13 +265,10 @@ func (s *SessionRewindService) Rewind(
 		return nil, err
 	}
 
-	history, err := s.messages.ListMessagesBySessionUpTo(
-		ctx, sessionID, rewindPoint.CreatedAt, rewindPoint.ID,
-	)
+	history, err := s.keptCheckpointHistory(ctx, sessionID, rewindPoint)
 	if err != nil {
-		return nil, fmt.Errorf("session rewind: load history: %w", err)
+		return nil, err
 	}
-	history = historyThroughForkPoint(history, rewindPoint)
 
 	// Client abort must not leave git reset applied and messages intact.
 	// Once we are past the cheap busy reject, finish reset+truncate even if
@@ -274,6 +280,7 @@ func (s *SessionRewindService) Rewind(
 	}
 	defer unlock()
 
+	var abandonedBootstrap *types.ForkBootstrap
 	workspaceReset, reason, resetErr := s.resetWorkspaceIfPossible(persistCtx, sessionID, history)
 	if resetErr != nil {
 		return nil, resetErr
@@ -290,8 +297,9 @@ func (s *SessionRewindService) Rewind(
 			if aligned {
 				workspaceReset = true
 				reason = ""
-			} else if abandoned {
+			} else if abandoned != nil {
 				reason = RewindSkipNoCheckpoint
+				abandonedBootstrap = abandoned
 			}
 		}
 	}
@@ -307,6 +315,11 @@ func (s *SessionRewindService) Rewind(
 		return nil, fmt.Errorf("session rewind: delete messages: %w", err)
 	}
 
+	// Deleting the snapshot is the one step of the bootstrap handover that
+	// cannot be undone, so it waits until the truncate has actually landed.
+	// Everything above it is a DB write the next rewind attempt can redo.
+	s.releaseAbandonedForkSnapshot(persistCtx, source, abandonedBootstrap)
+
 	s.cleanupDeleted(persistCtx, source.TenantID, sessionID, deleted)
 
 	logger.Infof(ctx,
@@ -318,6 +331,36 @@ func (s *SessionRewindService) Rewind(
 		WorkspaceReset:  workspaceReset,
 		Reason:          reason,
 	}, nil
+}
+
+// keptCheckpointHistory returns the messages that survive the cut, in the
+// shape latestReachableCheckpoint and hasAssistantMessage read them.
+//
+// Only assistant turns carry a SandboxCheckpoint and only assistant turns
+// decide between "reset to a SHA", "empty-reset" and ErrRewindNoCheckpoint,
+// so a store that can list just those is asked for just those. The fallback
+// reads the full prefix, which is correct but loads every message body and
+// artifact row in the session to answer a question about a handful of rows.
+func (s *SessionRewindService) keptCheckpointHistory(
+	ctx context.Context, sessionID string, rewindPoint *types.Message,
+) ([]*types.Message, error) {
+	var (
+		kept []*types.Message
+		err  error
+	)
+	if lister, ok := s.messages.(rewindCheckpointLister); ok {
+		kept, err = lister.ListAssistantCheckpointsUpTo(
+			ctx, sessionID, rewindPoint.CreatedAt, rewindPoint.ID,
+		)
+	} else {
+		kept, err = s.messages.ListMessagesBySessionUpTo(
+			ctx, sessionID, rewindPoint.CreatedAt, rewindPoint.ID,
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("session rewind: load history: %w", err)
+	}
+	return historyThroughForkPoint(kept, rewindPoint), nil
 }
 
 func (s *SessionRewindService) resetWorkspaceIfPossible(
@@ -481,41 +524,75 @@ func (s *SessionRewindService) rejectIfIncompleteTurn(ctx context.Context, sessi
 // after an earlier rewind would boot the workspace ahead of the remaining
 // messages. No remaining checkpoint means the next sandbox should be ordinary,
 // same as forking at the first user message.
+//
+// A non-nil abandoned return is the bootstrap that was just cleared; its
+// snapshot is still alive and the caller releases it once the truncate has
+// landed. Clearing the column here and freeing the snapshot later keeps the
+// whole handover redoable while the conversation can still fail to delete.
 func (s *SessionRewindService) syncPendingForkBootstrap(
 	ctx context.Context, session *types.Session, kept []*types.Message,
-) (aligned bool, abandoned bool, err error) {
+) (aligned bool, abandoned *types.ForkBootstrap, err error) {
 	if s == nil || session == nil || session.ForkBootstrap == nil || session.ForkBootstrap.Consumed() {
-		return false, false, nil
+		return false, nil, nil
 	}
 	pending := *session.ForkBootstrap
 	checkpoint := latestReachableCheckpoint(kept)
 	if checkpoint == nil || strings.TrimSpace(checkpoint.CommitSHA) == "" {
-		return false, true, s.abandonPendingForkBootstrap(ctx, session, &pending)
+		if err := s.sessions.UpdateForkBootstrap(ctx, session.ID, nil); err != nil {
+			return false, nil, fmt.Errorf("session rewind: clear fork bootstrap: %w", err)
+		}
+		return false, &pending, nil
 	}
 	sha := strings.TrimSpace(checkpoint.CommitSHA)
 	if !gitSHAPattern.MatchString(sha) {
-		return false, false, fmt.Errorf("session rewind: invalid checkpoint sha %q", truncateForLog(sha))
+		return false, nil, fmt.Errorf("session rewind: invalid checkpoint sha %q", truncateForLog(sha))
 	}
 	if sha == strings.TrimSpace(pending.CommitSHA) {
-		return true, false, nil
+		return true, nil, nil
 	}
 	pending.CommitSHA = sha
 	if err := s.sessions.UpdateForkBootstrap(ctx, session.ID, &pending); err != nil {
-		return false, false, fmt.Errorf("session rewind: retarget fork bootstrap: %w", err)
+		return false, nil, fmt.Errorf("session rewind: retarget fork bootstrap: %w", err)
 	}
-	return true, false, nil
+	return true, nil, nil
 }
 
-func (s *SessionRewindService) abandonPendingForkBootstrap(
+// releaseAbandonedForkSnapshot frees the snapshot behind a bootstrap that
+// syncPendingForkBootstrap cleared. It runs after the messages are gone
+// because the delete is irreversible: dropping the snapshot first and then
+// failing to truncate would leave the fork with no workspace to boot from
+// while its whole transcript is still there.
+func (s *SessionRewindService) releaseAbandonedForkSnapshot(
 	ctx context.Context, session *types.Session, pending *types.ForkBootstrap,
-) error {
-	if err := s.sessions.UpdateForkBootstrap(ctx, session.ID, nil); err != nil {
-		return fmt.Errorf("session rewind: clear fork bootstrap: %w", err)
+) {
+	if s == nil || session == nil || pending == nil {
+		return
 	}
 	view := *session
 	view.ForkBootstrap = pending
 	releaseForkSnapshotOnDelete(ctx, s.sessions, s.snapshots, &view)
-	return nil
+}
+
+// deleteSuggestions drops the follow-up questions hanging off the deleted
+// messages, in one statement when the store can batch. A long rewind deletes
+// hundreds of messages and the rewind lock is held for all of it.
+func (s *SessionRewindService) deleteSuggestions(
+	ctx context.Context, tenantID uint64, sessionID string, ids []string,
+) {
+	if s.suggestions == nil {
+		return
+	}
+	if batch, ok := s.suggestions.(rewindSuggestionBatchCleaner); ok {
+		if err := batch.DeleteByMessageIDs(ctx, tenantID, sessionID, ids); err != nil {
+			logger.Warnf(ctx, "[SessionRewind] delete suggestions for session %s: %v", sessionID, err)
+		}
+		return
+	}
+	for _, id := range ids {
+		if err := s.suggestions.DeleteByMessageID(ctx, tenantID, sessionID, id); err != nil {
+			logger.Warnf(ctx, "[SessionRewind] delete suggestions for message %s: %v", id, err)
+		}
+	}
 }
 
 func (s *SessionRewindService) cleanupDeleted(
@@ -527,11 +604,6 @@ func (s *SessionRewindService) cleanupDeleted(
 			continue
 		}
 		ids = append(ids, msg.ID)
-		if s.suggestions != nil {
-			if err := s.suggestions.DeleteByMessageID(ctx, tenantID, sessionID, msg.ID); err != nil {
-				logger.Warnf(ctx, "[SessionRewind] delete suggestions for message %s: %v", msg.ID, err)
-			}
-		}
 		if s.knowledge != nil && strings.TrimSpace(msg.KnowledgeID) != "" {
 			s.knowledge.DeleteMessageKnowledge(ctx, msg.KnowledgeID)
 		}
@@ -539,6 +611,7 @@ func (s *SessionRewindService) cleanupDeleted(
 	if len(ids) == 0 {
 		return
 	}
+	s.deleteSuggestions(ctx, tenantID, sessionID, ids)
 	if dropper, ok := s.liveRuns.(rewindStreamDropper); ok {
 		if err := dropper.DropMessageStreams(ctx, sessionID, ids); err != nil {
 			logger.Warnf(ctx, "[SessionRewind] drop streams for session %s: %v", sessionID, err)

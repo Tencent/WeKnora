@@ -869,3 +869,26 @@ func messageIDs(messages []*types.Message) []string {
 	}
 	return ids
 }
+
+// Clearing the bootstrap column is redoable; deleting the snapshot behind it
+// is not. A truncate that never lands must leave the fork something to boot
+// from, otherwise the retry finds the whole transcript and no workspace.
+func TestRewindKeepsForkSnapshotWhenDeleteFails(t *testing.T) {
+	history := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	svc, sessions, msgs, _ := newUnopenedForkRewindFixture(
+		t, history, pendingForkBootstrap(rewindSHA1),
+	)
+	snapshots := &fakeSnapshotDeleter{}
+	svc.snapshots = snapshots
+	msgs.deleteFromErr = errors.New("db down")
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-1")
+
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.Equal(t, []string{"u-1", "a-1"}, messageIDs(msgs.messages))
+	require.Empty(t, snapshots.deleted,
+		"the snapshot must survive a truncate that did not happen")
+	require.True(t, sessions.bootstrapCleared,
+		"the column write stays ahead of the delete so the fork cannot boot ahead of the transcript")
+}

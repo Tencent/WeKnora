@@ -15,8 +15,6 @@ export function rewindSkipMessage(reason: string, t: RewindCopyFn): string {
       return t('chat.rewind.skipNoSandbox')
     case 'NO_CHECKPOINT':
       return t('chat.rewind.skipNoCheckpoint')
-    case 'SANDBOX_REPLACED':
-      return t('chat.rewind.skipSandboxReplaced')
     default:
       return t('chat.rewind.skipped')
   }

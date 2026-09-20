@@ -92,6 +92,9 @@ type qaRequestContext struct {
 	// previous run are visible to this engine from round 1 and to any client
 	// that reloads the queue.
 	steerCarryOver []interfaces.StreamEvent
+	// turnLeaseHeld records that executeQA already took the send-side turn
+	// lease for this request, so the QA service does not take a second one.
+	turnLeaseHeld bool
 }
 
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
@@ -118,6 +121,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		LocalBrowserEnabled: rc.localBrowserEnabled,
 		Attachments:         rc.attachments,
 		QuestionOrigin:      rc.questionOrigin,
+		TurnLeaseHeld:       rc.turnLeaseHeld,
 	}
 	if rc.steerSink != nil {
 		req.SteerSink = rc.steerSink
@@ -1113,6 +1117,11 @@ func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (fun
 		configID = reqCtx.customAgent.Config.SandboxConfigID
 	}
 	release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
+	if err == nil {
+		// The QA service reads this off the built request and skips its own
+		// hold, so the send path opens and closes the lease exactly once.
+		reqCtx.turnLeaseHeld = true
+	}
 	if err != nil {
 		if reqCtx.c != nil && !reqCtx.skipSSE {
 			if stderrors.Is(err, sandbox.ErrSessionRewindLocked) || stderrors.Is(err, sandbox.ErrSessionTurnActive) {

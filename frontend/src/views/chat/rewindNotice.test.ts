@@ -12,10 +12,8 @@ test('NO_CHECKPOINT maps to skipNoCheckpoint', () => {
   assert.equal(rewindSkipMessage('NO_CHECKPOINT', t), 'chat.rewind.skipNoCheckpoint')
 })
 
-test('SANDBOX_REPLACED maps to skipSandboxReplaced', () => {
-  assert.equal(rewindSkipMessage('SANDBOX_REPLACED', t), 'chat.rewind.skipSandboxReplaced')
-})
-
+// A replaced sandbox fail-closes with a 409 rather than truncating, so it
+// never arrives here as a skip reason.
 test('unknown code falls back to generic skipped copy', () => {
   assert.equal(rewindSkipMessage('WEIRD', t), 'chat.rewind.skipped')
 })
