@@ -210,6 +210,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `OLLAMA_BASE_URL` | http://host.docker.internal:11434 | Ollama 地址 |
 | `OLLAMA_OPTIONAL` | true | Ollama 不可用时仅告警不阻断启动 |
 | `BATCH_EMBED_SIZE` | 空 | 批量 embedding 大小 |
+| `EMBEDDING_MODEL_NAME` / `EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_PROVIDER` | 空 | 仅供 `builtin_models.yaml` 中启用的 env-driven `Embedding` 条目使用；不会自动选择 Ollama 向量模型 |
 | `VLM_HTTP_TIMEOUT_SECONDS` | 180 | VLM 单次请求超时 |
 | `BUILTIN_MODELS_CONFIG` | config/builtin_models.yaml | 内置模型声明文件路径（见下文） |
 | `WEKNORA_LLM_STREAM_RAW_DUMP` / `_DIR` | 空 | LLM 流原始转储（排障用） |

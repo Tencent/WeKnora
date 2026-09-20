@@ -226,6 +226,18 @@ docker compose up -d    # 启动核心服务
 
 > 如需使用本地 Ollama 模型，请先运行 `ollama serve > /dev/null 2>&1 &`
 
+如需使用本地对话或向量模型，请在「设置 → 模型」中将模型来源设为
+`local`，并填写 Ollama 模型名。`OLLAMA_BASE_URL` 只用于指定 Ollama
+服务地址，并不会自动选择向量模型。可选的环境变量内置 `Embedding`
+条目见 [`config/builtin_models.yaml.example`](./config/builtin_models.yaml.example)，
+使用 `EMBEDDING_MODEL_NAME`、`EMBEDDING_BASE_URL`、`EMBEDDING_API_KEY`
+和 `EMBEDDING_PROVIDER`，不会自动启用。
+
+项目目前没有发布固定的 Ollama 最低内存要求。实际占用取决于模型、量化
+方式、上下文长度，以及同时运行的数据库和向量服务。对话模型和向量模型
+可以共用一个 Ollama 实例，但会共享内存；如果主机内存不足，请改用更小
+或量化后的模型，或将向量模型切换到远程服务。
+
 ### 🔄 版本升级
 
 若已有部署并下载了更新的 release：

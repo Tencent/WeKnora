@@ -249,6 +249,21 @@ Once started, visit **http://localhost** to get started.
 
 > To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
 
+For local chat or embedding models, add the model in **Settings → Models** with
+**Source: local** and enter the Ollama model name. `OLLAMA_BASE_URL` selects the
+Ollama service; it does not select an embedding model. The optional
+env-driven `Embedding` entry in
+[`config/builtin_models.yaml.example`](./config/builtin_models.yaml.example)
+uses `EMBEDDING_MODEL_NAME`, `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, and
+`EMBEDDING_PROVIDER` instead, and is not enabled automatically.
+
+WeKnora does not publish a fixed minimum RAM requirement for Ollama. Memory
+depends on the selected models and quantization, context sizes, and the
+database/vector services running alongside them. Chat and embedding models can
+share one Ollama instance, but they also share its memory; use smaller or
+quantized models, or a remote embedding provider, if the host is under memory
+pressure.
+
 ### 🔄 Upgrading
 
 If you already have WeKnora running and downloaded a newer release:

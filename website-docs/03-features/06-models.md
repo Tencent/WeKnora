@@ -153,6 +153,12 @@ builtin_models:
 
 > 注意：`cmd/download/duckdb/duckdb.go` 与模型无关——它在构建镜像时预下载 DuckDB 的 `spatial`、`excel` 扩展，供数据分析工具使用。模型权重下载只发生在 Ollama 路径。
 
+#### Ollama 与 Embedding 配置
+
+- `OLLAMA_BASE_URL` 指向 Ollama 服务。使用本地对话或向量模型时，在「设置 → 模型」中将模型来源设为 `local`，再填写对应的 Ollama 模型名；仅设置服务地址不会自动选择向量模型。
+- 如果使用 `config/builtin_models.yaml` 的环境变量内置模型配置，向量模型示例使用 `EMBEDDING_MODEL_NAME`、`EMBEDDING_BASE_URL`、`EMBEDDING_API_KEY` 和 `EMBEDDING_PROVIDER`。示例条目默认是 `source: remote`，必须显式启用并按需修改，不能把这些变量理解为 Ollama 的全局模型选择器。
+- 项目没有为 Ollama 发布固定的最低 RAM benchmark。实际占用取决于模型大小、量化方式、上下文长度，以及数据库和向量服务；对话模型与向量模型可以共用一个 Ollama 实例，但会共享其内存。遇到内存压力时，优先使用更小/量化模型或远程向量模型，并按实际部署压测。
+
 ### 模型用量统计
 
 - **Token 用量**：`types.TokenUsage`（`internal/types/chat.go`）记录 `prompt_tokens / completion_tokens / total_tokens` 及 prompt cache 细分（`cache_read_tokens / cache_write_tokens / cache_miss_tokens / cache_status`）。每个 Chat 实现通过 `internal/models/chat/usage.go` 的 `logUsage` 输出统一的结构化日志行：
