@@ -1,0 +1,10 @@
+{
+  "vendor": "mimo",
+  "source": "https://mimo.mi.com/static/docs/quick-start/summary/model.md",
+  "models": [
+    {"id": "mimo-v2.5-pro", "name": "MiMo V2.5 Pro", "reasoning": true, "input": ["text"], "context_window": 1048576, "max_output_tokens": 131072, "cost": {"input": 0.435, "output": 0.87, "cache_read": 0.0036}, "source": "https://mimo.mi.com/static/docs/price/pay-as-you-go.md"},
+    {"id": "mimo-v2.5", "name": "MiMo V2.5", "reasoning": true, "input": ["text", "image", "audio", "video"], "context_window": 1048576, "max_output_tokens": 131072, "cost": {"input": 0.14, "output": 0.28, "cache_read": 0.0028}, "source": "https://mimo.mi.com/static/docs/price/pay-as-you-go.md"},
+    {"id": "mimo-v2.5-pro-ultraspeed", "name": "MiMo V2.5 Pro Ultraspeed", "reasoning": true, "input": ["text"], "context_window": 1048576, "max_output_tokens": 131072, "cost": {"input": 1.305, "output": 2.61, "cache_read": 0.0108}, "source": "https://mimo.mi.com/static/docs/news/latest/beta-extended.md"},
+    {"id": "mimo-v2-flash", "name": "MiMo V2 Flash (retired 2026-06-30)", "reasoning": true, "input": ["text"], "context_window": 256000, "max_output_tokens": 256000, "cost": {"input": 0.1, "output": 0.3, "cache_read": 0.01}, "deprecated": true, "source": "https://mimo.mi.com/static/docs/updates/deprecate.md"}
+  ]
+}
