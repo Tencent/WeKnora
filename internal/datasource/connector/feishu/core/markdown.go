@@ -47,6 +47,11 @@ type mdRenderer struct {
 	imgN   int    // last weknora-img:// sequence number assigned
 	docURL string // parent document's web URL, for non-whitelisted attachment placeholders
 
+	// userName resolves a mention_user OpenID to a display name; "" means
+	// unresolved (renders the generic @成员). Nil-safe via the default set in
+	// blocksToMarkdown.
+	userName func(string) string
+
 	orderedActive bool // an ordered-list run is in progress
 	orderedNext   int  // next number for "auto"/absent sequence
 }
@@ -65,8 +70,10 @@ func (r *mdRenderer) nextImageNo(kind, token string) int {
 // attachments, and numbering image/board blocks as weknora-img://N markers.
 // docURL is the parent document's web URL used in non-whitelisted attachment
 // placeholders (empty → placeholder without link). client may be nil when the
-// block set has no downdrill blocks.
-func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock, docURL string) ([]byte, []pendingAttachment, []pendingImage, error) {
+// block set has no downdrill blocks. userName resolves mention_user OpenIDs to
+// display names (nil → generic @成员 for every mention; documents without
+// mentions never invoke it, so it costs zero API calls).
+func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock, docURL string, userName func(string) string) ([]byte, []pendingAttachment, []pendingImage, error) {
 	byID := make(map[string]DocxBlock, len(blocks))
 	for _, b := range blocks {
 		byID[b.BlockID] = b
@@ -78,7 +85,10 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 	consumed := tableDescendants(blocks, byID)
 	markContainerDescendants(blocks, byID, consumed)
 
-	r := &mdRenderer{ctx: ctx, client: client, byID: byID, docURL: docURL}
+	if userName == nil {
+		userName = func(string) string { return "" }
+	}
+	r := &mdRenderer{ctx: ctx, client: client, byID: byID, docURL: docURL, userName: userName}
 	var sb strings.Builder
 	for _, b := range blocks {
 		if consumed[b.BlockID] {
@@ -134,23 +144,23 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 	case BlockTypePage, BlockTypeTableCell:
 		return "" // containers rendered elsewhere
 	case BlockTypeText:
-		return richText(textBearingField(b))
+		return r.richText(textBearingField(b))
 	case BlockTypeBullet:
-		return "- " + richText(b.Bullet)
+		return "- " + r.richText(b.Bullet)
 	case BlockTypeOrdered:
-		return fmt.Sprintf("%d. %s", r.nextOrderedNo(textBearingField(b)), richText(b.Ordered))
+		return fmt.Sprintf("%d. %s", r.nextOrderedNo(textBearingField(b)), r.richText(b.Ordered))
 	case BlockTypeCode:
-		return renderCode(b)
+		return r.renderCode(b)
 	case BlockTypeQuote:
-		return "> " + richText(b.Quote)
+		return "> " + r.richText(b.Quote)
 	case BlockTypeTodo:
-		if t := richText(b.Todo); t != "" {
+		if t := r.richText(b.Todo); t != "" {
 			return "- [ ] " + t
 		}
 	case BlockTypeDivider:
 		return "---"
 	case BlockTypeCallout:
-		return r.renderQuotedContainer(b, richText(b.Callout))
+		return r.renderQuotedContainer(b, r.richText(b.Callout))
 	case BlockTypeQuoteContainer:
 		return r.renderQuotedContainer(b, "")
 	case BlockTypeGrid:
@@ -222,7 +232,7 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 	default:
 		if b.BlockType >= BlockTypeHeading1 && b.BlockType <= blockTypeHeading9 {
 			level := b.BlockType - BlockTypeHeading1 + 1
-			return strings.Repeat("#", level) + " " + richText(headingText(b))
+			return strings.Repeat("#", level) + " " + r.richText(headingText(b))
 		}
 		return unsupportedBlockNote(b)
 	}
@@ -333,7 +343,7 @@ func plainText(bt *BlockText) string {
 
 // richText renders the inline elements of a text-bearing block: styled text
 // runs, @-mentions, and inline KaTeX equations.
-func richText(bt *BlockText) string {
+func (r *mdRenderer) richText(bt *BlockText) string {
 	if bt == nil {
 		return ""
 	}
@@ -347,8 +357,14 @@ func richText(bt *BlockText) string {
 			u := e.MentionDoc.URL
 			sb.WriteString("[" + u + "](" + u + ")")
 		case e.MentionUser != nil:
-			// The API carries only the user OpenID, never a display name.
-			sb.WriteString("@成员")
+			// The API carries only the user OpenID; the caller-supplied
+			// resolver (cached, degrading) turns it into a display name when
+			// it can. Unresolved → generic @成员, never an error.
+			if name := r.userName(e.MentionUser.UserID); name != "" {
+				sb.WriteString("@" + name)
+			} else {
+				sb.WriteString("@成员")
+			}
 		case e.Equation != nil && strings.TrimSpace(e.Equation.Content) != "":
 			sb.WriteString("$" + strings.TrimSpace(e.Equation.Content) + "$")
 		}
@@ -404,7 +420,7 @@ var gfmCodeLanguages = map[int]string{
 
 // renderCode renders a code block, tagging the fence with the GFM alias of the
 // block's CodeLanguage when one is known.
-func renderCode(b DocxBlock) string {
+func (r *mdRenderer) renderCode(b DocxBlock) string {
 	lang := ""
 	if b.Code != nil && b.Code.Style != nil {
 		lang = gfmCodeLanguages[b.Code.Style.Language]
@@ -413,7 +429,7 @@ func renderCode(b DocxBlock) string {
 	if lang != "" {
 		fence += lang
 	}
-	return fence + "\n" + richText(b.Code) + "\n```"
+	return fence + "\n" + r.richText(b.Code) + "\n```"
 }
 
 // blockTypeNames maps docx block types this converter does not unpack to their

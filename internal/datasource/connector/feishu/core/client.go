@@ -860,3 +860,36 @@ func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string)
 	}
 	return all, nil
 }
+
+// userNameResponse is the GET /contact/v3/users/:userID payload;
+// data.user.name is the user's display name.
+type userNameResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		User struct {
+			Name string `json:"name"`
+		} `json:"user"`
+	} `json:"data"`
+}
+
+// UserName fetches a user's display name by OpenID via the contact API.
+// mention_user.user_id carries an OpenID, hence user_id_type=open_id. Requires
+// a contact read scope (contact:user.base:readonly / contact:contact:readonly);
+// callers degrade to a generic @ marker on any failure, so errors here never
+// block ingestion.
+func (c *Client) UserName(ctx context.Context, userID string) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("empty user id")
+	}
+	path := fmt.Sprintf("/open-apis/contact/v3/users/%s?user_id_type=open_id", url.PathEscape(userID))
+
+	var resp userNameResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return "", fmt.Errorf("get user %s: %w", userID, err)
+	}
+	if resp.Code != 0 {
+		return "", fmt.Errorf("get user %s error: code=%d msg=%s", userID, resp.Code, resp.Msg)
+	}
+	return resp.Data.User.Name, nil
+}

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -312,6 +313,31 @@ func truncateUTF8(s string, maxBytes int) string {
 	return s
 }
 
+// userNameResolver returns a per-document @mention display-name resolver for
+// the contact API. The cache (OpenID → name) means each user costs at most one
+// contact call per document; failures and empty names negative-cache too, so a
+// user without contact permission renders every later mention of themselves as
+// the generic @成员 without re-hitting the API. Errors never propagate — they
+// only log at debug level; ingestion is never blocked or failed by this.
+func userNameResolver(ctx context.Context, client *Client) func(string) string {
+	var cache sync.Map // OpenID → display name ("" = lookup failed)
+	return func(userID string) string {
+		if userID == "" {
+			return ""
+		}
+		if v, ok := cache.Load(userID); ok {
+			return v.(string)
+		}
+		name, err := client.UserName(ctx, userID)
+		if err != nil {
+			logger.Debugf(ctx, "[Feishu] resolve mention user %s: %v (degrading to @成员)", userID, err)
+			name = ""
+		}
+		cache.Store(userID, name)
+		return name
+	}
+}
+
 // DocxFetchInput is the unified description of one docx document from either
 // source (wiki node or Drive file) that FetchDocxWithBlocks needs.
 type DocxFetchInput struct {
@@ -376,7 +402,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	// sub-items, and the parent's metadata image_map ("N" → external_id) lets
 	// the doc-process pipeline resolve each marker against the image
 	// knowledge's persistent FilePath in a single pass.
-	mdBytes, atts, imgs, err := blocksToMarkdown(ctx, client, blocks, in.URL)
+	mdBytes, atts, imgs, err := blocksToMarkdown(ctx, client, blocks, in.URL, userNameResolver(ctx, client))
 	if err != nil {
 		return nil, fmt.Errorf("convert blocks %s: %w", in.Title, err)
 	}
