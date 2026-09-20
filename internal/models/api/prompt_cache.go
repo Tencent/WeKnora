@@ -75,18 +75,6 @@ func ResolveCacheRetention(opts *Options) CacheRetention {
 	return CacheRetentionShort
 }
 
-// PromptCacheSessionID resolves the routing key: an explicit Options value
-// wins, otherwise the session ID on the context.
-func PromptCacheSessionID(ctx context.Context, opts *Options) string {
-	if opts != nil && opts.PromptCacheKey != "" {
-		return ClampPromptCacheKey(opts.PromptCacheKey)
-	}
-	if sessionID, ok := types.SessionIDFromContext(ctx); ok {
-		return ClampPromptCacheKey(sessionID)
-	}
-	return ""
-}
-
 // CacheControlMarker is the Anthropic-style cache breakpoint object that
 // several OpenAI-compatible gateways (OpenRouter, DashScope) also accept.
 type CacheControlMarker struct {

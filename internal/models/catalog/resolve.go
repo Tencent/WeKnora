@@ -346,8 +346,3 @@ func (r *Resolved) Capabilities() Capabilities {
 	caps.ThinkingLevels = r.ThinkingLevels.SupportedLevels()
 	return caps
 }
-
-// SupportsThinking reports whether the resolved model can be asked to think.
-func (r *Resolved) SupportsThinking() bool {
-	return len(r.Capabilities().ThinkingLevels) > 0
-}

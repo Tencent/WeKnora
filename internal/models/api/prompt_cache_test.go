@@ -53,10 +53,24 @@ func TestAttachSessionAffinityHeaders(t *testing.T) {
 	assert.Equal(t, "sess-1", req.Header.Get("x-session-affinity"))
 }
 
+// parseUsage decodes a response envelope the way the Chat Completions client
+// does, so these cases exercise the same path production takes.
+func parseUsage(t *testing.T, body string) (OpenAIUsage, bool) {
+	t.Helper()
+	var envelope struct {
+		Usage *OpenAIUsage `json:"usage"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &envelope))
+	if envelope.Usage == nil {
+		return OpenAIUsage{}, false
+	}
+	return *envelope.Usage, true
+}
+
 func TestOpenAIUsage_CacheVariants(t *testing.T) {
 	t.Run("deepseek hit/miss", func(t *testing.T) {
-		u, ok := ParseOpenAIUsage([]byte(`{"usage":{"prompt_tokens":30,"completion_tokens":2,` +
-			`"prompt_cache_hit_tokens":20,"prompt_cache_miss_tokens":10}}`))
+		u, ok := parseUsage(t, `{"usage":{"prompt_tokens":30,"completion_tokens":2,`+
+			`"prompt_cache_hit_tokens":20,"prompt_cache_miss_tokens":10}}`)
 		require.True(t, ok)
 		got := u.ToTokenUsage(true)
 		assert.Equal(t, 20, got.CacheReadTokens)
@@ -64,26 +78,26 @@ func TestOpenAIUsage_CacheVariants(t *testing.T) {
 		assert.True(t, got.CacheReported)
 	})
 	t.Run("openai details", func(t *testing.T) {
-		u, ok := ParseOpenAIUsage([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":5,` +
-			`"prompt_tokens_details":{"cached_tokens":64}}}`))
+		u, ok := parseUsage(t, `{"usage":{"prompt_tokens":100,"completion_tokens":5,`+
+			`"prompt_tokens_details":{"cached_tokens":64}}}`)
 		require.True(t, ok)
 		got := u.ToTokenUsage(true)
 		assert.Equal(t, 64, got.CacheReadTokens)
 		assert.Equal(t, 36, got.CacheMissTokens)
 	})
 	t.Run("kimi top-level cached_tokens", func(t *testing.T) {
-		u, ok := ParseOpenAIUsage([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":5,"cached_tokens":40}}`))
+		u, ok := parseUsage(t, `{"usage":{"prompt_tokens":100,"completion_tokens":5,"cached_tokens":40}}`)
 		require.True(t, ok)
 		assert.Equal(t, 40, u.ToTokenUsage(true).CacheReadTokens)
 	})
 	t.Run("no counters, vendor without accounting", func(t *testing.T) {
-		u, ok := ParseOpenAIUsage([]byte(`{"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+		u, ok := parseUsage(t, `{"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
 		require.True(t, ok)
 		assert.False(t, u.ToTokenUsage(false).CacheReported)
 		assert.Equal(t, 15, u.ToTokenUsage(false).TotalTokens)
 	})
 	t.Run("missing usage", func(t *testing.T) {
-		_, ok := ParseOpenAIUsage([]byte(`{"choices":[]}`))
+		_, ok := parseUsage(t, `{"choices":[]}`)
 		assert.False(t, ok)
 	})
 }

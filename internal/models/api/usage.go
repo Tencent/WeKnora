@@ -1,10 +1,6 @@
 package api
 
-import (
-	"encoding/json"
-
-	"github.com/Tencent/WeKnora/internal/types"
-)
+import "github.com/Tencent/WeKnora/internal/types"
 
 // OpenAIUsage is the superset of the usage shapes OpenAI-compatible
 // endpoints return. Vendors disagree on where cache counters live:
@@ -67,18 +63,6 @@ func (u OpenAIUsage) ToTokenUsage(cacheAccounting bool) types.TokenUsage {
 		out.MarkPromptCacheUnsupported()
 	}
 	return out
-}
-
-// ParseOpenAIUsage decodes the "usage" object out of a raw response or stream
-// chunk. ok is false when the payload carries no usage block.
-func ParseOpenAIUsage(data []byte) (OpenAIUsage, bool) {
-	var envelope struct {
-		Usage *OpenAIUsage `json:"usage"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil || envelope.Usage == nil {
-		return OpenAIUsage{}, false
-	}
-	return *envelope.Usage, true
 }
 
 func valueOrZero(value *int) int {
