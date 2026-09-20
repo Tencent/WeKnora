@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -159,6 +160,11 @@ func (c *Connector) walk(
 		return nil, nil, err
 	}
 	cli := newClient(cfg)
+	settings := parseFolderSettings(ctx, config)
+	if settings.FolderMode != folderModeNone {
+		logger.Infof(ctx, "[Yuque] folder path derivation enabled: folder_mode=%s include_book_title=%t toc_only=%t",
+			settings.FolderMode, settings.IncludeBookTitle, settings.TOCOnly)
+	}
 
 	newCursor := &yuqueCursor{LastSyncTime: time.Now(), BookDocTimes: make(map[string]map[string]string)}
 	var out []types.FetchedItem
@@ -174,11 +180,34 @@ func (c *Connector) walk(
 			return nil, nil, fmt.Errorf("list docs for book %d: %w", bookID, err)
 		}
 
+		// Optionally fetch the book's table of contents and fold it into a
+		// per-document folder path. One request per book per sync.
+		//
+		// tocOK separates "the TOC was fetched and this document is not in it"
+		// from "we could not fetch the TOC at all". Both the path assembly and
+		// the toc_only filter depend on that distinction: with no TOC we must
+		// degrade to the previous flat behaviour rather than silently dropping
+		// every document.
+		var tocSegs map[int64][]string
+		var inTOC map[int64]bool
+		tocOK := false
+		if settings.FolderMode == folderModeTOC {
+			toc, tocErr := cli.ListBookTOC(ctx, bookID)
+			if tocErr != nil {
+				logger.Warnf(ctx, "[Yuque] book %d: fetch TOC failed, falling back to flat file names: %v",
+					bookID, tocErr)
+			} else {
+				tocSegs, inTOC = buildTOCPaths(toc)
+				tocOK = true
+			}
+		}
+		bookName := ""
+
 		currentDocs := make(map[string]bool)
 		newCursor.BookDocTimes[bookIDStr] = make(map[string]string)
 
-		var skippedType, skippedDraft, kept int
-		var sampleSkipType, sampleSkipDraft string
+		var skippedType, skippedDraft, skippedNotInTOC, kept int
+		var sampleSkipType, sampleSkipDraft, sampleSkipNotInTOC string
 		for _, d := range docs {
 			// Empty type/status is treated as acceptable — forward-compat with
 			// API variations that omit the field.
@@ -193,6 +222,17 @@ func (c *Connector) walk(
 				skippedDraft++
 				if sampleSkipDraft == "" {
 					sampleSkipDraft = fmt.Sprintf("id=%d status=%q title=%q", d.ID, d.Status, d.Title)
+				}
+				continue
+			}
+			// Filter to documents that appear in the TOC. Applies only when the
+			// TOC was actually fetched — see the tocOK comment above. The
+			// predicate is membership in the TOC node list, not "has a path":
+			// a document may sit in the TOC with no enclosing group.
+			if settings.TOCOnly && tocOK && !inTOC[d.ID] {
+				skippedNotInTOC++
+				if sampleSkipNotInTOC == "" {
+					sampleSkipNotInTOC = fmt.Sprintf("id=%d title=%q", d.ID, d.Title)
 				}
 				continue
 			}
@@ -257,12 +297,27 @@ func (c *Connector) walk(
 				continue
 			}
 
+			// Book title for the leading path segment. The detail response
+			// already carries it, so this costs no extra API call. Captured
+			// once per book; falls back to the namespace, then to no prefix.
+			if bookName == "" {
+				bookName = strings.TrimSpace(detail.Book.Name)
+				if bookName == "" {
+					bookName = strings.TrimSpace(detail.Book.Namespace)
+				}
+			}
+
+			// folder_path is derived downstream from FileName alone
+			// (SplitKnowledgeRelativePath → NormalizeKnowledgeFolderPath), so the
+			// hierarchy has to be encoded here as a relative path.
+			fileName := buildFolderFileName(settings, tocOK, bookName, tocSegs[d.ID], d.Title)
+
 			out = append(out, types.FetchedItem{
 				ExternalID:       docIDStr,
 				Title:            d.Title,
 				Content:          []byte(detail.Body),
 				ContentType:      "text/markdown",
-				FileName:         datasource.SanitizeFileName(d.Title) + ".md",
+				FileName:         fileName,
 				URL:              buildDocURL(cfg.GetBaseURL(), detail.Book.Namespace, d.Slug),
 				UpdatedAt:        parseContentUpdatedAt(d.ContentUpdatedAt),
 				SourceResourceID: bookIDStr,
@@ -277,8 +332,11 @@ func (c *Connector) walk(
 			})
 		}
 
-		logger.Infof(ctx, "[Yuque] book %d: total=%d kept=%d skipped_non_doc=%d skipped_draft=%d non_doc_sample={%s} draft_sample={%s}",
-			bookID, len(docs), kept, skippedType, skippedDraft, sampleSkipType, sampleSkipDraft)
+		logger.Infof(ctx, "[Yuque] book %d: total=%d kept=%d skipped_non_doc=%d skipped_draft=%d "+
+			"skipped_not_in_toc=%d toc_loaded=%t non_doc_sample={%s} draft_sample={%s} "+
+			"not_in_toc_sample={%s}",
+			bookID, len(docs), kept, skippedType, skippedDraft, skippedNotInTOC, tocOK,
+			sampleSkipType, sampleSkipDraft, sampleSkipNotInTOC)
 
 		// Deletion detection (incremental only): previous doc IDs not in current → IsDeleted=true
 		if incremental && prev != nil && prev.BookDocTimes != nil {

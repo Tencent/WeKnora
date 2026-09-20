@@ -18,6 +18,7 @@
 package yuque
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -230,4 +232,233 @@ func redactToken(t string) string {
 		return "***"
 	}
 	return t[:6] + "..." + t[len(t)-4:]
+}
+
+// --- Table of contents (TOC) ---
+
+// v2TOCResponse wraps GET /api/v2/repos/{book_id}/toc.
+type v2TOCResponse struct {
+	Data []v2TOCNode `json:"data"`
+}
+
+// v2TOCNode is one entry in a book's table of contents.
+//
+// The endpoint returns a flat list; the hierarchy is expressed by parent_uuid.
+// TITLE nodes are grouping headers (their doc_id is empty), DOC nodes are the
+// actual documents. Both carry a uuid that other nodes reference as parent_uuid.
+type v2TOCNode struct {
+	UUID       string        `json:"uuid"`
+	Type       string        `json:"type"`
+	Title      string        `json:"title"`
+	ParentUUID string        `json:"parent_uuid"`
+	DocID      flexibleDocID `json:"doc_id"`
+}
+
+const (
+	tocNodeTypeTitle = "TITLE"
+	tocNodeTypeDoc   = "DOC"
+)
+
+// flexibleDocID accepts the TOC `doc_id` field, which the API serializes as a
+// number on DOC nodes but as an empty string on TITLE nodes. Decoding straight
+// into int64 fails on "" ("cannot unmarshal string into Go struct field").
+// Absent or empty IDs normalise to 0, which is never a real Yuque document ID.
+type flexibleDocID int64
+
+func (d *flexibleDocID) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		*d = 0
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			*d = 0
+			return nil
+		}
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return fmt.Errorf("flexibleDocID: %q is not a numeric id: %w", s, err)
+		}
+		*d = flexibleDocID(n)
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(b, &n); err != nil {
+		return fmt.Errorf("flexibleDocID: expected string or integer, got %s: %w", b, err)
+	}
+	*d = flexibleDocID(n)
+	return nil
+}
+
+// maxTOCDepth bounds the ancestor walk in buildTOCPaths. Real nesting is only a
+// few levels deep; the bound is a backstop against malformed input.
+const maxTOCDepth = 32
+
+// buildTOCPaths folds a flat TOC node list into two per-document lookup maps:
+//
+//	segs  — doc_id → ancestor titles, root-first, each already passed through
+//	        sanitizeFileName. Absent when the document sits directly under the
+//	        book root.
+//	inTOC — doc_id → whether the document appears in the TOC node list at all.
+//
+// The two maps are deliberately separate and must stay that way. A document can
+// legitimately appear in the TOC without belonging to any group, in which case
+// inTOC is true and segs is empty. A caller filtering out "documents that are
+// not in the TOC" must test inTOC — testing segs[id] instead would also drop
+// those group-less documents.
+//
+// Sanitising per segment here (rather than on the joined path) is what keeps a
+// "/" inside a group title from silently creating an extra nesting level.
+func buildTOCPaths(nodes []v2TOCNode) (map[int64][]string, map[int64]bool) {
+	byUUID := make(map[string]v2TOCNode, len(nodes))
+	for _, n := range nodes {
+		if n.UUID != "" {
+			byUUID[n.UUID] = n
+		}
+	}
+
+	segs := make(map[int64][]string)
+	inTOC := make(map[int64]bool)
+
+	for _, n := range nodes {
+		if n.Type != tocNodeTypeDoc {
+			continue
+		}
+		id := int64(n.DocID)
+		if id == 0 {
+			continue
+		}
+		inTOC[id] = true
+
+		var reverse []string
+		visited := map[string]bool{n.UUID: true}
+		cur := n
+		for len(reverse) < maxTOCDepth {
+			parent, ok := byUUID[cur.ParentUUID]
+			if !ok || parent.UUID == "" || visited[parent.UUID] {
+				break // reached the root, hit a dangling parent, or a cycle
+			}
+			visited[parent.UUID] = true
+			if title := strings.TrimSpace(parent.Title); title != "" {
+				reverse = append(reverse, datasource.SanitizeFileName(title))
+			}
+			cur = parent
+		}
+		// Walked child → root; flip to root → child for path order.
+		out := make([]string, len(reverse))
+		for i, s := range reverse {
+			out[len(reverse)-1-i] = s
+		}
+		if len(out) > 0 {
+			segs[id] = out
+		}
+	}
+	return segs, inTOC
+}
+
+// --- Folder path settings ---
+
+const (
+	// folderModeNone is the historical behaviour: a bare "<title>.md" file name,
+	// so every synced document lands at the knowledge base root.
+	folderModeNone = "none"
+	// folderModeTOC derives the folder path from the book's table of contents.
+	folderModeTOC = "toc"
+)
+
+// folderSettings controls how folder paths are derived for synced documents.
+// Configured under DataSourceConfig.Settings, never under Credentials.
+type folderSettings struct {
+	// FolderMode is folderModeNone or folderModeTOC.
+	FolderMode string
+	// IncludeBookTitle prefixes the path with the book title. Only meaningful
+	// when FolderMode is folderModeTOC.
+	IncludeBookTitle bool
+	// TOCOnly syncs only documents that appear in the book's TOC. Only
+	// meaningful when FolderMode is folderModeTOC.
+	TOCOnly bool
+}
+
+// defaultFolderSettings keeps the emitted FileName byte-for-byte identical to
+// previous releases, so enabling the new behaviour is strictly opt-in and an
+// existing data source keeps working unchanged after an upgrade.
+func defaultFolderSettings() folderSettings {
+	return folderSettings{
+		FolderMode:       folderModeNone,
+		IncludeBookTitle: true,
+		TOCOnly:          false,
+	}
+}
+
+// parseFolderSettings reads the folder-path settings, falling back to the
+// default for any key that is absent or unrecognised. A typo in the settings
+// map must not fail a sync.
+func parseFolderSettings(ctx context.Context, ds *types.DataSourceConfig) folderSettings {
+	s := defaultFolderSettings()
+	if ds == nil || ds.Settings == nil {
+		return s
+	}
+	if raw, ok := ds.Settings["folder_mode"]; ok {
+		mode := strings.ToLower(strings.TrimSpace(fmt.Sprint(raw)))
+		switch mode {
+		case folderModeNone, folderModeTOC:
+			s.FolderMode = mode
+		default:
+			logger.Warnf(ctx, "[Yuque] unknown folder_mode %q, keeping %q", mode, s.FolderMode)
+		}
+	}
+	s.IncludeBookTitle = settingBool(ds.Settings["include_book_title"], s.IncludeBookTitle)
+	s.TOCOnly = settingBool(ds.Settings["toc_only"], s.TOCOnly)
+	return s
+}
+
+// settingBool interprets a settings value as a boolean, returning def when the
+// value is absent or of an unrecognised shape. Settings arrive from JSON, so a
+// hand-edited config may carry either a real bool or its string form.
+func settingBool(v interface{}, def bool) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "true", "1", "yes", "on":
+			return true
+		case "false", "0", "no", "off":
+			return false
+		}
+	}
+	return def
+}
+
+// buildFolderFileName assembles the FileName for a synced document.
+//
+// folder_path downstream is derived from FileName alone
+// (SplitKnowledgeRelativePath → NormalizeKnowledgeFolderPath), so the folder
+// hierarchy has to be encoded here as a relative path.
+//
+// With the default settings — or whenever the book's TOC could not be loaded —
+// this returns exactly "<title>.md", which is the byte-for-byte behaviour of
+// previous releases.
+func buildFolderFileName(
+	settings folderSettings, tocOK bool, bookName string, tocSegs []string, title string,
+) string {
+	fileName := datasource.SanitizeFileName(title) + ".md"
+	if settings.FolderMode != folderModeTOC || !tocOK {
+		return fileName
+	}
+	segments := make([]string, 0, len(tocSegs)+1)
+	if settings.IncludeBookTitle && bookName != "" {
+		segments = append(segments, datasource.SanitizeFileName(bookName))
+	}
+	// tocSegs are already sanitised by buildTOCPaths.
+	segments = append(segments, tocSegs...)
+	if len(segments) == 0 {
+		return fileName
+	}
+	return strings.Join(segments, "/") + "/" + fileName
 }
