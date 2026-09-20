@@ -298,3 +298,57 @@ func TestTrimBoardImage_FullyBlankAndGarbagePassThrough(t *testing.T) {
 		t.Fatal("undecodable bytes must pass through unchanged")
 	}
 }
+
+// Content spanning two opposite corners makes the corner vote 2:2 — trimming
+// must bail entirely rather than trust either color as the background.
+func TestTrimBoardImage_SplitCornerVoteSkipsTrimming(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 120, 200))
+	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	red := color.RGBA{R: 200, G: 30, B: 30, A: 255}
+	for y := 0; y < 200; y++ {
+		for x := 0; x < 120; x++ {
+			src.Set(x, y, white)
+		}
+	}
+	// Red band down the full left side: touches top-left and bottom-left.
+	for y := 0; y < 200; y++ {
+		for x := 0; x < 50; x++ {
+			src.Set(x, y, red)
+		}
+	}
+	data := encodeTestImage(t, src, "png")
+	if got := trimBoardImage(data); !bytes.Equal(got, data) {
+		t.Fatal("split corner vote (2:2) must pass through untrimmed")
+	}
+}
+
+// Content touching exactly one corner keeps the majority vote at 3 — the
+// blank borders away from that corner are still trimmed.
+func TestTrimBoardImage_ContentAtOneCornerStillTrims(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 120, 200))
+	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	red := color.RGBA{R: 200, G: 30, B: 30, A: 255}
+	for y := 0; y < 200; y++ {
+		for x := 0; x < 120; x++ {
+			src.Set(x, y, white)
+		}
+	}
+	// Content only in the top-left corner region.
+	for y := 0; y < 40; y++ {
+		for x := 0; x < 40; x++ {
+			src.Set(x, y, red)
+		}
+	}
+	trimmed := trimBoardImage(encodeTestImage(t, src, "png"))
+	out, _, err := image.Decode(bytes.NewReader(trimmed))
+	if err != nil {
+		t.Fatalf("decode trimmed: %v", err)
+	}
+	b := out.Bounds()
+	if b.Dy() > 40+2*trimMargin || b.Dx() > 40+2*trimMargin {
+		t.Fatalf("blank canvas not trimmed, got %dx%d", b.Dx(), b.Dy())
+	}
+	if r, _, _, _ := out.At(2, 2).RGBA(); uint8(r>>8) != 200 {
+		t.Fatal("corner-touching content must survive at its position")
+	}
+}

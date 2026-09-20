@@ -57,7 +57,9 @@ func (c *Client) downloadBoardAsImage(ctx context.Context, boardToken string) ([
 // JPEG; anything undecodable or in another format returns unchanged). The
 // bottom-right pixel seeds the background color; border rows/columns entirely
 // within blankTolerance of it are trimmed, keeping trimMargin pixels around
-// the content.
+// the content. The background color is the majority of the four corner
+// pixels (>=3 must agree); on a split vote content reaches the corners and
+// the image passes through untrimmed.
 func trimBoardImage(data []byte) []byte {
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil || (format != "png" && format != "jpeg") {
@@ -72,7 +74,7 @@ func trimBoardImage(data []byte) []byte {
 		r, g, bl, a := img.At(x, y).RGBA()
 		return boardPixel{uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8), uint8(a >> 8)}
 	}
-	closeTo := func(p, bg boardPixel) bool {
+	withinTolerance := func(p, q boardPixel) bool {
 		d := func(a, c uint8) int {
 			if d := int(a) - int(c); d < 0 {
 				return -d
@@ -80,13 +82,35 @@ func trimBoardImage(data []byte) []byte {
 				return d
 			}
 		}
-		return d(p.r, bg.r) <= blankTolerance && d(p.g, bg.g) <= blankTolerance &&
-			d(p.b, bg.b) <= blankTolerance && d(p.a, bg.a) <= blankTolerance
+		return d(p.r, q.r) <= blankTolerance && d(p.g, q.g) <= blankTolerance &&
+			d(p.b, q.b) <= blankTolerance && d(p.a, q.a) <= blankTolerance
 	}
-	bg := at(b.Max.X-1, b.Max.Y-1)
+	// The background color must be unambiguous: require at least three of the
+	// four corners to agree on one color, else content reaches the corners and
+	// trimming could eat it (rows fully matching the seed would read as blank).
+	corners := [4]boardPixel{
+		at(b.Min.X, b.Min.Y), at(b.Max.X-1, b.Min.Y),
+		at(b.Min.X, b.Max.Y-1), at(b.Max.X-1, b.Max.Y-1),
+	}
+	bg, ok := boardPixel{}, false
+	for _, c := range corners {
+		n := 0
+		for _, d := range corners {
+			if withinTolerance(c, d) {
+				n++
+			}
+		}
+		if n >= 3 {
+			bg, ok = c, true
+			break
+		}
+	}
+	if !ok {
+		return data
+	}
 	rowBlank := func(y int) bool {
 		for x := b.Min.X; x < b.Max.X; x++ {
-			if !closeTo(at(x, y), bg) {
+			if !withinTolerance(at(x, y), bg) {
 				return false
 			}
 		}
@@ -94,7 +118,7 @@ func trimBoardImage(data []byte) []byte {
 	}
 	colBlank := func(x int) bool {
 		for y := b.Min.Y; y < b.Max.Y; y++ {
-			if !closeTo(at(x, y), bg) {
+			if !withinTolerance(at(x, y), bg) {
 				return false
 			}
 		}
