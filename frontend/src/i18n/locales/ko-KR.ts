@@ -4936,8 +4936,7 @@ export default {
       draftTag: '현재 상태: 임시 저장',
       publishedTag: '현재 상태: 게시됨',
       lastUpdated: '최근 업데이트: {time}',
-      counter: '{chars}자 · {lines}줄',
-      shortcutHint: '{mod}B 굵게 · {mod}I 기울임 · {mod}K 링크 · {mod}S 임시 저장'
+      counter: '{chars}자 · {lines}줄'
     },
     form: {
       knowledgeBaseLabel: '대상 지식베이스',
@@ -4974,6 +4973,11 @@ export default {
     preview: {
       empty: '내용 없음'
     },
+    shortcuts: {
+      title: '단축키',
+      continueList: '목록 이어쓰기',
+      indent: '들여쓰기 / Shift+Tab 내어쓰기'
+    },
     view: {
       edit: '편집',
       split: '분할',
@@ -4997,7 +5001,9 @@ export default {
       link: '링크 삽입',
       image: '이미지 삽입',
       table: '표 삽입',
-      horizontalRule: '구분선'
+      horizontalRule: '구분선',
+      headingGroup: '제목',
+      insertGroup: '삽입'
     },
     table: {
       column1: '열1',

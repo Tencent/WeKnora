@@ -4936,8 +4936,7 @@ export default {
       draftTag: 'Статус: Черновик',
       publishedTag: 'Статус: Опубликовано',
       lastUpdated: 'Последнее обновление: {time}',
-      counter: 'Символов: {chars} · Строк: {lines}',
-      shortcutHint: '{mod}B жирный · {mod}I курсив · {mod}K ссылка · {mod}S черновик'
+      counter: 'Символов: {chars} · Строк: {lines}'
     },
     form: {
       knowledgeBaseLabel: 'Целевая база знаний',
@@ -4974,6 +4973,11 @@ export default {
     preview: {
       empty: 'Пока нет содержимого'
     },
+    shortcuts: {
+      title: 'Горячие клавиши',
+      continueList: 'Продолжить список',
+      indent: 'Отступ / Shift+Tab — назад'
+    },
     view: {
       edit: 'Редактор',
       split: 'Разделить',
@@ -4997,7 +5001,9 @@ export default {
       link: 'Вставить ссылку',
       image: 'Вставить изображение',
       table: 'Вставить таблицу',
-      horizontalRule: 'Горизонтальная линия'
+      horizontalRule: 'Горизонтальная линия',
+      headingGroup: 'Заголовок',
+      insertGroup: 'Вставить'
     },
     table: {
       column1: 'Колонка 1',

@@ -347,49 +347,96 @@ type ToolbarButton = {
   action: ToolbarAction
   icon: string
 }
+/**
+ * A group of related actions behind one labelled trigger. Headings and the
+ * block inserts are one-per-document choices, so they cost more toolbar room
+ * than they earn as separate icons.
+ */
+type ToolbarMenu = {
+  key: string
+  label: string
+  options: Array<{ content: string; value: string }>
+  actions: Record<string, ToolbarAction>
+}
 type ToolbarGroup = {
   key: string
   buttons: ToolbarButton[]
+  menu?: ToolbarMenu
 }
 
-const toolbarGroups = computed<ToolbarGroup[]>(() => [
-  {
-    key: 'format',
-    buttons: [
-      { key: 'bold', icon: 'textformat-bold', tooltip: t('manualEditor.toolbar.bold'), action: () => wrapSelection('**', '**', t('manualEditor.placeholders.bold')) },
-      { key: 'italic', icon: 'textformat-italic', tooltip: t('manualEditor.toolbar.italic'), action: () => wrapSelection('*', '*', t('manualEditor.placeholders.italic')) },
-      { key: 'strike', icon: 'textformat-strikethrough', tooltip: t('manualEditor.toolbar.strike'), action: () => wrapSelection('~~', '~~', t('manualEditor.placeholders.strike')) },
-      { key: 'inline-code', icon: 'code', tooltip: t('manualEditor.toolbar.inlineCode'), action: () => wrapSelection('`', '`', t('manualEditor.placeholders.inlineCode')) },
-    ],
-  },
-  {
+const toolbarGroups = computed<ToolbarGroup[]>(() => {
+  const headingMenu: ToolbarMenu = {
     key: 'heading',
-    buttons: [
-      { key: 'h1', icon: 'numbers-1', tooltip: t('manualEditor.toolbar.heading1'), action: () => applyHeading(1) },
-      { key: 'h2', icon: 'numbers-2', tooltip: t('manualEditor.toolbar.heading2'), action: () => applyHeading(2) },
-      { key: 'h3', icon: 'numbers-3', tooltip: t('manualEditor.toolbar.heading3'), action: () => applyHeading(3) },
+    label: t('manualEditor.toolbar.headingGroup'),
+    options: [
+      { content: t('manualEditor.toolbar.heading1'), value: 'h1' },
+      { content: t('manualEditor.toolbar.heading2'), value: 'h2' },
+      { content: t('manualEditor.toolbar.heading3'), value: 'h3' },
     ],
-  },
-  {
-    key: 'list',
-    buttons: [
-      { key: 'ul', icon: 'view-list', tooltip: t('manualEditor.toolbar.bulletList'), action: applyBulletList },
-      { key: 'ol', icon: 'list-numbered', tooltip: t('manualEditor.toolbar.orderedList'), action: applyOrderedList },
-      { key: 'task', icon: 'check-rectangle', tooltip: t('manualEditor.toolbar.taskList'), action: applyTaskList },
-      { key: 'quote', icon: 'quote', tooltip: t('manualEditor.toolbar.blockquote'), action: applyBlockquote },
-    ],
-  },
-  {
+    actions: {
+      h1: () => applyHeading(1),
+      h2: () => applyHeading(2),
+      h3: () => applyHeading(3),
+    },
+  }
+
+  const insertMenu: ToolbarMenu = {
     key: 'insert',
-    buttons: [
-      { key: 'codeblock', icon: 'code-1', tooltip: t('manualEditor.toolbar.codeBlock'), action: insertCodeBlock },
-      { key: 'link', icon: 'link', tooltip: t('manualEditor.toolbar.link'), action: insertLink },
-      { key: 'image', icon: 'image', tooltip: t('manualEditor.toolbar.image'), action: insertImage },
-      { key: 'table', icon: 'table', tooltip: t('manualEditor.toolbar.table'), action: insertTable },
-      { key: 'hr', icon: 'component-divider-horizontal', tooltip: t('manualEditor.toolbar.horizontalRule'), action: insertHorizontalRule },
+    label: t('manualEditor.toolbar.insertGroup'),
+    options: [
+      { content: t('manualEditor.toolbar.blockquote'), value: 'quote' },
+      { content: t('manualEditor.toolbar.codeBlock'), value: 'codeblock' },
+      { content: t('manualEditor.toolbar.table'), value: 'table' },
+      { content: t('manualEditor.toolbar.image'), value: 'image' },
+      { content: t('manualEditor.toolbar.horizontalRule'), value: 'hr' },
     ],
-  },
-])
+    actions: {
+      quote: applyBlockquote,
+      codeblock: insertCodeBlock,
+      table: insertTable,
+      image: insertImage,
+      hr: insertHorizontalRule,
+    },
+  }
+
+  return [
+    {
+      key: 'format',
+      buttons: [
+        { key: 'bold', icon: 'textformat-bold', tooltip: t('manualEditor.toolbar.bold'), action: () => wrapSelection('**', '**', t('manualEditor.placeholders.bold')) },
+        { key: 'italic', icon: 'textformat-italic', tooltip: t('manualEditor.toolbar.italic'), action: () => wrapSelection('*', '*', t('manualEditor.placeholders.italic')) },
+        { key: 'strike', icon: 'textformat-strikethrough', tooltip: t('manualEditor.toolbar.strike'), action: () => wrapSelection('~~', '~~', t('manualEditor.placeholders.strike')) },
+        { key: 'inline-code', icon: 'code', tooltip: t('manualEditor.toolbar.inlineCode'), action: () => wrapSelection('`', '`', t('manualEditor.placeholders.inlineCode')) },
+      ],
+    },
+    { key: 'heading', buttons: [], menu: headingMenu },
+    {
+      key: 'list',
+      buttons: [
+        { key: 'ul', icon: 'view-list', tooltip: t('manualEditor.toolbar.bulletList'), action: applyBulletList },
+        { key: 'ol', icon: 'list-numbered', tooltip: t('manualEditor.toolbar.orderedList'), action: applyOrderedList },
+        { key: 'task', icon: 'check-rectangle', tooltip: t('manualEditor.toolbar.taskList'), action: applyTaskList },
+      ],
+    },
+    {
+      key: 'insert',
+      buttons: [
+        { key: 'link', icon: 'link', tooltip: t('manualEditor.toolbar.link'), action: insertLink },
+      ],
+      menu: insertMenu,
+    },
+  ]
+})
+
+/** TDesign hands the clicked item's `value` (or the item itself in older builds). */
+const handleToolbarMenuSelect = (menu: ToolbarMenu, selected: unknown) => {
+  const key =
+    selected && typeof selected === 'object'
+      ? String((selected as { value?: unknown }).value ?? '')
+      : String(selected ?? '')
+  const action = menu.actions[key]
+  if (action) handleToolbarAction(action)
+}
 
 const previewRoot = ref<HTMLElement | null>(null)
 
@@ -503,7 +550,16 @@ const counterText = computed(() =>
     lines: contentStats.value.lines,
   }),
 )
-const shortcutHint = computed(() => t('manualEditor.status.shortcutHint', { mod: modifierLabel.value }))
+/** Rows behind the status bar's keyboard button — a full list, not a cropped line. */
+const shortcutRows = computed(() => [
+  { keys: `${modifierLabel.value}B`, label: t('manualEditor.toolbar.bold') },
+  { keys: `${modifierLabel.value}I`, label: t('manualEditor.toolbar.italic') },
+  { keys: `${modifierLabel.value}K`, label: t('manualEditor.toolbar.link') },
+  { keys: `${modifierLabel.value}S`, label: t('manualEditor.actions.saveDraft') },
+  { keys: `${modifierLabel.value}\u21B5`, label: t('manualEditor.actions.publish') },
+  { keys: 'Enter', label: t('manualEditor.shortcuts.continueList') },
+  { keys: 'Tab', label: t('manualEditor.shortcuts.indent') },
+])
 
 marked.use({})
 
@@ -963,6 +1019,19 @@ onBeforeUnmount(() => {
                     </button>
                   </t-tooltip>
                 </template>
+                <t-dropdown
+                  v-if="group.menu"
+                  :options="group.menu.options"
+                  trigger="click"
+                  :min-column-width="132"
+                  :popup-props="{ attach: 'body', zIndex: 2600 }"
+                  @click="(selected: unknown) => handleToolbarMenuSelect(group.menu!, selected)"
+                >
+                  <button type="button" class="toolbar-menu-btn" @mousedown.prevent>
+                    <span>{{ group.menu.label }}</span>
+                    <t-icon name="chevron-down" class="toolbar-menu-btn__caret" />
+                  </button>
+                </t-dropdown>
               </div>
               <div
                 v-if="groupIndex < toolbarGroups.length - 1"
@@ -1019,7 +1088,25 @@ onBeforeUnmount(() => {
 
         <div class="editor-status">
           <span class="editor-status__count">{{ counterText }}</span>
-          <span class="editor-status__hint">{{ shortcutHint }}</span>
+          <t-tooltip placement="top-right" :show-arrow="false">
+            <template #content>
+              <div class="shortcut-sheet">
+                <div class="shortcut-sheet__title">{{ $t('manualEditor.shortcuts.title') }}</div>
+                <div v-for="row in shortcutRows" :key="row.keys" class="shortcut-sheet__row">
+                  <kbd>{{ row.keys }}</kbd>
+                  <span>{{ row.label }}</span>
+                </div>
+              </div>
+            </template>
+            <button
+              type="button"
+              class="editor-status__shortcuts"
+              :aria-label="$t('manualEditor.shortcuts.title')"
+              @mousedown.prevent
+            >
+              <t-icon name="keyboard" />
+            </button>
+          </t-tooltip>
         </div>
       </div>
     </div>
@@ -1262,6 +1349,38 @@ onBeforeUnmount(() => {
   gap: 2px;
 }
 
+.toolbar-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
+}
+
+.toolbar-menu-btn__caret {
+  font-size: var(--app-text-sm);
+  opacity: 0.7;
+}
+
 .toolbar-divider {
   width: 1px;
   height: 18px;
@@ -1423,11 +1542,30 @@ onBeforeUnmount(() => {
   color: var(--td-text-color-placeholder);
 }
 
-.editor-status__hint {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.editor-status__shortcuts {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--app-radius-xs);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-md);
+  cursor: help;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-secondary);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
 }
 
 .loading-wrapper,
@@ -1451,6 +1589,33 @@ onBeforeUnmount(() => {
   Namespaced under .manual-editor-drawer so no other SettingDrawer is affected.
 -->
 <style lang="less">
+/* Tooltip content is teleported out of the component, so its rules cannot be scoped. */
+.shortcut-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.shortcut-sheet__title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.shortcut-sheet__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+
+  kbd {
+    min-width: 42px;
+    font-family: var(--app-font-family-mono);
+    font-size: var(--app-text-xs);
+    opacity: 0.9;
+  }
+}
+
 .manual-editor-drawer {
   .t-drawer__body {
     display: flex;

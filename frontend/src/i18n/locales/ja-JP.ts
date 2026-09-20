@@ -2587,7 +2587,14 @@ export default {
       link: 'リンクを挿入',
       image: '画像を挿入',
       table: '表を挿入',
-      horizontalRule: '水平線'
+      horizontalRule: '水平線',
+      headingGroup: '見出し',
+      insertGroup: '挿入'
+    },
+    shortcuts: {
+      title: 'ショートカット',
+      continueList: 'リストを続ける',
+      indent: 'インデント / Shift+Tab で解除'
     },
     view: {
       edit: '編集',
@@ -2638,8 +2645,7 @@ export default {
       draftTag: 'ステータス: 下書き',
       publishedTag: 'ステータス: 公開済み',
       lastUpdated: '最終更新: {time}',
-      counter: '{chars} 文字 · {lines} 行',
-      shortcutHint: '{mod}B 太字 · {mod}I 斜体 · {mod}K リンク · {mod}S 下書き保存'
+      counter: '{chars} 文字 · {lines} 行'
     },
     loading: {
       content: '内容を読み込み中...',

@@ -2587,7 +2587,14 @@ export default {
       link: 'Insert link',
       image: 'Insert image',
       table: 'Insert table',
-      horizontalRule: 'Horizontal rule'
+      horizontalRule: 'Horizontal rule',
+      headingGroup: 'Heading',
+      insertGroup: 'Insert'
+    },
+    shortcuts: {
+      title: 'Shortcuts',
+      continueList: 'Continue the list',
+      indent: 'Indent / Shift+Tab to outdent'
     },
     view: {
       edit: 'Edit',
@@ -2638,8 +2645,7 @@ export default {
       draftTag: 'Status: Draft',
       publishedTag: 'Status: Published',
       lastUpdated: 'Last updated: {time}',
-      counter: '{chars} characters · {lines} lines',
-      shortcutHint: '{mod}B bold · {mod}I italic · {mod}K link · {mod}S save draft'
+      counter: '{chars} characters · {lines} lines'
     },
     loading: {
       content: 'Loading content...',

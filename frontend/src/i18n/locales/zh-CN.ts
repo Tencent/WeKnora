@@ -4938,8 +4938,7 @@ export default {
       draftTag: '当前状态：草稿',
       publishedTag: '当前状态：已发布',
       lastUpdated: '最近更新：{time}',
-      counter: '{chars} 字 · {lines} 行',
-      shortcutHint: '{mod}B 加粗 · {mod}I 斜体 · {mod}K 链接 · {mod}S 存草稿'
+      counter: '{chars} 字 · {lines} 行'
     },
     form: {
       knowledgeBaseLabel: '目标知识库',
@@ -4976,6 +4975,11 @@ export default {
     preview: {
       empty: '暂无内容'
     },
+    shortcuts: {
+      title: '快捷键',
+      continueList: '列表内自动续行',
+      indent: '缩进 / Shift+Tab 反缩进'
+    },
     view: {
       edit: '编辑',
       split: '分屏',
@@ -4999,7 +5003,9 @@ export default {
       link: '插入链接',
       image: '插入图片',
       table: '插入表格',
-      horizontalRule: '分割线'
+      horizontalRule: '分割线',
+      headingGroup: '标题',
+      insertGroup: '插入'
     },
     table: {
       column1: '列1',
