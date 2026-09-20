@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,12 +16,25 @@ import (
 type embedFailureKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	knowledge *types.Knowledge
-	updates   []types.Knowledge
+	// stored is what the database starts returning once storedAfterReads
+	// reads have been served. The delay matters: processChunks already
+	// guards its entry, so a test that returns the cancelled / replaced row
+	// from the very first read never reaches the code under test. Delaying
+	// it models the real window — resolving an embedding model reads the
+	// database, so a cancel or a replacement can land while it runs.
+	stored           *types.Knowledge
+	storedAfterReads int
+	reads            int
+	updates          []types.Knowledge
 }
 
 func (r *embedFailureKnowledgeRepo) GetKnowledgeByID(
 	context.Context, uint64, string,
 ) (*types.Knowledge, error) {
+	r.reads++
+	if r.stored != nil && r.reads > r.storedAfterReads {
+		return r.stored, nil
+	}
 	return r.knowledge, nil
 }
 
@@ -79,6 +93,137 @@ func TestProcessChunksFailsKnowledgeWhenEmbeddingModelUnavailable(t *testing.T) 
 		"error_message should name the underlying cause, got %q", repo.updates[0].ErrorMessage,
 	)
 	require.Equal(t, types.ParseStatusFailed, knowledge.ParseStatus)
+}
+
+// A cancelled context means the run was interrupted, not that the model is
+// unusable — the user cancelled (asynq CancelProcessing cancels the handler
+// context), the worker was preempted, or the process is shutting down.
+// Recording a model failure here would both mislabel the cause and overwrite
+// the cancelled status the abort path just wrote.
+func TestProcessChunksLeavesStatusAloneWhenEmbeddingModelCallIsCancelled(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		modelErr  error
+		cancelCtx bool
+	}{
+		{name: "error is context.Canceled", modelErr: context.Canceled},
+		{name: "error wraps context.DeadlineExceeded", modelErr: fmt.Errorf("query: %w", context.DeadlineExceeded)},
+		{name: "context already cancelled", modelErr: errors.New("driver: bad connection"), cancelCtx: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			knowledge := &types.Knowledge{
+				ID:              "knowledge-1",
+				TenantID:        1,
+				KnowledgeBaseID: "kb-1",
+				ParseStatus:     types.ParseStatusProcessing,
+			}
+			repo := &embedFailureKnowledgeRepo{knowledge: knowledge}
+			svc := &knowledgeService{
+				repo:         repo,
+				modelService: embedFailureModelService{err: tc.modelErr},
+			}
+			kb := &types.KnowledgeBase{
+				ID:               "kb-1",
+				TenantID:         1,
+				EmbeddingModelID: "embedding-1",
+				IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+			}
+			ctx := context.Background()
+			if tc.cancelCtx {
+				cancelled, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = cancelled
+			}
+
+			svc.processChunks(ctx, kb, knowledge,
+				[]types.ParsedChunk{{Content: "body", Seq: 0, Start: 0, End: 4}})
+
+			require.Empty(t, repo.updates, "an interrupted run must not be written as a failure")
+			require.Equal(t, types.ParseStatusProcessing, knowledge.ParseStatus)
+		})
+	}
+}
+
+// The row was cancelled after the entry guard ran. Resolving a model reads the
+// database, so that window is real — and the cancelled status must survive it.
+func TestProcessChunksDoesNotOverwriteCancelledRowOnEmbeddingFailure(t *testing.T) {
+	knowledge := &types.Knowledge{
+		ID:              "knowledge-1",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		ParseStatus:     types.ParseStatusProcessing,
+	}
+	repo := &embedFailureKnowledgeRepo{
+		knowledge: knowledge,
+		// The entry guard's read still sees a live row; the cancel lands
+		// while the embedding model is being resolved.
+		storedAfterReads: 1,
+		stored: &types.Knowledge{
+			ID:          "knowledge-1",
+			TenantID:    1,
+			ParseStatus: types.ParseStatusCancelled,
+		},
+	}
+	svc := &knowledgeService{
+		repo:         repo,
+		modelService: embedFailureModelService{err: errors.New("embedding model not found")},
+	}
+	kb := &types.KnowledgeBase{
+		ID:               "kb-1",
+		TenantID:         1,
+		EmbeddingModelID: "embedding-1",
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+	}
+
+	svc.processChunks(context.Background(), kb, knowledge,
+		[]types.ParsedChunk{{Content: "body", Seq: 0, Start: 0, End: 4}})
+
+	require.Greater(t, repo.reads, 1, "the guard must re-read after resolving the model")
+	require.Empty(t, repo.updates, "cancelled must not be overwritten with failed")
+}
+
+// ReplaceKnowledgeFile keeps the knowledge ID and swaps file_path, so a stale
+// worker must not persist its row: UpdateKnowledge is a full-row Save and
+// file_path is not omitted, so it would roll the path back over the
+// replacement and mark the replacement's live attempt failed.
+func TestProcessChunksSkipsEmbeddingFailureWriteWhenSourceReplaced(t *testing.T) {
+	knowledge := &types.Knowledge{
+		ID:              "knowledge-1",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		ParseStatus:     types.ParseStatusProcessing,
+		FilePath:        "tenant/1/old.pdf",
+	}
+	repo := &embedFailureKnowledgeRepo{
+		knowledge: knowledge,
+		// Reads 1-2 are the entry guard (aborted + source-replaced) and still
+		// see this worker's own file; the replacement lands while the
+		// embedding model is being resolved.
+		storedAfterReads: 2,
+		stored: &types.Knowledge{
+			ID:          "knowledge-1",
+			TenantID:    1,
+			ParseStatus: types.ParseStatusProcessing,
+			FilePath:    "tenant/1/replacement.pdf",
+		},
+	}
+	svc := &knowledgeService{
+		repo:         repo,
+		modelService: embedFailureModelService{err: errors.New("embedding model not found")},
+	}
+	kb := &types.KnowledgeBase{
+		ID:               "kb-1",
+		TenantID:         1,
+		EmbeddingModelID: "embedding-1",
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+	}
+
+	svc.processChunks(context.Background(), kb, knowledge,
+		[]types.ParsedChunk{{Content: "body", Seq: 0, Start: 0, End: 4}})
+
+	require.Greater(t, repo.reads, 2, "the guard must re-read after resolving the model")
+	require.Empty(t, repo.updates,
+		"a replaced source must not have this attempt's failure written back")
 }
 
 // A KB with vector and keyword indexing both off never resolves an embedder,

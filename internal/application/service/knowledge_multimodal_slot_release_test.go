@@ -167,3 +167,88 @@ func mustGet(t *testing.T, mr *miniredis.Miniredis, key string) string {
 	require.NoError(t, err)
 	return value
 }
+
+// failingDecrByHook fails the first `failures` DECRBY commands, so a test can
+// drive the release retry deterministically instead of racing miniredis.
+type failingDecrByHook struct {
+	failures int
+	calls    int
+}
+
+func (h *failingDecrByHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h *failingDecrByHook) ProcessPipelineHook(
+	next redis.ProcessPipelineHook,
+) redis.ProcessPipelineHook {
+	return next
+}
+
+func (h *failingDecrByHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if cmd.Name() == "decrby" {
+			h.calls++
+			if h.calls <= h.failures {
+				err := errors.New("redis unavailable")
+				cmd.SetErr(err)
+				return err
+			}
+		}
+		return next(ctx, cmd)
+	}
+}
+
+// A transient Redis error must not end the release: it is the only thing that
+// can drain an un-owned slot, so giving up on the first error would strand the
+// row in "processing" exactly as before this fix.
+func TestEnqueueImageMultimodalTasksRetriesSlotRelease(t *testing.T) {
+	mr, rdb := newSlotReleaseRedis(t)
+	hook := &failingDecrByHook{failures: multimodalSlotReleaseAttempts - 1}
+	rdb.AddHook(hook)
+	enqueuer := &slotReleaseEnqueuer{failAt: map[int]bool{0: true}}
+	svc := &knowledgeService{task: enqueuer, redisClient: rdb}
+	knowledge, kb, images, chunks := slotReleaseFixture(2)
+
+	svc.enqueueImageMultimodalTasks(context.Background(), knowledge, kb, images, chunks, nil)
+
+	require.Equal(t, multimodalSlotReleaseAttempts, hook.calls, "every attempt should be used")
+	require.Equal(t, "1", mustGet(t, mr, multimodalPendingKey(knowledge.ID)),
+		"the retry that succeeded must still release the un-owned slot")
+}
+
+// When Redis stays down the release cannot happen, so the row is left to the
+// housekeeping sweep. Assert the bounded retry rather than an unbounded loop,
+// and that nothing is finalized on a counter we failed to settle.
+func TestEnqueueImageMultimodalTasksGivesUpSlotReleaseAfterRetries(t *testing.T) {
+	mr, rdb := newSlotReleaseRedis(t)
+	hook := &failingDecrByHook{failures: multimodalSlotReleaseAttempts + 5}
+	rdb.AddHook(hook)
+	enqueuer := &slotReleaseEnqueuer{failAt: map[int]bool{0: true}}
+	svc := &knowledgeService{task: enqueuer, redisClient: rdb}
+	knowledge, kb, images, chunks := slotReleaseFixture(2)
+
+	svc.enqueueImageMultimodalTasks(context.Background(), knowledge, kb, images, chunks, nil)
+
+	require.Equal(t, multimodalSlotReleaseAttempts, hook.calls, "retries must stay bounded")
+	require.Equal(t, "2", mustGet(t, mr, multimodalPendingKey(knowledge.ID)))
+	require.Equal(t, 0, enqueuer.postProcess,
+		"must not finalize on a counter the release could not settle")
+}
+
+// The fan-out can be reached with an already-cancelled context (graceful
+// shutdown). The nothing-enqueued branch still has to clear the seeded key, or
+// it lingers for its full 24h TTL; asynq's Enqueue takes no context, so
+// post-process still goes out.
+func TestEnqueueImageMultimodalTasksClearsCounterOnCancelledContext(t *testing.T) {
+	mr, rdb := newSlotReleaseRedis(t)
+	enqueuer := &slotReleaseEnqueuer{failAt: map[int]bool{0: true, 1: true}}
+	svc := &knowledgeService{task: enqueuer, redisClient: rdb}
+	knowledge, kb, images, chunks := slotReleaseFixture(2)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.enqueueImageMultimodalTasks(ctx, knowledge, kb, images, chunks, nil)
+
+	require.False(t, mr.Exists(multimodalPendingKey(knowledge.ID)),
+		"seeded counter must be cleared on a detached context")
+	require.Equal(t, 1, enqueuer.postProcess)
+}
