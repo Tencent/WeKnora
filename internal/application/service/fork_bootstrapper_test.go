@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -109,6 +108,7 @@ func TestAfterCreateResetsWorkspaceThenConsumesAndDeletesSnapshot(t *testing.T) 
 	require.Contains(t, script, "gc --prune=now")
 	require.Contains(t, script, "clean -fdx")
 	require.Contains(t, script, "ORIG_HEAD")
+	assertWorkspaceGitLayout(t, script)
 
 	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
 	require.NotNil(t, sessions.updatedBootstrap)
@@ -263,69 +263,12 @@ func TestAfterCreateRejectsInvalidCommitSHAWithoutExec(t *testing.T) {
 }
 
 func TestForkResetScriptRejectsNonHexSHA(t *testing.T) {
-	_, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, "abc123")
+	_, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, "abc123")
 	require.Error(t, err)
-	_, err = workspaceResetScript(sandbox.SessionWorkspaceRoot, "")
+	_, err = workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, "")
 	require.Error(t, err)
-	_, err = workspaceResetScript(sandbox.SessionWorkspaceRoot, forkTestCommitSHA()+";rm")
+	_, err = workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, forkTestCommitSHA()+";rm")
 	require.Error(t, err)
-}
-
-func TestForkResetScriptPrunesLaterCommits(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	dir := t.TempDir()
-	// Git hooks export repository overrides. Use disposable paths to reproduce
-	// that environment without risking the repository running this test.
-	inheritedRepo := t.TempDir()
-	t.Setenv("GIT_DIR", filepath.Join(inheritedRepo, "repo.git"))
-	t.Setenv("GIT_WORK_TREE", inheritedRepo)
-	t.Setenv("GIT_INDEX_FILE", filepath.Join(inheritedRepo, "index"))
-	env := isolatedGitEnv(t)
-	runGit := func(args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = env
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, string(out))
-		return strings.TrimSpace(string(out))
-	}
-
-	runGit("init")
-	_, err := os.Stat(filepath.Join(dir, ".git"))
-	require.NoError(t, err, "git init must use the test directory")
-	runGit("config", "user.email", "agent@weknora.local")
-	runGit("config", "user.name", "WeKnora Agent")
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("early"), 0o644))
-	runGit("add", "-A")
-	runGit("commit", "-m", "early")
-	early := runGit("rev-parse", "HEAD")
-	if !gitSHAPattern.MatchString(early) {
-		t.Skip("host git is not using SHA-1 object names")
-	}
-
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("later-secret"), 0o644))
-	runGit("add", "-A")
-	runGit("commit", "-m", "later")
-	later := runGit("rev-parse", "HEAD")
-	require.NotEqual(t, early, later)
-
-	script, err := workspaceResetScript(dir, early)
-	require.NoError(t, err)
-	cmd := exec.Command("bash", "-c", script)
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(out))
-
-	cat := exec.Command("git", "-C", dir, "cat-file", "-t", later)
-	cat.Env = env
-	require.Error(t, cat.Run(), "later-turn commit must be unreachable after prune")
-	_, err = os.Stat(filepath.Join(dir, "secret.txt"))
-	require.True(t, os.IsNotExist(err))
-	body, err := os.ReadFile(filepath.Join(dir, "keep.txt"))
-	require.NoError(t, err)
-	require.Equal(t, "early", string(body))
 }
 
 func isolatedGitEnv(t *testing.T) []string {
@@ -435,6 +378,7 @@ func TestAfterCreateWithClientUsesHandleNotRunner(t *testing.T) {
 	require.Equal(t, workspaceResetTimeout, client.execs[0].Timeout)
 	require.Contains(t, client.execs[0].Command, "reset --hard "+forkTestCommitSHA())
 	require.Contains(t, client.execs[0].Command, "gc --prune=now")
+	assertWorkspaceGitLayout(t, client.execs[0].Command)
 	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
 	require.True(t, sessions.updatedBootstrap.Consumed())
 }

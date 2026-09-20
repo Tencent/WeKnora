@@ -76,6 +76,7 @@ type fakeSessionStore struct {
 	updatedBootstrap *types.ForkBootstrap
 	bootstrapCleared bool
 	clearErr         error
+	updateErr        error
 	unconsumed       []*types.Session
 	createErr        error
 	leases           []*types.ForkSnapshotLease
@@ -106,6 +107,9 @@ func (f *fakeSessionStore) UpdateForkBootstrap(_ context.Context, _ string, b *t
 			f.source.ForkBootstrap = nil
 		}
 		return nil
+	}
+	if f.updateErr != nil {
+		return f.updateErr
 	}
 	copied := *b
 	f.updatedBootstrap = &copied

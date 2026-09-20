@@ -386,6 +386,174 @@ func TestRewindFirstUserMessageClearsConversationWithoutCheckpoint(t *testing.T)
 	require.Empty(t, msgs.messages)
 }
 
+func pendingForkBootstrap(sha string) *types.ForkBootstrap {
+	return &types.ForkBootstrap{
+		SnapshotID:      "snap-1",
+		CommitSHA:       sha,
+		SourceSandboxID: "sbx-1",
+		CreatedAt:       forkBase,
+	}
+}
+
+func newUnopenedForkRewindFixture(
+	t *testing.T, messages []*types.Message, bootstrap *types.ForkBootstrap,
+) (*SessionRewindService, *fakeSessionStore, *fakeMessageStore, *fakeRewindSandboxPort) {
+	t.Helper()
+	port := newFakeRewindPort()
+	port.bound = false
+	port.boundID = ""
+	sessions := newFakeSessionStore(&types.Session{
+		ID: "src", TenantID: 1, UserID: "u1", Title: "分支",
+		SandboxConfigID: "cfg-1", ForkBootstrap: bootstrap,
+	})
+	msgs := newFakeMessageStore(messages)
+	svc := NewSessionRewindService(sessions, msgs, port, nil, nil)
+	return svc, sessions, msgs, port
+}
+
+func TestRewindUnopenedForkRetargetsBootstrapToKeptCheckpoint(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	svc, sessions, msgs, port := newUnopenedForkRewindFixture(
+		t, append(turn1, later...), pendingForkBootstrap(rewindSHA2),
+	)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.NoError(t, err)
+	require.Equal(t, 2, got.DeletedMessages)
+	require.False(t, got.WorkspaceReset)
+	require.Equal(t, RewindSkipNoSandbox, got.Reason)
+	require.Empty(t, port.runner.calls)
+	require.Equal(t, []string{"u-1", "a-1"}, messageIDs(msgs.messages))
+	require.NotNil(t, sessions.source.ForkBootstrap)
+	require.Equal(t, rewindSHA1, sessions.source.ForkBootstrap.CommitSHA)
+	require.Equal(t, "snap-1", sessions.source.ForkBootstrap.SnapshotID)
+	require.Equal(t, "sbx-1", sessions.source.ForkBootstrap.SourceSandboxID)
+	require.False(t, sessions.source.ForkBootstrap.Consumed())
+	require.False(t, sessions.bootstrapCleared)
+}
+
+func TestRewindUnopenedForkAbandonsBootstrapWhenNoCheckpointRemains(t *testing.T) {
+	history := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	svc, sessions, msgs, port := newUnopenedForkRewindFixture(
+		t, history, pendingForkBootstrap(rewindSHA1),
+	)
+	snapshots := &fakeSnapshotDeleter{}
+	svc.snapshots = snapshots
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-1")
+
+	require.NoError(t, err)
+	require.Equal(t, 2, got.DeletedMessages)
+	require.False(t, got.WorkspaceReset)
+	require.Equal(t, RewindSkipNoSandbox, got.Reason)
+	require.Empty(t, port.runner.calls)
+	require.Empty(t, msgs.messages)
+	require.True(t, sessions.bootstrapCleared)
+	require.Nil(t, sessions.source.ForkBootstrap)
+	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
+	require.Empty(t, sessions.leases)
+}
+
+func TestRewindUnopenedForkKeepsSharedSnapshotWhenAbandoningBootstrap(t *testing.T) {
+	history := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	svc, sessions, _, _ := newUnopenedForkRewindFixture(
+		t, history, pendingForkBootstrap(rewindSHA1),
+	)
+	sessions.unconsumed = []*types.Session{{
+		ID: "sibling", TenantID: 1,
+		ForkBootstrap: pendingForkBootstrap(rewindSHA1),
+	}}
+	snapshots := &fakeSnapshotDeleter{}
+	svc.snapshots = snapshots
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-1")
+
+	require.NoError(t, err)
+	require.True(t, sessions.bootstrapCleared)
+	require.Empty(t, snapshots.deleted, "nested unopened sibling still needs the snapshot")
+	require.Empty(t, sessions.leases)
+	require.Equal(t, 2, got.DeletedMessages)
+}
+
+func TestRewindConsumedBootstrapIsLeftAloneWhenSandboxGone(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	consumedAt := forkBase.Add(time.Minute)
+	bootstrap := pendingForkBootstrap(rewindSHA2)
+	bootstrap.ConsumedAt = &consumedAt
+	svc, sessions, _, port := newUnopenedForkRewindFixture(t, append(turn1, later...), bootstrap)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.NoError(t, err)
+	require.Equal(t, RewindSkipNoSandbox, got.Reason)
+	require.Empty(t, port.runner.calls)
+	require.False(t, sessions.bootstrapCleared)
+	require.NotNil(t, sessions.source.ForkBootstrap)
+	require.Equal(t, rewindSHA2, sessions.source.ForkBootstrap.CommitSHA)
+	require.True(t, sessions.source.ForkBootstrap.Consumed())
+	require.Nil(t, sessions.updatedBootstrap)
+}
+
+func TestRewindLiveSandboxDoesNotRewritePendingBootstrap(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	port := newFakeRewindPort()
+	sessions := newFakeSessionStore(&types.Session{
+		ID: "src", TenantID: 1, UserID: "u1", Title: "分支",
+		ForkBootstrap: pendingForkBootstrap(rewindSHA2),
+	})
+	msgs := newFakeMessageStore(append(turn1, later...))
+	svc := NewSessionRewindService(sessions, msgs, port, nil, nil)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.NoError(t, err)
+	require.True(t, got.WorkspaceReset)
+	require.Contains(t, port.runner.calls[0], rewindSHA1)
+	require.Nil(t, sessions.updatedBootstrap)
+	require.Equal(t, rewindSHA2, sessions.source.ForkBootstrap.CommitSHA)
+}
+
+func TestRewindUnopenedForkBootstrapUpdateFailureDoesNotDeleteMessages(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	svc, sessions, msgs, port := newUnopenedForkRewindFixture(
+		t, append(turn1, later...), pendingForkBootstrap(rewindSHA2),
+	)
+	sessions.updateErr = errors.New("db down")
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.Contains(t, err.Error(), "db down")
+	require.Equal(t, 0, msgs.deleteFromCalls)
+	require.Equal(t, []string{"u-1", "a-1", "u-2", "a-2"}, messageIDs(msgs.messages))
+	require.Empty(t, port.runner.calls)
+	require.Equal(t, rewindSHA2, sessions.source.ForkBootstrap.CommitSHA)
+}
+
+func TestRewindUnopenedForkBootstrapClearFailureDoesNotDeleteMessages(t *testing.T) {
+	history := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	svc, sessions, msgs, _ := newUnopenedForkRewindFixture(
+		t, history, pendingForkBootstrap(rewindSHA1),
+	)
+	sessions.clearErr = errors.New("db down")
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-1")
+
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.Contains(t, err.Error(), "db down")
+	require.Equal(t, 0, msgs.deleteFromCalls)
+	require.Equal(t, []string{"u-1", "a-1"}, messageIDs(msgs.messages))
+	require.NotNil(t, sessions.source.ForkBootstrap)
+	require.False(t, sessions.bootstrapCleared)
+}
+
 func messageIDs(messages []*types.Message) []string {
 	ids := make([]string, 0, len(messages))
 	for _, m := range messages {

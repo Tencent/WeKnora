@@ -6,6 +6,11 @@
 // session, and refuses the whole operation if git reset fails — a half-applied
 // rewind (conversation gone, files still ahead) is harder to recover from
 // than a 500 the user can retry.
+//
+// Unopened forks are the exception to "no sandbox means conversation only":
+// they still carry ForkBootstrap for the first provision. Rewind retargets
+// that SHA to the kept history, or drops the bootstrap when nothing remains
+// to reset to, so the lazy sandbox cannot boot ahead of the transcript.
 package service
 
 import (
@@ -17,6 +22,7 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -79,6 +85,8 @@ type SessionRewindSandboxPort interface {
 
 type rewindSessionStore interface {
 	GetByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error)
+	UpdateForkBootstrap(ctx context.Context, sessionID string, b *types.ForkBootstrap) error
+	forkSnapshotReleaseStore
 }
 
 type rewindMessageStore interface {
@@ -106,6 +114,7 @@ type SessionRewindService struct {
 	sandbox     SessionRewindSandboxPort
 	knowledge   rewindKnowledgeCleaner
 	suggestions rewindSuggestionCleaner
+	snapshots   ForkSnapshotDeleter
 }
 
 // NewSessionRewindService wires the service. A nil sandbox port skips the
@@ -134,8 +143,12 @@ func NewSessionRewindServiceFromRepos(
 	sandboxPort SessionRewindSandboxPort,
 	knowledge interfaces.MessageService,
 	suggestions interfaces.MessageSuggestionRepository,
+	resolver sandbox.TenantSandboxResolver,
+	fallback sandbox.Manager,
 ) *SessionRewindService {
-	return NewSessionRewindService(sessions, messages, sandboxPort, knowledge, suggestions)
+	s := NewSessionRewindService(sessions, messages, sandboxPort, knowledge, suggestions)
+	s.snapshots = NewResolverForkSnapshotDeleter(resolver, fallback)
+	return s
 }
 
 // Rewind truncates sessionID at messageID and resets the live workspace when
@@ -211,6 +224,11 @@ func (s *SessionRewindService) Rewind(
 		if err := s.rejectIfBusy(persistCtx, sessionID); err != nil {
 			return nil, err
 		}
+		if reason == RewindSkipNoSandbox {
+			if err := s.syncPendingForkBootstrap(persistCtx, source, history); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	inclusive := rewindPoint.Role == "user"
@@ -277,6 +295,46 @@ func (s *SessionRewindService) rejectIfBusy(ctx context.Context, sessionID strin
 	if busy {
 		return ErrRewindSourceBusy
 	}
+	return nil
+}
+
+// syncPendingForkBootstrap keeps an unopened fork's lazy sandbox in line with
+// the conversation just truncated. ForkBootstrap.CommitSHA is applied the
+// first time the session provisions a sandbox; leaving the fork-point SHA
+// after an earlier rewind would boot the workspace ahead of the remaining
+// messages. No remaining checkpoint means the next sandbox should be ordinary,
+// same as forking at the first user message.
+func (s *SessionRewindService) syncPendingForkBootstrap(
+	ctx context.Context, session *types.Session, kept []*types.Message,
+) error {
+	if s == nil || session == nil || session.ForkBootstrap == nil || session.ForkBootstrap.Consumed() {
+		return nil
+	}
+	pending := *session.ForkBootstrap
+	checkpoint := latestCheckpoint(kept)
+	if checkpoint == nil || strings.TrimSpace(checkpoint.CommitSHA) == "" {
+		return s.abandonPendingForkBootstrap(ctx, session, &pending)
+	}
+	sha := strings.TrimSpace(checkpoint.CommitSHA)
+	if sha == strings.TrimSpace(pending.CommitSHA) {
+		return nil
+	}
+	pending.CommitSHA = sha
+	if err := s.sessions.UpdateForkBootstrap(ctx, session.ID, &pending); err != nil {
+		return fmt.Errorf("session rewind: retarget fork bootstrap: %w", err)
+	}
+	return nil
+}
+
+func (s *SessionRewindService) abandonPendingForkBootstrap(
+	ctx context.Context, session *types.Session, pending *types.ForkBootstrap,
+) error {
+	if err := s.sessions.UpdateForkBootstrap(ctx, session.ID, nil); err != nil {
+		return fmt.Errorf("session rewind: clear fork bootstrap: %w", err)
+	}
+	view := *session
+	view.ForkBootstrap = pending
+	releaseForkSnapshotOnDelete(ctx, s.sessions, s.snapshots, &view)
 	return nil
 }
 

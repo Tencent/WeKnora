@@ -28,24 +28,44 @@ const workspaceResetTimeout = 90 * time.Second
 // deleted and gc'd before clean -fdx; otherwise the working tree would look
 // right while `git checkout` could resurrect later files. -x then drops
 // leftover untracked files that are not in that commit.
-func workspaceResetScript(workspace, sha string) (string, error) {
+func workspaceResetScript(workspace, gitDir, sha string) (string, error) {
 	if !gitSHAPattern.MatchString(sha) {
 		return "", fmt.Errorf("workspace reset: invalid commit sha %q", truncateForLog(sha))
 	}
-	ws := shellSingleQuote(workspace)
 	return fmt.Sprintf(`set -e
-git config --global safe.directory %[1]s
-git -C %[1]s reset --hard %[2]s
-current=$(git -C %[1]s symbolic-ref -q HEAD || true)
-for ref in $(git -C %[1]s for-each-ref --format='%%(refname)'); do
+%s
+git_ws reset --hard %s
+current=$(git_ws symbolic-ref -q HEAD || true)
+for ref in $(git_ws for-each-ref --format='%%(refname)'); do
   [ -z "$ref" ] && continue
   [ "$ref" = "$current" ] && continue
-  git -C %[1]s update-ref -d "$ref"
+  git_ws update-ref -d "$ref"
 done
-rm -f %[1]s/.git/ORIG_HEAD %[1]s/.git/FETCH_HEAD
-git -C %[1]s reflog expire --expire=now --all
-git -C %[1]s gc --prune=now
-git -C %[1]s clean -fdx`, ws, sha), nil
+rm -f "$GIT_DIR"/ORIG_HEAD "$GIT_DIR"/FETCH_HEAD
+git_ws reflog expire --expire=now --all
+git_ws gc --prune=now
+git_ws clean -fdx`, gitWorkspacePreamble(workspace, gitDir), sha), nil
+}
+
+// gitWorkspacePreamble is shared by checkpoint and reset so fork and rewind
+// cannot drift onto different git layouts. Every git call goes through git_ws:
+// GIT_DIR stays outside /workspace, while --work-tree still edits the session
+// files. A leftover in-tree .git from before this split is moved once so
+// old sandboxes keep their checkpoint SHAs.
+func gitWorkspacePreamble(workspace, gitDir string) string {
+	return fmt.Sprintf(`WORK_TREE=%[1]s
+GIT_DIR=%[2]s
+git_ws() {
+  git -c safe.directory='*' --git-dir="$GIT_DIR" --work-tree="$WORK_TREE" "$@"
+}
+mkdir -p "$WORK_TREE"
+if [ ! -e "$GIT_DIR" ] && [ -d "$WORK_TREE/.git" ]; then
+  mkdir -p "$(dirname "$GIT_DIR")"
+  mv "$WORK_TREE/.git" "$GIT_DIR"
+elif [ -e "$GIT_DIR" ] && [ -e "$WORK_TREE/.git" ]; then
+  rm -rf "$WORK_TREE/.git"
+fi
+`, shellSingleQuote(workspace), shellSingleQuote(gitDir))
 }
 
 func shellSingleQuote(s string) string {
@@ -67,7 +87,7 @@ func resetWorkspaceToCommit(
 	ctx context.Context, runner SandboxShellRunner, sessionID, sha string,
 ) error {
 	sha = strings.TrimSpace(sha)
-	script, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sha)
+	script, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, sha)
 	if err != nil {
 		return err
 	}

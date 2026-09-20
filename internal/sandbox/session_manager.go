@@ -59,6 +59,13 @@ const sessionInputEnvVar = "WEKNORA_SESSION_INPUT_DIR"
 // shell_exec work_dir must stay underneath this path.
 const SessionWorkspaceRoot = "/workspace"
 
+// SessionGitDir is the git metadata directory for per-turn workspace
+// checkpoints. It lives on the sandbox root filesystem so a fork snapshot
+// still copies the object store, but outside SessionWorkspaceRoot so
+// `rm -rf /workspace` (or an agent cleaning the work tree) cannot drop
+// checkpoint history that rewind and fork later reset to.
+const SessionGitDir = "/var/lib/weknora/workspace.git"
+
 // sessionArtifactDirBootstrapTimeout bounds directory creation and access
 // checks, performed with the execution identity.
 const sessionArtifactDirBootstrapTimeout = 15 * time.Second

@@ -231,7 +231,7 @@ func (b *ForkBootstrapper) resetWorkspace(
 		return resetWorkspaceToCommit(ctx, b.runner, sessionID, sha)
 	}
 
-	script, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sha)
+	script, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, sha)
 	if err != nil {
 		return err
 	}
