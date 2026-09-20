@@ -585,3 +585,62 @@ func TestStreamKeepsOneSignaturePerThinkingBlock(t *testing.T) {
 	assert.Equal(t, thinkingBlock{Type: "thinking", Thinking: "first", Signature: "sig-1"}, blocks[0])
 	assert.Equal(t, thinkingBlock{Type: "thinking", Thinking: "second", Signature: "sig-2"}, blocks[1])
 }
+
+func TestTruncatedInterleavedTurnStillReplaysItsSignedBlocks(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", nil)
+	// thinking(signed) → tool_use(completed) → thinking(stream cut before
+	// signature_delta). Claude rejects an unsigned thinking block, and it
+	// also rejects a tool_use that is not preceded by thinking — so the
+	// signed block must survive the unsigned one.
+	msg := api.Message{
+		Role:             "assistant",
+		ReasoningContent: "first thoughtcut off",
+		ReasoningMetadata: storedThinking(t,
+			newThinkingBlock("first thought", "sig-1"),
+			newThinkingBlock("cut off", ""),
+		),
+		ToolCalls: []api.ToolCall{
+			{ID: "t1", Type: "function", Function: api.FunctionCall{Name: "search", Arguments: `{}`}},
+		},
+	}
+
+	blocks := assistantContent(t, bodyJSON(t, c, []api.Message{msg}, &api.Options{}, false))
+	require.Equal(t, []string{"thinking", "tool_use"}, blockTypes(blocks),
+		"a tool_use must still be preceded by a thinking block")
+	first := blocks[0].(map[string]any)
+	assert.Equal(t, "first thought", first["thinking"])
+	assert.Equal(t, "sig-1", first["signature"])
+}
+
+func TestUnsignedThinkingIsNeverSentOnItsOwn(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", nil)
+	// A turn whose only thinking block lost its signature: the block cannot
+	// be replayed at all, so nothing thinking-shaped goes out.
+	msg := api.Message{
+		Role:              "assistant",
+		Content:           "answer",
+		ReasoningContent:  "cut off",
+		ReasoningMetadata: storedThinking(t, newThinkingBlock("cut off", "")),
+	}
+
+	blocks := assistantContent(t, bodyJSON(t, c, []api.Message{msg}, &api.Options{}, false))
+	assert.Equal(t, []string{"text"}, blockTypes(blocks))
+}
+
+func TestRedactedThinkingSurvivesAnUnsignedNeighbour(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", nil)
+	msg := api.Message{
+		Role: "assistant",
+		ReasoningMetadata: storedThinking(t,
+			newRedactedThinkingBlock("opaque-1"),
+			newThinkingBlock("cut off", ""),
+		),
+		ToolCalls: []api.ToolCall{
+			{ID: "t1", Type: "function", Function: api.FunctionCall{Name: "search", Arguments: `{}`}},
+		},
+	}
+
+	blocks := assistantContent(t, bodyJSON(t, c, []api.Message{msg}, &api.Options{}, false))
+	require.Equal(t, []string{"redacted_thinking", "tool_use"}, blockTypes(blocks))
+	assert.Equal(t, "opaque-1", blocks[0].(map[string]any)["data"])
+}

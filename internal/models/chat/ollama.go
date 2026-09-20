@@ -47,8 +47,32 @@ func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
 		if msg.Role == "tool" {
 			msgOllama.ToolName = msg.Name
 		}
-		if len(msg.Images) > 0 && msg.Role == "user" {
-			for _, imgURL := range msg.Images {
+		// The agent builds multimodal turns as MultiContent parts, the shape
+		// every remote protocol prefers, and only the older callers fill
+		// Images. Reading just Images dropped both the text and the pictures
+		// of such a turn: Ollama answered about nothing, without an error.
+		images := msg.Images
+		if len(msg.MultiContent) > 0 {
+			// Copy first: appending to the caller's slice could write into
+			// its spare capacity and leak an image into another message.
+			images = append([]string(nil), msg.Images...)
+			var text strings.Builder
+			for _, part := range msg.MultiContent {
+				switch part.Type {
+				case "text":
+					text.WriteString(part.Text)
+				case "image_url":
+					if part.ImageURL != nil && part.ImageURL.URL != "" {
+						images = append(images, part.ImageURL.URL)
+					}
+				}
+			}
+			if msgOllama.Content == "" {
+				msgOllama.Content = text.String()
+			}
+		}
+		if len(images) > 0 && msg.Role == "user" {
+			for _, imgURL := range images {
 				if imgData := resolveImageForOllama(imgURL); imgData != nil {
 					msgOllama.Images = append(msgOllama.Images, imgData)
 				}

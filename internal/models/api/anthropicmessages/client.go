@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -104,7 +105,17 @@ func (c *Client) Chat(ctx context.Context, messages []api.Message, opts *api.Opt
 	defer cancel()
 	resp, err := c.send(ctx, messages, opts, false)
 	if err != nil {
-		return nil, err
+		// Claude's own models all accept images, but this protocol is also
+		// the compatibility surface of vendors whose text-only models do
+		// not, and the other three clients already degrade this way.
+		if api.IsMultimodalNotSupportedError(err) {
+			logger.Warnf(ctx, "[LLM Request] Model %s does not support multimodal, retrying without images",
+				c.cfg.Endpoint.Model)
+			resp, err = c.send(ctx, api.StripImagesFromMessages(messages), opts, false)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer func() { _ = resp.body.Close() }()
 	raw, err := io.ReadAll(resp.body)
@@ -132,8 +143,15 @@ func (c *Client) ChatStream(
 	ctx, cancel := api.WithLLMTimeout(ctx, api.DefaultStreamTimeout)
 	resp, err := c.send(ctx, messages, opts, true)
 	if err != nil {
-		cancel()
-		return nil, err
+		if api.IsMultimodalNotSupportedError(err) {
+			logger.Warnf(ctx, "[LLM Stream] Model %s does not support multimodal, retrying without images",
+				c.cfg.Endpoint.Model)
+			resp, err = c.send(ctx, api.StripImagesFromMessages(messages), opts, true)
+		}
+		if err != nil {
+			cancel()
+			return nil, err
+		}
 	}
 	ch := make(chan types.StreamResponse)
 	dumper := api.NewStreamPacketDumper(c.cfg.Endpoint.Model, json.RawMessage(resp.data))

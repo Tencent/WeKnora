@@ -14,8 +14,12 @@ import (
 // protocol, a bad compat key or an invalid thinking level is rejected where
 // it is written instead of surfacing as a failed chat call much later.
 //
-// Only chat and VLM rows carry catalog parameters; everything else resolves
-// trivially and returns nil.
+// Embedding, rerank and ASR rows return nil without being checked, and that
+// is deliberate rather than an oversight: those clients do not resolve
+// through the catalog at all (they read the provider and base URL directly),
+// so there is no protocol or compat for a spec to be wrong about. The
+// consequence worth knowing is that a spec stored on such a row is inert —
+// it is neither validated nor applied.
 func ValidateRow(modelName string, modelType types.ModelType, params *types.ModelParameters) error {
 	if params == nil || (modelType != types.ModelTypeKnowledgeQA && modelType != types.ModelTypeVLLM) {
 		return nil

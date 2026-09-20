@@ -405,12 +405,16 @@ func replayThinkingBlocks(msg api.Message) []contentBlock {
 			for _, b := range stored {
 				switch b.Type {
 				case "thinking":
-					// A block whose signature did not survive cannot be
-					// replayed, but dropping it silently would break the
-					// tool_use pairing above. Keep the ordering intact by
-					// skipping the whole replay instead.
+					// An unsigned block cannot go back: Claude rejects a
+					// thinking block without a signature. It means the stream
+					// ended inside that block (truncation), so it is the last
+					// one and produced no tool_use of its own. Skip just it —
+					// discarding the whole turn's blocks instead would strip
+					// the signed ones that a completed tool_use in the same
+					// turn still needs, which is the 400 this replay exists
+					// to prevent.
 					if b.Signature == "" {
-						return nil
+						continue
 					}
 					blocks = append(blocks, contentBlock{
 						Type: "thinking", Thinking: b.Thinking, Signature: b.Signature,
