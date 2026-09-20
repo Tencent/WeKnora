@@ -320,7 +320,28 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		var err error
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
+			// Terminal for this attempt, and it has to be recorded as such.
+			// A KB that indexes vectors cannot proceed without an embedder,
+			// and processChunks reports nothing to its callers — returning
+			// silently leaves parse_status on "processing" with no task left
+			// to move it, so the row hangs until the housekeeping sweep fails
+			// it an hour later with a generic "stuck in processing" message.
+			// Failing here gives the user the actual reason (deleted model,
+			// expired credentials, unreachable provider) and a row they can
+			// reparse once it is fixed.
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = fmt.Sprintf("failed to get embedding model: %v", err)
+			knowledge.UpdatedAt = time.Now()
+			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+				logger.Errorf(ctx, "failed to persist embedding model failure for %s: %v",
+					knowledge.ID, updateErr)
+			}
+			s.beginStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
+				"model_id": kb.EmbeddingModelID,
+			})
+			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+				werrors.ErrCodeEmbeddingProviderFail, "embedding model unavailable", err)
 			return
 		}
 	} else {
@@ -715,27 +736,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	} else {
 		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
 		// If there are no multimodal tasks, enqueue the post process task immediately
-		lang := types.LanguageFromContextOrDefault(ctx)
-		postProcessPayload := types.KnowledgePostProcessPayload{
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Language:        lang,
-			Attempt:         attemptFromCtx(ctx),
-		}
-		langfuse.InjectTracing(ctx, &postProcessPayload)
-		payloadBytes, err := json.Marshal(postProcessPayload)
-		if err == nil {
-			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
-				knowledgePostProcessTaskOptions()...)
-			if _, err := s.task.Enqueue(task); err != nil {
-				logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
-			} else {
-				logger.Infof(ctx, "Enqueued knowledge post process task for %s", knowledge.ID)
-			}
-		} else {
-			logger.Errorf(ctx, "Failed to marshal knowledge post process payload: %v", err)
-		}
+		s.enqueueKnowledgePostProcessTask(ctx, knowledge)
 	}
 
 	// Update tenant's storage usage
@@ -4068,13 +4069,23 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	}
 
 	attempt := attemptFromCtx(ctx)
-	redisKey := fmt.Sprintf("multimodal:pending:%s", knowledge.ID)
+	lang := types.LanguageFromContextOrDefault(ctx)
+	redisKey := multimodalPendingKey(knowledge.ID)
+	// The counter has to be seeded BEFORE the first task is enqueued: an image
+	// task that finishes early would otherwise decrement a key we are about to
+	// overwrite, and its slot would be counted twice. The cost of seeding
+	// first is that a slot whose task never reaches the queue has no owner to
+	// drain it — releaseUnownedMultimodalSlots settles that after the fan-out.
+	counterSeeded := false
 	if s.redisClient != nil {
 		if err := s.redisClient.Set(ctx, redisKey, len(images), 24*time.Hour).Err(); err != nil {
 			logger.Warnf(ctx, "Failed to set multimodal pending count for %s: %v", knowledge.ID, err)
+		} else {
+			counterSeeded = true
 		}
 	}
 
+	enqueued := 0
 	for idx, img := range images {
 		// Match image to the ParsedChunk whose content contains the image URL.
 		// ChunkID was populated by processChunks with the real DB UUID.
@@ -4089,7 +4100,6 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			chunkID = chunks[0].ChunkID
 		}
 
-		lang := types.LanguageFromContextOrDefault(ctx)
 		payload := types.ImageMultimodalPayload{
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
@@ -4115,10 +4125,113 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			asynq.Queue(types.QueueMultimodal), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 		if _, err := s.task.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
-		} else {
-			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
+			continue
 		}
+		enqueued++
+		logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
 	}
+
+	s.releaseUnownedMultimodalSlots(
+		ctx, knowledge, redisKey, counterSeeded, len(images), enqueued,
+	)
+}
+
+// releaseUnownedMultimodalSlots settles the multimodal fan-in counter against
+// what actually reached the queue.
+//
+// Every enqueued image task drains exactly one slot when it exits terminally,
+// and the knowledge only leaves "processing" once the counter reaches zero. A
+// slot whose task was never enqueued (payload marshal failure, asynq refusing
+// the write) has no owner, so without this release the counter stalls above
+// zero, post-process is never triggered, and the row sits in "processing"
+// until the housekeeping sweep fails it an hour later — which reaches the user
+// as an unexplained parse failure. This mirrors the shortfall release
+// KnowledgePostProcess already performs for its own enrichment subtasks.
+func (s *knowledgeService) releaseUnownedMultimodalSlots(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	redisKey string,
+	counterSeeded bool,
+	planned, enqueued int,
+) {
+	if enqueued == 0 {
+		// No task exists to finalize this knowledge, whatever the counter
+		// says. Drive post-process directly so the row completes on the
+		// chunks that were already indexed instead of waiting to be swept.
+		logger.Warnf(ctx,
+			"[ImageMultimodal] No image task enqueued for %s (planned=%d); enqueueing post-process directly",
+			knowledge.ID, planned)
+		if counterSeeded {
+			s.redisClient.Del(ctx, redisKey)
+		}
+		s.enqueueKnowledgePostProcessTask(ctx, knowledge)
+		return
+	}
+
+	shortfall := planned - enqueued
+	if shortfall <= 0 {
+		return
+	}
+	if !counterSeeded {
+		// Seeding failed, so the key is absent and the first image to finish
+		// already drives post-process through the missing-key fallback in
+		// checkAndFinalizeAllImages. Decrementing here would only create the
+		// key below zero and finalize before the siblings are done.
+		return
+	}
+
+	logger.Warnf(ctx,
+		"[ImageMultimodal] Releasing %d un-enqueued image slot(s) for %s (planned=%d enqueued=%d)",
+		shortfall, knowledge.ID, planned, enqueued)
+	// Detached ctx, for the same reason KnowledgePostProcess detaches its own
+	// releases: these slots have no other path to drain, so a parent context
+	// cancelled mid-fan-out (graceful shutdown) must not skip the release.
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+	defer cancel()
+	pending, err := s.redisClient.DecrBy(rctx, redisKey, int64(shortfall)).Result()
+	if err != nil {
+		logger.Warnf(ctx, "Failed to release multimodal slots for %s: %v", knowledge.ID, err)
+		return
+	}
+	if pending <= 0 {
+		// Every enqueued sibling had already finished, so the release owns the
+		// finalize. Ordering is safe either way: the slots we just drained have
+		// no task behind them, so exactly one path reaches zero.
+		s.redisClient.Del(rctx, redisKey)
+		s.enqueueKnowledgePostProcessTask(ctx, knowledge)
+	}
+}
+
+// enqueueKnowledgePostProcessTask hands a knowledge to the post-process
+// orchestrator, which owns the enrichment fan-out and the promotion out of
+// "processing". Shared by the no-multimodal path and by the multimodal slot
+// release, so both build the same payload (attempt, language, tracing).
+func (s *knowledgeService) enqueueKnowledgePostProcessTask(
+	ctx context.Context, knowledge *types.Knowledge,
+) {
+	if s.task == nil {
+		return
+	}
+	payload := types.KnowledgePostProcessPayload{
+		TenantID:        knowledge.TenantID,
+		KnowledgeID:     knowledge.ID,
+		KnowledgeBaseID: knowledge.KnowledgeBaseID,
+		Language:        types.LanguageFromContextOrDefault(ctx),
+		Attempt:         attemptFromCtx(ctx),
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal knowledge post process payload: %v", err)
+		return
+	}
+	task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
+		knowledgePostProcessTaskOptions()...)
+	if _, err := s.task.Enqueue(task); err != nil {
+		logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
+		return
+	}
+	logger.Infof(ctx, "Enqueued knowledge post process task for %s", knowledge.ID)
 }
 
 // ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.
