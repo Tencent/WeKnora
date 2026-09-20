@@ -31,8 +31,9 @@ import (
 // background color — generous enough to absorb JPEG edge artifacts.
 const blankTolerance = 14
 
-// trimMargin keeps a small visual margin around the content bounding box.
-const trimMargin = 8
+// trimMargin keeps a visible white frame around the content bounding box —
+// the border reads as the content's edge rather than a tight crop.
+const trimMargin = 32
 
 // maxTrimPixels bounds the decode/scan cost; larger images pass through
 // untrimmed rather than risking a huge RGBA allocation.
@@ -155,7 +156,7 @@ func trimBoardImage(data []byte) []byte {
 	var buf bytes.Buffer
 	switch format {
 	case "jpeg":
-		err = jpeg.Encode(&buf, out, &jpeg.Options{Quality: 90})
+		err = jpeg.Encode(&buf, out, &jpeg.Options{Quality: 80})
 	case "png":
 		err = png.Encode(&buf, out)
 	}
