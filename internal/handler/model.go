@@ -662,9 +662,14 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if newParams.AppID == "" {
 		newParams.AppID = model.Parameters.AppID
 	}
-	if newParams.ExtraConfig == nil {
-		newParams.ExtraConfig = model.Parameters.ExtraConfig
-	}
+	// extra_config is replaced wholesale here, but GET redacts the vendor's
+	// secret extra fields (dto.NewModelResponse), so a UI round-trip carries
+	// no value for them — keep the stored secret unless the caller sent a new
+	// one. This also covers the request that omits extra_config entirely.
+	newParams.ExtraConfig = dto.PreserveStoredSecretExtras(
+		model.Parameters.ExtraConfig, newParams.ExtraConfig,
+		model.Parameters.Provider, model.Parameters.BaseURL,
+	)
 	model.Parameters = newParams
 
 	model.Source = req.Source

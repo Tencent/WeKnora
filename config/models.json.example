@@ -6,6 +6,11 @@
     "A known id (see GET /api/v1/models/providers) patches the built-in vendor;",
     "a new id declares a vendor. String values accept ${ENV} / $ENV interpolation.",
     "Unknown keys are rejected at startup so typos surface immediately.",
+    "'models' upserts by id: an id that already exists keeps every field you",
+    "did not write (reasoning, thinking_levels, compat, input); a new id is created.",
+    "'icon' is an inline <svg ...> string or an .svg path under this file's own",
+    "directory — no absolute paths, no escaping it, 256 KB max: icons are served",
+    "as a data: URI to everyone who can open the model pages.",
     "Per-model 'compat' keys depend on the protocol; see internal/models/catalog/compat.go."
   ],
   "providers": {

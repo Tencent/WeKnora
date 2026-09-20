@@ -1770,7 +1770,12 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req == nil || req.ModelID == "" {
 		return
 	}
-	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil {
+	// A request that already carries every secret needs no lookup — but a
+	// secret stored in extra_config (LKEAP / Volcengine secret_key) is
+	// redacted by GET, so "extraConfig is present" does not mean it is
+	// complete.
+	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil &&
+		dto.HasAllSecretExtras(req.Provider, req.BaseURL, req.ExtraConfig) {
 		return
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
@@ -1785,9 +1790,12 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req.AppSecret == "" {
 		req.AppSecret = stored.Parameters.AppSecret
 	}
-	if req.ExtraConfig == nil {
-		req.ExtraConfig = stored.Parameters.ExtraConfig
-	}
+	// Same contract as PUT /models/{id}: an absent or masked secret extra
+	// falls back to the stored value, a real one the user just typed wins.
+	req.ExtraConfig = dto.PreserveStoredSecretExtras(
+		stored.Parameters.ExtraConfig, req.ExtraConfig,
+		stored.Parameters.Provider, stored.Parameters.BaseURL,
+	)
 }
 
 // RemoteModelCheckRequest 兼容旧 swagger 定义。

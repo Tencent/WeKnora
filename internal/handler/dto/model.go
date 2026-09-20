@@ -2,11 +2,97 @@ package dto
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// SecretExtraConfigKeys returns the extra_config keys the vendor declares as
+// secret (catalog.ExtraField.Secret, or a password input). These are real
+// credentials — LKEAP and Volcengine rerank keep an IAM/CAM secret key there
+// — so they get the same treatment as api_key / app_secret: never echoed,
+// only reported as present.
+//
+// baseURL covers legacy rows saved before provider was stored; the vendor is
+// then detected from the endpoint. The field's ModelTypes restriction is
+// deliberately ignored: a key that is secret for any model type of the vendor
+// is redacted for every row of that vendor.
+func SecretExtraConfigKeys(provider, baseURL string) map[string]bool {
+	id := strings.TrimSpace(provider)
+	if id == "" {
+		id = catalog.DetectByURL(baseURL)
+	}
+	v, ok := catalog.Get(id)
+	if !ok {
+		return nil
+	}
+	var keys map[string]bool
+	for _, f := range v.ExtraFields {
+		if !f.Secret && f.Type != "password" {
+			continue
+		}
+		if keys == nil {
+			keys = map[string]bool{}
+		}
+		keys[f.Key] = true
+	}
+	return keys
+}
+
+// redactedSecretPlaceholder reports whether an incoming extra_config value
+// carries no new secret: empty, or a mask the UI shows for a value it never
+// received (GET omits the key entirely, but forms happily render bullets).
+func redactedSecretPlaceholder(v string) bool {
+	t := strings.TrimSpace(v)
+	return t == "" || strings.Trim(t, "*•·●") == ""
+}
+
+// PreserveStoredSecretExtras merges the stored secret extra_config values
+// into an incoming map.
+//
+// PUT /models/{id} replaces extra_config wholesale and the frontend always
+// sends the map for remote rows, but GET redacts the vendor's secret fields,
+// so a plain edit-and-save round-trip carries no value for them. Without this
+// merge the first save after any unrelated edit would erase the stored secret
+// key and break rerank for that row. An incoming value that is absent, empty
+// or a mask means "unchanged"; anything else replaces the stored secret.
+//
+// provider/baseURL identify the vendor the *stored* values belong to.
+// incoming is filled in place and returned.
+func PreserveStoredSecretExtras(stored, incoming map[string]string, provider, baseURL string) map[string]string {
+	if incoming == nil {
+		return stored
+	}
+	keys := SecretExtraConfigKeys(provider, baseURL)
+	if len(keys) == 0 || len(stored) == 0 {
+		return incoming
+	}
+	for key := range keys {
+		storedValue := stored[key]
+		if storedValue == "" {
+			continue
+		}
+		if redactedSecretPlaceholder(incoming[key]) {
+			incoming[key] = storedValue
+		}
+	}
+	return incoming
+}
+
+// HasAllSecretExtras reports whether extra already carries a usable value for
+// every secret extra field the vendor declares. Callers that would otherwise
+// skip a lookup of the stored row use it to notice that the request is
+// missing a redacted secret.
+func HasAllSecretExtras(provider, baseURL string, extra map[string]string) bool {
+	for key := range SecretExtraConfigKeys(provider, baseURL) {
+		if redactedSecretPlaceholder(extra[key]) {
+			return false
+		}
+	}
+	return true
+}
 
 // ModelResponse mirrors types.Model for response bodies, with all secret
 // fields (APIKey, AppSecret) removed by construction. Credential presence
@@ -98,11 +184,31 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		params.CustomHeaders = nil
 		params.AppID = ""
 	}
+	// Vendor-declared secret extra fields are credentials that happen to be
+	// stored in extra_config. Drop them from the echoed map — even for
+	// callers allowed to see integration detail, exactly as api_key is
+	// withheld from an admin — and report presence instead. The stored map is
+	// never mutated: params.ExtraConfig still aliases it here.
+	secretKeys := SecretExtraConfigKeys(m.Parameters.Provider, m.Parameters.BaseURL)
+	if len(secretKeys) > 0 && len(params.ExtraConfig) > 0 {
+		sanitized := make(map[string]string, len(params.ExtraConfig))
+		for k, v := range params.ExtraConfig {
+			if !secretKeys[k] {
+				sanitized[k] = v
+			}
+		}
+		params.ExtraConfig = sanitized
+	}
 	var creds map[string]CredentialFieldMetadata
 	if !m.IsBuiltin || canManageBuiltin {
 		creds = map[string]CredentialFieldMetadata{
 			"api_key":    {Configured: m.Parameters.APIKey != ""},
 			"app_secret": {Configured: m.Parameters.AppSecret != ""},
+		}
+		for key := range secretKeys {
+			creds[key] = CredentialFieldMetadata{
+				Configured: strings.TrimSpace(m.Parameters.ExtraConfig[key]) != "",
+			}
 		}
 	}
 	var caps *catalog.Capabilities

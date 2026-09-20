@@ -48,8 +48,10 @@ type OverlayProvider struct {
 	Compat json.RawMessage `json:"compat,omitempty"`
 	// ThinkingLevels patches the vendor level map.
 	ThinkingLevels map[string]*string `json:"thinking_levels,omitempty"`
-	// Models are upserted by id into the vendor catalog.
-	Models []ModelSpec `json:"models,omitempty"`
+	// Models are upserted by id into the vendor catalog. Entries stay raw so
+	// an upsert against an existing id can patch only the keys the operator
+	// actually wrote (see applyOverlayProvider).
+	Models []json.RawMessage `json:"models,omitempty"`
 	// ModelOverrides patch existing entries by id without restating them.
 	ModelOverrides map[string]ModelSpecPatch `json:"model_overrides,omitempty"`
 }
@@ -227,19 +229,11 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 		v.URLPatterns = p.URLPatterns
 	}
 	if p.Icon != "" {
-		if strings.HasPrefix(strings.TrimSpace(p.Icon), "<svg") {
-			v.Icon = []byte(p.Icon)
-		} else {
-			iconPath := p.Icon
-			if !filepath.IsAbs(iconPath) {
-				iconPath = filepath.Join(baseDir, iconPath)
-			}
-			data, err := os.ReadFile(iconPath)
-			if err != nil {
-				return fmt.Errorf("read icon: %w", err)
-			}
-			v.Icon = data
+		icon, err := loadOverlayIcon(baseDir, p.Icon)
+		if err != nil {
+			return err
 		}
+		v.Icon = icon
 	}
 	if len(p.Compat) > 0 {
 		var err error
@@ -267,27 +261,20 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 		}
 		v.ThinkingLevels = levels
 	}
-	for _, m := range p.Models {
-		if m.ID == "" {
-			return fmt.Errorf("model without id")
-		}
-		replaced := false
-		for i := range v.Models {
-			if strings.EqualFold(v.Models[i].ID, m.ID) {
-				v.Models[i] = m
-				replaced = true
-				break
-			}
-		}
-		if !replaced {
-			v.Models = append(v.Models, m)
+	for _, raw := range p.Models {
+		if err := upsertOverlayModel(v, raw); err != nil {
+			return err
 		}
 	}
 	for id, patch := range p.ModelOverrides {
 		found := false
 		for i := range v.Models {
 			if strings.EqualFold(v.Models[i].ID, id) {
-				applyPatch(&v.Models[i], patch)
+				// Clone first, for the same reason as upsertOverlayModel: the
+				// entry's slices are shared with the built-in definition.
+				spec := cloneModelSpec(v.Models[i])
+				applyPatch(&spec, patch)
+				v.Models[i] = spec
 				found = true
 				break
 			}
@@ -299,6 +286,178 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 		}
 	}
 	return nil
+}
+
+// maxIconBytes caps a vendor icon. Icons are base64'd into every
+// GET /models/providers response, so an oversized file is a response-size
+// problem for every viewer, not just a disk read.
+const maxIconBytes = 256 * 1024
+
+// loadOverlayIcon resolves providers.*.icon to SVG bytes.
+//
+// The bytes are handed to every viewer of the model pages as a data: URI, so
+// the path is treated as untrusted even though writing the overlay already
+// requires filesystem access: an operator (or a config-management template)
+// that points `icon` at /etc/shadow or ../../secrets must not turn the
+// provider list into a file-disclosure endpoint for read-only tenants.
+// Hence: no absolute paths, no escaping the overlay's own directory
+// (symlinks included), a size cap, and the content must really be an SVG.
+func loadOverlayIcon(baseDir, ref string) ([]byte, error) {
+	if looksLikeSVG([]byte(ref)) {
+		if len(ref) > maxIconBytes {
+			return nil, fmt.Errorf("icon: inline svg is %d bytes, limit is %d", len(ref), maxIconBytes)
+		}
+		return []byte(ref), nil
+	}
+	if filepath.IsAbs(ref) || strings.HasPrefix(ref, "/") || filepath.VolumeName(ref) != "" {
+		return nil, fmt.Errorf("icon: absolute paths are not allowed: %q", ref)
+	}
+	clean := filepath.Clean(filepath.FromSlash(ref))
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("icon: path escapes the overlay directory: %q", ref)
+	}
+	if baseDir == "" {
+		baseDir = "."
+	}
+	full, err := resolveInsideDir(baseDir, clean)
+	if err != nil {
+		return nil, fmt.Errorf("icon: %w", err)
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return nil, fmt.Errorf("read icon: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("icon: %q is not a regular file", ref)
+	}
+	if info.Size() > maxIconBytes {
+		return nil, fmt.Errorf("icon: %q is %d bytes, limit is %d", ref, info.Size(), maxIconBytes)
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return nil, fmt.Errorf("read icon: %w", err)
+	}
+	if len(data) > maxIconBytes {
+		return nil, fmt.Errorf("icon: %q is %d bytes, limit is %d", ref, len(data), maxIconBytes)
+	}
+	if !looksLikeSVG(data) {
+		return nil, fmt.Errorf("icon: %q is not an SVG document", ref)
+	}
+	return data, nil
+}
+
+// resolveInsideDir joins rel onto dir and fails unless the result stays
+// inside it. Both sides are resolved through EvalSymlinks so a symlink
+// planted in the overlay directory cannot point out of it; a path that does
+// not exist is compared unresolved and left to the caller's os.Stat, which
+// reports it with a clearer message.
+func resolveInsideDir(dir, rel string) (string, error) {
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		realDir = filepath.Clean(dir)
+	}
+	full := filepath.Join(realDir, rel)
+	if resolved, err := filepath.EvalSymlinks(full); err == nil {
+		full = resolved
+	}
+	if full != realDir && !strings.HasPrefix(full, realDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes the overlay directory: %q", rel)
+	}
+	return full, nil
+}
+
+// looksLikeSVG reports whether data is an SVG document: an optional XML
+// prologue (declaration, doctype, comments, whitespace) followed by <svg.
+func looksLikeSVG(data []byte) bool {
+	s := strings.TrimPrefix(string(data), "\ufeff")
+	for {
+		s = strings.TrimSpace(s)
+		switch {
+		case strings.HasPrefix(s, "<?"):
+			s = skipPast(s, "?>")
+		case strings.HasPrefix(s, "<!--"):
+			s = skipPast(s, "-->")
+		case strings.HasPrefix(s, "<!"):
+			s = skipPast(s, ">")
+		default:
+			lower := strings.ToLower(s)
+			if !strings.HasPrefix(lower, "<svg") || len(lower) == len("<svg") {
+				return false
+			}
+			// Reject "<svgfoo": the tag must end right after the name.
+			return strings.ContainsRune(" \t\r\n>/", rune(lower[len("<svg")]))
+		}
+		if s == "" {
+			return false
+		}
+	}
+}
+
+// skipPast returns what follows the first occurrence of end, or "" if the
+// token never closes.
+func skipPast(s, end string) string {
+	i := strings.Index(s, end)
+	if i < 0 {
+		return ""
+	}
+	return s[i+len(end):]
+}
+
+// upsertOverlayModel applies one providers.*.models entry.
+//
+// A new id creates a full entry. An id that already exists is *patched*, not
+// replaced: both config/models.json.example and the docs present `models` as
+// the way to restate a known model with corrected facts, and most fields of
+// ModelSpec cannot tell "absent" from "zero" — Reasoning is a plain bool, so
+// an entry that only fixes context_window used to silently turn reasoning
+// off and drop thinking levels, compat and input along with it. Unmarshaling
+// the operator's JSON onto a copy of the stored entry leaves every key they
+// did not write exactly as it was.
+func upsertOverlayModel(v *Vendor, raw json.RawMessage) error {
+	// Decode strictly first: this is what rejects typos and wrong types, the
+	// same guarantee the rest of the overlay gives. The value is used only
+	// for the id, since the merge below re-reads the raw bytes.
+	var spec ModelSpec
+	dec := json.NewDecoder(bytesReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&spec); err != nil {
+		return fmt.Errorf("model entry: %w", err)
+	}
+	if spec.ID == "" {
+		return fmt.Errorf("model without id")
+	}
+	for i := range v.Models {
+		if !strings.EqualFold(v.Models[i].ID, spec.ID) {
+			continue
+		}
+		// cloneModelSpec first: the vendor's Models slice was only shallow
+		// copied, so unmarshaling into the entry's slices/maps in place would
+		// write through to the built-in vendor's package-level definition.
+		merged := cloneModelSpec(v.Models[i])
+		if err := json.Unmarshal(raw, &merged); err != nil {
+			return fmt.Errorf("model %s: %w", spec.ID, err)
+		}
+		v.Models[i] = merged
+		return nil
+	}
+	v.Models = append(v.Models, spec)
+	return nil
+}
+
+// cloneModelSpec deep-copies the reference-typed fields of a spec.
+func cloneModelSpec(m ModelSpec) ModelSpec {
+	out := m
+	out.Input = append([]string(nil), m.Input...)
+	out.Aliases = append([]string(nil), m.Aliases...)
+	out.Compat = append(json.RawMessage(nil), m.Compat...)
+	if m.ThinkingLevels != nil {
+		levels := make(api.ThinkingLevelMap, len(m.ThinkingLevels))
+		for k, v := range m.ThinkingLevels {
+			levels[k] = v
+		}
+		out.ThinkingLevels = levels
+	}
+	return out
 }
 
 func applyPatch(m *ModelSpec, p ModelSpecPatch) {
