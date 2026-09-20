@@ -3683,6 +3683,7 @@ export default {
     questionMinimapAttachmentPlaceholder: '(Attachment)',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
+    truncatedHint: 'This answer was cut off at the per-response output limit. Above is what the model produced before the cut.',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',

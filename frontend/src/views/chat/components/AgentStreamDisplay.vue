@@ -418,6 +418,11 @@
                     <t-icon name="info-circle" />
                   </t-button>
                 </t-tooltip>
+                <t-tooltip v-if="event.truncated" :content="$t('chat.truncatedHint')" placement="top">
+                  <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                    <t-icon name="info-circle" />
+                  </t-button>
+                </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">

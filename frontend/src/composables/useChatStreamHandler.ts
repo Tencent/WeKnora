@@ -934,6 +934,13 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           answerEvent.is_fallback = true
           message.is_fallback = true
         }
+        // The completion cap cut this answer off. The backend sends it on the
+        // content chunks and again on the Done marker, because an answer that
+        // streamed live only learns of the cap at the close.
+        if (dataPayload?.truncated) {
+          answerEvent.truncated = true
+          message.truncated = true
+        }
         if (data.done && !answerEvent.done) {
           answerEvent.done = true
           onAgentAnswerDone?.(message)

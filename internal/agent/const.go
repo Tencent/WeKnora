@@ -51,8 +51,30 @@ const (
 	// where the LLM returns identical content without any tool calls before
 	// the loop is forcibly terminated. This catches stuck loops caused by
 	// unhandled finish reasons (e.g., content_filter not caught elsewhere).
+	// "Identical" includes an identical lack of content: consecutive empty
+	// rounds are the clearest stuck loop there is.
 	maxRepeatedResponseRounds = 2
+
+	// maxConsecutiveLengthRounds is how many rounds in a row may be cut off at
+	// the completion-token cap before the loop gives up. A truncated answer
+	// already ends the turn (analyzeResponse Case 2), so reaching this limit
+	// means round after round is truncating inside tool-call arguments: the
+	// model is told to re-issue the call, writes an even longer one, and hits
+	// the cap again. Without this the turn burns its whole round budget.
+	maxConsecutiveLengthRounds = 3
 )
+
+// truncatedAnswerFallback is delivered when every attempt at this turn was cut
+// off at the completion cap and none of them produced answer text — there is
+// nothing partial to hand over, so say what happened instead of finishing with
+// an empty message.
+const truncatedAnswerFallback = "Sorry, this answer kept hitting the model's per-response output limit " +
+	"before any text was produced. Try narrowing the question, or raise the agent's " +
+	"max_completion_tokens setting."
+
+// stalledAnswerFallback is delivered when a no-progress guard stopped the turn
+// and the round that tripped it produced no text.
+const stalledAnswerFallback = "I'm sorry, I was unable to generate a response. Please try again."
 
 func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	if toolName == "local_browser" && len(arguments) > 0 {

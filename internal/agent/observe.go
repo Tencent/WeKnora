@@ -330,7 +330,11 @@ type responseVerdict struct {
 	isDone       bool
 	finalAnswer  string
 	emptyContent bool // LLM returned stop with no tool calls and empty content
-	step         types.AgentStep
+	// truncated marks a finalAnswer the completion-token cap cut off. The turn
+	// ends with it rather than looping, so the client has to be told the text
+	// is partial.
+	truncated bool
+	step      types.AgentStep
 	// answerID is the EventAgentFinalAnswer id to close with Done:true if
 	// this round actually finishes. Natural-stop must not close the stream
 	// before the loop-end steer drain: a pending inject continues the turn,
@@ -486,9 +490,76 @@ func (e *AgentEngine) analyzeResponse(
 		}
 	}
 
+	// Case 2: the completion cap cut this message off and the model asked for
+	// no tool work.
+	//
+	// Looping here is what produced the "answer restarts from the top" spiral
+	// (#3446). `length` is not a natural stop, so the round used to fall
+	// through as non-terminal; with no tool calls to run, appendToolResults
+	// pushed the half-written answer back as a plain assistant message with
+	// nothing instructing the model to continue. The next round rewrote the
+	// answer from the beginning, hit the same cap, and repeated until the
+	// round budget ran out or the user cancelled.
+	//
+	// Deliver what the model produced and end the turn. This matches what the
+	// truncated-tool-call path already does one level down (act.go refuses the
+	// calls rather than running half-serialized arguments) and what other
+	// agent loops do with a text truncation. A continuation nudge is
+	// deliberately not sent: it only grows the prompt with the discarded
+	// fragment, and the reliable form of continuation (assistant prefill) is
+	// not available on most OpenAI-compatible endpoints.
+	if isLengthFinishReason(response.FinishReason) && len(response.ToolCalls) == 0 {
+		response.Content = agenttools.StripThinkBlocks(response.Content)
+		round := iteration + 1
+		// Nothing was produced but reasoning: there is no partial answer to
+		// hand over, so use the existing empty-content path, which nudges and
+		// retries a bounded number of times before falling back.
+		if strings.TrimSpace(response.Content) == "" {
+			logger.Warnf(ctx, "[Agent][Round-%d] Completion cap reached with no answer text (finish=%s); "+
+				"deferring to the empty-content retry", round, response.FinishReason)
+			return responseVerdict{isDone: true, finalAnswer: "", emptyContent: true, step: step}
+		}
+
+		logger.Warnf(ctx, "[Agent][Round-%d] Answer truncated at the completion cap (finish=%s, answer=%d chars); "+
+			"ending the turn instead of re-answering", round, response.FinishReason, len(response.Content))
+		common.PipelineWarn(ctx, "Agent", "round_truncated_answer", map[string]interface{}{
+			"iteration":     iteration,
+			"round":         round,
+			"answer_len":    len(response.Content),
+			"finish_reason": response.FinishReason,
+		})
+
+		// Same two delivery paths as Case 1: reuse the live stream when the
+		// text already went out, otherwise emit it once here. Done is left to
+		// the caller so a loop-end steer inject can still continue the turn.
+		answerID := response.AnswerEventID
+		if !response.AnswerStreamed || answerID == "" {
+			answerID = generateEventID("answer")
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content:   response.Content,
+					Done:      false,
+					Truncated: true,
+				},
+			})
+		}
+
+		return responseVerdict{
+			isDone:      true,
+			finalAnswer: response.Content,
+			truncated:   true,
+			step:        step,
+			answerID:    answerID,
+		}
+	}
+
 	// Any round that still requests tool calls is non-terminal: the caller
-	// executes the tools and loops again. The agent only ends by stopping
-	// naturally (Case 1) with its answer as plain assistant text.
+	// executes the tools and loops again. Apart from the cases above, the
+	// agent only ends by stopping naturally (Case 1) with its answer as plain
+	// assistant text.
 	return responseVerdict{isDone: false, step: step}
 }
 

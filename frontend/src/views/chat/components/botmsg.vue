@@ -85,6 +85,12 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
+                <!-- 输出被单次上限截断的提示 -->
+                <t-tooltip v-if="session.truncated" :content="$t('chat.truncatedHint')" placement="top">
+                    <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                        <t-icon name="info-circle" />
+                    </t-button>
+                </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
