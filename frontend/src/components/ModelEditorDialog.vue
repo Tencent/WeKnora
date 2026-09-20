@@ -2201,9 +2201,12 @@ const handleCancel = () => {
     color: var(--td-text-color-primary);
   }
 
+  // 选中态与下面的「模型来源」分段一致：白底 + 主题色描边 + 主题色文字。
+  // 原先还铺了一层 10% 的主题色底，五个按钮里那一块是整屏最重的色块，而且
+  // 和下拉里刚去掉的整行绿底是同一个毛病。
   &.is-active {
     border-color: var(--td-brand-color);
-    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    background: var(--td-bg-color-container);
     color: var(--td-brand-color);
     font-weight: 500;
   }
