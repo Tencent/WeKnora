@@ -58,11 +58,23 @@ func (o *driveOps) listDriveFilesForResource(
 		return files, partialDriveError(failures)
 	}
 
+	// Sub-selection ("rootFolderToken:fileToken"). The selected node's kind is
+	// read off the root subtree listing — probing it with folder APIs would
+	// fail for file tokens (folder meta 91202, folder list 1061002) and log
+	// API errors on every sync.
+	rootFiles, rootDirs, rootFailures := core.WalkDriveTree(ctx, client, rootFolderToken, "")
+	for _, f := range rootFiles {
+		if f.Token == fileToken && f.Type != "folder" {
+			o.dirPaths = rootDirs
+			return filterDriveFileByToken(rootFiles, fileToken), partialDriveError(rootFailures)
+		}
+	}
+
 	// Sub-folder selection: walk that sub-folder's subtree, prefixed with the
 	// sub-folder's own name (relative to the KB root; unresolved name → the
-	// walk runs with no prefix). If the token turns out to be a file (the walk
-	// fails with the params error), fall back to walking the root subtree and
-	// filtering — mirroring the previous single-file selection behaviour.
+	// walk runs with no prefix). If the token turns out to be a file missing
+	// from the root listing (partial listing, permission edge), fall back to
+	// the already-fetched root subtree — mirroring single-file behaviour.
 	base := ""
 	if subName, ok := o.driveFolderName(ctx, client, fileToken); ok {
 		base = subName
@@ -70,7 +82,6 @@ func (o *driveOps) listDriveFilesForResource(
 	files, dirPaths, failures := core.WalkDriveTree(ctx, client, fileToken, base)
 	for _, failure := range failures {
 		if failure.FolderToken == fileToken && isDriveNotFolderError(failure.Err) {
-			rootFiles, rootDirs, rootFailures := core.WalkDriveTree(ctx, client, rootFolderToken, "")
 			o.dirPaths = rootDirs
 			return filterDriveFileByToken(rootFiles, fileToken), partialDriveError(rootFailures)
 		}

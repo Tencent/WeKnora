@@ -24,13 +24,17 @@ type fakeDriveTree struct {
 	folders   map[string][]core.DriveFile
 	failing   map[string]bool
 	metaNames map[string]string
+	// listCalls / metaCalls count API hits per token, so tests can assert a
+	// file token is never probed with folder APIs.
+	listCalls map[string]int
+	metaCalls map[string]int
 	ts        *httptest.Server
 	cfg       *core.Config
 }
 
 func newFakeDriveTree(t *testing.T, folders map[string][]core.DriveFile) *fakeDriveTree {
 	t.Helper()
-	f := &fakeDriveTree{folders: folders, failing: map[string]bool{}}
+	f := &fakeDriveTree{folders: folders, failing: map[string]bool{}, listCalls: map[string]int{}, metaCalls: map[string]int{}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +43,7 @@ func newFakeDriveTree(t *testing.T, folders map[string][]core.DriveFile) *fakeDr
 	// Folder listing (paged endpoint, exact path) and file download (subtree).
 	mux.HandleFunc("/open-apis/drive/v1/files", func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("folder_token")
+		f.listCalls[token]++
 		if f.failing[token] {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"code":1663,"msg":"internal error"}`))
@@ -61,6 +66,7 @@ func newFakeDriveTree(t *testing.T, folders map[string][]core.DriveFile) *fakeDr
 		// path: /open-apis/drive/explorer/v2/folder/<token>/meta
 		p := strings.TrimPrefix(r.URL.Path, "/open-apis/drive/explorer/v2/folder/")
 		token := strings.TrimSuffix(p, "/meta")
+		f.metaCalls[token]++
 		name, ok := f.metaNames[token]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
@@ -263,5 +269,59 @@ func TestDriveFetchIncremental_MoveFollowsNewPath(t *testing.T) {
 	}
 	if moved.FileName != "目录B/文档.pdf" {
 		t.Errorf("moved file FileName = %q, want 目录B/文档.pdf (same external_id, new folder)", moved.FileName)
+	}
+}
+
+// TestDriveFetchIncremental_SingleFileSelectionSkipsFolderProbes anchors the
+// sub-selection fix: a selected file's kind is read off the root subtree
+// listing, so no folder meta/list API is ever called with the file token —
+// probing used to fail with 91202/1061002 and log API errors on every sync.
+func TestDriveFetchIncremental_SingleFileSelectionSkipsFolderProbes(t *testing.T) {
+	f := newFakeDriveTree(t, map[string][]core.DriveFile{
+		"fold-root": {driveFile("f-doc", "文档.docx", "fold-root", "100")},
+	})
+
+	c := NewDriveConnector(core.RegionFeishuDrive)
+	items, _, err := c.FetchIncremental(context.Background(), makeDriveConfig(f.cfg, []string{"fold-root:f-doc"}), nil)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error: %v", err)
+	}
+
+	got := fetchedByToken(items)
+	if len(got) != 1 || got["f-doc"].FileName != "文档.docx" {
+		t.Fatalf("got %d items (%v), want exactly f-doc with its own name", len(got), got)
+	}
+	if f.listCalls["f-doc"] != 0 {
+		t.Errorf("folder list probed the file token %d time(s)", f.listCalls["f-doc"])
+	}
+	if f.metaCalls["f-doc"] != 0 {
+		t.Errorf("folder meta probed the file token %d time(s)", f.metaCalls["f-doc"])
+	}
+}
+
+// TestDriveFetchIncremental_SubFolderSelection pins the sub-folder semantics:
+// only the selected subtree syncs, prefixed with the sub-folder's own name.
+func TestDriveFetchIncremental_SubFolderSelection(t *testing.T) {
+	f := newFakeDriveTree(t, map[string][]core.DriveFile{
+		"fold-root": {
+			driveFolder("fold-spec", "规格", "fold-root"),
+			driveFile("f-root", "说明.pdf", "fold-root", "100"),
+		},
+		"fold-spec": {driveFile("f-spec", "详细.pdf", "fold-spec", "200")},
+	})
+	f.metaNames = map[string]string{"fold-spec": "规格"}
+
+	c := NewDriveConnector(core.RegionFeishuDrive)
+	items, _, err := c.FetchIncremental(context.Background(), makeDriveConfig(f.cfg, []string{"fold-root:fold-spec"}), nil)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error: %v", err)
+	}
+
+	got := fetchedByToken(items)
+	if len(got) != 1 {
+		t.Fatalf("got %d items (%v), want only the selected subtree", len(got), got)
+	}
+	if got["f-spec"].FileName != "规格/详细.pdf" {
+		t.Errorf("FileName for f-spec = %q, want %q", got["f-spec"].FileName, "规格/详细.pdf")
 	}
 }
