@@ -890,21 +890,36 @@ const vendorDocLink = computed(() => {
   return /^https?:\/\//i.test(url) ? url : ''
 })
 
+/**
+ * What applyCatalogEntry filled in for the model currently selected.
+ *
+ * Switching vendor has to take those values back — a context window from the
+ * previous vendor's model is exactly the "填大会导致压缩不触发、上游直接拒绝"
+ * case this field warns about — but it must not touch a number the operator
+ * typed. Remembering what was filled, and only clearing a field that still
+ * holds it, separates the two.
+ */
+const catalogFilled = ref<Partial<ModelFormData>>({})
+
 /** Fill blank capability fields from a catalog entry the user just picked. */
 const applyCatalogEntry = (entry: ModelCatalogEntry) => {
   if (activeModelType.value === 'chat' || activeModelType.value === 'vllm') {
     if (!formData.value.contextWindow && entry.context_window) {
       formData.value.contextWindow = entry.context_window
+      catalogFilled.value.contextWindow = entry.context_window
     }
     if (!formData.value.maxOutputTokens && entry.max_output_tokens) {
       formData.value.maxOutputTokens = entry.max_output_tokens
+      catalogFilled.value.maxOutputTokens = entry.max_output_tokens
     }
   }
   if (activeModelType.value === 'chat' && !formData.value.supportsVision && Array.isArray(entry.input) && entry.input.includes('image')) {
     formData.value.supportsVision = true
+    catalogFilled.value.supportsVision = true
   }
   if (activeModelType.value === 'embedding' && !formData.value.dimension && entry.dimension) {
     formData.value.dimension = entry.dimension
+    catalogFilled.value.dimension = entry.dimension
   }
 }
 
@@ -1509,24 +1524,64 @@ const resetForm = () => {
 }
 
 // 处理厂商选择变化 (自动填充默认 URL)
+/**
+ * Drop a model name the new vendor does not serve, along with whatever the
+ * catalog filled in for it.
+ *
+ * The same id does exist at several vendors — deepseek-v4-pro is sold by
+ * DeepSeek, Aliyun, Volcengine and the gateways — so switching between them
+ * should keep the selection. Anything else is a name from the previous
+ * vendor: left in place it is saved verbatim, resolves as an uncatalogued
+ * model and fails at the first call.
+ */
+const resetModelSelectionForVendor = () => {
+  const current = (formData.value.modelName || '').trim()
+  if (!current || findCatalogEntry(current)) return
+
+  formData.value.modelName = ''
+  // Take back only the values applyCatalogEntry put there; a number the
+  // operator typed is theirs and survives the switch.
+  const filled = catalogFilled.value
+  if (filled.contextWindow && formData.value.contextWindow === filled.contextWindow) {
+    formData.value.contextWindow = undefined
+  }
+  if (filled.maxOutputTokens && formData.value.maxOutputTokens === filled.maxOutputTokens) {
+    formData.value.maxOutputTokens = undefined
+  }
+  if (filled.dimension && formData.value.dimension === filled.dimension) {
+    formData.value.dimension = undefined
+  }
+  if (filled.supportsVision && formData.value.supportsVision) {
+    formData.value.supportsVision = false
+  }
+  catalogFilled.value = {}
+  modelChecked.value = false
+  modelAvailable.value = false
+  dimensionChecked.value = false
+  dimensionSuccess.value = false
+  dimensionMessage.value = ''
+}
+
 const handleProviderChange = (value: string) => {
   const provider = providerOptions.value.find(opt => opt.value === value)
-  if (provider && provider.defaultUrls) {
+  if (provider?.defaultUrls) {
     // 根据当前模型类型获取对应的默认 URL
     const defaultUrl = provider.defaultUrls[activeModelType.value]
     if (defaultUrl) {
       formData.value.baseUrl = defaultUrl
     }
-    // 重置校验状态
-    remoteChecked.value = false
-    remoteAvailable.value = false
-    remoteMessage.value = ''
   }
+  // 重置校验状态：它描述的是上一家厂商的连通性，跟新厂商无关。放在 defaultUrls
+  // 判断之外，否则切到没有默认地址的厂商时会留着一条"连接正常"的旧结论。
+  remoteChecked.value = false
+  remoteAvailable.value = false
+  remoteMessage.value = ''
   // WeKnoraCloud: 检查凭证状态
   if (value === 'weknoracloud') {
     checkWkcCredentialStatus()
   }
   if (hydratingForm.value) return
+  resetModelSelectionForVendor()
   // 换厂商：丢掉上一家的厂商字段（保留协议 / 远端模型名等高级覆盖），再灌入新厂商默认值
   formData.value.extraConfig = keepVendorNeutralExtraConfig()
   formData.value.appSecret = ''

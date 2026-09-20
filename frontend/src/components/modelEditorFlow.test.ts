@@ -654,3 +654,92 @@ test('parent save sends an empty extra_config so cleared vendor fields really cl
   assert.equal('extra_config' in updates[1].parameters, false)
   assert.equal(creates.length, 0)
 })
+
+// Two vendors that share one model id (deepseek-v4-pro is sold by DeepSeek,
+// Aliyun, Volcengine and the gateways alike) and one that does not.
+const switchProviders = [
+  {
+    value: 'vendor-a', label: 'Vendor A', description: '', order: 1, modelTypes: ['chat'],
+    defaultUrls: { chat: 'https://a.example.com/v1' },
+    models: [
+      { id: 'shared-model', name: 'Shared', type: 'chat', context_window: 128000, max_output_tokens: 8192 },
+      { id: 'only-on-a', name: 'Only on A', type: 'chat', context_window: 1000000, input: ['text', 'image'] },
+    ],
+  },
+  {
+    value: 'vendor-b', label: 'Vendor B', description: '', order: 2, modelTypes: ['chat'],
+    defaultUrls: { chat: 'https://b.example.com/v1' },
+    models: [
+      { id: 'shared-model', name: 'Shared', type: 'chat', context_window: 128000 },
+    ],
+  },
+]
+
+test('switching vendor drops a model the new vendor does not serve, and what the catalog filled for it', async () => {
+  const f = await fixture({ providers: switchProviders })
+  try {
+    f.vm.formData.provider = 'vendor-a'
+    f.vm.handleProviderChange('vendor-a')
+    await nextTick()
+    // The select's v-model writes the name; the change handler fills the
+    // capability fields from the catalog entry.
+    f.vm.formData.modelName = 'only-on-a'
+    f.vm.handleCatalogModelChange('only-on-a')
+    await nextTick()
+    assert.equal(f.vm.formData.modelName, 'only-on-a')
+    // The catalog filled these, so they belong to that model.
+    assert.equal(f.vm.formData.contextWindow, 1000000)
+    assert.equal(f.vm.formData.supportsVision, true)
+
+    f.vm.formData.provider = 'vendor-b'
+    f.vm.handleProviderChange('vendor-b')
+    await nextTick()
+    // Left in place the name would be saved verbatim and fail at first call.
+    assert.equal(f.vm.formData.modelName, '')
+    // A 1M window from another vendor's model is the exact mis-configuration
+    // the field warns about, so it goes with the name.
+    assert.equal(f.vm.formData.contextWindow, undefined)
+    assert.equal(f.vm.formData.supportsVision, false)
+    assert.equal(f.vm.formData.baseUrl, 'https://b.example.com/v1')
+  } finally { f.close() }
+})
+
+test('switching vendor keeps a model both vendors serve, and never discards typed values', async () => {
+  const f = await fixture({ providers: switchProviders })
+  try {
+    f.vm.formData.provider = 'vendor-a'
+    f.vm.handleProviderChange('vendor-a')
+    await nextTick()
+    f.vm.formData.modelName = 'shared-model'
+    f.vm.handleCatalogModelChange('shared-model')
+    await nextTick()
+    // The operator overrides the catalog's number by hand.
+    f.vm.formData.contextWindow = 64000
+    f.vm.formData.maxOutputTokens = 4096
+
+    f.vm.formData.provider = 'vendor-b'
+    f.vm.handleProviderChange('vendor-b')
+    await nextTick()
+    assert.equal(f.vm.formData.modelName, 'shared-model', 'both vendors serve it')
+    assert.equal(f.vm.formData.contextWindow, 64000, 'a typed value is the operator‘s')
+    assert.equal(f.vm.formData.maxOutputTokens, 4096)
+  } finally { f.close() }
+})
+
+test('switching vendor clears a connection result that described the old one', async () => {
+  const f = await fixture({ providers: switchProviders })
+  try {
+    f.vm.formData.provider = 'vendor-a'
+    f.vm.handleProviderChange('vendor-a')
+    await nextTick()
+    f.vm.formData.modelName = 'shared-model'
+    await f.vm.checkRemoteAPI()
+    assert.equal(f.vm.remoteChecked, true)
+
+    f.vm.formData.provider = 'vendor-b'
+    f.vm.handleProviderChange('vendor-b')
+    await nextTick()
+    assert.equal(f.vm.remoteChecked, false)
+    assert.equal(f.vm.remoteMessage, '')
+  } finally { f.close() }
+})
