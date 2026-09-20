@@ -228,6 +228,12 @@ type Vendor struct {
 	ModelTypes      []types.ModelType
 	RequiresAuth    bool
 	Auth            AuthStyle
+	// AuthByAPI overrides Auth for one protocol. A vendor that exposes a
+	// second protocol on a sub-path may authenticate it differently: Gemini's
+	// OpenAI-compatible facade documents Authorization: Bearer while the
+	// native generateContent API takes x-goog-api-key. Protocols absent from
+	// the map use Auth.
+	AuthByAPI map[api.API]AuthStyle
 	// URLPatterns are substrings of a base URL that identify this vendor
 	// when the operator left provider empty (legacy rows).
 	URLPatterns []string
@@ -315,9 +321,20 @@ func (v *Vendor) LocalizedDescription(locale string) string {
 	return v.Description
 }
 
-// AuthFunc builds the request authenticator for the stored credentials.
-func (v *Vendor) AuthFunc(creds Credentials) api.AuthFunc {
-	switch v.Auth {
+// AuthStyleFor returns the auth style this vendor uses for one protocol,
+// falling back to the vendor-wide Auth.
+func (v *Vendor) AuthStyleFor(protocol api.API) AuthStyle {
+	if style, ok := v.AuthByAPI[protocol]; ok && style != "" {
+		return style
+	}
+	return v.Auth
+}
+
+// AuthFunc builds the request authenticator for the stored credentials. The
+// protocol matters because a vendor that serves a second protocol on a
+// sub-path may authenticate it differently (see Vendor.AuthByAPI).
+func (v *Vendor) AuthFunc(protocol api.API, creds Credentials) api.AuthFunc {
+	switch v.AuthStyleFor(protocol) {
 	case AuthAPIKeyHeader:
 		return api.HeaderAuth("api-key", creds.APIKey)
 	case AuthXAPIKey:

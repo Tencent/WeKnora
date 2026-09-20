@@ -16,7 +16,10 @@
 package parity
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -557,6 +560,54 @@ func TestGeminiLegacyBaseURLKeepsOpenAIProtocol(t *testing.T) {
 
 	native := resolve(t, "gemini", "gemini-2.5-pro")
 	assert.Equal(t, api.APIGoogleGenerativeAI, native.API, "new rows use the native protocol")
+}
+
+// TestGeminiCredentialFollowsTheProtocol pins the header each Gemini path
+// authenticates with. The two surfaces document different credentials —
+// x-goog-api-key for native generateContent, Authorization: Bearer for the
+// OpenAI-compatible facade (https://ai.google.dev/gemini-api/docs/openai) —
+// and the auth style is a vendor-wide setting, so without the per-protocol
+// override every row stored before the native protocol became the default
+// would silently change credential: they all carry the /v1beta/openai base
+// URL that the pre-catalog code paired with a bearer token.
+func TestGeminiCredentialFollowsTheProtocol(t *testing.T) {
+	var got http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}],` +
+			`"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	defer server.Close()
+
+	for _, tc := range []struct {
+		name       string
+		baseURL    string
+		wantHeader string
+		otherEmpty string
+	}{
+		{
+			name: "openai facade keeps the bearer token", baseURL: server.URL + "/v1beta/openai",
+			wantHeader: "Authorization", otherEmpty: "x-goog-api-key",
+		},
+		{
+			name: "native protocol uses the google api key", baseURL: server.URL + "/v1beta",
+			wantHeader: "x-goog-api-key", otherEmpty: "Authorization",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := chat.NewRemoteChat(&chat.ChatConfig{
+				Source: types.ModelSourceRemote, Provider: "gemini",
+				ModelName: "gemini-2.5-pro", BaseURL: tc.baseURL, APIKey: "KEY",
+			})
+			require.NoError(t, err)
+			_, _ = client.Chat(context.Background(), []chat.Message{{Role: "user", Content: "hi"}},
+				&chat.ChatOptions{})
+
+			assert.NotEmpty(t, got.Get(tc.wantHeader), "%s must carry the credential", tc.wantHeader)
+			assert.Empty(t, got.Get(tc.otherEmpty), "%s must not be sent on this protocol", tc.otherEmpty)
+		})
+	}
 }
 
 // TestConcurrentResolve runs the resolution path from many goroutines at

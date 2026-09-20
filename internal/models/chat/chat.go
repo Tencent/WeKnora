@@ -208,7 +208,7 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 		BaseURL: resolved.BaseURL,
 		Model:   resolved.RemoteModel,
 		ModelID: config.ModelID,
-		Auth:    vendor.AuthFunc(creds),
+		Auth:    vendor.AuthFunc(resolved.API, creds),
 		Headers: headers,
 	}
 	if vendor.Endpoint != nil {

@@ -20,7 +20,12 @@
 //     that reason and tops out at 32768;
 //   - pointing base_url at https://generativelanguage.googleapis.com/v1beta/openai
 //     keeps the OpenAI-compatible Chat Completions protocol (Resolve detects
-//     the /openai suffix); on that facade `reasoning_effort` is translated to
+//     the /openai suffix) and switches the credential to
+//     `Authorization: Bearer`, the only form that facade documents
+//     (https://ai.google.dev/gemini-api/docs/openai). Every row created
+//     before the native protocol became the default carries exactly that base
+//     URL, so this is the auth those rows have always used; on that facade
+//     `reasoning_effort` is translated to
 //     thinking_level or thinking_budget per model,
 //     `extra_body.google.thinking_config` carries include_thoughts, and usage
 //     reports cached tokens (the OpenAICompletions vendor compat below);
@@ -30,11 +35,6 @@
 //     input (https://ai.google.dev/gemini-api/docs/embeddings).
 //
 // Unverified:
-//   - the OpenAI-compat guide only documents `Authorization: Bearer
-//     $GEMINI_API_KEY` for the /openai facade, while this vendor sends
-//     `x-goog-api-key` for every model type because AuthStyle is a
-//     vendor-wide setting. Google's frontend has historically accepted both,
-//     but the docs do not say so.
 //   - `extra_content` on tool calls is not named anywhere in the current
 //     OpenAI-compat guide; the tool_call_extra_fields entry is kept because
 //     dropping an opaque round-trip field is the riskier direction.
@@ -87,7 +87,14 @@ func init() {
 		Order:        33,
 		RequiresAuth: true,
 		Auth:         catalog.AuthGoogleAPIKey,
-		URLPatterns:  []string{"generativelanguage.googleapis.com"},
+		// The OpenAI-compatible facade documents only Authorization: Bearer.
+		// Sending x-goog-api-key there would change the credential of every
+		// row stored before the native protocol became the default — they all
+		// carry the .../v1beta/openai base URL.
+		AuthByAPI: map[api.API]catalog.AuthStyle{
+			api.APIOpenAICompletions: catalog.AuthBearer,
+		},
+		URLPatterns: []string{"generativelanguage.googleapis.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: BaseURL,
 			types.ModelTypeEmbedding:   BaseURL,
