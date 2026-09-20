@@ -1654,6 +1654,25 @@ onBeforeUnmount(() => {
 }
 
 .manual-editor-drawer {
+  /* 没有副标题的抽屉不需要 65px 的头：收一圈内边距、缩小图标徽章，
+     把高度还给正文。只作用于本抽屉，不动共用的 SettingDrawer。 */
+  .t-drawer__header {
+    /* TDesign 给 header 兜了 56px 的 min-height，不解开就只是白留一圈空 */
+    min-height: 0;
+    padding: 9px 18px;
+  }
+
+  .setting-drawer__header {
+    padding: 0;
+  }
+
+  .setting-drawer__header-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--app-radius-sm);
+    font-size: var(--app-text-md);
+  }
+
   .t-drawer__body {
     display: flex;
     flex-direction: column;
