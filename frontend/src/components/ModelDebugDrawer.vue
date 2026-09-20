@@ -476,7 +476,7 @@ onBeforeUnmount(() => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -484,7 +484,7 @@ onBeforeUnmount(() => {
 
 .form-desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 
@@ -506,16 +506,16 @@ onBeforeUnmount(() => {
   padding: 6px 12px;
   min-height: 32px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &__icon {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     flex-shrink: 0;
   }
 
@@ -524,7 +524,7 @@ onBeforeUnmount(() => {
   }
 
   &:hover:not(.is-active) {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
     color: var(--td-text-color-primary);
   }
 
@@ -557,7 +557,7 @@ onBeforeUnmount(() => {
   &__meta {
     flex-shrink: 0;
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 }
 
@@ -602,12 +602,12 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding: 5px 10px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 
   &__label {
     color: var(--td-text-color-primary);
@@ -630,8 +630,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-md);
 
   &--ok {
     background: var(--td-success-color-light);
@@ -658,7 +658,7 @@ onBeforeUnmount(() => {
 
     span {
       color: var(--td-text-color-placeholder);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 }
@@ -672,16 +672,16 @@ onBeforeUnmount(() => {
 
 .metric-chip {
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .result-error {
   margin: 10px 0 0;
   color: var(--td-error-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   white-space: pre-wrap;
 }
 
@@ -700,7 +700,7 @@ onBeforeUnmount(() => {
   margin: 8px 0 0;
   padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

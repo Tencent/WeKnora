@@ -310,8 +310,11 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 }
 
 func outputFilesPrompt(result *types.ToolResult) string {
-	if result == nil || len(result.OutputFiles) == 0 {
+	if result == nil || result.OutputFiles == nil {
 		return ""
+	}
+	if len(result.OutputFiles) == 0 {
+		return "\nOutput files: none identified by this call."
 	}
 	return "\nOutput files: `" + strings.Join(result.OutputFiles, "`, `") + "`"
 }

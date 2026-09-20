@@ -30,6 +30,11 @@ type TokenUsage struct {
 	CacheMissTokens  int               `json:"cache_miss_tokens,omitempty"`
 	CacheReported    bool              `json:"cache_reported"`
 	CacheStatus      PromptCacheStatus `json:"cache_status,omitempty"`
+	// ContextTokenScale is provider prompt tokens per cl100k-estimated token,
+	// measured over the turn's rounds. Persisted with the turn so the next
+	// turn's history loading and first compaction check are calibrated before
+	// any provider count of their own. Zero when the turn measured none.
+	ContextTokenScale float64 `json:"context_token_scale,omitempty"`
 }
 
 // SetPromptCacheUsage normalizes provider-specific cache counters into the
@@ -91,6 +96,10 @@ func (u *TokenUsage) Accumulate(other TokenUsage) {
 	u.CacheWriteTokens += other.CacheWriteTokens
 	u.CacheMissTokens += other.CacheMissTokens
 	u.CacheReported = u.CacheReported || other.CacheReported
+	// A scale is a ratio, not a count: the newest measurement stands.
+	if other.ContextTokenScale > 0 {
+		u.ContextTokenScale = other.ContextTokenScale
+	}
 	switch {
 	case !u.CacheReported:
 		u.CacheStatus = mergeUnreportedCacheStatus(u.CacheStatus, other.CacheStatus)

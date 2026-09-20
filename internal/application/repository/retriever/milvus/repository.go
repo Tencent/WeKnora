@@ -795,10 +795,10 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 		log.Errorf("[Milvus] Failed to convert result set: %v", err)
 		return nil, fmt.Errorf("failed to convert result set: %w", err)
 	}
-	var results []*types.IndexWithScore
-	for i, set := range sets {
-		set.Score = scores[i]
-		results = append(results, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeEmbedding))
+	results, err := buildMilvusIndexResults(sets, scores, types.MatchTypeEmbedding)
+	if err != nil {
+		log.Errorf("[Milvus] Failed to attach vector scores: %v", err)
+		return nil, fmt.Errorf("failed to attach vector scores: %w", err)
 	}
 	if len(results) == 0 {
 		log.Warnf("[Milvus] No vector matches found that meet threshold %.4f", params.Threshold)
@@ -864,19 +864,41 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 			log.Errorf("[Milvus] Keywords search failed: %v", err)
 			continue
 		}
-		sets, _, err := convertResultSet(resultSet)
+		sets, scores, err := convertResultSet(resultSet)
 		if err != nil {
 			log.Errorf("[Milvus] Failed to convert result set: %v", err)
 			continue
 		}
-		for _, set := range sets {
-			set.Score = 1.0
-			allResults = append(allResults, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeKeywords))
+		results, scoreErr := buildMilvusIndexResults(sets, scores, types.MatchTypeKeywords)
+		if scoreErr != nil {
+			log.Errorf("[Milvus] Failed to attach keyword scores: %v", scoreErr)
+			continue
 		}
+		allResults = append(allResults, results...)
 	}
 
-	// Limit results to topK
-	if len(allResults) > params.TopK {
+	// Searches across multiple collections return one score-sorted page per
+	// collection. Re-sort the combined list before applying the global TopK;
+	// otherwise the first collection can crowd out better matches from later
+	// collections.
+	slices.SortStableFunc(allResults, func(a, b *types.IndexWithScore) int {
+		if a.Score > b.Score {
+			return -1
+		}
+		if a.Score < b.Score {
+			return 1
+		}
+		if a.ChunkID < b.ChunkID {
+			return -1
+		}
+		if a.ChunkID > b.ChunkID {
+			return 1
+		}
+		return 0
+	})
+
+	// Limit results to topK after sorting the merged collection results.
+	if params.TopK > 0 && len(allResults) > params.TopK {
 		allResults = allResults[:params.TopK]
 	}
 
@@ -1009,6 +1031,35 @@ func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.Re
 			Error:               nil,
 		},
 	}
+}
+
+// buildMilvusIndexResults attaches the score returned by Milvus to the
+// corresponding document. Search scores are meaningful for both vector and
+// BM25 searches; replacing keyword scores with a constant destroys the
+// ordering and makes retrieval observability misleading.
+func buildMilvusIndexResults(
+	documents []*MilvusVectorEmbeddingWithScore,
+	scores []float64,
+	matchType types.MatchType,
+) ([]*types.IndexWithScore, error) {
+	if len(documents) != len(scores) {
+		return nil, fmt.Errorf(
+			"result and score count mismatch: documents=%d scores=%d",
+			len(documents), len(scores),
+		)
+	}
+
+	results := make([]*types.IndexWithScore, 0, len(documents))
+	for i, document := range documents {
+		if document == nil {
+			return nil, fmt.Errorf("nil result at index %d", i)
+		}
+		document.Score = scores[i]
+		results = append(results,
+			fromMilvusVectorEmbedding(document.ID, document, matchType),
+		)
+	}
+	return results, nil
 }
 
 func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding) int64 {

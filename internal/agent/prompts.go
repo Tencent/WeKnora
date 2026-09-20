@@ -11,24 +11,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// formatFileSize formats file size in human-readable format
-func formatFileSize(size int64) string {
-	const (
-		KB = 1024
-		MB = 1024 * KB
-		GB = 1024 * MB
-	)
-
-	if size < KB {
-		return fmt.Sprintf("%d B", size)
-	} else if size < MB {
-		return fmt.Sprintf("%.2f KB", float64(size)/KB)
-	} else if size < GB {
-		return fmt.Sprintf("%.2f MB", float64(size)/MB)
-	}
-	return fmt.Sprintf("%.2f GB", float64(size)/GB)
-}
-
 // formatDocSummary cleans and truncates document summaries for table display
 func formatDocSummary(summary string, maxLen int) string {
 	cleaned := strings.TrimSpace(summary)
@@ -72,6 +54,15 @@ type SelectedDocumentInfo struct {
 	FileType        string // File type (pdf, docx, etc.)
 }
 
+// QuestionOriginInfo is the knowledge source a suggested question was
+// generated from, when the user picked that question. Rendered into
+// runtime_context so the model searches the source before answering.
+type QuestionOriginInfo struct {
+	KnowledgeBaseID   string
+	KnowledgeBaseName string
+	Document          *SelectedDocumentInfo // nil when only the base is known
+}
+
 // PinnedMCPServiceInfo describes an MCP service explicitly @mentioned for this turn.
 type PinnedMCPServiceInfo struct {
 	Discoverable bool // Available through the scoped MCP directory.
@@ -101,6 +92,11 @@ type KnowledgeBaseInfo struct {
 	// significantly more reliable than running probing searches.
 	Capabilities []string
 	RecentDocs   []RecentDocInfo // Recently added documents (up to 10)
+	// Profile is the generated description (gist, merged topics, typical
+	// questions) derived from document profiles. It complements the manual
+	// Description: that one says what the KB is for, this one says what is
+	// actually in it. nil when never generated.
+	Profile *types.KnowledgeBaseProfile
 }
 
 // PlaceholderDefinition defines a placeholder exposed to UI/configuration
@@ -149,6 +145,7 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 		if kb.Description != "" {
 			fmt.Fprintf(&b, "<description>%s</description>\n", escapeXMLAttr(formatDocSummary(kb.Description, 240)))
 		}
+		writeKnowledgeBaseProfile(&b, kb.Profile)
 		if len(kb.RecentDocs) > 0 {
 			b.WriteString("<recent_documents>\n")
 			for j, doc := range kb.RecentDocs {
@@ -175,6 +172,35 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	}
 	b.WriteString("</knowledge_bases>")
 	return b.String()
+}
+
+// writeKnowledgeBaseProfile renders the generated description so the model
+// can route a question to the right bound knowledge base without probing it.
+// Every value is untrusted model output stored in the database, so it is
+// escaped and capped like the manual description.
+func writeKnowledgeBaseProfile(b *strings.Builder, profile *types.KnowledgeBaseProfile) {
+	if profile == nil || !profile.HasText() {
+		return
+	}
+	b.WriteString("<generated_profile>\n")
+	if gist := strings.TrimSpace(profile.Gist); gist != "" {
+		fmt.Fprintf(b, "<gist>%s</gist>\n", escapeXMLAttr(formatDocSummary(gist, 300)))
+	}
+	if len(profile.Topics) > 0 {
+		fmt.Fprintf(b, "<topics>%s</topics>\n",
+			escapeXMLAttr(formatDocSummary(strings.Join(profile.Topics, ", "), 300)))
+	}
+	if len(profile.TypicalQuestions) > 0 {
+		b.WriteString("<typical_questions>\n")
+		for i, q := range profile.TypicalQuestions {
+			if i >= types.KnowledgeBaseProfileMaxQuestions {
+				break
+			}
+			fmt.Fprintf(b, "<question>%s</question>\n", escapeXMLAttr(formatDocSummary(q, 160)))
+		}
+		b.WriteString("</typical_questions>\n")
+	}
+	b.WriteString("</generated_profile>\n")
 }
 
 // renderPromptPlaceholders renders placeholders in the prompt template.
@@ -265,7 +291,7 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool) string {
 	}
 	if !skillInstallMode && (has("shell_exec") || has("write_sandbox_file")) {
 		b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. " +
-			"/workspace/output is the only directory collected for download, " +
+			skills.ArtifactOutputDir() + " is the only directory collected for download, " +
 			"so it takes finished deliverables only; " +
 			"keep drafts and intermediate files in another directory under /workspace. " +
 			"Commands start from their specified working directory on every call. " +
@@ -307,6 +333,15 @@ func sandboxArtifactReferenceGuidance() string {
 	var builder strings.Builder
 	builder.WriteString("  - Include key generated deliverables in your final answer as ")
 	builder.WriteString("`![description](sandbox:<file name>)` using the exact file name and no directory path\n")
+	builder.WriteString("    - Copy the exact links supplied in the tool result's appended Output files list. ")
+	builder.WriteString("Each list covers that call's changes; earlier supplied links remain usable. ")
+	builder.WriteString("A path or filename in stdout/stderr (including ls output) is not a user-visible file link. ")
+	builder.WriteString("Never construct sandbox: links from it.\n")
+	builder.WriteString("    - Files outside the output directory, including /tmp/task/previews, " +
+		"are internal working files. ")
+	builder.WriteString("Rendering pages for your own layout checks does not publish them to the user. ")
+	builder.WriteString("If the user requests those previews, copy the requested files into the output directory ")
+	builder.WriteString("and use the output links returned by the tool.\n")
 	builder.WriteString("    - Images render inline; charts, tables, and documents ")
 	builder.WriteString("render as a card the user clicks to preview\n")
 	builder.WriteString("    - Never reference a sandbox path (`/workspace/output/...`) ")

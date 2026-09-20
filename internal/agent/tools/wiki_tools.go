@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -204,25 +205,6 @@ func scopeKnowledgeFilter(scope WikiScope) (map[string]bool, bool) {
 	return set, true
 }
 
-// extractSourceKnowledgeIDs parses SourceRefs ("uuid" or "uuid|title") and
-// returns the bare knowledge IDs.
-func extractSourceKnowledgeIDs(page *types.WikiPage) []string {
-	if page == nil || len(page.SourceRefs) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(page.SourceRefs))
-	for _, ref := range page.SourceRefs {
-		kid := ref
-		if pipeIdx := strings.Index(ref, "|"); pipeIdx > 0 {
-			kid = ref[:pipeIdx]
-		}
-		if kid != "" {
-			ids = append(ids, kid)
-		}
-	}
-	return ids
-}
-
 // isStructuralPage reports whether a page is the wiki-level index rather than
 // a content page tied to specific source documents. The index is never
 // filtered by knowledge_ids scope because it describes wiki topology.
@@ -270,7 +252,7 @@ func pageIntersectsKnowledgeIDs(page *types.WikiPage, allowed map[string]bool) b
 	if len(allowed) == 0 {
 		return true
 	}
-	for _, kid := range extractSourceKnowledgeIDs(page) {
+	for _, kid := range page.SourceKnowledgeIDs() {
 		if allowed[kid] {
 			return true
 		}
@@ -296,7 +278,7 @@ func pagePassesWikiScope(
 	if isStructuralPage(page) {
 		return false, nil
 	}
-	sourceKnowledgeIDs := extractSourceKnowledgeIDs(page)
+	sourceKnowledgeIDs := page.SourceKnowledgeIDs()
 	if len(sourceKnowledgeIDs) == 0 {
 		return false, nil
 	}
@@ -575,12 +557,9 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}
 
 		for _, ref := range page.SourceRefs {
-			// SourceRefs might be "knowledgeID" or "knowledgeID|Title"
-			kid := ref
-			title := ""
-			if pipeIdx := strings.Index(ref, "|"); pipeIdx > 0 {
-				kid = ref[:pipeIdx]
-				title = ref[pipeIdx+1:]
+			kid, title := types.ParseWikiSourceRef(ref)
+			if kid == "" {
+				continue
 			}
 			if title != "" {
 				resolved.sources = append(resolved.sources, fmt.Sprintf(`<source knowledge_id="%s">%s</source>`, kid, title))
@@ -771,34 +750,36 @@ func NewWikiSearchTool(
 	return &wikiSearchTool{
 		BaseTool: NewBaseTool(
 			ToolWikiSearch,
-			`Search wiki pages using PostgreSQL POSIX regular expressions (~* operator, case-insensitive).
-STRONGLY PREFER using regex to search for multiple concepts at once rather than simple plain text queries.
-Returns matching pages with titles, slugs, and summaries (each tagged with its short bN knowledge_base_id).
-Examples:
-- Alternation (RECOMMENDED): "stardust|skyvault" (matches either word)
-- Multiple terms (RECOMMENDED): "psionic.*engine" (matches both words in order)
-- Prefix matching: "^entity/.*" (finds all entities)
-- Plain text: "engine" (matches anywhere in title/content/slug/summary)
-IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
-Use this to find relevant wiki pages when you don't know the exact slug.`,
+			"Search the wiki pages of the knowledge bases in scope by title, slug, alias, summary and content. "+
+				"Returns page slugs with summaries; read a page with wiki_read_page.\n"+
+				"query is a case-insensitive POSIX regular expression (for example \"stardust|skyvault\" matches "+
+				"either term); text that is not a valid regular expression, such as \"C++\", is matched literally. "+
+				"Set regex=false to force a literal match. Pass knowledge_base_ids to restrict the search.",
 			json.RawMessage(`{
   "type": "object",
   "properties": {
-    "queries": {
+    "query": {
+      "type": "string",
+      "description": "Case-insensitive POSIX regular expression; invalid patterns are matched literally",
+      "minLength": 1
+    },
+    "regex": {
+      "type": "boolean",
+      "description": "false forces a literal match; true requires a valid regular expression (default: auto)"
+    },
+    "knowledge_base_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "List of regex search queries to run"
+      "description": "Optional bN knowledge-base handles to restrict the search"
     },
     "limit": {
       "type": "integer",
-      "description": "Max results to return per query (default 10)"
-    },
-    "knowledge_base_id": {
-      "type": "string",
-      "description": "Optional: restrict search to a single short bN knowledge base ID in scope."
+      "description": "Maximum pages to return per knowledge base (default 10, max 50)",
+      "minimum": 1,
+      "maximum": 50
     }
   },
-  "required": ["queries"]
+  "required": ["query"]
 }`),
 		),
 		wikiService:      wikiService,
@@ -811,41 +792,59 @@ Use this to find relevant wiki pages when you don't know the exact slug.`,
 
 func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
-		Query           any    `json:"query"`
-		Queries         any    `json:"queries"`
-		Limit           int    `json:"limit"`
-		KnowledgeBaseID string `json:"knowledge_base_id"`
+		Query            any      `json:"query"`
+		Queries          any      `json:"queries"` // legacy alias
+		Regex            *bool    `json:"regex"`
+		Limit            int      `json:"limit"`
+		KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+		KnowledgeBaseID  string   `json:"knowledge_base_id"` // legacy alias
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return &types.ToolResult{Success: false, Error: "Invalid parameters: " + err.Error()}, nil
 	}
 
 	var queriesToRun []string
-	queriesToRun = append(queriesToRun, parseStringOrArray(params.Queries)...)
 	queriesToRun = append(queriesToRun, parseStringOrArray(params.Query)...)
+	queriesToRun = append(queriesToRun, parseStringOrArray(params.Queries)...)
+	queriesToRun = dedupNonEmptyStrings(queriesToRun)
 
 	if len(queriesToRun) == 0 {
-		return &types.ToolResult{Success: false, Error: "Missing 'queries' parameter"}, nil
+		return &types.ToolResult{Success: false, Error: "Missing 'query' parameter"}, nil
 	}
 
 	if params.Limit <= 0 {
 		params.Limit = 10
 	}
+	if params.Limit > 50 {
+		params.Limit = 50
+	}
 
-	// Restrict scopes by knowledge_base_id arg if provided.
+	// Restrict scopes by knowledge_base_ids if provided.
+	requestedKBs := dedupNonEmptyStrings(append(append([]string{}, params.KnowledgeBaseIDs...), params.KnowledgeBaseID))
 	effectiveScopes := t.scopes
-	if params.KnowledgeBaseID != "" {
-		filtered := make([]WikiScope, 0, 1)
+	if len(requestedKBs) > 0 {
+		wanted := make(map[string]bool, len(requestedKBs))
+		for _, kbID := range requestedKBs {
+			wanted[kbID] = true
+		}
+		filtered := make([]WikiScope, 0, len(requestedKBs))
 		for _, sc := range t.scopes {
-			if sc.KnowledgeBaseID == params.KnowledgeBaseID {
+			if wanted[sc.KnowledgeBaseID] {
 				filtered = append(filtered, sc)
-				break
+				delete(wanted, sc.KnowledgeBaseID)
 			}
 		}
-		if len(filtered) == 0 {
+		if len(wanted) > 0 || len(filtered) == 0 {
+			missing := make([]string, 0, len(wanted))
+			for kbID := range wanted {
+				missing = append(missing, kbID)
+			}
+			sort.Strings(missing)
 			return &types.ToolResult{
 				Success: false,
-				Error:   "knowledge_base_id is not within the current wiki scope",
+				Error: fmt.Sprintf(
+					"knowledge base %s is not within the current wiki scope", strings.Join(missing, ", "),
+				),
 			}, nil
 		}
 		effectiveScopes = filtered
@@ -870,12 +869,16 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	for _, query := range queriesToRun {
 		var allHits []searchHit
 		filteredCount := 0
+		pattern, perr := wikiSearchPattern(query, params.Regex)
+		if perr != nil {
+			return &types.ToolResult{Success: false, Error: perr.Error()}, nil
+		}
 		for _, sc := range effectiveScopes {
 			kbID := sc.KnowledgeBaseID
 			if kbID == "" {
 				continue
 			}
-			pages, err := t.wikiService.SearchPages(ctx, kbID, query, params.Limit)
+			pages, err := t.wikiService.SearchPages(ctx, kbID, pattern, params.Limit)
 			if err != nil {
 				searchErrors = append(searchErrors, fmt.Sprintf("Wiki search %q failed in KB %s: %v", query, kbID, err))
 				continue
@@ -929,7 +932,7 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			t.seenSlugs[key] = true
 			t.mu.Unlock()
 
-			snippet := extractSnippet(p.Content, query)
+			snippet := extractSnippet(p.Content, pattern)
 			snippetTag := ""
 			if snippet != "" {
 				snippetTag = fmt.Sprintf("\n<match_snippet>%s</match_snippet>", snippet)
@@ -969,6 +972,25 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	}, nil
 }
 
+// wikiSearchPattern turns the query into the POSIX pattern the repository
+// runs with ~*. Without an explicit regex flag the query keeps its historical
+// meaning as a regular expression, and only text that does not compile (for
+// example "C++") is escaped and matched literally, so every query that worked
+// before still behaves the same. regex=false always escapes; regex=true
+// rejects an invalid pattern instead of silently changing its meaning.
+func wikiSearchPattern(query string, regex *bool) (string, error) {
+	if regex != nil && !*regex {
+		return regexp.QuoteMeta(query), nil
+	}
+	if _, err := regexp.Compile("(?i)" + query); err != nil {
+		if regex != nil && *regex {
+			return "", fmt.Errorf("invalid regular expression %q: %v", query, err)
+		}
+		return regexp.QuoteMeta(query), nil
+	}
+	return query, nil
+}
+
 // --- Helper ---
 
 func truncateForSummary(content string, maxLen int) string {
@@ -1003,36 +1025,6 @@ func parseStringOrArray(val any) []string {
 		return res
 	}
 	return nil
-}
-
-// resolveSourceRefs enriches plain knowledge UUIDs to "uuid|title" format.
-// Refs already in "uuid|title" format are left unchanged.
-func resolveSourceRefs(ctx context.Context, knowledgeService interfaces.KnowledgeService, refs []string) []string {
-	if len(refs) == 0 || knowledgeService == nil {
-		return refs
-	}
-	resolved := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		if strings.Contains(ref, "|") {
-			resolved = append(resolved, ref)
-			continue
-		}
-		kn, err := knowledgeService.GetKnowledgeByIDOnly(ctx, ref)
-		if err != nil || kn == nil {
-			resolved = append(resolved, ref)
-			continue
-		}
-		title := kn.Title
-		if title == "" {
-			title = kn.FileName
-		}
-		if title != "" {
-			resolved = append(resolved, ref+"|"+title)
-		} else {
-			resolved = append(resolved, ref)
-		}
-	}
-	return resolved
 }
 
 func extractSnippet(content string, query string) string {

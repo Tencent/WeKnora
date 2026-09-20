@@ -210,7 +210,13 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 		p := &types.KBCloneProgress{TaskID: access.TransferTaskID(ctx), SourceID: source.ID, TargetID: target.ID}
 		return s.cloneFAQKnowledgeBase(ctx, source, target, p, func(*types.KBCloneProgress, error, string) {})
 	}
-	return s.executeKnowledgeClone(ctx, source, target, nil)
+	if err := s.executeKnowledgeClone(ctx, source, target, nil); err != nil {
+		return err
+	}
+	// Derive the target's description from the cloned documents now rather
+	// than on the next upload.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, target, false)
+	return nil
 }
 
 // CloneChunk clone chunks from one knowledge to another
@@ -596,6 +602,12 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
 		logger.Errorf(ctx, "Failed to update KB clone progress to completed: %v", err)
 	}
+	// Derive the target's description from the cloned documents now instead
+	// of waiting for the next upload. dstKB is the loaded target (type and
+	// profile_config included); `target` above is only the reservation stub
+	// when the clone created the knowledge base, and the refresh helper
+	// would reject it.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, dstKB, false)
 
 	logger.Infof(ctx, "KB clone task completed: %s", payload.TaskID)
 	recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneCompleted,
@@ -1179,6 +1191,10 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	progress.Error = ""
 	_ = s.saveKnowledgeMoveProgress(ctx, progress)
 	record(types.AuditActionKnowledgeMoveCompleted, types.AuditOutcomeSuccess)
+	// A move is a delete on the source and an add on the target as far as
+	// the description aggregation is concerned.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, sourceKB, false)
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, targetKB, false)
 	return nil
 }
 

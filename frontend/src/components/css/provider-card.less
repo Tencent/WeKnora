@@ -1,0 +1,161 @@
+// 设置区「提供方卡片」（模型 / 向量库 / 网络搜索 / 存储后端 / 解析引擎 / 沙箱 / MCP / 技能）共用的视觉规范。
+// 页面保留自己的 BEM 前缀（.model-card__badge 等），把重复声明换成这里的 mixin。
+//
+//   @import (reference) '@/components/css/provider-card.less';
+//   .model-card { .provider-card(); &--add { .provider-card-add(); } }
+//   .model-card__badge { .provider-card-badge(); }
+//   .model-card--chat .model-card__badge { .provider-card-badge-color(#0052d9); }
+
+.provider-card() {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-lg);
+  background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+// 可点击（进入编辑）的卡片 hover / focus 反馈
+.provider-card-interactive() {
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--td-brand-color-3);
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+}
+
+// 虚线「新增」卡片
+.provider-card-add() {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 68px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--td-brand-color);
+    border-color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+  }
+}
+
+// 左侧徽标：默认 36px；MCP / 技能等紧凑卡片传 26px
+.provider-card-badge(@size: 36px, @radius: 9px) {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: @size;
+  height: @size;
+  border-radius: @radius;
+  margin-top: 1px;
+  font-size: var(--app-text-lg);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+
+  &--logo {
+    background: var(--td-bg-color-container);
+    box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+  }
+
+  &--mono::before {
+    content: '';
+    width: 22px;
+    height: 22px;
+    background-color: currentColor;
+    -webkit-mask-image: var(--logo-url);
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    mask-image: var(--logo-url);
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+  }
+}
+
+// 厂商品牌色：前景向文字主色靠拢（深色模式下自动变亮），底色为同色 12% 透明叠加
+.provider-card-badge-color(@c) {
+  color: color-mix(in srgb, @c 75%, var(--td-text-color-primary));
+  background: color-mix(in srgb, @c 12%, transparent);
+}
+
+.provider-card-badge-img() {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
+}
+
+.provider-card-body() {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-card-header() {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.provider-card-title() {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--app-text-base);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-card-subtitle() {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+}
+
+// 右上角「更多」：hover / 聚焦时显现
+.provider-card-more() {
+  flex-shrink: 0;
+  padding: 2px;
+  color: var(--td-text-color-placeholder);
+  opacity: 0;
+  transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+}

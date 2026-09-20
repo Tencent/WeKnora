@@ -43,7 +43,7 @@ func validToken(token string) bool {
 }
 
 // AuthorizeHTTP is extension-only, independent of browser cookies. Device
-// tokens stay in chrome.storage.local; only hashes are committed to the DB.
+// tokens stay in extension-origin storage; only hashes are committed to the DB.
 func (m *Manager) AuthorizeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if !m.Enabled() || m.store == nil {

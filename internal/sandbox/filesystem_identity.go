@@ -67,7 +67,22 @@ func rpcUsesCallerDeadline(path string) bool {
 	if strings.HasPrefix(path, "/process.Process/") {
 		return true
 	}
-	return isFilesystemContentRPC(path)
+	if isFilesystemContentRPC(path) {
+		return true
+	}
+	return isCubeSandboxSnapshotRPC(path)
+}
+
+// isCubeSandboxSnapshotRPC reports POST /sandboxes/{id}/snapshots. Cube pauses
+// the live MicroVM and copies its disk; that exceeds CubeHTTPTimeout (30s).
+func isCubeSandboxSnapshotRPC(path string) bool {
+	const prefix = "/sandboxes/"
+	const suffix = "/snapshots"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	return id != "" && !strings.Contains(id, "/")
 }
 
 func isFilesystemContentRPC(path string) bool {

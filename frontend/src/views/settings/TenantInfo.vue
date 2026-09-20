@@ -675,26 +675,14 @@ onMounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .tenant-info {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 32px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .loading-inline {
@@ -704,7 +692,7 @@ onMounted(() => {
   padding: 40px 0;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .error-inline {
@@ -723,15 +711,7 @@ onMounted(() => {
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
+  .setting-row();
 }
 
 .setting-info {
@@ -745,7 +725,7 @@ onMounted(() => {
   padding-right: 24px;
 
   label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 500;
     color: var(--td-text-color-primary);
     display: block;
@@ -753,7 +733,7 @@ onMounted(() => {
   }
 
   .desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -761,17 +741,12 @@ onMounted(() => {
 }
 
 .setting-control {
-  /* 反过来：内容列吃掉剩余空间，并允许收缩 + 内部换行，长字符串不会再撑爆行。
-     去掉原先的 min-width:280px 硬约束（短内容也不需要那么宽的展示槽）。 */
+  .setting-control();
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
 
   .info-value {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     text-align: right;
     /* anywhere 比 break-word 激进：连无空格的长串（"WorkspaceDefault..." 这种）
@@ -783,6 +758,8 @@ onMounted(() => {
   .edit-btn {
     flex-shrink: 0;
   }
+  /* 反过来：内容列吃掉剩余空间，并允许收缩 + 内部换行，长字符串不会再撑爆行。
+     去掉原先的 min-width:280px 硬约束（短内容也不需要那么宽的展示槽）。 */
 }
 
 .inline-edit {
@@ -845,7 +822,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: 20px;
   padding: 16px 18px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-secondarycontainer);
   box-sizing: border-box;
@@ -859,7 +836,7 @@ onMounted(() => {
 }
 
 .leave-space-panel-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -868,7 +845,7 @@ onMounted(() => {
 
 .leave-space-panel-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
@@ -901,7 +878,7 @@ onMounted(() => {
   //   gap: 12px;
 
   .usage-text {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     min-width: 50px;

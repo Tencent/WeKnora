@@ -228,18 +228,18 @@ func (m *MessageAttachments) Scan(value interface{}) error {
 // behalf and that WeKnora has persisted to its file service so the user can
 // download them after the sandbox is reaped.
 //
-// URL is the provider-scoped storage path (e.g. "local://tenant/..."), never
-// exposed directly to the client. SourcePath + ModTime form the sandbox-side
-// identity used by ArtifactCollector to de-duplicate files across multi-turn
-// runs (see docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
+// SourcePath + ModTime is the cheap identity for an unchanged sandbox file.
+// When mtime moves, ArtifactCollector compares content hashes so a git
+// checkout cannot duplicate a blob and a same-size rewrite still attaches.
 type MessageArtifact struct {
-	URL        string    `json:"url"`         // Storage URL (provider://path); persisted, not sent to client
-	FileName   string    `json:"file_name"`   // Original filename inside the sandbox
-	FileType   string    `json:"file_type"`   // File extension (e.g., ".pptx", ".pdf")
-	FileSize   int64     `json:"file_size"`   // File size in bytes
-	SourcePath string    `json:"source_path"` // Absolute path inside the sandbox (used for diff)
-	ModTime    time.Time `json:"mod_time"`    // Sandbox-side modification time (used for diff)
-	CreatedAt  time.Time `json:"created_at"`  // When WeKnora persisted the blob
+	URL         string    `json:"url"`                    // Storage URL (provider://path); persisted, not sent to client
+	FileName    string    `json:"file_name"`              // Original filename inside the sandbox
+	FileType    string    `json:"file_type"`              // File extension (e.g., ".pptx", ".pdf")
+	FileSize    int64     `json:"file_size"`              // File size in bytes
+	ContentHash string    `json:"content_hash,omitempty"` // SHA-256 of the persisted bytes
+	SourcePath  string    `json:"source_path"`            // Absolute path inside the sandbox (used for diff)
+	ModTime     time.Time `json:"mod_time"`               // Sandbox-side modification time (used for diff)
+	CreatedAt   time.Time `json:"created_at"`             // When WeKnora persisted the blob
 }
 
 // MessageArtifacts is a slice of MessageArtifact for database storage.
@@ -270,6 +270,37 @@ func (m *MessageArtifacts) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, m)
+}
+
+// WithRestoredMtime stamps sandbox mtime onto the artifact at sourcePath
+// whose ContentHash already matches. Used after a fork checkout so later
+// collects can skip by path+mtime. Other versions at the same path —
+// including empty-hash legacy rows — are left alone. The returned slice is a
+// copy.
+func (m MessageArtifacts) WithRestoredMtime(sourcePath string, mod time.Time, hash string) (MessageArtifacts, bool) {
+	if len(m) == 0 || sourcePath == "" || hash == "" {
+		return m, false
+	}
+	out := make(MessageArtifacts, len(m))
+	copy(out, m)
+	changed := false
+	for i := range out {
+		if out[i].SourcePath != sourcePath {
+			continue
+		}
+		// Empty hashes are not a match: a restore must not stamp every
+		// historical version at this path. Only the row whose content
+		// already hashed to `hash` gets the new mtime.
+		if out[i].ContentHash != hash {
+			continue
+		}
+		if out[i].ModTime.Equal(mod) {
+			continue
+		}
+		out[i].ModTime = mod
+		changed = true
+	}
+	return out, changed
 }
 
 // MentionedItems is a slice of MentionedItem for database storage
@@ -332,7 +363,11 @@ type Message struct {
 	// Skill-generated files produced during this assistant turn (assistant messages only).
 	// Populated by ArtifactCollector after the sandbox finishes, referenced by the
 	// artifact download endpoint. Empty for user messages and turns without skills.
-	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"type:jsonb;column:artifacts"`
+	//
+	// Stored in the message_artifacts table, not on the message row: the message
+	// repository loads it with every message it returns and writes it whenever it
+	// is non-nil on create or update. A nil slice leaves the stored rows alone.
+	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"-"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// Whether this response is a fallback (no knowledge base match found)
@@ -369,6 +404,17 @@ type Message struct {
 	// spot. Persisted rather than only streamed so reopening a conversation
 	// still explains what the answer saw.
 	UsedMemories UsedMemories `json:"used_memories,omitempty" gorm:"type:jsonb;column:used_memories"`
+	// SandboxCheckpoint is the git commit this assistant turn produced in the
+	// session sandbox's /workspace. Nil for user messages, for turns that ran
+	// without a sandbox, and for turns whose commit failed (best-effort — a
+	// failed checkpoint must never block the reply). A message without a
+	// checkpoint cannot serve as a fork point with sandbox state.
+	SandboxCheckpoint *SandboxCheckpoint `json:"sandbox_checkpoint,omitempty" gorm:"type:jsonb"`
+	// ContextCheckpoint is the agent compaction summary covering this turn
+	// and every turn before it (see ContextCheckpoint). Assistant messages
+	// only; nil unless a later turn's compaction ended exactly here. Internal
+	// to history loading, so it stays out of API responses.
+	ContextCheckpoint *ContextCheckpoint `json:"-" gorm:"type:jsonb;column:context_checkpoint"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp

@@ -114,6 +114,9 @@ type ConversationConfig struct {
 	ExtractRelationshipsPromptID string `yaml:"extract_relationships_prompt_id"   json:"extract_relationships_prompt_id"`
 	GenerateQuestionsPromptID    string `yaml:"generate_questions_prompt_id"      json:"generate_questions_prompt_id"`
 
+	// GenerateKBDescriptionPromptID selects the knowledge-base description template.
+	GenerateKBDescriptionPromptID string `yaml:"generate_kb_description_prompt_id" json:"generate_kb_description_prompt_id"` //nolint:lll // one-line struct tag
+
 	// Resolved prompt text fields (populated by backfill, not from YAML)
 	FallbackPrompt             string `yaml:"-" json:"fallback_prompt"`
 	RewritePromptSystem        string `yaml:"-" json:"rewrite_prompt_system"`
@@ -123,6 +126,9 @@ type ConversationConfig struct {
 	ExtractEntitiesPrompt      string `yaml:"-" json:"extract_entities_prompt"`
 	ExtractRelationshipsPrompt string `yaml:"-" json:"extract_relationships_prompt"`
 	GenerateQuestionsPrompt    string `yaml:"-" json:"generate_questions_prompt"`
+
+	// GenerateKBDescriptionPrompt is the resolved knowledge-base description template text.
+	GenerateKBDescriptionPrompt string `yaml:"-" json:"generate_kb_description_prompt"`
 
 	// IntentSystemPrompts maps intent values (e.g. "greeting", "chitchat") to
 	// system prompt text. Populated by backfill from IntentPrompts templates.
@@ -361,10 +367,12 @@ type PromptTemplatesConfig struct {
 
 	GenerateSessionTitle []PromptTemplate `yaml:"generate_session_title" json:"generate_session_title,omitempty"`
 	GenerateSummary      []PromptTemplate `yaml:"generate_summary"       json:"generate_summary,omitempty"`
-	KeywordsExtraction   []PromptTemplate `yaml:"keywords_extraction"    json:"keywords_extraction,omitempty"`
-	AgentSystemPrompt    []PromptTemplate `yaml:"agent_system_prompt"    json:"agent_system_prompt,omitempty"`
-	GraphExtraction      []PromptTemplate `yaml:"graph_extraction"       json:"graph_extraction,omitempty"`
-	GenerateQuestions    []PromptTemplate `yaml:"generate_questions"     json:"generate_questions,omitempty"`
+	// GenerateKBDescription writes the knowledge-base gist from the document profile aggregate.
+	GenerateKBDescription []PromptTemplate `yaml:"generate_kb_description" json:"generate_kb_description,omitempty"` //nolint:lll // one-line struct tag
+	KeywordsExtraction    []PromptTemplate `yaml:"keywords_extraction"    json:"keywords_extraction,omitempty"`
+	AgentSystemPrompt     []PromptTemplate `yaml:"agent_system_prompt"    json:"agent_system_prompt,omitempty"`
+	GraphExtraction       []PromptTemplate `yaml:"graph_extraction"       json:"graph_extraction,omitempty"`
+	GenerateQuestions     []PromptTemplate `yaml:"generate_questions"     json:"generate_questions,omitempty"`
 	// IntentPrompts holds per-intent system prompt overrides (template ID = intent value).
 	IntentPrompts []PromptTemplate `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
 }
@@ -980,6 +988,13 @@ func backfillConversationDefaults(cfg *Config) {
 			fmt.Printf("Warning: generate_summary_prompt_id %q not found\n", conv.GenerateSummaryPromptID)
 		}
 	}
+	if conv.GenerateKBDescriptionPromptID != "" {
+		if t := FindTemplateByID(pt, conv.GenerateKBDescriptionPromptID); t != nil {
+			conv.GenerateKBDescriptionPrompt = t.Content
+		} else {
+			fmt.Printf("Warning: generate_kb_description_prompt_id %q not found\n", conv.GenerateKBDescriptionPromptID)
+		}
+	}
 	if conv.ExtractEntitiesPromptID != "" {
 		if t := FindTemplateByID(pt, conv.ExtractEntitiesPromptID); t != nil {
 			conv.ExtractEntitiesPrompt = t.Content
@@ -1044,6 +1059,7 @@ func FindTemplateByID(pt *PromptTemplatesConfig, id string) *PromptTemplate {
 		pt.Fallback,
 		pt.GenerateSessionTitle,
 		pt.GenerateSummary,
+		pt.GenerateKBDescription,
 		pt.KeywordsExtraction,
 		pt.AgentSystemPrompt,
 		pt.GraphExtraction,
@@ -1089,17 +1105,18 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 
 	// 定义模板文件映射
 	templateFiles := map[string]*[]PromptTemplate{
-		"system_prompt.yaml":          &config.SystemPrompt,
-		"context_template.yaml":       &config.ContextTemplate,
-		"rewrite.yaml":                &config.Rewrite,
-		"fallback.yaml":               &config.Fallback,
-		"generate_session_title.yaml": &config.GenerateSessionTitle,
-		"generate_summary.yaml":       &config.GenerateSummary,
-		"keywords_extraction.yaml":    &config.KeywordsExtraction,
-		"agent_system_prompt.yaml":    &config.AgentSystemPrompt,
-		"graph_extraction.yaml":       &config.GraphExtraction,
-		"generate_questions.yaml":     &config.GenerateQuestions,
-		"intent_prompts.yaml":         &config.IntentPrompts,
+		"system_prompt.yaml":           &config.SystemPrompt,
+		"context_template.yaml":        &config.ContextTemplate,
+		"rewrite.yaml":                 &config.Rewrite,
+		"fallback.yaml":                &config.Fallback,
+		"generate_session_title.yaml":  &config.GenerateSessionTitle,
+		"generate_summary.yaml":        &config.GenerateSummary,
+		"generate_kb_description.yaml": &config.GenerateKBDescription,
+		"keywords_extraction.yaml":     &config.KeywordsExtraction,
+		"agent_system_prompt.yaml":     &config.AgentSystemPrompt,
+		"graph_extraction.yaml":        &config.GraphExtraction,
+		"generate_questions.yaml":      &config.GenerateQuestions,
+		"intent_prompts.yaml":          &config.IntentPrompts,
 	}
 
 	// 加载每个模板文件

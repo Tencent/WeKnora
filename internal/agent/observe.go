@@ -101,13 +101,19 @@ func (e *AgentEngine) runCompaction(
 		logger.Warnf(ctx, "[Agent][Round-%d] Compaction freed too little (%d → %d tokens); "+
 			"not attempting again at this size", round, result.TokensBefore, result.TokensAfter)
 		e.compactionExhaustedAt = len(messages)
+		// This context keeps its messages, but the stored history was still
+		// summarized, and that summary is as good a checkpoint as any. The
+		// usual case is a large live turn next to a short stored history:
+		// discarding it would have the next turn summarize the same history
+		// again.
+		e.saveContextCheckpoint(ctx, result.Checkpoint, round)
 		return messages, false
 	}
 
 	logger.Infof(ctx, "[Agent][Round-%d] Compacted (%s): %d → %d tokens, %d → %d messages "+
-		"(split_turn=%v, degraded=%v)",
+		"(split_turn=%v, degraded=%v, omitted=%d)",
 		round, result.Reason, result.TokensBefore, result.TokensAfter,
-		result.MessagesBefore, result.MessagesAfter, result.SplitTurn, result.Degraded)
+		result.MessagesBefore, result.MessagesAfter, result.SplitTurn, result.Degraded, result.Omitted)
 	// Where the surviving tokens went. If the retained tail is far larger than
 	// keep_recent, the cut point could not reach past one oversized message.
 	logger.Debugf(ctx, "[Agent][Round-%d][ctx] post-compaction: summary=%d tail=%d "+
@@ -124,6 +130,8 @@ func (e *AgentEngine) runCompaction(
 		"degraded":      result.Degraded,
 	})
 	e.emitContextCompacted(ctx, result, round)
+	e.saveContextCheckpoint(ctx, result.Checkpoint, round)
+	e.contextRewrites++
 
 	// The usage baseline described the pre-compaction context; keeping it
 	// would have the next round estimate against history that no longer
@@ -192,6 +200,7 @@ func (e *AgentEngine) trimToolResults(
 		return messages, false
 	}
 	logger.Infof(ctx, "[Agent][Round-%d] Trimmed tool results to the token budget", round)
+	e.contextRewrites++
 	return trimmed, true
 }
 
@@ -522,6 +531,7 @@ func buildRuntimeContextBlock(
 	sessionID string,
 	kbs []*KnowledgeBaseInfo,
 	docs []*SelectedDocumentInfo,
+	origin *QuestionOriginInfo,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
@@ -564,8 +574,38 @@ func buildRuntimeContextBlock(
 		sb.WriteString("  </pinned_documents>\n")
 	}
 
+	writeQuestionOrigin(&sb, origin)
+
 	sb.WriteString("</runtime_context>")
 	return sb.String()
+}
+
+// writeQuestionOrigin tells the model which source a picked suggested
+// question came from. Such a question is phrased from one document's
+// content, so it can read like general knowledge ("why be careful comparing
+// graphs?") while meaning something specific to that document; without the
+// hint the model may answer from memory without searching at all.
+func writeQuestionOrigin(sb *strings.Builder, origin *QuestionOriginInfo) {
+	if origin == nil || origin.KnowledgeBaseID == "" {
+		return
+	}
+	fmt.Fprintf(sb, "  <question_origin knowledge_base_id=\"%s\"", escapeXMLAttr(origin.KnowledgeBaseID))
+	if origin.KnowledgeBaseName != "" {
+		fmt.Fprintf(sb, " name=\"%s\"", escapeXMLAttr(origin.KnowledgeBaseName))
+	}
+	sb.WriteString(">\n")
+	if d := origin.Document; d != nil && d.KnowledgeID != "" {
+		title := d.Title
+		if title == "" {
+			title = d.FileName
+		}
+		fmt.Fprintf(sb, "    <document knowledge_id=\"%s\" title=\"%s\" />\n",
+			escapeXMLAttr(d.KnowledgeID), escapeXMLAttr(title))
+	}
+	sb.WriteString("    <note>The user picked this question from suggestions generated from this source. " +
+		"Search it before answering: the question refers to that content even when it reads like " +
+		"general knowledge.</note>\n")
+	sb.WriteString("  </question_origin>\n")
 }
 
 // buildMustUseBlock emits a short per-turn hint when the user @mentioned MCP/Skill.
@@ -690,7 +730,7 @@ func commonStringPrefix(a, b string) string {
 // not written to rendered_content / history.
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
-	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin)
 	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
@@ -730,6 +770,12 @@ func (e *AgentEngine) registerRuntimeReferences() {
 		}
 		e.modelContext.RegisterDocument(doc.KnowledgeID)
 		e.modelContext.RegisterKnowledgeBase(doc.KnowledgeBaseID)
+	}
+	if origin := e.questionOrigin; origin != nil {
+		e.modelContext.RegisterKnowledgeBase(origin.KnowledgeBaseID)
+		if origin.Document != nil {
+			e.modelContext.RegisterDocument(origin.Document.KnowledgeID)
+		}
 	}
 }
 
@@ -856,14 +902,18 @@ func countTotalToolCalls(steps []types.AgentStep) int {
 // may become stale across turns (KB can be switched, updated, or deleted).
 // Historical results from these tools are redacted to force fresh retrieval.
 var kbToolNames = map[string]bool{
-	agenttools.ToolKnowledgeSearch:     true,
-	agenttools.ToolGrepChunks:          true,
-	agenttools.ToolListKnowledgeChunks: true,
+	agenttools.ToolSearchKnowledge:     true,
+	agenttools.ToolReadDocument:        true,
+	agenttools.ToolListDocuments:       true,
 	agenttools.ToolQueryKnowledgeGraph: true,
-	agenttools.ToolGetDocumentInfo:     true,
 	agenttools.ToolWikiSearch:          true,
 	agenttools.ToolWikiReadPage:        true,
-	agenttools.ToolWikiReadSourceDoc:   true,
+	// Retired names still appear in stored histories.
+	agenttools.LegacyToolKnowledgeSearch:     true,
+	agenttools.LegacyToolGrepChunks:          true,
+	agenttools.LegacyToolListKnowledgeChunks: true,
+	agenttools.LegacyToolGetDocumentInfo:     true,
+	agenttools.LegacyToolWikiReadSourceDoc:   true,
 }
 
 // redactHistoryKBResults replaces full KB tool results in historical context
@@ -878,12 +928,26 @@ func redactHistoryKBResults(llmContext []chat.Message) []chat.Message {
 				Content:    "[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]",
 				ToolCallID: msg.ToolCallID,
 				Name:       msg.Name,
+				TurnID:     msg.TurnID,
 			})
 		} else {
 			redacted = append(redacted, msg)
 		}
 	}
 	return redacted
+}
+
+// HistoryAsSent is stored history as the engine sends it. Unless the agent
+// retains retrieval history, KB and Wiki tool results from earlier turns are
+// redacted, so the model does not reuse retrieval data the knowledge base may
+// have outgrown. The history loader prices turns with it too, so its token
+// budget is spent on what reaches the model, not on a wiki page that goes out
+// as one line.
+func HistoryAsSent(history []chat.Message, retainRetrievalHistory bool) []chat.Message {
+	if retainRetrievalHistory {
+		return history
+	}
+	return redactHistoryKBResults(history)
 }
 
 // buildMessagesWithLLMContext builds the message array with LLM context
@@ -897,14 +961,10 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 	}
 
 	if len(llmContext) > 0 {
-		var sanitized []chat.Message
+		sanitized := HistoryAsSent(llmContext, e.config.RetainRetrievalHistory)
 		if e.config.RetainRetrievalHistory {
-			sanitized = llmContext
 			logger.Infof(context.Background(), "Retaining full retrieval history in context (RetainRetrievalHistory=true)")
 		} else {
-			// Redact KB tool results from previous turns to prevent the LLM
-			// from reusing stale retrieval data when the KB has been modified.
-			sanitized = redactHistoryKBResults(llmContext)
 			logger.Infof(context.Background(), "Added %d history messages to context (KB tool results redacted)", len(llmContext))
 		}
 

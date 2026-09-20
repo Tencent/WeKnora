@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS task_dead_letters (
 
 const taskQueueKnowledgeBaseTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledge_bases (
+    profile_config TEXT,
+    generated_profile TEXT,
     id         VARCHAR(64) PRIMARY KEY,
     tenant_id  INTEGER NOT NULL,
     deleted_at DATETIME
@@ -61,6 +63,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 
 const taskQueueKnowledgeTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledges (
+    profile TEXT,
     id                     VARCHAR(64) PRIMARY KEY,
     tenant_id              INTEGER NOT NULL,
     knowledge_base_id      VARCHAR(64) NOT NULL,
@@ -348,6 +351,8 @@ func TestTaskPendingOps_DeleteByScope_RejectsMissingScope(t *testing.T) {
 func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 	db := setupTaskQueueTestDB(t)
 	require.NoError(t, db.Exec(`CREATE TABLE knowledge_bases (
+    profile_config TEXT,
+    generated_profile TEXT,
 		id VARCHAR(64) PRIMARY KEY,
 		tenant_id INTEGER NOT NULL,
 		deleted_at DATETIME

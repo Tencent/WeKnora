@@ -75,11 +75,54 @@
 - 新增 11 项行为测试，包含真实面板 setup 的配置切换、卸载失败展示、相同 Skill ID 重试、异步请求迟到和卸载清理；替换原有一项订阅源码正则断言。
 - `scripts/verify_frontend_pr.sh` 通过：927 项前端测试、类型检查和生产构建。面板 template/style 与本批基线逐字节一致；未做浏览器视觉验收，未修改或测试后端。
 
+## 第四批已实施：聊天引用浮层
+
+基于第三批合入并同步后的 `42e616398`，`useChatCitationPopover` 与 `useEmbedCitationPopover` 改为复用 `useCitationPopover`。计入新增共享实现后，生产源码净减少 174 行。
+
+- 统一浮层状态、定位、悬停延迟、关闭计时、引用抽屉和事件绑定；两个入口保留 API 选择、缓存作用域和错误展示策略。独立嵌入入口即使凭证为空，也继续只调用嵌入接口。
+- 保留主聊天的会话缓存、嵌入的 channel/token 缓存隔离、主聊天滚动/缩放关闭逻辑、嵌入 Wiki 点击拦截，以及两种入口原有的悬停引用 ID 解析差异。
+- 绑定对象单独记录，节点替换时移除旧节点监听；根节点、作用域或浮层目标变化后，迟到请求不会覆盖当前内容或写回缓存。卸载时清理监听和计时器。
+- 嵌入消息组件直接使用共享关闭计时器，修复触发区与浮层之间无法取消彼此关闭任务的问题；相同节点的流式内容更新不会重置浮层。
+- 新增 15 项真实 composable 行为测试，覆盖两个入口、接口路由、缓存、引用抽屉、请求竞争、计时和 Vue 挂载/卸载生命周期。
+- `scripts/verify_frontend_pr.sh` 通过：948 项测试通过，1 项原有浏览器场景测试跳过，类型检查和生产构建通过。嵌入消息 template/style 与本批基线逐字节一致；未做浏览器视觉验收，未修改或测试后端。
+
+## 第五批已实施：Go 未引用私有函数
+
+基于第四批合入后的 `d645334d0`，逐包核实原有 16 个候选，全部确认无调用；同时删除仅被候选使用的 `collectTableAliases` 与 `escapeDoubleQuotes`。共移除 18 个私有函数和 3 个失效 import，生产 Go 源码净减少 235 行。
+
+- 使用 Go AST 检查候选所属 12 个包目录中的 894 个 Go 文件，包括测试、带构建标签和平台后缀的源码；删除集合以外没有对应标识符引用。全仓搜索同时检查文档、脚本和特殊链接引用。
+- 对修改的生产 Go 文件逐函数比较：453 个保留函数的签名与函数体完全一致。Qdrant 的 `tokenizeQuery`、Agent 工具包的 `formatFileSize`、JSON 解析包的 `formatValue` 等同名活跃实现继续保留。
+- 更新分块配置相关注释和开发文档，指向仍在使用的 `buildSplitterConfigFromChunking` / `NormalizeSplitterConfig`；迁移历史注释保留旧名称。
+- 13 个受影响包执行 `go test -count=1`：12 个包通过，微信适配包无测试文件但编译通过；3,529 项顶层测试通过、1 项原有测试跳过，计入子测试为 5,274 项通过。跳过项为需要可替换连接探测或真实后端的向量存储创建测试。
+- `integration,e2b_integration,docker_integration` 标签下的 sandbox/tools 测试代码编译通过，未执行需要外部服务的集成测试。未修改前端，未运行前端或浏览器检查。
+- 本批只删除无调用代码，复用现有包测试和编译检查，没有添加仅断言函数不存在的测试。
+- 推送检查暴露新合入的 fork 测试未隔离 Git hook 环境：继承的 `GIT_DIR` 等变量使临时仓库操作指向当前仓库。测试辅助函数现清除继承的 `GIT_*` 变量；真实仓库测试主动注入指向临时路径的仓库变量，验证旧实现失败、修复后通过。该测试修复单独提交，不改变生产逻辑。
+
+## 第六批已实施：外部来源文件名清理
+
+基于第五批合入后的 `10973ed32`，IMA、语雀、RSS 复用 `datasource.SanitizeFileName`，统一无效标点替换、空标题回退和 200 字节 UTF-8 边界截断。计入新增共享实现后，生产 Go 源码净减少 49 行。
+
+- IMA 的媒体与笔记路径、语雀文档直接调用共享函数；RSS 仅保留换行/制表符转空格和首尾空白清理，再调用共享函数。
+- 保留原有扩展名拼接、源标题、空白、控制字符和无效 UTF-8 输入处理行为。飞书的扩展名保留、钉钉的控制字符/尾部标点清理、Confluence 的按字符截断规则不同，本批未合并。
+- 将两份旧 helper 测试收敛到共享函数测试，补充 16 个边界用例；在实际连接器读取/组装路径新增 15 个用例，覆盖 IMA 两类内容、语雀和 RSS 的最终文件名。
+- 用重构前的三个实现对 30,000 组确定性生成输入执行差异校验，结果一致；输入包含中文、emoji、空白、非法字节和截断边界。临时对比代码未留在仓库，避免长期维护旧实现副本。
+- 4 个受影响包测试通过：104 项顶层测试，包含既有同步、游标和错误处理测试。未修改前端，未运行浏览器检查或真实外部来源服务测试。
+
+## 第七批已实施：知识库标签筛选与遗留样式
+
+基于第六批合入后的 `820a14daf`，文档页与 FAQ 页复用 `KnowledgeTagFilter`，统一筛选浮层、多选、清空、搜索和管理入口。计入新增组件后，生产前端源码净减少 1,061 行。
+
+- 页面继续负责标签 API、分页、搜索防抖、持久化选择和列表刷新；共享组件只负责展示与交互，保留文档数量/FAQ 分块数量、清空占位文案和管理权限差异。
+- 删除两份无效的已选标签补齐逻辑：缺失项原本仍从同一个标签列表生成的映射中查找，因此不可能补齐；未加载的选中 ID 仍保留在选择状态中。
+- 删除 `KnowledgeBase.vue` 中 682 行失效 scoped 样式，包括已移入子组件的卡片菜单、标签、悬浮详情和旧上传区域样式。保留仍在当前模板使用的骨架卡片、FAQ 容器和响应式布局。
+- 对迁移前后编译后的 CSS 做临时声明对比，检查 2,196 项声明，确认保留的父组件规则与两种筛选界面的原有属性值一致；这不替代浏览器视觉验收。
+- 新增 9 项真实 Vue 组件行为测试，覆盖两种计数、多选/清空、搜索、加载/空态、分页、管理权限及父级选择更新。
+- `scripts/verify_frontend_pr.sh` 通过：957 项测试通过，1 项原有测试跳过，类型检查与生产构建通过。未做浏览器视觉验收；未修改后端。
+
 ## 后续优先级
 
 | 优先级 | 证据 | 建议边界 | 验证重点 |
 | --- | --- | --- | --- |
-| P1 | `useChatCitationPopover.ts` 与 `useEmbedCitationPopover.ts` 重复浮层状态、定位、计时和事件绑定 | 共享交互状态；通过参数提供内容加载、缓存作用域和点击行为 | 普通/嵌入鉴权、缓存隔离、根节点替换、悬停竞争与卸载 |
 | P2 | `AgentEditorModal.vue` 6,756 行，其中 script 3,023 行；近期变更 9 次 | 按提示词编辑、知识库选择、工具配置分离状态和表单序列化责任 | 编辑回填、模式切换、保存 payload 保持兼容 |
 | P2 | `WikiBrowser.vue` 6,592 行，其中 script 4,086 行；`FAQEntryManager.vue` 5,650 行，其中 style 2,780 行 | 分开文档导航/编辑状态、批量动作与可复用展示区域 | 页面切换后的异步结果、选中项、保存与批量操作 |
 | P2 | `knowledge_process.go` 4,091 行；`processChunks` 470 行、`ProcessDocument` 441 行 | 先划分分块入库、摘要、问题生成、重解析阶段的输入与输出，再抽函数 | 任务归属、取消、失败回写、重试与索引状态 |
@@ -90,24 +133,24 @@
 
 ### 后端重复的具体判断
 
-- Qdrant 与 Weaviate 的 `tokenizeQuery` 函数体相同，但只有 Qdrant 的关键字检索调用它；Weaviate 使用 `WithQuery(params.Query)`。后续应验证并删除 Weaviate 的失效函数，而非为了它增加共享分词层。
-- IMA、语雀的 `sanitizeFileName` 函数体相同，可以共享；RSS 的近似实现另外处理首尾空白和换行，合并时必须保留这些差异。
+- Qdrant 与 Weaviate 的 `tokenizeQuery` 函数体相同，但只有 Qdrant 的关键字检索调用它；Weaviate 使用 `WithQuery(params.Query)`。第五批已删除 Weaviate 的失效函数，保留 Qdrant 实现。
+- 第六批已合并 IMA、语雀、RSS 的文件名标点替换和 UTF-8 截断逻辑；RSS 的空白预处理保留在连接器内。飞书、钉钉、Confluence 的其他规则继续独立维护。
 - Milvus/Qdrant/Weaviate 的结果映射体相似，但接收不同后端类型。当前各约 17 行，为此引入通用接口或泛型转换层未必减少维护成本。
 - 终端和桌面 WebSocket ticket handler 重复检查会话、用户、租户和 token，但签发方式不同。后续可共享前置身份校验，保留 ticket 和连接生命周期各自的契约。
 - 资源权限已经有 `internal/application/access`；继续沿已有授权边界收敛，避免新建与其并行的权限工具层。
 
-### 未引用 Go 私有自由函数候选
+### 第五批已核实并删除的 Go 私有自由函数
 
-扫描发现 16 个，第一批暂未改动后端。后续逐包确认调用、构建入口和测试后处理：
+初次扫描的 16 个候选和 2 个仅被候选调用的辅助函数已清理：
 
 | 文件（相对 `internal`） | 函数 |
 | --- | --- |
 | `application/repository/retriever/weaviate/repository.go` | `tokenizeQuery` |
 | `im/wechat/crypto.go` | `encryptAES128ECB` |
-| `application/repository/retriever/milvus/filter.go` | `formatValue` |
+| `application/repository/retriever/milvus/filter.go` | `formatValue`、`escapeDoubleQuotes` |
 | `agent/tools/todo_write.go` | `getStringArrayField`、`getStringField` |
 | `agent/prompts.go` | `formatFileSize` |
-| `utils/inject.go` | `extractTableAliasMap` |
+| `utils/inject.go` | `extractTableAliasMap`、`collectTableAliases` |
 | `application/service/wiki_ingest_dedup.go` | `countEntityConceptPages` |
 | `agent/tools/sandbox_ls.go` | `relativeSkillFileFromImagePath` |
 | `infrastructure/docparser/json_converter.go` | `indentJSON` |
@@ -130,4 +173,4 @@
 - 构建仍报告大 chunk 提示；本轮未以 bundle 体积为目标，也没有测量构建前后的体积差异。
 - 未修改后端，未运行后端测试；未做浏览器视觉验收。
 
-下一批优先处理主聊天与嵌入聊天引用浮层的重复。涉及聊天、任务重试、权限或共享状态的改动应单独成批，以可验证的行为等价为边界。
+下一批优先检查终端与桌面 WebSocket ticket 的重复身份校验，沿现有授权边界确定共享范围。涉及聊天、任务重试、权限或共享状态的改动应单独成批，以可验证的行为等价为边界。

@@ -6,6 +6,7 @@ import ts from 'typescript'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import * as vue from 'vue'
 import * as progress from './skillInstallProgress.ts'
+import * as skillUpgrade from '../utils/skillUpgrade.ts'
 import type { useConfigSkillInstallProgress } from './useConfigSkillInstallProgress.ts'
 
 const compile = (source: string) => ts.transpileModule(source, {
@@ -147,7 +148,11 @@ const componentScript = compileScript(descriptor, { id: 'skill-progress-test' })
   .replace(/__expose\(\{[\s\S]*?\}\);?/, '')
   .replace('return __returned__', '__expose(__returned__); return __returned__')
 const componentCompiled = compile(componentScript)
-async function panelFixture(api: Record<string, (...args: any[]) => Promise<any>> = {}) {
+async function panelFixture(
+  api: Record<string, (...args: any[]) => Promise<any>> = {},
+  skillApi: Record<string, (...args: any[]) => Promise<any>> = {},
+  props: Record<string, unknown> = {},
+) {
   const f = fixture(), exports: any = {}, intervals = new Set<number>(), emitted: any[] = []
   let timer = 0
   const record = vue.ref<any>({ id: 'a' }), panel = vue.ref<any>()
@@ -165,6 +170,8 @@ async function panelFixture(api: Record<string, (...args: any[]) => Promise<any>
         listConfigSkills: async () => ({ data: [{ ...row }] }), getSandboxConfigById: async (id: string) => ({ data: { id } }),
         ...api,
       }
+      if (name === '@/api/skill') return { installSkillCatalog: async () => ({ data: { installs: {} } }), ...skillApi }
+      if (name === '@/utils/skillUpgrade') return skillUpgrade
       if (name === '@/views/settings/envVarState') return { skillHasDeclaredEnvs: () => false }
       if (name.endsWith('.vue') || ['@/types/mention', '@/utils/index', 'tdesign-icons-vue-next'].includes(name)) return { default: {}, SETTING_DRAWER_HEADER_ACTIONS_ID: 'header' }
       throw new Error(`Unexpected import: ${name}`)
@@ -175,7 +182,7 @@ async function panelFixture(api: Record<string, (...args: any[]) => Promise<any>
     patchProp() {}, insert() {}, remove() {}, setText() {}, setElementText() {},
     createElement: () => ({}), createText: () => ({}), createComment: () => ({}), parentNode: () => null, nextSibling: () => null,
   })
-  const app = renderer.createApp({ setup: () => () => vue.h(exports.default, { record: record.value, ref: panel, onUpdated: (event: any) => emitted.push(event) }) })
+  const app = renderer.createApp({ setup: () => () => vue.h(exports.default, { record: record.value, ref: panel, onUpdated: (event: any) => emitted.push(event), ...props }) })
   app.mount({})
   await flush()
   return { ...f, record, panel, row, intervals, emitted, close: () => app.unmount() }
@@ -262,4 +269,44 @@ test('late retry/stop/remove actions cannot attach the old skill to the new conf
     assert.equal(f.panel.value.uninstallingId, '')
     assert.equal(f.intervals.size, 0)
   }
+})
+
+test('panel upgrade installs the catalog onto this sandbox and follows the reused skill ID', async (t) => {
+  const row = { id: 'skill', name: 'Skill', status: 'ready', enabled: true, bundle_sha256: 'old' }
+  const installs: unknown[] = []
+  const f = await panelFixture(
+    { listConfigSkills: async () => ({ data: [{ ...row }] }) },
+    {
+      installSkillCatalog: async (catalogId: string, configIds: string[]) => {
+        installs.push([catalogId, configIds])
+        row.status = 'installing'
+        return { data: { installs: { a: 'skill' } } }
+      },
+    },
+    { catalogItem: { id: 'cat', bundle_sha256: 'new' } },
+  )
+  t.after(f.close)
+  await f.panel.value.upgradeSkill(row)
+  assert.equal(JSON.stringify(installs), JSON.stringify([['cat', ['a']]]))
+  assert.equal(f.requests.length, 1)
+  assert.equal(f.requests[0]!.url, '/prefix/configs/a/skills/skill/events')
+  assert.equal(f.panel.value.upgradingId, '')
+})
+
+test('a late upgrade cannot attach the old skill to the new config', async (t) => {
+  const pending = deferred<any>()
+  const row = { id: 'skill', name: 'Skill', status: 'ready', enabled: true, bundle_sha256: 'old' }
+  const f = await panelFixture(
+    { listConfigSkills: async () => ({ data: [row] }) },
+    { installSkillCatalog: () => pending.promise },
+    { catalogItem: { id: 'cat', bundle_sha256: 'new' } },
+  )
+  t.after(f.close)
+  const upgrading = f.panel.value.upgradeSkill(row)
+  f.record.value = { id: 'b' }
+  await flush()
+  pending.resolve({ data: { installs: { a: 'skill' } } })
+  await upgrading
+  assert.equal(f.requests.length, 0)
+  assert.equal(f.panel.value.upgradingId, '')
 })

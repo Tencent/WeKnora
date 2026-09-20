@@ -39,8 +39,9 @@ registry.Register("brave", infra_web_search.NewBraveProvider)
 | Exa | `exa.go` | 是 | `https://api.exa.ai/search` | 默认 highlights，可用 extra_config.include_text 获取正文 |
 | 博查 Bocha | `bocha.go` | 是 | `https://api.bochaai.com/v1/web-search` | extra_config.freshness、summary |
 | Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
+| Serply | `serply.go` | 是 | `https://api.serply.io/v1/search` | Google 结果；支持按次传 country/freshness（仅 pd/pw/pm/py） |
 
-在「设置 → 网络搜索」选择提供商、填写 API Key 并测试，然后在智能体中选择该配置。当前注册 13 个引擎；实际结果数仍受智能体最大结果数约束。
+在「设置 → 网络搜索」选择提供商、填写 API Key 并测试，然后在智能体中选择该配置。当前注册 14 个引擎；实际结果数仍受智能体最大结果数约束。
 
 | 提供商附加配置 | 值 |
 | --- | --- |
@@ -49,6 +50,7 @@ registry.Register("brave", infra_web_search.NewBraveProvider)
 | Bocha freshness | noLimit（默认）、oneDay、oneWeek、oneMonth、oneYear |
 | Bocha summary | 字符串布尔值，决定是否请求摘要 |
 | Brave 按次过滤 | country/freshness 是 web_search 工具参数，见下文；与 Bocha 固定配置的字段取值不同 |
+| Serply 按次过滤 | 同 Brave；country 映射为 Google 的 gl，freshness 只接受 pd/pw/pm/py，不支持日期区间 |
 
 除 SearXNG 外，所有引擎端点均硬编码、租户不可配置——这是防 SSRF 的第一道措施（源码注释：`Not configurable by tenants — prevents SSRF`）。
 
@@ -68,7 +70,7 @@ CRUD 路由（`RegisterWebSearchProviderRoutes`，`internal/router/router.go`）
 
 ## Agent 搜索与读页
 
-`web_search` 负责发现来源，`web_fetch` 负责读取选中的页面。用户指定网页时可直接读页；用户要求外部或实时信息时可直接搜索。知识库是否需要检索取决于任务相关性与当前可用工具，不再强制先调用 `grep_chunks` 和 `knowledge_search`。
+`web_search` 负责发现来源，`web_fetch` 负责读取选中的页面。用户指定网页时可直接读页；用户要求外部或实时信息时可直接搜索。知识库是否需要检索取决于任务相关性与当前可用工具，不再强制先调用 `search_knowledge`。
 
 ```mermaid
 flowchart TD
@@ -100,7 +102,7 @@ flowchart TD
 ```
 
 - `count` 指定结果数量，范围是 1 到当前 Agent 配置的最大结果数（最多 20）；省略时沿用现有 Agent 默认值。
-- `country` / `freshness` 通过新增的 Brave 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
+- `country` / `freshness` 通过 Brave 与 Serply 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。Serply 的 `country` 映射为 Google 的 `gl`（省略或 `ALL` 时不传 `gl`，由 Google 决定地区），`freshness` 只接受 `pd` / `pw` / `pm` / `py`。其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
 - 在联网搜索设置中新建 Brave Search 配置并填写 API Key，可使用现有代理配置；API Key 沿用加密存储和独立凭据接口。
 - `content` 默认关闭。设为 `true` 时，并行抓取前 3 条结果的正文（整批 15 秒预算，每页最多 5,000 字符摘录）；其余结果保留搜索摘要，需用 `web_fetch` 继续读页。抓取失败仍保留摘要；完整正文地址通过 `full_output_path` 返回。搜索和独立 `web_fetch` 共用本轮快照，短超时不会取消正在进行的共享抓取。
 - Brave 的相对 `age` 原样保留，避免把“2 days ago”伪造为精确发布日期。

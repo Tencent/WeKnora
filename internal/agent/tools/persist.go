@@ -327,7 +327,7 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 			count = intField(data, "count")
 		}
 		if count > 0 {
-			return fmt.Sprintf("Semantic search returned %d result(s) (details omitted from history)", count)
+			return fmt.Sprintf("Knowledge search returned %d result(s) (details omitted from history)", count)
 		}
 	case "shell_exec":
 		if rebuilt := rebuildShellExecHistory(data); rebuilt != "" {

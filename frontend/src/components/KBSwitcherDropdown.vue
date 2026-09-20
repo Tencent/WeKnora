@@ -110,23 +110,24 @@ const handleSelect = (id: string): void => {
   gap: 8px;
   padding: 6px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-primary);
-  font-size: 13px;
-  line-height: 1.4;
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
+  font-weight: 400;
+  line-height: 20px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   text-align: left;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer);
+    background: var(--td-bg-color-container-hover);
   }
 
   &.active {
-    background: var(--td-brand-color-light, rgba(0, 82, 217, 0.08));
+    background: var(--app-selection-bg);
     color: var(--td-brand-color);
-    font-weight: 500;
   }
 }
 
@@ -154,7 +155,7 @@ const handleSelect = (id: string): void => {
 .kb-switcher-empty {
   padding: 16px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 </style>

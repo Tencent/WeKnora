@@ -468,7 +468,10 @@ const messages = {
       },
       "knowledgeChunksList": {
         "chunkRange": "已加载 {fetched} / {total} 个分块",
-        "page": "第 {page} 页，每页 {pageSize} 个"
+        "page": "第 {page} 页，每页 {pageSize} 个",
+        "offsetRange": "第 {from}–{to} 块",
+        "queryMatches": "文档内搜索「{query}」命中 {count} 处",
+        "queryNoMatch": "文档内搜索「{query}」无匹配"
       },
       "attachmentParsing": {
         "parsedSummary": "已解析 {count} 个附件",
@@ -1050,7 +1053,10 @@ const messages = {
       },
       "knowledgeChunksList": {
         "chunkRange": "{total}件中{fetched}件のチャンクを読み込みました",
-        "page": "{page}ページ目、1ページ{pageSize}件"
+        "page": "{page}ページ目、1ページ{pageSize}件",
+        "offsetRange": "チャンク {from}–{to}",
+        "queryMatches": "文書内検索「{query}」: {count}件一致",
+        "queryNoMatch": "文書内検索「{query}」: 一致なし"
       },
       "attachmentParsing": {
         "parsedSummary": "{count}件の添付ファイルを解析しました",
@@ -1632,7 +1638,10 @@ const messages = {
       },
       "knowledgeChunksList": {
         "chunkRange": "Loaded {fetched} / {total} chunks",
-        "page": "Page {page}, {pageSize} per page"
+        "page": "Page {page}, {pageSize} per page",
+        "offsetRange": "Chunks {from}–{to}",
+        "queryMatches": "{count} matches for \"{query}\" in this document",
+        "queryNoMatch": "No matches for \"{query}\" in this document"
       },
       "attachmentParsing": {
         "parsedSummary": "Parsed {count} attachment(s)",

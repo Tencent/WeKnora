@@ -208,11 +208,15 @@ type KnowledgeBaseShare struct {
 
 **共享的前置条件**（`ShareKnowledgeBase`）：调用者租户必须**拥有**该 KB（`kb.TenantID == tenantID`），且在目标组织中角色为 **editor+**。重复共享转为更新权限。
 
-**管理共享的三条豁免路径**（`callerCanManageShare`，用于改权限 / 撤销共享）：
+**谁能管理共享**（`canManageShare`，KB 共享与 Agent 共享共用，用于改权限 / 撤销共享）：
 
-1. 调用者就是原共享人（同 user id）；
-2. 调用者租户是来源租户且调用者是租户 Admin+（所有权是租户级的，原共享人离开后租户 Admin 仍可管理）；
-3. 调用者租户是目标组织的 admin（org admin 可在原共享人离开后修复共享）。
+1. 原共享人，且仍在来源租户内操作、租户角色为 Contributor+；
+2. 来源租户的 Admin+（所有权是租户级的，原共享人离开后租户 Admin 仍可管理）；
+3. 目标组织中角色为 admin 的租户，其 Admin+ 用户可以撤销共享或**降低**权限，但不能把权限提升到超过当前值，否则等于把别人的 KB 写权限交给全体 editor 成员。
+
+路由上的 `share_id` 必须属于路径中的 KB / Agent，否则返回 404。
+
+**共享何时失效**：共享只在组织未删除、且来源租户仍是组织成员时生效。来源租户退出或被移除时，它共享进该组织的 KB 与 Agent 会被一并撤销；查询侧也会按来源租户的成员关系过滤，旧版本遗留的共享同样不再生效。
 
 **有效权限 = 多层交集（取最小）**：
 
@@ -229,6 +233,13 @@ func applyTenantRoleCap(p types.OrgMemberRole, callerTenantRole types.TenantRole
 ```
 
 共享相关操作会写入 KB 活动流：`kb.share_added` / `kb.share_permission_changed` / `kb.share_removed`。
+
+**Agent 共享的额外规则**（`internal/application/service/agent_share.go`、`agent_share_scope.go`）：
+
+- 内置智能体不能共享：每个空间都有同 ID 的内置智能体，共享后接收方无法区分。未指定来源空间的对话请求总是先使用自己空间的智能体。
+- 共享 Agent 会把它的 KB 范围以只读方式开放给组织成员，因此共享人必须有权直接共享这些 KB，即 KB 创建者或租户 Admin+。`kb_selection_mode: all` 会自动包含之后新建的 KB，只有 Admin+ 可以共享。已共享的 Agent 被编辑时，新加入范围的 KB 适用同一规则。
+- 共享运行时，Agent 未设置 MCP 选择模式按「不使用」处理，与共享范围里的展示一致。
+- 启用了技能的 Agent 共享后，技能在来源空间的沙箱中运行，并带上管理员为技能配置的环境变量（如 API Key）；成员可以让智能体读出这些值。共享设置页会对此给出提示。
 
 ```mermaid
 flowchart LR
@@ -310,7 +321,7 @@ flowchart LR
 5. ownership 守卫执行 creator 查询：资源不存在 → 放行让 handler 返回 404；查询失败 → 503；creator == 当前用户 → 放行；
 6. 否则 403 + 审计日志（`AuditActionAccessDenied = "rbac.access_denied"`）。
 
-强制执行开关 `TenantConfig.EnableRBAC`：`nil` 或 `true` = 强制（当前默认），`false` = 只记日志不拒绝（发布过渡用）；可用环境变量 `WEKNORA_TENANT_ENABLE_RBAC` 覆盖。
+强制执行开关 `TenantConfig.EnableRBAC`：`nil` 或 `true` = 强制（当前默认），`false` = 只记日志不拒绝（发布过渡用）；可用环境变量 `WEKNORA_TENANT_ENABLE_RBAC` 覆盖。该开关只作用于空间内的角色检查，知识库访问守卫（`RequireKBAccess`）对跨空间访问始终拦截。
 
 `RequireSystemAdmin`：JWT 用户须 `IsSystemAdmin=true`；API Key 须为 platform key（tenant key 一律 403）。
 

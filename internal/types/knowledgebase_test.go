@@ -376,3 +376,40 @@ func TestChunkingConfigResolveParserEngineDefaults(t *testing.T) {
 		t.Fatalf("configured ResolveParserEngine(pptx) = %q, want mineru", got)
 	}
 }
+
+// KB JSON is what API responses (including org-share listings) carry, so the
+// legacy inline credentials must not appear there; their DB columns still do.
+func TestKnowledgeBase_MarshalJSONWithholdsInlineCredentials(t *testing.T) {
+	kb := &KnowledgeBase{
+		ID: "kb-1",
+		StorageConfig: StorageConfig{
+			Provider: "minio", BucketName: "bucket", SecretID: "root-id", SecretKey: "root-secret",
+		},
+		VLMConfig: VLMConfig{ModelName: "vlm", BaseURL: "https://vlm.example", APIKey: "vlm-key"},
+	}
+
+	data, err := json.Marshal(kb)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, secret := range []string{"root-id", "root-secret", "vlm-key"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("KB JSON leaks %q: %s", secret, data)
+		}
+	}
+	if !strings.Contains(string(data), `"bucket_name":"bucket"`) || !strings.Contains(string(data), `"capabilities"`) {
+		t.Fatalf("KB JSON lost non-secret fields: %s", data)
+	}
+	if kb.StorageConfig.SecretKey != "root-secret" || kb.VLMConfig.APIKey != "vlm-key" {
+		t.Fatal("MarshalJSON mutated the knowledge base")
+	}
+
+	storageColumn, err := kb.StorageConfig.Value()
+	if err != nil || !strings.Contains(string(storageColumn.([]byte)), "root-secret") {
+		t.Fatalf("storage column lost its secret: %v %s", err, storageColumn)
+	}
+	vlmColumn, err := kb.VLMConfig.Value()
+	if err != nil || !strings.Contains(string(vlmColumn.([]byte)), "vlm-key") {
+		t.Fatalf("VLM column lost its key: %v %s", err, vlmColumn)
+	}
+}

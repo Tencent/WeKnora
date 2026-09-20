@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -177,10 +178,10 @@ func TestSessionBoundManagerShellExecRunsAsSandboxUser(t *testing.T) {
 	require.Equal(t, DefaultSandboxExecUser, shell[0].User)
 }
 
-func TestCleanSessionWorkDirRejectsSkillRootByDefault(t *testing.T) {
+func TestCleanSessionWorkDirAcceptsSandboxSkillRoot(t *testing.T) {
 	skillDir := mustSkillDir(t, "sk-1")
 	_, err := cleanSessionWorkDir(skillDir, false)
-	require.Error(t, err, "ordinary sessions must stay inside /workspace")
+	require.NoError(t, err, "ordinary sessions may use any directory in their sandbox")
 
 	got, err := cleanSessionWorkDir(skillDir, true)
 	require.NoError(t, err, "install sessions need to work inside the skills root")
@@ -241,16 +242,16 @@ func TestExecShellCommandSkipWorkspacePrepOmitsBootstrap(t *testing.T) {
 	require.Equal(t, DefaultSandboxExecUser, execs[0].User)
 }
 
-func TestExecShellCommandSkipWorkspacePrepStillRejectsWorkDir(t *testing.T) {
+func TestExecShellCommandSkipWorkspacePrepStillRejectsRelativeWorkDir(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
 	mgr, _ := newSessionManagerExecTestHarness(t)
 
 	_, err := mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{
 		SkipWorkspacePrep: true,
-		WorkDir:           "/etc",
+		WorkDir:           "relative",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "outside allowed roots")
+	require.Contains(t, err.Error(), "must be absolute")
 }
 
 func TestExecShellCommandWithoutSkipStillBootstraps(t *testing.T) {
@@ -301,14 +302,13 @@ func TestExecShellCommandEmptyWorkDirUsesWorkspace(t *testing.T) {
 	require.Equal(t, DefaultSandboxExecUser, last.User)
 }
 
-func TestExecShellCommandRejectsInvalidWorkDir(t *testing.T) {
+func TestExecShellCommandAllowsTemporaryWorkDir(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
-	mgr, _ := newSessionManagerExecTestHarness(t)
+	mgr, client := newSessionManagerExecTestHarness(t)
 
-	_, err := mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "/etc", time.Second, nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "outside allowed roots")
-	require.Contains(t, err.Error(), SessionWorkspaceRoot)
+	_, err := mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "/tmp/task", time.Second, nil)
+	require.NoError(t, err)
+	require.Equal(t, "/tmp/task", lastExecRequest(t, client).WorkDir)
 }
 
 // The manager is what the skill install flow holds, so the path from "the
@@ -386,29 +386,36 @@ func TestCleanSessionWorkspaceWritePathAcceptsWorkspaceAndRefusesInput(t *testin
 	require.Error(t, err)
 	_, err = cleanSessionWorkspaceWritePath("/workspace/output")
 	require.Error(t, err)
-	_, err = cleanSessionWorkspaceWritePath("/etc/passwd")
+	got, err = cleanSessionWorkspaceWritePath("/tmp/task/check.txt")
+	require.NoError(t, err)
+	require.Equal(t, "/tmp/task/check.txt", got)
+	_, err = cleanSessionWorkspaceWritePath("/tmp/../workspace/input/report.txt")
 	require.Error(t, err)
 	got, err = cleanSessionWorkspaceWritePath("relative.py")
 	require.NoError(t, err)
 	require.Equal(t, "/workspace/relative.py", got)
 }
 
-func TestWriteSessionWorkspaceFileWritesUnderOutput(t *testing.T) {
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
-	mgr, client := newSessionManagerExecTestHarness(t)
+func TestWriteSessionWorkspaceFileWritesSandboxPaths(t *testing.T) {
+	for _, filePath := range []string{"/workspace/output/generate_ppt.py", "/tmp/task/generate_ppt.py"} {
+		t.Run(filePath, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+			mgr, client := newSessionManagerExecTestHarness(t)
 
-	require.NoError(t, mgr.WriteSessionWorkspaceFile(
-		ctx, "sess-1", "/workspace/output/generate_ppt.py", []byte("print(1)\n"),
-	))
+			require.NoError(t, mgr.WriteSessionWorkspaceFile(
+				ctx, "sess-1", filePath, []byte("print(1)\n"),
+			))
 
-	client.mu.Lock()
-	writes := append([]fakeRemoteWriteFile(nil), client.writeFiles...)
-	execs := len(client.execRequests)
-	client.mu.Unlock()
-	require.Len(t, writes, 1)
-	require.Equal(t, "/workspace/output/generate_ppt.py", writes[0].path)
-	require.Equal(t, []byte("print(1)\n"), writes[0].content)
-	require.Equal(t, 1, execs)
+			client.mu.Lock()
+			writes := append([]fakeRemoteWriteFile(nil), client.writeFiles...)
+			execs := len(client.execRequests)
+			client.mu.Unlock()
+			require.Len(t, writes, 1)
+			require.Equal(t, filePath, writes[0].path)
+			require.Equal(t, []byte("print(1)\n"), writes[0].content)
+			require.Equal(t, 1, execs)
+		})
+	}
 }
 
 func TestWriteSessionWorkspaceFilesPreparesLayoutOnce(t *testing.T) {
@@ -547,4 +554,324 @@ func TestOpenSessionDesktopUnsupportedBackend(t *testing.T) {
 	mgr, _ := newSessionManagerExecTestHarness(t)
 	_, err := mgr.OpenSessionDesktop(context.Background(), "sess-1", RemoteDesktopOptions{})
 	require.ErrorIs(t, err, ErrDesktopUnsupported)
+}
+
+func TestBoundSandboxIDReadsBindingWithoutConnect(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	key := SessionSandboxKey{TenantID: 10000, SessionID: "session-a"}
+	created, err := store.Create(ctx, key, validSessionSandboxBinding(key, "sbx-existing"))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	id, ok := mgr.BoundSandboxID(ctx, "session-a")
+	require.True(t, ok)
+	require.Equal(t, "sbx-existing", id)
+
+	client.mu.Lock()
+	connects := append([]string(nil), client.connectIDs...)
+	client.mu.Unlock()
+	require.Empty(t, connects, "BoundSandboxID must not Connect")
+}
+
+func TestBoundSandboxIDReportsUnbound(t *testing.T) {
+	mgr, client := newSessionManagerExecTestHarness(t)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+
+	id, ok := mgr.BoundSandboxID(ctx, "session-a")
+	require.False(t, ok)
+	require.Empty(t, id)
+
+	client.mu.Lock()
+	connects := append([]string(nil), client.connectIDs...)
+	client.mu.Unlock()
+	require.Empty(t, connects)
+}
+
+func TestHasActiveTurnReportsLeaseState(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          newFakeRemoteClient(SandboxTypeCube),
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	busy, err := mgr.HasActiveTurn(ctx, "sess-1")
+	require.NoError(t, err)
+	require.False(t, busy)
+
+	require.NoError(t, mgr.BeginSessionTurn(ctx, "sess-1"))
+	busy, err = mgr.HasActiveTurn(ctx, "sess-1")
+	require.NoError(t, err)
+	require.True(t, busy)
+}
+
+func TestHasActiveTurnWithoutLeaseStoreIsNotBusy(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	store := leaseFreeBindingStore{SessionSandboxBindingStore: NewMemorySessionSandboxBindingStore()}
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          newFakeRemoteClient(SandboxTypeCube),
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	busy, err := mgr.HasActiveTurn(ctx, "sess-1")
+	require.NoError(t, err)
+	require.False(t, busy)
+}
+
+func TestCreateForkSnapshotSnapshotsBoundSandboxWithoutProvisioning(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	client.capabilities.SupportsSnapshots = true
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	key := SessionSandboxKey{TenantID: 10000, SessionID: "session-a"}
+	created, err := store.Create(ctx, key, validSessionSandboxBinding(key, "sbx-existing"))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	id, err := mgr.CreateForkSnapshot(ctx, "session-a", "fork-session-a-1")
+	require.NoError(t, err)
+	require.Equal(t, "snap-1", id)
+
+	creates, connects, _, _, _ := client.counts()
+	require.Zero(t, creates, "CreateForkSnapshot must not provision")
+	require.Zero(t, connects, "CreateForkSnapshot must not Connect")
+	client.mu.Lock()
+	src := client.snapshots[id]
+	client.mu.Unlock()
+	require.Equal(t, "sbx-existing", src)
+}
+
+func TestCreateForkSnapshotErrorsWhenUnbound(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	client.capabilities.SupportsSnapshots = true
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           NewMemorySessionSandboxBindingStore(),
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	_, err = mgr.CreateForkSnapshot(ctx, "session-a", "fork-session-a-1")
+	require.Error(t, err)
+
+	creates, connects, _, _, _ := client.counts()
+	require.Zero(t, creates)
+	require.Zero(t, connects)
+}
+
+func TestCreateForkSnapshotErrorsWhenUnsupported(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	key := SessionSandboxKey{TenantID: 10000, SessionID: "session-a"}
+	created, err := store.Create(ctx, key, validSessionSandboxBinding(key, "sbx-existing"))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	_, err = mgr.CreateForkSnapshot(ctx, "session-a", "fork-session-a-1")
+	require.Error(t, err)
+
+	creates, connects, _, _, _ := client.counts()
+	require.Zero(t, creates)
+	require.Zero(t, connects)
+}
+
+type recordingForkSnapshotClient struct {
+	*fakeRemoteClient
+	forkCalls int
+	forkName  string
+	forkSrc   string
+}
+
+func (c *recordingForkSnapshotClient) CreateForkSnapshot(
+	_ context.Context, sandboxID, name string,
+) (RemoteSnapshotRef, error) {
+	c.forkCalls++
+	c.forkName = name
+	c.forkSrc = sandboxID
+	return RemoteSnapshotRef{ID: "fork-" + sandboxID, Names: []string{name}}, nil
+}
+
+func TestCreateForkSnapshotPrefersClientCreateForkSnapshot(t *testing.T) {
+	inner := newFakeRemoteClient(SandboxTypeCube)
+	inner.capabilities.SupportsSnapshots = true
+	client := &recordingForkSnapshotClient{fakeRemoteClient: inner}
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	key := SessionSandboxKey{TenantID: 10000, SessionID: "session-a"}
+	created, err := store.Create(ctx, key, validSessionSandboxBinding(key, "sbx-existing"))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	id, err := mgr.CreateForkSnapshot(ctx, "session-a", "fork-session-a-1")
+	require.NoError(t, err)
+	require.Equal(t, "fork-sbx-existing", id)
+	require.Equal(t, 1, client.forkCalls)
+	require.Equal(t, "fork-session-a-1", client.forkName)
+	require.Equal(t, "sbx-existing", client.forkSrc)
+
+	creates, connects, _, _, _ := inner.counts()
+	require.Zero(t, creates, "CreateForkSnapshot must not provision")
+	require.Zero(t, connects, "CreateForkSnapshot must not Connect")
+	inner.mu.Lock()
+	_, usedCreateSnapshot := inner.snapshots["snap-1"]
+	inner.mu.Unlock()
+	require.False(t, usedCreateSnapshot, "Docker must not fall back to skill CreateSnapshot")
+}
+
+type clientBoundRecordingState struct {
+	withClientCalls int
+	afterExecs      int
+}
+
+type clientBoundRecordingBootstrapper struct {
+	state  *clientBoundRecordingState
+	client RemoteSandboxClient
+}
+
+func (b *clientBoundRecordingBootstrapper) WithClient(client RemoteSandboxClient) SessionBootstrapper {
+	b.state.withClientCalls++
+	cp := *b
+	cp.client = client
+	return &cp
+}
+
+func (b *clientBoundRecordingBootstrapper) TemplateOverride(
+	context.Context, SessionSandboxKey,
+) (string, error) {
+	return "", nil
+}
+
+func (b *clientBoundRecordingBootstrapper) AfterCreate(
+	ctx context.Context, _ SessionSandboxKey, handle RemoteSandboxHandle,
+) error {
+	if b.client == nil || handle == nil {
+		return errors.New("AfterCreate must use the bound remote client")
+	}
+	_, err := b.client.Exec(ctx, handle, RemoteExecRequest{
+		Command: "echo weknora-fork-after-create",
+		Shell:   true,
+		WorkDir: SessionWorkspaceRoot,
+		Timeout: time.Second,
+		User:    DefaultSandboxExecUser,
+	})
+	if err != nil {
+		return err
+	}
+	b.state.afterExecs++
+	return nil
+}
+
+var _ SessionBootstrapper = (*clientBoundRecordingBootstrapper)(nil)
+
+var _ SessionBootstrapperWithClient = (*clientBoundRecordingBootstrapper)(nil)
+
+func TestNewSessionBoundManagerBindsBootstrapperToClient(t *testing.T) {
+	client := newFakeRemoteClient(SandboxTypeCube)
+	state := &clientBoundRecordingState{}
+	boot := &clientBoundRecordingBootstrapper{state: state}
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          client,
+		Store:           NewMemorySessionSandboxBindingStore(),
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+		Bootstrapper:    boot,
+	})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	_, err = mgr.Execute(ctx, &ExecuteConfig{
+		SessionID:      "session-fork-boot",
+		SkipValidation: true,
+		ScriptContent:  "print('ok')\n",
+		Script:         "hello.py",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, state.withClientCalls)
+	require.Equal(t, 1, state.afterExecs)
+
+	found := false
+	client.mu.Lock()
+	for _, req := range client.execRequests {
+		if strings.Contains(req.Command, "weknora-fork-after-create") {
+			found = true
+			require.True(t, req.Shell)
+			require.Equal(t, SessionWorkspaceRoot, req.WorkDir)
+			require.Equal(t, DefaultSandboxExecUser, req.User)
+		}
+	}
+	client.mu.Unlock()
+	require.True(t, found, "AfterCreate must Exec on the handle's client")
+}
+
+// leaseFreeBindingStore implements only SessionSandboxBindingStore so the
+// optional turn-lease type assert fails.
+type leaseFreeBindingStore struct {
+	SessionSandboxBindingStore
 }

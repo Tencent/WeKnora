@@ -17,6 +17,7 @@ codec lives in this one package:
 | `mcp.go` | MCP bridge routing handles (`msN`/`mtN`), definition projection and envelope codec |
 | `mcp_sources.go` | bounded citation sidecar for HTTP(S) links in successful MCP results |
 | `handles.go` | exported `HandleTable` for invocation-local spaces (`iN`, `ref-N`, `c000`) |
+| `leaks.go` | `LeakedIdentifiers` report of raw UUIDs that survive `EncodeMessages`, logged at every model-call site |
 
 ## Identity rules
 
@@ -57,6 +58,13 @@ references that have not been backed by current evidence.
 
 ## Observability
 
+Every model-call site runs `LeakedIdentifiers` on the encoded messages and
+logs a warning naming the role or tool whose text still carries a raw UUID.
+A *registered* leak means the codec missed a rewrite site; an *unregistered*
+leak means a producer emitted an identifier that never entered the registry.
+Text-level compaction (`CompactKnownText`) stays in place as defense in depth
+until those producers are fixed and the report stays quiet.
+
 Langfuse generation observations contain the exact encoded payload sent to and
 returned by the model. Agent tool spans contain both `model_arguments` (the
 model-emitted handles) and `resolved_arguments` (the durable values actually
@@ -73,9 +81,12 @@ are decoded centrally through a tool-name plus JSON-field allowlist. The
 `sourceKeySpaces` table is the single source of truth for which keys are
 ID-bearing and which handle space they register into; per-tool `sourceIDKeys`
 contracts gate which of those keys each tool may use.
-`database_query.sql` and `data_analysis.sql` have an explicit policy because
-source handles can be embedded inside quoted SQL values; unquoted SQL aliases
-and arbitrary prose are never rewritten. Wiki issue IDs use the same lifecycle
+`database_query.sql` has an explicit policy because source handles can be
+embedded inside quoted SQL values when the model filters the real
+`knowledges`/`chunks` tables; unquoted SQL aliases and arbitrary prose are
+never rewritten. `data_analysis.sql` carries no handles: the selected document
+is always exposed as the fixed table `dataset`, so only `knowledge_id` is
+decoded. Wiki issue IDs use the same lifecycle
 via an `iN` handle space.
 
 Dynamic MCP tools are intentionally opaque in both arguments and results.

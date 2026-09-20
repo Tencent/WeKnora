@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -106,4 +107,29 @@ type SessionRepository interface {
 	BatchDelete(ctx context.Context, tenantID uint64, userID string, ids []string) (int64, error)
 	// DeleteAllByTenantID deletes all sessions visible to the tenant/user scope.
 	DeleteAllByTenantID(ctx context.Context, tenantID uint64, userID string) (int64, error)
+	// CreateForked persists a forked session and its copied history atomically.
+	CreateForked(ctx context.Context, session *types.Session, messages []*types.Message) error
+	// UpdateForkBootstrap overwrites a session's fork bootstrap. Passing nil clears it.
+	UpdateForkBootstrap(ctx context.Context, sessionID string, b *types.ForkBootstrap) error
+	// ListUnconsumedForks returns fork bootstraps the snapshot reaper should
+	// try to retire: unopened forks older than olderThan, plus consumed forks
+	// that still name a snapshot.
+	ListUnconsumedForks(ctx context.Context, olderThan time.Time) ([]*types.Session, error)
+	// HasOtherUnconsumedForkSnapshot reports whether another session still
+	// needs snapshotID to boot. excludeSessionID is the row currently being
+	// consumed or reaped.
+	HasOtherUnconsumedForkSnapshot(ctx context.Context, snapshotID, excludeSessionID string) (bool, error)
+	// UnconsumedForkSnapshotHolders returns session IDs that still need
+	// snapshotID to provision. The reaper uses this to avoid deleting a
+	// snapshot while a fork within retention still depends on it.
+	UnconsumedForkSnapshotHolders(ctx context.Context, snapshotID string) ([]string, error)
+	// CreateForkSnapshotLease records a provider snapshot ID before the forked
+	// session row exists, so a crash or CreateForked failure cannot hide it
+	// from the reaper.
+	CreateForkSnapshotLease(ctx context.Context, lease *types.ForkSnapshotLease) error
+	// DeleteForkSnapshotLease drops a lease after the session owns the
+	// snapshot, or after the snapshot itself has been deleted.
+	DeleteForkSnapshotLease(ctx context.Context, snapshotID string) error
+	// ListStaleForkSnapshotLeases returns leases older than olderThan.
+	ListStaleForkSnapshotLeases(ctx context.Context, olderThan time.Time) ([]*types.ForkSnapshotLease, error)
 }

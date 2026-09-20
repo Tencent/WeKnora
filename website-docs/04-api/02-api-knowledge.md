@@ -35,7 +35,7 @@ curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
 
 ### 文档自动标签配置
 
-创建知识库时 `auto_tag_config` 位于顶层；更新时放在 `config.auto_tag_config`。仅 document 知识库支持，默认 enabled=false。
+创建知识库时 `auto_tag_config`、`profile_config` 位于顶层；更新时放在 `config.auto_tag_config`、`config.profile_config`。两者仅 document 知识库支持，默认 enabled=false。`profile_config` 开启后，文档新增/删除/摘要更新会自动刷新 `generated_profile`（AI 知识库描述，见下文 `profile/generate`）。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -167,6 +167,16 @@ curl -X POST $BASE/api/v1/knowledge-bases/copy -H "Authorization: Bearer $TOKEN"
 
 ```bash
 curl -X POST $BASE/api/v1/knowledge-bases/kb-1/duplicate -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/knowledge-bases/:id/profile/generate
+
+用途：立即重新生成知识库的 AI 描述（`generated_profile`），同步执行一次文档画像聚合和一次小模型调用，不修改手写 `description`。权限：与更新知识库相同（创建者/Admin 且 KB write）；API key `manage_kbs`/full。无请求体。仅 document 类型；未配置模型返回 400。
+
+响应：200 `{"success":true,"data":{"gist","topics":[...],"typical_questions":[...],"stats":{"document_count",...},"status":"ready","model_id","generated_at"}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/profile/generate -H "Authorization: Bearer $TOKEN"
 ```
 
 ### GET /api/v1/knowledge-bases/copy/progress/:task_id

@@ -309,6 +309,7 @@ func (h *Handler) setupStreamHandler(
 	streamHandler := NewAgentStreamHandler(
 		ctx, sessionID, assistantMessageID, requestID, tenantID, receivedAt,
 		assistantMessage, h.streamManager, eventBus, h.artifactCollector,
+		h.workspaceCheckpointer, h.sandboxIDLookup,
 	)
 	streamHandler.Subscribe()
 	return streamHandler
@@ -437,11 +438,6 @@ func (h *Handler) writeAgentQueryEvent(
 		})
 		// Non-fatal error, continue
 	}
-}
-
-// getRequestID gets the request ID from gin context
-func getRequestID(c *gin.Context) string {
-	return c.GetString(types.RequestIDContextKey.String())
 }
 
 // Helper function for type assertion with default value

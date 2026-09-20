@@ -1098,6 +1098,9 @@ export interface ConfigSkill {
   // decides whether to offer the "view install" entry point.
   install_session_id?: string
   install_message_id?: string
+  // Present while a newer install is in flight or has failed and the sandbox
+  // still runs the previous version.
+  served?: { version?: string }
   created_at: string
   updated_at: string
   // Absent for a skill whose installer declared nothing, which is how the

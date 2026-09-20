@@ -25,6 +25,8 @@ on:
       - "licenses/**"
       - "internal/textconv/data/**"
       - "scripts/*license*.sh"
+      - "scripts/git-hooks/**"
+      - "scripts/test-git-hooks.sh"
       - "cmd/desktop/build/windows/installer/project.nsi"
       - ".github/workflows/app.yml"
   pull_request:
@@ -47,6 +49,8 @@ on:
       - "licenses/**"
       - "internal/textconv/data/**"
       - "scripts/*license*.sh"
+      - "scripts/git-hooks/**"
+      - "scripts/test-git-hooks.sh"
       - "cmd/desktop/build/windows/installer/project.nsi"
       - ".github/workflows/app.yml"
   workflow_dispatch:
@@ -112,6 +116,9 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+      - name: Verify Git hook test coverage
+        run: bash ./scripts/test-git-hooks.sh
 
       - name: Vet and test
         shell: bash

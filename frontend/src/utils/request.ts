@@ -4,6 +4,7 @@ import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
 import { isSkillBundleUploadUrl } from './uploadLimit';
+import { isTimeoutError, uploadTimeoutMs } from './requestTimeouts';
 import {
   forceReloginRedirect,
   isEmbedPage,
@@ -135,7 +136,12 @@ instance.interceptors.response.use(
     const originalRequest = error.config;
     
     if (!error.response) {
-      return Promise.reject({ message: t('error.networkError') });
+      // A timeout and an unreachable server both arrive without a response, but
+      // telling someone whose upload timed out to "check your connection" sends
+      // them after the wrong problem.
+      return Promise.reject({
+        message: t(isTimeoutError(error) ? 'error.requestTimeout' : 'error.networkError'),
+      });
     }
 
     // 文件下载失败时服务端仍返回 JSON；先还原错误信息，避免被 Blob 隐藏。
@@ -242,6 +248,11 @@ export function postUpload(
   config: any = {},
 ): Promise<WithStatus<any>> {
   return instance.post(url, data, {
+    // Uploads are bounded by transfer time, not by the 30s default that suits
+    // JSON calls. Derive the budget from the payload so a deployment raising
+    // MAX_FILE_SIZE_MB doesn't silently abort its own uploads; an explicit
+    // `config.timeout` still wins.
+    timeout: uploadTimeoutMs(data),
     ...config,
     headers: {
       "Content-Type": "multipart/form-data",

@@ -85,7 +85,7 @@ const blocks = computed(() => {
   max-height: 420px;
   max-width: 500px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
   word-wrap: break-word;
@@ -101,7 +101,7 @@ const blocks = computed(() => {
   }
 
   .full-content {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     line-height: 1.7;
     white-space: pre-wrap;
@@ -125,7 +125,7 @@ const blocks = computed(() => {
     }
 
     .chunk-block__label {
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       font-weight: 600;
       color: var(--td-text-color-placeholder);
       margin-bottom: 4px;
@@ -151,7 +151,7 @@ const blocks = computed(() => {
 
   .popup-footer__item {
     font-family: var(--app-font-family-mono);
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     color: var(--td-text-color-placeholder);
     overflow: hidden;
     text-overflow: ellipsis;

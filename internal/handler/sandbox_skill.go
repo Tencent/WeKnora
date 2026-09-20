@@ -117,6 +117,10 @@ type skillResponse struct {
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 
+	// Served is the previous version that keeps running while this install
+	// is in flight or after it failed.
+	Served *service.SkillServedInfo `json:"served,omitempty"`
+
 	Envs []skillEnvResponse `json:"envs,omitempty"`
 }
 
@@ -164,6 +168,7 @@ func toSkillResponse(e *types.TenantSkillEntity) skillResponse {
 		InstallMessageID:    e.InstallMessageID,
 		CreatedAt:           e.CreatedAt,
 		UpdatedAt:           e.UpdatedAt,
+		Served:              service.ServedInfoOf(e),
 		Envs:                toSkillEnvResponses(e.Envs),
 	}
 }

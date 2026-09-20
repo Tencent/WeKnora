@@ -43,6 +43,23 @@
         <div class="user_msg">
             {{ content }}
         </div>
+        <div v-if="timestamp || content || canFork" class="user_msg_meta">
+            <time v-if="timestamp" class="user_msg_time" :datetime="timestamp.datetime" :title="fullTimestamp">
+                {{ timestamp.time }}
+            </time>
+            <div v-if="content || canFork" class="user_msg_actions">
+                <t-tooltip v-if="content" :content="t('agent.copy')">
+                    <button type="button" class="user_msg_action" :aria-label="t('agent.copy')" @click="handleCopy">
+                        <t-icon name="copy" />
+                    </button>
+                </t-tooltip>
+                <t-tooltip v-if="canFork" :content="forkTooltip">
+                    <button type="button" class="user_msg_action" :aria-label="forkTooltip" @click="emit('fork', messageId)">
+                        <t-icon name="git-branch" />
+                    </button>
+                </t-tooltip>
+            </div>
+        </div>
         <div v-if="steerFailed" class="steer-failure" role="status">
             <span>{{ t('input.messages.steerFailed') }}</span>
             <t-tooltip :content="t('input.steerRetry')"><button type="button" :aria-label="t('input.steerRetry')" @click="emit('retry-steer')"><t-icon name="refresh" /></button></t-tooltip>
@@ -59,7 +76,9 @@ import { useI18n } from 'vue-i18n';
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
 import { SKILL_ICON } from '@/types/mention';
-const emit = defineEmits(['retry-steer', 'remove-steer']);
+import { copyWithToast } from '@/utils/clipboard';
+import { formatMessageTimestamp, getConversationTimestampModel } from '@/utils/messageTimestamp';
+const emit = defineEmits(['retry-steer', 'remove-steer', 'fork']);
 
 const { t } = useI18n();
 
@@ -108,8 +127,26 @@ const props = defineProps({
     sessionId: {
         type: String,
         default: ''
+    },
+    messageId: {
+        type: String,
+        default: ''
+    },
+    createdAt: {
+        type: String,
+        default: ''
+    },
+    canFork: {
+        type: Boolean,
+        default: false
     }
 });
+
+const canFork = computed(() => props.canFork === true && !props.embeddedMode);
+const forkTooltip = '从这里分叉出新会话';
+const timestamp = computed(() => getConversationTimestampModel(props.createdAt));
+const fullTimestamp = computed(() => formatMessageTimestamp(props.createdAt));
+const handleCopy = () => copyWithToast(props.content, 'common.copySuccess', 'common.copyFailed');
 
 const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 
@@ -195,6 +232,7 @@ const closePreImg = () => {
 @import '../../../components/css/chat-resource-chips.less';
 
 .user_msg_container {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -228,11 +266,11 @@ const closePreImg = () => {
     align-items: flex-start;
     gap: 4px;
     flex: 1 0 0;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     margin-left: auto;
     color: var(--td-text-color-primary);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     line-height: 1.6;
     text-align: left;
     word-break: break-word;
@@ -263,19 +301,19 @@ const closePreImg = () => {
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--td-border-level-1-color, #e7e7e7);
-    background: var(--td-bg-color-container, #fff);
+    border-radius: var(--app-radius-md);
+    border: 1px solid var(--td-border-level-1-color);
+    background: var(--td-bg-color-container);
     max-width: 260px;
     min-width: 160px;
     cursor: default;
 
     &.is-previewable {
         cursor: pointer;
-        transition: border-color 0.2s, box-shadow 0.2s;
+        transition: border-color var(--app-motion-base), box-shadow var(--app-motion-base);
 
         &:hover {
-            border-color: var(--td-brand-color-2, rgba(0, 82, 217, 0.25));
+            border-color: var(--td-brand-color-2);
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
         }
     }
@@ -296,17 +334,17 @@ const closePreImg = () => {
     }
 
     .attachment_card_name {
-        font-size: 13px;
+        font-size: var(--app-text-md);
         font-weight: 500;
-        color: var(--td-text-color-primary, #333);
+        color: var(--td-text-color-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
 
     .attachment_card_meta {
-        font-size: 11px;
-        color: var(--td-text-color-secondary, #999);
+        font-size: var(--app-text-xs);
+        color: var(--td-text-color-secondary);
         white-space: nowrap;
         box-sizing: border-box;
     }
@@ -316,10 +354,10 @@ const closePreImg = () => {
     width: 120px;
     height: 120px;
     object-fit: cover;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
-    border: 1px solid var(--td-border-level-2-color, #e7e7e7);
-    transition: opacity 0.2s;
+    border: 1px solid var(--td-border-level-2-color);
+    transition: opacity var(--app-motion-base);
 
     &:hover {
         opacity: 0.85;
@@ -331,29 +369,29 @@ const closePreImg = () => {
     align-items: center;
     padding: 1px 6px;
     border-radius: 3px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 500;
     line-height: 18px;
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-placeholder);
-    border: 1px solid var(--td-border-level-2-color, #e7e7e7);
+    border: 1px solid var(--td-border-level-2-color);
 
     &.channel-web {
         color: var(--td-brand-color);
         background: var(--td-brand-color-light);
-        border-color: var(--td-brand-color-2, rgba(0, 82, 217, 0.1));
+        border-color: var(--td-brand-color-2);
     }
 
     &.channel-api {
         color: var(--td-success-color);
-        background: var(--td-success-color-1, rgba(0, 168, 112, 0.06));
-        border-color: var(--td-success-color-2, rgba(0, 168, 112, 0.15));
+        background: var(--td-success-color-1);
+        border-color: var(--td-success-color-2);
     }
 
     &.channel-im {
         color: var(--td-warning-color);
-        background: var(--td-warning-color-1, rgba(237, 123, 0, 0.06));
-        border-color: var(--td-warning-color-2, rgba(237, 123, 0, 0.15));
+        background: var(--td-warning-color-1);
+        border-color: var(--td-warning-color-2);
     }
 }
 
@@ -366,8 +404,77 @@ html[theme-mode="dark"] {
 </style>
 
 <style scoped>
-.steer-failure { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 4px; }
+.steer-failure { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: var(--app-text-sm); color: var(--td-text-color-secondary); margin-bottom: 4px; }
 .steer-failure { margin-top: 6px; color: var(--td-error-color); }
-.steer-failure button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.steer-failure button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: inherit; cursor: pointer; }
 .steer-failure button:hover { background: var(--td-bg-color-secondarycontainer); }
+
+.user_msg_meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-height: 28px;
+    padding-right: 4px;
+    color: var(--td-text-color-placeholder);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease;
+}
+
+.user_msg_time {
+    font-size: var(--app-text-sm);
+    font-variant-numeric: tabular-nums;
+    line-height: 20px;
+}
+
+.user_msg_actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.user_msg_container:hover .user_msg_meta,
+.user_msg_container:focus-within .user_msg_meta {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.user_msg_action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--app-radius-sm);
+    background: transparent;
+    color: inherit;
+    font-size: var(--app-text-xl);
+    cursor: pointer;
+}
+
+.user_msg_action:hover {
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-container-hover);
+}
+
+.user_msg_action:focus-visible {
+    outline: 2px solid var(--td-text-color-secondary);
+    outline-offset: 2px;
+}
+
+@media (hover: none) {
+    .user_msg_meta {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .user_msg_meta {
+        transition: none;
+    }
+}
 </style>

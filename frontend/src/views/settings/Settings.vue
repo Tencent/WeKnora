@@ -1,227 +1,202 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal">
-      <div v-if="visible" class="settings-overlay">
-        <div class="settings-modal">
-          <!-- 关闭按钮 -->
-          <button class="close-btn" @click="handleClose" :aria-label="$t('general.close')">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+  <SettingsModalShell :visible="visible" :title="$t('general.settings')" @close="modalShell.requestClose">
+    <template #nav>
+      <template v-for="group in navGroups" :key="group.key">
+        <div class="nav-group-title">{{ group.label }}</div>
+        <template v-for="item in group.items" :key="item.key">
+          <div :class="['nav-item', {
+            'active': currentSection === item.key,
+            'has-submenu': item.children && item.children.length > 0,
+            'expanded': expandedMenus.includes(item.key)
+          }]" @click="handleNavClick(item)">
+            <!-- 网络搜索使用自定义 SVG 图标 -->
+            <svg v-if="item.key === 'websearch'" width="17" height="17" viewBox="0 0 18 18" fill="none"
+              xmlns="http://www.w3.org/2000/svg" class="nav-icon">
+              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
+              <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+              <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+              <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
+                stroke-linecap="round" />
+              <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                stroke-linecap="round" />
             </svg>
-          </button>
-
-          <div class="settings-container">
-            <!-- 左侧导航 -->
-            <div class="settings-sidebar">
-              <div class="sidebar-header">
-                <h2 class="sidebar-title">{{ $t('general.settings') }}</h2>
-              </div>
-              <div class="settings-nav">
-                <template v-for="group in navGroups" :key="group.key">
-                  <div class="nav-group-title">{{ group.label }}</div>
-                  <template v-for="item in group.items" :key="item.key">
-                    <div :class="['nav-item', {
-                      'active': currentSection === item.key,
-                      'has-submenu': item.children && item.children.length > 0,
-                      'expanded': expandedMenus.includes(item.key)
-                    }]" @click="handleNavClick(item)">
-                      <!-- 网络搜索使用自定义 SVG 图标 -->
-                      <svg v-if="item.key === 'websearch'" width="17" height="17" viewBox="0 0 18 18" fill="none"
-                        xmlns="http://www.w3.org/2000/svg" class="nav-icon">
-                        <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
-                        <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-                        <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-                        <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
-                          stroke-linecap="round" />
-                        <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
-                          stroke-linecap="round" />
-                      </svg>
-                      <!-- WeKnora Cloud 使用自定义 W 图标 -->
-                      <svg v-else-if="item.key === 'weknoracloud'" width="17" height="17" viewBox="0 0 18 18"
-                        fill="none" xmlns="http://www.w3.org/2000/svg" class="nav-icon">
-                        <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" stroke="currentColor" stroke-width="1.2"
-                          fill="none" />
-                        <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3"
-                          stroke-linecap="round" stroke-linejoin="round" fill="none" />
-                      </svg>
-                      <!-- 沙箱：隔离运行窗口，避免和 Ollama / 系统设置共用 server -->
-                      <svg v-else-if="item.key === 'sandbox'" width="17" height="17" viewBox="0 0 18 18" fill="none"
-                        xmlns="http://www.w3.org/2000/svg" class="nav-icon">
-                        <rect x="2.5" y="3" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.2"
-                          fill="none" />
-                        <path d="M2.5 6.5h13" stroke="currentColor" stroke-width="1.2" />
-                        <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2"
-                          stroke-linecap="round" />
-                      </svg>
-                      <BrowserIcon v-else-if="item.key === 'browserconnection'" class="nav-icon" width="17" height="17" />
-                      <span v-else-if="item.emoji" class="nav-icon nav-icon-emoji">{{ item.emoji }}</span>
-                      <t-icon v-else :name="item.icon" class="nav-icon" />
-                      <span class="nav-label">{{ item.label }}</span>
-                      <t-icon v-if="item.children && item.children.length > 0"
-                        :name="expandedMenus.includes(item.key) ? 'chevron-down' : 'chevron-right'"
-                        class="expand-icon" />
-                    </div>
-
-                    <!-- 子菜单 -->
-                    <Transition name="submenu">
-                      <div v-if="item.children && expandedMenus.includes(item.key)" class="submenu">
-                        <div v-for="(child, childIndex) in item.children" :key="childIndex"
-                          :class="['submenu-item', { 'active': currentSubSection === child.key }]"
-                          @click.stop="handleSubMenuClick(item.key, child.key)">
-                          <span class="submenu-label">{{ child.label }}</span>
-                        </div>
-                      </div>
-                    </Transition>
-                  </template>
-                </template>
-              </div>
-            </div>
-
-            <!-- 右侧内容区域 -->
-            <div class="settings-content">
-              <div class="content-wrapper" :class="{
-                'content-wrapper--wide': currentSection === 'members',
-                'content-wrapper--full': SYSTEM_ADMIN_SECTIONS.has(currentSection) || isIntegrationSection(currentSection),
-              }">
-                <!-- 角色不允许访问当前 section（deep-link 进来 / 跨空间切换后角色降级）—— 优先于具体 section 渲染。
-                     正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
-                     的瞬间触发；这一段做兜底兼容旧 URL。 -->
-                <div v-if="!canSeeSection(currentSection)" class="section role-denied">
-                  <div class="role-denied-icon">
-                    <t-icon name="lock-on" size="48px" />
-                  </div>
-                  <div class="role-denied-title">{{ $t('settings.roleDenied.title') }}</div>
-                  <div class="role-denied-desc">{{ $t('settings.roleDenied.desc') }}</div>
-                </div>
-                <template v-else>
-                  <!-- 常规设置 -->
-                  <div v-if="currentSection === 'general'" class="section">
-                    <GeneralSettings />
-                  </div>
-
-                  <!-- Ollama 设置 -->
-                  <div v-if="currentSection === 'ollama'" class="section">
-                    <OllamaSettings />
-                  </div>
-
-                  <!-- WeKnora Cloud -->
-                  <div v-if="currentSection === 'weknoracloud'" class="section">
-                    <WeKnoraCloudSettings />
-                  </div>
-
-                  <!-- 模型配置 -->
-                  <div v-if="currentSection === 'models'" class="section">
-                    <ModelSettings />
-                  </div>
-
-                  <!-- 网络搜索配置 -->
-                  <div v-if="currentSection === 'websearch'" class="section">
-                    <WebSearchSettings />
-                  </div>
-
-                  <!-- 消息管理 -->
-                  <div v-if="currentSection === 'chathistory'" class="section">
-                    <ChatHistorySettings />
-                  </div>
-
-                  <!-- 长期记忆（空间级开关） -->
-                  <div v-if="currentSection === 'memory'" class="section">
-                    <MemoryWorkspaceSettings />
-                  </div>
-
-                  <!-- 我的记忆（个人记忆管理） -->
-                  <div v-if="currentSection === 'mymemory'" class="section">
-                    <MemorySettings />
-                  </div>
-
-                  <!-- 沙箱密钥（成员自己的技能 / 沙箱密钥） -->
-                  <div v-if="currentSection === 'envvars'" class="section">
-                    <EnvVarSettings />
-                  </div>
-
-                  <!-- 向量数据库引擎 -->
-                  <div v-if="currentSection === 'vectorstore'" class="section">
-                    <VectorStoreSettings />
-                  </div>
-
-                  <!-- 解析引擎 -->
-                  <div v-if="currentSection === 'parser'" class="section">
-                    <ParserEngineSettings />
-                  </div>
-
-                  <!-- 存储引擎 -->
-                  <div v-if="currentSection === 'storage'" class="section">
-                    <StorageBackendSettings />
-                  </div>
-
-                  <!-- 沙箱 -->
-                  <div v-if="currentSection === 'sandbox'" class="section">
-                    <SandboxSettings />
-                  </div>
-
-                  <!-- 技能目录：登记后可装到多份沙箱，智能体只从当前沙箱的就绪集合选用 -->
-                  <div v-if="currentSection === 'skills'" class="section">
-                    <SkillSettings :initial-sandbox-id="currentSubSection" />
-                  </div>
-
-                  <!-- 系统信息 -->
-                  <div v-if="currentSection === 'system'" class="section">
-                    <SystemInfo />
-                  </div>
-
-                  <!-- 系统管理员可见的全局运行时设置 -->
-                  <div v-if="currentSection === 'system-global'" class="section">
-                    <SystemSettings />
-                  </div>
-
-                  <!-- 系统管理员可见的任务队列运行状态 -->
-                  <div v-if="currentSection === 'runtime-queues'" class="section">
-                    <RuntimeQueues />
-                  </div>
-
-                  <div v-if="currentSection === 'platform-api-keys'" class="section">
-                    <PlatformAPIKeys />
-                  </div>
-
-                  <div v-if="currentSection === 'system-audit-log'" class="section">
-                    <SystemAuditLog />
-                  </div>
-
-                  <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
-                     用户的基本信息不该跟 owner 权限绑定。 -->
-                  <div v-if="currentSection === 'userprofile'" class="section">
-                    <UserProfile />
-                  </div>
-
-                  <div v-if="currentSection === 'browserconnection'" class="section"><BrowserConnectionSettings /></div>
-
-                  <!-- 空间信息 -->
-                  <div v-if="currentSection === 'tenant'" class="section">
-                    <TenantInfo />
-                  </div>
-
-                  <!-- 成员管理 (#1303 PR 3) -->
-                  <div v-if="currentSection === 'members'" class="section">
-                    <TenantMembers />
-                  </div>
-
-                  <!-- 发布集成 -->
-                  <div v-if="isIntegrationSection(currentSection)" class="section">
-                    <IntegrationSettingsSection :tab="integrationTabFromSection(currentSection)" />
-                  </div>
-
-                  <!-- MCP 服务 -->
-                  <div v-if="currentSection === 'mcp'" class="section">
-                    <McpSettings />
-                  </div>
-                </template>
-              </div>
-            </div>
+            <!-- WeKnora Cloud 使用自定义 W 图标 -->
+            <svg v-else-if="item.key === 'weknoracloud'" width="17" height="17" viewBox="0 0 18 18"
+              fill="none" xmlns="http://www.w3.org/2000/svg" class="nav-icon">
+              <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" stroke="currentColor" stroke-width="1.2"
+                fill="none" />
+              <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3"
+                stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            </svg>
+            <!-- 沙箱：隔离运行窗口，避免和 Ollama / 系统设置共用 server -->
+            <svg v-else-if="item.key === 'sandbox'" width="17" height="17" viewBox="0 0 18 18" fill="none"
+              xmlns="http://www.w3.org/2000/svg" class="nav-icon">
+              <rect x="2.5" y="3" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.2"
+                fill="none" />
+              <path d="M2.5 6.5h13" stroke="currentColor" stroke-width="1.2" />
+              <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2"
+                stroke-linecap="round" />
+            </svg>
+            <BrowserIcon v-else-if="item.key === 'browserconnection'" class="nav-icon" width="17" height="17" />
+            <span v-else-if="item.emoji" class="nav-icon nav-icon-emoji">{{ item.emoji }}</span>
+            <t-icon v-else :name="item.icon" class="nav-icon" />
+            <span class="nav-label">{{ item.label }}</span>
+            <t-icon v-if="item.children && item.children.length > 0"
+              :name="expandedMenus.includes(item.key) ? 'chevron-down' : 'chevron-right'"
+              class="expand-icon" />
           </div>
+
+          <!-- 子菜单 -->
+          <Transition name="submenu">
+            <div v-if="item.children && expandedMenus.includes(item.key)" class="submenu">
+              <div v-for="(child, childIndex) in item.children" :key="childIndex"
+                :class="['submenu-item', { 'active': currentSubSection === child.key }]"
+                @click.stop="handleSubMenuClick(item.key, child.key)">
+                <span class="submenu-label">{{ child.label }}</span>
+              </div>
+            </div>
+          </Transition>
+        </template>
+      </template>
+    </template>
+    <div class="content-wrapper" :class="{
+      'content-wrapper--wide': currentSection === 'members',
+      'content-wrapper--full': SYSTEM_ADMIN_SECTIONS.has(currentSection) || isIntegrationSection(currentSection),
+    }">
+      <!-- 角色不允许访问当前 section（deep-link 进来 / 跨空间切换后角色降级）—— 优先于具体 section 渲染。
+           正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
+           的瞬间触发；这一段做兜底兼容旧 URL。 -->
+      <div v-if="!canSeeSection(currentSection)" class="section role-denied">
+        <div class="role-denied-icon">
+          <t-icon name="lock-on" size="48px" />
         </div>
+        <div class="role-denied-title">{{ $t('settings.roleDenied.title') }}</div>
+        <div class="role-denied-desc">{{ $t('settings.roleDenied.desc') }}</div>
       </div>
-    </Transition>
-  </Teleport>
+      <template v-else>
+        <!-- 常规设置 -->
+        <div v-if="currentSection === 'general'" class="section">
+          <GeneralSettings />
+        </div>
+
+        <!-- Ollama 设置 -->
+        <div v-if="currentSection === 'ollama'" class="section">
+          <OllamaSettings />
+        </div>
+
+        <!-- WeKnora Cloud -->
+        <div v-if="currentSection === 'weknoracloud'" class="section">
+          <WeKnoraCloudSettings />
+        </div>
+
+        <!-- 模型配置 -->
+        <div v-if="currentSection === 'models'" class="section">
+          <ModelSettings />
+        </div>
+
+        <!-- 网络搜索配置 -->
+        <div v-if="currentSection === 'websearch'" class="section">
+          <WebSearchSettings />
+        </div>
+
+        <!-- 消息管理 -->
+        <div v-if="currentSection === 'chathistory'" class="section">
+          <ChatHistorySettings />
+        </div>
+
+        <!-- 长期记忆（空间级开关） -->
+        <div v-if="currentSection === 'memory'" class="section">
+          <MemoryWorkspaceSettings />
+        </div>
+
+        <!-- 我的记忆（个人记忆管理） -->
+        <div v-if="currentSection === 'mymemory'" class="section">
+          <MemorySettings />
+        </div>
+
+        <!-- 沙箱密钥（成员自己的技能 / 沙箱密钥） -->
+        <div v-if="currentSection === 'envvars'" class="section">
+          <EnvVarSettings />
+        </div>
+
+        <!-- 向量数据库引擎 -->
+        <div v-if="currentSection === 'vectorstore'" class="section">
+          <VectorStoreSettings />
+        </div>
+
+        <!-- 解析引擎 -->
+        <div v-if="currentSection === 'parser'" class="section">
+          <ParserEngineSettings />
+        </div>
+
+        <!-- 存储引擎 -->
+        <div v-if="currentSection === 'storage'" class="section">
+          <StorageBackendSettings />
+        </div>
+
+        <!-- 沙箱 -->
+        <div v-if="currentSection === 'sandbox'" class="section">
+          <SandboxSettings />
+        </div>
+
+        <!-- 技能目录：登记后可装到多份沙箱，智能体只从当前沙箱的就绪集合选用 -->
+        <div v-if="currentSection === 'skills'" class="section">
+          <SkillSettings :initial-sandbox-id="currentSubSection" />
+        </div>
+
+        <!-- 系统信息 -->
+        <div v-if="currentSection === 'system'" class="section">
+          <SystemInfo />
+        </div>
+
+        <!-- 系统管理员可见的全局运行时设置 -->
+        <div v-if="currentSection === 'system-global'" class="section">
+          <SystemSettings />
+        </div>
+
+        <!-- 系统管理员可见的任务队列运行状态 -->
+        <div v-if="currentSection === 'runtime-queues'" class="section">
+          <RuntimeQueues />
+        </div>
+
+        <div v-if="currentSection === 'platform-api-keys'" class="section">
+          <PlatformAPIKeys />
+        </div>
+
+        <div v-if="currentSection === 'system-audit-log'" class="section">
+          <SystemAuditLog />
+        </div>
+
+        <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
+           用户的基本信息不该跟 owner 权限绑定。 -->
+        <div v-if="currentSection === 'userprofile'" class="section">
+          <UserProfile />
+        </div>
+
+        <div v-if="currentSection === 'browserconnection'" class="section"><BrowserConnectionSettings /></div>
+
+        <!-- 空间信息 -->
+        <div v-if="currentSection === 'tenant'" class="section">
+          <TenantInfo />
+        </div>
+
+        <!-- 成员管理 (#1303 PR 3) -->
+        <div v-if="currentSection === 'members'" class="section">
+          <TenantMembers />
+        </div>
+
+        <!-- 发布集成 -->
+        <div v-if="isIntegrationSection(currentSection)" class="section">
+          <IntegrationSettingsSection :tab="integrationTabFromSection(currentSection)" />
+        </div>
+
+        <!-- MCP 服务 -->
+        <div v-if="currentSection === 'mcp'" class="section">
+          <McpSettings />
+        </div>
+      </template>
+    </div>
+  </SettingsModalShell>
 </template>
 
 <script setup lang="ts">
@@ -233,6 +208,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useModalShell } from '@/composables/useModalShell'
+import SettingsModalShell from '@/components/SettingsModalShell.vue'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
@@ -601,12 +578,11 @@ watch(navItems, (items) => {
   }
 })
 
-// ESC 键关闭
-const handleEscape = (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && visible.value) {
-    handleClose()
-  }
-}
+// Esc / 遮罩点击关闭（与其他设置类弹窗共用同一壳层交互）
+const modalShell = useModalShell({
+  visible: () => visible.value,
+  close: handleClose,
+})
 
 // 处理快捷导航事件
 const handleSettingsNav = (e: CustomEvent) => {
@@ -634,7 +610,6 @@ const handleSettingsNav = (e: CustomEvent) => {
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', handleEscape)
   window.addEventListener('settings-nav', handleSettingsNav as EventListener)
 })
 
@@ -645,162 +620,19 @@ watch(currentSection, () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('settings-nav', handleSettingsNav as EventListener)
 })
 </script>
 
 <style lang="less" scoped>
 /* 遮罩层 */
-.settings-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  backdrop-filter: blur(4px);
-}
-
 /* 弹窗容器 */
-.settings-modal {
-  position: relative;
-  width: 100%;
-  // 1080×780 trades a touch of small-screen real estate for noticeably
-  // less cramped tables (member list, system settings rows). Outer
-  // padding is 20px so 1080 + 40 = 1120, comfortably within typical
-  // laptops (1280+). Below 1100px viewport the `width: 100%` kicks in
-  // and the modal shrinks to fit minus the 20px padding.
-  max-width: 1080px;
-  height: 780px;
-  max-height: calc(100vh - 40px);
-  background: var(--td-bg-color-container);
-  border-radius: 12px;
-  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
 /* 关闭按钮 */
-.close-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  color: var(--td-text-color-secondary);
-  cursor: pointer;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  z-index: 10;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-    color: var(--td-text-color-primary);
-  }
-}
-
-.settings-container {
-  display: flex;
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-}
-
 /* 左侧导航栏：略紧凑于最初版，字号与留白适中 */
-.settings-sidebar {
-  width: 208px;
-  background-color: var(--td-bg-color-settings-modal);
-  border-right: 1px solid var(--td-component-stroke);
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.sidebar-header {
-  padding: 16px 14px 12px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  flex-shrink: 0;
-}
-
-.sidebar-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  margin: 0;
-}
-
-.settings-nav {
-  padding: 8px 8px 12px;
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.nav-group-title {
-  padding: 9px 14px 4px;
-  color: var(--td-text-color-placeholder);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  padding: 6px 12px;
-  margin-bottom: 2px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: var(--td-text-color-primary);
-  font-size: 14px;
-  transition: all 0.2s ease;
-  user-select: none;
-
-  &:hover {
-    background-color: var(--td-bg-color-container-hover);
-    color: var(--td-text-color-primary);
-  }
-
-  &.active {
-    background-color: var(--td-bg-color-secondarycontainer);
-    color: var(--td-brand-color);
-    font-weight: 500;
-  }
-}
-
-.nav-icon {
-  margin-right: 9px;
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: inherit;
-}
-
-.nav-icon-emoji {
-  font-size: 14px;
-  line-height: 1;
-}
-
-.nav-label {
-  flex: 1;
-}
-
 .expand-icon {
   margin-left: 4px;
-  font-size: 14px;
-  transition: transform 0.2s ease;
+  font-size: var(--app-text-base);
+  transition: transform var(--app-motion-base) ease;
 }
 
 /* 子菜单 */
@@ -813,11 +645,11 @@ onUnmounted(() => {
 .submenu-item {
   padding: 5px 12px;
   margin-bottom: 2px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   cursor: pointer;
   color: var(--td-text-color-primary);
-  font-size: 13px;
-  transition: all 0.2s ease;
+  font-size: var(--app-text-md);
+  transition: all var(--app-motion-base) ease;
   user-select: none;
 
   &:hover {
@@ -839,7 +671,7 @@ onUnmounted(() => {
 /* 子菜单动画 */
 .submenu-enter-active,
 .submenu-leave-active {
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 }
 
 .submenu-enter-from {
@@ -863,12 +695,6 @@ onUnmounted(() => {
 }
 
 /* 右侧内容区域 */
-.settings-content {
-  flex: 1;
-  overflow-y: auto;
-  background-color: var(--td-bg-color-container);
-}
-
 .content-wrapper {
   // Bumped from 600 to 760 when the modal grew from 900→1080 (see
   // .settings-modal). Without this, single-column panes (General,
@@ -912,59 +738,7 @@ onUnmounted(() => {
 }
 
 /* 弹窗动画 */
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.modal-enter-active .settings-modal,
-.modal-leave-active .settings-modal {
-  transition: transform 0.2s ease, opacity 0.2s ease;
-}
-
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
-
-.modal-enter-from .settings-modal,
-.modal-leave-to .settings-modal {
-  transform: scale(0.95);
-  opacity: 0;
-}
-
 /* 滚动条样式 */
-.settings-nav::-webkit-scrollbar,
-.settings-content::-webkit-scrollbar {
-  width: 6px;
-}
-
-.settings-nav::-webkit-scrollbar-track {
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.settings-nav::-webkit-scrollbar-thumb {
-  background: var(--td-gray-color-5);
-  border-radius: 3px;
-}
-
-.settings-nav::-webkit-scrollbar-thumb:hover {
-  background: var(--td-gray-color-6);
-}
-
-.settings-content::-webkit-scrollbar-track {
-  background: var(--td-bg-color-container);
-}
-
-.settings-content::-webkit-scrollbar-thumb {
-  background: var(--td-gray-color-5);
-  border-radius: 3px;
-}
-
-.settings-content::-webkit-scrollbar-thumb:hover {
-  background: var(--td-gray-color-6);
-}
-
 .role-denied {
   display: flex;
   flex-direction: column;
@@ -980,13 +754,13 @@ onUnmounted(() => {
   }
 
   .role-denied-title {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   .role-denied-desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     max-width: 360px;
     line-height: 1.6;
