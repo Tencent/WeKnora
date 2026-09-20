@@ -286,7 +286,8 @@ const messages = {
         "download": "下载",
         "downloadFailed": "下载失败，请稍后重试",
         "inlinePreviewHint": "点击预览",
-        "inlineMissing": "文件不可用"
+        "inlineMissing": "文件不可用",
+        "inlineDeleted": "文件已删除"
       },
       "updatePlan": "更新计划",
       "webSearchFound": "找到 <strong>{count}</strong> 个网络搜索结果",
@@ -468,7 +469,10 @@ const messages = {
       },
       "knowledgeChunksList": {
         "chunkRange": "已加载 {fetched} / {total} 个分块",
-        "page": "第 {page} 页，每页 {pageSize} 个"
+        "page": "第 {page} 页，每页 {pageSize} 个",
+        "offsetRange": "第 {from}–{to} 块",
+        "queryMatches": "文档内搜索「{query}」命中 {count} 处",
+        "queryNoMatch": "文档内搜索「{query}」无匹配"
       },
       "attachmentParsing": {
         "parsedSummary": "已解析 {count} 个附件",
@@ -868,7 +872,8 @@ const messages = {
         "download": "ダウンロード",
         "downloadFailed": "ダウンロードに失敗しました。再試行してください。",
         "inlinePreviewHint": "クリックしてプレビュー",
-        "inlineMissing": "ファイルを利用できません"
+        "inlineMissing": "ファイルを利用できません",
+        "inlineDeleted": "ファイルは削除されました"
       },
       "updatePlan": "計画を更新",
       "webSearchFound": "Web検索結果を<strong>{count}</strong>件見つけました",
@@ -1050,7 +1055,10 @@ const messages = {
       },
       "knowledgeChunksList": {
         "chunkRange": "{total}件中{fetched}件のチャンクを読み込みました",
-        "page": "{page}ページ目、1ページ{pageSize}件"
+        "page": "{page}ページ目、1ページ{pageSize}件",
+        "offsetRange": "チャンク {from}–{to}",
+        "queryMatches": "文書内検索「{query}」: {count}件一致",
+        "queryNoMatch": "文書内検索「{query}」: 一致なし"
       },
       "attachmentParsing": {
         "parsedSummary": "{count}件の添付ファイルを解析しました",
@@ -1450,7 +1458,8 @@ const messages = {
         "download": "Download",
         "downloadFailed": "Download failed, please retry.",
         "inlinePreviewHint": "Click to preview",
-        "inlineMissing": "File unavailable"
+        "inlineMissing": "File unavailable",
+        "inlineDeleted": "File deleted"
       },
       "updatePlan": "Update Plan",
       "webSearchFound": "Found <strong>{count}</strong> web search result(s)",
@@ -1632,7 +1641,10 @@ const messages = {
       },
       "knowledgeChunksList": {
         "chunkRange": "Loaded {fetched} / {total} chunks",
-        "page": "Page {page}, {pageSize} per page"
+        "page": "Page {page}, {pageSize} per page",
+        "offsetRange": "Chunks {from}–{to}",
+        "queryMatches": "{count} matches for \"{query}\" in this document",
+        "queryNoMatch": "No matches for \"{query}\" in this document"
       },
       "attachmentParsing": {
         "parsedSummary": "Parsed {count} attachment(s)",

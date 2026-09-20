@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -457,6 +458,178 @@ func TestRemovingThePinnedInstallReclaimsTheReplacedZip(t *testing.T) {
 
 	require.Equal(t, []string{firstRef}, fx.deletedBundles,
 		"the pinned archive is reclaimed with its last reader, the definition's is not")
+}
+
+// A sandbox still on v1 is pinned to v1's archive once the catalog moves to
+// v2. Retrying it replays v1 for that sandbox alone: writing v1 back to the
+// definition would turn every other sandbox's upgrade target into v1 and delete
+// the only copy of v2.
+func TestReinstallOfAnInstallStillOnTheReplacedArchiveLeavesTheCatalogAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   string
+		guidance []string
+	}{
+		{name: "failed retry", status: types.SkillStatusFailed},
+		{name: "ready with guidance", status: types.SkillStatusReady, guidance: []string{"Install and verify the CLI"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newInstallFixture(t)
+			ctx := context.Background()
+			first := zipBundle(t, map[string]string{
+				"SKILL.md":           validSkillMD,
+				"scripts/extract.py": "print('v1')\n",
+			})
+			second := zipBundle(t, map[string]string{
+				"SKILL.md":           validSkillMD,
+				"scripts/extract.py": "print('v2')\n",
+			})
+			firstBundle, err := ParseSkillBundle(first)
+			require.NoError(t, err)
+			secondBundle, err := ParseSkillBundle(second)
+			require.NoError(t, err)
+
+			skillID, err := fx.svc.InstallSkill(ctx, 7, "cfg-1", first)
+			require.NoError(t, err)
+			fx.awaitSkillSettled(t, skillID)
+			installed, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+			require.NoError(t, err)
+			catalogID := installed.CatalogID
+			firstRef := fx.catalogRefFor(t, catalogID)
+
+			_, err = fx.svc.RegisterCatalogFromArchive(ctx, 7, second)
+			require.NoError(t, err)
+			secondRef := fx.catalogRefFor(t, catalogID)
+
+			installed, err = fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+			require.NoError(t, err)
+			installed.Status = tc.status
+			require.NoError(t, fx.skillRepo.UpdateSkill(ctx, installed))
+
+			_, err = fx.svc.ReinstallSkill(ctx, 7, "cfg-1", skillID, tc.guidance...)
+			require.NoError(t, err)
+			fx.awaitSkillSettled(t, skillID)
+
+			cat, err := fx.skillRepo.GetCatalog(ctx, 7, catalogID)
+			require.NoError(t, err)
+			require.Equal(t, secondBundle.SHA256, cat.BundleSHA256, "the definition stays on v2")
+			require.Equal(t, secondRef, cat.BundleRef)
+			require.NotContains(t, fx.deletedBundles, secondRef, "v2's archive must survive a v1 retry")
+			require.NotContains(t, fx.deletedBundles, firstRef, "the retried install still reads v1's archive")
+
+			installed, err = fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+			require.NoError(t, err)
+			require.Equal(t, firstRef, installed.BundleRef, "the retry keeps its pin to v1")
+			require.Equal(t, firstBundle.SHA256, installed.BundleSHA256)
+		})
+	}
+}
+
+// Upgrading is installing the catalog onto a sandbox that is still on the
+// replaced archive: the install moves to v2 and v1's archive, with no reader
+// left, is reclaimed.
+func TestInstallCatalogToConfigsUpgradesAnInstallStillOnTheReplacedArchive(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	first := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v1')\n",
+	})
+	second := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v2')\n",
+	})
+	secondBundle, err := ParseSkillBundle(second)
+	require.NoError(t, err)
+
+	skillID, err := fx.svc.InstallSkill(ctx, 7, "cfg-1", first)
+	require.NoError(t, err)
+	fx.awaitSkillSettled(t, skillID)
+	installed, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+	require.NoError(t, err)
+	firstRef := fx.catalogRefFor(t, installed.CatalogID)
+
+	cat, err := fx.svc.RegisterCatalogFromArchive(ctx, 7, second)
+	require.NoError(t, err)
+	result, err := fx.svc.InstallCatalogToConfigs(ctx, 7, cat.ID, []string{"cfg-1"})
+	require.NoError(t, err)
+	require.Equal(t, skillID, result.Installs["cfg-1"], "an upgrade reuses the sandbox's row")
+	fx.awaitSkillSettled(t, skillID)
+
+	installed, err = fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+	require.NoError(t, err)
+	require.Equal(t, types.SkillStatusReady, installed.Status)
+	require.Equal(t, secondBundle.SHA256, installed.BundleSHA256)
+	require.Empty(t, installed.BundleRef, "the upgraded install follows the definition again")
+	require.Equal(t, secondBundle.SHA256, fx.catalogSHAFor(t, cat.ID))
+	require.Contains(t, fx.deletedBundles, firstRef, "v1's archive lost its last reader")
+}
+
+// Installing a definition onto a sandbox reads it; it does not re-register it.
+// Rewriting the row would move its updated_at every time someone installs it.
+func TestInstallCatalogToConfigsLeavesTheDefinitionUntouched(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	cat, err := fx.svc.RegisterCatalogFromArchive(ctx, 7, zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v1')\n",
+	}))
+	require.NoError(t, err)
+	registered, err := fx.skillRepo.GetCatalog(ctx, 7, cat.ID)
+	require.NoError(t, err)
+	savedBefore := fx.savedBundles
+	fx.svc.now = func() time.Time { return registered.UpdatedAt.Add(time.Hour) }
+
+	result, err := fx.svc.InstallCatalogToConfigs(ctx, 7, cat.ID, []string{"cfg-1"})
+	require.NoError(t, err)
+	fx.awaitSkillSettled(t, result.Installs["cfg-1"])
+
+	after, err := fx.skillRepo.GetCatalog(ctx, 7, cat.ID)
+	require.NoError(t, err)
+	require.Equal(t, registered.UpdatedAt, after.UpdatedAt)
+	require.Equal(t, registered.BundleRef, after.BundleRef)
+	require.Equal(t, savedBefore, fx.savedBundles, "the definition's bytes are not stored again")
+}
+
+// Bytes neither the definition nor the row holds mean the catalog moved after
+// its archive was read. Installing them would write that older archive back.
+func TestStoredArchiveThatNoLongerMatchesTheCatalogIsRefused(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	first := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v1')\n",
+	})
+	second := zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v2')\n",
+	})
+	firstBundle, err := ParseSkillBundle(first)
+	require.NoError(t, err)
+	_, err = fx.svc.RegisterCatalogFromArchive(ctx, 7, second)
+	require.NoError(t, err)
+
+	_, err = fx.svc.storedArchiveKeepsItsPin(ctx, 7, nil, firstBundle)
+
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, apperrors.ErrConflict, appErr.Code)
+}
+
+func (f *installFixture) awaitSkillSettled(t *testing.T, skillID string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		row, err := f.skillRepo.GetSkill(context.Background(), 7, "cfg-1", skillID)
+		return err == nil && row != nil && row.Status != types.SkillStatusInstalling
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func (f *installFixture) catalogSHAFor(t *testing.T, catalogID string) string {
+	t.Helper()
+	cat, err := f.skillRepo.GetCatalog(context.Background(), 7, catalogID)
+	require.NoError(t, err)
+	require.NotNil(t, cat)
+	return cat.BundleSHA256
 }
 
 func (f *installFixture) catalogRefFor(t *testing.T, catalogID string) string {

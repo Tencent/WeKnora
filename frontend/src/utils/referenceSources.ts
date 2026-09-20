@@ -18,6 +18,7 @@ export type ReferenceListItem = {
   kind: ReferenceItemKind
   index: number
   title: string
+  fileName?: string
   url?: string
   domain?: string
   faviconUrl?: string
@@ -168,6 +169,7 @@ function buildDocumentItem(item: KnowledgeReferenceLike, index: number): Referen
   return {
     key: `doc:${documentKey}`,
     kind: 'document',
+    fileName: item.knowledge_filename,
     index,
     title,
     chunkId,

@@ -40,7 +40,13 @@ type Handler struct {
 	// after an agent turn completes. May be nil when the sandbox backend does
 	// not support artifact collection; handlers must check before using.
 	artifactCollector *service.ArtifactCollector
-	memoryService     interfaces.MemoryService // Service for cross-session long-term memory
+	// workspaceCheckpointer commits the sandbox /workspace at the end of each
+	// agent turn so session fork can roll back to a specific message. May be
+	// nil when the deployment has no sandbox backend.
+	workspaceCheckpointer *service.WorkspaceCheckpointer
+	// sandboxIDLookup resolves a session's bound sandbox without provisioning.
+	sandboxIDLookup SandboxIDLookup
+	memoryService   interfaces.MemoryService // Service for cross-session long-term memory
 	// userService / memberService back the sandbox terminal's self-contained
 	// handshake (browser WebSocket upgrades cannot send Authorization).
 	userService   interfaces.UserService
@@ -56,6 +62,9 @@ type Handler struct {
 	// redis backs the distributed desktop slot. Nil in Lite mode, where the
 	// in-process limiter is the correct degradation.
 	redis *redis.Client
+	// forkService branches a session at a chosen user message. May be nil in
+	// deployments where fork is not wired; ForkSession checks.
+	forkService sessionForker
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -78,6 +87,8 @@ func NewHandler(
 	imageResolver *docparser.ImageResolver,
 	temporaryDocuments interfaces.TemporaryDocumentService,
 	artifactCollector *service.ArtifactCollector,
+	workspaceCheckpointer *service.WorkspaceCheckpointer,
+	sandboxIDLookup SandboxIDLookup,
 	memoryService interfaces.MemoryService,
 	userService interfaces.UserService,
 	memberService interfaces.TenantMemberService,
@@ -87,33 +98,36 @@ func NewHandler(
 	desktopTickets service.SandboxDesktopTicketStore,
 	desktopLast service.SandboxDesktopLastStore,
 	rdb *redis.Client,
+	forkService *service.SessionForkService,
 ) *Handler {
-	return &Handler{
-		browserSkill:         browserSkill,
-		sessionService:       sessionService,
-		messageService:       messageService,
-		suggestionService:    suggestionService,
-		streamManager:        streamManager,
-		config:               config,
-		knowledgebaseService: knowledgebaseService,
-		customAgentService:   customAgentService,
-		tenantService:        tenantService,
-		agentShareService:    agentShareService,
-		kbShareService:       kbShareService,
-		fileService:          fileService,
-		resourceCatalog:      resourceCatalog,
-		storageResolver:      storageResolver,
-		modelService:         modelService,
-		temporaryDocuments:   temporaryDocuments,
-		artifactCollector:    artifactCollector,
-		memoryService:        memoryService,
-		userService:          userService,
-		memberService:        memberService,
-		terminalService:      terminalService,
-		desktopService:       desktopService,
-		desktopTickets:       desktopTickets,
-		desktopLast:          desktopLast,
-		redis:                rdb,
+	h := &Handler{
+		browserSkill:          browserSkill,
+		sessionService:        sessionService,
+		messageService:        messageService,
+		suggestionService:     suggestionService,
+		streamManager:         streamManager,
+		config:                config,
+		knowledgebaseService:  knowledgebaseService,
+		customAgentService:    customAgentService,
+		tenantService:         tenantService,
+		agentShareService:     agentShareService,
+		kbShareService:        kbShareService,
+		fileService:           fileService,
+		resourceCatalog:       resourceCatalog,
+		storageResolver:       storageResolver,
+		modelService:          modelService,
+		temporaryDocuments:    temporaryDocuments,
+		artifactCollector:     artifactCollector,
+		workspaceCheckpointer: workspaceCheckpointer,
+		sandboxIDLookup:       sandboxIDLookup,
+		memoryService:         memoryService,
+		userService:           userService,
+		memberService:         memberService,
+		terminalService:       terminalService,
+		desktopService:        desktopService,
+		desktopTickets:        desktopTickets,
+		desktopLast:           desktopLast,
+		redis:                 rdb,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
@@ -121,6 +135,10 @@ func NewHandler(
 			modelService,
 		),
 	}
+	if forkService != nil {
+		h.forkService = forkService
+	}
+	return h
 }
 
 // CreateSession godoc

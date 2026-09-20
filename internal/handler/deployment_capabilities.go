@@ -16,6 +16,7 @@ var DeploymentCapabilityKeys = []string{
 	"integrations.im",
 	"integrations.embed",
 	"integrations.api",
+	"integrations.mcpserver",
 	"settings.mcp",
 	"settings.websearch",
 	"settings.vectorstore",
@@ -43,6 +44,7 @@ type DeploymentFeatureAvailability struct {
 	IM            bool
 	Embed         bool
 	API           bool
+	MCPServer     bool
 	MCP           bool
 	WebSearch     bool
 	VectorStore   bool
@@ -86,6 +88,7 @@ func BuildDeploymentCapabilities(
 			"integrations.im":         supportedDeploymentCapability(available.IM),
 			"integrations.embed":      supportedDeploymentCapability(available.Embed),
 			"integrations.api":        supportedDeploymentCapability(available.API),
+			"integrations.mcpserver":  supportedDeploymentCapability(available.MCPServer),
 			"settings.mcp":            supportedDeploymentCapability(available.MCP),
 			"settings.websearch":      supportedDeploymentCapability(available.WebSearch),
 			"settings.vectorstore":    supportedDeploymentCapability(available.VectorStore),

@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
+import type { SendMessageOptions } from '@/utils/questionOrigin';
 import { useSettingsStore } from '@/stores/settings';
 import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useUIStore } from '@/stores/ui';
@@ -506,6 +507,10 @@ const sharedAgentOrgName = computed(() => {
 });
 
 const props = defineProps({
+  compact: {
+    type: Boolean,
+    default: false
+  },
   autoFocus: {
     type: Boolean,
     default: false
@@ -718,35 +723,6 @@ const modelDropdownStyle = ref<Record<string, string>>({});
 // 显示的知识库标签（最多显示2个）
 const displayedKbs = computed(() => selectedKbs.value.slice(0, 2));
 const remainingCount = computed(() => Math.max(0, selectedKbs.value.length - 2));
-
-// 根据不同状态组合计算输入框的 placeholder
-const inputPlaceholder = computed(() => {
-  // 如果选择了自定义智能体
-  if (isCustomAgent.value && selectedAgent.value) {
-    // 有描述时显示描述，否则显示"向 [名称] 提问"
-    if (selectedAgent.value.description) {
-      return selectedAgent.value.description;
-    }
-    return t('input.placeholderAgent', { name: selectedAgent.value.name });
-  }
-
-  const hasKnowledge = allSelectedItems.value.length > 0;
-  const hasWebSearch = isWebSearchEnabled.value && isWebSearchConfigured.value;
-
-  if (hasKnowledge && hasWebSearch) {
-    // 有知识库 + 有网络搜索
-    return t('input.placeholderKbAndWeb');
-  } else if (hasKnowledge) {
-    // 有知识库 + 无网络搜索
-    return t('input.placeholderWithContext');
-  } else if (hasWebSearch) {
-    // 无知识库 + 有网络搜索
-    return t('input.placeholderWebOnly');
-  } else {
-    // 无知识库 + 无网络搜索（纯模型对话）
-    return t('input.placeholder');
-  }
-});
 
 // 加载知识库列表（自己的 + 共享的，用于 @ 提及等）
 const loadKnowledgeBases = async (force = false) => {
@@ -1948,7 +1924,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], options: SendMessageOptions): void;
   (e: 'stop-generation'): void;
   (e: 'stop-confirmed'): void;
   (e: 'stop-failed'): void;
@@ -1960,7 +1936,13 @@ const emit = defineEmits<{
   (e: 'retry-steer', steerId: string): void;
 }>();
 
-const createSession = async (val: string, delivery: 'inject' | 'after' = 'after') => {
+// options ride along with this one send only: a send that returns early (or
+// steers into the running turn) drops them instead of leaving them behind.
+const createSession = async (
+  val: string,
+  delivery: 'inject' | 'after' = 'after',
+  options: SendMessageOptions = {},
+) => {
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
@@ -2017,7 +1999,7 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
 
   // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
   if (props.embeddedMode) {
-    emit('send-msg', val, selectedModelId.value || '', [], [], []);
+    emit('send-msg', val, selectedModelId.value || '', [], [], [], options);
     clearvalue();
     void focusInput();
     return;
@@ -2080,7 +2062,7 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
 
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles, options);
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2610,16 +2592,24 @@ onBeforeRouteUpdate((to, from, next) => {
 
 defineExpose({
   focusInput,
-  triggerSend(text: string) {
+  triggerSend(text: string, options: SendMessageOptions = {}) {
     if (!text.trim()) return;
     query.value = text;
-    nextTick(() => createSession(text));
+    nextTick(() => createSession(text, 'after', options));
+  },
+  /**
+   * Puts text in the composer WITHOUT sending it. Session fork uses this so
+   * the user lands on the branch with the original question ready to edit —
+   * the whole point of branching at a user message.
+   */
+  prefill(text: string) {
+    query.value = text;
   }
 });
 
 </script>
 <template>
-  <div class="answers-input" :class="{ 'is-embedded': embeddedMode }" @drop="onDrop" @dragover="onDragOver">
+  <div class="answers-input" :class="{ 'is-embedded': embeddedMode, 'is-compact': compact }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
     <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
@@ -2686,7 +2676,7 @@ defineExpose({
       </div>
 
       <!-- 实际输入框 -->
-      <t-textarea ref="textareaRef" v-model="query" :placeholder="inputPlaceholder" name="description" :autosize="true"
+      <t-textarea ref="textareaRef" v-model="query" :placeholder="t('input.placeholder')" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
         @paste="onPaste" />
 
@@ -2963,8 +2953,8 @@ const getImgSrc = (url: string) => {
   box-sizing: border-box;
   max-height: 140px;
   overflow-y: auto;
-  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
-  border: 1px solid var(--td-component-stroke, #dcdcdc);
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
   border-bottom: 0;
   border-radius: 10px 10px 0 0;
 }
@@ -2977,13 +2967,13 @@ const getImgSrc = (url: string) => {
 }
 
 .steer-queue-item + .steer-queue-item {
-  border-top: 1px solid var(--td-component-stroke, #dcdcdc);
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .steer-queue-text {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-primary);
   white-space: nowrap;
@@ -3000,7 +2990,7 @@ const getImgSrc = (url: string) => {
 
 .steer-queue-icon {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-secondary);
 }
 
@@ -3012,17 +3002,16 @@ const getImgSrc = (url: string) => {
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   cursor: pointer;
   &:hover:not(:disabled) { background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary); }
   &:disabled { opacity: 0.4; cursor: default; }
 }
 
-.steer-sending { animation: steer-spin 1s linear infinite; }
-@keyframes steer-spin { to { transform: rotate(360deg); } }
+.steer-sending { animation: wk-spin 1s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .steer-sending { animation: none; } }
 
 /* 富文本输入框容器 */
@@ -3030,13 +3019,13 @@ const getImgSrc = (url: string) => {
   position: relative;
   width: 100%;
   max-width: 960px;
-  background: var(--td-bg-color-container, #FFF);
-  border-radius: 12px;
-  border: 1px solid var(--td-component-stroke, #dcdcdc);
+  background: var(--td-bg-color-container);
+  border-radius: var(--app-radius-xl);
+  border: 1px solid var(--td-component-stroke);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 8px 16px -4px rgba(0, 0, 0, 0.06);
 
   &:focus-within {
-    border-color: var(--td-brand-color, #07C05F);
+    border-color: var(--td-brand-color);
   }
 }
 
@@ -3047,8 +3036,8 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 5px;
   padding: 6px 12px 6px;
-  border-bottom: 1px solid var(--td-component-stroke, #dcdcdc);
-  background: var(--td-bg-color-container, #fff);
+  border-bottom: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
   border-radius: 11px 11px 0 0;
   /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
 }
@@ -3061,12 +3050,12 @@ const getImgSrc = (url: string) => {
   gap: 5px;
   min-height: 26px;
   padding: 3px 7px 3px 6px;
-  border-radius: var(--td-radius-medium, 6px);
+  border-radius: var(--td-radius-medium);
   box-sizing: border-box;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   cursor: default;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--app-motion-fast), border-color var(--app-motion-fast);
   line-height: 18px;
 
   &:hover {
@@ -3086,7 +3075,7 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip__icon {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3100,7 +3089,7 @@ const getImgSrc = (url: string) => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--td-bg-color-secondarycontainer, #f0f2f5);
+  background: var(--td-bg-color-secondarycontainer);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
   display: flex;
   align-items: center;
@@ -3130,12 +3119,12 @@ const getImgSrc = (url: string) => {
   height: 14px;
   margin-left: 1px;
   border-radius: 50%;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1;
   font-weight: 400;
   cursor: pointer;
   opacity: 0.5;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  transition: opacity var(--app-motion-fast), background var(--app-motion-fast), color var(--app-motion-fast);
   color: currentColor;
   flex-shrink: 0;
 }
@@ -3147,7 +3136,7 @@ const getImgSrc = (url: string) => {
 .mention-chip__remove:hover {
   opacity: 1;
   background: var(--td-bg-color-component);
-  color: var(--td-text-color-primary, #1f2937);
+  color: var(--td-text-color-primary);
 }
 
 /* 标签表面保持中性，仅用图标颜色表达资源类型。 */
@@ -3156,7 +3145,7 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip--kb .mention-chip__icon-wrap {
-  color: var(--td-brand-color, #07c05f);
+  color: var(--td-brand-color);
 }
 
 .mention-chip--faq {
@@ -3172,7 +3161,7 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip--file .mention-chip__icon-wrap {
-  color: var(--td-text-color-secondary, #6b7280);
+  color: var(--td-text-color-secondary);
 }
 
 .mention-chip--tag,
@@ -3202,10 +3191,10 @@ const getImgSrc = (url: string) => {
 :deep(.t-textarea__inner) {
   width: 100%;
   max-height: 152px !important;
-  min-height: 72px !important;
+  min-height: var(--composer-input-min-height, 72px) !important;
   resize: none;
-  color: var(--td-text-color-primary, #000000e6);
-  font-size: 16px;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-xl);
   font-weight: 400;
   line-height: 24px;
   font-family: var(--app-font-family);
@@ -3222,9 +3211,9 @@ const getImgSrc = (url: string) => {
   }
 
   &::placeholder {
-    color: var(--td-text-color-placeholder, #00000066);
+    color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     font-weight: 400;
     line-height: 24px;
   }
@@ -3232,7 +3221,7 @@ const getImgSrc = (url: string) => {
 
 /* 当没有选中标签时，textarea 样式 */
 .rich-input-container:not(:has(.selected-tags-inline)) :deep(.t-textarea__inner) {
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   padding-top: 16px;
 }
 
@@ -3254,6 +3243,24 @@ const getImgSrc = (url: string) => {
   }
 }
 
+.answers-input.is-compact {
+  --composer-input-min-height: 56px;
+
+  .rich-input-container :deep(.t-textarea__inner) {
+    padding: 12px 14px;
+  }
+
+  .control-bar {
+    margin: 0 12px 8px;
+    padding-top: 4px;
+  }
+
+  .control-icon {
+    width: 16px;
+    height: 16px;
+  }
+}
+
 .control-left {
   display: flex;
   align-items: center;
@@ -3271,15 +3278,15 @@ const getImgSrc = (url: string) => {
   justify-content: center;
   gap: 4px;
   padding: 6px 10px;
-  border-radius: 6px;
-  color: var(--td-text-color-secondary, #666);
+  border-radius: var(--app-radius-sm);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--app-motion-instant), color var(--app-motion-instant);
   user-select: none;
   flex-shrink: 0;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
+    background: var(--td-bg-color-secondarycontainer-hover);
   }
 
   &.disabled {
@@ -3287,7 +3294,7 @@ const getImgSrc = (url: string) => {
     cursor: not-allowed;
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 }
@@ -3298,7 +3305,7 @@ const getImgSrc = (url: string) => {
   min-width: auto;
   font-weight: 500;
   position: relative;
-  border: .5px solid var(--td-component-border, #e7e7e7);
+  border: .5px solid var(--td-component-border);
 }
 
 .agent-icon {
@@ -3315,12 +3322,12 @@ const getImgSrc = (url: string) => {
   height: 20px;
   border-radius: 5px;
   flex-shrink: 0;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 }
 
 .agent-mode-text {
-  font-size: 13px;
-  color: var(--td-text-color-secondary, #666);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
   font-weight: 500;
   white-space: nowrap;
   margin: 0 4px;
@@ -3339,7 +3346,7 @@ const getImgSrc = (url: string) => {
   position: relative;
 
   &:hover:not(.disabled):not(.active) {
-    color: var(--td-text-color-primary, #333);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
@@ -3357,7 +3364,7 @@ const getImgSrc = (url: string) => {
     opacity: 0.85;
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+      background: var(--td-bg-color-secondarycontainer);
     }
 
     &.active:hover {
@@ -3381,7 +3388,7 @@ const getImgSrc = (url: string) => {
   border-radius: 7px;
   background: var(--td-brand-color);
   color: var(--td-text-color-anti);
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -3389,8 +3396,8 @@ const getImgSrc = (url: string) => {
 }
 
 .kb-btn-text {
-  font-size: 13px;
-  color: var(--td-text-color-secondary, #666);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -3409,11 +3416,11 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: center;
   position: relative;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #f0f0f0);
-    color: var(--td-text-color-primary, #333);
+    background: var(--td-bg-color-secondarycontainer-hover);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
@@ -3427,7 +3434,7 @@ const getImgSrc = (url: string) => {
     right: -2px;
     background: #07C05F;
     color: #fff;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
     border-radius: 50%;
@@ -3448,11 +3455,11 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: center;
   position: relative;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #f0f0f0);
-    color: var(--td-text-color-primary, #333);
+    background: var(--td-bg-color-secondarycontainer-hover);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
@@ -3466,7 +3473,7 @@ const getImgSrc = (url: string) => {
     right: -2px;
     background: #07C05F;
     color: #fff;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
     border-radius: 50%;
@@ -3488,9 +3495,9 @@ const getImgSrc = (url: string) => {
   position: relative;
   width: 60px;
   height: 60px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
-  border: 1px solid var(--td-border-level-1-color, #e7e7e7);
+  border: 1px solid var(--td-border-level-1-color);
 
   .image-preview-thumb {
     width: 100%;
@@ -3510,7 +3517,7 @@ const getImgSrc = (url: string) => {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     cursor: pointer;
     line-height: 1;
 
@@ -3527,7 +3534,7 @@ const getImgSrc = (url: string) => {
   background: transparent;
 
   &:hover:not(.disabled):not(.active) {
-    color: var(--td-text-color-primary, #333);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
@@ -3582,14 +3589,14 @@ const getImgSrc = (url: string) => {
 
   &:not(.active) {
     .websearch-icon {
-      color: var(--td-text-color-secondary, #666);
+      color: var(--td-text-color-secondary);
     }
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer-hover, #f0f0f0);
+      background: var(--td-bg-color-secondarycontainer-hover);
 
       .websearch-icon {
-        color: var(--td-text-color-primary, #333);
+        color: var(--td-text-color-primary);
       }
     }
   }
@@ -3599,7 +3606,7 @@ const getImgSrc = (url: string) => {
     opacity: 0.85;
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+      background: var(--td-bg-color-secondarycontainer);
     }
 
     &.active:hover {
@@ -3611,7 +3618,7 @@ const getImgSrc = (url: string) => {
 :global(.input-field-tooltip) {
   .t-popup__content {
     box-shadow: var(--td-shadow-2);
-    border: .5px solid var(--td-component-border, #e7e7e7);
+    border: .5px solid var(--td-component-border);
   }
 }
 
@@ -3620,8 +3627,8 @@ const getImgSrc = (url: string) => {
   flex-direction: column;
   gap: 6px;
   max-width: 220px;
-  font-size: 12px;
-  color: var(--td-text-color-primary, #333);
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-primary);
 }
 
 :global(.tooltip-with-link a) {
@@ -3643,7 +3650,7 @@ const getImgSrc = (url: string) => {
   width: 10px;
   height: 10px;
   margin-left: 2px;
-  transition: transform 0.12s;
+  transition: transform var(--app-motion-instant);
 
   &.rotate {
     transform: rotate(180deg);
@@ -3661,7 +3668,7 @@ const getImgSrc = (url: string) => {
   height: 28px;
   padding: 0;
   box-sizing: border-box;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   line-height: 1;
 
   &:focus-visible {
@@ -3710,13 +3717,13 @@ const getImgSrc = (url: string) => {
   padding: 2px 8px;
   min-width: 100px;
   height: 22px;
-  border-radius: 6px;
-  border: .5px solid var(--td-component-border, #e7e7e7);
-  transition: background 0.12s, border-color 0.12s;
+  border-radius: var(--app-radius-sm);
+  border: .5px solid var(--td-component-border);
+  transition: background var(--app-motion-instant), border-color var(--app-motion-instant);
   cursor: pointer;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
+    background: var(--td-bg-color-secondarycontainer-hover);
   }
 
   &.disabled {
@@ -3724,16 +3731,16 @@ const getImgSrc = (url: string) => {
     cursor: not-allowed;
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 }
 
 .model-selector-name {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3741,9 +3748,9 @@ const getImgSrc = (url: string) => {
 
 .model-selector-ctx {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-variant-numeric: tabular-nums;
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
   font-weight: 400;
 
   &.is-default {
@@ -3754,9 +3761,9 @@ const getImgSrc = (url: string) => {
 .model-dropdown-arrow {
   width: 10px;
   height: 10px;
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
   flex-shrink: 0;
-  transition: transform 0.12s;
+  transition: transform var(--app-motion-instant);
 
   &.rotate {
     transform: rotate(180deg);
@@ -3764,7 +3771,7 @@ const getImgSrc = (url: string) => {
 }
 
 .model-selector-trigger.disabled .model-dropdown-arrow {
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
 }
 
 .model-selector-overlay {
@@ -3780,7 +3787,7 @@ const getImgSrc = (url: string) => {
   z-index: 10000;
   background: var(--td-bg-color-container);
   border: .5px solid var(--td-component-border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   box-shadow: var(--td-shadow-2);
   overflow: hidden;
   display: flex;
@@ -3811,7 +3818,7 @@ const getImgSrc = (url: string) => {
   padding: 8px 10px;
   border-bottom: .5px solid var(--td-component-stroke);
   background: var(--td-bg-color-container);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-secondary);
 }
@@ -3831,17 +3838,17 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: .5px solid transparent;
   background: transparent;
   color: var(--td-brand-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--app-motion-instant);
 
   .add-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1;
     font-weight: 400;
   }
@@ -3859,8 +3866,8 @@ const getImgSrc = (url: string) => {
   gap: 8px;
   padding: 6px 8px;
   cursor: pointer;
-  transition: background 0.12s;
-  border-radius: 6px;
+  transition: background var(--app-motion-instant);
+  border-radius: var(--app-radius-sm);
   margin-bottom: 4px;
 
   &:last-child {
@@ -3911,7 +3918,7 @@ const getImgSrc = (url: string) => {
 }
 
 .model-option-name {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -3920,19 +3927,19 @@ const getImgSrc = (url: string) => {
 }
 
 .model-option-raw-name {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
 }
 
 .model-option-ctx {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   line-height: 18px;
 
   &.is-default {
@@ -3952,10 +3959,10 @@ const getImgSrc = (url: string) => {
 .agent-mode-selector-dropdown {
   position: fixed !important;
   z-index: 9999;
-  background: var(--td-bg-color-container, #fff);
-  border-radius: 10px;
-  box-shadow: var(--td-shadow-2, 0 6px 28px rgba(15, 23, 42, 0.08));
-  border: 1px solid var(--td-component-border, #e7e9eb);
+  background: var(--td-bg-color-container);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--td-shadow-2);
+  border: 1px solid var(--td-component-border);
   overflow: hidden;
   padding: 6px 8px;
   min-width: 200px;
@@ -3972,13 +3979,13 @@ const getImgSrc = (url: string) => {
   justify-content: space-between;
   padding: 8px 10px;
   cursor: pointer;
-  transition: background 0.12s;
-  border-radius: 6px;
+  transition: background var(--app-motion-instant);
+  border-radius: var(--app-radius-sm);
   position: relative;
   margin: 4px 6px;
 
   &:hover:not(.disabled) {
-    background: var(--td-bg-color-container-hover, #f6f8f7);
+    background: var(--td-bg-color-container-hover);
   }
 
   &.disabled {
@@ -3991,7 +3998,7 @@ const getImgSrc = (url: string) => {
   }
 
   &.selected {
-    background: var(--td-brand-color-light, #eefdf5);
+    background: var(--td-brand-color-light);
 
     .agent-mode-option-name {
       color: var(--td-success-color);
@@ -4009,16 +4016,16 @@ const getImgSrc = (url: string) => {
 }
 
 .agent-mode-option-name {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
-  color: var(--td-text-color-primary, #222);
+  color: var(--td-text-color-primary);
   line-height: 1.4;
-  transition: color 0.12s;
+  transition: color var(--app-motion-instant);
 }
 
 .agent-mode-option-desc {
-  font-size: 11px;
-  color: var(--td-text-color-secondary, #8b9196);
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-secondary);
   line-height: 1.3;
 }
 
@@ -4037,26 +4044,26 @@ const getImgSrc = (url: string) => {
 
   .warning-icon {
     color: var(--td-warning-color);
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 }
 
 .agent-mode-footer {
   padding: 6px 10px;
-  border-top: 1px solid var(--td-component-border, #f2f4f5);
+  border-top: 1px solid var(--td-component-border);
   margin-top: 2px;
-  background: var(--td-bg-color-secondarycontainer, #fafcfc);
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .agent-mode-link {
   color: var(--td-success-color);
   text-decoration: none;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  transition: all 0.12s;
+  transition: all var(--app-motion-instant);
 
   &:hover {
     color: var(--td-brand-color-active);

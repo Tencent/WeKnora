@@ -36,7 +36,7 @@ const props = defineProps<Props>();
 
 <style lang="less" scoped>
 .plan-display {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   background: transparent;
   padding: 6px 0 6px 12px;
@@ -57,7 +57,7 @@ const props = defineProps<Props>();
   align-items: flex-start;
   gap: 7px;
   padding: 1px 0;
-  transition: all 0.15s;
+  transition: all var(--app-motion-fast);
   
   &:last-child {
     margin-bottom: 0;
@@ -98,7 +98,7 @@ const props = defineProps<Props>();
   flex: 1;
   color: var(--td-text-color-secondary);
   line-height: 1.5;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   
   &.completed {
     text-decoration: line-through;
@@ -107,7 +107,7 @@ const props = defineProps<Props>();
   
   .sparkle {
     margin-left: 3px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
   }
 }
 
@@ -116,7 +116,7 @@ const props = defineProps<Props>();
   text-align: center;
   color: var(--td-text-color-placeholder);
   font-style: italic;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 </style>
 

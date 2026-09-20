@@ -32,7 +32,7 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 }
 
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
-	return nil
+	return fmt.Errorf("QQ messages require an authenticated gateway connection")
 }
 
 func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {

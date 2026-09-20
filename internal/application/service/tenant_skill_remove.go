@@ -409,9 +409,9 @@ func (s *TenantSkillService) finishRemoval(
 
 	// Read before the delete: past it the only record of what this row named is
 	// gone, and a pinned archive would be left behind with nothing to reclaim it.
-	pinned := ""
+	var pinned []string
 	if row, err := s.skills.GetSkill(ctx, tenantID, configID, skillID); err == nil && row != nil {
-		pinned = strings.TrimSpace(row.BundleRef)
+		pinned = installBundleRefs(row)
 	}
 	if err := s.retrySkillBookkeeping(ctx, func() error {
 		return s.skills.DeleteSkill(ctx, tenantID, configID, skillID)
@@ -421,7 +421,9 @@ func (s *TenantSkillService) finishRemoval(
 	}
 	// The definition's archive survives this; only an object no catalog and no
 	// other install names is reclaimed.
-	s.releaseInstallBundle(ctx, tenantID, pinned)
+	for _, ref := range pinned {
+		s.releaseInstallBundle(ctx, tenantID, ref)
+	}
 	// Only an image that actually changed can leave a bound sandbox out of
 	// date. Marking after a removal that moved no pointer would destroy and
 	// rebuild every live sandbox of the config - throwing away each session's
@@ -444,12 +446,15 @@ func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
 		return
 	}
 	status := types.SkillStatusFailed
+	abandoned := ""
 	_ = s.updateSkillFields(ctx, tenantID, configID, skillID,
 		func(e *types.TenantSkillEntity) {
 			// A skill that reached an image is still in it, so it goes back to
 			// ready and the operator can retry. One that never did has nothing
 			// to be ready for, and calling it ready would point the agent at
-			// files no image carries.
+			// files no image carries. A row whose upgrade never landed goes
+			// back to the version the image actually has.
+			abandoned = restoreServedVersion(e)
 			if e.InstalledSnapshotID != "" {
 				status = types.SkillStatusReady
 			}
@@ -457,9 +462,38 @@ func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
 			e.Error = cause.Error()
 			e.InstallingSince = nil
 		})
+	s.releaseInstallBundle(ctx, tenantID, abandoned)
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 100, Stage: "failed", Status: status, Log: cause.Error(),
 	})
+}
+
+// installReadsBundle reports whether an install still needs the object ref:
+// the archive its row names, or the one its served version was built from.
+func installReadsBundle(row *types.TenantSkillEntity, ref string) bool {
+	if row == nil || ref == "" {
+		return false
+	}
+	for _, named := range installBundleRefs(row) {
+		if named == ref {
+			return true
+		}
+	}
+	return false
+}
+
+// installBundleRefs lists the objects an install names.
+func installBundleRefs(row *types.TenantSkillEntity) []string {
+	var refs []string
+	if ref := strings.TrimSpace(row.BundleRef); ref != "" {
+		refs = append(refs, ref)
+	}
+	if row.Served != nil {
+		if ref := strings.TrimSpace(row.Served.BundleRef); ref != "" && (len(refs) == 0 || refs[0] != ref) {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
 }
 
 // removeStillOwnsTheRow is the lock-side counterpart of RemoveSkill's
@@ -511,7 +545,7 @@ func (s *TenantSkillService) releaseInstallBundle(
 		return
 	}
 	for _, row := range installs {
-		if row != nil && strings.TrimSpace(row.BundleRef) == ref {
+		if installReadsBundle(row, ref) {
 			return
 		}
 	}

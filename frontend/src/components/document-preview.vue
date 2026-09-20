@@ -625,7 +625,7 @@ onUnmounted(() => {
 <style scoped lang="less">
 // ── Design tokens ──
 @border-color: var(--td-component-stroke);
-@border-radius: 6px;
+@border-radius: var(--app-radius-sm);
 @bg-white: var(--td-bg-color-container);
 @bg-subtle: var(--td-bg-color-container);
 @bg-muted: var(--td-bg-color-secondarycontainer);
@@ -646,7 +646,7 @@ onUnmounted(() => {
 // That produces an extra bit of scroll inside the non-fullscreen preview,
 // which is acceptable for document reading. Not worth the complexity of
 // inverse-scaling here.
-@transition: all 0.2s ease;
+@transition: all var(--app-motion-base) ease;
 
 // ── Shared container mixin ──
 .preview-container() {
@@ -788,7 +788,7 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: @text-primary;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
 }
 
@@ -817,7 +817,7 @@ onUnmounted(() => {
 
   :deep(.t-button__icon) {
     margin: 0;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 }
 
@@ -829,7 +829,7 @@ onUnmounted(() => {
   justify-content: center;
   padding: 60px 20px;
   gap: 16px;
-  .loading-text { color: @text-tertiary; font-size: 14px; }
+  .loading-text { color: @text-tertiary; font-size: var(--app-text-base); }
 }
 
 .preview-error {
@@ -840,7 +840,7 @@ onUnmounted(() => {
   padding: 60px 20px;
   gap: 12px;
   color: @error-color;
-  p { margin: 0; font-size: 14px; color: @text-secondary; }
+  p { margin: 0; font-size: var(--app-text-base); color: @text-secondary; }
 }
 
 .preview-unsupported {
@@ -851,8 +851,8 @@ onUnmounted(() => {
   padding: 60px 20px;
   gap: 12px;
   color: @text-disabled;
-  p { margin: 0; font-size: 14px; color: @text-secondary; }
-  .unsupported-hint { font-size: 12px; color: @text-tertiary; }
+  p { margin: 0; font-size: var(--app-text-base); color: @text-secondary; }
+  .unsupported-hint { font-size: var(--app-text-sm); color: @text-tertiary; }
 }
 
 // ── PDF ──
@@ -890,7 +890,7 @@ onUnmounted(() => {
     margin: 0;
     padding: 16px;
     background: @bg-subtle;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.6;
     code {
       white-space: pre;
@@ -932,10 +932,10 @@ onUnmounted(() => {
       max-width: 100%;
       max-height: calc(100vh - 280px);
       border-radius: @border-radius;
-      box-shadow: 0 2px 12px rgba(7, 192, 95, 0.08);
+      box-shadow: 0 2px 12px color-mix(in srgb, var(--td-brand-color) 8%, transparent);
       object-fit: contain;
     }
-    .image-info { font-size: 12px; color: @text-tertiary; }
+    .image-info { font-size: var(--app-text-sm); color: @text-tertiary; }
   }
 }
 
@@ -977,7 +977,7 @@ onUnmounted(() => {
     margin: 0;
     padding: 16px;
     background: @bg-subtle;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.6;
     code {
       white-space: pre;
@@ -999,7 +999,7 @@ onUnmounted(() => {
     align-items: center;
     gap: 16px;
     color: @text-secondary;
-    .audio-filename { font-size: 14px; color: @text-primary; margin: 0; }
+    .audio-filename { font-size: var(--app-text-base); color: @text-primary; margin: 0; }
     .audio-element { width: 100%; max-width: 480px; }
   }
 }
@@ -1022,28 +1022,28 @@ onUnmounted(() => {
 // ── Deep styles (v-html / third-party components) ──
 
 // Shared table mixin for v-html content
-.preview-table() {
+.preview-table(@header-bg: @accent-bg; @hover-bg: @accent-bg) {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   th, td {
     border: 1px solid @table-border;
     padding: 6px 12px;
     text-align: left;
   }
   th {
-    background: @accent-bg;
+    background: @header-bg;
     font-weight: 600;
     color: @text-primary;
   }
   tr:hover td {
-    background: @accent-bg;
+    background: @hover-bg;
     transition: @transition;
   }
 }
 
 :deep(.markdown-body) {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.7;
   color: @text-primary;
   word-break: break-word;
@@ -1054,15 +1054,15 @@ onUnmounted(() => {
     font-weight: 600;
     line-height: 1.4;
   }
-  h1 { font-size: 24px; border-bottom: 1px solid @border-color; padding-bottom: 8px; }
-  h2 { font-size: 20px; border-bottom: 1px solid @border-color; padding-bottom: 6px; }
+  h1 { font-size: var(--app-text-4xl); border-bottom: 1px solid @border-color; padding-bottom: 8px; }
+  h2 { font-size: var(--app-text-3xl); border-bottom: 1px solid @border-color; padding-bottom: 6px; }
   h3 { font-size: 17px; }
 
   p { margin: 8px 0; }
   blockquote {
     margin: 12px 0;
     padding: 8px 16px;
-    border-left: 4px solid @accent;
+    border-left: 4px solid @border-color;
     background: @bg-subtle;
     color: var(--td-text-color-secondary);
   }
@@ -1095,7 +1095,10 @@ onUnmounted(() => {
     }
   }
 
-  table { .preview-table(); margin: 12px 0; }
+  table {
+    .preview-table(@bg-muted; var(--td-bg-color-container-hover));
+    margin: 12px 0;
+  }
 
   pre {
     margin: 12px 0;
@@ -1103,7 +1106,7 @@ onUnmounted(() => {
     background: @bg-subtle;
     border-radius: @border-radius;
     overflow: auto;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     code { background: transparent; padding: 0; }
   }
@@ -1113,7 +1116,7 @@ onUnmounted(() => {
     border-radius: 3px;
     font-size: 0.9em;
   }
-  img { max-width: 100%; border-radius: 4px; }
+  img { max-width: 100%; border-radius: var(--app-radius-xs); }
   hr { border: none; border-top: 1px solid @border-color; margin: 20px 0; }
   a { color: @accent; text-decoration: none; &:hover { color: @accent-hover; text-decoration: underline; } }
   strong { font-weight: 600; }
@@ -1169,7 +1172,7 @@ onUnmounted(() => {
     background: @accent-bg;
     padding: 8px 16px;
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: @text-primary;
     border-bottom: 1px solid @border-color;
     z-index: 1;

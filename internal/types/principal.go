@@ -15,6 +15,7 @@ const (
 	PrincipalEmbedChannel    = "embed_channel"
 	PrincipalEmbedSession    = "embed_session"
 	PrincipalEmbedVisitor    = "embed_visitor"
+	PrincipalMCPEndpoint     = "mcp_endpoint"
 )
 
 // EmbedVisitorHeader is sent by the embed widget to identify a browser visitor
@@ -107,6 +108,15 @@ func EmbedVisitorIDFromContext(ctx context.Context) string {
 }
 
 // EmbedSessionPrincipal identifies a single embed visitor chat session.
+// MCPEndpointPrincipal identifies calls made through a workspace MCP
+// endpoint. Sessions and messages created by the ask tool are owned by it.
+func MCPEndpointPrincipal(tenantID uint64, endpointID string) Principal {
+	return Principal{
+		Type: PrincipalMCPEndpoint,
+		ID:   fmt.Sprintf("%d:%s", tenantID, endpointID),
+	}
+}
+
 func EmbedSessionPrincipal(tenantID uint64, channelID, sessionID string) Principal {
 	return Principal{
 		Type: PrincipalEmbedSession,

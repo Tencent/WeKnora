@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
+	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // AgentQA performs agent-based question answering with conversation history and streaming support
@@ -143,19 +147,20 @@ func (s *sessionService) AgentQA(
 	// AgentSteps on each historical assistant message are expanded into proper
 	// assistant_with_tool_calls + tool messages so the model can see what was
 	// tried last turn — except final_answer, which is replayed as the trailing
-	// canonical assistant message.
+	// canonical assistant message. History is sized by the window, not by a
+	// turn count: compaction and its persisted checkpoints keep it in bounds.
 	var llmContext []chat.Message
 	if agentConfig.MultiTurnEnabled {
-		historyTurns := agentConfig.HistoryTurns
-		if historyTurns <= 0 {
-			historyTurns = 5
-		}
-		llmContext, err = LoadAgentHistory(ctx, s.messageRepo, sessionID, historyTurns)
+		budget := agent.HistoryTokenBudget(agentConfig)
+		llmContext, agentConfig.ContextTokenScale, err = LoadAgentHistory(
+			ctx, s.messageRepo, sessionID, budget, agentConfig.RetainRetrievalHistory,
+		)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to load agent history from DB: %v, continuing without history", err)
 			llmContext = []chat.Message{}
 		}
-		logger.Infof(ctx, "Loaded %d history messages from DB (turns=%d)", len(llmContext), historyTurns)
+		logger.Infof(ctx, "Loaded %d history messages from DB (budget=%d tokens, token scale=%.2f)",
+			len(llmContext), budget, agentConfig.ContextTokenScale)
 	} else {
 		logger.Infof(ctx, "Multi-turn disabled for this agent, running without history")
 		llmContext = []chat.Message{}
@@ -238,6 +243,13 @@ func (s *sessionService) AgentQA(
 		engine.SetSteerSink(req.SteerSink)
 	}
 
+	// A compaction that ends on a stored turn is written back onto it, so the
+	// next turn loads the summary instead of summarizing the same history
+	// again. Without multi-turn there is no stored history to end on.
+	if agentConfig.MultiTurnEnabled {
+		engine.SetContextCheckpointSink(messageCheckpointSink{repo: s.messageRepo, sessionID: sessionID})
+	}
+
 	agentQuery := req.Query
 	var agentImageURLs []string
 	if agentModelSupportsVision && len(req.ImageURLs) > 0 {
@@ -303,7 +315,6 @@ func (s *sessionService) buildAgentConfig(
 		WebSearchMaxResults:         customAgent.Config.WebSearchMaxResults,
 		WebSearchProviderID:         customAgent.Config.WebSearchProviderID,
 		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
-		HistoryTurns:                customAgent.Config.HistoryTurns,
 		MemoryEnabled:               customAgent.Config.MemoryEnabled,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
 		MCPServices:                 customAgent.Config.MCPServices,
@@ -315,6 +326,13 @@ func (s *sessionService) buildAgentConfig(
 		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
+	}
+	// An unset MCP mode means "all" at runtime, but the share scope and the
+	// agent UI both present it as none. A shared run must not hand receivers
+	// every MCP service (with the owner's credentials) that its owner believes
+	// is off.
+	if req.SharedAgentReadOnly && agentConfig.MCPSelectionMode == "" {
+		agentConfig.MCPSelectionMode = "none"
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.
@@ -409,6 +427,11 @@ func (s *sessionService) buildAgentConfig(
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
+	if !req.SharedAgentReadOnly {
+		roleEnforced := s.cfg != nil && s.cfg.Tenant.IsRBACEnforced()
+		agentConfig.WritableKBIDs = kbWritableIDs(ctx, s.kbShareService, searchTargets, roleEnforced)
+	}
+	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
 	// those resolved IDs as this turn's pinned documents as well: otherwise the
@@ -644,4 +667,53 @@ func (s *sessionService) configureSkillsFromAgent(
 		agentConfig.SkillsEnabled = false
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}
+}
+
+// questionOriginInTargets keeps a suggested question's origin only when this
+// turn's search targets reach it, so the hint never points the model at
+// anything the tools cannot read. The base must be searched this turn (a whole
+// base, or a document/tag scope inside it); the document is kept only when a
+// target for that base covers it.
+func questionOriginInTargets(
+	ctx context.Context, origin *types.QuestionOrigin, targets types.SearchTargets,
+) *types.QuestionOrigin {
+	if origin == nil {
+		return nil
+	}
+	kbID := strings.TrimSpace(origin.KnowledgeBaseID)
+	if kbID == "" {
+		return nil
+	}
+	if !targets.ContainsKB(kbID) {
+		logger.Infof(ctx, "Ignoring question origin: knowledge base %s is outside this turn's search targets",
+			secutils.SanitizeForLog(kbID))
+		return nil
+	}
+	kept := &types.QuestionOrigin{KnowledgeBaseID: kbID}
+	if docID := strings.TrimSpace(origin.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
+		kept.KnowledgeID = docID
+	}
+	return kept
+}
+
+// targetsCoverDocument reports whether a target for kbID can read docID: an
+// unfiltered whole-base target, or a document scope that lists it. A
+// tag-filtered base cannot be checked per document here, so it does not count.
+func targetsCoverDocument(targets types.SearchTargets, kbID, docID string) bool {
+	for _, t := range targets {
+		if t == nil || t.KnowledgeBaseID != kbID {
+			continue
+		}
+		switch t.Type {
+		case types.SearchTargetTypeKnowledgeBase:
+			if len(t.TagIDs) == 0 {
+				return true
+			}
+		case types.SearchTargetTypeKnowledge:
+			if slices.Contains(t.KnowledgeIDs, docID) {
+				return true
+			}
+		}
+	}
+	return false
 }

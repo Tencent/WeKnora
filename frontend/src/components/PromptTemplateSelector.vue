@@ -231,7 +231,7 @@ onMounted(() => {
   align-items: center;
   gap: 3px;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   height: 26px;
   padding: 0 6px;
 
@@ -246,7 +246,7 @@ onMounted(() => {
   }
   
   :deep(.t-icon) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     vertical-align: middle;
     line-height: 1;
   }
@@ -258,7 +258,7 @@ onMounted(() => {
   gap: 4px;
   color: var(--td-text-color-secondary);
   border-color: var(--td-component-stroke);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   height: 26px;
   padding: 0 8px;
   background: var(--td-bg-color-container);
@@ -296,7 +296,7 @@ onMounted(() => {
 }
 
 .template-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
@@ -306,7 +306,7 @@ onMounted(() => {
   padding: 40px 16px;
   text-align: center;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .template-list {
@@ -317,9 +317,9 @@ onMounted(() => {
 
 .template-item {
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   margin-bottom: 4px;
   
   &:last-child {
@@ -340,7 +340,7 @@ onMounted(() => {
 }
 
 .template-name {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
@@ -350,8 +350,8 @@ onMounted(() => {
   align-items: center;
   gap: 3px;
   padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-xs);
   
   &.kb-tag {
     background: var(--td-brand-color-light);
@@ -371,7 +371,7 @@ onMounted(() => {
 }
 
 .template-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   margin: 0;
   line-height: 1.5;

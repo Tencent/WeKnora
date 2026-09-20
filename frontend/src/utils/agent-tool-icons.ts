@@ -22,6 +22,10 @@ export function getAgentToolIconName(
   if (toolName === 'web_search') {
     return 'internet'
   }
+  if (toolName === 'read_document' || toolName === 'list_documents') {
+    return 'file-search'
+  }
+  // Retired names still present in stored chat history
   if (toolName === 'get_document_info' || toolName === 'list_knowledge_chunks') {
     return 'file-search'
   }

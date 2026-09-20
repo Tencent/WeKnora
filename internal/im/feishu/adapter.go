@@ -38,9 +38,11 @@ import (
 )
 
 // Compile-time checks for the optional IM capabilities implemented by Adapter.
-var _ im.StreamSender = (*Adapter)(nil)
-var _ im.FullOutputProgressSender = (*Adapter)(nil)
-var _ im.FileDownloader = (*Adapter)(nil)
+var (
+	_ im.StreamSender             = (*Adapter)(nil)
+	_ im.FullOutputProgressSender = (*Adapter)(nil)
+	_ im.FileDownloader           = (*Adapter)(nil)
+)
 
 var httpClient = utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 	Timeout:      10 * time.Second,
@@ -192,7 +194,7 @@ func (a *Adapter) SupportsFullOutputProgress() bool {
 // If no verification token is configured (e.g., WebSocket mode), skip verification.
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
 	if a.verificationToken == "" {
-		return nil
+		return fmt.Errorf("webhook verification secret is required")
 	}
 
 	bodyBytes, err := io.ReadAll(c.Request.Body)

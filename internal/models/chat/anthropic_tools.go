@@ -57,6 +57,7 @@ func anthropicMessages(messages []Message) ([]string, []anthropicMessage) {
 	var system []string
 	var result []anthropicMessage
 	for _, msg := range messages {
+		msg = neutralizeMessageSpecialTokens(msg)
 		content := strings.TrimSpace(msg.Content)
 		if content == "" {
 			content = textFromMultiContent(msg.MultiContent)

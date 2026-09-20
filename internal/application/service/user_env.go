@@ -469,7 +469,8 @@ func (s *UserEnvService) findVisibleSkill(
 }
 
 // skillAcceptsUserEnvs reports whether a skill is one the agent can actually
-// run, which is the only kind worth asking a member for a credential for.
+// run, which is the only kind worth asking a member for a credential for. A
+// skill mid-upgrade still runs its previous version, so it still counts.
 func skillAcceptsUserEnvs(row *types.TenantSkillEntity) bool {
-	return row != nil && row.Enabled && row.Status == types.SkillStatusReady
+	return row != nil && row.Enabled && row.ServedView() != nil
 }

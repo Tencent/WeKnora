@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	stderrors "errors"
@@ -22,8 +23,16 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-const oidcNonceCookieName = "weknora_oidc_nonce"
-const oidcNonceCookieMaxAge = 600
+var liteSetupToken string
+
+// SetLiteSetupToken is called by the native desktop host before serving requests.
+// Web deployments leave it empty and cannot issue anonymous administrator tokens.
+func SetLiteSetupToken(token string) { liteSetupToken = token }
+
+const (
+	oidcNonceCookieName   = "weknora_oidc_nonce"
+	oidcNonceCookieMaxAge = 600
+)
 
 // AuthHandler implements HTTP request handlers for user authentication
 // Provides functionality for user registration, login, logout, and token management
@@ -885,7 +894,7 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 }
 
 // @Summary      自动初始化（Lite 桌面版）
-// @Description  Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
+// @Description  Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，首次及后续启动均须通过桌面原生凭据认证，免除手动注册/登录流程
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -898,6 +907,12 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 	if Edition != "lite" {
 		appErr := errors.NewForbiddenError("auto-setup is only available in lite edition")
 		c.Error(appErr)
+		return
+	}
+
+	if liteSetupToken == "" ||
+		subtle.ConstantTimeCompare([]byte(c.GetHeader("X-WeKnora-Desktop-Token")), []byte(liteSetupToken)) != 1 {
+		_ = c.Error(errors.NewUnauthorizedError("desktop authentication is required"))
 		return
 	}
 

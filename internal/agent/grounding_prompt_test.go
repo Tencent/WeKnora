@@ -53,21 +53,49 @@ func TestGroundingUsesRegistryInsteadOfConfiguration(t *testing.T) {
 		want       []string
 		absent     []string
 	}{
-		{"skill only with stale flags", []string{tools.ToolReadFile, tools.ToolShellExec}, true,
-			nil, []string{"Available knowledge tools:", "web_search is available", "web_fetch is available"}},
-		{"rag", []string{tools.ToolKnowledgeSearch, tools.ToolListKnowledgeChunks}, false,
-			[]string{"Available knowledge tools: knowledge_search, list_knowledge_chunks"}, []string{"wiki_search", "web_search is available"}},
-		{"wiki", []string{tools.ToolWikiReadPage, tools.ToolWikiSearch}, false,
-			[]string{"Available knowledge tools: wiki_search, wiki_read_page"}, []string{"knowledge_search", "web_search is available"}},
-		{"registered web", []string{tools.ToolWebSearch, tools.ToolWebFetch}, false,
-			[]string{"web_search is available", "web_fetch is available"}, []string{"Available knowledge tools:"}},
-		{"no tools", nil, false, nil,
-			[]string{"Available knowledge tools:", "web_search is available", "web_fetch is available"}},
+		{
+			"skill only with stale flags",
+			[]string{tools.ToolReadFile, tools.ToolShellExec},
+			true,
+			nil,
+			[]string{
+				"Available knowledge tools:", "web_search is available", "web_fetch is available",
+				"search them before answering",
+			},
+		},
+		{
+			"rag",
+			[]string{tools.ToolSearchKnowledge, tools.ToolReadDocument},
+			false,
+			[]string{
+				"Available knowledge tools: search_knowledge, read_document",
+				"search them before answering a question about a topic, even one that reads like general knowledge",
+			},
+			[]string{"wiki_search", "web_search is available"},
+		},
+		{
+			"wiki",
+			[]string{tools.ToolWikiReadPage, tools.ToolWikiSearch},
+			false,
+			[]string{"Available knowledge tools: wiki_search, wiki_read_page"},
+			[]string{"search_knowledge", "web_search is available"},
+		},
+		{
+			"registered web",
+			[]string{tools.ToolWebSearch, tools.ToolWebFetch},
+			false,
+			[]string{"web_search is available", "web_fetch is available"},
+			[]string{"Available knowledge tools:"},
+		},
+		{
+			"no tools", nil, false, nil,
+			[]string{"Available knowledge tools:", "web_search is available", "web_fetch is available"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := newTestEngine(t, &mockChat{})
 			engine.config.WebSearchEnabled = tc.webFlag
-			engine.config.AllowedTools = []string{tools.ToolKnowledgeSearch, tools.ToolWebSearch}
+			engine.config.AllowedTools = []string{tools.ToolSearchKnowledge, tools.ToolWebSearch}
 			engine.toolRegistry = tools.NewToolRegistry()
 			for _, name := range tc.registered {
 				engine.toolRegistry.RegisterTool(newCountingTool(name))

@@ -100,16 +100,13 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 	suspectedKnowledgeIDs := params.SuspectedKnowledgeIDs
 	if t.scopeEnforced && len(suspectedKnowledgeIDs) > 0 {
-		resolved, scopeErr := resolveAuthorizedSourceRefs(
-			ctx, t.searchTargets, suspectedKnowledgeIDs, t.knowledgeService,
+		resolved, scopeErr := resolveWikiSourceDocuments(
+			ctx, suspectedKnowledgeIDs, t.knowledgeService, t.searchTargets, true,
 		)
 		if scopeErr != nil {
 			return &types.ToolResult{Success: false, Error: "Invalid suspected_knowledge_ids: " + scopeErr.Error()}, nil
 		}
-		suspectedKnowledgeIDs = make([]string, 0, len(resolved))
-		for _, ref := range resolved {
-			suspectedKnowledgeIDs = append(suspectedKnowledgeIDs, strings.SplitN(ref, "|", 2)[0])
-		}
+		suspectedKnowledgeIDs = wikiSourceKnowledgeIDs(resolved)
 	}
 
 	issue := &types.WikiPageIssue{

@@ -834,33 +834,16 @@ onMounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/provider-card.less';
+
+@import (reference) '@/components/css/settings-section.less';
+
 .model-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 28px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
-}
-
-.section-header__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  .settings-section-header();
 }
 
 .model-test-trigger {
@@ -888,12 +871,12 @@ onMounted(() => {
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 }
 
 .builtin-hint-label {
   margin: 0 0 4px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-placeholder);
   letter-spacing: 0.02em;
@@ -901,13 +884,13 @@ onMounted(() => {
 
 .builtin-hint-text {
   margin: 0 0 6px 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
 
 .builtin-models-hint .doc-link {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .model-list-loading {
@@ -918,7 +901,7 @@ onMounted(() => {
   margin-bottom: 16px;
 
   :deep(.t-tabs__nav-item) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   :deep(.t-tabs__nav-item-wrapper) {
@@ -957,47 +940,18 @@ onMounted(() => {
 
 // 模型卡片 —— 可选类型徽章（仅「全部」Tab）+ 标题 + 一行副标题
 .model-card {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-  min-width: 0;
-
-  &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  }
+  .provider-card();
+  .provider-card-interactive();
 
   &--add {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 68px;
-    border-style: dashed;
-    background: transparent;
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    font: inherit;
-    text-align: center;
+    .provider-card-add();
 
     &:hover,
     &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
       box-shadow: none;
     }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+
 
     &__icon {
       display: flex;
@@ -1005,14 +959,14 @@ onMounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -1028,87 +982,48 @@ onMounted(() => {
   }
 
   &--clickable {
-    cursor: pointer;
+    .provider-card-interactive();
 
-    &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-    }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
   }
 }
 
 .model-card__badge {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 1px;
-  // 默认底色，被 type 修饰覆盖
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge();
+  .provider-card-badge-color(#0052d9);
 }
 
 // 5 种类型的徽章配色 —— 比原 tag 配色饱和度低一档，避免炫光
 .model-card--chat .model-card__badge {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge-color(#0052d9);
 }
 
 .model-card--embedding .model-card__badge {
-  background: rgba(98, 53, 187, 0.1);
-  color: #6235BB;
+  .provider-card-badge-color(#6235bb);
 }
 
 .model-card--rerank .model-card__badge {
-  background: rgba(184, 92, 0, 0.1);
-  color: #B85C00;
+  .provider-card-badge-color(#b85c00);
 }
 
 .model-card--vllm .model-card__badge {
-  background: rgba(201, 62, 62, 0.1);
-  color: #C93E3E;
+  .provider-card-badge-color(#c93e3e);
 }
 
 .model-card--asr .model-card__badge {
-  background: rgba(17, 128, 83, 0.1);
-  color: #118053;
+  .provider-card-badge-color(#118053);
 }
 
 .model-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
+  .provider-card-body();
 }
 
 .model-card__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  .provider-card-header();
 }
 
 .model-card__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .provider-card-title();
 }
 
 /*
@@ -1127,10 +1042,10 @@ onMounted(() => {
   height: 18px;
   color: var(--td-text-color-placeholder);
   opacity: 0.6;
-  transition: color 0.15s ease, opacity 0.15s ease;
+  transition: color var(--app-motion-fast) ease, opacity var(--app-motion-fast) ease;
 
   .t-icon {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 }
 
@@ -1141,7 +1056,7 @@ onMounted(() => {
 
 .model-card__subtitle {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   overflow: hidden;
@@ -1179,7 +1094,7 @@ onMounted(() => {
   flex-shrink: 0;
   padding: 2px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease;
 }
 
 .model-card__more {
@@ -1204,7 +1119,7 @@ onMounted(() => {
   text-align: center;
 
   :deep(.t-empty__description) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
@@ -1229,7 +1144,7 @@ onMounted(() => {
 
   h3 {
     margin: 0 0 8px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -1239,7 +1154,7 @@ onMounted(() => {
     padding: 0;
     list-style: none;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     overflow: hidden;
   }
 
@@ -1258,7 +1173,7 @@ onMounted(() => {
 
 .model-usage-truncated {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
@@ -1285,7 +1200,7 @@ onMounted(() => {
 .model-usage-memory {
   padding: 10px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .model-usage-dialog__actions {

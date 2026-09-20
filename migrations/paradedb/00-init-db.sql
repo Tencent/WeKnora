@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     vlm_config JSONB NOT NULL DEFAULT '{}',
     extract_config JSONB NULL DEFAULT NULL,
     auto_tag_config JSONB NULL,
+    profile_config JSONB NULL,
+    generated_profile JSONB NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
@@ -92,6 +94,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0, -- 存储大小(Byte)
     metadata JSONB,
+    profile JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     processed_at TIMESTAMP WITH TIME ZONE,

@@ -94,10 +94,10 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		FileSize: file.Size,
 		FileHash: hash,
 	}
-	// Repository paths are independent source files, even when their bytes are
-	// identical (for example, README templates in different subdirectories).
-	// Keep retries deduplicated within the same GitLab data source and path.
-	if channel == types.ConnectorTypeGitLab {
+	// Same-bytes files from different source identities are still distinct
+	// documents (GitLab README templates, copied Confluence pages). Scope the
+	// hash check to datasource_id + external_id so retries stay idempotent.
+	if usesSourceIdentityDuplicateCheck(channel) {
 		checkParams.DataSourceID = metadata["datasource_id"]
 		checkParams.ExternalID = metadata["external_id"]
 	}
@@ -1161,6 +1161,15 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 	}
 }
 
+func usesSourceIdentityDuplicateCheck(channel string) bool {
+	switch channel {
+	case types.ConnectorTypeGitLab, types.ChannelConfluence:
+		return true
+	default:
+		return false
+	}
+}
+
 func ensureManualFileName(title string) string {
 	if title == "" {
 		return fmt.Sprintf("manual-%s%s", time.Now().Format("20060102-150405"), manualFileExtension)
@@ -1266,6 +1275,11 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
+
+	// Normalize inline HTML tables before chunking, for the same reason as the
+	// file-processing path: parser/OCR output may embed raw <table> blocks that
+	// the chunker cannot split. Fenced code examples are left untouched.
+	clean = docparser.NormalizeHTMLTables(clean)
 
 	// Manual content is markdown - chunk directly with Go chunker
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)

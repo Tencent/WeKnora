@@ -205,26 +205,14 @@ onMounted(async () => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .retrieval-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 24px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 6px 0;
-  }
-
-  .section-description {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .settings-group {
@@ -243,7 +231,7 @@ onMounted(async () => {
 }
 
 .setting-label {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
   margin-bottom: 4px;
@@ -253,14 +241,14 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
   margin-bottom: 10px;
 }
 
 .setting-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   margin: 0 0 8px 0;
   line-height: 1.5;
@@ -279,7 +267,7 @@ onMounted(async () => {
 }
 
 .value-display {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-brand-color);
   font-family: var(--app-font-family-mono);

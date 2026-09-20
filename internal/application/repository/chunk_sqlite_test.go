@@ -361,3 +361,118 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 	require.Len(t, got, 2)
 	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
 }
+
+func TestCreateChunks_LeavesSourceContentEmpty(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+
+	chunk := makeChunk("kb-src", "k-src", types.ChunkTypeText)
+	require.NoError(t, repo.CreateChunks(context.Background(), []*types.Chunk{chunk}))
+
+	var saved types.Chunk
+	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
+	assert.Equal(t, "test content", saved.Content)
+	assert.Empty(t, saved.SourceContent, "source_content is backfilled lazily on first edit, not on create")
+	assert.Equal(t, "ready", saved.IndexStatus)
+}
+
+func TestUpdateChunks_UpdatesOnlyDocumentedColumns(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	chunks := make([]*types.Chunk, 0, 3)
+	for i := 0; i < 3; i++ {
+		c := makeChunk("kb-upd", "k-upd", types.ChunkTypeFAQ)
+		c.Metadata = types.JSON(`{"keep":"me"}`)
+		c.ContentHash = "hash-original"
+		chunks = append(chunks, c)
+	}
+	require.NoError(t, repo.CreateChunks(ctx, chunks))
+
+	var before types.Chunk
+	require.NoError(t, db.First(&before, "id = ?", chunks[0].ID).Error)
+
+	chunks[0].Content = "edited-0"
+	chunks[0].IsEnabled = false
+	chunks[0].Flags = 0
+	chunks[0].Status = int(types.ChunkStatusIndexed)
+	chunks[0].TagID = "tag-a"
+	chunks[0].ContentHash = "hash-should-not-persist"
+	chunks[1].Content = "edited-1"
+	chunks[1].Status = int(types.ChunkStatusStored)
+	// chunks[2] is deliberately not passed to UpdateChunks.
+	require.NoError(t, repo.UpdateChunks(ctx, chunks[:2]))
+
+	var saved []types.Chunk
+	require.NoError(t, db.Order("chunk_index").Find(&saved, "knowledge_id = ?", "k-upd").Error)
+	byID := make(map[string]types.Chunk, len(saved))
+	for _, s := range saved {
+		byID[s.ID] = s
+	}
+
+	c0 := byID[chunks[0].ID]
+	assert.Equal(t, "edited-0", c0.Content)
+	assert.False(t, c0.IsEnabled, "zero-value bool must be written")
+	assert.Equal(t, types.ChunkFlags(0), c0.Flags, "zero-value flags must be written")
+	assert.Equal(t, int(types.ChunkStatusIndexed), c0.Status)
+	assert.Equal(t, "tag-a", c0.TagID)
+	assert.Equal(t, "hash-original", c0.ContentHash, "content_hash is outside the UpdateChunks contract")
+	assert.JSONEq(t, `{"keep":"me"}`, string(c0.Metadata), "metadata is outside the UpdateChunks contract")
+	assert.Equal(t, before.SeqID, c0.SeqID)
+	assert.False(t, c0.UpdatedAt.Before(before.UpdatedAt))
+
+	c1 := byID[chunks[1].ID]
+	assert.Equal(t, "edited-1", c1.Content)
+	assert.True(t, c1.IsEnabled)
+	assert.Equal(t, int(types.ChunkStatusStored), c1.Status)
+
+	c2 := byID[chunks[2].ID]
+	assert.Equal(t, "test content", c2.Content, "rows not in the batch stay untouched")
+}
+
+func TestUpdateChunks_CleansInvalidUTF8(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	chunk := makeChunk("kb-utf8", "k-utf8", types.ChunkTypeText)
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+
+	chunk.Content = "ok\xffbad"
+	require.NoError(t, repo.UpdateChunks(ctx, []*types.Chunk{chunk}))
+
+	var saved types.Chunk
+	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
+	assert.True(t, utf8.ValidString(saved.Content))
+}
+
+func TestUpdateChunkFieldsByIDs_ScopesByTenantAndSetsUpdatedAt(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	mine := makeChunk("kb-fields", "k-fields", types.ChunkTypeFAQ)
+	other := makeChunk("kb-fields", "k-fields", types.ChunkTypeFAQ)
+	other.TenantID = 2
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{mine, other}))
+
+	var before types.Chunk
+	require.NoError(t, db.First(&before, "id = ?", mine.ID).Error)
+
+	require.NoError(t, repo.UpdateChunkFieldsByIDs(ctx, 1, []string{mine.ID, other.ID}, map[string]interface{}{
+		"status": int(types.ChunkStatusIndexed),
+	}))
+
+	var savedMine, savedOther types.Chunk
+	require.NoError(t, db.First(&savedMine, "id = ?", mine.ID).Error)
+	require.NoError(t, db.First(&savedOther, "id = ?", other.ID).Error)
+	assert.Equal(t, int(types.ChunkStatusIndexed), savedMine.Status)
+	assert.Equal(t, "test content", savedMine.Content, "other columns are untouched")
+	assert.False(t, savedMine.UpdatedAt.Before(before.UpdatedAt))
+	assert.Equal(t, int(types.ChunkStatusDefault), savedOther.Status, "rows of another tenant must not change")
+
+	// Empty inputs are no-ops.
+	require.NoError(t, repo.UpdateChunkFieldsByIDs(ctx, 1, nil, map[string]interface{}{"status": 0}))
+	require.NoError(t, repo.UpdateChunkFieldsByIDs(ctx, 1, []string{mine.ID}, nil))
+}

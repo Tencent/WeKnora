@@ -64,7 +64,7 @@ make dev-restart  # 重启
 
 | 服务 | 镜像 | 端口（默认） | 启动条件 |
 | --- | --- | --- | --- |
-| `postgres` | `paradedb/paradedb:v0.22.2-pg17`（自带 pg_search/BM25） | `5432` | 默认启动 |
+| `postgres` | `paradedb/paradedb:v0.22.6-pg17`（自带 pg_search/BM25） | `5432` | 默认启动 |
 | `redis` | `redis:7.0-alpine`（`--requirepass`） | `6379` | 默认启动 |
 | `docreader` | 本地构建 `docker/Dockerfile.docreader` | `50051`（gRPC） | 默认启动 |
 | `searxng`（+`searxng-init`） | `searxng/searxng:latest` | `127.0.0.1:8888` | `--searxng` / `--full`（compose profile `searxng`） |

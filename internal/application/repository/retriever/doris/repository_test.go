@@ -273,9 +273,14 @@ func TestDorisStreamLoadHTTPClient_ForwardsAuthorizationToTrustedRedirect(t *tes
 	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
 
-	var gotAuthorization string
+	var gotAuthorization, gotBody, gotColumns, gotMethod string
 	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuthorization = r.Header.Get(headerAuthorization)
+		gotColumns = r.Header.Get("columns")
+		gotMethod = r.Method
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		gotBody = string(body)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer be.Close()
@@ -288,11 +293,51 @@ func TestDorisStreamLoadHTTPClient_ForwardsAuthorizationToTrustedRedirect(t *tes
 	req, err := http.NewRequest(http.MethodPut, fe.URL, strings.NewReader("[]"))
 	require.NoError(t, err)
 	req.Header.Set(headerAuthorization, "Basic trusted-doris-credential")
+	req.Header.Set("columns", "id,content")
 
 	resp, err := newDorisStreamLoadHTTPClient().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, "Basic trusted-doris-credential", gotAuthorization)
+	assert.Equal(t, "[]", gotBody)
+	assert.Equal(t, "id,content", gotColumns)
+	assert.Equal(t, http.MethodPut, gotMethod)
+}
+
+func TestDorisStreamLoadHTTPClient_RedirectBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, target, whitelist string
+	}{
+		{"untrusted port", "https://8.8.8.8:8030/load", "https://8.8.8.8:8040/load", ""},
+		{"untrusted host", "https://8.8.8.8/load", "https://1.1.1.1/load", ""},
+		{"HTTPS downgrade", "https://127.0.0.1:8030/load", "http://127.0.0.1:8040/load", "127.0.0.1"},
+		{"invalid scheme", "http://127.0.0.1/load", "ftp://127.0.0.1/load", "127.0.0.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			secutils.SetSSRFWhitelistFromRaw(tc.whitelist)
+			t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+			source, err := http.NewRequest(http.MethodPut, tc.source, strings.NewReader("[]"))
+			require.NoError(t, err)
+			source.Header.Set(headerAuthorization, "Basic trusted-doris-credential")
+			target, err := http.NewRequest(http.MethodPut, tc.target, strings.NewReader("[]"))
+			require.NoError(t, err)
+			err = newDorisStreamLoadHTTPClient().CheckRedirect(target, []*http.Request{source})
+			require.ErrorIs(t, err, secutils.ErrSSRFRedirectBlocked)
+			assert.Empty(t, target.Header.Get(headerAuthorization))
+		})
+	}
+}
+
+func TestDorisStreamLoadHTTPClient_RedirectLimit(t *testing.T) {
+	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	req, err := http.NewRequest(http.MethodPut, "http://127.0.0.1/load", strings.NewReader("[]"))
+	require.NoError(t, err)
+	via := make([]*http.Request, secutils.DefaultSSRFSafeHTTPClientConfig().MaxRedirects)
+	for i := range via {
+		via[i] = req
+	}
+	require.ErrorContains(t, newDorisStreamLoadHTTPClient().CheckRedirect(req, via), "stopped after")
 }
 
 // ---------------------------------------------------------------------------

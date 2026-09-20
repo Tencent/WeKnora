@@ -205,8 +205,8 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    until wiki generation actually finishes instead of flipping to
 	//    completed while wiki runs minutes later. A wiki op that never
 	//    drains is bounded by the housekeeping finalizing sweep.
-	willSpawnSummary := len(textChunks) > 0
-	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
+	willSpawnSummary := eff.SummaryEnabled && len(textChunks) > 0
+	willSpawnQuestion := len(textChunks) > 0 && kb.NeedsEmbeddingModel() &&
 		eff.QuestionGenerationConfig.Enabled
 	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
 	willSpawnAutoTag := kb.Type == types.KnowledgeBaseTypeDocument &&
@@ -293,21 +293,16 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			}, "", "")
 		return nil
 	case expectedSubtasks == 0:
-		// Nothing to enrich — fast path keeps the previous behavior so
-		// users without summary/question/graph see 'completed' immediately.
-		updates := map[string]interface{}{
-			"parse_status": types.ParseStatusCompleted,
-			"updated_at":   time.Now(),
+		completed, err := s.knowledgeRepo.CompleteProcessingWithoutSubtasks(ctx, payload.KnowledgeID)
+		if err != nil {
+			s.tracker().FailSpan(ctx, postSpan, "COMPLETION_FAILED", err.Error(), err)
+			return fmt.Errorf("complete knowledge without enrichment: %w", err)
 		}
-		if len(textChunks) > 0 {
-			updates["summary_status"] = types.SummaryStatusNone
-		}
-		if err := s.knowledgeRepo.UpdateKnowledgeColumns(ctx, payload.KnowledgeID, updates); err != nil {
-			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to mark %s completed (no subtasks): %v",
-				payload.KnowledgeID, err)
-		} else {
-			logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s marked completed (no enrichment subtasks).",
-				payload.KnowledgeID)
+		if !completed {
+			output := types.JSONMap{"skipped": "knowledge_no_longer_processing"}
+			s.tracker().EndSpan(ctx, postSpan, output)
+			s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt, types.SpanStatusDone, output, "", "")
+			return nil
 		}
 	default:
 		// Flip processing to finalizing before fan-out so a parallel
@@ -374,7 +369,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	}
 
 	// Queue best-effort automatic tagging only after the processing row has
-	// successfully handed off to finalizing. This avoids model calls from a
+	// successfully handed off to finalizing or completed. This avoids model calls from a
 	// duplicate post-process delivery that observes an already terminal row.
 	if willSpawnAutoTag {
 		enqueuedAutoTag = s.enqueueAutoTagTask(ctx, payload, attempt)
@@ -390,25 +385,27 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed,
 			)
 		}
-		if willSpawnQuestion {
-			// Create the postprocess.question grouping span up front so the
-			// per-batch subspans (enqueued just below, run later in their own
-			// workers) have a parent to nest under. It's begun and ended right
-			// here as a structural container — the batches extend past it,
-			// which the timeline renders with the wrapping outline bar.
-			if grp := s.tracker().BeginSubSpan(ctx, postSpan, postprocessQuestionGroupSpanName,
-				types.SpanKindSubSpan, types.JSONMap{
-					"batch_count": questionBatchCount,
-					"chunk_count": len(questionChunks),
-					"batch_size":  questionGenChunkBatchSize,
-				}); grp != nil {
-				s.tracker().EndSpan(ctx, grp, types.JSONMap{
-					"batch_count": questionBatchCount,
-					"chunk_count": len(questionChunks),
-				})
-			}
-			enqueuedQuestionCount = s.enqueueQuestionGenerationTasks(ctx, payload, eff.QuestionGenerationConfig, attempt, questionChunks)
+	}
+	if willSpawnQuestion {
+		// Create the postprocess.question grouping span up front so the
+		// per-batch subspans (enqueued just below, run later in their own
+		// workers) have a parent to nest under. It's begun and ended right
+		// here as a structural container — the batches extend past it,
+		// which the timeline renders with the wrapping outline bar.
+		if grp := s.tracker().BeginSubSpan(ctx, postSpan, postprocessQuestionGroupSpanName,
+			types.SpanKindSubSpan, types.JSONMap{
+				"batch_count": questionBatchCount,
+				"chunk_count": len(questionChunks),
+				"batch_size":  questionGenChunkBatchSize,
+			}); grp != nil {
+			s.tracker().EndSpan(ctx, grp, types.JSONMap{
+				"batch_count": questionBatchCount,
+				"chunk_count": len(questionChunks),
+			})
 		}
+		enqueuedQuestionCount = s.enqueueQuestionGenerationTasks(
+			ctx, payload, eff.QuestionGenerationConfig, attempt, questionChunks,
+		)
 	}
 
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
@@ -519,6 +516,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// of those stages does not poison the parse result.
 	s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
 		types.SpanStatusDone, postOutput, "", "")
+	// The document now counts (title, type, folder, tags) in the knowledge-base
+	// description aggregation even before its summary lands; the summary task
+	// requests another refresh once the profile exists. No-op unless the KB
+	// opted in, and debounced so a batch upload costs one aggregation.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.taskEnqueuer, kb, false)
 	return nil
 }
 

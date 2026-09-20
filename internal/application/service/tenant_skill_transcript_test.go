@@ -149,9 +149,9 @@ func TestInstallTranscriptProjectsTheAgentsWork(t *testing.T) {
 }
 
 // A failed command is the single most useful thing in an install transcript,
-// so it must reach the stream as an error the console already knows how to
-// render, not be dropped for having Success=false.
-func TestInstallTranscriptReportsAFailedCommandAsAnError(t *testing.T) {
+// so it must reach the stream as a tool result carrying success=false —
+// response_type=error is reserved for internal failures, not tool outcomes.
+func TestInstallTranscriptReportsAFailedCommandAsAToolResult(t *testing.T) {
 	_, bus, streams, _ := newTranscriptForTest(t)
 
 	require.NoError(t, bus.Emit(context.Background(), event.Event{
@@ -162,7 +162,7 @@ func TestInstallTranscriptReportsAFailedCommandAsAnError(t *testing.T) {
 		},
 	}))
 
-	require.Equal(t, []types.ResponseType{types.ResponseTypeError}, streams.types())
+	require.Equal(t, []types.ResponseType{types.ResponseTypeToolResult}, streams.types())
 	require.Equal(t, "exit status 1", streams.events[0].Content)
 	require.Equal(t, false, streams.events[0].Data["success"])
 }

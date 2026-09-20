@@ -130,7 +130,8 @@ var shellExecTool = BaseTool{
 	name: ToolShellExec,
 	description: `Execute a command in the current session's isolated sandbox as root.
 The sandbox belongs to this session alone; nothing here runs on the host.
-- CWD defaults to /workspace on every call; cd does not persist. work_dir selects another directory under /workspace and missing directories are created as the same user.
+- CWD defaults to /workspace on every call; cd does not persist.
+  work_dir selects any directory inside the session sandbox; missing directories are created as the same user.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules;
@@ -148,7 +149,7 @@ The sandbox belongs to this session alone; nothing here runs on the host.
   Changes live and die with this session.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
-- Reference collected deliverables as ![description](sandbox:<file name>) using the exact filename.`,
+- Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.`,
 	schema: utils.GenerateSchema[ShellExecInput](),
 }
 
@@ -220,8 +221,8 @@ func (e installShellExecutor) ExecShellCommand(
 type ShellExecTool struct {
 	BaseTool
 	executor SandboxCommandExecutor
-	// workDirRoots are the directories work_dir may point inside. Ordinary
-	// sessions get /workspace only; install mode adds the skills image root.
+	// workDirRoots restrict install-mode working directories. Ordinary
+	// sessions may work anywhere inside their own sandbox.
 	workDirRoots []string
 	// defaultWorkDir is where a call that omits work_dir lands. Empty means
 	// /workspace, which is right for an ordinary session and wrong for an
@@ -263,7 +264,7 @@ func NewShellExecTool(executor SandboxCommandExecutor, envResolver skills.SkillE
 		BaseTool:     shellExecTool,
 		executor:     executor,
 		envResolver:  envResolver,
-		workDirRoots: []string{defaultShellExecWorkDir},
+		workDirRoots: []string{"/"},
 	}
 }
 
@@ -490,12 +491,37 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		execCommand = "printf %s " + sandbox.ShellQuote(base64.StdEncoding.EncodeToString([]byte(input.Stdin))) +
 			" | base64 -d | /bin/bash --noprofile --norc -c " + sandbox.ShellQuote(execCommand)
 	}
-	beforeOutputs, inspectedOutputs := sandboxOutputSnapshot(ctx, t.executor, sessionID)
 	output, finishOutput := shellCommandOutput(ctx, command)
 	defer finishOutput()
 	// Observe only the requested command, not skill staging or artifact probes.
 	execCtx := sandbox.WithCommandOutput(ctx, output)
-	res, err := t.executor.ExecShellCommand(execCtx, sessionID, execCommand, workDir, timeout, env)
+	var res *sandbox.ExecuteResult
+	var err error
+	var outputFiles []string
+	if executor, ok := t.executor.(interface {
+		ExecShellCommandWithOutputSnapshot(
+			context.Context, string, string, sandbox.ShellExecOptions, string,
+		) (*sandbox.ExecuteResult, *sandbox.ShellOutputSnapshot, error)
+	}); ok {
+		var snapshot *sandbox.ShellOutputSnapshot
+		res, snapshot, err = executor.ExecShellCommandWithOutputSnapshot(execCtx, sessionID, execCommand,
+			sandbox.ShellExecOptions{WorkDir: workDir, Timeout: timeout, Env: env}, skills.ArtifactOutputDir())
+		if snapshot != nil {
+			outputFiles = changedOutputLinks(
+				outputEntriesSnapshot(snapshot.Before), outputEntriesSnapshot(snapshot.After),
+			)
+		}
+	} else {
+		// Keep support for executors without the combined operation (including
+		// install mode); production session managers use one handle above.
+		before, inspected := sandboxOutputSnapshot(ctx, t.executor, sessionID)
+		res, err = t.executor.ExecShellCommand(execCtx, sessionID, execCommand, workDir, timeout, env)
+		if err == nil && res != nil && inspected {
+			if after, ok := sandboxOutputSnapshot(ctx, t.executor, sessionID); ok {
+				outputFiles = changedOutputLinks(before, after)
+			}
+		}
+	}
 	finishOutput()
 	noteSandboxMutation()
 	if err != nil {
@@ -564,12 +590,6 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	if hint := t.recoveryHint(input.SkillName, res.ExitCode, command, stderr); hint != "" {
 		b.WriteString(hint)
 		b.WriteString("\n")
-	}
-	var outputFiles []string
-	if inspectedOutputs {
-		if afterOutputs, ok := sandboxOutputSnapshot(ctx, t.executor, sessionID); ok {
-			outputFiles = changedOutputLinks(beforeOutputs, afterOutputs)
-		}
 	}
 	visibleOutput := b.String()
 	visibleOutput, totalTruncated := truncateShellStream(visibleOutput, maxShellExecVisibleBytes)
@@ -692,11 +712,11 @@ func (t *ShellExecTool) effectiveDefaultWorkDir() string {
 	return t.defaultWorkDir
 }
 
-// allowedWorkDirRoots defaults to /workspace so a zero-value tool (or one
-// built before install mode existed) keeps the ordinary contract.
+// allowedWorkDirRoots allows any sandbox directory for ordinary sessions.
+// Install-mode tools provide an explicit scope.
 func (t *ShellExecTool) allowedWorkDirRoots() []string {
 	if len(t.workDirRoots) == 0 {
-		return []string{defaultShellExecWorkDir}
+		return []string{"/"}
 	}
 	return t.workDirRoots
 }

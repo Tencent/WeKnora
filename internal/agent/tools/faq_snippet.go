@@ -66,7 +66,7 @@ func faqFieldsEmpty(meta *types.FAQChunkMetadata) bool {
 	return meta.StandardQuestion == "" && len(meta.SimilarQuestions) == 0 && len(meta.Answers) == 0
 }
 
-// writeFAQMetadataXML emits a nested <faq> block (used inside knowledge_search <chunk>).
+// writeFAQMetadataXML emits a nested <faq> block (used inside search_knowledge <chunk>).
 func writeFAQMetadataXML(b *strings.Builder, meta *types.FAQChunkMetadata) {
 	if faqFieldsEmpty(meta) {
 		return
@@ -76,7 +76,7 @@ func writeFAQMetadataXML(b *strings.Builder, meta *types.FAQChunkMetadata) {
 	b.WriteString("</faq>\n")
 }
 
-// writeFAQEntryXML emits a top-level FAQ entry for list_knowledge_chunks (not wrapped in <chunk>).
+// writeFAQEntryXML emits a top-level FAQ entry for read_document (not wrapped in <chunk>).
 func writeFAQEntryXML(b *strings.Builder, c *types.Chunk) {
 	if c == nil || c.ChunkType != types.ChunkTypeFAQ {
 		return
@@ -135,7 +135,7 @@ func appendFAQChunkData(chunkData map[string]interface{}, c *types.Chunk) {
 	}
 }
 
-// Bounds for retrieval-tool match snippets (grep_chunks, knowledge_search).
+// Bounds for retrieval-tool match snippets (search_knowledge, read_document).
 const (
 	snippetContextRunes   = 200
 	snippetMaxMatchRunes  = 200
@@ -143,7 +143,7 @@ const (
 	snippetMaxAnswerRunes = 600
 )
 
-// faqMatchSnippetFromQueries builds "Q: … | A: …" for knowledge_search hits.
+// faqMatchSnippetFromQueries builds "Q: … | A: …" for search_knowledge hits.
 func faqMatchSnippetFromQueries(meta *types.FAQChunkMetadata, queries []string) string {
 	if meta == nil {
 		return ""
@@ -155,7 +155,7 @@ func faqMatchSnippetFromQueries(meta *types.FAQChunkMetadata, queries []string) 
 	return formatFAQMatchSnippet(question, meta.Answers)
 }
 
-// faqMatchSnippet builds "Q: … | A: …" for grep_chunks regex hits.
+// faqMatchSnippet builds "Q: … | A: …" for read_document regex hits.
 func faqMatchSnippet(chunk *types.Chunk, compiled []*regexp.Regexp) string {
 	if chunk == nil {
 		return ""

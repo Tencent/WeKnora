@@ -1,16 +1,15 @@
 // Package tools — read_file.
 //
-// Read-only tool that lets the LLM read a file under the session's
-// inspectable sandbox directories. Known paths can be read directly;
+// Read-only tool that lets the LLM read a file inside the session's
+// sandbox. Known paths can be read directly;
 // directory discovery is optional.
 //
 // Design notes:
 //   - Session-scoped: path must belong to the current session's sandbox,
 //     enforced by delegating to SandboxFileSource.ReadSessionFile which
 //     itself takes the session ID from context.
-//   - Directory guardrail: path must sit underneath /workspace, matching
-//     what this session may write. Skills that need to peek outside it
-//     should print via stdout.
+//   - Absolute paths are sandbox-local; relative paths resolve from /workspace.
+//     Reading a file does not make it a downloadable artifact.
 //   - Paginated reads: a page is bounded by a line count, a byte budget, and
 //     the registry's rune budget, and a partial page ends with the offset to
 //     continue from. Files over 8 MiB are never downloaded; the model gets
@@ -55,7 +54,7 @@ const (
 )
 
 // workspaceFileReader is a private source adapter for read_file, not a
-// separately registered tool. It owns the workspace cache and path guards.
+// separately registered tool. It owns the sandbox file cache and read limits.
 type workspaceFileReader struct {
 	source SandboxFileSource
 	mu     sync.Mutex
@@ -131,7 +130,7 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 	if trimmed == "" {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "path is required; use a known file path under /workspace",
+			Error:   "path is required; use a known file path inside the session sandbox",
 		}, nil
 	}
 
@@ -139,22 +138,20 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 	if sessionID == "" {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "no session ID in context; workspace file reads must run inside an agent turn",
+			Error:   "no session ID in context; sandbox file reads must run inside an agent turn",
 		}, nil
 	}
 
-	// Enforce that the path sits underneath an inspectable root. This
-	// mirrors list_sandbox_files so the LLM sees a consistent reachable
-	// surface covering both skill output and staged attachments.
+	// The source binds reads to the current session's sandbox. Preserve the
+	// familiar workspace roots in metadata, without restricting readable paths
+	// to them: temporary files and installed resources may live elsewhere.
 	clean := sandbox.ResolveWorkspacePath(trimmed)
 	rootDir, ok := matchingInspectableRoot(clean)
 	if !ok {
-		return &types.ToolResult{
-			Success: false,
-			Error:   inspectablePathError(input.Path),
-		}, nil
+		rootDir = "/"
 	}
 
+	ctx = sandbox.WithSessionFileOperation(ctx)
 	stat, err := t.source.StatSessionFile(ctx, sessionID, clean)
 	if err != nil {
 		logger.Warnf(ctx, "[Tool][ReadSandboxFile] stat failed: session=%s path=%s err=%v",
@@ -176,23 +173,13 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 			Error:   fmt.Sprintf("path is a directory, not a file: %s", clean),
 		}, nil
 	}
-	// The directory guard above is a string prefix test, so it cannot tell that
-	// a symlink under the output directory points somewhere else entirely. The
-	// backends stat the final component without following it, so this refuses a
-	// path that names a link.
-	//
-	// A link in the MIDDLE of the path is still resolved by the kernel and is
-	// not caught here. That leaves the artifact-directory convention evadable,
-	// but not the privilege boundary: the read runs as the sandbox account, so
-	// it can only return what that account could already have read via
-	// shell_exec.
+	// Keep reads limited to regular files. Backends stat the final component
+	// without following symlinks; other filesystem permissions remain enforced
+	// by the sandbox backend.
 	if stat.Type != sandbox.RemoteEntryFile {
 		return &types.ToolResult{
 			Success: false,
-			Error: fmt.Sprintf(
-				"path is not a regular file: %s; only files under %s can be read",
-				clean, inspectableRootsDescription(),
-			),
+			Error:   fmt.Sprintf("path is not a regular file: %s", clean),
 		}, nil
 	}
 	if stat.Size > maxReadSandboxDownloadBytes {

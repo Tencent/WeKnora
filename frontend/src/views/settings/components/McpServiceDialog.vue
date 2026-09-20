@@ -644,7 +644,7 @@ async function startAuthorize(serviceId: string) {
     // After the backend completes the exchange it bounces the popup here. The
     // app root is harmless; the popup is closed by the opener below once the
     // authorization status flips, so this page is only shown briefly.
-    const frontendRedirect = window.location.origin + '/'
+    const frontendRedirect = '/'
     const authorization = await getMCPOAuthAuthorizeURL(serviceId, {
       redirect_uri: redirectUri,
       frontend_redirect: frontendRedirect,
@@ -1028,7 +1028,7 @@ const handleClose = () => {
   gap: 8px;
   min-width: 0;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   /* Only the steps that draw a connector need to absorb the leftover width. */
   &:not(:last-child) {
@@ -1063,7 +1063,7 @@ const handleClose = () => {
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
       outline-offset: 2px;
-      border-radius: 4px;
+      border-radius: var(--app-radius-xs);
     }
   }
 }
@@ -1077,7 +1077,7 @@ const handleClose = () => {
   flex-shrink: 0;
   border: 1px solid currentColor;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   line-height: 1;
 
@@ -1096,7 +1096,7 @@ const handleClose = () => {
 
 .mcp-step__title {
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1175,7 +1175,7 @@ const handleClose = () => {
     border: none;
     background: none;
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
 
@@ -1196,13 +1196,13 @@ const handleClose = () => {
   }
 
   &__textarea :deep(textarea) {
-    font-family: var(--td-font-family-mono, monospace);
-    font-size: 12px;
+    font-family: var(--td-font-family-mono);
+    font-size: var(--app-text-sm);
   }
 
   &__error {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-error-color);
   }
 
@@ -1236,7 +1236,7 @@ const handleClose = () => {
 
 .oauth-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
@@ -1244,7 +1244,7 @@ const handleClose = () => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -1260,7 +1260,7 @@ const handleClose = () => {
 
 .form-desc {
   margin: 4px 0 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 
@@ -1274,7 +1274,7 @@ const handleClose = () => {
 :deep(.t-textarea),
 :deep(.t-input-number) {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 // 隐藏 t-form 默认 form-item 容器 — 走自定义 .form-item / .form-label
@@ -1290,7 +1290,7 @@ const handleClose = () => {
   padding: 3px;
   background: var(--td-bg-color-component);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .source-option {
@@ -1301,13 +1301,13 @@ const handleClose = () => {
   height: 28px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   line-height: 1;
-  transition: all 0.15s ease;
+  transition: all var(--app-motion-fast) ease;
 
   &:hover:not(.is-active) {
     color: var(--td-text-color-primary);
@@ -1324,7 +1324,7 @@ const handleClose = () => {
 }
 
 .source-option__icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   flex-shrink: 0;
 }
 
@@ -1358,14 +1358,14 @@ const handleClose = () => {
 }
 
 .number-input__unit {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   user-select: none;
 }
 
 // ---- footer-left 测试按钮的状态 icon ----
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 
   &.available {
@@ -1384,7 +1384,7 @@ const handleClose = () => {
   padding: 0 6px;
   margin-left: 6px;
   height: 16px;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 500;
   border-radius: 3px;
 

@@ -51,6 +51,17 @@ class TestSSRFValidation(unittest.TestCase):
         self.assertFalse(safe)
         self.assertIn("restricted", reason)
 
+    def test_blocks_local_use_nat64(self):
+        for address in ('64:ff9b:1::', '64:ff9b:1::a9fe:a9fe',
+                        '64:ff9b:1::808:808', '64:ff9b:1:ffff:ffff:ffff:ffff:ffff'):
+            with self.subTest(address=address), patch(
+                'docreader.utils.ssrf._resolve_host_ips',
+                return_value=((ipaddress.ip_address(address),), None),
+            ):
+                safe, reason = is_ssrf_safe_url('https://example.invalid/path')
+                self.assertFalse(safe)
+                self.assertIn('restricted', reason)
+
     def test_allows_public_https(self):
         safe, reason = is_ssrf_safe_url("https://example.com/article")
         self.assertTrue(safe, reason)

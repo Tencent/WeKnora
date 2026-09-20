@@ -1797,7 +1797,7 @@ onUnmounted(stopTemplatePolling)
   gap: 8px;
   min-width: 0;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   /* Only the steps that draw a connector need to absorb the leftover width. */
   &:not(:last-child) {
@@ -1832,7 +1832,7 @@ onUnmounted(stopTemplatePolling)
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
       outline-offset: 2px;
-      border-radius: 4px;
+      border-radius: var(--app-radius-xs);
     }
   }
 }
@@ -1846,7 +1846,7 @@ onUnmounted(stopTemplatePolling)
   flex-shrink: 0;
   border: 1px solid currentColor;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   line-height: 1;
 
@@ -1865,7 +1865,7 @@ onUnmounted(stopTemplatePolling)
 
 .sandbox-step__title {
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1906,7 +1906,7 @@ onUnmounted(stopTemplatePolling)
 
   :deep(.t-form__label) {
     padding-bottom: 6px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     line-height: 1.4;
   }
@@ -1915,7 +1915,7 @@ onUnmounted(stopTemplatePolling)
   :deep(.t-input-number),
   :deep(.t-select) {
     width: 100%;
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 }
 
@@ -1930,12 +1930,12 @@ onUnmounted(stopTemplatePolling)
   background: var(--td-bg-color-secondarycontainer);
 
   :deep(.t-alert__icon) {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
   }
 
   :deep(.t-alert__message) {
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
   }
 }
@@ -1947,14 +1947,14 @@ onUnmounted(stopTemplatePolling)
   gap: 16px;
   padding: 10px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
 }
 
 .private-endpoint-row__title {
   margin: 0 0 3px;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
@@ -1984,14 +1984,14 @@ onUnmounted(stopTemplatePolling)
 
 .backend-choice__name {
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   line-height: 1.4;
 }
 
 .backend-choice__desc {
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   white-space: normal;
 }
@@ -2014,7 +2014,7 @@ onUnmounted(stopTemplatePolling)
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 
   &.is-active {
@@ -2030,7 +2030,7 @@ onUnmounted(stopTemplatePolling)
   p {
     margin: 4px 0 0;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
   }
 }
@@ -2042,7 +2042,7 @@ onUnmounted(stopTemplatePolling)
 }
 
 .weknora-template-card__title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
@@ -2054,9 +2054,9 @@ onUnmounted(stopTemplatePolling)
   width: 100%;
   min-height: 88px;
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .template-list {
@@ -2080,15 +2080,15 @@ onUnmounted(stopTemplatePolling)
   padding: 10px 12px;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
 
   &:hover:not(.is-disabled):not(.template-row--offer) {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
   }
 
   &.is-active {
@@ -2116,7 +2116,7 @@ onUnmounted(stopTemplatePolling)
   height: 14px;
   margin-top: 3px;
   box-sizing: border-box;
-  border: 1.5px solid var(--td-border-level-2-color, var(--td-component-stroke));
+  border: 1.5px solid var(--td-border-level-2-color);
   border-radius: 50%;
   background: var(--td-bg-color-container);
 
@@ -2155,7 +2155,7 @@ onUnmounted(stopTemplatePolling)
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 22px;
   text-overflow: ellipsis;
@@ -2198,7 +2198,7 @@ onUnmounted(stopTemplatePolling)
 
   dt {
     color: var(--td-text-color-placeholder);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 18px;
     white-space: nowrap;
   }
@@ -2208,14 +2208,14 @@ onUnmounted(stopTemplatePolling)
     min-width: 0;
     overflow: hidden;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 18px;
     text-overflow: ellipsis;
     white-space: nowrap;
 
     &.is-mono {
-      font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-      font-size: 11px;
+      font-family: var(--td-font-family-mono);
+      font-size: var(--app-text-xs);
     }
   }
 }
@@ -2224,7 +2224,7 @@ onUnmounted(stopTemplatePolling)
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   &--error {
@@ -2251,7 +2251,7 @@ onUnmounted(stopTemplatePolling)
   gap: 5px;
   margin-top: -4px;
   color: var(--td-brand-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   text-decoration: none;
 
   &:hover {
@@ -2272,7 +2272,7 @@ onUnmounted(stopTemplatePolling)
 }
 
 .net-list__title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -2295,7 +2295,7 @@ onUnmounted(stopTemplatePolling)
 
 .net-rule {
   border: 1px solid var(--td-component-border);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   padding: 12px;
   margin-bottom: 12px;
 }
@@ -2304,7 +2304,7 @@ onUnmounted(stopTemplatePolling)
   padding: 0;
   margin-bottom: 2px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .net-rule--collapsible.is-open {
@@ -2336,7 +2336,7 @@ onUnmounted(stopTemplatePolling)
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   text-align: left;
 }
 
@@ -2350,7 +2350,7 @@ onUnmounted(stopTemplatePolling)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-text-color-primary);
 }
@@ -2371,7 +2371,7 @@ onUnmounted(stopTemplatePolling)
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .net-rule__move:hover:not(:disabled) {
@@ -2415,9 +2415,9 @@ onUnmounted(stopTemplatePolling)
 .env-empty {
   padding: 18px;
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   text-align: center;
 }
 
@@ -2431,7 +2431,7 @@ onUnmounted(stopTemplatePolling)
 .section-help {
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   &--under-title {
@@ -2461,7 +2461,7 @@ onUnmounted(stopTemplatePolling)
   gap: 6px;
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 1.45;
 
@@ -2478,7 +2478,7 @@ onUnmounted(stopTemplatePolling)
 .check-result__hint {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
@@ -2497,7 +2497,7 @@ onUnmounted(stopTemplatePolling)
   gap: 8px;
   flex-wrap: wrap;
   padding: 2px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .check-item .ok {
@@ -2550,7 +2550,7 @@ onUnmounted(stopTemplatePolling)
   }
 
   .sandbox-step__title {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   .template-row__fields {

@@ -39,6 +39,15 @@ type SteerSink interface {
 	) string
 }
 
+// QuestionOrigin names the knowledge source a suggested question was
+// generated from. The client sends it with the question the user picked so
+// the agent searches that source before answering; it is a hint inside the
+// turn's resolved scope, never a scope change.
+type QuestionOrigin struct {
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	KnowledgeID     string `json:"knowledge_id,omitempty"`
+}
+
 // QARequest consolidates all parameters for KnowledgeQA and AgentQA service calls,
 // replacing the previous 14-parameter method signatures.
 // EventBus is passed separately to avoid circular dependency with the event package.
@@ -61,6 +70,7 @@ type QARequest struct {
 	WebSearchEnabled    bool               // Whether web search is enabled for this request
 	QuotedContext       string             // Quoted message content from IM quote-reply (appended at LLM prompt stage, not used for retrieval)
 	Attachments         MessageAttachments // File attachments (processed and ready for prompt injection)
+	QuestionOrigin      *QuestionOrigin    // Source of a picked suggested question; a retrieval hint only
 	// SteerSink, when set, enables mid-run message injection for this run:
 	// the engine drains user-appended messages at every round boundary and
 	// persists accepted ones through this sink. A structural interface so

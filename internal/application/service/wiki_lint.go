@@ -195,10 +195,7 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			// each id.
 			if s.knowledgeService != nil && page.PageType != types.WikiPageTypeIndex {
 				for _, ref := range page.SourceRefs {
-					kid := ref
-					if i := strings.Index(ref, "|"); i > 0 {
-						kid = ref[:i]
-					}
+					kid := types.WikiSourceKnowledgeID(ref)
 					if kid == "" {
 						continue
 					}

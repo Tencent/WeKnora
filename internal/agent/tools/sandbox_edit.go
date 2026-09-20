@@ -6,7 +6,7 @@
 // regenerate the whole file — that burns tokens and often truncates.
 //
 // Design notes:
-//   - Same writable roots as write_sandbox_file: /workspace except
+//   - Same writable scope as write_sandbox_file: session sandbox except
 //     /workspace/input.
 //   - One input shape: every change is an entry in edits[]. Each entry resolves
 //     against the original content, so a batch is order-independent and
@@ -47,7 +47,8 @@ type SandboxFileEditor interface {
 
 var editSandboxFileTool = BaseTool{
 	name: ToolEditSandboxFile,
-	description: `Apply exact text replacements to an existing text file under /workspace, excluding /workspace/input.
+	description: `Apply exact text replacements to an existing text file inside the session sandbox,
+excluding /workspace/input.
 Read the relevant content first. Send edits as an array, even for one replacement. Every old_string matches the original file, must be unique unless replace_all=true, and must not overlap another edit. Include enough surrounding text to identify the intended occurrence.
 All replacements are validated before writing; a failed match leaves the file unchanged. The result includes a diff. Use write_sandbox_file for new files.`,
 	schema: utils.GenerateSchema[EditSandboxFileInput](),
@@ -95,7 +96,7 @@ func (l *sandboxEditList) UnmarshalJSON(data []byte) error {
 // attaches to. Every replacement goes in edits[], and a single-element array is
 // the ordinary way to change one thing.
 type EditSandboxFileInput struct {
-	Path  string          `json:"path" jsonschema:"Absolute or /workspace-relative sandbox path of an existing text file under /workspace (not /workspace/input)."`                                                                                                                                                            //nolint:lll // one-line struct tag
+	Path  string          `json:"path" jsonschema:"Absolute or /workspace-relative sandbox path of an existing text file (not /workspace/input)."`                                                                                                                                                                             //nolint:lll // one-line struct tag
 	Edits sandboxEditList `json:"edits" jsonschema:"Replacements to apply, as an array even for a single change. Each old_string is matched against the original file, not against the result of earlier edits, so they must not overlap. Send every change to one file in one call rather than calling the tool repeatedly."` //nolint:lll // one-line struct tag
 }
 
@@ -136,7 +137,7 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	if trimmed == "" {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "path is required; edit a file under /workspace (not /workspace/input)",
+			Error:   "path is required; edit a file inside the session sandbox (not /workspace/input)",
 		}, nil
 	}
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -240,9 +241,9 @@ func TestRunToolCallRejectsUnresolvedHandlesBeforeExecution(t *testing.T) {
 			ID: "call-1",
 			Function: types.FunctionCall{
 				Name:      tool.Name(),
-				Arguments: `{"knowledge_id":"d99"}`,
+				Arguments: `{"id":"d99"}`,
 			},
-			ModelArguments:     `{"knowledge_id":"d99"}`,
+			ModelArguments:     `{"id":"d99"}`,
 			ArgumentResolution: modelcontext.ArgumentResolutionUnresolved,
 			UnresolvedHandles:  []string{"d99"},
 		},
@@ -258,7 +259,7 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 	newEngine := func() (*AgentEngine, *countingTool) {
 		engine := newTestEngine(t, &mockChat{})
 		engine.toolRegistry = agenttools.NewToolRegistry()
-		tool := newCountingTool(agenttools.ToolListKnowledgeChunks)
+		tool := newCountingTool(agenttools.ToolReadDocument)
 		engine.toolRegistry.RegisterTool(tool)
 		return engine, tool
 	}
@@ -268,8 +269,8 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 		context.Background(),
 		types.LLMToolCall{
 			ID:             "call-unknown",
-			Function:       types.FunctionCall{Name: unknownTool.Name(), Arguments: `{"knowledge_id":"d99",}`},
-			ModelArguments: `{"knowledge_id":"d99",}`,
+			Function:       types.FunctionCall{Name: unknownTool.Name(), Arguments: `{"id":"d99",}`},
+			ModelArguments: `{"id":"d99",}`,
 		},
 		0, 0, 1, "session", "message",
 	)
@@ -283,14 +284,14 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 		context.Background(),
 		types.LLMToolCall{
 			ID:             "call-known",
-			Function:       types.FunctionCall{Name: knownTool.Name(), Arguments: `{"knowledge_id":"d1",}`},
-			ModelArguments: `{"knowledge_id":"d1",}`,
+			Function:       types.FunctionCall{Name: knownTool.Name(), Arguments: `{"id":"d1",}`},
+			ModelArguments: `{"id":"d1",}`,
 		},
 		0, 0, 1, "session", "message",
 	)
 	require.Equal(t, 1, knownTool.calls)
 	require.True(t, known.Result.Success)
-	require.Equal(t, "doc-real", known.Args["knowledge_id"])
+	require.Equal(t, "doc-real", known.Args["id"])
 }
 
 func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
@@ -450,6 +451,19 @@ func (s *summarizerChat) Chat(
 	return &types.ChatResponse{Content: "## Goal\ndo the thing", FinishReason: "stop"}, nil
 }
 
+// ChatStream is how compaction calls the summarizer.
+func (s *summarizerChat) ChatStream(
+	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	resp, _ := s.Chat(ctx, messages, opts)
+	ch := make(chan types.StreamResponse, 1)
+	ch <- types.StreamResponse{
+		ResponseType: types.ResponseTypeAnswer, Content: resp.Content, Done: true, FinishReason: resp.FinishReason,
+	}
+	close(ch)
+	return ch, nil
+}
+
 // The bug this replaces: inside one ReAct turn nothing was compactable, so
 // every round crossed the threshold, spent a summarization call, and freed
 // nothing. The loop is only broken if a second pass over the compacted context
@@ -498,6 +512,163 @@ func TestContextCompactionDoesNotRunEveryRound(t *testing.T) {
 	require.False(t, changedAgain)
 	require.Equal(t, callsAfterFirst, llm.calls,
 		"a context that cannot shrink must not spend another summarization call")
+}
+
+// recordingCheckpointSink captures what the engine persists.
+type recordingCheckpointSink struct {
+	turnIDs []string
+	saved   []*types.ContextCheckpoint
+	err     error
+}
+
+func (s *recordingCheckpointSink) SaveContextCheckpoint(
+	_ context.Context, turnMessageID string, checkpoint *types.ContextCheckpoint,
+) error {
+	s.turnIDs = append(s.turnIDs, turnMessageID)
+	s.saved = append(s.saved, checkpoint)
+	return s.err
+}
+
+// storedHistoryOverflow is a request whose stored history ends on turn-b and
+// whose live turn has outgrown the keep-recent budget on its own.
+func storedHistoryOverflow() []chat.Message {
+	messages := []chat.Message{
+		{Role: "system", Content: "you are an agent"},
+		{Role: "user", Content: "first question", TurnID: "turn-a"},
+		{Role: "assistant", Content: "first answer", TurnID: "turn-a"},
+		{Role: "user", Content: "second question", TurnID: "turn-b"},
+		{Role: "assistant", Content: "second answer", TurnID: "turn-b"},
+		{Role: "user", Content: "build me a deck"},
+	}
+	body := strings.Repeat("tool output content ", 400)
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("call-%d", i)
+		messages = append(messages,
+			chat.Message{Role: "assistant", ToolCalls: []chat.ToolCall{{
+				ID:       id,
+				Type:     "function",
+				Function: chat.FunctionCall{Name: "write_sandbox_file", Arguments: `{"path":"/w/a.html"}`},
+			}}},
+			chat.Message{Role: "tool", Name: "write_sandbox_file", ToolCallID: id, Content: body},
+		)
+	}
+	return messages
+}
+
+// Without persistence every later turn re-summarizes the same stored history.
+// A compaction that ends on a stored turn is written back onto that turn.
+func TestContextCompactionPersistsACheckpointOnTheLastStoredTurn(t *testing.T) {
+	engine := newTestEngine(t, &summarizerChat{},
+		withMaxContextTokens(40000), withMaxCompletionTokens(4000))
+	sink := &recordingCheckpointSink{}
+	engine.SetContextCheckpointSink(sink)
+
+	messages := storedHistoryOverflow()
+	_, changed := engine.manageContextWindow(
+		context.Background(), messages, 1, engine.tokenEstimator.EstimateMessages(messages),
+	)
+	require.True(t, changed)
+
+	require.Equal(t, []string{"turn-b"}, sink.turnIDs)
+	require.Contains(t, sink.saved[0].Summary, "do the thing")
+	require.False(t, sink.saved[0].CreatedAt.IsZero())
+}
+
+// The checkpoint is an optimization for later turns. Failing to store it must
+// not undo the compaction this turn needed.
+func TestContextCheckpointFailureKeepsTheCompaction(t *testing.T) {
+	engine := newTestEngine(t, &summarizerChat{},
+		withMaxContextTokens(40000), withMaxCompletionTokens(4000))
+	engine.SetContextCheckpointSink(&recordingCheckpointSink{err: errors.New("db down")})
+
+	messages := storedHistoryOverflow()
+	before := engine.tokenEstimator.EstimateMessages(messages)
+	compacted, changed := engine.manageContextWindow(context.Background(), messages, 1, before)
+	require.True(t, changed)
+	require.Less(t, engine.tokenEstimator.EstimateMessages(compacted), before/2)
+}
+
+// A compaction can be discarded for freeing too little and still have
+// summarized the stored history in full: a short stored history next to a
+// live turn whose weight is one result the cut cannot reach. That summary is a
+// valid checkpoint, and dropping it would have the next turn pay for it again.
+func TestContextCheckpointIsKeptWhenTheCompactionFreesTooLittle(t *testing.T) {
+	engine := newTestEngine(t, &summarizerChat{},
+		withMaxContextTokens(40000), withMaxCompletionTokens(4000))
+	sink := &recordingCheckpointSink{}
+	engine.SetContextCheckpointSink(sink)
+
+	messages := []chat.Message{
+		{Role: "system", Content: "you are an agent"},
+		{Role: "user", Content: "first question", TurnID: "turn-a"},
+		{Role: "assistant", Content: "first answer", TurnID: "turn-a"},
+		{Role: "user", Content: "read the export"},
+		{Role: "assistant", ToolCalls: []chat.ToolCall{{
+			ID: "call-1", Type: "function",
+			Function: chat.FunctionCall{Name: "read_file", Arguments: `{"path":"/w/export.csv"}`},
+		}}},
+		{Role: "tool", Name: "read_file", ToolCallID: "call-1", Content: strings.Repeat("row,value ", 12000)},
+	}
+	before := engine.tokenEstimator.EstimateMessages(messages)
+	require.True(t, engine.compactor.Settings().ShouldCompact(before))
+
+	result, err := engine.compactor.Compact(context.Background(), messages, compaction.ReasonThreshold)
+	require.NoError(t, err)
+	require.Less(t, result.Freed(), result.TokensBefore/minFreedFraction,
+		"the fixture must be a compaction the engine discards")
+
+	engine.manageContextWindow(context.Background(), messages, 1, before)
+	require.Equal(t, []string{"turn-a"}, sink.turnIDs)
+}
+
+// Redacting a stored KB result must not detach it from its turn, or a summary
+// ending on that turn could no longer be recognized as ending there.
+func TestRedactHistoryKBResultsKeepsTurnID(t *testing.T) {
+	redacted := redactHistoryKBResults([]chat.Message{{
+		Role: "tool", Name: agenttools.ToolSearchKnowledge, ToolCallID: "c1",
+		Content: "stale chunk", TurnID: "turn-a",
+	}})
+	require.Len(t, redacted, 1)
+	require.NotEqual(t, "stale chunk", redacted[0].Content)
+	require.Equal(t, "turn-a", redacted[0].TurnID)
+}
+
+// History loads up to the whole window, past the compaction threshold, so the
+// overflow reaches the first round's compaction instead of being dropped by
+// the loader before compaction can see it.
+func TestHistoryTokenBudgetExceedsTheCompactionThreshold(t *testing.T) {
+	for _, tc := range []struct{ window, completion int }{
+		{window: 40000, completion: 4000},
+		{window: 200000, completion: 24576},
+		{window: 32768, completion: 0},
+	} {
+		engine := newTestEngine(t, &mockChat{},
+			withMaxContextTokens(tc.window), withMaxCompletionTokens(tc.completion))
+		budget := HistoryTokenBudget(engine.config)
+		require.Equal(t, tc.window, budget)
+		require.Greater(t, budget, engine.compactor.Settings().Threshold(),
+			"window=%d completion=%d", tc.window, tc.completion)
+	}
+	require.Equal(t, types.DefaultMaxContextTokens, HistoryTokenBudget(&types.AgentConfig{}),
+		"an unresolved window falls back to the default")
+}
+
+// The history loader prices turns with HistoryAsSent, so it must match what
+// buildMessagesWithLLMContext sends under both settings.
+func TestHistoryAsSentFollowsTheRetainSetting(t *testing.T) {
+	history := []chat.Message{
+		{Role: "tool", Name: agenttools.ToolWikiReadPage, ToolCallID: "c1", Content: "full page"},
+		{Role: "tool", Name: agenttools.ToolWebFetch, ToolCallID: "c2", Content: "fetched"},
+	}
+
+	redacted := HistoryAsSent(history, false)
+	require.NotEqual(t, "full page", redacted[0].Content)
+	require.Equal(t, "fetched", redacted[1].Content, "only KB and Wiki results are redacted")
+	require.Equal(t, "full page", HistoryAsSent(history, true)[0].Content)
+
+	engine := newTestEngine(t, &mockChat{})
+	sent := engine.buildMessagesWithLLMContext("system", "next", "s1", history, nil)
+	require.Equal(t, redacted[0].Content, sent[1].Content)
 }
 
 // Asking for more output than the window can still hold is rejected outright

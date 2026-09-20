@@ -320,9 +320,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--app-motion-base);
   background: var(--td-bg-color-secondarycontainer);
   border: .5px solid var(--td-component-stroke);
 
@@ -338,7 +338,7 @@ onUnmounted(() => {
 }
 
 .tenant-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   margin-bottom: 2px;
   font-weight: 500;
@@ -352,7 +352,7 @@ onUnmounted(() => {
 }
 
 .tenant-name {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
   white-space: nowrap;
@@ -362,7 +362,7 @@ onUnmounted(() => {
 }
 
 .tenant-switch-icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-brand-color);
   flex-shrink: 0;
 }
@@ -383,7 +383,7 @@ onUnmounted(() => {
   right: 0;
   background: var(--td-bg-color-container);
   border: .5px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
   z-index: 1000;
   overflow: hidden;
@@ -396,7 +396,7 @@ onUnmounted(() => {
 
 .dropdown-title {
   display: block;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   color: var(--td-text-color-secondary);
   margin-bottom: 8px;
@@ -408,19 +408,19 @@ onUnmounted(() => {
   gap: 6px;
   padding: 7px 10px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: .5px solid transparent;
-  transition: all 0.2s;
+  transition: all var(--app-motion-base);
 
   &:focus-within {
     background: var(--td-bg-color-container);
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   }
 }
 
 .search-icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
 }
@@ -430,7 +430,7 @@ onUnmounted(() => {
   border: none;
   outline: none;
   background: transparent;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   min-width: 0;
 
@@ -440,11 +440,11 @@ onUnmounted(() => {
 }
 
 .clear-icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
   cursor: pointer;
   flex-shrink: 0;
-  transition: color 0.2s;
+  transition: color var(--app-motion-base);
 
   &:hover {
     color: var(--td-text-color-secondary);
@@ -479,9 +479,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--app-motion-fast);
   margin-bottom: 2px;
 
   &:last-child {
@@ -493,7 +493,7 @@ onUnmounted(() => {
   }
 
   &.selected {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
 
     .tenant-item-name {
       color: var(--td-brand-color);
@@ -513,16 +513,16 @@ onUnmounted(() => {
 .tenant-item-avatar {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-secondary);
   flex-shrink: 0;
-  transition: all 0.2s;
+  transition: all var(--app-motion-base);
 
   &.active {
     background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
@@ -539,7 +539,7 @@ onUnmounted(() => {
 }
 
 .tenant-item-name {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -547,7 +547,7 @@ onUnmounted(() => {
 }
 
 .tenant-item-id {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
 }
 
@@ -565,7 +565,7 @@ onUnmounted(() => {
   padding: 24px 12px;
   gap: 8px;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .tenant-loading-more {
@@ -581,20 +581,20 @@ onUnmounted(() => {
   padding: 10px 12px;
   margin: 4px 6px 6px;
   border-top: .5px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   color: var(--td-brand-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
-  transition: background 0.15s;
+  transition: background var(--app-motion-fast);
 
   &:hover {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
   }
 }
 
 .tenant-create-icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   flex-shrink: 0;
 }
 
@@ -608,7 +608,7 @@ onUnmounted(() => {
 // 下拉动画
 .dropdown-enter-active,
 .dropdown-leave-active {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--app-motion-base) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .dropdown-enter-from,

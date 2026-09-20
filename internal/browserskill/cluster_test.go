@@ -96,7 +96,7 @@ func TestRequestsRouteToBrowserOwnerAcrossReplicas(t *testing.T) {
 	require.True(t, owner.Status(scope, "chat").Paused)
 	require.NoError(t, follower.Focus(ctx, scope, "chat"))
 	require.True(t, owner.Status(scope, "chat").Paused, "locating a window must not resume automation")
-	require.NoError(t, follower.Idle(ctx, scope, "chat"))
+	require.NoError(t, follower.FinishTurn(ctx, scope, "chat", true))
 	require.True(t, owner.Status(scope, "chat").Idle)
 	require.NoError(t, follower.Revoke(ctx, scope))
 	_, err = owner.Call(ctx, scope, "chat", "snapshot", nil)

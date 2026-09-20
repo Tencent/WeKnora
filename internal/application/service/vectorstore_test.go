@@ -822,6 +822,8 @@ CREATE TABLE IF NOT EXISTS vector_stores (
     deleted_at DATETIME NULL
 );
 CREATE TABLE IF NOT EXISTS knowledge_bases (
+    profile_config TEXT,
+    generated_profile TEXT,
     id VARCHAR(36) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -911,6 +913,17 @@ func (r *realStoreRepo) ExistsByEndpointAndIndex(_ context.Context, _ uint64, _ 
 // realKBRepo is the minimal KnowledgeBaseRepository slice required by the
 // vector-store service (only CountByVectorStoreID is exercised here).
 type realKBRepo struct{ db *gorm.DB }
+
+func (r *realKBRepo) UpdateKnowledgeBaseGeneratedProfile(
+	ctx context.Context, id string, profile *types.KnowledgeBaseProfile,
+) error {
+	var value interface{}
+	if profile != nil {
+		value = *profile
+	}
+	return r.db.WithContext(ctx).Model(&types.KnowledgeBase{}).Where("id = ?", id).
+		Update("generated_profile", value).Error
+}
 
 func (r *realKBRepo) CountByVectorStoreID(ctx context.Context, db *gorm.DB, tenantID uint64, storeID string) (int64, error) {
 	if db == nil {

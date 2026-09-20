@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // NewFactory returns an im.AdapterFactory for Slack channels.
@@ -23,7 +24,8 @@ func NewFactory() im.AdapterFactory {
 
 		switch mode {
 		case "webhook":
-			api := slackpkg.New(im.GetString(creds, "bot_token"))
+			api := slackpkg.New(im.GetString(creds, "bot_token"),
+				slackpkg.OptionHTTPClient(secutils.NewSSRFSafeHTTPClient(secutils.DefaultSSRFSafeHTTPClientConfig())))
 			adapter := NewWebhookAdapter(api, im.GetString(creds, "signing_secret"))
 			return adapter, func() {}, nil
 

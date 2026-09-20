@@ -279,7 +279,32 @@ func (s *knowledgeBaseService) assembleSearchResults(
 		}
 	}
 
+	logSearchResultChunkTypes(ctx, searchResults)
 	return searchResults
+}
+
+// logSearchResultChunkTypes records how many returned hits came from each
+// chunk type. It exists to answer one question with data: how often does the
+// document-level summary chunk actually surface, compared with text chunks?
+// If "summary" stays near zero in production, indexing it can be dropped.
+func logSearchResultChunkTypes(ctx context.Context, results []*types.SearchResult) {
+	if len(results) == 0 {
+		return
+	}
+	counts := make(map[string]int, 4)
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		key := r.ChunkType
+		if key == "" {
+			key = string(types.ChunkTypeText)
+		}
+		counts[key]++
+	}
+	logger.GetLogger(ctx).WithField("chunk_type_counts", counts).
+		WithField("total", len(results)).
+		Infof("search results by chunk type")
 }
 
 // collectRelatedChunkIDs extracts related chunk IDs from a chunk.

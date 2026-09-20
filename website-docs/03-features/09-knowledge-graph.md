@@ -4,11 +4,6 @@
 
 该功能适用于人物、组织、产品或条款之间关系较多的资料。启用后会增加入库阶段的模型调用，并需要部署 Neo4j。
 
-<Screenshot
-  src="/screenshots/kg-graph.png"
-  caption="知识图谱视图：实体与关系"
-  hint="展示知识库图谱页签中的实体关系图，节点可点击查看关联文档。" />
-
 图谱存储使用 Neo4j，并依赖 APOC 插件。
 
 ## 开启配置
@@ -127,7 +122,7 @@ SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
 1. **PluginExtractEntity**（`extract_entity.go`，挂在 `QUERY_UNDERSTAND` 事件）：`NEO4J_ENABLE=true` 时，先筛出 `ExtractConfig.Enabled` 的知识库（存入 `chatManage.EntityKBIDs` / `EntityKnowledge`），再用 `ExtractManager.ExtractEntity` 模板 + Chat 模型从**用户查询**里抽取实体名，存入 `chatManage.Entity`。
 2. **PluginSearchEntity**（`search_entity.go`，挂在 `ENTITY_SEARCH` 事件）：对每个启用图谱的知识库 / 文件并行调用 `graphRepo.SearchNode`——Cypher 用 `n.name CONTAINS nodeText` 模糊匹配实体并返回一跳邻居与关系，合并为 `chatManage.GraphResult`；随后 `filterSeenChunk` 取出图谱节点携带的 `chunks`（去掉向量检索已命中的），从 `chunkRepo` 拉取原文并转换为 `SearchResult` 并入候选集，实现"实体 → 关联 chunk"的图谱补充召回。
 
-Agent 模式则提供 `query_knowledge_graph` 工具（`internal/agent/tools/query_knowledge_graph.go`）：校验各知识库是否配置了图谱（`ExtractConfig.Nodes/Relations` 非空），并发对多库执行检索、按 chunk 去重排序，输出中附带各库的图谱配置状态（实体类型 / 关系类型清单）；未配置图谱的库回落为普通混合检索结果。
+Agent 模式则提供 `query_knowledge_graph` 工具（`internal/agent/tools/query_knowledge_graph.go`）：校验各知识库是否配置了图谱（`ExtractConfig.Nodes/Relations` 非空），并发对多库执行检索、按 chunk 去重排序，输出中附带各库的图谱配置状态（实体类型 / 关系类型清单）；未配置图谱的库回落为普通混合检索结果。该工具的能力要求是 `all_of: [graph]`，并且只有当 Agent 作用域内存在启用图谱的知识库时才会提供给模型——`agent_service.go` 装配工具白名单时会把它从没有图谱库的作用域中移除，避免模型反复调用一个只能返回退化结果的工具。
 
 ## 流程图
 

@@ -16,6 +16,10 @@
  * 图片类产物内联显示（带鉴权拉取后换成 blob），其余类型（HTML 图表、CSV、
  * 文档等）渲染成一张卡片，点击后交给右侧沙箱面板的产物页预览——正文里塞一个
  * 1MB 的自包含 HTML iframe 既慢又不安全。
+ *
+ * 已被用户删除的产物在列表里是墓碑（带 deleted_at），渲染成一张置灰的不可点击
+ * 卡片。调用方**不要**把墓碑过滤掉再传进来：过滤了句柄就对不上本条回答的产物，
+ * 会被当成知识库图片走受保护图片渲染，最终显示成一张拉不出来的裂图。
  */
 
 import { escapeHTML } from './security.ts';
@@ -33,6 +37,12 @@ export interface ArtifactRefMeta {
    * 同义，取其一即可。
    */
   url?: string;
+  /**
+   * 用户删除该文件的时间。墓碑条目**必须**留在传给渲染器的列表里：一是下标就是
+   * 下载地址，抽掉会让后面的文件整体错位；二是句柄只有对得上才知道它属于本条
+   * 回答，对不上会被当成知识库图片走受保护图片渲染，最后显示成一张裂图。
+   */
+  deleted_at?: string | null;
 }
 
 export interface ArtifactRefContext {
@@ -45,6 +55,8 @@ export interface ArtifactRefLabels {
   previewHint: string;
   /** 本轮已结束但引用对不上任何产物时的副标题，如「文件不可用」。 */
   missingHint: string;
+  /** 文件已被用户删除时的副标题，如「文件已删除」。 */
+  deletedHint: string;
 }
 
 const RESOURCE_HANDLE_RE = /^resource:\/\/([A-Za-z0-9_-]{22})$/;
@@ -239,15 +251,29 @@ function blobCacheKey(ctx: ArtifactRefContext, index: number): string {
 const STREAMING_PLACEHOLDER =
   '<span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>';
 
-function renderCard(fileName: string, hint: string, index: number | null): string {
+/**
+ * 卡片的三种状态：
+ *   - `ready`   —— 正常，可点击打开预览；
+ *   - `pending` —— 本轮已结束但引用对不上任何产物（模型引用了不存在的文件）；
+ *   - `deleted` —— 文件确实生成过，但已被用户删除，字节已回收。
+ * 后两种都不可点击，但要能区分开：一个是「从来没有过」，一个是「你自己删掉了」。
+ */
+type ArtifactCardVariant = 'ready' | 'pending' | 'deleted';
+
+function renderCard(
+  fileName: string,
+  hint: string,
+  index: number | null,
+  variant: ArtifactCardVariant,
+): string {
   const safeName = escapeHTML(fileName);
   const safeHint = escapeHTML(hint);
   // 卡片必须是内联元素：marked 会把图片包在 <p> 里，块级元素会被 HTML 解析器
   // 提到段落外面，破坏正文结构。
-  const interactive = index === null
-    ? ''
-    : ` data-artifact-index="${index}" role="button" tabindex="0"`;
-  const state = index === null ? ' artifact-ref-card--pending' : '';
+  const interactive = variant === 'ready' && index !== null
+    ? ` data-artifact-index="${index}" role="button" tabindex="0"`
+    : '';
+  const state = variant === 'ready' ? '' : ` artifact-ref-card--${variant}`;
   return (
     `<span class="artifact-ref-card${state}"${interactive} title="${safeName}">`
     + `<span class="artifact-ref-card__icon" aria-hidden="true">${renderArtifactFileIcon(fileName)}</span>`
@@ -305,13 +331,21 @@ export function renderArtifactReference(args: {
     // 继续显示「生成中」。
     const fallbackName = ref.name || (args.alt || '').trim();
     if (!fallbackName) return '';
-    return renderCard(fallbackName, args.labels.missingHint, null);
+    return renderCard(fallbackName, args.labels.missingHint, null, 'pending');
+  }
+
+  // 用户删过的文件字节已经回收，下载会 404。图片类产物同样降级成卡片：走
+  // renderImage 只会拉取失败，留下一张永远加载不出来的裂图。
+  if (artifact.deleted_at) {
+    const name = artifact.file_name || (args.alt || '').trim();
+    if (!name) return '';
+    return renderCard(name, args.labels.deletedHint, null, 'deleted');
   }
 
   if (rendersAsImage(artifact)) {
     return renderImage(artifact, args.alt || '', args.context ?? null);
   }
-  return renderCard(artifact.file_name, args.labels.previewHint, artifact.index);
+  return renderCard(artifact.file_name, args.labels.previewHint, artifact.index, 'ready');
 }
 
 async function loadArtifactBlobURL(ctx: ArtifactRefContext, index: number): Promise<string | null> {

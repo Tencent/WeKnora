@@ -5,22 +5,6 @@
 .system-admin-action-popup-overlay {
   z-index: 3050 !important;
 
-  .t-popup__content {
-    padding: 14px 16px !important;
-    min-width: 300px;
-    max-width: min(360px, calc(100vw - 24px));
-    max-height: min(480px, calc(100vh - 96px));
-    overflow-y: auto;
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  }
 }
 
 :root[theme-mode='dark'] .system-admin-action-popup-overlay .t-popup__content {
@@ -43,7 +27,7 @@
 
 .system-admin-action-popup-title {
   margin: 0 0 8px;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 1.35;
   color: var(--td-text-color-primary);
@@ -51,7 +35,7 @@
 
 .system-admin-action-popup-hint {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }

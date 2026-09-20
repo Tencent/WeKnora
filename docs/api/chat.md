@@ -37,6 +37,7 @@
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
 | `channel` | string | 否 | 来源渠道标识：`web`、`api`、`im`、`browser_extension` |
 | `suggestion_attribution` | object | 否 | 用户从推荐问题发起本轮时传入 `{suggestion_set_id, question_id}`；服务端会校验归属 |
+| `question_origin` | object | 否 | 用户点选智能体推荐问题（`GET /api/v1/agents/{id}/suggested-questions`）时传入该问题的 `{knowledge_base_id, knowledge_id}`。Agent 会先检索这个来源再作答；它只是本轮检索范围内的提示，不会扩大范围。对仅在 @ 提及时检索知识库的智能体，若该知识库在智能体可用范围内，则本轮检索该知识库 |
 
 **请求**:
 
@@ -87,6 +88,7 @@ Agent 模式支持更智能的问答，包括工具调用、网络搜索、多�
 | `images` | object[] | 否 | 附带的图片（base64 格式），需要 Agent 启用图片上传 |
 | `channel` | string | 否 | 来源渠道标识：`web`、`api`、`im`、`browser_extension` |
 | `suggestion_attribution` | object | 否 | 用户从推荐问题发起本轮时传入 `{suggestion_set_id, question_id}`；服务端会校验归属 |
+| `question_origin` | object | 否 | 用户点选智能体推荐问题（`GET /api/v1/agents/{id}/suggested-questions`）时传入该问题的 `{knowledge_base_id, knowledge_id}`。Agent 会先检索这个来源再作答；它只是本轮检索范围内的提示，不会扩大范围。对仅在 @ 提及时检索知识库的智能体，若该知识库在智能体可用范围内，则本轮检索该知识库 |
 
 ## 回答后推荐问题
 

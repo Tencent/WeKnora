@@ -1,0 +1,52 @@
+/* Shared by the product homepage and VitePress documentation. */
+:root {
+  color-scheme: light;
+  --wk-ink: #101f38;
+  --wk-ink-deep: #0a1526;
+  --wk-ink-soft: #40536f;
+  --wk-ink-mute: #6d7d94;
+  --wk-gold: #b8863b;
+  --wk-gold-light: #d9a94f;
+  --wk-paper: #fdfcfa;
+  --wk-paper-2: #f5f3ee;
+  --wk-paper-3: #edeae2;
+  --wk-rule: rgba(16, 31, 56, .12);
+  --wk-rule-soft: rgba(16, 31, 56, .07);
+  --wk-surface: #fff;
+  --wk-header: rgba(253, 252, 250, .96);
+  --wk-button-hover: #24395a;
+  --wk-accent-text: #886025;
+  --wk-accent-border: #dfd1b9;
+  --wk-logo-ground: #fff;
+  --wk-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --wk-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Songti SC", "Source Han Serif SC", "Noto Serif CJK SC", "STSong", serif;
+  --wk-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+html.dark {
+  color-scheme: dark;
+  --wk-ink: #e6ecf5;
+  --wk-ink-soft: #a9b6c9;
+  --wk-ink-mute: #9aaac0;
+  --wk-gold: #d9a94f;
+  --wk-gold-light: #e8c176;
+  --wk-paper: #0b1220;
+  --wk-paper-2: #101a2b;
+  --wk-paper-3: #16233a;
+  --wk-rule: rgba(190, 208, 232, .14);
+  --wk-rule-soft: rgba(190, 208, 232, .08);
+  --wk-surface: #101a2b;
+  --wk-header: rgba(11, 18, 32, .96);
+  --wk-button-hover: #c3d0e2;
+  --wk-accent-text: #e8c176;
+  --wk-accent-border: #685638;
+}
+
+/* Original README artwork, copied byte-for-byte. Only blank outer canvas is
+   hidden (source viewport: x=0, y=208, width=945, height=238). Keep the full
+   lettering, sail and waves. Blend away the blank background in light mode;
+   the user-approved inverted presentation is applied only in dark mode. */
+.wk-logo { position: relative; display: inline-block; width: 164px; aspect-ratio: 945 / 238; overflow: hidden; flex-shrink: 0; vertical-align: middle; mix-blend-mode: multiply; }
+html.dark .wk-logo { mix-blend-mode: screen; }
+html.dark .wk-logo img { filter: invert(1) hue-rotate(180deg); }
+.wk-logo img { position: absolute; display: block; left: 0; top: -87.394958%; width: 100%; max-width: none; height: auto; }
+@media (max-width: 480px) { .wk-brand .wk-logo { width: 148px; } }

@@ -71,6 +71,38 @@ func TestResolveBuiltinWikiFixerTenantScope_SharedEditorUsesSourceTenant(t *test
 	require.Equal(t, types.TenantRoleContributor, kbShare.checkedTenantRole)
 }
 
+// The scoped run executes in the owner's workspace, so the caller's own fixer
+// customizations must not select the owner's other KBs, MCP services, skills
+// or models there.
+func TestResolveBuiltinWikiFixerTenantScope_PinsConfigToTheSharedKB(t *testing.T) {
+	agent := &types.CustomAgent{ID: types.BuiltinWikiFixerID, TenantID: 10, Config: types.CustomAgentConfig{
+		KBSelectionMode:     "all",
+		MCPSelectionMode:    "",
+		SkillsSelectionMode: "all",
+		SandboxConfigID:     "caller-sandbox",
+		WebSearchEnabled:    true,
+		ModelID:             "caller-model",
+	}}
+	kbLookup := &wikiFixerKBLookupStub{kb: &types.KnowledgeBase{ID: "kb-shared", TenantID: 20}}
+	kbShare := &wikiFixerKBShareStub{permission: types.OrgRoleEditor, isShared: true}
+
+	gotAgent, _ := resolveBuiltinWikiFixerTenantScope(
+		context.Background(), agent, 10, types.TenantRoleContributor, []string{"kb-shared"}, kbLookup, kbShare,
+	)
+
+	cfg := gotAgent.Config
+	require.Equal(t, "selected", cfg.KBSelectionMode)
+	require.Equal(t, []string{"kb-shared"}, cfg.KnowledgeBases)
+	require.Equal(t, "none", cfg.MCPSelectionMode)
+	require.Equal(t, "none", cfg.SkillsSelectionMode)
+	require.Empty(t, cfg.SandboxConfigID)
+	require.False(t, cfg.WebSearchEnabled)
+	require.Empty(t, cfg.ModelID)
+	require.True(t, types.NewSharedAgentKBScope(gotAgent).Allows("kb-shared", 20))
+	require.False(t, types.NewSharedAgentKBScope(gotAgent).Allows("kb-other", 20))
+	require.Equal(t, "all", agent.Config.KBSelectionMode, "must not mutate the caller's agent")
+}
+
 func TestResolveBuiltinWikiFixerTenantScope_SharedViewerDoesNotSwitchTenant(t *testing.T) {
 	agent := &types.CustomAgent{ID: types.BuiltinWikiFixerID, TenantID: 10}
 	kbLookup := &wikiFixerKBLookupStub{

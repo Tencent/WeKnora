@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -53,6 +54,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 
 	// Model-context encoding owns codec ordering and temporary-handle lifecycle.
 	messages = e.modelContext.EncodeMessages(messages)
+	reportModelContextLeaks(ctx, "Agent", e.modelContext, messages)
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
@@ -623,4 +625,18 @@ func (e *AgentEngine) callLLMWithRetry(
 	}
 
 	return response, nil
+}
+
+// reportModelContextLeaks logs any durable identifier that survived encoding.
+// Each line names the producing role or tool so the leak can be fixed at its
+// source; see modelcontext/leaks.go.
+func reportModelContextLeaks(
+	ctx context.Context, scope string, registry *modelcontext.Registry, messages []chat.Message,
+) {
+	leaks := registry.LeakedIdentifiers(messages)
+	if len(leaks) == 0 {
+		return
+	}
+	logger.Warnf(ctx, "[%s][ModelContext] %d message field(s) carry raw identifiers after encoding: %s",
+		scope, len(leaks), modelcontext.SummarizeLeaks(leaks))
 }

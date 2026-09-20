@@ -51,8 +51,30 @@ const (
 	// where the LLM returns identical content without any tool calls before
 	// the loop is forcibly terminated. This catches stuck loops caused by
 	// unhandled finish reasons (e.g., content_filter not caught elsewhere).
+	// "Identical" includes an identical lack of content: consecutive empty
+	// rounds are the clearest stuck loop there is.
 	maxRepeatedResponseRounds = 2
+
+	// maxConsecutiveLengthRounds is how many rounds in a row may be cut off at
+	// the completion-token cap before the loop gives up. A truncated answer
+	// already ends the turn (analyzeResponse Case 2), so reaching this limit
+	// means round after round is truncating inside tool-call arguments: the
+	// model is told to re-issue the call, writes an even longer one, and hits
+	// the cap again. Without this the turn burns its whole round budget.
+	maxConsecutiveLengthRounds = 3
 )
+
+// truncatedAnswerFallback is delivered when every attempt at this turn was cut
+// off at the completion cap and none of them produced answer text — there is
+// nothing partial to hand over, so say what happened instead of finishing with
+// an empty message.
+const truncatedAnswerFallback = "Sorry, this answer kept hitting the model's per-response output limit " +
+	"before any text was produced. Try narrowing the question, or raise the agent's " +
+	"max_completion_tokens setting."
+
+// stalledAnswerFallback is delivered when a no-progress guard stopped the turn
+// and the round that tripped it produced no text.
+const stalledAnswerFallback = "I'm sorry, I was unable to generate a response. Please try again."
 
 func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	if toolName == "local_browser" && len(arguments) > 0 {
@@ -115,11 +137,15 @@ const contextSafetyTokens = 4096
 // provider. Unset without a sandbox is 4096; unset with a sandbox
 // (write_sandbox_file / edit_sandbox_file) is 24576.
 func (e *AgentEngine) getCompletionTokenBudget() int {
+	return completionTokenBudgetFor(e.config)
+}
+
+func completionTokenBudgetFor(cfg *types.AgentConfig) int {
 	configured := 0
 	sandboxID := ""
-	if e.config != nil {
-		configured = e.config.MaxCompletionTokens
-		sandboxID = e.config.SandboxConfigID
+	if cfg != nil {
+		configured = cfg.MaxCompletionTokens
+		sandboxID = cfg.SandboxConfigID
 	}
 	return types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
 }
@@ -130,7 +156,30 @@ func (e *AgentEngine) getCompletionTokenBudget() int {
 // emit 24576 tokens needs at least that much free, or the request is accepted
 // and the reply is truncated.
 func (e *AgentEngine) contextReserveTokens() int {
-	return max(e.getCompletionTokenBudget()+contextSafetyTokens, compaction.DefaultReserveTokens)
+	return reserveTokensFor(e.config)
+}
+
+func reserveTokensFor(cfg *types.AgentConfig) int {
+	return max(completionTokenBudgetFor(cfg)+contextSafetyTokens, compaction.DefaultReserveTokens)
+}
+
+// HistoryTokenBudget is how much stored history one run of cfg may load: the
+// whole context window, deliberately more than the compaction threshold.
+//
+// The loader drops the oldest turns that do not fit, and what it drops is
+// lost: it is neither replayed nor summarized. With a budget equal to the
+// threshold the loader always trimmed first, so whenever one turn was larger
+// than the system prompt plus the new question the request never crossed the
+// threshold, nothing was summarized, and the session became a sliding window
+// that never got a checkpoint. Loading up to the window leaves the overflow
+// to the first round's compaction instead, which summarizes it and persists a
+// checkpoint. The compactor bounds its own summarizer input, so a history this
+// large cannot make the summarization request itself overflow.
+func HistoryTokenBudget(cfg *types.AgentConfig) int {
+	if cfg != nil && cfg.MaxContextTokens > 0 {
+		return cfg.MaxContextTokens
+	}
+	return types.DefaultMaxContextTokens
 }
 
 // clampCompletionBudgetToContext shrinks the round's completion budget to what
