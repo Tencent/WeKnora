@@ -1068,6 +1068,32 @@ onUnmounted(() => {
   }
   ul, ol { padding-left: 24px; margin: 8px 0; }
   li { margin: 4px 0; }
+  ul li:has(> .task-checkbox) { list-style: none; }
+  .task-checkbox {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    border: 1px solid @border-color;
+    border-radius: 3px;
+    vertical-align: -2px;
+    position: relative;
+    &.checked {
+      background: @accent;
+      border-color: @accent;
+      &::after {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 1px;
+        width: 4px;
+        height: 8px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+  }
 
   table { .preview-table(); margin: 12px 0; }
 
