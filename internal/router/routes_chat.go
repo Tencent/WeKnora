@@ -108,6 +108,9 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id/artifacts", handler.ListSessionArtifacts)
 		sessions.GET("/:id/messages/:message_id/artifacts", handler.ListMessageArtifacts)
 		sessions.GET("/:id/messages/:message_id/artifacts/:index/download", handler.DownloadMessageArtifact)
+		// Deleting reclaims the stored bytes, so it is owner-only: unlike the
+		// download above it does not honour shared-agent read access.
+		sessions.DELETE("/:id/messages/:message_id/artifacts/:index", handler.DeleteMessageArtifact)
 	}
 
 	// Cross-session artifact library. Same guards as /sessions: the rows come
@@ -116,6 +119,10 @@ func RegisterSessionRoutes(
 	artifacts := g.apiKeyGroup(r.Group("/artifacts", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
 	{
 		artifacts.GET("", handler.ListArtifactLibrary)
+		// The artifact to delete is addressed by query parameters rather than a
+		// path: the library row already carries session_id/message_id/index, and
+		// a path would have to repeat the /sessions tree under a second prefix.
+		artifacts.DELETE("", handler.DeleteLibraryArtifact)
 	}
 }
 

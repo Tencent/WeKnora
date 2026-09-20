@@ -551,6 +551,10 @@ func (c *ArtifactCollector) bindArtifactResource(ctx context.Context, ref, messa
 // sandbox back at an earlier commit, so every unchanged file is de-duplicated
 // out of that turn's own artifact list — and the reference still has to be bound
 // to that file's stable handle.
+//
+// Files the user deleted are filtered out: they are still in the store as
+// tombstones so loadKnownSet will not re-collect them, but an answer must not
+// resolve a name to a file whose bytes are gone.
 func (c *ArtifactCollector) SessionArtifacts(ctx context.Context, sessionID string) types.MessageArtifacts {
 	if c == nil || c.store == nil || sessionID == "" {
 		return nil
@@ -560,7 +564,7 @@ func (c *ArtifactCollector) SessionArtifacts(ctx context.Context, sessionID stri
 		logger.Warnf(ctx, "Read session artifacts failed: %v", err)
 		return nil
 	}
-	return previous
+	return types.MessageArtifacts(previous).Live()
 }
 
 // BindArtifactsToMessage makes messageID an owner of each artifact's resource

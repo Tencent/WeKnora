@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -57,6 +58,11 @@ func insertMessageArtifacts(tx *gorm.DB, messages []*types.Message) error {
 // loadArtifactsByMessage returns each message's artifacts in position order.
 // Every requested id is present in the result, with an empty list when the
 // message has none.
+//
+// Tombstones (deleted_at set) are deliberately included: position is the index
+// the download endpoint addresses a file by, so skipping a deleted row here
+// would renumber every later file in the message. Callers that render a list
+// filter with MessageArtifacts.Live.
 func loadArtifactsByMessage(
 	ctx context.Context, db *gorm.DB, messageIDs []string,
 ) (map[string]types.MessageArtifacts, error) {
@@ -116,6 +122,12 @@ func attachArtifactsWithSession(ctx context.Context, db *gorm.DB, results []*typ
 
 // GetSessionArtifacts returns every skill-produced MessageArtifact recorded
 // against a live message of the session, in message then position order.
+//
+// User-deleted artifacts are included as tombstones. ArtifactCollector builds
+// its de-duplication set from this call, and a tombstone is exactly what stops
+// it re-attaching a file the user deleted while the sandbox copy — same path,
+// same mtime — is still sitting there. Display paths filter with
+// MessageArtifacts.Live.
 func (r *messageRepository) GetSessionArtifacts(
 	ctx context.Context, sessionID string,
 ) (types.MessageArtifacts, error) {
@@ -172,6 +184,10 @@ func (r *messageRepository) RecordRestoredArtifactMtime(
 // ListArtifactLibrary returns the latest version of every artifact in the
 // sessions the caller can see, newest first.
 //
+// User-deleted artifacts are excluded, versions included: deleting the newest
+// version of a file surfaces the one before it, which is why the delete path
+// tombstones every version of a library row at once.
+//
 // Session visibility mirrors the home sidebar, i.e. the "web" bucket of
 // sessionRepository.QueryPaged: same tenant, not deleted, owned by the user or
 // a legacy tenant-level row, not a skill-maintenance session, and not an IM,
@@ -188,7 +204,7 @@ func (r *messageRepository) ListArtifactLibrary(
 		where []string
 		args  []any
 	)
-	where = append(where, "s.tenant_id = ?", "s.deleted_at IS NULL")
+	where = append(where, "s.tenant_id = ?", "s.deleted_at IS NULL", "ma.deleted_at IS NULL")
 	args = append(args, q.TenantID)
 	if q.UserID != "" {
 		where = append(where, "(s.user_id = ? OR s.user_id IS NULL OR s.user_id = '')")
@@ -247,4 +263,90 @@ func (r *messageRepository) ListArtifactLibrary(
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+// FindSessionArtifact returns one live artifact row of the session addressed by
+// (message, position) — the same coordinates the download endpoint uses.
+// A tombstone is reported as not found, so deleting twice is a 404 rather than
+// a second blob reclaim.
+func (r *messageRepository) FindSessionArtifact(
+	ctx context.Context, sessionID, messageID string, position int,
+) (*types.MessageArtifactRecord, error) {
+	if sessionID == "" || messageID == "" || position < 0 {
+		return nil, nil
+	}
+	var row types.MessageArtifactRecord
+	err := r.db.WithContext(ctx).
+		Table("message_artifacts AS ma").
+		Select("ma.*").
+		Joins("JOIN messages m ON m.id = ma.message_id AND m.deleted_at IS NULL").
+		Where("ma.session_id = ? AND ma.message_id = ? AND ma.position = ? AND ma.deleted_at IS NULL",
+			sessionID, messageID, position).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// FindSessionArtifactVersions returns every live row of the session that shares
+// sourcePath, i.e. the regenerations the artifact library folds into one entry.
+// An empty sourcePath has no version group — the artifact stands alone — so the
+// caller gets nothing back and deletes just the row it started from.
+func (r *messageRepository) FindSessionArtifactVersions(
+	ctx context.Context, sessionID, sourcePath string,
+) ([]types.MessageArtifactRecord, error) {
+	if sessionID == "" || sourcePath == "" {
+		return nil, nil
+	}
+	var rows []types.MessageArtifactRecord
+	if err := r.db.WithContext(ctx).
+		Table("message_artifacts AS ma").
+		Select("ma.*").
+		Joins("JOIN messages m ON m.id = ma.message_id AND m.deleted_at IS NULL").
+		Where("ma.session_id = ? AND ma.source_path = ? AND ma.deleted_at IS NULL", sessionID, sourcePath).
+		Order("ma.created_at ASC, ma.id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// SoftDeleteSessionArtifacts tombstones the given rows and returns the subset it
+// actually marked. Rows another caller already tombstoned are left out, so the
+// caller reclaims exactly the blobs it took ownership of and a concurrent
+// duplicate delete reclaims none of them twice.
+//
+// url is left on the tombstone on purpose: if the blob reclaim that follows
+// fails, the storage path is still on record for a later GC pass.
+func (r *messageRepository) SoftDeleteSessionArtifacts(
+	ctx context.Context, sessionID string, refs []types.ArtifactRef, at time.Time,
+) ([]types.ArtifactRef, error) {
+	if sessionID == "" || len(refs) == 0 {
+		return nil, nil
+	}
+	marked := make([]types.ArtifactRef, 0, len(refs))
+	// One statement per ref: the pairs are a handful at most (a message's
+	// artifacts, or one file's versions), and a composite IN list is not
+	// portable across PostgreSQL and SQLite.
+	for _, ref := range refs {
+		if ref.MessageID == "" || ref.Position < 0 {
+			continue
+		}
+		res := r.db.WithContext(ctx).
+			Model(&types.MessageArtifactRecord{}).
+			Where("session_id = ? AND message_id = ? AND position = ? AND deleted_at IS NULL",
+				sessionID, ref.MessageID, ref.Position).
+			Update("deleted_at", at.UTC())
+		if res.Error != nil {
+			return marked, res.Error
+		}
+		if res.RowsAffected > 0 {
+			marked = append(marked, ref)
+		}
+	}
+	return marked, nil
 }

@@ -105,6 +105,10 @@ func MessageReferencesFile(message *types.Message, reference string) bool {
 		return true
 	}
 	for _, artifact := range message.Artifacts {
+		// A deleted artifact is not evidence the message still offers the file.
+		if artifact.Deleted() {
+			continue
+		}
 		if artifact.URL == reference {
 			return true
 		}
@@ -240,6 +244,11 @@ func ResolveMessageArtifact(ctx context.Context, message *types.Message, index i
 		return FileAccess{}, ErrNotFound
 	}
 	artifact := message.Artifacts[index]
+	// Tombstones keep their slot so the indices of later artifacts stay put;
+	// they are not downloadable through any path, shared or owned.
+	if artifact.Deleted() {
+		return FileAccess{}, ErrNotFound
+	}
 	file, resource, err := resolveFile(ctx, catalog, artifact.URL)
 	if err != nil {
 		return FileAccess{}, err

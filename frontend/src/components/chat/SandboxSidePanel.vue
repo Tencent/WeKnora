@@ -54,6 +54,7 @@
           :items="artifacts"
           :collecting="artifactsCollecting"
           :active="panel?.activeTab.value === 'artifacts'"
+          @deleted="emit('artifactDeleted', $event)"
         />
 
         <!-- 终端：首次激活时惰性挂载；切 tab 用 v-show 保留实例（不丢 PTY）。 -->
@@ -124,6 +125,10 @@ const props = withDefaults(
     artifactsCollecting: false,
   },
 )
+
+// The artifact list is owned by the chat view (a computed over the loaded
+// history), so a delete inside the panel has to travel back up to it.
+const emit = defineEmits<{ (e: 'artifactDeleted', payload: { messageId: string; index: number }): void }>()
 
 const { t } = useI18n()
 const panel = useChatSandboxPanel()

@@ -286,7 +286,8 @@ const messages = {
         "download": "下载",
         "downloadFailed": "下载失败，请稍后重试",
         "inlinePreviewHint": "点击预览",
-        "inlineMissing": "文件不可用"
+        "inlineMissing": "文件不可用",
+        "inlineDeleted": "文件已删除"
       },
       "updatePlan": "更新计划",
       "webSearchFound": "找到 <strong>{count}</strong> 个网络搜索结果",
@@ -871,7 +872,8 @@ const messages = {
         "download": "ダウンロード",
         "downloadFailed": "ダウンロードに失敗しました。再試行してください。",
         "inlinePreviewHint": "クリックしてプレビュー",
-        "inlineMissing": "ファイルを利用できません"
+        "inlineMissing": "ファイルを利用できません",
+        "inlineDeleted": "ファイルは削除されました"
       },
       "updatePlan": "計画を更新",
       "webSearchFound": "Web検索結果を<strong>{count}</strong>件見つけました",
@@ -1456,7 +1458,8 @@ const messages = {
         "download": "Download",
         "downloadFailed": "Download failed, please retry.",
         "inlinePreviewHint": "Click to preview",
-        "inlineMissing": "File unavailable"
+        "inlineMissing": "File unavailable",
+        "inlineDeleted": "File deleted"
       },
       "updatePlan": "Update Plan",
       "webSearchFound": "Found <strong>{count}</strong> web search result(s)",
