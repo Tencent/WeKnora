@@ -2931,7 +2931,12 @@ const handleCancel = () => {
   // 自己那条同样两级的选择器。
   &.wk-popover .t-popup__content {
     max-height: min(480px, 60vh);
+    // Scrolling itself is restored for every skinned select in
+    // assets/theme/tdesign-overrides.less; this only makes the bar visible,
+    // because macOS overlay scrollbars stay hidden until something moves and
+    // a capped list then looks complete.
     scrollbar-color: var(--td-component-border) transparent;
+    scrollbar-width: thin;
   }
 
   // TDesign 默认会在 t-select-option 上挂一个 overflow tooltip（浮在右侧
