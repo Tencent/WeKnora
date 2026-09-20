@@ -81,6 +81,17 @@ func init() {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
+		ExtraFields: []catalog.ExtraField{{
+			Key:    catalog.ExtraTruncatePromptTokens,
+			Label:  "Rerank prompt truncation (vLLM)",
+			Labels: map[string]string{"zh-CN": "Rerank 提示词截断长度（vLLM）"},
+			Type:   "number",
+			// Off unless the operator asks: a runtime that does not implement
+			// the extension rejects the unknown field.
+			Required:    false,
+			Placeholder: "empty unless the backend rejects long documents",
+			ModelTypes:  []types.ModelType{types.ModelTypeRerank},
+		}},
 		Compat: catalog.VendorCompat{
 			Rerank: catalog.RerankCompat{
 				// GPUStack's built-in backends are vLLM, SGLang, Ascend MindIE and

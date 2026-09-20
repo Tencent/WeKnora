@@ -298,3 +298,35 @@ func TestWeKnoraCloudRerankKeepsItsDeadline(t *testing.T) {
 		assert.Zero(t, other.Rerank.RequestTimeout, "%s did not have a client deadline before", id)
 	}
 }
+
+// TestTruncatePromptTokensIsReachableFromTheEditor closes the loop between the
+// vendor accepting the extension and an operator being able to turn it on.
+// Before the catalog it was readable from extra_config but had no input in the
+// model editor, so the only way to set it was the API or the database.
+// GET /models/providers renders extra fields dynamically, so declaring one is
+// all it takes — and it must be declared exactly where the extension is
+// accepted, or the form offers a switch the vendor will reject.
+func TestTruncatePromptTokensIsReachableFromTheEditor(t *testing.T) {
+	for _, v := range catalog.ListByType(types.ModelTypeRerank) {
+		var field *catalog.ExtraField
+		for i := range v.ExtraFields {
+			if v.ExtraFields[i].Key == catalog.ExtraTruncatePromptTokens {
+				field = &v.ExtraFields[i]
+			}
+		}
+		resolved, err := catalog.Resolve(catalog.Ref{
+			Provider: v.ID, Model: "m", ModelType: types.ModelTypeRerank,
+		})
+		require.NoError(t, err)
+
+		if !resolved.Rerank.AcceptsTruncatePromptTokens {
+			assert.Nil(t, field, "%s does not accept the extension, so it must not offer the input", v.ID)
+			continue
+		}
+		require.NotNil(t, field, "%s accepts the extension but offers no way to set it", v.ID)
+		assert.Equal(t, "number", field.Type)
+		assert.False(t, field.Required, "the extension is opt-in")
+		assert.Equal(t, []types.ModelType{types.ModelTypeRerank}, field.ModelTypes,
+			"the input belongs to the rerank form only")
+	}
+}
