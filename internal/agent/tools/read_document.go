@@ -162,15 +162,10 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
-	title, filename, desc, err := maskKnowledgeForModel(ctx, t.knowledgeBaseService, t.config, knowledge)
+	knowledge, err = copyKnowledgeForModel(ctx, t.knowledgeBaseService, t.config, knowledge)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
-	modelFacing := *knowledge
-	modelFacing.Title = title
-	modelFacing.FileName = filename
-	modelFacing.Description = desc
-	knowledge = &modelFacing
 
 	var matchers []*regexp.Regexp
 	switch {
@@ -625,6 +620,9 @@ func formatSource(knowledgeType, source string) string {
 	case "file":
 		return "File Upload"
 	case "url":
+		if strings.TrimSpace(source) == "" {
+			return "URL"
+		}
 		return fmt.Sprintf("URL: %s", source)
 	case "passage":
 		return "Text Input"
