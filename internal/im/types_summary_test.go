@@ -16,6 +16,7 @@ func TestSummarizeIMChannel_OmitsCredentials(t *testing.T) {
 		AgentID:     "agent-1",
 		Platform:    "feishu",
 		Name:        "support",
+		Locale:      "ko-KR",
 		Credentials: types.JSON(`{"app_secret":"top-secret"}`),
 	}
 
@@ -24,6 +25,7 @@ func TestSummarizeIMChannel_OmitsCredentials(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, summary.CredentialsConfigured)
+	assert.Equal(t, "ko-KR", summary.Locale)
 	assert.NotContains(t, string(body), "top-secret")
 	assert.NotContains(t, string(body), `"credentials":`)
 }
