@@ -10,7 +10,8 @@ import (
 )
 
 // This file implements the P1 directory mapping for the Drive connector:
-// FetchedItem.FileName becomes "<根文件夹名>/<子目录...>/<文件名>" so ingestion's
+// FetchedItem.FileName becomes "<子目录...>/<文件名>" relative to the selected
+// sync root (the root folder = the knowledge base root) so ingestion's
 // types.SplitKnowledgeRelativePath derives the KB folder_path. The walk is the
 // Drive connector's single recursive walker (it absorbed the former
 // core.ListDriveFilesRecursiveFrom, which could not hand back folder names):
@@ -25,8 +26,9 @@ import (
 //
 // Listing failures are collected into the returned failures and the walk
 // continues (PartialDriveFileListError semantics). dirPaths maps every visited
-// folder token to its cleaned directory path; the walk root's own prefix is
-// baseDir (the root folder name, optionally plus the selected sub-folder).
+// folder token to its cleaned directory path relative to the selected root;
+// the walk root's own prefix is baseDir ("" for a bare root selection, the
+// sub-folder's relative path for a sub-folder selection).
 func walkDriveTree(
 	ctx context.Context, client *core.Client, rootToken, baseDir string,
 ) (files []core.DriveFile, dirPaths map[string]string, failures []core.DriveFileListFailure) {
@@ -55,7 +57,11 @@ func walkDriveTree(
 		for _, f := range entries {
 			switch f.Type {
 			case "folder":
-				dirPaths[f.Token] = dirPaths[folderToken] + "/" + core.SanitizeFileName(f.Name)
+				name := core.SanitizeFileName(f.Name)
+				if parent := dirPaths[folderToken]; parent != "" {
+					name = parent + "/" + name
+				}
+				dirPaths[f.Token] = name
 				walk(f.Token)
 			case "shortcut":
 				// Expand to target. target_type is never "folder" (verified), so
@@ -84,8 +90,7 @@ func walkDriveTree(
 
 // driveFolderName resolves a folder's display name via GetDriveFolderMeta,
 // one call per token per sync run (cached). resolved is false when the meta
-// call failed or returned no name — callers fall back (root: the token itself,
-// mirroring ListResources; sub-folder: skip the segment).
+// call failed or returned no name — the sub-folder prefix is then skipped.
 func (o *driveOps) driveFolderName(ctx context.Context, client *core.Client, folderToken string) (name string, resolved bool) {
 	if o.folderNames == nil {
 		o.folderNames = make(map[string]string)
@@ -114,29 +119,28 @@ func (o *driveOps) listDriveFilesForResource(
 	ctx context.Context, client *core.Client, resourceID string,
 ) ([]core.DriveFile, error) {
 	rootFolderToken, fileToken := parseDriveResourceID(resourceID)
-	rootName, ok := o.driveFolderName(ctx, client, rootFolderToken)
-	if !ok {
-		rootName = core.SanitizeFileName(rootFolderToken)
-	}
 
 	if fileToken == "" {
-		files, dirPaths, failures := walkDriveTree(ctx, client, rootFolderToken, rootName)
+		// The selected root folder maps to the knowledge base root: documents
+		// directly under it land in folder_path "".
+		files, dirPaths, failures := walkDriveTree(ctx, client, rootFolderToken, "")
 		o.dirPaths = dirPaths
 		return files, partialDriveError(failures)
 	}
 
-	// Sub-folder selection: walk that sub-folder's subtree, prefixed
-	// "<rootName>/<subName>". If the token turns out to be a file (the walk
+	// Sub-folder selection: walk that sub-folder's subtree, prefixed with the
+	// sub-folder's own name (relative to the KB root; unresolved name → the
+	// walk runs with no prefix). If the token turns out to be a file (the walk
 	// fails with the params error), fall back to walking the root subtree and
 	// filtering — mirroring the previous single-file selection behaviour.
-	base := rootName
+	base := ""
 	if subName, ok := o.driveFolderName(ctx, client, fileToken); ok {
-		base = rootName + "/" + subName
+		base = subName
 	}
 	files, dirPaths, failures := walkDriveTree(ctx, client, fileToken, base)
 	for _, failure := range failures {
 		if failure.FolderToken == fileToken && isDriveNotFolderError(failure.Err) {
-			rootFiles, rootDirs, rootFailures := walkDriveTree(ctx, client, rootFolderToken, rootName)
+			rootFiles, rootDirs, rootFailures := walkDriveTree(ctx, client, rootFolderToken, "")
 			o.dirPaths = rootDirs
 			return filterDriveFileByToken(rootFiles, fileToken), partialDriveError(rootFailures)
 		}

@@ -13,6 +13,7 @@ import (
 type sheetReader interface {
 	readSheetRange(ctx context.Context, embedToken string) ([][]string, bool, error)
 	readBitableRecords(ctx context.Context, embedToken string) ([][]string, bool, error)
+	sheetMerges(ctx context.Context, embedToken string) ([]sheetMergeRange, error)
 }
 
 // pendingAttachment is an embedded file block awaiting a download decision by
@@ -100,7 +101,7 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 
 // markContainerDescendants marks every block reachable through the children of
 // the container blocks the main loop renders recursively (callout, grid — its
-// columns' content is rendered per column — and quote_container).
+// columns' content is rendered per column — quote_container, and view).
 func markContainerDescendants(blocks []DocxBlock, byID map[string]DocxBlock, consumed map[string]bool) {
 	var mark func(id string)
 	mark = func(id string) {
@@ -115,7 +116,7 @@ func markContainerDescendants(blocks []DocxBlock, byID map[string]DocxBlock, con
 	}
 	for _, b := range blocks {
 		switch b.BlockType {
-		case BlockTypeCallout, BlockTypeGrid, BlockTypeQuoteContainer:
+		case BlockTypeCallout, BlockTypeGrid, BlockTypeQuoteContainer, BlockTypeView:
 			for _, c := range b.Children {
 				mark(c)
 			}
@@ -154,6 +155,19 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 		return r.renderQuotedContainer(b, "")
 	case BlockTypeGrid:
 		return r.renderGrid(b)
+	case BlockTypeView:
+		// view is a pure container (e.g. the file-list "视图" wrapping file
+		// blocks): render its children inline, no placeholder. An empty view
+		// contributes nothing.
+		var lines []string
+		for _, cid := range b.Children {
+			if child, ok := r.byID[cid]; ok {
+				if s := r.renderBlock(child); s != "" {
+					lines = append(lines, strings.Split(s, "\n")...)
+				}
+			}
+		}
+		return strings.Join(lines, "\n")
 	case BlockTypeTable:
 		return renderNativeTable(b, r.byID)
 	case BlockTypeSheet:
@@ -413,7 +427,6 @@ var blockTypeNames = map[int]string{
 	BlockTypeGridColumn:        "分栏列",
 	BlockTypeISV:               "开放平台小组件",
 	BlockTypeMindnote:          "思维笔记",
-	BlockTypeView:              "视图",
 	BlockTypeTask:              "任务",
 	BlockTypeOKR:               "OKR",
 	BlockTypeOKRObjective:      "OKR目标",
@@ -565,9 +578,8 @@ func renderNativeTable(b DocxBlock, byID map[string]DocxBlock) string {
 // it covers — GFM has no row/col span, and dropping the covered cells' content
 // would lose text, so the anchor value fills them instead. merge_info entries
 // are parallel to the table's cells array; entries beyond the rendered grid are
-// ignored. (Embedded sheet/bitable merge ranges would need the spreadsheet
-// merged-cell API; their cell read path carries no merge data, so nothing to
-// fill there.)
+// ignored. (Embedded sheet merge ranges come from the v3 metadata API instead —
+// see fillSheetMerges; bitable has no merge concept.)
 func fillMergedCells(rows [][]string, cols int, merge []BlockTableMergeInfo) {
 	if len(merge) == 0 || len(rows) == 0 {
 		return
@@ -593,6 +605,29 @@ func fillMergedCells(rows [][]string, cols int, merge []BlockTableMergeInfo) {
 				if rr < len(rows) && cc < len(rows[rr]) {
 					rows[rr][cc] = v
 				}
+			}
+		}
+	}
+}
+
+// fillSheetMerges propagates each embedded-sheet merged region's top-left value
+// across the whole region — same GFM-no-span rationale as fillMergedCells. The
+// v3 metadata API reports 0-based CLOSED intervals [start..end]; regions beyond
+// the rendered (row-capped) grid are clamped or skipped. If a real-world check
+// shows one cell too many per region, the intervals are half-open — switch
+// `i <= endRow` / `j <= endCol` to `<`.
+func fillSheetMerges(rows [][]string, merges []sheetMergeRange) {
+	for _, m := range merges {
+		startRow, startCol := int(m.StartRow), int(m.StartCol)
+		if startRow < 0 || startRow >= len(rows) || startCol < 0 || startCol >= len(rows[startRow]) {
+			continue
+		}
+		anchor := rows[startRow][startCol]
+		endRow := min(int(m.EndRow), len(rows)-1)
+		for i := startRow; i <= endRow; i++ {
+			endCol := min(int(m.EndCol), len(rows[i])-1)
+			for j := startCol; j <= endCol; j++ {
+				rows[i][j] = anchor
 			}
 		}
 	}
@@ -657,6 +692,14 @@ func inlineTable(ctx context.Context, client sheetReader, token, kind string) st
 	}
 	if err != nil {
 		return fmt.Sprintf("> [无法读取%s]", noun)
+	}
+	// Embedded sheets (unlike native tables) only expose merge regions through
+	// the v3 metadata API; fetch them for the fill below. A failure degrades to
+	// the raw values — merge info is cosmetic. Bitable has no merge concept.
+	if kind == "sheet" {
+		if merges, merr := client.sheetMerges(ctx, token); merr == nil && len(merges) > 0 {
+			fillSheetMerges(rows, merges)
+		}
 	}
 	// markdownTable returns "" when there is nothing renderable (no rows, or a
 	// header with no columns). Skip the truncation note too in that case, since it

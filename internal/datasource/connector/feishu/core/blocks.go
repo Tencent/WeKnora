@@ -343,6 +343,69 @@ type sheetValuesResponse struct {
 	Data sheetValuesData `json:"data"`
 }
 
+// flexInt decodes a JSON value that may be a number or a numeric string —
+// Feishu sheet APIs mix both spellings for row/column indices.
+type flexInt int
+
+func (f *flexInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return fmt.Errorf("invalid integer value %s", s)
+	}
+	*f = flexInt(v)
+	return nil
+}
+
+// sheetMergeRange is one merged-cell region of a sheet: 0-based CLOSED
+// row/column indices [start..end] as reported by the sheets-v3 metadata API.
+type sheetMergeRange struct {
+	StartRow flexInt `json:"start_row_index"`
+	EndRow   flexInt `json:"end_row_index"`
+	StartCol flexInt `json:"start_column_index"`
+	EndCol   flexInt `json:"end_column_index"`
+}
+
+// sheetQueryResponse is the response for the sheets-v3
+// spreadsheets/:spreadsheet_token/sheets/query metadata read.
+type sheetQueryResponse struct {
+	ApiResponse
+	Data struct {
+		Sheets []struct {
+			SheetID string            `json:"sheet_id"`
+			Merges  []sheetMergeRange `json:"merges"`
+		} `json:"sheets"`
+	} `json:"data"`
+}
+
+// sheetMerges returns the merged-cell regions of one sheet of a spreadsheet,
+// addressed by the sheet embed token ("spreadsheetToken_sheetId"). The sheet
+// entry is looked up by its sheet_id; a spreadsheet without merges carries no
+// merges field, which degrades to nil. Errors surface to the caller, which
+// silently skips merge filling — the information is cosmetic, never fatal.
+// Permission scope: sheets:spreadsheet:readonly (same token as the values read).
+func (c *Client) sheetMerges(ctx context.Context, embedToken string) ([]sheetMergeRange, error) {
+	idx := strings.LastIndex(embedToken, "_")
+	if idx < 0 {
+		return nil, fmt.Errorf("invalid sheet embed token: %q", embedToken)
+	}
+	spreadsheetToken, sheetID := embedToken[:idx], embedToken[idx+1:]
+	path := "/open-apis/sheets/v3/spreadsheets/" + url.PathEscape(spreadsheetToken) + "/sheets/query"
+	var resp sheetQueryResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, fmt.Errorf("query sheet metadata: %w", err)
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("query sheet metadata error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	for _, s := range resp.Data.Sheets {
+		if s.SheetID == sheetID {
+			return s.Merges, nil
+		}
+	}
+	return nil, nil
+}
+
 // readSheetRange reads the cell values of an embedded spreadsheet block.
 // embedToken is the block's sheet.token, formatted "spreadsheetToken_sheetId".
 // Cells are stringified (display value) for RAG text retrieval. Rows are capped

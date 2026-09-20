@@ -1,16 +1,15 @@
 package wiki
 
 import (
-	"context"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // This file implements the P1 directory mapping: FetchedItem.FileName becomes
-// "<space名>/<目录A>/<目录B>/<文档名>.md" so ingestion's
+// "<目录A>/<目录B>/<文档名>.md" relative to the selected sync root (the space
+// = the knowledge base root) so ingestion's
 // types.SplitKnowledgeRelativePath derives the KB folder_path (GitLab-style).
 // The path table is built per sync run from the recursive node listing — zero
 // engine changes. external_id stays the node token, so a move/rename lands in
@@ -59,20 +58,24 @@ func underShortcut(n core.WikiNode, byToken map[string]core.WikiNode) bool {
 	return false
 }
 
-// buildWikiDirPaths maps each node token to its cleaned directory prefix:
-// "<space名>/<父目录标题...>". Ancestors are resolved bottom-up through
-// ParentNodeID within the listing; a top-level node's prefix is the space name.
-// A docx node that also has children is both a document and a directory — its
-// own item sits beside the child folder it forms.
-func buildWikiDirPaths(spaceName string, nodes []core.WikiNode) map[string]string {
+// buildWikiDirPaths maps each node token to its cleaned directory prefix,
+// relative to the selected sync root: the user-selected space IS the knowledge
+// base root, so a top-level node maps to "" (its document lands directly in
+// the KB root) and deeper nodes to "<父目录标题...>". Ancestors are resolved
+// bottom-up through ParentNodeID within the listing. A docx node that also has
+// children is both a document and a directory — its own item sits beside the
+// child folder it forms.
+// NOTE: with several wiki spaces selected into one KB, same-named
+// sub-directories of different spaces merge into one KB folder — accepted.
+func buildWikiDirPaths(nodes []core.WikiNode) map[string]string {
 	byToken := make(map[string]core.WikiNode, len(nodes))
 	for _, n := range nodes {
 		byToken[n.NodeToken] = n
 	}
 	paths := make(map[string]string, len(nodes))
 	for _, n := range nodes {
-		// Walk up collecting ancestor titles, then reverse: the space name
-		// leads and each level's directory follows root-first.
+		// Walk up collecting ancestor titles, then reverse so the topmost
+		// directory leads; no space-name segment (selected root = KB root).
 		var ancestors []string
 		visited := make(map[string]bool)
 		for p := n.ParentNodeID; p != "" && !visited[p]; p = byToken[p].ParentNodeID {
@@ -86,44 +89,16 @@ func buildWikiDirPaths(spaceName string, nodes []core.WikiNode) map[string]strin
 		for i, j := 0, len(ancestors)-1; i < j; i, j = i+1, j-1 {
 			ancestors[i], ancestors[j] = ancestors[j], ancestors[i]
 		}
-		segments := append([]string{spaceName}, ancestors...)
-		paths[n.NodeToken] = strings.Join(segments, "/")
+		paths[n.NodeToken] = strings.Join(ancestors, "/")
 	}
 	return paths
-}
-
-// spaceName resolves the display name of a wiki space for the path's first
-// segment. One ListWikiSpaces call per sync run (cached across resources);
-// on failure the space ID is used so the sync still proceeds.
-func (o *wikiOps) spaceName(ctx context.Context, client *core.Client, spaceID string) string {
-	if o.spaceNames == nil {
-		o.spaceNames = make(map[string]string)
-	}
-	if name, ok := o.spaceNames[spaceID]; ok {
-		return name
-	}
-	name := spaceID
-	spaces, err := client.ListWikiSpaces(ctx)
-	if err != nil {
-		logger.Warnf(ctx, "[Feishu] resolve wiki space name for %s: %v (falling back to space ID)", spaceID, err)
-	} else {
-		for _, s := range spaces {
-			if s.SpaceID == spaceID && s.Name != "" {
-				name = s.Name
-				break
-			}
-		}
-	}
-	name = core.SanitizeFileName(name)
-	o.spaceNames[spaceID] = name
-	return name
 }
 
 // prepareDirPaths rebuilds the per-resource directory table. Called from List
 // after the shortcut filter, so shortcut tokens (and their subtrees) never
 // appear as path segments.
-func (o *wikiOps) prepareDirPaths(ctx context.Context, client *core.Client, spaceID string, nodes []core.WikiNode) {
-	o.dirPaths = buildWikiDirPaths(o.spaceName(ctx, client, spaceID), nodes)
+func (o *wikiOps) prepareDirPaths(nodes []core.WikiNode) {
+	o.dirPaths = buildWikiDirPaths(nodes)
 }
 
 // qualifyItemFileNames prefixes every fetched item's FileName with dir so

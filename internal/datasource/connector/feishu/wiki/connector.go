@@ -219,14 +219,13 @@ func (c *Connector) FetchStream(
 // wikiOps adapts the wiki Connector to the generic sync engine. It carries the
 // region (for URL rendering), encodes/decodes the wiki cursor wire format
 // (core.FeishuCursor / space_node_times), and holds the per-run directory
-// mapping state (P1): spaceNames caches cleaned space display names, dirPaths
-// maps node token → cleaned directory prefix. List builds the state for the
+// mapping state (P1): dirPaths maps node token → cleaned directory prefix
+// relative to the selected space (KB root). List builds the state for the
 // resource being synced; Fetch reads it. runSync processes one resource at a
 // time, so the mutation is race-free.
 type wikiOps struct {
-	region     core.Region
-	spaceNames map[string]string
-	dirPaths   map[string]string
+	region   core.Region
+	dirPaths map[string]string
 }
 
 func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
@@ -241,7 +240,7 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 		}
 	}
 	nodes = filterShortcutSubtrees(nodes)
-	o.prepareDirPaths(ctx, client, spaceID, nodes)
+	o.prepareDirPaths(nodes)
 	if err != nil {
 		return nodes, err, nil
 	}

@@ -131,9 +131,11 @@ func TestDriveFetchIncremental_PathQualifiedMultiLevel(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"f-root": "团队资料/说明.pdf",
-		"f-spec": "团队资料/规格/详细.pdf",
-		"f-bad":  "团队资料/a_b/child.pdf",
+		// The selected root folder IS the KB root: direct children carry no
+		// prefix, deeper ones only the sub-directory path.
+		"f-root": "说明.pdf",
+		"f-spec": "规格/详细.pdf",
+		"f-bad":  "a_b/child.pdf",
 	}
 	got := fetchedByToken(items)
 	if len(got) != len(want) {
@@ -240,8 +242,8 @@ func TestDriveFetchIncremental_MoveFollowsNewPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first sync error: %v", err)
 	}
-	if got := fetchedByToken(items1)["f-doc"].FileName; got != "团队资料/目录A/文档.pdf" {
-		t.Fatalf("first sync f-doc FileName = %q, want 团队资料/目录A/文档.pdf", got)
+	if got := fetchedByToken(items1)["f-doc"].FileName; got != "目录A/文档.pdf" {
+		t.Fatalf("first sync f-doc FileName = %q, want 目录A/文档.pdf", got)
 	}
 
 	// Move f-doc to a new folder 目录B and bump its modified time.
@@ -259,7 +261,7 @@ func TestDriveFetchIncremental_MoveFollowsNewPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("moved file not re-fetched on second sync: %+v", items2)
 	}
-	if moved.FileName != "团队资料/目录B/文档.pdf" {
-		t.Errorf("moved file FileName = %q, want 团队资料/目录B/文档.pdf (same external_id, new folder)", moved.FileName)
+	if moved.FileName != "目录B/文档.pdf" {
+		t.Errorf("moved file FileName = %q, want 目录B/文档.pdf (same external_id, new folder)", moved.FileName)
 	}
 }

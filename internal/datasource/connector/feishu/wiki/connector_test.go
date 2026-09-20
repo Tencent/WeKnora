@@ -611,8 +611,8 @@ func TestFetchAll_DocxNode(t *testing.T) {
 	if string(item.Content) != "fake-docx-content" {
 		t.Errorf("Content = %q, want %q", string(item.Content), "fake-docx-content")
 	}
-	if item.FileName != "Test Space/exported.docx" {
-		t.Errorf("FileName = %q, want %q (path-qualified with the space name)", item.FileName, "Test Space/exported.docx")
+	if item.FileName != "exported.docx" {
+		t.Errorf("FileName = %q, want %q (top-level node, KB-root relative)", item.FileName, "exported.docx")
 	}
 	if item.Metadata["obj_type"] != "docx" {
 		t.Errorf("Metadata[obj_type] = %q", item.Metadata["obj_type"])
@@ -717,8 +717,8 @@ func TestFetchAll_FileNode(t *testing.T) {
 	if string(item.Content) != "fake-pdf-binary" {
 		t.Errorf("Content = %q, want %q", string(item.Content), "fake-pdf-binary")
 	}
-	if item.FileName != "Test Space/manual.pdf" {
-		t.Errorf("FileName = %q, want %q (path-qualified with the space name)", item.FileName, "Test Space/manual.pdf")
+	if item.FileName != "manual.pdf" {
+		t.Errorf("FileName = %q, want %q (top-level node, KB-root relative)", item.FileName, "manual.pdf")
 	}
 	if item.Metadata["obj_type"] != "file" {
 		t.Errorf("obj_type = %q, want file", item.Metadata["obj_type"])

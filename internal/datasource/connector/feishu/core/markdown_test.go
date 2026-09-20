@@ -17,6 +17,8 @@ type fakeReader struct {
 	sheet            [][]string
 	sheetTruncated   bool
 	sheetErr         error
+	merges           []sheetMergeRange
+	sheetMergesErr   error
 	bitable          [][]string
 	bitableTruncated bool
 	bitableErr       error
@@ -28,6 +30,10 @@ func (f fakeReader) readSheetRange(_ context.Context, _ string) ([][]string, boo
 
 func (f fakeReader) readBitableRecords(_ context.Context, _ string) ([][]string, bool, error) {
 	return f.bitable, f.bitableTruncated, f.bitableErr
+}
+
+func (f fakeReader) sheetMerges(_ context.Context, _ string) ([]sheetMergeRange, error) {
+	return f.merges, f.sheetMergesErr
 }
 
 func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
@@ -59,6 +65,62 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	}
 	if !strings.Contains(string(md), "- 报表.pdf") {
 		t.Errorf("attachment file-name list missing:\n%s", md)
+	}
+}
+
+func TestBlocksToMarkdown_SheetMergesFilled(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
+	}
+	// 3x3 grid: B1:rule merged region spanning rows 0-1 col 1, and the whole
+	// bottom row merged across cols 0-2. Indices are 0-based CLOSED.
+	sheet := [][]string{
+		{"名称", "分类", "备注"},
+		{"苹果", "水果", ""},
+		{"香蕉", "", ""},
+	}
+	fr := fakeReader{
+		sheet: sheet,
+		merges: []sheetMergeRange{
+			{StartRow: 0, EndRow: 1, StartCol: 1, EndCol: 1}, // 分类 covers rows 0-1
+			{StartRow: 2, EndRow: 2, StartCol: 0, EndCol: 2}, // bottom row merged
+		},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	for _, want := range []string{
+		"| 名称 | 分类 | 备注 |",
+		// 分类 is the merged region's anchor and fills the covered cell below.
+		"| 苹果 | 分类 |  |",
+		// Bottom row: the anchor value fills the whole merged region.
+		"| 香蕉 | 香蕉 | 香蕉 |",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("merged sheet table missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestBlocksToMarkdown_SheetMergeFetchFailureDegrades(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
+	}
+	fr := fakeReader{
+		sheet:          [][]string{{"名称", "数量"}, {"苹果", "3"}},
+		merges:         nil,
+		sheetMergesErr: fmt.Errorf("permission denied"),
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "")
+	if err != nil {
+		t.Fatalf("merge fetch failure must not fail the document, got: %v", err)
+	}
+	if !strings.Contains(string(md), "| 苹果 | 3 |") {
+		t.Errorf("raw values must survive merge fetch failure:\n%s", md)
 	}
 }
 
@@ -390,6 +452,8 @@ func TestBlocksToMarkdown_UnsupportedBlocksPlaceholdersNoTokenLeak(t *testing.T)
 		{BlockID: "dg", BlockType: BlockTypeDiagram, Diagram: &BlockDiagram{DiagramType: 1}},
 		{BlockID: "cc", BlockType: BlockTypeChatCard, ChatCard: &BlockChatCard{ChatID: "oc_SECRET"}},
 		{BlockID: "jira", BlockType: BlockTypeJiraIssue, JiraIssue: &BlockJiraIssue{ID: "1", Key: "AB-1"}},
+		// view (33) is no longer a placeholder: an empty view emits nothing.
+		{BlockID: "v", BlockType: BlockTypeView},
 		{BlockID: "unk", BlockType: 999},
 	}
 	md, atts, imgs, err := blocksToMarkdown(context.Background(), nil, blocks, "")
@@ -404,6 +468,10 @@ func TestBlocksToMarkdown_UnsupportedBlocksPlaceholdersNoTokenLeak(t *testing.T)
 		if !strings.Contains(s, want) {
 			t.Errorf("missing placeholder %q, got:\n%s", want, s)
 		}
+	}
+	// Removed from the placeholder set: view renders its children (none here).
+	if strings.Contains(s, "飞书块: 视图") {
+		t.Errorf("empty view must not emit a placeholder:\n%s", s)
 	}
 	// Board (43) now rides the image pipeline: a token-bearing board renders a
 	// numbered weknora-img:// marker and records a pendingImage for the
@@ -422,6 +490,36 @@ func TestBlocksToMarkdown_UnsupportedBlocksPlaceholdersNoTokenLeak(t *testing.T)
 	}
 	if len(atts) != 0 {
 		t.Errorf("placeholders must not collect attachments, got %+v", atts)
+	}
+}
+
+// TestBlocksToMarkdown_ViewContainerRendersChildren anchors the view (33)
+// handling: the view is the file-list container seen in real smoke tests, so
+// its children (file blocks etc.) must render inline, exactly once, and an
+// empty view must contribute nothing — no `> [飞书块: 视图]` placeholder.
+func TestBlocksToMarkdown_ViewContainerRendersChildren(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "view", BlockType: BlockTypeView, Children: []string{"f1", "f2"}},
+		{BlockID: "f1", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "ftok1", Name: "报表.pdf"}},
+		{BlockID: "f2", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "ftok2", Name: "手册.pdf"}},
+	}
+	md, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	if strings.Contains(s, "飞书块: 视图") {
+		t.Errorf("view must not render a placeholder:\n%s", s)
+	}
+	if n := strings.Count(s, "- 报表.pdf"); n != 1 {
+		t.Errorf("file child rendered %d times, want exactly 1:\n%s", n, s)
+	}
+	if !strings.Contains(s, "- 报表.pdf\n- 手册.pdf") {
+		t.Errorf("view children not rendered as one list:\n%s", s)
+	}
+	if len(atts) != 2 {
+		t.Errorf("view children must still be collected as attachments, got %+v", atts)
 	}
 }
 

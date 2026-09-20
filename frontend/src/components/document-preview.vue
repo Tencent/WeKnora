@@ -8,7 +8,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
@@ -431,6 +431,10 @@ async function loadPreview() {
       }
       case 'markdown': {
         await renderMarkdown(blob);
+        // Markdown 里的 resource:// 等受保护图片需要带鉴权换 blob（无 override
+        // 时走应用默认鉴权面：登录态 /files 代理）。已换过的元素幂等跳过。
+        await nextTick();
+        await hydrateProtectedFileImages(previewContent.value);
         break;
       }
       case 'pptx': {
