@@ -130,3 +130,34 @@ func TestRegisterToolsKeepsDocumentReadersForWikiOnlyScope(t *testing.T) {
 	}
 	require.NotContains(t, names, tools.ToolSearchKnowledge, "chunk search needs a vector or keyword index")
 }
+
+// Search targets only need read access, so wiki mutation tools are registered
+// only when a wiki KB in scope is writable for this caller.
+func TestRegisterToolsOffersWikiWritesOnlyForWritableKBs(t *testing.T) {
+	kb := &types.KnowledgeBase{ID: "kb"}
+	kb.IndexingStrategy.WikiEnabled = true
+	writeTools := []string{
+		tools.ToolWikiWritePage, tools.ToolWikiReplaceText, tools.ToolWikiRenamePage,
+		tools.ToolWikiDeletePage, tools.ToolWikiFlagIssue, tools.ToolWikiUpdateIssue,
+	}
+	allowed := append([]string{tools.ToolWikiReadPage, tools.ToolWikiReadIssue}, writeTools...)
+
+	readOnly := toolSurfaceConfig(allowed...)
+	registry := tools.NewToolRegistry()
+	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, readOnly, nil, nil, "s"))
+	names := registry.ListTools()
+	require.Contains(t, names, tools.ToolWikiReadPage)
+	require.Contains(t, names, tools.ToolWikiReadIssue)
+	for _, name := range writeTools {
+		require.NotContains(t, names, name)
+	}
+
+	writable := toolSurfaceConfig(allowed...)
+	writable.WritableKBIDs = []string{"kb"}
+	registry = tools.NewToolRegistry()
+	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, writable, nil, nil, "s"))
+	names = registry.ListTools()
+	for _, name := range writeTools {
+		require.Contains(t, names, name)
+	}
+}

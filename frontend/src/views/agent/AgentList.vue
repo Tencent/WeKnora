@@ -1,13 +1,13 @@
 <template>
   <div class="agent-list-container">
-    <ListSpaceSidebar v-if="!authStore.isLiteMode" v-model="spaceSelection" :count-all="allAgentsCount"
-      :count-mine="agents.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="agentFavoritesCount"
-      :count-recents="agentRecentsCount" />
     <div class="agent-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
-            <h2 style="--wails-draggable: drag">{{ $t('agent.title') }}</h2>
+            <h2 style="--wails-draggable: drag">
+              <ResourceIcon type="agent" :size="24" />
+              {{ $t('agent.title') }}
+            </h2>
             <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
               <t-button variant="text" theme="default" size="small" class="header-action-btn"
                 data-guide="agent-list-create" style="--wails-draggable: no-drag" @click="handleCreateAgent">
@@ -30,13 +30,21 @@
                     </svg>
                   </span>
                 </template>
+                {{ $t('agent.createAgent') }}
               </t-button>
             </t-tooltip>
           </div>
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
         </div>
       </div>
+      <ResourceListToolbar :hide-scopes="authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allAgentsCount"
+      :count-mine="agents.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="agentFavoritesCount"
+      :count-recents="agentRecentsCount" />
       <div class="agent-list-main">
+        <EmptyState v-if="keyword.trim() && !(loading || spaceAgentsLoading) && visibleResultCount === 0" icon="search"
+          :title="$t('common.noResult')">
+          <t-button variant="outline" @click="keyword = ''">{{ $t('common.clear') }}</t-button>
+        </EmptyState>
         <!-- creator filter removed; see KnowledgeBaseList for rationale.
              Card-level creator display + URL-state field are retained. -->
 
@@ -68,13 +76,12 @@
             :key="agent.isMine ? agent.id : `shared-${agent.share_id}`">
             <!-- 内置：始终置顶。filteredAgents 在 all 视图里已经把
                  builtin 排到最前；这里只在第一张 builtin 之前打一次标题。 -->
-            <div v-if="showShareGroupHeaders
-              && agent.isMine
+            <div v-if="agent.isMine
               && agent.is_builtin
               && (index === 0
                 || !filteredAgents[index - 1].isMine
                 || !(filteredAgents[index - 1] as AgentWithUI).is_builtin)" class="agent-section-header" role="button"
-              tabindex="0" @click="toggleAgentSection('builtin')"
+              tabindex="0" :aria-expanded="!isAgentSectionCollapsed('builtin')" @click="toggleAgentSection('builtin')"
               @keydown.enter.prevent="toggleAgentSection('builtin')"
               @keydown.space.prevent="toggleAgentSection('builtin')">
               <t-icon name="app" size="14px" />
@@ -86,15 +93,14 @@
             <!-- 我创建的：当前 agent 是本空间 + 非内置 + 我亲手创建，且前一张
                  要么不存在、要么不是本空间、要么是内置（builtin → mine 过渡）、
                  要么是同事创建。与 KB 列表对齐。 -->
-            <div v-if="showShareGroupHeaders
-              && agent.isMine
+            <div v-if="agent.isMine
               && !agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
                 || !filteredAgents[index - 1].isMine
                 || (filteredAgents[index - 1] as AgentWithUI).is_builtin
                 || !isMyAgent(filteredAgents[index - 1] as AgentWithUI))" class="agent-section-header" role="button"
-              tabindex="0" @click="toggleAgentSection('mine')"
+              tabindex="0" :aria-expanded="!isAgentSectionCollapsed('mine')" @click="toggleAgentSection('mine')"
               @keydown.enter.prevent="toggleAgentSection('mine')"
               @keydown.space.prevent="toggleAgentSection('mine')">
               <t-icon name="user" size="14px" />
@@ -104,15 +110,14 @@
                 :name="isAgentSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 本空间 · 仅查看 / 其他成员：本空间里非内置且非我创建的同事 agent。 -->
-            <div v-if="showShareGroupHeaders
-              && agent.isMine
+            <div v-if="agent.isMine
               && !agent.is_builtin
               && !isMyAgent(agent)
               && (index === 0
                 || !filteredAgents[index - 1].isMine
                 || (filteredAgents[index - 1] as AgentWithUI).is_builtin
                 || isMyAgent(filteredAgents[index - 1] as AgentWithUI))" class="agent-section-header" role="button"
-              tabindex="0" @click="toggleAgentSection('tenantOthers')"
+              tabindex="0" :aria-expanded="!isAgentSectionCollapsed('tenantOthers')" @click="toggleAgentSection('tenantOthers')"
               @keydown.enter.prevent="toggleAgentSection('tenantOthers')"
               @keydown.space.prevent="toggleAgentSection('tenantOthers')">
               <t-icon :name="tenantSectionIconName" size="14px" />
@@ -122,11 +127,10 @@
                 :name="isAgentSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 可编辑：仅在「全部」视图过渡处显示分组标题 -->
-            <div v-if="showShareGroupHeaders
-              && !agent.isMine
+            <div v-if="!agent.isMine
               && isSharedAgentEditable((agent as any).permission)
               && (index === 0 || filteredAgents[index - 1].isMine)" class="agent-section-header" role="button"
-              tabindex="0" @click="toggleAgentSection('sharedEditable')"
+              tabindex="0" :aria-expanded="!isAgentSectionCollapsed('sharedEditable')" @click="toggleAgentSection('sharedEditable')"
               @keydown.enter.prevent="toggleAgentSection('sharedEditable')"
               @keydown.space.prevent="toggleAgentSection('sharedEditable')">
               <t-icon name="usergroup-add" size="14px" />
@@ -137,13 +141,12 @@
                 :name="isAgentSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看 -->
-            <div v-if="showShareGroupHeaders
-              && !agent.isMine
+            <div v-if="!agent.isMine
               && !isSharedAgentEditable((agent as any).permission)
               && (index === 0
                 || filteredAgents[index - 1].isMine
                 || isSharedAgentEditable((filteredAgents[index - 1] as any).permission))" class="agent-section-header"
-              role="button" tabindex="0" @click="toggleAgentSection('sharedReadonly')"
+              role="button" tabindex="0" :aria-expanded="!isAgentSectionCollapsed('sharedReadonly')" @click="toggleAgentSection('sharedReadonly')"
               @keydown.enter.prevent="toggleAgentSection('sharedReadonly')"
               @keydown.space.prevent="toggleAgentSection('sharedReadonly')">
               <t-icon name="usergroup-add" size="14px" />
@@ -158,29 +161,11 @@
               'agent-mode-normal': agent.config?.agent_mode === 'quick-answer',
               'agent-mode-agent': agent.config?.agent_mode === 'smart-reasoning',
               'shared-agent-card': !agent.isMine
-            }" @click="handleCardClick(agent)">
-              <!-- 装饰星星 -->
-              <div class="card-decoration">
-                <svg class="star-icon" width="24" height="24" viewBox="0 0 20 20" fill="none"
-                  xmlns="http://www.w3.org/2000/svg">
-                  <path
-                    d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z"
-                    stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"
-                    fill="currentColor" fill-opacity="0.15" />
-                </svg>
-                <svg class="star-icon small" width="14" height="14" viewBox="0 0 20 20" fill="none"
-                  xmlns="http://www.w3.org/2000/svg">
-                  <path
-                    d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z"
-                    stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"
-                    fill="currentColor" fill-opacity="0.15" />
-                </svg>
-              </div>
-              <!-- 收藏按钮：浮在卡片右上角；.card-header padding-right 已为
-                   "更多"按钮腾出空间，避免重叠。 -->
+            }" role="link" tabindex="0" @keydown.enter.self.prevent="handleCardClick(agent)" @keydown.space.self.prevent="handleCardClick(agent)" @click="handleCardClick(agent)">
+              <!-- 行尾收藏操作，与更多菜单分开。 -->
               <button type="button" class="agent-favorite-star"
                 :class="{ 'is-favorited': isAgentFavorited(agent.id) }"
-                @click.stop="toggleFavoriteAgent(agent.id, $event)">
+                :aria-label="$t('listSpaceSidebar.favorites')" :aria-pressed="isAgentFavorited(agent.id)" @click.stop="toggleFavoriteAgent(agent.id, $event)">
                 <t-icon :name="isAgentFavorited(agent.id) ? 'star-filled' : 'star'" size="14px" />
               </button>
               <div class="card-header">
@@ -196,13 +181,13 @@
                 </div>
                 <t-popup
                   v-if="agent.isMine && (canManageAgent(agent) || authStore.hasRole('contributor') || authStore.hasRole('admin'))"
-                  :visible="openMoreAgentId === agent.id" trigger="hover" overlayClassName="card-more-popup"
-                  destroy-on-close placement="bottom-right" @visible-change="onVisibleChange"
-                  @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
-                  <div class="more-wrap" :class="{ 'active-more': openMoreAgentId === agent.id }"
-                    @click="toggleMore($event, agent.id)">
+                  :visible="openMoreAgentId === agent.id" trigger="click" overlayClassName="card-more-popup"
+                  destroy-on-close placement="bottom-right"
+                  @update:visible="(v: boolean) => { openMoreAgentId = v ? agent.id : null }">
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === agent.id }"
+                    @click.stop>
                     <img class="more-icon" src="@/assets/img/more.png" alt="" />
-                  </div>
+                  </button>
                   <template #content>
                     <div class="popup-menu">
                       <div v-if="canManageAgent(agent)" class="popup-menu-item" @click="handleEdit(agent)"><t-icon
@@ -222,13 +207,13 @@
                   </template>
                 </t-popup>
                 <t-popup v-else-if="!agent.isMine && authStore.hasRole('admin')"
-                  :visible="openMoreAgentId === 'shared-' + agent.share_id" trigger="hover"
+                  :visible="openMoreAgentId === 'shared-' + agent.share_id" trigger="click"
                   overlayClassName="card-more-popup" destroy-on-close placement="bottom-right"
-                  @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
-                  <div class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-' + agent.share_id }"
-                    @click.stop="toggleMore($event, 'shared-' + agent.share_id)">
+                  @update:visible="(v: boolean) => { openMoreAgentId = v ? 'shared-' + agent.share_id : null }">
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-' + agent.share_id }"
+                    @click.stop>
                     <img class="more-icon" src="@/assets/img/more.png" alt="" />
-                  </div>
+                  </button>
                   <template #content>
                     <div class="popup-menu">
                       <div class="popup-menu-item" @click="handleToggleSharedDisabled(agent)">
@@ -240,7 +225,8 @@
                 </t-popup>
               </div>
               <div class="card-content">
-                <div class="card-description">{{ agent.description || $t('agent.noDescription') }}</div>
+                <div class="card-description" :title="agent.description || $t('agent.noDescription')">
+                  {{ agent.description || $t('agent.noDescription') }}</div>
               </div>
               <div class="card-bottom">
                 <div class="bottom-left">
@@ -311,10 +297,9 @@
         <div v-if="spaceSelection === 'mine' && sortedMineAgents.length > 0" class="agent-card-wrap">
           <template v-for="(agent, index) in sortedMineAgents" :key="agent.id">
             <!-- 内置：始终置顶。sortedMineAgents 已按 内置→我→同事 排序。 -->
-            <div v-if="showShareGroupHeaders
-              && agent.is_builtin
+            <div v-if="agent.is_builtin
               && (index === 0 || !sortedMineAgents[index - 1].is_builtin)" class="agent-section-header" role="button"
-              tabindex="0" @click="toggleAgentSection('builtin')"
+              tabindex="0" :aria-expanded="!isAgentSectionCollapsed('builtin')" @click="toggleAgentSection('builtin')"
               @keydown.enter.prevent="toggleAgentSection('builtin')"
               @keydown.space.prevent="toggleAgentSection('builtin')">
               <t-icon name="app" size="14px" />
@@ -324,13 +309,12 @@
                 :name="isAgentSectionCollapsed('builtin') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 我创建的：第一张非内置且我亲手创建的卡片前打标题 -->
-            <div v-if="showShareGroupHeaders
-              && !agent.is_builtin
+            <div v-if="!agent.is_builtin
               && isMyAgent(agent)
               && (index === 0
                 || sortedMineAgents[index - 1].is_builtin
                 || !isMyAgent(sortedMineAgents[index - 1]))" class="agent-section-header" role="button"
-              tabindex="0" @click="toggleAgentSection('mine')"
+              tabindex="0" :aria-expanded="!isAgentSectionCollapsed('mine')" @click="toggleAgentSection('mine')"
               @keydown.enter.prevent="toggleAgentSection('mine')"
               @keydown.space.prevent="toggleAgentSection('mine')">
               <t-icon name="user" size="14px" />
@@ -340,13 +324,12 @@
                 :name="isAgentSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 本空间 · 仅查看 / 其他成员：非内置且非我创建的同事 agent -->
-            <div v-if="showShareGroupHeaders
-              && !agent.is_builtin
+            <div v-if="!agent.is_builtin
               && !isMyAgent(agent)
               && (index === 0
                 || sortedMineAgents[index - 1].is_builtin
                 || isMyAgent(sortedMineAgents[index - 1]))" class="agent-section-header" role="button"
-              tabindex="0" @click="toggleAgentSection('tenantOthers')"
+              tabindex="0" :aria-expanded="!isAgentSectionCollapsed('tenantOthers')" @click="toggleAgentSection('tenantOthers')"
               @keydown.enter.prevent="toggleAgentSection('tenantOthers')"
               @keydown.space.prevent="toggleAgentSection('tenantOthers')">
               <t-icon :name="tenantSectionIconName" size="14px" />
@@ -359,28 +342,11 @@
               'is-builtin': agent.is_builtin,
               'agent-mode-normal': agent.config?.agent_mode === 'quick-answer',
               'agent-mode-agent': agent.config?.agent_mode === 'smart-reasoning'
-            }" @click="handleCardClick(agent)">
-              <!-- 装饰星星 -->
-              <div class="card-decoration">
-                <svg class="star-icon" width="24" height="24" viewBox="0 0 20 20" fill="none"
-                  xmlns="http://www.w3.org/2000/svg">
-                  <path
-                    d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z"
-                    stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"
-                    fill="currentColor" fill-opacity="0.15" />
-                </svg>
-                <svg class="star-icon small" width="14" height="14" viewBox="0 0 20 20" fill="none"
-                  xmlns="http://www.w3.org/2000/svg">
-                  <path
-                    d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z"
-                    stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"
-                    fill="currentColor" fill-opacity="0.15" />
-                </svg>
-              </div>
+            }" role="link" tabindex="0" @keydown.enter.self.prevent="handleCardClick(agent)" @keydown.space.self.prevent="handleCardClick(agent)" @click="handleCardClick(agent)">
 
               <button type="button" class="agent-favorite-star"
                 :class="{ 'is-favorited': isAgentFavorited(agent.id) }"
-                @click.stop="toggleFavoriteAgent(agent.id, $event)">
+                :aria-label="$t('listSpaceSidebar.favorites')" :aria-pressed="isAgentFavorited(agent.id)" @click.stop="toggleFavoriteAgent(agent.id, $event)">
                 <t-icon :name="isAgentFavorited(agent.id) ? 'star-filled' : 'star'" size="14px" />
               </button>
               <!-- 卡片头部 -->
@@ -397,13 +363,13 @@
                   <span class="card-title" :title="agent.name">{{ agent.name }}</span>
                 </div>
                 <t-popup v-if="canManageAgent(agent) || authStore.hasRole('contributor') || authStore.hasRole('admin')"
-                  :visible="openMoreAgentId === agent.id" trigger="hover" overlayClassName="card-more-popup"
-                  destroy-on-close placement="bottom-right" @visible-change="onVisibleChange"
-                  @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
-                  <div class="more-wrap" :class="{ 'active-more': openMoreAgentId === agent.id }"
-                    @click="toggleMore($event, agent.id)">
+                  :visible="openMoreAgentId === agent.id" trigger="click" overlayClassName="card-more-popup"
+                  destroy-on-close placement="bottom-right"
+                  @update:visible="(v: boolean) => { openMoreAgentId = v ? agent.id : null }">
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === agent.id }"
+                    @click.stop>
                     <img class="more-icon" src="@/assets/img/more.png" alt="" />
-                  </div>
+                  </button>
                   <template #content>
                     <div class="popup-menu">
                       <div v-if="canManageAgent(agent)" class="popup-menu-item" @click="handleEdit(agent)">
@@ -431,7 +397,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description">
+                <div class="card-description" :title="agent.description || $t('agent.noDescription')">
                   {{ agent.description || $t('agent.noDescription') }}
                 </div>
               </div>
@@ -501,8 +467,8 @@
         <div v-else-if="spaceSelectionOrgId && sortedSpaceAgentsList.length > 0" class="agent-card-wrap">
           <template v-for="(shared, index) in sortedSpaceAgentsList" :key="'shared-' + shared.share_id">
             <!-- 我共享的：当前用户共享进本空间的智能体，只在首条 is_mine 上挂标题 -->
-            <div v-if="showShareGroupHeaders && shared.is_mine && index === 0" class="agent-section-header"
-              role="button" tabindex="0" @click="toggleAgentSection('sharedByMe')"
+            <div v-if="shared.is_mine && index === 0" class="agent-section-header"
+              role="button" tabindex="0" :aria-expanded="!isAgentSectionCollapsed('sharedByMe')" @click="toggleAgentSection('sharedByMe')"
               @keydown.enter.prevent="toggleAgentSection('sharedByMe')"
               @keydown.space.prevent="toggleAgentSection('sharedByMe')">
               <t-icon name="share" size="14px" />
@@ -512,11 +478,10 @@
                 :name="isAgentSectionCollapsed('sharedByMe') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 可编辑：首次从 is_mine 进入共享 + editable -->
-            <div v-if="showShareGroupHeaders
-              && !shared.is_mine
+            <div v-if="!shared.is_mine
               && isSharedAgentEditable(shared.permission)
               && (index === 0 || sortedSpaceAgentsList[index - 1].is_mine)" class="agent-section-header" role="button"
-              tabindex="0" @click="toggleAgentSection('sharedEditable')"
+              tabindex="0" :aria-expanded="!isAgentSectionCollapsed('sharedEditable')" @click="toggleAgentSection('sharedEditable')"
               @keydown.enter.prevent="toggleAgentSection('sharedEditable')"
               @keydown.space.prevent="toggleAgentSection('sharedEditable')">
               <t-icon name="usergroup-add" size="14px" />
@@ -527,13 +492,12 @@
                 :name="isAgentSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看：首次从可编辑 / is_mine 进入 viewer -->
-            <div v-if="showShareGroupHeaders
-              && !shared.is_mine
+            <div v-if="!shared.is_mine
               && !isSharedAgentEditable(shared.permission)
               && (index === 0
                 || sortedSpaceAgentsList[index - 1].is_mine
                 || isSharedAgentEditable(sortedSpaceAgentsList[index - 1].permission))" class="agent-section-header"
-              role="button" tabindex="0" @click="toggleAgentSection('sharedReadonly')"
+              role="button" tabindex="0" :aria-expanded="!isAgentSectionCollapsed('sharedReadonly')" @click="toggleAgentSection('sharedReadonly')"
               @keydown.enter.prevent="toggleAgentSection('sharedReadonly')"
               @keydown.space.prevent="toggleAgentSection('sharedReadonly')">
               <t-icon name="usergroup-add" size="14px" />
@@ -546,23 +510,7 @@
             <div v-show="!isSpaceAgentCollapsed(shared)" class="agent-card shared-agent-card" :class="{
               'agent-mode-normal': shared.agent?.config?.agent_mode === 'quick-answer',
               'agent-mode-agent': shared.agent?.config?.agent_mode === 'smart-reasoning'
-            }" @click="handleSpaceAgentCardClick(shared)">
-              <div class="card-decoration">
-                <svg class="star-icon" width="24" height="24" viewBox="0 0 20 20" fill="none"
-                  xmlns="http://www.w3.org/2000/svg">
-                  <path
-                    d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z"
-                    stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"
-                    fill="currentColor" fill-opacity="0.15" />
-                </svg>
-                <svg class="star-icon small" width="14" height="14" viewBox="0 0 20 20" fill="none"
-                  xmlns="http://www.w3.org/2000/svg">
-                  <path
-                    d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z"
-                    stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"
-                    fill="currentColor" fill-opacity="0.15" />
-                </svg>
-              </div>
+            }" role="link" tabindex="0" @keydown.enter.self.prevent="handleSpaceAgentCardClick(shared)" @keydown.space.self.prevent="handleSpaceAgentCardClick(shared)" @click="handleSpaceAgentCardClick(shared)">
               <div class="card-header">
                 <div class="card-header-left">
                   <div v-if="shared.agent?.avatar" class="builtin-avatar agent-emoji">{{ shared.agent.avatar }}</div>
@@ -570,13 +518,13 @@
                   <span class="card-title" :title="shared.agent?.name">{{ shared.agent?.name }}</span>
                 </div>
                 <t-popup v-if="!shared.is_mine && authStore.hasRole('admin')"
-                  :visible="openMoreAgentId === 'shared-tab-' + shared.share_id" trigger="hover"
+                  :visible="openMoreAgentId === 'shared-tab-' + shared.share_id" trigger="click"
                   overlayClassName="card-more-popup" destroy-on-close placement="bottom-right"
-                  @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
-                  <div class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-tab-' + shared.share_id }"
-                    @click.stop="toggleMore($event, 'shared-tab-' + shared.share_id)">
+                  @update:visible="(v: boolean) => { openMoreAgentId = v ? 'shared-tab-' + shared.share_id : null }">
+                  <button type="button" :aria-label="$t('common.expand')" class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-tab-' + shared.share_id }"
+                    @click.stop>
                     <img class="more-icon" src="@/assets/img/more.png" alt="" />
-                  </div>
+                  </button>
                   <template #content>
                     <div class="popup-menu">
                       <div class="popup-menu-item" @click="handleToggleSharedDisabledFromShared(shared)">
@@ -588,7 +536,8 @@
                 </t-popup>
               </div>
               <div class="card-content">
-                <div class="card-description">{{ shared.agent?.description || $t('agent.noDescription') }}</div>
+                <div class="card-description" :title="shared.agent?.description || $t('agent.noDescription')">
+                  {{ shared.agent?.description || $t('agent.noDescription') }}</div>
               </div>
               <div class="card-bottom">
                 <div class="bottom-left">
@@ -637,8 +586,9 @@
         </div>
 
         <!-- 空状态：全部（保留创建 CTA） -->
-        <EmptyState v-if="spaceSelection === 'all' && filteredAgents.length === 0 && !loading" icon="chat-bubble-1" :title="$t('agent.empty.title')"
+        <EmptyState v-if="!keyword.trim() && spaceSelection === 'all' && filteredAgents.length === 0 && !loading" :title="$t('agent.empty.title')"
           :description="$t('agent.empty.description')">
+          <template #icon><ResourceIcon type="agent" :size="32" /></template>
           <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn"
             data-guide="agent-list-create" @click="handleCreateAgent">
             <template #icon>
@@ -665,13 +615,14 @@
         </EmptyState>
 
         <!-- 空状态：收藏 / 最近 — 不放创建按钮，参见 KnowledgeBaseList 的同处理由 -->
-        <EmptyState v-if="spaceSelection === 'favorites' && filteredAgents.length === 0 && !loading" icon="star" :title="$t('agent.empty.favoritesTitle')"
+        <EmptyState v-if="!keyword.trim() && spaceSelection === 'favorites' && filteredAgents.length === 0 && !loading" icon="star" :title="$t('agent.empty.favoritesTitle')"
           :description="$t('agent.empty.favoritesDescription')" />
-        <EmptyState v-if="spaceSelection === 'recents' && filteredAgents.length === 0 && !loading" icon="history" :title="$t('agent.empty.recentsTitle')"
+        <EmptyState v-if="!keyword.trim() && spaceSelection === 'recents' && filteredAgents.length === 0 && !loading" icon="history" :title="$t('agent.empty.recentsTitle')"
           :description="$t('agent.empty.recentsDescription')" />
         <!-- 空状态：我的 -->
-        <EmptyState v-if="spaceSelection === 'mine' && agents.length === 0 && !loading" icon="chat-bubble-1" :title="$t('agent.empty.title')"
+        <EmptyState v-if="!keyword.trim() && spaceSelection === 'mine' && agents.length === 0 && !loading" :title="$t('agent.empty.title')"
           :description="$t('agent.empty.description')">
+          <template #icon><ResourceIcon type="agent" :size="32" /></template>
           <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn"
             @click="handleCreateAgent">
             <template #icon>
@@ -697,8 +648,10 @@
           </t-button>
         </EmptyState>
         <!-- 空状态：空间下 -->
-        <EmptyState v-if="spaceSelectionOrgId && !spaceAgentsLoading && spaceAgentsList.length === 0" icon="chat-bubble-1" :title="$t('agent.empty.sharedTitle')"
-          :description="$t('agent.empty.sharedDescription')" />
+        <EmptyState v-if="!keyword.trim() && spaceSelectionOrgId && !spaceAgentsLoading && spaceAgentsList.length === 0" :title="$t('agent.empty.sharedTitle')"
+          :description="$t('agent.empty.sharedDescription')">
+          <template #icon><ResourceIcon type="agent" :size="32" /></template>
+        </EmptyState>
       </div>
     </div>
 
@@ -785,10 +738,10 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
-import { formatStringDate } from '@/utils/index'
 import { useI18n } from 'vue-i18n'
 import { createSessions } from '@/api/chat/index'
 import { useOrganizationStore } from '@/stores/organization'
@@ -803,7 +756,8 @@ import { focusAgentEditorSection, markContextualGuideDone } from '@/config/conte
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useUIStore } from '@/stores/ui'
 import AgentAvatar from '@/components/AgentAvatar.vue'
-import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
+import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
+import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import { useAuthStore } from '@/stores/auth'
@@ -836,9 +790,9 @@ type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: 
 // 默认落到 "all" 才能看到内置 + 共享给我的；Contributor 以上仍默认 "mine"。
 // State synced to `?scope=` so links are shareable. The "mine" value is
 // retained for back-compat with existing links; its display label is
-// rebranded to the active tenant name inside ListSpaceSidebar.
+// shown as the current workspace in ResourceListToolbar.
 const defaultScope: 'all' | 'mine' = authStore.hasRole('contributor') ? 'mine' : 'all'
-const { scope: spaceSelection, creator: creatorFilter } = useListUrlState({
+const { scope: spaceSelection, creator: creatorFilter, query: keyword } = useListUrlState({
   defaultScope,
   defaultCreator: 'all',
 })
@@ -856,19 +810,13 @@ const sharedAgents = computed<SharedAgentInfo[]>(() => orgStore.sharedAgents || 
 const allAgentsCount = computed(() => agents.value.length + sharedAgents.value.length)
 
 // Same gotcha as KnowledgeBaseList: keep the reserved-scope set in sync
-// with ListSpaceSidebar's pseudo-scopes (favorites / recents / shared /
+// with ResourceListToolbar's pseudo-scopes (favorites / recents / shared /
 // mine / all). Anything not in here is treated as an org/space id, which
 // is what triggers the per-space fetch + "no shared agents" empty state.
 const RESERVED_SCOPES = new Set(['all', 'mine', 'shared', 'favorites', 'recents'])
 const spaceSelectionOrgId = computed(() => {
   const s = spaceSelection.value
   return !!s && !RESERVED_SCOPES.has(s)
-})
-
-const sharedAgentsByOrg = computed(() => {
-  const orgId = spaceSelection.value
-  if (orgId === 'all' || orgId === 'mine') return []
-  return sharedAgents.value.filter(s => s.organization_id === orgId)
 })
 
 // 空间视角：该空间内全部智能体（含我共享的），选中空间时请求新接口
@@ -950,7 +898,7 @@ const recentsAgentList = computed<DisplayAgent[]>(() => {
     .filter((x): x is DisplayAgent => x !== null)
 })
 
-const filteredAgents = computed<DisplayAgent[]>(() => {
+const unsearchedFilteredAgents = computed<DisplayAgent[]>(() => {
   if (spaceSelection.value === 'favorites') return favoritesAgentList.value
   if (spaceSelection.value === 'recents') return recentsAgentList.value
   if (spaceSelection.value === 'mine') {
@@ -997,10 +945,11 @@ const filteredAgents = computed<DisplayAgent[]>(() => {
   })
   return list
 })
+const filteredAgents = computed(() => unsearchedFilteredAgents.value.filter(item => matchesResourceQuery(item, keyword.value)))
 
 // 「工作空间」视图下的稳定排序：本空间内「我创建」在前、「同事创建 / 内建」
 // 在后。给 contributor 视图把「本空间 · 仅查看」分组标题正好插在过渡处。
-const sortedMineAgents = computed(() => {
+const unsearchedSortedMineAgents = computed(() => {
   // 内置 → 我创建 → 同事创建。与 filteredAgents 的"全部"视图保持同序。
   const builtin: AgentWithUI[] = []
   const own: AgentWithUI[] = []
@@ -1012,9 +961,10 @@ const sortedMineAgents = computed(() => {
   })
   return [...builtin, ...own, ...teammate]
 })
+const sortedMineAgents = computed(() => unsearchedSortedMineAgents.value.filter(item => matchesResourceQuery(item, keyword.value)))
 
 // 空间视角下的稳定排序：我自己创建的（is_mine）放前面，其余按 permission 切分。
-const sortedSpaceAgentsList = computed(() => {
+const unsearchedSortedSpaceAgentsList = computed(() => {
   return [...spaceAgentsList.value].sort((a, b) => {
     const aMine = a.is_mine ? 0 : 1
     const bMine = b.is_mine ? 0 : 1
@@ -1024,6 +974,7 @@ const sortedSpaceAgentsList = computed(() => {
     return aE - bE
   })
 })
+const sortedSpaceAgentsList = computed(() => unsearchedSortedSpaceAgentsList.value.filter(item => matchesResourceQuery(item.agent, keyword.value)))
 const loading = ref(false)
 const confirmDelete = useConfirmDelete()
 const sharedDetailVisible = ref(false)
@@ -1056,7 +1007,7 @@ const editorInitialHighlightField = ref<string>('')
 const openMoreAgentId = ref<string | null>(null)
 
 const showAgentListEmpty = computed(() => {
-  if (loading.value) return false
+  if (loading.value || keyword.value.trim()) return false
   if (!authStore.hasRole('contributor')) return false
   if (spaceSelection.value === 'all' && filteredAgents.value.length === 0) return true
   if (spaceSelection.value === 'mine' && agents.value.length === 0) return true
@@ -1217,17 +1168,6 @@ onUnmounted(() => {
   window.removeEventListener('openAgentEditor', handleOpenAgentEditor as EventListener)
 })
 
-const onVisibleChange = (visible: boolean) => {
-  if (!visible) {
-    openMoreAgentId.value = null
-  }
-}
-
-const toggleMore = (e: Event, agentId: string) => {
-  e.stopPropagation()
-  openMoreAgentId.value = openMoreAgentId.value === agentId ? null : agentId
-}
-
 const handleCardClick = (agent: DisplayAgent | AgentWithUI) => {
   if (openMoreAgentId.value === agent.id) return
   // Track recency before any branch — Recents should reflect what the
@@ -1345,7 +1285,7 @@ function showAgentOriginBadge(agent: { created_by?: string; creator_name?: strin
     section: agentSectionOf(agent),
     variant: agentOriginVariant(agent),
     creatorName: (agent as any).creator_name,
-    showSectionHeaders: showShareGroupHeaders.value,
+    showSectionHeaders: true,
   })
 }
 
@@ -1354,20 +1294,15 @@ function showAgentBuiltinBadge(agent: { is_builtin?: boolean }): boolean {
   return shouldShowResourceOriginBadge({
     section: agentSectionOf(agent),
     variant: 'mine',
-    showSectionHeaders: showShareGroupHeaders.value,
+    showSectionHeaders: true,
   })
 }
 
-// 共享 agent 的可编辑/只读分组开关，与 KB 列表逻辑保持一致：仅对
-// contributor / editor 中间档展示分组标题。Viewer / Admin+ 不分组。
+// 按共享资源的实际权限划分可编辑和只读分组。
 const AGENT_EDITABLE_PERMS = new Set(['admin', 'editor'])
 function isSharedAgentEditable(perm: string | undefined): boolean {
   return !!perm && AGENT_EDITABLE_PERMS.has(perm)
 }
-// 与 KnowledgeBaseList 同理：分组标题对所有角色生效，依据"创建者 + 来源"
-// 这种客观信息分段，不再按当前用户的可写权限筛掉。
-const showShareGroupHeaders = computed(() => true)
-
 // 同空间、非当前用户创建的 Agent 分组标题。
 // contributor / viewer 在本空间里对这些 Agent 没有写权限，所以打"仅查看"；
 // admin / owner 对整个空间都有编辑权限，"仅查看"反而误导，统一改成
@@ -1547,11 +1482,6 @@ const handleEditorSuccess = (agent?: CustomAgent) => {
   fetchList(true)
 }
 
-const formatDate = (dateStr: string) => {
-  if (!dateStr) return ''
-  return formatStringDate(new Date(dateStr))
-}
-
 // 暴露创建方法供外部调用
 const openCreateModal = () => {
   editingAgent.value = null
@@ -1575,40 +1505,25 @@ const handleCreateAgent = () => {
 defineExpose({
   openCreateModal
 })
+const visibleResultCount = computed(() => spaceSelection.value === 'mine' ? sortedMineAgents.value.length : spaceSelectionOrgId.value ? sortedSpaceAgentsList.value.length : filteredAgents.value.length)
+// A new search reveals matching rows even if their group was previously collapsed.
+watch(keyword, () => { collapsedAgentSections.value = new Set() })
 </script>
 
 <style scoped lang="less">
 @import (reference) '@/components/css/resource-card.less';
 
 .agent-list-container {
-  margin: 0;
-  height: 100%;
-  box-sizing: border-box;
   flex: 1;
-  display: flex;
-  position: relative;
+  min-width: 0;
   min-height: 0;
-}
-
-.agent-list-content {
-  flex: 1;
+  height: 100%;
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-  // 右侧不留 padding，让滚动条贴到内容区最右缘；内边距改到 header / main 内部
-  padding: 20px 0 0 28px;
 }
 
-.agent-list-main {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  // 同 KB 列表：顶部去掉 padding，让 sticky 分组标题贴到容器最顶。
-  padding: 0 28px 8px 0;
-  scrollbar-width: auto;
-  scrollbar-color: auto;
-}
+.agent-list-content { .resource-list-content(); }
+
+.agent-list-main { .resource-list-main(); }
 
 .agent-list-main-loading {
   display: flex;
@@ -1617,17 +1532,6 @@ defineExpose({
   min-height: 200px;
   padding: 12px;
   background: var(--td-bg-color-container);
-}
-
-.shared-by-me-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 6px;
-  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  border-radius: var(--app-radius-xs);
-  font-size: var(--app-text-sm);
-  color: var(--td-brand-color);
-  margin-left: 6px;
 }
 
 .header {
@@ -1650,6 +1554,9 @@ defineExpose({
   }
 
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
@@ -1707,39 +1614,6 @@ defineExpose({
   }
 }
 
-.agent-tabs {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  margin-bottom: 20px;
-
-  .tab-item {
-    padding: 12px 0;
-    cursor: pointer;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-base);
-    font-weight: 400;
-    transition: color var(--app-motion-base);
-
-    &:hover {
-      color: var(--td-text-color-primary);
-    }
-
-    &.active {
-      color: var(--td-brand-color);
-      font-weight: 600;
-      border-bottom: 2px solid var(--td-brand-color);
-      margin-bottom: -1px;
-    }
-  }
-}
-
-.shared-badge {
-  flex-shrink: 0;
-}
-
 .card-bottom-source {
   display: inline-flex;
   align-items: center;
@@ -1764,217 +1638,20 @@ defineExpose({
   flex-shrink: 0;
 }
 
-.custom-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 8px;
-  border-radius: var(--app-radius-lg);
-  background: var(--td-bg-color-container-hover);
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: var(--app-text-xs);
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
 // 共享给我 · 可编辑 / 仅查看 分组标题，与 KB 列表 .kb-section-header 对齐。
 .agent-section-header {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  // 整行只用来铺背景；点击靠子元素冒泡，避免点到标题右侧空白误折叠。
-  pointer-events: none;
-
-  & > * {
-    pointer-events: auto;
-  }
-  // 同 KB 列表：下滑到当前分组时标题吸顶到滚动容器顶部，box-shadow 向上/
-  // 向下延伸背景以封掉 sticky 边缘的 subpixel 残缝。
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--td-bg-color-container);
-  box-shadow: 0 -8px 0 0 var(--td-bg-color-container),
-    0 4px 0 0 var(--td-bg-color-container);
-  padding: 6px 4px 6px 0;
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: var(--app-text-md);
-  font-weight: 600;
-  line-height: 20px;
-  cursor: pointer;
-  user-select: none;
-  outline: none;
-
-  &:hover {
-    color: var(--td-text-color-primary);
-  }
-
-  &:focus-visible {
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
-  }
-
-  .t-icon {
-    color: inherit;
-  }
-
-  .agent-section-toggle {
-    margin-left: 4px;
-    opacity: 0.7;
-    transition: opacity var(--app-motion-fast) ease;
-  }
-
-  // 共享给我的两个子分组：主图标 usergroup-add 表达"共享"语义，
-  // 子图标 (edit / browse) 紧挨主图标用来区分权限。
-  .agent-section-subicon {
-    margin-left: -4px;
-    opacity: 0.75;
-  }
-
-  // 与 KB 列表口径一致：组里的卡片数量徽标。
-  .agent-section-count {
-    margin-left: 2px;
-    padding: 0 6px;
-    border-radius: var(--app-radius-md);
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-    font-size: var(--app-text-xs);
-    line-height: 16px;
-    font-weight: 500;
-  }
-
-  &:hover .agent-section-toggle {
-    opacity: 1;
-  }
-}
-
-
-@keyframes contentFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  .resource-section-header();
 }
 
 .agent-card-wrap {
   .resource-card-grid();
 }
 
-/* 与知识库列表卡片统一尺寸：紧凑行高、148px 卡片高 */
+// 共享卡片尺寸与交互。
 .agent-card {
   .resource-card();
 
-  .agent-favorite-star {
-    // 浮在卡片右上角顶角。卡片自身有 padding，"更多"按钮在 header flex
-    // 末端自然落在 padding 内部，与零位的 star 错开。
-    position: absolute;
-    top: 0;
-    right: 0;
-    z-index: 3;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    border-radius: var(--app-radius-sm);
-    color: var(--td-text-color-secondary);
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
-
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer);
-      color: var(--td-warning-color);
-    }
-
-    &.is-favorited {
-      opacity: 1;
-      color: var(--td-warning-color);
-    }
-  }
-
-  &:hover .agent-favorite-star {
-    opacity: 1;
-  }
-
-  // 普通模式样式
-  &.agent-mode-normal {
-    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 4%, transparent) 100%);
-
-    &:hover {
-      border-color: var(--td-brand-color);
-      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%);
-    }
-
-    .card-decoration {
-      color: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
-    }
-
-    &:hover .card-decoration {
-      color: color-mix(in srgb, var(--td-brand-color) 50%, transparent);
-    }
-  }
-
-  // Agent 模式样式
-  &.agent-mode-agent {
-    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--app-accent-purple) 4%, transparent) 100%);
-
-    &:hover {
-      border-color: var(--td-brand-color);
-      box-shadow: 0 4px 12px color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
-      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--app-accent-purple) 8%, transparent) 100%);
-    }
-
-    .card-decoration {
-      color: color-mix(in srgb, var(--app-accent-purple) 35%, transparent);
-    }
-
-    &:hover .card-decoration {
-      color: color-mix(in srgb, var(--app-accent-purple) 50%, transparent);
-    }
-  }
-
-  .builtin-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--app-radius-md);
-  }
-
-  .edit-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--app-radius-md);
-  }
-}
-
-.card-decoration {
-  position: absolute;
-  top: 12px;
-  right: 44px;
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  pointer-events: none;
-  z-index: 0;
-  transition: color 0.25s ease;
-
-  .star-icon {
-    opacity: 0.9;
-
-    &.small {
-      margin-top: 10px;
-      opacity: 0.7;
-    }
-  }
+  .agent-favorite-star { .resource-favorite-button(); }
 }
 
 .builtin-badge {
@@ -1992,13 +1669,7 @@ defineExpose({
 }
 
 .builtin-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
   border-radius: var(--app-radius-md);
-  flex-shrink: 0;
 
   &.agent-emoji {
     font-size: var(--app-text-2xl);
@@ -2013,24 +1684,6 @@ defineExpose({
 
   &.agent {
     background: linear-gradient(135deg, color-mix(in srgb, var(--app-accent-purple) 15%, transparent) 0%, color-mix(in srgb, var(--app-accent-purple) 8%, transparent) 100%);
-    color: var(--td-brand-color);
-  }
-}
-
-.edit-btn {
-  display: flex;
-  width: 32px;
-  height: 32px;
-  justify-content: center;
-  align-items: center;
-  border-radius: var(--app-radius-md);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all var(--app-motion-base) ease;
-  color: var(--td-text-color-disabled);
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
     color: var(--td-brand-color);
   }
 }
@@ -2074,11 +1727,11 @@ defineExpose({
   }
 
   &.knowledge {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color-active);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
 
     &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+      background: var(--td-bg-color-container-hover);
     }
   }
 
@@ -2101,41 +1754,12 @@ defineExpose({
   }
 }
 
-// 响应式布局
-@media (min-width: 900px) {
-  .agent-card-wrap {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (min-width: 1250px) {
-  .agent-card-wrap {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (min-width: 1600px) {
-  .agent-card-wrap {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-@media (min-width: 1900px) {
-  .agent-card-wrap {
-    grid-template-columns: repeat(5, 1fr);
-  }
-}
-
-@media (min-width: 2200px) {
-  .agent-card-wrap {
-    grid-template-columns: repeat(6, 1fr);
-  }
-}
-
 // 删除确认对话框样式
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
+
+.resource-list-header();
 
 </style>
 

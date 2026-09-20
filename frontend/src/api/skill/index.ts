@@ -15,7 +15,11 @@ export interface SkillCatalogInstall {
   status: string;
   enabled: boolean;
   error?: string;
+  version?: string;
   bundle_sha256?: string;
+  // Present while a newer install is in flight or has failed and the sandbox
+  // still runs the previous version.
+  served?: { version?: string };
   updated_at: string;
 }
 

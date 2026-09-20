@@ -17,6 +17,9 @@ import (
 // ErrWikiPageNotFound is returned when a wiki page is not found
 var ErrWikiPageNotFound = errors.New("wiki page not found")
 
+// ErrWikiIssueNotFound means no issue with that ID belongs to the knowledge base.
+var ErrWikiIssueNotFound = errors.New("wiki issue not found")
+
 // ErrWikiPageConflict is returned when an optimistic lock conflict is detected
 var ErrWikiPageConflict = errors.New("wiki page version conflict")
 
@@ -1418,8 +1421,17 @@ func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug s
 	return issues, nil
 }
 
-func (r *wikiPageRepository) UpdateIssueStatus(ctx context.Context, issueID string, status string) error {
-	return r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
-		Where("id = ?", issueID).
-		Update("status", status).Error
+func (r *wikiPageRepository) UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error {
+	// Scoped to the knowledge base the caller was authorized for: issue IDs are
+	// listed to readers, so an ID alone must not reach another KB's issue.
+	result := r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
+		Where("id = ? AND knowledge_base_id = ?", issueID, kbID).
+		Update("status", status)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrWikiIssueNotFound
+	}
+	return nil
 }

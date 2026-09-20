@@ -134,6 +134,23 @@
           </section>
         </template>
         <template v-else-if="managedSkill">
+          <p v-if="managedServedNote" class="skill-manage__served">{{ managedServedNote }}</p>
+          <div v-if="managedUpgradeHint" class="skill-manage__row skill-manage__row--upgrade">
+            <div class="skill-manage__info">
+              <label>{{ $t('settings.skills.upgradeRowTitle') }}</label>
+              <p>{{ managedUpgradeHint }}</p>
+            </div>
+            <div class="skill-manage__controls">
+              <t-button
+                theme="primary"
+                size="small"
+                :loading="upgradingId === managedSkill.id"
+                @click="managedSkill && upgradeSkill(managedSkill)"
+              >
+                {{ $t('settings.skills.upgrade') }}
+              </t-button>
+            </div>
+          </div>
           <div class="skill-manage__row">
             <div class="skill-manage__info">
               <label>{{ $t('settings.skills.manageEnable') }}</label>
@@ -147,7 +164,7 @@
                 @change="(v: any) => managedSkill && toggleEnabled(managedSkill, Boolean(v))"
               />
               <t-tooltip
-                v-if="managedSkill.status === 'failed'"
+                v-if="managedSkill.status === 'failed' && !managedUpgradable"
                 :content="$t('settings.sandbox.skillRetryHint')"
                 placement="top"
               >
@@ -255,7 +272,7 @@
               :session-id="managedSkill.install_session_id || ''"
               :message-id="managedSkill.install_message_id || ''"
               :live="managedSkill.status === 'installing'"
-              :can-retry="managedSkill.status === 'ready' || managedSkill.status === 'failed'"
+              :can-retry="(managedSkill.status === 'ready' || managedSkill.status === 'failed') && !managedUpgradable"
               @restarted="loadSkills()"
             />
           </section>
@@ -625,6 +642,8 @@ import {
   type ConfigSkill,
   type SandboxConfigRecord,
 } from '@/api/system'
+import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill'
+import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
 import {
   MAX_ENV_VALUE_BYTES,
@@ -648,10 +667,14 @@ const props = withDefaults(defineProps<{
   mode?: 'install' | 'list'
   hideAdd?: boolean
   focusSkillId?: string
+  // The workspace definition the focused skill was installed from. Only the
+  // catalog knows a newer version exists, so without it no upgrade is offered.
+  catalogItem?: SkillCatalogItem | null
 }>(), {
   mode: 'list',
   hideAdd: false,
   focusSkillId: '',
+  catalogItem: null,
 })
 
 const emit = defineEmits<{
@@ -674,6 +697,7 @@ const skills = ref<ConfigSkill[]>([])
 const togglingId = ref('')
 const deletingId = ref('')
 const retryingId = ref('')
+const upgradingId = ref('')
 const stoppingId = ref('')
 const uninstallingId = ref('')
 const uninstallingName = ref('')
@@ -781,6 +805,36 @@ const visibleSkills = computed(() => {
 
 const managedSkill = computed(() =>
   props.focusSkillId ? (visibleSkills.value[0] || null) : null,
+)
+
+// An install the catalog has moved past is offered the upgrade and not the
+// retries: both of those replay the archive this install is pinned to, which
+// is exactly the version the operator came here to leave behind.
+const managedUpgradable = computed(() => {
+  const skill = managedSkill.value
+  const catalog = props.catalogItem
+  return Boolean(skill && catalog && installUpgradable(catalog, skill))
+})
+
+const managedUpgradeHint = computed(() => {
+  const skill = managedSkill.value
+  const catalog = props.catalogItem
+  if (!skill || !catalog || !managedUpgradable.value) return ''
+  const versions = upgradeVersions(catalog, skill)
+  if (skill.status === 'failed') {
+    return versions
+      ? t('settings.skills.upgradeRowHintFailedVersions', versions)
+      : t('settings.skills.upgradeRowHintFailed')
+  }
+  return versions
+    ? t('settings.skills.upgradeRowHintVersions', versions)
+    : t('settings.skills.upgradeRowHint')
+})
+
+// While this install runs or after it failed, the sandbox keeps running the
+// previous version, which is worth saying next to a spinner or an error.
+const managedServedNote = computed(() =>
+  managedSkill.value ? servedPreviousText(t, managedSkill.value) : '',
 )
 
 const showHeaderUninstall = computed(() => {
@@ -1303,6 +1357,35 @@ async function retrySkill(skill: ConfigSkill) {
   }
 }
 
+// An upgrade is the catalog install onto this one sandbox. The retry above
+// cannot do it: it replays the archive this sandbox already runs.
+async function upgradeSkill(skill: ConfigSkill) {
+  const catalog = props.catalogItem
+  if (!props.record || !catalog) return
+  const configId = props.record.id
+  const generation = panelGeneration
+  upgradingId.value = skill.id
+  forgetProgress(skill.id)
+  try {
+    const res = await installSkillCatalog(catalog.id, [configId])
+    if (generation !== panelGeneration) return
+    const refused = res?.data?.errors?.[configId]
+    if (refused) {
+      MessagePlugin.error(refused)
+      return
+    }
+    MessagePlugin.success(t('settings.skills.upgradeAccepted'))
+    await loadSkills()
+    if (generation !== panelGeneration) return
+    followProgress(skill.id)
+  } catch (e: any) {
+    if (generation !== panelGeneration) return
+    MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
+  } finally {
+    if (generation === panelGeneration) upgradingId.value = ''
+  }
+}
+
 async function stopSkill(skill: ConfigSkill) {
   if (!props.record) return
   const generation = panelGeneration
@@ -1370,6 +1453,7 @@ watch(
       skills.value = []
       loading.value = false
       retryingId.value = ''
+      upgradingId.value = ''
       stoppingId.value = ''
       deletingId.value = ''
       uninstallingId.value = ''
@@ -1615,6 +1699,23 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.skill-manage__served {
+  margin: 0;
+  padding: var(--app-space-2) var(--app-space-3);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
+.skill-manage__row--upgrade {
+  align-items: center;
+  padding: var(--app-space-2) var(--app-space-3);
+  border-radius: var(--app-radius-sm);
+  background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
 }
 
 .skill-manage__controls {

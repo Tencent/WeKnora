@@ -1,8 +1,8 @@
 diff --git a/apps/extension/src/entrypoints/background.ts b/apps/extension/src/entrypoints/background.ts
-index 1a9a788..5a2f0ef 100644
+index cb88179..cba98b8 100644
 --- a/apps/extension/src/entrypoints/background.ts
 +++ b/apps/extension/src/entrypoints/background.ts
-@@ -339,10 +339,12 @@ export default defineBackground(() => {
+@@ -326,10 +326,12 @@ export default defineBackground(() => {
          },
          ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
          deps: {
@@ -183,10 +183,10 @@ index 0000000..53db1bf
 +  }
 +}
 diff --git a/apps/extension/src/tools/__tests__/tabs.test.ts b/apps/extension/src/tools/__tests__/tabs.test.ts
-index dc9fdb5..ae9534d 100644
+index 5a7239e..b48a15e 100644
 --- a/apps/extension/src/tools/__tests__/tabs.test.ts
 +++ b/apps/extension/src/tools/__tests__/tabs.test.ts
-@@ -297,7 +297,7 @@ describe("handleTabCreate", () => {
+@@ -298,7 +298,7 @@ describe("handleTabCreate", () => {
  });
  
  describe("handleTabClose", () => {
@@ -195,7 +195,7 @@ index dc9fdb5..ae9534d 100644
      const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]), remote: () => true });
      const ctx = await sm.start("aa11");
      const state: FakeTabState = {
-@@ -309,6 +309,15 @@ describe("handleTabClose", () => {
+@@ -310,6 +310,15 @@ describe("handleTabClose", () => {
      expect(
        await handleTabClose(sm, { session_id: "aa11", tab_id: 5 }, { tabs: api }),
      ).toMatchObject({ code: "permission_denied" });
@@ -211,7 +211,7 @@ index dc9fdb5..ae9534d 100644
      const approval = vi.fn(async () => true);
      expect(
        await handleTabBorrow(
-@@ -316,13 +325,32 @@ describe("handleTabClose", () => {
+@@ -317,13 +326,32 @@ describe("handleTabClose", () => {
          { session_id: "aa11", tab_id: 5 },
          { tabs: api, approveBorrow: approval },
        ),
@@ -250,22 +250,22 @@ index dc9fdb5..ae9534d 100644
    it("removes a tab inside the Agent Window", async () => {
      const sm = new SessionManager({ agentWindow: fakeAgentWindow([100]) });
 diff --git a/apps/extension/src/tools/dispatcher.ts b/apps/extension/src/tools/dispatcher.ts
-index 0726f27..8afdedf 100644
+index b713f2f..93908bc 100644
 --- a/apps/extension/src/tools/dispatcher.ts
 +++ b/apps/extension/src/tools/dispatcher.ts
-@@ -3,6 +3,7 @@ import { OVERLAY_AUTOMATION_BYPASS } from "@/lib/overlay-bridge";
- import type { TaskActivity } from "@/lib/task-activity";
+@@ -2,6 +2,7 @@ import type { InteractionPreferenceStore } from "@/lib/interaction-preferences";
+ import { OVERLAY_AUTOMATION_BYPASS } from "@/lib/overlay-bridge";
  import { ScreenshotExports } from "@/long-screenshot/exports";
  import type { SessionManager } from "@/session-manager/manager";
 +import { withTaskPopups } from "@/session-manager/task-popups";
  import type { Transport } from "@/transport/transport";
  import type {
    BlurParams,
-@@ -279,7 +280,25 @@ export class ToolDispatcher {
+@@ -276,7 +277,24 @@ export class ToolDispatcher {
        } catch {
          /* The daemon still has the original operation metadata. */
        }
--      const invoke = () => this.invoke(req, ac.signal);
+-      const result = await this.invoke(req, ac.signal);
 +      const createsPopup = [
 +        "tool.click",
 +        "tool.press_key",
@@ -276,23 +276,22 @@ index 0726f27..8afdedf 100644
 +        "tool.fill",
 +        "tool.select",
 +      ].includes(req.method);
-+      const invoke = () =>
-+        createsPopup
-+          ? withTaskPopups(
-+              this.sessions,
-+              (req.params ?? {}) as { session_id?: string; tab_id?: number },
-+              () => this.invoke(req, ac.signal),
-+              this.onAgentTabClaimed,
-+            )
-+          : this.invoke(req, ac.signal);
-       const result = this.taskActivity
-         ? await this.taskActivity.run(
-             (req.params as { session_id?: string } | undefined)?.session_id,
++      const result = createsPopup
++        ? await withTaskPopups(
++            this.sessions,
++            (req.params ?? {}) as { session_id?: string; tab_id?: number },
++            () => this.invoke(req, ac.signal),
++            this.onAgentTabClaimed,
++          )
++        : await this.invoke(req, ac.signal);
+       if (isRpcError(result)) {
+         body = { id: req.id, error: classifyCdpError(result) };
+       } else {
 diff --git a/apps/extension/src/tools/tabs.ts b/apps/extension/src/tools/tabs.ts
-index 5e90e6b..2570c74 100644
+index 4130ca4..86b5cfa 100644
 --- a/apps/extension/src/tools/tabs.ts
 +++ b/apps/extension/src/tools/tabs.ts
-@@ -646,13 +646,12 @@ async function validateBorrowTarget(
+@@ -697,13 +697,12 @@ async function validateBorrowTarget(
    if (typeof tab.id !== "number" || typeof tab.windowId !== "number") {
      return { code: "not_found", message: `tab ${tabId} not found` };
    }
@@ -310,7 +309,7 @@ index 5e90e6b..2570c74 100644
      };
    }
    for (const s of manager.list()) {
-@@ -772,14 +771,17 @@ async function executeBorrowCore(
+@@ -823,14 +822,17 @@ async function executeBorrowCore(
  
    const originalWindowId = currentTab.windowId;
    const originalIndex = typeof currentTab.index === "number" ? currentTab.index : 0;

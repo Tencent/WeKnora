@@ -54,6 +54,15 @@ type SelectedDocumentInfo struct {
 	FileType        string // File type (pdf, docx, etc.)
 }
 
+// QuestionOriginInfo is the knowledge source a suggested question was
+// generated from, when the user picked that question. Rendered into
+// runtime_context so the model searches the source before answering.
+type QuestionOriginInfo struct {
+	KnowledgeBaseID   string
+	KnowledgeBaseName string
+	Document          *SelectedDocumentInfo // nil when only the base is known
+}
+
 // PinnedMCPServiceInfo describes an MCP service explicitly @mentioned for this turn.
 type PinnedMCPServiceInfo struct {
 	Discoverable bool // Available through the scoped MCP directory.

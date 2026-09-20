@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -162,8 +163,6 @@ func connectSharedFixture(
 				result = map[string]any{"cancelled": true}
 			case "gateway.task_preview":
 				result = map[string]any{"image_base64": "dGVzdA==", "format": "jpeg"}
-			case "gateway.task_idle":
-				result = map[string]any{"released": true}
 			case "gateway.task_focus":
 				result = map[string]any{"focused": true}
 			case "system.ping":
@@ -573,7 +572,7 @@ func TestHumanHelpOutcomeControlsPause(t *testing.T) {
 	}
 }
 
-func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
+func TestFinishTurnRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	m, ctx := sharedTestManager(t)
 	s := Scope{1, "idle-user"}
 	f := connectSharedFixture(ctx, t, m, s, "", "browser")
@@ -582,7 +581,7 @@ func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	before := m.Status(s, "chat")
 	frame, err := m.Preview(ctx, s, "chat")
 	require.NoError(t, err)
-	require.NoError(t, m.Idle(ctx, s, "chat"))
+	require.NoError(t, m.FinishTurn(ctx, s, "chat", true))
 	after := m.Status(s, "chat")
 	require.True(t, after.Idle)
 	require.Equal(t, before.SessionID, after.SessionID)
@@ -599,7 +598,7 @@ func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, m.Status(s, "chat").Idle)
 	require.NoError(t, m.Control(ctx, s, "chat", "stop"))
-	require.NoError(t, m.Idle(ctx, s, "chat"))
+	require.NoError(t, m.FinishTurn(ctx, s, "chat", true))
 }
 
 func TestNavigationDefaultsToDocumentReadyAndPreservesExplicitWait(t *testing.T) {
@@ -657,7 +656,7 @@ func TestFinishTurnClosesResearchButRetainsHandoffsAndPausedTasks(t *testing.T) 
 	}
 }
 
-func TestFinishTurnWithOfficialExtensionStillStopsCompletedTask(t *testing.T) {
+func TestFinishTurnUsesOfficialLifecycleWithoutGatewayCalls(t *testing.T) {
 	for _, remote := range []bool{false, true} {
 		t.Run(fmt.Sprintf("remote=%t", remote), func(t *testing.T) {
 			owner, ctx := sharedTestManager(t)
@@ -673,12 +672,14 @@ func TestFinishTurnWithOfficialExtensionStillStopsCompletedTask(t *testing.T) {
 				t.Cleanup(caller.Close)
 			}
 			scope := Scope{1, "official-extension"}
+			var gatewayCalls atomic.Int32
 			connectSharedFixture(ctx, t, owner, scope, "", "browser", func(
 				f *sharedFixture, id, method string, _ map[string]any,
 			) bool {
 				if !strings.HasPrefix(method, "gateway.") {
 					return false
 				}
+				gatewayCalls.Add(1)
 				_ = f.send(map[string]any{"id": id, "error": map[string]string{"code": "unknown_method"}})
 				return true
 			})
@@ -691,11 +692,16 @@ func TestFinishTurnWithOfficialExtensionStillStopsCompletedTask(t *testing.T) {
 				if !keep {
 					require.NoError(t, caller.Control(ctx, scope, session, "pause"))
 				}
-				var rpcErr *RPCError
-				require.ErrorAs(t, caller.FinishTurn(ctx, scope, session, keep), &rpcErr)
-				require.Equal(t, errGatewayUIUnsupported.Code, rpcErr.Code)
-				require.NotEmpty(t, owner.Status(scope, session).SessionID)
+				id := owner.Status(scope, session).SessionID
+				require.NoError(t, caller.FinishTurn(ctx, scope, session, keep))
+				require.Equal(t, id, owner.Status(scope, session).SessionID)
+				if keep {
+					_, err := caller.Call(ctx, scope, session, "snapshot", nil)
+					require.NoError(t, err)
+					require.Equal(t, id, owner.Status(scope, session).SessionID)
+				}
 			}
+			require.Zero(t, gatewayCalls.Load(), "turn cleanup must not send custom gateway RPC")
 		})
 	}
 }

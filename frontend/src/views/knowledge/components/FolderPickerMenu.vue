@@ -249,12 +249,16 @@ const commitNewFolder = async () => {
   padding: 6px 10px;
   margin-bottom: 2px;
   border-bottom: 1px solid var(--td-component-stroke);
-  color: var(--td-text-color-secondary);
-  font-size: var(--app-text-md);
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
+  font-weight: 400;
+  line-height: 20px;
   cursor: pointer;
 
   &:hover {
-    color: var(--td-brand-color);
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container-hover);
   }
 }
 
@@ -277,12 +281,15 @@ const commitNewFolder = async () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: 32px;
   box-sizing: border-box;
   padding: 0 8px 0 calc(var(--folder-picker-depth, 0) * var(--folder-picker-indent) + 10px);
-  border-radius: var(--app-radius-sm);
+  border-radius: var(--app-radius-xs);
   color: var(--td-text-color-primary);
-  font-size: var(--app-text-md);
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
+  font-weight: 400;
+  line-height: 20px;
   cursor: pointer;
   transition: background var(--app-motion-fast) ease;
 

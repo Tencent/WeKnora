@@ -289,25 +289,6 @@
                       </template>
                     </div>
                     <div class="faq-card-status" @click.stop>
-                      <!-- 暂时隐藏推荐开关
-                      <t-tooltip
-                        :content="entry.is_recommended ? $t('knowledgeEditor.faq.recommendedEnabled') : $t('knowledgeEditor.faq.recommendedDisabled')"
-                        placement="top"
-                      >
-                        <div class="status-item-compact">
-                          <t-switch
-                            :key="`${entry.id}-recommended-${entry.is_recommended}`"
-                            size="small"
-                            :value="entry.is_recommended"
-                            :loading="!!entryRecommendedLoading[entry.id]"
-                            :disabled="!!entryRecommendedLoading[entry.id]"
-                            @click.stop
-                            @change="(value: boolean) => handleEntryRecommendedChange(entry, value)"
-                          />
-                          <span class="status-label">{{ $t('knowledgeEditor.faq.recommended') }}</span>
-                        </div>
-                      </t-tooltip>
-                      -->
                       <t-tooltip
                         :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
                         placement="top">
@@ -778,7 +759,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, computed, nextTick, onUnmounted, h } from 'vue'
 import KnowledgeTagFilter from './KnowledgeTagFilter.vue'
-import { MessagePlugin, DialogPlugin, Icon as TIcon } from 'tdesign-vue-next'
+import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import type { FormRules, FormInstanceFunctions } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -951,7 +932,6 @@ const loading = ref(true)
 const loadingMore = ref(false)
 const entries = ref<FAQEntry[]>([])
 const entryStatusLoading = reactive<Record<number, boolean>>({})
-const entryRecommendedLoading = reactive<Record<number, boolean>>({})
 const selectedRowKeys = ref<number[]>([])
 const batchDeleteLoading = ref(false)
 const batchTagLoading = ref(false)
@@ -1350,32 +1330,6 @@ const handleEntryStatusChange = async (entry: FAQEntry, value: boolean) => {
   }
 }
 
-const handleEntryRecommendedChange = async (entry: FAQEntry, value: boolean) => {
-  if (entryRecommendedLoading[entry.id]) {
-    return
-  }
-  const entryIndex = entries.value.findIndex(e => e.id === entry.id)
-  if (entryIndex === -1) {
-    return
-  }
-  const actualEntry = entries.value[entryIndex]
-  const previous = actualEntry.is_recommended
-  if (previous === value) {
-    return
-  }
-  actualEntry.is_recommended = value
-  entryRecommendedLoading[entry.id] = true
-  try {
-    await updateFAQEntryFieldsBatch(props.kbId, { by_id: { [entry.id]: { is_recommended: value } } })
-    MessagePlugin.success(t(value ? 'knowledgeEditor.faq.recommendedEnableSuccess' : 'knowledgeEditor.faq.recommendedDisableSuccess'))
-  } catch (error: any) {
-    actualEntry.is_recommended = previous
-    MessagePlugin.error(error?.message || t('knowledgeEditor.faq.recommendedUpdateFailed'))
-  } finally {
-    entryRecommendedLoading[entry.id] = false
-  }
-}
-
 const editorRules: FormRules<FAQEntryPayload> = {
   standard_question: [
     { required: true, message: t('knowledgeEditor.messages.nameRequired') },
@@ -1684,22 +1638,6 @@ const handleBatchStatusChange = async (isEnabled: boolean) => {
     MessagePlugin.error(error?.message || t('common.operationFailed'))
   } finally {
     batchStatusAction.value = null
-  }
-}
-
-const handleBatchRecommendedChange = async (isRecommended: boolean) => {
-  if (!selectedRowKeys.value.length || !props.kbId) return
-  try {
-    const by_id: Record<number, { is_recommended: boolean }> = {}
-    selectedRowKeys.value.forEach(id => {
-      by_id[id] = { is_recommended: isRecommended }
-    })
-    await updateFAQEntryFieldsBatch(props.kbId, { by_id })
-    MessagePlugin.success(t(isRecommended ? 'knowledgeEditor.faq.recommendedEnableSuccess' : 'knowledgeEditor.faq.recommendedDisableSuccess'))
-    selectedRowKeys.value = []
-    await loadEntries()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'))
   }
 }
 
@@ -2521,17 +2459,6 @@ const handleSearch = async () => {
   }
 }
 
-const getMatchTypeLabel = (matchType?: string) => {
-  if (!matchType) return ''
-  if (matchType === 'embedding') {
-    return t('knowledgeEditor.faq.matchTypeEmbedding')
-  }
-  if (matchType === 'keywords') {
-    return t('knowledgeEditor.faq.matchTypeKeywords')
-  }
-  return matchType
-}
-
 const toggleResult = (result: FAQEntry) => {
   result.expanded = !result.expanded
 }
@@ -2839,45 +2766,9 @@ watch(() => entries.value.map(e => ({
   }
 }
 
-:deep(.tag-menu) {
-  display: flex;
-  flex-direction: column;
-}
 
-:deep(.tag-menu-item) {
-  display: flex;
-  align-items: center;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: all var(--app-motion-base) ease;
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: var(--app-text-base);
-  font-weight: 400;
 
-  .menu-icon {
-    margin-right: 8px;
-    font-size: var(--app-text-xl);
-  }
 
-  &:hover {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
-  }
-
-  &.danger {
-    color: var(--td-text-color-primary);
-
-    &:hover {
-      background: var(--td-error-color-light);
-      color: var(--td-error-color);
-
-      .menu-icon {
-        color: var(--td-error-color);
-      }
-    }
-  }
-}
 
 .faq-header {
   display: flex;
@@ -3325,15 +3216,14 @@ watch(() => entries.value.map(e => ({
     cursor: pointer;
 
     &:hover {
-      border-color: var(--td-brand-color);
-      box-shadow: 0 2px 8px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      border-color: var(--app-selection-border);
     }
   }
 
   &.selected {
-    border-color: var(--td-brand-color);
-    background: var(--td-success-color-light);
-    box-shadow: 0 2px 8px color-mix(in srgb, var(--td-brand-color) 15%, transparent);
+    border-color: var(--app-selection-border);
+    background: var(--td-bg-color-container);
+    box-shadow: none;
   }
 }
 

@@ -1,5 +1,5 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
+    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed, 'aside_box--resizing': uiStore.sidebarResizing }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
@@ -52,8 +52,10 @@
         <!-- 空间选择器：仅在用户可切换空间时显示 -->
         <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
 
-        <!-- 折叠时右侧拖拽展开手柄 -->
-        <div v-if="uiStore.sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
+        <!-- 侧栏边缘拖拽调宽，拖窄时自动收缩 -->
+        <PanelResizeHandle edge="right" :label="t('knowledgeStages.resizeDrawer')"
+            :value="uiStore.sidebarDisplayWidth" :min="SIDEBAR_COLLAPSED_WIDTH" :max="SIDEBAR_MAX_WIDTH"
+            @start="startSidebarResize" @resize="resizeSidebar" @end="uiStore.sidebarResizing = false" />
 
         <!-- 上半部分：新对话吸顶 + 知识库/智能体/共享空间/历史会话随滚动一起滚走 -->
         <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
@@ -206,6 +208,8 @@ import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
 import SessionSidebarRow from './SessionSidebarRow.vue';
+import PanelResizeHandle from './PanelResizeHandle.vue';
+import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '@/utils/sidebarWidth';
 import {
     clearSession,
     removeSession,
@@ -650,20 +654,20 @@ const buildSessionMenuOptions = (item: any) => {
         options.push({
             content: t('menu.unpin'),
             value: 'unpin',
-            prefixIcon: () => h(TIcon, { name: 'pin-filled', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin-filled' }),
         });
     } else {
         options.push({
             content: t('menu.pin'),
             value: 'pin',
-            prefixIcon: () => h(TIcon, { name: 'pin', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin' }),
         });
     }
     options.push(
-        { content: t('menu.renameSession'), value: 'rename', prefixIcon: () => h(TIcon, { name: 'edit-1', size: '16px' }) },
-        { content: t('menu.clearMessages'), value: 'clearMessages', prefixIcon: () => h(TIcon, { name: 'clear', size: '16px' }) },
-        { content: t('menu.batchManage'), value: 'batchManage', prefixIcon: () => h(TIcon, { name: 'queue', size: '16px' }) },
-        { content: t('upload.deleteRecord'), value: 'delete', theme: 'error', prefixIcon: () => h(TIcon, { name: 'delete', size: '16px' }) },
+        { content: t('menu.renameSession'), value: 'rename', prefixIcon: () => h(TIcon, { name: 'edit-1' }) },
+        { content: t('menu.clearMessages'), value: 'clearMessages', prefixIcon: () => h(TIcon, { name: 'clear' }) },
+        { content: t('menu.batchManage'), value: 'batchManage', prefixIcon: () => h(TIcon, { name: 'queue' }) },
+        { content: t('upload.deleteRecord'), value: 'delete', theme: 'error', prefixIcon: () => h(TIcon, { name: 'delete' }) },
     );
     return options;
 };
@@ -1193,24 +1197,19 @@ const mouseenteMenu = (path: string) => {
 const mouseleaveMenu = (path: string) => {
 }
 
-const onDragHandleMouseDown = (e: MouseEvent) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const expandThreshold = 40
-
-    const onMouseMove = (ev: MouseEvent) => {
-        if (ev.clientX - startX > expandThreshold) {
-            uiStore.expandSidebar()
-            cleanup()
-        }
+let sidebarResizeStartWidth = 0
+const startSidebarResize = () => {
+    sidebarResizeStartWidth = uiStore.sidebarDisplayWidth
+    uiStore.sidebarResizing = true
+}
+const resizeSidebar = (delta: number, keyboard: boolean) => {
+    if (keyboard && uiStore.sidebarCollapsed && delta > 0) {
+        uiStore.expandSidebar()
+    } else if (keyboard && uiStore.sidebarWidth === SIDEBAR_MIN_WIDTH && delta < 0) {
+        uiStore.collapseSidebar()
+    } else {
+        uiStore.resizeSidebar(sidebarResizeStartWidth + delta)
     }
-    const onMouseUp = () => cleanup()
-    const cleanup = () => {
-        document.removeEventListener('mousemove', onMouseMove)
-        document.removeEventListener('mouseup', onMouseUp)
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
 }
 
 
@@ -1224,8 +1223,9 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     --sidebar-icon-gap: 8px;
     --sidebar-text-inset: calc(var(--sidebar-inset-x) + var(--sidebar-icon-size) + var(--sidebar-icon-gap)); // 40px
 
-    min-width: 260px;
-    width: 260px;
+    min-width: 0;
+    width: var(--sidebar-width, 260px);
+    flex-shrink: 0;
     padding: 8px 6px 6px;
     background: var(--td-bg-color-sidebar);
     box-sizing: border-box;
@@ -1234,7 +1234,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
        scaled, so at "large" the sidebar would extend past the window. The
        ancestor chain (html/body/#app/.main) is already height: 100%. */
     height: 100%;
-    overflow: hidden;
+    overflow: visible;
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--td-component-stroke);
@@ -1245,6 +1245,10 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     // macOS Wails 桌面：红绿灯位于 HiddenInset 标题栏区域，需让出顶部空间
     html.wails-desktop & {
         padding-top: 30px;
+    }
+
+    &--resizing {
+        transition: none;
     }
 
     &--collapsed {
@@ -1302,20 +1306,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         &:hover {
             background: var(--td-bg-color-container-hover);
             color: var(--td-text-color-primary);
-        }
-    }
-
-    .sidebar-drag-handle {
-        position: absolute;
-        top: 0;
-        right: -3px;
-        width: 6px;
-        height: 100%;
-        cursor: ew-resize;
-        z-index: 10;
-
-        &:hover {
-            background: var(--td-brand-color-light);
         }
     }
 
@@ -1503,14 +1493,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         flex-shrink: 0;
     }
 
-    :deep(.submenu_fork_icon) {
-        color: inherit;
-        font-size: var(--app-text-sm);
-        margin-right: 4px;
-        vertical-align: middle;
-        flex-shrink: 0;
-    }
-
     .submenu_source_icon {
         width: 14px;
         height: 14px;
@@ -1623,6 +1605,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
         &.session-chat-row .session-list-row {
             min-height: 30px;
+            padding-right: 6px;
             border-radius: var(--app-radius-sm);
             transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
         }
@@ -1638,9 +1621,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
                 color: var(--td-text-color-primary);
             }
 
-            :deep(.menu-more-wrap) {
-                opacity: 1;
-            }
         }
 
         &.session-chat-row--active .session-list-row {
@@ -1652,10 +1632,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
             :deep(.menu-more) {
                 color: var(--td-text-color-primary);
-            }
-
-            :deep(.menu-more-wrap) {
-                opacity: 1;
             }
         }
 
@@ -1702,7 +1678,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         }
 
         .menu-more-wrap {
-            opacity: 0;
             transition: opacity var(--app-motion-base) ease;
             flex-shrink: 0;
         }

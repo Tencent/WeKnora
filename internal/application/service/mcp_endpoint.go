@@ -124,6 +124,9 @@ func (s *mcpEndpointService) Create(
 		DefaultAgentID:     agentID,
 		RateLimitPerMinute: rate,
 	}
+	if err := requireKeyCoversEndpoint(ctx, row); err != nil {
+		return nil, "", err
+	}
 	if err := s.repo.Create(ctx, row); err != nil {
 		return nil, "", err
 	}
@@ -189,6 +192,9 @@ func (s *mcpEndpointService) Update(
 		}
 		ep.RateLimitPerMinute = rate
 	}
+	if err := requireKeyCoversEndpoint(ctx, ep); err != nil {
+		return nil, err
+	}
 	if err := s.repo.Update(ctx, ep); err != nil {
 		return nil, err
 	}
@@ -209,6 +215,9 @@ func (s *mcpEndpointService) RotateToken(
 	if err != nil {
 		return nil, "", err
 	}
+	if err := requireKeyCoversEndpoint(ctx, ep); err != nil {
+		return nil, "", err
+	}
 	token, err := generateMCPEndpointToken()
 	if err != nil {
 		return nil, "", err
@@ -219,6 +228,40 @@ func (s *mcpEndpointService) RotateToken(
 		return nil, "", err
 	}
 	return ep, token, nil
+}
+
+// requireKeyCoversEndpoint keeps a scoped API key from minting an endpoint
+// token with more authority than the key holds. The token is a new credential
+// whose scope comes from the endpoint, so the endpoint's KBs must lie inside
+// the key's allow-list (an empty list means the whole workspace) and its tools
+// may need only capabilities the key has. Rotating counts too: it hands out
+// the existing endpoint's authority.
+func requireKeyCoversEndpoint(ctx context.Context, ep *types.MCPEndpoint) error {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || scope.FullAccess {
+		return nil
+	}
+	if len(scope.KnowledgeBaseIDs) > 0 {
+		if len(ep.KnowledgeBaseIDs) == 0 {
+			return apperrors.NewForbiddenError("this API key may only create endpoints limited to its knowledge bases")
+		}
+		allowed := make(map[string]bool, len(scope.KnowledgeBaseIDs))
+		for _, id := range scope.KnowledgeBaseIDs {
+			allowed[id] = true
+		}
+		for _, id := range ep.KnowledgeBaseIDs {
+			if !allowed[id] {
+				return apperrors.NewForbiddenError("knowledge base is outside this API key's scope: " + id)
+			}
+		}
+	}
+	for _, capability := range types.MCPEndpointCapabilitiesForTools(ep.Tools) {
+		if !scope.HasCapability(types.APIKeyCapability(capability)) {
+			return apperrors.NewForbiddenError(
+				"this API key lacks the " + capability + " capability the endpoint's tools need")
+		}
+	}
+	return nil
 }
 
 func (s *mcpEndpointService) Authenticate(

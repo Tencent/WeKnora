@@ -46,8 +46,8 @@ done
 cp "$build_dir/source/apps/extension/dist/browser-skillextension-${extension_version}-chrome.zip" "$output_dir/browser-skill-weknora-${extension_version}.zip"
 cp "$build_dir/source/LICENSE" "$output_dir/BrowserSkill-LICENSE"
 
-# Build the daemon from the same source: CLI 0.2.1 releases do not support
-# scroll_to, wheel, focus, or blur even though newer extension sources do.
+# Build the daemon from the same source and apply our navigation-response
+# deadline fix; published CLI binaries do not include this downstream patch.
 cargo_target_dir="${CARGO_TARGET_DIR:-$build_dir/target}"
 mkdir -p "$cargo_target_dir"
 cargo_target_dir="$(cd "$cargo_target_dir" && pwd)"

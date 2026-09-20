@@ -110,23 +110,24 @@ const handleSelect = (id: string): void => {
   gap: 8px;
   padding: 6px 10px;
   border: none;
-  border-radius: var(--app-radius-sm);
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-primary);
-  font-size: var(--app-text-md);
-  line-height: 1.4;
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
+  font-weight: 400;
+  line-height: 20px;
   cursor: pointer;
   transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   text-align: left;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer);
+    background: var(--td-bg-color-container-hover);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
+    background: var(--app-selection-bg);
     color: var(--td-brand-color);
-    font-weight: 500;
   }
 }
 

@@ -50,5 +50,5 @@ test('folder navigation cancels stale card hover popovers', () => {
   assert.match(cardView, /if \(!cardElement\.isConnected/)
   assert.match(cardView, /watch\(\(\) => props\.items, dismissCardPopover\)/)
   assert.match(cardView, /const onOpenFolder = \(path: string\)[\s\S]*?dismissCardPopover\(\)[\s\S]*?emit\('open-folder', path\)/)
-  assert.match(cardView, /@click="onOpenFolder\(folder\.path\)"/)
+  assert.match(cardView, /@click\.stop="onOpenFolder\(item\.folder_path\)"/)
 })

@@ -119,7 +119,7 @@ curl $BASE/api/v1/organizations/org-1 -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/organizations/:id
 
-用途：更新组织（服务层校验调用者空间为组织 owner）。权限：Admin+。请求体字段同创建（均可选）。
+用途：更新组织（服务层校验调用者空间是组织 admin，不限于 owner）。权限：Admin+。请求体字段同创建（均可选）。
 
 响应：200 `{"success":true,"data":{OrganizationResponse}}`
 
@@ -140,7 +140,7 @@ curl -X DELETE $BASE/api/v1/organizations/org-1 -H "Authorization: Bearer $TOKEN
 
 ### POST /api/v1/organizations/:id/leave
 
-用途：本空间退出组织。权限：Admin+。无请求体。
+用途：本空间退出组织。权限：Admin+。无请求体。本空间分享进该组织的知识库和 Agent 会被一并撤销。
 
 响应：200 `{"success":true,"message":"Left organization successfully"}`
 
@@ -205,7 +205,7 @@ curl "$BASE/api/v1/organizations/org-1/search-users?q=demo" -H "Authorization: B
 | --- | --- | --- | --- |
 | `tenant_id` | uint64 | 二选一 | 目标空间 ID（推荐） |
 | `user_id` | string | 二选一 | 兼容路径：用户 ID（解析为其空间） |
-| `representative_user_id` | string | 否 | 该空间的代表用户 |
+| `representative_user_id` | string | 否 | 已忽略，仅为兼容保留：直接添加的空间不挂代表用户，避免邀请方指定对方空间里哪位用户的信息出现在成员列表中 |
 | `role` | string | 是 | 组织内角色 |
 
 响应：200 `{"success":true,"message":"Member added successfully"}`
@@ -217,7 +217,7 @@ curl -X POST $BASE/api/v1/organizations/org-1/invite -H "Authorization: Bearer $
 
 ### GET /api/v1/organizations/:id/members
 
-用途：组织成员（空间）列表。权限：Viewer+。
+用途：组织成员（空间）列表。权限：Viewer+。`email` 只对调用方自己空间那一行返回，其他空间只返回用户名和头像。
 
 响应：200 `{"success":true,"data":{"members":[{id,user_id,representative_user_id,role,tenant_id,tenant_name,username,email,avatar,joined_at}],"total":N}}`
 
@@ -238,7 +238,7 @@ curl -X PUT $BASE/api/v1/organizations/org-1/members/2 -H "Authorization: Bearer
 
 ### DELETE /api/v1/organizations/:id/members/:tenant_id
 
-用途：移除成员空间（含自移除）。权限：Admin+。
+用途：移除成员空间（含自移除）。权限：Admin+。被移除空间分享进该组织的知识库和 Agent 会被一并撤销。
 
 响应：200 `{"success":true,"message":"Member removed successfully"}`
 
@@ -347,6 +347,14 @@ curl $BASE/api/v1/knowledge-bases/kb-1/shares -H "Authorization: Bearer $TOKEN"
 
 用途：修改分享权限。权限：KB 创建者 OR Admin+。请求体：`{"permission":"editor"}`（必填）。
 
+服务层规则（与取消分享共用）：
+
+- 原分享人需在 KB 所属空间内操作，且空间角色为 Contributor+；
+- KB 所属空间的 Admin+ 可以管理本空间的全部分享；
+- 目标组织中角色为 admin 的空间，其 Admin+ 用户只能**降低**权限或取消分享，不能把权限提升到超过当前值。
+
+`share_id` 必须属于路径中的 KB，否则 404。
+
 响应：200 `{"success":true,"message":"Share permission updated successfully"}`
 
 ```bash
@@ -356,7 +364,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/shares/s-1 -H "Authorization: Bear
 
 ### DELETE /api/v1/knowledge-bases/:id/shares/:share_id
 
-用途：取消分享。权限：KB 创建者 OR Admin+。
+用途：取消分享。权限：KB 创建者 OR Admin+，服务层规则同上。`share_id` 必须属于路径中的 KB，否则 404。
 
 响应：200 `{"success":true,"message":"Share removed successfully"}`
 
@@ -370,7 +378,7 @@ API key：仅 full-access。Handler: `internal/handler/organization.go`
 
 ### POST /api/v1/agents/:id/shares
 
-用途：把 Agent 分享到组织。权限：Agent 创建者 OR Admin+。请求体同 KB 分享（`organization_id` + `permission`，必填）。
+用途：把 Agent 分享到组织。权限：Agent 创建者 OR Admin+。请求体同 KB 分享（`organization_id` + `permission`，必填）。内置智能体不能分享（400）：每个空间都有同 ID 的内置智能体，分享后接收方无法区分。Agent 的知识库范围会开放给组织成员，因此调用者必须有权直接分享其中每个知识库（知识库创建者或 Admin+），`kb_selection_mode: all` 只有 Admin+ 可以分享，否则 403。
 
 响应：201 `{"success":true,"data":{AgentShare}}`
 
@@ -391,7 +399,7 @@ curl $BASE/api/v1/agents/agent-1/shares -H "Authorization: Bearer $TOKEN"
 
 ### DELETE /api/v1/agents/:id/shares/:share_id
 
-用途：取消 Agent 分享。权限：Agent 创建者 OR Admin+。
+用途：取消 Agent 分享。权限：Agent 创建者 OR Admin+，服务层规则同 KB 取消分享。`share_id` 必须属于路径中的 Agent，否则 404。
 
 响应：200 `{"success":true,"message":"Share removed successfully"}`
 

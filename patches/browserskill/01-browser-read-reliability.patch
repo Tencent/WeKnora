@@ -1,8 +1,8 @@
 diff --git a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-index c901e49..2368337 100644
+index 8f99c94..16f7499 100644
 --- a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
 +++ b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-@@ -30,6 +30,103 @@ function fakeApi() {
+@@ -30,6 +30,77 @@ function fakeApi() {
  }
  
  describe("ChromiumCdp", () => {
@@ -77,36 +77,10 @@ index c901e49..2368337 100644
 +    }
 +  });
 +
-+  it("emulates activity only for owned task tabs and reapplies after detach", async () => {
-+    const { api, onDetach } = fakeApi();
-+    const owned = new Set([4]);
-+    const cdp = new ChromiumCdp(api, { shouldKeepTaskActive: (id) => owned.has(id) });
-+    await Promise.all([cdp.ensureAttached(4), cdp.ensureAttached(4)]);
-+    await cdp.ensureAttached(5);
-+    const focusCalls = () =>
-+      vi
-+        .mocked(api.sendCommand)
-+        .mock.calls.filter((call) => call[1] === "Emulation.setFocusEmulationEnabled");
-+    expect(focusCalls()).toEqual([
-+      [{ tabId: 4 }, "Emulation.setFocusEmulationEnabled", { enabled: true }],
-+    ]);
-+    // A previously observed user tab becomes eligible only once explicitly borrowed.
-+    owned.add(5);
-+    await cdp.send(5, "Page.getLayoutMetrics");
-+    expect(focusCalls()).toHaveLength(2);
-+    onDetach.fire({ tabId: 4 }, "canceled_by_user");
-+    await cdp.ensureAttached(4);
-+    expect(focusCalls()).toHaveLength(3);
-+    await cdp.detach(4);
-+    await cdp.ensureAttached(4);
-+    expect(focusCalls()).toHaveLength(4);
-+    cdp.dispose();
-+  });
-+
    it("changes attachment identity only across real debugger attachments", async () => {
      const { api, onEvent, onDetach } = fakeApi();
      const cdp = new ChromiumCdp(api);
-@@ -430,6 +527,7 @@ describe("ChromiumCdp", () => {
+@@ -430,6 +501,7 @@ describe("ChromiumCdp", () => {
      expect(api.sendCommand).toHaveBeenCalledWith({ tabId: 3 }, "Page.handleJavaScriptDialog", {
        accept: true,
      });
@@ -114,7 +88,7 @@ index c901e49..2368337 100644
      const dialogs = cdp.dialogsSince(3, cursor);
      expect(dialogs).toHaveLength(1);
      expect(dialogs[0]).toMatchObject({
-@@ -479,7 +577,7 @@ describe("ChromiumCdp", () => {
+@@ -479,7 +551,7 @@ describe("ChromiumCdp", () => {
        url: "https://example.com/",
      });
      await Promise.resolve();
@@ -207,10 +181,10 @@ index 0000000..7c1dd61
 +});
 diff --git a/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts b/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts
 new file mode 100644
-index 0000000..deed38f
+index 0000000..fe79f2a
 --- /dev/null
 +++ b/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,96 @@
 +// @vitest-environment node
 +import { describe, expect, it } from "vitest";
 +import { captureVomObservation } from "@/tools/observation";
@@ -257,6 +231,8 @@ index 0000000..deed38f
 +              session,
 +            )
 +          ).result.value;
++        // A newly created target may still expose the initial complete about:blank.
++        await expect.poll(() => evaluate("document.title")).toBe("Background task");
 +        await expect.poll(() => evaluate("document.readyState")).toBe("complete");
 +        expect(
 +          await evaluate(
@@ -278,9 +254,9 @@ index 0000000..deed38f
 +          onEvent: event,
 +          onDetach: event,
 +        } as unknown as CdpDebuggerApi;
-+        const cdp = new ChromiumCdp(api, { shouldKeepTaskActive: () => true });
++        const cdp = new ChromiumCdp(api);
 +        try {
-+          await cdp.ensureAttached(4);
++          await cdp.acquireBackgroundExecution("task", 4);
 +          expect(
 +            await evaluate(
 +              'new Promise(resolve=>requestAnimationFrame(()=>resolve(document.querySelector("p").textContent)))',
@@ -295,7 +271,7 @@ index 0000000..deed38f
 +          });
 +          expect(image.data.length).toBeGreaterThan(100);
 +          expect(await evaluate("document.visibilityState", foregroundSession)).toBe("visible");
-+          await cdp.detach(4);
++          await cdp.releaseSessionTab("task", 4);
 +          sessionId = (await send("Target.attachToTarget", { targetId, flatten: true })).sessionId;
 +          expect(await evaluate("document.visibilityState")).toBe("hidden");
 +        } finally {
@@ -306,18 +282,18 @@ index 0000000..deed38f
 +  }, 20_000);
 +});
 diff --git a/apps/extension/src/browser-driver/chromium-cdp.ts b/apps/extension/src/browser-driver/chromium-cdp.ts
-index d40325c..720f87a 100644
+index 2779da7..eebb362 100644
 --- a/apps/extension/src/browser-driver/chromium-cdp.ts
 +++ b/apps/extension/src/browser-driver/chromium-cdp.ts
-@@ -31,6 +31,7 @@ import type {
-   NetworkEntryKind,
+@@ -32,6 +32,7 @@ import type {
    NetworkResult,
  } from "@/transport/types";
+ import { BackgroundExecution } from "./background-execution";
 +import { runCdpCommand } from "./command-deadline";
  import {
    buildFrameGraph,
    type CdpFrameGraph,
-@@ -140,6 +141,7 @@ interface FrameDiscoveryState {
+@@ -141,6 +142,7 @@ interface FrameDiscoveryState {
    sessions: Set<string>;
    pending: Set<Promise<void>>;
    generation: number;
@@ -325,104 +301,41 @@ index d40325c..720f87a 100644
  }
  
  async function settleBeforeDeadline(promises: Promise<void>[], deadline: number): Promise<boolean> {
-@@ -164,6 +166,8 @@ async function settleBeforeDeadline(promises: Promise<void>[], deadline: number)
+@@ -165,13 +167,14 @@ async function settleBeforeDeadline(promises: Promise<void>[], deadline: number)
  export class ChromiumCdp {
    private readonly api: CdpDebuggerApi;
    private readonly attachedTabs = new Set<number>();
 +  private readonly pendingScreenshots = new Map<number, Promise<unknown>>();
-+  private readonly taskFocus = new Map<number, Promise<void>>();
    private readonly attachmentIds = new Map<number, string>();
    private readonly attachInFlight = new Map<number, Promise<void>>();
    private readonly detachInFlight = new Map<number, Promise<void>>();
-@@ -191,6 +195,8 @@ export class ChromiumCdp {
-       shouldAutoAcceptDialog?: (tabId: number) => boolean | Promise<boolean>;
-       /** Invalidate tab refs when the root document or debugger attachment changes. */
-       onDocumentChanged?: (tabId: number) => void;
-+      /** Only explicitly controlled task tabs may emulate foreground page activity. */
-+      shouldKeepTaskActive?: (tabId: number) => boolean;
-     } = {},
-   ) {
-     this.api = api;
-@@ -212,7 +218,10 @@ export class ChromiumCdp {
-     // New observers must wait before opening the next connection to that tab.
-     const detaching = this.detachInFlight.get(tabId);
-     if (detaching) await detaching;
--    if (this.attachedTabs.has(tabId)) return;
-+    if (this.attachedTabs.has(tabId)) {
-+      await this.keepTaskActive(tabId);
-+      return;
-+    }
-     const existing = this.attachInFlight.get(tabId);
-     if (existing) {
-       await existing;
-@@ -221,6 +230,7 @@ export class ChromiumCdp {
-     const attach = (async () => {
-       await this.api.attach({ tabId }, CDP_PROTOCOL_VERSION);
-       try {
-+        await this.keepTaskActive(tabId);
-         await this.enablePageDomain(tabId);
-         await this.enableConsoleDomains(tabId);
-         await this.enableNetworkDomainBestEffort(tabId);
-@@ -242,6 +252,7 @@ export class ChromiumCdp {
-         await this.api.detach({ tabId }).catch((detachErr) => {
-           console.debug("[bsk cdp] rollback detach failed", { tabId, detachErr });
-         });
-+        this.taskFocus.delete(tabId);
-         throw err;
-       }
-     })()
-@@ -263,11 +274,16 @@ export class ChromiumCdp {
-    * `chrome.runtime.lastError`.
-    */
+   private readonly backgroundExecution = new BackgroundExecution(
+     (tabId) => this.attachmentIds.get(tabId),
+     (tabId, enabled) =>
+-      this.api.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled }),
++      this.command({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled }),
+   );
+   private readonly tabOwners = new Map<number, Set<string>>();
+   private readonly dialogBuffers = new Map<number, JavaScriptDialogInfo[]>();
+@@ -295,7 +298,7 @@ export class ChromiumCdp {
    async send<T = unknown>(tabId: number, method: string, params?: object): Promise<T> {
--    if (!this.attachedTabs.has(tabId)) {
--      await this.ensureAttached(tabId);
--    }
-+    await this.ensureAttached(tabId);
+     await this.ensureAttached(tabId);
      try {
 -      const result = await this.api.sendCommand({ tabId }, method, params ?? {});
 +      const result = await this.command({ tabId }, method, params ?? {});
-+      // Upstream input readiness temporarily restores focus emulation. Reapply
-+      // the task policy on the next command instead of trusting a stale cache.
-+      if (
-+        method === "Emulation.setFocusEmulationEnabled" &&
-+        (params as { enabled?: boolean } | undefined)?.enabled === false
-+      )
-+        this.taskFocus.delete(tabId);
        return result as T;
      } catch (err) {
        throw normalizeError(err);
-@@ -275,11 +291,9 @@ export class ChromiumCdp {
-   }
- 
+@@ -305,7 +308,7 @@ export class ChromiumCdp {
    async sendToTarget<T = unknown>(target: CdpTarget, method: string, params?: object): Promise<T> {
--    if (!this.attachedTabs.has(target.tabId)) {
--      await this.ensureAttached(target.tabId);
--    }
-+    await this.ensureAttached(target.tabId);
+     await this.ensureAttached(target.tabId);
      try {
 -      return (await this.api.sendCommand(target, method, params ?? {})) as T;
 +      return (await this.command(target, method, params ?? {})) as T;
      } catch (err) {
        throw normalizeError(err);
      }
-@@ -455,6 +469,7 @@ export class ChromiumCdp {
-     this.attachedTabs.delete(tabId);
-     this.attachmentIds.delete(tabId);
-     this.options.onDocumentChanged?.(tabId);
-+    this.taskFocus.delete(tabId);
-     this.clearDialogState(tabId);
-     this.clearConsoleState(tabId);
-     this.clearNetworkState(tabId);
-@@ -515,6 +530,7 @@ export class ChromiumCdp {
-     this.attachedTabs.clear();
-     this.attachmentIds.clear();
-     for (const tabId of tabs) this.options.onDocumentChanged?.(tabId);
-+    this.taskFocus.clear();
-     this.dialogBuffers.clear();
-     this.dialogSequences.clear();
-     this.consoleBuffers.clear();
-@@ -525,6 +541,7 @@ export class ChromiumCdp {
+@@ -563,6 +566,7 @@ export class ChromiumCdp {
      this.networkDomainsEnabledTabs.clear();
      this.networkRequestMeta.clear();
      this.frameDiscovery.clear();
@@ -430,7 +343,7 @@ index d40325c..720f87a 100644
      await Promise.all(
        tabs.map(async (tabId) => {
          try {
-@@ -536,8 +553,48 @@ export class ChromiumCdp {
+@@ -574,8 +578,31 @@ export class ChromiumCdp {
      );
    }
  
@@ -457,30 +370,13 @@ index d40325c..720f87a 100644
 +    });
 +  }
 +
-+  private async keepTaskActive(tabId: number): Promise<void> {
-+    if (!this.options.shouldKeepTaskActive?.(tabId)) return;
-+    let work = this.taskFocus.get(tabId);
-+    if (!work) {
-+      // Emulate page visibility/focus without activating a Chrome tab or window.
-+      // Chrome resets this per-debugger override when we detach at turn end.
-+      work = this.command({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: true })
-+        .then(() => {})
-+        .catch((error) => {
-+          this.taskFocus.delete(tabId);
-+          throw error;
-+        });
-+      this.taskFocus.set(tabId, work);
-+    }
-+    await work;
-+  }
-+
    private async enablePageDomain(tabId: number): Promise<void> {
 -    await this.api.sendCommand({ tabId }, "Page.enable", {});
 +    await this.command({ tabId }, "Page.enable", {});
    }
  
    private async enableConsoleDomains(tabId: number): Promise<void> {
-@@ -550,7 +607,7 @@ export class ChromiumCdp {
+@@ -588,7 +615,7 @@ export class ChromiumCdp {
      let failed = false;
      for (const method of ["Runtime.enable", "Log.enable"]) {
        try {
@@ -489,7 +385,7 @@ index d40325c..720f87a 100644
        } catch (err) {
          failed = true;
          console.debug("[bsk cdp] console domain enable failed", { tabId, method, err });
-@@ -563,7 +620,7 @@ export class ChromiumCdp {
+@@ -601,7 +628,7 @@ export class ChromiumCdp {
  
    private async enableNetworkDomain(tabId: number): Promise<void> {
      if (this.networkDomainsEnabledTabs.has(tabId)) return;
@@ -498,7 +394,7 @@ index d40325c..720f87a 100644
      this.networkDomainsEnabledTabs.add(tabId);
    }
  
-@@ -575,13 +632,27 @@ export class ChromiumCdp {
+@@ -613,13 +640,27 @@ export class ChromiumCdp {
      }
    }
  
@@ -529,7 +425,7 @@ index d40325c..720f87a 100644
    }
  
    private bindFrameTargetHandler(): void {
-@@ -608,6 +679,7 @@ export class ChromiumCdp {
+@@ -646,6 +687,7 @@ export class ChromiumCdp {
  
        if (method === "Target.detachedFromTarget") {
          const state = this.frameDiscovery.get(tabId);
@@ -537,7 +433,7 @@ index d40325c..720f87a 100644
          if (state?.sessions.delete(sessionId)) state.generation += 1;
          return;
        }
-@@ -674,6 +746,7 @@ export class ChromiumCdp {
+@@ -712,6 +754,7 @@ export class ChromiumCdp {
        sessions: new Set(),
        pending: new Set(),
        generation: 0,
@@ -545,7 +441,7 @@ index d40325c..720f87a 100644
      };
      this.frameDiscovery.set(tabId, created);
      return created;
-@@ -681,6 +754,7 @@ export class ChromiumCdp {
+@@ -719,6 +762,7 @@ export class ChromiumCdp {
  
    private clearFrameState(tabId: number): void {
      this.frameDiscovery.delete(tabId);
@@ -553,7 +449,7 @@ index d40325c..720f87a 100644
    }
  
    private bindDialogHandler(): void {
-@@ -713,7 +787,7 @@ export class ChromiumCdp {
+@@ -751,7 +795,7 @@ export class ChromiumCdp {
        if (parsed.type === "prompt") {
          handleParams.promptText = parsed.defaultPrompt ?? "";
        }
@@ -562,14 +458,6 @@ index d40325c..720f87a 100644
        if (!this.attachedTabs.has(tabId) && !this.attachInFlight.has(tabId)) return;
        const sequence = (this.dialogSequences.get(tabId) ?? 0) + 1;
        this.dialogSequences.set(tabId, sequence);
-@@ -876,6 +950,7 @@ export class ChromiumCdp {
-         this.options.onDocumentChanged?.(source.tabId);
-         this.attachedTabs.delete(source.tabId);
-         this.attachmentIds.delete(source.tabId);
-+        this.taskFocus.delete(source.tabId);
-         this.attachInFlight.delete(source.tabId);
-         this.tabOwners.delete(source.tabId);
-         this.clearDialogState(source.tabId);
 diff --git a/apps/extension/src/browser-driver/command-deadline.ts b/apps/extension/src/browser-driver/command-deadline.ts
 new file mode 100644
 index 0000000..540d804

@@ -186,7 +186,8 @@ migration `000061_wiki_page_hierarchy.up.sql` 引入独立的 `wiki_folders` 表
 配套机制：
 
 - **Wiki Scope**：Agent 会话内维护 wiki KB 白名单，支持通过 `@mention` 把范围收窄到特定文档/标签，工具执行时自动过滤 `source_refs`（`internal/agent/tools/wiki_tools.go`）；
-- **Wiki Fixer**：内置 Agent（`types.BuiltinWikiFixerID`），负责自动修复 wiki 问题（死链、实体混淆等）。跨租户访问共享 KB 时要求租户角色 ≥ Editor，并自动提升到源租户上下文（`internal/handler/session/wiki_fixer_scope.go`）；
+- **写权限**：检索范围只需要读权限，而改写类工具（`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_flag_issue`、`wiki_update_issue`）只作用于调用方可编辑的知识库，即本空间的知识库，或通过组织分享获得 editor 及以上权限的知识库。调用方本身还要有写权限：空间角色 Contributor 及以上，受限 API key 需要 `ingest` 能力。以 Viewer 身份运行的 IM、网页嵌入和 MCP 端点因此只读。范围内没有可编辑的 wiki 知识库时，这些工具不会注册。共享智能体始终只读；
+- **Wiki Fixer**：内置 Agent（`types.BuiltinWikiFixerID`），负责自动修复 wiki 问题（死链、实体混淆等）。跨租户访问共享 KB 时要求租户角色 ≥ Editor，并自动提升到源租户上下文（`internal/handler/session/wiki_fixer_scope.go`）。提升后使用内置默认配置，只针对这一个 KB，不启用 MCP、技能、沙箱和联网搜索，模型回退到该 KB 自己的模型，调用方对 fixer 的自定义配置不会带进源空间；
 - **问题闭环**：`wiki_page_issues` 表 + lint 接口 + `auto-fix`，人和 Agent 都可以报告/处理问题。
 
 ### 生成流程

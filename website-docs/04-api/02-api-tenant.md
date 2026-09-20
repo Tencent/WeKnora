@@ -374,7 +374,7 @@ curl "$BASE/api/v1/tenants/1/audit-log?limit=50" -H "Authorization: Bearer $TOKE
 
 用途：单个 KB 的活动流（只读审计）。权限：KB 创建者 OR Admin+，且对 KB 有 read 权限；仅 JWT。查询参数同上（`after_id/limit/action/outcome/actor`）。注册于 `RegisterKnowledgeBaseActivityRoutes`。
 
-响应：200 `{"success":true,"data":[AuditLog],"next_cursor":N}`
+响应：200 `{"success":true,"data":[AuditLog],"next_cursor":N}`。`details` 为动作负载；若该条由 API Key 触发，会包含 `api_key_id` 与 `api_key_name`（名称快照，不含明文 Key）。
 
 ```bash
 curl $BASE/api/v1/knowledge-bases/kb-1/activity -H "Authorization: Bearer $TOKEN"

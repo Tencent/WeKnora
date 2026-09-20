@@ -8,12 +8,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
 	ErrOrganizationNotFound   = errors.New("organization not found")
 	ErrOrgMemberNotFound      = errors.New("organization member not found")
 	ErrOrgMemberAlreadyExists = errors.New("member already exists in organization")
+	ErrOrgMemberLimitReached  = errors.New("organization member limit reached")
 	ErrInviteCodeNotFound     = errors.New("invite code not found")
 	ErrInviteCodeExpired      = errors.New("invite code has expired")
 )
@@ -115,18 +117,45 @@ func (r *organizationRepository) Delete(ctx context.Context, id string) error {
 // AddTenantMember inserts a new (org, tenant) membership row. Returns
 // ErrOrgMemberAlreadyExists if a row already exists for this tuple — the
 // service layer treats that as a no-op when the caller is just confirming
-// an idempotent join.
-func (r *organizationRepository) AddTenantMember(ctx context.Context, member *types.OrganizationTenantMember) error {
-	var count int64
-	r.db.WithContext(ctx).Model(&types.OrganizationTenantMember{}).
-		Where("organization_id = ? AND tenant_id = ?", member.OrganizationID, member.TenantID).
-		Count(&count)
-
-	if count > 0 {
-		return ErrOrgMemberAlreadyExists
-	}
-
-	return r.db.WithContext(ctx).Create(member).Error
+// an idempotent join — and ErrOrgMemberLimitReached when a positive
+// memberLimit is already reached.
+func (r *organizationRepository) AddTenantMember(
+	ctx context.Context, member *types.OrganizationTenantMember, memberLimit int,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// A positive limit is checked in the same transaction as the insert,
+		// with the organization row locked, so concurrent joins cannot all
+		// pass the count. SQLite has no row locks; it serializes writers,
+		// and a stale read fails to upgrade to a write instead.
+		if memberLimit > 0 && tx.Name() != "sqlite" {
+			var org types.Organization
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
+				Where("id = ?", member.OrganizationID).First(&org).Error; err != nil {
+				return err
+			}
+		}
+		var existing int64
+		if err := tx.Model(&types.OrganizationTenantMember{}).
+			Where("organization_id = ? AND tenant_id = ?", member.OrganizationID, member.TenantID).
+			Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			return ErrOrgMemberAlreadyExists
+		}
+		if memberLimit > 0 {
+			var count int64
+			if err := tx.Model(&types.OrganizationTenantMember{}).
+				Where("organization_id = ?", member.OrganizationID).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count >= int64(memberLimit) {
+				return ErrOrgMemberLimitReached
+			}
+		}
+		return tx.Create(member).Error
+	})
 }
 
 // RemoveTenantMember removes the (org, tenant) membership row.

@@ -30,6 +30,20 @@
           <t-icon name="download" size="16px" />
         </template>
       </t-button>
+      <t-button
+        class="artifact-download artifact-delete"
+        variant="text"
+        shape="square"
+        size="small"
+        :title="$t('agent.artifactDrawer.delete')"
+        :aria-label="$t('agent.artifactDrawer.delete')"
+        :loading="isDeleting(previewItem)"
+        @click="handleDelete(previewItem)"
+      >
+        <template #icon>
+          <t-icon name="delete" size="16px" />
+        </template>
+      </t-button>
       <div ref="previewActions" class="artifact-preview-actions" />
     </div>
 
@@ -123,6 +137,20 @@
               <t-icon name="download" size="16px" />
             </template>
           </t-button>
+          <t-button
+            class="artifact-download artifact-delete"
+            variant="text"
+            shape="square"
+            size="small"
+            :title="$t('agent.artifactDrawer.delete')"
+            :aria-label="$t('agent.artifactDrawer.delete')"
+            :loading="isDeleting(item)"
+            @click.stop="handleDelete(item)"
+          >
+            <template #icon>
+              <t-icon name="delete" size="16px" />
+            </template>
+          </t-button>
         </li>
       </ul>
     </template>
@@ -133,7 +161,7 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { downloadArtifact } from '@/api/chat'
+import { deleteMessageArtifact, downloadArtifact } from '@/api/chat'
 import { resolveFilePreviewExt } from '@/utils/filePreview'
 import {
   formatArtifactDateTime,
@@ -141,6 +169,7 @@ import {
   type SessionArtifactItem,
 } from '@/utils/sessionArtifacts'
 import { useChatSandboxPanel, type ArtifactPanelFocusState } from '@/composables/useChatSandboxPanel'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from './ArtifactFileIcon.vue'
 
@@ -157,12 +186,18 @@ const props = withDefaults(
   },
 )
 
+// The list is a computed over the loaded history, so the panel reports the
+// delete upward instead of mutating its own prop.
+const emit = defineEmits<{ (e: 'deleted', payload: { messageId: string; index: number }): void }>()
+
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
+const confirmDelete = useConfirmDelete()
 const previewActions = ref<HTMLElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 const previewItem = ref<SessionArtifactItem | null>(null)
 const downloading = reactive<Record<string, boolean>>({})
+const deleting = reactive<Record<string, boolean>>({})
 const focusedMessageId = ref<string | null>(null)
 const scope = ref<'current' | 'all'>('all')
 const searchQuery = ref('')
@@ -185,6 +220,42 @@ function downloadKey(item: SessionArtifactItem): string {
 
 function isDownloading(item: SessionArtifactItem): boolean {
   return !!downloading[downloadKey(item)]
+}
+
+function isDeleting(item: SessionArtifactItem): boolean {
+  return !!deleting[downloadKey(item)]
+}
+
+// Each row here is one regeneration of a file, so the delete takes just that
+// version. The artifact library, which folds versions into one entry, is where
+// deleting the whole file lives.
+function handleDelete(item: SessionArtifactItem) {
+  if (isDeleting(item)) return
+  confirmDelete({
+    title: t('agent.artifactDrawer.deleteTitle'),
+    body: t('agent.artifactDrawer.deleteConfirm', { name: item.file_name }),
+    onConfirm: () => performDelete(item),
+  })
+}
+
+async function performDelete(item: SessionArtifactItem) {
+  if (!props.sessionId || !item.messageId) {
+    MessagePlugin.error(t('agent.artifactDrawer.deleteFailed'))
+    return
+  }
+  const key = downloadKey(item)
+  deleting[key] = true
+  try {
+    await deleteMessageArtifact(props.sessionId, item.messageId, item.index)
+    if (previewItem.value && downloadKey(previewItem.value) === key) previewItem.value = null
+    emit('deleted', { messageId: item.messageId, index: item.index })
+    MessagePlugin.success(t('agent.artifactDrawer.deleted'))
+  } catch (err) {
+    console.error('[ChatArtifactsPanel] delete failed:', err)
+    MessagePlugin.error(t('agent.artifactDrawer.deleteFailed'))
+  } finally {
+    deleting[key] = false
+  }
 }
 
 function findItem(messageId: string, previewIndex?: number | null): SessionArtifactItem | undefined {
@@ -302,6 +373,8 @@ async function handleDownload(item: SessionArtifactItem) {
 </script>
 
 <style scoped lang="less">
+@import '@/components/css/artifact-filter-tabs.less';
+
 .chat-artifacts-panel {
   flex: 1;
   min-height: 0;
@@ -421,40 +494,18 @@ async function handleDownload(item: SessionArtifactItem) {
 }
 
 .artifact-scope {
-  display: inline-flex;
+  .artifact-filter-tabs();
   align-self: flex-start;
-  gap: 2px;
-  padding: 3px;
-  border-radius: var(--app-radius-md);
-  background: var(--td-bg-color-secondarycontainer);
 
   button {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 10px;
-    border: 0;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--td-text-color-secondary);
-    font: inherit;
-    font-size: var(--app-text-sm);
-    cursor: pointer;
-
-    &[aria-pressed='true'] {
-      background: var(--td-bg-color-container);
-      color: var(--td-text-color-primary);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
 
     span {
-      color: var(--td-text-color-placeholder);
-      font-size: var(--app-text-xs);
+      color: inherit;
+      opacity: 0.7;
+      font-size: var(--app-text-sm);
       font-variant-numeric: tabular-nums;
     }
   }
@@ -536,6 +587,11 @@ async function handleDownload(item: SessionArtifactItem) {
   &:focus-visible {
     outline: 2px solid var(--td-text-color-secondary);
     outline-offset: 2px;
+  }
+
+  &.artifact-delete:not(.t-is-disabled):not(.t-is-loading):hover {
+    background: var(--td-error-color-1);
+    color: var(--td-error-color);
   }
 
   :deep(.t-button__icon) {

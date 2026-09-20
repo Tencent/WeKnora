@@ -33,17 +33,15 @@ type cosFileService struct {
 const cosScheme = "cos://"
 
 func newCOSHTTPClient(secretID, secretKey string) *http.Client {
-	httpConfig := utils.DefaultSSRFSafeHTTPClientConfig()
-	client := utils.NewSSRFSafeHTTPClient(httpConfig)
+	client := objectStorageHTTPClient()
 	// COS GetCredential expects AuthorizationTransport to remain the outermost
-	// transport. Put the per-request SSRF guard immediately underneath it while
-	// retaining the safe client's redirect policy.
+	// transport. The per-request SSRF guard the client came with, over the
+	// bounded transport, goes immediately underneath it; the client keeps its
+	// redirect policy.
 	client.Transport = &cos.AuthorizationTransport{
 		SecretID:  secretID,
 		SecretKey: secretKey,
-		Transport: &utils.SSRFValidatingRoundTripper{
-			Base: utils.NewSSRFSafeTransport(httpConfig),
-		},
+		Transport: client.Transport,
 	}
 	return client
 }
@@ -120,6 +118,8 @@ func (s *cosFileService) SaveFile(ctx context.Context,
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
 	defer src.Close()
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err = s.client.Object.Put(ctx, objectName, src, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to upload file to COS: %w", err)
@@ -136,11 +136,13 @@ func (s *cosFileService) GetFile(ctx context.Context, filePathUrl string) (io.Re
 	if err := utils.SafeObjectKey(objectName); err != nil {
 		return nil, fmt.Errorf("invalid file path: %w", err)
 	}
+	ctx, cancel := objectStorageTransferContext(ctx)
 	resp, err := s.client.Object.Get(ctx, objectName, nil)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to get file from COS: %w", err)
 	}
-	return resp.Body, nil
+	return objectStorageBoundReader(resp.Body, cancel), nil
 }
 
 // DeleteFile removes a file from COS storage
@@ -152,6 +154,8 @@ func (s *cosFileService) DeleteFile(ctx context.Context, filePath string) error 
 	if err := utils.SafeObjectKey(objectName); err != nil {
 		return fmt.Errorf("invalid file path: %w", err)
 	}
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err = s.client.Object.Delete(ctx, objectName)
 	if err != nil {
 		return fmt.Errorf("failed to delete file: %w", err)
@@ -173,6 +177,16 @@ func (s *cosFileService) parseCosObjectName(filePath string) (string, error) {
 		rest := strings.TrimPrefix(filePath, cosScheme)
 		parts := strings.SplitN(rest, "/", 3)
 		if len(parts) == 3 {
+			// Bucket and region are not part of the object key, but the
+			// tenant check (ParseTenantIDFromStoragePath) scans them too: an
+			// unchecked numeric bucket or region would pass as the caller's
+			// tenant while the key reads another tenant's object.
+			if s.bucketName != "" && parts[0] != s.bucketName {
+				return "", fmt.Errorf("bucket mismatch in path: got %s, want %s", parts[0], s.bucketName)
+			}
+			if s.region != "" && parts[1] != s.region {
+				return "", fmt.Errorf("region mismatch in path: got %s, want %s", parts[1], s.region)
+			}
 			return parts[2], nil
 		}
 		return rest, nil
@@ -199,6 +213,9 @@ func (s *cosFileService) CopyFile(ctx context.Context,
 	destKey := fmt.Sprintf("%s/%d/%s/%s%s", s.cosPathPrefix, tenantID, knowledgeID, uuid.New().String(), ext)
 
 	// sourceURL is the host + object key WITHOUT a scheme, per the COS SDK contract.
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
 	sourceURL := fmt.Sprintf("%s.cos.%s.myqcloud.com/%s", s.bucketName, s.region, srcObjectKey)
 	_, _, err = s.client.Object.Copy(ctx, destKey, sourceURL, nil)
 	if err != nil {
@@ -219,9 +236,11 @@ func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		return "", fmt.Errorf("invalid file name: %w", err)
 	}
 	ext := filepath.Ext(safeName)
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	reader := bytes.NewReader(data)
 
-	// 如果请求写入临时桶且临时桶已配置
+	// ????????????????
 	if temp && s.tempClient != nil {
 		objectName := fmt.Sprintf("exports/%d/%s%s", tenantID, uuid.New().String(), ext)
 		_, err := s.tempClient.Object.Put(ctx, objectName, reader, nil)
@@ -232,7 +251,7 @@ func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		return fmt.Sprintf("%s%s", s.tempBucketURL, objectName), nil
 	}
 
-	// 写入主桶
+	// ????
 	objectName := fmt.Sprintf("%s/%d/exports/%s%s", s.cosPathPrefix, tenantID, uuid.New().String(), ext)
 	_, err = s.client.Object.Put(ctx, objectName, reader, nil)
 	if err != nil {
@@ -244,7 +263,7 @@ func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 
 // GetFileURL returns a presigned download URL for the file
 func (s *cosFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
-	// 判断文件属于哪个桶
+	// ?????????
 	if s.tempClient != nil && strings.HasPrefix(filePath, s.tempBucketURL) {
 		objectName := strings.TrimPrefix(filePath, s.tempBucketURL)
 		if err := utils.SafeObjectKey(objectName); err != nil {

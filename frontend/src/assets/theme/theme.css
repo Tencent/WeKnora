@@ -201,6 +201,14 @@ select:-webkit-autofill {
     box-shadow: none;
 }
 
+/* Keep selection surfaces quiet; small indicators retain the brand accent. */
+:root {
+    --app-selection-bg: color-mix(in srgb, var(--td-text-color-primary) 4%, var(--td-bg-color-container));
+    --app-selection-text: var(--td-text-color-primary);
+    --app-selection-border: color-mix(in srgb, var(--td-brand-color) 30%, var(--td-component-stroke));
+    --app-focus-border: var(--td-brand-color);
+}
+
 /* 应用级强调色：智能体 / 图谱等「非品牌但反复出现」的语义色，透明叠加请用 color-mix */
 :root {
     --app-accent-purple: #7c4dff;
@@ -223,6 +231,9 @@ select:-webkit-autofill {
  * 新代码请引用令牌，样式守卫会统计残留字面量。
  * ============================================================ */
 :root {
+    /* 对话标题与右侧面板共用同一条头部分割线。 */
+    --app-chat-header-height: 40px;
+
     /* 圆角 */
     --app-radius-xs: 4px;
     --app-radius-sm: 6px;

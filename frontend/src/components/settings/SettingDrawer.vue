@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="drawerVisible && resizable" class="setting-drawer-resize-handle"
+    <div v-if="drawerVisible && resizable && !maximized" class="setting-drawer-resize-handle"
       :class="{ 'setting-drawer-resize-handle--active': drawerResizing }"
       :style="{ right: `${drawerWidthPx}px`, '--setting-drawer-travel': `${drawerWidthPx}px` }"
       role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
@@ -31,7 +31,20 @@
               <slot name="subtitle">{{ description }}</slot>
             </div>
           </div>
-          <div :id="headerActionsId" class="setting-drawer__header-actions"><slot name="header-actions" /></div>
+          <div class="setting-drawer__header-tools">
+            <div :id="headerActionsId" class="setting-drawer__header-actions"><slot name="header-actions" /></div>
+            <t-tooltip v-if="maximizable" :content="maximized ? t('common.exitFullscreen') : t('common.fullscreen')" placement="bottom">
+              <button
+                type="button"
+                class="setting-drawer__maximize"
+                :aria-label="maximized ? t('common.exitFullscreen') : t('common.fullscreen')"
+                :aria-pressed="maximized"
+                @click="maximized = !maximized"
+              >
+                <t-icon :name="maximized ? 'fullscreen-exit' : 'fullscreen'" />
+              </button>
+            </t-tooltip>
+          </div>
         </div>
         <div v-if="$slots['header-extra']" class="setting-drawer__header-extra">
           <slot name="header-extra" />
@@ -74,7 +87,7 @@ export const SETTING_DRAWER_HEADER_ACTIONS_ID: InjectionKey<string> = Symbol('se
 </script>
 
 <script setup lang="ts">
-import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted } from 'vue'
+import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
@@ -96,6 +109,12 @@ interface Props {
   /** Min/max bounds for the drag-resize, in px. */
   minWidth?: number
   maxWidth?: number
+  /**
+   * Show a maximize toggle in the header. Content-heavy drawers (the Markdown
+   * editor) need more room than `maxWidth` allows; while maximized the drawer
+   * spans the viewport and the drag handle steps aside.
+   */
+  maximizable?: boolean
   /**
    * localStorage key used to remember the user's chosen width. Set to '' to
    * disable persistence. Default key is namespaced per-consumer using the
@@ -120,6 +139,7 @@ const props = withDefaults(defineProps<Props>(), {
   resizable: true,
   minWidth: 480,
   maxWidth: 1200,
+  maximizable: false,
   storageKey: '',
   confirmLoading: false,
   cancelDisabled: false,
@@ -195,7 +215,18 @@ const drawerWidthPx = computed(() =>
   clampWidth(userWidthPx.value ?? parseWidthToPx(props.width)),
 )
 
-const effectiveWidth = computed(() => `${drawerWidthPx.value}px`)
+// ---------- maximize ----------
+const maximized = ref(false)
+
+// Leaving the drawer maximized would surprise the next caller of the same
+// storage key, so the toggle lives for one open.
+watch(drawerVisible, (val) => {
+  if (!val) maximized.value = false
+})
+
+const effectiveWidth = computed(() =>
+  maximized.value ? `${viewportWidth.value}px` : `${drawerWidthPx.value}px`,
+)
 
 const persistWidth = (width: number) => {
   const next = clampWidth(width)
@@ -324,11 +355,45 @@ const handleCancel = () => {
   min-width: 0;
 }
 
+.setting-drawer__header-tools {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.setting-drawer__maximize {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-lg);
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
+}
+
 .setting-drawer__header-actions {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  margin-left: auto;
 
   &:empty {
     display: none;

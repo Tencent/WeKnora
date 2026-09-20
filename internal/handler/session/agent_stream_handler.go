@@ -580,6 +580,13 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	if data.IsFallback {
 		metadata["is_fallback"] = true
 	}
+	// The completion cap cut this answer off. Carried on every chunk and on
+	// the Done marker: a live-streamed answer only learns of the cap at the
+	// close, and the metadata is persisted with the stream event so a replay
+	// still shows the notice.
+	if data.Truncated {
+		metadata["truncated"] = true
+	}
 	h.mu.Unlock()
 
 	// Append this chunk to stream (frontend will accumulate by event ID)

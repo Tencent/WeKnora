@@ -1,0 +1,48 @@
+diff --git a/crates/bsk-cli/src/daemon/ipc.rs b/crates/bsk-cli/src/daemon/ipc.rs
+index 69daf58..4695d48 100644
+--- a/crates/bsk-cli/src/daemon/ipc.rs
++++ b/crates/bsk-cli/src/daemon/ipc.rs
+@@ -793,7 +793,14 @@ fn tool_dispatch_transport_timeout(method: &Method, params: &Value) -> Result<Du
+     timeout.map(|timeout| {
+         if matches!(
+             method,
+-            Method::ToolUpload | Method::ToolDownload | Method::ToolRequestHelp
++            Method::ToolUpload
++                | Method::ToolDownload
++                | Method::ToolRequestHelp
++                | Method::ToolNavigate
++                | Method::ToolNavigateBack
++                | Method::ToolNavigateForward
++                | Method::ToolReload
++                | Method::ToolWaitForNavigation
+         ) {
+             timeout.saturating_add(EXTENSION_RESPONSE_GRACE)
+         } else {
+@@ -1820,12 +1827,27 @@ mod tests {
+             Method::ToolUpload,
+             Method::ToolDownload,
+             Method::ToolRequestHelp,
++            Method::ToolNavigate,
++            Method::ToolNavigateBack,
++            Method::ToolNavigateForward,
++            Method::ToolReload,
++            Method::ToolWaitForNavigation,
+         ] {
+             let dispatch_timeout = tool_dispatch_transport_timeout(&method, &params).unwrap();
+             assert_eq!(dispatch_timeout, Duration::from_secs(62));
+         }
+     }
+ 
++    #[test]
++    fn default_navigation_deadline_allows_extension_timeout_response() {
++        for method in [Method::ToolNavigate, Method::ToolWaitForNavigation] {
++            assert_eq!(
++                tool_dispatch_transport_timeout(&method, &serde_json::json!({})).unwrap(),
++                DEFAULT_TOOL_TIMEOUT + EXTENSION_RESPONSE_GRACE
++            );
++        }
++    }
++
+     #[test]
+     fn extension_response_grace_does_not_change_other_tools() {
+         let params = serde_json::json!({

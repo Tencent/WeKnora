@@ -1,5 +1,5 @@
 diff --git a/apps/extension/src/entrypoints/background.ts b/apps/extension/src/entrypoints/background.ts
-index 830bbbe..1a9a788 100644
+index 830bbbe..cb88179 100644
 --- a/apps/extension/src/entrypoints/background.ts
 +++ b/apps/extension/src/entrypoints/background.ts
 @@ -4,6 +4,7 @@ import { getAuditEnabled } from "@/lib/audit";
@@ -10,16 +10,15 @@ index 830bbbe..1a9a788 100644
  import { startHeartbeat } from "@/lib/heartbeat";
  import {
    getConnectionEnabled,
-@@ -27,6 +28,8 @@ import {
+@@ -27,6 +28,7 @@ import {
  import { POPUP_PORT_NAME, type PopupInbound, type PopupOutbound } from "@/lib/popup-bridge";
  import { recordFrameCoordinator } from "@/lib/recording/frame-coordinator";
  import { attachSessionsLiveFlag } from "@/lib/sessions-live-flag";
-+import { TaskActivity } from "@/lib/task-activity";
 +import { captureTaskPreview, taskTarget } from "@/lib/task-preview";
  import { attachLongScreenshot } from "@/long-screenshot/background";
  import { createDisconnectCleanup } from "@/session-manager/disconnect-cleanup";
  import { attachSessionEventHandler } from "@/session-manager/event-handler";
-@@ -63,7 +66,27 @@ export default defineBackground(() => {
+@@ -63,7 +65,21 @@ export default defineBackground(() => {
      url: __BSK_DAEMON_WS_URL__,
      webSocketFactory: (url) => {
        if (!connectionPreferenceValid) throw new Error("Connection settings are unavailable");
@@ -36,51 +35,18 @@ index 830bbbe..1a9a788 100644
 +            await chrome.windows.update(tab.windowId, { focused: true });
 +            return { focused: true };
 +          },
-+          preview: (sessionId) =>
-+            taskActivity.preview(sessionId, () => captureTaskPreview(sessions, cdp, sessionId)),
-+          idle: async (sessionId) => {
-+            if (!sessions.get(sessionId)?.remote) throw new Error("Task unavailable");
-+            await taskActivity.release(sessionId);
-+            return { released: true };
-+          },
++          preview: (sessionId) => captureTaskPreview(sessions, cdp, sessionId),
 +        });
 +      return socket;
      },
    });
    const sessions = new SessionManager({ remote: () => remoteEndpoint !== null });
-@@ -72,6 +95,8 @@ export default defineBackground(() => {
-   });
-   attachAuditBridge(controller, transport);
-   const cdp = new ChromiumCdp(undefined, {
-+    shouldKeepTaskActive: (tabId) =>
-+      sessions.list().some((task) => task.remote && isAgentControlledTab(task, tabId)),
-     onDocumentChanged: (tabId) => sessions.invalidateTabRefs(tabId),
-     shouldAutoAcceptDialog: async (tabId) => {
-       const tab = await chrome.tabs.get(tabId);
-@@ -79,6 +104,9 @@ export default defineBackground(() => {
-       return session !== null && (!session.remote || isAgentControlledTab(session, tabId));
-     },
-   });
-+  const taskActivity: TaskActivity = new TaskActivity(sessions, (id) =>
-+    dispatcher.releaseTaskControl(id),
-+  );
-   const sessionsLive = attachSessionsLiveFlag({ manager: sessions });
-   let overlayGeneration = 0;
-   const controlModes = new Map<string, OverlayMode>();
-@@ -290,6 +318,7 @@ export default defineBackground(() => {
-   });
-   void interactionPreferences.readyOrFallback();
-   const dispatcher = new ToolDispatcher({
-+    taskActivity,
-     interactionPreferences,
-     transport,
-     sessions,
 diff --git a/apps/extension/src/lib/__tests__/gateway-ui.test.ts b/apps/extension/src/lib/__tests__/gateway-ui.test.ts
 new file mode 100644
-index 0000000..eda0a0e
+index 0000000..273c15b
 --- /dev/null
 +++ b/apps/extension/src/lib/__tests__/gateway-ui.test.ts
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,51 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import { attachGatewayUI } from "../gateway-ui";
 +
@@ -91,7 +57,6 @@ index 0000000..eda0a0e
 +  const ui = {
 +    focus: vi.fn(async () => ({ focused: true })),
 +    preview: vi.fn(async () => ({ image_base64: "jpeg" })),
-+    idle: vi.fn(async () => ({ released: true })),
 +  };
 +  attachGatewayUI(socket as unknown as WebSocket, ui);
 +  const native = vi.fn();
@@ -105,7 +70,7 @@ index 0000000..eda0a0e
 +describe("gateway UI side channel", () => {
 +  it("routes UI requests independently and leaves native RPC untouched", async () => {
 +    const f = fixture();
-+    for (const name of ["preview", "focus", "idle"] as const) {
++    for (const name of ["preview", "focus"] as const) {
 +      await f.request({ id: name, method: `gateway.task_${name}`, params: { session_id: "task" } });
 +      expect(f.ui[name]).toHaveBeenCalledWith("task");
 +    }
@@ -123,8 +88,8 @@ index 0000000..eda0a0e
 +  });
 +  it("reports failures and drops late replies on closed sockets", async () => {
 +    const f = fixture();
-+    f.ui.idle.mockRejectedValueOnce(new Error("unavailable"));
-+    await f.request({ id: "idle", method: "gateway.task_idle", params: { session_id: "task" } });
++    f.ui.focus.mockRejectedValueOnce(new Error("unavailable"));
++    await f.request({ id: "focus", method: "gateway.task_focus", params: { session_id: "task" } });
 +    expect(JSON.parse(f.socket.send.mock.calls[0]![0])).toMatchObject({
 +      error: { code: "task_unavailable" },
 +    });
@@ -133,117 +98,17 @@ index 0000000..eda0a0e
 +    expect(f.socket.send).toHaveBeenCalledTimes(1);
 +  });
 +});
-diff --git a/apps/extension/src/lib/__tests__/task-activity.test.ts b/apps/extension/src/lib/__tests__/task-activity.test.ts
-new file mode 100644
-index 0000000..7eae50f
---- /dev/null
-+++ b/apps/extension/src/lib/__tests__/task-activity.test.ts
-@@ -0,0 +1,93 @@
-+import { describe, expect, it, vi } from "vitest";
-+import type { SessionManager } from "@/session-manager/manager";
-+import { TaskActivity } from "../task-activity";
-+
-+function deferred() {
-+  let resolve!: () => void;
-+  const promise = new Promise<void>((r) => {
-+    resolve = r;
-+  });
-+  return { promise, resolve };
-+}
-+function fixture() {
-+  const tasks = new Map<string, object>([
-+    ["one", { remote: true }],
-+    ["two", { remote: true }],
-+  ]);
-+  const manager = { get: (id: string) => tasks.get(id) } as unknown as SessionManager;
-+  const detach = vi.fn(async (_id: string) => {});
-+  return { tasks, detach, activity: new TaskActivity(manager, detach) };
-+}
-+describe("task debugging lifecycle", () => {
-+  it("drains an in-flight screenshot before detach and rejects later preview attachment", async () => {
-+    const { activity, detach, tasks } = fixture();
-+    const shot = deferred();
-+    const capture = activity.preview("one", () => shot.promise);
-+    const release = activity.release("one");
-+    await expect(activity.preview("one", async () => {})).rejects.toThrow("idle");
-+    await Promise.resolve();
-+    expect(detach).not.toHaveBeenCalled();
-+    shot.resolve();
-+    await Promise.all([capture, release]);
-+    expect(detach).toHaveBeenCalledWith("one");
-+    expect(tasks.has("one")).toBe(true);
-+    await expect(activity.preview("one", async () => {})).rejects.toThrow("idle");
-+  });
-+  it("waits for automation even if turn end arrives before the operation begins", async () => {
-+    const { activity, detach } = fixture();
-+    const op = deferred();
-+    const running = activity.run("one", false, () => op.promise);
-+    const release = activity.release("one");
-+    await Promise.resolve();
-+    expect(detach).not.toHaveBeenCalled();
-+    op.resolve();
-+    await Promise.all([running, release]);
-+    expect(detach).toHaveBeenCalledTimes(1);
-+  });
-+  it("a new turn waits for detach then resumes capture without deleting tabs", async () => {
-+    const { activity, detach } = fixture();
-+    const gate = deferred();
-+    detach.mockImplementationOnce(() => gate.promise);
-+    const release = activity.release("one");
-+    const op = vi.fn(async () => {});
-+    const next = activity.run("one", false, op);
-+    await Promise.resolve();
-+    expect(op).not.toHaveBeenCalled();
-+    gate.resolve();
-+    await Promise.all([release, next]);
-+    expect(op).toHaveBeenCalledOnce();
-+    await expect(activity.preview("one", async () => "frame")).resolves.toBe("frame");
-+  });
-+  it("stop fences previews before closing tabs", async () => {
-+    const { activity, detach } = fixture();
-+    await activity.run("one", true, async () => {
-+      expect(detach).toHaveBeenCalledWith("one");
-+      await expect(activity.preview("one", async () => {})).rejects.toThrow("idle");
-+    });
-+    await expect(activity.preview("one", async () => {})).rejects.toThrow("idle");
-+  });
-+  it("failed captures do not prevent release or interfere with another task", async () => {
-+    const { activity, detach } = fixture();
-+    const capture = activity.preview("one", async () => {
-+      throw new Error("failed capture");
-+    });
-+    const release = activity.release("one");
-+    await expect(capture).rejects.toThrow("failed capture");
-+    await release;
-+    await expect(activity.preview("two", async () => "live")).resolves.toBe("live");
-+    expect(detach).toHaveBeenCalledTimes(1);
-+  });
-+  it("does not resume a deleted session after waiting for release", async () => {
-+    const { activity, tasks, detach } = fixture();
-+    const gate = deferred();
-+    detach.mockImplementationOnce(() => gate.promise);
-+    const release = activity.release("one");
-+    const op = vi.fn(async () => {});
-+    const next = activity.run("one", false, op);
-+    tasks.delete("one");
-+    gate.resolve();
-+    await release;
-+    await expect(next).rejects.toThrow("Task ended");
-+    expect(op).not.toHaveBeenCalled();
-+  });
-+});
 diff --git a/apps/extension/src/lib/__tests__/task-preview.test.ts b/apps/extension/src/lib/__tests__/task-preview.test.ts
 new file mode 100644
-index 0000000..49d1e24
+index 0000000..3939bae
 --- /dev/null
 +++ b/apps/extension/src/lib/__tests__/task-preview.test.ts
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,180 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import type { ChromiumCdp } from "@/browser-driver/chromium-cdp";
 +import { runCdpCommand } from "@/browser-driver/command-deadline";
 +import type { SessionManager } from "@/session-manager/manager";
-+import { TaskActivity } from "../task-activity";
-+import { captureTaskPreview } from "../task-preview";
++import { captureTaskPreview, withTaskPreviewStop } from "../task-preview";
 +
 +afterEach(() => {
 +  vi.unstubAllGlobals();
@@ -261,9 +126,8 @@ index 0000000..49d1e24
 +  const manager = { get: () => task } as unknown as SessionManager;
 +  const cdp = {
 +    getAttachmentId: vi.fn(() => "attachment"),
-+    trackSessionTab: vi.fn(),
 +    hasPendingScreenshot: vi.fn(() => false),
-+    ensureAttached: vi.fn(async () => {}),
++    acquireBackgroundExecution: vi.fn(async () => {}),
 +    send: vi.fn(async (_tab, method) =>
 +      method === "Page.getLayoutMetrics"
 +        ? { cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 1280, clientHeight: 720 } }
@@ -313,11 +177,12 @@ index 0000000..49d1e24
 +        image_base64: btoa("thumbnail"),
 +      });
 +    }
++    expect(f.cdp.acquireBackgroundExecution).toHaveBeenCalledWith("visible", 5);
 +    expect(f.cdp.send).toHaveBeenCalledTimes(3);
 +    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
 +  });
 +
-+  it("lets turn-end release finish after a stuck screenshot times out", async () => {
++  it("lets native stop proceed after a stuck screenshot times out", async () => {
 +    vi.useFakeTimers();
 +    vi.spyOn(console, "warn").mockImplementation(() => {});
 +    vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -328,20 +193,34 @@ index 0000000..49d1e24
 +        ? runCdpCommand({ tabId: tab }, method, () => new Promise<never>(() => {}))
 +        : original(tab, method, params),
 +    );
-+    const detach = vi.fn(async () => {});
-+    const activity = new TaskActivity(f.manager, detach);
-+    const frame = activity.preview("stuck", () => captureTaskPreview(f.manager, f.cdp, "stuck"));
++    const stop = vi.fn(async () => {});
++    const frame = captureTaskPreview(f.manager, f.cdp, "stuck");
 +    const checked = expect(frame).rejects.toThrow("Page.captureScreenshot timed out");
-+    const released = activity.release("stuck");
++    const released = withTaskPreviewStop(f.manager, "stuck", stop);
++    await expect(captureTaskPreview(f.manager, f.cdp, "stuck")).rejects.toThrow("stopping");
++    expect(stop).not.toHaveBeenCalled();
 +    await vi.advanceTimersByTimeAsync(3_000);
 +    await checked;
 +    await released;
-+    expect(detach).toHaveBeenCalledWith("stuck");
++    expect(stop).toHaveBeenCalledOnce();
 +    expect(vi.getTimerCount()).toBe(0);
 +    vi.mocked(f.cdp.send).mockImplementation(original);
 +    await expect(
-+      activity.run("stuck", false, () => captureTaskPreview(f.manager, f.cdp, "stuck")),
++      captureTaskPreview(f.manager, f.cdp, "stuck"),
 +    ).resolves.toMatchObject({ tab_id: 5 });
++  });
++
++  it("blocks previews throughout native cleanup and restores them after a failed stop", async () => {
++    const f = fixture();
++    let reject!: (error: Error) => void;
++    const pending = new Promise<never>((_, fail) => { reject = fail; });
++    const stopping = withTaskPreviewStop(f.manager, "retry", () => pending);
++    const checked = expect(stopping).rejects.toThrow("return failed");
++    await expect(captureTaskPreview(f.manager, f.cdp, "retry")).rejects.toThrow("stopping");
++    expect(f.cdp.acquireBackgroundExecution).not.toHaveBeenCalled();
++    reject(new Error("return failed"));
++    await checked;
++    await expect(captureTaskPreview(f.manager, f.cdp, "retry")).resolves.toMatchObject({ tab_id: 5 });
 +  });
 +
 +  it("coalesces captures and bounds the physical bitmap on HiDPI screens", async () => {
@@ -363,7 +242,7 @@ index 0000000..49d1e24
 +    const f = fixture();
 +    vi.mocked(f.cdp.hasPendingScreenshot).mockReturnValue(true);
 +    await expect(captureTaskPreview(f.manager, f.cdp, "pending")).rejects.toThrow("still running");
-+    expect(f.cdp.ensureAttached).not.toHaveBeenCalled();
++    expect(f.cdp.acquireBackgroundExecution).not.toHaveBeenCalled();
 +    expect(f.cdp.send).not.toHaveBeenCalled();
 +  });
 +  it("does not capture an unowned active user tab", async () => {
@@ -376,7 +255,7 @@ index 0000000..49d1e24
 +  });
 +  it("discards the result if authorization ends during capture", async () => {
 +    const f = fixture();
-+    vi.mocked(f.cdp.ensureAttached).mockImplementation(async () => {
++    vi.mocked(f.cdp.acquireBackgroundExecution).mockImplementation(async () => {
 +      f.task.agentCreatedTabs.clear();
 +    });
 +    await expect(captureTaskPreview(f.manager, f.cdp, "ended")).rejects.toThrow(
@@ -407,14 +286,13 @@ index 0000000..49d1e24
 +});
 diff --git a/apps/extension/src/lib/gateway-ui.ts b/apps/extension/src/lib/gateway-ui.ts
 new file mode 100644
-index 0000000..a020db8
+index 0000000..ef0443f
 --- /dev/null
 +++ b/apps/extension/src/lib/gateway-ui.ts
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,40 @@
 +interface GatewayUI {
 +  focus(sessionId: string): Promise<unknown>;
 +  preview(sessionId: string): Promise<unknown>;
-+  idle(sessionId: string): Promise<unknown>;
 +}
 +
 +/** WeKnora's optional UI protocol, attached only to authenticated remote sockets.
@@ -431,7 +309,6 @@ index 0000000..a020db8
 +    const methods: Record<string, (sessionId: string) => Promise<unknown>> = {
 +      "gateway.task_focus": (id) => ui.focus(id),
 +      "gateway.task_preview": (id) => ui.preview(id),
-+      "gateway.task_idle": (id) => ui.idle(id),
 +    };
 +    if (typeof request.method !== "string" || !Object.hasOwn(methods, request.method)) return;
 +    event.stopImmediatePropagation();
@@ -453,121 +330,67 @@ index 0000000..a020db8
 +      );
 +  });
 +}
-diff --git a/apps/extension/src/lib/task-activity.ts b/apps/extension/src/lib/task-activity.ts
-new file mode 100644
-index 0000000..91bc85a
---- /dev/null
-+++ b/apps/extension/src/lib/task-activity.ts
-@@ -0,0 +1,86 @@
-+import type { SessionManager } from "@/session-manager/manager";
-+
-+interface Activity {
-+  idle: boolean;
-+  pending: Set<Promise<unknown>>;
-+  releasing?: Promise<void>;
-+}
-+
-+/** Coordinates UI captures with turn-end release and native session stop.
-+ * State follows the session object, so deleted sessions cannot retain frames or fences. */
-+export class TaskActivity {
-+  private readonly states = new WeakMap<object, Activity>();
-+  constructor(
-+    private readonly manager: SessionManager,
-+    private readonly detach: (sessionId: string) => Promise<void>,
-+  ) {}
-+
-+  private state(sessionId: string): Activity | undefined {
-+    const task = this.manager.get(sessionId);
-+    if (!task?.remote) return undefined;
-+    let state = this.states.get(task);
-+    if (!state) {
-+      state = { idle: false, pending: new Set() };
-+      this.states.set(task, state);
-+    }
-+    return state;
-+  }
-+
-+  private track<T>(state: Activity, run: () => Promise<T>): Promise<T> {
-+    const work = Promise.resolve().then(run);
-+    state.pending.add(work);
-+    void work.then(
-+      () => state.pending.delete(work),
-+      () => state.pending.delete(work),
-+    );
-+    return work;
-+  }
-+
-+  preview<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-+    const state = this.state(sessionId);
-+    if (!state || state.idle) return Promise.reject(new Error("Task preview is idle"));
-+    return this.track(state, run);
-+  }
-+
-+  async run<T>(
-+    sessionId: string | undefined,
-+    stopping: boolean,
-+    run: () => Promise<T>,
-+  ): Promise<T> {
-+    if (!sessionId) return run();
-+    const task = this.manager.get(sessionId);
-+    const state = this.state(sessionId);
-+    if (!state) return run();
-+    if (stopping) {
-+      await this.release(sessionId);
-+      return run();
-+    }
-+    if (state.releasing) await state.releasing;
-+    if (this.manager.get(sessionId) !== task) throw new Error("Task ended before operation");
-+    state.idle = false;
-+    return this.track(state, run);
-+  }
-+
-+  release(sessionId: string): Promise<void> {
-+    const state = this.state(sessionId);
-+    if (!state) return Promise.resolve();
-+    if (state.releasing) return state.releasing;
-+    state.idle = true;
-+    const work = (async () => {
-+      // A screenshot's send() can auto-attach. Let every in-flight operation
-+      // finish before detaching, and reject new previews throughout release.
-+      await Promise.allSettled([...state.pending]);
-+      await this.detach(sessionId);
-+    })();
-+    state.releasing = work;
-+    void work.then(
-+      () => {
-+        state.releasing = undefined;
-+      },
-+      () => {
-+        state.releasing = undefined;
-+      },
-+    );
-+    return work;
-+  }
-+}
 diff --git a/apps/extension/src/lib/task-preview.ts b/apps/extension/src/lib/task-preview.ts
 new file mode 100644
-index 0000000..38d1917
+index 0000000..a6d2532
 --- /dev/null
 +++ b/apps/extension/src/lib/task-preview.ts
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,143 @@
 +import type { ChromiumCdp } from "@/browser-driver/chromium-cdp";
 +import { isAgentControlledTab, type SessionManager } from "@/session-manager/manager";
 +
-+const captures = new Map<string, Promise<unknown>>();
-+/** UI-only capture, outside the automation queue (including human-help waits).
-+ * Captures only the task's concrete tab; never activates it or reads a user tab. */
++interface PreviewState {
++  pending?: Promise<unknown>;
++  stopping: number;
++}
++const previews = new WeakMap<object, PreviewState>();
++function previewState(task: object): PreviewState {
++  let state = previews.get(task);
++  if (!state) {
++    state = { stopping: 0 };
++    previews.set(task, state);
++  }
++  return state;
++}
++
++/** UI-only capture outside the automation queue, including human-help waits. */
 +export function captureTaskPreview(
 +  manager: SessionManager,
 +  cdp: ChromiumCdp,
 +  sessionId: string,
 +): Promise<unknown> {
-+  const pending = captures.get(sessionId);
-+  if (pending) return pending;
-+  const work = capture(manager, cdp, sessionId).finally(() => captures.delete(sessionId));
-+  captures.set(sessionId, work);
++  const task = manager.get(sessionId);
++  if (!task?.remote) return Promise.reject(new Error("Task unavailable"));
++  const state = previewState(task);
++  if (state.stopping) return Promise.reject(new Error("Task is stopping"));
++  if (state.pending) return state.pending;
++  const work = capture(manager, cdp, sessionId).finally(() => {
++    if (state.pending === work) state.pending = undefined;
++  });
++  state.pending = work;
 +  return work;
 +}
++
++/** Drain side-channel screenshots before the official stop handler detaches
++ * and closes tabs. No turn-end detach or custom session state is introduced. */
++export async function withTaskPreviewStop<T>(
++  manager: SessionManager,
++  sessionId: string | undefined,
++  stop: () => Promise<T>,
++): Promise<T> {
++  const task = sessionId ? manager.get(sessionId) : undefined;
++  if (!task?.remote) return stop();
++  const state = previewState(task);
++  state.stopping++;
++  try {
++    await state.pending?.catch(() => {});
++    return await stop();
++  } finally {
++    // A failed native stop can be retried; it must not permanently disable previews.
++    state.stopping--;
++  }
++}
++
 +async function capture(manager: SessionManager, cdp: ChromiumCdp, sessionId: string) {
 +  const task = manager.get(sessionId);
 +  if (!task?.remote) throw new Error("Task unavailable");
@@ -577,8 +400,10 @@ index 0000000..38d1917
 +  if (cdp.hasPendingScreenshot(tabId))
 +    throw new Error("Previous screenshot is still running in Chrome");
 +  const tab = await chrome.tabs.get(tabId);
-+  cdp.trackSessionTab(sessionId, tabId);
-+  await cdp.ensureAttached(tabId);
++  // Preview bypasses the automation dispatcher, so acquire the same explicit
++  // control policy before reading a background page. Native session stop drains
++  // this capture before releasing the claim and closing tabs.
++  await cdp.acquireBackgroundExecution(sessionId, tabId);
 +  if (manager.get(sessionId) !== task || !isAgentControlledTab(task, tabId))
 +    throw new Error("Task ended during capture");
 +  const attachment = cdp.getAttachmentId(tabId);
@@ -654,67 +479,27 @@ index 0000000..38d1917
 +  if (tabId === undefined) throw new Error("Task tab unavailable");
 +  return tabId;
 +}
-diff --git a/apps/extension/src/tools/dispatcher.ts b/apps/extension/src/tools/dispatcher.ts
-index fdac85d..0726f27 100644
---- a/apps/extension/src/tools/dispatcher.ts
-+++ b/apps/extension/src/tools/dispatcher.ts
-@@ -1,5 +1,6 @@
- import type { InteractionPreferenceStore } from "@/lib/interaction-preferences";
- import { OVERLAY_AUTOMATION_BYPASS } from "@/lib/overlay-bridge";
-+import type { TaskActivity } from "@/lib/task-activity";
- import { ScreenshotExports } from "@/long-screenshot/exports";
- import type { SessionManager } from "@/session-manager/manager";
- import type { Transport } from "@/transport/transport";
-@@ -129,6 +130,7 @@ interface HoverLatchScope {
- }
- 
- export interface DispatcherDeps {
-+  taskActivity?: TaskActivity;
-   transport: Transport;
-   sessions: SessionManager;
-   cdp?: DispatcherCdpRunner;
-@@ -168,6 +170,7 @@ export interface DispatcherDeps {
-  * takes the fast path.
-  */
- export class ToolDispatcher {
-+  private readonly taskActivity?: TaskActivity;
-   private readonly transport: Transport;
-   private readonly sessions: SessionManager;
-   private screenshotExports: ScreenshotExports;
-@@ -191,6 +194,7 @@ export class ToolDispatcher {
-   readonly inflightAbortControllers = new Map<string, AbortController>();
- 
-   constructor(deps: DispatcherDeps) {
-+    this.taskActivity = deps.taskActivity;
-     this.transport = deps.transport;
-     this.sessions = deps.sessions;
-     this.screenshotExports = new ScreenshotExports((id) => this.sessions.has(id));
-@@ -275,7 +279,14 @@ export class ToolDispatcher {
-       } catch {
-         /* The daemon still has the original operation metadata. */
-       }
--      const result = await this.invoke(req, ac.signal);
-+      const invoke = () => this.invoke(req, ac.signal);
-+      const result = this.taskActivity
-+        ? await this.taskActivity.run(
-+            (req.params as { session_id?: string } | undefined)?.session_id,
-+            req.method === "tool.session_stop",
-+            invoke,
-+          )
-+        : await invoke();
-       if (isRpcError(result)) {
-         body = { id: req.id, error: classifyCdpError(result) };
-       } else {
-@@ -854,6 +865,12 @@ export class ToolDispatcher {
-     );
-   }
- 
-+  async releaseTaskControl(sessionId: string): Promise<void> {
-+    await this.releaseHoverLatch(sessionId);
-+    this.sessions.get(sessionId)?.refStore.clear();
-+    await this.cdp?.detachSession(sessionId);
-+  }
+diff --git a/apps/extension/src/tools/session.ts b/apps/extension/src/tools/session.ts
+index 4e0220b..ce13827 100644
+--- a/apps/extension/src/tools/session.ts
++++ b/apps/extension/src/tools/session.ts
+@@ -1,3 +1,4 @@
++import { withTaskPreviewStop } from "@/lib/task-preview";
+ import {
+   DEFAULT_INTERACTION_PREFERENCES,
+   type InteractionPreferenceStore,
+@@ -196,6 +197,14 @@ export async function handleSessionStop(
+   manager: SessionManager,
+   params: SessionStopParams,
+   deps: SessionStopDeps = {},
++): Promise<SessionStopResult | RpcError> {
++  return withTaskPreviewStop(manager, params?.session_id, () => stopSession(manager, params, deps));
++}
 +
-   private async releaseHoverLatch(sessionId?: string, tabId?: number): Promise<void> {
-     const matchesScope = (entrySessionId: string, entryTabId: number): boolean => {
-       if (sessionId !== undefined && entrySessionId !== sessionId) return false;
++async function stopSession(
++  manager: SessionManager,
++  params: SessionStopParams,
++  deps: SessionStopDeps,
+ ): Promise<SessionStopResult | RpcError> {
+   if (!params?.session_id) {
+     return {

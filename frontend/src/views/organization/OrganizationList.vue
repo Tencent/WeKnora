@@ -1,17 +1,19 @@
 <template>
   <div class="org-list-container">
-    <ListSpaceSidebar mode="organization" v-model="spaceSelection" :count-all="organizations.length"
-      :count-created="createdCount" :count-joined="joinedCount" />
     <div class="org-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
-            <h2 style="--wails-draggable: drag">{{ $t('organization.title') }}</h2>
+            <h2 style="--wails-draggable: drag">
+              <ResourceIcon type="organization" :size="24" />
+              {{ $t('organization.title') }}
+            </h2>
             <div class="header-actions" style="--wails-draggable: no-drag">
               <t-tooltip :content="canManageOrg ? $t('organization.joinOrg') : noPermissionTip" placement="bottom">
                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
                   style="--wails-draggable: no-drag" :disabled="!canManageOrg" @click="handleJoinOrganization">
                   <template #icon><t-icon name="enter" size="16px" /></template>
+                {{ $t('organization.joinOrg') }}
                 </t-button>
               </t-tooltip>
               <t-tooltip :content="canManageOrg ? $t('organization.createOrg') : noPermissionTip" placement="bottom">
@@ -19,6 +21,7 @@
                   style="--wails-draggable: no-drag" :disabled="!canManageOrg" @click="handleCreateOrganization">
                   <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt=""
                       aria-hidden="true" /></template>
+                {{ $t('organization.createOrg') }}
                 </t-button>
               </t-tooltip>
             </div>
@@ -26,7 +29,13 @@
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('organization.subtitle') }}</p>
         </div>
       </div>
+      <ResourceListToolbar mode="organization" :model-value="spaceSelection" @update:model-value="value => spaceSelection = value === 'created' || value === 'joined' ? value : 'all'" v-model:query="keyword" :count-all="organizations.length"
+      :count-created="createdCount" :count-joined="joinedCount" />
       <div class="org-list-main">
+        <EmptyState v-if="keyword.trim() && !loading && filteredOrganizations.length === 0" icon="search"
+          :title="$t('common.noResult')">
+          <t-button variant="outline" @click="keyword = ''">{{ $t('common.clear') }}</t-button>
+        </EmptyState>
         <!-- 骨架屏占位 -->
         <div v-if="loading && filteredOrganizations.length === 0" class="org-card-wrap">
           <div v-for="n in 4" :key="'skel-' + n" class="org-card org-card-skeleton is-skeleton">
@@ -51,7 +60,7 @@
             <!-- 我创建的：仅在 all 视图下出现；created/joined 子视图自身已经
                  隐含了语义，再加标题反而冗余。-->
             <div v-if="spaceSelection === 'all' && org.is_owner && index === 0" class="org-section-header"
-              role="button" tabindex="0" @click="toggleOrgSection('created')"
+              role="button" tabindex="0" :aria-expanded="!isOrgSectionCollapsed('created')" @click="toggleOrgSection('created')"
               @keydown.enter.prevent="toggleOrgSection('created')"
               @keydown.space.prevent="toggleOrgSection('created')">
               <t-icon name="user" size="14px" />
@@ -63,7 +72,7 @@
             <!-- 我加入的：第一张非 owner 卡片前打标题（all 视图下） -->
             <div v-if="spaceSelection === 'all' && !org.is_owner
               && (index === 0 || filteredOrganizations[index - 1].is_owner)" class="org-section-header" role="button"
-              tabindex="0" @click="toggleOrgSection('joined')"
+              tabindex="0" :aria-expanded="!isOrgSectionCollapsed('joined')" @click="toggleOrgSection('joined')"
               @keydown.enter.prevent="toggleOrgSection('joined')"
               @keydown.space.prevent="toggleOrgSection('joined')">
               <t-icon name="usergroup" size="14px" />
@@ -73,21 +82,7 @@
                 :name="isOrgSectionCollapsed('joined') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <div v-show="!isOrgRowHidden(org)" class="org-card"
-            :class="{ 'joined-org': !org.is_owner }" @click="handleCardClick(org)">
-            <!-- 装饰：协作网络感图形 -->
-            <div class="card-decoration">
-              <svg class="card-deco-svg" width="56" height="40" viewBox="0 0 56 40" fill="none"
-                xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5" />
-                <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7" />
-                <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5" />
-                <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
-                  opacity="0.4" />
-                <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35" />
-                <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1"
-                  stroke-linecap="round" opacity="0.3" />
-              </svg>
-            </div>
+            :class="{ 'joined-org': !org.is_owner }" role="link" tabindex="0" @keydown.enter.self.prevent="handleCardClick(org)" @keydown.space.self.prevent="handleCardClick(org)" @click="handleCardClick(org)">
 
             <!-- 卡片头部 -->
             <div class="card-header">
@@ -102,9 +97,9 @@
               <t-popup v-model="organizationMenuVisibility[org.id]" overlayClassName="card-more-popup"
                 :on-visible-change="(visible: boolean) => onVisibleChange(visible, org)" trigger="click"
                 destroy-on-close placement="bottom-right">
-                <div class="more-wrap" @click.stop :class="{ 'active-more': organizationMenuVisibility[org.id] }">
+                <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop :class="{ 'active-more': organizationMenuVisibility[org.id] }">
                   <img class="more-icon" src="@/assets/img/more.png" alt="" />
-                </div>
+                </button>
                 <template #content>
                   <div class="popup-menu" @click.stop>
                     <div class="popup-menu-item" @click.stop="handleSettings(org)">
@@ -127,8 +122,8 @@
 
             <!-- 卡片内容 -->
             <div class="card-content">
-              <div class="card-description">
-                {{ org.description || $t('organization.noDescription') }}
+              <div class="card-description" :title="org.description || $t('organization.noDescription')">
+                  {{ org.description || $t('organization.noDescription') }}
               </div>
             </div>
 
@@ -175,8 +170,9 @@
         </div>
 
         <!-- 空状态（按筛选显示不同文案） -->
-        <EmptyState v-else-if="!loading" icon="usergroup" :title="emptyStateTitle"
+        <EmptyState v-if="!keyword.trim() && !loading && filteredOrganizations.length === 0" :title="emptyStateTitle"
           :description="emptyStateDesc">
+          <template #icon><ResourceIcon type="organization" :size="32" /></template>
           <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
             <t-button theme="default" variant="outline" class="org-join-btn" :disabled="!canManageOrg"
               @click="handleJoinOrganization">
@@ -438,6 +434,7 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'
@@ -447,7 +444,8 @@ import { useI18n } from 'vue-i18n'
 import { copyWithToast } from '@/utils/clipboard'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
-import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
+import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
+import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import { shouldShowOrgRelationTag } from '@/utils/card-list-badge'
 
 type OrgWithUI = Organization
@@ -656,8 +654,9 @@ const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'j
   }
 }) as EventListener
 
-// 左侧筛选：'all' | 'created' | 'joined'
+// 分类筛选：'all' | 'created' | 'joined'
 const spaceSelection = ref<'all' | 'created' | 'joined'>('all')
+const keyword = ref('')
 
 // Computed
 const loading = computed(() => orgStore.loading)
@@ -666,7 +665,7 @@ const organizations = computed<OrgWithUI[]>(() => orgStore.organizations)
 const createdCount = computed(() => organizations.value.filter(o => o.is_owner).length)
 const joinedCount = computed(() => organizations.value.filter(o => !o.is_owner).length)
 
-const filteredOrganizations = computed(() => {
+const unsearchedFilteredOrganizations = computed(() => {
   if (spaceSelection.value === 'created') return organizations.value.filter(o => o.is_owner)
   if (spaceSelection.value === 'joined') return organizations.value.filter(o => !o.is_owner)
   // 「全部」视图下把我创建的 owner 排在前面、我加入的排在后面，方便上面的
@@ -676,6 +675,7 @@ const filteredOrganizations = computed(() => {
     return a.is_owner ? -1 : 1
   })
 })
+const filteredOrganizations = computed(() => unsearchedFilteredOrganizations.value.filter(item => matchesResourceQuery(item, keyword.value)))
 
 type OrgSectionKey = 'created' | 'joined'
 const collapsedOrgSections = ref<Set<OrgSectionKey>>(new Set())
@@ -716,14 +716,6 @@ const emptyStateDesc = computed(() => {
 })
 
 // Methods
-function getRoleTheme(role: string) {
-  switch (role) {
-    case 'admin': return 'primary'
-    case 'editor': return 'warning'
-    default: return 'default'
-  }
-}
-
 const onVisibleChange = (visible: boolean, org: OrgWithUI) => {
   if (!visible) {
     organizationMenuVisibility[org.id] = false
@@ -981,13 +973,6 @@ function previewSearchableOrg(org: SearchableOrganizationItem) {
   inviteCode.value = ''
 }
 
-// 查看搜索到的空间（已是成员时，打开空间设置；不关闭加入弹窗，关闭设置后仍回到搜索）
-function viewSearchableOrg(org: SearchableOrganizationItem) {
-  settingsOrgId.value = org.id
-  settingsMode.value = 'edit'
-  showSettingsModal.value = true
-}
-
 // 从预览弹框中查看空间（已是成员时；不关闭加入弹窗，关闭设置后仍回到搜索）
 function viewOrganizationFromPreview() {
   if (!invitePreviewData.value) return
@@ -1071,36 +1056,24 @@ onUnmounted(() => {
   window.removeEventListener('openOrganizationDialog', handleOrganizationDialogEvent)
   teardownInviteBodyResizeObserver()
 })
+// A new search reveals matching rows even if their group was previously collapsed.
+watch(keyword, () => { collapsedOrgSections.value = new Set() })
 </script>
 
 <style scoped lang="less">
 @import (reference) '@/components/css/resource-card.less';
 
 .org-list-container {
-  margin: 0 16px 0 0;
-  height: 100%;
-  box-sizing: border-box;
   flex: 1;
-  display: flex;
-  position: relative;
+  min-width: 0;
   min-height: 0;
-}
-
-.org-list-content {
-  flex: 1;
+  height: 100%;
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 20px 28px 0 28px;
 }
 
-.org-list-main {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 8px 0;
-}
+.org-list-content { .resource-list-content(); }
+
+.org-list-main { .resource-list-main(); }
 
 .header {
   display: flex;
@@ -1122,6 +1095,9 @@ onUnmounted(() => {
   }
 
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
@@ -1208,168 +1184,18 @@ onUnmounted(() => {
   }
 }
 
-// Tab 切换样式（下划线式，与整体协作感一致）
-.org-tabs {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  margin-bottom: 24px;
-
-  .tab-item {
-    padding: 12px 0;
-    cursor: pointer;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-base);
-    font-weight: 400;
-    user-select: none;
-    position: relative;
-    transition: color var(--app-motion-base) ease;
-
-    &:hover {
-      color: var(--td-text-color-secondary);
-    }
-
-    &.active {
-      color: var(--td-brand-color);
-      font-weight: 500;
-
-      &::after {
-        content: '';
-        position: absolute;
-        bottom: -1px;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: var(--td-brand-color);
-        border-radius: 1px;
-      }
-    }
-  }
-}
-
-@keyframes contentFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .org-card-wrap {
   .resource-card-grid();
 }
 
 // 共享空间分组标题——与 KB / Agent 列表口径完全一致（图标 + 名称 + 数量 + 折叠 chevron）。
 .org-section-header {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  // 整行只用来铺背景；点击靠子元素冒泡，避免点到标题右侧空白误折叠。
-  pointer-events: none;
-
-  & > * {
-    pointer-events: auto;
-  }
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--td-bg-color-container);
-  box-shadow: 0 -8px 0 0 var(--td-bg-color-container),
-    0 4px 0 0 var(--td-bg-color-container);
-  padding: 6px 4px 6px 0;
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: var(--app-text-md);
-  font-weight: 600;
-  line-height: 20px;
-  cursor: pointer;
-  user-select: none;
-  outline: none;
-
-  &:hover {
-    color: var(--td-text-color-primary);
-  }
-
-  &:focus-visible {
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
-  }
-
-  .t-icon {
-    color: inherit;
-  }
-
-  .org-section-toggle {
-    margin-left: 4px;
-    opacity: 0.7;
-    transition: opacity var(--app-motion-fast) ease;
-  }
-
-  .org-section-count {
-    margin-left: 2px;
-    padding: 0 6px;
-    border-radius: var(--app-radius-md);
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-    font-size: var(--app-text-xs);
-    line-height: 16px;
-    font-weight: 500;
-  }
-
-  &:hover .org-section-toggle {
-    opacity: 1;
-  }
+  .resource-section-header();
 }
 
 /* 与知识库 / 智能体列表统一：紧凑 + 1px 描边 */
 .org-card {
   .resource-card();
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 120px;
-    height: 80px;
-    background: radial-gradient(ellipse 60% 50% at 100% 0%, color-mix(in srgb, var(--td-brand-color) 6%, transparent) 0%, transparent 70%);
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  .card-decoration {
-    color: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
-  }
-
-  &:hover .card-decoration {
-    color: color-mix(in srgb, var(--td-brand-color) 55%, transparent);
-  }
-
-}
-
-// 卡片装饰：协作网络图形
-.card-decoration {
-  position: absolute;
-  top: 8px;
-  right: 14px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  pointer-events: none;
-  z-index: 0;
-  transition: color var(--app-motion-slow) ease;
-
-  .card-deco-svg {
-    display: block;
-    width: 56px;
-    height: 40px;
-  }
 }
 
 // 空间头像容器（SpaceAvatar 自带样式）
@@ -1416,15 +1242,15 @@ onUnmounted(() => {
   }
 
   &.stat-kb {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
 
     .t-icon {
-      color: var(--td-brand-color);
+      color: var(--td-text-color-secondary);
     }
 
     &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+      background: var(--td-bg-color-container-hover);
     }
   }
 
@@ -1522,63 +1348,17 @@ onUnmounted(() => {
   }
 }
 
-// 响应式布局
-@media (min-width: 900px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (min-width: 1250px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (min-width: 1600px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-@media (min-width: 1900px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(5, 1fr);
-  }
-}
-
-@media (min-width: 2200px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(6, 1fr);
-  }
-}
-
 // 删除/离开确认对话框样式
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
 
+.resource-list-header();
+
 </style>
 
 <style lang="less">
 /* 下拉菜单样式已统一至 @/assets/dropdown-menu.less */
-
-// 创建对话框样式优化
-.create-org-dialog,
-.join-org-dialog {
-  .t-form-item__label {
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-base);
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .t-input,
-  .t-textarea {
-    font-family: var(--app-font-family);
-  }
-
-}
 
 // 邀请预览弹框 - 参考 FAQ 导入弹窗风格，更紧凑
 .invite-preview-overlay {
@@ -1798,10 +1578,6 @@ onUnmounted(() => {
 
 .join-tab-content {
   width: 100%;
-}
-
-.search-input-wrap {
-  margin-bottom: 16px;
 }
 
 // 搜索空间列表容器（与主列表一致：无外框，卡片间距）

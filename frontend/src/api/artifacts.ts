@@ -1,4 +1,4 @@
-import { get } from '@/utils/request'
+import { del, get } from '@/utils/request'
 
 /**
  * One file in the artifact library: the latest version of a file a skill
@@ -46,4 +46,26 @@ export function listArtifactLibrary(params: ArtifactLibraryParams = {}) {
   if (params.page) query.page = params.page
   if (params.pageSize) query.page_size = params.pageSize
   return get<ArtifactLibraryPage>('/api/v1/artifacts', { params: query })
+}
+
+export interface ArtifactDeleteResult {
+  success: boolean
+  data: { file_name: string; deleted: number }
+}
+
+/**
+ * Deletes a file from the artifact library, along with every earlier version of
+ * it in the same session — a library row is the file, not one regeneration of
+ * it, so leaving the older versions behind would leave the row in place.
+ *
+ * The stored bytes are reclaimed unless something else still references them,
+ * so this is not reversible. Callers confirm with the user first.
+ */
+export function deleteArtifactLibraryItem(item: ArtifactLibraryItem) {
+  const query = new URLSearchParams({
+    session_id: item.session_id,
+    message_id: item.message_id,
+    index: String(item.index),
+  })
+  return del<ArtifactDeleteResult>(`/api/v1/artifacts?${query.toString()}`)
 }

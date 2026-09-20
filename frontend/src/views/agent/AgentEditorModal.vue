@@ -846,9 +846,9 @@
         </div>
       </div>
 
-      <!-- 多轮对话。Agent 模式下 history_turns 同样生效（session_agent_qa.go
-           经 LoadAgentHistory 读取），所以本组不再整体按模式隐藏；开关本身仍由
-           EnsureDefaults 强制开启，故只在普通模式展示。 -->
+      <!-- 多轮对话。两种模式都保留本组：Agent 模式在这里说明历史按上下文窗口
+           自动管理，并承载跨轮保留检索结果；开关由 EnsureDefaults 强制开启，
+           故只在普通模式展示。 -->
       <div v-show="currentSection === 'conversation'" class="section">
         <div class="section-header">
           <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
@@ -868,8 +868,9 @@
             </div>
           </div>
 
-          <!-- 保留轮数（Agent 模式恒为多轮，故不受开关状态影响） -->
-          <div v-if="formData.config.multi_turn_enabled || isAgentMode" class="setting-row">
+          <!-- 保留轮数（仅普通模式：Agent 模式按上下文窗口加载历史、超出时压缩成
+               摘要，见 session_agent_qa.go -> LoadAgentHistory，不读 history_turns） -->
+          <div v-if="!isAgentMode && formData.config.multi_turn_enabled" class="setting-row">
             <div class="setting-info">
               <label>{{ $t('agent.editor.historyTurns') }}</label>
               <p class="desc">{{ $t('agentEditor.desc.historyRounds') }}</p>
@@ -1380,6 +1381,21 @@
                           <t-icon :name="skillStatusIcon(skill)" size="14px" />
                           {{ skillStatusHint(skill) }}
                         </span>
+                        <span
+                          v-if="skill.selectable && skill.servedNote"
+                          class="skill-pick__hint"
+                          :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
+                        >
+                          <t-icon :name="isSkillBusy(skill) ? 'refresh' : 'error-circle'" size="14px" />
+                          {{ skill.servedNote }}
+                        </span>
+                        <span
+                          v-if="canUpgradeSkillRow(skill)"
+                          class="skill-pick__hint skill-pick__hint--upgrade"
+                        >
+                          <t-icon name="arrow-up" size="14px" />
+                          {{ skillUpgradeHint(skill) }}
+                        </span>
                       </div>
                       <p
                         v-if="skill.description"
@@ -1393,13 +1409,24 @@
                       variant="text"
                       theme="primary"
                       :loading="installingCatalogId === skill.id"
-                      :title="$t('agent.editor.installToThisSandbox')"
+                      :title="installsAnUpgrade(skill) ? $t('agent.editor.upgradeOnThisSandbox') : $t('agent.editor.installToThisSandbox')"
                       @click.stop="installCatalogToCurrent(skill)"
                     >
-                      {{ $t('agent.editor.installShort') }}
+                      {{ installsAnUpgrade(skill) ? $t('settings.skills.upgrade') : $t('agent.editor.installShort') }}
                     </t-button>
                     <t-button
-                      v-else-if="isSkillBusy(skill)"
+                      v-else-if="canUpgradeSkillRow(skill)"
+                      size="small"
+                      variant="text"
+                      theme="primary"
+                      :loading="installingCatalogId === skill.id"
+                      :title="$t('agent.editor.upgradeOnThisSandbox')"
+                      @click.stop="installCatalogToCurrent(skill)"
+                    >
+                      {{ $t('settings.skills.upgrade') }}
+                    </t-button>
+                    <t-button
+                      v-else-if="canInstallSkills && isSkillBusy(skill)"
                       size="small"
                       variant="text"
                       theme="primary"
@@ -1812,6 +1839,7 @@ import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
 import { normalizeLegacyToolNames } from '@/utils/legacy-tool-names';
 import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill';
+import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import {
   isNamedSandboxBackend,
@@ -2049,6 +2077,12 @@ type CatalogSkillRow = SkillCatalogItem & {
   selectable: boolean
   installStatus: string
   installEnabled: boolean
+  // The install on this sandbox is still on an archive the catalog has moved past.
+  upgradable: boolean
+  installVersion: string
+  // Set while a newer install runs or after it failed: the sandbox still runs
+  // the previous version, so the skill stays usable.
+  servedNote: string
 }
 
 const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
@@ -2060,8 +2094,13 @@ const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
     const installStatus = inst?.status || ''
     const installEnabled = Boolean(inst?.enabled)
     const installed = Boolean(inst) && installStatus !== 'removed'
-    const selectable = installStatus === 'ready' && installEnabled
-    return { ...item, installed, selectable, installStatus, installEnabled }
+    const servedNote = inst ? servedPreviousText(t, inst) : ''
+    const selectable = installEnabled && (installStatus === 'ready' || Boolean(servedNote))
+    const upgradable = Boolean(inst && installUpgradable(item, inst))
+    return {
+      ...item, installed, selectable, installStatus, installEnabled,
+      upgradable, installVersion: inst?.version || '', servedNote,
+    }
   })
 })
 
@@ -2123,6 +2162,26 @@ function isSkillBusy(skill: CatalogSkillRow): boolean {
 function canInstallSkillRow(skill: CatalogSkillRow): boolean {
   if (!canInstallSkills.value || !hasSandboxSelected.value) return false
   return !skill.installed || skill.installStatus === 'failed'
+}
+
+// Upgrading writes the sandbox image through the same admin-only catalog
+// install, so it is offered, and even mentioned, only to those who can run it.
+function canUpgradeSkillRow(skill: CatalogSkillRow): boolean {
+  return canInstallSkills.value && hasSandboxSelected.value && skill.upgradable
+}
+
+// Installing the catalog version over what this sandbox has is an upgrade:
+// over an outdated install, or over a failed upgrade whose previous version
+// still runs. Only a skill the sandbox has never carried is a plain install.
+function installsAnUpgrade(skill: CatalogSkillRow): boolean {
+  return skill.upgradable || Boolean(skill.servedNote)
+}
+
+function skillUpgradeHint(skill: CatalogSkillRow): string {
+  const versions = upgradeVersions(skill, { version: skill.installVersion })
+  return versions
+    ? t('settings.skills.upgradeFromTo', versions)
+    : t('settings.skills.upgradeAvailable')
 }
 
 function namedSandboxConfigs(): SandboxConfigRecord[] {
@@ -2194,7 +2253,11 @@ function onSkillProgressChanged() {
 
 function pruneSelectedSkills() {
   if (!catalogReady.value) return
-  const names = new Set(catalogSkillRows.value.filter((skill) => skill.selectable).map((skill) => skill.name))
+  // A skill being upgraded is briefly not ready, and dropping it here would
+  // silently unselect it for good once the agent is saved.
+  const names = new Set(catalogSkillRows.value
+    .filter((skill) => skill.selectable || (skill.installed && isSkillBusy(skill)))
+    .map((skill) => skill.name))
   const selected: string[] = formData.value.config.selected_skills || []
   const kept = selected.filter((name: string) => names.has(name))
   if (kept.length !== selected.length) {
@@ -2220,13 +2283,14 @@ async function installCatalogToCurrent(skill: CatalogSkillRow) {
   const configId = formData.value.config.sandbox_config_id || ''
   if (!configId || installingCatalogId.value) return
   installingCatalogId.value = skill.id
+  const upgrading = installsAnUpgrade(skill)
   try {
     const res = await installSkillCatalog(skill.id, [configId])
     const failed = Object.keys(res?.data?.errors || {}).length
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
     } else {
-      MessagePlugin.success(t('settings.skills.installAccepted'))
+      MessagePlugin.success(t(upgrading ? 'settings.skills.upgradeAccepted' : 'settings.skills.installAccepted'))
     }
     await syncInstalledSkills(true)
   } catch (e: any) {
@@ -2624,7 +2688,7 @@ const navItems = computed(() => {
     { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
     { key: 'suggestions', icon: 'help-circle', label: t('agentEditor.questionSuggestions.navLabel') },
   ];
-  // 多轮对话（两种模式都需要：Agent 模式同样按 history_turns 截断历史）
+  // 多轮对话（两种模式都需要：Agent 模式在这里说明历史自动管理、保留检索结果）
   items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
   // 知识库与检索
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
@@ -5992,6 +6056,10 @@ const handleSave = async () => {
   .t-icon {
     flex-shrink: 0;
   }
+}
+
+.skill-pick__hint--upgrade {
+  color: var(--td-warning-color);
 }
 
 .skill-pick__hint--busy {

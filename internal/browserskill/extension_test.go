@@ -620,7 +620,7 @@ func TestRealExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	if status := m.Status(scope, "chat"); !status.Idle || status.SessionID != taskID {
-		t.Fatalf("idle lost task: %+v", status)
+		t.Fatalf("turn completion lost retained task: %+v", status)
 	}
 	checkDetached := func() {
 		t.Helper()
@@ -634,16 +634,23 @@ func TestRealExtension(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 	}
-	checkDetached()
+	_, _ = io.WriteString(input, "check-detached\n")
+	select {
+	case line := <-hostLines:
+		if line != `{"detached":false}` {
+			t.Fatalf("retained official session unexpectedly detached: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
 	if _, err = m.Preview(ctx, scope, "chat"); err != nil {
 		t.Fatal(err)
 	}
-	checkDetached()
 	if _, err = call(ctx, scope, "chat", "snapshot", nil); err != nil {
 		t.Fatal(err)
 	}
 	if m.Status(scope, "chat").Idle {
-		t.Fatal("next operation did not resume control")
+		t.Fatal("next operation did not resume preview polling")
 	}
 	if err = m.Control(ctx, scope, "chat", "pause"); err != nil {
 		t.Fatal(err)

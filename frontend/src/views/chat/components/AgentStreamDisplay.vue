@@ -395,6 +395,22 @@
                     <t-icon name="git-branch" />
                   </t-button>
                 </t-tooltip>
+                <t-popconfirm
+                  v-if="canRewind"
+                  :content="t('chat.rewind.confirmBody')"
+                  :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                  :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                  theme="warning"
+                  placement="top"
+                  overlay-class-name="chat-rewind-popconfirm"
+                  @confirm="emitRewind"
+                >
+                  <t-tooltip :content="rewindTooltip">
+                    <t-button size="small" variant="outline" shape="round" @click.stop>
+                      <t-icon name="rollback" />
+                    </t-button>
+                  </t-tooltip>
+                </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -420,6 +436,11 @@
                   <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
+                  <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                    <t-icon name="info-circle" />
+                  </t-button>
+                </t-tooltip>
+                <t-tooltip v-if="event.truncated" :content="$t('chat.truncatedHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
                   </t-button>
@@ -615,7 +636,7 @@
     v-model:visible="showArtifactDrawer"
     :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
-    :artifacts="artifactList"
+    :artifacts="liveArtifacts"
     :preview-index="artifactPreviewIndex"
   />
 </template>
@@ -987,18 +1008,26 @@ const props = defineProps<{
   ragMode?: boolean;
   followUpLoading?: boolean;
   canFork?: boolean;
+  canRewind?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: 'render-complete-change', ready: boolean): void;
   (event: 'fork', messageId: string): void;
+  (event: 'rewind', messageId: string): void;
 }>();
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
 const forkTooltip = '从这条回答继续分叉'
+const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
   const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
   if (messageId) emit('fork', messageId)
+}
+const emitRewind = () => {
+  const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
+  if (messageId) emit('rewind', messageId)
 }
 
 const embedAuthProps = computed(() => ({
@@ -1072,8 +1101,13 @@ const artifactList = computed(() => {
   const list = ((props.session?.artifacts as any[]) || []);
   return list.map((a, i) => ({ index: i, ...a }));
 });
-const hasArtifacts = computed(() => artifactList.value.length > 0);
-const artifactCount = computed(() => artifactList.value.length);
+// Deleted files stay in artifactList on purpose: the inline renderer needs the
+// tombstone to tell "you deleted this" apart from "this handle belongs to some
+// other message", and its position is still the download address of the files
+// after it. Everything that counts or lists files uses the live view.
+const liveArtifacts = computed(() => artifactList.value.filter((a) => !a.deleted_at));
+const hasArtifacts = computed(() => liveArtifacts.value.length > 0);
+const artifactCount = computed(() => liveArtifacts.value.length);
 const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifactCount);
 const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session as any));
 const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
@@ -1111,6 +1145,7 @@ const artifactRefContext = computed(() => {
 const artifactRefLabels = computed(() => ({
   previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
   missingHint: t('agent.artifactDrawer.inlineMissing'),
+  deletedHint: t('agent.artifactDrawer.inlineDeleted'),
 }));
 
 const {

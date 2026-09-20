@@ -275,10 +275,10 @@ onBeforeUnmount(() => {
   width: max-content;
   min-width: 108px;
   max-width: min(200px, calc(100vw - 16px));
-  padding: 3px;
+  padding: 4px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 7px;
-  background: var(--td-bg-color-sidebar);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05), 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
@@ -286,12 +286,12 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  min-height: 28px;
-  padding: 4px 6px;
+  min-height: 32px;
+  padding: 6px 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-primary);
   cursor: pointer;
@@ -306,10 +306,10 @@ onBeforeUnmount(() => {
 
   &--active {
     background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
+    color: var(--td-brand-color);
 
     .session-source-filter__icon {
-      color: var(--td-text-color-secondary);
+      color: var(--td-brand-color);
     }
 
     .session-source-filter__logo {
@@ -320,16 +320,17 @@ onBeforeUnmount(() => {
 }
 
 .session-source-filter__option-label {
-  font-size: var(--app-text-sm);
-  font-weight: 500;
-  line-height: 16px;
+  font-size: var(--app-text-base);
+  font-weight: 400;
+  line-height: 20px;
+  letter-spacing: normal;
 }
 
 .session-source-filter__check {
   flex: 0 0 13px;
   width: 13px;
   margin-left: 2px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-brand-color);
   font-size: var(--app-text-sm) !important;
   visibility: hidden;
 

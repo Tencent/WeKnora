@@ -274,7 +274,7 @@ type CustomAgentConfig struct {
 	// ===== Multi-turn Conversation Settings =====
 	// Whether multi-turn conversation is enabled
 	MultiTurnEnabled bool `yaml:"multi_turn_enabled" json:"multi_turn_enabled"`
-	// Number of history turns to keep in context
+	// Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window
 	HistoryTurns int `yaml:"history_turns" json:"history_turns"`
 	// Whether this agent may read the user's long-term memory. Nil inherits
 	// the workspace setting; false opts a single agent out of memory even when
@@ -587,6 +587,8 @@ type SuggestedQuestion struct {
 	Source string `json:"source"`
 	// 来源知识库ID（仅 faq/document/wiki 来源时有值）
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// 来源文档ID（仅 faq/document 来源时有值）
+	KnowledgeID string `json:"knowledge_id,omitempty"`
 }
 
 // BuiltinAgentRegistry provides a registry of all built-in agents.

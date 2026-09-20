@@ -161,8 +161,11 @@
                 </div>
               </template>
               <template #actor="{ row }">
-                <div class="audit-actor">
-                  <span class="audit-actor-name">{{ actorLabel(row) }}</span>
+                <div class="audit-actor" :title="actorLabel(row)">
+                  <span class="audit-actor-name">{{ actorPersonLabel(row) }}</span>
+                  <span v-if="activityAPIKeyName(row)" class="audit-actor-key">
+                    {{ actorAPIKeyLabel(row) }}
+                  </span>
                 </div>
               </template>
               <template #outcome="{ row }">
@@ -332,7 +335,7 @@ const columns = computed(() => [
     width: 132,
   },
   { colKey: 'target', title: t('knowledgeEditor.activity.columns.target'), minWidth: 180 },
-  { colKey: 'actor', title: t('knowledgeEditor.activity.columns.actor'), width: 120 },
+  { colKey: 'actor', title: t('knowledgeEditor.activity.columns.actor'), width: 132 },
   {
     colKey: 'outcome',
     title: 'outcome-title',
@@ -503,13 +506,38 @@ function targetDiff(entry: KnowledgeBaseActivity): string {
   return ''
 }
 
-function actorLabel(entry: KnowledgeBaseActivity): string {
+function actorPersonLabel(entry: KnowledgeBaseActivity): string {
   if (!entry.actor_user_id) return t('knowledgeEditor.activity.systemActor')
   const me = authStore.user
   if (me?.id === entry.actor_user_id) {
     return me.username?.trim() || me.email?.trim() || entry.actor_user_id.slice(0, 8)
   }
   return entry.actor_user_id.slice(0, 8)
+}
+
+function actorAPIKeyLabel(entry: KnowledgeBaseActivity): string {
+  const name = activityAPIKeyName(entry)
+  return name ? t('knowledgeEditor.activity.actorAPIKey', { name }) : ''
+}
+
+function actorLabel(entry: KnowledgeBaseActivity): string {
+  const person = actorPersonLabel(entry)
+  const keyName = activityAPIKeyName(entry)
+  if (keyName) {
+    return t('knowledgeEditor.activity.actorWithAPIKey', { actor: person, name: keyName })
+  }
+  return person
+}
+
+function activityAPIKeyName(entry: KnowledgeBaseActivity): string {
+  const value = details(entry).api_key_name
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function activityAPIKeyId(entry: KnowledgeBaseActivity): string {
+  const value = details(entry).api_key_id
+  if (value === undefined || value === null || value === '') return ''
+  return String(value)
 }
 
 function formatDatePart(value: string): string {
@@ -611,6 +639,22 @@ function identifierFields(entry: KnowledgeBaseActivity): DetailField[] {
       key: 'actorId',
       label: t('knowledgeEditor.activity.expanded.actorId'),
       value: entry.actor_user_id,
+    })
+  }
+  const keyName = activityAPIKeyName(entry)
+  if (keyName) {
+    fields.push({
+      key: 'apiKeyName',
+      label: t('knowledgeEditor.activity.expanded.apiKeyName'),
+      value: keyName,
+    })
+  }
+  const keyId = activityAPIKeyId(entry)
+  if (keyId) {
+    fields.push({
+      key: 'apiKeyId',
+      label: t('knowledgeEditor.activity.expanded.apiKeyId'),
+      value: keyId,
     })
   }
   return fields
@@ -821,7 +865,7 @@ onUnmounted(() => detachInfiniteScroll())
 
   &.active {
     color: var(--td-brand-color);
-    background: var(--td-brand-color-light);
+    background: var(--app-selection-bg);
   }
 }
 
@@ -851,23 +895,24 @@ onUnmounted(() => detachInfiniteScroll())
   gap: 8px;
   padding: 6px 10px;
   border: none;
-  border-radius: var(--app-radius-sm);
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-primary);
-  font-size: var(--app-text-md);
-  line-height: 1.4;
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
+  font-weight: 400;
+  line-height: 20px;
   cursor: pointer;
   text-align: left;
   transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer);
+    background: var(--td-bg-color-container-hover);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
+    background: var(--app-selection-bg);
     color: var(--td-brand-color);
-    font-weight: 500;
   }
 }
 
@@ -945,15 +990,28 @@ onUnmounted(() => detachInfiniteScroll())
 }
 
 .audit-actor {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
+  line-height: 1.3;
+
+  .audit-actor-name,
+  .audit-actor-key {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .audit-actor-name {
     font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+
+  .audit-actor-key {
+    font-size: var(--app-text-sm, 12px);
+    color: var(--td-text-color-secondary);
   }
 }
 

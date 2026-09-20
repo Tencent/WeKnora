@@ -20,3 +20,28 @@
   background: rgba(36, 36, 36, 0.92);
   border-color: rgba(255, 255, 255, 0.08);
 }
+
+// A quiet option surface, with the brand accent reserved for the small check.
+.t-select-option.t-is-selected:not(.t-is-disabled),
+.t-select-option.t-is-selected:not(.t-is-disabled):hover {
+  background-color: var(--app-selection-bg);
+  color: var(--td-text-color-primary);
+  font-weight: 500;
+}
+
+// A check keeps single-selection menus distinct from hover without using color alone.
+.t-select-option.t-is-selected:not(.t-is-disabled):not(:has(.t-checkbox))::after {
+  content: '';
+  flex: 0 0 auto;
+  width: 5px;
+  height: 9px;
+  margin-left: auto;
+  margin-right: 2px;
+  color: var(--td-brand-color);
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+.t-select-option.t-is-selected:not(.t-is-disabled):not(:has(.t-checkbox)) {
+  gap: 8px;
+}

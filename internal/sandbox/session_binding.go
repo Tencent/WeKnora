@@ -294,6 +294,7 @@ type MemorySessionSandboxBindingStore struct {
 	bindings map[SessionSandboxKey]SessionSandboxBinding
 	locks    map[SessionSandboxKey]*memoryLifecycleLock
 	turns    map[SessionSandboxKey]*memoryTurnLease
+	rewinds  map[SessionSandboxKey]struct{}
 }
 
 // NewMemorySessionSandboxBindingStore creates an empty in-memory store.
@@ -302,6 +303,7 @@ func NewMemorySessionSandboxBindingStore() *MemorySessionSandboxBindingStore {
 		bindings: make(map[SessionSandboxKey]SessionSandboxBinding),
 		locks:    make(map[SessionSandboxKey]*memoryLifecycleLock),
 		turns:    make(map[SessionSandboxKey]*memoryTurnLease),
+		rewinds:  make(map[SessionSandboxKey]struct{}),
 	}
 }
 
@@ -539,6 +541,9 @@ func (s *MemorySessionSandboxBindingStore) BeginTurn(
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, held := s.rewinds[key]; held {
+		return ErrSessionRewindLocked
+	}
 	lease := s.turns[key]
 	if lease == nil {
 		lease = &memoryTurnLease{}
@@ -571,6 +576,53 @@ func (s *MemorySessionSandboxBindingStore) EndTurn(
 		delete(s.turns, key)
 	}
 	return nil
+}
+
+// TryLockRewind takes a process-local exclusive rewind lock for key.
+func (s *MemorySessionSandboxBindingStore) TryLockRewind(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (func(), error) {
+	if err := key.Validate(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rewinds == nil {
+		s.rewinds = make(map[SessionSandboxKey]struct{})
+	}
+	if lease := s.turns[key]; lease != nil && lease.refs > 0 {
+		return nil, ErrSessionTurnActive
+	}
+	if _, held := s.rewinds[key]; held {
+		return nil, ErrSessionRewindLocked
+	}
+	s.rewinds[key] = struct{}{}
+	return func() {
+		s.mu.Lock()
+		delete(s.rewinds, key)
+		s.mu.Unlock()
+	}, nil
+}
+
+// HasRewindLock reports whether rewind currently holds key.
+func (s *MemorySessionSandboxBindingStore) HasRewindLock(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (bool, error) {
+	if err := key.Validate(); err != nil {
+		return false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, held := s.rewinds[key]
+	return held, nil
 }
 
 // TurnState reports whether a chat turn is open and whether its first
