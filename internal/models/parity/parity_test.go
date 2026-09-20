@@ -142,6 +142,79 @@ func TestLegacyWireParity(t *testing.T) {
 				"max_completion_tokens as the field and max_tokens as deprecated, so the vendor " +
 				"audit switched it; both are still accepted upstream.",
 		},
+		// The seven vendors below moved the other way: the old table left them
+		// on the default max_completion_tokens and the audit put them on
+		// max_tokens. Each entry carries the documentation that decided it, so
+		// a later flip back is a visible change rather than a silent one.
+		{
+			name: "aliyun moved to max_tokens", provider: "aliyun", model: "qwen3-max",
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
+			divergence: "DashScope's parameter table marks max_tokens 即将废弃 and names " +
+				"max_completion_tokens its successor, but nothing says max_tokens is rejected and " +
+				"it is what the compatible mode has always taken, so the audit kept the older " +
+				"field. This is the one output-cap decision that goes against the vendor's own " +
+				"stated direction; revisit it when DashScope announces a removal date.",
+		},
+		{
+			name: "hunyuan moved to max_tokens", provider: "hunyuan", model: "hunyuan-turbos-latest",
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
+			divergence: "the OpenAI-compatible reference documents only max_tokens (default 4096); " +
+				"max_completion_tokens appears nowhere in it.",
+		},
+		{
+			name: "modelscope moved to max_tokens", provider: "modelscope", model: "ZhipuAI/GLM-4.6",
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
+			divergence: "ModelScope API-Inference documents no output-cap parameter at all. " +
+				"max_tokens is carried over from the DashScope/Bailian channel behind it and is " +
+				"marked unverified in the vendor package, so this case pins a guess, not a fact.",
+		},
+		{
+			name: "qiniu moved to max_tokens", provider: "qiniu", model: "qwen3.5-397b-a17b",
+			opts:       &api.Options{MaxTokens: 100},
+			want:       map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
+			divergence: "max_completion_tokens is not in the Qiniu reference.",
+		},
+		{
+			name: "longcat moved to max_tokens", provider: "longcat", model: "LongCat-2.0",
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
+			divergence: "max_completion_tokens is not part of the LongCat reference; max_tokens " +
+				"defaults to and tops out at the model's 131072 output budget.",
+		},
+		{
+			name: "requesty moved to max_tokens", provider: "requesty", model: "anthropic/claude-opus-5",
+			opts:       &api.Options{MaxTokens: 100},
+			want:       map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
+			divergence: "max_completion_tokens appears nowhere in Requesty's documentation.",
+		},
+		{
+			name: "novita moved to max_tokens", provider: "novita", model: "moonshotai/kimi-k3",
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
+			divergence: "Novita documents max_tokens as required and never mentions " +
+				"max_completion_tokens.",
+		},
+		// NVIDIA is the one vendor whose output-cap field is per model, so the
+		// vendor-level case above ("nvidia keeps max_tokens", an uncatalogued
+		// deployment) does not cover these two.
+		{
+			name: "nvidia kimi-k3 overrides the vendor default", provider: "nvidia", model: "moonshotai/kimi-k3",
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_completion_tokens": float64(100), "max_tokens": nil},
+			divergence: "NVIDIA's own curl and Python samples use max_tokens, which is why that is " +
+				"the vendor default, but the build.nvidia.com cards for kimi-k3 and " +
+				"gemma-4-31b-it show max_completion_tokens; those two entries override it.",
+		},
+		{
+			name:     "nvidia gemma-4 overrides the vendor default",
+			provider: "nvidia", model: "google/gemma-4-31b-it",
+			opts:       &api.Options{MaxTokens: 100},
+			want:       map[string]any{"max_completion_tokens": float64(100), "max_tokens": nil},
+			divergence: "see the kimi-k3 case above; the model card shows max_completion_tokens.",
+		},
 		{
 			name: "nvidia keeps max_tokens", provider: "nvidia", model: "some-nim-model",
 			opts: &api.Options{MaxTokens: 100},
