@@ -42,14 +42,16 @@ const (
 // ExtraField describes one vendor-specific configuration input the model
 // editor renders dynamically (Azure api-version, LKEAP secret key, ...).
 type ExtraField struct {
-	Key         string             `json:"key"`
-	Label       string             `json:"label"`
-	Labels      map[string]string  `json:"labels,omitempty"`
-	Type        string             `json:"type"` // "string", "number", "boolean", "select", "password"
-	Required    bool               `json:"required"`
-	Default     string             `json:"default,omitempty"`
-	Placeholder string             `json:"placeholder,omitempty"`
-	Options     []ExtraFieldOption `json:"options,omitempty"`
+	Key         string            `json:"key"`
+	Label       string            `json:"label"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Type        string            `json:"type"` // "string", "number", "boolean", "select", "password"
+	Required    bool              `json:"required"`
+	Default     string            `json:"default,omitempty"`
+	Placeholder string            `json:"placeholder,omitempty"`
+	// Placeholders carries localized variants of Placeholder.
+	Placeholders map[string]string  `json:"placeholders,omitempty"`
+	Options      []ExtraFieldOption `json:"options,omitempty"`
 	// ModelTypes restricts the field to some model types; empty means all.
 	ModelTypes []types.ModelType `json:"model_types,omitempty"`
 	// Secret marks values that must never be echoed back to the UI.
@@ -102,6 +104,11 @@ func localizedOr(table map[string]string, locale, fallback string) string {
 	return fallback
 }
 
+// LocalizedPlaceholder resolves the placeholder for a locale.
+func (f ExtraField) LocalizedPlaceholder(locale string) string {
+	return localizedOr(f.Placeholders, locale, f.Placeholder)
+}
+
 // CredentialLabelFor returns the credential naming for a model type, or nil
 // when the vendor uses the generic API-key wording.
 func (v *Vendor) CredentialLabelFor(modelType types.ModelType) *CredentialLabel {
@@ -119,10 +126,19 @@ func (v *Vendor) CredentialLabelFor(modelType types.ModelType) *CredentialLabel 
 	return nil
 }
 
-// ExtraFieldOption is one choice of a select field.
+// ExtraFieldOption is one choice of a select field. Labels carries localized
+// variants keyed by locale, like every other operator-facing string here: an
+// option whose label is prose rather than an identifier is unreadable to half
+// the product without it.
 type ExtraFieldOption struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
+	Label  string            `json:"label"`
+	Labels map[string]string `json:"labels,omitempty"`
+	Value  string            `json:"value"`
+}
+
+// LocalizedLabel resolves the option label for a locale.
+func (o ExtraFieldOption) LocalizedLabel(locale string) string {
+	return localizedOr(o.Labels, locale, o.Label)
 }
 
 // ModelCost is priced per million tokens, in USD unless Currency says otherwise.

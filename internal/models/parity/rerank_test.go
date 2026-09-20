@@ -468,3 +468,55 @@ func TestScoreScaleIsOverridablePerRow(t *testing.T) {
 	})
 	require.Error(t, err, "an unknown scale must not be treated as a probability")
 }
+
+// TestGatewayVendorsOfferTheScoreScaleOverride keeps the override where the
+// question is open. A gateway cannot know which reranker is deployed behind
+// it, so all three offer the input; the other vendors' scales are settled by
+// their own documentation and must not offer a switch that only lets an
+// operator get it wrong.
+func TestGatewayVendorsOfferTheScoreScaleOverride(t *testing.T) {
+	gateways := map[string]bool{"generic": true, "gpustack": true, "litellm": true}
+
+	for _, v := range catalog.ListByType(types.ModelTypeRerank) {
+		var field *catalog.ExtraField
+		for i := range v.ExtraFields {
+			if v.ExtraFields[i].Key == catalog.ExtraScoreScale {
+				field = &v.ExtraFields[i]
+			}
+		}
+		if !gateways[v.ID] {
+			assert.Nil(t, field, "%s: its documentation settles the scale", v.ID)
+			continue
+		}
+		require.NotNil(t, field, "%s is a gateway and needs the override", v.ID)
+		require.Len(t, field.Options, 2)
+		for _, opt := range field.Options {
+			assert.NotEmpty(t, opt.LocalizedLabel("zh-CN"), "%s: option %q has no label", v.ID, opt.Value)
+			assert.NotEqual(t, opt.Label, opt.LocalizedLabel("zh-CN"),
+				"%s: option %q is prose and needs a zh-CN label", v.ID, opt.Value)
+		}
+		assert.NotEqual(t, field.Placeholder, field.LocalizedPlaceholder("zh-CN"),
+			"%s: the placeholder is prose and needs a zh-CN variant", v.ID)
+	}
+}
+
+// Every operator-facing string a vendor declares has to exist in both
+// languages, or half the product reads English prose in a Chinese form.
+func TestEveryExtraFieldProseIsLocalized(t *testing.T) {
+	for _, v := range catalog.List() {
+		for _, field := range v.ExtraFields {
+			if field.Placeholder != "" && strings.Contains(field.Placeholder, " ") {
+				assert.NotEqual(t, field.Placeholder, field.LocalizedPlaceholder("zh-CN"),
+					"%s/%s: placeholder is prose without a zh-CN variant", v.ID, field.Key)
+			}
+			for _, opt := range field.Options {
+				// An identifier (a region code, a version) is the same in
+				// every language; prose is not.
+				if strings.Contains(opt.Label, " ") {
+					assert.NotEqual(t, opt.Label, opt.LocalizedLabel("zh-CN"),
+						"%s/%s: option %q is prose without a zh-CN label", v.ID, field.Key, opt.Value)
+				}
+			}
+		}
+	}
+}

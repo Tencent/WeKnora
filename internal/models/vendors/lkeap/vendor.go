@@ -111,8 +111,11 @@ func init() {
 				Type:        "password",
 				Required:    true,
 				Placeholder: "Tencent Cloud SecretKey (the API Key field holds the SecretId)",
-				ModelTypes:  rerankOnly,
-				Secret:      true,
+				Placeholders: map[string]string{
+					"zh-CN": "腾讯云 SecretKey（API Key 那一栏填的是 SecretId）",
+				},
+				ModelTypes: rerankOnly,
+				Secret:     true,
 			},
 			{
 				// RunRerank is only published in ap-beijing and ap-guangzhou.

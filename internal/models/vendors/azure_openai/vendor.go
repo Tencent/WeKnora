@@ -148,6 +148,9 @@ func init() {
 				// api-version. A value switches back to the dated
 				// /openai/deployments/... path.
 				Placeholder: "leave empty for /openai/v1, or e.g. 2025-04-01-preview",
+				Placeholders: map[string]string{
+					"zh-CN": "留空走 /openai/v1，或填如 2025-04-01-preview",
+				},
 			},
 		},
 		Compat: catalog.VendorCompat{

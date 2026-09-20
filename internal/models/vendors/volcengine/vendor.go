@@ -150,8 +150,11 @@ func init() {
 				Type:        "password",
 				Required:    true,
 				Placeholder: "Volcengine IAM secret key (the API Key field holds the access key)",
-				ModelTypes:  rerankOnly,
-				Secret:      true,
+				Placeholders: map[string]string{
+					"zh-CN": "火山引擎 IAM Secret Access Key（API Key 那一栏填的是 Access Key ID）",
+				},
+				ModelTypes: rerankOnly,
+				Secret:     true,
 			},
 			{
 				Key:         "region",
@@ -169,7 +172,10 @@ func init() {
 				Type:        "string",
 				Default:     "Whether the Document answers the Query or matches the content retrieval intent",
 				Placeholder: "Instruction passed to the rerank model",
-				ModelTypes:  rerankOnly,
+				Placeholders: map[string]string{
+					"zh-CN": "传给重排模型的 instruction",
+				},
+				ModelTypes: rerankOnly,
 			},
 		},
 		RerankAPI: api.RerankVolcengineKnowledge,

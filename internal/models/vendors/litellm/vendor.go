@@ -78,6 +78,31 @@ func init() {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
+		ExtraFields: []catalog.ExtraField{{
+			Key:    catalog.ExtraScoreScale,
+			Label:  "Rerank score scale",
+			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},
+			Type:   "select",
+			Options: []catalog.ExtraFieldOption{
+				{
+					Label:  "Unbounded score (Qwen3-Reranker class)",
+					Labels: map[string]string{"zh-CN": "无界分数（Qwen3-Reranker 一类）"},
+					Value:  "logit",
+				},
+				{
+					Label:  "0..1 relevance (BGE class)",
+					Labels: map[string]string{"zh-CN": "0~1 相关度（BGE 一类）"},
+					Value:  "probability",
+				},
+			},
+			Placeholder:  "match the reranker actually deployed behind this endpoint",
+			Placeholders: map[string]string{"zh-CN": "按这个端点后面实际部署的重排模型选择"},
+			// A gateway serves whatever reranker was deployed behind it, and
+			// the two families disagree. The vendor default follows the
+			// documentation; the operator knows which model is actually there.
+			Required:   false,
+			ModelTypes: []types.ModelType{types.ModelTypeRerank},
+		}},
 		Compat: catalog.VendorCompat{
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),

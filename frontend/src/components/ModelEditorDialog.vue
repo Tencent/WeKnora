@@ -358,18 +358,19 @@
             <div v-if="field.type === 'boolean'" class="vision-toggle">
               <t-switch :model-value="extraConfigBool(field.key)"
                 @update:model-value="(v: boolean) => setExtraConfig(field.key, v ? 'true' : 'false')" />
-              <span v-if="field.placeholder" class="form-desc form-desc--inline">{{ field.placeholder }}</span>
+              <span v-if="extraFieldDisplayPlaceholder(field)" class="form-desc form-desc--inline">{{ extraFieldDisplayPlaceholder(field) }}</span>
             </div>
             <t-select v-else-if="field.type === 'select'" :model-value="formData.extraConfig[field.key] || ''"
-              :placeholder="field.placeholder || ''" clearable
+              :placeholder="extraFieldDisplayPlaceholder(field)" clearable
               @update:model-value="(v: string) => setExtraConfig(field.key, v)">
-              <t-option v-for="opt in (field.options || [])" :key="opt.value" :value="opt.value" :label="opt.label || opt.value" />
+              <t-option v-for="opt in (field.options || [])" :key="opt.value" :value="opt.value"
+                :label="extraFieldDisplayOptionLabel(opt)" />
             </t-select>
             <t-input v-else-if="field.type === 'number'" :model-value="formData.extraConfig[field.key] || ''"
-              type="number" :placeholder="field.placeholder || ''"
+              type="number" :placeholder="extraFieldDisplayPlaceholder(field)"
               @update:model-value="(v: string | number) => setExtraConfig(field.key, String(v ?? ''))" />
             <t-input v-else-if="field.type === 'password'" :model-value="formData.extraConfig[field.key] || ''"
-              type="password" :placeholder="field.placeholder || ''" autocomplete="off" spellcheck="false"
+              type="password" :placeholder="extraFieldDisplayPlaceholder(field)" autocomplete="off" spellcheck="false"
               @update:model-value="(v: string) => setExtraConfig(field.key, v)">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
@@ -599,7 +600,8 @@ import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import {
   checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels,
   downloadOllamaModel, getDownloadProgress, checkOllamaStatus, resolveModelCatalog,
-  type OllamaModelInfo, type ModelProviderOption, type ModelProviderExtraField, type ModelCatalogEntry,
+  type OllamaModelInfo, type ModelProviderOption, type ModelProviderExtraField,
+  type ModelProviderExtraFieldOption, type ModelCatalogEntry,
   type ResolvedModelCatalog,
 } from '@/api/initialization'
 import {
@@ -615,6 +617,8 @@ import { useModelProvidersStore } from '@/stores/modelProviders'
 import {
   credentialLabelForModelType,
   extraFieldLabel,
+  extraFieldOptionLabel,
+  extraFieldPlaceholder,
   extraFieldsForModelType,
   pickLocalized,
   providerDescription,
@@ -775,6 +779,10 @@ const matchTriggerWidth = (triggerElement: HTMLElement) => ({
 })
 
 const extraFieldDisplayLabel = (field: ModelProviderExtraField) => extraFieldLabel(field, currentLocale.value)
+const extraFieldDisplayPlaceholder = (field: ModelProviderExtraField) =>
+  extraFieldPlaceholder(field, currentLocale.value)
+const extraFieldDisplayOptionLabel = (option: ModelProviderExtraFieldOption) =>
+  extraFieldOptionLabel(option, currentLocale.value)
 
 /**
  * Vendors whose API is not a bearer-token API name their first credential
