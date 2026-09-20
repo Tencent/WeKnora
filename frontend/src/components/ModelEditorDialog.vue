@@ -374,7 +374,8 @@
               @update:model-value="(v: string) => setExtraConfig(field.key, v)">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
-            <t-input v-else :model-value="formData.extraConfig[field.key] || ''" :placeholder="field.placeholder || ''"
+            <t-input v-else :model-value="formData.extraConfig[field.key] || ''"
+              :placeholder="extraFieldDisplayPlaceholder(field)"
               @update:model-value="(v: string) => setExtraConfig(field.key, v)" />
           </div>
 
