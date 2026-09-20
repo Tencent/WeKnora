@@ -29,6 +29,8 @@ type PathGuard struct {
 	denyRead []string
 }
 
+// NewPathGuard builds a PathGuard from p. The guard copies the policy's path
+// lists so later mutations of p do not change enforcement.
 func NewPathGuard(p Policy) *PathGuard {
 	g := &PathGuard{
 		writable: append([]WritableRoot(nil), p.WritableRoots...),

@@ -20,6 +20,7 @@ type Command struct {
 	Stdin []byte
 }
 
+// Validate reports whether the command has a non-empty argv.
 func (c Command) Validate() error {
 	if len(c.Argv) == 0 || c.Argv[0] == "" {
 		return fmt.Errorf("localsandbox: command argv is empty")

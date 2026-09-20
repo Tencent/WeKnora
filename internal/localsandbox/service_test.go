@@ -15,21 +15,21 @@ import (
 )
 
 type fakeBackend struct {
-	mu        sync.Mutex
-	prepared  []string
-	spawnCmd  Command
-	stdout    string
-	stderr    string
-	exit      ExitStatus
-	spawnErr  error
+	mu          sync.Mutex
+	prepared    []string
+	spawnCmd    Command
+	stdout      string
+	stderr      string
+	exit        ExitStatus
+	spawnErr    error
 	available   error
 	ensureReady error
 	calls       []string
 	proc        Process
-	onSpawn   func()
+	onSpawn     func()
 }
 
-func (f *fakeBackend) Name() string                      { return "fake" }
+func (f *fakeBackend) Name() string { return "fake" }
 func (f *fakeBackend) Available() error {
 	f.mu.Lock()
 	f.calls = append(f.calls, "available")
@@ -45,7 +45,7 @@ func (f *fakeBackend) EnsureReady(context.Context) error {
 	f.mu.Unlock()
 	return err
 }
-func (f *fakeBackend) TearDown(context.Context) error    { return nil }
+func (f *fakeBackend) TearDown(context.Context) error { return nil }
 
 type fakePrepared struct{ fp string }
 

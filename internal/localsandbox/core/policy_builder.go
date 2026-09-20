@@ -106,11 +106,13 @@ var platformReadRoots = []string{
 	"/opt/homebrew", "/usr/local",
 }
 
+// PolicyBuilder derives a Policy from an approval mode and a workspace.
 type PolicyBuilder struct {
 	homeDir    string
 	appDataDir string
 }
 
+// NewPolicyBuilder returns a builder scoped to the user's home and app-data dirs.
 func NewPolicyBuilder(homeDir, appDataDir string) *PolicyBuilder {
 	return &PolicyBuilder{
 		homeDir:    filepath.Clean(homeDir),

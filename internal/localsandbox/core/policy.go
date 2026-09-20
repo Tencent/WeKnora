@@ -1,6 +1,6 @@
-// Package localsandbox runs untrusted commands on the user's own machine
-// under OS-enforced restrictions. It is independent of the remote sandbox
-// stack in internal/sandbox: the two share no domain model.
+// Package core holds the platform-neutral sandbox contract: policy, path
+// checks, workspace identity, and denial classification. Platform backends
+// live in sibling packages.
 package core
 
 import (
@@ -62,10 +62,15 @@ type Policy struct {
 }
 
 var (
-	ErrNoWritableRoot     = errors.New("localsandbox: policy has no writable root")
-	ErrFilesystemRoot     = errors.New("localsandbox: a filesystem root cannot be a policy target")
-	ErrCwdOutsideRoots    = errors.New("localsandbox: cwd is outside every writable root")
-	ErrRelativePath       = errors.New("localsandbox: policy paths must be absolute")
+	// ErrNoWritableRoot is returned when a policy names no writable root.
+	ErrNoWritableRoot = errors.New("localsandbox: policy has no writable root")
+	// ErrFilesystemRoot is returned when a policy target is "/" or a volume root.
+	ErrFilesystemRoot = errors.New("localsandbox: a filesystem root cannot be a policy target")
+	// ErrCwdOutsideRoots is returned when Policy.Cwd is outside every writable root.
+	ErrCwdOutsideRoots = errors.New("localsandbox: cwd is outside every writable root")
+	// ErrRelativePath is returned when a policy path is not absolute.
+	ErrRelativePath = errors.New("localsandbox: policy paths must be absolute")
+	// ErrDenyReadCoversRoot is returned when a deny-read entry covers a writable root.
 	ErrDenyReadCoversRoot = errors.New("localsandbox: deny-read entry covers a writable root")
 )
 

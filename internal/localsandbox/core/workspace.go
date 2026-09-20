@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 )
 
+// WorkspaceKind distinguishes a user-picked project from an auto-allocated session dir.
 type WorkspaceKind int
 
 const (
@@ -45,6 +46,7 @@ type DirLayout struct {
 	SessionRoot string
 }
 
+// WorkspaceResolver maps a session to the directory the agent may work in.
 type WorkspaceResolver interface {
 	Resolve(ctx context.Context, sessionID string) (Workspace, error)
 }
@@ -55,6 +57,8 @@ type workspaceResolver struct {
 	now      func() time.Time
 }
 
+// NewWorkspaceResolver returns a resolver that prefers a bound project
+// directory and otherwise allocates under layout.SessionRoot.
 func NewWorkspaceResolver(layout DirLayout, projects ProjectLookup) WorkspaceResolver {
 	return &workspaceResolver{layout: layout, projects: projects, now: time.Now}
 }

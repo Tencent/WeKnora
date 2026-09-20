@@ -43,6 +43,7 @@ type Service struct {
 	roots    *rootLocks
 }
 
+// NewService constructs the application-facing sandbox facade.
 func NewService(
 	backend Backend, resolver WorkspaceResolver, builder *PolicyBuilder, modes ModeLookup,
 ) *Service {
@@ -56,6 +57,7 @@ func NewService(
 	}
 }
 
+// RunRequest is one shell command to execute inside a session workspace.
 type RunRequest struct {
 	SessionID string
 	Command   string
@@ -65,6 +67,7 @@ type RunRequest struct {
 	Env     map[string]string
 }
 
+// RunResult is the captured outcome of one Run.
 type RunResult struct {
 	Stdout string
 	Stderr string
@@ -166,7 +169,7 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		logger.Errorf(ctx, "[LocalSandbox] prepare session=%s: %v", req.SessionID, err)
 		return nil, fmt.Errorf("prepare sandbox: %w", err)
 	}
-	defer prep.Close()
+	defer func() { _ = prep.Close() }()
 
 	argv := append(append([]string(nil), s.shell...), req.Command)
 	proc, err := s.backend.Spawn(runCtx, prep, Command{

@@ -13,13 +13,19 @@ type ExitStatus struct {
 	Duration time.Duration
 }
 
+// DenialReason classifies why a sandboxed process is believed to have failed.
 type DenialReason int
 
 const (
+	// DenialNone means the failure was not classified as a sandbox denial.
 	DenialNone DenialReason = iota
+	// DenialOperationNotPermitted matches "operation not permitted" in process output.
 	DenialOperationNotPermitted
+	// DenialPermissionDenied matches "permission denied" in process output.
 	DenialPermissionDenied
+	// DenialReadOnlyFileSystem matches "read-only file system" in process output.
 	DenialReadOnlyFileSystem
+	// DenialPolicy matches an explicit sandbox marker or a withheld-network failure.
 	DenialPolicy
 )
 
@@ -38,6 +44,7 @@ type Denial struct {
 	Snippet string
 }
 
+// IsDenied reports whether this verdict represents a sandbox denial.
 func (d Denial) IsDenied() bool { return d.Reason != DenialNone }
 
 var denialMarkers = []struct {
@@ -53,7 +60,8 @@ var denialMarkers = []struct {
 // denialPathPattern captures the path preceding a known denial marker, e.g.
 // "touch: /a/b: Operation not permitted".
 var denialPathPattern = regexp.MustCompile(
-	`(?i)((?:/|\./|\.\./)[^\s:]*(?:[^\s:]|\\ )*)\s*:\s*(?:operation not permitted|permission denied|read-only file system)`)
+	`(?i)((?:/|\./|\.\./)[^\s:]*(?:[^\s:]|\\ )*)` +
+		`\s*:\s*(?:operation not permitted|permission denied|read-only file system)`)
 
 // ClassifyDenial inspects a failed execution for signs of a sandbox denial.
 func ClassifyDenial(status ExitStatus, stdout, stderr string) Denial {

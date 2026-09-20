@@ -19,7 +19,7 @@ func (g *PathGuard) writeRel(root, rel, orig string, data []byte, perm os.FileMo
 		return mapWalkErr(orig, err)
 	}
 	f := os.NewFile(uintptr(fd), orig)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	n, err := f.Write(data)
 	if err != nil {
 		return err
@@ -36,7 +36,7 @@ func (g *PathGuard) readRel(root, rel, orig string) ([]byte, error) {
 		return nil, mapWalkErr(orig, err)
 	}
 	f := os.NewFile(uintptr(fd), orig)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return io.ReadAll(f)
 }
 

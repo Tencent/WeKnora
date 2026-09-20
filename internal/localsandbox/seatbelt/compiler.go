@@ -1,3 +1,6 @@
+// Package seatbelt implements the sandbox backend for macOS on top of
+// /usr/bin/sandbox-exec. The policy compiler in this package carries no build
+// tag so it stays testable on every platform.
 package seatbelt
 
 import (
