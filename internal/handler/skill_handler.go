@@ -79,7 +79,7 @@ func (h *SkillHandler) ListSkills(c *gin.Context) {
 	// picker used to come up empty for every shared agent.
 	agent, err := sharedAgentPickerScope(c, h.agents)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 

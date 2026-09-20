@@ -154,7 +154,7 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	// dropped every such @mention with only a warning in the log.
 	agent, err := sharedAgentPickerScope(c, h.agents)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if agent != nil {
@@ -193,7 +193,7 @@ func (h *MCPServiceHandler) listSharedAgentMCPServices(c *gin.Context, agent *ty
 	services, err := h.mcpServiceService.ListMCPServicesByIDs(ctx, agent.TenantID, ids)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": agent.TenantID})
-		c.Error(errors.NewInternalServerError("Failed to list MCP services: " + err.Error()))
+		_ = c.Error(errors.NewInternalServerError("Failed to list MCP services: " + err.Error()))
 		return
 	}
 	enabled := make([]*types.MCPService, 0, len(services))
