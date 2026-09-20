@@ -70,4 +70,3 @@ func TestModelFacingDocumentHeaderMasksTitleAndLeavesOriginal(t *testing.T) {
 		t.Fatalf("stored metadata was rewritten: %q", original.KnowledgeCustomMetadata)
 	}
 }
-
