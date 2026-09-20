@@ -36,15 +36,24 @@
           </div>
         </div>
 
-        <t-alert
-          v-if="local.engine === 'presidio'"
-          theme="info"
-          class="notice-alert"
-          :title="$t('knowledgeEditor.desensitization.previewBuiltinOnlyTitle')"
-          :message="$t('knowledgeEditor.desensitization.previewBuiltinOnlyNotice')"
-        />
+        <div v-if="local.engine === 'presidio'" class="presidio-help">
+          <t-alert
+            theme="info"
+            class="notice-alert"
+            :title="$t('knowledgeEditor.desensitization.presidioFlowTitle')"
+            :message="$t('knowledgeEditor.desensitization.presidioFlowNotice')"
+          />
+          <div class="api-block">
+            <label>{{ $t('knowledgeEditor.desensitization.presidioApiLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.desensitization.presidioApiUrlHint') }}</p>
+            <pre class="preview-output">{{ presidioEndpoint }}</pre>
+            <label>{{ $t('knowledgeEditor.desensitization.presidioRequestLabel') }}</label>
+            <pre class="preview-output">{{ presidioRequestExample }}</pre>
+            <label>{{ $t('knowledgeEditor.desensitization.presidioResponseLabel') }}</label>
+            <pre class="preview-output">{{ presidioResponseExample }}</pre>
+          </div>
+        </div>
 
-        <template v-if="local.engine === 'builtin'">
         <div class="setting-row">
           <div class="setting-info">
             <label>{{ $t('knowledgeEditor.desensitization.maskStyleLabel') }}</label>
@@ -113,7 +122,6 @@
             <pre v-if="previewOutput !== null" class="preview-output">{{ previewOutput }}</pre>
           </div>
         </div>
-        </template>
       </div>
     </div>
   </div>
@@ -124,6 +132,21 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { previewDesensitization } from '@/api/desensitization'
+
+const presidioEndpoint = 'POST {PRESIDIO_ANALYZER_URL}/analyze'
+const presidioRequestExample = `{
+  "text": "请联系 user@example.com 或 13800138000",
+  "language": "zh",
+  "score_threshold": 0.4
+}`
+const presidioResponseExample = `[
+  {
+    "start": 3,
+    "end": 19,
+    "score": 1.0,
+    "entity_type": "EMAIL_ADDRESS"
+  }
+]`
 
 export interface DesensitizationRule {
   name: string
@@ -384,5 +407,20 @@ const runPreview = async () => {
   white-space: pre-wrap;
   word-break: break-word;
   font-size: var(--app-text-sm);
+}
+.presidio-help {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--td-border-level-1-color);
+}
+.api-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.api-block label {
+  font-weight: 500;
 }
 </style>
