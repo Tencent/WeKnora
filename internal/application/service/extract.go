@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -354,8 +357,40 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if err != nil {
-		handleErr = err
-		return err
+		// A chunk that cannot be extracted must not take the whole document's
+		// graph down with it.
+		//
+		// Returning here costs more than the one chunk. The deferred
+		// finalizeSubtaskDetached above only releases this chunk's slot in
+		// pending_subtasks_count on the final asynq attempt, so the parent
+		// knowledge sits in "finalizing" until the retries are exhausted, and
+		// nothing surfaces an error while it waits. A single malformed model
+		// response is enough to strand a document that way.
+		//
+		// Model output is not reliably well-formed, so across a large corpus a
+		// few failures per thousand chunks are expected. A graph covering most
+		// of the chunks is far more useful than no graph at all, and the gap is
+		// recoverable: graph nodes record their source chunk ids, so the
+		// difference between every chunk id and the ones already covered is
+		// exactly the set to re-run, which is naturally idempotent.
+		//
+		// Skipping is only safe for input problems. When the model itself is
+		// unavailable we hand the task back to asynq instead — see
+		// isTransientExtractionError for why that direction matters more.
+		if isTransientExtractionError(err) {
+			logger.Errorf(ctx,
+				"graph extract: chunk %s hit a transient error, leaving it to asynq to retry: %v",
+				p.ChunkID, err)
+			handleErr = err
+			return err
+		}
+		logger.Errorf(ctx,
+			"graph extract: skipping chunk %s after an unrecoverable extraction error: %v",
+			p.ChunkID, err)
+		graphOut["skipped"] = "extract_failed"
+		graphOut["skip_error"] = err.Error()
+		graphOut["skip_chunk_id"] = p.ChunkID
+		return nil
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -916,4 +951,86 @@ func (s *DataTableSummaryService) buildSampleDataDescription(ctx context.Context
 	}
 
 	return builder.String()
+}
+
+// isTransientExtractionError reports whether a failed graph extraction is
+// worth retrying ("the model is unavailable right now") rather than a property
+// of the input ("this response will never parse, however often we ask").
+//
+// The two directions are not symmetric, which is why the distinction is worth
+// making at all:
+//
+//   - Misclassifying a transient failure as permanent is the damaging one.
+//     When a model pool is exhausted or a gateway goes down, every in-flight
+//     chunk fails within seconds. Skipping them all yields a knowledge base
+//     that reports itself complete while its graph is missing large parts — a
+//     stuck job is at least visible, a silently incomplete graph is not.
+//   - Misclassifying a permanent failure as transient only spends the retry
+//     budget: a response that is not valid JSON parses no better on the
+//     fourth attempt, and the task then fails terminally as it does today.
+//
+// Classification deliberately does not rely on HTTP status alone. Gateways
+// commonly report pool exhaustion or throttling as 400 with the reason in the
+// body, which a status check would read as a client error and skip forever.
+// Sentinel and typed errors are matched first; the substring pass exists
+// because model gateways frequently surface upstream conditions as plain text
+// with no typed error to match on.
+func isTransientExtractionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// context.Canceled belongs here. A shutdown, a client disconnect or a
+	// cancelled parent aborts every request in flight at once, so reading it
+	// as a data problem skips a whole batch permanently — it is the most
+	// typical transient error there is, not a reason to give up on a chunk.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	// A truncated response says the connection died mid-answer, not that the
+	// content was bad.
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
+	for _, pattern := range []string{
+		"rate limit",
+		"too many requests",
+		"quota",
+		"overloaded",
+		"temporarily unavailable",
+		"service unavailable",
+		"connection refused",
+		"connection reset",
+		"broken pipe",
+		"no such host",
+		"i/o timeout",
+		"timeout",
+		"context canceled",
+		"context deadline exceeded",
+		"unexpected eof",
+		"status 429",
+		"status 500",
+		"status 502",
+		"status 503",
+		"status 504",
+	} {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
 }
