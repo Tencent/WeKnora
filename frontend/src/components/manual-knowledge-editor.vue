@@ -1169,8 +1169,7 @@ onBeforeUnmount(() => {
   transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
 
   &:focus-within {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    border-color: var(--td-component-border);
   }
 }
 
@@ -1215,7 +1214,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   padding: 2px;
   border-radius: var(--app-radius-sm);
-  background: var(--td-bg-color-container);
+  background: var(--td-bg-color-component-disabled);
   border: 1px solid var(--td-component-stroke);
 }
 
@@ -1236,13 +1235,14 @@ onBeforeUnmount(() => {
   transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover:not(.is-disabled) {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color);
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
   }
 
   &.is-active {
-    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    color: var(--td-brand-color);
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
   }
 
   &.is-disabled {
@@ -1292,11 +1292,11 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-btn:hover {
-  background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-  color: var(--td-brand-color);
+  background: var(--td-bg-color-container-hover);
+  color: var(--td-text-color-primary);
 
   .t-icon {
-    color: var(--td-brand-color);
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -1306,7 +1306,7 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-btn:active {
-  background: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
+  background: var(--td-bg-color-container-active);
   transform: translateY(0.5px);
 }
 
@@ -1392,12 +1392,12 @@ onBeforeUnmount(() => {
     overflow: auto;
   }
 
+  /* 与 chat-markdown.less 的引用块一致：中性描边、无底色 */
   :deep(blockquote) {
-    border-left: 4px solid var(--td-brand-color);
-    padding-left: 12px;
+    border-left: 2px solid var(--td-component-stroke);
+    padding: 6px 0 6px 14px;
     color: var(--td-text-color-secondary);
-    margin: 16px 0;
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+    margin: 12px 0;
   }
 
   :deep(a) {
