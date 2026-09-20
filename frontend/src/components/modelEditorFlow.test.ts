@@ -743,3 +743,72 @@ test('switching vendor clears a connection result that described the old one', a
     assert.equal(f.vm.remoteMessage, '')
   } finally { f.close() }
 })
+
+// A VLM entry is a chat model that accepts images, so the backend — which
+// already scopes the provider list to the requested model type — returns it
+// typed "chat". Re-filtering on that type in the editor emptied the picker
+// for every vendor under 视觉.
+const vlmProviders = [{
+  value: 'vendor-v', label: 'Vendor V', description: '', order: 1, modelTypes: ['chat', 'vllm'],
+  defaultUrls: { chat: 'https://v.example.com/v1', vllm: 'https://v.example.com/v1' },
+  models: [
+    { id: 'sees-images', name: 'Sees Images', type: 'chat', input: ['text', 'image'], context_window: 128000 },
+  ],
+}]
+
+test('the vision picker lists the vendor models the backend scoped to it', async () => {
+  const f = await fixture({ type: 'vllm', providers: vlmProviders })
+  try {
+    f.vm.formData.provider = 'vendor-v'
+    f.vm.handleProviderChange('vendor-v')
+    await nextTick()
+    assert.deepEqual(f.vm.catalogModelOptions.map((o: any) => o.value), ['sees-images'])
+    assert.equal(f.vm.catalogModelOptions[0].vision, true)
+  } finally { f.close() }
+})
+
+test('rerank and asr pickers list their own entries', async () => {
+  for (const [type, id] of [['rerank', 'the-reranker'], ['asr', 'the-transcriber']]) {
+    const providers = [{
+      value: 'vendor-t', label: 'Vendor T', description: '', order: 1, modelTypes: [type],
+      defaultUrls: { [type]: 'https://t.example.com/v1' },
+      models: [{ id, name: id, type }],
+    }]
+    const f = await fixture({ type, providers })
+    try {
+      f.vm.formData.provider = 'vendor-t'
+      f.vm.handleProviderChange('vendor-t')
+      await nextTick()
+      assert.deepEqual(f.vm.catalogModelOptions.map((o: any) => o.value), [id], type)
+    } finally { f.close() }
+  }
+})
+
+// TDesign hides a select's popup when it has no options, which takes the
+// creatable "create" row with it: the field accepts keystrokes but offers no
+// way to commit them, and a blur throws the text away. That is every vendor
+// with no catalog for the current type — 自定义 (OpenAI 兼容接口) above all.
+test('a vendor with no catalog falls back to a plain text field', async () => {
+  const f = await fixture({ providers: switchProviders })
+  try {
+    f.vm.formData.provider = 'vendor-a'
+    f.vm.handleProviderChange('vendor-a')
+    await nextTick()
+    assert.ok(f.vm.catalogModelOptions.length > 0, 'a catalogued vendor keeps the picker')
+
+    const f2 = await fixture({ providers: [{
+      value: 'bare', label: 'Bare', description: '', order: 1, modelTypes: ['chat'],
+      defaultUrls: { chat: 'https://bare.example.com/v1' }, models: [],
+    }] })
+    try {
+      f2.vm.formData.provider = 'bare'
+      f2.vm.handleProviderChange('bare')
+      await nextTick()
+      assert.equal(f2.vm.catalogModelOptions.length, 0)
+      // Typing is the only way in, and it must survive as the model name.
+      f2.vm.formData.modelName = 'my-own-model'
+      await nextTick()
+      assert.equal(f2.vm.formData.modelName, 'my-own-model')
+    } finally { f2.close() }
+  } finally { f.close() }
+})

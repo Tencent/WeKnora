@@ -261,7 +261,23 @@
           -->
           <div class="form-item">
             <label class="form-label required">{{ $t('model.modelName') }}</label>
+            <!--
+              没有内置目录时用纯输入框：TDesign 的 select 在零选项时会隐藏整个
+              浮层（hideEmptyPopup），连 creatable 的"创建"行也一并藏掉，于是
+              用户能打字、但没有任何方式提交，失焦后输入直接丢失。自定义
+              (OpenAI 兼容接口) 正是这种情况，所以那里根本填不进模型名。
+            -->
+            <t-input
+              v-if="catalogModelOptions.length === 0"
+              v-model="formData.modelName"
+              :placeholder="getModelNamePlaceholder()"
+              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
+              clearable
+              autocomplete="off"
+              spellcheck="false"
+            />
             <t-select
+              v-else
               v-model="formData.modelName"
               filterable
               creatable
@@ -850,9 +866,12 @@ interface CatalogModelOption {
 }
 
 const catalogEntries = computed<ModelCatalogEntry[]>(() => {
-  const models = selectedProvider.value?.models || []
-  const type = activeModelType.value
-  return models.filter(m => !m.type || m.type === type)
+  // The list is already scoped: providers are fetched per model type, so the
+  // backend returned exactly the entries that type can use. Filtering again
+  // here on entry.type was wrong for 视觉 — a VLM entry is a chat model that
+  // accepts images, so it arrives typed "chat" and every one of them was
+  // dropped, leaving the picker empty for every vendor.
+  return selectedProvider.value?.models || []
 })
 
 const catalogModelOptions = computed<CatalogModelOption[]>(() => {
