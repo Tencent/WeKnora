@@ -151,8 +151,13 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 
-	// Validate query content
-	if request.Query == "" {
+	// Validate before session lookup or QA work, preserving the original query text.
+	validatedQuery, valid := secutils.ValidateInput(request.Query)
+	if !valid {
+		logger.Error(ctx, "Query content is invalid")
+		return nil, nil, errors.NewBadRequestError("Query content contains invalid content")
+	}
+	if validatedQuery == "" {
 		logger.Error(ctx, "Query content is empty")
 		return nil, nil, errors.NewBadRequestError("Query content cannot be empty")
 	}
