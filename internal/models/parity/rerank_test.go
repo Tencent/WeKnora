@@ -69,6 +69,9 @@ func TestRerankProtocolAssignment(t *testing.T) {
 		"generic":      api.RerankCohere,
 		"openai":       api.RerankCohere,
 		"weknoracloud": api.RerankCohere,
+		"novita":       api.RerankCohere,
+		"openrouter":   api.RerankCohere,
+		"litellm":      api.RerankCohere,
 	} {
 		t.Run(id, func(t *testing.T) {
 			resolved, err := catalog.Resolve(catalog.Ref{
@@ -361,12 +364,12 @@ func TestRerankScoreScalesMatchTheVendorDocs(t *testing.T) {
 	}
 }
 
-// TestUnimplementedRerankDialectsAreHidden keeps the picker from offering a
-// model this build cannot call. qwen3-rerank is a second, incompatible
-// protocol on the same vendor — a different path, a flat request and a
-// response with no output wrapper — so it stays resolvable for rows that
-// already name it and disappears from the list.
-func TestUnimplementedRerankDialectsAreHidden(t *testing.T) {
+// TestUnimplementedRerankDialectsAreRefused covers a model that names a
+// protocol no package implements. Hiding it from the picker stops new rows;
+// a row that already names it has to fail somewhere, and failing at
+// construction with the reason beats sending a request shaped for the wrong
+// protocol and reporting whatever the decoder makes of the reply.
+func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
 	v, ok := catalog.Get("aliyun")
 	require.True(t, ok)
 
@@ -377,12 +380,18 @@ func TestUnimplementedRerankDialectsAreHidden(t *testing.T) {
 	assert.NotContains(t, offered, "qwen3-rerank", "the picker must not offer an unimplemented dialect")
 	assert.Contains(t, offered, "gte-rerank-v2")
 
-	// Still resolvable: an existing row naming it must not start failing.
-	resolved, err := catalog.Resolve(catalog.Ref{
+	_, err := catalog.Resolve(catalog.Ref{
 		Provider: "aliyun", Model: "qwen3-rerank", ModelType: types.ModelTypeRerank,
 	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "/compatible-api/v1/reranks",
+		"the error should name the protocol the model actually speaks")
+
+	// The vendor's other rerank model is unaffected.
+	_, err = catalog.Resolve(catalog.Ref{
+		Provider: "aliyun", Model: "gte-rerank-v2", ModelType: types.ModelTypeRerank,
+	})
 	require.NoError(t, err)
-	assert.True(t, resolved.Cataloged)
 }
 
 // TestGatewayRerankEndpoints pins the URL each gateway's rerank rows reach.
@@ -417,4 +426,45 @@ func TestGatewayRerankEndpoints(t *testing.T) {
 			assert.Equal(t, tc.wantURL, got)
 		})
 	}
+}
+
+// TestScoreScaleIsOverridablePerRow covers the gateways, where the vendor
+// cannot know the answer: GPUStack and a generic endpoint serve whatever
+// reranker was deployed behind them, and the two families disagree — BGE
+// answers a 0..1 probability, Qwen3-Reranker an unbounded score. Converting a
+// probability as if it were a logit squeezes every score into [0.5, 0.73],
+// which makes a relevance threshold meaningless, so the operator needs a way
+// to say which one is actually there.
+func TestScoreScaleIsOverridablePerRow(t *testing.T) {
+	for _, id := range []string{"gpustack", "generic"} {
+		t.Run(id, func(t *testing.T) {
+			base := "http://127.0.0.1:9/v1"
+			overridden, err := catalog.Resolve(catalog.Ref{
+				Provider: id, Model: "bge-reranker-v2-m3", ModelType: types.ModelTypeRerank,
+				BaseURL: base, Extra: map[string]string{catalog.ExtraScoreScale: "probability"},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, api.ScoreProbability, overridden.Rerank.ScoreScale)
+
+			// And the input to set it is rendered by the editor.
+			v, ok := catalog.Get(id)
+			require.True(t, ok)
+			var field *catalog.ExtraField
+			for i := range v.ExtraFields {
+				if v.ExtraFields[i].Key == catalog.ExtraScoreScale {
+					field = &v.ExtraFields[i]
+				}
+			}
+			require.NotNil(t, field, "%s must offer the override it needs", id)
+			assert.Equal(t, "select", field.Type)
+			assert.Len(t, field.Options, 2)
+		})
+	}
+
+	_, err := catalog.Resolve(catalog.Ref{
+		Provider: "gpustack", Model: "m", ModelType: types.ModelTypeRerank,
+		BaseURL: "http://127.0.0.1:9/v1",
+		Extra:   map[string]string{catalog.ExtraScoreScale: "sigmoid"},
+	})
+	require.Error(t, err, "an unknown scale must not be treated as a probability")
 }

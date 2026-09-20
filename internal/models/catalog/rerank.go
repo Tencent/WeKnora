@@ -18,8 +18,10 @@ type RerankCompat struct {
 	MaxConcurrency   *int            `json:"max_concurrency,omitempty"`
 	RequestTimeout   *int            `json:"request_timeout_seconds,omitempty"`
 	// AcceptsTruncatePromptTokens marks a vLLM-class runtime.
-	AcceptsTruncatePromptTokens *bool          `json:"accepts_truncate_prompt_tokens,omitempty"`
-	ExtraBody                   map[string]any `json:"extra_body,omitempty"`
+	AcceptsTruncatePromptTokens *bool `json:"accepts_truncate_prompt_tokens,omitempty"`
+	// UnsupportedReason marks a model this build cannot call.
+	UnsupportedReason *string        `json:"unsupported_reason,omitempty"`
+	ExtraBody         map[string]any `json:"extra_body,omitempty"`
 }
 
 // RerankSettings is the resolved (fully defaulted) form.
@@ -59,6 +61,11 @@ type RerankSettings struct {
 	// and appears in no managed vendor's schema, so it must never be sent to
 	// one: that is how an undocumented field ends up on every request.
 	AcceptsTruncatePromptTokens bool
+	// UnsupportedReason is set on a catalog entry naming a rerank dialect no
+	// protocol package implements. Resolve refuses it rather than letting a
+	// request go out shaped for a different protocol, which surfaces as a
+	// decode error far from its cause.
+	UnsupportedReason string
 	// TruncatePromptTokens is the budget the operator opted into on this row,
 	// honoured only where AcceptsTruncatePromptTokens is set. It is a row
 	// setting rather than a vendor fact because one runtime serves models

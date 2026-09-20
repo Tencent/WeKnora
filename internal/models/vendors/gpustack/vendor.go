@@ -82,6 +82,20 @@ func init() {
 			types.ModelTypeASR,
 		},
 		ExtraFields: []catalog.ExtraField{{
+			Key:    catalog.ExtraScoreScale,
+			Label:  "Rerank score scale",
+			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},
+			Type:   "select",
+			Options: []catalog.ExtraFieldOption{
+				{Label: "Unbounded score (Qwen3-Reranker class)", Value: "logit"},
+				{Label: "0..1 relevance (BGE class)", Value: "probability"},
+			},
+			// A gateway serves whatever reranker was deployed behind it, and
+			// the two families disagree. The vendor default follows the
+			// documentation; the operator knows which model is actually there.
+			Required:   false,
+			ModelTypes: []types.ModelType{types.ModelTypeRerank},
+		}, {
 			Key:    catalog.ExtraTruncatePromptTokens,
 			Label:  "Rerank prompt truncation (vLLM)",
 			Labels: map[string]string{"zh-CN": "Rerank 提示词截断长度（vLLM）"},

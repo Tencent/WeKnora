@@ -110,7 +110,7 @@ func init() {
 		ID:           ID,
 		Name:         "Alibaba Cloud DashScope",
 		Names:        map[string]string{"zh-CN": "阿里云 DashScope"},
-		Description:  "qwen-plus, qwen3.8-max, deepseek-v4-pro, text-embedding-v4, qwen3-rerank, etc.",
+		Description:  "qwen-plus, qwen3.8-max, deepseek-v4-pro, text-embedding-v4, gte-rerank-v2, etc.",
 		Website:      "https://bailian.console.aliyun.com",
 		Icon:         icon,
 		API:          api.APIOpenAICompletions,

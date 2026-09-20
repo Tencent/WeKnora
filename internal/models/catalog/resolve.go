@@ -26,6 +26,12 @@ const (
 	// budget for rerank, opt-in per row. It is never sent unless the operator
 	// set it: vendors that do not implement it reject the unknown field.
 	ExtraTruncatePromptTokens = "truncate_prompt_tokens"
+	// ExtraScoreScale overrides the vendor rerank score scale for one row.
+	// A self-hosted gateway serves whatever reranker was deployed behind it
+	// and the two families disagree: BGE-class models answer a 0..1
+	// probability, Qwen3-Reranker-class models an unbounded score. A vendor
+	// can only state what its own documentation shows.
+	ExtraScoreScale = "score_scale"
 )
 
 // Ref identifies one configured model.
@@ -376,22 +382,11 @@ func resolveRerank(
 		return nil, fmt.Errorf("catalog: unknown rerank api %q for provider %s", protocol, vendor.ID)
 	}
 
+	// Lowest precedence first: protocol default, vendor, model entry, row spec
+	// override. extra_config is the operator speaking about this one row, so it
+	// comes last.
 	settings := DefaultRerank()
 	apply(&settings, &vendor.Compat.Rerank)
-	if raw := strings.TrimSpace(ref.Extra[ExtraTruncatePromptTokens]); raw != "" {
-		if !settings.AcceptsTruncatePromptTokens {
-			return nil, fmt.Errorf(
-				"catalog: %s is a vLLM extension and %s does not implement it; "+
-					"remove it from extra_config (it is accepted by self-hosted runtimes only)",
-				ExtraTruncatePromptTokens, vendor.ID,
-			)
-		}
-		budget, err := strconv.Atoi(raw)
-		if err != nil || budget <= 0 {
-			return nil, fmt.Errorf("catalog: invalid %s in extra_config: %q", ExtraTruncatePromptTokens, raw)
-		}
-		settings.TruncatePromptTokens = budget
-	}
 	if len(spec.Compat) > 0 {
 		overlay := &RerankCompat{}
 		if err := decodeCompat(spec.Compat, overlay); err != nil {
@@ -407,6 +402,38 @@ func resolveRerank(
 		apply(&settings, overlay)
 	}
 
+	if raw := strings.TrimSpace(ref.Extra[ExtraScoreScale]); raw != "" {
+		scale := api.ScoreScale(strings.ToLower(raw))
+		if scale != api.ScoreProbability && scale != api.ScoreLogit {
+			return nil, fmt.Errorf(
+				"catalog: invalid %s in extra_config: %q (expected %q or %q)",
+				ExtraScoreScale, raw, api.ScoreProbability, api.ScoreLogit,
+			)
+		}
+		settings.ScoreScale = scale
+	}
+	if raw := strings.TrimSpace(ref.Extra[ExtraTruncatePromptTokens]); raw != "" {
+		if !settings.AcceptsTruncatePromptTokens {
+			return nil, fmt.Errorf(
+				"catalog: %s is a vLLM extension and %s does not implement it; "+
+					"remove it from extra_config (it is accepted by self-hosted runtimes only)",
+				ExtraTruncatePromptTokens, vendor.ID,
+			)
+		}
+		budget, err := strconv.Atoi(raw)
+		if err != nil || budget <= 0 {
+			return nil, fmt.Errorf("catalog: invalid %s in extra_config: %q", ExtraTruncatePromptTokens, raw)
+		}
+		settings.TruncatePromptTokens = budget
+	}
+	// Checked after every layer: a model entry is what declares a dialect
+	// this build cannot speak.
+	if settings.UnsupportedReason != "" {
+		return nil, fmt.Errorf(
+			"catalog: %s does not serve %q through a protocol this build implements: %s",
+			vendor.ID, spec.ID, settings.UnsupportedReason,
+		)
+	}
 	out := &Resolved{
 		Vendor:      vendor,
 		Spec:        spec,

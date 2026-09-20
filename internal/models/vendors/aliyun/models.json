@@ -47,7 +47,7 @@
     {"id": "text-embedding-v4", "name": "Tongyi text-embedding-v4", "type": "Embedding", "dimension": 1024, "source": "https://help.aliyun.com/zh/model-studio/embedding"},
     {"id": "text-embedding-v3", "name": "Tongyi text-embedding-v3", "type": "Embedding", "dimension": 1024, "source": "https://help.aliyun.com/zh/model-studio/embedding"},
     {"id": "tongyi-embedding-vision-plus", "name": "Tongyi Embedding Vision Plus", "type": "Embedding", "dimension": 1152, "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api"},
-    {"id": "qwen3-rerank", "name": "Qwen3 Rerank (separate endpoint, not implemented)", "type": "Rerank", "deprecated": true, "source": "https://help.aliyun.com/zh/model-studio/text-rerank-api"},
+    {"id": "qwen3-rerank", "name": "Qwen3 Rerank (separate endpoint, not implemented)", "type": "Rerank", "deprecated": true, "compat": {"unsupported_reason": "qwen3-rerank speaks a different protocol (/compatible-api/v1/reranks, flat request, results at the top level) that no protocol package implements yet"}, "source": "https://help.aliyun.com/zh/model-studio/text-rerank-api"},
     {"id": "gte-rerank-v2", "name": "GTE Rerank v2", "type": "Rerank", "source": "https://help.aliyun.com/zh/model-studio/text-rerank-api"}
   ]
 }

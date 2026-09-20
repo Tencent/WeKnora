@@ -90,6 +90,16 @@ func TestEveryCatalogEntryResolves(t *testing.T) {
 				modelType = types.ModelTypeKnowledgeQA
 			}
 			r, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: name, ModelType: modelType})
+			// An entry may declare that this build cannot serve it — a vendor
+			// whose second rerank dialect has no protocol package. Refusing is
+			// the point: the alternative is a request shaped for the wrong
+			// protocol. Such an entry must refuse, and must do it with a reason.
+			if bytes.Contains(m.Compat, []byte("unsupported_reason")) {
+				if err == nil {
+					t.Errorf("%s/%s: declares unsupported_reason but still resolves", id, name)
+				}
+				continue
+			}
 			if err != nil {
 				t.Errorf("%s/%s: resolve: %v", id, name, err)
 				continue
