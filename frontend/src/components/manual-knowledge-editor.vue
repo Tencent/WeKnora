@@ -1269,20 +1269,18 @@ onBeforeUnmount(() => {
   color: var(--td-text-color-placeholder);
 }
 
-/* 窄抽屉：标题和去处各占一行；工具栏换行而不是横向滚动——滚动条是隐藏的，
-   溢出的按钮等于消失 */
+/* 窄抽屉：与其让工具栏折行（视图切换会悬在第二行），不如把视图切换收成图标，
+   一行仍然装得下。文字含义由 tooltip 兜底。 */
 .manual-editor--narrow {
-  .doc-head {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 2px;
+  .view-switch__btn {
+    padding: 0 6px;
   }
 
-  /* 叠成两行也留在右端，控件不会因为抽屉变窄就跳到另一边 */
-  .doc-meta {
-    align-self: flex-end;
+  .view-switch__label {
+    display: none;
   }
 
+  /* 极窄时的兜底：真放不下才换行，而不是把按钮藏进隐藏的滚动条里 */
   .editor-toolbar {
     flex-wrap: wrap;
   }
@@ -1290,11 +1288,6 @@ onBeforeUnmount(() => {
   .editor-toolbar__format {
     flex-wrap: wrap;
     overflow-x: visible;
-  }
-
-  .editor-toolbar__view {
-    padding-left: 0;
-    border-left: none;
   }
 }
 
