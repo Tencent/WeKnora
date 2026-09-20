@@ -63,8 +63,8 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	if len(atts) != 1 || atts[0].FileToken != "file_t" || atts[0].Name != "报表.pdf" {
 		t.Errorf("attachments = %+v", atts)
 	}
-	if !strings.Contains(string(md), "- 报表.pdf") {
-		t.Errorf("attachment file-name list missing:\n%s", md)
+	if !strings.Contains(string(md), "- weknora-att://file_t") {
+		t.Errorf("attachment marker line missing:\n%s", md)
 	}
 }
 
@@ -512,10 +512,12 @@ func TestBlocksToMarkdown_ViewContainerRendersChildren(t *testing.T) {
 	if strings.Contains(s, "飞书块: 视图") {
 		t.Errorf("view must not render a placeholder:\n%s", s)
 	}
-	if n := strings.Count(s, "- 报表.pdf"); n != 1 {
+	// Raw render emits unique per-token marker lines; FetchDocxWithBlocks
+	// patches them to the display names after the download attempt.
+	if n := strings.Count(s, "- weknora-att://ftok1"); n != 1 {
 		t.Errorf("file child rendered %d times, want exactly 1:\n%s", n, s)
 	}
-	if !strings.Contains(s, "- 报表.pdf\n- 手册.pdf") {
+	if !strings.Contains(s, "- weknora-att://ftok1\n- weknora-att://ftok2") {
 		t.Errorf("view children not rendered as one list:\n%s", s)
 	}
 	if len(atts) != 2 {
@@ -687,5 +689,28 @@ func TestBlocksToMarkdown_ImageNumberingStableOrder(t *testing.T) {
 		if imgs[i] != w {
 			t.Errorf("imgs[%d] = %+v, want %+v", i, imgs[i], w)
 		}
+	}
+}
+
+func TestBlocksToMarkdown_LinkURLWithSpacesAndParens(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "p", BlockType: BlockTypeText, Text: &BlockText{
+			Elements: []TextElement{
+				{TextRun: &TextRun{Content: "文档", TextElementStyle: &TextElementStyle{
+					Link: &TextElementLink{URL: "https://example.com/a (1).pdf"},
+				}}},
+			},
+		}},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// The rendered target must decode back to the original URL: a raw space or
+	// ")" would terminate the link target early.
+	if !strings.Contains(string(md), "](https://example.com/a%20%281%29.pdf)") &&
+		!strings.Contains(string(md), "](<https://example.com/a (1).pdf>)") {
+		t.Errorf("URL not escaped for Markdown:\n%s", md)
 	}
 }

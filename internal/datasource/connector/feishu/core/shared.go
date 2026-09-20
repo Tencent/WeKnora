@@ -352,6 +352,10 @@ type DocxFetchInput struct {
 	// CreateTime is the document creation time in Feishu; zero when unknown.
 	CreateTime time.Time
 	BaseMeta   map[string]string
+	// ParseMode selects the docx parsing path ("blocks" | "export"), resolved
+	// from Settings["parse_mode"] by ParseFeishuConfig and threaded from the
+	// connector entry points. Empty means blocks (the default).
+	ParseMode string
 }
 
 // FetchDocxWithBlocks retrieves a docx document via the blocks API, converts it
@@ -362,16 +366,15 @@ type DocxFetchInput struct {
 // the wiki Connector and the Drive DriveConnector.
 func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput) ([]*types.FetchedItem, error) {
 	// The parse mode comes from the data source's Settings["parse_mode"],
-	// resolved by ParseFeishuConfig into Config.ParseMode and carried on the
-	// Client. The blocks path (default) fans images/boards/attachments out into
+	// resolved by ParseFeishuConfig and threaded in via DocxFetchInput.ParseMode.
+	// The blocks path (default) fans images/boards/attachments out into
 	// sub-items wired to the parent via weknora-img://N markers and image_map /
 	// attachment_ids metadata. The export path yields a .docx that docreader
 	// parses inline, so images are bound to the parent document via
 	// parent_chunk_id (same as a regular docx upload) — kept as the per-data-
 	// source escape hatch.
-	parsingMode := client.parseMode
+	parsingMode := in.ParseMode
 	if parsingMode == "" {
-		// Client constructed directly (e.g. tests) without ParseFeishuConfig.
 		parsingMode = ParseModeBlocks
 	}
 
@@ -451,6 +454,12 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	for _, a := range atts {
 		childID := types.SubtreeChildID(in.DocToken, "file", a.FileToken)
 		keep = append(keep, childID) // present in the doc → never sweep as stale
+		// The renderer emitted the unique line "- weknora-att://<token>" for
+		// this attachment; patch that exact line so an identical earlier
+		// bullet can never be replaced by mistake.
+		patchAtt := func(line string) {
+			md = strings.Replace(md, "- weknora-att://"+a.FileToken, line, 1)
+		}
 		// The renderer only collects whitelisted extensions into atts, so
 		// non-whitelisted/video files never reach this loop (their inline
 		// `> [附件: …]` reference is already in the Markdown).
@@ -467,13 +476,14 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 				}
 				note := "> [附件: " + displayName + "]"
 				if in.URL != "" {
-					note = "> [附件: " + displayName + "](" + in.URL + ")"
+					note = "> [附件: " + displayName + "](" + escapeURL(in.URL) + ")"
 				}
-				md = strings.Replace(md, "- "+displayName, note, 1)
+				patchAtt(note)
 				continue
 			}
 			logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) download failed: %v",
 				in.ObjToken, a.Name, a.FileToken, derr)
+			patchAtt("- " + a.Name)
 			children = append(children, &types.FetchedItem{
 				ExternalID:       childID,
 				Title:            a.Name,
@@ -485,8 +495,10 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		if len(data) < MinAttachmentBytes {
 			logger.Infof(ctx, "[Feishu] doc %s: skipping tiny attachment %q (token=%s, %d bytes < %d)",
 				in.ObjToken, a.Name, a.FileToken, len(data), MinAttachmentBytes)
+			patchAtt("- " + a.Name)
 			continue
 		}
+		patchAtt("- " + a.Name)
 		children = append(children, &types.FetchedItem{
 			ExternalID:       childID,
 			Title:            a.Name,

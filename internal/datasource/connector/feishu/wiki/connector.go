@@ -171,7 +171,7 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	return core.FetchAllEngine(ctx, client, config, resourceIDs, &wikiOps{region: c.region})
+	return core.FetchAllEngine(ctx, client, config, resourceIDs, &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode})
 }
 
 // FetchIncremental performs an incremental sync by comparing node edit times
@@ -185,7 +185,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		return nil, nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	ops := &wikiOps{region: c.region}
+	ops := &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode}
 	if len(config.ResourceIDs) == 0 {
 		return nil, nil, errors.New(ops.EmptyResourceIDsError())
 	}
@@ -209,7 +209,7 @@ func (c *Connector) FetchStream(
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	ops := &wikiOps{region: c.region}
+	ops := &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode}
 	if len(config.ResourceIDs) == 0 {
 		return nil, errors.New(ops.EmptyResourceIDsError())
 	}
@@ -224,8 +224,9 @@ func (c *Connector) FetchStream(
 // resource being synced; Fetch reads it. runSync processes one resource at a
 // time, so the mutation is race-free.
 type wikiOps struct {
-	region   core.Region
-	dirPaths map[string]string
+	region    core.Region
+	parseMode string
+	dirPaths  map[string]string
 }
 
 func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
@@ -264,7 +265,7 @@ func (o *wikiOps) EditTime(n core.WikiNode) string {
 
 func (o *wikiOps) Fetch(ctx context.Context, client *core.Client, n core.WikiNode, resourceID string) ([]*types.FetchedItem, error) {
 	spaceID, _ := parseWikiResourceID(resourceID)
-	items, err := fetchNodeContent(ctx, client, n, spaceID, resourceID, o.region)
+	items, err := fetchNodeContent(ctx, client, n, spaceID, resourceID, o.region, o.parseMode)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +336,7 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 //   - file       → drive download → original file (PDF/Word/image/etc.)
 //   - mindnote   → Skip (no API)
 //   - slides     → Skip (no API)
-func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNode, spaceID string, resourceID string, region core.Region) ([]*types.FetchedItem, error) {
+func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNode, spaceID string, resourceID string, region core.Region, parseMode string) ([]*types.FetchedItem, error) {
 	if !core.IsSupportedDocType(node.ObjType) {
 		return nil, nil
 	}
@@ -362,6 +363,7 @@ func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNo
 			ResourceID: resourceID,
 			EditTime:   editTime,
 			CreateTime: createTime,
+			ParseMode:  parseMode,
 			BaseMeta:   baseMeta,
 		})
 	case "doc", "sheet", "bitable":

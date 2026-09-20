@@ -236,7 +236,7 @@ func (c *DriveConnector) FetchAll(
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	return core.FetchAllEngine(ctx, client, config, resourceIDs, &driveOps{region: c.region})
+	return core.FetchAllEngine(ctx, client, config, resourceIDs, &driveOps{region: c.region, parseMode: feishuConfig.ParseMode})
 }
 
 // FetchIncremental performs an incremental sync by comparing file modified_time
@@ -251,7 +251,7 @@ func (c *DriveConnector) FetchIncremental(
 		return nil, nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	ops := &driveOps{region: c.region}
+	ops := &driveOps{region: c.region, parseMode: feishuConfig.ParseMode}
 	if len(config.ResourceIDs) == 0 {
 		return nil, nil, errors.New(ops.EmptyResourceIDsError())
 	}
@@ -275,7 +275,7 @@ func (c *DriveConnector) FetchStream(
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	ops := &driveOps{region: c.region}
+	ops := &driveOps{region: c.region, parseMode: feishuConfig.ParseMode}
 	if len(config.ResourceIDs) == 0 {
 		return nil, errors.New(ops.EmptyResourceIDsError())
 	}
@@ -291,6 +291,7 @@ func (c *DriveConnector) FetchStream(
 // resource at a time, so the mutation is race-free.
 type driveOps struct {
 	region      core.Region
+	parseMode   string
 	folderNames map[string]string
 	dirPaths    map[string]string
 }
@@ -313,7 +314,7 @@ func (o *driveOps) ObjType(n core.DriveFile) string  { return n.Type }
 func (o *driveOps) EditTime(n core.DriveFile) string { return n.ModifiedTime }
 
 func (o *driveOps) Fetch(ctx context.Context, client *core.Client, n core.DriveFile, resourceID string) ([]*types.FetchedItem, error) {
-	items, err := fetchDriveFileContent(ctx, client, n, resourceID, o.region)
+	items, err := fetchDriveFileContent(ctx, client, n, resourceID, o.region, o.parseMode)
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +370,7 @@ func (o *driveOps) EncodeCursor(times map[string]map[string]string, lastSync tim
 //   - file                   -> DownloadDriveFile -> original file
 //   - mindnote/slides/board  -> Skip (no API), returns (nil, nil)
 func fetchDriveFileContent(
-	ctx context.Context, client *core.Client, file core.DriveFile, resourceID string, region core.Region,
+	ctx context.Context, client *core.Client, file core.DriveFile, resourceID string, region core.Region, parseMode string,
 ) ([]*types.FetchedItem, error) {
 	if !core.IsSupportedDocType(file.Type) {
 		return nil, nil
@@ -402,6 +403,7 @@ func fetchDriveFileContent(
 			ResourceID: resourceID,
 			EditTime:   editTime,
 			CreateTime: createTime,
+			ParseMode:  parseMode,
 			BaseMeta:   baseMeta,
 		})
 

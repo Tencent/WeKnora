@@ -71,8 +71,9 @@ func TestParseFeishuConfig_ParseMode(t *testing.T) {
 // NewClient carries Config.ParseMode so FetchDocxWithBlocks (which only sees
 // the Client) picks the right path; empty stays empty and FetchDocxWithBlocks
 // itself treats that as blocks.
-func TestNewClient_CarriesParseMode(t *testing.T) {
-	assert.Equal(t, ParseModeExport, NewClient(&Config{AppID: "a", AppSecret: "b", ParseMode: ParseModeExport}).parseMode)
-	assert.Equal(t, ParseModeBlocks, NewClient(&Config{AppID: "a", AppSecret: "b", ParseMode: ParseModeBlocks}).parseMode)
-	assert.Empty(t, NewClient(&Config{AppID: "a", AppSecret: "b"}).parseMode)
-}
+// ParseMode threading: DocxFetchInput.ParseMode is now the single transport
+// (connector entry resolves it via ParseFeishuConfig and passes it through
+// ops → fetchNodeContent → DocxFetchInput). Empty degrades to blocks inside
+// FetchDocxWithBlocks; resolution itself is covered by
+// TestParseFeishuConfig_ParseMode above, and the wiki/drive suites exercise
+// the blocks default end-to-end with ops built without an explicit mode.

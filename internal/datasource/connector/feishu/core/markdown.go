@@ -215,18 +215,22 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 			}
 			if parseableAttachmentExts[strings.ToLower(filepath.Ext(name))] {
 				r.atts = append(r.atts, pendingAttachment{FileToken: b.File.Token, Name: b.File.Name})
-				return "- " + name
+				// Unique token line, not the display name: the connector swaps
+				// this exact line after the download attempt (name on success /
+				// tiny, degrade note over cap), so an identical earlier bullet
+				// can never be replaced by mistake.
+				return "- weknora-att://" + b.File.Token
 			}
 			// Not ingestible (wrong type / video): keep a visible reference with
 			// the source link when available.
 			if r.docURL != "" {
-				return "> [附件: " + name + "](" + r.docURL + ")"
+				return "> [附件: " + name + "](" + escapeURL(r.docURL) + ")"
 			}
 			return "> [附件: " + name + "]"
 		}
 	case BlockTypeIframe:
 		if b.Iframe != nil && b.Iframe.Component != nil && b.Iframe.Component.URL != "" {
-			return "[内嵌网页](" + b.Iframe.Component.URL + ")"
+			return "[内嵌网页](" + escapeURL(b.Iframe.Component.URL) + ")"
 		}
 		return unsupportedBlockNote(b)
 	default:
@@ -343,6 +347,15 @@ func plainText(bt *BlockText) string {
 
 // richText renders the inline elements of a text-bearing block: styled text
 // runs, @-mentions, and inline KaTeX equations.
+// escapeURL makes a raw URL safe inside a Markdown link target: spaces and
+// unbalanced closing parens would otherwise terminate the [...](&#46;..) early
+// and truncate the link. Percent-encoding keeps the target byte-identical
+// after Markdown decoding.
+func escapeURL(u string) string {
+	r := strings.NewReplacer(" ", "%20", ")", "%29", "(", "%28")
+	return r.Replace(u)
+}
+
 func (r *mdRenderer) richText(bt *BlockText) string {
 	if bt == nil {
 		return ""
@@ -355,7 +368,7 @@ func (r *mdRenderer) richText(bt *BlockText) string {
 		case e.MentionDoc != nil && e.MentionDoc.URL != "":
 			// The payload carries no document title — use the URL as link text.
 			u := e.MentionDoc.URL
-			sb.WriteString("[" + u + "](" + u + ")")
+			sb.WriteString("[" + u + "](" + escapeURL(u) + ")")
 		case e.MentionUser != nil:
 			// The API carries only the user OpenID; the caller-supplied
 			// resolver (cached, degrading) turns it into a display name when
@@ -393,7 +406,7 @@ func styleRun(content string, st *TextElementStyle) string {
 		content = "~~" + content + "~~"
 	}
 	if st.Link != nil && st.Link.URL != "" {
-		content = "[" + content + "](" + st.Link.URL + ")"
+		content = "[" + content + "](" + escapeURL(st.Link.URL) + ")"
 	}
 	return content
 }
