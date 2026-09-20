@@ -1420,6 +1420,15 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile
 	if len(item.Content) > 0 {
+		// Resolve `weknora-img://<n>` markers against sibling image rows BEFORE
+		// the content is persisted, so the stored file, source_content and the
+		// chunks ProcessDocument later produces all carry the same provider://
+		// URL. Absent sequences keep their marker (keepUnresolved) — the
+		// ProcessDocument hook degrades them once chunking runs, so a
+		// late-arriving image sibling can still resolve. Rows ingested before
+		// this fix converge on the next full re-sync (update = delete +
+		// re-create); no data migration is needed.
+		item.Content = s.resolveIngestImageMarkers(ctx, ds, item)
 		fh, err := bytesToFileHeader(item.Content, item.FileName)
 		if err != nil {
 			return isUpdate, fmt.Errorf("build file header: %w", err)
@@ -1490,6 +1499,40 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	}
 
 	return isUpdate, fmt.Errorf("item has neither content nor URL")
+}
+
+// resolveIngestImageMarkers rewrites `weknora-img://<n>` markers in the item's
+// content using the item's image_map metadata and sibling image knowledge rows
+// of the same data source (which the connector emits before the parent
+// document). Missing siblings keep their marker: the ProcessDocument hook
+// degrades them during chunking. Callers without image_map or without markers
+// pass through untouched.
+func (s *DataSourceService) resolveIngestImageMarkers(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
+) []byte {
+	raw := item.Metadata["image_map"]
+	if raw == "" || !bytes.Contains(item.Content, []byte("weknora-img://")) {
+		return item.Content
+	}
+	var imageMap map[string]string
+	if err := json.Unmarshal([]byte(raw), &imageMap); err != nil {
+		logger.Warnf(ctx, "invalid image_map metadata for item %s: %v", item.ExternalID, err)
+		return item.Content
+	}
+	repo := s.knowledgeService.GetRepository()
+	lookup := func(externalID string) (string, error) {
+		row, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, externalID)
+		if err != nil {
+			logger.Warnf(ctx, "embedded image lookup failed for item %s external_id %s: %v",
+				item.ExternalID, externalID, err)
+			return "", err
+		}
+		if row == nil || row.FilePath == "" {
+			return "", nil
+		}
+		return row.FilePath, nil
+	}
+	return []byte(resolveEmbeddedImageContent(string(item.Content), imageMap, lookup, true))
 }
 
 // dupIsSameNode reports whether a duplicate-content error means the parent still

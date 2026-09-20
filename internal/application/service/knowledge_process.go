@@ -3685,14 +3685,61 @@ var reWrappedImageMarker = regexp.MustCompile(`!\[([^\]]*)\]\(weknora-img://(\d+
 // external-system token.
 var reBareImageMarker = regexp.MustCompile(`weknora-img://(\d+)`)
 
-// resolveEmbeddedImageMarkers rewrites `weknora-img://<n>` placeholders in the
-// document markdown into image references pointing at the persisted FilePath
-// (provider:// …) of the sibling image knowledge row named by the parent's
-// image_map metadata ({"n": external_id}). Image rows share the data source
-// but not necessarily the ingest order, so every absent mapping — no
-// image_map, unknown sequence number, missing sibling row, empty FilePath,
-// lookup error — degrades to an empty image reference: the document still
-// parses normally and no retry is enqueued.
+// resolveEmbeddedImageContent is the shared core for rewriting `weknora-img://<n>`
+// placeholders into image references pointing at the persisted FilePath
+// (provider:// …) of sibling image knowledge rows, keyed by the parent's
+// image_map metadata ({"n": external_id}). imageMap is passed in by the caller;
+// unknown sequence numbers (absent from the map) resolve to an empty external
+// ID, which lookup reports as missing. On a missing image the behaviour is
+// caller-owned: keepUnresolved=true leaves the `weknora-img://<n>` marker in
+// place (ingest path — a late-arriving sibling can still be resolved by the
+// ProcessDocument hook on re-parse), keepUnresolved=false degrades to an empty
+// image reference `![alt]()` (ProcessDocument path — no retry is enqueued).
+func resolveEmbeddedImageContent(
+	content string, imageMap map[string]string,
+	lookup func(externalID string) (filePath string, err error),
+	keepUnresolved bool,
+) string {
+	if !strings.Contains(content, "weknora-img://") {
+		return content
+	}
+
+	filePathFor := func(n string) string {
+		externalID := imageMap[n]
+		if externalID == "" || lookup == nil {
+			return ""
+		}
+		path, err := lookup(externalID)
+		if err != nil || path == "" {
+			return ""
+		}
+		return path
+	}
+
+	replace := func(alt, n string) string {
+		if path := filePathFor(n); path != "" {
+			return fmt.Sprintf("![%s](%s)", alt, path)
+		}
+		if keepUnresolved {
+			return fmt.Sprintf("![%s](weknora-img://%s)", alt, n)
+		}
+		return fmt.Sprintf("![%s]()", alt)
+	}
+	out := reWrappedImageMarker.ReplaceAllStringFunc(content, func(match string) string {
+		sub := reWrappedImageMarker.FindStringSubmatch(match)
+		return replace(sub[1], sub[2])
+	})
+	out = reBareImageMarker.ReplaceAllStringFunc(out, func(match string) string {
+		return replace("图片", strings.TrimPrefix(match, "weknora-img://"))
+	})
+	return out
+}
+
+// resolveEmbeddedImageMarkers is the ProcessDocument hook: it reads the parent
+// knowledge row's image_map metadata and resolves markers via
+// FindByDataSourceExternalID (datasource_id + external_id → sibling image row).
+// Callers of this path are already chunking the stored document, so missing
+// images degrade to empty image references (keepUnresolved=false).
 func (s *knowledgeService) resolveEmbeddedImageMarkers(
 	ctx context.Context, knowledge *types.Knowledge, markdown string,
 ) string {
@@ -3708,51 +3755,35 @@ func (s *knowledgeService) resolveEmbeddedImageMarkers(
 		}
 	}
 
-	// One DB lookup per distinct sequence number, however often it repeats.
-	resolved := make(map[string]string)
-	filePathFor := func(n string) string {
-		if path, ok := resolved[n]; ok {
-			return path
+	// One DB lookup per distinct sibling external ID, however often the
+	// sequence number repeats; lookup results (including misses) are memoized.
+	memo := make(map[string]string)
+	lookup := func(externalID string) (string, error) {
+		if path, ok := memo[externalID]; ok {
+			return path, nil
 		}
 		var path string
-		externalID := imageMap[n]
-		if dataSourceID != "" && externalID != "" {
+		if dataSourceID != "" {
 			row, err := s.repo.FindByDataSourceExternalID(
 				ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, dataSourceID, externalID,
 			)
 			switch {
 			case err != nil:
-				logger.Warnf(ctx, "embedded image lookup failed for knowledge %s seq %s: %v",
-					knowledge.ID, n, err)
+				logger.Warnf(ctx, "embedded image lookup failed for knowledge %s external_id %s: %v",
+					knowledge.ID, externalID, err)
 			case row == nil || row.FilePath == "":
-				logger.Infof(ctx, "embedded image %s (seq %s) not available for knowledge %s; degrading to placeholder",
-					externalID, n, knowledge.ID)
+				logger.Infof(ctx, "embedded image %s not available for knowledge %s; degrading to placeholder",
+					externalID, knowledge.ID)
 			default:
 				path = row.FilePath
 			}
 		}
-		resolved[n] = path
-		return path
+		memo[externalID] = path
+		return path, nil
 	}
 
-	resolvedCount, placeholderCount := 0, 0
-	replace := func(alt, n string) string {
-		if path := filePathFor(n); path != "" {
-			resolvedCount++
-			return fmt.Sprintf("![%s](%s)", alt, path)
-		}
-		placeholderCount++
-		return fmt.Sprintf("![%s]()", alt)
-	}
-	out := reWrappedImageMarker.ReplaceAllStringFunc(markdown, func(match string) string {
-		sub := reWrappedImageMarker.FindStringSubmatch(match)
-		return replace(sub[1], sub[2])
-	})
-	out = reBareImageMarker.ReplaceAllStringFunc(out, func(match string) string {
-		return replace("图片", strings.TrimPrefix(match, "weknora-img://"))
-	})
-	logger.Infof(ctx, "Resolved %d embedded image markers (%d placeholders) for knowledge %s",
-		resolvedCount, placeholderCount, knowledge.ID)
+	out := resolveEmbeddedImageContent(markdown, imageMap, lookup, false)
+	logger.Infof(ctx, "Resolved embedded image markers for knowledge %s", knowledge.ID)
 	return out
 }
 
