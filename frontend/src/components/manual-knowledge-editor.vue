@@ -1233,10 +1233,11 @@ onBeforeUnmount(() => {
 }
 
 :deep(.doc-meta__kb) {
-  /* TDesign 的 select 根节点是块级，这里要它跟在“存入”后面像个行内控件 */
+  /* TDesign 的 select 根节点是块级；这里让它收到内容宽度，
+     否则框比文字宽，箭头够不到右边缘，看着就是没对齐 */
   flex: 0 1 auto;
   width: auto;
-  min-width: 132px;
+  min-width: 0;
   max-width: 260px;
 
   .t-input {
@@ -1273,12 +1274,13 @@ onBeforeUnmount(() => {
 .manual-editor--narrow {
   .doc-head {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 2px;
   }
 
+  /* 叠成两行也留在右端，控件不会因为抽屉变窄就跳到另一边 */
   .doc-meta {
-    padding-left: 8px;
+    align-self: flex-end;
   }
 
   .editor-toolbar {
