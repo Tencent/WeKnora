@@ -59,6 +59,7 @@
   - `blocks`（默认）→ blocks API 逐块读取并转为 GFM Markdown（`core/blocks.go`/`markdown.go`），保留代码块语言、LaTeX 公式、原生表格（合并单元格以左上值填充）等；覆盖不到的块类型（画板思维笔记等少数）降级为占位标记，不影响文档其余部分；
   - `export` → 异步导出 API（`POST /drive/v1/export_tasks`）导出 `.docx` 走通用文档解析。
   - `doc`（旧版文档）/`sheet`/`bitable` 不受此开关影响，仍走导出通道。
+  - 取舍：**blocks** 快、保留 docx 内 file block 附件、需 `docx:document:readonly`；**export** 慢（异步导出 + docreader 解析）、丢失 docx 内附件、但解析表现与普通 docx 手工上传完全一致。只要正文与附件用默认 blocks 即可；需要与上传流程一致的解析表现时选 export。
 - **内嵌对象**（blocks 模式）：
   - **图片**：下载后存入 WeKnora 存储，Markdown 正文内嵌 WeKnora 持久图片地址；配置了 VLM 的知识库会自动生成 OCR/描述子分块（未配置则仅保留图片，不报错）。**画板**（block 43）经官方 `download_as_image` 接口导出为图片走同一管线，无权限/失败时降级占位（需应用具备 `board:whiteboard:node:read` 权限）。
   - **文档类附件**（PDF/Markdown/Excel/PPT/Word 等）：下载后作为独立知识入库，落在父文档同目录，文件名用附件自身名称；父文档元数据与附件元数据互相记录对方 ID，正文中附件位置以文件名列表展示。同字节文件在多个文档出现时共享同一份知识（去重）。
