@@ -234,11 +234,13 @@ test('extraFieldOptionLabel resolves the locale, falling back to label then valu
     labels: { 'zh-CN': '0~1 相关度（BGE 一类）' },
     value: 'probability',
   }
-  expect(extraFieldOptionLabel(option, 'zh-CN')).toBe('0~1 相关度（BGE 一类）')
-  expect(extraFieldOptionLabel(option, 'en')).toBe('0..1 relevance (BGE class)')
-  expect(extraFieldOptionLabel({ label: 'ap-guangzhou', value: 'ap-guangzhou' }, 'zh-CN'))
-    .toBe('ap-guangzhou')
-  expect(extraFieldOptionLabel({ value: 'logit' }, 'zh-CN')).toBe('logit')
+  assert.equal(extraFieldOptionLabel(option, 'zh-CN'), '0~1 相关度（BGE 一类）')
+  assert.equal(extraFieldOptionLabel(option, 'en'), '0..1 relevance (BGE class)')
+  assert.equal(
+    extraFieldOptionLabel({ label: 'ap-guangzhou', value: 'ap-guangzhou' }, 'zh-CN'),
+    'ap-guangzhou',
+  )
+  assert.equal(extraFieldOptionLabel({ value: 'logit' }, 'zh-CN'), 'logit')
 })
 
 test('extraFieldPlaceholder resolves the locale and tolerates no placeholder', () => {
@@ -249,7 +251,10 @@ test('extraFieldPlaceholder resolves the locale and tolerates no placeholder', (
     placeholder: 'match the reranker actually deployed behind this endpoint',
     placeholders: { 'zh-CN': '按这个端点后面实际部署的重排模型选择' },
   }
-  expect(extraFieldPlaceholder(field, 'zh-CN')).toBe('按这个端点后面实际部署的重排模型选择')
-  expect(extraFieldPlaceholder(field, 'en')).toBe('match the reranker actually deployed behind this endpoint')
-  expect(extraFieldPlaceholder({ key: 'k', label: 'k', type: 'string' }, 'zh-CN')).toBe('')
+  assert.equal(extraFieldPlaceholder(field, 'zh-CN'), '按这个端点后面实际部署的重排模型选择')
+  assert.equal(
+    extraFieldPlaceholder(field, 'en'),
+    'match the reranker actually deployed behind this endpoint',
+  )
+  assert.equal(extraFieldPlaceholder({ key: 'k', label: 'k', type: 'string' }, 'zh-CN'), '')
 })
