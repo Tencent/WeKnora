@@ -731,6 +731,70 @@ func knowledgeSpansLastError(
 	}
 }
 
+// missingStageStatusFunc decides what a canonical stage with no row should
+// render as. The parse_status-derived fallback cannot tell "this stage ran and
+// failed" from "this stage never ran", so once a stage actually recorded a
+// failure it paints every rows-less stage `failed` too: the UI picks the first
+// failed stage in canonical order and names the wrong one, and the blast radius
+// looks total rather than "one stage broke, the rest never started" (#3452).
+//
+// With a real stage failure on record the position of that failure is known, so:
+//
+//   - downstream of it, per StageDependencies or canonical order → cancelled
+//     ("not run because an upstream span failed")
+//   - before it → skipped; the stage either did not apply (a text passage has no
+//     docreader step) or its row was never written, and neither is a failure
+//
+// Without one, the parse_status fallback stands unchanged, which is the case it
+// was written for: legacy knowledge parsed before span tracking existed.
+func missingStageStatusFunc(
+	stageRowByName map[string]*types.KnowledgeProcessingSpan, fallback string,
+) func(string) string {
+	failedIdx := -1
+	for i, name := range types.AllStages {
+		if row, ok := stageRowByName[name]; ok && row.Status == types.SpanStatusFailed {
+			failedIdx = i
+			break
+		}
+	}
+	if failedIdx < 0 {
+		return func(string) string { return fallback }
+	}
+
+	// Transitive dependents of the failed stage. Today these are always later
+	// in AllStages too, so the canonical-order check below already covers them;
+	// consulting the DAG keeps the answer right if the stage list is ever
+	// reordered or a stage gains an upstream that is not its predecessor.
+	cancelled := map[string]bool{}
+	var markDependents func(string)
+	markDependents = func(stage string) {
+		for candidate, upstreams := range types.StageDependencies {
+			if cancelled[candidate] {
+				continue
+			}
+			for _, up := range upstreams {
+				if up == stage {
+					cancelled[candidate] = true
+					markDependents(candidate)
+					break
+				}
+			}
+		}
+	}
+	markDependents(types.AllStages[failedIdx])
+
+	stageIdx := make(map[string]int, len(types.AllStages))
+	for i, name := range types.AllStages {
+		stageIdx[name] = i
+	}
+	return func(name string) string {
+		if cancelled[name] || stageIdx[name] > failedIdx {
+			return types.SpanStatusCancelled
+		}
+		return types.SpanStatusSkipped
+	}
+}
+
 // buildSpanTree assembles a flat list of span rows into a parent-child
 // tree rooted at the (knowledge, attempt)'s root span. Missing canonical
 // stages are filled in with pending placeholders so the UI always renders
@@ -785,6 +849,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 		syntheticStatus = types.SpanStatusDone
 	case types.ParseStatusFailed:
 		syntheticStatus = types.SpanStatusFailed
+	case types.ParseStatusCancelled:
+		syntheticStatus = types.SpanStatusCancelled
 	}
 
 	// Synthesize root if no rows came back so the API contract stays
@@ -838,6 +904,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 	// per-stage timing was never recorded. Appended in AllStages order
 	// so the canonical stage layout is deterministic regardless of
 	// which rows are missing.
+	missingStageStatus := missingStageStatusFunc(stageRowByName, syntheticStatus)
 	for _, name := range types.AllStages {
 		if _, ok := stageRowByName[name]; ok {
 			continue
@@ -847,7 +914,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 			Attempt:     attempt,
 			Name:        name,
 			Kind:        types.SpanKindStage,
-			Status:      syntheticStatus,
+			Status:      missingStageStatus(name),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
