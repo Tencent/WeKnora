@@ -7,9 +7,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"golang.org/x/sync/errgroup"
+)
+
+const (
+	// aliyunRerankMaxDocuments is DashScope text-rerank's per-request document
+	// cap. Exceeding it returns HTTP 400:
+	//   Value error, batch size of documents is invalid, it should not be
+	//   larger than 500.
+	aliyunRerankMaxDocuments = 500
+	// aliyunRerankMaxConcurrency bounds the number of in-flight batch requests
+	// so a very large candidate set cannot open hundreds of sockets at once.
+	aliyunRerankMaxConcurrency = 4
 )
 
 // AliyunReranker implements a reranking system based on Aliyun DashScope models
@@ -96,6 +109,60 @@ func NewAliyunReranker(config *RerankerConfig) (*AliyunReranker, error) {
 
 // Rerank performs document reranking based on relevance to the query using Aliyun DashScope API
 func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
+	if len(documents) == 0 {
+		return []RankResult{}, nil
+	}
+
+	// DashScope's text-rerank endpoint caps the document count per request and
+	// answers HTTP 400 "batch size of documents is invalid, it should not be
+	// larger than 500" past that. Upstream callers (chat pipeline, agent
+	// knowledge search, message search) hand in every retrieval candidate and
+	// never cap per provider, so a graph expansion or a large embedding_top_k
+	// blows straight through the limit — and the pipeline then silently falls
+	// back to unranked results. Scores are per (query, document) pair, so they
+	// stay comparable across requests: split into limit-sized batches, rerank
+	// them concurrently, and merge without dropping any candidate.
+	batchCount := (len(documents) + aliyunRerankMaxDocuments - 1) / aliyunRerankMaxDocuments
+	batches := make([][]RankResult, batchCount)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(aliyunRerankMaxConcurrency)
+	for b := 0; b < batchCount; b++ {
+		b := b
+		start := b * aliyunRerankMaxDocuments
+		end := min(start+aliyunRerankMaxDocuments, len(documents))
+		g.Go(func() error {
+			results, err := r.rerankBatch(gctx, query, documents[start:end], start)
+			if err != nil {
+				return err
+			}
+			batches[b] = results
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Preserve the pre-batching contract: a single request returned the
+	// provider's ordering, i.e. descending relevance. Downstream (rerank.go)
+	// relies on results[0] being the top candidate and does not sort itself.
+	results := make([]RankResult, 0, len(documents))
+	for _, batch := range batches {
+		results = append(results, batch...)
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].RelevanceScore > results[j].RelevanceScore
+	})
+	return results, nil
+}
+
+// rerankBatch reranks one batch (already sized within the provider limit) and
+// returns the results with their indices rebased onto the original document
+// slice via offset.
+func (r *AliyunReranker) rerankBatch(
+	ctx context.Context, query string, documents []string, offset int,
+) ([]RankResult, error) {
 	// Build the request body
 	requestBody := &AliyunRerankRequest{
 		Model: r.modelName,
@@ -138,7 +205,10 @@ func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []s
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("aliyun rerank API error: Http Status: %s, Body: %s", resp.Status, string(body))
+		return nil, fmt.Errorf(
+			"aliyun rerank API error: Http Status: %s, Body: %s (documents in this batch: %d)",
+			resp.Status, string(body), len(documents),
+		)
 	}
 
 	var response AliyunRerankResponse
@@ -146,16 +216,26 @@ func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []s
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	// Convert Aliyun results to standard RankResult format
-	results := make([]RankResult, len(response.Output.Results))
-	for i, aliyunResult := range response.Output.Results {
-		results[i] = RankResult{
-			Index: aliyunResult.Index,
+	// Convert Aliyun results to standard RankResult format, rebasing the
+	// provider's batch-relative index onto the original document slice.
+	results := make([]RankResult, 0, len(response.Output.Results))
+	for _, aliyunResult := range response.Output.Results {
+		index := offset + aliyunResult.Index
+		if aliyunResult.Index < 0 || aliyunResult.Index >= len(documents) {
+			// Defensive: a provider index outside the batch would otherwise
+			// silently point at an unrelated candidate downstream.
+			logger.Warnf(ctx,
+				"aliyun rerank returned out-of-range index %d for a batch of %d (offset %d), skipped",
+				aliyunResult.Index, len(documents), offset)
+			continue
+		}
+		results = append(results, RankResult{
+			Index: index,
 			Document: DocumentInfo{
 				Text: aliyunResult.Document.Text,
 			},
 			RelevanceScore: aliyunResult.RelevanceScore,
-		}
+		})
 	}
 
 	return results, nil
