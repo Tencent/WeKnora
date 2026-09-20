@@ -45,6 +45,23 @@ func TestPathGuardWriteFileDoesNotFollowInWorkspaceSymlink(t *testing.T) {
 	require.True(t, os.IsNotExist(statErr))
 }
 
+// Seatbelt denies unlinking the workspace directory so it cannot be swapped
+// for a symlink. PathGuard still has to refuse if that happens anyway: file
+// tools do not run inside sandbox-exec.
+func TestPathGuardWriteFileDoesNotFollowReplacedRoot(t *testing.T) {
+	root, g := guardFixture(t)
+	outside := filepath.Join(filepath.Dir(root), "outside")
+	require.NoError(t, os.Mkdir(outside, 0o755))
+
+	require.NoError(t, os.RemoveAll(root))
+	require.NoError(t, os.Symlink(outside, root))
+
+	err := g.WriteFile(filepath.Join(root, "pwned.txt"), []byte("x"), 0o644)
+	require.ErrorIs(t, err, ErrPathDenied)
+	_, statErr := os.Stat(filepath.Join(outside, "pwned.txt"))
+	require.True(t, os.IsNotExist(statErr))
+}
+
 func TestPathGuardReadFileDoesNotFollowSymlinkEscape(t *testing.T) {
 	root, g := guardFixture(t)
 	secrets := filepath.Join(filepath.Dir(root), "secrets", "id_rsa")

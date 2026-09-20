@@ -116,6 +116,7 @@ func compileSeatbelt(p core.Policy) (seatbeltProgram, error) {
 			fmt.Sprintf("(deny file-read* (subpath (param %q)))", param),
 			fmt.Sprintf("(deny file-read* (literal (param %q)))", param),
 			fmt.Sprintf("(deny file-write* (subpath (param %q)))", param),
+			fmt.Sprintf("(deny file-write* (literal (param %q)))", param),
 		)
 	}
 

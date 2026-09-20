@@ -60,9 +60,9 @@ func (g *PathGuard) lstatRel(root, rel, orig string) (os.FileInfo, error) {
 }
 
 func walkOpen(root, rel string, mkdir bool, lastFlags int, lastPerm uint32) (int, error) {
-	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return -1, err
+		return -1, mapRootOpenErr(root, err)
 	}
 	parts := relParts(rel)
 	if len(parts) == 0 {
@@ -103,6 +103,22 @@ func walkOpen(root, rel string, mkdir bool, lastFlags int, lastPerm uint32) (int
 		fd = next
 	}
 	return fd, nil
+}
+
+func mapRootOpenErr(root string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, unix.ELOOP) {
+		return ErrPathDenied
+	}
+	var st unix.Stat_t
+	if e := unix.Lstat(root, &st); e == nil {
+		if st.Mode&unix.S_IFMT == unix.S_IFLNK {
+			return ErrPathDenied
+		}
+	}
+	return err
 }
 
 func mapOpenatErr(dirfd int, name string, err error) error {

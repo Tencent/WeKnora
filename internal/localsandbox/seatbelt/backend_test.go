@@ -56,6 +56,13 @@ func darwinFixture(t *testing.T) (core.Backend, core.Policy, string) {
 
 func runSandboxed(t *testing.T, backend core.Backend, p core.Policy, script string) (core.ExitStatus, string) {
 	t.Helper()
+	return runSandboxedArgv(t, backend, p, []string{"/bin/bash", "-c", script}, nil)
+}
+
+func runSandboxedArgv(
+	t *testing.T, backend core.Backend, p core.Policy, argv []string, env map[string]string,
+) (core.ExitStatus, string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -64,19 +71,25 @@ func runSandboxed(t *testing.T, backend core.Backend, p core.Policy, script stri
 	defer prep.Close()
 
 	proc, err := backend.Spawn(ctx, prep, core.Command{
-		Argv: []string{"/bin/bash", "-c", script},
+		Argv: argv,
+		Env:  env,
 		Cwd:  p.Cwd,
 	})
 	require.NoError(t, err)
 
-	out, err := io.ReadAll(proc.Stdout())
-	require.NoError(t, err)
-	errOut, err := io.ReadAll(proc.Stderr())
-	require.NoError(t, err)
-
+	outCh := make(chan []byte, 1)
+	errCh := make(chan []byte, 1)
+	go func() {
+		b, _ := io.ReadAll(proc.Stdout())
+		outCh <- b
+	}()
+	go func() {
+		b, _ := io.ReadAll(proc.Stderr())
+		errCh <- b
+	}()
 	status, err := proc.Wait(ctx)
 	require.NoError(t, err)
-	return status, string(out) + string(errOut)
+	return status, string(<-outCh) + string(<-errCh)
 }
 
 func TestSeatbeltAllowsWriteInsideWorkspace(t *testing.T) {
@@ -152,6 +165,8 @@ func TestSeatbeltPolicyFromBuilderRunsLoginShell(t *testing.T) {
 	require.NoError(t, err)
 	workspace := filepath.Join(home, "Documents", "WeKnora", "s1")
 	require.NoError(t, os.MkdirAll(workspace, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".profile"), []byte("# profile\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".bashrc"), []byte("# bashrc\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".zshrc"), []byte("# rc\n"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".ssh"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".ssh", "id_rsa"), []byte("PRIVATEKEY"), 0o600))
@@ -160,14 +175,93 @@ func TestSeatbeltPolicyFromBuilderRunsLoginShell(t *testing.T) {
 	p, err := builder.Build(core.ModeAuto, core.Workspace{Kind: core.WorkspaceSession, Root: workspace})
 	require.NoError(t, err)
 
-	status, out := runSandboxed(t, backend, p, `echo alive && echo w > ./f.txt && cat ./f.txt`)
+	env := map[string]string{
+		"HOME": home,
+		"PATH": os.Getenv("PATH"),
+	}
+	status, out := runSandboxedArgv(t, backend, p, []string{"/bin/bash", "-lc", `echo alive && echo w > ./f.txt && cat ./f.txt`}, env)
 	require.Equal(t, 0, status.Code, out)
 	require.Contains(t, out, "alive")
 	require.Contains(t, out, "w")
 
-	status, out = runSandboxed(t, backend, p, `cat `+filepath.Join(home, ".ssh", "id_rsa"))
+	status, out = runSandboxedArgv(t, backend, p, []string{"/bin/bash", "-lc", `cat ` + filepath.Join(home, ".ssh", "id_rsa")}, env)
 	require.NotEqual(t, 0, status.Code, out)
 	require.NotContains(t, out, "PRIVATEKEY")
+}
+
+// Cancelling the spawn context after Wait must not SIGKILL the process group:
+// the pid may already have been reused. Service.Run's defer cancel() hits
+// this on every successful command.
+func TestSeatbeltDoesNotKillAfterSuccessfulWait(t *testing.T) {
+	backend, p, _ := darwinFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+	prep, err := backend.Prepare(ctx, p)
+	require.NoError(t, err)
+	defer prep.Close()
+
+	proc, err := backend.Spawn(ctx, prep, core.Command{
+		Argv: []string{"/bin/bash", "-c", "echo hi"},
+		Cwd:  p.Cwd,
+	})
+	require.NoError(t, err)
+
+	outCh := make(chan []byte, 1)
+	errCh := make(chan []byte, 1)
+	go func() {
+		b, _ := io.ReadAll(proc.Stdout())
+		outCh <- b
+	}()
+	go func() {
+		b, _ := io.ReadAll(proc.Stderr())
+		errCh <- b
+	}()
+	status, err := proc.Wait(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, status.Code, string(<-outCh)+string(<-errCh))
+	require.False(t, status.Killed)
+
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	sp := proc.(*seatbeltProcess)
+	sp.mu.Lock()
+	killed := sp.killed
+	sp.mu.Unlock()
+	require.False(t, killed, "spawn-context cancel after Wait must not Kill(-pid)")
+}
+
+// When the workspace is the home directory, credential files sit inside the
+// writable root. subpath deny does not match a file, so without a literal
+// write deny `echo pwned > ~/.cargo/credentials.toml` succeeds.
+func TestSeatbeltDeniesWritingCredentialFileInsideWritableHome(t *testing.T) {
+	backend, err := New()
+	require.NoError(t, err)
+	require.NoError(t, backend.Available())
+
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	cargo := filepath.Join(home, ".cargo")
+	require.NoError(t, os.MkdirAll(cargo, 0o755))
+	creds := filepath.Join(cargo, "credentials.toml")
+	require.NoError(t, os.WriteFile(creds, []byte("SECRET"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(cargo, "config.toml"), []byte("ok\n"), 0o644))
+
+	builder := core.NewPolicyBuilder(home, filepath.Join(home, "Library", "App"))
+	p, err := builder.Build(core.ModeAuto, core.Workspace{
+		Kind:       core.WorkspaceProject,
+		Root:       home,
+		ProtectGit: true,
+	})
+	require.NoError(t, err)
+
+	status, out := runSandboxed(t, backend, p, `echo pwned > `+creds)
+	require.NotEqual(t, 0, status.Code, out)
+	got, err := os.ReadFile(creds)
+	require.NoError(t, err)
+	require.Equal(t, "SECRET", string(got))
+
+	status, out = runSandboxed(t, backend, p, `echo x > `+filepath.Join(cargo, "config.toml"))
+	require.Equal(t, 0, status.Code, out)
 }
 
 func TestSeatbeltDeniesNetwork(t *testing.T) {

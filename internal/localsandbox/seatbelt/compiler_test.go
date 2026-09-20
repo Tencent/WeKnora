@@ -87,6 +87,17 @@ func TestCompileSeatbeltExcludesReadOnlySubpathTwice(t *testing.T) {
 		`(require-not (subpath (param "WRITABLE_ROOT_0_EXCLUDED_0")))`)
 }
 
+// A credential path may be a file (~/.npmrc, ~/.cargo/credentials.toml).
+// subpath does not match a file, which is why reads already emit literal;
+// the write deny has to do the same or a writable home still clobbers it.
+func TestCompileSeatbeltDeniesCredentialWriteAsSubpathAndLiteral(t *testing.T) {
+	prog, err := compileSeatbelt(seatbeltPolicy())
+	require.NoError(t, err)
+
+	require.Contains(t, prog.Profile, `(deny file-write* (subpath (param "DENY_READ_0")))`)
+	require.Contains(t, prog.Profile, `(deny file-write* (literal (param "DENY_READ_0")))`)
+}
+
 // sbpl gives precedence to later rules, so every deny must follow every allow.
 func TestCompileSeatbeltPutsDeniesLast(t *testing.T) {
 	prog, err := compileSeatbelt(seatbeltPolicy())

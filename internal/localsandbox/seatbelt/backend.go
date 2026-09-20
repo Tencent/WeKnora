@@ -132,10 +132,11 @@ func (b *seatbeltBackend) Spawn(
 	logger.Infof(ctx, "[LocalSandbox] seatbelt spawn pid=%d cwd=%s argv0=%s", pid, cmd.Cwd, cmd.Argv[0])
 
 	proc := &seatbeltProcess{
-		cmd:     execCmd,
-		stdout:  stdout,
-		stderr:  stderr,
-		started: started,
+		cmd:      execCmd,
+		stdout:   stdout,
+		stderr:   stderr,
+		started:  started,
+		waitDone: make(chan struct{}),
 	}
 	go proc.watchContext(ctx)
 	return proc, nil
@@ -252,10 +253,11 @@ func envSlice(env map[string]string) []string {
 }
 
 type seatbeltProcess struct {
-	cmd     *exec.Cmd
-	stdout  io.ReadCloser
-	stderr  io.ReadCloser
-	started time.Time
+	cmd      *exec.Cmd
+	stdout   io.ReadCloser
+	stderr   io.ReadCloser
+	started  time.Time
+	waitDone chan struct{}
 
 	mu     sync.Mutex
 	killed bool
@@ -266,8 +268,19 @@ func (p *seatbeltProcess) Stderr() io.Reader { return p.stderr }
 func (p *seatbeltProcess) PID() int          { return p.cmd.Process.Pid }
 
 func (p *seatbeltProcess) watchContext(ctx context.Context) {
-	<-ctx.Done()
-	_ = p.Kill()
+	select {
+	case <-p.waitDone:
+		return
+	case <-ctx.Done():
+	}
+	// ctx fired. If Wait already reaped the process, skip Kill: SIGKILL to
+	// -pid after wait has a PID-reuse window. waitDone is closed first.
+	select {
+	case <-p.waitDone:
+		return
+	default:
+		_ = p.Kill()
+	}
 }
 
 // Kill terminates the entire process group. Killing only the root would leave
@@ -289,6 +302,7 @@ func (p *seatbeltProcess) Kill() error {
 
 func (p *seatbeltProcess) Wait(context.Context) (core.ExitStatus, error) {
 	err := p.cmd.Wait()
+	close(p.waitDone)
 	duration := time.Since(p.started)
 
 	p.mu.Lock()
