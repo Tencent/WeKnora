@@ -191,13 +191,16 @@ func (c *Client) reasoningText(m rawMessage) string {
 	return ""
 }
 
-func (c *Client) decodeToolCalls(raws []json.RawMessage) ([]types.LLMToolCall, []api.ToolCallDelta) {
+func (c *Client) decodeToolCalls(raws []json.RawMessage) ([]types.LLMToolCall, []api.ToolCallDelta, error) {
 	calls := make([]types.LLMToolCall, 0, len(raws))
 	deltas := make([]api.ToolCallDelta, 0, len(raws))
 	for i, raw := range raws {
 		var tc rawToolCall
 		if err := json.Unmarshal(raw, &tc); err != nil {
-			continue
+			// Dropping the entry turns a round that wanted to call a tool into
+			// a plain answer, and the agent has no way to notice the action it
+			// was told to take went missing. Surface it instead.
+			return nil, nil, fmt.Errorf("decode tool call %d: %w", i, err)
 		}
 		idx := i
 		if tc.Index != nil {
@@ -214,7 +217,7 @@ func (c *Client) decodeToolCalls(raws []json.RawMessage) ([]types.LLMToolCall, [
 			Index: idx, ID: tc.ID, Type: tc.Type, Name: tc.Function.Name, Arguments: tc.Function.Arguments,
 		})
 	}
-	return calls, deltas
+	return calls, deltas, nil
 }
 
 func (c *Client) extractToolCallMetadata(raw json.RawMessage) types.ToolCallMetadata {
@@ -262,7 +265,11 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 		result.ReasoningMetadata = types.ProviderMetadata{metadataReasoningDetails: choice.Message.ReasoningDetails}
 	}
 	if len(choice.Message.ToolCalls) > 0 {
-		result.ToolCalls, _ = c.decodeToolCalls(choice.Message.ToolCalls)
+		calls, _, err := c.decodeToolCalls(choice.Message.ToolCalls)
+		if err != nil {
+			return nil, err
+		}
+		result.ToolCalls = calls
 	}
 	// Classify the cache status even when the vendor omitted the usage block,
 	// so "no counters at all" is still distinguishable from a real miss on the
@@ -370,8 +377,11 @@ func (c *Client) processStream(
 			}
 		}
 		if len(choice.Delta.ToolCalls) > 0 {
-			var deltas []api.ToolCallDelta
-			_, deltas = c.decodeToolCalls(choice.Delta.ToolCalls)
+			_, deltas, err := c.decodeToolCalls(choice.Delta.ToolCalls)
+			if err != nil {
+				assembler.Fail(ch, err)
+				return
+			}
 			delta.ToolCalls = deltas
 			for i, raw := range choice.Delta.ToolCalls {
 				if md := c.extractToolCallMetadata(raw); len(md) > 0 {

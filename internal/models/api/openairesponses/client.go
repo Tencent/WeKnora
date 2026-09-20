@@ -213,12 +213,27 @@ func (r *rawResponse) finishReason(hasToolCalls bool) string {
 	return "stop"
 }
 
-func decodeItem(raw json.RawMessage) (rawOutputItem, bool) {
+func decodeItem(raw json.RawMessage) (rawOutputItem, error) {
 	var item rawOutputItem
 	if err := json.Unmarshal(raw, &item); err != nil {
-		return rawOutputItem{}, false
+		return rawOutputItem{}, fmt.Errorf("decode output item: %w", err)
 	}
-	return item, true
+	return item, nil
+}
+
+// streamItem decodes the item carried by an output_item event. An event that
+// carries no item at all is simply nothing to decode, but an item we cannot
+// read is lost output, possibly a whole function_call, so the caller must
+// surface it instead of moving on.
+func streamItem(raw json.RawMessage) (rawOutputItem, bool, error) {
+	if len(raw) == 0 {
+		return rawOutputItem{}, false, nil
+	}
+	item, err := decodeItem(raw)
+	if err != nil {
+		return rawOutputItem{}, false, err
+	}
+	return item, true, nil
 }
 
 func itemText(item rawOutputItem) string {
@@ -275,9 +290,11 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 	var content, reasoning []string
 	var reasoningItems []json.RawMessage
 	for _, rawItem := range env.Output {
-		item, ok := decodeItem(rawItem)
-		if !ok {
-			continue
+		// An output item we cannot read may be the round's tool call. Dropping
+		// it hands the agent what looks like a plain answer, so fail instead.
+		item, err := decodeItem(rawItem)
+		if err != nil {
+			return nil, err
 		}
 		switch item.Type {
 		case "message":
@@ -391,8 +408,14 @@ func (c *Client) processStream(
 
 		var ev rawStreamEvent
 		if err := json.Unmarshal(event.Data, &ev); err != nil {
-			logger.Errorf(ctx, "Failed to parse stream event: %v", err)
-			continue
+			// An event whose *type* we do not know is routine and the switch
+			// below already ignores it. A payload that is not JSON at all is
+			// not: it is a truncated frame or a gateway error page, i.e. a
+			// hole in the answer. Skipping it runs the loop to EOF, which the
+			// caller cannot tell from a complete reply and then stores as the
+			// model's answer. Fail, as the Completions loop does.
+			assembler.Fail(ch, fmt.Errorf("decode stream chunk: %w", err))
+			return
 		}
 
 		switch ev.Type {
@@ -410,7 +433,11 @@ func (c *Client) processStream(
 				assembler.Process(ch, api.Delta{Reasoning: "\n"})
 			}
 		case "response.output_item.added":
-			item, ok := decodeItem(ev.Item)
+			item, ok, err := streamItem(ev.Item)
+			if err != nil {
+				assembler.Fail(ch, err)
+				return
+			}
 			if !ok || item.Type != "function_call" {
 				continue
 			}
@@ -433,7 +460,11 @@ func (c *Client) processStream(
 				Index: st.indexFor(key), Arguments: ev.Delta,
 			}}})
 		case "response.output_item.done":
-			item, ok := decodeItem(ev.Item)
+			item, ok, err := streamItem(ev.Item)
+			if err != nil {
+				assembler.Fail(ch, err)
+				return
+			}
 			if !ok {
 				continue
 			}
@@ -502,7 +533,10 @@ func (c *Client) completeStream(
 		// vendor never emitted output_item.done for them.
 		if len(st.reasoningItems) == 0 {
 			for _, rawItem := range resp.Output {
-				if item, ok := decodeItem(rawItem); ok && item.Type == "reasoning" {
+				// Tolerated on purpose, unlike the item events above: the
+				// deltas already carried the answer and its tool calls, so an
+				// unreadable item here costs at most a reasoning artifact.
+				if item, err := decodeItem(rawItem); err == nil && item.Type == "reasoning" {
 					st.reasoningItems = append(st.reasoningItems, rawItem)
 				}
 			}

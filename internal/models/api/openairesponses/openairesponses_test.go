@@ -571,3 +571,107 @@ func TestChatStreamCorrelatesToolCallsWithoutItemIDs(t *testing.T) {
 		}
 	}
 }
+
+// Responses is an event-typed protocol, so an event whose *type* we do not
+// know is routine and the switch ignores it. A payload that is not JSON at
+// all is a different animal: a truncated frame or a gateway error page.
+// Skipping it ran the loop to EOF, which reached the caller as a complete
+// answer and got stored as the model's reply.
+func TestChatStreamUndecodableEventFailsTheStream(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	body := sseBody(
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"Hel"}`,
+		// An unknown but well-formed event type stays harmless.
+		`{"type":"response.web_search_call.in_progress","item_id":"ws_1","output_index":1}`,
+	) + "event: response.output_text.delta\ndata: <html>502 Bad Gateway</html>\n\n" +
+		sseBody(
+			`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"lo"}`,
+			`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`,
+		)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server, false)
+	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	var answer string
+	var sawError bool
+	for ev := range ch {
+		if ev.ResponseType == types.ResponseTypeError {
+			sawError = true
+			if !strings.Contains(ev.Content, "decode stream chunk") {
+				t.Errorf("error content = %q", ev.Content)
+			}
+			continue
+		}
+		answer += ev.Content
+	}
+	if !sawError {
+		t.Error("a truncated stream must surface as an error, not as a short answer")
+	}
+	if answer != "Hel" {
+		t.Errorf("answer = %q, decoding must stop at the bad frame", answer)
+	}
+}
+
+// An output item that will not decode may be the round's function_call.
+// Dropping it hands the agent a plain answer with nothing to act on.
+func TestChatMalformedOutputItemIsAnError(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[` +
+			`{"type":"message","id":"msg_1","role":"assistant",` +
+			`"content":[{"type":"output_text","text":"done"}]},` +
+			`{"type":"function_call","id":"fc_1","call_id":"call_1","name":{"broken":true}}]}`))
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server, false)
+	_, err := c.Chat(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "decode output item") {
+		t.Fatalf("expected a decode error, got %v", err)
+	}
+}
+
+// The streaming counterpart: an item event we cannot read fails the round
+// instead of letting the tool call disappear from it.
+func TestChatStreamMalformedOutputItemFailsTheStream(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	body := sseBody(
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"ok"}`,
+		`{"type":"response.output_item.added","output_index":1,`+
+			`"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":{"broken":true}}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`,
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server, false)
+	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	var last types.StreamResponse
+	var answer string
+	for ev := range ch {
+		if ev.ResponseType != types.ResponseTypeError {
+			answer += ev.Content
+		}
+		last = ev
+	}
+	if last.ResponseType != types.ResponseTypeError || !strings.Contains(last.Content, "decode output item") {
+		t.Fatalf("last event = %+v", last)
+	}
+	if answer != "ok" {
+		t.Errorf("answer = %q, decoding must stop at the bad item", answer)
+	}
+}

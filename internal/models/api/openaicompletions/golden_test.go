@@ -574,3 +574,59 @@ func TestChatStream_UndecodableChunkFailsTheStream(t *testing.T) {
 	assert.True(t, sawError, "a truncated stream must surface as an error, not as a short answer")
 	assert.Equal(t, "Hel", answer.String(), "decoding stops at the bad chunk")
 }
+
+// A tool_calls entry we cannot decode used to be skipped, so a round that
+// wanted to call a tool arrived at the agent as a plain answer with nothing
+// to act on. Losing the action is worse than failing the round.
+func TestChat_MalformedToolCallIsAnError(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"",` +
+			`"tool_calls":["not-an-object"]},"finish_reason":"tool_calls"}]}`))
+	}))
+	defer server.Close()
+
+	c := New(Config{
+		Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
+		Settings: catalog.DefaultOpenAICompletions(),
+	})
+	_, err := c.Chat(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+	require.Error(t, err, "a tool call that will not decode must not pass as a plain answer")
+	assert.Contains(t, err.Error(), "decode tool call")
+}
+
+// The streaming counterpart: the round must end as an error rather than as a
+// short answer whose tool call quietly vanished.
+func TestChatStream_MalformedToolCallFailsTheStream(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+				"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[42]}}]}\n\n" +
+				"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+				"data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	c := New(Config{
+		Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
+		Settings: catalog.DefaultOpenAICompletions(),
+	})
+	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+	require.NoError(t, err)
+
+	var sawError bool
+	var answer strings.Builder
+	for chunk := range ch {
+		if chunk.ResponseType == types.ResponseTypeError {
+			sawError = true
+			assert.Contains(t, chunk.Content, "decode tool call")
+			continue
+		}
+		answer.WriteString(chunk.Content)
+	}
+	assert.True(t, sawError, "a dropped tool call must surface as an error")
+	assert.Equal(t, "ok", answer.String(), "decoding stops at the bad chunk")
+}
