@@ -494,17 +494,33 @@ func (CustomAgent) TableName() string {
 	return "custom_agents"
 }
 
-// reasoningEffortEnablesThinking mirrors api.ReasoningEffort.Enabled() for the
-// strings this package can see. internal/types cannot import
-// internal/models/api (api imports types), so the "thinking is off" vocabulary
-// — the canonical "off" plus the aliases api.ParseReasoningEffort accepts — is
-// restated here. Keep the two in sync.
-func reasoningEffortEnablesThinking(level string) bool {
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "", "off", "none", "false", "disabled":
-		return false
+// reasoningEffortEnablesThinking mirrors api.ParseReasoningEffort followed by
+// api.ReasoningEffort.Enabled(), for the strings this package can see.
+// internal/types cannot import internal/models/api (api imports types), so the
+// whole vocabulary — api.AllReasoningEfforts plus the aliases
+// api.ParseReasoningEffort accepts — is restated here. Keep the two in sync:
+// the cases below are exactly that function's, in the same order, and like it
+// they neither trim nor lowercase, so a spelling it rejects is rejected here
+// too.
+//
+// known is false for anything outside that vocabulary. Reporting it separately
+// is what keeps a typo from meaning "thinking on": the runtime drops such a
+// level (api.SanitizeReasoningEffort) and falls back to the Thinking boolean,
+// so deriving true from it here would enable thinking at the provider default
+// for a value the write path answers with a 400.
+func reasoningEffortEnablesThinking(level string) (enabled, known bool) {
+	switch level {
+	case "off":
+		return false, true
+	case "auto", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true, true
+	// Aliases the legacy boolean UI and provider docs use.
+	case "none", "false", "disabled":
+		return false, true
+	case "true", "enabled", "default", "on":
+		return true, true
 	}
-	return true
+	return false, false
 }
 
 // EnsureDefaults sets default values for the agent
@@ -582,9 +598,15 @@ func (a *CustomAgent) EnsureDefaults() {
 	// still reads only Thinking — the agent editor, the pipeline logs, the
 	// "thinking is off" warning in applyAgentOverridesToChatManage — would
 	// otherwise report an agent configured for `high` as thinking-off.
+	//
+	// A level outside that vocabulary is left alone rather than read as "on":
+	// it is dropped at call time, so the boolean derived here would be the
+	// only thing left deciding, and a typo would silently buy thinking at the
+	// provider default.
 	if a.Config.ReasoningEffort != "" {
-		enabled := reasoningEffortEnablesThinking(a.Config.ReasoningEffort)
-		a.Config.Thinking = &enabled
+		if enabled, known := reasoningEffortEnablesThinking(a.Config.ReasoningEffort); known {
+			a.Config.Thinking = &enabled
+		}
 	}
 	// Pin thinking to an explicit false when unset so provider-specific wire
 	// formats (e.g. thinking_control=thinking_type) always receive a value.
