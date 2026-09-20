@@ -173,20 +173,6 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	return query
 }
 
-// excludeEmbeddedImageRows hides embedded image/board sub-item rows (metadata
-// embedded_image = "true") from document-list style queries. These rows stay in
-// the KB — VLM chunks, retrieval and marker resolution read them — they just
-// must not surface as standalone documents in the list or the folder tree.
-// Attachment rows (metadata attachment = "true") are unaffected. Both SQL
-// dialects treat a missing/null key as "not embedded".
-func excludeEmbeddedImageRows(db *gorm.DB) *gorm.DB {
-	if db.Dialector.Name() == "postgres" {
-		return db.Where("metadata->>'embedded_image' IS DISTINCT FROM 'true'")
-	}
-	// SQLite (json_extract returns NULL for a missing key).
-	return db.Where("COALESCE(json_extract(metadata, '$.embedded_image'), '') <> 'true'")
-}
-
 // ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination
 func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	ctx context.Context,
@@ -200,9 +186,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 	scope := func(q *gorm.DB) *gorm.DB {
 		return applyKnowledgeListFilter(
-			excludeEmbeddedImageRows(
-				q.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID),
-			),
+			q.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID),
 			filter,
 		)
 	}
@@ -232,8 +216,8 @@ func (r *knowledgeRepository) ListKnowledgeFolderCounts(
 	kbID string,
 ) ([]*types.KnowledgeFolderCount, error) {
 	var counts []*types.KnowledgeFolderCount
-	if err := excludeEmbeddedImageRows(r.db.WithContext(ctx).
-		Model(&types.Knowledge{})).
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
 		Select("folder_path AS folder_path, COUNT(*) AS count").
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?",
 			tenantID, kbID, types.ParseStatusDeleting).

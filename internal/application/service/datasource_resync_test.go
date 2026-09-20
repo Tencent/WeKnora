@@ -15,10 +15,10 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Feishu deep-adaptation legacy upgrade (design §7): data sources predating the
-// per-source parse_mode setting are tagged parse_mode=blocks + resync_required
-// on their first sync, that sync is upgraded to a full pass, and the marker is
-// cleared on success.
+// Feishu deep-adaptation legacy upgrade: legacy feishu data sources carry a
+// one-shot Settings["resync_required"] marker (stamped by migration 000096 /
+// sqlite 000017). The sync entry upgrades such a sync — even a scheduled
+// incremental one — to a full pass and clears the marker on success.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // resyncStreamConnector records the start cursor each FetchStream received, so
@@ -144,13 +144,12 @@ func settingsOf(t *testing.T, blob types.JSON) map[string]interface{} {
 	return raw.Settings
 }
 
-// A legacy data source (no parse_mode in Settings) gets parse_mode=blocks plus
-// a one-shot resync_required marker on its first sync, the sync runs FULL even
-// though it is an incremental data source, and the marker is cleared once the
-// run succeeds — while parse_mode itself persists for the connector.
-func TestProcessSync_ResyncMarkerBackfillRunsFullOnceAndClears(t *testing.T) {
+// A data source armed with the migration's resync_required marker runs FULL
+// even though it is incremental, and the marker is cleared once the run
+// succeeds.
+func TestProcessSync_ResyncMarkerRunsFullOnceAndClears(t *testing.T) {
 	conn := &resyncStreamConnector{}
-	svc, ds, dsRepo, syncLog := newResyncHarness(t, nil, conn)
+	svc, ds, dsRepo, syncLog := newResyncHarness(t, map[string]interface{}{"resync_required": true}, conn)
 
 	log := runResyncSync(t, svc, ds, syncLog)
 	assert.Equal(t, types.SyncLogStatusSuccess, log.Status)
@@ -159,18 +158,14 @@ func TestProcessSync_ResyncMarkerBackfillRunsFullOnceAndClears(t *testing.T) {
 	require.Len(t, conn.startCursors, 1)
 	assert.Nil(t, conn.startCursors[0], "resync_required must upgrade the incremental sync to a full pass")
 
-	// Two Config writes: the backfill (marker armed) and the clear on success.
-	require.Equal(t, 2, dsRepo.updates)
-	final := settingsOf(t, dsRepo.configs[1])
-	assert.Equal(t, "blocks", final["parse_mode"], "parse_mode backfill must persist after the marker clears")
+	// One Config write: clearing the marker on success.
+	require.Equal(t, 1, dsRepo.updates)
+	final := settingsOf(t, dsRepo.configs[0])
 	assert.NotContains(t, final, "resync_required", "marker must be cleared after a successful upgrade")
-	armed := settingsOf(t, dsRepo.configs[0])
-	assert.Equal(t, true, armed["resync_required"], "backfill must arm the marker before the run")
 }
 
-// A data source that already carries parse_mode is left untouched: no backfill
-// write, no marker, and the sync stays incremental (cursor preserved).
-func TestProcessSync_ParseModePresentSkipsBackfillAndResync(t *testing.T) {
+// A data source without the marker stays incremental: no config writes.
+func TestProcessSync_NoMarkerStaysIncremental(t *testing.T) {
 	conn := &resyncStreamConnector{}
 	svc, ds, dsRepo, syncLog := newResyncHarness(t, map[string]interface{}{"parse_mode": "export"}, conn)
 	ds.LastSyncCursor = makeConnectorCursor(t, map[string]map[string]string{"space1": {"nt1": "100"}})
@@ -187,7 +182,7 @@ func TestProcessSync_ParseModePresentSkipsBackfillAndResync(t *testing.T) {
 // upgrade instead of silently continuing incremental.
 func TestProcessSync_FailedResyncKeepsMarker(t *testing.T) {
 	conn := &resyncStreamConnector{failFetch: true}
-	svc, ds, dsRepo, syncLog := newResyncHarness(t, nil, conn)
+	svc, ds, dsRepo, syncLog := newResyncHarness(t, map[string]interface{}{"resync_required": true}, conn)
 
 	payload, err := json.Marshal(types.DataSourceSyncPayload{
 		DataSourceID: ds.ID,
@@ -197,11 +192,9 @@ func TestProcessSync_FailedResyncKeepsMarker(t *testing.T) {
 	require.NoError(t, err)
 	assert.Error(t, svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload)))
 
-	// Only the backfill write happened; the marker is still armed.
-	require.Equal(t, 1, dsRepo.updates)
-	armed := settingsOf(t, dsRepo.configs[0])
-	assert.Equal(t, true, armed["resync_required"])
-	assert.Equal(t, "blocks", armed["parse_mode"])
+	// No config writes on the failed run: the marker stays armed.
+	assert.Equal(t, 0, dsRepo.updates)
+
 }
 
 // resyncRequired tolerates the encodings the marker may be written in.

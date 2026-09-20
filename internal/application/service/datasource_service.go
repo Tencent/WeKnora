@@ -652,15 +652,11 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 
-	// One-time legacy upgrade (feishu deep adaptation, design §7): feishu/lark
-	// data sources predating the per-source parse_mode setting get
-	// Settings["parse_mode"]="blocks" plus a one-shot Settings["resync_required"]
-	// marker; the marker upgrades the next sync (even an incremental one) to a
-	// full pass and is cleared on success. Must run before ParseConfig so the
-	// freshly written parse_mode is visible to the connector this run. The
-	// marker itself is read back from the parsed config below (forceFull +
-	// clear-on-success in processSyncStreaming).
-	s.ensureFeishuParseModeBackfill(ctx, ds)
+	// One-time legacy upgrade (feishu deep adaptation): feishu/lark data
+	// sources predating the per-source parse_mode setting carry a
+	// resync_required marker stamped by migration 000096 (sqlite 000017).
+	// resyncRequired(config) below upgrades their next sync (even an
+	// incremental one) to a full pass and clears it on success.
 
 	// Parse configuration
 	config, err := ds.ParseConfig()
@@ -957,16 +953,6 @@ func (s *DataSourceService) applyFetchedItem(
 			// Duplicate file/URL is not a failure — count as skipped.
 			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
 			result.Skipped++
-		case item.Metadata["embedded_image"] == "true":
-			// An image extracted from a document for OCR is a best-effort
-			// enrichment, not the document itself. If the KB cannot ingest it
-			// (VLM/object-storage not configured for images, or a transient error),
-			// skip it rather than failing the whole sync: the doc body already
-			// synced, and the image stays in SubtreeKeep for a later retry once the
-			// KB is configured.
-			logger.Infof(ctx, "skipping embedded image %q (external_id=%s), not ingested: %v",
-				item.Title, item.ExternalID, err)
-			result.Skipped++
 		default:
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
@@ -995,67 +981,16 @@ func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*type
 	return ds.ParseSyncCursor()
 }
 
-// Settings keys used by the feishu deep-adaptation legacy upgrade (design §7).
-const (
-	feishuSettingParseMode      = "parse_mode"
-	feishuSettingResyncRequired = "resync_required"
-)
-
-// feishuFamilyConnector reports whether ds.Type is one of the feishu/lark
-// connector variants sharing the feishu connector package.
-func feishuFamilyConnector(dsType string) bool {
-	switch dsType {
-	case types.ConnectorTypeFeishu, types.ConnectorTypeLark,
-		types.ConnectorTypeFeishuDrive, types.ConnectorTypeLarkDrive:
-		return true
-	}
-	return false
-}
-
-// ensureFeishuParseModeBackfill migrates legacy feishu/lark data sources to the
-// per-source parse_mode setting with zero migration SQL: the first sync after
-// this code ships writes Settings["parse_mode"]="blocks" plus a one-shot
-// Settings["resync_required"]=true marker and persists both via the regular
-// Update path. The marker upgrades that sync (even a scheduled incremental one)
-// to a full pass so existing documents re-ingest under the blocks mode; it is
-// cleared once the upgraded run succeeds. Failures are non-fatal: the sync
-// proceeds without the upgrade.
-func (s *DataSourceService) ensureFeishuParseModeBackfill(ctx context.Context, ds *types.DataSource) bool {
-	if !feishuFamilyConnector(ds.Type) {
-		return false
-	}
-	cfg, err := ds.ParseConfig()
-	if err != nil {
-		logger.Warnf(ctx, "feishu parse_mode backfill skipped, config unreadable: ds=%s err=%v", ds.ID, err)
-		return false
-	}
-	if _, ok := cfg.Settings[feishuSettingParseMode]; ok {
-		// Backfill already ran (or the user configured parse_mode on the form).
-		// An armed resync_required marker is still honored via resyncRequired.
-		return false
-	}
-	if cfg.Settings == nil {
-		cfg.Settings = map[string]interface{}{}
-	}
-	cfg.Settings[feishuSettingParseMode] = "blocks"
-	cfg.Settings[feishuSettingResyncRequired] = true
-	blob, err := cfg.ToJSON()
-	if err != nil {
-		logger.Warnf(ctx, "feishu parse_mode backfill skipped, config re-encode failed: ds=%s err=%v", ds.ID, err)
-		return false
-	}
-	ds.Config = blob
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
-		logger.Warnf(ctx, "failed to persist feishu parse_mode backfill: ds=%s err=%v", ds.ID, err)
-		return false
-	}
-	logger.Infof(ctx, "feishu data source upgraded to per-source parse_mode=blocks with one-shot resync: ds=%s type=%s",
-		ds.ID, ds.Type)
-	return true
-}
+// feishuSettingResyncRequired is the one-shot upgrade marker key. Legacy
+// feishu/lark data sources are stamped by migration 000096 (sqlite 000017).
+const feishuSettingResyncRequired = "resync_required"
 
 // resyncRequired reads the one-shot upgrade marker out of parsed config
-// Settings. Tolerates both bool and string encodings.
+// Settings. Tolerates both bool and string encodings. The marker is stamped
+// onto legacy feishu/lark data sources by migration 000096 (sqlite 000017)
+// when the per-source parse_mode shipped; it upgrades their next sync — even
+// a scheduled incremental one — to a full pass so existing documents re-ingest
+// with folder paths and block-level parsing.
 func resyncRequired(cfg *types.DataSourceConfig) bool {
 	if cfg == nil {
 		return false
@@ -1420,15 +1355,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile
 	if len(item.Content) > 0 {
-		// Resolve `weknora-img://<n>` markers against sibling image rows BEFORE
-		// the content is persisted, so the stored file, source_content and the
-		// chunks ProcessDocument later produces all carry the same provider://
-		// URL. Absent sequences keep their marker (keepUnresolved) — the
-		// ProcessDocument hook degrades them once chunking runs, so a
-		// late-arriving image sibling can still resolve. Rows ingested before
-		// this fix converge on the next full re-sync (update = delete +
-		// re-create); no data migration is needed.
-		item.Content = s.resolveIngestImageMarkers(ctx, ds, item)
+		// Images ride inline as base64 data URIs; ProcessDocument's image
+		// resolver stores them on the file service and swaps in persistent
+		// provider:// URLs before chunking.
 		fh, err := bytesToFileHeader(item.Content, item.FileName)
 		if err != nil {
 			return isUpdate, fmt.Errorf("build file header: %w", err)
@@ -1499,40 +1428,6 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	}
 
 	return isUpdate, fmt.Errorf("item has neither content nor URL")
-}
-
-// resolveIngestImageMarkers rewrites `weknora-img://<n>` markers in the item's
-// content using the item's image_map metadata and sibling image knowledge rows
-// of the same data source (which the connector emits before the parent
-// document). Missing siblings keep their marker: the ProcessDocument hook
-// degrades them during chunking. Callers without image_map or without markers
-// pass through untouched.
-func (s *DataSourceService) resolveIngestImageMarkers(
-	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
-) []byte {
-	raw := item.Metadata["image_map"]
-	if raw == "" || !bytes.Contains(item.Content, []byte("weknora-img://")) {
-		return item.Content
-	}
-	var imageMap map[string]string
-	if err := json.Unmarshal([]byte(raw), &imageMap); err != nil {
-		logger.Warnf(ctx, "invalid image_map metadata for item %s: %v", item.ExternalID, err)
-		return item.Content
-	}
-	repo := s.knowledgeService.GetRepository()
-	lookup := func(externalID string) (string, error) {
-		row, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, externalID)
-		if err != nil {
-			logger.Warnf(ctx, "embedded image lookup failed for item %s external_id %s: %v",
-				item.ExternalID, externalID, err)
-			return "", err
-		}
-		if row == nil || row.FilePath == "" {
-			return "", nil
-		}
-		return row.FilePath, nil
-	}
-	return []byte(resolveEmbeddedImageContent(string(item.Content), imageMap, lookup, true))
 }
 
 // dupIsSameNode reports whether a duplicate-content error means the parent still

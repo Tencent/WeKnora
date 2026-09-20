@@ -3,6 +3,7 @@ package wiki
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1568,81 +1569,43 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 	defer ts.Close()
 
 	cfg := &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
-	conn := NewConnector(core.RegionFeishu)
 	ctx := context.Background()
 	client := core.NewClient(cfg)
 	node := core.WikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Image", NodeEditTime: "1711468800"}
-	baseMeta := map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu}
-	imgChildID := nodeToken + "#image#" + imgToken
 
-	// Image items are unconditional now (the multimodal switch only affects
-	// ImageMultimodal sub-chunks in the service layer); the marker → external_id
-	// mapping lands on the parent's metadata image_map for the doc-process
-	// pipeline.
+	// Orthodox flow: the image rides inline in the parent markdown as a base64
+	// data URI — no image sub-item, no image_map.
 	items, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
 		DocToken:   node.NodeToken,
 		ObjToken:   node.ObjToken,
 		Title:      node.Title,
-		URL:        conn.region.WikiURL(node.NodeToken),
+		URL:        "https://example.feishu.cn/wiki/" + nodeToken,
 		ResourceID: "space1:" + nodeToken,
 		EditTime:   core.ParseFeishuTimestamp("1711468800"),
-		BaseMeta:   baseMeta,
+		BaseMeta:   map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu},
 	})
 	if err != nil {
 		t.Fatalf("core.FetchDocxWithBlocks: %v", err)
 	}
-	var main, img *types.FetchedItem
-	for _, it := range items {
-		switch it.ExternalID {
-		case nodeToken:
-			main = it
-		case imgChildID:
-			img = it
-		}
+	if len(items) != 1 {
+		t.Fatalf("want 1 item (main only), got %d: %+v", len(items), items)
 	}
-	if main == nil {
-		t.Fatal("main doc item missing")
+	main := items[0]
+	wantURI := "![图片](data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes) + ")"
+	if !strings.Contains(string(main.Content), wantURI) {
+		t.Errorf("image not inlined as base64 data URI:\n%s", main.Content[:min(len(main.Content), 400)])
 	}
-	if img == nil {
-		t.Fatalf("embedded image sub-item missing; got %+v", items)
+	if strings.Contains(string(main.Content), "weknora-img://") {
+		t.Errorf("internal marker leaked into stored markdown:\n%s", main.Content[:400])
 	}
-	if !strings.HasSuffix(img.FileName, ".png") {
-		t.Errorf("image FileName = %q, want a .png extension", img.FileName)
-	}
-	if img.Metadata["embedded_image"] != "true" {
-		t.Errorf("image Metadata[embedded_image] = %q, want true", img.Metadata["embedded_image"])
-	}
-	if img.Metadata["parent_doc_id"] != nodeToken {
-		t.Errorf("image Metadata[parent_doc_id] = %q, want %q", img.Metadata["parent_doc_id"], nodeToken)
-	}
-	if img.Metadata["attachment"] == "true" {
-		t.Error("an embedded image must not be marked as a file attachment")
-	}
-	if len(img.Content) != len(pngBytes) {
-		t.Errorf("image Content = %d bytes, want %d", len(img.Content), len(pngBytes))
-	}
-	if !slices.Contains(main.SubtreeKeep, imgChildID) {
-		t.Errorf("SubtreeKeep must contain image %q, got %+v", imgChildID, main.SubtreeKeep)
-	}
-	// The doc-process pipeline resolves weknora-img://1 in the parent Markdown
-	// through image_map; key is the decimal sequence number as a string.
-	if main.Metadata["image_map"] != `{"1":"`+imgChildID+`"}` {
-		t.Errorf("main.Metadata[image_map] = %q, want %q", main.Metadata["image_map"], `{"1":"`+imgChildID+`"}`)
-	}
-	if !strings.Contains(string(main.Content), "![图片](weknora-img://1)") {
-		t.Errorf("main markdown missing numbered image marker:\n%s", main.Content)
-	}
-	// Sub-items precede the parent document.
-	if items[0].ExternalID != imgChildID {
-		t.Errorf("items[0].ExternalID = %q, want image sub-item %q first", items[0].ExternalID, imgChildID)
+	if main.Metadata["image_map"] != "" {
+		t.Errorf("image_map must be gone, got %q", main.Metadata["image_map"])
 	}
 }
 
 // TestFetchDocxWithBlocks_ImageDownloadFailure verifies that a failed image
-// download (a genuine core.Fetch failure — revoked token, permission gap, transient
-// error) surfaces a visible error sub-item exactly like a failed attachment
-// download, rather than being silently dropped to a server log. The image is
-// still kept in SubtreeKeep so any prior OCR'd copy is preserved.
+// download degrades inline to a plain placeholder: the document still syncs,
+// no error sub-item is produced, and no marker leaks.
 func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 	const (
 		nodeToken = "nt-docx-img-fail"
@@ -1660,71 +1623,42 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 			Data: core.DocxBlocksData{
 				Items: []core.DocxBlock{
 					{BlockID: "b1", BlockType: core.BlockTypePage},
-					{BlockID: "b2", BlockType: core.BlockTypeImage, Image: &core.BlockTokenRef{Token: imgToken}},
+					{BlockID: "b3", BlockType: core.BlockTypeImage, Image: &core.BlockTokenRef{Token: imgToken}},
 				},
 			},
 		})
 	})
-	// Media download always fails.
 	mux.HandleFunc("/open-apis/drive/v1/medias/", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "boom", http.StatusInternalServerError)
+		http.Error(w, "denied", http.StatusForbidden)
 	})
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
 	cfg := &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
-	conn := NewConnector(core.RegionFeishu)
 	ctx := context.Background()
 	client := core.NewClient(cfg)
-	node := core.WikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Bad Image", NodeEditTime: "1711468800"}
-	baseMeta := map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu}
-	imgChildID := nodeToken + "#image#" + imgToken
+	node := core.WikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Broken Image"}
 
-	// The download is attempted and fails → a visible error item; the marker
-	// stays in the Markdown (no image_map entry) so the pipeline degrades it.
 	items, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
 		DocToken:   node.NodeToken,
 		ObjToken:   node.ObjToken,
 		Title:      node.Title,
-		URL:        conn.region.WikiURL(node.NodeToken),
+		URL:        "https://example.feishu.cn/wiki/" + nodeToken,
 		ResourceID: "space1:" + nodeToken,
-		EditTime:   core.ParseFeishuTimestamp("1711468800"),
-		BaseMeta:   baseMeta,
+		BaseMeta:   map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu},
 	})
 	if err != nil {
-		t.Fatalf("a failed image download must not fail the whole node, got error: %v", err)
+		t.Fatalf("core.FetchDocxWithBlocks: %v", err)
 	}
-	var main, errItem *types.FetchedItem
-	for _, it := range items {
-		switch it.ExternalID {
-		case nodeToken:
-			main = it
-		case imgChildID:
-			errItem = it
-		}
+	if len(items) != 1 {
+		t.Fatalf("want 1 item (main only), got %d: %+v", len(items), items)
 	}
-	if main == nil {
-		t.Fatal("main doc item missing")
+	main := items[0]
+	if !strings.Contains(string(main.Content), "![图片]()") {
+		t.Errorf("broken image must degrade to a placeholder:\n%s", main.Content)
 	}
-	if errItem == nil {
-		t.Fatalf("failed image download must Emit a visible error sub-item, got %+v", items)
-	}
-	if len(errItem.Content) != 0 {
-		t.Errorf("image error item must carry no content, got %d bytes", len(errItem.Content))
-	}
-	if errItem.Metadata["error"] == "" {
-		t.Error("image error item must carry error metadata for UI visibility")
-	}
-	if errItem.Metadata["embedded_image"] != "true" {
-		t.Errorf("image error item must stay tagged embedded_image=true, got %q", errItem.Metadata["embedded_image"])
-	}
-	if !slices.Contains(main.SubtreeKeep, imgChildID) {
-		t.Errorf("SubtreeKeep must contain the failed image %q so its prior copy is preserved, got %+v",
-			imgChildID, main.SubtreeKeep)
-	}
-	// A failed download produces no image knowledge → no image_map entry.
-	if main.Metadata["image_map"] != "" {
-		t.Errorf("failed image must not appear in image_map, got %q", main.Metadata["image_map"])
+	if strings.Contains(string(main.Content), "weknora-img://") {
+		t.Errorf("internal marker leaked into stored markdown:\n%s", main.Content)
 	}
 }
 

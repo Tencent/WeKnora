@@ -3,6 +3,7 @@ package drive
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -260,34 +261,20 @@ func TestDriveFetchStream_DocxImageEmitted(t *testing.T) {
 		t.Fatalf("FetchStream() error: %v", err)
 	}
 
-	if len(h.emitted) != 2 {
-		t.Fatalf("expected 2 emitted items (image + main), got %d: %+v", len(h.emitted), h.emitted)
+	// Orthodox flow: the image rides inline in the parent markdown as a base64
+	// data URI — one emitted item, no image sub-item, no image_map.
+	if len(h.emitted) != 1 {
+		t.Fatalf("expected 1 emitted item (main only), got %d: %+v", len(h.emitted), h.emitted)
 	}
-	img := h.emitted[0]
-	wantKeep := driveDocxFileToken + "#image#" + imgToken
-	if img.ExternalID != wantKeep {
-		t.Errorf("image ExternalID = %q, want %q", img.ExternalID, wantKeep)
-	}
-	if img.Metadata["embedded_image"] != "true" {
-		t.Errorf("image Metadata[embedded_image] = %q, want true", img.Metadata["embedded_image"])
-	}
-	main := h.emitted[1]
+	main := h.emitted[0]
 	if main.ExternalID != driveDocxFileToken {
 		t.Errorf("main ExternalID = %q, want %q", main.ExternalID, driveDocxFileToken)
 	}
-	found := false
-	for _, k := range main.SubtreeKeep {
-		if k == wantKeep {
-			found = true
-		}
+	wantURI := "![图片](data:image/png;base64," + base64.StdEncoding.EncodeToString(png) + ")"
+	if !strings.Contains(string(main.Content), wantURI) {
+		t.Errorf("image not inlined as base64 data URI:\n%s", main.Content)
 	}
-	if !found {
-		t.Errorf("SubtreeKeep = %v, want it to contain %q", main.SubtreeKeep, wantKeep)
-	}
-	if !strings.Contains(string(main.Content), "![图片](weknora-img://1)") {
-		t.Errorf("main markdown missing numbered image marker:\n%s", main.Content)
-	}
-	if main.Metadata["image_map"] != `{"1":"`+wantKeep+`"}` {
-		t.Errorf("main.Metadata[image_map] = %q, want mapping for %q", main.Metadata["image_map"], wantKeep)
+	if main.Metadata["image_map"] != "" {
+		t.Errorf("image_map must be gone, got %q", main.Metadata["image_map"])
 	}
 }

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -421,13 +422,11 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		return []*types.FetchedItem{item}, nil
 	}
 
-	// Sub-items are emitted BEFORE the parent document so the pipeline can
-	// resolve the parent's image markers against sub-items already present in
-	// the same batch.
+	// Attachments stay sub-items (they are documents in their own right and
+	// are emitted BEFORE the parent so SubtreeKeep/sweep semantics hold).
 	var children []*types.FetchedItem
-	keep := make([]string, 0, len(atts)+len(imgs))
+	keep := make([]string, 0, len(atts))
 	attachmentIDs := make([]string, 0, len(atts))
-	imageMap := map[string]string{} // "N" → sub-item external_id
 
 	childMeta := func() map[string]string {
 		m := maps.Clone(in.BaseMeta)
@@ -436,18 +435,12 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		m["attachment"] = "true"
 		return m
 	}
-	imgMeta := func() map[string]string {
-		m := maps.Clone(in.BaseMeta)
-		m["parent_node_token"] = in.DocToken
-		m["parent_doc_id"] = in.DocToken
-		m["embedded_image"] = "true"
-		return m
-	}
 	// patchMarker swaps one numbered image marker in the rendered Markdown for
-	// an inline degrade note (board export failure / attachment over cap).
-	// Markers are unique per N, and N is assigned once per image/board block.
-	patchMarker := func(n int, note string) {
-		md = strings.Replace(md, fmt.Sprintf("![图片](weknora-img://%d)", n), note, 1)
+	// its final form: an inline base64 data URI on success, a plain
+	// ![图片]() placeholder or a degrade note on failure. Markers are unique
+	// per N, and N is assigned once per image/board block.
+	patchMarker := func(n int, replacement string) {
+		md = strings.Replace(md, fmt.Sprintf("![图片](weknora-img://%d)", n), replacement, 1)
 	}
 
 	// ── file attachments ──
@@ -515,82 +508,52 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	}
 
 	// ── embedded images and whiteboard blocks (block_type 43) ──
+	// Orthodox platform flow (same as the docparser for parsed PDFs/Word):
+	// the image bytes ride INSIDE the parent markdown as a base64 data URI;
+	// the document-processing pipeline's image resolver stores them on the
+	// tenant file service, swaps in the persistent provider:// URL and (when
+	// a VLM is configured) produces OCR/caption child chunks. No image
+	// knowledge rows are created.
 	for _, pi := range imgs {
 		if pi.Token == "" {
-			continue // malformed block: the marker stays, the pipeline degrades it
+			// Malformed block: degrade the marker to a plain placeholder.
+			patchMarker(pi.N, "![图片]()")
+			continue
 		}
-		childID := types.SubtreeChildID(in.DocToken, pi.Kind, pi.Token)
-		keep = append(keep, childID) // present in the doc → never sweep as stale
 
 		var (
-			data        []byte
-			derr        error
-			titleSuffix string
-			filePrefix  string
+			data []byte
+			derr error
 		)
 		if pi.Kind == "board" {
 			data, derr = client.downloadBoardAsImage(ctx, pi.Token)
-			titleSuffix = "（画板）"
-			filePrefix = "board-"
 		} else {
 			data, derr = client.downloadMediaFile(ctx, pi.Token)
-			titleSuffix = "（内嵌图片）"
-			filePrefix = "image-"
 		}
 		if derr != nil {
-			if pi.Kind == "board" {
-				// 403 (no board:whiteboard:node:read) or transient failure:
-				// degrade inline, never fail the document.
-				logger.Warnf(ctx, "[Feishu] doc %s: board %s export failed: %v", in.ObjToken, pi.Token, derr)
-				patchMarker(pi.N, "> [飞书画板无法导出]")
-				continue
-			}
-			logger.Warnf(ctx, "[Feishu] doc %s: image (token=%s) download failed: %v",
-				in.ObjToken, pi.Token, derr)
-			children = append(children, &types.FetchedItem{
-				ExternalID:       childID,
-				Title:            in.Title + titleSuffix,
-				SourceResourceID: in.ResourceID,
-				Metadata:         FeishuErrorItemMeta(derr, imgMeta()),
-			})
+			// 403 (no board:whiteboard:node:read for boards) or transient
+			// failure: degrade inline, never fail the document.
+			logger.Warnf(ctx, "[Feishu] doc %s: %s %s download failed: %v",
+				in.ObjToken, pi.Kind, pi.Token, derr)
+			patchMarker(pi.N, "![图片]()")
 			continue
 		}
 		ext, contentType, ok := SupportedImageExt(data)
 		if !ok || len(data) < MinAttachmentBytes {
-			if pi.Kind == "board" {
-				// Non-image payload or decorative thumbnail: degrade inline.
-				logger.Warnf(ctx, "[Feishu] doc %s: board %s not a usable image (type=%q bytes=%d)",
-					in.ObjToken, pi.Token, contentType, len(data))
-				patchMarker(pi.N, "> [飞书画板无法导出]")
-				continue
-			}
-			if !ok {
-				logger.Warnf(ctx, "[Feishu] doc %s: skipping image (token=%s) of unsupported type %q",
-					in.ObjToken, pi.Token, contentType)
-			}
-			continue // tiny/unsupported: decorative micro-image (icon/spacer)
+			// Non-image payload or decorative micro-image (icon/spacer):
+			// degrade to a placeholder rather than embedding junk.
+			logger.Infof(ctx, "[Feishu] doc %s: %s %s not a usable image (type=%q bytes=%d)",
+				in.ObjToken, pi.Kind, pi.Token, contentType, len(data))
+			patchMarker(pi.N, "![图片]()")
+			continue
 		}
-		children = append(children, &types.FetchedItem{
-			ExternalID:       childID,
-			Title:            in.Title + titleSuffix,
-			Content:          data,
-			ContentType:      contentType,
-			FileName:         filePrefix + pi.Token + ext,
-			URL:              in.URL,
-			UpdatedAt:        in.EditTime,
-			CreatedAt:        in.CreateTime,
-			SourceResourceID: in.ResourceID,
-			Metadata:         imgMeta(),
-		})
-		imageMap[strconv.Itoa(pi.N)] = childID
+
+		dataURI := "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data)
+		patchMarker(pi.N, "![图片]("+dataURI+")")
+		_ = ext // ext is implied by contentType in the data URI
 	}
 
 	meta := maps.Clone(in.BaseMeta)
-	if len(imageMap) > 0 {
-		if b, merr := json.Marshal(imageMap); merr == nil {
-			meta["image_map"] = string(b)
-		}
-	}
 	if len(attachmentIDs) > 0 {
 		if b, merr := json.Marshal(attachmentIDs); merr == nil {
 			meta["attachment_ids"] = string(b)

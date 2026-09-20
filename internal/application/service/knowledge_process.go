@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -3576,15 +3575,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		convertResult.AudioData = nil
 	}
 
-	// Step 1.9: resolve embedded-image placeholders BEFORE the docparser
-	// image-resolution stage (Step 2), so `weknora-img://<n>` markers are
-	// never mistaken for image URLs, and before chunking, so no marker and
-	// no wrong URL ever reaches a chunk or the vector index. Single pass —
-	// a missing image row degrades to a placeholder, no re-enqueue.
-	if convertResult != nil {
-		convertResult.MarkdownContent = s.resolveEmbeddedImageMarkers(ctx, knowledge, convertResult.MarkdownContent)
-	}
-
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
 
@@ -3673,118 +3663,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 
 	return nil
-}
-
-// reWrappedImageMarker matches the marker wrapped in markdown image syntax:
-// `![alt](weknora-img://<n>)`. Only the URL part is rewritten, keeping alt.
-var reWrappedImageMarker = regexp.MustCompile(`!\[([^\]]*)\]\(weknora-img://(\d+)\)`)
-
-// reBareImageMarker matches the bare-text form `weknora-img://<n>` as a
-// fallback, so a connector emitting the unwrapped token still resolves.
-// n is a 1-based sequence within the doc and deliberately carries no
-// external-system token.
-var reBareImageMarker = regexp.MustCompile(`weknora-img://(\d+)`)
-
-// resolveEmbeddedImageContent is the shared core for rewriting `weknora-img://<n>`
-// placeholders into image references pointing at the persisted FilePath
-// (provider:// …) of sibling image knowledge rows, keyed by the parent's
-// image_map metadata ({"n": external_id}). imageMap is passed in by the caller;
-// unknown sequence numbers (absent from the map) resolve to an empty external
-// ID, which lookup reports as missing. On a missing image the behaviour is
-// caller-owned: keepUnresolved=true leaves the `weknora-img://<n>` marker in
-// place (ingest path — a late-arriving sibling can still be resolved by the
-// ProcessDocument hook on re-parse), keepUnresolved=false degrades to an empty
-// image reference `![alt]()` (ProcessDocument path — no retry is enqueued).
-func resolveEmbeddedImageContent(
-	content string, imageMap map[string]string,
-	lookup func(externalID string) (filePath string, err error),
-	keepUnresolved bool,
-) string {
-	if !strings.Contains(content, "weknora-img://") {
-		return content
-	}
-
-	filePathFor := func(n string) string {
-		externalID := imageMap[n]
-		if externalID == "" || lookup == nil {
-			return ""
-		}
-		path, err := lookup(externalID)
-		if err != nil || path == "" {
-			return ""
-		}
-		return path
-	}
-
-	replace := func(alt, n string) string {
-		if path := filePathFor(n); path != "" {
-			return fmt.Sprintf("![%s](%s)", alt, path)
-		}
-		if keepUnresolved {
-			return fmt.Sprintf("![%s](weknora-img://%s)", alt, n)
-		}
-		return fmt.Sprintf("![%s]()", alt)
-	}
-	out := reWrappedImageMarker.ReplaceAllStringFunc(content, func(match string) string {
-		sub := reWrappedImageMarker.FindStringSubmatch(match)
-		return replace(sub[1], sub[2])
-	})
-	out = reBareImageMarker.ReplaceAllStringFunc(out, func(match string) string {
-		return replace("图片", strings.TrimPrefix(match, "weknora-img://"))
-	})
-	return out
-}
-
-// resolveEmbeddedImageMarkers is the ProcessDocument hook: it reads the parent
-// knowledge row's image_map metadata and resolves markers via
-// FindByDataSourceExternalID (datasource_id + external_id → sibling image row).
-// Callers of this path are already chunking the stored document, so missing
-// images degrade to empty image references (keepUnresolved=false).
-func (s *knowledgeService) resolveEmbeddedImageMarkers(
-	ctx context.Context, knowledge *types.Knowledge, markdown string,
-) string {
-	if !strings.Contains(markdown, "weknora-img://") {
-		return markdown
-	}
-	meta := knowledge.GetMetadata()
-	dataSourceID := meta["datasource_id"]
-	var imageMap map[string]string
-	if raw := meta["image_map"]; raw != "" {
-		if err := json.Unmarshal([]byte(raw), &imageMap); err != nil {
-			logger.Warnf(ctx, "invalid image_map metadata for knowledge %s: %v", knowledge.ID, err)
-		}
-	}
-
-	// One DB lookup per distinct sibling external ID, however often the
-	// sequence number repeats; lookup results (including misses) are memoized.
-	memo := make(map[string]string)
-	lookup := func(externalID string) (string, error) {
-		if path, ok := memo[externalID]; ok {
-			return path, nil
-		}
-		var path string
-		if dataSourceID != "" {
-			row, err := s.repo.FindByDataSourceExternalID(
-				ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, dataSourceID, externalID,
-			)
-			switch {
-			case err != nil:
-				logger.Warnf(ctx, "embedded image lookup failed for knowledge %s external_id %s: %v",
-					knowledge.ID, externalID, err)
-			case row == nil || row.FilePath == "":
-				logger.Infof(ctx, "embedded image %s not available for knowledge %s; degrading to placeholder",
-					externalID, knowledge.ID)
-			default:
-				path = row.FilePath
-			}
-		}
-		memo[externalID] = path
-		return path, nil
-	}
-
-	out := resolveEmbeddedImageContent(markdown, imageMap, lookup, false)
-	logger.Infof(ctx, "Resolved embedded image markers for knowledge %s", knowledge.ID)
-	return out
 }
 
 // sanitizeReadResult protects every text field that can cross from a parser

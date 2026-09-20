@@ -181,19 +181,19 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		t.Fatalf("FetchAll error: %v", err)
 	}
 
-	// ── sub-items first (image + attachment), then the main markdown item ──
-	if len(items) != 3 {
-		t.Fatalf("want 3 items (1 image + 1 kept attachment + main), got %d:\n%+v", len(items), items)
+	// ── sub-items first (attachment), then the main markdown item ──
+	// Orthodox image flow (2026-09-20): images ride inline in the parent
+	// markdown as base64 data URIs — no image sub-items at all.
+	if len(items) != 2 {
+		t.Fatalf("want 2 items (1 kept attachment + main), got %d:\n%+v", len(items), items)
 	}
-	var main, att, img *types.FetchedItem
+	var main, att *types.FetchedItem
 	for i := range items {
 		switch items[i].ExternalID {
 		case "nt-golden":
 			main = &items[i]
 		case "nt-golden#file#tok-big":
 			att = &items[i]
-		case "nt-golden#image#img-tok-SECRET":
-			img = &items[i]
 		}
 	}
 	if main == nil {
@@ -215,9 +215,9 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 	md := string(main.Content)
 
 	// ── every text construct rendered correctly ──
-	// Baseline re-recorded (2026-09-16, feat/feishu-deep-adaptation P3): image
-	// blocks now render numbered `![图片](weknora-img://N)` markers resolved by
-	// the doc-process pipeline (no tokens), and file blocks render as
+	// Baseline re-recorded (2026-09-20, orthodox image flow): image blocks
+	// render inline base64 data URIs (stored to provider:// URLs by the
+	// doc-process image resolver), and file blocks render as
 	// `- 文件名` list entries (whitelisted) or `> [附件: …](链接)` references
 	// (non-whitelisted), replacing the old `📎 附件：…` placeholder.
 	fragments := []string{
@@ -237,7 +237,7 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		"| 苹果 | 3 |",             // embedded sheet row
 		"| 任务 | 状态 |",            // embedded bitable header
 		"| 写码 | 完成 |",            // embedded bitable row
-		"![图片](weknora-img://1)", // numbered image marker
+		"![图片](data:image/png;base64,", // image inlined as base64 data URI
 		"- 手册.pdf",
 		"> [附件: logo.png](",
 		"- small.pdf",
@@ -263,9 +263,9 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 	if strings.Contains(md, "img-tok-SECRET") {
 		t.Errorf("internal image token leaked into markdown:\n%s", md)
 	}
-	// The image marker maps to the image sub-item through the parent's metadata.
-	if main.Metadata["image_map"] != `{"1":"nt-golden#image#img-tok-SECRET"}` {
-		t.Errorf("main.Metadata[image_map] = %q, want the img mapping", main.Metadata["image_map"])
+	// The internal image media token must map to nothing: markers are gone.
+	if main.Metadata["image_map"] != "" {
+		t.Errorf("image_map must be gone, got %q", main.Metadata["image_map"])
 	}
 	if !strings.Contains(main.Metadata["attachment_ids"], "nt-golden#file#tok-big") {
 		t.Errorf("main.Metadata[attachment_ids] = %q, want it to contain tok-big", main.Metadata["attachment_ids"])
@@ -288,17 +288,4 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		t.Errorf("attachment metadata wrong: %+v", att.Metadata)
 	}
 
-	// ── the embedded image became a real sub-item (marker pipeline, ungated) ──
-	if img == nil {
-		t.Fatal("image sub-item missing")
-	}
-	if !strings.HasSuffix(img.FileName, ".png") {
-		t.Errorf("image FileName = %q, want .png", img.FileName)
-	}
-	if !bytes.Equal(img.Content, png) {
-		t.Errorf("image content mismatch: got %d bytes want %d", len(img.Content), len(png))
-	}
-	if img.Metadata["embedded_image"] != "true" || img.Metadata["parent_doc_id"] != "nt-golden" {
-		t.Errorf("image metadata wrong: %+v", img.Metadata)
-	}
 }

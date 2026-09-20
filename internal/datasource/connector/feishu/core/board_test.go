@@ -70,27 +70,20 @@ func TestFetchDocxWithBlocks_BoardExportSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchDocxWithBlocks: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("want 2 items (board image + main), got %d: %+v", len(items), items)
+	// Orthodox flow: the board rides inline in the parent markdown as a
+	// base64 data URI — no image sub-item, no image_map.
+	if len(items) != 1 {
+		t.Fatalf("want 1 item (main only), got %d: %+v", len(items), items)
 	}
-	boardID := "nt-board#board#brd-1"
-	img, main := items[0], items[1]
-	if img.ExternalID != boardID {
-		t.Errorf("board item ExternalID = %q, want %q", img.ExternalID, boardID)
+	main := items[0]
+	if !strings.Contains(string(main.Content), "![图片](data:image/png;base64,") {
+		t.Errorf("board not inlined as base64 data URI:\n%s", main.Content)
 	}
-	if !strings.HasPrefix(img.FileName, "board-") || !strings.HasSuffix(img.FileName, ".png") {
-		t.Errorf("board FileName = %q, want board-*.png", img.FileName)
+	if strings.Contains(string(main.Content), "weknora-img://") {
+		t.Errorf("internal marker leaked into stored markdown:\n%s", main.Content)
 	}
-	if img.Metadata["embedded_image"] != "true" || img.Metadata["parent_doc_id"] != "nt-board" {
-		t.Errorf("board metadata wrong: %+v", img.Metadata)
-	}
-	// Board marker is sequence 1 (first image-kind block in the doc) and maps
-	// through the parent's image_map.
-	if main.Metadata["image_map"] != `{"1":"`+boardID+`"}` {
-		t.Errorf("main.Metadata[image_map] = %q, want mapping for %q", main.Metadata["image_map"], boardID)
-	}
-	if !strings.Contains(string(main.Content), "![图片](weknora-img://1)") {
-		t.Errorf("main markdown missing board marker:\n%s", main.Content)
+	if main.Metadata["image_map"] != "" {
+		t.Errorf("image_map must be gone, got %q", main.Metadata["image_map"])
 	}
 	if !strings.Contains(string(main.Content), "见画板") {
 		t.Errorf("main markdown lost body text:\n%s", main.Content)
@@ -111,7 +104,7 @@ func TestFetchDocxWithBlocks_BoardExportForbiddenDegrades(t *testing.T) {
 		t.Fatalf("want 1 item (main only), got %d: %+v", len(items), items)
 	}
 	main := items[0]
-	if !strings.Contains(string(main.Content), "> [飞书画板无法导出]") {
+	if !strings.Contains(string(main.Content), "![图片]()") {
 		t.Errorf("markdown missing board degrade note:\n%s", main.Content)
 	}
 	if strings.Contains(string(main.Content), "weknora-img") {
