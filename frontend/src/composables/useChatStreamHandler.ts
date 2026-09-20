@@ -3,6 +3,7 @@ import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
 import { applyMessageCreatedAt, bindServerTurnTimestamps, ensureMessageCreatedAt } from '@/utils/messageTimestamp'
+import { canSeedAnswerEvent } from '@/utils/agentAnswerSeed'
 import { expandSteerForksInHistory, forkAfterInjectedUser, steerStepEvents, resetSteerTurnForReplay } from '@/utils/steerStreamFork'
 
 export type ChatMessage = Record<string, unknown>
@@ -908,7 +909,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           stream.push(answerEvent)
           if (eventId) eventMap.set(eventId, answerEvent)
         }
-        if (!answerEvent.content && message.content && String(message.content).trim()) {
+        if (canSeedAnswerEvent(stream, answerEvent, message.content)) {
           answerEvent.content = message.content
         }
         if (data.content) {
