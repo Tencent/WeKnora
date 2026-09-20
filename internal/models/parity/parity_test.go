@@ -142,20 +142,10 @@ func TestLegacyWireParity(t *testing.T) {
 				"max_completion_tokens as the field and max_tokens as deprecated, so the vendor " +
 				"audit switched it; both are still accepted upstream.",
 		},
-		// The seven vendors below moved the other way: the old table left them
+		// The six vendors below moved the other way: the old table left them
 		// on the default max_completion_tokens and the audit put them on
 		// max_tokens. Each entry carries the documentation that decided it, so
 		// a later flip back is a visible change rather than a silent one.
-		{
-			name: "aliyun moved to max_tokens", provider: "aliyun", model: "qwen3-max",
-			opts: &api.Options{MaxTokens: 100},
-			want: map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
-			divergence: "DashScope's parameter table marks max_tokens 即将废弃 and names " +
-				"max_completion_tokens its successor, but nothing says max_tokens is rejected and " +
-				"it is what the compatible mode has always taken, so the audit kept the older " +
-				"field. This is the one output-cap decision that goes against the vendor's own " +
-				"stated direction; revisit it when DashScope announces a removal date.",
-		},
 		{
 			name: "hunyuan moved to max_tokens", provider: "hunyuan", model: "hunyuan-turbos-latest",
 			opts: &api.Options{MaxTokens: 100},
@@ -238,6 +228,18 @@ func TestLegacyWireParity(t *testing.T) {
 		},
 		{
 			name: "volcengine keeps max_completion_tokens", provider: "volcengine", model: "doubao-seed-1-6-251015",
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_completion_tokens": float64(100), "max_tokens": nil},
+		},
+		{
+			// Not a divergence: the pre-catalog table left DashScope on the
+			// default too. The audit briefly moved it to max_tokens because
+			// the compatible mode has always accepted that field; it was
+			// moved back because DashScope's parameter table marks
+			// max_tokens 即将废弃 and names max_completion_tokens its
+			// successor, and following a vendor that has announced a
+			// replacement is the cheaper side of the bet.
+			name: "aliyun keeps max_completion_tokens", provider: "aliyun", model: "qwen3-max",
 			opts: &api.Options{MaxTokens: 100},
 			want: map[string]any{"max_completion_tokens": float64(100), "max_tokens": nil},
 		},

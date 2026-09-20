@@ -264,7 +264,7 @@ make model-catalog-diff VENDOR=deepseek # 只看一家
 1. **`extra_config.api` 变成保留键**。它现在是协议选择器（`openai-completions` / `openai-responses` / `anthropic-messages` / `google-generative-ai` / `ollama`），取值非法会在创建、更新模型时返回 400。WeKnora 自身从未写过这个键，只有手工调 REST 或写 YAML 造出来的行会受影响——升级前删掉或改成合法取值。这里刻意选择报错而不是忽略：静默忽略会让人以为切换生效了。
 2. **Azure OpenAI 未填 `api_version` 的行改走 `/openai/v1` GA 数据面**，不再是 `/openai/deployments/{model}/...?api-version=2024-10-21`。旧默认版本根本不支持它同时声称的 `reasoning_effort` 与 `max_completion_tokens`，属于自相矛盾。要保留旧路径，在额外字段里显式填一个 `api_version`。
 3. **`api.openai.com` 的一方流量改走 Responses 协议**（`PreferAPI` 只对官方域生效）。各类中转 / 网关仍走 Chat Completions，`parity` 包里有断言钉住这一点。
-4. **8 家厂商的输出上限字段按文档纠正**：aliyun、hunyuan、modelscope、qiniu、requesty、longcat、novita 由 `max_completion_tokens` 改回 `max_tokens`，moonshot 反向改为 `max_completion_tokens`。每一处在 `internal/models/parity/parity_test.go` 里都记了变更理由与厂商文档。
+4. **7 家厂商的输出上限字段按文档纠正**：hunyuan、modelscope、qiniu、requesty、longcat、novita 由 `max_completion_tokens` 改回 `max_tokens`，moonshot 反向改为 `max_completion_tokens`。每一处在 `internal/models/parity/parity_test.go` 里都记了变更理由与厂商文档。aliyun 保持 `max_completion_tokens` 不变：兼容模式两个字段都收，但 DashScope 的参数表已经把 `max_tokens` 标为即将废弃并指名了继任者。
 
 另外 Azure OpenAI 不再声明支持 ASR（ASR 客户端只会构造标准 OpenAI 客户端，根本无法带上 Azure 的 `api-key` 头和部署路径，这类行此前就调不通）。
 

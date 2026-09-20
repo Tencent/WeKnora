@@ -15,10 +15,12 @@
 //     /apps/anthropic and the DashScope-native API under /api/v1. This
 //     package configures OpenAI Chat Completions, which is what the model
 //     pages document first;
-//   - output cap: the parameter table marks `max_tokens` 即将废弃 and
-//     documents `max_completion_tokens` ("模型输出的最大长度，包含思维链和
-//     模型回答") as its successor. Nothing says `max_tokens` is rejected, and
-//     it is what the compatible mode has always taken, so it is kept;
+//   - output cap is `max_completion_tokens` ("模型输出的最大长度，包含思维链和
+//     模型回答"). The parameter table marks `max_tokens` 即将废弃 and names
+//     this field its successor. `max_tokens` is still accepted today, but
+//     following a vendor that has announced a replacement is the cheaper
+//     side of the bet: the deprecated field disappears on DashScope's
+//     schedule, the successor does not;
 //   - hybrid-thinking models (Qwen3 / Qwen3.x, qwen-plus / -max / -turbo /
 //     -flash, DeepSeek V3 / V4, Kimi K2, GLM-5) are switched with
 //     `enable_thinking` and budgeted with `thinking_budget` (max token count
@@ -126,7 +128,10 @@ func init() {
 		},
 		Compat: catalog.VendorCompat{
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField:      catalog.Ptr("max_tokens"),
+				// Explicit although it matches the protocol default, because
+				// this vendor's own parameter table deprecates the other
+				// field and the choice should be visible here.
+				MaxTokensField:      catalog.Ptr("max_completion_tokens"),
 				ThinkingFormat:      catalog.Ptr(catalog.ThinkingFormatEnableThinking),
 				ThinkingBudgetField: catalog.Ptr("thinking_budget"),
 				CacheControlFormat:  catalog.Ptr("anthropic"),
