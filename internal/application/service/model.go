@@ -25,12 +25,13 @@ var ErrModelNotFound = errors.New("model not found")
 
 // modelService implements the model service interface
 type modelService struct {
-	repo          interfaces.ModelRepository
-	kbRepo        interfaces.KnowledgeBaseRepository
-	agentRepo     interfaces.CustomAgentRepository
-	ollamaService *ollama.OllamaService
-	pooler        embedding.EmbedderPooler
-	tenantService interfaces.TenantService
+	repo           interfaces.ModelRepository
+	kbRepo         interfaces.KnowledgeBaseRepository
+	agentRepo      interfaces.CustomAgentRepository
+	ollamaService  *ollama.OllamaService
+	pooler         embedding.EmbedderPooler
+	tenantService  interfaces.TenantService
+	embeddingCache embedding.ResultCache
 }
 
 // NewModelService creates a new model service instance
@@ -41,13 +42,26 @@ func NewModelService(repo interfaces.ModelRepository,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
 ) interfaces.ModelService {
+	return NewModelServiceWithEmbeddingCache(repo, kbRepo, agentRepo, ollamaService, pooler, tenantService, nil)
+}
+
+// NewModelServiceWithEmbeddingCache adds optional embedding result reuse to the model service.
+func NewModelServiceWithEmbeddingCache(repo interfaces.ModelRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
+	agentRepo interfaces.CustomAgentRepository,
+	ollamaService *ollama.OllamaService,
+	pooler embedding.EmbedderPooler,
+	tenantService interfaces.TenantService,
+	embeddingCache embedding.ResultCache,
+) interfaces.ModelService {
 	return &modelService{
-		repo:          repo,
-		kbRepo:        kbRepo,
-		agentRepo:     agentRepo,
-		ollamaService: ollamaService,
-		pooler:        pooler,
-		tenantService: tenantService,
+		repo:           repo,
+		kbRepo:         kbRepo,
+		agentRepo:      agentRepo,
+		ollamaService:  ollamaService,
+		pooler:         pooler,
+		tenantService:  tenantService,
+		embeddingCache: embeddingCache,
 	}
 }
 
@@ -496,7 +510,8 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embeddingConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(embeddingConfig, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -506,7 +521,8 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 	}
 
 	logger.Info(ctx, "Embedding model initialized successfully")
-	return embedder, nil
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	return embedding.WrapResultCache(embedder, s.embeddingCache, embeddingConfig, tenantID), nil
 }
 
 // GetEmbeddingModelForTenant retrieves and initializes an embedding model for a specific tenant
@@ -543,7 +559,8 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embeddingConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(embeddingConfig, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -554,7 +571,7 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 	}
 
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
-	return embedder, nil
+	return embedding.WrapResultCache(embedder, s.embeddingCache, embeddingConfig, tenantID), nil
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance

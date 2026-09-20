@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
@@ -50,6 +51,8 @@ type Config struct {
 	SupportsDimensionOverride bool              `json:"supports_dimension_override"`
 	ModelID                   string            `json:"model_id"`
 	Provider                  string            `json:"provider"`
+	// ModelVersion invalidates cached vectors when persisted model settings change.
+	ModelVersion time.Time `json:"-"`
 	// MaxConcurrency caps concurrent background calls to this model; 0 falls
 	// back to the process-wide default (see limiter.GateN).
 	MaxConcurrency int               `json:"max_concurrency"`
@@ -73,6 +76,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 		APIKey:                    m.Parameters.APIKey,
 		ModelID:                   m.ID,
 		ModelName:                 m.Name,
+		ModelVersion:              m.UpdatedAt,
 		Dimensions:                m.Parameters.EmbeddingParameters.Dimension,
 		SupportsDimensionOverride: m.Parameters.EmbeddingParameters.SupportsDimensionOverride,
 		TruncatePromptTokens:      m.Parameters.EmbeddingParameters.TruncatePromptTokens,
