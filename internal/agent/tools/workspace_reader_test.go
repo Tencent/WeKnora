@@ -15,14 +15,18 @@ import (
 )
 
 type fakeSandboxFileSource struct {
-	stat      *sandbox.RemoteStatEntry
-	statErr   error
-	data      []byte
-	readErr   error
-	entries   []sandbox.RemoteDirEntry
-	statCalls int
-	readCalls int
-	listedDir string
+	stat        *sandbox.RemoteStatEntry
+	statErr     error
+	data        []byte
+	readErr     error
+	entries     []sandbox.RemoteDirEntry
+	statCalls   int
+	readCalls   int
+	listedDir   string
+	statPath    string
+	readPath    string
+	statSession string
+	readSession string
 }
 
 func (f *fakeSandboxFileSource) ListSessionFiles(_ context.Context, _, dir string) ([]sandbox.RemoteDirEntry, error) {
@@ -30,13 +34,17 @@ func (f *fakeSandboxFileSource) ListSessionFiles(_ context.Context, _, dir strin
 	return f.entries, nil
 }
 
-func (f *fakeSandboxFileSource) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
+func (f *fakeSandboxFileSource) StatSessionFile(
+	_ context.Context, sessionID, path string,
+) (*sandbox.RemoteStatEntry, error) {
 	f.statCalls++
+	f.statSession, f.statPath = sessionID, path
 	return f.stat, f.statErr
 }
 
-func (f *fakeSandboxFileSource) ReadSessionFile(context.Context, string, string) ([]byte, error) {
+func (f *fakeSandboxFileSource) ReadSessionFile(_ context.Context, sessionID, path string) ([]byte, error) {
 	f.readCalls++
+	f.readSession, f.readPath = sessionID, path
 	return f.data, f.readErr
 }
 
@@ -366,8 +374,7 @@ func TestReadFileWorkspaceReturnsSmallTextOnlyInOutput(t *testing.T) {
 //
 // The path here names the link itself, which is the case this actually covers.
 // A link used as an intermediate component is resolved by the kernel and still
-// stats as a regular file; see the note in Execute for why that is a convention
-// leak rather than a privilege one.
+// stats as a regular file. Both cases remain inside the session's sandbox.
 func TestReadFileWorkspaceRefusesNonRegularFile(t *testing.T) {
 	source := &fakeSandboxFileSource{
 		stat: &sandbox.RemoteStatEntry{
@@ -482,27 +489,32 @@ func TestReadFileWorkspaceAllowsWorkspaceScratchFile(t *testing.T) {
 	assert.Equal(t, sandbox.SessionWorkspaceRoot, result.Data["root"])
 }
 
-func TestReadFileWorkspaceRefusesOutsideInspectableRoots(t *testing.T) {
-	source := &fakeSandboxFileSource{
-		data: []byte("must not be read"),
-		stat: &sandbox.RemoteStatEntry{Path: "/etc/passwd", Type: sandbox.RemoteEntryFile, Size: 4},
-	}
-
-	for _, path := range []string{
-		"/etc/passwd",
-		"/home/user/.ssh/id_rsa",
-		"/opt/weknora/tenant/skills/pdf/SKILL.md",
+func TestReadFileAllowsPathsOutsideWorkspaceInCurrentSandbox(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"/tmp/task/previews/check.txt", "/tmp/task/previews/check.txt"},
+		{"/etc/os-release", "/etc/os-release"},
+		{"/home/user/config.txt", "/home/user/config.txt"},
+		{"/opt/weknora/tenant/skills/pdf/SKILL.md", "/opt/weknora/tenant/skills/pdf/SKILL.md"},
+		{"../tmp/task/./check.txt", "/tmp/task/check.txt"},
 	} {
-		result, err := NewReadFileTool(source).Execute(
-			sandboxFileTestContext(),
-			json.RawMessage(`{"path":"`+path+`"}`),
-		)
-		require.NoError(t, err, path)
-		require.False(t, result.Success, path)
-		assert.Contains(t, result.Error, "outside that scope", path)
+		t.Run(tc.input, func(t *testing.T) {
+			source := &fakeSandboxFileSource{
+				data: []byte("sandbox text"),
+				stat: &sandbox.RemoteStatEntry{Type: sandbox.RemoteEntryFile, Size: 12},
+			}
+			result, err := NewReadFileTool(source).Execute(sandboxFileTestContext(),
+				json.RawMessage(`{"path":"`+tc.input+`"}`))
+			require.NoError(t, err)
+			require.True(t, result.Success, result.Error)
+			require.Equal(t, tc.want, source.statPath)
+			require.Equal(t, tc.want, source.readPath)
+			require.Equal(t, "session-1", source.statSession)
+			require.Equal(t, "session-1", source.readSession)
+			require.Equal(t, "/", result.Data["root"])
+			require.Contains(t, result.Output, "sandbox text")
+			require.Nil(t, result.OutputFiles, "reading a temporary file must not publish it")
+		})
 	}
-	assert.Zero(t, source.readCalls)
-	assert.Zero(t, source.statCalls)
 }
 
 func TestListSandboxFilesDefaultsToOutput(t *testing.T) {
@@ -540,45 +552,43 @@ func TestListSandboxFilesAllowsSessionInput(t *testing.T) {
 	assert.Equal(t, 1, result.Data["count"])
 }
 
-func TestListSandboxFilesRefusesOutsideInspectableRoots(t *testing.T) {
+func TestListSandboxFilesAllowsOutsideWorkspace(t *testing.T) {
 	source := &fakeSandboxFileSource{}
 
 	result, err := NewListSandboxFilesTool(source).Execute(
 		sandboxFileTestContext(),
-		json.RawMessage(`{"path":"/etc"}`),
+		json.RawMessage(`{"path":"../tmp/task/previews"}`),
 	)
 
 	require.NoError(t, err)
-	require.False(t, result.Success)
-	assert.Contains(t, result.Error, "outside that scope")
-	assert.Empty(t, source.listedDir)
+	require.True(t, result.Success, result.Error)
+	assert.Equal(t, "/tmp/task/previews", source.listedDir)
+	assert.Equal(t, "/", result.Data["root"])
 }
 
-func TestListSandboxFilesRedirectsSkillImagePaths(t *testing.T) {
+func TestListSandboxFilesAllowsSandboxSkillImagePaths(t *testing.T) {
 	source := &fakeSandboxFileSource{}
 	result, err := NewListSandboxFilesTool(source).Execute(
 		sandboxFileTestContext(),
 		json.RawMessage(`{"path":"/opt/weknora/tenant/skills/ppt-generator"}`),
 	)
 	require.NoError(t, err)
-	require.False(t, result.Success)
-	assert.Contains(t, result.Error, "outside that scope")
-	assert.Contains(t, result.Error, `read_file(path="skill://ppt-generator/SKILL.md")`)
-	assert.Contains(t, result.Error, "Do not ls")
-	assert.Empty(t, source.listedDir)
+	require.True(t, result.Success, result.Error)
+	assert.Equal(t, "/opt/weknora/tenant/skills/ppt-generator", source.listedDir)
 }
 
-func TestReadFileWorkspaceRedirectsSkillImagePaths(t *testing.T) {
+func TestReadFileOutsideWorkspaceStillRequiresSession(t *testing.T) {
 	source := &fakeSandboxFileSource{
 		data: []byte("must not be read"),
-		stat: &sandbox.RemoteStatEntry{Path: "/opt/weknora/tenant/skills/ppt-generator/scripts/generate_ppt.py", Type: sandbox.RemoteEntryFile, Size: 4},
+		stat: &sandbox.RemoteStatEntry{Type: sandbox.RemoteEntryFile, Size: 4},
 	}
 	result, err := NewReadFileTool(source).Execute(
-		sandboxFileTestContext(),
-		json.RawMessage(`{"path":"/opt/weknora/tenant/skills/ppt-generator/scripts/generate_ppt.py"}`),
+		context.Background(),
+		json.RawMessage(`{"path":"/tmp/task/check.txt"}`),
 	)
 	require.NoError(t, err)
 	require.False(t, result.Success)
-	assert.Contains(t, result.Error, "skill://")
+	assert.Contains(t, result.Error, "no session ID")
+	assert.Zero(t, source.statCalls)
 	assert.Zero(t, source.readCalls)
 }

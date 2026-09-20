@@ -10,7 +10,7 @@ import {
   type ArtifactRefMeta,
 } from './sandboxArtifactRefs.ts'
 
-const labels = { previewHint: '点击预览', missingHint: '文件不可用' }
+const labels = { previewHint: '点击预览', missingHint: '文件不可用', deletedHint: '文件已删除' }
 
 test('inline file cards reuse the drawer icon and keep filenames escaped', () => {
   for (const name of ['report.pdf', 'table.xlsx', 'notes.docx', 'slides.pptx', 'chart.html', 'bad.<img src=x onerror=alert(1)>']) {
@@ -202,4 +202,47 @@ test('artifact names are HTML-escaped', () => {
   })
   assert.ok(!html?.includes('<img src=x'))
   assert.ok(html?.includes('&lt;img'))
+})
+
+test('a deleted artifact renders as a greyed, non-clickable card', () => {
+  const html = renderArtifactReference({
+    href: refFor(0),
+    alt: '市场画像评分',
+    artifacts: artifacts.map((a, i) =>
+      i === 0 ? { ...a, deleted_at: '2026-09-20T02:00:00Z' } : a,
+    ),
+    labels,
+  })
+  assert.ok(html?.includes('artifact-ref-card--deleted'))
+  assert.ok(html?.includes('文件已删除'))
+  assert.ok(html?.includes('市场画像评分_e7edba.html'), 'the name still says which file it was')
+  // Not clickable: the bytes are gone, so opening the preview would 404.
+  assert.ok(!html?.includes('data-artifact-index'))
+  assert.ok(!html?.includes('role="button"'))
+  // And distinguishable from a reference that never resolved at all.
+  assert.ok(!html?.includes('artifact-ref-card--pending'))
+})
+
+test('a deleted image artifact degrades to the card instead of a broken img', () => {
+  // renderImage would emit a placeholder that hydrateArtifactImages then fails
+  // to fill, leaving a permanently blank image in the answer.
+  const html = renderArtifactReference({
+    href: refFor(1),
+    alt: '走势',
+    artifacts: artifacts.map((a, i) =>
+      i === 1 ? { ...a, deleted_at: '2026-09-20T02:00:00Z' } : a,
+    ),
+    labels,
+  })
+  assert.ok(html?.includes('artifact-ref-card--deleted'))
+  assert.ok(!html?.includes('artifact-ref-image'))
+  assert.ok(!html?.includes('<img'))
+})
+
+test('a deleted artifact is not mistaken for a foreign handle', () => {
+  // Dropping tombstones before rendering would make the handle unresolvable,
+  // and an unresolved handle falls through to protected-image rendering — a
+  // broken image rather than an honest "deleted" card.
+  const live = artifacts.filter((_, i) => i !== 0)
+  assert.equal(renderArtifactReference({ href: refFor(0), artifacts: live, labels }), null)
 })

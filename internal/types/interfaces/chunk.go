@@ -64,6 +64,20 @@ type ChunkRepository interface {
 		isEnabled *bool,
 	) ([]*types.Chunk, int64, error)
 	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
+	// ListChunkNeighbors returns up to `before` enabled chunks immediately
+	// preceding chunkIndex and up to `after` immediately following it, in
+	// document order, restricted to chunkTypes. It walks chunk_index rather
+	// than list positions, so gaps left by other chunk types (parents,
+	// summaries, images) do not shift the neighbourhood.
+	ListChunkNeighbors(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		chunkIndex int,
+		before int,
+		after int,
+		chunkTypes []types.ChunkType,
+	) ([]*types.Chunk, error)
 	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list
 	ListChunksByParentIDs(ctx context.Context, tenantID uint64, parentIDs []string) ([]*types.Chunk, error)
 	// UpdateChunk updates a chunk
@@ -81,6 +95,10 @@ type ChunkRepository interface {
 	UpdateChunks(ctx context.Context, chunks []*types.Chunk) error
 	// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
 	SaveChunks(ctx context.Context, chunks []*types.Chunk) error
+	// UpdateChunkFieldsByIDs sets the same column values (e.g. {"status": 2})
+	// on every listed chunk of the tenant with one UPDATE per batch of IDs.
+	// updated_at is set automatically.
+	UpdateChunkFieldsByIDs(ctx context.Context, tenantID uint64, ids []string, fields map[string]interface{}) error
 	// DeleteChunk deletes a chunk
 	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
 	// DeleteChunks deletes chunks by IDs in batch

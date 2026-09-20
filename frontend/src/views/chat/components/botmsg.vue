@@ -18,6 +18,9 @@
                 <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
+                    :embedded-mode="embeddedMode"
+                    :can-fork="canFork"
+                    @fork="emit('fork', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
@@ -30,6 +33,9 @@
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
+                    :embedded-mode="embeddedMode"
+                    :can-fork="canFork"
+                    @fork="emit('fork', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
@@ -44,6 +50,11 @@
             </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
             <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar">
+                <t-tooltip v-if="canFork" :content="forkTooltip">
+                    <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
+                        <t-icon name="git-branch" />
+                    </t-button>
+                </t-tooltip>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
                     <t-icon name="copy" />
@@ -74,6 +85,12 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
+                <!-- 输出被单次上限截断的提示 -->
+                <t-tooltip v-if="session.truncated" :content="$t('chat.truncatedHint')" placement="top">
+                    <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                        <t-icon name="info-circle" />
+                    </t-button>
+                </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
@@ -96,7 +113,7 @@
             v-model:visible="showArtifactDrawer"
             :session-id="sessionId"
             :message-id="messageIdForArtifacts"
-            :artifacts="artifactList"
+            :artifacts="liveArtifacts"
             :preview-index="artifactPreviewIndex"
         />
     </div>
@@ -161,7 +178,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom', 'render-complete-change'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -202,8 +219,19 @@ const props = defineProps({
     followUpLoading: {
         type: Boolean,
         default: false
+    },
+    canFork: {
+        type: Boolean,
+        default: false
     }
 });
+
+const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const forkTooltip = '从这条回答继续分叉'
+const emitFork = () => {
+    const messageId = persistedAssistantId(props.session) || props.session?.id
+    if (messageId) emit('fork', messageId)
+}
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
 
@@ -228,8 +256,13 @@ const artifactList = computed(() => {
     // omit it. Normalising here keeps ChatArtifactsDrawer index-agnostic.
     return list.map((a, i) => ({ index: i, ...a }));
 });
-const hasArtifacts = computed(() => artifactList.value.length > 0);
-const artifactCount = computed(() => artifactList.value.length);
+// Deleted files stay in artifactList on purpose: the inline renderer needs the
+// tombstone to tell "you deleted this" apart from "this handle belongs to some
+// other message", and its position is still the download address of the files
+// after it. Everything that counts or lists files uses the live view.
+const liveArtifacts = computed(() => artifactList.value.filter((a) => !a.deleted_at));
+const hasArtifacts = computed(() => liveArtifacts.value.length > 0);
+const artifactCount = computed(() => liveArtifacts.value.length);
 const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifactCount);
 const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session));
 const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
@@ -267,6 +300,7 @@ const artifactRefContext = computed(() => {
 const artifactRefLabels = computed(() => ({
     previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
     missingHint: t('agent.artifactDrawer.inlineMissing'),
+    deletedHint: t('agent.artifactDrawer.inlineDeleted'),
 }));
 
 const preview = (url) => {
@@ -366,7 +400,7 @@ const handleCopyAnswer = async () => {
         return;
     }
 
-    await copyWithToast(content, 'chat.copySuccess', 'chat.copyFailed');
+    await copyWithToast(content, 'common.copySuccess', 'common.copyFailed');
 };
 
 // 添加到知识库
@@ -516,13 +550,13 @@ onBeforeUnmount(() => {
     max-height: 300px;
     width: auto;
     height: auto;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     display: block;
     cursor: pointer;
     object-fit: contain;
     margin: 8px 0 8px 16px;
     border: 0.5px solid var(--td-component-stroke);
-    transition: transform 0.2s ease;
+    transition: transform var(--app-motion-base) ease;
 
     &:hover {
         transform: scale(1.02);
@@ -531,9 +565,9 @@ onBeforeUnmount(() => {
 
 .bot_msg {
     // background: var(--td-bg-color-container);
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     color: var(--td-text-color-primary);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     // padding: 10px 12px;
     margin-right: auto;
     width: 100%;
@@ -557,10 +591,10 @@ onBeforeUnmount(() => {
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     gap: 4px;
     margin-left: 16px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
 }
 
 :deep(.t-loading__gradient-conic) {

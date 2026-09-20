@@ -72,16 +72,6 @@ sudo mv weknora /usr/local/bin/   # 或放到任意 $PATH 目录
 
 注意：Makefile 中**没有** `install` target，构建产物需自行移动到 `$PATH`。
 
-### Homebrew（服务端 Lite 版，非 CLI）
-
-仓库 `Formula/` 目录下目前只有一个 formula：`Formula/weknora-lite.rb`，它安装的是 **WeKnora 服务端的单二进制 Lite 版**（`weknora-lite`），而不是本文档的 `weknora` CLI。该 formula：
-
-- 按 macOS/Linux × arm64/amd64 四个平台从 GitHub Releases 下载 `WeKnora-lite_v<version>_<os>_<arch>.tar.gz`；
-- 生成 `weknora-lite` 启动脚本：首次运行自动生成 `~/.config/weknora/.env.lite` 配置、数据存到 `~/.local/share/weknora/`；
-- 支持 `brew services start weknora-lite` 作为后台服务运行，日志在 `$(brew --prefix)/var/log/weknora-lite.log`。
-
-在本地用 Lite 版做 CLI 的目标服务器是一个方便的组合：`brew services start weknora-lite` 起服务端，再用 `weknora profile add local --host http://localhost:8080 --use` 连接。
-
 ---
 
 ## 配置与 Profile 管理

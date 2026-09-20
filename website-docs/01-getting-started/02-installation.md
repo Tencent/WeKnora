@@ -11,7 +11,6 @@ WeKnora 支持 Docker Compose、Kubernetes Helm、Lite 单二进制和桌面应�
 | Helm | `helm/` | ParadeDB（chart 内置） | Redis（chart 内置） | Kubernetes >= 1.25 |
 | Lite 单二进制 | `make build-lite` / `scripts/package-lite.sh` | SQLite（FTS5 + sqlite-vec） | 内存（无 Redis） | 个人 / 离线 / 低资源环境 |
 | 桌面应用（**未正式发布**） | `cmd/desktop`（Wails v2）+ `scripts/package-mac-app.sh` | SQLite | 内存 | 桌面单机使用，带图形界面与本地数据目录 |
-| Homebrew | `Formula/weknora-lite.rb` | SQLite | 内存 | macOS / Linux 命令行安装 Lite |
 
 ```mermaid
 flowchart TB
@@ -44,6 +43,8 @@ flowchart TB
 - **源码编译**：Go 1.26（见 `docker/Dockerfile.app` builder 阶段 `golang:1.26-bookworm`）、CGO（依赖 `libsqlite3-dev`）、Node.js + npm（前端）、Python 3.10 + uv（docreader）。
 - **Kubernetes**：>= 1.25.0（`helm/Chart.yaml`）。
 
+Compose 默认 ParadeDB `v0.22.6-pg17` 的 x86 CPU 基线为 `x86-64-v2`（包括 SSE4.2、POPCNT），不再强制要求 AVX2。这不代表所有 ARM CPU 或其他可选服务均兼容。
+
 ## 一、Docker Compose 标准部署（docker-compose.yml）
 
 最快路径：
@@ -68,6 +69,8 @@ docker compose ps                 # 等所有服务变成 healthy/running
 
 若已有部署并下载了更新的 release：
 
+> 如果数据库仍为 ParadeDB `v0.22.2-pg17`，先按 [ParadeDB 升级说明](https://github.com/Tencent/WeKnora/blob/main/docs/paradedb-upgrade.md) 停止写入、备份、保留数据卷更换镜像并完成 `pg_search` 扩展升级，再恢复应用。仅替换镜像不会更新已有数据库的扩展 SQL；迁移 `000099` 会处理 WeKnora 库中符合条件的 `0.22.2–0.22.5`，其他数据库仍需单独检查。
+
 ```bash
 # 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.7.0），或保持 latest
 docker compose pull
@@ -83,7 +86,7 @@ docker compose up -d
 | `frontend` | `wechatopenai/weknora-ui:${WEKNORA_VERSION:-latest}` | `${FRONTEND_PORT:-80}:80` | app（healthy） | Nginx 托管 SPA 并反代到 app；`APP_HOST`/`APP_BACKEND_PORT`/`APP_SCHEME` 可指向远程后端 |
 | `app` | `wechatopenai/weknora-app` | `${APP_PORT:-8080}:8080` | postgres（healthy）、redis、docreader（healthy） | Go 后端；挂载 `./config/config.yaml`、`data-files` 卷；健康检查 `GET /health` |
 | `docreader` | `wechatopenai/weknora-docreader` | 仅 `expose: 50051`（不发布到宿主机） | — | 文档解析 gRPC 服务；健康检查 `grpc_health_probe`；与 app 共享 `docreader-tmp` 卷传递图片 |
-| `postgres` | `paradedb/paradedb:v0.22.2-pg17` | 不映射宿主端口 | — | ParadeDB = PostgreSQL 17 + BM25/向量扩展，默认检索引擎 |
+| `postgres` | `paradedb/paradedb:v0.22.6-pg17` | 不映射宿主端口 | — | ParadeDB = PostgreSQL 17 + BM25/向量扩展，默认检索引擎 |
 | `redis` | `redis:7.0-alpine` | 不映射宿主端口 | — | `--appendonly yes --requirepass ${REDIS_PASSWORD}` |
 
 ### 可选服务与 profiles
@@ -210,9 +213,9 @@ helm install weknora ./helm -n weknora --create-namespace \
   --set secrets.jwtSecret=xxx --set secrets.systemAesKey=$(openssl rand -hex 16)
 ```
 
-## 七、桌面端（Lite 模式 / 桌面应用 / Homebrew）
+## 七、桌面端（Lite 模式 / 桌面应用）
 
-桌面端面向本机与低资源环境，底层都是同一套 Lite 运行时（单进程 + SQLite + 内存队列），只是分发与启动方式不同：**单二进制**（命令行启动，也可作为后台服务）、**桌面应用**（图形界面，双击启动）、**Homebrew**（macOS/Linux 命令行安装 Lite）。三者能力范围一致。
+桌面端面向本机与低资源环境，底层都是同一套 Lite 运行时（单进程 + SQLite + 内存队列），只是分发与启动方式不同：**单二进制**（命令行启动，也可作为后台服务）、**桌面应用**（图形界面，双击启动）。两者能力范围一致。
 
 ### Lite 运行时（零外部依赖） {#_7-1-lite-运行时-零外部依赖}
 
@@ -248,15 +251,6 @@ Lite 还提供 `POST /auth/auto-setup` 一键生成本地账号（仅 lite editi
 make package-mac-app
 ```
 
-### Homebrew（Formula/weknora-lite.rb） {#_7-3-homebrew-formula-weknora-lite-rb}
-
-```bash
-brew install weknora-lite            # 从 GitHub Releases 下载 WeKnora-lite_v{ver}_{os}_{arch}.tar.gz
-brew services start weknora-lite     # 作为后台服务运行（keep_alive，日志 var/log/weknora-lite.log）
-```
-
-Formula 描述为 "Knowledge base management system — single-binary Lite edition"，支持 macOS/Linux 的 arm64 与 amd64。包装脚本首次运行会把 `.env.lite.example` 复制为 `~/.config/weknora/.env.lite`（可用 `WEKNORA_CONFIG_DIR` / `WEKNORA_DATA_DIR` 覆盖配置与数据目录，数据默认在 `~/.local/share/weknora`）。
-
 ## 八、源码编译运行
 
 ```bash
@@ -291,7 +285,7 @@ flowchart TB
         A2 --> PVC1[("PVC: postgres 10Gi / redis 1Gi / data-files 10Gi")]
         A2 --> D2["docreader Deployment"]
     end
-    subgraph laptop["个人：Lite / 桌面 / Homebrew"]
+    subgraph laptop["个人：Lite / 桌面"]
         direction LR
         U3["用户"] --> L1["WeKnora-lite 单进程 (内嵌前端 + SQLite + 内存队列)"]
         L1 --> O3["Ollama / 远程 OpenAI 兼容 API"]

@@ -642,7 +642,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	// 获取样本数据用于生成摘要
 	input := tools.DataAnalysisInput{
 		KnowledgeID: resources.knowledge.ID,
-		Sql:         fmt.Sprintf("SELECT * FROM \"%s\" LIMIT 10", tableSchema.TableName),
+		SQL:         fmt.Sprintf("SELECT * FROM \"%s\" LIMIT 10", tools.DataAnalysisTableName),
 	}
 	jsonData, err := json.Marshal(input)
 	if err != nil {
@@ -668,7 +668,9 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 		}
 		customInstructions = ResolveProcessConfig(resources.knowledgeBase, processOverrides).ChunkingConfig.TableMetadataInstructions
 	}
-	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName,
+	// The stored summary is later shown to the model by data_schema, so it
+	// must name the model-facing table, never the physical knowledge-ID table.
+	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tools.DataAnalysisTableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate table description: %v", err)
@@ -676,7 +678,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	}
 	logger.Debugf(ctx, "table describe of knowledge %s: %s", resources.knowledge.ID, tableDescription)
 
-	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tableSchema.TableName,
+	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tools.DataAnalysisTableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate column descriptions: %v", err)

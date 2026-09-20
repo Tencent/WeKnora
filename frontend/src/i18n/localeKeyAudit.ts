@@ -92,6 +92,8 @@ const EXTRA_PREFIXES = [
   'kbSettings.parser.engines.',
   'model.editor.description.',
   'integrations.tabs.',
+  'integrations.mcpserver.tools.',
+  'integrations.mcpserver.groups.',
   'knowledgeStages.stage.',
   'knowledgeStages.status.',
   'system.globalSettings.runtime.pools.',

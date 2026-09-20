@@ -163,7 +163,7 @@ type Chunk struct {
 	// Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
 	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
-	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
+	ContentHash string `json:"content_hash"             gorm:"type:varchar(64)"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
 	// Chunk creation time

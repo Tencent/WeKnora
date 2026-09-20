@@ -314,3 +314,50 @@ export function preserveCitationTags(contentStr: string): { text: string; tags: 
 export function restoreCitationTags(text: string, tags: string[]): string {
   return text.replace(/\x00TAG(\d+)\x00/g, (_, idx) => tags[Number(idx)] || '')
 }
+
+/** A line that holds nothing but `<kb/>` tags, including its line break. */
+const KB_ONLY_LINE_RE = /^[ \t]*(?:<kb\b[^>]*?\/?>[ \t]*)+\n?/gm
+/** An inline `<kb/>` tag together with the space that separated it from the text. */
+const KB_INLINE_TAG_RE = /[ \t]*<kb\b[^>]*?\s*\/?>/g
+
+/**
+ * Strip chat-only citation markup so an answer can live on as standalone
+ * Markdown (e.g. saved into a knowledge base by "add to knowledge").
+ *
+ * `<web/>` becomes a plain Markdown link — the URL still means something
+ * outside the chat. `<kb/>` points at chunk UUIDs that do not, so it is dropped
+ * and its document name is returned instead, for the caller to render as a
+ * source list. Removal stays local to the tags: no whitespace elsewhere in the
+ * answer is touched, so code blocks survive unchanged.
+ */
+export function stripCitationTagsForMarkdown(
+  content: string,
+): { text: string; sources: string[] } {
+  if (!content) return { text: '', sources: [] }
+
+  const sources: string[] = []
+  const seen = new Set<string>()
+  KB_TAG_ATTR_RE.lastIndex = 0
+  for (const match of content.matchAll(KB_TAG_ATTR_RE)) {
+    const doc = (parseTagAttributes(match[1]).doc || '').trim()
+    if (doc && !seen.has(doc)) {
+      seen.add(doc)
+      sources.push(doc)
+    }
+  }
+
+  const text = content
+    .replace(WEB_TAG_ATTR_RE, (_match, attrString: string) => {
+      const attrs = parseTagAttributes(attrString)
+      const url = (attrs.url || '').trim()
+      if (!url) return ''
+      // Brackets inside the label would break the link syntax we emit.
+      const label = (attrs.title || '').trim().replace(/[[\]]/g, ' ').trim() || url
+      return `[${label}](${url})`
+    })
+    .replace(KB_ONLY_LINE_RE, '')
+    .replace(KB_INLINE_TAG_RE, '')
+    .trim()
+
+  return { text, sources }
+}

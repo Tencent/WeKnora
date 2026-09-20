@@ -9,7 +9,7 @@
       <div class="section-header-row">
         <div class="section-header-titlewrap">
           <h2>{{ $t('tenantMember.title') }}</h2>
-          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="permissions-popup-overlay"
+          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="wk-popover permissions-popup-overlay"
             :overlay-inner-style="permissionsPopupInnerStyle">
             <button type="button" class="permissions-trigger-btn" :aria-label="$t('tenantMember.permissions.title')"
               :title="$t('tenantMember.permissions.iconHint')">
@@ -198,7 +198,7 @@
               </t-input>
             </div>
             <t-popup v-if="canManage" v-model="invitePopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="member-invite-popup-overlay">
+              destroy-on-close overlay-class-name="wk-popover member-invite-popup-overlay">
               <t-button theme="primary" variant="outline" shape="square" size="small" class="members-list-add-btn"
                 :title="$t('tenantMember.add.button')" :aria-label="$t('tenantMember.add.button')">
                 <template #icon><t-icon name="user-add" /></template>
@@ -247,7 +247,7 @@
                  popup so the two flows live side-by-side: "I know who"
                  (email input) vs "I don't" (one link, group chat). -->
             <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="member-invite-popup-overlay">
+              destroy-on-close overlay-class-name="wk-popover member-invite-popup-overlay">
               <t-button theme="default" variant="outline" shape="square" size="small" class="members-list-add-btn"
                 :title="$t('tenantInvitation.shareLink.button')"
                 :aria-label="$t('tenantInvitation.shareLink.button')">
@@ -1466,6 +1466,8 @@ watch(
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .tenant-members {
   width: 100%;
 }
@@ -1479,7 +1481,7 @@ watch(
 
   .member-name {
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1487,7 +1489,7 @@ watch(
   }
 
   .member-email {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.35;
     color: var(--td-text-color-secondary);
     overflow: hidden;
@@ -1497,23 +1499,7 @@ watch(
 }
 
 .section-header {
-  margin-bottom: 20px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-    letter-spacing: -0.02em;
-  }
-
-  .section-description {
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    line-height: 1.55;
-    margin: 8px 0 0;
-    max-width: 52rem;
-  }
+  .settings-section-header();
 }
 
 .section-header-row {
@@ -1593,12 +1579,12 @@ watch(
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   line-height: 0;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   :deep(.t-icon) {
     display: block;
@@ -1640,7 +1626,7 @@ watch(
 }
 
 .members-list-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -1654,16 +1640,16 @@ watch(
   min-width: 22px;
   height: 20px;
   padding: 0 7px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background-color: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   line-height: 1;
 }
 
 .members-list-filter-hint {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -1709,13 +1695,13 @@ watch(
 
 .data-table-shell {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-container);
 
   &:deep(thead th) {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   &:deep(.t-table td),
@@ -1789,13 +1775,13 @@ watch(
     margin-bottom: 16px;
 
     .permissions-compact-title {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
 
     .permissions-compact-desc {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
     }
   }
@@ -1808,10 +1794,10 @@ watch(
 
   .perm-role-block {
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     padding: 14px 16px;
     background: var(--td-bg-color-container);
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
 
     &.is-me {
       border-color: var(--td-brand-color);
@@ -1822,19 +1808,19 @@ watch(
       display: flex;
       align-items: center;
       gap: 6px;
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
       margin-bottom: 12px;
 
       .me-badge {
         margin-left: auto;
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         font-weight: 500;
         color: var(--td-brand-color);
         padding: 2px 8px;
         background: var(--td-brand-color-light);
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
       }
     }
 
@@ -1847,7 +1833,7 @@ watch(
         display: flex;
         align-items: flex-start;
         gap: 6px;
-        font-size: 13px;
+        font-size: var(--app-text-md);
         line-height: 1.5;
 
         .t-icon {
@@ -1887,11 +1873,11 @@ watch(
       margin-bottom: 10px;
 
       .permissions-compact-title {
-        font-size: 13px;
+        font-size: var(--app-text-md);
       }
 
       .permissions-compact-desc {
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         line-height: 1.4;
       }
     }
@@ -1903,15 +1889,15 @@ watch(
 
     .perm-role-block {
       padding: 8px 10px;
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
 
       .perm-role-tag {
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         margin-bottom: 6px;
         gap: 4px;
 
         .me-badge {
-          font-size: 10px;
+          font-size: var(--app-text-2xs);
           padding: 1px 5px;
         }
       }
@@ -1920,7 +1906,7 @@ watch(
         gap: 3px;
 
         .perm-item {
-          font-size: 11px;
+          font-size: var(--app-text-xs);
           line-height: 1.35;
           gap: 4px;
 
@@ -1954,7 +1940,7 @@ watch(
 }
 
 .member-invite-popup-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 12px;
@@ -1974,7 +1960,7 @@ watch(
 .invite-confirm-body {
   padding: 4px 0 8px;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.6;
 }
 
@@ -2004,10 +1990,10 @@ watch(
   min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-page);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   outline: none;
 }
@@ -2046,22 +2032,22 @@ watch(
   }
 
   .pending-invitations-title {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   .pending-invitations-desc {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .pending-invitations-empty {
     padding: 10px 12px;
     border: 1px dashed var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     background: var(--td-bg-color-container);
   }
 
@@ -2098,13 +2084,13 @@ watch(
   justify-content: space-between;
   background: var(--td-bg-color-secondarycontainer);
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   gap: 12px;
 
   .audit-desc {
     flex: 1;
     min-width: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
   }
 
@@ -2172,13 +2158,13 @@ watch(
   justify-content: center;
   gap: 10px;
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
 .audit-end-hint {
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-disabled);
   padding: 8px 0 14px;
   margin: 0;
@@ -2191,12 +2177,12 @@ watch(
   line-height: 1.3;
 
   .audit-time-date {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .audit-time-clock {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     font-variant-numeric: tabular-nums;
@@ -2211,7 +2197,7 @@ watch(
   min-width: 0;
 
   .audit-actor-name {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -2220,7 +2206,7 @@ watch(
   }
 
   .audit-actor-role {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 }
@@ -2234,15 +2220,15 @@ watch(
   padding: 2px 0;
 
   .audit-target-key {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     word-break: break-all;
   }
 
   .audit-target-diff {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     word-break: break-all;
     line-height: 1.4;
   }
@@ -2253,8 +2239,8 @@ watch(
 }
 
 .audit-path {
-  font-family: var(--td-font-family-mono, monospace);
-  font-size: 12px;
+  font-family: var(--td-font-family-mono);
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   word-break: break-all;
 
@@ -2291,7 +2277,7 @@ watch(
 }
 
 .audit-expanded-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-secondary);
   text-transform: uppercase;
@@ -2299,7 +2285,7 @@ watch(
 }
 
 .audit-expanded-value {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   word-break: break-all;
 }
@@ -2313,12 +2299,12 @@ watch(
 .audit-expanded-json {
   margin: 0;
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 280px;
@@ -2326,7 +2312,7 @@ watch(
 }
 
 .mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
 }
 </style>
 
@@ -2334,20 +2320,6 @@ watch(
 /* 权限说明弹出层（t-popup 挂到 body，须全局样式） */
 .permissions-popup-overlay {
   z-index: 3050 !important;
-
-  .t-popup__content {
-    padding: 0 !important;
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    overflow: hidden;
-  }
 
   .permissions-compact.permissions-compact--popover {
     padding: 12px 14px;
@@ -2363,13 +2335,13 @@ watch(
       margin-bottom: 10px;
 
       .permissions-compact-title {
-        font-size: 13px;
+        font-size: var(--app-text-md);
         font-weight: 600;
         color: var(--td-text-color-primary);
       }
 
       .permissions-compact-desc {
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         line-height: 1.45;
         color: var(--td-text-color-secondary);
       }
@@ -2383,7 +2355,7 @@ watch(
 
     .perm-role-block {
       border: 1px solid var(--td-component-stroke);
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
       padding: 8px 10px;
       background: var(--td-bg-color-container);
 
@@ -2396,19 +2368,19 @@ watch(
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         font-weight: 600;
         color: var(--td-text-color-primary);
         margin-bottom: 6px;
 
         .me-badge {
           margin-left: auto;
-          font-size: 10px;
+          font-size: var(--app-text-2xs);
           font-weight: 500;
           color: var(--td-brand-color);
           padding: 1px 5px;
           background: var(--td-brand-color-light);
-          border-radius: 4px;
+          border-radius: var(--app-radius-xs);
         }
       }
 
@@ -2421,7 +2393,7 @@ watch(
           display: flex;
           align-items: flex-start;
           gap: 4px;
-          font-size: 11px;
+          font-size: var(--app-text-xs);
           line-height: 1.35;
           color: var(--td-text-color-secondary);
 
@@ -2466,20 +2438,6 @@ watch(
 .member-invite-popup-overlay {
   z-index: 3050 !important;
 
-  .t-popup__content {
-    padding: 14px 16px !important;
-    min-width: 300px;
-    max-width: min(392px, calc(100vw - 24px));
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  }
 }
 
 :root[theme-mode='dark'] .member-invite-popup-overlay .t-popup__content {
@@ -2501,7 +2459,7 @@ watch(
     gap: 8px;
   }
   .role-option-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
   }
 }

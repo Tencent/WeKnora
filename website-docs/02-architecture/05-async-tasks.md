@@ -52,7 +52,8 @@ opt := &asynq.RedisClientOpt{
 | `knowledge:post_process` | `TypeKnowledgePostProcess` | 知识后处理统一调度（fan-out 富化子任务） | `postprocess` |
 | `knowledge:auto_tag` | `TypeKnowledgeAutoTag` | 文档已有标签的自动关联 | `summary` |
 | `memory:extract` | `TypeMemoryExtract` | 个人记忆后台抽取 | `memory` |
-| `summary:generation` | `TypeSummaryGeneration` | 摘要生成 | `summary` |
+| `summary:generation` | `TypeSummaryGeneration` | 摘要 + 文档画像生成 | `summary` |
+| `kb:profile` | `TypeKnowledgeBaseProfile` | 知识库描述（画像聚合 + 一次小模型调用，哈希未变则跳过） | `summary` |
 | `datatable:summary` | `TypeDataTableSummary` | 表格摘要 | `summary` |
 | `image:multimodal` | `TypeImageMultimodal` | 图片 OCR + VLM Caption | `multimodal` |
 | `chunk:extract` | `TypeChunkExtract` | 图谱实体/关系抽取（按 chunk） | `graph` |
@@ -70,7 +71,7 @@ opt := &asynq.RedisClientOpt{
 
 所有 payload 结构体（如 `DocumentProcessPayload`、`ImageMultimodalPayload`）都内嵌 `types.TracingContext`，用于跨进程传递 Langfuse/W3C traceparent（见可观测性文档），并统一携带 `tenant_id` / `knowledge_id` / `knowledge_base_id` 等路由字段，供死信归档与取消匹配使用。
 
-自动标签与摘要共享 summary 队列，属于可选富化任务；仅在文档知识库开启 auto_tag_config 时入队，失败不影响已完成的解析。记忆抽取使用独立 memory 队列，由 enrichment pool 消费，并以权重 1 参与 shared pool 弹性借用，worker pool 总数仍为 6。
+自动标签、摘要与知识库描述共享 summary 队列，属于可选富化任务；自动标签仅在文档知识库开启 auto_tag_config 时入队，知识库描述（`kb:profile`）仅在开启 profile_config 时由摘要终态/删除/移动触发并按 30 秒窗口去重，失败都不影响已完成的解析。记忆抽取使用独立 memory 队列，由 enrichment pool 消费，并以权重 1 参与 shared pool 弹性借用，worker pool 总数仍为 6。
 
 记忆任务按个人主体去重、延迟聚合；memory_subjects 的 extract_cursor、pending_sessions 与调度时间用于续接，避免每次发问立即启动一次模型提取。空间关闭记忆或 write_mode 非 auto 时不跑后台蒸馏。Lite 的同步执行器也注册自动标签和记忆任务，遵循同样的业务开关。
 

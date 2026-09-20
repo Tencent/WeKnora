@@ -976,45 +976,6 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	return securedSQL, validationResult, nil
 }
 
-// extractTableAliasMap walks the parse tree to build a table_name→alias map.
-// When a table has an alias (e.g., "knowledge_bases kb"), the map entry is
-// {"knowledge_bases": "kb"}. Without an alias, both key and value are the table name.
-func extractTableAliasMap(parseResult *pg_query.ParseResult) map[string]string {
-	m := make(map[string]string)
-	if len(parseResult.Stmts) == 0 || parseResult.Stmts[0].Stmt == nil {
-		return m
-	}
-	selectStmt := parseResult.Stmts[0].Stmt.GetSelectStmt()
-	if selectStmt == nil {
-		return m
-	}
-	for _, fromItem := range selectStmt.FromClause {
-		collectTableAliases(fromItem, m)
-	}
-	return m
-}
-
-// collectTableAliases recursively collects table→alias mappings from FROM clause nodes.
-func collectTableAliases(node *pg_query.Node, m map[string]string) {
-	if node == nil {
-		return
-	}
-	if rv := node.GetRangeVar(); rv != nil {
-		tableName := strings.ToLower(rv.Relname)
-		alias := tableName
-		if rv.Alias != nil && rv.Alias.Aliasname != "" {
-			alias = strings.ToLower(rv.Alias.Aliasname)
-		}
-		m[tableName] = alias
-		return
-	}
-	if je := node.GetJoinExpr(); je != nil {
-		collectTableAliases(je.Larg, m)
-		collectTableAliases(je.Rarg, m)
-		return
-	}
-}
-
 // walkSQLMessages visits children before their parent so rewriting a SELECT
 // does not revisit trusted predicates added by the server.
 func walkSQLMessages(message protoreflect.Message, visit func(protoreflect.Message) error) error {

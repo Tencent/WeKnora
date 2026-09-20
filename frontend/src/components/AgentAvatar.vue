@@ -104,7 +104,7 @@ const letterStyle = computed(() => {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   flex-shrink: 0;
   box-shadow: var(--td-shadow-2);
   overflow: hidden;
@@ -116,7 +116,7 @@ const letterStyle = computed(() => {
     box-shadow: none;
     
     .agent-avatar-letter {
-      font-size: 11px;
+      font-size: var(--app-text-xs);
     }
     
     .agent-sparkles {
@@ -127,10 +127,10 @@ const letterStyle = computed(() => {
   &.agent-avatar-large {
     width: 48px;
     height: 48px;
-    border-radius: 12px;
+    border-radius: var(--app-radius-xl);
     
     .agent-avatar-letter {
-      font-size: 20px;
+      font-size: var(--app-text-3xl);
     }
     
     .agent-sparkles {
@@ -153,7 +153,7 @@ const letterStyle = computed(() => {
   position: relative;
   z-index: 1;
   color: var(--td-text-color-anti);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   font-family: var(--app-font-family);
 }

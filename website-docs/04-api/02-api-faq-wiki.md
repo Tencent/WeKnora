@@ -447,7 +447,7 @@ curl $BASE/api/v1/knowledgebase/kb-1/wiki/issues -H "Authorization: Bearer $TOKE
 
 ### PUT /api/v1/knowledgebase/:kb_id/wiki/issues/:issue_id/status
 
-用途：更新问题状态。写权限。请求体：`{"status":"pending|ignored|resolved"}`（`binding:"required"`）。
+用途：更新问题状态。写权限。请求体：`{"status":"pending|ignored|resolved"}`（`binding:"required"`）。`issue_id` 必须属于路径中的知识库，否则 404。
 
 响应：200 `{"message":"Issue status updated successfully"}`
 

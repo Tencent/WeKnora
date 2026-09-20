@@ -305,6 +305,7 @@ type SuggestedQuestion struct {
 	Question        string `json:"question"`                    // Question text
 	Source          string `json:"source"`                      // Source: "faq", "document", or "agent_config"
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"` // Source knowledge base ID
+	KnowledgeID     string `json:"knowledge_id,omitempty"`      // Source document ID (faq/document sources)
 }
 
 // SuggestedQuestionsRequest represents the options for getting suggested questions

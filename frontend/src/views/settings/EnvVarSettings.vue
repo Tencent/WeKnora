@@ -612,26 +612,14 @@ onMounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .env-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 24px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 8px 0 0;
-    line-height: 1.6;
-  }
+  .settings-section-header();
 }
 
 .section-header__titlewrap {
@@ -646,7 +634,7 @@ onMounted(() => {
   justify-content: center;
   padding: 2px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: help;
@@ -668,14 +656,14 @@ onMounted(() => {
 .hint-popover__title {
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .hint-popover__text {
   margin: 4px 0 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
@@ -683,7 +671,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   margin: 0;
 }
@@ -695,7 +683,7 @@ onMounted(() => {
 
 .env-empty {
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   padding: 24px;
   text-align: center;
 }
@@ -705,14 +693,14 @@ onMounted(() => {
 }
 
 .env-empty__title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   margin: 0 0 4px 0;
 }
 
 .env-empty__desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   margin: 0;
 }
@@ -722,14 +710,14 @@ onMounted(() => {
 
   h3 {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   p {
     margin: 4px 0 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
     color: var(--td-text-color-secondary);
   }
@@ -746,7 +734,7 @@ onMounted(() => {
   margin-bottom: 12px;
   padding: 12px 14px;
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
 }
 
@@ -772,7 +760,7 @@ onMounted(() => {
 .env-skill-card,
 .env-sandbox-card {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   padding: 14px 16px;
   background: var(--td-bg-color-container);
 }
@@ -787,7 +775,7 @@ onMounted(() => {
 .env-skill-card__identity h4,
 .env-sandbox-card h4 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -806,7 +794,7 @@ onMounted(() => {
 
 .env-group__desc {
   margin: 6px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
   display: -webkit-box;
@@ -816,17 +804,17 @@ onMounted(() => {
 }
 
 .env-skill-card__sandbox {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 400;
   color: var(--td-text-color-placeholder);
 }
 
 .env-skill-card__status {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 20px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-success-color-light);
   color: var(--td-success-color);
 
@@ -866,8 +854,8 @@ onMounted(() => {
   flex: 1;
 
   code {
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-    font-size: 13px;
+    font-family: var(--td-font-family-mono);
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     overflow-wrap: anywhere;
   }
@@ -899,18 +887,18 @@ onMounted(() => {
   gap: 6px;
 
   code {
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-    font-size: 13px;
+    font-family: var(--td-font-family-mono);
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     overflow-wrap: anywhere;
   }
 }
 
 .env-tag {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
 }
@@ -933,7 +921,7 @@ onMounted(() => {
 .env-secret__desc,
 .env-secret__when {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -962,7 +950,7 @@ onMounted(() => {
 
 .env-sandbox-card__empty {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }

@@ -49,18 +49,18 @@ func shellExecTestContext() context.Context {
 	return WithToolExecContext(context.Background(), &ToolExecContext{SessionID: "session-1"})
 }
 
-func TestShellExecRejectsWorkDirOutsideWorkspace(t *testing.T) {
+func TestShellExecAllowsWorkDirOutsideWorkspace(t *testing.T) {
 	executor := &fakeShellExecutor{}
 	tool := NewShellExecTool(executor, nil)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"pwd","work_dir":"/etc"}`,
+		`{"command":"pwd","work_dir":"../tmp/task"}`,
 	))
 
 	require.NoError(t, err)
-	require.False(t, result.Success)
-	require.Contains(t, result.Error, `work_dir "/etc" is outside the allowed sandbox roots /workspace`)
-	assert.Equal(t, time.Duration(0), executor.timeout)
+	require.True(t, result.Success, result.Error)
+	require.Equal(t, "/tmp/task", executor.workDir)
+	require.Equal(t, 1, executor.calls)
 }
 
 func TestShellExecTimeoutHonorsAndCapsRequestedValue(t *testing.T) {

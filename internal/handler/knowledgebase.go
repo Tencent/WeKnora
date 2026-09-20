@@ -31,6 +31,7 @@ import (
 type KnowledgeBaseHandler struct {
 	cfg                *config.Config
 	service            interfaces.KnowledgeBaseService
+	profileService     interfaces.KnowledgeBaseProfileService
 	knowledgeService   interfaces.KnowledgeService
 	kbShareService     interfaces.KBShareService
 	agentShareService  interfaces.AgentShareService
@@ -58,9 +59,11 @@ func NewKnowledgeBaseHandler(
 	userService interfaces.UserService,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	profileService interfaces.KnowledgeBaseProfileService,
 ) *KnowledgeBaseHandler {
 	return &KnowledgeBaseHandler{
 		cfg:                cfg,
+		profileService:     profileService,
 		service:            service,
 		knowledgeService:   knowledgeService,
 		kbShareService:     kbShareService,
@@ -757,6 +760,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 			ChunkingConfig:        req.Config.ChunkingConfig,
 			ImageProcessingConfig: req.Config.ImageProcessingConfig,
 			WikiConfig:            req.Config.WikiConfig,
+			ProfileConfig:         req.Config.ProfileConfig,
 		}
 		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
 			c.Error(err)
@@ -783,6 +787,54 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
 	})
 }
+
+// GenerateKnowledgeBaseProfile godoc
+// @Summary      生成知识库描述
+// @Description  基于文档画像聚合，立即重新生成知识库的 AI 描述（不覆盖手写描述）
+// @Tags         知识库
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "生成的知识库画像"
+// @Failure      400  {object}  errors.AppError         "知识库类型不支持或未配置模型"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/profile/generate [post]
+func (h *KnowledgeBaseHandler) GenerateKnowledgeBaseProfile(c *gin.Context) {
+	ctx := c.Request.Context()
+	kb, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		return
+	}
+	if h.profileService == nil {
+		_ = c.Error(apperrors.NewInternalServerError("knowledge base profile service unavailable"))
+		return
+	}
+	genCtx, cancel := context.WithTimeout(ctx, knowledgeBaseProfileRequestTimeout)
+	defer cancel()
+	profile, err := h.profileService.GenerateKnowledgeBaseProfile(genCtx, kb, true)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_base_id": id})
+		switch {
+		case stderrors.Is(err, types.ErrKnowledgeBaseProfileUnsupported),
+			stderrors.Is(err, types.ErrKnowledgeBaseProfileModelNotConfigured):
+			_ = c.Error(apperrors.NewBadRequestError(err.Error()))
+		default:
+			_ = c.Error(apperrors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": profile})
+}
+
+// knowledgeBaseProfileRequestTimeout bounds the synchronous regeneration a
+// user triggers from the settings dialog: one aggregation plus one small
+// model call.
+const knowledgeBaseProfileRequestTimeout = 2 * time.Minute
 
 // DeleteKnowledgeBase godoc
 // @Summary      删除知识库

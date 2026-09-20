@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,58 @@ type outputLinkExecutor struct {
 	before, after []sandbox.RemoteDirEntry
 	listError     error
 	listed        int
+}
+
+type combinedOutputExecutor struct {
+	outputLinkExecutor
+	snapshot  *sandbox.ShellOutputSnapshot
+	opts      sandbox.ShellExecOptions
+	command   string
+	outputDir string
+}
+
+func (f *combinedOutputExecutor) ExecShellCommandWithOutputSnapshot(
+	_ context.Context, _, command string, opts sandbox.ShellExecOptions, outputDir string,
+) (*sandbox.ExecuteResult, *sandbox.ShellOutputSnapshot, error) {
+	f.calls++
+	f.opts, f.command, f.outputDir = opts, command, outputDir
+	return &sandbox.ExecuteResult{Stdout: "hello", ExitCode: 0}, f.snapshot, nil
+}
+
+func TestShellOutputLinksPreferCombinedExecution(t *testing.T) {
+	t.Setenv("WEKNORA_SKILL_OUTPUT_DIR", "/workspace/output")
+	for _, tc := range []struct {
+		name     string
+		snapshot *sandbox.ShellOutputSnapshot
+		want     []string
+	}{
+		{"changed", &sandbox.ShellOutputSnapshot{
+			Before: []sandbox.RemoteDirEntry{{Path: "/workspace/output/old.txt", Type: sandbox.RemoteEntryFile}},
+			After: []sandbox.RemoteDirEntry{
+				{Path: "/workspace/output/old.txt", Type: sandbox.RemoteEntryFile},
+				{Path: "/workspace/output/new.txt", Type: sandbox.RemoteEntryFile},
+			},
+		}, []string{"sandbox:new.txt"}},
+		{"empty", &sandbox.ShellOutputSnapshot{}, []string{}},
+		{"unavailable", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			executor := &combinedOutputExecutor{snapshot: tc.snapshot}
+			result, err := NewShellExecTool(executor, nil).Execute(shellExecTestContext(), json.RawMessage(
+				`{"command":"cat", "stdin":"hello\n", "work_dir":"/tmp/task",
+                  "timeout_sec":10, "env":{"KEY":"value"}}`))
+			require.NoError(t, err)
+			require.True(t, result.Success)
+			require.Equal(t, tc.want, result.OutputFiles)
+			require.Equal(t, 1, executor.calls)
+			require.Zero(t, executor.listed, "must not perform legacy scans around the combined operation")
+			require.Equal(t, "/workspace/output", executor.outputDir)
+			require.Equal(t, "/tmp/task", executor.opts.WorkDir)
+			require.Equal(t, 10*time.Second, executor.opts.Timeout)
+			require.Equal(t, "value", executor.opts.Env["KEY"])
+			require.Contains(t, executor.command, "base64 -d")
+		})
+	}
 }
 
 func (f *outputLinkExecutor) ListSessionFiles(_ context.Context, sessionID, dir string) ([]sandbox.RemoteDirEntry, error) {
@@ -38,7 +91,8 @@ func TestShellOutputLinksUseChangedFilesAndDoNotReplay(t *testing.T) {
 	unchanged := sandbox.RemoteDirEntry{Path: "/workspace/output/data.json", Type: sandbox.RemoteEntryFile, Size: 20}
 	executor := &outputLinkExecutor{
 		before: []sandbox.RemoteDirEntry{old, unchanged},
-		after: []sandbox.RemoteDirEntry{next, unchanged,
+		after: []sandbox.RemoteDirEntry{
+			next, unchanged,
 			{Path: "/workspace/output/new.csv", Type: sandbox.RemoteEntryFile},
 			{Path: "/workspace/output/subdir", Type: sandbox.RemoteEntryDir},
 		},
@@ -70,6 +124,7 @@ func TestShellOutputLinksOmitUnverifiedOutputs(t *testing.T) {
 		result, err := NewShellExecTool(executor, nil).Execute(shellExecTestContext(), json.RawMessage(`{"command":"python3 generate.py"}`))
 		require.NoError(t, err)
 		require.Empty(t, result.OutputFiles)
+		require.Nil(t, result.OutputFiles, "failed inspection must not claim that no output files were found")
 		require.Equal(t, 1, executor.calls)
 	})
 	t.Run("failed command", func(t *testing.T) {
@@ -96,9 +151,40 @@ func TestShellOutputLinksOmitUnverifiedOutputs(t *testing.T) {
 	})
 }
 
+func TestShellPreviewListingDoesNotBecomeDownloadLinks(t *testing.T) {
+	t.Setenv("WEKNORA_SKILL_OUTPUT_DIR", "/workspace/output")
+	doc := sandbox.RemoteDirEntry{Path: "/workspace/output/report.docx", Type: sandbox.RemoteEntryFile, Size: 100}
+	executor := &outputLinkExecutor{
+		fakeShellExecutor: fakeShellExecutor{result: &sandbox.ExecuteResult{
+			Stdout: "page-1.png\npage-2.png\npage-3.png\npage-4.png\n",
+		}},
+		before: []sandbox.RemoteDirEntry{doc},
+		after:  []sandbox.RemoteDirEntry{doc},
+	}
+	result, err := NewShellExecTool(executor, nil).Execute(
+		shellExecTestContext(), json.RawMessage(`{"command":"ls /tmp/task/previews/"}`),
+	)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Empty(t, result.OutputFiles)
+	require.NotNil(t, result.OutputFiles, "a completed inspection should explicitly report no output changes")
+	registry := modelcontext.NewRegistry(true)
+	modelOutput := registry.ModelToolResultForTool(ToolShellExec, result)
+	require.Contains(t, modelOutput, "page-1.png", "preserve stdout for the model to inspect")
+	require.Contains(t, modelOutput, "Output files: none identified by this call.")
+	require.NotContains(t, modelOutput, "sandbox:")
+}
+
 func TestOutputLinksEscapeNamesAndStayInsideOutputDirectory(t *testing.T) {
 	t.Setenv("WEKNORA_SKILL_OUTPUT_DIR", "/workspace/output")
-	links := sandboxOutputLinks("/workspace/output/report [1](final).pdf", "/workspace/script.py", "/workspace/output/../input/a.pdf")
+	links := sandboxOutputLinks(
+		"/workspace/output/report [1](final).pdf",
+		"/workspace/script.py",
+		"/workspace/output/../input/a.pdf",
+		"/tmp/task/previews/page-1.png",
+		"/workspace/output-previews/page-1.png",
+		"/workspace/output/../../tmp/task/previews/page-1.png",
+	)
 	require.Equal(t, []string{"sandbox:report%20%5B1%5D%28final%29.pdf"}, links)
 	require.Equal(t, []string{"sandbox:比赛信息.pptx"}, sandboxOutputLinks("/workspace/output/比赛信息.pptx"))
 }

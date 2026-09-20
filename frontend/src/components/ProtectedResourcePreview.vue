@@ -35,13 +35,13 @@ onUnmounted(() => window.removeEventListener(RESOURCE_PREVIEW_EVENT, open))
   align-items: center;
   max-width: 100%;
   padding: 14px 18px;
-  border: 1px solid var(--td-component-border, #ddd);
-  border-radius: 10px;
-  color: var(--td-text-color-primary, #222);
-  background: var(--td-bg-color-container, #fff);
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-lg);
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
   overflow-wrap: anywhere;
   text-decoration: none;
 }
 .protected-resource-card::before { content: '↗'; margin-right: 12px; }
-.protected-resource-card:hover { border-color: var(--td-brand-color, #07c160); }
+.protected-resource-card:hover { border-color: var(--td-brand-color); }
 </style>

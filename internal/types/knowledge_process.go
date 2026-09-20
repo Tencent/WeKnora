@@ -2,6 +2,8 @@ package types
 
 // KnowledgeProcessOverrides stores per-upload parse config overrides in knowledge metadata.
 type KnowledgeProcessOverrides struct {
+	// SummaryEnabled defaults to true when omitted for backward compatibility.
+	SummaryEnabled           *bool                     `json:"summary_enabled,omitempty"`
 	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitempty"`
 	ChunkingConfig           *ChunkingConfig           `json:"chunking_config,omitempty"`
 	EnableMultimodel         *bool                     `json:"enable_multimodel,omitempty"`
@@ -18,6 +20,7 @@ type KnowledgeProcessOverrides struct {
 
 // EffectiveProcessConfig is the merged view used by the parse pipeline.
 type EffectiveProcessConfig struct {
+	SummaryEnabled           bool
 	ChunkingConfig           ChunkingConfig
 	EnableMultimodel         bool
 	VLMConfig                VLMConfig

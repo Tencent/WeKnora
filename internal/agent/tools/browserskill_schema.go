@@ -11,8 +11,8 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// Flat argument fields follow BrowserSkill 0.2.1, source revision
-// 5aaa36bf79a201ec40b277ce6c24f2ce23ce37ca. Session identity is server-owned.
+// Flat argument fields use the paired CLI/extension 0.3.0 source baseline.
+// Session identity is server-owned.
 // Method-specific requirements are also described to the model on each field.
 const browserToolParameters = `{
   "type": "object",
@@ -200,8 +200,11 @@ const browserToolParameters = `{
     "expression": {
       "type": "string",
       "minLength": 1,
-      "description": "Required for evaluate. Use only for a specific gap after observation; ` +
-	`return bounded JSON-serializable values, not DOM nodes. Inspect result ok/error."
+      "description": "Required for evaluate: JavaScript evaluated as a script, not a function body. ` +
+	`Use an expression such as document.title, or wrap statements and return in an IIFE: ` +
+	`(() => { return document.title; })(). A top-level return is a syntax error. ` +
+	`Use only for a specific gap after observation; return bounded JSON-serializable values, ` +
+	`not DOM nodes. Inspect result ok/error."
     },
     "return_by_value": {
       "type": "boolean"
@@ -316,68 +319,6 @@ const browserToolParameters = `{
         }
       },
       "description": "For emulate: required unless off is true."
-    },
-    "completion_criteria": {
-      "type": "object",
-      "properties": {
-        "all": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "selector_exists": {
-                "type": "string"
-              },
-              "selector_missing": {
-                "type": "string"
-              },
-              "text_exists": {
-                "type": "string"
-              },
-              "text_missing": {
-                "type": "string"
-              },
-              "url_contains": {
-                "type": "string"
-              },
-              "url_matches": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "any": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "selector_exists": {
-                "type": "string"
-              },
-              "selector_missing": {
-                "type": "string"
-              },
-              "text_exists": {
-                "type": "string"
-              },
-              "text_missing": {
-                "type": "string"
-              },
-              "url_contains": {
-                "type": "string"
-              },
-              "url_matches": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "stable_for_ms": {
-          "type": "integer",
-          "minimum": 0.0
-        }
-      },
-      "description": "For request_help: optional detector for when the user has completed the step."
     },
     "prompt": {
       "type": "string",
@@ -529,7 +470,7 @@ var browserArgumentRules = map[string]browserArgumentRule{
 		required: []string{},
 	},
 	"request_help": {
-		fields:   []string{"completion_criteria", "prompt", "tab_id", "targets", "timeout_ms", "title"},
+		fields:   []string{"prompt", "tab_id", "targets", "timeout_ms", "title"},
 		required: []string{"prompt"},
 	},
 }

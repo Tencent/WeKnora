@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -91,8 +92,8 @@ func connectSharedFixture(
 	require.NoError(
 		t,
 		ws.WriteJSON(map[string]any{"id": "handshake", "method": "system.handshake", "params": map[string]any{
-			"client": "browser-skill-extension", "version": "0.2.1",
-			"protocol_version": "1.1", "min_compatible_protocol": "1.0",
+			"client": "browser-skill-extension", "version": "0.3.0",
+			"protocol_version": "1.3", "min_compatible_protocol": "1.0",
 			"instance_id": claimedID, "label": scope.User,
 			"browser": map[string]string{"name": "chrome", "version": "125"},
 		}}),
@@ -162,8 +163,6 @@ func connectSharedFixture(
 				result = map[string]any{"cancelled": true}
 			case "gateway.task_preview":
 				result = map[string]any{"image_base64": "dGVzdA==", "format": "jpeg"}
-			case "gateway.task_idle":
-				result = map[string]any{"released": true}
 			case "gateway.task_focus":
 				result = map[string]any{"focused": true}
 			case "system.ping":
@@ -226,7 +225,9 @@ func TestScreenshotUsesNativeTaskAndPreservesCrop(t *testing.T) {
 func TestProgressReportsNavigationFailureAndFreezesElapsedTime(t *testing.T) {
 	m, ctx := sharedTestManager(t)
 	s := Scope{1, "progress"}
-	connectSharedFixture(ctx, t, m, s, "", "browser", func(f *sharedFixture, id, method string, _ map[string]any) bool {
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(
+		f *sharedFixture, id, method string, _ map[string]any,
+	) bool {
 		if method != "tool.navigate" {
 			return false
 		}
@@ -571,7 +572,7 @@ func TestHumanHelpOutcomeControlsPause(t *testing.T) {
 	}
 }
 
-func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
+func TestFinishTurnRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	m, ctx := sharedTestManager(t)
 	s := Scope{1, "idle-user"}
 	f := connectSharedFixture(ctx, t, m, s, "", "browser")
@@ -580,7 +581,7 @@ func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	before := m.Status(s, "chat")
 	frame, err := m.Preview(ctx, s, "chat")
 	require.NoError(t, err)
-	require.NoError(t, m.Idle(ctx, s, "chat"))
+	require.NoError(t, m.FinishTurn(ctx, s, "chat", true))
 	after := m.Status(s, "chat")
 	require.True(t, after.Idle)
 	require.Equal(t, before.SessionID, after.SessionID)
@@ -597,7 +598,7 @@ func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, m.Status(s, "chat").Idle)
 	require.NoError(t, m.Control(ctx, s, "chat", "stop"))
-	require.NoError(t, m.Idle(ctx, s, "chat"))
+	require.NoError(t, m.FinishTurn(ctx, s, "chat", true))
 }
 
 func TestNavigationDefaultsToDocumentReadyAndPreservesExplicitWait(t *testing.T) {
@@ -651,6 +652,122 @@ func TestFinishTurnClosesResearchButRetainsHandoffsAndPausedTasks(t *testing.T) 
 				require.NoError(t, err)
 				require.NotEmpty(t, m.Status(scope, tc.name).SessionID)
 			}
+		})
+	}
+}
+
+func TestFinishTurnUsesOfficialLifecycleWithoutGatewayCalls(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remote=%t", remote), func(t *testing.T) {
+			owner, ctx := sharedTestManager(t)
+			caller := owner
+			if remote {
+				owner.clusterSecret = strings.Repeat("cluster-secret-", 3)
+				server := httptest.NewServer(http.HandlerFunc(owner.InternalHTTP))
+				defer server.Close()
+				owner.internalURL = server.URL
+				caller = NewManager(owner.store)
+				caller.binary = owner.binary
+				caller.clusterSecret = owner.clusterSecret
+				t.Cleanup(caller.Close)
+			}
+			scope := Scope{1, "official-extension"}
+			var gatewayCalls atomic.Int32
+			connectSharedFixture(ctx, t, owner, scope, "", "browser", func(
+				f *sharedFixture, id, method string, _ map[string]any,
+			) bool {
+				if !strings.HasPrefix(method, "gateway.") {
+					return false
+				}
+				gatewayCalls.Add(1)
+				_ = f.send(map[string]any{"id": id, "error": map[string]string{"code": "unknown_method"}})
+				return true
+			})
+			require.NoError(t, caller.Control(ctx, scope, "research", "start"))
+			require.NoError(t, caller.FinishTurn(ctx, scope, "research", false))
+			require.Empty(t, owner.Status(scope, "research").SessionID)
+			for _, keep := range []bool{false, true} {
+				session := fmt.Sprintf("retained-%t", keep)
+				require.NoError(t, caller.Control(ctx, scope, session, "start"))
+				if !keep {
+					require.NoError(t, caller.Control(ctx, scope, session, "pause"))
+				}
+				id := owner.Status(scope, session).SessionID
+				require.NoError(t, caller.FinishTurn(ctx, scope, session, keep))
+				require.Equal(t, id, owner.Status(scope, session).SessionID)
+				if keep {
+					_, err := caller.Call(ctx, scope, session, "snapshot", nil)
+					require.NoError(t, err)
+					require.Equal(t, id, owner.Status(scope, session).SessionID)
+				}
+			}
+			require.Zero(t, gatewayCalls.Load(), "turn cleanup must not send custom gateway RPC")
+		})
+	}
+}
+
+// Inspect the actual parameters forwarded by the native daemon, not just a
+// timeout helper: tab_borrow ignores request_help's timeout_ms field.
+func TestBorrowConfirmationBudgetReachesExtension(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "borrow-budget"}
+	type pendingBorrow struct {
+		fixture *sharedFixture
+		id      string
+		params  map[string]any
+	}
+	pending := make(chan pendingBorrow, 1)
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(
+		f *sharedFixture, id, method string, params map[string]any,
+	) bool {
+		if method != "tool.tab_borrow" {
+			return false
+		}
+		pending <- pendingBorrow{f, id, params}
+		return true
+	})
+	require.NoError(t, m.Control(ctx, s, "chat", "start"))
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  float64
+	}{
+		{"default", nil, 300000},
+		{"explicit", 10000, 10000},
+		{"bounded", 600000, 300000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := map[string]any{"tab_id": 7}
+			if tc.value != nil {
+				params["confirmation_timeout_ms"] = tc.value
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := m.Call(ctx, s, "chat", "tab_borrow", params)
+				done <- err
+			}()
+			var request pendingBorrow
+			select {
+			case request = <-pending:
+			case err := <-done:
+				t.Fatalf("borrow returned before extension confirmation: %v", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			require.Equal(t, tc.want, request.params["confirmation_timeout_ms"])
+			require.NotContains(t, request.params, "timeout_ms")
+			require.True(t, m.Status(s, "chat").NeedsHelp)
+			require.Equal(t, "tab_borrow", m.Status(s, "chat").Action)
+			require.NoError(t, request.fixture.send(map[string]any{"id": request.id, "result": map[string]any{
+				"tab_id": 7, "original_window_id": 200, "agent_window_id": 100,
+			}}))
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			require.False(t, m.Status(s, "chat").NeedsHelp)
 		})
 	}
 }

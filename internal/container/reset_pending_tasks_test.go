@@ -17,6 +17,7 @@ import (
 
 const resetPendingKnowledgeDDL = `
 CREATE TABLE IF NOT EXISTS knowledges (
+    profile TEXT,
     id              VARCHAR(64) PRIMARY KEY,
     parse_status    VARCHAR(32) NOT NULL DEFAULT 'pending',
     summary_status  VARCHAR(32) NOT NULL DEFAULT 'none',
@@ -80,6 +81,8 @@ CREATE TABLE IF NOT EXISTS task_pending_ops (
 
 const resetPendingKnowledgeBasesDDL = `
 CREATE TABLE IF NOT EXISTS knowledge_bases (
+    profile_config TEXT,
+    generated_profile TEXT,
     id          VARCHAR(64) PRIMARY KEY,
     tenant_id   INTEGER NOT NULL DEFAULT 0,
     deleted_at  DATETIME

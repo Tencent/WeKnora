@@ -75,7 +75,7 @@ const folderPickerVisible = ref(false);
           <t-button v-if="canMutate" theme="default" variant="outline" size="small"
             :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || downloadLoading" :loading="tagLoading"
             @click="emit('batchTag')">
-            <template #icon><t-icon name="discount" size="14px" /></template>
+            <template #icon><t-icon name="tag" size="14px" /></template>
             {{ t('knowledgeBase.batchTag') }}
           </t-button>
 
@@ -129,21 +129,21 @@ const folderPickerVisible = ref(false);
   padding: 8px 12px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
 }
 
 .batch-bar-left {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .batch-bar-count {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   white-space: nowrap;
@@ -153,16 +153,17 @@ const folderPickerVisible = ref(false);
   flex-shrink: 0;
   padding: 0 6px !important;
   height: 28px !important;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary) !important;
 
   &:hover {
-    color: var(--td-brand-color) !important;
+    color: var(--td-text-color-primary) !important;
   }
 }
 
 .batch-bar-actions {
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -170,13 +171,15 @@ const folderPickerVisible = ref(false);
   gap: 8px;
 }
 
+.batch-bar-actions > * { flex-shrink: 0; }
+
 .batch-download-trigger {
   display: inline-flex;
 }
 
 .batch-bar-fade-enter-active,
 .batch-bar-fade-leave-active {
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform var(--app-motion-base) ease, opacity var(--app-motion-base) ease;
 }
 
 .batch-bar-fade-enter-from,

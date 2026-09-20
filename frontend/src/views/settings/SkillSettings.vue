@@ -116,6 +116,12 @@
                     </div>
                   </template>
                 </t-popup>
+                <button v-if="view.upgradable.length > 0" type="button"
+                  class="skill-card__chip skill-card__chip--upgrade" :title="upgradeTooltip(item, view)"
+                  :aria-label="upgradeLabel(view)" @click="openUpgrade(item)">
+                  <t-icon name="arrow-up" size="14px" class="skill-card__chip-go" />
+                  <span class="skill-card__chip-text">{{ upgradeLabel(view) }}</span>
+                </button>
               </div>
             </div>
           </div>
@@ -228,7 +234,7 @@
                   <SandboxBackendBadge :type="row.cfg.sandbox_type" size="sm" />
                   <span class="sandbox-pick__text">
                     <span class="sandbox-pick__name">{{ row.cfg.name }}</span>
-                    <span class="sandbox-pick__meta">{{ sandboxMetaLine(row.cfg) }}</span>
+                    <span class="sandbox-pick__meta">{{ pickRowMeta(row) }}</span>
                   </span>
                 </span>
               </t-checkbox>
@@ -264,11 +270,11 @@
       </template>
     </SettingDrawer>
 
-    <SettingDrawer v-model:visible="showInstall" :title="$t('settings.skills.installToSandbox')"
+    <SettingDrawer v-model:visible="showInstall" :title="installDrawerTitle"
       :description="installDrawerDesc" :icon="SKILL_ICON" width="560px" :min-width="480" :max-width="760"
       storage-key="setting-drawer:width:skill-catalog-install" :confirm-loading="installing"
       :confirm-disabled="installConfirmDisabled" :confirm-text="installConfirmText" @confirm="onInstallDrawerConfirm">
-      <p class="installer-model-hint">{{ $t('settings.skills.installToSandboxDesc') }}</p>
+      <p v-if="installMode === 'install'" class="installer-model-hint">{{ $t('settings.skills.installToSandboxDesc') }}</p>
       <section v-if="installPickRows.length > 0" class="setting-drawer__section">
         <div class="sandbox-pick-list">
           <div v-for="row in installPickRows" :key="row.cfg.id" class="sandbox-pick-row"
@@ -279,7 +285,7 @@
                 <SandboxBackendBadge :type="row.cfg.sandbox_type" size="sm" />
                 <span class="sandbox-pick__text">
                   <span class="sandbox-pick__name">{{ row.cfg.name }}</span>
-                  <span class="sandbox-pick__meta">{{ sandboxMetaLine(row.cfg) }}</span>
+                  <span class="sandbox-pick__meta">{{ pickRowMeta(row) }}</span>
                 </span>
               </span>
             </t-checkbox>
@@ -304,7 +310,9 @@
           </div>
         </div>
       </section>
-      <p v-else class="installer-model-hint">{{ $t('settings.skills.noSandboxToInstall') }}</p>
+      <p v-else class="installer-model-hint">
+        {{ installMode === 'upgrade' ? $t('settings.skills.noSandboxToUpgrade') : $t('settings.skills.noSandboxToInstall') }}
+      </p>
       <section v-if="installTargetIds.length > 0" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstallerModel') }}</h4>
         <p class="installer-model-hint">{{ $t('settings.sandbox.skillInstallerModelHint') }}</p>
@@ -317,7 +325,8 @@
       width="680px" :min-width="560" :max-width="920" storage-key="setting-drawer:width:skill-catalog-manage"
       :hide-footer="true" :z-index="2600">
       <SandboxSkillsPanel v-if="showManage && manageRecord && manageSkillId" :record="manageRecord" mode="list" hide-add
-        :focus-skill-id="manageSkillId" @updated="onPanelUpdated" @skills-changed="loadCatalog" />
+        :focus-skill-id="manageSkillId" :catalog-item="catalogItemById(manageCatalogId)" @updated="onPanelUpdated"
+        @skills-changed="loadCatalog" />
     </SettingDrawer>
 
     <SkillFilesDrawer v-model:visible="filesDrawerVisible" :catalog-id="filesCatalogId"
@@ -351,6 +360,7 @@ import {
   type SkillCatalogRegisterResult,
 } from '@/api/skill'
 import { useSkillInstallerModel } from '@/composables/useSkillInstallerModel'
+import { installOutdated, installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import {
   isNamedSandboxBackend,
   listSandboxConfigs,
@@ -381,8 +391,10 @@ const addSessionIds = ref<string[]>([])
 const installTargetIds = ref<string[]>([])
 const installSessionIds = ref<string[]>([])
 const installCatalog = ref<SkillCatalogItem | null>(null)
+const installMode = ref<'install' | 'upgrade'>('install')
 const manageRecord = ref<SandboxConfigRecord | null>(null)
 const manageSkillId = ref('')
+const manageCatalogId = ref('')
 const manageTitle = ref('')
 const filesDrawerVisible = ref(false)
 const filesCatalogId = ref('')
@@ -445,13 +457,13 @@ const addPrimaryDisabled = computed(() => {
 
 const addPrimaryText = computed(() => {
   if (addStep.value === 0) return t('common.next')
-  if (addTargetIds.value.length > 0) return t('settings.skills.installToSandbox')
+  if (addTargetIds.value.length > 0) return pickConfirmText(addPickRows.value, addTargetIds.value)
   return t('settings.skills.addFinish')
 })
 
 const installConfirmText = computed(() =>
   installTargetIds.value.length > 0
-    ? t('settings.skills.installToSandbox')
+    ? pickConfirmText(installPickRows.value, installTargetIds.value)
     : t('settings.skills.addFinish'),
 )
 
@@ -460,16 +472,27 @@ const installConfirmDisabled = computed(() =>
 )
 
 const installPickRows = computed(() =>
-  sandboxPickRows(catalogItemById(installCatalog.value?.id), 'remaining', installSessionIds.value),
+  sandboxPickRows(
+    catalogItemById(installCatalog.value?.id),
+    installMode.value === 'upgrade' ? 'upgrade' : 'remaining',
+    installSessionIds.value,
+  ),
 )
 
 const addPickRows = computed(() =>
   sandboxPickRows(catalogItemById(registeredCatalog.value?.id), 'all', addSessionIds.value),
 )
 
+const installDrawerTitle = computed(() =>
+  installMode.value === 'upgrade'
+    ? t('settings.skills.upgradeTitle')
+    : t('settings.skills.installToSandbox'),
+)
+
 const installDrawerDesc = computed(() => {
   const item = installCatalog.value
   if (!item) return t('settings.skills.installToSandboxDesc')
+  if (installMode.value === 'upgrade') return t('settings.skills.upgradeDrawerDesc', { name: item.name })
   return t('settings.skills.installDrawerDesc', { name: item.name })
 })
 
@@ -530,6 +553,10 @@ type SandboxPickRow = {
   selectable: boolean
   busy: boolean
   ready: boolean
+  // A ready install still on an older archive than the catalog. Picking it
+  // installs the catalog over it, which is the upgrade.
+  upgradable: boolean
+  upgradeNote: string
 }
 
 function catalogItemById(id: string | undefined | null): SkillCatalogItem | null {
@@ -540,7 +567,7 @@ function catalogItemById(id: string | undefined | null): SkillCatalogItem | null
 
 function sandboxPickRows(
   item: SkillCatalogItem | null,
-  mode: 'remaining' | 'all',
+  mode: 'remaining' | 'upgrade' | 'all',
   sessionIds: string[],
 ): SandboxPickRow[] {
   const byId = new Map(
@@ -553,6 +580,8 @@ function sandboxPickRows(
       const inst = byId.get(cfg.id)
       if (session.has(cfg.id)) return true
       if (inst && isInstallBusy(inst)) return true
+      if (inst && item && installUpgradable(item, inst)) return true
+      if (mode === 'upgrade') return false
       if (!inst || inst.status === 'failed') return true
       return false
     })
@@ -560,14 +589,33 @@ function sandboxPickRows(
       const install = byId.get(cfg.id)
       const busy = Boolean(install && isInstallBusy(install))
       const ready = install?.status === 'ready'
+      const upgradable = Boolean(item && install && installUpgradable(item, install))
       return {
         cfg,
         install,
-        selectable: !busy && !ready,
+        selectable: !busy && (!ready || upgradable),
         busy,
         ready,
+        upgradable,
+        upgradeNote: item && install && upgradable ? upgradeVersionText(item, install) : '',
       }
     })
+}
+
+function pickRowMeta(row: SandboxPickRow): string {
+  const meta = sandboxMetaLine(row.cfg)
+  return row.upgradeNote ? `${row.upgradeNote} · ${meta}` : meta
+}
+
+function pickedOnlyUpgrades(rows: SandboxPickRow[], ids: string[]): boolean {
+  const byId = new Map(rows.map((row) => [row.cfg.id, row]))
+  return ids.length > 0 && ids.every((id) => byId.get(id)?.upgradable)
+}
+
+function pickConfirmText(rows: SandboxPickRow[], ids: string[]): string {
+  return pickedOnlyUpgrades(rows, ids)
+    ? t('settings.skills.upgrade')
+    : t('settings.skills.installToSandbox')
 }
 
 function sandboxPickPercent(row: SandboxPickRow): number | null {
@@ -635,15 +683,16 @@ function compactText(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
-function installOutdated(item: SkillCatalogItem, inst: SkillCatalogInstall): boolean {
-  return Boolean(
-    item.bundle_sha256
-    && inst.bundle_sha256
-    && item.bundle_sha256 !== inst.bundle_sha256,
-  )
+function upgradeVersionText(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
+  const versions = upgradeVersions(item, inst)
+  return versions
+    ? t('settings.skills.upgradeFromTo', versions)
+    : t('settings.skills.upgradeAvailable')
 }
 
 function installStatusText(inst: SkillCatalogInstall): string {
+  const served = servedPreviousText(t, inst)
+  if (served) return served
   if (inst.status === 'installing') return t('settings.sandbox.skillStatusInstalling')
   if (inst.status === 'removing') return t('settings.sandbox.skillStatusRemoving')
   if (inst.status === 'failed') return t('settings.sandbox.skillStatusFailed')
@@ -696,9 +745,21 @@ function installsView(item: SkillCatalogItem) {
   return {
     installs,
     available,
+    upgradable: installs.filter((inst) => installUpgradable(item, inst)),
     canAdd: available.length > 0,
     needsPanel: installs.length + available.length > 1,
   }
+}
+
+function upgradeLabel(view: ReturnType<typeof installsView>): string {
+  const count = view.upgradable.length
+  return count > 1 ? t('settings.skills.upgradeCount', { count }) : t('settings.skills.upgrade')
+}
+
+function upgradeTooltip(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
+  return view.upgradable
+    .map((inst) => `${installName(inst)} · ${upgradeVersionText(item, inst)}`)
+    .join('\n')
 }
 
 function installSummary(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
@@ -753,6 +814,7 @@ function openManageFromPanel(item: SkillCatalogItem, inst: SkillCatalogInstall) 
 
 function openInstallTo(item: SkillCatalogItem, cfg: SandboxConfigRecord) {
   openPanelId.value = ''
+  installMode.value = 'install'
   installCatalog.value = item
   installSessionIds.value = []
   installTargetIds.value = [cfg.id]
@@ -853,10 +915,24 @@ function addPreviousStep() {
 }
 
 function openInstall(item: SkillCatalogItem) {
+  installMode.value = 'install'
   installCatalog.value = item
   installSessionIds.value = []
   const remaining = targetsFor(item)
   installTargetIds.value = remaining.length === 1 ? [remaining[0].id] : []
+  void loadInstallerModel()
+  showInstall.value = true
+}
+
+// Upgrading is the catalog install onto sandboxes that already carry an older
+// archive; the server treats a same-name install as an in-place upgrade. Every
+// outdated sandbox starts checked, so one confirm upgrades them all.
+function openUpgrade(item: SkillCatalogItem) {
+  openPanelId.value = ''
+  installMode.value = 'upgrade'
+  installCatalog.value = item
+  installSessionIds.value = []
+  installTargetIds.value = installsView(item).upgradable.map((inst) => inst.sandbox_config_id)
   void loadInstallerModel()
   showInstall.value = true
 }
@@ -866,6 +942,7 @@ function openManage(item: SkillCatalogItem, inst: SkillCatalogInstall) {
   if (!record) return
   manageRecord.value = record
   manageSkillId.value = inst.skill_id
+  manageCatalogId.value = item.id
   manageTitle.value = item.name
   showManage.value = true
 }
@@ -983,6 +1060,7 @@ async function handleAddPrimary() {
     revealCatalog(catalogId)
     return
   }
+  const upgrading = pickedOnlyUpgrades(addPickRows.value, targets)
   installing.value = true
   try {
     await ensureInstallerModelIfNeeded(targets)
@@ -991,7 +1069,7 @@ async function handleAddPrimary() {
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
     } else {
-      MessagePlugin.success(t('settings.skills.installAccepted'))
+      MessagePlugin.success(t(upgrading ? 'settings.skills.upgradeAccepted' : 'settings.skills.installAccepted'))
     }
     rememberSession(addSessionIds, targets)
     await loadCatalog()
@@ -1027,6 +1105,7 @@ async function confirmInstall() {
   const item = installCatalog.value
   const targets = [...installTargetIds.value]
   if (!item || targets.length === 0) return
+  const upgrading = pickedOnlyUpgrades(installPickRows.value, targets)
   installing.value = true
   try {
     await ensureInstallerModelIfNeeded(targets)
@@ -1035,7 +1114,7 @@ async function confirmInstall() {
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
     } else {
-      MessagePlugin.success(t('settings.skills.installAccepted'))
+      MessagePlugin.success(t(upgrading ? 'settings.skills.upgradeAccepted' : 'settings.skills.installAccepted'))
     }
     rememberSession(installSessionIds, targets)
     await loadCatalog()
@@ -1115,6 +1194,7 @@ watch(showManage, (open) => {
   if (!open) {
     void loadCatalog()
     manageSkillId.value = ''
+    manageCatalogId.value = ''
     manageRecord.value = null
   } else {
     openPanelId.value = ''
@@ -1170,12 +1250,16 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/provider-card.less';
+
+@import (reference) '@/components/css/settings-section.less';
+
 .skill-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 28px;
+  .settings-section-header();
 
   &__title-row {
     display: flex;
@@ -1184,29 +1268,15 @@ onUnmounted(() => {
     margin-bottom: 8px;
   }
 
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-  }
-
   &__help {
     color: var(--td-text-color-placeholder);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     cursor: help;
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
 
     &:hover {
       color: var(--td-text-color-secondary);
     }
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
   }
 }
 
@@ -1221,10 +1291,10 @@ onUnmounted(() => {
 
 :global(.skill-install-panel-overlay .t-popup__content) {
   padding: 0 !important;
-  border-radius: 6px !important;
+  border-radius: var(--app-radius-sm) !important;
   border: 1px solid var(--td-component-stroke) !important;
   background: var(--td-bg-color-container) !important;
-  box-shadow: var(--td-shadow-2, 0 3px 14px 2px rgba(0, 0, 0, 0.05)) !important;
+  box-shadow: var(--td-shadow-2) !important;
 }
 
 .loading-container {
@@ -1237,7 +1307,7 @@ onUnmounted(() => {
   text-align: center;
 
   :deep(.t-empty__description) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
@@ -1245,7 +1315,7 @@ onUnmounted(() => {
 
 .empty-hint {
   margin: 0 0 16px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -1269,7 +1339,7 @@ onUnmounted(() => {
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
@@ -1277,7 +1347,7 @@ onUnmounted(() => {
 
   &--focused {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 168, 112, 0.18));
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
   }
 
   &--installed .skill-card__badge {
@@ -1319,14 +1389,14 @@ onUnmounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: var(--td-bg-color-secondarycontainer);
       color: var(--td-text-color-secondary);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -1342,15 +1412,8 @@ onUnmounted(() => {
 }
 
 .skill-card__badge {
-  flex-shrink: 0;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
+  .provider-card-badge(26px, 7px);
+  font-size: var(--app-text-md);
 
   :deep(.t-icon) {
     display: block;
@@ -1386,7 +1449,7 @@ onUnmounted(() => {
   flex: 0 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 20px;
   color: var(--td-text-color-primary);
@@ -1412,7 +1475,7 @@ onUnmounted(() => {
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: none;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
@@ -1440,7 +1503,7 @@ onUnmounted(() => {
 
 .skill-card__type {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 18px;
   color: var(--td-text-color-placeholder);
@@ -1453,7 +1516,7 @@ onUnmounted(() => {
   line-clamp: 2;
   margin: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   overflow-wrap: anywhere;
@@ -1462,12 +1525,13 @@ onUnmounted(() => {
 .skill-card__installs {
   display: flex;
   align-items: center;
+  gap: 6px;
   min-width: 0;
   margin-top: auto;
 }
 
 .skill-card__installs-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-text-color-placeholder);
 }
@@ -1481,12 +1545,12 @@ onUnmounted(() => {
   margin: 0;
   padding: 2px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   text-align: left;
 
@@ -1500,7 +1564,12 @@ onUnmounted(() => {
     opacity: 0.6;
   }
 
-  &--idle {
+  &--upgrade {
+    flex-shrink: 0;
+  }
+
+  &--idle,
+  &--upgrade {
     color: var(--td-brand-color);
     background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
 
@@ -1519,7 +1588,7 @@ onUnmounted(() => {
   }
 
   &--installed .skill-card__entry-status {
-    color: var(--td-success-color, var(--td-brand-color));
+    color: var(--td-success-color);
   }
 
   &.skill-card__entry--stale {
@@ -1562,7 +1631,7 @@ onUnmounted(() => {
 }
 
 .skill-card__entry--ready .skill-card__entry-status {
-  color: var(--td-success-color, var(--td-brand-color));
+  color: var(--td-success-color);
 }
 
 .skill-card__chip-go {
@@ -1594,7 +1663,7 @@ onUnmounted(() => {
 .skill-install-panel__group {
   margin: 0;
   padding: 6px 12px 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 20px;
   color: var(--td-text-color-placeholder);
 }
@@ -1613,7 +1682,7 @@ onUnmounted(() => {
   color: var(--td-text-color-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 22px;
   text-align: left;
 
@@ -1680,7 +1749,7 @@ onUnmounted(() => {
 
 .installer-model-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1702,7 +1771,7 @@ onUnmounted(() => {
   gap: 8px;
   min-width: 0;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:not(:last-child) {
     flex: 1;
@@ -1731,7 +1800,7 @@ onUnmounted(() => {
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
       outline-offset: 2px;
-      border-radius: 4px;
+      border-radius: var(--app-radius-xs);
     }
   }
 }
@@ -1745,7 +1814,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   border: 1px solid currentColor;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   line-height: 1;
 
@@ -1764,7 +1833,7 @@ onUnmounted(() => {
 
 .skill-add-step__title {
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1798,7 +1867,7 @@ onUnmounted(() => {
     align-items: center;
     padding: 10px 12px;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     background: var(--td-bg-color-container);
     cursor: pointer;
     box-sizing: border-box;
@@ -1845,7 +1914,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   padding: 10px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
 
   .sandbox-pick__main {
@@ -1878,7 +1947,7 @@ onUnmounted(() => {
 }
 
 .sandbox-pick__name {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.3;
@@ -1888,7 +1957,7 @@ onUnmounted(() => {
 }
 
 .sandbox-pick__meta {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.3;
   overflow: hidden;
@@ -1900,7 +1969,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 1;
   color: var(--td-brand-color);
@@ -1920,9 +1989,9 @@ onUnmounted(() => {
 
 .file-upload-area {
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &:hover:not(.is-disabled) {
     border-color: var(--td-brand-color);
@@ -1965,18 +2034,18 @@ onUnmounted(() => {
 }
 
 .upload-primary-text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .upload-secondary-text {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
 }
 
 .upload-file-name {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-brand-color);
 }

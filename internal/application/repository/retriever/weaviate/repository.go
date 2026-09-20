@@ -6,7 +6,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -1034,31 +1033,4 @@ func fromWeaviateVectorEmbedding(id string,
 		Score:           embedding.Score,
 		MatchType:       matchType,
 	}
-}
-
-// tokenizeQuery splits a query string into tokens for OR-based full-text search.
-// It uses jieba for professional Chinese word segmentation.
-func tokenizeQuery(query string) []string {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil
-	}
-
-	// Use jieba for segmentation (search mode for better recall)
-	words := types.Jieba.CutForSearch(query, true)
-
-	// Filter and deduplicate
-	seen := make(map[string]bool)
-	result := make([]string, 0, len(words))
-	for _, word := range words {
-		word = strings.TrimSpace(strings.ToLower(word))
-		// Skip empty, single-char, and already seen words
-		if utf8.RuneCountInString(word) < 2 || seen[word] {
-			continue
-		}
-		seen[word] = true
-		result = append(result, word)
-	}
-
-	return result
 }

@@ -193,10 +193,6 @@ func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, d
 	return content
 }
 
-func imLocalStorageBaseDir() string {
-	return storageurl.LocalStorageBaseDir()
-}
-
 // newIMFileServiceResolver builds a per-message storage backend resolver. The
 // cache lives for one cleanIMContent / outbound message so a long answer does
 // not re-create an SDK client for every reference.
@@ -3251,6 +3247,30 @@ func (s *Service) SetChannelAgentID(ctx context.Context, channel *IMChannel, age
 		return fmt.Errorf("agent not found")
 	}
 	channel.AgentID = agentID
+	return nil
+}
+
+// SetChannelKnowledgeBaseID binds the KB that IM files are saved into. It must
+// belong to the channel's workspace, which writes into it, and to a KB-restricted
+// API key's allow-list; a foreign ID would create records in (and read the
+// configuration of) another workspace's KB. An empty ID clears the binding.
+func (s *Service) SetChannelKnowledgeBaseID(ctx context.Context, channel *IMChannel, kbID string) error {
+	kbID = strings.TrimSpace(kbID)
+	if kbID == "" {
+		channel.KnowledgeBaseID = ""
+		return nil
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+		return fmt.Errorf("knowledge base not found")
+	}
+	if s.kbService == nil {
+		return fmt.Errorf("knowledge base not found")
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
+	if err != nil || kb == nil || kb.TenantID != channel.TenantID {
+		return fmt.Errorf("knowledge base not found")
+	}
+	channel.KnowledgeBaseID = kbID
 	return nil
 }
 

@@ -19,6 +19,12 @@ type stubKBRepoForModelDelete struct {
 	usageErr error
 }
 
+func (s *stubKBRepoForModelDelete) UpdateKnowledgeBaseGeneratedProfile(
+	context.Context, string, *types.KnowledgeBaseProfile,
+) error {
+	return nil
+}
+
 func (s *stubKBRepoForModelDelete) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) error {
 	return nil
 }

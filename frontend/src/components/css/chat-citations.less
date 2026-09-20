@@ -5,7 +5,7 @@
     gap: 2px;
     vertical-align: baseline;
     box-sizing: border-box;
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     padding: 0 5px;
     font-size: 0.72em;
     line-height: 1.45;
@@ -55,7 +55,7 @@
     cursor: pointer;
     white-space: nowrap;
     position: relative;
-    transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+    transition: background var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   }
 
   :deep(.citation-kb:hover) {
@@ -73,7 +73,7 @@
     white-space: nowrap;
     position: relative;
     text-decoration: none;
-    transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+    transition: background var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   }
 
   :deep(.citation-web:hover) {
@@ -97,7 +97,7 @@
     border-bottom: 1px dashed var(--td-brand-color);
     text-decoration: none;
     font-weight: 500;
-    transition: border-bottom-style 0.15s ease;
+    transition: border-bottom-style var(--app-motion-fast) ease;
 
     &:hover {
       border-bottom-style: solid;
@@ -117,10 +117,10 @@
   z-index: 10000;
   max-width: 320px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-primary);
 

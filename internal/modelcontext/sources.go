@@ -480,7 +480,7 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool)
 		r.RegisterDocument(value)
 	case spaceDocumentRef:
 		// Stored refs use "knowledgeID|title"; only the ID part is durable.
-		r.RegisterDocument(strings.TrimSpace(strings.SplitN(value, "|", 2)[0]))
+		r.RegisterDocument(types.WikiSourceKnowledgeID(value))
 	case spaceKnowledgeBase:
 		r.RegisterKnowledgeBase(value)
 	case spaceWeb:
@@ -490,6 +490,8 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool)
 		if parsed, err := url.Parse(value); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 			r.registerWeb(value, "", evidence)
 		}
+	case spaceAnySource:
+		// Decode-only: a bare "id" never registers a new source.
 	}
 }
 

@@ -528,10 +528,10 @@ function formatShortTime(iso?: string): string {
 
 .wiki-rev-item {
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   padding: 6px 10px 6px 14px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 }
 
 .wiki-rev-item:hover,
@@ -553,18 +553,18 @@ function formatShortTime(iso?: string): string {
 
 .wiki-rev-version {
   font-weight: 400;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 20px;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   color: var(--td-text-color-primary);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .wiki-rev-current-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 16px;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .wiki-rev-item-secondary {
@@ -574,13 +574,13 @@ function formatShortTime(iso?: string): string {
   gap: 8px;
   margin-top: 2px;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 16px;
   color: var(--td-text-color-placeholder);
 }
 
 .wiki-rev-time {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
   flex-shrink: 0;
@@ -598,7 +598,7 @@ function formatShortTime(iso?: string): string {
   justify-content: center;
   padding: 16px 14px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -629,8 +629,8 @@ function formatShortTime(iso?: string): string {
 }
 
 .wiki-rev-detail-range {
-  font-family: var(--td-font-family-mono, monospace);
-  font-size: 15px;
+  font-family: var(--td-font-family-mono);
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
@@ -638,7 +638,7 @@ function formatShortTime(iso?: string): string {
 
 .wiki-rev-detail-sub {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -655,21 +655,21 @@ function formatShortTime(iso?: string): string {
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 }
 
 .wiki-rev-view-switch-btn {
   padding: 5px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 }
 
 .wiki-rev-view-switch-btn:hover {
@@ -690,7 +690,7 @@ function formatShortTime(iso?: string): string {
   color: var(--td-text-color-placeholder);
   padding: 24px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
 }
 
@@ -701,7 +701,7 @@ function formatShortTime(iso?: string): string {
   justify-content: center;
   gap: 8px;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .wiki-rev-diff {
@@ -716,7 +716,7 @@ function formatShortTime(iso?: string): string {
 .wiki-rev-empty-diff {
   padding: 24px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -727,7 +727,7 @@ function formatShortTime(iso?: string): string {
 }
 
 .wiki-rev-diff-block-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-placeholder);
 }
@@ -737,10 +737,10 @@ function formatShortTime(iso?: string): string {
   margin: 0;
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-sm);
   line-height: 1.7;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -755,10 +755,10 @@ function formatShortTime(iso?: string): string {
   margin: 0;
   padding: 12px 14px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-md);
   line-height: 1.7;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -768,7 +768,7 @@ function formatShortTime(iso?: string): string {
 }
 
 .wiki-rev-diff-line--add {
-  background: rgba(7, 192, 95, 0.08);
+  background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
   color: var(--td-text-color-primary);
 }
 

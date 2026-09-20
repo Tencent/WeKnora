@@ -153,7 +153,7 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 				ToolCalls: []types.ToolCall{
 					{
 						ID:   "call_1",
-						Name: agenttools.ToolKnowledgeSearch,
+						Name: agenttools.ToolSearchKnowledge,
 						Args: map[string]interface{}{"query": "foo"},
 						Result: &types.ToolResult{
 							Success: true,
@@ -187,7 +187,7 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 	assert.Equal(t, "Let me search.", got[0].Content)
 	if assert.Len(t, got[0].ToolCalls, 1) {
 		assert.Equal(t, "call_1", got[0].ToolCalls[0].ID)
-		assert.Equal(t, agenttools.ToolKnowledgeSearch, got[0].ToolCalls[0].Function.Name)
+		assert.Equal(t, agenttools.ToolSearchKnowledge, got[0].ToolCalls[0].Function.Name)
 		assert.Contains(t, got[0].ToolCalls[0].Function.Arguments, "foo")
 	}
 	// 2. tool result paired with the call ID
@@ -214,7 +214,7 @@ func TestBuildAssistantHistoryMessages_SkipsPipelineTimelineToolCalls(t *testing
 				ToolCalls: []types.ToolCall{
 					{
 						ID:     types.PipelineToolCallIDPrefix + "abc",
-						Name:   agenttools.ToolKnowledgeSearch,
+						Name:   agenttools.ToolSearchKnowledge,
 						Args:   map[string]interface{}{"query": "你好"},
 						Result: &types.ToolResult{Success: true, Output: "未检索到相关内容"},
 					},
@@ -245,7 +245,7 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 				ToolCalls: []types.ToolCall{
 					{
 						ID:   "call_err",
-						Name: agenttools.ToolKnowledgeSearch,
+						Name: agenttools.ToolSearchKnowledge,
 						Args: map[string]interface{}{"query": "x"},
 						Result: &types.ToolResult{
 							Success: false,
@@ -264,7 +264,7 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 		Role:       "tool",
 		Content:    "Error: kb unreachable",
 		ToolCallID: "call_err",
-		Name:       agenttools.ToolKnowledgeSearch,
+		Name:       agenttools.ToolSearchKnowledge,
 	}, got[1])
 }
 
@@ -323,7 +323,7 @@ func TestBuildTurnBodyMessages_KeepsMidRunUsersInPlace(t *testing.T) {
 				Timestamp: firstStep,
 				ToolCalls: []types.ToolCall{{
 					ID:     "call_a",
-					Name:   agenttools.ToolKnowledgeSearch,
+					Name:   agenttools.ToolSearchKnowledge,
 					Args:   map[string]interface{}{"query": "A"},
 					Result: &types.ToolResult{Success: true, Output: "found A"},
 				}},
@@ -334,7 +334,7 @@ func TestBuildTurnBodyMessages_KeepsMidRunUsersInPlace(t *testing.T) {
 				Timestamp: secondStep,
 				ToolCalls: []types.ToolCall{{
 					ID:     "call_b",
-					Name:   agenttools.ToolKnowledgeSearch,
+					Name:   agenttools.ToolSearchKnowledge,
 					Args:   map[string]interface{}{"query": "B"},
 					Result: &types.ToolResult{Success: true, Output: "found B"},
 				}},
@@ -377,7 +377,7 @@ func TestBuildTurnBodyMessages_LateMidRunUserPrecedesAnswer(t *testing.T) {
 			Timestamp: step,
 			ToolCalls: []types.ToolCall{{
 				ID:     "call_a",
-				Name:   agenttools.ToolKnowledgeSearch,
+				Name:   agenttools.ToolSearchKnowledge,
 				Result: &types.ToolResult{Success: true, Output: "found"},
 			}},
 		}},
@@ -398,13 +398,13 @@ func TestBuildTurnBodyMessages_LateMidRunUserPrecedesAnswer(t *testing.T) {
 // dropped — every other tool (KB search, web search, MCP tools…) must survive.
 func TestFilterNonTerminalToolCalls(t *testing.T) {
 	in := []types.ToolCall{
-		{Name: agenttools.ToolKnowledgeSearch},
+		{Name: agenttools.ToolSearchKnowledge},
 		{Name: "final_answer"},
 		{Name: agenttools.ToolWebSearch},
 	}
 	out := filterNonTerminalToolCalls(in)
 	if assert.Len(t, out, 2) {
-		assert.Equal(t, agenttools.ToolKnowledgeSearch, out[0].Name)
+		assert.Equal(t, agenttools.ToolSearchKnowledge, out[0].Name)
 		assert.Equal(t, agenttools.ToolWebSearch, out[1].Name)
 	}
 }
@@ -424,7 +424,7 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 				ReasoningContent: "model's chain of thought",
 				ToolCalls: []types.ToolCall{{
 					ID:               "call_1",
-					Name:             agenttools.ToolKnowledgeSearch,
+					Name:             agenttools.ToolSearchKnowledge,
 					Args:             map[string]interface{}{"query": "foo"},
 					ProviderMetadata: types.ToolCallMetadata{"google": json.RawMessage(`{"thought_signature":"gemini-history-signature"}`)},
 					Result: &types.ToolResult{

@@ -355,27 +355,22 @@ async function copyToken() {
 onMounted(reload)
 </script>
 
-<style scoped>
+<style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .platform-api-keys {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 20px;
+  .settings-section-header();
 }
 
 .section-header h2 {
   margin: 0 0 8px;
-  font-size: 20px;
+  font-size: var(--app-text-3xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
-}
-
-.section-description {
-  margin: 0;
-  color: var(--td-text-color-secondary);
-  font-size: 14px;
-  line-height: 1.5;
 }
 
 .security-alert {
@@ -384,7 +379,7 @@ onMounted(reload)
 
 .keys-section {
   border: 1px solid var(--td-component-border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
   overflow: hidden;
 }
@@ -396,7 +391,7 @@ onMounted(reload)
   gap: 8px;
   min-height: 120px;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .keys-state--empty {
@@ -426,14 +421,14 @@ onMounted(reload)
 .api-key-table th {
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 1.4;
 }
 
 .api-key-table td {
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.45;
 }
 
@@ -495,7 +490,7 @@ onMounted(reload)
 .api-key-capability-popup__title {
   margin-bottom: 10px;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -523,7 +518,7 @@ onMounted(reload)
 .api-key-capability-block__title {
   margin-bottom: 6px;
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -539,10 +534,10 @@ onMounted(reload)
   align-items: center;
   height: 22px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: color-mix(in srgb, var(--td-success-color) 10%, var(--td-bg-color-container));
   color: var(--td-success-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 20px;
   white-space: nowrap;
@@ -552,7 +547,7 @@ onMounted(reload)
   display: block;
   min-width: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -564,7 +559,7 @@ onMounted(reload)
   max-width: 100%;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -575,7 +570,7 @@ onMounted(reload)
 .api-key-meta {
   display: block;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -583,7 +578,7 @@ onMounted(reload)
 .api-key-date {
   display: block;
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   white-space: nowrap;
   color: var(--td-text-color-secondary);
@@ -618,7 +613,7 @@ onMounted(reload)
   align-items: center;
   gap: 8px;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 1.45;
 }
@@ -633,7 +628,7 @@ onMounted(reload)
 }
 
 .api-key-dialog-row :deep(.t-input) {
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background-color: var(--td-bg-color-secondarycontainer);
   border-color: transparent;
   box-shadow: none !important;
@@ -648,7 +643,7 @@ onMounted(reload)
 .scope-hint {
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
 }
 
@@ -676,7 +671,7 @@ onMounted(reload)
   gap: 12px;
   min-height: 24px;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 

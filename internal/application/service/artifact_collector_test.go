@@ -63,6 +63,14 @@ func (s *fakeStore) KnownArtifacts(_ context.Context, _ string) ([]types.Message
 	return s.prev, s.err
 }
 
+func (s *fakeStore) RecordRestoredMtime(_ context.Context, _, sourcePath string, mod time.Time, hash string) error {
+	updated, changed := types.MessageArtifacts(s.prev).WithRestoredMtime(sourcePath, mod, hash)
+	if changed {
+		s.prev = updated
+	}
+	return nil
+}
+
 // fakeFileService captures uploads and returns a deterministic provider URL.
 // Only SaveBytes is exercised by the collector; the other methods are
 // implemented to satisfy interfaces.FileService but panic on use so a
@@ -94,8 +102,11 @@ func (f *fakeFileService) SaveBytes(_ context.Context, data []byte, tenantID uin
 	return key, nil
 }
 
-func (f *fakeFileService) GetFile(_ context.Context, _ string) (io.ReadCloser, error) {
-	panic("GetFile should not be called by ArtifactCollector")
+func (f *fakeFileService) GetFile(_ context.Context, filePath string) (io.ReadCloser, error) {
+	if data, ok := f.saved[filePath]; ok {
+		return io.NopCloser(strings.NewReader(string(data))), nil
+	}
+	return nil, stderrors.New("fake file service: not found: " + filePath)
 }
 
 func (f *fakeFileService) GetFileURL(_ context.Context, _ string) (string, error) {
@@ -150,12 +161,15 @@ type fakeCatalog struct {
 func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
 	return "", nil
 }
+
 func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
 	return nil, nil
 }
+
 func (c *fakeCatalog) ResolvePath(_ context.Context, v string) (string, *types.StoredResource, error) {
 	return v, nil, nil
 }
+
 func (c *fakeCatalog) Bind(_ context.Context, ref, ownerType, ownerID, relation string) error {
 	c.binds = append(c.binds, bindCall{ref, ownerType, ownerID, relation})
 	return c.bindErr
@@ -172,9 +186,11 @@ func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string)
 	}
 	return -1, nil
 }
+
 func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	return "", nil
 }
+
 func (c *fakeCatalog) ResolveAccessGrant(context.Context, string) (*types.StoredResource, error) {
 	return nil, nil
 }
@@ -257,12 +273,16 @@ func TestArtifactCollector_NotifyFiresBeforeUpload(t *testing.T) {
 			"/workspace/output/b.csv":  []byte("x,"),
 		},
 	}
-	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
+	fs := &fakeFileService{}
+	c := newTestCollector(src, &fakeStore{}, fs, 1<<20)
 
 	var notified int
 	got, err := c.CollectWithNotify(ctx, "sess-1", "msg-1", 42, "/workspace/output", func(n int) {
-		if src.readCalls != nil {
-			t.Fatalf("notify ran after ReadSessionFile: %v", src.readCalls)
+		if len(fs.saved) != 0 {
+			t.Fatalf("notify ran after SaveBytes: saved=%v", fs.saved)
+		}
+		if len(src.readCalls) == 0 {
+			t.Fatalf("notify should run after hash reads")
 		}
 		notified = n
 	})
@@ -274,6 +294,44 @@ func TestArtifactCollector_NotifyFiresBeforeUpload(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("CollectWithNotify() len = %d, want 2", len(got))
+	}
+}
+
+func TestArtifactCollector_NotifySkipsHashMatchedRestores(t *testing.T) {
+	ctx := context.Background()
+	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": []byte("PPTX"),
+		},
+	}
+	store := &fakeStore{prev: []types.MessageArtifact{
+		{
+			SourcePath:  "/workspace/output/report.pptx",
+			ModTime:     oldMod,
+			FileSize:    4,
+			ContentHash: artifactContentHash([]byte("PPTX")),
+		},
+	}}
+	c := newTestCollector(src, store, &fakeFileService{}, 1<<20)
+
+	notified := 0
+	got, err := c.CollectWithNotify(ctx, "sess-1", "msg-1", 42, "/workspace/output", func(n int) {
+		notified = n
+	})
+	if err != nil {
+		t.Fatalf("CollectWithNotify() error = %v", err)
+	}
+	if notified != 0 {
+		t.Fatalf("notify count = %d, want 0 (restored files must not look pending)", notified)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CollectWithNotify() len = %d, want 0", len(got))
 	}
 }
 
@@ -311,13 +369,15 @@ func TestArtifactCollector_SkipsAlreadyKnown(t *testing.T) {
 	}
 }
 
-func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
+func TestArtifactCollector_SkipsRestoredFileSamePathSameSize(t *testing.T) {
 	ctx := context.Background()
 	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				// Same path as the known set, but a *newer* mtime — must be re-attached.
+				// git checkout rewrites the file with a fresh mtime but the
+				// same bytes. That must not attach a duplicate to the next
+				// assistant message.
 				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
 			},
 		},
@@ -326,7 +386,130 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 		},
 	}
 	store := &fakeStore{prev: []types.MessageArtifact{
-		{SourcePath: "/workspace/output/report.pptx", ModTime: oldMod},
+		{
+			SourcePath:  "/workspace/output/report.pptx",
+			ModTime:     oldMod,
+			FileSize:    4,
+			ContentHash: artifactContentHash([]byte("PPTX")),
+		},
+	}}
+	fs := &fakeFileService{}
+	c := newTestCollector(src, store, fs, 1<<20)
+
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Collect() len = %d, want 0 (same bytes after restore must not re-attach)", len(got))
+	}
+	if len(fs.saved) != 0 {
+		t.Fatalf("SaveBytes should not have been called; saved=%v", fs.saved)
+	}
+}
+
+func TestArtifactCollector_SkipsRestoredFileUsingStoredBlob(t *testing.T) {
+	ctx := context.Background()
+	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": []byte("PPTX"),
+		},
+	}
+	fs := &fakeFileService{saved: map[string][]byte{"fake://prev": []byte("PPTX")}}
+	store := &fakeStore{prev: []types.MessageArtifact{
+		{SourcePath: "/workspace/output/report.pptx", ModTime: oldMod, FileSize: 4, URL: "fake://prev"},
+	}}
+	c := newTestCollector(src, store, fs, 1<<20)
+
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Collect() len = %d, want 0 (same stored blob after restore must not re-attach)", len(got))
+	}
+}
+
+func TestArtifactCollector_PersistsRestoredMtimeSoNextTurnDoesNotReread(t *testing.T) {
+	ctx := context.Background()
+	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
+	newMod := mustParseTime("2026-07-10T10:21:00Z")
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"fork-1": {
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: newMod},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": []byte("PPTX"),
+		},
+	}
+	store := &fakeStore{prev: []types.MessageArtifact{
+		{
+			SourcePath:  "/workspace/output/report.pptx",
+			ModTime:     oldMod,
+			FileSize:    4,
+			ContentHash: artifactContentHash([]byte("PPTX")),
+		},
+	}}
+	c := newTestCollector(src, store, &fakeFileService{}, 1<<20)
+
+	got, err := c.Collect(ctx, "fork-1", "msg-1", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("first Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("first Collect() len = %d, want 0", len(got))
+	}
+	if len(src.readCalls) != 1 {
+		t.Fatalf("first Collect() reads = %d, want 1 (hash restore)", len(src.readCalls))
+	}
+	if !store.prev[0].ModTime.Equal(newMod) {
+		t.Fatalf("restored mtime not written back: got %v want %v", store.prev[0].ModTime, newMod)
+	}
+
+	src.readCalls = nil
+	got, err = c.Collect(ctx, "fork-1", "msg-2", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("second Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("second Collect() len = %d, want 0", len(got))
+	}
+	if len(src.readCalls) != 0 {
+		t.Fatalf("second Collect() should hit path+mtime and skip the read; readCalls=%v", src.readCalls)
+	}
+}
+
+func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
+	ctx := context.Background()
+	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				// Same path, newer mtime *and* a different size — the skill
+				// actually rewrote the file this turn.
+				{
+					Name:    "report.pptx",
+					Path:    "/workspace/output/report.pptx",
+					Type:    sandbox.RemoteEntryFile,
+					Size:    8,
+					ModTime: mustParseTime("2026-07-10T10:21:00Z"),
+				},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": []byte("PPTX-NEW"),
+		},
+	}
+	store := &fakeStore{prev: []types.MessageArtifact{
+		{SourcePath: "/workspace/output/report.pptx", ModTime: oldMod, FileSize: 4},
 	}}
 	fs := &fakeFileService{}
 	c := newTestCollector(src, store, fs, 1<<20)
@@ -336,7 +519,43 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 		t.Fatalf("Collect() error = %v", err)
 	}
 	if len(got) != 1 {
-		t.Fatalf("Collect() len = %d, want 1 (mtime-change should re-attach)", len(got))
+		t.Fatalf("Collect() len = %d, want 1 (rewritten file should re-attach)", len(got))
+	}
+	if len(fs.saved) != 1 {
+		t.Fatalf("SaveBytes calls = %d, want 1", len(fs.saved))
+	}
+}
+
+func TestArtifactCollector_ReattachesSameSizeDifferentContent(t *testing.T) {
+	ctx := context.Background()
+	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
+	oldBytes := []byte("PPTX")
+	newBytes := []byte("PPT!")
+	if len(oldBytes) != len(newBytes) {
+		t.Fatal("fixture must keep size identical so a size-key skip would hide the rewrite")
+	}
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: int64(len(newBytes)), ModTime: mustParseTime("2026-07-10T10:21:00Z")},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": newBytes,
+		},
+	}
+	store := &fakeStore{prev: []types.MessageArtifact{
+		{SourcePath: "/workspace/output/report.pptx", ModTime: oldMod, FileSize: int64(len(oldBytes)), ContentHash: artifactContentHash(oldBytes)},
+	}}
+	fs := &fakeFileService{}
+	c := newTestCollector(src, store, fs, 1<<20)
+
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Collect() len = %d, want 1 (same-size rewrite must still attach)", len(got))
 	}
 	if len(fs.saved) != 1 {
 		t.Fatalf("SaveBytes calls = %d, want 1", len(fs.saved))
@@ -583,4 +802,127 @@ func bytesN(n int) []byte {
 		b[i] = 'x'
 	}
 	return b
+}
+
+// A deleted file whose sandbox copy was never touched must stay gone: its
+// mtime has not moved, so nothing about the sandbox says it was regenerated.
+func TestArtifactCollector_DeletedFileDoesNotComeBackUntouched(t *testing.T) {
+	ctx := context.Background()
+	mod := mustParseTime("2026-07-10T10:20:33Z")
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{
+					Name: "report.pptx", Path: "/workspace/output/report.pptx",
+					Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mod,
+				},
+			},
+		},
+		contents: map[string][]byte{"/workspace/output/report.pptx": []byte("PPTX")},
+	}
+	deletedAt := mustParseTime("2026-07-11T00:00:00Z")
+	store := &fakeStore{prev: []types.MessageArtifact{{
+		SourcePath:  "/workspace/output/report.pptx",
+		ModTime:     mod,
+		FileSize:    4,
+		ContentHash: artifactContentHash([]byte("PPTX")),
+		DeletedAt:   &deletedAt,
+	}}}
+	fs := &fakeFileService{}
+	c := newTestCollector(src, store, fs, 1<<20)
+
+	got, err := c.Collect(ctx, "sess-1", "msg-2", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Collect() len = %d, want 0: an untouched sandbox file must not resurrect it", len(got))
+	}
+	if len(fs.saved) != 0 {
+		t.Fatalf("SaveBytes should not have been called; saved=%v", fs.saved)
+	}
+}
+
+// But a turn that actually rewrites the file — new mtime — regenerates it, and
+// the user gets it back even when the bytes come out identical. The tombstone
+// must not feed the same-content restore short circuit: doing so would make a
+// deleted file impossible to reproduce byte-for-byte ever again.
+func TestArtifactCollector_DeletedFileReturnsWhenRegenerated(t *testing.T) {
+	ctx := context.Background()
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{
+					Name: "report.pptx", Path: "/workspace/output/report.pptx",
+					Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-11T09:00:00Z"),
+				},
+			},
+		},
+		contents: map[string][]byte{"/workspace/output/report.pptx": []byte("PPTX")},
+	}
+	deletedAt := mustParseTime("2026-07-11T00:00:00Z")
+	store := &fakeStore{prev: []types.MessageArtifact{{
+		SourcePath: "/workspace/output/report.pptx",
+		ModTime:    mustParseTime("2026-07-10T10:20:33Z"),
+		FileSize:   4,
+		// Identical content to what the sandbox now holds.
+		ContentHash: artifactContentHash([]byte("PPTX")),
+		DeletedAt:   &deletedAt,
+	}}}
+	fs := &fakeFileService{}
+	c := newTestCollector(src, store, fs, 1<<20)
+
+	got, err := c.Collect(ctx, "sess-1", "msg-2", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Collect() len = %d, want 1: a regenerated file is a new artifact, not a restore", len(got))
+	}
+	if got[0].Deleted() {
+		t.Fatal("the re-collected artifact must be live, not a tombstone")
+	}
+	if len(fs.saved) != 1 {
+		t.Fatalf("the regenerated bytes must be uploaded; saved=%v", fs.saved)
+	}
+}
+
+// A live artifact's same-content restore still short-circuits — the tombstone
+// change must not weaken the fork-checkout path it was built for.
+func TestArtifactCollector_LiveRestoreStillSkipsAlongsideATombstone(t *testing.T) {
+	ctx := context.Background()
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{
+					Name: "report.pptx", Path: "/workspace/output/report.pptx",
+					Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-11T09:00:00Z"),
+				},
+			},
+		},
+		contents: map[string][]byte{"/workspace/output/report.pptx": []byte("PPTX")},
+	}
+	deletedAt := mustParseTime("2026-07-11T00:00:00Z")
+	store := &fakeStore{prev: []types.MessageArtifact{
+		// An older version of the same file that the user deleted...
+		{
+			SourcePath: "/workspace/output/report.pptx", ModTime: mustParseTime("2026-07-09T10:00:00Z"),
+			FileSize: 4, ContentHash: artifactContentHash([]byte("OLD!")), DeletedAt: &deletedAt,
+		},
+		// ...and a live one whose bytes match what the sandbox holds now.
+		{
+			SourcePath: "/workspace/output/report.pptx", ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+			FileSize: 4, ContentHash: artifactContentHash([]byte("PPTX")),
+		},
+	}}
+	fs := &fakeFileService{}
+	c := newTestCollector(src, store, fs, 1<<20)
+
+	got, err := c.Collect(ctx, "sess-1", "msg-2", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Collect() len = %d, want 0: the live version still matches, so this is a restore", len(got))
+	}
 }

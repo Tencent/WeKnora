@@ -282,6 +282,7 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 	chunkSize := 512
 	overrides := &types.KnowledgeProcessOverrides{
 		ChunkingConfig: &types.ChunkingConfig{ChunkSize: chunkSize},
+		SummaryEnabled: processConfigBoolPtr(false),
 	}
 
 	knowledge, err := svc.CreateKnowledgeFromFile(
@@ -304,6 +305,8 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 	parsed, err := repo.createdKnowledge.ProcessOverrides()
 	require.NoError(t, err)
 	require.NotNil(t, parsed)
+	require.NotNil(t, parsed.SummaryEnabled)
+	require.False(t, *parsed.SummaryEnabled)
 	require.NotNil(t, parsed.ChunkingConfig)
 	require.Equal(t, chunkSize, parsed.ChunkingConfig.ChunkSize)
 

@@ -212,7 +212,14 @@ func snapshotInUseBySandboxes(message string) bool {
 	if strings.Contains(msg, "sandboxes using") {
 		return true
 	}
-	return strings.Contains(msg, "cannot delete template") && strings.Contains(msg, "using it")
+	if strings.Contains(msg, "cannot delete template") && strings.Contains(msg, "using it") {
+		return true
+	}
+	// Cube CoW: HTTP 500 / 130409 while source + child sandboxes still reference the snapshot.
+	if strings.Contains(msg, "runtime ref") {
+		return true
+	}
+	return strings.Contains(msg, "130409")
 }
 
 // IsRemoteDirAlreadyExists reports whether MakeDir failed because the

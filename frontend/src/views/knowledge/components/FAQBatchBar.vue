@@ -94,7 +94,7 @@ const actionLoading = computed(() => (
   padding: 8px 12px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
 }
 
@@ -108,7 +108,7 @@ const actionLoading = computed(() => (
 
 .faq-batch-bar__count {
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -123,7 +123,7 @@ const actionLoading = computed(() => (
 
 .faq-batch-bar-fade-enter-active,
 .faq-batch-bar-fade-leave-active {
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform var(--app-motion-base) ease, opacity var(--app-motion-base) ease;
 }
 
 .faq-batch-bar-fade-enter-from,

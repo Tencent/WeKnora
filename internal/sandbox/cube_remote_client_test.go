@@ -652,6 +652,11 @@ func TestNormalizeCubeError(t *testing.T) {
 			StatusCode: http.StatusBadRequest,
 			Message:    "cannot delete template x because there are paused sandboxes using it",
 		}, RemoteErrorKindConflict},
+		{"delete snapshot runtime refs", "DeleteSnapshot", &cubesandbox.APIError{
+			StatusCode: http.StatusInternalServerError,
+			Message: "CubeMaster returned error code 130409: template attempt is already in progress: " +
+				"snapshot snap-x still has 2 active runtime ref(s): a@host, b@host",
+		}, RemoteErrorKindConflict},
 		{"delete snapshot bad id", "DeleteSnapshot", &cubesandbox.APIError{
 			StatusCode: http.StatusBadRequest,
 			Message:    "invalid snapshot id",

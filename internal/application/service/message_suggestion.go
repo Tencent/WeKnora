@@ -346,7 +346,7 @@ func (s *messageSuggestionService) generateWithModel(
 
 	modelCtx := ctx
 	if message.AgentTenantID != 0 {
-		modelCtx = context.WithValue(modelCtx, types.TenantIDContextKey, message.AgentTenantID)
+		modelCtx = types.WithExecutionTenant(modelCtx, message.AgentTenantID)
 	}
 	chatModel, err := s.modelService.GetChatModel(modelCtx, modelID)
 	if err != nil {
@@ -413,7 +413,11 @@ func (s *messageSuggestionService) generateFromKnowledge(
 	}
 	knowledgeCtx := ctx
 	if message.AgentTenantID != 0 {
-		knowledgeCtx = context.WithValue(knowledgeCtx, types.TenantIDContextKey, message.AgentTenantID)
+		// WithExecutionTenant pins the caller before moving execution into the
+		// agent's workspace; a bare tenant rewrite would make a context without
+		// a captured caller read as that workspace, passing every permission
+		// check on its documents.
+		knowledgeCtx = types.WithExecutionTenant(knowledgeCtx, message.AgentTenantID)
 	}
 	poolSize := count * 5
 	if poolSize < 10 {
