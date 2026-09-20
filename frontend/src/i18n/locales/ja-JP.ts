@@ -890,7 +890,6 @@ export default {
       kbDefault: 'ナレッジベースのデフォルト設定を使用',
       graph: 'ナレッジグラフ'
     },
-    attempt: '{n}回目の試行',
     retry: '再解析',
     notRun: '未実行',
     stageFailed: '{stage}が失敗しました',

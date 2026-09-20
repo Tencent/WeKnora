@@ -890,7 +890,6 @@ export default {
       kbDefault: 'Using knowledge base defaults',
       graph: 'Knowledge graph'
     },
-    attempt: 'Attempt {n}',
     retry: 'Retry parsing',
     notRun: 'Not run',
     stageFailed: '{stage} failed',

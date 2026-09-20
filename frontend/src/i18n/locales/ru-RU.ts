@@ -6574,7 +6574,6 @@ export default {
   knowledgeStages: {
     title: 'Конвейер обработки',
     root: 'Обработка знаний',
-    attempt: 'Попытка {n}',
     retry: 'Повторить парсинг',
     notRun: 'Не выполнялся',
     stageFailed: 'Этап «{stage}» завершился с ошибкой',

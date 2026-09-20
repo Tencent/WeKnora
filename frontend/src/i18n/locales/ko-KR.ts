@@ -6574,7 +6574,6 @@ export default {
   knowledgeStages: {
     title: '처리 파이프라인',
     root: '지식 처리',
-    attempt: '{n}번째 시도',
     retry: '다시 파싱',
     notRun: '실행 안 됨',
     stageFailed: '{stage} 단계 실패',

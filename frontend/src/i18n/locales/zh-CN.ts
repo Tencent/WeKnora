@@ -6576,7 +6576,6 @@ export default {
   knowledgeStages: {
     title: '处理流水线',
     root: '知识处理',
-    attempt: '第 {n} 次尝试',
     retry: '重新解析',
     notRun: '未执行',
     stageFailed: '{stage}阶段失败',

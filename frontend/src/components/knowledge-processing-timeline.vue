@@ -994,11 +994,20 @@ function rowLabel(row: FlatRow): string {
   return row.node.name
 }
 
-// v1 stamped ROOT / STAGE / SPAN on every row and flung the label to the
-// far right of the name column with margin-left:auto, which opened a
-// ~200px gap mid-row and told the reader nothing that indentation hadn't
-// already said. Only `generation` (an LLM/VLM call) is worth a chip.
+// The span's actual kind. Used where the reader asked for it: the detail
+// panel's title line and its Identity table.
 function rowKindLabel(row: FlatRow): string {
+  if (row.isRoot) return 'root'
+  if (row.isStage) return 'stage'
+  return row.node.kind || 'span'
+}
+
+// The kind chip on a waterfall row, which is a different question. v1
+// stamped ROOT / STAGE / SPAN on every row and flung it to the far right
+// of the name column with margin-left:auto, opening a ~200px gap mid-row
+// to say what the indentation already said. Only `generation` (an
+// LLM/VLM call) earns a chip.
+function rowKindBadge(row: FlatRow): string {
   if (row.isRoot || row.isStage) return ''
   return row.node.kind === 'generation' ? 'generation' : ''
 }
@@ -1160,7 +1169,6 @@ function attemptGlyph(status: string): { ch: string; cls: string } {
       return { ch: '✗', cls: 'kp-glyph-failed' }
     case 'running':
     case 'pending':
-    case 'processing':
       return { ch: '●', cls: 'kp-glyph-running' }
     default:
       return { ch: '–', cls: 'kp-glyph-unknown' }
@@ -1198,14 +1206,15 @@ const headerStatusText = computed(() => {
 })
 
 const headerStatusTheme = computed(() => {
+  // headerStatus has already been mapped into the span vocabulary by
+  // parseStatusToTimelineStatus, so 'completed' / 'processing' cannot
+  // reach here.
   switch (headerStatus.value) {
     case 'done':
-    case 'completed':
       return 'success'
     case 'failed':
       return 'danger'
     case 'running':
-    case 'processing':
     case 'pending':
     case 'finalizing':
       return 'warning'
@@ -1689,7 +1698,7 @@ const processConfigLines = computed<string[]>(() => {
                     <span class="kp-name-text" :title="rowLabel(row)"
                       :class="{ 'kp-name-root': row.isRoot, 'kp-name-mono': !row.isRoot && !row.isStage }">{{
                         rowLabel(row) }}</span>
-                    <span v-if="rowKindLabel(row)" class="kp-name-kind">{{ rowKindLabel(row) }}</span>
+                    <span v-if="rowKindBadge(row)" class="kp-name-kind">{{ rowKindBadge(row) }}</span>
                   </div>
                 </div>
 
@@ -2193,16 +2202,6 @@ const processConfigLines = computed<string[]>(() => {
 .kp-icon-btn-autoflow :deep(.t-icon) {
   animation: wk-spin 4s linear infinite;
   color: var(--td-warning-color);
-}
-
-.kp-meta-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  font-size: var(--app-text-xs);
-  line-height: 1;
 }
 
 .kp-glyph-done {
@@ -2848,19 +2847,6 @@ const processConfigLines = computed<string[]>(() => {
 .kp-dot-placeholder {
   background: transparent;
   border: 1px dashed var(--td-component-border);
-}
-
-.kp-dot-completed {
-  background: var(--td-success-color);
-}
-
-.kp-dot-processing {
-  background: var(--td-warning-color);
-  animation: kpLivePulse 1.4s ease-in-out infinite;
-}
-
-.kp-dot-unknown {
-  background: var(--td-text-color-placeholder);
 }
 
 /* ============== LAST ERROR ==============
