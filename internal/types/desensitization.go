@@ -50,19 +50,19 @@ const (
 // DesensitizationConfig is opt-in per knowledge base. Disabled by default so
 // existing deployments do not rewrite ingested text.
 type DesensitizationConfig struct {
-	Enabled     bool                  `yaml:"enabled" json:"enabled"`
-	Engine      string                `yaml:"engine,omitempty" json:"engine,omitempty"`
-	MaskStyle   string                `yaml:"mask_style,omitempty" json:"mask_style,omitempty"`
-	EntityTypes []string              `yaml:"entity_types,omitempty" json:"entity_types,omitempty"`
+	Enabled     bool                  `yaml:"enabled" json:"enabled" example:"false"`
+	Engine      string                `yaml:"engine,omitempty" json:"engine,omitempty" example:"builtin" enums:"builtin,presidio"`
+	MaskStyle   string                `yaml:"mask_style,omitempty" json:"mask_style,omitempty" example:"replace" enums:"replace,partial"`
+	EntityTypes []string              `yaml:"entity_types,omitempty" json:"entity_types,omitempty" example:"cn_mobile,email"`
 	Rules       []DesensitizationRule `yaml:"rules,omitempty" json:"rules,omitempty"`
 	LLMModelID  string                `yaml:"llm_model_id,omitempty" json:"llm_model_id,omitempty"`
 }
 
 // DesensitizationRule is a user-supplied regexp applied after preset types.
 type DesensitizationRule struct {
-	Name        string `yaml:"name" json:"name"`
-	Pattern     string `yaml:"pattern" json:"pattern"`
-	Replacement string `yaml:"replacement,omitempty" json:"replacement,omitempty"`
+	Name        string `yaml:"name" json:"name" example:"order_id"`
+	Pattern     string `yaml:"pattern" json:"pattern" example:"ORD-\\d+"`
+	Replacement string `yaml:"replacement,omitempty" json:"replacement,omitempty" example:"<订单号>"`
 }
 
 // IsEnabled reports whether masking should run. A nil receiver is off.
@@ -102,11 +102,6 @@ func (c *DesensitizationConfig) Normalize() {
 	}
 	if c.MaskStyle != DesensitizationMaskReplace && c.MaskStyle != DesensitizationMaskPartial {
 		c.MaskStyle = DesensitizationMaskReplace
-	}
-	if c.Engine != DesensitizationEngineBuiltin &&
-		c.Engine != DesensitizationEnginePresidio &&
-		c.Engine != DesensitizationEngineLLM {
-		c.Engine = DesensitizationEngineBuiltin
 	}
 
 	allowed := make(map[string]struct{}, len(KnownDesensitizationEntityTypes))

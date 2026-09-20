@@ -32,7 +32,7 @@ func newListDocumentsFixture() *ListDocumentsTool {
 	}
 	return NewListDocumentsTool(service, types.SearchTargets{{
 		Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 7,
-	}})
+	}}, nil, nil)
 }
 
 func TestListDocumentsRequiresKnowledgeBaseInScope(t *testing.T) {

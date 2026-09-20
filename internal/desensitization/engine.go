@@ -17,6 +17,12 @@ var (
 	ErrCloudParserForbidden = errors.New("cloud parser engines are not allowed when desensitization is enabled")
 	// ErrEngineUnavailable is returned when the selected engine cannot run.
 	ErrEngineUnavailable = errors.New("desensitization engine is unavailable")
+	// ErrEngineUnsupported is returned when the engine is known but disabled
+	// for this release (currently llm).
+	ErrEngineUnsupported = errors.New("desensitization engine is not supported")
+	// ErrCloudVLMForbidden is returned when desensitization is on and a
+	// remote VLM would receive the original image.
+	ErrCloudVLMForbidden = errors.New("remote VLM models are not allowed when desensitization is enabled")
 )
 
 // Completer generates a single model completion. Used by the optional LLM engine.
@@ -52,28 +58,30 @@ func (e presidioEngine) Mask(ctx context.Context, text string, cfg types.Desensi
 	return maskWithPresidio(ctx, text, cfg, e.deps)
 }
 
-type llmEngine struct{ deps Deps }
-
-func (llmEngine) Name() string { return types.DesensitizationEngineLLM }
-
-func (e llmEngine) Mask(ctx context.Context, text string, cfg types.DesensitizationConfig) (string, types.JSONMap, error) {
-	return maskWithLLM(ctx, text, cfg, e.deps)
-}
-
-// Select picks the engine registered for cfg. Unknown names fall back to builtin
-// after Normalize; an empty/disabled config still returns the builtin engine.
+// Select picks the engine registered for cfg. Empty engine names become builtin
+// after Normalize. Unknown names and the llm engine fail closed.
 func Select(cfg types.DesensitizationConfig, deps Deps) (Engine, error) {
 	cfg.Normalize()
 	switch cfg.Engine {
 	case types.DesensitizationEnginePresidio:
 		return presidioEngine{deps: deps}, nil
 	case types.DesensitizationEngineLLM:
-		return llmEngine{deps: deps}, nil
+		return nil, fmt.Errorf("%w: llm", ErrEngineUnsupported)
 	case types.DesensitizationEngineBuiltin, "":
 		return builtinEngine{}, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrEngineUnavailable, cfg.Engine)
 	}
+}
+
+// MaskIfEnabled runs Apply when the knowledge base has desensitization on.
+func MaskIfEnabled(ctx context.Context, kb *types.KnowledgeBase, text string, deps Deps) (string, error) {
+	if kb == nil || !kb.DesensitizationConfig.IsEnabled() {
+		return text, nil
+	}
+	cfg := *kb.DesensitizationConfig
+	out, _, err := Apply(ctx, text, cfg, deps)
+	return out, err
 }
 
 // Apply masks markdown according to cfg. Disabled configs are a no-op.
@@ -96,6 +104,16 @@ func ValidateConfig(cfg *types.DesensitizationConfig, chunking types.ChunkingCon
 	}
 	if !cfg.IsEnabled() {
 		return nil
+	}
+	engine := strings.TrimSpace(cfg.Engine)
+	if engine == "" {
+		engine = types.DesensitizationEngineBuiltin
+	}
+	if engine == types.DesensitizationEngineLLM {
+		return fmt.Errorf("%w: llm", ErrEngineUnsupported)
+	}
+	if engine != types.DesensitizationEngineBuiltin && engine != types.DesensitizationEnginePresidio {
+		return fmt.Errorf("%w: %s", ErrEngineUnavailable, engine)
 	}
 	normalized := *cfg
 	normalized.Normalize()

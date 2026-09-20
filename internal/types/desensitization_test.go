@@ -18,7 +18,7 @@ func TestDesensitizationConfigNormalizeDefaults(t *testing.T) {
 func TestDesensitizationConfigNormalizeDropsUnknownTypesAndEmptyRules(t *testing.T) {
 	cfg := &DesensitizationConfig{
 		Enabled:     true,
-		Engine:      "nope",
+		Engine:      DesensitizationEngineBuiltin,
 		MaskStyle:   "hash",
 		EntityTypes: []string{"cn_id_card", "cn_id_card", "person_name", " cn_mobile "},
 		Rules: []DesensitizationRule{
@@ -32,6 +32,12 @@ func TestDesensitizationConfigNormalizeDropsUnknownTypesAndEmptyRules(t *testing
 	assert.Equal(t, []string{DesensitizationEntityCNIDCard, DesensitizationEntityCNMobile}, cfg.EntityTypes)
 	require.Len(t, cfg.Rules, 1)
 	assert.Equal(t, "order", cfg.Rules[0].Name)
+}
+
+func TestDesensitizationConfigNormalizeKeepsUnknownEngine(t *testing.T) {
+	cfg := &DesensitizationConfig{Enabled: true, Engine: "nope"}
+	cfg.Normalize()
+	assert.Equal(t, "nope", cfg.Engine)
 }
 
 func TestDesensitizationConfigNilIsDisabled(t *testing.T) {

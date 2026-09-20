@@ -13,7 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
-	"github.com/Tencent/WeKnora/internal/desensitization"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -35,6 +35,7 @@ type chunkService struct {
 	ownership       retriever.TenantStoreOwnership
 	task            interfaces.TaskEnqueuer
 	spanTracker     SpanTracker
+	config          *config.Config
 }
 
 // NewChunkService creates a new chunk service
@@ -53,6 +54,7 @@ func NewChunkService(
 	ownership retriever.TenantStoreOwnership,
 	task interfaces.TaskEnqueuer,
 	spanTracker SpanTracker,
+	cfg *config.Config,
 ) interfaces.ChunkService {
 	return &chunkService{
 		chunkRepository: chunkRepository,
@@ -63,6 +65,7 @@ func NewChunkService(
 		ownership:       ownership,
 		task:            task,
 		spanTracker:     spanTracker,
+		config:          cfg,
 	}
 }
 
@@ -683,18 +686,18 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	if err != nil {
 		return err
 	}
-	if err := engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type); err != nil {
-		return err
-	}
 	if !chunk.IsEnabled {
-		return nil
+		return engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type)
 	}
 	knowledge, err := s.knowledgeRepo.GetKnowledgeByID(ctx, chunk.TenantID, chunk.KnowledgeID)
 	if err != nil {
 		return err
 	}
-	maskedTitle, err := maskModelFacingText(ctx, kb, knowledge.Title, desensitization.Deps{})
+	maskedTitle, err := maskModelFacingText(ctx, kb, knowledge.Title, desensitizationDepsFromConfig(s.config))
 	if err != nil {
+		return err
+	}
+	if err := engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type); err != nil {
 		return err
 	}
 	indexKB := knowledgeWithIndexTitle(knowledge, maskedTitle)

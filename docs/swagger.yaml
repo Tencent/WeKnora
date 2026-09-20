@@ -888,7 +888,8 @@ definitions:
           this factor
         type: number
       history_turns:
-        description: Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window
+        description: Number of history turns to keep in context. Quick-answer only;
+          smart-reasoning sizes history by context window
         type: integer
       image_storage_provider:
         description: |-
@@ -1154,6 +1155,49 @@ definitions:
         type: string
       updated_at:
         description: Last update timestamp
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.DesensitizationConfig:
+    properties:
+      enabled:
+        example: false
+        type: boolean
+      engine:
+        enum:
+        - builtin
+        - presidio
+        example: builtin
+        type: string
+      entity_types:
+        example:
+        - cn_mobile
+        - email
+        items:
+          type: string
+        type: array
+      llm_model_id:
+        type: string
+      mask_style:
+        enum:
+        - replace
+        - partial
+        example: replace
+        type: string
+      rules:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DesensitizationRule'
+        type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.DesensitizationRule:
+    properties:
+      name:
+        example: order_id
+        type: string
+      pattern:
+        example: ORD-\d+
+        type: string
+      replacement:
+        example: <订单号>
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig:
@@ -1541,9 +1585,9 @@ definitions:
     properties:
       representative_user_id:
         description: |-
-          RepresentativeUserID identifies the user attached to the OTM row for
-          display/audit. Optional: when unset, the handler picks a stable default
-          (the user from the legacy UserID field, or the workspace's owner).
+          RepresentativeUserID is accepted for compatibility and ignored: a
+          direct add attaches no user of the enrolled workspace, since the
+          inviter must not choose whose details the roster shows.
         type: string
       role:
         allOf:
@@ -1556,8 +1600,7 @@ definitions:
       user_id:
         description: |-
           UserID is retained for backward compatibility. When set without
-          TenantID, the handler resolves the user's TenantID and uses this
-          user as the representative.
+          TenantID, the handler resolves the user's TenantID.
         type: string
     required:
     - role
@@ -1655,6 +1698,11 @@ definitions:
       description:
         description: Description of the knowledge base
         type: string
+      desensitization_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DesensitizationConfig'
+        description: DesensitizationConfig optionally masks parsed markdown before
+          chunking.
       embedding_model_id:
         description: ID of the embedding model
         type: string
@@ -1667,6 +1715,13 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig'
         description: FAQConfig stores FAQ specific configuration such as indexing
           strategy
+      generated_profile:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfile'
+        description: |-
+          GeneratedProfile is the machine-generated description: a gist, merged
+          topics, typical questions and the aggregate snapshot they came from. It
+          never overwrites the user-authored Description; both are shown to agents.
       id:
         description: Unique identifier of the knowledge base
         type: string
@@ -1714,6 +1769,12 @@ definitions:
         description: ProcessingCount indicates the number of knowledge items being
           processed (for document type knowledge bases)
         type: integer
+      profile_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig'
+        description: |-
+          ProfileConfig controls automatic generation of the knowledge-base
+          description from per-document profiles (document knowledge bases only).
       question_generation_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
@@ -1780,6 +1841,11 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
         description: Chunking configuration
+      desensitization_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DesensitizationConfig'
+        description: DesensitizationConfig optionally masks parsed markdown before
+          chunking.
       faq_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig'
@@ -1794,10 +1860,108 @@ definitions:
         description: |-
           IndexingStrategy controls which indexing pipelines are active.
           nil means "no change" when updating (preserves existing strategy).
+      profile_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig'
+        description: |-
+          ProfileConfig controls optional automatic knowledge-base description
+          generation. nil means "no change" when updating.
       wiki_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig'
         description: Wiki configuration (only for wiki-enabled knowledge bases)
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfile:
+    properties:
+      aggregate_hash:
+        description: |-
+          AggregateHash identifies the aggregate the gist was generated from. A
+          mismatch with the live aggregate means the text is stale.
+        type: string
+      error:
+        description: Error holds the last generation error when Status is failed.
+        type: string
+      generated_at:
+        description: GeneratedAt records when the text was produced.
+        type: string
+      gist:
+        description: Gist is a short statement of what the knowledge base covers.
+        type: string
+      model_id:
+        description: ModelID records which chat model produced the text.
+        type: string
+      stats:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileStats'
+        description: Stats is the aggregate snapshot the text was generated from.
+      status:
+        description: Status is one of the KnowledgeBaseProfileStatus* values.
+        type: string
+      topics:
+        description: Topics is the merged topic list (at most KnowledgeBaseProfileMaxTopics).
+        items:
+          type: string
+        type: array
+      typical_questions:
+        description: TypicalQuestions lists questions this knowledge base can answer.
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig:
+    properties:
+      custom_instructions:
+        description: |-
+          CustomInstructions is appended to the stable system prompt, e.g. the
+          audience the description should address or terms to keep.
+        type: string
+      enabled:
+        type: boolean
+      model_id:
+        description: ModelID overrides the chat model; empty falls back to the KB
+          summary model.
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileStats:
+    properties:
+      doc_types:
+        description: DocTypes counts documents per model-assigned document type.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.NamedCount'
+        type: array
+      document_count:
+        description: DocumentCount is the number of eligible documents at generation
+          time.
+        type: integer
+      earliest_at:
+        description: EarliestAt and LatestAt bound document creation times.
+        type: string
+      file_types:
+        description: FileTypes counts documents per file extension.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.NamedCount'
+        type: array
+      folders:
+        description: Folders lists the top-level folder names present.
+        items:
+          type: string
+        type: array
+      latest_at:
+        type: string
+      profiled_count:
+        description: ProfiledCount is how many of them carried a document profile.
+        type: integer
+      raw_topics:
+        description: RawTopics counts documents per normalized topic keyword before
+          merging.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.NamedCount'
+        type: array
+      tags:
+        description: Tags counts documents per knowledge-base tag.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.NamedCount'
+        type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShareResponse:
     properties:
@@ -2312,6 +2476,10 @@ definitions:
           Skill-generated files produced during this assistant turn (assistant messages only).
           Populated by ArtifactCollector after the sandbox finishes, referenced by the
           artifact download endpoint. Empty for user messages and turns without skills.
+
+          Stored in the message_artifacts table, not on the message row: the message
+          repository loads it with every message it returns and writes it whenever it
+          is non-nil on create or update. A nil slice leaves the stored rows alone.
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MessageArtifact'
         type: array
@@ -2665,6 +2833,13 @@ definitions:
     - ModelTypeKnowledgeQA
     - ModelTypeVLLM
     - ModelTypeASR
+  github_com_Tencent_WeKnora_internal_types.NamedCount:
+    properties:
+      count:
+        type: integer
+      name:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.OBSEngineConfig:
     properties:
       access_key:
@@ -5716,6 +5891,17 @@ definitions:
           response was truncated to previewMaxChunks for transport.
         type: integer
     type: object
+  internal_handler.PreviewDesensitizationRequest:
+    properties:
+      desensitization_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DesensitizationConfig'
+        description: Optional rules; engine is forced to builtin for this endpoint.
+      text:
+        description: Sample text to mask. Preview always uses the builtin engine.
+        example: 请拨打13800138000
+        type: string
+    type: object
   internal_handler.PromoteUserToSystemAdminRequest:
     properties:
       email:
@@ -7102,6 +7288,40 @@ paths:
       summary: 获取知识文档解析的 Span 树（含历史尝试）
       tags:
       - 知识管理
+  /artifacts:
+    get:
+      description: 跨会话列出当前用户可见会话中技能生成的文件，每个文件只返回最新版本（不含存储 URL）
+      parameters:
+      - description: 按文件名过滤
+        in: query
+        name: keyword
+        type: string
+      - description: 逗号分隔的扩展名，如 .pdf,.pptx
+        in: query
+        name: file_types
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量（最大 100）
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出我的产物
+      tags:
+      - 会话
   /auth/auto-setup:
     post:
       consumes:
@@ -8214,6 +8434,37 @@ paths:
       summary: Test connection with raw credentials (no persistence)
       tags:
       - DataSource
+  /desensitization/preview:
+    post:
+      consumes:
+      - application/json
+      description: 对样例文本运行内置引擎。不调用 Presidio 或 LLM。
+      parameters:
+      - description: 样例文本与脱敏配置
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.PreviewDesensitizationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 试跑内置脱敏规则
+      tags:
+      - 知识库
   /evaluation/:
     get:
       consumes:
@@ -10195,6 +10446,33 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 置顶/取消置顶知识库
+      tags:
+      - 知识库
+  /knowledge-bases/{id}/profile/generate:
+    post:
+      description: 基于文档画像聚合，立即重新生成知识库的 AI 描述（不覆盖手写描述）
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 生成的知识库画像
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 知识库类型不支持或未配置模型
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 生成知识库描述
       tags:
       - 知识库
   /knowledge-bases/{id}/shares:

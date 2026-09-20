@@ -352,6 +352,7 @@ func (s *Server) handleReadDocument(ctx context.Context, req mcp.CallToolRequest
 	}
 	tool := tools.NewReadDocumentTool(
 		s.knowledgeService, s.chunkService, searchTargetsFor([]*types.KnowledgeBase{kb}),
+		s.kbService, s.cfg,
 	)
 	callArgs := map[string]any{
 		"id":     k.ID,

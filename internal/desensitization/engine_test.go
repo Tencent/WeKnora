@@ -36,6 +36,13 @@ func TestSelectBuiltinByDefault(t *testing.T) {
 	assert.Equal(t, types.DesensitizationEngineBuiltin, eng.Name())
 }
 
+func TestSelectRejectsLLMAndUnknownEngine(t *testing.T) {
+	_, err := Select(types.DesensitizationConfig{Enabled: true, Engine: types.DesensitizationEngineLLM}, Deps{})
+	require.ErrorIs(t, err, ErrEngineUnsupported)
+	_, err = Select(types.DesensitizationConfig{Enabled: true, Engine: "nope"}, Deps{})
+	require.ErrorIs(t, err, ErrEngineUnavailable)
+}
+
 func TestValidateConfigRejectsCloudParserAndBadRegexp(t *testing.T) {
 	cfg := &types.DesensitizationConfig{Enabled: true}
 	err := ValidateConfig(cfg, types.ChunkingConfig{
@@ -123,27 +130,47 @@ func TestApplyPresidioFailsClosedWithoutURL(t *testing.T) {
 	require.ErrorIs(t, err, ErrEngineUnavailable)
 }
 
-func TestApplyLLMUsesMatches(t *testing.T) {
+func TestApplyLLMIsRejected(t *testing.T) {
 	complete := Completer(func(ctx context.Context, _, _ string) (string, error) {
-		return `{"matches":[{"text":"张三密文999","type":"email"}]}`, nil
+		t.Fatal("llm completer must not be called")
+		return "", nil
 	})
-	out, _, err := Apply(context.Background(), "联系张三密文999即可", types.DesensitizationConfig{
+	_, _, err := Apply(context.Background(), "联系13800138000", types.DesensitizationConfig{
 		Enabled:     true,
 		Engine:      types.DesensitizationEngineLLM,
-		EntityTypes: []string{types.DesensitizationEntityEmail},
+		EntityTypes: []string{types.DesensitizationEntityCNMobile},
 	}, Deps{Complete: complete})
-	require.NoError(t, err)
-	assert.Contains(t, out, "<邮箱>")
-	assert.NotContains(t, out, "张三密文999")
+	require.ErrorIs(t, err, ErrEngineUnsupported)
 }
 
-func TestApplyLLMFailsClosedOnBadJSON(t *testing.T) {
-	complete := Completer(func(ctx context.Context, _, _ string) (string, error) {
-		return "not-json", nil
-	})
-	_, _, err := Apply(context.Background(), "abc", types.DesensitizationConfig{
+func TestValidateConfigRejectsLLMAndUnknownEngine(t *testing.T) {
+	require.ErrorIs(t, ValidateConfig(&types.DesensitizationConfig{
 		Enabled: true,
 		Engine:  types.DesensitizationEngineLLM,
-	}, Deps{Complete: complete})
-	require.ErrorIs(t, err, ErrEngineUnavailable)
+	}, types.ChunkingConfig{}), ErrEngineUnsupported)
+	require.ErrorIs(t, ValidateConfig(&types.DesensitizationConfig{
+		Enabled: true,
+		Engine:  "nope",
+	}, types.ChunkingConfig{}), ErrEngineUnavailable)
+	require.NoError(t, ValidateConfig(&types.DesensitizationConfig{
+		Enabled: true,
+		Engine:  types.DesensitizationEngineBuiltin,
+	}, types.ChunkingConfig{}))
+}
+
+func TestMaskIfEnabledNoopWhenDisabled(t *testing.T) {
+	out, err := MaskIfEnabled(context.Background(), &types.KnowledgeBase{}, "13800138000", Deps{})
+	require.NoError(t, err)
+	assert.Equal(t, "13800138000", out)
+}
+
+func TestMaskWithLLMDoesNotCallCompleter(t *testing.T) {
+	_, _, err := maskWithLLM(context.Background(), "13800138000", types.DesensitizationConfig{
+		Enabled: true,
+		Engine:  types.DesensitizationEngineLLM,
+	}, Deps{Complete: func(context.Context, string, string) (string, error) {
+		t.Fatal("completer must not run")
+		return "", nil
+	}})
+	require.ErrorIs(t, err, ErrEngineUnsupported)
 }

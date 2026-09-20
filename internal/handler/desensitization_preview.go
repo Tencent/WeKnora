@@ -14,13 +14,24 @@ const desensitizationPreviewMaxChars = 32 * 1024
 
 // PreviewDesensitizationRequest is the body for POST /desensitization/preview.
 type PreviewDesensitizationRequest struct {
-	Text                  string                      `json:"text"`
+	// Sample text to mask. Preview always uses the builtin engine.
+	Text string `json:"text" example:"请拨打13800138000"`
+	// Optional rules; engine is forced to builtin for this endpoint.
 	DesensitizationConfig types.DesensitizationConfig `json:"desensitization_config"`
 }
 
-// PreviewDesensitization runs the builtin engine on supplied text so the KB
-// editor can try rules without ingesting a document. Sidecar/LLM engines are
-// not invoked here.
+// PreviewDesensitization godoc
+// @Summary      试跑内置脱敏规则
+// @Description  对样例文本运行内置引擎。不调用 Presidio 或 LLM。
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        request  body      PreviewDesensitizationRequest  true  "样例文本与脱敏配置"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      400      {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /desensitization/preview [post]
 func PreviewDesensitization(c *gin.Context) {
 	var req PreviewDesensitizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

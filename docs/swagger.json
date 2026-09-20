@@ -782,6 +782,61 @@
                 }
             }
         },
+        "/artifacts": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "跨会话列出当前用户可见会话中技能生成的文件，每个文件只返回最新版本（不含存储 URL）",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "列出我的产物",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "按文件名过滤",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "逗号分隔的扩展名，如 .pdf,.pptx",
+                        "name": "file_types",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量（最大 100）",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/auth/auto-setup": {
             "post": {
                 "description": "Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，首次及后续启动均须通过桌面原生凭据认证，免除手动注册/登录流程",
@@ -2471,6 +2526,56 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/desensitization/preview": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "对样例文本运行内置引擎。不调用 Presidio 或 LLM。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "试跑内置脱敏规则",
+                "parameters": [
+                    {
+                        "description": "样例文本与脱敏配置",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PreviewDesensitizationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -5701,6 +5806,50 @@
                     },
                     "404": {
                         "description": "知识库不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/{id}/profile/generate": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "基于文档画像聚合，立即重新生成知识库的 AI 描述（不覆盖手写描述）",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "生成知识库描述",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "生成的知识库画像",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "知识库类型不支持或未配置模型",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -19273,6 +19422,67 @@
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.DesensitizationConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "engine": {
+                    "type": "string",
+                    "enum": [
+                        "builtin",
+                        "presidio"
+                    ],
+                    "example": "builtin"
+                },
+                "entity_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "cn_mobile",
+                        "email"
+                    ]
+                },
+                "llm_model_id": {
+                    "type": "string"
+                },
+                "mask_style": {
+                    "type": "string",
+                    "enum": [
+                        "replace",
+                        "partial"
+                    ],
+                    "example": "replace"
+                },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DesensitizationRule"
+                    }
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.DesensitizationRule": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "order_id"
+                },
+                "pattern": {
+                    "type": "string",
+                    "example": "ORD-\\d+"
+                },
+                "replacement": {
+                    "type": "string",
+                    "example": "\u003c订单号\u003e"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig": {
             "type": "object",
             "properties": {
@@ -19777,7 +19987,7 @@
             ],
             "properties": {
                 "representative_user_id": {
-                    "description": "RepresentativeUserID identifies the user attached to the OTM row for\ndisplay/audit. Optional: when unset, the handler picks a stable default\n(the user from the legacy UserID field, or the workspace's owner).",
+                    "description": "RepresentativeUserID is accepted for compatibility and ignored: a\ndirect add attaches no user of the enrolled workspace, since the\ninviter must not choose whose details the roster shows.",
                     "type": "string"
                 },
                 "role": {
@@ -19793,7 +20003,7 @@
                     "type": "integer"
                 },
                 "user_id": {
-                    "description": "UserID is retained for backward compatibility. When set without\nTenantID, the handler resolves the user's TenantID and uses this\nuser as the representative.",
+                    "description": "UserID is retained for backward compatibility. When set without\nTenantID, the handler resolves the user's TenantID.",
                     "type": "string"
                 }
             }
@@ -19928,6 +20138,14 @@
                     "description": "Description of the knowledge base",
                     "type": "string"
                 },
+                "desensitization_config": {
+                    "description": "DesensitizationConfig optionally masks parsed markdown before chunking.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DesensitizationConfig"
+                        }
+                    ]
+                },
                 "embedding_model_id": {
                     "description": "ID of the embedding model",
                     "type": "string"
@@ -19945,6 +20163,14 @@
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig"
+                        }
+                    ]
+                },
+                "generated_profile": {
+                    "description": "GeneratedProfile is the machine-generated description: a gist, merged\ntopics, typical questions and the aggregate snapshot they came from. It\nnever overwrites the user-authored Description; both are shown to agents.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfile"
                         }
                     ]
                 },
@@ -19995,6 +20221,14 @@
                 "processing_count": {
                     "description": "ProcessingCount indicates the number of knowledge items being processed (for document type knowledge bases)",
                     "type": "integer"
+                },
+                "profile_config": {
+                    "description": "ProfileConfig controls automatic generation of the knowledge-base\ndescription from per-document profiles (document knowledge bases only).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig"
+                        }
+                    ]
                 },
                 "question_generation_config": {
                     "description": "QuestionGenerationConfig stores question generation configuration for document knowledge bases",
@@ -20085,6 +20319,14 @@
                         }
                     ]
                 },
+                "desensitization_config": {
+                    "description": "DesensitizationConfig optionally masks parsed markdown before chunking.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DesensitizationConfig"
+                        }
+                    ]
+                },
                 "faq_config": {
                     "description": "FAQ configuration (only for FAQ type knowledge bases)",
                     "allOf": [
@@ -20109,6 +20351,14 @@
                         }
                     ]
                 },
+                "profile_config": {
+                    "description": "ProfileConfig controls optional automatic knowledge-base description\ngeneration. nil means \"no change\" when updating.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig"
+                        }
+                    ]
+                },
                 "wiki_config": {
                     "description": "Wiki configuration (only for wiki-enabled knowledge bases)",
                     "allOf": [
@@ -20116,6 +20366,128 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
                     ]
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfile": {
+            "type": "object",
+            "properties": {
+                "aggregate_hash": {
+                    "description": "AggregateHash identifies the aggregate the gist was generated from. A\nmismatch with the live aggregate means the text is stale.",
+                    "type": "string"
+                },
+                "error": {
+                    "description": "Error holds the last generation error when Status is failed.",
+                    "type": "string"
+                },
+                "generated_at": {
+                    "description": "GeneratedAt records when the text was produced.",
+                    "type": "string"
+                },
+                "gist": {
+                    "description": "Gist is a short statement of what the knowledge base covers.",
+                    "type": "string"
+                },
+                "model_id": {
+                    "description": "ModelID records which chat model produced the text.",
+                    "type": "string"
+                },
+                "stats": {
+                    "description": "Stats is the aggregate snapshot the text was generated from.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileStats"
+                        }
+                    ]
+                },
+                "status": {
+                    "description": "Status is one of the KnowledgeBaseProfileStatus* values.",
+                    "type": "string"
+                },
+                "topics": {
+                    "description": "Topics is the merged topic list (at most KnowledgeBaseProfileMaxTopics).",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "typical_questions": {
+                    "description": "TypicalQuestions lists questions this knowledge base can answer.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileConfig": {
+            "type": "object",
+            "properties": {
+                "custom_instructions": {
+                    "description": "CustomInstructions is appended to the stable system prompt, e.g. the\naudience the description should address or terms to keep.",
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "model_id": {
+                    "description": "ModelID overrides the chat model; empty falls back to the KB summary model.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfileStats": {
+            "type": "object",
+            "properties": {
+                "doc_types": {
+                    "description": "DocTypes counts documents per model-assigned document type.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.NamedCount"
+                    }
+                },
+                "document_count": {
+                    "description": "DocumentCount is the number of eligible documents at generation time.",
+                    "type": "integer"
+                },
+                "earliest_at": {
+                    "description": "EarliestAt and LatestAt bound document creation times.",
+                    "type": "string"
+                },
+                "file_types": {
+                    "description": "FileTypes counts documents per file extension.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.NamedCount"
+                    }
+                },
+                "folders": {
+                    "description": "Folders lists the top-level folder names present.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "latest_at": {
+                    "type": "string"
+                },
+                "profiled_count": {
+                    "description": "ProfiledCount is how many of them carried a document profile.",
+                    "type": "integer"
+                },
+                "raw_topics": {
+                    "description": "RawTopics counts documents per normalized topic keyword before merging.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.NamedCount"
+                    }
+                },
+                "tags": {
+                    "description": "Tags counts documents per knowledge-base tag.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.NamedCount"
+                    }
                 }
             }
         },
@@ -20757,7 +21129,7 @@
                     }
                 },
                 "artifacts": {
-                    "description": "Skill-generated files produced during this assistant turn (assistant messages only).\nPopulated by ArtifactCollector after the sandbox finishes, referenced by the\nartifact download endpoint. Empty for user messages and turns without skills.",
+                    "description": "Skill-generated files produced during this assistant turn (assistant messages only).\nPopulated by ArtifactCollector after the sandbox finishes, referenced by the\nartifact download endpoint. Empty for user messages and turns without skills.\n\nStored in the message_artifacts table, not on the message row: the message\nrepository loads it with every message it returns and writes it whenever it\nis non-nil on create or update. A nil slice leaves the stored rows alone.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MessageArtifact"
@@ -21175,6 +21547,17 @@
                 "ModelTypeVLLM",
                 "ModelTypeASR"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.NamedCount": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_types.OBSEngineConfig": {
             "type": "object",
@@ -25184,6 +25567,24 @@
                 "truncated_to": {
                     "description": "TruncatedTo, when set, is the original chunk count before the\nresponse was truncated to previewMaxChunks for transport.",
                     "type": "integer"
+                }
+            }
+        },
+        "internal_handler.PreviewDesensitizationRequest": {
+            "type": "object",
+            "properties": {
+                "desensitization_config": {
+                    "description": "Optional rules; engine is forced to builtin for this endpoint.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DesensitizationConfig"
+                        }
+                    ]
+                },
+                "text": {
+                    "description": "Sample text to mask. Preview always uses the builtin engine.",
+                    "type": "string",
+                    "example": "请拨打13800138000"
                 }
             }
         },

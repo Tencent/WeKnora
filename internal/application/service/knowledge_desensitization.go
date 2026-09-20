@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/desensitization"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -14,19 +15,21 @@ import (
 )
 
 func maskModelFacingText(ctx context.Context, kb *types.KnowledgeBase, text string, deps desensitization.Deps) (string, error) {
-	if kb == nil || !kb.DesensitizationConfig.IsEnabled() {
-		return text, nil
+	return desensitization.MaskIfEnabled(ctx, kb, text, deps)
+}
+
+func desensitizationDepsFromConfig(cfg *config.Config) desensitization.Deps {
+	deps := desensitization.Deps{}
+	if cfg != nil && cfg.Desensitization != nil {
+		deps.PresidioAnalyzerURL = cfg.Desensitization.PresidioAnalyzerURL
 	}
-	cfg := *kb.DesensitizationConfig
-	cfg.Normalize()
-	out, _, err := desensitization.Apply(ctx, text, cfg, deps)
-	return out, err
+	return deps
 }
 
 func (s *knowledgeService) desensitizationDeps(kb *types.KnowledgeBase) desensitization.Deps {
-	deps := desensitization.Deps{}
-	if s != nil && s.config != nil && s.config.Desensitization != nil {
-		deps.PresidioAnalyzerURL = s.config.Desensitization.PresidioAnalyzerURL
+	deps := desensitizationDepsFromConfig(nil)
+	if s != nil {
+		deps = desensitizationDepsFromConfig(s.config)
 	}
 	if kb != nil && kb.DesensitizationConfig != nil && kb.DesensitizationConfig.Engine == types.DesensitizationEngineLLM {
 		deps.Complete = s.desensitizationCompleter(kb)
@@ -90,6 +93,42 @@ func (s *knowledgeService) desensitizationCompleter(kb *types.KnowledgeBase) des
 		}
 		return resp.Content, nil
 	}
+}
+
+func maskStringSlice(ctx context.Context, kb *types.KnowledgeBase, items []string, deps desensitization.Deps) ([]string, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	out := make([]string, len(items))
+	for i, item := range items {
+		masked, err := maskModelFacingText(ctx, kb, item, deps)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = masked
+	}
+	return out, nil
+}
+
+func maskProfileAggregate(
+	ctx context.Context, kb *types.KnowledgeBase, agg *types.KnowledgeBaseProfileAggregate, cfg *config.Config,
+) (*types.KnowledgeBaseProfileAggregate, error) {
+	if agg == nil || kb == nil || !kb.DesensitizationConfig.IsEnabled() {
+		return agg, nil
+	}
+	out := *agg
+	deps := desensitizationDepsFromConfig(cfg)
+	var err error
+	if out.SampleTitles, err = maskStringSlice(ctx, kb, agg.SampleTitles, deps); err != nil {
+		return nil, err
+	}
+	if out.SampleGists, err = maskStringSlice(ctx, kb, agg.SampleGists, deps); err != nil {
+		return nil, err
+	}
+	if out.SampleQuestions, err = maskStringSlice(ctx, kb, agg.SampleQuestions, deps); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func persistDesensitizationFailure(ctx context.Context, repo interfaces.KnowledgeRepository, knowledge *types.Knowledge, err error) error {

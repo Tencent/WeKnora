@@ -122,6 +122,10 @@ var (
 		Description: "Failed to get conversation history",
 		ErrorType:   "get_history_failed",
 	}
+	ErrDesensitization = &PluginError{
+		Description: "Failed to mask model-facing retrieval context",
+		ErrorType:   "desensitization_failed",
+	}
 )
 
 // clone creates a copy of the PluginError

@@ -36,6 +36,14 @@
           </div>
         </div>
 
+        <t-alert
+          v-if="local.engine === 'presidio'"
+          theme="info"
+          class="notice-alert"
+          :title="$t('knowledgeEditor.desensitization.previewBuiltinOnlyTitle')"
+          :message="$t('knowledgeEditor.desensitization.previewBuiltinOnlyNotice')"
+        />
+
         <template v-if="local.engine === 'builtin'">
         <div class="setting-row">
           <div class="setting-info">
@@ -266,7 +274,7 @@ const runPreview = async () => {
   margin-bottom: 16px;
 }
 .section-header h2 {
-  font-size: 18px;
+  font-size: var(--app-text-3xl);
   font-weight: 600;
   margin: 0 0 8px;
 }
@@ -304,7 +312,7 @@ const runPreview = async () => {
 .desc {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 }
 .setting-control {
@@ -333,7 +341,7 @@ const runPreview = async () => {
   padding: 16px 20px;
   margin: 12px 0 0;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border-left: 3px solid var(--td-brand-color);
 }
 .entity-types {
@@ -346,7 +354,7 @@ const runPreview = async () => {
 }
 .preset-badge {
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-2xs);
   white-space: nowrap;
   padding: 0 4px;
 }
@@ -372,9 +380,9 @@ const runPreview = async () => {
   margin: 0;
   padding: 12px;
   background: var(--td-bg-color-page);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 13px;
+  font-size: var(--app-text-sm);
 }
 </style>
