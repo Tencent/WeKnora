@@ -56,7 +56,7 @@
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。
 - **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。Wiki 侧节点改名/移动会更新节点编辑时间，下一次增量同步文档自动落到新目录；Drive 侧目录改名/文件移动不改变文件修改时间，增量同步不感知，需手动全量同步刷新目录结构；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式节点按其指向的实体去重，不重复入库。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
 - **docx 解析模式**（数据源编辑页 → 解析模式，配置存于数据源级 `settings.parse_mode`，默认 `blocks`）：
-  - `blocks`（默认）→ blocks API 逐块读取并转为 GFM Markdown（`core/blocks.go`/`markdown.go`），保留代码块语言、LaTeX 公式、原生表格（合并单元格以左上值填充）等；覆盖不到的块类型（画板思维笔记等少数）降级为占位标记，不影响文档其余部分；
+  - `blocks`（默认）→ blocks API 逐块读取并转为 GFM Markdown（`core/blocks.go`/`markdown.go`），保留代码块语言、LaTeX 公式（`$...$`）、原生表格（**合并单元格拆分为独立单元格并填充左上值**，列对齐随源文档）、任务列表、分栏、高亮块等；文档内嵌的电子表格/多维表格块直接转为文档内 Markdown 表格（合并单元格同样以左上值填充）；文档小组件中的时间轴转为 Markdown 列表；覆盖不到的块类型（会话卡片、OKR、议程等无公开内容 API 的少数类型）降级为占位标记，不影响文档其余部分；
   - `export` → 异步导出 API（`POST /drive/v1/export_tasks`）导出 `.docx` 走通用文档解析。
   - `doc`（旧版文档）/`sheet`/`bitable` 不受此开关影响，仍走导出通道。
   - 取舍：**blocks** 快、保留 docx 内 file block 附件、需 `docx:document:readonly`；**export** 慢（异步导出 + docreader 解析）、丢失 docx 内附件、但解析表现与普通 docx 手工上传完全一致。只要正文与附件用默认 blocks 即可；需要与上传流程一致的解析表现时选 export。
