@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -235,10 +236,11 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 	if err != nil {
 		var partial *core.PartialWikiNodeListError
 		if !errors.As(err, &partial) {
-			// Partial listing: nodes are still usable; the failed sub-trees are
-			// surfaced via ListFailureItems, and the sync continues.
+			// Total listing failure: nothing usable — abort the sync.
 			return nodes, nil, err
 		}
+		// Partial listing: nodes are still usable; the failed sub-trees are
+		// surfaced via ListFailureItems, and the sync continues.
 	}
 	nodes = filterShortcutSubtrees(nodes)
 	o.prepareDirPaths(nodes)
@@ -252,15 +254,27 @@ func (o *wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
 func (o *wikiOps) Title(n core.WikiNode) string   { return n.Title }
 func (o *wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
 
-// EditTime is the change-detection timestamp: ObjEditTime (document content)
-// with a NodeEditTime fallback for nodes that lack obj_edit_time. It drives the
-// cursor comparison and, parsed, FetchedItem.UpdatedAt (see contentEditTime),
-// so the persisted source_updated_at tracks content edits, not node moves.
+// EditTime is the incremental-sync change key: the later of the object edit
+// time and the node edit time. It drives the cursor comparison only — the
+// fetched item's source_updated_at keeps tracking content edits (see
+// contentEditTime). Moves/renames are node-level operations and may
+// not bump obj_edit_time, so keying on the object alone would skip a moved
+// document forever (stale KB folder path) until its next content edit.
 func (o *wikiOps) EditTime(n core.WikiNode) string {
-	if n.ObjEditTime != "" {
+	obj, objErr := strconv.ParseInt(n.ObjEditTime, 10, 64)
+	node, nodeErr := strconv.ParseInt(n.NodeEditTime, 10, 64)
+	switch {
+	case objErr != nil && nodeErr != nil:
+		return n.ObjEditTime
+	case objErr != nil:
+		return n.NodeEditTime
+	case nodeErr != nil:
+		return n.ObjEditTime
+	case node > obj:
+		return n.NodeEditTime
+	default:
 		return n.ObjEditTime
 	}
-	return n.NodeEditTime
 }
 
 func (o *wikiOps) Fetch(ctx context.Context, client *core.Client, n core.WikiNode, resourceID string) ([]*types.FetchedItem, error) {
@@ -426,7 +440,7 @@ func fetchDriveFile(ctx context.Context, client *core.Client, node core.WikiNode
 	}
 
 	// Use the node title as file name; it usually preserves the original extension
-	fileName := node.Title
+	fileName := core.SanitizeFileName(node.Title)
 	if fileName == "" {
 		fileName = node.ObjToken
 	}

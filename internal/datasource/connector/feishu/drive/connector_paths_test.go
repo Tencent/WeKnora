@@ -116,7 +116,8 @@ func deletedIDs(items []types.FetchedItem) []string {
 }
 
 // TestDriveFetchIncremental_PathQualifiedMultiLevel anchors the directory
-// mapping: <根文件夹名>/<子目录...>/<文件名>, Chinese names kept, "/" in a folder
+// mapping: the selected root is the KB root, so paths are <子目录...>/<文件名>
+// relative to it, Chinese names kept, "/" in a folder
 // name sanitised to "_", multi-level nesting resolved from the same walk.
 func TestDriveFetchIncremental_PathQualifiedMultiLevel(t *testing.T) {
 	f := newFakeDriveTree(t, map[string][]core.DriveFile{

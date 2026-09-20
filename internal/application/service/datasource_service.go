@@ -1007,9 +1007,22 @@ func resyncRequired(cfg *types.DataSourceConfig) bool {
 
 // clearResyncMarker removes the one-shot upgrade marker after the upgraded sync
 // succeeded so it never fires again. Streaming path only: the feishu/lark
-// connectors the backfill tags all implement StreamingConnector.
+// connectors the migration tags all implement StreamingConnector.
 func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.DataSource) {
 	cfg, err := ds.ParseConfig()
+	if err == nil && cfg.Settings[feishuSettingResyncRequired] == nil {
+		return
+	}
+	// Re-read the row before writing: the upgraded sync may have run long, and
+	// a full-row Update from the sync-start snapshot would silently revert
+	// concurrent user edits (settings, resource_ids, schedule…). Only the
+	// marker removal is ours to persist.
+	fresh, err := s.dsRepo.FindByID(ctx, ds.ID)
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, re-read failed: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	cfg, err = fresh.ParseConfig()
 	if err != nil {
 		logger.Warnf(ctx, "failed to clear resync_required marker, config unreadable: ds=%s err=%v", ds.ID, err)
 		return
@@ -1023,8 +1036,8 @@ func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.Dat
 		logger.Warnf(ctx, "failed to clear resync_required marker, config re-encode failed: ds=%s err=%v", ds.ID, err)
 		return
 	}
-	ds.Config = blob
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
+	fresh.Config = blob
+	if err := s.dsRepo.Update(ctx, fresh); err != nil {
 		logger.Warnf(ctx, "failed to clear resync_required marker: ds=%s err=%v", ds.ID, err)
 	}
 }

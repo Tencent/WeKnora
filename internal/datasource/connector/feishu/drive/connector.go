@@ -439,7 +439,7 @@ func fetchDriveFileContent(
 			return nil, fmt.Errorf("download file %s (%s): %w", file.Name, file.Token, err)
 		}
 
-		fileName := file.Name
+		fileName := core.SanitizeFileName(file.Name)
 		if fileName == "" {
 			fileName = file.Token
 		}

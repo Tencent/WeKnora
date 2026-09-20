@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -157,6 +158,13 @@ var parseableAttachmentExts = map[string]bool{
 // MinAttachmentBytes filters out decorative micro-files.
 const MinAttachmentBytes = 2 * 1024
 
+// maxInlineImageBytes caps a single image inlined as a base64 data URI. It
+// mirrors the document-processing image resolver's per-image budget
+// (docparser maxRemoteImageSize): anything larger would be downloaded,
+// base64-expanded ~1.37x into the markdown, then silently skipped by the
+// resolver — a permanent raw-base64 blob in stored content.
+const maxInlineImageBytes = 10 * 1024 * 1024
+
 // SupportedImageExt sniffs image bytes and returns the filename extension and
 // content type WeKnora accepts for a standalone image knowledge item (png/jpg/
 // gif — the image set isValidFileType admits). ok is false for non-image or
@@ -172,6 +180,12 @@ func SupportedImageExt(data []byte) (ext, contentType string, ok bool) {
 	case "image/gif":
 		return ".gif", ct, true
 	default:
+		// Go's sniffer reports SVG markup as text/xml; recover the real type
+		// when the payload is an <svg> document (board download_as_image may
+		// return SVG), and the platform resolver stores .svg natively.
+		if strings.HasPrefix(ct, "text/xml") && bytes.Contains(data[:min(len(data), 512)], []byte("<svg")) {
+			return ".svg", "image/svg+xml", true
+		}
 		return "", ct, false
 	}
 }
@@ -359,17 +373,18 @@ type DocxFetchInput struct {
 	ParseMode string
 }
 
-// FetchDocxWithBlocks retrieves a docx document via the blocks API, converts it
-// to Markdown, and returns any image/attachment sub-items followed by the main
-// item. Image and board blocks render as numbered `weknora-img://N` markers
-// resolved by the doc-process pipeline through the parent's image_map. Falls
-// back to the export API if the blocks API errors or renders empty. Shared by
-// the wiki Connector and the Drive DriveConnector.
+// FetchDocxWithBlocks retrieves a docx document via the blocks API, converts
+// it to Markdown, and returns the main item with attachment sub-items. Image
+// and board blocks render as nonce-tagged markers that this function patches
+// in place with inline base64 data URIs (placeholders on failure); the
+// document-processing image resolver stores them later. Falls back to the
+// export API if the blocks API errors or renders empty. Shared by the wiki
+// Connector and the Drive DriveConnector.
 func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput) ([]*types.FetchedItem, error) {
 	// The parse mode comes from the data source's Settings["parse_mode"],
 	// resolved by ParseFeishuConfig and threaded in via DocxFetchInput.ParseMode.
 	// The blocks path (default) fans images/boards/attachments out into
-	// sub-items wired to the parent via weknora-img://N markers and image_map /
+	// sub-items wired to the parent via weknora-img://N markers and image_map /  (stale-marker)
 	// attachment_ids metadata. The export path yields a .docx that docreader
 	// parses inline, so images are bound to the parent document via
 	// parent_chunk_id (same as a regular docx upload) — kept as the per-data-
@@ -401,11 +416,9 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		return []*types.FetchedItem{item}, nil
 	}
 
-	// Images/boards ride the weknora-img://N marker pipeline: the renderer
-	// numbers them in document order, the connector fans the media out into
-	// sub-items, and the parent's metadata image_map ("N" → external_id) lets
-	// the doc-process pipeline resolve each marker against the image
-	// knowledge's persistent FilePath in a single pass.
+	// Images/boards ride the marker pipeline: the renderer numbers them in
+	// document order, and the patches below inline each image's bytes as a
+	// base64 data URI (or a plain placeholder on failure) in a single pass.
 	mdBytes, atts, imgs, err := blocksToMarkdown(ctx, client, blocks, in.URL, userNameResolver(ctx, client))
 	if err != nil {
 		return nil, fmt.Errorf("convert blocks %s: %w", in.Title, err)
@@ -440,7 +453,8 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	// ![图片]() placeholder or a degrade note on failure. Markers are unique
 	// per N, and N is assigned once per image/board block.
 	patchMarker := func(n int, replacement string) {
-		md = strings.Replace(md, fmt.Sprintf("![图片](weknora-img://%d)", n), replacement, 1)
+		needle := fmt.Sprintf("![图片](weknora-img://%d-%s)", n, imageMarkerNonce(in.URL))
+		md = strings.Replace(md, needle, replacement, 1)
 	}
 
 	// ── file attachments ──
@@ -449,9 +463,18 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		keep = append(keep, childID) // present in the doc → never sweep as stale
 		// The renderer emitted the unique line "- weknora-att://<token>" for
 		// this attachment; patch that exact line so an identical earlier
-		// bullet can never be replaced by mistake.
+		// bullet can never be replaced by mistake. Anchoring on the token's
+		// end (newline or end of markdown) keeps a token that is a strict
+		// prefix of another attachment's token from matching inside it.
 		patchAtt := func(line string) {
-			md = strings.Replace(md, "- weknora-att://"+a.FileToken, line, 1)
+			needle := "- weknora-att://" + a.FileToken
+			if anchored := needle + "\n"; strings.Contains(md, anchored) {
+				md = strings.Replace(md, anchored, line+"\n", 1)
+				return
+			}
+			if strings.HasSuffix(md, needle) {
+				md = md[:len(md)-len(needle)] + line
+			}
 		}
 		// The renderer only collects whitelisted extensions into atts, so
 		// non-whitelisted/video files never reach this loop (their inline
@@ -544,6 +567,16 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			// degrade to a placeholder rather than embedding junk.
 			logger.Infof(ctx, "[Feishu] doc %s: %s %s not a usable image (type=%q bytes=%d)",
 				in.ObjToken, pi.Kind, pi.Token, contentType, len(data))
+			patchMarker(pi.N, "![图片]()")
+			continue
+		}
+		if len(data) > maxInlineImageBytes {
+			// The document-processing image resolver skips data URIs over its
+			// 10 MB budget (image_resolver maxRemoteImageSize); inlining one
+			// would leave a raw base64 blob in the stored markdown forever.
+			// Degrade here instead — same handling as an oversized attachment.
+			logger.Warnf(ctx, "[Feishu] doc %s: %s %s (%d bytes) over inline image cap, degrading to placeholder",
+				in.ObjToken, pi.Kind, pi.Token, len(data))
 			patchMarker(pi.N, "![图片]()")
 			continue
 		}

@@ -208,3 +208,17 @@ func TestFetchDocxWithBlocks_OverCapPatchHitsMarkerNotEarlierBullet(t *testing.T
 		t.Errorf("over-cap degrade note missing:\n%s", main.Content)
 	}
 }
+
+// TestSupportedImageExtSVG pins the svg recovery: Go's sniffer reports SVG
+// markup as text/xml, but a board export carrying an <svg> document must be
+// treated as an inlinable image, not degraded to a placeholder.
+func TestSupportedImageExtSVG(t *testing.T) {
+	svg := []byte(`<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`)
+	ext, ct, ok := SupportedImageExt(svg)
+	if !ok || ext != ".svg" || ct != "image/svg+xml" {
+		t.Fatalf("SupportedImageExt(svg) = %q %q %v, want .svg image/svg+xml true", ext, ct, ok)
+	}
+	if _, _, ok := SupportedImageExt([]byte("<?xml version=\"1.0\"?><not-svg/>")); ok {
+		t.Fatal("non-svg xml must not be treated as an image")
+	}
+}

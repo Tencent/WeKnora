@@ -36,10 +36,11 @@ type Config struct {
 	Timezone string `json:"timezone,omitempty"`
 
 	// ParseMode selects the docx parsing path: "blocks" (default) renders the
-	// blocks API into Markdown with attachment/image sub-items; "export" exports
+	// blocks API into Markdown with attachment sub-items; "export" exports
 	// a .docx binary that docreader parses inline, keeping image↔document
 	// association via parent_chunk_id. Parsed from Settings["parse_mode"] by
-	// ParseFeishuConfig and carried on the Client; see FetchDocxWithBlocks.
+	// ParseFeishuConfig and threaded via DocxFetchInput.ParseMode; see
+	// FetchDocxWithBlocks.
 	ParseMode string `json:"parse_mode,omitempty"`
 }
 

@@ -125,6 +125,7 @@ type TextElement struct {
 type BlockTextStyle struct {
 	Language int    `json:"language"`
 	Sequence string `json:"sequence"`
+	Done     bool   `json:"done"` // todo blocks: item completed
 }
 
 // BlockText is the shared shape of text-bearing blocks (text, headingN, bullet…).

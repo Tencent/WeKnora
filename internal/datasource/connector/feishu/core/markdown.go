@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,12 +25,11 @@ type pendingAttachment struct {
 }
 
 // pendingImage is one image/board marker emitted into the Markdown, in
-// document order: N is the 1-based weknora-img:// sequence number, Kind is the
+// document order: N is the 1-based marker sequence number, Kind is the
 // SubtreeChildID discriminator ("image" or "board"), Token the Feishu media or
-// whiteboard token. The connector turns these into sub-items and the
-// parent's metadata image_map ("N" → external_id); an image whose item is
-// never produced simply has no image_map entry, and the doc-process pipeline
-// degrades the unresolved marker back to a plain ![图片]() placeholder.
+// whiteboard token. The connector downloads each token and patches its marker
+// in place — an inline base64 data URI on success, a plain ![图片]()
+// placeholder on failure (no image sub-items are created).
 type pendingImage struct {
 	N     int
 	Kind  string
@@ -39,30 +39,47 @@ type pendingImage struct {
 // mdRenderer carries per-document rendering state: the block index for
 // container recursion, download candidates, and the ordered-list counter.
 type mdRenderer struct {
-	ctx    context.Context
-	client sheetReader
-	byID   map[string]DocxBlock
-	atts   []pendingAttachment
-	imgs   []pendingImage
-	imgN   int    // last weknora-img:// sequence number assigned
-	docURL string // parent document's web URL, for non-whitelisted attachment placeholders
+	ctx         context.Context
+	client      sheetReader
+	byID        map[string]DocxBlock
+	atts        []pendingAttachment
+	imgs        []pendingImage
+	imgN        int    // last marker sequence number assigned
+	markerNonce string // per-document nonce keeping user text from matching markers
+	docURL      string // parent document's web URL, for non-whitelisted attachment placeholders
 
 	// userName resolves a mention_user OpenID to a display name; "" means
 	// unresolved (renders the generic @成员). Nil-safe via the default set in
 	// blocksToMarkdown.
 	userName func(string) string
 
-	orderedActive bool // an ordered-list run is in progress
-	orderedNext   int  // next number for "auto"/absent sequence
+	orderedActive     bool   // an ordered-list run is in progress
+	lastOrderedParent string // ParentID of the most recent ordered item
+	orderedNext       int    // next number for "auto"/absent sequence
 }
 
-// nextImageNo assigns the next weknora-img:// sequence number. The renderer and
-// the recorded pendingImage share this single counter, so the marker in the
-// Markdown and the parent's image_map can never disagree.
+// nextImageNo assigns the next marker sequence number. The renderer and the
+// recorded pendingImage share this single counter, so the marker in the
+// Markdown and the pendingImage can never disagree.
 func (r *mdRenderer) nextImageNo(kind, token string) int {
 	r.imgN++
 	r.imgs = append(r.imgs, pendingImage{N: r.imgN, Kind: kind, Token: token})
 	return r.imgN
+}
+
+// imageMarker renders the synthetic placeholder for image/board N. The nonce
+// keeps user-typed look-alike text (a literal ![图片](weknora-img://1) in a
+// text run) from ever matching the connector's patch needle — only this
+// renderer and the patcher share the derivation (imageMarkerNonce).
+func (r *mdRenderer) imageMarker(n int) string {
+	return fmt.Sprintf("![图片](weknora-img://%d-%s)", n, r.markerNonce)
+}
+
+// imageMarkerNonce derives the per-document marker nonce from the doc URL.
+func imageMarkerNonce(seed string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(seed))
+	return fmt.Sprintf("%08x", h.Sum32())
 }
 
 // blocksToMarkdown renders a flat docx block array to Markdown, inlining
@@ -88,7 +105,7 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 	if userName == nil {
 		userName = func(string) string { return "" }
 	}
-	r := &mdRenderer{ctx: ctx, client: client, byID: byID, docURL: docURL, userName: userName}
+	r := &mdRenderer{ctx: ctx, client: client, byID: byID, docURL: docURL, userName: userName, markerNonce: imageMarkerNonce(docURL)}
 	var sb strings.Builder
 	for _, b := range blocks {
 		if consumed[b.BlockID] {
@@ -137,8 +154,15 @@ func markContainerDescendants(blocks []DocxBlock, byID map[string]DocxBlock, con
 // renderBlock renders one block, recursing into containers. Returns "" when
 // the block contributes nothing.
 func (r *mdRenderer) renderBlock(b DocxBlock) string {
+	// Only a sibling of the last ordered item ends an ordered run. Ordered
+	// items share one parent, while their child blocks render flat between
+	// items carrying the item's own ID — those must not renumber the run.
 	if b.BlockType != BlockTypeOrdered {
-		r.orderedActive = false
+		if b.ParentID == r.lastOrderedParent {
+			r.orderedActive = false
+		}
+	} else {
+		r.lastOrderedParent = b.ParentID
 	}
 	switch b.BlockType {
 	case BlockTypePage, BlockTypeTableCell:
@@ -154,7 +178,11 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 	case BlockTypeQuote:
 		return "> " + r.richText(b.Quote)
 	case BlockTypeTodo:
-		if t := r.richText(b.Todo); t != "" {
+		bt := textBearingField(b)
+		if t := r.richText(bt); t != "" {
+			if bt != nil && bt.Style != nil && bt.Style.Done {
+				return "- [x] " + t
+			}
 			return "- [ ] " + t
 		}
 	case BlockTypeDivider:
@@ -190,23 +218,22 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 		}
 	case BlockTypeImage:
 		// Token-free numbered marker: the media token never enters the Markdown;
-		// the doc-process pipeline resolves weknora-img://N through the parent's
-		// image_map to the image knowledge's persistent FilePath.
+		// the connector downloads it and patches the marker in place.
 		var tok string
 		if b.Image != nil {
 			tok = b.Image.Token
 		}
 		n := r.nextImageNo("image", tok)
-		return fmt.Sprintf("![图片](weknora-img://%d)", n)
+		return r.imageMarker(n)
 	case BlockTypeBoard:
 		if b.Board == nil || b.Board.Token == "" {
 			return unsupportedBlockNote(b)
 		}
 		// Boards ride the same image pipeline: the connector downloads the
-		// whiteboard thumbnail and fans it out as an image sub-item. On export
-		// failure the connector patches this marker back to a degrade note.
+		// whiteboard export and inlines it. On failure it patches this marker
+		// back to a plain placeholder.
 		n := r.nextImageNo("board", b.Board.Token)
-		return fmt.Sprintf("![图片](weknora-img://%d)", n)
+		return r.imageMarker(n)
 	case BlockTypeFile:
 		if b.File != nil {
 			name := b.File.Name
@@ -432,17 +459,35 @@ var gfmCodeLanguages = map[int]string{
 }
 
 // renderCode renders a code block, tagging the fence with the GFM alias of the
-// block's CodeLanguage when one is known.
+// block's CodeLanguage when one is known. The fence grows past any backtick
+// run inside the content so a line of ``` in the code cannot close it early.
 func (r *mdRenderer) renderCode(b DocxBlock) string {
 	lang := ""
 	if b.Code != nil && b.Code.Style != nil {
 		lang = gfmCodeLanguages[b.Code.Style.Language]
 	}
-	fence := "```"
+	content := r.richText(b.Code)
+	fence := strings.Repeat("`", codeFenceLength(content))
 	if lang != "" {
 		fence += lang
 	}
-	return fence + "\n" + r.richText(b.Code) + "\n```"
+	return fence + "\n" + content + "\n" + fence
+}
+
+// codeFenceLength returns a fence length strictly longer than the longest
+// leading backtick run on any content line (≥3), per the CommonMark fencing rule.
+func codeFenceLength(content string) int {
+	longest := 2
+	for _, line := range strings.Split(content, "\n") {
+		n := 0
+		for n < len(line) && line[n] == '`' {
+			n++
+		}
+		if n > longest {
+			longest = n
+		}
+	}
+	return longest + 1
 }
 
 // blockTypeNames maps docx block types this converter does not unpack to their

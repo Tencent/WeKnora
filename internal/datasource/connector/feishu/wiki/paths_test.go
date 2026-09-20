@@ -108,7 +108,8 @@ func fileNode(token, title string, opts ...func(*core.WikiNode)) core.WikiNode {
 }
 
 // TestWikiFetchAll_PathQualifiedMultiLevel anchors the multi-level directory
-// mapping: <space名>/<目录A>/<目录B>/<文档名>, Chinese directory names kept as-is
+// mapping: the selected root is the KB root, so paths are
+// <目录A>/<目录B>/<文档名> relative to it, Chinese directory names kept as-is
 // and "/" inside a directory name sanitised to "_" so it cannot fake an extra
 // nesting level.
 func TestWikiFetchAll_PathQualifiedMultiLevel(t *testing.T) {
@@ -136,13 +137,12 @@ func TestWikiFetchAll_PathQualifiedMultiLevel(t *testing.T) {
 	want := map[string]string{
 		// The selected space IS the KB root: a top-level item's prefix is
 		// empty (bare file name), deeper items carry only the directory path.
-		// Top-level directory node keeps its raw title as base name (existing
-		// file-node naming rule, unchanged).
+		// Base names are sanitised like directory segments: a "/" in a title
+		// must not fake an extra folder level (nt-dirB), while the directory
+		// path prefix is built from the sanitised folder name (nt-leaf).
 		"nt-dirA": "产品文档",
 		"nt-top":  "顶层.pdf",
-		// Its own base name keeps the raw title; the "/" sanitisation of the
-		// DIRECTORY segment shows up in nt-leaf's path below.
-		"nt-dirB": "产品文档/子/目录",
+		"nt-dirB": "产品文档/子_目录",
 		"nt-leaf": "产品文档/子_目录/规格说明.pdf",
 	}
 	got := make(map[string]string, len(items))

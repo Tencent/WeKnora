@@ -208,8 +208,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 // ListKnowledgeFolderCounts aggregates how many knowledge entries live directly
 // in each folder of a knowledge base. Rows mid-deletion are excluded so the
-// sidebar tree counts match the document list; embedded image/board rows are
-// excluded for the same reason (they are not documents).
+// sidebar tree counts match the document list.
 func (r *knowledgeRepository) ListKnowledgeFolderCounts(
 	ctx context.Context,
 	tenantID uint64,

@@ -794,6 +794,10 @@ function selectType(def: ConnectorDef) {
   form.value.config.credentials = {}
   if (isFeishuFamilyConnector(def.type)) {
     form.value.config.settings.parse_mode = form.value.config.settings.parse_mode || 'blocks'
+  } else {
+    // Backtracking from a Feishu/Lark type must not leak parse_mode into
+    // other connectors' settings.
+    delete form.value.config.settings.parse_mode
   }
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []

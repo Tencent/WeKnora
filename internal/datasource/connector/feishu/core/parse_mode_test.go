@@ -68,10 +68,7 @@ func TestParseFeishuConfig_ParseMode(t *testing.T) {
 	})
 }
 
-// NewClient carries Config.ParseMode so FetchDocxWithBlocks (which only sees
-// the Client) picks the right path; empty stays empty and FetchDocxWithBlocks
-// itself treats that as blocks.
-// ParseMode threading: DocxFetchInput.ParseMode is now the single transport
+// ParseMode threading: DocxFetchInput.ParseMode is the single transport
 // (connector entry resolves it via ParseFeishuConfig and passes it through
 // ops → fetchNodeContent → DocxFetchInput). Empty degrades to blocks inside
 // FetchDocxWithBlocks; resolution itself is covered by

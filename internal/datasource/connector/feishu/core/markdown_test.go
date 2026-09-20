@@ -51,7 +51,7 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	if !strings.Contains(string(md), "| 名称 | 数量 |") || !strings.Contains(string(md), "| 苹果 | 3 |") {
 		t.Errorf("sheet not inlined:\n%s", md)
 	}
-	if !strings.Contains(string(md), "![图片](weknora-img://1)") {
+	if !strings.Contains(string(md), fmt.Sprintf("![图片](weknora-img://1-%s)", imageMarkerNonce(""))) {
 		t.Errorf("numbered image marker missing:\n%s", md)
 	}
 	if len(imgs) != 1 || imgs[0].N != 1 || imgs[0].Kind != "image" || imgs[0].Token != "img_t" {
@@ -343,6 +343,19 @@ func TestBlocksToMarkdown_TodoAndCallout(t *testing.T) {
 	if !strings.Contains(string(md), "> 注意事项") {
 		t.Errorf("callout direct text not rendered:\n%s", md)
 	}
+	done := txt("已办结")
+	done.Style = &BlockTextStyle{Done: true}
+	blocks = []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "d", BlockType: BlockTypeTodo, Todo: done},
+	}
+	md, _, _, err = blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(string(md), "- [x] 已办结") {
+		t.Errorf("completed todo must render checked:\n%s", md)
+	}
 }
 
 func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
@@ -476,7 +489,7 @@ func TestBlocksToMarkdown_UnsupportedBlocksPlaceholdersNoTokenLeak(t *testing.T)
 	// Board (43) now rides the image pipeline: a token-bearing board renders a
 	// numbered weknora-img:// marker and records a pendingImage for the
 	// connector's whiteboard download.
-	if !strings.Contains(s, "![图片](weknora-img://1)") {
+	if !strings.Contains(s, fmt.Sprintf("![图片](weknora-img://1-%s)", imageMarkerNonce(""))) {
 		t.Errorf("board marker missing:\n%s", s)
 	}
 	if len(imgs) != 1 || imgs[0].Kind != "board" || imgs[0].Token != "brdSECRET" {
@@ -672,7 +685,12 @@ func TestBlocksToMarkdown_ImageNumberingStableOrder(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	s := string(md)
-	for _, want := range []string{"![图片](weknora-img://1)", "![图片](weknora-img://2)", "![图片](weknora-img://3)"} {
+	nonce := imageMarkerNonce("")
+	for _, want := range []string{
+		fmt.Sprintf("![图片](weknora-img://1-%s)", nonce),
+		fmt.Sprintf("![图片](weknora-img://2-%s)", nonce),
+		fmt.Sprintf("![图片](weknora-img://3-%s)", nonce),
+	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("marker %q missing:\n%s", want, s)
 		}
@@ -712,5 +730,59 @@ func TestBlocksToMarkdown_LinkURLWithSpacesAndParens(t *testing.T) {
 	if !strings.Contains(string(md), "](https://example.com/a%20%281%29.pdf)") &&
 		!strings.Contains(string(md), "](<https://example.com/a (1).pdf>)") {
 		t.Errorf("URL not escaped for Markdown:\n%s", md)
+	}
+}
+
+// TestBlocksToMarkdown_CodeFenceSurvivesBackticks pins fence sizing: code
+// content containing a ``` line must not close the fence early.
+func TestBlocksToMarkdown_CodeFenceSurvivesBackticks(t *testing.T) {
+	content := "x := 1\n```\nthis line must stay fenced"
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "code", BlockType: BlockTypeCode, Code: txt(content)},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	out := string(md)
+	if !strings.HasPrefix(out, "````\n") {
+		t.Errorf("fence must grow past the inner ``` run:\n%s", out)
+	}
+	if !strings.Contains(out, "this line must stay fenced\n````") {
+		t.Errorf("content after the inner ``` run leaked out of the fence:\n%s", out)
+	}
+}
+
+// TestBlocksToMarkdown_OrderedChildrenKeepNumbering pins the sibling-only
+// reset: child blocks between ordered items must not renumber an "auto" run.
+func TestBlocksToMarkdown_OrderedChildrenKeepNumbering(t *testing.T) {
+	child := txt("子项")
+	auto := func(id, parent string) DocxBlock {
+		b := DocxBlock{BlockID: id, ParentID: parent, BlockType: BlockTypeOrdered, Ordered: txt("项")}
+		b.Ordered.Style = &BlockTextStyle{Sequence: "auto"}
+		return b
+	}
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		auto("i1", "root"),
+		{BlockID: "c1", ParentID: "i1", BlockType: BlockTypeBullet, Bullet: child},
+		auto("i2", "root"),
+		{BlockID: "p", ParentID: "root", BlockType: BlockTypeText, Text: txt("正文")},
+		auto("i3", "root"),
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	out := string(md)
+	if !strings.Contains(out, "2. 项") {
+		t.Errorf("child block between items must not renumber the run:\n%s", out)
+	}
+	if strings.Contains(out, "3. 项") {
+		t.Errorf("run must not continue across the intervening paragraph:\n%s", out)
+	}
+	if !strings.Contains(out, "正文\n\n1. 项") {
+		t.Errorf("a top-level sibling must restart the numbering:\n%s", out)
 	}
 }
