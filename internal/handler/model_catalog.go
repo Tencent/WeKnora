@@ -26,16 +26,19 @@ type ModelProviderDTO struct {
 	Descriptions map[string]string `json:"descriptions,omitempty"`
 	Website      string            `json:"website,omitempty"`
 	// Icon is a data: URI (image/svg+xml;base64) ready for <img src>.
-	Icon         string                 `json:"icon,omitempty"`
-	API          api.API                `json:"api"`
-	Auth         catalog.AuthStyle      `json:"auth"`
-	RequiresAuth bool                   `json:"requiresAuth"`
-	DefaultURLs  map[string]string      `json:"defaultUrls"`
-	ModelTypes   []string               `json:"modelTypes"`
-	ExtraFields  []catalog.ExtraField   `json:"extraFields,omitempty"`
-	Models       []ModelCatalogEntryDTO `json:"models,omitempty"`
-	Thinking     ProviderThinkingDTO    `json:"thinking"`
-	Order        int                    `json:"order"`
+	Icon         string               `json:"icon,omitempty"`
+	API          api.API              `json:"api"`
+	Auth         catalog.AuthStyle    `json:"auth"`
+	RequiresAuth bool                 `json:"requiresAuth"`
+	DefaultURLs  map[string]string    `json:"defaultUrls"`
+	ModelTypes   []string             `json:"modelTypes"`
+	ExtraFields  []catalog.ExtraField `json:"extraFields,omitempty"`
+	// CredentialLabels rename the primary credential input for the model
+	// types that do not take a plain API key (signed rerank APIs).
+	CredentialLabels []catalog.CredentialLabel `json:"credentialLabels,omitempty"`
+	Models           []ModelCatalogEntryDTO    `json:"models,omitempty"`
+	Thinking         ProviderThinkingDTO       `json:"thinking"`
+	Order            int                       `json:"order"`
 }
 
 // ProviderThinkingDTO summarizes how the vendor encodes thinking so the UI
@@ -109,7 +112,10 @@ func providerDTO(v *catalog.Vendor, modelType types.ModelType, includeModels boo
 		DefaultURLs:  defaultURLs,
 		ModelTypes:   modelTypes,
 		ExtraFields:  v.ExtraFields,
-		Order:        v.Order,
+		// Passed through raw, like ExtraFields: the editor resolves the
+		// locale and the model type, so a new vendor needs no UI change.
+		CredentialLabels: v.CredentialLabels,
+		Order:            v.Order,
 	}
 	// Vendor-level thinking summary: resolve an unknown model so only the
 	// vendor defaults contribute.

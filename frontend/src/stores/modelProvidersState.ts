@@ -6,7 +6,11 @@
  * catalog models) comes from the backend catalog (internal/handler/
  * model_catalog.go); these helpers only pick the right locale / model type.
  */
-import type { ModelProviderExtraField, ModelProviderOption } from '@/api/initialization'
+import type {
+  ModelProviderCredentialLabel,
+  ModelProviderExtraField,
+  ModelProviderOption,
+} from '@/api/initialization'
 
 /** Editor model types → backend ModelType names used by ExtraField.model_types. */
 const FRONTEND_TO_BACKEND_MODEL_TYPE: Record<string, string> = {
@@ -44,6 +48,19 @@ export function extraFieldsForModelType(
 ): ModelProviderExtraField[] {
   if (!fields || fields.length === 0) return []
   return fields.filter((field) => !!field?.key && extraFieldAppliesTo(field, modelType))
+}
+
+/**
+ * The credential naming to use at one model type, or null when the vendor
+ * takes a plain API key. First match wins, and an entry without a
+ * `model_types` filter applies everywhere — same rule as extra fields.
+ */
+export function credentialLabelForModelType(
+  labels: ReadonlyArray<ModelProviderCredentialLabel> | null | undefined,
+  modelType: string,
+): ModelProviderCredentialLabel | null {
+  if (!labels || labels.length === 0) return null
+  return labels.find((label) => !!label?.label && extraFieldAppliesTo(label, modelType)) || null
 }
 
 /**

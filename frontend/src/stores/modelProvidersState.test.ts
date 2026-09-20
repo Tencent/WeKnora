@@ -4,6 +4,7 @@ import test from 'node:test'
 import type { ModelProviderOption } from '@/api/initialization'
 
 import {
+  credentialLabelForModelType,
   extraFieldLabel,
   extraFieldsForModelType,
   loadProvidersForType,
@@ -186,4 +187,38 @@ test('mergeProviderIndex tolerates missing values and model lists', () => {
   )
   assert.deepEqual(withModels.openai.models?.map((m) => m.id), ['gpt-4o'])
   assert.equal(withModels.openai.label, 'OpenAI', 'fresh metadata still wins')
+})
+
+test('credentialLabelForModelType follows the vendor declaration, not a hardcoded table', () => {
+  const labels = [
+    {
+      label: 'SecretId',
+      labels: { 'zh-CN': 'SecretId（TC3 签名）' },
+      placeholder: 'AKID...',
+      hint: 'not an sk- key',
+      model_types: ['Rerank'],
+      required: true,
+    },
+  ]
+  // The signed rerank API renames the field; chat on the same vendor does not.
+  const rerank = credentialLabelForModelType(labels, 'rerank')
+  assert.equal(rerank?.label, 'SecretId')
+  assert.equal(rerank?.required, true)
+  assert.equal(credentialLabelForModelType(labels, 'chat'), null)
+  assert.equal(credentialLabelForModelType(labels, 'embedding'), null)
+
+  // Backend spelling of the model type resolves the same way.
+  assert.equal(credentialLabelForModelType(labels, 'Rerank')?.label, 'SecretId')
+
+  // Vendors that take a plain API key declare nothing.
+  assert.equal(credentialLabelForModelType(undefined, 'rerank'), null)
+  assert.equal(credentialLabelForModelType([], 'rerank'), null)
+
+  // An entry without a model_types filter applies to every type.
+  const everywhere = [{ label: 'Access Key' }]
+  assert.equal(credentialLabelForModelType(everywhere, 'chat')?.label, 'Access Key')
+
+  // Localization goes through the same picker as every other vendor string.
+  assert.equal(pickLocalized(rerank?.labels, 'zh-CN', rerank!.label), 'SecretId（TC3 签名）')
+  assert.equal(pickLocalized(rerank?.labels, 'en-US', rerank!.label), 'SecretId')
 })

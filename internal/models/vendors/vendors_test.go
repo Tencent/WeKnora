@@ -183,6 +183,23 @@ func TestFamilyExpectations(t *testing.T) {
 	if r := resolve(t, "azure_openai", "gpt-5.4-prod"); r.OpenAICompletions.SupportsTemperature {
 		t.Error("azure gpt-5* deployment should not support temperature")
 	}
+	// A deployment named exactly gpt-5 / gpt-5-mini / gpt-5-nano must agree
+	// with the openai vendor: the original GPT-5 trio rejects
+	// reasoning_effort "none", so the picker must not offer thinking off.
+	// Only GPT-5.1 and later, which the gpt-5* pattern covers, accept it.
+	for _, deployment := range []string{"gpt-5", "gpt-5-mini", "gpt-5-nano"} {
+		azureSpec := resolve(t, "azure_openai", deployment)
+		if azureSpec.ThinkingLevels.Supports(api.ReasoningOff) {
+			t.Errorf("azure/%s should not allow thinking off", deployment)
+		}
+		openaiSpec := resolve(t, "openai", deployment)
+		if openaiSpec.ThinkingLevels.Supports(api.ReasoningOff) {
+			t.Errorf("openai/%s should not allow thinking off", deployment)
+		}
+	}
+	if r := resolve(t, "azure_openai", "gpt-5.1-prod"); !r.ThinkingLevels.Supports(api.ReasoningOff) {
+		t.Error("azure gpt-5* family (GPT-5.1 and later) should allow thinking off")
+	}
 	if r := resolve(t, "aliyun", "qwen3-max"); !r.OpenAICompletions.ThinkingAlwaysSend {
 		t.Error("aliyun/qwen3-max should always send the thinking switch")
 	}
@@ -280,6 +297,30 @@ func TestHooks(t *testing.T) {
 	if azure.Auth != catalog.AuthAPIKeyHeader {
 		t.Errorf("azure auth = %q", azure.Auth)
 	}
+	// Embedding obeys the same rule as chat for the same stored row, so one
+	// Azure resource never ends up serving chat on v1 and embedding on the
+	// dated deployments path. internal/models/embedding calls this hook.
+	u, q = azure.Endpoint(catalog.EndpointRequest{
+		BaseURL: "https://x.openai.azure.com", Model: "embed-deploy",
+		ModelType: types.ModelTypeEmbedding,
+	})
+	if u != "https://x.openai.azure.com/openai/v1/embeddings" {
+		t.Errorf("azure v1 embedding endpoint = %q", u)
+	}
+	if len(q) != 0 {
+		t.Errorf("azure v1 embedding query = %v, want none", q)
+	}
+	u, q = azure.Endpoint(catalog.EndpointRequest{
+		BaseURL: "https://x.openai.azure.com", Model: "embed-deploy",
+		ModelType: types.ModelTypeEmbedding,
+		Extra:     map[string]string{catalog.ExtraAPIVersion: "2024-10-21"},
+	})
+	if u != "https://x.openai.azure.com/openai/deployments/embed-deploy/embeddings" {
+		t.Errorf("azure legacy embedding endpoint = %q", u)
+	}
+	if q["api-version"] != "2024-10-21" {
+		t.Errorf("azure legacy embedding api-version = %q", q["api-version"])
+	}
 
 	wk, _ := catalog.Get("weknoracloud")
 	u, _ = wk.Endpoint(catalog.EndpointRequest{
@@ -321,5 +362,40 @@ func TestHooks(t *testing.T) {
 		if !found {
 			t.Errorf("%s should expose a secret_key extra field", id)
 		}
+	}
+}
+
+// TestSignedRerankCredentialLabels pins that the two signed rerank vendors
+// name their first credential after the identity it actually is. The editor
+// renders this instead of a hardcoded vendor table, so losing it silently
+// sends operators back to pasting an sk- key into a signature field.
+func TestSignedRerankCredentialLabels(t *testing.T) {
+	for _, tc := range []struct{ vendor, wantLabel string }{
+		{"lkeap", "SecretId"},
+		{"volcengine", "Access Key ID"},
+	} {
+		t.Run(tc.vendor, func(t *testing.T) {
+			v, ok := catalog.Get(tc.vendor)
+			if !ok {
+				t.Fatalf("vendor %s is not registered", tc.vendor)
+			}
+			label := v.CredentialLabelFor(types.ModelTypeRerank)
+			if label == nil {
+				t.Fatalf("rerank should override the credential label")
+			}
+			if label.Label != tc.wantLabel {
+				t.Errorf("rerank credential label = %q, want %q", label.Label, tc.wantLabel)
+			}
+			if label.LocalizedLabel("zh-CN") == label.Label {
+				t.Errorf("zh-CN label should differ from the default")
+			}
+			if label.Hint == "" {
+				t.Errorf("the hint is what stops an sk- key being pasted here")
+			}
+			// Chat and embedding on these vendors do take a plain API key.
+			if other := v.CredentialLabelFor(types.ModelTypeKnowledgeQA); other != nil {
+				t.Errorf("chat should keep the generic API-key wording, got %q", other.Label)
+			}
+		})
 	}
 }

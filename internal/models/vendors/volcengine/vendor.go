@@ -130,6 +130,18 @@ func init() {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
+		// Rerank is signed with an IAM access-key pair, so the first
+		// credential is an Access Key ID rather than an Ark bearer token.
+		CredentialLabels: []catalog.CredentialLabel{{
+			Label:        "Access Key ID",
+			Labels:       map[string]string{"zh-CN": "Access Key ID（AK/SK 签名）"},
+			Placeholder:  "Volcengine IAM access key id (AKLT...)",
+			Placeholders: map[string]string{"zh-CN": "火山引擎 IAM Access Key ID（AKLT 开头）"},
+			Hint:         "Rerank is signed with an IAM key pair; this is not an Ark API key.",
+			Hints:        map[string]string{"zh-CN": "Rerank 使用 IAM 密钥对签名，不是方舟的 API Key。"},
+			ModelTypes:   rerankOnly,
+			Required:     true,
+		}},
 		ExtraFields: []catalog.ExtraField{
 			{
 				Key:         "secret_key",

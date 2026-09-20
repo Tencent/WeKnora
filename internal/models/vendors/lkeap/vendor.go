@@ -89,6 +89,20 @@ func init() {
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeRerank,
 		},
+		// The rerank API authenticates with a TC3-signed CAM identity, so the
+		// first credential is a SecretId, not a bearer token. Left as the
+		// generic "API Key" an operator pastes an `sk-` key that can never
+		// sign a request.
+		CredentialLabels: []catalog.CredentialLabel{{
+			Label:        "SecretId",
+			Labels:       map[string]string{"zh-CN": "SecretId（TC3 签名）"},
+			Placeholder:  "Tencent Cloud SecretId (AKID...)",
+			Placeholders: map[string]string{"zh-CN": "腾讯云 SecretId（AKID 开头）"},
+			Hint:         "Rerank is signed with a CAM key pair; this is not an sk- API key.",
+			Hints:        map[string]string{"zh-CN": "Rerank 使用 CAM 密钥对签名，不是 sk- 开头的 API Key。"},
+			ModelTypes:   rerankOnly,
+			Required:     true,
+		}},
 		ExtraFields: []catalog.ExtraField{
 			{
 				Key:         "secret_key",

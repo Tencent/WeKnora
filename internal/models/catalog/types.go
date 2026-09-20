@@ -56,6 +56,69 @@ type ExtraField struct {
 	Secret bool `json:"secret,omitempty"`
 }
 
+// CredentialLabel renames the primary credential input for one vendor.
+//
+// Most vendors take an API key and need none of this. LKEAP and Volcengine
+// authenticate their rerank API with a CAM / IAM identity pair instead, where
+// the first field is a SecretId / AccessKeyId — calling it "API Key" leads
+// operators to paste an `sk-` token that can never authenticate. The vendor
+// says what the field is called rather than the editor hardcoding a table of
+// vendor ids, which is what this whole layer exists to avoid.
+type CredentialLabel struct {
+	Label        string            `json:"label"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Placeholder  string            `json:"placeholder,omitempty"`
+	Placeholders map[string]string `json:"placeholders,omitempty"`
+	// Hint is rendered under the input, for a warning the label cannot carry.
+	Hint  string            `json:"hint,omitempty"`
+	Hints map[string]string `json:"hints,omitempty"`
+	// ModelTypes restricts the override; empty means every type.
+	ModelTypes []types.ModelType `json:"model_types,omitempty"`
+	// Required marks the credential mandatory even where the generic label
+	// calls it optional.
+	Required bool `json:"required,omitempty"`
+}
+
+// LocalizedLabel / LocalizedPlaceholder / LocalizedHint resolve one locale,
+// falling back to the default string.
+func (c CredentialLabel) LocalizedLabel(locale string) string {
+	return localizedOr(c.Labels, locale, c.Label)
+}
+
+// LocalizedPlaceholder resolves the placeholder for a locale.
+func (c CredentialLabel) LocalizedPlaceholder(locale string) string {
+	return localizedOr(c.Placeholders, locale, c.Placeholder)
+}
+
+// LocalizedHint resolves the hint for a locale.
+func (c CredentialLabel) LocalizedHint(locale string) string {
+	return localizedOr(c.Hints, locale, c.Hint)
+}
+
+func localizedOr(table map[string]string, locale, fallback string) string {
+	if v, ok := table[locale]; ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
+// CredentialLabelFor returns the credential naming for a model type, or nil
+// when the vendor uses the generic API-key wording.
+func (v *Vendor) CredentialLabelFor(modelType types.ModelType) *CredentialLabel {
+	for i := range v.CredentialLabels {
+		c := &v.CredentialLabels[i]
+		if len(c.ModelTypes) == 0 {
+			return c
+		}
+		for _, mt := range c.ModelTypes {
+			if mt == modelType {
+				return c
+			}
+		}
+	}
+	return nil
+}
+
 // ExtraFieldOption is one choice of a select field.
 type ExtraFieldOption struct {
 	Label string `json:"label"`
@@ -169,6 +232,8 @@ type Vendor struct {
 	// when the operator left provider empty (legacy rows).
 	URLPatterns []string
 	ExtraFields []ExtraField
+	// CredentialLabels rename the primary credential input per model type.
+	CredentialLabels []CredentialLabel
 	// Compat holds vendor-level protocol defaults.
 	Compat VendorCompat
 	// ThinkingLevels is the vendor-level level map.

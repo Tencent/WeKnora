@@ -587,6 +587,24 @@ export interface ModelProviderExtraFieldOption {
     value: string;
 }
 
+/**
+ * Renames the primary credential input for vendors whose API does not take a
+ * plain API key. LKEAP and Volcengine sign their rerank requests with a
+ * CAM / IAM key pair, so the first field is a SecretId / Access Key ID.
+ * The vendor declares the wording so the editor needs no vendor table.
+ */
+export interface ModelProviderCredentialLabel {
+    label: string;
+    labels?: Record<string, string>;
+    placeholder?: string;
+    placeholders?: Record<string, string>;
+    hint?: string;
+    hints?: Record<string, string>;
+    // Backend model types ("KnowledgeQA", "Rerank", ...); empty = all.
+    model_types?: string[];
+    required?: boolean;
+}
+
 export interface ModelProviderExtraField {
     key: string;
     label: string;
@@ -638,6 +656,7 @@ export interface ModelProviderOption {
     defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
     modelTypes: string[]; // 支持的模型类型
     extraFields?: ModelProviderExtraField[];
+    credentialLabels?: ModelProviderCredentialLabel[];
     models?: ModelCatalogEntry[];
     thinking?: ModelProviderThinking;
     order?: number;
@@ -654,7 +673,15 @@ export function listModelProviders(modelType?: string): Promise<ModelProviderOpt
         : '/api/v1/models/providers';
     return get(url).then((response: any) => {
         const data = response?.data;
-        return Array.isArray(data) ? (data as ModelProviderOption[]) : [];
+        // Reject rather than coerce: the store distinguishes "this vendor list
+        // is genuinely empty" (cacheable) from "the request did not produce a
+        // list" (retry on the next mount). Returning [] here would make a
+        // malformed 200 look like the former and blank the vendor dropdown and
+        // every card icon for the rest of the session.
+        if (!Array.isArray(data)) {
+            return Promise.reject(new Error('model providers response is not a list'));
+        }
+        return data as ModelProviderOption[];
     });
 }
 

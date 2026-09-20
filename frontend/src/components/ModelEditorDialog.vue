@@ -294,9 +294,7 @@
           </div>
 
           <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-            <label class="form-label" :class="{ required: selectedProvider?.requiresAuth && !isEdit }">{{
-              $t('model.editor.apiKeyOptional')
-            }}</label>
+            <label class="form-label" :class="{ required: apiKeyRequired }">{{ apiKeyLabel }}</label>
             <!--
               Edit mode: credentials live behind the /credentials subresource
               of the model — managed by the shared CredentialResource card,
@@ -315,6 +313,7 @@
               class="api-key-input" autocomplete="off" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
+            <p v-if="apiKeyHint" class="form-desc">{{ apiKeyHint }}</p>
           </div>
 
           <!--
@@ -587,8 +586,10 @@ import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import { useModelProvidersStore } from '@/stores/modelProviders'
 import {
+  credentialLabelForModelType,
   extraFieldLabel,
   extraFieldsForModelType,
+  pickLocalized,
   providerDescription,
   providerIcon,
   providerLabel,
@@ -732,6 +733,28 @@ const selectedProviderDisplayLabel = computed(() => (
     : (formData.value.provider || '')
 ))
 const extraFieldDisplayLabel = (field: ModelProviderExtraField) => extraFieldLabel(field, currentLocale.value)
+
+/**
+ * Vendors whose API is not a bearer-token API name their first credential
+ * themselves (LKEAP rerank takes a SecretId, Volcengine rerank an Access Key
+ * ID). Falling back to the generic "API Key" wording is what led operators to
+ * paste an `sk-` token into a signature field.
+ */
+const credentialLabel = computed(() =>
+  credentialLabelForModelType(selectedProvider.value?.credentialLabels, activeModelType.value),
+)
+const apiKeyLabel = computed(() => {
+  const label = credentialLabel.value
+  return label ? pickLocalized(label.labels, currentLocale.value, label.label) : t('model.editor.apiKeyOptional')
+})
+const apiKeyRequired = computed(
+  () => credentialLabel.value?.required === true || (!!selectedProvider.value?.requiresAuth && !isEdit.value),
+)
+const apiKeyHint = computed(() => {
+  const label = credentialLabel.value
+  if (!label?.hint) return ''
+  return pickLocalized(label.hints, currentLocale.value, label.hint)
+})
 
 // 厂商额外字段：按当前模型类型过滤；secret 字段走 app_secret 凭证，其余进 extra_config。
 const visibleExtraFields = computed<ModelProviderExtraField[]>(() =>
@@ -1007,7 +1030,11 @@ const credentialMeta = computed(() => (props.modelData as any)?.credentials ?? {
 
 // Placeholder hint for the create-mode API key input. Edit mode replaces
 // this input entirely with a <CredentialResource> card.
-const apiKeyPlaceholder = computed(() => t('model.editor.apiKeyPlaceholder'))
+const apiKeyPlaceholder = computed(() => {
+  const label = credentialLabel.value
+  if (label?.placeholder) return pickLocalized(label.placeholders, currentLocale.value, label.placeholder)
+  return t('model.editor.apiKeyPlaceholder')
+})
 
 const formRef = ref()
 const saving = ref(false)
