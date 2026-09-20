@@ -141,4 +141,3 @@ func TestListKnowledgeFolderCounts(t *testing.T) {
 	assert.Equal(t, "docs", tree.Folders[0].Path)
 	assert.Equal(t, int64(2), tree.Folders[0].TotalCount)
 }
-

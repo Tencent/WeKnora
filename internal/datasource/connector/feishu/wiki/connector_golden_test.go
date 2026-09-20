@@ -231,12 +231,12 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		"- [ ] 完成复盘",
 		"> 注意风险",
 		"---",
-		"| 列A | 列B |",            // native docx table header
-		"| 1 | 2 |",              // native docx table row
-		"| 名称 | 数量 |",            // embedded sheet header
-		"| 苹果 | 3 |",             // embedded sheet row
-		"| 任务 | 状态 |",            // embedded bitable header
-		"| 写码 | 完成 |",            // embedded bitable row
+		"| 列A | 列B |",                  // native docx table header
+		"| 1 | 2 |",                    // native docx table row
+		"| 名称 | 数量 |",                  // embedded sheet header
+		"| 苹果 | 3 |",                   // embedded sheet row
+		"| 任务 | 状态 |",                  // embedded bitable header
+		"| 写码 | 完成 |",                  // embedded bitable row
 		"![图片](data:image/png;base64,", // image inlined as base64 data URI
 		"- 手册.pdf",
 		"> [附件: logo.png](",
