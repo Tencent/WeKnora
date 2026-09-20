@@ -185,3 +185,21 @@ func TestNvidiaRerankScoresAreComparable(t *testing.T) {
 	}
 	assert.Less(t, got[0].RelevanceScore, got[1].RelevanceScore, "order must survive the conversion")
 }
+
+// TestSignedRerankVendorRequiresItsIdentityPair keeps the pre-catalog
+// contract: WeKnora Cloud rerank is signed with an AppID / AppSecret pair, and
+// a row without one must fail at construction rather than send unsigned
+// requests that the far end rejects with something less readable.
+func TestSignedRerankVendorRequiresItsIdentityPair(t *testing.T) {
+	_, err := rerank.NewReranker(&rerank.RerankerConfig{
+		Provider: "weknoracloud", ModelName: "rerank",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AppID")
+
+	_, err = rerank.NewReranker(&rerank.RerankerConfig{
+		Provider: "weknoracloud", ModelName: "rerank", AppID: "app",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AppSecret")
+}

@@ -163,6 +163,16 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 
 	vendor := resolved.Vendor
 	creds := catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret}
+	// A signing vendor with no identity pair would otherwise send unsigned
+	// requests and fail at the far end, which is a worse error than this one.
+	if vendor.Auth == catalog.AuthSigned {
+		if creds.AppID == "" {
+			return nil, fmt.Errorf("%s rerank: AppID is required", vendor.Name)
+		}
+		if creds.AppSecret == "" {
+			return nil, fmt.Errorf("%s rerank: AppSecret is required", vendor.Name)
+		}
+	}
 	endpoint := api.Endpoint{
 		BaseURL: resolved.BaseURL,
 		Model:   resolved.RemoteModel,
