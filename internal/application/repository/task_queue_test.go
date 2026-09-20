@@ -531,6 +531,53 @@ func TestTaskPendingOps_ClaimBatch_MarksAndReturnsDisjoint(t *testing.T) {
 	assert.Len(t, third, 0)
 }
 
+// TestTaskPendingOps_ClaimBatch_PrefersLeastFailed guards the starvation fix.
+// A retried document keeps its ORIGINAL id — requeueFailedOps releases the
+// claim rather than moving the row, so the fail_count budget keeps counting
+// down — which under a pure `id ASC` ordering let it park at the head of the
+// queue while never-attempted documents sat behind it. Observed on a real
+// 87-document KB: four re-run documents held the head and all forty
+// never-started ones waited. Selection must drain untried work first, without
+// stranding a document that keeps failing.
+func TestTaskPendingOps_ClaimBatch_PrefersLeastFailed(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	// "hot" is enqueued FIRST, so it owns the lowest id.
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "hot", nil)))
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "fresh", nil)))
+
+	stale := time.Now().Add(-time.Hour)
+
+	// Replay the retry path on "hot": claim it, bump fail_count, release it
+	// back to the pool exactly as requeueFailedOps does.
+	first, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, stale)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Equal(t, "hot", first[0].DedupKey)
+	_, err = repo.IncrFailCount(ctx, first[0].ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.ReleaseByIDs(ctx, []int64{first[0].ID}))
+
+	// "hot" holds the lower id but has a failure on record; the
+	// never-attempted document must be selected ahead of it.
+	next, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, stale)
+	require.NoError(t, err)
+	require.Len(t, next, 1)
+	assert.Equal(t, "fresh", next[0].DedupKey,
+		"a retried document must not starve a never-attempted one")
+
+	// The retried document still gets its turn once nothing fresher remains.
+	last, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, stale)
+	require.NoError(t, err)
+	require.Len(t, last, 1)
+	assert.Equal(t, "hot", last[0].DedupKey,
+		"a retried document must eventually be picked up, not stranded")
+}
+
 // TestTaskPendingOps_ClaimBatch_KeepsSameKeyTogether verifies the
 // dedup_key affinity invariant: all rows sharing a knowledge_id are claimed
 // in the SAME batch (never split), and `limit` counts distinct keys, not

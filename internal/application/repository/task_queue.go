@@ -234,20 +234,26 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	now := time.Now()
 	var claimed []*types.TaskPendingOp
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
+		// 1. Pick up to `limit` distinct dedup_keys to claim: least-failed
+		//    first, oldest first within the same fail_count. A failed op keeps
+		//    its original id AND its original position, so ordering purely by
+		//    id lets a repeatedly-retried head block every never-attempted
+		//    sibling behind it until its own retry budget runs out — the queue
+		//    drains a handful of stuck documents while the backlog starves.
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
 		if tx.Dialector.Name() == "postgres" {
-			// Lock the anchor (earliest eligible) row of each key with SKIP
-			// LOCKED so concurrent claimers get disjoint KEY sets, then map
-			// the locked anchors back to their dedup_keys. The NOT IN subquery
-			// drops any key that still has a fresh (non-stale) claim.
+			// Lock the anchor (least-failed, earliest eligible) row of each
+			// key with SKIP LOCKED so concurrent claimers get disjoint KEY
+			// sets, then map the locked anchors back to their dedup_keys. The
+			// NOT IN subquery drops any key that still has a fresh (non-stale)
+			// claim.
 			const anchorSQL = `
 SELECT dedup_key FROM task_pending_ops
 WHERE id IN (
 	SELECT id FROM (
-		SELECT id, ROW_NUMBER() OVER (PARTITION BY dedup_key ORDER BY id) AS rn
+		SELECT id, ROW_NUMBER() OVER (PARTITION BY dedup_key ORDER BY fail_count ASC, id ASC) AS rn
 		FROM task_pending_ops
 		WHERE task_type = ? AND scope = ? AND scope_id = ?
 			AND (claimed_at IS NULL OR claimed_at < ?)
@@ -258,7 +264,7 @@ WHERE id IN (
 			)
 	) anchors WHERE anchors.rn = 1
 )
-ORDER BY id ASC
+ORDER BY fail_count ASC, id ASC
 LIMIT ?
 FOR UPDATE SKIP LOCKED`
 			if err := tx.Raw(anchorSQL,
@@ -278,7 +284,7 @@ FOR UPDATE SKIP LOCKED`
 				Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
 				Where("dedup_key NOT IN (?)", freshKeys).
 				Group("dedup_key").
-				Order("MIN(id) ASC").
+				Order("MIN(fail_count) ASC, MIN(id) ASC").
 				Limit(limit).
 				Pluck("dedup_key", &keys).Error; err != nil {
 				return err
