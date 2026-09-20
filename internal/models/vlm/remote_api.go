@@ -116,7 +116,10 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		Text: prompt,
 	})
 
-	// Add images
+	// Add images. `detail` is deliberately omitted: OpenAI defaults it to
+	// "auto" server-side, while strict OpenAI-compatible endpoints (e.g.
+	// MiniMax) reject detail values outside their whitelist, so sending the
+	// explicit "auto" broke every OCR/Caption call there (#3451).
 	for _, imgBytes := range imgBytesList {
 		if len(imgBytes) > 0 {
 			mimeType := detectImageMIME(imgBytes)
@@ -125,8 +128,7 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 			parts = append(parts, openai.ChatMessagePart{
 				Type: openai.ChatMessagePartTypeImageURL,
 				ImageURL: &openai.ChatMessageImageURL{
-					URL:    dataURI,
-					Detail: openai.ImageURLDetailAuto,
+					URL: dataURI,
 				},
 			})
 		}

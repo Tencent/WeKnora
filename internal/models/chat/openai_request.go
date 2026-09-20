@@ -42,11 +42,15 @@ func (c *RemoteAPIChat) ConvertMessages(messages []Message) []openai.ChatComplet
 			parts := make([]openai.ChatMessagePart, 0, len(msg.Images)+1)
 			for _, imgURL := range msg.Images {
 				resolved := resolveImageURLForLLM(imgURL)
+				// `detail` stays unset so it is omitted from the request:
+				// OpenAI defaults it to "auto" server-side, while strict
+				// OpenAI-compatible endpoints reject non-whitelisted values
+				// (#3451). Callers that set ImageURL.Detail explicitly keep
+				// it via the MultiContent branch above.
 				parts = append(parts, openai.ChatMessagePart{
 					Type: openai.ChatMessagePartTypeImageURL,
 					ImageURL: &openai.ChatMessageImageURL{
-						URL:    resolved,
-						Detail: openai.ImageURLDetailAuto,
+						URL: resolved,
 					},
 				})
 			}
