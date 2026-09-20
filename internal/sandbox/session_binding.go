@@ -594,6 +594,9 @@ func (s *MemorySessionSandboxBindingStore) TryLockRewind(
 	if s.rewinds == nil {
 		s.rewinds = make(map[SessionSandboxKey]struct{})
 	}
+	if lease := s.turns[key]; lease != nil && lease.refs > 0 {
+		return nil, ErrSessionTurnActive
+	}
 	if _, held := s.rewinds[key]; held {
 		return nil, ErrSessionRewindLocked
 	}

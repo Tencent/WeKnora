@@ -64,6 +64,11 @@ var (
 	// ErrRewindMessageRole is returned when the rewind point exists but is
 	// neither a user nor an assistant message. HTTP 400.
 	ErrRewindMessageRole = errors.New("session rewind: rewind point must be a user or assistant message")
+
+	// ErrRewindNoCheckpoint is returned when the session has a live sandbox
+	// and kept history includes an assistant turn, but no reachable git SHA.
+	// Truncating would leave files ahead of the conversation. HTTP 409.
+	ErrRewindNoCheckpoint = errors.New("session rewind: no reachable workspace checkpoint")
 )
 
 func isRewindNotFound(err error) bool {
@@ -96,12 +101,17 @@ type rewindSessionStore interface {
 
 type rewindMessageStore interface {
 	GetMessage(ctx context.Context, sessionID, messageID string) (*types.Message, error)
+	GetMessagesBySession(ctx context.Context, sessionID string, page, pageSize int) ([]*types.Message, error)
 	ListMessagesBySessionUpTo(
 		ctx context.Context, sessionID string, boundary time.Time, boundaryID string,
 	) ([]*types.Message, error)
 	DeleteMessagesFrom(
 		ctx context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
 	) ([]*types.Message, error)
+}
+
+type rewindLiveRunReader interface {
+	GetLiveRun(ctx context.Context, sessionID string) (assistantMessageID, requestID string, err error)
 }
 
 type rewindKnowledgeCleaner interface {
@@ -120,6 +130,7 @@ type SessionRewindService struct {
 	knowledge   rewindKnowledgeCleaner
 	suggestions rewindSuggestionCleaner
 	snapshots   ForkSnapshotDeleter
+	liveRuns    rewindLiveRunReader
 	inflight    sync.Map
 }
 
@@ -151,9 +162,11 @@ func NewSessionRewindServiceFromRepos(
 	suggestions interfaces.MessageSuggestionRepository,
 	resolver sandbox.TenantSandboxResolver,
 	fallback sandbox.Manager,
+	streams interfaces.StreamManager,
 ) *SessionRewindService {
 	s := NewSessionRewindService(sessions, messages, sandboxPort, knowledge, suggestions)
 	s.snapshots = NewResolverForkSnapshotDeleter(resolver, fallback)
+	s.liveRuns = streams
 	return s
 }
 
@@ -280,9 +293,20 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 	if !ok || strings.TrimSpace(currentID) == "" {
 		return false, RewindSkipNoSandbox, nil
 	}
-	checkpoint := latestCheckpoint(history)
+	checkpoint := latestReachableCheckpoint(history)
 	if checkpoint == nil {
-		return false, RewindSkipNoCheckpoint, nil
+		if hasAssistantMessage(history) {
+			return false, "", ErrRewindNoCheckpoint
+		}
+		if err := s.rejectIfBusy(ctx, sessionID); err != nil {
+			return false, "", err
+		}
+		workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceResetTimeout)
+		defer cancel()
+		if err := resetWorkspaceToEmpty(workCtx, s.sandbox, sessionID, currentID); err != nil {
+			return false, "", fmt.Errorf("session rewind: reset workspace: %w", err)
+		}
+		return true, "", nil
 	}
 	if currentID != checkpoint.SandboxID {
 		return false, RewindSkipSandboxReplaced, nil
@@ -296,7 +320,7 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 
 	workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceResetTimeout)
 	defer cancel()
-	if err := resetWorkspaceToCommit(workCtx, s.sandbox, sessionID, checkpoint.CommitSHA); err != nil {
+	if err := resetWorkspaceToCommit(workCtx, s.sandbox, sessionID, checkpoint.CommitSHA, checkpoint.SandboxID); err != nil {
 		return false, "", fmt.Errorf("session rewind: reset workspace: %w", err)
 	}
 	return true, "", nil
@@ -311,7 +335,9 @@ func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string)
 		unlock, err := s.sandbox.TryLockRewind(ctx, sessionID)
 		if err != nil {
 			s.inflight.Delete(sessionID)
-			if errors.Is(err, sandbox.ErrSessionRewindLocked) || errors.Is(err, ErrRewindSourceBusy) {
+			if errors.Is(err, sandbox.ErrSessionRewindLocked) ||
+				errors.Is(err, sandbox.ErrSessionTurnActive) ||
+				errors.Is(err, ErrRewindSourceBusy) {
 				return nil, ErrRewindSourceBusy
 			}
 			return nil, fmt.Errorf("session rewind: lock session: %w", err)
@@ -327,6 +353,18 @@ func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string)
 }
 
 func (s *SessionRewindService) rejectIfBusy(ctx context.Context, sessionID string) error {
+	if s.liveRuns != nil {
+		liveID, _, err := s.liveRuns.GetLiveRun(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("session rewind: check live run: %w", err)
+		}
+		if strings.TrimSpace(liveID) != "" {
+			return ErrRewindSourceBusy
+		}
+	}
+	if err := s.rejectIfIncompleteTurn(ctx, sessionID); err != nil {
+		return err
+	}
 	if s.sandbox == nil {
 		return nil
 	}
@@ -336,6 +374,22 @@ func (s *SessionRewindService) rejectIfBusy(ctx context.Context, sessionID strin
 	}
 	if busy {
 		return ErrRewindSourceBusy
+	}
+	return nil
+}
+
+func (s *SessionRewindService) rejectIfIncompleteTurn(ctx context.Context, sessionID string) error {
+	if s.messages == nil {
+		return nil
+	}
+	msgs, err := s.messages.GetMessagesBySession(ctx, sessionID, 1, 1000)
+	if err != nil {
+		return fmt.Errorf("session rewind: check incomplete turn: %w", err)
+	}
+	for _, msg := range msgs {
+		if msg != nil && msg.Role == "assistant" && !msg.IsCompleted {
+			return ErrRewindSourceBusy
+		}
 	}
 	return nil
 }
@@ -353,7 +407,7 @@ func (s *SessionRewindService) syncPendingForkBootstrap(
 		return false, false, nil
 	}
 	pending := *session.ForkBootstrap
-	checkpoint := latestCheckpoint(kept)
+	checkpoint := latestReachableCheckpoint(kept)
 	if checkpoint == nil || strings.TrimSpace(checkpoint.CommitSHA) == "" {
 		return false, true, s.abandonPendingForkBootstrap(ctx, session, &pending)
 	}

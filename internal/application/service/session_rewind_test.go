@@ -84,6 +84,17 @@ func (f *fakeRewindSandboxPort) ExecShellCommand(
 	return f.runner.ExecShellCommand(ctx, sessionID, command, workDir, timeout, env)
 }
 
+type fakeLiveRunReader struct {
+	assistantID string
+}
+
+func (f *fakeLiveRunReader) GetLiveRun(context.Context, string) (string, string, error) {
+	if f == nil {
+		return "", "", nil
+	}
+	return f.assistantID, "req", nil
+}
+
 func rewindCompletedTurn(userID, assistantID, sandboxID, sha string, offset time.Duration) []*types.Message {
 	turn := checkpointedTurn(userID, assistantID, sandboxID, sha, offset)
 	turn[1].IsCompleted = true
@@ -218,7 +229,7 @@ func TestRewindNoSandboxDeletesMessagesWithoutShell(t *testing.T) {
 	require.Equal(t, []string{"u-1", "a-1"}, messageIDs(msgs.messages))
 }
 
-func TestRewindNoCheckpointDeletesMessagesWithoutShell(t *testing.T) {
+func TestRewindNoCheckpointOnLiveSandboxDoesNotDeleteMessages(t *testing.T) {
 	history := []*types.Message{
 		{ID: "u-1", SessionID: "src", Role: "user", CreatedAt: forkBase},
 		{
@@ -228,15 +239,15 @@ func TestRewindNoCheckpointDeletesMessagesWithoutShell(t *testing.T) {
 		{ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second)},
 	}
 	port := newFakeRewindPort()
-	svc, _ := newRewindFixture(t, port, history)
+	svc, msgs := newRewindFixture(t, port, history)
 
 	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
 
-	require.NoError(t, err)
-	require.Equal(t, 1, got.DeletedMessages)
-	require.False(t, got.WorkspaceReset)
-	require.Equal(t, RewindSkipNoCheckpoint, got.Reason)
+	require.ErrorIs(t, err, ErrRewindNoCheckpoint)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
 	require.Empty(t, port.runner.calls)
+	require.Equal(t, []string{"u-1", "a-1", "u-2"}, messageIDs(msgs.messages))
 }
 
 func TestRewindReplacedSandboxDeletesMessagesWithoutShell(t *testing.T) {
@@ -402,10 +413,74 @@ func TestRewindFirstUserMessageClearsConversationWithoutCheckpoint(t *testing.T)
 
 	require.NoError(t, err)
 	require.Equal(t, 2, got.DeletedMessages)
-	require.False(t, got.WorkspaceReset)
-	require.Equal(t, RewindSkipNoCheckpoint, got.Reason)
-	require.Empty(t, port.runner.calls)
+	require.True(t, got.WorkspaceReset)
+	require.Empty(t, got.Reason)
+	require.Len(t, port.runner.calls, 1)
+	require.Contains(t, port.runner.calls[0], "commit-tree")
+	require.Contains(t, port.runner.calls[0], "reset --hard")
+	require.Contains(t, port.runner.calls[0], "clean -fdx")
+	require.NotContains(t, port.runner.calls[0], `find "$WORK_TREE"`)
 	require.Empty(t, msgs.messages)
+}
+
+func TestRewindWalksToEarlierCheckpointWhenLatestAssistantHasNone(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := []*types.Message{
+		{ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second)},
+		{
+			ID: "a-2", SessionID: "src", Role: "assistant", IsCompleted: true,
+			CreatedAt: forkBase.Add(11 * time.Second),
+		},
+		{ID: "u-3", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(20 * time.Second)},
+	}
+	port := newFakeRewindPort()
+	svc, msgs := newRewindFixture(t, port, append(turn1, later...))
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-3")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, got.DeletedMessages)
+	require.True(t, got.WorkspaceReset)
+	require.Len(t, port.runner.calls, 1)
+	require.Contains(t, port.runner.calls[0], rewindSHA1)
+	require.Equal(t, []string{"u-1", "a-1", "u-2", "a-2"}, messageIDs(msgs.messages))
+}
+
+func TestRewindLiveRunIsBusy(t *testing.T) {
+	turn := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	laterUser := &types.Message{
+		ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := newFakeRewindPort()
+	svc, msgs := newRewindFixture(t, port, append(turn, laterUser))
+	svc.liveRuns = &fakeLiveRunReader{assistantID: "a-live"}
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+	require.Empty(t, port.runner.calls)
+}
+
+func TestRewindIncompleteLaterTurnIsBusy(t *testing.T) {
+	turn := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := []*types.Message{
+		{ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second)},
+		{
+			ID: "a-2", SessionID: "src", Role: "assistant", IsCompleted: false,
+			CreatedAt: forkBase.Add(11 * time.Second),
+		},
+	}
+	port := newFakeRewindPort()
+	svc, msgs := newRewindFixture(t, port, append(turn, later...))
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-1")
+
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+	require.Empty(t, port.runner.calls)
 }
 
 func pendingForkBootstrap(sha string) *types.ForkBootstrap {
@@ -454,6 +529,32 @@ func TestRewindUnopenedForkRetargetsBootstrapToKeptCheckpoint(t *testing.T) {
 	require.Equal(t, "sbx-1", sessions.source.ForkBootstrap.SourceSandboxID)
 	require.False(t, sessions.source.ForkBootstrap.Consumed())
 	require.False(t, sessions.bootstrapCleared)
+}
+
+func TestRewindUnopenedForkWalksToEarlierCheckpoint(t *testing.T) {
+	turn1 := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := []*types.Message{
+		{ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second)},
+		{
+			ID: "a-2", SessionID: "src", Role: "assistant", IsCompleted: true,
+			CreatedAt: forkBase.Add(11 * time.Second),
+		},
+		{ID: "u-3", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(20 * time.Second)},
+	}
+	svc, sessions, msgs, port := newUnopenedForkRewindFixture(
+		t, append(turn1, later...), pendingForkBootstrap(rewindSHA2),
+	)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-3")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, got.DeletedMessages)
+	require.True(t, got.WorkspaceReset)
+	require.Empty(t, got.Reason)
+	require.Empty(t, port.runner.calls)
+	require.Equal(t, []string{"u-1", "a-1", "u-2", "a-2"}, messageIDs(msgs.messages))
+	require.NotNil(t, sessions.source.ForkBootstrap)
+	require.Equal(t, rewindSHA1, sessions.source.ForkBootstrap.CommitSHA)
 }
 
 func TestRewindUnopenedForkAbandonsBootstrapWhenNoCheckpointRemains(t *testing.T) {

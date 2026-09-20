@@ -36,6 +36,17 @@ func (s *sessionService) KnowledgeQA(
 	if err := s.RejectSendIfRewinding(ctx, req.Session.ID); err != nil {
 		return err
 	}
+	// IM/MCP call KnowledgeQA without executeQA's send-side lease. Hold for
+	// the pipeline; HTTP send nests this under the lease taken before persist.
+	configID := ""
+	if req.CustomAgent != nil {
+		configID = req.CustomAgent.Config.SandboxConfigID
+	}
+	releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
+	if holdErr != nil {
+		return holdErr
+	}
+	defer releaseTurn()
 
 	// Span the request setup (KB / model resolution, search target building,
 	// agent override application). This covers the visible gap between trace

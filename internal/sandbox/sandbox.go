@@ -160,6 +160,9 @@ var (
 	ErrSandboxPaused = errors.New("session sandbox is paused")
 	// ErrSessionRewindLocked means another rewind already holds the session.
 	ErrSessionRewindLocked = errors.New("sandbox: session rewind already in progress")
+	// ErrSessionTurnActive means a chat turn already holds the session lease,
+	// so rewind must not take the exclusive lock or reset the workspace.
+	ErrSessionTurnActive = errors.New("sandbox: session turn is active")
 	// ErrTerminalUnsupported is returned when the active backend cannot
 	// stream PTYs (Docker, a disabled manager). Distinct from
 	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,

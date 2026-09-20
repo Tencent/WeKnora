@@ -120,6 +120,33 @@ func TestResetPrunesLaterCommitsFromExternalGitDir(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 }
 
+func TestEmptyResetWipesWorkTreeAndReinitializesGitDir(t *testing.T) {
+	requireGit(t)
+	workspace, gitDir, env := splitGitDirs(t)
+
+	runGitSplit(t, env, workspace, gitDir, "init", "-q")
+	runGitSplit(t, env, workspace, gitDir, "config", "user.email", "agent@weknora.local")
+	runGitSplit(t, env, workspace, gitDir, "config", "user.name", "WeKnora Agent")
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "keep.txt"), []byte("early"), 0o644))
+	runGitSplit(t, env, workspace, gitDir, "add", "-A")
+	runGitSplit(t, env, workspace, gitDir, "commit", "-q", "-m", "early")
+	early := strings.TrimSpace(runGitSplit(t, env, workspace, gitDir, "rev-parse", "HEAD"))
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, "untracked.txt"), []byte("tmp"), 0o644))
+
+	runWorkspaceGitScript(t, env, workspaceEmptyResetScript(workspace, gitDir))
+
+	_, err := os.Stat(filepath.Join(workspace, "keep.txt"))
+	require.True(t, os.IsNotExist(err))
+	_, err = os.Stat(filepath.Join(workspace, "untracked.txt"))
+	require.True(t, os.IsNotExist(err))
+	require.FileExists(t, filepath.Join(gitDir, "HEAD"))
+	cmd := exec.Command("git", "--git-dir", gitDir, "--work-tree", workspace, "cat-file", "-t", early)
+	cmd.Env = env
+	require.Error(t, cmd.Run(), "pre-rewind commits must be unreachable after prune")
+	_, err = os.Stat(filepath.Join(workspace, ".git"))
+	require.True(t, os.IsNotExist(err))
+}
+
 func TestCheckpointSurvivesWipedWorkTree(t *testing.T) {
 	requireGit(t)
 	workspace, gitDir, env := splitGitDirs(t)

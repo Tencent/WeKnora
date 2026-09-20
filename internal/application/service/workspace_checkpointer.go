@@ -79,15 +79,10 @@ func NewWorkspaceCheckpointer(runner SandboxShellRunner) *WorkspaceCheckpointer 
 func checkpointScript(workspace, gitDir, messageID string) string {
 	return fmt.Sprintf(`set -e
 %s
-git_ws rev-parse --git-dir >/dev/null 2>&1 || {
-  mkdir -p "$(dirname "$GIT_DIR")"
-  git_ws init -q
-  git_ws config user.email agent@weknora.local
-  git_ws config user.name 'WeKnora Agent'
-}
+%s
 git_ws add -A
 git_ws commit -q --allow-empty -m 'turn:%s'
-git_ws rev-parse HEAD`, gitWorkspacePreamble(workspace, gitDir), messageID)
+git_ws rev-parse HEAD`, gitWorkspacePreamble(workspace, gitDir), gitWorkspaceEnsureRepo(), messageID)
 }
 
 // Checkpoint commits /workspace and returns the resulting checkpoint, or nil

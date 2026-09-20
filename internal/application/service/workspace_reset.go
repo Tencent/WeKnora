@@ -32,11 +32,35 @@ func workspaceResetScript(workspace, gitDir, sha string) (string, error) {
 	if !gitSHAPattern.MatchString(sha) {
 		return "", fmt.Errorf("workspace reset: invalid commit sha %q", truncateForLog(sha))
 	}
-	return fmt.Sprintf(`set -e
-%s
-git_ws reset --hard %s
-current=$(git_ws symbolic-ref -q HEAD || true)
-for ref in $(git_ws for-each-ref --format='%%(refname)'); do
+	return "set -e\n" + gitWorkspacePreamble(workspace, gitDir) +
+		"git_ws reset --hard " + sha + "\n" +
+		gitWorkspacePruneAndClean(), nil
+}
+
+// workspaceEmptyResetScript is the start-over path: kept history has no SHA,
+// so we commit an empty tree and run the same reset+prune+clean as a SHA rewind.
+func workspaceEmptyResetScript(workspace, gitDir string) string {
+	return "set -e\n" + gitWorkspacePreamble(workspace, gitDir) + gitWorkspaceEnsureRepo() + `
+empty=$(git_ws commit-tree "$(git_ws mktree </dev/null)" -m 'rewind: empty')
+git_ws reset --hard "$empty"
+` + gitWorkspacePruneAndClean()
+}
+
+// gitWorkspaceEnsureRepo is the checkpointer's first-use init. Empty rewind
+// reuses it so a sandbox that never checkpointed can still reset to empty.
+func gitWorkspaceEnsureRepo() string {
+	return `git_ws rev-parse --git-dir >/dev/null 2>&1 || {
+  mkdir -p "$(dirname "$GIT_DIR")"
+  git_ws init -q
+  git_ws config user.email agent@weknora.local
+  git_ws config user.name 'WeKnora Agent'
+}
+`
+}
+
+func gitWorkspacePruneAndClean() string {
+	return `current=$(git_ws symbolic-ref -q HEAD || true)
+for ref in $(git_ws for-each-ref --format='%(refname)'); do
   [ -z "$ref" ] && continue
   [ "$ref" = "$current" ] && continue
   git_ws update-ref -d "$ref"
@@ -44,7 +68,8 @@ done
 rm -f "$GIT_DIR"/ORIG_HEAD "$GIT_DIR"/FETCH_HEAD
 git_ws reflog expire --expire=now --all
 git_ws gc --prune=now
-git_ws clean -fdx`, gitWorkspacePreamble(workspace, gitDir), sha), nil
+git_ws clean -fdx
+`
 }
 
 // gitWorkspacePreamble is shared by checkpoint and reset so fork and rewind
@@ -68,27 +93,41 @@ func gitResetFailure(sha, stderr string) error {
 	return fmt.Errorf("workspace reset: git reset to %s failed: %s", sha, stderr)
 }
 
+func execWorkspaceReset(
+	ctx context.Context, runner SandboxShellRunner, sessionID, script, expectedSandboxID string,
+) (*sandbox.ExecuteResult, error) {
+	if runner == nil {
+		return nil, errors.New("workspace reset: no shell runner wired")
+	}
+	if withOpts, ok := runner.(sandbox.SessionInstallShellExecutor); ok {
+		return withOpts.ExecShellCommandWithOptions(ctx, sessionID, script, sandbox.ShellExecOptions{
+			WorkDir:           sandbox.SessionWorkspaceRoot,
+			Timeout:           workspaceResetTimeout,
+			SkipWorkspacePrep: true,
+			ExpectedSandboxID: expectedSandboxID,
+		})
+	}
+	return runner.ExecShellCommand(
+		ctx, sessionID, script, sandbox.SessionWorkspaceRoot, workspaceResetTimeout, nil,
+	)
+}
+
 // resetWorkspaceToCommit rolls the session's live /workspace back to sha
 // through a session-scoped shell runner.
 //
 // Callers that already hold a sandbox handle (the fork bootstrapper, which
 // runs under the lifecycle lock and must not Resolve) exec the script
-// themselves; everyone else goes through the runner, which resolves the
-// session's bound sandbox.
+// themselves; everyone else goes through the runner. expectedSandboxID makes
+// that path lookup-only so rewind cannot provision a replacement VM.
 func resetWorkspaceToCommit(
-	ctx context.Context, runner SandboxShellRunner, sessionID, sha string,
+	ctx context.Context, runner SandboxShellRunner, sessionID, sha, expectedSandboxID string,
 ) error {
 	sha = strings.TrimSpace(sha)
 	script, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, sha)
 	if err != nil {
 		return err
 	}
-	if runner == nil {
-		return errors.New("workspace reset: no shell runner wired")
-	}
-	result, err := runner.ExecShellCommand(
-		ctx, sessionID, script, sandbox.SessionWorkspaceRoot, workspaceResetTimeout, nil,
-	)
+	result, err := execWorkspaceReset(ctx, runner, sessionID, script, expectedSandboxID)
 	if err != nil {
 		return fmt.Errorf("workspace reset: git reset exec: %w", err)
 	}
@@ -98,6 +137,24 @@ func resetWorkspaceToCommit(
 			stderr = result.Stderr
 		}
 		return gitResetFailure(sha, stderr)
+	}
+	return nil
+}
+
+func resetWorkspaceToEmpty(
+	ctx context.Context, runner SandboxShellRunner, sessionID, expectedSandboxID string,
+) error {
+	script := workspaceEmptyResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir)
+	result, err := execWorkspaceReset(ctx, runner, sessionID, script, expectedSandboxID)
+	if err != nil {
+		return fmt.Errorf("workspace reset: empty workspace exec: %w", err)
+	}
+	if result == nil || result.ExitCode != 0 {
+		stderr := ""
+		if result != nil {
+			stderr = result.Stderr
+		}
+		return fmt.Errorf("workspace reset: empty workspace failed: %s", stderr)
 	}
 	return nil
 }

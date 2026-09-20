@@ -663,6 +663,10 @@ type sseStreamContext struct {
 	// second turn.
 	liveRunFailed bool
 	liveRunErr    error
+	// releaseTurn ends the sandbox turn lease taken before persist. Knowledge
+	// mode releases on completion (the pipeline returns before the stream
+	// finishes); agent mode releases when AgentQA returns.
+	releaseTurn func()
 }
 
 // setupSSEStream sets up the SSE streaming context
@@ -1092,6 +1096,42 @@ func (h *Handler) rejectIfSessionRewinding(ctx context.Context, sessionID string
 	return errors.NewInternalServerError(err.Error())
 }
 
+func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (func(), bool) {
+	noop := func() {}
+	if reqCtx == nil {
+		return noop, true
+	}
+	type sessionTurnHolder interface {
+		HoldSandboxTurn(context.Context, string, string) (func(), error)
+	}
+	holder, ok := h.sessionService.(sessionTurnHolder)
+	if !ok {
+		return noop, true
+	}
+	configID := ""
+	if reqCtx.customAgent != nil {
+		configID = reqCtx.customAgent.Config.SandboxConfigID
+	}
+	release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
+	if err != nil {
+		if reqCtx.c != nil && !reqCtx.skipSSE {
+			if stderrors.Is(err, sandbox.ErrSessionRewindLocked) || stderrors.Is(err, sandbox.ErrSessionTurnActive) {
+				_ = reqCtx.c.Error(errors.NewConflictError("session rewind is in progress"))
+			} else {
+				_ = reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
+			}
+		} else {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": reqCtx.sessionID})
+		}
+		return noop, false
+	}
+	if release == nil {
+		release = noop
+	}
+	var once sync.Once
+	return func() { once.Do(release) }, true
+}
+
 // executeQA is the unified execution flow for both KnowledgeQA and AgentQA modes.
 // It handles message creation, SSE setup, VLM analysis, service invocation, and error handling.
 func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle bool) {
@@ -1124,6 +1164,11 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		return
 	}
 
+	releaseQATurn, held := h.holdQATurn(ctx, reqCtx)
+	if !held {
+		return
+	}
+
 	// Agent mode: emit agent query event before message creation
 	if mode == qaModeAgent {
 		if err := event.Emit(ctx, event.Event{
@@ -1136,6 +1181,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				RequestID: reqCtx.requestID,
 			},
 		}); err != nil {
+			releaseQATurn()
 			logger.Errorf(ctx, "Failed to emit agent query event: %v", err)
 			return
 		}
@@ -1147,6 +1193,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// Create user message. Include pre-uploaded document metadata so history
 	// reload shows the attachments even though their content is selected later.
 	if err := h.persistTurnMessages(ctx, reqCtx); err != nil {
+		releaseQATurn()
 		if reqCtx.c != nil && !reqCtx.skipSSE {
 			_ = reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		} else {
@@ -1175,10 +1222,12 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 	// Setup SSE stream
 	streamCtx := h.setupSSEStream(reqCtx, generateTitle, mode)
+	streamCtx.releaseTurn = releaseQATurn
 	if streamCtx.liveRunFailed {
 		if streamCtx.cancel != nil {
 			streamCtx.cancel()
 		}
+		releaseQATurn()
 		h.rollbackTurnMessages(ctx, reqCtx, createdUser, createdAssistant)
 		if reqCtx.c != nil && !reqCtx.skipSSE {
 			if stderrors.Is(streamCtx.liveRunErr, stream.ErrLiveRunExists) {
@@ -1242,6 +1291,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		defer close(asyncDone)
 		defer func() {
 			if r := recover(); r != nil {
+				if streamCtx.releaseTurn != nil {
+					streamCtx.releaseTurn()
+				}
 				buf := make([]byte, 10240)
 				runtime.Stack(buf, true)
 				stageName := "Knowledge QA"
@@ -1254,6 +1306,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			}
 			// Agent mode: complete the assistant message in defer (normal mode does it via event handler)
 			if mode == qaModeAgent {
+				if streamCtx.releaseTurn != nil {
+					streamCtx.releaseTurn()
+				}
 				// Use WithoutCancel so a user-triggered stop (which cancels
 				// asyncCtx) doesn't also cancel the GORM UPDATE that persists
 				// AgentSteps/Content. Without this, cancelled-ctx makes
@@ -1322,6 +1377,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		}
 
 		if serviceErr != nil {
+			if mode == qaModeNormal && streamCtx.releaseTurn != nil {
+				streamCtx.releaseTurn()
+			}
 			// A user-requested stop cancels asyncCtx, which surfaces here as a
 			// context cancellation. That is an expected outcome, not a failure:
 			// the stop event already notifies the client, so don't emit a
@@ -1728,6 +1786,9 @@ func (h *Handler) completeQuickAnswerTurn(
 		})
 	}
 	h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID)
+	if streamCtx.releaseTurn != nil {
+		streamCtx.releaseTurn()
+	}
 }
 
 // sessionTenantInfoContext makes the tenant info match the session owner (the

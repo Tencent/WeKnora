@@ -113,7 +113,7 @@
                                     :message-id="session.id"
                                     :created-at="session.created_at"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
-                                    :can-rewind="!embeddedMode && !outgoingWorkBlocksRewind && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="rewindAffordanceOf(session.id).canRewind"
                                     :steer-failed="Boolean(session._steerFailed)"
                                     @retry-steer="handleRetrySteer(session.steer_id)"
                                     @remove-steer="handleRemoveSteer(session.steer_id)"
@@ -129,7 +129,7 @@
                                     :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                                     :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
-                                    :can-rewind="!embeddedMode && !outgoingWorkBlocksRewind && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="rewindAffordanceOf(session.id).canRewind"
                                     @fork="handleFork"
                                     @rewind="handleRewind"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
@@ -201,7 +201,7 @@ import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
 import { rewindSkipMessage } from './rewindNotice';
-import { rewindPrefillText, rewindBlockedByOutgoingWork, canReplaceRewindTranscript, shouldApplyRewindLocally } from './rewindView';
+import { rewindPrefillText, rewindBlockedByOutgoingWork, canReplaceRewindTranscript, shouldApplyRewindLocally, rewindHistoryHasMore, keepMessagesThroughRewindPoint, resolveRewindAffordance, rewindHttpConflictCode, rewindConflictI18nKey } from './rewindView';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -332,6 +332,14 @@ function forkAffordanceOf(messageId) {
     return resolveForkAffordance(messagesList, messageId)
 }
 
+function rewindAffordanceOf(messageId) {
+    if (!messageId) return { canRewind: false }
+    return resolveRewindAffordance(messagesList, messageId, {
+        embeddedMode: props.embeddedMode,
+        outgoingWork: outgoingWorkBlocksRewind.value,
+    })
+}
+
 const FORK_PREFILL_KEY = 'weknora:fork-prefill'
 let forkInFlight = false
 const rewindInFlight = ref(false)
@@ -451,6 +459,7 @@ async function handleRewind(messageId) {
         if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
 
         let batch
+        let reloadFailed = false
         try {
             const history = await fetchMessageList({
                 session_id: sourceSessionId,
@@ -462,23 +471,32 @@ async function handleRewind(messageId) {
                 throw new Error('rewind history reload returned no list')
             }
         } catch {
-            MessagePlugin.error(t('chat.rewind.failed'))
-            return
+            reloadFailed = true
         }
-        if (!canReplaceRewindTranscript(String(session_id.value || ''), sourceSessionId, undefined)) return
+        if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
 
         created_at.value = ''
-        messagesList.splice(0)
         steerQueue.value = []
         historyLoading.value = false
-        if (batch.length) {
-            created_at.value = batch[0].created_at
-            if (batch.length < limit.value) {
+        if (reloadFailed) {
+            const kept = keepMessagesThroughRewindPoint(
+                [...messagesList],
+                messageId,
+                sourceRole,
+                (m) => m.id === messageId || persistedAssistantId(m) === messageId,
+            )
+            messagesList.splice(0, messagesList.length, ...kept)
+            MessagePlugin.warning(t('chat.rewind.reloadFailed'))
+        } else {
+            if (!canReplaceRewindTranscript(String(session_id.value || ''), sourceSessionId, undefined)) return
+            messagesList.splice(0)
+            if (batch.length) {
+                created_at.value = batch[0].created_at
+                hasMoreHistory.value = rewindHistoryHasMore(batch.length, limit.value)
+                await handleMsgList(batch, false)
+            } else {
                 hasMoreHistory.value = false
             }
-            await handleMsgList(batch, false)
-        } else {
-            hasMoreHistory.value = false
         }
 
         const prefill = rewindPrefillText(sourceRole, sourceContent)
@@ -486,6 +504,9 @@ async function handleRewind(messageId) {
             inputFieldRef.value?.prefill(prefill)
         }
 
+        if (reloadFailed) {
+            return
+        }
         if (data.workspace_reset) {
             MessagePlugin.success(t('chat.rewind.success'))
             return
@@ -495,8 +516,9 @@ async function handleRewind(messageId) {
             MessagePlugin.info(skip)
         }
     } catch (err) {
-        if (err?.status === 409 || err?.$httpStatus === 409) {
-            MessagePlugin.warning(t('chat.rewind.busy'))
+        const conflictCode = rewindHttpConflictCode(err)
+        if (conflictCode || err?.status === 409 || err?.$httpStatus === 409) {
+            MessagePlugin.warning(t(rewindConflictI18nKey(conflictCode)))
             return
         }
         MessagePlugin.error(t('chat.rewind.failed'))

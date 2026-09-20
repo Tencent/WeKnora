@@ -71,7 +71,7 @@ func (h *Handler) RewindSession(c *gin.Context) {
 	}
 
 	if h.rewindService == nil {
-		_ = c.Error(errors.NewBadRequestError("session rewind is not available"))
+		_ = c.Error(errors.NewServiceUnavailableError("session rewind is not available"))
 		return
 	}
 
@@ -87,6 +87,14 @@ func (h *Handler) RewindSession(c *gin.Context) {
 				"success": false,
 				"error":   "session has an active turn",
 				"code":    "REWIND_SOURCE_BUSY",
+			})
+			return
+		}
+		if stderrors.Is(err, service.ErrRewindNoCheckpoint) {
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"error":   "no reachable workspace checkpoint",
+				"code":    "REWIND_NO_CHECKPOINT",
 			})
 			return
 		}

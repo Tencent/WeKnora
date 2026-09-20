@@ -21,12 +21,12 @@ func TestHoldSandboxTurnOpensAndClosesTheLease(t *testing.T) {
 	require.Equal(t, 1, holder.ends)
 }
 
-func TestHoldSandboxTurnIsNoopWhenBeginFails(t *testing.T) {
+func TestHoldSandboxTurnFailsWhenBeginFails(t *testing.T) {
 	holder := &turnLeaseManager{beginErr: context.Canceled}
 	svc := &sessionService{sandboxMgr: holder}
 
 	release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
-	require.NoError(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 1, holder.begins)
 	release()
 	require.Zero(t, holder.ends)

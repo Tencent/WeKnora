@@ -228,7 +228,11 @@ func (b *ForkBootstrapper) resetWorkspace(
 ) error {
 	sha = strings.TrimSpace(sha)
 	if b.client == nil || handle == nil {
-		return resetWorkspaceToCommit(ctx, b.runner, sessionID, sha)
+		expectedID := ""
+		if handle != nil {
+			expectedID = handle.ID()
+		}
+		return resetWorkspaceToCommit(ctx, b.runner, sessionID, sha, expectedID)
 	}
 
 	script, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, sha)

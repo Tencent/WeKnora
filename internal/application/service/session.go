@@ -982,7 +982,8 @@ func (s *sessionService) GenerateTitleAsync(
 // previous turn. The returned closer must be called.
 //
 // A rewind in progress is a hard failure: the agent must not start on a
-// workspace that git reset is about to rewrite.
+// workspace that git reset is about to rewrite. Lease errors fail closed so
+// send cannot persist a turn that rewind would not see as busy.
 func (s *sessionService) holdSandboxTurn(
 	ctx context.Context, sessionID, configID string,
 ) (func(), error) {
@@ -999,11 +1000,8 @@ func (s *sessionService) holdSandboxTurn(
 			return nil, nil
 		}
 		if err := holder.BeginSessionTurn(ctx, sessionID); err != nil {
-			if stderrors.Is(err, sandbox.ErrSessionRewindLocked) {
-				return nil, err
-			}
 			logger.Warnf(ctx, "[sandbox] begin turn for session %s failed: %v", sessionID, err)
-			return nil, nil
+			return nil, err
 		}
 		return holder, nil
 	}
@@ -1074,4 +1072,12 @@ func (s *sessionService) RejectSendIfRewinding(ctx context.Context, sessionID st
 		return nil
 	}
 	return check(s.sandboxMgr)
+}
+
+// HoldSandboxTurn is the exported turn-lease entry so HTTP send can take the
+// lease before persisting messages, matching rewind's busy check.
+func (s *sessionService) HoldSandboxTurn(
+	ctx context.Context, sessionID, configID string,
+) (func(), error) {
+	return s.holdSandboxTurn(ctx, sessionID, configID)
 }

@@ -111,6 +111,23 @@ func TestRewindSessionMapsBusySourceTo409(t *testing.T) {
 	require.Equal(t, "REWIND_SOURCE_BUSY", body["code"])
 }
 
+func TestRewindSessionMapsNoCheckpointTo409(t *testing.T) {
+	rewinder := &stubRewinder{err: service.ErrRewindNoCheckpoint}
+
+	w := performRewind(t, rewinder, `{"message_id":"u-2"}`)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "REWIND_NO_CHECKPOINT", body["code"])
+}
+
+func TestRewindSessionUnavailableWhenUnwired(t *testing.T) {
+	w := performRewind(t, nil, `{"message_id":"u-2"}`)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
 func TestRewindSessionMapsResetFailureTo500(t *testing.T) {
 	rewinder := &stubRewinder{err: errors.New("workspace reset: git reset exec: sandbox unreachable")}
 

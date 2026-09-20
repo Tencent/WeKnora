@@ -78,6 +78,38 @@ func TestRedisSessionSandboxBindingStoreBeginTurnFailsWhenRewindLocked(t *testin
 	require.NoError(t, store.EndTurn(ctx, key))
 }
 
+func TestRedisSessionSandboxBindingStoreTryLockRewindFailsWhenTurnActive(t *testing.T) {
+	store, _, _ := newRedisBindingTestStore(t)
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-turn-rewind"}
+
+	require.NoError(t, store.BeginTurn(ctx, key))
+	_, err := store.TryLockRewind(ctx, key)
+	require.ErrorIs(t, err, ErrSessionTurnActive)
+	require.NoError(t, store.EndTurn(ctx, key))
+
+	unlock, err := store.TryLockRewind(ctx, key)
+	require.NoError(t, err)
+	unlock()
+}
+
+func TestRedisSessionSandboxBindingStoreRewindLockRenews(t *testing.T) {
+	store, client, _ := newRedisBindingTestStore(t)
+	store.rewindLockTTL = 150 * time.Millisecond
+	store.rewindLockRenew = 40 * time.Millisecond
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-rewind-renew"}
+
+	unlock, err := store.TryLockRewind(ctx, key)
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	time.Sleep(220 * time.Millisecond)
+	n, err := client.Exists(ctx, store.rewindKey(key)).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n, "rewind lock must be renewed past the original TTL")
+}
+
 func TestRedisSessionSandboxBindingStoreInvalidatesByConfig(t *testing.T) {
 	store, _, _ := newRedisBindingTestStore(t)
 	testSessionSandboxBindingInvalidateByConfig(t, store)
