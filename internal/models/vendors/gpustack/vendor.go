@@ -97,6 +97,13 @@ func init() {
 				// GPUStack's built-in backends are vLLM, SGLang, Ascend MindIE and
 				// VoxBox, so the vLLM rerank extension reaches the model.
 				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+				// The field is spelled relevance_score like the Cohere shape, but
+				// it is not a probability: the rerank API page's own example
+				// returns 1.951932668685913, -3.7347371578216553 and
+				// -6.157620906829834. Read as a probability, every negative score
+				// falls below a relevance threshold tuned for 0..1.
+				// https://docs.gpustack.ai/2.0/user-guide/rerank-api/
+				ScoreScale: catalog.Ptr(api.ScoreLogit),
 			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),

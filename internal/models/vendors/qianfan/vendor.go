@@ -101,6 +101,13 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				// "文本数量不超过64"; query "长度不超过1600个字符"; each document
+				// "长度不超过4096个字符".
+				MaxDocuments:     catalog.Ptr(64),
+				MaxQueryChars:    catalog.Ptr(1600),
+				MaxDocumentChars: catalog.Ptr(4096),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				// Both spellings are accepted; max_completion_tokens is the
 				// one that also covers the thinking chain.

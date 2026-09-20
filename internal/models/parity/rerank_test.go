@@ -263,6 +263,12 @@ func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
 		"volcengine": {MaxDocuments: 50, MaxConcurrency: 4},
 		// NIM reranking: passages is capped at 512 items.
 		"nvidia": {MaxDocuments: 512},
+		// cloud.baidu.com/doc/qianfan-api: 文本数量不超过64, query 不超过
+		// 1600 个字符, 每条 document 不超过 4096 个字符.
+		"qianfan": {MaxDocuments: 64, MaxQueryChars: 1600, MaxDocumentChars: 4096},
+		// help.aliyun.com text-rerank: 500 documents per request. Its length
+		// limits are stated in tokens, which runes cannot express.
+		"aliyun": {MaxDocuments: 500},
 	} {
 		t.Run(id, func(t *testing.T) {
 			resolved, err := catalog.Resolve(catalog.Ref{
@@ -329,4 +335,51 @@ func TestTruncatePromptTokensIsReachableFromTheEditor(t *testing.T) {
 		assert.Equal(t, []types.ModelType{types.ModelTypeRerank}, field.ModelTypes,
 			"the input belongs to the rerank form only")
 	}
+}
+
+// TestRerankScoreScalesMatchTheVendorDocs pins which vendors return something
+// other than a 0..1 relevance score. Getting this wrong is silent: the number
+// still looks like a score, and the retrieval threshold still compares it, so
+// a logit-scaled vendor simply loses every negatively scored document.
+func TestRerankScoreScalesMatchTheVendorDocs(t *testing.T) {
+	// Both spell the field like a probability and return neither.
+	//   NIM:      rankings[].logit, e.g. 0.226 / -1.171 / -6.31
+	//   GPUStack: relevance_score,  e.g. 1.951 / -3.734 / -6.157
+	logitScaled := map[string]bool{"nvidia": true, "gpustack": true}
+
+	for _, v := range catalog.ListByType(types.ModelTypeRerank) {
+		resolved, err := catalog.Resolve(catalog.Ref{
+			Provider: v.ID, Model: "m", ModelType: types.ModelTypeRerank,
+		})
+		require.NoError(t, err)
+		want := api.ScoreProbability
+		if logitScaled[v.ID] {
+			want = api.ScoreLogit
+		}
+		assert.Equal(t, want, resolved.Rerank.ScoreScale, "%s score scale", v.ID)
+	}
+}
+
+// TestUnimplementedRerankDialectsAreHidden keeps the picker from offering a
+// model this build cannot call. qwen3-rerank is a second, incompatible
+// protocol on the same vendor — a different path, a flat request and a
+// response with no output wrapper — so it stays resolvable for rows that
+// already name it and disappears from the list.
+func TestUnimplementedRerankDialectsAreHidden(t *testing.T) {
+	v, ok := catalog.Get("aliyun")
+	require.True(t, ok)
+
+	offered := make([]string, 0)
+	for _, m := range v.ModelsByType(types.ModelTypeRerank) {
+		offered = append(offered, m.ID)
+	}
+	assert.NotContains(t, offered, "qwen3-rerank", "the picker must not offer an unimplemented dialect")
+	assert.Contains(t, offered, "gte-rerank-v2")
+
+	// Still resolvable: an existing row naming it must not start failing.
+	resolved, err := catalog.Resolve(catalog.Ref{
+		Provider: "aliyun", Model: "qwen3-rerank", ModelType: types.ModelTypeRerank,
+	})
+	require.NoError(t, err)
+	assert.True(t, resolved.Cataloged)
 }
