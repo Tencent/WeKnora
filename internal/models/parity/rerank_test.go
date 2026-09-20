@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
@@ -382,4 +383,38 @@ func TestUnimplementedRerankDialectsAreHidden(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, resolved.Cataloged)
+}
+
+// TestGatewayRerankEndpoints pins the URL each gateway's rerank rows reach.
+// All three serve the Cohere dialect the protocol package already speaks, so
+// opening the type was a declaration — but LiteLLM documents the route on the
+// proxy root rather than under /v1, which is why it needs its own default.
+func TestGatewayRerankEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		wantURL  string
+	}{
+		// https://docs.novita.ai/api-reference/model-apis-llm-create-rerank
+		{provider: "novita", wantURL: "https://api.novita.ai/openai/v1/rerank"},
+		// https://openrouter.ai/docs/api/api-reference/rerank/submit-a-rerank-request
+		{provider: "openrouter", wantURL: "https://openrouter.ai/api/v1/rerank"},
+		// https://docs.litellm.ai/docs/rerank — the curl example posts to
+		// http://0.0.0.0:4000/rerank, not /v1/rerank.
+		{provider: "litellm", wantURL: "http://your_litellm_proxy/rerank"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			resolved, err := catalog.Resolve(catalog.Ref{
+				Provider: tc.provider, Model: "m", ModelType: types.ModelTypeRerank,
+			})
+			require.NoError(t, err)
+			require.Equal(t, api.RerankCohere, resolved.RerankAPI)
+
+			// Rebuild the URL the way cohererank does.
+			got := strings.TrimRight(resolved.BaseURL, "/")
+			if !strings.HasSuffix(got, "/rerank") {
+				got += "/rerank"
+			}
+			assert.Equal(t, tc.wantURL, got)
+		})
+	}
 }

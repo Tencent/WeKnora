@@ -67,11 +67,13 @@ func init() {
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: BaseURL,
 			types.ModelTypeEmbedding:   BaseURL,
+			types.ModelTypeRerank:      BaseURL,
 			types.ModelTypeVLLM:        BaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
+			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{

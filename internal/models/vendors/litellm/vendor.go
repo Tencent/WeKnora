@@ -48,6 +48,10 @@ const ID = "litellm"
 // BaseURL is a placeholder the operator replaces with a reachable proxy.
 const BaseURL = "http://your_litellm_proxy/v1"
 
+// RerankBaseURL is the proxy root. LiteLLM documents rerank at /rerank
+// rather than /v1/rerank, so it does not hang off the chat base URL.
+const RerankBaseURL = "http://your_litellm_proxy"
+
 func init() {
 	catalog.Register(&catalog.Vendor{
 		ID:           ID,
@@ -65,11 +69,13 @@ func init() {
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: BaseURL,
 			types.ModelTypeEmbedding:   BaseURL,
+			types.ModelTypeRerank:      RerankBaseURL,
 			types.ModelTypeVLLM:        BaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
+			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
