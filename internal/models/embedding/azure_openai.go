@@ -7,21 +7,30 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // AzureOpenAIEmbedder implements text vectorization using Azure OpenAI API
 type AzureOpenAIEmbedder struct {
-	apiKey                    string
-	baseURL                   string
-	modelName                 string
-	truncatePromptTokens      int
-	dimensions                int
-	modelID                   string
+	apiKey               string
+	baseURL              string
+	modelName            string
+	truncatePromptTokens int
+	dimensions           int
+	modelID              string
+	// apiVersion is the stored extra_config.api_version, empty for the v1
+	// GA data plane. It only selects requestURL; see azureEmbeddingURL.
 	apiVersion                string
+	requestURL                string
 	httpClient                *http.Client
 	maxRetries                int
 	customHeaders             map[string]string
@@ -56,9 +65,6 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 	if modelName == "" {
 		return nil, fmt.Errorf("deployment name (model name) is required")
 	}
-	if apiVersion == "" {
-		apiVersion = "2024-10-21"
-	}
 	if truncatePromptTokens == 0 {
 		truncatePromptTokens = 511
 	}
@@ -75,10 +81,49 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 		dimensions:           dimensions,
 		modelID:              modelID,
 		apiVersion:           apiVersion,
+		requestURL:           azureEmbeddingURL(baseURL, modelName, apiVersion),
 		httpClient:           newEmbeddingHTTPClient(60 * time.Second),
 		maxRetries:           3,
 		EmbedderPooler:       pooler,
 	}, nil
+}
+
+// azureEmbeddingURL resolves the embeddings URL through the catalog's Azure
+// vendor, so one stored row lands on the same data plane for embedding as it
+// does for chat and VLM (which both go through catalog.Vendor.Endpoint via
+// internal/models/chat): an empty api_version means the v1 GA path
+// {base}/openai/v1/embeddings with the deployment name in the body's `model`
+// field, and a non-empty one means the dated
+// {base}/openai/deployments/{deployment}/embeddings?api-version=... path.
+// See the package comment of internal/models/vendors/azure_openai for the
+// documentation behind that rule.
+//
+// The literal fallback below only runs if the vendor package was not linked
+// in; embedder.go blank-imports internal/models/vendors so it normally is.
+func azureEmbeddingURL(baseURL, deployment, apiVersion string) string {
+	root := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	extra := map[string]string{}
+	version := strings.TrimSpace(apiVersion)
+	if version != "" {
+		extra[catalog.ExtraAPIVersion] = version
+	}
+	if vendor, ok := catalog.Get(string(provider.ProviderAzureOpenAI)); ok && vendor.Endpoint != nil {
+		target, query := vendor.Endpoint(catalog.EndpointRequest{
+			BaseURL:   root,
+			Model:     deployment,
+			ModelType: types.ModelTypeEmbedding,
+			API:       api.APIOpenAICompletions,
+			Extra:     extra,
+		})
+		if target != "" {
+			return api.Endpoint{URL: target, Query: query}.Resolve("")
+		}
+	}
+	if version != "" {
+		return root + "/openai/deployments/" + url.PathEscape(deployment) +
+			"/embeddings?api-version=" + version
+	}
+	return root + "/openai/v1/embeddings"
 }
 
 func (e *AzureOpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -146,9 +191,6 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 }
 
 func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
-	url := fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=%s",
-		e.baseURL, e.modelName, e.apiVersion)
-
 	var resp *http.Response
 	var err error
 
@@ -165,7 +207,7 @@ func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData [
 			}
 		}
 
-		req, reqErr := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		req, reqErr := http.NewRequestWithContext(ctx, "POST", e.requestURL, bytes.NewReader(jsonData))
 		if reqErr != nil {
 			err = reqErr
 			continue

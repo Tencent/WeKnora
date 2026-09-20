@@ -206,11 +206,13 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 			embedder, err = jinaEmb, jErr
 			return embedder, err
 		case provider.ProviderAzureOpenAI:
-			apiVersion := "2024-10-21"
+			// No default: an empty api_version means the v1 GA data
+			// plane, exactly as it does for this row's chat and VLM
+			// clients. Filling in a dated version here would put the
+			// same stored row on two different data planes.
+			var apiVersion string
 			if config.ExtraConfig != nil {
-				if v, ok := config.ExtraConfig["api_version"]; ok {
-					apiVersion = v
-				}
+				apiVersion = config.ExtraConfig["api_version"]
 			}
 			azureEmb, azErr := NewAzureOpenAIEmbedder(config.APIKey,
 				config.BaseURL,

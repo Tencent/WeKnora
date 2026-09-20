@@ -28,13 +28,53 @@
 //     GPT-5.5, GPT-5.4 and gpt-5.1-codex-max, `max` to GPT-6 and GPT-5.6 on
 //     the Responses API only, and `minimal` to the original GPT-5 models.
 //     Because a deployment name says nothing about which model backs it, the
-//     family patterns stay on the conservative subset;
+//     family patterns stay on the conservative subset. The exception is a
+//     deployment named exactly gpt-5, gpt-5-mini or gpt-5-nano, which is
+//     overwhelmingly the model of that name: those three carry their own
+//     entries mirroring the openai vendor, because the original GPT-5 trio
+//     supports "Reasoning.effort ... minimal, low, medium, and high"
+//     (https://developers.openai.com/api/docs/models/gpt-5) and rejects
+//     `none`, unlike GPT-5.1 and later, which the gpt-5* pattern covers;
 //   - `store: false`, `prompt_cache_key` and cached-token usage behave as
 //     on api.openai.com.
 //
-// Unverified: whether a resource that has not opted into the v1 API still
-// answers on /openai/v1. Operators in that situation set api_version and get
-// the legacy deployments path back.
+// # The one path rule
+//
+// A stored row picks its data plane from `extra_config.api_version` alone,
+// and chat, VLM and embedding all apply the same rule to the same row:
+//
+//	api_version empty     -> {base}/openai/v1{path}, no api-version, the
+//	                         deployment name travelling in the body's
+//	                         `model` field;
+//	api_version non-empty -> {base}/openai/deployments/{deployment}{path}
+//	                         ?api-version={value}.
+//
+// Chat and VLM reach this through the Endpoint hook below (VLM is built on
+// the chat client); embedding applies it in azureEmbeddingURL in
+// internal/models/embedding/azure_openai.go, which calls this same hook.
+//
+// The v1 default is not a guess. The v1 API reference is published at
+// "API Version: v1" with server {endpoint}/openai/v1 and covers the paths
+// this vendor uses, embeddings included
+// (https://learn.microsoft.com/rest/api/microsoft-foundry/azureopenai/embeddings:
+// "POST {endpoint}/openai/v1/embeddings", with `api-version` marked
+// "Required: No" and defaulting to v1). The lifecycle page's prerequisites
+// for the v1 API are only a subscription, a Foundry or Azure OpenAI resource
+// in a supported region, and at least one model deployment — there is no
+// resource-level switch to flip, and `base_url` is documented to accept the
+// https://{resource}.openai.azure.com/openai/v1/ form. The dated path is not
+// a parallel modern option: 2024-10-21 is still the newest GA api-version
+// there, so the reasoning surface this vendor advertises
+// (`max_completion_tokens`, 2024-09-01-preview; `reasoning_effort`,
+// 2024-12-01-preview) exists on no GA dated version at all.
+//
+// Behaviour change for existing rows: before the catalog, a row with no
+// api_version used the dated deployments path (the Go SDK's built-in Azure
+// default for chat and VLM, a hard-coded 2024-10-21 for embedding). Those
+// rows now use /openai/v1. This is deliberate and documented in
+// website-docs/03-features/06-models.md; an operator whose gateway only
+// serves the dated path (an API Management front end, a sovereign cloud)
+// restores the exact previous shape by filling the api_version extra field.
 package azureopenai
 
 import (
