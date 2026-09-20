@@ -71,6 +71,9 @@ func isRewindNotFound(err error) bool {
 }
 
 // RewindResult is what the HTTP layer renders.
+// WorkspaceReset is true when the live sandbox was git-reset, or when an
+// unopened fork's ForkBootstrap was retargeted so the first provision lands
+// on the rewind SHA.
 type RewindResult struct {
 	DeletedMessages int              `json:"deleted_messages"`
 	WorkspaceReset  bool             `json:"workspace_reset"`
@@ -233,8 +236,15 @@ func (s *SessionRewindService) Rewind(
 			return nil, err
 		}
 		if reason == RewindSkipNoSandbox {
-			if err := s.syncPendingForkBootstrap(persistCtx, source, history); err != nil {
+			aligned, abandoned, err := s.syncPendingForkBootstrap(persistCtx, source, history)
+			if err != nil {
 				return nil, err
+			}
+			if aligned {
+				workspaceReset = true
+				reason = ""
+			} else if abandoned {
+				reason = RewindSkipNoCheckpoint
 			}
 		}
 	}
@@ -338,27 +348,27 @@ func (s *SessionRewindService) rejectIfBusy(ctx context.Context, sessionID strin
 // same as forking at the first user message.
 func (s *SessionRewindService) syncPendingForkBootstrap(
 	ctx context.Context, session *types.Session, kept []*types.Message,
-) error {
+) (aligned bool, abandoned bool, err error) {
 	if s == nil || session == nil || session.ForkBootstrap == nil || session.ForkBootstrap.Consumed() {
-		return nil
+		return false, false, nil
 	}
 	pending := *session.ForkBootstrap
 	checkpoint := latestCheckpoint(kept)
 	if checkpoint == nil || strings.TrimSpace(checkpoint.CommitSHA) == "" {
-		return s.abandonPendingForkBootstrap(ctx, session, &pending)
+		return false, true, s.abandonPendingForkBootstrap(ctx, session, &pending)
 	}
 	sha := strings.TrimSpace(checkpoint.CommitSHA)
 	if !gitSHAPattern.MatchString(sha) {
-		return fmt.Errorf("session rewind: invalid checkpoint sha %q", truncateForLog(sha))
+		return false, false, fmt.Errorf("session rewind: invalid checkpoint sha %q", truncateForLog(sha))
 	}
 	if sha == strings.TrimSpace(pending.CommitSHA) {
-		return nil
+		return true, false, nil
 	}
 	pending.CommitSHA = sha
 	if err := s.sessions.UpdateForkBootstrap(ctx, session.ID, &pending); err != nil {
-		return fmt.Errorf("session rewind: retarget fork bootstrap: %w", err)
+		return false, false, fmt.Errorf("session rewind: retarget fork bootstrap: %w", err)
 	}
-	return nil
+	return true, false, nil
 }
 
 func (s *SessionRewindService) abandonPendingForkBootstrap(
