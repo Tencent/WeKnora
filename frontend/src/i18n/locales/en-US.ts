@@ -892,6 +892,15 @@ export default {
     },
     attempt: 'Attempt {n}',
     retry: 'Retry parsing',
+    notRun: 'Not run',
+    stageFailed: '{stage} failed',
+    copyError: 'Copy error details',
+    stat: {
+      duration: 'Duration',
+      attempt: 'Attempt',
+      tasks: 'Background tasks',
+      tasksValue: '{running} running · {failed} failed · {completed} done'
+    },
     refresh: 'Refresh now',
     copy: 'Copy',
     copyDetails: 'Copy details',
@@ -911,12 +920,9 @@ export default {
     minutesAgo: '{n}m ago',
     noActivity: 'No parsing activity yet',
     totalDuration: 'Total: {d}',
-    total: 'Total {d}',
     head: {
       stagesDone: 'Main stages',
       stagesProgress: 'Current stage',
-      postprocessTasks: 'Postprocess: {running} running / {failed} failed / {completed} completed',
-      completedWithActiveTrace: 'Processing completed, but {n} trace task(s) remain active',
       attempt: 'Attempt',
       updated: 'Updated'
     },

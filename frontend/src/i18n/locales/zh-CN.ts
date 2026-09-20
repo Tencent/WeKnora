@@ -6578,6 +6578,15 @@ export default {
     root: '知识处理',
     attempt: '第 {n} 次尝试',
     retry: '重新解析',
+    notRun: '未执行',
+    stageFailed: '{stage}阶段失败',
+    copyError: '复制错误信息',
+    stat: {
+      duration: '耗时',
+      attempt: '尝试',
+      tasks: '后台任务',
+      tasksValue: '运行中 {running} · 失败 {failed} · 已完成 {completed}'
+    },
     refresh: '立即刷新',
     copy: '复制',
     copyDetails: '复制详情',
@@ -6597,7 +6606,6 @@ export default {
     minutesAgo: '{n} 分钟前',
     noActivity: '暂无解析记录',
     totalDuration: '总耗时：{d}',
-    total: '总耗时 {d}',
     errorCode: {
       UNKNOWN_SUGGESTION: '请查看应用日志获取详细信息。'
     },
@@ -6652,8 +6660,6 @@ export default {
     head: {
       stagesDone: '主流程阶段',
       stagesProgress: '当前阶段',
-      postprocessTasks: '后台任务：运行中 {running} / 失败 {failed} / 已完成 {completed}',
-      completedWithActiveTrace: '处理已完成，但仍有 {n} 个 Trace 任务处于活动状态',
       attempt: '尝试',
       updated: '更新于'
     },

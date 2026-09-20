@@ -892,6 +892,15 @@ export default {
     },
     attempt: '{n}回目の試行',
     retry: '再解析',
+    notRun: '未実行',
+    stageFailed: '{stage}が失敗しました',
+    copyError: 'エラー情報をコピー',
+    stat: {
+      duration: '所要時間',
+      attempt: '試行',
+      tasks: 'バックグラウンドタスク',
+      tasksValue: '実行中 {running} · 失敗 {failed} · 完了 {completed}'
+    },
     refresh: '今すぐ更新',
     copy: 'コピー',
     copyDetails: '詳細をコピー',
@@ -911,12 +920,9 @@ export default {
     minutesAgo: '{n}分前',
     noActivity: '解析の記録はまだありません',
     totalDuration: '合計: {d}',
-    total: '合計{d}',
     head: {
       stagesDone: '主要ステージ',
       stagesProgress: '現在のステージ',
-      postprocessTasks: '後処理: 実行中{running}件／失敗{failed}件／完了{completed}件',
-      completedWithActiveTrace: '処理は完了しましたが、{n}件のトレースタスクがまだ実行中です',
       attempt: '試行',
       updated: '更新'
     },

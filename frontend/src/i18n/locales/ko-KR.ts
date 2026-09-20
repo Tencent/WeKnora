@@ -6576,6 +6576,15 @@ export default {
     root: '지식 처리',
     attempt: '{n}번째 시도',
     retry: '다시 파싱',
+    notRun: '실행 안 됨',
+    stageFailed: '{stage} 단계 실패',
+    copyError: '오류 정보 복사',
+    stat: {
+      duration: '소요 시간',
+      attempt: '시도',
+      tasks: '백그라운드 작업',
+      tasksValue: '실행 중 {running} · 실패 {failed} · 완료 {completed}'
+    },
     refresh: '지금 새로고침',
     copy: '복사',
     copyDetails: '세부정보 복사',
@@ -6595,7 +6604,6 @@ export default {
     minutesAgo: '{n}분 전',
     noActivity: '파싱 활동 없음',
     totalDuration: '총 소요시간: {d}',
-    total: '총 {d}',
     errorCode: {
       UNKNOWN_SUGGESTION: '자세한 내용은 애플리케이션 로그를 확인하세요.'
     },
@@ -6650,8 +6658,6 @@ export default {
     head: {
       stagesDone: '주요 단계',
       stagesProgress: '현재 단계',
-      postprocessTasks: '후처리: 실행 중 {running} / 실패 {failed} / 완료 {completed}',
-      completedWithActiveTrace: '처리는 완료되었지만 {n}개의 Trace 작업이 아직 활성 상태입니다',
       attempt: '시도',
       updated: '갱신'
     },

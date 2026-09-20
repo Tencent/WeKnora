@@ -6576,6 +6576,15 @@ export default {
     root: 'Обработка знаний',
     attempt: 'Попытка {n}',
     retry: 'Повторить парсинг',
+    notRun: 'Не выполнялся',
+    stageFailed: 'Этап «{stage}» завершился с ошибкой',
+    copyError: 'Скопировать детали ошибки',
+    stat: {
+      duration: 'Длительность',
+      attempt: 'Попытка',
+      tasks: 'Фоновые задачи',
+      tasksValue: 'выполняется {running} · с ошибкой {failed} · готово {completed}'
+    },
     refresh: 'Refresh now',
     copy: 'Copy',
     copyDetails: 'Скопировать детали',
@@ -6595,7 +6604,6 @@ export default {
     minutesAgo: '{n}m ago',
     noActivity: 'Нет активности парсинга',
     totalDuration: 'Всего: {d}',
-    total: 'Всего {d}',
     errorCode: {
       UNKNOWN_SUGGESTION: 'Проверьте логи приложения для подробностей.'
     },
@@ -6650,8 +6658,6 @@ export default {
     head: {
       stagesDone: 'Main stages',
       stagesProgress: 'Current stage',
-      postprocessTasks: 'Postprocess: {running} running / {failed} failed / {completed} completed',
-      completedWithActiveTrace: 'Processing completed, but {n} trace task(s) remain active',
       attempt: 'Attempt',
       updated: 'Updated'
     },
