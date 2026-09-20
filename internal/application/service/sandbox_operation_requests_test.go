@@ -157,9 +157,13 @@ func TestPinnedCheckpointSkipsWorkspacePreparation(t *testing.T) {
 	require.NotNil(t, checkpoint)
 	require.Equal(t, "sb1", checkpoint.SandboxID)
 	require.Equal(t, strings.Repeat("a", 40), checkpoint.CommitSHA)
-	require.Equal(t, []string{"connect", "exec"}, client.ops)
+	require.Equal(t, []string{"connect", "exec"}, client.ops,
+		"SkipWorkspacePrep must omit the extra prepareSessionDirs exec")
 	require.Equal(t, workspaceCheckpointTimeout, client.exec.Timeout)
 	require.Equal(t, sandbox.SessionWorkspaceRoot, client.exec.WorkDir)
 	require.Contains(t, client.exec.Command, "--allow-empty")
-	require.NotContains(t, client.exec.Command, "mkdir")
+	require.Contains(t, client.exec.Command, sandbox.SessionGitDir)
+	require.Contains(t, client.exec.Command, `mkdir -p "$WORK_TREE"`)
+	require.NotContains(t, client.exec.Command, `mkdir -p -- "$d"`,
+		"checkpoint must not run the session input/output bootstrap")
 }
