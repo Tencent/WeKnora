@@ -129,7 +129,14 @@ func init() {
 				ModelTypes: rerankOnly,
 			},
 		},
+		RerankAPI: api.RerankTencentLKEAP,
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				// RunRerank takes at most 60 documents, and Query plus Docs
+				// together at most 2000 characters.
+				MaxDocuments:    catalog.Ptr(60),
+				MaxRequestChars: catalog.Ptr(2000),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatThinkingType),

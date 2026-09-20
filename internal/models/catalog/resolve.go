@@ -51,6 +51,12 @@ type Resolved struct {
 	OpenAIResponses    OpenAIResponsesSettings
 	AnthropicMessages  AnthropicMessagesSettings
 	GoogleGenerativeAI GoogleGenerativeAISettings
+
+	// RerankAPI and Rerank are filled only when the reference asked for a
+	// rerank model. Chat resolution is on every request's hot path, so the
+	// rerank overlay is not merged for it.
+	RerankAPI api.RerankAPI
+	Rerank    RerankSettings
 }
 
 // Resolve merges the vendor, catalog entry, extra-config and per-row
@@ -84,6 +90,10 @@ func Resolve(ref Ref) (*Resolved, error) {
 	}
 	if ref.Override != nil {
 		applySpecOverride(&spec, ref.Override)
+	}
+
+	if modelType == types.ModelTypeRerank {
+		return resolveRerank(ref, vendor, spec, cataloged, baseURL)
 	}
 
 	resolvedAPI := spec.API
@@ -345,4 +355,50 @@ func (r *Resolved) Capabilities() Capabilities {
 	}
 	caps.ThinkingLevels = r.ThinkingLevels.SupportedLevels()
 	return caps
+}
+
+// resolveRerank merges the rerank layers. Rerank has one settings struct
+// rather than one per protocol, so the model entry's compat object is decoded
+// unconditionally instead of being matched against a protocol.
+func resolveRerank(
+	ref Ref, vendor *Vendor, spec ModelSpec, cataloged bool, baseURL string,
+) (*Resolved, error) {
+	protocol := vendor.RerankAPI
+	if protocol == "" {
+		protocol = api.RerankCohere
+	}
+	if !protocol.Known() {
+		return nil, fmt.Errorf("catalog: unknown rerank api %q for provider %s", protocol, vendor.ID)
+	}
+
+	settings := DefaultRerank()
+	apply(&settings, &vendor.Compat.Rerank)
+	if len(spec.Compat) > 0 {
+		overlay := &RerankCompat{}
+		if err := decodeCompat(spec.Compat, overlay); err != nil {
+			return nil, fmt.Errorf("rerank compat: %w", err)
+		}
+		apply(&settings, overlay)
+	}
+	if raw := ref.Override.CompatJSON(); len(raw) > 0 {
+		overlay := &RerankCompat{}
+		if err := decodeCompat(raw, overlay); err != nil {
+			return nil, fmt.Errorf("rerank compat: %w", err)
+		}
+		apply(&settings, overlay)
+	}
+
+	out := &Resolved{
+		Vendor:      vendor,
+		Spec:        spec,
+		Cataloged:   cataloged,
+		BaseURL:     baseURL,
+		RemoteModel: ref.Model,
+		RerankAPI:   protocol,
+		Rerank:      settings,
+	}
+	if override := strings.TrimSpace(ref.Extra[ExtraRemoteModelName]); override != "" {
+		out.RemoteModel = override
+	}
+	return out, nil
 }

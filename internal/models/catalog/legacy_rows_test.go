@@ -194,7 +194,14 @@ func TestLegacyRowsValidateAndResolve(t *testing.T) {
 			if resolved.Vendor == nil {
 				t.Fatal("resolved with a nil vendor")
 			}
-			if !resolved.API.Known() {
+			// Rerank rows resolve to a rerank protocol; everything else
+			// resolves to a chat one. The two vocabularies are separate
+			// types so a row can never land on the wrong one.
+			if row.typ == types.ModelTypeRerank {
+				if !resolved.RerankAPI.Known() {
+					t.Fatalf("resolved to an unknown rerank protocol %q", resolved.RerankAPI)
+				}
+			} else if !resolved.API.Known() {
 				t.Fatalf("resolved to an unknown protocol %q", resolved.API)
 			}
 			if resolved.RemoteModel == "" && row.model != "" {

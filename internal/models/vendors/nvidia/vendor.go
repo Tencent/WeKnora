@@ -91,7 +91,17 @@ func init() {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
+		RerankAPI: api.RerankNIM,
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				// rankings[].logit is unbounded and routinely negative, so the
+				// caller must be told this is not a 0..1 relevance score.
+				ScoreScale: catalog.Ptr(api.ScoreLogit),
+				// truncate defaults to NONE upstream, which fails the request on
+				// an over-long passage instead of cutting it.
+				Truncate:     catalog.Ptr("END"),
+				MaxDocuments: catalog.Ptr(512),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),

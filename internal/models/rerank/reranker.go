@@ -6,12 +6,15 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/provider"
-	// provider.DetectProvider answers from the vendor catalog, which is empty
-	// until the vendor packages have run their init. Without this import every
-	// URL detects as "generic" and newReranker below falls through to the
-	// OpenAI-compatible reranker for LKEAP / Volcengine / Jina / … rows that
-	// carry no explicit provider id.
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
+	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
+	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
+	// catalog.Resolve answers from the vendor catalog, which is empty until
+	// the vendor packages have run their init. Without this import every row
+	// resolves to the generic vendor: LKEAP and Volcengine would lose their
+	// signed clients and Aliyun its native protocol.
 	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -136,40 +139,73 @@ type customHeaderSetter interface {
 	SetCustomHeaders(map[string]string)
 }
 
+// newReranker resolves the catalog and returns the protocol client for the
+// configured model, wrapped in the shared batching and score-scaling layer.
+// It mirrors chat.NewRemoteChat: the vendor's facts decide the protocol, the
+// URL and the credential, and this function knows no vendor names.
 func newReranker(config *RerankerConfig) (Reranker, error) {
-	// Use provider field if set, otherwise detect from URL using provider registry
-	providerName := provider.ProviderName(config.Provider)
-	if providerName == "" {
-		providerName = provider.DetectProvider(config.BaseURL)
+	if config == nil {
+		return nil, fmt.Errorf("rerank config is nil")
+	}
+	resolved, err := catalog.Resolve(catalog.Ref{
+		Provider:  config.Provider,
+		Model:     config.ModelName,
+		BaseURL:   config.BaseURL,
+		ModelType: types.ModelTypeRerank,
+		Extra:     config.ExtraConfig,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRerankBaseURL(resolved.BaseURL); err != nil {
+		return nil, err
 	}
 
-	var (
-		reranker Reranker
-		err      error
-	)
-	switch providerName {
-	case provider.ProviderAliyun:
-		reranker, err = NewAliyunReranker(config)
-	case provider.ProviderZhipu:
-		reranker, err = NewZhipuReranker(config)
-	case provider.ProviderJina:
-		reranker, err = NewJinaReranker(config)
-	case provider.ProviderNvidia:
-		reranker, err = NewNvidiaReranker(config)
-	case provider.ProviderWeKnoraCloud:
-		reranker, err = NewWeKnoraCloudReranker(config)
-	case provider.ProviderLKEAP:
-		reranker, err = NewLKEAPReranker(config)
-	case provider.ProviderVolcengine:
-		reranker, err = NewVolcengineReranker(config)
+	vendor := resolved.Vendor
+	creds := catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret}
+	endpoint := api.Endpoint{
+		BaseURL: resolved.BaseURL,
+		Model:   resolved.RemoteModel,
+		ModelID: config.ModelID,
+		Auth:    vendor.AuthFunc(vendor.API, creds),
+		Headers: config.CustomHeaders,
+		Client:  newRerankHTTPClient(0),
+	}
+	if vendor.Endpoint != nil {
+		if url, query := vendor.Endpoint(catalog.EndpointRequest{
+			BaseURL:   resolved.BaseURL,
+			Model:     resolved.RemoteModel,
+			ModelType: types.ModelTypeRerank,
+			Extra:     config.ExtraConfig,
+		}); url != "" {
+			endpoint.URL, endpoint.Query = url, query
+		}
+	}
+
+	var client api.Reranker
+	switch resolved.RerankAPI {
+	case api.RerankCohere:
+		client = cohererank.New(cohererank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankDashScope:
+		client = dashscoperank.New(dashscoperank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankNIM:
+		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankTencentLKEAP:
+		client, err = newLKEAPClient(config, resolved)
+	case api.RerankVolcengineKnowledge:
+		client, err = newVolcengineClient(config, resolved)
 	default:
-		reranker, err = NewOpenAIReranker(config)
+		return nil, fmt.Errorf("unsupported rerank api %q for provider %s", resolved.RerankAPI, vendor.ID)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if setter, ok := reranker.(customHeaderSetter); ok {
-		setter.SetCustomHeaders(config.CustomHeaders)
-	}
-	return reranker, nil
+
+	return &protocolReranker{
+		inner:     client,
+		settings:  resolved.Rerank,
+		endpoint:  resolved.BaseURL,
+		modelName: config.ModelName,
+		modelID:   config.ModelID,
+	}, nil
 }

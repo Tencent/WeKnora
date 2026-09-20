@@ -63,6 +63,14 @@ func init() {
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 		},
+		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				// return_documents echoes the text back. Results are matched
+				// by index, so this is not needed to map them; it is kept
+				// because it is what this vendor has always been sent.
+				SendReturnDocs: catalog.Ptr(true),
+			},
+		},
 		Models: catalog.MustParseModels(modelsJSON),
 	})
 }

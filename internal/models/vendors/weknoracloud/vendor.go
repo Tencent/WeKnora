@@ -90,6 +90,9 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				Path: catalog.Ptr("/api/v1/rerank"),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				SupportsMultiContent:  catalog.Ptr(false),
 				PromptCacheAccounting: catalog.Ptr(false),

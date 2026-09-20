@@ -31,6 +31,9 @@ func Register(v *Vendor) {
 	if v.Auth == "" {
 		v.Auth = AuthBearer
 	}
+	if v.RerankAPI == "" && v.SupportsType(types.ModelTypeRerank) {
+		v.RerankAPI = api.RerankCohere
+	}
 	for i := range v.Models {
 		if v.Models[i].Type == "" {
 			v.Models[i].Type = types.ModelTypeKnowledgeQA

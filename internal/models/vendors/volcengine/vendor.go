@@ -172,7 +172,12 @@ func init() {
 				ModelTypes:  rerankOnly,
 			},
 		},
+		RerankAPI: api.RerankVolcengineKnowledge,
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				MaxDocuments:   catalog.Ptr(50),
+				MaxConcurrency: catalog.Ptr(4),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatThinkingType),
 				SupportsReasoningEffort: catalog.Ptr(true),

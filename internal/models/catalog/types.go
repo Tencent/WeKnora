@@ -223,6 +223,9 @@ type Vendor struct {
 	Icon []byte
 	// API is the default chat protocol; a ModelSpec may override it.
 	API api.API
+	// RerankAPI is the rerank protocol. Register defaults it to the Cohere
+	// shape for any vendor that serves rerank without naming another.
+	RerankAPI api.RerankAPI
 	// DefaultBaseURLs by model type; GetDefaultURL falls back to chat.
 	DefaultBaseURLs map[types.ModelType]string
 	ModelTypes      []types.ModelType

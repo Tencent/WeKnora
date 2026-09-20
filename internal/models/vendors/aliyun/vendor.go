@@ -126,7 +126,11 @@ func init() {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
+		RerankAPI: api.RerankDashScope,
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				SendReturnDocs: catalog.Ptr(true),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				// Explicit although it matches the protocol default, because
 				// this vendor's own parameter table deprecates the other

@@ -106,6 +106,14 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Rerank: catalog.RerankCompat{
+				// The reference gives 最大长度为 4096 字符 for the query and for each
+				// document, and caps documents at 128 per request.
+				SendReturnDocs:   catalog.Ptr(true),
+				MaxDocuments:     catalog.Ptr(128),
+				MaxQueryChars:    catalog.Ptr(4096),
+				MaxDocumentChars: catalog.Ptr(4096),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField:          catalog.Ptr("max_tokens"),
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatThinkingType),
