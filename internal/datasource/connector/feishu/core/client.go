@@ -945,6 +945,50 @@ type userNameResponse struct {
 	} `json:"data"`
 }
 
+// DocTitles resolves display titles for document tokens via the drive
+// metadata batch API (one call for all refs, capped at the API's 200-item
+// limit). Tokens whose metadata is unavailable — no permission (970003),
+// deleted/mismatched (970005) — are simply absent from the result;
+// transport-level failures return nil. Callers degrade to the URL as link
+// text, so failures never block ingestion.
+func (c *Client) DocTitles(ctx context.Context, refs []pendingDocName) map[string]string {
+	if len(refs) == 0 {
+		return nil
+	}
+	type reqDoc struct {
+		DocToken string `json:"doc_token"`
+		DocType  string `json:"doc_type"`
+	}
+	reqs := make([]reqDoc, 0, len(refs))
+	for _, r := range refs {
+		if len(reqs) == 200 {
+			break
+		}
+		reqs = append(reqs, reqDoc{DocToken: r.Token, DocType: r.DocType})
+	}
+	var resp struct {
+		ApiResponse
+		Data struct {
+			Metas []struct {
+				DocToken string `json:"doc_token"`
+				Title    string `json:"title"`
+			} `json:"metas"`
+		} `json:"data"`
+	}
+	path := "/open-apis/drive/v1/metas/batch_query"
+	if err := c.DoRequest(ctx, http.MethodPost, path, map[string]any{"request_docs": reqs}, &resp); err != nil {
+		return nil
+	}
+	if resp.Code != 0 {
+		return nil
+	}
+	out := make(map[string]string, len(resp.Data.Metas))
+	for _, m := range resp.Data.Metas {
+		out[m.DocToken] = m.Title
+	}
+	return out
+}
+
 // UserName fetches a user's display name by OpenID via the contact API.
 // mention_user.user_id carries an OpenID, hence user_id_type=open_id. Requires
 // a contact read scope (contact:user.base:readonly / contact:contact:readonly);

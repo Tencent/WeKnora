@@ -26,6 +26,16 @@ type pendingAttachment struct {
 	Name      string
 }
 
+// pendingDocName is one 云文档 mention link awaiting a title backfill: the
+// renderer emits "[weknora-docname://<token>](<url>)" placeholders (it has no
+// access to document titles) and FetchDocxWithBlocks resolves the titles via
+// the drive metadata batch API, patching the link text in place.
+type pendingDocName struct {
+	Token   string
+	DocType string // drive metas doc_type: docx/doc/sheet/bitable/wiki/...
+	URL     string
+}
+
 // pendingImage is one image/board marker emitted into the Markdown, in
 // document order: N is the 1-based marker sequence number, Kind is the
 // SubtreeChildID discriminator ("image" or "board"), Token the Feishu media or
@@ -46,6 +56,8 @@ type mdRenderer struct {
 	byID        map[string]DocxBlock
 	atts        []pendingAttachment
 	imgs        []pendingImage
+	docNames    []pendingDocName
+	docNameSeen map[string]bool
 	imgN        int    // last marker sequence number assigned
 	markerNonce string // per-document nonce keeping user text from matching markers
 	docURL      string // parent document's web URL, for non-whitelisted attachment placeholders
@@ -92,7 +104,7 @@ func imageMarkerNonce(seed string) string {
 // block set has no downdrill blocks. userName resolves mention_user OpenIDs to
 // display names (nil → generic @成员 for every mention; documents without
 // mentions never invoke it, so it costs zero API calls).
-func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock, docURL string, userName func(string) string) ([]byte, []pendingAttachment, []pendingImage, error) {
+func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock, docURL string, userName func(string) string) ([]byte, []pendingAttachment, []pendingImage, []pendingDocName, error) {
 	byID := make(map[string]DocxBlock, len(blocks))
 	for _, b := range blocks {
 		byID[b.BlockID] = b
@@ -125,7 +137,7 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 	if out != "" {
 		out += "\n"
 	}
-	return []byte(out), r.atts, r.imgs, nil
+	return []byte(out), r.atts, r.imgs, r.docNames, nil
 }
 
 // markContainerDescendants marks every block reachable through the children of
@@ -389,6 +401,48 @@ func plainText(bt *BlockText) string {
 	return sb.String()
 }
 
+// mentionDocTypeByPathSegment maps Feishu URL path segments to drive metas
+// doc_type values. Wiki links resolve through this table too — the metadata
+// API supports wiki tokens for titles (content fetching is another matter).
+var mentionDocTypeByPathSegment = map[string]string{
+	"doc":      "doc",
+	"docx":     "docx",
+	"sheets":   "sheet",
+	"base":     "bitable",
+	"wiki":     "wiki",
+	"mindnote": "mindnote",
+	"slides":   "slides",
+	"file":     "file",
+}
+
+// parseMentionDocRef extracts (token, doc_type) from a Feishu document URL
+// like https://x.feishu.cn/docx/<token>. Returns ok=false for anything that
+// is not a recognizable Feishu doc URL (the link then stays as-is).
+func parseMentionDocRef(u string) (pendingDocName, bool) {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return pendingDocName{}, false
+	}
+	segs := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	for i, seg := range segs {
+		docType, ok := mentionDocTypeByPathSegment[seg]
+		if !ok || i+1 >= len(segs) {
+			continue
+		}
+		token := segs[i+1]
+		if token == "" {
+			continue
+		}
+		for _, r := range token {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+				return pendingDocName{}, false
+			}
+		}
+		return pendingDocName{Token: token, DocType: docType, URL: u}, true
+	}
+	return pendingDocName{}, false
+}
+
 // escapeURL renders a Feishu-provided URL as a safe Markdown href. The docx
 // API percent-encodes link targets (e.g. http%3A%2F%2F...), so that encoding
 // is reversed first — a value that does not decode cleanly passes through
@@ -412,9 +466,22 @@ func (r *mdRenderer) richText(bt *BlockText) string {
 		case e.TextRun != nil:
 			sb.WriteString(styleRun(e.TextRun.Content, e.TextRun.TextElementStyle))
 		case e.MentionDoc != nil && e.MentionDoc.URL != "":
-			// The payload carries no document title — use the URL as link text.
+			// The payload carries no document title. Feishu doc URLs emit a
+			// title placeholder that FetchDocxWithBlocks backfills via the
+			// drive metadata API; anything else keeps the URL as link text.
 			u := e.MentionDoc.URL
-			sb.WriteString("[" + u + "](" + escapeURL(u) + ")")
+			if ref, ok := parseMentionDocRef(u); ok {
+				if r.docNameSeen == nil {
+					r.docNameSeen = map[string]bool{}
+				}
+				if !r.docNameSeen[ref.Token] {
+					r.docNameSeen[ref.Token] = true
+					r.docNames = append(r.docNames, ref)
+				}
+				sb.WriteString("[weknora-docname://" + ref.Token + "](" + escapeURL(u) + ")")
+			} else {
+				sb.WriteString("[" + u + "](" + escapeURL(u) + ")")
+			}
 		case e.MentionUser != nil:
 			// The API carries only the user OpenID; the caller-supplied
 			// resolver (cached, degrading) turns it into a display name when

@@ -21,7 +21,7 @@ func mentionBlk(id, openID string) DocxBlock {
 // (named) and miss/403-degrade (generic @成员) paths.
 func mentionUserCase(t *testing.T, name string, resolver func(string) string, blocks []DocxBlock, want []string) {
 	t.Helper()
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", resolver)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", resolver)
 	if err != nil {
 		t.Fatalf("%s: err: %v", name, err)
 	}
@@ -65,7 +65,7 @@ func TestBlocksToMarkdown_MentionUserName_OncePerElement(t *testing.T) {
 		return "张三"
 	}
 	blocks := []DocxBlock{mentionBlk("p1", "ou_x"), mentionBlk("p2", "ou_x"), mentionBlk("p3", "ou_y")}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", resolver)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", resolver)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestBlocksToMarkdown_NoMention_ZeroResolverCalls(t *testing.T) {
 		{BlockID: "p1", BlockType: BlockTypeText, Text: txt("没有提及的普通段落")},
 		{BlockID: "p2", BlockType: BlockTypeText, Text: txt("另一段")},
 	}
-	if _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", resolver); err != nil {
+	if _, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", resolver); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if calls != 0 {

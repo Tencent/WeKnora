@@ -419,7 +419,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	// Images/boards ride the marker pipeline: the renderer numbers them in
 	// document order, and the patches below inline each image's bytes as a
 	// base64 data URI (or a plain placeholder on failure) in a single pass.
-	mdBytes, atts, imgs, err := blocksToMarkdown(ctx, client, blocks, in.URL, userNameResolver(ctx, client))
+	mdBytes, atts, imgs, docNames, err := blocksToMarkdown(ctx, client, blocks, in.URL, userNameResolver(ctx, client))
 	if err != nil {
 		return nil, fmt.Errorf("convert blocks %s: %w", in.Title, err)
 	}
@@ -528,6 +528,27 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			Metadata:         childMeta(),
 		})
 		attachmentIDs = append(attachmentIDs, childID)
+	}
+
+	// ── 云文档 mention links: backfill document titles ──
+	// The renderer emits "[weknora-docname://<token>](<url>)" placeholders; the
+	// drive metadata batch API resolves every title in one call. Refs that
+	// cannot be resolved (no permission, deleted, unsupported type) keep the
+	// URL as the link text — exactly the form rendered before this backfill.
+	if len(docNames) > 0 {
+		titles := client.DocTitles(ctx, docNames)
+		for _, dn := range docNames {
+			needle := "[weknora-docname://" + dn.Token + "](" + escapeURL(dn.URL) + ")"
+			repl := "[" + dn.URL + "](" + escapeURL(dn.URL) + ")"
+			if title := titles[dn.Token]; title != "" {
+				clean := strings.NewReplacer("[", "［", "]", "］", "\n", " ", "\r", "").Replace(title)
+				repl = "[" + clean + "](" + escapeURL(dn.URL) + ")"
+			} else {
+				logger.Warnf(ctx, "[Feishu] doc %s: no metadata for referenced doc %s (%s), keeping URL as link text",
+					in.Title, dn.Token, dn.DocType)
+			}
+			md = strings.ReplaceAll(md, needle, repl)
+		}
 	}
 
 	// ── embedded images and whiteboard blocks (block_type 43) ──

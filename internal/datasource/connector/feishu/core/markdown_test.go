@@ -44,7 +44,7 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 		{BlockID: "f", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "file_t", Name: "报表.pdf"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"名称", "数量"}, {"苹果", "3"}}}
-	md, atts, imgs, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
+	md, atts, imgs, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestBlocksToMarkdown_SheetMergesFilled(t *testing.T) {
 			{StartRow: 2, EndRow: 2, StartCol: 0, EndCol: 2}, // bottom row merged
 		},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestBlocksToMarkdown_SheetMergeFetchFailureDegrades(t *testing.T) {
 		merges:         nil,
 		sheetMergesErr: fmt.Errorf("permission denied"),
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("merge fetch failure must not fail the document, got: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"h"}, {"1"}}, sheetTruncated: true}
-	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestBlocksToMarkdown_SheetPermissionDegrades(t *testing.T) {
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheetErr: fmt.Errorf("code=99991672 permission denied")}
-	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("should not fail on permission error, got %v", err)
 	}
@@ -160,7 +160,7 @@ func TestBlocksToMarkdown_BitableInlinedAndDegrades(t *testing.T) {
 			{BlockID: "root", BlockType: BlockTypePage},
 			{BlockID: "bt", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "bascabc_tblxyz"}},
 		}
-		md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
+		md, _, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "", nil)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -189,7 +189,7 @@ func TestBlocksToMarkdown_NativeTableFromCellChildren(t *testing.T) {
 		cellTextBlk("c1", "姓名"), cellTextBlk("c2", "分数"),
 		cellTextBlk("c3", "张三"), cellTextBlk("c4", "95"),
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestBlocksToMarkdown_AttachmentInsideTableCellStillCollected(t *testing.T) 
 		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"f1"}},
 		{BlockID: "f1", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "tok-in-cell", Name: "内嵌.pdf"}},
 	}
-	_, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	_, atts, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestBlocksToMarkdown_UnrenderableTablePreservesCellText(t *testing.T) {
 		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"c1_txt"}},
 		cellTextBlk("c1", "重要内容"),
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestBlocksToMarkdown_TextConstructs(t *testing.T) {
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("一段正文")},
 		{BlockID: "b", BlockType: BlockTypeBullet, Bullet: txt("要点")},
 	}
-	md, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, atts, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("blocksToMarkdown: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestBlocksToMarkdown_BlankDocRendersEmpty(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage, Children: []string{"p"}},
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("")},
 	}
-	md, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, atts, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("blocksToMarkdown: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestBlocksToMarkdown_TodoAndCallout(t *testing.T) {
 		{BlockID: "t", BlockType: BlockTypeTodo, Todo: txt("买牛奶")},
 		{BlockID: "c", BlockType: BlockTypeCallout, Callout: txt("注意事项")},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestBlocksToMarkdown_TodoAndCallout(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage},
 		{BlockID: "d", BlockType: BlockTypeTodo, Todo: done},
 	}
-	md, _, _, err = blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err = blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage},
 		{BlockID: "c", BlockType: BlockTypeCallout},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestBlocksToMarkdown_CalloutQuotesChildren(t *testing.T) {
 		{BlockID: "h", BlockType: 4, Heading2: txt("注意")},
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("正文内容")},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestBlocksToMarkdown_QuoteContainerQuotesChildren(t *testing.T) {
 		{BlockID: "q", BlockType: BlockTypeQuoteContainer, Children: []string{"p"}},
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("引用内容")},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestBlocksToMarkdown_GridColumnsJoinedByRule(t *testing.T) {
 		{BlockID: "p1", BlockType: BlockTypeText, Text: txt("左栏")},
 		{BlockID: "p2", BlockType: BlockTypeText, Text: txt("右栏")},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestBlocksToMarkdown_IframeLink(t *testing.T) {
 			Component: &BlockIframeComponent{Type: 1, URL: "https://example.com/embed"},
 		}},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestBlocksToMarkdown_UnsupportedBlocksPlaceholdersNoTokenLeak(t *testing.T)
 		{BlockID: "v", BlockType: BlockTypeView},
 		{BlockID: "unk", BlockType: 999},
 	}
-	md, atts, imgs, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, atts, imgs, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestBlocksToMarkdown_ViewContainerRendersChildren(t *testing.T) {
 		{BlockID: "f1", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "ftok1", Name: "报表.pdf"}},
 		{BlockID: "f2", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "ftok2", Name: "手册.pdf"}},
 	}
-	md, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, atts, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -551,7 +551,7 @@ func TestBlocksToMarkdown_RichTextElements(t *testing.T) {
 			{Equation: &Equation{Content: "E=mc^2"}},
 		}}},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -573,7 +573,7 @@ func TestBlocksToMarkdown_CodeBlockLanguage(t *testing.T) {
 			{BlockID: "c", BlockType: BlockTypeCode,
 				Code: &BlockText{Style: &BlockTextStyle{Language: lang}, Elements: []TextElement{{TextRun: &TextRun{Content: "x"}}}}},
 		}
-		md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+		md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -603,7 +603,7 @@ func TestBlocksToMarkdown_CodeFenceClosingBare(t *testing.T) {
 		{BlockID: "c", BlockType: BlockTypeCode,
 			Code: &BlockText{Style: &BlockTextStyle{Language: 29}, Elements: []TextElement{{TextRun: &TextRun{Content: "System.out.print(1);"}}}}},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -626,7 +626,7 @@ func TestBlocksToMarkdown_Heading7to9DegradeToBold(t *testing.T) {
 			{BlockID: "root", BlockType: BlockTypePage},
 			{BlockID: "h", BlockType: bt, Text: txt(strings.Trim(want, "*"))},
 		}
-		md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+		md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 		if err != nil {
 			t.Fatalf("block %d: err: %v", bt, err)
 		}
@@ -651,7 +651,7 @@ func TestBlocksToMarkdown_LinkURLPercentDecoded(t *testing.T) {
 			}}}},
 		}},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestBlocksToMarkdown_OrderedListRealSequence(t *testing.T) {
 		{BlockID: "sep2", BlockType: BlockTypeText, Text: txt("第二段")},
 		ord("", "新列表"),
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -702,7 +702,7 @@ func TestBlocksToMarkdown_NativeTableMergedCellsFilled(t *testing.T) {
 		cellTextBlk("c4", "C"), cellTextBlk("c5", "D"), cellTextBlk("c6", "E"),
 	}
 	blocks[1].Table.Property.MergeInfo = []BlockTableMergeInfo{{RowSpan: 2, ColSpan: 2}}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -725,7 +725,7 @@ func TestBlocksToMarkdown_DocumentTruncationNote(t *testing.T) {
 	for i := range blocks {
 		blocks[i] = DocxBlock{BlockID: strconv.Itoa(i), BlockType: BlockTypeText, Text: txt("块")}
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -746,7 +746,7 @@ func TestBlocksToMarkdown_ImageNumberingStableOrder(t *testing.T) {
 		{BlockID: "i2", BlockType: BlockTypeImage, Image: &BlockTokenRef{Token: "tok-b"}},
 		{BlockID: "bd", BlockType: BlockTypeBoard, Board: &BlockBoard{Token: "brd-9"}},
 	}
-	md, _, imgs, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, imgs, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -787,7 +787,7 @@ func TestBlocksToMarkdown_LinkURLWithSpacesAndParens(t *testing.T) {
 			},
 		}},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -807,7 +807,7 @@ func TestBlocksToMarkdown_CodeFenceSurvivesBackticks(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage},
 		{BlockID: "code", BlockType: BlockTypeCode, Code: txt(content)},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -837,7 +837,7 @@ func TestBlocksToMarkdown_OrderedChildrenKeepNumbering(t *testing.T) {
 		{BlockID: "p", ParentID: "root", BlockType: BlockTypeText, Text: txt("正文")},
 		auto("i3", "root"),
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -867,7 +867,7 @@ func TestBlocksToMarkdown_TimelineAddOn(t *testing.T) {
 			ComponentTypeID: "blk_6358a421bca0001c22536e4c", Record: record,
 		}},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -894,7 +894,7 @@ func TestBlocksToMarkdown_TimelineAddOnHiddenAndUnknown(t *testing.T) {
 			ComponentTypeID: "blk_6358a421bca0001c22536e4c", Record: record,
 		}},
 	}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -914,7 +914,7 @@ func TestBlocksToMarkdown_TimelineAddOnHiddenAndUnknown(t *testing.T) {
 				ComponentTypeID: "blk_6358a421bca0001c22536e4c", Record: rec,
 			}},
 		}
-		md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+		md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -928,7 +928,7 @@ func TestBlocksToMarkdown_TimelineAddOnHiddenAndUnknown(t *testing.T) {
 			ComponentTypeID: "blk_unknown", Record: `{"items":[]}`,
 		}},
 	}
-	md, _, _, err = blocksToMarkdown(context.Background(), nil, unknown, "", nil)
+	md, _, _, _, err = blocksToMarkdown(context.Background(), nil, unknown, "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -976,7 +976,7 @@ func TestBlocksToMarkdown_TableCellAlignment(t *testing.T) {
 		},
 	}
 	root := DocxBlock{BlockID: "root", BlockType: BlockTypePage}
-	md, _, _, err := blocksToMarkdown(context.Background(), nil,
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil,
 		append([]DocxBlock{root, table}, append(cellBlocks, texts...)...), "", nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -984,5 +984,58 @@ func TestBlocksToMarkdown_TableCellAlignment(t *testing.T) {
 	out := string(md)
 	if !strings.Contains(out, "| --- | :---: | ---: |") {
 		t.Errorf("alignment not rendered, got:\n%s", out)
+	}
+}
+
+// TestParseMentionDocRef pins the Feishu URL → (token, doc_type) table used
+// for the 云文档 link-title backfill.
+func TestParseMentionDocRef(t *testing.T) {
+	cases := []struct {
+		url     string
+		token   string
+		docType string
+		ok      bool
+	}{
+		{"https://my.feishu.cn/docx/MHU6d4eixo1UdCxNzGbcspVSnfg", "MHU6d4eixo1UdCxNzGbcspVSnfg", "docx", true},
+		{"https://x.feishu.cn/sheets/Abc123", "Abc123", "sheet", true},
+		{"https://x.feishu.cn/base/Tok01", "Tok01", "bitable", true},
+		{"https://x.feishu.cn/wiki/wik123", "wik123", "wiki", true},
+		{"https://www.baidu.com/s?wd=x", "", "", false},
+		{"https://x.cn/doc", "", "", false},                     // type segment without token
+		{"https://x.feishu.cn/docx/not-a-token", "", "", false}, // dash = not a token
+	}
+	for _, c := range cases {
+		ref, ok := parseMentionDocRef(c.url)
+		if ok != c.ok {
+			t.Errorf("%s: ok=%v want %v", c.url, ok, c.ok)
+			continue
+		}
+		if ok && (ref.Token != c.token || ref.DocType != c.docType) {
+			t.Errorf("%s: got %s/%s want %s/%s", c.url, ref.Token, ref.DocType, c.token, c.docType)
+		}
+	}
+}
+
+// TestBlocksToMarkdown_MentionDocTitlePlaceholder pins the placeholder form
+// emitted for Feishu doc mention links (the connector backfills real titles).
+func TestBlocksToMarkdown_MentionDocTitlePlaceholder(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "p", BlockType: BlockTypeText, Text: &BlockText{
+			Elements: []TextElement{{MentionDoc: &MentionDoc{
+				URL: "https://my.feishu.cn/docx/MHU6d4eixo1UdCxNzGbcspVSnfg",
+			}}},
+		}},
+	}
+	md, _, _, docs, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	url := "https://my.feishu.cn/docx/MHU6d4eixo1UdCxNzGbcspVSnfg"
+	if !strings.Contains(string(md), "[weknora-docname://MHU6d4eixo1UdCxNzGbcspVSnfg]("+escapeURL(url)+")") {
+		t.Errorf("title placeholder missing, got:\n%s", md)
+	}
+	if len(docs) != 1 || docs[0].Token != "MHU6d4eixo1UdCxNzGbcspVSnfg" || docs[0].DocType != "docx" {
+		t.Errorf("pending doc refs wrong: %+v", docs)
 	}
 }

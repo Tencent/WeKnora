@@ -352,3 +352,61 @@ func TestTrimBoardImage_ContentAtOneCornerStillTrims(t *testing.T) {
 		t.Fatal("corner-touching content must survive at its position")
 	}
 }
+
+// 云文档 mention links: FetchDocxWithBlocks backfills link text with the
+// referenced document's title via the drive metadata batch API; unresolved
+// refs (no permission, 403) degrade to the URL-as-text form.
+func TestFetchDocxWithBlocks_MentionDocTitleBackfill(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "r", BlockType: BlockTypePage},
+		{BlockID: "p", BlockType: BlockTypeText, Text: &BlockText{
+			Elements: []TextElement{{MentionDoc: &MentionDoc{
+				URL: "https://my.feishu.cn/docx/RefDoc001",
+			}}},
+		}},
+	}
+	run := func(metasStatus int, metasBody string, wantTitle string) *types.FetchedItem {
+		t.Helper()
+		mux := http.NewServeMux()
+		mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, TokenResponse{ApiResponse: ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+		})
+		mux.HandleFunc("/open-apis/docx/v1/documents/obj-doc/blocks", func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, DocxBlocksResponse{ApiResponse: ApiResponse{Code: 0},
+				Data: DocxBlocksData{Items: blocks}})
+		})
+		mux.HandleFunc("/open-apis/drive/v1/metas/batch_query", func(w http.ResponseWriter, r *http.Request) {
+			if metasStatus != http.StatusOK {
+				http.Error(w, metasBody, metasStatus)
+				return
+			}
+			w.Write([]byte(metasBody))
+		})
+		ts := httptest.NewServer(mux)
+		t.Cleanup(ts.Close)
+
+		client := NewClient(&Config{AppID: "a", AppSecret: "b", BaseURL: ts.URL})
+		items, err := FetchDocxWithBlocks(context.Background(), client, DocxFetchInput{
+			DocToken: "nt-doc", ObjToken: "obj-doc", Title: "父文档",
+			URL: "https://my.feishu.cn/docx/obj-doc",
+		})
+		if err != nil {
+			t.Fatalf("fetch: %v", err)
+		}
+		return items[len(items)-1]
+	}
+
+	main := run(http.StatusOK,
+		`{"code":0,"data":{"metas":[{"doc_token":"RefDoc001","doc_type":"docx","title":"引用的文档"}]}}`,
+		"引用的文档")
+	if !strings.Contains(string(main.Content), "[引用的文档](https://my.feishu.cn/docx/RefDoc001)") {
+		t.Errorf("title not backfilled, got:\n%s", main.Content)
+	}
+
+	// Permission denied on the metadata API → falls back to URL-as-text.
+	main = run(http.StatusForbidden, `forbidden`, "")
+	if !strings.Contains(string(main.Content),
+		"[https://my.feishu.cn/docx/RefDoc001](https://my.feishu.cn/docx/RefDoc001)") {
+		t.Errorf("fallback form missing, got:\n%s", main.Content)
+	}
+}
