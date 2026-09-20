@@ -320,7 +320,9 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 
 	workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceResetTimeout)
 	defer cancel()
-	if err := resetWorkspaceToCommit(workCtx, s.sandbox, sessionID, checkpoint.CommitSHA, checkpoint.SandboxID); err != nil {
+	if err := resetWorkspaceToCommit(
+		workCtx, s.sandbox, sessionID, checkpoint.CommitSHA, checkpoint.SandboxID,
+	); err != nil {
 		return false, "", fmt.Errorf("session rewind: reset workspace: %w", err)
 	}
 	return true, "", nil
