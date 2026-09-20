@@ -27,7 +27,7 @@ type OpenAIASR struct {
 	language  string
 }
 
-// NewOpenAIASR creates an OpenAI-compatible ASR instance.
+// NewOpenAIASR 创建兼容 OpenAI 的 ASR 实例，并适配供应商返回的语言元数据。
 func NewOpenAIASR(config *Config) (*OpenAIASR, error) {
 	if err := validateASRBaseURL(config.BaseURL); err != nil {
 		return nil, err
@@ -38,6 +38,7 @@ func NewOpenAIASR(config *Config) (*OpenAIASR, error) {
 		apiCfg.BaseURL = config.BaseURL
 	}
 	httpClient := newASRHTTPClient(asrDefaultTimeout)
+	httpClient.Transport = &asrLanguageTransport{base: httpClient.Transport}
 
 	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
 	if len(config.CustomHeaders) > 0 {

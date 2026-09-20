@@ -1,0 +1,20 @@
+{
+  "text": "Uh huh. Oh yeah, yeah. He wasn't even that big when I started listening to him, but and his solo music didn't do overly well, but he did very well when he started writing for other people.",
+  "segments": [
+    {
+      "text": "Uh huh. Oh yeah, yeah. He wasn't even that big when I started listening to him, but and his solo music didn't do overly well, but he did very well when he started writing for other people.",
+      "language": "English",
+      "start": 0.0,
+      "end": 15.05125
+    }
+  ],
+  "language": [
+    "English"
+  ],
+  "prompt_tokens": 211,
+  "generation_tokens": 48,
+  "total_tokens": 259,
+  "prompt_tps": 9.722264893472701,
+  "generation_tps": 2.2117000705530314,
+  "total_time": 21.70276188850403
+}
