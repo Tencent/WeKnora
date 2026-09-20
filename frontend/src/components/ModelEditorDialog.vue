@@ -2185,16 +2185,22 @@ const handleCancel = () => {
   }
 }
 
-.model-type-options {
+.model-type-options,
+.source-options {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.model-type-option {
+// 「模型类型」和「模型来源」都是单选，就用同一种按钮。模型来源原本是灰底轨道
+// 的 segmented：#e7e7e7 的轨道在浅色表单里是一整块深灰，白色药丸又浮不起来，
+// 而且紧挨着的模型类型是另一套长相。取消轨道后两组自然成为一族。
+.model-type-option,
+.source-option {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-family: inherit;
   padding: 6px 12px;
   min-height: 32px;
   border: 1px solid var(--td-component-stroke);
@@ -2236,60 +2242,14 @@ const handleCancel = () => {
   }
 }
 
-// 模型来源分段：紧凑单行 pill 形 segmented。容器自身是浅底圆角条，
-// 选中按钮通过实色背景 + 主题色描边浮出，未选中态接近透明，节省纵向空间。
-.source-options {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px;
-  background: var(--td-bg-color-component);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-md);
-}
+
 
 .source-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  height: 28px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--app-radius-sm);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: var(--app-text-md);
-  color: var(--td-text-color-secondary);
-  line-height: 1;
-  transition: all var(--app-motion-fast) ease;
-
-  &:hover:not(.is-disabled):not(.is-active) {
-    color: var(--td-text-color-primary);
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &.is-active {
-    background: var(--td-bg-color-container);
-    border-color: var(--td-brand-color);
-    color: var(--td-brand-color);
-    font-weight: 500;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  }
-
+  // 外观来自上面那条共用规则；这里只补禁用态（Ollama 未就绪 / rerank 不支持）。
   &.is-disabled {
     cursor: not-allowed;
     opacity: 0.45;
   }
-}
-
-.source-option__icon {
-  font-size: var(--app-text-base);
-  flex-shrink: 0;
-}
-
-.source-option__label {
-  white-space: nowrap;
 }
 
 // 输入框样式：只在最外层 .t-input 上调字号，避免在内部 wrap/inner 上重复加边
