@@ -2899,6 +2899,7 @@ export default {
       goToOllamaSettings: '설정 보기',
       providerLabel: '프로바이더',
       providerPlaceholder: '모델 프로바이더 선택',
+      providerDocs: '{provider} 모델 문서 보기',
       validation: {
         extraFieldRequired: '{name}을(를) 입력하세요',
         modelNameRequired: '모델 이름을 입력해주세요',

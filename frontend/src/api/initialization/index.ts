@@ -633,6 +633,8 @@ export interface ModelCatalogEntry {
     dimension?: number;
     thinking_levels?: ReasoningEffortLevel[];
     cost?: Record<string, unknown>;
+    // Vendor page these facts came from, for the "read the docs" link.
+    source?: string;
 }
 
 export interface ModelProviderThinking {

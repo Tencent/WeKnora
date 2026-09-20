@@ -4748,6 +4748,7 @@ export default {
       },
       providerLabel: 'Provider',
       providerPlaceholder: 'Select model provider',
+      providerDocs: 'Read the {provider} model docs',
     },
     builtinTag: 'Built-in'
   },

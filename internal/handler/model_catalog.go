@@ -62,6 +62,9 @@ type ModelCatalogEntryDTO struct {
 	Dimension       int                   `json:"dimension,omitempty"`
 	ThinkingLevels  []api.ReasoningEffort `json:"thinking_levels"`
 	Cost            *catalog.ModelCost    `json:"cost,omitempty"`
+	// Source is the vendor page these facts were read from, so the editor can
+	// send an operator to the documentation for this exact model.
+	Source string `json:"source,omitempty"`
 }
 
 // modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
@@ -153,6 +156,7 @@ func providerDTO(v *catalog.Vendor, modelType types.ModelType, includeModels boo
 				Dimension:       m.Dimension,
 				Cost:            m.Cost,
 				ThinkingLevels:  []api.ReasoningEffort{},
+				Source:          m.Source,
 			}
 			// A vision chat model keeps Type KnowledgeQA (VLM eligibility is
 			// derived from Input), so this covers reasoning VLMs too;

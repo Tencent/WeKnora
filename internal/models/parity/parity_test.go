@@ -595,3 +595,31 @@ func TestConcurrentResolve(t *testing.T) {
 		<-done
 	}
 }
+
+// TestEveryCatalogModelDocumentsItsSource pins that each entry can answer
+// "where is this documented".
+//
+// Two things depend on it. The facts in models.json are only auditable if the
+// page they came from is recorded next to them, and the model editor links an
+// operator straight to that page from the picker. models.json may state the
+// URL once at file level for the entries a single page covers, so this also
+// covers MustParseModels pushing it down — before that it was parsed and
+// dropped, and most entries had nothing to link to.
+func TestEveryCatalogModelDocumentsItsSource(t *testing.T) {
+	for _, vendor := range catalog.List() {
+		for _, model := range vendor.Models {
+			name := model.ID
+			if name == "" {
+				name = model.Match
+			}
+			t.Run(vendor.ID+"/"+name, func(t *testing.T) {
+				if model.Source == "" {
+					t.Fatalf("no source: add one to the entry, or a file-level source to models.json")
+				}
+				if !strings.HasPrefix(model.Source, "https://") && !strings.HasPrefix(model.Source, "http://") {
+					t.Errorf("source %q is not a URL the editor can link to", model.Source)
+				}
+			})
+		}
+	}
+}

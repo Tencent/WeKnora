@@ -536,5 +536,14 @@ func MustParseModels(data []byte) []ModelSpec {
 	if err := dec.Decode(&file); err != nil {
 		panic(fmt.Sprintf("catalog: invalid models.json: %v", err))
 	}
+	// The file-level source is the vendor's model documentation, and most
+	// entries omit their own because that page covers them. Pushing it down
+	// means every entry can answer "where is this documented" — the editor
+	// links to it from the model picker.
+	for i := range file.Models {
+		if file.Models[i].Source == "" {
+			file.Models[i].Source = file.Source
+		}
+	}
 	return file.Models
 }

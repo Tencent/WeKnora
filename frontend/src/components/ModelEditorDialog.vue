@@ -205,6 +205,12 @@
                 </div>
               </t-option>
             </t-select>
+            <p v-if="vendorDocLink" class="form-desc provider-doc-link">
+              <a :href="vendorDocLink" target="_blank" rel="noopener noreferrer">
+                {{ $t('model.editor.providerDocs', { provider: selectedProviderDisplayLabel }) }}
+                <t-icon name="jump" size="12px" />
+              </a>
+            </p>
           </div>
 
           <!-- WeKnoraCloud 提示信息 -->
@@ -867,6 +873,22 @@ const catalogModelOptions = computed<CatalogModelOption[]>(() => {
 })
 
 const findCatalogEntry = (name: string) => catalogEntries.value.find(m => m.id === name)
+
+/**
+ * Where to read about what is configured right now.
+ *
+ * Prefer the page the selected model's facts were taken from — that is the
+ * page listing its context window, thinking levels and price — and fall back
+ * to the vendor's own site when the model is not in the catalog. Both come
+ * from the catalog, so a new vendor gets the link without a UI change.
+ */
+const vendorDocLink = computed(() => {
+  const provider = selectedProvider.value
+  if (!provider) return ''
+  const entry = findCatalogEntry((formData.value.modelName || '').trim())
+  const url = entry?.source || provider.website || ''
+  return /^https?:\/\//i.test(url) ? url : ''
+})
 
 /** Fill blank capability fields from a catalog entry the user just picked. */
 const applyCatalogEntry = (entry: ModelCatalogEntry) => {
@@ -2039,6 +2061,22 @@ const handleCancel = () => {
 </script>
 
 <style lang="less" scoped>
+.provider-doc-link {
+  margin-top: 6px;
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--td-text-color-link);
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
 // 原生 t-form-item 容器置空（本组件使用自定义 .form-item + 手写 label）
 :deep(.t-form) {
   .t-form-item {
@@ -2885,6 +2923,16 @@ const handleCancel = () => {
 .provider-select-popup {
   // 容器留点呼吸：避免选项贴着 popup 圆角
   padding: 4px;
+
+  // TDesign 给 select 浮层写死 max-height: 300px，而这里的选项是双行的
+  // （约 56px），正好只露出五条——下面还有二十多家厂商，但 macOS 的悬浮滚
+  // 动条不滚不显形，看上去就像"只有这几个"。放高到一屏能看到八九条，滚动
+  // 条也常驻，列表还有后续这件事才成立。&.wk-popover 只是为了压过 TDesign
+  // 自己那条同样两级的选择器。
+  &.wk-popover .t-popup__content {
+    max-height: min(480px, 60vh);
+    scrollbar-color: var(--td-component-border) transparent;
+  }
 
   // TDesign 默认会在 t-select-option 上挂一个 overflow tooltip（浮在右侧
   // 显示完整 label）。我们的选项排版是「主名称 + 次描述」两行，永远不会

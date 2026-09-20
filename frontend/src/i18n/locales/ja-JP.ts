@@ -4748,6 +4748,7 @@ export default {
       },
       providerLabel: 'プロバイダ',
       providerPlaceholder: 'モデルプロバイダを選択',
+      providerDocs: '{provider} のモデルドキュメントを見る',
     },
     builtinTag: '組み込み'
   },

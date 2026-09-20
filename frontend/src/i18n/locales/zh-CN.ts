@@ -2901,6 +2901,7 @@ export default {
       goToOllamaSettings: '查看设置',
       providerLabel: '服务商',
       providerPlaceholder: '选择模型服务商',
+      providerDocs: '查看 {provider} 的模型文档',
       validation: {
         extraFieldRequired: '请填写 {name}',
         modelNameRequired: '请输入模型名称',

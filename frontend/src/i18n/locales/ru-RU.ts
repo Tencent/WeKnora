@@ -2899,6 +2899,7 @@ export default {
       goToOllamaSettings: 'Открыть настройки',
       providerLabel: 'Провайдер',
       providerPlaceholder: 'Выберите провайдера модели',
+      providerDocs: 'Документация моделей {provider}',
       validation: {
         extraFieldRequired: 'Заполните {name}',
         modelNameRequired: 'Введите название модели',
