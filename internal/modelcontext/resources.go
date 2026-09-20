@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -158,22 +159,26 @@ func (r *resourceRegistry) handles() []string {
 	return handles
 }
 
-// dropStaleReasoningSignature clears a provider reasoning signature whose
-// text this registry just rewrote.
+// dropStaleReasoningSignature clears a reasoning signature this registry just
+// invalidated by rewriting the text it covers.
 //
-// Anthropic signs the exact thinking text it returned and rejects a replayed
-// block whose text no longer matches its signature; Gemini's thoughtSignature
-// works the same way. Handle encoding and citation compaction both rewrite
-// ReasoningContent, so a signature that survives such a rewrite is a 400
-// waiting to happen. Clearing it makes the protocol layer omit the thinking
-// block entirely (see anthropicmessages.assistantBlocks, which only emits a
-// block when a signature survives) — a degradation instead of a failure.
+// It applies only to Anthropic. Claude signs the exact thinking text, so a
+// block replayed with rewritten text and its original signature fails
+// verification. Gemini is deliberately excluded: its thought signatures ride
+// on the answer text and on each tool call's metadata, neither of which this
+// registry touches, so dropping one there would throw away a signature
+// Gemini 3 requires back.
 //
-// Opaque artifacts in ReasoningMetadata (redacted_thinking, Responses
-// encrypted items) are deliberately kept: they are self-contained and do not
-// cover the plaintext this registry touched.
+// This is a safety net for assistant turns stored before
+// anthropicmessages.MetadataThinkingBlocks existed. Current turns replay from
+// that metadata, which carries the signed bytes verbatim and is opaque to
+// every rewrite here, so they do not depend on this at all.
 func dropStaleReasoningSignature(msg *chat.Message, before string) {
-	if msg.ReasoningSignature != "" && msg.ReasoningContent != before {
-		msg.ReasoningSignature = ""
+	if msg.ReasoningContent == before {
+		return
 	}
+	if api.SignatureFor(api.APIAnthropicMessages, msg.ReasoningSignature) == "" {
+		return
+	}
+	msg.ReasoningSignature = ""
 }

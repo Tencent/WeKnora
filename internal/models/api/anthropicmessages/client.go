@@ -228,7 +228,11 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 	}
 	result := &types.ChatResponse{Usage: c.usageFrom(resp.Usage)}
 	var text, thinking []string
-	var redacted []string
+	// Interleaved thinking puts several signed thinking blocks in one reply,
+	// each signed over its own text, so they are kept separately for replay.
+	// ReasoningContent / ReasoningSignature stay filled for readers and for
+	// older stored turns, but they are no longer what goes back on the wire.
+	var stored []thinkingBlock
 	for _, block := range resp.Content {
 		switch block.Type {
 		case "text":
@@ -237,11 +241,12 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 			}
 		case "thinking":
 			thinking = append(thinking, block.Thinking)
+			stored = append(stored, newThinkingBlock(block.Thinking, block.Signature))
 			if block.Signature != "" {
 				result.ReasoningSignature = api.TagSignature(api.APIAnthropicMessages, block.Signature)
 			}
 		case "redacted_thinking":
-			redacted = append(redacted, block.Data)
+			stored = append(stored, newRedactedThinkingBlock(block.Data))
 		case "tool_use":
 			input := string(block.Input)
 			if input == "" {
@@ -255,9 +260,8 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 	}
 	result.Content = strings.Join(text, "")
 	result.ReasoningContent = strings.Join(thinking, "")
-	if len(redacted) > 0 {
-		data, _ := json.Marshal(redacted)
-		result.ReasoningMetadata = types.ProviderMetadata{MetadataRedactedThinking: data}
+	if blocks := thinkingBlocksMetadata(stored); blocks != nil {
+		result.ReasoningMetadata = types.ProviderMetadata{MetadataThinkingBlocks: blocks}
 	}
 	result.FinishReason = mapStopReason(resp.StopReason, len(result.ToolCalls), false)
 	return result, nil
@@ -277,13 +281,47 @@ type streamState struct {
 	toolOrder []int
 	blockType map[int]string
 	signature string
-	redacted  []string
-	stop      string
-	usage     *types.TokenUsage
+	// thinking accumulates each thinking / redacted_thinking block by its
+	// content-block index, and thinkingOrder keeps the order they started in.
+	// Interleaved thinking sends several, each with its own signature_delta;
+	// accumulating into one string would splice two signatures together and
+	// produce one that verifies against nothing.
+	thinking      map[int]*thinkingBlock
+	thinkingOrder []int
+	stop          string
+	usage         *types.TokenUsage
 }
 
 func newStreamState() *streamState {
-	return &streamState{tools: map[int]*toolInput{}, blockType: map[int]string{}}
+	return &streamState{
+		tools:     map[int]*toolInput{},
+		blockType: map[int]string{},
+		thinking:  map[int]*thinkingBlock{},
+	}
+}
+
+// thinkingAt returns the block being streamed at this content-block index,
+// creating it on first use. A vendor that sends deltas without a
+// content_block_start still gets a block rather than losing the text.
+func (s *streamState) thinkingAt(index int, blockType string) *thinkingBlock {
+	if b, ok := s.thinking[index]; ok {
+		return b
+	}
+	b := &thinkingBlock{Type: blockType}
+	s.thinking[index] = b
+	s.thinkingOrder = append(s.thinkingOrder, index)
+	return b
+}
+
+// thinkingBlocks returns the finished blocks in the order Claude sent them.
+func (s *streamState) thinkingBlocks() []thinkingBlock {
+	blocks := make([]thinkingBlock, 0, len(s.thinkingOrder))
+	for _, index := range s.thinkingOrder {
+		if b := s.thinking[index]; b != nil {
+			blocks = append(blocks, *b)
+		}
+	}
+	return blocks
 }
 
 func (s *streamState) calls() []types.LLMToolCall {
@@ -361,9 +399,11 @@ func (c *Client) consume(s *streamState, ev streamEvent) api.Delta {
 				Index: s.toolIndex(ev.Index), ID: ev.ContentBlock.ID, Type: "function", Name: ev.ContentBlock.Name,
 			}}
 		case "redacted_thinking":
-			s.redacted = append(s.redacted, ev.ContentBlock.Data)
+			s.thinkingAt(ev.Index, "redacted_thinking").Data = ev.ContentBlock.Data
 		case "thinking":
+			block := s.thinkingAt(ev.Index, "thinking")
 			if ev.ContentBlock.Thinking != "" {
+				block.Thinking += ev.ContentBlock.Thinking
 				d.Reasoning = ev.ContentBlock.Thinking
 			}
 		case "text":
@@ -380,8 +420,13 @@ func (c *Client) consume(s *streamState, ev streamEvent) api.Delta {
 			d.Content = ev.Delta.Text
 		case "thinking_delta":
 			d.Reasoning = ev.Delta.Thinking
+			s.thinkingAt(ev.Index, "thinking").Thinking += ev.Delta.Thinking
 		case "signature_delta":
-			s.signature += ev.Delta.Signature
+			// The signature belongs to the block at this index; the top-level
+			// field keeps carrying the last one for readers that still use it.
+			block := s.thinkingAt(ev.Index, "thinking")
+			block.Signature += ev.Delta.Signature
+			s.signature = block.Signature
 		case "input_json_delta":
 			if t := s.tools[ev.Index]; t != nil {
 				t.json.WriteString(ev.Delta.PartialJSON)
@@ -436,9 +481,8 @@ func (c *Client) processStream(
 		calls := state.calls()
 		assembler.ReplaceToolCalls(calls)
 		assembler.ReasoningSignature = api.TagSignature(api.APIAnthropicMessages, state.signature)
-		if len(state.redacted) > 0 {
-			data, _ := json.Marshal(state.redacted)
-			assembler.ReasoningMetadata = types.ProviderMetadata{MetadataRedactedThinking: data}
+		if blocks := thinkingBlocksMetadata(state.thinkingBlocks()); blocks != nil {
+			assembler.ReasoningMetadata = types.ProviderMetadata{MetadataThinkingBlocks: blocks}
 		}
 		if state.usage != nil {
 			assembler.SetUsage(*state.usage)

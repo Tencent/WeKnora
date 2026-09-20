@@ -27,9 +27,56 @@ type Config struct {
 // Metadata keys used on messages and tool calls.
 const (
 	// MetadataRedactedThinking stores redacted_thinking blocks (JSON array
-	// of {"data": ...}) that must be replayed verbatim.
+	// of {"data": ...}) that must be replayed verbatim. Superseded by
+	// MetadataThinkingBlocks; still read so assistant turns stored by an
+	// earlier build keep replaying.
 	MetadataRedactedThinking = "anthropic_redacted_thinking"
+	// MetadataThinkingBlocks stores the turn's thinking and
+	// redacted_thinking blocks exactly as Claude emitted them, in order.
+	//
+	// Two properties make this the only correct source for replay. First,
+	// Claude signs the exact text of each block, so one assistant turn with
+	// interleaved thinking carries several (text, signature) pairs that a
+	// single ReasoningContent / ReasoningSignature pair cannot represent —
+	// concatenating them produces a signature that matches nothing. Second,
+	// ReasoningContent is rewritten downstream (resource-handle encoding,
+	// citation compaction, special-token neutralisation) for the benefit of
+	// readers and of the next prompt, which invalidates the signature over
+	// it. This metadata is opaque to all of that and travels unchanged.
+	MetadataThinkingBlocks = "anthropic_thinking_blocks"
 )
+
+// thinkingBlock is one stored thinking or redacted_thinking block. It is the
+// wire shape, so replay is a copy rather than a reconstruction.
+type thinkingBlock struct {
+	Type      string `json:"type"`
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"`
+}
+
+// thinkingBlocksMetadata renders the blocks for storage on the assistant
+// message. It returns nil when there is nothing to replay.
+func thinkingBlocksMetadata(blocks []thinkingBlock) json.RawMessage {
+	if len(blocks) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(blocks)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// newThinkingBlock records a signed thinking block.
+func newThinkingBlock(thinking, signature string) thinkingBlock {
+	return thinkingBlock{Type: "thinking", Thinking: thinking, Signature: signature}
+}
+
+// newRedactedThinkingBlock records an opaque redacted_thinking block.
+func newRedactedThinkingBlock(data string) thinkingBlock {
+	return thinkingBlock{Type: "redacted_thinking", Data: data}
+}
 
 type cacheControl struct {
 	Type string `json:"type"`
@@ -324,6 +371,58 @@ func (c *Client) convertMessages(messages []api.Message, _ *api.Options) ([]stri
 }
 
 func (c *Client) assistantBlocks(msg api.Message, content string) []contentBlock {
+	blocks := replayThinkingBlocks(msg)
+	if content == "" {
+		content = textFromMultiContent(msg.MultiContent)
+	}
+	if content != "" {
+		blocks = append(blocks, contentBlock{Type: "text", Text: content})
+	}
+	for _, call := range msg.ToolCalls {
+		input := json.RawMessage(call.Function.Arguments)
+		if len(input) == 0 || !json.Valid(input) {
+			input = json.RawMessage(`{}`)
+		}
+		blocks = append(blocks, contentBlock{Type: "tool_use", ID: call.ID, Name: call.Function.Name, Input: input})
+	}
+	return blocks
+}
+
+// replayThinkingBlocks rebuilds the leading thinking / redacted_thinking
+// blocks of a stored assistant turn.
+//
+// Claude requires them back verbatim whenever that turn also carries tool_use
+// and extended thinking was on: dropping them answers 400 ("Expected
+// `thinking` or `redacted_thinking`, but found `tool_use`"), and altering the
+// signed text answers 400 as well. Preference order is therefore the verbatim
+// metadata first, then the legacy single-block fields for turns stored before
+// that metadata existed.
+func replayThinkingBlocks(msg api.Message) []contentBlock {
+	if raw, ok := msg.ReasoningMetadata[MetadataThinkingBlocks]; ok && len(raw) > 0 {
+		var stored []thinkingBlock
+		if err := json.Unmarshal(raw, &stored); err == nil {
+			blocks := make([]contentBlock, 0, len(stored))
+			for _, b := range stored {
+				switch b.Type {
+				case "thinking":
+					// A block whose signature did not survive cannot be
+					// replayed, but dropping it silently would break the
+					// tool_use pairing above. Keep the ordering intact by
+					// skipping the whole replay instead.
+					if b.Signature == "" {
+						return nil
+					}
+					blocks = append(blocks, contentBlock{
+						Type: "thinking", Thinking: b.Thinking, Signature: b.Signature,
+					})
+				case "redacted_thinking":
+					blocks = append(blocks, contentBlock{Type: "redacted_thinking", Data: b.Data})
+				}
+			}
+			return blocks
+		}
+	}
+
 	var blocks []contentBlock
 	if raw, ok := msg.ReasoningMetadata[MetadataRedactedThinking]; ok && len(raw) > 0 {
 		var redacted []string
@@ -338,19 +437,6 @@ func (c *Client) assistantBlocks(msg api.Message, content string) []contentBlock
 		blocks = append(blocks, contentBlock{
 			Type: "thinking", Thinking: msg.ReasoningContent, Signature: sig,
 		})
-	}
-	if content == "" {
-		content = textFromMultiContent(msg.MultiContent)
-	}
-	if content != "" {
-		blocks = append(blocks, contentBlock{Type: "text", Text: content})
-	}
-	for _, call := range msg.ToolCalls {
-		input := json.RawMessage(call.Function.Arguments)
-		if len(input) == 0 || !json.Valid(input) {
-			input = json.RawMessage(`{}`)
-		}
-		blocks = append(blocks, contentBlock{Type: "tool_use", ID: call.ID, Name: call.Function.Name, Input: input})
 	}
 	return blocks
 }

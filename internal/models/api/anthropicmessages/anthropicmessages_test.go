@@ -458,3 +458,130 @@ func TestSend_DefaultsAnthropicVersion(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, defaultAnthropicVersion, got)
 }
+
+// storedThinking renders what the client persists on an assistant turn, so
+// the replay tests start from the same bytes production would have stored.
+func storedThinking(t *testing.T, blocks ...thinkingBlock) types.ProviderMetadata {
+	t.Helper()
+	raw := thinkingBlocksMetadata(blocks)
+	require.NotNil(t, raw)
+	return types.ProviderMetadata{MetadataThinkingBlocks: raw}
+}
+
+func assistantContent(t *testing.T, body map[string]any) []any {
+	t.Helper()
+	messages, ok := body["messages"].([]any)
+	require.True(t, ok, "messages should be a list")
+	require.NotEmpty(t, messages)
+	first, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "assistant", first["role"])
+	blocks, ok := first["content"].([]any)
+	require.True(t, ok, "assistant content should be a block list")
+	return blocks
+}
+
+func blockTypes(blocks []any) []string {
+	out := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		if m, ok := b.(map[string]any); ok {
+			out = append(out, m["type"].(string))
+		}
+	}
+	return out
+}
+
+func TestInterleavedThinkingReplaysEveryBlockWithItsOwnSignature(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", nil)
+	msg := api.Message{
+		Role: "assistant",
+		// The concatenation readers see; deliberately different from the
+		// signed text below so a replay built from it would be detectable.
+		ReasoningContent: "first thoughtsecond thought",
+		ReasoningMetadata: storedThinking(t,
+			newThinkingBlock("first thought", "sig-1"),
+			newThinkingBlock("second thought", "sig-2"),
+		),
+		ToolCalls: []api.ToolCall{
+			{ID: "t1", Type: "function", Function: api.FunctionCall{Name: "search", Arguments: `{"q":"a"}`}},
+			{ID: "t2", Type: "function", Function: api.FunctionCall{Name: "search", Arguments: `{"q":"b"}`}},
+		},
+	}
+
+	blocks := assistantContent(t, bodyJSON(t, c, []api.Message{msg}, &api.Options{}, false))
+	require.Equal(t, []string{"thinking", "thinking", "tool_use", "tool_use"}, blockTypes(blocks))
+
+	first := blocks[0].(map[string]any)
+	second := blocks[1].(map[string]any)
+	assert.Equal(t, "first thought", first["thinking"])
+	assert.Equal(t, "sig-1", first["signature"])
+	assert.Equal(t, "second thought", second["thinking"])
+	assert.Equal(t, "sig-2", second["signature"])
+}
+
+func TestReplayKeepsSignedTextWhenReasoningContentWasRewritten(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", nil)
+	// internal/modelcontext rewrites ReasoningContent (resource handles,
+	// citation compaction) and clears the now-stale signature. The signed
+	// bytes survive in the metadata, so the turn still replays — which
+	// matters because dropping the thinking block while keeping tool_use is
+	// a 400 from Claude, not a degradation.
+	msg := api.Message{
+		Role:              "assistant",
+		ReasoningContent:  "I read res://0001",
+		ReasoningMetadata: storedThinking(t, newThinkingBlock("I read resource://Ab12", "sig-1")),
+		ToolCalls: []api.ToolCall{
+			{ID: "t1", Type: "function", Function: api.FunctionCall{Name: "read", Arguments: `{}`}},
+		},
+	}
+
+	blocks := assistantContent(t, bodyJSON(t, c, []api.Message{msg}, &api.Options{}, false))
+	require.Equal(t, []string{"thinking", "tool_use"}, blockTypes(blocks))
+	first := blocks[0].(map[string]any)
+	assert.Equal(t, "I read resource://Ab12", first["thinking"], "the signed text, not the rewritten one")
+	assert.Equal(t, "sig-1", first["signature"])
+}
+
+func TestReplayFallsBackToLegacySingleBlockTurns(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", nil)
+	// Assistant turns stored before the metadata existed carry only the
+	// single pair, and must keep replaying.
+	msg := api.Message{
+		Role:               "assistant",
+		ReasoningContent:   "one thought",
+		ReasoningSignature: api.TagSignature(api.APIAnthropicMessages, "legacy-sig"),
+		ToolCalls: []api.ToolCall{
+			{ID: "t1", Type: "function", Function: api.FunctionCall{Name: "search", Arguments: `{}`}},
+		},
+	}
+
+	blocks := assistantContent(t, bodyJSON(t, c, []api.Message{msg}, &api.Options{}, false))
+	require.Equal(t, []string{"thinking", "tool_use"}, blockTypes(blocks))
+	assert.Equal(t, "legacy-sig", blocks[0].(map[string]any)["signature"])
+}
+
+func TestReplayIgnoresAnotherProvidersSignature(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", nil)
+	msg := api.Message{
+		Role:               "assistant",
+		Content:            "answer",
+		ReasoningContent:   "one thought",
+		ReasoningSignature: api.TagSignature(api.APIGoogleGenerativeAI, "gemini-sig"),
+	}
+	blocks := assistantContent(t, bodyJSON(t, c, []api.Message{msg}, &api.Options{}, false))
+	assert.NotContains(t, blockTypes(blocks), "thinking")
+}
+
+func TestStreamKeepsOneSignaturePerThinkingBlock(t *testing.T) {
+	s := newStreamState()
+	// Two interleaved thinking blocks at different content-block indices.
+	s.thinkingAt(0, "thinking").Thinking = "first"
+	s.thinkingAt(0, "thinking").Signature = "sig-1"
+	s.thinkingAt(2, "thinking").Thinking = "second"
+	s.thinkingAt(2, "thinking").Signature = "sig-2"
+
+	blocks := s.thinkingBlocks()
+	require.Len(t, blocks, 2)
+	assert.Equal(t, thinkingBlock{Type: "thinking", Thinking: "first", Signature: "sig-1"}, blocks[0])
+	assert.Equal(t, thinkingBlock{Type: "thinking", Thinking: "second", Signature: "sig-2"}, blocks[1])
+}

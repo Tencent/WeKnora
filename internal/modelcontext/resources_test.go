@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -139,4 +140,38 @@ func TestEncodeMessagesDropsSignatureOnlyWhenReasoningIsRewritten(t *testing.T) 
 	require.Equal(t, "anthropic-messages:sig-2", encoded[1].ReasoningSignature)
 	// Callers' own slice is never mutated.
 	require.Equal(t, "anthropic-messages:sig-1", messages[0].ReasoningSignature)
+}
+
+func TestEncodeMessagesKeepsGeminiSignatureWhenReasoningIsRewritten(t *testing.T) {
+	r := newResourceRegistry()
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	messages := []chat.Message{{
+		Role:             "assistant",
+		Content:          "answer",
+		ReasoningContent: "I looked at " + ref,
+		// Gemini replays this signature on the answer text and on each tool
+		// call's own metadata; it never replays the reasoning text, so a
+		// rewrite here does not invalidate it.
+		ReasoningSignature: "google-generative-ai:thought-sig",
+	}}
+
+	encoded := r.EncodeMessages(messages)
+
+	require.Equal(t, "I looked at res://0001", encoded[0].ReasoningContent)
+	require.Equal(t, "google-generative-ai:thought-sig", encoded[0].ReasoningSignature)
+}
+
+func TestDecodeResponseKeepsGeminiSignature(t *testing.T) {
+	registry := NewRegistry(true)
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	registry.EncodeMessages([]chat.Message{{Role: "assistant", Content: ref}})
+
+	decoded := &types.ChatResponse{
+		Content:            "done",
+		ReasoningContent:   "read res://0001",
+		ReasoningSignature: "google-generative-ai:thought-sig",
+	}
+	registry.DecodeResponse(decoded)
+	require.Equal(t, "read "+ref, decoded.ReasoningContent)
+	require.Equal(t, "google-generative-ai:thought-sig", decoded.ReasoningSignature)
 }

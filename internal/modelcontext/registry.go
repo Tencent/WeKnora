@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -177,10 +178,13 @@ func (r *Registry) DecodeResponse(response *types.ChatResponse) {
 	response.Content = r.DecodeOutputText(response.Content)
 	reasoningBefore := response.ReasoningContent
 	response.ReasoningContent = r.DecodeOutputText(response.ReasoningContent)
-	if response.ReasoningSignature != "" && response.ReasoningContent != reasoningBefore {
-		// Same reason as dropStaleReasoningSignature: the decoded text is no
-		// longer what the provider signed, and this response is what lands on
-		// the agent step and is replayed next turn.
+	if response.ReasoningContent != reasoningBefore &&
+		api.SignatureFor(api.APIAnthropicMessages, response.ReasoningSignature) != "" {
+		// Same reason and same protocol limit as dropStaleReasoningSignature:
+		// the decoded text is no longer what Claude signed, and this response
+		// is what lands on the agent step. Anthropic turns replay from
+		// ReasoningMetadata, which decoding never touches, so this only
+		// affects turns stored before that metadata existed.
 		response.ReasoningSignature = ""
 	}
 	r.DecodeToolCalls(response.ToolCalls)
