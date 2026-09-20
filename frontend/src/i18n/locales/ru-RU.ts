@@ -2373,6 +2373,8 @@ export default {
       }
     },
     debug: {
+      reasoningEffort: 'Интенсивность размышлений',
+      reasoningEffortDesc: 'Отправляет reasoning_effort с уровнями, которые сообщает каталог модели',
       title: 'Тест модели',
       description: 'Запрос с сохранёнными настройками модели. Перед проверкой сохраните изменения.',
       groupModel: 'Выбор модели',
@@ -2395,15 +2397,11 @@ export default {
       audioFile: 'Аудиофайл',
       chooseFile: 'Выбрать файл',
       parameters: 'Параметры запроса',
-      thinking: 'Режим размышления',
-      thinkingDesc: 'Применяется только к моделям с поддержкой размышления',
       systemPrompt: 'System Prompt',
       systemPromptPlaceholder: 'Необязательно: системный промпт',
       run: 'Запустить тест',
       copyResult: 'Копировать результат',
       history: 'История',
-      thinkOn: 'Размышление вкл.',
-      thinkOff: 'Размышление выкл.',
       runLabel: 'Запуск №{n}',
       success: 'Запрос выполнен',
       failed: 'Запрос не выполнен',
@@ -2411,6 +2409,9 @@ export default {
       requestPreview: 'Просмотр запроса',
       requestFailed: 'Не удалось выполнить тест модели',
       metrics: {
+        api: 'Протокол',
+        thinkingFormat: 'Формат размышлений',
+        requestedReasoningEffort: 'Запрошенная интенсивность',
         dimension: 'Размерность вектора',
         resultCount: 'Количество результатов',
         answerChars: 'Символов в ответе',
@@ -2753,6 +2754,28 @@ export default {
     languageSaved: 'Настройки языка сохранены'
   },
   model: {
+    reasoning: {
+      levels: {
+        off: 'Выкл',
+        auto: 'Авто',
+        minimal: 'Минимальный',
+        low: 'Низкий',
+        medium: 'Средний',
+        high: 'Высокий',
+        xhigh: 'Очень высокий',
+        max: 'Максимальный',
+      },
+      levelDescriptions: {
+        off: 'Размышления отключены, параметры размышления не отправляются',
+        auto: 'Интенсивность по умолчанию поставщика; модель сама решает, сколько думать',
+        minimal: 'Минимум размышлений, самые быстрые ответы',
+        low: 'Лёгкие размышления',
+        medium: 'Умеренные размышления',
+        high: 'Глубокие размышления, ответы медленнее',
+        xhigh: 'Очень большой бюджет размышлений (только некоторые модели)',
+        max: 'Максимальный бюджет размышлений (только некоторые модели)',
+      },
+    },
     modelName: 'Название модели',
     defaultTag: 'По умолчанию',
     addModelInSettings: 'Перейти в общие настройки для добавления моделей',
@@ -2761,6 +2784,52 @@ export default {
     searchPlaceholder: 'Поиск моделей...',
     builtinTag: 'Built-in',
     editor: {
+      maxOutputTokensLabel: 'Макс. выходных токенов',
+      maxOutputTokensPlaceholder: 'Пусто — значение из каталога',
+      maxOutputTokensDesc: 'Лимит вывода на один ответ. Оставьте пустым, чтобы использовать значение каталога для этой модели.',
+      catalog: {
+        reasoning: 'Рассуждение',
+        vision: 'Зрение',
+        hint: 'Выберите модель из каталога поставщика или введите своё имя модели.',
+      },
+      resolved: {
+        title: 'Диагностика подключения',
+        empty: 'Укажите поставщика и имя модели, чтобы определить способ вызова',
+        failed: 'Не удалось определить',
+        protocol: 'Протокол',
+        catalog: 'Каталог',
+        catalogedYes: 'В каталоге',
+        catalogedNo: 'Вне каталога, настройки поставщика',
+        thinkingFormat: 'Формат размышлений',
+        thinkingLevels: 'Поддерживаемые уровни',
+        noThinking: 'Размышления не поддерживаются',
+      },
+      advanced: {
+        toggle: 'Дополнительно',
+        api: {
+          label: 'Переопределение протокола',
+          auto: 'Авто (по поставщику / URL)',
+          desc: 'Принудительно задать протокол запросов; обычно не требуется.',
+        },
+        remoteModelName: {
+          label: 'Имя модели у поставщика',
+          placeholder: 'Пусто — совпадает с именем модели',
+          desc: 'ID модели, который реально отправляется поставщику, если отличается от имени выше.',
+        },
+        legacyThinking: {
+          label: 'Формат параметров размышления (устаревший)',
+          catalog: 'Следовать каталогу (рекомендуется)',
+          none: 'Не отправлять параметры размышления',
+          desc: 'У этой модели сохранилась устаревшая настройка thinking_control. Выберите «Следовать каталогу», чтобы решение принимал каталог.',
+        },
+        compat: {
+          label: 'Переопределение совместимости протокола (JSON)',
+          placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
+          desc: 'Переключатели совместимости, накладываемые на значения каталога для определённого протокола; см. catalog/compat.go на бэкенде. Пусто — без переопределения.',
+          invalid: 'Некорректный JSON',
+          mustBeObject: 'Должен быть JSON-объект',
+        },
+      },
       addTitle: 'Добавить модель',
       editTitle: 'Редактировать модель',
       sectionType: 'Тип модели',
@@ -2807,8 +2876,6 @@ export default {
       maxConcurrencyLabel: 'Лимит фоновой параллельности',
       maxConcurrencyPlaceholder: '0 — использовать глобальное значение',
       maxConcurrencyDesc: 'Ограничивает число одновременных фоновых вызовов (индексация/обогащение) к этой модели, общее для модели по всем репликам. 0 или пусто — используется глобальное значение по умолчанию; интерактивный чат не затрагивается.',
-      thinkingControlLabel: 'Формат параметров режима размышления',
-      thinkingControlDesc: 'Определяет, как переключатель «Режим размышления» агента записывается в API. При возможности выбирается по поставщику/модели; при несоответствии измените по документации API. При выборе «Не отправлять» переключатель «Режим размышления» агента не действует.',
       dimensionHint: 'Модель выбрана. Нажмите «Определить размерность», чтобы автоматически получить значение.',
       loadModelListFailed: 'Не удалось загрузить список моделей',
       listRefreshed: 'Список обновлён',
@@ -2831,154 +2898,14 @@ export default {
       goToOllamaSettings: 'Открыть настройки',
       providerLabel: 'Провайдер',
       providerPlaceholder: 'Выберите провайдера модели',
-      providers: {
-        novita: {
-          label: 'Novita AI',
-          description: 'moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b, etc.'
-        },
-        nvidia: {
-          label: 'NVIDIA',
-          description: 'deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.'
-        },
-        lkeap: {
-          label: 'Tencent Cloud LKEAP',
-          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base и др.'
-        },
-        longcat: {
-          label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.'
-        },
-        qianfan: {
-          label: 'Baidu Qianfan',
-          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.'
-        },
-        moonshot: {
-          label: 'Moonshot',
-          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.'
-        },
-        qiniu: {
-          label: 'Qiniu Cloud',
-          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.'
-        },
-        modelscope: {
-          label: 'ModelScope',
-          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.'
-        },
-        gpustack: {
-          label: 'GPUStack',
-          description: 'Choose your deployed model on GPUStack'
-        },
-        gemini: {
-          label: 'Google Gemini',
-          description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.'
-        },
-        mimo: {
-          label: 'MiMo',
-          description: 'mimo-v2-flash'
-        },
-        minimax: {
-          label: 'MiniMax',
-          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.'
-        },
-        hunyuan: {
-          label: 'Hunyuan',
-          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.'
-        },
-        deepseek: {
-          label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner, etc.'
-        },
-        volcengine: {
-          label: 'Volcengine',
-          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.'
-        },
-        jina: {
-          label: 'Jina',
-          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.'
-        },
-        siliconflow: {
-          label: 'SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1, etc.'
-        },
-        generic: {
-          label: 'Пользовательский (OpenAI-совместимый)',
-          description: 'Generic API endpoint'
-        },
-        requesty: {
-          label: 'Requesty',
-          description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
-        },
-        openrouter: {
-          label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
-        },
-        litellm: {
-          label: 'LiteLLM',
-          description: 'Self-hosted прокси к 100+ провайдерам (OpenAI, Anthropic, Gemini, Bedrock и др.). Замените URL-заглушку; localhost нужно добавить в SSRF_WHITELIST.'
-        },
-        zhipu: {
-          label: 'Zhipu BigModel',
-          description: 'glm-4.7, embedding-3, rerank, etc.'
-        },
-        aliyun: {
-          label: 'Aliyun DashScope',
-          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.'
-        },
-        azure_openai: {
-          label: 'Azure OpenAI',
-          description: 'Сервис OpenAI на платформе Microsoft Azure'
-        },
-        anthropic: {
-          label: 'Anthropic',
-          description: 'Claude models via native Anthropic Messages API'
-        },
-        openai: {
-          label: 'OpenAI',
-          description: 'gpt-5.2, gpt-5-mini, etc.'
-        }
-      },
       validation: {
+        extraFieldRequired: 'Заполните {name}',
         modelNameRequired: 'Введите название модели',
         modelNameEmpty: 'Название модели не может быть пустым',
         modelNameMax: 'Название модели не может превышать 100 символов',
         baseUrlRequired: 'Введите Base URL',
         baseUrlEmpty: 'Base URL не может быть пустым',
         baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес'
-      },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 и др.; по умолчанию для LKEAP; для R1 — «Не отправлять»)'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Пользовательские OpenAI-совместимые шлюзы, NVIDIA NIM, vLLM / локальный Qwen'
-        },
-        none: {
-          label: 'Не отправлять параметры размышления',
-          hint: 'Переключатель «Режим размышления» агента не действует; параметры размышления не отправляются в запросе'
-        }
-      },
-      volcengine: {
-        accessKeyLabel: 'Access Key ID',
-        accessKeyPlaceholder: 'Volcengine Access Key ID',
-        secretKeyLabel: 'Secret Access Key',
-        secretKeyPlaceholder: 'Volcengine Secret Access Key',
-        rerankCredentialHint: 'Rerank использует подпись VikingDB AK/SK, а не Ark API key. Рекомендуемая модель: doubao-seed-rerank.'
-      },
-      lkeap: {
-        secretIdLabel: 'SecretId',
-        secretIdPlaceholder: 'Tencent Cloud API SecretId',
-        secretKeyLabel: 'SecretKey',
-        secretKeyPlaceholder: 'Tencent Cloud API SecretKey',
-        regionLabel: 'Region',
-        regionPlaceholder: 'ap-guangzhou',
-        regionDesc: 'RunRerank supports ap-beijing, ap-guangzhou, etc. Default: ap-guangzhou',
-        rerankCredentialHint: 'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.'
       },
       modelNamePlaceholder: {
         local: 'например: llama2:latest',
@@ -6377,6 +6304,8 @@ export default {
       capabilityUnconfigured: 'Not set'
     },
     editor: {
+      reasoningEffortUnsupported: 'Выбранная модель не поддерживает размышления; все варианты, кроме «Выкл», игнорируются.',
+      reasoningEffortAlwaysOn: 'Выбранная модель всегда размышляет, её нельзя отключить — можно менять только уровень усилий.',
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
       buttons: {
