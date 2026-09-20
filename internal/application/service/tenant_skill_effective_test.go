@@ -231,7 +231,7 @@ func twoConfigFixture(t *testing.T) (*multiConfigRepo, *installSkillRepo) {
 func TestSkillsForRunPrefersThePinnedConfigOverTheAgents(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
-	_, err := pinner.Pin(ctx, "s-1", "cfg-a")
+	_, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "cfg-a"})
 	require.NoError(t, err)
 	configs, skills := twoConfigFixture(t)
 

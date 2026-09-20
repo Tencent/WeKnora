@@ -40,13 +40,13 @@ func TestPinWritesWhenUnset(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
 
-	got, err := pinner.Pin(ctx, "s-1", "cfg-a")
+	got, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "cfg-a"})
 	require.NoError(t, err)
-	require.Equal(t, "cfg-a", got)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-a"}, got)
 
 	read, err := pinner.Read(ctx, "s-1")
 	require.NoError(t, err)
-	require.Equal(t, "cfg-a", read)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-a"}, read)
 }
 
 // Two concurrent first-sandbox creations must converge on one config, or the
@@ -55,20 +55,20 @@ func TestPinIsIdempotentAndReturnsExistingWinner(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
 
-	first, err := pinner.Pin(ctx, "s-1", "cfg-a")
+	first, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "cfg-a"})
 	require.NoError(t, err)
-	require.Equal(t, "cfg-a", first)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-a"}, first)
 
-	second, err := pinner.Pin(ctx, "s-1", "cfg-b")
+	second, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "cfg-b"})
 	require.NoError(t, err)
-	require.Equal(t, "cfg-a", second, "the first writer wins; later callers adopt it")
+	require.Equal(t, SandboxPin{ConfigID: "cfg-a"}, second, "the first writer wins; later callers adopt it")
 }
 
 func TestPinLeavesEmptyConfigUnpinned(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
 
-	got, err := pinner.Pin(ctx, "s-1", "")
+	got, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: ""})
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
@@ -79,13 +79,13 @@ func TestPinTrimsConfigIDBeforeStoring(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
 
-	got, err := pinner.Pin(ctx, "s-1", "  cfg-a  ")
+	got, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "  cfg-a  "})
 	require.NoError(t, err)
-	require.Equal(t, "cfg-a", got)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-a"}, got)
 
 	read, err := pinner.Read(ctx, "s-1")
 	require.NoError(t, err)
-	require.Equal(t, "cfg-a", read)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-a"}, read)
 }
 
 // Pin runs right after a sandbox was created, so a vanished session must be an
@@ -95,11 +95,11 @@ func TestPinFailsWhenSessionIsGone(t *testing.T) {
 	pinner := NewSessionSandboxPinner(db)
 	ctx := context.Background()
 
-	_, err := pinner.Pin(ctx, "missing", "cfg-a")
+	_, err := pinner.Pin(ctx, "missing", SandboxPin{ConfigID: "cfg-a"})
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 	require.NoError(t, db.Delete(&types.Session{}, "id = ?", "s-1").Error)
-	_, err = pinner.Pin(ctx, "s-1", "cfg-a")
+	_, err = pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "cfg-a"})
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound,
 		"a soft-deleted session already had its sandbox destroyed")
 }
@@ -120,7 +120,7 @@ func TestClearReleasesPin(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
 
-	_, err := pinner.Pin(ctx, "s-1", "cfg-a")
+	_, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "cfg-a"})
 	require.NoError(t, err)
 	require.NoError(t, pinner.Clear(ctx, "s-1"))
 
@@ -137,7 +137,7 @@ func TestSoftDeleteHidesSandboxPin(t *testing.T) {
 	pinner := NewSessionSandboxPinner(db)
 	ctx := context.Background()
 
-	_, err := pinner.Pin(ctx, "s-1", "cfg-a")
+	_, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "cfg-a"})
 	require.NoError(t, err)
 
 	require.NoError(t, db.Delete(&types.Session{}, "id = ?", "s-1").Error)
@@ -151,14 +151,14 @@ func TestResolveSandboxForExecutionDoesNotPinStatelessBackend(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	want := &pinTestManager{typ: sandbox.SandboxTypeDisabled}
 
-	got, configID, err := resolveSandboxForExecution(
+	got, pin, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
 		7, "s-1", "cfg-local", nil,
 	)
 
 	require.NoError(t, err)
 	require.Same(t, want, got)
-	require.Equal(t, "cfg-local", configID)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-local", TenantID: 7}, pin)
 	pinned, err := pinner.Read(context.Background(), "s-1")
 	require.NoError(t, err)
 	require.Empty(t, pinned, "disabled backends must not leave a session binding")
@@ -168,17 +168,17 @@ func TestResolveSandboxForExecutionPinsRemoteBackend(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	want := &pinTestManager{typ: sandbox.SandboxTypeCube}
 
-	got, configID, err := resolveSandboxForExecution(
+	got, pin, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
 		7, "s-1", "cfg-cube", nil,
 	)
 
 	require.NoError(t, err)
 	require.Same(t, want, got)
-	require.Equal(t, "cfg-cube", configID)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-cube", TenantID: 7}, pin)
 	pinned, err := pinner.Read(context.Background(), "s-1")
 	require.NoError(t, err)
-	require.Equal(t, "cfg-cube", pinned)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-cube", TenantID: 7}, pinned)
 }
 
 // Docker is a session-persistent remote backend, same as Cube/E2B. Skipping
@@ -188,32 +188,98 @@ func TestResolveSandboxForExecutionPinsDockerBackend(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	want := &pinTestManager{typ: sandbox.SandboxTypeDocker}
 
-	got, configID, err := resolveSandboxForExecution(
+	got, pin, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
 		7, "s-1", "cfg-docker", nil,
 	)
 
 	require.NoError(t, err)
 	require.Same(t, want, got)
-	require.Equal(t, "cfg-docker", configID)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-docker", TenantID: 7}, pin)
 	pinned, err := pinner.Read(context.Background(), "s-1")
 	require.NoError(t, err)
-	require.Equal(t, "cfg-docker", pinned)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-docker", TenantID: 7}, pinned)
 }
 
 func TestResolveSandboxForExecutionKeepsExistingRemotePin(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
-	_, err := pinner.Pin(context.Background(), "s-1", "cfg-existing")
+	_, err := pinner.Pin(context.Background(), "s-1", SandboxPin{ConfigID: "cfg-existing"})
 	require.NoError(t, err)
 	want := &pinTestManager{typ: sandbox.SandboxTypeE2B}
 
-	got, configID, err := resolveSandboxForExecution(
+	got, pin, err := resolveSandboxForExecution(
 		context.Background(), stubSandboxResolver{mgr: want}, nil, pinner,
 		7, "s-1", "cfg-new-agent-choice", nil,
 	)
 
 	require.NoError(t, err)
 	require.Same(t, want, got)
-	require.Equal(t, "cfg-existing", configID,
+	require.Equal(t, SandboxPin{ConfigID: "cfg-existing"}, pin,
 		"re-pointing an agent must not move an existing remote session")
+}
+
+// A shared agent runs on ITS OWNER's sandbox config, so the pin has to record
+// that workspace: everything outside the chat turn (teardown, the terminal and
+// desktop panels, fork snapshots) runs as the session owner and would
+// otherwise look the config up in a workspace that does not have it.
+func TestResolveSandboxForExecutionPinsTheConfigOwningWorkspace(t *testing.T) {
+	const sessionOwner, agentOwner = uint64(7), uint64(99)
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	resolver := &tenantRecordingResolver{mgr: &pinTestManager{typ: sandbox.SandboxTypeCube}}
+
+	_, pin, err := resolveSandboxForExecution(
+		context.Background(), resolver, nil, pinner,
+		agentOwner, "s-1", "cfg-owned-by-99", nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-owned-by-99", TenantID: agentOwner}, pin)
+
+	stored, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Equal(t, agentOwner, stored.TenantID, "the lending workspace is durable")
+	require.Equal(t, agentOwner, stored.TenantOr(sessionOwner),
+		"a borrowed pin ignores the session's own workspace")
+}
+
+// An own agent's config already lives in the session's workspace, so the pin
+// stays owner-less and TenantOr keeps resolving it exactly as before. This is
+// what makes the new column a no-op for every existing session.
+func TestSandboxPinTenantOrFallsBackToTheSessionWorkspace(t *testing.T) {
+	require.Equal(t, uint64(7), SandboxPin{ConfigID: "cfg-a"}.TenantOr(7))
+	require.Equal(t, uint64(99), SandboxPin{ConfigID: "cfg-a", TenantID: 99}.TenantOr(7))
+	require.True(t, SandboxPin{}.IsZero())
+	require.False(t, SandboxPin{ConfigID: "cfg-a"}.IsZero())
+}
+
+// A pin resolves in the workspace it recorded, not the one on the context.
+func TestResolveSandboxForExecutionResolvesPinnedConfigInItsOwnWorkspace(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	_, err := pinner.Pin(context.Background(), "s-1",
+		SandboxPin{ConfigID: "cfg-owned-by-99", TenantID: 99})
+	require.NoError(t, err)
+	resolver := &tenantRecordingResolver{mgr: &pinTestManager{typ: sandbox.SandboxTypeCube}}
+
+	_, pin, err := resolveSandboxForExecution(
+		context.Background(), resolver, nil, pinner,
+		7 /* the borrower, e.g. a teardown or panel-open caller */, "s-1", "", nil,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(99), resolver.lastTenant)
+	require.Equal(t, "cfg-owned-by-99", resolver.lastConfig)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-owned-by-99", TenantID: 99}, pin)
+}
+
+// tenantRecordingResolver reports which workspace a config was looked up in.
+type tenantRecordingResolver struct {
+	mgr        sandbox.Manager
+	lastTenant uint64
+	lastConfig string
+}
+
+func (r *tenantRecordingResolver) Resolve(
+	_ context.Context, tenantID uint64, configID string,
+) (sandbox.Manager, error) {
+	r.lastTenant, r.lastConfig = tenantID, configID
+	return r.mgr, nil
 }

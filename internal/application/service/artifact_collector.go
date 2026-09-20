@@ -178,17 +178,17 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	if c.resolver == nil {
 		return c.source
 	}
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	configID, err := sandboxConfigForExistingSandbox(ctx, c.pinner, sessionID)
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
+	pin, err := sandboxConfigForExistingSandbox(ctx, c.pinner, sessionID)
 	if err != nil {
 		logger.Warnf(ctx, "[ArtifactCollector] read sandbox pin failed: %v", err)
 		return nil
 	}
-	if configID == "" {
+	if pin.IsZero() {
 		return nil
 	}
 	mgr, err := resolveTenantSandboxForConfig(
-		ctx, c.resolver, c.fallbackMgr, tenantID, configID, nil,
+		ctx, c.resolver, c.fallbackMgr, pin.TenantOr(sessionTenantID), pin.ConfigID, nil,
 	)
 	if err != nil {
 		// Refusing to read is the safe failure: substituting another backend
@@ -204,7 +204,7 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	if source, ok := mgr.(SandboxArtifactSource); ok {
 		return source
 	}
-	if configID == types.SandboxConfigIDGlobalDefault {
+	if pin.ConfigID == types.SandboxConfigIDGlobalDefault {
 		return c.source
 	}
 	return nil
