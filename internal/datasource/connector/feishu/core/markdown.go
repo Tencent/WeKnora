@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"net/url"
@@ -259,6 +260,16 @@ func (r *mdRenderer) renderBlock(b DocxBlock) string {
 	case BlockTypeIframe:
 		if b.Iframe != nil && b.Iframe.Component != nil && b.Iframe.Component.URL != "" {
 			return "[内嵌网页](" + escapeURL(b.Iframe.Component.URL) + ")"
+		}
+		return unsupportedBlockNote(b)
+	case BlockTypeAddOns:
+		// 文档小组件 carry their full data inline in `record` (JSON string);
+		// there is no server-side render to download. Recognized component
+		// types degrade to structured Markdown, unknown ones keep the note.
+		if b.AddOns != nil && b.AddOns.ComponentTypeID == addOnsTimelineTypeID {
+			if md := renderTimelineAddOn(b.AddOns.Record); md != "" {
+				return md
+			}
 		}
 		return unsupportedBlockNote(b)
 	default:
@@ -624,17 +635,24 @@ func textBearingField(b DocxBlock) *BlockText {
 	return b.Text
 }
 
-// cellText renders a native table cell to a single string. A Feishu table_cell
+// cellTextAndAlign renders a native table cell to a single string and reports
+// the cell's column alignment (0 when default). A Feishu table_cell
 // (block_type 32) is a container: its text lives in child blocks, not on the
-// cell itself, so we concatenate the text of each child block.
-func cellText(cell DocxBlock, byID map[string]DocxBlock) string {
+// cell itself, so we concatenate the text of each child block; the first child
+// carrying an explicit style alignment (2 center / 3 right) wins.
+func cellTextAndAlign(cell DocxBlock, byID map[string]DocxBlock) (string, int) {
 	var parts []string
+	align := 0
 	for _, childID := range cell.Children {
-		if t := plainText(textBearingField(byID[childID])); t != "" {
+		child := byID[childID]
+		if t := plainText(textBearingField(child)); t != "" {
 			parts = append(parts, t)
 		}
+		if align == 0 && child.Text != nil && child.Text.Style != nil && child.Text.Style.Align != 0 {
+			align = child.Text.Style.Align
+		}
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(parts, " "), align
 }
 
 // renderNativeTable renders a native docx table block into a Markdown table.
@@ -644,8 +662,13 @@ func renderNativeTable(b DocxBlock, byID map[string]DocxBlock) string {
 	}
 	cols := b.Table.Property.ColumnSize
 	var cells []string
-	for _, cid := range b.Table.Cells {
-		cells = append(cells, cellText(byID[cid], byID))
+	aligns := make([]int, cols)
+	for i, cid := range b.Table.Cells {
+		text, align := cellTextAndAlign(byID[cid], byID)
+		cells = append(cells, text)
+		if col := i % cols; align != 0 && aligns[col] == 0 {
+			aligns[col] = align
+		}
 	}
 	var rows [][]string
 	for i := 0; i < len(cells); i += cols {
@@ -656,7 +679,7 @@ func renderNativeTable(b DocxBlock, byID map[string]DocxBlock) string {
 		rows = append(rows, cells[i:end])
 	}
 	fillMergedCells(rows, cols, b.Table.Property.MergeInfo)
-	return markdownTable(rows)
+	return markdownTable(rows, aligns)
 }
 
 // fillMergedCells propagates each merged region's top-left value into the cells
@@ -719,17 +742,33 @@ func fillSheetMerges(rows [][]string, merges []sheetMergeRange) {
 }
 
 // markdownTable renders a [][]string (first row = header) as a GFM table.
-func markdownTable(rows [][]string) string {
+// aligns carries per-column alignment (0/1 left, 2 center, 3 right — the docx
+// style.align values) rendered as GFM colons; nil or zero entries yield the
+// plain left-aligned separator.
+func markdownTable(rows [][]string, aligns []int) string {
 	// A zero-column header (an embedded sheet/bitable with no columns) would Emit
 	// a header line of "|  |" and a separator of just "|" — malformed GFM. Render
 	// nothing instead.
 	if len(rows) == 0 || len(rows[0]) == 0 {
 		return ""
 	}
+	sep := func(col int) string {
+		switch {
+		case col < len(aligns) && aligns[col] == 2:
+			return ":---:"
+		case col < len(aligns) && aligns[col] == 3:
+			return "---:"
+		default:
+			return "---"
+		}
+	}
 	var sb strings.Builder
 	cols := len(rows[0])
-	sb.WriteString("| " + strings.Join(escapePipes(rows[0]), " | ") + " |\n")
-	sb.WriteString("|" + strings.Repeat(" --- |", cols) + "\n")
+	sb.WriteString("| " + strings.Join(escapePipes(rows[0]), " | ") + " |\n|")
+	for c := range cols {
+		sb.WriteString(" " + sep(c) + " |")
+	}
+	sb.WriteString("\n")
 	for _, r := range rows[1:] {
 		// Ragged data: a row wider than the header would Emit more cells than the
 		// header/separator declare, producing a malformed GFM table. Clamp to the
@@ -743,6 +782,59 @@ func markdownTable(rows [][]string) string {
 		sb.WriteString("| " + strings.Join(escapePipes(r), " | ") + " |\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// addOnsTimelineTypeID is the component_type_id of the timeline 文档小组件.
+// Add-on blocks are client-rendered from their inline `record` JSON — there
+// is no server asset to download — so recognized types degrade to structured
+// Markdown.
+const addOnsTimelineTypeID = "blk_6358a421bca0001c22536e4c"
+
+type addOnsTimelineRecord struct {
+	ContentShow struct {
+		Text  bool `json:"text"`
+		Time  bool `json:"time"`
+		Title bool `json:"title"`
+	} `json:"contentShow"`
+	Items []struct {
+		Text  string `json:"text"`
+		Time  string `json:"time"`
+		Title string `json:"title"`
+	} `json:"items"`
+}
+
+// renderTimelineAddOn renders a timeline widget's record as a Markdown list:
+// `- **time · title**：text`, omitting the segments the widget hides
+// (contentShow) or that are empty. Returns "" for malformed or empty records
+// (the caller falls back to the placeholder note).
+func renderTimelineAddOn(record string) string {
+	var rec addOnsTimelineRecord
+	if json.Unmarshal([]byte(record), &rec) != nil || len(rec.Items) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(rec.Items))
+	for _, it := range rec.Items {
+		var head []string
+		if rec.ContentShow.Time && it.Time != "" {
+			head = append(head, it.Time)
+		}
+		if rec.ContentShow.Title && it.Title != "" {
+			head = append(head, it.Title)
+		}
+		line := "-"
+		if len(head) > 0 {
+			line = "- **" + strings.Join(head, " · ") + "**"
+		}
+		if rec.ContentShow.Text && it.Text != "" {
+			if len(head) > 0 {
+				line += "：" + it.Text
+			} else {
+				line += " " + it.Text
+			}
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n\n")
 }
 
 // escapePipes makes cell values safe for a single Markdown table row.
@@ -789,7 +881,7 @@ func inlineTable(ctx context.Context, client sheetReader, token, kind string) st
 	// markdownTable returns "" when there is nothing renderable (no rows, or a
 	// header with no columns). Skip the truncation note too in that case, since it
 	// would otherwise dangle without a table above it.
-	table := markdownTable(rows)
+	table := markdownTable(rows, nil) // sheet/bitable values carry no alignment
 	if table == "" {
 		return ""
 	}

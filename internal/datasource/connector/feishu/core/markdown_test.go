@@ -230,7 +230,7 @@ func TestMarkdownTable_RaggedRowClampedToHeader(t *testing.T) {
 		{"名称", "数量"},
 		{"苹果", "3", "多余1", "多余2"},
 	}
-	out := markdownTable(rows)
+	out := markdownTable(rows, nil)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("want 3 lines (header, separator, 1 row), got %d:\n%s", len(lines), out)
@@ -256,7 +256,7 @@ func TestMarkdownTable_ZeroColumnRendersNothing(t *testing.T) {
 		{{}},         // one empty header row, no data
 		{{}, {}, {}}, // empty header + empty data rows
 	} {
-		out := markdownTable(rows)
+		out := markdownTable(rows, nil)
 		if out != "" {
 			t.Errorf("zero-column table must render nothing, got %q for rows=%+v", out, rows)
 		}
@@ -850,5 +850,139 @@ func TestBlocksToMarkdown_OrderedChildrenKeepNumbering(t *testing.T) {
 	}
 	if !strings.Contains(out, "正文\n\n1. 项") {
 		t.Errorf("a top-level sibling must restart the numbering:\n%s", out)
+	}
+}
+
+// TestBlocksToMarkdown_TimelineAddOn pins the list-style degradation of the
+// timeline 文档小组件 (block_type 40): its record JSON carries the full data
+// inline, and the renderer must emit one bullet per item honoring contentShow.
+func TestBlocksToMarkdown_TimelineAddOn(t *testing.T) {
+	record := `{"blockId":"x","contentShow":{"text":true,"time":true,"title":true},` +
+		`"items":[{"id":"a","text":"1","time":"2026-09-19","title":"昨天"},` +
+		`{"id":"b","text":"2","time":"2026-09-20","title":"今天"},` +
+		`{"id":"c","text":"3","time":"2026-09-21","title":"明天"}],"mode":"horizontal_alternating"}`
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "tl", BlockType: BlockTypeAddOns, AddOns: &BlockAddOns{
+			ComponentTypeID: "blk_6358a421bca0001c22536e4c", Record: record,
+		}},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	for _, want := range []string{
+		"- **2026-09-19 · 昨天**：1",
+		"- **2026-09-20 · 今天**：2",
+		"- **2026-09-21 · 明天**：3",
+	} {
+		if !strings.Contains(string(md), want) {
+			t.Errorf("missing timeline line %q, got:\n%s", want, md)
+		}
+	}
+	if strings.Contains(string(md), "文档小组件") {
+		t.Errorf("timeline must not fall back to the placeholder, got:\n%s", md)
+	}
+}
+
+func TestBlocksToMarkdown_TimelineAddOnHiddenAndUnknown(t *testing.T) {
+	record := `{"contentShow":{"text":false,"time":true,"title":true},` +
+		`"items":[{"text":"1","time":"2026-09-19","title":"昨天"},{"text":"2","time":"","title":""}]}`
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "tl", BlockType: BlockTypeAddOns, AddOns: &BlockAddOns{
+			ComponentTypeID: "blk_6358a421bca0001c22536e4c", Record: record,
+		}},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(string(md), "- **2026-09-19 · 昨天**") {
+		t.Errorf("hidden text must be omitted, got:\n%s", md)
+	}
+	// Both head segments empty and text hidden → bare bullet.
+	if !strings.Contains(string(md), "-\n") && !strings.HasSuffix(strings.TrimRight(string(md), "\n"), "-") {
+		t.Errorf("bare bullet expected for empty item, got:\n%s", md)
+	}
+
+	// Unknown component type keeps the placeholder; malformed record too.
+	for _, rec := range []string{`{"items":broken`, ""} {
+		blocks := []DocxBlock{
+			{BlockID: "root", BlockType: BlockTypePage},
+			{BlockID: "tl", BlockType: BlockTypeAddOns, AddOns: &BlockAddOns{
+				ComponentTypeID: "blk_6358a421bca0001c22536e4c", Record: rec,
+			}},
+		}
+		md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if !strings.Contains(string(md), "文档小组件") {
+			t.Errorf("malformed record must keep the placeholder, got:\n%s", md)
+		}
+	}
+	unknown := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "w", BlockType: BlockTypeAddOns, AddOns: &BlockAddOns{
+			ComponentTypeID: "blk_unknown", Record: `{"items":[]}`,
+		}},
+	}
+	md, _, _, err = blocksToMarkdown(context.Background(), nil, unknown, "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(string(md), "文档小组件") {
+		t.Errorf("unknown component type must keep the placeholder, got:\n%s", md)
+	}
+}
+
+// TestMarkdownTable_ColumnAlignment pins the GFM colon rendering of the docx
+// style.align values (2 center / 3 right) in the separator row.
+func TestMarkdownTable_ColumnAlignment(t *testing.T) {
+	rows := [][]string{{"A", "B", "C"}, {"a", "b", "c"}}
+	out := markdownTable(rows, []int{0, 2, 3})
+	want := "| A | B | C |\n| --- | :---: | ---: |\n| a | b | c |"
+	if out != want {
+		t.Errorf("alignment separators:\n got: %q\nwant: %q", out, want)
+	}
+}
+
+func TestBlocksToMarkdown_TableCellAlignment(t *testing.T) {
+	// Column 2's cell text carries align=2 (center); column 3 align=3 (right).
+	mk := func(content string, align int) DocxBlock {
+		return DocxBlock{BlockID: content, BlockType: BlockTypeText, Text: &BlockText{
+			Elements: []TextElement{{TextRun: &TextRun{Content: content}}},
+			Style:    &BlockTextStyle{Align: align},
+		}}
+	}
+	// Feishu's table.cells reference table_cell CONTAINER blocks (type 32);
+	// the text blocks hang off each cell's children.
+	texts := []DocxBlock{mk("h1", 0), mk("h2", 0), mk("h3", 0), mk("a", 0), mk("b", 2), mk("c", 3)}
+	var cells []string
+	var cellBlocks []DocxBlock
+	for _, tid := range []string{"h1", "h2", "h3", "a", "b", "c"} {
+		cid := "cell" + tid
+		cells = append(cells, cid)
+		cellBlocks = append(cellBlocks, DocxBlock{
+			BlockID: cid, BlockType: BlockTypeTableCell, Children: []string{tid},
+		})
+	}
+	table := DocxBlock{
+		BlockID: "t", BlockType: BlockTypeTable,
+		Table: &BlockTable{
+			Cells:    cells,
+			Property: &BlockTableProperty{ColumnSize: 3},
+		},
+	}
+	root := DocxBlock{BlockID: "root", BlockType: BlockTypePage}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil,
+		append([]DocxBlock{root, table}, append(cellBlocks, texts...)...), "", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	out := string(md)
+	if !strings.Contains(out, "| --- | :---: | ---: |") {
+		t.Errorf("alignment not rendered, got:\n%s", out)
 	}
 }

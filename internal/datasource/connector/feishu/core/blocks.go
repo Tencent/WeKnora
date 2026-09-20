@@ -126,6 +126,9 @@ type BlockTextStyle struct {
 	Language int    `json:"language"`
 	Sequence string `json:"sequence"`
 	Done     bool   `json:"done"` // todo blocks: item completed
+	// Align: 1 left / 2 center / 3 right. Absent from the API unless the
+	// author set an explicit non-default alignment.
+	Align int `json:"align"`
 }
 
 // BlockText is the shared shape of text-bearing blocks (text, headingN, bullet…).
