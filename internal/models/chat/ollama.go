@@ -329,26 +329,6 @@ func (c *OllamaChat) toolFrom(tools []Tool) ollamaapi.Tools {
 	return ollamaTools
 }
 
-// toolTo 将 Ollama 的 Tool 转换为本模块的 Tool
-func (c *OllamaChat) toolTo(ollamaTools ollamaapi.Tools) []Tool {
-	if len(ollamaTools) == 0 {
-		return nil
-	}
-	tools := make([]Tool, 0, len(ollamaTools))
-	for _, tool := range ollamaTools {
-		paramsBytes, _ := json.Marshal(tool.Function.Parameters)
-		tools = append(tools, Tool{
-			Type: tool.Type,
-			Function: FunctionDef{
-				Name:        tool.Function.Name,
-				Description: tool.Function.Description,
-				Parameters:  paramsBytes,
-			},
-		})
-	}
-	return tools
-}
-
 // toolCallFrom 将本模块的 ToolCall 转换为 Ollama 的 ToolCall
 func (c *OllamaChat) toolCallFrom(toolCalls []ToolCall) []ollamaapi.ToolCall {
 	if len(toolCalls) == 0 {
