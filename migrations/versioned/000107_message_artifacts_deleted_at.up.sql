@@ -22,4 +22,11 @@ CREATE INDEX IF NOT EXISTS idx_message_artifacts_session_live
     ON message_artifacts (session_id, created_at)
     WHERE deleted_at IS NULL;
 
+-- Before a delete reclaims an object's bytes it checks whether any live row
+-- anywhere still points at the same url (a forked session's copied rows, a
+-- later answer that re-attached the file). That lookup is by url alone.
+CREATE INDEX IF NOT EXISTS idx_message_artifacts_url_live
+    ON message_artifacts (url)
+    WHERE deleted_at IS NULL;
+
 COMMENT ON COLUMN message_artifacts.deleted_at IS 'Set when the user deleted the file; the row survives to keep position stable and to stop the collector re-attaching it';

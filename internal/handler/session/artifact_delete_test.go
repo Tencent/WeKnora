@@ -225,6 +225,53 @@ func TestDeleteLibraryArtifactDefaultsToAllVersions(t *testing.T) {
 	}
 }
 
+// The two routes differ only in what an absent flag means. An explicit value
+// must be read identically on both, so a client cannot have "1" mean one thing
+// on one route and another elsewhere.
+func TestAllVersionsIsParsedTheSameOnBothRoutes(t *testing.T) {
+	cases := []struct {
+		query   string
+		session bool // in-chat route, absent => false
+		library bool // library route, absent => true
+	}{
+		{"", false, true},
+		{"&all_versions=true", true, true},
+		{"&all_versions=false", false, false},
+		{"&all_versions=1", true, true},
+		{"&all_versions=0", false, false},
+		{"&all_versions=TRUE", true, true},
+		{"&all_versions=F", false, false},
+		// Unparseable falls back to the route's default rather than to false.
+		{"&all_versions=perhaps", false, true},
+	}
+	for _, tc := range cases {
+		t.Run("q="+tc.query, func(t *testing.T) {
+			svc := &stubMessageServiceForDelete{result: &types.ArtifactDeleteResult{Deleted: 1}}
+			router := newArtifactDeleteRouter(&Handler{messageService: svc, fileService: &deletingFileService{}})
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete,
+				"/sessions/sess-1/messages/msg-1/artifacts/0?x=1"+tc.query, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("session route status = %d, want 200", w.Code)
+			}
+			if svc.got.AllVersions != tc.session {
+				t.Fatalf("session route all_versions = %v, want %v", svc.got.AllVersions, tc.session)
+			}
+
+			w = httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete,
+				"/artifacts?session_id=sess-1&message_id=msg-1&index=0"+tc.query, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("library route status = %d, want 200", w.Code)
+			}
+			if svc.got.AllVersions != tc.library {
+				t.Fatalf("library route all_versions = %v, want %v", svc.got.AllVersions, tc.library)
+			}
+		})
+	}
+}
+
 func TestDeleteArtifactErrorMapping(t *testing.T) {
 	cases := []struct {
 		name string

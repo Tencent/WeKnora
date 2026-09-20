@@ -178,6 +178,11 @@ type MessageRepository interface {
 	SoftDeleteSessionArtifacts(
 		ctx context.Context, sessionID string, refs []types.ArtifactRef, at time.Time,
 	) ([]types.ArtifactRef, error)
+	// CountLiveArtifactsByURL counts undeleted artifact rows pointing at a
+	// stored object, across every session. Callers use it as the last guard
+	// before reclaiming bytes that a fork copy, a legacy raw path or a later
+	// re-attachment may still need.
+	CountLiveArtifactsByURL(ctx context.Context, url string) (int64, error)
 	// GetSessionAttachments returns every user-uploaded attachment recorded in
 	// the session. Implementations should project only the attachments column.
 	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)

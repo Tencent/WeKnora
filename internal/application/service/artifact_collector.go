@@ -378,6 +378,10 @@ func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) 
 		return set
 	}
 	for _, p := range prev {
+		if p.Deleted() {
+			set.rememberDeleted(p)
+			continue
+		}
 		set.remember(p)
 	}
 	return set
@@ -642,6 +646,26 @@ func (k *artifactKnownSet) remember(art types.MessageArtifact) {
 	if art.SourcePath != "" {
 		k.byPath[art.SourcePath] = append(k.byPath[art.SourcePath], art)
 	}
+}
+
+// rememberDeleted registers a tombstone: a file the user deleted, whose sandbox
+// copy may still be sitting there untouched.
+//
+// Only the (path, mtime) key goes in. That is what stops an unchanged sandbox
+// file being re-collected, which is the whole reason tombstones stay in the
+// known set. The content hash is deliberately left out, and so is byPath: those
+// two drive the same-content short circuit in knownSameContent, and a turn that
+// rewrites the file with identical bytes is a genuine regeneration the user
+// should get back — not a restore to skip. Keeping the hash here would make a
+// deleted file impossible to reproduce byte-for-byte ever again.
+func (k *artifactKnownSet) rememberDeleted(art types.MessageArtifact) {
+	if k == nil {
+		return
+	}
+	if k.keys == nil {
+		k.keys = map[string]struct{}{}
+	}
+	k.keys[artifactKey(art.SourcePath, art.ModTime)] = struct{}{}
 }
 
 func (k *artifactKnownSet) seenMtime(path string, mod time.Time) bool {

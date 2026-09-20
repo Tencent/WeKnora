@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -42,7 +43,7 @@ func (h *Handler) DeleteMessageArtifact(c *gin.Context) {
 		SessionID:   sessionID,
 		MessageID:   messageID,
 		Index:       index,
-		AllVersions: c.Query("all_versions") == "true",
+		AllVersions: artifactAllVersions(c, false),
 	})
 }
 
@@ -73,8 +74,24 @@ func (h *Handler) DeleteLibraryArtifact(c *gin.Context) {
 		SessionID:   secutils.SanitizeForLog(c.Query("session_id")),
 		MessageID:   secutils.SanitizeForLog(c.Query("message_id")),
 		Index:       index,
-		AllVersions: c.Query("all_versions") != "false",
+		AllVersions: artifactAllVersions(c, true),
 	})
+}
+
+// artifactAllVersions reads the all_versions flag. The two routes differ only
+// in what an absent flag means, so they share one parser: an explicit value is
+// read the same way on both, and "1"/"TRUE"/"yes" cannot mean one thing here
+// and another there.
+func artifactAllVersions(c *gin.Context, whenAbsent bool) bool {
+	raw := strings.TrimSpace(c.Query("all_versions"))
+	if raw == "" {
+		return whenAbsent
+	}
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return whenAbsent
+	}
+	return parsed
 }
 
 // deleteArtifact runs the tombstone-then-reclaim sequence both delete routes

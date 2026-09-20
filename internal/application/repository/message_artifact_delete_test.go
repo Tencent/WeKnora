@@ -228,3 +228,115 @@ func TestListArtifactLibraryHidesDeletedArtifacts(t *testing.T) {
 	require.EqualValues(t, 0, total)
 	require.Empty(t, items)
 }
+
+// A stale writer must not be able to undo a delete. writeMessageArtifacts is a
+// full replace, so a caller holding a pre-delete snapshot would resurrect the
+// row while its bytes are already being reclaimed.
+func TestWriteMessageArtifactsCannotResurrectATombstone(t *testing.T) {
+	db := newArtifactTestDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+	created := time.Date(2026, 9, 1, 2, 0, 0, 0, time.UTC)
+
+	msg, err := repo.CreateMessage(ctx, &types.Message{
+		SessionID: "s1", RequestID: "r1", Role: "assistant",
+		Artifacts: types.MessageArtifacts{
+			testArtifact("a.pptx", "/w/a.pptx", created),
+			testArtifact("b.pptx", "/w/b.pptx", created),
+		},
+	})
+	require.NoError(t, err)
+	// A snapshot taken before the delete, still carrying both as live.
+	stale, err := repo.GetMessage(ctx, "s1", msg.ID)
+	require.NoError(t, err)
+
+	_, err = repo.SoftDeleteSessionArtifacts(ctx, "s1",
+		[]types.ArtifactRef{{MessageID: msg.ID, Position: 0}}, created)
+	require.NoError(t, err)
+
+	stale.Content = "edited"
+	require.NoError(t, repo.UpdateMessage(ctx, stale))
+
+	got, err := repo.GetMessage(ctx, "s1", msg.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Artifacts, 2)
+	require.True(t, got.Artifacts[0].Deleted(), "the stale write must not bring the deleted row back")
+	require.False(t, got.Artifacts[1].Deleted())
+}
+
+// Deleting a file's versions is several statements; a failure partway through
+// must not leave some of them hidden with their bytes never reclaimed.
+func TestSoftDeleteSessionArtifactsIsAtomic(t *testing.T) {
+	db := newArtifactTestDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+	created := time.Date(2026, 9, 1, 2, 0, 0, 0, time.UTC)
+
+	msg, err := repo.CreateMessage(ctx, &types.Message{
+		SessionID: "s1", RequestID: "r1", Role: "assistant",
+		Artifacts: types.MessageArtifacts{
+			testArtifact("a.pptx", "/w/a.pptx", created),
+			testArtifact("b.pptx", "/w/b.pptx", created),
+		},
+	})
+	require.NoError(t, err)
+
+	// Dropping the table mid-transaction is the cheapest way to make the
+	// second statement fail after the first one succeeded.
+	require.NoError(t, db.Exec(
+		`CREATE TRIGGER fail_second BEFORE UPDATE ON message_artifacts
+		 WHEN NEW.position = 1
+		 BEGIN SELECT RAISE(ABORT, 'boom'); END`).Error)
+
+	_, err = repo.SoftDeleteSessionArtifacts(ctx, "s1", []types.ArtifactRef{
+		{MessageID: msg.ID, Position: 0},
+		{MessageID: msg.ID, Position: 1},
+	}, created)
+	require.Error(t, err)
+
+	require.NoError(t, db.Exec("DROP TRIGGER fail_second").Error)
+	got, err := repo.GetMessage(ctx, "s1", msg.ID)
+	require.NoError(t, err)
+	require.False(t, got.Artifacts[0].Deleted(), "the first mark must roll back with the failed second one")
+	require.False(t, got.Artifacts[1].Deleted())
+}
+
+// The last guard before reclaiming bytes: a fork's copied rows carry the
+// parent's storage URLs without a binding of their own.
+func TestCountLiveArtifactsByURLSpansSessions(t *testing.T) {
+	db := newArtifactTestDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+	created := time.Date(2026, 9, 1, 2, 0, 0, 0, time.UTC)
+
+	shared := testArtifact("report.pptx", "/w/report.pptx", created)
+	parent, err := repo.CreateMessage(ctx, &types.Message{
+		SessionID: "s1", RequestID: "r1", Role: "assistant",
+		Artifacts: types.MessageArtifacts{shared},
+	})
+	require.NoError(t, err)
+	// The fork copy: new session and message, same storage URL.
+	forked, err := repo.CreateMessage(ctx, &types.Message{
+		SessionID: "s2", RequestID: "r2", Role: "assistant",
+		Artifacts: types.MessageArtifacts{shared},
+	})
+	require.NoError(t, err)
+
+	count, err := repo.CountLiveArtifactsByURL(ctx, shared.URL)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count)
+
+	_, err = repo.SoftDeleteSessionArtifacts(ctx, "s1",
+		[]types.ArtifactRef{{MessageID: parent.ID, Position: 0}}, created)
+	require.NoError(t, err)
+	count, err = repo.CountLiveArtifactsByURL(ctx, shared.URL)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count, "the fork still needs the bytes")
+
+	_, err = repo.SoftDeleteSessionArtifacts(ctx, "s2",
+		[]types.ArtifactRef{{MessageID: forked.ID, Position: 0}}, created)
+	require.NoError(t, err)
+	count, err = repo.CountLiveArtifactsByURL(ctx, shared.URL)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, count, "now nothing points at them")
+}

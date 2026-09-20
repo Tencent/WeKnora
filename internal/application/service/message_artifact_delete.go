@@ -89,8 +89,37 @@ func (s *messageService) DeleteSessionArtifact(
 		// Only the rows this call claimed: a row a concurrent delete marked
 		// first is its reclaim to do, and doing it twice would try to remove
 		// the same object from under it.
-		Reclaim: artifactReclaimList(rows, marked),
+		Reclaim: s.reclaimableBlobs(ctx, artifactReclaimList(rows, marked)),
 	}, nil
+}
+
+// reclaimableBlobs drops the objects some other row still points at.
+//
+// The catalog's binding count is the primary guard, but it only knows about
+// bindings, and rows come to share a URL in ways that never created one: a
+// forked session's rows are copies of the parent's, storage URL included, and
+// CreateForked does not re-Bind them; a deployment storing raw provider paths
+// has no catalog entries at all. Deleting in the parent session would then take
+// the bytes out from under the fork. A count of live rows catches all of it.
+//
+// A failed count keeps the blob, like every other uncertainty on this path.
+func (s *messageService) reclaimableBlobs(
+	ctx context.Context, candidates []types.ArtifactBlobRef,
+) []types.ArtifactBlobRef {
+	out := make([]types.ArtifactBlobRef, 0, len(candidates))
+	for _, ref := range candidates {
+		live, err := s.messageRepo.CountLiveArtifactsByURL(ctx, ref.URL)
+		if err != nil {
+			logger.Warnf(ctx, "Artifact reclaim check failed for %s, keeping the blob: %v", ref.URL, err)
+			continue
+		}
+		if live > 0 {
+			logger.Infof(ctx, "Keeping artifact blob %s: %d live row(s) still point at it", ref.URL, live)
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
 }
 
 // artifactDeleteSet expands the request into the rows to tombstone: the one
