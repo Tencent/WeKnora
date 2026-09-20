@@ -117,8 +117,15 @@ func NewChunkExtractTask(
 	if err != nil {
 		return false, err
 	}
+	// Graph extraction retries more than the other queues because the failure
+	// it retries against is measured in minutes to hours, not seconds: when a
+	// model pool is exhausted, gateways routinely quote recovery windows well
+	// past what three attempts of exponential backoff can cover. Once the
+	// retry budget is gone the chunk loses its graph for good, so the ceiling
+	// is worth raising; the cost is only that a genuinely failing task lingers
+	// in the queue somewhat longer.
 	task := asynq.NewTask(types.TypeChunkExtract, payload,
-		asynq.Queue(types.QueueGraph), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
+		asynq.Queue(types.QueueGraph), asynq.MaxRetry(10), asynq.Timeout(30*time.Minute))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue task: %v", err)
