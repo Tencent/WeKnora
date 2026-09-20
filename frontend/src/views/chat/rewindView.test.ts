@@ -84,6 +84,7 @@ test('maps rewind HTTP conflicts onto dedicated copy', () => {
   assert.equal(rewindHttpConflictCode({ $httpStatus: 409, code: 'REWIND_SOURCE_BUSY' }), 'REWIND_SOURCE_BUSY')
   assert.equal(rewindHttpConflictCode({ status: 500, code: 'REWIND_NO_CHECKPOINT' }), '')
   assert.equal(rewindConflictI18nKey('REWIND_NO_CHECKPOINT'), 'chat.rewind.noCheckpoint')
+  assert.equal(rewindConflictI18nKey('REWIND_SANDBOX_REPLACED'), 'chat.rewind.sandboxReplaced')
   assert.equal(rewindConflictI18nKey('REWIND_SOURCE_BUSY'), 'chat.rewind.busy')
   assert.equal(rewindConflictI18nKey(''), 'chat.rewind.busy')
 })

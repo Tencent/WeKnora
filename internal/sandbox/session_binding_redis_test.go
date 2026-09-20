@@ -3,9 +3,12 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/common/redislock"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -108,6 +111,31 @@ func TestRedisSessionSandboxBindingStoreRewindLockRenews(t *testing.T) {
 	n, err := client.Exists(ctx, store.rewindKey(key)).Result()
 	require.NoError(t, err)
 	require.Equal(t, int64(1), n, "rewind lock must be renewed past the original TTL")
+}
+
+func TestRedisSessionSandboxBindingStoreRewindLockRenewSurvivesErrors(t *testing.T) {
+	store, client, _ := newRedisBindingTestStore(t)
+	store.rewindLockTTL = 150 * time.Millisecond
+	store.rewindLockRenew = 40 * time.Millisecond
+	var fails atomic.Int32
+	store.rewindRenewer = func(ctx context.Context, key, token string, lease time.Duration) (bool, error) {
+		if fails.Add(1) == 1 {
+			return false, errors.New("redis blip")
+		}
+		return redislock.Renew(ctx, store.client, key, token, lease)
+	}
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-rewind-renew-blip"}
+
+	unlock, err := store.TryLockRewind(ctx, key)
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	time.Sleep(220 * time.Millisecond)
+	n, err := client.Exists(ctx, store.rewindKey(key)).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n, "rewind lock renew must keep retrying after a transient error")
+	require.GreaterOrEqual(t, fails.Load(), int32(2))
 }
 
 func TestRedisSessionSandboxBindingStoreInvalidatesByConfig(t *testing.T) {

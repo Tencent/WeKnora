@@ -3722,6 +3722,7 @@ export default {
       success: 'Rewound',
       busy: 'Wait until this turn finishes before rewinding',
       noCheckpoint: 'Cannot rewind: this session has a live workspace but no reachable checkpoint',
+      sandboxReplaced: 'Cannot rewind: the sandbox was replaced, so the old checkpoint is unreachable',
       reloadFailed: 'Conversation was rewound, but history could not be reloaded. Refresh if older messages are missing',
       failed: 'Rewind failed. Please try again',
       skipped: 'Conversation rewound; workspace was left unchanged',

@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -43,8 +42,9 @@ const (
 	// checkpoint (the image has no git, or every kept turn failed to commit).
 	RewindSkipNoCheckpoint RewindSkipReason = "NO_CHECKPOINT"
 
-	// RewindSkipSandboxReplaced means the checkpoint belongs to a sandbox the
-	// session no longer uses, so the SHA is unreachable.
+	// RewindSkipSandboxReplaced is kept for clients that still understand the
+	// old skip reason. Current rewind fail-closes with ErrRewindSandboxReplaced
+	// instead of truncating while the live workspace is unreachable.
 	RewindSkipSandboxReplaced RewindSkipReason = "SANDBOX_REPLACED"
 )
 
@@ -69,6 +69,17 @@ var (
 	// and kept history includes an assistant turn, but no reachable git SHA.
 	// Truncating would leave files ahead of the conversation. HTTP 409.
 	ErrRewindNoCheckpoint = errors.New("session rewind: no reachable workspace checkpoint")
+
+	// ErrRewindSandboxReplaced is returned when the kept checkpoint belongs
+	// to a sandbox the session no longer uses. Truncating would leave the
+	// live workspace ahead of the conversation. HTTP 409.
+	ErrRewindSandboxReplaced = errors.New("session rewind: sandbox was replaced")
+)
+
+const (
+	rewindIncompleteLookback = 512
+	rewindDeleteAttempts     = 3
+	rewindDeleteRetryWait    = 50 * time.Millisecond
 )
 
 func isRewindNotFound(err error) bool {
@@ -102,6 +113,7 @@ type rewindSessionStore interface {
 type rewindMessageStore interface {
 	GetMessage(ctx context.Context, sessionID, messageID string) (*types.Message, error)
 	GetMessagesBySession(ctx context.Context, sessionID string, page, pageSize int) ([]*types.Message, error)
+	GetRecentMessagesBySession(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
 	ListMessagesBySessionUpTo(
 		ctx context.Context, sessionID string, boundary time.Time, boundaryID string,
 	) ([]*types.Message, error)
@@ -110,8 +122,25 @@ type rewindMessageStore interface {
 	) ([]*types.Message, error)
 }
 
+type rewindIncompleteFinder interface {
+	SessionHasIncompleteAssistant(ctx context.Context, sessionID string) (bool, error)
+}
+
+type rewindArtifactJanitor interface {
+	ListLiveArtifactsByMessageIDs(
+		ctx context.Context, sessionID string, messageIDs []string,
+	) ([]types.MessageArtifactRecord, error)
+	SoftDeleteSessionArtifacts(
+		ctx context.Context, sessionID string, refs []types.ArtifactRef, at time.Time,
+	) ([]types.ArtifactRef, error)
+}
+
 type rewindLiveRunReader interface {
 	GetLiveRun(ctx context.Context, sessionID string) (assistantMessageID, requestID string, err error)
+}
+
+type rewindStreamDropper interface {
+	DropMessageStreams(ctx context.Context, sessionID string, messageIDs []string) error
 }
 
 type rewindKnowledgeCleaner interface {
@@ -131,7 +160,7 @@ type SessionRewindService struct {
 	suggestions rewindSuggestionCleaner
 	snapshots   ForkSnapshotDeleter
 	liveRuns    rewindLiveRunReader
-	inflight    sync.Map
+	busyGate    *SessionBusyGate
 }
 
 // NewSessionRewindService wires the service. A nil sandbox port skips the
@@ -150,6 +179,7 @@ func NewSessionRewindService(
 		sandbox:     sandboxPort,
 		knowledge:   knowledge,
 		suggestions: suggestions,
+		busyGate:    NewSessionBusyGate(),
 	}
 }
 
@@ -163,10 +193,14 @@ func NewSessionRewindServiceFromRepos(
 	resolver sandbox.TenantSandboxResolver,
 	fallback sandbox.Manager,
 	streams interfaces.StreamManager,
+	busyGate *SessionBusyGate,
 ) *SessionRewindService {
 	s := NewSessionRewindService(sessions, messages, sandboxPort, knowledge, suggestions)
 	s.snapshots = NewResolverForkSnapshotDeleter(resolver, fallback)
 	s.liveRuns = streams
+	if busyGate != nil {
+		s.busyGate = busyGate
+	}
 	return s
 }
 
@@ -263,10 +297,13 @@ func (s *SessionRewindService) Rewind(
 	}
 
 	inclusive := rewindPoint.Role == "user"
-	deleted, err := s.messages.DeleteMessagesFrom(
+	deleted, err := s.deleteMessagesFrom(
 		persistCtx, sessionID, rewindPoint.CreatedAt, rewindPoint.ID, inclusive,
 	)
 	if err != nil {
+		if workspaceReset {
+			return nil, fmt.Errorf("session rewind: delete messages after workspace reset: %w", err)
+		}
 		return nil, fmt.Errorf("session rewind: delete messages: %w", err)
 	}
 
@@ -309,7 +346,7 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 		return true, "", nil
 	}
 	if currentID != checkpoint.SandboxID {
-		return false, RewindSkipSandboxReplaced, nil
+		return false, "", ErrRewindSandboxReplaced
 	}
 
 	// Re-check immediately before git reset --hard. The entry check is a
@@ -328,15 +365,47 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 	return true, "", nil
 }
 
+func (s *SessionRewindService) deleteMessagesFrom(
+	ctx context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
+) ([]*types.Message, error) {
+	if s == nil || s.messages == nil {
+		return nil, nil
+	}
+	var lastErr error
+	for attempt := 1; attempt <= rewindDeleteAttempts; attempt++ {
+		deleted, err := s.messages.DeleteMessagesFrom(
+			ctx, sessionID, boundary, boundaryID, inclusive,
+		)
+		if err == nil {
+			return deleted, nil
+		}
+		lastErr = err
+		if attempt == rewindDeleteAttempts {
+			break
+		}
+		timer := time.NewTimer(rewindDeleteRetryWait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, err
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
+}
+
 func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string) (func(), error) {
-	if _, loaded := s.inflight.LoadOrStore(sessionID, struct{}{}); loaded {
+	unlockGate, err := s.busyGate.TryLockRewind(sessionID)
+	if err != nil {
 		return nil, ErrRewindSourceBusy
 	}
 	unlockPort := func() {}
 	if s.sandbox != nil {
 		unlock, err := s.sandbox.TryLockRewind(ctx, sessionID)
 		if err != nil {
-			s.inflight.Delete(sessionID)
+			unlockGate()
 			if errors.Is(err, sandbox.ErrSessionRewindLocked) ||
 				errors.Is(err, sandbox.ErrSessionTurnActive) ||
 				errors.Is(err, ErrRewindSourceBusy) {
@@ -350,7 +419,7 @@ func (s *SessionRewindService) lockRewind(ctx context.Context, sessionID string)
 	}
 	return func() {
 		unlockPort()
-		s.inflight.Delete(sessionID)
+		unlockGate()
 	}, nil
 }
 
@@ -384,7 +453,17 @@ func (s *SessionRewindService) rejectIfIncompleteTurn(ctx context.Context, sessi
 	if s.messages == nil {
 		return nil
 	}
-	msgs, err := s.messages.GetMessagesBySession(ctx, sessionID, 1, 1000)
+	if finder, ok := s.messages.(rewindIncompleteFinder); ok {
+		busy, err := finder.SessionHasIncompleteAssistant(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("session rewind: check incomplete turn: %w", err)
+		}
+		if busy {
+			return ErrRewindSourceBusy
+		}
+		return nil
+	}
+	msgs, err := s.messages.GetRecentMessagesBySession(ctx, sessionID, rewindIncompleteLookback)
 	if err != nil {
 		return fmt.Errorf("session rewind: check incomplete turn: %w", err)
 	}
@@ -442,10 +521,12 @@ func (s *SessionRewindService) abandonPendingForkBootstrap(
 func (s *SessionRewindService) cleanupDeleted(
 	ctx context.Context, tenantID uint64, sessionID string, deleted []*types.Message,
 ) {
+	ids := make([]string, 0, len(deleted))
 	for _, msg := range deleted {
-		if msg == nil {
+		if msg == nil || msg.ID == "" {
 			continue
 		}
+		ids = append(ids, msg.ID)
 		if s.suggestions != nil {
 			if err := s.suggestions.DeleteByMessageID(ctx, tenantID, sessionID, msg.ID); err != nil {
 				logger.Warnf(ctx, "[SessionRewind] delete suggestions for message %s: %v", msg.ID, err)
@@ -454,5 +535,35 @@ func (s *SessionRewindService) cleanupDeleted(
 		if s.knowledge != nil && strings.TrimSpace(msg.KnowledgeID) != "" {
 			s.knowledge.DeleteMessageKnowledge(ctx, msg.KnowledgeID)
 		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	if dropper, ok := s.liveRuns.(rewindStreamDropper); ok {
+		if err := dropper.DropMessageStreams(ctx, sessionID, ids); err != nil {
+			logger.Warnf(ctx, "[SessionRewind] drop streams for session %s: %v", sessionID, err)
+		}
+	}
+	janitor, ok := s.messages.(rewindArtifactJanitor)
+	if !ok {
+		return
+	}
+	records, err := janitor.ListLiveArtifactsByMessageIDs(ctx, sessionID, ids)
+	if err != nil {
+		logger.Warnf(ctx, "[SessionRewind] list artifacts for session %s: %v", sessionID, err)
+		return
+	}
+	refs := make([]types.ArtifactRef, 0, len(records))
+	for _, row := range records {
+		if row.MessageID == "" || row.Position < 0 {
+			continue
+		}
+		refs = append(refs, types.ArtifactRef{MessageID: row.MessageID, Position: row.Position})
+	}
+	if len(refs) == 0 {
+		return
+	}
+	if _, err := janitor.SoftDeleteSessionArtifacts(ctx, sessionID, refs, time.Now()); err != nil {
+		logger.Warnf(ctx, "[SessionRewind] tombstone artifacts for session %s: %v", sessionID, err)
 	}
 }

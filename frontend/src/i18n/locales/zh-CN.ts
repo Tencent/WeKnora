@@ -3839,6 +3839,7 @@ export default {
       success: '已回滚',
       busy: '请等本轮回答结束后再回滚',
       noCheckpoint: '无法回滚：当前有沙箱，但没有可回退的检查点',
+      sandboxReplaced: '无法回滚：沙箱已更换，无法回退到旧检查点',
       reloadFailed: '对话已回滚，但未能重新加载历史。若较早消息缺失，请刷新页面',
       failed: '回滚失败，请重试',
       skipped: '对话已回滚，工作区未改动',

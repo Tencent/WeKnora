@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -93,6 +94,16 @@ func (f *fakeLiveRunReader) GetLiveRun(context.Context, string) (string, string,
 		return "", "", nil
 	}
 	return f.assistantID, "req", nil
+}
+
+type fakeRewindStream struct {
+	fakeLiveRunReader
+	dropped []string
+}
+
+func (f *fakeRewindStream) DropMessageStreams(_ context.Context, _ string, messageIDs []string) error {
+	f.dropped = append(f.dropped, messageIDs...)
+	return nil
 }
 
 func rewindCompletedTurn(userID, assistantID, sandboxID, sha string, offset time.Duration) []*types.Message {
@@ -250,21 +261,21 @@ func TestRewindNoCheckpointOnLiveSandboxDoesNotDeleteMessages(t *testing.T) {
 	require.Equal(t, []string{"u-1", "a-1", "u-2"}, messageIDs(msgs.messages))
 }
 
-func TestRewindReplacedSandboxDeletesMessagesWithoutShell(t *testing.T) {
+func TestRewindReplacedSandboxDoesNotDeleteMessages(t *testing.T) {
 	turn := rewindCompletedTurn("u-1", "a-1", "sbx-old", rewindSHA1, 0)
 	laterUser := &types.Message{
 		ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
 	}
 	port := newFakeRewindPort()
 	port.boundID = "sbx-new"
-	svc, _ := newRewindFixture(t, port, append(turn, laterUser))
+	svc, msgs := newRewindFixture(t, port, append(turn, laterUser))
 
 	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
 
-	require.NoError(t, err)
-	require.Equal(t, 1, got.DeletedMessages)
-	require.False(t, got.WorkspaceReset)
-	require.Equal(t, RewindSkipSandboxReplaced, got.Reason)
+	require.ErrorIs(t, err, ErrRewindSandboxReplaced)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+	require.Equal(t, []string{"u-1", "a-1", "u-2"}, messageIDs(msgs.messages))
 	require.Empty(t, port.runner.calls)
 }
 
@@ -461,6 +472,66 @@ func TestRewindLiveRunIsBusy(t *testing.T) {
 	require.Nil(t, got)
 	require.Equal(t, 0, msgs.deleteFromCalls)
 	require.Empty(t, port.runner.calls)
+}
+
+func TestRewindIncompleteTurnPastOldestPageIsBusy(t *testing.T) {
+	history := make([]*types.Message, 0, 1001)
+	for i := 0; i < 1000; i++ {
+		history = append(history, &types.Message{
+			ID:        fmt.Sprintf("old-%04d", i),
+			SessionID: "src",
+			Role:      "user",
+			CreatedAt: forkBase.Add(time.Duration(i) * time.Millisecond),
+		})
+	}
+	history = append(history, &types.Message{
+		ID: "late-a", SessionID: "src", Role: "assistant", IsCompleted: false,
+		CreatedAt: forkBase.Add(time.Second),
+	})
+	port := newFakeRewindPort()
+	svc, msgs := newRewindFixture(t, port, history)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "old-0000")
+
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+	require.Empty(t, port.runner.calls)
+}
+
+func TestRewindRetriesDeleteAfterWorkspaceReset(t *testing.T) {
+	turn := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	laterUser := &types.Message{
+		ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := newFakeRewindPort()
+	svc, msgs := newRewindFixture(t, port, append(turn, laterUser))
+	msgs.deleteFromFailTimes = 2
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, got.DeletedMessages)
+	require.True(t, got.WorkspaceReset)
+	require.Equal(t, 3, msgs.deleteFromCalls)
+	require.Equal(t, []string{"u-1", "a-1"}, messageIDs(msgs.messages))
+}
+
+func TestRewindCleansArtifactsAndStreamsForDeletedMessages(t *testing.T) {
+	turn := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	later := rewindCompletedTurn("u-2", "a-2", "sbx-1", rewindSHA2, 10*time.Second)
+	later[1].Artifacts = types.MessageArtifacts{{URL: "blob://a2", FileName: "out.txt"}}
+	port := newFakeRewindPort()
+	svc, msgs := newRewindFixture(t, port, append(turn, later...))
+	streams := &fakeRewindStream{}
+	svc.liveRuns = streams
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "a-1")
+
+	require.NoError(t, err)
+	require.Equal(t, 2, got.DeletedMessages)
+	require.Equal(t, []types.ArtifactRef{{MessageID: "a-2", Position: 0}}, msgs.tombstoned)
+	require.Equal(t, []string{"u-2", "a-2"}, streams.dropped)
 }
 
 func TestRewindIncompleteLaterTurnIsBusy(t *testing.T) {
@@ -676,6 +747,33 @@ func TestRewindUnopenedForkRejectsInvalidCheckpointSHA(t *testing.T) {
 	require.Empty(t, port.runner.calls)
 	require.Equal(t, rewindSHA2, sessions.source.ForkBootstrap.CommitSHA)
 	require.Nil(t, sessions.updatedBootstrap)
+}
+
+func TestRewindBlocksLocalSendWithoutSandbox(t *testing.T) {
+	turn := rewindCompletedTurn("u-1", "a-1", "sbx-1", rewindSHA1, 0)
+	laterUser := &types.Message{
+		ID: "u-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := newFakeRewindPort()
+	port.bound = false
+	port.boundID = ""
+	svc, msgs := newRewindFixture(t, port, append(turn, laterUser))
+	gate := NewSessionBusyGate()
+	svc.busyGate = gate
+	sessionSvc := &sessionService{busyGate: gate}
+
+	release, err := sessionSvc.holdSandboxTurn(context.Background(), "src", "")
+	require.NoError(t, err)
+
+	got, err := svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+	require.Nil(t, got)
+	require.Equal(t, 0, msgs.deleteFromCalls)
+
+	release()
+	got, err = svc.Rewind(context.Background(), 1, "u1", "src", "u-2")
+	require.NoError(t, err)
+	require.Equal(t, 1, got.DeletedMessages)
 }
 
 func TestRewindConcurrentSecondIsBusy(t *testing.T) {

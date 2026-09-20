@@ -106,6 +106,27 @@ func (r *messageRepository) GetRecentMessagesBySession(
 	return messages, nil
 }
 
+// SessionHasIncompleteAssistant reports whether any assistant message in the
+// session is still generating. Rewind uses this instead of paging oldest
+// messages, so a late incomplete turn is not hidden behind a 1000-row window.
+func (r *messageRepository) SessionHasIncompleteAssistant(
+	ctx context.Context, sessionID string,
+) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	var id string
+	err := r.db.WithContext(ctx).Model(&types.Message{}).
+		Select("id").
+		Where("session_id = ? AND role = ? AND is_completed = ?", sessionID, "assistant", false).
+		Limit(1).
+		Scan(&id).Error
+	if err != nil {
+		return false, err
+	}
+	return id != "", nil
+}
+
 // GetMessagesBySessionBeforeTime retrieves messages from a session created before a specific time
 func (r *messageRepository) GetMessagesBySessionBeforeTime(
 	ctx context.Context, sessionID string, beforeTime time.Time, limit int,

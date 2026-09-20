@@ -43,7 +43,7 @@ type RewindSessionRequest struct {
 // @Success      200         {object}  map[string]interface{}  "回滚结果"
 // @Failure      400         {object}  errors.AppError         "请求参数错误 / 回滚点角色不支持"
 // @Failure      404         {object}  errors.AppError         "会话或消息不存在"
-// @Failure      409         {object}  errors.AppError         "会话正在生成中"
+// @Failure      409         {object}  errors.AppError         "会话正在生成中 / 无检查点 / 沙箱已更换"
 // @Failure      500         {object}  errors.AppError         "工作区回滚失败"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -95,6 +95,14 @@ func (h *Handler) RewindSession(c *gin.Context) {
 				"success": false,
 				"error":   "no reachable workspace checkpoint",
 				"code":    "REWIND_NO_CHECKPOINT",
+			})
+			return
+		}
+		if stderrors.Is(err, service.ErrRewindSandboxReplaced) {
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"error":   "sandbox was replaced",
+				"code":    "REWIND_SANDBOX_REPLACED",
 			})
 			return
 		}

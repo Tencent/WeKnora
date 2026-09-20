@@ -132,6 +132,7 @@ type RedisSessionSandboxBindingStore struct {
 	lockRenewInterval time.Duration
 	rewindLockTTL     time.Duration
 	rewindLockRenew   time.Duration
+	rewindRenewer     func(ctx context.Context, key, token string, lease time.Duration) (bool, error)
 }
 
 // NewRedisSessionSandboxBindingStore creates a fail-closed Redis store.
@@ -550,6 +551,15 @@ func (s *RedisSessionSandboxBindingStore) rewindRenewInterval() time.Duration {
 	return sessionRewindLockRenewInterval
 }
 
+func (s *RedisSessionSandboxBindingStore) renewRewind(
+	ctx context.Context, key, token string, lease time.Duration,
+) (bool, error) {
+	if s != nil && s.rewindRenewer != nil {
+		return s.rewindRenewer(ctx, key, token, lease)
+	}
+	return redislock.Renew(ctx, s.client, key, token, lease)
+}
+
 func (s *RedisSessionSandboxBindingStore) renewRewindLock(
 	stop <-chan struct{}, done chan<- struct{}, key, token string, lease time.Duration,
 ) {
@@ -568,9 +578,18 @@ func (s *RedisSessionSandboxBindingStore) renewRewindLock(
 		case <-stop:
 			return
 		case <-ticker.C:
-			renewed, err := redislock.Renew(context.Background(), s.client, key, token, lease)
-			if err != nil || !renewed {
-				return
+			renewed, err := s.renewRewind(context.Background(), key, token, lease)
+			if err == nil && renewed {
+				continue
+			}
+			// A blip talking to Redis, or a lost lease, must not kill the
+			// renew loop: git reset can still be running, and the 2m TTL
+			// would otherwise expire under it. Retry; re-acquire if the key
+			// vanished so the original unlock token still matches.
+			if err == nil && !renewed {
+				_, _ = redislock.TryAcquire(
+					context.Background(), s.client, key, token, lease,
+				)
 			}
 		}
 	}

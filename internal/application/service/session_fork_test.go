@@ -225,6 +225,9 @@ type fakeMessageStore struct {
 	deleteFromCalls     int
 	lastDeleteInclusive *bool
 	deleteFromErr       error
+	deleteFromFailTimes int
+	tombstoned          []types.ArtifactRef
+	liveArtifacts       []types.MessageArtifactRecord
 }
 
 func newFakeMessageStore(messages []*types.Message) *fakeMessageStore {
@@ -327,6 +330,10 @@ func (f *fakeMessageStore) DeleteMessagesFrom(
 	if f.deleteFromErr != nil {
 		return nil, f.deleteFromErr
 	}
+	if f.deleteFromFailTimes > 0 {
+		f.deleteFromFailTimes--
+		return nil, errors.New("delete messages: temporary failure")
+	}
 	var deleted, kept []*types.Message
 	for _, m := range f.messages {
 		if m == nil {
@@ -340,6 +347,18 @@ func (f *fakeMessageStore) DeleteMessagesFrom(
 		atBoundary := m.CreatedAt.Equal(boundary) && m.ID == boundaryID
 		if after || (inclusive && atBoundary) {
 			deleted = append(deleted, m)
+			for i, art := range m.Artifacts {
+				if art.DeletedAt != nil {
+					continue
+				}
+				f.liveArtifacts = append(f.liveArtifacts, types.MessageArtifactRecord{
+					SessionID: sessionID,
+					MessageID: m.ID,
+					Position:  i,
+					URL:       art.URL,
+					FileName:  art.FileName,
+				})
+			}
 			continue
 		}
 		kept = append(kept, m)
@@ -352,6 +371,58 @@ func (f *fakeMessageStore) DeleteMessagesFrom(
 	})
 	f.messages = kept
 	return deleted, nil
+}
+
+func (f *fakeMessageStore) GetRecentMessagesBySession(
+	ctx context.Context, sessionID string, limit int,
+) ([]*types.Message, error) {
+	all, err := f.GetMessagesBySession(ctx, sessionID, 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || len(all) <= limit {
+		return all, nil
+	}
+	return all[len(all)-limit:], nil
+}
+
+func (f *fakeMessageStore) SessionHasIncompleteAssistant(
+	_ context.Context, sessionID string,
+) (bool, error) {
+	for _, m := range f.messages {
+		if m != nil && m.SessionID == sessionID && m.Role == "assistant" && !m.IsCompleted {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeMessageStore) ListLiveArtifactsByMessageIDs(
+	_ context.Context, sessionID string, messageIDs []string,
+) ([]types.MessageArtifactRecord, error) {
+	want := make(map[string]struct{}, len(messageIDs))
+	for _, id := range messageIDs {
+		if id != "" {
+			want[id] = struct{}{}
+		}
+	}
+	var out []types.MessageArtifactRecord
+	for _, row := range f.liveArtifacts {
+		if row.SessionID != sessionID {
+			continue
+		}
+		if _, ok := want[row.MessageID]; ok {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeMessageStore) SoftDeleteSessionArtifacts(
+	_ context.Context, _ string, refs []types.ArtifactRef, _ time.Time,
+) ([]types.ArtifactRef, error) {
+	f.tombstoned = append(f.tombstoned, refs...)
+	return refs, nil
 }
 
 func (f *fakeMessageStore) RewriteSandboxCheckpoints(_ context.Context, sessionID, oldID, newID string) error {

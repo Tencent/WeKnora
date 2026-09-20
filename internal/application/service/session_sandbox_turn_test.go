@@ -42,6 +42,32 @@ func TestHoldSandboxTurnFailsWhenRewindLocked(t *testing.T) {
 	require.Zero(t, holder.ends)
 }
 
+func TestHoldSandboxTurnUsesBusyGateWithoutSandboxManager(t *testing.T) {
+	gate := NewSessionBusyGate()
+	svc := &sessionService{busyGate: gate}
+
+	release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
+	require.NoError(t, err)
+	_, err = gate.TryLockRewind("session-a")
+	require.ErrorIs(t, err, ErrRewindSourceBusy)
+
+	release()
+	unlock, err := gate.TryLockRewind("session-a")
+	require.NoError(t, err)
+	unlock()
+}
+
+func TestRejectSendIfRewindingWhenLocalGateHeld(t *testing.T) {
+	gate := NewSessionBusyGate()
+	svc := &sessionService{busyGate: gate}
+	unlock, err := gate.TryLockRewind("session-a")
+	require.NoError(t, err)
+
+	require.ErrorIs(t, svc.RejectSendIfRewinding(context.Background(), "session-a"), sandbox.ErrSessionRewindLocked)
+	unlock()
+	require.NoError(t, svc.RejectSendIfRewinding(context.Background(), "session-a"))
+}
+
 func TestRejectSendIfRewindingWhenLockHeld(t *testing.T) {
 	mgr := &rewindLockManager{held: true}
 	svc := &sessionService{sandboxMgr: mgr}

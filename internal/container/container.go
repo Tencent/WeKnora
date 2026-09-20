@@ -399,6 +399,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		}
 		return pinned
 	}))
+	must(container.Provide(service.NewSessionBusyGate))
 	must(container.Provide(service.NewSessionRewindServiceFromRepos))
 
 	// SandboxTerminalService opens interactive PTYs on session sandboxes for

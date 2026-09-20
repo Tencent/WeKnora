@@ -138,6 +138,7 @@ type sessionService struct {
 	// before its sandbox is provisioned. Nil uses NewResolverForkSnapshotDeleter
 	// from sandboxResolver/sandboxMgr.
 	forkSnapshots ForkSnapshotDeleter
+	busyGate      *SessionBusyGate
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -162,6 +163,7 @@ func NewSessionService(cfg *config.Config,
 	memoryService interfaces.MemoryService,
 	sandboxConfigRepo repository.TenantSandboxConfigRepository,
 	tenantSkillRepo repository.TenantSkillRepository,
+	busyGate *SessionBusyGate,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -185,6 +187,7 @@ func NewSessionService(cfg *config.Config,
 		memoryService:         memoryService,
 		sandboxConfigRepo:     sandboxConfigRepo,
 		tenantSkillRepo:       tenantSkillRepo,
+		busyGate:              busyGate,
 	}
 }
 
@@ -991,6 +994,10 @@ func (s *sessionService) holdSandboxTurn(
 	if strings.TrimSpace(sessionID) == "" {
 		return noop, nil
 	}
+	releaseGate, err := s.busyGate.HoldSend(sessionID)
+	if err != nil {
+		return noop, err
+	}
 	begin := func(mgr sandbox.Manager) (sandbox.SessionTurnHolder, error) {
 		if mgr == nil {
 			return nil, nil
@@ -1008,6 +1015,7 @@ func (s *sessionService) holdSandboxTurn(
 
 	holder, err := begin(s.sandboxMgr)
 	if err != nil {
+		releaseGate()
 		return noop, err
 	}
 	if holder != nil {
@@ -1015,12 +1023,13 @@ func (s *sessionService) holdSandboxTurn(
 			if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
 				logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
 			}
+			releaseGate()
 		}, nil
 	}
 
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	if s.sandboxResolver == nil || tenantID == 0 {
-		return noop, nil
+		return releaseGate, nil
 	}
 	mgr, err := resolveTenantSandboxForConfig(
 		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
@@ -1028,19 +1037,21 @@ func (s *sessionService) holdSandboxTurn(
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] resolve config %s to begin turn of session %s failed: %v",
 			configID, sessionID, err)
-		return noop, nil
+		return releaseGate, nil
 	}
 	holder, err = begin(mgr)
 	if err != nil {
+		releaseGate()
 		return noop, err
 	}
 	if holder == nil {
-		return noop, nil
+		return releaseGate, nil
 	}
 	return func() {
 		if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
 			logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
 		}
+		releaseGate()
 	}, nil
 }
 
@@ -1050,6 +1061,9 @@ func (s *sessionService) holdSandboxTurn(
 func (s *sessionService) RejectSendIfRewinding(ctx context.Context, sessionID string) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
+	}
+	if s.busyGate != nil && s.busyGate.RewindHeld(sessionID) {
+		return sandbox.ErrSessionRewindLocked
 	}
 	type rewindLockReader interface {
 		HasRewindLock(context.Context, string) (bool, error)

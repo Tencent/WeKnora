@@ -111,15 +111,15 @@ func TestRewindSessionMapsBusySourceTo409(t *testing.T) {
 	require.Equal(t, "REWIND_SOURCE_BUSY", body["code"])
 }
 
-func TestRewindSessionMapsNoCheckpointTo409(t *testing.T) {
-	rewinder := &stubRewinder{err: service.ErrRewindNoCheckpoint}
+func TestRewindSessionMapsReplacedSandboxTo409(t *testing.T) {
+	rewinder := &stubRewinder{err: service.ErrRewindSandboxReplaced}
 
 	w := performRewind(t, rewinder, `{"message_id":"u-2"}`)
 
 	require.Equal(t, http.StatusConflict, w.Code)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.Equal(t, "REWIND_NO_CHECKPOINT", body["code"])
+	require.Equal(t, "REWIND_SANDBOX_REPLACED", body["code"])
 }
 
 func TestRewindSessionUnavailableWhenUnwired(t *testing.T) {

@@ -1354,6 +1354,12 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				}
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}
+			// Knowledge mode normally releases on EventAgentFinalAnswer Done.
+			// If that event never fires, release here so rewind is not blocked
+			// until the Redis turn TTL expires.
+			if mode == qaModeNormal && streamCtx.releaseTurn != nil {
+				streamCtx.releaseTurn()
+			}
 		}()
 
 		// Resolve pre-uploaded attachments (may still be parsing): waits with a

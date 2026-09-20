@@ -98,5 +98,8 @@ export function rewindConflictI18nKey(code: string): string {
   if (code === 'REWIND_NO_CHECKPOINT') {
     return 'chat.rewind.noCheckpoint'
   }
+  if (code === 'REWIND_SANDBOX_REPLACED') {
+    return 'chat.rewind.sandboxReplaced'
+  }
   return 'chat.rewind.busy'
 }
