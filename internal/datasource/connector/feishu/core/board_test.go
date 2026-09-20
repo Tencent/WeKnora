@@ -3,6 +3,10 @@ package core
 import (
 	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -220,5 +224,77 @@ func TestSupportedImageExtSVG(t *testing.T) {
 	}
 	if _, _, ok := SupportedImageExt([]byte("<?xml version=\"1.0\"?><not-svg/>")); ok {
 		t.Fatal("non-svg xml must not be treated as an image")
+	}
+}
+
+// trimBoardImage tests: the board API renders the whole canvas, so exports
+// carry large blank borders (mostly below the content) — they must be cropped.
+
+func encodeTestImage(t *testing.T, img image.Image, format string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	var err error
+	if format == "jpeg" {
+		err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 80})
+	} else {
+		err = png.Encode(&buf, img)
+	}
+	if err != nil {
+		t.Fatalf("encode %s: %v", format, err)
+	}
+	return buf.Bytes()
+}
+
+func TestTrimBoardImage_CropsBlankBottomAndRight(t *testing.T) {
+	for _, format := range []string{"png", "jpeg"} {
+		src := image.NewRGBA(image.Rect(0, 0, 120, 200))
+		content := color.RGBA{R: 30, G: 60, B: 200, A: 255}
+		for y := 0; y < 40; y++ {
+			for x := 0; x < 80; x++ {
+				src.Set(x, y, content)
+			}
+		}
+		trimmed := trimBoardImage(encodeTestImage(t, src, format))
+		out, gotFormat, err := image.Decode(bytes.NewReader(trimmed))
+		if err != nil {
+			t.Fatalf("%s: decode trimmed: %v", format, err)
+		}
+		if gotFormat != format {
+			t.Fatalf("%s: format changed to %s", format, gotFormat)
+		}
+		b := out.Bounds()
+		if b.Dx() > 80+2*trimMargin || b.Dy() > 40+2*trimMargin {
+			t.Fatalf("%s: blank canvas not trimmed, got %dx%d", format, b.Dx(), b.Dy())
+		}
+		if b.Dx() < 40 || b.Dy() < 20 {
+			t.Fatalf("%s: content lost, got %dx%d", format, b.Dx(), b.Dy())
+		}
+		if r, _, _, _ := out.At(b.Min.X+4, b.Min.Y+4).RGBA(); uint8(r>>8) != 30 {
+			t.Fatalf("%s: content pixel lost at margin", format)
+		}
+	}
+}
+
+func TestTrimBoardImage_NoBlankBorderReturnsOriginal(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 50, 50))
+	for y := 0; y < 50; y++ {
+		for x := 0; x < 50; x++ {
+			src.Set(x, y, color.RGBA{R: uint8(x * 5), G: uint8(y * 5), B: 90, A: 255})
+		}
+	}
+	data := encodeTestImage(t, src, "png")
+	if got := trimBoardImage(data); !bytes.Equal(got, data) {
+		t.Fatal("fully painted image must pass through byte-identical")
+	}
+}
+
+func TestTrimBoardImage_FullyBlankAndGarbagePassThrough(t *testing.T) {
+	blank := image.NewRGBA(image.Rect(0, 0, 60, 60))
+	data := encodeTestImage(t, blank, "png")
+	if got := trimBoardImage(data); !bytes.Equal(got, data) {
+		t.Fatal("fully blank export must pass through unchanged")
+	}
+	if got := trimBoardImage([]byte("not an image")); !bytes.Equal(got, []byte("not an image")) {
+		t.Fatal("undecodable bytes must pass through unchanged")
 	}
 }
