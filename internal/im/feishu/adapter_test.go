@@ -442,6 +442,11 @@ func TestCardSummaryPreview(t *testing.T) {
 	}{
 		{name: "collapse whitespace", in: "  最终\n回答\t✅  ", want: "最终 回答 ✅"},
 		{name: "image keeps alt only", in: "![架构图](https://cdn.example/a.png?sig=secret) 说明", want: "架构图 说明"},
+		{
+			name: "resource image keeps alt only",
+			in:   "![diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) 说明",
+			want: "diagram 说明",
+		},
 		{name: "link keeps text only", in: "见 [文档](https://cdn.example/a.png?sig=secret) 说明", want: "见 文档 说明"},
 		{name: "unicode limit", in: strings.Repeat("界", 121), want: strings.Repeat("界", 120)},
 		{name: "empty", in: " \n\t ", want: ""},
