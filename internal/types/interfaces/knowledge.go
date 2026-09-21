@@ -40,6 +40,17 @@ type KnowledgeService interface {
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	// CreateKnowledgeFromYoutube expands each URL (single video or
+	// playlist) into its component videos and creates one knowledge item
+	// per video via CreateKnowledgeFromURL. Per-URL/per-video failures are
+	// collected rather than aborting the batch.
+	CreateKnowledgeFromYoutube(
+		ctx context.Context,
+		kbID string,
+		urls []string,
+		tagIDs []string,
+		channel string,
+	) (*types.YoutubeIngestResult, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
 	CreateKnowledgeFromPassage(ctx context.Context, kbID string, passage []string, channel string) (*types.Knowledge, error)

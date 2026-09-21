@@ -279,6 +279,22 @@ type ManualKnowledgePayload struct {
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
+// YoutubeIngestFailure records one URL (input or expanded video) that
+// failed during batch YouTube ingestion, with a human-readable reason.
+type YoutubeIngestFailure struct {
+	URL   string `json:"url"`
+	Error string `json:"error"`
+}
+
+// YoutubeIngestResult is the aggregate outcome of a batch YouTube import:
+// zero or more knowledge records created (one per expanded video), plus
+// the per-URL failures that did not abort the rest of the batch.
+type YoutubeIngestResult struct {
+	SuccessCount int                    `json:"success_count"`
+	Knowledge    []*Knowledge           `json:"knowledge"`
+	Failed       []YoutubeIngestFailure `json:"failed"`
+}
+
 // KnowledgeSearchScope defines a (tenant_id, knowledge_base_id) scope for knowledge search (e.g. own KBs + shared KBs).
 type KnowledgeSearchScope struct {
 	TenantID uint64
