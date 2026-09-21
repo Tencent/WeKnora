@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,6 +46,26 @@ func TestRedactedDebugConfig(t *testing.T) {
 	assert.Equal(t, "enable_thinking", got["thinking_control"])
 	assert.Equal(t, "[REDACTED]", got["secret_key"])
 	assert.Equal(t, "[REDACTED]", got["access_token"])
+}
+
+// The debug preview asks the catalog, not only the key name: a vendor whose
+// credential field is called something the name heuristic cannot guess is
+// still redacted, because the vendor declared it Secret.
+func TestRedactedDebugConfigUsesVendorDeclaration(t *testing.T) {
+	catalog.Register(&catalog.Vendor{
+		ID:         "handler-debug-redaction-vendor",
+		Name:       "Debug Redaction Vendor",
+		ModelTypes: []types.ModelType{types.ModelTypeRerank},
+		ExtraFields: []catalog.ExtraField{
+			{Key: "signing_material", Label: "Signing Material", Secret: true},
+		},
+	})
+	got := redactedDebugConfig(map[string]string{
+		"signing_material": "do-not-leak",
+		"region":           "ap-guangzhou",
+	})
+	assert.Equal(t, "[REDACTED]", got["signing_material"])
+	assert.Equal(t, "ap-guangzhou", got["region"])
 }
 
 func TestConsumeModelDebugChatStream(t *testing.T) {

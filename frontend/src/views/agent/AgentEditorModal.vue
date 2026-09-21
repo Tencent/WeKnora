@@ -602,14 +602,29 @@
             </div>
           </div>
 
-          <!-- 思考模式 -->
+          <!-- 思考强度：off / auto + 所选对话模型目录上报的等级 -->
           <div class="setting-row">
             <div class="setting-info">
               <label>{{ $t('agent.editor.thinking') }}</label>
               <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
+              <p v-if="selectedChatModel && !selectedChatModelCanThink" class="desc">
+                {{ $t('agent.editor.reasoningEffortUnsupported') }}
+              </p>
+              <p v-else-if="selectedChatModelAlwaysThinks" class="desc">
+                {{ $t('agent.editor.reasoningEffortAlwaysOn') }}
+              </p>
             </div>
             <div class="setting-control">
-              <t-switch v-model="thinkingEnabled" />
+              <t-select v-model="reasoningEffortLevel" class="reasoning-effort-select"
+                :popup-props="{ overlayClassName: 'reasoning-level-select-popup' }">
+                <t-option v-for="level in reasoningEffortOptions" :key="level" :value="level"
+                  :label="$t(levelLabelKey(level))" :show-overflow-tooltip="false">
+                  <div class="reasoning-level-option">
+                    <span class="reasoning-level-option__title">{{ $t(levelLabelKey(level)) }}</span>
+                    <span class="reasoning-level-option__hint">{{ $t(levelDescriptionKey(level)) }}</span>
+                  </div>
+                </t-option>
+              </t-select>
             </div>
           </div>
 
@@ -1870,6 +1885,17 @@ import {
   type RequirementMissKind,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
+import {
+  clampLevel,
+  levelDescriptionKey,
+  levelEnablesThinking,
+  levelFromLegacy,
+  levelLabelKey,
+  modelCanThink,
+  modelCannotDisableThinking,
+  optionsFor,
+  type ReasoningLevel,
+} from '@/utils/reasoningEffort';
 
 // File extensions offered in the agent-level chat attachment parsing policy.
 const CHAT_PARSER_EXTENSIONS = [
@@ -2268,7 +2294,9 @@ function pruneSelectedSkills() {
 async function syncInstalledSkills(force = false) {
   autoBindSoleSandbox()
   const configId = formData.value.config.sandbox_config_id || ''
-  await editorResources.ensureSkills(configId, force)
+  // The editor only edits this workspace's agents, so the sandbox config is
+  // local and needs no source-workspace scope.
+  await editorResources.ensureSkills(configId, undefined, force)
   try {
     await editorResources.ensureSkillCatalog(force)
     skillCatalog.value = [...editorResources.skillCatalog]
@@ -2755,6 +2783,7 @@ const defaultFormData = {
     temperature: 0.7,
     max_completion_tokens: 0,
     thinking: false, // 默认禁用思考模式
+    reasoning_effort: 'off', // 思考强度；与 thinking 布尔保持同步
     citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
@@ -3375,11 +3404,47 @@ const onAgentTypeChange = (val: AgentType) => {
   }
 };
 
-// 思考模式计算属性（直接绑定 boolean）
-const thinkingEnabled = computed({
-  get: () => formData.value.config.thinking === true,
-  set: (val: boolean) => { formData.value.config.thinking = val; }
+// 思考强度：reasoning_effort 为准，旧数据只有 thinking 布尔时按 true→auto / false→off 推导。
+// 写入时同步维护 thinking 布尔，保证旧后端 / 旧读取路径继续工作。
+const selectedChatModel = computed(() =>
+  allModels.value.find(model => model.id === formData.value.config.model_id),
+);
+const selectedChatModelCanThink = computed(() => modelCanThink(selectedChatModel.value?.capabilities));
+// 所选模型无法关闭思考（deepseek-reasoner / qwq-plus / gemini-3 等）时给出提示，
+// 否则下拉里没有「关闭」看起来像 bug。
+const selectedChatModelAlwaysThinks = computed(
+  () => modelCannotDisableThinking(selectedChatModel.value?.capabilities),
+);
+// 目录上报 capabilities 时严格按 thinking_levels 出选项（含「没有 off」这一事实）；
+// 没有 capabilities 的模型（本地 / Ollama / 模型列表未加载）才退回通用梯度。
+const reasoningEffortOptions = computed<ReasoningLevel[]>(() => optionsFor(selectedChatModel.value?.capabilities));
+const reasoningEffortLevel = computed<ReasoningLevel>({
+  get: () => levelFromLegacy(formData.value.config.thinking, formData.value.config.reasoning_effort),
+  set: (level: ReasoningLevel) => {
+    formData.value.config.reasoning_effort = level;
+    formData.value.config.thinking = levelEnablesThinking(level);
+  },
 });
+// 已存等级可能不在所选模型的可用集合里（换模型，或加载了一个旧智能体）：
+// 夹到可用集合上，并同步 thinking 布尔（由 setter 负责），避免界面显示「关闭」
+// 而后端其实没下发任何开关、模型照样思考。
+//
+// 只在模型真正解析出来之后才夹：模型列表异步加载期间 capabilities 还是 undefined，
+// 此时的通用梯度会把已保存的 max/xhigh 误降级成 auto。
+const clampReasoningEffortToModel = () => {
+  if (editorInitializing.value || !selectedChatModel.value) return;
+  const clamped = clampLevel(reasoningEffortLevel.value, reasoningEffortOptions.value);
+  if (clamped !== reasoningEffortLevel.value) reasoningEffortLevel.value = clamped;
+};
+watch(
+  () => [
+    editorInitializing.value,
+    formData.value.config.model_id,
+    reasoningEffortOptions.value.join(','),
+  ].join('|'),
+  () => clampReasoningEffortToModel(),
+  { immediate: true },
+);
 
 // 是否为内置智能体
 const isBuiltinAgent = computed(() => {
@@ -3439,6 +3504,10 @@ watch(() => props.visible, async (val) => {
       if (agentData.config.thinking == null) {
         agentData.config.thinking = false;
       }
+      // Legacy rows carry only the boolean: derive the graded level once so
+      // the selector and the persisted config agree (true → auto, false → off).
+      agentData.config.reasoning_effort = levelFromLegacy(agentData.config.thinking, agentData.config.reasoning_effort);
+      agentData.config.thinking = levelEnablesThinking(agentData.config.reasoning_effort);
 
       agentData.config.question_suggestions = {
         starters: {
@@ -5204,6 +5273,11 @@ const handleSave = async () => {
   align-items: flex-start;
   overflow: hidden;
 
+  .reasoning-effort-select {
+    width: 100%;
+    max-width: 220px;
+  }
+
   &.setting-control-full {
     width: 100%;
     min-width: 100%;
@@ -6503,6 +6577,37 @@ const handleSave = async () => {
 <!-- Non-scoped styles: TDesign teleports the popup outside this component, so
      scoped selectors can't reach .agent-type-popup .t-select-option. -->
 <style lang="less">
+.reasoning-level-select-popup {
+  padding: 4px;
+
+  .t-select-option {
+    height: auto !important;
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin: 2px 0;
+    white-space: normal;
+  }
+}
+
+.reasoning-level-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  min-width: 0;
+
+  &__title {
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    font-size: var(--app-text-sm);
+    color: var(--td-text-color-placeholder);
+    word-break: break-word;
+  }
+}
+
 .agent-type-popup {
   .t-select-option {
     // 默认 option 是 32px 单行；我们要双行显示，取消固定高度并放宽 padding

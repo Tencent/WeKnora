@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/provider"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
-	openai "github.com/sashabaranov/go-openai"
+	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
@@ -38,13 +37,15 @@ func vlmHTTPTimeout() time.Duration {
 	return defaultTimeout
 }
 
-// RemoteAPIVLM implements VLM via an OpenAI-compatible chat completions API.
+// RemoteAPIVLM implements VLM on top of the catalog-driven chat client: a
+// vision call is a chat call whose user turn carries images, so the vendor
+// dialect (max_tokens field, sampling restrictions, protocol) is resolved
+// exactly like it is for chat models.
 type RemoteAPIVLM struct {
 	modelName   string
 	modelID     string
-	client      *openai.Client
-	baseURL     string
-	temperature float32
+	chat        chat.Chat
+	temperature float64
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -53,152 +54,83 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		return nil, err
 	}
 
-	providerName := provider.ProviderName(config.Provider)
-	if providerName == "" {
-		providerName = provider.DetectProvider(config.BaseURL)
-	}
-
-	var apiCfg openai.ClientConfig
-	if providerName == provider.ProviderAzureOpenAI {
-		apiCfg = openai.DefaultAzureConfig(config.APIKey, config.BaseURL)
-		apiCfg.AzureModelMapperFunc = func(model string) string {
-			return model
-		}
-		if config.Extra != nil {
-			if v, ok := config.Extra["api_version"]; ok {
-				if vs, ok := v.(string); ok && vs != "" {
-					apiCfg.APIVersion = vs
-				}
-			}
-		}
-	} else {
-		apiCfg = openai.DefaultConfig(config.APIKey)
-		if config.BaseURL != "" {
-			apiCfg.BaseURL = config.BaseURL
+	temp := float64(defaultTemp)
+	extra := make(map[string]string, len(config.Extra))
+	for k, v := range config.Extra {
+		if s, ok := v.(string); ok {
+			extra[k] = s
 		}
 	}
-	httpClient := newVLMHTTPClient(vlmHTTPTimeout())
-
-	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
-	if len(config.CustomHeaders) > 0 {
-		apiCfg.HTTPClient = secutils.WrapHTTPClientWithHeaders(httpClient, config.CustomHeaders)
-	} else {
-		apiCfg.HTTPClient = httpClient
-	}
-
-	temp := defaultTemp
-	if config.Extra != nil {
-		if v, ok := config.Extra["temperature"]; ok {
-			if vs, ok := v.(string); ok {
-				if f, err := strconv.ParseFloat(vs, 32); err == nil {
-					temp = float32(f)
-				}
-			}
+	if raw, ok := extra["temperature"]; ok {
+		if f, err := strconv.ParseFloat(raw, 64); err == nil {
+			temp = f
 		}
 	}
 
+	client, err := chat.NewRemoteChat(&chat.ChatConfig{
+		Source:        types.ModelSourceRemote,
+		BaseURL:       config.BaseURL,
+		ModelName:     config.ModelName,
+		APIKey:        config.APIKey,
+		ModelID:       config.ModelID,
+		Provider:      config.Provider,
+		ExtraConfig:   extra,
+		CustomHeaders: config.CustomHeaders,
+		AppID:         config.AppID,
+		AppSecret:     config.AppSecret,
+		Spec:          config.Spec,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &RemoteAPIVLM{
 		modelName:   config.ModelName,
 		modelID:     config.ModelID,
-		client:      openai.NewClientWithConfig(apiCfg),
-		baseURL:     config.BaseURL,
+		chat:        client,
 		temperature: temp,
 	}, nil
 }
 
-// Predict sends an image with a text prompt to the OpenAI-compatible API.
+// Predict sends images with a text prompt through the chat client.
 func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
-	var parts []openai.ChatMessagePart
-
-	// Add text prompt first
-	parts = append(parts, openai.ChatMessagePart{
-		Type: openai.ChatMessagePartTypeText,
-		Text: prompt,
-	})
-
-	// Add images
-	for _, imgBytes := range imgBytesList {
-		if len(imgBytes) > 0 {
-			mimeType := detectImageMIME(imgBytes)
-			b64 := base64.StdEncoding.EncodeToString(imgBytes)
-			dataURI := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
-			parts = append(parts, openai.ChatMessagePart{
-				Type: openai.ChatMessagePartTypeImageURL,
-				ImageURL: &openai.ChatMessageImageURL{
-					URL:    dataURI,
-					Detail: openai.ImageURLDetailAuto,
-				},
-			})
-		}
-	}
-
-	req := openai.ChatCompletionRequest{
-		Model: v.modelName,
-		Messages: []openai.ChatCompletionMessage{
-			{
-				Role:         openai.ChatMessageRoleUser,
-				MultiContent: parts,
-			},
-		},
-		MaxTokens:   defaultMaxToks,
-		Temperature: v.temperature,
-	}
-	shapeReasoningVLMRequest(&req)
-
+	parts := []chat.MessageContentPart{{Type: "text", Text: prompt}}
 	totalImageSize := 0
-	for _, img := range imgBytesList {
-		totalImageSize += len(img)
+	for _, imgBytes := range imgBytesList {
+		if len(imgBytes) == 0 {
+			continue
+		}
+		totalImageSize += len(imgBytes)
+		dataURI := fmt.Sprintf("data:%s;base64,%s",
+			detectImageMIME(imgBytes), base64.StdEncoding.EncodeToString(imgBytes))
+		parts = append(parts, chat.MessageContentPart{
+			Type: "image_url", ImageURL: &chat.ImageURL{URL: dataURI, Detail: "auto"},
+		})
 	}
-	logger.Infof(ctx, "[VLM] Calling OpenAI-compatible API, model=%s, baseURL=%s, numImages=%d, totalImageSize=%d",
-		v.modelName, v.baseURL, len(imgBytesList), totalImageSize)
+	logger.Infof(ctx, "[VLM] Calling chat protocol, model=%s, numImages=%d, totalImageSize=%d",
+		v.modelName, len(imgBytesList), totalImageSize)
 
-	resp, err := v.client.CreateChatCompletion(ctx, req)
+	ctx, cancel := context.WithTimeout(ctx, vlmHTTPTimeout())
+	defer cancel()
+	resp, err := v.chat.Chat(ctx, []chat.Message{{Role: "user", MultiContent: parts}}, &chat.ChatOptions{
+		Temperature: v.temperature,
+		MaxTokens:   defaultMaxToks,
+	})
 	if err != nil {
-		return "", fmt.Errorf("OpenAI VLM request: %w", err)
+		return "", fmt.Errorf("VLM request: %w", err)
 	}
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("OpenAI VLM returned no choices")
-	}
-
-	choice := resp.Choices[0]
-	content := choice.Message.Content
-	if strings.TrimSpace(content) == "" && choice.FinishReason == openai.FinishReasonLength {
-		// Reasoning models spend max_completion_tokens on reasoning before any
+	content := resp.Content
+	if strings.TrimSpace(content) == "" && resp.FinishReason == "length" {
+		// Reasoning models spend the completion budget on reasoning before any
 		// visible output, so an exhausted budget yields an empty message rather
 		// than an API error. Returning "" here would be recorded as
 		// "no_extracted_content" and look identical to an image with no text.
 		return "", fmt.Errorf(
-			"OpenAI VLM returned no content: completion truncated at %d tokens (finish_reason=length)",
+			"VLM returned no content: completion truncated at %d tokens (finish_reason=length)",
 			defaultMaxToks,
 		)
 	}
-	logger.Infof(ctx, "[VLM] OpenAI response received, len=%d", len(content))
+	logger.Infof(ctx, "[VLM] response received, len=%d", len(content))
 	return content, nil
-}
-
-// shapeReasoningVLMRequest adapts an OpenAI-compatible VLM request for
-// reasoning (o-series) and GPT-5 models, which reject `max_tokens` and every
-// non-default sampling parameter.
-//
-// This mirrors shapeOpenAIReasoning in internal/models/chat, which fixed the
-// same incompatibility on the chat path for issue #1283. The VLM path was
-// never wired to it, so image OCR and captioning failed for every one of these
-// models (issue #2537).
-//
-// Both quirks have to be handled together: migrating max_tokens alone still
-// fails, because the VLM default temperature (0.1) is itself rejected.
-func shapeReasoningVLMRequest(req *openai.ChatCompletionRequest) {
-	if !provider.IsOpenAIReasoningOrGPT5Model(req.Model) {
-		return
-	}
-	if req.MaxCompletionTokens == 0 && req.MaxTokens > 0 {
-		req.MaxCompletionTokens = req.MaxTokens
-	}
-	req.MaxTokens = 0
-	req.Temperature = 0
-	req.TopP = 0
-	req.FrequencyPenalty = 0
-	req.PresencePenalty = 0
 }
 
 func (v *RemoteAPIVLM) GetModelName() string { return v.modelName }

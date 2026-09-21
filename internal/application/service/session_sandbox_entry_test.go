@@ -56,7 +56,7 @@ func TestSandboxConfigForExistingSandboxReturnsEmptyWhenUnpinned(t *testing.T) {
 func TestArtifactSessionSourceKeepsDefaultBackendForSentinelPin(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.Background()
-	_, err := pinner.Pin(ctx, "s-1", types.SandboxConfigIDGlobalDefault)
+	_, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: types.SandboxConfigIDGlobalDefault})
 	require.NoError(t, err)
 
 	source := &fakeSandboxSource{}
@@ -103,7 +103,7 @@ func TestArtifactSessionSourceSkipsUnpinnedSession(t *testing.T) {
 func TestArtifactSessionSourceResolvesNamedPin(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
-	_, err := pinner.Pin(ctx, "s-1", "cfg-docker")
+	_, err := pinner.Pin(ctx, "s-1", SandboxPin{ConfigID: "cfg-docker"})
 	require.NoError(t, err)
 
 	named := &artifactFallbackManager{source: &fakeSandboxSource{}}

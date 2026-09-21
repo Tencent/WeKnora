@@ -47,6 +47,9 @@ export interface CustomAgentConfig {
   temperature?: number;
   max_completion_tokens?: number;   // 0 = 跟随系统默认（快速问答 2048；智能推理 4096，绑沙箱可写文件时 24576）。大于 0 为自定义上限
   thinking?: boolean;                      // 是否启用思考模式（支持扩展思考的模型）
+  // 思考强度：off | auto | minimal | low | medium | high | xhigh | max。
+  // 为空时退回 thinking 布尔值（true == auto，false == off）。
+  reasoning_effort?: string;
   citation_enabled?: boolean;        // 是否在最终回答中输出知识库/网页来源引用（默认开启）
 
   // ===== Agent模式设置 =====

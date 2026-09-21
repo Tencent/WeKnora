@@ -1,0 +1,9 @@
+{
+  "vendor": "longcat",
+  "source": "https://longcat.chat/platform/docs/zh/api/chat.html",
+  "models": [
+    {"id": "LongCat-2.0", "name": "LongCat 2.0", "reasoning": true, "input": ["text"], "context_window": 1000000, "max_output_tokens": 131072, "cost": {"input": 0.75, "output": 2.95, "cache_read": 0.015}, "source": "https://longcat.chat/platform/docs/zh/api/chat.html"},
+    {"id": "LongCat-Flash-Chat", "name": "LongCat Flash Chat (retired 2026-05-29)", "deprecated": true, "reasoning": false, "input": ["text"], "context_window": 262144, "max_output_tokens": 8192, "source": "https://longcat.chat/platform/docs/zh/ChangeLog.html"},
+    {"id": "LongCat-Flash-Thinking", "name": "LongCat Flash Thinking (retired 2026-05-29)", "deprecated": true, "reasoning": true, "input": ["text"], "context_window": 131072, "max_output_tokens": 65536, "thinking_levels": {"off": null}, "source": "https://longcat.chat/platform/docs/zh/ChangeLog.html"}
+  ]
+}

@@ -519,6 +519,10 @@ const props = defineProps({
     type: Boolean,
     required: false
   },
+  composerLocked: {
+    type: Boolean,
+    default: false
+  },
   sessionId: {
     type: String,
     required: false
@@ -805,14 +809,40 @@ const loadFiles = async () => {
   }
 };
 
+// A shared agent @mentions its OWNER's MCP services; this workspace's service
+// ids match none of its preset, and the backend drops such a mention outright.
+// So the list follows the selected agent and is refetched when it changes.
+const currentAgentScope = computed(() => {
+  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+  if (!sourceTenantId || !selectedAgentId.value) return undefined;
+  return { agentId: selectedAgentId.value, sourceTenantId };
+});
+
+const agentScopeKey = (scope?: { agentId: string; sourceTenantId: string | number }) =>
+  scope ? `${scope.sourceTenantId}:${scope.agentId}` : '';
+
+// Guards against a slow response for a previously selected agent overwriting
+// the list with another workspace's services after the user switched away.
+let mcpServicesRequestKey = '';
+
 const loadMCPServices = async () => {
+  const scope = currentAgentScope.value;
+  const requestKey = agentScopeKey(scope);
+  mcpServicesRequestKey = requestKey;
   try {
-    mcpServices.value = await listMCPServices();
+    const list = await listMCPServices(scope);
+    if (mcpServicesRequestKey !== requestKey) return;
+    mcpServices.value = list;
   } catch (error) {
     console.error('Failed to load MCP services:', error);
+    if (mcpServicesRequestKey !== requestKey) return;
     mcpServices.value = [];
   }
 };
+
+watch(currentAgentScope, () => {
+  void loadMCPServices();
+});
 
 watch(selectedFileIds, () => {
   loadFiles();
@@ -1369,7 +1399,12 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
-      await editorResources.ensureSkills(currentAgentConfig.value?.sandbox_config_id);
+      // The scope makes a shared agent's skills resolve in its owner's
+      // workspace, where they are actually installed.
+      await editorResources.ensureSkills(
+        currentAgentConfig.value?.sandbox_config_id,
+        currentAgentScope.value,
+      );
       skillItems = editorResources.skills
         .filter(skill => isSkillAllowedByAgent(skill.name))
         .map(skill => ({
@@ -1943,6 +1978,9 @@ const createSession = async (
   delivery: 'inject' | 'after' = 'after',
   options: SendMessageOptions = {},
 ) => {
+  if (props.composerLocked) {
+    return;
+  }
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
@@ -2301,6 +2339,7 @@ const steerShortcutLabel = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ Ent
 const firstQueuedSteer = computed(() => props.queuedSteers.find(item =>
   item.delivery === 'after' && !item.pending && !item.promoting && !item.failed));
 const injectCurrentInput = () => {
+  if (props.composerLocked) return;
   if (!props.isReplying || !props.canSteer) return;
   if (query.value.trim()) void createSession(query.value, 'inject');
   else if (firstQueuedSteer.value) emit('promote-steer', firstQueuedSteer.value.steer_id);
@@ -2350,6 +2389,7 @@ const onKeydown = (val: string, event: { e: KeyboardEvent }) => {
   const delivery = chatSubmitShortcut(event.e, props.isReplying && props.canSteer);
   if (delivery) {
     event.e.preventDefault();
+    if (props.composerLocked) return;
     if (delivery === 'inject' && props.isReplying && props.canSteer) injectCurrentInput();
     else void createSession(val, delivery);
   }
@@ -2892,7 +2932,7 @@ defineExpose({
           </t-tooltip>
           <t-tooltip v-else :content="`${isReplying && canSteer ? $t('input.steerAfter') : $t('input.send')} · Enter`">
             <button type="button" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
-              :disabled="!query.trim()" :class="{ 'disabled': !query.trim() }"
+              :disabled="!query.trim() || composerLocked" :class="{ 'disabled': !query.trim() || composerLocked }"
               :aria-label="isReplying && canSteer ? $t('input.steerAfter') : $t('input.send')">
               <t-icon name="arrow-up" />
             </button>

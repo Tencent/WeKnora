@@ -76,4 +76,10 @@ type QARequest struct {
 	// persists accepted ones through this sink. A structural interface so
 	// neither package imports the other; handler-owned, nil for IM/embed.
 	SteerSink SteerSink
+	// TurnLeaseHeld reports that the caller already took the session's
+	// send-side turn lease (and already rejected the send if a rewind holds
+	// the session) before persisting this turn's messages. HTTP send does;
+	// IM/MCP, which call the QA services directly, do not and leave this
+	// false so the service takes the lease itself.
+	TurnLeaseHeld bool
 }

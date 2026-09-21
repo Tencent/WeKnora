@@ -395,9 +395,10 @@ func TestModelToolResultProtectsSummarySlugBeforeSourceCompaction(t *testing.T) 
 	registry.RegisterDocument(knowledgeID)
 	registry.RegisterKnowledgeBase(kbID)
 
-	got := registry.ModelToolResult(&types.ToolResult{Success: true, Output: "<knowledge_base_id>" + kbID + "</knowledge_base_id>\n" +
-		"<link>[[summary/" + knowledgeID + "|Summary]]</link>\n" +
-		"<knowledge_id>" + knowledgeID + "</knowledge_id>",
+	got := registry.ModelToolResult(&types.ToolResult{
+		Success: true, Output: "<knowledge_base_id>" + kbID + "</knowledge_base_id>\n" +
+			"<link>[[summary/" + knowledgeID + "|Summary]]</link>\n" +
+			"<knowledge_id>" + knowledgeID + "</knowledge_id>",
 	})
 	require.Contains(t, got, "[[res://0001|Summary]]")
 	require.Contains(t, got, "<knowledge_base_id>b1</knowledge_base_id>")
@@ -678,4 +679,28 @@ func TestModelOutputReportsSearchModeAndFallbacks(t *testing.T) {
 		"display_type": "search_results", "results": []map[string]interface{}{row},
 	}})
 	require.Contains(t, legacy, `mode="semantic"`, "legacy knowledge_search payloads were semantic")
+}
+
+func TestDecodeResponseDropsSignatureWhenReasoningIsDecoded(t *testing.T) {
+	registry := NewRegistry(true)
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	// The handle only exists after the outbound half assigned it.
+	registry.EncodeMessages([]chat.Message{{Role: "assistant", Content: ref}})
+
+	decoded := &types.ChatResponse{
+		Content:            "done",
+		ReasoningContent:   "read res://0001",
+		ReasoningSignature: "anthropic-messages:sig",
+	}
+	registry.DecodeResponse(decoded)
+	require.Equal(t, "read "+ref, decoded.ReasoningContent)
+	require.Empty(t, decoded.ReasoningSignature, "decoded text is no longer what the provider signed")
+
+	untouched := &types.ChatResponse{
+		Content:            "done",
+		ReasoningContent:   "no handles here",
+		ReasoningSignature: "anthropic-messages:sig",
+	}
+	registry.DecodeResponse(untouched)
+	require.Equal(t, "anthropic-messages:sig", untouched.ReasoningSignature)
 }

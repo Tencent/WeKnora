@@ -330,20 +330,19 @@ const handleCancel = () => {
   gap: 10px;
   flex: 1;
   min-width: 0;
-  padding: 2px 0;
 }
 
 .setting-drawer__header-icon {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   color: var(--td-brand-color);
-  font-size: var(--app-text-xl);
+  font-size: var(--app-text-lg);
   transition: background var(--app-motion-base) ease;
 }
 
@@ -557,7 +556,10 @@ const handleCancel = () => {
   }
 
   .t-drawer__header {
-    padding: 14px 18px;
+    // 72px 的抽屉头在一屏设置里太重：图标 32px、上下各 14px，再加标题与副标题
+    // 两行。收到 60px（图标 28px、内边距 10px）够了，标题字号刻意不动——再小
+    // 就和正文里的字段标签一样大，层级会塌。
+    padding: 10px 18px;
     border-bottom: 1px solid var(--td-component-stroke);
   }
 

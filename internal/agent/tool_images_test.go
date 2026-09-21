@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/api/openaicompletions"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -28,9 +30,17 @@ func TestToolImagesReachNextModelTurnAfterAllReplies(t *testing.T) {
 			require.Equal(t, "user", messages[3].Role)
 			require.Equal(t, step.ToolCalls[0].Result.Images, messages[3].Images)
 			require.Contains(t, messages[3].Content, "untrusted tool evidence")
-			wire := (&chat.RemoteAPIChat{}).ConvertMessages(messages)
-			require.Len(t, wire[3].MultiContent, 2)
-			require.Equal(t, step.ToolCalls[0].Result.Images[0], wire[3].MultiContent[0].ImageURL.URL)
+			client := openaicompletions.New(openaicompletions.Config{Settings: catalog.DefaultOpenAICompletions()})
+			body, err := client.BuildRequestBody(messages, nil, false)
+			require.NoError(t, err)
+			raw, err := json.Marshal(body["messages"])
+			require.NoError(t, err)
+			var wire []map[string]any
+			require.NoError(t, json.Unmarshal(raw, &wire))
+			parts := wire[3]["content"].([]any)
+			require.Len(t, parts, 2)
+			imagePart := parts[0].(map[string]any)["image_url"].(map[string]any)
+			require.Equal(t, step.ToolCalls[0].Result.Images[0], imagePart["url"])
 		} else {
 			require.Len(t, messages, 3)
 			require.Contains(t, messages[1].Content, "cannot view")

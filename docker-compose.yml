@@ -56,6 +56,9 @@ services:
       # to config/builtin_models.yaml, edit it for your deployment, then
       # uncomment the line below. See docs/BUILTIN_MODELS.md.
       # - ./config/builtin_models.yaml:/app/config/builtin_models.yaml:ro
+      # Optional: model catalog overlay (extra vendors / model overrides).
+      # Copy config/models.json.example to config/models.json, then
+      # - ./config/models.json:/app/config/models.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

@@ -1,10 +1,12 @@
 // Package service - per-turn /workspace git checkpoints.
 //
 // WorkspaceCheckpointer commits the session sandbox's /workspace at the end of
-// every agent turn so session fork can later roll a forked sandbox back to a
-// specific turn. It mirrors ArtifactCollector's shape deliberately: a narrow
-// injectable interface for the sandbox side, and strict best-effort semantics
-// so an auxiliary feature can never break a reply.
+// every agent turn so session fork and rewind can later roll a sandbox back to
+// a specific turn. Git metadata lives at sandbox.SessionGitDir, outside
+// /workspace, so wiping the work tree cannot drop checkpoint history. It
+// mirrors ArtifactCollector's shape deliberately: a narrow injectable
+// interface for the sandbox side, and strict best-effort semantics so an
+// auxiliary feature can never break a reply.
 //
 // Contract:
 //   - Never returns an error. A failed checkpoint yields nil, the message
@@ -64,28 +66,23 @@ func NewWorkspaceCheckpointer(runner SandboxShellRunner) *WorkspaceCheckpointer 
 //
 // Ordering matters in two places:
 //
-//   - `safe.directory` comes first. /workspace is owned by uid 1000 while
-//     shell_exec runs as root by default, and git refuses to touch a
-//     dubiously-owned repository — including from the rev-parse probe below.
-//     Plain assignment rather than `--add`: safe.directory is a multi-valued
-//     key, so --add would append one duplicate line to ~/.gitconfig per turn.
+//   - `safe.directory` is passed per-invocation via git_ws. /workspace is
+//     owned by uid 1000 while shell_exec runs as root by default, and git
+//     refuses to touch a dubiously-owned repository — including from the
+//     rev-parse probe below. -c avoids writing ~/.gitconfig every turn.
 //
 //   - `--allow-empty` is mandatory. A turn that only answered a question
 //     without touching a file would otherwise produce no commit, leaving that
 //     message with no checkpoint and making it unusable as a fork point. With
 //     it, every turn has exactly one checkpoint and fork boundaries are always
 //     resolvable.
-func checkpointScript(workspace, messageID string) string {
+func checkpointScript(workspace, gitDir, messageID string) string {
 	return fmt.Sprintf(`set -e
-git config --global safe.directory %[1]s
-git -C %[1]s rev-parse --git-dir >/dev/null 2>&1 || {
-  git init -q %[1]s
-  git -C %[1]s config user.email agent@weknora.local
-  git -C %[1]s config user.name 'WeKnora Agent'
-}
-git -C %[1]s add -A
-git -C %[1]s commit -q --allow-empty -m 'turn:%[2]s'
-git -C %[1]s rev-parse HEAD`, workspace, messageID)
+%s
+%s
+git_ws add -A
+git_ws commit -q --allow-empty -m 'turn:%s'
+git_ws rev-parse HEAD`, gitWorkspacePreamble(workspace, gitDir), gitWorkspaceEnsureRepo(), messageID)
 }
 
 // Checkpoint commits /workspace and returns the resulting checkpoint, or nil
@@ -108,7 +105,7 @@ func (c *WorkspaceCheckpointer) Checkpoint(
 
 	var result *sandbox.ExecuteResult
 	var err error
-	command := checkpointScript(sandbox.SessionWorkspaceRoot, messageID)
+	command := checkpointScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, messageID)
 	if runner, ok := c.runner.(sandbox.SessionInstallShellExecutor); ok {
 		// Git operates on the existing workspace. Do not prepare artifact/input
 		// directories or let a late checkpoint provision a replacement sandbox.

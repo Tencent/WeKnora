@@ -169,9 +169,15 @@ func (s *sessionService) AgentQA(
 	// Hold the sandbox across this turn so an install that finishes while we
 	// are running cannot rebuild the VM between tool calls. Staging below is
 	// the first resolve: if the previous turn left a stale mark, that is
-	// where the new image is picked up.
-	releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
-	defer releaseTurn()
+	// where the new image is picked up. HTTP send already holds the lease it
+	// took before persisting the turn, so only direct callers take one here.
+	if !req.TurnLeaseHeld {
+		releaseTurn, err := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+		if err != nil {
+			return err
+		}
+		defer releaseTurn()
+	}
 
 	// Reconcile all durable session attachments into the session's remote
 	// sandbox before the model can request shell or skill execution. The
@@ -320,6 +326,7 @@ func (s *sessionService) buildAgentConfig(
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
+		ReasoningEffort:             customAgent.Config.ReasoningEffort,
 		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,

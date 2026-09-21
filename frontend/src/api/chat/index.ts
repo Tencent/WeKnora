@@ -37,6 +37,13 @@ export async function forkSession(
   return post(`/api/v1/sessions/${session_id}/fork`, data, { timeout: 180000 });
 }
 
+export async function rewindSession(
+  session_id: string,
+  data: { message_id: string },
+) {
+  return post(`/api/v1/sessions/${session_id}/rewind`, data, { timeout: 180000 });
+}
+
 export async function knowledgeChat(data: { session_id: string; query: string; }) {
   return postChat(`/api/v1/knowledge-chat/${data.session_id}`, { query: data.query, channel: "web" });
 }

@@ -914,12 +914,18 @@ func (e *AgentEngine) appendToolResults(
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
-	// Add assistant message with tool calls (if any)
-	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
+	// Add assistant message with tool calls (if any). The reasoning artifacts
+	// count as content of their own: an Anthropic round can consist purely of
+	// a redacted_thinking block, and dropping the turn loses state the next
+	// request has to replay.
+	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" ||
+		step.ReasoningSignature != "" || len(step.ReasoningMetadata) > 0 {
 		assistantMsg := chat.Message{
-			Role:             "assistant",
-			Content:          step.Thought,
-			ReasoningContent: step.ReasoningContent,
+			Role:               "assistant",
+			Content:            step.Thought,
+			ReasoningContent:   step.ReasoningContent,
+			ReasoningSignature: step.ReasoningSignature,
+			ReasoningMetadata:  step.ReasoningMetadata,
 		}
 
 		// Add tool calls to assistant message (following OpenAI format)
