@@ -154,7 +154,7 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 	if !ok {
 		return &types.ToolResult{
 			Success: false,
-			Error:   inspectScopeErrorIn(layout, trimmed),
+			Error:   inspectScopeErrorIn(layout, clean),
 		}, nil
 	}
 

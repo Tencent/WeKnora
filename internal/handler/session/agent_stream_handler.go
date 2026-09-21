@@ -784,10 +784,9 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		if h.artifactCollector != nil {
 			collectCtx := context.WithoutCancel(h.ctx)
 			var artifacts types.MessageArtifacts
-			if !h.artifactCollector.SkipCollect(collectCtx, h.sessionID) {
-				collectDir := skills.ArtifactOutputDir()
-				if dir := h.artifactCollector.LayoutOutputDir(collectCtx, h.sessionID); dir != "" {
-					collectDir = dir
+			if collectDir, skip := h.artifactCollector.CollectTarget(collectCtx, h.sessionID); !skip {
+				if collectDir == "" {
+					collectDir = skills.ArtifactOutputDir()
 				}
 				var err error
 				artifacts, err = h.artifactCollector.CollectWithNotify(

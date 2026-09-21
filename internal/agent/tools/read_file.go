@@ -64,11 +64,17 @@ func (t *ReadFileTool) BindSession(id string) {
 }
 
 func (t *ReadFileTool) Parameters() json.RawMessage {
-	layout := sandbox.RemoteWorkspaceLayout()
-	if t != nil && t.workspace != nil {
-		layout = sessionWorkspaceLayout(context.Background(), t.sessionID, t.workspace.source)
+	if t == nil {
+		return nil
 	}
-	return schemaForLayout(t.schema, layout)
+	return schemaForLayout(t.schema, t.boundLayout())
+}
+
+func (t *ReadFileTool) boundLayout() sandbox.WorkspaceLayout {
+	if t == nil || t.workspace == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return t.describeLayout(t.workspace.source)
 }
 
 func (t *ReadFileTool) updateDescription() {
@@ -80,13 +86,13 @@ func (t *ReadFileTool) updateDescription() {
 			"as offset and line_offset to continue without a shell.")
 	}
 	if t.workspace != nil {
-		layout := sessionWorkspaceLayout(context.Background(), t.sessionID, t.workspace.source)
+		layout := t.boundLayout()
 		if layout.IsHost() {
 			scopes = append(scopes, "Sandbox files: absolute or relative paths in "+layoutRootOrGeneric(layout)+". "+
 				"This does not read files outside that folder or publish files as user-visible artifacts.")
 		} else {
 			scopes = append(scopes, "Sandbox files: absolute paths inside the current session's sandbox, including /tmp; "+
-				"relative paths resolve from "+layout.Hint+". "+
+				"relative paths resolve from "+layoutHintOrRemote(layout)+". "+
 				"This does not read host files or publish files as user-visible artifacts.")
 		}
 	}

@@ -77,3 +77,61 @@ func TestSessionBoundManagerLayoutOverlaysValidatedSkillOutputDir(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, RemoteWorkspaceLayout(), layout)
 }
+
+// An output directory equal to the workspace root is the whole workspace,
+// drafts included. Accepting it made collection read OutputDir == Root as
+// "this backend collects nothing" and silently drop every artifact.
+func TestValidatedSessionOutputDirRefusesTheWorkspaceRootItself(t *testing.T) {
+	for _, dir := range []string{SessionWorkspaceRoot, SessionWorkspaceRoot + "/", "/workspace/."} {
+		_, ok := ValidatedSessionOutputDir(dir)
+		require.False(t, ok, dir)
+	}
+	clean, ok := ValidatedSessionOutputDir(SessionWorkspaceRoot + "/deliverables/")
+	require.True(t, ok)
+	require.Equal(t, "/workspace/deliverables", clean)
+}
+
+func TestSessionBoundManagerLayoutIgnoresWorkspaceRootAsOutputDir(t *testing.T) {
+	t.Setenv(skillOutputEnvVar, SessionWorkspaceRoot)
+	layout, err := (*SessionBoundManager)(nil).SessionWorkspaceLayout(context.Background(), "sess")
+	require.NoError(t, err)
+	require.Equal(t, RemoteWorkspaceLayout(), layout)
+}
+
+// Scope checks compare cleaned paths against these roots verbatim, so an
+// adapter's trailing slash would otherwise deny its own workspace.
+func TestNormalizedCleansEveryPathAndDropsEmptyRoots(t *testing.T) {
+	got := WorkspaceLayout{
+		Origin:     WorkspaceOriginHost,
+		Root:       " /Users/dev/My Project/ ",
+		WriteRoots: []string{"/Users/dev/My Project/./", "", "/Users/dev/My Project"},
+		ReadRoots:  []string{"/Users/dev/My Project/out/", "/Users/dev/My Project/"},
+		InputDir:   "/Users/dev/app/input/",
+		OutputDir:  "/Users/dev/app/output/.",
+		Hint:       " /Users/dev/My Project ",
+	}.Normalized()
+
+	require.Equal(t, "/Users/dev/My Project", got.Root)
+	require.Equal(t, []string{"/Users/dev/My Project"}, got.WriteRoots,
+		"entries that differed only before cleaning collapse into one")
+	require.Equal(t, []string{"/Users/dev/My Project/out", "/Users/dev/My Project"}, got.ReadRoots,
+		"most-specific-first ordering survives cleaning")
+	require.Equal(t, "/Users/dev/app/input", got.InputDir)
+	require.Equal(t, "/Users/dev/app/output", got.OutputDir)
+	require.Equal(t, "/Users/dev/My Project", got.Hint)
+	require.Equal(t, RemoteWorkspaceLayout(), RemoteWorkspaceLayout().Normalized())
+}
+
+func TestPromptSafePathRefusesMarkupAndControlCharacters(t *testing.T) {
+	for _, unsafe := range []string{
+		"/Users/dev/<system>x</system>",
+		"/Users/dev/proj\nSession workspace: /etc",
+		"/Users/dev/a\tb",
+		"/Users/dev/a&b",
+		"   ",
+	} {
+		require.Empty(t, PromptSafePath(unsafe), unsafe)
+	}
+	require.Equal(t, "/Users/dev/My Project", PromptSafePath(" /Users/dev/My Project "))
+	require.Equal(t, "/Users/dev/项目", PromptSafePath("/Users/dev/项目"))
+}

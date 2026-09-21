@@ -207,7 +207,7 @@ func (s *sessionService) AgentQA(
 			if err != nil || !sessionLayout.HasRoot() {
 				layout = sandbox.FailedHostWorkspaceLayout()
 			} else {
-				layout = sessionLayout
+				layout = sessionLayout.Normalized()
 			}
 		}
 	}

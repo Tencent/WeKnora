@@ -210,48 +210,37 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	return nil
 }
 
-// LayoutOutputDir is the directory Collect should scan when the backend
-// advertises a workspace layout with a separate output tree. Empty means
-// either there is no layout (use skills.ArtifactOutputDir) or the layout
-// has no output directory (call SkipCollect first; do not scan Root).
-func (c *ArtifactCollector) LayoutOutputDir(ctx context.Context, sessionID string) string {
+// CollectTarget reports the directory Collect should scan for this session,
+// and whether collection must be skipped entirely.
+//
+// skip is true when collecting would scan the user's project: the backend
+// advertised a workspace with no separate output tree, OutputDir is Root, or
+// the layout provider failed. An empty dir with skip false means the backend
+// advertises no layout at all — the caller's remote default applies.
+//
+// The directory and the skip decision come from one lookup on purpose. Asking
+// twice re-resolved the session's sandbox (a pin read plus a manager resolve)
+// and let the two answers disagree: a second lookup that failed after the
+// first succeeded returned no directory, sending a host session's collection
+// back to the remote /workspace/output.
+func (c *ArtifactCollector) CollectTarget(ctx context.Context, sessionID string) (string, bool) {
 	if c == nil {
-		return ""
+		return "", true
 	}
 	source := c.sessionSource(ctx, sessionID)
 	provider, ok := source.(sandbox.SessionWorkspaceLayoutProvider)
 	if !ok || provider == nil {
-		return ""
+		return "", false
 	}
 	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
 	if err != nil {
-		return ""
+		return "", true
 	}
-	return strings.TrimSpace(layout.OutputDir)
-}
-
-// SkipCollect is true when collecting would scan the user's project: the
-// backend advertised a workspace with no separate output tree, OutputDir is
-// Root, or the layout provider failed. No provider still means remote
-// /workspace/output collection.
-func (c *ArtifactCollector) SkipCollect(ctx context.Context, sessionID string) bool {
-	if c == nil {
-		return false
+	layout = layout.Normalized()
+	if layout.Root == "" || layout.OutputDir == "" || layout.OutputDir == layout.Root {
+		return "", true
 	}
-	source := c.sessionSource(ctx, sessionID)
-	provider, ok := source.(sandbox.SessionWorkspaceLayoutProvider)
-	if !ok || provider == nil {
-		return false
-	}
-	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
-	if err != nil || strings.TrimSpace(layout.Root) == "" {
-		return true
-	}
-	outputDir := strings.TrimSpace(layout.OutputDir)
-	if outputDir == "" {
-		return true
-	}
-	return filepath.Clean(outputDir) == filepath.Clean(strings.TrimSpace(layout.Root))
+	return layout.OutputDir, false
 }
 
 // newBoundedConfig fills in defaults so callers can pass a zero
