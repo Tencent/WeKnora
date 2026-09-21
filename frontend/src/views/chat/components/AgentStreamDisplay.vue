@@ -1713,9 +1713,8 @@ const answerFullyRendered = computed(
 watch(answerFullyRendered, (ready) => {
   emit('render-complete-change', ready);
   if (!ready) return;
-  // Clear before this reactive update renders, so a source that returned 404
-  // mid-stream gets one real final-attempt <img> node instead of remaining
-  // suppressed by the missing-source cache.
+  // Retry hidden 404 images and requests that are still in flight, now that
+  // completion guarantees the message's file references have been persisted.
   clearProtectedFileFailureCache();
   nextTick(async () => {
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);

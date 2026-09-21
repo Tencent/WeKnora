@@ -140,6 +140,7 @@ func TestQuickAnswerCompletionPersistsSandboxCheckpoint(t *testing.T) {
 	h := &Handler{messageService: stub}
 	h.completeQuickAnswerTurn(context.Background(), &sseStreamContext{
 		eventBus:         bus,
+		streamHandler:    streamHandler,
 		assistantMessage: message,
 	}, "", "")
 
