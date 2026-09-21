@@ -14,7 +14,9 @@ type WorkspaceOrigin int
 const (
 	// WorkspaceOriginUnspecified is the zero value. Tools treat it as remote.
 	WorkspaceOriginUnspecified WorkspaceOrigin = iota
+	// WorkspaceOriginRemote is a disposable container that owns /workspace.
 	WorkspaceOriginRemote
+	// WorkspaceOriginHost is a directory on the user's machine.
 	WorkspaceOriginHost
 )
 

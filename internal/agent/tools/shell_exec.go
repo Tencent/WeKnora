@@ -164,13 +164,18 @@ func shellExecDescription(l sandbox.WorkspaceLayout) string {
 	return rewriteRemoteWorkspaceCopy(legacyShellExecDescription, l)
 }
 
-const hostShellExecDescription = `Execute a command in %s. The process is OS-sandboxed on this machine.
-- CWD defaults to %s on every call; cd does not persist. work_dir must be that folder or a subdirectory.
-- Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly.
-- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
-- Edit files in place under %s.
-- Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Do not bypass permission or policy denials through another tool.
-- stdout/stderr have independent byte limits. Redirect verbose commands to a workspace log when output must be kept.`
+const hostShellExecDescription = "Execute a command in %s. The process is OS-sandboxed on this machine.\n" +
+	"- CWD defaults to %s on every call; cd does not persist. " +
+	"work_dir must be that folder or a subdirectory.\n" +
+	"- Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. " +
+	"Read known paths directly.\n" +
+	"- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. " +
+	"Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).\n" +
+	"- Edit files in place under %s.\n" +
+	"- Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. " +
+	"Do not bypass permission or policy denials through another tool.\n" +
+	"- stdout/stderr have independent byte limits. " +
+	"Redirect verbose commands to a workspace log when output must be kept."
 
 // ShellExecInput defines the input parameters for shell_exec.
 type ShellExecInput struct {
@@ -296,6 +301,7 @@ func (t *ShellExecTool) Description() string {
 	return shellExecDescription(t.boundLayout())
 }
 
+// Parameters rewrites workspace paths in the schema to match the session layout.
 func (t *ShellExecTool) Parameters() json.RawMessage {
 	if t != nil && t.installMode {
 		return t.schema

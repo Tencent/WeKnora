@@ -148,6 +148,7 @@ func (t *WriteSandboxFileTool) Description() string {
 	return writeSandboxDescription(t.boundLayout(), t.sizeGuidance)
 }
 
+// Parameters rewrites workspace paths in the schema to match the session layout.
 func (t *WriteSandboxFileTool) Parameters() json.RawMessage {
 	if t == nil {
 		return nil
@@ -169,11 +170,16 @@ func writeSandboxDescription(l sandbox.WorkspaceLayout, sizeGuidance string) str
 	return fmt.Sprintf(rewriteRemoteWorkspaceCopy(writeSandboxFileDescription, l), sizeGuidance)
 }
 
-const hostWriteSandboxFileDescription = `Create, overwrite, or append a text file in %s.
-Send both path and content (path first). Use edit_sandbox_file for small changes to an existing file. File content does not pass through shell quoting.
-Large files: first call uses mode=overwrite (default), subsequent calls use mode=append with only the next chunk. Keep calls in order and inspect the reported running byte count. A refused/truncated call wrote nothing; retry that chunk with complete JSON, never duplicate successful chunks.
-%s
-Binary content is not accepted. The result reports the absolute path and total size without echoing content.`
+const hostWriteSandboxFileDescription = "Create, overwrite, or append a text file in %s.\n" +
+	"Send both path and content (path first). Use edit_sandbox_file for small changes to an existing file. " +
+	"File content does not pass through shell quoting.\n" +
+	"Large files: first call uses mode=overwrite (default), " +
+	"subsequent calls use mode=append with only the next chunk. " +
+	"Keep calls in order and inspect the reported running byte count. " +
+	"A refused/truncated call wrote nothing; retry that chunk with complete JSON, " +
+	"never duplicate successful chunks.\n" +
+	"%s\n" +
+	"Binary content is not accepted. The result reports the absolute path and total size without echoing content."
 
 // writeSizeGuidance states how much content one call should carry and why.
 //

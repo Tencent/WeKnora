@@ -128,6 +128,7 @@ func (t *EditSandboxFileTool) Description() string {
 	return rewriteRemoteWorkspaceCopy(editSandboxFileTool.description, layout)
 }
 
+// Parameters rewrites workspace paths in the schema to match the session layout.
 func (t *EditSandboxFileTool) Parameters() json.RawMessage {
 	return schemaForLayout(editSandboxFileTool.schema, t.boundLayout())
 }
@@ -139,11 +140,13 @@ func (t *EditSandboxFileTool) boundLayout() sandbox.WorkspaceLayout {
 	return t.describeLayout(t.editor)
 }
 
-const hostEditSandboxFileDescription = `Apply exact text replacements to an existing text file in %s.
-Read the relevant content first. Send edits as an array, even for one replacement. 
-Every old_string matches the original file, must be unique unless replace_all=true, and must not overlap another edit. 
-Include enough surrounding text to identify the intended occurrence.
-All replacements are validated before writing; a failed match leaves the file unchanged. The result includes a diff. Use write_sandbox_file for new files.`
+const hostEditSandboxFileDescription = "Apply exact text replacements to an existing text file in %s.\n" +
+	"Read the relevant content first. Send edits as an array, even for one replacement. \n" +
+	"Every old_string matches the original file, must be unique unless replace_all=true, " +
+	"and must not overlap another edit. \n" +
+	"Include enough surrounding text to identify the intended occurrence.\n" +
+	"All replacements are validated before writing; a failed match leaves the file unchanged. " +
+	"The result includes a diff. Use write_sandbox_file for new files."
 
 // Execute reads the file, applies the replacement, and writes it back.
 func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {

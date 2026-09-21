@@ -168,12 +168,14 @@ func writeScopeErrorIn(l sandbox.WorkspaceLayout, requested string) string {
 	scope := layoutScopeName(l)
 	if strings.TrimSpace(l.InputDir) == "" {
 		return fmt.Sprintf(
-			"this tool only writes files under %s (not the directory roots themselves). path %q is outside that scope; use shell_exec for other locations",
+			"this tool only writes files under %s (not the directory roots themselves). "+
+				"path %q is outside that scope; use shell_exec for other locations",
 			scope, requested,
 		)
 	}
 	return fmt.Sprintf(
-		"this tool only writes files under %s (not under %s, and not the directory roots themselves). path %q is outside that scope; use shell_exec for other locations",
+		"this tool only writes files under %s (not under %s, and not the directory roots themselves). "+
+			"path %q is outside that scope; use shell_exec for other locations",
 		scope, modelSafeLayoutPath(l.InputDir, "the attachment directory"), requested,
 	)
 }

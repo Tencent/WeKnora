@@ -55,6 +55,8 @@ func (t *ReadFileTool) WithSkills(manager *skills.Manager, shell bool) *ReadFile
 	return t
 }
 
+// BindSession records the session so Description() and Parameters() advertise
+// that session's workspace instead of the remote /workspace copy.
 func (t *ReadFileTool) BindSession(id string) {
 	if t == nil {
 		return
@@ -63,6 +65,7 @@ func (t *ReadFileTool) BindSession(id string) {
 	t.updateDescription()
 }
 
+// Parameters rewrites workspace paths in the schema to match the session layout.
 func (t *ReadFileTool) Parameters() json.RawMessage {
 	if t == nil {
 		return nil
@@ -91,8 +94,9 @@ func (t *ReadFileTool) updateDescription() {
 			scopes = append(scopes, "Sandbox files: absolute or relative paths in "+layoutRootOrGeneric(layout)+". "+
 				"This does not read files outside that folder or publish files as user-visible artifacts.")
 		} else {
-			scopes = append(scopes, "Sandbox files: absolute paths inside the current session's sandbox, including /tmp; "+
-				"relative paths resolve from "+layoutHintOrRemote(layout)+". "+
+			scopes = append(scopes,
+				"Sandbox files: absolute paths inside the current session's sandbox, including /tmp; "+
+					"relative paths resolve from "+layoutHintOrRemote(layout)+". "+
 				"This does not read host files or publish files as user-visible artifacts.")
 		}
 	}
