@@ -34,6 +34,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/intentgate"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -534,6 +535,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
+
+	// IntentGate 策略：运行期 scope 解析缓存（设计 §8.3）+ CRUD handler。
+	// 策略变更后 handler 通过 PolicyStore.InvalidateTenant 失效缓存。
+	must(container.Provide(func(repo interfaces.IntentPolicyRepository) intentgate.PolicyStore {
+		return intentgate.NewPolicyStore(repo)
+	}))
+	must(container.Provide(handler.NewIntentPolicyHandler))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))
