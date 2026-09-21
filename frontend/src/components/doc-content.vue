@@ -22,6 +22,8 @@ import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
+import { isKnowledgeParseInFlight } from '@/views/knowledge/wikiStatusRefresh';
+import KnowledgeFileVersionsPanel from '@/views/knowledge/components/KnowledgeFileVersionsPanel.vue';
 import DocumentFileIcon from '@/views/knowledge/components/DocumentFileIcon.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 import { resolveKnowledgeDownloadFileName } from '@/views/knowledge/knowledgeDownloadFileName';
@@ -238,8 +240,14 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
-const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId", "showVersionHistory"]);
+const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange", "fileVersionUploaded"]);
+
+const versionHistoryVisible = ref(false);
+const versionHistoryPopup = ref();
+watch(() => [props.visible, props.showVersionHistory, props.details?.id], () => {
+  versionHistoryVisible.value = !!(props.visible && props.showVersionHistory && props.details?.id);
+}, { immediate: true });
 
 const applySummaryState = (summaryStatus?: string, description?: string) => {
   if (typeof summaryStatus === 'string' && summaryStatus) {
@@ -259,6 +267,7 @@ const applySummaryState = (summaryStatus?: string, description?: string) => {
 
 const isSummaryStatusInFlight = (status?: string) => status === 'pending' || status === 'processing';
 const summaryStatusRefreshing = computed(() => isSummaryStatusInFlight(props.details?.summary_status));
+const documentStatusRefreshing = computed(() => summaryStatusRefreshing.value || isKnowledgeParseInFlight(props.details?.parse_status));
 const canEditSummary = computed(() => canEditContent.value && !summaryStatusRefreshing.value);
 let summaryStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
 let summaryStatusPollGeneration = 0;
@@ -273,7 +282,7 @@ const stopSummaryStatusPolling = () => {
 
 const scheduleSummaryStatusPoll = () => {
   if (summaryStatusPollTimer !== null || !props.visible || !props.details?.id ||
-    !isSummaryStatusInFlight(props.details?.summary_status)) return;
+    !documentStatusRefreshing.value) return;
 
   const knowledgeID = props.details.id;
   const generation = summaryStatusPollGeneration;
@@ -284,26 +293,28 @@ const scheduleSummaryStatusPoll = () => {
       const result: any = await getKnowledgeDetails(knowledgeID);
       if (generation !== summaryStatusPollGeneration || props.details?.id !== knowledgeID) return;
       if (result?.success && result.data) {
+        // Ignore a status response for a source that was replaced during this request.
+        if (result.data.file_version && props.details.file_version && result.data.file_version !== props.details.file_version) throw new Error('File version changed');
+        const wasProcessing = isKnowledgeParseInFlight(props.details.parse_status);
+        if (result.data.parse_status) props.details.parse_status = result.data.parse_status;
         applySummaryState(result.data.summary_status, result.data.description);
+        if (wasProcessing && !isKnowledgeParseInFlight(props.details.parse_status)) emit('getDoc', 1);
       }
     } catch {
       // Keep the current status visible and retry while the drawer remains open.
     }
     if (generation === summaryStatusPollGeneration && props.visible && props.details?.id === knowledgeID &&
-      isSummaryStatusInFlight(props.details?.summary_status)) {
+      documentStatusRefreshing.value) {
       scheduleSummaryStatusPoll();
     }
   }, 1500);
 };
 
 watch(
-  () => [props.visible, props.details?.id, props.details?.summary_status],
-  ([visible, knowledgeID, summaryStatus]) => {
-    if (visible && knowledgeID && isSummaryStatusInFlight(summaryStatus as string)) {
-      scheduleSummaryStatusPoll();
-    } else {
-      stopSummaryStatusPolling();
-    }
+  () => [props.visible, props.details?.id, documentStatusRefreshing.value, props.details?.file_version],
+  ([visible, knowledgeID, refreshing]) => {
+    stopSummaryStatusPolling();
+    if (visible && knowledgeID && refreshing) scheduleSummaryStatusPoll();
   },
   { immediate: true },
 );
@@ -629,7 +640,7 @@ onMounted(() => {
   window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
 });
 
-watch(() => props.details?.id, () => {
+watch(() => [props.details?.id, props.details?.file_version], () => {
   cancelSummaryEdit();
   chunkPage.value = 1;
   loadedChunkPage.value = 1;
@@ -746,7 +757,7 @@ const canPreview = (): boolean => {
 };
 
 // 当文档详情加载完成时，file 类型自动切换到「预览」；音频类型使用 merged + 播放器
-watch(() => props.details?.id, (newId) => {
+watch(() => [props.details?.id, props.details?.file_version], ([newId]) => {
   // 清理旧音频
   if (audioBlobUrl.value) {
     URL.revokeObjectURL(audioBlobUrl.value);
@@ -1327,7 +1338,7 @@ const editingQuestionKey = ref('');
 const questionEditDraft = ref('');
 const savingQuestionKey = ref('');
 
-watch(() => props.details?.id, () => {
+watch(() => [props.details?.id, props.details?.file_version], () => {
   metadataEditing.value = false;
   editingChunkId.value = '';
   chunkHistoryPopup.value = '';
@@ -1577,7 +1588,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
     </teleport>
     <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
       :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
-      @close="handleClose">
+      @close="handleClose" @transitionend="versionHistoryPopup?.update()">
       <template #header>
         <div class="doc-drawer-header">
           <div class="doc-drawer-header-icon">
@@ -1594,6 +1605,20 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
                 <t-icon name="download" size="16px" />
               </template>
             </t-button>
+            <t-popup ref="versionHistoryPopup" v-if="details.type === 'file' && details.id" :visible="versionHistoryVisible"
+              trigger="click" placement="bottom-right" :z-index="2200" :overlay-inner-style="{ padding: '0', maxWidth: 'calc(100vw - 32px)' }"
+              @visible-change="versionHistoryVisible = $event">
+              <t-button class="header-action-btn" size="small" variant="text" shape="square" theme="default"
+                :title="$t('knowledgeBase.fileVersions.title')" :aria-label="$t('knowledgeBase.fileVersions.title')"
+                :aria-expanded="versionHistoryVisible">
+                <template #icon><t-icon name="history" size="16px" /></template>
+              </t-button>
+              <template #content>
+                <KnowledgeFileVersionsPanel :visible="visible && versionHistoryVisible" :knowledge="details"
+                  :can-upload="canEditContent && !!canDownloadKB" :can-download="!!canDownloadKB"
+                  @uploaded="emit('fileVersionUploaded', $event)" />
+              </template>
+            </t-popup>
             <t-button v-if="details.id && hasTimelineSpans" class="header-action-btn trace-entry-btn" size="small"
               variant="text" shape="square" :theme="traceEntryTheme" :title="traceEntryTitle" @click="openTimeline">
               <template #icon>
@@ -2130,8 +2155,8 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           </div>
 
           <div v-else-if="viewMode === 'preview'">
-            <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
-              :active="viewMode === 'preview'" />
+            <DocumentPreview :key="details.file_version" :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
+              :active="visible && viewMode === 'preview'" />
           </div>
         </section>
       </div>

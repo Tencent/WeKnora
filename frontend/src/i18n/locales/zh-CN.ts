@@ -6699,8 +6699,9 @@ export default {
   },
   knowledgeBase: {
     fileVersions: {
+      confirmUpload: "确认上传",
       title: "文件版本",
-      uploadHint: "上传此文档的新版本。历史原文件会保留，文档将重新解析并更新关联 Wiki。",
+      uploadHint: "上传后将重新解析文档，历史文件和已有引用会保留。",
       processing: "文档正在处理中，请等待完成后再上传新版本。",
       selectFile: "选择文件",
       upload: "上传新版本",

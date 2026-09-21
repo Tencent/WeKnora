@@ -493,8 +493,9 @@ export default {
   },
   knowledgeBase: {
     fileVersions: {
+      confirmUpload: "アップロードを確定",
       title: "ファイルのバージョン",
-      uploadHint: "この文書の新しいバージョンをアップロードします。過去のファイルは保持され、文書の再処理と関連 Wiki の更新が行われます。",
+      uploadHint: "文書を再処理します。過去のファイルと既存の参照は保持されます。",
       processing: "文書の処理が完了してから、新しいバージョンをアップロードしてください。",
       selectFile: "ファイルを選択",
       upload: "新しいバージョンをアップロード",

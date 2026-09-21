@@ -493,8 +493,9 @@ export default {
   },
   knowledgeBase: {
     fileVersions: {
+      confirmUpload: "Confirm upload",
       title: "File versions",
-      uploadHint: "Upload a new version of this document. Previous files remain available; the document will be reprocessed and linked Wiki pages updated.",
+      uploadHint: "The document will be reprocessed. Previous files and existing references are preserved.",
       processing: "Wait for document processing to finish before uploading a new version.",
       selectFile: "Choose file",
       upload: "Upload new version",

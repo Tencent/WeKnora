@@ -6,7 +6,7 @@ import ts from 'typescript'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import * as vue from 'vue'
 
-const source = readFileSync(new URL('./KnowledgeFileVersionsDialog.vue', import.meta.url), 'utf8')
+const source = readFileSync(new URL('./KnowledgeFileVersionsPanel.vue', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
 const compiled = ts.transpileModule(compileScript(descriptor, { id: 'versions-test', inlineTemplate: true }).content, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -72,7 +72,7 @@ async function fixture(options: {
     onUploaded: (id: string) => calls.uploaded.push(id),
     'onUpdate:visible': (visible: boolean) => { props.visible = visible },
   }) })
-  for (const [name, type] of [['t-dialog', 'dialog'], ['t-button', 'button'], ['t-tag', 'tag'], ['t-loading', 'loading'], ['t-pagination', 'pagination']]) {
+  for (const [name, type] of [['t-icon', 'icon'], ['t-button', 'button'], ['t-tag', 'tag'], ['t-loading', 'loading'], ['t-pagination', 'pagination']]) {
     app.component(name!, vue.defineComponent({ setup: (_props, { slots }) => () => vue.h(type!, {}, slots.default?.()) }))
   }
   app.mount(root)
@@ -81,27 +81,28 @@ async function fixture(options: {
   const find = (predicate: (el: Host) => boolean) => { const el = all(root, predicate)[0]; assert.ok(el); return el }
   const fire = async (el: Host, event = 'onClick', value?: unknown) => { await el.props[event](value); await settle() }
   const chooseFile = async () => { const file = { name: 'revised.pdf', size: 128 }; await fire(find(el => el.type === 'input'), 'onChange', { target: { files: [file] } }); return file }
-  const uploadButton = () => find(el => el.type === 'button' && textOf(el) === 'knowledgeBase.fileVersions.upload')
+  const uploadButton = () => find(el => el.type === 'button' && textOf(el).trim() === 'knowledgeBase.fileVersions.confirmUpload')
   return { props, calls, root, find, fire, settle, chooseFile, uploadButton, close: () => app.unmount() }
 }
 
 test('upload pins the current revision and retains it while paging older versions', async t => {
   const f = await fixture({ list: async (_id, offset) => offset ? { success: true, data: { items: [version(1, 'doc', false)], total: 21 } } : response(3, 'doc', 21) }); t.after(f.close)
-  assert.equal(f.uploadButton().props.disabled, true)
   const file = await f.chooseFile()
   await f.fire(f.find(el => el.type === 'pagination'), 'onCurrentChange', 2)
   assert.equal(f.uploadButton().props.disabled, false)
   await f.fire(f.uploadButton())
   assert.deepEqual(f.calls.upload, [['doc', file, 3]])
   assert.deepEqual(f.calls.uploaded, ['doc'])
-  assert.deepEqual(f.calls.list, [['doc', 0, 20], ['doc', 20, 20]])
+  assert.deepEqual(f.calls.list, [['doc', 0, 20], ['doc', 20, 20], ['doc', 0, 20]])
+  assert.equal(f.props.visible, true)
+  assert.ok(textOf(f.root).includes('knowledgeBase.fileVersions.upload'))
 })
 
 test('readers see history without original-file download or upload controls', async t => {
   const f = await fixture({ canUpload: false, canDownload: false }); t.after(f.close)
-  assert.ok(textOf(f.root).includes('file-3.pdf'))
+  assert.ok(textOf(f.root).includes('v3'))
   assert.equal(all(f.root, el => el.type === 'input').length, 0)
-  assert.equal(all(f.root, el => el.type === 'button' && textOf(el) === 'common.download').length, 0)
+  assert.equal(all(f.root, el => el.type === 'button' && String(el.props['aria-label']).startsWith('common.download')).length, 0)
   assert.deepEqual(f.calls.upload, [])
 })
 
@@ -112,11 +113,12 @@ test('processing documents cannot upload and a revision conflict refreshes the e
     if (conflict) { conflict = false; revision = 4; throw { status: 409 } }
     return { success: true }
   } }); t.after(f.close)
+  assert.equal(f.find(el => el.type === 'button' && textOf(el).trim() === 'knowledgeBase.fileVersions.upload').props.disabled, true)
   await f.chooseFile()
-  assert.equal(f.uploadButton().props.disabled, true)
-  await f.fire(f.uploadButton())
+  assert.equal(all(f.root, el => el.type === 'button' && textOf(el).trim() === 'knowledgeBase.fileVersions.confirmUpload').length, 0)
   assert.equal(f.calls.upload.length, 0)
   f.props.knowledge.parse_status = 'completed'; await f.settle()
+  await f.chooseFile()
   await f.fire(f.uploadButton())
   assert.deepEqual(f.calls.warnings, ['knowledgeBase.fileVersions.conflict'])
   assert.equal(f.calls.uploaded.length, 0)
@@ -130,8 +132,8 @@ test('an old history request cannot replace the newly selected document', async 
   const f = await fixture({ list: async id => id === 'doc' ? new Promise(resolve => { resolveOld = resolve }) : response(9, id) }); t.after(f.close)
   f.props.knowledge = { id: 'new-doc', file_name: 'new.pdf', parse_status: 'completed' }; await f.settle()
   resolveOld(response(3)); await f.settle()
-  assert.ok(textOf(f.root).includes('file-9.pdf'))
-  assert.equal(textOf(f.root).includes('file-3.pdf'), false)
+  assert.ok(textOf(f.root).includes('v9'))
+  assert.equal(textOf(f.root).includes('v3'), false)
   await f.chooseFile(); await f.fire(f.uploadButton())
   assert.equal(f.calls.upload[0]![0], 'new-doc')
   assert.equal(f.calls.upload[0]![2], 9)
@@ -139,8 +141,27 @@ test('an old history request cannot replace the newly selected document', async 
 
 test('history download targets the selected file revision', async t => {
   const f = await fixture({ list: async () => ({ success: true, data: { items: [version(3), version(2, 'doc', false)], total: 2 } }) }); t.after(f.close)
-  const previousRow = f.find(el => hasClass(el, 'version-row') && textOf(el).includes('file-2.pdf'))
-  const download = all(previousRow, el => el.type === 'button' && textOf(el) === 'common.download')[0]!
+  const previousRow = f.find(el => hasClass(el, 'version-row') && textOf(el).includes('v2'))
+  const download = all(previousRow, el => el.type === 'button' && el.props['aria-label'] === 'common.download · v2')[0]!
   await f.fire(download)
   assert.deepEqual(f.calls.download, [['doc', 2]])
+})
+
+
+test('switching documents clears a selected upload', async t => {
+  const f = await fixture(); t.after(f.close)
+  await f.chooseFile()
+  assert.ok(textOf(f.root).includes('revised.pdf'))
+  f.props.knowledge = { id: 'another-doc', file_name: 'another.pdf', parse_status: 'completed' }
+  await f.settle()
+  assert.equal(textOf(f.root).includes('revised.pdf'), false)
+  assert.ok(textOf(f.root).includes('knowledgeBase.fileVersions.upload'))
+})
+
+test('empty uploads are rejected before enabling confirmation', async t => {
+  const f = await fixture(); t.after(f.close)
+  await f.fire(f.find(el => el.type === 'input'), 'onChange', { target: { files: [{ name: 'empty.pdf', size: 0 }] } })
+  assert.deepEqual(f.calls.warnings, ['knowledgeBase.fileVersions.invalidSize'])
+  assert.equal(all(f.root, el => el.type === 'button' && textOf(el).trim() === 'knowledgeBase.fileVersions.confirmUpload').length, 0)
+  assert.equal(f.calls.upload.length, 0)
 })

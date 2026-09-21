@@ -45,7 +45,6 @@ import { waitForKnowledgeDeletion } from '@/utils/knowledgeDeletion';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
-import KnowledgeFileVersionsDialog from './components/KnowledgeFileVersionsDialog.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
@@ -1369,13 +1368,16 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
 const closeDoc = () => {
   isCardDetails.value = false;
 };
-const openCardDetails = (item: KnowledgeCard) => {
+const versionHistoryRequested = ref(false);
+const openCardDetails = (item: KnowledgeCard, showVersions = false) => {
+  versionHistoryRequested.value = showVersions;
   isCardDetails.value = true;
   getCardDetails(item);
 };
 
 // Open source document preview from WikiBrowser
 const openSourceDoc = (knowledgeId: string) => {
+  versionHistoryRequested.value = false;
   isCardDetails.value = true;
   getCardDetails({ id: knowledgeId });
 };
@@ -2066,14 +2068,12 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
   }
 };
 
-const versionHistoryItem = ref<KnowledgeCard | null>(null);
-const versionHistoryKnowledge = computed(() =>
-  cardList.value.find((item: KnowledgeCard) => item.id === versionHistoryItem.value?.id) || versionHistoryItem.value,
-);
-watch(kbId, () => { versionHistoryItem.value = null; });
 const onFileVersionUploaded = async (knowledgeId: string) => {
-  if (versionHistoryItem.value?.id !== knowledgeId) return;
-  versionHistoryItem.value = null;
+  if (details.id === knowledgeId) {
+    details.parse_status = 'pending';
+    details.description = '';
+    getCardDetails({ id: knowledgeId }, true);
+  }
   await loadKnowledgeFiles(kbId.value);
   scheduleWikiStatusProbes();
 };
@@ -2084,7 +2084,7 @@ const handleCardAction = (
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
-  if (action === 'versions' && item.type === 'file') { versionHistoryItem.value = item; return; }
+  if (action === 'versions' && item.type === 'file') { openCardDetails(item, true); return; }
   if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') {
@@ -2104,7 +2104,7 @@ const handleListAction = (
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
-  if (action === 'versions' && item.type === 'file') { versionHistoryItem.value = item; return; }
+  if (action === 'versions' && item.type === 'file') { openCardDetails(item, true); return; }
   if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
@@ -2477,7 +2477,8 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
-        :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
+        :canDownloadKB="canDownloadKnowledge" :kbId="kbId" :showVersionHistory="versionHistoryRequested"
+        @fileVersionUploaded="onFileVersionUploaded"
         @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
       </DocContent>
     </div>
@@ -2494,11 +2495,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
-
-  <KnowledgeFileVersionsDialog :visible="!!versionHistoryItem" :knowledge="versionHistoryKnowledge"
-    :can-upload="canEdit && canDownloadKnowledge" :can-download="canDownloadKnowledge"
-    @update:visible="(value) => { if (!value) versionHistoryItem = null; }"
-    @uploaded="onFileVersionUploaded" />
 
   <!-- 批量打标签弹窗 -->
   <BatchTagDialog @tags-changed="onTagCatalogChanged" :visible="batchTagDialogVisible"

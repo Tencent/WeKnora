@@ -6697,8 +6697,9 @@ export default {
   },
   knowledgeBase: {
     fileVersions: {
+      confirmUpload: "업로드 확인",
       title: "파일 버전",
-      uploadHint: "이 문서의 새 버전을 업로드합니다. 이전 파일은 보존되며 문서가 다시 처리되고 연결된 Wiki가 업데이트됩니다.",
+      uploadHint: "문서가 다시 처리됩니다. 이전 파일과 기존 참조는 유지됩니다.",
       processing: "문서 처리가 완료된 후 새 버전을 업로드하세요.",
       selectFile: "파일 선택",
       upload: "새 버전 업로드",
