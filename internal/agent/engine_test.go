@@ -710,7 +710,10 @@ func TestBuildSystemPromptUsesHostWorkspace(t *testing.T) {
 	registry := agenttools.NewToolRegistry()
 	registry.RegisterTool(newCountingTool("shell_exec"))
 	engine.toolRegistry = registry
-	engine.SetWorkspaceLayout(sandbox.WorkspaceLayout{Root: "/Users/dev/My Project"})
+	engine.SetWorkspaceLayout(sandbox.WorkspaceLayout{
+		Origin: sandbox.WorkspaceOriginHost,
+		Root:   "/Users/dev/My Project",
+	})
 	prompt := engine.buildSystemPrompt(context.Background())
 	require.Contains(t, prompt, "/Users/dev/My Project")
 	require.NotContains(t, prompt, "Session workspace: /workspace")

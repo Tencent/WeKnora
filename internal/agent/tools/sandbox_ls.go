@@ -104,7 +104,7 @@ func NewListSandboxFilesTool(source SandboxFileSource) *ListSandboxFilesTool {
 func (t *ListSandboxFilesTool) Description() string {
 	layout := sessionWorkspaceLayout(context.Background(), t.sessionID, t.source)
 	if layout.IsHost() {
-		return fmt.Sprintf(hostListSandboxFilesDescription, layout.Root)
+		return fmt.Sprintf(hostListSandboxFilesDescription, layoutRootOrGeneric(layout))
 	}
 	return rewriteRemoteWorkspaceCopy(listSandboxFilesTool.description, layout)
 }
@@ -147,7 +147,10 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 		}, nil
 	}
 
-	layout := sessionWorkspaceLayout(ctx, sessionID, t.source)
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.source)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
 
 	// Resolve target directory. When the caller omits path we scan the
 	// layout's default listing (remote: artifact output; host: workspace).
@@ -157,9 +160,12 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 	} else {
 		targetDir = resolveIn(layout, targetDir)
 	}
-	rootDir, ok := inspectableRootIn(layout, targetDir)
+	rootDir, ok := inspectRoot(layout, targetDir)
 	if !ok {
-		rootDir = "/"
+		return &types.ToolResult{
+			Success: false,
+			Error:   inspectScopeErrorIn(layout, input.Path),
+		}, nil
 	}
 
 	maxEntries := input.MaxEntries
@@ -268,9 +274,11 @@ func resolveSessionID(ctx context.Context) string {
 }
 
 // isUnderRoot reports whether clean sits at or underneath root. Both
-// arguments must already be cleaned. Readers use this to label workspace roots;
-// writers also use it to preserve attachment write protection. It is not a
-// privilege boundary (shell_exec can already reach the same files).
+// arguments must already be cleaned. On a remote sandbox this labels roots
+// and protects the attachment tree; shell_exec can still reach the same
+// files. On a host layout, write scope and work_dir clamping use this as
+// the tool-layer boundary — the OS sandbox PathGuard remains the real
+// privilege check, including symlink follow.
 func isUnderRoot(clean, root string) bool {
 	if clean == root {
 		return true

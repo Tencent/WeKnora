@@ -22,7 +22,11 @@ func sandboxOutputSnapshot(ctx context.Context, executor SandboxCommandExecutor,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	outputDir := layoutOutputDir(sessionWorkspaceLayout(ctx, sessionID, source))
+	layout, err := lookupWorkspaceLayout(ctx, sessionID, source)
+	if err != nil {
+		return nil, false
+	}
+	outputDir := layoutOutputDir(layout)
 	if outputDir == "" {
 		return nil, false
 	}

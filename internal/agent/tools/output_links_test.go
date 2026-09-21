@@ -24,7 +24,10 @@ type outputLinkExecutor struct {
 func (f *outputLinkExecutor) SessionWorkspaceLayout(
 	_ context.Context, _ string,
 ) (sandbox.WorkspaceLayout, error) {
-	return f.layout, nil
+	if f.layout.HasRoot() {
+		return f.layout, nil
+	}
+	return sandbox.RemoteWorkspaceLayout(), nil
 }
 
 type combinedOutputExecutor struct {
@@ -63,7 +66,7 @@ func TestShellOutputLinksPreferCombinedExecution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			executor := &combinedOutputExecutor{snapshot: tc.snapshot}
 			result, err := NewShellExecTool(executor, nil).Execute(shellExecTestContext(), json.RawMessage(
-				`{"command":"cat", "stdin":"hello\n", "work_dir":"/workspace/task",
+				`{"command":"cat", "stdin":"hello\n", "work_dir":"/tmp/task",
                   "timeout_sec":10, "env":{"KEY":"value"}}`))
 			require.NoError(t, err)
 			require.True(t, result.Success)
@@ -71,7 +74,7 @@ func TestShellOutputLinksPreferCombinedExecution(t *testing.T) {
 			require.Equal(t, 1, executor.calls)
 			require.Zero(t, executor.listed, "must not perform legacy scans around the combined operation")
 			require.Equal(t, "/workspace/output", executor.outputDir)
-			require.Equal(t, "/workspace/task", executor.opts.WorkDir)
+			require.Equal(t, "/tmp/task", executor.opts.WorkDir)
 			require.Equal(t, 10*time.Second, executor.opts.Timeout)
 			require.Equal(t, "value", executor.opts.Env["KEY"])
 			require.Contains(t, executor.command, "base64 -d")

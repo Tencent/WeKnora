@@ -539,13 +539,30 @@ func TestAttachmentPromptUsesLayoutRoot(t *testing.T) {
 	prompt := buildSandboxAttachmentsPrompt([]stagedSessionAttachment{{
 		Name: "report.pdf", Path: "/Users/dev/appdata/s1/input/ab12cd/report.pdf",
 	}}, sandbox.WorkspaceLayout{
+		Origin:    sandbox.WorkspaceOriginHost,
 		Root:      "/Users/dev/My Project",
 		InputDir:  "/Users/dev/appdata/s1/input",
 		OutputDir: "/Users/dev/appdata/s1/output",
 	})
 
 	require.Contains(t, prompt, `root="/Users/dev/appdata/s1/input"`)
+	require.Contains(t, prompt, "Edit files in place under /Users/dev/My Project")
 	require.NotContains(t, prompt, "/workspace")
+	require.NotContains(t, prompt, "only directory collected")
+}
+
+func TestAttachmentPromptOmitsRemoteOutputWhenHostHasNoOutputDir(t *testing.T) {
+	prompt := buildSandboxAttachmentsPrompt([]stagedSessionAttachment{{
+		Name: "report.pdf", Path: "/Users/dev/appdata/s1/input/ab12cd/report.pdf",
+	}}, sandbox.WorkspaceLayout{
+		Origin:   sandbox.WorkspaceOriginHost,
+		Root:     "/Users/dev/My Project",
+		InputDir: "/Users/dev/appdata/s1/input",
+	})
+
+	require.Contains(t, prompt, `root="/Users/dev/appdata/s1/input"`)
+	require.NotContains(t, prompt, "/workspace")
+	require.NotContains(t, prompt, "only directory collected")
 }
 
 // Regression: the remote contract must be byte-for-byte unchanged.

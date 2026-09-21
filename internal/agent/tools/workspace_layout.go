@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // sessionBound is embedded by sandbox tools so Description() and schema copy
@@ -22,17 +23,56 @@ func (s *sessionBound) BindSession(id string) {
 	s.sessionID = strings.TrimSpace(id)
 }
 
-// sessionWorkspaceLayout is the single Execute-time lookup: if the session
-// sandbox advertises a layout, use it; otherwise use the remote /workspace
-// contract. Tools do not store a layout of their own.
+const layoutRootToken = "\x00WEKNORA_LAYOUT_ROOT\x00"
+
+// lookupWorkspaceLayout is the Execute-time lookup.
+//
+// No provider keeps the remote /workspace contract (Cube/E2B/Docker that do
+// not advertise a layout). A provider that errors or returns an empty Root
+// is fail-closed: callers must not resolve relative paths under /workspace.
+func lookupWorkspaceLayout(
+	ctx context.Context, sessionID string, dep any,
+) (sandbox.WorkspaceLayout, error) {
+	provider, ok := dep.(sandbox.SessionWorkspaceLayoutProvider)
+	if !ok || provider == nil {
+		return sandbox.RemoteWorkspaceLayout(), nil
+	}
+	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+	if err != nil {
+		return sandbox.WorkspaceLayout{}, err
+	}
+	if !layout.HasRoot() {
+		return sandbox.WorkspaceLayout{}, fmt.Errorf("session workspace root is empty")
+	}
+	return layout, nil
+}
+
+// sessionWorkspaceLayout is for Description() / Parameters(). Unbound tools
+// (empty sessionID) keep the remote copy so host adapters that refuse
+// sessionID="" do not advertise /workspace after BindSession. A bound lookup
+// that fails uses a host origin with no root so copy does not say /workspace.
 func sessionWorkspaceLayout(ctx context.Context, sessionID string, dep any) sandbox.WorkspaceLayout {
-	if provider, ok := dep.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
-		layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
-		if err == nil && strings.TrimSpace(layout.Root) != "" {
-			return layout
+	layout, err := lookupWorkspaceLayout(ctx, sessionID, dep)
+	if err == nil {
+		return layout
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return sandbox.FailedHostWorkspaceLayout()
+}
+
+func executeWorkspaceLayout(
+	ctx context.Context, sessionID string, dep any,
+) (sandbox.WorkspaceLayout, *types.ToolResult) {
+	layout, err := lookupWorkspaceLayout(ctx, sessionID, dep)
+	if err != nil {
+		return sandbox.WorkspaceLayout{}, &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("session workspace is unavailable: %v", err),
 		}
 	}
-	return sandbox.RemoteWorkspaceLayout()
+	return layout, nil
 }
 
 // resolveIn gives file tools the same relative-path semantics as commands:
@@ -76,6 +116,19 @@ func inspectableRootIn(l sandbox.WorkspaceLayout, clean string) (string, bool) {
 	return "", false
 }
 
+// inspectRoot reports the metadata root for a read/list. Remote sandboxes
+// label misses as "/" and still inspect (tmp, installed skills). Host
+// layouts refuse anything outside ReadRoots.
+func inspectRoot(l sandbox.WorkspaceLayout, clean string) (string, bool) {
+	if root, ok := inspectableRootIn(l, clean); ok {
+		return root, true
+	}
+	if l.IsHost() {
+		return "", false
+	}
+	return "/", true
+}
+
 func writeScopeErrorIn(l sandbox.WorkspaceLayout, requested string) string {
 	scope := layoutScopeName(l)
 	if strings.TrimSpace(l.InputDir) == "" {
@@ -87,6 +140,13 @@ func writeScopeErrorIn(l sandbox.WorkspaceLayout, requested string) string {
 	return fmt.Sprintf(
 		"this tool only writes files under %s (not under %s, and not the directory roots themselves). path %q is outside that scope; use shell_exec for other locations",
 		scope, modelSafeLayoutPath(l.InputDir, "the attachment directory"), requested,
+	)
+}
+
+func inspectScopeErrorIn(l sandbox.WorkspaceLayout, requested string) string {
+	return fmt.Sprintf(
+		"this tool only reads files under %s. path %q is outside that scope",
+		layoutScopeName(l), requested,
 	)
 }
 
@@ -119,10 +179,28 @@ func layoutOutputDir(l sandbox.WorkspaceLayout) string {
 	return strings.TrimSpace(l.OutputDir)
 }
 
+func layoutRootOrGeneric(l sandbox.WorkspaceLayout) string {
+	if root := strings.TrimSpace(l.Root); root != "" {
+		return root
+	}
+	return "the session workspace"
+}
+
+func jsonSafePath(p string) string {
+	encoded, err := json.Marshal(p)
+	if err != nil || len(encoded) < 2 {
+		return p
+	}
+	return string(encoded[1 : len(encoded)-1])
+}
+
 // layoutDefaultListDir is what list_sandbox_files scans when the model omits
-// path. Remote sessions keep the artifact output tree; host sessions have no
-// such tree, so the workspace root is the listing.
+// path. Remote sessions keep the artifact output tree. Host sessions edit in
+// place: omitted path lists Root even when a separate collect OutputDir exists.
 func layoutDefaultListDir(l sandbox.WorkspaceLayout) string {
+	if l.IsHost() {
+		return strings.TrimSpace(l.Root)
+	}
 	if dir := layoutOutputDir(l); dir != "" {
 		return dir
 	}
@@ -150,9 +228,11 @@ func schemaForLayout(schema json.RawMessage, l sandbox.WorkspaceLayout) json.Raw
 	}
 	s := string(schema)
 	if l.IsHost() {
+		root := jsonSafePath(l.Root)
 		s = strings.ReplaceAll(s, sandbox.SessionInputRoot, "attachments")
-		s = strings.ReplaceAll(s, sandbox.SessionOutputRoot, l.Root)
-		s = strings.ReplaceAll(s, sandbox.SessionWorkspaceRoot, l.Root)
+		s = strings.ReplaceAll(s, sandbox.SessionOutputRoot, layoutRootToken)
+		s = strings.ReplaceAll(s, sandbox.SessionWorkspaceRoot, layoutRootToken)
+		s = strings.ReplaceAll(s, layoutRootToken, root)
 		return json.RawMessage(s)
 	}
 	return json.RawMessage(rewriteRemoteWorkspaceCopy(s, l))

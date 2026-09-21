@@ -273,18 +273,12 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 	if len(attachments) == 0 {
 		return ""
 	}
-	inputDir := layout.InputDir
-	outputDir := layout.OutputDir
-	workspace := layout.Root
+	inputDir := strings.TrimSpace(layout.InputDir)
 	if inputDir == "" {
-		inputDir = sandbox.RemoteWorkspaceLayout().InputDir
+		return ""
 	}
-	if outputDir == "" {
-		outputDir = sandbox.RemoteWorkspaceLayout().OutputDir
-	}
-	if workspace == "" {
-		workspace = sandbox.RemoteWorkspaceLayout().Root
-	}
+	outputDir := strings.TrimSpace(layout.OutputDir)
+	workspace := strings.TrimSpace(layout.Root)
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\n<sandbox_attachments root=\"%s\">\n", escapeAttachmentXML(inputDir))
 	for _, attachment := range attachments {
@@ -301,9 +295,24 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 		"and do not write into " + inputDir + ". Inspect them with read_file, " +
 		"or with shell_exec (ls/find) when a shell is available. " +
 		"Create generated files with write_sandbox_file " +
-		"and patch existing ones with edit_sandbox_file. $WEKNORA_SKILL_OUTPUT_DIR (" + outputDir + ") " +
-		"is the only directory collected for download, so put finished deliverables there " +
-		"and keep drafts and intermediate files in any other directory under " + workspace + ".</instruction>\n")
+		"and patch existing ones with edit_sandbox_file.")
+	if layout.IsHost() {
+		if workspace != "" {
+			b.WriteString(" Edit files in place under " + workspace + ".")
+		}
+	} else {
+		remote := sandbox.RemoteWorkspaceLayout()
+		if outputDir == "" {
+			outputDir = remote.OutputDir
+		}
+		if workspace == "" {
+			workspace = remote.Root
+		}
+		b.WriteString(" $WEKNORA_SKILL_OUTPUT_DIR (" + outputDir + ") " +
+			"is the only directory collected for download, so put finished deliverables there " +
+			"and keep drafts and intermediate files in any other directory under " + workspace + ".")
+	}
+	b.WriteString("</instruction>\n")
 	b.WriteString("</sandbox_attachments>")
 	return b.String()
 }

@@ -21,8 +21,11 @@ func TestRemoteWorkspaceLayoutMatchesLegacyConstants(t *testing.T) {
 }
 
 func TestHostWorkspaceLayoutIsHost(t *testing.T) {
-	require.True(t, WorkspaceLayout{Root: "/Users/dev/My Project"}.IsHost())
+	require.True(t, WorkspaceLayout{Origin: WorkspaceOriginHost, Root: SessionWorkspaceRoot}.IsHost())
+	require.True(t, WorkspaceLayout{Origin: WorkspaceOriginHost, Root: "/Users/dev/My Project"}.IsHost())
+	require.False(t, WorkspaceLayout{Root: "/Users/dev/My Project"}.IsHost())
 	require.False(t, WorkspaceLayout{}.IsHost())
+	require.False(t, RemoteWorkspaceLayout().IsHost())
 }
 
 // ReadRoots must stay most-specific-first: the reported root has to name the
@@ -38,7 +41,7 @@ func TestResolveWorkspacePathInJoinsRelativeAgainstLayoutRoot(t *testing.T) {
 	require.Equal(t, "/workspace/a.txt", ResolveWorkspacePathIn(remote, "a.txt"))
 	require.Equal(t, "/etc/passwd", ResolveWorkspacePathIn(remote, "/etc/passwd"))
 
-	host := WorkspaceLayout{Root: "/Users/dev/My Project"}
+	host := WorkspaceLayout{Origin: WorkspaceOriginHost, Root: "/Users/dev/My Project"}
 	require.Equal(t, "/Users/dev/My Project/a.txt", ResolveWorkspacePathIn(host, "a.txt"))
 }
 
