@@ -484,6 +484,68 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	})
 }
 
+// CreateKnowledgeFromYoutube godoc
+// @Summary      从 YouTube 批量创建知识
+// @Description  接收一批 YouTube 视频或播放列表链接，展开播放列表并逐个抓取字幕导入
+// @Tags         knowledge
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        request  body      object{urls=[]string,tag_ids=[]string,channel=string}  true  "YouTube 链接请求"
+// @Success      201      {object}  map[string]interface{}  "批量导入结果"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/youtube [post]
+func (h *KnowledgeHandler) CreateKnowledgeFromYoutube(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start creating knowledge from YouTube")
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
+		return
+	}
+
+	var req struct {
+		URLs    []string `json:"urls" binding:"required,min=1"`
+		TagIDs  []string `json:"tag_ids"`
+		Channel string   `json:"channel"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse YouTube request", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Creating knowledge from %d YouTube URL(s), knowledge base ID: %s",
+		len(req.URLs), secutils.SanitizeForLog(kbID))
+
+	result, err := h.kgService.CreateKnowledgeFromYoutube(ctx, kbID, req.URLs, req.TagIDs, req.Channel)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "YouTube ingest complete: %d succeeded, %d failed",
+		result.SuccessCount, len(result.Failed))
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
 // CreateManualKnowledge godoc
 // @Summary      手工创建知识
 // @Description  手工录入Markdown格式的知识内容
