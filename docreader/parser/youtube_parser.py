@@ -63,6 +63,7 @@ def _ytdlp_extract_info(url: str) -> dict:
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
+        "noplaylist": not is_playlist_url(url),
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
@@ -98,9 +99,9 @@ def _fetch_transcript_items(video_id: str) -> list[dict]:
     """Thin wrapper around youtube-transcript-api so tests can patch it."""
     from youtube_transcript_api import YouTubeTranscriptApi
 
-    return YouTubeTranscriptApi.get_transcript(
+    return YouTubeTranscriptApi().fetch(
         video_id, languages=_TRANSCRIPT_LANGUAGES
-    )
+    ).to_raw_data()
 
 
 class YoutubeEnumerateParser(BaseParser):
@@ -116,6 +117,9 @@ class YoutubeEnumerateParser(BaseParser):
     def parse_into_text(self, content: bytes) -> Document:
         url = endecode.decode_bytes(content)
         logger.info("Enumerating YouTube URL: %s", url)
+
+        if not is_youtube_url(url):
+            raise YoutubeParseError(f"Not a YouTube URL: {url}")
 
         try:
             info = _ytdlp_extract_info(url)

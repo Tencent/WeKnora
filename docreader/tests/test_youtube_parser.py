@@ -51,6 +51,16 @@ class TestYoutubeUrlHelpers(unittest.TestCase):
             is_playlist_url("https://www.youtube.com/watch?v=abc123&list=PL123")
         )
 
+    def test_youtube_transcript_api_has_expected_fetch_method(self):
+        """Guards against another breaking API change silently passing every
+        mocked test — this is the one place this module touches the real
+        youtube_transcript_api surface without mocking it."""
+        from youtube_transcript_api import YouTubeTranscriptApi
+
+        self.assertTrue(hasattr(YouTubeTranscriptApi, "fetch"))
+        result = YouTubeTranscriptApi.fetch
+        self.assertTrue(callable(result))
+
 
 class TestYoutubeEnumerateParser(unittest.TestCase):
     def test_single_video_returns_one_entry(self):
@@ -106,6 +116,57 @@ class TestYoutubeEnumerateParser(unittest.TestCase):
                 parser.parse_into_text(
                     b"https://www.youtube.com/playlist?list=PL123"
                 )
+
+    def test_non_youtube_url_raises_before_ytdlp(self):
+        parser = YoutubeEnumerateParser(title="")
+        with patch(
+            "docreader.parser.youtube_parser._ytdlp_extract_info",
+        ) as mock_extract:
+            with self.assertRaises(YoutubeParseError):
+                parser.parse_into_text(b"https://example.com/watch?v=abc123")
+        mock_extract.assert_not_called()
+
+
+class TestYtdlpNoplaylistOption(unittest.TestCase):
+    """Verifies _ytdlp_extract_info sets `noplaylist` consistently with
+    is_playlist_url, so a `watch?v=X&list=Y` URL behaves the same (single
+    video) whether it goes through YoutubeTranscriptParser (which checks
+    is_playlist_url directly) or YoutubeEnumerateParser/yt-dlp."""
+
+    def _captured_opts(self, url):
+        from docreader.parser import youtube_parser
+
+        captured = {}
+
+        class FakeYoutubeDL:
+            def __init__(self, opts):
+                captured["opts"] = opts
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+            def extract_info(self, url, download=False):
+                return {"_type": "video", "id": "abc123"}
+
+        fake_yt_dlp = type("FakeModule", (), {"YoutubeDL": FakeYoutubeDL})
+        with patch.dict("sys.modules", {"yt_dlp": fake_yt_dlp}):
+            youtube_parser._ytdlp_extract_info(url)
+        return captured["opts"]
+
+    def test_noplaylist_true_for_video_with_list_param(self):
+        opts = self._captured_opts(
+            "https://www.youtube.com/watch?v=abc123&list=PL123"
+        )
+        self.assertTrue(opts["noplaylist"])
+
+    def test_noplaylist_false_for_playlist_url(self):
+        opts = self._captured_opts(
+            "https://www.youtube.com/playlist?list=PL123"
+        )
+        self.assertFalse(opts["noplaylist"])
 
 
 class TestYoutubeTranscriptParser(unittest.TestCase):

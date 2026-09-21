@@ -501,7 +501,7 @@ requires-dist = [
     { name = "textract", specifier = "==1.5.0" },
     { name = "trafilatura", specifier = ">=2.0.0" },
     { name = "xlrd", specifier = ">=2.0.0" },
-    { name = "youtube-transcript-api", specifier = ">=0.6.2" },
+    { name = "youtube-transcript-api", specifier = ">=1.0,<2" },
     { name = "yt-dlp", specifier = ">=2024.12.13" },
 ]
 
