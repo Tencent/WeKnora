@@ -998,6 +998,22 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			})
 			return err
 		}
+		versionCtx := ctx
+		if s.storageResolver != nil && s.tenantRepo != nil {
+			if tenant, err := s.tenantRepo.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
+				versionCtx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+			}
+		}
+		versionFiles := &knowledgeService{
+			fileSvc: s.fileSvc, storageResolver: s.storageResolver,
+			resourceCatalog: s.resourceCatalog, tenantRepo: s.tenantRepo,
+		}
+		for _, knowledge := range knowledgeList {
+			cleanupKnowledgeFileVersions(versionCtx, s.kgRepo, tenantID, knowledge.ID,
+				func(path string) interfaces.FileService {
+					return versionFiles.resolveFileServiceForPath(versionCtx, &types.KnowledgeBase{}, path)
+				})
+		}
 	}
 
 	logger.Infof(ctx, "KB resource cleanup finished, knowledge base ID: %s", kbID)

@@ -15,6 +15,7 @@
 | --- | --- |
 | 建库、改分块大小与索引开关 | 知识库编辑弹窗的「分块」「索引策略」页签 |
 | 上传文件、导入网页或编写 Markdown | 文档列表页的上传区，或「新建」下拉 |
+| 更新原文件、下载历史版本 | 文件卡片或列表的「更多 → 文件版本」（见 [文件版本管理](#文件版本管理)） |
 | 用文件夹整理文档 | 文档列表左侧的文件夹树；上传整个目录会保留目录结构（见 [文件夹树](#_3-4-文件夹树)） |
 | 给文档打标签（一篇可多个） | 单篇在详情里改；多篇勾选后用批量操作栏的「标签」（见 [标签（KnowledgeTag）](#_3-5-标签-knowledgetag)） |
 | 检查解析结果、改错字 | 打开文档 → 分块列表 → 直接编辑分块（见 [分块编辑与版本历史](#_3-6-分块编辑与版本历史)） |
@@ -32,6 +33,14 @@
 创建知识库时选择内容类型、模型与索引方式，再上传文件、导入网页或编写 Markdown。普通资料使用文档库，标准问答使用 [FAQ 库](17-faq.md)。向量存储创建后不可更改，应在建库前确定。
 
 上传确认页可设置标签和本批文件的解析选项。单次处理选项优先于知识库配置，知识库配置再优先于空间默认值。上传后可在列表查看解析进度；已有文档需要重新解析才能使用修改后的分块参数。
+
+## 文件版本管理
+
+在文件卡片或列表的「更多 → 文件版本」中查看当前与历史版本，包括文件名、大小和上传时间。有写权限且符合原文件下载权限的用户，可以选择文件并点击「上传新版本」，也可下载历史原文件；只读用户通过文件旁的历史图标查看版本信息。
+
+新版本保留原知识 ID，文档级引用继续指向同一知识条目，并重新解析文件、更新索引。历史原文件会保留；更新前已有的文件按 v1 展示。与当前版本文件名和内容均相同的上传不会新增版本。文档处于待处理、处理中或收尾阶段时，需等待完成后再上传。
+
+若其他用户已更新同一文档，上传会提示冲突并刷新历史记录，检查后再重试。需要恢复旧内容时，先下载对应历史原文件，再作为新版本上传；这会产生新的版本号并重新处理文档。
 
 ## 整理文件夹与标签
 
@@ -265,6 +274,9 @@ stateDiagram-v2
 | POST | `/knowledge/:id/reparse`、`/knowledge/:id/cancel-parse` | 重解析 / 取消解析 | 同上 |
 | POST | `/knowledge/:id/regenerate-summary` | 重新生成文档摘要 | 同上 |
 | GET | `/knowledge/:id/download` | 下载原始文件 | Contributor+ + KBAccessWrite |
+| GET | `/knowledge/:id/versions` | 文件版本历史（含当前版本） | Viewer+ + KBAccessRead |
+| POST | `/knowledge/:id/versions` | 上传文件新版本 | OwnedKnowledgeKBOrAdmin + KBAccessWrite |
+| GET | `/knowledge/:id/versions/:version/download` | 下载指定版本原文件 | Contributor+ + KBAccessWrite |
 | GET | `/knowledge/:id/preview` | 预览文件 | Viewer+ + KBAccessRead |
 | PUT | `/knowledge/tags` | 批量更新标签 | Contributor+ / `ingest` |
 | POST | `/knowledge/batch-reparse`、`/knowledge/batch-delete` | 批量重解析 / 删除 | Contributor+ / `ingest` |

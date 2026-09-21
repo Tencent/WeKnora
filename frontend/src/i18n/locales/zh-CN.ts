@@ -6698,6 +6698,20 @@ export default {
     }
   },
   knowledgeBase: {
+    fileVersions: {
+      title: "文件版本",
+      uploadHint: "上传此文档的新版本。历史原文件会保留，文档将重新解析并更新关联 Wiki。",
+      processing: "文档正在处理中，请等待完成后再上传新版本。",
+      selectFile: "选择文件",
+      upload: "上传新版本",
+      current: "当前版本",
+      empty: "暂无版本记录",
+      loadFailed: "加载版本历史失败。",
+      uploadFailed: "上传新版本失败。",
+      uploaded: "新版本已上传，正在处理文档。",
+      conflict: "文档已更新、正在处理或文件内容重复。已刷新版本历史，请检查后重试。",
+      invalidSize: "请选择非空且不超过 {size} MB 的文件。",
+    },
     tagAddAction: '添加标签',
     documentCount: '{count} 个文档',
     filters: '筛选',

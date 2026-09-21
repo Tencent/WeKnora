@@ -151,3 +151,29 @@ func TestBatchKnowledgeDownloadRejectsReadOnlySharedKB(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
 }
+
+func TestKnowledgeFileVersionDownloadRequiresWritePermission(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		role   types.TenantRole
+		source uint64
+		share  interfaces.KBShareService
+	}{
+		{name: "own knowledge viewer", role: types.TenantRoleViewer, source: 1},
+		{
+			name: "read only shared knowledge", role: types.TenantRoleContributor, source: 2,
+			share: &downloadKBShareStub{permission: types.OrgRoleViewer, source: 2},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := newKnowledgeDownloadRouteTestEngine(t, tt.role,
+				&types.Knowledge{ID: "knowledge-1", KnowledgeBaseID: "kb-1", TenantID: tt.source},
+				&types.KnowledgeBase{ID: "kb-1", TenantID: tt.source}, tt.share)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledge/knowledge-1/versions/1/download", nil)
+			engine.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusForbidden, rec.Code,
+				"historical bytes follow current original download permissions: %s", rec.Body.String())
+		})
+	}
+}

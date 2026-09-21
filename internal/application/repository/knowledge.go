@@ -40,7 +40,7 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount", "FileVersion", "FileVersionCreatedAt"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -336,6 +336,21 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 	// to support unrelated updates when the caller did not provide the field.
 	if knowledge.CustomMetadata == nil {
 		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
+	}
+	// A worker holding an earlier source must never write its old file path
+	// back over a newly uploaded version. Updates avoids Save's insert fallback.
+	if knowledge.FileVersion > 0 {
+		result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+			Where("id = ? AND tenant_id = ? AND file_version = ?",
+				knowledge.ID, knowledge.TenantID, knowledge.FileVersion).
+			Select("*").Omit(omit...).Updates(knowledge)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrKnowledgeFileVersionConflict
+		}
+		return nil
 	}
 	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err

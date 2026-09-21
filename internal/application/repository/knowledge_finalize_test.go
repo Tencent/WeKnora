@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS knowledges (
     file_type VARCHAR(50),
     file_size BIGINT,
     file_path TEXT,
+    file_version INTEGER NOT NULL DEFAULT 1,
+    file_version_created_at DATETIME,
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata TEXT,

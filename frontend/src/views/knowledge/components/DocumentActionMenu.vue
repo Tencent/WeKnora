@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'download'): void;
+  (e: 'versions'): void;
   (e: 'edit'): void;
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
@@ -49,6 +50,11 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   >
     <t-icon class="icon" name="download" />
     <span>{{ $t('common.download') }}</span>
+  </div>
+
+  <div v-if="item.type === 'file'" class="doc-action-menu-item" @click.stop="emit('versions')">
+    <t-icon class="icon" name="history" />
+    <span>{{ $t('knowledgeBase.fileVersions.title') }}</span>
   </div>
 
   <!-- 编辑文档 -->

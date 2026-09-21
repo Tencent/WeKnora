@@ -172,7 +172,9 @@ type Knowledge struct {
 	// File type of the knowledge
 	FileType string `json:"file_type"`
 	// File size of the knowledge
-	FileSize int64 `json:"file_size"`
+	FileSize             int64      `json:"file_size"`
+	FileVersion          int        `json:"file_version" gorm:"not null;default:1"`
+	FileVersionCreatedAt *time.Time `json:"file_version_created_at,omitempty"`
 	// File hash of the knowledge
 	FileHash string `json:"file_hash"`
 	// File path of the knowledge

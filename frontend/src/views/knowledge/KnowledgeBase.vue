@@ -45,6 +45,7 @@ import { waitForKnowledgeDeletion } from '@/utils/knowledgeDeletion';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
+import KnowledgeFileVersionsDialog from './components/KnowledgeFileVersionsDialog.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
@@ -2065,12 +2066,25 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
   }
 };
 
+const versionHistoryItem = ref<KnowledgeCard | null>(null);
+const versionHistoryKnowledge = computed(() =>
+  cardList.value.find((item: KnowledgeCard) => item.id === versionHistoryItem.value?.id) || versionHistoryItem.value,
+);
+watch(kbId, () => { versionHistoryItem.value = null; });
+const onFileVersionUploaded = async (knowledgeId: string) => {
+  if (versionHistoryItem.value?.id !== knowledgeId) return;
+  versionHistoryItem.value = null;
+  await loadKnowledgeFiles(kbId.value);
+  scheduleWikiStatusProbes();
+};
+
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'versions' | 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'versions' && item.type === 'file') { versionHistoryItem.value = item; return; }
   if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') {
@@ -2086,10 +2100,11 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'versions' | 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'versions' && item.type === 'file') { versionHistoryItem.value = item; return; }
   if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
@@ -2479,6 +2494,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
+
+  <KnowledgeFileVersionsDialog :visible="!!versionHistoryItem" :knowledge="versionHistoryKnowledge"
+    :can-upload="canEdit && canDownloadKnowledge" :can-download="canDownloadKnowledge"
+    @update:visible="(value) => { if (!value) versionHistoryItem = null; }"
+    @uploaded="onFileVersionUploaded" />
 
   <!-- 批量打标签弹窗 -->
   <BatchTagDialog @tags-changed="onTagCatalogChanged" :visible="batchTagDialogVisible"

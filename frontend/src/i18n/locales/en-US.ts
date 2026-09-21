@@ -492,6 +492,20 @@ export default {
     sharedTooltip: 'Accessed from an external workspace via a shared space'
   },
   knowledgeBase: {
+    fileVersions: {
+      title: "File versions",
+      uploadHint: "Upload a new version of this document. Previous files remain available; the document will be reprocessed and linked Wiki pages updated.",
+      processing: "Wait for document processing to finish before uploading a new version.",
+      selectFile: "Choose file",
+      upload: "Upload new version",
+      current: "Current",
+      empty: "No versions yet",
+      loadFailed: "Unable to load version history.",
+      uploadFailed: "Unable to upload the new version.",
+      uploaded: "New version uploaded. Document processing has started.",
+      conflict: "The document changed, is processing, or this file already exists. History has been refreshed; check it before retrying.",
+      invalidSize: "Choose a non-empty file up to {size} MB.",
+    },
     tagAddAction: 'Add tags',
     documentCount: '{count} documents',
     filters: 'Filters',

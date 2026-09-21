@@ -458,6 +458,69 @@ curl -X POST $BASE/api/v1/knowledge/k-1/cancel-parse -H "Authorization: Bearer $
 curl -OJ $BASE/api/v1/knowledge/k-1/download -H "Authorization: Bearer $TOKEN"
 ```
 
+### GET /api/v1/knowledge/:id/versions
+
+用途：查询文件知识的版本历史，按版本号降序返回，包含当前版本。仅支持 `type=file` 且存在源文件的知识；已有文件兼容为 v1。权限：Viewer+ 且 KB read；API key `retrieve`/full。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `offset` | integer | 否 | 偏移量，默认 0，不小于 0 |
+| `limit` | integer | 否 | 每页条数，默认 20，范围 1–100 |
+
+响应：200 `{"success":true,"data":{"items":[KnowledgeFileVersion],"total":2}}`。`total` 包含当前版本。
+
+| 版本字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 历史版本记录 ID；当前版本为即时快照，此字段可为空 |
+| `knowledge_id` | string | 保持不变的知识 ID |
+| `version` | integer | 从 1 开始的版本号；用于下载路由 |
+| `file_name` / `file_type` | string | 该版本的原文件名 / 类型 |
+| `file_size` | integer | 文件大小，字节 |
+| `file_hash` | string | 文件内容哈希 |
+| `created_at` | string | 版本创建时间 |
+| `is_current` | boolean | 是否为当前版本 |
+
+响应不包含存储路径。
+
+```bash
+curl "$BASE/api/v1/knowledge/k-1/versions?offset=0&limit=20" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/knowledge/:id/versions
+
+用途：上传同一文件知识的新版本，保留知识 ID 和文档级引用，归档此前的原文件并启动重新解析。权限：KB 创建者 OR Admin+ 且 KB write；API key `ingest`/full。
+
+请求体：`multipart/form-data`。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `file` | file | 是 | 新版本原文件，受部署的文件大小和类型限制 |
+| `expected_version` | integer | 否 | 调用方读取到的当前版本号，必须大于 0；建议填写以检测并发更新 |
+
+响应：200 `{"success":true,"data":{Knowledge}}`，其中 `file_version` 为新的当前版本号。文件解析与关联 Wiki 更新异步执行，HTTP 成功不代表解析已完成。
+
+以下情况返回 409：`expected_version` 与当前版本不一致；文档处于 `pending`、`processing` 或 `finalizing`；上传文件与当前版本文件名、内容及目录均相同。冲突或重复上传不会新增版本，应刷新版本历史、确认文档状态后再重试。相同内容的文件改名上传仍可构成新版本。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge/k-1/versions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F 'file=@./manual.pdf' -F 'expected_version=2'
+```
+
+### GET /api/v1/knowledge/:id/versions/:version/download
+
+用途：下载指定版本的原文件，包括当前版本。权限与当前原文件下载一致：Contributor+ 且 KB write；API key `retrieve`/full。只读用户能查看历史元数据，不能下载原文件。
+
+路径参数 `version` 为正整数版本号。响应：200 二进制流（`application/octet-stream`），文件名使用该版本的原文件名；不存在的版本返回 404。
+
+```bash
+curl -OJ "$BASE/api/v1/knowledge/k-1/versions/1/download" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+恢复旧内容时，可下载历史版本，再调用上传新版本接口。这会创建新的版本号并重新解析，不会把当前版本号改回旧值。
+
 ### GET /api/v1/knowledge/:id/preview
 
 用途：预览解析后的文件内容。权限：Viewer+，KB read。

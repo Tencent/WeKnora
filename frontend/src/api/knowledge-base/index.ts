@@ -423,6 +423,35 @@ export function downKnowledgeDetails(id: string) {
   return getDown(`/api/v1/knowledge/${id}/download`);
 }
 
+export interface KnowledgeFileVersion {
+  id: string;
+  knowledge_id: string;
+  version: number;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  file_hash: string;
+  created_at: string;
+  is_current: boolean;
+}
+
+export function listKnowledgeFileVersions(id: string, offset = 0, limit = 20) {
+  return get<{ success: boolean; data: { items: KnowledgeFileVersion[]; total: number } }>(
+    `/api/v1/knowledge/${encodeURIComponent(id)}/versions?offset=${offset}&limit=${limit}`,
+  );
+}
+
+export function uploadKnowledgeFileVersion(id: string, file: File, expectedVersion: number) {
+  const data = new FormData();
+  data.append('file', file);
+  data.append('expected_version', String(expectedVersion));
+  return postUpload(`/api/v1/knowledge/${encodeURIComponent(id)}/versions`, data);
+}
+
+export function downloadKnowledgeFileVersion(id: string, version: number): Promise<Blob> {
+  return getDown(`/api/v1/knowledge/${encodeURIComponent(id)}/versions/${version}/download`);
+}
+
 // 使用已有登录和租户请求头下载 ZIP，不将凭据放入下载链接。
 export function batchDownloadKnowledge(kbId: string, ids: string[], signal?: AbortSignal): Promise<Blob> {
   return post<Blob>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/knowledge/batch-download`, { ids }, {

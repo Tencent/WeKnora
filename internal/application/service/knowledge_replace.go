@@ -22,14 +22,13 @@ import (
 // Object storage is not transactional, so the steps are ordered to keep the
 // row pointing at a file that exists:
 //  1. save the new file under a fresh storage path;
-//  2. dequeue any in-flight parse of the previous source;
-//  3. point the row at the new file and mark it pending in one UPDATE;
-//  4. ReparseKnowledge cleans the old chunks/index/graph and enqueues parsing;
-//  5. only after that succeeds, delete the old file.
+//  2. archive the previous source and atomically switch to the next version;
+//  3. ReparseKnowledge cleans the old chunks/index/graph and enqueues parsing;
+//  4. retain the old file for historical downloads.
 //
-// If step 3 fails the new file is discarded, unless a re-read shows the write
+// If step 2 fails the new file is discarded, unless a re-read shows the write
 // committed despite the error — in that case reparse continues so the row is
-// not left completed against a new file. If step 4 fails the previous source
+// not left completed against a new file. If step 3 fails the previous source
 // columns are restored (marked failed, since cleanup may already have removed
 // the old index) and the new file is discarded. A file is never deleted while
 // the row may still reference it.
@@ -56,6 +55,15 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	}
 	if existing.ParseStatus == types.ParseStatusDeleting {
 		return nil, werrors.NewBadRequestError("knowledge is being deleted")
+	}
+	versionRepo, versioned := s.repo.(interfaces.KnowledgeFileVersionRepository)
+	expected, _ := ctx.Value(expectedFileVersionKey{}).(int)
+	if expected > 0 && expected != existing.CurrentFileVersion() {
+		return nil, werrors.NewConflictError("file version changed; refresh and retry")
+	}
+	if versioned && (existing.ParseStatus == types.ParseStatusPending ||
+		existing.ParseStatus == types.ParseStatusProcessing || existing.ParseStatus == types.ParseStatusFinalizing) {
+		return nil, werrors.NewConflictError("file is still being processed; wait before uploading another version")
 	}
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
@@ -143,7 +151,9 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	// Drop queued parse tasks of the previous source before the row
 	// points at the new file. The new TypeDocumentProcess task is
 	// enqueued later by ReparseKnowledge.
-	s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
+	if !versioned {
+		s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
+	}
 
 	sourceColumns := map[string]interface{}{
 		"title":         title,
@@ -159,12 +169,18 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		"error_message": "",
 		"updated_at":    time.Now(),
 	}
-	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, sourceColumns); err != nil {
+	updateSource := func() error { return s.repo.UpdateKnowledgeColumns(ctx, existing.ID, sourceColumns) }
+	if versioned {
+		sourceColumns["file_version"] = existing.CurrentFileVersion() + 1
+		sourceColumns["file_version_created_at"] = sourceColumns["updated_at"]
+		updateSource = func() error { return versionRepo.ReplaceKnowledgeSource(ctx, existing, sourceColumns) }
+	}
+	if err := updateSource(); err != nil {
 		current, readErr := s.repo.GetKnowledgeByID(cleanupCtx, existing.TenantID, existing.ID)
 		if readErr != nil || current == nil || current.FilePath != newPath {
 			logger.Errorf(ctx, "Failed to point knowledge %s at its replacement file: %v", existing.ID, err)
 			s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
-			return nil, err
+			return nil, mapFileVersionError(err)
 		}
 		logger.Warnf(ctx, "Source update for knowledge %s reported an error after committing; continuing reparse: %v",
 			existing.ID, err)
@@ -174,7 +190,7 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	if err != nil {
 		logger.Errorf(ctx, "Reparse after replacing the file of knowledge %s failed, restoring source: %v",
 			existing.ID, err)
-		if rerr := s.repo.UpdateKnowledgeColumns(cleanupCtx, existing.ID, map[string]interface{}{
+		restoreColumns := map[string]interface{}{
 			"title":         existing.Title,
 			"file_name":     existing.FileName,
 			"folder_path":   existing.FolderPath,
@@ -186,14 +202,23 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 			"parse_status":  types.ParseStatusFailed,
 			"error_message": "File replacement failed; reparse to rebuild the index",
 			"updated_at":    time.Now(),
-		}); rerr != nil {
+		}
+		restoreSource := func() error { return s.repo.UpdateKnowledgeColumns(cleanupCtx, existing.ID, restoreColumns) }
+		if versioned {
+			restoreColumns["file_version"] = existing.CurrentFileVersion()
+			restoreColumns["file_version_created_at"] = existing.FileVersionCreatedAt
+			restoreSource = func() error {
+				return versionRepo.RestoreKnowledgeSource(cleanupCtx, existing, newPath, restoreColumns)
+			}
+		}
+		if rerr := restoreSource(); rerr != nil {
 			logger.Errorf(ctx, "Failed to restore the source of knowledge %s: %v", existing.ID, rerr)
 		}
 		s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
 		return nil, err
 	}
 
-	if existing.FilePath != newPath {
+	if !versioned && existing.FilePath != newPath {
 		oldFileSvc := s.resolveFileServiceForPath(cleanupCtx, kb, existing.FilePath)
 		if err := oldFileSvc.DeleteFile(cleanupCtx, existing.FilePath); err != nil {
 			logger.Warnf(ctx, "Failed to delete replaced file %s of knowledge %s: %v",
