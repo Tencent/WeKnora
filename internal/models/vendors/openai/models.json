@@ -29,6 +29,10 @@
 
     {"id": "text-embedding-3-small", "name": "text-embedding-3-small", "type": "Embedding", "dimension": 1536, "context_window": 8191, "cost": {"input": 0.02, "output": 0}},
     {"id": "text-embedding-3-large", "name": "text-embedding-3-large", "type": "Embedding", "dimension": 3072, "context_window": 8191, "cost": {"input": 0.13, "output": 0}},
-    {"id": "text-embedding-ada-002", "name": "text-embedding-ada-002", "type": "Embedding", "dimension": 1536, "context_window": 8192, "cost": {"input": 0.1, "output": 0}}
+    {"id": "whisper-1", "name": "Whisper", "type": "ASR", "compat": {"response_format": "verbose_json"}, "source": "https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create"},
+    {"id": "gpt-transcribe", "name": "GPT Transcribe", "type": "ASR", "source": "https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create"},
+    {"id": "gpt-4o-transcribe", "name": "GPT-4o Transcribe", "type": "ASR", "source": "https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create"},
+    {"id": "gpt-4o-mini-transcribe", "name": "GPT-4o mini Transcribe", "type": "ASR", "source": "https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create"},
+    {"id": "text-embedding-ada-002", "name": "text-embedding-ada-002", "type": "Embedding", "dimension": 1536, "context_window": 8192, "cost": {"input": 0.1, "output": 0}, "compat": {"dimensions_field": ""}}
   ]
 }

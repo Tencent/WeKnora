@@ -2294,7 +2294,9 @@ function pruneSelectedSkills() {
 async function syncInstalledSkills(force = false) {
   autoBindSoleSandbox()
   const configId = formData.value.config.sandbox_config_id || ''
-  await editorResources.ensureSkills(configId, force)
+  // The editor only edits this workspace's agents, so the sandbox config is
+  // local and needs no source-workspace scope.
+  await editorResources.ensureSkills(configId, undefined, force)
   try {
     await editorResources.ensureSkillCatalog(force)
     skillCatalog.value = [...editorResources.skillCatalog]

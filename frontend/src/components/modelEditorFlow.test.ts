@@ -812,3 +812,75 @@ test('a vendor with no catalog falls back to a plain text field', async () => {
     } finally { f2.close() }
   } finally { f.close() }
 })
+
+// --- Vendor strings reach the form in the reader's language ---------------
+
+// The editor renders whatever the catalog declares, so every operator-facing
+// string a vendor ships has to go through the locale resolvers. Binding a raw
+// `field.placeholder` or `opt.label` is silent: the form still works, it is
+// just English in a Chinese product, and a test that only checks the catalog
+// for a zh-CN entry passes while the editor ignores it. This reads the
+// template instead.
+test('every vendor-declared string in the form goes through a locale resolver', () => {
+  const template = descriptor.template?.content ?? ''
+  assert.ok(template.length > 0, 'the editor template should have been parsed')
+
+  // `field` is the extra-field loop variable, so any read of its placeholder
+  // is a vendor string rendered without resolving the locale. One input
+  // branch per field type plus the secret field means it is easy to bind four
+  // and miss the fifth, which is exactly what happened.
+  for (const pattern of [
+    /:placeholder="field\.placeholder/,
+    /\{\{\s*field\.placeholder\s*\}\}/,
+    /v-if="field\.placeholder"/,
+  ]) {
+    assert.equal(
+      pattern.test(template), false,
+      `template reads field.placeholder directly (${pattern}); use extraFieldDisplayPlaceholder`,
+    )
+  }
+
+  // Options: scope to the extra-field select, because `opt` is also the loop
+  // variable of the model-type list and the catalog model list, whose labels
+  // come from i18n and from the catalog's own names.
+  const optionLoop = /v-for="opt in \(field\.options \|\| \[\]\)"[^>]*/.exec(template)
+  assert.ok(optionLoop, 'the extra-field select should loop over field.options')
+  assert.match(
+    optionLoop[0], /:label="extraFieldDisplayOptionLabel\(opt\)"/,
+    'extra-field option labels must resolve the locale',
+  )
+
+  // And the placeholder resolver is referenced, so the checks above cannot be
+  // satisfied by dropping the placeholders altogether.
+  assert.ok(template.includes('extraFieldDisplayPlaceholder('), 'placeholders must use the resolver')
+})
+
+test('the chat protocol override is offered only on chat and vision rows', () => {
+  const template = descriptor.template?.content ?? ''
+  // extra_config.api names a chat protocol. Embedding and rerank rows never
+  // read it, so offering it there is a control that silently does nothing.
+  const select = /<div([^>]*)>\s*<label[^>]*>\{\{ \$t\('model\.editor\.advanced\.api\.label'\) \}\}/.exec(template)
+  assert.ok(select, 'the protocol override should still be in the template')
+  assert.match(select[1], /v-if="isChatLike"/, 'the protocol override must be scoped to chat-like rows')
+})
+
+test('extraFieldDisplayPlaceholder resolves the vendor placeholder for the active locale', async () => {
+  const f = await fixture({ type: 'rerank', providers: catalogProviders })
+  try {
+    const field = {
+      key: 'score_scale',
+      label: 'Rerank score scale',
+      type: 'select',
+      placeholder: 'match the reranker actually deployed behind this endpoint',
+      placeholders: { 'zh-CN': '按这个端点后面实际部署的重排模型选择' },
+    }
+    const rendered = f.vm.extraFieldDisplayPlaceholder(field)
+    assert.ok(
+      rendered === field.placeholder || rendered === field.placeholders['zh-CN'],
+      `expected one of the declared variants, got ${rendered}`,
+    )
+    assert.equal(f.vm.extraFieldDisplayPlaceholder({ key: 'k', label: 'k', type: 'string' }), '')
+  } finally {
+    f.close()
+  }
+})

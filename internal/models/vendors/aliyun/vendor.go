@@ -58,12 +58,16 @@
 //   - rerank is a separate DashScope-native endpoint
 //     (/api/v1/services/rerank/text-rerank/text-rerank).
 //
-// unverified: the docs place qwen3-rerank on a different path than every
-// other rerank model (/compatible-api/v1/reranks instead of the native
-// text-rerank path this package defaults to), and WeKnora's DashScope rerank
-// client only speaks the native request shape. The single RerankBaseURL is
-// kept; qwen3-rerank needs an operator-supplied base URL until the client
-// learns the second shape
+// qwen3-rerank is a second, incompatible rerank protocol on the same vendor.
+// The text-rerank page puts it on /compatible-api/v1/reranks and states
+// outright that "两种接口的请求体结构和响应格式不同": its request is flat
+// (query / documents at the top level, no input/parameters wrapper) and its
+// response carries `results` at the top level with no `output` object. This
+// package implements only the native shape that gte-rerank-v2 and
+// qwen3.7-text-rerank use, so the entry is marked deprecated: it stays
+// resolvable for a row that already names it, but the picker no longer offers
+// a model that would be sent to the wrong path and decoded with the wrong
+// shape. Serving it needs a fourth rerank protocol package
 // (https://help.aliyun.com/zh/model-studio/text-rerank-api).
 //
 // unverified: no page states whether `prompt_cache_key` is accepted, so the
@@ -78,6 +82,7 @@ package aliyun
 
 import (
 	_ "embed"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
@@ -103,12 +108,16 @@ const RerankBaseURL = "https://dashscope.aliyuncs.com/api/v1/services/rerank/tex
 // default for this vendor; operators who want it configure it explicitly.
 const AnthropicBaseURL = "https://dashscope.aliyuncs.com/apps/anthropic"
 
+// multimodalEmbeddingPath is the native multimodal embedding method
+// (https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference).
+const multimodalEmbeddingPath = "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
+
 func init() {
 	catalog.Register(&catalog.Vendor{
 		ID:           ID,
 		Name:         "Alibaba Cloud DashScope",
 		Names:        map[string]string{"zh-CN": "阿里云 DashScope"},
-		Description:  "qwen-plus, qwen3.8-max, deepseek-v4-pro, text-embedding-v4, qwen3-rerank, etc.",
+		Description:  "qwen-plus, qwen3.8-max, deepseek-v4-pro, text-embedding-v4, gte-rerank-v2, etc.",
 		Website:      "https://bailian.console.aliyun.com",
 		Icon:         icon,
 		API:          api.APIOpenAICompletions,
@@ -127,8 +136,57 @@ func init() {
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
+		},
+		RerankAPI: api.RerankDashScope,
+		// Text and multimodal embeddings live under different roots of the
+		// same host — /compatible-mode/v1 and /api/v1 — and a row stores one
+		// base URL for both, so the request is placed from the host. A base
+		// URL without either root is taken as the host itself, which keeps a
+		// workspace or international domain instead of replacing it with the
+		// Beijing default as the pre-catalog client did.
+		Endpoint: func(r catalog.EndpointRequest) (string, map[string]string) {
+			if r.ModelType != types.ModelTypeEmbedding {
+				return "", nil
+			}
+			root := strings.TrimRight(r.BaseURL, "/")
+			for _, marker := range []string{"/compatible-mode", "/api/v1"} {
+				if i := strings.Index(root, marker); i >= 0 {
+					root = root[:i]
+				}
+			}
+			if r.EmbeddingAPI == api.EmbeddingDashScope {
+				return root + multimodalEmbeddingPath, nil
+			}
+			return root + "/compatible-mode/v1/embeddings", nil
 		},
 		Compat: catalog.VendorCompat{
+			// ASR: qwen3-asr-flash is the one recognition model callable with
+			// the audio in the request, on the compatible chat endpoint as a
+			// base64 data URI; its catalog entry declares that. Every other
+			// ASR name falls to a catch-all entry that refuses it: Paraformer,
+			// Fun-ASR and the *-filetrans models are asynchronous tasks that
+			// take a public file URL, which no protocol here can send
+			// (https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference).
+			// Text models: the OpenAI-compatible endpoint
+			// (https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai),
+			// which takes model, input, dimensions and encoding_format.
+			// Multimodal models "不支持OpenAI兼容接口" and override the protocol
+			// in models.json. The native APIs' text_type / instruct are not
+			// declared: both change the document vectors
+			// (Tencent/WeKnora#1401).
+			Embeddings: catalog.EmbeddingsCompat{
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
+			Rerank: catalog.RerankCompat{
+				SendReturnDocs: catalog.Ptr(true),
+				// 500 documents per request for the native text-rerank models.
+				// The query (4,000 tokens) and per-document limits are stated in
+				// tokens, which a rune count cannot express, so they are not
+				// declared.
+				MaxDocuments: catalog.Ptr(500),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				// Explicit although it matches the protocol default, because
 				// this vendor's own parameter table deprecates the other

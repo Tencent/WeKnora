@@ -14,7 +14,7 @@ import (
 // owns a session's binding. *SessionSandboxPinner is the production
 // implementation; tests use a stub so this does not need a database.
 type sessionSandboxPinReader interface {
-	Read(ctx context.Context, sessionID string) (string, error)
+	Read(ctx context.Context, sessionID string) (SandboxPin, error)
 }
 
 // PinnedSessionSandbox resolves the session's pinned sandbox manager at
@@ -49,13 +49,17 @@ func (a *PinnedSessionSandbox) manager(ctx context.Context, sessionID string) sa
 	if a.pinner == nil {
 		return nil
 	}
-	configID, err := a.pinner.Read(ctx, sessionID)
-	if err != nil || strings.TrimSpace(configID) == "" {
+	pin, err := a.pinner.Read(ctx, sessionID)
+	if err != nil || pin.IsZero() {
 		return nil
 	}
-	tenantID, _ := types.TenantIDFromContext(ctx)
+	// The workspace comes from the pin, not the request. Fork runs from a plain
+	// POST as the session owner, while a shared agent's sandbox lives on the
+	// lending workspace's config — reading it as the session owner found
+	// nothing and silently degraded the fork to SNAPSHOT_UNSUPPORTED.
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
 	mgr, err := resolveTenantSandboxForConfig(
-		ctx, a.resolver, a.fallback, tenantID, configID, nil,
+		ctx, a.resolver, a.fallback, pin.TenantOr(sessionTenantID), pin.ConfigID, nil,
 	)
 	if err != nil {
 		return nil

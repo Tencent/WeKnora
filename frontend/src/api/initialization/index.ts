@@ -584,6 +584,7 @@ export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
 // Mirrors internal/models/catalog.ExtraField.
 export interface ModelProviderExtraFieldOption {
     label: string;
+    labels?: Record<string, string>;
     value: string;
 }
 
@@ -613,6 +614,7 @@ export interface ModelProviderExtraField {
     required?: boolean;
     default?: string;
     placeholder?: string;
+    placeholders?: Record<string, string>;
     options?: ModelProviderExtraFieldOption[];
     // Backend model types ("KnowledgeQA", "Embedding", "Rerank", "VLLM", "ASR"); empty = all.
     model_types?: string[];

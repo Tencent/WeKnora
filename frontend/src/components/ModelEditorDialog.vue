@@ -358,22 +358,24 @@
             <div v-if="field.type === 'boolean'" class="vision-toggle">
               <t-switch :model-value="extraConfigBool(field.key)"
                 @update:model-value="(v: boolean) => setExtraConfig(field.key, v ? 'true' : 'false')" />
-              <span v-if="field.placeholder" class="form-desc form-desc--inline">{{ field.placeholder }}</span>
+              <span v-if="extraFieldDisplayPlaceholder(field)" class="form-desc form-desc--inline">{{ extraFieldDisplayPlaceholder(field) }}</span>
             </div>
             <t-select v-else-if="field.type === 'select'" :model-value="formData.extraConfig[field.key] || ''"
-              :placeholder="field.placeholder || ''" clearable
+              :placeholder="extraFieldDisplayPlaceholder(field)" clearable
               @update:model-value="(v: string) => setExtraConfig(field.key, v)">
-              <t-option v-for="opt in (field.options || [])" :key="opt.value" :value="opt.value" :label="opt.label || opt.value" />
+              <t-option v-for="opt in (field.options || [])" :key="opt.value" :value="opt.value"
+                :label="extraFieldDisplayOptionLabel(opt)" />
             </t-select>
             <t-input v-else-if="field.type === 'number'" :model-value="formData.extraConfig[field.key] || ''"
-              type="number" :placeholder="field.placeholder || ''"
+              type="number" :placeholder="extraFieldDisplayPlaceholder(field)"
               @update:model-value="(v: string | number) => setExtraConfig(field.key, String(v ?? ''))" />
             <t-input v-else-if="field.type === 'password'" :model-value="formData.extraConfig[field.key] || ''"
-              type="password" :placeholder="field.placeholder || ''" autocomplete="off" spellcheck="false"
+              type="password" :placeholder="extraFieldDisplayPlaceholder(field)" autocomplete="off" spellcheck="false"
               @update:model-value="(v: string) => setExtraConfig(field.key, v)">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
-            <t-input v-else :model-value="formData.extraConfig[field.key] || ''" :placeholder="field.placeholder || ''"
+            <t-input v-else :model-value="formData.extraConfig[field.key] || ''"
+              :placeholder="extraFieldDisplayPlaceholder(field)"
               @update:model-value="(v: string) => setExtraConfig(field.key, v)" />
           </div>
 
@@ -547,7 +549,11 @@
           </button>
 
           <template v-if="advancedOpen">
-            <div class="form-item">
+            <!--
+              extra_config.api 只选对话协议。embedding / rerank 行不读它：
+              embedding 的协议覆盖写在下面的 compat JSON 里（"api"），取值是向量协议。
+            -->
+            <div v-if="isChatLike" class="form-item">
               <label class="form-label">{{ $t('model.editor.advanced.api.label') }}</label>
               <t-select :model-value="formData.extraConfig.api || ''" clearable
                 @update:model-value="(v: string) => setExtraConfig('api', v)">
@@ -599,7 +605,8 @@ import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import {
   checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels,
   downloadOllamaModel, getDownloadProgress, checkOllamaStatus, resolveModelCatalog,
-  type OllamaModelInfo, type ModelProviderOption, type ModelProviderExtraField, type ModelCatalogEntry,
+  type OllamaModelInfo, type ModelProviderOption, type ModelProviderExtraField,
+  type ModelProviderExtraFieldOption, type ModelCatalogEntry,
   type ResolvedModelCatalog,
 } from '@/api/initialization'
 import {
@@ -615,6 +622,8 @@ import { useModelProvidersStore } from '@/stores/modelProviders'
 import {
   credentialLabelForModelType,
   extraFieldLabel,
+  extraFieldOptionLabel,
+  extraFieldPlaceholder,
   extraFieldsForModelType,
   pickLocalized,
   providerDescription,
@@ -775,6 +784,10 @@ const matchTriggerWidth = (triggerElement: HTMLElement) => ({
 })
 
 const extraFieldDisplayLabel = (field: ModelProviderExtraField) => extraFieldLabel(field, currentLocale.value)
+const extraFieldDisplayPlaceholder = (field: ModelProviderExtraField) =>
+  extraFieldPlaceholder(field, currentLocale.value)
+const extraFieldDisplayOptionLabel = (option: ModelProviderExtraFieldOption) =>
+  extraFieldOptionLabel(option, currentLocale.value)
 
 /**
  * Vendors whose API is not a bearer-token API name their first credential

@@ -20,9 +20,53 @@ func TestValidateRow(t *testing.T) {
 			name: "nil parameters", modelName: "x", modelType: types.ModelTypeKnowledgeQA,
 		},
 		{
-			name: "embedding rows carry no catalog parameters", modelName: "text-embedding-v4",
+			name: "a catalogued embedding row resolves", modelName: "text-embedding-v4",
 			modelType: types.ModelTypeEmbedding,
-			params:    &types.ModelParameters{Provider: "aliyun", Spec: &types.ModelSpecOverride{API: "nope"}},
+			params:    &types.ModelParameters{Provider: "aliyun"},
+		},
+		{
+			// Embedding is built from Resolve too, so a bad overlay fails
+			// every call; it must fail the save instead.
+			name: "unknown embedding compat key is rejected", modelName: "text-embedding-v4",
+			modelType: types.ModelTypeEmbedding,
+			params: &types.ModelParameters{
+				Provider: "aliyun", Spec: &types.ModelSpecOverride{Compat: map[string]any{"max_tokens_field": "x"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "unknown embedding protocol is rejected", modelName: "text-embedding-v4",
+			modelType: types.ModelTypeEmbedding,
+			params: &types.ModelParameters{
+				Provider: "aliyun", Spec: &types.ModelSpecOverride{Compat: map[string]any{"api": "openai-completions"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an embedding name inside a chat glob is accepted", modelName: "qwen3.8-text-embedding",
+			modelType: types.ModelTypeEmbedding,
+			params:    &types.ModelParameters{Provider: "aliyun"},
+		},
+		{
+			name: "rerank truncation on a vendor without the extension is rejected", modelName: "gte-rerank-v2",
+			modelType: types.ModelTypeRerank,
+			params: &types.ModelParameters{
+				Provider: "aliyun", ExtraConfig: map[string]string{"truncate_prompt_tokens": "512"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a catalogued asr row resolves", modelName: "whisper-1",
+			modelType: types.ModelTypeASR,
+			params:    &types.ModelParameters{Provider: "openai"},
+		},
+		{
+			name: "unknown asr compat key is rejected", modelName: "whisper-1",
+			modelType: types.ModelTypeASR,
+			params: &types.ModelParameters{
+				Provider: "openai", Spec: &types.ModelSpecOverride{Compat: map[string]any{"dimensions_field": "x"}},
+			},
+			wantErr: true,
 		},
 		{
 			name: "a catalogued chat row resolves", modelName: "deepseek-v4-pro",

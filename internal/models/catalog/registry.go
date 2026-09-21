@@ -31,6 +31,15 @@ func Register(v *Vendor) {
 	if v.Auth == "" {
 		v.Auth = AuthBearer
 	}
+	if v.RerankAPI == "" && v.SupportsType(types.ModelTypeRerank) {
+		v.RerankAPI = api.RerankCohere
+	}
+	if v.TranscriptionAPI == "" && v.SupportsType(types.ModelTypeASR) {
+		v.TranscriptionAPI = api.TranscriptionOpenAI
+	}
+	if v.EmbeddingAPI == "" && v.SupportsType(types.ModelTypeEmbedding) {
+		v.EmbeddingAPI = api.EmbeddingOpenAI
+	}
 	for i := range v.Models {
 		if v.Models[i].Type == "" {
 			v.Models[i].Type = types.ModelTypeKnowledgeQA
@@ -158,20 +167,34 @@ func (v *Vendor) ModelsByType(modelType types.ModelType) []ModelSpec {
 	return out
 }
 
-// FindModel looks a model name up in the vendor catalog: exact id, then
-// aliases, then glob patterns (longest literal prefix wins). Matching is
-// case-insensitive.
-func (v *Vendor) FindModel(name string) (ModelSpec, bool) {
+// FindModel looks a model name up among the vendor's entries of one model
+// type: exact id, then aliases, then glob patterns (longest literal prefix
+// wins). Matching is case-insensitive.
+//
+// The type is part of the key because families share prefixes across types.
+// Aliyun's qwen3* chat glob also matches qwen3.8-text-embedding, and gpt-5*
+// matches gpt-5-embed; an untyped lookup would hand an embedding row the chat
+// family's compat, which the embedding overlay rejects, and the row could not
+// be built at all. A VLM row is a chat model that accepts images, so it looks
+// among the chat entries.
+func (v *Vendor) FindModel(name string, modelType types.ModelType) (ModelSpec, bool) {
 	needle := strings.ToLower(strings.TrimSpace(name))
 	if needle == "" {
 		return ModelSpec{}, false
 	}
+	want := entryType(modelType)
+	var candidates []ModelSpec
 	for _, m := range v.Models {
+		if entryType(m.Type) == want {
+			candidates = append(candidates, m)
+		}
+	}
+	for _, m := range candidates {
 		if strings.ToLower(m.ID) == needle {
 			return m, true
 		}
 	}
-	for _, m := range v.Models {
+	for _, m := range candidates {
 		for _, alias := range m.Aliases {
 			if strings.ToLower(alias) == needle {
 				return m, true
@@ -180,7 +203,7 @@ func (v *Vendor) FindModel(name string) (ModelSpec, bool) {
 	}
 	var best ModelSpec
 	bestScore := -1
-	for _, m := range v.Models {
+	for _, m := range candidates {
 		if m.Match == "" {
 			continue
 		}
@@ -195,6 +218,15 @@ func (v *Vendor) FindModel(name string) (ModelSpec, bool) {
 		return best, true
 	}
 	return ModelSpec{}, false
+}
+
+// entryType folds a model type onto the catalog entries that describe it:
+// chat entries leave Type empty, and VLM rows use them too.
+func entryType(t types.ModelType) types.ModelType {
+	if t == "" || t == types.ModelTypeVLLM {
+		return types.ModelTypeKnowledgeQA
+	}
+	return t
 }
 
 // globMatch supports '*' wildcards only.

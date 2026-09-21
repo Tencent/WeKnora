@@ -90,6 +90,20 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// The OpenAI body on the service's own path, signed like the
+				// rest of it.
+				Path:            catalog.Ptr("/api/v1/embeddings"),
+				DimensionsField: catalog.Ptr("dimensions"),
+				RequestTimeout:  catalog.Ptr(60),
+			},
+			Rerank: catalog.RerankCompat{
+				Path: catalog.Ptr("/api/v1/rerank"),
+				// The only rerank vendor that has ever had a client deadline
+				// here. Without it a hung endpoint holds the retrieval stage
+				// for as long as the caller's context allows.
+				RequestTimeout: catalog.Ptr(60),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				SupportsMultiContent:  catalog.Ptr(false),
 				PromptCacheAccounting: catalog.Ptr(false),

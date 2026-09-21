@@ -6,6 +6,8 @@ import type { ModelProviderOption } from '@/api/initialization'
 import {
   credentialLabelForModelType,
   extraFieldLabel,
+  extraFieldOptionLabel,
+  extraFieldPlaceholder,
   extraFieldsForModelType,
   loadProvidersForType,
   mergeProviderIndex,
@@ -221,4 +223,38 @@ test('credentialLabelForModelType follows the vendor declaration, not a hardcode
   // Localization goes through the same picker as every other vendor string.
   assert.equal(pickLocalized(rerank?.labels, 'zh-CN', rerank!.label), 'SecretId（TC3 签名）')
   assert.equal(pickLocalized(rerank?.labels, 'en-US', rerank!.label), 'SecretId')
+})
+
+// Select options and placeholders used to render their raw English string.
+// That was invisible while every option was an identifier — LKEAP's region
+// codes — and became a gap as soon as one was prose.
+test('extraFieldOptionLabel resolves the locale, falling back to label then value', () => {
+  const option = {
+    label: '0..1 relevance (BGE class)',
+    labels: { 'zh-CN': '0~1 相关度（BGE 一类）' },
+    value: 'probability',
+  }
+  assert.equal(extraFieldOptionLabel(option, 'zh-CN'), '0~1 相关度（BGE 一类）')
+  assert.equal(extraFieldOptionLabel(option, 'en'), '0..1 relevance (BGE class)')
+  assert.equal(
+    extraFieldOptionLabel({ label: 'ap-guangzhou', value: 'ap-guangzhou' }, 'zh-CN'),
+    'ap-guangzhou',
+  )
+  assert.equal(extraFieldOptionLabel({ value: 'logit' }, 'zh-CN'), 'logit')
+})
+
+test('extraFieldPlaceholder resolves the locale and tolerates no placeholder', () => {
+  const field = {
+    key: 'score_scale',
+    label: 'Rerank score scale',
+    type: 'select',
+    placeholder: 'match the reranker actually deployed behind this endpoint',
+    placeholders: { 'zh-CN': '按这个端点后面实际部署的重排模型选择' },
+  }
+  assert.equal(extraFieldPlaceholder(field, 'zh-CN'), '按这个端点后面实际部署的重排模型选择')
+  assert.equal(
+    extraFieldPlaceholder(field, 'en'),
+    'match the reranker actually deployed behind this endpoint',
+  )
+  assert.equal(extraFieldPlaceholder({ key: 'k', label: 'k', type: 'string' }, 'zh-CN'), '')
 })

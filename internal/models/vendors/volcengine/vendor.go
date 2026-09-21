@@ -40,34 +40,35 @@
 //   - in tool-calling turns Ark also returns `encrypted_content` next to
 //     `reasoning_content` and asks for it to be replayed; omitting it is not
 //     an error but degrades multi-turn agent quality;
-//   - multimodal embeddings post to /api/v3/embeddings/multimodal with
-//     `dimensions` defaulting to 2048
-//     (https://docs.volcengine.com/docs/ark/multimodal-vectorization-api);
+//   - embeddings post to /api/v3/embeddings/multimodal with `dimensions`
+//     defaulting to 2048, and answer one fused vector for the whole input
+//     (https://docs.volcengine.com/docs/ark/multimodal-vectorization-api).
+//     It is the only embedding API the current docs list, and the 向量化 model
+//     list names only the two doubao-embedding-vision snapshots. The text
+//     endpoint, /api/v3/embeddings in the OpenAI shape, now sits under
+//     下线文档归档 (retired documentation), so doubao-embedding-large-text was
+//     removed from models.json; rows that still name a doubao-embedding text
+//     model are routed to that endpoint by pattern;
 //   - rerank is the VikingDB Knowledge Base service signed with AK/SK at
 //     https://api-knowledgebase.mlp.cn-beijing.volces.com/api/knowledge/service/rerank
 //     (the API key field carries the access key; the secret key, region and
 //     instruction come from the rerank-only extra fields). Documented models
 //     are doubao-seed-rerank and base-multilingual-rerank
-//     (https://www.volcengine.com/docs/84313/1254474);
+//     (https://www.volcengine.com/docs/84313/1254474). datas takes at most
+//     200 items, and the default instruction is the console's, verbatim, as
+//     the page asks for results that match the console;
 //   - Ark additionally serves an Anthropic Messages surface at
 //     https://ark.cn-beijing.volces.com/api/compatible/v1 with x-api-key
 //     auth. This package configures OpenAI Chat Completions, which is the
 //     surface every model page documents first.
 //
-// unverified: text-only embedding models post to /api/v3/embeddings, not the
-// multimodal path this vendor defaults to, and WeKnora's Ark embedder pins
-// the multimodal path regardless of the configured base URL. The default is
-// left alone; doubao-embedding-large-text-250515 is kept because no
-// retirement notice was found, even though the current 向量化 model list only
-// names the two doubao-embedding-vision snapshots.
+// unverified: whether the retired text endpoint still answers for accounts
+// that used it. Rows naming a text model reach it either way; before the
+// catalog they were sent to the multimodal path.
 //
 // unverified: the model list spells lengths as "256k" / "1024k" without
 // saying whether k is 1000 or 1024, so the context windows in models.json are
 // left at their present values.
-//
-// unverified: the rerank instruction default here capitalises Document /
-// Query while the console default in the docs is lower case; it is kept in
-// sync with internal/models/rerank instead.
 //
 // unverified: prices in models.json come from the Ark pricing console, which
 // the public docs do not render.
@@ -75,6 +76,7 @@ package volcengine
 
 import (
 	_ "embed"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
@@ -95,6 +97,11 @@ const BaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 
 // EmbeddingBaseURL is the Ark multimodal embedding endpoint.
 const EmbeddingBaseURL = "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal"
+
+const (
+	multimodalEmbeddingPath = "/api/v3/embeddings/multimodal"
+	textEmbeddingPath       = "/api/v3/embeddings"
+)
 
 // RerankBaseURL is the Knowledge Base managed rerank endpoint.
 const RerankBaseURL = "https://api-knowledgebase.mlp.cn-beijing.volces.com"
@@ -150,8 +157,11 @@ func init() {
 				Type:        "password",
 				Required:    true,
 				Placeholder: "Volcengine IAM secret key (the API Key field holds the access key)",
-				ModelTypes:  rerankOnly,
-				Secret:      true,
+				Placeholders: map[string]string{
+					"zh-CN": "火山引擎 IAM Secret Access Key（API Key 那一栏填的是 Access Key ID）",
+				},
+				ModelTypes: rerankOnly,
+				Secret:     true,
 			},
 			{
 				Key:         "region",
@@ -167,12 +177,57 @@ func init() {
 				Label:       "Rerank Instruction",
 				Labels:      map[string]string{"zh-CN": "重排指令"},
 				Type:        "string",
-				Default:     "Whether the Document answers the Query or matches the content retrieval intent",
+				Default:     "Whether the document answers the query or matches the content retrieval intent",
 				Placeholder: "Instruction passed to the rerank model",
-				ModelTypes:  rerankOnly,
+				Placeholders: map[string]string{
+					"zh-CN": "传给重排模型的 instruction",
+				},
+				ModelTypes: rerankOnly,
 			},
 		},
+		RerankAPI:    api.RerankVolcengineKnowledge,
+		EmbeddingAPI: api.EmbeddingArk,
+		// Embedding rows have stored three shapes of base URL: the full
+		// multimodal URL that was the default, .../api/v3 like chat, and the
+		// bare host. All of them name the same service, so the request is
+		// placed from the host.
+		Endpoint: func(r catalog.EndpointRequest) (string, map[string]string) {
+			if r.ModelType != types.ModelTypeEmbedding {
+				return "", nil
+			}
+			root := strings.TrimRight(r.BaseURL, "/")
+			if i := strings.Index(root, "/api/"); i >= 0 {
+				root = root[:i]
+			}
+			if r.EmbeddingAPI == api.EmbeddingOpenAI {
+				// The retired doubao-embedding text models, whose archived
+				// reference still names this endpoint.
+				return root + textEmbeddingPath, nil
+			}
+			return root + multimodalEmbeddingPath, nil
+		},
 		Compat: catalog.VendorCompat{
+			// https://docs.volcengine.com/docs/ark/multimodal-vectorization-api:
+			// the only embedding API Ark still lists. It fuses everything in
+			// one request into a single vector, so a request carries one text.
+			// dimensions defaults to 2048 and the current models also serve
+			// 1024; encoding_format defaults to float and the reference's own
+			// curl sends it. `instructions` is documented too and deliberately
+			// not declared: like Jina's task it changes the document vectors
+			// (Tencent/WeKnora#1401).
+			Embeddings: catalog.EmbeddingsCompat{
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+				MaxBatchSize:       catalog.Ptr(1),
+			},
+			Rerank: catalog.RerankCompat{
+				// datas "数组长度不超过 200"
+				// (https://docs.volcengine.com/docs/vector_database_vikingdb/Rerank).
+				// The pre-catalog client split at 50, a constant of its own
+				// rather than a documented ceiling.
+				MaxDocuments:   catalog.Ptr(200),
+				MaxConcurrency: catalog.Ptr(4),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatThinkingType),
 				SupportsReasoningEffort: catalog.Ptr(true),

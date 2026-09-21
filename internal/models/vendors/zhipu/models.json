@@ -13,8 +13,9 @@
     {"id": "glm-4.6v", "name": "GLM-4.6V", "reasoning": true, "input": ["text", "image", "video"], "context_window": 128000, "max_output_tokens": 32768, "cost": {"input": 0.3, "output": 0.9}, "compat": {"supports_reasoning_effort": false}},
     {"id": "glm-4.6", "name": "GLM-4.6", "reasoning": true, "input": ["text"], "context_window": 204800, "max_output_tokens": 131072, "cost": {"input": 0.6, "output": 2.2, "cache_read": 0.11}, "compat": {"supports_reasoning_effort": false}},
     {"id": "glm-4.5-air", "name": "GLM-4.5 Air", "reasoning": true, "input": ["text"], "context_window": 131072, "max_output_tokens": 98304, "cost": {"input": 0.2, "output": 1.1, "cache_read": 0.03}, "compat": {"supports_reasoning_effort": false}},
-    {"id": "embedding-3", "name": "Embedding-3", "type": "Embedding", "dimension": 2048, "source": "https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入"},
-    {"id": "embedding-2", "name": "Embedding-2", "type": "Embedding", "dimension": 1024, "source": "https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入"},
-    {"id": "rerank", "name": "Rerank", "type": "Rerank", "source": "https://docs.bigmodel.cn/api-reference/模型-api/文本重排序"}
+    {"id": "embedding-3", "name": "Embedding-3", "type": "Embedding", "dimension": 2048, "compat": {"max_batch_size": 64}, "source": "https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入"},
+    {"id": "embedding-2", "name": "Embedding-2", "type": "Embedding", "dimension": 1024, "compat": {"dimensions_field": ""}, "source": "https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入"},
+    {"id": "rerank", "name": "Rerank", "type": "Rerank", "source": "https://docs.bigmodel.cn/api-reference/模型-api/文本重排序"},
+    {"id": "glm-asr-2512", "name": "GLM-ASR-2512 (at most 30 s per file)", "type": "ASR", "source": "https://docs.bigmodel.cn/api-reference/模型-api/语音转文本"}
   ]
 }

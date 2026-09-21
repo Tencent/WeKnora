@@ -67,20 +67,51 @@ func TestFindModel_ExactAliasAndGlob(t *testing.T) {
 	registerTestVendors(t)
 	v, _ := Get("acme")
 
-	m, ok := v.FindModel("ACME-PRO")
+	chat := types.ModelTypeKnowledgeQA
+	m, ok := v.FindModel("ACME-PRO", chat)
 	require.True(t, ok)
 	assert.Equal(t, "acme-pro", m.ID)
 
-	m, ok = v.FindModel("acme-lite-2")
+	m, ok = v.FindModel("acme-lite-2", chat)
 	require.True(t, ok)
 	assert.Equal(t, "acme-lite*", m.Match)
 
-	m, ok = v.FindModel("acme-lite-vision-2")
+	m, ok = v.FindModel("acme-lite-vision-2", chat)
 	require.True(t, ok, "longest literal prefix wins")
 	assert.Equal(t, "acme-lite-vision*", m.Match)
 
-	_, ok = v.FindModel("unknown")
+	_, ok = v.FindModel("unknown", chat)
 	assert.False(t, ok)
+}
+
+// A lookup only sees entries of the row's own type. A VLM row is a chat
+// model that accepts images, so it sees the chat entries.
+func TestFindModel_IsTyped(t *testing.T) {
+	registerTestVendors(t)
+	v, _ := Get("acme")
+
+	_, ok := v.FindModel("acme-embed", types.ModelTypeKnowledgeQA)
+	assert.False(t, ok, "a chat row must not pick up an embedding entry")
+	m, ok := v.FindModel("acme-embed", types.ModelTypeEmbedding)
+	require.True(t, ok)
+	assert.Equal(t, "acme-embed", m.ID)
+
+	_, ok = v.FindModel("acme-lite-embed", types.ModelTypeEmbedding)
+	assert.False(t, ok, "an embedding row must not pick up a chat glob")
+	_, ok = v.FindModel("acme-lite-2", types.ModelTypeVLLM)
+	assert.True(t, ok)
+}
+
+// The failure a typed lookup prevents: a chat family's glob carries chat
+// compat, and handing it to an embedding or rerank row fails the strict
+// overlay decode, so the row could not be built at all.
+func TestResolve_ModelNameInsideAChatGlobStillResolvesForOtherTypes(t *testing.T) {
+	registerTestVendors(t)
+	for _, modelType := range []types.ModelType{types.ModelTypeEmbedding, types.ModelTypeRerank} {
+		r, err := Resolve(Ref{Provider: "acme", Model: "acme-lite-embed", ModelType: modelType})
+		require.NoError(t, err, modelType)
+		assert.False(t, r.Cataloged, modelType)
+	}
 }
 
 func TestDetectByURL_LongestPatternWins(t *testing.T) {

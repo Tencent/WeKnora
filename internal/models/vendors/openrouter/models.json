@@ -18,6 +18,8 @@
     {"id": "minimax/minimax-m3", "name": "MiniMax M3", "reasoning": true, "input": ["text", "image", "video"], "context_window": 1048576, "max_output_tokens": 512000, "cost": {"input": 0.3, "output": 1.2, "cache_read": 0.06}},
     {"id": "x-ai/grok-4.6", "name": "Grok 4.6", "reasoning": true, "input": ["text", "image"], "context_window": 500000, "max_output_tokens": 450000, "cost": {"input": 2, "output": 6, "cache_read": 0.5}, "thinking_levels": {"off": null, "minimal": "low", "xhigh": "xhigh", "max": "xhigh"}},
     {"id": "openai/text-embedding-3-small", "name": "text-embedding-3-small", "type": "Embedding", "dimension": 1536, "context_window": 8192, "source": "https://openrouter.ai/docs/api_reference/embeddings"},
-    {"id": "openai/text-embedding-3-large", "name": "text-embedding-3-large", "type": "Embedding", "dimension": 3072, "context_window": 8192, "source": "https://openrouter.ai/docs/api_reference/embeddings"}
+    {"id": "openai/text-embedding-3-large", "name": "text-embedding-3-large", "type": "Embedding", "dimension": 3072, "context_window": 8192, "source": "https://openrouter.ai/docs/api_reference/embeddings"},
+    {"id": "cohere/rerank-v3.5", "name": "Cohere Rerank v3.5", "type": "Rerank", "source": "https://openrouter.ai/docs/api/api-reference/rerank/submit-a-rerank-request"},
+    {"id": "openai/whisper-large-v3", "name": "Whisper Large v3", "type": "ASR", "source": "https://openrouter.ai/docs/api/api-reference/stt/create-transcription"}
   ]
 }

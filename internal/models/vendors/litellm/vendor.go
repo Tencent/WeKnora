@@ -48,6 +48,10 @@ const ID = "litellm"
 // BaseURL is a placeholder the operator replaces with a reachable proxy.
 const BaseURL = "http://your_litellm_proxy/v1"
 
+// RerankBaseURL is the proxy root. LiteLLM documents rerank at /rerank
+// rather than /v1/rerank, so it does not hang off the chat base URL.
+const RerankBaseURL = "http://your_litellm_proxy"
+
 func init() {
 	catalog.Register(&catalog.Vendor{
 		ID:           ID,
@@ -65,14 +69,52 @@ func init() {
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: BaseURL,
 			types.ModelTypeEmbedding:   BaseURL,
+			types.ModelTypeRerank:      RerankBaseURL,
 			types.ModelTypeVLLM:        BaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
+			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
+		ExtraFields: []catalog.ExtraField{{
+			Key:    catalog.ExtraScoreScale,
+			Label:  "Rerank score scale",
+			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},
+			Type:   "select",
+			Options: []catalog.ExtraFieldOption{
+				{
+					Label:  "Unbounded score (Qwen3-Reranker class)",
+					Labels: map[string]string{"zh-CN": "无界分数（Qwen3-Reranker 一类）"},
+					Value:  "logit",
+				},
+				{
+					Label:  "0..1 relevance (BGE class)",
+					Labels: map[string]string{"zh-CN": "0~1 相关度（BGE 一类）"},
+					Value:  "probability",
+				},
+			},
+			Placeholder:  "match the reranker actually deployed behind this endpoint",
+			Placeholders: map[string]string{"zh-CN": "按这个端点后面实际部署的重排模型选择"},
+			// A gateway serves whatever reranker was deployed behind it, and
+			// the two families disagree. The vendor default follows the
+			// documentation; the operator knows which model is actually there.
+			Required:   false,
+			ModelTypes: []types.ModelType{types.ModelTypeRerank},
+		}},
 		Compat: catalog.VendorCompat{
+			// Transcriptions keeps the baseline: the proxy serves the OpenAI
+			// /audio/transcriptions route for whichever upstream it is
+			// configured with (https://docs.litellm.ai/docs/audio_transcription).
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://docs.litellm.ai/docs/embedding/supported_embedding:
+				// model, input, user, dimensions, encoding_format; anything else
+				// is forwarded to the upstream as a provider-specific kwarg.
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
 				SupportsReasoningEffort: catalog.Ptr(true),

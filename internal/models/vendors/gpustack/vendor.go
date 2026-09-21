@@ -81,7 +81,73 @@ func init() {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
+		ExtraFields: []catalog.ExtraField{{
+			Key:    catalog.ExtraScoreScale,
+			Label:  "Rerank score scale",
+			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},
+			Type:   "select",
+			Options: []catalog.ExtraFieldOption{
+				{
+					Label:  "Unbounded score (Qwen3-Reranker class)",
+					Labels: map[string]string{"zh-CN": "无界分数（Qwen3-Reranker 一类）"},
+					Value:  "logit",
+				},
+				{
+					Label:  "0..1 relevance (BGE class)",
+					Labels: map[string]string{"zh-CN": "0~1 相关度（BGE 一类）"},
+					Value:  "probability",
+				},
+			},
+			Placeholder:  "match the reranker actually deployed behind this endpoint",
+			Placeholders: map[string]string{"zh-CN": "按这个端点后面实际部署的重排模型选择"},
+			// A gateway serves whatever reranker was deployed behind it, and
+			// the two families disagree. The vendor default follows the
+			// documentation; the operator knows which model is actually there.
+			Required:   false,
+			ModelTypes: []types.ModelType{types.ModelTypeRerank},
+		}, {
+			Key:    catalog.ExtraTruncatePromptTokens,
+			Label:  "Rerank prompt truncation (vLLM)",
+			Labels: map[string]string{"zh-CN": "Rerank 提示词截断长度（vLLM）"},
+			Type:   "number",
+			// Off unless the operator asks: a runtime that does not implement
+			// the extension rejects the unknown field.
+			Required:     false,
+			Placeholder:  "empty unless the backend rejects long documents",
+			Placeholders: map[string]string{"zh-CN": "留空，除非后端因文档过长而报错"},
+			ModelTypes:   []types.ModelType{types.ModelTypeRerank},
+		}},
 		Compat: catalog.VendorCompat{
+			// Transcriptions keeps the baseline, json by default. GPUStack
+			// serves audio through vox-box (https://github.com/gpustack/vox-box),
+			// whose route wraps a json answer as {"text": ...} but returns
+			// verbose_json as whatever the backend produced — and its FunASR
+			// backend (SenseVoice, Paraformer) produces a bare string for every
+			// format. The pre-catalog client's verbose_json therefore arrived
+			// as a JSON string that could not be decoded. The route reads a
+			// language form field.
+			Transcriptions: catalog.TranscriptionsCompat{
+				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+			},
+			Embeddings: catalog.EmbeddingsCompat{
+				// vLLM's embedding server: dimensions for Matryoshka models, the
+				// row's truncation budget, and encoding_format.
+				SendEncodingFormat:          catalog.Ptr(true),
+				DimensionsField:             catalog.Ptr("dimensions"),
+				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+			},
+			Rerank: catalog.RerankCompat{
+				// GPUStack's built-in backends are vLLM, SGLang, Ascend MindIE and
+				// VoxBox, so the vLLM rerank extension reaches the model.
+				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+				// The field is spelled relevance_score like the Cohere shape, but
+				// it is not a probability: the rerank API page's own example
+				// returns 1.951932668685913, -3.7347371578216553 and
+				// -6.157620906829834. Read as a probability, every negative score
+				// falls below a relevance threshold tuned for 0..1.
+				// https://docs.gpustack.ai/2.0/user-guide/rerank-api/
+				ScoreScale: catalog.Ptr(api.ScoreLogit),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),

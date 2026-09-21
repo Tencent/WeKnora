@@ -101,6 +101,21 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://cloud.baidu.com/doc/qianfan-api/s/Fm7u3ropn: model,
+				// input, user, encoding_format ("当前只支持float"). The model list
+				// (https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j) caps a request
+				// at 16 texts; tao-8k takes one.
+				SendEncodingFormat: catalog.Ptr(true),
+				MaxBatchSize:       catalog.Ptr(16),
+			},
+			Rerank: catalog.RerankCompat{
+				// "文本数量不超过64"; query "长度不超过1600个字符"; each document
+				// "长度不超过4096个字符".
+				MaxDocuments:     catalog.Ptr(64),
+				MaxQueryChars:    catalog.Ptr(1600),
+				MaxDocumentChars: catalog.Ptr(4096),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				// Both spellings are accepted; max_completion_tokens is the
 				// one that also covers the thinking chain.

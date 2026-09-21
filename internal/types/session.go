@@ -109,6 +109,17 @@ type Session struct {
 	// permanent would make "no session references this config" never true.
 	SandboxConfigID string `json:"sandbox_config_id,omitempty" gorm:"type:varchar(36)"`
 
+	// SandboxConfigTenantID names the workspace that owns SandboxConfigID.
+	// Sandbox configs are keyed by (tenant, id), so the id above is not an
+	// address on its own: a shared agent's sandbox lives on ITS OWNER's config
+	// while this session belongs to the borrower, and resolving that config
+	// under the borrower finds nothing.
+	//
+	// Zero means "this session's own tenant", which covers every sandbox
+	// created by an agent the session's workspace owns, plus pins written
+	// before the column existed.
+	SandboxConfigTenantID uint64 `json:"-" gorm:"column:sandbox_config_tenant_id;type:bigint;default:0"`
+
 	// ParentSessionID names the session this one was forked from. Empty for
 	// ordinary sessions. Deliberately not a foreign key: the parent may be
 	// deleted while the branch lives on, and a branch must not cascade away
@@ -160,6 +171,22 @@ type Session struct {
 func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
 	s.ID = uuid.New().String()
 	return nil
+}
+
+// SandboxConfigOwner returns the workspace SandboxConfigID must be looked up
+// in. Sandbox configs are keyed by (tenant, id), so the two always travel
+// together; a shared agent's sandbox lives on the LENDING workspace's config
+// while the session belongs to the borrower. Zero falls back to the session's
+// own tenant, which is right for every sandbox an own agent created and for
+// pins written before the owner was recorded.
+func (s *Session) SandboxConfigOwner() uint64 {
+	if s == nil {
+		return 0
+	}
+	if s.SandboxConfigTenantID != 0 {
+		return s.SandboxConfigTenantID
+	}
+	return s.TenantID
 }
 
 // SessionSourceAPI is the source filter that lists every session created via a

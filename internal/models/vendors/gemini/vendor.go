@@ -84,6 +84,7 @@ func init() {
 		Website:      "https://aistudio.google.com",
 		Icon:         icon,
 		API:          api.APIGoogleGenerativeAI,
+		EmbeddingAPI: api.EmbeddingGoogle,
 		Order:        33,
 		RequiresAuth: true,
 		Auth:         catalog.AuthGoogleAPIKey,
@@ -104,6 +105,18 @@ func init() {
 			types.ModelTypeEmbedding,
 		},
 		Compat: catalog.VendorCompat{
+			// https://ai.google.dev/api/embeddings: per request model, content
+			// and embedContentConfig {taskType, title, outputDimensionality,
+			// autoTruncate, …}; the same option names at the top level of the
+			// request are marked deprecated. The pre-catalog client sent the
+			// width top-level as output_dimensionality, which the proto JSON
+			// parser reads as the same field. taskType exists on
+			// gemini-embedding-001 only and is deliberately not declared: it
+			// changes the document vectors, so turning it on would split every
+			// existing index across two spaces (Tencent/WeKnora#1401).
+			Embeddings: catalog.EmbeddingsCompat{
+				DimensionsField: catalog.Ptr("outputDimensionality"),
+			},
 			// Used when the operator points base_url at the /openai facade.
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ToolCallExtraFields:     []string{"extra_content"},

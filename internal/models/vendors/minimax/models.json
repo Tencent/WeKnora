@@ -9,6 +9,7 @@
     {"id": "MiniMax-M2.5-highspeed", "name": "MiniMax M2.5 Highspeed", "reasoning": true, "input": ["text"], "context_window": 204800, "max_output_tokens": 131072, "cost": {"input": 0.6, "output": 2.4, "cache_read": 0.06, "cache_write": 0.375}, "thinking_levels": {"off": null}},
     {"id": "MiniMax-M2.1", "name": "MiniMax M2.1", "reasoning": true, "input": ["text"], "context_window": 204800, "max_output_tokens": 131072, "cost": {"input": 0.3, "output": 1.2, "cache_read": 0.03, "cache_write": 0.375}, "thinking_levels": {"off": null}},
     {"id": "MiniMax-M2.1-highspeed", "name": "MiniMax M2.1 Highspeed", "reasoning": true, "input": ["text"], "context_window": 204800, "max_output_tokens": 131072, "thinking_levels": {"off": null}, "source": "https://platform.minimax.io/docs/guides/text-generation"},
-    {"id": "MiniMax-M2", "name": "MiniMax M2", "reasoning": true, "input": ["text"], "context_window": 204800, "max_output_tokens": 131072, "cost": {"input": 0.3, "output": 1.2}, "thinking_levels": {"off": null}}
+    {"id": "MiniMax-M2", "name": "MiniMax M2", "reasoning": true, "input": ["text"], "context_window": 204800, "max_output_tokens": 131072, "cost": {"input": 0.3, "output": 1.2}, "thinking_levels": {"off": null}},
+    {"id": "asr-1.0", "name": "MiniMax ASR 1.0", "type": "ASR", "source": "https://platform.minimax.io/docs/api-reference/speech-to-text"}
   ]
 }

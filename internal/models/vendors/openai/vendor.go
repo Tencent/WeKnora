@@ -21,8 +21,8 @@
 //     gpt-5* / o1* / o3* / o4* families set supports_temperature false;
 //   - `store: false` is sent so completions are not retained, and
 //     `prompt_cache_key` steers cache routing; usage reports cached tokens;
-//   - every model type (chat, embedding, rerank via generic clients, VLM,
-//     ASR) is served from https://api.openai.com/v1;
+//   - chat, embedding, VLM and ASR are served from https://api.openai.com/v1;
+//     there is no rerank API;
 //   - requests that go to api.openai.com itself use the Responses protocol
 //     (https://developers.openai.com/api/docs/api-reference/responses),
 //     OpenAI's primary API where reasoning items and encrypted reasoning are
@@ -85,18 +85,42 @@ func init() {
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: BaseURL,
 			types.ModelTypeEmbedding:   BaseURL,
-			types.ModelTypeRerank:      BaseURL,
 			types.ModelTypeVLLM:        BaseURL,
 			types.ModelTypeASR:         BaseURL,
 		},
+		// No rerank: OpenAI's API has no rerank endpoint — the reference
+		// index (https://developers.openai.com/api/llms.txt) does not mention
+		// one — so a row created here would only ever 404. A relay that
+		// serves rerank behind an OpenAI-style URL is a generic row.
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
-			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Transcriptions: catalog.TranscriptionsCompat{
+				// The transcription reference (URL in openaitranscriptions):
+				// response_format differs per model — "For gpt-4o-transcribe
+				// and gpt-4o-mini-transcribe, the only supported format is
+				// json", the default — so it is declared per entry, not here.
+				// "Files can be up to 25 MB"
+				// (https://developers.openai.com/api/docs/guides/speech-to-text).
+				MaxFileBytes: catalog.Ptr(25 << 20),
+				// "flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm", and a
+				// language field in ISO-639-1.
+				Formats:       []string{"flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"},
+				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+			},
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://developers.openai.com/api/reference/resources/embeddings/methods/create:
+				// model, input, dimensions (text-embedding-3 and later; the ada-002
+				// entry turns it off), encoding_format, user. An input array
+				// "must be 2048 dimensions or less" — elements, despite the word.
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+				MaxBatchSize:       catalog.Ptr(2048),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
 				SupportsReasoningEffort: catalog.Ptr(true),

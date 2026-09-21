@@ -301,11 +301,12 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 		// path this endpoint would have to guess.
 		if resolved.Vendor.Endpoint != nil {
 			endpointURL, query := resolved.Vendor.Endpoint(catalog.EndpointRequest{
-				BaseURL:   resolved.BaseURL,
-				Model:     resolved.RemoteModel,
-				ModelType: modelType,
-				API:       resolved.API,
-				Extra:     extra,
+				BaseURL:      resolved.BaseURL,
+				Model:        resolved.RemoteModel,
+				ModelType:    modelType,
+				API:          resolved.API,
+				EmbeddingAPI: resolved.EmbeddingAPI,
+				Extra:        extra,
 			})
 			if endpointURL != "" {
 				data["url"] = api.Endpoint{URL: endpointURL, Query: query}.Resolve("")

@@ -9,7 +9,7 @@
     {"id": "deepseek-v3.2", "name": "DeepSeek V3.2 (Qianfan)", "reasoning": true, "input": ["text"], "context_window": 128000, "max_output_tokens": 32000, "compat": {"thinking_format": "thinking-type"}, "source": "https://cloud.baidu.com/doc/qianfan-docs/s/Wm95lyynv"},
     {"id": "embedding-v1", "name": "Embedding-V1", "type": "Embedding", "dimension": 384, "source": "https://cloud.baidu.com/doc/qianfan-api/s/Fm7u3ropn"},
     {"id": "bge-large-zh", "name": "BGE Large ZH", "type": "Embedding", "dimension": 1024, "source": "https://cloud.baidu.com/doc/qianfan-api/s/Fm7u3ropn"},
-    {"id": "tao-8k", "name": "Tao-8K", "type": "Embedding", "dimension": 1024, "source": "https://cloud.baidu.com/doc/qianfan-api/s/Fm7u3ropn"},
+    {"id": "tao-8k", "name": "Tao-8K", "type": "Embedding", "dimension": 1024, "compat": {"max_batch_size": 1}, "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j"},
     {"id": "bce-reranker-base", "name": "BCE Reranker Base", "type": "Rerank"}
   ]
 }

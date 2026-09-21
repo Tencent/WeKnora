@@ -90,6 +90,16 @@ func TestEveryCatalogEntryResolves(t *testing.T) {
 				modelType = types.ModelTypeKnowledgeQA
 			}
 			r, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: name, ModelType: modelType})
+			// An entry may declare that this build cannot serve it — a vendor
+			// whose second rerank dialect has no protocol package. Refusing is
+			// the point: the alternative is a request shaped for the wrong
+			// protocol. Such an entry must refuse, and must do it with a reason.
+			if bytes.Contains(m.Compat, []byte("unsupported_reason")) {
+				if err == nil {
+					t.Errorf("%s/%s: declares unsupported_reason but still resolves", id, name)
+				}
+				continue
+			}
 			if err != nil {
 				t.Errorf("%s/%s: resolve: %v", id, name, err)
 				continue
@@ -100,8 +110,43 @@ func TestEveryCatalogEntryResolves(t *testing.T) {
 			if modelType == types.ModelTypeKnowledgeQA && !r.API.Known() {
 				t.Errorf("%s/%s: resolved to unknown API %q", id, name, r.API)
 			}
+			if modelType == types.ModelTypeASR && !r.TranscriptionAPI.Known() {
+				t.Errorf("%s/%s: resolved to unknown transcription API %q", id, name, r.TranscriptionAPI)
+			}
+			if modelType == types.ModelTypeEmbedding && !r.EmbeddingAPI.Known() {
+				t.Errorf("%s/%s: resolved to unknown embedding API %q", id, name, r.EmbeddingAPI)
+			}
 			if modelType == types.ModelTypeEmbedding && m.ID != "" && m.Dimension <= 0 {
 				t.Logf("%s/%s: embedding entry without dimension", id, name)
+			}
+		}
+	}
+}
+
+// Model names that fall inside a chat family's glob must still resolve as
+// embedding and rerank rows. The families that caught them carry chat compat
+// (thinking_always_send on Aliyun's qwen3*, max_tokens_field and
+// supports_temperature on gpt-5*), which the embedding and rerank overlays
+// reject, so an untyped lookup made these rows impossible to build — new ids
+// and dated snapshots first of all, since they are never in models.json yet.
+func TestNamesInsideChatGlobsResolveForOtherTypes(t *testing.T) {
+	names := []struct{ provider, model string }{
+		{"aliyun", "qwen3.8-text-embedding"},
+		{"aliyun", "qwen3-embedding"},
+		{"aliyun", "qwen3.7-text-embedding-20260601"},
+		{"generic", "gpt-5-embed"},
+		{"openai", "gpt-5-embed"},
+	}
+	for _, n := range names {
+		for _, modelType := range []types.ModelType{types.ModelTypeEmbedding, types.ModelTypeRerank} {
+			r, err := catalog.Resolve(catalog.Ref{Provider: n.provider, Model: n.model, ModelType: modelType})
+			if err != nil {
+				t.Errorf("%s/%s as %s: %v", n.provider, n.model, modelType, err)
+				continue
+			}
+			if r.Cataloged {
+				t.Errorf("%s/%s as %s matched %q, which is not an entry of that type",
+					n.provider, n.model, modelType, r.Spec.Name)
 			}
 		}
 	}

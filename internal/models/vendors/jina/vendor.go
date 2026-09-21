@@ -63,6 +63,27 @@ func init() {
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 		},
+		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://jina.ai/embeddings/: model, input, an optional task,
+				// dimensions, embedding_type, normalized, late_chunking and a
+				// boolean truncate that defaults to false (an over-long input is
+				// an error). truncate: true is what this vendor has always been
+				// sent. task is deliberately not declared: the adapter it selects
+				// changes the document vectors, so turning it on would leave every
+				// existing index half in one space and half in another
+				// (Tencent/WeKnora#1401).
+				DimensionsField: catalog.Ptr("dimensions"),
+				TruncateField:   catalog.Ptr("truncate"),
+				TruncateValue:   catalog.Ptr("true"),
+			},
+			Rerank: catalog.RerankCompat{
+				// return_documents echoes the text back. Results are matched
+				// by index, so this is not needed to map them; it is kept
+				// because it is what this vendor has always been sent.
+				SendReturnDocs: catalog.Ptr(true),
+			},
+		},
 		Models: catalog.MustParseModels(modelsJSON),
 	})
 }

@@ -148,6 +148,36 @@ func NewMCPServiceResponses(ctx context.Context, svcs []*types.MCPService) []*MC
 	return out
 }
 
+// NewSharedAgentMCPServiceResponses is the cross-workspace list shape: the
+// @MCP picker of a borrowed agent needs a service's identity and how many
+// tools it offers, and nothing else.
+//
+// It fills the fields explicitly instead of reusing NewMCPServiceResponse and
+// blanking the rest, so a field added to MCPServiceResponse later is absent
+// here until someone decides it may cross a workspace boundary. Endpoint URLs,
+// headers, env vars, stdio commands, auth config and credential metadata all
+// describe how the OWNER wired the service up; the borrower never configures
+// it and must not see it.
+func NewSharedAgentMCPServiceResponses(svcs []*types.MCPService) []*MCPServiceResponse {
+	out := make([]*MCPServiceResponse, 0, len(svcs))
+	for _, s := range svcs {
+		if s == nil {
+			continue
+		}
+		out = append(out, &MCPServiceResponse{
+			ID:                s.ID,
+			TenantID:          s.TenantID,
+			Name:              s.Name,
+			Description:       s.Description,
+			UsageInstructions: s.UsageInstructions,
+			Enabled:           s.Enabled,
+			TransportType:     s.TransportType,
+			IsBuiltin:         s.IsBuiltin,
+		})
+	}
+	return out
+}
+
 // AttachMCPCatalogs copies persisted directory counts onto list/detail responses.
 func AttachMCPCatalogs(
 	resp []*MCPServiceResponse,

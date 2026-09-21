@@ -12,11 +12,14 @@ import (
 
 type stubPinReader struct {
 	configID string
+	// tenantID is the workspace owning configID; zero keeps the "the session's
+	// own workspace" fallback that every non-borrowed pin uses.
+	tenantID uint64
 	err      error
 }
 
-func (s stubPinReader) Read(context.Context, string) (string, error) {
-	return s.configID, s.err
+func (s stubPinReader) Read(context.Context, string) (SandboxPin, error) {
+	return SandboxPin{ConfigID: s.configID, TenantID: s.tenantID}, s.err
 }
 
 type stubTenantSandboxResolver struct {

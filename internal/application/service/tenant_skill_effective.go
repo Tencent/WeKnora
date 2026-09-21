@@ -48,8 +48,13 @@ func skillsForRun(
 			sessionID, err)
 		return "", nil
 	}
-	if pinned != "" {
-		configID = pinned
+	if !pinned.IsZero() {
+		configID = pinned.ConfigID
+		// A config is read in the workspace that owns it, which for a shared
+		// agent is the lending one. tenantID is that same workspace on every
+		// path today (the chat turn runs there); taking it from the pin is
+		// what keeps the two from drifting apart again.
+		tenantID = pinned.TenantOr(tenantID)
 	}
 	return configID, effectiveTenantSkills(ctx, configs, skills, tenantID, configID)
 }

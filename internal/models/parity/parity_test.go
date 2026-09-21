@@ -16,6 +16,7 @@
 package parity
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -523,6 +524,13 @@ func TestCatalogInvariants(t *testing.T) {
 					// Resolve validates the compat object against the model's
 					// protocol: an unknown or misspelled key fails here.
 					_, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: m.ID, ModelType: m.Type})
+					if bytes.Contains(m.Compat, []byte("unsupported_reason")) {
+						// An entry that declares itself unserveable must say so
+						// by refusing, not by resolving into a request shaped
+						// for a protocol this build does not speak.
+						assert.Error(t, err, "%s: declares unsupported_reason but still resolves", label)
+						continue
+					}
 					assert.NoError(t, err, "%s: does not resolve", label)
 				}
 			}

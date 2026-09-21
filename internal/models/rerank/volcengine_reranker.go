@@ -6,37 +6,32 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/volcengine/vikingdb-go-sdk/knowledge"
 	knowledgemodel "github.com/volcengine/vikingdb-go-sdk/knowledge/model"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
-	VolcengineRerankBaseURL = provider.VolcengineRerankBaseURL
-
-	volcengineRerankPath               = "/api/knowledge/service/rerank"
-	volcengineRerankDefaultModel       = "doubao-seed-rerank"
-	volcengineRerankDefaultRegion      = "cn-beijing"
-	volcengineRerankDefaultInstruction = "Whether the Document answers the Query or matches the content retrieval intent"
-	volcengineRerankMaxDocuments       = 50
-	// volcengineRerankMaxConcurrency bounds the number of in-flight batch
-	// requests when the candidate set exceeds volcengineRerankMaxDocuments, so a
-	// very large embedding_top_k cannot fan out into an unbounded burst of calls.
-	volcengineRerankMaxConcurrency = 4
+	volcengineRerankDefaultModel  = "doubao-seed-rerank"
+	volcengineRerankDefaultRegion = "cn-beijing"
+	// The console's default instruction, verbatim: "如需对齐控制台效果，请使用
+	// 相同指令" (https://docs.volcengine.com/docs/vector_database_vikingdb/Rerank).
+	volcengineRerankDefaultInstruction = "Whether the document answers the query " +
+		"or matches the content retrieval intent"
 )
 
-// VolcengineReranker calls the managed Knowledge Service Rerank API with AK/SK signing.
-type VolcengineReranker struct {
+// volcengineClient calls the managed Knowledge Service rerank through the
+// vikingdb SDK, which owns the AK/SK signing. It implements api.Reranker and
+// nothing else: the 200-document ceiling and the batch concurrency are
+// declared on the vendor and enforced by protocolReranker.
+type volcengineClient struct {
 	modelName   string
 	instruction string
-	modelID     string
-	endpoint    string
 	client      *knowledge.Client
 }
 
-func NewVolcengineReranker(config *RerankerConfig) (*VolcengineReranker, error) {
+func newVolcengineClient(config *RerankerConfig, resolved *catalog.Resolved) (api.Reranker, error) {
 	accessKey := strings.TrimSpace(config.APIKey)
 	secretKey := strings.TrimSpace(config.AppSecret)
 	if secretKey == "" && config.ExtraConfig != nil {
@@ -46,15 +41,11 @@ func NewVolcengineReranker(config *RerankerConfig) (*VolcengineReranker, error) 
 		return nil, fmt.Errorf("access key and secret key are required for Volcengine rerank")
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = VolcengineRerankBaseURL
-	}
-	if err := validateRerankBaseURL(baseURL); err != nil {
-		return nil, err
-	}
+	// The catalog supplies the vendor's Knowledge Service host when the row
+	// names none.
+	baseURL := resolved.BaseURL
 
-	modelName := strings.TrimSpace(config.ModelName)
+	modelName := strings.TrimSpace(resolved.RemoteModel)
 	if modelName == "" {
 		modelName = volcengineRerankDefaultModel
 	}
@@ -80,70 +71,17 @@ func NewVolcengineReranker(config *RerankerConfig) (*VolcengineReranker, error) 
 	if err != nil {
 		return nil, fmt.Errorf("create Volcengine rerank client: %w", err)
 	}
-
-	return &VolcengineReranker{
-		modelName:   modelName,
-		instruction: instruction,
-		modelID:     config.ModelID,
-		endpoint:    baseURL,
-		client:      client,
-	}, nil
+	return &volcengineClient{modelName: modelName, instruction: instruction, client: client}, nil
 }
 
-func (r *VolcengineReranker) Rerank(
+// Rerank scores one batch. Every document is paired with the same query and
+// instruction, and the reply is a score list in input order.
+func (r *volcengineClient) Rerank(
 	ctx context.Context, query string, documents []string,
-) ([]RankResult, error) {
-	if len(documents) == 0 {
-		return []RankResult{}, nil
-	}
-
-	// The managed Knowledge Service Rerank API rejects requests carrying more
-	// than volcengineRerankMaxDocuments items. Upstream callers (chat pipeline,
-	// agent knowledge search, message search) feed in every retrieval candidate
-	// and do not cap the count per provider, so a large embedding_top_k or a
-	// multi-target search can exceed the limit. Each Data item is scored
-	// independently against the same (query, instruction) pair, so the scores
-	// are comparable across requests — we can split the documents into limit-
-	// sized batches, rerank them concurrently, and merge without losing any
-	// candidate (unlike truncation) or biasing the ranking.
-	results := make([]RankResult, len(documents))
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(volcengineRerankMaxConcurrency)
-	for start := 0; start < len(documents); start += volcengineRerankMaxDocuments {
-		start := start
-		end := min(start+volcengineRerankMaxDocuments, len(documents))
-		g.Go(func() error {
-			scores, err := r.rerankBatch(gctx, query, documents[start:end])
-			if err != nil {
-				return err
-			}
-			for i, score := range scores {
-				results[start+i] = RankResult{
-					Index:          start + i,
-					Document:       DocumentInfo{Text: documents[start+i]},
-					RelevanceScore: score,
-				}
-			}
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
-// rerankBatch scores a single batch of documents (already sized within the API
-// limit) and returns the per-document relevance scores in input order.
-func (r *VolcengineReranker) rerankBatch(
-	ctx context.Context, query string, documents []string,
-) ([]float64, error) {
+) ([]api.RerankResult, error) {
 	data := make([]knowledgemodel.RerankDataItem, len(documents))
 	for i := range documents {
-		data[i] = knowledgemodel.RerankDataItem{
-			Query:   query,
-			Content: &documents[i],
-		}
+		data[i] = knowledgemodel.RerankDataItem{Query: query, Content: &documents[i]}
 	}
 	request := knowledgemodel.RerankRequest{
 		Datas:             data,
@@ -151,11 +89,6 @@ func (r *VolcengineReranker) rerankBatch(
 		RerankInstruction: &r.instruction,
 	}
 
-	logger.Debugf(
-		ctx,
-		"%s",
-		buildRerankRequestDebug(r.modelName, r.endpoint+volcengineRerankPath, query, documents),
-	)
 	response, err := r.client.Rerank(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("call Volcengine rerank: %w", err)
@@ -169,17 +102,13 @@ func (r *VolcengineReranker) rerankBatch(
 	if len(response.Data.Scores) != len(documents) {
 		return nil, fmt.Errorf(
 			"Volcengine rerank score count mismatch: got %d scores for %d documents",
-			len(response.Data.Scores),
-			len(documents),
+			len(response.Data.Scores), len(documents),
 		)
 	}
-	return response.Data.Scores, nil
-}
 
-func (r *VolcengineReranker) GetModelName() string {
-	return r.modelName
-}
-
-func (r *VolcengineReranker) GetModelID() string {
-	return r.modelID
+	results := make([]api.RerankResult, len(documents))
+	for i, score := range response.Data.Scores {
+		results[i] = api.RerankResult{Index: i, Score: score, Text: documents[i]}
+	}
+	return results, nil
 }

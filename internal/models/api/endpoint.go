@@ -100,24 +100,33 @@ func (e Endpoint) NewRequest(ctx context.Context, url string, body any, stream b
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal request: %w", err)
 	}
-	if err := secutils.ValidateURLForSSRF(url); err != nil {
-		return nil, nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	req, err := e.newPost(ctx, url, data, "application/json")
 	if err != nil {
-		return nil, nil, fmt.Errorf("create request: %w", err)
+		return nil, nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
 	}
+	return req, data, nil
+}
+
+// newPost prepares an authenticated POST of an already-encoded body.
+func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentType string) (*http.Request, error) {
+	if err := secutils.ValidateURLForSSRF(url); err != nil {
+		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", contentType)
 	if e.Auth != nil {
 		e.Auth(req, data)
 	}
 	// User headers are applied last but the helper skips reserved names so
 	// they cannot clobber auth or content negotiation.
 	secutils.ApplyCustomHeaders(req, e.Headers)
-	return req, data, nil
+	return req, nil
 }
 
 // Do sends the request and returns the response. Non-2xx responses are
@@ -125,7 +134,7 @@ func (e Endpoint) NewRequest(ctx context.Context, url string, body any, stream b
 func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 	resp, err := e.httpClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, &TransportError{Op: "send request", Err: err}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -134,6 +143,59 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 	}
 	return resp, nil
 }
+
+// PostJSON sends one authenticated JSON request and decodes the reply into
+// out. It is the whole round-trip for the non-streaming protocols (rerank,
+// embeddings), which have no SSE to assemble.
+//
+// It never returns a nil error with nothing decoded: every failure path —
+// marshalling, SSRF, transport, non-2xx, decoding — returns an error, so a
+// caller cannot mistake an empty result for a successful empty answer.
+func (e Endpoint) PostJSON(ctx context.Context, url string, body, out any) error {
+	req, _, err := e.NewRequest(ctx, url, body, false)
+	if err != nil {
+		return err
+	}
+	// No LogRequest here: the chat protocols log their own bodies because a
+	// prompt is what an operator debugs, while a rerank body is a query plus
+	// every candidate chunk. The rerank layer logs a truncated line at Debug
+	// instead, so this would have duplicated it at Info.
+	return e.roundTrip(req, out)
+}
+
+// roundTrip sends a prepared request and decodes a 2xx reply into out.
+func (e Endpoint) roundTrip(req *http.Request, out any) error {
+	resp, err := e.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		// The connection broke before the reply arrived whole: nothing was
+		// received, so this is the network failing, not the vendor answering.
+		return &TransportError{Op: "read response", Err: err}
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
+}
+
+// TransportError is a request that never got a whole answer: DNS, connect,
+// TLS, a reset or a timeout, while sending or while reading the reply. It is
+// the only failure worth sending again.
+type TransportError struct {
+	// Op is the phase that failed: "send request" or "read response".
+	Op  string
+	Err error
+}
+
+func (e *TransportError) Error() string { return e.Op + ": " + e.Err.Error() }
+func (e *TransportError) Unwrap() error { return e.Err }
 
 // HTTPError is a non-2xx vendor reply.
 type HTTPError struct {

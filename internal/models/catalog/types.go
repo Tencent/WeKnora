@@ -42,14 +42,16 @@ const (
 // ExtraField describes one vendor-specific configuration input the model
 // editor renders dynamically (Azure api-version, LKEAP secret key, ...).
 type ExtraField struct {
-	Key         string             `json:"key"`
-	Label       string             `json:"label"`
-	Labels      map[string]string  `json:"labels,omitempty"`
-	Type        string             `json:"type"` // "string", "number", "boolean", "select", "password"
-	Required    bool               `json:"required"`
-	Default     string             `json:"default,omitempty"`
-	Placeholder string             `json:"placeholder,omitempty"`
-	Options     []ExtraFieldOption `json:"options,omitempty"`
+	Key         string            `json:"key"`
+	Label       string            `json:"label"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Type        string            `json:"type"` // "string", "number", "boolean", "select", "password"
+	Required    bool              `json:"required"`
+	Default     string            `json:"default,omitempty"`
+	Placeholder string            `json:"placeholder,omitempty"`
+	// Placeholders carries localized variants of Placeholder.
+	Placeholders map[string]string  `json:"placeholders,omitempty"`
+	Options      []ExtraFieldOption `json:"options,omitempty"`
 	// ModelTypes restricts the field to some model types; empty means all.
 	ModelTypes []types.ModelType `json:"model_types,omitempty"`
 	// Secret marks values that must never be echoed back to the UI.
@@ -102,6 +104,11 @@ func localizedOr(table map[string]string, locale, fallback string) string {
 	return fallback
 }
 
+// LocalizedPlaceholder resolves the placeholder for a locale.
+func (f ExtraField) LocalizedPlaceholder(locale string) string {
+	return localizedOr(f.Placeholders, locale, f.Placeholder)
+}
+
 // CredentialLabelFor returns the credential naming for a model type, or nil
 // when the vendor uses the generic API-key wording.
 func (v *Vendor) CredentialLabelFor(modelType types.ModelType) *CredentialLabel {
@@ -119,10 +126,19 @@ func (v *Vendor) CredentialLabelFor(modelType types.ModelType) *CredentialLabel 
 	return nil
 }
 
-// ExtraFieldOption is one choice of a select field.
+// ExtraFieldOption is one choice of a select field. Labels carries localized
+// variants keyed by locale, like every other operator-facing string here: an
+// option whose label is prose rather than an identifier is unreadable to half
+// the product without it.
 type ExtraFieldOption struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
+	Label  string            `json:"label"`
+	Labels map[string]string `json:"labels,omitempty"`
+	Value  string            `json:"value"`
+}
+
+// LocalizedLabel resolves the option label for a locale.
+func (o ExtraFieldOption) LocalizedLabel(locale string) string {
+	return localizedOr(o.Labels, locale, o.Label)
 }
 
 // ModelCost is priced per million tokens, in USD unless Currency says otherwise.
@@ -205,7 +221,12 @@ type EndpointRequest struct {
 	Model     string
 	ModelType types.ModelType
 	API       api.API
-	Extra     map[string]string
+	// EmbeddingAPI is the resolved embedding protocol on an embedding
+	// request. Aliyun and Volcengine each serve their text and multimodal
+	// embeddings on different paths under one base URL, so the hook has to
+	// know which one the model speaks.
+	EmbeddingAPI api.EmbeddingAPI
+	Extra        map[string]string
 }
 
 // Vendor is one model vendor / gateway / self-hosted runtime.
@@ -223,6 +244,16 @@ type Vendor struct {
 	Icon []byte
 	// API is the default chat protocol; a ModelSpec may override it.
 	API api.API
+	// RerankAPI is the rerank protocol. Register defaults it to the Cohere
+	// shape for any vendor that serves rerank without naming another.
+	RerankAPI api.RerankAPI
+	// EmbeddingAPI is the embedding protocol. Register defaults it to the
+	// OpenAI shape for any vendor that serves embeddings without naming
+	// another.
+	EmbeddingAPI api.EmbeddingAPI
+	// TranscriptionAPI is the speech-to-text protocol. Register defaults it
+	// to the OpenAI shape for any vendor that serves ASR.
+	TranscriptionAPI api.TranscriptionAPI
 	// DefaultBaseURLs by model type; GetDefaultURL falls back to chat.
 	DefaultBaseURLs map[types.ModelType]string
 	ModelTypes      []types.ModelType

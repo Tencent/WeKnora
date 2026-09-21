@@ -109,6 +109,23 @@ export function extraFieldLabel(field: ModelProviderExtraField, locale?: string)
   return pickLocalized(field.labels, locale, field.label || field.key)
 }
 
+/** Placeholder for the current locale, falling back to the default string. */
+export function extraFieldPlaceholder(field: ModelProviderExtraField, locale?: string): string {
+  return pickLocalized(field.placeholders, locale, field.placeholder || '')
+}
+
+/**
+ * Option label for the current locale. Select options used to render their
+ * raw `label`, which was fine while every option was an identifier (a region
+ * code) and wrong as soon as one was prose.
+ */
+export function extraFieldOptionLabel(
+  option: { label?: string; labels?: Record<string, string>; value: string },
+  locale?: string,
+): string {
+  return pickLocalized(option.labels, locale, option.label || option.value)
+}
+
 /** Stable display order: backend `order`, then label. */
 export function sortProviders(providers: ReadonlyArray<ModelProviderOption>): ModelProviderOption[] {
   return [...providers].sort((a, b) => {

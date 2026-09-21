@@ -11,9 +11,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/models/vendors/weknoracloud"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -70,7 +70,7 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 	appID = params.AppID
 	appSecret = s.decryptAppSecret(params.AppSecret)
 
-	if provider.ProviderName(params.Provider) != provider.ProviderWeKnoraCloud {
+	if params.Provider != weknoracloud.ID {
 		return
 	}
 	if appID != "" && appSecret != "" {

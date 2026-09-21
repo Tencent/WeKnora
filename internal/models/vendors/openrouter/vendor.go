@@ -67,14 +67,38 @@ func init() {
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: BaseURL,
 			types.ModelTypeEmbedding:   BaseURL,
+			types.ModelTypeRerank:      BaseURL,
 			types.ModelTypeVLLM:        BaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
+			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Transcriptions: catalog.TranscriptionsCompat{
+				// https://openrouter.ai/docs/api/api-reference/stt/create-transcription:
+				// OpenAI-style multipart file + model, json by default. "Max 25
+				// MB; send larger files as base64 JSON via input_audio."
+				MaxFileBytes: catalog.Ptr(25 << 20),
+				// language is an ISO-639-1 form field. The format "is derived
+				// from the filename extension", with no closed list.
+				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+			},
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://openrouter.ai/docs/api/api-reference/embeddings/create-embeddings:
+				// model, input, dimensions, encoding_format, input_type, provider,
+				// user. input_type is a free-form string handed to whichever
+				// upstream serves the model ("e.g. search_query,
+				// search_document"), so its vocabulary is the upstream's, and on
+				// an asymmetric model it changes the document vectors. Not
+				// declared, for the reason Jina's task is not
+				// (Tencent/WeKnora#1401).
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenRouter),
 				SupportsReasoningEffort: catalog.Ptr(true),

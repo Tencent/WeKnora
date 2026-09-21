@@ -71,10 +71,22 @@ func init() {
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: BaseURL,
 		},
+		TranscriptionAPI: api.TranscriptionChatAudio,
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			// ASR: mimo-v2.5-asr on the chat endpoint, WAV or MP3 as a base64
+			// data URI whose "encoded string size must not exceed 10 MB"
+			// (https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/Speech-Recognition).
+			Transcriptions: catalog.TranscriptionsCompat{
+				// The ceiling counts the whole data URI as sent.
+				MaxEncodedBytes: catalog.Ptr(10 << 20),
+				Formats:         []string{"wav", "mp3"},
+				// asr_options.language: "auto|zh|en".
+				LanguageParam: catalog.Ptr(catalog.LanguageASROptions),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:        catalog.Ptr(catalog.ThinkingFormatThinkingType),
 				PromptCacheAccounting: catalog.Ptr(true),

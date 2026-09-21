@@ -26,12 +26,15 @@
 //     without it the vendor default would emit a chat-template switch and
 //     drop the level, leaving the picker's rungs inert;
 //   - most hosted endpoints are metered at zero cost; the Nemotron and
-//     DeepSeek endpoints are priced.
+//     DeepSeek endpoints are priced;
+//   - nemotron-3-embed-1b is the one embedding endpoint here that
+//     build.nvidia.com does not mark deprecated: nv-embed-v1,
+//     llama-3_2-nemoretriever-300m-embed-v1 (and its v2) and baai/bge-m3 all
+//     carry "This NIM Endpoint has been deprecated", so their entries were
+//     removed. Its reference caps input at 4096 tokens; the 2048-wide vector
+//     is from the Nemotron-3-Embed-1B model card on Hugging Face.
 //
 // Unverified:
-//   - embedding dimensions (nv-embed-v1 4096, nemoretriever-300m 2048,
-//     nemotron-3-embed-1b 2048, bge-m3 1024) come from the model cards;
-//     nv-embed-v1's 32768 context is not restated in the current card;
 //   - `minimaxai/minimax-m3`, `minimaxai/minimax-m2.7` and
 //     `mistralai/mistral-medium-3.5-128b` have live build.nvidia.com pages
 //     whose samples ship an empty `model=""`, so the exact org-prefixed id
@@ -78,7 +81,7 @@ func init() {
 		Name:  "NVIDIA",
 		Names: map[string]string{"zh-CN": "NVIDIA"},
 		Description: "nvidia/nemotron-3-ultra-550b-a55b, deepseek-ai/deepseek-v4-pro-0813, " +
-			"nvidia/nv-embed-v1, nvidia/nv-rerankqa-mistral-4b-v3, etc.",
+			"nvidia/nemotron-3-embed-1b, nvidia/nv-rerankqa-mistral-4b-v3, etc.",
 		Website:      "https://build.nvidia.com",
 		Icon:         icon,
 		API:          api.APIOpenAICompletions,
@@ -98,7 +101,35 @@ func init() {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
+		RerankAPI: api.RerankNIM,
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3-embed-1b-infer:
+				// input, model, input_type (passage | query), encoding_format,
+				// truncate (NONE | START | END, default NONE), user. There is no
+				// dimensions field. input_type is required and passage is what
+				// this vendor has always been sent for documents, so the indexed
+				// side is unchanged; queries now get query, as the reference
+				// insists they must. This is the hosted API: a self-hosted NIM
+				// (https://docs.nvidia.com/nim/nemo-retriever/embedding/latest/reference.html)
+				// does take dimensions, and belongs on a generic row pointed at it.
+				SendEncodingFormat: catalog.Ptr(true),
+				InputTypeField:     catalog.Ptr("input_type"),
+				InputTypeValues:    map[string]string{"document": "passage", "query": "query"},
+				// NONE fails the request on an over-long input instead of
+				// cutting it.
+				TruncateField: catalog.Ptr("truncate"),
+				TruncateValue: catalog.Ptr("END"),
+			},
+			Rerank: catalog.RerankCompat{
+				// rankings[].logit is unbounded and routinely negative, so the
+				// caller must be told this is not a 0..1 relevance score.
+				ScoreScale: catalog.Ptr(api.ScoreLogit),
+				// truncate defaults to NONE upstream, which fails the request on
+				// an over-long passage instead of cutting it.
+				Truncate:     catalog.Ptr("END"),
+				MaxDocuments: catalog.Ptr(512),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),
