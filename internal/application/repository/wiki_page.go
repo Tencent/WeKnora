@@ -1039,8 +1039,8 @@ func (r *wikiPageRepository) ListByTypeRecent(
 // an exact alias (case-insensitive, with surrounding spaces trimmed). Exact
 // alias matches score 1, ahead of fuzzy title matches; equal scores sort by
 // slug for stable top-k results. These are candidates, not automatic merges.
-// The title predicate can use idx_wiki_pages_title_trgm; alias matching scans
-// JSONB arrays within the scoped knowledge base and page types.
+// Separate bounded branches preserve the title trigram index path; alias
+// matching still scans JSONB arrays within the scoped knowledge base/types.
 //
 // types is an optional page_type allow-list; empty means entity+concept.
 // Non-positive limits default to 20; positive limits are capped at 50.
@@ -1076,16 +1076,29 @@ func (r *wikiPageRepository) FindSimilarPages(
 				THEN aliases::jsonb ELSE '[]'::jsonb END
 		) AS alias(value) WHERE lower(btrim(alias.value)) = ?
 	)`
-	var rows []types.WikiPageLite
-	if err := r.db.WithContext(ctx).
-		Model(&types.WikiPage{}).
-		Select("slug, title, page_type, status, aliases, out_links, CASE WHEN "+exactAlias+
-			" THEN 1.0 ELSE similarity(lower(title), ?) END AS sim", q, q).
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
-			kbID, pageTypes, types.WikiPageStatusArchived).
-		Where("(lower(title) % ? OR "+exactAlias+")", q, q).
+	// Keep both branches scoped via the model so GORM also applies soft-delete
+	// filtering. An OR with an alias subquery can prevent the title index path.
+	scoped := func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&types.WikiPage{}).
+			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+				kbID, pageTypes, types.WikiPageStatusArchived)
+	}
+	const fields = "slug, title, page_type, status, aliases, out_links"
+	titleMatches := scoped().Select(fields+", similarity(lower(title), ?) AS sim", q).
+		Where("lower(title) % ?", q).
 		Order("sim DESC, slug ASC").
-		Limit(limit).
+		Limit(limit)
+	aliasMatches := scoped().Select(fields+", 1.0 AS sim").Where(exactAlias, q).
+		Order("slug ASC").Limit(limit)
+
+	// Each branch uses the same score/slug ordering, so their top-k union
+	// contains the global top-k. Keep the higher score for overlapping pages;
+	// the final sort/dedup processes at most 2*limit rows in one round trip.
+	var rows []types.WikiPageLite
+	if err := r.db.WithContext(ctx).Raw("SELECT "+fields+` FROM (
+		SELECT DISTINCT ON (slug) * FROM ((?) UNION ALL (?)) AS candidates
+		ORDER BY slug, sim DESC
+	) AS deduplicated ORDER BY sim DESC, slug ASC LIMIT ?`, titleMatches, aliasMatches, limit).
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}

@@ -82,6 +82,25 @@ func TestFindSimilarPages_ExactAliasesPostgres(t *testing.T) {
 		})
 	}
 
+	t.Run("overlapping bounded branches preserve global top-k", func(t *testing.T) {
+		require.NoError(t, tx.Exec(`INSERT INTO wiki_pages
+			(knowledge_base_id, slug, title, page_type, status, aliases) VALUES
+			('kb', 'entity/a-title', 'MATCHKEY', 'entity', 'published', '[]'),
+			('kb', 'entity/c-both', 'MATCHKEY', 'entity', 'published', '["MATCHKEY", "matchkey"]'),
+			('kb', 'entity/z-alias', 'Different organization', 'entity', 'published', '["MATCHKEY"]'),
+			('kb', 'entity/fuzzy', 'MATCHKEY Services', 'entity', 'published', '[]')`).Error)
+		want := []string{"entity/a-title", "entity/c-both", "entity/z-alias", "entity/fuzzy"}
+		for _, limit := range []int{1, 2, 3, 4} {
+			pages, err := repo.FindSimilarPages(context.Background(), "kb", "MATCHKEY", nil, limit)
+			require.NoError(t, err)
+			var slugs []string
+			for _, page := range pages {
+				slugs = append(slugs, page.Slug)
+			}
+			require.Equal(t, want[:limit], slugs)
+		}
+	})
+
 	// The existing default (20) and maximum (50) still apply to alias matches.
 	require.NoError(t, tx.Exec(`INSERT INTO wiki_pages
 		(knowledge_base_id, slug, title, page_type, status, aliases)
