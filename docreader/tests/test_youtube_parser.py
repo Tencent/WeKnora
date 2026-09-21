@@ -1,6 +1,10 @@
+import json
 import unittest
+from unittest.mock import patch
 
 from docreader.parser.youtube_parser import (
+    YoutubeEnumerateParser,
+    YoutubeParseError,
     extract_video_id,
     is_playlist_url,
     is_youtube_url,
@@ -45,6 +49,62 @@ class TestYoutubeUrlHelpers(unittest.TestCase):
         self.assertFalse(
             is_playlist_url("https://www.youtube.com/watch?v=abc123&list=PL123")
         )
+
+
+class TestYoutubeEnumerateParser(unittest.TestCase):
+    def test_single_video_returns_one_entry(self):
+        info = {"_type": "video", "id": "abc123", "title": "My Video"}
+        parser = YoutubeEnumerateParser(title="")
+        with patch(
+            "docreader.parser.youtube_parser._ytdlp_extract_info",
+            return_value=info,
+        ):
+            doc = parser.parse_into_text(b"https://www.youtube.com/watch?v=abc123")
+        self.assertTrue(doc.is_valid())
+        self.assertEqual(doc.metadata["youtube_kind"], "video")
+        entries = json.loads(doc.metadata["youtube_videos"])
+        self.assertEqual(entries, [{
+            "video_id": "abc123",
+            "url": "https://www.youtube.com/watch?v=abc123",
+            "title": "My Video",
+        }])
+
+    def test_playlist_returns_all_entries(self):
+        info = {
+            "_type": "playlist",
+            "entries": [
+                {"id": "vid1", "title": "First"},
+                {"id": "vid2", "title": "Second"},
+                None,  # yt-dlp can yield None for unavailable entries
+            ],
+        }
+        parser = YoutubeEnumerateParser(title="")
+        with patch(
+            "docreader.parser.youtube_parser._ytdlp_extract_info",
+            return_value=info,
+        ):
+            doc = parser.parse_into_text(
+                b"https://www.youtube.com/playlist?list=PL123"
+            )
+        entries = json.loads(doc.metadata["youtube_videos"])
+        self.assertEqual(doc.metadata["youtube_kind"], "playlist")
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0]["video_id"], "vid1")
+        self.assertEqual(
+            entries[0]["url"], "https://www.youtube.com/watch?v=vid1"
+        )
+
+    def test_empty_playlist_raises(self):
+        info = {"_type": "playlist", "entries": []}
+        parser = YoutubeEnumerateParser(title="")
+        with patch(
+            "docreader.parser.youtube_parser._ytdlp_extract_info",
+            return_value=info,
+        ):
+            with self.assertRaises(YoutubeParseError):
+                parser.parse_into_text(
+                    b"https://www.youtube.com/playlist?list=PL123"
+                )
 
 
 if __name__ == "__main__":
