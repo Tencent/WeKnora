@@ -1,0 +1,26 @@
+# 自建 ParadeDB 镜像：境内镜像站的 paradedb/paradedb:v0.22.6-pg17 缓存损坏
+# （entrypoint/gosu/postgres 主程序均为 0 字节，digest 锁定复现），
+# 改为 postgres:17 官方镜像 + pg_search(.deb, GitHub Release) + pgvector(源码编译)。
+# 依赖文件由宿主机预先下载（GitHub 直连不稳）：
+#   docker/dev/pgsearch.deb      — postgresql-17-pg-search_0.22.6-1PARADEDB-bookworm_amd64.deb
+#   docker/dev/pgvector.tar.gz   — pgvector v0.8.1 源码
+FROM docker.m.daocloud.io/library/postgres:17
+
+COPY docker/dev/pgsearch.deb /tmp/pgsearch.deb
+COPY docker/dev/pgvector.tar.gz /tmp/pgvector.tar.gz
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends make gcc postgresql-server-dev-17; \
+    dpkg -i /tmp/pgsearch.deb; \
+    cd /tmp && tar xzf pgvector.tar.gz && cd pgvector-0.8.1 && make -j"$(nproc)" && make install; \
+    apt-get purge -y make gcc postgresql-server-dev-17; \
+    apt-get autoremove -y; \
+    rm -rf /var/lib/apt/lists/* /tmp/pgsearch.deb /tmp/pgvector.tar.gz /tmp/pgvector-0.8.1
+
+# pg_search 需要预加载；通过配置片段注入，避免改 entrypoint
+RUN echo "shared_preload_libraries = 'pg_search'" > /usr/share/postgresql/postgresql.conf.pgsearch.sample
+
+# 初始化后把配置片段并入 postgresql.conf（官方 entrypoint 会执行 /docker-entrypoint-initdb.d/*.sh）
+RUN printf '#!/bin/bash\necho "shared_preload_libraries = '"'"'pg_search'"'"'" >> "$PGDATA/postgresql.conf"\n' > /docker-entrypoint-initdb.d/00-pgsearch-preload.sh \
+    && chmod +x /docker-entrypoint-initdb.d/00-pgsearch-preload.sh

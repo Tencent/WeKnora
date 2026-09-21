@@ -63,3 +63,7 @@ miniprogram/project.private.config.json
 
 # Locally built BrowserSkill runtime and extension bundles
 /artifacts/browserskill/
+
+# 本地生成的 UML 包图导读（不入库）
+/WeKnora-包图导读.html
+/WeKnora-*.html

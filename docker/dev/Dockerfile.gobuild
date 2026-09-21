@@ -1,0 +1,6 @@
+# 开发构建环境：CGO 依赖（sqlite-vec 需要 libsqlite3-dev）
+FROM golang:1.26-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
+ENV GOPROXY=https://goproxy.cn,direct CGO_ENABLED=1
+WORKDIR /app

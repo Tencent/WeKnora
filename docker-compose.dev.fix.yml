@@ -1,0 +1,11 @@
+# 开发环境补丁：境内镜像站的 paradedb 官方镜像缓存损坏（关键文件 0 字节），
+# 换用 docker/dev/Dockerfile.paradedb 自建的 paradedb-local:pg17（postgres:17 + pg_search + pgvector）。
+# 用法：docker compose -f docker-compose.dev.yml -f docker-compose.dev.fix.yml up -d
+# （docker-entrypoint.sh 为空、gosu 不可执行；镜像站缓存损坏，digest 锁定复现），
+# 从 postgres:17 官方镜像提取同版本 entrypoint（389 行）与 gosu 1.19 挂载替代。
+# 用法：docker compose -f docker-compose.dev.yml -f docker-compose.dev.fix.yml up -d
+services:
+  postgres:
+    image: paradedb-local:pg17
+    volumes:
+      - ./docker/dev/gosu.bin:/usr/local/bin/gosu:ro
