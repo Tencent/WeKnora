@@ -79,6 +79,12 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://docs.requesty.ai/api-reference/endpoint/embeddings-create:
+				// model, input, encoding_format, dimensions.
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField:          catalog.Ptr("max_tokens"),
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),

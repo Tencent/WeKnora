@@ -77,6 +77,13 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://openrouter.ai/docs/api/api-reference/embeddings/create-embeddings:
+				// model, input, dimensions, encoding_format, input_type (a
+				// free-form string passed to the upstream), provider, user.
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenRouter),
 				SupportsReasoningEffort: catalog.Ptr(true),

@@ -34,6 +34,9 @@ func Register(v *Vendor) {
 	if v.RerankAPI == "" && v.SupportsType(types.ModelTypeRerank) {
 		v.RerankAPI = api.RerankCohere
 	}
+	if v.EmbeddingAPI == "" && v.SupportsType(types.ModelTypeEmbedding) {
+		v.EmbeddingAPI = api.EmbeddingOpenAI
+	}
 	for i := range v.Models {
 		if v.Models[i].Type == "" {
 			v.Models[i].Type = types.ModelTypeKnowledgeQA

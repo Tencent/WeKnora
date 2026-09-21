@@ -109,6 +109,13 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入: model,
+				// input, dimensions — no encoding_format. embedding-2 is fixed at
+				// 1024 and its entry turns dimensions off; embedding-3 takes at
+				// most 64 inputs per request.
+				DimensionsField: catalog.Ptr("dimensions"),
+			},
 			Rerank: catalog.RerankCompat{
 				// The reference gives 最大长度为 4096 字符 for the query and for each
 				// document, and caps documents at 128 per request.

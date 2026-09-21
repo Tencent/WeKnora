@@ -110,6 +110,9 @@ func TestEveryCatalogEntryResolves(t *testing.T) {
 			if modelType == types.ModelTypeKnowledgeQA && !r.API.Known() {
 				t.Errorf("%s/%s: resolved to unknown API %q", id, name, r.API)
 			}
+			if modelType == types.ModelTypeEmbedding && !r.EmbeddingAPI.Known() {
+				t.Errorf("%s/%s: resolved to unknown embedding API %q", id, name, r.EmbeddingAPI)
+			}
 			if modelType == types.ModelTypeEmbedding && m.ID != "" && m.Dimension <= 0 {
 				t.Logf("%s/%s: embedding entry without dimension", id, name)
 			}

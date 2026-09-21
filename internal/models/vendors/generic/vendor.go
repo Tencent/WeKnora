@@ -108,6 +108,15 @@ func init() {
 			ModelTypes:   []types.ModelType{types.ModelTypeRerank},
 		}},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// Whatever the operator runs. Everything the pre-catalog client
+				// sent stays: vLLM, SGLang, TEI and Ollama's OpenAI route all
+				// accept it, and dimensions still goes out only when the row
+				// asks for a width.
+				SendEncodingFormat:          catalog.Ptr(true),
+				DimensionsField:             catalog.Ptr("dimensions"),
+				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+			},
 			Rerank: catalog.RerankCompat{
 				// Any OpenAI-compatible endpoint an operator points here is most
 				// often a vLLM or SGLang server, which is where

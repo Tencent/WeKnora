@@ -97,6 +97,15 @@ func init() {
 			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://developers.openai.com/api/reference/resources/embeddings/methods/create:
+				// model, input, dimensions (text-embedding-3 and later; the ada-002
+				// entry turns it off), encoding_format, user. An input array
+				// "must be 2048 dimensions or less" — elements, despite the word.
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+				MaxBatchSize:       catalog.Ptr(2048),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
 				SupportsReasoningEffort: catalog.Ptr(true),

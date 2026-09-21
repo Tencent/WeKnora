@@ -154,6 +154,12 @@ func init() {
 			},
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// The same body as OpenAI's; the Endpoint hook below supplies the
+				// v1 or deployments URL.
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
 				SupportsReasoningEffort: catalog.Ptr(true),

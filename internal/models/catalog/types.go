@@ -221,7 +221,12 @@ type EndpointRequest struct {
 	Model     string
 	ModelType types.ModelType
 	API       api.API
-	Extra     map[string]string
+	// EmbeddingAPI is the resolved embedding protocol on an embedding
+	// request. Aliyun and Volcengine each serve their text and multimodal
+	// embeddings on different paths under one base URL, so the hook has to
+	// know which one the model speaks.
+	EmbeddingAPI api.EmbeddingAPI
+	Extra        map[string]string
 }
 
 // Vendor is one model vendor / gateway / self-hosted runtime.
@@ -242,6 +247,10 @@ type Vendor struct {
 	// RerankAPI is the rerank protocol. Register defaults it to the Cohere
 	// shape for any vendor that serves rerank without naming another.
 	RerankAPI api.RerankAPI
+	// EmbeddingAPI is the embedding protocol. Register defaults it to the
+	// OpenAI shape for any vendor that serves embeddings without naming
+	// another.
+	EmbeddingAPI api.EmbeddingAPI
 	// DefaultBaseURLs by model type; GetDefaultURL falls back to chat.
 	DefaultBaseURLs map[types.ModelType]string
 	ModelTypes      []types.ModelType

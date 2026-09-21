@@ -40,9 +40,15 @@
 //   - in tool-calling turns Ark also returns `encrypted_content` next to
 //     `reasoning_content` and asks for it to be replayed; omitting it is not
 //     an error but degrades multi-turn agent quality;
-//   - multimodal embeddings post to /api/v3/embeddings/multimodal with
-//     `dimensions` defaulting to 2048
-//     (https://docs.volcengine.com/docs/ark/multimodal-vectorization-api);
+//   - embeddings post to /api/v3/embeddings/multimodal with `dimensions`
+//     defaulting to 2048, and answer one fused vector for the whole input
+//     (https://docs.volcengine.com/docs/ark/multimodal-vectorization-api).
+//     It is the only embedding API the current docs list, and the 向量化 model
+//     list names only the two doubao-embedding-vision snapshots. The text
+//     endpoint, /api/v3/embeddings in the OpenAI shape, now sits under
+//     下线文档归档 (retired documentation), so doubao-embedding-large-text was
+//     removed from models.json; rows that still name a doubao-embedding text
+//     model are routed to that endpoint by pattern;
 //   - rerank is the VikingDB Knowledge Base service signed with AK/SK at
 //     https://api-knowledgebase.mlp.cn-beijing.volces.com/api/knowledge/service/rerank
 //     (the API key field carries the access key; the secret key, region and
@@ -54,12 +60,9 @@
 //     auth. This package configures OpenAI Chat Completions, which is the
 //     surface every model page documents first.
 //
-// unverified: text-only embedding models post to /api/v3/embeddings, not the
-// multimodal path this vendor defaults to, and WeKnora's Ark embedder pins
-// the multimodal path regardless of the configured base URL. The default is
-// left alone; doubao-embedding-large-text-250515 is kept because no
-// retirement notice was found, even though the current 向量化 model list only
-// names the two doubao-embedding-vision snapshots.
+// unverified: whether the retired text endpoint still answers for accounts
+// that used it. Rows naming a text model reach it either way; before the
+// catalog they were sent to the multimodal path.
 //
 // unverified: the model list spells lengths as "256k" / "1024k" without
 // saying whether k is 1000 or 1024, so the context windows in models.json are
@@ -75,6 +78,7 @@ package volcengine
 
 import (
 	_ "embed"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
@@ -95,6 +99,11 @@ const BaseURL = "https://ark.cn-beijing.volces.com/api/v3"
 
 // EmbeddingBaseURL is the Ark multimodal embedding endpoint.
 const EmbeddingBaseURL = "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal"
+
+const (
+	multimodalEmbeddingPath = "/api/v3/embeddings/multimodal"
+	textEmbeddingPath       = "/api/v3/embeddings"
+)
 
 // RerankBaseURL is the Knowledge Base managed rerank endpoint.
 const RerankBaseURL = "https://api-knowledgebase.mlp.cn-beijing.volces.com"
@@ -178,8 +187,37 @@ func init() {
 				ModelTypes: rerankOnly,
 			},
 		},
-		RerankAPI: api.RerankVolcengineKnowledge,
+		RerankAPI:    api.RerankVolcengineKnowledge,
+		EmbeddingAPI: api.EmbeddingArk,
+		// Embedding rows have stored three shapes of base URL: the full
+		// multimodal URL that was the default, .../api/v3 like chat, and the
+		// bare host. All of them name the same service, so the request is
+		// placed from the host.
+		Endpoint: func(r catalog.EndpointRequest) (string, map[string]string) {
+			if r.ModelType != types.ModelTypeEmbedding {
+				return "", nil
+			}
+			root := strings.TrimRight(r.BaseURL, "/")
+			if i := strings.Index(root, "/api/"); i >= 0 {
+				root = root[:i]
+			}
+			if r.EmbeddingAPI == api.EmbeddingOpenAI {
+				// The retired doubao-embedding text models, whose archived
+				// reference still names this endpoint.
+				return root + textEmbeddingPath, nil
+			}
+			return root + multimodalEmbeddingPath, nil
+		},
 		Compat: catalog.VendorCompat{
+			// https://docs.volcengine.com/docs/ark/multimodal-vectorization-api:
+			// the only embedding API Ark still lists. It fuses everything in
+			// one request into a single vector, so a request carries one text.
+			// dimensions defaults to 2048 and the current models also serve
+			// 1024.
+			Embeddings: catalog.EmbeddingsCompat{
+				DimensionsField: catalog.Ptr("dimensions"),
+				MaxBatchSize:    catalog.Ptr(1),
+			},
 			Rerank: catalog.RerankCompat{
 				MaxDocuments:   catalog.Ptr(50),
 				MaxConcurrency: catalog.Ptr(4),

@@ -78,6 +78,8 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			// Embeddings keeps the bare baseline: /v1/embeddings answers, but no
+			// ModelScope page documents a single parameter of it.
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatEnableThinking),

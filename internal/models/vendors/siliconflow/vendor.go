@@ -77,6 +77,13 @@ func init() {
 			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://api-docs.siliconflow.cn/docs/api/embeddings-post: model,
+				// input, encoding_format, and dimensions "仅 Qwen/Qwen3 系列支持"
+				// — the bge-m3 entry turns it off.
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField:          catalog.Ptr("max_tokens"),
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatEnableThinking),

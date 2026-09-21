@@ -75,6 +75,11 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://novita.ai/docs/api-reference/model-apis-llm-create-embeddings:
+				// input, model, encoding_format. Nothing else.
+				SendEncodingFormat: catalog.Ptr(true),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatEnableThinking),

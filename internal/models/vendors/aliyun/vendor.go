@@ -82,6 +82,7 @@ package aliyun
 
 import (
 	_ "embed"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
@@ -106,6 +107,10 @@ const RerankBaseURL = "https://dashscope.aliyuncs.com/api/v1/services/rerank/tex
 // AnthropicBaseURL is the documented Anthropic Messages facade. It is not the
 // default for this vendor; operators who want it configure it explicitly.
 const AnthropicBaseURL = "https://dashscope.aliyuncs.com/apps/anthropic"
+
+// multimodalEmbeddingPath is the native multimodal embedding method
+// (https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference).
+const multimodalEmbeddingPath = "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
 
 func init() {
 	catalog.Register(&catalog.Vendor{
@@ -133,7 +138,37 @@ func init() {
 			types.ModelTypeVLLM,
 		},
 		RerankAPI: api.RerankDashScope,
+		// Text and multimodal embeddings live under different roots of the
+		// same host — /compatible-mode/v1 and /api/v1 — and a row stores one
+		// base URL for both, so the request is placed from the host. A base
+		// URL without either root is taken as the host itself, which keeps a
+		// workspace or international domain instead of replacing it with the
+		// Beijing default as the pre-catalog client did.
+		Endpoint: func(r catalog.EndpointRequest) (string, map[string]string) {
+			if r.ModelType != types.ModelTypeEmbedding {
+				return "", nil
+			}
+			root := strings.TrimRight(r.BaseURL, "/")
+			for _, marker := range []string{"/compatible-mode", "/api/v1"} {
+				if i := strings.Index(root, marker); i >= 0 {
+					root = root[:i]
+				}
+			}
+			if r.EmbeddingAPI == api.EmbeddingDashScope {
+				return root + multimodalEmbeddingPath, nil
+			}
+			return root + "/compatible-mode/v1/embeddings", nil
+		},
 		Compat: catalog.VendorCompat{
+			// Text models: the OpenAI-compatible endpoint
+			// (https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai),
+			// which takes model, input, dimensions and encoding_format.
+			// Multimodal models "不支持OpenAI兼容接口" and override the protocol
+			// in models.json.
+			Embeddings: catalog.EmbeddingsCompat{
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
 			Rerank: catalog.RerankCompat{
 				SendReturnDocs: catalog.Ptr(true),
 				// 500 documents per request for the native text-rerank models.

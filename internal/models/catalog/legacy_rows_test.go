@@ -194,15 +194,21 @@ func TestLegacyRowsValidateAndResolve(t *testing.T) {
 			if resolved.Vendor == nil {
 				t.Fatal("resolved with a nil vendor")
 			}
-			// Rerank rows resolve to a rerank protocol; everything else
-			// resolves to a chat one. The two vocabularies are separate
-			// types so a row can never land on the wrong one.
-			if row.typ == types.ModelTypeRerank {
+			// Each model type resolves to its own protocol vocabulary. They
+			// are separate Go types, so a row can never land on the wrong one.
+			switch row.typ {
+			case types.ModelTypeRerank:
 				if !resolved.RerankAPI.Known() {
 					t.Fatalf("resolved to an unknown rerank protocol %q", resolved.RerankAPI)
 				}
-			} else if !resolved.API.Known() {
-				t.Fatalf("resolved to an unknown protocol %q", resolved.API)
+			case types.ModelTypeEmbedding:
+				if !resolved.EmbeddingAPI.Known() {
+					t.Fatalf("resolved to an unknown embedding protocol %q", resolved.EmbeddingAPI)
+				}
+			default:
+				if !resolved.API.Known() {
+					t.Fatalf("resolved to an unknown protocol %q", resolved.API)
+				}
 			}
 			if resolved.RemoteModel == "" && row.model != "" {
 				t.Fatal("resolved to an empty remote model id")

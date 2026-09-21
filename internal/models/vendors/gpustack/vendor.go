@@ -118,6 +118,13 @@ func init() {
 			ModelTypes:   []types.ModelType{types.ModelTypeRerank},
 		}},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// vLLM's embedding server: dimensions for Matryoshka models, the
+				// row's truncation budget, and encoding_format.
+				SendEncodingFormat:          catalog.Ptr(true),
+				DimensionsField:             catalog.Ptr("dimensions"),
+				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+			},
 			Rerank: catalog.RerankCompat{
 				// GPUStack's built-in backends are vLLM, SGLang, Ascend MindIE and
 				// VoxBox, so the vLLM rerank extension reaches the model.

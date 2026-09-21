@@ -96,6 +96,9 @@ func init() {
 			types.ModelTypeEmbedding,
 		},
 		Compat: catalog.VendorCompat{
+			// Embeddings keeps the bare baseline on purpose: "Embedding 接口目前仅
+			// 支持 input 和 model 参数 … dimensions 固定为 1024"
+			// (https://cloud.tencent.com/document/product/1729/111007).
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField: catalog.Ptr("max_tokens"),
 				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatEnableThinking),

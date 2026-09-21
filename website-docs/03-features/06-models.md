@@ -72,8 +72,8 @@ const (
 | `api_key` | string | 空 | API 密钥，**AES-256-GCM 加密落库**（`ModelParameters.Value/Scan`），仅通过 `PUT /models/:id/credentials` 子资源修改 |
 | `interface_type` | string | 空（VLM：local 默认 `ollama`，remote 默认 `openai`） | 接口协议类型 |
 | `embedding_parameters.dimension` | int | 0 | 向量维度 |
-| `embedding_parameters.truncate_prompt_tokens` | int | 0 | 输入截断 token 数 |
-| `embedding_parameters.supports_dimension_override` | bool | false | 是否支持请求级维度覆盖（`dimensions` 参数） |
+| `embedding_parameters.truncate_prompt_tokens` | int | 0 | 服务端截断 token 数。这是 vLLM 的扩展参数，只发给 `generic`、`gpustack`（为 0 时沿用历史值 511）；托管厂商的文档里没有它，一律不发 |
+| `embedding_parameters.supports_dimension_override` | bool | false | 是否在请求里指定向量维度。字段名由厂商决定（OpenAI 系 `dimensions`、Gemini `outputDimensionality`、百炼多模态 `parameters.dimension`）；厂商文档里没有该参数的模型（NVIDIA NIM、混元、Novita、ada-002 等）即使勾选也不发 |
 | `parameter_size` | string | 空 | Ollama 模型参数规模（如 "7B"），后端维护、前端不可改 |
 | `provider` | string | 空（按 BaseURL 自动检测） | 厂商标识 |
 | `extra_config` | map[string]string | nil | 厂商专属配置（由厂商定义的 `extraFields` 驱动，如 Azure 的 `api_version`）；保留键 `api`（强制协议）、`remote_model_name`、`thinking_control`（旧版） |
@@ -176,7 +176,7 @@ builtin_models:
 
 | 层 | 位置 | 职责 |
 |----|------|------|
-| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`。各自持有请求/响应结构、SSE 解析与 usage 解析，不含任何厂商名 |
+| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`。各自持有请求/响应结构与解析，不含任何厂商名 |
 | 厂商层 | `internal/models/vendors/<id>/` | 一个厂商一个目录：`vendor.go`（注册 `catalog.Vendor`）、`models.json`（模型目录）、`icon.svg`（品牌图标，`go:embed` 进二进制） |
 | 目录层 | `internal/models/catalog` | 合并厂商定义、模型条目、部署叠加与单行覆盖，`Resolve` 得出「这个模型到底怎么发请求」 |
 
@@ -266,6 +266,14 @@ make model-catalog-diff VENDOR=deepseek # 只看一家
 2. **Azure OpenAI 未填 `api_version` 的行改走 `/openai/v1` GA 数据面**，不再是 `/openai/deployments/{model}/...?api-version=2024-10-21`。旧默认版本根本不支持它同时声称的 `reasoning_effort` 与 `max_completion_tokens`，属于自相矛盾。要保留旧路径，在额外字段里显式填一个 `api_version`。
 3. **`api.openai.com` 的一方流量改走 Responses 协议**（`PreferAPI` 只对官方域生效）。各类中转 / 网关仍走 Chat Completions，`parity` 包里有断言钉住这一点。
 4. **7 家厂商的输出上限字段按文档纠正**：hunyuan、modelscope、qiniu、requesty、longcat、novita 由 `max_completion_tokens` 改回 `max_tokens`，moonshot 反向改为 `max_completion_tokens`。每一处在 `internal/models/parity/parity_test.go` 里都记了变更理由与厂商文档。aliyun 保持 `max_completion_tokens` 不变：兼容模式两个字段都收，但 DashScope 的参数表已经把 `max_tokens` 标为即将废弃并指名了继任者。
+
+Embedding 行也有几处按厂商文档纠正的行为变化（逐厂商的出站请求由 `internal/models/embedding/wire_test.go` 钉住）：
+
+1. **托管厂商不再收到 `truncate_prompt_tokens`**。此前所有 OpenAI 兼容厂商都被塞了一个 511，它只是 vLLM 的扩展参数；`generic`、`gpustack` 照旧发送。
+2. **NVIDIA NIM 的检索查询改用 `input_type: query`**。文档侧照旧是 `passage`，已有索引不受影响；这一标记在一次检索重构里丢失过，现在由 `types.WithEmbedQuery` 在三处查询入口设置。超长输入改为 `truncate: END` 截断而不是报错；`dimensions` 不再发送（NIM 没有这个参数）。目录里已被 NVIDIA 标记下线的 `nv-embed-v1`、`llama-3.2-nemoretriever-300m-embed-v1`、`baai/bge-m3` 已移除。
+3. **阿里云按模型分流**：文本模型走 `/compatible-mode/v1/embeddings`，`qwen3-vl-embedding`、`qwen2.5-vl-embedding`、`tongyi-embedding-vision*`、`multimodal-embedding*` 走原生多模态接口。`base_url` 只填主机、国际站或业务空间域名时保留该主机，不再被替换成北京默认地址。
+4. **火山方舟的文本向量接口已归档下线**，当前只有多模态接口。沿用老的 `doubao-embedding-text*` / `doubao-embedding-large-text*` 的行改发到它们归档文档里的 `/api/v3/embeddings`；此前它们被发往多模态接口。
+5. **Jina 的 `task`、Gemini 的 `taskType` 仍然不发**。它们会改变文档侧向量，开启后同一个知识库里新旧向量不在同一空间；需要按行显式开启的设计另见 Tencent/WeKnora#1401。
 
 另外 Azure OpenAI 不再声明支持 ASR（ASR 客户端只会构造标准 OpenAI 客户端，根本无法带上 Azure 的 `api-key` 头和部署路径，这类行此前就调不通）。
 

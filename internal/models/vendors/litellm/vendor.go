@@ -104,6 +104,13 @@ func init() {
 			ModelTypes: []types.ModelType{types.ModelTypeRerank},
 		}},
 		Compat: catalog.VendorCompat{
+			Embeddings: catalog.EmbeddingsCompat{
+				// https://docs.litellm.ai/docs/embedding/supported_embedding:
+				// model, input, user, dimensions, encoding_format; anything else
+				// is forwarded to the upstream as a provider-specific kwarg.
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
 				SupportsReasoningEffort: catalog.Ptr(true),
