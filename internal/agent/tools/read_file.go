@@ -82,7 +82,7 @@ func (t *ReadFileTool) updateDescription() {
 	if t.workspace != nil {
 		layout := sessionWorkspaceLayout(context.Background(), t.sessionID, t.workspace.source)
 		if layout.IsHost() {
-			scopes = append(scopes, "Sandbox files: absolute or relative paths in "+layout.Root+". "+
+			scopes = append(scopes, "Sandbox files: absolute or relative paths in "+layoutRootOrGeneric(layout)+". "+
 				"This does not read files outside that folder or publish files as user-visible artifacts.")
 		} else {
 			scopes = append(scopes, "Sandbox files: absolute paths inside the current session's sandbox, including /tmp; "+

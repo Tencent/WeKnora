@@ -123,7 +123,7 @@ func NewEditSandboxFileTool(editor SandboxFileEditor) *EditSandboxFileTool {
 func (t *EditSandboxFileTool) Description() string {
 	layout := sessionWorkspaceLayout(context.Background(), t.sessionID, t.editor)
 	if layout.IsHost() {
-		return fmt.Sprintf(hostEditSandboxFileDescription, layout.Root)
+		return fmt.Sprintf(hostEditSandboxFileDescription, layoutRootOrGeneric(layout))
 	}
 	return rewriteRemoteWorkspaceCopy(editSandboxFileTool.description, layout)
 }
@@ -158,7 +158,17 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	sessionID := resolveSessionID(ctx)
-	layout := sessionWorkspaceLayout(ctx, sessionID, t.editor)
+	if sessionID == "" {
+		return &types.ToolResult{
+			Success: false,
+			Error:   "no session ID in context; edit_sandbox_file must run inside an agent turn",
+		}, nil
+	}
+
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.editor)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
 
 	trimmed := strings.TrimSpace(input.Path)
 	if trimmed == "" {
@@ -168,13 +178,6 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 				"path is required; edit a file inside the session sandbox (not %s)",
 				modelSafeLayoutPath(layout.InputDir, "the attachment directory"),
 			),
-		}, nil
-	}
-
-	if sessionID == "" {
-		return &types.ToolResult{
-			Success: false,
-			Error:   "no session ID in context; edit_sandbox_file must run inside an agent turn",
 		}, nil
 	}
 

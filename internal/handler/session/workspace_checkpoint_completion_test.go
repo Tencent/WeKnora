@@ -186,6 +186,7 @@ func (s *collectDirFileService) SaveBytes(_ context.Context, data []byte, _ uint
 
 func TestCompletionCollectsFromLayoutOutputDir(t *testing.T) {
 	layout := sandbox.WorkspaceLayout{
+		Origin:    sandbox.WorkspaceOriginHost,
 		Root:      "/Users/dev/proj",
 		OutputDir: "/Users/dev/AppData/s1/output",
 	}
@@ -224,7 +225,7 @@ func TestCompletionCollectsFromLayoutOutputDir(t *testing.T) {
 
 func TestCompletionSkipsCollectWhenHostLayoutHasNoOutputDir(t *testing.T) {
 	source := &layoutCollectSource{
-		layout: sandbox.WorkspaceLayout{Root: "/Users/dev/proj"},
+		layout: sandbox.WorkspaceLayout{Origin: sandbox.WorkspaceOriginHost, Root: "/Users/dev/proj"},
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"/Users/dev/proj": {{
 				Name: "main.go", Path: "/Users/dev/proj/src/main.go",
@@ -236,6 +237,69 @@ func TestCompletionSkipsCollectWhenHostLayoutHasNoOutputDir(t *testing.T) {
 			"/Users/dev/proj/src/main.go": []byte("package main"),
 		},
 	}
+	message := &types.Message{ID: "m1", SessionID: "s1", Role: "assistant"}
+	h := NewAgentStreamHandler(
+		context.Background(), "s1", "m1", "req1", 1, time.Now(),
+		message, &completionEventRecorder{}, event.NewEventBus(),
+		service.NewArtifactCollector(source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{}),
+		nil, nil,
+	)
+
+	require.NoError(t, h.handleComplete(context.Background(), completeEvent()))
+	require.Empty(t, source.listedDirs)
+	require.Empty(t, message.Artifacts)
+}
+
+func TestCompletionSkipsCollectWhenOutputDirEqualsRoot(t *testing.T) {
+	source := &layoutCollectSource{
+		layout: sandbox.WorkspaceLayout{
+			Origin:    sandbox.WorkspaceOriginHost,
+			Root:      "/Users/dev/proj",
+			OutputDir: "/Users/dev/proj",
+		},
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"/Users/dev/proj": {{
+				Name: "main.go", Path: "/Users/dev/proj/src/main.go",
+				Type: sandbox.RemoteEntryFile, Size: 12,
+				ModTime: time.Date(2026, 7, 10, 10, 20, 33, 0, time.UTC),
+			}},
+		},
+		contents: map[string][]byte{
+			"/Users/dev/proj/src/main.go": []byte("package main"),
+		},
+	}
+	message := &types.Message{ID: "m1", SessionID: "s1", Role: "assistant"}
+	h := NewAgentStreamHandler(
+		context.Background(), "s1", "m1", "req1", 1, time.Now(),
+		message, &completionEventRecorder{}, event.NewEventBus(),
+		service.NewArtifactCollector(source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{}),
+		nil, nil,
+	)
+
+	require.NoError(t, h.handleComplete(context.Background(), completeEvent()))
+	require.Empty(t, source.listedDirs)
+	require.Empty(t, message.Artifacts)
+}
+
+type failingLayoutCollectSource struct {
+	listedDirs []string
+}
+
+func (s *failingLayoutCollectSource) ListSessionFiles(_ context.Context, _, dir string) ([]sandbox.RemoteDirEntry, error) {
+	s.listedDirs = append(s.listedDirs, dir)
+	return nil, nil
+}
+
+func (s *failingLayoutCollectSource) ReadSessionFile(context.Context, string, string) ([]byte, error) {
+	return nil, errors.New("not found")
+}
+
+func (s *failingLayoutCollectSource) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	return sandbox.WorkspaceLayout{}, errors.New("layout unavailable")
+}
+
+func TestCompletionSkipsCollectWhenLayoutLookupFails(t *testing.T) {
+	source := &failingLayoutCollectSource{}
 	message := &types.Message{ID: "m1", SessionID: "s1", Role: "assistant"}
 	h := NewAgentStreamHandler(
 		context.Background(), "s1", "m1", "req1", 1, time.Now(),

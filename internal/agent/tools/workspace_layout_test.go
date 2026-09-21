@@ -70,6 +70,7 @@ func TestResolveInJoinsRelativeAgainstRoot(t *testing.T) {
 
 func hostLayout() sandbox.WorkspaceLayout {
 	return sandbox.WorkspaceLayout{
+		Origin:     sandbox.WorkspaceOriginHost,
 		Root:       "/Users/dev/My Project",
 		WriteRoots: []string{"/Users/dev/My Project"},
 		ReadRoots:  []string{"/Users/dev/My Project"},
@@ -314,4 +315,102 @@ func TestToolRegistryBindSessionUpdatesShellDescription(t *testing.T) {
 	require.Contains(t, tool.Description(), sandbox.SessionWorkspaceRoot)
 	reg.BindSession("sess-1")
 	require.Contains(t, tool.Description(), hostLayout().Root)
+}
+
+func TestSchemaForLayoutDoesNotRewriteWorkspaceInsideHostRoot(t *testing.T) {
+	layout := sandbox.WorkspaceLayout{
+		Origin: sandbox.WorkspaceOriginHost,
+		Root:   "/Users/dev/workspace/app",
+		Hint:   "/Users/dev/workspace/app",
+	}
+	schema := json.RawMessage(
+		`{"description":"Defaults to /workspace/output. Relative paths resolve from /workspace."}`,
+	)
+	got := string(schemaForLayout(schema, layout))
+	require.NotContains(t, got, "/Users/dev/Users/dev")
+	require.Contains(t, got, "/Users/dev/workspace/app")
+	require.Equal(t, 2, strings.Count(got, "/Users/dev/workspace/app"))
+	require.True(t, json.Valid([]byte(got)))
+}
+
+type errorLayoutExecutor struct {
+	fakeShellExecutor
+}
+
+func (e *errorLayoutExecutor) SessionWorkspaceLayout(
+	context.Context, string,
+) (sandbox.WorkspaceLayout, error) {
+	return sandbox.WorkspaceLayout{}, fmt.Errorf("layout unavailable")
+}
+
+func TestShellExecExecuteFailsClosedWhenLayoutProviderErrors(t *testing.T) {
+	executor := &errorLayoutExecutor{}
+	result, err := NewShellExecTool(executor, nil).Execute(
+		shellExecTestContext(),
+		json.RawMessage(`{"command":"pwd"}`),
+	)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "unavailable")
+	require.Zero(t, executor.calls)
+	require.NotContains(t, result.Error, sandbox.SessionWorkspaceRoot)
+}
+
+func TestWriteSandboxFileExecuteFailsClosedWhenLayoutProviderErrors(t *testing.T) {
+	sink := &errorLayoutFileSink{}
+	result, err := NewWriteSandboxFileTool(sink, 0).Execute(
+		sandboxFileTestContext(),
+		mustWriteSandboxArgs("notes.md", "print(1)\n"),
+	)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Zero(t, sink.calls)
+	require.NotContains(t, result.Error, sandbox.SessionWorkspaceRoot)
+}
+
+type errorLayoutFileSink struct {
+	fakeSandboxFileSink
+}
+
+func (s *errorLayoutFileSink) SessionWorkspaceLayout(
+	context.Context, string,
+) (sandbox.WorkspaceLayout, error) {
+	return sandbox.WorkspaceLayout{}, fmt.Errorf("layout unavailable")
+}
+
+func TestListSandboxFilesHostLayoutRejectsOutsideRoots(t *testing.T) {
+	source := &layoutFileSource{layout: hostLayout()}
+	result, err := NewListSandboxFilesTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"/etc/passwd"}`),
+	)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Empty(t, source.listedDir)
+	require.Contains(t, result.Error, hostLayout().Root)
+}
+
+func TestReadFileHostLayoutRejectsOutsideRoots(t *testing.T) {
+	source := &layoutFileSource{
+		fakeSandboxFileSource: fakeSandboxFileSource{
+			data: []byte("secret"),
+			stat: &sandbox.RemoteStatEntry{Type: sandbox.RemoteEntryFile, Size: 6},
+		},
+		layout: hostLayout(),
+	}
+	result, err := NewReadFileTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"/etc/passwd"}`),
+	)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Zero(t, source.statCalls)
+	require.Contains(t, result.Error, hostLayout().Root)
+}
+
+func TestLayoutDefaultListDirHostIgnoresSeparateOutputDir(t *testing.T) {
+	layout := hostLayout()
+	layout.OutputDir = "/Users/dev/AppData/s1/output"
+	require.Equal(t, layout.Root, layoutDefaultListDir(layout))
+	require.Equal(t, sandbox.SessionOutputRoot, layoutDefaultListDir(remoteLayout()))
 }

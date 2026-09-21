@@ -204,7 +204,9 @@ func (s *sessionService) AgentQA(
 	); layoutErr == nil {
 		if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
 			sessionLayout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
-			if err == nil {
+			if err != nil || !sessionLayout.HasRoot() {
+				layout = sandbox.FailedHostWorkspaceLayout()
+			} else {
 				layout = sessionLayout
 			}
 		}

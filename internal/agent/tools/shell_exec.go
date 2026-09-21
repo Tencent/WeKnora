@@ -9,7 +9,9 @@
 //
 //   - Session-sandbox capability: registration is feature-gated on the
 //     sandbox backend exposing SandboxCommandExecutor (Cube, E2B, Docker).
-//     shell_exec never runs on the WeKnora host.
+//     Remote sessions never run on the WeKnora host. Host layouts clamp
+//     work_dir to the layout's writable roots; the OS sandbox is the
+//     process perimeter.
 //   - Session-scoped: the sandbox is resolved from ToolExecContext.SessionID
 //     so the LLM cannot execute against a foreign session, and installed
 //     dependencies persist across subsequent tool calls in the same session.
@@ -24,9 +26,10 @@
 //   - Command shape blacklist: the sandbox is throwaway, but we still refuse
 //     obviously destructive patterns (rm -rf /, fork bombs, mkfs...) to
 //     protect the LLM from its own hallucinations.
-//   - Optional stdin is allowed as data; when the command is an interpreter
-//     that would run stdin as a program, the same blacklist and command-size
-//     cap apply to that payload.
+//   - No backgrounding: trailing '&' and 'nohup' are rejected up-front to
+//     avoid orphaned processes inside the sandbox. Optional stdin is allowed
+//     as data; when the command is an interpreter that would run stdin as a
+//     program, the same blacklist and command-size cap apply to that payload.
 package tools
 
 import (
@@ -113,6 +116,11 @@ var shellExecBlacklist = []struct {
 	// Host-level power management. Even inside a MicroVM these serve no
 	// legitimate skill purpose and would just tear down the session.
 	{name: "shutdown", re: regexp.MustCompile(`(?i)\b(shutdown|reboot|halt|poweroff)\b`)},
+	// Explicit backgrounding is a product decision (see file header). Trailing
+	// `&` (but not `&&`) or a `nohup` prefix indicates the LLM tried to
+	// detach a process.
+	{name: "background_amp", re: regexp.MustCompile(`(?:^|[^&])&\s*(?:#.*)?$`)},
+	{name: "nohup", re: regexp.MustCompile(`(?i)(^|[;|&\s])nohup\b`)},
 }
 
 // Tool schema
@@ -130,7 +138,7 @@ The sandbox belongs to this session alone; nothing here runs on the host.
 - CWD defaults to /workspace on every call; cd does not persist.
   work_dir selects any directory inside the session sandbox; missing directories are created as the same user.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
-- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes.
+- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules;
   host resources are staged automatically and use the system runtime until a local .venv is created.
   Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py".
@@ -150,7 +158,8 @@ The sandbox belongs to this session alone; nothing here runs on the host.
 
 func shellExecDescription(l sandbox.WorkspaceLayout) string {
 	if l.IsHost() {
-		return fmt.Sprintf(hostShellExecDescription, l.Root, l.Root, l.Root)
+		root := layoutRootOrGeneric(l)
+		return fmt.Sprintf(hostShellExecDescription, root, root, root)
 	}
 	return rewriteRemoteWorkspaceCopy(legacyShellExecDescription, l)
 }
@@ -158,7 +167,7 @@ func shellExecDescription(l sandbox.WorkspaceLayout) string {
 const hostShellExecDescription = `Execute a command in %s. The process is OS-sandboxed on this machine.
 - CWD defaults to %s on every call; cd does not persist. work_dir must be that folder or a subdirectory.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly.
-- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes.
+- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - Edit files in place under %s.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Do not bypass permission or policy denials through another tool.
 - stdout/stderr have independent byte limits. Redirect verbose commands to a workspace log when output must be kept.`
@@ -438,7 +447,10 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, nil
 	}
 
-	layout := sessionWorkspaceLayout(ctx, sessionID, t.executor)
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.executor)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
 	workDir := strings.TrimSpace(input.WorkDir)
 	if workDir == "" {
 		workDir = t.defaultWorkDirFor(layout)

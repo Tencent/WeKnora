@@ -33,8 +33,9 @@ func TestToolGuidanceUsesActualCapabilities(t *testing.T) {
 
 func TestToolGuidanceForHostUsesActualWorkspace(t *testing.T) {
 	layout := sandbox.WorkspaceLayout{
-		Root: "/Users/dev/My Project",
-		Hint: "/Users/dev/My Project",
+		Origin: sandbox.WorkspaceOriginHost,
+		Root:   "/Users/dev/My Project",
+		Hint:   "/Users/dev/My Project",
 	}
 	text := formatToolGuidanceForMode(
 		[]string{"shell_exec", "read_file", "write_sandbox_file"}, false, layout,
@@ -43,6 +44,14 @@ func TestToolGuidanceForHostUsesActualWorkspace(t *testing.T) {
 	require.NotContains(t, text, sandbox.SessionWorkspaceRoot)
 	require.NotContains(t, text, "is the only directory collected")
 	require.NotContains(t, text, "sandbox:<file name>")
+}
+
+func TestToolGuidanceOmitsRemoteWorkspaceWhenHostLookupFailed(t *testing.T) {
+	text := formatToolGuidanceForMode(
+		[]string{"shell_exec", "write_sandbox_file"}, false, sandbox.FailedHostWorkspaceLayout(),
+	)
+	require.NotContains(t, text, sandbox.SessionWorkspaceRoot)
+	require.NotContains(t, text, "Session workspace:")
 }
 
 func TestArtifactGuidanceUsesConfiguredOutputDirectory(t *testing.T) {

@@ -292,12 +292,14 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 	}
 	if !skillInstallMode && (has("shell_exec") || has("write_sandbox_file")) {
 		if layout.IsHost() {
-			b.WriteString("Session workspace: ")
-			b.WriteString(layout.Root)
-			b.WriteString(". Edit files in place under that folder. Commands start from ")
-			b.WriteString(layout.Root)
-			b.WriteString(" on every call unless work_dir names a subdirectory. " +
-				"Files persist on the user's machine.\n")
+			if root := strings.TrimSpace(layout.Root); root != "" {
+				b.WriteString("Session workspace: ")
+				b.WriteString(root)
+				b.WriteString(". Edit files in place under that folder. Commands start from ")
+				b.WriteString(root)
+				b.WriteString(" on every call unless work_dir names a subdirectory. " +
+					"Files persist on the user's machine.\n")
+			}
 		} else {
 			b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. ")
 			b.WriteString(skills.ArtifactOutputDir())

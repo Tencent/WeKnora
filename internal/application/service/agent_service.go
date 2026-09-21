@@ -568,9 +568,10 @@ func (s *agentService) lookupSessionWorkspaceLayout(
 	}
 	if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
 		layout, layoutErr := provider.SessionWorkspaceLayout(ctx, sessionID)
-		if layoutErr == nil && strings.TrimSpace(layout.Root) != "" {
-			return layout
+		if layoutErr != nil || !layout.HasRoot() {
+			return sandbox.FailedHostWorkspaceLayout()
 		}
+		return layout
 	}
 	return sandbox.RemoteWorkspaceLayout()
 }
@@ -824,7 +825,8 @@ func (s *agentService) readSkillBundle(
 // The skill installer agent gets the install-mode variant, which runs as root
 // and may work inside the skills image root — it exists to install
 // dependencies into the image, which the ordinary contract forbids on both
-// counts. Every other agent keeps the non-root, /workspace-only executor.
+// counts. Every other agent keeps the session-layout executor: remote
+// work_dir is the whole sandbox, host work_dir is clamped to writable roots.
 // AgentConfig.SkillInstallMode is settable only through
 // EnableSkillInstallMode, which refuses every agent but the built-in
 // installer, so no tenant agent can reach this branch.

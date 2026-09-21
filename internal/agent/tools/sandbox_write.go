@@ -6,13 +6,11 @@
 //
 // Design notes:
 //   - Session-scoped: the sandbox is resolved from ToolExecContext.SessionID.
-//   - Path guardrail: writes stay inside the session sandbox and never under
-//     /workspace/input (staged attachments are the user's, not ours).
-//     /workspace/output is what gets collected for download, so the
-//     description reserves it for finished deliverables and sends scratch
-//     work elsewhere under /workspace. Only the /workspace/input half is
-//     enforced here; the rest is guidance, because "finished" is a judgement
-//     the tool cannot make.
+//   - Path guardrail: writes stay under the session layout's WriteRoots and
+//     never under InputDir (staged attachments are the user's, not ours).
+//     Remote sessions collect OutputDir for download; host sessions with an
+//     empty OutputDir edit in place. Only the InputDir half is enforced here;
+//     "finished deliverable" is guidance the tool cannot judge.
 //   - Content stays out of ToolResult.Data/Output: the model already has the
 //     bytes it just sent. The result is path + size so the next call can
 //     shell_exec the file.
@@ -153,7 +151,7 @@ func (t *WriteSandboxFileTool) Parameters() json.RawMessage {
 
 func writeSandboxDescription(l sandbox.WorkspaceLayout, sizeGuidance string) string {
 	if l.IsHost() {
-		return fmt.Sprintf(hostWriteSandboxFileDescription, l.Root, sizeGuidance)
+		return fmt.Sprintf(hostWriteSandboxFileDescription, layoutRootOrGeneric(l), sizeGuidance)
 	}
 	return fmt.Sprintf(rewriteRemoteWorkspaceCopy(writeSandboxFileDescription, l), sizeGuidance)
 }
@@ -208,7 +206,17 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	}
 
 	sessionID := resolveSessionID(ctx)
-	layout := sessionWorkspaceLayout(ctx, sessionID, t.sink)
+	if sessionID == "" {
+		return &types.ToolResult{
+			Success: false,
+			Error:   "no session ID in context; write_sandbox_file must run inside an agent turn",
+		}, nil
+	}
+
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.sink)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
 
 	trimmed := strings.TrimSpace(input.Path)
 	if trimmed == "" {
@@ -218,13 +226,6 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 				"path is required; write under %s",
 				layoutScopeName(layout),
 			),
-		}, nil
-	}
-
-	if sessionID == "" {
-		return &types.ToolResult{
-			Success: false,
-			Error:   "no session ID in context; write_sandbox_file must run inside an agent turn",
 		}, nil
 	}
 

@@ -230,8 +230,10 @@ func (c *ArtifactCollector) LayoutOutputDir(ctx context.Context, sessionID strin
 	return strings.TrimSpace(layout.OutputDir)
 }
 
-// SkipCollect is true when the session has a workspace root but no separate
-// output tree: scanning Root would upload the user's files.
+// SkipCollect is true when collecting would scan the user's project: the
+// backend advertised a workspace with no separate output tree, OutputDir is
+// Root, or the layout provider failed. No provider still means remote
+// /workspace/output collection.
 func (c *ArtifactCollector) SkipCollect(ctx context.Context, sessionID string) bool {
 	if c == nil {
 		return false
@@ -243,9 +245,13 @@ func (c *ArtifactCollector) SkipCollect(ctx context.Context, sessionID string) b
 	}
 	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
 	if err != nil || strings.TrimSpace(layout.Root) == "" {
-		return false
+		return true
 	}
-	return strings.TrimSpace(layout.OutputDir) == ""
+	outputDir := strings.TrimSpace(layout.OutputDir)
+	if outputDir == "" {
+		return true
+	}
+	return filepath.Clean(outputDir) == filepath.Clean(strings.TrimSpace(layout.Root))
 }
 
 // newBoundedConfig fills in defaults so callers can pass a zero
