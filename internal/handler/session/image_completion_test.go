@@ -39,7 +39,9 @@ type imageCompletionStream struct {
 	onComplete func()
 }
 
-func (s *imageCompletionStream) AppendEvent(ctx context.Context, session, message string, e interfaces.StreamEvent) error {
+func (s *imageCompletionStream) AppendEvent(
+	ctx context.Context, session, message string, e interfaces.StreamEvent,
+) error {
 	if e.Type == types.ResponseTypeComplete && s.onComplete != nil {
 		s.onComplete()
 	}
@@ -71,7 +73,9 @@ func TestSharedImageCompletionWaitsForPersistedReferences(t *testing.T) {
 					runCtx := types.WithExecutionTenant(context.Background(), 2)
 					saveCtx := types.WithExecutionTenant(runCtx, 1)
 					streamHandler := h.setupStreamHandler(runCtx, "s", "m", "req", 1, time.Now(), message, bus)
-					streamCtx := &sseStreamContext{eventBus: bus, streamHandler: streamHandler, assistantMessage: message}
+					streamCtx := &sseStreamContext{
+						eventBus: bus, streamHandler: streamHandler, assistantMessage: message,
+					}
 					completed := 0
 					stream.onComplete = func() {
 						completed++
