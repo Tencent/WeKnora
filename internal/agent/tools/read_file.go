@@ -97,7 +97,7 @@ func (t *ReadFileTool) updateDescription() {
 			scopes = append(scopes,
 				"Sandbox files: absolute paths inside the current session's sandbox, including /tmp; "+
 					"relative paths resolve from "+layoutHintOrRemote(layout)+". "+
-				"This does not read host files or publish files as user-visible artifacts.")
+					"This does not read host files or publish files as user-visible artifacts.")
 		}
 	}
 	if t.skills != nil && t.skills.IsEnabled() {
