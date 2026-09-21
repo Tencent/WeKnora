@@ -961,11 +961,13 @@ return 1
 // standard/Redis mode). Returns (release, true) when granted — release() MUST
 // run when the batch finishes; (nil, false) when the KB is already at
 // maxInflight, so the caller should reschedule and bail. A background renew
-// keeps the slot alive for the batch's duration; a crashed batch's slot simply
-// expires (wikiInflightTTL) and is purged by the next reserver. Lite mode has
-// no shared-pool contention (liteLocks already serialize per KB), so it always
-// grants a no-op slot. Fails OPEN on a Redis error: a blip must not halt wiki
-// generation, and the pool size still bounds total work.
+// keeps the slot alive for the batch's duration and removes it when the task
+// context is canceled, even if the handler itself is still blocked. A crashed
+// batch's slot simply expires (wikiInflightTTL) and is purged by the next
+// reserver. Lite mode has no shared-pool contention (liteLocks already
+// serialize per KB), so it always grants a no-op slot. Fails OPEN on a Redis
+// error: a blip must not halt wiki generation, and the pool size still bounds
+// total work.
 func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string, maxInflight int) (func(), bool) {
 	if s.redisClient == nil || maxInflight <= 0 {
 		return func() {}, true
@@ -989,10 +991,13 @@ func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string
 		return nil, false
 	}
 
-	renewCtx, cancel := context.WithCancel(context.Background())
+	renewCtx, cancel := context.WithCancel(ctx)
+	renewDone := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(wikiInflightRenew)
 		defer ticker.Stop()
+		defer close(renewDone)
+		defer s.redisClient.ZRem(context.Background(), key, token)
 		for {
 			select {
 			case <-renewCtx.Done():
@@ -1006,7 +1011,7 @@ func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string
 	}()
 	return func() {
 		cancel()
-		s.redisClient.ZRem(context.Background(), key, token)
+		<-renewDone
 	}, true
 }
 
