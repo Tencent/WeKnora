@@ -1035,17 +1035,17 @@ func (r *wikiPageRepository) ListByTypeRecent(
 	return entries, nil
 }
 
-// FindSimilarPages returns the top-k entity/concept pages whose lowercase
-// title is most similar to the given query under PostgreSQL pg_trgm
-// trigram similarity. Backed by idx_wiki_pages_title_trgm (GIN
-// gin_trgm_ops, migration 000041). Used by the dedup pre-filter to
-// surface candidate merge targets without loading every entity/concept
-// page into Go.
+// FindSimilarPages returns candidate pages matching a title via pg_trgm or
+// an exact alias (case-insensitive, with surrounding spaces trimmed). Exact
+// alias matches score 1, ahead of fuzzy title matches; equal scores sort by
+// slug for stable top-k results. These are candidates, not automatic merges.
+// The title predicate can use idx_wiki_pages_title_trgm; alias matching scans
+// JSONB arrays within the scoped knowledge base and page types.
 //
 // types is an optional page_type allow-list; empty means entity+concept.
-// limit is clamped to [1, 50]. Pages whose title similarity is below
-// 0.1 are dropped server-side via the `%` operator (which respects
-// pg_trgm.similarity_threshold).
+// Non-positive limits default to 20; positive limits are capped at 50.
+// The title predicate respects pg_trgm.similarity_threshold. An exact alias
+// match does not need to meet that title-similarity threshold.
 func (r *wikiPageRepository) FindSimilarPages(
 	ctx context.Context,
 	kbID string,
@@ -1068,13 +1068,23 @@ func (r *wikiPageRepository) FindSimilarPages(
 
 	q := strings.ToLower(strings.TrimSpace(query))
 
+	// EXISTS keeps one result per page even when multiple aliases match.
+	// Nil StringArray values can be stored as JSON null rather than SQL NULL.
+	const exactAlias = `EXISTS (
+		SELECT 1 FROM jsonb_array_elements_text(
+			CASE WHEN jsonb_typeof(aliases::jsonb) = 'array'
+				THEN aliases::jsonb ELSE '[]'::jsonb END
+		) AS alias(value) WHERE lower(btrim(alias.value)) = ?
+	)`
 	var rows []types.WikiPageLite
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
-			kbID, pageTypes, types.WikiPageStatusArchived, q).
-		Order("sim DESC").
+		Select("slug, title, page_type, status, aliases, out_links, CASE WHEN "+exactAlias+
+			" THEN 1.0 ELSE similarity(lower(title), ?) END AS sim", q, q).
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+			kbID, pageTypes, types.WikiPageStatusArchived).
+		Where("(lower(title) % ? OR "+exactAlias+")", q, q).
+		Order("sim DESC, slug ASC").
 		Limit(limit).
 		Scan(&rows).Error; err != nil {
 		return nil, err

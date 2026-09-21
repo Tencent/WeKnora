@@ -148,9 +148,9 @@ type WikiPageService interface {
 	// Used by rebuildIndexPage's first-time generation path.
 	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
 
-	// FindSimilarPages performs a pg_trgm similarity search over
-	// page titles. Used by the dedup pre-filter to surface candidate
-	// merge targets server-side.
+	// FindSimilarPages finds title pg_trgm matches and case-insensitive exact
+	// alias matches. Exact alias matches rank ahead of fuzzy title matches.
+	// Used by the dedup pre-filter; a candidate is not an automatic merge.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
 	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
@@ -323,10 +323,9 @@ type WikiPageRepository interface {
 	// LLM prompt size is bounded on large KBs.
 	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
 
-	// FindSimilarPages returns the top-k pages whose lowercase title
-	// is most similar to the query under pg_trgm. `pageTypes` empty
-	// defaults to entity+concept. Used by the dedup pre-filter to
-	// surface candidate merge targets server-side.
+	// FindSimilarPages returns top-k title pg_trgm or case-insensitive exact
+	// alias matches, with exact aliases ahead of fuzzy titles. `pageTypes`
+	// empty defaults to entity+concept. Used by the dedup pre-filter.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
 	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
