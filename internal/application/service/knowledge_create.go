@@ -1338,3 +1338,94 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	newCtx := logger.CloneContext(ctx)
 	go s.processChunks(newCtx, kb, knowledge, parsed, opts)
 }
+
+// youtubeEnumerateEngine tells docreader's parse_url to run the fast
+// yt-dlp enumeration path instead of the default transcript/web parser.
+const youtubeEnumerateEngine = "youtube-enumerate"
+
+// youtubeVideoEntry mirrors the JSON objects docreader packs into
+// ReadResult.Metadata["youtube_videos"] (see docreader/parser/youtube_parser.py).
+type youtubeVideoEntry struct {
+	VideoID string `json:"video_id"`
+	URL     string `json:"url"`
+	Title   string `json:"title"`
+}
+
+// CreateKnowledgeFromYoutube expands each input URL (single video or
+// playlist) via docreader's YouTube enumerator, then creates one knowledge
+// item per resulting video through the existing CreateKnowledgeFromURL —
+// reusing its RBAC/dedup/SSRF/async-processing pipeline unchanged. A
+// failure on one URL or one video is recorded and does not abort the rest.
+func (s *knowledgeService) CreateKnowledgeFromYoutube(
+	ctx context.Context, kbID string, urls []string, tagIDs []string, channel string,
+) (*types.YoutubeIngestResult, error) {
+	result := &types.YoutubeIngestResult{
+		Knowledge: []*types.Knowledge{},
+		Failed:    []types.YoutubeIngestFailure{},
+	}
+
+	for _, rawURL := range urls {
+		url := strings.TrimSpace(rawURL)
+		if url == "" {
+			continue
+		}
+
+		if err := secutils.ValidateURLForSSRF(url); err != nil {
+			logger.Warnf(ctx, "YouTube ingest: URL rejected for SSRF protection: %s: %v", url, err)
+			result.Failed = append(result.Failed, types.YoutubeIngestFailure{URL: url, Error: err.Error()})
+			continue
+		}
+
+		entries, err := s.expandYoutubeURL(ctx, url)
+		if err != nil {
+			logger.Warnf(ctx, "YouTube ingest: failed to expand %s: %v", url, err)
+			result.Failed = append(result.Failed, types.YoutubeIngestFailure{URL: url, Error: err.Error()})
+			continue
+		}
+
+		for _, entry := range entries {
+			knowledge, err := s.CreateKnowledgeFromURL(
+				ctx, kbID, entry.URL, "", "", nil, entry.Title, tagIDs, channel, nil,
+			)
+			if err != nil {
+				logger.Warnf(ctx, "YouTube ingest: failed to create knowledge for %s: %v", entry.URL, err)
+				result.Failed = append(result.Failed, types.YoutubeIngestFailure{URL: entry.URL, Error: err.Error()})
+				continue
+			}
+			result.Knowledge = append(result.Knowledge, knowledge)
+			result.SuccessCount++
+		}
+	}
+
+	return result, nil
+}
+
+// expandYoutubeURL asks docreader to enumerate a YouTube URL (single video
+// or playlist) into its component videos, synchronously, without fetching
+// any transcript yet.
+func (s *knowledgeService) expandYoutubeURL(ctx context.Context, url string) ([]youtubeVideoEntry, error) {
+	if s.documentReader == nil {
+		return nil, fmt.Errorf("document parsing service is not configured")
+	}
+
+	readResult, err := s.documentReader.Read(ctx, &types.ReadRequest{
+		URL:          url,
+		ParserEngine: youtubeEnumerateEngine,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand YouTube URL: %w", err)
+	}
+	if readResult.Error != "" {
+		return nil, fmt.Errorf("failed to expand YouTube URL: %s", readResult.Error)
+	}
+
+	raw := readResult.Metadata["youtube_videos"]
+	if raw == "" {
+		return nil, fmt.Errorf("YouTube parser returned no videos for %s", url)
+	}
+	var entries []youtubeVideoEntry
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		return nil, fmt.Errorf("failed to parse YouTube video list: %w", err)
+	}
+	return entries, nil
+}
