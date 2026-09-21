@@ -48,7 +48,7 @@ func TestConnector_Validate_Success(t *testing.T) {
 }
 
 func TestConnector_Validate_BadToken(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(401)
 	}))
 	defer srv.Close()
@@ -199,8 +199,14 @@ func TestConnector_FetchAll(t *testing.T) {
 func TestConnector_FetchAll_SkipsGoneAndTemplates(t *testing.T) {
 	f := newFakeOutline([]document{
 		{ID: "d1", Title: "Bình thường", Text: "ok", CollectionID: "col-1", Revision: 1},
-		{ID: "d2", Title: "Đã xoá", Text: "x", CollectionID: "col-1", Revision: 1, DeletedAt: "2026-09-01T00:00:00.000Z"},
-		{ID: "d3", Title: "Đã lưu trữ", Text: "x", CollectionID: "col-1", Revision: 1, ArchivedAt: "2026-09-01T00:00:00.000Z"},
+		{
+			ID: "d2", Title: "Đã xoá", Text: "x", CollectionID: "col-1", Revision: 1,
+			DeletedAt: "2026-09-01T00:00:00.000Z",
+		},
+		{
+			ID: "d3", Title: "Đã lưu trữ", Text: "x", CollectionID: "col-1", Revision: 1,
+			ArchivedAt: "2026-09-01T00:00:00.000Z",
+		},
 		{ID: "d4", Title: "Mẫu", Text: "x", CollectionID: "col-1", Revision: 1, TemplateID: "tpl-1"},
 	})
 	defer f.Close()
@@ -221,8 +227,10 @@ func TestConnector_FetchAll_SkipsGoneAndTemplates(t *testing.T) {
 func TestConnector_FetchAll_StripsEscapeArtifacts(t *testing.T) {
 	bs := "\\"
 	f := newFakeOutline([]document{
-		{ID: "d1", Title: "Có rác", Text: "## Mục\n\n   " + bs + "n" + bs + "n\n\n* Thật\n",
-			CollectionID: "col-1", Revision: 1},
+		{
+			ID: "d1", Title: "Có rác", Text: "## Mục\n\n   " + bs + "n" + bs + "n\n\n* Thật\n",
+			CollectionID: "col-1", Revision: 1,
+		},
 	})
 	defer f.Close()
 
@@ -273,10 +281,14 @@ func TestConnector_FetchAll_FileNamePolicy(t *testing.T) {
 
 func TestConnector_FetchIncremental_SkipsUnchangedAndReportsDeletions(t *testing.T) {
 	f := newFakeOutline([]document{
-		{ID: "d1", Title: "Không đổi", Text: "a", CollectionID: "col-1", Revision: 5,
-			UpdatedAt: "2026-09-01T00:00:00.000Z"},
-		{ID: "d2", Title: "Đã sửa", Text: "b", CollectionID: "col-1", Revision: 9,
-			UpdatedAt: "2026-09-02T00:00:00.000Z"},
+		{
+			ID: "d1", Title: "Không đổi", Text: "a", CollectionID: "col-1", Revision: 5,
+			UpdatedAt: "2026-09-01T00:00:00.000Z",
+		},
+		{
+			ID: "d2", Title: "Đã sửa", Text: "b", CollectionID: "col-1", Revision: 9,
+			UpdatedAt: "2026-09-02T00:00:00.000Z",
+		},
 	})
 	defer f.Close()
 
@@ -378,8 +390,10 @@ func TestConnector_FetchIncremental_NoResourcesIsAnError(t *testing.T) {
 
 func TestConnector_FetchAll_InlinesImages(t *testing.T) {
 	f := newFakeOutline([]document{
-		{ID: "d1", Title: "Có ảnh", CollectionID: "col-1", Revision: 1,
-			Text: "Xem hình:\n\n![](/api/attachments.redirect?id=att-1 \"Ảnh minh hoạ\")\n"},
+		{
+			ID: "d1", Title: "Có ảnh", CollectionID: "col-1", Revision: 1,
+			Text: "Xem hình:\n\n![](/api/attachments.redirect?id=att-1 \"Ảnh minh hoạ\")\n",
+		},
 	})
 	defer f.Close()
 	f.serveAttachment("att-1", pngBytes(2048), "image/png")
@@ -404,8 +418,10 @@ func TestConnector_FetchAll_InlinesImages(t *testing.T) {
 
 func TestConnector_FetchAll_SkipsImageDownloadWithoutMultimodal(t *testing.T) {
 	f := newFakeOutline([]document{
-		{ID: "d1", Title: "Có ảnh", CollectionID: "col-1", Revision: 1,
-			Text: "![](/api/attachments.redirect?id=att-1)"},
+		{
+			ID: "d1", Title: "Có ảnh", CollectionID: "col-1", Revision: 1,
+			Text: "![](/api/attachments.redirect?id=att-1)",
+		},
 	})
 	defer f.Close()
 	f.serveAttachment("att-1", pngBytes(2048), "image/png")

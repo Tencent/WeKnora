@@ -89,7 +89,8 @@ func embedAttachmentImages(ctx context.Context, cli attachmentDownloader, md str
 			continue
 		}
 		if len(data) > maxImageBytes {
-			logger.Warnf(ctx, "[Outline] attachment %s is %d bytes, over the %d byte inline limit; keeping original link",
+			logger.Warnf(ctx,
+				"[Outline] attachment %s is %d bytes, over the %d byte inline limit; keeping original link",
 				attachmentID, len(data), maxImageBytes)
 			out.WriteString(whole)
 			continue

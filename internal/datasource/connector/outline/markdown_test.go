@@ -16,7 +16,7 @@ type stubDownloader struct {
 	calls int
 }
 
-func (s *stubDownloader) DownloadAttachment(ctx context.Context, id string) ([]byte, string, error) {
+func (s *stubDownloader) DownloadAttachment(_ context.Context, id string) ([]byte, string, error) {
 	s.calls++
 	b, ok := s.data[id]
 	if !ok {

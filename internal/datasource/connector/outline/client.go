@@ -98,7 +98,7 @@ func (c *client) doRequest(ctx context.Context, path string, payload interface{}
 		}
 
 		respBody, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response body: %w", readErr)
 			if attempt < maxRetries {
@@ -245,7 +245,7 @@ func (c *client) DownloadAttachment(ctx context.Context, attachmentID string) ([
 	if err != nil {
 		return nil, "", fmt.Errorf("download attachment %s: %w", attachmentID, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("download attachment %s: status=%d", attachmentID, resp.StatusCode)

@@ -80,7 +80,7 @@ func (f *fakeOutline) hitCount(path string) int {
 }
 
 func (f *fakeOutline) handleJSON(path string, status int, payload interface{}) {
-	f.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+	f.mux.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
 		f.count(path)
 		writeJSON(w, status, payload)
 	})
@@ -89,7 +89,7 @@ func (f *fakeOutline) handleJSON(path string, status int, payload interface{}) {
 // serveAttachment makes one attachment id downloadable from the fake instance,
 // through the same 302 that a real Outline emits.
 func (f *fakeOutline) serveAttachment(id string, data []byte, contentType string) {
-	f.mux.HandleFunc("/api/files.get/"+id, func(w http.ResponseWriter, r *http.Request) {
+	f.mux.HandleFunc("/api/files.get/"+id, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(200)
 		_, _ = w.Write(data)
@@ -131,7 +131,7 @@ func TestClient_Ping(t *testing.T) {
 }
 
 func TestClient_Ping_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 401, apiErrorBody{Error: "authentication_required"})
 	}))
 	defer srv.Close()
@@ -217,7 +217,7 @@ func TestClient_DownloadAttachment_FollowsRedirect(t *testing.T) {
 	mux.HandleFunc("/api/attachments.redirect", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, srv.URL+"/api/files.get?key=abc", http.StatusFound)
 	})
-	mux.HandleFunc("/api/files.get", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/files.get", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(200)
 		_, _ = w.Write(png)
@@ -237,7 +237,7 @@ func TestClient_DownloadAttachment_FollowsRedirect(t *testing.T) {
 }
 
 func TestClient_DownloadAttachment_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(404)
 	}))
 	defer srv.Close()
@@ -251,7 +251,7 @@ func TestClient_DownloadAttachment_NotFound(t *testing.T) {
 
 func TestClient_RetriesOn429(t *testing.T) {
 	var calls int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if atomic.AddInt32(&calls, 1) == 1 {
 			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(429)

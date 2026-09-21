@@ -42,7 +42,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 // ResolveResourceAncestors has nothing to do for Outline: collections are a flat
 // list, so a selection has no ancestors for the picker to reveal.
 func (c *Connector) ResolveResourceAncestors(
-	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+	_ context.Context, _ *types.DataSourceConfig, _ []string,
 ) ([]string, error) {
 	return []string{}, nil
 }
