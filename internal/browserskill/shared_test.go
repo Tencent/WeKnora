@@ -373,7 +373,8 @@ func TestConcurrentPairingSharesOneDaemon(t *testing.T) {
 	const count = 12
 	results := make(chan error, count)
 	for i := 0; i < count; i++ {
-		go func(i int) { _, err := m.ensureDevice(ctx, Scope{1, fmt.Sprint(i)}); results <- err }(i)
+		// Reserved as in-progress extension handshakes, so none is idle.
+		go func(i int) { _, err := m.acquireDevice(ctx, Scope{1, fmt.Sprint(i)}, true); results <- err }(i)
 	}
 	for i := 0; i < count; i++ {
 		require.NoError(t, <-results)
@@ -384,12 +385,70 @@ func TestConcurrentPairingSharesOneDaemon(t *testing.T) {
 	}
 	m.maxConnections = count
 	_, err := m.ensureDevice(ctx, Scope{1, "over-limit"})
-	require.ErrorContains(t, err, "capacity")
+	require.ErrorIs(t, err, errCapacity)
 	if err := m.Revoke(ctx, Scope{1, "0"}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = m.ensureDevice(ctx, Scope{1, "replacement"})
 	require.NoError(t, err)
+}
+
+// Capacity counts live members, not every member this node has ever served.
+func TestDisconnectedMembersReleaseCapacity(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	m.maxConnections = 2
+	alice, bob, carol := Scope{1, "alice"}, Scope{1, "bob"}, Scope{1, "carol"}
+	fixture := connectSharedFixture(ctx, t, m, alice, "", "alice-browser")
+	require.NoError(t, m.Control(ctx, alice, "chat", "start"))
+	d := m.get(alice)
+	require.NoError(t, fixture.ws.Close())
+	require.Eventually(t, func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.idleLocked()
+	}, 5*time.Second, 20*time.Millisecond)
+
+	// An unpaired selection is idle as well and must not pin a slot.
+	require.NoError(t, m.Control(ctx, carol, "chat", "select"))
+	connectSharedFixture(ctx, t, m, bob, "", "bob-browser")
+	require.Nil(t, m.get(alice))
+	require.Nil(t, m.get(carol))
+
+	// Alice's interrupted task is durable and reloads paused on reconnection.
+	status, err := m.GetStatus(ctx, alice, "chat")
+	require.NoError(t, err)
+	require.True(t, status.Selected)
+	require.True(t, status.Paused)
+	require.NoError(t, m.Control(ctx, alice, "chat", "pause"))
+	connectSharedFixture(ctx, t, m, alice, "", "alice-browser")
+	status = m.Status(alice, "chat")
+	require.True(t, status.Connected)
+	require.True(t, status.Selected)
+	require.True(t, status.Paused)
+}
+
+// A handshake reserves its device; a failed lease claim must not leak it.
+func TestFailedLeaseClaimDoesNotPinCapacity(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	m.maxConnections = 1
+	alice := Scope{1, "alice"}
+	link, err := m.Pair(ctx, alice, "")
+	require.NoError(t, err)
+	parts := strings.Split(redeemTestPair(ctx, t, m, link), "#")
+	record, err := m.store.account(ctx, alice)
+	require.NoError(t, err)
+	require.NoError(t, m.store.claim(ctx, record, "other-node", "http://other:8080", randomID()))
+
+	header := http.Header{"Origin": []string{"chrome-extension://" + strings.Repeat("a", 32)}}
+	dialer := websocket.Dialer{Subprotocols: []string{AuthProtocol + parts[1]}}
+	_, response, err := dialer.DialContext(ctx, parts[0], header)
+	require.Error(t, err)
+	require.Equal(t, http.StatusConflict, response.StatusCode)
+	_ = response.Body.Close()
+
+	_, err = m.ensureDevice(ctx, Scope{1, "bob"})
+	require.NoError(t, err, "the refused handshake must leave an evictable device")
+	require.Nil(t, m.get(alice))
 }
 
 func TestSharedDaemonCrashKeepsAuthorizationAndPausesTasks(t *testing.T) {
@@ -430,7 +489,8 @@ exec "$WEKNORA_BSK_NATIVE" "$@"
 	m.binary = wrapper
 	t.Cleanup(func() { _ = os.WriteFile(gate+"/release", nil, 0o600) })
 	pending := make(chan error, 1)
-	go func() { _, err := m.ensureDevice(ctx, Scope{1, "alice"}); pending <- err }()
+	// Reserved like a pending extension handshake so Bob cannot evict it.
+	go func() { _, err := m.acquireDevice(ctx, Scope{1, "alice"}, true); pending <- err }()
 	require.Eventually(
 		t,
 		func() bool {

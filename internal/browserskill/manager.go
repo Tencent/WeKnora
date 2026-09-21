@@ -92,7 +92,17 @@ type device struct {
 	tasks      map[string]*task
 	expires    time.Time
 	recordID   string
+	// connecting counts extension handshakes holding this device against
+	// eviction; attaching excludes a second handshake while dialing unlocked.
+	connecting int
+	attaching  bool
 }
+
+// idleLocked reports whether the device only caches reloadable state.
+// Interrupted tasks are durable and reload as paused on the next connection.
+func (d *device) idleLocked() bool { return d.conn == nil && d.connecting == 0 && !d.attaching }
+
+var errCapacity = errors.New("local browser connection capacity reached")
 
 // Manager owns transient browser connections; authorization and interruption
 // markers are durable. Other replicas route commands to the lease owner.
@@ -244,6 +254,13 @@ func (m *Manager) Pair(ctx context.Context, s Scope, origin string) (string, err
 
 // ensureDevice shares the daemon, but never shares authorization or task maps.
 func (m *Manager) ensureDevice(ctx context.Context, s Scope) (*device, error) {
+	return m.acquireDevice(ctx, s, false)
+}
+
+// acquireDevice optionally reserves the device for an extension handshake;
+// the caller must release a reservation by decrementing d.connecting.
+// Capacity counts live members only: other members' idle devices are evicted.
+func (m *Manager) acquireDevice(ctx context.Context, s Scope, reserve bool) (*device, error) {
 	runtime, err := m.ensureDaemon(ctx)
 	if err != nil {
 		return nil, err
@@ -253,19 +270,21 @@ func (m *Manager) ensureDevice(ctx context.Context, s Scope) (*device, error) {
 	if m.closed || runtime.exited() {
 		return nil, errors.New("BrowserSkill daemon unavailable")
 	}
+	self := s.key()
 	for key, old := range m.devices {
 		old.mu.Lock()
-		if old.runtime != runtime || (!old.expires.IsZero() && time.Now().After(old.expires)) {
+		if old.runtime != runtime || (!old.expires.IsZero() && time.Now().After(old.expires)) ||
+			(key != self && old.idleLocked()) {
 			delete(m.devices, key)
 			disconnectDeviceLocked(old)
 			old.expires = time.Time{}
 		}
 		old.mu.Unlock()
 	}
-	d := m.devices[s.key()]
+	d := m.devices[self]
 	if d == nil {
 		if len(m.devices) >= m.maxConnections {
-			return nil, errors.New("local browser connection capacity reached")
+			return nil, errCapacity
 		}
 		rows, err := m.store.tasks(ctx, s)
 		if err != nil {
@@ -276,7 +295,12 @@ func (m *Manager) ensureDevice(ctx context.Context, s Scope) (*device, error) {
 			d.tasks[row.Session] = &task{selected: true, paused: true}
 		}
 
-		m.devices[s.key()] = d
+		m.devices[self] = d
+	}
+	if reserve {
+		d.mu.Lock()
+		d.connecting++
+		d.mu.Unlock()
 	}
 	return d, nil
 }
@@ -366,11 +390,17 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "device authorization invalid; pair again", http.StatusUnauthorized)
 		return
 	}
-	d, err := m.ensureDevice(authCtx, record.scope())
+	d, err := m.acquireDevice(authCtx, record.scope(), true)
+	if errors.Is(err, errCapacity) {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		http.Error(w, "browser runtime unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	// Idle once this handler returns, so the next member's connection can evict it.
+	defer func() { d.mu.Lock(); d.connecting--; d.mu.Unlock() }()
 	leaseKey := randomID()
 	if err = m.store.claim(authCtx, record, m.nodeID, m.internalURL, leaseKey); err != nil {
 		http.Error(w, "browser connection owned elsewhere; retry shortly", http.StatusConflict)
@@ -382,30 +412,32 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = m.store.release(ctx, record.ID, leaseKey)
 	}()
 	d.mu.Lock()
-	if d.conn != nil {
+	if d.conn != nil || d.attaching {
 		d.mu.Unlock()
 		http.Error(w, "browser already connected", http.StatusConflict)
 		return
 	}
-	d.recordID = record.ID
-	d.expires = record.ExpiresAt
-	// Hold the device lock across the bounded connect/upgrade to exclude a second connector.
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	target := fmt.Sprintf("ws://127.0.0.1:%d", d.runtime.port)
-	up, _, err := websocket.DefaultDialer.DialContext(ctx, target, http.Header{"Origin": []string{origin}})
+	// Dial and upgrade unlocked: a slow peer must not stall other members'
+	// lookups, which lock every device while holding the manager lock.
+	d.attaching = true
+	attachGeneration := d.generation
+	d.mu.Unlock()
+	up, conn, err := m.attach(w, r, d, origin, protocols)
+	d.mu.Lock()
+	d.attaching = false
 	if err != nil {
 		d.mu.Unlock()
-		http.Error(w, "daemon unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }, Subprotocols: protocols}
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
+	if d.generation != attachGeneration {
+		// Revoked, re-paired or evicted after a daemon restart while dialing.
 		d.mu.Unlock()
+		_ = conn.Close()
 		_ = up.Close()
 		return
 	}
+	d.recordID = record.ID
+	d.expires = record.ExpiresAt
 	d.conn = conn
 	d.upstream = up
 	d.ready = false
@@ -484,6 +516,36 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = conn.Close()
 	_ = up.Close()
 	<-done
+}
+
+// attach dials the shared daemon, then upgrades the extension connection.
+// On failure the extension has already received an HTTP error response.
+func (m *Manager) attach(
+	w http.ResponseWriter,
+	r *http.Request,
+	d *device,
+	origin string,
+	protocols []string,
+) (up, conn *websocket.Conn, err error) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	target := fmt.Sprintf("ws://127.0.0.1:%d", d.runtime.port)
+	up, _, err = websocket.DefaultDialer.DialContext(ctx, target, http.Header{"Origin": []string{origin}})
+	if err != nil {
+		http.Error(w, "daemon unavailable", http.StatusServiceUnavailable)
+		return nil, nil, err
+	}
+	upgrader := websocket.Upgrader{
+		CheckOrigin:      func(*http.Request) bool { return true },
+		Subprotocols:     protocols,
+		HandshakeTimeout: 5 * time.Second,
+	}
+	conn, err = upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		_ = up.Close()
+		return nil, nil, err
+	}
+	return up, conn, nil
 }
 
 func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, error) {
@@ -914,6 +976,10 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	}
 	if d == nil && action == "stop" && m.store != nil {
 		return m.store.clearTask(ctx, s, session)
+	}
+	if d == nil && action == "pause" {
+		// Idle devices are evicted; nothing runs and durable tasks reload paused.
+		return nil
 	}
 	if d == nil {
 		return errors.New("pair a browser first")
