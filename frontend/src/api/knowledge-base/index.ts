@@ -284,6 +284,14 @@ export function createKnowledgeFromURL(
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
 
+// 批量从 YouTube 创建知识（自动展开播放列表）
+export function createKnowledgeFromYoutube(
+  kbId: string,
+  data: { urls: string[]; tag_ids?: string[] },
+) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/youtube`, data);
+}
+
 // 手工创建知识
 // data.tag_ids: 可选，指定知识所属的标签 ID
 export function createManualKnowledge(
