@@ -4,6 +4,11 @@ from typing import Any, Optional
 from docreader.models.document import Document
 from docreader.parser.registry import registry
 from docreader.parser.web_parser import WebParser
+from docreader.parser.youtube_parser import (
+    YoutubeEnumerateParser,
+    YoutubeTranscriptParser,
+    is_youtube_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +98,14 @@ class Parser:
         """Parse content from a URL to markdown."""
         logger.info("Parsing URL: %s, title: %s", url, title)
 
-        parser = WebParser(title=title)
-        logger.info("Starting to parse URL content")
+        if parser_engine == "youtube-enumerate":
+            parser = YoutubeEnumerateParser(title=title)
+        elif is_youtube_url(url):
+            parser = YoutubeTranscriptParser(title=title)
+        else:
+            parser = WebParser(title=title)
+
+        logger.info("Starting to parse URL content with %s", type(parser).__name__)
         result = parser.parse(url.encode())
 
         if not result.content:
