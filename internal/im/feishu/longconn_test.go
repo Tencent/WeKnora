@@ -7,6 +7,63 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
+func stringPtr(s string) *string { return &s }
+
+func TestConvertEventIgnoresGroupMessageWithoutBotMention(t *testing.T) {
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				MessageType: stringPtr("text"),
+				ChatType:    stringPtr("group"),
+				ChatId:      stringPtr("oc_group"),
+				MessageId:   stringPtr("om_message"),
+				Content:     stringPtr(`{"text":"知识库最新文档"}`),
+			},
+			Sender: &larkim.EventSender{
+				SenderId: &larkim.UserId{OpenId: stringPtr("ou_sender")},
+			},
+		},
+	}
+
+	if got := convertEvent(RegionFeishu, event); got != nil {
+		t.Fatalf("convertEvent() = %+v, want nil for group message without bot mention", got)
+	}
+}
+
+func TestConvertEventKeepsGroupMessageThatMentionsBot(t *testing.T) {
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				MessageType: stringPtr("text"),
+				ChatType:    stringPtr("group"),
+				ChatId:      stringPtr("oc_group"),
+				MessageId:   stringPtr("om_message"),
+				Content:     stringPtr(`{"text":"@_user_1 亚信有什么ai安全产品"}`),
+				Mentions: []*larkim.MentionEvent{{
+					Key:           stringPtr("@_user_1"),
+					MentionedType: stringPtr("bot"),
+					Name:          stringPtr("WeKnora"),
+					Id:            &larkim.UserId{OpenId: stringPtr("ou_bot")},
+				}},
+			},
+			Sender: &larkim.EventSender{
+				SenderId: &larkim.UserId{OpenId: stringPtr("ou_sender")},
+			},
+		},
+	}
+
+	got := convertEvent(RegionFeishu, event)
+	if got == nil {
+		t.Fatal("convertEvent() returned nil for group message that mentions the bot")
+	}
+	if got.Content != "亚信有什么ai安全产品" {
+		t.Fatalf("Content = %q, want %q", got.Content, "亚信有什么ai安全产品")
+	}
+	if got.ChatType != im.ChatTypeGroup {
+		t.Fatalf("ChatType = %q, want %q", got.ChatType, im.ChatTypeGroup)
+	}
+}
+
 func TestConvertPostEventPreservesEmbeddedImage(t *testing.T) {
 	content := `{"title":"","content":[[{"tag":"at","user_id":"ou_bot"},{"tag":"text","text":"请描述这张图"},{"tag":"img","image_key":"img_v3_abc"}]]}`
 	msg := &larkim.EventMessage{Content: &content}
