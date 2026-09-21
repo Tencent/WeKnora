@@ -6,6 +6,7 @@ package catalog_test
 // means an existing deployment breaks on upgrade without a migration.
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
@@ -224,6 +225,11 @@ func TestEveryCataloguedModelResolves(t *testing.T) {
 	for _, v := range catalog.List() {
 		for _, m := range v.Models {
 			if m.ID == "" {
+				continue
+			}
+			// An entry that declares this build cannot serve it must refuse,
+			// on save as at construction; vendors_test pins that it does.
+			if bytes.Contains(m.Compat, []byte("unsupported_reason")) {
 				continue
 			}
 			modelType := m.Type

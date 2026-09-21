@@ -213,10 +213,14 @@ func init() {
 			// the only embedding API Ark still lists. It fuses everything in
 			// one request into a single vector, so a request carries one text.
 			// dimensions defaults to 2048 and the current models also serve
-			// 1024.
+			// 1024; encoding_format defaults to float and the reference's own
+			// curl sends it. `instructions` is documented too and deliberately
+			// not declared: like Jina's task it changes the document vectors
+			// (Tencent/WeKnora#1401).
 			Embeddings: catalog.EmbeddingsCompat{
-				DimensionsField: catalog.Ptr("dimensions"),
-				MaxBatchSize:    catalog.Ptr(1),
+				SendEncodingFormat: catalog.Ptr(true),
+				DimensionsField:    catalog.Ptr("dimensions"),
+				MaxBatchSize:       catalog.Ptr(1),
 			},
 			Rerank: catalog.RerankCompat{
 				MaxDocuments:   catalog.Ptr(50),

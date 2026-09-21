@@ -1,11 +1,17 @@
 // Package googleembeddings implements Gemini's batchEmbedContents: one POST
 // carrying a request per text, answering embeddings[].values in order.
 //
-// Two facts shape it. The per-request `model` must be the fully qualified
-// `models/{id}`, not the bare id the URL already carries. And `taskType`
-// exists on gemini-embedding-001 but not on gemini-embedding-2, which takes
-// its task instruction in the prompt instead — so the field is declared per
-// model rather than for the vendor.
+// Three facts shape it. The per-request `model` must be the fully qualified
+// `models/{id}`, not the bare id the URL already carries. The per-request
+// options — `taskType`, `outputDimensionality` — belong inside
+// `embedContentConfig`; the reference marks the same names at the top level
+// of the request "Deprecated: Please use EmbedContentConfig…". And
+// `taskType` exists on gemini-embedding-001 but not on gemini-embedding-2,
+// which takes its task instruction in the prompt instead — so the field is
+// declared per model rather than for the vendor.
+//
+// Each text is its own request with a single part: gemini-embedding-2 fuses
+// the parts of one Content into one vector.
 //
 // https://ai.google.dev/api/embeddings
 package googleembeddings
@@ -36,6 +42,9 @@ type Client struct {
 func New(cfg Config) *Client { return &Client{cfg: cfg} }
 
 const method = ":batchEmbedContents"
+
+// configField holds the per-request options.
+const configField = "embedContentConfig"
 
 // qualifiedModel is the `models/{id}` form the per-request model field needs.
 func (c *Client) qualifiedModel() string {
@@ -75,11 +84,15 @@ func (c *Client) BuildRequestBody(texts []string, kind api.EmbedInputType) map[s
 			"model":   c.qualifiedModel(),
 			"content": map[string]any{"parts": []any{map[string]any{"text": text}}},
 		}
+		config := map[string]any{}
 		if field := s.InputTypeField; field != "" {
-			req[field] = s.InputTypeValue(kind)
+			config[field] = s.InputTypeValue(kind)
 		}
 		if s.DimensionsField != "" && c.cfg.Dimensions > 0 {
-			req[s.DimensionsField] = c.cfg.Dimensions
+			config[s.DimensionsField] = c.cfg.Dimensions
+		}
+		if len(config) > 0 {
+			req[configField] = config
 		}
 		requests = append(requests, req)
 	}

@@ -110,7 +110,9 @@ func init() {
 				// dimensions field. input_type is required and passage is what
 				// this vendor has always been sent for documents, so the indexed
 				// side is unchanged; queries now get query, as the reference
-				// insists they must.
+				// insists they must. This is the hosted API: a self-hosted NIM
+				// (https://docs.nvidia.com/nim/nemo-retriever/embedding/latest/reference.html)
+				// does take dimensions, and belongs on a generic row pointed at it.
 				SendEncodingFormat: catalog.Ptr(true),
 				InputTypeField:     catalog.Ptr("input_type"),
 				InputTypeValues:    map[string]string{"document": "passage", "query": "query"},

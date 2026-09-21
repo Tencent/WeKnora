@@ -549,7 +549,11 @@
           </button>
 
           <template v-if="advancedOpen">
-            <div class="form-item">
+            <!--
+              extra_config.api 只选对话协议。embedding / rerank 行不读它：
+              embedding 的协议覆盖写在下面的 compat JSON 里（"api"），取值是向量协议。
+            -->
+            <div v-if="isChatLike" class="form-item">
               <label class="form-label">{{ $t('model.editor.advanced.api.label') }}</label>
               <t-select :model-value="formData.extraConfig.api || ''" clearable
                 @update:model-value="(v: string) => setExtraConfig('api', v)">

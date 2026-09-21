@@ -80,9 +80,11 @@ func init() {
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://api-docs.siliconflow.cn/docs/api/embeddings-post: model,
 				// input, encoding_format, and dimensions "仅 Qwen/Qwen3 系列支持"
-				// — the bge-m3 entry turns it off.
+				// — the bge-m3 entry turns it off. The input array schema says
+				// "当前最大数组大小为 32" (maxItems 32).
 				SendEncodingFormat: catalog.Ptr(true),
 				DimensionsField:    catalog.Ptr("dimensions"),
+				MaxBatchSize:       catalog.Ptr(32),
 			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				MaxTokensField:          catalog.Ptr("max_tokens"),

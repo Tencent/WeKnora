@@ -105,9 +105,9 @@ func Resolve(ref Ref) (*Resolved, error) {
 		baseURL = strings.TrimRight(vendor.GetDefaultURL(modelType), "/")
 	}
 
-	spec, cataloged := vendor.FindModel(ref.Model)
+	spec, cataloged := vendor.FindModel(ref.Model, modelType)
 	if !cataloged {
-		spec = ModelSpec{ID: ref.Model, Type: types.ModelTypeKnowledgeQA}
+		spec = ModelSpec{ID: ref.Model, Type: entryType(modelType)}
 	}
 	if spec.API == "" {
 		spec.API = vendor.API

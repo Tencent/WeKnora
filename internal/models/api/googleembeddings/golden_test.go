@@ -35,16 +35,20 @@ func TestRequestBodyForATaskTypeModel(t *testing.T) {
 			DimensionsField: "outputDimensionality",
 		}, 768)
 
+	// The options sit in embedContentConfig: the same names at the top level
+	// of the request are marked deprecated in the reference.
 	body := c.BuildRequestBody([]string{"a"}, api.EmbedDocument)
 	assert.Equal(t, map[string]any{"requests": []any{map[string]any{
-		"model":                "models/gemini-embedding-001",
-		"content":              map[string]any{"parts": []any{map[string]any{"text": "a"}}},
-		"taskType":             "RETRIEVAL_DOCUMENT",
-		"outputDimensionality": 768,
+		"model":   "models/gemini-embedding-001",
+		"content": map[string]any{"parts": []any{map[string]any{"text": "a"}}},
+		"embedContentConfig": map[string]any{
+			"taskType":             "RETRIEVAL_DOCUMENT",
+			"outputDimensionality": 768,
+		},
 	}}}, body)
 
 	q := c.BuildRequestBody([]string{"q"}, api.EmbedQuery)["requests"].([]any)[0].(map[string]any)
-	assert.Equal(t, "RETRIEVAL_QUERY", q["taskType"])
+	assert.Equal(t, "RETRIEVAL_QUERY", q["embedContentConfig"].(map[string]any)["taskType"])
 }
 
 // gemini-embedding-2 does not support task_type: its reference says to put
@@ -54,6 +58,7 @@ func TestNoTaskTypeWhereTheModelHasNone(t *testing.T) {
 	c := newClient("https://generativelanguage.googleapis.com/v1beta", "gemini-embedding-2",
 		catalog.EmbeddingsSettings{}, 0)
 	req := c.BuildRequestBody([]string{"a"}, api.EmbedDocument)["requests"].([]any)[0].(map[string]any)
+	assert.NotContains(t, req, "embedContentConfig", "no option declared, so no config object")
 	assert.NotContains(t, req, "taskType")
 }
 

@@ -61,7 +61,12 @@ func (c *Client) url() string {
 type response struct {
 	Data []struct {
 		Embedding []float32 `json:"embedding"`
-		Index     int       `json:"index"`
+		// Index is a pointer so that an absent field reads as absent rather
+		// than as 0. OpenAI, vLLM and TEI send it; some minimal compatible
+		// servers answer in order and leave it out, and the pre-catalog
+		// client read those positionally. Decoded as a plain int, every
+		// element of such a reply would claim slot 0.
+		Index *int `json:"index"`
 	} `json:"data"`
 	Error *struct {
 		Message string `json:"message"`
@@ -118,6 +123,9 @@ func (c *Client) Embed(
 		return nil, fmt.Errorf("embedding API error: %s", decoded.Error.Message)
 	}
 	return api.PlaceEmbeddings(len(texts), len(decoded.Data), func(i int) (int, []float32) {
-		return decoded.Data[i].Index, decoded.Data[i].Embedding
+		if decoded.Data[i].Index == nil {
+			return i, decoded.Data[i].Embedding
+		}
+		return *decoded.Data[i].Index, decoded.Data[i].Embedding
 	})
 }

@@ -164,7 +164,9 @@ func init() {
 			// (https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai),
 			// which takes model, input, dimensions and encoding_format.
 			// Multimodal models "不支持OpenAI兼容接口" and override the protocol
-			// in models.json.
+			// in models.json. The native APIs' text_type / instruct are not
+			// declared: both change the document vectors
+			// (Tencent/WeKnora#1401).
 			Embeddings: catalog.EmbeddingsCompat{
 				SendEncodingFormat: catalog.Ptr(true),
 				DimensionsField:    catalog.Ptr("dimensions"),

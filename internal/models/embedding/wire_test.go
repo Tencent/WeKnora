@@ -275,6 +275,19 @@ func TestEmbeddingWireFormatPerVendor(t *testing.T) {
 			wantBody: openAIBody("BAAI/bge-m3", three, map[string]any{"encoding_format": "float"}),
 		},
 		{
+			name: "siliconflow takes up to thirty-two texts", provider: "siliconflow",
+			model: "BAAI/bge-m3", base: "/v1", texts: texts(33), wantRequests: 2,
+			wantPath: "/v1/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: openAIBody("BAAI/bge-m3", texts(32), map[string]any{"encoding_format": "float"}),
+		},
+		{
+			name: "aliyun text-embedding-v2 has a fixed width and takes 25", provider: "aliyun",
+			model: "text-embedding-v2", base: "/compatible-mode/v1", override: true,
+			texts: texts(26), wantRequests: 2,
+			wantPath: "/compatible-mode/v1/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: openAIBody("text-embedding-v2", texts(25), map[string]any{"encoding_format": "float"}),
+		},
+		{
 			name: "openrouter", provider: "openrouter",
 			model: "openai/text-embedding-3-small", base: "/api/v1", override: true,
 			wantPath: "/api/v1/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
@@ -308,6 +321,12 @@ func TestEmbeddingWireFormatPerVendor(t *testing.T) {
 			wantBody: openAIBody("text-embedding-v4", three, map[string]any{"encoding_format": "float"}),
 		},
 		{
+			name: "aliyun text model not yet in the catalog", provider: "aliyun",
+			model: "qwen3.8-text-embedding", base: "/compatible-mode/v1",
+			wantPath: "/compatible-mode/v1/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: openAIBody("qwen3.8-text-embedding", three, map[string]any{"encoding_format": "float"}),
+		},
+		{
 			name: "aliyun vision plus uses the native API at a fixed width", provider: "aliyun",
 			model: "tongyi-embedding-vision-plus", base: "/compatible-mode/v1", override: true,
 			wantPath: dashPath, wantAuth: [2]string{"Authorization", "Bearer k"},
@@ -331,25 +350,27 @@ func TestEmbeddingWireFormatPerVendor(t *testing.T) {
 			model: "doubao-embedding-vision-251215", base: "/api/v3/embeddings/multimodal",
 			override: true, wantRequests: 3,
 			wantPath: "/api/v3/embeddings/multimodal", wantAuth: [2]string{"Authorization", "Bearer k"},
-			wantBody: arkBody("doubao-embedding-vision-251215", "a", map[string]any{"dimensions": float64(256)}),
+			wantBody: arkBody("doubao-embedding-vision-251215", "a",
+				map[string]any{"encoding_format": "float", "dimensions": float64(256)}),
 		},
 		{
 			name: "volcengine from the chat base URL", provider: "volcengine",
 			model: "doubao-embedding-vision-251215", base: "/api/v3", wantRequests: 3,
 			wantPath: "/api/v3/embeddings/multimodal", wantAuth: [2]string{"Authorization", "Bearer k"},
-			wantBody: arkBody("doubao-embedding-vision-251215", "a", nil),
+			wantBody: arkBody("doubao-embedding-vision-251215", "a", map[string]any{"encoding_format": "float"}),
 		},
 		{
 			name: "volcengine from a bare host", provider: "volcengine",
 			model: "doubao-embedding-vision-251215", wantRequests: 3,
 			wantPath: "/api/v3/embeddings/multimodal", wantAuth: [2]string{"Authorization", "Bearer k"},
-			wantBody: arkBody("doubao-embedding-vision-251215", "a", nil),
+			wantBody: arkBody("doubao-embedding-vision-251215", "a", map[string]any{"encoding_format": "float"}),
 		},
 		{
 			name: "volcengine retired text models keep their own endpoint", provider: "volcengine",
 			model: "doubao-embedding-text-240715", base: "/api/v3/embeddings/multimodal", override: true,
 			wantPath: "/api/v3/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
-			wantBody: openAIBody("doubao-embedding-text-240715", three, nil),
+			// The archived reference lists encoding_format too, and no dimensions.
+			wantBody: openAIBody("doubao-embedding-text-240715", three, map[string]any{"encoding_format": "float"}),
 		},
 		{
 			name: "gemini posts to the native method", provider: "gemini",
@@ -357,9 +378,9 @@ func TestEmbeddingWireFormatPerVendor(t *testing.T) {
 			wantPath: "/v1beta/models/gemini-embedding-001:batchEmbedContents",
 			wantAuth: [2]string{"X-Goog-Api-Key", "k"},
 			wantBody: map[string]any{"requests": []any{map[string]any{
-				"model":                "models/gemini-embedding-001",
-				"content":              map[string]any{"parts": []any{map[string]any{"text": "a"}}},
-				"outputDimensionality": float64(256),
+				"model":              "models/gemini-embedding-001",
+				"content":            map[string]any{"parts": []any{map[string]any{"text": "a"}}},
+				"embedContentConfig": map[string]any{"outputDimensionality": float64(256)},
 			}}},
 		},
 		{

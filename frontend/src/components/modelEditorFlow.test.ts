@@ -855,6 +855,15 @@ test('every vendor-declared string in the form goes through a locale resolver', 
   assert.ok(template.includes('extraFieldDisplayPlaceholder('), 'placeholders must use the resolver')
 })
 
+test('the chat protocol override is offered only on chat and vision rows', () => {
+  const template = descriptor.template?.content ?? ''
+  // extra_config.api names a chat protocol. Embedding and rerank rows never
+  // read it, so offering it there is a control that silently does nothing.
+  const select = /<div([^>]*)>\s*<label[^>]*>\{\{ \$t\('model\.editor\.advanced\.api\.label'\) \}\}/.exec(template)
+  assert.ok(select, 'the protocol override should still be in the template')
+  assert.match(select[1], /v-if="isChatLike"/, 'the protocol override must be scoped to chat-like rows')
+})
+
 test('extraFieldDisplayPlaceholder resolves the vendor placeholder for the active locale', async () => {
   const f = await fixture({ type: 'rerank', providers: catalogProviders })
   try {

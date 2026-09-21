@@ -120,6 +120,35 @@ func TestEveryCatalogEntryResolves(t *testing.T) {
 	}
 }
 
+// Model names that fall inside a chat family's glob must still resolve as
+// embedding and rerank rows. The families that caught them carry chat compat
+// (thinking_always_send on Aliyun's qwen3*, max_tokens_field and
+// supports_temperature on gpt-5*), which the embedding and rerank overlays
+// reject, so an untyped lookup made these rows impossible to build — new ids
+// and dated snapshots first of all, since they are never in models.json yet.
+func TestNamesInsideChatGlobsResolveForOtherTypes(t *testing.T) {
+	names := []struct{ provider, model string }{
+		{"aliyun", "qwen3.8-text-embedding"},
+		{"aliyun", "qwen3-embedding"},
+		{"aliyun", "qwen3.7-text-embedding-20260601"},
+		{"generic", "gpt-5-embed"},
+		{"openai", "gpt-5-embed"},
+	}
+	for _, n := range names {
+		for _, modelType := range []types.ModelType{types.ModelTypeEmbedding, types.ModelTypeRerank} {
+			r, err := catalog.Resolve(catalog.Ref{Provider: n.provider, Model: n.model, ModelType: modelType})
+			if err != nil {
+				t.Errorf("%s/%s as %s: %v", n.provider, n.model, modelType, err)
+				continue
+			}
+			if r.Cataloged {
+				t.Errorf("%s/%s as %s matched %q, which is not an entry of that type",
+					n.provider, n.model, modelType, r.Spec.Name)
+			}
+		}
+	}
+}
+
 func TestDetectByURLRoundTrip(t *testing.T) {
 	for _, id := range expectedIDs {
 		v, _ := catalog.Get(id)

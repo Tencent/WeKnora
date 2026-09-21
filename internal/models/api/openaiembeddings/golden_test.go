@@ -159,6 +159,29 @@ func TestOutOfOrderIndicesArePlacedByIndex(t *testing.T) {
 	assert.Equal(t, [][]float32{{1}, {2}}, got)
 }
 
+// A server that answers in order without an index is read positionally, as
+// the pre-catalog client read it, rather than as every vector claiming 0.
+func TestReplyWithoutIndicesIsReadInOrder(t *testing.T) {
+	server, _, _ := serve(t, `{"data":[{"embedding":[1]},{"embedding":[2]},{"embedding":[3]}]}`)
+	defer server.Close()
+
+	got, err := newClient(server.URL, catalog.EmbeddingsSettings{}, 0).
+		Embed(context.Background(), []string{"a", "b", "c"}, api.EmbedDocument)
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{1}, {2}, {3}}, got)
+}
+
+// An index that is present but repeated is still refused: that reply really
+// does leave an input without its vector.
+func TestRepeatedIndexIsStillAnError(t *testing.T) {
+	server, _, _ := serve(t, `{"data":[{"embedding":[1],"index":0},{"embedding":[2],"index":0}]}`)
+	defer server.Close()
+
+	_, err := newClient(server.URL, catalog.EmbeddingsSettings{}, 0).
+		Embed(context.Background(), []string{"a", "b"}, api.EmbedDocument)
+	assert.Error(t, err)
+}
+
 // A reply covering fewer inputs than were sent would store an empty vector.
 func TestShortReplyIsAnError(t *testing.T) {
 	server, _, _ := serve(t, `{"data":[{"embedding":[1],"index":0}]}`)

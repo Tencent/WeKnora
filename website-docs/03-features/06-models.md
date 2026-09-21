@@ -211,7 +211,9 @@ builtin_models:
 
 `GET /api/v1/models/providers?model_type=chat` 返回全部厂商定义（图标 data URI、默认地址、额外字段、内置模型与思考能力），前端完全据此动态渲染，没有本地厂商表。目前内置 27 个厂商：`generic`、`weknoracloud`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`siliconflow`、`deepseek`、`minimax`、`moonshot`、`mimo`、`modelscope`、`qianfan`、`qiniu`、`longcat`、`lkeap`、`openai`、`azure_openai`、`anthropic`、`gemini`、`openrouter`、`litellm`、`requesty`、`jina`、`nvidia`、`novita`、`gpustack`；Ollama 走 `source=local` 独立路径。
 
-协议选择：Anthropic 走 Messages 协议；Gemini 默认走原生 `generateContent`（`base_url` 指向 `/v1beta/openai` 则保持 OpenAI 兼容）；OpenAI 在 `api.openai.com` 上走 Responses 协议，中转/代理保持 Chat Completions；任何厂商 `base_url` 以 `/anthropic` 结尾时自动切到 Messages 协议（MiniMax、智谱、Kimi 的 Anthropic 兼容口）。`extra_config.api` 可强制指定。
+协议选择：Anthropic 走 Messages 协议；Gemini 默认走原生 `generateContent`（`base_url` 指向 `/v1beta/openai` 则保持 OpenAI 兼容）；OpenAI 在 `api.openai.com` 上走 Responses 协议，中转/代理保持 Chat Completions；任何厂商 `base_url` 以 `/anthropic` 结尾时自动切到 Messages 协议（MiniMax、智谱、Kimi 的 Anthropic 兼容口）。`extra_config.api` 可强制指定对话协议，只对 chat / VLM 行生效；embedding 行的协议覆盖写在 `spec.compat` 的 `"api"` 里，取值是向量协议（`openai-embeddings`、`dashscope-embeddings`、`ark-embeddings`、`google-embeddings`）。
+
+目录条目按模型类型查找：embedding 行只匹配 embedding 条目，不会被同名前缀的对话通配（如百炼的 `qwen3*`、OpenAI 的 `gpt-5*`）套上对话的 compat。目录里还没有的新 id、带日期的快照照常按厂商默认解析。
 
 #### 新增厂商
 
@@ -233,7 +235,7 @@ make model-catalog-check
 
 前端不需要任何改动：厂商下拉、图标、额外字段、内置模型列表都由 `GET /api/v1/models/providers` 动态渲染。
 
-写入侧也有一道闸：`catalog.ValidateRow` 会在创建 / 更新模型（REST）和加载 `config/builtin_models.yaml`（启动）时解析这行配置，未知协议、拼错的 compat 键、非法的思考档位在写入时就被拒绝（YAML 行只打 WARN 不阻塞启动，避免一次重启把线上模型下线）。
+写入侧也有一道闸：`catalog.ValidateRow` 会在创建 / 更新模型（REST）和加载 `config/builtin_models.yaml`（启动）时解析这行配置（chat、VLM、embedding、rerank 四类；ASR 还没进目录），未知协议、拼错的 compat 键、非法的思考档位在写入时就被拒绝（YAML 行只打 WARN 不阻塞启动，避免一次重启把线上模型下线）。
 
 #### 厂商更新了模型怎么办
 
@@ -273,7 +275,10 @@ Embedding 行也有几处按厂商文档纠正的行为变化（逐厂商的出�
 2. **NVIDIA NIM 的检索查询改用 `input_type: query`**。文档侧照旧是 `passage`，已有索引不受影响；这一标记在一次检索重构里丢失过，现在由 `types.WithEmbedQuery` 在三处查询入口设置。超长输入改为 `truncate: END` 截断而不是报错；`dimensions` 不再发送（NIM 没有这个参数）。目录里已被 NVIDIA 标记下线的 `nv-embed-v1`、`llama-3.2-nemoretriever-300m-embed-v1`、`baai/bge-m3` 已移除。
 3. **阿里云按模型分流**：文本模型走 `/compatible-mode/v1/embeddings`，`qwen3-vl-embedding`、`qwen2.5-vl-embedding`、`tongyi-embedding-vision*`、`multimodal-embedding*` 走原生多模态接口。`base_url` 只填主机、国际站或业务空间域名时保留该主机，不再被替换成北京默认地址。
 4. **火山方舟的文本向量接口已归档下线**，当前只有多模态接口。沿用老的 `doubao-embedding-text*` / `doubao-embedding-large-text*` 的行改发到它们归档文档里的 `/api/v3/embeddings`；此前它们被发往多模态接口。
-5. **Jina 的 `task`、Gemini 的 `taskType` 仍然不发**。它们会改变文档侧向量，开启后同一个知识库里新旧向量不在同一空间；需要按行显式开启的设计另见 Tencent/WeKnora#1401。
+5. **Gemini 的缩维放进 `embedContentConfig.outputDimensionality`**。请求顶层的同名字段已被文档标为 deprecated；旧实现发的是顶层 `output_dimensionality`。
+6. **SiliconFlow 每次最多 32 条、百炼 `text-embedding-v1/v2` 最多 25 条**，超出时自动拆批；v1/v2 固定 1536 维，不发 `dimensions`。
+7. **OpenAI 兼容回复里没有 `index` 时按顺序取**（和旧实现一致）；有 `index` 就按它放回，重复或缺位报错。
+8. **Jina 的 `task`、Gemini 的 `taskType`、OpenRouter 的 `input_type`、火山的 `instructions`、百炼原生接口的 `text_type` / `instruct` 都不发**。它们会改变文档侧向量，开启后同一个知识库里新旧向量不在同一空间；需要按行显式开启的设计另见 Tencent/WeKnora#1401。
 
 另外 Azure OpenAI 不再声明支持 ASR（ASR 客户端只会构造标准 OpenAI 客户端，根本无法带上 Azure 的 `api-key` 头和部署路径，这类行此前就调不通）。
 
