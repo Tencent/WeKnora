@@ -8,15 +8,11 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/volcengine/vikingdb-go-sdk/knowledge"
 	knowledgemodel "github.com/volcengine/vikingdb-go-sdk/knowledge/model"
 )
 
 const (
-	// VolcengineRerankBaseURL is the managed Knowledge Service host.
-	VolcengineRerankBaseURL = provider.VolcengineRerankBaseURL
-
 	volcengineRerankDefaultModel       = "doubao-seed-rerank"
 	volcengineRerankDefaultRegion      = "cn-beijing"
 	volcengineRerankDefaultInstruction = "Whether the Document answers the Query or matches the content retrieval intent"
@@ -42,10 +38,9 @@ func newVolcengineClient(config *RerankerConfig, resolved *catalog.Resolved) (ap
 		return nil, fmt.Errorf("access key and secret key are required for Volcengine rerank")
 	}
 
+	// The catalog supplies the vendor's Knowledge Service host when the row
+	// names none.
 	baseURL := resolved.BaseURL
-	if baseURL == "" {
-		baseURL = VolcengineRerankBaseURL
-	}
 
 	modelName := strings.TrimSpace(resolved.RemoteModel)
 	if modelName == "" {
