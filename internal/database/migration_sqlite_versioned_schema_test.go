@@ -49,7 +49,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"message_artifacts":  {"deleted_at"},                                                       // 000107
 }
 
-const expectedSQLiteMigrationVersion = 26
+const expectedSQLiteMigrationVersion = 27
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
