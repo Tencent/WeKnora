@@ -25,6 +25,7 @@ import {
   listKnowledgeTags,
   updateKnowledgeTagBatch,
   createKnowledgeFromURL,
+  createKnowledgeFromYoutube,
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
@@ -1646,6 +1647,34 @@ const handleUploadSourceUrl = (url: string) => {
   openUploadConfirmDialog([], [url]);
 };
 
+const handleUploadSourceYoutube = async (urls: string[]) => {
+  if (!ensureDocumentKbReady()) return;
+  const targetKbId = kbId.value;
+  if (!targetKbId) {
+    MessagePlugin.error(t('error.missingKbId'));
+    return;
+  }
+  try {
+    const responseData: any = await createKnowledgeFromYoutube(targetKbId, {
+      urls,
+      tag_ids: selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined,
+    });
+    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
+      detail: { kbId: targetKbId },
+    }));
+    const data = responseData?.data ?? responseData;
+    const successCount = data?.success_count ?? 0;
+    const failedCount = data?.failed?.length ?? 0;
+    if (successCount === 0 && failedCount > 0) {
+      MessagePlugin.error(t('knowledgeBase.youtubeImportAllFailed'));
+    } else {
+      MessagePlugin.success(t('knowledgeBase.youtubeImportResult', { success: successCount, failed: failedCount }));
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.error?.message || error?.message || t('knowledgeBase.urlImportFailed'));
+  }
+};
+
 const handleManualCreate = () => {
   if (!ensureDocumentKbReady()) return;
   uiStore.openManualEditor({
@@ -2333,7 +2362,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
                       :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
-                      @url="handleUploadSourceUrl" @manual="handleManualCreate" />
+                      @url="handleUploadSourceUrl" @youtube="handleUploadSourceYoutube" @manual="handleManualCreate" />
                   </div>
                 </div>
               </div>

@@ -62,6 +62,26 @@
         <div class="url-input-tip">{{ t('knowledgeBase.urlTip') }}</div>
       </div>
     </t-dialog>
+
+    <t-dialog
+      v-model:visible="youtubeDialogVisible"
+      :header="t('knowledgeBase.importYoutubeTitle')"
+      :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
+      :cancel-btn="{ content: t('common.cancel') }"
+      width="520px"
+      @confirm="handleYoutubeDialogConfirm"
+      @cancel="handleYoutubeDialogCancel"
+    >
+      <div class="url-import-form">
+        <div class="url-input-label">{{ t('knowledgeBase.youtubeUrlsLabel') }}</div>
+        <t-textarea
+          v-model="youtubeInputValue"
+          :placeholder="t('knowledgeBase.youtubeUrlsPlaceholder')"
+          :autosize="{ minRows: 4, maxRows: 10 }"
+        />
+        <div class="url-input-tip">{{ t('knowledgeBase.youtubeUrlsTip') }}</div>
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -69,8 +89,9 @@
 import { ref, computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { AddIcon, FileAddIcon, UploadIcon, FolderAddIcon, LinkIcon, EditIcon } from 'tdesign-icons-vue-next'
+import { AddIcon, FileAddIcon, UploadIcon, FolderAddIcon, LinkIcon, LogoYoutubeIcon, EditIcon } from 'tdesign-icons-vue-next'
 import { filterUploadFiles } from '../utils/uploadSources'
+import { parseYoutubeUrlsInput } from '../utils/youtubeImport'
 
 const props = withDefaults(defineProps<{
   acceptFileTypes?: string
@@ -96,6 +117,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   files: [files: File[]]
   url: [url: string]
+  youtube: [urls: string[]]
   manual: []
 }>()
 
@@ -105,6 +127,8 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const urlDialogVisible = ref(false)
 const urlInputValue = ref('')
+const youtubeDialogVisible = ref(false)
+const youtubeInputValue = ref('')
 
 const tooltipText = computed(() => props.tooltip || t('knowledgeBase.addDocument'))
 
@@ -133,6 +157,11 @@ const dropdownOptions = computed(() => {
       value: 'importURL',
       prefixIcon: () => h(LinkIcon, sourceIconProps),
     },
+    {
+      content: t('knowledgeBase.importYoutube'),
+      value: 'importYoutube',
+      prefixIcon: () => h(LogoYoutubeIcon, sourceIconProps),
+    },
   ]
   if (props.includeManual) {
     options.push({
@@ -155,6 +184,10 @@ const handleActionSelect = (data: { value: string }) => {
     case 'importURL':
       urlInputValue.value = ''
       urlDialogVisible.value = true
+      break
+    case 'importYoutube':
+      youtubeInputValue.value = ''
+      youtubeDialogVisible.value = true
       break
     case 'manualCreate':
       emit('manual')
@@ -221,6 +254,25 @@ const handleUrlDialogConfirm = () => {
 const handleUrlDialogCancel = () => {
   urlDialogVisible.value = false
   urlInputValue.value = ''
+}
+
+const handleYoutubeDialogConfirm = () => {
+  const { urls, invalidLines } = parseYoutubeUrlsInput(youtubeInputValue.value)
+  if (urls.length === 0) {
+    MessagePlugin.warning(t('knowledgeBase.youtubeUrlsRequired'))
+    return
+  }
+  if (invalidLines.length > 0) {
+    MessagePlugin.warning(t('knowledgeBase.youtubeInvalidLines', { count: invalidLines.length }))
+  }
+  youtubeDialogVisible.value = false
+  youtubeInputValue.value = ''
+  emit('youtube', urls)
+}
+
+const handleYoutubeDialogCancel = () => {
+  youtubeDialogVisible.value = false
+  youtubeInputValue.value = ''
 }
 
 const openUrlDialog = () => {
