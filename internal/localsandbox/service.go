@@ -52,7 +52,7 @@ func NewService(
 		resolver: resolver,
 		builder:  builder,
 		modes:    modes,
-		shell:    []string{"/bin/bash", "-lc"},
+		shell:    []string{"/bin/bash", "--noprofile", "--norc", "-c"},
 		roots:    newRootLocks(),
 	}
 }
@@ -172,9 +172,13 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	defer func() { _ = prep.Close() }()
 
 	argv := append(append([]string(nil), s.shell...), req.Command)
+	var extraPATH []string
+	if s.builder != nil {
+		extraPATH = s.builder.ToolchainBins()
+	}
 	proc, err := s.backend.Spawn(runCtx, prep, Command{
 		Argv: argv,
-		Env:  req.Env,
+		Env:  BuildCommandEnv(req.Env, extraPATH),
 		Cwd:  cwd,
 	})
 	if err != nil {

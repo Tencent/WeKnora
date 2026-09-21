@@ -393,6 +393,40 @@ func TestServiceRunFailsWhenBackendUnavailable(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnsupportedPlatform)
 }
 
+func TestServiceRunUsesNonLoginShell(t *testing.T) {
+	backend := &fakeBackend{exit: ExitStatus{Code: 0}}
+	svc := serviceFixture(t, backend, ModeAuto)
+	_, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "echo hi"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"/bin/bash", "--noprofile", "--norc", "-c", "echo hi"}, backend.spawnCmd.Argv)
+}
+
+func TestServiceRunDoesNotPassHostSecrets(t *testing.T) {
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "super-secret")
+	t.Setenv("GITHUB_TOKEN", "gho_secret")
+	backend := &fakeBackend{exit: ExitStatus{Code: 0}}
+	svc := serviceFixture(t, backend, ModeAuto)
+
+	_, err := svc.Run(context.Background(), RunRequest{
+		SessionID: "s1",
+		Command:   "printenv",
+		Env:       map[string]string{"FOO": "bar"},
+	})
+	require.NoError(t, err)
+	joined := strings.Join(envMapToSlice(backend.spawnCmd.Env), "\n")
+	require.Contains(t, joined, "FOO=bar")
+	require.NotContains(t, joined, "super-secret")
+	require.NotContains(t, joined, "GITHUB_TOKEN")
+}
+
+func envMapToSlice(env map[string]string) []string {
+	out := make([]string, 0, len(env))
+	for k, v := range env {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
 func TestPreviewCommandMasksInlineAssignments(t *testing.T) {
 	got := previewCommand(`export TOKEN="sk-secret"; FOO=bare ./run --model cogview-4`)
 	require.NotContains(t, got, "sk-secret")

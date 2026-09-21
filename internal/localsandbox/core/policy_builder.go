@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -88,13 +89,23 @@ var homeReadableNames = []string{
 	".sdkman", ".volta", ".yarn",
 }
 
-// shellStartupNames are the files a login shell reads. Service runs commands
-// through `bash -lc`, and this is where per-user toolchains put themselves on
-// PATH, so denying them would undo homeReadableNames.
-var shellStartupNames = []string{
-	".profile", ".bash_profile", ".bashrc", ".zshenv", ".zprofile",
-	".zshrc", ".zlogin", ".inputrc",
+// toolchainBinNames are prepended onto PATH so the agent can run per-user
+// toolchains without sourcing shell rc files (those files often hold API keys).
+var toolchainBinNames = []string{
+	".cargo/bin", ".local/bin", ".deno/bin", ".bun/bin",
+	".pyenv/shims", ".rbenv/shims", ".asdf/shims", ".yarn/bin",
 }
+
+// broadWorkspaceRoots cannot be a workspace or a Relax write grant: they
+// would re-open every user, every volume, or the whole system prefix.
+var broadWorkspaceRoots = []string{
+	"/Users", "/Volumes", "/private", "/tmp", "/var", "/etc",
+	"/System", "/Library", "/opt", "/home",
+}
+
+// extraPrivateRoots tighten Seatbelt's blanket file-read* on darwin: home
+// alone still leaves /Users/<other> and /Volumes readable.
+var extraPrivateRoots = []string{"/Users", "/Volumes"}
 
 // platformReadRoots are extra readable paths for Windows / PathGuard.
 // Darwin Seatbelt ignores them for availability: the base profile already
@@ -125,6 +136,9 @@ func NewPolicyBuilder(homeDir, appDataDir string) *PolicyBuilder {
 func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 	if mode == ModeFull {
 		return Policy{}, ErrFullAccessHasNoPolicy
+	}
+	if err := b.rejectBroadWorkspace(ws.Root); err != nil {
+		return Policy{}, err
 	}
 
 	p := Policy{
@@ -162,10 +176,21 @@ func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 // privateRoots denies the user's home. Everything the agent legitimately
 // needs inside it comes back through readableRoots.
 func (b *PolicyBuilder) privateRoots() []string {
-	if b.homeDir == "" || b.homeDir == string(filepath.Separator) {
-		return nil
+	var roots []string
+	if b.homeDir != "" && b.homeDir != string(filepath.Separator) {
+		roots = append(roots, b.homeDir)
 	}
-	return []string{b.homeDir}
+	for _, extra := range extraPrivateRoots {
+		cleaned := filepath.Clean(extra)
+		if !filepath.IsAbs(cleaned) || isFilesystemRoot(cleaned) {
+			continue
+		}
+		if samePath(cleaned, b.homeDir) {
+			continue
+		}
+		roots = append(roots, cleaned)
+	}
+	return roots
 }
 
 func (b *PolicyBuilder) readableRoots(ws Workspace) []string {
@@ -174,10 +199,67 @@ func (b *PolicyBuilder) readableRoots(ws Workspace) []string {
 	for _, name := range homeReadableNames {
 		roots = append(roots, filepath.Join(b.homeDir, filepath.FromSlash(name)))
 	}
-	for _, name := range shellStartupNames {
-		roots = append(roots, filepath.Join(b.homeDir, name))
-	}
 	return roots
+}
+
+// ToolchainBins returns existing per-user and platform toolchain directories
+// that should be prepended to PATH. It is the substitute for sourcing rc files.
+func (b *PolicyBuilder) ToolchainBins() []string {
+	var out []string
+	for _, name := range toolchainBinNames {
+		p := filepath.Join(b.homeDir, filepath.FromSlash(name))
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			out = append(out, p)
+		}
+	}
+	if matches, err := filepath.Glob(filepath.Join(b.homeDir, ".nvm", "versions", "node", "*", "bin")); err == nil {
+		for _, p := range matches {
+			if info, err := os.Stat(p); err == nil && info.IsDir() {
+				out = append(out, p)
+			}
+		}
+	}
+	for _, p := range []string{"/opt/homebrew/bin", "/usr/local/bin"} {
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (b *PolicyBuilder) rejectBroadWorkspace(root string) error {
+	root = filepath.Clean(root)
+	if root == "" || !filepath.IsAbs(root) {
+		return fmt.Errorf("%w: %q", ErrRelativePath, root)
+	}
+	if isFilesystemRoot(root) {
+		return fmt.Errorf("%w: %q", ErrFilesystemRoot, root)
+	}
+	if b.homeDir != "" && b.homeDir != string(filepath.Separator) {
+		home := filepath.Clean(b.homeDir)
+		if PathUnder(home, root) {
+			return fmt.Errorf("%w: %q covers the home directory", ErrWorkspaceTooBroad, root)
+		}
+		if samePath(root, filepath.Join(home, "Library")) {
+			return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, root)
+		}
+	}
+	for _, wide := range broadWorkspaceRoots {
+		if !filepath.IsAbs(wide) {
+			continue
+		}
+		if samePath(root, filepath.Clean(wide)) {
+			return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, root)
+		}
+	}
+	return nil
+}
+
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return PathUnder(a, b) && PathUnder(b, a)
 }
 
 func (b *PolicyBuilder) denyRead() []string {
@@ -208,6 +290,9 @@ func (b *PolicyBuilder) Relax(base Policy, g Grant) (Policy, error) {
 
 	if g.WritePath != "" {
 		path := filepath.Clean(g.WritePath)
+		if err := b.rejectBroadWorkspace(path); err != nil {
+			return Policy{}, err
+		}
 		for _, deny := range base.DenyRead {
 			if PathUnder(path, deny) {
 				return Policy{}, fmt.Errorf(

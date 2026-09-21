@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -133,10 +135,12 @@ func sanitizeSegment(id string) string {
 			b.WriteRune('-')
 		}
 	}
-	if b.Len() == 0 {
-		return "session"
+	visible := b.String()
+	if visible == "" {
+		visible = "session"
 	}
-	return b.String()
+	sum := sha256.Sum256([]byte(id))
+	return visible + "-" + hex.EncodeToString(sum[:4])
 }
 
 func (r *workspaceResolver) existingSessionDir(seg string) (string, bool) {

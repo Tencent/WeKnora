@@ -120,6 +120,14 @@ func TestSeatbeltDeniesRecreatingProtectedDirectory(t *testing.T) {
 	require.NotEqual(t, 0, status.Code, out)
 }
 
+func TestSeatbeltDeniesSymlinkEscapeToSecrets(t *testing.T) {
+	backend, p, base := darwinFixture(t)
+	status, out := runSandboxed(t, backend, p,
+		`ln -s `+filepath.Join(base, "secrets", "note.txt")+` ./stolen && cat ./stolen`)
+	require.NotEqual(t, 0, status.Code, out)
+	require.NotContains(t, out, "KEY")
+}
+
 func TestSeatbeltDeniesReadingSecrets(t *testing.T) {
 	backend, p, base := darwinFixture(t)
 	status, out := runSandboxed(t, backend, p, `cat `+filepath.Join(base, "secrets", "note.txt"))
@@ -165,9 +173,10 @@ func TestSeatbeltPolicyFromBuilderRunsLoginShell(t *testing.T) {
 	require.NoError(t, err)
 	workspace := filepath.Join(home, "Documents", "WeKnora", "s1")
 	require.NoError(t, os.MkdirAll(workspace, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".profile"), []byte("# profile\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".bashrc"), []byte("# bashrc\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".zshrc"), []byte("# rc\n"), 0o644))
+	secretProfile := []byte("export AWS_SECRET_ACCESS_KEY=super-secret\n")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".profile"), secretProfile, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".bashrc"), []byte("export GITHUB_TOKEN=gho_secret\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export OPENAI_API_KEY=sk-secret\n"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".ssh"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".ssh", "id_rsa"), []byte("PRIVATEKEY"), 0o600))
 
@@ -179,14 +188,26 @@ func TestSeatbeltPolicyFromBuilderRunsLoginShell(t *testing.T) {
 		"HOME": home,
 		"PATH": os.Getenv("PATH"),
 	}
-	status, out := runSandboxedArgv(t, backend, p, []string{"/bin/bash", "-lc", `echo alive && echo w > ./f.txt && cat ./f.txt`}, env)
+	noProfile := []string{"/bin/bash", "--noprofile", "--norc", "-c"}
+	writeCmd := `echo alive && echo w > ./f.txt && cat ./f.txt`
+	status, out := runSandboxedArgv(t, backend, p, append(noProfile, writeCmd), env)
 	require.Equal(t, 0, status.Code, out)
 	require.Contains(t, out, "alive")
 	require.Contains(t, out, "w")
 
-	status, out = runSandboxedArgv(t, backend, p, []string{"/bin/bash", "-lc", `cat ` + filepath.Join(home, ".ssh", "id_rsa")}, env)
+	status, out = runSandboxedArgv(t, backend, p, append(noProfile, `cat `+filepath.Join(home, ".ssh", "id_rsa")), env)
 	require.NotEqual(t, 0, status.Code, out)
 	require.NotContains(t, out, "PRIVATEKEY")
+
+	status, out = runSandboxedArgv(t, backend, p, append(noProfile, `cat `+filepath.Join(home, ".zshrc")), env)
+	require.NotEqual(t, 0, status.Code, out)
+	require.NotContains(t, out, "sk-secret")
+
+	status, out = runSandboxedArgv(t, backend, p, append(noProfile, "printenv"), env)
+	require.Equal(t, 0, status.Code, out)
+	require.NotContains(t, out, "super-secret")
+	require.NotContains(t, out, "gho_secret")
+	require.NotContains(t, out, "sk-secret")
 }
 
 // Cancelling the spawn context after Wait must not SIGKILL the process group:
@@ -275,13 +296,18 @@ func TestSeatbeltDeniesWritingCredentialFileInsideWritableHome(t *testing.T) {
 	require.NoError(t, os.WriteFile(creds, []byte("SECRET"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(cargo, "config.toml"), []byte("ok\n"), 0o644))
 
-	builder := core.NewPolicyBuilder(home, filepath.Join(home, "Library", "App"))
-	p, err := builder.Build(core.ModeAuto, core.Workspace{
-		Kind:       core.WorkspaceProject,
-		Root:       home,
-		ProtectGit: true,
-	})
-	require.NoError(t, err)
+	p := core.Policy{
+		WritableRoots: []core.WritableRoot{{
+			Path:             home,
+			ReadOnlySubpaths: []string{filepath.Join(home, ".git")},
+		}},
+		ReadableRoots: []string{home, cargo},
+		PrivateRoots:  []string{home},
+		DenyRead:      []string{creds},
+		Network:       core.NetworkDenied,
+		Cwd:           home,
+	}
+	require.NoError(t, p.Validate())
 
 	status, out := runSandboxed(t, backend, p, `echo pwned > `+creds)
 	require.NotEqual(t, 0, status.Code, out)
@@ -305,13 +331,18 @@ func TestSeatbeltDeniesWritingAppDataInsideWritableHome(t *testing.T) {
 	prefs := filepath.Join(appData, "prefs.json")
 	require.NoError(t, os.WriteFile(prefs, []byte("keep"), 0o600))
 
-	builder := core.NewPolicyBuilder(home, appData)
-	p, err := builder.Build(core.ModeAuto, core.Workspace{
-		Kind:       core.WorkspaceProject,
-		Root:       home,
-		ProtectGit: true,
-	})
-	require.NoError(t, err)
+	p := core.Policy{
+		WritableRoots: []core.WritableRoot{{
+			Path:             home,
+			ReadOnlySubpaths: []string{filepath.Join(home, ".git")},
+		}},
+		ReadableRoots: []string{home},
+		PrivateRoots:  []string{home},
+		DenyRead:      []string{appData},
+		Network:       core.NetworkDenied,
+		Cwd:           home,
+	}
+	require.NoError(t, p.Validate())
 
 	status, out := runSandboxed(t, backend, p, `echo pwned > `+prefs)
 	require.NotEqual(t, 0, status.Code, out)

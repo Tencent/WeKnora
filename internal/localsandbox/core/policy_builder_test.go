@@ -141,14 +141,15 @@ func TestBuildReAllowsWorkspaceInsidePrivateHome(t *testing.T) {
 
 // Per-user toolchains (nvm, pyenv, cargo) and the login shell's startup files
 // live in home. Denying them would leave the agent unable to run node at all.
-func TestBuildReAllowsToolchainsAndShellStartupFiles(t *testing.T) {
+func TestBuildReAllowsToolchainsButNotShellStartupFiles(t *testing.T) {
 	b, ws := builderFixture(t)
 	p, err := b.Build(ModeAuto, ws)
 	require.NoError(t, err)
 
 	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".nvm"))
 	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".cargo"))
-	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".zshrc"))
+	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".zshrc"))
+	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".profile"))
 	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".cache"))
 	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".local"))
 	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, "Library", "Caches"))
@@ -213,18 +214,50 @@ func TestRelaxRefusesToGrantDeniedPath(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestBuildDeniesAppDataWhenWorkspaceIsHome(t *testing.T) {
+func TestBuildRefusesHomeAsWorkspace(t *testing.T) {
 	b, ws := builderFixture(t)
 	ws.Root = b.homeDir
 	ws.ProtectGit = true
 
+	_, err := b.Build(ModeAuto, ws)
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
+}
+
+func TestBuildRefusesUsersAsWorkspace(t *testing.T) {
+	if !filepath.IsAbs("/Users") {
+		t.Skip("not a unix path layout")
+	}
+	b, _ := builderFixture(t)
+	_, err := b.Build(ModeAuto, Workspace{Kind: WorkspaceProject, Root: "/Users"})
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
+}
+
+func TestBuildRefusesHomeLibraryAsWorkspace(t *testing.T) {
+	b, ws := builderFixture(t)
+	ws.Root = filepath.Join(b.homeDir, "Library")
+	_, err := b.Build(ModeAuto, ws)
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
+}
+
+func TestBuildMakesOtherUsersAndVolumesPrivate(t *testing.T) {
+	b, ws := builderFixture(t)
 	p, err := b.Build(ModeAuto, ws)
 	require.NoError(t, err)
-	require.Contains(t, p.DenyRead, b.appDataDir)
-	for _, deny := range p.DenyRead {
-		require.False(t, PathUnder(ws.Root, deny),
-			"home workspace %q must not be covered by deny-read %q", ws.Root, deny)
+	if filepath.IsAbs("/Users") {
+		require.Contains(t, p.PrivateRoots, "/Users")
 	}
+	if filepath.IsAbs("/Volumes") {
+		require.Contains(t, p.PrivateRoots, "/Volumes")
+	}
+}
+
+func TestRelaxRefusesHomeWriteGrant(t *testing.T) {
+	b, ws := builderFixture(t)
+	base, err := b.Build(ModeAuto, ws)
+	require.NoError(t, err)
+
+	_, err = b.Relax(base, Grant{WritePath: b.homeDir})
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
 }
 
 func TestBuildRefusesWorkspaceInsideAppData(t *testing.T) {

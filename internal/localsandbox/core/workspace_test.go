@@ -142,6 +142,12 @@ func TestResolveSessionWorkspaceUsesFullSessionID(t *testing.T) {
 	require.Contains(t, b.Root, "session-abcdef999999")
 }
 
+func TestSanitizeSegmentDistinguishesCollidingIDs(t *testing.T) {
+	require.NotEqual(t, sanitizeSegment("foo/bar"), sanitizeSegment("foo-bar"))
+	require.NotEqual(t, sanitizeSegment("!!!"), sanitizeSegment("@@@"))
+	require.Equal(t, sanitizeSegment("sess-keep"), sanitizeSegment("sess-keep"))
+}
+
 func TestResolveSessionWorkspaceIsOwnerPrivate(t *testing.T) {
 	ws, err := workspaceFixture(t, "").Resolve(context.Background(), "sess-mode")
 	require.NoError(t, err)

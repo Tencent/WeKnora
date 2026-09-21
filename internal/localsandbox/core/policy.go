@@ -72,6 +72,11 @@ var (
 	ErrRelativePath = errors.New("localsandbox: policy paths must be absolute")
 	// ErrDenyReadCoversRoot is returned when a deny-read entry covers a writable root.
 	ErrDenyReadCoversRoot = errors.New("localsandbox: deny-read entry covers a writable root")
+	// ErrWorkspaceTooBroad is returned when a workspace or grant is $HOME,
+	// an ancestor of $HOME, or another well-known wide root. Sandboxing
+	// those paths would re-open the private home (or every user) as the
+	// workspace and collapse the read boundary to a credential denylist.
+	ErrWorkspaceTooBroad = errors.New("localsandbox: workspace is too broad to sandbox")
 )
 
 // caseInsensitivePaths reports whether path comparison must ignore case.

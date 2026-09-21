@@ -211,33 +211,13 @@ func resolveExisting(path string) (string, error) {
 	return filepath.Join(resolvedParent, filepath.Base(cleaned)), nil
 }
 
-var inheritedEnvNames = map[string]struct{}{
-	"PATH": {}, "HOME": {}, "USER": {}, "LOGNAME": {}, "SHELL": {},
-	"TERM": {}, "LANG": {}, "LC_ALL": {}, "LC_CTYPE": {}, "LC_MESSAGES": {},
-	"TZ": {},
-}
-
 func mergedEnv(env map[string]string) []string {
-	// Nil means a filtered inherit. An empty map would otherwise wipe PATH
-	// and break anything that is not an absolute path.
+	// Nil is a direct-Spawn fallback: filtered inherit. Service always
+	// passes a map already run through BuildCommandEnv.
 	if env == nil {
-		return filterInheritedEnv(os.Environ())
+		return core.FilterInheritedEnv(os.Environ())
 	}
-	return envSlice(env)
-}
-
-func filterInheritedEnv(environ []string) []string {
-	out := make([]string, 0, len(inheritedEnvNames))
-	for _, kv := range environ {
-		name, _, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		if _, allowed := inheritedEnvNames[name]; allowed || strings.HasPrefix(name, "LC_") {
-			out = append(out, kv)
-		}
-	}
-	return out
+	return core.EnvSlice(env)
 }
 
 func withSandboxTemp(env []string, cwd string, explicit map[string]string) []string {
@@ -262,14 +242,6 @@ func withSandboxTemp(env []string, cwd string, explicit map[string]string) []str
 		"TMP="+cwd,
 		"TEMP="+cwd,
 	)
-}
-
-func envSlice(env map[string]string) []string {
-	out := make([]string, 0, len(env))
-	for k, v := range env {
-		out = append(out, k+"="+v)
-	}
-	return out
 }
 
 type seatbeltProcess struct {
@@ -308,17 +280,23 @@ func (p *seatbeltProcess) watchContext(ctx context.Context) {
 // descendants running after a timeout.
 func (p *seatbeltProcess) Kill() error {
 	p.mu.Lock()
-	if p.reaped {
+	// ProcessState is written before cmd.Wait returns, so this closes the
+	// window between Wait returning and reaped being set.
+	if p.reaped || p.cmd.ProcessState != nil {
 		p.mu.Unlock()
 		return nil
 	}
 	p.killed = true
+	pid := 0
+	if p.cmd.Process != nil {
+		pid = p.cmd.Process.Pid
+	}
 	p.mu.Unlock()
 
-	if p.cmd.Process == nil {
+	if pid == 0 {
 		return nil
 	}
-	if err := syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL); err != nil &&
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil &&
 		err != syscall.ESRCH {
 		return fmt.Errorf("localsandbox: kill process group: %w", err)
 	}

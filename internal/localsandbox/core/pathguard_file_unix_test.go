@@ -72,6 +72,45 @@ func TestPathGuardReadFileDoesNotFollowSymlinkEscape(t *testing.T) {
 	require.ErrorIs(t, err, ErrPathDenied)
 }
 
+func TestPathGuardLstatDoesNotFollowReplacedParent(t *testing.T) {
+	root, g := guardFixture(t)
+	inner := filepath.Join(root, "out")
+	require.NoError(t, os.Mkdir(inner, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(inner, "a.txt"), []byte("in"), 0o644))
+	secrets := filepath.Join(filepath.Dir(root), "secrets")
+	require.NoError(t, os.WriteFile(filepath.Join(secrets, "a.txt"), []byte("KEY"), 0o644))
+
+	info, err := g.Lstat(filepath.Join(inner, "a.txt"))
+	require.NoError(t, err)
+	require.Equal(t, int64(2), info.Size())
+
+	require.NoError(t, os.RemoveAll(inner))
+	require.NoError(t, os.Symlink(secrets, inner))
+
+	_, err = g.Lstat(filepath.Join(root, "out", "a.txt"))
+	require.ErrorIs(t, err, ErrPathDenied)
+}
+
+func TestPathGuardReadFileReadableFileRoot(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	root := filepath.Join(base, "My Project")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	rc := filepath.Join(base, "notes.txt")
+	require.NoError(t, os.WriteFile(rc, []byte("ok"), 0o644))
+
+	p := Policy{
+		WritableRoots: []WritableRoot{{Path: root}},
+		ReadableRoots: []string{rc},
+		Cwd:           root,
+	}
+	require.NoError(t, p.Validate())
+	g := NewPathGuard(p)
+	got, err := g.ReadFile(rc)
+	require.NoError(t, err)
+	require.Equal(t, []byte("ok"), got)
+}
+
 func TestPathGuardLstatReportsFinalSymlink(t *testing.T) {
 	root, g := guardFixture(t)
 	target := filepath.Join(root, "real.txt")

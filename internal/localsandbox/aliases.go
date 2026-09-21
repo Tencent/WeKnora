@@ -90,7 +90,14 @@ var (
 	ErrApprovalModeNotShipped = core.ErrApprovalModeNotShipped
 	// ErrPathDenied is returned for every rejected path.
 	ErrPathDenied = core.ErrPathDenied
+	// ErrWorkspaceTooBroad is returned when a workspace or grant is too wide.
+	ErrWorkspaceTooBroad = core.ErrWorkspaceTooBroad
 )
+
+// BuildCommandEnv filters the host environment and overlays explicit vars.
+func BuildCommandEnv(explicit map[string]string, extraPATH []string) map[string]string {
+	return core.BuildCommandEnv(explicit, extraPATH)
+}
 
 // ParseApprovalMode normalizes a stored preference. Unknown values become
 // Auto; known-but-unshipped modes are returned unchanged so Service can refuse

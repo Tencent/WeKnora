@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -79,18 +78,31 @@ func (g *PathGuard) lstatRel(root, rel, orig string) (os.FileInfo, error) {
 	if err != nil {
 		return nil, mapWalkErr(orig, err)
 	}
-	_ = unix.Close(fd)
-	return os.Lstat(filepath.Join(root, rel))
+	defer func() { _ = unix.Close(fd) }()
+	name := parts[len(parts)-1]
+	var st unix.Stat_t
+	if err := unix.Fstatat(fd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return nil, mapWalkErr(orig, err)
+	}
+	return fileInfoFromUnixStat(name, st), nil
 }
 
 func walkOpen(root, rel string, mkdir bool, lastFlags int, lastPerm uint32) (int, error) {
+	parts := relParts(rel)
+	if len(parts) == 0 {
+		flags := unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+		if !mkdir && lastFlags&unix.O_DIRECTORY == 0 {
+			flags = lastFlags | unix.O_NOFOLLOW | unix.O_CLOEXEC
+		}
+		fd, err := unix.Open(root, flags, lastPerm)
+		if err != nil {
+			return -1, mapRootOpenErr(root, err)
+		}
+		return fd, nil
+	}
 	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return -1, mapRootOpenErr(root, err)
-	}
-	parts := relParts(rel)
-	if len(parts) == 0 {
-		return fd, nil
 	}
 	for i, part := range parts {
 		if part == "" || part == "." {
