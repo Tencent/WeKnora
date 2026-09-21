@@ -376,6 +376,24 @@ func (r *chunkRepository) ListChunksByParentIDs(
 	return chunks, nil
 }
 
+// ListChunksByParentIDsOnly retrieves chunks by parent IDs without tenant
+// filter, for expansions whose parent IDs come from org-shared KB retrieval
+// results owned by another workspace (#3342).
+func (r *chunkRepository) ListChunksByParentIDsOnly(
+	ctx context.Context, parentIDs []string,
+) ([]*types.Chunk, error) {
+	if len(parentIDs) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("parent_chunk_id IN ?", parentIDs).
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // UpdateChunk updates a chunk using GORM Save, which updates ALL fields
 // except SeqID (auto-increment, must not be overwritten).
 // Make sure the chunk object is complete (e.g., fetched from DB) before calling this method.
