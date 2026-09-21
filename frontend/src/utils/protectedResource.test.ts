@@ -155,7 +155,10 @@ test('completion clears a settled failure cooldown without waiting for another r
 test('a settled 404 recovers on the same DOM node without a Markdown change', async (t) => {
   hydrationEnvironment(t)
   const image = imageRoot('local://2/exports/settled-404.png')
-  const paragraph = { tagName: 'P', textContent: '', children: [image.img], style: { display: '' } }
+  const paragraph = {
+    tagName: 'P', textContent: '', children: [image.img], style: { display: '' },
+    setAttribute() {}, removeAttribute() {},
+  }
   image.img.parentElement = paragraph
   let calls = 0
   globalThis.fetch = async () => ++calls === 1 ? new Response(null, { status: 404 }) : pngResponse()

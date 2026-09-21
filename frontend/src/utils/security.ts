@@ -536,8 +536,12 @@ function hideMissingProtectedImages(root: ParentNode, sourceURL: string, request
       });
     }
     img.style.display = 'none';
+    img.setAttribute('data-protected-hidden', '1');
     const parent = hiddenProtectedImages.get(img)?.parent;
-    if (parent) parent.style.display = 'none';
+    if (parent) {
+      parent.style.display = 'none';
+      parent.setAttribute('data-protected-hidden', '1');
+    }
     img.dataset.authHydrated = '0';
   });
 }
@@ -547,7 +551,11 @@ function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, file: 
     const hidden = hiddenProtectedImages.get(img);
     if (hidden) {
       img.style.display = hidden.display;
-      if (hidden.parent) hidden.parent.style.display = hidden.parentDisplay;
+      img.removeAttribute('data-protected-hidden');
+      if (hidden.parent) {
+        hidden.parent.style.display = hidden.parentDisplay;
+        hidden.parent.removeAttribute('data-protected-hidden');
+      }
       hiddenProtectedImages.delete(img);
     }
     if (!isRasterProtectedImage(file)) {

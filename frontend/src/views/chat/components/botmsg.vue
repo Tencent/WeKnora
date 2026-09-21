@@ -153,7 +153,8 @@ import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import { persistedAssistantId } from '@/utils/steerStreamFork';
-import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, clearProtectedFileFailureCache } from '@/utils/security';
+import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
+import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
 import {
     artifactIndexFromEventTarget,
     hydrateArtifactImages,
@@ -334,10 +335,6 @@ const protectedFileAccess = computed(() => {
     if (!props.sessionId || !messageId) return undefined;
     return { mode: 'message', sessionId: props.sessionId, messageId };
 });
-watch(protectedFileAccess, () => {
-    clearProtectedFileFailureCache();
-    nextTick(() => hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value));
-});
 
 const artifactRefLabels = computed(() => ({
     previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
@@ -401,15 +398,13 @@ const { displayed: typedAnswer } = useTypewriter(
 const answerFullyRendered = computed(() =>
     Boolean(props.session?.is_completed) && typedAnswer.value.length >= answerText.value.length
 );
+useProtectedImageRecovery(() => parentMd.value, () => protectedFileAccess.value,
+    () => !props.session?.isAgentMode && !props.session?.persistence_error && answerFullyRendered.value);
 
 watch(
     answerFullyRendered,
     (ready) => {
         if (!props.session?.isAgentMode) emit('render-complete-change', ready);
-        if (ready && !props.session?.isAgentMode) {
-            clearProtectedFileFailureCache();
-            nextTick(() => hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value));
-        }
     },
     { immediate: true },
 );

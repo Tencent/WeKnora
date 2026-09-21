@@ -1789,6 +1789,9 @@ func (h *Handler) completeQuickAnswerTurn(
 	if streamCtx == nil || streamCtx.assistantMessage == nil {
 		return
 	}
+	// A stop can cancel the generation context after the final answer event
+	// was queued. Preserve the streamed answer just as the Agent defer does.
+	ctx = context.WithoutCancel(ctx)
 	if streamCtx.eventBus != nil {
 		// MessageID is what handleComplete keys on. Leave FinalAnswer empty:
 		// KnowledgeQA already accumulated the answer on the message, and

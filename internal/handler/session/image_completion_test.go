@@ -22,6 +22,9 @@ type imageCompletionMessages struct {
 }
 
 func (s *imageCompletionMessages) UpdateMessage(ctx context.Context, message *types.Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s.beforeSave != nil {
 		s.beforeSave()
 	}
@@ -32,6 +35,29 @@ func (s *imageCompletionMessages) UpdateMessage(ctx context.Context, message *ty
 	snapshot := *message
 	s.saved = &snapshot
 	return nil
+}
+
+func TestQuickAnswerCompletionPersistsAfterGenerationCancellation(t *testing.T) {
+	messages := &imageCompletionMessages{}
+	stream := &imageCompletionStream{}
+	h := &Handler{messageService: messages, streamManager: stream}
+	bus := event.NewEventBus()
+	message := &types.Message{
+		ID: "m", SessionID: "s", Role: "assistant", Content: "already streamed answer", AgentTenantID: 2,
+	}
+	ctx, cancel := context.WithCancel(types.WithExecutionTenant(context.Background(), 1))
+	streamHandler := h.setupStreamHandler(ctx, "s", "m", "req", 1, time.Now(), message, bus)
+	cancel()
+	released := false
+	h.completeQuickAnswerTurn(ctx, &sseStreamContext{
+		eventBus: bus, streamHandler: streamHandler, assistantMessage: message,
+		releaseTurn: func() { released = true },
+	}, "", "")
+	require.NotNil(t, messages.saved)
+	require.Equal(t, "already streamed answer", messages.saved.Content)
+	require.Equal(t, uint64(1), messages.tenant)
+	require.True(t, released)
+	require.Equal(t, types.ResponseTypeComplete, stream.events[len(stream.events)-1].Type)
 }
 
 type imageCompletionStream struct {
