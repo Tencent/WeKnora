@@ -91,6 +91,18 @@ def _entries_from_info(info: dict) -> tuple[str, list[dict]]:
     }]
 
 
+_TRANSCRIPT_LANGUAGES = ["vi", "en"]
+
+
+def _fetch_transcript_items(video_id: str) -> list[dict]:
+    """Thin wrapper around youtube-transcript-api so tests can patch it."""
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    return YouTubeTranscriptApi.get_transcript(
+        video_id, languages=_TRANSCRIPT_LANGUAGES
+    )
+
+
 class YoutubeEnumerateParser(BaseParser):
     """Enumerates a YouTube URL (single video or playlist) without fetching
     transcripts. Used by the batch-import expansion step so a playlist can
@@ -122,4 +134,56 @@ class YoutubeEnumerateParser(BaseParser):
                 "youtube_kind": kind,
                 "youtube_videos": json.dumps(entries),
             },
+        )
+
+
+class YoutubeTranscriptParser(BaseParser):
+    """Fetches a single YouTube video's transcript as plain text (no
+    timestamps). Raises YoutubeParseError for playlist URLs — those must be
+    expanded first via YoutubeEnumerateParser (see the batch YouTube
+    ingestion endpoint).
+    """
+
+    def __init__(self, title: str = "", **kwargs):
+        self.title = title
+        super().__init__(file_name=title, **kwargs)
+
+    def parse_into_text(self, content: bytes) -> Document:
+        url = endecode.decode_bytes(content)
+
+        if is_playlist_url(url):
+            raise YoutubeParseError(
+                f"{url} is a playlist URL; use the YouTube batch import instead"
+            )
+
+        video_id = extract_video_id(url)
+        if not video_id:
+            raise YoutubeParseError(f"Could not resolve a video id for: {url}")
+
+        logger.info("Fetching YouTube transcript for video: %s", video_id)
+        try:
+            items = _fetch_transcript_items(video_id)
+        except Exception as e:
+            raise YoutubeParseError(
+                f"No transcript available for video {video_id}: {e}"
+            ) from e
+
+        text = " ".join(
+            item.get("text", "").strip() for item in items if item.get("text", "").strip()
+        )
+        if not text:
+            raise YoutubeParseError(f"Transcript for video {video_id} is empty")
+
+        title = self.title
+        if not title:
+            try:
+                info = _ytdlp_extract_info(url)
+                _, entries = _entries_from_info(info)
+                title = entries[0]["title"] if entries else video_id
+            except Exception:
+                title = video_id
+
+        return Document(
+            content=f"Source: {url}\n\n{text}",
+            metadata={"title": title, "youtube_video_id": video_id},
         )

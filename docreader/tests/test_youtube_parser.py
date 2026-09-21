@@ -5,6 +5,7 @@ from unittest.mock import patch
 from docreader.parser.youtube_parser import (
     YoutubeEnumerateParser,
     YoutubeParseError,
+    YoutubeTranscriptParser,
     extract_video_id,
     is_playlist_url,
     is_youtube_url,
@@ -104,6 +105,87 @@ class TestYoutubeEnumerateParser(unittest.TestCase):
             with self.assertRaises(YoutubeParseError):
                 parser.parse_into_text(
                     b"https://www.youtube.com/playlist?list=PL123"
+                )
+
+
+class TestYoutubeTranscriptParser(unittest.TestCase):
+    def test_playlist_url_raises_before_fetching(self):
+        from docreader.parser.youtube_parser import YoutubeTranscriptParser
+
+        parser = YoutubeTranscriptParser(title="")
+        with self.assertRaises(YoutubeParseError):
+            parser.parse_into_text(
+                b"https://www.youtube.com/playlist?list=PL123"
+            )
+
+    def test_no_video_id_raises(self):
+        from docreader.parser.youtube_parser import YoutubeTranscriptParser
+
+        parser = YoutubeTranscriptParser(title="")
+        with self.assertRaises(YoutubeParseError):
+            parser.parse_into_text(b"https://www.youtube.com/")
+
+    def test_successful_transcript_uses_given_title(self):
+        from docreader.parser.youtube_parser import YoutubeTranscriptParser
+
+        transcript_items = [
+            {"text": "Hello"},
+            {"text": "world."},
+        ]
+        parser = YoutubeTranscriptParser(title="Given Title")
+        with patch(
+            "docreader.parser.youtube_parser._fetch_transcript_items",
+            return_value=transcript_items,
+        ):
+            doc = parser.parse_into_text(
+                b"https://www.youtube.com/watch?v=abc123"
+            )
+        self.assertTrue(doc.is_valid())
+        self.assertIn("Hello world.", doc.content)
+        self.assertIn("https://www.youtube.com/watch?v=abc123", doc.content)
+        self.assertEqual(doc.metadata["title"], "Given Title")
+        self.assertEqual(doc.metadata["youtube_video_id"], "abc123")
+
+    def test_no_title_falls_back_to_ytdlp_lookup(self):
+        from docreader.parser.youtube_parser import YoutubeTranscriptParser
+
+        parser = YoutubeTranscriptParser(title="")
+        with patch(
+            "docreader.parser.youtube_parser._fetch_transcript_items",
+            return_value=[{"text": "content"}],
+        ), patch(
+            "docreader.parser.youtube_parser._ytdlp_extract_info",
+            return_value={"_type": "video", "id": "abc123", "title": "Fetched Title"},
+        ):
+            doc = parser.parse_into_text(
+                b"https://www.youtube.com/watch?v=abc123"
+            )
+        self.assertEqual(doc.metadata["title"], "Fetched Title")
+
+    def test_empty_transcript_raises(self):
+        from docreader.parser.youtube_parser import YoutubeTranscriptParser
+
+        parser = YoutubeTranscriptParser(title="t")
+        with patch(
+            "docreader.parser.youtube_parser._fetch_transcript_items",
+            return_value=[{"text": "   "}],
+        ):
+            with self.assertRaises(YoutubeParseError):
+                parser.parse_into_text(
+                    b"https://www.youtube.com/watch?v=abc123"
+                )
+
+    def test_transcript_fetch_error_becomes_parse_error(self):
+        from docreader.parser.youtube_parser import YoutubeTranscriptParser
+
+        parser = YoutubeTranscriptParser(title="t")
+        with patch(
+            "docreader.parser.youtube_parser._fetch_transcript_items",
+            side_effect=RuntimeError("no captions"),
+        ):
+            with self.assertRaises(YoutubeParseError):
+                parser.parse_into_text(
+                    b"https://www.youtube.com/watch?v=abc123"
                 )
 
 
