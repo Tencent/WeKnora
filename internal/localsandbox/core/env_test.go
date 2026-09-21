@@ -46,3 +46,16 @@ func TestBuildCommandEnvOverlaysExplicitAndPrependsPATH(t *testing.T) {
 	require.True(t, strings.HasPrefix(got["PATH"], "/opt/tools/bin"+string(os.PathListSeparator)))
 	require.Contains(t, got["PATH"], "/bin")
 }
+
+func TestBuildCommandEnvDropsLoaderInjectionFromExplicit(t *testing.T) {
+	got := BuildCommandEnv(map[string]string{
+		"AWS_SECRET_ACCESS_KEY": "skill-key",
+		"DYLD_INSERT_LIBRARIES": "/tmp/evil.dylib",
+		"LD_PRELOAD":            "/tmp/evil.so",
+	}, nil)
+	require.Equal(t, "skill-key", got["AWS_SECRET_ACCESS_KEY"])
+	_, hasDYLD := got["DYLD_INSERT_LIBRARIES"]
+	require.False(t, hasDYLD)
+	_, hasPreload := got["LD_PRELOAD"]
+	require.False(t, hasPreload)
+}

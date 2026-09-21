@@ -95,6 +95,7 @@ var (
 )
 
 // BuildCommandEnv filters the host environment and overlays explicit vars.
+// Adapters must not pass os.Environ(); skill keys belong in the explicit map.
 func BuildCommandEnv(explicit map[string]string, extraPATH []string) map[string]string {
 	return core.BuildCommandEnv(explicit, extraPATH)
 }

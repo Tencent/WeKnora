@@ -351,6 +351,50 @@ func TestSeatbeltDeniesWritingAppDataInsideWritableHome(t *testing.T) {
 	require.Equal(t, "keep", string(got))
 }
 
+// file-read* is blanket; /tmp and /var/folders must stay behind PrivateRoots
+// or the agent can read other apps' temp tokens. Workspace under a temp
+// fixture must still be writable after those denials.
+func TestSeatbeltDeniesReadingTmpAndVarFolders(t *testing.T) {
+	backend, err := New()
+	require.NoError(t, err)
+	require.NoError(t, backend.Available())
+
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	workspace := filepath.Join(home, "Documents", "WeKnora", "s1")
+	require.NoError(t, os.MkdirAll(workspace, 0o755))
+
+	tmpSecret := filepath.Join("/tmp", "weknora-seatbelt-"+t.Name())
+	require.NoError(t, os.WriteFile(tmpSecret, []byte("TMPSECRET"), 0o600))
+	t.Cleanup(func() { _ = os.Remove(tmpSecret) })
+
+	vfSecret := filepath.Join(os.TempDir(), "weknora-seatbelt-"+t.Name())
+	require.NoError(t, os.WriteFile(vfSecret, []byte("VFSECRET"), 0o600))
+	t.Cleanup(func() { _ = os.Remove(vfSecret) })
+
+	builder := core.NewPolicyBuilder(home, filepath.Join(home, "Library", "App"))
+	p, err := builder.Build(core.ModeAuto, core.Workspace{Kind: core.WorkspaceSession, Root: workspace})
+	require.NoError(t, err)
+
+	env := map[string]string{
+		"HOME": home,
+		"PATH": os.Getenv("PATH"),
+	}
+	noProfile := []string{"/bin/bash", "--noprofile", "--norc", "-c"}
+
+	status, out := runSandboxedArgv(t, backend, p, append(noProfile, `echo ok > ./f.txt && cat ./f.txt`), env)
+	require.Equal(t, 0, status.Code, out)
+	require.Contains(t, out, "ok")
+
+	status, out = runSandboxedArgv(t, backend, p, append(noProfile, `cat `+tmpSecret), env)
+	require.NotEqual(t, 0, status.Code, out)
+	require.NotContains(t, out, "TMPSECRET")
+
+	status, out = runSandboxedArgv(t, backend, p, append(noProfile, `cat `+vfSecret), env)
+	require.NotEqual(t, 0, status.Code, out)
+	require.NotContains(t, out, "VFSECRET")
+}
+
 func TestSeatbeltDeniesNetwork(t *testing.T) {
 	backend, p, _ := darwinFixture(t)
 	status, out := runSandboxed(t, backend, p,

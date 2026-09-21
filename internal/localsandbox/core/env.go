@@ -13,6 +13,13 @@ var inheritedEnvNames = map[string]struct{}{
 	"TZ": {},
 }
 
+// blockedExplicitEnvNames are never taken from RunRequest.Env. Skill keys
+// (AWS_*, *_TOKEN) must still overlay; these are loader-injection knobs.
+var blockedExplicitEnvNames = map[string]struct{}{
+	"DYLD_INSERT_LIBRARIES": {}, "DYLD_LIBRARY_PATH": {}, "DYLD_FRAMEWORK_PATH": {},
+	"LD_PRELOAD": {}, "LD_LIBRARY_PATH": {},
+}
+
 // FilterInheritedEnv keeps only the allowlisted names from a raw environ.
 func FilterInheritedEnv(environ []string) []string {
 	out := make([]string, 0, len(inheritedEnvNames))
@@ -41,10 +48,17 @@ func EnvSlice(env map[string]string) []string {
 // inherit, overlay the caller's explicit vars, then prepend extra PATH
 // entries (toolchain bins). A nil or empty explicit map both mean "no extra
 // vars" — they must not wipe PATH.
+//
+// Explicit keys are the caller's responsibility: this is how skill credentials
+// reach the child. Adapters must not pass os.Environ() here. Loader-injection
+// names are dropped even when explicit.
 func BuildCommandEnv(explicit map[string]string, extraPATH []string) map[string]string {
 	out := environToMap(FilterInheritedEnv(os.Environ()))
 	for k, v := range explicit {
 		if k == "" {
+			continue
+		}
+		if _, blocked := blockedExplicitEnvNames[k]; blocked {
 			continue
 		}
 		out[k] = v

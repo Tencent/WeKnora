@@ -148,6 +148,7 @@ func TestBuildReAllowsToolchainsButNotShellStartupFiles(t *testing.T) {
 
 	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".nvm"))
 	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".cargo"))
+	require.Contains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".local", "bin"))
 	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".zshrc"))
 	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".profile"))
 	require.NotContains(t, p.ReadableRoots, filepath.Join(b.homeDir, ".cache"))
@@ -251,12 +252,67 @@ func TestBuildMakesOtherUsersAndVolumesPrivate(t *testing.T) {
 	}
 }
 
+func TestBuildMakesTempDirsPrivate(t *testing.T) {
+	b, ws := builderFixture(t)
+	p, err := b.Build(ModeAuto, ws)
+	require.NoError(t, err)
+	for _, root := range []string{"/tmp", "/private/tmp", "/var", "/private/var"} {
+		if !filepath.IsAbs(root) {
+			continue
+		}
+		require.Contains(t, p.PrivateRoots, filepath.Clean(root), root)
+	}
+}
+
+func TestBuildRefusesPrivateVarAsWorkspace(t *testing.T) {
+	if !filepath.IsAbs("/private/var") {
+		t.Skip("not a unix path layout")
+	}
+	b, _ := builderFixture(t)
+	_, err := b.Build(ModeAuto, Workspace{Kind: WorkspaceProject, Root: "/private/var"})
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
+}
+
+func TestBuildRefusesVarFoldersAsWorkspace(t *testing.T) {
+	if !filepath.IsAbs("/var/folders") {
+		t.Skip("not a unix path layout")
+	}
+	b, _ := builderFixture(t)
+	_, err := b.Build(ModeAuto, Workspace{Kind: WorkspaceProject, Root: "/var/folders"})
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
+}
+
+func TestBuildRefusesSystemVolumesDataAsWorkspace(t *testing.T) {
+	if !filepath.IsAbs("/System/Volumes/Data") {
+		t.Skip("not a unix path layout")
+	}
+	b, _ := builderFixture(t)
+	_, err := b.Build(ModeAuto, Workspace{Kind: WorkspaceProject, Root: "/System/Volumes/Data"})
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
+}
+
+func TestBuildRefusesHomeLibraryDescendantAsWorkspace(t *testing.T) {
+	b, ws := builderFixture(t)
+	ws.Root = filepath.Join(b.homeDir, "Library", "Application Support")
+	_, err := b.Build(ModeAuto, ws)
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
+}
+
 func TestRelaxRefusesHomeWriteGrant(t *testing.T) {
 	b, ws := builderFixture(t)
 	base, err := b.Build(ModeAuto, ws)
 	require.NoError(t, err)
 
 	_, err = b.Relax(base, Grant{WritePath: b.homeDir})
+	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
+}
+
+func TestRelaxRefusesHomeLibraryDescendant(t *testing.T) {
+	b, ws := builderFixture(t)
+	base, err := b.Build(ModeAuto, ws)
+	require.NoError(t, err)
+
+	_, err = b.Relax(base, Grant{WritePath: filepath.Join(b.homeDir, "Library", "Application Support")})
 	require.ErrorIs(t, err, ErrWorkspaceTooBroad)
 }
 

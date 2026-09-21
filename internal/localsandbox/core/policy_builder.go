@@ -87,6 +87,8 @@ var homeReadableNames = []string{
 	".asdf", ".bun", ".cargo", ".deno", ".gem", ".gradle",
 	".npm", ".nvm", ".pnpm-store", ".pyenv", ".rbenv", ".rustup",
 	".sdkman", ".volta", ".yarn",
+	// Only the bin dir: ~/.local/share holds app state and tokens.
+	".local/bin",
 }
 
 // toolchainBinNames are prepended onto PATH so the agent can run per-user
@@ -96,16 +98,16 @@ var toolchainBinNames = []string{
 	".pyenv/shims", ".rbenv/shims", ".asdf/shims", ".yarn/bin",
 }
 
-// broadWorkspaceRoots cannot be a workspace or a Relax write grant: they
-// would re-open every user, every volume, or the whole system prefix.
-var broadWorkspaceRoots = []string{
-	"/Users", "/Volumes", "/private", "/tmp", "/var", "/etc",
-	"/System", "/Library", "/opt", "/home",
+// extraPrivateRoots tighten Seatbelt's blanket file-read* on darwin.
+// /Users and /Volumes cover other homes and mounted disks; /tmp and /var
+// (plus their /private aliases) cover host temp dirs that hold tokens.
+// Seatbelt matches the resolved vnode, so denying /private/tmp also
+// blocks /tmp and denying /private/var also blocks /var/folders.
+var extraPrivateRoots = []string{
+	"/Users", "/Volumes",
+	"/tmp", "/private/tmp",
+	"/var", "/private/var",
 }
-
-// extraPrivateRoots tighten Seatbelt's blanket file-read* on darwin: home
-// alone still leaves /Users/<other> and /Volumes readable.
-var extraPrivateRoots = []string{"/Users", "/Volumes"}
 
 // platformReadRoots are extra readable paths for Windows / PathGuard.
 // Darwin Seatbelt ignores them for availability: the base profile already
@@ -240,17 +242,13 @@ func (b *PolicyBuilder) rejectBroadWorkspace(root string) error {
 		if PathUnder(home, root) {
 			return fmt.Errorf("%w: %q covers the home directory", ErrWorkspaceTooBroad, root)
 		}
-		if samePath(root, filepath.Join(home, "Library")) {
+		library := filepath.Join(home, "Library")
+		if PathUnder(root, library) {
 			return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, root)
 		}
 	}
-	for _, wide := range broadWorkspaceRoots {
-		if !filepath.IsAbs(wide) {
-			continue
-		}
-		if samePath(root, filepath.Clean(wide)) {
-			return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, root)
-		}
+	if isWellKnownWideRoot(root) {
+		return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, root)
 	}
 	return nil
 }

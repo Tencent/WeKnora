@@ -64,7 +64,10 @@ type RunRequest struct {
 	// WorkDir is optional and must stay inside the workspace.
 	WorkDir string
 	Timeout time.Duration
-	Env     map[string]string
+	// Env overlays the filtered host inherit. It is not itself allowlisted:
+	// pass only the keys this command needs (skill credentials, PATH tweaks).
+	// Do not copy os.Environ() into it.
+	Env map[string]string
 }
 
 // RunResult is the captured outcome of one Run.

@@ -79,6 +79,34 @@ var (
 	ErrWorkspaceTooBroad = errors.New("localsandbox: workspace is too broad to sandbox")
 )
 
+// wellKnownWideRoots cannot be a workspace, a Relax write grant, or a
+// writable root. Exact match only: /tmp/project is fine, /tmp is not.
+// /private/var and /System/Volumes/Data are listed separately because they
+// are not the same path as /private or /System.
+var wellKnownWideRoots = []string{
+	"/Users", "/Volumes", "/private", "/tmp", "/var", "/etc",
+	"/System", "/Library", "/opt", "/home",
+	"/private/var", "/private/tmp", "/private/etc",
+	"/var/folders",
+	"/System/Volumes", "/System/Volumes/Data",
+}
+
+func isWellKnownWideRoot(p string) bool {
+	if p == "" || !filepath.IsAbs(p) {
+		return false
+	}
+	p = filepath.Clean(p)
+	for _, wide := range wellKnownWideRoots {
+		if !filepath.IsAbs(wide) {
+			continue
+		}
+		if PathUnder(p, filepath.Clean(wide)) && PathUnder(filepath.Clean(wide), p) {
+			return true
+		}
+	}
+	return false
+}
+
 // caseInsensitivePaths reports whether path comparison must ignore case.
 // APFS is case-insensitive by default, so this is not a Windows-only concern.
 func caseInsensitivePaths() bool {
@@ -127,6 +155,9 @@ func (p Policy) Validate() error {
 		}
 		if isFilesystemRoot(root.Path) {
 			return fmt.Errorf("%w: writable root %q", ErrFilesystemRoot, root.Path)
+		}
+		if isWellKnownWideRoot(root.Path) {
+			return fmt.Errorf("%w: writable root %q", ErrWorkspaceTooBroad, root.Path)
 		}
 		if err := checkAbsolute(root.ReadOnlySubpaths...); err != nil {
 			return err

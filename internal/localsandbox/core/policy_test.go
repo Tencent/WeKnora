@@ -1,6 +1,7 @@
 package core
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,18 @@ func TestPolicyValidateRejectsFilesystemRoot(t *testing.T) {
 	p.WritableRoots = []WritableRoot{{Path: "/"}}
 	p.Cwd = "/"
 	require.ErrorIs(t, p.Validate(), ErrFilesystemRoot)
+}
+
+func TestPolicyValidateRejectsWellKnownWideWritableRoot(t *testing.T) {
+	for _, wide := range []string{"/var", "/private/var", "/tmp", "/System/Volumes/Data"} {
+		if !filepath.IsAbs(wide) {
+			continue
+		}
+		p := validPolicy()
+		p.WritableRoots = []WritableRoot{{Path: wide}}
+		p.Cwd = wide
+		require.ErrorIs(t, p.Validate(), ErrWorkspaceTooBroad, wide)
+	}
 }
 
 func TestPolicyValidateRejectsDenyReadOfFilesystemRoot(t *testing.T) {
