@@ -316,10 +316,80 @@ func TestResolveSandboxForExecutionDoesNotPersistOwnerWhenResolveFails(t *testin
 	require.Zero(t, stored.TenantID, "a failed lookup must leave the owner unset")
 }
 
+// resolveTenantSandboxForConfig answers the workspace kill switch with a
+// disabled manager and NO error, before it ever reads the config row. A nil
+// error is therefore not proof that this workspace owns the pinned config, and
+// stamping it would brand a legacy pin with a workspace that cannot resolve it
+// — recreating the stranded MicroVM this column exists to prevent.
+//
+// The end-to-end shape: a session of workspace 7 pinned to a config workspace 7
+// owns (left at 0 by the backfill, correctly), then one turn of a shared agent
+// lent by workspace 99 whose admin has script execution turned off.
+func TestResolveSandboxForExecutionDoesNotPersistOwnerBehindTheKillSwitch(t *testing.T) {
+	const sessionOwner, lender = uint64(7), uint64(99)
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	_, err := pinner.Pin(context.Background(), "s-1", SandboxPin{ConfigID: "cfg-owned-by-7"})
+	require.NoError(t, err)
+
+	// The resolver must never be reached: the kill switch short-circuits first.
+	_, pin, err := resolveSandboxForExecution(
+		context.Background(), failingSandboxResolver{}, nil, pinner,
+		lender, "s-1", "", scriptsDisabledPolicy{},
+	)
+	require.NoError(t, err, "the kill switch returns a disabled manager, not an error")
+	require.Zero(t, pin.TenantID)
+
+	stored, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Zero(t, stored.TenantID,
+		"workspace 99 never proved it owns this config, so it must not be recorded")
+
+	// The pin is still resolvable as the session's own workspace, which is what
+	// keeps DELETE able to reclaim the MicroVM.
+	mgr := &pinTestManager{typ: sandbox.SandboxTypeCube}
+	recorder := &tenantRecordingResolver{mgr: mgr}
+	_, _, err = resolveSandboxForExecution(
+		context.Background(), recorder, nil, pinner, sessionOwner, "s-1", "", nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, sessionOwner, recorder.lastTenant)
+	require.Equal(t, "cfg-owned-by-7", recorder.lastConfig)
+}
+
+// The deployment-default pin short-circuits on the config id before the tenant
+// is used at all, so nothing is recorded for it either. Pinning this down keeps
+// a later relaxation of the proof from quietly reopening the case above.
+func TestResolveSandboxForExecutionDoesNotPersistOwnerForTheDefaultConfig(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	_, err := pinner.Pin(context.Background(), "s-1",
+		SandboxPin{ConfigID: types.SandboxConfigIDGlobalDefault})
+	require.NoError(t, err)
+
+	mgr, pin, err := resolveSandboxForExecution(
+		context.Background(), failingSandboxResolver{}, nil, pinner, 99, "s-1", "", nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, sandbox.SandboxTypeDisabled, mgr.GetType())
+	require.Zero(t, pin.TenantID)
+
+	stored, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Zero(t, stored.TenantID, "the deployment default has no owning workspace")
+}
+
 type failingSandboxResolver struct{}
 
 func (failingSandboxResolver) Resolve(context.Context, uint64, string) (sandbox.Manager, error) {
 	return nil, sandbox.ErrSandboxConfigNotFound
+}
+
+// scriptsDisabledPolicy is the workspace kill switch an admin turns on.
+type scriptsDisabledPolicy struct{}
+
+func (scriptsDisabledPolicy) WorkspaceScriptsDisabled(
+	context.Context, uint64,
+) (bool, error) {
+	return true, nil
 }
 
 // tenantRecordingResolver reports which workspace a config was looked up in.

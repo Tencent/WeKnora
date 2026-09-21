@@ -242,7 +242,20 @@ func resolveSandboxForExecution(
 			// Only persist an owner that actually resolved this config. Writing
 			// the caller's tenant on a failed lookup would stamp the wrong
 			// workspace onto a sticky pin left by a previous shared agent.
-			if err == nil && pinned.TenantID == 0 && owner != 0 {
+			//
+			// A nil error is not that proof on its own. resolveTenantSandboxForConfig
+			// returns a disabled manager with no error before it ever reads the
+			// config row: once for the workspace kill switch, once for an empty
+			// or deployment-default config id. A named backend is the proof,
+			// and it is the same condition that is allowed to CREATE a pin
+			// below — what may write a pin may update whose it is.
+			//
+			// A config that exists but resolves to type "disabled" is skipped
+			// too. Ownership is genuine there, but such a config never creates
+			// a sandbox, so there is nothing whose teardown could go missing.
+			proven := err == nil && mgr != nil &&
+				sandbox.IsNamedSandboxBackendType(string(mgr.GetType()))
+			if proven && pinned.TenantID == 0 && owner != 0 {
 				if recErr := pinner.recordOwner(ctx, sessionID, owner); recErr != nil {
 					logger.Warnf(ctx, "Failed to record sandbox pin owner for session %s: %v",
 						sessionID, recErr)
