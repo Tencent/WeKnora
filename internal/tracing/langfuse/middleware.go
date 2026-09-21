@@ -2,6 +2,7 @@ package langfuse
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -50,6 +51,7 @@ func GinMiddleware() gin.HandlerFunc {
 		if rid, ok := types.RequestIDFromContext(ctx); ok {
 			opts.Metadata["request_id"] = rid
 		}
+		mergeMetadataHeader(opts.Metadata, c.Request.Header.Get(langfuseMetadataHeader))
 
 		newCtx, trace := mgr.StartTrace(ctx, opts)
 		c.Request = c.Request.WithContext(newCtx)
@@ -60,6 +62,36 @@ func GinMiddleware() gin.HandlerFunc {
 			"status":        c.Writer.Status(),
 			"response.size": c.Writer.Size(),
 		}, nil)
+	}
+}
+
+// langfuseMetadataHeader is the request header carrying caller-defined JSON
+// key/value pairs that are merged into the Langfuse trace metadata. For
+// example `X-Langfuse-Metadata: {"ticket_id":"T-123","biz_line":"ops"}` lets
+// callers tag traces with their own business labels for filtering in the
+// Langfuse UI. Values are optional and additive: a malformed body or an empty
+// header is ignored and never fails the request.
+const langfuseMetadataHeader = "X-Langfuse-Metadata"
+
+// mergeMetadataHeader parses the given X-Langfuse-Metadata header value as a
+// JSON object and merges its keys into md. Built-in correlation fields set by
+// GinMiddleware (http.method, http.path, http.query, request_id, ...) always
+// win on conflict so callers cannot clobber them. Non-object JSON, malformed
+// JSON and the empty header are silently ignored.
+func mergeMetadataHeader(md map[string]interface{}, raw string) {
+	if md == nil || strings.TrimSpace(raw) == "" {
+		return
+	}
+	var extra map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &extra); err != nil {
+		return
+	}
+	// Only apply keys that are not already present so the middleware's own
+	// correlation fields are preserved.
+	for k, v := range extra {
+		if _, exists := md[k]; !exists {
+			md[k] = v
+		}
 	}
 }
 
