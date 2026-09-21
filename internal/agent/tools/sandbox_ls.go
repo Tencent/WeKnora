@@ -109,6 +109,7 @@ func (t *ListSandboxFilesTool) Description() string {
 	return rewriteRemoteWorkspaceCopy(listSandboxFilesTool.description, layout)
 }
 
+// Parameters rewrites workspace paths in the schema to match the session layout.
 func (t *ListSandboxFilesTool) Parameters() json.RawMessage {
 	return schemaForLayout(listSandboxFilesTool.schema, t.boundLayout())
 }
@@ -120,9 +121,10 @@ func (t *ListSandboxFilesTool) boundLayout() sandbox.WorkspaceLayout {
 	return t.describeLayout(t.source)
 }
 
-const hostListSandboxFilesDescription = `List files in %s. Relative paths resolve from that folder; omitted path lists it.
-Use known paths directly with read_file; list only to discover unknown files.
-Results are bounded by max_entries.`
+const hostListSandboxFilesDescription = "List files in %s. Relative paths resolve from that folder; " +
+	"omitted path lists it.\n" +
+	"Use known paths directly with read_file; list only to discover unknown files.\n" +
+	"Results are bounded by max_entries."
 
 // Execute enumerates files under the requested path inside the current
 // session's sandbox.

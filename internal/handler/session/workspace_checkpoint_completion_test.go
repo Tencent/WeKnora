@@ -184,7 +184,9 @@ type collectDirFileService struct {
 	interfaces.FileService
 }
 
-func (s *collectDirFileService) SaveBytes(_ context.Context, data []byte, _ uint64, fileName string, _ bool) (string, error) {
+func (s *collectDirFileService) SaveBytes(
+	_ context.Context, _ []byte, _ uint64, fileName string, _ bool,
+) (string, error) {
 	return "fake://" + fileName, nil
 }
 
@@ -217,7 +219,9 @@ func TestCompletionCollectsFromLayoutOutputDir(t *testing.T) {
 	h := NewAgentStreamHandler(
 		context.Background(), "s1", "m1", "req1", 1, time.Now(),
 		message, &completionEventRecorder{}, event.NewEventBus(),
-		service.NewArtifactCollector(source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{}),
+		service.NewArtifactCollector(
+			source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{},
+		),
 		nil, nil,
 	)
 
@@ -247,7 +251,9 @@ func TestCompletionSkipsCollectWhenHostLayoutHasNoOutputDir(t *testing.T) {
 	h := NewAgentStreamHandler(
 		context.Background(), "s1", "m1", "req1", 1, time.Now(),
 		message, &completionEventRecorder{}, event.NewEventBus(),
-		service.NewArtifactCollector(source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{}),
+		service.NewArtifactCollector(
+			source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{},
+		),
 		nil, nil,
 	)
 
@@ -278,7 +284,9 @@ func TestCompletionSkipsCollectWhenOutputDirEqualsRoot(t *testing.T) {
 	h := NewAgentStreamHandler(
 		context.Background(), "s1", "m1", "req1", 1, time.Now(),
 		message, &completionEventRecorder{}, event.NewEventBus(),
-		service.NewArtifactCollector(source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{}),
+		service.NewArtifactCollector(
+			source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{},
+		),
 		nil, nil,
 	)
 
@@ -291,7 +299,9 @@ type failingLayoutCollectSource struct {
 	listedDirs []string
 }
 
-func (s *failingLayoutCollectSource) ListSessionFiles(_ context.Context, _, dir string) ([]sandbox.RemoteDirEntry, error) {
+func (s *failingLayoutCollectSource) ListSessionFiles(
+	_ context.Context, _, dir string,
+) ([]sandbox.RemoteDirEntry, error) {
 	s.listedDirs = append(s.listedDirs, dir)
 	return nil, nil
 }
@@ -310,7 +320,9 @@ func TestCompletionSkipsCollectWhenLayoutLookupFails(t *testing.T) {
 	h := NewAgentStreamHandler(
 		context.Background(), "s1", "m1", "req1", 1, time.Now(),
 		message, &completionEventRecorder{}, event.NewEventBus(),
-		service.NewArtifactCollector(source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{}),
+		service.NewArtifactCollector(
+			source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{},
+		),
 		nil, nil,
 	)
 
@@ -325,7 +337,9 @@ func TestCompletionCollectDirOnRemoteUsesArtifactOutputDir(t *testing.T) {
 	h := NewAgentStreamHandler(
 		context.Background(), "s1", "m1", "req1", 1, time.Now(),
 		message, &completionEventRecorder{}, event.NewEventBus(),
-		service.NewArtifactCollector(source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{}),
+		service.NewArtifactCollector(
+			source, &collectDirFileService{}, completionHistory{}, nil, service.ArtifactCollectorConfig{},
+		),
 		nil, nil,
 	)
 

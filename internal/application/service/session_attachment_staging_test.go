@@ -160,7 +160,9 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 	assert.NotContains(t, manager.files, stalePath)
 
 	// The second reconciliation sees the same path and size and avoids storage IO.
-	_, err = service.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7, types.MessageAttachments{attachment}, sandbox.RemoteWorkspaceLayout())
+	_, err = service.stageSessionAttachments(
+		ctx, "session-1", "cfg-remote", 7, types.MessageAttachments{attachment}, sandbox.RemoteWorkspaceLayout(),
+	)
 	require.NoError(t, err)
 	assert.Equal(t, 1, fileService.getCalls[attachment.URL])
 }
@@ -457,7 +459,9 @@ func (m *fakeInputStore) SessionFileStore() sandbox.SessionFileStore {
 	return m
 }
 
-func (m *fakeInputStore) ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.RemoteDirEntry, error) {
+func (m *fakeInputStore) ListSessionFiles(
+	ctx context.Context, sessionID, dir string,
+) ([]sandbox.RemoteDirEntry, error) {
 	m.listedDir = dir
 	return m.stagingSandboxManager.ListSessionFiles(ctx, sessionID, dir)
 }
@@ -526,7 +530,9 @@ func TestStageSessionAttachmentsListsLayoutInputDirWithNoAttachments(t *testing.
 func TestStageSessionAttachmentsSkipsWhenInputDirEmpty(t *testing.T) {
 	store := newFakeInputStore()
 
-	staged, err := stageAttachmentsWithLayout(t, store, sandbox.WorkspaceLayout{Root: "/Users/dev/proj"}, oneAttachment())
+	staged, err := stageAttachmentsWithLayout(
+		t, store, sandbox.WorkspaceLayout{Root: "/Users/dev/proj"}, oneAttachment(),
+	)
 
 	require.NoError(t, err)
 	require.Empty(t, staged)

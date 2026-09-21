@@ -197,7 +197,9 @@ func TestShellExecInstallModeIgnoresWorkspaceLayout(t *testing.T) {
 	install := NewInstallShellExecTool(nil, "")
 	layout := hostLayout()
 	require.Equal(t, sandbox.RemoteWorkspaceLayout().Root, install.effectiveDefaultWorkDir())
-	require.Equal(t, []string{sandbox.RemoteWorkspaceLayout().Root, sandbox.SkillsImageRoot}, install.workDirRootsFor(layout))
+	require.Equal(t, []string{
+		sandbox.RemoteWorkspaceLayout().Root, sandbox.SkillsImageRoot,
+	}, install.workDirRootsFor(layout))
 	require.False(t, install.workDirAllowedIn(layout, layout.Root))
 	require.True(t, install.workDirAllowedIn(layout, sandbox.SkillsImageRoot+"/pdf-tools"))
 	require.NotContains(t, install.Description(), "the working directory")
