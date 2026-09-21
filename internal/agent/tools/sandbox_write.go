@@ -119,7 +119,9 @@ type WriteSandboxFileInput struct {
 // WriteSandboxFileTool writes a text file into the session sandbox.
 type WriteSandboxFileTool struct {
 	BaseTool
-	sink SandboxFileSink
+	sessionBound
+	sink         SandboxFileSink
+	sizeGuidance string
 }
 
 // NewWriteSandboxFileTool constructs the tool. `sink` MUST NOT be nil.
@@ -131,16 +133,36 @@ type WriteSandboxFileTool struct {
 func NewWriteSandboxFileTool(sink SandboxFileSink, completionTokens int) *WriteSandboxFileTool {
 	return &WriteSandboxFileTool{
 		BaseTool: BaseTool{
-			name: ToolWriteSandboxFile,
-			description: fmt.Sprintf(
-				writeSandboxFileDescription,
-				writeSizeGuidance(writeBudgetBytes(completionTokens)),
-			),
+			name:   ToolWriteSandboxFile,
 			schema: utils.GenerateSchema[WriteSandboxFileInput](),
 		},
-		sink: sink,
+		sink:         sink,
+		sizeGuidance: writeSizeGuidance(writeBudgetBytes(completionTokens)),
 	}
 }
+
+// Description is built from the session sandbox layout so host paths never
+// hard-code /workspace.
+func (t *WriteSandboxFileTool) Description() string {
+	return writeSandboxDescription(sessionWorkspaceLayout(context.Background(), t.sessionID, t.sink), t.sizeGuidance)
+}
+
+func (t *WriteSandboxFileTool) Parameters() json.RawMessage {
+	return schemaForLayout(t.schema, sessionWorkspaceLayout(context.Background(), t.sessionID, t.sink))
+}
+
+func writeSandboxDescription(l sandbox.WorkspaceLayout, sizeGuidance string) string {
+	if l.IsHost() {
+		return fmt.Sprintf(hostWriteSandboxFileDescription, l.Root, sizeGuidance)
+	}
+	return fmt.Sprintf(rewriteRemoteWorkspaceCopy(writeSandboxFileDescription, l), sizeGuidance)
+}
+
+const hostWriteSandboxFileDescription = `Create, overwrite, or append a text file in %s.
+Send both path and content (path first). Use edit_sandbox_file for small changes to an existing file. File content does not pass through shell quoting.
+Large files: first call uses mode=overwrite (default), subsequent calls use mode=append with only the next chunk. Keep calls in order and inspect the reported running byte count. A refused/truncated call wrote nothing; retry that chunk with complete JSON, never duplicate successful chunks.
+%s
+Binary content is not accepted. The result reports the absolute path and total size without echoing content.`
 
 // writeSizeGuidance states how much content one call should carry and why.
 //
@@ -185,15 +207,20 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 		}, nil
 	}
 
+	sessionID := resolveSessionID(ctx)
+	layout := sessionWorkspaceLayout(ctx, sessionID, t.sink)
+
 	trimmed := strings.TrimSpace(input.Path)
 	if trimmed == "" {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "path is required; write under /workspace/output for artifacts or /workspace for scratch scripts",
+			Error: fmt.Sprintf(
+				"path is required; write under %s",
+				layoutScopeName(layout),
+			),
 		}, nil
 	}
 
-	sessionID := resolveSessionID(ctx)
 	if sessionID == "" {
 		return &types.ToolResult{
 			Success: false,
@@ -201,12 +228,12 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 		}, nil
 	}
 
-	clean := sandbox.ResolveWorkspacePath(trimmed)
-	rootDir, ok := matchingWritableRoot(clean)
+	clean := resolveIn(layout, trimmed)
+	rootDir, ok := writableRootIn(layout, clean)
 	if !ok {
 		return &types.ToolResult{
 			Success: false,
-			Error:   workspaceWriteScopeError(input.Path),
+			Error:   writeScopeErrorIn(layout, input.Path),
 		}, nil
 	}
 
@@ -237,7 +264,8 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	if isBinaryShellOutput(string(chunk)) {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "binary content is not accepted; write a text script and have it produce binary files under /workspace/output",
+			Error: "binary content is not accepted; write a text script and have it produce binary files under " +
+				modelSafeLayoutPath(layout.OutputDir, "the artifact output directory"),
 		}, nil
 	}
 
@@ -328,7 +356,7 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	return &types.ToolResult{
 		Success:     true,
 		Output:      output,
-		OutputFiles: sandboxOutputLinks(clean),
+		OutputFiles: sandboxOutputLinksIn(layoutOutputDir(layout), clean),
 		Data:        data,
 	}, nil
 }
@@ -374,34 +402,4 @@ func (t *WriteSandboxFileTool) readForAppend(
 // Cleanup releases any resources.
 func (t *WriteSandboxFileTool) Cleanup(ctx context.Context) error {
 	return nil
-}
-
-// workspaceWriteScopeError explains a refused write/edit path. This is a
-// tool-scope convention (attachments stay out of these tools), not a privilege
-// check — shell_exec can already write
-// the same session sandbox.
-func workspaceWriteScopeError(requested string) string {
-	return fmt.Sprintf(
-		"path %q is outside that scope: write a file inside the session sandbox, "+
-			"not a directory root or a path under read-only %s",
-		requested, sandbox.SessionInputRoot,
-	)
-}
-
-// matchingWritableRoot labels sandbox writes while excluding directory roots
-// and the read-only attachment tree.
-func matchingWritableRoot(clean string) (string, bool) {
-	if !path.IsAbs(clean) || clean == "/" ||
-		clean == sandbox.SessionWorkspaceRoot ||
-		clean == sandbox.SessionOutputRoot ||
-		isUnderRoot(clean, sandbox.SessionInputRoot) {
-		return "", false
-	}
-	if isUnderRoot(clean, sandbox.SessionOutputRoot) {
-		return sandbox.SessionOutputRoot, true
-	}
-	if isUnderRoot(clean, sandbox.SessionWorkspaceRoot) {
-		return sandbox.SessionWorkspaceRoot, true
-	}
-	return "/", true
 }

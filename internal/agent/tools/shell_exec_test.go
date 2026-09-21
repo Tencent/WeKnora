@@ -621,3 +621,27 @@ func TestShellExecVenvAccessFailuresPrecedeGenericPermissionHints(t *testing.T) 
 		}
 	}
 }
+
+func TestShellExecAllowsBackgroundCommands(t *testing.T) {
+	for _, command := range []string{
+		"python3 -m http.server 8080 &",
+		"nohup python3 app.py >/tmp/app.log 2>&1 &",
+		"sleep 30 &",
+	} {
+		executor := &fakeShellExecutor{}
+		args, err := json.Marshal(ShellExecInput{Command: command})
+		require.NoError(t, err)
+		result, err := NewShellExecTool(executor, nil).Execute(shellExecTestContext(), args)
+		require.NoError(t, err)
+		require.True(t, result.Success, "%s: %s", command, result.Error)
+		require.Equal(t, 1, executor.calls)
+		require.Equal(t, command, executor.command)
+	}
+}
+
+func TestShellExecDescriptionDoesNotForbidBackgrounding(t *testing.T) {
+	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
+	require.NotContains(t, description, "no nohup")
+	require.NotContains(t, description, "trailing &")
+	require.NotContains(t, description, "Execution is synchronous")
+}

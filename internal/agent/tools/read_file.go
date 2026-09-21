@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -17,6 +18,7 @@ import (
 // session's sandbox and retain its file type, size, and output limits.
 type ReadFileTool struct {
 	BaseTool
+	sessionBound
 	webPages  WebPageSource
 	workspace *workspaceFileReader
 	skills    *skills.Manager
@@ -53,6 +55,22 @@ func (t *ReadFileTool) WithSkills(manager *skills.Manager, shell bool) *ReadFile
 	return t
 }
 
+func (t *ReadFileTool) BindSession(id string) {
+	if t == nil {
+		return
+	}
+	t.sessionBound.BindSession(id)
+	t.updateDescription()
+}
+
+func (t *ReadFileTool) Parameters() json.RawMessage {
+	layout := sandbox.RemoteWorkspaceLayout()
+	if t != nil && t.workspace != nil {
+		layout = sessionWorkspaceLayout(context.Background(), t.sessionID, t.workspace.source)
+	}
+	return schemaForLayout(t.schema, layout)
+}
+
 func (t *ReadFileTool) updateDescription() {
 	var scopes []string
 	if t.webPages != nil {
@@ -62,9 +80,15 @@ func (t *ReadFileTool) updateDescription() {
 			"as offset and line_offset to continue without a shell.")
 	}
 	if t.workspace != nil {
-		scopes = append(scopes, "Sandbox files: absolute paths inside the current session's sandbox, including /tmp; "+
-			"relative paths resolve from /workspace. "+
-			"This does not read host files or publish files as user-visible artifacts.")
+		layout := sessionWorkspaceLayout(context.Background(), t.sessionID, t.workspace.source)
+		if layout.IsHost() {
+			scopes = append(scopes, "Sandbox files: absolute or relative paths in "+layout.Root+". "+
+				"This does not read files outside that folder or publish files as user-visible artifacts.")
+		} else {
+			scopes = append(scopes, "Sandbox files: absolute paths inside the current session's sandbox, including /tmp; "+
+				"relative paths resolve from "+layout.Hint+". "+
+				"This does not read host files or publish files as user-visible artifacts.")
+		}
 	}
 	if t.skills != nil && t.skills.IsEnabled() {
 		scopes = append(scopes, "Skill resources: skill://<name>/SKILL.md loads the allowed skill's instructions, file list and execution guidance; skill://<name>/<relative-file> reads a bundled resource. These are package resources, not shell paths or arbitrary host files.")

@@ -210,6 +210,44 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	return nil
 }
 
+// LayoutOutputDir is the directory Collect should scan when the backend
+// advertises a workspace layout with a separate output tree. Empty means
+// either there is no layout (use skills.ArtifactOutputDir) or the layout
+// has no output directory (call SkipCollect first; do not scan Root).
+func (c *ArtifactCollector) LayoutOutputDir(ctx context.Context, sessionID string) string {
+	if c == nil {
+		return ""
+	}
+	source := c.sessionSource(ctx, sessionID)
+	provider, ok := source.(sandbox.SessionWorkspaceLayoutProvider)
+	if !ok || provider == nil {
+		return ""
+	}
+	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(layout.OutputDir)
+}
+
+// SkipCollect is true when the session has a workspace root but no separate
+// output tree: scanning Root would upload the user's files.
+func (c *ArtifactCollector) SkipCollect(ctx context.Context, sessionID string) bool {
+	if c == nil {
+		return false
+	}
+	source := c.sessionSource(ctx, sessionID)
+	provider, ok := source.(sandbox.SessionWorkspaceLayoutProvider)
+	if !ok || provider == nil {
+		return false
+	}
+	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+	if err != nil || strings.TrimSpace(layout.Root) == "" {
+		return false
+	}
+	return strings.TrimSpace(layout.OutputDir) == ""
+}
+
 // newBoundedConfig fills in defaults so callers can pass a zero
 // ArtifactCollectorConfig without hitting empty-value edge cases.
 func newBoundedConfig(cfg ArtifactCollectorConfig) ArtifactCollectorConfig {

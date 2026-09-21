@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
@@ -23,7 +22,11 @@ func sandboxOutputSnapshot(ctx context.Context, executor SandboxCommandExecutor,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	entries, err := source.ListSessionFiles(ctx, sessionID, skills.ArtifactOutputDir())
+	outputDir := layoutOutputDir(sessionWorkspaceLayout(ctx, sessionID, source))
+	if outputDir == "" {
+		return nil, false
+	}
+	entries, err := source.ListSessionFiles(ctx, sessionID, outputDir)
 	if err != nil {
 		return nil, false
 	}
@@ -40,7 +43,7 @@ func outputEntriesSnapshot(entries []sandbox.RemoteDirEntry) map[string]sandbox.
 	return files
 }
 
-func changedOutputLinks(before, after map[string]sandbox.RemoteDirEntry) []string {
+func changedOutputLinks(outputDir string, before, after map[string]sandbox.RemoteDirEntry) []string {
 	var paths []string
 	for filePath, next := range after {
 		old, exists := before[filePath]
@@ -49,18 +52,22 @@ func changedOutputLinks(before, after map[string]sandbox.RemoteDirEntry) []strin
 		}
 	}
 	sort.Strings(paths)
-	return sandboxOutputLinks(paths...)
+	return sandboxOutputLinksIn(outputDir, paths...)
 }
 
-func sandboxOutputLinks(paths ...string) []string {
+func sandboxOutputLinksIn(outputDir string, paths ...string) []string {
 	// A non-nil empty list means inspection completed without finding output
 	// links. Keep it distinct from nil (inspection unavailable or failed) so the
 	// next model turn can distinguish stdout filenames from deliverables.
 	links := []string{}
 	bytes := 0
+	if outputDir == "" {
+		return links
+	}
+	outputDir = path.Clean(outputDir)
 	for _, filePath := range paths {
 		filePath = path.Clean(filePath)
-		if !strings.HasPrefix(filePath, path.Clean(skills.ArtifactOutputDir())+"/") {
+		if !strings.HasPrefix(filePath, outputDir+"/") {
 			continue
 		}
 		name := path.Base(filePath)
