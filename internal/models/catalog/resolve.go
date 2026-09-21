@@ -575,6 +575,20 @@ func resolveTranscriptions(
 		return nil, fmt.Errorf("catalog: unknown transcription api %q for %s/%s", protocol, vendor.ID, spec.ID)
 	}
 	settings.API = protocol
+	switch settings.LanguageParam {
+	case "", LanguageForm, LanguageHeader, LanguageASROptions:
+	default:
+		return nil, fmt.Errorf("catalog: unknown language_param %q for %s/%s",
+			settings.LanguageParam, vendor.ID, spec.ID)
+	}
+	// Checked after every layer: an entry may lift a vendor-wide refusal for
+	// the one model that takes the audio in the request.
+	if settings.UnsupportedReason != "" {
+		return nil, fmt.Errorf(
+			"catalog: %s does not serve %q through a protocol this build implements: %s",
+			vendor.ID, spec.ID, settings.UnsupportedReason,
+		)
+	}
 
 	out := &Resolved{
 		Vendor:           vendor,

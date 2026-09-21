@@ -55,6 +55,7 @@ const verboseResponse = `{
 type captured struct {
 	path     string
 	auth     string
+	language string
 	fields   map[string]string
 	fileName string
 	fileType string
@@ -68,6 +69,7 @@ func serve(t *testing.T, status int, reply string) (*httptest.Server, *captured)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.path = r.URL.Path
 		got.auth = r.Header.Get("Authorization")
+		got.language = r.Header.Get("language")
 		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		require.NoError(t, err)
 		reader := multipart.NewReader(r.Body, params["boundary"])
@@ -106,7 +108,7 @@ func newClient(url, model string, settings catalog.TranscriptionsSettings) *Clie
 func TestBaselineFormIsFileAndModel(t *testing.T) {
 	server, got := serve(t, http.StatusOK, jsonResponse)
 	out, err := newClient(server.URL+"/v1", "gpt-4o-transcribe", catalog.TranscriptionsSettings{}).
-		Transcribe(context.Background(), []byte("RIFF"), "meeting.wav")
+		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("RIFF"), FileName: "meeting.wav"})
 	require.NoError(t, err)
 
 	assert.Equal(t, "/v1/audio/transcriptions", got.path)
@@ -118,11 +120,56 @@ func TestBaselineFormIsFileAndModel(t *testing.T) {
 	assert.Equal(t, &api.Transcription{Text: "text"}, out)
 }
 
+// The language hint goes where the vendor documents it: a form field on
+// OpenAI's shape, a request header on MiniMax's, nowhere otherwise.
+func TestLanguageGoesWhereTheVendorDeclares(t *testing.T) {
+	for _, tc := range []struct {
+		param      string
+		wantField  string
+		wantHeader string
+	}{
+		{param: "", wantField: "", wantHeader: ""},
+		{param: catalog.LanguageForm, wantField: "zh", wantHeader: ""},
+		{param: catalog.LanguageHeader, wantField: "", wantHeader: "zh"},
+	} {
+		t.Run("param="+tc.param, func(t *testing.T) {
+			server, got := serve(t, http.StatusOK, jsonResponse)
+			_, err := newClient(server.URL, "m", catalog.TranscriptionsSettings{LanguageParam: tc.param}).
+				Transcribe(context.Background(), api.TranscriptionRequest{
+					Audio: []byte("x"), FileName: "a.wav", Language: "zh",
+				})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantField, got.fields["language"])
+			assert.Equal(t, tc.wantHeader, got.language)
+		})
+	}
+}
+
+// The audio length is read from wherever the reply states it, so usage can
+// be reported without asking for segments.
+func TestDurationIsReadFromTheReply(t *testing.T) {
+	for name, reply := range map[string]string{
+		// MiniMax's default json, from its reference.
+		"top-level duration": `{"text": "x", "duration": 26.325, "trace_id": "021785229015510a2c883cf675b9804d"}`,
+		// OpenRouter's reference example.
+		"usage.seconds": `{"text": "x", "usage": {"cost": 0.000508, "input_tokens": 83, "output_tokens": 30, ` +
+			`"seconds": 9.2, "total_tokens": 113}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			server, _ := serve(t, http.StatusOK, reply)
+			out, err := newClient(server.URL, "m", catalog.TranscriptionsSettings{}).
+				Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
+			require.NoError(t, err)
+			assert.NotZero(t, out.Duration)
+		})
+	}
+}
+
 func TestVerboseJSONCarriesSegments(t *testing.T) {
 	server, got := serve(t, http.StatusOK, verboseResponse)
 	settings := catalog.TranscriptionsSettings{ResponseFormat: "verbose_json"}
 	out, err := newClient(server.URL+"/v1", "whisper-1", settings).
-		Transcribe(context.Background(), []byte("ID3"), "a.mp3")
+		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("ID3"), FileName: "a.mp3"})
 	require.NoError(t, err)
 
 	assert.Equal(t, "verbose_json", got.fields["response_format"])
@@ -136,7 +183,7 @@ func TestVerboseJSONCarriesSegments(t *testing.T) {
 func TestEmptyTextIsSilence(t *testing.T) {
 	server, _ := serve(t, http.StatusOK, `{"text": ""}`)
 	out, err := newClient(server.URL, "m", catalog.TranscriptionsSettings{}).
-		Transcribe(context.Background(), []byte("x"), "a.wav")
+		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 	require.NoError(t, err)
 	assert.Equal(t, "", out.Text)
 }
@@ -149,7 +196,7 @@ func TestReplyWithoutTextIsAnError(t *testing.T) {
 	server, _ := serve(t, http.StatusOK,
 		`{"status_code": 500, "detail": "Failed to transcribe audio, boom", "headers": null}`)
 	_, err := newClient(server.URL, "m", catalog.TranscriptionsSettings{}).
-		Transcribe(context.Background(), []byte("x"), "a.wav")
+		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Failed to transcribe audio")
 }
@@ -158,7 +205,7 @@ func TestSurfacesTheVendorErrorBody(t *testing.T) {
 	// A stand-in rejection in OpenAI's error envelope.
 	server, _ := serve(t, http.StatusBadRequest, `{"error":{"message":"stand-in rejection"}}`)
 	_, err := newClient(server.URL, "gpt-4o-transcribe", catalog.TranscriptionsSettings{}).
-		Transcribe(context.Background(), []byte("x"), "a.wav")
+		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stand-in rejection")
 }
@@ -166,7 +213,7 @@ func TestSurfacesTheVendorErrorBody(t *testing.T) {
 func TestDoesNotDoubleThePath(t *testing.T) {
 	server, got := serve(t, http.StatusOK, jsonResponse)
 	_, err := newClient(server.URL+"/v1/audio/transcriptions", "m", catalog.TranscriptionsSettings{}).
-		Transcribe(context.Background(), []byte("x"), "a.wav")
+		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 	require.NoError(t, err)
 	assert.Equal(t, "/v1/audio/transcriptions", got.path)
 }

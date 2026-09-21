@@ -117,6 +117,8 @@ func init() {
 				// at most 25 MB and 30 seconds — the duration cannot be checked
 				// here without decoding, so a longer file is the vendor's error.
 				MaxFileBytes: catalog.Ptr(25 << 20),
+				// No language field; prompt and hotwords are its only hints.
+				Formats: []string{"wav", "mp3"},
 			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入: model,

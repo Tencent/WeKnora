@@ -283,10 +283,14 @@ Embedding 行也有几处按厂商文档纠正的行为变化（逐厂商的出�
 ASR 行的变化（逐厂商的出站表单由 `internal/models/asr/wire_test.go` 钉住）：
 
 1. **不再一律发 `response_format=verbose_json`**。OpenAI 文档写明 gpt-4o-transcribe / gpt-4o-mini-transcribe「only supported format is json」，旧实现发给它们必然 400；GPUStack 的音频后端 vox-box 在 FunASR 模型（SenseVoice、Paraformer）上对 `verbose_json` 返回裸字符串，旧实现解不开。现在只有文档写明支持的模型声明它（OpenAI `whisper-1`），其余走默认 json，Langfuse 里的音频时长因此只在返回分段的模型上有。需要分段的自建行可以在 `spec.compat` 里写 `{"response_format": "verbose_json"}`。
-2. **按厂商文档的文件上限在上传前拒绝**（OpenAI / 智谱 / OpenRouter 25 MB、Requesty 32 MB、SiliconFlow / MiniMax 50 MB、阿里与小米编码后 10 MB）。
+2. **按厂商文档的上限和格式在上传前拒绝**：文件大小（OpenAI / 智谱 / OpenRouter 25 MB、Requesty 32 MB、SiliconFlow / MiniMax 50 MB；阿里与小米按整段 `data:` URI 计 10 MB），以及文档给出封闭格式清单的厂商（智谱、小米只收 wav/mp3，OpenAI、Requesty、MiniMax 各有列表）。
 3. **回复里没有 `text` 字段即报错**，不再当成「未检测到语音」入库；静音音频返回的是空字符串 `text`，照常处理。
-4. ASR 行现在带上 provider 走目录解析，go-openai 依赖随之移除。
+4. ASR 行现在带上 provider 走目录解析，go-openai 依赖随之移除。provider 没有声明 ASR 的行：显式填了该厂商的直接报错；没填、靠 URL 识别到的，按 OpenAI 形状打到它的 URL（与旧实现一致），不走该厂商的 Endpoint 钩子。
 5. **支持 ASR 的厂商按文档补齐**。OpenAI 形状（multipart `file` + `model`）：openai、siliconflow、gpustack、generic、智谱（`glm-asr-2512`，单文件 ≤30 秒）、MiniMax（`asr-1.0`，路径是 `/v1/speech_to_text`）、OpenRouter、Requesty、LiteLLM。经 chat completions 的 `input_audio`（base64 data URI，编码后 ≤10 MB）：阿里云 `qwen3-asr-flash`、小米 `mimo-v2.5-asr`。
+6. **知识库的「音频语言提示」终于发出去了**（此前从未接线）。位置按厂商文档：OpenAI / Requesty / OpenRouter / GPUStack / generic 是 `language` 表单字段，MiniMax 是 `language` 请求头，阿里与小米是 `asr_options.language`；智谱、SiliconFlow、LiteLLM 文档没有这个参数，不发。填 `auto` 等同留空。
+7. **音频时长从回包里读**：MiniMax 的 `duration`、OpenAI 系与阿里的 `usage.seconds`，Langfuse 不再只靠 `verbose_json` 的分段。
+
+阿里只有 `qwen3-asr-flash` 能直接带音频调用；其余 ASR 模型名由一条兜底条目拒绝并说明原因。
 
 查过但没有接的：火山豆包语音（独立域名与密钥，当前文档的请求体只收音频 URL）、千帆（`vop_asr` 挂在应用实例下要 `app_id`；短语音接口 ≤60 秒且只收 pcm/wav/amr/m4a）、七牛（只收音频 URL）、Novita（GLM-ASR 自有接口，≤30 秒）、腾讯云 ASR（与混元不是同一套鉴权）、NVIDIA 托管 Riva（gRPC）、Gemini（没有专用转写接口，只能让对话模型听音频）、Azure（见下）。阿里 Paraformer / Fun-ASR / `*-filetrans` 是异步任务，同样要公网 URL。
 

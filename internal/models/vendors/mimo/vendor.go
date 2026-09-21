@@ -78,11 +78,14 @@ func init() {
 		},
 		Compat: catalog.VendorCompat{
 			// ASR: mimo-v2.5-asr on the chat endpoint, WAV or MP3 as a base64
-			// data URI whose "encoded string size must not exceed 10 MB" —
-			// 7.5 MB of audio
+			// data URI whose "encoded string size must not exceed 10 MB"
 			// (https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/Speech-Recognition).
 			Transcriptions: catalog.TranscriptionsCompat{
-				MaxFileBytes: catalog.Ptr(10 << 20 * 3 / 4),
+				// The ceiling counts the whole data URI as sent.
+				MaxEncodedBytes: catalog.Ptr(10 << 20),
+				Formats:         []string{"wav", "mp3"},
+				// asr_options.language: "auto|zh|en".
+				LanguageParam: catalog.Ptr(catalog.LanguageASROptions),
 			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:        catalog.Ptr(catalog.ThinkingFormatThinkingType),

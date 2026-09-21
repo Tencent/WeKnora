@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,7 @@ type form struct {
 	auth     string
 	fields   map[string]string
 	fileName string
+	language string // the language request header
 	// body is set instead of fields when the request was JSON: the
 	// chat-served recognisers take the audio as a data URI.
 	body map[string]any
@@ -43,7 +45,7 @@ func upstream(t *testing.T) (string, *form, *atomic.Int32) {
 	calls := &atomic.Int32{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		got.path, got.auth = r.URL.Path, r.Header.Get("Authorization")
+		got.path, got.auth, got.language = r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("language")
 		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		require.NoError(t, err)
 		if mediaType == "application/json" {
@@ -212,9 +214,9 @@ func TestOversizedAudioIsRefusedBeforeUpload(t *testing.T) {
 	require.NoError(t, err, "the ceiling itself is allowed")
 }
 
-// The chat-served recognisers cap the base64 string at 10 MB, so the audio
-// itself may be three quarters of that.
-func TestChatServedCeilingCountsTheEncoding(t *testing.T) {
+// The chat-served recognisers cap the data URI as sent at 10 MB, prefix
+// included, so three quarters of 10 MB of audio is already too much.
+func TestChatServedCeilingCountsTheWholeDataURI(t *testing.T) {
 	url, _, calls := upstream(t)
 	a, err := NewASR(&Config{
 		Source: types.ModelSourceRemote, Provider: "aliyun", BaseURL: url + "/compatible-mode/v1",
@@ -222,11 +224,115 @@ func TestChatServedCeilingCountsTheEncoding(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = a.Transcribe(context.Background(), make([]byte, 10<<20*3/4+1), "long.wav")
+	_, err = a.Transcribe(context.Background(), make([]byte, 10<<20*3/4), "long.wav")
 	require.Error(t, err)
 	assert.Zero(t, calls.Load())
-	_, err = a.Transcribe(context.Background(), make([]byte, 10<<20*3/4), "fits.wav")
+
+	prefix := len("data:audio/wav;base64,")
+	_, err = a.Transcribe(context.Background(), make([]byte, (10<<20-prefix)/4*3), "fits.wav")
 	require.NoError(t, err)
+}
+
+// Only qwen3-asr-flash takes the audio in the request. Alibaba's other
+// recognition models want a public URL or an asynchronous task, so a row
+// naming one is refused with the reason rather than sent a chat request.
+func TestAlibabaRecognitionModelsOtherThanQwenASRFlashAreRefused(t *testing.T) {
+	_, err := NewASR(&Config{
+		Source: types.ModelSourceRemote, Provider: "aliyun",
+		BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", ModelName: "paraformer-v2", APIKey: "k",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "public file URL")
+}
+
+// A vendor that does not declare speech recognition is not trusted with it.
+// Azure's Endpoint hook still knows a transcription path, but nobody has
+// verified it; a row that names Azure is refused, and a row that names no
+// vendor gets what the pre-catalog client sent: the OpenAI shape at its URL.
+func TestVendorsWithoutASRAreNotRoutedThroughTheirHooks(t *testing.T) {
+	_, err := NewASR(&Config{
+		Source: types.ModelSourceRemote, Provider: "azure_openai",
+		BaseURL: "https://example.openai.azure.com", ModelName: "whisper", APIKey: "k",
+	})
+	require.Error(t, err)
+
+	// Detection matches URL patterns as substrings, so a path carrying Azure's
+	// host detects as Azure while the request still reaches the test server.
+	url, got, _ := upstream(t)
+	base := url + "/openai.azure.com/v1"
+	require.Equal(t, "azure_openai", catalog.DetectByURL(base))
+	a, err := NewASR(&Config{
+		Source: types.ModelSourceRemote, BaseURL: base, ModelName: "whisper", APIKey: "k",
+	})
+	require.NoError(t, err)
+	_, err = a.Transcribe(context.Background(), []byte("RIFF"), "a.wav")
+	require.NoError(t, err)
+	assert.Equal(t, "/openai.azure.com/v1/audio/transcriptions", got.path, "not Azure's /openai/v1 path")
+	assert.Equal(t, "Bearer k", got.auth, "not Azure's api-key header")
+}
+
+// A format the vendor does not list is refused before upload.
+func TestUndocumentedFormatIsRefusedBeforeUpload(t *testing.T) {
+	url, _, calls := upstream(t)
+	a, err := NewASR(&Config{
+		Source: types.ModelSourceRemote, Provider: "zhipu", BaseURL: url + "/api/paas/v4",
+		ModelName: "glm-asr-2512", APIKey: "k",
+	})
+	require.NoError(t, err)
+	_, err = a.Transcribe(context.Background(), []byte("x"), "memo.m4a")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "wav/mp3")
+	assert.Zero(t, calls.Load())
+}
+
+// The knowledge base's language hint reaches each vendor where its reference
+// puts it, and nowhere for a vendor that documents none.
+func TestLanguageHintGoesWhereEachVendorDocumentsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, model, base string
+		check                       func(t *testing.T, got *form)
+	}{
+		{"openai form field", "openai", "whisper-1", "/v1", func(t *testing.T, got *form) {
+			assert.Equal(t, "zh", got.fields["language"])
+			assert.Empty(t, got.language)
+		}},
+		{"minimax header", "minimax", "asr-1.0", "/v1", func(t *testing.T, got *form) {
+			assert.Equal(t, "zh", got.language)
+			assert.NotContains(t, got.fields, "language")
+		}},
+		{"aliyun asr_options", "aliyun", "qwen3-asr-flash", "/compatible-mode/v1", func(t *testing.T, got *form) {
+			assert.Equal(t, map[string]any{"language": "zh"}, got.body["asr_options"])
+		}},
+		{
+			"siliconflow documents none", "siliconflow", "FunAudioLLM/SenseVoiceSmall", "/v1",
+			func(t *testing.T, got *form) {
+				assert.NotContains(t, got.fields, "language")
+				assert.Empty(t, got.language)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			url, got, _ := upstream(t)
+			a, err := NewASR(&Config{
+				Source: types.ModelSourceRemote, Provider: tc.provider, BaseURL: url + tc.base,
+				ModelName: tc.model, APIKey: "k",
+			})
+			require.NoError(t, err)
+			_, err = a.Transcribe(WithLanguage(context.Background(), "zh"), []byte("RIFF"), "a.wav")
+			require.NoError(t, err)
+			tc.check(t, got)
+		})
+	}
+
+	// "auto" is every vendor's default and is not sent.
+	url, got, _ := upstream(t)
+	a, err := NewASR(&Config{
+		Source: types.ModelSourceRemote, Provider: "openai", BaseURL: url + "/v1", ModelName: "whisper-1", APIKey: "k",
+	})
+	require.NoError(t, err)
+	_, err = a.Transcribe(WithLanguage(context.Background(), "auto"), []byte("RIFF"), "a.wav")
+	require.NoError(t, err)
+	assert.NotContains(t, got.fields, "language")
 }
 
 func TestEmptyAudioIsAnError(t *testing.T) {

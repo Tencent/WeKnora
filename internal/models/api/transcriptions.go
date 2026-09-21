@@ -36,9 +36,21 @@ type TranscriptionSegment struct {
 type Transcription struct {
 	Text     string
 	Segments []TranscriptionSegment
+	// Duration is the audio length in seconds when the reply states it —
+	// OpenAI-shaped duration or usage.seconds — and 0 otherwise.
+	Duration float64
+}
+
+// TranscriptionRequest is one file to transcribe.
+type TranscriptionRequest struct {
+	Audio    []byte
+	FileName string
+	// Language is the operator's hint, empty for auto-detection. Where it is
+	// sent, and whether at all, is the vendor's declaration.
+	Language string
 }
 
 // Transcriber turns one audio file into text.
 type Transcriber interface {
-	Transcribe(ctx context.Context, audio []byte, fileName string) (*Transcription, error)
+	Transcribe(ctx context.Context, req TranscriptionRequest) (*Transcription, error)
 }

@@ -83,6 +83,9 @@ func init() {
 				// OpenAI-style multipart file + model, json by default. "Max 25
 				// MB; send larger files as base64 JSON via input_audio."
 				MaxFileBytes: catalog.Ptr(25 << 20),
+				// language is an ISO-639-1 form field. The format "is derived
+				// from the filename extension", with no closed list.
+				LanguageParam: catalog.Ptr(catalog.LanguageForm),
 			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://openrouter.ai/docs/api/api-reference/embeddings/create-embeddings:

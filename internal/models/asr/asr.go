@@ -2,6 +2,7 @@ package asr
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -17,6 +18,27 @@ type Segment struct {
 type TranscriptionResult struct {
 	Text     string    `json:"text"`
 	Segments []Segment `json:"segments,omitempty"`
+	// Duration is the audio length in seconds when the vendor reports it,
+	// which several do without segments; 0 when unknown.
+	Duration float64 `json:"duration,omitempty"`
+}
+
+type languageKey struct{}
+
+// WithLanguage attaches the operator's language hint (for example "zh") to
+// a transcription. Empty and "auto" mean auto-detection, which is every
+// vendor's default, and send nothing.
+func WithLanguage(ctx context.Context, language string) context.Context {
+	return context.WithValue(ctx, languageKey{}, language)
+}
+
+func languageFrom(ctx context.Context) string {
+	language, _ := ctx.Value(languageKey{}).(string)
+	language = strings.TrimSpace(language)
+	if strings.EqualFold(language, "auto") {
+		return ""
+	}
+	return language
 }
 
 // ASR defines the interface for Automatic Speech Recognition model operations.

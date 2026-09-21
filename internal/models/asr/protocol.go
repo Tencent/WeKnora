@@ -3,6 +3,8 @@ package asr
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,6 +45,26 @@ func newASR(config *Config) (ASR, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	// A vendor that does not declare speech recognition has not been checked
+	// for it, and its Endpoint hook may still compute a path — Azure's does.
+	// A row that named the vendor is refused; a row that named none and was
+	// matched by its URL is what the pre-catalog client served: an
+	// OpenAI-compatible endpoint at that URL.
+	if !resolved.Vendor.SupportsType(types.ModelTypeASR) {
+		if strings.TrimSpace(config.Provider) != "" {
+			return nil, fmt.Errorf("%s does not offer speech recognition in this build", resolved.Vendor.Name)
+		}
+		resolved, err = catalog.Resolve(catalog.Ref{
+			Provider:  catalog.GenericID,
+			Model:     config.ModelName,
+			BaseURL:   config.BaseURL,
+			ModelType: types.ModelTypeASR,
+			Extra:     config.ExtraConfig,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := validateASRBaseURL(resolved.BaseURL); err != nil {
 		return nil, err
@@ -136,14 +158,23 @@ func (a *protocolASR) Transcribe(ctx context.Context, audio []byte, fileName str
 	if fileName == "" {
 		fileName = "audio.mp3"
 	}
+	if formats := a.settings.Formats; len(formats) > 0 {
+		ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+		if !slices.Contains(formats, ext) {
+			return nil, fmt.Errorf("%s transcription: %s accepts %s audio, not %q",
+				a.modelName, a.vendor, strings.Join(formats, "/"), fileName)
+		}
+	}
 	logger.Infof(ctx, "[ASR] transcribing model=%s endpoint=%s size=%d file=%s",
 		a.modelName, a.endpoint, len(audio), fileName)
 
-	out, err := a.inner.Transcribe(ctx, audio, fileName)
+	out, err := a.inner.Transcribe(ctx, api.TranscriptionRequest{
+		Audio: audio, FileName: fileName, Language: languageFrom(ctx),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("ASR transcription request failed: %w", err)
 	}
-	result := &TranscriptionResult{Text: out.Text}
+	result := &TranscriptionResult{Text: out.Text, Duration: out.Duration}
 	for _, s := range out.Segments {
 		result.Segments = append(result.Segments, Segment{Start: s.Start, End: s.End, Text: s.Text})
 	}

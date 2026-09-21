@@ -105,6 +105,10 @@ func init() {
 				// "Files can be up to 25 MB"
 				// (https://developers.openai.com/api/docs/guides/speech-to-text).
 				MaxFileBytes: catalog.Ptr(25 << 20),
+				// "flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm", and a
+				// language field in ISO-639-1.
+				Formats:       []string{"flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"},
+				LanguageParam: catalog.Ptr(catalog.LanguageForm),
 			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://developers.openai.com/api/reference/resources/embeddings/methods/create:

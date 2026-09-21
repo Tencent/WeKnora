@@ -124,7 +124,11 @@ func init() {
 			// verbose_json as whatever the backend produced — and its FunASR
 			// backend (SenseVoice, Paraformer) produces a bare string for every
 			// format. The pre-catalog client's verbose_json therefore arrived
-			// as a JSON string that could not be decoded.
+			// as a JSON string that could not be decoded. The route reads a
+			// language form field.
+			Transcriptions: catalog.TranscriptionsCompat{
+				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// vLLM's embedding server: dimensions for Matryoshka models, the
 				// row's truncation budget, and encoding_format.

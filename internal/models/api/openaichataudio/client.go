@@ -70,27 +70,44 @@ var audioTypes = map[string]string{
 	".amr":  "audio/amr",
 }
 
-// DataURI is the input_audio payload for one file.
-func DataURI(audio []byte, fileName string) string {
+// DataURI is the input_audio payload for one file. Both references show an
+// audio media type in the URI, so a file whose extension names no audio
+// container is refused rather than labelled application/octet-stream.
+func DataURI(audio []byte, fileName string) (string, error) {
 	mediaType, ok := audioTypes[strings.ToLower(filepath.Ext(fileName))]
 	if !ok {
-		mediaType = "application/octet-stream"
+		return "", fmt.Errorf("cannot tell the audio format of %q from its extension", fileName)
 	}
-	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(audio)
+	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(audio), nil
 }
 
 // BuildRequestBody is the golden-test entry point.
-func (c *Client) BuildRequestBody(audio []byte, fileName string) map[string]any {
-	return map[string]any{
+func (c *Client) BuildRequestBody(req api.TranscriptionRequest) (map[string]any, error) {
+	uri, err := DataURI(req.Audio, req.FileName)
+	if err != nil {
+		return nil, err
+	}
+	// The ceiling is on the whole string as sent — "encoded string size must
+	// not exceed 10 MB" — so the data: prefix counts too.
+	if limit := c.cfg.Settings.MaxEncodedBytes; limit > 0 && len(uri) > limit {
+		return nil, fmt.Errorf(
+			"the audio is %.1f MB and %.1f MB once base64-encoded; this model accepts at most %.1f MB encoded",
+			float64(len(req.Audio))/(1<<20), float64(len(uri))/(1<<20), float64(limit)/(1<<20))
+	}
+	body := map[string]any{
 		"model": c.cfg.Endpoint.Model,
 		"messages": []any{map[string]any{
 			"role": "user",
 			"content": []any{map[string]any{
 				"type":        "input_audio",
-				"input_audio": map[string]any{"data": DataURI(audio, fileName)},
+				"input_audio": map[string]any{"data": uri},
 			}},
 		}},
 	}
+	if req.Language != "" && c.cfg.Settings.LanguageParam == catalog.LanguageASROptions {
+		body["asr_options"] = map[string]any{"language": req.Language}
+	}
+	return body, nil
 }
 
 type response struct {
@@ -102,17 +119,23 @@ type response struct {
 			Content *string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	// Usage.Seconds is the audio length, which Alibaba reports.
+	Usage struct {
+		Seconds float64 `json:"seconds"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
 // Transcribe sends one audio file.
-func (c *Client) Transcribe(ctx context.Context, audio []byte, fileName string) (*api.Transcription, error) {
+func (c *Client) Transcribe(ctx context.Context, req api.TranscriptionRequest) (*api.Transcription, error) {
+	body, err := c.BuildRequestBody(req)
+	if err != nil {
+		return nil, err
+	}
 	var decoded response
-	err := c.cfg.Endpoint.PostJSONWithRetry(
-		ctx, c.url(), c.BuildRequestBody(audio, fileName), &decoded, c.cfg.Retry, "transcription",
-	)
+	err = c.cfg.Endpoint.PostJSONWithRetry(ctx, c.url(), body, &decoded, c.cfg.Retry, "transcription")
 	if err != nil {
 		return nil, err
 	}
@@ -122,5 +145,8 @@ func (c *Client) Transcribe(ctx context.Context, audio []byte, fileName string) 
 	if len(decoded.Choices) == 0 || decoded.Choices[0].Message.Content == nil {
 		return nil, fmt.Errorf("transcription reply carries no message content")
 	}
-	return &api.Transcription{Text: strings.TrimSpace(*decoded.Choices[0].Message.Content)}, nil
+	return &api.Transcription{
+		Text:     strings.TrimSpace(*decoded.Choices[0].Message.Content),
+		Duration: decoded.Usage.Seconds,
+	}, nil
 }

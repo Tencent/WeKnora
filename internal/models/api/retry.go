@@ -49,10 +49,11 @@ func (p RetryPolicy) delay(attempt int) time.Duration {
 // Here the last error is captured in the enclosing scope on purpose and the
 // function cannot fall through without it.
 //
-// Only transport failures are retried. A non-2xx reply is the vendor
-// answering, and repeating a rejected request neither fixes it nor tells the
-// operator anything new; a reply that arrived but does not decode is the same
-// answer every time, and sending it again would bill the request twice.
+// Only transport failures are retried, including a reply cut off while it
+// was being read. A non-2xx reply is the vendor answering, and repeating a
+// rejected request neither fixes it nor tells the operator anything new; a
+// reply that arrived whole but does not decode is the same answer every time,
+// and sending it again would bill the request twice.
 func (e Endpoint) PostJSONWithRetry(
 	ctx context.Context, url string, body, out any, policy RetryPolicy, label string,
 ) error {

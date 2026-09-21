@@ -113,7 +113,12 @@ func init() {
 			// model or server can produce: OpenAI's gpt-4o transcribers accept
 			// only json, and vox-box's FunASR backend answers verbose_json with
 			// a bare JSON string. A row that wants segments sets
-			// {"response_format": "verbose_json"} in its compat.
+			// {"response_format": "verbose_json"} in its compat. The language
+			// hint goes as OpenAI's language form field, which a server that
+			// does not implement it ignores.
+			Transcriptions: catalog.TranscriptionsCompat{
+				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// Whatever the operator runs. Everything the pre-catalog client
 				// sent stays: vLLM, SGLang, TEI and Ollama's OpenAI route all

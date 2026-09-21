@@ -134,7 +134,7 @@ func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentT
 func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 	resp, err := e.httpClient().Do(req)
 	if err != nil {
-		return nil, &TransportError{Err: err}
+		return nil, &TransportError{Op: "send request", Err: err}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -172,7 +172,9 @@ func (e Endpoint) roundTrip(req *http.Request, out any) error {
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read response: %w", err)
+		// The connection broke before the reply arrived whole: nothing was
+		// received, so this is the network failing, not the vendor answering.
+		return &TransportError{Op: "read response", Err: err}
 	}
 	if out == nil {
 		return nil
@@ -183,11 +185,16 @@ func (e Endpoint) roundTrip(req *http.Request, out any) error {
 	return nil
 }
 
-// TransportError is a request that never got an HTTP answer: DNS, connect,
-// TLS, a reset or a timeout. It is the only failure worth sending again.
-type TransportError struct{ Err error }
+// TransportError is a request that never got a whole answer: DNS, connect,
+// TLS, a reset or a timeout, while sending or while reading the reply. It is
+// the only failure worth sending again.
+type TransportError struct {
+	// Op is the phase that failed: "send request" or "read response".
+	Op  string
+	Err error
+}
 
-func (e *TransportError) Error() string { return "send request: " + e.Err.Error() }
+func (e *TransportError) Error() string { return e.Op + ": " + e.Err.Error() }
 func (e *TransportError) Unwrap() error { return e.Err }
 
 // HTTPError is a non-2xx vendor reply.

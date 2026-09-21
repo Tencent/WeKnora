@@ -85,6 +85,10 @@ func init() {
 				// OpenAI-compatible multipart, json by default, verbose_json
 				// available. "The maximum upload size per request is 32 MB."
 				MaxFileBytes: catalog.Ptr(32 << 20),
+				// "flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm"; language
+				// is an ISO 639-1 form field.
+				Formats:       []string{"flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"},
+				LanguageParam: catalog.Ptr(catalog.LanguageForm),
 			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://docs.requesty.ai/api-reference/endpoint/embeddings-create:

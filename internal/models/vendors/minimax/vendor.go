@@ -106,6 +106,11 @@ func init() {
 				// json. At most 50 MB and 500 seconds; "超出会返回 400 而不会被截断".
 				Path:         catalog.Ptr("/speech_to_text"),
 				MaxFileBytes: catalog.Ptr(50 << 20),
+				// "wav / aiff / flac / alac(m4a) / mp3 / aac / opus / ogg";
+				// "不支持无容器的裸 PCM 数据". The language hint is a request
+				// header, a BCP-47 tag, not a form field.
+				Formats:       []string{"wav", "aiff", "flac", "m4a", "mp3", "aac", "opus", "ogg"},
+				LanguageParam: catalog.Ptr(catalog.LanguageHeader),
 			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:        catalog.Ptr(catalog.ThinkingFormatThinkingType),

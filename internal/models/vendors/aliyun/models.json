@@ -56,6 +56,7 @@
     {"name": "multimodal-embedding-v1", "match": "multimodal-embedding*", "type": "Embedding", "compat": {"api": "dashscope-embeddings", "dimensions_field": "", "max_batch_size": 20}, "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"},
     {"id": "qwen3-rerank", "name": "Qwen3 Rerank (separate endpoint, not implemented)", "type": "Rerank", "deprecated": true, "compat": {"unsupported_reason": "qwen3-rerank speaks a different protocol (/compatible-api/v1/reranks, flat request, results at the top level) that no protocol package implements yet"}, "source": "https://help.aliyun.com/zh/model-studio/text-rerank-api"},
     {"id": "gte-rerank-v2", "name": "GTE Rerank v2", "type": "Rerank", "source": "https://help.aliyun.com/zh/model-studio/text-rerank-api"},
-    {"id": "qwen3-asr-flash", "name": "Qwen3 ASR Flash", "type": "ASR", "source": "https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference"}
+    {"id": "qwen3-asr-flash", "name": "Qwen3 ASR Flash", "type": "ASR", "compat": {"api": "openai-chat-audio", "max_encoded_bytes": 10485760, "language_param": "asr_options"}, "source": "https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference"},
+    {"name": "Other Alibaba recognition models (not callable with the audio in the request)", "match": "*", "type": "ASR", "compat": {"unsupported_reason": "Alibaba's other recognition models take a public file URL or run as asynchronous tasks; only qwen3-asr-flash accepts the audio in the request"}, "source": "https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference"}
   ]
 }
