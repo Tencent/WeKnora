@@ -27,4 +27,6 @@ dependencies = [
     "requests>=2.33.0",
     "textract==1.5.0",
     "trafilatura>=2.0.0",
+    "youtube-transcript-api>=0.6.2",
+    "yt-dlp>=2024.12.13",
 ]
