@@ -3,6 +3,7 @@ package langfuse
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -46,8 +47,11 @@ type Span struct {
 	span    trace.Span
 	manager *Manager
 	name    string
-	// metadata holds the metadata set at StartSpan so Finish can merge (not
-	// overwrite) the finish-time metadata into it before serializing.
+	// metadata holds the metadata set at StartSpan (and merged later via
+	// SetMetadata) so Finish can merge (not overwrite) the finish-time
+	// metadata into it before serializing. Guarded by mu because SetMetadata
+	// may be called from a different pipeline phase than Finish.
+	mu       sync.Mutex
 	metadata map[string]interface{}
 	// autoTrace is a non-nil root trace this span implicitly opened because
 	// ctx carried none; Finish must End it so the root is exported.
@@ -242,6 +246,26 @@ func (m *Manager) startSpan(ctx context.Context, opts SpanOptions, createTrace b
 	}
 }
 
+// SetMetadata merges kv into the span's metadata after StartSpan, for
+// facts that only become known mid-span (e.g. an IntentGate verdict produced
+// inside a tool span). The merged map is exported as
+// langfuse.observation.metadata at Finish; later SetMetadata calls win on
+// key conflict. No-op on a disabled or nil span, so callers can wire it
+// unconditionally (same contract as Finish).
+func (s *Span) SetMetadata(kv map[string]interface{}) {
+	if s == nil || s.manager == nil || !s.manager.Enabled() || s.span == nil || len(kv) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.metadata == nil {
+		s.metadata = make(map[string]interface{}, len(kv))
+	}
+	for k, v := range kv {
+		s.metadata[k] = v
+	}
+}
+
 // Finish updates a span with its final output, extra metadata and any error.
 // A non-nil err marks the span as ERROR. Finish-time metadata is merged on top
 // of the metadata set at StartSpan (finish keys win) rather than discarded, so
@@ -253,7 +277,10 @@ func (s *Span) Finish(output interface{}, metadata map[string]interface{}, err e
 		return
 	}
 	attrs := []attribute.KeyValue{jsonAttr(attrObsOutput, output)}
-	if merged := mergeMetadata(s.metadata, metadata); merged != nil {
+	s.mu.Lock()
+	merged := mergeMetadata(s.metadata, metadata)
+	s.mu.Unlock()
+	if merged != nil {
 		attrs = append(attrs, jsonAttr(attrObsMetadata, merged))
 	}
 	s.span.SetAttributes(attrs...)

@@ -554,7 +554,7 @@ func (e *AgentEngine) runToolCall(
 		// 现阶段只有 observe 语义——任何 verdict 只记录不拦截；enforce
 		// 接线属于后续 ticket。nil Gate 时此调用完全跳过，行为零变化。
 		if e.intentGate != nil {
-			e.evaluateIntentGate(toolCtx, tc, target, sessionID)
+			e.evaluateIntentGate(toolCtx, tc, target, toolSpan, sessionID)
 		}
 		execCtx, toolCancel := context.WithTimeout(toolExecCtx, execTimeout)
 		result, err = e.toolRegistry.ExecuteTool(
@@ -628,17 +628,31 @@ func (e *AgentEngine) runToolCall(
 	return toolCall
 }
 
+// intentVerdictSpanMetadata 把一次判定结果整形为 agent.tool.<name> span 的
+// metadata（设计 §10）。四个 intent.* 键恒在：spike/基线判定无策略命中时
+// intent.policy_id 为空串（键不缺席，便于按字段对账）。
+func intentVerdictSpanMetadata(v intentgate.Verdict, latencyMs int64) map[string]interface{} {
+	return map[string]interface{}{
+		"intent.verdict":    string(v.Action),
+		"intent.layer":      string(v.Layer),
+		"intent.policy_id":  v.PolicyID,
+		"intent.latency_ms": latencyMs,
+	}
+}
+
 // evaluateIntentGate 在工具执行点前调用 IntentGate（设计 §7 插入点）。
-// 现阶段只实现 observe 语义：任何 verdict（含 deny）都只记录不拦截，
-// verdict 走结构化日志落地（Langfuse span metadata 属于 T04 观测面）。
-// Evaluate 出错按设计 §9 fail-open：记 warn 日志后照常执行，observe
+// 现阶段只实现 observe 语义：任何 verdict（含 deny）都只记录不拦截。
+// 观测面（设计 §10）：verdict 的 action/layer/policy_id/latency_ms 写入
+// agent.tool.<name> span 的 metadata，同时发一条带 verdict 字段的结构化
+// 日志。Evaluate 出错按设计 §9 fail-open：记 warn 日志后照常执行，observe
 // 期一个被误拦的调用都不能有。
 //
 // ToolCallInput 的 UserPrompt/History（意图基准）需要 engine 循环的
 // messages 管线，由规则引擎/judge 落地 ticket（T03/T30）接线；本接缝
 // 只填执行点本地可得的字段。
 func (e *AgentEngine) evaluateIntentGate(
-	ctx context.Context, tc types.LLMToolCall, target *types.ToolCallTarget, sessionID string,
+	ctx context.Context, tc types.LLMToolCall, target *types.ToolCallTarget,
+	toolSpan *langfuse.Span, sessionID string,
 ) {
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	principal, _ := types.PrincipalFromContext(ctx)
@@ -652,13 +666,26 @@ func (e *AgentEngine) evaluateIntentGate(
 	if target != nil {
 		input.ServiceID = target.ServiceName
 	}
+	evalStart := time.Now()
 	verdict, err := e.intentGate.Evaluate(ctx, input)
+	latencyMs := time.Since(evalStart).Milliseconds()
 	if err != nil {
 		logger.Warnf(ctx, "[Agent][IntentGate] evaluate failed for tool %s (fail-open): %v",
 			tc.Function.Name, err)
 		return
 	}
-	logger.Infof(ctx,
-		"[Agent][IntentGate] verdict: tool=%s tool_call_id=%s action=%s layer=%s policy_id=%s reason=%s",
-		tc.Function.Name, tc.ID, verdict.Action, verdict.Layer, verdict.PolicyID, verdict.Reason)
+	toolSpan.SetMetadata(intentVerdictSpanMetadata(verdict, latencyMs))
+	// 结构化日志：verdict/layer/policy_id/latency_ms 等作为日志字段输出，
+	// 日志采集侧无需解析自由文本即可按字段检索。
+	logger.Infof(logger.WithFields(ctx, logger.Fields{
+		"verdict":      string(verdict.Action),
+		"layer":        string(verdict.Layer),
+		"policy_id":    verdict.PolicyID,
+		"latency_ms":   latencyMs,
+		"tool":         tc.Function.Name,
+		"tool_call_id": tc.ID,
+		"session_id":   sessionID,
+		"tenant_id":    tenantID,
+		"reason":       verdict.Reason,
+	}), "[Agent][IntentGate] verdict")
 }

@@ -127,12 +127,100 @@ func TestIntentGateObserveDenyStillExecutes(t *testing.T) {
 	if toolCall.Result == nil || !toolCall.Result.Success {
 		t.Fatalf("observe-mode deny must not fail the tool call, got %+v", toolCall.Result)
 	}
-	// verdict 被记录：结构化日志含 action / policy / reason。
+	// verdict 被记录：结构化日志含 verdict / layer / policy_id / latency_ms 字段。
 	out := buf.String()
-	for _, want := range []string{"deny", "pol-1", "会话历史无删除意图"} {
+	for _, want := range []string{
+		"verdict=deny", "layer=rule", "policy_id=pol-1", "latency_ms=",
+		"tool=search_knowledge", "tool_call_id=call-1", "session_id=session-1",
+		"会话历史无删除意图",
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("verdict log must contain %q, got:\n%s", want, out)
 		}
+	}
+}
+
+// TestIntentVerdictSpanMetadataFields 验收 [unit]：span metadata 字段完整性——
+// intent.verdict / intent.layer / intent.policy_id / intent.latency_ms 四键
+// 恒在（设计 §10），取值与 Verdict 一致；无策略命中（spike/基线）时
+// policy_id 为空串但键不缺席，latency_ms 为 int64 毫秒。
+func TestIntentVerdictSpanMetadataFields(t *testing.T) {
+	md := intentVerdictSpanMetadata(intentgate.Verdict{
+		Action:   intentgate.ActionDeny,
+		Layer:    intentgate.LayerRule,
+		PolicyID: "pol-1",
+		Reason:   "r",
+	}, 7)
+	for _, k := range []string{"intent.verdict", "intent.layer", "intent.policy_id", "intent.latency_ms"} {
+		if _, ok := md[k]; !ok {
+			t.Fatalf("span metadata missing key %q, got %v", k, md)
+		}
+	}
+	if md["intent.verdict"] != "deny" {
+		t.Fatalf("intent.verdict = %#v", md["intent.verdict"])
+	}
+	if md["intent.layer"] != "rule" {
+		t.Fatalf("intent.layer = %#v", md["intent.layer"])
+	}
+	if md["intent.policy_id"] != "pol-1" {
+		t.Fatalf("intent.policy_id = %#v", md["intent.policy_id"])
+	}
+	if md["intent.latency_ms"] != int64(7) {
+		t.Fatalf("intent.latency_ms = %#v (want int64(7))", md["intent.latency_ms"])
+	}
+
+	// 无策略命中（spike/基线判定）：四键仍齐全，policy_id 为空串。
+	baseline := intentVerdictSpanMetadata(intentgate.Verdict{Action: intentgate.ActionAllow}, 0)
+	if v, ok := baseline["intent.policy_id"]; !ok || v != "" {
+		t.Fatalf("baseline intent.policy_id = %#v (present=%v), want empty string", v, ok)
+	}
+	if v := baseline["intent.latency_ms"]; v != int64(0) {
+		t.Fatalf("baseline intent.latency_ms = %#v, want int64(0)", v)
+	}
+	if baseline["intent.verdict"] != "allow" {
+		t.Fatalf("baseline intent.verdict = %#v", baseline["intent.verdict"])
+	}
+}
+
+// TestIntentGateVerdictLogHarness 是 [cli] 验收的驱动入口：用真 SpikeGate
+// （非 fake）+ 真 toolRegistry 各触发一次 deny 与 allow 工具调用。日志不做
+// 重定向，随 go test 标准输出落地（或设 LOG_PATH 落盘），供命令行 grep
+// 断言含 verdict 字段的结构化记录：
+//
+//	go test ./internal/agent/ -run TestIntentGateVerdictLogHarness -v | grep 'verdict='
+//
+// 双向断言：deny 与 allow 两个方向的调用都必须执行成功（observe 语义
+// 不拦截），各自产生一条结构化 verdict 记录。
+func TestIntentGateVerdictLogHarness(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = tools.NewToolRegistry()
+	succeed := func(context.Context) *types.ToolResult { return &types.ToolResult{Success: true} }
+	engine.toolRegistry.RegisterTool(&orderedTestTool{
+		BaseTool: tools.NewBaseTool("shell_exec", "", json.RawMessage(`{"type":"object"}`)),
+		run:      succeed,
+	})
+	engine.toolRegistry.RegisterTool(&orderedTestTool{
+		BaseTool: tools.NewBaseTool("search_knowledge", "", json.RawMessage(`{"type":"object"}`)),
+		run:      succeed,
+	})
+	engine.SetIntentGate(intentgate.NewSpikeGate())
+
+	// deny 方向：shell_exec rm -rf ~ 而会话无删除意图（spike 规则 3）。
+	denyCall := engine.runToolCall(context.Background(), types.LLMToolCall{
+		ID:       "cli-deny-1",
+		Function: types.FunctionCall{Name: "shell_exec", Arguments: `{"command":"rm -rf ~"}`},
+	}, 0, 0, 1, "cli-session", "msg-1")
+	if denyCall.Result == nil || !denyCall.Result.Success {
+		t.Fatalf("observe deny must not block execution, got %+v", denyCall.Result)
+	}
+
+	// allow 方向：普通检索调用不命中任何 spike 规则。
+	allowCall := engine.runToolCall(context.Background(), types.LLMToolCall{
+		ID:       "cli-allow-1",
+		Function: types.FunctionCall{Name: "search_knowledge", Arguments: `{"query":"活动方案"}`},
+	}, 1, 0, 1, "cli-session", "msg-1")
+	if allowCall.Result == nil || !allowCall.Result.Success {
+		t.Fatalf("allow verdict must execute successfully, got %+v", allowCall.Result)
 	}
 }
 
