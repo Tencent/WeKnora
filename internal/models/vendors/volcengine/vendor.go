@@ -54,7 +54,9 @@
 //     (the API key field carries the access key; the secret key, region and
 //     instruction come from the rerank-only extra fields). Documented models
 //     are doubao-seed-rerank and base-multilingual-rerank
-//     (https://www.volcengine.com/docs/84313/1254474);
+//     (https://www.volcengine.com/docs/84313/1254474). datas takes at most
+//     200 items, and the default instruction is the console's, verbatim, as
+//     the page asks for results that match the console;
 //   - Ark additionally serves an Anthropic Messages surface at
 //     https://ark.cn-beijing.volces.com/api/compatible/v1 with x-api-key
 //     auth. This package configures OpenAI Chat Completions, which is the
@@ -67,10 +69,6 @@
 // unverified: the model list spells lengths as "256k" / "1024k" without
 // saying whether k is 1000 or 1024, so the context windows in models.json are
 // left at their present values.
-//
-// unverified: the rerank instruction default here capitalises Document /
-// Query while the console default in the docs is lower case; it is kept in
-// sync with internal/models/rerank instead.
 //
 // unverified: prices in models.json come from the Ark pricing console, which
 // the public docs do not render.
@@ -179,7 +177,7 @@ func init() {
 				Label:       "Rerank Instruction",
 				Labels:      map[string]string{"zh-CN": "重排指令"},
 				Type:        "string",
-				Default:     "Whether the Document answers the Query or matches the content retrieval intent",
+				Default:     "Whether the document answers the query or matches the content retrieval intent",
 				Placeholder: "Instruction passed to the rerank model",
 				Placeholders: map[string]string{
 					"zh-CN": "传给重排模型的 instruction",
@@ -223,7 +221,11 @@ func init() {
 				MaxBatchSize:       catalog.Ptr(1),
 			},
 			Rerank: catalog.RerankCompat{
-				MaxDocuments:   catalog.Ptr(50),
+				// datas "数组长度不超过 200"
+				// (https://docs.volcengine.com/docs/vector_database_vikingdb/Rerank).
+				// The pre-catalog client split at 50, a constant of its own
+				// rather than a documented ceiling.
+				MaxDocuments:   catalog.Ptr(200),
 				MaxConcurrency: catalog.Ptr(4),
 			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
