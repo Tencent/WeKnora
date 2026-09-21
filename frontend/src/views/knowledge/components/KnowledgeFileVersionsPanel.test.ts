@@ -47,7 +47,7 @@ const version = (number: number, knowledgeId = 'doc', current = true) => ({
 const response = (number: number, knowledgeId = 'doc', total = 1) => ({ success: true, data: { items: [version(number, knowledgeId)], total } })
 
 async function fixture(options: {
-  canUpload?: boolean; canDownload?: boolean; status?: string;
+  canUpload?: boolean; canDownload?: boolean; status?: string; initialFile?: File;
   list?: (...args: any[]) => Promise<any>; upload?: (...args: any[]) => Promise<any>;
 } = {}) {
   const calls = { list: [] as any[][], upload: [] as any[][], download: [] as any[][], uploaded: [] as string[], warnings: [] as string[] }
@@ -66,10 +66,11 @@ async function fixture(options: {
     }
     throw new Error('Unexpected import: ' + name)
   } })
-  const props = vue.reactive({ visible: true, knowledge: { id: 'doc', file_name: 'document.pdf', parse_status: options.status || 'completed' }, canUpload: options.canUpload ?? true, canDownload: options.canDownload ?? true })
+  const props = vue.reactive({ visible: true, knowledge: { id: 'doc', file_name: 'document.pdf', parse_status: options.status || 'completed' }, canUpload: options.canUpload ?? true, canDownload: options.canDownload ?? true, initialFile: options.initialFile })
   const root = node('root')
   const app = renderer.createApp({ setup: () => () => vue.h(exports.default!, { ...props,
     onUploaded: (id: string) => calls.uploaded.push(id),
+    onFileConsumed: () => { props.initialFile = undefined },
     'onUpdate:visible': (visible: boolean) => { props.visible = visible },
   }) })
   for (const [name, type] of [['t-icon', 'icon'], ['t-button', 'button'], ['t-tag', 'tag'], ['t-loading', 'loading'], ['t-pagination', 'pagination']]) {
@@ -164,4 +165,67 @@ test('empty uploads are rejected before enabling confirmation', async t => {
   assert.deepEqual(f.calls.warnings, ['knowledgeBase.fileVersions.invalidSize'])
   assert.equal(all(f.root, el => el.type === 'button' && textOf(el).trim() === 'knowledgeBase.fileVersions.confirmUpload').length, 0)
   assert.equal(f.calls.upload.length, 0)
+})
+
+
+test('a file selected from the card menu is confirmed once and is not restored when history reopens', async t => {
+  const file = { name: 'menu-selection.pdf', size: 512 } as File
+  const f = await fixture({ initialFile: file }); t.after(f.close)
+  assert.ok(textOf(f.root).includes(file.name))
+  assert.equal(f.props.initialFile, undefined)
+  assert.equal(f.calls.upload.length, 0)
+  await f.fire(f.uploadButton())
+  assert.deepEqual(f.calls.upload, [['doc', file, 3]])
+  f.props.visible = false; await f.settle()
+  f.props.visible = true; await f.settle()
+  assert.equal(textOf(f.root).includes(file.name), false)
+})
+
+test('menu-selected files cannot bypass the processing guard', async t => {
+  const f = await fixture({ status: 'processing', initialFile: { name: 'menu.pdf', size: 512 } as File }); t.after(f.close)
+  assert.equal(textOf(f.root).includes('menu.pdf'), false)
+  assert.equal(f.props.initialFile, undefined)
+  assert.equal(f.calls.upload.length, 0)
+})
+
+async function menuFixture(canMutateKnowledge: boolean, canDownload: boolean, type = 'file', parse_status = 'completed') {
+  const { descriptor } = parse(readFileSync(new URL('./DocumentActionMenu.vue', import.meta.url), 'utf8'))
+  const code = ts.transpileModule(compileScript(descriptor, { id: 'menu-test', inlineTemplate: true }).content, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const exports: { default?: vue.Component } = {}
+  runInNewContext(code, { exports, require: (name: string) => { assert.equal(name, 'vue'); return vue } })
+  const root = node('root')
+  let uploads = 0
+  const app = renderer.createApp({ setup: () => () => vue.h(exports.default!, {
+    item: { id: 'doc', type, parse_status }, canMutateKnowledge, canDownload, traceVisible: false,
+    onUploadVersion: () => uploads++,
+  }) })
+  app.config.globalProperties.$t = translate
+  for (const name of ['t-icon', 't-popconfirm']) app.component(name, { setup: (_props: any, { slots }: any) => () => vue.h('span', {}, slots.default?.()) })
+  app.mount(root); await vue.nextTick()
+  return { root, uploads: () => uploads, close: () => app.unmount() }
+}
+
+test('upload menu entry requires file type, edit permission and original download permission', async () => {
+  for (const [edit, download, type, expected] of [
+    [true, true, 'file', 1], [false, true, 'file', 0], [true, false, 'file', 0], [true, true, 'manual', 0],
+  ] as const) {
+    const f = await menuFixture(edit, download, type)
+    try {
+      const entries = all(f.root, el => hasClass(el, 'doc-action-menu-item') && textOf(el).trim() === 'knowledgeBase.fileVersions.upload')
+      assert.equal(entries.length, expected)
+      if (entries[0]) { entries[0].props.onClick({ stopPropagation() {} }); assert.equal(f.uploads(), 1) }
+    } finally { f.close() }
+  }
+})
+
+test('processing disables the upload menu entry', async () => {
+  const f = await menuFixture(true, true, 'file', 'processing')
+  try {
+    const entry = all(f.root, el => hasClass(el, 'doc-action-menu-item') && textOf(el).trim() === 'knowledgeBase.fileVersions.upload')[0]!
+    assert.equal(entry.props['aria-disabled'], true)
+    entry.props.onClick({ stopPropagation() {} })
+    assert.equal(f.uploads(), 0)
+  } finally { f.close() }
 })

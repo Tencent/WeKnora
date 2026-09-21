@@ -17,9 +17,11 @@ const props = defineProps<{
   knowledge: { id: string; file_name?: string; title?: string; parse_status?: string } | null;
   canUpload: boolean;
   canDownload: boolean;
+  initialFile?: File | null;
 }>();
 const emit = defineEmits<{
   (e: 'uploaded', knowledgeId: string): void;
+  (e: 'file-consumed'): void;
 }>();
 const { t, locale } = useI18n();
 const items = ref<KnowledgeFileVersion[]>([]);
@@ -73,6 +75,12 @@ watch(() => [props.visible, props.knowledge?.id] as const, () => {
   loading.value = false;
   if (fileInput.value) fileInput.value.value = '';
   if (props.visible) void loadPage();
+}, { immediate: true });
+
+watch(() => [props.visible, props.knowledge?.id, props.initialFile], () => {
+  if (!props.visible || !props.knowledge?.id || !props.initialFile) return;
+  acceptFile(props.initialFile);
+  emit('file-consumed');
 }, { immediate: true });
 
 function selectFile(event: Event) {
@@ -160,11 +168,11 @@ const formatDate = (value: string) => new Date(value).toLocaleString(locale.valu
             <div class="version-heading">
               <strong>v{{ version.version }}</strong>
               <span v-if="version.is_current" class="current-label">{{ t('knowledgeBase.fileVersions.current') }}</span>
-              <span class="version-size">{{ formatFileSize(version.file_size) }}</span>
             </div>
             <div class="version-date" :title="version.file_name">{{ formatDate(version.created_at) }}</div>
           </div>
-          <t-button v-if="canDownload" theme="default" variant="text" shape="square" size="small"
+          <span class="version-size">{{ formatFileSize(version.file_size) }}</span>
+          <t-button v-if="canDownload" class="version-download" theme="default" variant="text" shape="square" size="small"
             :title="t('common.download') + ' · v' + version.version"
             :aria-label="t('common.download') + ' · v' + version.version"
             :loading="downloading === version.version" :disabled="downloading !== undefined" @click="download(version)">
@@ -205,13 +213,14 @@ const formatDate = (value: string) => new Date(value).toLocaleString(locale.valu
 .version-count { padding: 0 6px; border-radius: 9px; background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font-size: 11px; }
 .history-loading { min-height: 55px; width: 100%; }
 .version-list { list-style: none; margin: 0; padding: 0 6px 6px; max-height: 320px; overflow-y: auto; }
-.version-row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 5px; }
+.version-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 24px; align-items: center; column-gap: 12px; padding: 10px; border-radius: 5px; }
 .version-row:hover { background: var(--td-bg-color-container-hover); }
 .version-meta { flex: 1; min-width: 0; }
 .version-heading { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .version-heading strong { font-weight: 600; font-variant-numeric: tabular-nums; }
 .current-label { font-size: 10px; font-weight: 500; padding: 0 5px; line-height: 18px; border-radius: 3px; color: var(--td-text-color-secondary); background: var(--td-bg-color-secondarycontainer); }
-.version-size { margin-left: auto; font-size: 11px; color: var(--td-text-color-placeholder); }
+.version-size { text-align: right; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--td-text-color-secondary); }
+.version-download { justify-self: end; }
 .version-date { margin-top: 4px; font-size: 11px; line-height: 18px; color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
 .version-footer { padding: 8px; border-top: 1px solid var(--td-component-stroke); }
 .file-input { display: none; }

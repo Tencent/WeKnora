@@ -21,6 +21,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'download'): void;
   (e: 'versions'): void;
+  (e: 'upload-version'): void;
   (e: 'edit'): void;
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
@@ -55,6 +56,14 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   <div v-if="item.type === 'file'" class="doc-action-menu-item" @click.stop="emit('versions')">
     <t-icon class="icon" name="history" />
     <span>{{ $t('knowledgeBase.fileVersions.title') }}</span>
+  </div>
+
+  <div v-if="item.type === 'file' && canMutateKnowledge && canDownload" class="doc-action-menu-item"
+    :class="{ disabled: isParseInFlight }" :aria-disabled="isParseInFlight"
+    :title="isParseInFlight ? $t('knowledgeBase.fileVersions.processing') : undefined"
+    @click.stop="!isParseInFlight && emit('upload-version')">
+    <t-icon class="icon" name="upload" />
+    <span>{{ $t('knowledgeBase.fileVersions.upload') }}</span>
   </div>
 
   <!-- 编辑文档 -->
@@ -161,6 +170,13 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
 
   &:hover .icon {
     color: var(--td-text-color-primary);
+  }
+
+  &.disabled {
+    color: var(--td-text-color-disabled);
+    cursor: not-allowed;
+    background: transparent;
+    .icon { color: inherit; }
   }
 
   &.danger {

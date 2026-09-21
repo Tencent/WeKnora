@@ -240,8 +240,8 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId", "showVersionHistory"]);
-const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange", "fileVersionUploaded"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId", "showVersionHistory", "versionUploadFile"]);
+const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange", "fileVersionUploaded", "versionUploadFileConsumed"]);
 
 const versionHistoryVisible = ref(false);
 const versionHistoryPopup = ref();
@@ -1586,7 +1586,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
         <div class="doc-drawer-resize-line" />
       </div>
     </teleport>
-    <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
+    <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="false"
       :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
       @close="handleClose" @transitionend="versionHistoryPopup?.update()">
       <template #header>
@@ -1616,6 +1616,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
               <template #content>
                 <KnowledgeFileVersionsPanel :visible="visible && versionHistoryVisible" :knowledge="details"
                   :can-upload="canEditContent && !!canDownloadKB" :can-download="!!canDownloadKB"
+                  :initial-file="versionUploadFile" @file-consumed="emit('versionUploadFileConsumed')"
                   @uploaded="emit('fileVersionUploaded', $event)" />
               </template>
             </t-popup>
@@ -1624,6 +1625,10 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
               <template #icon>
                 <t-icon name="chart-line" size="16px" />
               </template>
+            </t-button>
+            <t-button class="header-action-btn" size="small" variant="text" shape="square" theme="default"
+              :title="$t('common.close')" :aria-label="$t('common.close')" @click="handleClose">
+              <template #icon><t-icon name="close" size="16px" /></template>
             </t-button>
           </div>
         </div>
@@ -2268,7 +2273,6 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
   gap: 10px;
   min-width: 0;
   width: 100%;
-  padding-right: 32px;
 }
 
 .doc-drawer-header-icon {
