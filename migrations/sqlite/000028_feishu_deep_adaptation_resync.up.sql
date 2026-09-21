@@ -1,5 +1,5 @@
--- Migration 000027: feishu deep adaptation — one-shot full-resync marker.
--- (Postgres twin: versioned/000108_feishu_deep_adaptation_resync.)
+-- Migration 000028: feishu deep adaptation — one-shot full-resync marker.
+-- (Postgres twin: versioned/000109_feishu_deep_adaptation_resync.)
 --
 -- Legacy feishu/lark data sources created before the deep-adaptation feature
 -- hold documents ingested through the export path with no knowledge-base

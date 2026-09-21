@@ -1,4 +1,4 @@
--- Migration 000108: feishu deep adaptation — one-shot full-resync marker.
+-- Migration 000109: feishu deep adaptation — one-shot full-resync marker.
 --
 -- Legacy feishu/lark data sources created before the deep-adaptation feature
 -- hold documents ingested through the export path with no knowledge-base

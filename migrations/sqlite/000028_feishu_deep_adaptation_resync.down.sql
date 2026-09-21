@@ -1,4 +1,4 @@
--- Migration 000027 down: drop the one-shot resync marker.
+-- Migration 000028 down: drop the one-shot resync marker.
 
 UPDATE data_sources
 SET config = json_remove(config, '$.settings.resync_required')

@@ -1,4 +1,4 @@
--- Migration 000108 down: drop the one-shot resync marker.
+-- Migration 000109 down: drop the one-shot resync marker.
 
 UPDATE data_sources
 SET config = config #-'{settings,resync_required}'
