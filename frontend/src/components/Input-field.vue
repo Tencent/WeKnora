@@ -519,6 +519,10 @@ const props = defineProps({
     type: Boolean,
     required: false
   },
+  composerLocked: {
+    type: Boolean,
+    default: false
+  },
   sessionId: {
     type: String,
     required: false
@@ -1943,6 +1947,9 @@ const createSession = async (
   delivery: 'inject' | 'after' = 'after',
   options: SendMessageOptions = {},
 ) => {
+  if (props.composerLocked) {
+    return;
+  }
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
@@ -2301,6 +2308,7 @@ const steerShortcutLabel = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ Ent
 const firstQueuedSteer = computed(() => props.queuedSteers.find(item =>
   item.delivery === 'after' && !item.pending && !item.promoting && !item.failed));
 const injectCurrentInput = () => {
+  if (props.composerLocked) return;
   if (!props.isReplying || !props.canSteer) return;
   if (query.value.trim()) void createSession(query.value, 'inject');
   else if (firstQueuedSteer.value) emit('promote-steer', firstQueuedSteer.value.steer_id);
@@ -2350,6 +2358,7 @@ const onKeydown = (val: string, event: { e: KeyboardEvent }) => {
   const delivery = chatSubmitShortcut(event.e, props.isReplying && props.canSteer);
   if (delivery) {
     event.e.preventDefault();
+    if (props.composerLocked) return;
     if (delivery === 'inject' && props.isReplying && props.canSteer) injectCurrentInput();
     else void createSession(val, delivery);
   }
@@ -2892,7 +2901,7 @@ defineExpose({
           </t-tooltip>
           <t-tooltip v-else :content="`${isReplying && canSteer ? $t('input.steerAfter') : $t('input.send')} · Enter`">
             <button type="button" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
-              :disabled="!query.trim()" :class="{ 'disabled': !query.trim() }"
+              :disabled="!query.trim() || composerLocked" :class="{ 'disabled': !query.trim() || composerLocked }"
               :aria-label="isReplying && canSteer ? $t('input.steerAfter') : $t('input.send')">
               <t-icon name="arrow-up" />
             </button>

@@ -22,10 +22,14 @@ import (
 type streamLLMResult struct {
 	Content          string
 	ReasoningContent string // accumulated reasoning content, kept separate from answer
-	ToolCalls        []types.LLMToolCall
-	Usage            *types.TokenUsage
-	FinishReason     string // actual finish_reason from LLM (captured from last stream chunk)
-	StreamError      string // error message from stream (e.g., timeout), kept separate from Content
+	// ReasoningSignature / ReasoningMetadata arrive on the closing chunk's
+	// Data and must be persisted with the step for replay.
+	ReasoningSignature string
+	ReasoningMetadata  types.ProviderMetadata
+	ToolCalls          []types.LLMToolCall
+	Usage              *types.TokenUsage
+	FinishReason       string // actual finish_reason from LLM (captured from last stream chunk)
+	StreamError        string // error message from stream (e.g., timeout), kept separate from Content
 }
 
 // streamLLMToEventBus streams LLM response through EventBus (generic method)
@@ -132,6 +136,12 @@ func (e *AgentEngine) streamLLMToEventBus(
 
 		if chunk.FinishReason != "" {
 			result.FinishReason = chunk.FinishReason
+		}
+		if sig, ok := chunk.Data["reasoning_signature"].(string); ok && sig != "" {
+			result.ReasoningSignature = sig
+		}
+		if md, ok := chunk.Data["reasoning_metadata"].(types.ProviderMetadata); ok && len(md) > 0 {
+			result.ReasoningMetadata = md
 		}
 
 		if emitFunc != nil {
@@ -257,6 +267,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		MaxCompletionTokens: budget,
 		Tools:               tools,
 		Thinking:            e.config.Thinking,
+		ReasoningEffort:     chat.SanitizeReasoningEffort(ctx, e.config.ReasoningEffort, "agent config"),
 		ParallelToolCalls:   &parallelToolCalls,
 		PromptCacheKey:      sessionID,
 	}
@@ -456,11 +467,13 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	}
 
 	resp := &types.ChatResponse{
-		Content:          fullContent,
-		ReasoningContent: llmResult.ReasoningContent,
-		ToolCalls:        llmResult.ToolCalls,
-		FinishReason:     finishReason,
-		AnswerStreamed:   answerStreamed,
+		Content:            fullContent,
+		ReasoningContent:   llmResult.ReasoningContent,
+		ReasoningSignature: llmResult.ReasoningSignature,
+		ReasoningMetadata:  llmResult.ReasoningMetadata,
+		ToolCalls:          llmResult.ToolCalls,
+		FinishReason:       finishReason,
+		AnswerStreamed:     answerStreamed,
 	}
 	if answerStreamed {
 		resp.AnswerEventID = answerID

@@ -2375,6 +2375,8 @@ export default {
       }
     },
     debug: {
+      reasoningEffort: '思考强度',
+      reasoningEffortDesc: '按模型目录上报的等级发送 reasoning_effort',
       title: '模型测试',
       description: '使用已保存的模型配置发送真实请求；编辑中的修改需保存后才会生效',
       groupModel: '选择模型',
@@ -2397,15 +2399,11 @@ export default {
       audioFile: '音频文件',
       chooseFile: '选择文件',
       parameters: '请求参数',
-      thinking: '思考模式',
-      thinkingDesc: '仅对支持思考模式的模型生效',
       systemPrompt: 'System Prompt',
       systemPromptPlaceholder: '可选，输入系统提示词',
       run: '运行测试',
       copyResult: '复制结果',
       history: '历史记录',
-      thinkOn: '思考开启',
-      thinkOff: '思考关闭',
       runLabel: '第 {n} 次运行',
       success: '调用成功',
       failed: '调用失败',
@@ -2413,6 +2411,9 @@ export default {
       requestPreview: '请求预览',
       requestFailed: '模型测试请求失败',
       metrics: {
+        api: '协议',
+        thinkingFormat: '思考格式',
+        requestedReasoningEffort: '请求思考强度',
         dimension: '向量维度',
         resultCount: '结果数量',
         answerChars: '回答字符数',
@@ -2755,6 +2756,28 @@ export default {
     languageSaved: '语言设置已保存'
   },
   model: {
+    reasoning: {
+      levels: {
+        off: '关闭',
+        auto: '自动',
+        minimal: '极低',
+        low: '低',
+        medium: '中',
+        high: '高',
+        xhigh: '极高',
+        max: '最大',
+      },
+      levelDescriptions: {
+        off: '关闭思考，不写入任何思考参数',
+        auto: '厂商默认强度，由模型自行决定思考深度',
+        minimal: '最少思考，响应最快',
+        low: '轻度思考',
+        medium: '中等思考强度',
+        high: '深度思考，响应更慢',
+        xhigh: '超高强度思考（仅部分模型支持）',
+        max: '最大思考预算（仅部分模型支持）',
+      },
+    },
     modelName: '模型名称',
     defaultTag: '默认',
     addModelInSettings: '前往全局设置添加模型',
@@ -2763,6 +2786,53 @@ export default {
     searchPlaceholder: '搜索模型...',
     builtinTag: '内置',
     editor: {
+      maxOutputTokensLabel: '最大输出 tokens',
+      maxOutputTokensPlaceholder: '留空使用目录默认',
+      maxOutputTokensDesc: '单次回复的输出上限。留空则沿用目录中该模型的默认值。',
+      catalog: {
+        reasoning: '推理',
+        vision: '视觉',
+        hint: '可从厂商内置目录选择，也可直接输入自定义模型名。',
+      },
+      resolved: {
+        title: '实际调用方式',
+        empty: '填写厂商与模型名后，这里会显示这个模型将被怎样调用',
+        failed: '解析失败',
+        protocol: '请求协议',
+        catalog: '能力来源',
+        catalogedYes: '内置模型档案',
+        catalogedNo: '厂商通用默认（未收录此模型）',
+        endpoint: '请求地址',
+        thinkingFormat: '思考开关传参',
+        thinkingLevels: '可选思考强度',
+        noThinking: '该模型不支持思考',
+      },
+      advanced: {
+        toggle: '高级',
+        api: {
+          label: '协议覆盖',
+          auto: '自动（按厂商 / URL 推断）',
+          desc: '强制使用指定的请求协议；一般无需修改。',
+        },
+        remoteModelName: {
+          label: '远端模型名',
+          placeholder: '留空与模型名相同',
+          desc: '实际发送给厂商的模型 ID，与上面的模型名不同时填写。',
+        },
+        legacyThinking: {
+          label: '思考参数格式（旧配置）',
+          catalog: '遵循目录默认（推荐）',
+          none: '不写入思考参数',
+          desc: '此模型仍带有旧版 thinking_control 设置。选择「遵循目录默认」后由目录决定思考参数的写法。',
+        },
+        compat: {
+          label: '协议兼容覆盖（JSON）',
+          placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
+          desc: '按协议合并到目录默认值的兼容开关，字段见后端 catalog/compat.go。留空表示不覆盖。',
+          invalid: 'JSON 格式不正确',
+          mustBeObject: '必须是 JSON 对象',
+        },
+      },
       addTitle: '添加模型',
       editTitle: '编辑模型',
       sectionType: '模型类型',
@@ -2809,8 +2879,6 @@ export default {
       maxConcurrencyLabel: '后台并发上限',
       maxConcurrencyPlaceholder: '0 表示使用全局默认',
       maxConcurrencyDesc: '限制文档入库/富化等后台任务对该模型的并发调用数（按模型全副本共享）。0 或留空表示沿用全局默认；不影响交互式对话。',
-      thinkingControlLabel: '思考模式参数格式',
-      thinkingControlDesc: '决定智能体「思考模式」开/关时如何写入 API。已尝试按厂商/模型预选，若与实际情况不符请按 API 文档手动修改；选「不写入」时，智能体「思考模式」开关不生效。',
       dimensionHint: '模型已选择，点击"检测维度"按钮自动获取向量维度',
       loadModelListFailed: '加载模型列表失败',
       listRefreshed: '列表已刷新',
@@ -2833,154 +2901,15 @@ export default {
       goToOllamaSettings: '查看设置',
       providerLabel: '服务商',
       providerPlaceholder: '选择模型服务商',
-      providers: {
-        novita: {
-          label: 'Novita AI',
-          description: 'moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b 等'
-        },
-        nvidia: {
-          label: 'NVIDIA',
-          description: 'deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.'
-        },
-        lkeap: {
-          label: '腾讯云 LKEAP',
-          description: 'DeepSeek-R1、DeepSeek-V3、lke-reranker-base 等'
-        },
-        longcat: {
-          label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.'
-        },
-        qianfan: {
-          label: '百度千帆 Baidu Cloud',
-          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.'
-        },
-        moonshot: {
-          label: '月之暗面 Moonshot',
-          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.'
-        },
-        qiniu: {
-          label: '七牛云 Qiniu',
-          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.'
-        },
-        modelscope: {
-          label: '魔搭 ModelScope',
-          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.'
-        },
-        gpustack: {
-          label: 'GPUStack',
-          description: 'Choose your deployed model on GPUStack'
-        },
-        gemini: {
-          label: 'Google Gemini',
-          description: 'gemini-3-flash-preview, gemini-2.5-pro 等'
-        },
-        mimo: {
-          label: '小米 MiMo',
-          description: 'mimo-v2-flash'
-        },
-        minimax: {
-          label: 'MiniMax',
-          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed 等'
-        },
-        hunyuan: {
-          label: '腾讯混元 Hunyuan',
-          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.'
-        },
-        deepseek: {
-          label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner 等'
-        },
-        volcengine: {
-          label: '火山引擎 Volcengine',
-          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.'
-        },
-        jina: {
-          label: 'Jina',
-          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.'
-        },
-        siliconflow: {
-          label: '硅基流动 SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1, etc.'
-        },
-        generic: {
-          label: '自定义 (OpenAI兼容接口)',
-          description: 'Generic API endpoint (OpenAI-compatible)'
-        },
-        requesty: {
-          label: 'Requesty',
-          description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
-        },
-        openrouter: {
-          label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
-        },
-        litellm: {
-          label: 'LiteLLM',
-          description: '自托管代理，统一接入 OpenAI、Anthropic、Gemini、Bedrock 等 100+ 厂商。请将占位 URL 换成可访问地址；localhost 需加入 SSRF_WHITELIST。'
-        },
-        zhipu: {
-          label: '智谱 BigModel',
-          description: 'glm-4.7, embedding-3, rerank, etc.'
-        },
-        aliyun: {
-          label: '阿里云 DashScope',
-          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.'
-        },
-        azure_openai: {
-          label: 'Azure OpenAI',
-          description: 'Microsoft Azure 上的 OpenAI 服务'
-        },
-        anthropic: {
-          label: 'Anthropic',
-          description: 'Claude models via native Anthropic Messages API'
-        },
-        openai: {
-          label: 'OpenAI',
-          description: 'gpt-5.2, gpt-5-mini, etc.'
-        }
-      },
+      providerDocs: '查看 {provider} 的模型文档',
       validation: {
+        extraFieldRequired: '请填写 {name}',
         modelNameRequired: '请输入模型名称',
         modelNameEmpty: '模型名称不能为空',
         modelNameMax: '模型名称不能超过100个字符',
         baseUrlRequired: '请输入 Base URL',
         baseUrlEmpty: 'Base URL 不能为空',
         baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL'
-      },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: '火山引擎 Ark；腾讯云 LKEAP（DeepSeek V3 等，选 LKEAP 时默认此项；R1 请改「不写入」）'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: '阿里云 DashScope：qwen3、qwen-plus、qwen-max、qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: '自定义 OpenAI 兼容、NVIDIA NIM、vLLM / 本地 Qwen 部署'
-        },
-        none: {
-          label: '不写入思考参数',
-          hint: '智能体「思考模式」开关不生效，不会在请求中写入思考相关参数'
-        }
-      },
-      volcengine: {
-        accessKeyLabel: 'Access Key ID',
-        accessKeyPlaceholder: '火山引擎访问密钥 Access Key ID',
-        secretKeyLabel: 'Secret Access Key',
-        secretKeyPlaceholder: '火山引擎访问密钥 Secret Access Key',
-        rerankCredentialHint: 'Rerank 使用 VikingDB AK/SK 签名（非方舟 API Key），模型建议填写 doubao-seed-rerank。'
-      },
-      lkeap: {
-        secretIdLabel: 'SecretId',
-        secretIdPlaceholder: '腾讯云 API 密钥 SecretId',
-        secretKeyLabel: 'SecretKey',
-        secretKeyPlaceholder: '腾讯云 API 密钥 SecretKey',
-        regionLabel: '地域',
-        regionPlaceholder: 'ap-guangzhou',
-        regionDesc: 'RunRerank 支持 ap-beijing、ap-guangzhou 等，默认 ap-guangzhou',
-        rerankCredentialHint: 'Rerank 使用腾讯云 API 签名（非 OpenAI API Key）。请在云 API 密钥控制台创建 SecretId/SecretKey。'
       },
       modelNamePlaceholder: {
         local: '例如：llama2:latest',
@@ -3830,6 +3759,21 @@ export default {
     referenceChunkCount: '{count}个片段',
     fallbackHint: '未从知识库中检索到相关内容，以上为模型直接回答',
     truncatedHint: '回答在模型单次输出上限处被截断，以上为截断前已生成的内容',
+    rewind: {
+      tooltip: '回滚到这里',
+      confirmBody: '将删除此条之后的对话。从用户消息回滚时会删掉该问题本身，并填回输入框。若有可用检查点，工作区会一并回退。此操作不可撤销。',
+      confirmButton: '回滚',
+      cancelButton: '取消',
+      success: '已回滚',
+      busy: '请等本轮回答结束后再回滚',
+      noCheckpoint: '无法回滚：当前有沙箱，但没有可回退的检查点',
+      sandboxReplaced: '无法回滚：沙箱已更换，无法回退到旧检查点',
+      reloadFailed: '对话已回滚，但未能重新加载历史。若较早消息缺失，请刷新页面',
+      failed: '回滚失败，请重试',
+      skipped: '对话已回滚，工作区未改动',
+      skipNoSandbox: '对话已回滚，工作区未改动（当前没有沙箱）',
+      skipNoCheckpoint: '对话已回滚，工作区未改动（没有可回退的检查点）',
+    },
     requestInfoTitle: '请求信息',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: '消息 ID',
@@ -6379,6 +6323,8 @@ export default {
       capabilityUnconfigured: '未配置'
     },
     editor: {
+      reasoningEffortUnsupported: '当前所选模型不支持思考，除「关闭」外的选项将被忽略。',
+      reasoningEffortAlwaysOn: '当前所选模型始终开启思考，无法关闭，只能调整思考强度。',
       createTitle: '创建智能体',
       editTitle: '编辑智能体',
       buttons: {

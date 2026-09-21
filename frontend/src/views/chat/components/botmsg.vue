@@ -20,7 +20,9 @@
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
                     :embedded-mode="embeddedMode"
                     :can-fork="canFork"
+                    :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
+                    @rewind="emit('rewind', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
@@ -35,7 +37,9 @@
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
                     :embedded-mode="embeddedMode"
                     :can-fork="canFork"
+                    :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
+                    @rewind="emit('rewind', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
@@ -55,6 +59,22 @@
                         <t-icon name="git-branch" />
                     </t-button>
                 </t-tooltip>
+                <t-popconfirm
+                    v-if="canRewind"
+                    :content="t('chat.rewind.confirmBody')"
+                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                    :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                    theme="warning"
+                    placement="top"
+                    overlay-class-name="chat-rewind-popconfirm"
+                    @confirm="emitRewind"
+                >
+                    <t-tooltip :content="rewindTooltip">
+                        <t-button size="small" variant="outline" shape="round" @click.stop>
+                            <t-icon name="rollback" />
+                        </t-button>
+                    </t-tooltip>
+                </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
                     <t-icon name="copy" />
@@ -178,7 +198,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 'rewind'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -223,14 +243,24 @@ const props = defineProps({
     canFork: {
         type: Boolean,
         default: false
+    },
+    canRewind: {
+        type: Boolean,
+        default: false
     }
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
 const forkTooltip = '从这条回答继续分叉'
+const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
     const messageId = persistedAssistantId(props.session) || props.session?.id
     if (messageId) emit('fork', messageId)
+}
+const emitRewind = () => {
+    const messageId = persistedAssistantId(props.session) || props.session?.id
+    if (messageId) emit('rewind', messageId)
 }
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));

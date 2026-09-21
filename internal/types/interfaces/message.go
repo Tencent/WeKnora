@@ -131,6 +131,13 @@ type MessageRepository interface {
 	GetLatestContextCheckpoint(ctx context.Context, sessionID string) (*types.Message, error)
 	// DeleteMessage deletes a message
 	DeleteMessage(ctx context.Context, sessionID string, id string) error
+	// DeleteMessagesFrom deletes every message at or after the
+	// (boundary, boundaryID) composite cursor and returns the deleted rows,
+	// oldest first. inclusive keeps or drops the boundary message itself,
+	// which is what separates a user rewind point from an assistant one.
+	DeleteMessagesFrom(
+		ctx context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
+	) ([]*types.Message, error)
 	// DeleteMessagesBySessionID deletes all messages belonging to a session
 	DeleteMessagesBySessionID(ctx context.Context, sessionID string) error
 	// GetFirstMessageOfUser gets the first message of a user

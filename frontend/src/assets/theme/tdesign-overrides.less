@@ -21,6 +21,16 @@
   border-color: rgba(255, 255, 255, 0.08);
 }
 
+// .wk-popover clips to its rounded corners with overflow:hidden, which also
+// cancels the overflow-y:auto TDesign puts on a select's list — the options
+// past the first screenful become unreachable rather than merely unseen.
+// Restore vertical scrolling for any select wearing this skin; the horizontal
+// axis stays clipped, which is what the rounded corners needed.
+.t-select__dropdown.wk-popover .t-popup__content {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 // A quiet option surface, with the brand accent reserved for the small check.
 .t-select-option.t-is-selected:not(.t-is-disabled),
 .t-select-option.t-is-selected:not(.t-is-disabled):hover {

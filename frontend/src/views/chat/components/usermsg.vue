@@ -43,11 +43,11 @@
         <div class="user_msg">
             {{ content }}
         </div>
-        <div v-if="timestamp || content || canFork" class="user_msg_meta">
+        <div v-if="timestamp || content || canFork || canRewind" class="user_msg_meta">
             <time v-if="timestamp" class="user_msg_time" :datetime="timestamp.datetime" :title="fullTimestamp">
                 {{ timestamp.time }}
             </time>
-            <div v-if="content || canFork" class="user_msg_actions">
+            <div v-if="content || canFork || canRewind" class="user_msg_actions">
                 <t-tooltip v-if="content" :content="t('agent.copy')">
                     <button type="button" class="user_msg_action" :aria-label="t('agent.copy')" @click="handleCopy">
                         <t-icon name="copy" />
@@ -58,6 +58,22 @@
                         <t-icon name="git-branch" />
                     </button>
                 </t-tooltip>
+                <t-popconfirm
+                    v-if="canRewind"
+                    :content="t('chat.rewind.confirmBody')"
+                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                    :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                    theme="warning"
+                    placement="top"
+                    overlay-class-name="chat-rewind-popconfirm"
+                    @confirm="emit('rewind', messageId)"
+                >
+                    <t-tooltip :content="rewindTooltip">
+                        <button type="button" class="user_msg_action" :aria-label="rewindTooltip" @click.stop>
+                            <t-icon name="rollback" />
+                        </button>
+                    </t-tooltip>
+                </t-popconfirm>
             </div>
         </div>
         <div v-if="steerFailed" class="steer-failure" role="status">
@@ -78,7 +94,7 @@ import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/atta
 import { SKILL_ICON } from '@/types/mention';
 import { copyWithToast } from '@/utils/clipboard';
 import { formatMessageTimestamp, getConversationTimestampModel } from '@/utils/messageTimestamp';
-const emit = defineEmits(['retry-steer', 'remove-steer', 'fork']);
+const emit = defineEmits(['retry-steer', 'remove-steer', 'fork', 'rewind']);
 
 const { t } = useI18n();
 
@@ -139,14 +155,20 @@ const props = defineProps({
     canFork: {
         type: Boolean,
         default: false
+    },
+    canRewind: {
+        type: Boolean,
+        default: false
     }
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode);
+const canRewind = computed(() => props.canRewind === true && !props.embeddedMode);
 const forkTooltip = '从这里分叉出新会话';
 const timestamp = computed(() => getConversationTimestampModel(props.createdAt));
 const fullTimestamp = computed(() => formatMessageTimestamp(props.createdAt));
 const handleCopy = () => copyWithToast(props.content, 'common.copySuccess', 'common.copyFailed');
+const rewindTooltip = computed(() => t('chat.rewind.tooltip'));
 
 const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 

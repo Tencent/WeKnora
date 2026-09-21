@@ -105,17 +105,20 @@
                                 :value="session.created_at" />
 
                             <div v-if="session.role == 'user'" class="message-row"
-                                :data-message-id="session.id || undefined">
+                                :data-message-id="session.id || undefined"
+                                :class="{ 'is-minimap-target': session.id && session.id === minimapTargetId }">
                                 <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
                                     :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
                                     :session-id="session_id"
                                     :message-id="session.id"
                                     :created-at="session.created_at"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="canRewindMessage(session.id)"
                                     :steer-failed="Boolean(session._steerFailed)"
                                     @retry-steer="handleRetrySteer(session.steer_id)"
                                     @remove-steer="handleRemoveSteer(session.steer_id)"
-                                    @fork="handleFork">
+                                    @fork="handleFork"
+                                    @rewind="handleRewind">
                                 </usermsg>
                             </div>
                             <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
@@ -126,7 +129,9 @@
                                     :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                                     :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="canRewindMessage(session.id)"
                                     @fork="handleFork"
+                                    @rewind="handleRewind"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                                 </botmsg>
                                 <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
@@ -159,7 +164,7 @@
                                 @retry-steer="handleRetrySteer"
                                 @stop-generation="handleStopGeneration"
                                 @stop-confirmed="handleStopConfirmed"
-                                @stop-failed="handleStopFailed" :isReplying="isReplying" :sessionId="session_id"
+                                @stop-failed="handleStopFailed" :isReplying="isReplying" :composer-locked="composerLocked" :sessionId="session_id"
                                 :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
                                 :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
                         </div>
@@ -193,8 +198,10 @@ import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vu
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
-import { getMessageList, getSession, forkSession } from "@/api/chat/index";
+import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
+import { rewindSkipMessage } from './rewindNotice';
+import { rewindPrefillText, rewindBlockedByOutgoingWork, canReplaceRewindTranscript, shouldApplyRewindLocally, rewindHistoryHasMore, keepMessagesThroughRewindPoint, rewindableMessageIds, rewindHttpConflictCode, rewindConflictI18nKey } from './rewindView';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -325,8 +332,24 @@ function forkAffordanceOf(messageId) {
     return resolveForkAffordance(messagesList, messageId)
 }
 
+// One pass over the transcript per render instead of two per rendered row:
+// the template asks this for every message and re-asks on every streamed token.
+const rewindableIds = computed(() => rewindableMessageIds(messagesList, {
+    embeddedMode: props.embeddedMode,
+    outgoingWork: outgoingWorkBlocksRewind.value,
+}))
+
+function canRewindMessage(messageId) {
+    return Boolean(messageId) && rewindableIds.value.has(String(messageId))
+}
+
 const FORK_PREFILL_KEY = 'weknora:fork-prefill'
 let forkInFlight = false
+const rewindInFlight = ref(false)
+const rewindLockSessionId = ref('')
+const composerLocked = computed(() =>
+    rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value
+)
 
 function stashForkLanding(sessionId, text) {
     const payload = JSON.stringify({ sessionId, text })
@@ -372,7 +395,7 @@ function applyForkLanding() {
 
 async function handleFork(messageId) {
     if (props.embeddedMode) return
-    if (forkInFlight) return
+    if (forkInFlight || composerLocked.value) return
     if (!messageId || !session_id.value) return
     const source = messagesList.find((m) => m.id === messageId)
     if (!source) return
@@ -415,6 +438,102 @@ async function handleFork(messageId) {
     }
 }
 
+async function handleRewind(messageId) {
+    if (props.embeddedMode) return
+    if (forkInFlight || composerLocked.value) return
+    if (rewindBlockedByOutgoingWork({
+        isReplying: isReplying.value,
+        isStreaming: isStreaming.value,
+        isRecovering: isImRecovering.value,
+    })) return
+    if (!messageId || !session_id.value) return
+    const source = messagesList.find((m) => m.id === messageId || persistedAssistantId(m) === messageId)
+    if (!source) return
+    const sourceSessionId = session_id.value
+    const sourceRole = source.role
+    const sourceContent = source.content
+
+    rewindInFlight.value = true
+    rewindLockSessionId.value = sourceSessionId
+    try {
+        const res = await rewindSession(sourceSessionId, { message_id: messageId })
+        const data = res?.data
+        if (!data) return
+        if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
+
+        let batch
+        let reloadFailed = false
+        try {
+            const history = await fetchMessageList({
+                session_id: sourceSessionId,
+                created_at: '',
+                limit: limit.value,
+            })
+            batch = history?.data
+            if (!Array.isArray(batch)) {
+                throw new Error('rewind history reload returned no list')
+            }
+        } catch {
+            reloadFailed = true
+        }
+        if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
+
+        steerQueue.value = []
+        historyLoading.value = false
+        if (reloadFailed) {
+            const kept = keepMessagesThroughRewindPoint(
+                [...messagesList],
+                messageId,
+                sourceRole,
+                (m) => m.id === messageId || persistedAssistantId(m) === messageId,
+            )
+            messagesList.splice(0, messagesList.length, ...kept)
+            // created_at still points at the oldest message we actually hold.
+            // Clearing it here would send the next scroll-up back to the newest
+            // page, which this prefix already contains, instead of older ones.
+            MessagePlugin.warning(t('chat.rewind.reloadFailed'))
+        } else {
+            if (!canReplaceRewindTranscript(String(session_id.value || ''), sourceSessionId, undefined)) return
+            messagesList.splice(0)
+            created_at.value = ''
+            if (batch.length) {
+                created_at.value = batch[0].created_at
+                hasMoreHistory.value = rewindHistoryHasMore(batch.length, limit.value)
+                await handleMsgList(batch, false)
+            } else {
+                hasMoreHistory.value = false
+            }
+        }
+
+        const prefill = rewindPrefillText(sourceRole, sourceContent)
+        if (prefill) {
+            inputFieldRef.value?.prefill(prefill)
+        }
+
+        if (reloadFailed) {
+            return
+        }
+        if (data.workspace_reset) {
+            MessagePlugin.success(t('chat.rewind.success'))
+            return
+        }
+        const skip = rewindSkipMessage(String(data.reason || ''), t)
+        if (skip) {
+            MessagePlugin.info(skip)
+        }
+    } catch (err) {
+        const conflictCode = rewindHttpConflictCode(err)
+        if (conflictCode || err?.status === 409 || err?.$httpStatus === 409) {
+            MessagePlugin.warning(t(rewindConflictI18nKey(conflictCode)))
+            return
+        }
+        MessagePlugin.error(t('chat.rewind.failed'))
+    } finally {
+        rewindInFlight.value = false
+        rewindLockSessionId.value = ''
+    }
+}
+
 const sessionArtifacts = computed(() => collectSessionArtifacts(messagesList));
 // The panel already deleted the file server side; flag it in the loaded
 // history so the computed drops it without reloading the conversation.
@@ -437,6 +556,11 @@ let recoverPollTimer = null;
 // the same "generating" typing indicator the normal reply path shows, so the wait
 // isn't a silent gap. IM-only: false everywhere else, so other flows are unchanged.
 const isImRecovering = ref(false);
+const outgoingWorkBlocksRewind = computed(() => rewindBlockedByOutgoingWork({
+    isReplying: isReplying.value,
+    isStreaming: isStreaming.value,
+    isRecovering: isImRecovering.value,
+}))
 const scrollLock = ref(false);
 const isFirstEnter = ref(true);
 const loading = ref(false);
@@ -892,7 +1016,10 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
         if (historyLoadingMore.value || !hasMoreHistory.value) return;
         historyLoadingMore.value = true;
     }
-    fetchMessageList(data).then(async (res) => {
+    return fetchMessageList(data).then(async (res) => {
+        if (data?.session_id && String(data.session_id) !== String(session_id.value || '')) {
+            return
+        }
         const batch = res?.data;
         if (!batch?.length) {
             if (isScrollType) {
@@ -960,6 +1087,7 @@ const findSteerQueueItem = (steerId) =>
 
 // Enter queues a follow-up; an explicit inject appears in the transcript immediately.
 const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after', retryId = '') => {
+    if (composerLocked.value) return
     if (!session_id.value || !value?.trim()) return;
     if (!isReplying.value && !retryId) {
         // 空闲时没有运行中的 turn 可排队：直接走正常发送，而不是把
@@ -1233,6 +1361,7 @@ const attachSteerFollowUp = async (completedAssistantId) => {
 };
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
+    if (composerLocked.value) return
     stopStream();
     prepareForNewOutgoingMessage();
     activitySessionId.value = String(session_id.value);
@@ -2006,5 +2135,18 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-enter-from,
 .sq-fade-leave-to {
     opacity: 0;
+}
+</style>
+
+<style lang="less">
+.chat-rewind-popconfirm {
+    max-width: 260px;
+
+    .t-popconfirm__content,
+    .t-popup__content {
+        max-width: 260px;
+        white-space: normal;
+        line-height: 1.5;
+    }
 }
 </style>

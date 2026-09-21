@@ -305,6 +305,7 @@ function renderImage(
  *
  * 返回 null 表示这不是沙箱产物引用，调用方应回落到默认渲染（普通图片、
  * `resource://` 受保护图片、外链等一律不受影响）。
+ * 返回空字符串表示目标为空，调用方不应再画裂图。
  */
 export function renderArtifactReference(args: {
   href: string;
@@ -315,10 +316,12 @@ export function renderArtifactReference(args: {
   /** 本轮回答还在生成中。产物要到本轮结束才会收集，此时解析不到是正常的。 */
   streaming?: boolean;
 }): string | null {
-  const ref = parseArtifactRef(args.href);
+  const href = (args.href || '').trim();
+  if (!href) return '';
+  const ref = parseArtifactRef(href);
   if (!ref) return null;
 
-  const artifact = resolveArtifactRef(args.href, args.artifacts);
+  const artifact = resolveArtifactRef(href, args.artifacts);
   if (!artifact) {
     // 句柄对不上本消息的产物，说明这是别的受保护文件（知识库检索图、
     // 附件图……）。交回默认渲染，由 hydrateProtectedFileImages 带鉴权拉取。

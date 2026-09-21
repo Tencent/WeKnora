@@ -1,0 +1,59 @@
+{
+  "vendor": "deepseek",
+  "source": "https://api-docs.deepseek.com/quick_start/pricing",
+  "models": [
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "reasoning": true,
+      "input": ["text"],
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "cost": {"input": 0.66, "output": 1.98, "cache_read": 0.022},
+      "thinking_levels": {"minimal": "high", "low": "high", "medium": "high", "high": "high", "xhigh": "max", "max": "max"},
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    },
+    {
+      "id": "deepseek-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "reasoning": true,
+      "input": ["text", "image"],
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "cost": {"input": 0.15, "output": 0.6, "cache_read": 0.003},
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash (retired name, served by V4.1 Flash)",
+      "deprecated": true,
+      "reasoning": true,
+      "input": ["text", "image"],
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "cost": {"input": 0.15, "output": 0.6, "cache_read": 0.003},
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    },
+    {
+      "id": "deepseek-chat",
+      "name": "DeepSeek Chat (retired 2026-07-24, non-thinking alias)",
+      "deprecated": true,
+      "reasoning": false,
+      "input": ["text"],
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "source": "https://api-docs.deepseek.com/news/news260424/"
+    },
+    {
+      "id": "deepseek-reasoner",
+      "name": "DeepSeek Reasoner (retired 2026-07-24, thinking alias)",
+      "deprecated": true,
+      "reasoning": true,
+      "input": ["text"],
+      "context_window": 128000,
+      "max_output_tokens": 65536,
+      "thinking_levels": {"off": null},
+      "source": "https://api-docs.deepseek.com/news/news260424/"
+    }
+  ]
+}

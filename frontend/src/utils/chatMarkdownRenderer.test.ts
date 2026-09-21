@@ -84,6 +84,23 @@ test('renderChatMarkdown safely renders an image with fullwidth parentheses', ()
   assert.doesNotMatch(html, /（|）/)
 })
 
+test('renderChatMarkdown skips an image with an empty destination', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    invalidImageHtml: () => '<p>invalid</p>',
+    isValidImageUrl: (href) => Boolean(href),
+  })
+  const html = renderChatMarkdown('![根目录示例文件]()', {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+  })
+
+  assert.doesNotMatch(html, /<img/)
+  assert.doesNotMatch(html, /invalid/)
+})
+
 test('renderChatMarkdown hides an unfinished fullwidth-parenthesis image while streaming', () => {
   const renderer = createChatMarkdownRenderer()
   const html = renderChatMarkdown('before ![流程图]（resource://yB7V7wE1gls7h9WonCDq5Q', {
