@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
+	"github.com/Tencent/WeKnora/internal/agent/intentgate"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -78,6 +79,10 @@ type AgentEngine struct {
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
+	// intentGate, when set, is consulted before every tool execution
+	// (IntentGate 语义门禁层, see docs/plans/2026-09-21-intent-gate-design.md).
+	// nil (the default) keeps the pre-IntentGate behavior exactly.
+	intentGate intentgate.Gate
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -140,6 +145,13 @@ func NewAgentEngine(
 // user picked for this turn; nil clears it.
 func (e *AgentEngine) SetQuestionOrigin(origin *QuestionOriginInfo) {
 	e.questionOrigin = origin
+}
+
+// SetIntentGate installs the IntentGate consulted before every tool
+// execution. Nil (the default) disables the gate and keeps behavior
+// identical to a build without IntentGate.
+func (e *AgentEngine) SetIntentGate(g intentgate.Gate) {
+	e.intentGate = g
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
