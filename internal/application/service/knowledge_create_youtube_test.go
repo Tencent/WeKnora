@@ -172,3 +172,68 @@ func TestCreateKnowledgeFromYoutubeRejectsUnsafeURL(t *testing.T) {
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }
+
+// youtubeRepoWithExistingStub reports one URL as already existing in the
+// knowledge base (as CheckKnowledgeExists would for a video ingested by an
+// earlier run), so CreateKnowledgeFromURL returns a DuplicateKnowledgeError
+// for it.
+type youtubeRepoWithExistingStub struct {
+	youtubeRepoStub
+	existingURL       string
+	existingKnowledge *types.Knowledge
+}
+
+func (r *youtubeRepoWithExistingStub) CheckKnowledgeExists(
+	_ context.Context, _ uint64, _ string, params *types.KnowledgeCheckParams,
+) (bool, *types.Knowledge, error) {
+	if params.URL == r.existingURL {
+		return true, r.existingKnowledge, nil
+	}
+	return false, nil, nil
+}
+
+func (r *youtubeRepoWithExistingStub) UpdateKnowledge(context.Context, *types.Knowledge) error {
+	return nil
+}
+
+func TestCreateKnowledgeFromYoutubeTreatsExistingURLAsSuccess(t *testing.T) {
+	existingURL := "https://www.youtube.com/watch?v=existing"
+	playlistURL := "https://www.youtube.com/playlist?list=PL999"
+	entries := `[
+		{"video_id":"existing","url":"https://www.youtube.com/watch?v=existing","title":"Existing"},
+		{"video_id":"newvid","url":"https://www.youtube.com/watch?v=newvid","title":"New"}
+	]`
+	reader := &youtubeDocReaderStub{byURL: map[string]*types.ReadResult{
+		playlistURL: {MarkdownContent: "ok", Metadata: map[string]string{
+			"youtube_kind": "playlist", "youtube_videos": entries,
+		}},
+	}}
+	existingKnowledge := &types.Knowledge{ID: "existing-kid", Title: "Existing", Source: existingURL}
+	repo := &youtubeRepoWithExistingStub{existingURL: existingURL, existingKnowledge: existingKnowledge}
+	svc := newYoutubeTestService(reader, repo)
+
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{})
+
+	result, err := svc.CreateKnowledgeFromYoutube(ctx, "kb1", []string{playlistURL}, nil, "")
+	require.NoError(t, err)
+
+	// Both the duplicate and the new video count as successes; the
+	// duplicate must NOT be recorded as a failure.
+	require.Equal(t, 2, result.SuccessCount)
+	require.Empty(t, result.Failed)
+	require.Len(t, result.Knowledge, 2)
+
+	// Only the genuinely new video should have gone through CreateKnowledge.
+	require.Len(t, repo.created, 1)
+	require.Equal(t, "New", repo.created[0].Title)
+
+	// The duplicate's existing knowledge record must be the one reported back.
+	found := false
+	for _, k := range result.Knowledge {
+		if k.ID == "existing-kid" {
+			found = true
+		}
+	}
+	require.True(t, found, "expected existing knowledge to be included in result.Knowledge")
+}

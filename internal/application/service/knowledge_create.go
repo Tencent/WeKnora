@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/url"
@@ -1388,6 +1389,20 @@ func (s *knowledgeService) CreateKnowledgeFromYoutube(
 				ctx, kbID, entry.URL, "", "", nil, entry.Title, tagIDs, channel, nil,
 			)
 			if err != nil {
+				var dupErr *types.DuplicateKnowledgeError
+				if errors.As(err, &dupErr) {
+					// The video already exists in this knowledge base — treat
+					// this as a quiet success (not a failure) so re-running a
+					// playlist import to pick up newly-added videos doesn't
+					// look like "everything failed" for the already-ingested
+					// ones.
+					logger.Infof(ctx, "YouTube ingest: %s already exists, skipping", entry.URL)
+					if dupErr.Knowledge != nil {
+						result.Knowledge = append(result.Knowledge, dupErr.Knowledge)
+						result.SuccessCount++
+					}
+					continue
+				}
 				logger.Warnf(ctx, "YouTube ingest: failed to create knowledge for %s: %v", entry.URL, err)
 				result.Failed = append(result.Failed, types.YoutubeIngestFailure{URL: entry.URL, Error: err.Error()})
 				continue
@@ -1408,7 +1423,7 @@ func (s *knowledgeService) expandYoutubeURL(ctx context.Context, url string) ([]
 		return nil, fmt.Errorf("document parsing service is not configured")
 	}
 
-	readResult, err := s.documentReader.Read(ctx, &types.ReadRequest{
+	readResult, err := s.callDocReaderWithTimeout(ctx, s.documentReader, &types.ReadRequest{
 		URL:          url,
 		ParserEngine: youtubeEnumerateEngine,
 	})

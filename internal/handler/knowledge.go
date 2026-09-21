@@ -514,7 +514,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromYoutube(c *gin.Context) {
 	}
 
 	var req struct {
-		URLs    []string `json:"urls" binding:"required,min=1"`
+		URLs    []string `json:"urls" binding:"required,min=1,max=50"`
 		TagIDs  []string `json:"tag_ids"`
 		Channel string   `json:"channel"`
 	}
