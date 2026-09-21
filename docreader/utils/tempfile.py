@@ -16,6 +16,23 @@ class TempFileContext:
         self.suffix = suffix
         self.file = None
 
+    def _cleanup(self):
+        """Close and unlink the temp file. close() may re-raise a prior flush
+        error (ENOSPC), so unlink must still run and cleanup errors must not
+        replace the original exception.
+        """
+        temp_file = getattr(self, "temp_file", None)
+        if not temp_file:
+            return
+        try:
+            temp_file.close()
+        except OSError:
+            pass
+        try:
+            os.remove(temp_file.name)
+        except OSError:
+            pass
+
     def __enter__(self):
         """
         Create file when entering context
@@ -28,9 +45,7 @@ class TempFileContext:
             self.temp_file.write(self.file_content)
             self.temp_file.flush()
         except BaseException:
-            self.temp_file.close()
-            if os.path.exists(self.temp_file.name):
-                os.remove(self.temp_file.name)
+            self._cleanup()
             raise
         logger.info(
             f"Saved {self.suffix} content to temporary file: {self.temp_file.name}"
@@ -41,11 +56,10 @@ class TempFileContext:
         """
         Delete file when exiting context
         """
-        if self.temp_file:
-            self.temp_file.close()
-            if os.path.exists(self.temp_file.name):
-                os.remove(self.temp_file.name)
-            logger.info(f"File {self.temp_file.name} has been deleted.")
+        if getattr(self, "temp_file", None):
+            name = self.temp_file.name
+            self._cleanup()
+            logger.info(f"File {name} has been deleted.")
         # Return False to propagate exception (if any exception occurred)
         return False
 
