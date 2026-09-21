@@ -251,6 +251,9 @@ type Vendor struct {
 	// OpenAI shape for any vendor that serves embeddings without naming
 	// another.
 	EmbeddingAPI api.EmbeddingAPI
+	// TranscriptionAPI is the speech-to-text protocol. Register defaults it
+	// to the OpenAI shape for any vendor that serves ASR.
+	TranscriptionAPI api.TranscriptionAPI
 	// DefaultBaseURLs by model type; GetDefaultURL falls back to chat.
 	DefaultBaseURLs map[types.ModelType]string
 	ModelTypes      []types.ModelType

@@ -124,14 +124,16 @@ func init() {
 			types.ModelTypeEmbedding:   BaseURL,
 			types.ModelTypeVLLM:        BaseURL,
 		},
-		// ASR is deliberately absent: Azure serves Whisper, but
-		// internal/models/asr builds every remote client with a plain
-		// OpenAI config (Bearer auth, {base}/audio/transcriptions) and has
-		// no provider or extra-config field to route through this vendor's
-		// api-key header and deployments path. Advertising the type would
-		// let the picker create a row that fails at first use. The Endpoint
-		// hook below already knows the ASR path, so re-adding the type is a
-		// one-line change once asr.Config carries the provider.
+		// ASR is deliberately absent. The ASR client now resolves through
+		// this vendor (api-key header, Endpoint hook below), but the only
+		// v1 reference for audio is the preview one —
+		// POST {endpoint}/openai/v1/audio/transcriptions?api-version=preview
+		// (https://learn.microsoft.com/en-us/azure/foundry/openai/reference-preview-latest)
+		// — while the hook sends a row without api_version to the v1 path
+		// with no version at all. Until that is verified against a live
+		// resource, advertising the type would let the picker create a row
+		// that may fail at first use. A row with an explicit api_version
+		// would take the documented deployments path.
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,

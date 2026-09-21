@@ -97,6 +97,15 @@ func init() {
 			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Transcriptions: catalog.TranscriptionsCompat{
+				// The transcription reference (URL in openaitranscriptions):
+				// response_format differs per model — "For gpt-4o-transcribe
+				// and gpt-4o-mini-transcribe, the only supported format is
+				// json", the default — so it is declared per entry, not here.
+				// "Files can be up to 25 MB"
+				// (https://developers.openai.com/api/docs/guides/speech-to-text).
+				MaxFileBytes: catalog.Ptr(25 << 20),
+			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://developers.openai.com/api/reference/resources/embeddings/methods/create:
 				// model, input, dimensions (text-embedding-3 and later; the ada-002

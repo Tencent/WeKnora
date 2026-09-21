@@ -110,6 +110,9 @@ func TestEveryCatalogEntryResolves(t *testing.T) {
 			if modelType == types.ModelTypeKnowledgeQA && !r.API.Known() {
 				t.Errorf("%s/%s: resolved to unknown API %q", id, name, r.API)
 			}
+			if modelType == types.ModelTypeASR && !r.TranscriptionAPI.Known() {
+				t.Errorf("%s/%s: resolved to unknown transcription API %q", id, name, r.TranscriptionAPI)
+			}
 			if modelType == types.ModelTypeEmbedding && !r.EmbeddingAPI.Known() {
 				t.Errorf("%s/%s: resolved to unknown embedding API %q", id, name, r.EmbeddingAPI)
 			}

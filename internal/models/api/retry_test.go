@@ -78,6 +78,25 @@ func TestPostJSONWithRetryDoesNotRetryAVendorRejection(t *testing.T) {
 	assert.Equal(t, 1, attempts, "a rejection must not be repeated")
 }
 
+// A reply that arrived but does not decode is not a transport failure: the
+// vendor did the work, and sending the request again bills it again.
+func TestPostJSONWithRetryDoesNotRetryAnUndecodableReply(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		_, _ = w.Write([]byte(`not json`))
+	}))
+	defer server.Close()
+
+	var out map[string]any
+	err := Endpoint{}.PostJSONWithRetry(
+		context.Background(), server.URL, map[string]any{}, &out, fastPolicy(), "test",
+	)
+	require.Error(t, err)
+	assert.Equal(t, 1, attempts)
+}
+
 func TestPostJSONWithRetryStopsWhenTheContextIsDone(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))

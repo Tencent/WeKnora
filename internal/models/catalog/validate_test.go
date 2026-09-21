@@ -56,9 +56,17 @@ func TestValidateRow(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "asr rows are not resolved through the catalog", modelName: "whisper-1",
+			name: "a catalogued asr row resolves", modelName: "whisper-1",
 			modelType: types.ModelTypeASR,
-			params:    &types.ModelParameters{Provider: "openai", Spec: &types.ModelSpecOverride{API: "nope"}},
+			params:    &types.ModelParameters{Provider: "openai"},
+		},
+		{
+			name: "unknown asr compat key is rejected", modelName: "whisper-1",
+			modelType: types.ModelTypeASR,
+			params: &types.ModelParameters{
+				Provider: "openai", Spec: &types.ModelSpecOverride{Compat: map[string]any{"dimensions_field": "x"}},
+			},
+			wantErr: true,
 		},
 		{
 			name: "a catalogued chat row resolves", modelName: "deepseek-v4-pro",

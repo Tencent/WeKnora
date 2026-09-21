@@ -118,6 +118,13 @@ func init() {
 			ModelTypes:   []types.ModelType{types.ModelTypeRerank},
 		}},
 		Compat: catalog.VendorCompat{
+			// Transcriptions keeps the baseline, json by default. GPUStack
+			// serves audio through vox-box (https://github.com/gpustack/vox-box),
+			// whose route wraps a json answer as {"text": ...} but returns
+			// verbose_json as whatever the backend produced — and its FunASR
+			// backend (SenseVoice, Paraformer) produces a bare string for every
+			// format. The pre-catalog client's verbose_json therefore arrived
+			// as a JSON string that could not be decoded.
 			Embeddings: catalog.EmbeddingsCompat{
 				// vLLM's embedding server: dimensions for Matryoshka models, the
 				// row's truncation budget, and encoding_format.

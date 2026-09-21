@@ -346,6 +346,8 @@ type VendorCompat struct {
 	Rerank RerankCompat `json:"rerank,omitempty"`
 	// Embeddings is the embedding protocol overlay, likewise one per vendor.
 	Embeddings EmbeddingsCompat `json:"embeddings,omitempty"`
+	// Transcriptions is the speech-to-text overlay, likewise one per vendor.
+	Transcriptions TranscriptionsCompat `json:"transcriptions,omitempty"`
 }
 
 // apply writes the set fields of an overlay struct onto a settings struct

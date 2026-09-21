@@ -759,8 +759,7 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 // validateCatalogParameters rejects protocol / compat overrides the catalog
 // cannot interpret (unknown extra_config.api, unknown compat keys, bad
 // reasoning levels) so a typo fails at save time instead of at the first
-// call. Chat, VLM, embedding and rerank rows are checked; see
-// catalog.ValidateRow.
+// call. Every model type is checked; see catalog.ValidateRow.
 func validateCatalogParameters(name string, modelType types.ModelType, params *types.ModelParameters) error {
 	return catalog.ValidateRow(name, modelType, params)
 }

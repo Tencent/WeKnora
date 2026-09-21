@@ -14,10 +14,9 @@ import (
 // protocol, a bad compat key or an invalid thinking level is rejected where
 // it is written instead of surfacing as a failed chat call much later.
 //
-// Chat, VLM, embedding and rerank rows are checked; all four are built from
-// catalog.Resolve, so a row that does not resolve cannot be used. ASR rows
-// return nil: the ASR client does not resolve through the catalog yet, so a
-// spec stored on such a row is inert — neither validated nor applied.
+// Every model type is checked: all of them are built from catalog.Resolve,
+// so a row that does not resolve cannot be used and should fail the save
+// rather than the first call.
 func ValidateRow(modelName string, modelType types.ModelType, params *types.ModelParameters) error {
 	if params == nil || !resolvesThroughCatalog(modelType) {
 		return nil
@@ -44,7 +43,8 @@ func ValidateRow(modelName string, modelType types.ModelType, params *types.Mode
 
 func resolvesThroughCatalog(modelType types.ModelType) bool {
 	switch modelType {
-	case types.ModelTypeKnowledgeQA, types.ModelTypeVLLM, types.ModelTypeEmbedding, types.ModelTypeRerank:
+	case types.ModelTypeKnowledgeQA, types.ModelTypeVLLM, types.ModelTypeEmbedding, types.ModelTypeRerank,
+		types.ModelTypeASR:
 		return true
 	}
 	return false

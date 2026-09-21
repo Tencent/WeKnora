@@ -108,6 +108,12 @@ func init() {
 			ModelTypes:   []types.ModelType{types.ModelTypeRerank},
 		}},
 		Compat: catalog.VendorCompat{
+			// Transcriptions keeps the baseline, json by default. The
+			// pre-catalog client always asked for verbose_json, which not every
+			// model or server can produce: OpenAI's gpt-4o transcribers accept
+			// only json, and vox-box's FunASR backend answers verbose_json with
+			// a bare JSON string. A row that wants segments sets
+			// {"response_format": "verbose_json"} in its compat.
 			Embeddings: catalog.EmbeddingsCompat{
 				// Whatever the operator runs. Everything the pre-catalog client
 				// sent stays: vLLM, SGLang, TEI and Ollama's OpenAI route all

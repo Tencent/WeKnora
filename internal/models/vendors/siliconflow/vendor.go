@@ -77,6 +77,12 @@ func init() {
 			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Transcriptions: catalog.TranscriptionsCompat{
+				// https://api-docs.siliconflow.cn/docs/api/audio-transcriptions-post:
+				// file and model only — no response_format — and a file of
+				// "时长不超过 1 小时，文件大小不超过 50MB".
+				MaxFileBytes: catalog.Ptr(50 << 20),
+			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://api-docs.siliconflow.cn/docs/api/embeddings-post: model,
 				// input, encoding_format, and dimensions "仅 Qwen/Qwen3 系列支持"

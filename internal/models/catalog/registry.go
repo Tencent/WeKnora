@@ -34,6 +34,9 @@ func Register(v *Vendor) {
 	if v.RerankAPI == "" && v.SupportsType(types.ModelTypeRerank) {
 		v.RerankAPI = api.RerankCohere
 	}
+	if v.TranscriptionAPI == "" && v.SupportsType(types.ModelTypeASR) {
+		v.TranscriptionAPI = api.TranscriptionOpenAI
+	}
 	if v.EmbeddingAPI == "" && v.SupportsType(types.ModelTypeEmbedding) {
 		v.EmbeddingAPI = api.EmbeddingOpenAI
 	}

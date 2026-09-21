@@ -56,7 +56,7 @@ const (
 | `Embedding` | `embedding` | `internal/models/embedding` | `Embed` / `BatchEmbed`（含 `GetDimensions`） | 文本向量化，供向量检索索引与查询 |
 | `Rerank` | `rerank` | `internal/models/rerank` | `Rerank(query, documents)` 返回 `RankResult` | 检索结果精排 |
 | `VLLM` | `vllm` | `internal/models/vlm` | `Predict(imgBytes, prompt)` | 视觉语言模型（VLM），文档图片理解 / 多模态解析 |
-| `ASR` | `asr` | `internal/models/asr` | `Transcribe(audioBytes, fileName)` 返回文本与分段时间戳 | 音频转写（自动语音识别） |
+| `ASR` | `asr` | `internal/models/asr` | `Transcribe(audioBytes, fileName)` 返回文本；模型提供时附带分段时间戳（如 OpenAI `whisper-1`） | 音频转写（自动语音识别） |
 
 前后端类型映射见 `internal/handler/model.go` 的 `modelTypeToFrontend()`（`KnowledgeQA -> chat` 等）。
 
@@ -176,7 +176,7 @@ builtin_models:
 
 | 层 | 位置 | 职责 |
 |----|------|------|
-| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`。各自持有请求/响应结构与解析，不含任何厂商名 |
+| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`。各自持有请求/响应结构与解析，不含任何厂商名 |
 | 厂商层 | `internal/models/vendors/<id>/` | 一个厂商一个目录：`vendor.go`（注册 `catalog.Vendor`）、`models.json`（模型目录）、`icon.svg`（品牌图标，`go:embed` 进二进制） |
 | 目录层 | `internal/models/catalog` | 合并厂商定义、模型条目、部署叠加与单行覆盖，`Resolve` 得出「这个模型到底怎么发请求」 |
 
@@ -235,7 +235,7 @@ make model-catalog-check
 
 前端不需要任何改动：厂商下拉、图标、额外字段、内置模型列表都由 `GET /api/v1/models/providers` 动态渲染。
 
-写入侧也有一道闸：`catalog.ValidateRow` 会在创建 / 更新模型（REST）和加载 `config/builtin_models.yaml`（启动）时解析这行配置（chat、VLM、embedding、rerank 四类；ASR 还没进目录），未知协议、拼错的 compat 键、非法的思考档位在写入时就被拒绝（YAML 行只打 WARN 不阻塞启动，避免一次重启把线上模型下线）。
+写入侧也有一道闸：`catalog.ValidateRow` 会在创建 / 更新模型（REST）和加载 `config/builtin_models.yaml`（启动）时解析这行配置（全部模型类型），未知协议、拼错的 compat 键、非法的思考档位在写入时就被拒绝（YAML 行只打 WARN 不阻塞启动，避免一次重启把线上模型下线）。
 
 #### 厂商更新了模型怎么办
 
@@ -280,7 +280,14 @@ Embedding 行也有几处按厂商文档纠正的行为变化（逐厂商的出�
 7. **OpenAI 兼容回复里没有 `index` 时按顺序取**（和旧实现一致）；有 `index` 就按它放回，重复或缺位报错。
 8. **Jina 的 `task`、Gemini 的 `taskType`、OpenRouter 的 `input_type`、火山的 `instructions`、百炼原生接口的 `text_type` / `instruct` 都不发**。它们会改变文档侧向量，开启后同一个知识库里新旧向量不在同一空间；需要按行显式开启的设计另见 Tencent/WeKnora#1401。
 
-另外 Azure OpenAI 不再声明支持 ASR（ASR 客户端只会构造标准 OpenAI 客户端，根本无法带上 Azure 的 `api-key` 头和部署路径，这类行此前就调不通）。
+ASR 行的变化（逐厂商的出站表单由 `internal/models/asr/wire_test.go` 钉住）：
+
+1. **不再一律发 `response_format=verbose_json`**。OpenAI 文档写明 gpt-4o-transcribe / gpt-4o-mini-transcribe「only supported format is json」，旧实现发给它们必然 400；GPUStack 的音频后端 vox-box 在 FunASR 模型（SenseVoice、Paraformer）上对 `verbose_json` 返回裸字符串，旧实现解不开。现在只有文档写明支持的模型声明它（OpenAI `whisper-1`），其余走默认 json，Langfuse 里的音频时长因此只在返回分段的模型上有。需要分段的自建行可以在 `spec.compat` 里写 `{"response_format": "verbose_json"}`。
+2. **按厂商文档的文件上限在上传前拒绝**：OpenAI 25 MB、SiliconFlow 50 MB。
+3. **回复里没有 `text` 字段即报错**，不再当成「未检测到语音」入库；静音音频返回的是空字符串 `text`，照常处理。
+4. ASR 行现在带上 provider 走目录解析，go-openai 依赖随之移除。
+
+Azure OpenAI 仍不声明 ASR：音频转写只出现在 v1 **preview** 参考里（`/openai/v1/audio/transcriptions?api-version=preview`），v1 GA 参考没有；未填 `api_version` 的行会被钩子发到不带版本的 v1 路径，能否调通没有核实。
 
 ### 模型调用链
 

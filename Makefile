@@ -117,7 +117,7 @@ test:
 .PHONY: model-catalog-check
 model-catalog-check:
 	go test ./internal/models/parity/ ./internal/models/vendors/ ./internal/models/catalog/ ./internal/models/api/... \
-		./internal/models/rerank/ ./internal/models/embedding/
+		./internal/models/rerank/ ./internal/models/embedding/ ./internal/models/asr/
 
 # Vendor catalog: report where our model metadata differs from models.dev.
 # Development aid only — nothing is fetched at runtime and nothing is written
