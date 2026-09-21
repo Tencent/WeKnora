@@ -151,6 +151,7 @@ export function updateKnowledgeBase(id: string, data: {
       extraction_instructions?: string;
     };
     auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
+    profile_config?: KnowledgeBaseProfileConfig;
     indexing_strategy?: {
       vector_enabled: boolean;
       keyword_enabled: boolean;
@@ -160,6 +161,49 @@ export function updateKnowledgeBase(id: string, data: {
   }
 }) {
   return put(`/api/v1/knowledge-bases/${id}`, data);
+}
+
+/** Opt-in automatic generation of the knowledge-base description. */
+export interface KnowledgeBaseProfileConfig {
+  enabled: boolean;
+  model_id?: string;
+  custom_instructions?: string;
+}
+
+export interface KnowledgeBaseProfileNamedCount {
+  name: string;
+  count: number;
+}
+
+/**
+ * Machine-generated knowledge-base description. Derived from per-document
+ * profiles; never overwrites the user-authored description.
+ */
+export interface KnowledgeBaseProfile {
+  gist?: string;
+  topics?: string[];
+  typical_questions?: string[];
+  stats?: {
+    document_count: number;
+    profiled_count: number;
+    file_types?: KnowledgeBaseProfileNamedCount[];
+    tags?: KnowledgeBaseProfileNamedCount[];
+    raw_topics?: KnowledgeBaseProfileNamedCount[];
+    doc_types?: KnowledgeBaseProfileNamedCount[];
+    folders?: string[];
+    earliest_at?: string;
+    latest_at?: string;
+  };
+  aggregate_hash?: string;
+  status?: 'ready' | 'empty' | 'failed' | string;
+  error?: string;
+  model_id?: string;
+  generated_at?: string;
+}
+
+/** Regenerates the AI description of a knowledge base synchronously. */
+export function generateKnowledgeBaseProfile(id: string) {
+  return post(`/api/v1/knowledge-bases/${id}/profile/generate`, {});
 }
 
 export function rebuildKBIndex(kbId: string) {
@@ -214,6 +258,7 @@ export function uploadKnowledgeFile(
     [key: string]: any
   } = { file: new File([], '') },
   onProgress?: (progressEvent: any) => void,
+  config?: { signal?: AbortSignal },
 ) {
   const formData = new FormData();
   Object.keys(data).forEach(key => {
@@ -227,7 +272,7 @@ export function uploadKnowledgeFile(
       formData.append(key, value);
     }
   });
-  return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress);
+  return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress, config);
 }
 
 // 从URL创建知识
@@ -376,6 +421,15 @@ export function batchDeleteKnowledge(kbId: string, ids: string[]) {
 
 export function downKnowledgeDetails(id: string) {
   return getDown(`/api/v1/knowledge/${id}/download`);
+}
+
+// 使用已有登录和租户请求头下载 ZIP，不将凭据放入下载链接。
+export function batchDownloadKnowledge(kbId: string, ids: string[], signal?: AbortSignal): Promise<Blob> {
+  return post<Blob>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/knowledge/batch-download`, { ids }, {
+    responseType: 'blob',
+    timeout: 300000,
+    signal,
+  });
 }
 
 export function previewKnowledgeFile(id: string) {

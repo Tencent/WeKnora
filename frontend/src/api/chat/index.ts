@@ -30,6 +30,20 @@ export async function updateSession(session_id: string, data: { title: string; d
   return put(`/api/v1/sessions/${session_id}`, data);
 }
 
+export async function forkSession(
+  session_id: string,
+  data: { message_id: string; title?: string },
+) {
+  return post(`/api/v1/sessions/${session_id}/fork`, data, { timeout: 180000 });
+}
+
+export async function rewindSession(
+  session_id: string,
+  data: { message_id: string },
+) {
+  return post(`/api/v1/sessions/${session_id}/rewind`, data, { timeout: 180000 });
+}
+
 export async function knowledgeChat(data: { session_id: string; query: string; }) {
   return postChat(`/api/v1/knowledge-chat/${data.session_id}`, { query: data.query, channel: "web" });
 }
@@ -104,6 +118,12 @@ export interface ArtifactMeta {
   source_path: string;
   mod_time: string;
   created_at: string;
+  /**
+   * Set when the user deleted the file. The entry stays in the list so the
+   * artifacts after it keep their index — which is their download address —
+   * so clients filter on this rather than on position.
+   */
+  deleted_at?: string;
 }
 
 // listMessageArtifacts returns the artifacts attached to a single assistant
@@ -133,5 +153,23 @@ export async function downloadArtifact(
 ): Promise<Blob> {
   return getDown(
     `/api/v1/sessions/${session_id}/messages/${message_id}/artifacts/${index}/download`,
+  );
+}
+
+// deleteMessageArtifact removes a generated file from the session. The stored
+// bytes are reclaimed, so this is not reversible; callers confirm first.
+//
+// The in-chat panel lists every regeneration of a file as its own row, so it
+// deletes exactly the row the user clicked. The artifact library folds them
+// into one entry and passes all_versions.
+export async function deleteMessageArtifact(
+  session_id: string,
+  message_id: string,
+  index: number,
+  allVersions = false,
+) {
+  const query = allVersions ? '?all_versions=true' : '';
+  return del(
+    `/api/v1/sessions/${session_id}/messages/${message_id}/artifacts/${index}${query}`,
   );
 }

@@ -366,6 +366,10 @@ promoted, err := s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expecte
 
 解析后的后处理会按知识库 auto_tag_config 决定是否入队 knowledge:auto_tag（summary 队列）。处理器从当前 KB 已有标签中选择，模型回退 summary_model_id；max_tags 默认 3、上限 10，默认跳过已有标签文档。它只增量关联标签，不创建新分类，也不删除人工标签；失败不阻断文档入库。配置与新解析/重解析的生效范围见[知识库管理](../03-features/02-knowledge-base.md)。
 
+#### 知识库描述刷新（knowledgebase_profile.go）
+
+摘要任务的每次终态退出、后处理调度完成、文档删除、跨库移动完成，都会调用 `requestKnowledgeBaseProfileRefresh` 入队一次 `kb:profile`（summary 队列）。任务 ID 按知识库和 30 秒窗口分桶，一批上传或删除只触发一次聚合；处理器重算文档画像聚合，哈希未变则不调用模型。只有 `profile_config.enabled` 的文档知识库会入队，手动触发（`POST /knowledge-bases/:id/profile/generate`）不受此限制。
+
 #### 摘要刷新（knowledge_summary_refresh.go）
 
 首次入库之外，分块内容编辑、分块启停、自定义元数据变更都会让已有摘要过期，此时入队一次**摘要刷新**（也可由 `POST /knowledge/:id/regenerate-summary` 手动触发）：

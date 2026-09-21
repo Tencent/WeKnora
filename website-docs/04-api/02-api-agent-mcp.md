@@ -68,7 +68,7 @@ curl $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/agents/:id
 
-用途：更新 Agent。权限：创建者 OR Admin+。请求体：`name/description/avatar/config`（均可选）。
+用途：更新 Agent。权限：创建者 OR Admin+。请求体：`name/description/avatar/config`（均可选）。Agent 已分享到组织时，新加入知识库范围的知识库须是调用者可分享的（知识库创建者或 Admin+，改为 `all` 需要 Admin+），否则 403。
 
 响应：200 `{"success":true,"data":{Agent}}`
 

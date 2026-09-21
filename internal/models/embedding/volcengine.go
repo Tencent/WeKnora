@@ -171,7 +171,12 @@ func (e *VolcengineEmbedder) doRequestWithRetry(ctx context.Context, jsonData []
 			}
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		// Declare req separately: with `req, err := ...` the `:=` introduces a
+		// loop-local err, so the `resp, err = client.Do(req)` below writes to
+		// that copy and the outer err stays nil. Every retry failing then
+		// returns (nil, nil) and the caller dereferences resp.Body → SIGSEGV.
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("VolcengineEmbedder failed to create request: %v", err)
 			continue
@@ -251,7 +256,6 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 	}
 
 	return embeddings, nil
-
 }
 
 // GetModelName returns the model name

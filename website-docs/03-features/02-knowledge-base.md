@@ -42,11 +42,6 @@
 开启自动标签后，系统在解析完成时从已有候选标签中选择匹配项。默认每篇最多关联 3 个，已有标签时跳过。配置只影响后续解析，不自动补齐历史文档，模型失败也不会阻塞文档完成。
 
 <Screenshot
-  src="/screenshots/kb-folder-tree.png"
-  caption="文档列表的文件夹树：按目录浏览与重新归类"
-  hint="展示左侧文件夹树、当前目录下的文档列表，以及重命名/移动文件夹的操作入口。" />
-
-<Screenshot
   src="/screenshots/kb-batch-tag.png"
   caption="批量打标签：已选文档的共有标签会被预选中"
   hint="展示勾选多篇文档后打开的标签对话框，含已选标签区、搜索框与可选标签列表。" />
@@ -205,6 +200,26 @@ graph TB
 | skip_if_tagged | true | 已有标签时跳过，包括人工或数据源添加的标签；false 则增量追加 |
 
 配置仅对之后新解析或重新解析的文档生效，不自动回填历史文档。模型失败不阻塞文档完成，异步任务按队列策略重试。候选标签取知识库排序前 500 个；自动关联不删除人工标签。数据源按来源名称添加标签是另一条机制。
+
+#### AI 生成知识库描述
+
+知识库有两段描述：`description` 是用户手写的"这个库是干什么用的"，`generated_profile` 是系统从文档画像推导出的"这个库里实际有什么"。两者互不覆盖，智能体在运行时上下文里同时读取，用来判断一个问题该在哪个绑定知识库里检索。
+
+生成分三层，只有最后一层调用模型：
+
+1. **文档画像**：文档摘要任务在生成短摘要的同时输出结构化画像（`knowledges.profile`）：一句话 gist、3 到 5 个主题词、文档类型、一个典型问题。它随文档一起存在、随文档删除而消失。
+2. **知识库聚合**：纯数据库统计——文档数、文件类型、标签计数、主题词计数（大小写与标点归一）、文档类型计数、按主题轮询抽样的典型问题、均匀抽样的标题，并对输入算一个哈希。删除、移动、重新解析都不需要特殊处理，重算即精确。
+3. **描述文案**：把聚合（一两千 token，与文档数无关）交给模型，得到 gist、合并后的主题列表和 3 到 5 个典型问题。聚合哈希没变就跳过模型调用。
+
+`profile_config` 仅适用于 document 类型：
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| enabled | false | 文档新增/删除/摘要更新后自动刷新（30 秒防抖，同一窗口只跑一次） |
+| model_id | 空 | 为空使用知识库 summary_model_id |
+| custom_instructions | 空 | 追加到系统提示词的补充要求，如面向读者、需保留的术语 |
+
+无论是否开启自动刷新，知识库设置页都可以点击"生成 AI 描述"立即生成一次，并可一键把 gist 采纳为手写描述。`generated_profile.status` 为 `ready`/`empty`（无已解析文档，不调模型）/`failed`（保留上一次文案并记录错误）。关闭了文档摘要的上传只贡献标题、类型和标签，不贡献主题词。
 
 ### 知识（Knowledge）管理 {#_3-知识-knowledge-管理}
 
@@ -371,6 +386,8 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 
 测试用例明确验证：即使文件内容是 `<script>alert(1)</script>`，也只会作为二进制附件传输。下载端点（`/knowledge/:id/download`）要求更高的 Contributor+ 且走 KBAccessWrite 门禁。
 
+预览返回的是原始文件本身，通过只读共享（组织共享的 viewer、经共享智能体可见）访问时同样可以预览。「只有 Editor 及以上才能下载」是产品上的便利性限制，不是访问控制边界：能读到一个 KB 的人，就能拿到其中的原文件。
+
 ### 知识库复制与知识移动 {#_4-知识库复制与知识移动}
 
 #### 复制（Copy / Duplicate）与 Preflight {#_4-1-复制-copy-duplicate-与-preflight}
@@ -474,6 +491,7 @@ Chunk 类型（`internal/types/chunk.go`）：`text`、`parent_text`、`image_oc
 
 - **活动动作**（`internal/types/audit_log.go`）：`kb.created` / `kb.updated` / `kb.deleted` / `kb.duplicated` / `kb.clone_started` / `kb.clone_completed` / `kb.clone_failed`、`kb.share_added` / `kb.share_permission_changed` / `kb.share_removed`，以及知识 / chunk 级的增删改动作；
 - **触发源**：context 中的 `kbActivityTaskMetadata{TaskID, Trigger}`（`user` 用户操作 / `system` 后台任务）自动并入 details；根据 outcome 自动补 `processing_status`（accepted→pending、success→completed、partial→partial、failed/denied→failed、canceled→canceled）；
+- **API Key 身份**：`X-API-Key` 调用写入 `details.api_key_id` / `details.api_key_name`（名称快照）。活动页在原发起人后额外显示 Key 名称；JWT 网页操作不加这两项。异步任务只把 Key 展示身份放进 `TaskInitiator`，不把 Key 权限 scope 恢复进 worker；
 - **批量操作样本标题**：`kbActivityAppendSampleTitles` 为批量操作附带最多 5 个去重标题（第一个作为 `title`，其余进 `titles` 数组），保证活动流可读且有界；
 - **抑制机制**：`withKBActivitySuppressed(ctx)` 可让内部级联操作不产生重复活动记录。
 

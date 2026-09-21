@@ -162,7 +162,7 @@ Prompt 组装将稳定说明放在前部，动态会话内容放在后部；支�
 | `target_type` / `target_id` / `target_user_id` | varchar | 具体目标资源 / 用户 |
 | `request_path` / `request_method` | varchar | 路由模板（非原始 URL，防游标爆表；原始 URL 存 Details.raw_path） |
 | `outcome` | varchar(16) | `success` / `accepted`（异步已受理未终态）/ `denied` / `failed` / `partial` / `canceled` |
-| `details` | jsonb | 动作特定负载；密钥值**绝不**入库（如 vector_store 只记变更字段名） |
+| `details` | jsonb | 动作特定负载；密钥值**绝不**入库（如 vector_store 只记变更字段名）。API Key 发起的知识库活动会额外写入 `api_key_id` / `api_key_name`（名称快照，不含明文 Key） |
 | `created_at` | timestamp | 保留策略清扫依据 |
 
 #### 审计动作清单 {#_4-2-审计动作清单}

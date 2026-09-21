@@ -199,32 +199,6 @@ func (t *TodoWriteTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}, nil
 }
 
-// Helper function to safely get string field from map
-func getStringField(m map[string]interface{}, key string) string {
-	if val, ok := m[key].(string); ok {
-		return val
-	}
-	return ""
-}
-
-// Helper function to safely get string array field from map
-func getStringArrayField(m map[string]interface{}, key string) []string {
-	if val, ok := m[key].([]interface{}); ok {
-		result := make([]string, 0, len(val))
-		for _, item := range val {
-			if str, ok := item.(string); ok {
-				result = append(result, str)
-			}
-		}
-		return result
-	}
-	// Handle legacy string format for backward compatibility
-	if val, ok := m[key].(string); ok && val != "" {
-		return []string{val}
-	}
-	return []string{}
-}
-
 // generatePlanOutput generates a formatted plan output
 func generatePlanOutput(task string, steps []PlanStep) string {
 	output := "Plan created\n\n"
@@ -233,10 +207,9 @@ func generatePlanOutput(task string, steps []PlanStep) string {
 	if len(steps) == 0 {
 		output += "Note: No specific steps provided. It is recommended to create 3-7 retrieval tasks for systematic research.\n\n"
 		output += "Suggested retrieval workflow (focused on retrieval tasks, excluding summarization):\n"
-		output += "1. Use grep_chunks to search keywords and locate relevant documents\n"
-		output += "2. Use knowledge_search for semantic search to retrieve relevant content\n"
-		output += "3. Use list_knowledge_chunks to get the full content of key documents\n"
-		output += "4. Use web_search to get supplementary information (if needed)\n"
+		output += "1. Use search_knowledge to locate the relevant documents and passages\n"
+		output += "2. Use read_document to read the key documents in full\n"
+		output += "3. Use web_search to get supplementary information (if needed)\n"
 		output += "\nNote: Summarization and synthesis are handled by the thinking tool. Do not add summarization tasks here.\n"
 		return output
 	}

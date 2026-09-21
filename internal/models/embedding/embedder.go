@@ -8,6 +8,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	// provider.DetectProvider answers from the vendor catalog, which is empty
+	// until the vendor packages have run their init. Without this import every
+	// URL detects as "generic" and the per-vendor embedders below are never
+	// selected — silently, and only in builds that do not already link the
+	// container (leaf tests, future tools).
+	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -200,11 +206,13 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 			embedder, err = jinaEmb, jErr
 			return embedder, err
 		case provider.ProviderAzureOpenAI:
-			apiVersion := "2024-10-21"
+			// No default: an empty api_version means the v1 GA data
+			// plane, exactly as it does for this row's chat and VLM
+			// clients. Filling in a dated version here would put the
+			// same stored row on two different data planes.
+			var apiVersion string
 			if config.ExtraConfig != nil {
-				if v, ok := config.ExtraConfig["api_version"]; ok {
-					apiVersion = v
-				}
+				apiVersion = config.ExtraConfig["api_version"]
 			}
 			azureEmb, azErr := NewAzureOpenAIEmbedder(config.APIKey,
 				config.BaseURL,
@@ -258,7 +266,7 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 			embedder, err = zhipuEmb, zErr
 			return embedder, err
 		case provider.ProviderWeKnoraCloud:
-			embedder, err = NewWeKnoraCloudEmbedder(config)
+			embedder, err = NewWeKnoraCloudEmbedder(config, pooler)
 			return embedder, err
 		default:
 			// Use OpenAI-compatible embedder for other providers

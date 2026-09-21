@@ -76,12 +76,12 @@ onBeforeUnmount(() => { alive = false })
 <style scoped lang="less">
 .browser-search-preferences {
   margin-top: 20px;
-  h3 { margin: 0 0 6px; font-size: 16px; color: var(--td-text-color-primary); }
-  .description { margin: 0 0 8px; color: var(--td-text-color-secondary); font-size: 13px; line-height: 1.5; }
+  h3 { margin: 0 0 6px; font-size: var(--app-text-xl); color: var(--td-text-color-primary); }
+  .description { margin: 0 0 8px; color: var(--td-text-color-secondary); font-size: var(--app-text-md); line-height: 1.5; }
   .actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-  .actions span { color: var(--td-success-color); font-size: 12px; }
-  :deep(.t-textarea__inner) { font-size: 13px; line-height: 20px; }
-  :deep(.t-textarea__info_wrapper) { font-size: 12px; }
-  .error { color: var(--td-error-color); font-size: 13px; }
+  .actions span { color: var(--td-success-color); font-size: var(--app-text-sm); }
+  :deep(.t-textarea__inner) { font-size: var(--app-text-md); line-height: 20px; }
+  :deep(.t-textarea__info_wrapper) { font-size: var(--app-text-sm); }
+  .error { color: var(--td-error-color); font-size: var(--app-text-md); }
 }
 </style>

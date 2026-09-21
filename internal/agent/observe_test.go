@@ -81,7 +81,7 @@ func TestAnalyzeResponse_ToolCall_DoesNotTerminate(t *testing.T) {
 				ID:   "call-1",
 				Type: "function",
 				Function: types.FunctionCall{
-					Name:      agenttools.ToolKnowledgeSearch,
+					Name:      agenttools.ToolSearchKnowledge,
 					Arguments: `{"query": "hi"}`,
 				},
 			},
@@ -247,6 +247,7 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 			Title:       "Report.pdf",
 			FileType:    "pdf",
 		}},
+		nil,
 	)
 
 	assert.Contains(t, block, "<pinned_documents")
@@ -256,6 +257,43 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 	assert.NotContains(t, block, "<note>")
 	assert.Contains(t, runtimePromptContract, "Honor the current pinned-document scope")
 	assert.NotContains(t, block, "<must_use>")
+}
+
+func TestBuildRuntimeContextBlock_QuestionOrigin(t *testing.T) {
+	origin := &QuestionOriginInfo{
+		KnowledgeBaseID:   "kb-1",
+		KnowledgeBaseName: "TEST",
+		Document:          &SelectedDocumentInfo{KnowledgeID: "kid-1", Title: "Corners <SSAO>"},
+	}
+	block := buildRuntimeContextBlock("sess-1", nil, nil, origin)
+	assert.Contains(t, block, `<question_origin knowledge_base_id="kb-1" name="TEST">`)
+	assert.Contains(t, block, `<document knowledge_id="kid-1" title="Corners &lt;SSAO&gt;" />`)
+	assert.Contains(t, block, "Search it before answering")
+
+	baseOnly := buildRuntimeContextBlock("sess-1", nil, nil, &QuestionOriginInfo{KnowledgeBaseID: "kb-1"})
+	assert.Contains(t, baseOnly, `<question_origin knowledge_base_id="kb-1">`, "an unknown name is omitted, not empty")
+	assert.NotContains(t, baseOnly, "<document")
+
+	assert.NotContains(t, buildRuntimeContextBlock("sess-1", nil, nil, nil), "question_origin")
+}
+
+// The origin's raw IDs must reach the model as handles it can pass to
+// search_knowledge / read_document, never as durable IDs.
+func TestRenderUserTurnContent_QuestionOriginUsesHandles(t *testing.T) {
+	engine := &AgentEngine{
+		modelContext:       modelcontext.NewRegistry(true),
+		knowledgeBasesInfo: []*KnowledgeBaseInfo{{ID: "kb-real-id", Name: "TEST"}},
+		questionOrigin: &QuestionOriginInfo{
+			KnowledgeBaseID:   "kb-real-id",
+			KnowledgeBaseName: "TEST",
+			Document:          &SelectedDocumentInfo{KnowledgeID: "doc-real-id", Title: "Corners"},
+		},
+	}
+	out := engine.RenderUserTurnContent("sess-1", "为什么在比较图形时需要谨慎处理？")
+	assert.Contains(t, out, `<question_origin knowledge_base_id="b1" name="TEST">`)
+	assert.Contains(t, out, `<document knowledge_id="d1" title="Corners" />`)
+	assert.NotContains(t, out, "kb-real-id")
+	assert.NotContains(t, out, "doc-real-id")
 }
 
 func TestBuildMustUseBlock_MCPAndSkills(t *testing.T) {

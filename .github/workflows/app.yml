@@ -24,8 +24,9 @@ on:
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/**"
       - "internal/textconv/data/**"
-      - "scripts/*licenses.sh"
-      - "scripts/check-license-bundle.sh"
+      - "scripts/*license*.sh"
+      - "scripts/git-hooks/**"
+      - "scripts/test-git-hooks.sh"
       - "cmd/desktop/build/windows/installer/project.nsi"
       - ".github/workflows/app.yml"
   pull_request:
@@ -47,8 +48,9 @@ on:
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/**"
       - "internal/textconv/data/**"
-      - "scripts/*licenses.sh"
-      - "scripts/check-license-bundle.sh"
+      - "scripts/*license*.sh"
+      - "scripts/git-hooks/**"
+      - "scripts/test-git-hooks.sh"
       - "cmd/desktop/build/windows/installer/project.nsi"
       - ".github/workflows/app.yml"
   workflow_dispatch:
@@ -87,7 +89,9 @@ jobs:
         run: go mod download
 
       - name: Verify third-party notices and source bundle
-        run: bash ./scripts/check-license-bundle.sh
+        run: |
+          bash ./scripts/check-license-bundle.sh
+          bash ./scripts/test-license-bundle.sh
 
       - name: Check formatting
         shell: bash
@@ -112,6 +116,9 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+      - name: Verify Git hook test coverage
+        run: bash ./scripts/test-git-hooks.sh
 
       - name: Vet and test
         shell: bash

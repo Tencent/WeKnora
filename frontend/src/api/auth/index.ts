@@ -295,7 +295,12 @@ export async function register(data: RegisterRequest): Promise<RegisterResponse>
  */
 export async function autoSetup(): Promise<LoginResponse> {
   try {
-    const response = await post('/api/v1/auth/auto-setup', {})
+    const nativeApp = (window as any).go?.main?.App
+    if (!nativeApp?.GetAutoSetupToken) return { success: false, message: 'Desktop authentication required' }
+    const token = await nativeApp.GetAutoSetupToken()
+    const response = await post('/api/v1/auth/auto-setup', {}, {
+      headers: { 'X-WeKnora-Desktop-Token': token },
+    })
     return response as unknown as LoginResponse
   } catch (error: any) {
     return {

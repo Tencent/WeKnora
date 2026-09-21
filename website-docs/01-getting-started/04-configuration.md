@@ -66,7 +66,8 @@ flowchart LR
 | `enable_rerank` | bool | true | 启用 Rerank |
 | `fallback_prompt_id` | string | "default_fallback_prompt" | 兜底 prompt 模板 ID（`prompt_templates/fallback.yaml`，mode:"model"） |
 | `rewrite_prompt_id` | string | "default_rewrite" | 改写模板 ID（含 content 系统侧 + user 用户侧） |
-| `generate_summary_prompt_id` | string | "default_summary" | 文档摘要模板 ID |
+| `generate_summary_prompt_id` | string | "default_summary" | 文档画像模板 ID（短摘要 + gist/主题/类型/典型问题，JSON 输出） |
+| `generate_kb_description_prompt_id` | string | "default_kb_description" | 知识库描述模板 ID（输入为文档画像聚合，不是文档正文） |
 | `generate_session_title_prompt_id` | string | "default_session_title" | 会话标题生成模板 ID |
 | `extract_entities_prompt_id` / `extract_relationships_prompt_id` | string | "default_extract_entities" / "default_extract_relationships" | 图谱抽取模板 ID（`graph_extraction.yaml`） |
 | `generate_questions_prompt_id` | string | "default_generate_questions" | 预生成问题模板 ID |
@@ -75,10 +76,10 @@ flowchart LR
 
 | 名称 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `max_input_chars` | int | 16384 | 送入 LLM 的最大字符数 |
+| `max_input_chars` | int | 8192 | 送入 LLM 的最大字符数。文档画像只需要文档开头即可判断主题，8k 足够；旧值 16384/24576 会成倍增加每篇文档的摘要成本 |
 | `temperature` | float | 0.3 | 生成温度 |
 | `repeat_penalty` | float | 1.0 | 重复惩罚 |
-| `max_completion_tokens` | int | 2048 | 最大生成 token |
+| `max_completion_tokens` | int | 1024 | 最大生成 token（画像 JSON 各字段都很短） |
 | `no_match_prefix` | string | `<think>\n</think>\nNO_MATCH` | 模型输出以此为前缀时判定「未命中」触发 fallback |
 | `prompt_id` | string | "default_kb" | 系统 Prompt 模板 ID（`system_prompt.yaml`） |
 | `context_template_id` | string | "default_context" | 上下文拼装模板 ID（`context_template.yaml`） |
@@ -107,7 +108,7 @@ flowchart LR
 | 名称 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `enable_cross_tenant_access` | bool | false | 允许具备 `CanAccessAllTenants` 的用户跨空间访问（内网可开） |
-| `enable_rbac` | *bool | true | 空间角色强制鉴权；显式 `false` 进入仅记录不拦截的灰度模式（env `WEKNORA_TENANT_ENABLE_RBAC`） |
+| `enable_rbac` | *bool | true | 空间角色强制鉴权；显式 `false` 进入灰度模式，空间内的角色检查仅记录不拦截，跨空间访问仍然拦截（env `WEKNORA_TENANT_ENABLE_RBAC`） |
 | `max_owned_per_user` | int | 0（走 handler 默认） | 单个非超管可自建空间数上限；<0 关闭限制（env `WEKNORA_TENANT_MAX_OWNED_PER_USER`） |
 | `self_service_creation_enabled` | *bool | true | 普通用户能否自建空间（env `WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED`） |
 | `default_session_name` / `default_session_title` / `default_session_description` | string | 空 | 新会话默认文案 |
@@ -335,11 +336,13 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 | id | 系统 Prompt | 工具白名单 | 备注 |
 | --- | --- | --- | --- |
-| `rag-qa` | `progressive_rag_agent` | knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info | temperature 0.7、max_iterations 30、FAQ 优先 |
-| `wiki-qa` | `wiki_researcher` | wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue | 需 Wiki 已启用的知识库 |
+| `rag-qa` | `progressive_rag_agent` | search_knowledge、read_document、list_documents | temperature 0.7、max_iterations 30、FAQ 优先 |
+| `wiki-qa` | `wiki_researcher` | wiki_search、wiki_read_page、read_document、wiki_flag_issue | 需 Wiki 已启用的知识库 |
 | `hybrid-rag-wiki` | `hybrid_rag_wiki_agent` | Wiki + RAG 工具全集 | max_iterations 40，最灵活的预设 |
 | `data-analysis` | `data_analyst` | data_schema、data_analysis | temperature 0.3；`kb_filter: none_of: [faq]`；支持 csv/xlsx |
 | `custom` | 无 | 无预填 | 完全手动配置 |
+
+已保存配置里出现的旧工具名（`knowledge_search`、`grep_chunks` → `search_knowledge`；`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc` → `read_document`）会在运行时自动映射为新工具，无需手动改写。
 
 ## config/builtin_agents.yaml：内置 Agent
 

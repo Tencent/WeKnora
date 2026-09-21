@@ -576,33 +576,16 @@ onMounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/provider-card.less';
+
+@import (reference) '@/components/css/settings-section.less';
+
 .sandbox-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 20px;
-
-  h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-  }
-}
-
-.section-description {
-  margin: 0;
-  color: var(--td-text-color-secondary);
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.section-header__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  .settings-section-header();
 }
 
 .defaults-trigger {
@@ -625,7 +608,7 @@ onMounted(() => {
   align-items: center;
   gap: 5px;
   color: var(--td-brand-color);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   text-decoration: none;
 
@@ -650,7 +633,7 @@ onMounted(() => {
   justify-content: center;
   padding: 2px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: help;
@@ -672,14 +655,14 @@ onMounted(() => {
 .hint-popover__title {
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .hint-popover__text {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
@@ -688,39 +671,16 @@ onMounted(() => {
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  .setting-row();
   gap: 24px;
-  padding: 0 0 16px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .setting-info {
-  flex: 1;
-  min-width: 0;
-
-  label {
-    display: block;
-    margin-bottom: 4px;
-    color: var(--td-text-color-primary);
-    font-size: 14px;
-    font-weight: 500;
-  }
-
-  .desc {
-    margin: 0;
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    line-height: 1.5;
-  }
+  .setting-info();
 }
 
 .setting-control {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
+  .setting-control();
 }
 
 .sandbox-tabs-row {
@@ -736,7 +696,7 @@ onMounted(() => {
   margin-bottom: 0;
 
   :deep(.t-tabs__nav-item) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   :deep(.t-tabs__nav-item-wrapper) {
@@ -774,29 +734,12 @@ onMounted(() => {
 }
 
 .sandbox-card {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 14px 14px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-  min-width: 0;
+  .provider-card();
 
   &--clickable {
-    cursor: pointer;
+    .provider-card-interactive();
 
-    &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-    }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
   }
 
   &--add {
@@ -819,10 +762,7 @@ onMounted(() => {
       box-shadow: none;
     }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+
 
     &__icon {
       display: flex;
@@ -830,14 +770,14 @@ onMounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -845,42 +785,19 @@ onMounted(() => {
 }
 
 .sandbox-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  .provider-card-body();
 }
 
 .sandbox-card__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  .provider-card-header();
 }
 
 .sandbox-card__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .provider-card-title();
 }
 
 .sandbox-card__subtitle {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--td-text-color-secondary);
-  min-width: 0;
+  .provider-card-subtitle();
 }
 
 .sandbox-card__type {
@@ -900,7 +817,7 @@ onMounted(() => {
 
 .sandbox-card__url {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
@@ -921,8 +838,8 @@ onMounted(() => {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    color: var(--td-warning-color-7, var(--td-warning-color));
-    font-size: 12px;
+    color: var(--td-warning-color-7);
+    font-size: var(--app-text-sm);
     line-height: 1.4;
   }
 }
@@ -932,17 +849,7 @@ onMounted(() => {
 }
 
 .sandbox-card__more {
-  flex-shrink: 0;
-  padding: 2px;
-  color: var(--td-text-color-placeholder);
-  opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
-
-  &:hover,
-  &:focus-visible {
-    color: var(--td-text-color-primary);
-    background: var(--td-bg-color-secondarycontainer);
-  }
+  .provider-card-more();
 }
 
 .sandbox-card:hover .sandbox-card__more,
@@ -962,7 +869,7 @@ onMounted(() => {
 
 .sandbox-empty-hint {
   margin: 16px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -988,7 +895,7 @@ onMounted(() => {
   margin: 0;
   padding: 6px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -1019,13 +926,13 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
 }
 
 .inventory-row__meta {
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
 }
 
@@ -1038,7 +945,7 @@ onMounted(() => {
 .inventory-agents {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
 }
 </style>

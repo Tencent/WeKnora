@@ -193,10 +193,6 @@ func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, d
 	return content
 }
 
-func imLocalStorageBaseDir() string {
-	return storageurl.LocalStorageBaseDir()
-}
-
 // newIMFileServiceResolver builds a per-message storage backend resolver. The
 // cache lives for one cleanIMContent / outbound message so a long answer does
 // not re-create an SDK client for every reference.
@@ -1100,6 +1096,9 @@ func (s *Service) reloadChannelFromDB(channelID, reason string) {
 // the leader lock and opens the connection; other instances periodically
 // retry so they can take over if the leader dies.
 func (s *Service) StartChannel(channel *IMChannel) error {
+	if err := validateChannelTransport(channel); err != nil {
+		return err
+	}
 	if s.stopped.Load() {
 		return fmt.Errorf("im service is stopped")
 	}
@@ -2639,6 +2638,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		mergeIMAgentAnswerBuffers(&answerBuilder, &answerOuter, &agentLiveAnswer, data.FinalAnswer)
 		bufMu.Unlock()
 		closeComplete()
+		// Execute can emit EventError after Complete. The AgentQA return path
+		// closes done after those errors have been collected for finalization.
 		return nil
 	})
 
@@ -2785,6 +2786,13 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 
 	// Run QA async
 	go func() {
+		// AgentQA returns after all synchronous events, including errors emitted
+		// after EventAgentComplete. KnowledgeQA starts an asynchronous stream,
+		// so its return must not end the reply.
+		if useAgent {
+			defer closeDone()
+			defer closeComplete()
+		}
 		var err error
 		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote, attachments)
 		req.ImageURLs = imageURLs
@@ -3062,6 +3070,12 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 
 	// Run QA async
 	go func() {
+		// Match the streaming path: a returned AgentQA cannot produce more
+		// events, while KnowledgeQA may still be consuming its answer stream.
+		if useAgent {
+			defer closeDone()
+			defer closeComplete()
+		}
 		var err error
 		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, quote, attachments)
 		req.ImageURLs = imageURLs
@@ -3201,6 +3215,9 @@ func relocalizeBuiltinChannelAgentNames(ctx context.Context, rows []ChannelWithA
 // CreateChannel creates a new IM channel and optionally starts it.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) CreateChannel(channel *IMChannel) error {
+	if err := validateChannelTransport(channel); err != nil {
+		return err
+	}
 	if err := s.checkDuplicateBot(channel, ""); err != nil {
 		return err
 	}
@@ -3233,9 +3250,36 @@ func (s *Service) SetChannelAgentID(ctx context.Context, channel *IMChannel, age
 	return nil
 }
 
+// SetChannelKnowledgeBaseID binds the KB that IM files are saved into. It must
+// belong to the channel's workspace, which writes into it, and to a KB-restricted
+// API key's allow-list; a foreign ID would create records in (and read the
+// configuration of) another workspace's KB. An empty ID clears the binding.
+func (s *Service) SetChannelKnowledgeBaseID(ctx context.Context, channel *IMChannel, kbID string) error {
+	kbID = strings.TrimSpace(kbID)
+	if kbID == "" {
+		channel.KnowledgeBaseID = ""
+		return nil
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+		return fmt.Errorf("knowledge base not found")
+	}
+	if s.kbService == nil {
+		return fmt.Errorf("knowledge base not found")
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
+	if err != nil || kb == nil || kb.TenantID != channel.TenantID {
+		return fmt.Errorf("knowledge base not found")
+	}
+	channel.KnowledgeBaseID = kbID
+	return nil
+}
+
 // UpdateChannel updates a channel and restarts it if needed.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) UpdateChannel(channel *IMChannel) error {
+	if err := validateChannelTransport(channel); err != nil {
+		return err
+	}
 	if err := s.checkDuplicateBot(channel, channel.ID); err != nil {
 		return err
 	}

@@ -424,6 +424,32 @@ func (s *knowledgeService) isKnowledgeAborted(
 	return false, knowledge.ParseStatus
 }
 
+// isKnowledgeSourceReplaced reports whether the stored source file no longer
+// matches the in-memory knowledge this worker loaded. ReplaceKnowledgeFile
+// changes file_path under a still-running ProcessDocument; the stale worker
+// must not Save() the old path back or write chunks from the replaced file.
+func (s *knowledgeService) isKnowledgeSourceReplaced(ctx context.Context, knowledge *types.Knowledge) bool {
+	if knowledge == nil || knowledge.ID == "" || knowledge.FilePath == "" {
+		return false
+	}
+	current, err := s.repo.GetKnowledgeByID(ctx, knowledge.TenantID, knowledge.ID)
+	if err != nil || current == nil {
+		return false
+	}
+	return current.FilePath != "" && current.FilePath != knowledge.FilePath
+}
+
+// updateKnowledgeUnlessSourceReplaced persists processing state only when this
+// worker still owns the source file. A no-op skip is preferred over rolling
+// file_path back to a blob ReplaceKnowledgeFile may already have deleted.
+func (s *knowledgeService) updateKnowledgeUnlessSourceReplaced(ctx context.Context, knowledge *types.Knowledge) error {
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Skip knowledge update for %s: source file was replaced", knowledge.ID)
+		return nil
+	}
+	return s.repo.UpdateKnowledge(ctx, knowledge)
+}
+
 // checkStorageEngineConfigured verifies that the knowledge base has a storage engine configured
 // (either at the KB level or via the tenant default).
 //

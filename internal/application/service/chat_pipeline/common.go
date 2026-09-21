@@ -43,6 +43,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		return nil, nil, err
 	}
 
+	effort := chat.SanitizeReasoningEffort(ctx, chatManage.SummaryConfig.ReasoningEffort, "session summary config")
 	opt := &chat.ChatOptions{
 		Temperature:         chatManage.SummaryConfig.Temperature,
 		TopP:                chatManage.SummaryConfig.TopP,
@@ -52,11 +53,13 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
+		ReasoningEffort:     effort,
 		PromptCacheKey:      chatManage.SessionID,
 	}
-	if opt.Thinking != nil {
+	if level, requested := opt.Reasoning(); requested {
 		pipelineInfo(ctx, "Stream", "thinking_option", map[string]interface{}{
-			"enabled": *opt.Thinking,
+			"enabled": level.Enabled(),
+			"level":   string(level),
 		})
 	}
 

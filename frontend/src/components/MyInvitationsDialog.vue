@@ -216,7 +216,7 @@ watch(
 <style lang="less" scoped>
 .my-invitations-desc {
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   margin: 0 0 16px 0;
 }
@@ -255,7 +255,7 @@ watch(
   padding: 12px 14px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 
   .invitation-card-main {
     flex: 1 1 auto;
@@ -272,7 +272,7 @@ watch(
     flex-wrap: wrap;
 
     .tenant-name {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
@@ -283,7 +283,7 @@ watch(
     flex-direction: column;
     gap: 3px;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
 
     .meta-row {
       display: inline-flex;

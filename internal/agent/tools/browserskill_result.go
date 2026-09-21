@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -28,6 +29,22 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 		Effect string `json:"effect_state"`
 	}
 	_ = json.Unmarshal(err.Data, &data)
+	if method == "tab_borrow" && (data.Reason == "confirmation_timeout" ||
+		err.Code == "timeout" || err.Code == "cancelled" || err.Code == "user_aborted") {
+		return "Stop browser actions: tab borrowing was not approved. The confirmation is no longer pending. " +
+			"Ask the user to click Continue operation in the conversation preview " +
+			"before continuing in this same conversation. " +
+			"Continue operation only resumes the task; it does not grant tab access. After explicit resume, " +
+			"request tab_borrow once again and wait for Allow in the target page's BrowserSkill confirmation. " +
+			"Do not call request_help on the unapproved tab or reconnect/pair again."
+	}
+	if err.Code == "permission_denied" && (strings.Contains(err.Message, "borrow this tab before") ||
+		strings.Contains(err.Message, "Authorize this tab with tab_borrow")) {
+		return "This tab is not authorized for the current task. If its existing page state is needed, " +
+			"call tab_borrow once and wait for the user's approval in the target page. " +
+			"Do not retry tab_select/read/close or call request_help before borrowing succeeds. " +
+			"For an ordinary website lookup that does not need this tab's state, navigate in the task's own tab."
+	}
 	if err.Code == "user_aborted" || err.Code == "cancelled" || err.Code == "task_paused" || err.Code == "timeout" {
 		return "Stop browser actions. Ask the user to complete any manual step and click Continue operation " +
 			"in the conversation browser preview, then continue in the same conversation. " +
@@ -112,6 +129,17 @@ func (t *BrowserSkillTool) interpretResult(method string, raw json.RawMessage) *
 		}
 		result.Error = "Browser evaluate failed or returned an invalid result. Inspect ok/error; " +
 			"return bounded serializable data, not DOM nodes. Observe before retrying."
+		var detail struct {
+			Error struct {
+				Text string `json:"text"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(raw, &detail) == nil && strings.Contains(detail.Error.Text, "Illegal return statement") {
+			result.Error = "evaluate received a top-level return. Use an expression or an IIFE, " +
+				"for example (() => { return document.title; })(). " +
+				"Correct the syntax and inspect page state before repeating mutations. " +
+				"For scrolling, use wheel with delta_y or scroll_to with an observed ref."
+		}
 	} else {
 		if err == nil && (envelope.Outcome == "continued" || envelope.Outcome == "completed") {
 			return result

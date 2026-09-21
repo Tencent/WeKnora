@@ -56,6 +56,9 @@ services:
       # to config/builtin_models.yaml, edit it for your deployment, then
       # uncomment the line below. See docs/BUILTIN_MODELS.md.
       # - ./config/builtin_models.yaml:/app/config/builtin_models.yaml:ro
+      # Optional: model catalog overlay (extra vendors / model overrides).
+      # Copy config/models.json.example to config/models.json, then
+      # - ./config/models.json:/app/config/models.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -299,6 +302,7 @@ services:
       # （TENANT_AES_KEY / CRYPTO_MASTER_KEY / CRYPTO_SALT 已废弃：v0.4.0 起加密统一
       #   改用 SYSTEM_AES_KEY，Go 主应用不再读取这三个变量。）
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
+      - SYSTEM_SIGNING_KEY=${SYSTEM_SIGNING_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
       # 保留原始 URL 的图片域名白名单（逗号分隔，不替换为 provider://）
       - IMAGE_HOST_KEEP_URL=${IMAGE_HOST_KEEP_URL:-}
@@ -519,7 +523,7 @@ services:
 
   # 修改的PostgreSQL配置
   postgres:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: paradedb/paradedb:v0.22.6-pg17
     container_name: WeKnora-postgres
     environment:
       - POSTGRES_USER=${DB_USER}
@@ -797,7 +801,7 @@ services:
   # 一次性初始化脚本：在已有的 WeKnora-postgres 里创建 langfuse 数据库（幂等，数据库已存在则跳过）
   # 复用 WeKnora-postgres 的 ParadeDB 镜像，避免多拉一个 postgres 镜像
   langfuse-db-init:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: paradedb/paradedb:v0.22.6-pg17
     container_name: WeKnora-langfuse-db-init
     depends_on:
       postgres:

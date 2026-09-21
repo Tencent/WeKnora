@@ -5,11 +5,11 @@ package tools
 // a file write must finish before the next shell or skill call starts.
 func CanRunConcurrently(name string) bool {
 	switch name {
-	case ToolKnowledgeSearch, ToolGrepChunks, ToolListKnowledgeChunks,
-		ToolQueryKnowledgeGraph, ToolGetDocumentInfo, ToolSearchConversations,
+	case ToolSearchKnowledge, ToolReadDocument, ToolListDocuments,
+		ToolQueryKnowledgeGraph, ToolSearchConversations,
 		ToolSearchMemory, ToolDataSchema, ToolWebSearch, ToolWebFetch,
 		ToolReadFile, ToolListSandboxFiles,
-		ToolWikiSearch, ToolWikiReadPage, ToolWikiReadSourceDoc, ToolWikiReadIssue:
+		ToolWikiSearch, ToolWikiReadPage, ToolWikiReadIssue:
 		return true
 	default:
 		return false

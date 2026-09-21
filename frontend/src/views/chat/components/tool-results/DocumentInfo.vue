@@ -109,6 +109,7 @@ const channelLabelMap: Record<string, string> = {
   wecom: 'knowledgeBase.channelWecom',
   feishu: 'knowledgeBase.channelFeishu',
   gitlab: 'knowledgeBase.channelGitLab',
+  confluence: 'knowledgeBase.channelConfluence',
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
@@ -168,11 +169,11 @@ const formatMetadataValue = (value: unknown) => {
 }
 
 .meta-chip {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid @card-border;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   padding: 2px 8px;
   line-height: 1.5;
   white-space: nowrap;
@@ -197,16 +198,16 @@ const formatMetadataValue = (value: unknown) => {
   }
 
   .doc-title {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   .status-pill {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-brand-color);
-    border: 1px solid rgba(7, 192, 95, 0.3);
-    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--td-brand-color) 30%, transparent);
+    border-radius: var(--app-radius-lg);
     padding: 2px 8px;
     line-height: 1.4;
   }
@@ -230,7 +231,7 @@ const formatMetadataValue = (value: unknown) => {
   gap: 4px;
 
   li {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-primary);
   }
@@ -240,7 +241,7 @@ const formatMetadataValue = (value: unknown) => {
   display: flex;
   gap: 10px;
   margin-bottom: 5px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   &--block {
@@ -275,7 +276,7 @@ const formatMetadataValue = (value: unknown) => {
   gap: 3px;
 
   li {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-primary);
     line-height: 1.5;
   }
@@ -293,7 +294,7 @@ const formatMetadataValue = (value: unknown) => {
 }
 
 .empty-state {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   text-align: center;
   padding: 14px;
@@ -304,7 +305,7 @@ const formatMetadataValue = (value: unknown) => {
 
 code {
   font-family: var(--app-font-family-mono);
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;
   border-radius: 2px;

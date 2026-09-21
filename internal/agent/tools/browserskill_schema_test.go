@@ -17,6 +17,7 @@ func TestBrowserFlatSchemaCoversEveryMethod(t *testing.T) {
 	require.NoError(t, json.Unmarshal(tool.Parameters(), &schema))
 	require.NotContains(t, schema.Properties, "params")
 	require.NotContains(t, schema.Properties, "session_id")
+	require.NotContains(t, schema.Properties, "completion_criteria")
 	require.Equal(t, []string{"method"}, schema.Required)
 	var method struct {
 		Enum []string `json:"enum"`
@@ -76,6 +77,7 @@ func TestBrowserFlatArgumentsRejectBeforeDispatch(t *testing.T) {
 		`{"method":"window_resize","width":800}`, `{"method":"window_resize","width":1,"height":600}`,
 		`{"method":"emulate"}`, `{"method":"emulate","off":true,"overrides":{"width":800}}`,
 		`{"method":"emulate","overrides":"{}"}`, `{"method":"request_help","prompt":null}`,
+		`{"method":"request_help","prompt":"Sign in","completion_criteria":{"any":[{"text_exists":"看过"}]}}`,
 	} {
 		t.Run(raw, func(t *testing.T) { require.Error(t, tool.ValidateArguments(json.RawMessage(raw))) })
 	}

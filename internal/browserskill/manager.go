@@ -50,7 +50,7 @@ type Status struct {
 	LastError       string `json:"last_error,omitempty"`
 	Stopping        bool   `json:"stopping"`
 	HelpPrompt      string `json:"help_prompt,omitempty"`
-	Idle            bool   `json:"idle"`
+	Idle            bool   `json:"idle"` // Between turns; does not imply debugger release.
 	NeedsHelp       bool   `json:"needs_help"`
 	Enabled         bool   `json:"enabled"`
 	Selected        bool   `json:"selected"`
@@ -625,8 +625,21 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 		return nil, errors.New("browser command interrupted or timed out; do not replay actions automatically")
 	}
 	var reply rpcReply
-	if json.Unmarshal(line, &reply) != nil || reply.ID != id {
+	if json.Unmarshal(line, &reply) != nil {
 		return nil, errors.New("invalid BrowserSkill response")
+	}
+	if reply.ID != id {
+		// The daemon answers unrecognized request methods with an uncorrelated
+		// protocol error. This socket carries only one request; preserve the
+		// actionable version mismatch without accepting other mismatched replies.
+		if reply.ID == "0" && reply.Error != nil && reply.Error.Code == "protocol_error" {
+			return nil, &RPCError{
+				Code: "daemon_incompatible",
+				Message: "BrowserSkill daemon rejected the request protocol; " +
+					"rebuild bsk and the extension from the same pinned source baseline",
+			}
+		}
+		return nil, errors.New("invalid BrowserSkill response ID")
 	}
 	if reply.Error != nil {
 		reply.Error.BoundDetails()
@@ -735,6 +748,10 @@ func (m *Manager) Call(
 	}
 	t.idle = false
 	t.action, t.actionStarted, t.actionFinished, t.lastError = method, time.Now(), time.Time{}, ""
+	if method == "navigate" {
+		requestedURL, _ := params["url"].(string)
+		t.pageURL = statusPageURL(requestedURL)
+	}
 	if method == "tab_select" || method == "tab_close" || method == "tab_return" {
 		t.pageURL = ""
 	}
@@ -776,10 +793,23 @@ func (m *Manager) Call(
 			clean["wait_until"] = "domcontentloaded"
 		}
 	}
+	if method == "request_help" {
+		// A model-proposed page predicate is not evidence that the human step
+		// finished (e.g. login pages can already contain "History"). Require
+		// the user's explicit Continue action, including for legacy callers.
+		delete(clean, "completion_criteria")
+	}
 	clean["session_id"] = id
 	if helping {
 		// Keep all transports inside the same bounded human-wait budget.
-		clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
+		if method == "tab_borrow" {
+			// Borrow confirmation uses a distinct protocol field. timeout_ms is
+			// ignored by this method, leaving the extension's shorter default.
+			clean["confirmation_timeout_ms"] = humanTimeoutMS(clean["confirmation_timeout_ms"])
+			delete(clean, "timeout_ms")
+		} else {
+			clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
+		}
 	}
 	result, err := rpc(callCtx, d, "tool."+method, clean)
 	if method == "request_help" && err == nil {
@@ -882,9 +912,6 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 			return err
 		}
 	}
-	if d == nil && action == "finish" {
-		return nil
-	}
 	if d == nil && action == "stop" && m.store != nil {
 		return m.store.clearTask(ctx, s, session)
 	}
@@ -896,16 +923,6 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	}
 	d.mu.Lock()
 	t := d.tasks[session]
-	if action == "finish" {
-		// Automatic cleanup must not resume or discard interrupted work, nor
-		// interrupt a new command/start that raced with turn completion.
-		if t == nil || t.paused || t.starting || t.stopping || len(t.calls) > 0 || !t.idle {
-			d.mu.Unlock()
-			return nil
-		}
-		d.mu.Unlock()
-		return m.stopTask(ctx, s, session, d, true)
-	}
 	if action == "auto_start" && (t == nil || !t.selected || t.paused || t.forgotten) {
 		d.mu.Unlock()
 		return errors.New("local browser is not selected or is paused; ask the user to resume")

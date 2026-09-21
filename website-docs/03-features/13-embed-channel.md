@@ -1,6 +1,6 @@
 # 网页嵌入（Embed Channel）
 
-嵌入渠道用于在官网或帮助中心提供知识库问答挂件。创建渠道并绑定智能体后，将生成的脚本加入网页，访客无需 WeKnora 账号即可对话。
+嵌入渠道用于在官网或帮助中心提供知识库问答挂件。创建渠道并绑定智能体后，将生成的脚本加入网页，访客无需 WeKnora 账号即可对话。访客的检索范围和模型完全由渠道绑定的智能体决定：服务端会丢弃请求里的知识库、文档、标签、@提及、技能和模型覆盖。
 
 在「设置 → 网页嵌入」新建渠道，绑定智能体并设置允许嵌入的域名，然后复制接入代码。公开使用前应配置域名白名单和限流，限制访问来源与请求量。
 
@@ -109,7 +109,7 @@ publish token 只保存在业务后端，页面通过 `data-token-endpoint` 指�
 
 A 网站嵌入 B 的 WeKnora 时，白名单填 A。标准 Nginx 使用 `/api/v1/embed-frame-policy` 获取渠道策略（无需 token，仅返回 CSP，不返回渠道配置），并在 `/embed/:channelId` 的 HTML 响应中设置 `frame-ancestors`；Lite 使用同一策略。该页面不缓存，策略获取失败时不返回嵌入 HTML。
 
-升级时，过去仅填 B 的渠道需改填实际宿主 A，并同时更新前后端。自定义反向代理需保留 CSP、原始 Host（含端口）、协议及 `Sec-Fetch-Site`；详见 [embed-subdomain.md](../../docs/embed-subdomain.md)。白名单限制浏览器嵌入，不能代替访客认证或阻止持有 token 的非浏览器客户端；此类访问控制使用安全模式和限流。
+升级时，过去仅填 B 的渠道需改填实际宿主 A，并同时更新前后端。自定义反向代理需保留 CSP、原始 Host（含端口）、协议及 `Sec-Fetch-Site`；详见 [embed-subdomain.md](https://github.com/Tencent/WeKnora/blob/main/docs/embed-subdomain.md)。白名单限制浏览器嵌入，不能代替访客认证或阻止持有 token 的非浏览器客户端；此类访问控制使用安全模式和限流。
 
 ### Token 交换（安全模式核心）
 

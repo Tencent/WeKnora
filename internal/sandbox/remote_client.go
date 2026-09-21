@@ -49,6 +49,14 @@ type RemoteConnectRequest struct {
 	TrafficAccessToken string
 }
 
+// RemoteSessionConnector connects and checks lifecycle state using the same
+// provider handle. It avoids Get (which itself connects on Cube/E2B) followed
+// by another Connect. Terminal/missing sandboxes must return classified errors;
+// transient failures must never authorize replacement of a session's sandbox.
+type RemoteSessionConnector interface {
+	ConnectSession(context.Context, RemoteConnectRequest) (RemoteSandboxHandle, error)
+}
+
 // RemoteTimeoutMode describes how the remote provider should treat the
 // requested idle timeout.
 type RemoteTimeoutMode string

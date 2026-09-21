@@ -10,13 +10,29 @@ API key：`manage_models` 或 full-access。
 
 ### GET /api/v1/models/providers
 
-用途：模型厂商列表。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`）。Handler: `internal/handler/model.go`
+用途：厂商目录（前端据此动态渲染厂商下拉、图标、额外字段与模型选择）。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`）。Handler: `internal/handler/model_catalog.go`
 
-响应：200 `{"success":true,"data":[{value,label,description,defaultUrls,modelTypes}]}`
+响应：200 `{"success":true,"data":[ModelProviderDTO]}`，每项：
+
+| 字段 | 说明 |
+| --- | --- |
+| `value` / `label` / `labels` / `description` / `descriptions` / `website` | 厂商 id、品牌名、按语言的名称与描述 |
+| `icon` | `data:image/svg+xml;base64,...`，可直接用于 `<img src>` |
+| `api` / `auth` / `requiresAuth` | 默认协议（`openai-completions` 等）、鉴权方式、是否需要密钥 |
+| `defaultUrls` / `modelTypes` | 按模型类型的默认地址与支持的类型 |
+| `extraFields` | 厂商额外配置字段定义（`key,label,type,required,default,options,model_types,secret`），值存入 `parameters.extra_config` |
+| `models` | 内置模型目录（`id,name,type,api,reasoning,input,context_window,max_output_tokens,dimension,thinking_levels,cost`） |
+| `thinking` | 厂商级思考编码摘要（`format`、`levels`） |
 
 ```bash
 curl "$BASE/api/v1/models/providers?model_type=chat" -H "Authorization: Bearer $TOKEN"
 ```
+
+### GET /api/v1/models/catalog/resolve
+
+用途：按厂商、模型名、`base_url` 与 `extra_config` 解析有效接入配置（协议、思考等级、上下文），供模型编辑器实时展示。权限：Viewer+。查询参数：`provider`（必填）、`model`、`base_url`、`model_type`、`api`、`thinking_control`、`remote_model_name`。
+
+响应：200 `{"success":true,"data":{provider,api,base_url,remote_model,cataloged,model,capabilities}}`，其中 `capabilities` 为 `{provider,api,cataloged,reasoning,thinking_levels,thinking_format,input,context_window,max_output_tokens,max_tokens_field}`。同一结构也随对话/视觉模型的 `ModelResponse.capabilities` 返回。
 
 ### POST /api/v1/models
 
@@ -172,6 +188,8 @@ Handler: `internal/handler/initialization.go`。KB 配置类：API key `manage_k
 
 用途：读取 KB 当前模型/解析配置。权限：Viewer+，KB read。
 
+模型 `baseUrl` 仅对 KB 所属空间的 Admin+（或 full-access / `manage_tenant_settings` API key）返回。通过组织分享访问的空间只能看到凭证是否已配置（`credentials.*`），看不到来源空间的模型地址和存储桶信息。
+
 响应：200 `{"success":true,"data":{"hasFiles",llm,embedding,rerank,multimodal,documentSplitting,nodeExtract,questionGeneration}}`
 
 ```bash
@@ -181,6 +199,8 @@ curl $BASE/api/v1/initialization/config/kb-1 -H "Authorization: Bearer $TOKEN"
 ### POST /api/v1/initialization/initialize/:kbId
 
 用途：初始化 KB 的模型与解析配置（首次配置向导）。权限：KB 创建者 OR Admin+，KB write。
+
+只有 KB 所属空间可以调用；通过组织分享获得编辑权限的空间会被拒绝（403）。KB 已绑定模型时，该接口会原地更新这些模型的配置，这一步需要与 `PUT /models/:id` 相同的权限（Admin+，或拥有 `manage_models` 能力的 API key），否则 403。
 
 主要字段（`InitializationRequest`）：
 
@@ -208,6 +228,8 @@ curl -X POST $BASE/api/v1/initialization/initialize/kb-1 -H "Authorization: Bear
 ### PUT /api/v1/initialization/config/:kbId
 
 用途：更新 KB 模型/分块配置（`KBModelConfigRequest`：`llmModelId` 必填，`embeddingModelId`、`vlm_config`、`asr_config`、`documentSplitting.*`、`multimodal.enabled`、`storageProvider`、`storageBackendId`、`nodeExtract.*`、`questionGeneration.*` 可选）。权限：KB 创建者 OR Admin+，KB write。
+
+通过组织分享访问时，需要有效分享权限为 admin；editor 只能编辑内容，不能改设置（403）。存储绑定（`storageBackendId` / `storageProvider`）只有 KB 所属空间可以修改，其他空间提交与当前不同的值会返回 403。
 
 响应：200 `{"success":true,"message":"配置更新成功"}`
 

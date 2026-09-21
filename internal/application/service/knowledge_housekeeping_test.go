@@ -24,6 +24,7 @@ import (
 // service code uses Model(&types.Knowledge{}).
 const knowledgeTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledges (
+    profile TEXT,
     id              VARCHAR(64) PRIMARY KEY,
     tenant_id       INTEGER NOT NULL DEFAULT 0,
     knowledge_base_id VARCHAR(64),
@@ -132,7 +133,10 @@ func insertSpan(t *testing.T, db *gorm.DB, kid string, attempt int, spanID, stat
 // the probe to fail so the fail-safe branch can be exercised.
 type fakeTaskInspector struct {
 	queued map[string]bool
-	err    error
+	// deleteQueued independently controls the delete-task liveness probe;
+	// nil means "no delete task alive" for every ID.
+	deleteQueued map[string]bool
+	err          error
 }
 
 func (f fakeTaskInspector) CancelTasksForKnowledge(
@@ -148,6 +152,15 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 		return false, f.err
 	}
 	return f.queued[knowledgeID], nil
+}
+
+func (f fakeTaskInspector) HasQueuedDeleteTasksForKnowledge(
+	_ context.Context, knowledgeID string,
+) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.deleteQueued[knowledgeID], nil
 }
 
 func (f fakeTaskInspector) QueueStats(
@@ -384,4 +397,89 @@ func TestHousekeeping_PreservesRecentlyTouched(t *testing.T) {
 	).Row().Scan(&status))
 	assert.Equal(t, types.ParseStatusProcessing, status,
 		"knowledge updated within the cutoff must be left alone")
+}
+
+// --- Sweep C: stranded "deleting" rows (issues #3338/#3345) --—
+
+func readKnowledgeStatus(t *testing.T, db *gorm.DB, id string) (string, string) {
+	t.Helper()
+	var status, errMsg string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, COALESCE(error_message, '') FROM knowledges WHERE id = ?`, id,
+	).Row().Scan(&status, &errMsg))
+	return status, errMsg
+}
+
+func TestHousekeeping_RecoversStrandedDeletingRow(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	// No deleteQueued entry: the delete task is gone (worker death / lost
+	// queue), the dead-letter path never fired, the row is stranded.
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-stranded-delete", types.ParseStatusDeleting, stale)
+
+	svc.runSweep(context.Background())
+
+	status, errMsg := readKnowledgeStatus(t, db, "kid-stranded-delete")
+	assert.Equal(t, types.ParseStatusFailed, status)
+	assert.Contains(t, errMsg, "stranded")
+}
+
+func TestHousekeeping_KeepsBackloggedDeletingRow(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	// A live (queued/active/retry) knowledge:list_delete still covers the
+	// row — backpressure, not stranded; must stay untouched.
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		deleteQueued: map[string]bool{"kid-backlogged-delete": true},
+	})
+	insertKnowledge(t, db, "kid-backlogged-delete", types.ParseStatusDeleting,
+		time.Now().Add(-3*time.Hour))
+
+	svc.runSweep(context.Background())
+
+	status, _ := readKnowledgeStatus(t, db, "kid-backlogged-delete")
+	assert.Equal(t, types.ParseStatusDeleting, status)
+}
+
+func TestHousekeeping_FreshDeletingRowUntouched(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	// Marked deleting moments ago: below the staleness cutoff, so the sweep
+	// must not even consider it (a delete just handed to the queue).
+	insertKnowledge(t, db, "kid-fresh-delete", types.ParseStatusDeleting, time.Now())
+
+	svc.runSweep(context.Background())
+
+	status, _ := readKnowledgeStatus(t, db, "kid-fresh-delete")
+	assert.Equal(t, types.ParseStatusDeleting, status)
+}
+
+func TestHousekeeping_DeletingProbeErrorDefers(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	// Backend probe error must defer the row to the next sweep rather than
+	// guess: failing a live delete would surface a wrong "failed" card.
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		err: assert.AnError,
+	})
+	insertKnowledge(t, db, "kid-probe-err-delete", types.ParseStatusDeleting,
+		time.Now().Add(-3*time.Hour))
+
+	svc.runSweep(context.Background())
+
+	status, _ := readKnowledgeStatus(t, db, "kid-probe-err-delete")
+	assert.Equal(t, types.ParseStatusDeleting, status)
+}
+
+func TestHousekeeping_NilInspectorDefersDeletingSweep(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	// Without any inspector wired there is no way to tell backlog from
+	// orphan, so the whole Sweep C defers — never guesses.
+	svc := newHousekeepingSvcWithInspector(db, nil)
+	insertKnowledge(t, db, "kid-nil-inspector", types.ParseStatusDeleting,
+		time.Now().Add(-3*time.Hour))
+
+	svc.runSweep(context.Background())
+
+	status, _ := readKnowledgeStatus(t, db, "kid-nil-inspector")
+	assert.Equal(t, types.ParseStatusDeleting, status)
 }

@@ -4,6 +4,7 @@ import larkIcon from '@/assets/img/datasource-lark.svg'
 import notionIcon from '@/assets/img/datasource-notion.ico'
 import yuqueIcon from '@/assets/img/datasource-yuque.ico'
 import rssIcon from '@/assets/img/datasource-rss.svg'
+import confluenceIcon from '@/assets/img/datasource-confluence.svg'
 import dingtalkIcon from '@/assets/img/im/dingtalk.svg'
 import imaIcon from '@/assets/img/datasource-ima.png'
 import outlineIcon from '@/assets/img/datasource-outline.png'
@@ -18,6 +19,7 @@ export const datasourceIconMap: Record<string, string> = {
   yuque: yuqueIcon,
   dingtalk: dingtalkIcon,
   rss: rssIcon,
+  confluence: confluenceIcon,
   gitlab: gitlabIcon,
   ima: imaIcon,
   outline: outlineIcon,

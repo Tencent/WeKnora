@@ -41,7 +41,7 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 			SandboxConfigID: "sandbox", MCPSelectionMode: "all", KnowledgeBases: []string{"kb"},
 			SearchTargets: types.SearchTargets{&types.SearchTarget{KnowledgeBaseID: "kb", TenantID: 7}},
 			SkillDirs:     []string{t.TempDir()},
-			AllowedTools:  []string{tools.ToolKnowledgeSearch, tools.ToolShellExec, tools.ToolThinking},
+			AllowedTools:  []string{tools.ToolSearchKnowledge, tools.ToolShellExec, tools.ToolThinking},
 		}
 		engine, err := svc.CreateAgentEngine(ctx, cfg, model, nil, nil, "session", "message")
 		require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 		_, err = engine.Execute(ctx, "session", "message", "use my browser and other sources", nil)
 		require.NoError(t, err)
 		for _, name := range []string{
-			tools.ToolKnowledgeSearch, tools.ToolWebSearch, tools.ToolWebFetch, tools.ToolShellExec,
+			tools.ToolSearchKnowledge, tools.ToolWebSearch, tools.ToolWebFetch, tools.ToolShellExec,
 		} {
 			require.Contains(t, model.lastToolNames, name)
 		}

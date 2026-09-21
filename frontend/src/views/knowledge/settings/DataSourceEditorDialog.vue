@@ -159,9 +159,33 @@ function needsConnectionTest(): boolean {
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
+function hydrateConfluenceCredentialsFromSettings() {
+  if (form.value.type !== 'confluence') return
+  const settings = form.value.config.settings || {}
+  const creds = form.value.config.credentials || {}
+  form.value.config.credentials = {
+    ...creds,
+    edition: creds.edition || settings.edition || 'server',
+    base_url: creds.base_url || settings.base_url || '',
+    username: creds.username || settings.username || '',
+  }
+}
+
+function syncConfluencePublicFieldsToSettings() {
+  if (form.value.type !== 'confluence') return
+  const creds = form.value.config.credentials || {}
+  form.value.config.settings = {
+    ...(form.value.config.settings || {}),
+    ...(creds.edition ? { edition: creds.edition } : {}),
+    ...(creds.base_url ? { base_url: creds.base_url } : {}),
+    ...(creds.username ? { username: creds.username } : {}),
+  }
+}
+
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
   replaceCredentialsMode.value = true
+  hydrateConfluenceCredentialsFromSettings()
   testResult.value = ''
   testErrorMsg.value = ''
 }
@@ -586,6 +610,20 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'confluence',
+    available: true,
+    docUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionDocUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionPageUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com or https://team.atlassian.net/wiki' },
+      { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: 'name or email' },
+      { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true },
+      { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true },
+    ],
+  },
+  {
     type: 'yuque',
     available: true,
     docUrl: 'https://www.yuque.com/yuque/developer/api',
@@ -668,6 +706,17 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
 
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+
+const displayedCredentialFields = computed(() => {
+  const fields = currentDef.value?.fields || []
+  if (form.value.type !== "confluence") return fields
+
+  return fields.filter((field) => {
+    if (field.key === "password") return form.value.config.credentials.edition !== "cloud"
+    if (field.key === "api_token") return form.value.config.credentials.edition === "cloud"
+    return true
+  })
+})
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
@@ -797,7 +846,10 @@ function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
-  form.value.config.credentials = {}
+  form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
+  if (def.type === 'confluence') {
+    form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
+  }
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
@@ -806,9 +858,10 @@ function selectType(def: ConnectorDef) {
 // --- Test connection ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
   if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    const fields = currentDef.value?.fields || []
+    const fields = displayedCredentialFields.value
     for (const f of fields) {
       if (f.optional || f.fieldType === 'custom_headers') continue
       if (!form.value.config.credentials[f.key]) {
@@ -853,6 +906,7 @@ async function testConnection() {
 async function loadResources() {
   loadingResources.value = true
   try {
+    syncConfluencePublicFieldsToSettings()
     if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
@@ -1007,7 +1061,7 @@ function validateStep1Fields(): boolean {
     return true
   }
 
-  const fields = currentDef.value?.fields || []
+  const fields = displayedCredentialFields.value
   for (const f of fields) {
     if (f.optional || f.fieldType === 'custom_headers') continue
     if (!form.value.config.credentials[f.key]) {
@@ -1074,6 +1128,7 @@ function prevStep() {
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
   syncGitLabProjectsToSettings()
+  syncConfluencePublicFieldsToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -1087,6 +1142,7 @@ function buildConfigPayload(): Record<string, unknown> {
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
   if (!isEdit.value || !replaceCredentialsMode.value) return true
   syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
   )
@@ -1515,8 +1571,15 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <template v-else-if="credentialsInputVisible">
+          <div v-if="form.type === 'confluence'" class="form-item">
+            <label class="form-label">{{ t('datasource.field.confluenceEdition') }}</label>
+            <t-select v-model="form.config.credentials.edition">
+              <t-option value="server" :label="t('datasource.field.confluenceEditionServer')" />
+              <t-option value="cloud" :label="t('datasource.field.confluenceEditionCloud')" />
+            </t-select>
+          </div>
           <div
-            v-for="field in currentDef?.fields || []"
+            v-for="field in displayedCredentialFields"
             :key="field.key"
             class="form-item"
           >
@@ -1864,7 +1927,7 @@ const drawerConfirmText = computed(() => {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -1893,7 +1956,7 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   border: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-placeholder);
@@ -1913,7 +1976,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-step-check {
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .ds-loading-center {
@@ -1950,12 +2013,12 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-type-name {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .ds-type-soon {
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-component);
   padding: 1px 6px;
@@ -1963,7 +2026,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-type-desc {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
@@ -1973,14 +2036,14 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   flex-wrap: wrap;
 }
 
 .inline-alert__icon {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
 }
@@ -1994,11 +2057,11 @@ const drawerConfirmText = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   white-space: nowrap;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .inline-alert__action:hover {
@@ -2024,12 +2087,12 @@ const drawerConfirmText = computed(() => {
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   text-align: left;
   cursor: pointer;
-  transition: color 0.12s ease;
+  transition: color var(--app-motion-instant) ease;
 }
 
 .ds-setup-guide__toggle:hover,
@@ -2066,7 +2129,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-setup-step {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-primary);
 }
@@ -2084,7 +2147,7 @@ const drawerConfirmText = computed(() => {
 
 .ds-perm-tag {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   padding: 1px 5px;
   margin: 2px 4px 2px 0;
   border-radius: 3px;
@@ -2098,7 +2161,7 @@ const drawerConfirmText = computed(() => {
   align-items: center;
   gap: 4px;
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .credential-faux-input {
@@ -2108,14 +2171,14 @@ const drawerConfirmText = computed(() => {
   height: 32px;
   padding: 0 4px 0 12px;
   background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-border, var(--td-component-stroke));
-  border-radius: 6px;
-  font-size: 13px;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-md);
+  transition: border-color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 }
 
 .credential-faux-input:hover {
-  border-color: var(--td-brand-color-hover, var(--td-brand-color));
+  border-color: var(--td-brand-color-hover);
 }
 
 .credential-faux-input.is-empty {
@@ -2151,7 +2214,7 @@ const drawerConfirmText = computed(() => {
 
 .credential-status-icon {
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
 }
 
 .credential-status-icon.success {
@@ -2176,8 +2239,8 @@ const drawerConfirmText = computed(() => {
 .credential-actions :deep(.t-button--variant-text) {
   height: 24px;
   padding: 0 8px;
-  font-size: 12px;
-  border-radius: 4px;
+  font-size: var(--app-text-sm);
+  border-radius: var(--app-radius-xs);
 }
 
 .action-divider {
@@ -2195,7 +2258,7 @@ const drawerConfirmText = computed(() => {
 .credential-edit-actions :deep(.t-button) {
   height: 28px;
   padding: 0 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .form-item {
@@ -2207,14 +2270,14 @@ const drawerConfirmText = computed(() => {
 }
 
 .form-item--flat :deep(.t-checkbox__label) {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
 
 .form-label {
   display: block;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   margin-bottom: 6px;
   color: var(--td-text-color-primary);
@@ -2231,13 +2294,13 @@ const drawerConfirmText = computed(() => {
 
 .form-desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
 
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 }
 
@@ -2250,7 +2313,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .footer-test-message {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   flex: 1;
   min-width: 0;
@@ -2274,7 +2337,7 @@ const drawerConfirmText = computed(() => {
 
 .ds-resource-hint {
   margin: -8px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -2286,7 +2349,7 @@ const drawerConfirmText = computed(() => {
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--td-border-level-1-color);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
 }
 
@@ -2294,7 +2357,7 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
 
@@ -2308,7 +2371,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .drive-folder-input__help {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   color: var(--td-text-color-placeholder);
   cursor: help;
 
@@ -2334,21 +2397,21 @@ const drawerConfirmText = computed(() => {
   min-height: 120px;
   padding: 24px 12px;
   border: 1px dashed var(--td-border-level-2-color);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-page);
   text-align: center;
 }
 
 .ds-drive-placeholder .ds-empty-title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .ds-drive-placeholder .ds-empty-desc {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -2369,7 +2432,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .resource-picker__count {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -2385,10 +2448,10 @@ const drawerConfirmText = computed(() => {
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: color 0.12s ease;
+  transition: color var(--app-motion-instant) ease;
 }
 
 .resource-picker__action:hover,
@@ -2399,7 +2462,7 @@ const drawerConfirmText = computed(() => {
 
 .resource-picker__action-sep {
   color: var(--td-text-color-disabled);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   user-select: none;
 }
 
@@ -2422,9 +2485,9 @@ const drawerConfirmText = computed(() => {
   min-height: 34px;
   margin-bottom: 2px;
   padding: 5px 8px 5px calc(8px + var(--depth) * 14px);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background var(--app-motion-instant) ease;
 }
 
 .resource-picker__row:last-child {
@@ -2450,11 +2513,11 @@ const drawerConfirmText = computed(() => {
   justify-content: center;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--app-motion-instant) ease, color var(--app-motion-instant) ease;
 }
 
 .resource-picker__expand:hover,
@@ -2468,13 +2531,13 @@ const drawerConfirmText = computed(() => {
   width: 16px;
   height: 16px;
   border-radius: 3px;
-  border: 1.5px solid var(--td-component-border, var(--td-component-stroke));
+  border: 1.5px solid var(--td-component-border);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--app-motion-instant) ease, border-color var(--app-motion-instant) ease;
 }
 
 .resource-picker__check.is-checked,
@@ -2510,7 +2573,7 @@ const drawerConfirmText = computed(() => {
 
 .resource-picker__name {
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   color: var(--td-text-color-primary);
   white-space: nowrap;
@@ -2520,10 +2583,10 @@ const drawerConfirmText = computed(() => {
 
 .resource-picker__type {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   line-height: 1;
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   color: var(--td-text-color-placeholder);
   background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
 }
@@ -2535,14 +2598,14 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-empty-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 4px;
 }
 
 .ds-empty-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   margin: 0 0 16px;
 }
@@ -2560,7 +2623,7 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   line-height: 1.5;
 }
@@ -2572,7 +2635,7 @@ const drawerConfirmText = computed(() => {
   border: 1px solid var(--td-component-stroke);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -2597,7 +2660,7 @@ const drawerConfirmText = computed(() => {
 
 .custom-headers-desc {
   margin: 0 0 10px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -2627,7 +2690,7 @@ const drawerConfirmText = computed(() => {
     height: 32px;
     padding: 0;
     color: var(--td-text-color-placeholder);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     transition: all 0.18s ease;
 
     &:hover {
@@ -2642,11 +2705,11 @@ const drawerConfirmText = computed(() => {
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   cursor: pointer;
-  transition: color 0.12s ease;
+  transition: color var(--app-motion-instant) ease;
 }
 
 .ds-empty-retry:hover,
@@ -2663,7 +2726,7 @@ const drawerConfirmText = computed(() => {
   padding: 3px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   width: fit-content;
   max-width: 100%;
 }
@@ -2675,15 +2738,15 @@ const drawerConfirmText = computed(() => {
   padding: 4px 10px;
   min-height: 28px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.3;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
 }
 
 .option-pill:hover {
@@ -2713,7 +2776,7 @@ const drawerConfirmText = computed(() => {
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
 }
 
@@ -2725,11 +2788,11 @@ const drawerConfirmText = computed(() => {
 </style>
 
 <!--
-  Drawer header logo — same white badge as list cards / StorageEngineSettings.
+  Drawer header logo — same white badge as the data-source list cards.
 -->
 <style lang="less">
 .datasource-editor-drawer .setting-drawer__header-icon:has(.datasource-header-icon__img) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 

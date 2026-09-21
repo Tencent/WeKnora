@@ -40,12 +40,15 @@ def _allowed_upload_roots() -> List[str]:
     """Return directories local files may be read from for upload tools."""
     raw = os.getenv("MCP_ALLOWED_UPLOAD_DIRS", "").strip()
     if raw:
-        return [os.path.realpath(part.strip()) for part in raw.split(",") if part.strip()]
+        roots = [os.path.realpath(part.strip()) for part in raw.split(",") if part.strip()]
+        if not roots:
+            raise ValueError("allowed upload directories must not be empty")
+        return roots
 
-    transport = _current_transport()
-    if transport in ("sse", "http"):
-        return [os.path.realpath(os.getcwd())]
-    return []
+    root = os.path.realpath(os.getcwd())
+    if os.path.dirname(root) == root:
+        raise ValueError("configure upload directories when working directory is the filesystem root")
+    return [root]
 
 
 def resolve_upload_file_path(file_path: str) -> str:

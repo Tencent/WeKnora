@@ -21,12 +21,15 @@ conversation:
   enable_rerank: true
   rewrite_prompt_id: "default_rewrite"  # from prompt_templates/rewrite.yaml (content + user fields)
   generate_summary_prompt_id: "default_summary"  # from prompt_templates/generate_summary.yaml
+  generate_kb_description_prompt_id: "default_kb_description"  # from prompt_templates/generate_kb_description.yaml
   generate_session_title_prompt_id: "default_session_title"  # from prompt_templates/generate_session_title.yaml
   summary:
-    max_input_chars: 16384
+    # Document profiles need the head of the document, not the whole body:
+    # 8k characters is enough to name the topic, the type and one question.
+    max_input_chars: 8192
     repeat_penalty: 1.0
     temperature: 0.3
-    max_completion_tokens: 2048
+    max_completion_tokens: 1024
     no_match_prefix: |-
       <think>
       </think>

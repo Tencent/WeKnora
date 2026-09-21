@@ -2,9 +2,7 @@ package yuque
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -155,22 +153,5 @@ func TestGetBaseURL_TrimsWhitespace(t *testing.T) {
 	c := &Config{BaseURL: "  https://x.yuque.com/  "}
 	if got := c.GetBaseURL(); got != "https://x.yuque.com" {
 		t.Errorf("GetBaseURL = %q, want https://x.yuque.com", got)
-	}
-}
-
-func TestSanitizeFileName_TruncatesAtRuneBoundary(t *testing.T) {
-	// Long Chinese title (each 测 is 3 bytes in UTF-8). Raw byte slicing at 200
-	// would split a rune and produce invalid UTF-8 that downstream filename
-	// validation rejects with "文件名包含非法字符".
-	long := strings.Repeat("测试", 100) // 600 bytes
-	got := sanitizeFileName(long)
-	if !utf8.ValidString(got) {
-		t.Fatalf("sanitizeFileName produced invalid UTF-8: %q", got)
-	}
-	if len(got) > 200 {
-		t.Errorf("len = %d, want ≤ 200", len(got))
-	}
-	if len(got) == 0 {
-		t.Error("result is empty")
 	}
 }

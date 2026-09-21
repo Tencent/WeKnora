@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "config/models.json — deployment overlay for the model catalog.",
+    "Copy to config/models.json (or point MODELS_CONFIG at a custom path).",
+    "Same idea as pi's ~/.pi/agent/models.json: 'providers' is keyed by vendor id.",
+    "A known id (see GET /api/v1/models/providers) patches the built-in vendor;",
+    "a new id declares a vendor. String values accept ${ENV} / $ENV interpolation.",
+    "Unknown keys are rejected at startup so typos surface immediately.",
+    "'models' upserts by id: an id that already exists keeps every field you",
+    "did not write (reasoning, thinking_levels, compat, input); a new id is created.",
+    "'icon' is an inline <svg ...> string or an .svg path under this file's own",
+    "directory — no absolute paths, no escaping it, 256 KB max: icons are served",
+    "as a data: URI to everyone who can open the model pages.",
+    "Per-model 'compat' keys depend on the protocol; see internal/models/catalog/compat.go."
+  ],
+  "providers": {
+    "openai": {
+      "base_url": "https://gateway.example.com/openai/v1",
+      "api_key": "${OPENAI_API_KEY}",
+      "headers": {"X-Gateway-Team": "rag"},
+      "model_overrides": {
+        "gpt-5.5": {"context_window": 200000, "max_output_tokens": 32000}
+      }
+    },
+    "aliyun": {
+      "models": [
+        {"id": "qwen3.9-plus", "reasoning": true, "input": ["text", "image"],
+         "context_window": 1000000, "max_output_tokens": 65536,
+         "compat": {"thinking_always_send": true, "thinking_disable_on_non_stream": true}}
+      ]
+    },
+    "lab-vllm": {
+      "name": "Lab vLLM",
+      "names": {"zh-CN": "实验室 vLLM"},
+      "description": "Self-hosted vLLM cluster",
+      "api": "openai-completions",
+      "base_url": "http://vllm.lab.internal:8000/v1",
+      "requires_auth": false,
+      "model_types": ["chat", "embedding"],
+      "url_patterns": ["vllm.lab.internal"],
+      "icon": "icons/lab-vllm.svg",
+      "compat": {"thinking_format": "chat-template-kwargs", "max_tokens_field": "max_tokens"},
+      "models": [
+        {"id": "Qwen/Qwen3-32B", "reasoning": true, "context_window": 131072, "max_output_tokens": 16384},
+        {"id": "BAAI/bge-m3", "type": "Embedding", "dimension": 1024}
+      ]
+    },
+    "claude-proxy": {
+      "name": "Claude via proxy",
+      "api": "anthropic-messages",
+      "base_url": "https://claude-proxy.example.com/v1",
+      "auth": "x-api-key",
+      "api_key": "${CLAUDE_PROXY_KEY}",
+      "models": [
+        {"id": "claude-sonnet-5", "reasoning": true, "input": ["text", "image"],
+         "context_window": 200000, "max_output_tokens": 64000,
+         "compat": {"thinking_mode": "adaptive", "supports_effort": true}}
+      ]
+    }
+  }
+}

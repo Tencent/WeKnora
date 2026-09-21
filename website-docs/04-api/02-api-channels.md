@@ -428,6 +428,8 @@ curl "$BASE/api/v1/files/presigned?file_path=local://1/x.png&tenant_id=1&expires
 
 用途：诊断端点：返回给定路径将生成的预签名 HTTP URL。权限：Admin+，显式拒绝 API key（`DenyAPIKeyPrincipal`）。查询参数：`file_path`（必填）。
 
+`file_path` 必须属于当前空间，与 `/files` 相同：`resource://` 句柄要求资源归属本空间，存储路径要求租户段为本空间 ID；否则 403，不会签发任何 URL。
+
 响应：200 `{"file_path","provider","url","rewritten":bool,"hint"}`
 
 ```bash

@@ -240,26 +240,16 @@ onMounted(() => {
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/provider-card.less';
+
+@import (reference) '@/components/css/settings-section.less';
+
 .mcp-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 28px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
+  .settings-section-header();
 }
 
 .loading-container {
@@ -272,7 +262,7 @@ onMounted(() => {
   text-align: center;
 
   :deep(.t-empty__description) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
@@ -293,7 +283,7 @@ onMounted(() => {
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
 
   &--add {
@@ -328,14 +318,14 @@ onMounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: var(--td-bg-color-secondarycontainer);
       color: var(--td-text-color-secondary);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -351,15 +341,8 @@ onMounted(() => {
 }
 
 .service-card__badge {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
+  .provider-card-badge(26px, 7px);
+  font-size: var(--app-text-md);
 
   :deep(.t-icon) {
     display: block;
@@ -387,7 +370,7 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 20px;
   color: var(--td-text-color-primary);
@@ -398,14 +381,14 @@ onMounted(() => {
 
 .service-card__builtin {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.35;
   color: var(--td-text-color-placeholder);
 }
 
 .service-card__type {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 18px;
   color: var(--td-text-color-placeholder);
 }
@@ -425,7 +408,7 @@ onMounted(() => {
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: none;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
@@ -458,7 +441,7 @@ onMounted(() => {
   line-clamp: 2;
   margin: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   overflow-wrap: anywhere;
@@ -478,7 +461,7 @@ onMounted(() => {
   align-items: center;
   min-height: calc(2 * 12px * 1.5);
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 }
 
@@ -488,7 +471,7 @@ onMounted(() => {
   gap: 4px;
   padding: 2px 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: none;
   color: inherit;
   font: inherit;
@@ -513,11 +496,11 @@ onMounted(() => {
   max-width: 100%;
   padding: 2px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   text-align: left;
 
@@ -556,10 +539,10 @@ button.service-card__tools {
   gap: 5px;
   padding: 2px 4px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-text-color-placeholder);
 

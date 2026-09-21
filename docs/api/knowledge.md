@@ -21,6 +21,7 @@
 | POST   | `/knowledge/:id/reparse`                   | 重新解析知识（异步）                       |
 | POST   | `/knowledge/:id/cancel-parse`              | 取消正在进行的解析任务                     |
 | GET    | `/knowledge/:id/download`                  | 下载原始文件（attachment）                 |
+| POST   | `/knowledge-bases/:id/knowledge/batch-download` | 将所选文档打包下载为 ZIP                  |
 | GET    | `/knowledge/:id/preview`                   | 内联预览文件（按扩展名设置 Content-Type）  |
 | PUT    | `/knowledge/image/:id/:chunk_id`           | 更新分块图像信息                           |
 | PUT    | `/knowledge/tags`                          | 批量更新知识标签                           |
@@ -712,7 +713,32 @@ curl --location --request POST 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-
 }
 ```
 
-## GET `/knowledge/:id/download` - 下载原始文件
+## 文件下载
+
+### POST `/knowledge-bases/:id/knowledge/batch-download` - 批量下载
+
+`POST /api/v1/knowledge-bases/:id/knowledge/batch-download`，请求体为 `{"ids":["文档ID1","文档ID2"]}`。
+
+- 权限与单文件下载一致：JWT 用户需要 Contributor 身份及知识库 Editor 权限；API Key 需要 `retrieve` 能力或完整访问权限，并受知识库白名单限制。
+- 每次最多 200 个 ID（重复 ID 只下载一次），原始文件实际读取字节合计最多 512 MiB。超限请分批下载。服务端同时最多处理 4 个批量下载请求，过多时返回 429。
+- 成功返回 `application/zip` 附件；保留文件内容、中文文件名和知识库 `folder_path`。同名文件自动追加数字，移除不安全路径和 Windows 不支持的文件名字符。
+- 手工编写的文档导出为 Markdown。没有原始文件的网页条目会被跳过；若跳过后没有任何可下载文件，返回 400。FAQ 条目通常没有原始文件，不能通过此接口导出。
+- 任一条目无权访问、不属于当前知识库或读取失败时，整个请求失败，不返回残缺 ZIP。请求取消时返回 400，而不是 500。
+- 压缩包在服务器临时目录生成后发送，请求结束或失败后清理临时文件；不包含分块、向量、标签、权限、Wiki 或图谱。
+
+页面操作：进入知识库的文档页 → 点击「批量管理」→ 勾选文件，或「全选已加载」→「批量下载」。全选只包含列表已加载的文档；可先继续加载更多，再选择，单批仍受 200 项限制。没有原始文件的条目会自动跳过。ZIP 解压后可按文件夹批量上传到其他知识库。
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-id/knowledge/batch-download' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{"ids":["文档ID1","文档ID2"]}' \
+--output knowledge-files.zip
+```
+
+### GET `/knowledge/:id/download` - 单文件下载
 
 以 `attachment` 方式下载知识对应的原始文件。
 

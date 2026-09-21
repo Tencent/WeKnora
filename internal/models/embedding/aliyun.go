@@ -66,12 +66,19 @@ type AliyunContent struct {
 	Text string `json:"text,omitempty"`
 }
 
-// AliyunEmbedResponse represents an Aliyun DashScope embedding response
+// AliyunEmbedResponse represents an Aliyun DashScope embedding response.
+//
+// The position field is `index`, not the `text_index` of DashScope's
+// text-embedding API (/services/embeddings/text-embedding/text-embedding).
+// The two interfaces are neighbours in the docs and the wrong name was
+// carried over: a missing field decodes as 0, so every vector in a batch
+// landed in slot 0 and the rest stayed empty.
+// https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference
 type AliyunEmbedResponse struct {
 	Output struct {
 		Embeddings []struct {
 			Embedding []float32 `json:"embedding"`
-			TextIndex int       `json:"text_index"`
+			Index     int       `json:"index"`
 		} `json:"embeddings"`
 	} `json:"output"`
 	Usage struct {
@@ -165,7 +172,12 @@ func (e *AliyunEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 			}
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		// Declare req separately: with `req, err := ...` the `:=` introduces a
+		// loop-local err, so the `resp, err = client.Do(req)` below writes to
+		// that copy and the outer err stays nil. Every retry failing then
+		// returns (nil, nil) and the caller dereferences resp.Body → SIGSEGV.
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("AliyunEmbedder failed to create request: %v", err)
 			continue
@@ -242,11 +254,20 @@ func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	// Extract embedding vectors, preserving order by text_index
+	// Extract embedding vectors, restoring input order from `index`.
 	embeddings := make([][]float32, len(texts))
 	for _, emb := range response.Output.Embeddings {
-		if emb.TextIndex >= 0 && emb.TextIndex < len(embeddings) {
-			embeddings[emb.TextIndex] = emb.Embedding
+		if emb.Index < 0 || emb.Index >= len(embeddings) {
+			return nil, fmt.Errorf("embedding index %d out of range for %d inputs", emb.Index, len(texts))
+		}
+		embeddings[emb.Index] = emb.Embedding
+	}
+	// An unfilled slot means the response did not cover every input. Returning
+	// it would store an empty vector and silently poison retrieval, so fail
+	// instead: the caller can retry or surface the error.
+	for i, embedding := range embeddings {
+		if len(embedding) == 0 {
+			return nil, fmt.Errorf("no embedding returned for input %d of %d", i, len(texts))
 		}
 	}
 
