@@ -67,6 +67,19 @@ class ParserRoutingTest(unittest.TestCase):
         self.assertIs(registry.get_parser_class("", "ppt"), MarkitdownParser)
         self.assertIs(registry.get_parser_class("", ".PPTX"), MarkitdownParser)
 
+    def test_empty_engine_routes_sql_to_markitdown(self):
+        self.assertIs(registry.get_parser_class("", "sql"), MarkitdownParser)
+        self.assertIs(registry.get_parser_class(BUILTIN_ENGINE, ".SQL"), MarkitdownParser)
+
+    def test_sql_file_is_parsed_as_text(self):
+        result = Parser().parse_file(
+            "schema.sql",
+            "sql",
+            b"-- marker\nSELECT 1 AS marker;\n",
+        )
+
+        self.assertIn("SELECT 1 AS marker;", result.content)
+
     def test_builtin_engine_still_parses_pptx(self):
         self.assertIs(registry.get_parser_class(BUILTIN_ENGINE, "pptx"), MarkitdownParser)
 
@@ -75,13 +88,20 @@ class ParserRoutingTest(unittest.TestCase):
         isolated.register(BUILTIN_ENGINE, {"pdf": PDFParser})
         isolated.register(
             "markitdown",
-            {"pptx": MarkitdownParser, "ppt": MarkitdownParser, "csv": MarkitdownParser},
+            {
+                "pptx": MarkitdownParser,
+                "ppt": MarkitdownParser,
+                "csv": MarkitdownParser,
+                "sql": MarkitdownParser,
+            },
         )
 
         self.assertIs(isolated.get_parser_class("", "pptx"), MarkitdownParser)
         self.assertIs(isolated.get_parser_class(BUILTIN_ENGINE, "pptx"), MarkitdownParser)
         self.assertIs(isolated.get_parser_class("", "csv"), MarkitdownParser)
         self.assertIs(isolated.get_parser_class(BUILTIN_ENGINE, "csv"), MarkitdownParser)
+        self.assertIs(isolated.get_parser_class("", "sql"), MarkitdownParser)
+        self.assertIs(isolated.get_parser_class(BUILTIN_ENGINE, "sql"), MarkitdownParser)
         self.assertIs(isolated.get_parser_class(BUILTIN_ENGINE, "pdf"), PDFParser)
         self.assertIs(isolated.get_parser_class("", "pdf"), PDFParser)
 
