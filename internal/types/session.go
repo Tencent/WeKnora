@@ -116,7 +116,7 @@ type Session struct {
 	// Zero means "this session's own tenant", which covers every sandbox
 	// created by an agent the session's workspace owns, plus pins written
 	// before the column existed.
-	SandboxConfigTenantID uint64 `json:"-" gorm:"column:sandbox_config_tenant_id;default:0"`
+	SandboxConfigTenantID uint64 `json:"-" gorm:"column:sandbox_config_tenant_id;type:bigint;default:0"`
 
 	// ParentSessionID names the session this one was forked from. Empty for
 	// ordinary sessions. Deliberately not a foreign key: the parent may be

@@ -17,28 +17,23 @@
 DO $$ BEGIN RAISE NOTICE '[Migration 000108] Adding sessions.sandbox_config_tenant_id'; END $$;
 
 ALTER TABLE sessions
-    ADD COLUMN IF NOT EXISTS sandbox_config_tenant_id INTEGER NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS sandbox_config_tenant_id BIGINT NOT NULL DEFAULT 0;
 
 COMMENT ON COLUMN sessions.sandbox_config_tenant_id IS 'Workspace owning sandbox_config_id; 0 = the session own tenant (never borrowed)';
 
--- Backfill the sessions that are broken today: a pinned config that does NOT
--- exist in the session's own workspace can only have come from a shared agent,
--- and that turn recorded the lending workspace on its assistant message.
+-- Backfill from the config row itself, not from messages. The pin is sticky
+-- to the first sandbox, while the newest shared-agent message may belong to a
+-- later agent from a different workspace. tenant_sandbox_configs.id is the
+-- primary key (a UUID), so the join names the workspace that actually owns
+-- the pinned config.
 --
--- The NOT EXISTS guard is what keeps this safe for sessions that mixed their
--- own agents with shared ones: whenever the session's workspace really owns the
--- pinned config, the row stays 0 and falls back exactly as before.
+-- Rows whose config still lives in the session's own workspace stay 0 and
+-- fall back exactly as before, including sessions that mixed own agents with
+-- shared ones.
 UPDATE sessions s
-SET sandbox_config_tenant_id = m.agent_tenant_id
-FROM (
-    SELECT DISTINCT ON (session_id) session_id, agent_tenant_id
-    FROM messages
-    WHERE agent_tenant_id <> 0
-    ORDER BY session_id, created_at DESC
-) m
-WHERE s.id = m.session_id
+SET sandbox_config_tenant_id = c.tenant_id
+FROM tenant_sandbox_configs c
+WHERE c.id = s.sandbox_config_id
+  AND c.tenant_id IS DISTINCT FROM s.tenant_id
   AND COALESCE(s.sandbox_config_id, '') NOT IN ('', '-')
-  AND NOT EXISTS (
-      SELECT 1 FROM tenant_sandbox_configs c
-      WHERE c.tenant_id = s.tenant_id AND c.id = s.sandbox_config_id
-  );
+  AND c.deleted_at IS NULL;

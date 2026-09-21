@@ -214,7 +214,7 @@ func TestResolveSandboxForExecutionKeepsExistingRemotePin(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Same(t, want, got)
-	require.Equal(t, SandboxPin{ConfigID: "cfg-existing"}, pin,
+	require.Equal(t, SandboxPin{ConfigID: "cfg-existing", TenantID: 7}, pin,
 		"re-pointing an agent must not move an existing remote session")
 }
 
@@ -251,6 +251,31 @@ func TestSandboxPinTenantOrFallsBackToTheSessionWorkspace(t *testing.T) {
 	require.False(t, SandboxPin{ConfigID: "cfg-a"}.IsZero())
 }
 
+// Pre-migration pins (and any row the SQL backfill missed) store TenantID=0.
+// The next chat turn already knows the workspace that can resolve the config;
+// persisting it is what lets DELETE / the panel / fork find that sandbox later
+// instead of looking it up as the session owner and leaking a paused MicroVM.
+func TestResolveSandboxForExecutionPersistsOwnerOnLegacyPin(t *testing.T) {
+	const agentOwner = uint64(99)
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	_, err := pinner.Pin(context.Background(), "s-1",
+		SandboxPin{ConfigID: "cfg-owned-by-99"})
+	require.NoError(t, err)
+
+	resolver := &tenantRecordingResolver{mgr: &pinTestManager{typ: sandbox.SandboxTypeCube}}
+	_, pin, err := resolveSandboxForExecution(
+		context.Background(), resolver, nil, pinner,
+		agentOwner, "s-1", "", nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-owned-by-99", TenantID: agentOwner}, pin)
+
+	stored, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Equal(t, agentOwner, stored.TenantID,
+		"a successful resolve must record the workspace that owns the pin")
+}
+
 // A pin resolves in the workspace it recorded, not the one on the context.
 func TestResolveSandboxForExecutionResolvesPinnedConfigInItsOwnWorkspace(t *testing.T) {
 	pinner := NewSessionSandboxPinner(newPinTestDB(t))
@@ -268,6 +293,33 @@ func TestResolveSandboxForExecutionResolvesPinnedConfigInItsOwnWorkspace(t *test
 	require.Equal(t, uint64(99), resolver.lastTenant)
 	require.Equal(t, "cfg-owned-by-99", resolver.lastConfig)
 	require.Equal(t, SandboxPin{ConfigID: "cfg-owned-by-99", TenantID: 99}, pin)
+}
+
+// A failed lookup must not stamp the caller's workspace onto a legacy pin:
+// the config may belong to a previous shared agent, and the pin is sticky.
+func TestResolveSandboxForExecutionDoesNotPersistOwnerWhenResolveFails(t *testing.T) {
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	_, err := pinner.Pin(context.Background(), "s-1",
+		SandboxPin{ConfigID: "cfg-owned-by-99"})
+	require.NoError(t, err)
+
+	resolver := failingSandboxResolver{}
+	_, pin, err := resolveSandboxForExecution(
+		context.Background(), resolver, nil, pinner,
+		7, "s-1", "", nil,
+	)
+	require.ErrorIs(t, err, sandbox.ErrSandboxConfigNotFound)
+	require.Equal(t, uint64(0), pin.TenantID)
+
+	stored, err := pinner.Read(context.Background(), "s-1")
+	require.NoError(t, err)
+	require.Zero(t, stored.TenantID, "a failed lookup must leave the owner unset")
+}
+
+type failingSandboxResolver struct{}
+
+func (failingSandboxResolver) Resolve(context.Context, uint64, string) (sandbox.Manager, error) {
+	return nil, sandbox.ErrSandboxConfigNotFound
 }
 
 // tenantRecordingResolver reports which workspace a config was looked up in.

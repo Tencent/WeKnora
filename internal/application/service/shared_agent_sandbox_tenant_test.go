@@ -22,9 +22,9 @@ import (
 //
 // These tests pin the fix: the workspace travels with the config id.
 const (
-	borrowerTenant   = uint64(7)  // owns the session
-	lenderTenant     = uint64(99) // owns the shared agent and its sandbox config
-	lentSandboxConfg = "cfg-owned-by-lender"
+	borrowerTenant    = uint64(7)  // owns the session
+	lenderTenant      = uint64(99) // owns the shared agent and its sandbox config
+	lentSandboxConfig = "cfg-owned-by-lender"
 )
 
 // lendingResolver mirrors tenantSandboxResolver.Resolve: a config resolves in
@@ -39,7 +39,7 @@ func (r *lendingResolver) Resolve(
 	_ context.Context, tenantID uint64, configID string,
 ) (sandbox.Manager, error) {
 	r.lastTenant, r.lastConfig = tenantID, configID
-	if tenantID != lenderTenant || configID != lentSandboxConfg {
+	if tenantID != lenderTenant || configID != lentSandboxConfig {
 		return nil, fmt.Errorf("%w: %s", sandbox.ErrSandboxConfigNotFound, configID)
 	}
 	return r.mgr, nil
@@ -93,7 +93,7 @@ func borrowerCtx() context.Context {
 func TestDestroyBoundSandboxTearsDownALentWorkspacesSandbox(t *testing.T) {
 	pinner := NewSessionSandboxPinner(borrowedSessionDB(t))
 	_, err := pinner.Pin(context.Background(), "s-1",
-		SandboxPin{ConfigID: lentSandboxConfg, TenantID: lenderTenant})
+		SandboxPin{ConfigID: lentSandboxConfig, TenantID: lenderTenant})
 	require.NoError(t, err)
 
 	mgr := &destroyRecordingManager{}
@@ -119,11 +119,13 @@ func TestDestroyBoundSandboxStillUsesTheSessionWorkspaceForOwnAgents(t *testing.
 	_, err := pinner.Pin(context.Background(), "s-1", SandboxPin{ConfigID: "cfg-local"})
 	require.NoError(t, err)
 
-	resolver := &lendingResolver{mgr: &destroyRecordingManager{}}
+	mgr := &destroyRecordingManager{}
+	resolver := &tenantRecordingResolver{mgr: mgr}
 	svc := &sessionService{sandboxPinner: pinner, sandboxResolver: resolver}
 
 	svc.destroyBoundSandbox(borrowerCtx(), "s-1")
 
+	require.Equal(t, []string{"s-1"}, mgr.destroyed)
 	require.Equal(t, borrowerTenant, resolver.lastTenant)
 	require.Equal(t, "cfg-local", resolver.lastConfig)
 }
@@ -133,7 +135,7 @@ func TestDestroyBoundSandboxStillUsesTheSessionWorkspaceForOwnAgents(t *testing.
 func TestTerminalAttachResolvesTheLentWorkspace(t *testing.T) {
 	pinner := NewSessionSandboxPinner(borrowedSessionDB(t))
 	_, err := pinner.Pin(context.Background(), "s-1",
-		SandboxPin{ConfigID: lentSandboxConfg, TenantID: lenderTenant})
+		SandboxPin{ConfigID: lentSandboxConfig, TenantID: lenderTenant})
 	require.NoError(t, err)
 
 	mgr := &destroyRecordingManager{}
@@ -144,7 +146,7 @@ func TestTerminalAttachResolvesTheLentWorkspace(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Same(t, mgr, got)
-	require.Equal(t, SandboxPin{ConfigID: lentSandboxConfg, TenantID: lenderTenant}, pin)
+	require.Equal(t, SandboxPin{ConfigID: lentSandboxConfig, TenantID: lenderTenant}, pin)
 	require.Equal(t, lenderTenant, resolver.lastTenant)
 }
 
@@ -158,15 +160,15 @@ func TestTerminalProvisionUsesTheAgentsWorkspace(t *testing.T) {
 	// The PTY open that follows fails for this fake manager; what matters here
 	// is that resolution and the pin claim happened in the lending workspace.
 	_, _ = svc.EnsureSessionTerminal(borrowerCtx(), "s-1",
-		SandboxPin{ConfigID: lentSandboxConfg, TenantID: lenderTenant},
+		SandboxPin{ConfigID: lentSandboxConfig, TenantID: lenderTenant},
 		sandbox.RemoteTerminalOptions{})
 
 	require.Equal(t, lenderTenant, resolver.lastTenant)
-	require.Equal(t, lentSandboxConfg, resolver.lastConfig)
+	require.Equal(t, lentSandboxConfig, resolver.lastConfig)
 
 	pin, err := pinner.Read(context.Background(), "s-1")
 	require.NoError(t, err)
-	require.Equal(t, SandboxPin{ConfigID: lentSandboxConfg, TenantID: lenderTenant}, pin,
+	require.Equal(t, SandboxPin{ConfigID: lentSandboxConfig, TenantID: lenderTenant}, pin,
 		"a panel-created sandbox records its workspace like a chat turn does")
 }
 
@@ -185,13 +187,13 @@ func TestTerminalProvisionStaysLookupOnlyWithoutAPin(t *testing.T) {
 }
 
 // Fork snapshots go through PinnedSessionSandbox, which runs from a plain POST
-// as the session owner. Resolving the lent config there used to return nil and
-// degrade the fork to SNAPSHOT_UNSUPPORTED, silently losing the sandbox state.
+// as the session owner. Resolving the lent config there used to return nil,
+// so BoundSandboxID failed and the fork degraded to SANDBOX_GONE.
 func TestPinnedSessionSandboxResolvesTheLentWorkspace(t *testing.T) {
 	mgr := &destroyRecordingManager{bound: "sbx-1"}
 	resolver := &lendingResolver{mgr: mgr}
 	access := NewPinnedSessionSandbox(
-		stubPinReader{configID: lentSandboxConfg, tenantID: lenderTenant}, resolver, nil)
+		stubPinReader{configID: lentSandboxConfig, tenantID: lenderTenant}, resolver, nil)
 
 	id, ok := access.BoundSandboxID(borrowerCtx(), "s-1")
 

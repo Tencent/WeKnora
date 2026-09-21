@@ -25,6 +25,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -192,6 +193,23 @@ func (p *SessionSandboxPinner) Clear(ctx context.Context, sessionID string) erro
 		}).Error
 }
 
+// recordOwner fills sandbox_config_tenant_id on a pin written before the
+// column existed (value 0). It must not overwrite a recorded owner: the pin
+// is sticky, and a later shared agent from a different workspace is not the
+// owner of this config.
+func (p *SessionSandboxPinner) recordOwner(
+	ctx context.Context, sessionID string, tenantID uint64,
+) error {
+	if p == nil || p.db == nil || tenantID == 0 || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	return p.db.WithContext(ctx).
+		Model(&types.Session{}).
+		Where("id = ? AND sandbox_config_tenant_id = 0 AND sandbox_config_id IS NOT NULL AND sandbox_config_id <> ?",
+			sessionID, "").
+		Update("sandbox_config_tenant_id", tenantID).Error
+}
+
 // resolveSandboxForExecution resolves before pinning so non-remote workspace
 // backends never leave a permanent session pin. Remote backends
 // pin before their first Create; concurrent callers adopt and re-resolve the
@@ -217,9 +235,20 @@ func resolveSandboxForExecution(
 			return nil, SandboxPin{}, err
 		}
 		if !pinned.IsZero() {
+			owner := pinned.TenantOr(tenantID)
 			mgr, err := resolveTenantSandboxForConfig(
-				ctx, resolver, fallback, pinned.TenantOr(tenantID), pinned.ConfigID, policy,
+				ctx, resolver, fallback, owner, pinned.ConfigID, policy,
 			)
+			// Only persist an owner that actually resolved this config. Writing
+			// the caller's tenant on a failed lookup would stamp the wrong
+			// workspace onto a sticky pin left by a previous shared agent.
+			if err == nil && pinned.TenantID == 0 && owner != 0 {
+				if recErr := pinner.recordOwner(ctx, sessionID, owner); recErr != nil {
+					logger.Warnf(ctx, "Failed to record sandbox pin owner for session %s: %v",
+						sessionID, recErr)
+				}
+				pinned.TenantID = owner
+			}
 			return mgr, pinned, err
 		}
 	}
