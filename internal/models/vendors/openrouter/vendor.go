@@ -75,8 +75,15 @@ func init() {
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Transcriptions: catalog.TranscriptionsCompat{
+				// https://openrouter.ai/docs/api/api-reference/stt/create-transcription:
+				// OpenAI-style multipart file + model, json by default. "Max 25
+				// MB; send larger files as base64 JSON via input_audio."
+				MaxFileBytes: catalog.Ptr(25 << 20),
+			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://openrouter.ai/docs/api/api-reference/embeddings/create-embeddings:
 				// model, input, dimensions, encoding_format, input_type, provider,

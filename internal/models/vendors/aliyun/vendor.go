@@ -131,11 +131,13 @@ func init() {
 			types.ModelTypeRerank:      RerankBaseURL,
 			types.ModelTypeVLLM:        BaseURL,
 		},
+		TranscriptionAPI: api.TranscriptionChatAudio,
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		RerankAPI: api.RerankDashScope,
 		// Text and multimodal embeddings live under different roots of the
@@ -160,6 +162,16 @@ func init() {
 			return root + "/compatible-mode/v1/embeddings", nil
 		},
 		Compat: catalog.VendorCompat{
+			// ASR: qwen3-asr-flash is the one recognition model callable with
+			// the audio in the request; the file-transcription models
+			// (Paraformer, Fun-ASR, *-filetrans) are asynchronous tasks that
+			// take a public file URL. It is served on the compatible chat
+			// endpoint with the audio as a base64 data URI, limited to 10 MB
+			// after encoding — 7.5 MB of audio
+			// (https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference).
+			Transcriptions: catalog.TranscriptionsCompat{
+				MaxFileBytes: catalog.Ptr(10 << 20 * 3 / 4),
+			},
 			// Text models: the OpenAI-compatible endpoint
 			// (https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai),
 			// which takes model, input, dimensions and encoding_format.

@@ -107,8 +107,17 @@ func init() {
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Transcriptions: catalog.TranscriptionsCompat{
+				// https://docs.bigmodel.cn/api-reference/模型-api/语音转文本:
+				// POST {base}/audio/transcriptions, multipart file + model
+				// (glm-asr-2512), answering {text}. The file is ".wav / .mp3",
+				// at most 25 MB and 30 seconds — the duration cannot be checked
+				// here without decoding, so a longer file is the vendor's error.
+				MaxFileBytes: catalog.Ptr(25 << 20),
+			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入: model,
 				// input, dimensions — no encoding_format. embedding-2 is fixed at

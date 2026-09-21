@@ -77,8 +77,15 @@ func init() {
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Transcriptions: catalog.TranscriptionsCompat{
+				// https://docs.requesty.ai/api-reference/endpoint/audio-transcriptions-create:
+				// OpenAI-compatible multipart, json by default, verbose_json
+				// available. "The maximum upload size per request is 32 MB."
+				MaxFileBytes: catalog.Ptr(32 << 20),
+			},
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://docs.requesty.ai/api-reference/endpoint/embeddings-create:
 				// model, input, encoding_format, dimensions.

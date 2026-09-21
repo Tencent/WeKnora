@@ -77,6 +77,7 @@ func init() {
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		ExtraFields: []catalog.ExtraField{{
 			Key:    catalog.ExtraScoreScale,
@@ -104,6 +105,9 @@ func init() {
 			ModelTypes: []types.ModelType{types.ModelTypeRerank},
 		}},
 		Compat: catalog.VendorCompat{
+			// Transcriptions keeps the baseline: the proxy serves the OpenAI
+			// /audio/transcriptions route for whichever upstream it is
+			// configured with (https://docs.litellm.ai/docs/audio_transcription).
 			Embeddings: catalog.EmbeddingsCompat{
 				// https://docs.litellm.ai/docs/embedding/supported_embedding:
 				// model, input, user, dimensions, encoding_format; anything else

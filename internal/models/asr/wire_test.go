@@ -2,6 +2,7 @@ package asr
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -28,6 +29,9 @@ type form struct {
 	auth     string
 	fields   map[string]string
 	fileName string
+	// body is set instead of fields when the request was JSON: the
+	// chat-served recognisers take the audio as a data URI.
+	body map[string]any
 }
 
 // upstream records the form it receives and answers the documented json
@@ -40,8 +44,13 @@ func upstream(t *testing.T) (string, *form, *atomic.Int32) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		got.path, got.auth = r.URL.Path, r.Header.Get("Authorization")
-		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		require.NoError(t, err)
+		if mediaType == "application/json" {
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&got.body))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":" hello "}}]}`))
+			return
+		}
 		reader := multipart.NewReader(r.Body, params["boundary"])
 		for {
 			part, err := reader.NextPart()
@@ -72,10 +81,23 @@ func upstream(t *testing.T) (string, *form, *atomic.Int32) {
 // gpt-4o-transcribe rejects ("the only supported format is json") and which
 // vox-box's FunASR backend answers with an undecodable bare string.
 func TestTranscriptionWireFormatPerVendor(t *testing.T) {
+	chatAudio := func(model string) map[string]any {
+		return map[string]any{
+			"model": model,
+			"messages": []any{map[string]any{
+				"role": "user",
+				"content": []any{map[string]any{
+					"type":        "input_audio",
+					"input_audio": map[string]any{"data": "data:audio/wav;base64,UklGRg=="},
+				}},
+			}},
+		}
+	}
 	cases := []struct {
 		name, provider, model, base string
 		wantPath                    string
 		wantFields                  map[string]string
+		wantBody                    map[string]any
 		wantSegments                int
 	}{
 		{
@@ -109,6 +131,42 @@ func TestTranscriptionWireFormatPerVendor(t *testing.T) {
 			base: "/v1", wantPath: "/v1/audio/transcriptions",
 			wantFields: map[string]string{"model": "whisper-large-v3"},
 		},
+		{
+			name: "zhipu glm-asr on the OpenAI shape", provider: "zhipu", model: "glm-asr-2512",
+			base: "/api/paas/v4", wantPath: "/api/paas/v4/audio/transcriptions",
+			wantFields: map[string]string{"model": "glm-asr-2512"},
+		},
+		{
+			name: "minimax on its own path", provider: "minimax", model: "asr-1.0",
+			base: "/v1", wantPath: "/v1/speech_to_text",
+			wantFields: map[string]string{"model": "asr-1.0"},
+		},
+		{
+			name: "openrouter", provider: "openrouter", model: "openai/whisper-large-v3",
+			base: "/api/v1", wantPath: "/api/v1/audio/transcriptions",
+			wantFields: map[string]string{"model": "openai/whisper-large-v3"},
+		},
+		{
+			name: "requesty whisper-1 serves segments", provider: "requesty", model: "openai/whisper-1",
+			base: "/v1", wantPath: "/v1/audio/transcriptions",
+			wantFields:   map[string]string{"model": "openai/whisper-1", "response_format": "verbose_json"},
+			wantSegments: 1,
+		},
+		{
+			name: "litellm proxy", provider: "litellm", model: "whisper",
+			base: "/v1", wantPath: "/v1/audio/transcriptions",
+			wantFields: map[string]string{"model": "whisper"},
+		},
+		{
+			name: "aliyun qwen3-asr-flash is served on chat", provider: "aliyun", model: "qwen3-asr-flash",
+			base: "/compatible-mode/v1", wantPath: "/compatible-mode/v1/chat/completions",
+			wantBody: chatAudio("qwen3-asr-flash"),
+		},
+		{
+			name: "mimo asr is served on chat", provider: "mimo", model: "mimo-v2.5-asr",
+			base: "/v1", wantPath: "/v1/chat/completions",
+			wantBody: chatAudio("mimo-v2.5-asr"),
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -123,8 +181,12 @@ func TestTranscriptionWireFormatPerVendor(t *testing.T) {
 
 			assert.Equal(t, tc.wantPath, got.path)
 			assert.Equal(t, "Bearer k", got.auth)
-			assert.Equal(t, tc.wantFields, got.fields)
-			assert.Equal(t, "meeting.wav", got.fileName)
+			if tc.wantBody != nil {
+				assert.Equal(t, tc.wantBody, got.body)
+			} else {
+				assert.Equal(t, tc.wantFields, got.fields)
+				assert.Equal(t, "meeting.wav", got.fileName)
+			}
 			assert.Equal(t, "hello", out.Text)
 			assert.Len(t, out.Segments, tc.wantSegments)
 		})
@@ -148,6 +210,23 @@ func TestOversizedAudioIsRefusedBeforeUpload(t *testing.T) {
 
 	_, err = a.Transcribe(context.Background(), make([]byte, 25<<20), "exactly.mp3")
 	require.NoError(t, err, "the ceiling itself is allowed")
+}
+
+// The chat-served recognisers cap the base64 string at 10 MB, so the audio
+// itself may be three quarters of that.
+func TestChatServedCeilingCountsTheEncoding(t *testing.T) {
+	url, _, calls := upstream(t)
+	a, err := NewASR(&Config{
+		Source: types.ModelSourceRemote, Provider: "aliyun", BaseURL: url + "/compatible-mode/v1",
+		ModelName: "qwen3-asr-flash", APIKey: "k",
+	})
+	require.NoError(t, err)
+
+	_, err = a.Transcribe(context.Background(), make([]byte, 10<<20*3/4+1), "long.wav")
+	require.Error(t, err)
+	assert.Zero(t, calls.Load())
+	_, err = a.Transcribe(context.Background(), make([]byte, 10<<20*3/4), "fits.wav")
+	require.NoError(t, err)
 }
 
 func TestEmptyAudioIsAnError(t *testing.T) {

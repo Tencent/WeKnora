@@ -95,8 +95,18 @@ func init() {
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeASR,
 		},
 		Compat: catalog.VendorCompat{
+			Transcriptions: catalog.TranscriptionsCompat{
+				// https://platform.minimax.io/docs/api-reference/speech-to-text
+				// (and the same page on platform.minimax.cn): multipart model
+				// (asr-1.0) + file on /v1/speech_to_text rather than the OpenAI
+				// path, answering {text, duration, trace_id} for the default
+				// json. At most 50 MB and 500 seconds; "超出会返回 400 而不会被截断".
+				Path:         catalog.Ptr("/speech_to_text"),
+				MaxFileBytes: catalog.Ptr(50 << 20),
+			},
 			OpenAICompletions: catalog.OpenAICompletionsCompat{
 				ThinkingFormat:        catalog.Ptr(catalog.ThinkingFormatThinkingType),
 				ThinkingEnabledValue:  catalog.Ptr("adaptive"),
