@@ -145,8 +145,9 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 	// The source binds reads to the current session's sandbox. Preserve the
 	// familiar workspace roots in metadata, without restricting readable paths
 	// to them: temporary files and installed resources may live elsewhere.
-	clean := sandbox.ResolveWorkspacePath(trimmed)
-	rootDir, ok := matchingInspectableRoot(clean)
+	layout := sessionWorkspaceLayout(ctx, sessionID, t.source)
+	clean := resolveIn(layout, trimmed)
+	rootDir, ok := inspectableRootIn(layout, clean)
 	if !ok {
 		rootDir = "/"
 	}

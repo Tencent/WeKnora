@@ -65,6 +65,7 @@ type sessionAttachmentStager interface {
 		ctx context.Context, sessionID, agentSandboxConfigID string,
 		tenantID uint64,
 		attachments types.MessageAttachments,
+		layout sandbox.WorkspaceLayout,
 	) ([]stagedSessionAttachment, error)
 }
 
@@ -94,18 +95,23 @@ func (s *agentService) sessionSandboxInputStore(
 	return sessionSandboxFileStore(mgr), nil
 }
 
-// stageSessionAttachments reconciles /workspace/input with the durable
-// attachment inventory. It is gated on the sandbox manager advertising a
-// session filesystem capability; other backends retain prompt-extracted
-// attachment content and never receive host file paths.
+// stageSessionAttachments reconciles the layout's InputDir with the durable
+// attachment inventory. Remote backends pass RemoteWorkspaceLayout() so
+// InputDir is still /workspace/input. Host layouts leave InputDir empty:
+// staging is skipped entirely — never list /workspace/input, and never copy
+// chat attachments into the user's directory.
 func (s *agentService) stageSessionAttachments(
 	ctx context.Context,
 	sessionID string,
 	agentSandboxConfigID string,
 	tenantID uint64,
 	attachments types.MessageAttachments,
+	layout sandbox.WorkspaceLayout,
 ) ([]stagedSessionAttachment, error) {
 	if s == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(layout.InputDir) == "" {
 		return nil, nil
 	}
 	store, err := s.sessionSandboxInputStore(ctx, sessionID, agentSandboxConfigID)
@@ -124,7 +130,7 @@ func (s *agentService) stageSessionAttachments(
 		return nil, err
 	}
 	attachments = deduplicateSessionAttachments(resolved)
-	existingEntries, err := store.ListSessionFiles(ctx, sessionID, sandbox.SessionInputRoot)
+	existingEntries, err := store.ListSessionFiles(ctx, sessionID, layout.InputDir)
 	if err != nil {
 		return nil, fmt.Errorf("list staged session inputs: %w", err)
 	}
@@ -137,7 +143,7 @@ func (s *agentService) stageSessionAttachments(
 	staged := make([]stagedSessionAttachment, 0, len(attachments))
 	maxBytes := int64(secutils.GetMaxFileSizeMB()) * 1024 * 1024
 	for _, attachment := range attachments {
-		remotePath, pathErr := sandboxAttachmentPath(attachment)
+		remotePath, pathErr := sandboxAttachmentPath(attachment, layout.InputDir)
 		if pathErr != nil {
 			return nil, pathErr
 		}
@@ -175,6 +181,11 @@ func (s *agentService) stageSessionAttachments(
 	}
 
 	// Remove inputs whose durable message attachment no longer exists.
+	//
+	// This delete pass is only safe because InputDir is a session-private
+	// application-data directory, never the user's project tree. If InputDir
+	// were ever pointed at the workspace, this loop would delete the user's
+	// files.
 	for filePath := range existing {
 		if _, keep := desired[filePath]; !keep {
 			if err := store.RemoveSessionInputPath(ctx, sessionID, filePath); err != nil {
@@ -245,7 +256,7 @@ func deduplicateSessionAttachments(attachments types.MessageAttachments) types.M
 	return out
 }
 
-func sandboxAttachmentPath(attachment types.MessageAttachment) (string, error) {
+func sandboxAttachmentPath(attachment types.MessageAttachment, inputDir string) (string, error) {
 	url := strings.TrimSpace(attachment.URL)
 	if url == "" {
 		return "", fmt.Errorf("attachment %q has no durable storage URL", attachment.FileName)
@@ -255,15 +266,27 @@ func sandboxAttachmentPath(attachment types.MessageAttachment) (string, error) {
 		return "", fmt.Errorf("unsafe attachment filename %q: %w", attachment.FileName, err)
 	}
 	sum := sha256.Sum256([]byte(url))
-	return path.Join(sandbox.SessionInputRoot, fmt.Sprintf("%x", sum[:6]), fileName), nil
+	return path.Join(inputDir, fmt.Sprintf("%x", sum[:6]), fileName), nil
 }
 
-func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment) string {
+func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout sandbox.WorkspaceLayout) string {
 	if len(attachments) == 0 {
 		return ""
 	}
+	inputDir := layout.InputDir
+	outputDir := layout.OutputDir
+	workspace := layout.Root
+	if inputDir == "" {
+		inputDir = sandbox.RemoteWorkspaceLayout().InputDir
+	}
+	if outputDir == "" {
+		outputDir = sandbox.RemoteWorkspaceLayout().OutputDir
+	}
+	if workspace == "" {
+		workspace = sandbox.RemoteWorkspaceLayout().Root
+	}
 	var b strings.Builder
-	b.WriteString("\n\n<sandbox_attachments root=\"/workspace/input\">\n")
+	fmt.Fprintf(&b, "\n\n<sandbox_attachments root=\"%s\">\n", escapeAttachmentXML(inputDir))
 	for _, attachment := range attachments {
 		fmt.Fprintf(
 			&b,
@@ -275,12 +298,12 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment) string
 		)
 	}
 	b.WriteString("  <instruction>These are the user's files: read them at the absolute paths above " +
-		"and do not write into /workspace/input. Inspect them with read_file, " +
+		"and do not write into " + inputDir + ". Inspect them with read_file, " +
 		"or with shell_exec (ls/find) when a shell is available. " +
 		"Create generated files with write_sandbox_file " +
-		"and patch existing ones with edit_sandbox_file. $WEKNORA_SKILL_OUTPUT_DIR (/workspace/output) " +
+		"and patch existing ones with edit_sandbox_file. $WEKNORA_SKILL_OUTPUT_DIR (" + outputDir + ") " +
 		"is the only directory collected for download, so put finished deliverables there " +
-		"and keep drafts and intermediate files in any other directory under /workspace.</instruction>\n")
+		"and keep drafts and intermediate files in any other directory under " + workspace + ".</instruction>\n")
 	b.WriteString("</sandbox_attachments>")
 	return b.String()
 }

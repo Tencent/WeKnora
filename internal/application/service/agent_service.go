@@ -292,6 +292,9 @@ func (s *agentService) CreateAgentEngine(
 		toolRegistry.RegisterTool(tools.NewBrowserSkillTool(s.browserSkill, scope, sessionID, instructions))
 	}
 
+	toolRegistry.BindSession(sessionID)
+	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
+
 	return engine, nil
 }
 
@@ -552,6 +555,24 @@ func (s *agentService) resolveWorkspaceSandbox(
 		return nil, nil
 	}
 	return sandboxMgr, nil
+}
+
+func (s *agentService) lookupSessionWorkspaceLayout(
+	ctx context.Context,
+	sessionID string,
+	config *types.AgentConfig,
+) sandbox.WorkspaceLayout {
+	mgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
+	if err != nil || mgr == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
+		layout, layoutErr := provider.SessionWorkspaceLayout(ctx, sessionID)
+		if layoutErr == nil && strings.TrimSpace(layout.Root) != "" {
+			return layout
+		}
+	}
+	return sandbox.RemoteWorkspaceLayout()
 }
 
 // initializeSkillsManager creates and initializes the skills manager.
