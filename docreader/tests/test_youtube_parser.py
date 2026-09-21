@@ -1,6 +1,6 @@
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from docreader.parser.youtube_parser import (
     YoutubeEnumerateParser,
@@ -248,6 +248,74 @@ class TestYoutubeTranscriptParser(unittest.TestCase):
                 parser.parse_into_text(
                     b"https://www.youtube.com/watch?v=abc123"
                 )
+
+
+class TestFetchTranscriptItemsFallback(unittest.TestCase):
+    """_fetch_transcript_items falls back to any available transcript when
+    neither vi nor en exists, instead of failing the video outright.
+    """
+
+    def test_falls_back_to_available_language_when_vi_en_missing(self):
+        from docreader.parser.youtube_parser import _fetch_transcript_items
+        from youtube_transcript_api import NoTranscriptFound
+
+        fake_fetched = MagicMock()
+        fake_fetched.to_raw_data.return_value = [{"text": "こんにちは"}]
+
+        fake_transcript = MagicMock()
+        fake_transcript.language_code = "ja"
+        fake_transcript.is_generated = False
+        fake_transcript.fetch.return_value = fake_fetched
+
+        fake_api = MagicMock()
+        fake_api.fetch.side_effect = NoTranscriptFound(
+            "abc123", ["vi", "en"], MagicMock()
+        )
+        fake_api.list.return_value = [fake_transcript]
+
+        with patch(
+            "youtube_transcript_api.YouTubeTranscriptApi",
+            return_value=fake_api,
+        ):
+            result = _fetch_transcript_items("abc123")
+
+        self.assertEqual(result, [{"text": "こんにちは"}])
+        fake_transcript.fetch.assert_called_once()
+
+    def test_reraises_when_no_transcripts_exist_at_all(self):
+        from docreader.parser.youtube_parser import _fetch_transcript_items
+        from youtube_transcript_api import NoTranscriptFound
+
+        fake_api = MagicMock()
+        fake_api.fetch.side_effect = NoTranscriptFound(
+            "abc123", ["vi", "en"], MagicMock()
+        )
+        fake_api.list.return_value = []
+
+        with patch(
+            "youtube_transcript_api.YouTubeTranscriptApi",
+            return_value=fake_api,
+        ):
+            with self.assertRaises(NoTranscriptFound):
+                _fetch_transcript_items("abc123")
+
+    def test_prefers_vi_en_when_available_no_fallback_needed(self):
+        from docreader.parser.youtube_parser import _fetch_transcript_items
+
+        fake_fetched = MagicMock()
+        fake_fetched.to_raw_data.return_value = [{"text": "hello"}]
+
+        fake_api = MagicMock()
+        fake_api.fetch.return_value = fake_fetched
+
+        with patch(
+            "youtube_transcript_api.YouTubeTranscriptApi",
+            return_value=fake_api,
+        ):
+            result = _fetch_transcript_items("abc123")
+
+        self.assertEqual(result, [{"text": "hello"}])
+        fake_api.list.assert_not_called()
 
 
 if __name__ == "__main__":

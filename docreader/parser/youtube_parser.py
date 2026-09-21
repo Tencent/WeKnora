@@ -96,12 +96,28 @@ _TRANSCRIPT_LANGUAGES = ["vi", "en"]
 
 
 def _fetch_transcript_items(video_id: str) -> list[dict]:
-    """Thin wrapper around youtube-transcript-api so tests can patch it."""
-    from youtube_transcript_api import YouTubeTranscriptApi
+    """Fetch a transcript, preferring vi/en (manual, then auto-generated).
 
-    return YouTubeTranscriptApi().fetch(
-        video_id, languages=_TRANSCRIPT_LANGUAGES
-    ).to_raw_data()
+    If neither language exists, falls back to whatever transcript is
+    available instead of failing the video outright — TranscriptList
+    already orders manually-created transcripts before generated ones, so
+    the first entry is the best available fallback.
+    """
+    from youtube_transcript_api import NoTranscriptFound, YouTubeTranscriptApi
+
+    api = YouTubeTranscriptApi()
+    try:
+        return api.fetch(video_id, languages=_TRANSCRIPT_LANGUAGES).to_raw_data()
+    except NoTranscriptFound:
+        for transcript in api.list(video_id):
+            logger.info(
+                "No vi/en transcript for %s; falling back to %s (%s)",
+                video_id,
+                transcript.language_code,
+                "auto-generated" if transcript.is_generated else "manual",
+            )
+            return transcript.fetch().to_raw_data()
+        raise
 
 
 class YoutubeEnumerateParser(BaseParser):
