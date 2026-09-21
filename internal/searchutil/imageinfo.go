@@ -58,7 +58,7 @@ func CollectImageInfoByChunkIDs(
 	tenantID uint64,
 	chunkIDs []string,
 ) map[string]string {
-	return collectImageInfoByChunkIDs(ctx, chunkIDs, func(parentIDs []string) ([]*types.Chunk, error) {
+	return collectImageInfoByChunkIDs(chunkIDs, func(parentIDs []string) ([]*types.Chunk, error) {
 		return chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
 	})
 }
@@ -72,13 +72,12 @@ func CollectImageInfoByChunkIDsOnly(
 	chunkRepo interfaces.ChunkRepository,
 	chunkIDs []string,
 ) map[string]string {
-	return collectImageInfoByChunkIDs(ctx, chunkIDs, func(parentIDs []string) ([]*types.Chunk, error) {
+	return collectImageInfoByChunkIDs(chunkIDs, func(parentIDs []string) ([]*types.Chunk, error) {
 		return chunkRepo.ListChunksByParentIDsOnly(ctx, parentIDs)
 	})
 }
 
 func collectImageInfoByChunkIDs(
-	ctx context.Context,
 	chunkIDs []string,
 	listChildren func(parentIDs []string) ([]*types.Chunk, error),
 ) map[string]string {

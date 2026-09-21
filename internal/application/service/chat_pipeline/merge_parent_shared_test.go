@@ -59,15 +59,21 @@ func TestResolveParentChunksResolvesSharedKBParentsAcrossTenants(t *testing.T) {
 	// All chunks belong to workspace 2; the caller is workspace 1.
 	repo := &tenantScopedChunkRepo{expandChunkRepo: &expandChunkRepo{
 		chunks: map[string]*types.Chunk{
-			"parent": {ID: "parent", TenantID: 2, ChunkType: types.ChunkTypeParentText,
-				Content: "shared parent body with ![img](resource://sharedImage)"},
-			"child": {ID: "child", TenantID: 2, ChunkType: types.ChunkTypeText,
-				ParentChunkID: "parent", Content: "shared child body"},
+			"parent": {
+				ID: "parent", TenantID: 2, ChunkType: types.ChunkTypeParentText,
+				Content: "shared parent body with ![img](resource://sharedImage)",
+			},
+			"child": {
+				ID: "child", TenantID: 2, ChunkType: types.ChunkTypeText,
+				ParentChunkID: "parent", Content: "shared child body",
+			},
 		},
 		children: map[string][]*types.Chunk{
 			"child": {
-				{ID: "imageChild", TenantID: 2, ParentChunkID: "child",
-					ChunkType: types.ChunkTypeImageOCR, ImageInfo: string(imageInfo), IsEnabled: true},
+				{
+					ID: "imageChild", TenantID: 2, ParentChunkID: "child",
+					ChunkType: types.ChunkTypeImageOCR, ImageInfo: string(imageInfo), IsEnabled: true,
+				},
 			},
 		},
 	}}
