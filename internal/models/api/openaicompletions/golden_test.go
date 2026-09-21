@@ -277,6 +277,36 @@ func TestGolden(t *testing.T) {
 			opts: &api.Options{Temperature: 0.2},
 			want: map[string]any{"enable_search": true, "temperature": 0.2},
 		},
+		{
+			// #3474: skill-install agent sets MaxCompletionTokens; ExtraBody
+			// or a mis-resolved catalog entry can still inject the alias.
+			// Providers that reject the pair must never see both.
+			name: "deepseek drops extra_body max_completion_tokens alias",
+			mutate: func(c *Config) {
+				c.Settings.MaxTokensField = "max_tokens"
+				c.Settings.ExtraBody = map[string]any{"max_completion_tokens": float64(9999)}
+			},
+			opts: &api.Options{MaxCompletionTokens: 24576},
+			want: map[string]any{"max_tokens": float64(24576), "max_completion_tokens": nil},
+		},
+		{
+			name: "aliyun/volcengine drops extra_body max_tokens alias",
+			mutate: func(c *Config) {
+				c.Settings.MaxTokensField = "max_completion_tokens"
+				c.Settings.ExtraBody = map[string]any{"max_tokens": float64(4096)}
+			},
+			opts: &api.Options{MaxTokens: 4096, MaxCompletionTokens: 8192},
+			want: map[string]any{"max_completion_tokens": float64(8192), "max_tokens": nil},
+		},
+		{
+			name: "extra_body alias is re-keyed when no budget is set",
+			mutate: func(c *Config) {
+				c.Settings.MaxTokensField = "max_tokens"
+				c.Settings.ExtraBody = map[string]any{"max_completion_tokens": float64(1024)}
+			},
+			opts: &api.Options{Temperature: 0.1},
+			want: map[string]any{"max_tokens": float64(1024), "max_completion_tokens": nil},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

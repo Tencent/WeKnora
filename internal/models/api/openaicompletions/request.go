@@ -205,11 +205,7 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream boo
 	if opts != nil {
 		c.applySampling(body, opts)
 		if budget := opts.CompletionBudget(); budget > 0 {
-			field := s.MaxTokensField
-			if field == "" {
-				field = "max_completion_tokens"
-			}
-			body[field] = budget
+			body[completionTokenField(s.MaxTokensField)] = budget
 		}
 		c.applyTools(body, opts)
 		if len(opts.Format) > 0 && s.SupportsResponseFormat {
@@ -242,7 +238,66 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream boo
 			body[k] = v
 		}
 	}
+	normalizeCompletionTokenFields(body, completionTokenField(s.MaxTokensField))
 	return body, nil
+}
+
+const (
+	tokenFieldLegacy = "max_tokens"
+	tokenFieldModern = "max_completion_tokens"
+)
+
+// completionTokenField is the single Chat Completions wire name for one
+// provider. Empty settings fall back to the OpenAI protocol default.
+func completionTokenField(configured string) string {
+	switch configured {
+	case tokenFieldLegacy, tokenFieldModern:
+		return configured
+	case "":
+		return tokenFieldModern
+	default:
+		return configured
+	}
+}
+
+// normalizeCompletionTokenFields keeps at most one completion-token alias on
+// the wire. Callers may set Options.MaxTokens and Options.MaxCompletionTokens
+// (one budget, two spellings), and ExtraBody / model compat can inject the
+// other key. Volcengine Ark, DashScope and several OpenAI-compatible
+// gateways reject a request that carries both
+// ("max_tokens and max_completion_tokens cannot be set at the same time"),
+// which broke skill-install LLM rounds on those providers (#3474). The
+// catalog-chosen MaxTokensField wins; an ExtraBody alias is re-keyed to it
+// when the primary is absent, and dropped when both are present.
+func normalizeCompletionTokenFields(body map[string]any, primary string) {
+	if body == nil {
+		return
+	}
+	if primary == "" {
+		primary = tokenFieldModern
+	}
+	alias := tokenFieldModern
+	if primary == tokenFieldModern {
+		alias = tokenFieldLegacy
+	} else if primary != tokenFieldLegacy {
+		// Unknown custom field name: still collapse the two standard aliases
+		// so a dual-write never reaches the provider.
+		if _, hasLegacy := body[tokenFieldLegacy]; hasLegacy {
+			if _, hasModern := body[tokenFieldModern]; hasModern {
+				delete(body, tokenFieldModern)
+			}
+		}
+		return
+	}
+
+	if v, ok := body[alias]; ok {
+		if _, hasPrimary := body[primary]; hasPrimary {
+			delete(body, alias)
+			return
+		}
+		body[primary] = v
+		delete(body, alias)
+	}
 }
 
 func (c *Client) applySampling(body map[string]any, opts *api.Options) {
