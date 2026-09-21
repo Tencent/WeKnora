@@ -234,7 +234,7 @@ func (c *Connector) walk(
 				Title:            title,
 				Content:          []byte(body),
 				ContentType:      "text/markdown",
-				FileName:         sanitizeFileName(title) + ".md",
+				FileName:         datasource.SanitizeFileName(title) + ".md",
 				URL:              absoluteURL(base, d.URL),
 				UpdatedAt:        parseOutlineTime(d.UpdatedAt),
 				CreatedAt:        parseOutlineTime(d.CreatedAt),

@@ -37,7 +37,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -187,34 +186,6 @@ func parseOutlineTime(ts string) time.Time {
 		return time.Time{}
 	}
 	return t
-}
-
-// sanitizeFileName removes characters that are invalid in filenames and
-// truncates to a safe length at a UTF-8 rune boundary. Raw byte truncation
-// would split a multi-byte codepoint and produce an invalid UTF-8 string, which
-// downstream filename validation rejects.
-func sanitizeFileName(name string) string {
-	if strings.TrimSpace(name) == "" {
-		return "untitled"
-	}
-	replacer := strings.NewReplacer(
-		"/", "_", "\\", "_", ":", "_", "*", "_",
-		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_",
-	)
-	result := replacer.Replace(name)
-	const maxBytes = 200
-	if len(result) > maxBytes {
-		result = result[:maxBytes]
-		// Peel trailing bytes that no longer form a complete rune.
-		for len(result) > 0 {
-			r, size := utf8.DecodeLastRuneInString(result)
-			if r != utf8.RuneError || size != 1 {
-				break
-			}
-			result = result[:len(result)-1]
-		}
-	}
-	return result
 }
 
 // redactToken returns a masked form of the token for logging.

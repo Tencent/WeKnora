@@ -82,19 +82,6 @@ func TestParseOutlineConfig_RejectsUnsafeBaseURL(t *testing.T) {
 	}
 }
 
-func TestSanitizeFileName(t *testing.T) {
-	if got := sanitizeFileName(""); got != "untitled" {
-		t.Errorf("empty name = %q, want untitled", got)
-	}
-	if got := sanitizeFileName("a/b:c*d?e"); got != "a_b_c_d_e" {
-		t.Errorf("illegal chars = %q", got)
-	}
-	long := sanitizeFileName(string(make([]byte, 400)))
-	if len(long) > 200 {
-		t.Errorf("length = %d, want <= 200", len(long))
-	}
-}
-
 func TestRedactToken(t *testing.T) {
 	if got := redactToken("short"); got != "***" {
 		t.Errorf("short token = %q", got)

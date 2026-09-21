@@ -240,6 +240,37 @@ func TestConnector_FetchAll_StripsEscapeArtifacts(t *testing.T) {
 	}
 }
 
+// The punctuation and truncation rules live in datasource.SanitizeFileName,
+// shared with the other connectors. What is this connector's own is the blank
+// title fallback and the ".md" suffix, so the policy is asserted where Outline
+// assembles the name rather than against the shared helper.
+func TestConnector_FetchAll_FileNamePolicy(t *testing.T) {
+	for _, tt := range []struct{ name, title, want string }{
+		{"punctuation", "a/b:c*d?e", "a_b_c_d_e.md"},
+		{"blank title", "   ", "Untitled.md"},
+		{"truncated on a rune boundary", strings.Repeat("测", 100), strings.Repeat("测", 66) + ".md"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeOutline([]document{
+				{ID: "d1", Title: tt.title, Text: "# x", CollectionID: "col-1", Revision: 1},
+			})
+			defer f.Close()
+
+			items, err := NewConnector().FetchAll(context.Background(),
+				makeDSConfig(f, []string{"col-1"}), []string{"col-1"})
+			if err != nil {
+				t.Fatalf("FetchAll: %v", err)
+			}
+			if len(items) != 1 {
+				t.Fatalf("got %d items, want 1", len(items))
+			}
+			if items[0].FileName != tt.want {
+				t.Errorf("FileName = %q, want %q", items[0].FileName, tt.want)
+			}
+		})
+	}
+}
+
 func TestConnector_FetchIncremental_SkipsUnchangedAndReportsDeletions(t *testing.T) {
 	f := newFakeOutline([]document{
 		{ID: "d1", Title: "Không đổi", Text: "a", CollectionID: "col-1", Revision: 5,
