@@ -68,7 +68,7 @@ func runSandboxedArgv(
 
 	prep, err := backend.Prepare(ctx, p)
 	require.NoError(t, err)
-	defer prep.Close()
+	defer func() { _ = prep.Close() }()
 
 	proc, err := backend.Spawn(ctx, prep, core.Command{
 		Argv: argv,
@@ -219,7 +219,7 @@ func TestSeatbeltDoesNotKillAfterSuccessfulWait(t *testing.T) {
 
 	prep, err := backend.Prepare(ctx, p)
 	require.NoError(t, err)
-	defer prep.Close()
+	defer func() { _ = prep.Close() }()
 
 	proc, err := backend.Spawn(ctx, prep, core.Command{
 		Argv: []string{"/bin/bash", "-c", "echo hi"},
@@ -258,7 +258,7 @@ func TestSeatbeltKillAfterWaitDoesNotSignal(t *testing.T) {
 
 	prep, err := backend.Prepare(ctx, p)
 	require.NoError(t, err)
-	defer prep.Close()
+	defer func() { _ = prep.Close() }()
 
 	proc, err := backend.Spawn(ctx, prep, core.Command{
 		Argv: []string{"/bin/bash", "-c", "echo hi"},
@@ -405,7 +405,7 @@ func TestSeatbeltKillsProcessTreeOnContextCancel(t *testing.T) {
 
 	prep, err := backend.Prepare(ctx, p)
 	require.NoError(t, err)
-	defer prep.Close()
+	defer func() { _ = prep.Close() }()
 
 	proc, err := backend.Spawn(ctx, prep, core.Command{
 		Argv: []string{"/bin/bash", "-c", `sleep 60 & sleep 60`},
@@ -424,6 +424,6 @@ func TestSeatbeltPreparedFingerprintMatchesPolicy(t *testing.T) {
 	backend, p, _ := darwinFixture(t)
 	prep, err := backend.Prepare(context.Background(), p)
 	require.NoError(t, err)
-	defer prep.Close()
+	defer func() { _ = prep.Close() }()
 	require.Equal(t, p.Fingerprint(), prep.Fingerprint())
 }
