@@ -208,30 +208,30 @@ const formatDate = (value: string) => new Date(value).toLocaleString(locale.valu
 
 <style scoped lang="less">
 .version-popover { width: 320px; max-width: calc(100vw - 32px); color: var(--td-text-color-primary); }
-.popover-heading { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; font-size: 13px; }
+.popover-heading { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; font-size: var(--app-text-md); }
 .popover-heading strong { font-weight: 600; }
-.version-count { padding: 0 6px; border-radius: 9px; background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font-size: 11px; }
+.version-count { padding: 0 6px; border-radius: 9px; background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); font-size: var(--app-text-xs); }
 .history-loading { min-height: 55px; width: 100%; }
 .version-list { list-style: none; margin: 0; padding: 0 6px 6px; max-height: 320px; overflow-y: auto; }
 .version-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 24px; align-items: center; column-gap: 12px; padding: 10px; border-radius: 5px; }
 .version-row:hover { background: var(--td-bg-color-container-hover); }
 .version-meta { flex: 1; min-width: 0; }
-.version-heading { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.version-heading { display: flex; align-items: center; gap: 8px; font-size: var(--app-text-sm); }
 .version-heading strong { font-weight: 600; font-variant-numeric: tabular-nums; }
-.current-label { font-size: 10px; font-weight: 500; padding: 0 5px; line-height: 18px; border-radius: 3px; color: var(--td-text-color-secondary); background: var(--td-bg-color-secondarycontainer); }
-.version-size { text-align: right; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--td-text-color-secondary); }
+.current-label { font-size: var(--app-text-2xs); font-weight: 500; padding: 0 5px; line-height: 18px; border-radius: 3px; color: var(--td-text-color-secondary); background: var(--td-bg-color-secondarycontainer); }
+.version-size { text-align: right; white-space: nowrap; font-size: var(--app-text-xs); font-variant-numeric: tabular-nums; color: var(--td-text-color-secondary); }
 .version-download { justify-self: end; }
-.version-date { margin-top: 4px; font-size: 11px; line-height: 18px; color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
+.version-date { margin-top: 4px; font-size: var(--app-text-xs); line-height: 18px; color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
 .version-footer { padding: 8px; border-top: 1px solid var(--td-component-stroke); }
 .file-input { display: none; }
-.selected-file { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 12px; }
+.selected-file { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: var(--app-text-sm); }
 .selected-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selected-file .t-icon { flex-shrink: 0; color: var(--td-text-color-secondary); }
-.upload-hint { margin: 5px 6px 10px; font-size: 11px; line-height: 1.6; color: var(--td-text-color-secondary); }
+.upload-hint { margin: 5px 6px 10px; font-size: var(--app-text-xs); line-height: 1.6; color: var(--td-text-color-secondary); }
 .upload-actions { display: flex; justify-content: flex-end; gap: 6px; }
-.processing-notice { display: flex; align-items: flex-start; gap: 6px; margin: 4px 6px 8px; font-size: 11px; line-height: 1.6; color: var(--td-text-color-secondary); }
+.processing-notice { display: flex; align-items: flex-start; gap: 6px; margin: 4px 6px 8px; font-size: var(--app-text-xs); line-height: 1.6; color: var(--td-text-color-secondary); }
 .processing-notice .t-icon { flex-shrink: 0; margin-top: 2px; }
 .version-pagination { padding: 6px 16px 12px; }
-.load-error { padding: 8px 16px; color: var(--td-error-color); font-size: 12px; }
-.empty-history { padding: 12px 16px 20px; margin: 0; font-size: 12px; color: var(--td-text-color-placeholder); }
+.load-error { padding: 8px 16px; color: var(--td-error-color); font-size: var(--app-text-sm); }
+.empty-history { padding: 12px 16px 20px; margin: 0; font-size: var(--app-text-sm); color: var(--td-text-color-placeholder); }
 </style>
