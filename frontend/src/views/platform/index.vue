@@ -1,5 +1,5 @@
 <template>
-    <div class="main" ref="dropzone">
+    <div class="main" ref="dropzone" :style="{ '--sidebar-width': `${uiStore.sidebarDisplayWidth}px` }">
         <Menu></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
@@ -14,6 +14,8 @@
         <!-- 全局右上角"待处理邀请"铃铛。固定定位，z-index 低于抽屉，业务页面
              右侧抽屉弹出时会自然覆盖；仅在有待处理邀请时渲染。 -->
         <GlobalInvitationBell />
+        <!-- 知识库文件上传进度浮层：上传队列放在 store 里，切换页面不中断 -->
+        <UploadTasksPanel />
         <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开 -->
         <NewUserGuide />
     </div>
@@ -26,9 +28,11 @@ import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
 import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
+import UploadTasksPanel from '@/components/upload-tasks/UploadTasksPanel.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useUIStore } from '@/stores/ui'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -37,6 +41,7 @@ import { collectDroppedFiles } from './collectDroppedFiles'
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
+const uiStore = useUIStore();
 let ismask = ref(false)
 const { t } = useI18n();
 
@@ -119,10 +124,25 @@ const isFileDrag = (event: DragEvent): boolean => {
     return Array.from(types).includes('Files')
 }
 
+const shouldHandleGlobalFileDrag = (event: DragEvent): boolean => {
+    if (!isFileDrag(event)) return false;
+    // Keep the browser from opening dropped files, even outside upload pages.
+    event.preventDefault();
+    // Settings and its teleported skill drawers own their uploads. This runs
+    // in document capture, before a local drop handler can stop propagation.
+    const enabled = !uiStore.showSettingsModal && (
+        isChatDropRoute() || (route.name === 'knowledgeBaseDetail' && !!getCurrentKbId())
+    );
+    if (!enabled) {
+        dragCounter = 0;
+        ismask.value = false;
+    }
+    return enabled;
+}
+
 // 全局拖拽事件处理
 const handleGlobalDragEnter = (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
+    if (!shouldHandleGlobalFileDrag(event)) return;
     dragCounter++;
     if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'all';
@@ -131,16 +151,14 @@ const handleGlobalDragEnter = (event: DragEvent) => {
 }
 
 const handleGlobalDragOver = (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
+    if (!shouldHandleGlobalFileDrag(event)) return;
     if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'copy';
     }
 }
 
 const handleGlobalDragLeave = (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
+    if (!shouldHandleGlobalFileDrag(event)) return;
     dragCounter--;
     if (dragCounter === 0) {
         ismask.value = false;
@@ -148,8 +166,7 @@ const handleGlobalDragLeave = (event: DragEvent) => {
 }
 
 const handleGlobalDrop = async (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
+    if (!shouldHandleGlobalFileDrag(event)) return;
     dragCounter = 0;
     ismask.value = false;
 

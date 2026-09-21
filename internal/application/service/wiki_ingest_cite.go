@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -115,7 +116,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
+		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
 	)
 
 	slugItems := make(map[string]extractedItem, len(result.Entities)+len(result.Concepts))
@@ -408,11 +409,24 @@ func (s *wikiIngestService) resolveCitedChunks(
 			logger.Warnf(ctx, "wiki ingest: failed to resolve cited chunks: %v", err)
 			continue
 		}
+
+		// Pull image captions / OCR from the image child chunks of the cited
+		// text chunks and inline them into the content, the same way the wiki
+		// summary path does via reconstructEnrichedContent. Without this the
+		// Reduce phase sees bare Markdown image links with no caption/OCR
+		// context, so image-heavy documents degrade to "copy verbatim" or
+		// "drop entirely" behavior on concept/entity pages.
+		imageInfoByID := searchutil.CollectImageInfoByChunkIDs(ctx, s.chunkRepo, tenantID, ids)
+
 		for _, c := range chunks {
 			if c == nil || c.Content == "" {
 				continue
 			}
-			out[c.ID] = c.Content
+			content := c.Content
+			if info := imageInfoByID[c.ID]; info != "" {
+				content = searchutil.EnrichContentWithImageInfo(content, info)
+			}
+			out[c.ID] = content
 		}
 	}
 	return out

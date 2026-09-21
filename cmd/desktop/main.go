@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
+	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -176,11 +179,21 @@ func main() {
 	runtime.SilenceGinRouteSpam()
 	runtime.LogStartupEnv(context.Background())
 
+	if err := ensureDesktopSigningKey(); err != nil {
+		panic(fmt.Sprintf("initialize desktop signing key: %v", err))
+	}
+
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
 
 	// Initialize the WeKnora App struct
 	app := NewApp()
+	setupBytes := make([]byte, 32)
+	if _, err := rand.Read(setupBytes); err != nil {
+		panic("failed to generate desktop authentication capability")
+	}
+	app.setupToken = base64.RawURLEncoding.EncodeToString(setupBytes)
+	handler.SetLiteSetupToken(app.setupToken)
 
 	// Error channel to capture server startup errors
 	serverErrCh := make(chan error, 1)
@@ -249,7 +262,6 @@ func main() {
 			}
 			return nil
 		})
-
 		if err != nil {
 			serverErrCh <- err
 			logger.Fatalf(context.Background(), "Failed to run backend: %v", err)
@@ -345,7 +357,6 @@ func main() {
 			WindowIsTranslucent:  false,
 		},
 	})
-
 	if err != nil {
 		println("Error:", err.Error())
 	}

@@ -456,20 +456,31 @@ const WikiDeduplicationPrompt = `You are a strict deduplication system. You are 
 ### How to read the input
 Each <item> is a newly extracted entity/concept. The <candidates> nested inside it are the ONLY existing pages you may merge that item into — they were pre-selected as similar to that specific item. A page listed under one item tells you NOTHING about any other item.
 
+### How to use names and aliases
+Each item and candidate page has a <name> and may include one or more <alias> values. Consider the primary name and all provided aliases on BOTH sides when deciding whether they refer to the same entity or concept.
+
+Compare name-to-name, name-to-alias, alias-to-name, and alias-to-alias. Do not reject a match solely because the primary names differ.
+
+Aliases are supporting evidence, NOT unique identifiers. A shared alias or acronym alone does not prove that two entries refer to the same thing. Do not treat related entities, related concepts, or broader/narrower concepts as aliases.
+
 ### Hard constraints — a merge is only valid when ALL hold:
 - The target slug is one of the candidate <page> slugs listed **inside that same item**. NEVER merge into a page listed under a different item, and NEVER invent a slug.
 - The types are compatible: entities merge with entities, concepts merge with concepts. **Never merge an entity into a concept or vice versa.**
 
 ### Merge criteria — ALL must be true:
 1. The new item and the candidate page refer to the **same real-world thing** (same person, same organization, same specific concept).
-2. The match is a **name variation**: abbreviation ↔ full name, translation, or minor spelling difference.
+2. Their names and/or provided aliases support a **name-variation match**, such as an abbreviation and its full form, a translation, a minor spelling difference, or an explicitly provided alternative name. The primary names do not need to match.
+3. The provided information does not indicate different identities, versions, or scopes. If a shared alias or acronym is ambiguous and the available information is insufficient to establish identity with high confidence, **do NOT merge**.
 
 ### Examples of CORRECT merges:
 - "Acme Corp" → "Acme Corporation" (same company, abbreviation)
 - "RAG" → "Retrieval-Augmented Generation" (same concept, acronym)
 - "苹果公司" → "Apple Inc." (same entity, translation)
+- New item: name="IBM", no aliases. Candidate: name="International Business Machines", alias="IBM". Merge: the new name matches the candidate's explicitly provided acronym, and both refer to the same organization.
+- New item: name="Retrieval Augmented Generation", alias="RAG". Candidate: name="检索增强生成", alias="RAG". Merge: the names are translations of the same concept, supported by the shared alias.
 
 ### Examples of INCORRECT merges — do NOT merge these:
+- New item: name="Alpha Research Center", alias="ARC". Candidate: name="Advanced Robotics Company", alias="ARC". Do NOT merge: the shared acronym does not establish that these are the same organization.
 - "Hunyuan Model" → "Qwen Model" (competing products in the same category are DIFFERENT entities, do not merge them)
 - "iPhone 15" → "Huawei Mate 60" (different specific instances in the same category)
 - "GPT-4" → "GPT-3.5" (different versions of a product are distinct entities)

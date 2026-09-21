@@ -101,7 +101,8 @@ type KnowledgeService interface {
 	RenameKnowledgeFolder(ctx context.Context, kbID string, from string, to string) (int64, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
-	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
+	// DeleteKnowledgeList requires an explicit write grant for every affected KB.
+	// It validates the complete selection before changing any deletion state.
 	DeleteKnowledgeList(ctx context.Context, ids []string) error
 	// GetKnowledgeFile retrieves the file associated with the knowledge.
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
@@ -126,6 +127,18 @@ type KnowledgeService interface {
 		ctx context.Context,
 		knowledgeID string,
 		processOverrides *types.KnowledgeProcessOverrides,
+	) (*types.Knowledge, error)
+	// ReplaceKnowledgeFile replaces the source file of an existing file knowledge
+	// while preserving its ID, then re-parses it. A path-qualified customFileName
+	// also sets the folder; a bare filename keeps the current folder. Metadata
+	// entries are merged into the stored metadata. Identical content on this
+	// same path returns a DuplicateKnowledgeError without re-parsing.
+	ReplaceKnowledgeFile(
+		ctx context.Context,
+		knowledgeID string,
+		file *multipart.FileHeader,
+		customFileName string,
+		metadata map[string]string,
 	) (*types.Knowledge, error)
 	// CancelKnowledgeParse marks an in-progress parse as cancelled by the
 	// user. The knowledge row and any partially written chunks/index are
@@ -152,6 +165,7 @@ type KnowledgeService interface {
 		keyword string,
 		searchField string,
 		sortOrder string,
+		isEnabled *bool,
 	) (*types.PageResult, error)
 	// UpsertFAQEntries imports or appends FAQ entries asynchronously.
 	// When DryRun is true, only validates entries without actually importing.
@@ -178,7 +192,7 @@ type KnowledgeService interface {
 	ExportFAQEntriesJSON(ctx context.Context, kbID string) ([]byte, error)
 	// UpdateKnowledgeTagBatch updates tag for document knowledge items in batch.
 	// authorizedKBID restricts all updates to knowledge items belonging to this KB;
-	// pass empty string to skip (caller must ensure authorization by other means).
+	// an empty value still requires an explicit write grant for every affected KB.
 	UpdateKnowledgeTagBatch(ctx context.Context, authorizedKBID string, updates map[string][]string) error
 	// SetKnowledgeTags replaces all tags for a single knowledge entry.
 	SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error
@@ -241,6 +255,10 @@ type KnowledgeRepository interface {
 		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// UpdateKnowledgeForTransfer conditionally persists a transfer checkpoint
+	// and its storage delta in one transaction, without inserting missing rows.
+	UpdateKnowledgeForTransfer(ctx context.Context, before, after *types.Knowledge) error
+
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
@@ -291,7 +309,12 @@ type KnowledgeRepository interface {
 	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
 	// UpdateActiveDeletingKnowledgeColumns updates an active, non-deleted knowledge row
 	// only when it is still in the transient deleting state.
-	UpdateActiveDeletingKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) (bool, error)
+	UpdateActiveDeletingKnowledgeColumns(
+		ctx context.Context,
+		tenantID uint64,
+		kbID, id string,
+		values map[string]interface{},
+	) (bool, error)
 	// FinalizeSubtask atomically decrements pending_subtasks_count for the
 	// given knowledge and promotes parse_status from "finalizing" to
 	// "completed" when the count reaches zero. Returns the post-decrement
@@ -303,6 +326,9 @@ type KnowledgeRepository interface {
 	// whether the transition took place (false when the row's parse_status
 	// was no longer "processing", e.g. user cancelled / deleted in flight).
 	SetFinalizing(ctx context.Context, id string, expectedSubtasks int) (bool, error)
+	// CompleteProcessingWithoutSubtasks atomically completes a still-processing
+	// document that has no enrichment tasks, without overriding cancel/delete.
+	CompleteProcessingWithoutSubtasks(ctx context.Context, id string) (bool, error)
 	// CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base.
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.
@@ -346,4 +372,8 @@ type KnowledgeRepository interface {
 	GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error)
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.
 	DeleteKnowledgeTagRelations(ctx context.Context, knowledgeID string) error
+	// ListKnowledgeProfileRows returns the lightweight projection used to
+	// aggregate a knowledge-base description: every enabled document that has
+	// finished parsing (completed or finalizing), without content columns.
+	ListKnowledgeProfileRows(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeProfileRow, error)
 }

@@ -10,7 +10,7 @@
       "tool": "weknora_list_knowledge_bases",
       "method": "GET",
       "path": "/api/v1/knowledge-bases",
-      "query": {},
+      "query": { "resource_urls": "public" },
       "body": null,
       "goRequestType": null
     },
@@ -18,7 +18,7 @@
       "tool": "weknora_search",
       "method": "POST",
       "path": "/api/v1/knowledge-search",
-      "query": {},
+      "query": { "resource_urls": "public" },
       "body": {
         "query": "默认的检索阈值是多少",
         "knowledge_base_ids": ["kb-product"]
@@ -29,7 +29,7 @@
       "tool": "weknora_search",
       "method": "GET",
       "path": "/api/v1/knowledge/search",
-      "query": { "keyword": "默认的检索阈值是多少", "limit": "8" },
+      "query": { "keyword": "默认的检索阈值是多少", "limit": "8", "resource_urls": "public" },
       "body": null,
       "goRequestType": null
     },
@@ -37,7 +37,7 @@
       "tool": "weknora_read_document",
       "method": "GET",
       "path": "/api/v1/chunks/doc-retrieval-pipeline",
-      "query": { "page": "1", "page_size": "5" },
+      "query": { "page": "1", "page_size": "5", "resource_urls": "public" },
       "body": null,
       "goRequestType": "types.Pagination"
     },
@@ -45,7 +45,7 @@
       "tool": "weknora_read_document",
       "method": "GET",
       "path": "/api/v1/knowledge/doc-retrieval-pipeline",
-      "query": {},
+      "query": { "resource_urls": "public" },
       "body": null,
       "goRequestType": null
     },
@@ -53,7 +53,7 @@
       "tool": "weknora_ask",
       "method": "POST",
       "path": "/api/v1/sessions",
-      "query": {},
+      "query": { "resource_urls": "public" },
       "body": {
         "title": "dsh: 默认的检索阈值是多少"
       },
@@ -63,7 +63,7 @@
       "tool": "weknora_ask",
       "method": "POST",
       "path": "/api/v1/knowledge-chat/session-mock-1",
-      "query": {},
+      "query": { "resource_urls": "public" },
       "body": {
         "query": "默认的检索阈值是多少",
         "channel": "api",
@@ -75,7 +75,7 @@
       "tool": "weknora_ask",
       "method": "POST",
       "path": "/api/v1/agent-chat/s1",
-      "query": {},
+      "query": { "resource_urls": "public" },
       "body": {
         "query": "部署方式",
         "channel": "api",

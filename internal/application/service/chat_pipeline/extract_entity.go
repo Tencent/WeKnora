@@ -151,6 +151,9 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	return next()
 }
 
+// Graph extraction can return many nodes and relations; 4096 tokens can truncate the JSON payload.
+const entityExtractionMaxTokens = 8192
+
 // Extractor is a struct for extracting entities
 type Extractor struct {
 	chat     chat.Chat
@@ -171,7 +174,7 @@ func NewExtractor(
 		template: template,
 		chatOpt: &chat.ChatOptions{
 			Temperature: 0.3,
-			MaxTokens:   4096,
+			MaxTokens:   entityExtractionMaxTokens,
 			Thinking:    &think,
 		},
 	}

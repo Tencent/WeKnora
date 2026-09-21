@@ -87,7 +87,7 @@
               trigger="click"
               placement="bottom-end"
               destroy-on-close
-              overlay-class-name="user-profile-password-popup-overlay"
+              overlay-class-name="wk-popover user-profile-password-popup-overlay"
             >
               <t-button
                 theme="default"
@@ -176,18 +176,21 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
 import {
   getCurrentUser,
+  getAuthConfig,
   changePassword,
   logout as logoutApi,
   type UserInfo,
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { newPasswordRules } from '@/utils/passwordPolicy'
 
 const { t, locale } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
 
 const userInfo = ref<UserInfo | null>(null)
+const complexPasswordEnabled = ref(false)
 const loading = ref(true)
 const error = ref('')
 
@@ -200,32 +203,39 @@ const passwordForm = reactive({
   confirmPassword: '',
 })
 
+const loadPasswordPolicy = async () => {
+  try {
+    const resp = await getAuthConfig()
+    complexPasswordEnabled.value = !!resp.complex_password_enabled
+  } catch {
+    complexPasswordEnabled.value = false
+  }
+}
+
 const oidcOnlyLogin = computed(
   () => userInfo.value?.preferences?.oidc_only_login === true,
 )
 
 watch(passwordPopupVisible, (open) => {
-  if (open) {
+  if (!open) {
     resetPasswordForm()
+    return
   }
+  resetPasswordForm()
+  void loadPasswordPolicy()
 })
 
 const passwordRules = computed<Record<string, FormRule[]>>(() => ({
   oldPassword: [
     { required: true, message: t('userProfile.changePassword.currentRequired'), type: 'error' },
   ],
-  newPassword: [
-    { required: true, message: t('auth.passwordRequired'), type: 'error' },
-    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' },
+  newPassword: newPasswordRules(t, complexPasswordEnabled.value, [
     {
       validator: (val: string) => val !== passwordForm.oldPassword,
       message: t('userProfile.changePassword.sameAsCurrent'),
       type: 'error',
     },
-  ],
+  ]),
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
     {
@@ -324,26 +334,14 @@ onMounted(loadInfo)
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .user-profile {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 32px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .loading-inline {
@@ -353,7 +351,7 @@ onMounted(loadInfo)
   padding: 40px 0;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .error-inline {
@@ -367,48 +365,18 @@ onMounted(loadInfo)
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
+  .setting-row();
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 65%;
-  padding-right: 24px;
-
-  label {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    display: block;
-    margin-bottom: 4px;
-  }
-
-  .desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .setting-info();
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
+  .setting-control();
 
   .info-value {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     text-align: right;
     word-break: break-word;
@@ -433,7 +401,7 @@ onMounted(loadInfo)
 }
 
 .password-popup-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 8px;
@@ -442,7 +410,7 @@ onMounted(loadInfo)
 
 .password-popup-hint {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
@@ -470,20 +438,6 @@ onMounted(loadInfo)
 .user-profile-password-popup-overlay {
   z-index: 3050 !important;
 
-  .t-popup__content {
-    padding: 14px 16px !important;
-    min-width: 300px;
-    max-width: min(392px, calc(100vw - 24px));
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  }
 }
 
 :root[theme-mode='dark'] .user-profile-password-popup-overlay .t-popup__content {

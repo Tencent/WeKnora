@@ -1,16 +1,12 @@
 import { ref, reactive } from "vue";
 import { storeToRefs } from "pinia";
-import { formatStringDate, kbFileTypeVerification } from "../utils/index";
-import { MessagePlugin } from "tdesign-vue-next";
+import { formatStringDate } from "../utils/index";
 import {
-  uploadKnowledgeFile,
   listKnowledgeFiles,
   getKnowledgeDetails,
-  delKnowledgeDetails,
   getKnowledgeDetailsCon,
 } from "@/api/knowledge-base/index";
 import { knowledgeStore } from "@/stores/knowledge";
-import { useUIStore } from "@/stores/ui";
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
@@ -96,38 +92,6 @@ export default function (knowledgeBaseId?: string) {
       })
       .catch(() => {});
   };
-  const delKnowledge = (index: number, item: any, onSuccess?: () => void) => {
-    cardList.value[index].isMore = false;
-    moreIndex.value = -1;
-    return delKnowledgeDetails(item.id)
-      .then(async (result: any) => {
-        if (result.success) {
-          MessagePlugin.info(t('knowledgeBase.deleteSuccess'));
-          if (onSuccess) {
-            onSuccess();
-          } else {
-            // 后端已将单条删除放入异步队列，立即拉列表仍可能包含待删项；
-            // 短轮询直到列表与后端一致或超时。
-            const maxPolls = 30;
-            const delayMs = 400;
-            for (let i = 0; i < maxPolls; i++) {
-              await getKnowled();
-              const stillPresent = (cardList.value || []).some((c: any) => c.id === item.id);
-              if (!stillPresent) break;
-              await new Promise<void>((r) => setTimeout(r, delayMs));
-            }
-          }
-          return true;
-        } else {
-          MessagePlugin.error(t('knowledgeBase.deleteFailed'));
-          return false;
-        }
-      })
-      .catch(() => {
-        MessagePlugin.error(t('knowledgeBase.deleteFailed'));
-        return false;
-      });
-  };
   const openMore = (index: number) => {
     moreIndex.value = index;
   };
@@ -135,51 +99,6 @@ export default function (knowledgeBaseId?: string) {
     if (!visible) {
       moreIndex.value = -1;
     }
-  };
-  const requestMethod = (file: any, uploadInput: any) => {
-    if (!(file instanceof File) || !uploadInput) {
-      MessagePlugin.error(t('error.invalidFileType'));
-      return;
-    }
-    
-    if (kbFileTypeVerification(file)) {
-      return;
-    }
-    
-    // 获取当前知识库ID
-    let currentKbId: string | undefined = (route.params as any)?.kbId as string;
-    if (!currentKbId && typeof window !== 'undefined') {
-      const match = window.location.pathname.match(/knowledge-bases\/([^/]+)/);
-      if (match?.[1]) currentKbId = match[1];
-    }
-    if (!currentKbId) {
-      currentKbId = knowledgeBaseId;
-    }
-    if (!currentKbId) {
-      MessagePlugin.error(t('error.missingKbId'));
-      return;
-    }
-    
-    // 获取当前选中的标签 ID
-    const uiStore = useUIStore();
-    const tagIdsToUpload = uiStore.selectedTagIds.length > 0 ? [...uiStore.selectedTagIds] : undefined;
-
-    uploadKnowledgeFile(currentKbId, { file, tag_ids: tagIdsToUpload })
-      .then((result: any) => {
-        if (result.success) {
-          MessagePlugin.info(t('knowledgeBase.uploadSuccess'));
-          getKnowled({ page: 1, page_size: 35 }, currentKbId);
-        } else {
-          const errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
-          MessagePlugin.error(result.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
-        }
-        uploadInput.value.value = "";
-      })
-      .catch((err: any) => {
-        const errorMessage = err.error?.message || err.message || t('knowledgeBase.uploadFailed');
-        MessagePlugin.error(err.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
-        uploadInput.value.value = "";
-      });
   };
   const getCardDetails = (item: any) => {
     activeKnowledgeId = item.id;
@@ -261,10 +180,8 @@ export default function (knowledgeBaseId?: string) {
     moreIndex,
     getKnowled,
     details,
-    delKnowledge,
     openMore,
     onVisibleChange,
-    requestMethod,
     getCardDetails,
     total,
     getfDetails,

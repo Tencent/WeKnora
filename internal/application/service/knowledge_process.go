@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/common"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -31,19 +34,28 @@ func (s *knowledgeService) cloneKnowledge(
 	src *types.Knowledge,
 	targetKB *types.KnowledgeBase,
 ) (err error) {
-	if src.ParseStatus != "completed" {
-		logger.GetLogger(ctx).WithField("knowledge_id", src.ID).Errorf("MoveKnowledge parse status is not completed")
-		return nil
+	sourceKB, err := knowledgeWriteKB(ctx, s.kbService, src)
+	if err != nil {
+		return err
 	}
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, access.KBTransferClone); err != nil {
+		return err
+	}
+	if src.ParseStatus != types.ParseStatusCompleted {
+		return fmt.Errorf("source knowledge %s is not completed", src.ID)
+	}
+	if _, err := s.transferChunks(ctx, src, sourceKB.ID); err != nil {
+		return err
+	}
 	dst := &types.Knowledge{
-		ID:               uuid.New().String(),
+		ID:               uuid.NewString(),
 		TenantID:         targetKB.TenantID,
 		KnowledgeBaseID:  targetKB.ID,
 		Type:             src.Type,
 		Channel:          src.Channel,
 		Title:            src.Title,
 		Description:      src.Description,
+		Profile:          src.Profile.Clone(),
 		Source:           src.Source,
 		ParseStatus:      "processing",
 		EnableStatus:     "disabled",
@@ -54,8 +66,21 @@ func (s *knowledgeService) cloneKnowledge(
 		FileSize:         src.FileSize,
 		FileHash:         src.FileHash,
 		FilePath:         src.FilePath,
-		StorageSize:      src.StorageSize,
+		StorageSize:      0,
 		Metadata:         src.Metadata,
+		CustomMetadata:   src.CustomMetadata,
+	}
+
+	state := knowledgeTransferState{
+		TaskID:    access.TransferTaskID(ctx),
+		Operation: access.KBTransferClone,
+		SourceKB:  sourceKB.ID,
+		TargetKB:  targetKB.ID,
+		SourceID:  src.ID,
+		Phase:     "cloning",
+	}
+	if err := setTransferState(dst, state); err != nil {
+		return err
 	}
 
 	// Deep-copy the source document file into an object owned by the destination
@@ -79,37 +104,52 @@ func (s *knowledgeService) cloneKnowledge(
 	}
 
 	defer func() {
-		if err != nil {
-			if len(copiedFilePaths) > 0 {
-				cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
-			}
-			dst.ParseStatus = "failed"
-			dst.ErrorMessage = err.Error()
-			_ = s.repo.UpdateKnowledge(ctx, dst)
-			logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge failed to move knowledge")
-		} else {
-			dst.ParseStatus = "completed"
-			dst.EnableStatus = "enabled"
-			_ = s.repo.UpdateKnowledge(ctx, dst)
-			logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).Infof("MoveKnowledge move knowledge successfully")
+		if err == nil {
+			return
 		}
+		stored, loadErr := s.repo.GetKnowledgeByID(ctx, dst.TenantID, dst.ID)
+		if errors.Is(loadErr, repository.ErrKnowledgeNotFound) {
+			cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
+			return
+		}
+		// An uncertain save/read must not delete objects that may be referenced.
+		if loadErr != nil || stored == nil || validateTransferKnowledge(stored, targetKB) != nil {
+			return
+		}
+		marker, markerErr := transferState(stored)
+		if markerErr != nil || !matchesTransfer(ctx, marker, sourceKB, targetKB, access.KBTransferClone, src.ID, "") ||
+			stored.ParseStatus == types.ParseStatusCompleted {
+			return
+		}
+		before, after := *stored, *stored
+		after.ParseStatus = types.ParseStatusFailed
+		after.ErrorMessage = err.Error()
+		_ = s.repo.UpdateKnowledgeForTransfer(ctx, &before, &after)
 	}()
-
 	if err = s.repo.CreateKnowledge(ctx, dst); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge create knowledge failed")
-		return
+		return err
 	}
-	tenantInfo.StorageUsed += dst.StorageSize
-	if err = s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, dst.StorageSize); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge update tenant storage used failed")
-		return
+	// Create timestamps can be rounded by the database before the first CAS.
+	persisted, err := s.repo.GetKnowledgeByID(ctx, dst.TenantID, dst.ID)
+	if err != nil {
+		return err
 	}
+	if err := validateTransferKnowledge(persisted, targetKB); err != nil {
+		return err
+	}
+	dst.UpdatedAt = persisted.UpdatedAt
 	if err = s.CloneChunk(ctx, src, dst); err != nil {
-		logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).
-			WithField("error", err).Errorf("MoveKnowledge move chunks failed")
-		return
+		return err
 	}
-	return
+	before := *dst
+	state.Phase = "done"
+	if err = setTransferState(dst, state); err != nil {
+		return err
+	}
+	dst.ParseStatus = types.ParseStatusCompleted
+	dst.EnableStatus = "enabled"
+	dst.StorageSize = src.StorageSize
+	return s.repo.UpdateKnowledgeForTransfer(ctx, &before, dst)
 }
 
 // processDocumentFromPassage handles asynchronous processing of text passages
@@ -211,14 +251,55 @@ func markKnowledgeProcessing(knowledge *types.Knowledge, now time.Time) {
 	knowledge.UpdatedAt = now
 }
 
-// buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
-// Defaults mirror chunker.DefaultChunkSize / DefaultChunkOverlap so behavior is
-// identical whether callers come through this path or invoke the chunker
-// directly with a zero-value config.
-func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
-	return buildSplitterConfigFromChunking(kb.ChunkingConfig)
+// failKnowledgeOnEmbeddingModel records an unresolvable embedding model as this
+// attempt's terminal state.
+//
+// It re-reads the row instead of trusting the entry guard, because resolving a
+// model reads the database: a cancel or a ReplaceKnowledgeFile can land in the
+// window between that guard and this write. Both would be clobbered otherwise —
+// UpdateKnowledge is a full-row Save and file_path is not among the omitted
+// columns, so a stale in-memory row would roll file_path back over the
+// replacement and mark the replacement's live attempt failed.
+func (s *knowledgeService) failKnowledgeOnEmbeddingModel(
+	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge, cause error,
+) {
+	// A cancelled or expired context means the run was interrupted — the user
+	// cancelled (asynq CancelProcessing cancels the handler context), the
+	// worker was preempted, the process is shutting down. The model itself is
+	// not implicated, so recording "failed to get embedding model" would both
+	// mislabel the cause and overwrite the cancelled status the abort path
+	// just wrote. Leave the row to the abort path, or to the housekeeping
+	// sweep when nothing else claims it.
+	if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		logger.Infof(ctx,
+			"Embedding model resolution interrupted for %s (%v); leaving parse status untouched",
+			knowledge.ID, cause)
+		return
+	}
+	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+		logger.Infof(ctx,
+			"Knowledge aborted (%s), not recording embedding model failure: %s", status, knowledge.ID)
+		return
+	}
+
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = fmt.Sprintf("failed to get embedding model: %v", cause)
+	knowledge.UpdatedAt = time.Now()
+	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+		logger.Errorf(ctx, "failed to persist embedding model failure for %s: %v", knowledge.ID, err)
+	}
+	s.beginStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
+		"model_id": kb.EmbeddingModelID,
+	})
+	// The span's error_message is what the timeline renders, and its
+	// error_detail is withheld from non-admin responses — so carry the same
+	// text the document list shows rather than a fixed generic string.
+	s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+		werrors.ErrCodeEmbeddingProviderFail, knowledge.ErrorMessage, cause)
 }
 
+// buildSplitterConfigFromChunking normalizes effective chunking settings with
+// the shared chunker defaults.
 func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterConfig {
 	return chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
 		ChunkSize:    cc.ChunkSize,
@@ -251,11 +332,32 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		options = opts[0]
 	}
 
+	// Parser output and manually supplied passages can contain malformed byte
+	// sequences. Clean them before logging, chunk persistence, or embedding;
+	// the embedding provider and tracing/database drivers expect valid UTF-8.
+	for i := range chunks {
+		chunks[i].Content = common.CleanInvalidUTF8(chunks[i].Content)
+		chunks[i].ContextHeader = common.CleanInvalidUTF8(chunks[i].ContextHeader)
+		for j := range chunks[i].Images {
+			chunks[i].Images[j].URL = common.CleanInvalidUTF8(chunks[i].Images[j].URL)
+			chunks[i].Images[j].Caption = common.CleanInvalidUTF8(chunks[i].Images[j].Caption)
+			chunks[i].Images[j].OCRText = common.CleanInvalidUTF8(chunks[i].Images[j].OCRText)
+			chunks[i].Images[j].OriginalURL = common.CleanInvalidUTF8(chunks[i].Images[j].OriginalURL)
+		}
+	}
+	for i := range options.ParentChunks {
+		options.ParentChunks[i].Content = common.CleanInvalidUTF8(options.ParentChunks[i].Content)
+	}
+
 	// Check if knowledge is being deleted/cancelled before processing.
 	// Both statuses short-circuit identically here — there's nothing to clean
 	// up yet so the branch is purely "stop early".
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
+		return
+	}
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Knowledge source replaced, skipping chunk processing: %s", knowledge.ID)
 		return
 	}
 
@@ -265,7 +367,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		var err error
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
+			// Terminal for this attempt, and it has to be recorded as such.
+			// A KB that indexes vectors cannot proceed without an embedder,
+			// and processChunks reports nothing to its callers — returning
+			// silently leaves parse_status on "processing" with no task left
+			// to move it, so the row hangs until the housekeeping sweep fails
+			// it an hour later with a generic "stuck in processing" message.
+			// Failing here names the real cause instead: a model row that was
+			// deleted or deactivated, or a configuration the embedder factory
+			// refuses. (Credential and connectivity problems surface later, on
+			// the first BatchIndex round-trip — resolving a model only reads
+			// the row and constructs a client.)
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
+			s.failKnowledgeOnEmbeddingModel(ctx, kb, knowledge, err)
 			return
 		}
 	} else {
@@ -276,7 +390,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
 	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
 		// 不返回错误，继续处理（可能没有旧数据）
 	}
@@ -469,6 +583,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
 		return
 	}
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Knowledge source replaced, skipping chunk write: %s", knowledge.ID)
+		return
+	}
 
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
@@ -476,7 +594,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
-	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
+	if err := s.chunkRepo.CreateChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
@@ -553,10 +671,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// Check again before batch indexing (heavy operation).
 		// deleting → row is going away anyway, drop the chunks we just wrote.
 		// cancelled → user wants to keep what was already persisted, just stop.
+		if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+			logger.Infof(ctx, "Knowledge source replaced, skipping indexing: %s", knowledge.ID)
+			return
+		}
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) before indexing: %s", status, knowledge.ID)
 			if status == types.ParseStatusDeleting {
-				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+				if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 			}
@@ -571,7 +693,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			s.repo.UpdateKnowledge(ctx, knowledge)
 
 			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+			if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 				logger.Errorf(ctx, "Delete chunks failed: %v", err)
 			}
 
@@ -601,10 +723,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// deleting → drop chunks+index we just wrote.
 		// cancelled → keep persisted data; the row stays in cancelled status
 		// and downstream stages skip via the entry guards.
+		if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+			logger.Infof(ctx, "Knowledge source replaced, skipping completion: %s", knowledge.ID)
+			return
+		}
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) after indexing: %s", status, knowledge.ID)
 			if status == types.ParseStatusDeleting {
-				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+				if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
@@ -633,7 +759,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		now,
 	)
 
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
 	}
 
@@ -648,27 +774,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	} else {
 		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
 		// If there are no multimodal tasks, enqueue the post process task immediately
-		lang := types.LanguageFromContextOrDefault(ctx)
-		postProcessPayload := types.KnowledgePostProcessPayload{
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Language:        lang,
-			Attempt:         attemptFromCtx(ctx),
-		}
-		langfuse.InjectTracing(ctx, &postProcessPayload)
-		payloadBytes, err := json.Marshal(postProcessPayload)
-		if err == nil {
-			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
-				knowledgePostProcessTaskOptions()...)
-			if _, err := s.task.Enqueue(task); err != nil {
-				logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
-			} else {
-				logger.Infof(ctx, "Enqueued knowledge post process task for %s", knowledge.ID)
-			}
-		} else {
-			logger.Errorf(ctx, "Failed to marshal knowledge post process payload: %v", err)
-		}
+		s.enqueueKnowledgePostProcessTask(ctx, knowledge)
 	}
 
 	// Update tenant's storage usage
@@ -679,8 +785,73 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	logger.GetLogger(ctx).Infof("processChunks successfully")
 }
 
-// defaultMaxInputChars is the default maximum characters used as input for summary generation.
-const defaultMaxInputChars = 1024 * 24
+// defaultMaxInputChars is the default maximum characters used as input for
+// summary generation. The document profile (short summary, gist, topics,
+// type, one question) is decided by the head of a document; 8k characters
+// keeps the per-document cost a quarter of the previous 24k without changing
+// what the profile can say.
+const defaultMaxInputChars = 1024 * 8
+
+// defaultSummaryMaxTokens bounds the JSON profile reply; every field is short.
+const defaultSummaryMaxTokens = 1024
+
+// documentSummaryResult is what one profiling call yields: the short summary
+// stored in knowledge.Description plus the structured profile, when the model
+// returned parseable JSON.
+type documentSummaryResult struct {
+	Summary string
+	Profile *types.KnowledgeProfile
+}
+
+// documentProfileOutput mirrors the JSON contract of generate_summary.yaml.
+type documentProfileOutput struct {
+	Summary         string   `json:"summary"`
+	Gist            string   `json:"gist"`
+	Topics          []string `json:"topics"`
+	DocType         string   `json:"doc_type"`
+	TypicalQuestion string   `json:"typical_question"`
+}
+
+// parseDocumentSummaryOutput accepts both the structured JSON reply and a
+// legacy plain-text summary (custom templates, older models). Plain text is
+// stored as the summary with no profile, so nothing that worked before
+// regresses; only the knowledge-base aggregation loses that document's topics.
+func parseDocumentSummaryOutput(content string) *documentSummaryResult {
+	content = strings.TrimSpace(content)
+	var out documentProfileOutput
+	if err := common.ParseLLMJsonResponse(content, &out); err != nil {
+		return &documentSummaryResult{Summary: content}
+	}
+	summary := strings.TrimSpace(out.Summary)
+	profile := (&types.KnowledgeProfile{
+		Gist:            out.Gist,
+		Topics:          out.Topics,
+		DocType:         out.DocType,
+		TypicalQuestion: out.TypicalQuestion,
+	}).Normalize()
+	if summary == "" && profile != nil {
+		summary = profile.Gist
+	}
+	if summary == "" {
+		// JSON without usable text: fall back to the raw content so the
+		// caller's empty-output handling still applies.
+		return &documentSummaryResult{Summary: content}
+	}
+	return &documentSummaryResult{Summary: summary, Profile: profile}
+}
+
+// buildSummaryChunkContent is the text embedded for the document-level
+// summary chunk. The gist leads so the vector reflects the headline first.
+func buildSummaryChunkContent(summary string, profile *types.KnowledgeProfile) string {
+	summary = strings.TrimSpace(summary)
+	if profile != nil {
+		gist := strings.TrimSpace(profile.Gist)
+		if gist != "" && !strings.EqualFold(gist, summary) {
+			return "# Summary\n" + gist + "\n\n" + summary
+		}
+	}
+	return "# Summary\n" + summary
+}
 
 // imageDominatedTextThreshold is the rune count below which a document is
 // considered "image-dominated" — i.e. the body text is so sparse that we
@@ -744,6 +915,7 @@ func applyRetryableSummaryFailureState(
 	}
 	fallback := firstTextChunkSummaryFallback(textChunks)
 	knowledge.Description = fallback
+	knowledge.Profile = nil
 	knowledge.SummaryStatus = types.SummaryStatusFailed
 	return fallback
 }
@@ -807,10 +979,10 @@ func sortChunksForSummary(chunks []*types.Chunk) []*types.Chunk {
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
-) (string, error) {
+) (*documentSummaryResult, error) {
 	// Get knowledge info from the first chunk
 	if len(chunks) == 0 {
-		return "", fmt.Errorf("no chunks provided for summary generation")
+		return nil, fmt.Errorf("no chunks provided for summary generation")
 	}
 
 	// Determine max input chars from config
@@ -890,7 +1062,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// hallucinate a scanner manual instead of admitting the document had no
 	// extractable text.
 	if err := checkSufficientSummaryContent(ctx, knowledge.ID, chunkContents); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// User-authored metadata is trusted document context. Internal ingestion
@@ -902,7 +1074,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	contentWithMetadata = sampleLongContent(contentWithMetadata, maxInputChars)
 
 	// Determine max output tokens from config
-	maxTokens := 2048
+	maxTokens := defaultSummaryMaxTokens
 	if s.config.Conversation.Summary != nil && s.config.Conversation.Summary.MaxCompletionTokens > 0 {
 		maxTokens = s.config.Conversation.Summary.MaxCompletionTokens
 	}
@@ -929,15 +1101,17 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	})
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
-		return "", err
+		return nil, err
 	}
 	content, err := validateSummaryOutput(summary)
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned no usable content")
-		return "", err
+		return nil, err
 	}
-	logger.GetLogger(ctx).WithField("summary", content).Infof("GetSummary success")
-	return content, nil
+	result := parseDocumentSummaryOutput(content)
+	logger.GetLogger(ctx).WithField("summary", result.Summary).
+		WithField("has_profile", result.Profile != nil).Infof("GetSummary success")
+	return result, nil
 }
 
 // sampleLongContent returns content that fits within maxChars.
@@ -1039,6 +1213,9 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		})
 	var summaryErr error
 	summaryOut := types.JSONMap{}
+	// profileKB is the knowledge base once loaded; the deferred handler uses
+	// it to schedule the knowledge-base description refresh on terminal exit.
+	var profileKB *types.KnowledgeBase
 	defer func() {
 		// Decrement the parent's enrichment counter on terminal exit.
 		// "Terminal" is keyed on the value RETURNED to asynq, not on
@@ -1051,6 +1228,13 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// we only drain on the final attempt.
 		finalizeSubtaskDetached(ctx, s.repo, payload.KnowledgeID, "summary",
 			retErr, false, isFinalAsynqAttempt(ctx))
+		// Every terminal exit changes what the knowledge-base aggregation
+		// sees (a new profile, a cleared one, or a document that will never
+		// get one), so the debounced refresh is requested regardless of
+		// outcome. It is a no-op unless the KB opted in.
+		if retErr == nil && profileKB != nil {
+			_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, profileKB, false)
+		}
 		if span == nil {
 			return
 		}
@@ -1073,6 +1257,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// seeing WHICH chat model was actually used (kb config drift, fall-
 	// throughs to a slow upstream, etc.).
 	summaryOut["model_id"] = kb.SummaryModelID
+	profileKB = kb
 
 	if kb.SummaryModelID == "" {
 		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
@@ -1136,6 +1321,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if len(textChunks) == 0 {
 		logger.Infof(ctx, "No text chunks found for knowledge: %s", payload.KnowledgeID)
 		knowledge.Description = ""
+		knowledge.Profile = nil
 		knowledge.SummaryStatus = types.SummaryStatusFailed
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
@@ -1206,7 +1392,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 
 	// Generate summary
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summaryResult, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -1222,6 +1408,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// and surfacing it in the description is misleading.
 		if errors.Is(err, errInsufficientSummaryContent) {
 			knowledge.Description = ""
+			knowledge.Profile = nil
 			knowledge.SummaryStatus = types.SummaryStatusFailed
 			knowledge.UpdatedAt = time.Now()
 			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
@@ -1252,11 +1439,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return nil
 	}
 
-	// Update knowledge description
+	// Update knowledge description and structured profile
+	summary := summaryResult.Summary
 	knowledge.Description = summary
+	knowledge.Profile = summaryResult.Profile
 	knowledge.SummaryStatus = types.SummaryStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	summaryOut["summary_chars"] = len([]rune(summary))
+	summaryOut["has_profile"] = summaryResult.Profile != nil
 	// Preview the generated summary on the span output so the trace
 	// viewer can show "this is what the LLM produced" at a glance,
 	// without hopping to the knowledge-detail page. Capped to keep
@@ -1289,7 +1479,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# Summary\n%s", summary),
+			Content:         buildSummaryChunkContent(summary, summaryResult.Profile),
 			ChunkIndex:      maxChunkIndex + 1,
 			IsEnabled:       true,
 			CreatedAt:       time.Now(),
@@ -1301,7 +1491,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		}
 
 		// Save summary chunk
-		if err := s.chunkService.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
+		if err := s.chunkRepo.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
 			logger.Errorf(ctx, "Failed to create summary chunk: %v", err)
 			summaryErr = err
 			return fmt.Errorf("failed to create summary chunk: %w", err)
@@ -1708,7 +1898,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		}
 
 		// Update chunk in database
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+		if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
 			chunkUpdateFailed++
 			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
 			continue
@@ -2041,7 +2231,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
 			continue
 		}
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+		if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
 			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
 			continue
 		}
@@ -2162,13 +2352,12 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 		return nil, fmt.Errorf("questions can only be generated for text chunks")
 	}
 	generationRevision := chunk.ContentRevision
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
+	knowledge, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, chunk.KnowledgeID)
 	if err != nil {
 		return nil, err
 	}
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
-	if err != nil {
-		return nil, err
+	if knowledge.KnowledgeBaseID != chunk.KnowledgeBaseID || chunk.TenantID != knowledge.TenantID {
+		return nil, werrors.NewForbiddenError("chunk does not belong to its knowledge document")
 	}
 	if kb.SummaryModelID == "" {
 		return nil, fmt.Errorf("summary model is required for question generation")
@@ -2182,7 +2371,7 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 			return ""
 		}
 		neighbor, getErr := s.chunkRepo.GetChunkByID(ctx, tenantID, id)
-		if getErr != nil {
+		if getErr != nil || !sameChunkDocument(chunk, neighbor) {
 			return ""
 		}
 		return neighbor.Content
@@ -2263,11 +2452,13 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	}
 	if len(textChunks) == 0 {
 		knowledge.Description = ""
+		knowledge.Profile = nil
 		knowledge.SummaryStatus = types.SummaryStatusFailed
 		knowledge.UpdatedAt = time.Now()
 		if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
 			return knowledge, updateErr
 		}
+		_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, kb, false)
 		return knowledge, errInsufficientSummaryContent
 	}
 	sort.Slice(textChunks, func(i, j int) bool {
@@ -2281,6 +2472,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	handleGenerationFailure := func(generationErr error) (*types.Knowledge, error) {
 		if errors.Is(generationErr, errInsufficientSummaryContent) {
 			knowledge.Description = ""
+			knowledge.Profile = nil
 			knowledge.SummaryStatus = types.SummaryStatusFailed
 			knowledge.UpdatedAt = time.Now()
 			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
@@ -2319,7 +2511,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	if err != nil {
 		return handleGenerationFailure(fmt.Errorf("get chat model: %w", err))
 	}
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summaryResult, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
 		return handleGenerationFailure(err)
 	}
@@ -2333,12 +2525,16 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		logger.Infof(ctx, "Discarding stale summary refresh for knowledge %s", knowledgeID)
 		return nil, ErrSummaryRefreshStale
 	}
+	summary := summaryResult.Summary
 	knowledge.Description = summary
+	knowledge.Profile = summaryResult.Profile
 	knowledge.SummaryStatus = types.SummaryStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		return nil, err
 	}
+	summaryChunkContent := buildSummaryChunkContent(summary, summaryResult.Profile)
+	defer func() { _ = requestKnowledgeBaseProfileRefresh(ctx, s.task, kb, false) }()
 	if kb.NeedsEmbeddingModel() {
 		maxIndex := 0
 		for _, chunk := range allChunks {
@@ -2359,7 +2555,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		}
 		summaryChunks := make([]*types.Chunk, 0, len(existingSummaries))
 		for _, chunk := range existingSummaries {
-			chunk.Content = "# Summary\n" + summary
+			chunk.Content = summaryChunkContent
 			chunk.SourceContent = chunk.Content
 			chunk.IsEnabled = true
 			chunk.UpdatedAt = time.Now()
@@ -2371,7 +2567,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		if len(summaryChunks) == 0 {
 			summaryChunk := &types.Chunk{
 				ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: "# Summary\n" + summary,
+				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: summaryChunkContent,
 				ChunkIndex: maxIndex + 1, IsEnabled: true, ChunkType: types.ChunkTypeSummary,
 				ParentChunkID: textChunks[0].ID, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 			}
@@ -2396,12 +2592,13 @@ func (s *knowledgeService) ReparseKnowledge(
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	existing, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	existing, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
 	}
+
+	tenantID := existing.TenantID
 
 	// Allocate a fresh span tree attempt up front. Doing this BEFORE
 	// the cleanup + enqueue means: (a) the UI immediately sees a new
@@ -2414,13 +2611,6 @@ func (s *knowledgeService) ReparseKnowledge(
 		reparseAttempt = n
 	} else if err != nil {
 		logger.Warnf(ctx, "[Reparse] OpenAttempt failed for %s: %v (will fall back in worker)", existing.ID, err)
-	}
-
-	// Get knowledge base configuration
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get knowledge base for reparse: %v", err)
-		return nil, err
 	}
 
 	// When the caller supplies new overrides (e.g. via the reparse confirm
@@ -2896,6 +3086,11 @@ func (s *knowledgeService) UpdateImageInfo(
 	chunkID string,
 	imageInfo string,
 ) error {
+	knowledge, _, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
+	if err != nil {
+		return err
+	}
+	imageInfo = common.CleanInvalidUTF8(imageInfo)
 	var images []*types.ImageInfo
 	if err := json.Unmarshal([]byte(imageInfo), &images); err != nil {
 		logger.Errorf(ctx, "Failed to unmarshal image info: %v", err)
@@ -2913,6 +3108,11 @@ func (s *knowledgeService) UpdateImageInfo(
 		logger.Errorf(ctx, "Failed to get chunk: %v", err)
 		return err
 	}
+	if chunk == nil || chunk.ID != chunkID || chunk.KnowledgeID != knowledge.ID ||
+		chunk.TenantID != knowledge.TenantID ||
+		chunk.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+		return werrors.NewForbiddenError("chunk does not belong to its knowledge document")
+	}
 	chunk.ImageInfo = imageInfo
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	chunkChildren, err := s.chunkService.ListChunkByParentID(ctx, tenantID, chunkID)
@@ -2922,6 +3122,11 @@ func (s *knowledgeService) UpdateImageInfo(
 			"tenant_id":       tenantID,
 		})
 		return err
+	}
+	for _, child := range chunkChildren {
+		if !sameChunkDocument(chunk, child) {
+			return werrors.NewForbiddenError("image child does not belong to its document")
+		}
 	}
 	logger.Infof(ctx, "Found %d chunks with parent chunk ID: %s", len(chunkChildren), chunkID)
 
@@ -3010,7 +3215,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	logger.Infof(ctx, "Updated %d chunks out of %d total chunks", len(updateChunk), len(chunkChildren)+1)
 
 	if len(addChunk) > 0 {
-		err := s.chunkService.CreateChunks(ctx, addChunk)
+		err := s.chunkRepo.CreateChunks(ctx, addChunk)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"add_chunk_size": len(addChunk),
@@ -3021,7 +3226,7 @@ func (s *knowledgeService) UpdateImageInfo(
 
 	// Update the chunks
 	for _, c := range updateChunk {
-		err := s.chunkService.UpdateChunk(ctx, c)
+		err := s.chunkRepo.UpdateChunk(ctx, c)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"chunk_id":     c.ID,
@@ -3042,7 +3247,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	}
 
 	// Update the knowledge file hash
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	knowledge, err = s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge: %v", err)
 		return err
@@ -3069,7 +3274,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 
 	ctx = logger.WithRequestID(ctx, payload.RequestId)
 	ctx = logger.WithField(ctx, "manual_process", payload.KnowledgeID)
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -3086,6 +3291,13 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	if knowledge == nil {
 		logger.Warnf(ctx, "ProcessManualUpdate: knowledge not found: %s", payload.KnowledgeID)
 		return nil
+	}
+
+	if err := validateProcessingKnowledge(knowledge,
+		payload.TenantID,
+		payload.KnowledgeBaseID,
+		payload.KnowledgeID); err != nil {
+		return err
 	}
 
 	// Skip if already completed or being deleted
@@ -3110,6 +3322,13 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		return nil
+	}
+	if kb == nil || kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
+		return fmt.Errorf("processing task KB owner changed: %w", asynq.SkipRetry)
+	}
+	ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		return fmt.Errorf("invalid processing scope: %v: %w", err, asynq.SkipRetry)
 	}
 
 	// Re-check abort status right before marking processing — see the same
@@ -3166,7 +3385,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	ctx = logger.WithRequestID(ctx, payload.RequestId)
 	ctx = logger.WithField(ctx, "document_process", payload.KnowledgeID)
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
@@ -3195,6 +3414,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	if knowledge == nil {
 		return nil
+	}
+
+	if err := validateProcessingKnowledge(knowledge,
+		payload.TenantID,
+		payload.KnowledgeBaseID,
+		payload.KnowledgeID); err != nil {
+		return err
 	}
 
 	// 检查是否正在删除 / 已被用户取消 - 如果是则直接退出
@@ -3242,6 +3468,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		return nil
 	}
+	if kb == nil || kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
+		return fmt.Errorf("processing task KB owner changed: %w", asynq.SkipRetry)
+	}
+	ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		return fmt.Errorf("invalid processing scope: %v: %w", err, asynq.SkipRetry)
+	}
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
@@ -3254,9 +3487,21 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Knowledge aborted (%s) before marking processing: %s", status, knowledge.ID)
 		return nil
 	}
+	if payload.FilePath != "" && knowledge.FilePath != "" && payload.FilePath != knowledge.FilePath {
+		logger.Infof(ctx, "Document source replaced, skipping stale process task: %s", payload.KnowledgeID)
+		return nil
+	}
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Document source replaced, skipping stale process task: %s", payload.KnowledgeID)
+		return nil
+	}
 	markKnowledgeProcessing(knowledge, time.Now())
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "failed to update knowledge status to processing: %v", err)
+		return nil
+	}
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Document source replaced, aborting after status update: %s", payload.KnowledgeID)
 		return nil
 	}
 
@@ -3483,6 +3728,22 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		convertResult.AudioData = nil
 	}
 
+	// Normalize inline HTML tables from any parser engine (MinerU, builtin,
+	// markitdown, paddleocr-vl, ...) into GFM, or row-newline-separated HTML
+	// for merged / non-GFM tables, so the chunker can split them.
+	// Runs before image resolution so <img> inside HTML tables becomes
+	// markdown the resolver can persist, instead of rewriting data-URI
+	// <img> tags to `![...](...)` and then escaping them in a later
+	// HTML→GFM pass. Line endings are normalized first so injected row
+	// breaks are plain LF.
+	sanitizeReadResult(convertResult)
+	if convertResult != nil {
+		convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
+		if convertResult.MarkdownContent != "" {
+			convertResult.MarkdownContent = docparser.NormalizeHTMLTables(convertResult.MarkdownContent)
+		}
+	}
+
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
 
@@ -3513,10 +3774,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
-	// Step 3: Split into chunks using Go chunker. Browser textareas normalize
-	// pasted content to LF, so normalize uploaded source text before calculating
-	// chunk boundaries as well.
-	convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
+	// Step 3: Split into chunks using Go chunker. Line endings and inline
+	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	processOpts := ProcessChunksOptions{
@@ -3570,6 +3829,28 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 
 	return nil
+}
+
+// sanitizeReadResult protects every text field that can cross from a parser
+// into the embedding, storage, or tracing layers. A parser may return a Go
+// string containing arbitrary bytes even though the string type itself does
+// not enforce UTF-8 validity.
+func sanitizeReadResult(result *types.ReadResult) {
+	if result == nil {
+		return
+	}
+	result.MarkdownContent = common.CleanInvalidUTF8(result.MarkdownContent)
+	result.ImageDirPath = common.CleanInvalidUTF8(result.ImageDirPath)
+	result.Error = common.CleanInvalidUTF8(result.Error)
+	for key, value := range result.Metadata {
+		result.Metadata[key] = common.CleanInvalidUTF8(value)
+	}
+	for i := range result.ImageRefs {
+		result.ImageRefs[i].Filename = common.CleanInvalidUTF8(result.ImageRefs[i].Filename)
+		result.ImageRefs[i].OriginalRef = common.CleanInvalidUTF8(result.ImageRefs[i].OriginalRef)
+		result.ImageRefs[i].MimeType = common.CleanInvalidUTF8(result.ImageRefs[i].MimeType)
+		result.ImageRefs[i].StorageKey = common.CleanInvalidUTF8(result.ImageRefs[i].StorageKey)
+	}
 }
 
 // convert handles both file and URL reading using a unified ReadRequest.
@@ -3689,13 +3970,16 @@ func (s *knowledgeService) convert(
 			code, "document read failed", err)
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
 	}
+	sanitizeReadResult(result)
 	if result.Error != "" {
 		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
 			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+			logger.Errorf(ctx, "failed to persist parser error for %s: %v", knowledge.ID, err)
+		}
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
@@ -3794,11 +4078,17 @@ func (s *knowledgeService) failKnowledge(
 	args ...interface{},
 ) (*types.ReadResult, error) {
 	errMsg := fmt.Sprintf(format, args...)
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Skip failing knowledge %s: source file was replaced", knowledge.ID)
+		return nil, nil
+	}
 	if isLastRetry {
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = errMsg
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+			logger.Errorf(ctx, "failed to persist knowledge failure for %s: %v", knowledge.ID, err)
+		}
 	}
 	return nil, fmt.Errorf(format, args...)
 }
@@ -3817,13 +4107,23 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	}
 
 	attempt := attemptFromCtx(ctx)
-	redisKey := fmt.Sprintf("multimodal:pending:%s", knowledge.ID)
+	lang := types.LanguageFromContextOrDefault(ctx)
+	redisKey := multimodalPendingKey(knowledge.ID)
+	// The counter has to be seeded BEFORE the first task is enqueued: an image
+	// task that finishes early would otherwise decrement a key we are about to
+	// overwrite, and its slot would be counted twice. The cost of seeding
+	// first is that a slot whose task never reaches the queue has no owner to
+	// drain it — releaseUnownedMultimodalSlots settles that after the fan-out.
+	counterSeeded := false
 	if s.redisClient != nil {
 		if err := s.redisClient.Set(ctx, redisKey, len(images), 24*time.Hour).Err(); err != nil {
 			logger.Warnf(ctx, "Failed to set multimodal pending count for %s: %v", knowledge.ID, err)
+		} else {
+			counterSeeded = true
 		}
 	}
 
+	enqueued := 0
 	for idx, img := range images {
 		// Match image to the ParsedChunk whose content contains the image URL.
 		// ChunkID was populated by processChunks with the real DB UUID.
@@ -3838,7 +4138,6 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			chunkID = chunks[0].ChunkID
 		}
 
-		lang := types.LanguageFromContextOrDefault(ctx)
 		payload := types.ImageMultimodalPayload{
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
@@ -3864,10 +4163,171 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			asynq.Queue(types.QueueMultimodal), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 		if _, err := s.task.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
-		} else {
-			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
+			continue
+		}
+		enqueued++
+		logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
+	}
+
+	s.releaseUnownedMultimodalSlots(
+		ctx, knowledge, redisKey, counterSeeded, len(images), enqueued,
+	)
+}
+
+// releaseUnownedMultimodalSlots settles the multimodal fan-in counter against
+// what actually reached the queue.
+//
+// Every enqueued image task drains exactly one slot when it exits terminally,
+// and the knowledge only leaves "processing" once the counter reaches zero. A
+// slot whose task was never enqueued (payload marshal failure, asynq refusing
+// the write) has no owner, so without this release the counter stalls above
+// zero, post-process is never triggered, and the row sits in "processing"
+// until the housekeeping sweep fails it an hour later — which reaches the user
+// as an unexplained parse failure. This mirrors the shortfall release
+// KnowledgePostProcess already performs for its own enrichment subtasks.
+func (s *knowledgeService) releaseUnownedMultimodalSlots(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	redisKey string,
+	counterSeeded bool,
+	planned, enqueued int,
+) {
+	if enqueued == 0 {
+		// No task exists to finalize this knowledge, whatever the counter
+		// says. Drive post-process directly so the row completes on the
+		// chunks that were already indexed instead of waiting to be swept.
+		logger.Warnf(ctx,
+			"[ImageMultimodal] No image task enqueued for %s (planned=%d); enqueueing post-process directly",
+			knowledge.ID, planned)
+		if counterSeeded {
+			// Detached like the shortfall path below: a cancelled parent
+			// context would otherwise leave the seeded key to expire on its
+			// own 24h TTL.
+			dctx, cancel := context.WithTimeout(
+				context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+			s.redisClient.Del(dctx, redisKey)
+			cancel()
+		}
+		s.enqueueKnowledgePostProcessTask(ctx, knowledge)
+		return
+	}
+
+	shortfall := planned - enqueued
+	if shortfall <= 0 {
+		return
+	}
+	if !counterSeeded {
+		// Seeding failed, so the key is absent and the first image to finish
+		// already drives post-process through the missing-key fallback in
+		// checkAndFinalizeAllImages. Decrementing here would only create the
+		// key below zero and finalize before the siblings are done.
+		return
+	}
+
+	logger.Warnf(ctx,
+		"[ImageMultimodal] Releasing %d un-enqueued image slot(s) for %s (planned=%d enqueued=%d)",
+		shortfall, knowledge.ID, planned, enqueued)
+	// Detached ctx, for the same reason KnowledgePostProcess detaches its own
+	// releases: these slots have no other path to drain, so a parent context
+	// cancelled mid-fan-out (graceful shutdown) must not skip the release.
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+	defer cancel()
+	pending, err := s.decrMultimodalSlots(rctx, redisKey, int64(shortfall))
+	if err != nil {
+		// Giving up here puts the row back in the state this whole fix exists
+		// to remove: a counter no task can drain, recovered only by the
+		// housekeeping sweep an hour later. Say so at error level so it is
+		// greppable, rather than hiding it in a warning.
+		logger.Errorf(ctx,
+			"Failed to release %d multimodal slot(s) for %s after %d attempts: %v; "+
+				"row will be left to the housekeeping sweep",
+			shortfall, knowledge.ID, multimodalSlotReleaseAttempts, err)
+		return
+	}
+	if pending <= 0 {
+		// Every enqueued sibling had already finished, so the release owns the
+		// finalize. Ordering is safe either way: the slots we just drained have
+		// no task behind them, so exactly one path reaches zero.
+		s.redisClient.Del(rctx, redisKey)
+		s.enqueueKnowledgePostProcessTask(ctx, knowledge)
+	}
+}
+
+// multimodalSlotReleaseAttempts bounds the retry on the release decrement.
+//
+// The release is the only thing that can ever drain an un-owned slot, so a
+// single transient Redis error must not be the end of it — that would strand
+// the row exactly as it did before this fix. Attempts stay small because they
+// share the detached context's budget, and the housekeeping sweep is still the
+// backstop when Redis is genuinely down.
+//
+// DECRBY is not idempotent, so a retry after a lost reply can over-decrement.
+// That is the safe direction to fail in: an over-decrement finalizes early
+// (post-process may miss some OCR / caption chunks, and repeat deliveries are
+// already handled by its non-processing-status branch), whereas not retrying
+// strands the document in "processing" for an hour.
+const multimodalSlotReleaseAttempts = 3
+
+// multimodalSlotReleaseBackoff is the unit of linear backoff between release
+// attempts, small enough that all attempts fit the detached 10s budget.
+const multimodalSlotReleaseBackoff = 100 * time.Millisecond
+
+// decrMultimodalSlots decrements the fan-in counter by `by`, retrying transient
+// Redis failures, and returns the resulting count.
+func (s *knowledgeService) decrMultimodalSlots(
+	ctx context.Context, redisKey string, by int64,
+) (int64, error) {
+	var lastErr error
+	for attempt := 1; attempt <= multimodalSlotReleaseAttempts; attempt++ {
+		pending, err := s.redisClient.DecrBy(ctx, redisKey, by).Result()
+		if err == nil {
+			return pending, nil
+		}
+		lastErr = err
+		if attempt == multimodalSlotReleaseAttempts {
+			break
+		}
+		logger.Warnf(ctx, "multimodal slot release attempt %d/%d failed for %s: %v",
+			attempt, multimodalSlotReleaseAttempts, redisKey, err)
+		select {
+		case <-time.After(time.Duration(attempt) * multimodalSlotReleaseBackoff):
+		case <-ctx.Done():
+			return 0, ctx.Err()
 		}
 	}
+	return 0, lastErr
+}
+
+// enqueueKnowledgePostProcessTask hands a knowledge to the post-process
+// orchestrator, which owns the enrichment fan-out and the promotion out of
+// "processing". Shared by the no-multimodal path and by the multimodal slot
+// release, so both build the same payload (attempt, language, tracing).
+func (s *knowledgeService) enqueueKnowledgePostProcessTask(
+	ctx context.Context, knowledge *types.Knowledge,
+) {
+	if s.task == nil {
+		return
+	}
+	payload := types.KnowledgePostProcessPayload{
+		TenantID:        knowledge.TenantID,
+		KnowledgeID:     knowledge.ID,
+		KnowledgeBaseID: knowledge.KnowledgeBaseID,
+		Language:        types.LanguageFromContextOrDefault(ctx),
+		Attempt:         attemptFromCtx(ctx),
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal knowledge post process payload: %v", err)
+		return
+	}
+	task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
+		knowledgePostProcessTaskOptions()...)
+	if _, err := s.task.Enqueue(task); err != nil {
+		logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
+		return
+	}
+	logger.Infof(ctx, "Enqueued knowledge post process task for %s", knowledge.ID)
 }
 
 // ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.
@@ -3883,6 +4343,11 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 
 	logger.Infof(ctx, "Processing knowledge list reparse task for %d knowledge items", len(payload.KnowledgeIDs))
 
+	ctx, ids, err := s.reparseTaskScope(ctx, payload)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
@@ -3892,7 +4357,7 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
-	outcome, err := runKnowledgeListReparseSubmissions(payload.KnowledgeIDs, func(id string) error {
+	outcome, err := runKnowledgeListReparseSubmissions(ids, func(id string) error {
 		_, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig)
 		return err
 	})

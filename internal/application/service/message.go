@@ -125,7 +125,7 @@ func (s *messageService) GetMessage(ctx context.Context, sessionID string, messa
 	}
 
 	logger.Info(ctx, "Message retrieved successfully")
-	return message, nil
+	return s.clarifyReadArtifactVersions(ctx, sessionID, []*types.Message{message})[0], nil
 }
 
 // GetMessagesBySession retrieves paginated messages for a specific session
@@ -155,7 +155,7 @@ func (s *messageService) GetMessagesBySession(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d messages successfully", len(messages))
-	return messages, nil
+	return s.clarifyReadArtifactVersions(ctx, sessionID, messages), nil
 }
 
 // GetRecentMessagesBySession retrieves the most recent messages from a session
@@ -188,7 +188,7 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d recent messages successfully", len(messages))
-	return messages, nil
+	return s.clarifyReadArtifactVersions(ctx, sessionID, messages), nil
 }
 
 // GetMessagesBySessionBeforeTime retrieves messages sent before a specific time
@@ -222,7 +222,7 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d messages before time successfully", len(messages))
-	return messages, nil
+	return s.clarifyReadArtifactVersions(ctx, sessionID, messages), nil
 }
 
 // UpdateMessage updates an existing message's content or metadata
@@ -384,6 +384,12 @@ func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string,
 
 	cfg := s.getChatHistoryConfig(ctx)
 	if cfg == nil {
+		// Say why, otherwise an operator who enabled indexing in the UI sees
+		// "indexed messages: 0" with nothing in the logs to explain it: the
+		// stats endpoint only checks Enabled, while indexing additionally
+		// requires an embedding model and an auto-created KB.
+		logger.Infof(ctx, "Skipping message index for message %s: %s",
+			messageID, describeChatHistorySkip(ctx))
 		return
 	}
 
@@ -410,13 +416,37 @@ func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string,
 	logger.Infof(ctx, "Message indexed to chat history KB: knowledge_id=%s, message_id=%s", knowledge.ID, messageID)
 }
 
+// describeChatHistorySkip reports which chat-history precondition is missing,
+// for the log line emitted when indexing is skipped. ChatHistoryConfig.
+// IsConfigured requires Enabled plus a selected embedding model plus an
+// auto-created KB, so "enabled" alone is not enough to index.
+func describeChatHistorySkip(ctx context.Context) string {
+	tenant, ok := types.TenantInfoFromContext(ctx)
+	if !ok {
+		return "no tenant in context"
+	}
+	cfg := tenant.ChatHistoryConfig
+	switch {
+	case cfg == nil:
+		return "chat history config not set"
+	case !cfg.Enabled:
+		return "chat history indexing disabled"
+	case cfg.EmbeddingModelID == "":
+		return "enabled but no embedding model selected"
+	case cfg.KnowledgeBaseID == "":
+		return "enabled but chat history knowledge base not created yet"
+	default:
+		return "chat history config incomplete"
+	}
+}
+
 // DeleteMessageKnowledge deletes the Knowledge entry associated with a message from the chat history KB.
 func (s *messageService) DeleteMessageKnowledge(ctx context.Context, knowledgeID string) {
 	if knowledgeID == "" {
 		return
 	}
 	logger.Infof(ctx, "Deleting chat history knowledge entry: %s", knowledgeID)
-	if err := s.knowService.DeleteKnowledge(ctx, knowledgeID); err != nil {
+	if err := deleteReferencedKnowledge(ctx, s.knowService, "", []string{knowledgeID}); err != nil {
 		logger.Warnf(ctx, "Failed to delete chat history knowledge %s: %v", knowledgeID, err)
 	}
 }
@@ -436,7 +466,7 @@ func (s *messageService) DeleteSessionKnowledge(ctx context.Context, sessionID s
 	}
 
 	logger.Infof(ctx, "Deleting %d chat history knowledge entries for session %s", len(knowledgeIDs), sessionID)
-	if err := s.knowService.DeleteKnowledgeList(ctx, knowledgeIDs); err != nil {
+	if err := deleteReferencedKnowledge(ctx, s.knowService, "", knowledgeIDs); err != nil {
 		logger.Warnf(ctx, "Failed to batch delete chat history knowledge for session %s: %v", sessionID, err)
 	}
 }
@@ -492,6 +522,64 @@ func (s *messageService) GetSessionArtifacts(
 	return s.messageRepo.GetSessionArtifacts(ctx, sessionID)
 }
 
+// artifactLibraryMaxPageSize caps one library page; the page renders a card
+// per row, so larger pages only cost bandwidth.
+const artifactLibraryMaxPageSize = 100
+
+// ListArtifactLibrary lists the latest version of every artifact in the
+// sessions the caller can see. Scope follows ListSessions for its default
+// (unfiltered) view: the caller's own sessions plus legacy tenant-level ones.
+func (s *messageService) ListArtifactLibrary(
+	ctx context.Context, query *types.ArtifactLibraryQuery,
+) (*types.PageResult, error) {
+	if query == nil {
+		query = &types.ArtifactLibraryQuery{}
+	}
+	query.TenantID = types.MustTenantIDFromContext(ctx)
+	query.UserID = types.SessionOwnerIDFromContext(ctx)
+	pagination := &types.Pagination{Page: query.Page, PageSize: query.PageSize}
+	query.Page = pagination.GetPage()
+	query.PageSize = min(pagination.GetPageSize(), artifactLibraryMaxPageSize)
+	pagination.PageSize = query.PageSize
+	query.FileTypes = normalizeArtifactFileTypes(query.FileTypes)
+
+	items, total, err := s.messageRepo.ListArtifactLibrary(ctx, query)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": query.TenantID,
+			"user_id":   query.UserID,
+		})
+		return nil, err
+	}
+	for _, item := range items {
+		if handle, ok := types.ParseResourcePath(item.URL); ok {
+			item.Handle = types.BuildResourcePath(handle)
+		}
+	}
+	return types.NewPageResult(total, pagination, items), nil
+}
+
+// normalizeArtifactFileTypes lower-cases extensions and adds the leading dot
+// the collector stores ("pdf" and ".PDF" both become ".pdf").
+func normalizeArtifactFileTypes(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, raw := range in {
+		ext := strings.ToLower(strings.TrimSpace(raw))
+		if ext == "" {
+			continue
+		}
+		if !strings.HasPrefix(ext, ".") {
+			ext = "." + ext
+		}
+		if !seen[ext] {
+			seen[ext] = true
+			out = append(out, ext)
+		}
+	}
+	return out
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Message Search (Hybrid: Keyword + KB Vector Search)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -523,7 +611,7 @@ func (s *messageService) SearchMessages(ctx context.Context, params *types.Messa
 	var vectorResults []*types.MessageSearchResultItem
 	var err error
 
-	// Step 1: Keyword search (direct PG ILIKE)
+	// Step 1: Keyword search (dialect-aware LIKE in the repository)
 	if params.Mode == types.MessageSearchModeKeyword || params.Mode == types.MessageSearchModeHybrid {
 		keywordResults, err = s.messageRepo.SearchMessagesByKeyword(
 			ctx, tenantID, params.OwnerID, params.Query, params.SessionIDs, params.Limit*3)
@@ -825,14 +913,14 @@ func (s *messageService) fetchPartnerMessages(ctx context.Context, items []*type
 	existingIDs := make(map[string]bool)
 	for _, item := range items {
 		existingIDs[item.ID] = true
-		rid := item.RequestID
-		if rid == "" {
+		if item.RequestID == "" || item.SessionID == "" {
 			continue
 		}
-		rs, ok := seen[rid]
+		key := searchPairKey(item.SessionID, item.RequestID)
+		rs, ok := seen[key]
 		if !ok {
 			rs = &roleSet{}
-			seen[rid] = rs
+			seen[key] = rs
 		}
 		if item.Role == "user" {
 			rs.hasUser = true
@@ -841,35 +929,38 @@ func (s *messageService) fetchPartnerMessages(ctx context.Context, items []*type
 		}
 	}
 
-	// Find request_ids that need partner lookup
-	var needFetch []string
-	for rid, rs := range seen {
-		if !rs.hasUser || !rs.hasAssistant {
-			needFetch = append(needFetch, rid)
-		}
-	}
-	if len(needFetch) == 0 {
-		return items
-	}
-
-	// Fetch partner messages
-	partners, err := s.messageRepo.GetMessagesByRequestIDs(ctx, needFetch)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to fetch partner messages: %v", err)
-		return items
-	}
-
-	// Append only messages not already in results
-	for _, p := range partners {
-		if existingIDs[p.ID] {
+	needBySession := make(map[string][]string)
+	for key, rs := range seen {
+		if rs.hasUser && rs.hasAssistant {
 			continue
 		}
-		existingIDs[p.ID] = true
-		items = append(items, &types.MessageSearchResultItem{
-			MessageWithSession: *p,
-			Score:              0, // partner is not directly matched
-			MatchType:          "",
-		})
+		sessionID, rid, ok := strings.Cut(key, "\x00")
+		if !ok || sessionID == "" || rid == "" {
+			continue
+		}
+		needBySession[sessionID] = append(needBySession[sessionID], rid)
+	}
+	if len(needBySession) == 0 {
+		return items
+	}
+
+	for sessionID, rids := range needBySession {
+		partners, err := s.messageRepo.GetMessagesByRequestIDs(ctx, sessionID, rids)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to fetch partner messages: %v", err)
+			return items
+		}
+		for _, p := range partners {
+			if existingIDs[p.ID] {
+				continue
+			}
+			existingIDs[p.ID] = true
+			items = append(items, &types.MessageSearchResultItem{
+				MessageWithSession: *p,
+				Score:              0, // partner is not directly matched
+				MatchType:          "",
+			})
+		}
 	}
 
 	return items
@@ -886,10 +977,9 @@ func groupByRequestID(items []*types.MessageSearchResultItem) []*types.MessageSe
 	nextOrder := 0
 
 	for _, item := range items {
-		key := item.RequestID
-		if key == "" {
-			// No request_id — treat as standalone
-			key = item.ID
+		key := item.ID
+		if item.RequestID != "" {
+			key = searchPairKey(item.SessionID, item.RequestID)
 		}
 
 		g, exists := groups[key]
@@ -945,4 +1035,8 @@ func groupByRequestID(items []*types.MessageSearchResultItem) []*types.MessageSe
 	}
 
 	return result
+}
+
+func searchPairKey(sessionID, requestID string) string {
+	return sessionID + "\x00" + requestID
 }

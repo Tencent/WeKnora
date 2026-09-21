@@ -367,26 +367,14 @@ onMounted(async () => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .ollama-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 32px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .settings-group {
@@ -396,42 +384,17 @@ onMounted(async () => {
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
+  .setting-row();
 }
 
 .setting-info {
-  flex: 1;
-  padding-right: 32px;
-
-  label {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    display: block;
-    margin-bottom: 4px;
-  }
-
-  .desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
+  .setting-info();
 }
 
 .setting-control {
-  flex-shrink: 0;
+  .setting-control();
   min-width: 360px;
   max-width: 360px;
-  display: flex;
   flex-direction: column;
   align-items: flex-end;
 }
@@ -442,7 +405,7 @@ onMounted(async () => {
   gap: 12px;
 
   .status-icon.spinning {
-    animation: spin 1s linear infinite;
+    animation: wk-spin 1s linear infinite;
   }
 }
 
@@ -486,7 +449,7 @@ onMounted(async () => {
     }
 
     p {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-placeholder);
       margin: 0;
       line-height: 1.5;
@@ -502,7 +465,7 @@ onMounted(async () => {
   gap: 8px;
   padding: 48px 0;
   color: var(--td-text-color-placeholder);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .model-list-container {
@@ -521,9 +484,9 @@ onMounted(async () => {
   justify-content: space-between;
   padding: 10px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
-  transition: all 0.2s;
+  transition: all var(--app-motion-base);
 
   &:hover {
     border-color: var(--td-brand-color);
@@ -536,7 +499,7 @@ onMounted(async () => {
   min-width: 0;
 
   .model-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     margin-bottom: 4px;
@@ -546,7 +509,7 @@ onMounted(async () => {
   .model-meta {
     display: flex;
     gap: 12px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 }
@@ -570,14 +533,14 @@ onMounted(async () => {
   .download-progress {
     padding: 16px;
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     border: 1px solid var(--td-component-stroke);
 
     .progress-info {
       display: flex;
       justify-content: space-between;
       margin-bottom: 10px;
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-primary);
       font-weight: 500;
     }
@@ -589,18 +552,10 @@ onMounted(async () => {
   text-align: center;
 
   .empty-text {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin: 0;
   }
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
 </style>

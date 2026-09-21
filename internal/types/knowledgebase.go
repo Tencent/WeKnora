@@ -109,6 +109,13 @@ type KnowledgeBase struct {
 	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
 	// AutoTagConfig controls asynchronous association of existing tags after parsing.
 	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config" gorm:"type:json"`
+	// ProfileConfig controls automatic generation of the knowledge-base
+	// description from per-document profiles (document knowledge bases only).
+	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config" gorm:"column:profile_config;type:json"` //nolint:lll // one-line struct tag
+	// GeneratedProfile is the machine-generated description: a gist, merged
+	// topics, typical questions and the aggregate snapshot they came from. It
+	// never overwrites the user-authored Description; both are shown to agents.
+	GeneratedProfile *KnowledgeBaseProfile `yaml:"generated_profile" json:"generated_profile,omitempty" gorm:"column:generated_profile;type:json"` //nolint:lll // one-line struct tag
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
@@ -160,6 +167,9 @@ type KnowledgeBaseConfig struct {
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"`
 	// AutoTagConfig controls optional automatic association of existing KB tags.
 	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config"`
+	// ProfileConfig controls optional automatic knowledge-base description
+	// generation. nil means "no change" when updating.
+	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config"`
 	// IndexingStrategy controls which indexing pipelines are active.
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
@@ -249,7 +259,10 @@ type ChunkingConfig struct {
 	// Separators
 	Separators []string `yaml:"separators"    json:"separators"`
 	// ParserEngineRules configures which parser engine to use for each file type.
-	// When empty, the builtin engine is used for all types.
+	// When empty, DefaultParserEngine is used (builtin/simple routing, except
+	// types that only a specific engine can parse: ppt/pptx fall back to
+	// markitdown). A linked anydoc binding is preferred for every type it
+	// converts.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
@@ -278,14 +291,49 @@ type ChunkingConfig struct {
 	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
 }
 
+// defaultParserEngineByType maps file types the builtin/simple engines cannot
+// parse to a docreader engine that can. Types omitted here keep empty-string
+// routing (Go simple formats, otherwise docreader builtin) unless
+// SetPreferParserEngine selects a linked in-process engine such as anydoc.
+var defaultParserEngineByType = map[string]string{
+	"ppt":  "markitdown",
+	"pptx": "markitdown",
+}
+
+// preferParserEngine, if set, may override DefaultParserEngine. The
+// docparser package registers anydoc here so types does not import the
+// engine catalog.
+var preferParserEngine func(fileType string) string
+
+// SetPreferParserEngine registers a build-time preference used by
+// DefaultParserEngine. Pass nil to clear. Intended to be called from init().
+func SetPreferParserEngine(fn func(fileType string) string) {
+	preferParserEngine = fn
+}
+
+// DefaultParserEngine returns the engine used when no parser_engine_rules
+// match. Empty string means builtin (docreader) or Go simple-format routing.
+// When the anydoc binding is linked it is preferred for every type it
+// converts (except Go simple formats). ppt/pptx otherwise fall back to
+// markitdown.
+func DefaultParserEngine(fileType string) string {
+	ft := normalizeParserFileType(fileType)
+	if preferParserEngine != nil {
+		if engine := preferParserEngine(ft); engine != "" {
+			return engine
+		}
+	}
+	return defaultParserEngineByType[ft]
+}
+
 // ResolveParserEngine returns the engine name for the given file type
-// based on the configured rules. Returns empty string (builtin) when
-// no rule matches.
+// based on the configured rules. When no rule matches it returns the
+// type-level default (see DefaultParserEngine).
 func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 	if rule := c.ResolveParserEngineRule(fileType); rule != nil {
 		return rule.Engine
 	}
-	return ""
+	return DefaultParserEngine(fileType)
 }
 
 // ResolveParserEngineRule returns the parser rule for a file type.
@@ -699,6 +747,7 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	}
 	if kb.Type != KnowledgeBaseTypeDocument {
 		kb.AutoTagConfig = nil
+		kb.ProfileConfig = nil
 	} else if kb.AutoTagConfig != nil {
 		kb.AutoTagConfig.Normalize()
 	}
@@ -766,14 +815,25 @@ func (kb *KnowledgeBase) Capabilities() KBCapabilities {
 
 // MarshalJSON augments the default JSON encoding of KnowledgeBase with a computed
 // `capabilities` field so clients (agent editor) can filter KBs by feature.
-// It preserves all existing fields verbatim.
+//
+// The legacy inline credentials (storage_config secret_id / secret_key and
+// vlm_config api_key) are withheld. Their DB columns are written by
+// StorageConfig.Value / VLMConfig.Value, so persistence is unaffected, while
+// every JSON rendering of a KB is an API or tool response — including the
+// lists shown to org-share receivers, who must never see the owner's keys.
+// Clients only need these fields' presence, which /initialization/config
+// reports separately.
 func (kb *KnowledgeBase) MarshalJSON() ([]byte, error) {
 	type alias KnowledgeBase
+	redacted := *kb
+	redacted.StorageConfig.SecretID = ""
+	redacted.StorageConfig.SecretKey = ""
+	redacted.VLMConfig.APIKey = ""
 	aux := struct {
 		*alias
 		Capabilities KBCapabilities `json:"capabilities"`
 	}{
-		alias:        (*alias)(kb),
+		alias:        (*alias)(&redacted),
 		Capabilities: kb.Capabilities(),
 	}
 	return json.Marshal(aux)

@@ -63,6 +63,30 @@ func CleanWikiCategoryPath(parts []string) []string {
 	return cleaned
 }
 
+// TrimWikiFolderSegments keeps folder path segments verbatim, dropping only
+// blank entries. Folder names are validated on creation (no separators), and
+// the folder tree is the source of truth for a page's placement, so unlike
+// CleanWikiCategoryPath no page-type filtering, deduplication, or depth cap
+// applies: a user may legitimately name a folder "概念" or "Concepts".
+func TrimWikiFolderSegments(parts []string) []string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// WikiFolderPathSegments splits a materialized folder path ("AI/RAG") into its
+// literal segments. An empty/blank path yields nil (the wiki root).
+func WikiFolderPathSegments(path string) []string {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	return TrimWikiFolderSegments(strings.Split(path, "/"))
+}
+
 // SplitWikiPageTypes parses a page_type value that may carry several
 // comma-separated types (e.g. "entity,concept") into a deduplicated slice,
 // dropping blanks. An empty/whitespace-only input yields nil ("no filter").
@@ -796,17 +820,51 @@ type WikiPageLite struct {
 	OutLinks StringArray `json:"out_links,omitempty"`
 }
 
+// ParseWikiSourceRef splits a source_refs entry into its durable knowledge ID
+// and optional display title. Entries are stored as "uuid" or "uuid|title";
+// both halves are trimmed and a leading "|" yields an empty ID. This is the
+// only parser of the format: every reader must go through it so that a ref
+// with stray whitespace resolves identically on the scope-authorization,
+// deletion, lint, and rendering paths.
+func ParseWikiSourceRef(ref string) (knowledgeID, title string) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", ""
+	}
+	i := strings.IndexByte(ref, '|')
+	if i < 0 {
+		return ref, ""
+	}
+	return strings.TrimSpace(ref[:i]), strings.TrimSpace(ref[i+1:])
+}
+
+// FormatWikiSourceRef builds the stored source_refs entry for a knowledge ID
+// and optional title. A title that contains "|" is kept verbatim: the parser
+// splits on the first pipe only, so the ID half stays unambiguous.
+func FormatWikiSourceRef(knowledgeID, title string) string {
+	knowledgeID = strings.TrimSpace(knowledgeID)
+	title = strings.TrimSpace(title)
+	if knowledgeID == "" {
+		return ""
+	}
+	if title == "" {
+		return knowledgeID
+	}
+	return knowledgeID + "|" + title
+}
+
 // WikiSourceKnowledgeID extracts the knowledge id from a source_refs entry,
 // stored as "uuid" or "uuid|title".
 func WikiSourceKnowledgeID(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if i := strings.IndexByte(ref, '|'); i > 0 {
-		return strings.TrimSpace(ref[:i])
-	}
-	return ref
+	knowledgeID, _ := ParseWikiSourceRef(ref)
+	return knowledgeID
+}
+
+// WikiSourceRefMatchesKnowledge reports whether a source_refs entry points at
+// the given knowledge ID, in either the bare or the "uuid|title" form.
+func WikiSourceRefMatchesKnowledge(ref, knowledgeID string) bool {
+	knowledgeID = strings.TrimSpace(knowledgeID)
+	return knowledgeID != "" && WikiSourceKnowledgeID(ref) == knowledgeID
 }
 
 // SourceKnowledgeIDs returns the document ids this page was built from.

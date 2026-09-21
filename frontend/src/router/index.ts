@@ -6,6 +6,7 @@ import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
+import { normalizeSettingsSection } from '@/config/settingsRoute'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -133,6 +134,12 @@ const router = createRouter({
           },
         },
         {
+          path: "artifacts",
+          name: "artifactLibrary",
+          component: () => import("../views/artifacts/ArtifactLibrary.vue"),
+          meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'settings.sandbox' }
+        },
+        {
           path: "agents",
           name: "agentList",
           component: () => import("../views/agent/AgentList.vue"),
@@ -140,13 +147,19 @@ const router = createRouter({
         },
         {
           path: "integrations",
-          redirect: (to) => ({
-            path: "/platform/settings",
-            query: {
-              ...to.query,
-              section: "integrations",
-            },
-          }),
+          redirect: (to) => {
+            const tab = typeof to.query.tab === 'string' ? to.query.tab : undefined
+            const incoming = typeof to.query.section === 'string' ? to.query.section : 'integrations'
+            const rest = { ...to.query }
+            delete rest.tab
+            return {
+              path: '/platform/settings',
+              query: {
+                ...rest,
+                section: normalizeSettingsSection(incoming, tab),
+              },
+            }
+          },
           meta: { requiresInit: true, requiresAuth: true }
         },
         {

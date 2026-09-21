@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"html"
+
 	"github.com/Tencent/WeKnora/internal/models/chat"
 )
 
@@ -37,9 +39,10 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 		// Verify tool result messages reference a valid tool call
 		if msg.Role == "tool" && msg.ToolCallID != "" {
 			if !hasMatchingToolCall(messages[:i], msg.ToolCallID) {
-				// Orphaned tool result — convert to system message
-				msg.Role = "system"
-				msg.Content = "[Tool result for " + msg.Name + "]: " + msg.Content
+				// Preserve recoverable data without promoting external output to policy.
+				msg.Role = "user"
+				msg.Content = "<untrusted_tool_result name=\"" + html.EscapeString(msg.Name) +
+					"\">\n" + html.EscapeString(msg.Content) + "\n</untrusted_tool_result>"
 				msg.ToolCallID = ""
 				msg.Name = ""
 			}

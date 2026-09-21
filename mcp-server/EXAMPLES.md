@@ -135,6 +135,21 @@ echo "WEKNORA_API_KEY=your_api_key_here" >> .env
 }
 ```
 
+#### 更新手工知识
+```json
+{
+  "tool": "update_knowledge_from_text",
+  "arguments": {
+    "knowledge_id": "know_789012",
+    "title": "注意力机制摘要（修订版）",
+    "content": "# 注意力机制\n\n这里是修订后的 Markdown 内容...",
+    "status": "publish"
+  }
+}
+```
+
+省略 `title` 或传空字符串会保留原标题；将 `status` 设为 `draft` 可只保存内容而不重新索引。
+
 #### 列出知识
 ```json
 {

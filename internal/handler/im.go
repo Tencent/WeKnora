@@ -81,16 +81,25 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	channel := &im.IMChannel{
-		TenantID:        tenantID,
-		AgentID:         agentID,
-		Platform:        req.Platform,
-		Name:            req.Name,
-		Mode:            req.Mode,
-		OutputMode:      req.OutputMode,
-		SessionMode:     req.SessionMode,
-		KnowledgeBaseID: req.KnowledgeBaseID,
-		Credentials:     req.Credentials,
-		Enabled:         true,
+		TenantID:    tenantID,
+		AgentID:     agentID,
+		Platform:    req.Platform,
+		Name:        req.Name,
+		Mode:        req.Mode,
+		OutputMode:  req.OutputMode,
+		SessionMode: req.SessionMode,
+		Credentials: req.Credentials,
+		Enabled:     true,
+	}
+	// The route guard passes an agent it cannot find in this workspace; both
+	// the agent and the file-saving KB must belong to the channel's workspace.
+	if err := h.imService.SetChannelAgentID(c.Request.Context(), channel, agentID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent not found"})
+		return
+	}
+	if err := h.imService.SetChannelKnowledgeBaseID(c.Request.Context(), channel, req.KnowledgeBaseID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "knowledge base not found"})
+		return
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
@@ -161,7 +170,7 @@ func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
 		return
 	}
 
-	channels, err := h.imService.ListChannelsByTenant(tenantID)
+	channels, err := h.imService.ListChannelsByTenant(c.Request.Context(), tenantID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list channels"})
 		return
@@ -233,7 +242,11 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		channel.SessionMode = *req.SessionMode
 	}
 	if req.KnowledgeBaseID != nil {
-		channel.KnowledgeBaseID = *req.KnowledgeBaseID
+		ctx := c.Request.Context()
+		if err := h.imService.SetChannelKnowledgeBaseID(ctx, channel, *req.KnowledgeBaseID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "knowledge base not found"})
+			return
+		}
 	}
 	if req.Credentials != nil {
 		channel.Credentials = req.Credentials
@@ -389,6 +402,16 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 		}
 		logger.Errorf(ctx, "[IM] Channel unavailable for callback %s: %v", channelID, err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
+		return
+	}
+
+	defaultMode := "websocket"
+	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
+		defaultMode = "webhook"
+	}
+	if im.ResolveMode(channel, defaultMode) != "webhook" ||
+		channel.Platform == "qqbot" || channel.Platform == "wechat" || channel.Platform == "dingtalk" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "HTTP callbacks are disabled for this channel"})
 		return
 	}
 

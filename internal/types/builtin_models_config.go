@@ -134,6 +134,7 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 			continue
 		}
 		m := e.toModel()
+		warnOnUnresolvableParameters(&m)
 
 		// A system-admin edit clears managed_by to claim the row as a runtime
 		// override. Preserve that explicit override on subsequent starts rather
@@ -254,6 +255,26 @@ var validBuiltinModelStatuses = map[ModelStatus]struct{}{
 // Source is intentionally NOT validated against a fixed list because the
 // provider matrix in internal/models/* keeps growing and a too-strict
 // check here would force changes in two places per new provider.
+// ValidateModelParameters is set at startup to catalog.ValidateRow. It is a
+// hook rather than a direct call because internal/models/catalog imports this
+// package, so the dependency can only run in this direction. A nil hook (unit
+// tests, tools that never build the container) simply skips the check.
+var ValidateModelParameters func(modelName string, modelType ModelType, params *ModelParameters) error
+
+// warnOnUnresolvableParameters reports a YAML row whose provider, protocol or
+// compat override the catalog cannot resolve. It only warns: refusing to load
+// the row would take a running deployment's model offline on restart, whereas
+// the request itself still fails loudly at first use with the same message.
+func warnOnUnresolvableParameters(m *Model) {
+	if ValidateModelParameters == nil {
+		return
+	}
+	if err := ValidateModelParameters(m.Name, m.Type, &m.Parameters); err != nil {
+		log.Printf("[builtin-models] WARN: id=%s name=%s has parameters the catalog cannot resolve: %v; "+
+			"the row is loaded but every call will fail until it is corrected", m.ID, m.Name, err)
+	}
+}
+
 func validateBuiltinModelEntry(e *BuiltinModelEntry, index int) error {
 	if e.ID == "" {
 		return errBuiltinModel("entry %d has empty id", index)

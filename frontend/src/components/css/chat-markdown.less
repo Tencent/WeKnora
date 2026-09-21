@@ -1,4 +1,5 @@
 @import './chat-hljs.less';
+@import './artifact-file-icon.less';
 
 // Single source of truth for chat answer Markdown typography and block styles.
 // Used by botmsg, AgentStreamDisplay, embed chat, and the dev Markdown test page.
@@ -10,7 +11,7 @@
 // Tuned against ChatGPT markdown test doc: 16px body, 24px line-height on paragraphs,
 // stepped headings, dotted links, light tables, pill inline code, kbd chips.
 .chat-markdown-typography() {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   color: var(--td-text-color-primary);
   line-height: 1.625;
   letter-spacing: normal;
@@ -115,7 +116,7 @@
   :deep(code):not(pre code) {
     background: color-mix(in srgb, var(--td-text-color-primary) 8%, transparent);
     padding: 0.15em 0.3em;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     font-family: var(--app-font-family-mono);
     font-size: 0.875em;
     font-weight: 500;
@@ -125,11 +126,11 @@
     background: var(--td-bg-color-secondarycontainer);
     padding: 14px 16px;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     overflow-x: auto;
     margin: 0.75em 0;
     line-height: 1.55;
-    font-size: 13px;
+    font-size: var(--app-text-md);
 
     code {
       background: none;
@@ -142,7 +143,7 @@
   :deep(.chat-code-block) {
     margin: 0.75em 0;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     overflow: hidden;
     background: var(--td-bg-color-container);
     box-shadow: 0 1px 2px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
@@ -160,7 +161,7 @@
   }
 
   :deep(.chat-code-block__lang) {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 600;
     line-height: 1.2;
     color: var(--td-text-color-secondary);
@@ -175,14 +176,14 @@
     margin: 0;
     padding: 4px 8px;
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: transparent;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     line-height: 1;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
 
     &:hover {
       background: color-mix(in srgb, var(--td-text-color-primary) 6%, var(--td-bg-color-secondarycontainer));
@@ -209,7 +210,7 @@
     border-radius: 0;
     background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 88%, var(--td-bg-color-container));
     overflow-x: auto;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
 
     code {
@@ -226,7 +227,7 @@
   :deep(.chat-mermaid-block) {
     margin: 0.75em 0;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     overflow: hidden;
     background: var(--td-bg-color-container);
     box-shadow: 0 1px 3px color-mix(in srgb, var(--td-text-color-primary) 5%, transparent);
@@ -247,7 +248,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -263,11 +264,11 @@
     margin: 0;
     padding: 0;
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: transparent;
     color: var(--td-text-color-secondary);
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
 
     &:hover:not(:disabled) {
       background: color-mix(in srgb, var(--td-text-color-primary) 6%, var(--td-bg-color-secondarycontainer));
@@ -329,7 +330,7 @@
     margin: 0.75em 0;
     padding: 20px 16px;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     background: var(--td-bg-color-secondarycontainer);
     overflow-x: auto;
     text-align: center;
@@ -515,7 +516,7 @@
     margin: 0.875em 0 1em;
     overflow-x: auto;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-container);
     -webkit-overflow-scrolling: touch;
   }
@@ -525,7 +526,7 @@
     border-collapse: separate;
     border-spacing: 0;
     display: table;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.55;
     width: max-content;
     min-width: 0;
@@ -585,13 +586,13 @@
     max-height: 300px;
     width: auto;
     height: auto;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     display: block;
     margin: 1.25em 0;
     border: 0.5px solid var(--td-component-stroke);
     object-fit: contain;
     cursor: pointer;
-    transition: transform 0.2s ease;
+    transition: transform var(--app-motion-base) ease;
   }
 
   // Protected images not yet hydrated still carry the 1x1 placeholder gif.
@@ -613,9 +614,9 @@
     cursor: default;
     background: linear-gradient(
       100deg,
-      var(--td-bg-color-secondarycontainer, #f3f3f3) 30%,
-      var(--td-bg-color-container-hover, #eaeaea) 50%,
-      var(--td-bg-color-secondarycontainer, #f3f3f3) 70%
+      var(--td-bg-color-secondarycontainer) 30%,
+      var(--td-bg-color-container-hover) 50%,
+      var(--td-bg-color-secondarycontainer) 70%
     );
     background-size: 200% 100%;
     animation: chat-img-skeleton 1.2s ease-in-out infinite;
@@ -633,6 +634,107 @@
 
   :deep(.mermaid) {
     margin: 0;
+  }
+
+  // A sandbox-generated file that is not an image (HTML chart, CSV, document)
+  // is referenced inline as a card instead of being embedded: the artifacts are
+  // self-contained pages up to a megabyte, and an iframe per reference would be
+  // both slow and an active-content risk. Clicking opens the artifact drawer's
+  // sandboxed preview. It must stay inline — Markdown wraps the reference in a
+  // paragraph, and a block element would be hoisted out of it by the parser.
+  :deep(.artifact-ref-card) {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    width: 420px;
+    max-width: min(420px, 100%);
+    margin: 0.75em 0;
+    box-sizing: border-box;
+    padding: 12px 8px;
+    border-radius: var(--app-radius-md);
+    background: transparent;
+    cursor: pointer;
+    vertical-align: middle;
+    text-align: left;
+    transition: background var(--app-motion-fast) ease;
+
+    &:hover {
+      background: var(--td-bg-color-container-hover);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-text-color-secondary);
+      outline-offset: 2px;
+    }
+  }
+
+  // 引用对不上任何产物：模型提到了一个并不存在的文件。
+  :deep(.artifact-ref-card--pending) {
+    cursor: default;
+    opacity: 0.7;
+
+    &:hover {
+      background: transparent;
+    }
+  }
+
+  // 文件确实生成过，但用户删了它，字节已回收。整体置灰并给文件名加删除线，
+  // 好让它一眼区别于「从来没有过」的 --pending：这条回答当时确实产出了东西。
+  :deep(.artifact-ref-card--deleted) {
+    cursor: default;
+
+    &:hover {
+      background: transparent;
+    }
+
+    .artifact-ref-card__icon {
+      opacity: 0.45;
+      filter: grayscale(1);
+    }
+
+    .artifact-ref-card__name {
+      color: var(--td-text-color-placeholder);
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+    }
+  }
+
+  :deep(.artifact-ref-card__icon) {
+    flex-shrink: 0;
+    width: 32px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  :deep(.artifact-file-icon-svg) {
+    .artifact-file-icon-style();
+  }
+
+  :deep(.artifact-ref-card__text) {
+    display: inline-flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  :deep(.artifact-ref-card__name) {
+    font-size: var(--app-text-md);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    line-height: 1.35;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :deep(.artifact-ref-card__hint) {
+    margin-top: 2px;
+    font-size: var(--app-text-sm);
+    line-height: 1.3;
+    color: var(--td-text-color-placeholder);
   }
 
   .chat-markdown-hljs();

@@ -140,6 +140,11 @@
             </div>
             <div class="item-main">
               <span class="name">{{ item.name }}</span>
+              <span
+                v-if="item.type === 'mcp' && item.catalogSynced"
+                class="count"
+                :class="{ 'is-stale': item.catalogStale }"
+              >{{ item.toolCount ?? 0 }}</span>
             </div>
           </div>
           <template #content>
@@ -148,7 +153,19 @@
                 <span class="detail-name">{{ item.name }}</span>
               </div>
               <p v-if="item.description" class="detail-desc">{{ item.description }}</p>
-              <div class="detail-meta">
+              <div v-if="item.type === 'mcp'" class="detail-meta">
+                <span class="detail-kb">
+                  <t-icon name="tools" class="detail-icon" />
+                  <span v-if="item.catalogSynced" class="detail-value">
+                    {{ $t('mentionDetail.mcpToolCount', { count: item.toolCount ?? 0 }) }}
+                  </span>
+                  <span v-else class="detail-value">{{ $t('mentionDetail.mcpNotSynced') }}</span>
+                </span>
+                <span v-if="item.catalogSynced && item.catalogStale" class="detail-stale">
+                  {{ $t('mentionDetail.mcpStale') }}
+                </span>
+              </div>
+              <div v-else-if="item.kbName || item.serviceName" class="detail-meta">
                 <span v-if="item.kbName" class="detail-kb">
                   <t-icon name="folder" class="detail-icon" />
                   <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
@@ -265,7 +282,7 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
-import type { MentionItem, MentionItemType } from '@/types/mention';
+import { SKILL_ICON, type MentionItem, type MentionItemType } from '@/types/mention';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
 
@@ -317,7 +334,7 @@ const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; 
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
   { type: 'tag', label: '标签', icon: 'tag' },
   { type: 'mcp', label: 'MCP', icon: 'tools' },
-  { type: 'skill', label: 'Skills', icon: 'bookmark' },
+  { type: 'skill', label: t('common.skill'), icon: SKILL_ICON },
   { type: 'file', label: t('common.file'), icon: 'file' },
 ]);
 
@@ -568,9 +585,9 @@ const scrollToItem = (index: number) => {
 .mention-menu {
   position: fixed;
   z-index: 10000;
-  background: var(--td-bg-color-container, #fff);
-  border: 1px solid var(--td-component-stroke, #e7e9eb);
-  border-radius: var(--td-radius-extraLarge, 12px);
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-extraLarge);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
   width: 220px;
   max-height: 388px;
@@ -593,11 +610,11 @@ const scrollToItem = (index: number) => {
   margin: 1px 6px;
   padding: 0 8px;
   border: 0;
-  border-radius: var(--td-radius-medium, 6px);
+  border-radius: var(--td-radius-medium);
   background: transparent;
-  color: var(--td-text-color-primary, #333);
+  color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: var(--td-font-size-body-medium, 14px);
+  font-size: var(--td-font-size-body-medium);
   font-weight: 400;
   line-height: 20px;
   cursor: pointer;
@@ -605,13 +622,13 @@ const scrollToItem = (index: number) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
 }
 
 .mention-group-entry:hover,
 .mention-group-entry.active,
 .mention-back-row:hover {
-  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .mention-group-entry__icon {
@@ -621,8 +638,8 @@ const scrollToItem = (index: number) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--td-text-color-secondary, #666);
-  font-size: 16px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xl);
 }
 
 .mention-group-entry__label,
@@ -641,10 +658,10 @@ const scrollToItem = (index: number) => {
   flex-shrink: 0;
   min-width: 18px;
   padding: 0 6px;
-  border-radius: 999px;
-  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
-  color: var(--td-text-color-placeholder, #999);
-  font-size: var(--td-font-size-mark-small, 12px);
+  border-radius: var(--app-radius-pill);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-placeholder);
+  font-size: var(--td-font-size-mark-small);
   line-height: 18px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -652,20 +669,20 @@ const scrollToItem = (index: number) => {
 
 .mention-group-entry__arrow {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder, #999);
-  font-size: 16px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-xl);
 }
 
 .mention-back-row {
   min-height: 30px;
   margin-bottom: 4px;
-  color: var(--td-text-color-secondary, #666);
-  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+  color: var(--td-text-color-secondary);
+  border-bottom: 1px solid var(--td-component-stroke);
   border-radius: 0;
 }
 
 .mention-back-row span {
-  font-size: var(--td-font-size-body-medium, 14px);
+  font-size: var(--td-font-size-body-medium);
 }
 
 .mention-group {
@@ -673,15 +690,15 @@ const scrollToItem = (index: number) => {
 }
 
 .mention-group:not(:last-child) {
-  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .mention-group-header {
   padding: 7px 14px 5px;
-  font-size: var(--td-font-size-mark-small, 12px);
+  font-size: var(--td-font-size-mark-small);
   font-weight: 600;
   line-height: 18px;
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
 }
 
 .mention-item {
@@ -693,20 +710,20 @@ const scrollToItem = (index: number) => {
   margin: 1px 6px;
   box-sizing: border-box;
   cursor: pointer;
-  border-radius: var(--td-radius-medium, 6px);
-  color: var(--td-text-color-primary, #333);
-  font-size: var(--td-font-size-body-medium, 14px);
+  border-radius: var(--td-radius-medium);
+  color: var(--td-text-color-primary);
+  font-size: var(--td-font-size-body-medium);
   font-family: var(--app-font-family);
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
 }
 
 .mention-item:hover {
-  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .mention-item.active {
-  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
-  color: var(--td-text-color-primary, #333);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
 }
 
 .icon-wrap {
@@ -723,7 +740,7 @@ const scrollToItem = (index: number) => {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
 }
 
 /* 右下角组织角标：柔和小圆 + 绿色/灰色 icon，不刺眼 */
@@ -734,7 +751,7 @@ const scrollToItem = (index: number) => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--td-bg-color-secondarycontainer, #f0f2f5);
+  background: var(--td-bg-color-secondarycontainer);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
@@ -751,9 +768,12 @@ const scrollToItem = (index: number) => {
 /* 知识库 / 文件 - 无背景，与整体一致 */
 .kb-icon,
 .faq-icon,
-.file-icon {
+.file-icon,
+.mcp-icon,
+.skill-icon,
+.tag-icon {
   background: transparent;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 }
 
 .mention-item.active .icon {
@@ -788,9 +808,13 @@ const scrollToItem = (index: number) => {
 .count {
   margin-left: auto;
   flex-shrink: 0;
-  font-size: var(--td-font-size-mark-small, 12px);
+  font-size: var(--td-font-size-mark-small);
   font-variant-numeric: tabular-nums;
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
+}
+
+.count.is-stale {
+  color: var(--td-warning-color);
 }
 
 .org-name {
@@ -799,8 +823,8 @@ const scrollToItem = (index: number) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--td-font-size-mark-small, 12px);
-  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--td-font-size-mark-small);
+  color: var(--td-text-color-placeholder);
 }
 
 .kb-name {
@@ -809,15 +833,15 @@ const scrollToItem = (index: number) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--td-font-size-mark-small, 12px);
-  color: var(--td-text-color-secondary, #999);
+  font-size: var(--td-font-size-mark-small);
+  color: var(--td-text-color-secondary);
 }
 
 .empty {
   padding: 28px 16px;
   text-align: center;
-  color: var(--td-text-color-placeholder, #999);
-  font-size: var(--td-font-size-body-medium, 14px);
+  color: var(--td-text-color-placeholder);
+  font-size: var(--td-font-size-body-medium);
 }
 
 .loading-more {
@@ -834,23 +858,23 @@ const scrollToItem = (index: number) => {
   max-width: 280px;
   padding: 13px 14px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-large, 9px);
+  border-radius: var(--td-radius-large);
   background: var(--td-bg-color-container);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 .mention-detail-content {
-  font-size: var(--td-font-size-body-small, 12px);
-  color: var(--td-text-color-primary, #333);
+  font-size: var(--td-font-size-body-small);
+  color: var(--td-text-color-primary);
   line-height: 1.5;
 }
 .mention-detail-content .detail-loading,
 .mention-detail-content .detail-error {
   padding: 8px 0;
-  color: var(--td-text-color-secondary, #999);
-  font-size: var(--td-font-size-body-small, 12px);
+  color: var(--td-text-color-secondary);
+  font-size: var(--td-font-size-body-small);
 }
 .mention-detail-content .detail-error {
-  color: var(--td-error-color, #e34d59);
+  color: var(--td-error-color);
 }
 .mention-detail-content .detail-header {
   display: flex;
@@ -861,7 +885,7 @@ const scrollToItem = (index: number) => {
 }
 .mention-detail-content .detail-name {
   font-weight: 600;
-  font-size: var(--td-font-size-body-medium, 14px);
+  font-size: var(--td-font-size-body-medium);
   line-height: 20px;
   word-break: break-word;
 }
@@ -869,8 +893,8 @@ const scrollToItem = (index: number) => {
   flex-shrink: 0;
   padding: 1px 6px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-medium, 6px);
-  font-size: var(--td-font-size-mark-small, 12px);
+  border-radius: var(--td-radius-medium);
+  font-size: var(--td-font-size-mark-small);
   line-height: 18px;
 }
 .mention-detail-content .detail-type-badge.doc {
@@ -884,8 +908,8 @@ const scrollToItem = (index: number) => {
 }
 .mention-detail-content .detail-desc {
   margin: 0 0 8px;
-  font-size: var(--td-font-size-body-small, 12px);
-  color: var(--td-text-color-secondary, #666);
+  font-size: var(--td-font-size-body-small);
+  color: var(--td-text-color-secondary);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 4;
@@ -895,8 +919,8 @@ const scrollToItem = (index: number) => {
   word-break: break-word;
 }
 .mention-detail-content .detail-meta {
-  font-size: var(--td-font-size-mark-small, 12px);
-  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--td-font-size-mark-small);
+  color: var(--td-text-color-placeholder);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -905,8 +929,8 @@ const scrollToItem = (index: number) => {
 .mention-detail-content .detail-readonly-hint {
   display: block;
   margin-top: 6px;
-  font-size: var(--td-font-size-mark-small, 12px);
-  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--td-font-size-mark-small);
+  color: var(--td-text-color-placeholder);
   font-style: italic;
 }
 
@@ -920,8 +944,8 @@ const scrollToItem = (index: number) => {
 }
 .mention-detail-content .detail-icon {
   flex-shrink: 0;
-  font-size: 14px;
-  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--app-text-base);
+  color: var(--td-text-color-placeholder);
   margin-right: 2px;
   display: inline-flex;
   align-items: center;
@@ -936,14 +960,14 @@ const scrollToItem = (index: number) => {
   width: 14px;
   height: 14px;
   margin-right: 2px;
-  color: var(--td-text-color-placeholder, #000000);
+  color: var(--td-text-color-placeholder);
   opacity: 0.7;
   display: inline-block;
   vertical-align: middle;
   object-fit: contain;
 }
 .mention-detail-content .detail-label {
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
   flex-shrink: 0;
   line-height: 1.5;
   display: inline-flex;
@@ -961,11 +985,14 @@ const scrollToItem = (index: number) => {
 .mention-detail-content .detail-value.clickable {
   cursor: pointer;
   text-decoration: underline;
-  text-decoration-color: var(--td-text-color-placeholder, #999);
-  transition: color 0.2s, text-decoration-color 0.2s;
+  text-decoration-color: var(--td-text-color-placeholder);
+  transition: color var(--app-motion-base), text-decoration-color var(--app-motion-base);
 }
 .mention-detail-content .detail-value.clickable:hover {
-  color: var(--td-brand-color, #07c05f);
-  text-decoration-color: var(--td-brand-color, #07c05f);
+  color: var(--td-brand-color);
+  text-decoration-color: var(--td-brand-color);
+}
+.mention-detail-content .detail-stale {
+  color: var(--td-warning-color);
 }
 </style>

@@ -62,3 +62,38 @@ func TestValidateProviderParametersMetaso(t *testing.T) {
 		t.Fatal("Metaso provider type is not accepted")
 	}
 }
+
+func TestValidateProviderParametersBocha(t *testing.T) {
+	valid := types.WebSearchProviderParameters{
+		APIKey:      "sk-test",
+		ExtraConfig: map[string]string{"freshness": "oneWeek", "summary": "true"},
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeBocha, valid); err != nil {
+		t.Fatalf("valid Bocha parameters rejected: %v", err)
+	}
+	invalid := valid
+	invalid.ExtraConfig = map[string]string{"freshness": "oneHour"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeBocha, invalid); err == nil {
+		t.Fatal("invalid Bocha freshness was accepted")
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeBocha, types.WebSearchProviderParameters{}); err == nil {
+		t.Fatal("missing Bocha API key was accepted")
+	}
+	if !isValidProviderType(types.WebSearchProviderTypeBocha) {
+		t.Fatal("Bocha provider type is not accepted")
+	}
+}
+
+func TestValidateProviderParametersSerply(t *testing.T) {
+	valid := types.WebSearchProviderParameters{APIKey: "serply-test"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSerply, valid); err != nil {
+		t.Fatalf("valid Serply parameters rejected: %v", err)
+	}
+	if !isValidProviderType(types.WebSearchProviderTypeSerply) {
+		t.Fatal("Serply provider type is not accepted")
+	}
+	blank := types.WebSearchProviderParameters{APIKey: "   "}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSerply, blank); err == nil {
+		t.Fatal("blank Serply API key was accepted")
+	}
+}

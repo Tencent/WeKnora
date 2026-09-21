@@ -1,5 +1,5 @@
 <template>
-  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-embedded': embeddedMode, 'is-rag-mode': ragMode }">
+  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-embedded': embeddedMode, 'is-rag-mode': ragMode, 'is-steer-prefix': session?.steerForked }">
 
     <!-- Collapsed intermediate steps (tree root) -->
     <div v-if="shouldShowCollapsedSteps" class="tree-container">
@@ -28,7 +28,7 @@
         />
         <template v-for="(event, index) in visibleIntermediateEvents" :key="getEventKey(event, index)">
           <div v-if="event && event.type" class="tree-child"
-            :class="{ 'tree-child-last': !isConversationDone && index === visibleIntermediateEvents.length - 1 }">
+            :class="{ 'tree-child-last': !isSegmentDone && index === visibleIntermediateEvents.length - 1 }">
             <div class="tree-branch"></div>
             <div class="tree-child-content">
               <!-- Plan Task Change Event -->
@@ -36,6 +36,25 @@
                 <div class="plan-task-change-card">
                   <div class="plan-task-change-content">
                     <strong>{{ $t('agent.taskLabel') }}</strong> {{ event.task }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Context Compaction -->
+              <div v-if="event.type === 'context_compacted'" class="tool-event">
+                <div class="action-card">
+                  <div class="action-header" @click="toggleEvent(event.event_id)">
+                    <div class="action-title">
+                      <span class="action-title-icon icon-mask" :style="maskIconStyle(compactionIcon)"
+                        aria-hidden="true" />
+                      <span class="action-name">{{ $t('agent.contextCompacted') }}</span>
+                      <span class="action-summary">{{ compactionSummaryText(event) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="event.summary && isEventExpanded(event.event_id)" class="action-details">
+                    <div class="thinking-detail-content markdown-content">
+                      <div v-html="renderMarkdownContent(event.summary)"></div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -127,7 +146,8 @@
                   <div class="action-header" @click.stop="handleActionHeaderClick(event)"
                     :class="{ 'no-results': !hasActionResult(event) }">
                     <div class="action-title">
-                      <t-icon v-if="event.tool_name" class="action-title-icon"
+                      <BrowserIcon v-if="event.tool_name === 'local_browser'" class="action-title-icon browser-tool-icon" />
+                      <t-icon v-else-if="event.tool_name" class="action-title-icon"
                         :name="getToolIconName(event.tool_name)" />
                       <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                         :content="t('agent.updatePlan')" placement="top">
@@ -136,6 +156,17 @@
                       <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                         <span class="action-name">{{ getToolTitle(event) }}</span>
                       </t-tooltip>
+                      <span v-if="getSandboxDiffStat(event)" class="sandbox-diff-stat">
+                        <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
+                        <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
+                    <pre>{{ getSandboxFilePreview(event) }}</pre>
+                    <div v-if="sandboxPreviewRemaining(event) > 0" class="sandbox-file-preview-more">
+                      {{ t('agentStream.sandboxFiles.moreLines', { count: sandboxPreviewRemaining(event) }) }}
                     </div>
                   </div>
 
@@ -168,21 +199,27 @@
                     <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'list_knowledge_chunks' && event.tool_data"
+                  <div v-if="!event.pending && (event.tool_name === 'read_document' || event.tool_name === 'list_knowledge_chunks') && event.tool_data"
                     class="search-results-summary-fixed knowledge-chunks-summary">
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
+
+                  <SandboxCommandProgress
+                    v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
+                    :progress="event.command_output"
+                  />
 
                   <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
                     class="search-results-summary-fixed attachment-parsing-summary">
                     <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
                   </div>
 
-                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
+                    <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
-                    <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
-                      <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
-                        :output="event.output" :arguments="event.arguments" />
+                    <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
+                    <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
+                      <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
+                        :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
@@ -216,9 +253,9 @@
     </div>
 
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
-    <div v-if="!ragMode || displayEvents.length > 0 || showAgentActivityIndicator" ref="streamingStepsContainer"
+    <div v-if="displayEvents.length > 0 || showMemoryRow || showAgentActivityIndicator" ref="streamingStepsContainer"
       class="streaming-steps-container" :class="{
-        'streaming-steps-constrained': !answerEverStarted && !isConversationDone,
+        'streaming-steps-constrained': !answerEverStarted && !isSegmentDone,
         'is-streaming-timeline': showStreamingTimeline
       }">
       <!-- Recalled memory leads the timeline: it is what the turn knew before it
@@ -248,6 +285,25 @@
               <div class="plan-task-change-card">
                 <div class="plan-task-change-content">
                   <strong>{{ $t('agent.taskLabel') }}</strong> {{ event.task }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Context Compaction -->
+            <div v-if="event.type === 'context_compacted'" class="tool-event">
+              <div class="action-card">
+                <div class="action-header" @click="toggleEvent(event.event_id)">
+                  <div class="action-title">
+                    <span class="action-title-icon icon-mask" :style="maskIconStyle(compactionIcon)"
+                      aria-hidden="true" />
+                    <span class="action-name">{{ $t('agent.contextCompacted') }}</span>
+                    <span class="action-summary">{{ compactionSummaryText(event) }}</span>
+                  </div>
+                </div>
+                <div v-if="event.summary && isEventExpanded(event.event_id)" class="action-details">
+                  <div class="thinking-detail-content markdown-content">
+                    <div v-html="renderMarkdownContent(event.summary)"></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -328,6 +384,27 @@
               </div>
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
                 class="answer-toolbar">
+                <t-tooltip v-if="canFork" :content="forkTooltip">
+                  <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
+                    <t-icon name="git-branch" />
+                  </t-button>
+                </t-tooltip>
+                <t-popconfirm
+                  v-if="canRewind"
+                  :content="t('chat.rewind.confirmBody')"
+                  :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                  :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                  theme="warning"
+                  placement="top"
+                  overlay-class-name="chat-rewind-popconfirm"
+                  @confirm="emitRewind"
+                >
+                  <t-tooltip :content="rewindTooltip">
+                    <t-button size="small" variant="outline" shape="round" @click.stop>
+                      <t-icon name="rollback" />
+                    </t-button>
+                  </t-tooltip>
+                </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -340,20 +417,24 @@
                      assistant message recorded any generated files. Agent
                      mode is the primary path for skills, so this is where
                      the button is most likely to appear. -->
-                <t-badge
-                  v-if="hasArtifacts"
-                  :count="artifactCount"
-                  :offset="[-4, 4]"
-                  shape="round"
-                  size="small"
-                >
+                <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
+                  :class="{ 'is-collecting': artifactButtonCollecting, 'is-arrived': artifactArrived }"
+                  @animationend="onArtifactArriveEnd">
                   <t-button size="small" variant="outline" shape="round"
-                    @click.stop="openArtifactDrawer"
-                    :title="$t('agent.artifactDrawer.buttonTitle')">
-                    <t-icon name="download" />
+                    :disabled="artifactButtonCollecting"
+                    :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
+                    @click.stop="openArtifactDrawer()">
+                    <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
+                    <t-icon v-else name="folder" />
                   </t-button>
-                </t-badge>
+                  <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
+                </span>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
+                  <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                    <t-icon name="info-circle" />
+                  </t-button>
+                </t-tooltip>
+                <t-tooltip v-if="event.truncated" :content="$t('chat.truncatedHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
                   </t-button>
@@ -386,7 +467,8 @@
                 <div class="action-header" @click.stop="handleActionHeaderClick(event)"
                   :class="{ 'no-results': !hasActionResult(event) }">
                   <div class="action-title">
-                    <t-icon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
+                    <BrowserIcon v-if="event.tool_name === 'local_browser'" class="action-title-icon browser-tool-icon" />
+                    <t-icon v-else-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
                     <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                       :content="t('agent.updatePlan')" placement="top">
                       <span class="action-name">
@@ -396,6 +478,17 @@
                     <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                       <span class="action-name">{{ getToolTitle(event) }}</span>
                     </t-tooltip>
+                    <span v-if="getSandboxDiffStat(event)" class="sandbox-diff-stat">
+                      <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
+                      <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
+                  <pre>{{ getSandboxFilePreview(event) }}</pre>
+                  <div v-if="sandboxPreviewRemaining(event) > 0" class="sandbox-file-preview-more">
+                    {{ t('agentStream.sandboxFiles.moreLines', { count: sandboxPreviewRemaining(event) }) }}
                   </div>
                 </div>
 
@@ -428,10 +521,15 @@
                   <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
                 </div>
 
-                <div v-if="!event.pending && event.tool_name === 'list_knowledge_chunks' && event.tool_data"
+                <div v-if="!event.pending && (event.tool_name === 'read_document' || event.tool_name === 'list_knowledge_chunks') && event.tool_data"
                   class="search-results-summary-fixed knowledge-chunks-summary">
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
+
+                <SandboxCommandProgress
+                  v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
+                  :progress="event.command_output"
+                />
 
                 <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
                   class="search-results-summary-fixed attachment-parsing-summary">
@@ -440,9 +538,10 @@
 
                 <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                   class="action-details">
-                  <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
-                    <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
-                      :output="event.output" :arguments="event.arguments" />
+                  <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
+                    <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
+                    <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
+                      :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
@@ -487,7 +586,8 @@
   <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
 
   <!-- Wiki Page Detail Drawer -->
-  <t-drawer v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
+  <!-- Mount on demand: a hidden TDesign drawer steals focus when each response mounts. -->
+  <t-drawer v-if="wikiDrawerVisible" v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
     placement="right" attach="body" :show-overlay="true" :close-btn="true" :close-on-overlay-click="true"
     class="wiki-graph-drawer">
     <template v-if="wikiDrawerPage">
@@ -518,19 +618,22 @@
     </template>
   </t-drawer>
   <ChatArtifactsDrawer
-    v-if="hasArtifacts && sessionIdForArtifacts && messageIdForArtifacts"
+    v-if="hasArtifacts && embeddedMode && sessionIdForArtifacts && messageIdForArtifacts"
     v-model:visible="showArtifactDrawer"
     :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
-    :artifacts="artifactList"
+    :artifacts="liveArtifacts"
+    :preview-index="artifactPreviewIndex"
   />
 </template>
 
 <script setup lang="ts">
+import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
+import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
@@ -538,6 +641,10 @@ import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
+import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
+import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
+import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
+import { persistedAssistantId } from '@/utils/steerStreamFork';
 import ChatMemoryStep from './ChatMemoryStep.vue';
 import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
@@ -555,18 +662,37 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
+import {
+  artifactIndexFromEventTarget,
+  hydrateArtifactImages,
+  renderArtifactReference,
+} from '@/utils/sandboxArtifactRefs';
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
+import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import {
+  formatToolTitleWithDetail,
+  getEventSkillName,
+  getReadSkillTarget,
+  getSandboxDiffStat,
+  getSandboxFilePreview,
+  getSandboxToolPath,
+  sandboxPreviewRemaining,
+  skillScriptTitleCommand,
+} from '@/utils/skillToolDisplay';
+import { previewShellCommand } from '@/utils/shellExecResult';
+import type { DisplayType } from '@/types/tool-results';
 import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
   buildManualMarkdown,
   formatManualTitle,
   replaceIncompleteMermaidWithPlaceholder,
   prepareStreamingMermaidMarkdown,
-  extractFirstMermaidCode,
+  extractMermaidCodes,
   injectCachedMermaidSvg,
+  type CachedMermaidSvgHtml,
 } from '@/utils/chatMessageShared';
 import { copyWithToast } from '@/utils/clipboard';
 import {
@@ -575,15 +701,18 @@ import {
   wrapChatMarkdownTables,
 } from '@/utils/chatMarkdownRenderer';
 import {
+  appendMermaidSvgCache,
   createMermaidCodeRenderer,
   ensureMermaidInitialized,
   enhanceMarkdownContainer,
-  renderMermaidToSvg,
 } from '@/utils/mermaidShared';
 import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
 
+import BrowserToolDetails from './BrowserToolDetails.vue';
+import { browserToolTitle } from '@/utils/browserToolDisplay';
+import BrowserIcon from '@/components/icons/BrowserIcon.vue';
 const getToolIconName = getAgentToolIconName;
 
 const router = useRouter();
@@ -596,7 +725,12 @@ const { t } = useI18n();
 ensureMermaidInitialized();
 
 const TOOL_NAME_KEYS: Record<string, string> = {
+  discover_mcp_tools: 'agentStream.mcp.discoverTools',
+  call_mcp_tool: 'agentStream.mcp.callTool',
   search_knowledge: 'agentStream.tools.searchKnowledge',
+  read_document: 'agentStream.tools.readDocument',
+  list_documents: 'agentStream.tools.listDocuments',
+  // Retired names still present in stored chat history
   knowledge_search: 'agentStream.tools.searchKnowledge',
   grep_chunks: 'agentStream.tools.grepChunks',
   web_search: 'agentStream.tools.webSearch',
@@ -623,7 +757,14 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   query_understand: 'agentStream.tools.queryUnderstand',
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
   read_skill: 'agentStream.tools.readSkill',
+  read_file: 'agentStream.tools.readFile',
   execute_skill_script: 'agentStream.tools.executeSkillScript',
+  list_sandbox_files: 'agentStream.tools.listSandboxFiles',
+  read_sandbox_file: 'agentStream.tools.readSandboxFile',
+  write_sandbox_file: 'agentStream.tools.writeSandboxFile',
+  edit_sandbox_file: 'agentStream.tools.editSandboxFile',
+  shell_exec: 'agentStream.tools.shellExec',
+  local_browser: 'localBrowser.local',
   data_analysis: 'agentStream.tools.dataAnalysis',
   data_schema: 'agentStream.tools.dataSchema',
   database_query: 'agentStream.tools.databaseQuery',
@@ -825,6 +966,7 @@ const handleWikiDrawerClick = (e: MouseEvent) => {
 // Import icons
 import agentIcon from '@/assets/img/agent.svg';
 import thinkingIcon from '@/assets/img/Frame3718.svg';
+import compactionIcon from '@/assets/img/context-compaction.svg';
 
 interface SessionData {
   id?: string;
@@ -848,11 +990,28 @@ const props = defineProps<{
   embedVisitorId?: string;
   ragMode?: boolean;
   followUpLoading?: boolean;
+  canFork?: boolean;
+  canRewind?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: 'render-complete-change', ready: boolean): void;
+  (event: 'fork', messageId: string): void;
+  (event: 'rewind', messageId: string): void;
 }>();
+
+const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
+const forkTooltip = '从这条回答继续分叉'
+const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
+const emitFork = () => {
+  const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
+  if (messageId) emit('fork', messageId)
+}
+const emitRewind = () => {
+  const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
+  if (messageId) emit('rewind', messageId)
+}
 
 const embedAuthProps = computed(() => ({
   embeddedMode: props.embeddedMode,
@@ -917,25 +1076,60 @@ watch(
 // Skill artifact download drawer (Agent path)
 // -----------------------------------------------------------------------------
 // Same contract as botmsg.vue: only render the button when the persisted
-// assistant message actually recorded files, then let ChatArtifactsDrawer
-// resolve names/sizes/mtimes and stream downloads via the /artifacts
-// endpoint. Agent mode is the primary path for skills, so this button will
-// appear more often here than in the RAG path.
+// assistant message actually recorded files, then open the sandbox panel's
+// artifacts tab (or ChatArtifactsDrawer in embedded mode).
 const showArtifactDrawer = ref(false);
+const sandboxPanel = useChatSandboxPanel();
 const artifactList = computed(() => {
   const list = ((props.session?.artifacts as any[]) || []);
   return list.map((a, i) => ({ index: i, ...a }));
 });
-const hasArtifacts = computed(() => artifactList.value.length > 0);
-const artifactCount = computed(() => artifactList.value.length);
+// Deleted files stay in artifactList on purpose: the inline renderer needs the
+// tombstone to tell "you deleted this" apart from "this handle belongs to some
+// other message", and its position is still the download address of the files
+// after it. Everything that counts or lists files uses the live view.
+const liveArtifacts = computed(() => artifactList.value.filter((a) => !a.deleted_at));
+const hasArtifacts = computed(() => liveArtifacts.value.length > 0);
+const artifactCount = computed(() => liveArtifacts.value.length);
+const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifactCount);
+const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session as any));
+const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
 const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
 const messageIdForArtifacts = computed(() =>
-  String(props.session?.id || props.session?.request_id || ''),
+  persistedAssistantId(props.session) || String(props.session?.request_id || ''),
 );
-function openArtifactDrawer() {
+// Set when the drawer is opened from an inline artifact card in the answer, so
+// it lands on that file's preview instead of the list.
+const artifactPreviewIndex = ref<number | null>(null);
+function openArtifactDrawer(previewIndex: number | null = null) {
   if (!hasArtifacts.value) return;
+  if (sandboxPanel && !props.embeddedMode) {
+    if (previewIndex == null) {
+      sandboxPanel.toggleArtifacts(messageIdForArtifacts.value);
+    } else {
+      sandboxPanel.open('artifacts', {
+        messageId: messageIdForArtifacts.value,
+        previewIndex,
+      });
+    }
+    return;
+  }
+  artifactPreviewIndex.value = previewIndex;
   showArtifactDrawer.value = true;
 }
+
+const artifactRefContext = computed(() => {
+  const sessionId = sessionIdForArtifacts.value;
+  const messageId = messageIdForArtifacts.value;
+  if (!sessionId || !messageId) return null;
+  return { sessionId, messageId };
+});
+
+const artifactRefLabels = computed(() => ({
+  previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
+  missingHint: t('agent.artifactDrawer.inlineMissing'),
+  deletedHint: t('agent.artifactDrawer.inlineDeleted'),
+}));
 
 const {
   float: citationFloat,
@@ -1042,6 +1236,28 @@ const formatToolResultContent = (value: unknown): string => {
 };
 
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
+
+const resolveToolDisplayType = (event: any): DisplayType | undefined => {
+  const mcpType = getMcpToolDisplayType(event?.tool_name)
+  if (mcpType) return mcpType
+  if (event?.display_type) return event.display_type as DisplayType
+  if (event?.tool_name === 'shell_exec' || event?.tool_name === 'execute_skill_script') {
+    return 'shell_exec'
+  }
+  if (event?.tool_name === 'list_sandbox_files' && event?.success !== false) {
+    return 'list_sandbox_files'
+  }
+  if (event?.tool_name === 'write_sandbox_file' && event?.success !== false) {
+    return 'write_sandbox_file'
+  }
+  if (event?.tool_name === 'edit_sandbox_file' && event?.success !== false) {
+    return 'edit_sandbox_file'
+  }
+  if (event?.tool_name === 'read_skill' && event?.success !== false) {
+    return 'read_skill'
+  }
+  return undefined
+};
 
 const WIKI_EDIT_TOOL_NAMES = new Set([
   'wiki_write_page',
@@ -1182,7 +1398,7 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   if (toolName === 'web_fetch') {
     const results = Array.isArray(toolData.results) ? toolData.results : [];
     return results
-      .filter((item: any) => item?.url)
+      .filter((item: any) => item?.url && (!item.status || item.status === 'success'))
       .map((item: any, index: number) => ({
         id: item.url,
         chunk_type: 'web_search',
@@ -1243,7 +1459,7 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
       })));
   }
 
-  if (toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
+  if (toolName === 'read_document' || toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
     const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
     if (chunks.length) {
       return mergeDocumentReferences(chunks
@@ -1409,39 +1625,12 @@ watch(eventStream, (stream) => {
 }, { deep: true, immediate: true });
 
 
-// Check if conversation is done (based on answer event with done=true or stop event)
-const isConversationDone = computed(() => {
-  const stream = eventStream.value;
-  if (!stream || stream.length === 0) {
-    console.log('[Collapse] No stream or empty stream');
-    return false;
-  }
+// A steer boundary stops local animation without completing or folding the task.
+const isConversationDone = computed(() => isAssistantTurnComplete(props.session));
+const isSegmentDone = computed(() => Boolean(props.session?.steerForked) || isConversationDone.value);
 
-  // Check for stop event (user cancelled)
-  const stopEvent = stream.find((e: any) => e.type === 'stop');
-  if (stopEvent) {
-    console.log('[Collapse] Found stop event, conversation done');
-    return true;
-  }
-
-  const completeEvent = stream.find((e: any) => e.type === 'agent_complete');
-  if (completeEvent) {
-    console.log('[Collapse] Found complete event, conversation done');
-    return true;
-  }
-
-  // Check for answer event with done=true. Exclude superseded preambles: a
-  // retracted tool-round preamble is also closed with done=true, but the agent
-  // keeps running, so it must not mark the whole conversation as finished.
-  const answerEvents = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
-  const doneAnswer = answerEvents.find((e: any) => e.done === true);
-
-  return !!doneAnswer;
-});
-
-const streamingMermaidSvgCache = ref<string | null>(null);
+const streamingMermaidSvgCache = ref<string[]>([]);
 let streamingMermaidRenderTask: Promise<void> | null = null;
-let streamingMermaidRenderId = 0;
 
 const activeAnswerMarkdown = computed(() => {
   const stream = eventStream.value;
@@ -1465,29 +1654,35 @@ const activeAnswerEventRef = computed(() => {
 // full instead of replaying.
 const { displayed: typedAnswer } = useTypewriter(
   () => activeAnswerMarkdown.value,
-  () => isConversationDone.value,
+  () => isSegmentDone.value,
 );
 
 const cacheStreamingMermaidSvg = async () => {
-  if (streamingMermaidSvgCache.value) return;
-  const code = extractFirstMermaidCode(activeAnswerMarkdown.value);
-  if (!code) return;
+  const codes = extractMermaidCodes(activeAnswerMarkdown.value);
+  if (codes.length <= streamingMermaidSvgCache.value.length) return;
 
   if (!streamingMermaidRenderTask) {
     streamingMermaidRenderTask = (async () => {
-      const svg = await renderMermaidToSvg(code, `mermaid-agent-stream-${++streamingMermaidRenderId}`);
-      if (svg) streamingMermaidSvgCache.value = svg;
+      streamingMermaidSvgCache.value = await appendMermaidSvgCache(
+        extractMermaidCodes(activeAnswerMarkdown.value),
+        streamingMermaidSvgCache.value,
+        'mermaid-agent-stream',
+      );
     })().finally(() => {
       streamingMermaidRenderTask = null;
     });
   }
 
   await streamingMermaidRenderTask;
+
+  if (extractMermaidCodes(activeAnswerMarkdown.value).length > streamingMermaidSvgCache.value.length) {
+    await cacheStreamingMermaidSvg();
+  }
 };
 
-watch(isConversationDone, (done) => {
+watch(isSegmentDone, (done) => {
   if (!done) {
-    streamingMermaidSvgCache.value = null;
+    streamingMermaidSvgCache.value = [];
     streamingMermaidRenderTask = null;
   }
 });
@@ -1497,7 +1692,6 @@ watch(streamingMermaidSvgCache, () => {
 });
 
 watch(activeAnswerMarkdown, () => {
-  if (isConversationDone.value || streamingMermaidSvgCache.value) return;
   void cacheStreamingMermaidSvg();
 });
 
@@ -1511,7 +1705,10 @@ watch(activeAnswerMarkdown, () => {
 // yet. Hydrating too early would find nothing and leave a permanent placeholder
 // (until a manual reload). Waiting for full reveal guarantees the image exists.
 const answerFullyRendered = computed(
-  () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
+  () =>
+    !props.session?.steerForked &&
+    isSegmentDone.value &&
+    typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
   emit('render-complete-change', ready);
@@ -1522,6 +1719,7 @@ watch(answerFullyRendered, (ready) => {
   clearProtectedFileFailureCache();
   nextTick(async () => {
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    await enhanceMarkdownContainer(rootElement.value);
   });
 }, { immediate: true });
 
@@ -1549,7 +1747,7 @@ const hasPendingStreamingActivity = computed(() => {
 // feedback-less timeline. Once a real pending step exists it carries its own
 // shimmer, and once answer text starts the stream itself is enough feedback.
 const showAgentActivityIndicator = computed(() => {
-  if (isConversationDone.value) return false;
+  if (isSegmentDone.value) return false;
   if (props.ragMode || hasAnswerStarted.value) return false;
   return !hasPendingStreamingActivity.value;
 });
@@ -1587,7 +1785,7 @@ const finalContent = computed(() => {
     return null;
   }
 
-  if (!isConversationDone.value) {
+  if (!isSegmentDone.value) {
     return null;
   }
 
@@ -1632,7 +1830,7 @@ const finalContent = computed(() => {
 
 // Count intermediate steps (after merging consecutive thinking events, matching what user sees in tree)
 const intermediateStepsCount = computed(() => {
-  if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
+  if (!hasAnswerStarted.value && !isSegmentDone.value) return 0;
   // Count only thinking and tool_call events (exclude plan_task_change, etc.)
   return intermediateEvents.value.filter(
     (e: any) => e.type === 'thinking' || e.type === 'tool_call'
@@ -1644,12 +1842,12 @@ const intermediateStepsCount = computed(() => {
 // over-counts what the user perceives as agent loops (a single loop emits one
 // thinking card plus its tool calls).
 const reasoningRoundsCount = computed(() => {
-  if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
+  if (!hasAnswerStarted.value && !isSegmentDone.value) return 0;
   return intermediateEvents.value.filter((e: any) => e.type === 'thinking').length;
 });
 
 const toolCallsCount = computed(() => {
-  if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
+  if (!hasAnswerStarted.value && !isSegmentDone.value) return 0;
   return intermediateEvents.value.filter((e: any) => e.type === 'tool_call').length;
 });
 
@@ -1912,6 +2110,10 @@ const intermediateEvents = computed(() => {
   const hidden = hiddenThinkingEventIds.value;
   return result.filter((e: any) => {
     if (e.type === 'answer' || e.type === 'agent_complete') return false;
+    // Mid-run injected user messages render as normal user bubbles in the
+    // message list, not inside the steps tree — the tree template has no
+    // branch for this type and would otherwise emit an empty node.
+    if (e.type === 'user_message_injected') return false;
     if (e.type === 'thinking' && e.event_id && hidden.has(e.event_id)) return false;
     return true;
   });
@@ -1929,7 +2131,12 @@ const displayEvents = computed(() => {
     return [];
   }
 
-  const result = buildFullEventList(stream);
+  const result = buildFullEventList(stream).filter(
+    // Injected user messages render as normal user bubbles in the message
+    // list — never inside the agent timeline (the template has no branch for
+    // the type and would render an empty card).
+    (e: any) => e.type !== 'user_message_injected',
+  );
 
   // Quick-answer RAG: pipeline steps (including attachment prep) live in
   // RagPipelineProgress; this component only renders the answer stream.
@@ -2045,6 +2252,7 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
   toolName === 'web_search' ||
   toolName === 'web_fetch' ||
   toolName === 'grep_chunks' ||
+  toolName === 'read_document' ||
   toolName === 'list_knowledge_chunks' ||
   toolName === 'wiki_search' ||
   toolName === 'wiki_read_page' ||
@@ -2082,8 +2290,9 @@ const hasResults = (event: any): boolean => {
     return totalMatches > 0 || resultCount > 0;
   }
 
-  // list_knowledge_chunks: summary is inline below the header (no expandable body)
-  if (toolName === 'list_knowledge_chunks') {
+  // read_document (and legacy list_knowledge_chunks): summary is inline below
+  // the header (no expandable body)
+  if (toolName === 'read_document' || toolName === 'list_knowledge_chunks') {
     return false;
   }
 
@@ -2165,6 +2374,15 @@ const getKbIdForWiki = (slug: string): string => {
 const onRootClick = (e: Event) => {
   const target = e.target as HTMLElement;
   if (!target) return;
+
+  // Inline artifact card -> open the drawer straight on that file's preview.
+  const artifactIndex = artifactIndexFromEventTarget(target);
+  if (artifactIndex !== null) {
+    e.preventDefault();
+    e.stopPropagation();
+    openArtifactDrawer(artifactIndex);
+    return;
+  }
 
   // Handle image clicks -> open preview (only for images inside markdown/answer content, not icons)
   if (target.tagName === 'IMG') {
@@ -2254,6 +2472,15 @@ const onRootKeydown = (e: KeyboardEvent) => {
   const target = e.target as HTMLElement;
   if (!target) return;
 
+  const artifactIndex = artifactIndexFromEventTarget(target);
+  if (artifactIndex !== null) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openArtifactDrawer(artifactIndex);
+    }
+    return;
+  }
+
   // Handle web citation keyboard
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl) {
@@ -2325,6 +2552,7 @@ onMounted(() => {
     root.addEventListener('keydown', keydownListener, true);
     rebindCitations();
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    await hydrateArtifactImages(rootElement.value, artifactRefContext.value);
   });
 });
 
@@ -2349,6 +2577,7 @@ onUpdated(() => {
     // de-duped, and failures back off for a cooldown — so a not-yet-ready file
     // simply retries later (and the answerFullyRendered pass is the backstop).
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
+    await hydrateArtifactImages(rootElement.value, artifactRefContext.value);
   });
 });
 
@@ -2356,9 +2585,37 @@ onUpdated(() => {
 const agentRenderer = new marked.Renderer();
 agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
 
-const prepareAgentMarkdown = (markdown: string, cachedSvgHtml?: string | null): string => {
-  const mermaidSafe = !isConversationDone.value
-    ? prepareStreamingMermaidMarkdown(markdown, cachedSvgHtml ?? streamingMermaidSvgCache.value)
+// Files the agent generated in its sandbox carry the same `resource://` handle
+// as any other stored file, so they are matched against this reply's artifacts
+// before marked's default <img>. Everything else — including a handle that
+// belongs to a knowledge-base image rather than to this reply — keeps the
+// default output, which protectProviderImageSrcInHTML still rewrites.
+const defaultImageRenderer = new marked.Renderer().image;
+agentRenderer.image = function agentImageRenderer(token) {
+  const artifactHtml = renderArtifactReference({
+    href: token.href || '',
+    alt: token.text || '',
+    artifacts: artifactList.value,
+    labels: artifactRefLabels.value,
+    context: artifactRefContext.value,
+    streaming: !isSegmentDone.value,
+  });
+  if (artifactHtml !== null) return artifactHtml;
+  return defaultImageRenderer.call(this, token);
+};
+
+const hasCachedMermaidSvg = (cached: CachedMermaidSvgHtml): boolean => {
+  if (!cached) return false;
+  if (typeof cached === 'string') return cached.length > 0;
+  return cached.some((svg) => Boolean(svg));
+};
+
+const prepareAgentMarkdown = (markdown: string, cachedSvgHtml?: CachedMermaidSvgHtml): string => {
+  const cache = cachedSvgHtml ?? streamingMermaidSvgCache.value;
+  // Keep masking after the turn ends when SVG is already cached so v-html /
+  // v-stable-html cannot replace a painted diagram with mermaid source.
+  const mermaidSafe = !isSegmentDone.value || hasCachedMermaidSvg(cache)
+    ? prepareStreamingMermaidMarkdown(markdown, cache)
     : replaceIncompleteMermaidWithPlaceholder(markdown);
   return mermaidSafe.replace(/<(?:kb|web)\b[^>]*$/i, '');
 };
@@ -2374,7 +2631,7 @@ const renderAgentMarkdown = (
     renderer: agentRenderer,
     escapeMarkdown,
     sanitizeHtml: sanitizeMarkdownHTML,
-    streaming: !isConversationDone.value,
+    streaming: !isSegmentDone.value,
     knowledgeReferences: getReferencesForDrawer(),
     cachedMermaidSvgHtml: streamingMermaidSvgCache.value,
     prepareMarkdown: prepareAgentMarkdown,
@@ -2423,11 +2680,11 @@ const getToolSummary = (event: any): string => {
   // For search tools, don't return summary here - it will be displayed in SearchResults component
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
     return '';
-  } else if (toolName === 'get_document_info') {
+  } else if (toolName === 'get_document_info' || toolName === 'list_documents') {
     if (toolData?.title) {
       return t('agentStream.toolSummary.getDocument', { title: toolData.title });
     }
-  } else if (toolName === 'list_knowledge_chunks') {
+  } else if (toolName === 'read_document' || toolName === 'list_knowledge_chunks') {
     if (toolData?.faq_question) {
       return t('agentStream.toolSummary.listFaqEntry', { question: toolData.faq_question });
     }
@@ -2521,6 +2778,27 @@ const getPlanStatusSummary = (event: any): string => {
   return textParts.length > 0 ? textParts.join(' · ') : '';
 };
 
+/**
+ * One-line caption for a compaction card. The token counts are the point: they
+ * are what tells the user how much of the conversation the agent can no longer
+ * see verbatim.
+ */
+const compactionSummaryText = (event: any): string => {
+  const before = Number(event?.tokens_before) || 0;
+  const after = Number(event?.tokens_after) || 0;
+  const parts: string[] = [];
+  if (before > 0 && after > 0) {
+    parts.push(
+      t('agent.contextCompactedSummary', {
+        before: before.toLocaleString(),
+        after: after.toLocaleString(),
+      }),
+    );
+  }
+  if (event?.degraded) parts.push(t('agent.contextCompactedDegraded'));
+  return parts.join(t('agent.stepSummarySeparator'));
+};
+
 /** Render SVG assets in the channel / brand color via CSS mask. */
 function maskIconStyle(src: string, size = 18): Record<string, string> {
   if (!src) return {}
@@ -2595,6 +2873,9 @@ const getAttachmentParsingSummary = (event: any): string => {
 
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
+  if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
+  const mcpTitle = getMcpToolTitle(t, event)
+  if (mcpTitle) return mcpTitle
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
@@ -2604,6 +2885,21 @@ const getToolTitle = (event: any): string => {
     }
     if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
+    }
+    if (event.tool_name === 'read_skill') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getReadSkillTarget(event))}...`;
+    }
+    if (event.tool_name === 'execute_skill_script') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getEventSkillName(event))}...`;
+    }
+    if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_file' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
+    }
+    if (event.tool_name === 'shell_exec') {
+      return t('agentStream.toolStatus.shellExecRunning');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
@@ -2700,13 +2996,48 @@ const getToolTitle = (event: any): string => {
     return pageLabel ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」` : baseTitle;
   }
 
+  if (toolName === 'read_skill') {
+    return formatToolTitleWithDetail(getToolDescription(event), getReadSkillTarget(event));
+  }
+
+  if (toolName === 'list_sandbox_files' || toolName === 'read_file' || toolName === 'read_sandbox_file' || toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {
+    return formatToolTitleWithDetail(getToolDescription(event), getSandboxToolPath(event));
+  }
+
+  if (toolName === 'execute_skill_script') {
+    const command = previewShellCommand(skillScriptCommandLabel(event))
+    const baseTitle = formatToolTitleWithDetail(getToolDescription(event), getEventSkillName(event))
+    const rest = skillScriptTitleCommand(getEventSkillName(event), command)
+    return rest ? `${baseTitle}：${rest}` : baseTitle
+  }
+
+  if (toolName === 'shell_exec') {
+    const command = previewShellCommand(skillScriptCommandLabel(event))
+    const baseTitle = getToolDescription(event)
+    return command ? `${baseTitle}：${command}` : baseTitle
+  }
+
   // Use tool summary if available
   const summary = getToolSummary(event);
   return summary || getToolDescription(event);
 };
 
+const skillScriptCommandLabel = (event: any): string => {
+  const fromData = String(event?.tool_data?.command || event?.arguments?.command || '').trim()
+  if (fromData) return fromData
+  const skill = String(event?.tool_data?.skill_name || event?.arguments?.skill_name || '').trim()
+  const script = String(event?.tool_data?.script_path || event?.arguments?.script_path || '').trim()
+  const path = [skill, script].filter(Boolean).join('/')
+  const args = event?.tool_data?.args || event?.arguments?.args
+  if (Array.isArray(args) && args.length) {
+    return [path, ...args.map((arg: unknown) => String(arg))].filter(Boolean).join(' ')
+  }
+  return path
+}
+
 // Tool description
 const getToolDescription = (event: any): string => {
+  if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
@@ -2716,6 +3047,21 @@ const getToolDescription = (event: any): string => {
     }
     if (event.tool_name === 'query_understand') {
       return t('agentStream.toolStatus.queryUnderstanding');
+    }
+    if (event.tool_name === 'read_skill') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getReadSkillTarget(event))}...`;
+    }
+    if (event.tool_name === 'execute_skill_script') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getEventSkillName(event))}...`;
+    }
+    if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_file' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
+      const name = getLocalizedToolName(event.tool_name);
+      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
+    }
+    if (event.tool_name === 'shell_exec') {
+      return t('agentStream.toolStatus.shellExecRunning');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
@@ -2733,9 +3079,9 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.webSearch') : t('agentStream.toolStatus.webSearchFailed');
   } else if (toolName === 'grep_chunks') {
     return success ? t('agentStream.toolStatus.grepSearch') : t('agentStream.toolStatus.grepSearchFailed');
-  } else if (toolName === 'get_document_info') {
+  } else if (toolName === 'get_document_info' || toolName === 'list_documents') {
     return success ? t('agentStream.toolStatus.getDocInfo') : t('agentStream.toolStatus.getDocInfoFailed');
-  } else if (toolName === 'get_document_content' || toolName === 'wiki_read_source_doc') {
+  } else if (toolName === 'read_document' || toolName === 'get_document_content' || toolName === 'wiki_read_source_doc') {
     return success ? t('agentStream.toolStatus.viewDocument') : t('agentStream.toolStatus.calledFailed', { name: t('agentStream.toolStatus.viewDocument') });
   } else if (toolName === 'thinking') {
     return success ? t('agentStream.toolStatus.thinkingDone') : t('agentStream.toolStatus.thinkingFailed');
@@ -2747,6 +3093,9 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
+  } else if (toolName === 'shell_exec' || toolName === 'execute_skill_script' || toolName === 'read_skill' || toolName === 'list_sandbox_files' || toolName === 'read_file' || toolName === 'read_sandbox_file' || toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {
+    const localizedName = getLocalizedToolName(toolName);
+    return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else {
     const localizedName = getLocalizedToolName(toolName);
     return success ? t('agentStream.toolStatus.called', { name: localizedName }) : t('agentStream.toolStatus.calledFailed', { name: localizedName });
@@ -2862,6 +3211,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
   --stream-brand-12: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   --stream-brand-15: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
   --stream-brand-20: color-mix(in srgb, var(--td-brand-color) 20%, transparent);
+
+  &.is-steer-prefix {
+    margin-bottom: 0;
+    .tree-container { margin-bottom: 0; }
+  }
 
   &.is-rag-mode {
     margin-top: 0;
@@ -3059,7 +3413,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     border-left: 0;
     overflow: visible;
     position: relative;
-    transition: border-color 0.2s ease;
+    transition: border-color var(--app-motion-base) ease;
     box-shadow: none;
 
     >* {
@@ -3095,7 +3449,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .tool-summary {
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-primary);
     background: var(--td-bg-color-container);
     border-top: 1px solid var(--td-component-stroke);
@@ -3125,7 +3479,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
         border-radius: 3px;
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         color: var(--td-brand-color);
         font-weight: 500;
       }
@@ -3147,7 +3501,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   min-height: 24px;
   cursor: pointer;
   user-select: none;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease;
 
   &:hover {
     background-color: transparent;
@@ -3172,6 +3526,8 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .action-title-icon {
     flex-shrink: 0;
+
+    &.browser-tool-icon { width: 18px; height: 18px; color: var(--agent-step-icon-color); }
 
     &.t-icon {
       width: 18px;
@@ -3217,7 +3573,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     border-radius: 9px;
     background: var(--stream-brand-10);
     color: color-mix(in srgb, var(--td-brand-color) 80%, var(--td-text-color-secondary));
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 500;
     white-space: nowrap;
     flex-shrink: 0;
@@ -3246,18 +3602,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
-@keyframes slideInDown {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @keyframes slideIn {
   from {
     opacity: 0;
@@ -3267,71 +3611,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   to {
     opacity: 1;
     transform: translateX(0);
-  }
-}
-
-@keyframes pulse {
-
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.8;
-  }
-
-  50% {
-    transform: scale(1.5);
-    opacity: 0.3;
-  }
-}
-
-@keyframes pulseBorder {
-
-  0%,
-  100% {
-    border-left-color: var(--td-brand-color);
-    box-shadow: 0 1px 3px var(--stream-brand-6);
-  }
-
-  50% {
-    border-left-color: var(--td-brand-color);
-    box-shadow: 0 1px 4px var(--stream-brand-12);
-  }
-}
-
-@keyframes shakeError {
-
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-
-  10%,
-  30%,
-  50%,
-  70%,
-  90% {
-    transform: translateX(-2px);
-  }
-
-  20%,
-  40%,
-  60%,
-  80% {
-    transform: translateX(2px);
-  }
-}
-
-@keyframes actionPendingShimmer {
-  0% {
-    transform: translateX(-90%);
-  }
-
-  50% {
-    transform: translateX(-5%);
-  }
-
-  100% {
-    transform: translateX(90%);
   }
 }
 
@@ -3347,8 +3626,53 @@ const handleAddToKnowledge = (answerEvent: any) => {
   vertical-align: middle;
 }
 
+.sandbox-diff-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+
+  .diff-add {
+    color: var(--td-success-color);
+  }
+
+  .diff-del {
+    color: var(--td-error-color);
+  }
+}
+
+.sandbox-file-preview {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: var(--app-radius-sm);
+
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow: hidden;
+  }
+}
+
+.sandbox-file-preview-more {
+  margin-top: 4px;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
+}
+
 .action-show-icon {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   padding: 0 2px;
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
@@ -3404,7 +3728,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     flex-wrap: wrap;
 
     .status-icon {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       flex-shrink: 0;
 
       &.in-progress {
@@ -3430,16 +3754,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
       align-items: center;
       gap: 4px;
     }
-  }
-}
-
-@keyframes rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
   }
 }
 
@@ -3476,7 +3790,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     padding: 0 4px;
 
     .fallback-label {
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       color: var(--td-text-color-secondary);
       font-weight: 500;
       line-height: 1.5;
@@ -3487,14 +3801,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
     position: relative;
     background: var(--td-bg-color-secondarycontainer);
     border: 1px solid var(--td-component-stroke);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     overflow: hidden;
     margin: 0;
     padding: 0;
 
     .detail-output {
       font-family: var(--app-font-family-mono);
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       color: var(--td-text-color-primary);
       padding: 12px;
       margin: 0;
@@ -3538,7 +3852,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     margin-bottom: 6px;
 
     .arguments-label {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       font-weight: 600;
       color: var(--td-text-color-secondary);
       text-transform: uppercase;
@@ -3547,10 +3861,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 
   .detail-code {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     background: var(--td-bg-color-container);
     padding: 10px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     font-family: var(--app-font-family-mono);
     color: var(--td-text-color-primary);
     margin: 0;
@@ -3697,7 +4011,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 
   .tree-root .action-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
   }
 
@@ -3717,204 +4031,4 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 </style>
 
-<style lang="less">
-/* Global styles for teleported components */
-
-.wiki-graph-drawer {
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
-
-  .wiki-reader-meta {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .wiki-reader-meta-text {
-    font-size: 13px;
-    color: var(--td-text-color-placeholder);
-  }
-
-  // Wiki drawer is a non-chat reader surface. Chat answer Markdown styles are
-  // centralized in chat-markdown.less; do not copy these rules into chat message components.
-  .wiki-reader-body {
-    line-height: 1.6;
-    font-size: 14px;
-    color: var(--td-text-color-primary);
-
-    h1 {
-      font-size: 24px;
-      margin: 28px 0 16px;
-      font-weight: 600;
-      line-height: 1.4;
-    }
-
-    h2 {
-      font-size: 18px;
-      margin: 24px 0 12px;
-      font-weight: 600;
-      line-height: 1.4;
-    }
-
-    h3 {
-      font-size: 16px;
-      margin: 20px 0 10px;
-      font-weight: 600;
-      line-height: 1.5;
-    }
-
-    h4,
-    h5,
-    h6 {
-      font-size: 14px;
-      margin: 16px 0 8px;
-      font-weight: 600;
-      line-height: 1.5;
-    }
-
-    p {
-      margin: 0 0 14px;
-    }
-
-    ul,
-    ol {
-      margin: 0 0 14px;
-      padding-left: 24px;
-    }
-
-    li {
-      margin-bottom: 6px;
-      line-height: 1.6;
-    }
-
-    li>p {
-      margin-bottom: 6px;
-    }
-
-    blockquote {
-      margin: 0 0 14px;
-      padding: 10px 16px;
-      background: var(--td-bg-color-secondarycontainer);
-      border-left: 4px solid var(--td-component-border);
-      border-radius: 0 4px 4px 0;
-      color: var(--td-text-color-secondary);
-    }
-
-    code {
-      font-family: var(--app-font-family-mono);
-      font-size: 13px;
-      padding: 2px 4px;
-      background: var(--td-bg-color-secondarycontainer);
-      border-radius: 4px;
-      color: var(--td-brand-color);
-    }
-
-    pre {
-      margin: 0 0 14px;
-      padding: 12px 16px;
-      background: var(--td-bg-color-secondarycontainer);
-      border-radius: 6px;
-      overflow-x: auto;
-
-      code {
-        padding: 0;
-        background: transparent;
-        color: inherit;
-      }
-    }
-
-    p:has(img) {
-      text-align: center;
-      color: var(--td-text-color-secondary);
-      font-size: 13px;
-      margin-top: 16px;
-      margin-bottom: 24px;
-
-      img {
-        max-width: 100%;
-        max-height: 400px;
-        object-fit: contain;
-        border-radius: 6px;
-        display: block;
-        margin: 0 auto 8px;
-        cursor: zoom-in;
-        transition: opacity 0.2s;
-
-        &:hover {
-          opacity: 0.9;
-        }
-      }
-    }
-
-    a.wiki-content-link {
-      color: var(--td-brand-color);
-      text-decoration: none;
-      border-bottom: 1px dashed var(--td-brand-color);
-      cursor: pointer;
-      font-weight: 500;
-
-      &:hover {
-        border-bottom-style: solid;
-        text-decoration: none !important;
-      }
-    }
-
-    .chat-markdown-table {
-      width: fit-content;
-      max-width: 100%;
-      overflow-x: auto;
-      margin: 0 0 16px;
-      background: var(--td-bg-color-container);
-      border: 1px solid var(--td-component-stroke);
-      border-radius: 6px;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    table {
-      display: table;
-      width: max-content;
-      min-width: 0;
-      border-collapse: separate;
-      border-spacing: 0;
-      font-size: 13px;
-      line-height: 1.55;
-    }
-
-    table thead {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-
-    table th,
-    table td {
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--td-component-stroke);
-      border-right: 1px solid var(--td-component-stroke);
-      text-align: left;
-      vertical-align: top;
-      word-break: break-word;
-    }
-
-    table th {
-      font-weight: 600;
-      color: var(--td-text-color-primary);
-      white-space: nowrap;
-    }
-
-    table th:last-child,
-    table td:last-child {
-      border-right: none;
-    }
-
-    table tbody tr:last-child td {
-      border-bottom: none;
-    }
-
-    table tbody tr:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-
-    table code {
-      font-size: 12px;
-    }
-  }
-}
-</style>
+<style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>

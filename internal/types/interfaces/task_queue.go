@@ -30,9 +30,10 @@ type TaskPendingOpsRepository interface {
 	Enqueue(ctx context.Context, op *types.TaskPendingOp) error
 
 	// PeekBatch returns up to `limit` rows for the given queue tuple,
-	// ordered by id ASC (FIFO within the queue). Rows are NOT removed —
-	// callers must DeleteByIDs once the ops have been processed (or
-	// IncrFailCount and leave them for the next pass).
+	// ordered by fail_count ASC, id ASC (least-failed first; FIFO among
+	// rows with the same fail_count). Rows are NOT removed — callers must
+	// DeleteByIDs once the ops have been processed (or IncrFailCount and
+	// leave them for the next pass).
 	PeekBatch(ctx context.Context, taskType, scope, scopeID string, limit int) ([]*types.TaskPendingOp, error)
 
 	// ClaimBatch atomically claims eligible rows for the tuple, grouped by
@@ -42,9 +43,11 @@ type TaskPendingOpsRepository interface {
 	// several queued ops is never split across two concurrent batches.
 	// A row is eligible when it is unclaimed (claimed_at IS NULL) or its
 	// claim is stale (claimed_at < staleBefore) — the latter recovers rows
-	// abandoned by a crashed worker. On Postgres the per-key anchor row is
-	// locked with FOR UPDATE SKIP LOCKED so concurrent claimers take
-	// disjoint key sets without blocking or double-claiming.
+	// abandoned by a crashed worker. Keys are selected least-failed first
+	// (then oldest id) so a retried row cannot starve never-attempted
+	// work. On Postgres the per-key anchor row is locked with FOR UPDATE
+	// SKIP LOCKED so concurrent claimers take disjoint key sets without
+	// blocking or double-claiming.
 	//
 	// Claimed rows are NOT removed: the consumer must DeleteByIDs on
 	// success, or ReleaseByIDs to hand a still-retryable row back to the

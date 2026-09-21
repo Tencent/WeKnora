@@ -2,11 +2,13 @@ package router
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Tencent/WeKnora/internal/embedpolicy"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -75,8 +77,19 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
 	skills := r.Group("/skills")
 	{
-		// List all preloaded skills — Viewer+
+		// Usable skills for @ mention / chat — Viewer+
 		skills.GET("", g.Viewer(), skillHandler.ListSkills)
+		// Catalog reads are Viewer+ so the agent editor can show uninstalled skills.
+		skills.GET("/catalog", g.Viewer(), skillHandler.ListCatalog)
+	}
+	// Catalog writes bake into sandbox images; scoped API keys cannot hold them.
+	catalogWrite := g.apiKeyGroup(r.Group("/skills/catalog"), apiKeyFullAccess())
+	{
+		catalogWrite.POST("", g.Admin(), skillHandler.RegisterCatalog)
+		catalogWrite.POST("/:id/install", g.Admin(), skillHandler.InstallCatalog)
+		catalogWrite.GET("/:id/files", g.Admin(), skillHandler.ListCatalogFiles)
+		catalogWrite.GET("/:id/files/content", g.Admin(), skillHandler.GetCatalogFile)
+		catalogWrite.DELETE("/:id", g.Admin(), skillHandler.DeleteCatalog)
 	}
 }
 
@@ -102,14 +115,14 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.POST("/join-by-id", g.Admin(), orgHandler.JoinByOrganizationID)
 		// Get organization by ID — Viewer+
 		orgs.GET("/:id", g.Viewer(), orgHandler.GetOrganization)
-		// Update organization — Admin+ in caller's tenant.
-		// Service still gates on "caller's tenant is the org owner";
-		// the route guard adds a defence-in-depth layer that stops a
-		// tenant Viewer/Contributor from ever reaching the service.
+		// Update organization — Admin+ in caller's tenant. The service
+		// requires the caller's tenant to be an org admin (not only the
+		// owner), matching the settings UI; the route guard stops a tenant
+		// Viewer/Contributor from ever reaching the service.
 		orgs.PUT("/:id", g.Admin(), orgHandler.UpdateOrganization)
-		// Delete organization — Admin+ in caller's tenant. Same
-		// rationale as PUT above; deletion is irreversible so the
-		// route-layer floor is at least as strict.
+		// Delete organization — Admin+ in caller's tenant; the service
+		// further requires the org's owner tenant, since deletion is
+		// irreversible.
 		orgs.DELETE("/:id", g.Admin(), orgHandler.DeleteOrganization)
 		// Leave organization (Admin+ in caller's tenant only)
 		orgs.POST("/:id/leave", g.Admin(), orgHandler.LeaveOrganization)
@@ -218,6 +231,9 @@ func RegisterEmbedPublicRoutes(
 	if embedHandler == nil || embedService == nil {
 		return
 	}
+	// Nginx uses this read-only subrequest to put the channel CSP on embed.html.
+	// No token is required: framing policy must be available before JS bootstrap.
+	r.GET("/api/v1/embed-frame-policy", embedFramePolicyHandler(embedService))
 	embed := r.Group("/api/v1/embed/:channel_id", middleware.EmbedAuth(embedService, tenantService, redisClient))
 	{
 		embed.POST("/exchange", embedHandler.ExchangeEmbedSession)
@@ -314,56 +330,75 @@ func embedChannelIDFromPath(path string) string {
 	if !strings.HasPrefix(path, prefix) {
 		return ""
 	}
-	rest := strings.TrimPrefix(path, prefix)
-	if i := strings.IndexByte(rest, '/'); i >= 0 {
-		rest = rest[:i]
+	rest := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/")
+	// Never authorize the first segment of a path that the browser/API can
+	// normalize to a different channel (including encoded slashes or dot paths).
+	if rest == "" || rest == "." || rest == ".." ||
+		strings.TrimSpace(rest) != rest || strings.ContainsAny(rest, "/\\%?#") {
+		return ""
 	}
-	if i := strings.IndexByte(rest, '?'); i >= 0 {
-		rest = rest[:i]
-	}
-	return strings.TrimSpace(rest)
+	return rest
 }
 
-// embedFrameAncestorsMiddleware sets a per-channel `frame-ancestors` CSP on the
-// embed SPA page so it can only be framed by the channel's allowed origins.
-// When the channel declares no origins (or "*"), no restriction is applied,
-// matching the API allowlist semantics. Only GET/HEAD page loads are handled.
+// embedFramePolicyHandler serves only framing policy, never channel config.
+func embedFramePolicyHandler(svc interfaces.EmbedChannelService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Header("Content-Security-Policy", "frame-ancestors 'none'")
+		u, err := url.ParseRequestURI(c.GetHeader("X-Embed-Page-URI"))
+		if err != nil || u.IsAbs() || u.Host != "" {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		channelID := embedChannelIDFromPath(u.Path)
+		if channelID == "" {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		ch, err := svc.LookupEnabledChannel(c.Request.Context(), channelID)
+		if err != nil || ch == nil {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		policy := embedpolicy.FrameAncestors(ch.AllowedOriginsList())
+		c.Header("Content-Security-Policy", policy)
+		if policy == "frame-ancestors 'none'" {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// embedFrameAncestorsMiddleware applies the same policy to Lite's HTML response.
 func embedFrameAncestorsMiddleware(svc interfaces.EmbedChannelService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
 			c.Next()
 			return
 		}
+		if !strings.HasPrefix(c.Request.URL.Path, "/embed/") {
+			c.Next()
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.Header("Content-Security-Policy", "frame-ancestors 'none'")
 		channelID := embedChannelIDFromPath(c.Request.URL.Path)
 		if channelID == "" {
-			c.Next()
+			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
 		ch, err := svc.LookupEnabledChannel(c.Request.Context(), channelID)
 		if err != nil || ch == nil {
-			c.Next()
+			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
-		origins := ch.AllowedOriginsList()
-		sources := make([]string, 0, len(origins))
-		wildcard := false
-		for _, o := range origins {
-			o = strings.TrimSpace(o)
-			if o == "" {
-				continue
-			}
-			if o == "*" {
-				wildcard = true
-				break
-			}
-			sources = append(sources, o)
-		}
-		// No explicit origins or a wildcard => do not constrain framing here.
-		if wildcard || len(sources) == 0 {
-			c.Next()
+		policy := embedpolicy.FrameAncestors(ch.AllowedOriginsList())
+		c.Header("Content-Security-Policy", policy)
+		if policy == "frame-ancestors 'none'" {
+			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
-		c.Header("Content-Security-Policy", "frame-ancestors "+strings.Join(sources, " "))
 		c.Next()
 	}
 }

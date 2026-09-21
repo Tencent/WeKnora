@@ -1,8 +1,8 @@
 # 扩展点指南
 
-WeKnora 在文档解析、分块、检索、模型接入、联网搜索、数据源、IM 渠道、Agent 工具、对象存储九个层面都预留了清晰的扩展点。本章逐个给出：**核心接口定义（真实源码）→ 现有实现列表 → 新增实现步骤（含注册点文件）**。所有接口代码均摘自当前仓库源码。
+WeKnora 的解析器、分块策略、检索引擎、模型 Provider、搜索引擎、数据源、IM 适配器、Agent 工具和存储后端均通过接口接入。新增实现时，先实现对应接口，再在注册入口装配，并验证现有调用链。以下按扩展类型列出接口、已有实现和接入步骤。
 
-## 0. 扩展点总览
+## 扩展点总览 {#_0-扩展点总览}
 
 ```mermaid
 graph LR
@@ -40,7 +40,7 @@ Go 侧绝大多数扩展点的**注册中枢**是 `internal/container/container.
 
 ---
 
-## 1. 新增文档解析器（docreader，Python）
+## 新增文档解析器（docreader，Python） {#_1-新增文档解析器-docreader-python}
 
 ### 接口定义
 
@@ -108,7 +108,7 @@ reg.register(
 
 ---
 
-## 2. 新增分块策略（internal/infrastructure/chunker）
+## 新增分块策略（internal/infrastructure/chunker） {#_2-新增分块策略-internal-infrastructure-chunker}
 
 ### 接口定义
 
@@ -192,12 +192,12 @@ var splitByHeuristics = func(text string, cfg SplitterConfig, _ *DocProfile) []C
    - 增加策略常量（如 `StrategyMine = "mine"`）与新的 `StrategyTier`；
    - 在 `resolveChain`/`resolveChainWithProfile` 的 switch 中为新策略返回 tier 链（建议以 `TierLegacy` 兜底）；
    - 在 `runTier()` 中新增 case；
-3. 调用方无需改动：知识库的 `chunking_config.strategy`（JSONB）经 `internal/application/service/knowledge.go` 的 `buildSplitterConfig` 传入；
+3. 调用方无需改动：知识库的 `chunking_config.strategy`（JSONB）经 `internal/application/service/knowledge_process.go` 的 `buildSplitterConfigFromChunking` 传入；
 4. 用 `SplitWithDiagnostics` 写单测验证 tier 选择与 `ValidateChunks` 验收行为。
 
 ---
 
-## 3. 新增检索引擎（Retriever Engine）
+## 新增检索引擎（Retriever Engine） {#_3-新增检索引擎-retriever-engine}
 
 ### 接口定义
 
@@ -280,7 +280,7 @@ if slices.Contains(retrieveDriver, "postgres") {
 
 ---
 
-## 4. 新增模型 Provider（internal/models/provider）
+## 新增模型 Provider（internal/models/provider） {#_4-新增模型-provider-internal-models-provider}
 
 ### 接口定义
 
@@ -342,7 +342,7 @@ type Reranker interface {
 
 ### 现有实现
 
-`internal/models/provider/provider.go` 中已定义 26 个 `ProviderName` 常量：openai、anthropic、aliyun、zhipu、openrouter、requesty、siliconflow、jina、generic、deepseek、gemini、volcengine、hunyuan、minimax、mimo、gpustack、moonshot、modelscope、qianfan、qiniu、longcat、lkeap、nvidia 等。具体 Provider 实现分布在 `internal/models/provider/` 下的各文件（如 `zhipu.go`、`gemini.go`、`hunyuan.go`、`generic.go`）；特殊 embedding 实现如 `internal/models/embedding/jina.go`、`volcengine.go`、`nvidia.go`。
+`internal/models/provider/provider.go` 中已定义 27 个 `ProviderName` 常量：openai、anthropic、aliyun、zhipu、openrouter、litellm、requesty、siliconflow、jina、generic、deepseek、gemini、volcengine、hunyuan、minimax、mimo、gpustack、moonshot、modelscope、qianfan、qiniu、longcat、lkeap、nvidia 等。具体 Provider 实现分布在 `internal/models/provider/` 下的各文件（如 `zhipu.go`、`gemini.go`、`hunyuan.go`、`generic.go`）；特殊 embedding 实现如 `internal/models/embedding/jina.go`、`volcengine.go`、`nvidia.go`。
 
 ### 新增步骤
 
@@ -354,7 +354,7 @@ type Reranker interface {
 
 ---
 
-## 5. 新增联网搜索引擎（internal/infrastructure/web_search）
+## 新增联网搜索引擎（internal/infrastructure/web_search） {#_5-新增联网搜索引擎-internal-infrastructure-web-search}
 
 ### 接口定义
 
@@ -406,7 +406,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 
 ---
 
-## 6. 新增数据源连接器（internal/datasource/connector）
+## 新增数据源连接器（internal/datasource/connector） {#_6-新增数据源连接器-internal-datasource-connector}
 
 > 目录内附有实现指南 `internal/datasource/CONNECTOR_IMPLEMENTATION_GUIDE.md`，可对照阅读。
 
@@ -482,7 +482,7 @@ if err := registry.Register(mysourceConnector.NewConnector()); err != nil {
 
 ---
 
-## 7. 新增 IM 平台适配器（internal/im）
+## 新增 IM 平台适配器（internal/im） {#_7-新增-im-平台适配器-internal-im}
 
 ### 接口定义
 
@@ -563,7 +563,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 
 ---
 
-## 8. 新增 Agent 工具（internal/agent/tools）
+## 新增 Agent 工具（internal/agent/tools） {#_8-新增-agent-工具-internal-agent-tools}
 
 ### 接口定义
 
@@ -604,18 +604,20 @@ func (r *ToolRegistry) ListTools() []string
 
 ### 现有实现
 
-工具名常量集中在 `internal/agent/tools/definitions.go`：`thinking`、`todo_write`、`grep_chunks`、`knowledge_search`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`database_query`、`data_analysis`、`data_schema`、`web_search`、`web_fetch`、skills 工具（`execute_skill_script`、`read_skill`）、wiki 工具（`wiki_read_page`、`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_search`、`wiki_read_source_doc`、`wiki_flag_issue`、`wiki_read_issue`、`wiki_update_issue`）。实现文件与工具同名（如 `grep_chunks.go`、`knowledge_search.go`、`data_analysis.go`、`mcp_tool.go`——后者把 MCP 服务的远程工具包装成 `types.Tool`）。
+工具名常量集中在 `internal/agent/tools/definitions.go`：`thinking`、`todo_write`、知识检索工具（`search_knowledge`、`read_document`、`list_documents`、`query_knowledge_graph`）、`database_query`、`data_analysis`、`data_schema`、`web_search`、`web_fetch`、沙箱/技能工具（`shell_exec`、`read_file`、`list_sandbox_files`、`write_sandbox_file`、`edit_sandbox_file`），记忆工具（`search_memory`、`search_conversations`）、wiki 工具（`wiki_read_page`、`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_search`、`wiki_flag_issue`、`wiki_read_issue`、`wiki_update_issue`）。实现文件与工具同名（如 `search_knowledge.go`、`read_document.go`、`list_documents.go`、`data_analysis.go`、`mcp_tool.go`——后者把 MCP 服务的远程工具包装成 `types.Tool`）。
+
+已退役的检索工具名（`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc`）仍以 `LegacyTool*` 常量保留：`legacyToolSuccessors` 把它们映射到 `search_knowledge` / `read_document`，`NormalizeAllowedTools` 在注册工具时自动改写已保存 Agent 配置里的旧名字，`SuccessorToolName` / `IsLegacyRetrievalTool` 供其他服务判定。重命名或合并工具时请沿用这一机制，而不是做数据迁移。
 
 ### 新增步骤
 
 1. 在 `internal/agent/tools/` 新建 `my_tool.go`，实现 `types.Tool` 四个方法（`Parameters()` 返回 JSON Schema；注意工具名 ≤ 64 字符的 OpenAI 限制，见 `definitions.go` 的 `maxFunctionNameLength`）；
 2. **注册点一：`internal/agent/tools/definitions.go`** — 增加 `ToolMyTool = "my_tool"` 常量，并把工具加进 `AvailableToolDefinitions()`（UI 的可选工具列表，注释明确要求与已注册工具保持同步）；
 3. **注册点二：Agent 引擎的工具装配处** — 在构建 `ToolRegistry` 的服务逻辑（Agent 会话初始化，按 Agent 配置的允许工具列表实例化并 `RegisterTool`）中加入新工具的构造；带资源清理需求时实现 `Cleanup`（`types.Cleanable`）；
-4. 输出体量大的工具注意 `ToolRegistry` 的 `maxToolOutputSize` 截断行为；为工具编写 `_test.go`（同目录有大量参考，如 `grep_chunks_scope_test.go`）。
+4. 输出体量大的工具注意 `ToolRegistry` 的 `maxToolOutputSize` 截断行为；为工具编写 `_test.go`（同目录有大量参考，如 `search_knowledge_test.go`、`scope_authorization_test.go`）。
 
 ---
 
-## 9. 新增存储后端（对象存储）
+## 新增存储后端（对象存储） {#_9-新增存储后端-对象存储}
 
 ### 接口定义
 

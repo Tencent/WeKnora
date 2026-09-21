@@ -1,6 +1,6 @@
 # API 参考：模型与初始化
 
-路由注册：`internal/router/router.go` 的 `RegisterModelRoutes`、`RegisterInitializationRoutes`、`RegisterEvaluationRoutes`、`RegisterWeKnoraCloudRoutes`。Handler：`internal/handler/model.go`、`internal/handler/model_credentials.go`、`internal/handler/initialization.go`、`internal/handler/evaluation.go`、`internal/handler/weknoracloud.go`。
+管理模型、测试连接、初始化知识库，并发起评估任务。WeKnoraCloud 接口用于相关云服务接入。
 
 系统信息与系统管理（`/system`、`/system/admin`）接口见[系统与平台管理](./02-api-system.md)。
 
@@ -10,13 +10,29 @@ API key：`manage_models` 或 full-access。
 
 ### GET /api/v1/models/providers
 
-用途：模型厂商列表。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`）。Handler: `internal/handler/model.go`
+用途：厂商目录（前端据此动态渲染厂商下拉、图标、额外字段与模型选择）。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`）。Handler: `internal/handler/model_catalog.go`
 
-响应：200 `{"success":true,"data":[{value,label,description,defaultUrls,modelTypes}]}`
+响应：200 `{"success":true,"data":[ModelProviderDTO]}`，每项：
+
+| 字段 | 说明 |
+| --- | --- |
+| `value` / `label` / `labels` / `description` / `descriptions` / `website` | 厂商 id、品牌名、按语言的名称与描述 |
+| `icon` | `data:image/svg+xml;base64,...`，可直接用于 `<img src>` |
+| `api` / `auth` / `requiresAuth` | 默认协议（`openai-completions` 等）、鉴权方式、是否需要密钥 |
+| `defaultUrls` / `modelTypes` | 按模型类型的默认地址与支持的类型 |
+| `extraFields` | 厂商额外配置字段定义（`key,label,type,required,default,options,model_types,secret`），值存入 `parameters.extra_config` |
+| `models` | 内置模型目录（`id,name,type,api,reasoning,input,context_window,max_output_tokens,dimension,thinking_levels,cost`） |
+| `thinking` | 厂商级思考编码摘要（`format`、`levels`） |
 
 ```bash
 curl "$BASE/api/v1/models/providers?model_type=chat" -H "Authorization: Bearer $TOKEN"
 ```
+
+### GET /api/v1/models/catalog/resolve
+
+用途：按厂商、模型名、`base_url` 与 `extra_config` 解析有效接入配置（协议、思考等级、上下文），供模型编辑器实时展示。权限：Viewer+。查询参数：`provider`（必填）、`model`、`base_url`、`model_type`、`api`、`thinking_control`、`remote_model_name`。
+
+响应：200 `{"success":true,"data":{provider,api,base_url,remote_model,cataloged,model,capabilities}}`，其中 `capabilities` 为 `{provider,api,cataloged,reasoning,thinking_levels,thinking_format,input,context_window,max_output_tokens,max_tokens_field}`。同一结构也随对话/视觉模型的 `ModelResponse.capabilities` 返回。
 
 ### POST /api/v1/models
 
@@ -85,6 +101,30 @@ curl -X PUT $BASE/api/v1/models/m-1 -H "Authorization: Bearer $TOKEN" \
 
 响应：200 `{"success":true,"message":"Model deleted"}`
 
+仍被当前空间的知识库、智能体或长期记忆引用时，响应为 HTTP 400；兼容 message 保留，同时 `error.code=2300`，`error.details` 给出具体对象和引用位置：
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": 2300,
+    "message": "model is used by 2 knowledge base(s); reconfigure or remove those references before deleting",
+    "details": {
+      "knowledge_bases": [
+        {"id": "kb-1", "name": "Product docs", "bindings": ["vlm_model"]},
+        {"id": "kb-2", "name": "Engineering", "bindings": ["vlm_model"]}
+      ],
+      "agents": [],
+      "long_term_memory": {"bindings": []},
+      "knowledge_base_total": 2,
+      "agent_total": 0
+    }
+  }
+}
+```
+
+知识库绑定值：`embedding_model`、`summary_model`、`image_processing_model`、`vlm_model`、`asr_model`、`wiki_synthesis_model`、`auto_tag_model`；智能体绑定值：`chat_model`、`rerank_model`、`vlm_model`、`asr_model`、`query_understand_model`、`follow_up_model`；长期记忆绑定值：`embedding_model`、`extract_model`。详情包含对象 `id`、`name`、合并后的 `bindings`，以及 `knowledge_base_total` / `agent_total`。列表最多各 50 条，删除守卫以总数为准。
+
 ```bash
 curl -X DELETE $BASE/api/v1/models/m-1 -H "Authorization: Bearer $TOKEN"
 ```
@@ -148,6 +188,8 @@ Handler: `internal/handler/initialization.go`。KB 配置类：API key `manage_k
 
 用途：读取 KB 当前模型/解析配置。权限：Viewer+，KB read。
 
+模型 `baseUrl` 仅对 KB 所属空间的 Admin+（或 full-access / `manage_tenant_settings` API key）返回。通过组织分享访问的空间只能看到凭证是否已配置（`credentials.*`），看不到来源空间的模型地址和存储桶信息。
+
 响应：200 `{"success":true,"data":{"hasFiles",llm,embedding,rerank,multimodal,documentSplitting,nodeExtract,questionGeneration}}`
 
 ```bash
@@ -157,6 +199,8 @@ curl $BASE/api/v1/initialization/config/kb-1 -H "Authorization: Bearer $TOKEN"
 ### POST /api/v1/initialization/initialize/:kbId
 
 用途：初始化 KB 的模型与解析配置（首次配置向导）。权限：KB 创建者 OR Admin+，KB write。
+
+只有 KB 所属空间可以调用；通过组织分享获得编辑权限的空间会被拒绝（403）。KB 已绑定模型时，该接口会原地更新这些模型的配置，这一步需要与 `PUT /models/:id` 相同的权限（Admin+，或拥有 `manage_models` 能力的 API key），否则 403。
 
 主要字段（`InitializationRequest`）：
 
@@ -184,6 +228,8 @@ curl -X POST $BASE/api/v1/initialization/initialize/kb-1 -H "Authorization: Bear
 ### PUT /api/v1/initialization/config/:kbId
 
 用途：更新 KB 模型/分块配置（`KBModelConfigRequest`：`llmModelId` 必填，`embeddingModelId`、`vlm_config`、`asr_config`、`documentSplitting.*`、`multimodal.enabled`、`storageProvider`、`storageBackendId`、`nodeExtract.*`、`questionGeneration.*` 可选）。权限：KB 创建者 OR Admin+，KB write。
+
+通过组织分享访问时，需要有效分享权限为 admin；editor 只能编辑内容，不能改设置（403）。存储绑定（`storageBackendId` / `storageProvider`）只有 KB 所属空间可以修改，其他空间提交与当前不同的值会返回 403。
 
 响应：200 `{"success":true,"message":"配置更新成功"}`
 
@@ -354,3 +400,7 @@ curl -X POST $BASE/api/v1/evaluation -H "Authorization: Bearer $TOKEN" \
 ```bash
 curl "$BASE/api/v1/evaluation?task_id=task-1" -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterModelRoutes`、`RegisterInitializationRoutes`、`RegisterEvaluationRoutes`、`RegisterWeKnoraCloudRoutes`。Handler：`internal/handler/model.go`、`internal/handler/model_credentials.go`、`internal/handler/initialization.go`、`internal/handler/evaluation.go`、`internal/handler/weknoracloud.go`。

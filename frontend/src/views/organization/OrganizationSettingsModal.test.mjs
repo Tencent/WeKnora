@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const source = readFileSync(new URL('./OrganizationSettingsModal.vue', import.meta.url), 'utf8')
+// 遮罩层由共享壳 SettingsModalShell 渲染，overscroll 规则也随之搬到那里。
+const shellSource = readFileSync(new URL('../../components/SettingsModalShell.vue', import.meta.url), 'utf8')
 
 test('reviewing join requests goes through the store and refreshes modal data', () => {
   assert.match(
@@ -30,6 +32,6 @@ test('organization settings lock and restore background scrolling', () => {
   assert.match(source, /document\.body\.style\.overflow = 'hidden'/)
   assert.match(source, /document\.body\.style\.overflow = previousBodyOverflow/)
   assert.match(source, /onBeforeUnmount\(\(\) => \{\s*unlockBackgroundScroll\(\)/)
-  assert.match(source, /\.settings-overlay\s*\{[\s\S]*?overscroll-behavior: none;/)
+  assert.match(shellSource, /\.settings-overlay\s*\{[\s\S]*?overscroll-behavior: none;/)
   assert.match(source, /\.content-wrapper\s*\{[\s\S]*?overscroll-behavior: contain;/)
 })

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -407,10 +408,21 @@ type SearchParams struct {
 }
 
 // HybridSearch performs hybrid search.
-func (c *Client) HybridSearch(ctx context.Context, knowledgeBaseID string, params *SearchParams) ([]*SearchResult, error) {
+// Pass ResourceURLOptions to receive public HTTP(S) file URLs in results.
+func (c *Client) HybridSearch(
+	ctx context.Context,
+	knowledgeBaseID string,
+	params *SearchParams,
+	opts ...ResourceURLOptions,
+) ([]*SearchResult, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/hybrid-search", knowledgeBaseID)
 
-	resp, err := c.doRequest(ctx, http.MethodPost, path, params, nil)
+	queryParams := url.Values{}
+	if len(opts) > 0 {
+		applyResourceURLQuery(queryParams, &opts[0])
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, path, params, queryParams)
 	if err != nil {
 		return nil, err
 	}

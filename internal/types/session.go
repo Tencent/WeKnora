@@ -46,6 +46,8 @@ type SummaryConfig struct {
 	MaxCompletionTokens int `json:"max_completion_tokens"`
 	// Thinking - whether to enable thinking mode
 	Thinking *bool `json:"thinking"`
+	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // ContextCompressionStrategy represents the strategy for context compression
@@ -106,6 +108,23 @@ type Session struct {
 	// owner: sessions outlive sandboxes by months, so treating it as
 	// permanent would make "no session references this config" never true.
 	SandboxConfigID string `json:"sandbox_config_id,omitempty" gorm:"type:varchar(36)"`
+
+	// ParentSessionID names the session this one was forked from. Empty for
+	// ordinary sessions. Deliberately not a foreign key: the parent may be
+	// deleted while the branch lives on, and a branch must not cascade away
+	// with it. A dangling value simply renders as an ordinary session.
+	ParentSessionID string `json:"parent_session_id,omitempty" gorm:"type:varchar(36);index"`
+
+	// ForkedFromMessageID is the user or assistant message, IN THE PARENT
+	// SESSION, that the fork branched at. For a user point, messages strictly
+	// before it were copied here. For an assistant point, that answer is
+	// included so the branch continues after it.
+	ForkedFromMessageID string `json:"forked_from_message_id,omitempty" gorm:"type:varchar(36)"`
+
+	// ForkBootstrap holds the one-shot sandbox provisioning instructions for a
+	// forked session. Nil for ordinary sessions and for forks that have
+	// already provisioned. See types.ForkBootstrap.
+	ForkBootstrap *ForkBootstrap `json:"-" gorm:"type:jsonb;column:fork_bootstrap"`
 
 	// // Strategy configuration
 	// KnowledgeBaseID   string              `json:"knowledge_base_id"`                    // 关联的知识库ID
@@ -175,7 +194,33 @@ func SessionRequiresAdminConsoleRead(s *Session, imPlatform string) bool {
 		strings.HasPrefix(s.UserID, PrincipalEmbedSession+":") {
 		return true
 	}
+	// Defence in depth for skill maintenance transcripts: the listing hides
+	// them, and this keeps a leaked session id from being opened by a
+	// non-admin who happens to own the row.
+	if IsSkillMaintenanceDescription(s.Description) {
+		return true
+	}
 	return strings.TrimSpace(imPlatform) != ""
+}
+
+// IsSkillMaintenanceDescription reports whether description is the reserved
+// prefix that hides skill-install sessions from the console list.
+func IsSkillMaintenanceDescription(description string) bool {
+	return strings.HasPrefix(description, SkillMaintenanceSessionMarker)
+}
+
+// SanitizeClientSessionDescription keeps the skill-maintenance marker off
+// client-writable descriptions. A row that is already a maintenance session
+// keeps its stored description so a PUT cannot un-hide it; any other row
+// drops a planted marker rather than accepting it.
+func SanitizeClientSessionDescription(incoming, existing string) string {
+	if IsSkillMaintenanceDescription(existing) {
+		return existing
+	}
+	if IsSkillMaintenanceDescription(incoming) {
+		return ""
+	}
+	return incoming
 }
 
 // SessionListQuery bundles the parameters for listing sessions.
@@ -251,16 +296,17 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 // to the frontend by GetSession so the chat input can restore the same agent,
 // model, KB scope, etc. the user had selected last time.
 type SessionLastRequestState struct {
-	AgentID          string         `json:"agent_id,omitempty"`
-	AgentEnabled     bool           `json:"agent_enabled"`
-	ModelID          string         `json:"model_id,omitempty"`
-	KnowledgeBaseIDs []string       `json:"knowledge_base_ids,omitempty"`
-	KnowledgeIDs     []string       `json:"knowledge_ids,omitempty"`
-	TagIDs           []string       `json:"tag_ids,omitempty"`
-	MCPServiceIDs    []string       `json:"mcp_service_ids,omitempty"`
-	SkillNames       []string       `json:"skill_names,omitempty"`
-	MentionedItems   MentionedItems `json:"mentioned_items,omitempty"`
-	WebSearchEnabled bool           `json:"web_search_enabled"`
+	AgentID             string         `json:"agent_id,omitempty"`
+	AgentEnabled        bool           `json:"agent_enabled"`
+	ModelID             string         `json:"model_id,omitempty"`
+	KnowledgeBaseIDs    []string       `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs        []string       `json:"knowledge_ids,omitempty"`
+	TagIDs              []string       `json:"tag_ids,omitempty"`
+	MCPServiceIDs       []string       `json:"mcp_service_ids,omitempty"`
+	SkillNames          []string       `json:"skill_names,omitempty"`
+	MentionedItems      MentionedItems `json:"mentioned_items,omitempty"`
+	LocalBrowserEnabled bool           `json:"local_browser_enabled"`
+	WebSearchEnabled    bool           `json:"web_search_enabled"`
 }
 
 // Value implements driver.Valuer for SessionLastRequestState (JSONB).

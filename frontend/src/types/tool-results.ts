@@ -25,7 +25,14 @@ export type DisplayType =
     | 'wiki_write_page'
     | 'wiki_replace_text'
     | 'wiki_rename_page'
-    | 'wiki_delete_page';
+    | 'wiki_delete_page'
+    | 'shell_exec'
+    | 'list_sandbox_files'
+    | 'write_sandbox_file'
+    | 'edit_sandbox_file'
+    | 'read_skill'
+    | 'mcp_discovery'
+    | 'mcp_call';
 
 // Search result item
 export interface SearchResultItem {
@@ -128,13 +135,20 @@ export interface DocumentInfoDocument {
     type_icon?: string;
 }
 
+// Emitted by list_documents (paged) and by the retired get_document_info tool
+// still present in stored chat history.
 export interface DocumentInfoData {
     display_type: 'document_info';
     documents?: DocumentInfoDocument[];
-    total_docs: number;
-    requested: number;
+    total_docs?: number;
+    requested?: number;
     errors?: string[];
     title?: string;
+    // list_documents pagination
+    page?: number;
+    page_size?: number;
+    next_page?: number;
+    knowledge_base_id?: string;
 }
 
 // Graph query results data
@@ -184,6 +198,14 @@ export interface WebSearchResultItem {
     content?: string;
     source?: string;
     published_at?: string;
+    age?: string;
+    page_status?: 'success' | 'failed';
+    page_verified?: boolean;
+    page_content?: string;
+    page_error?: string;
+    page_truncated?: boolean;
+    full_output_path?: string;
+    storage_error?: string;
 }
 
 // Web search results data
@@ -197,7 +219,6 @@ export interface WebSearchResultsData {
 // Web fetch result item
 export interface WebFetchResultItem {
     url: string;
-    prompt?: string;
     status?: 'success' | 'failed' | 'skipped';
     retryable?: boolean;
     error_code?: string;
@@ -206,8 +227,14 @@ export interface WebFetchResultItem {
     summary_status?: string;
     summary_error_code?: string;
     summary_error_message?: string;
+    full_output_path?: string;
+    storage_error?: string;
     raw_content?: string;
     content_length?: number;
+    offset?: number;
+    returned_chars?: number;
+    truncated?: boolean;
+    next_offset?: number;
     method?: string;
     /** @deprecated use error_message */
     error?: string;
@@ -269,15 +296,55 @@ export interface GrepResultsData {
     max_results: number;
 }
 
-// Knowledge chunks list data (list_knowledge_chunks tool)
+// Chunk row inside a knowledge_chunks_list payload. `role` / `match_snippet`
+// are only set by read_document in query mode (in-document search).
+export interface KnowledgeChunksListChunk {
+    index?: number;
+    chunk_id?: string;
+    chunk_index?: number;
+    content?: string;
+    knowledge_id?: string;
+    knowledge_base_id?: string;
+    chunk_type?: string;
+    role?: 'match' | 'context_before' | 'context_after' | 'focus';
+    match_snippet?: string;
+}
+
+// Document metadata attached to a read_document result.
+export interface KnowledgeChunksListDocument {
+    knowledge_id?: string;
+    title?: string;
+    type?: string;
+    source?: string;
+    file_name?: string;
+    file_type?: string;
+    file_size?: number;
+    parse_status?: string;
+    chunk_count?: number;
+    description?: string;
+    metadata?: Record<string, any>;
+}
+
+// Knowledge chunks list data (read_document tool; also emitted by the retired
+// list_knowledge_chunks / wiki_read_source_doc tools still present in stored
+// chat history)
 export interface KnowledgeChunksListData {
     display_type: 'knowledge_chunks_list';
     knowledge_id?: string;
     knowledge_title?: string;
     total_chunks?: number;
     fetched_chunks?: number;
+    chunks?: KnowledgeChunksListChunk[];
+    document?: KnowledgeChunksListDocument;
+    // Pagination (offset-based for read_document, page-based for legacy tools)
+    offset?: number;
+    next_offset?: number;
     page?: number;
     page_size?: number;
+    // read_document query mode (in-document search)
+    query?: string;
+    match_count?: number;
+    truncated?: boolean;
     faq_question?: string;
     faq_id?: string;
     single_chunk?: boolean;
@@ -321,6 +388,63 @@ export interface WikiDeletePageData {
     affected_pages?: string[];
 }
 
+export interface ShellExecData {
+    display_type: 'shell_exec';
+    command?: string;
+    work_dir?: string;
+    exit_code?: number;
+    duration_ms?: number;
+    killed?: boolean;
+    truncated?: boolean;
+    stdout?: string;
+    stderr?: string;
+    stdout_binary?: boolean;
+    stderr_binary?: boolean;
+    stdout_truncated?: boolean;
+    stderr_truncated?: boolean;
+}
+
+export interface SandboxFileEntry {
+    name?: string;
+    path: string;
+    size?: number;
+    modified_at?: string;
+}
+
+export interface ListSandboxFilesData {
+    display_type?: 'list_sandbox_files';
+    session_id?: string;
+    path?: string;
+    root?: string;
+    entries?: SandboxFileEntry[];
+    count?: number;
+    truncated?: boolean;
+}
+
+export interface WriteSandboxFileData {
+    display_type?: 'write_sandbox_file' | 'edit_sandbox_file';
+    session_id?: string;
+    path?: string;
+    root?: string;
+    name?: string;
+    size?: number;
+    replacements?: number;
+    added_lines?: number;
+    removed_lines?: number;
+    preview?: string;
+}
+
+export interface ReadSkillData {
+    display_type?: 'read_skill';
+    skill_name?: string;
+    file_path?: string;
+    description?: string;
+    instructions?: string;
+    content?: string;
+    files?: string[];
+    skill_dir?: string;
+}
+
 // Union type for all wiki edit data
 export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
 
@@ -342,7 +466,10 @@ export type ToolResultData =
     | WikiWritePageData
     | WikiReplaceTextData
     | WikiRenamePageData
-    | WikiDeletePageData;
+    | WikiDeletePageData
+    | ShellExecData
+    | ListSandboxFilesData
+    | ReadSkillData;
 
 // Action data (from index.vue)
 export interface ActionData {

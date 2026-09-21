@@ -102,10 +102,21 @@
               </div>
             </div>
             <p class="model-card__subtitle">
-              <span>{{ vendorLabel(model) }}</span>
+              <span class="model-card__vendor">
+                <img v-if="vendorIcon(model)" :src="vendorIcon(model)" class="model-card__vendor-icon" alt="" />
+                <span>{{ vendorLabel(model) }}</span>
+              </span>
               <template v-if="model._modelType === 'embedding' && model.dimension">
                 <span class="model-card__sep">·</span>
                 <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
+              </template>
+              <template v-if="model._modelType === 'chat' || model._modelType === 'vllm'">
+                <span class="model-card__sep">·</span>
+                <span
+                  class="model-card__ctx"
+                  :class="{ 'model-card__ctx--default': isDefaultContextWindow(model.contextWindow) }"
+                  :title="contextWindowTitle(model.contextWindow)"
+                >{{ formatContextWindow(model.contextWindow) }}</span>
               </template>
               <template v-if="model._modelType === 'chat' && model.supportsVision">
                 <span class="model-card__sep">·</span>
@@ -132,39 +143,194 @@
       </div>
     </t-loading>
 
+    <t-dialog
+      v-model:visible="showUsageDialog"
+      :header="$t('modelSettings.usage.title')"
+      :footer="false"
+      width="680px"
+      destroy-on-close
+    >
+      <div v-if="usageConflict" class="model-usage-dialog">
+        <p class="model-usage-dialog__description">
+          {{ $t('modelSettings.usage.description', { name: usageConflictModelName }) }}
+        </p>
+
+        <div class="model-usage-dialog__content">
+          <section v-if="usageConflict.knowledge_bases.length" class="model-usage-group">
+            <h3>
+              {{ $t('modelSettings.usage.knowledgeBases', {
+                count: modelUsageResourceCount(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)
+              }) }}
+            </h3>
+            <ul>
+              <li v-for="resource in usageConflict.knowledge_bases" :key="resource.id">
+                <div class="model-usage-resource">
+                  <strong>{{ resource.name || resource.id }}</strong>
+                  <div class="model-usage-bindings">
+                    <t-tag
+                      v-for="(binding, index) in resource.bindings"
+                      :key="`${binding}-${index}`"
+                      size="small"
+                      variant="light"
+                    >
+                      {{ $t(modelUsageBindingI18nKey(binding)) }}
+                    </t-tag>
+                  </div>
+                </div>
+                <t-button
+                  theme="primary"
+                  variant="text"
+                  size="small"
+                  @click="openUsageResource('knowledge_base', resource.id, resource.bindings)"
+                >
+                  {{ $t('modelSettings.usage.openConfiguration') }}
+                </t-button>
+              </li>
+            </ul>
+            <p
+              v-if="modelUsageListTruncated(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)"
+              class="model-usage-truncated"
+            >
+              {{ $t('modelSettings.usage.truncated', {
+                shown: usageConflict.knowledge_bases.length,
+                total: modelUsageResourceCount(usageConflict.knowledge_bases, usageConflict.knowledge_base_total)
+              }) }}
+            </p>
+          </section>
+
+          <section v-if="usageConflict.agents.length" class="model-usage-group">
+            <h3>{{ $t('modelSettings.usage.agents', {
+              count: modelUsageResourceCount(usageConflict.agents, usageConflict.agent_total)
+            }) }}</h3>
+            <ul>
+              <li v-for="resource in usageConflict.agents" :key="resource.id">
+                <div class="model-usage-resource">
+                  <strong>{{ resource.name || resource.id }}</strong>
+                  <div class="model-usage-bindings">
+                    <t-tag
+                      v-for="(binding, index) in resource.bindings"
+                      :key="`${binding}-${index}`"
+                      size="small"
+                      variant="light"
+                    >
+                      {{ $t(modelUsageBindingI18nKey(binding)) }}
+                    </t-tag>
+                  </div>
+                </div>
+                <t-button
+                  theme="primary"
+                  variant="text"
+                  size="small"
+                  @click="openUsageResource('agent', resource.id, resource.bindings)"
+                >
+                  {{ $t('modelSettings.usage.openConfiguration') }}
+                </t-button>
+              </li>
+            </ul>
+            <p
+              v-if="modelUsageListTruncated(usageConflict.agents, usageConflict.agent_total)"
+              class="model-usage-truncated"
+            >
+              {{ $t('modelSettings.usage.truncated', {
+                shown: usageConflict.agents.length,
+                total: modelUsageResourceCount(usageConflict.agents, usageConflict.agent_total)
+              }) }}
+            </p>
+          </section>
+
+          <section v-if="usageConflict.long_term_memory.bindings.length" class="model-usage-group">
+            <h3>{{ $t('modelSettings.usage.longTermMemory') }}</h3>
+            <div class="model-usage-memory">
+              <div class="model-usage-bindings">
+                <t-tag
+                  v-for="(binding, index) in usageConflict.long_term_memory.bindings"
+                  :key="`${binding}-${index}`"
+                  size="small"
+                  variant="light"
+                >
+                  {{ $t(modelUsageBindingI18nKey(binding)) }}
+                </t-tag>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="model-usage-dialog__actions">
+          <t-button @click="showUsageDialog = false">{{ $t('common.close') }}</t-button>
+        </div>
+      </div>
+    </t-dialog>
+
     <!-- 模型编辑器抽屉 -->
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
-      @confirm="handleModelSave" />
+      :save-model="handleModelSave" />
     <ModelDebugDrawer v-model:visible="showDebugDrawer" :models="allModels" />
 
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
-import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import {
+  listModels,
+  createModel,
+  updateModel as updateModelAPI,
+  deleteModel as deleteModelAPI,
+  ModelInUseError,
+  modelUsageBindingI18nKey,
+  modelUsageKnowledgeBaseSection,
+  modelUsageListTruncated,
+  modelUsageResourceCount,
+  modelUsageResourceRoute,
+  type ModelConfig,
+  type ModelUsageDetails,
+  type ModelUsageResourceKind,
+} from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
+import { focusKbEditorSection } from '@/config/contextualGuides'
+import { useChatResourcesStore } from '@/stores/chatResources'
+import { useModelProvidersStore } from '@/stores/modelProviders'
+import {
+  formatContextWindow,
+  isDefaultContextWindow,
+  effectiveContextWindow,
+} from '@/utils/contextWindow'
 
-const { t, te } = useI18n()
+const { t, locale } = useI18n()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
+const chatResources = useChatResourcesStore()
+const providersStore = useModelProvidersStore()
+const router = useRouter()
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
 
 const showDialog = ref(false)
 const showDebugDrawer = ref(false)
+const showUsageDialog = ref(false)
+const usageConflict = ref<ModelUsageDetails | null>(null)
+const usageConflictModelName = ref('')
 const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
 const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
 
 const MODEL_TAB_TYPES: FilterType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
+  'home',
+  'knowledgeBaseList',
+  'knowledgeBaseDetail',
+  'globalCreatChat',
+  'kbCreatChat',
+  'chat',
+])
 watch(
   () => uiStore.settingsInitialSubSection,
   (sub) => {
@@ -206,13 +372,19 @@ function convertToLegacyFormat(model: ModelConfig) {
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
+    contextWindow: model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
+    maxOutputTokens: model.parameters.max_output_tokens || undefined,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
-    lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
-    // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
-    thinkingControl: model.parameters.extra_config?.thinking_control,
+    // 厂商额外字段 / 高级覆盖原样带入编辑器（thinking_control 单独拆出，仅旧数据才有）
+    extraConfig: Object.fromEntries(
+      Object.entries(model.parameters.extra_config || {}).filter(([key]) => key !== 'thinking_control'),
+    ) as Record<string, string>,
+    thinkingControl: model.parameters.extra_config?.thinking_control || '',
+    spec: model.parameters.spec || null,
+    capabilities: model.capabilities,
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -261,15 +433,19 @@ const sourceLabel = (type: ModelType) => {
 }
 
 // Maps a backend `provider` id (e.g. "openai", "aliyun", "weknoracloud")
-// to its localized short label. Reuses the same i18n keys the editor's
-// provider dropdown uses, so the model card and the editor stay in sync
-// when a provider is renamed. Falls back to '' when the backend didn't
-// store a provider — caller falls back to sourceLabel().
+// to the vendor's localized name from the backend catalog (modelProviders
+// store), so the model card and the editor dropdown always agree. Falls
+// back to the raw id when the catalog has not loaded yet, and to '' when
+// the backend didn't store a provider — caller falls back to sourceLabel().
 const providerLabel = (model: any): string => {
   const id = model.provider
   if (!id) return ''
-  const key = `model.editor.providers.${id}.label`
-  return te(key) ? t(key) : id
+  return providersStore.labelFor(id, String(locale.value || '')) || id
+}
+
+const vendorIcon = (model: any): string => {
+  if (model.source === 'local' || !model.provider) return ''
+  return providersStore.iconFor(model.provider)
 }
 
 // What the vendor chip on a card shows. Keeps the chip text uniformly
@@ -295,6 +471,13 @@ const modelDisplayName = (model: any) => {
   return displayName || model.name
 }
 
+const contextWindowTitle = (tokens?: number) => {
+  if (isDefaultContextWindow(tokens)) {
+    return t('model.editor.contextWindowDefaultHint', { value: formatContextWindow(tokens) })
+  }
+  return t('model.editor.contextWindowTokens', { count: effectiveContextWindow(tokens) })
+}
+
 const emptyHint = computed(() => {
   if (activeTypeFilter.value === 'all') return t('modelSettings.chat.empty')
   const map: Record<ModelType, string> = {
@@ -310,9 +493,14 @@ const emptyHint = computed(() => {
 // 加载模型列表
 const loadModels = async () => {
   loading.value = true
+  // 厂商图标 / 本地化名称来自目录 store；与模型列表并行加载，失败不影响卡片渲染。
+  void providersStore.ensureLoaded('').catch(() => {})
   try {
     const models = await listModels()
     allModels.value = models
+    // 设置页自己 listModels 之后立刻写回空间级缓存。否则对话输入栏 /
+    // 智能体编辑器会继续拿 60s TTL 里的旧 context_window，刷新页面才对。
+    chatResources.replaceModels(models)
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
     MessagePlugin.error(error.message)
@@ -375,38 +563,32 @@ const handleModelSave = async (modelData: any) => {
 
   try {
     if (!modelData.modelName || !modelData.modelName.trim()) {
-      MessagePlugin.warning(t('modelSettings.toasts.nameRequired'))
-      return
+      throw new Error(t('modelSettings.toasts.nameRequired'))
     }
 
     if (modelData.modelName.trim().length > 100) {
-      MessagePlugin.warning(t('modelSettings.toasts.nameTooLong'))
-      return
+      throw new Error(t('modelSettings.toasts.nameTooLong'))
     }
 
     if (modelData.displayName && modelData.displayName.trim().length > 100) {
-      MessagePlugin.warning(t('modelSettings.toasts.displayNameTooLong'))
-      return
+      throw new Error(t('modelSettings.toasts.displayNameTooLong'))
     }
 
     if (modelData.source === 'remote') {
       if (!modelData.baseUrl || !modelData.baseUrl.trim()) {
-        MessagePlugin.warning(t('modelSettings.toasts.baseUrlRequired'))
-        return
+        throw new Error(t('modelSettings.toasts.baseUrlRequired'))
       }
 
       try {
         new URL(modelData.baseUrl.trim())
       } catch {
-        MessagePlugin.warning(t('modelSettings.toasts.baseUrlInvalid'))
-        return
+        throw new Error(t('modelSettings.toasts.baseUrlInvalid'))
       }
     }
 
     if (saveType === 'embedding') {
       if (!modelData.dimension || modelData.dimension < 128 || modelData.dimension > 4096) {
-        MessagePlugin.warning(t('modelSettings.toasts.dimensionInvalid'))
-        return
+        throw new Error(t('modelSettings.toasts.dimensionInvalid'))
       }
     }
 
@@ -430,20 +612,45 @@ const handleModelSave = async (modelData: any) => {
     const trimmedAppSecret = (modelData.appSecret ?? '').trim()
     const appSecretFields: { app_secret?: string } =
       !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
+    // extra_config: vendor extra fields + advanced overrides (already trimmed
+    // by the editor) plus the legacy thinking_control for rows that still
+    // carry it. Empty values are dropped so cleared keys disappear.
     const extraConfig: Record<string, string> = {}
-    if (modelData.provider === 'lkeap' && saveType === 'rerank') {
-      extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
+    if (modelData.source === 'remote') {
+      for (const [key, value] of Object.entries(modelData.extraConfig || {})) {
+        const trimmed = String(value ?? '').trim()
+        if (key && trimmed) extraConfig[key] = trimmed
+      }
+      const legacyThinking = String(modelData.thinkingControl || '').trim()
+      if (saveType === 'chat' && legacyThinking) {
+        extraConfig.thinking_control = legacyThinking
+      } else {
+        delete extraConfig.thinking_control
+      }
     }
-    if (
-      saveType === 'chat'
-      && modelData.source === 'remote'
-      && modelData.thinkingControl
-    ) {
-      extraConfig.thinking_control = modelData.thinkingControl
-    }
-    const extraConfigFields = Object.keys(extraConfig).length > 0
+    // Always send extra_config for remote models, even when it ends up empty:
+    // PUT /models/:id restores the stored map when the field is absent
+    // (internal/handler/model.go), so omitting it would make "clear the last
+    // vendor field / protocol override" silently no-op. Local rows keep the
+    // omit-when-empty behaviour — this form never edits their extra_config.
+    const extraConfigFields = modelData.source === 'remote'
       ? { extra_config: extraConfig }
       : {}
+
+    // parameters.spec: keep whatever the row already had, replace compat with
+    // the (validated) JSON from the advanced textarea; drop spec when empty.
+    const specText = String(modelData.specCompat ?? '').trim()
+    const baseSpec = (modelData.spec && typeof modelData.spec === 'object') ? { ...modelData.spec } : {}
+    if (specText) {
+      const compat = JSON.parse(specText)
+      if (!compat || typeof compat !== 'object' || Array.isArray(compat)) {
+        throw new Error(t('model.editor.advanced.compat.invalid'))
+      }
+      baseSpec.compat = compat
+    } else {
+      delete baseSpec.compat
+    }
+    const specFields = Object.keys(baseSpec).length > 0 ? { spec: baseSpec } : {}
 
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
@@ -470,6 +677,15 @@ const handleModelSave = async (modelData: any) => {
         } : saveType === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
         } : {}),
+        ...((saveType === 'chat' || saveType === 'vllm')
+          && Number(modelData.contextWindow) >= 1024
+          ? { context_window: Math.round(Number(modelData.contextWindow)) }
+          : {}),
+        ...((saveType === 'chat' || saveType === 'vllm')
+          && Number(modelData.maxOutputTokens) > 0
+          ? { max_output_tokens: Math.round(Number(modelData.maxOutputTokens)) }
+          : {}),
+        ...specFields,
         // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
         ...(['chat', 'embedding', 'vllm'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0
@@ -486,11 +702,10 @@ const handleModelSave = async (modelData: any) => {
       MessagePlugin.success(t('modelSettings.toasts.added'))
     }
 
-    showDialog.value = false
     await loadModels()
   } catch (error: any) {
     console.error('保存模型失败:', error)
-    MessagePlugin.error(error.message || t('modelSettings.toasts.saveFailed'))
+    throw error
   }
 }
 
@@ -508,7 +723,53 @@ const deleteModel = async (_type: ModelType, modelId: string) => {
     await loadModels()
   } catch (error: any) {
     console.error('删除模型失败:', error)
+    if (error instanceof ModelInUseError) {
+      usageConflict.value = error.details
+      usageConflictModelName.value = model?.display_name || model?.name || modelId
+      showUsageDialog.value = true
+      return
+    }
     MessagePlugin.error(error.message || t('modelSettings.toasts.deleteFailed'))
+  }
+}
+
+const openUsageResource = async (
+  kind: ModelUsageResourceKind,
+  id: string,
+  bindings: readonly string[] = [],
+) => {
+  showUsageDialog.value = false
+  const knowledgeBaseSection = modelUsageKnowledgeBaseSection(bindings)
+  // The UI store can outlive the route component that owns the KB editor.
+  // Only focus an existing editor when the current route still mounts one;
+  // otherwise a stale visible/id pair would make a direct Settings page no-op.
+  const routeName = router.currentRoute.value.name
+  const canFocusExistingKnowledgeBase = kind === 'knowledge_base'
+    && uiStore.showKBEditorModal
+    && uiStore.currentKBId === id
+    && typeof routeName === 'string'
+    && KNOWLEDGE_BASE_EDITOR_HOST_ROUTES.has(routeName)
+
+  uiStore.closeSettings()
+  await nextTick()
+
+  if (canFocusExistingKnowledgeBase) {
+    // Keep unsaved edits when the referenced KB is already open underneath
+    // global Settings; only move the existing editor to the relevant section.
+    focusKbEditorSection(knowledgeBaseSection)
+    return
+  }
+
+  if (kind === 'knowledge_base') {
+    uiStore.closeKBEditor()
+    await nextTick()
+  }
+  // Both the KB editor and global Settings can already be open underneath the
+  // usage dialog. Flush their false state before reusing either component so
+  // its visible watcher reloads the target object instead of keeping stale data.
+  await router.push(modelUsageResourceRoute(kind, id, bindings))
+  if (kind === 'knowledge_base') {
+    uiStore.openKBSettings(id, knowledgeBaseSection)
   }
 }
 
@@ -619,33 +880,16 @@ onMounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/provider-card.less';
+
+@import (reference) '@/components/css/settings-section.less';
+
 .model-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 28px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
-}
-
-.section-header__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  .settings-section-header();
 }
 
 .model-test-trigger {
@@ -673,12 +917,12 @@ onMounted(() => {
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 }
 
 .builtin-hint-label {
   margin: 0 0 4px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-placeholder);
   letter-spacing: 0.02em;
@@ -686,13 +930,13 @@ onMounted(() => {
 
 .builtin-hint-text {
   margin: 0 0 6px 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
 
 .builtin-models-hint .doc-link {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .model-list-loading {
@@ -703,7 +947,7 @@ onMounted(() => {
   margin-bottom: 16px;
 
   :deep(.t-tabs__nav-item) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   :deep(.t-tabs__nav-item-wrapper) {
@@ -742,47 +986,18 @@ onMounted(() => {
 
 // 模型卡片 —— 可选类型徽章（仅「全部」Tab）+ 标题 + 一行副标题
 .model-card {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-  min-width: 0;
-
-  &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  }
+  .provider-card();
+  .provider-card-interactive();
 
   &--add {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 68px;
-    border-style: dashed;
-    background: transparent;
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    font: inherit;
-    text-align: center;
+    .provider-card-add();
 
     &:hover,
     &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
       box-shadow: none;
     }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+
 
     &__icon {
       display: flex;
@@ -790,14 +1005,14 @@ onMounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -813,87 +1028,48 @@ onMounted(() => {
   }
 
   &--clickable {
-    cursor: pointer;
+    .provider-card-interactive();
 
-    &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-    }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
   }
 }
 
 .model-card__badge {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 1px;
-  // 默认底色，被 type 修饰覆盖
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge();
+  .provider-card-badge-color(#0052d9);
 }
 
 // 5 种类型的徽章配色 —— 比原 tag 配色饱和度低一档，避免炫光
 .model-card--chat .model-card__badge {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge-color(#0052d9);
 }
 
 .model-card--embedding .model-card__badge {
-  background: rgba(98, 53, 187, 0.1);
-  color: #6235BB;
+  .provider-card-badge-color(#6235bb);
 }
 
 .model-card--rerank .model-card__badge {
-  background: rgba(184, 92, 0, 0.1);
-  color: #B85C00;
+  .provider-card-badge-color(#b85c00);
 }
 
 .model-card--vllm .model-card__badge {
-  background: rgba(201, 62, 62, 0.1);
-  color: #C93E3E;
+  .provider-card-badge-color(#c93e3e);
 }
 
 .model-card--asr .model-card__badge {
-  background: rgba(17, 128, 83, 0.1);
-  color: #118053;
+  .provider-card-badge-color(#118053);
 }
 
 .model-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
+  .provider-card-body();
 }
 
 .model-card__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  .provider-card-header();
 }
 
 .model-card__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .provider-card-title();
 }
 
 /*
@@ -912,10 +1088,10 @@ onMounted(() => {
   height: 18px;
   color: var(--td-text-color-placeholder);
   opacity: 0.6;
-  transition: color 0.15s ease, opacity 0.15s ease;
+  transition: color var(--app-motion-fast) ease, opacity var(--app-motion-fast) ease;
 
   .t-icon {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 }
 
@@ -925,13 +1101,48 @@ onMounted(() => {
 }
 
 .model-card__subtitle {
+  // A flex row, not inline text: .model-card__vendor is an inline-flex box
+  // whose baseline comes from its first item — the 14px icon, whose baseline
+  // is its bottom edge — so as inline content it sat a couple of pixels off
+  // the "· 200K" beside it. Aligning the row by centre instead of by
+  // baseline puts every part of the line on one optical line.
+  display: flex;
+  align-items: center;
+  min-width: 0;
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.model-card__vendor {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+
+  // The vendor name is the only part long enough to need truncating; the
+  // context window and the badges after it must stay readable.
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.model-card__sep,
+.model-card__ctx,
+.model-card__vision {
+  flex: none;
   white-space: nowrap;
+}
+
+.model-card__vendor-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  object-fit: contain;
 }
 
 .model-card__sep {
@@ -945,6 +1156,14 @@ onMounted(() => {
   gap: 3px;
 }
 
+.model-card__ctx {
+  font-variant-numeric: tabular-nums;
+}
+
+.model-card__ctx--default {
+  color: var(--td-text-color-placeholder);
+}
+
 .model-card__actions {
   flex-shrink: 0;
   display: flex;
@@ -956,7 +1175,7 @@ onMounted(() => {
   flex-shrink: 0;
   padding: 2px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease;
 }
 
 .model-card__more {
@@ -981,9 +1200,93 @@ onMounted(() => {
   text-align: center;
 
   :deep(.t-empty__description) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
+}
+
+.model-usage-dialog__description {
+  margin: 0 0 16px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.6;
+}
+
+.model-usage-dialog__content {
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.model-usage-group {
+  & + & {
+    margin-top: 20px;
+  }
+
+  h3 {
+    margin: 0 0 8px;
+    font-size: var(--app-text-base);
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
+    overflow: hidden;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+
+    & + li {
+      border-top: 1px solid var(--td-component-stroke);
+    }
+  }
+}
+
+.model-usage-truncated {
+  margin: 8px 0 0;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+}
+
+.model-usage-resource {
+  min-width: 0;
+
+  strong {
+    display: block;
+    margin-bottom: 6px;
+    overflow: hidden;
+    color: var(--td-text-color-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.model-usage-bindings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.model-usage-memory {
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+}
+
+.model-usage-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
 }
 </style>

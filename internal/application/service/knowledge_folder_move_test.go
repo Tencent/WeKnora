@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -40,12 +41,23 @@ func (r *folderMoveRepoStub) RenameKnowledgeFolderPath(
 }
 
 func folderMoveContext() context.Context {
-	return context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	return (&access.KBAccess{
+		KnowledgeBase: &types.KnowledgeBase{
+			ID:       "kb-1",
+			TenantID: 1,
+		},
+		Caller:            types.CallerFromContext(ctx),
+		EffectiveTenantID: 1,
+		Permission:        types.OrgRoleEditor,
+	}).Context(
+		ctx,
+	)
 }
 
 func TestMoveKnowledgeToFolderNormalizesDestination(t *testing.T) {
 	repo := &folderMoveRepoStub{}
-	svc := &knowledgeService{repo: repo}
+	svc := &knowledgeService{repo: repo, kbService: &writeKBLookup{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 1}}}
 
 	affected, err := svc.MoveKnowledgeToFolder(folderMoveContext(), "kb-1", []string{"k1", "k2"}, "/docs//spec/")
 	require.NoError(t, err)
@@ -56,7 +68,7 @@ func TestMoveKnowledgeToFolderNormalizesDestination(t *testing.T) {
 
 func TestMoveKnowledgeToFolderAcceptsRootAndRejectsEmptyBatch(t *testing.T) {
 	repo := &folderMoveRepoStub{}
-	svc := &knowledgeService{repo: repo}
+	svc := &knowledgeService{repo: repo, kbService: &writeKBLookup{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 1}}}
 
 	// The empty destination is meaningful: it files documents back at the top level.
 	_, err := svc.MoveKnowledgeToFolder(folderMoveContext(), "kb-1", []string{"k1"}, "")
@@ -70,7 +82,7 @@ func TestMoveKnowledgeToFolderAcceptsRootAndRejectsEmptyBatch(t *testing.T) {
 
 func TestMoveKnowledgeToFolderRejectsTraversalAndUnsafeInput(t *testing.T) {
 	repo := &folderMoveRepoStub{}
-	svc := &knowledgeService{repo: repo}
+	svc := &knowledgeService{repo: repo, kbService: &writeKBLookup{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 1}}}
 
 	_, err := svc.MoveKnowledgeToFolder(folderMoveContext(), "kb-1", []string{"k1"}, "../../etc/docs")
 	require.NoError(t, err)
@@ -82,7 +94,7 @@ func TestMoveKnowledgeToFolderRejectsTraversalAndUnsafeInput(t *testing.T) {
 
 func TestRenameKnowledgeFolderValidatesPaths(t *testing.T) {
 	repo := &folderMoveRepoStub{}
-	svc := &knowledgeService{repo: repo}
+	svc := &knowledgeService{repo: repo, kbService: &writeKBLookup{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 1}}}
 	ctx := folderMoveContext()
 
 	affected, err := svc.RenameKnowledgeFolder(ctx, "kb-1", "docs", "handbook")
@@ -111,4 +123,16 @@ func TestRenameKnowledgeFolderValidatesPaths(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), affected)
 	assert.Equal(t, before, repo.renameCalls)
+}
+
+func (r *folderMoveRepoStub) GetKnowledgeBatch(
+	_ context.Context,
+	tenant uint64,
+	ids []string,
+) ([]*types.Knowledge, error) {
+	rows := make([]*types.Knowledge, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, &types.Knowledge{ID: id, TenantID: tenant, KnowledgeBaseID: "kb-1"})
+	}
+	return rows, nil
 }

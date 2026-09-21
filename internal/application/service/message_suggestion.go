@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -258,7 +259,30 @@ func (s *messageSuggestionService) generate(
 	message *types.Message,
 	answer string,
 	config types.FollowUpSuggestionConfig,
-) (types.SuggestionItems, types.TokenUsage, error) {
+) (questions types.SuggestionItems, usage types.TokenUsage, err error) {
+	// The LLM call often runs on POST .../suggestions (frontend onTurnComplete)
+	// or after GinMiddleware has already ended the HTTP root. Resume the
+	// originating chat trace so chat.completion nests under that turn instead
+	// of auto-creating an orphan root.
+	ctx = langfuse.AttachTraceparent(ctx, message.ExecutionContext.LangfuseTraceparent)
+	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: "follow_up.suggestions",
+		Input: map[string]interface{}{
+			"session_id":           message.SessionID,
+			"assistant_message_id": message.ID,
+			"mode":                 config.Mode,
+		},
+		Metadata: map[string]interface{}{
+			"count":    config.Count,
+			"model_id": config.ModelID,
+		},
+	})
+	defer func() {
+		span.Finish(map[string]interface{}{
+			"question_count": len(questions),
+		}, nil, err)
+	}()
+
 	count := config.Count
 	if count < 1 {
 		count = 3
@@ -269,7 +293,6 @@ func (s *messageSuggestionService) generate(
 	}
 	var generated types.SuggestionItems
 	var knowledge types.SuggestionItems
-	var usage types.TokenUsage
 	var modelErr error
 	if config.Mode == types.SuggestionModeGenerated || config.Mode == types.SuggestionModeHybrid {
 		generated, usage, modelErr = s.generateWithModel(
@@ -323,12 +346,13 @@ func (s *messageSuggestionService) generateWithModel(
 
 	modelCtx := ctx
 	if message.AgentTenantID != 0 {
-		modelCtx = context.WithValue(modelCtx, types.TenantIDContextKey, message.AgentTenantID)
+		modelCtx = types.WithExecutionTenant(modelCtx, message.AgentTenantID)
 	}
 	chatModel, err := s.modelService.GetChatModel(modelCtx, modelID)
 	if err != nil {
 		return nil, types.TokenUsage{}, err
 	}
+	modelCtx = types.WithLLMCallMetadata(modelCtx, "follow_up.suggestions", "")
 	categories := strings.Join(config.Categories, ", ")
 	if categories == "" {
 		categories = "clarify, deepen, action"
@@ -355,6 +379,11 @@ func (s *messageSuggestionService) generateWithModel(
 		return nil, types.TokenUsage{}, err
 	}
 	items, err := parseGeneratedSuggestions(response.Content, config.Categories, count)
+	if err == nil {
+		// The system prompt already asks the model not to repeat prior user
+		// questions, but that is guidance the model does not always honour.
+		items = filterSuggestionItemsAgainstQuery(items, generationContext.CurrentQuery)
+	}
 	return items, response.Usage, err
 }
 
@@ -389,7 +418,11 @@ func (s *messageSuggestionService) generateFromKnowledge(
 	}
 	knowledgeCtx := ctx
 	if message.AgentTenantID != 0 {
-		knowledgeCtx = context.WithValue(knowledgeCtx, types.TenantIDContextKey, message.AgentTenantID)
+		// WithExecutionTenant pins the caller before moving execution into the
+		// agent's workspace; a bare tenant rewrite would make a context without
+		// a captured caller read as that workspace, passing every permission
+		// check on its documents.
+		knowledgeCtx = types.WithExecutionTenant(knowledgeCtx, message.AgentTenantID)
 	}
 	poolSize := count * 5
 	if poolSize < 10 {
@@ -441,7 +474,18 @@ func (s *messageSuggestionService) generateFromKnowledge(
 	items := make(types.SuggestionItems, 0, len(candidates))
 	for _, candidate := range candidates {
 		text := strings.TrimSpace(candidate.Question)
-		if text == "" {
+		// The knowledge path never reaches the model, so the "do not repeat
+		// prior user questions" system-prompt rule cannot apply here. Worse,
+		// rankKnowledgeSuggestions ranks candidates against a context that
+		// starts with CurrentQuery and IsContentContained adds +1, so a
+		// candidate identical to the question just asked is actively promoted
+		// to the top of the knowledge pool.
+		// Typical trigger: the user asks "介绍一下X" while X has an
+		// entity/summary wiki page, which wikiSuggestionFromPage turns into
+		// the very same "介绍一下X".
+		// Skip via continue rather than filtering afterwards so that later
+		// candidates can backfill and the configured count is preserved.
+		if text == "" || suggestionMatchesQuery(text, generationContext.CurrentQuery) {
 			continue
 		}
 		item := types.SuggestionItem{
@@ -886,6 +930,36 @@ func mergeHybridSuggestionItems(model, knowledge types.SuggestionItems, limit in
 	appendFrom(model, -1)
 	appendFrom(knowledge, -1)
 	return result
+}
+
+// filterSuggestionItemsAgainstQuery drops suggestions that are, after
+// normalization, exactly the question the user just asked.
+// Only exact matches are removed, deliberately: a similarity threshold would
+// also kill legitimate follow-ups about the same entity, which is precisely
+// what the feature exists for.
+func filterSuggestionItemsAgainstQuery(
+	items types.SuggestionItems,
+	currentQuery string,
+) types.SuggestionItems {
+	if normalizeSuggestionText(currentQuery) == "" {
+		return items
+	}
+	filtered := make(types.SuggestionItems, 0, len(items))
+	for _, item := range items {
+		if suggestionMatchesQuery(item.Text, currentQuery) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+// suggestionMatchesQuery reports whether a candidate is the current question.
+// It reuses normalizeSuggestionText so punctuation, whitespace and case
+// variants ("Tell me about Foo?" vs "tell me about foo") are caught too.
+func suggestionMatchesQuery(value, currentQuery string) bool {
+	queryKey := normalizeSuggestionText(currentQuery)
+	return queryKey != "" && normalizeSuggestionText(value) == queryKey
 }
 
 func normalizeSuggestionText(value string) string {

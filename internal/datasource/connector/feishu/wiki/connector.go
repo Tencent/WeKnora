@@ -243,8 +243,9 @@ func (o wikiOps) Title(n core.WikiNode) string   { return n.Title }
 func (o wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
 
 // EditTime is the change-detection timestamp: ObjEditTime (document content)
-// with a NodeEditTime fallback for nodes that lack obj_edit_time. This drives
-// the cursor comparison, NOT FetchedItem.UpdatedAt (which uses NodeEditTime).
+// with a NodeEditTime fallback for nodes that lack obj_edit_time. It drives the
+// cursor comparison and, parsed, FetchedItem.UpdatedAt (see contentEditTime),
+// so the persisted source_updated_at tracks content edits, not node moves.
 func (o wikiOps) EditTime(n core.WikiNode) string {
 	if n.ObjEditTime != "" {
 		return n.ObjEditTime
@@ -323,7 +324,8 @@ func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNo
 		return nil, nil
 	}
 
-	editTime := core.ParseFeishuTimestamp(node.NodeEditTime)
+	editTime := contentEditTime(node)
+	createTime := contentCreateTime(node)
 	baseMeta := map[string]string{
 		"obj_token":  node.ObjToken,
 		"obj_type":   node.ObjType,
@@ -343,6 +345,7 @@ func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNo
 			URL:               region.WikiURL(node.NodeToken),
 			ResourceID:        resourceID,
 			EditTime:          editTime,
+			CreateTime:        createTime,
 			BaseMeta:          baseMeta,
 			MultimodalEnabled: multimodalEnabled,
 		})
@@ -351,12 +354,14 @@ func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNo
 		if err != nil {
 			return nil, err
 		}
+		item.CreatedAt = createTime
 		return []*types.FetchedItem{item}, nil
 	case "file":
 		item, err := fetchDriveFile(ctx, client, node, resourceID, editTime, baseMeta, region)
 		if err != nil {
 			return nil, err
 		}
+		item.CreatedAt = createTime
 		return []*types.FetchedItem{item}, nil
 	default:
 		return nil, nil
@@ -420,6 +425,26 @@ func fetchDriveFile(ctx context.Context, client *core.Client, node core.WikiNode
 		SourceResourceID: resourceID,
 		Metadata:         baseMeta,
 	}, nil
+}
+
+// contentEditTime is the document's last content edit time (obj_edit_time),
+// falling back to the node attribute edit time when Feishu omits it. It is
+// what ingestion persists as source_updated_at; NodeEditTime alone would move
+// on a rename or a move in the tree without any content change.
+func contentEditTime(node core.WikiNode) time.Time {
+	if t := core.ParseFeishuTimestamp(node.ObjEditTime); !t.IsZero() {
+		return t
+	}
+	return core.ParseFeishuTimestamp(node.NodeEditTime)
+}
+
+// contentCreateTime is the document creation time (obj_create_time), falling
+// back to the node creation time. Persisted as source_created_at.
+func contentCreateTime(node core.WikiNode) time.Time {
+	if t := core.ParseFeishuTimestamp(node.ObjCreateTime); !t.IsZero() {
+		return t
+	}
+	return core.ParseFeishuTimestamp(node.NodeCreateTime)
 }
 
 // --- Helper functions ---

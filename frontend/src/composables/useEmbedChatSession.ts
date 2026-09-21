@@ -95,7 +95,7 @@ export function useEmbedChatSession(options: {
     scrollToBottom(true)
   }
 
-  useStickyBottomOnResize(scrollContainer, userHasScrolledUp, scrollToBottom)
+  useStickyBottomOnResize(scrollContainer, userHasScrolledUp)
 
   const debounce = <T extends (...args: never[]) => void>(fn: T, delay: number) => {
     let timer: ReturnType<typeof setTimeout>
@@ -286,6 +286,7 @@ export function useEmbedChatSession(options: {
       images: displayImages,
       attachments: displayAttachments,
       channel: 'embed',
+      created_at: new Date().toISOString(),
     })
     postEmbedMessageSent(options.channelId, options.sessionId.value, value)
     relayEmbedWebhookEvent(

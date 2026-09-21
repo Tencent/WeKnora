@@ -5,6 +5,7 @@ export interface MCPService {
   tenant_id?: number
   name: string
   description: string
+  usage_instructions?: string
   enabled: boolean
   transport_type: 'sse' | 'http-streamable' | 'stdio'
   url?: string // Optional: required for SSE/HTTP Streamable
@@ -46,6 +47,11 @@ export interface MCPService {
   credentials?: Record<McpCredentialField, CredentialFieldMetadata>
   created_at?: string
   updated_at?: string
+  catalog?: {
+    tool_count: number
+    stale: boolean
+    synced_at: string
+  }
 }
 
 export interface MCPTool {
@@ -53,6 +59,7 @@ export interface MCPTool {
   description: string
   inputSchema: Record<string, any>
   require_approval?: boolean
+  enabled?: boolean
 }
 
 export interface MCPToolApprovalRow {
@@ -61,6 +68,7 @@ export interface MCPToolApprovalRow {
   service_id: string
   tool_name: string
   require_approval: boolean
+  enabled: boolean
 }
 
 export interface MCPResource {
@@ -82,8 +90,27 @@ export interface MCPTestResult {
 }
 
 // List all MCP services
-export async function listMCPServices(): Promise<MCPService[]> {
-  const response: any = await get('/api/v1/mcp-services')
+/** Locates a shared agent's source workspace, same parameters as a chat request. */
+export interface MCPAgentScope {
+  agentId?: string
+  /** Set only for a shared agent; left empty for this workspace's own agents. */
+  sourceTenantId?: string | number
+}
+
+// Lists MCP services.
+//
+// With a shared agent, the result is the services THAT agent can be @mentioned
+// with: they live in its owner's workspace and none of their ids match anything
+// in the caller's. Those rows also carry a narrowed field set — no URL,
+// headers or credential metadata, which describe how the owner wired the
+// service up — since the picker needs nothing more.
+export async function listMCPServices(agent?: MCPAgentScope): Promise<MCPService[]> {
+  const params: Record<string, string> = {}
+  if (agent?.agentId && agent?.sourceTenantId) {
+    params.agent_id = agent.agentId
+    params.agent_source_tenant_id = String(agent.sourceTenantId)
+  }
+  const response: any = await get('/api/v1/mcp-services', { params })
   return response.data || []
 }
 
@@ -144,6 +171,10 @@ export async function setMCPToolApproval(serviceId: string, toolName: string, re
   await put(`/api/v1/mcp-services/${serviceId}/tool-approvals/${encodeURIComponent(toolName)}`, {
     require_approval: requireApproval
   })
+}
+
+export async function setMCPToolEnabled(serviceId: string, toolName: string, enabled: boolean): Promise<void> {
+  await put(`/api/v1/mcp-services/${serviceId}/tool-approvals/${encodeURIComponent(toolName)}`, { enabled })
 }
 
 // ----------------------------------------------------------------------------
@@ -271,4 +302,31 @@ export async function resolveMCPOAuth(
 
 export async function cancelMCPOAuth(pendingId: string): Promise<void> {
   await post(`/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}/cancel`, {})
+}
+
+// Persisted directory: GET never opens an upstream MCP connection.
+export interface MCPMetadata {
+  service_id: string
+  tools: MCPTool[]
+  instructions: string
+  server_name: string
+  server_version: string
+  server_description: string
+  synced_at: string
+  stale: boolean
+}
+
+export async function getMCPMetadata(id: string): Promise<MCPMetadata | null> {
+  const response: any = await get(`/api/v1/mcp-services/${id}/metadata`)
+  return response.data ?? null
+}
+
+export async function refreshMCPMetadata(id: string): Promise<MCPMetadata> {
+  const response: any = await post(`/api/v1/mcp-services/${id}/metadata/refresh`, {})
+  return response.data
+}
+
+export async function generateMCPUsageInstructions(id: string, language: string): Promise<string> {
+  const response: any = await post(`/api/v1/mcp-services/${id}/usage-instructions/generate`, { language }, { timeout: 65000 })
+  return response.data.usage_instructions
 }

@@ -20,7 +20,7 @@ const { t } = useI18n()
 .drag-txt {
     color: var(--td-brand-color);
     font-family: var(--app-font-family);
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     font-weight: 600;
     line-height: 26px;
     display: inline-block;
@@ -32,7 +32,7 @@ const { t } = useI18n()
     color: var(--td-text-color-disabled);
     text-align: center;
     font-family: var(--app-font-family);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 400;
 }
 .upload-img{

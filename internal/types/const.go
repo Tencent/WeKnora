@@ -4,8 +4,16 @@ package types
 type ContextKey string
 
 const (
-	// TenantIDContextKey is the context key for tenant ID
+	// TenantIDContextKey scopes execution (repository/model queries).
 	TenantIDContextKey ContextKey = "TenantID"
+	// CallerContextKey captures the authenticated resource caller.
+	CallerContextKey ContextKey = "ResourceCaller"
+	// KBGrantsContextKey carries immutable operation grants.
+	KBGrantsContextKey ContextKey = "ResourceKBGrants"
+	// KBTransferContextKey carries one admitted resource pair.
+	KBTransferContextKey ContextKey = "ResourceKBTransfer"
+	// SharedAgentGrantContextKey carries an authorized agent read scope.
+	SharedAgentGrantContextKey ContextKey = "ResourceSharedAgentGrant"
 	// TenantInfoContextKey is the context key for tenant information
 	TenantInfoContextKey ContextKey = "TenantInfo"
 	// RequestIDContextKey is the context key for request ID
@@ -20,6 +28,9 @@ const (
 	PrincipalContextKey ContextKey = "Principal"
 	// TenantAPIKeyScopeContextKey carries per-API-key operation and KB scopes.
 	TenantAPIKeyScopeContextKey ContextKey = "TenantAPIKeyScope"
+	// AuditAPIKeyContextKey carries the API key id/name for activity
+	// attribution only. It is not an authorization grant.
+	AuditAPIKeyContextKey ContextKey = "AuditAPIKey"
 	// TenantRoleContextKey is the context key for the caller's TenantRole
 	// in the currently active tenant (loaded by the auth middleware from
 	// the tenant_members table). See TenantRoleFromContext.
@@ -44,7 +55,8 @@ const (
 	// distinct key from SessionTenantIDContextKey, which also re-scopes
 	// session/message repository lookups. See SandboxTenantIDFromContext.
 	SandboxTenantIDContextKey ContextKey = "SandboxTenantID"
-	// EmbedQueryContextKey is the context key for embedding query text
+	// EmbedQueryContextKey marks an embedding call as a search query; see
+	// WithEmbedQuery.
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
 	// WikiEditSourceContextKey carries who is authoring the current wiki
 	// page write (user / agent / revert). Absent means the wiki ingest
@@ -61,6 +73,10 @@ const (
 	// every context key, and middleware imports this package, so a key
 	// declared there could only be referred to by its raw string value.
 	EmbedChannelContextKey ContextKey = "EmbedChannel"
+	// MCPEndpointContextKey stores the authenticated *MCPEndpoint on the
+	// request context of a call arriving on the workspace MCP server surface.
+	// Declared here for the same reason as EmbedChannelContextKey.
+	MCPEndpointContextKey ContextKey = "MCPEndpoint"
 	// LangfuseTraceContextKey carries the active Langfuse *Trace across the
 	// request lifecycle. Defined here (not inside the langfuse package) so
 	// that logger.CloneContext can preserve it without importing langfuse.

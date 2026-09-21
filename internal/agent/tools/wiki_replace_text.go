@@ -111,15 +111,13 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	existingPage.Content = strings.ReplaceAll(existingPage.Content, params.OldText, params.NewText)
 
 	if params.SourceRefs != nil {
-		if t.scopeEnforced {
-			resolvedRefs, scopeErr := resolveAuthorizedSourceRefs(ctx, t.searchTargets, *params.SourceRefs, t.knowledgeService)
-			if scopeErr != nil {
-				return &types.ToolResult{Success: false, Error: "Invalid source_refs: " + scopeErr.Error()}, nil
-			}
-			existingPage.SourceRefs = resolvedRefs
-		} else {
-			existingPage.SourceRefs = resolveSourceRefs(ctx, t.knowledgeService, *params.SourceRefs)
+		sourceDocs, scopeErr := resolveWikiSourceDocuments(
+			ctx, *params.SourceRefs, t.knowledgeService, t.searchTargets, t.scopeEnforced,
+		)
+		if scopeErr != nil {
+			return &types.ToolResult{Success: false, Error: "Invalid source_refs: " + scopeErr.Error()}, nil
 		}
+		existingPage.SourceRefs = wikiSourceRefs(sourceDocs)
 	}
 
 	_, err = t.wikiPageService.UpdatePage(ctx, existingPage)

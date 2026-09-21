@@ -85,6 +85,10 @@ type TenantSandboxResolverDeps struct {
 	Store   SessionSandboxBindingStore
 	Checker SessionExistenceChecker
 
+	// Bootstrapper customises the first sandbox create of individual sessions
+	// (session fork). Optional: nil is the ordinary path.
+	Bootstrapper SessionBootstrapper
+
 	// SharedTransport is reused by every tenant's HTTP client. Optional; a
 	// guarded transport is installed when nil.
 	SharedTransport *http.Transport
@@ -175,11 +179,14 @@ func (r *tenantSandboxResolver) Resolve(
 	if err != nil {
 		return nil, err
 	}
+	if err := EnsureDockerBackendAllowed(effective.Type); err != nil {
+		return nil, err
+	}
 
 	switch effective.Type {
 	case SandboxTypeDisabled:
 		return NewDisabledManager(), nil
-	case SandboxTypeCube, SandboxTypeE2B:
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
 		client, err := r.buildClient(effective)
 		if err != nil {
 			return nil, err
@@ -191,14 +198,8 @@ func (r *tenantSandboxResolver) Resolve(
 			Checker:         r.deps.Checker,
 			SkipHealthProbe: true,
 			ConfigID:        configID,
+			Bootstrapper:    r.deps.Bootstrapper,
 		})
-	case SandboxTypeDocker, SandboxTypeLocal:
-		// Stateless backends still come from the selected workspace row. Docker
-		// fallback is deliberately disabled: silently running a configured
-		// container workload on the application host would cross an isolation
-		// boundary.
-		effective.FallbackEnabled = false
-		return NewManager(effective)
 	default:
 		return NewDisabledManager(), nil
 	}
@@ -221,6 +222,12 @@ func (r *tenantSandboxResolver) buildClient(cfg *Config) (RemoteSandboxClient, e
 			return NewE2BRemoteClientWithPool(cfg, r.privateGatewayTransports)
 		}
 		return NewE2BRemoteClientWithPool(cfg, r.gatewayTransports)
+	case SandboxTypeDocker:
+		// The docker client keeps its own pooled connection per daemon
+		// endpoint rather than using the transports above: the Engine API is
+		// reached over a unix socket as often as over TCP. It installs the
+		// same guarded dialer for TCP endpoints (see newDockerEngineClient).
+		return NewDockerRemoteClient(cfg)
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q has no remote client", cfg.Type)
 	}
@@ -248,6 +255,11 @@ func NewRemoteClientForCheck(cfg *Config) (RemoteSandboxClient, error) {
 		// routing the resolved manager will use.
 		return NewE2BRemoteClientWithPool(cfg, NewSandboxGatewayTransportPoolWithPolicy(nil,
 			OutboundURLPolicy{AllowPrivate: cfg.AllowPrivateEndpoints}))
+	case SandboxTypeDocker:
+		if err := EnsureDockerBackendAllowed(SandboxTypeDocker); err != nil {
+			return nil, err
+		}
+		return NewDockerRemoteClientForCheck(cfg)
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q cannot be probed", cfg.Type)
 	}

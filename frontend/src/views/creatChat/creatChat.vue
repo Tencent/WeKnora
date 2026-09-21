@@ -35,7 +35,7 @@
                             <div v-for="(item, index) in suggestedQuestions" :key="item.question"
                                 class="suggested-question-card" :class="{ 'sq-card-visible': sqCardsRevealed }"
                                 :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
-                                @click="handleSuggestedQuestionClick(item.question)">
+                                @click="handleSuggestedQuestionClick(item)">
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
                             </div>
@@ -61,6 +61,7 @@ import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
 import type { SuggestedQuestion } from "@/api/agent/index";
+import { questionOriginFromSuggestion, type SendMessageOptions } from '@/utils/questionOrigin';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
@@ -181,15 +182,17 @@ onMounted(() => { fetchSuggestedQuestions(); });
 
 const inputFieldRef = ref();
 
-const handleSuggestedQuestionClick = (question: string) => {
-    inputFieldRef.value?.triggerSend(question);
+// The suggestion's source rides with this send to the new session's first
+// request, so the agent searches it before answering.
+const handleSuggestedQuestionClick = (item: SuggestedQuestion) => {
+    inputFieldRef.value?.triggerSend(item.question, { questionOrigin: questionOriginFromSuggestion(item) });
 };
 
-const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
-    createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles);
+const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
+    createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
 }
 
-async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = []) {
+async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) {
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
 
@@ -209,7 +212,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     try {
         const res = await createSessions(sessionData);
         if (res.data && res.data.id) {
-            await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles);
+            await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
             console.error('[createChat] Failed to create session');
             MessagePlugin.error(t('createChat.messages.createFailed'));
@@ -220,7 +223,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     }
 }
 
-const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
+const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
     const now = new Date().toISOString();
     let obj = {
         title: t('createChat.newSessionTitle'),
@@ -233,7 +236,7 @@ const navigateToSession = async (sessionId: string, value: string, modelId: stri
     };
     usemenuStore.updataMenuChildren(obj);
     usemenuStore.changeIsFirstSession(true);
-    usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles);
+    usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles, options.questionOrigin ?? null);
     router.push(`/platform/chat/${sessionId}`);
 }
 
@@ -280,7 +283,7 @@ const handleKBEditorSuccess = (kbId: string) => {
         height: 32px;
         justify-content: center;
         align-items: center;
-        border-radius: 6px;
+        border-radius: var(--app-radius-sm);
         background: var(--td-bg-color-container);
         box-shadow: var(--td-shadow-1);
         margin-right: 12px;
@@ -320,7 +323,7 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 .sq-slide-fade-leave-active {
-    transition: opacity 0.15s cubic-bezier(0.4, 0, 1, 1),
+    transition: opacity var(--app-motion-fast) cubic-bezier(0.4, 0, 1, 1),
         transform 0.15s cubic-bezier(0.4, 0, 1, 1);
 }
 
@@ -360,46 +363,6 @@ const handleKBEditorSuccess = (kbId: string) => {
 
     &.sq-card-visible:active {
         transform: scale(0.98);
-    }
-}
-
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
     }
 }
 </style>

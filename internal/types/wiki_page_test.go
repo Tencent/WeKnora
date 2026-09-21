@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -179,6 +180,58 @@ func TestWikiPageJSON(t *testing.T) {
 	}
 }
 
+func TestParseWikiSourceRef(t *testing.T) {
+	cases := []struct {
+		in, wantID, wantTitle string
+	}{
+		{"doc-1|排班手册", "doc-1", "排班手册"},
+		{"doc-1", "doc-1", ""},
+		{"  doc-1 | title ", "doc-1", "title"},
+		{"doc-1|a|b", "doc-1", "a|b"},
+		{"|title", "", "title"},
+		{"   ", "", ""},
+	}
+	for _, c := range cases {
+		id, title := ParseWikiSourceRef(c.in)
+		if id != c.wantID || title != c.wantTitle {
+			t.Errorf("ParseWikiSourceRef(%q) = (%q, %q), want (%q, %q)", c.in, id, title, c.wantID, c.wantTitle)
+		}
+	}
+}
+
+func TestFormatWikiSourceRefRoundTrip(t *testing.T) {
+	cases := []struct {
+		id, title, want string
+	}{
+		{"doc-1", "排班手册", "doc-1|排班手册"},
+		{"doc-1", "", "doc-1"},
+		{" doc-1 ", " t ", "doc-1|t"},
+		{"", "orphan title", ""},
+	}
+	for _, c := range cases {
+		got := FormatWikiSourceRef(c.id, c.title)
+		if got != c.want {
+			t.Errorf("FormatWikiSourceRef(%q, %q) = %q, want %q", c.id, c.title, got, c.want)
+		}
+		if got == "" {
+			continue
+		}
+		id, title := ParseWikiSourceRef(got)
+		if id != strings.TrimSpace(c.id) || title != strings.TrimSpace(c.title) {
+			t.Errorf("round trip of %q lost data: (%q, %q)", got, id, title)
+		}
+	}
+}
+
+func TestWikiSourceRefMatchesKnowledge(t *testing.T) {
+	if !WikiSourceRefMatchesKnowledge("doc-1|T", "doc-1") || !WikiSourceRefMatchesKnowledge(" doc-1 ", "doc-1") {
+		t.Error("bare and titled refs must match their knowledge ID")
+	}
+	if WikiSourceRefMatchesKnowledge("doc-10|T", "doc-1") || WikiSourceRefMatchesKnowledge("doc-1|T", "") {
+		t.Error("prefix-only or empty IDs must not match")
+	}
+}
+
 func TestWikiSourceKnowledgeID(t *testing.T) {
 	cases := []struct {
 		in, want string
@@ -307,5 +360,26 @@ func TestWikiConfig_JSONRoundTrip_WithGranularity(t *testing.T) {
 	}
 	if oldCfg.ExtractionGranularity.Normalize() != WikiExtractionStandard {
 		t.Errorf("legacy row should normalize to standard")
+	}
+}
+
+func TestWikiFolderPathSegmentsKeepTypeLikeFolderNames(t *testing.T) {
+	got := WikiFolderPathSegments("概念/ 概念 /Concepts//实体")
+	want := []string{"概念", "概念", "Concepts", "实体"}
+	if len(got) != len(want) {
+		t.Fatalf("segments = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("segments[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if WikiFolderPathSegments("  ") != nil {
+		t.Fatalf("blank path must yield nil")
+	}
+	// The model-label cleaner still drops the same names, which is why folder
+	// paths must not go through it.
+	if cleaned := CleanWikiCategoryPath([]string{"概念"}); len(cleaned) != 0 {
+		t.Fatalf("CleanWikiCategoryPath(概念) = %v, want empty", cleaned)
 	}
 }

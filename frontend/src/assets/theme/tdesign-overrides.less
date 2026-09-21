@@ -1,0 +1,57 @@
+// 对 TDesign 组件的全局意图覆盖。组件内只做局部微调，不要在 scoped 样式里用 !important 和 TDesign 打架。
+
+// 悬浮面板皮肤：给 t-popup / t-select 等的 overlayClassName 加上 `wk-popover` 即可。
+// 用两级选择器压过 TDesign 默认的 .t-popup__content，不需要 !important。
+.wk-popover .t-popup__content {
+  padding: 0;
+  border-radius: var(--app-radius-xl);
+  background: var(--td-bg-color-container);
+  border: 0.5px solid var(--td-component-stroke);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  overflow: hidden;
+}
+
+:root[theme-mode="dark"] .wk-popover .t-popup__content {
+  background: rgba(36, 36, 36, 0.92);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+// .wk-popover clips to its rounded corners with overflow:hidden, which also
+// cancels the overflow-y:auto TDesign puts on a select's list — the options
+// past the first screenful become unreachable rather than merely unseen.
+// Restore vertical scrolling for any select wearing this skin; the horizontal
+// axis stays clipped, which is what the rounded corners needed.
+.t-select__dropdown.wk-popover .t-popup__content {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+// A quiet option surface, with the brand accent reserved for the small check.
+.t-select-option.t-is-selected:not(.t-is-disabled),
+.t-select-option.t-is-selected:not(.t-is-disabled):hover {
+  background-color: var(--app-selection-bg);
+  color: var(--td-text-color-primary);
+  font-weight: 500;
+}
+
+// A check keeps single-selection menus distinct from hover without using color alone.
+.t-select-option.t-is-selected:not(.t-is-disabled):not(:has(.t-checkbox))::after {
+  content: '';
+  flex: 0 0 auto;
+  width: 5px;
+  height: 9px;
+  margin-left: auto;
+  margin-right: 2px;
+  color: var(--td-brand-color);
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+.t-select-option.t-is-selected:not(.t-is-disabled):not(:has(.t-checkbox)) {
+  gap: 8px;
+}

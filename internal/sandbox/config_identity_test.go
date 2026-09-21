@@ -61,12 +61,12 @@ func TestIdentityOfReadsOnlyActiveProvider(t *testing.T) {
 
 // Backends that hold no remote resources carry no credentials, but switching
 // between them still has to register as a change.
-func TestIdentityOfLocalBackendsCarryProviderOnly(t *testing.T) {
+func TestIdentityOfDockerWithoutHostCarriesProviderOnly(t *testing.T) {
 	docker := IdentityOf(&types.TenantSandboxConfig{SandboxType: "docker"})
-	local := IdentityOf(&types.TenantSandboxConfig{SandboxType: "local"})
+	cube := IdentityOf(&types.TenantSandboxConfig{SandboxType: "cube"})
 
 	require.Equal(t, SandboxIdentity{Provider: "docker"}, docker)
-	require.NotEqual(t, docker, local)
+	require.NotEqual(t, docker, cube)
 }
 
 // A nil config must not panic: Update compares against it when creating.

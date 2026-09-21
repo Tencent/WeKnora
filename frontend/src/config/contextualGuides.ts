@@ -19,9 +19,15 @@ export type ContextualGuideTourId =
   | 'agentList'
   | 'agentCreate'
 
-const focusKbEditorSection = (section: string) => {
+export const focusKbEditorSection = (section: string) => {
   window.dispatchEvent(
     new CustomEvent(KB_EDITOR_FOCUS_SECTION_EVENT, { detail: { section } }),
+  )
+}
+
+export const focusAgentEditorSection = (section: string) => {
+  window.dispatchEvent(
+    new CustomEvent(AGENT_EDITOR_FOCUS_SECTION_EVENT, { detail: { section } }),
   )
 }
 

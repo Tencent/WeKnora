@@ -6,9 +6,7 @@ import (
 )
 
 func TestApplyBuiltinAgentLocalizationOverlaysYAMLLocale(t *testing.T) {
-	builtinAgentEntriesMu.Lock()
-	prevEntries := builtinAgentEntries
-	builtinAgentEntries = map[string]*BuiltinAgentEntry{
+	restore := OverrideBuiltinAgentEntriesForTest(map[string]*BuiltinAgentEntry{
 		BuiltinQuickAnswerID: {
 			ID:     BuiltinQuickAnswerID,
 			Avatar: "quick.png",
@@ -18,13 +16,8 @@ func TestApplyBuiltinAgentLocalizationOverlaysYAMLLocale(t *testing.T) {
 				"zh-CN":   {Name: "快速问答", Description: "中文 RAG"},
 			},
 		},
-	}
-	builtinAgentEntriesMu.Unlock()
-	t.Cleanup(func() {
-		builtinAgentEntriesMu.Lock()
-		builtinAgentEntries = prevEntries
-		builtinAgentEntriesMu.Unlock()
 	})
+	t.Cleanup(restore)
 
 	agent := &CustomAgent{
 		ID:          BuiltinQuickAnswerID,

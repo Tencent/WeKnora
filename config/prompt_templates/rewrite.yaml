@@ -16,6 +16,9 @@ templates:
       ko-KR:
         name: "표준 재작성 (의도 분류 포함)"
         description: "질문 재작성, 의도 분류 및 이미지/첨부 파일 분석을 포함한 기본 템플릿"
+      ja-JP:
+        name: "標準リライト（意図分類あり）"
+        description: "質問のリライト、意図分類、画像・添付ファイル分析を含むデフォルトのテンプレート"
     default: true
     content: |
       You are an intelligent assistant that performs THREE tasks on the user's question:
@@ -28,9 +31,9 @@ templates:
       - Perform coreference resolution: replace pronouns such as "it", "this", "that", "they", "them", etc. with explicit subjects
       - Complete omitted key information to ensure the question is semantically complete
       - Preserve the original meaning and expression style of the question
-      - The rewritten result must also be a question
-      - The rewritten question should be within 30 words
-      - IMPORTANT: The rewritten question must be in {{language}}
+      - Preserve the request type: a question remains a question and an instruction remains an instruction.
+      - Preserve source restrictions, requested actions, output format, language requirements, and other substantive constraints. Be concise without an arbitrary word limit that drops requirements.
+      - Keep the original request language unless the user asks for translation; {{language}} is a default, not a reason to change explicit language requirements.
       - CRITICAL: The rewritten question will be used for knowledge base retrieval. It MUST preserve specific entities, keywords, and core search terms. Do NOT generate meta-instructions like "请在知识库中查找..." or "请搜索..." — instead, produce a self-contained question that contains the actual search keywords (e.g. person names, concepts, technical terms)
       - EXCEPTION to the above: when the user wants to broadly read, browse, organize, or export knowledge base content WITHOUT specifying particular search terms (e.g. "请整理知识库中的数据", "读取知识库中的报告", "列出所有文档"), there are no specific keywords to extract. In this case, keep the original query's key descriptors intact — do NOT strip them as meta-instructions. For example, "请整理知识库中的数据，输出体检指标" should be rewritten as "体检指标数据整理", NOT reduced to "数据". Preserve any mentioned content types (报告/文档), labels (标签名), or file names.
 
@@ -140,6 +143,9 @@ templates:
       ko-KR:
         name: "표준 재작성"
         description: "참조를 제거하고 누락을 완료하기 위한 표준 재작성 규칙"
+      ja-JP:
+        name: "標準リライト"
+        description: "指示語の解決と省略の補完を行う標準的なリライトルール"
     content: |
       You are a professional question rewriting assistant. Your task is to rewrite the user's follow-up question into an independent, complete question that can be understood without conversation context.
 
@@ -179,6 +185,9 @@ templates:
       ko-KR:
         name: "엄격하게 다시 작성됨"
         description: "문제가 완전하고 독립적인지 확인하기 위해 더 엄격한 재작성 요구 사항"
+      ja-JP:
+        name: "厳格なリライト"
+        description: "質問の完全性と独立性をより厳密に確保するリライト要件"
     content: |
       You are a question rewriting expert. Rewrite the user's question into a complete, independent question.
 

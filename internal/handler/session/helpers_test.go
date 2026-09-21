@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -104,4 +105,29 @@ func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.KnowledgeDescription, got.KnowledgeDescription)
 	assert.Equal(t, original.KnowledgeBaseID, got.KnowledgeBaseID)
 	assert.Equal(t, original.Metadata, got.Metadata)
+}
+
+func TestCreateAgentQueryEventIncludesPersistedTimestamps(t *testing.T) {
+	userAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	assistantAt := time.Date(2026, 1, 2, 3, 4, 6, 0, time.UTC)
+
+	evt := createAgentQueryEvent("sess-1", "asst-1", "user-1", userAt, assistantAt)
+
+	assert.Equal(t, types.ResponseTypeAgentQuery, evt.Type)
+	assert.Equal(t, "sess-1", evt.Data["session_id"])
+	assert.Equal(t, "asst-1", evt.Data["assistant_message_id"])
+	assert.Equal(t, "user-1", evt.Data["user_message_id"])
+	assert.Equal(t, userAt.Format(time.RFC3339Nano), evt.Data["user_created_at"])
+	assert.Equal(t, assistantAt.Format(time.RFC3339Nano), evt.Data["assistant_created_at"])
+}
+
+func TestCreateAgentQueryEventOmitsZeroTimestamps(t *testing.T) {
+	evt := createAgentQueryEvent("sess-1", "asst-1", "", time.Time{}, time.Time{})
+
+	_, hasUserID := evt.Data["user_message_id"]
+	_, hasUserAt := evt.Data["user_created_at"]
+	_, hasAssistantAt := evt.Data["assistant_created_at"]
+	assert.False(t, hasUserID)
+	assert.False(t, hasUserAt)
+	assert.False(t, hasAssistantAt)
 }

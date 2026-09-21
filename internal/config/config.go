@@ -114,6 +114,9 @@ type ConversationConfig struct {
 	ExtractRelationshipsPromptID string `yaml:"extract_relationships_prompt_id"   json:"extract_relationships_prompt_id"`
 	GenerateQuestionsPromptID    string `yaml:"generate_questions_prompt_id"      json:"generate_questions_prompt_id"`
 
+	// GenerateKBDescriptionPromptID selects the knowledge-base description template.
+	GenerateKBDescriptionPromptID string `yaml:"generate_kb_description_prompt_id" json:"generate_kb_description_prompt_id"` //nolint:lll // one-line struct tag
+
 	// Resolved prompt text fields (populated by backfill, not from YAML)
 	FallbackPrompt             string `yaml:"-" json:"fallback_prompt"`
 	RewritePromptSystem        string `yaml:"-" json:"rewrite_prompt_system"`
@@ -123,6 +126,9 @@ type ConversationConfig struct {
 	ExtractEntitiesPrompt      string `yaml:"-" json:"extract_entities_prompt"`
 	ExtractRelationshipsPrompt string `yaml:"-" json:"extract_relationships_prompt"`
 	GenerateQuestionsPrompt    string `yaml:"-" json:"generate_questions_prompt"`
+
+	// GenerateKBDescriptionPrompt is the resolved knowledge-base description template text.
+	GenerateKBDescriptionPrompt string `yaml:"-" json:"generate_kb_description_prompt"`
 
 	// IntentSystemPrompts maps intent values (e.g. "greeting", "chitchat") to
 	// system prompt text. Populated by backfill from IntentPrompts templates.
@@ -279,7 +285,8 @@ type AuthConfig struct {
 	// create_personal preserves the historical one-user-one-workspace default;
 	// tenantless creates only the identity and waits for an invitation or an
 	// explicit self-service tenant creation.
-	DefaultTenantMode string `yaml:"default_tenant_mode" json:"default_tenant_mode"`
+	DefaultTenantMode      string `yaml:"default_tenant_mode" json:"default_tenant_mode"`
+	ComplexPasswordEnabled bool   `yaml:"complex_password_enabled" json:"complex_password_enabled"`
 }
 
 // AuthRegistrationMode constants used by handlers and middleware.
@@ -316,6 +323,7 @@ type OIDCAuthConfig struct {
 	AuthorizationEndpoint string               `yaml:"authorization_endpoint" json:"authorization_endpoint"`
 	TokenEndpoint         string               `yaml:"token_endpoint"         json:"token_endpoint"`
 	UserInfoEndpoint      string               `yaml:"user_info_endpoint"     json:"user_info_endpoint"`
+	JwksURI               string               `yaml:"jwks_uri"               json:"jwks_uri"`
 	Scopes                []string             `yaml:"scopes"                 json:"scopes"`
 	UserInfoMapping       *OIDCUserInfoMapping `yaml:"user_info_mapping"      json:"user_info_mapping"`
 }
@@ -359,10 +367,12 @@ type PromptTemplatesConfig struct {
 
 	GenerateSessionTitle []PromptTemplate `yaml:"generate_session_title" json:"generate_session_title,omitempty"`
 	GenerateSummary      []PromptTemplate `yaml:"generate_summary"       json:"generate_summary,omitempty"`
-	KeywordsExtraction   []PromptTemplate `yaml:"keywords_extraction"    json:"keywords_extraction,omitempty"`
-	AgentSystemPrompt    []PromptTemplate `yaml:"agent_system_prompt"    json:"agent_system_prompt,omitempty"`
-	GraphExtraction      []PromptTemplate `yaml:"graph_extraction"       json:"graph_extraction,omitempty"`
-	GenerateQuestions    []PromptTemplate `yaml:"generate_questions"     json:"generate_questions,omitempty"`
+	// GenerateKBDescription writes the knowledge-base gist from the document profile aggregate.
+	GenerateKBDescription []PromptTemplate `yaml:"generate_kb_description" json:"generate_kb_description,omitempty"` //nolint:lll // one-line struct tag
+	KeywordsExtraction    []PromptTemplate `yaml:"keywords_extraction"    json:"keywords_extraction,omitempty"`
+	AgentSystemPrompt     []PromptTemplate `yaml:"agent_system_prompt"    json:"agent_system_prompt,omitempty"`
+	GraphExtraction       []PromptTemplate `yaml:"graph_extraction"       json:"graph_extraction,omitempty"`
+	GenerateQuestions     []PromptTemplate `yaml:"generate_questions"     json:"generate_questions,omitempty"`
 	// IntentPrompts holds per-intent system prompt overrides (template ID = intent value).
 	IntentPrompts []PromptTemplate `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
 }
@@ -632,6 +642,7 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q or %q, got %q",
 				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
 		}
+
 		tenantMode := strings.TrimSpace(cfg.Auth.DefaultTenantMode)
 		if tenantMode != "" && tenantMode != AuthDefaultTenantModeCreatePersonal && tenantMode != AuthDefaultTenantModeTenantless {
 			errs = append(errs, fmt.Sprintf("auth.default_tenant_mode must be %q or %q, got %q",
@@ -717,6 +728,9 @@ func applyOIDCEnvOverrides(cfg *Config) {
 	}
 	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_USER_INFO_ENDPOINT")); value != "" {
 		cfg.OIDCAuth.UserInfoEndpoint = value
+	}
+	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_JWKS_URI")); value != "" {
+		cfg.OIDCAuth.JwksURI = value
 	}
 	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_SCOPES")); value != "" {
 		cfg.OIDCAuth.Scopes = strings.Fields(strings.ReplaceAll(value, ",", " "))
@@ -806,6 +820,7 @@ func applyAgentEnvOverrides(cfg *Config) {
 //
 // Env overrides (when set and non-empty):
 //   - WEKNORA_AUTH_DEFAULT_TENANT_MODE ("create_personal"/"tenantless")
+//   - WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED (boolean)
 //   - WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED (boolean)
 //   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
 //   - WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS ("true"/"false", case-insensitive).
@@ -844,6 +859,13 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 	if strings.TrimSpace(cfg.Auth.RegistrationMode) == "" {
 		cfg.Auth.RegistrationMode = AuthRegistrationModeSelfServe
 	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED")); value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
+			cfg.Auth.ComplexPasswordEnabled = parsed
+		}
+	}
+
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_DEFAULT_TENANT_MODE")); value != "" {
 		cfg.Auth.DefaultTenantMode = value
 	}
@@ -966,6 +988,13 @@ func backfillConversationDefaults(cfg *Config) {
 			fmt.Printf("Warning: generate_summary_prompt_id %q not found\n", conv.GenerateSummaryPromptID)
 		}
 	}
+	if conv.GenerateKBDescriptionPromptID != "" {
+		if t := FindTemplateByID(pt, conv.GenerateKBDescriptionPromptID); t != nil {
+			conv.GenerateKBDescriptionPrompt = t.Content
+		} else {
+			fmt.Printf("Warning: generate_kb_description_prompt_id %q not found\n", conv.GenerateKBDescriptionPromptID)
+		}
+	}
 	if conv.ExtractEntitiesPromptID != "" {
 		if t := FindTemplateByID(pt, conv.ExtractEntitiesPromptID); t != nil {
 			conv.ExtractEntitiesPrompt = t.Content
@@ -1030,6 +1059,7 @@ func FindTemplateByID(pt *PromptTemplatesConfig, id string) *PromptTemplate {
 		pt.Fallback,
 		pt.GenerateSessionTitle,
 		pt.GenerateSummary,
+		pt.GenerateKBDescription,
 		pt.KeywordsExtraction,
 		pt.AgentSystemPrompt,
 		pt.GraphExtraction,
@@ -1075,17 +1105,18 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 
 	// 定义模板文件映射
 	templateFiles := map[string]*[]PromptTemplate{
-		"system_prompt.yaml":          &config.SystemPrompt,
-		"context_template.yaml":       &config.ContextTemplate,
-		"rewrite.yaml":                &config.Rewrite,
-		"fallback.yaml":               &config.Fallback,
-		"generate_session_title.yaml": &config.GenerateSessionTitle,
-		"generate_summary.yaml":       &config.GenerateSummary,
-		"keywords_extraction.yaml":    &config.KeywordsExtraction,
-		"agent_system_prompt.yaml":    &config.AgentSystemPrompt,
-		"graph_extraction.yaml":       &config.GraphExtraction,
-		"generate_questions.yaml":     &config.GenerateQuestions,
-		"intent_prompts.yaml":         &config.IntentPrompts,
+		"system_prompt.yaml":           &config.SystemPrompt,
+		"context_template.yaml":        &config.ContextTemplate,
+		"rewrite.yaml":                 &config.Rewrite,
+		"fallback.yaml":                &config.Fallback,
+		"generate_session_title.yaml":  &config.GenerateSessionTitle,
+		"generate_summary.yaml":        &config.GenerateSummary,
+		"generate_kb_description.yaml": &config.GenerateKBDescription,
+		"keywords_extraction.yaml":     &config.KeywordsExtraction,
+		"agent_system_prompt.yaml":     &config.AgentSystemPrompt,
+		"graph_extraction.yaml":        &config.GraphExtraction,
+		"generate_questions.yaml":      &config.GenerateQuestions,
+		"intent_prompts.yaml":          &config.IntentPrompts,
 	}
 
 	// 加载每个模板文件

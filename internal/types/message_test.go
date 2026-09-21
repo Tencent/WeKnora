@@ -120,6 +120,31 @@ func TestMessageArtifacts_ScanUnknownType(t *testing.T) {
 	}
 }
 
+func TestWithRestoredMtimeLeavesEmptyHashOlderVersionAlone(t *testing.T) {
+	path := "/workspace/output/deck.pptx"
+	oldMod := time.Date(2026, 7, 10, 10, 20, 30, 0, time.UTC)
+	newMod := time.Date(2026, 7, 10, 10, 21, 0, 0, time.UTC)
+	arts := MessageArtifacts{
+		{URL: "resource://old", FileName: "deck.pptx", SourcePath: path, ModTime: oldMod},
+		{URL: "resource://new", FileName: "deck.pptx", SourcePath: path, ContentHash: "abc", ModTime: oldMod},
+	}
+
+	got, changed := arts.WithRestoredMtime(path, newMod, "abc")
+
+	if !changed {
+		t.Fatal("matching hashed version should be stamped")
+	}
+	if got[0].ContentHash != "" || !got[0].ModTime.Equal(oldMod) {
+		t.Fatalf("empty-hash older version was rewritten: %+v", got[0])
+	}
+	if got[1].ContentHash != "abc" || !got[1].ModTime.Equal(newMod) {
+		t.Fatalf("matching version not stamped: %+v", got[1])
+	}
+	if arts[1].ModTime.Equal(newMod) {
+		t.Fatal("WithRestoredMtime must not mutate the input slice")
+	}
+}
+
 // TestMessageArtifacts_ValueNil pins the "nil slice → JSON empty array" path
 // so a fresh Message without artifacts serialises as `[]` rather than `null`.
 func TestMessageArtifacts_ValueNil(t *testing.T) {

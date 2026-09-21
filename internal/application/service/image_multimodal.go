@@ -59,6 +59,20 @@ func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
 }
 
+// buildVLMOCRPrompt returns the system-owned OCR prompt for the given image
+// source type. cfg is part of the signature and deliberately unused: knowledge
+// base custom instructions must never reach the OCR prompt — free-form
+// business rules compete with the "No text content" output contract and turn
+// decorative images into poisoned, vectorized image_ocr chunks. Custom OCR
+// guidance, if ever needed, deserves a dedicated OCR instruction field rather
+// than reusing CustomInstructions.
+func buildVLMOCRPrompt(sourceType string, _ types.VLMConfig) string {
+	if sourceType == "scanned_pdf" {
+		return vlmOCRScannedPDFPrompt
+	}
+	return vlmOCRPrompt
+}
+
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
 // performs OCR and VLM caption, and creates child chunks.
@@ -258,15 +272,13 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	if payload.EnableOCR {
-		prompt := vlmOCRPrompt
+		prompt := buildVLMOCRPrompt(payload.ImageSourceType, vlmCfg)
 		if payload.ImageSourceType == "scanned_pdf" {
-			prompt = vlmOCRScannedPDFPrompt
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 			imgOut["ocr_prompt"] = "scanned_pdf"
 		} else {
 			imgOut["ocr_prompt"] = "default"
 		}
-		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
@@ -342,7 +354,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Persist chunks
-	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
+	if err := s.chunkService.GetRepository().CreateChunks(ctx, newChunks); err != nil {
 		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
 		return handleErr
 	}
@@ -446,7 +458,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 				continue
 			}
 			dbChunk.Status = int(types.ChunkStatusIndexed)
-			if uerr := s.chunkService.UpdateChunk(ctx, dbChunk); uerr != nil {
+			if uerr := s.chunkService.GetRepository().UpdateChunk(ctx, dbChunk); uerr != nil {
 				logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, uerr)
 			}
 		}
@@ -503,7 +515,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 			continue
 		}
 		dbChunk.Status = int(types.ChunkStatusIndexed)
-		if err := s.chunkService.UpdateChunk(ctx, dbChunk); err != nil {
+		if err := s.chunkService.GetRepository().UpdateChunk(ctx, dbChunk); err != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, err)
 		}
 	}
@@ -647,13 +659,21 @@ func downloadImageFromURL(imageURL string) ([]byte, error) {
 	return secutils.DownloadBytes(imageURL)
 }
 
+// multimodalPendingKey is the Redis key holding how many image tasks a
+// knowledge is still waiting on. The fan-out (enqueueImageMultimodalTasks)
+// seeds it and the fan-in (checkAndFinalizeAllImages) drains it, so the two
+// must agree on the name — hence one helper rather than two format strings.
+func multimodalPendingKey(knowledgeID string) string {
+	return fmt.Sprintf("multimodal:pending:%s", knowledgeID)
+}
+
 func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, payload types.ImageMultimodalPayload) {
 	if s.redisClient == nil {
 		s.enqueueKnowledgePostProcessTask(ctx, payload)
 		return
 	}
 
-	redisKey := fmt.Sprintf("multimodal:pending:%s", payload.KnowledgeID)
+	redisKey := multimodalPendingKey(payload.KnowledgeID)
 
 	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
 	if err != nil && err != redis.Nil {

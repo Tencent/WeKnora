@@ -3,6 +3,7 @@ package types
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,6 +43,30 @@ func TestNormalizeKnowledgeFolderPathCapsDepthAndLength(t *testing.T) {
 
 	wide := strings.TrimSuffix(strings.Repeat(strings.Repeat("y", 100)+"/", 12), "/")
 	assert.LessOrEqual(t, len(NormalizeKnowledgeFolderPath(wide)), MaxKnowledgeFolderPathLength)
+}
+
+func TestNormalizeKnowledgeFolderPathKeepsSegmentsValidUTF8(t *testing.T) {
+	// 60 Chinese characters is 180 bytes, so the segment cap cuts inside the
+	// 43rd character. The stored folder_path has to stay valid UTF-8: an
+	// invalid one no longer survives a JSON round trip, so the path the client
+	// gets back never matches the row again on rename or move.
+	segment := strings.Repeat("中", 60)
+	normalized := NormalizeKnowledgeFolderPath(segment)
+
+	assert.True(t, utf8.ValidString(normalized),
+		"segment truncated mid-rune: % x", []byte(normalized))
+	assert.LessOrEqual(t, len(normalized), MaxKnowledgeFolderSegmentLength,
+		"the cap is a byte budget and must still hold")
+	assert.True(t, strings.HasPrefix(segment, normalized),
+		"truncation must only drop a suffix")
+	assert.Equal(t, normalized, NormalizeKnowledgeFolderPath(normalized),
+		"normalizing an already-normalized path must be a no-op")
+
+	// A multi-byte character straddling the cap in an otherwise ASCII name.
+	mixed := strings.Repeat("a", MaxKnowledgeFolderSegmentLength-1) + "é" + "tail"
+	assert.True(t, utf8.ValidString(NormalizeKnowledgeFolderPath(mixed)))
+	assert.Equal(t, strings.Repeat("a", MaxKnowledgeFolderSegmentLength-1),
+		NormalizeKnowledgeFolderPath(mixed))
 }
 
 func TestSplitKnowledgeRelativePath(t *testing.T) {

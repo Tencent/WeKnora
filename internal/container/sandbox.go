@@ -101,7 +101,6 @@ func (c *repositorySessionExistenceChecker) SessionExists(
 func buildGlobalSandboxConfig() *sandbox.Config {
 	cfg := sandbox.DefaultConfig()
 	cfg.Type = sandbox.SandboxTypeDisabled
-	cfg.FallbackEnabled = false
 	return cfg
 }
 
@@ -113,12 +112,12 @@ func newTenantSandboxResolver(
 	loader sandbox.TenantSandboxConfigLoader,
 	redisClient *redis.Client,
 	sessionRepo interfaces.SessionRepository,
+	bootstrapper sandbox.SessionBootstrapper,
 ) sandbox.TenantSandboxResolver {
 	ctx := context.Background()
 
 	// Tenants may configure any supported backend regardless of process startup
-	// mode. Remote configs use this binding store for session persistence;
-	// Docker and Local configs remain stateless.
+	// mode. Remote configs use this binding store for session persistence.
 	store, storeKind, err := selectSessionBindingStore(redisClient, true)
 	if err != nil {
 		logger.Warnf(ctx,
@@ -131,6 +130,7 @@ func newTenantSandboxResolver(
 		Loader:          loader,
 		Store:           store,
 		Checker:         sessionExistenceCheckerFor(sessionRepo),
+		Bootstrapper:    bootstrapper,
 		SharedTransport: sandbox.NewGuardedTransport(),
 	})
 	if err != nil {

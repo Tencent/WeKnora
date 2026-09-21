@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -91,4 +92,86 @@ func TestStripOrphanAliasesRemovesIncompleteNumericHandle(t *testing.T) {
 func TestOrphanAliasesNilRegistry(t *testing.T) {
 	var r *resourceRegistry
 	require.Equal(t, []string{"res://0001"}, r.OrphanHandles("res://0001"))
+}
+
+// Aliases belong to one execution, and never follow mutable file names.
+func TestResourceVersionsStayImmutableAcrossRounds(t *testing.T) {
+	old := "resource://dHZ_fFslfs0GgJGaJZGjGA"
+	latest := "resource://4N1nAo-FZZoDEExDQz2yoA"
+	r := newResourceRegistry()
+	r.EncodeText("resource://aaaaaaaaaaaaaaaaaaaaaa resource://bbbbbbbbbbbbbbbbbbbbbb")
+	require.Equal(t, "res://0003", r.EncodeText(old))
+	require.Equal(t, "res://0004", r.EncodeText(latest))
+	require.Equal(t, old, r.DecodeText("res://0003"))
+	require.Equal(t, latest, r.DecodeText("res://0004"))
+	require.Equal(t, "res://0003", r.EncodeText(old))
+	nextRequest := newResourceRegistry()
+	require.Equal(t, "res://0001", nextRequest.EncodeText(latest))
+	require.Equal(t, old, r.DecodeText("res://0003"))
+}
+
+func TestEncodeMessagesDropsSignatureOnlyWhenReasoningIsRewritten(t *testing.T) {
+	r := newResourceRegistry()
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	messages := []chat.Message{
+		{
+			Role:               "assistant",
+			Content:            "answer",
+			ReasoningContent:   "I looked at " + ref,
+			ReasoningSignature: "anthropic-messages:sig-1",
+		},
+		{
+			Role:               "assistant",
+			Content:            "see " + ref,
+			ReasoningContent:   "plain thought with nothing to encode",
+			ReasoningSignature: "anthropic-messages:sig-2",
+		},
+	}
+
+	encoded := r.EncodeMessages(messages)
+
+	// The first message's thinking text was rewritten, so its signature no
+	// longer covers what would go on the wire.
+	require.Equal(t, "I looked at res://0001", encoded[0].ReasoningContent)
+	require.Empty(t, encoded[0].ReasoningSignature)
+	// The second one's thinking text is untouched (only Content changed), so
+	// the block stays replayable.
+	require.Equal(t, "plain thought with nothing to encode", encoded[1].ReasoningContent)
+	require.Equal(t, "anthropic-messages:sig-2", encoded[1].ReasoningSignature)
+	// Callers' own slice is never mutated.
+	require.Equal(t, "anthropic-messages:sig-1", messages[0].ReasoningSignature)
+}
+
+func TestEncodeMessagesKeepsGeminiSignatureWhenReasoningIsRewritten(t *testing.T) {
+	r := newResourceRegistry()
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	messages := []chat.Message{{
+		Role:             "assistant",
+		Content:          "answer",
+		ReasoningContent: "I looked at " + ref,
+		// Gemini replays this signature on the answer text and on each tool
+		// call's own metadata; it never replays the reasoning text, so a
+		// rewrite here does not invalidate it.
+		ReasoningSignature: "google-generative-ai:thought-sig",
+	}}
+
+	encoded := r.EncodeMessages(messages)
+
+	require.Equal(t, "I looked at res://0001", encoded[0].ReasoningContent)
+	require.Equal(t, "google-generative-ai:thought-sig", encoded[0].ReasoningSignature)
+}
+
+func TestDecodeResponseKeepsGeminiSignature(t *testing.T) {
+	registry := NewRegistry(true)
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	registry.EncodeMessages([]chat.Message{{Role: "assistant", Content: ref}})
+
+	decoded := &types.ChatResponse{
+		Content:            "done",
+		ReasoningContent:   "read res://0001",
+		ReasoningSignature: "google-generative-ai:thought-sig",
+	}
+	registry.DecodeResponse(decoded)
+	require.Equal(t, "read "+ref, decoded.ReasoningContent)
+	require.Equal(t, "google-generative-ai:thought-sig", decoded.ReasoningSignature)
 }

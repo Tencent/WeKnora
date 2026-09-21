@@ -17,6 +17,7 @@ import { AUDIT_ACTION_LOCALE_DEFAULTS, getAuditActionLocaleDefault } from './aud
 import { writeLocaleModule } from './localeSerialize.ts'
 
 import enUS from './locales/en-US.ts'
+import jaJP from './locales/ja-JP.ts'
 import koKR from './locales/ko-KR.ts'
 import ruRU from './locales/ru-RU.ts'
 import zhCN from './locales/zh-CN.ts'
@@ -25,6 +26,7 @@ export const LOCALE_BUNDLES = {
   'en-US': enUS,
   'zh-CN': zhCN,
   'ko-KR': koKR,
+  'ja-JP': jaJP,
   'ru-RU': ruRU,
 } as const
 
@@ -90,6 +92,8 @@ const EXTRA_PREFIXES = [
   'kbSettings.parser.engines.',
   'model.editor.description.',
   'integrations.tabs.',
+  'integrations.mcpserver.tools.',
+  'integrations.mcpserver.groups.',
   'knowledgeStages.stage.',
   'knowledgeStages.status.',
   'system.globalSettings.runtime.pools.',
@@ -512,7 +516,7 @@ export function findAllLocaleMessageCompileErrors(
 
 type LocaleTree = Record<string, unknown>
 
-const LOCALE_ORDER: LocaleName[] = ['en-US', 'zh-CN', 'ko-KR', 'ru-RU']
+const LOCALE_ORDER: LocaleName[] = ['en-US', 'zh-CN', 'ko-KR', 'ru-RU', 'ja-JP']
 const LOCALES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'locales')
 
 function getLocaleValueAtPathParts(current: unknown, parts: string[]): unknown {

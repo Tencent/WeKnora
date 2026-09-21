@@ -225,6 +225,11 @@ type KnowledgeBaseRepository interface {
 	// CountByModelID counts active KBs in the tenant that reference the given
 	// model ID in any model-binding field (embedding, summary, VLM, ASR, etc.).
 	CountByModelID(ctx context.Context, tenantID uint64, modelID string) (int64, error)
+	// ListModelUsages returns the minimal active KB projections that reference
+	// the model, with every matching binding merged per object. Implementations
+	// must cap the result at types.ModelUsageListLimit; callers that need the
+	// untruncated size should use CountByModelID.
+	ListModelUsages(ctx context.Context, tenantID uint64, modelID string) ([]types.ModelUsageResource, error)
 	// SetUserKBPin inserts or removes a row in user_kb_pins for the given
 	// (tenant, user, kb) triple. Returns the resulting pinned_at (nil when
 	// pinned=false) and an error. The tenant_id is captured to support
@@ -233,6 +238,10 @@ type KnowledgeBaseRepository interface {
 	SetUserKBPin(
 		ctx context.Context, tenantID uint64, userID string, kbID string, pinned bool,
 	) (pinnedAt *time.Time, err error)
+	// UpdateKnowledgeBaseGeneratedProfile writes only the generated_profile
+	// column so a background regeneration never races a concurrent settings
+	// save on the rest of the row.
+	UpdateKnowledgeBaseGeneratedProfile(ctx context.Context, id string, profile *types.KnowledgeBaseProfile) error
 
 	// ListUserKBPinIDs returns the kb_id → pinned_at map of every KB the
 	// given user has personally pinned in this tenant. Used by the list

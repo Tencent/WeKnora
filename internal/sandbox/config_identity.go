@@ -71,6 +71,15 @@ func IdentityOf(tenantCfg *types.TenantSandboxConfig) SandboxIdentity {
 			identity.SandboxDomain = e2bCfg.SandboxDomain
 			identity.ProxyURL = e2bCfg.ProxyURL
 		}
+	case SandboxTypeDocker:
+		// The daemon endpoint is both planes at once: containers are created,
+		// exec'd and deleted over the same socket, so re-pointing it strands
+		// every sandbox this config owns. The image is not part of the
+		// identity — changing it only affects sandboxes created afterwards.
+		if docker := tenantCfg.Docker; docker != nil {
+			identity.APIURL = docker.Host
+			identity.APIKey = docker.TLSCertPath
+		}
 	}
 	return identity
 }

@@ -79,7 +79,7 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 		return fmt.Errorf("parse outgoing payload: %w", err)
 	}
 
-	if a.outgoingToken != "" && payload.Token != a.outgoingToken {
+	if a.outgoingToken == "" || payload.Token != a.outgoingToken {
 		return fmt.Errorf("invalid outgoing webhook token")
 	}
 

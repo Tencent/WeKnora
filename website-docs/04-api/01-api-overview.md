@@ -1,6 +1,6 @@
 # API 总览
 
-本节介绍 WeKnora HTTP API 的通用约定：Base URL、认证方式、响应结构、错误码、分页、SSE 与限流。
+WeKnora HTTP API 使用 `/api/v1` 前缀，支持 JWT、API Key 和 Embed token 认证。调用各资源接口前，需按客户端类型选择凭证，并遵循统一的响应、错误处理、分页和流式事件约定。
 
 ## Base URL 与版本前缀
 
@@ -17,7 +17,7 @@ BASE=http://localhost:8080
 
 认证由 `internal/middleware/auth.go` 的 `Auth` 中间件统一处理，按以下顺序尝试：
 
-### 1. JWT Bearer（Web 用户）
+### JWT Bearer（Web 用户） {#_1-jwt-bearer-web-用户}
 
 ```
 Authorization: Bearer <access_token>
@@ -27,7 +27,7 @@ Authorization: Bearer <access_token>
 - 可选请求头 `X-Tenant-ID: <tenant_id>`：在 JWT 指向的空间之外切换目标空间（须为该空间活跃成员，或具备 `CanAccessAllTenants` 跨空间超管属性）。畸形或 `0` 值直接返回 400。
 - 若 JWT 未解析出任何空间且接口非“无空间可用”白名单（如 `/auth/me`、`/me/invitations` 等），返回 409 `{"code":"TENANT_REQUIRED"}`。
 
-### 2. API Key（机器主体）
+### API Key（机器主体） {#_2-api-key-机器主体}
 
 ```
 X-API-Key: <api_key>
@@ -42,7 +42,7 @@ X-API-Key: <api_key>
   - `direct` 模式：`X-External-User-ID: <外部用户ID>`（≤128 字符）。
   - `signed_token` 模式：`X-External-User-Token: <HS256 JWT>`，要求 `aud=weknora`、`exp`（生存期 ≤24h）、`tenant_id` claim 与目标空间一致、`sub` 为外部用户 ID。
 
-### 3. Embed publish token（匿名嵌入端）
+### Embed publish token（匿名嵌入端） {#_3-embed-publish-token-匿名嵌入端}
 
 `/api/v1/embed/:channel_id/*` 公开路由使用独立的 `EmbedAuth` 中间件（`internal/middleware/embed_auth.go`）：
 
@@ -188,7 +188,7 @@ X-Accel-Buffering: no
 
 取值只有 `handle`（默认）与 `public`，传其它值返回 400。单次请求参数优先于环境变量，所以把部署默认设成 `public` 之后，仍可以用 `?resource_urls=handle` 单独退回。
 
-支持该参数的接口：`POST /knowledge-chat/{session_id}`、`POST /agent-chat/{session_id}`、`GET /sessions/continue-stream/{session_id}`、`GET /messages/{session_id}/load`、`POST /knowledge-search`。改写覆盖答案正文、`knowledge_references`（含 `image_info`）、Agent 执行步骤与工具结果，以及消息上的图片附件；流式回答里跨 chunk 截断的引用会先缓冲再改写，客户端拿到的始终是完整链接。
+支持该参数的接口：`POST /knowledge-chat/{session_id}`、`POST /agent-chat/{session_id}`、`GET /sessions/continue-stream/{session_id}`、`GET /messages/{session_id}/load`、`POST /knowledge-search`、`POST /knowledge-bases/{id}/hybrid-search`（兼容 GET）。改写覆盖答案正文、检索结果 `content` / `image_info`、`knowledge_references`、Agent 执行步骤与工具结果，以及消息上的图片附件；流式回答里跨 chunk 截断的引用会先缓冲再改写，客户端拿到的始终是完整链接。
 
 使用前需要知道的几件事：
 
@@ -224,5 +224,9 @@ X-Accel-Buffering: no
 | 模型与初始化 | [02-api-model-system.md](./02-api-model-system.md) | `/models`、`/initialization`、`/evaluation`、`/weknoracloud` |
 | 系统与平台管理 | [02-api-system.md](./02-api-system.md) | `/system`、`/system/admin` |
 | 基础设施与数据源 | [02-api-infra.md](./02-api-infra.md) | `/vector-stores`、`/storage-backends`、`/web-search-providers`、`/datasource` |
-| Agent、MCP 与技能 | [02-api-agent-mcp.md](./02-api-agent-mcp.md) | `/agents`、`/mcp-services`、`/agent`、`/skills`、`/user/favorites` |
+| Agent 与 MCP | [02-api-agent-mcp.md](./02-api-agent-mcp.md) | `/agents`、`/mcp-services`、`/agent`、`/user/favorites` |
+| 沙箱、技能与个人变量 | [02-api-sandbox-skills.md](./02-api-sandbox-skills.md) | `/sandbox-configs`、`/skills`、`/me/env-vars` |
+| 长期记忆 | [02-api-memory.md](./02-api-memory.md) | `/memory`、`/tenants/kv/memory-config` |
 | IM、Embed 与文件服务 | [02-api-channels.md](./02-api-channels.md) | `/im`、`/im-channels`、`/wechat`、`/embed-channels`、`/embed`、`/files`、`/r/:token` |
+
+新增配置与个人接口分别见[沙箱、技能与个人变量](02-api-sandbox-skills.md)、[长期记忆](02-api-memory.md)；生成文件列表与下载见[会话与聊天](02-api-chat.md)。

@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-
+	"math"
 	"slices"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -38,8 +38,11 @@ func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*typ
 		return result
 	}
 	if len(vectorResults) == 0 {
-		// Keyword-only: keep original scores (important for FAQ)
+		// Keyword-only: keep relative BM25 order, but fold unbounded
+		// scores into [0, 1] before they reach rerank/MMR. Raw BM25
+		// (often >10) saturates compositeScore's 0.3*base term.
 		result := deduplicateByScore(keywordResults)
+		rescaleUnboundedScores(result)
 		logger.Infof(ctx, "Result count after deduplication: %d", len(result))
 		return result
 	}
@@ -75,6 +78,48 @@ func deduplicateByScore(results []*types.IndexWithScore) []*types.IndexWithScore
 	}
 	slices.SortFunc(deduped, sortByScoreDesc)
 	return deduped
+}
+
+// rescaleUnboundedScores maps a single-retriever candidate set onto [0, 1]
+// by dividing through the maximum finite score. Keyword (BM25) scores are
+// unbounded; leaving them in place saturates compositeScore (0.3*base with
+// a [0, 1] clamp) so every candidate ties at 1.0 and MMR degenerates to
+// diversity-only ordering.
+//
+// Scores already in [0, 1] are left unchanged so engines that stamp
+// keyword hits at 1.0 (Qdrant, Doris) and already-normalized vector
+// scores keep their current magnitude. Relative order is preserved
+// either way. Retrieve/Langfuse sampling happens before fusion, so
+// raw BM25 remains visible in the retrieve span.
+func rescaleUnboundedScores(results []*types.IndexWithScore) {
+	maxScore := 0.0
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		if math.IsNaN(r.Score) || math.IsInf(r.Score, 0) {
+			continue
+		}
+		if r.Score > maxScore {
+			maxScore = r.Score
+		}
+	}
+	if maxScore <= 1 {
+		return
+	}
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		switch {
+		case math.IsNaN(r.Score), math.IsInf(r.Score, -1), r.Score <= 0:
+			r.Score = 0
+		case math.IsInf(r.Score, 1):
+			r.Score = 1
+		default:
+			r.Score = r.Score / maxScore
+		}
+	}
 }
 
 // fuseWithRRF merges vector and keyword retrieval results using Reciprocal Rank Fusion.

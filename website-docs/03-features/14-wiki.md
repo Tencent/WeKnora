@@ -1,31 +1,103 @@
 # Wiki 能力
 
-上传一堆散乱的文档之后，你常常还是不知道「这批资料里到底有什么」。Wiki 就是为这件事准备的：文档入库后，WeKnora 用大模型从原文里抽出人物、产品、概念等条目，为每个条目生成一篇带出处的 Markdown 页面，页面之间互相链接，形成一个可以像维基百科一样浏览的知识站点。
+Wiki 将知识库资料整理为相互链接的 Markdown 页面。文档入库后，模型提取人物、产品和概念等条目，生成带来源引用的页面，便于按主题浏览。
 
-它和普通问答的区别在于：问答是「你问我答」，Wiki 是「先替你把知识整理好」。资料越多、越零散，Wiki 的价值越明显。而且这些页面不只给人看——Agent 也能读写它们，把它当成长期记忆用；模型写错的地方你可以直接改，每次改动都留版本、可回滚（见「人工编辑与版本历史」）。
+用户可直接编辑生成的页面，查看历史版本并回滚。智能体也可通过 Wiki 工具读取和维护页面；访问范围仍由知识库权限决定。
 
 <Screenshot
   src="/screenshots/wiki-browser.png"
   caption="Wiki 浏览器：左侧目录树，右侧生成的条目页面与出处"
   hint="展示左侧按类型分组的目录树、一篇实体页正文、页内 wiki 链接与来源文档引用。" />
 
-## 怎么开启
+## 开启并浏览 Wiki {#怎么开启}
 
 1. 编辑知识库 → 「索引策略」里打开 **Wiki**；
 2. 上传文档（已有文档也会被纳入，无需重传）；
 3. 等待生成。Wiki 生成是异步的，文档多时会持续一段时间，知识库面包屑上有「索引中」提示；
 4. 完成后进入知识库的 **Wiki** 页签浏览，**图谱**页签可以看条目之间的链接关系。
 
-生成过程要调大模型，成本与文档量成正比。抽取密度可以在知识库的 Wiki 配置里调（`focused` / `standard` / `exhaustive`，见下文「抽取粒度」）。
+Wiki 生成会增加模型调用，用量取决于文档规模和抽取密度。可在知识库 Wiki 配置中选择 `focused`、`standard` 或 `exhaustive`，详细说明见[抽取粒度](#抽取粒度)。
 
 <Screenshot
   src="/screenshots/wiki-graph.png"
   caption="Wiki 图谱视图：条目之间的链接关系"
   hint="展示图谱概览模式，节点按页面类型着色，可点击跳转到具体页面。" />
 
-## 页面模型与层级
+## 编辑和回滚页面
 
-### 页面类型（PageType）
+在 Wiki 页面中编辑正文后，可查看版本历史并比较改动。历史记录区分自动生成、智能体、人工编辑和回滚来源。回滚会以所选历史内容创建新版本，版本号继续递增。
+
+系统优先清理自动生成的旧版本：达到 50 个历史版本后清理可裁剪快照，达到 200 个时按硬上限清理全部来源。需要长期保存的内容应另行归档。
+
+## 查看变更与生成状态
+
+页面创建、更新、删除和批量生成的操作记录统一显示在「知识库 → 设置 → 活动」。文档处理期间可查看索引状态；服务重启后，系统会恢复持久化的待处理 Wiki 任务。接口兼容与恢复机制见参考部分。
+
+## 版本与运行参考
+
+### 人工编辑与版本历史
+
+Wiki 页面支持人工编辑和版本回滚，用户可修正生成内容，并查看各版本的来源、操作者和时间。版本记录由迁移 `000075` 引入。
+
+#### 版本来源与操作者 {#每个版本记的是谁改的}
+
+`wiki_pages` 上有两个溯源字段，`last_edit_source` 标记**当前版本**的作者类型：
+
+| `edit_source` | 含义 |
+| --- | --- |
+| `pipeline` | Wiki 生成管道写的（历史遗留行为空串，按 `pipeline` 处理） |
+| `agent` | Agent 通过 `wiki_write_page` / `wiki_replace_text` 等工具写的 |
+| `user` | 人工在编辑器里改的 |
+| `revert` | 回滚产生的版本 |
+
+配套的 `last_editor_id` 记录操作者（后台管道写入时为空）。界面据此展示每个版本的编辑来源。
+
+#### 快照与回滚
+
+- 每次页面被覆盖前，**旧版本**先整份快照进 `wiki_page_revisions`（标题、正文、摘要、页面类型、状态、别名，加上该版本的作者与时间）；当前版本只存在于 `wiki_pages` 里。`(page_id, version)` 上的唯一索引配合 `ON CONFLICT DO NOTHING`，让「先快照再更新」这条写路径在重试下保持幂等；
+- `GET /revisions/*slug` 列历史版本（倒序，不含正文，附当前版本号）；带 `?version=N` 则取该版本全文，用于 diff；
+- `POST /revert` 传 `{slug, version}` 回滚。回滚会使用目标版本的内容创建新版本，版本号继续递增，`edit_source` 记为 `revert`，因此回滚本身也可被回滚。回滚到当前版本会返回 400（通常意味着前端拿的是过期的历史列表）。
+
+#### 历史保留策略
+
+版本历史按两级上限清理（`internal/types/wiki_page.go`）：
+
+- **软上限 50 版**：只清理「可裁剪」的快照，即 `pipeline` 写的和历史遗留的空来源；
+- **硬上限 200 版**：不分作者一律裁剪，保证纯人工维护的页面存储也有界。
+
+在达到硬上限前，系统优先清理自动生成的历史，保留人工编辑记录。
+
+<Screenshot
+  src="/screenshots/wiki-revision-history.png"
+  caption="Wiki 页面版本历史：按来源区分的版本列表与回滚入口"
+  hint="展示某个 wiki 页面的历史抽屉，含版本号、编辑来源（管道/人工/Agent/回滚）、编辑者与时间，以及对比/回滚按钮。" />
+
+### 操作历史（知识库活动流）
+
+Wiki 曾经维护一份独立的操作日志（`wiki_log_entries` 表 + `GET /wiki/log` 接口 + WikiBrowser 里的日志页签）。这份 feed 与知识库活动流内容重叠，已在 migration `000077_remove_wiki_log` 中整体移除：表被 DROP，历史遗留的 `page_type = 'log'` 页面一并删除，`log` 不再是合法页面类型。
+
+现在**知识库活动流是唯一的操作历史入口**：
+
+- ingest 批次结束时，`wiki_ingest_batch.go` 汇总本批各类动作数量，调用 `service.RecordWikiContentActivity()` 写一条 `wiki_content_changed` 活动；
+- 人工在 WikiBrowser 中创建/更新/删除页面时，`internal/handler/wiki_page.go` 同样把 `manual_create` / `manual_update` / `manual_delete` 投影到活动流；
+- 活动记录落在审计日志体系（`kb_activity.go` → `AuditLogService`），可在「知识库 → 设置 → 活动」查看，保留策略与其它审计日志一致（见[可观测性与审计](16-observability.md)）；
+- 写入是 best-effort：活动记录失败不会让 wiki 编辑本身失败。
+
+升级注意：如果外部集成还在调用 `GET /api/v1/knowledgebase/:kb_id/wiki/log`，需要改用知识库活动流接口 `GET /api/v1/knowledge-bases/:id/activity`。
+
+### 失败恢复
+
+`internal/container/recover_pending_wiki_tasks.go` 在服务启动时闭合 Lite 模式（进程内 `SyncTaskExecutor`）或 Redis 入队中断留下的缺口：
+
+1. 扫描持久化的 `task_pending_ops` 表中 `scope = knowledge_base` 且 `task_type ∈ {wiki:ingest, wiki:finalize}` 的待处理组合；
+2. 清理已删除 KB 的残留行（fail-closed）；
+3. 对每个活跃 KB 重新入队触发任务：`wiki:ingest` 不带 TaskID（允许多批并发），`wiki:finalize` 使用 `"wiki-finalize-" + KB_ID` 去重（同一 KB 只保留一个 finalize）。重复入队无害——ingest 认领互不相交的行，finalize 在 lane 内合并。
+
+## 页面与接口参考
+
+### 页面模型与层级
+
+#### 页面类型（PageType）
 
 `internal/types/wiki_page.go` 定义了 6 种页面类型：
 
@@ -40,7 +112,7 @@
 
 页面状态（`WikiPageStatus`）：`draft` / `published`（默认）/ `archived`。
 
-### 目录树（Folder Hierarchy）
+#### 目录树（Folder Hierarchy）
 
 migration `000061_wiki_page_hierarchy.up.sql` 引入独立的 `wiki_folders` 表（邻接表模型）：
 
@@ -49,14 +121,76 @@ migration `000061_wiki_page_hierarchy.up.sql` 引入独立的 `wiki_folders` 表
 - 页面上的 `CategoryPath` / `WikiPath` / `Depth` / `SortOrder` 是从 folder 链派生的**缓存投影**；
 - 目录最深 3 级（常量 `WikiCategoryMaxDepth = 3`），`CleanWikiCategoryPath()` 会规范化全角分隔符（`／`、`｜` → `/`）并剔除类型标签。
 
-### 关键字段
+#### 关键字段
 
 - `Slug`：页面在 KB 内的唯一标识（见下节）；
 - `SourceRefs`：来源引用，格式 `"<knowledge_id>|<doc_title>"`；`ChunkRefs`：分块级证据引用；
 - `InLinks` / `OutLinks`：wiki-link 反向/正向链接，维护图结构，`GET /graph` 可查询全局或 ego 视图；
 - `Aliases`：别名（用于搜索与去重合并后的旧名指向）；`Version`：版本号。
 
-## 生成流程
+### 发布与访问
+
+所有 Wiki 路由挂在 `/api/v1/knowledgebase/:kb_id/wiki` 之下（`internal/router/router.go`），**没有免登录的公开访问模式**，读写均受 RBAC 与 KB 访问控制约束：
+
+#### 读接口（Viewer + KBAccessRead）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/pages` | 页面列表 |
+| GET | `/pages/*slug` | 按 slug 取单页 |
+| GET | `/folders` | 目录树 |
+| GET | `/index` | 索引页 |
+| GET | `/graph` | 链接图（全局概览 / ego 模式） |
+| GET | `/stats` | 统计 |
+| GET | `/search?q=...` | 搜索 |
+| GET | `/lint` / `/issues` | 质量检查结果 / 问题列表 |
+| GET | `/revisions/*slug` | 版本历史列表；带 `?version=N` 取该版本全文 |
+
+`KBAccessRead` 覆盖：KB 所有者、组织共享、以及通过共享 Agent 获得的访问。
+
+#### 写接口（OwnedWikiKBOrAdmin + KBAccessWrite）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST / PUT / DELETE | `/pages`、`/pages/*slug` | 创建 / 更新 / 删除页面 |
+| POST / PUT / DELETE | `/folders`、`/folders/:folder_id` | 目录管理 |
+| PUT | `/move-page` | 移动页面到目录 |
+| POST | `/rebuild-links` | 重建链接图 |
+| POST | `/auto-fix` | 触发自动修复 |
+| PUT | `/issues/:issue_id/status` | 更新问题状态 |
+| POST | `/revert` | 回滚到指定版本（body：`{slug, version}`） |
+
+写权限按 KB 归属判定：贡献者只要拥有该 KB 即可管理其 wiki，否则 403。API Key 场景按 `ingest` / `retrieve` capability 映射。
+
+前端由 `WikiBrowser.vue` 提供浏览界面；文档解析期间 `wikiStatusRefresh.ts` 轮询 `parse_status`（`pending` / `processing` / `finalizing`），解析完成而摘要仍在生成时继续轮询。目录树的展开状态由 `wikiDirectoryState.ts` 单独维护：新建文件夹或刷新数据后，`expandWikiDirectoryPath()` 会把当前路径上的各级目录标记为「用户已展开」，避免刷新时整棵树塌回默认折叠状态。
+
+### 与 Agent 的关系
+
+智能体可通过以下 9 个 Wiki 工具读取、修改页面并处理问题（回读源文档则复用通用的 `read_document`），工具定义位于 `internal/agent/tools/definitions.go`：
+
+| 工具 | 作用 | 关键参数 |
+| --- | --- | --- |
+| `wiki_read_page` | 按 slug 批量读取页面全文 | `slugs: string[]` |
+| `wiki_search` | 搜索页面（标题 / slug / 别名 / 摘要 / 内容；`query` 按大小写不敏感的 POSIX 正则解释，不是合法正则的文本如 `C++` 按字面匹配；`regex=false` 强制字面匹配） | `query`、`regex?`、`knowledge_base_ids?`、`limit?`（旧参数 `queries`、`knowledge_base_id` 仍接受） |
+| `wiki_write_page` | 创建/整页覆盖（`synthesis`、`comparison` 页只能由此创建） | `slug`、`title`、`summary`、`content`、`page_type`、`aliases?`、`source_refs?` |
+| `wiki_replace_text` | 页内精确文本替换 | `slug`、`old_text`、`new_text` |
+| `wiki_rename_page` | 重命名 slug，自动更新反向链接 | `slug`、`new_slug` |
+| `wiki_delete_page` | 删除页面并清理死链 | `slug` |
+| `read_document` | 回读源文档原文：元数据头 + 分块，可分页或用 `query` 在文档内定位（替代原 `wiki_read_source_doc`；仅 Wiki 的知识库同样可用，因为分块总会落库） | `id`（`dN` / `cN`）、`offset?`、`limit?`、`query?`、`regex?`、`context?` |
+| `wiki_flag_issue` | 标记页面问题 | `slug`、`issue_type ∈ {mixed_entities, contradictory_facts, out_of_date, other}`、`description` |
+| `wiki_read_issue` | 查看问题详情 | 问题 ID |
+| `wiki_update_issue` | 更新问题状态 | 问题 ID、`status ∈ {pending, ignored, resolved}` |
+
+推荐的阅读顺序是 `wiki_search` → `wiki_read_page` → `read_document`：先定位页面，再读整页，需要精确引用时回到原始来源的 `cN` 分块。工具输出为 XML-like 结构（`<wiki_page><metadata>...<summary>...<content>...`），前端用 `frontend/src/utils/wikiToolReferences.ts` 的 `parseWikiToolReferences()` 解析成引用卡片渲染在对话中。
+
+配套机制：
+
+- **Wiki Scope**：Agent 会话内维护 wiki KB 白名单，支持通过 `@mention` 把范围收窄到特定文档/标签，工具执行时自动过滤 `source_refs`（`internal/agent/tools/wiki_tools.go`）；
+- **写权限**：检索范围只需要读权限，而改写类工具（`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_flag_issue`、`wiki_update_issue`）只作用于调用方可编辑的知识库，即本空间的知识库，或通过组织分享获得 editor 及以上权限的知识库。调用方本身还要有写权限：空间角色 Contributor 及以上，受限 API key 需要 `ingest` 能力。以 Viewer 身份运行的 IM、网页嵌入和 MCP 端点因此只读。范围内没有可编辑的 wiki 知识库时，这些工具不会注册。共享智能体始终只读；
+- **Wiki Fixer**：内置 Agent（`types.BuiltinWikiFixerID`），负责自动修复 wiki 问题（死链、实体混淆等）。跨租户访问共享 KB 时要求租户角色 ≥ Editor，并自动提升到源租户上下文（`internal/handler/session/wiki_fixer_scope.go`）。提升后使用内置默认配置，只针对这一个 KB，不启用 MCP、技能、沙箱和联网搜索，模型回退到该 KB 自己的模型，调用方对 fixer 的自定义配置不会带进源空间；
+- **问题闭环**：`wiki_page_issues` 表 + lint 接口 + `auto-fix`，人和 Agent 都可以报告/处理问题。
+
+### 生成流程
 
 Wiki 生成由**文档摄入（knowledge ingest）触发**，经 Redis 任务队列异步执行。任务类型定义在 `internal/types/task.go`：
 
@@ -79,7 +213,7 @@ TypeWikiFinalize = "wiki:finalize"
 - `WikiTaxonomyPlanPrompt`：为同一批次的所有实体/概念统一规划目录路径（最多 2 级、优先复用已有文件夹），保证目录树连贯；
 - `WikiDeduplicationPrompt`：判断新抽取项是否与既有页面同指一物，核心原则是 **"related ≠ same"**（相关不等于相同），返回 `{ merges: { "entity/new": "entity/existing" } }`。
 
-### 抽取粒度
+#### 抽取粒度
 
 `WikiConfig`（存于 `knowledge_bases.wiki_config` JSONB 列）中的 `WikiExtractionGranularity` 控制抽取密度：
 
@@ -89,7 +223,7 @@ TypeWikiFinalize = "wiki:finalize"
 | `standard`（默认） | 主题 + 被实质性讨论（一段/多条/2-3 句以上）的实体概念 |
 | `exhaustive` | 穷举所有命名事物与公认概念 |
 
-### 并发与批处理
+#### 并发与批处理
 
 `WikiConfig` 相关参数（`internal/types/wiki_page.go`）：
 
@@ -100,7 +234,7 @@ TypeWikiFinalize = "wiki:finalize"
 | `IngestReduceParallel` | 10 | Reduce 阶段（每 slug 写页面）并发数 |
 | `IngestMaxInflight` | 4 | 同一 KB 最大并发批次（保证跨 KB 公平） |
 
-### 生成流程图
+#### 生成流程图
 
 ```mermaid
 flowchart TD
@@ -117,7 +251,7 @@ flowchart TD
     J --> K["published 页面在 WikiBrowser 可浏览<br/>Agent 工具可读写"]
 ```
 
-## Slug 机制
+### Slug 机制
 
 - **格式**：`<type>/<name>`，如 `entity/acme-corp`、`concept/rag`、`summary/<knowledge-uuid>`；小写、连字符分隔，非拉丁文名做罗马化/拼音；
 - **唯一性**：数据库唯一索引（`000037_wiki_and_indexing.up.sql`）：
@@ -135,128 +269,9 @@ flowchart TD
 - **Slug Handle（句柄代理）**：ingest 的 LLM 调用中，高熵的真实 slug（尤其含 UUID 的 `summary/...`）会被替换为短句柄（`ref-1`、`ref-2`），模型输出 `[[ref-1|title]]` 后由后端还原为真实 slug，避免模型抄错 UUID（`internal/application/service/wiki_slug_handles.go`）；
 - **引用作用**：Agent 回答中的 wiki 引用以 `[[slug|title]]` 形式出现，`InLinks`/`OutLinks` 依 slug 维护页面图；重命名 slug（`wiki_rename_page` 工具）会自动更新所有反向链接。
 
-## 发布与访问
-
-所有 Wiki 路由挂在 `/api/v1/knowledgebase/:kb_id/wiki` 之下（`internal/router/router.go`），**没有免登录的公开访问模式**，读写均受 RBAC 与 KB 访问控制约束：
-
-### 读接口（Viewer + KBAccessRead）
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/pages` | 页面列表 |
-| GET | `/pages/*slug` | 按 slug 取单页 |
-| GET | `/folders` | 目录树 |
-| GET | `/index` | 索引页 |
-| GET | `/graph` | 链接图（全局概览 / ego 模式） |
-| GET | `/stats` | 统计 |
-| GET | `/search?q=...` | 搜索 |
-| GET | `/lint` / `/issues` | 质量检查结果 / 问题列表 |
-| GET | `/revisions/*slug` | 版本历史列表；带 `?version=N` 取该版本全文 |
-
-`KBAccessRead` 覆盖：KB 所有者、组织共享、以及通过共享 Agent 获得的访问。
-
-### 写接口（OwnedWikiKBOrAdmin + KBAccessWrite）
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| POST / PUT / DELETE | `/pages`、`/pages/*slug` | 创建 / 更新 / 删除页面 |
-| POST / PUT / DELETE | `/folders`、`/folders/:folder_id` | 目录管理 |
-| PUT | `/move-page` | 移动页面到目录 |
-| POST | `/rebuild-links` | 重建链接图 |
-| POST | `/auto-fix` | 触发自动修复 |
-| PUT | `/issues/:issue_id/status` | 更新问题状态 |
-| POST | `/revert` | 回滚到指定版本（body：`{slug, version}`） |
-
-写权限按 KB 归属判定：贡献者只要拥有该 KB 即可管理其 wiki，否则 403。API Key 场景按 `ingest` / `retrieve` capability 映射。
-
-前端由 `WikiBrowser.vue` 提供浏览界面；文档解析期间 `wikiStatusRefresh.ts` 轮询 `parse_status`（`pending` / `processing` / `finalizing`），解析完成而摘要仍在生成时继续轮询。目录树的展开状态由 `wikiDirectoryState.ts` 单独维护：新建文件夹或刷新数据后，`expandWikiDirectoryPath()` 会把当前路径上的各级目录标记为「用户已展开」，避免刷新时整棵树塌回默认折叠状态。
-
-## 人工编辑与版本历史
-
-Wiki 页面是 LLM 生成的，难免有需要人工订正的地方。页面因此支持直接编辑，并保留完整版本历史（migration `000075`）。
-
-### 每个版本记的是谁改的
-
-`wiki_pages` 上有两个溯源字段，`last_edit_source` 标记**当前版本**的作者类型：
-
-| `edit_source` | 含义 |
-| --- | --- |
-| `pipeline` | Wiki 生成管道写的（历史遗留行为空串，按 `pipeline` 处理） |
-| `agent` | Agent 通过 `wiki_write_page` / `wiki_replace_text` 等工具写的 |
-| `user` | 人工在编辑器里改的 |
-| `revert` | 回滚产生的版本 |
-
-配套的 `last_editor_id` 记录操作者（后台管道写入时为空）。界面上据此区分「这段是模型写的还是人改的」。
-
-### 快照与回滚
-
-- 每次页面被覆盖前，**旧版本**先整份快照进 `wiki_page_revisions`（标题、正文、摘要、页面类型、状态、别名，加上该版本的作者与时间）；当前版本只存在于 `wiki_pages` 里。`(page_id, version)` 上的唯一索引配合 `ON CONFLICT DO NOTHING`，让「先快照再更新」这条写路径在重试下保持幂等；
-- `GET /revisions/*slug` 列历史版本（倒序，不含正文，附当前版本号）；带 `?version=N` 则取该版本全文，用于 diff；
-- `POST /revert` 传 `{slug, version}` 回滚。回滚**不是把版本号退回去**，而是以目标版本的内容产生一个新版本，`edit_source` 记为 `revert`，因此回滚本身也可被回滚。回滚到当前版本会返回 400（通常意味着前端拿的是过期的历史列表）。
-
-### 历史保留策略
-
-无节制留快照会被管道刷爆，因此采用两级上限（`internal/types/wiki_page.go`）：
-
-- **软上限 50 版**：只清理「可裁剪」的快照，即 `pipeline` 写的和历史遗留的空来源；
-- **硬上限 200 版**：不分作者一律裁剪，保证纯人工维护的页面存储也有界。
-
-这样设计的用意是：一个热点页面被管道反复重写时，不会把用户真正在意的人工编辑挤出历史。
-
-<Screenshot
-  src="/screenshots/wiki-revision-history.png"
-  caption="Wiki 页面版本历史：按来源区分的版本列表与回滚入口"
-  hint="展示某个 wiki 页面的历史抽屉，含版本号、编辑来源（管道/人工/Agent/回滚）、编辑者与时间，以及对比/回滚按钮。" />
-
-## 与 Agent 的关系
-
-Wiki 不只是给人看的——它是 Agent 的一等公民工作区。`internal/agent/tools/definitions.go` 注册了 10 个 wiki 工具：
-
-| 工具 | 作用 | 关键参数 |
-| --- | --- | --- |
-| `wiki_read_page` | 按 slug 批量读取页面全文 | `slugs: string[]` |
-| `wiki_search` | 正则搜索页面 | `queries`、`limit?`、`knowledge_base_id?` |
-| `wiki_write_page` | 创建/整页覆盖（`synthesis`、`comparison` 页只能由此创建） | `slug`、`title`、`summary`、`content`、`page_type`、`aliases?`、`source_refs?` |
-| `wiki_replace_text` | 页内精确文本替换 | `slug`、`old_text`、`new_text` |
-| `wiki_rename_page` | 重命名 slug，自动更新反向链接 | `slug`、`new_slug` |
-| `wiki_delete_page` | 删除页面并清理死链 | `slug` |
-| `wiki_read_source_doc` | 回读源文档原文（带上下文） | 文档 ID |
-| `wiki_flag_issue` | 标记页面问题 | `slug`、`issue_type ∈ {mixed_entities, contradictory_facts, out_of_date, other}`、`description` |
-| `wiki_read_issue` | 查看问题详情 | 问题 ID |
-| `wiki_update_issue` | 更新问题状态 | 问题 ID、`status ∈ {pending, ignored, resolved}` |
-
-工具输出为 XML-like 结构（`<wiki_page><metadata>...<summary>...<content>...`），前端用 `frontend/src/utils/wikiToolReferences.ts` 的 `parseWikiToolReferences()` 解析成引用卡片渲染在对话中。
-
-配套机制：
-
-- **Wiki Scope**：Agent 会话内维护 wiki KB 白名单，支持通过 `@mention` 把范围收窄到特定文档/标签，工具执行时自动过滤 `source_refs`（`internal/agent/tools/wiki_tools.go`）；
-- **Wiki Fixer**：内置 Agent（`types.BuiltinWikiFixerID`），负责自动修复 wiki 问题（死链、实体混淆等）。跨租户访问共享 KB 时要求租户角色 ≥ Editor，并自动提升到源租户上下文（`internal/handler/session/wiki_fixer_scope.go`）；
-- **问题闭环**：`wiki_page_issues` 表 + lint 接口 + `auto-fix`，人和 Agent 都可以报告/处理问题。
-
-## 操作历史（知识库活动流）
-
-Wiki 曾经维护一份独立的操作日志（`wiki_log_entries` 表 + `GET /wiki/log` 接口 + WikiBrowser 里的日志页签）。这份 feed 与知识库活动流内容重叠，已在 migration `000077_remove_wiki_log` 中整体移除：表被 DROP，历史遗留的 `page_type = 'log'` 页面一并删除，`log` 不再是合法页面类型。
-
-现在**知识库活动流是唯一的操作历史入口**：
-
-- ingest 批次结束时，`wiki_ingest_batch.go` 汇总本批各类动作数量，调用 `service.RecordWikiContentActivity()` 写一条 `wiki_content_changed` 活动；
-- 人工在 WikiBrowser 中创建/更新/删除页面时，`internal/handler/wiki_page.go` 同样把 `manual_create` / `manual_update` / `manual_delete` 投影到活动流；
-- 活动记录落在审计日志体系（`kb_activity.go` → `AuditLogService`），可在「知识库 → 设置 → 活动」查看，保留策略与其它审计日志一致（见[可观测性与审计](16-observability.md)）；
-- 写入是 best-effort：活动记录失败不会让 wiki 编辑本身失败。
-
-升级注意：如果外部集成还在调用 `GET /api/v1/knowledgebase/:kb_id/wiki/log`，需要改用知识库活动流接口 `GET /api/v1/knowledge-bases/:id/activity`。
-
-## 失败恢复
-
-`internal/container/recover_pending_wiki_tasks.go` 在服务启动时闭合 Lite 模式（进程内 `SyncTaskExecutor`）或 Redis 入队中断留下的缺口：
-
-1. 扫描持久化的 `task_pending_ops` 表中 `scope = knowledge_base` 且 `task_type ∈ {wiki:ingest, wiki:finalize}` 的待处理组合；
-2. 清理已删除 KB 的残留行（fail-closed）；
-3. 对每个活跃 KB 重新入队触发任务：`wiki:ingest` 不带 TaskID（允许多批并发），`wiki:finalize` 使用 `"wiki-finalize-" + KB_ID` 去重（同一 KB 只保留一个 finalize）。重复入队无害——ingest 认领互不相交的行，finalize 在 lane 内合并。
-
 ## 实现参考
 
-想读源码时按下表定位（路径相对仓库根目录）：
+以下路径均相对仓库根目录：
 
 | 层 | 文件 |
 | --- | --- |

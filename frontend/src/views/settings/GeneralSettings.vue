@@ -23,6 +23,7 @@
             <t-option value="en-US" :label="$t('language.enUS')">{{ $t('language.enUS') }}</t-option>
             <t-option value="ru-RU" :label="$t('language.ruRU')">{{ $t('language.ruRU') }}</t-option>
             <t-option value="ko-KR" :label="$t('language.koKR')">{{ $t('language.koKR') }}</t-option>
+            <t-option value="ja-JP" :label="$t('language.jaJP')">{{ $t('language.jaJP') }}</t-option>
           </t-select>
         </div>
       </div>
@@ -245,7 +246,6 @@ const handleThemeChange = (val: ThemeMode) => {
     localTheme.value = currentTheme.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 // 处理字体变化
@@ -254,7 +254,6 @@ const handleSansFontChange = (val: FontKey) => {
     localSansFont.value = currentSans.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 const handleMonoFontChange = (val: MonoFontKey) => {
@@ -262,7 +261,6 @@ const handleMonoFontChange = (val: MonoFontKey) => {
     localMonoFont.value = currentMono.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 const handleFontSizeChange = (val: FontSizeKey) => {
@@ -270,31 +268,18 @@ const handleFontSizeChange = (val: FontSizeKey) => {
     localFontSize.value = currentSize.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .general-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 32px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .settings-group {
@@ -304,44 +289,15 @@ const handleFontSizeChange = (val: FontSizeKey) => {
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
+  .setting-row();
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 65%;
-  padding-right: 24px;
-
-  label {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    display: block;
-    margin-bottom: 4px;
-  }
-
-  .desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .setting-info();
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  .setting-control();
 }
 
 // When a font picker is rendered, stack the select on top of a live
@@ -360,7 +316,7 @@ const handleFontSizeChange = (val: FontSizeKey) => {
   border-radius: var(--td-radius-medium);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.4;
   text-align: left;
   box-sizing: border-box;

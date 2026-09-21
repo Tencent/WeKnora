@@ -57,6 +57,13 @@ jobs:
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
         run: cargo install cargo-audit --locked
 
+      # The archive is a build artifact, not a committed blob, so CI is what
+      # keeps the vendored bindings in third_party/anydoc-go compiling.
+      # This also materializes patched-anydoc/ (gitignored); cargo audit below
+      # cannot load the crates-io patch until that tree exists.
+      - name: Build the anydoc static archive
+        run: ./scripts/build-anydoc-lib.sh
+
       # The vendored bindings pull anydoc and its PDF stack from crates.io, and
       # WeKnora parses untrusted uploads in-process. A Rust advisory there (as
       # in RUSTSEC-2026-0187, an uncatchable abort on a hostile PDF) has to
@@ -66,11 +73,6 @@ jobs:
       - name: Audit the vendored dependency tree
         working-directory: third_party/anydoc-go
         run: cargo audit
-
-      # The archive is a build artifact, not a committed blob, so CI is what
-      # keeps the vendored bindings in third_party/anydoc-go compiling.
-      - name: Build the anydoc static archive
-        run: ./scripts/build-anydoc-lib.sh
 
       - name: Vet, test, and build with the engine linked in
         run: |

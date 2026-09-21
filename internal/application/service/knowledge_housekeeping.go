@@ -210,6 +210,60 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	} else if resSummary.RowsAffected > 0 {
 		logger.Infof(ctx, "[Housekeeping] recovered %d stuck summary rows", resSummary.RowsAffected)
 	}
+
+	// Sweep C: rows stuck in "deleting" whose delete task no longer exists
+	// (issues #3338/#3345). The delete dead-letter callback only recovers
+	// rows that are still "deleting" when retries exhaust; a worker death
+	// mid-delete or a lost queue leaves the row hidden from the document
+	// list forever. Same recovery contract as Sweep A: flip to failed with
+	// a clear error so the row becomes visible and actionable (the user's
+	// delete intent can then be retried; the delete executor is idempotent
+	// and plans by row ID, so a late-arriving task still finishes cleanly).
+	//
+	// Liveness gate: a backlogged delete is not stranded — probe the queue
+	// for a live knowledge:list_delete covering the row before touching it.
+	// A nil inspector (nothing wired at all) defers every candidate to the
+	// next sweep: we cannot tell backlog from orphan without it, and
+	// wrongly failing a live delete is visible to users, while waiting one
+	// more interval is not. A probe error defers that single row.
+	if h.inspector != nil {
+		var strandedDeletes []types.Knowledge
+		if err := h.db.WithContext(ctx).
+			Where("parse_status = ? AND updated_at < ?", types.ParseStatusDeleting, cutoff).
+			Find(&strandedDeletes).Error; err != nil {
+			logger.Warnf(ctx, "[Housekeeping] deleting candidate query failed: %v", err)
+		} else {
+			recoveredDeletes := int64(0)
+			for _, k := range strandedDeletes {
+				queued, err := h.inspector.HasQueuedDeleteTasksForKnowledge(ctx, k.ID)
+				if err != nil {
+					logger.Warnf(ctx,
+						"[Housekeeping] delete-task probe failed for %s: %v (deferring to next sweep)",
+						k.ID, err)
+					continue
+				}
+				if queued {
+					continue
+				}
+				res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+					Where("id = ? AND parse_status = ?", k.ID, types.ParseStatusDeleting).
+					Updates(map[string]interface{}{
+						"parse_status":  types.ParseStatusFailed,
+						"error_message": "delete task stranded (no queued/active delete task) > " + threshold.String() + ", recovered by housekeeping",
+					})
+				if res.Error != nil {
+					logger.Warnf(ctx, "[Housekeeping] delete sweep update failed for %s: %v", k.ID, res.Error)
+					continue
+				}
+				recoveredDeletes += res.RowsAffected
+			}
+			if recoveredDeletes > 0 {
+				logger.Infof(ctx,
+					"[Housekeeping] recovered %d stranded deleting row(s) (threshold=%s)",
+					recoveredDeletes, threshold)
+			}
+		}
+	}
 }
 
 // filterByLastSpanActivity returns the subset of candidates whose most
