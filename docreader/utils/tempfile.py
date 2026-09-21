@@ -21,8 +21,17 @@ class TempFileContext:
         Create file when entering context
         """
         self.temp_file = tempfile.NamedTemporaryFile(suffix=self.suffix, delete=False)
-        self.temp_file.write(self.file_content)
-        self.temp_file.flush()
+        # If write/flush fails (e.g. ENOSPC), __exit__ is never called because
+        # the exception escapes __enter__, so clean up here or the file leaks
+        # permanently (delete=False means GC will not remove it either).
+        try:
+            self.temp_file.write(self.file_content)
+            self.temp_file.flush()
+        except BaseException:
+            self.temp_file.close()
+            if os.path.exists(self.temp_file.name):
+                os.remove(self.temp_file.name)
+            raise
         logger.info(
             f"Saved {self.suffix} content to temporary file: {self.temp_file.name}"
         )
