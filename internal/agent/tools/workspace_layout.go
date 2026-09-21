@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -13,14 +15,59 @@ import (
 // sessionBound is embedded by sandbox tools so Description() and schema copy
 // can resolve the per-session layout. Host adapters refuse sessionID="".
 type sessionBound struct {
+	mu        sync.Mutex
 	sessionID string
+	layout    sandbox.WorkspaceLayout
+	layoutFor string
+	hasLayout bool
 }
 
 func (s *sessionBound) BindSession(id string) {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sessionID = strings.TrimSpace(id)
+	s.hasLayout = false
+}
+
+// copyLayoutTimeout bounds the lookup behind Description() / Parameters().
+// Those run while assembling a model request and have no caller context, so
+// an adapter that blocks must not stall the turn.
+const copyLayoutTimeout = 3 * time.Second
+
+// describeLayout resolves the layout for Description() / Parameters().
+//
+// Unbound tools (empty sessionID) keep the remote copy so host adapters that
+// refuse sessionID="" do not advertise /workspace after BindSession. A bound
+// lookup that fails uses a host origin with no root so copy does not say
+// /workspace, and is not cached: the next call retries.
+//
+// Successful lookups are cached because both methods are called repeatedly
+// while building every model request. The registry is rebuilt per turn, so
+// the cache cannot outlive the layout it describes; Execute never reads it
+// and always performs the fail-closed lookup against the request context.
+func (s *sessionBound) describeLayout(dep any) sandbox.WorkspaceLayout {
+	if s == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hasLayout && s.layoutFor == s.sessionID {
+		return s.layout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), copyLayoutTimeout)
+	defer cancel()
+	layout, err := lookupWorkspaceLayout(ctx, s.sessionID, dep)
+	if err != nil {
+		if s.sessionID == "" {
+			return sandbox.RemoteWorkspaceLayout()
+		}
+		return sandbox.FailedHostWorkspaceLayout()
+	}
+	s.layout, s.layoutFor, s.hasLayout = layout, s.sessionID, true
+	return layout
 }
 
 const layoutRootToken = "\x00WEKNORA_LAYOUT_ROOT\x00"
@@ -41,25 +88,13 @@ func lookupWorkspaceLayout(
 	if err != nil {
 		return sandbox.WorkspaceLayout{}, err
 	}
+	// Scope checks compare against these roots verbatim, so normalize what
+	// the adapter returned before any of them run.
+	layout = layout.Normalized()
 	if !layout.HasRoot() {
 		return sandbox.WorkspaceLayout{}, fmt.Errorf("session workspace root is empty")
 	}
 	return layout, nil
-}
-
-// sessionWorkspaceLayout is for Description() / Parameters(). Unbound tools
-// (empty sessionID) keep the remote copy so host adapters that refuse
-// sessionID="" do not advertise /workspace after BindSession. A bound lookup
-// that fails uses a host origin with no root so copy does not say /workspace.
-func sessionWorkspaceLayout(ctx context.Context, sessionID string, dep any) sandbox.WorkspaceLayout {
-	layout, err := lookupWorkspaceLayout(ctx, sessionID, dep)
-	if err == nil {
-		return layout
-	}
-	if strings.TrimSpace(sessionID) == "" {
-		return sandbox.RemoteWorkspaceLayout()
-	}
-	return sandbox.FailedHostWorkspaceLayout()
 }
 
 func executeWorkspaceLayout(
@@ -150,14 +185,18 @@ func inspectScopeErrorIn(l sandbox.WorkspaceLayout, requested string) string {
 	)
 }
 
+// layoutScopeName names the scope a refused path fell outside of. A host
+// layout never borrows the remote wording: FailedHostWorkspaceLayout has no
+// root, and saying "/workspace" there would send the model at a directory
+// that does not exist on the user's machine.
 func layoutScopeName(l sandbox.WorkspaceLayout) string {
-	if l.IsHost() && strings.TrimSpace(l.Root) != "" {
-		return l.Root
+	if l.IsHost() {
+		return layoutRootOrGeneric(l)
 	}
 	if hint := strings.TrimSpace(l.Hint); hint != "" {
 		return hint
 	}
-	if root := strings.TrimSpace(l.Root); root != "" {
+	if root := sandbox.PromptSafePath(l.Root); root != "" {
 		return root
 	}
 	return sandbox.RemoteWorkspaceLayout().Hint
@@ -179,11 +218,27 @@ func layoutOutputDir(l sandbox.WorkspaceLayout) string {
 	return strings.TrimSpace(l.OutputDir)
 }
 
+// layoutHintOrRemote is the wording remote copy anchors on. A layout without
+// a hint keeps the /workspace contract the copy was written against.
+func layoutHintOrRemote(l sandbox.WorkspaceLayout) string {
+	if hint := strings.TrimSpace(l.Hint); hint != "" {
+		return hint
+	}
+	return sandbox.RemoteWorkspaceLayout().Hint
+}
+
+// genericWorkspaceName stands in wherever a real root cannot be shown: the
+// layout lookup failed, or the root is not safe to embed in prompt text.
+const genericWorkspaceName = "the session workspace"
+
+// layoutRootOrGeneric is the single place tool copy turns a layout into a
+// workspace name, so the prompt-safety check cannot be forgotten at one of
+// the call sites.
 func layoutRootOrGeneric(l sandbox.WorkspaceLayout) string {
-	if root := strings.TrimSpace(l.Root); root != "" {
+	if root := sandbox.PromptSafePath(l.Root); root != "" {
 		return root
 	}
-	return "the session workspace"
+	return genericWorkspaceName
 }
 
 func jsonSafePath(p string) string {
@@ -211,10 +266,7 @@ func layoutDefaultListDir(l sandbox.WorkspaceLayout) string {
 // tool copy with the session layout's model-safe wording. Longer paths
 // are substituted first so /workspace/input is not split into Hint+"/input".
 func rewriteRemoteWorkspaceCopy(text string, l sandbox.WorkspaceLayout) string {
-	hint := strings.TrimSpace(l.Hint)
-	if hint == "" {
-		hint = sandbox.RemoteWorkspaceLayout().Hint
-	}
+	hint := layoutHintOrRemote(l)
 	input := modelSafeLayoutPath(l.InputDir, hint)
 	output := modelSafeLayoutPath(l.OutputDir, hint)
 	text = strings.ReplaceAll(text, sandbox.SessionInputRoot, input)
@@ -228,7 +280,9 @@ func schemaForLayout(schema json.RawMessage, l sandbox.WorkspaceLayout) json.Raw
 	}
 	s := string(schema)
 	if l.IsHost() {
-		root := jsonSafePath(l.Root)
+		// layoutRootOrGeneric, not l.Root: a failed lookup has no root, and
+		// substituting "" leaves holes like "Commands already start in ;".
+		root := jsonSafePath(layoutRootOrGeneric(l))
 		s = strings.ReplaceAll(s, sandbox.SessionInputRoot, "attachments")
 		s = strings.ReplaceAll(s, sandbox.SessionOutputRoot, layoutRootToken)
 		s = strings.ReplaceAll(s, sandbox.SessionWorkspaceRoot, layoutRootToken)

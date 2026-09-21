@@ -571,7 +571,7 @@ func (s *agentService) lookupSessionWorkspaceLayout(
 		if layoutErr != nil || !layout.HasRoot() {
 			return sandbox.FailedHostWorkspaceLayout()
 		}
-		return layout
+		return layout.Normalized()
 	}
 	return sandbox.RemoteWorkspaceLayout()
 }

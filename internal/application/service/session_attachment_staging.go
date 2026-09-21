@@ -291,14 +291,18 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 			escapeAttachmentXML(attachment.Path),
 		)
 	}
+	// The instruction body carries the same host-chosen paths as the
+	// attributes above, so it gets the same escaping: on a host layout these
+	// are directory names the user picked, and unescaped markup in one would
+	// close the element and read as instructions.
 	b.WriteString("  <instruction>These are the user's files: read them at the absolute paths above " +
-		"and do not write into " + inputDir + ". Inspect them with read_file, " +
+		"and do not write into " + escapeAttachmentXML(inputDir) + ". Inspect them with read_file, " +
 		"or with shell_exec (ls/find) when a shell is available. " +
 		"Create generated files with write_sandbox_file " +
 		"and patch existing ones with edit_sandbox_file.")
 	if layout.IsHost() {
 		if workspace != "" {
-			b.WriteString(" Edit files in place under " + workspace + ".")
+			b.WriteString(" Edit files in place under " + escapeAttachmentXML(workspace) + ".")
 		}
 	} else {
 		remote := sandbox.RemoteWorkspaceLayout()
@@ -308,9 +312,10 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 		if workspace == "" {
 			workspace = remote.Root
 		}
-		b.WriteString(" $WEKNORA_SKILL_OUTPUT_DIR (" + outputDir + ") " +
+		b.WriteString(" $WEKNORA_SKILL_OUTPUT_DIR (" + escapeAttachmentXML(outputDir) + ") " +
 			"is the only directory collected for download, so put finished deliverables there " +
-			"and keep drafts and intermediate files in any other directory under " + workspace + ".")
+			"and keep drafts and intermediate files in any other directory under " +
+			escapeAttachmentXML(workspace) + ".")
 	}
 	b.WriteString("</instruction>\n")
 	b.WriteString("</sandbox_attachments>")
@@ -325,5 +330,17 @@ func escapeAttachmentXML(value string) string {
 		"\"", "&quot;",
 		"'", "&apos;",
 	)
-	return replacer.Replace(value)
+	return replacer.Replace(stripControlRunes(value))
+}
+
+// stripControlRunes drops the characters entity escaping does not neutralize.
+// One element per line is what makes this block readable to the model, and a
+// newline inside a filename or a host directory name would forge a second one.
+func stripControlRunes(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
 }

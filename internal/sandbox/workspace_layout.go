@@ -1,6 +1,9 @@
 package sandbox
 
-import "strings"
+import (
+	"path"
+	"strings"
+)
 
 // WorkspaceOrigin says whether a layout is a disposable remote sandbox or a
 // directory on the host. Isolation policy (work_dir clamping, inspect
@@ -63,7 +66,7 @@ func RemoteWorkspaceLayout() WorkspaceLayout {
 	}
 }
 
-// failedHostWorkspaceLayout is what tools and prompts use when a layout
+// FailedHostWorkspaceLayout is what tools and prompts use when a layout
 // provider exists but errors: do not fall back to /workspace.
 func FailedHostWorkspaceLayout() WorkspaceLayout {
 	return WorkspaceLayout{Origin: WorkspaceOriginHost}
@@ -72,4 +75,68 @@ func FailedHostWorkspaceLayout() WorkspaceLayout {
 // HasRoot reports a usable workspace root.
 func (l WorkspaceLayout) HasRoot() bool {
 	return strings.TrimSpace(l.Root) != ""
+}
+
+// Normalized cleans every path in the layout and drops empty roots.
+//
+// Scope checks compare cleaned paths against these entries verbatim, so an
+// adapter that hands back a trailing slash or an uncleaned path would
+// silently deny every write and work_dir inside its own workspace. Consumers
+// normalize on receipt rather than trusting the producer.
+func (l WorkspaceLayout) Normalized() WorkspaceLayout {
+	l.Root = cleanLayoutPath(l.Root)
+	l.InputDir = cleanLayoutPath(l.InputDir)
+	l.OutputDir = cleanLayoutPath(l.OutputDir)
+	l.WriteRoots = cleanLayoutRoots(l.WriteRoots)
+	l.ReadRoots = cleanLayoutRoots(l.ReadRoots)
+	l.Hint = strings.TrimSpace(l.Hint)
+	return l
+}
+
+func cleanLayoutPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	return path.Clean(p)
+}
+
+// cleanLayoutRoots preserves order (ReadRoots is most-specific-first) and
+// drops duplicates that only differed before cleaning.
+func cleanLayoutRoots(roots []string) []string {
+	if len(roots) == 0 {
+		return roots
+	}
+	out := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		clean := cleanLayoutPath(root)
+		if clean == "" {
+			continue
+		}
+		if _, dup := seen[clean]; dup {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
+}
+
+// PromptSafePath returns p when it can be embedded verbatim in prompt text,
+// and "" when it cannot. On a host layout the workspace root is a directory
+// the user chose, so a name carrying newlines or markup would otherwise reach
+// the model as instructions rather than as a path. Callers fall back to
+// generic wording instead of sanitizing, so a real path is never shown wrong.
+func PromptSafePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f || r == '<' || r == '>' || r == '&' {
+			return ""
+		}
+	}
+	return p
 }

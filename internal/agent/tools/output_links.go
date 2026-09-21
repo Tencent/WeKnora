@@ -13,7 +13,16 @@ import (
 
 // Metadata snapshots detect outputs without parsing arbitrary commands or stdout.
 // Inspection is best-effort and never provisions a sandbox or downloads files.
-func sandboxOutputSnapshot(ctx context.Context, executor SandboxCommandExecutor, sessionID string) (map[string]sandbox.RemoteDirEntry, bool) {
+//
+// outputDir comes from the layout the caller already resolved for this
+// command, so the before/after probes cannot describe a different tree than
+// the one the links are filtered against.
+func sandboxOutputSnapshot(
+	ctx context.Context, executor SandboxCommandExecutor, sessionID, outputDir string,
+) (map[string]sandbox.RemoteDirEntry, bool) {
+	if strings.TrimSpace(outputDir) == "" {
+		return nil, false
+	}
 	source, ok := executor.(interface {
 		ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error)
 	})
@@ -22,14 +31,6 @@ func sandboxOutputSnapshot(ctx context.Context, executor SandboxCommandExecutor,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	layout, err := lookupWorkspaceLayout(ctx, sessionID, source)
-	if err != nil {
-		return nil, false
-	}
-	outputDir := layoutOutputDir(layout)
-	if outputDir == "" {
-		return nil, false
-	}
 	entries, err := source.ListSessionFiles(ctx, sessionID, outputDir)
 	if err != nil {
 		return nil, false

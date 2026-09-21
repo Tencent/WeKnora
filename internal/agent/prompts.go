@@ -292,7 +292,13 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 	}
 	if !skillInstallMode && (has("shell_exec") || has("write_sandbox_file")) {
 		if layout.IsHost() {
-			if root := strings.TrimSpace(layout.Root); root != "" {
+			// A host root is a directory the user picked. PromptSafePath
+			// refuses names carrying newlines or markup rather than
+			// sanitizing them, so a forged instruction cannot reach the
+			// model and a real path is never shown altered. Without a
+			// usable root the workspace line is omitted entirely, which is
+			// the same fail-closed shape as a failed layout lookup.
+			if root := sandbox.PromptSafePath(layout.Root); root != "" {
 				b.WriteString("Session workspace: ")
 				b.WriteString(root)
 				b.WriteString(". Edit files in place under that folder. Commands start from ")

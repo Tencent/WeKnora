@@ -102,7 +102,7 @@ func NewListSandboxFilesTool(source SandboxFileSource) *ListSandboxFilesTool {
 // Description is built from the session sandbox layout so host paths never
 // hard-code /workspace.
 func (t *ListSandboxFilesTool) Description() string {
-	layout := sessionWorkspaceLayout(context.Background(), t.sessionID, t.source)
+	layout := t.boundLayout()
 	if layout.IsHost() {
 		return fmt.Sprintf(hostListSandboxFilesDescription, layoutRootOrGeneric(layout))
 	}
@@ -110,7 +110,14 @@ func (t *ListSandboxFilesTool) Description() string {
 }
 
 func (t *ListSandboxFilesTool) Parameters() json.RawMessage {
-	return schemaForLayout(t.schema, sessionWorkspaceLayout(context.Background(), t.sessionID, t.source))
+	return schemaForLayout(listSandboxFilesTool.schema, t.boundLayout())
+}
+
+func (t *ListSandboxFilesTool) boundLayout() sandbox.WorkspaceLayout {
+	if t == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return t.describeLayout(t.source)
 }
 
 const hostListSandboxFilesDescription = `List files in %s. Relative paths resolve from that folder; omitted path lists it.
@@ -162,9 +169,11 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 	}
 	rootDir, ok := inspectRoot(layout, targetDir)
 	if !ok {
+		// Report the resolved directory, not input.Path: an omitted path
+		// would otherwise be refused as `path ""`.
 		return &types.ToolResult{
 			Success: false,
-			Error:   inspectScopeErrorIn(layout, input.Path),
+			Error:   inspectScopeErrorIn(layout, targetDir),
 		}, nil
 	}
 

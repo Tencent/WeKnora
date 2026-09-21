@@ -158,6 +158,9 @@ type layoutCollectSource struct {
 	listedDirs []string
 	entries    map[string][]sandbox.RemoteDirEntry
 	contents   map[string][]byte
+	// layoutLookups guards against the collect target and the skip decision
+	// drifting back into two lookups that can disagree.
+	layoutLookups int
 }
 
 func (s *layoutCollectSource) ListSessionFiles(_ context.Context, _, dir string) ([]sandbox.RemoteDirEntry, error) {
@@ -173,6 +176,7 @@ func (s *layoutCollectSource) ReadSessionFile(_ context.Context, _ string, path 
 }
 
 func (s *layoutCollectSource) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	s.layoutLookups++
 	return s.layout, nil
 }
 
@@ -221,6 +225,8 @@ func TestCompletionCollectsFromLayoutOutputDir(t *testing.T) {
 	require.Equal(t, []string{layout.OutputDir}, source.listedDirs)
 	require.Len(t, message.Artifacts, 1)
 	require.Equal(t, "report.pptx", message.Artifacts[0].FileName)
+	require.Equal(t, 1, source.layoutLookups,
+		"the collect directory and the skip decision must come from one lookup")
 }
 
 func TestCompletionSkipsCollectWhenHostLayoutHasNoOutputDir(t *testing.T) {

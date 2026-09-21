@@ -121,7 +121,7 @@ func NewEditSandboxFileTool(editor SandboxFileEditor) *EditSandboxFileTool {
 // Description is built from the session sandbox layout so host paths never
 // hard-code /workspace.
 func (t *EditSandboxFileTool) Description() string {
-	layout := sessionWorkspaceLayout(context.Background(), t.sessionID, t.editor)
+	layout := t.boundLayout()
 	if layout.IsHost() {
 		return fmt.Sprintf(hostEditSandboxFileDescription, layoutRootOrGeneric(layout))
 	}
@@ -129,7 +129,14 @@ func (t *EditSandboxFileTool) Description() string {
 }
 
 func (t *EditSandboxFileTool) Parameters() json.RawMessage {
-	return schemaForLayout(t.schema, sessionWorkspaceLayout(context.Background(), t.sessionID, t.editor))
+	return schemaForLayout(editSandboxFileTool.schema, t.boundLayout())
+}
+
+func (t *EditSandboxFileTool) boundLayout() sandbox.WorkspaceLayout {
+	if t == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return t.describeLayout(t.editor)
 }
 
 const hostEditSandboxFileDescription = `Apply exact text replacements to an existing text file in %s.

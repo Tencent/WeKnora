@@ -307,7 +307,7 @@ func (t *ShellExecTool) boundLayout() sandbox.WorkspaceLayout {
 	if t == nil {
 		return sandbox.RemoteWorkspaceLayout()
 	}
-	return sessionWorkspaceLayout(context.Background(), t.sessionID, t.executor)
+	return t.describeLayout(t.executor)
 }
 
 // NewInstallShellExecTool constructs the install-mode variant: commands run as
@@ -562,10 +562,10 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	} else {
 		// Keep support for executors without the combined operation (including
 		// install mode); production session managers use one handle above.
-		before, inspected := sandboxOutputSnapshot(ctx, t.executor, sessionID)
+		before, inspected := sandboxOutputSnapshot(ctx, t.executor, sessionID, layoutOutputDir(layout))
 		res, err = t.executor.ExecShellCommand(execCtx, sessionID, execCommand, workDir, timeout, env)
 		if err == nil && res != nil && inspected {
-			if after, ok := sandboxOutputSnapshot(ctx, t.executor, sessionID); ok {
+			if after, ok := sandboxOutputSnapshot(ctx, t.executor, sessionID, layoutOutputDir(layout)); ok {
 				outputFiles = changedOutputLinks(layoutOutputDir(layout), before, after)
 			}
 		}

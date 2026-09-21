@@ -142,11 +142,24 @@ func NewWriteSandboxFileTool(sink SandboxFileSink, completionTokens int) *WriteS
 // Description is built from the session sandbox layout so host paths never
 // hard-code /workspace.
 func (t *WriteSandboxFileTool) Description() string {
-	return writeSandboxDescription(sessionWorkspaceLayout(context.Background(), t.sessionID, t.sink), t.sizeGuidance)
+	if t == nil {
+		return ""
+	}
+	return writeSandboxDescription(t.boundLayout(), t.sizeGuidance)
 }
 
 func (t *WriteSandboxFileTool) Parameters() json.RawMessage {
-	return schemaForLayout(t.schema, sessionWorkspaceLayout(context.Background(), t.sessionID, t.sink))
+	if t == nil {
+		return nil
+	}
+	return schemaForLayout(t.schema, t.boundLayout())
+}
+
+func (t *WriteSandboxFileTool) boundLayout() sandbox.WorkspaceLayout {
+	if t == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return t.describeLayout(t.sink)
 }
 
 func writeSandboxDescription(l sandbox.WorkspaceLayout, sizeGuidance string) string {
