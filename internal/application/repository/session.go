@@ -67,13 +67,16 @@ func (r *sessionRepository) Get(ctx context.Context, tenantID uint64, userID str
 // It expects sessions aliased as s and a
 // "LEFT JOIN im_channel_sessions ics ON ics.session_id = s.id".
 const webSessionPredicate = "ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?) " +
-	"AND (s.user_id IS NULL OR (s.user_id NOT LIKE ? AND s.user_id NOT LIKE ?))"
+	"AND (s.user_id IS NULL OR (s.user_id NOT LIKE ? AND s.user_id NOT LIKE ?" +
+	" AND s.user_id NOT LIKE ? AND s.user_id NOT LIKE ?))"
 
 func webSessionPredicateArgs() []any {
 	return []any{
 		types.EmbedSessionMarkerPrefix + "%",
 		types.SessionOwnerAPITenantKeyPrefix + "%",
 		types.SessionOwnerAPIExternalUserPrefix + "%",
+		types.PrincipalAPIApplication + ":%",
+		types.PrincipalAPIApplicationUser + ":%",
 	}
 }
 
@@ -224,9 +227,11 @@ func (r *sessionRepository) QueryPaged(
 			// The service layer already enforced Admin+ and cleared the
 			// per-user scope for this source.
 			return db.Where(
-				"(s.user_id LIKE ? OR s.user_id LIKE ?)",
+				"(s.user_id LIKE ? OR s.user_id LIKE ? OR s.user_id LIKE ? OR s.user_id LIKE ?)",
 				types.SessionOwnerAPITenantKeyPrefix+"%",
 				types.SessionOwnerAPIExternalUserPrefix+"%",
+				types.PrincipalAPIApplication+":%",
+				types.PrincipalAPIApplicationUser+":%",
 			)
 		case "web":
 			return db.Where(webSessionPredicate, webSessionPredicateArgs()...)

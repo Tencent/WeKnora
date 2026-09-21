@@ -116,6 +116,7 @@
                       <th>{{ $t('integrations.api.apiKeyValue') }}</th>
                       <th>{{ $t('integrations.api.apiKeyAccessMode') }}</th>
                       <th>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</th>
+                      <th>{{ $t('integrations.api.principalMode') }}</th>
                       <th>{{ $t('integrations.api.createdAt') }}</th>
                       <th class="api-key-table__actions-heading">{{ $t('integrations.api.actions') }}</th>
                     </tr>
@@ -152,6 +153,7 @@
                           {{ formatKeyKnowledgeScope(key.knowledge_base_ids) }}
                         </span>
                       </td>
+                      <td>{{ principalModeLabel(key.api_principal_config?.mode || 'tenant') }}</td>
                       <td>
                         <span class="api-key-created-at">{{ formatDate(key.created_at) }}</span>
                       </td>
@@ -193,114 +195,17 @@
         </div>
       </section>
 
-      <section class="settings-band principal-section">
+      <section v-if="selectedAPIKey" class="settings-band principal-section">
         <div class="principal-section__header">
-          <label>{{ $t('integrations.api.principalMode') }}</label>
-          <p>{{ $t('integrations.api.principalModeDesc') }}</p>
-          <p class="principal-section__scope">{{ $t('integrations.api.principalScope') }}</p>
+          <label>{{ $t('integrations.api.requestExample') }}</label>
+          <p>{{ $t('integrations.api.keyExampleDesc') }}</p>
         </div>
-
-        <t-radio-group v-model="form.mode" class="mode-radio" @change="handlePrincipalModeChange">
-          <t-radio-button value="tenant">{{ $t('integrations.api.modeTenant') }}</t-radio-button>
-          <t-radio-button value="direct_header">{{ $t('integrations.api.modeDirect') }}</t-radio-button>
-          <t-radio-button value="signed_token">{{ $t('integrations.api.modeSigned') }}</t-radio-button>
-        </t-radio-group>
-
-        <div v-if="form.mode !== 'tenant'" class="mode-detail">
-          <div
-            v-if="form.mode === 'direct_header'"
-            class="mode-callout mode-callout--warning"
-          >
-            <div class="mode-callout__body">
-              <strong>{{ $t('integrations.api.directWarning') }}</strong>
-              <p>{{ $t('integrations.api.directWarningDetail') }}</p>
-            </div>
-          </div>
-          <div
-            v-else-if="form.mode === 'signed_token'"
-            class="mode-callout"
-          >
-            <div class="mode-callout__body">
-              <strong>{{ $t('integrations.api.signedRecommended') }}</strong>
-              <p>{{ $t('integrations.api.signedFlowDetail') }}</p>
-            </div>
-          </div>
-
-          <div v-if="form.mode === 'direct_header'" class="principal-config">
-            <div class="config-row">
-              <div class="config-row__text">
-                <label>{{ $t('integrations.api.directHeader') }}</label>
-              </div>
-              <code class="fixed-header-name">{{ directHeaderName }}</code>
-            </div>
-            <div class="config-row config-row--switch">
-              <div class="config-row__text">
-                <label>{{ $t('integrations.api.requireDirectHeader') }}</label>
-                <p>{{ $t('integrations.api.requireDirectHeaderDesc') }}</p>
-              </div>
-              <div class="config-row__action">
-                <t-switch v-model="form.require_direct_header" size="small" @change="handleRequireDirectHeaderChange" />
-              </div>
-            </div>
-          </div>
-
-          <div v-else-if="form.mode === 'signed_token'" class="principal-config">
-            <div class="config-row">
-              <div class="config-row__text">
-                <label>{{ $t('integrations.api.tokenHeader') }}</label>
-                <p>{{ $t('integrations.api.tokenHeaderDesc') }}</p>
-              </div>
-              <code class="fixed-header-name">{{ tokenHeaderName }}</code>
-            </div>
-            <div class="config-row config-row--secret">
-              <div class="config-row__text">
-                <label>{{ $t('integrations.api.hmacSecret') }}</label>
-                <p>{{ $t('integrations.api.hmacSecretDesc') }}</p>
-              </div>
-              <div class="secret-field">
-                <div class="secret-control">
-                  <t-input
-                    v-model="secretInput"
-                    :type="secretInputType"
-                    class="mono-input secret-mono-input"
-                    :placeholder="config?.has_hmac_secret && !secretInput.trim() ? $t('integrations.api.secretConfigured') : ''"
-                    @blur="triggerAutoSave"
-                  />
-                  <t-button
-                    v-if="secretInput.trim()"
-                    size="small"
-                    variant="text"
-                    @click="showHMACSecret = !showHMACSecret"
-                  >
-                    <t-icon :name="showHMACSecret ? 'browse-off' : 'browse'" />
-                  </t-button>
-                  <t-button
-                    v-if="secretInput.trim()"
-                    size="small"
-                    variant="text"
-                    :title="$t('integrations.api.copy')"
-                    @click="copy(secretInput)"
-                  >
-                    <t-icon name="file-copy" />
-                  </t-button>
-                  <t-button
-                    size="small"
-                    variant="text"
-                    theme="danger"
-                    :title="$t('integrations.api.generateSecret')"
-                    :loading="saving"
-                    @click="confirmGenerateSecret"
-                  >
-                    <t-icon name="refresh" />
-                  </t-button>
-                </div>
-                <p v-if="showSecretSavedHint" class="secret-saved-hint">
-                  {{ $t('integrations.api.secretSavedCopyHint') }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+        <t-select v-model="selectedAPIKeyId" :options="apiKeyOptions" :disabled="playground.running" />
+        <p>{{ $t('integrations.api.principalMode') }}: {{ principalModeLabel(form.mode) }}</p>
+        <p v-if="selectedAPIKey.identity_namespace">
+          {{ $t('integrations.api.identityNamespace') }}: <code>{{ selectedAPIKey.identity_namespace }}</code>
+        </p>
+        <p v-else>{{ $t('integrations.api.legacyIdentityHint') }}</p>
 
         <div class="examples">
           <t-tabs
@@ -560,6 +465,14 @@
             :placeholder="$t('integrations.api.apiKeyKnowledgeScopePlaceholder')"
           />
         </div>
+
+        <div class="api-key-dialog-row">
+          <label>{{ $t('integrations.api.identityApplication') }}</label>
+          <t-select v-model="identitySourceKeyID" :options="identitySourceOptions" />
+          <p class="scope-hint">{{ $t('integrations.api.identityApplicationHint') }}</p>
+        </div>
+        <ApiKeyIdentityForm v-if="!identitySourceKeyID" v-model="createIdentity" />
+        <p v-else class="scope-hint">{{ $t('integrations.api.identityReuseHint') }}</p>
       </div>
     </SettingDrawer>
 
@@ -664,6 +577,9 @@
           />
           <p class="scope-hint">{{ $t('integrations.api.editApiKeyScopeHint') }}</p>
         </div>
+
+        <ApiKeyIdentityForm v-model="editIdentity" :has-secret="editingAPIKey?.api_principal_config?.has_hmac_secret" editing />
+        <p v-if="!editingAPIKey?.identity_namespace" class="scope-hint">{{ $t('integrations.api.legacyIdentityHint') }}</p>
       </div>
     </SettingDrawer>
 
@@ -678,15 +594,14 @@ import { copyWithToast } from '@/utils/clipboard'
 import { getCurrentUser } from '@/api/auth'
 import { listAgents, BUILTIN_SMART_REASONING_ID, type CustomAgent } from '@/api/agent'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import ApiKeyIdentityForm from './ApiKeyIdentityForm.vue'
 import {
   createTenantAPIKey,
   deleteTenantAPIKey,
   createAPIPrincipalTestToken,
-  getAPIPrincipalConfig,
   listTenantAPIKeys,
   updateTenantAPIKey,
-  updateAPIPrincipalConfig,
-  type APIPrincipalConfig,
+  type UpdateAPIPrincipalConfigPayload,
   type APIPrincipalMode,
   type TenantAPIKey,
   type TenantAPIKeyCapability,
@@ -709,11 +624,8 @@ const DEFAULT_DIRECT_HEADER_NAME = 'X-External-User-ID'
 const DEFAULT_TOKEN_HEADER_NAME = 'X-External-User-Token'
 
 const loading = ref(true)
-const saving = ref(false)
 const error = ref('')
 const tenantId = ref(0)
-const apiKey = ref('')
-const config = ref<APIPrincipalConfig | null>(null)
 const apiKeys = ref<TenantAPIKey[]>([])
 const apiKeysLoading = ref(false)
 const apiKeyDialogVisible = ref(false)
@@ -723,16 +635,12 @@ const apiKeyScopeSaving = ref(false)
 const editingAPIKey = ref<TenantAPIKey | null>(null)
 const knowledgeBasesLoading = ref(false)
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
-const secretInput = ref('')
-/** Plaintext of the last secret successfully saved in this page session. */
-const lastSavedSecretInput = ref('')
 const exampleTab = ref<'jwt' | 'curl'>('curl')
 const agents = ref<CustomAgent[]>([])
 const agentsLoading = ref(false)
 const agentsError = ref('')
 const playgroundDrawerVisible = ref(false)
 const playgroundController = ref<AbortController | null>(null)
-const showHMACSecret = ref(false)
 const wailsApiBaseURL = ref<string | null>(null)
 const wailsApiLanBaseURL = ref<string | null>(null)
 const showDesktopPortSetting = ref(false)
@@ -741,12 +649,21 @@ const desktopPortInput = ref<number | undefined>(0)
 const desktopBindPublicInput = ref(false)
 const desktopListenPublicActive = ref(false)
 
-const form = reactive({
-  mode: 'tenant' as APIPrincipalMode,
-  direct_header_name: DEFAULT_DIRECT_HEADER_NAME,
-  signed_token_header_name: DEFAULT_TOKEN_HEADER_NAME,
-  require_direct_header: false,
-})
+const selectedAPIKeyId = ref<number>(0)
+const selectedAPIKey = computed(() => apiKeys.value.find(key => key.id === selectedAPIKeyId.value))
+const apiKey = computed(() => selectedAPIKey.value?.api_key || '')
+const form = computed(() => selectedAPIKey.value?.api_principal_config || { mode: 'tenant' as APIPrincipalMode, require_direct_header: false })
+const apiKeyOptions = computed(() => apiKeys.value.map(key => ({ label: key.name, value: key.id })))
+const identitySourceKeyID = ref(0)
+const identitySourceOptions = computed(() => [
+  { label: t('integrations.api.identityNewApplication'), value: 0 },
+  ...apiKeyOptions.value,
+])
+const createIdentity = ref<UpdateAPIPrincipalConfigPayload>({ mode: 'tenant' })
+const editIdentity = ref<UpdateAPIPrincipalConfigPayload>({ mode: 'tenant' })
+function principalModeLabel(mode: APIPrincipalMode) {
+  return t(`integrations.api.${mode === 'direct_header' ? 'modeDirect' : mode === 'signed_token' ? 'modeSigned' : 'modeTenant'}`)
+}
 
 const API_KEY_CAPABILITIES = TENANT_API_KEY_CAPABILITIES
 const DEFAULT_API_KEY_CAPABILITIES = DEFAULT_TENANT_API_KEY_CAPABILITIES
@@ -933,10 +850,19 @@ const playground = reactive({
   error: '',
 })
 
-watch(() => form.mode, (mode) => {
+watch(() => form.value.mode, (mode) => {
   if (mode === 'signed_token') {
     exampleTab.value = 'curl'
   }
+})
+
+watch(selectedAPIKey, () => {
+  stopPlayground()
+  playground.signed_token = ''
+  playground.session_response = ''
+  playground.stream_output = ''
+  playground.final_answer = ''
+  playground.error = ''
 })
 
 watch(playgroundDrawerVisible, (visible) => {
@@ -964,22 +890,6 @@ const tokenHeaderName = computed(() => DEFAULT_TOKEN_HEADER_NAME)
 
 const directHeaderName = computed(() => DEFAULT_DIRECT_HEADER_NAME)
 
-const secretInputType = computed(() => {
-  if (!secretInput.value.trim()) return 'text'
-  return showHMACSecret.value ? 'text' : 'password'
-})
-
-const canAutoSave = computed(() => {
-  if (!tenantId.value) return false
-  if (form.mode === 'signed_token') {
-    // Either a secret is already stored server-side, or the user has just
-    // typed a new one. The plaintext secret is never returned by the API,
-    // so we rely on the has_hmac_secret presence flag.
-    return config.value?.has_hmac_secret === true || secretInput.value.trim() !== ''
-  }
-  return true
-})
-
 const agentOptions = computed(() => agents.value.map((agent) => ({
   label: `${agent.name}${agent.is_builtin ? ` · ${t('integrations.api.playgroundBuiltin')}` : ''}`,
   value: agent.id,
@@ -990,30 +900,9 @@ const knowledgeBaseOptions = computed(() => knowledgeBases.value.map((kb) => ({
   value: kb.id,
 })))
 
-const hasUnsavedSecretChange = computed(() => {
-  const trimmed = secretInput.value.trim()
-  if (!trimmed) return false
-  return trimmed !== lastSavedSecretInput.value
-})
-
-const showSecretSavedHint = computed(() => {
-  const trimmed = secretInput.value.trim()
-  return trimmed !== '' && trimmed === lastSavedSecretInput.value
-})
-
-const hasUnsavedPrincipalChanges = computed(() => {
-  const cfg = config.value
-  if (!cfg) return false
-  return (
-    form.mode !== cfg.mode
-    || form.require_direct_header !== cfg.require_direct_header
-    || hasUnsavedSecretChange.value
-  )
-})
-
 const externalUserHint = computed(() => {
-  if (form.mode === 'tenant') return t('integrations.api.playgroundTenantModeHint')
-  if (form.mode === 'direct_header') {
+  if (form.value.mode === 'tenant') return t('integrations.api.playgroundTenantModeHint')
+  if (form.value.mode === 'direct_header') {
     return t('integrations.api.playgroundDirectModeHint', { headerName: directHeaderName.value })
   }
   return t('integrations.api.playgroundSignedModeHint', { headerName: tokenHeaderName.value })
@@ -1041,7 +930,7 @@ const playgroundDisabledReason = computed(() => {
   if (!apiKey.value) return t('integrations.api.playgroundNeedApiKey')
   if (!playground.agent_id) return t('integrations.api.playgroundNeedAgent')
   if (!playground.query.trim()) return t('integrations.api.playgroundNeedQuestion')
-  if (form.mode === 'signed_token' && !playground.external_user_id.trim()) {
+  if ((form.value.mode === 'signed_token' || (form.value.mode === 'direct_header' && form.value.require_direct_header)) && !playground.external_user_id.trim()) {
     return t('integrations.api.playgroundNeedExternalUser')
   }
   return ''
@@ -1066,6 +955,7 @@ func signExternalUserToken(hmacSecret, externalUserID string, tenantID uint64) (
 	claims := jwt.MapClaims{
 		"sub":       externalUserID, // e.g. "user_123"
 		"tenant_id": float64(tenantID),
+		"identity_namespace": "${selectedAPIKey.value?.identity_namespace || ''}",
 		"aud":       "weknora",
 		"exp":       time.Now().Add(time.Hour).Unix(),
 	}
@@ -1082,17 +972,17 @@ const requestExample = computed(() => {
   const apiKeyHeader = `  -H "X-API-Key: ${apiKey.value ? '<API_KEY>' : '<YOUR_API_KEY>'}"`
   const contentType = '  -H "Content-Type: application/json"'
   const principalHeaders: string[] = []
-  if (form.mode === 'direct_header') {
+  if (form.value.mode === 'direct_header') {
     principalHeaders.push(`  -H "${directHeaderName.value}: user_123"`)
   }
-  if (form.mode === 'signed_token') {
+  if (form.value.mode === 'signed_token') {
     principalHeaders.push(`  -H "${tokenHeaderName.value}: ${t('integrations.api.requestExampleJwtPlaceholder')}"`)
   }
   const commonHeaders = [apiKeyHeader, contentType, ...principalHeaders].join(' \\\n')
   const agentID = playground.agent_id || BUILTIN_SMART_REASONING_ID
 
   const lines: string[] = []
-  if (form.mode === 'signed_token') {
+  if (form.value.mode === 'signed_token') {
     lines.push(
       t('integrations.api.signedRequestStep0', { tenantId: tenantId.value || '<tenant_id>' }),
       t('integrations.api.signedRequestStep0Hint', { headerName: tokenHeaderName.value }),
@@ -1114,13 +1004,13 @@ const requestExample = computed(() => {
 })
 
 const activeExampleText = computed(() => (
-  form.mode === 'signed_token' && exampleTab.value === 'jwt'
+  form.value.mode === 'signed_token' && exampleTab.value === 'jwt'
     ? tokenSignExample.value
     : requestExample.value
 ))
 
 const activeExampleLabel = computed(() => (
-  form.mode === 'signed_token' && exampleTab.value === 'jwt'
+  form.value.mode === 'signed_token' && exampleTab.value === 'jwt'
     ? t('integrations.api.tokenSignExample')
     : t('integrations.api.requestExample')
 ))
@@ -1143,19 +1033,6 @@ async function load() {
       loadKnowledgeBaseOptions(),
     ])
 
-    const cfgResp = await getAPIPrincipalConfig(tenantId.value)
-    if (!cfgResp.success || !cfgResp.data) {
-      throw new Error(cfgResp.message || t('integrations.api.loadFailed'))
-    }
-    config.value = cfgResp.data
-    form.mode = cfgResp.data.mode || 'tenant'
-    form.direct_header_name = DEFAULT_DIRECT_HEADER_NAME
-    form.signed_token_header_name = DEFAULT_TOKEN_HEADER_NAME
-    form.require_direct_header = cfgResp.data.require_direct_header === true
-    // The plaintext secret is never returned; start with an empty input and
-    // rely on config.has_hmac_secret to reflect whether one is configured.
-    secretInput.value = ''
-    lastSavedSecretInput.value = ''
     ensurePlaygroundAgent()
   } catch (err: any) {
     error.value = err?.message || t('integrations.api.loadFailed')
@@ -1173,8 +1050,8 @@ async function loadAPIKeys() {
       throw new Error(resp.message || t('integrations.api.loadApiKeysFailed'))
     }
     apiKeys.value = resp.data || []
-    if (!apiKey.value && apiKeys.value.length > 0) {
-      apiKey.value = apiKeys.value[0].api_key || ''
+    if (!apiKeys.value.some(key => key.id === selectedAPIKeyId.value)) {
+      selectedAPIKeyId.value = apiKeys.value[0]?.id || 0
     }
   } catch (err: any) {
     MessagePlugin.error(err?.message || t('integrations.api.loadApiKeysFailed'))
@@ -1227,85 +1104,6 @@ function openPlaygroundDrawer() {
 function handlePlaygroundDrawerCancel() {
   stopPlayground()
   playgroundDrawerVisible.value = false
-}
-
-function handlePrincipalModeChange(mode: APIPrincipalMode) {
-  form.mode = mode
-  void saveIfNeeded()
-}
-
-function handleRequireDirectHeaderChange(checked: boolean) {
-  form.require_direct_header = checked
-  void saveIfNeeded()
-}
-
-function triggerAutoSave() {
-  void saveIfNeeded()
-}
-
-function confirmGenerateSecret() {
-  const dialog = DialogPlugin.confirm({
-    header: t('integrations.api.hmacSecretResetConfirmTitle'),
-    body: t('integrations.api.hmacSecretResetConfirmBody'),
-    confirmBtn: { content: t('integrations.api.hmacSecretResetConfirmOk'), theme: 'danger' },
-    cancelBtn: t('integrations.api.hmacSecretResetConfirmCancel'),
-    onConfirm: async () => {
-      await generateSecret()
-      dialog.destroy()
-    },
-    onClose: () => dialog.destroy(),
-  })
-}
-
-async function generateSecret() {
-  const bytes = new Uint8Array(32)
-  window.crypto.getRandomValues(bytes)
-  secretInput.value = btoa(String.fromCharCode(...bytes))
-  showHMACSecret.value = true
-  await saveIfNeeded({ showSuccess: true })
-}
-
-async function saveIfNeeded(options: { showSuccess?: boolean } = {}) {
-  if (!hasUnsavedPrincipalChanges.value) return true
-  if (!canAutoSave.value) {
-    MessagePlugin.error(t('integrations.api.autoSaveNeedSecret'))
-    return false
-  }
-  saving.value = true
-  try {
-    const payload: Parameters<typeof updateAPIPrincipalConfig>[1] = {
-      mode: form.mode,
-      direct_header_name: DEFAULT_DIRECT_HEADER_NAME,
-      signed_token_header_name: DEFAULT_TOKEN_HEADER_NAME,
-      require_direct_header: form.require_direct_header,
-    }
-    // Only send the secret when the user entered a new value; otherwise the
-    // backend keeps the stored value untouched.
-    const secretBeingSaved = hasUnsavedSecretChange.value ? secretInput.value.trim() : ''
-    if (secretBeingSaved) {
-      payload.hmac_secret = secretBeingSaved
-    }
-    const resp = await updateAPIPrincipalConfig(tenantId.value, payload)
-    if (!resp.success || !resp.data) {
-      throw new Error(resp.message || t('integrations.api.saveFailed'))
-    }
-    config.value = resp.data
-    if (secretBeingSaved) {
-      lastSavedSecretInput.value = secretBeingSaved
-      showHMACSecret.value = true
-    }
-    if (options.showSuccess) {
-      MessagePlugin.success(
-        secretBeingSaved ? t('integrations.api.secretSavedCopyHint') : t('integrations.api.saveSuccess'),
-      )
-    }
-    return true
-  } catch (err: any) {
-    MessagePlugin.error(err?.message || t('integrations.api.saveFailed'))
-    return false
-  } finally {
-    saving.value = false
-  }
 }
 
 async function copy(text: string) {
@@ -1435,6 +1233,8 @@ function openApiDoc() {
 }
 
 function openCreateAPIKeyDialog() {
+  createIdentity.value = { mode: 'tenant', require_direct_header: false }
+  identitySourceKeyID.value = 0
   apiKeyForm.name = ''
   apiKeyForm.knowledge_base_ids = []
   apiKeyForm.tenant_full_enabled = false
@@ -1457,6 +1257,8 @@ async function createScopedAPIKey() {
   apiKeyCreating.value = true
   try {
     const resp = await createTenantAPIKey(tenantId.value, {
+      identity_source_key_id: identitySourceKeyID.value || undefined,
+      api_principal_config: identitySourceKeyID.value ? undefined : createIdentity.value,
       name: apiKeyForm.name.trim(),
       full_access: apiKeyFullAccessEnabled.value,
       // KB scoping only applies to capabilities that touch knowledge bases.
@@ -1468,7 +1270,7 @@ async function createScopedAPIKey() {
       throw new Error(resp.message || t('integrations.api.createApiKeyFailed'))
     }
     apiKeyDialogVisible.value = false
-    apiKey.value = resp.data.api_key
+    selectedAPIKeyId.value = resp.data.id
     MessagePlugin.success(t('integrations.api.apiKeyCreated'))
     await loadAPIKeys()
   } catch (err: any) {
@@ -1481,6 +1283,10 @@ async function createScopedAPIKey() {
 // 打开编辑器时复制服务端配置，取消操作不会污染列表中的原始数据。
 function openEditAPIKeyScope(key: TenantAPIKey) {
   editingAPIKey.value = key
+  editIdentity.value = {
+    mode: key.api_principal_config?.mode || 'tenant',
+    require_direct_header: key.api_principal_config?.require_direct_header === true,
+  }
   editingAPIKeyForm.name = key.name
   editingAPIKeyForm.tenant_full_enabled = key.full_access
   editingAPIKeyForm.knowledge_base_ids = normalizeAPIKeyKnowledgeBaseIDs(key.knowledge_base_ids)
@@ -1511,6 +1317,7 @@ async function saveAPIKeyConfiguration() {
   apiKeyScopeSaving.value = true
   try {
     const resp = await updateTenantAPIKey(tenantId.value, key.id, {
+      api_principal_config: editIdentity.value,
       name: editingAPIKeyForm.name.trim(),
       full_access: editingAPIKeyFullAccessEnabled.value,
       capabilities: editingAPIKeyFullAccessEnabled.value ? [] : editingSelectedCapabilities.value,
@@ -1586,10 +1393,10 @@ function buildPlaygroundHeaders(maskSecrets: boolean) {
     'Content-Type': 'application/json',
     'X-API-Key': maskSecrets ? '<API_KEY>' : apiKey.value,
   }
-  if (form.mode === 'direct_header' && playground.external_user_id.trim()) {
+  if (form.value.mode === 'direct_header' && playground.external_user_id.trim()) {
     commonHeaders[directHeaderName.value] = playground.external_user_id.trim()
   }
-  if (form.mode === 'signed_token') {
+  if (form.value.mode === 'signed_token') {
     commonHeaders[tokenHeaderName.value] = maskSecrets ? '<JWT>' : playground.signed_token.trim()
   }
   return {
@@ -1622,9 +1429,10 @@ async function readResponseBody(resp: Response) {
 }
 
 async function ensurePlaygroundSignedToken() {
-  if (form.mode !== 'signed_token') return
+  if (form.value.mode !== 'signed_token') return
   if (!tenantId.value) throw new Error(t('integrations.api.loadFailed'))
   const resp = await createAPIPrincipalTestToken(tenantId.value, {
+    api_key_id: selectedAPIKeyId.value,
     external_user_id: playground.external_user_id.trim(),
     expires_in_seconds: 900,
   })
@@ -1916,35 +1724,13 @@ onBeforeUnmount(stopPlayground)
     line-height: 1.45;
   }
 
-  th:nth-child(1),
-  td:nth-child(1) {
-    width: 18%;
-  }
-
-  th:nth-child(2),
-  td:nth-child(2) {
-    width: 22%;
-  }
-
-  th:nth-child(3),
-  td:nth-child(3) {
-    width: 24%;
-  }
-
-  th:nth-child(4),
-  td:nth-child(4) {
-    width: 16%;
-  }
-
-  th:nth-child(5),
-  td:nth-child(5) {
-    width: 12%;
-  }
-
-  th:nth-child(6),
-  td:nth-child(6) {
-    width: 112px;
-  }
+  th:nth-child(1), td:nth-child(1) { width: 14%; }
+  th:nth-child(2), td:nth-child(2) { width: 18%; }
+  th:nth-child(3), td:nth-child(3) { width: 17%; }
+  th:nth-child(4), td:nth-child(4) { width: 13%; }
+  th:nth-child(5), td:nth-child(5) { width: 14%; }
+  th:nth-child(6), td:nth-child(6) { width: 12%; }
+  th:nth-child(7), td:nth-child(7) { width: 12%; }
 
   tbody tr:last-child td {
     border-bottom: none;

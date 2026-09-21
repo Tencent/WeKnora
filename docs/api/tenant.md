@@ -355,7 +355,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/tenants/10000' \
 
 自 scoped API Key 改造后，密钥以独立记录存储，支持：
 
-- **role**：`viewer`（只读 + 语义检索 POST）、`contributor`（知识库写入）、`admin`（空间级管理，不含 `/api-keys` 管理面）
+- **full_access / capabilities**：全部空间操作或指定操作能力；API Key 管理始终要求登录的 Owner 会话。
 - **knowledge_base_ids**：可选，将 Key 限制在指定知识库
 - **吊销**：`DELETE /tenants/:id/api-keys/:key_id`
 - **过期**：创建时可选 `expires_at_unix`
@@ -393,31 +393,72 @@ curl 'http://localhost:8080/api/v1/knowledge-bases' \
 
 ## API Key Principal：隔离边界与安全说明
 
-`api-principal-config` 控制 `X-API-Key` 请求如何映射为终端 **Principal**。请先理解以下边界，再选择模式。
+每个空间 API Key 的 `api_principal_config` 控制 `X-API-Key` 请求如何映射为终端 **Principal**。在创建、编辑 Key 时配置；平台 Key 继续使用机器身份。
+
+管理界面中，每个 Key 显示自己的用户身份模式；编辑表单在知识库范围下方配置身份。以下截图使用演示数据：
+
+![API Key 列表](../images/api-key-identity/list.png)
+
+![API Key 用户身份设置](../images/api-key-identity/edit.png)
+
+创建示例（`POST /tenants/:id/api-keys`，登录的 Owner）：
+
+```json
+{
+  "name": "customer-app",
+  "capabilities": ["chat", "read_agents"],
+  "api_principal_config": {
+    "mode": "signed_token",
+    "hmac_secret": "<业务后端保存的随机签名密钥>"
+  }
+}
+```
+
+返回数据中的 `identity_namespace` 是服务端生成的稳定应用身份域；响应仅返回 `has_hmac_secret`，不会返回签名密钥。新建时省略身份配置，默认为独立应用的 `tenant` 模式。
+
+`PUT /tenants/:id/api-keys/:key_id` 可修改名称、权限、过期时间和 `api_principal_config`。省略整个身份配置会保留原值；省略 `hmac_secret` 会保留已保存的签名密钥。签名模式必须有密钥，身份配置并发变更返回 409，需重新加载再编辑。身份模式改变后，不自动沿用旧模式的会话和 MCP 授权。
+
+同一应用轮换 Key 时，创建请求可传 `identity_source_key_id`，复制同空间内已有、未吊销 Key 的应用身份域和身份配置；不能同时传 `api_principal_config`。操作权限仍由新 Key 的请求字段指定。复制后的配置独立保存，原 Key 可正常吊销。
+
+新应用的 JWT 必须额外包含 `identity_namespace`，值为对应 Key 返回的应用身份域；即使两个应用误用了相同签名密钥，JWT 也不能跨应用使用。同一应用域中的直接用户 ID 和签名 Token 模式也使用不同身份。
+
+```json
+{
+  "sub": "user_123",
+  "tenant_id": "10000",
+  "identity_namespace": "<创建 Key 时返回的应用身份域>",
+  "aud": "weknora",
+  "exp": 1893456000
+}
+```
+
+`exp` 请由业务后端动态生成，有效期不得超过 24 小时。Playground 的 `POST /tenants/:id/api-principal-test-token` 请求增加 `api_key_id`，使用该 Key 保存的签名密钥签发短期测试 JWT；仅登录 Owner 可调用。
+
+升级时将空间身份配置复制到既有 Key，保留原有 Session 和 MCP OAuth 身份；旧 JWT 无需增加应用身份域。旧 Key 的外部用户仍可能共享历史身份。改变旧 Key 的身份模式时，会为其建立独立应用身份域。原空间级 `api-principal-config` 接口仅保留给旧版兼容路径，修改它不会覆盖已经迁移或新建 Key 的身份配置。
 
 ### Principal 隔离范围（当前实现）
 
 Principal **仅**用于按终端用户隔离以下能力：
 
-- **对话 Session**（创建、列表、读取按外部用户分开；`仅空间` 模式仍共用空间级 Session）
+- **对话 Session**（新应用按应用身份域和外部用户隔离；`tenant` 模式按应用身份隔离）
 - **MCP OAuth** 访问令牌（同一空间下不同外部用户各自授权，token 互不共用）
 - 对话内 MCP OAuth 提示、MCP 工具审批等与终端用户绑定的流程
 
-Principal **不会**缩小 API Key 的 HTTP 路由权限：路由访问由 Key 的 `role` 控制；空间内 RBAC 角色与 `role` 一致。知识库、Agent 等资源的细粒度访问另受 KB 守卫约束。
+Principal 用于确定会话与 MCP 授权归属。HTTP 路由权限由 Key 的 `full_access` 和 `capabilities` 控制，知识库访问另外受 `knowledge_base_ids` 约束；外部用户身份不赋予空间 RBAC 权限。
 
 ### 模式与安全假设
 
 | mode | 适用场景 | 安全假设 |
 | ---- | -------- | -------- |
-| `tenant` | 无 per-user MCP 需求 | 全空间共用一个 MCP OAuth 身份 |
+| `tenant` | 无 per-user MCP 需求 | 同一应用身份共用一个 MCP OAuth 身份（旧 Key 保留历史空间身份） |
 | `direct_header` | 仅可信服务端到服务端 | 用户 ID 来自调用方请求头，**可被持有 API Key 的任意调用方伪造**（冒充其他外部用户并共用/劫持其 MCP OAuth 授权）。面向终端用户或不可信客户端时**禁止**使用；若必须使用，请开启 `require_direct_header` 并确保 API Key 仅保存在可信后端 |
 | `signed_token` | 面向终端用户的集成（**推荐**） | 由业务后端使用 `hmac_secret` 为外部用户签发短期 HS256 JWT；无效或缺失 token 返回 401，**不回退**为空间级 Principal |
 
-`direct_header` 模式下，若未携带用户 ID 请求头：`require_direct_header=false` 时回退为空间级 Principal；`require_direct_header=true` 时返回 401。
+`direct_header` 模式下，若未携带用户 ID 请求头：`require_direct_header=false` 时回退为该应用的无用户 Principal（旧 Key 保留空间级回退）；`require_direct_header=true` 时返回 401。
 
 ## GET `/tenants/:id/api-principal-config` - 获取 API Key 用户身份配置
 
-返回空间级 API Key 请求如何映射为终端 Principal 的配置。**需要 Owner 权限**。
+兼容接口：返回历史空间级 Principal 配置。新建和迁移后的 Key 使用各自保存的配置。**需要 Owner 权限**。
 
 **响应字段**:
 
@@ -453,7 +494,7 @@ curl --location 'http://localhost:8080/api/v1/tenants/10000/api-principal-config
 
 ## PUT `/tenants/:id/api-principal-config` - 更新 API Key 用户身份配置
 
-更新 API Key 请求的 Principal 映射方式。**需要 Owner 权限**。
+兼容接口：更新历史空间级配置，不覆盖新建或迁移后的 Key。**需要 Owner 权限**。
 
 **请求体**:
 

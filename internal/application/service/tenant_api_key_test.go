@@ -108,6 +108,10 @@ func (r *fakeTenantAPIKeyRepo) UpdateAPIKey(
 			key.KnowledgeBaseIDs = append(types.StringArray(nil), update.KnowledgeBaseIDs...)
 			key.Capabilities = append(types.StringArray(nil), update.Capabilities...)
 			key.ExpiresAt = update.ExpiresAt
+			if update.APIPrincipalConfig != nil {
+				key.APIPrincipalConfig = update.APIPrincipalConfig
+				key.IdentityNamespace = update.IdentityNamespace
+			}
 			cp := *key
 			return &cp, nil
 		}

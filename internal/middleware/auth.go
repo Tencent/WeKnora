@@ -524,7 +524,7 @@ func attachAPIKeyAuthContext(
 		}
 
 		var principalErr error
-		principal, principalErr = resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
+		principal, principalErr = resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header, key)
 		if principalErr != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": apiPrincipalAuthErrorMessage(principalErr)})
 			c.Abort()
@@ -549,18 +549,21 @@ func attachAPIKeyAuthContext(
 	}
 	if key != nil {
 		session.APIKeyScope = &types.TenantAPIKeyScope{
-			KeyID:            key.ID,
-			Name:             key.Name,
-			ScopeType:        key.ScopeType,
-			FullAccess:       fullAccess,
-			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
-			Capabilities:     key.Capabilities,
+			KeyID:              key.ID,
+			LegacySessionKeyID: key.LegacySessionKeyID,
+			Name:               key.Name,
+			ScopeType:          key.ScopeType,
+			FullAccess:         fullAccess,
+			KnowledgeBaseIDs:   key.KnowledgeBaseIDs,
+			Capabilities:       key.Capabilities,
 		}
 	}
 	applyAuthSession(c, session)
 }
 
-func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.Header) (types.Principal, error) {
+func resolveAPIPrincipal(
+	ctx context.Context, tenant *types.Tenant, header http.Header, keys ...*types.TenantAPIKey,
+) (types.Principal, error) {
 	tenantID := uint64(0)
 	if tenant != nil {
 		tenantID = tenant.ID
@@ -573,6 +576,31 @@ func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.
 		return fallback, nil
 	}
 	cfg := tenant.APIPrincipalConfig
+	namespace := ""
+	if len(keys) > 0 && keys[0] != nil {
+		key := keys[0]
+		namespace = key.IdentityNamespace
+		if key.APIPrincipalConfig != nil {
+			cfg = key.APIPrincipalConfig
+		}
+		if namespace != "" && key.APIPrincipalConfig == nil {
+			return types.Principal{}, errors.New("missing API key identity configuration")
+		}
+	}
+	// Separate types prevent legacy, caller-chosen IDs from colliding with a
+	// namespaced ID. Including the mode separates direct and signed trust.
+	externalType := types.PrincipalAPIExternalUser
+	externalPrefix := strconv.FormatUint(tenantID, 10) + ":"
+	if namespace != "" {
+		mode := types.APIPrincipalModeTenant
+		if cfg != nil {
+			mode = cfg.Mode
+		}
+		prefix := fmt.Sprintf("%d:%s:%s", tenantID, namespace, mode)
+		fallback = types.Principal{Type: types.PrincipalAPIApplication, ID: prefix}
+		externalType = types.PrincipalAPIApplicationUser
+		externalPrefix = prefix + ":"
+	}
 	if cfg == nil || cfg.Mode == "" || cfg.Mode == types.APIPrincipalModeTenant {
 		return fallback, nil
 	}
@@ -589,11 +617,13 @@ func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.
 			return types.Principal{}, fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
 		}
 		return types.Principal{
-			Type: types.PrincipalAPIExternalUser,
-			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
+			Type: externalType,
+			ID:   externalPrefix + externalUserID,
 		}, nil
 	case types.APIPrincipalModeSignedToken:
-		externalUserID, err := verifyExternalUserJWT(header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret)
+		externalUserID, err := verifyExternalUserJWT(
+			header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret, namespace,
+		)
 		if err != nil || externalUserID == "" {
 			logger.Warnf(ctx, "invalid external user token for tenant=%d: %v", tenantID, err)
 			return types.Principal{}, fmt.Errorf("%w: %w", errInvalidExternalUserToken, err)
@@ -602,15 +632,15 @@ func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.
 			return types.Principal{}, fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
 		}
 		return types.Principal{
-			Type: types.PrincipalAPIExternalUser,
-			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
+			Type: externalType,
+			ID:   externalPrefix + externalUserID,
 		}, nil
 	default:
-		return fallback, nil
+		return types.Principal{}, errors.New("invalid API key identity mode")
 	}
 }
 
-func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (string, error) {
+func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string, namespaces ...string) (string, error) {
 	tokenString = strings.TrimSpace(tokenString)
 	secret = strings.TrimSpace(secret)
 	if tokenString == "" {
@@ -649,6 +679,14 @@ func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (
 	}
 	if got := principalTenantIDFromClaims(claims); got != tenantID {
 		return "", fmt.Errorf("workspace mismatch: got %d want %d", got, tenantID)
+	}
+	expectedNamespace := ""
+	if len(namespaces) > 0 {
+		expectedNamespace = namespaces[0]
+	}
+	gotNamespace, _ := claims["identity_namespace"].(string)
+	if gotNamespace != expectedNamespace {
+		return "", errors.New("application identity mismatch")
 	}
 	sub, _ := claims["sub"].(string)
 	sub = strings.TrimSpace(sub)

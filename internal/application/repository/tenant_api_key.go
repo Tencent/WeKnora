@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -61,21 +62,31 @@ func (r *tenantAPIKeyRepository) ListPlatformAPIKeys(ctx context.Context) ([]*ty
 func (r *tenantAPIKeyRepository) UpdateAPIKey(
 	ctx context.Context, tenantID uint64, id uint64, update *types.TenantAPIKey,
 ) (*types.TenantAPIKey, error) {
-	res := r.db.WithContext(ctx).
-		Model(&types.TenantAPIKey{}).
+	fields := map[string]any{
+		"name": update.Name, "full_access": update.FullAccess,
+		"knowledge_base_ids": update.KnowledgeBaseIDs, "capabilities": update.Capabilities,
+		"expires_at": update.ExpiresAt,
+	}
+	if update.APIPrincipalConfig != nil {
+		fields["api_principal_config"] = update.APIPrincipalConfig
+		fields["identity_namespace"] = update.IdentityNamespace
+	}
+	query := r.db.WithContext(ctx).Model(&types.TenantAPIKey{}).
 		Where("id = ? AND tenant_id = ? AND scope_type = ? AND revoked_at IS NULL",
-			id, tenantID, types.APIKeyScopeTenant).
-		Updates(map[string]any{
-			"name":               update.Name,
-			"full_access":        update.FullAccess,
-			"knowledge_base_ids": update.KnowledgeBaseIDs,
-			"capabilities":       update.Capabilities,
-			"expires_at":         update.ExpiresAt,
-		})
+			id,
+			tenantID,
+			types.APIKeyScopeTenant)
+	if update.APIPrincipalConfig != nil && !update.UpdatedAt.IsZero() {
+		query = query.Where("updated_at = ?", update.UpdatedAt)
+	}
+	res := query.Updates(fields)
 	if res.Error != nil {
 		return nil, res.Error
 	}
 	if res.RowsAffected == 0 {
+		if update.APIPrincipalConfig != nil && !update.UpdatedAt.IsZero() {
+			return nil, apperrors.NewConflictError("API key changed; reload before saving identity configuration")
+		}
 		return nil, ErrTenantAPIKeyNotFound
 	}
 

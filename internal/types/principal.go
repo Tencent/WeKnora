@@ -6,16 +6,19 @@ import (
 	"strings"
 )
 
+// Principal kinds distinguish web users, application users, and machine callers.
 const (
-	PrincipalWebUser         = "web_user"
-	PrincipalAPITenant       = "api_tenant"
-	PrincipalAPIPlatform     = "api_platform"
-	PrincipalAPIExternalUser = "api_external_user"
-	PrincipalIMUser          = "im_user"
-	PrincipalEmbedChannel    = "embed_channel"
-	PrincipalEmbedSession    = "embed_session"
-	PrincipalEmbedVisitor    = "embed_visitor"
-	PrincipalMCPEndpoint     = "mcp_endpoint"
+	PrincipalWebUser            = "web_user"
+	PrincipalAPITenant          = "api_tenant"
+	PrincipalAPIPlatform        = "api_platform"
+	PrincipalAPIExternalUser    = "api_external_user"
+	PrincipalAPIApplication     = "api_application"
+	PrincipalAPIApplicationUser = "api_application_user"
+	PrincipalIMUser             = "im_user"
+	PrincipalEmbedChannel       = "embed_channel"
+	PrincipalEmbedSession       = "embed_session"
+	PrincipalEmbedVisitor       = "embed_visitor"
+	PrincipalMCPEndpoint        = "mcp_endpoint"
 )
 
 // EmbedVisitorHeader is sent by the embed widget to identify a browser visitor
@@ -37,7 +40,9 @@ const SessionOwnerAPIExternalUserPrefix = PrincipalAPIExternalUser + ":"
 func IsAPISessionOwnerID(ownerID string) bool {
 	ownerID = strings.TrimSpace(ownerID)
 	return strings.HasPrefix(ownerID, SessionOwnerAPITenantKeyPrefix) ||
-		strings.HasPrefix(ownerID, SessionOwnerAPIExternalUserPrefix)
+		strings.HasPrefix(ownerID, SessionOwnerAPIExternalUserPrefix) ||
+		strings.HasPrefix(ownerID, PrincipalAPIApplication+":") ||
+		strings.HasPrefix(ownerID, PrincipalAPIApplicationUser+":")
 }
 
 // Principal represents the terminal caller for per-subject isolation features.
@@ -188,12 +193,16 @@ func MCPOAuthPrincipalFromContext(ctx context.Context) Principal {
 func SessionOwnerIDFromContext(ctx context.Context) string {
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Type {
-		case PrincipalAPIExternalUser, PrincipalEmbedSession:
+		case PrincipalAPIExternalUser, PrincipalAPIApplication, PrincipalAPIApplicationUser, PrincipalEmbedSession:
 			return p.StorageID()
 		case PrincipalAPITenant:
 			if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && scope.KeyID > 0 {
 				if tenantID, ok := TenantIDFromContext(ctx); ok && tenantID > 0 {
-					return fmt.Sprintf("%s%d:%d", SessionOwnerAPITenantKeyPrefix, tenantID, scope.KeyID)
+					ownerKeyID := scope.KeyID
+					if scope.LegacySessionKeyID != 0 {
+						ownerKeyID = scope.LegacySessionKeyID
+					}
+					return fmt.Sprintf("%s%d:%d", SessionOwnerAPITenantKeyPrefix, tenantID, ownerKeyID)
 				}
 			}
 		}

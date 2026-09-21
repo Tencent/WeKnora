@@ -34,13 +34,14 @@ var versionedSQLiteTables = []string{
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"memory_subjects": {"extraction_state"},                                                 // 000094
-	"memory_items":    {"replaces_id"},                                                      // 000094
-	"tenants":         {"api_principal_config"},                                             // 000064
-	"users":           {"is_system_admin"},                                                  // 000053
-	"knowledges":      {"pending_subtasks_count", "profile"},                                // 000056, 000101
-	"knowledge_bases": {"profile_config", "generated_profile"},                              // 000101
-	"messages":        {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
+	"tenant_api_keys": {"api_principal_config", "identity_namespace", "legacy_session_key_id"}, // 000109
+	"memory_subjects": {"extraction_state"},                                                    // 000094
+	"memory_items":    {"replaces_id"},                                                         // 000094
+	"tenants":         {"api_principal_config"},                                                // 000064
+	"users":           {"is_system_admin"},                                                     // 000053
+	"knowledges":      {"pending_subtasks_count", "profile"},                                   // 000056, 000101
+	"knowledge_bases": {"profile_config", "generated_profile"},                                 // 000101
+	"messages":        {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"},    // 000034/085/097/105
 	"sessions": {
 		"parent_session_id", "forked_from_message_id", "fork_bootstrap", // 000097
 		"sandbox_config_tenant_id", // 000108
@@ -52,7 +53,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"message_artifacts":  {"deleted_at"},                     // 000107
 }
 
-const expectedSQLiteMigrationVersion = 27
+const expectedSQLiteMigrationVersion = 28
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

@@ -36,6 +36,7 @@ export interface UpdateAPIPrincipalConfigPayload {
 }
 
 export interface CreateAPIPrincipalTestTokenPayload {
+  api_key_id?: number
   external_user_id: string
   expires_in_seconds?: number
 }
@@ -94,6 +95,8 @@ export type TenantAPIKeyCapability =
   | 'system_audit_read'
 
 export interface TenantAPIKey {
+  identity_namespace: string
+  api_principal_config: APIPrincipalConfig
   id: number
   scope_type?: 'tenant' | 'platform'
   name: string
@@ -111,6 +114,8 @@ export interface CreatedTenantAPIKey extends TenantAPIKey {
 }
 
 export interface CreateTenantAPIKeyPayload {
+  identity_source_key_id?: number
+  api_principal_config?: UpdateAPIPrincipalConfigPayload
   name: string
   full_access?: boolean
   knowledge_base_ids?: string[]
@@ -119,6 +124,7 @@ export interface CreateTenantAPIKeyPayload {
 }
 
 export interface UpdateTenantAPIKeyPayload {
+  api_principal_config?: UpdateAPIPrincipalConfigPayload
   name: string
   full_access: boolean
   knowledge_base_ids: string[]

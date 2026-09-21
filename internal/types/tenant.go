@@ -235,9 +235,14 @@ func (c *APIPrincipalConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
-		return nil
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("invalid API principal config type %T", value)
 	}
 	if err := json.Unmarshal(b, c); err != nil {
 		return err

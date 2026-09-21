@@ -123,6 +123,7 @@ type apiPrincipalConfigResponse struct {
 }
 
 type apiPrincipalTestTokenRequest struct {
+	APIKeyID         uint64 `json:"api_key_id"`
 	ExternalUserID   string `json:"external_user_id"`
 	ExpiresInSeconds int    `json:"expires_in_seconds"`
 }
@@ -136,33 +137,39 @@ type apiPrincipalTestTokenResponse struct {
 }
 
 type tenantAPIKeyCreateRequest struct {
-	Name             string   `json:"name"`
-	FullAccess       bool     `json:"full_access"`
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
-	Capabilities     []string `json:"capabilities"`
-	ExpiresAt        *int64   `json:"expires_at_unix"`
+	APIPrincipalConfig  *types.APIPrincipalConfigInput `json:"api_principal_config"`
+	IdentitySourceKeyID uint64                         `json:"identity_source_key_id"`
+	Name                string                         `json:"name"`
+	FullAccess          bool                           `json:"full_access"`
+	KnowledgeBaseIDs    []string                       `json:"knowledge_base_ids"`
+	Capabilities        []string                       `json:"capabilities"`
+	ExpiresAt           *int64                         `json:"expires_at_unix"`
 }
 
 // tenantAPIKeyUpdateRequest 修改已创建 API Key 的配置，字段语义与创建接口一致。
 type tenantAPIKeyUpdateRequest struct {
-	Name             string   `json:"name"`
-	FullAccess       bool     `json:"full_access"`
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
-	Capabilities     []string `json:"capabilities"`
-	ExpiresAt        *int64   `json:"expires_at_unix"`
+	APIPrincipalConfig  *types.APIPrincipalConfigInput `json:"api_principal_config"`
+	IdentitySourceKeyID uint64                         `json:"identity_source_key_id"`
+	Name                string                         `json:"name"`
+	FullAccess          bool                           `json:"full_access"`
+	KnowledgeBaseIDs    []string                       `json:"knowledge_base_ids"`
+	Capabilities        []string                       `json:"capabilities"`
+	ExpiresAt           *int64                         `json:"expires_at_unix"`
 }
 
 type tenantAPIKeyResponse struct {
-	ID               uint64                `json:"id"`
-	ScopeType        types.APIKeyScopeType `json:"scope_type"`
-	Name             string                `json:"name"`
-	APIKey           string                `json:"api_key"`
-	FullAccess       bool                  `json:"full_access"`
-	KnowledgeBaseIDs types.StringArray     `json:"knowledge_base_ids"`
-	Capabilities     types.StringArray     `json:"capabilities"`
-	LastUsedAt       *time.Time            `json:"last_used_at,omitempty"`
-	ExpiresAt        *time.Time            `json:"expires_at,omitempty"`
-	CreatedAt        time.Time             `json:"created_at"`
+	IdentityNamespace  string                     `json:"identity_namespace"`
+	APIPrincipalConfig apiPrincipalConfigResponse `json:"api_principal_config"`
+	ID                 uint64                     `json:"id"`
+	ScopeType          types.APIKeyScopeType      `json:"scope_type"`
+	Name               string                     `json:"name"`
+	APIKey             string                     `json:"api_key"`
+	FullAccess         bool                       `json:"full_access"`
+	KnowledgeBaseIDs   types.StringArray          `json:"knowledge_base_ids"`
+	Capabilities       types.StringArray          `json:"capabilities"`
+	LastUsedAt         *time.Time                 `json:"last_used_at,omitempty"`
+	ExpiresAt          *time.Time                 `json:"expires_at,omitempty"`
+	CreatedAt          time.Time                  `json:"created_at"`
 }
 
 type tenantAPIKeyCreateResponse struct {
@@ -680,28 +687,29 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	var req tenantAPIKeyCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 	if err := validateTenantAPIKeyRequest(ctx, h.kbService, id, req); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
 		if !t.After(time.Now().UTC()) {
-			c.Error(errors.NewValidationError("expires_at_unix must be in the future"))
+			_ = c.Error(errors.NewValidationError("expires_at_unix must be in the future"))
 			return
 		}
 		expiresAt = &t
 	}
 	result, err := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		APIPrincipalConfig: req.APIPrincipalConfig, IdentitySourceKeyID: req.IdentitySourceKeyID,
 		TenantID:         id,
 		Name:             req.Name,
 		FullAccess:       req.FullAccess,
@@ -710,7 +718,11 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 		ExpiresAt:        expiresAt,
 	})
 	if err != nil {
-		c.Error(errors.NewInternalServerError("Failed to create API key").WithDetails(err.Error()))
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError("Failed to create API key").WithDetails(err.Error()))
+		}
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{
@@ -728,21 +740,21 @@ func (h *TenantHandler) UpdateAPIKey(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 	keyID, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
 	if err != nil || keyID == 0 {
-		c.Error(errors.NewBadRequestError("Invalid API key ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid API key ID"))
 		return
 	}
 	var req tenantAPIKeyUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 	if appErr := validateTenantAPIKeyRequest(ctx, h.kbService, tenantID, tenantAPIKeyCreateRequest(req)); appErr != nil {
-		c.Error(appErr)
+		_ = c.Error(appErr)
 		return
 	}
 	var expiresAt *time.Time
@@ -751,12 +763,21 @@ func (h *TenantHandler) UpdateAPIKey(c *gin.Context) {
 		expiresAt = &t
 	}
 
+	if req.IdentitySourceKeyID != 0 {
+		_ = c.Error(errors.NewValidationError("identity_source_key_id is only supported when creating a key"))
+		return
+	}
 	updated, err := h.apiKeyService.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
-		TenantID: tenantID, APIKeyID: keyID, Name: req.Name, FullAccess: req.FullAccess,
+		APIPrincipalConfig: req.APIPrincipalConfig,
+		TenantID:           tenantID, APIKeyID: keyID, Name: req.Name, FullAccess: req.FullAccess,
 		KnowledgeBaseIDs: req.KnowledgeBaseIDs, Capabilities: req.Capabilities, ExpiresAt: expiresAt,
 	})
 	if err != nil {
-		c.Error(errors.NewNotFoundError("API key not found"))
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewNotFoundError("API key not found"))
+		}
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": tenantAPIKeyForResponse(updated)})
@@ -786,16 +807,18 @@ func tenantAPIKeyForResponse(key *types.TenantAPIKey) tenantAPIKeyResponse {
 		return tenantAPIKeyResponse{}
 	}
 	return tenantAPIKeyResponse{
-		ID:               key.ID,
-		ScopeType:        types.NormalizeAPIKeyScopeType(key.ScopeType),
-		Name:             key.Name,
-		APIKey:           key.APIKey,
-		FullAccess:       key.FullAccess,
-		KnowledgeBaseIDs: key.KnowledgeBaseIDs,
-		Capabilities:     types.NormalizeAPIKeyCapabilities(key.Capabilities),
-		LastUsedAt:       key.LastUsedAt,
-		ExpiresAt:        key.ExpiresAt,
-		CreatedAt:        key.CreatedAt,
+		IdentityNamespace:  key.IdentityNamespace,
+		APIPrincipalConfig: apiPrincipalConfigForResponse(key.APIPrincipalConfig),
+		ID:                 key.ID,
+		ScopeType:          types.NormalizeAPIKeyScopeType(key.ScopeType),
+		Name:               key.Name,
+		APIKey:             key.APIKey,
+		FullAccess:         key.FullAccess,
+		KnowledgeBaseIDs:   key.KnowledgeBaseIDs,
+		Capabilities:       types.NormalizeAPIKeyCapabilities(key.Capabilities),
+		LastUsedAt:         key.LastUsedAt,
+		ExpiresAt:          key.ExpiresAt,
+		CreatedAt:          key.CreatedAt,
 	}
 }
 
@@ -1022,40 +1045,65 @@ func (h *TenantHandler) CreateAPIPrincipalTestToken(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(errors.NewBadRequestError("Invalid workspace ID"))
+		_ = c.Error(errors.NewBadRequestError("Invalid workspace ID"))
 		return
 	}
 
 	var req apiPrincipalTestTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 
 	externalUserID := strings.TrimSpace(req.ExternalUserID)
 	if err := validateAPIPrincipalExternalUserID(externalUserID); err != nil {
-		c.Error(errors.NewValidationError("external_user_id is invalid").WithDetails(err.Error()))
+		_ = c.Error(errors.NewValidationError("external_user_id is invalid").WithDetails(err.Error()))
 		return
 	}
 
 	tenant, err := h.service.GetTenantByID(ctx, id)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
+			_ = c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
 		}
 		return
 	}
 
 	cfg := tenant.APIPrincipalConfig
+	namespace := ""
+	if req.APIKeyID != 0 {
+		keys, err := h.apiKeyService.ListAPIKeys(ctx, id)
+		if err != nil {
+			_ = c.Error(errors.NewInternalServerError("Failed to load API key"))
+			return
+		}
+		var selected *types.TenantAPIKey
+		for _, key := range keys {
+			if key.ID == req.APIKeyID &&
+				key.TenantIDValue() == id &&
+				!key.IsPlatform() &&
+				key.RevokedAt == nil &&
+				(key.ExpiresAt == nil || key.ExpiresAt.After(time.Now())) {
+				selected = key
+				break
+			}
+		}
+		if selected == nil {
+			_ = c.Error(errors.NewNotFoundError("API key not found or expired"))
+			return
+		}
+		cfg = selected.APIPrincipalConfig
+		namespace = selected.IdentityNamespace
+	}
 	if cfg == nil || cfg.Mode != types.APIPrincipalModeSignedToken {
-		c.Error(errors.NewValidationError("signed_token mode is required"))
+		_ = c.Error(errors.NewValidationError("signed_token mode is required"))
 		return
 	}
 	secret := strings.TrimSpace(cfg.HMACSecret)
 	if secret == "" {
-		c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
+		_ = c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
 		return
 	}
 
@@ -1064,21 +1112,22 @@ func (h *TenantHandler) CreateAPIPrincipalTestToken(c *gin.Context) {
 		ttl = time.Duration(req.ExpiresInSeconds) * time.Second
 	}
 	if ttl <= 0 || ttl > maxAPIPrincipalTestTokenTTL {
-		c.Error(errors.NewValidationError("expires_in_seconds must be between 1 and 3600"))
+		_ = c.Error(errors.NewValidationError("expires_in_seconds must be between 1 and 3600"))
 		return
 	}
 
 	now := time.Now()
 	expiresAt := now.Add(ttl)
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":       externalUserID,
-		"tenant_id": strconv.FormatUint(id, 10),
-		"aud":       "weknora",
-		"iat":       now.Unix(),
-		"exp":       expiresAt.Unix(),
+		"identity_namespace": namespace,
+		"sub":                externalUserID,
+		"tenant_id":          strconv.FormatUint(id, 10),
+		"aud":                "weknora",
+		"iat":                now.Unix(),
+		"exp":                expiresAt.Unix(),
 	}).SignedString([]byte(secret))
 	if err != nil {
-		c.Error(errors.NewInternalServerError("Failed to create API principal test token").WithDetails(err.Error()))
+		_ = c.Error(errors.NewInternalServerError("Failed to create API principal test token").WithDetails(err.Error()))
 		return
 	}
 

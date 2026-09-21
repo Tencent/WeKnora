@@ -302,7 +302,9 @@ func TestSessionRepositoryQueryPagedAPISourceReturnsAllTenantAPIKeySessions(t *t
 	key2 := createSessionForTest(t, db, 1, types.SessionOwnerAPITenantKeyPrefix+"1:20")
 	directHeader := createSessionForTest(t, db, 1, types.SessionOwnerAPIExternalUserPrefix+"1:alice")
 	signedToken := createSessionForTest(t, db, 1, types.SessionOwnerAPIExternalUserPrefix+"1:bob")
-	_ = createSessionForTest(t, db, 1, "alice")
+	web := createSessionForTest(t, db, 1, "alice")
+	app := createSessionForTest(t, db, 1, types.PrincipalAPIApplication+":1:app-a:tenant")
+	appUser := createSessionForTest(t, db, 1, types.PrincipalAPIApplicationUser+":1:app-a:signed_token:alice")
 	_ = createSessionForTest(t, db, 2, types.SessionOwnerAPITenantKeyPrefix+"2:30")
 	_ = createSessionForTest(t, db, 2, types.SessionOwnerAPIExternalUserPrefix+"2:mallory")
 
@@ -312,12 +314,24 @@ func TestSessionRepositoryQueryPagedAPISourceReturnsAllTenantAPIKeySessions(t *t
 		TenantID: 1, UserID: "", Source: types.SessionSourceAPI, Page: 1, PageSize: 50,
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, 4, total)
+	require.EqualValues(t, 6, total)
 	require.ElementsMatch(
 		t,
-		[]string{key1.ID, key2.ID, directHeader.ID, signedToken.ID},
+		[]string{key1.ID, key2.ID, directHeader.ID, signedToken.ID, app.ID, appUser.ID},
 		listItemIDsForTest(items),
 	)
+
+	webItems,
+		webTotal, err := repo.QueryPaged(ctx,
+		&types.SessionListQuery{
+			TenantID: 1,
+			Source:   "web",
+			Page:     1,
+			PageSize: 50,
+		})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, webTotal)
+	require.Equal(t, []string{web.ID}, listItemIDsForTest(webItems))
 }
 
 // Maintenance sessions (skill install / remove) are real sessions with real

@@ -12,9 +12,11 @@ import (
 	"time"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 )
 
 // apiKeyLastUsedMinInterval bounds how often we persist last_used_at per key.
@@ -72,6 +74,36 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
 		Capabilities:     capabilities,
 		ExpiresAt:        expiresAt,
+	}
+	if scopeType == types.APIKeyScopeTenant {
+		key.IdentityNamespace = uuid.NewString()
+		if req.IdentitySourceKeyID != 0 {
+			if req.APIPrincipalConfig != nil {
+				return nil, apperrors.NewValidationError(
+					"identity_source_key_id and api_principal_config are mutually exclusive",
+				)
+			}
+			source, err := s.identitySource(ctx, req.TenantID, req.IdentitySourceKeyID)
+			if err != nil {
+				return nil, err
+			}
+			key.IdentityNamespace = source.IdentityNamespace
+			key.LegacySessionKeyID = source.LegacySessionKeyID
+			if key.IdentityNamespace == "" && key.LegacySessionKeyID == 0 {
+				key.LegacySessionKeyID = source.ID
+			}
+			key.APIPrincipalConfig, err = req.APIPrincipalConfig.Resolve(source.APIPrincipalConfig)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			key.APIPrincipalConfig, err = req.APIPrincipalConfig.Resolve(nil)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else if req.APIPrincipalConfig != nil || req.IdentitySourceKeyID != 0 {
+		return nil, apperrors.NewValidationError("platform keys do not support end-user identity configuration")
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil
@@ -165,7 +197,42 @@ func (s *tenantAPIKeyService) UpdateAPIKey(
 		key.KnowledgeBaseIDs = nil
 		key.Capabilities = nil
 	}
+	if req.APIPrincipalConfig != nil {
+		existing, err := s.identitySource(ctx, req.TenantID, req.APIKeyID)
+		if err != nil {
+			return nil, err
+		}
+		key.APIPrincipalConfig, err = req.APIPrincipalConfig.Resolve(existing.APIPrincipalConfig)
+		if err != nil {
+			return nil, err
+		}
+		key.IdentityNamespace = existing.IdentityNamespace
+		key.UpdatedAt = existing.UpdatedAt
+		// Changing a legacy key's trust mode must not grant access to another
+		// legacy integration's users under the new, weaker mode.
+		oldMode := types.APIPrincipalModeTenant
+		if existing.APIPrincipalConfig != nil && existing.APIPrincipalConfig.Mode != "" {
+			oldMode = existing.APIPrincipalConfig.Mode
+		}
+		if key.IdentityNamespace == "" && oldMode != key.APIPrincipalConfig.Mode {
+			key.IdentityNamespace = uuid.NewString()
+		}
+	}
 	return s.repo.UpdateAPIKey(ctx, req.TenantID, req.APIKeyID, key)
+}
+
+// identitySource only resolves active keys in the same workspace.
+func (s *tenantAPIKeyService) identitySource(ctx context.Context, tenantID, keyID uint64) (*types.TenantAPIKey, error) {
+	keys, err := s.repo.ListAPIKeys(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range keys {
+		if key.ID == keyID && key.TenantIDValue() == tenantID && !key.IsPlatform() && key.RevokedAt == nil {
+			return key, nil
+		}
+	}
+	return nil, apperrors.NewNotFoundError("API key not found")
 }
 
 func (s *tenantAPIKeyService) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {

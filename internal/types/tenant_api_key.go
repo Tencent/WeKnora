@@ -16,14 +16,19 @@ import (
 // choose a target workspace per request. KeyHash is used for authentication
 // lookup; APIKey is stored encrypted when SYSTEM_AES_KEY is set.
 type TenantAPIKey struct {
-	ID               uint64          `json:"id" gorm:"primaryKey;autoIncrement"`
-	TenantID         *uint64         `json:"tenant_id,omitempty" gorm:"index"`
-	ScopeType        APIKeyScopeType `json:"scope_type" gorm:"type:varchar(16);not null;default:tenant;index"`
-	Name             string          `json:"name" gorm:"type:varchar(128);not null"`
-	KeyHash          string          `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
-	APIKey           string          `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
-	FullAccess       bool            `json:"full_access" gorm:"not null;default:false"`
-	KnowledgeBaseIDs StringArray     `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
+	// Explicit rotations of migrated keys retain their original session owner.
+	LegacySessionKeyID uint64 `json:"-" gorm:"not null;default:0"`
+	// Empty namespace is reserved for migrated keys and preserves their owners.
+	IdentityNamespace  string              `json:"identity_namespace" gorm:"type:varchar(64);not null;default:''"`
+	APIPrincipalConfig *APIPrincipalConfig `json:"-" gorm:"type:jsonb"`
+	ID                 uint64              `json:"id" gorm:"primaryKey;autoIncrement"`
+	TenantID           *uint64             `json:"tenant_id,omitempty" gorm:"index"`
+	ScopeType          APIKeyScopeType     `json:"scope_type" gorm:"type:varchar(16);not null;default:tenant;index"`
+	Name               string              `json:"name" gorm:"type:varchar(128);not null"`
+	KeyHash            string              `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
+	APIKey             string              `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
+	FullAccess         bool                `json:"full_access" gorm:"not null;default:false"`
+	KnowledgeBaseIDs   StringArray         `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
 	// Capabilities are bounded grants for non-full-access keys. Each
 	// capability maps to an integration persona (retrieval, chat, ingest,
 	// tenant infrastructure management, and history access). KB scoping
@@ -267,12 +272,13 @@ func (k *TenantAPIKey) AfterFind(tx *gorm.DB) error {
 
 // TenantAPIKeyScope is the request-context projection used by middleware.
 type TenantAPIKeyScope struct {
-	KeyID            uint64
-	Name             string
-	ScopeType        APIKeyScopeType
-	FullAccess       bool
-	KnowledgeBaseIDs StringArray
-	Capabilities     StringArray
+	LegacySessionKeyID uint64
+	KeyID              uint64
+	Name               string
+	ScopeType          APIKeyScopeType
+	FullAccess         bool
+	KnowledgeBaseIDs   StringArray
+	Capabilities       StringArray
 }
 
 func WithTenantAPIKeyScope(ctx context.Context, scope TenantAPIKeyScope) context.Context {
@@ -292,12 +298,13 @@ func TenantAPIKeyScopeFromContext(ctx context.Context) (TenantAPIKeyScope, bool)
 
 func (s TenantAPIKeyScope) Normalize() TenantAPIKeyScope {
 	return TenantAPIKeyScope{
-		KeyID:            s.KeyID,
-		Name:             s.Name,
-		ScopeType:        NormalizeAPIKeyScopeType(s.ScopeType),
-		FullAccess:       s.FullAccess,
-		KnowledgeBaseIDs: normalizeIDArray(s.KnowledgeBaseIDs),
-		Capabilities:     NormalizeAPIKeyCapabilities(s.Capabilities),
+		KeyID:              s.KeyID,
+		LegacySessionKeyID: s.LegacySessionKeyID,
+		Name:               s.Name,
+		ScopeType:          NormalizeAPIKeyScopeType(s.ScopeType),
+		FullAccess:         s.FullAccess,
+		KnowledgeBaseIDs:   normalizeIDArray(s.KnowledgeBaseIDs),
+		Capabilities:       NormalizeAPIKeyCapabilities(s.Capabilities),
 	}
 }
 
