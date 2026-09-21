@@ -90,12 +90,58 @@ func TestResolveMarkdownImages_FallbackToLinkOnFailure(t *testing.T) {
 	}
 }
 
-func TestResolveMarkdownImages_ResourceHandleFallsBackToLink(t *testing.T) {
+func TestResolveMarkdownImages_InternalHandleFallsBackToPlainText(t *testing.T) {
 	a := &Adapter{region: RegionFeishu}
-	in := "see ![diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) here"
-	want := "see [diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) here"
-	if got := a.resolveMarkdownImages(context.Background(), "tok", in); got != want {
-		t.Errorf("resource image fallback = %q, want %q", got, want)
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "resource handle",
+			in:   "see ![diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) here",
+			want: "see diagram here",
+		},
+		{
+			name: "local scheme",
+			in:   "see ![shot](local://10000/exports/a.png) here",
+			want: "see shot here",
+		},
+		{
+			name: "empty alt uses region label",
+			in:   "![](resource://Zb2IrqfTdlCFkbUqFtmS5A)",
+			want: "图片",
+		},
+		{
+			name: "mixed internal and failed http",
+			in:   "![diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) and ![x](http://127.0.0.1/x.png)",
+			want: "diagram and [x](http://127.0.0.1/x.png)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := a.resolveMarkdownImages(context.Background(), "tok", tt.in)
+			if got != tt.want {
+				t.Errorf("fallback = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, "![") {
+				t.Errorf("failed image should not remain as image markdown: %q", got)
+			}
+			if strings.Contains(got, "resource://") || strings.Contains(got, "local://") {
+				t.Errorf("internal scheme must not remain in card markdown: %q", got)
+			}
+		})
+	}
+}
+
+func TestResolveMarkdownImages_UppercaseHTTPSchemeStillUploads(t *testing.T) {
+	a := &Adapter{region: RegionFeishu}
+	// IM rewrite may emit HTTPS://; loopback still fails SSRF and must degrade
+	// to a link rather than being treated as a non-HTTP handle.
+	got := a.resolveMarkdownImages(context.Background(), "tok", "![](HTTPS://127.0.0.1/x.png)")
+	want := "[图片](HTTPS://127.0.0.1/x.png)"
+	if got != want {
+		t.Errorf("uppercase scheme fallback = %q, want %q", got, want)
 	}
 }
 
