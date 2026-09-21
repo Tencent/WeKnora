@@ -1114,6 +1114,8 @@ export default {
       enabled: 'Agent enabled'
     },
     editor: {
+      reasoningEffortUnsupported: 'The selected model cannot think; every option except "Off" is ignored.',
+      reasoningEffortAlwaysOn: 'The selected model always reasons and cannot be switched off; only the effort level can be changed.',
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
       buttons: {
@@ -3203,6 +3205,9 @@ export default {
       revisionDiffContent: 'Body',
       revisionDiffEmpty: 'No differences in title, summary, or body vs current',
       revisionLoadFailed: 'Failed to load revision history',
+      revisionNotRetained: 'This version has no retained snapshot or it was cleaned up',
+      revisionNotRetainedRange: 'v{ver} · full content',
+      revisionNotRetainedHint: 'No snapshot is retained for the previous version v{prev} (versions from before the upgrade were not snapshotted; old snapshots may also have been pruned) — showing the full content of v{ver} from scratch.',
       revertBtn: 'Revert to this version',
       revertConfirm: 'Revert to v{ver}? The current content is snapshotted first, so the revert itself can be undone.',
       revertSuccess: 'Reverted to v{ver}',
@@ -3713,6 +3718,21 @@ export default {
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
     truncatedHint: 'This answer was cut off at the per-response output limit. Above is what the model produced before the cut.',
+    rewind: {
+      tooltip: 'Rewind to here',
+      confirmBody: 'Later messages will be deleted. Rewinding from a question also removes that question and puts it back in the input. The workspace rolls back when a checkpoint is available. This cannot be undone.',
+      confirmButton: 'Rewind',
+      cancelButton: 'Cancel',
+      success: 'Rewound',
+      busy: 'Wait until this turn finishes before rewinding',
+      noCheckpoint: 'Cannot rewind: this session has a live workspace but no reachable checkpoint',
+      sandboxReplaced: 'Cannot rewind: the sandbox was replaced, so the old checkpoint is unreachable',
+      reloadFailed: 'Conversation was rewound, but history could not be reloaded. Refresh if older messages are missing',
+      failed: 'Rewind failed. Please try again',
+      skipped: 'Conversation rewound; workspace was left unchanged',
+      skipNoSandbox: 'Conversation rewound; workspace was left unchanged (no sandbox is bound)',
+      skipNoCheckpoint: 'Conversation rewound; workspace was left unchanged (no checkpoint to restore)',
+    },
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',
@@ -4578,6 +4598,28 @@ export default {
     }
   },
   model: {
+    reasoning: {
+      levels: {
+        off: 'Off',
+        auto: 'Auto',
+        minimal: 'Minimal',
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        xhigh: 'Extra high',
+        max: 'Max',
+      },
+      levelDescriptions: {
+        off: 'Thinking disabled; no thinking parameters are sent',
+        auto: 'Vendor default intensity; the model decides how much to think',
+        minimal: 'Least thinking, fastest responses',
+        low: 'Light thinking',
+        medium: 'Moderate thinking',
+        high: 'Deep thinking, slower responses',
+        xhigh: 'Very high thinking budget (select models only)',
+        max: 'Maximum thinking budget (select models only)',
+      },
+    },
     modelName: 'Model Name',
     defaultTag: 'Default',
     addModelInSettings: 'Go to global settings to add models',
@@ -4585,6 +4627,53 @@ export default {
     selectModelPlaceholder: 'Select a model',
     searchPlaceholder: 'Search models...',
     editor: {
+      maxOutputTokensLabel: 'Max output tokens',
+      maxOutputTokensPlaceholder: 'Leave empty for the catalog default',
+      maxOutputTokensDesc: 'Output cap per response. Leave empty to use the catalog default for this model.',
+      catalog: {
+        reasoning: 'Reasoning',
+        vision: 'Vision',
+        hint: 'Pick a model from the vendor catalog or type a custom model name.',
+      },
+      resolved: {
+        title: 'How this model is called',
+        empty: 'Fill in the vendor and model name to see how this model will be called',
+        failed: 'Resolve failed',
+        protocol: 'Request protocol',
+        catalog: 'Capabilities from',
+        catalogedYes: 'Built-in model profile',
+        catalogedNo: 'Vendor defaults (model not in the catalog)',
+        endpoint: 'Request endpoint',
+        thinkingFormat: 'Thinking switch sent as',
+        thinkingLevels: 'Selectable effort',
+        noThinking: 'This model cannot think',
+      },
+      advanced: {
+        toggle: 'Advanced',
+        api: {
+          label: 'Protocol override',
+          auto: 'Auto (from vendor / URL)',
+          desc: 'Force a request protocol; normally unnecessary.',
+        },
+        remoteModelName: {
+          label: 'Remote model name',
+          placeholder: 'Leave empty to use the model name',
+          desc: 'Model id actually sent to the vendor when it differs from the name above.',
+        },
+        legacyThinking: {
+          label: 'Thinking parameter format (legacy)',
+          catalog: 'Follow catalog default (recommended)',
+          none: 'Do not send thinking fields',
+          desc: 'This model still carries a legacy thinking_control setting. Choose "Follow catalog default" to let the catalog decide.',
+        },
+        compat: {
+          label: 'Protocol compat override (JSON)',
+          placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
+          desc: 'Compat switches merged over the catalog defaults for the resolved protocol; see catalog/compat.go on the backend. Leave empty for no override.',
+          invalid: 'Invalid JSON',
+          mustBeObject: 'Must be a JSON object',
+        },
+      },
       addTitle: 'Add Model',
       editTitle: 'Edit Model',
       sectionType: 'Model Type',
@@ -4619,23 +4708,6 @@ export default {
       baseUrlPlaceholderAsr: 'e.g. https://api.openai.com/v1',
       apiKeyOptional: 'API Key (optional)',
       apiKeyPlaceholder: 'Enter API Key',
-      lkeap: {
-        secretIdLabel: 'SecretId',
-        secretIdPlaceholder: 'Tencent Cloud API SecretId',
-        secretKeyLabel: 'SecretKey',
-        secretKeyPlaceholder: 'Tencent Cloud API SecretKey',
-        regionLabel: 'Region',
-        regionPlaceholder: 'ap-guangzhou',
-        regionDesc: 'RunRerank supports ap-beijing, ap-guangzhou, etc. Default: ap-guangzhou',
-        rerankCredentialHint: 'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.'
-      },
-      volcengine: {
-        accessKeyLabel: 'Access Key ID',
-        accessKeyPlaceholder: 'Volcengine Access Key ID',
-        secretKeyLabel: 'Secret Access Key',
-        secretKeyPlaceholder: 'Volcengine Secret Access Key',
-        rerankCredentialHint: 'Rerank uses VikingDB AK/SK signing, not an Ark API key. Recommended model: doubao-seed-rerank.'
-      },
       customHeadersLabel: 'Custom Request Headers (optional)',
       customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored.',
       customHeadersAdd: 'Add Header',
@@ -4663,26 +4735,6 @@ export default {
       maxConcurrencyLabel: 'Background concurrency limit',
       maxConcurrencyPlaceholder: '0 = use global default',
       maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
-      thinkingControlLabel: 'Thinking mode request format',
-      thinkingControlDesc: 'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
-      thinkingControl: {
-        none: {
-          label: 'Do not send thinking fields',
-          hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)'
-        }
-      },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
       listRefreshed: 'List refreshed',
@@ -4704,6 +4756,7 @@ export default {
       ollamaNotSupportRerank: 'Ollama does not support ReRank models, please use a remote API instead',
       goToOllamaSettings: 'Open Settings',
       validation: {
+        extraFieldRequired: 'Please fill in {name}',
         modelNameRequired: 'Please enter the model name',
         modelNameEmpty: 'Model name cannot be empty',
         modelNameMax: 'Model name cannot exceed 100 characters',
@@ -4713,112 +4766,7 @@ export default {
       },
       providerLabel: 'Provider',
       providerPlaceholder: 'Select model provider',
-      providers: {
-        openai: {
-          label: 'OpenAI',
-          description: 'gpt-5.2, gpt-5-mini, etc.'
-        },
-        anthropic: {
-          label: 'Anthropic',
-          description: 'Claude models via native Anthropic Messages API'
-        },
-        azure_openai: {
-          label: 'Azure OpenAI',
-          description: 'OpenAI service hosted on Microsoft Azure'
-        },
-        aliyun: {
-          label: 'Aliyun DashScope',
-          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.'
-        },
-        zhipu: {
-          label: 'Zhipu BigModel',
-          description: 'glm-4.7, embedding-3, rerank, etc.'
-        },
-        openrouter: {
-          label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
-        },
-        litellm: {
-          label: 'LiteLLM',
-          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.). Replace the placeholder URL; loopback hosts need SSRF_WHITELIST.'
-        },
-        requesty: {
-          label: 'Requesty',
-          description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
-        },
-        generic: {
-          label: 'Custom (OpenAI-compatible)',
-          description: 'Generic API endpoint'
-        },
-        siliconflow: {
-          label: 'SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1, etc.'
-        },
-        jina: {
-          label: 'Jina',
-          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.'
-        },
-        volcengine: {
-          label: 'Volcengine',
-          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.'
-        },
-        deepseek: {
-          label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner, etc.'
-        },
-        hunyuan: {
-          label: 'Hunyuan',
-          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.'
-        },
-        minimax: {
-          label: 'MiniMax',
-          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.'
-        },
-        mimo: {
-          label: 'MiMo',
-          description: 'mimo-v2-flash'
-        },
-        gemini: {
-          label: 'Google Gemini',
-          description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.'
-        },
-        gpustack: {
-          label: 'GPUStack',
-          description: 'Choose your deployed model on GPUStack'
-        },
-        modelscope: {
-          label: 'ModelScope',
-          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.'
-        },
-        qiniu: {
-          label: 'Qiniu Cloud',
-          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.'
-        },
-        moonshot: {
-          label: 'Moonshot',
-          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.'
-        },
-        qianfan: {
-          label: 'Baidu Qianfan',
-          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.'
-        },
-        longcat: {
-          label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.'
-        },
-        lkeap: {
-          label: 'Tencent Cloud LKEAP',
-          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base, etc.'
-        },
-        nvidia: {
-          label: 'NVIDIA',
-          description: 'deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.'
-        },
-        novita: {
-          label: 'Novita AI',
-          description: 'moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b, etc.'
-        }
-      }
+      providerDocs: 'Read the {provider} model docs',
     },
     builtinTag: 'Built-in'
   },
@@ -5184,6 +5132,8 @@ export default {
       }
     },
     debug: {
+      reasoningEffort: 'Reasoning effort',
+      reasoningEffortDesc: 'Sends reasoning_effort using the levels reported by the model catalog',
       title: 'Model Test',
       description: 'Send a real request using saved model settings. Save pending edits before testing here.',
       groupModel: 'Select model',
@@ -5206,15 +5156,11 @@ export default {
       audioFile: 'Audio file',
       chooseFile: 'Choose file',
       parameters: 'Request parameters',
-      thinking: 'Thinking mode',
-      thinkingDesc: 'Only applies to models that support thinking',
       systemPrompt: 'System Prompt',
       systemPromptPlaceholder: 'Optional system prompt',
       run: 'Run test',
       copyResult: 'Copy result',
       history: 'History',
-      thinkOn: 'Thinking on',
-      thinkOff: 'Thinking off',
       runLabel: 'Run #{n}',
       success: 'Request succeeded',
       failed: 'Request failed',
@@ -5222,6 +5168,9 @@ export default {
       requestPreview: 'Request preview',
       requestFailed: 'Model test request failed',
       metrics: {
+        api: 'Protocol',
+        thinkingFormat: 'Thinking format',
+        requestedReasoningEffort: 'Requested effort',
         dimension: 'Dimensions',
         resultCount: 'Result count',
         answerChars: 'Answer chars',

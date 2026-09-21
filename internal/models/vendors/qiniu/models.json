@@ -1,0 +1,16 @@
+{
+  "vendor": "qiniu",
+  "source": "https://www.qiniu.com/ai/models",
+  "models": [
+    {"id": "qwen3.5-397b-a17b", "name": "Qwen3.5 397B-A17B", "reasoning": true, "input": ["text", "image"], "context_window": 256000, "max_output_tokens": 64000},
+    {"id": "z-ai/glm-5", "name": "GLM-5", "reasoning": true, "input": ["text"], "context_window": 200000, "max_output_tokens": 128000},
+    {"id": "z-ai/glm-4.7", "name": "GLM-4.7", "reasoning": true, "input": ["text"], "context_window": 200000, "max_output_tokens": 200000, "source": "https://api.qnaigc.com/v1/market/models"},
+    {"id": "minimax/minimax-m2.5", "name": "MiniMax M2.5", "reasoning": true, "input": ["text"], "context_window": 204800, "max_output_tokens": 128000},
+    {"id": "doubao-seed-2.0-pro", "name": "Doubao Seed 2.0 Pro", "reasoning": true, "input": ["text", "image", "video"], "context_window": 256000, "max_output_tokens": 128000},
+    {"id": "moonshotai/kimi-k2.5", "name": "Kimi K2.5", "reasoning": false, "input": ["text", "image", "video"], "context_window": 256000, "max_output_tokens": 256000},
+    {"id": "xiaomi/mimo-v2-flash", "name": "MiMo V2 Flash", "reasoning": true, "input": ["text"], "context_window": 256000, "max_output_tokens": 256000, "cost": {"input": 0.1, "output": 0.3, "cache_read": 0.01}},
+    {"id": "deepseek/deepseek-v3.2-251201", "name": "DeepSeek V3.2 (251201)", "reasoning": true, "input": ["text"], "context_window": 128000, "max_output_tokens": 32000, "source": "https://apidocs.qnaigc.com/397639742e0"},
+    {"id": "deepseek-r1", "name": "DeepSeek R1", "reasoning": true, "input": ["text"], "context_window": 128000, "max_output_tokens": 32000, "thinking_levels": {"off": null}, "source": "https://api.qnaigc.com/v1/market/models"},
+    {"id": "deepseek-v3", "name": "DeepSeek V3", "reasoning": false, "input": ["text"], "context_window": 128000, "max_output_tokens": 16000}
+  ]
+}

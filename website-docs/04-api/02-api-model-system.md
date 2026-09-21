@@ -10,13 +10,29 @@ API key：`manage_models` 或 full-access。
 
 ### GET /api/v1/models/providers
 
-用途：模型厂商列表。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`）。Handler: `internal/handler/model.go`
+用途：厂商目录（前端据此动态渲染厂商下拉、图标、额外字段与模型选择）。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`）。Handler: `internal/handler/model_catalog.go`
 
-响应：200 `{"success":true,"data":[{value,label,description,defaultUrls,modelTypes}]}`
+响应：200 `{"success":true,"data":[ModelProviderDTO]}`，每项：
+
+| 字段 | 说明 |
+| --- | --- |
+| `value` / `label` / `labels` / `description` / `descriptions` / `website` | 厂商 id、品牌名、按语言的名称与描述 |
+| `icon` | `data:image/svg+xml;base64,...`，可直接用于 `<img src>` |
+| `api` / `auth` / `requiresAuth` | 默认协议（`openai-completions` 等）、鉴权方式、是否需要密钥 |
+| `defaultUrls` / `modelTypes` | 按模型类型的默认地址与支持的类型 |
+| `extraFields` | 厂商额外配置字段定义（`key,label,type,required,default,options,model_types,secret`），值存入 `parameters.extra_config` |
+| `models` | 内置模型目录（`id,name,type,api,reasoning,input,context_window,max_output_tokens,dimension,thinking_levels,cost`） |
+| `thinking` | 厂商级思考编码摘要（`format`、`levels`） |
 
 ```bash
 curl "$BASE/api/v1/models/providers?model_type=chat" -H "Authorization: Bearer $TOKEN"
 ```
+
+### GET /api/v1/models/catalog/resolve
+
+用途：按厂商、模型名、`base_url` 与 `extra_config` 解析有效接入配置（协议、思考等级、上下文），供模型编辑器实时展示。权限：Viewer+。查询参数：`provider`（必填）、`model`、`base_url`、`model_type`、`api`、`thinking_control`、`remote_model_name`。
+
+响应：200 `{"success":true,"data":{provider,api,base_url,remote_model,cataloged,model,capabilities}}`，其中 `capabilities` 为 `{provider,api,cataloged,reasoning,thinking_levels,thinking_format,input,context_window,max_output_tokens,max_tokens_field}`。同一结构也随对话/视觉模型的 `ModelResponse.capabilities` 返回。
 
 ### POST /api/v1/models
 

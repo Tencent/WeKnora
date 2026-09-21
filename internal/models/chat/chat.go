@@ -1,119 +1,65 @@
+// Package chat exposes the Chat interface used by the application layer and
+// builds the right protocol client for a configured model. Every vendor fact
+// comes from internal/models/catalog; every wire protocol lives under
+// internal/models/api. This package only glues the two together and wraps
+// the client with debug / tracing / concurrency decorators.
 package chat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/api/anthropicmessages"
+	"github.com/Tencent/WeKnora/internal/models/api/googlegenai"
+	"github.com/Tencent/WeKnora/internal/models/api/openaicompletions"
+	"github.com/Tencent/WeKnora/internal/models/api/openairesponses"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	// Built-in vendors register with the catalog through package init; the
+	// chat factory is the one place that must never see an empty catalog.
+	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-// Tool represents a function/tool definition
-type Tool struct {
-	Type     string      `json:"type"` // "function"
-	Function FunctionDef `json:"function"`
-}
+// Message and the other aliases below re-export the request model defined
+// in internal/models/api so historical chat.* names keep working.
+//
+//nolint:revive // ChatOptions is the historical name every caller uses.
+type (
+	Message            = api.Message
+	MessageContentPart = api.MessageContentPart
+	ImageURL           = api.ImageURL
+	MessageKind        = api.MessageKind
+	ToolCall           = api.ToolCall
+	FunctionCall       = api.FunctionCall
+	Tool               = api.Tool
+	FunctionDef        = api.FunctionDef
+	ChatOptions        = api.Options
+	CacheRetention     = api.CacheRetention
+	ReasoningEffort    = api.ReasoningEffort
+)
 
-// FunctionDef represents a function definition
-type FunctionDef struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
-}
+// Re-exported constants of the request model.
+const (
+	MessageKindCompactionSummary = api.MessageKindCompactionSummary
+	CacheRetentionNone           = api.CacheRetentionNone
+	CacheRetentionShort          = api.CacheRetentionShort
+	CacheRetentionLong           = api.CacheRetentionLong
+)
 
-// ChatOptions 聊天选项
-type ChatOptions struct {
-	Temperature float64 `json:"temperature"` // 温度参数
-	TopP        float64 `json:"top_p"`       // Top P 参数
-	Seed        int     `json:"seed"`        // 随机种子
-	// MaxTokens and MaxCompletionTokens are aliases for one completion budget.
-	// Callers may set either; CompletionBudget() prefers MaxCompletionTokens.
-	// The outbound Chat Completions JSON carries exactly one of max_tokens or
-	// max_completion_tokens, chosen per provider (see wireCompletionTokenField).
-	MaxTokens           int             `json:"max_tokens"`
-	MaxCompletionTokens int             `json:"max_completion_tokens"`
-	FrequencyPenalty    float64         `json:"frequency_penalty"`             // 频率惩罚
-	PresencePenalty     float64         `json:"presence_penalty"`              // 存在惩罚
-	Thinking            *bool           `json:"thinking"`                      // 是否启用思考
-	Tools               []Tool          `json:"tools,omitempty"`               // 可用工具列表
-	ToolChoice          string          `json:"tool_choice,omitempty"`         // "auto", "required", "none", or specific tool
-	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用（默认 nil 表示由模型决定）
-	Format              json.RawMessage `json:"format,omitempty"`              // 响应格式定义
-	// PromptCacheKey is the provider routing key (OpenAI prompt_cache_key).
-	// Empty falls back to the session ID on the call context.
-	PromptCacheKey string `json:"-"`
-	// CacheRetention controls provider prompt-cache TTL. none disables cache
-	// markers; empty/short is the default 5-minute cache; long requests 1h/24h
-	// where the provider accepts it.
-	CacheRetention CacheRetention `json:"-"`
-}
+// SanitizeReasoningEffort is re-exported for the callers that build
+// ChatOptions from stored strings (agent config, session SummaryConfig).
+var SanitizeReasoningEffort = api.SanitizeReasoningEffort
 
-// MessageContentPart represents a part of multi-content message
-type MessageContentPart struct {
-	Type     string    `json:"type"`                // "text" or "image_url"
-	Text     string    `json:"text,omitempty"`      // For type="text"
-	ImageURL *ImageURL `json:"image_url,omitempty"` // For type="image_url"
-}
-
-// ImageURL represents the image URL structure
-type ImageURL struct {
-	URL    string `json:"url"`              // URL or base64 data URI
-	Detail string `json:"detail,omitempty"` // "auto", "low", "high"
-}
-
-// MessageKind marks messages the engine synthesized rather than received from
-// the user or the model. Compaction needs to tell its own summary apart from a
-// real user turn: a summary that looks like ordinary history gets fed back into
-// the next summarization pass and degrades into a summary of a summary.
-type MessageKind string
-
-// MessageKindCompactionSummary marks the message that replaces compacted
-// history. It carries the `user` role because that is where providers expect
-// conversation history, so the role alone cannot identify it.
-const MessageKindCompactionSummary MessageKind = "compaction_summary"
-
-// Message 表示聊天消息
-type Message struct {
-	Role         string               `json:"role"`                    // 角色：system, user, assistant, tool
-	Content      string               `json:"content"`                 // 消息内容
-	MultiContent []MessageContentPart `json:"multi_content,omitempty"` // 多内容消息（文本+图片）
-	Name         string               `json:"name,omitempty"`          // Function/tool name (for tool role)
-	ToolCallID   string               `json:"tool_call_id,omitempty"`  // Tool call ID (for tool role)
-	ToolCalls    []ToolCall           `json:"tool_calls,omitempty"`    // Tool calls (for assistant role)
-	Images       []string             `json:"images,omitempty"`        // Image URLs for multimodal (only for current user message)
-	// ReasoningContent 是 assistant 推理类模型（DeepSeek thinking、小米 MiMo、vLLM reasoning 等）
-	// 上一轮输出的思考内容。部分供应商（MiMo、DeepSeek V3.2/V4 thinking 模式）要求多轮对话中
-	// 把 assistant 的 reasoning_content 原样回传，否则会以 400 拒绝请求；其他不要求的供应商
-	// 会忽略未知字段，无副作用。
-	ReasoningContent string `json:"reasoning_content,omitempty"`
-	// Kind is engine-internal bookkeeping. `json:"-"` keeps it off the wire:
-	// providers reject unknown message fields on some endpoints, and this one
-	// means nothing to them anyway.
-	Kind MessageKind `json:"-"`
-	// TurnID is the stored assistant message whose turn this history message
-	// was replayed from. It is empty for the live turn and for messages the
-	// engine synthesized. Compaction uses it to tell whether a summary ends
-	// exactly on a stored turn, the only kind it can persist for later turns.
-	// Engine-internal like Kind, and kept off the wire for the same reason.
-	TurnID string `json:"-"`
-}
-
-// ToolCall represents a tool call in a message
-type ToolCall struct {
-	ID               string                 `json:"id"`
-	Type             string                 `json:"type"` // "function"
-	Function         FunctionCall           `json:"function"`
-	ProviderMetadata types.ToolCallMetadata `json:"provider_metadata,omitempty"`
-}
-
-// FunctionCall represents a function call
-type FunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"` // JSON string
-}
+// Prompt-cache helpers re-exported for the application layer.
+var (
+	FingerprintPromptPrefix = api.FingerprintPromptPrefix
+	PromptPrefixFingerprint = api.PromptPrefixFingerprint
+	BuildPromptCacheKey     = api.BuildPromptCacheKey
+)
 
 // Chat 定义了聊天接口
 type Chat interface {
@@ -130,6 +76,7 @@ type Chat interface {
 	GetModelID() string
 }
 
+// ChatConfig is the operator-facing configuration of one chat model.
 type ChatConfig struct {
 	Source    types.ModelSource
 	BaseURL   string
@@ -141,15 +88,17 @@ type ChatConfig struct {
 	// back to the process-wide default (see limiter.GateN).
 	MaxConcurrency int
 	ExtraConfig    map[string]string
-	// CustomHeaders 允许在调用远程 OpenAI 兼容 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
 	AppID         string
-	AppSecret     string // 加密值，由工厂函数调用方传入，在 NewWeKnoraCloudChat 中使用前已解密
+	AppSecret     string // 加密值，由工厂函数调用方传入，在使用前已解密
+	// Spec carries per-row catalog overrides (protocol, compat, levels).
+	Spec *types.ModelSpecOverride
 }
 
 // ConfigFromModel 根据 types.Model 构造 ChatConfig。
 // 保证生产路径（service 层根据 DB 中的模型配置拉起实例）和测试路径
-// （handler 层根据前端表单临时拉起实例）走完全相同的字段映射，避免重复样板。
+// （handler 层根据前端表单临时拉起实例）走完全相同的字段映射。
 // appID / appSecret 是已经解密/解析好的 WeKnoraCloud 凭证，调用方负责传入。
 func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 	if m == nil {
@@ -167,6 +116,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 		CustomHeaders:  m.Parameters.CustomHeaders,
 		AppID:          appID,
 		AppSecret:      appSecret,
+		Spec:           m.Parameters.Spec,
 	}
 }
 
@@ -189,16 +139,122 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	return wrapChatConcurrency(c, config.MaxConcurrency, err)
 }
 
-// NewRemoteChat 根据 provider 创建远程聊天实例。
-// Anthropic 走独立的 Messages 协议实现；其余 OpenAI 兼容供应商统一由
-// RemoteAPIChat 处理，provider 特定行为在构造时通过 providerAdapter 解析。
+// Resolve looks the configuration up in the catalog. It is exposed so the
+// handler layer can report the effective protocol and capabilities.
+func Resolve(config *ChatConfig) (*catalog.Resolved, error) {
+	if config == nil {
+		return nil, fmt.Errorf("chat config is nil")
+	}
+	return catalog.Resolve(catalog.Ref{
+		Provider:  config.Provider,
+		Model:     config.ModelName,
+		BaseURL:   config.BaseURL,
+		ModelType: types.ModelTypeKnowledgeQA,
+		Extra:     config.ExtraConfig,
+		Override:  config.Spec,
+	})
+}
+
+// EffectiveThinkingControl reports how the resolved model encodes thinking
+// ("none" when it cannot be asked to think). Kept for the model debug view.
+func EffectiveThinkingControl(config *ChatConfig) string {
+	resolved, err := Resolve(config)
+	if err != nil {
+		return "none"
+	}
+	caps := resolved.Capabilities()
+	if len(caps.ThinkingLevels) == 0 {
+		return "none"
+	}
+	return caps.ThinkingFormat
+}
+
+// NewRemoteChat builds the protocol client for a remote model.
 func NewRemoteChat(config *ChatConfig) (Chat, error) {
-	providerName := provider.ProviderName(config.Provider)
-	if providerName == "" {
-		providerName = provider.DetectProvider(config.BaseURL)
+	resolved, err := Resolve(config)
+	if err != nil {
+		return nil, err
 	}
-	if providerName == provider.ProviderAnthropic {
-		return NewAnthropicChat(config)
+	vendor := resolved.Vendor
+	if resolved.BaseURL != "" {
+		if err := secutils.ValidateURLForSSRF(resolved.BaseURL); err != nil {
+			return nil, fmt.Errorf("baseURL SSRF check failed: %w", err)
+		}
 	}
-	return NewRemoteAPIChat(config)
+
+	creds := catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret}
+	if creds.APIKey == "" {
+		creds.APIKey = vendor.DefaultAPIKey
+	}
+	if vendor.Auth == catalog.AuthSigned {
+		if creds.AppID == "" {
+			return nil, fmt.Errorf("%s provider: AppID is required", vendor.Name)
+		}
+		if creds.AppSecret == "" {
+			return nil, fmt.Errorf("%s provider: AppSecret is required", vendor.Name)
+		}
+	} else if vendor.RequiresAuth && resolved.API == api.APIAnthropicMessages && strings.TrimSpace(creds.APIKey) == "" {
+		return nil, fmt.Errorf("%s provider: API key is required", vendor.Name)
+	}
+
+	headers := make(map[string]string, len(vendor.Headers)+len(config.CustomHeaders))
+	for k, v := range vendor.Headers {
+		headers[k] = v
+	}
+	for k, v := range config.CustomHeaders {
+		headers[k] = v
+	}
+	endpoint := api.Endpoint{
+		BaseURL: resolved.BaseURL,
+		Model:   resolved.RemoteModel,
+		ModelID: config.ModelID,
+		Auth:    vendor.AuthFunc(resolved.API, creds),
+		Headers: headers,
+	}
+	if vendor.Endpoint != nil {
+		url, query := vendor.Endpoint(catalog.EndpointRequest{
+			BaseURL:   resolved.BaseURL,
+			Model:     resolved.RemoteModel,
+			ModelType: types.ModelTypeKnowledgeQA,
+			API:       resolved.API,
+			Extra:     config.ExtraConfig,
+		})
+		if url != "" {
+			endpoint.URL = url
+			endpoint.Query = query
+		}
+	}
+
+	switch resolved.API {
+	case api.APIOpenAICompletions:
+		return openaicompletions.New(openaicompletions.Config{
+			Endpoint:       endpoint,
+			Settings:       resolved.OpenAICompletions,
+			ThinkingLevels: resolved.ThinkingLevels,
+			Reasoning:      resolved.Spec.Reasoning,
+		}), nil
+	case api.APIOpenAIResponses:
+		return openairesponses.New(openairesponses.Config{
+			Endpoint:       endpoint,
+			Settings:       resolved.OpenAIResponses,
+			ThinkingLevels: resolved.ThinkingLevels,
+			Reasoning:      resolved.Spec.Reasoning,
+		}), nil
+	case api.APIAnthropicMessages:
+		return anthropicmessages.New(anthropicmessages.Config{
+			Endpoint:       endpoint,
+			Settings:       resolved.AnthropicMessages,
+			ThinkingLevels: resolved.ThinkingLevels,
+			Reasoning:      resolved.Spec.Reasoning,
+		}), nil
+	case api.APIGoogleGenerativeAI:
+		return googlegenai.New(googlegenai.Config{
+			Endpoint:       endpoint,
+			Settings:       resolved.GoogleGenerativeAI,
+			ThinkingLevels: resolved.ThinkingLevels,
+			Reasoning:      resolved.Spec.Reasoning,
+		}), nil
+	default:
+		return nil, fmt.Errorf("unsupported chat api %q for provider %s", resolved.API, vendor.ID)
+	}
 }

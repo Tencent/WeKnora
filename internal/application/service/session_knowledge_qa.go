@@ -33,6 +33,24 @@ func (s *sessionService) KnowledgeQA(
 		req.Query,
 		webSearchEnabled,
 	)
+	// IM/MCP call KnowledgeQA without executeQA's send-side lease, so hold one
+	// for the pipeline. HTTP send already took it before persisting the turn
+	// and says so on the request; taking a second would double every rewind
+	// check and lease round trip on the hot send path.
+	if !req.TurnLeaseHeld {
+		if err := s.RejectSendIfRewinding(ctx, req.Session.ID); err != nil {
+			return err
+		}
+		configID := ""
+		if req.CustomAgent != nil {
+			configID = req.CustomAgent.Config.SandboxConfigID
+		}
+		releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
+		if holdErr != nil {
+			return holdErr
+		}
+		defer releaseTurn()
+	}
 
 	// Span the request setup (KB / model resolution, search target building,
 	// agent override application). This covers the visible gap between trace

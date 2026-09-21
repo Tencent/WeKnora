@@ -153,6 +153,16 @@ test('after the turn ends an unresolved reference says so instead of hanging', (
   assert.ok(!html?.includes('role="button"'))
 })
 
+test('an empty image destination is skipped instead of rendering a broken img', () => {
+  const html = renderArtifactReference({
+    href: '',
+    alt: '根目录示例文件',
+    artifacts: [],
+    labels,
+  })
+  assert.equal(html, '')
+})
+
 test('file names with spaces and parentheses resolve end to end', () => {
   const raw = '![成交量](sandbox:腾讯控股(00700) 成交量_838ccc.html)'
   const normalized = normalizeSandboxArtifactRefs(raw)

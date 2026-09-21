@@ -240,16 +240,19 @@ func (s *SessionForkService) Fork(
 	}
 
 	newSession := &types.Session{
-		ID:                  uuid.New().String(),
-		TenantID:            source.TenantID,
-		UserID:              source.UserID,
-		Title:               forkTitle(title, source.Title),
-		Description:         source.Description,
-		LastRequestState:    source.LastRequestState,
-		SandboxConfigID:     source.SandboxConfigID,
-		ParentSessionID:     source.ID,
-		ForkedFromMessageID: forkPoint.ID,
-		ForkBootstrap:       bootstrap,
+		ID:               uuid.New().String(),
+		TenantID:         source.TenantID,
+		UserID:           source.UserID,
+		Title:            forkTitle(title, source.Title),
+		Description:      source.Description,
+		LastRequestState: source.LastRequestState,
+		SandboxConfigID:  source.SandboxConfigID,
+		// The owner travels with the config id, or the branch would inherit a
+		// pin that resolves nowhere the moment the source ran a shared agent.
+		SandboxConfigTenantID: source.SandboxConfigTenantID,
+		ParentSessionID:       source.ID,
+		ForkedFromMessageID:   forkPoint.ID,
+		ForkBootstrap:         bootstrap,
 	}
 
 	copied := copyMessagesInto(newSession.ID, history)
@@ -352,8 +355,11 @@ func (s *SessionForkService) recordSnapshotLease(
 		return nil
 	}
 	lease := &types.ForkSnapshotLease{
-		SnapshotID:      bootstrap.SnapshotID,
-		TenantID:        source.TenantID,
+		SnapshotID: bootstrap.SnapshotID,
+		// The reaper resolves (TenantID, SandboxConfigID) as a pair, so this
+		// must be the workspace that owns the config — the lending one when
+		// the snapshot was taken on a shared agent's sandbox.
+		TenantID:        source.SandboxConfigOwner(),
 		SandboxConfigID: source.SandboxConfigID,
 		CreatedAt:       time.Now().UTC(),
 	}
@@ -436,6 +442,23 @@ func latestCheckpoint(history []*types.Message) *types.SandboxCheckpoint {
 			continue
 		}
 		return history[i].SandboxCheckpoint
+	}
+	return nil
+}
+
+// latestReachableCheckpoint walks kept assistant messages until it finds one
+// with a non-empty commit SHA. Rewind uses this so a failed last-turn
+// checkpoint does not skip an earlier SHA that can still reset the workspace.
+func latestReachableCheckpoint(history []*types.Message) *types.SandboxCheckpoint {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i] == nil || history[i].Role != "assistant" {
+			continue
+		}
+		cp := history[i].SandboxCheckpoint
+		if cp == nil || strings.TrimSpace(cp.CommitSHA) == "" {
+			continue
+		}
+		return cp
 	}
 	return nil
 }

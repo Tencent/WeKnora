@@ -894,6 +894,8 @@ func (e *AgentEngine) runReActIteration(
 		Iteration:          state.CurrentRound,
 		Thought:            response.Content,
 		ReasoningContent:   response.ReasoningContent,
+		ReasoningSignature: response.ReasoningSignature,
+		ReasoningMetadata:  response.ReasoningMetadata,
 		ToolCalls:          make([]types.ToolCall, 0),
 		Timestamp:          time.Now(),
 	}
@@ -978,9 +980,11 @@ func (e *AgentEngine) runReActIteration(
 			canContinue := e.withinIterationBudget(nextRound) || e.steerOverruns < maxSteerOverruns
 			if canContinue {
 				*messagesPtr = append(*messagesPtr, chat.Message{
-					Role:             "assistant",
-					Content:          verdict.finalAnswer,
-					ReasoningContent: response.ReasoningContent,
+					Role:               "assistant",
+					Content:            verdict.finalAnswer,
+					ReasoningContent:   response.ReasoningContent,
+					ReasoningSignature: response.ReasoningSignature,
+					ReasoningMetadata:  response.ReasoningMetadata,
 				})
 				injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
 				if injected > 0 {

@@ -1,0 +1,17 @@
+{
+  "vendor": "modelscope",
+  "source": "https://modelscope.cn/docs/model-service/API-Inference/intro",
+  "models": [
+    {"id": "ZhipuAI/GLM-4.6", "name": "GLM-4.6", "reasoning": true, "input": ["text"], "context_window": 202752, "max_output_tokens": 98304, "cost": {"input": 0, "output": 0}, "source": "https://modelscope.cn/models/ZhipuAI/GLM-4.6"},
+    {"id": "ZhipuAI/GLM-4.5", "name": "GLM-4.5", "reasoning": true, "input": ["text"], "context_window": 131072, "max_output_tokens": 98304, "cost": {"input": 0, "output": 0}, "source": "https://modelscope.cn/models/ZhipuAI/GLM-4.5"},
+    {"id": "Qwen/Qwen3-235B-A22B-Instruct-2507", "name": "Qwen3 235B-A22B Instruct 2507", "reasoning": false, "input": ["text"], "context_window": 262144, "max_output_tokens": 131072, "cost": {"input": 0, "output": 0}, "source": "https://modelscope.cn/models/Qwen/Qwen3-235B-A22B-Instruct-2507"},
+    {"id": "Qwen/Qwen3-235B-A22B-Thinking-2507", "name": "Qwen3 235B-A22B Thinking 2507", "reasoning": true, "input": ["text"], "context_window": 262144, "max_output_tokens": 131072, "cost": {"input": 0, "output": 0}, "thinking_levels": {"off": null}, "source": "https://modelscope.cn/models/Qwen/Qwen3-235B-A22B-Thinking-2507"},
+    {"id": "Qwen/Qwen3-30B-A3B-Instruct-2507", "name": "Qwen3 30B-A3B Instruct 2507", "reasoning": false, "input": ["text"], "context_window": 262144, "max_output_tokens": 16384, "cost": {"input": 0, "output": 0}, "source": "https://modelscope.cn/models/Qwen/Qwen3-30B-A3B-Instruct-2507"},
+    {"id": "Qwen/Qwen3-30B-A3B-Thinking-2507", "name": "Qwen3 30B-A3B Thinking 2507", "reasoning": true, "input": ["text"], "context_window": 262144, "max_output_tokens": 32768, "cost": {"input": 0, "output": 0}, "thinking_levels": {"off": null}, "source": "https://modelscope.cn/models/Qwen/Qwen3-30B-A3B-Thinking-2507"},
+    {"id": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "name": "Qwen3 Coder 30B-A3B Instruct", "reasoning": false, "input": ["text"], "context_window": 262144, "max_output_tokens": 65536, "cost": {"input": 0, "output": 0}, "source": "https://modelscope.cn/models/Qwen/Qwen3-Coder-30B-A3B-Instruct"},
+    {"id": "Qwen/Qwen3-8B", "name": "Qwen3 8B (hybrid thinking)", "reasoning": true, "input": ["text"], "context_window": 131072, "max_output_tokens": 32768, "cost": {"input": 0, "output": 0}, "source": "https://modelscope.cn/models/Qwen/Qwen3-8B"},
+    {"id": "Qwen/Qwen3-VL-235B-A22B-Instruct", "name": "Qwen3 VL 235B-A22B Instruct", "reasoning": false, "input": ["text", "image"], "context_window": 262144, "max_output_tokens": 32768, "cost": {"input": 0, "output": 0}, "source": "https://modelscope.cn/models/Qwen/Qwen3-VL-235B-A22B-Instruct"},
+    {"id": "Qwen/Qwen3-Embedding-8B", "name": "Qwen3 Embedding 8B", "type": "Embedding", "dimension": 4096, "source": "https://modelscope.cn/models/Qwen/Qwen3-Embedding-8B"},
+    {"id": "Qwen/Qwen3-Embedding-0.6B", "name": "Qwen3 Embedding 0.6B", "type": "Embedding", "dimension": 1024, "source": "https://modelscope.cn/models/Qwen/Qwen3-Embedding-0.6B"}
+  ]
+}

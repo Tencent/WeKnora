@@ -14,7 +14,7 @@ import (
 // owns a session's binding. *SessionSandboxPinner is the production
 // implementation; tests use a stub so this does not need a database.
 type sessionSandboxPinReader interface {
-	Read(ctx context.Context, sessionID string) (string, error)
+	Read(ctx context.Context, sessionID string) (SandboxPin, error)
 }
 
 // PinnedSessionSandbox resolves the session's pinned sandbox manager at
@@ -49,13 +49,17 @@ func (a *PinnedSessionSandbox) manager(ctx context.Context, sessionID string) sa
 	if a.pinner == nil {
 		return nil
 	}
-	configID, err := a.pinner.Read(ctx, sessionID)
-	if err != nil || strings.TrimSpace(configID) == "" {
+	pin, err := a.pinner.Read(ctx, sessionID)
+	if err != nil || pin.IsZero() {
 		return nil
 	}
-	tenantID, _ := types.TenantIDFromContext(ctx)
+	// The workspace comes from the pin, not the request. Fork runs from a plain
+	// POST as the session owner, while a shared agent's sandbox lives on the
+	// lending workspace's config — reading it as the session owner found
+	// nothing and silently degraded the fork to SNAPSHOT_UNSUPPORTED.
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
 	mgr, err := resolveTenantSandboxForConfig(
-		ctx, a.resolver, a.fallback, tenantID, configID, nil,
+		ctx, a.resolver, a.fallback, pin.TenantOr(sessionTenantID), pin.ConfigID, nil,
 	)
 	if err != nil {
 		return nil
@@ -118,6 +122,32 @@ func (a *PinnedSessionSandbox) HasActiveTurn(ctx context.Context, sessionID stri
 	return false, nil
 }
 
+// TryLockRewind takes an exclusive rewind lock through the session's pinned
+// manager. Managers that do not expose the method succeed as a no-op.
+func (a *PinnedSessionSandbox) TryLockRewind(ctx context.Context, sessionID string) (func(), error) {
+	mgr := a.manager(ctx, sessionID)
+	type locker interface {
+		TryLockRewind(context.Context, string) (func(), error)
+	}
+	if l, ok := mgr.(locker); ok {
+		return l.TryLockRewind(ctx, sessionID)
+	}
+	return func() {}, nil
+}
+
+// HasRewindLock reports whether rewind currently holds the session on the
+// pinned manager. Managers that do not expose the method are treated as free.
+func (a *PinnedSessionSandbox) HasRewindLock(ctx context.Context, sessionID string) (bool, error) {
+	mgr := a.manager(ctx, sessionID)
+	type rewindLockReader interface {
+		HasRewindLock(context.Context, string) (bool, error)
+	}
+	if reader, ok := mgr.(rewindLockReader); ok {
+		return reader.HasRewindLock(ctx, sessionID)
+	}
+	return false, nil
+}
+
 // CreateForkSnapshot snapshots the session's already-bound sandbox through the
 // pinned manager. Managers that do not expose the method return an error so
 // fork can degrade to SNAPSHOT_UNSUPPORTED.
@@ -160,4 +190,8 @@ var _ SandboxShellRunner = (*PinnedSessionSandbox)(nil)
 
 var _ SessionForkSandboxPort = (*PinnedSessionSandbox)(nil)
 
+var _ SessionRewindSandboxPort = (*PinnedSessionSandbox)(nil)
+
 var _ SessionForkSandboxPort = (*sandbox.SessionBoundManager)(nil)
+
+var _ SessionRewindSandboxPort = (*sandbox.SessionBoundManager)(nil)

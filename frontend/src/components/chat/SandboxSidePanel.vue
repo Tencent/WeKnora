@@ -1,13 +1,13 @@
 <template>
-  <Transition name="sandbox-panel">
-    <aside
-      v-if="panel?.visible.value"
-      class="chat-sandbox-panel"
-      :class="{ 'is-shifted': shifted, 'is-resizing': resizing }"
-      :style="{ width: `${panel?.width.value ?? 420}px` }"
-      role="complementary"
-      :aria-label="t('chat.sandbox.panelTitle')"
-    >
+  <Transition name="sandbox-panel" :duration="{ enter: 240, leave: 300 }">
+    <div v-if="panel?.visible.value" class="chat-sandbox-panel-clip">
+      <aside
+        class="chat-sandbox-panel"
+        :class="{ 'is-shifted': shifted, 'is-resizing': resizing }"
+        :style="{ width: `${panel?.width.value ?? 420}px` }"
+        role="complementary"
+        :aria-label="t('chat.sandbox.panelTitle')"
+      >
       <!-- 左缘拖拽把手：按住向左/右拖动调整面板宽度。 -->
       <PanelResizeHandle edge="left" :label="t('knowledgeStages.resizeDrawer')"
         :value="panel.width.value" :min="SANDBOX_PANEL_MIN_WIDTH" :max="SANDBOX_PANEL_MAX_WIDTH"
@@ -89,6 +89,7 @@
         </div>
       </div>
     </aside>
+    </div>
   </Transition>
 </template>
 
@@ -238,14 +239,22 @@ function resizePanel(delta: number) {
 </script>
 
 <style scoped lang="less">
-.chat-sandbox-panel {
+.chat-sandbox-panel-clip {
   position: fixed;
+  inset: 0;
+  z-index: 1201;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.chat-sandbox-panel {
+  pointer-events: auto;
+  position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   width: min(420px, 100vw);
   max-width: 100vw;
-  z-index: 1201;
   display: flex;
   flex-direction: column;
   background: var(--td-bg-color-container);
@@ -390,20 +399,20 @@ function resizePanel(delta: number) {
   }
 }
 
-.sandbox-panel-enter-active {
+.sandbox-panel-enter-active .chat-sandbox-panel {
   transition:
     transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
     opacity 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.sandbox-panel-leave-active {
+.sandbox-panel-leave-active .chat-sandbox-panel {
   transition:
     transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1),
     opacity 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.sandbox-panel-enter-from,
-.sandbox-panel-leave-to {
+.sandbox-panel-enter-from .chat-sandbox-panel,
+.sandbox-panel-leave-to .chat-sandbox-panel {
   transform: translateX(100%);
   opacity: 0.6;
 }

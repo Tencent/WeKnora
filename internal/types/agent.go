@@ -131,6 +131,8 @@ type AgentConfig struct {
 	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
+	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// Whether final answers include knowledge/web source citations. Nil defaults to true.
 	CitationEnabled *bool `json:"citation_enabled"`
 	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)
@@ -441,9 +443,14 @@ type AgentStep struct {
 	// model in this round. Persisted on AgentStep so cross-turn replay can put it
 	// back on the assistant message — required by MiMo / DeepSeek V3.2+ thinking
 	// mode, ignored by providers that don't recognize the field.
-	ReasoningContent string     `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls"` // Tools called in this step (Act phase)
-	Timestamp        time.Time  `json:"timestamp"`  // When this step occurred
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// ReasoningSignature / ReasoningMetadata are the provider artifacts that
+	// must accompany ReasoningContent on replay (Anthropic signatures,
+	// OpenAI Responses encrypted reasoning items).
+	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
+	ReasoningMetadata  ProviderMetadata `json:"reasoning_metadata,omitempty"`
+	ToolCalls          []ToolCall       `json:"tool_calls"` // Tools called in this step (Act phase)
+	Timestamp          time.Time        `json:"timestamp"`  // When this step occurred
 	// Truncated marks the round the completion-token cap cut off. It rides in
 	// the agent_steps JSON so a reloaded, shared or re-opened conversation can
 	// still show that the answer stops mid-sentence by design, rather than
