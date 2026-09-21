@@ -554,7 +554,7 @@ func (e *AgentEngine) runToolCall(
 		// 现阶段只有 observe 语义——任何 verdict 只记录不拦截；enforce
 		// 接线属于后续 ticket。nil Gate 时此调用完全跳过，行为零变化。
 		if e.intentGate != nil {
-			e.evaluateIntentGate(toolCtx, tc, target, toolSpan, sessionID)
+			e.evaluateIntentGate(toolCtx, tc, target, toolSpan, sessionID, assistantMessageID)
 		}
 		execCtx, toolCancel := context.WithTimeout(toolExecCtx, execTimeout)
 		result, err = e.toolRegistry.ExecuteTool(
@@ -652,7 +652,7 @@ func intentVerdictSpanMetadata(v intentgate.Verdict, latencyMs int64) map[string
 // 只填执行点本地可得的字段。
 func (e *AgentEngine) evaluateIntentGate(
 	ctx context.Context, tc types.LLMToolCall, target *types.ToolCallTarget,
-	toolSpan *langfuse.Span, sessionID string,
+	toolSpan *langfuse.Span, sessionID, assistantMessageID string,
 ) {
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	principal, _ := types.PrincipalFromContext(ctx)
@@ -688,4 +688,45 @@ func (e *AgentEngine) evaluateIntentGate(
 		"tenant_id":    tenantID,
 		"reason":       verdict.Reason,
 	}), "[Agent][IntentGate] verdict")
+	// 异步落库（设计 §7 verdicts 字段）：Write 非阻塞且 fail-open，
+	// 落库失败/队列满只影响观测数据，绝不影响本次工具调用。
+	if e.intentVerdictWriter != nil {
+		if rec, err := intentVerdictRecord(tenantID, sessionID, assistantMessageID, tc, verdict, latencyMs); err != nil {
+			logger.Warnf(ctx, "[Agent][IntentGate] build verdict record failed (skip persist): %v", err)
+		} else {
+			e.intentVerdictWriter.Write(rec)
+		}
+	}
+}
+
+// intentVerdictRecord 把一次判定整形为 intent_verdicts 表的一行
+// （设计 §6.2）。两个映射约定：
+//   - Layer 为空（无策略命中的 allow，如 spike 全规则未命中）落为
+//     baseline——设计 §6.2：policy_id NULL = 兜底判定；
+//   - ModeAtDecision 恒为 observe：spike 阶段没有策略表，一切判定都是
+//     observe 语义；enforce 接线（T40）落地后由策略 mode 填充。
+//
+// 原始参数只用于计算 args_digest，不落库（types.NewVerdictRecord 保证）。
+func intentVerdictRecord(
+	tenantID uint64, sessionID, assistantMessageID string,
+	tc types.LLMToolCall, v intentgate.Verdict, latencyMs int64,
+) (*types.VerdictRecord, error) {
+	layer := string(v.Layer)
+	if layer == "" {
+		layer = types.VerdictLayerBaseline
+	}
+	return types.NewVerdictRecord(types.VerdictRecordInput{
+		TenantID:           tenantID,
+		SessionID:          sessionID,
+		AssistantMessageID: assistantMessageID,
+		ToolCallID:         tc.ID,
+		PolicyID:           v.PolicyID,
+		ToolName:           tc.Function.Name,
+		Args:               json.RawMessage(tc.Function.Arguments),
+		Layer:              layer,
+		Verdict:            string(v.Action),
+		Reason:             v.Reason,
+		ModeAtDecision:     types.VerdictModeObserve,
+		LatencyMs:          int(latencyMs),
+	})
 }

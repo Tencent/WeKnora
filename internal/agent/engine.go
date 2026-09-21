@@ -83,6 +83,10 @@ type AgentEngine struct {
 	// (IntentGate 语义门禁层, see docs/plans/2026-09-21-intent-gate-design.md).
 	// nil (the default) keeps the pre-IntentGate behavior exactly.
 	intentGate intentgate.Gate
+	// intentVerdictWriter 是 verdict 的异步落库接缝（设计 §7 verdicts 字段、
+	// §6.2 intent_verdicts 表）。nil（默认）只记 Langfuse span + 结构化日志，
+	// 不落库。写入必须非阻塞：它是观测面，不是判定链路的一部分。
+	intentVerdictWriter intentgate.VerdictWriter
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -152,6 +156,13 @@ func (e *AgentEngine) SetQuestionOrigin(origin *QuestionOriginInfo) {
 // identical to a build without IntentGate.
 func (e *AgentEngine) SetIntentGate(g intentgate.Gate) {
 	e.intentGate = g
+}
+
+// SetIntentVerdictWriter 安装 verdict 的异步落库写入端（T11）。nil
+// （默认）时 verdict 只进 Langfuse span metadata 与结构化日志，不落库。
+// 写入端必须非阻塞且 fail-open（见 intentgate.AsyncVerdictWriter）。
+func (e *AgentEngine) SetIntentVerdictWriter(w intentgate.VerdictWriter) {
+	e.intentVerdictWriter = w
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
