@@ -140,6 +140,12 @@ export default {
     total: '{count} 件のファイル',
     versions: '{count} バージョン',
     preview: 'プレビュー',
+    delete: '削除',
+    deleteTitle: 'このファイルを削除しますか？',
+    deleteConfirm: '「{name}」と保存されている内容を完全に削除します。元に戻せません。',
+    deleteConfirmVersions: '「{name}」の全 {count} バージョンと保存されている内容を完全に削除します。元に戻せません。',
+    deleted: 'ファイルを削除しました',
+    deleteFailed: '削除に失敗しました。再試行してください。',
     download: 'ダウンロード',
     downloadFailed: 'ダウンロードに失敗しました。しばらくしてから再試行してください',
     openSession: '会話を開く',
@@ -892,6 +898,15 @@ export default {
     },
     attempt: '{n}回目の試行',
     retry: '再解析',
+    notRun: '未実行',
+    stageFailed: '{stage}が失敗しました',
+    copyError: 'エラー情報をコピー',
+    stat: {
+      duration: '所要時間',
+      attempt: '試行',
+      tasks: 'バックグラウンドタスク',
+      tasksValue: '実行中 {running} · 失敗 {failed} · 完了 {completed}'
+    },
     refresh: '今すぐ更新',
     copy: 'コピー',
     copyDetails: '詳細をコピー',
@@ -911,12 +926,9 @@ export default {
     minutesAgo: '{n}分前',
     noActivity: '解析の記録はまだありません',
     totalDuration: '合計: {d}',
-    total: '合計{d}',
     head: {
       stagesDone: '主要ステージ',
       stagesProgress: '現在のステージ',
-      postprocessTasks: '後処理: 実行中{running}件／失敗{failed}件／完了{completed}件',
-      completedWithActiveTrace: '処理は完了しましたが、{n}件のトレースタスクがまだ実行中です',
       attempt: '試行',
       updated: '更新'
     },
@@ -984,10 +996,16 @@ export default {
       preview: 'プレビュー',
       previewBack: '一覧に戻る',
       collecting: '生成されたファイルを保存中…',
+      delete: '削除',
+      deleteTitle: 'このファイルを削除しますか？',
+      deleteConfirm: '「{name}」と保存されている内容を完全に削除します。元に戻せません。',
+      deleted: 'ファイルを削除しました',
+      deleteFailed: '削除に失敗しました。再試行してください。',
       download: 'ダウンロード',
       downloadFailed: 'ダウンロードに失敗しました。再試行してください。',
       inlinePreviewHint: 'クリックしてプレビュー',
       inlineMissing: 'ファイルを利用できません',
+      inlineDeleted: 'ファイルは削除されました',
     },
     updatePlan: 'プランを更新',
     webSearchFound: 'Web検索結果を<strong>{count}</strong>件見つけました',
@@ -1096,6 +1114,8 @@ export default {
       enabled: 'エージェントを有効化しました'
     },
     editor: {
+      reasoningEffortUnsupported: '選択中のモデルは思考に対応していません。「オフ」以外は無視されます。',
+      reasoningEffortAlwaysOn: '選択中のモデルは常に思考します。オフにはできず、強度のみ調整できます。',
       createTitle: 'エージェントを作成',
       editTitle: 'エージェントを編集',
       buttons: {
@@ -2465,6 +2485,8 @@ export default {
       discard: '変更を破棄',
       keepEditing: '編集を続ける',
     },
+    fullscreen: '全画面',
+    exitFullscreen: '全画面を終了',
     save: '保存',
     delete: '削除',
     edit: '編集',
@@ -2567,11 +2589,21 @@ export default {
       link: 'リンクを挿入',
       image: '画像を挿入',
       table: '表を挿入',
-      horizontalRule: '水平線'
+      horizontalRule: '水平線',
+      headingGroup: '見出し',
+      insertGroup: '挿入'
+    },
+    shortcuts: {
+      title: 'ショートカット',
+      continueList: 'リストを続ける',
+      indent: 'インデント / Shift+Tab で解除'
     },
     view: {
-      editLabel: '編集に戻る',
-      previewLabel: '内容をプレビュー'
+      edit: '編集',
+      split: '分割',
+      preview: 'プレビュー',
+      splitUnavailable: '幅が足りません。ドロワーを広げるか全画面にすると分割できます',
+      groupLabel: 'エディタ表示'
     },
     preview: {
       empty: 'まだ内容がありません'
@@ -2580,9 +2612,7 @@ export default {
       edit: 'Markdownナレッジを編集',
       create: 'Markdownナレッジを作成'
     },
-    description: 'Markdownでナレッジを記述し、リアルタイムでプレビューできます',
     section: {
-      basic: '基本情報',
       content: '内容'
     },
     labels: {
@@ -2604,9 +2634,9 @@ export default {
       published: 'ナレッジを公開し、インデックス作成を開始しました'
     },
     form: {
-      knowledgeBaseLabel: '対象のナレッジベース',
       knowledgeBasePlaceholder: 'ナレッジベースを選択',
       titleLabel: 'ナレッジのタイトル',
+      knowledgeBaseLabel: '対象のナレッジベース',
       titlePlaceholder: 'タイトルを入力',
       contentPlaceholder: 'Markdownに対応しています。#見出し、リスト、コードブロックなどが使えます。'
     },
@@ -2614,7 +2644,8 @@ export default {
     status: {
       draftTag: 'ステータス: 下書き',
       publishedTag: 'ステータス: 公開済み',
-      lastUpdated: '最終更新: {time}'
+      lastUpdated: '最終更新: {time}',
+      counter: '{chars} 文字 · {lines} 行'
     },
     loading: {
       content: '内容を読み込み中...',
@@ -3683,6 +3714,22 @@ export default {
     questionMinimapAttachmentPlaceholder: '（添付ファイル）',
     referenceChunkCount: '{count}件のチャンク',
     fallbackHint: 'ナレッジベースから関連する内容が見つかりませんでした。上記はモデルの直接回答です。',
+    truncatedHint: 'モデルの1回あたりの出力上限で回答が途中で打ち切られました。上記は打ち切り前に生成された内容です。',
+    rewind: {
+      tooltip: 'ここに巻き戻す',
+      confirmBody: 'これより後の会話を削除します。質問から巻き戻すとその質問自体も消え、入力欄に戻します。チェックポイントがあればワークスペースも戻します。この操作は元に戻せません。',
+      confirmButton: '巻き戻す',
+      cancelButton: 'キャンセル',
+      success: '巻き戻しました',
+      busy: 'このターンの回答が終わるまで待ってから巻き戻してください',
+      noCheckpoint: '巻き戻せません。ライブのワークスペースはありますが、到達できるチェックポイントがありません',
+      sandboxReplaced: '巻き戻せません。サンドボックスが置き換わったため、古いチェックポイントに到達できません',
+      reloadFailed: '会話は巻き戻しましたが、履歴を再読み込みできませんでした。古いメッセージが欠けている場合は更新してください',
+      failed: '巻き戻しに失敗しました。もう一度お試しください',
+      skipped: '会話は巻き戻しましたが、ワークスペースは変更していません',
+      skipNoSandbox: '会話は巻き戻しましたが、ワークスペースは変更していません（サンドボックスがありません）',
+      skipNoCheckpoint: '会話は巻き戻しましたが、ワークスペースは変更していません（戻せるチェックポイントがありません）',
+    },
     requestInfoTitle: 'リクエスト情報',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'メッセージID',
@@ -3778,6 +3825,7 @@ export default {
     processError: '処理エラー',
     sessionExcerpt: 'セッション抜粋',
     noAnswerContent: '（回答内容なし）',
+    manualSourcesHeading: '参照元',
     noMatchFound: '一致する内容が見つかりません',
     deleteSessionFailed: '削除に失敗しました。しばらくしてから再試行してください！',
     imageTooMany: '画像は最大5枚までです',
@@ -4547,6 +4595,28 @@ export default {
     }
   },
   model: {
+    reasoning: {
+      levels: {
+        off: 'オフ',
+        auto: '自動',
+        minimal: '最小',
+        low: '低',
+        medium: '中',
+        high: '高',
+        xhigh: '超高',
+        max: '最大',
+      },
+      levelDescriptions: {
+        off: '思考を無効化し、思考パラメータを送信しません',
+        auto: 'ベンダー既定の強度。思考量はモデルが決めます',
+        minimal: '最小限の思考、最速の応答',
+        low: '軽い思考',
+        medium: '中程度の思考',
+        high: '深い思考、応答は遅くなります',
+        xhigh: '超高の思考予算（一部モデルのみ）',
+        max: '最大の思考予算（一部モデルのみ）',
+      },
+    },
     modelName: 'モデル名',
     defaultTag: 'デフォルト',
     addModelInSettings: 'モデルを追加するにはシステム設定を開いてください',
@@ -4554,6 +4624,53 @@ export default {
     selectModelPlaceholder: 'モデルを選択',
     searchPlaceholder: 'モデルを検索...',
     editor: {
+      maxOutputTokensLabel: '最大出力トークン',
+      maxOutputTokensPlaceholder: '空欄でカタログ既定値',
+      maxOutputTokensDesc: '1 回の応答の出力上限。空欄ならこのモデルのカタログ既定値を使用します。',
+      catalog: {
+        reasoning: '推論',
+        vision: '画像',
+        hint: 'ベンダーのカタログから選ぶか、カスタムのモデル名を入力できます。',
+      },
+      resolved: {
+        title: '実際の呼び出し方',
+        empty: 'ベンダーとモデル名を入力すると、このモデルの呼び出し方を表示します',
+        failed: '解決に失敗',
+        protocol: 'リクエストプロトコル',
+        catalog: '能力の取得元',
+        catalogedYes: '内蔵モデルプロファイル',
+        catalogedNo: 'ベンダー既定（カタログ未収録）',
+        endpoint: 'リクエスト先',
+        thinkingFormat: '思考切替の送り方',
+        thinkingLevels: '選択できる思考強度',
+        noThinking: 'このモデルは思考できません',
+      },
+      advanced: {
+        toggle: '詳細設定',
+        api: {
+          label: 'プロトコル上書き',
+          auto: '自動（ベンダー / URL から推定）',
+          desc: 'リクエストプロトコルを強制します。通常は変更不要です。',
+        },
+        remoteModelName: {
+          label: 'リモートモデル名',
+          placeholder: '空欄でモデル名と同じ',
+          desc: '上のモデル名と異なる場合に、実際にベンダーへ送るモデル ID。',
+        },
+        legacyThinking: {
+          label: '思考パラメータ形式（旧設定）',
+          catalog: 'カタログ既定に従う（推奨）',
+          none: '思考パラメータを送信しない',
+          desc: 'このモデルには旧版の thinking_control 設定が残っています。「カタログ既定に従う」を選ぶとカタログが決定します。',
+        },
+        compat: {
+          label: 'プロトコル互換上書き（JSON）',
+          placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
+          desc: '解決されたプロトコルのカタログ既定値に上書きマージされる互換スイッチ。バックエンドの catalog/compat.go を参照。空欄で上書きなし。',
+          invalid: 'JSON が不正です',
+          mustBeObject: 'JSON オブジェクトが必要です',
+        },
+      },
       addTitle: 'モデルを追加',
       editTitle: 'モデルを編集',
       sectionType: 'モデルタイプ',
@@ -4588,23 +4705,6 @@ export default {
       baseUrlPlaceholderAsr: '例: https://api.openai.com/v1',
       apiKeyOptional: 'APIキー（任意）',
       apiKeyPlaceholder: 'APIキーを入力してください',
-      lkeap: {
-        secretIdLabel: 'SecretId',
-        secretIdPlaceholder: 'Tencent Cloud APIのSecretId',
-        secretKeyLabel: 'SecretKey',
-        secretKeyPlaceholder: 'Tencent Cloud APIのSecretKey',
-        regionLabel: 'リージョン',
-        regionPlaceholder: 'ap-guangzhou',
-        regionDesc: 'RunRerankはap-beijing、ap-guangzhouなどに対応しています。デフォルト値: ap-guangzhou',
-        rerankCredentialHint: 'リランクはTencent CloudのAPI署名（OpenAI形式のLKEAP APIキーではありません）を使用します。SecretId/SecretKeyはCAMコンソールで作成してください。'
-      },
-      volcengine: {
-        accessKeyLabel: 'Access Key ID',
-        accessKeyPlaceholder: 'VolcengineのAccess Key ID',
-        secretKeyLabel: 'Secret Access Key',
-        secretKeyPlaceholder: 'VolcengineのSecret Access Key',
-        rerankCredentialHint: 'リランクはArkのAPIキーではなく、VikingDBのAK/SK署名を使用します。推奨モデル: doubao-seed-rerank。'
-      },
       customHeadersLabel: 'カスタムリクエストヘッダー（任意）',
       customHeadersDesc: 'リモートモデルAPIへのリクエストに追加するHTTPヘッダーです（企業ゲートウェイの認証やトレースなどに利用）。Authorization / Content-Typeなどの予約ヘッダーは無視されます。',
       customHeadersAdd: 'ヘッダーを追加',
@@ -4632,26 +4732,6 @@ export default {
       maxConcurrencyLabel: 'バックグラウンドの並列実行上限',
       maxConcurrencyPlaceholder: '0 = グローバルのデフォルト値を使用',
       maxConcurrencyDesc: 'このモデルへのバックグラウンド（取り込み・エンリッチメント）呼び出しの並列数を制限します。モデルごとにすべてのレプリカで共有されます。0または空欄の場合はグローバルのデフォルト値が使われます。対話型のチャットには影響しません。',
-      thinkingControlLabel: '思考モードのリクエスト形式',
-      thinkingControlDesc: 'エージェントの「思考モード」のオン/オフをAPIにどう送信するかを設定します。可能な場合はベンダやモデルに応じて自動選択されます。お使いのAPIドキュメントに合わせて変更してください。「送信しない」を選ぶと、エージェントの思考モードの切り替えは効果がありません。',
-      thinkingControl: {
-        none: {
-          label: '思考関連のフィールドを送信しない',
-          hint: 'エージェントの「思考モード」の切り替えは効果がなく、リクエストに思考パラメータは送信されません'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'OpenAI互換のカスタムゲートウェイ、NVIDIA NIM、vLLM / ローカルのQwen'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3、qwen-plus、qwen-max、qwen-turbo'
-        },
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark、Tencent LKEAP（DeepSeek V3など。LKEAPのデフォルト値。R1では「送信しない」を使用）'
-        }
-      },
       dimensionHint: 'モデルを選択しました。「次元数を検出」をクリックするとベクトル次元数を自動取得できます。',
       loadModelListFailed: 'モデル一覧の読み込みに失敗しました',
       listRefreshed: '一覧を更新しました',
@@ -4673,6 +4753,7 @@ export default {
       ollamaNotSupportRerank: 'Ollamaはリランクモデルに対応していません。リモートAPIを使用してください',
       goToOllamaSettings: '設定を開く',
       validation: {
+        extraFieldRequired: '{name} を入力してください',
         modelNameRequired: 'モデル名を入力してください',
         modelNameEmpty: 'モデル名は空にできません',
         modelNameMax: 'モデル名は100文字以内で入力してください',
@@ -4682,112 +4763,7 @@ export default {
       },
       providerLabel: 'プロバイダ',
       providerPlaceholder: 'モデルプロバイダを選択',
-      providers: {
-        openai: {
-          label: 'OpenAI',
-          description: 'gpt-5.2、gpt-5-miniなど'
-        },
-        anthropic: {
-          label: 'Anthropic',
-          description: 'ネイティブのAnthropic Messages API経由のClaudeモデル'
-        },
-        azure_openai: {
-          label: 'Azure OpenAI',
-          description: 'Microsoft AzureでホストされるOpenAIサービス'
-        },
-        aliyun: {
-          label: 'Aliyun DashScope',
-          description: 'qwen-plus、tongyi-embedding-vision-plus、qwen3-rerankなど'
-        },
-        zhipu: {
-          label: 'Zhipu BigModel',
-          description: 'glm-4.7、embedding-3、rerankなど'
-        },
-        openrouter: {
-          label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat、google/gemini-3-flash-previewなど'
-        },
-        litellm: {
-          label: 'LiteLLM',
-          description: '100以上のプロバイダ（OpenAI、Anthropic、Gemini、Bedrockなど）へのセルフホスト型プロキシです。プレースホルダのURLを置き換えてください。ループバックのホストにはSSRF_WHITELISTの設定が必要です。'
-        },
-        requesty: {
-          label: 'Requesty',
-          description: 'openai/gpt-4o-mini、anthropic/claude-sonnet-4-5など'
-        },
-        generic: {
-          label: 'カスタム（OpenAI互換）',
-          description: '汎用のAPIエンドポイント'
-        },
-        siliconflow: {
-          label: 'SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1など'
-        },
-        jina: {
-          label: 'Jina',
-          description: 'jina-clip-v1、jina-embeddings-v2-base-zhなど'
-        },
-        volcengine: {
-          label: 'Volcengine',
-          description: 'doubao-1-5-pro-32k-250115、doubao-embedding-vision-250615など'
-        },
-        deepseek: {
-          label: 'DeepSeek',
-          description: 'deepseek-chat、deepseek-reasonerなど'
-        },
-        hunyuan: {
-          label: 'Hunyuan',
-          description: 'hunyuan-pro、hunyuan-standard、hunyuan-embeddingなど'
-        },
-        minimax: {
-          label: 'MiniMax',
-          description: 'MiniMax-M3、MiniMax-M2.7、MiniMax-M2.7-highspeedなど'
-        },
-        mimo: {
-          label: 'MiMo',
-          description: 'mimo-v2-flash'
-        },
-        gemini: {
-          label: 'Google Gemini',
-          description: 'gemini-3-flash-preview、gemini-2.5-proなど'
-        },
-        gpustack: {
-          label: 'GPUStack',
-          description: 'GPUStackにデプロイ済みのモデルを選択してください'
-        },
-        modelscope: {
-          label: 'ModelScope',
-          description: 'Qwen/Qwen3-8B、Qwen/Qwen3-Embedding-8Bなど'
-        },
-        qiniu: {
-          label: 'Qiniu Cloud',
-          description: 'deepseek/deepseek-v3.2-251201、z-ai/glm-4.7など'
-        },
-        moonshot: {
-          label: 'Moonshot',
-          description: 'kimi-k2-turbo-preview、moonshot-v1-8k-vision-previewなど'
-        },
-        qianfan: {
-          label: 'Baidu Qianfan',
-          description: 'ernie-5.0-thinking-preview、embedding-v1、bce-reranker-baseなど'
-        },
-        longcat: {
-          label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat、LongCat-Flash-Thinkingなど'
-        },
-        lkeap: {
-          label: 'Tencent Cloud LKEAP',
-          description: 'DeepSeek-R1、DeepSeek-V3、lke-reranker-baseなど'
-        },
-        nvidia: {
-          label: 'NVIDIA',
-          description: 'deepseek-ai-deepseek-v3_1、nv-embed-v1、rerank-qa-mistral-4bなど'
-        },
-        novita: {
-          label: 'Novita AI',
-          description: 'moonshotai/kimi-k2.5、zai-org/glm-5、minimax/minimax-m2.7、qwen/qwen3-embedding-0.6bなど'
-        }
-      }
+      providerDocs: '{provider} のモデルドキュメントを見る',
     },
     builtinTag: '組み込み'
   },
@@ -5153,6 +5129,8 @@ export default {
       }
     },
     debug: {
+      reasoningEffort: '思考強度',
+      reasoningEffortDesc: 'モデルカタログが報告するレベルで reasoning_effort を送信します',
       title: 'モデルテスト',
       description: '保存済みのモデル設定でリクエストを送信します。編集中の変更は保存後に反映されます。',
       groupModel: 'モデルを選択',
@@ -5175,15 +5153,11 @@ export default {
       audioFile: '音声ファイル',
       chooseFile: 'ファイルを選択',
       parameters: 'リクエストパラメータ',
-      thinking: '思考モード',
-      thinkingDesc: '思考に対応したモデルにのみ適用されます',
       systemPrompt: 'システムプロンプト',
       systemPromptPlaceholder: 'システムプロンプト（任意）',
       run: 'テストを実行',
       copyResult: '結果をコピー',
       history: '履歴',
-      thinkOn: '思考オン',
-      thinkOff: '思考オフ',
       runLabel: '実行 #{n}',
       success: 'リクエストに成功しました',
       failed: 'リクエストに失敗しました',
@@ -5191,6 +5165,9 @@ export default {
       requestPreview: 'リクエストのプレビュー',
       requestFailed: 'モデルテストのリクエストに失敗しました',
       metrics: {
+        api: 'プロトコル',
+        thinkingFormat: '思考形式',
+        requestedReasoningEffort: '要求した強度',
         dimension: '次元数',
         resultCount: '結果件数',
         answerChars: '回答文字数',

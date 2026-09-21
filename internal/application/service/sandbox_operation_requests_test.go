@@ -157,9 +157,40 @@ func TestPinnedCheckpointSkipsWorkspacePreparation(t *testing.T) {
 	require.NotNil(t, checkpoint)
 	require.Equal(t, "sb1", checkpoint.SandboxID)
 	require.Equal(t, strings.Repeat("a", 40), checkpoint.CommitSHA)
-	require.Equal(t, []string{"connect", "exec"}, client.ops)
+	require.Equal(t, []string{"connect", "exec"}, client.ops,
+		"SkipWorkspacePrep must omit the extra prepareSessionDirs exec")
 	require.Equal(t, workspaceCheckpointTimeout, client.exec.Timeout)
 	require.Equal(t, sandbox.SessionWorkspaceRoot, client.exec.WorkDir)
 	require.Contains(t, client.exec.Command, "--allow-empty")
-	require.NotContains(t, client.exec.Command, "mkdir")
+	require.Contains(t, client.exec.Command, sandbox.SessionGitDir)
+	require.Contains(t, client.exec.Command, `mkdir -p "$WORK_TREE"`)
+	require.NotContains(t, client.exec.Command, `mkdir -p -- "$d"`,
+		"checkpoint must not run the session input/output bootstrap")
+}
+
+func TestPinnedRewindResetSkipsWorkspacePreparation(t *testing.T) {
+	ctx, mgr, client := newOperationRequestManager(t)
+	pinned := NewPinnedSessionSandbox(stubPinReader{configID: "cfg1"}, &stubTenantSandboxResolver{mgr: mgr}, nil)
+	sha := strings.Repeat("a", 40)
+	require.NoError(t, resetWorkspaceToCommit(ctx, pinned, "s1", sha, "sb1"))
+	require.Equal(t, []string{"connect", "exec"}, client.ops,
+		"SkipWorkspacePrep must omit the extra prepareSessionDirs exec")
+	require.Equal(t, workspaceResetTimeout, client.exec.Timeout)
+	require.Equal(t, sandbox.SessionWorkspaceRoot, client.exec.WorkDir)
+	require.Contains(t, client.exec.Command, "reset --hard "+sha)
+	require.NotContains(t, client.exec.Command, `mkdir -p -- "$d"`)
+}
+
+func TestPinnedEmptyResetSkipsWorkspacePreparation(t *testing.T) {
+	ctx, mgr, client := newOperationRequestManager(t)
+	pinned := NewPinnedSessionSandbox(stubPinReader{configID: "cfg1"}, &stubTenantSandboxResolver{mgr: mgr}, nil)
+	require.NoError(t, resetWorkspaceToEmpty(ctx, pinned, "s1", "sb1"))
+	require.Equal(t, []string{"connect", "exec"}, client.ops,
+		"SkipWorkspacePrep must omit the extra prepareSessionDirs exec")
+	require.Contains(t, client.exec.Command, "commit-tree")
+	require.Contains(t, client.exec.Command, "reset --hard")
+	require.Contains(t, client.exec.Command, "clean -fdx")
+	require.NotContains(t, client.exec.Command, `rm -rf "$GIT_DIR"`)
+	require.NotContains(t, client.exec.Command, `find "$WORK_TREE"`)
+	require.NotContains(t, client.exec.Command, `mkdir -p -- "$d"`)
 }

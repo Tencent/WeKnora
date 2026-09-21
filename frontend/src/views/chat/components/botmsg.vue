@@ -20,7 +20,9 @@
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
                     :embedded-mode="embeddedMode"
                     :can-fork="canFork"
+                    :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
+                    @rewind="emit('rewind', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
@@ -35,7 +37,9 @@
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
                     :embedded-mode="embeddedMode"
                     :can-fork="canFork"
+                    :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
+                    @rewind="emit('rewind', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
@@ -55,6 +59,22 @@
                         <t-icon name="git-branch" />
                     </t-button>
                 </t-tooltip>
+                <t-popconfirm
+                    v-if="canRewind"
+                    :content="t('chat.rewind.confirmBody')"
+                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                    :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                    theme="warning"
+                    placement="top"
+                    overlay-class-name="chat-rewind-popconfirm"
+                    @confirm="emitRewind"
+                >
+                    <t-tooltip :content="rewindTooltip">
+                        <t-button size="small" variant="outline" shape="round" @click.stop>
+                            <t-icon name="rollback" />
+                        </t-button>
+                    </t-tooltip>
+                </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
                     <t-icon name="copy" />
@@ -85,6 +105,12 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
+                <!-- 输出被单次上限截断的提示 -->
+                <t-tooltip v-if="session.truncated" :content="$t('chat.truncatedHint')" placement="top">
+                    <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                        <t-icon name="info-circle" />
+                    </t-button>
+                </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
@@ -107,7 +133,7 @@
             v-model:visible="showArtifactDrawer"
             :session-id="sessionId"
             :message-id="messageIdForArtifacts"
-            :artifacts="artifactList"
+            :artifacts="liveArtifacts"
             :preview-index="artifactPreviewIndex"
         />
     </div>
@@ -172,7 +198,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 'rewind'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -217,14 +243,24 @@ const props = defineProps({
     canFork: {
         type: Boolean,
         default: false
+    },
+    canRewind: {
+        type: Boolean,
+        default: false
     }
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
 const forkTooltip = '从这条回答继续分叉'
+const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
     const messageId = persistedAssistantId(props.session) || props.session?.id
     if (messageId) emit('fork', messageId)
+}
+const emitRewind = () => {
+    const messageId = persistedAssistantId(props.session) || props.session?.id
+    if (messageId) emit('rewind', messageId)
 }
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
@@ -250,8 +286,13 @@ const artifactList = computed(() => {
     // omit it. Normalising here keeps ChatArtifactsDrawer index-agnostic.
     return list.map((a, i) => ({ index: i, ...a }));
 });
-const hasArtifacts = computed(() => artifactList.value.length > 0);
-const artifactCount = computed(() => artifactList.value.length);
+// Deleted files stay in artifactList on purpose: the inline renderer needs the
+// tombstone to tell "you deleted this" apart from "this handle belongs to some
+// other message", and its position is still the download address of the files
+// after it. Everything that counts or lists files uses the live view.
+const liveArtifacts = computed(() => artifactList.value.filter((a) => !a.deleted_at));
+const hasArtifacts = computed(() => liveArtifacts.value.length > 0);
+const artifactCount = computed(() => liveArtifacts.value.length);
 const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifactCount);
 const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session));
 const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
@@ -289,6 +330,7 @@ const artifactRefContext = computed(() => {
 const artifactRefLabels = computed(() => ({
     previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
     missingHint: t('agent.artifactDrawer.inlineMissing'),
+    deletedHint: t('agent.artifactDrawer.inlineDeleted'),
 }));
 
 const preview = (url) => {

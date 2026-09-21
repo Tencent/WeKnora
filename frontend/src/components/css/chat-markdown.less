@@ -668,12 +668,34 @@
     }
   }
 
+  // 引用对不上任何产物：模型提到了一个并不存在的文件。
   :deep(.artifact-ref-card--pending) {
     cursor: default;
     opacity: 0.7;
 
     &:hover {
       background: transparent;
+    }
+  }
+
+  // 文件确实生成过，但用户删了它，字节已回收。整体置灰并给文件名加删除线，
+  // 好让它一眼区别于「从来没有过」的 --pending：这条回答当时确实产出了东西。
+  :deep(.artifact-ref-card--deleted) {
+    cursor: default;
+
+    &:hover {
+      background: transparent;
+    }
+
+    .artifact-ref-card__icon {
+      opacity: 0.45;
+      filter: grayscale(1);
+    }
+
+    .artifact-ref-card__name {
+      color: var(--td-text-color-placeholder);
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
     }
   }
 

@@ -2373,6 +2373,8 @@ export default {
       }
     },
     debug: {
+      reasoningEffort: '사고 강도',
+      reasoningEffortDesc: '모델 카탈로그가 보고한 수준으로 reasoning_effort를 보냅니다',
       title: '모델 테스트',
       description: '저장된 모델 설정으로 요청을 보냅니다. 편집 중인 변경 사항은 저장 후 반영됩니다.',
       groupModel: '모델 선택',
@@ -2395,15 +2397,11 @@ export default {
       audioFile: '오디오 파일',
       chooseFile: '파일 선택',
       parameters: '요청 매개변수',
-      thinking: '사고 모드',
-      thinkingDesc: '사고 모드를 지원하는 모델에만 적용됩니다',
       systemPrompt: 'System Prompt',
       systemPromptPlaceholder: '선택 사항, 시스템 프롬프트 입력',
       run: '테스트 실행',
       copyResult: '결과 복사',
       history: '기록',
-      thinkOn: '사고 켜짐',
-      thinkOff: '사고 꺼짐',
       runLabel: '{n}번째 실행',
       success: '호출 성공',
       failed: '호출 실패',
@@ -2411,6 +2409,9 @@ export default {
       requestPreview: '요청 미리보기',
       requestFailed: '모델 테스트 요청 실패',
       metrics: {
+        api: '프로토콜',
+        thinkingFormat: '사고 형식',
+        requestedReasoningEffort: '요청한 강도',
         dimension: '벡터 차원',
         resultCount: '결과 수',
         answerChars: '답변 문자 수',
@@ -2753,6 +2754,28 @@ export default {
     languageSaved: '언어 설정이 저장되었습니다'
   },
   model: {
+    reasoning: {
+      levels: {
+        off: '끄기',
+        auto: '자동',
+        minimal: '최소',
+        low: '낮음',
+        medium: '중간',
+        high: '높음',
+        xhigh: '매우 높음',
+        max: '최대',
+      },
+      levelDescriptions: {
+        off: '사고를 끄고 사고 파라미터를 보내지 않습니다',
+        auto: '공급사 기본 강도, 사고량은 모델이 결정합니다',
+        minimal: '최소 사고, 가장 빠른 응답',
+        low: '가벼운 사고',
+        medium: '중간 강도 사고',
+        high: '깊은 사고, 응답이 느려집니다',
+        xhigh: '매우 높은 사고 예산(일부 모델만)',
+        max: '최대 사고 예산(일부 모델만)',
+      },
+    },
     modelName: '모델 이름',
     defaultTag: '기본값',
     addModelInSettings: '전역 설정에서 모델 추가하기',
@@ -2761,6 +2784,53 @@ export default {
     searchPlaceholder: '모델 검색...',
     builtinTag: '내장',
     editor: {
+      maxOutputTokensLabel: '최대 출력 토큰',
+      maxOutputTokensPlaceholder: '비워 두면 카탈로그 기본값',
+      maxOutputTokensDesc: '응답 1회의 출력 상한입니다. 비워 두면 이 모델의 카탈로그 기본값을 사용합니다.',
+      catalog: {
+        reasoning: '추론',
+        vision: '비전',
+        hint: '공급사 카탈로그에서 선택하거나 사용자 지정 모델 이름을 입력할 수 있습니다.',
+      },
+      resolved: {
+        title: '실제 호출 방식',
+        empty: '공급사와 모델 이름을 입력하면 이 모델이 어떻게 호출되는지 표시합니다',
+        failed: '해석 실패',
+        protocol: '요청 프로토콜',
+        catalog: '기능 출처',
+        catalogedYes: '내장 모델 프로필',
+        catalogedNo: '공급사 기본값(카탈로그 미수록)',
+        endpoint: '요청 엔드포인트',
+        thinkingFormat: '사고 전환 전달 방식',
+        thinkingLevels: '선택 가능한 사고 강도',
+        noThinking: '이 모델은 사고를 지원하지 않습니다',
+      },
+      advanced: {
+        toggle: '고급',
+        api: {
+          label: '프로토콜 재정의',
+          auto: '자동(공급사 / URL 기준)',
+          desc: '요청 프로토콜을 강제합니다. 일반적으로 변경할 필요가 없습니다.',
+        },
+        remoteModelName: {
+          label: '원격 모델 이름',
+          placeholder: '비워 두면 모델 이름과 동일',
+          desc: '위 모델 이름과 다를 때 실제로 공급사에 보내는 모델 ID입니다.',
+        },
+        legacyThinking: {
+          label: '사고 파라미터 형식(레거시)',
+          catalog: '카탈로그 기본값 따르기(권장)',
+          none: '사고 파라미터를 보내지 않음',
+          desc: '이 모델에는 이전 버전의 thinking_control 설정이 남아 있습니다. "카탈로그 기본값 따르기"를 선택하면 카탈로그가 결정합니다.',
+        },
+        compat: {
+          label: '프로토콜 호환 재정의(JSON)',
+          placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
+          desc: '해석된 프로토콜의 카탈로그 기본값 위에 병합되는 호환 스위치입니다. 백엔드 catalog/compat.go 참조. 비워 두면 재정의하지 않습니다.',
+          invalid: '잘못된 JSON',
+          mustBeObject: 'JSON 객체여야 합니다',
+        },
+      },
       addTitle: '모델 추가',
       editTitle: '모델 편집',
       sectionType: '모델 유형',
@@ -2807,8 +2877,6 @@ export default {
       maxConcurrencyLabel: '백그라운드 동시 실행 상한',
       maxConcurrencyPlaceholder: '0이면 전역 기본값 사용',
       maxConcurrencyDesc: '문서 인덱싱/보강 등 백그라운드 작업이 이 모델을 호출하는 동시 실행 수를 제한합니다(모델별로 모든 복제본이 공유). 0 또는 비워 두면 전역 기본값을 사용하며, 대화형 채팅에는 영향을 주지 않습니다.',
-      thinkingControlLabel: '사고 모드 매개변수 형식',
-      thinkingControlDesc: '에이전트 「사고 모드」 켜기/끄기 시 API에 어떻게 기록할지 결정합니다. 벤더/모델에 따라 미리 선택되며, 실제 API와 다르면 문서에 맞게 수정하세요. 「전송 안 함」을 선택하면 에이전트 「사고 모드」 스위치가 효과가 없습니다.',
       dimensionHint: '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
       loadModelListFailed: '모델 목록 로드 실패',
       listRefreshed: '목록이 새로고침되었습니다',
@@ -2831,154 +2899,15 @@ export default {
       goToOllamaSettings: '설정 보기',
       providerLabel: '프로바이더',
       providerPlaceholder: '모델 프로바이더 선택',
-      providers: {
-        novita: {
-          label: 'Novita AI',
-          description: 'moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b 등'
-        },
-        nvidia: {
-          label: 'NVIDIA',
-          description: 'deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.'
-        },
-        lkeap: {
-          label: '텐센트 클라우드 LKEAP',
-          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base 등'
-        },
-        longcat: {
-          label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.'
-        },
-        qianfan: {
-          label: 'Baidu Qianfan',
-          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.'
-        },
-        moonshot: {
-          label: 'Moonshot',
-          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.'
-        },
-        qiniu: {
-          label: 'Qiniu Cloud',
-          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.'
-        },
-        modelscope: {
-          label: 'ModelScope',
-          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.'
-        },
-        gpustack: {
-          label: 'GPUStack',
-          description: 'Choose your deployed model on GPUStack'
-        },
-        gemini: {
-          label: 'Google Gemini',
-          description: 'gemini-3-flash-preview, gemini-2.5-pro 등'
-        },
-        mimo: {
-          label: 'MiMo',
-          description: 'mimo-v2-flash'
-        },
-        minimax: {
-          label: 'MiniMax',
-          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed 등'
-        },
-        hunyuan: {
-          label: 'Hunyuan',
-          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding 등'
-        },
-        deepseek: {
-          label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner 등'
-        },
-        volcengine: {
-          label: 'Volcengine',
-          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615 등'
-        },
-        jina: {
-          label: 'Jina',
-          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.'
-        },
-        siliconflow: {
-          label: 'SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1 등'
-        },
-        generic: {
-          label: '사용자 정의 (OpenAI 호환)',
-          description: 'Generic API endpoint'
-        },
-        requesty: {
-          label: 'Requesty',
-          description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5 등'
-        },
-        openrouter: {
-          label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview 등'
-        },
-        litellm: {
-          label: 'LiteLLM',
-          description: '자체 호스팅 프록시로 OpenAI, Anthropic, Gemini, Bedrock 등 100+ 공급자를 연결합니다. 플레이스홀더 URL을 실제 주소로 바꾸세요. localhost는 SSRF_WHITELIST에 추가해야 합니다.'
-        },
-        zhipu: {
-          label: 'Zhipu BigModel',
-          description: 'glm-4.7, embedding-3, rerank, etc.'
-        },
-        aliyun: {
-          label: 'Aliyun DashScope',
-          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank 등'
-        },
-        azure_openai: {
-          label: 'Azure OpenAI',
-          description: 'Microsoft Azure에서 호스팅되는 OpenAI 서비스'
-        },
-        anthropic: {
-          label: 'Anthropic',
-          description: 'Claude models via native Anthropic Messages API'
-        },
-        openai: {
-          label: 'OpenAI',
-          description: 'gpt-5.2, gpt-5-mini 등'
-        }
-      },
+      providerDocs: '{provider} 모델 문서 보기',
       validation: {
+        extraFieldRequired: '{name}을(를) 입력하세요',
         modelNameRequired: '모델 이름을 입력해주세요',
         modelNameEmpty: '모델 이름은 비워둘 수 없습니다',
         modelNameMax: '모델 이름은 100자를 초과할 수 없습니다',
         baseUrlRequired: 'Base URL을 입력해주세요',
         baseUrlEmpty: 'Base URL은 비워둘 수 없습니다',
         baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요'
-      },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 등, LKEAP 기본값; R1은 「전송 안 함」)'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: '사용자 정의 OpenAI 호환, NVIDIA NIM, vLLM / 로컬 Qwen 배포'
-        },
-        none: {
-          label: '사고 매개변수 전송 안 함',
-          hint: '에이전트 「사고 모드」 스위치가 효과 없음, 요청에 사고 관련 매개변수를 보내지 않음'
-        }
-      },
-      volcengine: {
-        accessKeyLabel: 'Access Key ID',
-        accessKeyPlaceholder: 'Volcengine Access Key ID',
-        secretKeyLabel: 'Secret Access Key',
-        secretKeyPlaceholder: 'Volcengine Secret Access Key',
-        rerankCredentialHint: 'Rerank은 Ark API 키가 아닌 VikingDB AK/SK 서명을 사용합니다. 권장 모델: doubao-seed-rerank.'
-      },
-      lkeap: {
-        secretIdLabel: 'SecretId',
-        secretIdPlaceholder: 'Tencent Cloud API SecretId',
-        secretKeyLabel: 'SecretKey',
-        secretKeyPlaceholder: 'Tencent Cloud API SecretKey',
-        regionLabel: 'Region',
-        regionPlaceholder: 'ap-guangzhou',
-        regionDesc: 'RunRerank supports ap-beijing, ap-guangzhou, etc. Default: ap-guangzhou',
-        rerankCredentialHint: 'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.'
       },
       modelNamePlaceholder: {
         local: '예: llama2:latest',
@@ -3827,6 +3756,22 @@ export default {
     questionMinimapAttachmentPlaceholder: '(첨부)',
     referenceChunkCount: '{count}개 청크',
     fallbackHint: '지식 베이스에서 관련 내용을 찾지 못했습니다. 위는 모델의 직접 응답입니다.',
+    truncatedHint: '모델의 응답당 출력 한도에서 답변이 잘렸습니다. 위 내용은 잘리기 전까지 생성된 부분입니다.',
+    rewind: {
+      tooltip: '여기로 되돌리기',
+      confirmBody: '이 메시지 이후의 대화를 삭제합니다. 질문에서 되돌리면 해당 질문도 지워지고 입력창에 다시 채워집니다. 체크포인트가 있으면 작업 영역도 되돌립니다. 이 작업은 취소할 수 없습니다.',
+      confirmButton: '되돌리기',
+      cancelButton: '취소',
+      success: '되돌렸습니다',
+      busy: '이번 답변이 끝난 뒤에 되돌리세요',
+      noCheckpoint: '되돌릴 수 없습니다. 라이브 작업 영역은 있지만 도달 가능한 체크포인트가 없습니다',
+      sandboxReplaced: '되돌릴 수 없습니다. 샌드박스가 교체되어 이전 체크포인트에 도달할 수 없습니다',
+      reloadFailed: '대화는 되돌렸지만 기록을 다시 불러오지 못했습니다. 이전 메시지가 없으면 새로고침하세요',
+      failed: '되돌리기에 실패했습니다. 다시 시도하세요',
+      skipped: '대화는 되돌렸지만 작업 영역은 변경하지 않았습니다',
+      skipNoSandbox: '대화는 되돌렸지만 작업 영역은 변경하지 않았습니다(샌드박스가 없음)',
+      skipNoCheckpoint: '대화는 되돌렸지만 작업 영역은 변경하지 않았습니다(되돌릴 체크포인트가 없음)',
+    },
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',
@@ -3922,6 +3867,7 @@ export default {
     processError: '처리 오류',
     sessionExcerpt: '대화 발췌',
     noAnswerContent: '(답변 내용 없음)',
+    manualSourcesHeading: '참고 출처',
     noMatchFound: '일치하는 내용을 찾을 수 없습니다',
     deleteSessionFailed: '삭제 실패, 나중에 다시 시도해주세요!',
     imageTooMany: '최대 5장까지 업로드 가능합니다',
@@ -4918,7 +4864,6 @@ export default {
     }
   },
   manualEditor: {
-    description: 'Markdown으로 지식을 작성하고 실시간 미리보기 지원',
     defaultTitlePrefix: '새 문서',
     noDocumentKnowledgeBases: '사용 가능한 문서형 지식베이스가 없습니다. 먼저 문서형 지식베이스를 생성해주세요',
     actions: {
@@ -4933,12 +4878,13 @@ export default {
     status: {
       draftTag: '현재 상태: 임시 저장',
       publishedTag: '현재 상태: 게시됨',
-      lastUpdated: '최근 업데이트: {time}'
+      lastUpdated: '최근 업데이트: {time}',
+      counter: '{chars}자 · {lines}줄'
     },
     form: {
-      knowledgeBaseLabel: '대상 지식베이스',
       knowledgeBasePlaceholder: '지식베이스를 선택해주세요',
       titleLabel: '지식 제목',
+      knowledgeBaseLabel: '대상 지식베이스',
       titlePlaceholder: '제목을 입력해주세요',
       contentPlaceholder: 'Markdown 구문을 지원합니다. # 제목, 목록, 코드 블록 등을 사용할 수 있습니다'
     },
@@ -4960,7 +4906,6 @@ export default {
       currentKnowledgeBase: '현재 지식베이스'
     },
     section: {
-      basic: '기본 정보',
       content: '지식 내용'
     },
     title: {
@@ -4970,9 +4915,17 @@ export default {
     preview: {
       empty: '내용 없음'
     },
+    shortcuts: {
+      title: '단축키',
+      continueList: '목록 이어쓰기',
+      indent: '들여쓰기 / Shift+Tab 내어쓰기'
+    },
     view: {
-      editLabel: '편집으로 돌아가기',
-      previewLabel: '내용 미리보기'
+      edit: '편집',
+      split: '분할',
+      preview: '미리보기',
+      splitUnavailable: '너비가 부족합니다. 서랍을 넓히거나 전체 화면으로 전환하세요',
+      groupLabel: '편집기 보기'
     },
     toolbar: {
       bold: '굵게',
@@ -4990,7 +4943,9 @@ export default {
       link: '링크 삽입',
       image: '이미지 삽입',
       table: '표 삽입',
-      horizontalRule: '구분선'
+      horizontalRule: '구분선',
+      headingGroup: '제목',
+      insertGroup: '삽입'
     },
     table: {
       column1: '열1',
@@ -5036,6 +4991,8 @@ export default {
       discard: '변경 사항 버리기',
       keepEditing: '계속 편집',
     },
+    fullscreen: '전체 화면',
+    exitFullscreen: '전체 화면 종료',
     save: '저장',
     delete: '삭제',
     edit: '편집',
@@ -6310,10 +6267,16 @@ export default {
       preview: '미리보기',
       previewBack: '목록으로',
       collecting: '생성된 파일을 저장하는 중…',
+      delete: '삭제',
+      deleteTitle: '이 파일을 삭제할까요?',
+      deleteConfirm: '「{name}」과(와) 저장된 내용이 영구적으로 삭제되며 복구할 수 없습니다.',
+      deleted: '파일을 삭제했습니다',
+      deleteFailed: '삭제에 실패했습니다. 다시 시도해 주세요.',
       download: '다운로드',
       downloadFailed: '다운로드에 실패했습니다. 다시 시도해 주세요.',
       inlinePreviewHint: '클릭하여 미리보기',
       inlineMissing: '파일을 사용할 수 없습니다',
+      inlineDeleted: '삭제된 파일',
     },
     updatePlan: '계획 업데이트',
     webSearchFound: '<strong>{count}</strong>개의 웹 검색 결과 발견',
@@ -6358,6 +6321,8 @@ export default {
       capabilityUnconfigured: '미구성'
     },
     editor: {
+      reasoningEffortUnsupported: '선택한 모델은 사고를 지원하지 않습니다. "끄기" 외의 옵션은 무시됩니다.',
+      reasoningEffortAlwaysOn: '선택한 모델은 항상 사고하며 끌 수 없습니다. 강도만 조정할 수 있습니다.',
       createTitle: '에이전트 만들기',
       editTitle: '에이전트 편집',
       buttons: {
@@ -6576,6 +6541,15 @@ export default {
     root: '지식 처리',
     attempt: '{n}번째 시도',
     retry: '다시 파싱',
+    notRun: '실행 안 됨',
+    stageFailed: '{stage} 단계 실패',
+    copyError: '오류 정보 복사',
+    stat: {
+      duration: '소요 시간',
+      attempt: '시도',
+      tasks: '백그라운드 작업',
+      tasksValue: '실행 중 {running} · 실패 {failed} · 완료 {completed}'
+    },
     refresh: '지금 새로고침',
     copy: '복사',
     copyDetails: '세부정보 복사',
@@ -6595,7 +6569,6 @@ export default {
     minutesAgo: '{n}분 전',
     noActivity: '파싱 활동 없음',
     totalDuration: '총 소요시간: {d}',
-    total: '총 {d}',
     errorCode: {
       UNKNOWN_SUGGESTION: '자세한 내용은 애플리케이션 로그를 확인하세요.'
     },
@@ -6650,8 +6623,6 @@ export default {
     head: {
       stagesDone: '주요 단계',
       stagesProgress: '현재 단계',
-      postprocessTasks: '후처리: 실행 중 {running} / 실패 {failed} / 완료 {completed}',
-      completedWithActiveTrace: '처리는 완료되었지만 {n}개의 Trace 작업이 아직 활성 상태입니다',
       attempt: '시도',
       updated: '갱신'
     },
@@ -7381,6 +7352,12 @@ export default {
     total: '파일 {count}개',
     versions: '버전 {count}개',
     preview: '미리보기',
+    delete: '삭제',
+    deleteTitle: '이 파일을 삭제할까요?',
+    deleteConfirm: '「{name}」과(와) 저장된 내용이 영구적으로 삭제되며 복구할 수 없습니다.',
+    deleteConfirmVersions: '「{name}」의 {count}개 버전과 저장된 내용이 모두 영구적으로 삭제되며 복구할 수 없습니다.',
+    deleted: '파일을 삭제했습니다',
+    deleteFailed: '삭제에 실패했습니다. 다시 시도해 주세요.',
     download: '다운로드',
     downloadFailed: '다운로드에 실패했습니다. 잠시 후 다시 시도해 주세요',
     openSession: '대화 열기',

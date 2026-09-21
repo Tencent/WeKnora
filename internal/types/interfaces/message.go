@@ -68,6 +68,14 @@ type MessageService interface {
 	// the caller's sessions, newest first. Tenant and owner scope come from
 	// ctx; query.TenantID and query.UserID are overwritten.
 	ListArtifactLibrary(ctx context.Context, query *types.ArtifactLibraryQuery) (*types.PageResult, error)
+
+	// DeleteSessionArtifact tombstones a skill-generated file (and optionally
+	// every version of it) in a session the caller owns, and reports the blobs
+	// whose bytes the caller should now reclaim. Shared-agent read access does
+	// not carry delete rights.
+	DeleteSessionArtifact(
+		ctx context.Context, req *types.ArtifactDeleteRequest,
+	) (*types.ArtifactDeleteResult, error)
 }
 
 // MessageRepository defines the message repository interface
@@ -123,6 +131,13 @@ type MessageRepository interface {
 	GetLatestContextCheckpoint(ctx context.Context, sessionID string) (*types.Message, error)
 	// DeleteMessage deletes a message
 	DeleteMessage(ctx context.Context, sessionID string, id string) error
+	// DeleteMessagesFrom deletes every message at or after the
+	// (boundary, boundaryID) composite cursor and returns the deleted rows,
+	// oldest first. inclusive keeps or drops the boundary message itself,
+	// which is what separates a user rewind point from an assistant one.
+	DeleteMessagesFrom(
+		ctx context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
+	) ([]*types.Message, error)
 	// DeleteMessagesBySessionID deletes all messages belonging to a session
 	DeleteMessagesBySessionID(ctx context.Context, sessionID string) error
 	// GetFirstMessageOfUser gets the first message of a user
@@ -153,6 +168,28 @@ type MessageRepository interface {
 	ListArtifactLibrary(
 		ctx context.Context, query *types.ArtifactLibraryQuery,
 	) ([]*types.ArtifactLibraryItem, int64, error)
+	// FindSessionArtifact returns the live artifact row addressed by
+	// (session, message, position), or nil when there is none. A tombstoned
+	// row reads as absent.
+	FindSessionArtifact(
+		ctx context.Context, sessionID, messageID string, position int,
+	) (*types.MessageArtifactRecord, error)
+	// FindSessionArtifactVersions returns every live row of the session sharing
+	// sourcePath — the regenerations the artifact library folds into one entry.
+	// An empty sourcePath yields nothing: such artifacts have no version group.
+	FindSessionArtifactVersions(
+		ctx context.Context, sessionID, sourcePath string,
+	) ([]types.MessageArtifactRecord, error)
+	// SoftDeleteSessionArtifacts tombstones the referenced rows and returns the
+	// subset it marked, leaving out rows another caller already tombstoned.
+	SoftDeleteSessionArtifacts(
+		ctx context.Context, sessionID string, refs []types.ArtifactRef, at time.Time,
+	) ([]types.ArtifactRef, error)
+	// CountLiveArtifactsByURL counts undeleted artifact rows pointing at a
+	// stored object, across every session. Callers use it as the last guard
+	// before reclaiming bytes that a fork copy, a legacy raw path or a later
+	// re-attachment may still need.
+	CountLiveArtifactsByURL(ctx context.Context, url string) (int64, error)
 	// GetSessionAttachments returns every user-uploaded attachment recorded in
 	// the session. Implementations should project only the attachments column.
 	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)

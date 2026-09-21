@@ -235,6 +235,7 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	// EnsureDefaults pins nil to explicit false so thinking_control wire formats
 	// always receive a value.
 	cm.SummaryConfig.Thinking = customAgent.Config.Thinking
+	cm.SummaryConfig.ReasoningEffort = customAgent.Config.ReasoningEffort
 	cm.CitationEnabled = customAgent.Config.CitationEnabled
 	if customAgent.Config.Thinking != nil {
 		logger.Infof(ctx, "Using custom agent's thinking: %v", *customAgent.Config.Thinking)

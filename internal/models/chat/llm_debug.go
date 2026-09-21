@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -29,7 +31,8 @@ func buildLLMMessages(messages []Message) []logger.LLMMessage {
 					parts = append(parts, mc.Text)
 				case "image_url":
 					if mc.ImageURL != nil {
-						parts = append(parts, fmt.Sprintf("[image_url: %s]", truncateForDebug(mc.ImageURL.URL, 120)))
+						parts = append(parts,
+							fmt.Sprintf("[image_url: %s]", api.TruncateForDebug(mc.ImageURL.URL, 120)))
 					}
 				}
 			}
@@ -201,12 +204,4 @@ func logLLMDebugStream(ctx context.Context, model string, messages []Message, op
 		record.Error = callErr.Error()
 	}
 	logger.LLMDebugLog(ctx, record)
-}
-
-func truncateForDebug(s string, maxRunes int) string {
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
-		return s
-	}
-	return string(runes[:maxRunes]) + fmt.Sprintf("...(%d chars)", len(runes))
 }

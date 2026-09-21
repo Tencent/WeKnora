@@ -659,13 +659,21 @@ func downloadImageFromURL(imageURL string) ([]byte, error) {
 	return secutils.DownloadBytes(imageURL)
 }
 
+// multimodalPendingKey is the Redis key holding how many image tasks a
+// knowledge is still waiting on. The fan-out (enqueueImageMultimodalTasks)
+// seeds it and the fan-in (checkAndFinalizeAllImages) drains it, so the two
+// must agree on the name — hence one helper rather than two format strings.
+func multimodalPendingKey(knowledgeID string) string {
+	return fmt.Sprintf("multimodal:pending:%s", knowledgeID)
+}
+
 func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, payload types.ImageMultimodalPayload) {
 	if s.redisClient == nil {
 		s.enqueueKnowledgePostProcessTask(ctx, payload)
 		return
 	}
 
-	redisKey := fmt.Sprintf("multimodal:pending:%s", payload.KnowledgeID)
+	redisKey := multimodalPendingKey(payload.KnowledgeID)
 
 	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
 	if err != nil && err != redis.Nil {

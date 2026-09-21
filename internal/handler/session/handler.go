@@ -65,6 +65,9 @@ type Handler struct {
 	// forkService branches a session at a chosen user message. May be nil in
 	// deployments where fork is not wired; ForkSession checks.
 	forkService sessionForker
+	// rewindService truncates the current session at a chosen message. May
+	// be nil in deployments where rewind is not wired; RewindSession checks.
+	rewindService sessionRewinder
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -99,6 +102,7 @@ func NewHandler(
 	desktopLast service.SandboxDesktopLastStore,
 	rdb *redis.Client,
 	forkService *service.SessionForkService,
+	rewindService *service.SessionRewindService,
 ) *Handler {
 	h := &Handler{
 		browserSkill:          browserSkill,
@@ -137,6 +141,9 @@ func NewHandler(
 	}
 	if forkService != nil {
 		h.forkService = forkService
+	}
+	if rewindService != nil {
+		h.rewindService = rewindService
 	}
 	return h
 }

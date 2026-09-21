@@ -84,10 +84,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	_ "github.com/Tencent/WeKnora/internal/models/vendors" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -111,6 +113,12 @@ import (
 // Returns:
 //   - Configured container with all application dependencies registered
 func BuildContainer(container *dig.Container) *dig.Container {
+	// Deployment-level model catalog overlay (config/models.json, optional).
+	// Built-in vendors register themselves through the vendors package
+	// import; the overlay may add vendors or patch built-in ones.
+	if err := catalog.LoadOverlay(config.ConfigDir()); err != nil {
+		logger.Warnf(context.Background(), "Load models catalog overlay failed: %v", err)
+	}
 	ctx := context.Background()
 	logger.Debugf(ctx, "[Container] Starting container initialization...")
 
@@ -387,6 +395,20 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		return pinned
 	}))
 	must(container.Provide(service.NewSessionForkServiceFromRepos))
+	must(container.Provide(func(
+		mgr sandbox.Manager,
+		pinned *service.PinnedSessionSandbox,
+	) service.SessionRewindSandboxPort {
+		if port, ok := mgr.(service.SessionRewindSandboxPort); ok {
+			return port
+		}
+		if pinned == nil {
+			return nil
+		}
+		return pinned
+	}))
+	must(container.Provide(service.NewSessionBusyGate))
+	must(container.Provide(service.NewSessionRewindServiceFromRepos))
 
 	// SandboxTerminalService opens interactive PTYs on session sandboxes for
 	// the frontend terminal panel. First-use provisioning takes a sandbox
@@ -581,7 +603,7 @@ func registerChatLocalImageResolver(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 ) {
-	chat.LocalImageResolver = func(storageURL string) ([]byte, bool) {
+	api.LocalImageResolver = func(storageURL string) ([]byte, bool) {
 		// The object storage clients bound connection setup but leave the
 		// transfer to this context, so give it a deadline: a chat turn must
 		// not hang on one image whose download stalls.
@@ -865,6 +887,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		migrateLegacyStorageBackends(db)
 
 		// Post-migration: declarative built-in models from config/builtin_models.yaml (optional).
+		// The loader validates each row's catalog parameters through this hook;
+		// the wiring lives here because internal/types cannot import the catalog.
+		types.ValidateModelParameters = catalog.ValidateRow
 		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.ConfigDir()); err != nil {
 			logger.Warnf(context.Background(), "Load builtin models config failed: %v", err)
 		}

@@ -56,13 +56,12 @@ func TestCheckpointScriptShape(t *testing.T) {
 	script := runner.calls[0]
 
 	// safe.directory must precede the rev-parse probe: the probe itself is
-	// what dubious-ownership blocks.
+	// what dubious-ownership blocks. -c, not --add: writing global config
+	// every turn would grow ~/.gitconfig (safe.directory is multi-valued).
 	require.Less(t,
 		strings.Index(script, "safe.directory"),
 		strings.Index(script, "rev-parse --git-dir"),
 	)
-	// Plain assignment, not --add: safe.directory is multi-valued and --add
-	// would append a duplicate line to ~/.gitconfig on every single turn.
 	require.NotContains(t, script, "--add safe.directory")
 	require.Contains(t, script, "--allow-empty")
 	require.Contains(t, script, "turn:msg-42")
@@ -70,6 +69,7 @@ func TestCheckpointScriptShape(t *testing.T) {
 	require.NotContains(t, script, "printf 'input/\\noutput/\\n'")
 	require.Equal(t, workspaceCheckpointTimeout, runner.timeout)
 	require.Equal(t, sandbox.SessionWorkspaceRoot, runner.workDir)
+	assertWorkspaceGitLayout(t, script)
 }
 
 func TestCheckpointReturnsNilWhenExecFails(t *testing.T) {

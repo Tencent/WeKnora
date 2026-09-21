@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { marked } from 'marked'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useUIStore } from '@/stores/ui'
 import {
   listKnowledgeBases,
@@ -15,6 +15,7 @@ import { useUploadConfirmStore } from '@/stores/uploadConfirm'
 import { useOrganizationStore } from '@/stores/organization'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import { sanitizeHTML, safeMarkdownToHTML, hydrateProtectedFileImages } from '@/utils/security'
+import { continueListOnEnter, countContent, indentOnTab } from '@/utils/markdownEditing'
 import { useI18n } from 'vue-i18n'
 
 interface KnowledgeBaseOption {
@@ -85,72 +86,85 @@ const kbLoading = ref(false)
 const contentLoading = ref(false)
 const saving = ref(false)
 const savingAction = ref<ManualStatus>('draft')
-const activeTab = ref<'edit' | 'preview'>('edit')
 const lastUpdatedAt = ref<string>('')
 
-const textareaComponent = ref<any>(null)
-const textareaElement = ref<HTMLTextAreaElement | null>(null)
-const selectionRange = reactive({ start: 0, end: 0 })
-const selectionEvents = ['select', 'keyup', 'click', 'mouseup', 'input']
+// ---------- view mode ----------
+type ViewMode = 'edit' | 'split' | 'preview'
+const VIEW_MODE_STORAGE_KEY = 'manual-editor:view-mode'
+/** Below this the two panes would each be too narrow to write or read in. */
+const SPLIT_MIN_WIDTH = 820
 
-const resolveTextareaElement = (): HTMLTextAreaElement | null => {
-  const component = textareaComponent.value as any
-  if (!component) return null
-  if (component.textareaRef) {
-    return component.textareaRef as HTMLTextAreaElement
+const readStoredViewMode = (): ViewMode => {
+  try {
+    const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY)
+    if (stored === 'edit' || stored === 'split' || stored === 'preview') return stored
+  } catch {
+    // localStorage can throw in private mode / quota errors.
   }
-  if (component.$el) {
-    const el = component.$el.querySelector('textarea')
-    if (el) {
-      return el as HTMLTextAreaElement
-    }
-  }
-  return null
+  return 'split'
 }
 
-const handleTextareaSelectionEvent = () => {
-  const textarea = textareaElement.value ?? resolveTextareaElement()
-  if (!textarea) {
-    return
+const viewMode = ref<ViewMode>(readStoredViewMode())
+const editorAreaRef = ref<HTMLElement | null>(null)
+const editorAreaWidth = ref(SPLIT_MIN_WIDTH)
+const canSplit = computed(() => editorAreaWidth.value >= SPLIT_MIN_WIDTH)
+/**
+ * Narrow-layout switch, driven from the same measurement rather than a
+ * `@container` query: this project's scoped-style pipeline drops `@container`
+ * blocks, so those rules never reach the page.
+ */
+const NARROW_WIDTH = 620
+const isNarrow = computed(() => editorAreaWidth.value > 0 && editorAreaWidth.value < NARROW_WIDTH)
+/** Split silently falls back to edit-only while the drawer is too narrow for it. */
+const activeView = computed<ViewMode>(() =>
+  viewMode.value === 'split' && !canSplit.value ? 'edit' : viewMode.value,
+)
+const showEditor = computed(() => activeView.value !== 'preview')
+const showPreview = computed(() => activeView.value !== 'edit')
+
+const setViewMode = (mode: ViewMode) => {
+  if (mode === 'split' && !canSplit.value) return
+  viewMode.value = mode
+  try {
+    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode)
+  } catch {
+    // Ignore: remembering the layout is a convenience, not a requirement.
   }
+}
+
+let editorAreaObserver: ResizeObserver | null = null
+
+watch(editorAreaRef, (el) => {
+  editorAreaObserver?.disconnect()
+  editorAreaObserver = null
+  if (!el) return
+  // Measure straight away: waiting for the observer's first callback would
+  // paint a split editor for a frame before collapsing it on a narrow drawer.
+  editorAreaWidth.value = el.clientWidth
+  if (typeof ResizeObserver === 'undefined') return
+  editorAreaObserver = new ResizeObserver((entries) => {
+    editorAreaWidth.value = entries[0]?.contentRect.width ?? 0
+  })
+  editorAreaObserver.observe(el)
+})
+
+// ---------- textarea selection ----------
+const textareaEl = ref<HTMLTextAreaElement | null>(null)
+const selectionRange = reactive({ start: 0, end: 0 })
+
+const syncSelection = () => {
+  const textarea = textareaEl.value
+  if (!textarea) return
   selectionRange.start = textarea.selectionStart ?? 0
   selectionRange.end = textarea.selectionEnd ?? 0
-}
-
-const detachTextareaListeners = () => {
-  if (!textareaElement.value) {
-    return
-  }
-  selectionEvents.forEach((eventName) => {
-    textareaElement.value?.removeEventListener(eventName, handleTextareaSelectionEvent)
-  })
-  textareaElement.value = null
-}
-
-const attachTextareaListeners = () => {
-  nextTick(() => {
-    const textarea = resolveTextareaElement()
-    if (!textarea) {
-      return
-    }
-    if (textareaElement.value === textarea) {
-      return
-    }
-    detachTextareaListeners()
-    textareaElement.value = textarea
-    selectionEvents.forEach((eventName) => {
-      textarea.addEventListener(eventName, handleTextareaSelectionEvent)
-    })
-    handleTextareaSelectionEvent()
-  })
 }
 
 const setSelectionRange = (start: number, end: number) => {
   selectionRange.start = start
   selectionRange.end = end
   nextTick(() => {
-    const textarea = resolveTextareaElement()
-    if (!textarea || activeTab.value !== 'edit') {
+    const textarea = textareaEl.value
+    if (!textarea || !showEditor.value) {
       return
     }
     // Initialization can finish while the drawer is still sliding in. A plain
@@ -340,76 +354,219 @@ type ToolbarButton = {
   action: ToolbarAction
   icon: string
 }
+/**
+ * A group of related actions behind one labelled trigger. Headings and the
+ * block inserts are one-per-document choices, so they cost more toolbar room
+ * than they earn as separate icons.
+ */
+type ToolbarMenu = {
+  key: string
+  label: string
+  options: Array<{ content: string; value: string }>
+  actions: Record<string, ToolbarAction>
+}
 type ToolbarGroup = {
   key: string
   buttons: ToolbarButton[]
+  menu?: ToolbarMenu
 }
 
-const toolbarGroups = computed<ToolbarGroup[]>(() => [
-  {
-    key: 'format',
-    buttons: [
-      { key: 'bold', icon: 'textformat-bold', tooltip: t('manualEditor.toolbar.bold'), action: () => wrapSelection('**', '**', t('manualEditor.placeholders.bold')) },
-      { key: 'italic', icon: 'textformat-italic', tooltip: t('manualEditor.toolbar.italic'), action: () => wrapSelection('*', '*', t('manualEditor.placeholders.italic')) },
-      { key: 'strike', icon: 'textformat-strikethrough', tooltip: t('manualEditor.toolbar.strike'), action: () => wrapSelection('~~', '~~', t('manualEditor.placeholders.strike')) },
-      { key: 'inline-code', icon: 'code', tooltip: t('manualEditor.toolbar.inlineCode'), action: () => wrapSelection('`', '`', t('manualEditor.placeholders.inlineCode')) },
-    ],
-  },
-  {
+const toolbarGroups = computed<ToolbarGroup[]>(() => {
+  const headingMenu: ToolbarMenu = {
     key: 'heading',
-    buttons: [
-      { key: 'h1', icon: 'numbers-1', tooltip: t('manualEditor.toolbar.heading1'), action: () => applyHeading(1) },
-      { key: 'h2', icon: 'numbers-2', tooltip: t('manualEditor.toolbar.heading2'), action: () => applyHeading(2) },
-      { key: 'h3', icon: 'numbers-3', tooltip: t('manualEditor.toolbar.heading3'), action: () => applyHeading(3) },
+    label: t('manualEditor.toolbar.headingGroup'),
+    options: [
+      { content: t('manualEditor.toolbar.heading1'), value: 'h1' },
+      { content: t('manualEditor.toolbar.heading2'), value: 'h2' },
+      { content: t('manualEditor.toolbar.heading3'), value: 'h3' },
     ],
-  },
-  {
-    key: 'list',
-    buttons: [
-      { key: 'ul', icon: 'view-list', tooltip: t('manualEditor.toolbar.bulletList'), action: applyBulletList },
-      { key: 'ol', icon: 'list-numbered', tooltip: t('manualEditor.toolbar.orderedList'), action: applyOrderedList },
-      { key: 'task', icon: 'check-rectangle', tooltip: t('manualEditor.toolbar.taskList'), action: applyTaskList },
-      { key: 'quote', icon: 'quote', tooltip: t('manualEditor.toolbar.blockquote'), action: applyBlockquote },
-    ],
-  },
-  {
+    actions: {
+      h1: () => applyHeading(1),
+      h2: () => applyHeading(2),
+      h3: () => applyHeading(3),
+    },
+  }
+
+  const insertMenu: ToolbarMenu = {
     key: 'insert',
-    buttons: [
-      { key: 'codeblock', icon: 'code-1', tooltip: t('manualEditor.toolbar.codeBlock'), action: insertCodeBlock },
-      { key: 'link', icon: 'link', tooltip: t('manualEditor.toolbar.link'), action: insertLink },
-      { key: 'image', icon: 'image', tooltip: t('manualEditor.toolbar.image'), action: insertImage },
-      { key: 'table', icon: 'table', tooltip: t('manualEditor.toolbar.table'), action: insertTable },
-      { key: 'hr', icon: 'component-divider-horizontal', tooltip: t('manualEditor.toolbar.horizontalRule'), action: insertHorizontalRule },
+    label: t('manualEditor.toolbar.insertGroup'),
+    options: [
+      { content: t('manualEditor.toolbar.blockquote'), value: 'quote' },
+      { content: t('manualEditor.toolbar.codeBlock'), value: 'codeblock' },
+      { content: t('manualEditor.toolbar.table'), value: 'table' },
+      { content: t('manualEditor.toolbar.image'), value: 'image' },
+      { content: t('manualEditor.toolbar.horizontalRule'), value: 'hr' },
     ],
-  },
-])
+    actions: {
+      quote: applyBlockquote,
+      codeblock: insertCodeBlock,
+      table: insertTable,
+      image: insertImage,
+      hr: insertHorizontalRule,
+    },
+  }
+
+  return [
+    {
+      key: 'format',
+      buttons: [
+        { key: 'bold', icon: 'textformat-bold', tooltip: t('manualEditor.toolbar.bold'), action: () => wrapSelection('**', '**', t('manualEditor.placeholders.bold')) },
+        { key: 'italic', icon: 'textformat-italic', tooltip: t('manualEditor.toolbar.italic'), action: () => wrapSelection('*', '*', t('manualEditor.placeholders.italic')) },
+        { key: 'strike', icon: 'textformat-strikethrough', tooltip: t('manualEditor.toolbar.strike'), action: () => wrapSelection('~~', '~~', t('manualEditor.placeholders.strike')) },
+        { key: 'inline-code', icon: 'code', tooltip: t('manualEditor.toolbar.inlineCode'), action: () => wrapSelection('`', '`', t('manualEditor.placeholders.inlineCode')) },
+      ],
+    },
+    { key: 'heading', buttons: [], menu: headingMenu },
+    {
+      key: 'list',
+      buttons: [
+        { key: 'ul', icon: 'view-list', tooltip: t('manualEditor.toolbar.bulletList'), action: applyBulletList },
+        { key: 'ol', icon: 'list-numbered', tooltip: t('manualEditor.toolbar.orderedList'), action: applyOrderedList },
+        { key: 'task', icon: 'check-rectangle', tooltip: t('manualEditor.toolbar.taskList'), action: applyTaskList },
+      ],
+    },
+    {
+      key: 'insert',
+      buttons: [
+        { key: 'link', icon: 'link', tooltip: t('manualEditor.toolbar.link'), action: insertLink },
+      ],
+      menu: insertMenu,
+    },
+  ]
+})
+
+/** TDesign hands the clicked item's `value` (or the item itself in older builds). */
+const handleToolbarMenuSelect = (menu: ToolbarMenu, selected: unknown) => {
+  const key =
+    selected && typeof selected === 'object'
+      ? String((selected as { value?: unknown }).value ?? '')
+      : String(selected ?? '')
+  const action = menu.actions[key]
+  if (action) handleToolbarAction(action)
+}
 
 const previewRoot = ref<HTMLElement | null>(null)
-const isPreviewMode = computed(() => activeTab.value === 'preview')
-const viewToggleIcon = computed(() => (isPreviewMode.value ? 'edit-1' : 'browse'))
-const viewToggleLabel = computed(() =>
-  isPreviewMode.value ? t('manualEditor.view.editLabel') : t('manualEditor.view.previewLabel'),
-)
+
+const viewOptions = computed(() => [
+  { value: 'edit' as ViewMode, icon: 'edit-1', label: t('manualEditor.view.edit'), disabled: false, tooltip: t('manualEditor.view.edit') },
+  {
+    value: 'split' as ViewMode,
+    icon: 'column-layout',
+    label: t('manualEditor.view.split'),
+    disabled: !canSplit.value,
+    tooltip: canSplit.value ? t('manualEditor.view.split') : t('manualEditor.view.splitUnavailable'),
+  },
+  { value: 'preview' as ViewMode, icon: 'browse', label: t('manualEditor.view.preview'), disabled: false, tooltip: t('manualEditor.view.preview') },
+])
 
 const handleToolbarAction = (action: ToolbarAction) => {
   if (saving.value) {
     return
   }
-  if (activeTab.value !== 'edit') {
-    activeTab.value = 'edit'
-    nextTick(() => {
-      attachTextareaListeners()
-      action()
-    })
+  // Formatting acts on the textarea, so bring it back into view first.
+  if (!showEditor.value) {
+    setViewMode(canSplit.value ? 'split' : 'edit')
+    nextTick(action)
   } else {
-    attachTextareaListeners()
     action()
   }
 }
 
-const toggleEditorView = () => {
-  activeTab.value = isPreviewMode.value ? 'edit' : 'preview'
+// ---------- keyboard ----------
+const isApplePlatform =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)
+const modifierLabel = computed(() => (isApplePlatform ? '⌘' : 'Ctrl+'))
+
+const SHORTCUT_ACTIONS: Record<string, () => void> = {
+  b: () => wrapSelection('**', '**', t('manualEditor.placeholders.bold')),
+  i: () => wrapSelection('*', '*', t('manualEditor.placeholders.italic')),
+  k: insertLink,
 }
+
+const applyPatch = (patch: { value: string; start: number; end: number }) => {
+  form.content = patch.value
+  setSelectionRange(patch.start, patch.end)
+}
+
+/** Read the live caret off the event target — it is ahead of our cached range. */
+const readEditorState = (event: KeyboardEvent) => {
+  const textarea = event.currentTarget instanceof HTMLTextAreaElement ? event.currentTarget : null
+  return {
+    value: form.content ?? '',
+    start: textarea?.selectionStart ?? selectionRange.start,
+    end: textarea?.selectionEnd ?? selectionRange.end,
+  }
+}
+
+/**
+ * Shortcuts an author expects from any Markdown editor, plus list/indent
+ * behaviour a bare <textarea> does not provide.
+ */
+const handleEditorKeydown = (event: KeyboardEvent) => {
+  // Never steal a key from an IME mid-composition (Chinese/Japanese input).
+  if (event.isComposing || event.keyCode === 229) return
+
+  const modifier = isApplePlatform ? event.metaKey : event.ctrlKey
+  if (modifier && !event.altKey) {
+    const key = event.key.toLowerCase()
+    if (key === 'enter') {
+      event.preventDefault()
+      handleSave('publish')
+      return
+    }
+    if (key === 's') {
+      event.preventDefault()
+      handleSave('draft')
+      return
+    }
+    if (saving.value) return
+    const shortcut = SHORTCUT_ACTIONS[key]
+    if (shortcut) {
+      event.preventDefault()
+      syncSelection()
+      shortcut()
+      return
+    }
+  }
+
+  if (saving.value) return
+  const state = readEditorState(event)
+
+  if (event.key === 'Enter' && !event.shiftKey && !modifier) {
+    const patch = continueListOnEnter(state)
+    if (patch) {
+      event.preventDefault()
+      applyPatch(patch)
+    }
+    return
+  }
+
+  if (event.key === 'Tab') {
+    const patch = indentOnTab(state, event.shiftKey)
+    if (patch) {
+      event.preventDefault()
+      applyPatch(patch)
+    }
+  }
+}
+
+const contentStats = computed(() => countContent(form.content))
+const counterText = computed(() =>
+  t('manualEditor.status.counter', {
+    chars: contentStats.value.characters,
+    lines: contentStats.value.lines,
+  }),
+)
+/** Rows behind the status bar's keyboard button — a full list, not a cropped line. */
+const shortcutRows = computed(() => [
+  { keys: `${modifierLabel.value}B`, label: t('manualEditor.toolbar.bold') },
+  { keys: `${modifierLabel.value}I`, label: t('manualEditor.toolbar.italic') },
+  { keys: `${modifierLabel.value}K`, label: t('manualEditor.toolbar.link') },
+  { keys: `${modifierLabel.value}S`, label: t('manualEditor.actions.saveDraft') },
+  { keys: `${modifierLabel.value}\u21B5`, label: t('manualEditor.actions.publish') },
+  { keys: 'Enter', label: t('manualEditor.shortcuts.continueList') },
+  { keys: 'Tab', label: t('manualEditor.shortcuts.indent') },
+])
 
 marked.use({})
 
@@ -422,9 +579,9 @@ const previewHTML = computed(() => {
   return sanitizeHTML(html)
 })
 
-watch([previewHTML, activeTab, () => form.kbId], async () => {
+watch([previewHTML, activeView, () => form.kbId], async () => {
   await nextTick()
-  if (activeTab.value === 'preview') await hydrateProtectedFileImages(previewRoot.value,
+  if (showPreview.value) await hydrateProtectedFileImages(previewRoot.value,
     mode.value === 'edit' && form.kbId ? { mode: 'knowledgeBase', kbId: form.kbId } : undefined)
 })
 
@@ -562,7 +719,6 @@ const resetForm = () => {
   form.title = uiStore.manualEditorInitialTitle || ''
   form.content = uiStore.manualEditorInitialContent || ''
   form.status = uiStore.manualEditorInitialStatus || 'draft'
-  activeTab.value = 'edit'
   lastUpdatedAt.value = ''
   initialLoaded.value = false
   manualTagIds.value = mode.value === 'create' ? [...uiStore.selectedTagIds] : []
@@ -595,6 +751,7 @@ const initialize = async () => {
   }
 
   initialLoaded.value = true
+  markPristine()
 }
 
 const validateForm = (targetStatus: ManualStatus): boolean => {
@@ -697,6 +854,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
           status: targetStatus,
         })
       }
+      markPristine()
       uiStore.closeManualEditor()
     } else {
       const message = response?.message || t('manualEditor.error.saveFailed')
@@ -710,8 +868,33 @@ const handleSave = async (targetStatus: ManualStatus) => {
   }
 }
 
+// ---------- unsaved-changes guard ----------
+const pristineSnapshot = ref('')
+
+const snapshot = () => JSON.stringify({ kbId: form.kbId, title: form.title, content: form.content })
+const markPristine = () => {
+  pristineSnapshot.value = snapshot()
+}
+const isDirty = () => initialLoaded.value && snapshot() !== pristineSnapshot.value
+
 const handleClose = () => {
-  uiStore.closeManualEditor()
+  if (!isDirty()) {
+    uiStore.closeManualEditor()
+    return
+  }
+  // An accidental overlay click used to throw the whole draft away.
+  const dialog = DialogPlugin.confirm({
+    header: t('common.unsavedChanges.title'),
+    body: t('common.unsavedChanges.body'),
+    theme: 'warning',
+    confirmBtn: { content: t('common.unsavedChanges.discard'), theme: 'danger' },
+    cancelBtn: t('common.unsavedChanges.keepEditing'),
+    onConfirm: () => {
+      dialog.destroy()
+      uiStore.closeManualEditor()
+    },
+    onClose: () => dialog.destroy(),
+  })
 }
 
 watch(visible, async (val) => {
@@ -719,39 +902,29 @@ watch(visible, async (val) => {
     await nextTick()
     await initialize()
     await nextTick()
-    attachTextareaListeners()
     const length = form.content ? form.content.length : 0
     setSelectionRange(length, length)
   } else {
-    detachTextareaListeners()
     resetForm()
   }
 })
 
-watch(activeTab, (val) => {
-  if (val === 'edit') {
-    nextTick(() => {
-      attachTextareaListeners()
-    })
-  } else {
-    detachTextareaListeners()
-  }
-})
-
 onBeforeUnmount(() => {
-  detachTextareaListeners()
+  editorAreaObserver?.disconnect()
+  editorAreaObserver = null
 })
 </script>
 
 <template>
   <SettingDrawer
+    class="manual-editor-drawer"
     :visible="visible"
     :title="dialogTitle"
-    :description="$t('manualEditor.description')"
     icon="edit-1"
-    width="760px"
-    :min-width="560"
-    :max-width="1280"
+    width="960px"
+    :min-width="600"
+    :max-width="1440"
+    maximizable
     storage-key="setting-drawer:width:manual-markdown-editor"
     :hide-footer="!initialLoaded"
     @update:visible="(v: boolean) => { visible = v }"
@@ -764,6 +937,7 @@ onBeforeUnmount(() => {
         <t-tag size="small" theme="success" variant="light" v-else>
           {{ $t('manualEditor.status.publishedTag') }}
         </t-tag>
+        <span class="manual-editor-footer-count">{{ counterText }}</span>
       </div>
     </template>
 
@@ -798,110 +972,148 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
-    <div class="manual-editor" v-if="initialLoaded">
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('manualEditor.section.basic') }}</h4>
-
-        <div class="form-item">
-          <label class="form-label required">{{ $t('manualEditor.form.titleLabel') }}</label>
-          <t-input
-            v-model="form.title"
-            maxlength="100"
-            :placeholder="$t('manualEditor.form.titlePlaceholder')"
-            showLimitNumber
-          />
+    <div class="manual-editor" :class="{ 'manual-editor--narrow': isNarrow }" v-if="initialLoaded">
+      <!-- Document head: the title reads as the document's title, not as a form
+           field, and the destination is a sentence instead of a labelled row. -->
+      <div class="doc-head">
+        <t-input
+          id="manual-editor-title"
+          class="doc-title"
+          v-model="form.title"
+          maxlength="100"
+          borderless
+          :placeholder="$t('manualEditor.form.titlePlaceholder')"
+          :aria-label="$t('manualEditor.form.titleLabel')"
+        />
+        <div class="doc-meta">
+          <t-tooltip :content="$t('manualEditor.form.knowledgeBaseLabel')" placement="top">
+            <t-icon name="folder" class="doc-meta__icon" />
+          </t-tooltip>
+          <t-select
+            class="doc-meta__kb"
+            v-model="form.kbId"
+            size="small"
+            auto-width
+            :disabled="kbDisabled"
+            :loading="kbLoading"
+            :options="kbOptions"
+            :placeholder="$t('manualEditor.form.knowledgeBasePlaceholder')"
+            :aria-label="$t('manualEditor.form.knowledgeBaseLabel')"
+            :popup-props="{ attach: 'body', zIndex: 2600 }"
+          >
+            <template #empty>
+              <div class="kb-empty">{{ $t('manualEditor.noDocumentKnowledgeBases') }}</div>
+            </template>
+          </t-select>
+          <span v-if="lastUpdatedText" class="doc-meta__time">{{ lastUpdatedText }}</span>
         </div>
+      </div>
 
-        <div class="form-item">
-          <label class="form-label required">{{ $t('manualEditor.form.knowledgeBaseLabel') }}</label>
-          <div class="kb-row">
-            <t-select
-              v-model="form.kbId"
-              :disabled="kbDisabled"
-              :loading="kbLoading"
-              :options="kbOptions"
-              :placeholder="$t('manualEditor.form.knowledgeBasePlaceholder')"
-              :popup-props="{ attach: 'body', zIndex: 2600 }"
-            >
-              <template #empty>
-                <div style="padding: 20px; text-align: center; color: var(--td-text-color-placeholder);">
-                  {{ $t('manualEditor.noDocumentKnowledgeBases') }}
-                </div>
-              </template>
-            </t-select>
-            <div class="status-row" v-if="mode === 'edit'">
-              <t-tag size="small" theme="warning" variant="light" v-if="form.status === 'draft'">
-                {{ $t('manualEditor.status.draftTag') }}
-              </t-tag>
-              <t-tag size="small" theme="success" variant="light" v-else>
-                {{ $t('manualEditor.status.publishedTag') }}
-              </t-tag>
-            </div>
+      <div class="editor-area" ref="editorAreaRef" :class="`editor-area--${activeView}`">
+        <div class="editor-toolbar">
+          <div class="editor-toolbar__format">
+            <template v-for="(group, groupIndex) in toolbarGroups" :key="group.key">
+              <div class="toolbar-group">
+                <template v-for="btn in group.buttons" :key="btn.key">
+                  <t-tooltip :content="btn.tooltip" placement="top">
+                    <button
+                      type="button"
+                      class="toolbar-btn"
+                      :aria-label="btn.tooltip"
+                      @mousedown.prevent
+                      @click="handleToolbarAction(btn.action)"
+                    >
+                      <t-icon :name="btn.icon" size="18px" />
+                    </button>
+                  </t-tooltip>
+                </template>
+                <t-dropdown
+                  v-if="group.menu"
+                  :options="group.menu.options"
+                  trigger="click"
+                  :min-column-width="132"
+                  :popup-props="{ attach: 'body', zIndex: 2600 }"
+                  @click="(selected: unknown) => handleToolbarMenuSelect(group.menu!, selected)"
+                >
+                  <button type="button" class="toolbar-menu-btn" @mousedown.prevent>
+                    <span>{{ group.menu.label }}</span>
+                    <t-icon name="chevron-down" class="toolbar-menu-btn__caret" />
+                  </button>
+                </t-dropdown>
+              </div>
+              <div
+                v-if="groupIndex < toolbarGroups.length - 1"
+                class="toolbar-divider"
+              ></div>
+            </template>
           </div>
-          <p v-if="lastUpdatedText" class="form-desc">{{ lastUpdatedText }}</p>
-        </div>
-      </section>
-
-      <section class="setting-drawer__section editor-section">
-        <h4 class="setting-drawer__section-title">{{ $t('manualEditor.section.content') }}</h4>
-
-        <div class="editor-area">
-          <div class="editor-toolbar">
-            <div class="editor-toolbar__format">
-              <template v-for="(group, groupIndex) in toolbarGroups" :key="group.key">
-                <div class="toolbar-group">
-                  <template v-for="btn in group.buttons" :key="btn.key">
-                    <t-tooltip :content="btn.tooltip" placement="top">
-                      <button
-                        type="button"
-                        class="toolbar-btn"
-                        :class="`btn-${btn.key}`"
-                        @mousedown.prevent
-                        @click="handleToolbarAction(btn.action)"
-                      >
-                        <t-icon :name="btn.icon" size="18px" />
-                      </button>
-                    </t-tooltip>
-                  </template>
+          <div class="editor-toolbar__view">
+            <t-tooltip placement="top-right" :show-arrow="false">
+              <template #content>
+                <div class="shortcut-sheet">
+                  <div class="shortcut-sheet__title">{{ $t('manualEditor.shortcuts.title') }}</div>
+                  <div v-for="row in shortcutRows" :key="row.keys" class="shortcut-sheet__row">
+                    <kbd>{{ row.keys }}</kbd>
+                    <span>{{ row.label }}</span>
+                  </div>
                 </div>
-                <div
-                  v-if="groupIndex < toolbarGroups.length - 1"
-                  class="toolbar-divider"
-                ></div>
               </template>
-            </div>
-            <div class="editor-toolbar__view">
-              <t-button
-                variant="text"
-                theme="primary"
-                size="small"
-                :class="['toggle-view-btn', { 'is-preview': isPreviewMode }]"
-                :disabled="saving"
-                @click="toggleEditorView"
+              <button
+                type="button"
+                class="toolbar-shortcuts"
+                :aria-label="$t('manualEditor.shortcuts.title')"
+                @mousedown.prevent
               >
-                <template #icon><t-icon :name="viewToggleIcon" /></template>
-                {{ viewToggleLabel }}
-              </t-button>
+                <t-icon name="keyboard" />
+              </button>
+            </t-tooltip>
+            <div class="view-switch" role="group" :aria-label="$t('manualEditor.view.groupLabel')">
+              <t-tooltip v-for="option in viewOptions" :key="option.value" :content="option.tooltip" placement="top">
+                <!-- aria-disabled, not disabled: a disabled button swallows hover,
+                     and the tooltip is the only place that explains why split is off. -->
+                <button
+                  type="button"
+                  class="view-switch__btn"
+                  :class="{ 'is-active': activeView === option.value, 'is-disabled': option.disabled }"
+                  :aria-disabled="option.disabled"
+                  :aria-pressed="activeView === option.value"
+                  @mousedown.prevent
+                  @click="setViewMode(option.value)"
+                >
+                  <t-icon :name="option.icon" />
+                  <span class="view-switch__label">{{ option.label }}</span>
+                </button>
+              </t-tooltip>
             </div>
           </div>
+        </div>
 
-          <div class="editor-pane" v-show="activeTab === 'edit'">
-            <t-textarea
-              ref="textareaComponent"
+        <div class="editor-body">
+          <div class="editor-pane editor-pane--edit" v-show="showEditor">
+            <textarea
               v-if="!contentLoading"
+              ref="textareaEl"
               v-model="form.content"
-              :placeholder="$t('manualEditor.form.contentPlaceholder')"
               class="editor-textarea"
-            />
+              spellcheck="false"
+              :placeholder="$t('manualEditor.form.contentPlaceholder')"
+              :aria-label="$t('manualEditor.section.content')"
+              @keydown="handleEditorKeydown"
+              @select="syncSelection"
+              @click="syncSelection"
+              @keyup="syncSelection"
+              @input="syncSelection"
+            ></textarea>
             <div v-else class="loading-placeholder">
               <t-loading size="small" :text="$t('manualEditor.loading.content')" />
             </div>
           </div>
-          <div class="editor-pane editor-pane--preview" v-show="activeTab === 'preview'">
+          <div class="editor-pane editor-pane--preview" v-show="showPreview">
             <div ref="previewRoot" class="preview-container" v-html="previewHTML" />
           </div>
         </div>
-      </section>
+
+      </div>
     </div>
     <div v-else class="loading-wrapper">
       <t-loading size="medium" :text="$t('manualEditor.loading.preparing')" />
@@ -913,8 +1125,11 @@ onBeforeUnmount(() => {
 /* 复用模型管理同款 SettingDrawer：分组 section / header 图标 / footer 按钮 / 拖拽调宽。
    这里只负责本编辑器特有的内容样式。内容内联渲染（无 teleport），scoped 生效。 */
 .manual-editor {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: 14px;
 }
 
 .manual-editor-footer-meta {
@@ -923,6 +1138,18 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   color: var(--td-text-color-placeholder);
+
+  /* 状态标签保持整行，窄抽屉里让后面的时间先省略 */
+  :deep(.t-tag) {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
+
+.manual-editor-footer-count {
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
 }
 
 .manual-editor-footer-actions {
@@ -940,7 +1167,8 @@ onBeforeUnmount(() => {
   border-color: transparent;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  transition: background var(--app-motion-base) ease, border-color var(--app-motion-base) ease,
+    color var(--app-motion-base) ease;
 
   &:hover {
     border-color: var(--td-component-stroke);
@@ -949,53 +1177,135 @@ onBeforeUnmount(() => {
   }
 }
 
-.form-item {
+/* ---------- 文档头：标题 + 存入位置 ---------- */
+.doc-head {
+  flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 12px;
 }
 
-.form-label {
-  font-size: var(--app-text-md);
-  font-weight: 500;
-  color: var(--td-text-color-primary);
+/* 标题按“文档标题”排版，不做成表单控件；hover/聚焦才显出输入框的边界 */
+:deep(.doc-title) {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  /* 负外边距抵掉内边距：文字和下方编辑卡左对齐，hover 底色仍有呼吸空间 */
+  margin: 0 -8px;
 
-  &.required::after {
-    content: '*';
-    margin-left: 4px;
-    color: var(--td-error-color);
+  .t-input {
+    padding: 4px 8px;
+    border-radius: var(--app-radius-sm);
+    background: transparent;
+    transition: background var(--app-motion-fast) ease;
+  }
+
+  .t-input__inner {
+    font-size: var(--app-text-xl);
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
+
+  &:hover .t-input {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  .t-input.t-is-focused {
+    background: var(--td-bg-color-container-hover);
   }
 }
 
-.form-desc {
-  margin: 2px 0 0;
+.doc-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
-.kb-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.doc-meta__icon {
+  flex-shrink: 0;
+  font-size: var(--app-text-md);
+}
 
-  :deep(.t-select) {
-    flex: 1;
-    min-width: 0;
+:deep(.doc-meta__kb) {
+  /* TDesign 的 select 根节点是块级；这里让它收到内容宽度，
+     否则框比文字宽，箭头够不到右边缘，看着就是没对齐 */
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 260px;
+
+  .t-input {
+    border-color: transparent;
+    background: transparent;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .t-input__inner {
+    color: var(--td-text-color-secondary);
+  }
+
+  &:hover .t-input {
+    border-color: var(--td-component-border);
+    background: var(--td-bg-color-container);
   }
 }
 
-.status-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+.doc-meta__time {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 内容分组：让编辑区占满，无需依赖父级 flex 链路，直接用视口高度，稳健 */
-.editor-section {
+.kb-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--td-text-color-placeholder);
+}
+
+/* 窄抽屉：与其让工具栏折行（视图切换会悬在第二行），不如把视图切换收成图标，
+   一行仍然装得下。文字含义由 tooltip 兜底。 */
+.manual-editor--narrow {
+  .view-switch__btn {
+    padding: 0 6px;
+  }
+
+  .view-switch__label {
+    display: none;
+  }
+
+  /* 极窄时的兜底：真放不下才换行，而不是把按钮藏进隐藏的滚动条里 */
+  .editor-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .editor-toolbar__format {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+}
+
+/* ---------- 编辑区 ---------- */
+.editor-area {
   flex: 1;
-  min-height: 0;
+  /* 视口很矮时不再继续压缩，改由抽屉主体滚动 */
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  overflow: hidden;
+  background: var(--td-bg-color-container);
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
+
+  &:focus-within {
+    border-color: var(--td-component-border);
+  }
 }
 
 .editor-toolbar {
@@ -1028,43 +1338,84 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  gap: 6px;
   padding-left: 8px;
   border-left: 1px solid var(--td-component-stroke);
 }
 
-.toggle-view-btn {
-  min-width: 92px;
-  height: 30px;
-  padding: 0 10px;
+/* 编辑 / 分屏 / 预览：一组分段控件，当前视图一眼可见 */
+.view-switch {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-component-disabled);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 7px;
-  background: var(--td-bg-color-container);
+}
+
+.view-switch__btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--app-radius-xs);
+  background: transparent;
   color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
   font-weight: 500;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover:not(.is-disabled) {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &.is-active {
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  }
+
+  &.is-disabled {
+    color: var(--td-text-color-disabled);
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
+}
+
+/* 快捷键速查：和视图切换同处工具栏右端，省掉一整条状态栏 */
+.toolbar-shortcuts {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-md);
+  cursor: help;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
-    border-color: color-mix(in srgb, var(--td-brand-color) 45%, transparent);
-    background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-    color: var(--td-brand-color);
-    box-shadow: 0 2px 6px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-secondary);
   }
 
-  &.is-preview {
-    border-color: color-mix(in srgb, var(--td-brand-color) 50%, transparent);
-    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-    color: var(--td-brand-color);
-  }
-
-  &:active {
-    transform: translateY(1px);
-    box-shadow: none;
-  }
-
-  :deep(.t-button__icon) {
-    margin-right: 5px;
-    font-size: var(--app-text-lg);
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
   }
 }
 
@@ -1072,6 +1423,38 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+.toolbar-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
+}
+
+.toolbar-menu-btn__caret {
+  font-size: var(--app-text-sm);
+  opacity: 0.7;
 }
 
 .toolbar-divider {
@@ -1090,11 +1473,11 @@ onBeforeUnmount(() => {
   border: none;
   background: transparent;
   cursor: pointer;
-  transition: all var(--app-motion-base) ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  
+
   .t-icon {
     color: var(--td-text-color-secondary);
     font-size: var(--app-text-xl);
@@ -1104,20 +1487,11 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-btn:hover {
-  background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-  color: var(--td-brand-color);
-  
-  .t-icon {
-    color: var(--td-brand-color);
-  }
-}
+  background: var(--td-bg-color-container-hover);
+  color: var(--td-text-color-primary);
 
-.toolbar-btn.active {
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  color: var(--td-brand-color);
-  
   .t-icon {
-    color: var(--td-brand-color);
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -1127,31 +1501,20 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-btn:active {
-  background: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
+  background: var(--td-bg-color-container-active);
   transform: translateY(0.5px);
 }
 
-.editor-area {
-  /* 抽屉为整屏高，减去 header/footer/基本信息分组的大致高度，
-     让编辑区占据剩余空间且不必撑满父级 flex 链路。 */
-  height: calc(100vh - 360px);
-  min-height: 280px;
+.editor-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  flex-direction: column;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-md);
-  overflow: hidden;
-  background: var(--td-bg-color-container);
-  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
-
-  &:focus-within {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  }
+  align-items: stretch;
 }
 
 .editor-pane {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1159,33 +1522,37 @@ onBeforeUnmount(() => {
   background: var(--td-bg-color-container);
 }
 
-:deep(.editor-textarea) {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+/* 分屏时两栏之间给一道分隔线，预览栏底色略沉，区分“源码 / 成稿” */
+.editor-area--split {
+  .editor-pane--preview {
+    border-left: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-secondarycontainer);
+  }
 
-  .t-textarea__inner {
-    flex: 1;
-    height: 100% !important;
-    resize: none;
-    border: none;
-    border-radius: 0;
-    padding: 14px 16px;
-    font-family: var(--app-font-family-mono);
-    font-size: var(--app-text-base);
-    line-height: 1.7;
-    background: var(--td-bg-color-container);
-
-    &:focus {
-      box-shadow: none;
-    }
+  .preview-container {
+    background: var(--td-bg-color-secondarycontainer);
   }
 }
 
-.editor-pane--preview {
+.editor-textarea {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  outline: none;
+  resize: none;
+  box-sizing: border-box;
+  font-family: var(--app-font-family-mono);
+  font-size: var(--app-text-base);
+  line-height: 1.7;
+  color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
+  tab-size: 2;
+
+  &::placeholder {
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .preview-container {
@@ -1220,16 +1587,20 @@ onBeforeUnmount(() => {
     overflow: auto;
   }
 
+  /* 与 chat-markdown.less 的引用块一致：中性描边、无底色 */
   :deep(blockquote) {
-    border-left: 4px solid var(--td-brand-color);
-    padding-left: 12px;
+    border-left: 2px solid var(--td-component-stroke);
+    padding: 6px 0 6px 14px;
     color: var(--td-text-color-secondary);
-    margin: 16px 0;
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+    margin: 12px 0;
   }
 
   :deep(a) {
     color: var(--td-brand-color);
+  }
+
+  :deep(img) {
+    max-width: 100%;
   }
 }
 
@@ -1245,5 +1616,71 @@ onBeforeUnmount(() => {
 
 .empty-preview {
   color: var(--td-text-color-placeholder);
+}
+</style>
+
+<!--
+  Non-scoped: the editor wants the drawer's full height instead of the body's
+  natural scroll, so the flex chain has to start at TDesign's own body wrapper.
+  Namespaced under .manual-editor-drawer so no other SettingDrawer is affected.
+-->
+<style lang="less">
+/* Tooltip content is teleported out of the component, so its rules cannot be scoped. */
+.shortcut-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.shortcut-sheet__title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.shortcut-sheet__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+
+  kbd {
+    min-width: 42px;
+    font-family: var(--app-font-family-mono);
+    font-size: var(--app-text-xs);
+    opacity: 0.9;
+  }
+}
+
+.manual-editor-drawer {
+  /* 没有副标题的抽屉不需要 65px 的头：收一圈内边距、缩小图标徽章，
+     把高度还给正文。只作用于本抽屉，不动共用的 SettingDrawer。 */
+  .t-drawer__header {
+    /* TDesign 给 header 兜了 56px 的 min-height，不解开就只是白留一圈空 */
+    min-height: 0;
+    padding: 9px 18px;
+  }
+
+  .setting-drawer__header {
+    padding: 0;
+  }
+
+  .setting-drawer__header-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--app-radius-sm);
+    font-size: var(--app-text-md);
+  }
+
+  .t-drawer__body {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .setting-drawer__body {
+    flex: 1;
+    min-height: 0;
+  }
 }
 </style>

@@ -46,6 +46,8 @@ type SummaryConfig struct {
 	MaxCompletionTokens int `json:"max_completion_tokens"`
 	// Thinking - whether to enable thinking mode
 	Thinking *bool `json:"thinking"`
+	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // ContextCompressionStrategy represents the strategy for context compression

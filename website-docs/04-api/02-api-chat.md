@@ -375,6 +375,7 @@ curl -X DELETE $BASE/api/v1/messages/s-1/m-1 -H "Authorization: Bearer $TOKEN"
 | GET | `/api/v1/sessions/:id/artifacts` | 200 `{success:true,data:[Artifact]}`，汇总会话文件 |
 | GET | `/api/v1/sessions/:id/messages/:message_id/artifacts` | 同上，仅本条消息文件 |
 | GET | `/api/v1/sessions/:id/messages/:message_id/artifacts/:index/download` | 200 文件流，Content-Disposition: attachment |
+| DELETE | `/api/v1/sessions/:id/messages/:message_id/artifacts/:index` | 200 `{success:true,data:{file_name,deleted}}`，删除该文件 |
 
 Artifact 字段：index、handle（可选 resource:// 引用）、file_name、file_type、file_size、source_path、mod_time、created_at。响应不返回底层对象存储 URL。下载 index 从 0 开始，必须使用对应消息列表的索引，不能拿会话汇总索引直接拼消息下载地址。非法索引返回 400，越界或文件不存在返回 404。
 
@@ -383,6 +384,25 @@ curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts" \
   -H "Authorization: Bearer $TOKEN"
 curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts/0/download" \
   -H "Authorization: Bearer $TOKEN" -o result.pdf
+```
+
+### 删除生成的文件
+
+删除会回收对象存储中的字节，**不可恢复**。与下载不同，删除只对会话归属人开放：通过共享智能体获得的只读访问可以下载文件，但不能删除 —— 不属于自己的会话一律按 404 处理（不区分「不存在」和「无权限」，与其余会话接口一致）。已删除的文件返回 404，重复删除同样返回 404。
+
+字节只有在没有任何其他持有者时才会真正回收：同一份文件被存入知识库、被后续回答重新引用，或者所在会话被分叉出副本，都会让它保留下来。回收失败不影响删除结果（接口仍返回 200），文件在各处列表中都已消失。
+
+删除后该文件在列表接口和产物库中都不再出现，但它在消息中的**位置会被保留**：`index` 就是下载地址，如果后面的文件依次前移，已有的下载链接就会指向错的文件。同一原因，沙箱里的同名文件不会在下一轮采集时被重新收录 —— 它的 mtime 并没有因为用户删除而改变。
+
+只有当没有其他持有者仍然引用该对象时才会真正删除字节：同一份文件如果被存入知识库、或被后续回答重新引用，都会各自持有一份引用，删除其中一处不会动到底层数据。
+
+| 参数 | 说明 |
+| --- | --- |
+| `all_versions` | 连同本会话中同一 `source_path` 的所有历史版本一并删除。布尔值，默认 `false` |
+
+```bash
+curl -X DELETE "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts/0" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 跨会话产物列表
@@ -399,6 +419,13 @@ curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts/0/download" \
 
 ```bash
 curl "$BASE/api/v1/artifacts?file_types=.pptx,.pdf&keyword=报告&page=1&page_size=30" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+`DELETE /api/v1/artifacts` 删除产物库中的一个文件，用 query 参数 `session_id`、`message_id`、`index` 定位，语义与上面的会话内删除一致。区别只在于 `all_versions` 缺省时视为 `true`（显式传值时两个接口的解析规则相同）：产物库一行代表一个文件（`version_count` 给出版本数）而不是某一次生成，只删最新一版会让这一行继续留在列表里、显示上一版。传 `all_versions=false` 可只删当前这一版。
+
+```bash
+curl -X DELETE "$BASE/api/v1/artifacts?session_id=session-1&message_id=message-1&index=0" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

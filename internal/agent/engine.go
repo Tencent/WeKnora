@@ -467,10 +467,31 @@ func (e *AgentEngine) withinIterationBudget(round int) bool {
 	return round < e.config.MaxIterations
 }
 
-// closeAnswerStream emits the Done:true marker for a natural-stop answer
-// that is actually finishing. Loop-end inject skips this so the client
-// does not drop isReplying while the engine continues.
-func (e *AgentEngine) closeAnswerStream(ctx context.Context, sessionID, answerID string) {
+// loopGuards is the per-turn state the ReAct loop uses to notice it is not
+// making progress. All three counters exist because a model can keep the loop
+// spinning without ever finishing: empty answers, the same answer repeated,
+// and rounds cut off at the completion-token cap.
+type loopGuards struct {
+	// emptyRetries counts nudges sent after a stop with no content.
+	emptyRetries int
+	// consecutiveSameContent counts plain rounds that repeated the previous
+	// plain round verbatim, an identical lack of content included.
+	consecutiveSameContent int
+	// sawPlainRound records whether lastResponseContent holds a real
+	// observation yet, so the first plain round of a turn is never counted as
+	// a repeat of the zero value.
+	sawPlainRound       bool
+	lastResponseContent string
+	// consecutiveLength counts rounds in a row that the provider cut off at
+	// the completion-token cap.
+	consecutiveLength int
+}
+
+// closeAnswerStream emits the Done:true marker for an answer that is actually
+// finishing. Loop-end inject skips this so the client does not drop isReplying
+// while the engine continues. truncated rides along on the marker because an
+// answer streamed live only finds out about the completion cap at the close.
+func (e *AgentEngine) closeAnswerStream(ctx context.Context, sessionID, answerID string, truncated bool) {
 	if e.eventBus == nil || answerID == "" {
 		return
 	}
@@ -479,10 +500,63 @@ func (e *AgentEngine) closeAnswerStream(ctx context.Context, sessionID, answerID
 		Type:      event.EventAgentFinalAnswer,
 		SessionID: sessionID,
 		Data: event.AgentFinalAnswerData{
-			Content: "",
-			Done:    true,
+			Content:   "",
+			Done:      true,
+			Truncated: truncated,
 		},
 	})
+}
+
+// finishStalledTurn ends a turn that a guard stopped rather than the model.
+// Whatever text the last round produced stands as the answer; when the round
+// produced none, a fallback says why instead of completing with an empty
+// message. The answer stream is closed here because no natural-stop path will
+// reach it once the loop breaks.
+func (e *AgentEngine) finishStalledTurn(
+	ctx context.Context,
+	state *types.AgentState,
+	sessionID string,
+	response *types.ChatResponse,
+	truncated bool,
+) {
+	// Text that arrived alongside tool calls is a preamble — "let me look that
+	// up" — from a round that meant to keep working. Presenting it as the final
+	// answer would show an opening line and call the turn finished, so the
+	// fallback speaks for it instead.
+	answer := response.Content
+	if len(response.ToolCalls) > 0 {
+		answer = ""
+	}
+	answerID := ""
+	if response.AnswerStreamed && answer != "" {
+		answerID = response.AnswerEventID
+	}
+	if strings.TrimSpace(answer) == "" {
+		answer = stalledAnswerFallback
+		if truncated {
+			answer = truncatedAnswerFallback
+		}
+		answerID = ""
+	}
+	// No answer stream reached the client for this text: the round never
+	// streamed it, or it is the fallback just chosen. Emit it once so the turn
+	// does not end on a Done marker for content the client never saw.
+	if answerID == "" && e.eventBus != nil {
+		answerID = generateEventID("answer")
+		_ = e.eventBus.Emit(ctx, event.Event{
+			ID:        answerID,
+			Type:      event.EventAgentFinalAnswer,
+			SessionID: sessionID,
+			Data: event.AgentFinalAnswerData{
+				Content:   answer,
+				Done:      false,
+				Truncated: truncated,
+			},
+		})
+	}
+	e.closeAnswerStream(ctx, sessionID, answerID, truncated)
+	state.FinalAnswer = answer
+	state.IsComplete = true
 }
 
 func (e *AgentEngine) maxIterationsDisplay() string {
@@ -529,9 +603,7 @@ func (e *AgentEngine) executeLoop(
 	}
 	defer emitCompletion()
 
-	emptyRetries := 0
-	consecutiveSameContent := 0
-	lastResponseContent := ""
+	guards := &loopGuards{}
 loop:
 	for e.withinIterationBudget(state.CurrentRound) || e.allowSteerOverrun {
 		e.allowSteerOverrun = false
@@ -564,7 +636,7 @@ loop:
 		// every exit path (break/continue/next) without having to sprinkle
 		// manual finish calls throughout the many branches below.
 		outcome, iterErr := e.runReActIteration(ctx, state, &messages, tools,
-			sessionID, messageID, query, &emptyRetries, &consecutiveSameContent, &lastResponseContent)
+			sessionID, messageID, query, guards)
 		if iterErr != nil {
 			return state, iterErr
 		}
@@ -611,16 +683,15 @@ const (
 // single `defer span.Finish()` scope — otherwise we'd need to sprinkle
 // manual finish calls across every break/continue/return branch.
 //
-// The mutable loop state (messages, empty-retry counter, stuck-loop detector)
-// is passed by pointer so iterations share progress.
+// The mutable loop state (messages and the no-progress guards) is shared
+// across iterations so each round can see what the previous ones did.
 func (e *AgentEngine) runReActIteration(
 	parentCtx context.Context,
 	state *types.AgentState,
 	messagesPtr *[]chat.Message,
 	tools []chat.Tool,
 	sessionID, assistantMessageID, query string,
-	emptyRetries, consecutiveSameContent *int,
-	lastResponseContent *string,
+	guards *loopGuards,
 ) (outcome iterOutcome, retErr error) {
 	roundStart := time.Now()
 	round := state.CurrentRound + 1
@@ -750,25 +821,71 @@ func (e *AgentEngine) runReActIteration(
 			response.Usage.PromptCacheHitRate(), response.Usage.CacheStatus)
 	}
 
-	// Detect stuck loops: if the LLM keeps returning the same content
-	// without tool calls (e.g., an unhandled finish reason), break early.
-	if len(response.ToolCalls) == 0 && response.Content != "" {
-		if response.Content == *lastResponseContent {
-			*consecutiveSameContent++
-		} else {
-			*consecutiveSameContent = 0
-		}
-		*lastResponseContent = response.Content
-		if *consecutiveSameContent >= maxRepeatedResponseRounds {
-			logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
-				round, *consecutiveSameContent+1, response.FinishReason)
-			state.FinalAnswer = response.Content
-			state.IsComplete = true
+	// Every round in a row that the provider cut off at the completion cap.
+	// A truncated *answer* already ends the turn in analyzeResponse, so a run
+	// of these means the truncation keeps landing inside tool-call arguments:
+	// act.go refuses the calls, the model is told to re-issue them, writes an
+	// even longer call, and hits the cap again. Give up rather than spend the
+	// whole round budget on it (#3446).
+	if isLengthFinishReason(response.FinishReason) {
+		guards.consecutiveLength++
+		if guards.consecutiveLength >= maxConsecutiveLengthRounds {
+			logger.Warnf(ctx, "[Agent][Round-%d] %d consecutive rounds cut off at the completion cap "+
+				"(finish=%s, completion=%d of %d); stopping",
+				round, guards.consecutiveLength, response.FinishReason,
+				response.Usage.CompletionTokens, e.getCompletionTokenBudget())
+			common.PipelineWarn(ctx, "Agent", "consecutive_length_stop", map[string]interface{}{
+				"iteration":          state.CurrentRound,
+				"round":              round,
+				"consecutive_length": guards.consecutiveLength,
+			})
+			// Record the round the way every other round is recorded. The
+			// refused tool calls are also what tells the UI that this round's
+			// plain text was a preamble: without them the "let me look that
+			// up" line stays sitting in the answer area, exactly as if it were
+			// the answer.
+			step := types.AgentStep{
+				Iteration:        state.CurrentRound,
+				Thought:          response.Content,
+				ReasoningContent: response.ReasoningContent,
+				ToolCalls:        make([]types.ToolCall, 0),
+				Timestamp:        time.Now(),
+				Truncated:        true,
+			}
+			if len(response.ToolCalls) > 0 {
+				e.failTruncatedToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
+			}
+			state.RoundSteps = append(state.RoundSteps, step)
+			e.finishStalledTurn(ctx, state, sessionID, response, true)
 			return iterOutcomeBreak, nil
 		}
 	} else {
-		*consecutiveSameContent = 0
-		*lastResponseContent = ""
+		guards.consecutiveLength = 0
+	}
+
+	// Detect stuck loops: a round with no tool calls that repeats the previous
+	// such round is not making progress. An identical *lack* of content counts
+	// — a model burning its whole budget on reasoning returns empty every
+	// round, which used to land in the else branch and reset the counter, so
+	// the guard could never fire on the one shape that needs it most (#3446).
+	if len(response.ToolCalls) == 0 {
+		if guards.sawPlainRound && response.Content == guards.lastResponseContent {
+			guards.consecutiveSameContent++
+		} else {
+			guards.consecutiveSameContent = 0
+		}
+		guards.sawPlainRound = true
+		guards.lastResponseContent = response.Content
+		if guards.consecutiveSameContent >= maxRepeatedResponseRounds {
+			logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
+				round, guards.consecutiveSameContent+1, response.FinishReason)
+			e.finishStalledTurn(ctx, state, sessionID, response, false)
+			return iterOutcomeBreak, nil
+		}
+	} else {
+		guards.consecutiveSameContent = 0
+		guards.sawPlainRound = false
+		guards.lastResponseContent = ""
 	}
 
 	// Create agent step
@@ -777,6 +894,8 @@ func (e *AgentEngine) runReActIteration(
 		Iteration:          state.CurrentRound,
 		Thought:            response.Content,
 		ReasoningContent:   response.ReasoningContent,
+		ReasoningSignature: response.ReasoningSignature,
+		ReasoningMetadata:  response.ReasoningMetadata,
 		ToolCalls:          make([]types.ToolCall, 0),
 		Timestamp:          time.Now(),
 	}
@@ -808,11 +927,11 @@ func (e *AgentEngine) runReActIteration(
 		// content and no tool calls (e.g., thinking-only loop without KB),
 		// retry with a nudge message instead of accepting an empty answer.
 		if verdict.emptyContent {
-			*emptyRetries++
-			if *emptyRetries <= maxEmptyResponseRetries {
+			guards.emptyRetries++
+			if guards.emptyRetries <= maxEmptyResponseRetries {
 				state.PendingSteerMessages = step.UserMessagesBefore
 				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
-					round, *emptyRetries, maxEmptyResponseRetries)
+					round, guards.emptyRetries, maxEmptyResponseRetries)
 				*messagesPtr = append(*messagesPtr, chat.Message{
 					Role:    "user",
 					Content: "Please provide your complete answer now as plain text.",
@@ -825,7 +944,7 @@ func (e *AgentEngine) runReActIteration(
 			// sole terminal answer event (#2906).
 			logger.Warnf(ctx, "[Agent][Round-%d] Empty content after %d retries - using fallback",
 				round, maxEmptyResponseRetries)
-			fallback := "I'm sorry, I was unable to generate a response. Please try again."
+			fallback := stalledAnswerFallback
 			answerID := generateEventID("answer")
 			_ = e.eventBus.Emit(ctx, event.Event{
 				ID:        answerID,
@@ -848,7 +967,7 @@ func (e *AgentEngine) runReActIteration(
 			state.FinalAnswer = fallback
 			state.IsComplete = true
 			state.RoundSteps = append(state.RoundSteps, verdict.step)
-			e.closeAnswerStream(ctx, sessionID, verdict.answerID)
+			e.closeAnswerStream(ctx, sessionID, verdict.answerID, verdict.truncated)
 			return iterOutcomeBreak, nil
 		}
 		// Loop-end inject: a user message queued while this finishing round
@@ -861,9 +980,11 @@ func (e *AgentEngine) runReActIteration(
 			canContinue := e.withinIterationBudget(nextRound) || e.steerOverruns < maxSteerOverruns
 			if canContinue {
 				*messagesPtr = append(*messagesPtr, chat.Message{
-					Role:             "assistant",
-					Content:          verdict.finalAnswer,
-					ReasoningContent: response.ReasoningContent,
+					Role:               "assistant",
+					Content:            verdict.finalAnswer,
+					ReasoningContent:   response.ReasoningContent,
+					ReasoningSignature: response.ReasoningSignature,
+					ReasoningMetadata:  response.ReasoningMetadata,
 				})
 				injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
 				if injected > 0 {
@@ -880,7 +1001,7 @@ func (e *AgentEngine) runReActIteration(
 		state.FinalAnswer = verdict.finalAnswer
 		state.IsComplete = true
 		state.RoundSteps = append(state.RoundSteps, verdict.step)
-		e.closeAnswerStream(ctx, sessionID, verdict.answerID)
+		e.closeAnswerStream(ctx, sessionID, verdict.answerID, verdict.truncated)
 		return iterOutcomeBreak, nil
 	}
 

@@ -240,10 +240,34 @@ type MessageArtifact struct {
 	SourcePath  string    `json:"source_path"`            // Absolute path inside the sandbox (used for diff)
 	ModTime     time.Time `json:"mod_time"`               // Sandbox-side modification time (used for diff)
 	CreatedAt   time.Time `json:"created_at"`             // When WeKnora persisted the blob
+	// DeletedAt marks a file the user deleted. The entry stays in the list
+	// rather than being removed because its position IS the download address
+	// (msg.Artifacts[index]); dropping it would shift every later file's index
+	// and hand an old link the wrong blob. Keeping it also keeps the entry in
+	// ArtifactCollector's de-duplication set, so the next collect does not
+	// re-attach the very file that was deleted — its sandbox mtime has not
+	// moved. Clients filter these out; the bytes are already reclaimed.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
+
+// Deleted reports whether the user deleted this artifact.
+func (a MessageArtifact) Deleted() bool { return a.DeletedAt != nil }
 
 // MessageArtifacts is a slice of MessageArtifact for database storage.
 type MessageArtifacts []MessageArtifact
+
+// Live returns the artifacts the user has not deleted, preserving order. The
+// caller loses the positional index, so use it for counting and display only —
+// anything that addresses an artifact for download must index the full slice.
+func (m MessageArtifacts) Live() MessageArtifacts {
+	out := make(MessageArtifacts, 0, len(m))
+	for _, a := range m {
+		if !a.Deleted() {
+			out = append(out, a)
+		}
+	}
+	return out
+}
 
 // Value implements the driver.Valuer interface for database serialization
 func (m MessageArtifacts) Value() (driver.Value, error) {
