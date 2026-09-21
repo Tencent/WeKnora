@@ -484,7 +484,8 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			if errors.Is(derr, ErrDownloadTooLarge) {
 				// The file is fine, just over the sync cap: degrade inline
 				// instead of failing or error-iteming the document.
-				logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) over download cap, degrading to placeholder",
+				logger.Warnf(ctx,
+					"[Feishu] doc %s: attachment %q (token=%s) over download cap, degrading to placeholder",
 					in.ObjToken, a.Name, a.FileToken)
 				displayName := a.Name
 				if displayName == "" {

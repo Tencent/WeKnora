@@ -32,22 +32,31 @@ func (c *resyncStreamConnector) Type() string { return types.ConnectorTypeFeishu
 func (c *resyncStreamConnector) Validate(context.Context, *types.DataSourceConfig) error {
 	return nil
 }
-func (c *resyncStreamConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
+
+func (c *resyncStreamConnector) ListResources(
+	context.Context, *types.DataSourceConfig, string,
+) ([]types.Resource, error) {
 	return nil, nil
 }
+
 func (c *resyncStreamConnector) ResolveResourceAncestors(
 	context.Context, *types.DataSourceConfig, []string,
 ) ([]string, error) {
 	return nil, nil
 }
-func (c *resyncStreamConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
+
+func (c *resyncStreamConnector) FetchAll(
+	context.Context, *types.DataSourceConfig, []string,
+) ([]types.FetchedItem, error) {
 	return nil, nil
 }
+
 func (c *resyncStreamConnector) FetchIncremental(
 	context.Context, *types.DataSourceConfig, *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
 	return nil, nil, nil
 }
+
 func (c *resyncStreamConnector) FetchStream(
 	_ context.Context, _ *types.DataSourceConfig, cursor *types.SyncCursor, _ datasource.StreamHandler,
 ) (*types.SyncCursor, error) {
@@ -72,14 +81,16 @@ func (r *resyncDSRepo) Update(_ context.Context, ds *types.DataSource) error {
 	return nil
 }
 
-func (r *resyncDSRepo) UpdateSyncState(_ context.Context, ds *types.DataSource) error {
+func (r *resyncDSRepo) UpdateSyncState(_ context.Context, _ *types.DataSource) error {
 	r.syncStates++
 	return nil
 }
 
 // newResyncHarness wires a DataSourceService around the streaming fake for a
 // feishu data source whose stored Config carries the given Settings.
-func newResyncHarness(t *testing.T, settings map[string]interface{}, conn *resyncStreamConnector) (*DataSourceService, *types.DataSource, *resyncDSRepo, *types.SyncLog) {
+func newResyncHarness(
+	t *testing.T, settings map[string]interface{}, conn *resyncStreamConnector,
+) (*DataSourceService, *types.DataSource, *resyncDSRepo, *types.SyncLog) {
 	t.Helper()
 	cfg := &types.DataSourceConfig{
 		Type:        types.ConnectorTypeFeishu,
@@ -112,9 +123,13 @@ func newResyncHarness(t *testing.T, settings map[string]interface{}, conn *resyn
 	require.NoError(t, registry.Register(conn))
 
 	svc := &DataSourceService{
-		dsRepo:            dsRepo,
-		syncLogRepo:       &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}},
-		kbService:         &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID}},
+		dsRepo: dsRepo,
+		syncLogRepo: &processSyncSyncLogRepo{
+			logs: map[string]*types.SyncLog{syncLog.ID: syncLog},
+		},
+		kbService: &processSyncKBService{
+			kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID},
+		},
 		connectorRegistry: registry,
 		tenantRepo:        &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}},
 		tagService:        &processSyncTagService{},
@@ -194,7 +209,6 @@ func TestProcessSync_FailedResyncKeepsMarker(t *testing.T) {
 
 	// No config writes on the failed run: the marker stays armed.
 	assert.Equal(t, 0, dsRepo.updates)
-
 }
 
 // resyncRequired tolerates the encodings the marker may be written in.

@@ -99,10 +99,16 @@ func TestSheetMerges_SplitsTokenAndReturnsRegions(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
 			"sheets": []any{
 				map[string]any{"sheet_id": "0", "merges": []any{
-					map[string]any{"start_row_index": 0, "end_row_index": 1, "start_column_index": 1, "end_column_index": 2},
+					map[string]any{
+						"start_row_index": 0, "end_row_index": 1,
+						"start_column_index": 1, "end_column_index": 2,
+					},
 				}},
 				map[string]any{"sheet_id": "9", "merges": []any{
-					map[string]any{"start_row_index": "2", "end_row_index": "3", "start_column_index": "0", "end_column_index": "0"},
+					map[string]any{
+						"start_row_index": "2", "end_row_index": "3",
+						"start_column_index": "0", "end_column_index": "0",
+					},
 				}},
 				map[string]any{"sheet_id": "7"},
 			},
@@ -118,7 +124,9 @@ func TestSheetMerges_SplitsTokenAndReturnsRegions(t *testing.T) {
 	if gotPath != "/open-apis/sheets/v3/spreadsheets/sht_abc/sheets/query" {
 		t.Errorf("path = %q", gotPath)
 	}
-	if len(merges) != 1 || merges[0].StartRow != 0 || merges[0].EndRow != 1 || merges[0].StartCol != 1 || merges[0].EndCol != 2 {
+	if len(merges) != 1 ||
+		merges[0].StartRow != 0 || merges[0].EndRow != 1 ||
+		merges[0].StartCol != 1 || merges[0].EndCol != 2 {
 		t.Errorf("numeric merges = %+v", merges)
 	}
 

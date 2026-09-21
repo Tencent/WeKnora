@@ -172,7 +172,8 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	return core.FetchAllEngine(ctx, client, config, resourceIDs, &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode})
+	return core.FetchAllEngine(ctx, client, config, resourceIDs,
+		&wikiOps{region: c.region, parseMode: feishuConfig.ParseMode})
 }
 
 // FetchIncremental performs an incremental sync by comparing node edit times
@@ -277,7 +278,9 @@ func (o *wikiOps) EditTime(n core.WikiNode) string {
 	}
 }
 
-func (o *wikiOps) Fetch(ctx context.Context, client *core.Client, n core.WikiNode, resourceID string) ([]*types.FetchedItem, error) {
+func (o *wikiOps) Fetch(
+	ctx context.Context, client *core.Client, n core.WikiNode, resourceID string,
+) ([]*types.FetchedItem, error) {
 	spaceID, _ := parseWikiResourceID(resourceID)
 	items, err := fetchNodeContent(ctx, client, n, spaceID, resourceID, o.region, o.parseMode)
 	if err != nil {
@@ -350,7 +353,10 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 //   - file       → drive download → original file (PDF/Word/image/etc.)
 //   - mindnote   → Skip (no API)
 //   - slides     → Skip (no API)
-func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNode, spaceID string, resourceID string, region core.Region, parseMode string) ([]*types.FetchedItem, error) {
+func fetchNodeContent(
+	ctx context.Context, client *core.Client, node core.WikiNode,
+	spaceID string, resourceID string, region core.Region, parseMode string,
+) ([]*types.FetchedItem, error) {
 	if !core.IsSupportedDocType(node.ObjType) {
 		return nil, nil
 	}

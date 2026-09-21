@@ -24,21 +24,27 @@ import (
 func fakeFeishuForBoard(t *testing.T, blocks []DocxBlock, boardStatus int, boardBody []byte) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, TokenResponse{ApiResponse: ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, TokenResponse{
+			ApiResponse:       ApiResponse{Code: 0},
+			TenantAccessToken: "fake-token", Expire: 7200,
+		})
 	})
-	mux.HandleFunc("/open-apis/docx/v1/documents/obj-board/blocks", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, DocxBlocksResponse{ApiResponse: ApiResponse{Code: 0},
-			Data: DocxBlocksData{Items: blocks}})
+	mux.HandleFunc("/open-apis/docx/v1/documents/obj-board/blocks", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, DocxBlocksResponse{
+			ApiResponse: ApiResponse{Code: 0},
+			Data:        DocxBlocksData{Items: blocks},
+		})
 	})
-	mux.HandleFunc("/open-apis/board/v1/whiteboards/brd-1/download_as_image", func(w http.ResponseWriter, r *http.Request) {
-		if boardStatus != http.StatusOK {
-			http.Error(w, string(boardBody), boardStatus)
-			return
-		}
-		w.Header().Set("Content-Type", "image/png")
-		w.Write(boardBody)
-	})
+	mux.HandleFunc("/open-apis/board/v1/whiteboards/brd-1/download_as_image",
+		func(w http.ResponseWriter, _ *http.Request) {
+			if boardStatus != http.StatusOK {
+				http.Error(w, string(boardBody), boardStatus)
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(boardBody)
+		})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return ts
@@ -47,8 +53,10 @@ func fakeFeishuForBoard(t *testing.T, blocks []DocxBlock, boardStatus int, board
 func boardBlocks() []DocxBlock {
 	return []DocxBlock{
 		{BlockID: "b1", BlockType: BlockTypePage},
-		{BlockID: "b2", BlockType: BlockTypeText, Text: &BlockText{
-			Elements: []TextElement{{TextRun: &TextRun{Content: "见画板"}}}},
+		{
+			BlockID: "b2", BlockType: BlockTypeText, Text: &BlockText{
+				Elements: []TextElement{{TextRun: &TextRun{Content: "见画板"}}},
+			},
 		},
 		{BlockID: "b3", BlockType: BlockTypeBoard, Board: &BlockBoard{Token: "brd-1"}},
 	}
@@ -132,16 +140,21 @@ func TestFetchDocxWithBlocks_AttachmentOverCapDegrades(t *testing.T) {
 		{BlockID: "b2", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "ft-huge", Name: "report.pdf"}},
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, TokenResponse{ApiResponse: ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, TokenResponse{
+			ApiResponse:       ApiResponse{Code: 0},
+			TenantAccessToken: "fake-token", Expire: 7200,
+		})
 	})
-	mux.HandleFunc("/open-apis/docx/v1/documents/obj-board/blocks", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, DocxBlocksResponse{ApiResponse: ApiResponse{Code: 0},
-			Data: DocxBlocksData{Items: blocks}})
+	mux.HandleFunc("/open-apis/docx/v1/documents/obj-board/blocks", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, DocxBlocksResponse{
+			ApiResponse: ApiResponse{Code: 0},
+			Data:        DocxBlocksData{Items: blocks},
+		})
 	})
-	mux.HandleFunc("/open-apis/drive/v1/medias/ft-huge/download", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/drive/v1/medias/ft-huge/download", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(maxFeishuDownloadBytes+1, 10))
-		w.Write(bigPDF)
+		_, _ = w.Write(bigPDF)
 	})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -183,16 +196,21 @@ func TestFetchDocxWithBlocks_OverCapPatchHitsMarkerNotEarlierBullet(t *testing.T
 		{BlockID: "b4", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "ft-huge", Name: "report.pdf"}},
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, TokenResponse{ApiResponse: ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, TokenResponse{
+			ApiResponse:       ApiResponse{Code: 0},
+			TenantAccessToken: "fake-token", Expire: 7200,
+		})
 	})
-	mux.HandleFunc("/open-apis/docx/v1/documents/obj-board/blocks", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, DocxBlocksResponse{ApiResponse: ApiResponse{Code: 0},
-			Data: DocxBlocksData{Items: blocks}})
+	mux.HandleFunc("/open-apis/docx/v1/documents/obj-board/blocks", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, DocxBlocksResponse{
+			ApiResponse: ApiResponse{Code: 0},
+			Data:        DocxBlocksData{Items: blocks},
+		})
 	})
-	mux.HandleFunc("/open-apis/drive/v1/medias/ft-huge/download", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/drive/v1/medias/ft-huge/download", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(maxFeishuDownloadBytes+1, 10))
-		w.Write(bigPDF)
+		_, _ = w.Write(bigPDF)
 	})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -365,22 +383,27 @@ func TestFetchDocxWithBlocks_MentionDocTitleBackfill(t *testing.T) {
 			}}},
 		}},
 	}
-	run := func(metasStatus int, metasBody string, wantTitle string) *types.FetchedItem {
+	run := func(metasStatus int, metasBody string, _ string) *types.FetchedItem {
 		t.Helper()
 		mux := http.NewServeMux()
-		mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, TokenResponse{ApiResponse: ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+		mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, TokenResponse{
+				ApiResponse:       ApiResponse{Code: 0},
+				TenantAccessToken: "fake-token", Expire: 7200,
+			})
 		})
-		mux.HandleFunc("/open-apis/docx/v1/documents/obj-doc/blocks", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, DocxBlocksResponse{ApiResponse: ApiResponse{Code: 0},
-				Data: DocxBlocksData{Items: blocks}})
+		mux.HandleFunc("/open-apis/docx/v1/documents/obj-doc/blocks", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, DocxBlocksResponse{
+				ApiResponse: ApiResponse{Code: 0},
+				Data:        DocxBlocksData{Items: blocks},
+			})
 		})
-		mux.HandleFunc("/open-apis/drive/v1/metas/batch_query", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/open-apis/drive/v1/metas/batch_query", func(w http.ResponseWriter, _ *http.Request) {
 			if metasStatus != http.StatusOK {
 				http.Error(w, metasBody, metasStatus)
 				return
 			}
-			w.Write([]byte(metasBody))
+			_, _ = w.Write([]byte(metasBody))
 		})
 		ts := httptest.NewServer(mux)
 		t.Cleanup(ts.Close)

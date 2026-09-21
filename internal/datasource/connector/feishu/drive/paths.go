@@ -21,7 +21,9 @@ import (
 // driveFolderName resolves a folder's display name via GetDriveFolderMeta,
 // one call per token per sync run (cached). resolved is false when the meta
 // call failed or returned no name — the sub-folder prefix is then skipped.
-func (o *driveOps) driveFolderName(ctx context.Context, client *core.Client, folderToken string) (name string, resolved bool) {
+func (o *driveOps) driveFolderName(
+	ctx context.Context, client *core.Client, folderToken string,
+) (name string, resolved bool) {
 	if o.folderNames == nil {
 		o.folderNames = make(map[string]string)
 	}

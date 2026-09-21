@@ -925,7 +925,8 @@ func TestFetchIncremental_FirstSync(t *testing.T) {
 	// there is nothing to compare against, so no IsDeleted items may appear.
 	for _, item := range items {
 		if item.IsDeleted {
-			t.Errorf("first sync emitted IsDeleted item for %q — deletion must be suppressed without a prior cursor", item.ExternalID)
+			t.Errorf("first sync emitted IsDeleted item for %q — deletion must be suppressed without a prior cursor",
+				item.ExternalID)
 		}
 	}
 	if cursor == nil {
@@ -1376,7 +1377,8 @@ func TestFetchDocxWithBlocks_MultiItem(t *testing.T) {
 	}
 	// The produced attachment is recorded on the parent's attachment_ids.
 	if !strings.Contains(main.Metadata["attachment_ids"], wantAttID) {
-		t.Errorf("main.Metadata[attachment_ids] = %q, want it to contain %q", main.Metadata["attachment_ids"], wantAttID)
+		t.Errorf("main.Metadata[attachment_ids] = %q, want it to contain %q",
+			main.Metadata["attachment_ids"], wantAttID)
 	}
 }
 

@@ -104,7 +104,9 @@ func imageMarkerNonce(seed string) string {
 // block set has no downdrill blocks. userName resolves mention_user OpenIDs to
 // display names (nil → generic @成员 for every mention; documents without
 // mentions never invoke it, so it costs zero API calls).
-func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock, docURL string, userName func(string) string) ([]byte, []pendingAttachment, []pendingImage, []pendingDocName, error) {
+func blocksToMarkdown(
+	ctx context.Context, client sheetReader, blocks []DocxBlock, docURL string, userName func(string) string,
+) ([]byte, []pendingAttachment, []pendingImage, []pendingDocName, error) {
 	byID := make(map[string]DocxBlock, len(blocks))
 	for _, b := range blocks {
 		byID[b.BlockID] = b
@@ -119,7 +121,10 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 	if userName == nil {
 		userName = func(string) string { return "" }
 	}
-	r := &mdRenderer{ctx: ctx, client: client, byID: byID, docURL: docURL, userName: userName, markerNonce: imageMarkerNonce(docURL)}
+	r := &mdRenderer{
+		ctx: ctx, client: client, byID: byID, docURL: docURL,
+		userName: userName, markerNonce: imageMarkerNonce(docURL),
+	}
 	var sb strings.Builder
 	for _, b := range blocks {
 		if consumed[b.BlockID] {
@@ -434,7 +439,7 @@ func parseMentionDocRef(u string) (pendingDocName, bool) {
 			continue
 		}
 		for _, r := range token {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
 				return pendingDocName{}, false
 			}
 		}

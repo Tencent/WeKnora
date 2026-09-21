@@ -129,7 +129,10 @@ func fakeFeishuGolden(nodes []core.WikiNode, docToken string, blocks []core.Docx
 	// golden baseline stays valid if the default ever flips again (the env var
 	// FEISHU_DOCX_PARSE_MODE was retired in favor of per-data-source Settings).
 	ts := httptest.NewServer(mux)
-	return ts, &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL, ParseMode: core.ParseModeBlocks}
+	return ts, &core.Config{
+		AppID: "test-app-id", AppSecret: "test-app-secret",
+		BaseURL: ts.URL, ParseMode: core.ParseModeBlocks,
+	}
 }
 
 func TestGolden_RichDocxAllCapabilities(t *testing.T) {
@@ -201,7 +204,8 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 	}
 	// P3 contract: sub-items precede the parent document.
 	if items[len(items)-1].ExternalID != "nt-golden" {
-		t.Errorf("main item must be emitted last, got order: %v", []string{items[0].ExternalID, items[1].ExternalID, items[2].ExternalID})
+		order := []string{items[0].ExternalID, items[1].ExternalID, items[2].ExternalID}
+		t.Errorf("main item must be emitted last, got order: %v", order)
 	}
 	if main.ContentType != "text/markdown" {
 		t.Errorf("main ContentType = %q, want text/markdown", main.ContentType)
@@ -287,5 +291,4 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 	if att.Metadata["attachment"] != "true" || att.Metadata["parent_node_token"] != "nt-golden" {
 		t.Errorf("attachment metadata wrong: %+v", att.Metadata)
 	}
-
 }

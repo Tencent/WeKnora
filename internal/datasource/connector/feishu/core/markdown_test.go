@@ -419,9 +419,18 @@ func TestBlocksToMarkdown_GridColumnsJoinedByRule(t *testing.T) {
 	// separated by ---, and nothing leaks out as stray paragraphs.
 	blocks := []DocxBlock{
 		{BlockID: "root", BlockType: BlockTypePage},
-		{BlockID: "g", BlockType: BlockTypeGrid, Grid: &BlockGrid{ColumnSize: 2}, Children: []string{"c1", "c2"}},
-		{BlockID: "c1", BlockType: BlockTypeGridColumn, GridColumn: &BlockGridColumn{WidthRatio: 50}, Children: []string{"p1"}},
-		{BlockID: "c2", BlockType: BlockTypeGridColumn, GridColumn: &BlockGridColumn{WidthRatio: 50}, Children: []string{"p2"}},
+		{
+			BlockID: "g", BlockType: BlockTypeGrid,
+			Grid: &BlockGrid{ColumnSize: 2}, Children: []string{"c1", "c2"},
+		},
+		{
+			BlockID: "c1", BlockType: BlockTypeGridColumn,
+			GridColumn: &BlockGridColumn{WidthRatio: 50}, Children: []string{"p1"},
+		},
+		{
+			BlockID: "c2", BlockType: BlockTypeGridColumn,
+			GridColumn: &BlockGridColumn{WidthRatio: 50}, Children: []string{"p2"},
+		},
 		{BlockID: "p1", BlockType: BlockTypeText, Text: txt("左栏")},
 		{BlockID: "p2", BlockType: BlockTypeText, Text: txt("右栏")},
 	}
@@ -544,8 +553,14 @@ func TestBlocksToMarkdown_RichTextElements(t *testing.T) {
 		{BlockID: "p", BlockType: BlockTypeText, Text: &BlockText{Elements: []TextElement{
 			{TextRun: &TextRun{Content: "加粗", TextElementStyle: &TextElementStyle{Bold: true}}},
 			{TextRun: &TextRun{Content: "code", TextElementStyle: &TextElementStyle{InlineCode: true}}},
-			{TextRun: &TextRun{Content: "删除", TextElementStyle: &TextElementStyle{Strikethrough: true, Italic: true}}},
-			{TextRun: &TextRun{Content: "链接", TextElementStyle: &TextElementStyle{Link: &TextElementLink{URL: "https://x.cn"}}}},
+			{TextRun: &TextRun{
+				Content:          "删除",
+				TextElementStyle: &TextElementStyle{Strikethrough: true, Italic: true},
+			}},
+			{TextRun: &TextRun{
+				Content:          "链接",
+				TextElementStyle: &TextElementStyle{Link: &TextElementLink{URL: "https://x.cn"}},
+			}},
 			{MentionDoc: &MentionDoc{URL: "https://x.cn/doc"}},
 			{MentionUser: &MentionUser{UserID: "ou_1"}},
 			{Equation: &Equation{Content: "E=mc^2"}},
@@ -570,8 +585,13 @@ func TestBlocksToMarkdown_CodeBlockLanguage(t *testing.T) {
 	mk := func(lang int) string {
 		blocks := []DocxBlock{
 			{BlockID: "root", BlockType: BlockTypePage},
-			{BlockID: "c", BlockType: BlockTypeCode,
-				Code: &BlockText{Style: &BlockTextStyle{Language: lang}, Elements: []TextElement{{TextRun: &TextRun{Content: "x"}}}}},
+			{
+				BlockID: "c", BlockType: BlockTypeCode,
+				Code: &BlockText{
+					Style:    &BlockTextStyle{Language: lang},
+					Elements: []TextElement{{TextRun: &TextRun{Content: "x"}}},
+				},
+			},
 		}
 		md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 		if err != nil {
@@ -600,8 +620,13 @@ func TestBlocksToMarkdown_CodeBlockLanguage(t *testing.T) {
 func TestBlocksToMarkdown_CodeFenceClosingBare(t *testing.T) {
 	blocks := []DocxBlock{
 		{BlockID: "root", BlockType: BlockTypePage},
-		{BlockID: "c", BlockType: BlockTypeCode,
-			Code: &BlockText{Style: &BlockTextStyle{Language: 29}, Elements: []TextElement{{TextRun: &TextRun{Content: "System.out.print(1);"}}}}},
+		{
+			BlockID: "c", BlockType: BlockTypeCode,
+			Code: &BlockText{
+				Style:    &BlockTextStyle{Language: 29},
+				Elements: []TextElement{{TextRun: &TextRun{Content: "System.out.print(1);"}}},
+			},
+		},
 	}
 	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
 	if err != nil {

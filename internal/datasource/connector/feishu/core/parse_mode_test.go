@@ -32,7 +32,8 @@ func TestParseFeishuConfig_ParseMode(t *testing.T) {
 	})
 
 	t.Run("settings without parse_mode default to blocks", func(t *testing.T) {
-		cfg, err := ParseFeishuConfig(parseModeConfig(map[string]interface{}{"timezone": "Asia/Shanghai"}), RegionFeishu)
+		cfg, err := ParseFeishuConfig(
+			parseModeConfig(map[string]interface{}{"timezone": "Asia/Shanghai"}), RegionFeishu)
 		require.NoError(t, err)
 		assert.Equal(t, ParseModeBlocks, cfg.ParseMode)
 	})

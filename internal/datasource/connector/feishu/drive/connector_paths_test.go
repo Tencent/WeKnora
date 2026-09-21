@@ -34,12 +34,19 @@ type fakeDriveTree struct {
 
 func newFakeDriveTree(t *testing.T, folders map[string][]core.DriveFile) *fakeDriveTree {
 	t.Helper()
-	f := &fakeDriveTree{folders: folders, failing: map[string]bool{}, listCalls: map[string]int{}, metaCalls: map[string]int{}}
+	f := &fakeDriveTree{
+		folders: folders, failing: map[string]bool{},
+		listCalls: map[string]int{}, metaCalls: map[string]int{},
+	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, core.TokenResponse{ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
-	})
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal",
+		func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, core.TokenResponse{
+				ApiResponse:       core.ApiResponse{Code: 0},
+				TenantAccessToken: "fake-token", Expire: 7200,
+			})
+		})
 	// Folder listing (paged endpoint, exact path) and file download (subtree).
 	mux.HandleFunc("/open-apis/drive/v1/files", func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("folder_token")
@@ -313,7 +320,8 @@ func TestDriveFetchIncremental_SubFolderSelection(t *testing.T) {
 	f.metaNames = map[string]string{"fold-spec": "规格"}
 
 	c := NewDriveConnector(core.RegionFeishuDrive)
-	items, _, err := c.FetchIncremental(context.Background(), makeDriveConfig(f.cfg, []string{"fold-root:fold-spec"}), nil)
+	items, _, err := c.FetchIncremental(
+		context.Background(), makeDriveConfig(f.cfg, []string{"fold-root:fold-spec"}), nil)
 	if err != nil {
 		t.Fatalf("FetchIncremental() error: %v", err)
 	}

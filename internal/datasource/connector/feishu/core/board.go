@@ -77,11 +77,11 @@ func trimBoardImage(data []byte) []byte {
 	}
 	withinTolerance := func(p, q boardPixel) bool {
 		d := func(a, c uint8) int {
-			if d := int(a) - int(c); d < 0 {
-				return -d
-			} else {
-				return d
+			diff := int(a) - int(c)
+			if diff < 0 {
+				return -diff
 			}
+			return diff
 		}
 		return d(p.r, q.r) <= blankTolerance && d(p.g, q.g) <= blankTolerance &&
 			d(p.b, q.b) <= blankTolerance && d(p.a, q.a) <= blankTolerance

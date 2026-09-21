@@ -153,51 +153,68 @@ type BlockFileRef struct {
 // data structures). Only the fields a renderer needs are parsed; the rest are
 // dropped by encoding/json.
 
+// BlockChatCard is block_type 20: a group-chat card embedded in the document.
 type BlockChatCard struct {
 	ChatID string `json:"chat_id"`
 	Align  int    `json:"align"`
 }
 
+// BlockDiagram is block_type 21: a flowchart / UML diagram reference (no
+// public render API — rendered as a placeholder note).
 type BlockDiagram struct {
 	DiagramType int `json:"diagram_type"`
 }
 
+// BlockGrid is block_type 24: a multi-column layout container; its children
+// are BlockGridColumn (25) wrappers rendered in column order.
 type BlockGrid struct {
 	ColumnSize int `json:"column_size"`
 }
 
+// BlockGridColumn is block_type 25: one column inside a BlockGrid.
 type BlockGridColumn struct {
 	WidthRatio int `json:"width_ratio"`
 }
 
+// BlockIframeComponent is the embedded-webpage payload of BlockIframe.
 type BlockIframeComponent struct {
 	Type int    `json:"type"`
 	URL  string `json:"url"`
 }
 
+// BlockIframe is block_type 26: an embedded webpage, rendered as a link.
 type BlockIframe struct {
 	Component *BlockIframeComponent `json:"component"`
 }
 
+// BlockView is block_type 33: a view container (e.g. tab views); its children
+// render in place, so the wrapper itself is transparent.
 type BlockView struct {
 	ViewType int `json:"view_type"`
 }
 
+// BlockAddOns is block_type 40: a document widget (timeline etc.) carrying its
+// full data inline in Record; recognized component types render as Markdown.
 type BlockAddOns struct {
 	ComponentID     string `json:"component_id"`
 	ComponentTypeID string `json:"component_type_id"`
 	Record          string `json:"record"`
 }
 
+// BlockJiraIssue is block_type 41: a Jira issue card (placeholder only — no
+// public content API).
 type BlockJiraIssue struct {
 	ID  string `json:"id"`
 	Key string `json:"key"`
 }
 
+// BlockWikiCatalog is block_type 42: a Wiki child-page list (placeholder).
 type BlockWikiCatalog struct {
 	WikiToken string `json:"wiki_token"`
 }
 
+// BlockBoard is block_type 43: a whiteboard (mind notes ride the same path);
+// Token is exported via download_as_image and inlined as an image.
 type BlockBoard struct {
 	Token  string `json:"token"`
 	Align  int    `json:"align"`
@@ -205,6 +222,7 @@ type BlockBoard struct {
 	Height int    `json:"height"`
 }
 
+// BlockLinkPreview is block_type 48: a link preview card (placeholder).
 type BlockLinkPreview struct {
 	URL     string `json:"url"`
 	URLType string `json:"url_type"`

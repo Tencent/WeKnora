@@ -236,7 +236,8 @@ func (c *DriveConnector) FetchAll(
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	return core.FetchAllEngine(ctx, client, config, resourceIDs, &driveOps{region: c.region, parseMode: feishuConfig.ParseMode})
+	return core.FetchAllEngine(ctx, client, config, resourceIDs,
+		&driveOps{region: c.region, parseMode: feishuConfig.ParseMode})
 }
 
 // FetchIncremental performs an incremental sync by comparing file modified_time
@@ -313,7 +314,9 @@ func (o *driveOps) Title(n core.DriveFile) string    { return n.Name }
 func (o *driveOps) ObjType(n core.DriveFile) string  { return n.Type }
 func (o *driveOps) EditTime(n core.DriveFile) string { return n.ModifiedTime }
 
-func (o *driveOps) Fetch(ctx context.Context, client *core.Client, n core.DriveFile, resourceID string) ([]*types.FetchedItem, error) {
+func (o *driveOps) Fetch(
+	ctx context.Context, client *core.Client, n core.DriveFile, resourceID string,
+) ([]*types.FetchedItem, error) {
 	items, err := fetchDriveFileContent(ctx, client, n, resourceID, o.region, o.parseMode)
 	if err != nil {
 		return nil, err
@@ -370,7 +373,8 @@ func (o *driveOps) EncodeCursor(times map[string]map[string]string, lastSync tim
 //   - file                   -> DownloadDriveFile -> original file
 //   - mindnote/slides/board  -> Skip (no API), returns (nil, nil)
 func fetchDriveFileContent(
-	ctx context.Context, client *core.Client, file core.DriveFile, resourceID string, region core.Region, parseMode string,
+	ctx context.Context, client *core.Client, file core.DriveFile,
+	resourceID string, region core.Region, parseMode string,
 ) ([]*types.FetchedItem, error) {
 	if !core.IsSupportedDocType(file.Type) {
 		return nil, nil

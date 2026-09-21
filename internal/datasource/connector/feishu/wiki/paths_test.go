@@ -33,10 +33,13 @@ func newFakeWikiTree(t *testing.T, top []core.WikiNode, children map[string][]co
 	f := &fakeWikiTree{top: top, children: children}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, core.TokenResponse{ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, core.TokenResponse{
+			ApiResponse:       core.ApiResponse{Code: 0},
+			TenantAccessToken: "fake-token", Expire: 7200,
+		})
 	})
-	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, core.WikiSpaceListResponse{
 			ApiResponse: core.ApiResponse{Code: 0},
 			Data:        core.WikiSpaceListData{Items: []core.WikiSpace{{SpaceID: "space1", Name: "Test Space"}}},
@@ -56,20 +59,29 @@ func newFakeWikiTree(t *testing.T, top []core.WikiNode, children map[string][]co
 				}
 			}
 		}
-		writeJSON(w, core.WikiNodeListResponse{ApiResponse: core.ApiResponse{Code: 0}, Data: core.WikiNodeListData{Items: nodes}})
+		writeJSON(w, core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiNodeListData{Items: nodes},
+		})
 	})
 	mux.HandleFunc("/open-apis/wiki/v2/spaces/get_node", func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 		for _, n := range f.top {
 			if n.NodeToken == token {
-				writeJSON(w, core.WikiNodeInfoResponse{ApiResponse: core.ApiResponse{Code: 0}, Data: core.WikiNodeInfoData{Node: n}})
+				writeJSON(w, core.WikiNodeInfoResponse{
+					ApiResponse: core.ApiResponse{Code: 0},
+					Data:        core.WikiNodeInfoData{Node: n},
+				})
 				return
 			}
 		}
 		for _, group := range f.children {
 			for _, n := range group {
 				if n.NodeToken == token {
-					writeJSON(w, core.WikiNodeInfoResponse{ApiResponse: core.ApiResponse{Code: 0}, Data: core.WikiNodeInfoData{Node: n}})
+					writeJSON(w, core.WikiNodeInfoResponse{
+						ApiResponse: core.ApiResponse{Code: 0},
+						Data:        core.WikiNodeInfoData{Node: n},
+					})
 					return
 				}
 			}

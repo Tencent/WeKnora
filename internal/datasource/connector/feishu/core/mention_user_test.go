@@ -48,7 +48,7 @@ func TestBlocksToMarkdown_MentionUserName(t *testing.T) {
 	// Miss (unknown user / API failure): degrade to the generic marker, and
 	// the document still renders — the failure never surfaces as an error.
 	var calls int
-	mentionUserCase(t, "miss", func(id string) string {
+	mentionUserCase(t, "miss", func(_ string) string {
 		calls++
 		return ""
 	}, []DocxBlock{mentionBlk("p1", "ou_gone")},
@@ -60,7 +60,7 @@ func TestBlocksToMarkdown_MentionUserName(t *testing.T) {
 
 func TestBlocksToMarkdown_MentionUserName_OncePerElement(t *testing.T) {
 	var calls int
-	resolver := func(id string) string {
+	resolver := func(_ string) string {
 		calls++
 		return "张三"
 	}
@@ -82,7 +82,7 @@ func TestBlocksToMarkdown_MentionUserName_OncePerElement(t *testing.T) {
 
 func TestBlocksToMarkdown_NoMention_ZeroResolverCalls(t *testing.T) {
 	var calls int
-	resolver := func(id string) string {
+	resolver := func(_ string) string {
 		calls++
 		return "张三"
 	}
@@ -119,9 +119,9 @@ func TestUserName(t *testing.T) {
 	}
 
 	// 403 (no contact scope): error, caller degrades.
-	ts403, cfg403 := retryTestServer("/open-apis/contact/v3/users/ou_1", func(w http.ResponseWriter, r *http.Request) {
+	ts403, cfg403 := retryTestServer("/open-apis/contact/v3/users/ou_1", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"code":99991679,"msg":"permission denied"}`))
+		_, _ = w.Write([]byte(`{"code":99991679,"msg":"permission denied"}`))
 	})
 	defer ts403.Close()
 	if _, err := NewClient(cfg403).UserName(context.Background(), "ou_1"); err == nil {
@@ -129,9 +129,10 @@ func TestUserName(t *testing.T) {
 	}
 
 	// HTTP 200 but business error code: also an error.
-	tsCode, cfgCode := retryTestServer("/open-apis/contact/v3/users/ou_1", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"code": 99991672, "msg": "no permission"})
-	})
+	tsCode, cfgCode := retryTestServer("/open-apis/contact/v3/users/ou_1",
+		func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, map[string]any{"code": 99991672, "msg": "no permission"})
+		})
 	defer tsCode.Close()
 	if _, err := NewClient(cfgCode).UserName(context.Background(), "ou_1"); err == nil {
 		t.Error("non-zero body code must return an error")

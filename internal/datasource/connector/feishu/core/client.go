@@ -757,7 +757,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		// Early reject on an honest Content-Length: avoids buffering a
 		// hopeless 512 MB body just to hit the LimitReader check below.
 		if resp.ContentLength > maxFeishuDownloadBytes {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("%w (Content-Length %d): %s", ErrDownloadTooLarge, resp.ContentLength, path)
 		}
 
