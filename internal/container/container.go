@@ -537,7 +537,17 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
 	must(container.Provide(handler.NewSystemHandler))
-	must(container.Provide(handler.NewMCPServiceHandler))
+	// Dig resolves exact types; adapt the registered service to the handler's
+	// narrower SharedAgentLookup interface at the composition boundary.
+	must(container.Provide(func(
+		mcpService interfaces.MCPServiceService,
+		toolApprovals interfaces.MCPToolApprovalService,
+		gate *approval.Gate,
+		models interfaces.ModelService,
+		agents interfaces.AgentShareService,
+	) *handler.MCPServiceHandler {
+		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents)
+	}))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))
 	must(container.Provide(handler.NewModelCredentialsHandler))
