@@ -62,7 +62,10 @@ func TestFindSimilarPages_ExactAliasesPostgres(t *testing.T) {
 		{"stored alias whitespace", "xyz", nil, 20, []string{"entity/space"}},
 		{"exact alias before fuzzy title", "IBM", nil, 1, []string{"entity/ibm"}},
 		{"title and repeated aliases return one page", "Acme", nil, 20, []string{"entity/dual"}},
-		{"shared alias preserves distinct candidates", "ARC", nil, 20, []string{"concept/arc", "entity/arc-a", "entity/arc-b"}},
+		{
+			"shared alias preserves distinct candidates", "ARC", nil, 20,
+			[]string{"concept/arc", "entity/arc-a", "entity/arc-b"},
+		},
 		{"explicit type filter", "ARC", []string{"entity"}, 20, []string{"entity/arc-a", "entity/arc-b"}},
 		{"title search preserved", "IBM Services", nil, 20, []string{"entity/title"}},
 		{"no alias substring match", "XY", nil, 20, nil},
@@ -107,7 +110,9 @@ func TestFindSimilarPages_ExactAliasesPostgres(t *testing.T) {
 		SELECT 'kb', 'entity/bulk-' || lpad(i::text, 3, '0'), 'Unrelated ' || i,
 		'entity', 'published', '["BULKKEY"]'::jsonb FROM generate_series(1, 60) i`).Error)
 	for _, tc := range []struct{ limit, want int }{{0, 20}, {-1, 20}, {100, 50}} {
-		pages, err := repo.FindSimilarPages(context.Background(), "kb", "BULKKEY", []string{types.WikiPageTypeEntity}, tc.limit)
+		pages, err := repo.FindSimilarPages(
+			context.Background(), "kb", "BULKKEY", []string{types.WikiPageTypeEntity}, tc.limit,
+		)
 		require.NoError(t, err)
 		require.Len(t, pages, tc.want)
 	}
