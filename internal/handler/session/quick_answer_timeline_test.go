@@ -109,3 +109,13 @@ func TestQuickAnswerReasoningAndTimelineShareOneStep(t *testing.T) {
 	assert.Equal(t, "思考中继续", msg.AgentSteps[0].ReasoningContent)
 	require.Len(t, msg.AgentSteps[0].ToolCalls, 1)
 }
+
+func TestQuickAnswerTruncationPersistsOnSharedStep(t *testing.T) {
+	msg := &types.Message{}
+	appendQuickAnswerReasoning(msg, "思考中")
+	markQuickAnswerTruncated(msg)
+
+	require.Len(t, msg.AgentSteps, 1)
+	assert.Equal(t, "思考中", msg.AgentSteps[0].ReasoningContent)
+	assert.True(t, msg.AgentSteps[0].Truncated)
+}

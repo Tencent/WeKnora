@@ -68,7 +68,7 @@ make dev-restart  # 重启
 | `redis` | `redis:7.0-alpine`（`--requirepass`） | `6379` | 默认启动 |
 | `docreader` | 本地构建 `docker/Dockerfile.docreader` | `50051`（gRPC） | 默认启动 |
 | `searxng`（+`searxng-init`） | `searxng/searxng:latest` | `127.0.0.1:8888` | `--searxng` / `--full`（compose profile `searxng`） |
-| `minio` | `minio/minio:latest` | `9000` / 控制台 `9001` | `--minio` / `--full` |
+| `minio` | `quay.io/minio/minio:latest` | `9000` / 控制台 `9001` | `--minio` / `--full` |
 | `qdrant` | `qdrant/qdrant:v1.16.2` | `6333` / `6334` | `--qdrant` / `--full` |
 | `opensearch` | `opensearchproject/opensearch:3.3.2`（关闭 security，纯 HTTP） | `9200` | profile `opensearch` / `full` |
 | `opensearch-dashboards` | `opensearchproject/opensearch-dashboards:3.3.0` | `5601` | profile `opensearch-ui`（按需单独启动） |

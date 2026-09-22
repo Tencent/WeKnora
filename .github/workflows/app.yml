@@ -126,6 +126,7 @@ jobs:
           mapfile -t pkgs < <(go list ./... | grep -v '/docreader/')
           go vet "${pkgs[@]}"
           go test "${pkgs[@]}"
+          go test -tags desktop ./internal/container
 
       - name: Build server
         run: go build ./cmd/server

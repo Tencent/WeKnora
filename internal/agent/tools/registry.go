@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/common"
@@ -84,6 +85,24 @@ func (r *ToolRegistry) GetTool(name string) (types.Tool, error) {
 		return nil, fmt.Errorf("tool not found: %s", name)
 	}
 	return tool, nil
+}
+
+type sessionBinder interface {
+	BindSession(id string)
+}
+
+// BindSession tells sandbox tools which session's layout to advertise in
+// Description() and Parameters(). Host adapters refuse an empty session ID.
+func (r *ToolRegistry) BindSession(id string) {
+	if r == nil {
+		return
+	}
+	id = strings.TrimSpace(id)
+	for _, tool := range r.tools {
+		if binder, ok := tool.(sessionBinder); ok {
+			binder.BindSession(id)
+		}
+	}
 }
 
 // ListTools returns all registered tool names sorted alphabetically.

@@ -37,6 +37,28 @@ func (r *expandChunkRepo) ListChunksByID(
 	return chunks, nil
 }
 
+func (r *expandChunkRepo) ListChunksByIDOnly(
+	_ context.Context, ids []string,
+) ([]*types.Chunk, error) {
+	chunks := make([]*types.Chunk, 0, len(ids))
+	for _, id := range ids {
+		if chunk := r.chunks[id]; chunk != nil {
+			chunks = append(chunks, chunk)
+		}
+	}
+	return chunks, nil
+}
+
+func (r *expandChunkRepo) ListChunksByParentIDsOnly(
+	_ context.Context, parentIDs []string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	for _, parentID := range parentIDs {
+		chunks = append(chunks, r.children[parentID]...)
+	}
+	return chunks, nil
+}
+
 func TestExpandShortContextKeepsSourceCoordinates(t *testing.T) {
 	repo := &expandChunkRepo{chunks: map[string]*types.Chunk{
 		"prev": {ID: "prev", KnowledgeID: "doc", ChunkType: types.ChunkTypeText, Content: "edited previous body", NextChunkID: "base"},

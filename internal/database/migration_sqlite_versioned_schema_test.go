@@ -30,6 +30,10 @@ var versionedSQLiteTables = []string{
 	"mcp_endpoints",
 	"message_artifacts",
 	"knowledge_file_versions",
+	"tenant_skills",
+	"tenant_skill_snapshots",
+	"tenant_skill_catalog",
+	"tenant_user_env_vars",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -40,13 +44,14 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenants":         {"api_principal_config"}, // 000064
 	"users":           {"is_system_admin"},      // 000053
 	"knowledges": {
-		"pending_subtasks_count", "profile", "file_version", "file_version_created_at", // 000056/101/109
+		"pending_subtasks_count", "profile", "file_version", "file_version_created_at", // 000056/101/110
 	},
 	"knowledge_bases": {"profile_config", "generated_profile"},                              // 000101
 	"messages":        {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
 	"sessions": {
 		"parent_session_id", "forked_from_message_id", "fork_bootstrap", // 000097
-		"sandbox_config_tenant_id", // 000108
+		"sandbox_config_tenant_id", // 000027
+		"host_workspace_dir",       // 000029
 	},
 	"tenant_invitations": {"token", "accepted_count"},        // 000054
 	"embed_channels":     {"allow_memory"},                   // 000060
@@ -57,9 +62,16 @@ var versionedSQLiteColumns = map[string][]string{
 		"file_size", "file_hash", "file_path", "created_at",
 	},
 	"message_artifacts": {"deleted_at"}, // 000107
+	"tenant_skills": {
+		"envs", "served", "catalog_id", "install_session_id", "install_message_id",
+	}, // 000028
+	"tenant_skill_snapshots": {"planned_name"}, // 000028
+	"tenant_user_env_vars": {
+		"principal_type", "principal_id", "sandbox_config_id", "skill_id", "name", "value",
+	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 28
+const expectedSQLiteMigrationVersion = 30
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -159,6 +171,33 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	).Scan(&relationCount))
 	require.Equal(t, 1, relationCount)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"))
+}
+
+func TestSQLiteMigrationsUpgradeV29AddsFileVersions(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 29)
+	chdirAndRestore(t, legacyRoot)
+	dbPath := filepath.Join(t.TempDir(), "upgrade-v29.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+	require.False(t, sqliteTableExists(t, db, "knowledge_file_versions"))
+	require.False(t, sqliteColumnExists(t, db, "knowledges", "file_version"))
+	_, err := db.Exec(`INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, file_name)
+		VALUES ('existing-file', 1, 'existing-kb', 'file', 'Existing document', 'upload', 'existing.pdf')`)
+	require.NoError(t, err)
+
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db = openSQLiteDB(t, dbPath)
+	version, dirty := sqliteMigrationState(t, db)
+	require.Equal(t, expectedSQLiteMigrationVersion, version)
+	require.False(t, dirty)
+	var fileName string
+	var fileVersion int
+	require.NoError(t, db.QueryRow("SELECT file_name, file_version FROM knowledges WHERE id = 'existing-file'").Scan(&fileName, &fileVersion))
+	require.Equal(t, "existing.pdf", fileName)
+	require.Equal(t, 1, fileVersion)
+	assertSQLiteKnowledgeFileVersionsWork(t, db)
 }
 
 func TestSQLiteMigrationsUpgradeV16AddsSessionForkColumns(t *testing.T) {

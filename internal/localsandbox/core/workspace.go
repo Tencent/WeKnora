@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,9 +38,20 @@ type Workspace struct {
 }
 
 // ProjectLookup reports whether a session is bound to a user-selected project.
+//
+// Three outcomes:
+//   - ("", false, nil) — unbound; Resolve allocates a session workspace
+//   - (dir, true, nil) — bound and still approved
+//   - ("", false, err) — bound but no longer approved, or lookup failed;
+//     Resolve must not allocate a replacement directory
 type ProjectLookup interface {
-	ProjectDirForSession(ctx context.Context, sessionID string) (string, bool)
+	ProjectDirForSession(ctx context.Context, sessionID string) (string, bool, error)
 }
+
+// ErrProjectDirRevoked is returned when a session still names a host project
+// that is no longer on the approved list. Fail closed: do not silently
+// switch the agent to an auto-allocated directory.
+var ErrProjectDirRevoked = errors.New("localsandbox: session project directory is no longer approved")
 
 // DirLayout names the roots the resolver allocates under.
 type DirLayout struct {
@@ -73,7 +85,12 @@ func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Work
 	}
 
 	if r.projects != nil {
-		if dir, ok := r.projects.ProjectDirForSession(ctx, sessionID); ok && dir != "" {
+		dir, ok, err := r.projects.ProjectDirForSession(ctx, sessionID)
+		if err != nil {
+			logger.Warnf(ctx, "[LocalSandbox] resolve project dir session=%s: %v", sessionID, err)
+			return Workspace{}, err
+		}
+		if ok && dir != "" {
 			root, err := filepath.EvalSymlinks(filepath.Clean(dir))
 			if err != nil {
 				logger.Warnf(ctx, "[LocalSandbox] resolve project dir session=%s dir=%q: %v",

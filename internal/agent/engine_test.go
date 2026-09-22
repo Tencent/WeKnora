@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -702,6 +703,21 @@ func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
 	prompt := disabledEngine.buildSystemPrompt(context.Background())
 	require.Contains(t, prompt, "Source citations are disabled")
 	require.NotContains(t, prompt, "Source citations are enabled")
+}
+
+func TestBuildSystemPromptUsesHostWorkspace(t *testing.T) {
+	engine := newTestEngine(t, nil)
+	registry := agenttools.NewToolRegistry()
+	registry.RegisterTool(newCountingTool("shell_exec"))
+	engine.toolRegistry = registry
+	engine.SetWorkspaceLayout(sandbox.WorkspaceLayout{
+		Origin: sandbox.WorkspaceOriginHost,
+		Root:   "/Users/dev/My Project",
+	})
+	prompt := engine.buildSystemPrompt(context.Background())
+	require.Contains(t, prompt, "/Users/dev/My Project")
+	require.NotContains(t, prompt, "Session workspace: /workspace")
+	require.NotContains(t, prompt, "There is no /workspace")
 }
 
 func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {

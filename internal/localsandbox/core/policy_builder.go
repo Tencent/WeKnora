@@ -35,10 +35,9 @@ func (m ApprovalMode) Known() bool {
 //
 // This is the single source of truth for "which modes exist today", and it
 // lives beside the enum rather than in whatever reads the preferences file.
-// Both of the other two need machinery above the sandbox that is phase 2:
 // ModeAsk compiles to a valid policy with nothing writable and relies on an
-// approval round-trip to widen it per command, and ModeFull is by definition
-// the absence of a policy.
+// approval round-trip to widen it per command; ModeFull is the absence of a
+// policy. Neither path is wired yet, so only ModeAuto is served.
 func (m ApprovalMode) Shipped() bool {
 	return m == ModeAuto
 }
@@ -111,8 +110,8 @@ var extraPrivateRoots = []string{
 
 // platformReadRoots are extra readable paths for Windows / PathGuard.
 // Darwin Seatbelt ignores them for availability: the base profile already
-// grants unfiltered file-read* (see spec 6.1). Keeping the list makes the
-// Policy fingerprint comparable across platforms.
+// grants unfiltered file-read*. Keeping the list makes the Policy fingerprint
+// comparable across platforms.
 var platformReadRoots = []string{
 	"/usr/lib", "/usr/share", "/usr/bin", "/bin", "/sbin", "/usr/sbin",
 	"/usr/libexec", "/System", "/Library/Apple", "/private/etc",
