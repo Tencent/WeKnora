@@ -694,6 +694,30 @@ func (s *wikiIngestService) clearDeletedKnowledgeBasePendingOps(ctx context.Cont
 	return cleaner.DeleteByScope(cleanupCtx, types.TaskScopeKnowledgeBase, kbID)
 }
 
+// releaseIngestForUnavailableWiki drops the KB's queued ingest ops when the
+// wiki cannot run for a reason retries will not fix, and releases each
+// document's wiki slot so it leaves "finalizing". Retract ops stay queued for
+// when the wiki is usable again. Rows held by a live batch are left to it.
+func (s *wikiIngestService) releaseIngestForUnavailableWiki(ctx context.Context, kbID, reason string) error {
+	drainer, ok := s.pendingRepo.(interfaces.TaskPendingOpsDrainer)
+	if !ok {
+		return fmt.Errorf("wiki ingest: KB %s unavailable (%s)", kbID, reason)
+	}
+	cleanupCtx, cancel := wikiIngestCleanupContext(ctx)
+	defer cancel()
+	knowledgeIDs, err := drainer.DrainUnclaimed(cleanupCtx, wikiTaskType, wikiTaskScope, kbID,
+		WikiOpIngest, time.Now().Add(-wikiClaimStaleAfter))
+	if err != nil {
+		return fmt.Errorf("wiki ingest: KB %s unavailable (%s), drain pending ingest: %w", kbID, reason, err)
+	}
+	for _, knowledgeID := range knowledgeIDs {
+		s.finalizeWikiSubtask(ctx, knowledgeID)
+	}
+	logger.Warnf(ctx, "wiki ingest: KB %s unavailable (%s), dropped pending ingest for %d document(s)",
+		kbID, reason, len(knowledgeIDs))
+	return nil
+}
+
 func (s *wikiIngestService) enqueueFinalizeRow(ctx context.Context, op *types.TaskPendingOp) bool {
 	accepted, err := enqueueWikiPendingOp(ctx, s.pendingRepo, op)
 	if err != nil {

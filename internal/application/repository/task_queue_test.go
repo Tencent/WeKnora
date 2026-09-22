@@ -919,3 +919,40 @@ func TestTaskDeadLetter_DeleteByID_IsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, rows, 0)
 }
+
+// DrainUnclaimed removes only the lane's matching op rows that no live batch
+// holds, and reports each document once even when it has several rows.
+func TestTaskPendingOps_DrainUnclaimedSparesLiveClaimsAndOtherOps(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	drainer, ok := repo.(interfaces.TaskPendingOpsDrainer)
+	require.True(t, ok)
+	ctx := context.Background()
+	lane := func(scopeID, op, dedup string) *types.TaskPendingOp {
+		return makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, scopeID, op, dedup, []byte(`{}`))
+	}
+	for _, op := range []*types.TaskPendingOp{
+		lane("kb-1", "ingest", "k-unclaimed"),
+		lane("kb-1", "ingest", "k-unclaimed"),
+		lane("kb-1", "ingest", "k-stale"),
+		lane("kb-1", "ingest", "k-live"),
+		lane("kb-1", "retract", "k-retract"),
+		lane("kb-2", "ingest", "k-other-kb"),
+	} {
+		require.NoError(t, repo.Enqueue(ctx, op))
+	}
+	staleBefore := time.Now().Add(-time.Hour)
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("dedup_key = ?", "k-stale").
+		Update("claimed_at", staleBefore.Add(-time.Minute)).Error)
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("dedup_key = ?", "k-live").
+		Update("claimed_at", time.Now()).Error)
+
+	keys, err := drainer.DrainUnclaimed(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1",
+		"ingest", staleBefore)
+
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"k-unclaimed", "k-stale"}, keys)
+	var left []string
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Order("dedup_key").Pluck("dedup_key", &left).Error)
+	assert.Equal(t, []string{"k-live", "k-other-kb", "k-retract"}, left)
+}

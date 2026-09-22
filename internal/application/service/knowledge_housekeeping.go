@@ -46,21 +46,29 @@ type HousekeepingService struct {
 	// Durable Wiki ownership in task_pending_ops is always probed through db,
 	// so the sweep never falls back to the span/updated_at heuristics alone.
 	inspector interfaces.TaskInspector
+	// task re-arms the wiki trigger for rows kept alive only by a durable
+	// Wiki op, which a lost trigger would otherwise strand. nil disables it.
+	task interfaces.TaskEnqueuer
 
 	mu      sync.Mutex
 	started bool
+
+	kickMu    sync.Mutex
+	wikiKicks map[string]time.Time
 }
 
 // NewHousekeepingService constructs a HousekeepingService. It does NOT start
 // the cron — call Start in the application bootstrap so a misconfigured
 // cron schedule cannot prevent the rest of the service from coming up.
 func NewHousekeepingService(
-	db *gorm.DB, cfg *config.Config, inspector interfaces.TaskInspector,
+	db *gorm.DB, cfg *config.Config, inspector interfaces.TaskInspector, task interfaces.TaskEnqueuer,
 ) *HousekeepingService {
 	return &HousekeepingService{
 		db:        db,
 		cfg:       cfg,
 		inspector: inspector,
+		task:      task,
+		wikiKicks: make(map[string]time.Time),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
@@ -156,7 +164,8 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// positive users hit under heavy upload bursts. Drop any candidate
 	// that still has a queued/active task referencing it; only rows with
 	// nothing left in the queue are treated as genuinely orphaned.
-	stuck, queueSkipped := h.filterOutQueued(ctx, stuck)
+	stuck, queueSkipped, wikiHeld := h.filterOutQueued(ctx, stuck)
+	h.rearmWikiTriggers(ctx, wikiHeld, threshold)
 
 	if len(stuck) > 0 {
 		stuckIDs := make([]string, 0, len(stuck))
@@ -348,9 +357,9 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 // by the user, while waiting one more interval is.
 func (h *HousekeepingService) filterOutQueued(
 	ctx context.Context, candidates []types.Knowledge,
-) (kept []types.Knowledge, skipped int) {
+) (kept []types.Knowledge, skipped int, wikiHeld []types.Knowledge) {
 	if len(candidates) == 0 {
-		return candidates, 0
+		return candidates, 0, nil
 	}
 
 	ids := make([]string, 0, len(candidates))
@@ -367,7 +376,7 @@ func (h *HousekeepingService) filterOutQueued(
 		logger.Warnf(ctx,
 			"[Housekeeping] durable queue probe failed: %v (deferring %d candidate(s))",
 			err, len(candidates))
-		return candidates[:0], len(candidates)
+		return candidates[:0], len(candidates), nil
 	}
 	durable := make(map[string]struct{}, len(durableIDs))
 	for _, id := range durableIDs {
@@ -378,6 +387,7 @@ func (h *HousekeepingService) filterOutQueued(
 	for _, k := range candidates {
 		if _, ok := durable[k.ID]; ok {
 			skipped++
+			wikiHeld = append(wikiHeld, k)
 			continue
 		}
 		if h.inspector == nil {
@@ -397,7 +407,46 @@ func (h *HousekeepingService) filterOutQueued(
 		}
 		out = append(out, k)
 	}
-	return out, skipped
+	return out, skipped, wikiHeld
+}
+
+// rearmWikiTriggers enqueues one wiki ingest trigger per KB whose stale rows
+// are held only by durable Wiki ops. The trigger is ephemeral: once lost (or
+// archived after its retries), nothing wakes the consumer until a restart or
+// another upload, and the row sits in "finalizing" indefinitely. A KB is
+// re-armed at most once per threshold so a genuine backlog is not flooded.
+func (h *HousekeepingService) rearmWikiTriggers(
+	ctx context.Context, held []types.Knowledge, threshold time.Duration,
+) {
+	if h.task == nil || len(held) == 0 {
+		return
+	}
+	h.kickMu.Lock()
+	defer h.kickMu.Unlock()
+	now := time.Now()
+	for kbID, last := range h.wikiKicks {
+		if now.Sub(last) >= threshold {
+			delete(h.wikiKicks, kbID)
+		}
+	}
+	rearmed := 0
+	for _, k := range held {
+		if k.KnowledgeBaseID == "" {
+			continue
+		}
+		if _, recent := h.wikiKicks[k.KnowledgeBaseID]; recent {
+			continue
+		}
+		if err := enqueueWikiIngestTrigger(ctx, h.task, k.TenantID, k.KnowledgeBaseID); err != nil {
+			logger.Warnf(ctx, "[Housekeeping] re-arm wiki trigger for KB %s failed: %v", k.KnowledgeBaseID, err)
+			continue
+		}
+		h.wikiKicks[k.KnowledgeBaseID] = now
+		rearmed++
+	}
+	if rearmed > 0 {
+		logger.Infof(ctx, "[Housekeeping] re-armed wiki ingest trigger for %d knowledge base(s)", rearmed)
+	}
 }
 
 // parseHeartbeatTime accepts the timestamp formats Postgres and SQLite

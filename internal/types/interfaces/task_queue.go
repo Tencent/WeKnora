@@ -95,6 +95,16 @@ type TaskPendingOpsScopeCleaner interface {
 	DeleteByScope(ctx context.Context, scope, scopeID string) error
 }
 
+// TaskPendingOpsDrainer is an optional extension for consumers that must give
+// up on a queue lane: DrainUnclaimed deletes the lane's rows for op that no
+// live batch holds (unclaimed, or claimed before staleBefore) and returns the
+// distinct dedup keys it removed so the caller can release what they owned.
+type TaskPendingOpsDrainer interface {
+	DrainUnclaimed(
+		ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time,
+	) ([]string, error)
+}
+
 // TaskPendingOpsKnowledgeBaseGuard atomically persists a KB-scoped operation
 // only while its knowledge base is still active. Implementations must
 // serialize the active-KB check with soft deletion so a detached worker cannot

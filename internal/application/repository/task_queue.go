@@ -366,6 +366,37 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 		Delete(&types.TaskPendingOp{}).Error
 }
 
+// DrainUnclaimed deletes the lane's op rows that no live batch holds and
+// returns the distinct dedup keys removed. One DELETE ... RETURNING keeps a
+// row claimed mid-drain out of both the delete and the result.
+func (r *taskPendingOpsRepository) DrainUnclaimed(
+	ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time,
+) ([]string, error) {
+	if taskType == "" || scope == "" || scopeID == "" || op == "" {
+		return nil, errors.New("task pending ops: task_type, scope, scope_id and op are required")
+	}
+	var removed []string
+	if err := r.db.WithContext(ctx).Raw(
+		`DELETE FROM task_pending_ops
+		WHERE task_type = ? AND scope = ? AND scope_id = ? AND op = ?
+			AND (claimed_at IS NULL OR claimed_at < ?)
+		RETURNING dedup_key`,
+		taskType, scope, scopeID, op, staleBefore,
+	).Scan(&removed).Error; err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(removed))
+	seen := make(map[string]struct{}, len(removed))
+	for _, key := range removed {
+		if _, ok := seen[key]; ok || key == "" {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
 // IncrFailCount atomically bumps fail_count for one row and returns the
 // new value. We use UPDATE ... RETURNING so the read+write happens in
 // one round trip and races between concurrent IncrFailCount callers
