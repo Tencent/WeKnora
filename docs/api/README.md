@@ -95,7 +95,8 @@ X-Request-ID: unique_request_id
 
 ### 注意事项
 
-- **需要外链能力。** 直链由存储后端预签名，或由 `APP_EXTERNAL_URL` + `/r/<token>` 提供。二者都不
+- **需要外链能力。** 直链由存储后端预签名，或由 `APP_EXTERNAL_URL`（单体部署可回退到同时代理 `/r/` 的
+  `FRONTEND_BASE_URL`）+ `/r/<token>` 提供。二者都不
   可用时（例如 local 存储且未设 `APP_EXTERNAL_URL`），该引用**保持 `resource://` 原样**，客户端
   仍可回退到 `/files` 代理。详见 `.env.example` 中的 `APP_EXTERNAL_URL` 说明。
 - **直链是限时匿名可读的**（WeKnora 签发的 grant 2 小时，MinIO 预签名 24 小时）。任何拿到链接的
