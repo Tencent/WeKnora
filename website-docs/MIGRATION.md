@@ -1,6 +1,6 @@
 # 旧 docs 文档迁移记录
 
-后续产品、部署、API 和开发文档统一维护在 `website-docs/`。本记录用于维护者审查迁移范围，不发布到文档站。此次保留旧目录以兼容现有代码、发布流程和历史链接；不是整目录复制，也不表示旧文档仍然有效。
+后续产品、部署、API 和开发文档统一维护在 `website-docs/`。本记录用于维护者审查迁移范围，不发布到文档站。本次删除 87 篇已迁移、重复或过时的旧手写文档，不保留第二套正文。旧内容可从 Git 历史追溯；`docs/` 仅保留下文列出的工程资源。
 
 ## 补入新站的内容
 
@@ -45,16 +45,18 @@
 ## 不作为当前产品文档迁移
 
 - `ROADMAP.md`：旧计划包含已实现能力，不能当成当前承诺；入口改为现有产品介绍，计划应重新确认后再编写。
-- `code-slimming-audit.md`：一次性代码精简审计，保留历史记录即可。
-- `plans/2026-09-10-faq-enabled-filter-design.md`：历史设计过程，最终接口由 FAQ/API 章节承接。
+- `code-slimming-audit.md`：一次性代码精简审计，删除正文，仅通过 Git 历史保留。
+- `plans/2026-09-10-faq-enabled-filter-design.md`：历史设计过程，删除正文；最终接口由 FAQ/API 章节承接，设计过程可查 Git 历史。
 - `poc/docker-sandbox/`：独立 Go 模块和旧 Docker 可行性验证，不是用户文档；后续可移至开发实验目录，不混入站点。
 
-## 删除 docs 目录前仍需处理
+## docs 目录保留的工程资源
 
 1. **Swagger 生成包**：`internal/router/router.go` 导入 `github.com/Tencent/WeKnora/docs`；`Makefile` 的 `docs` 目标把输出写到该目录。`docs.go` 当前参与后端编译，`swagger_contract_test.go` 还读取 JSON/YAML。普通构建与 CI 未自动生成，暂时保留三份生成物及测试。未来可迁往独立生成包并更新导入、生成路径、测试和 lint 排除；若不提交生成物，必须先把固定版本的生成步骤接入所有构建、测试与发布入口。
 2. **Lite 发布 README**：`scripts/package-lite.sh` 和 `.github/workflows/release-lite.yml` 复制 `docs/LITE.md` 到离线发布包；迁出时需保留适合离线阅读的 README，不能直接换成含站内相对链接的长篇页面。
-3. **图片与历史链接**：多语言 README、CHANGELOG 和其他子项目文档仍引用 `docs/images/`、`docs/assets/` 或旧文档路径。已更新本次涉及的主要帮助入口；整目录删除前还需迁移图片并扫描所有消费者。新站自身图片位于 `public/`，不依赖旧目录。
-4. **旧文档与历史示例**：保留期内只作迁移参考，新功能不继续写入。需要删除旧正文时按本表逐组处理，不随手删除 Go 包、发布资源或 PoC 源码。
+3. **图片**：多语言 README、Helm 等仍引用 `docs/images/`、`docs/assets/`，本次保留。新站自身图片位于 `public/`，不依赖旧目录。
+4. **历史实验**：保留 `poc/docker-sandbox/` 独立 Go 模块及运行说明；它不属于维护中的产品文档。旧手写正文（包括 API、Wiki 副本、路线图、审计和设计记录）已删除。
+
+环境变量示例、前端帮助与分块示例、Helm 安装提示、示例项目、代码注释和 CHANGELOG 中的可点击文档链接均改指向新站。CHANGELOG 中描述旧版本曾新增哪些文件的历史文字保留原貌，不作为当前文档入口。`scripts/cloud-image/README.md` 收敛为新站入口，避免继续维护重复教程。
 
 ## 本次检查范围
 

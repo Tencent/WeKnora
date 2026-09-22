@@ -109,7 +109,7 @@ cargo test --locked -p bsk daemon::ipc::tests
 
 Run WeKnora's `TestRealExtension` with the built extension, pinned daemon and an
 isolated Chromium profile; environment variables are documented in
-`docs/browser-skill-integration.md`. It exercises actual pairing, screenshot and
+`website-docs/05-clients/09-local-browser.md`. It exercises actual pairing, screenshot and
 input RPC, agent popup selection/read/close and in-place borrow approval/revocation, independent preview during help waits,
 focus, pause/resume, retained-session continuity and completed-task cleanup.
 It separately verifies that agent last-tab closure permits the next turn and
