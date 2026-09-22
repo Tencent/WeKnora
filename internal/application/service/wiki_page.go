@@ -987,10 +987,17 @@ func (s *wikiPageService) ListByTypeRecent(ctx context.Context, kbID string, pag
 	return s.repo.ListByTypeRecent(ctx, kbID, pageType, limit)
 }
 
-// FindSimilarPages performs a pg_trgm similarity search; used by the
-// dedup pre-filter to surface candidate merge targets.
+// FindSimilarPages returns title/alias candidates for one term. Prefer the
+// batch API during ingest so aliases are not scanned once per name/alias.
 func (s *wikiPageService) FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error) {
 	return s.repo.FindSimilarPages(ctx, kbID, query, pageTypes, limit)
+}
+
+// FindSimilarPagesBatch retrieves candidates with a shared alias scan.
+func (s *wikiPageService) FindSimilarPagesBatch(
+	ctx context.Context, kbID string, queries []string, pageTypes []string, limit int,
+) (map[string][]*types.WikiPageLite, error) {
+	return s.repo.FindSimilarPagesBatch(ctx, kbID, queries, pageTypes, limit)
 }
 
 // FindPagesByNormalizedTitle looks up exact same-type title identities for

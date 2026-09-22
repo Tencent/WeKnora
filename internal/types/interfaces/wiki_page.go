@@ -152,6 +152,10 @@ type WikiPageService interface {
 	// alias matches. Exact alias matches rank ahead of fuzzy title matches.
 	// Used by the dedup pre-filter; a candidate is not an automatic merge.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
+	// FindSimilarPagesBatch shares the alias scan across terms and returns
+	// per-term top-k candidates keyed by lowercased, trimmed query. Prefer for ingest.
+	FindSimilarPagesBatch(ctx context.Context, kbID string, queries []string,
+		pageTypes []string, limit int) (map[string][]*types.WikiPageLite, error)
 
 	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
 	// display title matches identity after the same whitespace/case fold used
@@ -327,6 +331,10 @@ type WikiPageRepository interface {
 	// alias matches, with exact aliases ahead of fuzzy titles. `pageTypes`
 	// empty defaults to entity+concept. Used by the dedup pre-filter.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
+	// FindSimilarPagesBatch shares the alias scan across terms and returns
+	// per-term top-k candidates keyed by lowercased, trimmed query. Prefer for ingest.
+	FindSimilarPagesBatch(ctx context.Context, kbID string, queries []string,
+		pageTypes []string, limit int) (map[string][]*types.WikiPageLite, error)
 
 	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
 	// whitespace-stripped, lowercased title equals identity.
