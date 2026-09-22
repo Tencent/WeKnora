@@ -465,6 +465,7 @@ type StreamingConnector interface {
 | `notion` | `internal/datasource/connector/notion/` | 页面与数据库 |
 | `yuque` | `internal/datasource/connector/yuque/` | 语雀 |
 | `rss` | `internal/datasource/connector/rss/` | RSS 订阅 |
+| `seafile` | `internal/datasource/connector/seafile/` | 资料库目录与文件 |
 
 ### 新增步骤
 

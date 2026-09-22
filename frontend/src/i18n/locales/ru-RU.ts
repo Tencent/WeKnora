@@ -842,6 +842,12 @@ export default {
       paths: 'Каталоги', pathsPlaceholder: 'По одному каталогу в строке; оставьте пустым для синхронизации всего проекта',
       addProject: 'Добавить проект', projectRequired: 'Добавьте хотя бы один проект GitLab',
     },
+    seafile: {
+      baseUrl: 'URL Seafile', apiToken: 'API-токен',
+      apiTokenHint: 'Создайте его в Seafile: «Настройки → Web API токен». Учётной записи достаточно прав на чтение выбранных библиотек; токен не передаётся при скачивании файлов.',
+      singleLibraryOnly: 'Один источник данных синхронизирует одну библиотеку. Снимите текущий выбор, прежде чем выбрать другую библиотеку.',
+      selectionRequired: 'Выберите хотя бы одну библиотеку, папку или файл',
+    },
     resourceHint: 'Выберите пространства или папки для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
@@ -855,6 +861,10 @@ export default {
     guideStep1_notion: 'Откройте страницу или базу данных, которую хотите синхронизировать в Notion',
     guideStep2_notion: 'Нажмите меню «···» в правом верхнем углу, выберите «Connect to» или «Add connections»',
     guideStep3_notion: 'Найдите и выберите ваше интеграционное приложение, затем вернитесь и нажмите Повторить',
+    noResourcesDesc_seafile: 'Токену недоступна ни одна библиотека, либо все библиотеки зашифрованы (зашифрованные библиотеки не синхронизируются)',
+    guideStep1_seafile: 'Войдите в Seafile и убедитесь, что у аккаунта есть доступ на чтение хотя бы к одной незашифрованной библиотеке',
+    guideStep2_seafile: 'Создайте или пересоздайте токен в разделе «Настройки → Web API токен»',
+    guideStep3_seafile: 'Вернитесь сюда, введите новый токен и нажмите Повторить',
     permissionDocLink: 'Документация по настройке прав доступа',
     syncScheduleLabel: 'Расписание синхронизации',
     conflictLabel: 'Стратегия конфликтов',
@@ -941,7 +951,8 @@ export default {
     resourceType: {
       wikiSpace: 'Пространство вики',
       docCategory: 'Тег документа',
-      book: 'База знаний Yuque'
+      book: 'База знаний Yuque',
+      library: 'Библиотека Seafile'
     },
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
@@ -986,7 +997,8 @@ export default {
       dingtalk: 'Синхронизация онлайн-документов из баз знаний DingTalk',
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
-      gitlab: 'Синхронизация файлов из проектов GitLab'
+      gitlab: 'Синхронизация файлов из проектов GitLab',
+      seafile: 'Синхронизация папок и файлов из библиотек Seafile'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -999,7 +1011,8 @@ export default {
       dingtalk: 'Документы DingTalk',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     logDetail: {
       startTime: 'Время начала',
@@ -1063,7 +1076,15 @@ export default {
       dingtalk_resource_failed: 'Ресурс DingTalk недоступен. Проверьте права доступа и выбранные ресурсы, затем повторите попытку.',
       deletion_lookup_failed: 'Не удалось найти элемент перед удалением; подробности в журнале сервера',
       deletion_failed: 'Не удалось удалить элемент; подробности в журнале сервера',
-      ingest_failed: 'Не удалось импортировать элемент; подробности в журнале сервера'
+      ingest_failed: 'Не удалось импортировать элемент; подробности в журнале сервера',
+      seafile_permission_denied: 'Доступ к файлу Seafile запрещён. Проверьте права владельца токена на библиотеку.',
+      seafile_not_found: 'Файл Seafile не существует или был перемещён; при следующей синхронизации попытка повторится.',
+      seafile_file_too_large: 'Файл Seafile превышает ограничение размера. Увеличьте MAX_FILE_SIZE_MB или уменьшите файл.',
+      seafile_empty_file: 'Файл Seafile пуст и был пропущен.',
+      seafile_source_changed: 'Файл Seafile изменился во время получения; при следующей синхронизации попытка повторится.',
+      seafile_invalid_response: 'Seafile вернул ответ, который не удалось разобрать. Проверьте версию сервера и обратный прокси.',
+      seafile_ssrf_blocked: 'URL скачивания Seafile заблокирован политикой SSRF. Добавьте хост fileserver в SSRF_WHITELIST.',
+      seafile_fetch_failed: 'Не удалось получить файл из Seafile; при следующей синхронизации попытка повторится.'
     },
   },
   ollama: {
@@ -6825,6 +6846,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',

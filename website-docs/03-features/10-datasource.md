@@ -22,7 +22,7 @@
 
 ## 选择连接器
 
-飞书、Lark、Notion 和语雀用于同步协作文档，GitLab 用于同步仓库中的文档目录，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章。各连接器支持的格式、认证与删除检测见参考部分。
+飞书、Lark、Notion 和语雀用于同步协作文档，GitLab 用于同步仓库中的文档目录，Seafile 用于同步资料库中的目录和文件，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章。各连接器支持的格式、认证与删除检测见参考部分。
 
 ## 检查变更与失败
 
@@ -76,6 +76,19 @@
 ```json
 {"credentials":{"base_url":"https://gitlab.example.com","access_token":"<token>"},"settings":{"projects":[{"project_id":"123","ref":"main","paths":["docs"]}]}}
 ```
+
+#### Seafile（`connector/seafile/`）
+
+1. 获取 Seafile 账号的用户 API Token，确认该账号对目标资料库有读取权限。
+2. 添加「Seafile」数据源，填写 Seafile 地址（支持部署路径前缀）和 API Token。私网部署或独立 fileserver 地址需先加入 `SSRF_WHITELIST`。
+3. 测试连接后，在资源树中勾选同一资料库内的根目录、目录或文件；加密资料库和不支持的文件格式不会出现在选择器中。
+4. 发起首次同步；文件按 `<资料库名>/<资料库内路径>` 进入知识库，来源显示为「Seafile」。
+
+连接器支持定时、增量、流式检查点及同步删除。同步逐层扫描目录，以「对象 ID + 修改时间 + 大小」比较文件指纹，只下载需要更新的文件；下载经过 API 获取链接、fileserver 获取内容两步，fileserver 请求不携带令牌。每 50 次游标变更保存检查点，中断后从检查点继续。
+
+单文件获取失败不阻断其他文件，已知路径保留待重试状态；目录扫描失败或 `Retry-After` 超过 60 秒时停止本轮并暂停删除对账。删除知识条目受「同步删除」开关控制，单文件大小沿用 `MAX_FILE_SIZE_MB`。已同步的数据源不能改绑其他资料库，需新建数据源。
+
+配置、格式限制、失败恢复与删除边界见 [Seafile 接入](25-seafile.md)。
 
 #### 腾讯 IMA（`connector/ima/`）
 
@@ -340,9 +353,10 @@ registry.Register(dingtalkConnector.NewConnector())                            /
 registry.Register(imaConnector.NewConnector())                                 // ima
 registry.Register(rssConnector.NewConnector())                                 // rss
 registry.Register(gitlabConnector.NewConnector())                              // gitlab
+registry.Register(seafileConnector.NewConnector())                             // seafile
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（Confluence、GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（Confluence、GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

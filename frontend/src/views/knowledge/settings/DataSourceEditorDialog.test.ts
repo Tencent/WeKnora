@@ -18,8 +18,15 @@ const compiled = ts.transpileModule(script, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
 
-async function fixture({ configured = true, create = false } = {}) {
+// Lets un-awaited API calls (e.g. loadResources fired by nextStep) settle.
+const flush = async () => {
+  await new Promise(resolve => setImmediate(resolve))
+  await nextTick()
+}
+
+async function fixture({ configured = true, create = false, resources = [] as any[], dataSource = null as any } = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
+  const warnings: string[] = []
   let storedToken = configured ? 'expired-token' : ''
   const api = {
     async validateCredentials(type: string, credentials: Record<string, string>) {
@@ -38,10 +45,23 @@ async function fixture({ configured = true, create = false } = {}) {
       calls.push({ method: 'putDataSourceCredentials', args: [id, { ...credentials }] })
       storedToken = credentials.access_token
     },
+    async createDataSource(data: any) {
+      calls.push({ method: 'createDataSource', args: [JSON.parse(JSON.stringify(data))] })
+      return { data: { id: 'source-temp' } }
+    },
+    // Lazy picker: the first call lists roots, later calls list one level.
+    async listResources(id: string, parentId?: string) {
+      calls.push({ method: 'listResources', args: [id, parentId] })
+      return { data: resources.filter(r => (parentId ? r.parent_id === parentId : !r.parent_id)) }
+    },
+    async resolveResourceAncestors(id: string, ids: string[]) {
+      calls.push({ method: 'resolveResourceAncestors', args: [id, ids] })
+      return { data: { ancestors: [] } }
+    },
   }
   const props = reactive({
     visible: false, kbId: 'kb-one',
-    dataSource: create ? null : {
+    dataSource: create ? null : dataSource || {
       id: 'source-one', name: 'GitLab', type: 'gitlab',
       credentials: { credentials: { configured } },
       config: { resource_ids: [], settings: { projects: [{ project_id: '123', paths: [] }] } },
@@ -55,7 +75,7 @@ async function fixture({ configured = true, create = false } = {}) {
     require(name: string) {
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
-      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning() {}, success() {}, error() {} } }
+      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning(msg: string) { warnings.push(msg) }, success() {}, error() {} } }
       if (name === '@/api/datasource') return api
       return { default: {} }
     },
@@ -79,7 +99,7 @@ async function fixture({ configured = true, create = false } = {}) {
     vm.form.config.credentials = { base_url: 'https://gitlab.example.com', access_token: token }
     await nextTick()
   }
-  return { vm, calls, replace, storedToken: () => storedToken, close: () => app.unmount() }
+  return { vm, calls, warnings, replace, storedToken: () => storedToken, close: () => app.unmount() }
 }
 
 test('rotated GitLab credentials are tested without updating the saved data source', async () => {
@@ -156,4 +176,115 @@ test('new GitLab data sources continue to test credentials without persistence',
     assert.equal(f.vm.testResult, 'success')
     assert.deepEqual(f.calls.map(call => call.method), ['validateCredentials'])
   } finally { f.close() }
+})
+
+const seafileRepoA = '0f1e2d3c-4b5a-4968-8776-655443322110'
+const seafileRepoB = 'ffffffff-0000-4000-8000-000000000001'
+
+// A lazy Seafile tree: two libraries, one with a folder that holds a file.
+const seafileResources = [
+  { external_id: `${seafileRepoA}:/`, name: 'Docs', type: 'library', has_children: true },
+  { external_id: `${seafileRepoB}:/`, name: 'Design', type: 'library', has_children: true },
+  { external_id: `${seafileRepoA}:/guides`, name: 'guides', type: 'directory', parent_id: `${seafileRepoA}:/`, has_children: true },
+  { external_id: `${seafileRepoA}:/guides/a.pdf`, name: 'a.pdf', type: 'file', parent_id: `${seafileRepoA}:/guides`, has_children: false },
+]
+
+// Opens a new Seafile data source on the picker step with the roots listed.
+async function seafileFixture(resources = seafileResources) {
+  const f = await fixture({ create: true, resources })
+  f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'seafile'))
+  f.vm.form.config.credentials = { base_url: 'https://seafile.example.com', api_token: 'rotated-token' }
+  f.vm.testResult = 'success'
+  await f.vm.nextStep()
+  await flush()
+  return f
+}
+
+test('Seafile picker lists libraries lazily and shows the library icon', async () => {
+  const f = await seafileFixture()
+  try {
+    assert.equal(f.vm.step, 2)
+    assert.deepEqual(f.calls.map(call => call.method), ['createDataSource', 'listResources'])
+    assert.deepEqual([...f.vm.resources].map((r: any) => r.external_id), [`${seafileRepoA}:/`, `${seafileRepoB}:/`])
+    assert.equal(f.vm.resourceIconName(f.vm.resources[0]), 'root-list')
+    assert.equal(f.vm.resourceTypeLabel('library'), 'datasource.resourceType.library')
+    await f.vm.ensureChildrenLoaded(`${seafileRepoA}:/`)
+    await f.vm.ensureChildrenLoaded(`${seafileRepoA}:/guides`)
+    assert.equal(f.vm.resourceIconName(f.vm.resources.find((r: any) => r.name === 'guides')), 'folder')
+    assert.equal(f.vm.resourceIconName(f.vm.resources.find((r: any) => r.name === 'a.pdf')), 'file')
+  } finally { f.close() }
+})
+
+test('Seafile selection stays within one library until it is cleared', async () => {
+  const f = await seafileFixture()
+  try {
+    await f.vm.ensureChildrenLoaded(`${seafileRepoA}:/`)
+    await f.vm.ensureChildrenLoaded(`${seafileRepoA}:/guides`)
+    f.vm.toggleResource(`${seafileRepoA}:/guides/a.pdf`)
+    f.vm.toggleResource(`${seafileRepoB}:/`)
+    assert.deepEqual([...f.vm.selectedResourceIds], [`${seafileRepoA}:/guides/a.pdf`])
+    assert.deepEqual(f.warnings, ['datasource.seafile.singleLibraryOnly'])
+    // Clearing library A first lets the user pick library B before saving.
+    f.vm.toggleResource(`${seafileRepoA}:/guides/a.pdf`)
+    f.vm.toggleResource(`${seafileRepoB}:/`)
+    assert.deepEqual([...f.vm.selectedResourceIds], [`${seafileRepoB}:/`])
+    assert.equal(f.warnings.length, 1)
+  } finally { f.close() }
+})
+
+test('Seafile requires a selection before the strategy step', async () => {
+  const f = await seafileFixture()
+  try {
+    await f.vm.nextStep()
+    assert.equal(f.vm.step, 2)
+    assert.deepEqual(f.warnings, ['datasource.seafile.selectionRequired'])
+    f.vm.toggleResource(`${seafileRepoA}:/`)
+    await f.vm.nextStep()
+    assert.equal(f.vm.step, 3)
+  } finally { f.close() }
+})
+
+test('a vanished saved Seafile selection is cleared by unchecking its library', async () => {
+  const f = await fixture({ resources: seafileResources, dataSource: {
+    id: 'source-one', name: 'Seafile', type: 'seafile',
+    credentials: { credentials: { configured: true } },
+    config: { resource_ids: [`${seafileRepoA}:/guides/vanished.pdf`], settings: {} },
+    sync_schedule: '0 0 */6 * * *', sync_mode: 'incremental',
+    conflict_strategy: 'overwrite', sync_deletions: true,
+  } })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    assert.equal(f.vm.step, 2)
+    assert.deepEqual([...f.vm.selectedResourceIds], [`${seafileRepoA}:/guides/vanished.pdf`])
+    // The stale path is invisible, so library B is refused until A is cleared.
+    f.vm.toggleResource(`${seafileRepoB}:/`)
+    assert.deepEqual(f.warnings, ['datasource.seafile.singleLibraryOnly'])
+    // Checking then unchecking library A sweeps the stale path with it.
+    f.vm.toggleResource(`${seafileRepoA}:/`)
+    f.vm.toggleResource(`${seafileRepoA}:/`)
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+    f.vm.toggleResource(`${seafileRepoB}:/`)
+    assert.deepEqual([...f.vm.selectedResourceIds], [`${seafileRepoB}:/`])
+  } finally { f.close() }
+})
+
+test('the single-library guard leaves Feishu and Lark Drive selections alone', async () => {
+  for (const type of ['feishu_drive', 'lark_drive']) {
+    const f = await fixture({ create: true })
+    try {
+      f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === type))
+      // Drive IDs are "folderToken:fileToken"; roots under two folders must
+      // both stay selectable.
+      f.vm.resources = [
+        { external_id: 'folderA:fileA', name: 'A', type: 'file', has_children: false },
+        { external_id: 'folderB:fileB', name: 'B', type: 'file', has_children: false },
+      ]
+      await nextTick()
+      f.vm.toggleResource('folderA:fileA')
+      f.vm.toggleResource('folderB:fileB')
+      assert.deepEqual([...f.vm.selectedResourceIds].sort(), ['folderA:fileA', 'folderB:fileB'], type)
+      assert.deepEqual(f.warnings, [], type)
+    } finally { f.close() }
+  }
 })
