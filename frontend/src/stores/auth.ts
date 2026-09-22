@@ -11,6 +11,7 @@ import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useOrganizationStore } from '@/stores/organization'
+import { createSequencedRefresh } from '@/stores/sequencedRefresh'
 
 /** 登出时丢弃 Pinia 内的空间级资源缓存，避免 SPA 重登复用上一账号数据。 */
 function clearSessionResourceCaches() {
@@ -338,71 +339,72 @@ export const useAuthStore = defineStore('auth', () => {
   // hydrateSessionFromToken when isLoggedIn is already true — so inviting
   // flows or revokes would leave the sidebar switcher stale until reload.
   //
-  // 同一时刻只允许一个 /auth/me 在飞行：启动（main.ts）、路由守卫、侧栏用户菜单
-  // 都可能在首屏同时要它，并发调用共用同一个请求。
-  let authMeInflight: Promise<boolean> | null = null
+  // 请求排序：refreshFromAuthMe 是「刷新」，结果必须来自本次调用之后发出的请求
+  // （接受邀请 / 建空间 / 改空间信息之后调用，不能吃到侧栏悬停早先发出的那次响应）；
+  // ensureAuthMe 是「首屏共用」，有请求在飞行就直接复用。登出会作废飞行中的请求，
+  // 迟到的响应不再把会话写回来。
   // 本次会话是否已经用 /auth/me 校准过。登录响应 / 自动初始化只写入登录时的快照，
   // 之后第一次进入平台布局仍需校准一次；此后由写操作显式 refresh。
   let authMeSynced = false
 
-  const refreshFromAuthMe = (): Promise<boolean> => {
-    if (authMeInflight) return authMeInflight
-    authMeInflight = refreshFromAuthMeUncached().finally(() => {
-      authMeInflight = null
-    })
-    return authMeInflight
-  }
-
-  /** 会话内已校准过就直接返回，否则拉一次 /auth/me。 */
-  const ensureAuthMe = (): Promise<boolean> => {
-    if (authMeSynced) return Promise.resolve(true)
-    return refreshFromAuthMe()
-  }
-
-  const refreshFromAuthMeUncached = async (): Promise<boolean> => {
+  const authMeRequest = createSequencedRefresh<boolean>(async (isCurrent) => {
     try {
       const { getCurrentUser } = await import('@/api/auth')
       const response = await getCurrentUser()
-      const u = response.data?.user
-      if (!response.success || !u) return false
-
-      setUser(userInfoFromApi(u, response.data?.tenant?.id))
-
-      const tenantSnapshot = response.data?.tenant
-      if (tenantSnapshot) {
-        setTenant({
-          id: String(tenantSnapshot.id) || '',
-          name: tenantSnapshot.name || '',
-          owner_id: tenantSnapshot.owner_id || u.id || '',
-          description: tenantSnapshot.description,
-          status: tenantSnapshot.status,
-          business: tenantSnapshot.business,
-          storage_quota: tenantSnapshot.storage_quota,
-          storage_used: tenantSnapshot.storage_used,
-          created_at: tenantSnapshot.created_at || new Date().toISOString(),
-          updated_at: tenantSnapshot.updated_at || new Date().toISOString(),
-        })
-      } else {
-        setTenant(null)
-      }
-
-      const list = response.data?.memberships
-      if (Array.isArray(list)) {
-        setMemberships(list)
-      }
-
-      const createCapability = response.data?.capabilities?.can_create_tenant
-      if (typeof createCapability === 'boolean') {
-        setCanCreateTenant(createCapability)
-      }
-
-      setAutoAcceptInvitation(response.data?.capabilities?.auto_accept_invitation === true)
-
-      authMeSynced = true
-      return true
+      if (!isCurrent()) return false
+      return applyAuthMeResponse(response)
     } catch {
       return false
     }
+  })
+
+  const refreshFromAuthMe = (): Promise<boolean> => authMeRequest.refresh()
+
+  /** 会话内已校准过就直接返回，否则复用飞行中的 /auth/me，没有就拉一次。 */
+  const ensureAuthMe = (): Promise<boolean> => {
+    if (authMeSynced) return Promise.resolve(true)
+    return authMeRequest.share()
+  }
+
+  type AuthMeResponse = Awaited<ReturnType<typeof import('@/api/auth')['getCurrentUser']>>
+  const applyAuthMeResponse = (response: AuthMeResponse): boolean => {
+    const u = response.data?.user
+    if (!response.success || !u) return false
+
+    setUser(userInfoFromApi(u, response.data?.tenant?.id))
+
+    const tenantSnapshot = response.data?.tenant
+    if (tenantSnapshot) {
+      setTenant({
+        id: String(tenantSnapshot.id) || '',
+        name: tenantSnapshot.name || '',
+        owner_id: tenantSnapshot.owner_id || u.id || '',
+        description: tenantSnapshot.description,
+        status: tenantSnapshot.status,
+        business: tenantSnapshot.business,
+        storage_quota: tenantSnapshot.storage_quota,
+        storage_used: tenantSnapshot.storage_used,
+        created_at: tenantSnapshot.created_at || new Date().toISOString(),
+        updated_at: tenantSnapshot.updated_at || new Date().toISOString(),
+      })
+    } else {
+      setTenant(null)
+    }
+
+    const list = response.data?.memberships
+    if (Array.isArray(list)) {
+      setMemberships(list)
+    }
+
+    const createCapability = response.data?.capabilities?.can_create_tenant
+    if (typeof createCapability === 'boolean') {
+      setCanCreateTenant(createCapability)
+    }
+
+    setAutoAcceptInvitation(response.data?.capabilities?.auto_accept_invitation === true)
+
+    authMeSynced = true
+    return true
   }
 
   // 用 token 加入空间并刷新成员关系、切到新空间。token 无效时返回 ok:false（不抛异常），
@@ -456,6 +458,8 @@ export const useAuthStore = defineStore('auth', () => {
     canCreateTenant.value = false
     autoAcceptInvitation.value = false
     authMeSynced = false
+    // 飞行中的 /auth/me 作废：登出之后才返回的响应不能再 setUser / setTenant。
+    authMeRequest.invalidate()
     clearSessionResourceCaches()
 
     // 清空localStorage

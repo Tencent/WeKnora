@@ -65,34 +65,45 @@ export function createCachedResource<T>(
  */
 export function createKeyedSnapshotCache<T>(load: (key: string) => Promise<T>) {
   const snapshots = new Map<string, T>()
-  const inflight = new Map<string, { promise: Promise<T>; token: symbol }>()
+  const inflight = new Map<string, { promise: Promise<T>; revision: number }>()
+  // 每个 key 一个代际；invalidate / force 都会推进它。请求返回时代际已变，
+  // 说明中途发生过失效或有更新的请求，这次响应只交给调用方，不落快照。
+  const revisions = new Map<string, number>()
+
+  const bump = (key: string) => {
+    const next = (revisions.get(key) ?? 0) + 1
+    revisions.set(key, next)
+    return next
+  }
 
   return {
     async ensure(key: string, force = false): Promise<T> {
       if (!force && snapshots.has(key)) return snapshots.get(key) as T
       const existing = inflight.get(key)
       if (existing && !force) return existing.promise
-      // force 会覆盖飞行中的句柄；旧请求结束时凭 token 判断自己是否仍是最新的那次。
-      const token = Symbol(key)
+      const revision = force ? bump(key) : (revisions.get(key) ?? 0)
       const promise = (async () => {
         try {
           const value = await load(key)
+          const stillCurrent = (revisions.get(key) ?? 0) === revision
           // 加载失败以 null 表示时不落快照，下次读取会重试。
-          if (value != null) snapshots.set(key, value)
+          if (stillCurrent && value != null) snapshots.set(key, value)
           return value
         } finally {
-          if (inflight.get(key)?.token === token) inflight.delete(key)
+          if (inflight.get(key)?.revision === revision) inflight.delete(key)
         }
       })()
-      inflight.set(key, { promise, token })
+      inflight.set(key, { promise, revision })
       return promise
     },
     invalidate(key?: string) {
       if (key === undefined) {
+        for (const k of new Set([...snapshots.keys(), ...inflight.keys()])) bump(k)
         snapshots.clear()
         inflight.clear()
         return
       }
+      bump(key)
       snapshots.delete(key)
       inflight.delete(key)
     },

@@ -172,11 +172,16 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     return rawKnowledgeBases.value
   }
 
+  // 共享资源是附带刷新：它的接口挂了不能连坐自己的列表，否则调用方的 catch
+  // 会把已经拿到的自己的知识库 / 智能体一起清掉（手动文档编辑器、API 集成页）。
+  // 共享列表失败时保留上一次快照，由页面自己决定要不要单独强刷。
+  const swallow = (p: Promise<unknown>) => p.catch(() => undefined)
+
   async function ensureKnowledgeBases(force = false): Promise<void> {
     const orgStore = useOrganizationStore()
     await Promise.all([
       knowledgeBasesResource.ensure(force),
-      orgStore.fetchSharedKnowledgeBases({ force }),
+      swallow(orgStore.fetchSharedKnowledgeBases({ force })),
     ])
   }
 
@@ -214,7 +219,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       shouldForceLocalizedRefetch(agentsResource.hasInFlightRequest(), agentsInflightLocale, locale)
     await Promise.all([
       agentsResource.ensure(mustForce),
-      orgStore.fetchSharedAgents({ force }),
+      swallow(orgStore.fetchSharedAgents({ force })),
     ])
   }
 

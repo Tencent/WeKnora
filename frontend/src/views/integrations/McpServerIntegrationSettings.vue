@@ -399,13 +399,16 @@ async function loadOptions() {
   kbLoading.value = true
   agentsLoading.value = true
   try {
-    await Promise.all([
-      chatResources.ensureKnowledgeBases().catch(() => null),
-      chatResources.ensureAgents().catch(() => null),
+    // 刷新失败时给空列表，而不是把上一次的共享快照当成本次结果展示。
+    const [kbResult, agentResult] = await Promise.allSettled([
+      chatResources.ensureKnowledgeBases(),
+      chatResources.ensureAgents(),
     ])
-    const kbRows = chatResources.rawKnowledgeBases as Array<{ id: string | number; name?: string }>
+    const kbRows = kbResult.status === 'fulfilled'
+      ? (chatResources.rawKnowledgeBases as Array<{ id: string | number; name?: string }>)
+      : []
     knowledgeBases.value = kbRows.map((kb) => ({ id: String(kb.id), name: kb.name || String(kb.id) }))
-    agents.value = chatResources.agents as CustomAgent[]
+    agents.value = agentResult.status === 'fulfilled' ? (chatResources.agents as CustomAgent[]) : []
   } finally {
     kbLoading.value = false
     agentsLoading.value = false

@@ -103,3 +103,54 @@ test('keyed snapshot cache loads each key once until invalidated', async () => {
   assert.equal(await cache.ensure('kb1'), 'kb1:2')
   assert.equal(await cache.ensure('kb1', true), 'kb1:3', 'force bypasses the snapshot')
 })
+
+test('keyed snapshot: a response that lands after invalidate is not written back', async () => {
+  const pending = new Map<string, ReturnType<typeof deferred<string>>>()
+  let seq = 0
+  const cache = createKeyedSnapshotCache((key: string) => {
+    const d = deferred<string>()
+    pending.set(`${key}#${++seq}`, d)
+    return d.promise
+  })
+
+  // Sidebar read in flight; the editor saves, invalidates and forces a fresh read.
+  const stale = cache.ensure('kb1')
+  cache.invalidate('kb1')
+  const fresh = cache.ensure('kb1', true)
+  assert.equal(pending.size, 2)
+
+  pending.get('kb1#2')!.resolve('saved')
+  assert.equal(await fresh, 'saved')
+  pending.get('kb1#1')!.resolve('before-save')
+  assert.equal(await stale, 'before-save', 'caller of the stale read still gets its value')
+
+  // The snapshot must be the post-save detail, so a later non-force read is correct.
+  assert.equal(await cache.ensure('kb1'), 'saved')
+  assert.equal(pending.size, 2, 'served from snapshot')
+})
+
+test('keyed snapshot: a force read overlapping an in-flight read wins regardless of order', async () => {
+  const pending: Array<ReturnType<typeof deferred<string>>> = []
+  const cache = createKeyedSnapshotCache((_key: string) => {
+    const d = deferred<string>()
+    pending.push(d)
+    return d.promise
+  })
+
+  const first = cache.ensure('kb1')
+  const forced = cache.ensure('kb1', true)
+  pending[1].resolve('fresh')
+  pending[0].resolve('old')
+  await Promise.all([first, forced])
+  assert.equal(await cache.ensure('kb1'), 'fresh')
+
+  // invalidate() without a key must also fence every in-flight read.
+  const late = cache.ensure('kb2')
+  cache.invalidate()
+  pending[2].resolve('kb2-stale')
+  await late
+  const reloaded = cache.ensure('kb2')
+  assert.equal(pending.length, 4, 'kb2 is reloaded rather than served from the stale write')
+  pending[3].resolve('kb2-fresh')
+  assert.equal(await reloaded, 'kb2-fresh')
+})
