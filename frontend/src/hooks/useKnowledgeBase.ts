@@ -145,11 +145,11 @@ export default function (knowledgeBaseId?: string) {
     getfDetails(item.id, 1);
   };
   
-  const getfDetails = (id: string, page: number) => {
+  const getfDetails = (id: string, page: number, chunkType?: string) => {
     const requestGeneration = ++chunkRequestGeneration;
     details.chunkLoading = true;
     details.chunkLoadError = "";
-    getKnowledgeDetailsCon(id, page)
+    getKnowledgeDetailsCon(id, page, chunkType)
       .then((result: any) => {
         if (requestGeneration !== chunkRequestGeneration || activeKnowledgeId !== id) return;
         if (result.success && result.data) {

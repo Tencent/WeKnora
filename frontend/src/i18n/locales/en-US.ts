@@ -652,6 +652,11 @@ export default {
     segment: 'Segment',
     chunkCount: 'Total {count} segments',
     viewChunks: 'View Chunks',
+    chunkType: {
+      text: 'Text',
+      imageOcr: 'Image OCR',
+      imageCaption: 'Image Caption',
+    },
     viewMerged: 'Full Text',
     generatedQuestions: 'Retrieval questions',
     viewParentContext: 'View Parent Context',

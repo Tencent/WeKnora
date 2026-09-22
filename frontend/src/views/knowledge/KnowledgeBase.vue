@@ -1813,8 +1813,8 @@ const handleScroll = () => {
     }
   }
 };
-const getDoc = (page: number) => {
-  getfDetails(details.id, page)
+const getDoc = (page: number, chunkType?: string) => {
+  getfDetails(details.id, page, chunkType)
 };
 
 const syncDocumentSummaryState = (state: { id?: string; summary_status?: string; description?: string }) => {

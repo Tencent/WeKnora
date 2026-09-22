@@ -652,6 +652,11 @@ export default {
     segment: 'チャンク',
     chunkCount: '全{count}チャンク',
     viewChunks: 'チャンクを表示',
+    chunkType: {
+      text: 'テキスト',
+      imageOcr: '画像OCR',
+      imageCaption: '画像の説明',
+    },
     viewMerged: '全文',
     generatedQuestions: '検索用質問',
     viewParentContext: '親チャンクのコンテキストを表示',

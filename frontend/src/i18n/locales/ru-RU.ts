@@ -6823,6 +6823,11 @@ export default {
     segment: 'Фрагмент',
     chunkCount: 'Всего {count} фрагментов',
     viewChunks: 'Просмотр фрагментов',
+    chunkType: {
+      text: 'Текст',
+      imageOcr: 'OCR изображений',
+      imageCaption: 'Описание изображения',
+    },
     viewMerged: 'Полный текст',
     generatedQuestions: 'Вопросы для поиска',
     viewParentContext: 'Просмотр родительского контекста',

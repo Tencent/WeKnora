@@ -6823,6 +6823,11 @@ export default {
     segment: '조각',
     chunkCount: '총 {count}개 조각',
     viewChunks: '청크 보기',
+    chunkType: {
+      text: '텍스트',
+      imageOcr: '이미지 OCR',
+      imageCaption: '이미지 설명',
+    },
     viewMerged: '전체 텍스트',
     generatedQuestions: '검색 보조 질문',
     viewParentContext: '부모 컨텍스트 보기',
