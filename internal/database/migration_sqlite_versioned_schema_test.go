@@ -29,27 +29,42 @@ var versionedSQLiteTables = []string{
 	"fork_snapshot_leases",
 	"mcp_endpoints",
 	"message_artifacts",
+	"tenant_skills",
+	"tenant_skill_snapshots",
+	"tenant_skill_catalog",
+	"tenant_user_env_vars",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"memory_subjects":    {"extraction_state"},                                                 // 000094
-	"memory_items":       {"replaces_id"},                                                      // 000094
-	"tenants":            {"api_principal_config"},                                             // 000064
-	"users":              {"is_system_admin"},                                                  // 000053
-	"knowledges":         {"pending_subtasks_count", "profile"},                                // 000056, 000101
-	"knowledge_bases":    {"profile_config", "generated_profile"},                              // 000101
-	"messages":           {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
-	"sessions":           {"parent_session_id", "forked_from_message_id", "fork_bootstrap"},    // 000097
-	"tenant_invitations": {"token", "accepted_count"},                                          // 000054
-	"embed_channels":     {"allow_memory"},                                                     // 000060
-	"mcp_oauth_tokens":   {"principal_type", "principal_id"},                                   // 000064
-	"mcp_tool_approvals": {"enabled"},                                                          // 000091
-	"message_artifacts":  {"deleted_at"},                                                       // 000107
+	"memory_subjects": {"extraction_state"},                                                 // 000094
+	"memory_items":    {"replaces_id"},                                                      // 000094
+	"tenants":         {"api_principal_config"},                                             // 000064
+	"users":           {"is_system_admin"},                                                  // 000053
+	"knowledges":      {"pending_subtasks_count", "profile"},                                // 000056, 000101
+	"knowledge_bases": {"profile_config", "generated_profile"},                              // 000101
+	"messages":        {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
+	"sessions": {
+		"parent_session_id", "forked_from_message_id", "fork_bootstrap", // 000097
+		"sandbox_config_tenant_id", // 000027
+		"host_workspace_dir",       // 000029
+	},
+	"tenant_invitations": {"token", "accepted_count"},        // 000054
+	"embed_channels":     {"allow_memory"},                   // 000060
+	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
+	"mcp_tool_approvals": {"enabled"},                        // 000091
+	"message_artifacts":  {"deleted_at"},                     // 000107
+	"tenant_skills": {
+		"envs", "served", "catalog_id", "install_session_id", "install_message_id",
+	}, // 000028
+	"tenant_skill_snapshots": {"planned_name"}, // 000028
+	"tenant_user_env_vars": {
+		"principal_type", "principal_id", "sandbox_config_id", "skill_id", "name", "value",
+	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 26
+const expectedSQLiteMigrationVersion = 29
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

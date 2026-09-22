@@ -128,6 +128,7 @@ type sessionService struct {
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
 	sandboxPolicy         WorkspaceSandboxPolicy
+	hostSandbox           sandbox.Manager
 	memoryService         interfaces.MemoryService // Service for cross-session long-term memory
 	// sandboxConfigRepo and tenantSkillRepo answer "which installed skills can
 	// this turn actually invoke". They are repositories rather than
@@ -160,6 +161,7 @@ func NewSessionService(cfg *config.Config,
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	hostSandbox HostSandboxManager,
 	memoryService interfaces.MemoryService,
 	sandboxConfigRepo repository.TenantSandboxConfigRepository,
 	tenantSkillRepo repository.TenantSkillRepository,
@@ -184,6 +186,7 @@ func NewSessionService(cfg *config.Config,
 		sandboxResolver:       sandboxResolver,
 		sandboxPinner:         sandboxPinner,
 		sandboxPolicy:         sandboxPolicy,
+		hostSandbox:           hostSandbox.Manager,
 		memoryService:         memoryService,
 		sandboxConfigRepo:     sandboxConfigRepo,
 		tenantSkillRepo:       tenantSkillRepo,
@@ -699,8 +702,8 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	// Resolve the workspace's own manager: the sandbox to release lives on
 	// whichever backend that workspace is configured for, not necessarily the
 	// process-wide default.
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	configID, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
+	pin, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to read sandbox pin for session %s cleanup: %v", sessionID, err)
 		return
@@ -711,14 +714,27 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	// binding lookup that no-ops when the session truly has no sandbox, whereas
 	// skipping would abandon a paused instance that keeps billing.
 	//
+	// The workspace comes from the pin. This runs from a plain DELETE whose
+	// only tenant is the session's own, but a shared agent's sandbox was
+	// created on the LENDING workspace's config: resolving that here as the
+	// session owner finds nothing and abandons a paused MicroVM that keeps
+	// billing with nobody holding its id.
+	//
 	// Pass nil policy so the workspace kill switch cannot strand an already
 	// created sandbox: disabling script execution must still allow teardown.
-	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, nil)
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, s.sandboxResolver, s.sandboxMgr,
+		pin.TenantOr(sessionTenantID), pin.ConfigID, nil,
+	)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to resolve sandbox for session %s cleanup: %v", sessionID, err)
 		return
 	}
 	if mgr == nil {
+		return
+	}
+	if mgr.GetType() == sandbox.SandboxTypeHost {
+		// Deleting a chat is not deleting the user's directory.
 		return
 	}
 	destroyer, ok := mgr.(interface {
@@ -1037,8 +1053,10 @@ func (s *sessionService) holdSandboxTurn(
 	if s.sandboxResolver == nil || tenantID == 0 {
 		return releaseGate, nil
 	}
-	mgr, err := resolveTenantSandboxForConfig(
-		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
+	mgr, _, err := resolveSandboxForExecution(
+		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+		tenantID, sessionID, configID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox),
 	)
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] resolve config %s to begin turn of session %s failed: %v",

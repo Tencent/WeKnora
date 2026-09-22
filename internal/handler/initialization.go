@@ -25,9 +25,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/models/vendors/lkeap"
+	"github.com/Tencent/WeKnora/internal/models/vendors/volcengine"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -603,7 +604,12 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 		"success": true,
 		"message": "知识库配置更新成功",
 		"data": gin.H{
-			"models":         processedModels,
+			// Through the response DTO, like every other body carrying a
+			// model: types.Model marshals api_key in plaintext, and now that
+			// the reuse path keeps the stored credential instead of
+			// overwriting it, echoing the row would hand back a key the
+			// caller never submitted. KnowledgeBase redacts itself.
+			"models":         dto.NewModelResponses(ctx, processedModels),
 			"knowledge_base": kb,
 		},
 	})
@@ -855,7 +861,7 @@ func (h *InitializationHandler) processInitializationModels(
 			existingModel.Name = model.Name
 			existingModel.Source = model.Source
 			existingModel.Description = model.Description
-			existingModel.Parameters = model.Parameters
+			descriptor.applyToStoredParameters(&existingModel.Parameters)
 			existingModel.UpdatedAt = time.Now()
 
 			if err := h.modelService.UpdateModel(ctx, existingModel); err != nil {
@@ -880,6 +886,32 @@ func (h *InitializationHandler) processInitializationModels(
 	}
 
 	return processedModels, nil
+}
+
+// applyToStoredParameters merges the initialization payload into the
+// parameters of a model row that already exists.
+//
+// The wizard collects four fields (endpoint, key, interface type, embedding
+// dimension); everything else on the row — provider, extra_config, custom
+// headers, spec, concurrency, context window — was configured in the model
+// editor. Assigning toModel()'s parameters wholesale erased all of it, and
+// blanked the stored API key whenever the payload carried none, so a KB that
+// was merely re-initialized came back with a model nobody could call. Only
+// the fields the payload actually carries are written; an empty one means
+// "not submitted", not "clear it".
+func (descriptor modelDescriptor) applyToStoredParameters(params *types.ModelParameters) {
+	if descriptor.baseURL != "" {
+		params.BaseURL = descriptor.baseURL
+	}
+	if descriptor.apiKey != "" {
+		params.APIKey = descriptor.apiKey
+	}
+	if descriptor.interfaceType != "" {
+		params.InterfaceType = descriptor.interfaceType
+	}
+	if descriptor.modelType == types.ModelTypeEmbedding && descriptor.dimension > 0 {
+		params.EmbeddingParameters.Dimension = descriptor.dimension
+	}
 }
 
 func (descriptor modelDescriptor) toModel() *types.Model {
@@ -1770,7 +1802,12 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req == nil || req.ModelID == "" {
 		return
 	}
-	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil {
+	// A request that already carries every secret needs no lookup — but a
+	// secret stored in extra_config (LKEAP / Volcengine secret_key) is
+	// redacted by GET, so "extraConfig is present" does not mean it is
+	// complete.
+	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil &&
+		dto.HasAllSecretExtras(req.Provider, req.BaseURL, req.ExtraConfig) {
 		return
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
@@ -1785,9 +1822,15 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req.AppSecret == "" {
 		req.AppSecret = stored.Parameters.AppSecret
 	}
-	if req.ExtraConfig == nil {
-		req.ExtraConfig = stored.Parameters.ExtraConfig
-	}
+	// Same contract as PUT /models/{id}: an absent or masked secret extra
+	// falls back to the stored value, a real one the user just typed wins —
+	// and a test against a different vendor gets no stored credential, which
+	// belongs to the integration the row is being moved away from.
+	req.ExtraConfig = dto.PreserveStoredSecretExtras(
+		stored.Parameters.ExtraConfig, req.ExtraConfig,
+		dto.VendorRef{Provider: stored.Parameters.Provider, BaseURL: stored.Parameters.BaseURL},
+		dto.VendorRef{Provider: req.Provider, BaseURL: req.BaseURL},
+	)
 }
 
 // RemoteModelCheckRequest 兼容旧 swagger 定义。
@@ -2125,7 +2168,9 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
-	if providerName := provider.ProviderName(model.Parameters.Provider); providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
+	// LKEAP and Volcengine rerank sign with a key pair stored on the row
+	// itself, not with the tenant's WeKnora Cloud credentials.
+	if p := model.Parameters.Provider; p == lkeap.ID || p == volcengine.ID {
 		appID = ""
 		appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
 	}

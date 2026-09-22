@@ -839,9 +839,9 @@ func (s *wikiIngestService) scheduleFinalizeRetry(ctx context.Context, payload W
 }
 
 // peekPendingList loads up to `limit` ops from task_pending_ops for
-// this KB, ordered FIFO. Rows are NOT removed; callers must
-// DeleteByIDs once they have been consumed (or IncrFailCount + leave
-// them in place for the next pass).
+// this KB, least-failed first (then FIFO). Rows are NOT removed;
+// callers must DeleteByIDs once they have been consumed (or
+// IncrFailCount + leave them in place for the next pass).
 //
 // peekedIDs returns the DB ids of every row included in the peek
 // (NOT just the ones that survived dedup) so trimPendingList can
@@ -961,11 +961,13 @@ return 1
 // standard/Redis mode). Returns (release, true) when granted — release() MUST
 // run when the batch finishes; (nil, false) when the KB is already at
 // maxInflight, so the caller should reschedule and bail. A background renew
-// keeps the slot alive for the batch's duration; a crashed batch's slot simply
-// expires (wikiInflightTTL) and is purged by the next reserver. Lite mode has
-// no shared-pool contention (liteLocks already serialize per KB), so it always
-// grants a no-op slot. Fails OPEN on a Redis error: a blip must not halt wiki
-// generation, and the pool size still bounds total work.
+// keeps the slot alive for the batch's duration and removes it when the task
+// context is canceled, even if the handler itself is still blocked. A crashed
+// batch's slot simply expires (wikiInflightTTL) and is purged by the next
+// reserver. Lite mode has no shared-pool contention (liteLocks already
+// serialize per KB), so it always grants a no-op slot. Fails OPEN on a Redis
+// error: a blip must not halt wiki generation, and the pool size still bounds
+// total work.
 func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string, maxInflight int) (func(), bool) {
 	if s.redisClient == nil || maxInflight <= 0 {
 		return func() {}, true
@@ -989,10 +991,13 @@ func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string
 		return nil, false
 	}
 
-	renewCtx, cancel := context.WithCancel(context.Background())
+	renewCtx, cancel := context.WithCancel(ctx)
+	renewDone := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(wikiInflightRenew)
 		defer ticker.Stop()
+		defer close(renewDone)
+		defer s.redisClient.ZRem(context.Background(), key, token)
 		for {
 			select {
 			case <-renewCtx.Done():
@@ -1006,7 +1011,7 @@ func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string
 	}()
 	return func() {
 		cancel()
-		s.redisClient.ZRem(context.Background(), key, token)
+		<-renewDone
 	}, true
 }
 
@@ -1181,8 +1186,10 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID
 //     so a single round trip handles both bookkeeping and retry-budget
 //     check.
 //   - If the count is <= wikiMaxFailRetries: leave the row in place.
-//     The next follow-up batch's PeekBatch will pick it up naturally
-//     (rows are ordered by id ASC and we never moved/touched it).
+//     The next follow-up batch's ClaimBatch / PeekBatch will pick it
+//     up after never-attempted work (both order by fail_count ASC,
+//     then id ASC). The row is not moved, so the fail_count budget
+//     keeps counting down.
 //   - If the count exceeds the retry cap: archive the op into
 //     task_dead_letters and DeleteByIDs to remove it from the queue.
 //     Settlement failures are returned so the caller does not mark claims
@@ -1203,8 +1210,8 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			logger.Warnf(ctx, "wiki ingest: failed to increment fail count for %s (id=%d): %v", op.KnowledgeID, op.dbID, err)
 			settleErrs = append(settleErrs, fmt.Errorf("increment fail count id=%d: %w", op.dbID, err))
 			// Without a fresh count we can't tell whether to drop. Be
-			// conservative: leave the row in place; the next PeekBatch
-			// will see it again and we'll try once more.
+			// conservative: leave the row in place; the next ClaimBatch
+			// / PeekBatch will see it again and we'll try once more.
 			continue
 		}
 		if count <= wikiMaxFailRetries {

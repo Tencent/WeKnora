@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -3699,7 +3700,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			return nil
 		}
 
-		transcriptionResult, err := asrModel.Transcribe(ctx, convertResult.AudioData, knowledge.FileName)
+		// The knowledge base's language hint; the vendor declares where it
+		// goes, or that it takes none.
+		asrCtx := asr.WithLanguage(ctx, eff.ASRConfig.Language)
+		transcriptionResult, err := asrModel.Transcribe(asrCtx, convertResult.AudioData, knowledge.FileName)
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Transcription failed: %v", err)
 			if isLastRetry {
@@ -3773,6 +3777,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
+
+	// Claim the stored images for this document before chunking proceeds:
+	// the file proxies authorize images through resource bindings, and an
+	// unbound extracted image renders broken for org-shared KB viewers (#3342).
+	s.bindStoredImages(ctx, knowledge, storedImages)
 
 	// Step 3: Split into chunks using Go chunker. Line endings and inline
 	// HTML tables were normalized before image resolution above.

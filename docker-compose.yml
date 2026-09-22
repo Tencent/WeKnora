@@ -56,6 +56,9 @@ services:
       # to config/builtin_models.yaml, edit it for your deployment, then
       # uncomment the line below. See docs/BUILTIN_MODELS.md.
       # - ./config/builtin_models.yaml:/app/config/builtin_models.yaml:ro
+      # Optional: model catalog overlay (extra vendors / model overrides).
+      # Copy config/models.json.example to config/models.json, then
+      # - ./config/models.json:/app/config/models.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -601,7 +604,7 @@ services:
       - full
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: WeKnora-minio
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -855,7 +858,7 @@ services:
       - full
 
   langfuse-minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: WeKnora-langfuse-minio
     restart: unless-stopped
     entrypoint: sh

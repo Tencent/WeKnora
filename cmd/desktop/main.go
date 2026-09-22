@@ -30,6 +30,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -147,7 +148,17 @@ const wailsThemeSyncJS = `(function(){try{var t=localStorage.getItem('WeKnora_th
 
 const weknoraGitHubRepoURL = "https://github.com/Tencent/WeKnora"
 
+// ensureDesktopLiteEdition marks this process as Lite. cmd/desktop is the
+// Lite app; packaged builds also inject this via ldflags. wails dev often
+// does not, and auto-setup / the embedded SPA / capabilities still key off
+// the string. Host sandbox is gated by the desktop build tag, not this.
+func ensureDesktopLiteEdition() {
+	handler.Edition = "lite"
+}
+
 func main() {
+	ensureDesktopLiteEdition()
+
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
 	// We need to change the working directory to the Resources folder where our configs are.
 	execPath, errPath := os.Executable()
@@ -185,6 +196,16 @@ func main() {
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
+	if err := c.Decorate(func(container.HostApprovalModeLoader) container.HostApprovalModeLoader {
+		return LoadApprovalMode
+	}); err != nil {
+		panic(fmt.Sprintf("wire desktop approval mode: %v", err))
+	}
+	if err := c.Decorate(func(session.HostProjectDirsLoader) session.HostProjectDirsLoader {
+		return LoadProjectDirs
+	}); err != nil {
+		panic(fmt.Sprintf("wire desktop project dirs: %v", err))
+	}
 
 	// Initialize the WeKnora App struct
 	app := NewApp()
@@ -194,6 +215,7 @@ func main() {
 	}
 	app.setupToken = base64.RawURLEncoding.EncodeToString(setupBytes)
 	handler.SetLiteSetupToken(app.setupToken)
+	handler.SetHostProjectPicker(app.PickProjectDir)
 
 	// Error channel to capture server startup errors
 	serverErrCh := make(chan error, 1)

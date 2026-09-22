@@ -17,8 +17,8 @@ import (
 // the consumer dead-letters the row once the count exceeds a service-
 // defined cap.
 type TaskPendingOp struct {
-	// Auto-increment row id. Used by PeekBatch ordering and by
-	// DeleteByIDs / IncrFailCount as the row key.
+	// Auto-increment row id. Tie-break for PeekBatch / ClaimBatch
+	// after fail_count, and the row key for DeleteByIDs / IncrFailCount.
 	ID int64 `json:"id" gorm:"primaryKey;autoIncrement"`
 	// Tenant scope mirrored from the enclosing object so per-tenant
 	// retention / quota queries don't have to join.

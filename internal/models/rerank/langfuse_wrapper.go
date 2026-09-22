@@ -6,8 +6,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 )
 
-const langfuseRerankPreviewDocs = 8
-const langfuseRerankMaxScores = 50
+const (
+	langfuseRerankPreviewDocs = 8
+	langfuseRerankMaxScores   = 50
+)
 
 // langfuseReranker wraps a Reranker and reports each rerank call as a
 // Langfuse generation observation. Rerankers don't return token usage, but

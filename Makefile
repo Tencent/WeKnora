@@ -44,6 +44,11 @@ help:
 	@echo "  docs              生成 Swagger API 文档"
 	@echo "  install-swagger   安装 swag 工具"
 	@echo ""
+	@echo "模型厂商目录:"
+	@echo "  model-catalog-check   校验厂商目录（不变量 + 新旧行为对照 + 厂商测试）"
+	@echo "  model-catalog-diff    对比 models.dev，输出模型元数据差异报告（需人工审阅）"
+	@echo "                        可选: make model-catalog-diff VENDOR=deepseek"
+	@echo ""
 	@echo "环境检查:"
 	@echo "  check-env         检查环境配置"
 	@echo "  list-containers   列出运行中的容器"
@@ -106,6 +111,20 @@ run: build
 # Run tests
 test:
 	go test -v ./...
+
+# Vendor catalog: invariants, legacy-behaviour parity and vendor facts.
+# Run this after adding a vendor or editing any models.json.
+.PHONY: model-catalog-check
+model-catalog-check:
+	go test ./internal/models/parity/ ./internal/models/vendors/ ./internal/models/catalog/ ./internal/models/api/... \
+		./internal/models/rerank/ ./internal/models/embedding/ ./internal/models/asr/
+
+# Vendor catalog: report where our model metadata differs from models.dev.
+# Development aid only — nothing is fetched at runtime and nothing is written
+# automatically; review each line against the vendor's own documentation.
+.PHONY: model-catalog-diff
+model-catalog-diff:
+	@python3 scripts/model_catalog_diff.py $(if $(VENDOR),--vendor $(VENDOR),)
 
 # Clean build artifacts
 clean:

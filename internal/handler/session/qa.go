@@ -659,6 +659,7 @@ func mergeKnowledgeTargets(requestKBIDs []string, requestKnowledgeIDs []string, 
 // sseStreamContext holds the context for SSE streaming
 type sseStreamContext struct {
 	eventBus         *event.EventBus
+	streamHandler    *AgentStreamHandler
 	asyncCtx         context.Context
 	cancel           context.CancelFunc
 	assistantMessage *types.Message
@@ -778,7 +779,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	h.startStopWatcher(logger.CloneContext(baseCtx), reqCtx.sessionID, reqCtx.assistantMessage.ID, eventBus)
 
 	// Setup stream handler
-	h.setupStreamHandler(asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
+	streamCtx.streamHandler = h.setupStreamHandler(asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
 		reqCtx.requestID, reqCtx.session.TenantID, reqCtx.receivedAt, reqCtx.assistantMessage, eventBus)
 
 	// Generate title if needed
@@ -1344,13 +1345,13 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 						injected = streamCtx.steerSink.InjectedIDs()
 					}
 					h.discardSteerBacklog(updateCtx, sessionID, streamCtx.assistantMessage.ID, injected)
-					h.completeAssistantMessage(
-						updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID,
+					h.completeStreamAssistantMessage(
+						updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID,
 					)
 				} else {
 					kicked := h.kickNextRunFromSteerBacklog(updateCtx, reqCtx, streamCtx)
-					h.completeAssistantMessage(
-						updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID,
+					h.completeStreamAssistantMessage(
+						updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID,
 					)
 					// A /steer that landed while we were completing still sits
 					// on this run. Claim it before ClearLiveRun so it is not
@@ -1791,6 +1792,9 @@ func (h *Handler) completeQuickAnswerTurn(
 	if streamCtx == nil || streamCtx.assistantMessage == nil {
 		return
 	}
+	// A stop can cancel the generation context after the final answer event
+	// was queued. Preserve the streamed answer just as the Agent defer does.
+	ctx = context.WithoutCancel(ctx)
 	if streamCtx.eventBus != nil {
 		// MessageID is what handleComplete keys on. Leave FinalAnswer empty:
 		// KnowledgeQA already accumulated the answer on the message, and
@@ -1803,7 +1807,7 @@ func (h *Handler) completeQuickAnswerTurn(
 			},
 		})
 	}
-	h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID)
+	h.completeStreamAssistantMessage(ctx, streamCtx, query, userMessageID)
 	if streamCtx.releaseTurn != nil {
 		streamCtx.releaseTurn()
 	}
@@ -1830,14 +1834,39 @@ func (h *Handler) sessionTenantInfoContext(ctx context.Context) (context.Context
 	return context.WithValue(ctx, types.TenantInfoContextKey, tenant), true
 }
 
+// completeStreamAssistantMessage makes output readable before notifying clients
+// to perform their final image/artifact fetch. A failed write must not announce
+// a successful completion whose file authorization evidence is still missing.
+func (h *Handler) completeStreamAssistantMessage(
+	ctx context.Context, streamCtx *sseStreamContext, query, userMessageID string,
+) {
+	if err := h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID); err != nil {
+		if streamCtx.streamHandler != nil {
+			_ = streamCtx.streamHandler.handleError(ctx, event.Event{
+				ID: uuid.New().String(), Type: event.EventError, SessionID: streamCtx.assistantMessage.SessionID,
+				Data: event.ErrorData{Stage: "message_persistence", Error: "Failed to save assistant message"},
+			})
+		}
+		return
+	}
+	if streamCtx.streamHandler != nil {
+		if err := streamCtx.streamHandler.publishCompletion(ctx); err != nil {
+			logger.Errorf(ctx, "Append persisted message completion failed: %v", err)
+		}
+	}
+}
+
 // completeAssistantMessage marks an assistant message as complete, updates it,
 // and asynchronously indexes the Q&A pair into the chat history knowledge base.
 func (h *Handler) completeAssistantMessage(
 	ctx context.Context, assistantMessage *types.Message, userQuery, userMessageID string,
-) {
+) error {
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true
-	_ = h.messageService.UpdateMessage(ctx, assistantMessage)
+	if err := h.messageService.UpdateMessage(ctx, assistantMessage); err != nil {
+		logger.Errorf(ctx, "Failed to persist assistant message %s: %v", assistantMessage.ID, err)
+		return err
+	}
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
@@ -1858,6 +1887,7 @@ func (h *Handler) completeAssistantMessage(
 	if userQuery != "" {
 		go h.recordTurnMemory(bgCtx, assistantMessage, userQuery, userMessageID)
 	}
+	return nil
 }
 
 // recordTurnMemory runs the long-term memory write path for a finished turn.

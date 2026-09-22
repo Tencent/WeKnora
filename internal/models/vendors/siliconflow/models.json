@@ -1,0 +1,30 @@
+{
+  "vendor": "siliconflow",
+  "source": "https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions",
+  "models": [
+    {"name": "DeepSeek V4 family (reasoning_effort high | max)", "match": "deepseek-ai/DeepSeek-V4*", "reasoning": true, "input": ["text"], "thinking_levels": {"minimal": "high", "low": "high", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}},
+    {"name": "DeepSeek V4 Pro-tier family (reasoning_effort high | max)", "match": "Pro/deepseek-ai/DeepSeek-V4*", "reasoning": true, "input": ["text"], "thinking_levels": {"minimal": "high", "low": "high", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}},
+    {"id": "deepseek-ai/DeepSeek-V4-Pro", "name": "DeepSeek V4 Pro", "reasoning": true, "input": ["text"], "context_window": 1049000, "max_output_tokens": 393000, "cost": {"input": 1.74, "output": 3.48, "cache_read": 0.145}, "thinking_levels": {"minimal": "high", "low": "high", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}},
+    {"id": "deepseek-ai/DeepSeek-V4-Flash", "name": "DeepSeek V4 Flash", "reasoning": true, "input": ["text"], "context_window": 1000000, "max_output_tokens": 384000, "cost": {"input": 0.14, "output": 0.28, "cache_read": 0.003}, "thinking_levels": {"minimal": "high", "low": "high", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}},
+    {"id": "zai-org/GLM-5.2", "name": "GLM-5.2", "aliases": ["Pro/zai-org/GLM-5.2"], "reasoning": true, "input": ["text"], "context_window": 1049000, "max_output_tokens": 262000, "cost": {"input": 1.4, "output": 4.4, "cache_read": 0.26}, "thinking_levels": {"minimal": "high", "low": "high", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}},
+    {"id": "Pro/zai-org/GLM-5.1", "name": "GLM-5.1 (Pro)", "reasoning": true, "input": ["text"], "context_window": 205000, "max_output_tokens": 205000, "cost": {"input": 1.4, "output": 4.4, "cache_read": 0.26}, "compat": {"supports_reasoning_effort": false}},
+    {"id": "Pro/zai-org/GLM-5", "name": "GLM-5 (Pro)", "reasoning": true, "input": ["text"], "context_window": 205000, "max_output_tokens": 205000, "cost": {"input": 1, "output": 3.2}, "compat": {"supports_reasoning_effort": false}},
+    {"id": "Pro/moonshotai/Kimi-K2.6", "name": "Kimi K2.6 (Pro)", "reasoning": true, "input": ["text", "image"], "context_window": 262000, "max_output_tokens": 262000, "cost": {"input": 0.95, "output": 4, "cache_read": 0.16}, "compat": {"supports_reasoning_effort": false}},
+    {"id": "Pro/moonshotai/Kimi-K2.5", "name": "Kimi K2.5 (Pro)", "reasoning": true, "input": ["text", "image"], "context_window": 262000, "max_output_tokens": 262000, "cost": {"input": 0.45, "output": 2.25, "cache_read": 0.07}, "compat": {"supports_reasoning_effort": false}},
+    {"id": "Qwen/Qwen3.5-397B-A17B", "name": "Qwen3.5 397B-A17B", "reasoning": true, "input": ["text", "image", "video"], "context_window": 262144, "max_output_tokens": 65536, "cost": {"input": 0.29, "output": 1.74}, "compat": {"supports_reasoning_effort": false}},
+    {"id": "Qwen/Qwen3.5-122B-A10B", "name": "Qwen3.5 122B-A10B", "reasoning": true, "input": ["text", "image", "video"], "context_window": 262144, "max_output_tokens": 65536, "cost": {"input": 0.29, "output": 2.32}, "compat": {"supports_reasoning_effort": false}},
+    {"id": "Qwen/Qwen3.5-35B-A3B", "name": "Qwen3.5 35B-A3B", "reasoning": true, "input": ["text", "image", "video"], "context_window": 262144, "max_output_tokens": 65536, "cost": {"input": 0.23, "output": 1.86}, "compat": {"supports_reasoning_effort": false}},
+    {"id": "Qwen/Qwen3.6-35B-A3B", "name": "Qwen3.6 35B-A3B", "reasoning": false, "input": ["text", "image", "video"], "context_window": 262144, "max_output_tokens": 65536, "cost": {"input": 0.23, "output": 1.86}},
+    {"id": "deepseek-ai/DeepSeek-V3.2", "name": "DeepSeek V3.2", "reasoning": true, "input": ["text"], "context_window": 164000, "max_output_tokens": 164000, "cost": {"input": 0.27, "output": 0.42}, "compat": {"supports_reasoning_effort": false}},
+    {"id": "Pro/MiniMaxAI/MiniMax-M2.5", "name": "MiniMax M2.5 (Pro)", "reasoning": true, "input": ["text"], "context_window": 204800, "max_output_tokens": 131000, "cost": {"input": 0.3, "output": 1.22}, "compat": {"supports_reasoning_effort": false}, "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"},
+    {"id": "Qwen/Qwen3-VL-32B-Instruct", "name": "Qwen3 VL 32B Instruct", "reasoning": false, "input": ["text", "image"], "context_window": 262000, "max_output_tokens": 262000, "cost": {"input": 0.2, "output": 0.6}},
+    {"id": "BAAI/bge-m3", "name": "BGE-M3", "type": "Embedding", "dimension": 1024, "compat": {"dimensions_field": ""}, "source": "https://api-docs.siliconflow.cn/docs/api/embeddings-post"},
+    {"id": "Qwen/Qwen3-Embedding-8B", "name": "Qwen3 Embedding 8B", "type": "Embedding", "dimension": 4096, "source": "https://api-docs.siliconflow.cn/docs/api/embeddings-post"},
+    {"id": "Qwen/Qwen3-Embedding-4B", "name": "Qwen3 Embedding 4B", "type": "Embedding", "dimension": 2560, "source": "https://api-docs.siliconflow.cn/docs/api/embeddings-post"},
+    {"id": "Qwen/Qwen3-Embedding-0.6B", "name": "Qwen3 Embedding 0.6B", "type": "Embedding", "dimension": 1024, "source": "https://api-docs.siliconflow.cn/docs/api/embeddings-post"},
+    {"id": "BAAI/bge-reranker-v2-m3", "name": "BGE Reranker v2 M3", "type": "Rerank", "source": "https://api-docs.siliconflow.cn/docs/api/rerank-post"},
+    {"id": "Qwen/Qwen3-Reranker-8B", "name": "Qwen3 Reranker 8B", "type": "Rerank", "source": "https://api-docs.siliconflow.cn/docs/api/rerank-post"},
+    {"id": "FunAudioLLM/SenseVoiceSmall", "name": "SenseVoice Small", "type": "ASR", "source": "https://api-docs.siliconflow.cn/docs/api/audio-transcriptions-post"},
+    {"id": "TeleAI/TeleSpeechASR", "name": "TeleSpeechASR", "type": "ASR", "source": "https://api-docs.siliconflow.cn/docs/api/audio-transcriptions-post"}
+  ]
+}

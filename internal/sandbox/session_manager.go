@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -912,6 +913,40 @@ func (m *SessionBoundManager) SessionInstallShellExecutor() SessionInstallShellE
 	return m
 }
 
+// SessionWorkspaceLayout reports the /workspace contract every remote
+// session shares. sessionID is ignored: remote layouts are not per-session.
+// A validated WEKNORA_SKILL_OUTPUT_DIR overlays OutputDir and the matching
+// ReadRoots entry; RemoteWorkspaceLayout itself stays the constant baseline.
+func (m *SessionBoundManager) SessionWorkspaceLayout(context.Context, string) (WorkspaceLayout, error) {
+	return withValidatedSkillOutputDir(RemoteWorkspaceLayout()), nil
+}
+
+func withValidatedSkillOutputDir(layout WorkspaceLayout) WorkspaceLayout {
+	raw := strings.TrimSpace(os.Getenv(skillOutputEnvVar))
+	if raw == "" {
+		return layout
+	}
+	clean, ok := ValidatedSessionOutputDir(raw)
+	if !ok {
+		return layout
+	}
+	previous := layout.OutputDir
+	layout.OutputDir = clean
+	if previous == clean || len(layout.ReadRoots) == 0 {
+		return layout
+	}
+	roots := append([]string(nil), layout.ReadRoots...)
+	for i, root := range roots {
+		if root == previous {
+			roots[i] = clean
+		}
+	}
+	layout.ReadRoots = roots
+	return layout
+}
+
+var _ SessionWorkspaceLayoutProvider = (*SessionBoundManager)(nil)
+
 // SessionFileStore advertises the session-scoped filesystem capability while
 // a real remote backend is active and the provider implements the enumeration
 // operations (ListDir / Stat / MakeDir / Remove).
@@ -1478,7 +1513,7 @@ func cleanSessionInputPath(filePath string) (string, error) {
 // cleanSessionWorkspaceWritePath normalizes model-authored sandbox writes and
 // protects staged attachments. The remote session binding isolates the files.
 func cleanSessionWorkspaceWritePath(filePath string) (string, error) {
-	clean := ResolveWorkspacePath(filePath)
+	clean := ResolveWorkspacePathIn(RemoteWorkspaceLayout(), filePath)
 	if !path.IsAbs(clean) || clean == "." || clean == "/" {
 		return "", fmt.Errorf("sandbox: workspace write path %q must be an absolute file path", filePath)
 	}

@@ -56,7 +56,7 @@ const (
 | `Embedding` | `embedding` | `internal/models/embedding` | `Embed` / `BatchEmbed`（含 `GetDimensions`） | 文本向量化，供向量检索索引与查询 |
 | `Rerank` | `rerank` | `internal/models/rerank` | `Rerank(query, documents)` 返回 `RankResult` | 检索结果精排 |
 | `VLLM` | `vllm` | `internal/models/vlm` | `Predict(imgBytes, prompt)` | 视觉语言模型（VLM），文档图片理解 / 多模态解析 |
-| `ASR` | `asr` | `internal/models/asr` | `Transcribe(audioBytes, fileName)` 返回文本与分段时间戳 | 音频转写（自动语音识别） |
+| `ASR` | `asr` | `internal/models/asr` | `Transcribe(audioBytes, fileName)` 返回文本；模型提供时附带分段时间戳（如 OpenAI `whisper-1`） | 音频转写（自动语音识别） |
 
 前后端类型映射见 `internal/handler/model.go` 的 `modelTypeToFrontend()`（`KnowledgeQA -> chat` 等）。
 
@@ -72,11 +72,12 @@ const (
 | `api_key` | string | 空 | API 密钥，**AES-256-GCM 加密落库**（`ModelParameters.Value/Scan`），仅通过 `PUT /models/:id/credentials` 子资源修改 |
 | `interface_type` | string | 空（VLM：local 默认 `ollama`，remote 默认 `openai`） | 接口协议类型 |
 | `embedding_parameters.dimension` | int | 0 | 向量维度 |
-| `embedding_parameters.truncate_prompt_tokens` | int | 0 | 输入截断 token 数 |
-| `embedding_parameters.supports_dimension_override` | bool | false | 是否支持请求级维度覆盖（`dimensions` 参数） |
+| `embedding_parameters.truncate_prompt_tokens` | int | 0 | 服务端截断 token 数。这是 vLLM 的扩展参数，只发给 `generic`、`gpustack`（为 0 时沿用历史值 511）；托管厂商的文档里没有它，一律不发 |
+| `embedding_parameters.supports_dimension_override` | bool | false | 是否在请求里指定向量维度。字段名由厂商决定（OpenAI 系 `dimensions`、Gemini `outputDimensionality`、百炼多模态 `parameters.dimension`）；厂商文档里没有该参数的模型（NVIDIA NIM、混元、Novita、ada-002 等）即使勾选也不发 |
 | `parameter_size` | string | 空 | Ollama 模型参数规模（如 "7B"），后端维护、前端不可改 |
 | `provider` | string | 空（按 BaseURL 自动检测） | 厂商标识 |
-| `extra_config` | map[string]string | nil | 厂商专属配置（如 Azure 的 `api_version`） |
+| `extra_config` | map[string]string | nil | 厂商专属配置（由厂商定义的 `extraFields` 驱动，如 Azure 的 `api_version`）；保留键 `api`（强制协议）、`remote_model_name`、`thinking_control`（旧版） |
+| `spec` | object | nil | 单行目录覆盖：`api`、`reasoning`、`input`、`context_window`、`max_output_tokens`、`thinking_levels`、`compat`（协议相关的扁平 JSON） |
 | `custom_headers` | map[string]string | nil | 附加自定义 HTTP 请求头（类似 OpenAI SDK `extra_headers`；`Authorization`、`api-key` 等保留头在运行期被忽略） |
 | `supports_vision` | bool | false | Chat 模型是否接受图片多模态输入 |
 | `context_window` | int | 0（回落到 200000） | 对话/VLM 上下文窗口（token）。智能体压缩历史按此上限工作；留空使用默认 200K。应填写服务实际支持的窗口大小，过高会导致压缩无法及时触发 |
@@ -169,84 +170,137 @@ builtin_models:
 
 ## 模型调用与实现参考
 
-### Provider 抽象
+### 厂商目录（catalog）
 
-`internal/models/provider/provider.go` 定义了多厂商适配的统一注册表：
+模型接入分三层，每层只做一件事：
 
-```go
-type Provider interface {
-    // Info 返回服务商的元数据
-    Info() ProviderInfo
-    // ValidateConfig 验证服务商的配置
-    ValidateConfig(config *Config) error
-}
+| 层 | 位置 | 职责 |
+|----|------|------|
+| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`。各自持有请求/响应结构与解析，不含任何厂商名 |
+| 厂商层 | `internal/models/vendors/<id>/` | 一个厂商一个目录：`vendor.go`（注册 `catalog.Vendor`）、`models.json`（模型目录）、`icon.svg`（品牌图标，`go:embed` 进二进制） |
+| 目录层 | `internal/models/catalog` | 合并厂商定义、模型条目、部署叠加与单行覆盖，`Resolve` 得出「这个模型到底怎么发请求」 |
+
+`catalog.Resolve(Ref{Provider, Model, BaseURL, Extra, Override})` 的合并顺序从低到高：
+
+1. 协议默认值（`DefaultOpenAICompletions()` 等）；
+2. 厂商级 `Compat`（`vendor.go` 里声明，例如 DeepSeek 的 `max_tokens_field: max_tokens`）；
+3. `models.json` 里匹配到的条目（精确 id → `aliases` → `match` 通配，最长字面前缀优先）；
+4. 部署叠加 `config/models.json`（见下）；
+5. 模型行上的 `parameters.spec`（UI「高级」里的协议覆盖与 compat JSON）；
+6. `extra_config.api` 强制协议、`extra_config.thinking_control` 旧版思考编码、`extra_config.remote_model_name`。
+
+厂商事实全部忠实厂商文档，每个 `vendor.go` 的包注释列出依据与文档链接，`models.json` 的 `source` 字段记录来源。对应的出站 JSON 由各协议包的 golden 测试钉死（如 `openaicompletions/golden_test.go`）。
+
+#### 关键 compat 字段（OpenAI Chat Completions 方言）
+
+| 字段 | 含义 | 典型厂商 |
+|------|------|----------|
+| `max_tokens_field` | `max_tokens` 或 `max_completion_tokens`，二者只发一个 | DeepSeek / 智谱 / 硅基流动 用 `max_tokens`；OpenAI / 火山 用 `max_completion_tokens` |
+| `thinking_format` | `openai`（`reasoning_effort`）、`thinking-type`（`thinking.type`）、`enable-thinking`（`enable_thinking` + `thinking_budget`）、`chat-template-kwargs`（vLLM）、`openrouter`（`reasoning`）、`none` | 见各厂商 |
+| `supports_reasoning_effort` | 是否额外发 `reasoning_effort` | DeepSeek、智谱、火山、OpenAI |
+| `thinking_always_send` / `thinking_disable_on_non_stream` | 每次请求都钉开关；非流式强制关 | 百炼混合思考模型 |
+| `thinking_budget_excludes_effort` | 厂商禁止 `thinking_budget` 与 `reasoning_effort` 同发，发了报错；置真时按档位优先、丢掉预算 | 百炼 qwen3.8 系列 |
+| `supports_temperature` / `fixed_temperature` | 推理模型拒绝采样参数；Moonshot v1 固定 1 | GPT-5 / o 系列、Kimi K2.5+ |
+| `tool_choice_modes` | 允许的 `tool_choice` 取值 | DeepSeek 思考模式不支持 `required` |
+| `replay_reasoning_content` | 多轮回传 `reasoning_content` | DeepSeek、MiMo、Kimi |
+| `prompt_cache_key` / `cache_control_format` | OpenAI 缓存路由 / Anthropic 式断点 | OpenAI、OpenRouter、百炼 |
+
+思考强度在内部统一为 `off / auto / minimal / low / medium / high / xhigh / max`，每个模型的 `thinking_levels` 把统一等级映射到厂商取值（`null` 表示不支持，`"off": null` 表示无法关闭思考，如 DeepSeek Reasoner、QwQ、Kimi K3），不支持的等级按 PI 的规则就近钳位。
+
+#### 内置厂商
+
+`GET /api/v1/models/providers?model_type=chat` 返回全部厂商定义（图标 data URI、默认地址、额外字段、内置模型与思考能力），前端完全据此动态渲染，没有本地厂商表。目前内置 27 个厂商：`generic`、`weknoracloud`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`siliconflow`、`deepseek`、`minimax`、`moonshot`、`mimo`、`modelscope`、`qianfan`、`qiniu`、`longcat`、`lkeap`、`openai`、`azure_openai`、`anthropic`、`gemini`、`openrouter`、`litellm`、`requesty`、`jina`、`nvidia`、`novita`、`gpustack`；Ollama 走 `source=local` 独立路径。
+
+协议选择：Anthropic 走 Messages 协议；Gemini 默认走原生 `generateContent`（`base_url` 指向 `/v1beta/openai` 则保持 OpenAI 兼容）；OpenAI 在 `api.openai.com` 上走 Responses 协议，中转/代理保持 Chat Completions；任何厂商 `base_url` 以 `/anthropic` 结尾时自动切到 Messages 协议（MiniMax、智谱、Kimi 的 Anthropic 兼容口）。`extra_config.api` 可强制指定对话协议，只对 chat / VLM 行生效；embedding 行的协议覆盖写在 `spec.compat` 的 `"api"` 里，取值是向量协议（`openai-embeddings`、`dashscope-embeddings`、`ark-embeddings`、`google-embeddings`）。
+
+目录条目按模型类型查找：embedding 行只匹配 embedding 条目，不会被同名前缀的对话通配（如百炼的 `qwen3*`、OpenAI 的 `gpt-5*`）套上对话的 compat。目录里还没有的新 id、带日期的快照照常按厂商默认解析。
+
+#### 新增厂商
+
+代码侧新增一个厂商只需要一个目录，四个文件，不用改协议层和前端：
+
+1. 复制一个相近的目录到 `internal/models/vendors/<id>/`，改 `vendor.go` 的 id、名称（`Names` 放中文名）、`Description`、默认地址、`Auth`、`Compat`、`ThinkingLevels`、`URLPatterns`，并在包注释里逐条写清依据的厂商文档链接；无法从文档确认的字段标 `unverified:`，不要臆测；
+2. 按厂商文档填 `models.json`（`id`、`reasoning`、`input`、`context_window`、`max_output_tokens`、`cost`、`thinking_levels`、`compat`、`source`），同一家族用 `match` 通配（如 `"match": "gpt-5*"`），精确 id 优先于通配；
+3. 放一个 `icon.svg`（LobeHub icons 或手绘，6 KB 以内），会 `go:embed` 进二进制并以 data URI 下发给前端；
+4. 在 `vendors/all.go` 加一行 blank import；
+5. 需要特殊 URL、协议选择或签名时实现 `Endpoint` / `PreferAPI` / `Signer` 钩子（参考 `azure_openai`、`openai`、`weknoracloud`）。
+
+然后跑一条命令，目录层的守护测试会自动覆盖新厂商，无需为它单独写用例：
+
+```bash
+make model-catalog-check
 ```
 
-每个厂商在自己的文件（如 `provider/openai.go`、`provider/aliyun.go`）中通过 `init()` 调用 `Register()` 注册自身，`ProviderInfo` 携带 `DisplayName`、`Description`、按模型类型区分的 `DefaultURLs`、支持的 `ModelTypes`、`RequiresAuth` 以及可选的 `ExtraFields`（例如 Azure OpenAI 声明了 `api_version` 额外字段，默认 `2024-10-21`）。
+它包含三层校验：`vendors` 的注册与图标检查；`catalog` 的解析与叠加；`parity` 包的**不变量**（每个模型条目的字段合法性、compat 键名可解码、上下文与最大输出自洽）和**逐模型出站请求检查**（每个对话模型在思考开 / 关两种情况下，只能出现一个输出上限字段；不支持采样参数的模型不得带 temperature；始终思考的模型不得收到关闭开关等）。新加的厂商和模型一旦违反这些规则，测试直接失败。
 
-#### 支持的厂商清单
+前端不需要任何改动：厂商下拉、图标、额外字段、内置模型列表都由 `GET /api/v1/models/providers` 动态渲染。
 
-`AllProviders()`（`provider/provider.go`）返回的完整列表（共 27 个，每个厂商在自己的文件里 `init()` 注册）。表格最后一行的 Ollama 不在其中，它走 `source=local` 这条独立路径，列在这里只为方便对照：
+写入侧也有一道闸：`catalog.ValidateRow` 会在创建 / 更新模型（REST）和加载 `config/builtin_models.yaml`（启动）时解析这行配置（全部模型类型），未知协议、拼错的 compat 键、非法的思考档位在写入时就被拒绝（YAML 行只打 WARN 不阻塞启动，避免一次重启把线上模型下线）。
 
-| Provider 标识 | 名称 | 说明 |
-|---------------|------|------|
-| `generic` | Generic | 任意 OpenAI 兼容 / 自定义部署（默认兜底） |
-| `weknoracloud` | WeKnoraCloud | WeKnora 云服务（硬编码 `https://weknora.weixin.qq.com`，使用 AppID/AppSecret 凭证） |
-| `aliyun` | 阿里云 DashScope | |
-| `zhipu` | 智谱 AI（GLM 系列） | |
-| `volcengine` | 火山引擎 Ark | |
-| `hunyuan` | 腾讯混元 | |
-| `siliconflow` | 硅基流动 | |
-| `deepseek` | DeepSeek | |
-| `minimax` | MiniMax | |
-| `moonshot` | 月之暗面 Moonshot (Kimi) | |
-| `modelscope` | 魔搭 ModelScope | |
-| `qianfan` | 百度千帆 | |
-| `qiniu` | 七牛云 | |
-| `openai` | OpenAI | 五种模型类型全支持 |
-| `anthropic` | Anthropic Claude | 独立 Messages 协议实现 |
-| `gemini` | Google Gemini | Embedding 走专用 API |
-| `openrouter` | OpenRouter | |
-| `litellm` | LiteLLM（自托管 OpenAI 兼容代理） | 默认 URL 为占位符，loopback 需加入 `SSRF_WHITELIST` |
-| `requesty` | Requesty | |
-| `jina` | Jina AI | Embedding 与 Rerank |
-| `mimo` | 小米 MiMo | |
-| `longcat` | 美团 LongCat AI | |
-| `lkeap` | 腾讯云 LKEAP（知识引擎原子能力） | 提供专用 Rerank 实现 |
-| `gpustack` | GPUStack（私有化部署） | |
-| `nvidia` | NVIDIA | 专用 Embedding / Rerank 实现 |
-| `novita` | Novita AI | |
-| `azure_openai` | Azure OpenAI | 额外字段 `api_version` |
-| `ollama`（source=`local`） | Ollama 本地模型 | 非 Provider 注册表成员，由 `ModelSourceLocal` 路由 |
+#### 厂商更新了模型怎么办
 
-当模型未显式指定 provider 时，`DetectProvider(baseURL)` 会按 BaseURL 域名特征自动识别（如 `dashscope.aliyuncs.com -> aliyun`、`api.anthropic.com -> anthropic`），识别失败回落为 `generic`。
+分两种情况：
 
-#### 协议路由
+**只是新增 / 调整模型元数据**（新模型 id、上下文窗口、价格）。先拿差异报告，再人工核对厂商文档改 `models.json`：
 
-`internal/models/chat/chat.go` 的 `NewRemoteChat`：
-
-```go
-func NewRemoteChat(config *ChatConfig) (Chat, error) {
-    providerName := provider.ProviderName(config.Provider)
-    if providerName == "" {
-        providerName = provider.DetectProvider(config.BaseURL)
-    }
-    if providerName == provider.ProviderAnthropic {
-        return NewAnthropicChat(config) // 独立 Messages 协议
-    }
-    return NewRemoteAPIChat(config) // 统一 OpenAI 兼容协议 + providerAdapter
-}
+```bash
+make model-catalog-diff                 # 全部厂商
+make model-catalog-diff VENDOR=deepseek # 只看一家
 ```
 
-- **Ollama**（`source=local`）：`chat/ollama.go`、`embedding/ollama.go`、`vlm/ollama.go` 通过 `internal/models/utils/ollama` 的 `OllamaService` 直连本机 Ollama。
-- **Anthropic**：`chat/anthropic.go` 实现 Messages 协议。
-- **其余远程厂商**：统一走 `chat/remote_api.go` 的 OpenAI 兼容 Chat Completions 实现，厂商差异（thinking 编码、参数兼容等）由构造时解析的 `providerAdapter` 处理。
-- **Embedding** 有更多专用实现：阿里云多模态（`tongyi-embedding-vision-*` 走 DashScope 专用端点，纯文本模型自动改写为 `/compatible-mode/v1` OpenAI 兼容端点）、Volcengine 多模态、Jina、Azure OpenAI、NVIDIA、Gemini、Zhipu、WeKnoraCloud，其余为 OpenAI 兼容（`embedding/openai.go`）。
-- **Rerank** 专用实现：Aliyun、Zhipu、Jina、NVIDIA、WeKnoraCloud、LKEAP、Volcengine，默认 `NewOpenAIReranker`（通用 `/rerank` 风格接口）。两个厂商有额外适配：
-  - **LKEAP**：腾讯云 `RunRerank` 限制单次最多 60 篇文档、Query 与 Docs 合计不超过 2000 字符。`lkeapRerankBatches` 按这两个上限自动切批并回填全局下标，调用方不用感知分批；单篇文档自身就超限时直接报错并指出下标。
-  - **Volcengine**：候选集超过接口单次文档上限时自动切成多批**并发**打分再合并（并发上限见 `volcengineRerankMaxConcurrency`），不会静默截断候选。
-  - **NVIDIA**：接口返回的是原始 logit 而非 [0,1] 概率。`normalizeNvidiaLogit` 用数值稳定的 sigmoid 归一化（负数走 `e^x/(1+e^x)` 分支避免溢出），否则 `RerankThreshold` 这类阈值配置在该厂商下完全失效。
-- **ASR**：所有厂商统一使用 OpenAI 兼容 `/v1/audio/transcriptions`（`asr/asr.go`：`NewASR` 直接 `NewOpenAIASR`）。
+报告对比 [models.dev](https://models.dev/api.json) 的公开元数据：`+` 是上游有而我们没有的模型，`~` 是数值差异，`?` 是上游没收录的条目（国内厂商和别名经常如此，不代表错）。脚本只读不写，也从不在运行时调用——**字段名、思考格式这类行为事实不会被自动同步**，必须以厂商文档为准手工维护，这是刻意的取舍：models.dev 不携带这些信息，自动同步会让线上请求悄悄改变行为。
+
+**厂商改了接口行为**（换了输出上限字段、新增 effort 取值、思考开关格式变化）。改 `vendor.go` 或对应模型条目的 `compat`，并同步更新包注释里的文档链接；`internal/models/api/openaicompletions/golden_test.go` 之类的快照测试会把出站 JSON 钉死，改动必须先改测试预期，评审时一眼能看到行为变化。
+
+**紧急情况不必等发版**：用下面的部署叠加在配置里先改，验证无误后再补回代码。
+
+#### 部署叠加 `config/models.json`
+
+不改代码也能加厂商、改地址、补模型：复制 `config/models.json.example` 到 `config/models.json`（或用 `MODELS_CONFIG` 指定路径），结构与 PI 的 `~/.pi/agent/models.json` 一致：`providers` 按厂商 id 键入，已知 id 打补丁，新 id 声明新厂商；支持 `base_url` / `base_urls`、`api_key`（`${ENV}` 插值）、`headers`、`compat`、`thinking_levels`、`models`（按 id upsert：已存在的 id 只覆盖你写出来的字段，没写的 `reasoning`、`thinking_levels`、`compat`、`input` 保持原样；新 id 则整条新建）、`model_overrides`、`icon`（内联 `<svg …>` 字符串，或相对于叠加文件所在目录的 `.svg` 路径——不接受绝对路径、不能越出该目录、必须是 256 KB 以内的 SVG，因为图标会以 data URI 下发给所有能打开模型页的人）。未知键在启动时报错。运行时不会自动从外部拉取模型数据：字段名、思考格式这类行为事实必须由人维护。
+
+#### 升级到目录化实现的注意事项
+
+老库里的模型行**不需要任何迁移**：`parameters` 列只增加了可选的 `spec` 字段，旧的 26 个 `provider` 取值全部仍然注册，`extra_config` 的历史键（`thinking_control` 的每个取值、`remote_model_name`、`api_version`、`secret_key`、`region`、`instruction`、`truncate_prompt_tokens`）语义不变，目录里已没有的模型 id（自定义微调、已退役型号）照常解析并保留思考开关。这些由 `internal/models/catalog/legacy_rows_test.go` 与 `internal/types/legacy_persisted_json_test.go` 钉住。
+
+但有四处**既有模型行的运行时行为会变**，升级时需要知会使用者：
+
+1. **`extra_config.api` 变成保留键**。它现在是协议选择器（`openai-completions` / `openai-responses` / `anthropic-messages` / `google-generative-ai` / `ollama`），取值非法会在创建、更新模型时返回 400。WeKnora 自身从未写过这个键，只有手工调 REST 或写 YAML 造出来的行会受影响——升级前删掉或改成合法取值。这里刻意选择报错而不是忽略：静默忽略会让人以为切换生效了。
+2. **Azure OpenAI 未填 `api_version` 的行改走 `/openai/v1` GA 数据面**，不再是 `/openai/deployments/{model}/...?api-version=2024-10-21`。旧默认版本根本不支持它同时声称的 `reasoning_effort` 与 `max_completion_tokens`，属于自相矛盾。要保留旧路径，在额外字段里显式填一个 `api_version`。
+3. **`api.openai.com` 的一方流量改走 Responses 协议**（`PreferAPI` 只对官方域生效）。各类中转 / 网关仍走 Chat Completions，`parity` 包里有断言钉住这一点。
+4. **7 家厂商的输出上限字段按文档纠正**：hunyuan、modelscope、qiniu、requesty、longcat、novita 由 `max_completion_tokens` 改回 `max_tokens`，moonshot 反向改为 `max_completion_tokens`。每一处在 `internal/models/parity/parity_test.go` 里都记了变更理由与厂商文档。aliyun 保持 `max_completion_tokens` 不变：兼容模式两个字段都收，但 DashScope 的参数表已经把 `max_tokens` 标为即将废弃并指名了继任者。
+
+Rerank 行（逐厂商的出站请求由 `internal/models/rerank/wire_test.go` 钉住，含火山与 LKEAP 两个签名 SDK 客户端）：
+
+1. **OpenAI 不再出现在 rerank 的厂商列表里**。OpenAI 的 API 没有 rerank 接口，在这里建的行只会 404；架在 OpenAI 风格地址后面、自带 rerank 的中转请建成 generic 行。已有的行照常解析。
+2. **火山 rerank 每次最多 200 条**（文档：datas「数组长度不超过 200」），旧实现按自己定的 50 条切分。
+3. **火山 rerank 的默认指令改为控制台原文** `Whether the document answers the query or matches the content retrieval intent`，文档要求「如需对齐控制台效果，请使用相同指令」；旧默认值把 Document / Query 写成了大写。已在额外字段里保存了指令的行不受影响。
+
+Embedding 行也有几处按厂商文档纠正的行为变化（逐厂商的出站请求由 `internal/models/embedding/wire_test.go` 钉住）：
+
+1. **托管厂商不再收到 `truncate_prompt_tokens`**。此前所有 OpenAI 兼容厂商都被塞了一个 511，它只是 vLLM 的扩展参数；`generic`、`gpustack` 照旧发送。
+2. **NVIDIA NIM 的检索查询改用 `input_type: query`**。文档侧照旧是 `passage`，已有索引不受影响；这一标记在一次检索重构里丢失过，现在由 `types.WithEmbedQuery` 在三处查询入口设置。超长输入改为 `truncate: END` 截断而不是报错；`dimensions` 不再发送（NIM 没有这个参数）。目录里已被 NVIDIA 标记下线的 `nv-embed-v1`、`llama-3.2-nemoretriever-300m-embed-v1`、`baai/bge-m3` 已移除。
+3. **阿里云按模型分流**：文本模型走 `/compatible-mode/v1/embeddings`，`qwen3-vl-embedding`、`qwen2.5-vl-embedding`、`tongyi-embedding-vision*`、`multimodal-embedding*` 走原生多模态接口。`base_url` 只填主机、国际站或业务空间域名时保留该主机，不再被替换成北京默认地址。
+4. **火山方舟的文本向量接口已归档下线**，当前只有多模态接口。沿用老的 `doubao-embedding-text*` / `doubao-embedding-large-text*` 的行改发到它们归档文档里的 `/api/v3/embeddings`；此前它们被发往多模态接口。
+5. **Gemini 的缩维放进 `embedContentConfig.outputDimensionality`**。请求顶层的同名字段已被文档标为 deprecated；旧实现发的是顶层 `output_dimensionality`。
+6. **SiliconFlow 每次最多 32 条、百炼 `text-embedding-v1/v2` 最多 25 条**，超出时自动拆批；v1/v2 固定 1536 维，不发 `dimensions`。
+7. **OpenAI 兼容回复里没有 `index` 时按顺序取**（和旧实现一致）；有 `index` 就按它放回，重复或缺位报错。
+8. **Jina 的 `task`、Gemini 的 `taskType`、OpenRouter 的 `input_type`、火山的 `instructions`、百炼原生接口的 `text_type` / `instruct` 都不发**。它们会改变文档侧向量，开启后同一个知识库里新旧向量不在同一空间；需要按行显式开启的设计另见 Tencent/WeKnora#1401。
+
+ASR 行的变化（逐厂商的出站表单由 `internal/models/asr/wire_test.go` 钉住）：
+
+1. **不再一律发 `response_format=verbose_json`**。OpenAI 文档写明 gpt-4o-transcribe / gpt-4o-mini-transcribe「only supported format is json」，旧实现发给它们必然 400；GPUStack 的音频后端 vox-box 在 FunASR 模型（SenseVoice、Paraformer）上对 `verbose_json` 返回裸字符串，旧实现解不开。现在只有文档写明支持的模型声明它（OpenAI `whisper-1`），其余走默认 json，Langfuse 里的音频时长因此只在返回分段的模型上有。需要分段的自建行可以在 `spec.compat` 里写 `{"response_format": "verbose_json"}`。
+2. **按厂商文档的上限和格式在上传前拒绝**：文件大小（OpenAI / 智谱 / OpenRouter 25 MB、Requesty 32 MB、SiliconFlow / MiniMax 50 MB；阿里与小米按整段 `data:` URI 计 10 MB），以及文档给出封闭格式清单的厂商（智谱、小米只收 wav/mp3，OpenAI、Requesty、MiniMax 各有列表）。
+3. **回复里没有 `text` 字段即报错**，不再当成「未检测到语音」入库；静音音频返回的是空字符串 `text`，照常处理。
+4. ASR 行现在带上 provider 走目录解析，go-openai 依赖随之移除。provider 没有声明 ASR 的行：显式填了该厂商的直接报错；没填、靠 URL 识别到的，按 OpenAI 形状打到它的 URL（与旧实现一致），不走该厂商的 Endpoint 钩子。
+5. **支持 ASR 的厂商按文档补齐**。OpenAI 形状（multipart `file` + `model`）：openai、siliconflow、gpustack、generic、智谱（`glm-asr-2512`，单文件 ≤30 秒）、MiniMax（`asr-1.0`，路径是 `/v1/speech_to_text`）、OpenRouter、Requesty、LiteLLM。经 chat completions 的 `input_audio`（base64 data URI，编码后 ≤10 MB）：阿里云 `qwen3-asr-flash`、小米 `mimo-v2.5-asr`。
+6. **知识库的「音频语言提示」终于发出去了**（此前从未接线）。位置按厂商文档：OpenAI / Requesty / OpenRouter / GPUStack / generic 是 `language` 表单字段，MiniMax 是 `language` 请求头，阿里与小米是 `asr_options.language`；智谱、SiliconFlow、LiteLLM 文档没有这个参数，不发。填 `auto` 等同留空。
+7. **音频时长从回包里读**：MiniMax 的 `duration`、OpenAI 系与阿里的 `usage.seconds`，Langfuse 不再只靠 `verbose_json` 的分段。
+
+阿里只有 `qwen3-asr-flash` 能直接带音频调用；其余 ASR 模型名由一条兜底条目拒绝并说明原因。
+
+查过但没有接的：火山豆包语音（独立域名与密钥，当前文档的请求体只收音频 URL）、千帆（`vop_asr` 挂在应用实例下要 `app_id`；短语音接口 ≤60 秒且只收 pcm/wav/amr/m4a）、七牛（只收音频 URL）、Novita（GLM-ASR 自有接口，≤30 秒）、腾讯云 ASR（与混元不是同一套鉴权）、NVIDIA 托管 Riva（gRPC）、Gemini（没有专用转写接口，只能让对话模型听音频）、Azure（见下）。阿里 Paraformer / Fun-ASR / `*-filetrans` 是异步任务，同样要公网 URL。
+
+Azure OpenAI 仍不声明 ASR：音频转写只出现在 v1 **preview** 参考里（`/openai/v1/audio/transcriptions?api-version=preview`），v1 GA 参考没有；未填 `api_version` 的行会被钩子发到不带版本的 v1 路径，能否调通没有核实。
 
 ### 模型调用链
 
@@ -257,10 +311,11 @@ flowchart TD
     S --> CF["ConfigFromModel<br/>(chat / embedding / rerank / vlm / asr)"]
     CF --> F{"工厂函数<br/>NewChat / NewEmbedder / ..."}
     F -->|"source = local"| OL["OllamaService<br/>(internal/models/utils/ollama)"]
-    F -->|"source = remote"| PD{"provider 路由<br/>(显式 provider 或 DetectProvider)"}
-    PD -->|"anthropic"| AN["AnthropicChat<br/>(Messages 协议)"]
-    PD -->|"weknoracloud"| WC["WeKnoraCloud 实现<br/>(AppID + AppSecret 签名)"]
-    PD -->|"其他厂商"| OA["RemoteAPIChat / OpenAIEmbedder ...<br/>(OpenAI 兼容 + providerAdapter)"]
+    F -->|"source = remote"| PD{"catalog.Resolve<br/>(厂商 + 模型 + 叠加 + 行覆盖)"}
+    PD -->|"anthropic-messages"| AN["anthropicmessages.Client"]
+    PD -->|"openai-responses"| RS["openairesponses.Client"]
+    PD -->|"google-generative-ai"| GG["googlegenai.Client"]
+    PD -->|"openai-completions"| OA["openaicompletions.Client<br/>(compat 驱动的方言)"]
     F --> W1["debug 包装<br/>(LLM_DEBUG 日志)"]
     W1 --> W2["Langfuse 包装<br/>(链路追踪)"]
     W2 --> W3["concurrency 包装<br/>(limiter.GateNamedN 按模型限流)"]

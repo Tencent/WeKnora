@@ -507,15 +507,20 @@ func buildAgentStepMessages(step types.AgentStep) []chat.Message {
 	nonTerminalCalls := filterNonTerminalToolCalls(step.ToolCalls)
 	if len(nonTerminalCalls) == 0 {
 		if step.IntermediateAnswer && strings.TrimSpace(step.Thought) != "" {
-			return []chat.Message{{Role: "assistant", Content: step.Thought, ReasoningContent: step.ReasoningContent}}
+			return []chat.Message{{
+				Role: "assistant", Content: step.Thought, ReasoningContent: step.ReasoningContent,
+				ReasoningSignature: step.ReasoningSignature, ReasoningMetadata: step.ReasoningMetadata,
+			}}
 		}
 		return nil
 	}
 	assistantMsg := chat.Message{
-		Role:             "assistant",
-		Content:          step.Thought,
-		ReasoningContent: step.ReasoningContent,
-		ToolCalls:        make([]chat.ToolCall, 0, len(nonTerminalCalls)),
+		Role:               "assistant",
+		Content:            step.Thought,
+		ReasoningContent:   step.ReasoningContent,
+		ReasoningSignature: step.ReasoningSignature,
+		ReasoningMetadata:  step.ReasoningMetadata,
+		ToolCalls:          make([]chat.ToolCall, 0, len(nonTerminalCalls)),
 	}
 	for _, tc := range nonTerminalCalls {
 		argsJSON, _ := json.Marshal(tc.Args)
@@ -546,7 +551,8 @@ func buildAgentStepMessages(step types.AgentStep) []chat.Message {
 // finalAnswerHistoryMessage is the canonical answer of a turn, or nil when the
 // turn produced no text (stopped, or answered purely through tools). The
 // generated-file markers belong to that turn, so they are relabeled before
-// being replayed into a later turn's history.
+// being replayed into a later turn's history. It also carries the closing
+// round's reasoning artifacts — see finalAnswerReasoningStep.
 func finalAnswerHistoryMessage(m *types.Message) *chat.Message {
 	finalContent := agentHistoryThinkTagRegex.ReplaceAllString(m.Content, "")
 	// Version clarification was written for that message's turn, not this one.
@@ -558,7 +564,46 @@ func finalAnswerHistoryMessage(m *types.Message) *chat.Message {
 	if finalContent == "" {
 		return nil
 	}
-	return &chat.Message{Role: "assistant", Content: finalContent}
+	final := &chat.Message{Role: "assistant", Content: finalContent}
+	// The artifacts ride in their own fields, so stripping <think> blocks out
+	// of the visible answer above and replaying the round's reasoning here are
+	// not in conflict: nothing thinking-shaped is added back to Content.
+	if step := finalAnswerReasoningStep(m.AgentSteps); step != nil {
+		final.ReasoningContent = step.ReasoningContent
+		final.ReasoningSignature = step.ReasoningSignature
+		final.ReasoningMetadata = step.ReasoningMetadata
+	}
+	return final
+}
+
+// finalAnswerReasoningStep returns the step whose reasoning artifacts belong on
+// the turn's final assistant message, or nil when none do.
+//
+// A turn normally ends with a plain answer and no tool calls. The engine
+// records that closing round like any other, artifacts included, but
+// buildAgentStepMessages emits nothing for a step without tool calls — so
+// everything the next turn has to hand back (the OpenAI Responses encrypted
+// reasoning items, a DeepSeek/MiMo reasoning_content, an Anthropic thinking
+// signature) stopped at the turn boundary, exactly as the tool rounds' did
+// before they were replayed.
+//
+// Only the last step is eligible: an earlier round's artifacts belong to the
+// assistant message that round already produced, with its tool results in
+// between. Whether that message exists is asked of buildAgentStepMessages
+// itself rather than restated here, so a shape it learns to replay later is one
+// this function stops duplicating without being touched.
+func finalAnswerReasoningStep(steps types.AgentSteps) *types.AgentStep {
+	if len(steps) == 0 {
+		return nil
+	}
+	last := &steps[len(steps)-1]
+	if last.ReasoningContent == "" && last.ReasoningSignature == "" && len(last.ReasoningMetadata) == 0 {
+		return nil
+	}
+	if len(buildAgentStepMessages(*last)) > 0 {
+		return nil
+	}
+	return last
 }
 
 // legacyFinalAnswerToolName is the name of the now-removed final_answer tool.

@@ -21,6 +21,6 @@ func TestOpenSessionTerminalNeverReachesProvisioning(t *testing.T) {
 	_, err := svc.OpenSessionTerminal(ctx, "sess-1", sandbox.RemoteTerminalOptions{})
 	require.ErrorIs(t, err, sandbox.ErrNoLiveSessionSandbox)
 
-	_, err = svc.EnsureSessionTerminal(ctx, "sess-1", "", sandbox.RemoteTerminalOptions{})
+	_, err = svc.EnsureSessionTerminal(ctx, "sess-1", SandboxPin{}, sandbox.RemoteTerminalOptions{})
 	require.ErrorIs(t, err, sandbox.ErrNoLiveSessionSandbox)
 }

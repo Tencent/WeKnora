@@ -75,15 +75,15 @@ func NewSandboxDesktopService(terminals *SandboxTerminalService) *SandboxDesktop
 
 // EnsureSessionDesktop starts the desktop listeners and dials websockify.
 //
-// An empty sandboxConfigID is lookup-only: a running session sandbox is
+// A zero provision pin is lookup-only: a running session sandbox is
 // attached (and XFCE is lazily started if needed), a paused one returns
 // sandbox.ErrSandboxPaused, and a missing one returns
-// sandbox.ErrNoLiveSessionSandbox. A non-empty ID is the confirmed-click
+// sandbox.ErrNoLiveSessionSandbox. A non-zero pin is the confirmed-click
 // path and may create or resume, the same contract as EnsureSessionTerminal.
 func (s *SandboxDesktopService) EnsureSessionDesktop(
 	ctx context.Context,
 	sessionID string,
-	sandboxConfigID string,
+	provision SandboxPin,
 ) (*SessionDesktop, error) {
 	if s == nil || s.terminals == nil {
 		return nil, sandbox.ErrNoLiveSessionSandbox
@@ -93,7 +93,7 @@ func (s *SandboxDesktopService) EnsureSessionDesktop(
 	//    provisions through the same path a chat turn uses. Either way the
 	//    inbound token is registered on THIS replica, which is what keeps
 	//    the gateway from answering 401.
-	mgr, err := s.resolveRunningManager(ctx, sessionID, sandboxConfigID)
+	mgr, err := s.resolveRunningManager(ctx, sessionID, provision)
 	if err != nil {
 		return nil, err
 	}
@@ -139,17 +139,17 @@ func (s *SandboxDesktopService) EnsureSessionDesktop(
 }
 
 // resolveRunningManager returns a manager whose session sandbox is live.
-// With no sandboxConfigID it will not create or resume: a paused binding
+// With a zero provision pin it will not create or resume: a paused binding
 // is ErrSandboxPaused so the overlay can ask first. DesktopEnabled is
 // checked before provision (and before Exec in EnsureSessionDesktop) so a
 // CLI image cannot be created or woken only to miss start-desktop.sh.
 func (s *SandboxDesktopService) resolveRunningManager(
 	ctx context.Context,
 	sessionID string,
-	sandboxConfigID string,
+	provision SandboxPin,
 ) (sandbox.Manager, error) {
 	t := s.terminals
-	lookupOnly := strings.TrimSpace(sandboxConfigID) == ""
+	lookupOnly := provision.IsZero()
 	mgr, _, err := t.resolveSessionManager(ctx, sessionID)
 	if err == nil {
 		if err := requireDesktopCapable(mgr); err != nil {
@@ -165,10 +165,12 @@ func (s *SandboxDesktopService) resolveRunningManager(
 	if !errors.Is(err, sandbox.ErrNoLiveSessionSandbox) || lookupOnly {
 		return nil, err
 	}
-	tenantID, _ := types.TenantIDFromContext(ctx)
+	// provision.TenantID owns provision.ConfigID — the lending workspace for a
+	// shared agent, which is where its config actually exists.
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
 	mgr, _, err = resolveSandboxForExecution(
-		ctx, t.resolver, t.fallback, t.pinner, tenantID, sessionID,
-		strings.TrimSpace(sandboxConfigID), t.policy,
+		ctx, t.resolver, t.fallback, t.pinner,
+		provision.TenantOr(sessionTenantID), sessionID, provision.ConfigID, t.policy,
 	)
 	if err != nil {
 		return nil, err

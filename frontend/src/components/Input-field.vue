@@ -809,14 +809,40 @@ const loadFiles = async () => {
   }
 };
 
+// A shared agent @mentions its OWNER's MCP services; this workspace's service
+// ids match none of its preset, and the backend drops such a mention outright.
+// So the list follows the selected agent and is refetched when it changes.
+const currentAgentScope = computed(() => {
+  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+  if (!sourceTenantId || !selectedAgentId.value) return undefined;
+  return { agentId: selectedAgentId.value, sourceTenantId };
+});
+
+const agentScopeKey = (scope?: { agentId: string; sourceTenantId: string | number }) =>
+  scope ? `${scope.sourceTenantId}:${scope.agentId}` : '';
+
+// Guards against a slow response for a previously selected agent overwriting
+// the list with another workspace's services after the user switched away.
+let mcpServicesRequestKey = '';
+
 const loadMCPServices = async () => {
+  const scope = currentAgentScope.value;
+  const requestKey = agentScopeKey(scope);
+  mcpServicesRequestKey = requestKey;
   try {
-    mcpServices.value = await listMCPServices();
+    const list = await listMCPServices(scope);
+    if (mcpServicesRequestKey !== requestKey) return;
+    mcpServices.value = list;
   } catch (error) {
     console.error('Failed to load MCP services:', error);
+    if (mcpServicesRequestKey !== requestKey) return;
     mcpServices.value = [];
   }
 };
+
+watch(currentAgentScope, () => {
+  void loadMCPServices();
+});
 
 watch(selectedFileIds, () => {
   loadFiles();
@@ -1373,7 +1399,12 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
-      await editorResources.ensureSkills(currentAgentConfig.value?.sandbox_config_id);
+      // The scope makes a shared agent's skills resolve in its owner's
+      // workspace, where they are actually installed.
+      await editorResources.ensureSkills(
+        currentAgentConfig.value?.sandbox_config_id,
+        currentAgentScope.value,
+      );
       skillItems = editorResources.skills
         .filter(skill => isSkillAllowedByAgent(skill.name))
         .map(skill => ({

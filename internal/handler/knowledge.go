@@ -731,6 +731,53 @@ func knowledgeSpansLastError(
 	}
 }
 
+// missingStageStatusFunc resolves a rowless stage against the real failure:
+// earlier → skipped, downstream → cancelled, none → the parse_status fallback (#3452).
+func missingStageStatusFunc(
+	stageRowByName map[string]*types.KnowledgeProcessingSpan, fallback string,
+) func(string) string {
+	failedIdx := -1
+	for i, name := range types.AllStages {
+		if row, ok := stageRowByName[name]; ok && row.Status == types.SpanStatusFailed {
+			failedIdx = i
+			break
+		}
+	}
+	if failedIdx < 0 {
+		return func(string) string { return fallback }
+	}
+
+	// Redundant with canonical order today; keeps holding if stages are reordered.
+	cancelled := map[string]bool{}
+	var markDependents func(string)
+	markDependents = func(stage string) {
+		for candidate, upstreams := range types.StageDependencies {
+			if cancelled[candidate] {
+				continue
+			}
+			for _, up := range upstreams {
+				if up == stage {
+					cancelled[candidate] = true
+					markDependents(candidate)
+					break
+				}
+			}
+		}
+	}
+	markDependents(types.AllStages[failedIdx])
+
+	stageIdx := make(map[string]int, len(types.AllStages))
+	for i, name := range types.AllStages {
+		stageIdx[name] = i
+	}
+	return func(name string) string {
+		if cancelled[name] || stageIdx[name] > failedIdx {
+			return types.SpanStatusCancelled
+		}
+		return types.SpanStatusSkipped
+	}
+}
+
 // buildSpanTree assembles a flat list of span rows into a parent-child
 // tree rooted at the (knowledge, attempt)'s root span. Missing canonical
 // stages are filled in with pending placeholders so the UI always renders
@@ -785,6 +832,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 		syntheticStatus = types.SpanStatusDone
 	case types.ParseStatusFailed:
 		syntheticStatus = types.SpanStatusFailed
+	case types.ParseStatusCancelled:
+		syntheticStatus = types.SpanStatusCancelled
 	}
 
 	// Synthesize root if no rows came back so the API contract stays
@@ -838,6 +887,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 	// per-stage timing was never recorded. Appended in AllStages order
 	// so the canonical stage layout is deterministic regardless of
 	// which rows are missing.
+	missingStageStatus := missingStageStatusFunc(stageRowByName, syntheticStatus)
 	for _, name := range types.AllStages {
 		if _, ok := stageRowByName[name]; ok {
 			continue
@@ -847,7 +897,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 			Attempt:     attempt,
 			Name:        name,
 			Kind:        types.SpanKindStage,
-			Status:      syntheticStatus,
+			Status:      missingStageStatus(name),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}

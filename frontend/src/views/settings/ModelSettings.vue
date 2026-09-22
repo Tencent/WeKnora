@@ -102,7 +102,10 @@
               </div>
             </div>
             <p class="model-card__subtitle">
-              <span>{{ vendorLabel(model) }}</span>
+              <span class="model-card__vendor">
+                <img v-if="vendorIcon(model)" :src="vendorIcon(model)" class="model-card__vendor-icon" alt="" />
+                <span>{{ vendorLabel(model) }}</span>
+              </span>
               <template v-if="model._modelType === 'embedding' && model.dimension">
                 <span class="model-card__sep">·</span>
                 <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
@@ -293,16 +296,18 @@ import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { focusKbEditorSection } from '@/config/contextualGuides'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useModelProvidersStore } from '@/stores/modelProviders'
 import {
   formatContextWindow,
   isDefaultContextWindow,
   effectiveContextWindow,
 } from '@/utils/contextWindow'
 
-const { t, te } = useI18n()
+const { t, locale } = useI18n()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
 const chatResources = useChatResourcesStore()
+const providersStore = useModelProvidersStore()
 const router = useRouter()
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
@@ -369,12 +374,17 @@ function convertToLegacyFormat(model: ModelConfig) {
     supportsVision: model.parameters.supports_vision || false,
     contextWindow: model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
+    maxOutputTokens: model.parameters.max_output_tokens || undefined,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
-    lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
-    // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
-    thinkingControl: model.parameters.extra_config?.thinking_control,
+    // 厂商额外字段 / 高级覆盖原样带入编辑器（thinking_control 单独拆出，仅旧数据才有）
+    extraConfig: Object.fromEntries(
+      Object.entries(model.parameters.extra_config || {}).filter(([key]) => key !== 'thinking_control'),
+    ) as Record<string, string>,
+    thinkingControl: model.parameters.extra_config?.thinking_control || '',
+    spec: model.parameters.spec || null,
+    capabilities: model.capabilities,
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -423,15 +433,19 @@ const sourceLabel = (type: ModelType) => {
 }
 
 // Maps a backend `provider` id (e.g. "openai", "aliyun", "weknoracloud")
-// to its localized short label. Reuses the same i18n keys the editor's
-// provider dropdown uses, so the model card and the editor stay in sync
-// when a provider is renamed. Falls back to '' when the backend didn't
-// store a provider — caller falls back to sourceLabel().
+// to the vendor's localized name from the backend catalog (modelProviders
+// store), so the model card and the editor dropdown always agree. Falls
+// back to the raw id when the catalog has not loaded yet, and to '' when
+// the backend didn't store a provider — caller falls back to sourceLabel().
 const providerLabel = (model: any): string => {
   const id = model.provider
   if (!id) return ''
-  const key = `model.editor.providers.${id}.label`
-  return te(key) ? t(key) : id
+  return providersStore.labelFor(id, String(locale.value || '')) || id
+}
+
+const vendorIcon = (model: any): string => {
+  if (model.source === 'local' || !model.provider) return ''
+  return providersStore.iconFor(model.provider)
 }
 
 // What the vendor chip on a card shows. Keeps the chip text uniformly
@@ -479,6 +493,8 @@ const emptyHint = computed(() => {
 // 加载模型列表
 const loadModels = async () => {
   loading.value = true
+  // 厂商图标 / 本地化名称来自目录 store；与模型列表并行加载，失败不影响卡片渲染。
+  void providersStore.ensureLoaded('').catch(() => {})
   try {
     const models = await listModels()
     allModels.value = models
@@ -596,20 +612,45 @@ const handleModelSave = async (modelData: any) => {
     const trimmedAppSecret = (modelData.appSecret ?? '').trim()
     const appSecretFields: { app_secret?: string } =
       !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
+    // extra_config: vendor extra fields + advanced overrides (already trimmed
+    // by the editor) plus the legacy thinking_control for rows that still
+    // carry it. Empty values are dropped so cleared keys disappear.
     const extraConfig: Record<string, string> = {}
-    if (modelData.provider === 'lkeap' && saveType === 'rerank') {
-      extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
+    if (modelData.source === 'remote') {
+      for (const [key, value] of Object.entries(modelData.extraConfig || {})) {
+        const trimmed = String(value ?? '').trim()
+        if (key && trimmed) extraConfig[key] = trimmed
+      }
+      const legacyThinking = String(modelData.thinkingControl || '').trim()
+      if (saveType === 'chat' && legacyThinking) {
+        extraConfig.thinking_control = legacyThinking
+      } else {
+        delete extraConfig.thinking_control
+      }
     }
-    if (
-      saveType === 'chat'
-      && modelData.source === 'remote'
-      && modelData.thinkingControl
-    ) {
-      extraConfig.thinking_control = modelData.thinkingControl
-    }
-    const extraConfigFields = Object.keys(extraConfig).length > 0
+    // Always send extra_config for remote models, even when it ends up empty:
+    // PUT /models/:id restores the stored map when the field is absent
+    // (internal/handler/model.go), so omitting it would make "clear the last
+    // vendor field / protocol override" silently no-op. Local rows keep the
+    // omit-when-empty behaviour — this form never edits their extra_config.
+    const extraConfigFields = modelData.source === 'remote'
       ? { extra_config: extraConfig }
       : {}
+
+    // parameters.spec: keep whatever the row already had, replace compat with
+    // the (validated) JSON from the advanced textarea; drop spec when empty.
+    const specText = String(modelData.specCompat ?? '').trim()
+    const baseSpec = (modelData.spec && typeof modelData.spec === 'object') ? { ...modelData.spec } : {}
+    if (specText) {
+      const compat = JSON.parse(specText)
+      if (!compat || typeof compat !== 'object' || Array.isArray(compat)) {
+        throw new Error(t('model.editor.advanced.compat.invalid'))
+      }
+      baseSpec.compat = compat
+    } else {
+      delete baseSpec.compat
+    }
+    const specFields = Object.keys(baseSpec).length > 0 ? { spec: baseSpec } : {}
 
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
@@ -640,6 +681,11 @@ const handleModelSave = async (modelData: any) => {
           && Number(modelData.contextWindow) >= 1024
           ? { context_window: Math.round(Number(modelData.contextWindow)) }
           : {}),
+        ...((saveType === 'chat' || saveType === 'vllm')
+          && Number(modelData.maxOutputTokens) > 0
+          ? { max_output_tokens: Math.round(Number(modelData.maxOutputTokens)) }
+          : {}),
+        ...specFields,
         // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
         ...(['chat', 'embedding', 'vllm'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0
@@ -1055,13 +1101,48 @@ onMounted(() => {
 }
 
 .model-card__subtitle {
+  // A flex row, not inline text: .model-card__vendor is an inline-flex box
+  // whose baseline comes from its first item — the 14px icon, whose baseline
+  // is its bottom edge — so as inline content it sat a couple of pixels off
+  // the "· 200K" beside it. Aligning the row by centre instead of by
+  // baseline puts every part of the line on one optical line.
+  display: flex;
+  align-items: center;
+  min-width: 0;
   margin: 2px 0 0;
   font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.model-card__vendor {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+
+  // The vendor name is the only part long enough to need truncating; the
+  // context window and the badges after it must stay readable.
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.model-card__sep,
+.model-card__ctx,
+.model-card__vision {
+  flex: none;
   white-space: nowrap;
+}
+
+.model-card__vendor-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  object-fit: contain;
 }
 
 .model-card__sep {
