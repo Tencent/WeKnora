@@ -22,6 +22,9 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   // that config boots. Same Admin+ bar as the sandbox editor itself.
   skills: 'admin',
   mcp: 'admin',
+  // IntentGate 策略是租户管理员的运营配置资产（设计 §3.2），后端路由
+  // 全走 g.Admin()，入口同收 admin。
+  intentpolicy: 'admin',
   system: 'viewer',
   userprofile: 'viewer',
   browserconnection: 'viewer',
