@@ -206,6 +206,19 @@ Dev 相关容器都带 `-dev` 后缀、用独立网络 `WeKnora-network-dev`，�
 - 子节点依次为 rerank、chat、VLM 等具体模型调用，点击可查看 prompt、响应以及 usage（prompt/completion/total tokens）。
 - 流式对话会额外标注 Time-To-First-Token。
 
+### 2.4 附加自定义 metadata
+
+调用受追踪的接口时，可以通过 `X-Langfuse-Metadata` 请求头以 JSON 形式附带一组业务自定义键值对。它们会与内置字段（`http.method`、`http.path`、`http.query`、`request_id`、`status`、`response.size` 等）合并写入该次请求的 Langfuse trace metadata，便于在控制台按业务维度过滤、统计：
+
+```
+POST /api/v1/knowledge-chat/:session_id
+X-Langfuse-Metadata: {"ticket_id":"T-123","biz_line":"order","priority":"P1"}
+```
+
+- header 值必须是 **JSON object**；解析失败或非法 JSON 会被静默忽略，**不会影响业务请求**。
+- 与内置字段同名的 key 以内置字段为准（调用方无法覆盖 `http.path` 等关联字段），其余 key 原样透传。
+- 不传该 header 时，行为与既有版本完全一致，零额外开销。
+
 ## 3. 环境变量参考
 
 | 变量名 | 默认值 | 说明 |
