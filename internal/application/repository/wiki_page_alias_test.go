@@ -17,9 +17,14 @@ import (
 // Run with WEKNORA_TEST_POSTGRES_DSN pointing to a test database with pg_trgm
 // installed. A transaction-local temporary table shadows wiki_pages; fixtures
 // never touch the persistent table. SQLite cannot exercise pg_trgm or JSONB.
+// App CI provides a temporary PostgreSQL service and requires this test to run;
+// local runs without a DSN remain optional unless WEKNORA_REQUIRE_POSTGRES_TESTS=1.
 func TestFindSimilarPages_ExactAliasesPostgres(t *testing.T) {
 	dsn := os.Getenv("WEKNORA_TEST_POSTGRES_DSN")
 	if dsn == "" {
+		if os.Getenv("WEKNORA_REQUIRE_POSTGRES_TESTS") == "1" {
+			t.Fatal("WEKNORA_TEST_POSTGRES_DSN is required for the PostgreSQL CI test")
+		}
 		t.Skip("set WEKNORA_TEST_POSTGRES_DSN to run PostgreSQL alias regression tests")
 	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
