@@ -33,6 +33,10 @@ import (
 // 需要的东西（约束原文、参数、意图基准），不含执行点元数据。
 type JudgeInput struct {
 	TenantID uint64 `json:"tenant_id"`
+	// SessionID / PolicyID 供判定缓存（T32）键控：同 session 内
+	// (policy_id, args_digest) 命中 5 分钟缓存，不重复调用模型。
+	SessionID string `json:"session_id,omitempty"`
+	PolicyID  string `json:"policy_id,omitempty"`
 	// ConstraintText 策略的自然语言约束原文（intent_policy.constraint_text），
 	// 是判定的唯一标尺；rule_expr 已在规则层判过，不进 judge。
 	ConstraintText string          `json:"constraint_text"`
@@ -165,6 +169,10 @@ func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
 		}
 		return Verdict{Action: ActionUncertain, Layer: LayerJudge, Reason: reason}, nil
 	}
+	judgeTokens := resp.Usage.TotalTokens
+	if judgeTokens <= 0 {
+		judgeTokens = resp.Usage.CompletionTokens
+	}
 	out, err := parseJudgeOutput(resp.Content)
 	if err != nil {
 		return Verdict{
@@ -184,9 +192,10 @@ func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
 		}, nil
 	}
 	return Verdict{
-		Action: action,
-		Layer:  LayerJudge,
-		Reason: strings.TrimSpace(out.Reason),
+		Action:      action,
+		Layer:       LayerJudge,
+		Reason:      strings.TrimSpace(out.Reason),
+		JudgeTokens: judgeTokens, // 成本观测（T32）：落 intent_verdicts.judge_tokens
 	}, nil
 }
 

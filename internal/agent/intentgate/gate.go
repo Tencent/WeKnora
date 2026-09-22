@@ -72,6 +72,10 @@ type Verdict struct {
 	Mode   string `json:"mode,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	Layer  Layer  `json:"layer,omitempty"`
+	// JudgeTokens 是本次 judge 调用消耗的 token 数（设计 §6.2 成本观测，
+	// 落 intent_verdicts.judge_tokens）。规则层/baseline 判定为 0；命中
+	// 判定缓存时为原始那次调用的消耗。T32 起由 LLMJudge 填充。
+	JudgeTokens int `json:"judge_tokens,omitempty"`
 }
 
 // ToolCallInput 是一次工具调用的判定输入。意图基准是原始 user prompt

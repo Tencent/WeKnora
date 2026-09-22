@@ -18,6 +18,7 @@ type fakeJudgeChat struct {
 	resp              string
 	err               error
 	blockUntilCtxDone bool
+	usage             types.TokenUsage
 
 	calls        int
 	lastMessages []chat.Message
@@ -35,7 +36,7 @@ func (f *fakeJudgeChat) Chat(ctx context.Context, messages []chat.Message, opts 
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &types.ChatResponse{Content: f.resp}, nil
+	return &types.ChatResponse{Content: f.resp, Usage: f.usage}, nil
 }
 
 func (f *fakeJudgeChat) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
@@ -345,5 +346,35 @@ func TestLLMJudgeEnabledTier(t *testing.T) {
 		if got := judge.Enabled(context.Background(), 7); got != tc.want {
 			t.Fatalf("%s: Enabled = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestLLMJudgeRecordsTokenCost 验收 [unit]（T32 成本侧）：LLMJudge 把
+// 模型上报的 token 消耗写进 verdict.JudgeTokens（TotalTokens 优先，
+// 缺报回落 CompletionTokens）。
+func TestLLMJudgeRecordsTokenCost(t *testing.T) {
+	fake := &fakeJudgeChat{
+		resp:  `{"verdict":"allow","reason":"合规"}`,
+		usage: types.TokenUsage{PromptTokens: 900, CompletionTokens: 60, TotalTokens: 960},
+	}
+	judge := NewLLMJudge(func(context.Context, uint64) (*ResolvedJudgeModel, error) {
+		return &ResolvedJudgeModel{Chat: fake}, nil
+	})
+	v, err := judge.Judge(context.Background(), judgeTestInput())
+	if err != nil {
+		t.Fatalf("Judge: %v", err)
+	}
+	if v.JudgeTokens != 960 {
+		t.Fatalf("JudgeTokens = %d, want 960（TotalTokens）", v.JudgeTokens)
+	}
+
+	// TotalTokens 缺报时回落 CompletionTokens。
+	fake.usage = types.TokenUsage{CompletionTokens: 60}
+	v, err = judge.Judge(context.Background(), judgeTestInput())
+	if err != nil {
+		t.Fatalf("Judge: %v", err)
+	}
+	if v.JudgeTokens != 60 {
+		t.Fatalf("JudgeTokens = %d, want 60（CompletionTokens 回落）", v.JudgeTokens)
 	}
 }

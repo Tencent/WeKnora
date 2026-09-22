@@ -776,5 +776,6 @@ func intentVerdictRecord(
 		Reason:             v.Reason,
 		ModeAtDecision:     v.Mode,
 		LatencyMs:          int(latencyMs),
+		JudgeTokens:        v.JudgeTokens, // T32：judge 调用的 token 成本（规则层/baseline 为 0）
 	})
 }

@@ -130,6 +130,8 @@ func (g *PolicyGate) judgeEscalate(
 	}
 	jv, err := g.judge.Judge(ctx, JudgeInput{
 		TenantID:       in.TenantID,
+		SessionID:      in.SessionID,
+		PolicyID:       policy.ID,
 		ConstraintText: policy.ConstraintText,
 		ToolName:       in.ToolName,
 		ServiceID:      in.ServiceID,

@@ -193,7 +193,10 @@ func NewAgentService(
 	if intentPolicyStore != nil && db != nil {
 		var judge intentgate.Judge
 		if modelService != nil {
-			judge = intentgate.NewLLMJudge(newJudgeModelResolver(modelService))
+			// 判定缓存（T32）：同 session 同 (policy_id, args_digest) 5 分钟
+			// 去重，包在 LLMJudge 外面——缓存命中时连模型解析都不发生。
+			judge = intentgate.NewCachingJudge(
+				intentgate.NewLLMJudge(newJudgeModelResolver(modelService)))
 		}
 		svc.intentGate = intentgate.NewPolicyGate(intentPolicyStore, intentgate.WithJudge(judge))
 		svc.intentVerdictWriter = intentgate.NewAsyncVerdictWriter(
