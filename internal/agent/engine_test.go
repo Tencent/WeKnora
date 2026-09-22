@@ -932,8 +932,10 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	assert.Equal(t, "final answer", state.FinalAnswer)
 }
 
-func TestStreamFinalAnswerRefreshesContextUsageFromSynthesisRequest(t *testing.T) {
-	const promptTokens = 80
+// Synthesis runs with ToolChoice=none, so attributing it would report the
+// agent's tool definitions as costing nothing. The turn's context is what the
+// ReAct rounds actually sent; the synthesis call is an implementation detail.
+func TestStreamFinalAnswerKeepsTheReActContextSnapshot(t *testing.T) {
 	mock := &mockChat{
 		responses: []mockResponse{
 			{chunks: []types.StreamResponse{
@@ -942,34 +944,23 @@ func TestStreamFinalAnswerRefreshesContextUsageFromSynthesisRequest(t *testing.T
 					Content:      "final answer",
 					Done:         true,
 					FinishReason: "stop",
-					Usage: &types.TokenUsage{
-						PromptTokens:     promptTokens,
-						CompletionTokens: 5,
-						TotalTokens:      promptTokens + 5,
-					},
+					Usage:        &types.TokenUsage{PromptTokens: 80, CompletionTokens: 5, TotalTokens: 85},
 				},
 			}},
 		},
 	}
 	engine := newTestEngine(t, mock)
-	state := &types.AgentState{
-		ContextUsage: types.ContextUsage{
-			SystemPrompt: 10,
-			Tools:        4000,
-			MCP:          1500,
-			Conversation: 90,
-			Total:        5600,
-			Window:       200000,
-		},
+	before := types.ContextUsage{
+		SystemPrompt: 10, Tools: 4000, MCP: 1500, Conversation: 90,
+		Total: 5600, Window: 200000,
 	}
+	state := &types.AgentState{ContextUsage: before}
 
 	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1", emptyMessages())
 
 	require.NoError(t, err)
-	require.Zero(t, state.ContextUsage.Tools, "synthesis sends ToolChoice=none; Tools must drop")
-	require.Zero(t, state.ContextUsage.MCP)
-	require.Equal(t, promptTokens, state.ContextUsage.Total)
-	require.Greater(t, state.ContextUsage.Conversation, 0)
+	require.Equal(t, before, state.ContextUsage, "synthesis must not rewrite the turn's context mix")
+	require.Equal(t, 85, state.TurnUsage.TotalTokens, "its tokens still count toward the turn")
 }
 
 func TestStreamFinalAnswerDoesNotPublishLiveContextUsage(t *testing.T) {
@@ -1000,7 +991,7 @@ func TestStreamFinalAnswerDoesNotPublishLiveContextUsage(t *testing.T) {
 
 	require.NoError(t, engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1", emptyMessages()))
 	require.Empty(t, snapshots, "synthesis must not flash Tools/MCP to zero on the live ring")
-	require.Zero(t, state.ContextUsage.Tools, "the persisted snapshot still reflects the last request")
+	require.Equal(t, 4000, state.ContextUsage.Tools, "the ReAct snapshot survives synthesis")
 }
 
 func lastToolContent(messages []chat.Message) string {
@@ -1073,15 +1064,15 @@ func TestExecuteLoopReattributesContextUsageAfterOverflowCompaction(t *testing.T
 	require.Greater(t, len(lastToolContent(mock.calls[0])), len(lastToolContent(mock.calls[1])),
 		"overflow recovery should shrink the tool result before retry")
 
-	expected := AttributeContextUsage(engine.tokenEstimator, mock.calls[1], tools, "", engine.contextWindowTokens())
-	expected.Calibrate(retryPrompt)
-	require.InDelta(t, float64(expected.Tools), float64(state.ContextUsage.Tools), 1)
-	require.InDelta(t, float64(expected.Conversation), float64(state.ContextUsage.Conversation), 1)
-
-	stale := AttributeContextUsage(engine.tokenEstimator, mock.calls[0], tools, "", engine.contextWindowTokens())
-	stale.Calibrate(retryPrompt)
-	require.Greater(t, state.ContextUsage.Tools, stale.Tools,
-		"retry attribution must not keep the pre-compaction category mix")
+	require.Equal(t, retryPrompt, state.ContextUsage.Total,
+		"the snapshot must describe the retried request, not the one that overflowed")
+	require.Greater(t, state.ContextUsage.Tools, 0, "the retry still carries the tool schemas")
+	require.Greater(t, state.ContextUsage.ToolResults, 0)
+	require.Equal(t,
+		state.ContextUsage.SystemPrompt+state.ContextUsage.Memory+state.ContextUsage.Skills+
+			state.ContextUsage.Tools+state.ContextUsage.MCP+state.ContextUsage.Conversation+
+			state.ContextUsage.Reasoning+state.ContextUsage.ToolResults,
+		state.ContextUsage.Total, "buckets must reconcile with the provider count")
 }
 
 func TestExecuteLoopReattributesContextUsageAfterOverflowError(t *testing.T) {
@@ -1109,14 +1100,49 @@ func TestExecuteLoopReattributesContextUsageAfterOverflowError(t *testing.T) {
 	require.Equal(t, 2, mock.callCount)
 	require.Greater(t, len(lastToolContent(mock.calls[0])), len(lastToolContent(mock.calls[1])))
 
-	expected := AttributeContextUsage(engine.tokenEstimator, mock.calls[1], tools, "", engine.contextWindowTokens())
-	expected.Calibrate(retryPrompt)
-	require.InDelta(t, float64(expected.Tools), float64(state.ContextUsage.Tools), 1)
+	require.Equal(t, retryPrompt, state.ContextUsage.Total,
+		"the snapshot must describe the retried request, not the one that overflowed")
+	require.Greater(t, state.ContextUsage.Tools, 0, "the retry still carries the tool schemas")
+	require.Greater(t, state.ContextUsage.ToolResults, 0)
+	require.Equal(t,
+		state.ContextUsage.SystemPrompt+state.ContextUsage.Memory+state.ContextUsage.Skills+
+			state.ContextUsage.Tools+state.ContextUsage.MCP+state.ContextUsage.Conversation+
+			state.ContextUsage.Reasoning+state.ContextUsage.ToolResults,
+		state.ContextUsage.Total, "buckets must reconcile with the provider count")
+}
 
-	stale := AttributeContextUsage(engine.tokenEstimator, mock.calls[0], tools, "", engine.contextWindowTokens())
-	stale.Calibrate(retryPrompt)
-	require.Greater(t, state.ContextUsage.Tools, stale.Tools,
-		"retry attribution must not keep the pre-compaction category mix")
+// The engine-level guard for the bug this rework fixes.
+func TestMultiRoundTurnKeepsTheFixedBucketsStable(t *testing.T) {
+	round := func(prompt int) mockResponse {
+		return mockResponse{chunks: []types.StreamResponse{{
+			Content:      "step",
+			Done:         true,
+			FinishReason: "stop",
+			Usage:        &types.TokenUsage{PromptTokens: prompt, CompletionTokens: 10, TotalTokens: prompt + 10},
+		}}}
+	}
+	mock := &mockChat{responses: []mockResponse{round(4000), round(12000)}}
+	engine := newTestEngine(t, mock)
+
+	var snapshots []types.ContextUsage
+	engine.eventBus.On(event.EventAgentContextUsage, func(_ context.Context, evt event.Event) error {
+		usage, ok := evt.Data.(types.ContextUsage)
+		require.True(t, ok)
+		snapshots = append(snapshots, usage)
+		return nil
+	})
+
+	state := &types.AgentState{}
+	engine.snapshotContextUsage(context.Background(), state, emptyMessages(), emptyTools(), 4000)
+	first := state.ContextUsage
+	engine.snapshotContextUsage(context.Background(), state, emptyMessages(), emptyTools(), 12000)
+	second := state.ContextUsage
+
+	require.Equal(t, first.SystemPrompt, second.SystemPrompt,
+		"a frozen system prompt must not grow because the conversation did")
+	require.Equal(t, first.Tools, second.Tools)
+	require.Equal(t, first.MCP, second.MCP)
+	require.Equal(t, 12000, second.Total)
 }
 
 func TestSnapshotContextUsagePublishesToEventBus(t *testing.T) {

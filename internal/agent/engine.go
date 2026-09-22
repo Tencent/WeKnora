@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
+	"github.com/Tencent/WeKnora/internal/agent/contextusage"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -66,10 +67,14 @@ type AgentEngine struct {
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
-	// skillsPrompt is the skills directory frozen into this run's system
-	// prompt. Attribution uses this needle so a later skill install cannot
-	// invent a Skills bucket that the model never saw.
-	skillsPrompt string
+	// promptSectionTokens is the per-section cost of this run's system prompt,
+	// frozen when the prompt was assembled. Attribution reads it instead of
+	// searching the rendered text, so a later skill install cannot invent a
+	// bucket the model never saw.
+	promptSectionTokens map[string]int
+	// attributor accumulates this turn's locked buckets. Nil until the first
+	// snapshot; reset at Execute so a turn never inherits the previous one.
+	attributor *contextusage.Attributor
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -164,21 +169,32 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
-	e.skillsPrompt = ""
+	e.promptSectionTokens = make(map[string]int, len(sections))
 	for _, section := range sections {
+		content := strings.TrimSpace(section.Content)
 		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
-		if section.Name == "skills" {
-			e.skillsPrompt = section.Content
+		if content == "" {
+			continue
 		}
+		e.promptSectionTokens[section.Name] = e.tokenEstimator.EstimateString(content)
 	}
 	return renderSystemPromptSections(sections)
 }
 
-func (e *AgentEngine) skillsPromptContent() string {
-	if e == nil {
-		return ""
+// contextAttributor is this turn's attribution state. It is created lazily so
+// direct snapshot calls in tests do not need a full Execute.
+func (e *AgentEngine) contextAttributor() *contextusage.Attributor {
+	if e.attributor == nil {
+		e.attributor = contextusage.New(e.tokenEstimator, e.contextWindowTokens(), e.compactionThreshold())
 	}
-	return e.skillsPrompt
+	return e.attributor
+}
+
+func (e *AgentEngine) compactionThreshold() int {
+	if e == nil || e.compactor == nil {
+		return 0
+	}
+	return e.compactor.Settings().Threshold()
 }
 
 func (e *AgentEngine) contextWindowTokens() int {
@@ -350,6 +366,7 @@ func (e *AgentEngine) Execute(
 		IsComplete:    false,
 		CurrentRound:  0,
 	}
+	e.attributor = nil
 
 	// Build system prompt using progressive RAG prompt
 	// If skills are enabled, include skills metadata (Level 1 - Progressive Disclosure)
@@ -736,7 +753,7 @@ func (e *AgentEngine) runReActIteration(
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
 		state.TurnUsage.Accumulate(response.Usage)
-		state.ContextUsage.Calibrate(response.Usage.PromptTokens)
+		e.recalibrateContextUsage(state, response.Usage.PromptTokens)
 		logger.Infof(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d, "+
 			"cache_read=%d, cache_write=%d, cache_hit_rate=%.1f%%, cache_status=%s",
 			round, response.Usage.PromptTokens,

@@ -161,7 +161,7 @@ func TestSkillDirectoryRequiresReaderAndEscapesMetadata(t *testing.T) {
 	require.NotContains(t, BuildSystemPromptWithOptions(nil, false, options, "Install"), "Available skills:")
 }
 
-func TestSkillsPromptContentUsesFrozenSystemPrompt(t *testing.T) {
+func TestSkillsPromptSectionTokensFrozenAtBuild(t *testing.T) {
 	engine := newTestEngine(t, &mockChat{})
 	registry := tools.NewToolRegistry()
 	registry.RegisterTool(newCountingTool("read_file"))
@@ -175,15 +175,14 @@ func TestSkillsPromptContentUsesFrozenSystemPrompt(t *testing.T) {
 	engine.SetSkillsManager(mgr)
 
 	prompt := engine.buildSystemPrompt(t.Context())
-	frozen := engine.skillsPromptContent()
-	require.NotEmpty(t, frozen)
-	require.Contains(t, frozen, "pdf-tools")
-	require.Contains(t, prompt, strings.TrimSpace(frozen))
+	skillsTokens := engine.promptSectionTokens["skills"]
+	require.Greater(t, skillsTokens, 0)
+	require.Contains(t, prompt, "pdf-tools")
 
 	// A live rebuild would drop the skills section without read_file.
 	engine.toolRegistry = tools.NewToolRegistry()
-	require.Equal(t, frozen, engine.skillsPromptContent(),
-		"skills needle must stay the frozen system-prompt section, not a live rebuild")
+	require.Equal(t, skillsTokens, engine.promptSectionTokens["skills"],
+		"skills section tokens must stay frozen from the assembled prompt, not a live rebuild")
 }
 
 func TestDefaultTemplatesComposeWithBrowserCitationsAndOutputPolicy(t *testing.T) {

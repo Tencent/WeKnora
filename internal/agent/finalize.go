@@ -101,15 +101,12 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		})
 	}
 
-	// The synthesis call is often the last request of the turn — fold its
-	// usage into the aggregate and refresh the context snapshot from what
-	// was actually sent (no tool schemas; ToolChoice is "none").
-	promptTokens := 0
+	// The synthesis call is often the last request of the turn, so its tokens
+	// count. Its prompt mix does not: it runs with ToolChoice=none, and
+	// reporting it would tell the user their tool definitions cost nothing.
 	if llmResult.Usage != nil {
 		state.TurnUsage.Accumulate(*llmResult.Usage)
-		promptTokens = llmResult.Usage.PromptTokens
 	}
-	e.snapshotContextUsage(ctx, state, messages, nil, promptTokens)
 
 	// Safety net: strip any residual <think> blocks that may have leaked through
 	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
