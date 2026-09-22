@@ -1,8 +1,8 @@
 diff --git a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-index 66b14ad..6104574 100644
+index 66b14ad..1eb2b1c 100644
 --- a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
 +++ b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-@@ -30,6 +30,40 @@ function fakeApi() {
+@@ -30,6 +30,126 @@ function fakeApi() {
  }
  
  describe("ChromiumCdp", () => {
@@ -40,10 +40,96 @@ index 66b14ad..6104574 100644
 +    cdp.dispose();
 +  });
 +
++  it("keeps a child frame session whose auto-attach configuration timed out", async () => {
++    vi.useFakeTimers();
++    vi.spyOn(console, "warn").mockImplementation(() => {});
++    vi.spyOn(console, "debug").mockImplementation(() => {});
++    const { api, onEvent } = fakeApi();
++    let childConfigurations = 0;
++    vi.mocked(api.sendCommand).mockImplementation(
++      async (target: chrome.debugger.Debuggee & { sessionId?: string }, method: string) => {
++        if (method === "Target.setAutoAttach" && target.sessionId === "child") {
++          childConfigurations += 1;
++          if (childConfigurations === 1) return new Promise(() => {});
++          return {};
++        }
++        if (method === "DOM.getFrameOwner") return { backendNodeId: 200 };
++        if (method !== "Page.getFrameTree") return {};
++        if (target.sessionId === "child")
++          return { frameTree: { frame: { id: "child", url: "https://child.test" } } };
++        return {
++          frameTree: {
++            frame: { id: "main", url: "https://app.test" },
++            childFrames: [{ frame: { id: "child", parentId: "main", url: "https://child.test" } }],
++          },
++        };
++      },
++    );
++    const cdp = new ChromiumCdp(api);
++    try {
++      await cdp.ensureAttached(4);
++      onEvent.fire({ tabId: 4 }, "Target.attachedToTarget", { sessionId: "child" });
++      await vi.advanceTimersByTimeAsync(10_000);
++      expect(childConfigurations).toBe(1);
++      const graph = cdp.getFrameGraph(4);
++      await vi.advanceTimersByTimeAsync(2_000);
++      expect((await graph).frames.find((frame) => frame.frameId === "child")?.target).toEqual({
++        tabId: 4,
++        sessionId: "child",
++      });
++      expect(childConfigurations).toBe(2);
++    } finally {
++      cdp.dispose();
++      vi.useRealTimers();
++    }
++  });
++
++  it.each([
++    ["Target.setAutoAttach", undefined],
++    ["Page.getFrameTree", "child"],
++    ["DOM.getFrameOwner", undefined],
++  ])("propagates a %s read timeout instead of returning a partial frame graph", async (stuckMethod, stuckSession) => {
++    vi.useFakeTimers();
++    vi.spyOn(console, "warn").mockImplementation(() => {});
++    vi.spyOn(console, "debug").mockImplementation(() => {});
++    const { api, onEvent } = fakeApi();
++    vi.mocked(api.sendCommand).mockImplementation(
++      async (target: chrome.debugger.Debuggee & { sessionId?: string }, method: string) => {
++        if (method === stuckMethod && target.sessionId === stuckSession)
++          return new Promise(() => {});
++        if (method === "DOM.getFrameOwner") return { backendNodeId: 200 };
++        if (method !== "Page.getFrameTree") return {};
++        if (target.sessionId === "child")
++          return { frameTree: { frame: { id: "child", url: "https://child.test" } } };
++        return {
++          frameTree: {
++            frame: { id: "main", url: "https://app.test" },
++            childFrames: [{ frame: { id: "child", parentId: "main", url: "https://child.test" } }],
++          },
++        };
++      },
++    );
++    const cdp = new ChromiumCdp(api);
++    try {
++      if (stuckMethod !== "Target.setAutoAttach") {
++        await cdp.ensureAttached(4);
++        onEvent.fire({ tabId: 4 }, "Target.attachedToTarget", { sessionId: "child" });
++      }
++      const graph = cdp.getFrameGraph(4);
++      const rejected = expect(graph).rejects.toThrow(`${stuckMethod} timed out`);
++      // A stuck root configuration is first waited for by the attach path.
++      await vi.advanceTimersByTimeAsync(22_000);
++      await rejected;
++    } finally {
++      cdp.dispose();
++      vi.useRealTimers();
++    }
++  });
++
    it("changes attachment identity only across real debugger attachments", async () => {
      const { api, onEvent, onDetach } = fakeApi();
      const cdp = new ChromiumCdp(api);
-@@ -430,6 +464,7 @@ describe("ChromiumCdp", () => {
+@@ -430,6 +550,7 @@ describe("ChromiumCdp", () => {
      expect(api.sendCommand).toHaveBeenCalledWith({ tabId: 3 }, "Page.handleJavaScriptDialog", {
        accept: true,
      });
@@ -51,7 +137,7 @@ index 66b14ad..6104574 100644
      const dialogs = cdp.dialogsSince(3, cursor);
      expect(dialogs).toHaveLength(1);
      expect(dialogs[0]).toMatchObject({
-@@ -479,7 +514,7 @@ describe("ChromiumCdp", () => {
+@@ -479,7 +600,7 @@ describe("ChromiumCdp", () => {
        url: "https://example.com/",
      });
      await Promise.resolve();
@@ -62,10 +148,10 @@ index 66b14ad..6104574 100644
    });
 diff --git a/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts b/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts
 new file mode 100644
-index 0000000..5c284bd
+index 0000000..f157ea9
 --- /dev/null
 +++ b/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,120 @@
 +import { afterEach, expect, it, vi } from "vitest";
 +import { isAbortError, isCaptureTerminalError } from "@/tools/vom/capture-abort";
 +import { captureObservationFacts } from "@/tools/vom/capture-coordinator";
@@ -96,6 +182,17 @@ index 0000000..5c284bd
 +    "DOMSnapshot.captureSnapshot",
 +  ]);
 +  expect(vi.getTimerCount()).toBe(0);
++});
++
++it("does not start a snapshot after the frame graph read timed out", async () => {
++  const send = vi.fn(async () => ({}));
++  const getFrameGraph = vi.fn(async () => {
++    throw new CdpReadTimeoutError("DOM.getFrameOwner", 4, READ_TIMEOUT_MS);
++  });
++  await expect(captureObservationFacts({ send, getFrameGraph } as never, 4)).rejects.toThrow(
++    "DOM.getFrameOwner timed out",
++  );
++  expect(send).not.toHaveBeenCalled();
 +});
 +
 +it("ignores the late reply of a timed-out read", async () => {
@@ -176,14 +273,14 @@ index 0000000..5c284bd
 +  expect(isAbortError(abort)).toBe(true);
 +});
 diff --git a/apps/extension/src/browser-driver/chromium-cdp.ts b/apps/extension/src/browser-driver/chromium-cdp.ts
-index ebdc304..734f749 100644
+index ebdc304..6dfeb44 100644
 --- a/apps/extension/src/browser-driver/chromium-cdp.ts
 +++ b/apps/extension/src/browser-driver/chromium-cdp.ts
 @@ -32,6 +32,7 @@ import type {
    NetworkResult,
  } from "@/transport/types";
  import { BackgroundExecution } from "./background-execution";
-+import { runCdpCommand } from "./command-deadline";
++import { CdpReadTimeoutError, runCdpCommand } from "./command-deadline";
  import {
    buildFrameGraph,
    type CdpFrameGraph,
@@ -213,7 +310,41 @@ index ebdc304..734f749 100644
      } catch (err) {
        throw normalizeError(err);
      }
-@@ -633,8 +635,12 @@ export class ChromiumCdp {
+@@ -342,7 +344,11 @@ export class ChromiumCdp {
+ 
+   async getFrameGraph(tabId: number): Promise<CdpFrameGraph> {
+     await this.ensureAttached(tabId);
+-    await this.enableFrameDiscovery({ tabId }).catch(() => {});
++    // Ordinary configuration failures leave the graph to the root tree. A
++    // timed-out read means the renderer is not answering: stop here instead of
++    // queueing the tree, owner and snapshot reads behind the stuck command.
++    await this.enableFrameDiscovery({ tabId }).catch(rethrowReadTimeout);
++    this.retryChildFrameDiscovery(tabId);
+     await this.drainFrameAttachTasks(tabId);
+ 
+     const sources: CdpFrameTreeSource[] = [];
+@@ -364,7 +370,8 @@ export class ChromiumCdp {
+             {},
+           );
+           return reply.frameTree ? { target, tree: reply.frameTree } : null;
+-        } catch {
++        } catch (err) {
++          rethrowReadTimeout(err);
+           return null;
+         }
+       }),
+@@ -388,8 +395,9 @@ export class ChromiumCdp {
+             { frameId: frame.frameId },
+           );
+           if (owner.backendNodeId !== undefined) frame.ownerBackendNodeId = owner.backendNodeId;
+-        } catch {
++        } catch (err) {
+           // The frame may have navigated between tree capture and owner lookup.
++          rethrowReadTimeout(err);
+         }
+       }),
+     );
+@@ -633,8 +641,12 @@ export class ChromiumCdp {
      );
    }
  
@@ -227,7 +358,7 @@ index ebdc304..734f749 100644
    }
  
    private async enableConsoleDomains(tabId: number): Promise<void> {
-@@ -647,7 +653,7 @@ export class ChromiumCdp {
+@@ -647,7 +659,7 @@ export class ChromiumCdp {
      let failed = false;
      for (const method of ["Runtime.enable", "Log.enable"]) {
        try {
@@ -236,7 +367,7 @@ index ebdc304..734f749 100644
        } catch (err) {
          failed = true;
          console.debug("[bsk cdp] console domain enable failed", { tabId, method, err });
-@@ -660,7 +666,7 @@ export class ChromiumCdp {
+@@ -660,7 +672,7 @@ export class ChromiumCdp {
  
    private async enableNetworkDomain(tabId: number): Promise<void> {
      if (this.networkDomainsEnabledTabs.has(tabId)) return;
@@ -245,7 +376,7 @@ index ebdc304..734f749 100644
      this.networkDomainsEnabledTabs.add(tabId);
    }
  
-@@ -672,13 +678,27 @@ export class ChromiumCdp {
+@@ -672,13 +684,27 @@ export class ChromiumCdp {
      }
    }
  
@@ -276,7 +407,7 @@ index ebdc304..734f749 100644
    }
  
    private bindFrameTargetHandler(): void {
-@@ -705,6 +725,7 @@ export class ChromiumCdp {
+@@ -705,6 +731,7 @@ export class ChromiumCdp {
  
        if (method === "Target.detachedFromTarget") {
          const state = this.frameDiscovery.get(tabId);
@@ -284,7 +415,41 @@ index ebdc304..734f749 100644
          if (state?.sessions.delete(sessionId)) state.generation += 1;
          return;
        }
-@@ -771,6 +792,7 @@ export class ChromiumCdp {
+@@ -729,10 +756,33 @@ export class ChromiumCdp {
+     };
+   }
+ 
++  /** Child sessions stay attached in Chrome after their configuration timed
++   * out. Only the configuration needs another attempt, and it joins the same
++   * bounded drain as newly attached targets. */
++  private retryChildFrameDiscovery(tabId: number): void {
++    const state = this.frameDiscovery.get(tabId);
++    if (!state) return;
++    for (const sessionId of state.sessions) {
++      if (state.enabled.has(sessionId)) continue;
++      const task = this.initializeFrameTarget({ tabId, sessionId });
++      state.pending.add(task);
++      void task.finally(() => {
++        state.pending.delete(task);
++      });
++    }
++  }
++
+   private async initializeFrameTarget(target: CdpTarget): Promise<void> {
+     try {
+       await this.enableFrameDiscovery(target);
+     } catch (err) {
++      if (err instanceof CdpReadTimeoutError) {
++        // The command is still in flight and Chrome keeps the child session
++        // attached. Keep it registered so the next observation retries the
++        // configuration instead of losing the frame until the next reattach.
++        console.debug("[bsk cdp] child frame discovery timed out", { target });
++        return;
++      }
+       const state = this.frameDiscovery.get(target.tabId);
+       if (state?.sessions.delete(target.sessionId as string)) state.generation += 1;
+       console.debug("[bsk cdp] child frame target initialization failed", { target, err });
+@@ -771,6 +821,7 @@ export class ChromiumCdp {
        sessions: new Set(),
        pending: new Set(),
        generation: 0,
@@ -292,7 +457,7 @@ index ebdc304..734f749 100644
      };
      this.frameDiscovery.set(tabId, created);
      return created;
-@@ -810,7 +832,7 @@ export class ChromiumCdp {
+@@ -810,7 +861,7 @@ export class ChromiumCdp {
        if (parsed.type === "prompt") {
          handleParams.promptText = parsed.defaultPrompt ?? "";
        }
@@ -301,6 +466,17 @@ index ebdc304..734f749 100644
        if (!this.attachedTabs.has(tabId) && !this.attachInFlight.has(tabId)) return;
        const sequence = (this.dialogSequences.get(tabId) ?? 0) + 1;
        this.dialogSequences.set(tabId, sequence);
+@@ -1336,6 +1387,10 @@ function projectNetworkEntry(entry: NetworkEntry, maxTextChars: number): Network
+   };
+ }
+ 
++function rethrowReadTimeout(err: unknown): void {
++  if (err instanceof CdpReadTimeoutError) throw err;
++}
++
+ function normalizeError(err: unknown): Error {
+   if (err instanceof Error) return err;
+   if (typeof err === "string") return new Error(err);
 diff --git a/apps/extension/src/browser-driver/command-deadline.ts b/apps/extension/src/browser-driver/command-deadline.ts
 new file mode 100644
 index 0000000..a088706
