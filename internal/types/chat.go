@@ -17,18 +17,30 @@ const (
 	PromptCacheStatusHit         PromptCacheStatus = "hit"
 )
 
-// ContextUsage attributes the last LLM request's prompt tokens to the kind of
-// content that held them. Totals are estimates (cl100k) unless Calibrate has
-// scaled the buckets to a provider-reported prompt_tokens count. Nested on
-// TokenUsage so it persists in the existing messages.usage JSON column.
+// ContextUsage attributes one LLM request's prompt tokens to the kind of
+// content that held them. Buckets always sum to Total, and Total is the
+// provider's prompt_tokens whenever it reported one. Nested on TokenUsage so
+// it persists in the existing messages.usage JSON column.
+//
+// The fields are ordered by how they are grouped for display: instructions,
+// tool definitions, dialogue, then totals.
 type ContextUsage struct {
 	SystemPrompt int `json:"system_prompt,omitempty"`
-	Tools        int `json:"tools,omitempty"`
-	Conversation int `json:"conversation,omitempty"`
-	MCP          int `json:"mcp,omitempty"`
+	Memory       int `json:"memory,omitempty"`
 	Skills       int `json:"skills,omitempty"`
+	Tools        int `json:"tools,omitempty"`
+	MCP          int `json:"mcp,omitempty"`
+	Conversation int `json:"conversation,omitempty"`
+	Reasoning    int `json:"reasoning,omitempty"`
+	ToolResults  int `json:"tool_results,omitempty"`
 	Total        int `json:"total,omitempty"`
 	Window       int `json:"window,omitempty"`
+	// Threshold is the context size above which history gets compacted. It
+	// explains why compaction fires well before the window is full.
+	Threshold int `json:"threshold,omitempty"`
+	// Estimated marks a snapshot the provider never priced, so the numbers are
+	// the tokenizer's guess rather than a measured prompt_tokens split.
+	Estimated bool `json:"estimated,omitempty"`
 }
 
 // TokenUsage holds token consumption statistics returned by the model API.

@@ -67,15 +67,21 @@ const (
 	AgentResponseTypeContextUsage AgentResponseType = "context_usage"
 )
 
-// ContextUsage attributes the last LLM request's prompt tokens.
+// ContextUsage attributes one LLM request's prompt tokens to the kind of
+// content that held them. Buckets always sum to Total.
 type ContextUsage struct {
-	SystemPrompt int `json:"system_prompt,omitempty"`
-	Tools        int `json:"tools,omitempty"`
-	Conversation int `json:"conversation,omitempty"`
-	MCP          int `json:"mcp,omitempty"`
-	Skills       int `json:"skills,omitempty"`
-	Total        int `json:"total,omitempty"`
-	Window       int `json:"window,omitempty"`
+	SystemPrompt int  `json:"system_prompt,omitempty"`
+	Memory       int  `json:"memory,omitempty"`
+	Skills       int  `json:"skills,omitempty"`
+	Tools        int  `json:"tools,omitempty"`
+	MCP          int  `json:"mcp,omitempty"`
+	Conversation int  `json:"conversation,omitempty"`
+	Reasoning    int  `json:"reasoning,omitempty"`
+	ToolResults  int  `json:"tool_results,omitempty"`
+	Total        int  `json:"total,omitempty"`
+	Window       int  `json:"window,omitempty"`
+	Threshold    int  `json:"threshold,omitempty"`
+	Estimated    bool `json:"estimated,omitempty"`
 }
 
 // TokenUsage is the turn or event usage payload on the agent stream.

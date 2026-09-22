@@ -5,7 +5,8 @@ func (u *ContextUsage) RecalcTotal() {
 	if u == nil {
 		return
 	}
-	u.Total = u.SystemPrompt + u.Tools + u.Conversation + u.MCP + u.Skills
+	u.Total = u.SystemPrompt + u.Memory + u.Skills + u.Tools + u.MCP +
+		u.Conversation + u.Reasoning + u.ToolResults
 }
 
 // Calibrate proportionally scales the classified buckets so they sum to the
