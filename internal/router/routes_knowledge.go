@@ -78,6 +78,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kbRead.POST("/batch-download", g.Contributor(), g.KBAccessWrite("id"), handler.BatchDownloadKnowledge)
 		kbRead.GET("/folders", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledgeFolders)
 		kb.PUT("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RenameKnowledgeFolder)
+		kb.DELETE("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeFolder)
 		// Clearing all contents under a KB is a destructive op; gate
 		// behind Admin instead of Contributor.
 		kb.With(apiKeyFullAccess()).DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
