@@ -2730,7 +2730,8 @@ func (s *wikiIngestService) generateWithTemplateResult(
 			}
 
 			logger.Warnf(ctx,
-				"wiki ingest: page rewrite %s hit the completion budget (finish_reason=%s, %d chars so far); requesting continuation %d/%d",
+				"wiki ingest: page rewrite %s hit the completion budget (finish_reason=%s, "+
+					"%d chars so far); requesting continuation %d/%d",
 				maskedData["PageSlug"], finishReason, rewrite.Len(), round+1, wikiPageModifyMaxContinuations)
 
 			conversation = append(
@@ -2746,7 +2747,8 @@ func (s *wikiIngestService) generateWithTemplateResult(
 			// the caller keeps the existing page and flags the addition, which is
 			// recoverable; storing a half page is not.
 			logger.Warnf(ctx,
-				"wiki ingest: page rewrite %s still truncated after %d continuation rounds (finish_reason=%s, %d chars); refusing the partial page",
+				"wiki ingest: page rewrite %s still truncated after %d continuation rounds "+
+					"(finish_reason=%s, %d chars); refusing the partial page",
 				maskedData["PageSlug"], wikiPageModifyMaxContinuations, finishReason, len(content))
 			return wikiTemplateResult{}, fmt.Errorf(
 				"%w (finish_reason=%s after %d continuation rounds, %d chars)",
