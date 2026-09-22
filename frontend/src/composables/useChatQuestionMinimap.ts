@@ -116,7 +116,7 @@ export function useChatQuestionMinimap(options: {
     ticks.value = mapQuestionTicks(measured, trackHeight.value)
     viewport.value = viewportBand(el.scrollTop, el.clientHeight, el.scrollHeight, trackHeight.value)
     activeId.value = activeQuestionId(measured, el.scrollTop)
-    // The sticky composer is inside the scroll viewport but obscures its bottom.
+    // The composer overlays the bottom of the message scroll viewport.
     const bottomInset = parseFloat(containerStyle.scrollPaddingBottom) || 0
     visibleIds.value = visibleMessageIds(measured, el.scrollTop, el.clientHeight, bottomInset)
     anchoredIds.value = new Set(measured.map((item) => item.id))
