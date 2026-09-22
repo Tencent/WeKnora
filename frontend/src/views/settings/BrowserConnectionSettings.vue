@@ -18,6 +18,7 @@
             <div class="product-heading">
               <div class="product-name">
                 <strong>BrowserSkill</strong>
+                <span v-if="status.connected && status.extension_version" class="product-version">v{{ status.extension_version }}</span>
                 <a class="product-link" href="https://github.com/Tencent/BrowserSkill" target="_blank"
                   rel="noopener noreferrer" aria-label="BrowserSkill">
                   <t-icon name="jump" size="14px" />
@@ -27,72 +28,70 @@
                 <i />{{ t(status.connected ? 'localBrowser.connected' : status.device ? 'localBrowser.offline' : 'localBrowser.notPaired') }}
               </span>
             </div>
-            <p class="product-desc">{{ t('localBrowser.productDescription') }}</p>
+            <p v-if="status.device" class="product-desc">{{ status.device.label }}</p>
           </div>
         </div>
 
         <template v-if="status.device">
           <div class="device-block">
             <div class="device-meta">
-              <strong>{{ status.device.label }}</strong>
               <span>{{ t('localBrowser.lastSeen') }} {{ formatDate(status.device.last_seen_at) }}</span>
             </div>
-            <p v-if="!status.connected" class="device-hint">{{ t('localBrowser.reconnectHint') }}</p>
             <div class="device-actions">
+              <t-button theme="default" variant="text" size="small" :disabled="busy" @click="pair">
+                {{ t('localBrowser.replaceDevice') }}
+              </t-button>
               <t-popconfirm theme="warning" :content="t('localBrowser.revokeConfirm')"
                 :confirm-btn="{ content: t('localBrowser.revoke'), theme: 'danger' }"
                 :cancel-btn="{ content: t('common.cancel') }" placement="bottom" @confirm="disconnect">
-                <t-button theme="default" variant="outline" size="small" :disabled="busy">
-                  <template #icon><t-icon name="rollback" /></template>
+                <t-button class="revoke-action" theme="default" variant="text" size="small" :disabled="busy">
                   {{ t('localBrowser.revoke') }}
                 </t-button>
               </t-popconfirm>
-              <t-button theme="default" variant="outline" size="small" :disabled="busy" @click="pair">
-                <template #icon><t-icon name="refresh" /></template>
-                {{ t('localBrowser.replaceDevice') }}
-              </t-button>
             </div>
           </div>
+          <p v-if="!status.connected" class="device-hint">{{ t('localBrowser.reconnectHint') }}</p>
         </template>
 
         <ol v-else class="setup-steps">
           <li>
             <span class="step-index">1</span>
             <div class="step-copy">
-              <strong>{{ t('localBrowser.installExtension') }}</strong>
-              <p>{{ t('localBrowser.installHint') }}</p>
-              <a class="official-extension-link"
-                href="https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi"
-                target="_blank" rel="noopener noreferrer">
-                {{ t('localBrowser.officialExtension') }}
-                <t-icon name="jump" size="14px" />
-              </a>
+              <strong>{{ t('localBrowser.usageStep1Title') }}</strong>
               <details class="install-guide">
-                <summary>{{ t('localBrowser.installGuide') }}</summary>
-                <p>{{ t('localBrowser.usageStep1Text') }}</p>
+                <summary>{{ t('localBrowser.manualInstall') }}<t-icon name="chevron-down" size="12px" /></summary>
+                <div class="setup-help">
+                  <p>{{ t('localBrowser.installHint') }}</p>
+                  <p>{{ t('localBrowser.usageStep1Text') }}</p>
+                  <t-button class="setup-action fallback-download" theme="default" variant="outline" size="small"
+                    :disabled="!status.extension_available || downloading" @click="download">
+                    <template #icon><t-icon name="download" size="13px" /></template>
+                    {{ t('localBrowser.downloadExtension') }}
+                  </t-button>
+                  <p v-if="!status.extension_available" class="package-hint">{{ t('localBrowser.packageUnavailable') }}</p>
+                </div>
               </details>
             </div>
-            <t-button theme="default" variant="outline" size="small"
-              :disabled="!status.extension_available || downloading" @click="download">
-              <template #icon><t-icon name="download" /></template>
-              {{ t('localBrowser.downloadExtension') }}
-            </t-button>
+            <a class="setup-action setup-main-action store-action" href="https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi"
+              target="_blank" rel="noopener noreferrer">
+              {{ t('localBrowser.storeInstall') }}<t-icon name="jump" size="13px" />
+            </a>
           </li>
           <li>
             <span class="step-index">2</span>
             <div class="step-copy">
               <strong>{{ t('localBrowser.pairBrowser') }}</strong>
-              <p>{{ t('localBrowser.pairHint') }}</p>
+              <details class="install-guide">
+                <summary>{{ t('localBrowser.pairGuide') }}<t-icon name="chevron-down" size="12px" /></summary>
+                <div class="setup-help"><p>{{ t('localBrowser.pairHint') }}</p></div>
+              </details>
             </div>
-            <t-button theme="primary" size="small" :disabled="busy" @click="pair">
-              <template #icon><t-icon name="file-copy" /></template>
+            <button type="button" class="setup-action setup-main-action" :disabled="busy" @click="pair">
               {{ t(copied ? 'localBrowser.copyAgain' : 'localBrowser.copyPairing') }}
-            </t-button>
+              <t-icon name="file-copy" size="13px" />
+            </button>
           </li>
         </ol>
-        <p v-if="!status.device && !status.extension_available" class="package-hint">
-          {{ t('localBrowser.packageUnavailable') }}
-        </p>
 
         <div v-if="pairing" class="pairing-feedback" role="status">
           <t-icon name="check-circle-filled" size="16px" />
@@ -104,14 +103,14 @@
 
       <BrowserSearchPreferences />
 
-      <section class="usage" :aria-label="t('localBrowser.usageTitle')">
-        <h3>{{ t('localBrowser.usageTitle') }}</h3>
+      <details class="usage">
+        <summary>{{ t('localBrowser.usageTitle') }}<t-icon name="chevron-down" size="16px" /></summary>
         <ol>
           <li>
             <span class="usage-index">1</span>
             <div class="usage-copy">
               <strong>{{ t('localBrowser.usageStep1Title') }}</strong>
-              <p>{{ t('localBrowser.usageStep1Text') }}</p>
+              <p>{{ t('localBrowser.storeInstallHint') }}</p>
             </div>
           </li>
           <li>
@@ -136,7 +135,7 @@
             </div>
           </li>
         </ol>
-      </section>
+      </details>
     </template>
   </div>
 </template>
@@ -148,7 +147,7 @@ import { useBrowserConnectionStore } from '@/stores/browserConnection'
 import browserLogo from '@/assets/browserskill/logo.png'
 import BrowserSearchPreferences from './BrowserSearchPreferences.vue'
 interface Device { id: string; label: string; last_seen_at: string }
-interface Connection { enabled: boolean; connected: boolean; device?: Device; extension_available: boolean }
+interface Connection { enabled: boolean; connected: boolean; device?: Device; extension_available: boolean; extension_version?: string }
 const { t, locale } = useI18n()
 const browserConnection = useBrowserConnectionStore()
 const status = ref<Connection>({ enabled: false, connected: false, extension_available: false })
@@ -200,7 +199,8 @@ async function disconnect() {
 async function download() {
   downloading.value = true; error.value = ''
   try {
-    const blob = await getDown(`${endpoint}/extension`)
+    // Bypass archives cached before the server started sending no-store.
+    const blob = await getDown(`${endpoint}/extension?t=${Date.now()}`)
     if (!alive) return
     const url = URL.createObjectURL(blob), link = document.createElement('a')
     link.href = url; link.download = 'browser-skill-weknora.zip'; link.click()
@@ -223,28 +223,23 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 }
 
 .connection-card {
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-xl);
-  padding: 20px;
-  background: var(--td-bg-color-container);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-radius: 16px;
+  padding: 24px;
+  background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 65%, var(--td-bg-color-container));
 }
 
 .product-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
 }
 
 .product-logo {
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  border-radius: var(--app-radius-xl);
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
   object-fit: cover;
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.08),
-    0 6px 16px rgba(234, 88, 12, 0.16);
 }
 
 .product-copy {
@@ -266,7 +261,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   min-width: 0;
 
   strong {
-    font-size: var(--app-text-xl);
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 24px;
     color: var(--td-text-color-primary);
@@ -286,6 +281,17 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   }
 }
 
+.product-version {
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12ch;
+}
+
 .product-desc {
   margin: 4px 0 0;
   font-size: var(--app-text-md);
@@ -298,9 +304,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  padding: 3px 9px;
-  border-radius: var(--app-radius-pill);
-  background: var(--td-bg-color-secondarycontainer);
+  padding: 3px 0;
   color: var(--td-text-color-secondary);
   font-size: var(--app-text-sm);
   font-weight: 500;
@@ -317,12 +321,10 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
   &.idle {
     color: var(--td-warning-color);
-    background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
   }
 
   &.online {
     color: var(--td-success-color);
-    background: color-mix(in srgb, var(--td-success-color) 12%, transparent);
 
     i {
       opacity: 1;
@@ -351,7 +353,8 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
   span {
     font-size: var(--app-text-sm);
-    color: var(--td-text-color-placeholder);
+    color: var(--td-text-color-secondary);
+    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -365,8 +368,22 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 .device-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.device-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 14px;
+}
+
+.revoke-action {
+  color: var(--td-text-color-secondary);
+  &:hover { color: var(--td-error-color); }
 }
 
 .connection-card :deep(.t-button--variant-outline.t-button--theme-default) {
@@ -381,17 +398,62 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
 .setup-steps {
   list-style: none;
-  margin: 18px 0 0;
-  padding: 16px 0 0;
+  margin: 20px 0 0;
+  padding: 20px 0 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
 
 .setup-steps li {
-  display: flex;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: flex-start;
   gap: 12px;
+}
+
+.connection-card .setup-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 3px 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+  color: var(--setup-action-color, var(--td-text-color-primary));
+  font-family: inherit;
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  line-height: 22px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color .16s, border-color .16s;
+  &:disabled { opacity: .5; cursor: not-allowed; }
+  &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
+  :deep(.t-icon) { color: currentColor; margin: 0; flex-shrink: 0; }
+  // TDesign adds 8px here; use the same flex gap as the other actions.
+  :deep(.t-icon + .t-button__text:not(:empty)) { margin-left: 0; }
+}
+
+.connection-card .setup-main-action {
+  min-width: 144px;
+}
+
+.connection-card .store-action {
+  --setup-action-color: color-mix(in srgb, var(--td-brand-color) 75%, var(--td-text-color-primary));
+  color: var(--setup-action-color);
+}
+
+.connection-card .setup-action:not(:disabled) {
+  &:hover,
+  &:active {
+    color: var(--setup-action-color, var(--td-text-color-primary));
+    background: var(--td-bg-color-container-hover);
+    border-color: var(--td-component-border);
+  }
 }
 
 .step-index {
@@ -401,8 +463,8 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
   font-size: var(--app-text-sm);
   font-weight: 600;
@@ -435,20 +497,8 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   color: var(--td-text-color-secondary);
 }
 
-.official-extension-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-  color: var(--td-brand-color);
-  font-size: var(--app-text-sm);
-  line-height: 1.6;
-  text-decoration: none;
-
-  &:hover,
-  &:focus-visible {
-    text-decoration: underline;
-  }
+.fallback-download {
+  margin-top: 12px;
 }
 
 .install-guide {
@@ -460,7 +510,23 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   summary {
     cursor: pointer;
     width: fit-content;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    list-style: none;
+    &::-webkit-details-marker { display: none; }
+    &:hover { color: var(--td-text-color-primary); }
+    &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 3px; }
   }
+
+  &[open] summary :deep(.t-icon) { transform: rotate(180deg); }
+}
+
+.setup-help {
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--td-component-stroke);
+  p + p { margin-top: 8px; }
 }
 
 .pairing-feedback {
@@ -490,14 +556,26 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 }
 
 .usage {
-  margin-top: 28px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--td-component-stroke);
 
-  h3 {
-    margin: 0 0 16px;
-    font-size: var(--app-text-lg);
-    font-weight: 600;
-    color: var(--td-text-color-primary);
+  summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    list-style: none;
+    cursor: pointer;
+    font-size: var(--app-text-md);
+    font-weight: 500;
+    color: var(--td-text-color-secondary);
+    &::-webkit-details-marker { display: none; }
+    &:hover { color: var(--td-text-color-primary); }
+    &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 4px; }
   }
+
+  &[open] summary { margin-bottom: 20px; }
+  &[open] summary :deep(.t-icon) { transform: rotate(180deg); }
 
   ol {
     list-style: none;
@@ -570,12 +648,15 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 }
 
 @media (max-width: 600px) {
+  .connection-card { padding: 18px; }
+  .device-actions { margin-left: 0; }
   .setup-steps li {
-    flex-wrap: wrap;
+    grid-template-columns: 22px minmax(0, 1fr);
   }
 
-  .setup-steps li :deep(.t-button) {
-    margin-left: 34px;
+  .setup-steps li > .setup-action {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .status-pill {

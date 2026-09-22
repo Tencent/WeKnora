@@ -40,6 +40,23 @@ type sharedFixture struct {
 	calls chan map[string]any
 }
 
+func TestAccountReportsConnectedExtensionVersion(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	scope := Scope{1, "extension-version"}
+	fixture := connectSharedFixture(ctx, t, m, scope, "", "chrome")
+	account, err := m.Account(ctx, scope)
+	require.NoError(t, err)
+	require.True(t, account.Connected)
+	require.Equal(t, "0.3.0", account.ExtensionVersion)
+
+	require.NoError(t, fixture.ws.Close())
+	require.Eventually(t, func() bool { return !m.Status(scope, "").Connected }, time.Second, 10*time.Millisecond)
+	account, err = m.Account(ctx, scope)
+	require.NoError(t, err)
+	require.NotNil(t, account.Device, "authorization survives a transient disconnection")
+	require.Empty(t, account.ExtensionVersion, "do not display a stale version as the connected extension")
+}
+
 func TestConcurrentCommandsShareAutomaticSessionCreation(t *testing.T) {
 	m, ctx := sharedTestManager(t)
 	s := Scope{1, "auto-start-queue"}
