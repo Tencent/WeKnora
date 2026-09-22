@@ -15,7 +15,7 @@ type uiReply struct {
 // Extensions without the optional UI channel (BrowserSkill main after PR #296)
 // route ui.* requests to the native dispatcher, which answers unknown_method.
 var errGatewayUIUnsupported = &RPCError{
-	Code:    "gateway_ui_unsupported",
+	Code: "gateway_ui_unsupported",
 	Message: "BrowserSkill extension lacks the ui.task_preview/ui.task_focus channel; " +
 		"install the extension built from the pinned baseline",
 }
