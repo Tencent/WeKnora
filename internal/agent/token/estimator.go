@@ -106,6 +106,22 @@ func (e *Estimator) EstimateMessage(msg *chat.Message) int {
 	return tokens
 }
 
+// MessageParts splits a message estimate into its reasoning half and
+// everything else. Context attribution reports reasoning separately because
+// it is the one part of an assistant message a user can act on, and on
+// thinking models it routinely dwarfs the visible reply.
+type MessageParts struct {
+	Reasoning int
+	Rest      int
+}
+
+// EstimateMessageParts returns the same total as EstimateMessage, split so the
+// caller can attribute reasoning on its own.
+func (e *Estimator) EstimateMessageParts(msg *chat.Message) MessageParts {
+	reasoning := e.EstimateString(msg.ReasoningContent)
+	return MessageParts{Reasoning: reasoning, Rest: e.EstimateMessage(msg) - reasoning}
+}
+
 // estimateImageParts counts multimodal content. MultiContent is the assembled
 // representation actually sent to the provider, so when it is present the raw
 // Images list is the same pictures counted a second time.
