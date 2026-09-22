@@ -46,6 +46,9 @@ knowledge_base:
   chunk_overlap: 50
   split_markers: ["\n\n", "\n", "。"]
   document_process_timeout: 2h
+  # Self-hosted HTTP requests remain bounded by enclosing call/task deadlines.
+  paddleocr_vl_timeout: 1000s
+  mineru_timeout: 1000s
   image_processing:
     enable_multimodal: true
 

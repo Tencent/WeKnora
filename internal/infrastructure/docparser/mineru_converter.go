@@ -17,12 +17,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
-
-const mineruTimeout = 1000 * time.Second // large docs can take a while
 
 var (
 	b64DataURIPattern     = regexp.MustCompile(`^data:image/(\w+);base64,(.+)$`)
@@ -31,6 +30,7 @@ var (
 
 // MinerUReader calls a self-hosted MinerU API to read/convert documents.
 type MinerUReader struct {
+	timeout       time.Duration
 	endpoint      string
 	backend       string // "pipeline", "vlm-*", "hybrid-*"
 	vlmServerURL  string // vLLM server URL for vlm-http-client / hybrid-http-client
@@ -41,7 +41,10 @@ type MinerUReader struct {
 }
 
 // NewMinerUReader creates a reader from ParserEngineOverrides.
-func NewMinerUReader(overrides map[string]string) *MinerUReader {
+func NewMinerUReader(overrides map[string]string, timeout time.Duration) *MinerUReader {
+	if timeout <= 0 {
+		timeout = config.DefaultSelfHostedParserTimeout
+	}
 	var legacyOCREnabled *bool
 	if raw, ok := overrides["mineru_enable_ocr"]; ok {
 		value := parseBoolOr(raw, true)
@@ -49,6 +52,7 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 	}
 
 	c := &MinerUReader{
+		timeout:       timeout,
 		endpoint:      strings.TrimRight(overrides["mineru_endpoint"], "/"),
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
 		vlmServerURL:  overrides["mineru_vlm_server_url"],
@@ -240,7 +244,7 @@ func (c *MinerUReader) callFileParse(
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
-		Timeout:      mineruTimeout,
+		Timeout:      c.timeout,
 		MaxRedirects: 5,
 	})
 	resp, err := client.Do(httpReq)

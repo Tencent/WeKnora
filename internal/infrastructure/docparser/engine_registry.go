@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -29,6 +30,8 @@ type EngineRegistration interface {
 // cannot construct itself: tenant configuration, tenant credentials, and the
 // shared docreader connection.
 type ReaderDeps struct {
+	// Config holds deployment settings resolved at startup, including parser timeouts.
+	Config *config.Config
 	// Overrides holds tenant-level engine configuration (service endpoints,
 	// API keys), as produced by ParserEngineConfig.ToOverridesMap.
 	Overrides map[string]string

@@ -181,7 +181,13 @@ type KnowledgeBaseConfig struct {
 	// leave knowledge in "processing". Default 30 minutes is generous enough
 	// for OCR-heavy large PDFs while ensuring forward progress.
 	DocReaderCallTimeout time.Duration `yaml:"docreader_call_timeout"   json:"docreader_call_timeout"`
+	// Self-hosted parser HTTP timeouts, bounded further by the caller's context.
+	PaddleOCRVLTimeout time.Duration `yaml:"paddleocr_vl_timeout" json:"paddleocr_vl_timeout"`
+	MinerUTimeout      time.Duration `yaml:"mineru_timeout" json:"mineru_timeout"`
 }
+
+// DefaultSelfHostedParserTimeout preserves the historical HTTP timeout for local parser services.
+const DefaultSelfHostedParserTimeout = 1000 * time.Second
 
 // DefaultDocumentProcessTimeout is the ceiling for a single document:process
 // Asynq task when document_process_timeout is unset or non-positive.
@@ -779,6 +785,26 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
 		}
 	}
+	cfg.KnowledgeBase.PaddleOCRVLTimeout = selfHostedParserTimeout(
+		"WEKNORA_PADDLEOCR_VL_TIMEOUT", cfg.KnowledgeBase.PaddleOCRVLTimeout)
+	cfg.KnowledgeBase.MinerUTimeout = selfHostedParserTimeout(
+		"WEKNORA_MINERU_TIMEOUT", cfg.KnowledgeBase.MinerUTimeout)
+}
+
+// Valid environment values override YAML; missing or invalid values keep its effective default.
+func selfHostedParserTimeout(key string, configured time.Duration) time.Duration {
+	if configured <= 0 {
+		configured = DefaultSelfHostedParserTimeout
+	}
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return configured
+	}
+	if timeout, err := time.ParseDuration(value); err == nil && timeout > 0 {
+		return timeout
+	}
+	fmt.Printf("Warning: invalid %s %q; using %s\n", key, value, configured)
+	return configured
 }
 
 func applyAgentEnvOverrides(cfg *Config) {

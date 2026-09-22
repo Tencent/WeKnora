@@ -4067,6 +4067,7 @@ func (s *knowledgeService) resolveDocReader(
 	ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string,
 ) interfaces.DocReader {
 	reader, err := docparser.NewReader(ctx, engine, fileType, isURL, docparser.ReaderDeps{
+		Config:                  s.config,
 		Overrides:               overrides,
 		Remote:                  s.documentReader,
 		WeKnoraCloudCredentials: s.tenantService.GetWeKnoraCloudCredentials,

@@ -3,6 +3,7 @@ package docparser
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -212,7 +213,11 @@ func (e *mineruEngine) CheckAvailable(_ bool, overrides map[string]string) (bool
 }
 
 func (e *mineruEngine) NewReader(_ context.Context, deps ReaderDeps) (interfaces.DocReader, error) {
-	return NewMinerUReader(deps.Overrides), nil
+	var timeout time.Duration
+	if deps.Config != nil && deps.Config.KnowledgeBase != nil {
+		timeout = deps.Config.KnowledgeBase.MinerUTimeout
+	}
+	return NewMinerUReader(deps.Overrides, timeout), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +269,11 @@ func (e *paddleOCRVLEngine) CheckAvailable(_ bool, overrides map[string]string) 
 }
 
 func (e *paddleOCRVLEngine) NewReader(_ context.Context, deps ReaderDeps) (interfaces.DocReader, error) {
-	return NewPaddleOCRVLReader(deps.Overrides), nil
+	var timeout time.Duration
+	if deps.Config != nil && deps.Config.KnowledgeBase != nil {
+		timeout = deps.Config.KnowledgeBase.PaddleOCRVLTimeout
+	}
+	return NewPaddleOCRVLReader(deps.Overrides, timeout), nil
 }
 
 // ---------------------------------------------------------------------------

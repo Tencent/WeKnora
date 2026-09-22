@@ -139,6 +139,7 @@ func NewHandler(
 		redis:                 rdb,
 		approvedProjectDirs:   approvedProjectDirs,
 		attachmentProcessor: NewAttachmentProcessor(
+			config,
 			fileService,
 			documentReader,
 			imageResolver,
