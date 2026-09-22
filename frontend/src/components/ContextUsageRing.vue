@@ -42,18 +42,22 @@
               $t('input.contextUsage.used', { used: formatContextUsageCount(total), window: formatContextUsageCount(windowSize) })
             }}</span>
           </div>
-          <div class="context-usage-card__bar" aria-hidden="true">
-            <span
-              v-for="segment in barSegments"
-              :key="segment.key"
-              class="context-usage-card__bar-seg"
-              :style="{ width: segment.percent + '%', background: segment.color }"
-            />
+          <div class="context-usage-card__bar-wrap">
+            <div class="context-usage-card__bar" aria-hidden="true">
+              <span
+                v-for="segment in barSegments"
+                :key="segment.key"
+                class="context-usage-card__bar-seg"
+                :style="{ width: segment.percent + '%', background: segment.color }"
+              />
+            </div>
             <span
               v-if="thresholdPercent > 0"
               class="context-usage-card__bar-tick"
+              role="img"
               :style="{ left: thresholdPercent + '%' }"
               :title="$t('input.contextUsage.thresholdHint')"
+              :aria-label="$t('input.contextUsage.thresholdHint')"
             />
           </div>
           <ul class="context-usage-card__rows">
@@ -83,7 +87,6 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   CONTEXT_USAGE_CATEGORIES,
-  CONTEXT_USAGE_GROUPS,
   contextUsageBarSegments,
   contextUsageCategoryTokens,
   contextUsageFreeSpace,
@@ -233,13 +236,17 @@ const visibleRows = computed(() => {
   color: var(--td-text-color-secondary);
 }
 
+.context-usage-card__bar-wrap {
+  position: relative;
+  margin-bottom: 10px;
+}
+
 .context-usage-card__bar {
   display: flex;
   height: 6px;
   border-radius: 999px;
   overflow: hidden;
   background: var(--td-bg-color-secondarycontainer, #f2f2f2);
-  margin-bottom: 10px;
 }
 
 .context-usage-card__bar-seg {
@@ -289,17 +296,12 @@ const visibleRows = computed(() => {
   line-height: 1.5;
 }
 
-.context-usage-card__bar {
-  position: relative;
-}
-
 .context-usage-card__bar-tick {
   position: absolute;
   top: -2px;
   bottom: -2px;
   width: 2px;
   background: var(--td-text-color-placeholder, #bbb);
-  pointer-events: none;
 }
 
 .context-usage-card__dot--free {
