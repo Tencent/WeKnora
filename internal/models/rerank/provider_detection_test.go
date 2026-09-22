@@ -7,7 +7,7 @@ import (
 )
 
 // TestDetectByURLSeesVendorCatalog guards the blank import of
-// internal/models/vendors in reranker.go.
+// providers.EnsureBuiltins during test composition.
 //
 // catalog.DetectByURL returns "generic" for every URL while the catalog is
 // empty. Without the vendor packages linked in, a stored rerank row that

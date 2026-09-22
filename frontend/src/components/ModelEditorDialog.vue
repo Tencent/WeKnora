@@ -1003,6 +1003,7 @@ const runResolve = async () => {
   try {
     const result = await resolveModelCatalog({
       provider,
+      spec: buildSpec(),
       model: formData.value.modelName || '',
       base_url: formData.value.baseUrl || '',
       model_type: activeModelType.value,
@@ -1066,6 +1067,16 @@ const specCompatError = computed(() => {
     return error?.message || 'invalid JSON'
   }
 })
+
+// Match the parent save path: retain row metadata, replace the edited compat.
+const buildSpec = (): ModelSpecOverride => {
+  if (specCompatError.value) throw new Error(specCompatError.value)
+  const spec: ModelSpecOverride = { ...(formData.value.spec || {}) }
+  const text = (formData.value.specCompat || '').trim()
+  if (text) spec.compat = JSON.parse(text)
+  else delete spec.compat
+  return spec
+}
 
 const dialogVisible = computed({
   get: () => props.visible,
@@ -1303,6 +1314,7 @@ watch(
     props.visible, formData.value.source, formData.value.provider, formData.value.modelName,
     formData.value.baseUrl, formData.value.extraConfig?.api, formData.value.extraConfig?.remote_model_name,
     formData.value.thinkingControl, activeModelType.value,
+ formData.value.specCompat, JSON.stringify(formData.value.spec),
   ],
   () => {
     if (!props.visible) return
@@ -1503,6 +1515,7 @@ watch(
     formData.value.apiKey, formData.value.appSecret, formData.value.customHeaders,
     formData.value.dimension, formData.value.supportsDimensionOverride,
     formData.value.extraConfig, formData.value.thinkingControl,
+ formData.value.specCompat, formData.value.spec,
   ],
   () => {
     if (!applyingDetectedDimension) invalidateConnectionTest(props.visible && !hydratingForm.value)
@@ -1826,6 +1839,7 @@ const checkRemoteAPI = async () => {
     // 使测试连接走与生产调用相同的目录解析路径。
     const extraConfig = buildExtraConfig()
     const extraPayload = {
+      spec: buildSpec(),
       ...(Object.keys(extraConfig).length > 0 ? { extraConfig } : {}),
       ...(formData.value.appSecret?.trim() ? { appSecret: formData.value.appSecret.trim() } : {}),
     }

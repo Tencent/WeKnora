@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func TestEveryRerankVendorResolvesToAKnownProtocol(t *testing.T) {
 			if catalogued := v.ModelsByType(types.ModelTypeRerank); len(catalogued) > 0 {
 				model = catalogued[0].ID
 			}
-			resolved, err := catalog.Resolve(catalog.Ref{
+			resolved, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: v.ID, Model: model, ModelType: types.ModelTypeRerank,
 			})
 			require.NoError(t, err)
@@ -73,7 +74,7 @@ func TestRerankProtocolAssignment(t *testing.T) {
 		"litellm":      api.RerankCohere,
 	} {
 		t.Run(id, func(t *testing.T) {
-			resolved, err := catalog.Resolve(catalog.Ref{
+			resolved, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: id, Model: "m", ModelType: types.ModelTypeRerank,
 			})
 			require.NoError(t, err)
@@ -220,7 +221,7 @@ func TestTruncatePromptTokensOnlyReachesVLLMClassVendors(t *testing.T) {
 
 	for _, id := range []string{"generic", "gpustack"} {
 		t.Run(id+" accepts it", func(t *testing.T) {
-			resolved, err := catalog.Resolve(catalog.Ref{
+			resolved, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: id, Model: "m", ModelType: types.ModelTypeRerank,
 				BaseURL: "http://127.0.0.1:9/v1", Extra: optIn,
 			})
@@ -231,7 +232,7 @@ func TestTruncatePromptTokensOnlyReachesVLLMClassVendors(t *testing.T) {
 
 	for _, id := range []string{"jina", "zhipu", "siliconflow", "qianfan", "weknoracloud", "aliyun", "nvidia"} {
 		t.Run(id+" rejects it", func(t *testing.T) {
-			_, err := catalog.Resolve(catalog.Ref{
+			_, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: id, Model: "m", ModelType: types.ModelTypeRerank, Extra: optIn,
 			})
 			require.Error(t, err, "a managed vendor must not silently accept a vLLM extension")
@@ -242,7 +243,7 @@ func TestTruncatePromptTokensOnlyReachesVLLMClassVendors(t *testing.T) {
 
 func TestTruncatePromptTokensRejectsAnInvalidValue(t *testing.T) {
 	for _, raw := range []string{"0", "-1", "abc"} {
-		_, err := catalog.Resolve(catalog.Ref{
+		_, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: "generic", Model: "m", ModelType: types.ModelTypeRerank,
 			BaseURL: "http://127.0.0.1:9/v1",
 			Extra:   map[string]string{catalog.ExtraTruncatePromptTokens: raw},
@@ -274,7 +275,7 @@ func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
 		"aliyun": {MaxDocuments: 500},
 	} {
 		t.Run(id, func(t *testing.T) {
-			resolved, err := catalog.Resolve(catalog.Ref{
+			resolved, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: id, Model: "m", ModelType: types.ModelTypeRerank,
 			})
 			require.NoError(t, err)
@@ -292,7 +293,7 @@ func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
 // ever had a client-level timeout. Without it a hung endpoint holds the
 // retrieval stage open for as long as the caller's context allows.
 func TestWeKnoraCloudRerankKeepsItsDeadline(t *testing.T) {
-	resolved, err := catalog.Resolve(catalog.Ref{
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider: "weknoracloud", Model: "rerank", ModelType: types.ModelTypeRerank,
 	})
 	require.NoError(t, err)
@@ -300,7 +301,7 @@ func TestWeKnoraCloudRerankKeepsItsDeadline(t *testing.T) {
 
 	// Everyone else has always run without one and relies on the caller.
 	for _, id := range []string{"zhipu", "jina", "siliconflow", "aliyun", "nvidia", "generic"} {
-		other, err := catalog.Resolve(catalog.Ref{
+		other, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: id, Model: "m", ModelType: types.ModelTypeRerank,
 		})
 		require.NoError(t, err)
@@ -323,7 +324,7 @@ func TestTruncatePromptTokensIsReachableFromTheEditor(t *testing.T) {
 				field = &v.ExtraFields[i]
 			}
 		}
-		resolved, err := catalog.Resolve(catalog.Ref{
+		resolved, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: v.ID, Model: "m", ModelType: types.ModelTypeRerank,
 		})
 		require.NoError(t, err)
@@ -351,7 +352,7 @@ func TestRerankScoreScalesMatchTheVendorDocs(t *testing.T) {
 	logitScaled := map[string]bool{"nvidia": true, "gpustack": true}
 
 	for _, v := range catalog.ListByType(types.ModelTypeRerank) {
-		resolved, err := catalog.Resolve(catalog.Ref{
+		resolved, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: v.ID, Model: "m", ModelType: types.ModelTypeRerank,
 		})
 		require.NoError(t, err)
@@ -379,7 +380,7 @@ func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
 	assert.NotContains(t, offered, "qwen3-rerank", "the picker must not offer an unimplemented dialect")
 	assert.Contains(t, offered, "gte-rerank-v2")
 
-	_, err := catalog.Resolve(catalog.Ref{
+	_, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider: "aliyun", Model: "qwen3-rerank", ModelType: types.ModelTypeRerank,
 	})
 	require.Error(t, err)
@@ -387,7 +388,7 @@ func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
 		"the error should name the protocol the model actually speaks")
 
 	// The vendor's other rerank model is unaffected.
-	_, err = catalog.Resolve(catalog.Ref{
+	_, err = modelruntime.Resolve(modelruntime.Ref{
 		Provider: "aliyun", Model: "gte-rerank-v2", ModelType: types.ModelTypeRerank,
 	})
 	require.NoError(t, err)
@@ -411,7 +412,7 @@ func TestGatewayRerankEndpoints(t *testing.T) {
 		{provider: "litellm", wantURL: "http://your_litellm_proxy/rerank"},
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
-			resolved, err := catalog.Resolve(catalog.Ref{
+			resolved, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: tc.provider, Model: "m", ModelType: types.ModelTypeRerank,
 			})
 			require.NoError(t, err)
@@ -438,7 +439,7 @@ func TestScoreScaleIsOverridablePerRow(t *testing.T) {
 	for _, id := range []string{"gpustack", "generic"} {
 		t.Run(id, func(t *testing.T) {
 			base := "http://127.0.0.1:9/v1"
-			overridden, err := catalog.Resolve(catalog.Ref{
+			overridden, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: id, Model: "bge-reranker-v2-m3", ModelType: types.ModelTypeRerank,
 				BaseURL: base, Extra: map[string]string{catalog.ExtraScoreScale: "probability"},
 			})
@@ -460,7 +461,7 @@ func TestScoreScaleIsOverridablePerRow(t *testing.T) {
 		})
 	}
 
-	_, err := catalog.Resolve(catalog.Ref{
+	_, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider: "gpustack", Model: "m", ModelType: types.ModelTypeRerank,
 		BaseURL: "http://127.0.0.1:9/v1",
 		Extra:   map[string]string{catalog.ExtraScoreScale: "sigmoid"},

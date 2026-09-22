@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -30,7 +29,7 @@ func newTestClient(t *testing.T, server *httptest.Server, reasoning bool) *Clien
 	}
 	return New(Config{
 		Endpoint:  ep,
-		Settings:  catalog.DefaultOpenAIResponses(),
+		Settings:  api.DefaultOpenAIResponses(),
 		Reasoning: reasoning,
 		SessionID: "session-fallback",
 	})

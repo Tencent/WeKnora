@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/catalog"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -195,7 +196,7 @@ type ModelResponse struct {
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
 	// Capabilities is the catalog view of the model: protocol, whether it
 	// can think and at which levels, context window. Chat models only.
-	Capabilities *catalog.Capabilities `json:"capabilities,omitempty"`
+	Capabilities *modelruntime.Capabilities `json:"capabilities,omitempty"`
 }
 
 // ModelParametersDTO carries every parameter field EXCEPT the two secret
@@ -307,9 +308,9 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 			}
 		}
 	}
-	var caps *catalog.Capabilities
+	var caps *modelruntime.Capabilities
 	if m.Type == types.ModelTypeKnowledgeQA || m.Type == types.ModelTypeVLLM {
-		if resolved, err := catalog.Resolve(catalog.Ref{
+		if resolved, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: m.Parameters.Provider, Model: m.Name, BaseURL: m.Parameters.BaseURL,
 			ModelType: m.Type, Extra: m.Parameters.ExtraConfig, Override: m.Parameters.Spec,
 		}); err == nil && m.Source == types.ModelSourceRemote {

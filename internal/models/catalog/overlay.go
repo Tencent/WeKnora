@@ -3,8 +3,10 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -108,7 +110,10 @@ func ParseModelType(s string) (types.ModelType, bool) {
 
 // LoadOverlay reads config/models.json (or the path in MODELS_CONFIG) and
 // applies it to the registry. A missing file is not an error.
-func LoadOverlay(configDir string) error {
+func LoadOverlay(configDir string) error { return LoadOverlayValidated(configDir, nil) }
+
+// LoadOverlayValidated validates every candidate before publishing a generation.
+func LoadOverlayValidated(configDir string, validate func(*Vendor) error) error {
 	path := os.Getenv("MODELS_CONFIG")
 	if path == "" {
 		path = filepath.Join(configDir, "models.json")
@@ -120,50 +125,65 @@ func LoadOverlay(configDir string) error {
 		}
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	return ApplyOverlay(data, filepath.Dir(path))
+	return ApplyOverlayValidated(data, filepath.Dir(path), validate)
 }
 
 // ApplyOverlay applies overlay JSON to the registry. baseDir resolves
 // relative icon paths.
 func ApplyOverlay(data []byte, baseDir string) error {
+	return ApplyOverlayValidated(data, baseDir, nil)
+}
+
+// ApplyOverlayValidated rebuilds the overlay and validates it transactionally.
+// The validator must not access the live registry while the writer lock is held.
+func ApplyOverlayValidated(data []byte, baseDir string, validate func(*Vendor) error) error {
 	var file OverlayFile
 	dec := json.NewDecoder(bytesReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&file); err != nil {
 		return fmt.Errorf("parse models overlay: %w", err)
 	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("parse models overlay: expected a single JSON document")
+	}
+	// Build a fresh generation under the registry lock, then publish once.
+	// A failure leaves both the current generation and built-in baseline intact.
+	mu.Lock()
+	defer mu.Unlock()
+	next := cloneVendors(builtins)
 	for id, p := range file.Providers {
 		id = strings.ToLower(strings.TrimSpace(id))
 		if id == "" {
-			continue
+			return fmt.Errorf("provider id is empty")
 		}
-		vendor, exists := Get(id)
+		vendor, exists := next[id]
 		if !exists {
 			vendor = &Vendor{
 				ID:              id,
 				Name:            id,
 				API:             api.APIOpenAICompletions,
 				DefaultBaseURLs: map[types.ModelType]string{},
-				ModelTypes:      []types.ModelType{types.ModelTypeKnowledgeQA},
-				RequiresAuth:    true,
-				Auth:            AuthBearer,
-				Order:           1000,
+				ModelTypes: []types.ModelType{
+					types.ModelTypeKnowledgeQA,
+				},
+				RequiresAuth: true,
+				Auth:         AuthBearer,
+				Order:        1000,
 			}
-		} else {
-			copied := *vendor
-			vendor = &copied
-			vendor.Models = append([]ModelSpec(nil), vendor.Models...)
-			urls := make(map[types.ModelType]string, len(vendor.DefaultBaseURLs))
-			for k, v := range vendor.DefaultBaseURLs {
-				urls[k] = v
-			}
-			vendor.DefaultBaseURLs = urls
 		}
 		if err := applyOverlayProvider(vendor, p, baseDir); err != nil {
 			return fmt.Errorf("provider %s: %w", id, err)
 		}
-		Register(vendor)
+		normalizeVendor(vendor)
+		if validate != nil {
+			if err := validate(vendor); err != nil {
+				return fmt.Errorf("provider %s: %w", id, err)
+			}
+		}
+		next[id] = vendor
 	}
+	vendors = next
+
 	return nil
 }
 
@@ -239,13 +259,13 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 		var err error
 		switch v.API {
 		case api.APIOpenAICompletions:
-			err = decodeCompat(p.Compat, &v.Compat.OpenAICompletions)
+			err = DecodeCompat(p.Compat, &v.Compat.OpenAICompletions)
 		case api.APIOpenAIResponses:
-			err = decodeCompat(p.Compat, &v.Compat.OpenAIResponses)
+			err = DecodeCompat(p.Compat, &v.Compat.OpenAIResponses)
 		case api.APIAnthropicMessages:
-			err = decodeCompat(p.Compat, &v.Compat.AnthropicMessages)
+			err = DecodeCompat(p.Compat, &v.Compat.AnthropicMessages)
 		case api.APIGoogleGenerativeAI:
-			err = decodeCompat(p.Compat, &v.Compat.GoogleGenerativeAI)
+			err = DecodeCompat(p.Compat, &v.Compat.GoogleGenerativeAI)
 		}
 		if err != nil {
 			return err
@@ -267,6 +287,15 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 		}
 	}
 	for id, patch := range p.ModelOverrides {
+		matches := 0
+		for _, m := range v.Models {
+			if strings.EqualFold(m.ID, id) {
+				matches++
+			}
+		}
+		if matches > 1 {
+			return fmt.Errorf("model_overrides %s matches multiple types; use models with an explicit type", id)
+		}
 		found := false
 		for i := range v.Models {
 			if strings.EqualFold(v.Models[i].ID, id) {
@@ -426,8 +455,22 @@ func upsertOverlayModel(v *Vendor, raw json.RawMessage) error {
 	if spec.ID == "" {
 		return fmt.Errorf("model without id")
 	}
+	if spec.Type == "" {
+		matches := 0
+		for _, m := range v.Models {
+			if strings.EqualFold(m.ID, spec.ID) {
+				matches++
+			}
+		}
+		if matches > 1 {
+			return fmt.Errorf("model %s matches multiple types; specify type", spec.ID)
+		}
+	}
 	for i := range v.Models {
 		if !strings.EqualFold(v.Models[i].ID, spec.ID) {
+			continue
+		}
+		if spec.Type != "" && EntryType(v.Models[i].Type) != EntryType(spec.Type) {
 			continue
 		}
 		// cloneModelSpec first: the vendor's Models slice was only shallow
@@ -446,18 +489,7 @@ func upsertOverlayModel(v *Vendor, raw json.RawMessage) error {
 
 // cloneModelSpec deep-copies the reference-typed fields of a spec.
 func cloneModelSpec(m ModelSpec) ModelSpec {
-	out := m
-	out.Input = append([]string(nil), m.Input...)
-	out.Aliases = append([]string(nil), m.Aliases...)
-	out.Compat = append(json.RawMessage(nil), m.Compat...)
-	if m.ThinkingLevels != nil {
-		levels := make(api.ThinkingLevelMap, len(m.ThinkingLevels))
-		for k, v := range m.ThinkingLevels {
-			levels[k] = v
-		}
-		out.ThinkingLevels = levels
-	}
-	return out
+	return cloneValue(reflect.ValueOf(m)).Interface().(ModelSpec)
 }
 
 func applyPatch(m *ModelSpec, p ModelSpecPatch) {
@@ -518,32 +550,4 @@ func mergeRawObjects(a, b json.RawMessage) json.RawMessage {
 	}
 	out, _ := json.Marshal(merged)
 	return out
-}
-
-// ModelsFile is the schema of a vendor's embedded models.json.
-type ModelsFile struct {
-	Vendor string      `json:"vendor"`
-	Source string      `json:"source,omitempty"`
-	Models []ModelSpec `json:"models"`
-}
-
-// MustParseModels decodes an embedded models.json; vendors call it from
-// package init, so a malformed file fails the build's tests immediately.
-func MustParseModels(data []byte) []ModelSpec {
-	var file ModelsFile
-	dec := json.NewDecoder(bytesReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&file); err != nil {
-		panic(fmt.Sprintf("catalog: invalid models.json: %v", err))
-	}
-	// The file-level source is the vendor's model documentation, and most
-	// entries omit their own because that page covers them. Pushing it down
-	// means every entry can answer "where is this documented" — the editor
-	// links to it from the model picker.
-	for i := range file.Models {
-		if file.Models[i].Source == "" {
-			file.Models[i].Source = file.Source
-		}
-	}
-	return file.Models
 }

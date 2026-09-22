@@ -28,7 +28,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	_ "github.com/Tencent/WeKnora/internal/models/vendors"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
@@ -68,7 +68,7 @@ func ptrBool(b bool) *bool { return &b }
 
 var userTurn = []api.Message{{Role: "user", Content: "hi"}}
 
-// buildBody runs the production path: ChatConfig -> catalog.Resolve ->
+// buildBody runs the production path: ChatConfig -> modelruntime.Resolve ->
 // protocol client -> request body, then round-trips through JSON so the
 // assertions see the real wire types.
 func buildBody(t *testing.T, cfg *chat.ChatConfig, opts *api.Options, stream bool) map[string]any {
@@ -93,9 +93,9 @@ func buildBody(t *testing.T, cfg *chat.ChatConfig, opts *api.Options, stream boo
 	return out
 }
 
-func resolve(t *testing.T, provider, model string) *catalog.Resolved {
+func resolve(t *testing.T, provider, model string) *modelruntime.Resolved {
 	t.Helper()
-	r, err := catalog.Resolve(catalog.Ref{Provider: provider, Model: model})
+	r, err := modelruntime.Resolve(modelruntime.Ref{Provider: provider, Model: model})
 	require.NoError(t, err)
 	return r
 }
@@ -523,7 +523,7 @@ func TestCatalogInvariants(t *testing.T) {
 				if m.ID != "" {
 					// Resolve validates the compat object against the model's
 					// protocol: an unknown or misspelled key fails here.
-					_, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: m.ID, ModelType: m.Type})
+					_, err := modelruntime.Resolve(modelruntime.Ref{Provider: v.ID, Model: m.ID, ModelType: m.Type})
 					if bytes.Contains(m.Compat, []byte("unsupported_reason")) {
 						// An entry that declares itself unserveable must say so
 						// by refusing, not by resolving into a request shaped
@@ -634,7 +634,7 @@ func TestWeKnoraCloudTransport(t *testing.T) {
 // base URL, and those must keep speaking that protocol after the switch to
 // native generateContent as the default.
 func TestGeminiLegacyBaseURLKeepsOpenAIProtocol(t *testing.T) {
-	r, err := catalog.Resolve(catalog.Ref{
+	r, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider: "gemini", Model: "gemini-2.5-pro",
 		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 	})
@@ -713,7 +713,7 @@ func TestConcurrentResolve(t *testing.T) {
 				if len(models) > 0 {
 					name = models[i%len(models)].ID
 				}
-				r, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: name})
+				r, err := modelruntime.Resolve(modelruntime.Ref{Provider: v.ID, Model: name})
 				if err != nil {
 					t.Errorf("resolve %s/%s: %v", v.ID, name, err)
 					return
@@ -737,7 +737,7 @@ func TestConcurrentResolve(t *testing.T) {
 // page they came from is recorded next to them, and the model editor links an
 // operator straight to that page from the picker. models.json may state the
 // URL once at file level for the entries a single page covers, so this also
-// covers MustParseModels pushing it down — before that it was parsed and
+// covers the generator preserving per-entry sources — previously it was parsed and
 // dropped, and most entries had nothing to link to.
 func TestEveryCatalogModelDocumentsItsSource(t *testing.T) {
 	for _, vendor := range catalog.List() {

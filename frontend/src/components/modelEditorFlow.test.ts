@@ -884,3 +884,31 @@ test('extraFieldDisplayPlaceholder resolves the vendor placeholder for the activ
     f.close()
   }
 })
+
+for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
+  test(`${type}: connection tests include edited spec and clearing compat`, async () => {
+    const f = await fixture({ type })
+    try {
+      f.vm.formData.spec = { context_window: 64000, compat: { old: true } }
+      f.vm.formData.specCompat = '{"custom_option": true}'
+      await f.vm.checkRemoteAPI()
+      assert.deepEqual(plain(f.requests[0].spec), { context_window: 64000, compat: { custom_option: true } })
+      f.vm.formData.specCompat = ''
+      await nextTick()
+      assert.equal(f.vm.remoteChecked, false, 'editing spec invalidates the old connection result')
+      await f.vm.checkRemoteAPI()
+      assert.deepEqual(plain(f.requests[1].spec), { context_window: 64000 })
+    } finally { f.close() }
+  })
+}
+
+test('capability preview includes the same edited spec as connection tests', async () => {
+  const f = await fixture({ type: 'chat' })
+  try {
+    f.vm.formData.provider = 'openai'
+    f.vm.formData.spec = { api: 'openai-completions' }
+    f.vm.formData.specCompat = '{"supports_temperature": false}'
+    await f.vm.runResolve()
+    assert.deepEqual(plain(f.resolves.at(-1).spec), { api: 'openai-completions', compat: { supports_temperature: false } })
+  } finally { f.close() }
+})

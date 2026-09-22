@@ -15,16 +15,26 @@ import (
 const GenericID = "generic"
 
 var (
-	mu      sync.RWMutex
-	vendors = map[string]*Vendor{}
+	mu       sync.RWMutex
+	vendors  = map[string]*Vendor{}
+	builtins = map[string]*Vendor{}
 )
 
-// Register adds a built-in vendor. Registering the same id twice replaces
-// the earlier definition (the deployment overlay relies on this).
+// Register adds an independently copied built-in definition. Replacing an id
+// updates its baseline; deployment overlays never mutate this baseline.
 func Register(v *Vendor) {
 	if v == nil || v.ID == "" {
 		panic("catalog: vendor without id")
 	}
+	v = cloneVendors(map[string]*Vendor{v.ID: v})[v.ID]
+	normalizeVendor(v)
+	mu.Lock()
+	defer mu.Unlock()
+	vendors[v.ID] = v
+	builtins[v.ID] = cloneVendors(map[string]*Vendor{v.ID: v})[v.ID]
+}
+
+func normalizeVendor(v *Vendor) {
 	if v.API == "" {
 		v.API = api.APIOpenAICompletions
 	}
@@ -48,12 +58,9 @@ func Register(v *Vendor) {
 			v.Models[i].API = v.API
 		}
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	vendors[v.ID] = v
 }
 
-// Get returns a vendor by id.
+// Get returns a read-only vendor definition from one immutable generation.
 func Get(id string) (*Vendor, bool) {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -74,7 +81,36 @@ func GetOrGeneric(id string) *Vendor {
 	return fallbackGeneric
 }
 
-// fallbackGeneric mirrors internal/models/vendors/generic so behaviour does
+// Select chooses the provider using one registry generation. URL detection is
+// exclusively a compatibility fallback for old rows without a provider id.
+func Select(id, baseURL string) *Vendor {
+	mu.RLock()
+	defer mu.RUnlock()
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" {
+		id = GenericID
+		bestLen, bestOrder := 0, int(^uint(0)>>1)
+		lower := strings.ToLower(baseURL)
+		for candidate, v := range vendors {
+			for _, p := range v.URLPatterns {
+				if p != "" && strings.Contains(lower, strings.ToLower(p)) &&
+					(len(p) > bestLen || len(p) == bestLen &&
+						(v.Order < bestOrder || v.Order == bestOrder && candidate < id)) {
+					id, bestLen, bestOrder = candidate, len(p), v.Order
+				}
+			}
+		}
+	}
+	if v, ok := vendors[id]; ok {
+		return v
+	}
+	if v, ok := vendors[GenericID]; ok {
+		return v
+	}
+	return fallbackGeneric
+}
+
+// fallbackGeneric mirrors providers/generic.go so behaviour does
 // not depend on whether that package was imported.
 var fallbackGeneric = &Vendor{
 	ID:              GenericID,
@@ -182,22 +218,22 @@ func (v *Vendor) FindModel(name string, modelType types.ModelType) (ModelSpec, b
 	if needle == "" {
 		return ModelSpec{}, false
 	}
-	want := entryType(modelType)
+	want := EntryType(modelType)
 	var candidates []ModelSpec
 	for _, m := range v.Models {
-		if entryType(m.Type) == want {
+		if EntryType(m.Type) == want {
 			candidates = append(candidates, m)
 		}
 	}
 	for _, m := range candidates {
 		if strings.ToLower(m.ID) == needle {
-			return m, true
+			return cloneModelSpec(m), true
 		}
 	}
 	for _, m := range candidates {
 		for _, alias := range m.Aliases {
 			if strings.ToLower(alias) == needle {
-				return m, true
+				return cloneModelSpec(m), true
 			}
 		}
 	}
@@ -215,14 +251,14 @@ func (v *Vendor) FindModel(name string, modelType types.ModelType) (ModelSpec, b
 		}
 	}
 	if bestScore >= 0 {
-		return best, true
+		return cloneModelSpec(best), true
 	}
 	return ModelSpec{}, false
 }
 
-// entryType folds a model type onto the catalog entries that describe it:
+// EntryType folds a model type onto the catalog entries that describe it:
 // chat entries leave Type empty, and VLM rows use them too.
-func entryType(t types.ModelType) types.ModelType {
+func EntryType(t types.ModelType) types.ModelType {
 	if t == "" || t == types.ModelTypeVLLM {
 		return types.ModelTypeKnowledgeQA
 	}
@@ -266,21 +302,3 @@ func defaultValidate(v *Vendor, cfg *Config) error {
 }
 
 func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
-
-// reset clears the registry and returns a function that puts the previous
-// contents back (tests only). The registry is process-global, so a test that
-// merely cleared it would leave every later test in the same binary — the
-// external catalog_test package included — resolving against an empty
-// catalog, which silently turns assertions about real vendors into
-// assertions about the generic fallback.
-func reset() func() {
-	mu.Lock()
-	defer mu.Unlock()
-	previous := vendors
-	vendors = map[string]*Vendor{}
-	return func() {
-		mu.Lock()
-		defer mu.Unlock()
-		vendors = previous
-	}
-}

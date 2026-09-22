@@ -1,22 +1,9 @@
-// Package catalog is the model/vendor directory. It answers one question for
-// the rest of the system: "given a provider id, a model name and whatever the
-// operator configured, how exactly do we talk to this model?"
-//
-// Facts come from three layers, lowest precedence first:
-//  1. built-in vendor packages under internal/models/vendors (vendor.go +
-//     models.json + icon.svg), registered through Register;
-//  2. the deployment overlay config/models.json (same schema as pi's
-//     ~/.pi/agent/models.json): new vendors, base URL / key overrides,
-//     per-model overrides;
-//  3. per-model overrides stored on the models table.
-//
-// Resolve merges those layers into a Resolved value that the protocol
-// packages consume verbatim. No protocol or vendor package is imported here.
+// Package catalog stores model and provider definitions and deployment overlays.
+// Runtime resolution and per-model credentials belong to models/runtime.
 package catalog
 
 import (
-	"encoding/json"
-
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -141,72 +128,11 @@ func (o ExtraFieldOption) LocalizedLabel(locale string) string {
 	return localizedOr(o.Labels, locale, o.Label)
 }
 
-// ModelCost is priced per million tokens, in USD unless Currency says otherwise.
-type ModelCost struct {
-	Input      float64 `json:"input"`
-	Output     float64 `json:"output"`
-	CacheRead  float64 `json:"cache_read,omitempty"`
-	CacheWrite float64 `json:"cache_write,omitempty"`
-	Currency   string  `json:"currency,omitempty"`
-}
+// ModelSpec is shared metadata, independent of catalog storage.
+type ModelSpec = models.ModelSpec
 
-// ModelSpec is one entry of a vendor's models.json.
-//
-// Only ID is required. API defaults to the vendor's API; Type defaults to
-// KnowledgeQA. Compat is interpreted according to API (see compat.go).
-type ModelSpec struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
-	// Type is the WeKnora model type this entry describes. Chat models with
-	// image input are still KnowledgeQA; the UI derives VLM eligibility from
-	// Input. Embedding / Rerank / ASR entries exist for the model picker.
-	Type types.ModelType `json:"type,omitempty"`
-	API  api.API         `json:"api,omitempty"`
-	// Aliases are additional ids that resolve to this entry (dated
-	// snapshots, vendor-prefixed names on gateways).
-	Aliases []string `json:"aliases,omitempty"`
-	// Match is a case-insensitive glob ("gpt-5*", "*deepseek-r1*") that lets
-	// one entry describe a family. Exact ids and aliases win over patterns;
-	// among patterns the longest literal prefix wins.
-	Match string `json:"match,omitempty"`
-	// Reasoning reports whether the model can emit thinking at all.
-	Reasoning bool `json:"reasoning"`
-	// Input lists accepted modalities: text, image, audio, video.
-	Input           []string   `json:"input,omitempty"`
-	ContextWindow   int        `json:"context_window,omitempty"`
-	MaxOutputTokens int        `json:"max_output_tokens,omitempty"`
-	Cost            *ModelCost `json:"cost,omitempty"`
-	// ThinkingLevels maps protocol-neutral levels to vendor values; missing
-	// keys inherit the vendor map. See api.ThinkingLevelMap.
-	ThinkingLevels api.ThinkingLevelMap `json:"thinking_levels,omitempty"`
-	// Compat is the protocol-specific overlay for this model (flat object,
-	// fields depend on API). Decoded lazily by Resolve.
-	Compat json.RawMessage `json:"compat,omitempty"`
-	// Dimension is the embedding vector width (embedding entries only).
-	Dimension int `json:"dimension,omitempty"`
-	// Deprecated hides the entry from pickers but keeps resolution working.
-	Deprecated bool `json:"deprecated,omitempty"`
-	// Source is the documentation URL the facts were taken from.
-	Source string `json:"source,omitempty"`
-}
-
-// DisplayName returns Name or the id.
-func (m ModelSpec) DisplayName() string {
-	if m.Name != "" {
-		return m.Name
-	}
-	return m.ID
-}
-
-// AcceptsImages reports whether Input lists image.
-func (m ModelSpec) AcceptsImages() bool {
-	for _, in := range m.Input {
-		if in == "image" {
-			return true
-		}
-	}
-	return false
-}
+// ModelCost is shared pricing metadata.
+type ModelCost = models.ModelCost
 
 // Credentials is what the operator stored for one model row.
 type Credentials struct {
@@ -275,7 +201,7 @@ type Vendor struct {
 	Compat VendorCompat
 	// ThinkingLevels is the vendor-level level map.
 	ThinkingLevels api.ThinkingLevelMap
-	// Models is the built-in catalog (from models.json).
+	// Models is the built-in catalog (from catalog/data/models.generated.json).
 	Models []ModelSpec
 	// Order sorts the vendor list in the UI (lower first).
 	Order int

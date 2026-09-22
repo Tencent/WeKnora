@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -123,7 +125,12 @@ func providerDTO(v *catalog.Vendor, modelType types.ModelType, includeModels boo
 	}
 	// Vendor-level thinking summary: resolve an unknown model so only the
 	// vendor defaults contribute.
-	if resolved, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: "__vendor_default__"}); err == nil {
+	if resolved, err := modelruntime.Resolve(
+		modelruntime.Ref{
+			Provider: v.ID,
+			Model:    "__vendor_default__",
+		},
+	); err == nil {
 		caps := resolved.Capabilities()
 		dto.Thinking = ProviderThinkingDTO{Format: caps.ThinkingFormat, Levels: caps.ThinkingLevels}
 	}
@@ -162,7 +169,7 @@ func providerDTO(v *catalog.Vendor, modelType types.ModelType, includeModels boo
 			// derived from Input), so this covers reasoning VLMs too;
 			// embedding / rerank / ASR entries have no thinking levels.
 			if m.Type == "" || m.Type == "KnowledgeQA" {
-				if resolved, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: m.ID}); err == nil {
+				if resolved, err := modelruntime.Resolve(modelruntime.Ref{Provider: v.ID, Model: m.ID}); err == nil {
 					entry.ThinkingLevels = resolved.Capabilities().ThinkingLevels
 				}
 			}
@@ -237,12 +244,39 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /models/catalog/resolve [get]
 func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
+	// POST carries the row spec in the body; GET remains compatible with old clients.
+	query := c.Query
+	var spec *types.ModelSpecOverride
+	if c.Request.Method == http.MethodPost {
+		var body map[string]json.RawMessage
+		if err := c.ShouldBindJSON(&body); err != nil {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+		values := map[string]string{}
+		for key, raw := range body {
+			if key == "spec" {
+				if err := json.Unmarshal(raw, &spec); err != nil {
+					_ = c.Error(errors.NewBadRequestError("invalid model spec"))
+					return
+				}
+				continue
+			}
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				_ = c.Error(errors.NewBadRequestError("invalid resolve field: " + key))
+				return
+			}
+			values[key] = value
+		}
+		query = func(key string) string { return values[key] }
+	}
 	ctx := c.Request.Context()
-	providerID := strings.TrimSpace(c.Query("provider"))
-	modelName := strings.TrimSpace(c.Query("model"))
-	baseURL := strings.TrimSpace(c.Query("base_url"))
+	providerID := strings.TrimSpace(query("provider"))
+	modelName := strings.TrimSpace(query("model"))
+	baseURL := strings.TrimSpace(query("base_url"))
 	modelType := types.ModelTypeKnowledgeQA
-	if raw := c.Query("model_type"); raw != "" {
+	if raw := query("model_type"); raw != "" {
 		if parsed, ok := catalog.ParseModelType(raw); ok {
 			modelType = parsed
 		}
@@ -256,7 +290,7 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 	// in a query string lands in access logs and browser history.
 	extra := map[string]string{}
 	for _, key := range []string{catalog.ExtraAPI, catalog.ExtraThinkingControl, catalog.ExtraRemoteModelName} {
-		if v := strings.TrimSpace(c.Query(key)); v != "" {
+		if v := strings.TrimSpace(query(key)); v != "" {
 			extra[key] = v
 		}
 	}
@@ -265,13 +299,13 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 			if field.Secret || field.Type == "password" {
 				continue
 			}
-			if v := strings.TrimSpace(c.Query(field.Key)); v != "" {
+			if v := strings.TrimSpace(query(field.Key)); v != "" {
 				extra[field.Key] = v
 			}
 		}
 	}
-	resolved, err := catalog.Resolve(catalog.Ref{
-		Provider: providerID, Model: modelName, BaseURL: baseURL, ModelType: modelType, Extra: extra,
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: providerID, Model: modelName, BaseURL: baseURL, ModelType: modelType, Extra: extra, Override: spec,
 	})
 	if err != nil {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
