@@ -2372,15 +2372,11 @@ export default {
       audioFile: '音訊檔案',
       chooseFile: '選擇檔案',
       parameters: '請求參數',
-      thinking: '思考模式',
-      thinkingDesc: '僅對支援思考模式的模型生效',
       systemPrompt: 'System Prompt',
       systemPromptPlaceholder: '可選，輸入系統提示詞',
       run: '執行測試',
       copyResult: '複製結果',
       history: '歷史記錄',
-      thinkOn: '思考開啟',
-      thinkOff: '思考關閉',
       runLabel: '第 {n} 次執行',
       success: '呼叫成功',
       failed: '呼叫失敗',
@@ -2837,8 +2833,6 @@ export default {
       maxConcurrencyLabel: '後台併發上限',
       maxConcurrencyPlaceholder: '0 表示使用全域預設',
       maxConcurrencyDesc: '限制文件入庫/富化等後台任務對該模型的併發呼叫數（按模型全副本共享）。0 或留空表示沿用全域預設；不影響互動式對話。',
-      thinkingControlLabel: '思考模式參數格式',
-      thinkingControlDesc: '決定智慧體「思考模式」開/關時如何寫入 API。已嘗試按廠商/模型預選，若與實際情況不符請按 API 文件手動修改；選「不寫入」時，智慧體「思考模式」開關不生效。',
       dimensionHint: '模型已選擇，點選"檢測維度"按鈕自動獲取向量維度',
       loadModelListFailed: '載入模型列表失敗',
       listRefreshed: '列表已重新整理',
@@ -2858,112 +2852,6 @@ export default {
       providerLabel: '服務商',
       providerPlaceholder: '選擇模型服務商',
       providerDocs: '閱讀 {provider} 模型文件',
-      providers: {
-        novita: {
-          label: 'Novita AI',
-          description: 'moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b 等'
-        },
-        nvidia: {
-          label: 'NVIDIA',
-          description: 'deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.'
-        },
-        lkeap: {
-          label: '騰訊雲 LKEAP',
-          description: 'DeepSeek-R1、DeepSeek-V3、lke-reranker-base 等'
-        },
-        longcat: {
-          label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.'
-        },
-        qianfan: {
-          label: '百度千帆 Baidu Cloud',
-          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.'
-        },
-        moonshot: {
-          label: '月之暗面 Moonshot',
-          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.'
-        },
-        qiniu: {
-          label: '七牛雲 Qiniu',
-          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.'
-        },
-        modelscope: {
-          label: '魔搭 ModelScope',
-          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.'
-        },
-        gpustack: {
-          label: 'GPUStack',
-          description: 'Choose your deployed model on GPUStack'
-        },
-        gemini: {
-          label: 'Google Gemini',
-          description: 'gemini-3-flash-preview, gemini-2.5-pro 等'
-        },
-        mimo: {
-          label: '小米 MiMo',
-          description: 'mimo-v2-flash'
-        },
-        minimax: {
-          label: 'MiniMax',
-          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed 等'
-        },
-        hunyuan: {
-          label: '騰訊混元 Hunyuan',
-          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.'
-        },
-        deepseek: {
-          label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner 等'
-        },
-        volcengine: {
-          label: '火山引擎 Volcengine',
-          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.'
-        },
-        jina: {
-          label: 'Jina',
-          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.'
-        },
-        siliconflow: {
-          label: '矽基流動 SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1, etc.'
-        },
-        generic: {
-          label: '自定義 (OpenAI相容介面)',
-          description: 'Generic API endpoint (OpenAI-compatible)'
-        },
-        requesty: {
-          label: 'Requesty',
-          description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
-        },
-        litellm: {
-          label: 'LiteLLM',
-          description: '自託管代理，統一接入 OpenAI、Anthropic、Gemini、Bedrock 等 100+ 廠商。請將佔位 URL 換成可訪問地址；localhost 需加入 SSRF_WHITELIST。'
-        },
-        openrouter: {
-          label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
-        },
-        zhipu: {
-          label: '智譜 BigModel',
-          description: 'glm-4.7, embedding-3, rerank, etc.'
-        },
-        aliyun: {
-          label: '阿里雲 DashScope',
-          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.'
-        },
-        azure_openai: {
-          label: 'Azure OpenAI',
-          description: 'Microsoft Azure 上的 OpenAI 服務'
-        },
-        anthropic: {
-          label: 'Anthropic',
-          description: 'Claude models via native Anthropic Messages API'
-        },
-        openai: {
-          label: 'OpenAI',
-          description: 'gpt-5.2, gpt-5-mini, etc.'
-        }
-      },
       validation: {
         extraFieldRequired: '請填寫 {name}',
         modelNameRequired: '請輸入模型名稱',
@@ -2972,41 +2860,6 @@ export default {
         baseUrlRequired: '請輸入 Base URL',
         baseUrlEmpty: 'Base URL 不能為空',
         baseUrlInvalid: 'Base URL 格式不正確，請輸入有效的 URL'
-      },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: '火山引擎 Ark；騰訊雲 LKEAP（DeepSeek V3 等，選 LKEAP 時預設此項；R1 請改「不寫入」）'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: '阿里雲 DashScope：qwen3、qwen-plus、qwen-max、qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: '自定義 OpenAI 相容、NVIDIA NIM、vLLM / 本地 Qwen 部署'
-        },
-        none: {
-          label: '不寫入思考參數',
-          hint: '智慧體「思考模式」開關不生效，不會在請求中寫入思考相關參數'
-        }
-      },
-      volcengine: {
-        accessKeyLabel: 'Access Key ID',
-        accessKeyPlaceholder: '火山引擎訪問金鑰 Access Key ID',
-        secretKeyLabel: 'Secret Access Key',
-        secretKeyPlaceholder: '火山引擎訪問金鑰 Secret Access Key',
-        rerankCredentialHint: 'Rerank 使用 VikingDB AK/SK 簽名（非方舟 API Key），模型建議填寫 doubao-seed-rerank。'
-      },
-      lkeap: {
-        secretIdLabel: 'SecretId',
-        secretIdPlaceholder: '騰訊雲 API 金鑰 SecretId',
-        secretKeyLabel: 'SecretKey',
-        secretKeyPlaceholder: '騰訊雲 API 金鑰 SecretKey',
-        regionLabel: '地域',
-        regionPlaceholder: 'ap-guangzhou',
-        regionDesc: 'RunRerank 支援 ap-beijing、ap-guangzhou 等，預設 ap-guangzhou',
-        rerankCredentialHint: 'Rerank 使用騰訊雲 API 簽名（非 OpenAI API Key）。請在雲 API 金鑰控制檯建立 SecretId/SecretKey。'
       },
       modelNamePlaceholder: {
         local: '例如：llama2:latest',
@@ -3936,7 +3789,6 @@ export default {
       authRevoked: '登入狀態已失效，終端已斷開。請重新登入後再連線。',
       connecting: '正在連線沙箱…',
       createAndStart: '建立並啟動',
-      desktopPlaceholder: '桌面視覺化即將支援',
       disconnected: '連線已斷開',
       idleDisconnected: '終端空閒已斷開，沙箱將按工作區 TTL 自行暫停。可重新連線。',
       needsProvision: '本會話當前沒有執行中的沙箱環境。建立並啟動會建立一個沙箱，並按工作區設定計費。',
@@ -4832,16 +4684,6 @@ export default {
     subtitle: '管理和組織您的知識庫，支援文件型和問答型知識庫',
     sharedToOrgs: '已共享給 {count} 個空間',
     uninitializedBanner: '部分知識庫尚未初始化，需要先在設定中配置模型資訊才能新增知識文件',
-    uploadProgress: {
-      uploadingTitle: '正在向「{name}」上傳資料夾中的文件',
-      detail: '已完成 {completed}/{total} 個檔案',
-      keepPageOpen: '請保持頁面開啟，上傳完成後會自動重新整理解析狀態。',
-      completedTitle: '「{name}」的上傳已完成',
-      completedDetail: '共上傳 {total} 個檔案，正在重新整理列表檢視解析狀態...',
-      refreshing: '正在重新整理列表並獲取最新解析狀態...',
-      errorTip: '部分檔案上傳失敗，請檢視右上角通知詳情。',
-      unknownKb: '知識庫 {id}'
-    },
     features: {
       knowledgeGraph: '知識圖譜',
       multimodal: '多模態',
@@ -4916,10 +4758,6 @@ export default {
   input: {
     addModel: '新增模型',
     placeholder: '直接向模型提問',
-    placeholderWithContext: '輸入問題，將基於上方選中的知識庫/檔案回答',
-    placeholderWebOnly: '輸入問題，將結合網路搜尋回答',
-    placeholderKbAndWeb: '輸入問題，將基於知識庫和網路搜尋回答',
-    placeholderAgent: '向 {name} 提問',
     agentMode: '智慧推理',
     normalMode: '快速問答',
     normalModeDesc: '基於知識庫的 RAG 問答',
@@ -4981,7 +4819,6 @@ export default {
     steerQueueInjecting: '等待接收補充'
   },
   manualEditor: {
-    description: '使用 Markdown 編寫知識內容，支援實時預覽',
     defaultTitlePrefix: '新建文件',
     noDocumentKnowledgeBases: '暫無可用的文件型知識庫，請先建立一個文件型知識庫',
     actions: {
@@ -5024,7 +4861,6 @@ export default {
       currentKnowledgeBase: '當前知識庫'
     },
     section: {
-      basic: '基本資訊',
       content: '知識內容'
     },
     title: {
@@ -5035,8 +4871,6 @@ export default {
       empty: '暫無內容'
     },
     view: {
-      editLabel: '返回編輯',
-      previewLabel: '預覽內容',
       edit: '編輯',
       groupLabel: '編輯器視圖',
       preview: '預覽',
@@ -6680,7 +6514,6 @@ export default {
     minutesAgo: '{n} 分鐘前',
     noActivity: '暫無解析記錄',
     totalDuration: '總耗時：{d}',
-    total: '總耗時 {d}',
     errorCode: {
       UNKNOWN_SUGGESTION: '請檢視應用日誌獲取詳細資訊。'
     },
@@ -6735,8 +6568,6 @@ export default {
     head: {
       stagesDone: '主流程階段',
       stagesProgress: '當前階段',
-      postprocessTasks: '後台任務：執行中 {running} / 失敗 {failed} / 已完成 {completed}',
-      completedWithActiveTrace: '處理已完成，但仍有 {n} 個 Trace 任務處於活動狀態',
       attempt: '嘗試',
       updated: '更新於'
     },
@@ -6822,10 +6653,6 @@ export default {
     settings: '設定',
     tagUpdateSuccess: '標籤更新成功',
     tagEditDialogHeading: '編輯標籤',
-    tagEditSearch: '搜尋標籤...',
-    tagEditSelectedSection: '已選標籤',
-    tagEditAvailableSection: '可選標籤',
-    tagEditNoSelected: '暫未選擇',
     tagFilterTitle: '按標籤篩選',
     tagFilterPlaceholder: '標籤',
     tagFilterMulti: '{count} 個標籤',
@@ -6836,9 +6663,7 @@ export default {
     tagManageDocCount: '{count} 個文件',
     tagManageFaqCount: '{count} 個 FAQ',
     tagSelectedCount: '已選 {count} 個標籤',
-    tagNewPlaceholder: '輸入新標籤名稱，回車新增',
     untagged: '無標籤',
-    tagClearAction: '清空已選',
     tagCreateAction: '新建標籤',
     tagSearchPlaceholder: '輸入標籤名稱關鍵字',
     tagNamePlaceholder: '請輸入標籤名稱',
@@ -6853,13 +6678,6 @@ export default {
     tagLabel: '標籤',
     tagPlaceholder: '請選擇標籤',
     noTags: '暫無標籤',
-    uploadSuccess: '檔案上傳成功！',
-    uploadFailed: '檔案上傳失敗！',
-    fileExists: '檔案已存在',
-    uploadAllSuccess: '成功上傳 {count} 個檔案！',
-    uploadPartialSuccess: '上傳完成：成功 {success} 個，失敗 {fail} 個',
-    uploadAllFailed: '所有檔案上傳失敗',
-    uploadingFolder: '正在上傳資料夾中的 {total} 個檔案...',
     videosFilteredNoVLM: '已跳過 {count} 個影片檔案（暫不支援影片上傳）',
     unsupportedTypesHint: '部分文件型別（{types}）暫無可用解析引擎，上傳後將無法解析',
     goToParserSettings: '前往配置',
@@ -7022,9 +6840,6 @@ export default {
     batchTag: '批次打標籤',
     batchTagDialogHeading: '批次打標籤',
     batchTagSubtitle: '為選中的 {count} 個文件統一設定標籤（將替換文件原有標籤）',
-    batchTagSelectedSection: '已選標籤',
-    batchTagAvailableSection: '可選標籤',
-    batchTagNoSelected: '暫未選擇',
     batchTagSuccess: '已為 {count} 個文件成功設定標籤',
     batchTagFailed: '批次打標籤失敗',
     confirmBatchReparseDocument: '確認重建選中的 {count} 個文件？現有內容將被清除並重新解析。',
@@ -7072,9 +6887,6 @@ export default {
     operationNotSupportedForType: '當前知識庫型別不支援該操作',
     allFilesSkippedNoEngine: '所選檔案型別暫無可用解析引擎，已全部跳過',
     filesSkippedNoEngine: '{count} 個檔案因無可用解析引擎被跳過',
-    allUploadSuccess: '所有檔案上傳成功（{count}個）',
-    partialUploadSuccess: '部分檔案上傳成功（成功：{success}，失敗：{fail}）',
-    allUploadFailed: '所有檔案上傳失敗（{count}個）',
     deleteSuccess: '知識刪除成功！',
     chunkLoadFailed: '分塊載入失敗',
     moveToFolder: {
