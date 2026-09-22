@@ -14,7 +14,7 @@ target architecture.
 
 | Patch | Purpose | Removal condition |
 | --- | --- | --- |
-| `01-browser-read-reliability.patch` | Bound CDP reads, prevent overlapping timed-out screenshots, reuse frame discovery configuration | Equivalent upstream behavior passes the background rendering and timeout regressions |
+| `01-browser-read-reliability.patch` | 10 s deadline on renderer reads (snapshot, accessibility, layout, frame tree, auto-attach); a timed-out read stops capture fallback and is reported as `cdp_failed`, never `cancelled`; auto-attach configured once per debugger session | Equivalent upstream behavior passes the read-timeout regressions |
 
 Patch 01 is the only remaining downstream change and has no upstream
 equivalent yet; it is the candidate for the next upstream PR.
@@ -99,7 +99,6 @@ pnpm --filter @browser-skill/vom test
 pnpm ext:build:zip
 BSK_GEOMETRY_CHROME=/path/to/test-chrome BSK_BACKGROUND_CHROME=/path/to/test-chrome \
   pnpm --filter @browser-skill/extension exec vitest run --maxWorkers=1 \
-  src/browser-driver/__tests__/task-focus.browser.test.ts \
   src/tools/__tests__/background-execution.browser.test.ts \
   src/tools/__tests__/background-screenshot.browser.test.ts \
   src/tools/__tests__/background-full-page.browser.test.ts

@@ -1,8 +1,8 @@
 diff --git a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-index 66b14ad..fd6b021 100644
+index 66b14ad..6104574 100644
 --- a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
 +++ b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-@@ -30,6 +30,77 @@ function fakeApi() {
+@@ -30,6 +30,40 @@ function fakeApi() {
  }
  
  describe("ChromiumCdp", () => {
@@ -40,47 +40,10 @@ index 66b14ad..fd6b021 100644
 +    cdp.dispose();
 +  });
 +
-+  it("does not send another screenshot after a local timeout while Chrome is still working", async () => {
-+    vi.useFakeTimers();
-+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-+    const { api } = fakeApi();
-+    let finish!: (value: unknown) => void;
-+    vi.mocked(api.sendCommand).mockImplementation(async (_target, method) => {
-+      if (method === "Page.captureScreenshot")
-+        return new Promise((resolve) => {
-+          finish = resolve;
-+        });
-+      return {};
-+    });
-+    const cdp = new ChromiumCdp(api);
-+    try {
-+      await cdp.ensureAttached(4);
-+      const first = expect(cdp.send(4, "Page.captureScreenshot")).rejects.toThrow("timed out");
-+      await vi.advanceTimersByTimeAsync(3000);
-+      await first;
-+      expect(cdp.hasPendingScreenshot(4)).toBe(true);
-+      await expect(cdp.send(4, "Page.captureScreenshot")).rejects.toThrow("still running");
-+      expect(
-+        vi.mocked(api.sendCommand).mock.calls.filter((c) => c[1] === "Page.captureScreenshot"),
-+      ).toHaveLength(1);
-+      finish({ data: "late" });
-+      await vi.advanceTimersByTimeAsync(0);
-+      expect(cdp.hasPendingScreenshot(4)).toBe(false);
-+      const next = cdp.send(4, "Page.captureScreenshot");
-+      await vi.advanceTimersByTimeAsync(0);
-+      finish({ data: "new" });
-+      await expect(next).resolves.toEqual({ data: "new" });
-+    } finally {
-+      cdp.dispose();
-+      warning.mockRestore();
-+      vi.useRealTimers();
-+    }
-+  });
-+
    it("changes attachment identity only across real debugger attachments", async () => {
      const { api, onEvent, onDetach } = fakeApi();
      const cdp = new ChromiumCdp(api);
-@@ -430,6 +501,7 @@ describe("ChromiumCdp", () => {
+@@ -430,6 +464,7 @@ describe("ChromiumCdp", () => {
      expect(api.sendCommand).toHaveBeenCalledWith({ tabId: 3 }, "Page.handleJavaScriptDialog", {
        accept: true,
      });
@@ -88,7 +51,7 @@ index 66b14ad..fd6b021 100644
      const dialogs = cdp.dialogsSince(3, cursor);
      expect(dialogs).toHaveLength(1);
      expect(dialogs[0]).toMatchObject({
-@@ -479,7 +551,7 @@ describe("ChromiumCdp", () => {
+@@ -479,7 +514,7 @@ describe("ChromiumCdp", () => {
        url: "https://example.com/",
      });
      await Promise.resolve();
@@ -99,18 +62,20 @@ index 66b14ad..fd6b021 100644
    });
 diff --git a/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts b/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts
 new file mode 100644
-index 0000000..7c1dd61
+index 0000000..5c284bd
 --- /dev/null
 +++ b/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,109 @@
 +import { afterEach, expect, it, vi } from "vitest";
++import { isAbortError, isCaptureTerminalError } from "@/tools/vom/capture-abort";
 +import { captureObservationFacts } from "@/tools/vom/capture-coordinator";
-+import { CdpReadTimeoutError, runCdpCommand } from "../command-deadline";
++import { CdpReadTimeoutError, READ_TIMEOUT_MS, runCdpCommand } from "../command-deadline";
 +
 +afterEach(() => {
 +  vi.useRealTimers();
 +  vi.restoreAllMocks();
 +});
++
 +it("times out stuck snapshots with the actual method and stops fallback reads", async () => {
 +  vi.useFakeTimers();
 +  vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -124,7 +89,7 @@ index 0000000..7c1dd61
 +  const checked = expect(work).rejects.toThrow(
 +    "DOMSnapshot.captureSnapshot timed out after 10000ms (tab 4)",
 +  );
-+  await vi.advanceTimersByTimeAsync(10_000);
++  await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS);
 +  await checked;
 +  expect(send.mock.calls.map((call) => call[1])).toEqual([
 +    "DOMSnapshot.enable",
@@ -132,157 +97,86 @@ index 0000000..7c1dd61
 +  ]);
 +  expect(vi.getTimerCount()).toBe(0);
 +});
-+it("bounds screenshots and ignores their late reply", async () => {
++
++it("ignores the late reply of a timed-out read", async () => {
 +  vi.useFakeTimers();
 +  vi.spyOn(console, "warn").mockImplementation(() => {});
 +  vi.spyOn(console, "debug").mockImplementation(() => {});
-+  let finish!: (value: string) => void;
++  let finish!: (value: object) => void;
 +  const work = runCdpCommand(
 +    { tabId: 4 },
-+    "Page.captureScreenshot",
++    "Accessibility.getFullAXTree",
 +    () =>
-+      new Promise<string>((resolve) => {
++      new Promise<object>((resolve) => {
 +        finish = resolve;
 +      }),
 +  );
 +  const checked = expect(work).rejects.toBeInstanceOf(CdpReadTimeoutError);
-+  await vi.advanceTimersByTimeAsync(3_000);
++  await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS);
 +  await checked;
-+  finish("late image");
++  finish({ nodes: [] });
 +  await Promise.resolve();
++  expect(vi.getTimerCount()).toBe(0);
++});
++
++it("does not bound mutations, screenshots or evaluation", async () => {
++  vi.useFakeTimers();
++  vi.spyOn(console, "debug").mockImplementation(() => {});
++  const settled = vi.fn();
++  for (const method of ["Page.captureScreenshot", "Runtime.evaluate", "Input.dispatchMouseEvent"]) {
++    void runCdpCommand({ tabId: 4 }, method, () => new Promise<never>(() => {})).then(
++      settled,
++      settled,
++    );
++  }
++  await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS * 2);
++  expect(settled).not.toHaveBeenCalled();
 +  expect(vi.getTimerCount()).toBe(0);
 +});
 +
 +it("distinguishes caller timeout from a late Chrome completion", async () => {
 +  vi.useFakeTimers();
 +  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-+  let finish!: (value: string) => void;
++  vi.spyOn(console, "debug").mockImplementation(() => {});
++  let finish!: (value: object) => void;
 +  const work = runCdpCommand(
 +    { tabId: 4 },
-+    "Page.captureScreenshot",
++    "DOMSnapshot.captureSnapshot",
 +    () =>
-+      new Promise<string>((resolve) => {
++      new Promise<object>((resolve) => {
 +        finish = resolve;
 +      }),
 +  );
 +  const checked = expect(work).rejects.toBeInstanceOf(CdpReadTimeoutError);
-+  await vi.advanceTimersByTimeAsync(3000);
++  await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS);
 +  await checked;
++  expect(warning).toHaveBeenCalledWith(
++    "[bsk cdp] read timed out",
++    expect.objectContaining({ method: "DOMSnapshot.captureSnapshot", tabId: 4 }),
++  );
 +  expect(warning.mock.calls.filter((c) => c[0] === "[bsk cdp] slow command settled")).toHaveLength(
 +    0,
 +  );
 +  await vi.advanceTimersByTimeAsync(5000);
-+  finish("image");
++  finish({});
 +  await vi.advanceTimersByTimeAsync(0);
 +  expect(warning).toHaveBeenCalledWith(
 +    "[bsk cdp] slow command settled",
-+    expect.objectContaining({ elapsedMs: 8000, outcome: "returned", late: true }),
++    expect.objectContaining({ elapsedMs: READ_TIMEOUT_MS + 5000, outcome: "returned", late: true }),
 +  );
 +});
-diff --git a/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts b/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts
-new file mode 100644
-index 0000000..fe79f2a
---- /dev/null
-+++ b/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts
-@@ -0,0 +1,96 @@
-+// @vitest-environment node
-+import { describe, expect, it } from "vitest";
-+import { captureVomObservation } from "@/tools/observation";
-+import { type CdpDebuggerApi, ChromiumCdp } from "../chromium-cdp";
 +
-+describe.skipIf(!process.env.BSK_GEOMETRY_CHROME)("real background task rendering", () => {
-+  it.each([
-+    0, 2000,
-+  ])("renders a background page with %i repeated controls and restores visibility on detach", async (controlCount) => {
-+    // Raw CDP deliberately avoids Playwright, which enables focus emulation by default
-+    // and would mask this exact regression even when a Chrome tab is inactive.
-+    const { withChrome } = await import(
-+      new URL(
-+        "../../../../../evals/browser/cases/regression/snapshot-coordinates/chrome.mjs",
-+        import.meta.url,
-+      ).href
-+    );
-+    await withChrome(
-+      { executable: process.env.BSK_GEOMETRY_CHROME, deviceScale: 1, zoom: 1 },
-+      async (send: any) => {
-+        const foreground = (await send("Target.getTargets")).targetInfos.find(
-+          (t: any) => t.type === "page",
-+        );
-+        const { sessionId: foregroundSession } = await send("Target.attachToTarget", {
-+          targetId: foreground.targetId,
-+          flatten: true,
-+        });
-+        const url =
-+          "data:text/html," +
-+          encodeURIComponent(
-+            '<title>Background task</title><p>Loading</p><script>requestAnimationFrame(()=>document.querySelector("p").textContent="Rendered")</script>' +
-+              "<section><h2>Entry</h2><button>Open</button><p>Sample page content</p></section>".repeat(
-+                controlCount,
-+              ),
-+          );
-+        const { targetId } = await send("Target.createTarget", { url, background: true });
-+        let sessionId = (await send("Target.attachToTarget", { targetId, flatten: true }))
-+          .sessionId;
-+        const evaluate = async (expression: string, session = sessionId) =>
-+          (
-+            await send(
-+              "Runtime.evaluate",
-+              { expression, awaitPromise: true, returnByValue: true },
-+              session,
-+            )
-+          ).result.value;
-+        // A newly created target may still expose the initial complete about:blank.
-+        await expect.poll(() => evaluate("document.title")).toBe("Background task");
-+        await expect.poll(() => evaluate("document.readyState")).toBe("complete");
-+        expect(
-+          await evaluate(
-+            '({visibility:document.visibilityState,text:document.querySelector("p").textContent})',
-+          ),
-+        ).toEqual({ visibility: "hidden", text: "Loading" });
-+        await send("Target.detachFromTarget", { sessionId });
-+        const event = { addListener() {}, removeListener() {} };
-+        const api = {
-+          attach: async () => {
-+            sessionId = (await send("Target.attachToTarget", { targetId, flatten: true }))
-+              .sessionId;
-+          },
-+          detach: async () => {
-+            await send("Target.detachFromTarget", { sessionId });
-+          },
-+          sendCommand: (_target: unknown, method: string, params: object) =>
-+            send(method, params, sessionId),
-+          onEvent: event,
-+          onDetach: event,
-+        } as unknown as CdpDebuggerApi;
-+        const cdp = new ChromiumCdp(api);
-+        try {
-+          await cdp.acquireBackgroundExecution("task", 4);
-+          expect(
-+            await evaluate(
-+              'new Promise(resolve=>requestAnimationFrame(()=>resolve(document.querySelector("p").textContent)))',
-+            ),
-+          ).toBe("Rendered");
-+          const observation = await captureVomObservation(cdp, 4, url);
-+          expect(observation.text).toContain("Rendered");
-+          expect(observation.refs).toHaveLength(controlCount);
-+          const image = await cdp.send<{ data: string }>(4, "Page.captureScreenshot", {
-+            format: "jpeg",
-+            fromSurface: true,
-+          });
-+          expect(image.data.length).toBeGreaterThan(100);
-+          expect(await evaluate("document.visibilityState", foregroundSession)).toBe("visible");
-+          await cdp.releaseSessionTab("task", 4);
-+          sessionId = (await send("Target.attachToTarget", { targetId, flatten: true })).sessionId;
-+          expect(await evaluate("document.visibilityState")).toBe("hidden");
-+        } finally {
-+          cdp.dispose();
-+        }
-+      },
-+    );
-+  }, 20_000);
++it("is terminal for capture fallback but is not a caller abort", () => {
++  const error = new CdpReadTimeoutError("DOMSnapshot.captureSnapshot", 4, READ_TIMEOUT_MS);
++  expect(isCaptureTerminalError(error)).toBe(true);
++  expect(isAbortError(error)).toBe(false);
++  const abort = new Error("observation aborted");
++  abort.name = "AbortError";
++  expect(isCaptureTerminalError(abort)).toBe(true);
++  expect(isAbortError(abort)).toBe(true);
 +});
 diff --git a/apps/extension/src/browser-driver/chromium-cdp.ts b/apps/extension/src/browser-driver/chromium-cdp.ts
-index ebdc304..da94e1d 100644
+index ebdc304..734f749 100644
 --- a/apps/extension/src/browser-driver/chromium-cdp.ts
 +++ b/apps/extension/src/browser-driver/chromium-cdp.ts
 @@ -32,6 +32,7 @@ import type {
@@ -301,23 +195,7 @@ index ebdc304..da94e1d 100644
  }
  
  async function settleBeforeDeadline(promises: Promise<void>[], deadline: number): Promise<boolean> {
-@@ -167,13 +169,14 @@ export class ChromiumCdp {
-   private readonly attachedTabs = new Set<number>();
-   private readonly claimAttempts = new Map<number, Map<string, object>>();
-   private readonly attachmentVersions = new Map<number, number>();
-+  private readonly pendingScreenshots = new Map<number, Promise<unknown>>();
-   private readonly attachmentIds = new Map<number, string>();
-   private readonly attachInFlight = new Map<number, Promise<void>>();
-   private readonly detachInFlight = new Map<number, Promise<void>>();
-   private readonly backgroundExecution = new BackgroundExecution(
-     (tabId) => this.attachmentIds.get(tabId),
-     (tabId, enabled) =>
--      this.api.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled }),
-+      this.command({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled }),
-   );
-   private readonly tabOwners = new Map<number, Set<string>>();
-   private readonly dialogBuffers = new Map<number, JavaScriptDialogInfo[]>();
-@@ -324,7 +327,7 @@ export class ChromiumCdp {
+@@ -324,7 +326,7 @@ export class ChromiumCdp {
      await this.ensureAttached(tabId);
      signal?.throwIfAborted();
      try {
@@ -326,7 +204,7 @@ index ebdc304..da94e1d 100644
        return result as T;
      } catch (err) {
        throw normalizeError(err);
-@@ -334,7 +337,7 @@ export class ChromiumCdp {
+@@ -334,7 +336,7 @@ export class ChromiumCdp {
    async sendToTarget<T = unknown>(target: CdpTarget, method: string, params?: object): Promise<T> {
      await this.ensureAttached(target.tabId);
      try {
@@ -335,39 +213,12 @@ index ebdc304..da94e1d 100644
      } catch (err) {
        throw normalizeError(err);
      }
-@@ -622,6 +625,7 @@ export class ChromiumCdp {
-     this.networkDomainsEnabledTabs.clear();
-     this.networkRequestMeta.clear();
-     this.frameDiscovery.clear();
-+    this.pendingScreenshots.clear();
-     await Promise.all(
-       tabs.map(async (tabId) => {
-         try {
-@@ -633,8 +637,31 @@ export class ChromiumCdp {
+@@ -633,8 +635,12 @@ export class ChromiumCdp {
      );
    }
  
-+  hasPendingScreenshot(tabId: number): boolean {
-+    return this.pendingScreenshots.has(tabId);
-+  }
-+
 +  private command(target: CdpDebuggee, method: string, params: object): Promise<unknown> {
-+    return runCdpCommand(target, method, () => {
-+      const tabId = target.tabId;
-+      if (method !== "Page.captureScreenshot" || tabId === undefined)
-+        return this.api.sendCommand(target, method, params);
-+      // A local deadline cannot cancel a Chrome command. Keep this fence until
-+      // Chrome actually replies (or detaches), so polling cannot pile up captures.
-+      if (this.pendingScreenshots.has(tabId))
-+        throw new Error("Previous screenshot is still running in Chrome");
-+      const pending = this.api.sendCommand(target, method, params);
-+      this.pendingScreenshots.set(tabId, pending);
-+      const clear = () => {
-+        if (this.pendingScreenshots.get(tabId) === pending) this.pendingScreenshots.delete(tabId);
-+      };
-+      void pending.then(clear, clear);
-+      return pending;
-+    });
++    return runCdpCommand(target, method, () => this.api.sendCommand(target, method, params));
 +  }
 +
    private async enablePageDomain(tabId: number): Promise<void> {
@@ -376,7 +227,7 @@ index ebdc304..da94e1d 100644
    }
  
    private async enableConsoleDomains(tabId: number): Promise<void> {
-@@ -647,7 +674,7 @@ export class ChromiumCdp {
+@@ -647,7 +653,7 @@ export class ChromiumCdp {
      let failed = false;
      for (const method of ["Runtime.enable", "Log.enable"]) {
        try {
@@ -385,7 +236,7 @@ index ebdc304..da94e1d 100644
        } catch (err) {
          failed = true;
          console.debug("[bsk cdp] console domain enable failed", { tabId, method, err });
-@@ -660,7 +687,7 @@ export class ChromiumCdp {
+@@ -660,7 +666,7 @@ export class ChromiumCdp {
  
    private async enableNetworkDomain(tabId: number): Promise<void> {
      if (this.networkDomainsEnabledTabs.has(tabId)) return;
@@ -394,7 +245,7 @@ index ebdc304..da94e1d 100644
      this.networkDomainsEnabledTabs.add(tabId);
    }
  
-@@ -672,13 +699,27 @@ export class ChromiumCdp {
+@@ -672,13 +678,27 @@ export class ChromiumCdp {
      }
    }
  
@@ -425,7 +276,7 @@ index ebdc304..da94e1d 100644
    }
  
    private bindFrameTargetHandler(): void {
-@@ -705,6 +746,7 @@ export class ChromiumCdp {
+@@ -705,6 +725,7 @@ export class ChromiumCdp {
  
        if (method === "Target.detachedFromTarget") {
          const state = this.frameDiscovery.get(tabId);
@@ -433,7 +284,7 @@ index ebdc304..da94e1d 100644
          if (state?.sessions.delete(sessionId)) state.generation += 1;
          return;
        }
-@@ -771,6 +813,7 @@ export class ChromiumCdp {
+@@ -771,6 +792,7 @@ export class ChromiumCdp {
        sessions: new Set(),
        pending: new Set(),
        generation: 0,
@@ -441,15 +292,7 @@ index ebdc304..da94e1d 100644
      };
      this.frameDiscovery.set(tabId, created);
      return created;
-@@ -778,6 +821,7 @@ export class ChromiumCdp {
- 
-   private clearFrameState(tabId: number): void {
-     this.frameDiscovery.delete(tabId);
-+    this.pendingScreenshots.delete(tabId);
-   }
- 
-   private bindDialogHandler(): void {
-@@ -810,7 +854,7 @@ export class ChromiumCdp {
+@@ -810,7 +832,7 @@ export class ChromiumCdp {
        if (parsed.type === "prompt") {
          handleParams.promptText = parsed.defaultPrompt ?? "";
        }
@@ -460,15 +303,18 @@ index ebdc304..da94e1d 100644
        this.dialogSequences.set(tabId, sequence);
 diff --git a/apps/extension/src/browser-driver/command-deadline.ts b/apps/extension/src/browser-driver/command-deadline.ts
 new file mode 100644
-index 0000000..540d804
+index 0000000..a088706
 --- /dev/null
 +++ b/apps/extension/src/browser-driver/command-deadline.ts
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,76 @@
 +import type { CdpDebuggee } from "./chromium-cdp";
 +
-+// Bound renderer reads, not user-requested waits or mutations. An expired
-+// CDP read cannot be cancelled individually; its late reply is ignored and
-+// observation must stop rather than issue fallback reads against the same page.
++// Renderer reads that observation issues on the agent's behalf. A read that
++// chrome.debugger has already dispatched cannot be cancelled: the deadline
++// only ends the caller's wait, ignores the late reply and lets the capture
++// pipeline stop instead of issuing fallback reads against the same
++// unresponsive page. Mutations, screenshots and user-requested waits keep
++// their own limits.
 +const READ_COMMANDS = new Set([
 +  "Target.setAutoAttach",
 +  "DOMSnapshot.enable",
@@ -478,9 +324,10 @@ index 0000000..540d804
 +  "Page.getLayoutMetrics",
 +  "Page.getFrameTree",
 +  "DOM.getFrameOwner",
-+  "Page.captureScreenshot",
-+  "Emulation.setFocusEmulationEnabled",
 +]);
++export const READ_TIMEOUT_MS = 10_000;
++const SLOW_COMMAND_MS = 2_000;
++
 +export class CdpReadTimeoutError extends Error {
 +  constructor(method: string, tabId: number | undefined, timeout: number) {
 +    super(
@@ -496,68 +343,226 @@ index 0000000..540d804
 +  run: () => Promise<T>,
 +): Promise<T> {
 +  const started = Date.now();
++  let timedOut = false;
 +  const details = () => ({
 +    tabId: target.tabId,
 +    frameSessionId: target.sessionId,
 +    method,
 +    elapsedMs: Date.now() - started,
 +  });
-+  const slow = setTimeout(() => console.warn("[bsk cdp] slow command", details()), 2_000);
-+  let deadline: ReturnType<typeof setTimeout> | undefined;
-+  let timedOut = false;
 +  const settled = (outcome: "returned" | "failed") => {
-+    if (Date.now() - started >= 2_000)
-+      console.warn("[bsk cdp] slow command settled", { ...details(), outcome, late: timedOut });
++    if (Date.now() - started < SLOW_COMMAND_MS) return;
++    // A reply after the deadline proves Chrome was still busy, not detached.
++    const log = timedOut ? console.warn : console.debug;
++    log("[bsk cdp] slow command settled", { ...details(), outcome, late: timedOut });
 +  };
++  const pending = run().then(
++    (value) => {
++      settled("returned");
++      return value;
++    },
++    (error) => {
++      settled("failed");
++      throw error;
++    },
++  );
++  if (!READ_COMMANDS.has(method)) return pending;
++  let deadline: ReturnType<typeof setTimeout> | undefined;
 +  try {
-+    const pending = run().then(
-+      (value) => {
-+        settled("returned");
-+        return value;
-+      },
-+      (error) => {
-+        settled("failed");
-+        throw error;
-+      },
-+    );
-+    if (!READ_COMMANDS.has(method)) return await pending;
-+    const timeout = method === "Page.captureScreenshot" ? 3_000 : 10_000;
 +    return await Promise.race([
 +      pending,
 +      new Promise<never>((_, reject) => {
 +        deadline = setTimeout(() => {
 +          timedOut = true;
-+          reject(new CdpReadTimeoutError(method, target.tabId, timeout));
-+        }, timeout);
++          console.warn("[bsk cdp] read timed out", details());
++          reject(new CdpReadTimeoutError(method, target.tabId, READ_TIMEOUT_MS));
++        }, READ_TIMEOUT_MS);
 +      }),
 +    ]);
-+  } catch (error) {
-+    console.warn("[bsk cdp] command failed", {
-+      ...details(),
-+      error: error instanceof Error ? error.message : String(error),
-+    });
-+    throw error;
 +  } finally {
-+    clearTimeout(slow);
 +    clearTimeout(deadline);
 +  }
 +}
+diff --git a/apps/extension/src/tools/visual-screenshot.ts b/apps/extension/src/tools/visual-screenshot.ts
+index 05fd07e..c06603b 100644
+--- a/apps/extension/src/tools/visual-screenshot.ts
++++ b/apps/extension/src/tools/visual-screenshot.ts
+@@ -9,7 +9,7 @@ import {
+   type VisualTargetState,
+   verifyCapturedTarget,
+ } from "./visual-target";
+-import { isAbortError, throwIfAborted } from "./vom/capture-abort";
++import { isAbortError, isCaptureTerminalError, throwIfAborted } from "./vom/capture-abort";
+ import type { VisualCandidate } from "./vom/visual-discovery";
+ 
+ function stale(message: string): RpcError {
+@@ -81,7 +81,7 @@ export async function captureVisualScreenshot(
+         after = await resolveVisualRegionNow(cdp, candidate, signal, true);
+       } catch (error) {
+         throwIfAborted(signal);
+-        if (isAbortError(error)) throw error;
++        if (isCaptureTerminalError(error)) throw error;
+         after = stale("post-capture mapping unavailable");
+       }
+       if ("code" in after) {
+diff --git a/apps/extension/src/tools/visual-target.ts b/apps/extension/src/tools/visual-target.ts
+index 5e47fec..49e207f 100644
+--- a/apps/extension/src/tools/visual-target.ts
++++ b/apps/extension/src/tools/visual-target.ts
+@@ -10,7 +10,7 @@ import {
+ import { type CssViewport } from "./geometry/coordinate-types";
+ import { cssViewport, GeometryContext } from "./geometry/frame-context";
+ import { type CdpRunner, sendToCdpTarget } from "./shared";
+-import { isAbortError, throwIfAborted } from "./vom/capture-abort";
++import { isCaptureTerminalError, throwIfAborted } from "./vom/capture-abort";
+ import { resolveVerifiedNode } from "./vom/document-identity";
+ import type { DocumentIdentity } from "./vom/facts";
+ import { VISUAL_STYLES } from "./vom/snapshot";
+@@ -439,7 +439,7 @@ export async function verifyCapturedTarget(
+       : stale("visual attachment changed");
+   } catch (error) {
+     throwIfAborted(signal);
+-    if (isAbortError(error)) throw error;
++    if (isCaptureTerminalError(error)) throw error;
+     return stale("visual identity unavailable after capture");
+   }
+ }
 diff --git a/apps/extension/src/tools/vom/capture-abort.ts b/apps/extension/src/tools/vom/capture-abort.ts
-index 7ca65bf..429c373 100644
+index 7ca65bf..f9ea511 100644
 --- a/apps/extension/src/tools/vom/capture-abort.ts
 +++ b/apps/extension/src/tools/vom/capture-abort.ts
-@@ -4,11 +4,13 @@ function captureAbortError(): Error {
+@@ -4,12 +4,22 @@ function captureAbortError(): Error {
    return error;
  }
  
-+// Timed-out renderer reads are terminal too: AX/geometry fallback must not
-+// keep issuing reads after the renderer has stopped answering.
++function errorName(error: unknown): string {
++  return typeof error === "object" && error !== null
++    ? ((error as { name?: string }).name ?? "")
++    : "";
++}
++
  export function isAbortError(error: unknown): boolean {
-   return (
-     typeof error === "object" &&
-     error !== null &&
+-  return (
+-    typeof error === "object" &&
+-    error !== null &&
 -    (error as { name?: string }).name === "AbortError"
-+    ["AbortError", "CdpReadTimeoutError"].includes((error as { name?: string }).name ?? "")
-   );
+-  );
++  return errorName(error) === "AbortError";
++}
++
++/** Errors after which the capture pipeline must stop instead of falling back.
++ * A timed-out renderer read is terminal too: AX/geometry fallback must not keep
++ * issuing reads after the renderer stopped answering. It is still reported as
++ * a browser failure, not as a caller abort. */
++export function isCaptureTerminalError(error: unknown): boolean {
++  return ["AbortError", "CdpReadTimeoutError"].includes(errorName(error));
  }
  
+ export function throwIfAborted(signal: AbortSignal | undefined): void {
+diff --git a/apps/extension/src/tools/vom/capture-coordinator.ts b/apps/extension/src/tools/vom/capture-coordinator.ts
+index 0a90a03..37ec08c 100644
+--- a/apps/extension/src/tools/vom/capture-coordinator.ts
++++ b/apps/extension/src/tools/vom/capture-coordinator.ts
+@@ -8,7 +8,7 @@ import { cssViewport, GeometryContext } from "../geometry/frame-context";
+ import { type CdpRunner, cdpRunnerForTarget } from "../shared";
+ import { collectOverlayExcludedBackendIds } from "./capture";
+ import {
+-  isAbortError as isCaptureAbort,
++  isCaptureTerminalError as isCaptureAbort,
+   throwIfAborted as throwCaptureAborted,
+ } from "./capture-abort";
+ import { verifyDocumentIdentity } from "./document-identity";
+diff --git a/apps/extension/src/tools/vom/capture.ts b/apps/extension/src/tools/vom/capture.ts
+index 3191dc7..d905d3f 100644
+--- a/apps/extension/src/tools/vom/capture.ts
++++ b/apps/extension/src/tools/vom/capture.ts
+@@ -11,7 +11,7 @@ export type {
+   CapturedSurfaceProbe,
+ } from "./facts";
+ 
+-import { isAbortError, throwIfAborted } from "./capture-abort";
++import { isCaptureTerminalError, throwIfAborted } from "./capture-abort";
+ import { clearHover, ProbeBudget, waitForHover } from "./hover-perception";
+ 
+ interface RuntimeEvaluateReply {
+@@ -389,7 +389,7 @@ export async function probeHoverSurfaces(
+           confidence: confidenceForHover(candidate, subItems),
+         });
+       } catch (error) {
+-        if (isAbortError(error)) throw error;
++        if (isCaptureTerminalError(error)) throw error;
+         continue;
+       } finally {
+         await clearHover(cdp, tabId);
+@@ -397,7 +397,7 @@ export async function probeHoverSurfaces(
+     }
+     return results;
+   } catch (err) {
+-    if (isAbortError(err)) throw err;
++    if (isCaptureTerminalError(err)) throw err;
+     console.debug("[bsk capture] hover surface probe failed", err);
+     return [];
+   }
+@@ -438,7 +438,7 @@ export async function collectOverlayExcludedBackendIds(
+     throwIfAborted(signal);
+     collectBackendIdsFromDomNode(described.node, excluded);
+   } catch (err) {
+-    if (isAbortError(err)) throw err;
++    if (isCaptureTerminalError(err)) throw err;
+     console.debug("[bsk capture] overlay exclusion fallback failed", err);
+   }
+   return excluded;
+diff --git a/apps/extension/src/tools/vom/document-identity.ts b/apps/extension/src/tools/vom/document-identity.ts
+index 61222e1..2607a83 100644
+--- a/apps/extension/src/tools/vom/document-identity.ts
++++ b/apps/extension/src/tools/vom/document-identity.ts
+@@ -1,6 +1,6 @@
+ import type { CdpRunner } from "../shared";
+ import { sendToCdpTarget } from "../shared";
+-import { isAbortError, throwIfAborted } from "./capture-abort";
++import { isCaptureTerminalError, throwIfAborted } from "./capture-abort";
+ import type { DocumentIdentity } from "./facts";
+ import type { VisualCandidate } from "./visual-discovery";
+ 
+@@ -120,7 +120,7 @@ async function verifyIdentity(
+     };
+   } catch (error) {
+     throwIfAborted(signal);
+-    if (isAbortError(error)) throw error;
++    if (isCaptureTerminalError(error)) throw error;
+     return { status: attached() ? "unavailable" : "changed" };
+   } finally {
+     if (!retained)
+diff --git a/apps/extension/src/tools/vom/form-capture.ts b/apps/extension/src/tools/vom/form-capture.ts
+index c4c390c..ff1735f 100644
+--- a/apps/extension/src/tools/vom/form-capture.ts
++++ b/apps/extension/src/tools/vom/form-capture.ts
+@@ -1,5 +1,5 @@
+ import type { CdpRunner } from "../shared";
+-import { isAbortError, throwIfAborted } from "./capture-abort";
++import { isCaptureTerminalError, throwIfAborted } from "./capture-abort";
+ import type { CapturedNode } from "./capture-types";
+ 
+ interface RuntimeEvaluateReply {
+@@ -145,7 +145,7 @@ export async function enrichFormControlStates(
+     }
+     return true;
+   } catch (error) {
+-    if (isAbortError(error)) throw error;
++    if (isCaptureTerminalError(error)) throw error;
+     // Best-effort enrichment. DOMSnapshot/AX data still carries the nodes.
+     return false;
+   } finally {
+diff --git a/apps/extension/src/tools/vom/normalize.ts b/apps/extension/src/tools/vom/normalize.ts
+index 4375cd5..d27308a 100644
+--- a/apps/extension/src/tools/vom/normalize.ts
++++ b/apps/extension/src/tools/vom/normalize.ts
+@@ -15,7 +15,7 @@ import {
+ } from "../geometry/frame-context";
+ import {
+   createCaptureCheckpoint,
+-  isAbortError as isCaptureAbort,
++  isCaptureTerminalError as isCaptureAbort,
+   throwIfAborted as throwCaptureAborted,
+ } from "./capture-abort";
+ import {

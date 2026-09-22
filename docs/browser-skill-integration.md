@@ -110,7 +110,7 @@ BROWSERSKILL_TEST_HEADED=1
 
 测试使用独立浏览器资料目录，覆盖配对、独立窗口、任务弹窗完整操作、窗口内借用拒绝与移出后借用确认及权限释放、导航/输入/点击、目标标签截图、人工等待期间预览、显式定位、暂停/继续/结束、任务隔离、授权持久化和双节点路由。目标部署网络、真实模型任务与规模容量仍须现场验收；本机浏览器不保证免除网站验证或 403。
 
-补丁中的 `task-focus.browser.test.ts` 使用独立 Chrome 与原生 CDP 验证后台绘制、内容读取、截图和释放后的可见性恢复，避免 Playwright 默认的焦点模拟掩盖问题。在应用补丁后的 BrowserSkill 源码中，设置 `BSK_GEOMETRY_CHROME` 为测试 Chrome 路径，再执行 `pnpm --filter @browser-skill/extension exec vitest run src/browser-driver/__tests__/task-focus.browser.test.ts`（Node 20 另需 `NODE_OPTIONS=--experimental-websocket`）。
+上游的 `background-execution.browser.test.ts` 和 `background-screenshot.browser.test.ts` 使用独立 Chrome 验证后台绘制、内容读取、截图和释放后的可见性恢复。在应用补丁后的 BrowserSkill 源码中，设置 `BSK_GEOMETRY_CHROME`、`BSK_BACKGROUND_CHROME` 为测试 Chrome 路径，再执行 `pnpm --filter @browser-skill/extension exec vitest run --maxWorkers=1 src/tools/__tests__/background-execution.browser.test.ts src/tools/__tests__/background-screenshot.browser.test.ts`（Node 20 另需 `NODE_OPTIONS=--experimental-websocket`）。
 
 仅验证预览组件的真实 PiP 窗口（使用模拟任务 API，不需要扩展或模型）：
 
