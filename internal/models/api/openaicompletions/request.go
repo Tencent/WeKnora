@@ -241,19 +241,36 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream boo
 			body[k] = v
 		}
 	}
-	// These names are mutually exclusive, including when extra_body supplies
-	// one or both. Keep the protocol's configured field; an explicit caller
-	// budget already takes precedence over extra_body above.
-	if _, legacy := body["max_tokens"]; legacy {
-		if _, completion := body["max_completion_tokens"]; completion {
-			if s.MaxTokensField == "max_tokens" {
-				delete(body, "max_completion_tokens")
-			} else {
-				delete(body, "max_tokens")
-			}
-		}
-	}
+	// DeepSeek, Volcengine Ark and other OpenAI-compatible gateways return
+	// 400 when max_tokens and max_completion_tokens are both set (#3474).
+	// The caller budget is already on MaxTokensField (MaxCompletionTokens
+	// wins over MaxTokens when both aliases are configured). extra_body must
+	// not put the other name back beside it; the provider's field is kept.
+	c.dropRejectedCompletionField(body)
 	return body, nil
+}
+
+// dropRejectedCompletionField deletes the completion-budget name this
+// provider does not use, when the preferred name is also present. A lone
+// sibling (only the other name, no preferred field) is left alone: that is
+// an explicit extra_body override, not the dual-field rejection.
+func (c *Client) dropRejectedCompletionField(body map[string]any) {
+	preferred := c.cfg.Settings.MaxTokensField
+	if preferred == "" {
+		preferred = "max_completion_tokens"
+	}
+	var other string
+	switch preferred {
+	case "max_tokens":
+		other = "max_completion_tokens"
+	case "max_completion_tokens":
+		other = "max_tokens"
+	default:
+		return
+	}
+	if _, ok := body[preferred]; ok {
+		delete(body, other)
+	}
 }
 
 func (c *Client) applySampling(body map[string]any, opts *api.Options) {
