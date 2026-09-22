@@ -30,6 +30,12 @@ type protocolReranker struct {
 // burst of requests.
 const defaultBatchConcurrency = 4
 
+// undeclaredLimitWarnSize is the document count past which a vendor that
+// declares no batch limits is worth warning about. Below it a single request is
+// what every vendor here accepts; above it the missing catalog entry is the
+// most likely cause of a provider-side rejection (see #3559).
+const undeclaredLimitWarnSize = 200
+
 func (r *protocolReranker) GetModelName() string { return r.modelName }
 func (r *protocolReranker) GetModelID() string   { return r.modelID }
 
@@ -54,7 +60,18 @@ func (r *protocolReranker) Rerank(
 		}
 	}
 
-	batches, err := api.SplitBatches(documents, utf8.RuneCountInString(query), r.settings.BatchLimits())
+	limits := r.settings.BatchLimits()
+	if limits.MaxItems <= 0 && limits.MaxTotalRunes <= 0 && len(documents) > undeclaredLimitWarnSize {
+		// SplitBatches cannot split what the vendor never declared a ceiling
+		// for: the whole candidate set goes out as one request, and a
+		// provider-side rejection then looks like a transient failure. Say so
+		// here, so the missing catalog entry is visible in the log.
+		logger.Warnf(ctx,
+			"%s rerank: vendor declares no batch limits; sending %d documents in a single request",
+			r.modelName, len(documents))
+	}
+
+	batches, err := api.SplitBatches(documents, utf8.RuneCountInString(query), limits)
 	if err != nil {
 		return nil, fmt.Errorf("%s rerank: %w", r.modelName, err)
 	}
