@@ -1188,6 +1188,10 @@ func (s *sessionService) consumeFallbackStream(
 			if response.Done {
 				response.Content += decoder.Flush()
 			}
+			truncated := response.Done && chatpipeline.IsLengthFinishReason(response.FinishReason)
+			if truncated && strings.TrimSpace(finalContent+response.Content) == "" {
+				response.Content = chatpipeline.EmptyTruncatedAnswerFallback
+			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
 				ID:        fallbackID,
@@ -1197,6 +1201,7 @@ func (s *sessionService) consumeFallbackStream(
 					Content:    response.Content,
 					Done:       response.Done,
 					IsFallback: true,
+					Truncated:  truncated,
 				},
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
