@@ -833,6 +833,17 @@ watch(() => props.details.md, () => {
 }, { immediate: true, deep: true, flush: 'post' })
 
 watch(() => viewMode.value, (mode) => {
+  // The merged/preview views render props.details.md, which holds whatever
+  // chunk type was last loaded. When leaving the chunks view with a non-text
+  // filter active, reset to text chunks so those views never render OCR or
+  // caption chunks as document text.
+  if (mode !== 'chunks' && chunkType.value !== 'text') {
+    chunkType.value = 'text';
+    chunkPage.value = 1;
+    loadedChunkPage.value = 1;
+    pendingChunkPage = null;
+    emit('getDoc', 1, 'text');
+  }
   if ((mode === 'chunks' || mode === 'merged') && props.visible) {
     runMarkdownPostRenderPipeline();
   }
@@ -1146,7 +1157,7 @@ const reloadChunksFromStart = () => {
   pendingChunkPage = 1;
   editingChunkId.value = '';
   chunkDraft.value = '';
-  emit('getDoc', 1);
+  emit('getDoc', 1, chunkType.value);
 };
 
 const handleChunkEditError = (error: any, fallbackMessage: string) => {
