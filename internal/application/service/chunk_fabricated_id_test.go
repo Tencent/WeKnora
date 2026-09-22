@@ -18,10 +18,14 @@ func TestParseFabricatedChunkID(t *testing.T) {
 		wantIdx int
 		wantOK  bool
 	}{
-		{"valid", "f91259e7-4f95-46c2-a928-6a558cc0d3d3_chunk_119",
-			"f91259e7-4f95-46c2-a928-6a558cc0d3d3", 119, true},
-		{"uppercase uuid", "F91259E7-4F95-46C2-A928-6A558CC0D3D3_chunk_0",
-			"F91259E7-4F95-46C2-A928-6A558CC0D3D3", 0, true},
+		{
+			"valid", "f91259e7-4f95-46c2-a928-6a558cc0d3d3_chunk_119",
+			"f91259e7-4f95-46c2-a928-6a558cc0d3d3", 119, true,
+		},
+		{
+			"uppercase uuid", "F91259E7-4F95-46C2-A928-6A558CC0D3D3_chunk_0",
+			"F91259E7-4F95-46C2-A928-6A558CC0D3D3", 0, true,
+		},
 		{"real uuid untouched", "f91259e7-4f95-46c2-a928-6a558cc0d3d3", "", 0, false},
 		{"non-uuid prefix", "knowledge_1_chunk_2", "", 0, false},
 		{"missing index", "f91259e7-4f95-46c2-a928-6a558cc0d3d3_chunk_", "", 0, false},
@@ -45,7 +49,7 @@ type fakeChunkRepoForFallback struct {
 	calledByFallback bool
 }
 
-func (f *fakeChunkRepoForFallback) GetChunkByIDOnly(_ context.Context, id string) (*types.Chunk, error) {
+func (f *fakeChunkRepoForFallback) GetChunkByIDOnly(_ context.Context, _ string) (*types.Chunk, error) {
 	f.calledByID = true
 	return nil, ErrChunkNotFound
 }
