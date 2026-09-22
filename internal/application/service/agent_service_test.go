@@ -662,6 +662,56 @@ func TestCreateAgentEngineInjectsHostWorkspaceIntoPromptAndTools(t *testing.T) {
 	require.NotContains(t, chatModel.lastToolDescriptions[tools.ToolShellExec], sandbox.SessionWorkspaceRoot)
 }
 
+func TestLookupSessionWorkspaceLayoutFailsClosedWhenHostPinReadFails(t *testing.T) {
+	db := newPinTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	svc := &agentService{
+		hostSandbox:   &capableManager{typ: sandbox.SandboxTypeHost},
+		sandboxPinner: NewSessionSandboxPinner(db),
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{})
+
+	require.Equal(t, sandbox.FailedHostWorkspaceLayout(), layout)
+	require.NotEqual(t, sandbox.RemoteWorkspaceLayout().Root, layout.Root)
+}
+
+func TestLookupSessionWorkspaceLayoutFailsClosedWhenHostScriptsDisabled(t *testing.T) {
+	svc := &agentService{
+		hostSandbox:   &capableManager{typ: sandbox.SandboxTypeHost},
+		sandboxPolicy: disabledPolicy{},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{})
+
+	require.Equal(t, sandbox.FailedHostWorkspaceLayout(), layout)
+}
+
+func TestLookupSessionWorkspaceLayoutStaysRemoteWithoutHostSandbox(t *testing.T) {
+	layout := (&agentService{}).lookupSessionWorkspaceLayout(
+		context.Background(), "sess-1", &types.AgentConfig{},
+	)
+	require.Equal(t, sandbox.RemoteWorkspaceLayout(), layout)
+}
+
+func TestLookupSessionWorkspaceLayoutKeepsRemoteWhenNamedConfigFails(t *testing.T) {
+	svc := &agentService{
+		hostSandbox: &capableManager{typ: sandbox.SandboxTypeHost},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{
+		SandboxConfigID: "cfg-cube",
+	})
+
+	require.Equal(t, sandbox.RemoteWorkspaceLayout(), layout)
+}
+
 func TestRegisterSandboxShellIfAllowedRemoteKeepsSkillsGate(t *testing.T) {
 	registry := tools.NewToolRegistry()
 	svc := &agentService{

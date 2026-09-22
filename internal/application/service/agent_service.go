@@ -573,16 +573,45 @@ func (s *agentService) lookupSessionWorkspaceLayout(
 	sessionID string,
 	config *types.AgentConfig,
 ) sandbox.WorkspaceLayout {
+	configID := ""
+	if config != nil {
+		configID = config.SandboxConfigID
+	}
 	mgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
-	if err != nil || mgr == nil {
-		return sandbox.RemoteWorkspaceLayout()
+	return sessionWorkspaceLayout(ctx, sessionID, mgr, err, s.hostSandbox, configID)
+}
+
+// sessionWorkspaceLayout is the layout prompts and attachment staging share.
+// A Lite host session must never fall back to /workspace: that path is the
+// remote contract, and describing it after a pin/layout miss sends the model
+// to a directory that does not exist on the machine.
+func sessionWorkspaceLayout(
+	ctx context.Context,
+	sessionID string,
+	mgr sandbox.Manager,
+	resolveErr error,
+	host sandbox.Manager,
+	configID string,
+) sandbox.WorkspaceLayout {
+	if resolveErr != nil || mgr == nil {
+		return fallbackSessionWorkspaceLayout(host, configID)
 	}
 	if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
-		layout, layoutErr := provider.SessionWorkspaceLayout(ctx, sessionID)
-		if layoutErr != nil || !layout.HasRoot() {
+		layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+		if err != nil || !layout.HasRoot() {
 			return sandbox.FailedHostWorkspaceLayout()
 		}
 		return layout.Normalized()
+	}
+	if mgr.GetType() == sandbox.SandboxTypeHost {
+		return sandbox.FailedHostWorkspaceLayout()
+	}
+	return sandbox.RemoteWorkspaceLayout()
+}
+
+func fallbackSessionWorkspaceLayout(host sandbox.Manager, configID string) sandbox.WorkspaceLayout {
+	if liteHostSandbox(host) != nil && !hasNamedSandboxConfig(configID) {
+		return sandbox.FailedHostWorkspaceLayout()
 	}
 	return sandbox.RemoteWorkspaceLayout()
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -197,21 +196,14 @@ func (s *sessionService) AgentQA(
 	if storeErr != nil {
 		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
 	}
-	layout := sandbox.RemoteWorkspaceLayout()
-	if mgr, _, layoutErr := resolveSandboxForExecution(
+	mgr, _, layoutErr := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		req.Session.TenantID, sessionID, agentConfig.SandboxConfigID, s.sandboxPolicy,
 		withLiteHostSandbox(s.hostSandbox),
-	); layoutErr == nil {
-		if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
-			sessionLayout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
-			if err != nil || !sessionLayout.HasRoot() {
-				layout = sandbox.FailedHostWorkspaceLayout()
-			} else {
-				layout = sessionLayout.Normalized()
-			}
-		}
-	}
+	)
+	layout := sessionWorkspaceLayout(
+		ctx, sessionID, mgr, layoutErr, s.hostSandbox, agentConfig.SandboxConfigID,
+	)
 	if inputStore != nil && strings.TrimSpace(layout.InputDir) != "" {
 		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
 		if loadErr != nil {
