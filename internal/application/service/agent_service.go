@@ -734,7 +734,39 @@ func (s *agentService) userEnvResolver(
 	if tenantID == 0 {
 		return nil
 	}
-	return NewUserEnvResolver(rows, repository.NewTenantSkillRepository(s.db), tenantID, configID)
+	return NewUserEnvResolver(
+		rows,
+		repository.NewTenantSkillRepository(s.db),
+		sandboxCreateTimeEnvVars(ctx, s.db, tenantID, configID),
+		tenantID, configID,
+	)
+}
+
+// sandboxCreateTimeEnvVars loads the config's env_vars once per agent run for
+// the required check. They are not re-injected: the container already has them.
+// A read failure degrades to empty so a DB blip does not surface as "nobody
+// has set this credential".
+func sandboxCreateTimeEnvVars(
+	ctx context.Context, db *gorm.DB, tenantID uint64, configID string,
+) map[string]string {
+	if db == nil || db.Config == nil {
+		return nil
+	}
+	cfg, err := repository.NewTenantSandboxConfigRepository(db).GetByID(ctx, tenantID, configID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] sandbox config %s: create-time env unavailable: %v", configID, err)
+		return nil
+	}
+	if cfg == nil || cfg.Config == nil {
+		return nil
+	}
+	env := map[string]string{}
+	for name, value := range cfg.Config.EnvVars {
+		if value != "" {
+			env[name] = value
+		}
+	}
+	return env
 }
 
 // skillEnvCapture writes declared skill credentials a successful shell_exec
