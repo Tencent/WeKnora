@@ -4798,6 +4798,9 @@ export default {
   createChat: {
     title: '안녕하세요, WeKnora입니다 — 당신의 지식을 손끝에',
     newSessionTitle: '새 세션',
+    openProject: '프로젝트 선택',
+    clearProject: '바인딩 해제',
+    pickFailed: '선택한 경로를 열 수 없습니다',
     messages: {
       createFailed: '세션 생성 실패',
       createError: '세션 생성 실패, 나중에 다시 시도해주세요'
@@ -7312,6 +7315,7 @@ export default {
     deleteSession: '대화 삭제',
     renamePlaceholder: '대화 제목을 입력하세요',
     unpinSuccess: '대화 고정이 해제되었습니다',
+    temporaryWorkspace: '임시 작업 영역',
     sessionIdCopied: '세션 ID가 복사되었습니다',
     linkCopied: '대화 링크가 복사되었습니다',
     copyFailed: '복사하지 못했습니다. 브라우저 클립보드 권한을 확인하세요.',

@@ -4800,6 +4800,9 @@ export default {
   createChat: {
     title: 'Hi，我是 WeKnora，让你的知识触手可及',
     newSessionTitle: '新会话',
+    openProject: '选择项目',
+    clearProject: '取消绑定',
+    pickFailed: '无法打开所选路径',
     messages: {
       createFailed: '创建会话失败',
       createError: '创建会话失败，请稍后重试'
@@ -7314,6 +7317,7 @@ export default {
     deleteSession: '删除对话',
     renamePlaceholder: '输入对话标题',
     unpinSuccess: '已取消置顶',
+    temporaryWorkspace: '临时工作区',
     sessionIdCopied: '会话 ID 已复制',
     linkCopied: '对话链接已复制',
     copyFailed: '复制失败，请检查浏览器剪贴板权限',

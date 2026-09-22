@@ -1,9 +1,9 @@
 import { get, post, put, del, postChat, getDown } from "../../utils/request";
+import { withOptionalProjectDir } from "../../utils/hostWorkspace";
 
-
-
-export async function createSessions(data = {}) {
-  return post("/api/v1/sessions", data);
+export async function createSessions(data: Record<string, unknown> = {}) {
+  const projectDir = typeof data.project_dir === 'string' ? data.project_dir : undefined
+  return post("/api/v1/sessions", withOptionalProjectDir(data, projectDir));
 }
 
 export async function getSessionsList(page: number, page_size: number, source?: string) {

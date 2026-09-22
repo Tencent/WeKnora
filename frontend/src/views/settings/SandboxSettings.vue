@@ -569,8 +569,8 @@ async function forceRemove(record: SandboxConfigRecord) {
   await removeRecord(record, true)
 }
 
-onMounted(() => {
-  void deploymentCapabilities.ensureLoaded()
+onMounted(async () => {
+  await deploymentCapabilities.ensureLoaded()
   load()
 })
 </script>

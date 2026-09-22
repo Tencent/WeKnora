@@ -202,6 +202,7 @@ export default {
     deleteSession: '会話を削除',
     renamePlaceholder: '会話のタイトルを入力してください',
     unpinSuccess: '会話のピン留めを解除しました',
+    temporaryWorkspace: '一時ワークスペース',
     sessionIdCopied: 'セッションIDをコピーしました',
     linkCopied: '会話リンクをコピーしました',
     copyFailed: 'コピーに失敗しました。ブラウザのクリップボード権限を確認してください。',
@@ -2723,6 +2724,9 @@ export default {
   createChat: {
     title: 'こんにちは、WeKnoraです。あなたのナレッジを、すぐそばに',
     newSessionTitle: '新しいセッション',
+    openProject: 'プロジェクトを選択',
+    clearProject: '解除',
+    pickFailed: '選択したパスを開けませんでした',
     messages: {
       createFailed: 'セッションの作成に失敗しました',
       createError: 'セッションの作成に失敗しました。しばらくしてから再試行してください'

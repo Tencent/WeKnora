@@ -137,6 +137,8 @@ Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和
 | `cube` | 稳定 | Tencent CubeSandbox MicroVM；会话级持久，支持多机（需 Redis） |
 | `e2b` | 稳定 | E2B 云端 MicroVM；会话级持久，支持多机（需 Redis）；依赖第三方 SDK go-e2b |
 
+Lite 桌面版另有 OS 强制隔离的 `host` 后端（不是已删除的 `local` 裸跑后端）。一期不跑技能；工作区是真实主机路径，不是 `/workspace`。详见 [本地沙盒后端](sandbox-local-backend.md)。
+
 ### 工作区沙箱后端配置
 
 一个工作区可以维护**多份具名**沙箱后端配置（「设置 → 沙箱后端」），智能体在编辑弹窗的「能力扩展 → 沙箱后端」里各自选一份。不选表示禁用脚本执行。

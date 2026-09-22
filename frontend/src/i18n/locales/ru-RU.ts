@@ -4798,6 +4798,9 @@ export default {
   createChat: {
     title: 'Привет, я WeKnora — ваши знания всегда под рукой',
     newSessionTitle: 'Новая сессия',
+    openProject: 'Выбрать проект',
+    clearProject: 'Снять привязку',
+    pickFailed: 'Не удалось открыть выбранный путь',
     messages: {
       createFailed: 'Не удалось создать сессию',
       createError: 'Не удалось создать сессию, попробуйте позже'
@@ -7312,6 +7315,7 @@ export default {
     deleteSession: 'Удалить диалог',
     renamePlaceholder: 'Введите название диалога',
     unpinSuccess: 'Диалог откреплён',
+    temporaryWorkspace: 'Временная рабочая область',
     sessionIdCopied: 'ID сессии скопирован',
     linkCopied: 'Ссылка на диалог скопирована',
     copyFailed: 'Не удалось скопировать. Проверьте разрешение браузера на доступ к буферу обмена.',
