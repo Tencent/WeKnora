@@ -1,0 +1,15 @@
+data: {"model":"qwen-plus","id":"chatcmpl-417761f0-1ac8-97b0-a20c-0a74bd194cc6","created":1790092866,"object":"chat.completion.chunk","usage":null,"choices":[{"logprobs":null,"index":0,"delta":{"content":"","role":"assistant","tool_calls":[{"id":"call_e20759270f864d6cae43f3","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}
+
+data: {"model":"qwen-plus","id":"chatcmpl-417761f0-1ac8-97b0-a20c-0a74bd194cc6","choices":[{"delta":{"content":"","tool_calls":[{"id":"","type":"function","function":{"arguments":"{\"city\": \""}}]},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092866,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-417761f0-1ac8-97b0-a20c-0a74bd194cc6","choices":[{"delta":{"content":"","tool_calls":[{"id":"","type":"function","function":{"arguments":"北京\"}"}}]},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092866,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-417761f0-1ac8-97b0-a20c-0a74bd194cc6","choices":[{"delta":{"content":"","tool_calls":[{"id":"call_bfad3352e82641399b9337","type":"function","function":{"name":"get_weather","arguments":"{\""}}]},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092866,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-417761f0-1ac8-97b0-a20c-0a74bd194cc6","choices":[{"delta":{"content":"","tool_calls":[{"id":"","type":"function","function":{"arguments":"city\": \"上海\"}"}}]},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092866,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-417761f0-1ac8-97b0-a20c-0a74bd194cc6","choices":[{"delta":{"tool_calls":[{"function":{"arguments":null},"id":"","type":"function"}],"content":""},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092866,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-417761f0-1ac8-97b0-a20c-0a74bd194cc6","choices":[{"delta":{},"index":0,"finish_reason":"tool_calls","logprobs":null}],"created":1790092866,"object":"chat.completion.chunk","usage":null}
+
+data: [DONE]

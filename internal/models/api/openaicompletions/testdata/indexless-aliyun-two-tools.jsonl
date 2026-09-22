@@ -1,0 +1,15 @@
+data: {"model":"qwen-plus","id":"chatcmpl-8088ee93-17b6-9bd0-b89e-37eedee2fc85","created":1790092869,"object":"chat.completion.chunk","usage":null,"choices":[{"logprobs":null,"index":0,"delta":{"content":"","role":"assistant","tool_calls":[{"id":"call_b1e7bf092d8f48e6b9c732","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}
+
+data: {"model":"qwen-plus","id":"chatcmpl-8088ee93-17b6-9bd0-b89e-37eedee2fc85","choices":[{"delta":{"content":"","tool_calls":[{"id":"","type":"function","function":{"arguments":"{\"city\": \""}}]},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092869,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-8088ee93-17b6-9bd0-b89e-37eedee2fc85","choices":[{"delta":{"content":"","tool_calls":[{"id":"","type":"function","function":{"arguments":"北京\"}"}}]},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092869,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-8088ee93-17b6-9bd0-b89e-37eedee2fc85","choices":[{"delta":{"content":"","tool_calls":[{"id":"call_9bcf375915b4412db2d2b2","type":"function","function":{"name":"get_local_time","arguments":""}}]},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092869,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-8088ee93-17b6-9bd0-b89e-37eedee2fc85","choices":[{"delta":{"content":"","tool_calls":[{"id":"","type":"function","function":{"arguments":"{\"city\": \"上海\"}"}}]},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092869,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-8088ee93-17b6-9bd0-b89e-37eedee2fc85","choices":[{"delta":{"tool_calls":[{"function":{"arguments":null},"id":"","type":"function"}],"content":""},"index":0,"finish_reason":null,"logprobs":null}],"created":1790092869,"object":"chat.completion.chunk","usage":null}
+
+data: {"model":"qwen-plus","id":"chatcmpl-8088ee93-17b6-9bd0-b89e-37eedee2fc85","choices":[{"delta":{},"index":0,"finish_reason":"tool_calls","logprobs":null}],"created":1790092869,"object":"chat.completion.chunk","usage":null}
+
+data: [DONE]
