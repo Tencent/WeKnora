@@ -2501,6 +2501,33 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	return stabilize()
 }
 
+// errWikiLLMTruncated is a sentinel marking a page rewrite cut off by the
+// model token budget. Only the page-rewrite path (generatePageRewrite)
+// treats it as fatal; every other wiki LLM caller keeps truncated content
+// exactly as before (Tencent/WeKnora#3492 review).
+var errWikiLLMTruncated = errors.New("LLM rewrite truncated by the model token budget")
+
+// isWikiLLMTruncatedFinishReason mirrors isLengthFinishReason in
+// internal/agent: OpenAI reports the token-budget stop as "length" while
+// OpenAI-compatible gateways pass through "max_tokens" or
+// "max_output_tokens" verbatim, with arbitrary case/padding.
+func isWikiLLMTruncatedFinishReason(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "length", "max_tokens", "max_output_tokens":
+		return true
+	default:
+		return false
+	}
+}
+
+// wikiLLMResult is the coalesced outcome of one wiki LLM call: the model
+// output plus the verbatim finish reason, so each caller can decide how to
+// treat a token-budget stop without re-issuing the call.
+type wikiLLMResult struct {
+	content      string
+	finishReason string
+}
+
 // generateWithTemplate executes a prompt template and calls the LLM with
 // bounded exponential-backoff retries for transient infrastructure errors.
 //
@@ -2519,16 +2546,42 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 // summary page permanently. Retries plus failedOps requeuing (see
 // mapOneDocument) turn those events into at-most-a-few-minute hiccups.
 func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel chat.Chat, promptTpl string, data map[string]string) (string, error) {
+	content, _, err := s.generateWithTemplateAndFinish(ctx, chatModel, promptTpl, data)
+	return content, err
+}
+
+// generatePageRewrite is the page-rewrite-only LLM entry point
+// (WikiPageModifyUserPrompt). A token-budget stop must never flow into a
+// page write-back: callers store rewrite output on success, so a swallowed
+// truncation would silently shrink the page (Tencent/WeKnora#3468). Fail
+// fast with an errWikiLLMTruncated error instead of retrying — the same
+// prompt truncates deterministically, and the batch err path already keeps
+// the existing page. All non-rewrite callers (summary, extraction, dedup,
+// index intro, taxonomy, citations, candidate slugs) keep using
+// generateWithTemplate and accept truncated content as before.
+func (s *wikiIngestService) generatePageRewrite(ctx context.Context, chatModel chat.Chat, promptTpl string, data map[string]string) (string, error) {
+	content, finishReason, err := s.generateWithTemplateAndFinish(ctx, chatModel, promptTpl, data)
+	if err != nil {
+		return "", err
+	}
+	if isWikiLLMTruncatedFinishReason(finishReason) {
+		logger.Warnf(ctx, "wiki ingest: page rewrite truncated (finish_reason=%q), keeping existing content", finishReason)
+		return "", fmt.Errorf("LLM rewrite truncated (finish_reason=%s): %w", finishReason, errWikiLLMTruncated)
+	}
+	return content, nil
+}
+
+func (s *wikiIngestService) generateWithTemplateAndFinish(ctx context.Context, chatModel chat.Chat, promptTpl string, data map[string]string) (string, string, error) {
 	tmpl, err := template.New("wiki").Parse(promptTpl)
 	if err != nil {
-		return "", fmt.Errorf("parse template: %w", err)
+		return "", "", fmt.Errorf("parse template: %w", err)
 	}
 
 	maskedData, urlMap := maskTemplateDataImageURLs(data)
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, maskedData); err != nil {
-		return "", fmt.Errorf("execute template: %w", err)
+		return "", "", fmt.Errorf("execute template: %w", err)
 	}
 
 	prompt := buf.String()
@@ -2590,18 +2643,12 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
 			response, callErr := chatModel.Chat(ctx, messages, opts)
 			if callErr == nil && response != nil {
-				// A length-truncated rewrite must never flow into a page
-				// write-back: callers store generateWithTemplate output on
-				// success, so swallowing finish_reason=length silently
-				// shrinks the page (Tencent/WeKnora#3468). Fail fast
-				// instead of retrying — the same prompt truncates
-				// deterministically, and the batch err path already keeps
-				// the existing page.
-				if response.FinishReason == "length" {
-					logger.Warnf(ctx, "wiki ingest: LLM rewrite truncated (finish_reason=length), keeping existing content")
-					return "", errors.New("LLM rewrite truncated (finish_reason=length)")
-				}
-				return response.Content, nil
+				// Surface the verbatim finish reason to the caller without
+				// retrying: a token-budget stop is deterministic for a fixed
+				// prompt, so retrying only burns calls. Each caller decides:
+				// generatePageRewrite fails fast (Tencent/WeKnora#3468),
+				// every other caller keeps the content as before.
+				return wikiLLMResult{content: response.Content, finishReason: response.FinishReason}, nil
 			}
 			if callErr == nil {
 				callErr = errors.New("LLM returned nil response")
@@ -2635,22 +2682,22 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 	if !tenantScoped {
 		value, executeErr := execute()
 		if executeErr != nil {
-			return "", executeErr
+			return "", "", executeErr
 		}
-		content, _ := value.(string)
-		return unmaskImageURLs(content, urlMap), nil
+		res, _ := value.(wikiLLMResult)
+		return unmaskImageURLs(res.content, urlMap), res.finishReason, nil
 	}
 	resultCh := s.llmRequests.DoChan(requestKey, execute)
 
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", "", ctx.Err()
 	case result := <-resultCh:
 		if result.Err != nil {
-			return "", result.Err
+			return "", "", result.Err
 		}
-		content, _ := result.Val.(string)
-		return unmaskImageURLs(content, urlMap), nil
+		res, _ := result.Val.(wikiLLMResult)
+		return unmaskImageURLs(res.content, urlMap), res.finishReason, nil
 	}
 }
 
