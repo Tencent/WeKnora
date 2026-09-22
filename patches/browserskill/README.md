@@ -16,8 +16,8 @@ target architecture.
 | --- | --- | --- |
 | `01-browser-read-reliability.patch` | 10 s deadline on renderer reads (snapshot, accessibility, layout, frame tree, auto-attach); a timed-out read stops capture fallback and is reported as `cdp_failed`, never `cancelled`; auto-attach configured once per debugger session | Equivalent upstream behavior passes the read-timeout regressions |
 
-Patch 01 is the only remaining downstream change and has no upstream
-equivalent yet; it is the candidate for the next upstream PR.
+Patch 01 is the only remaining downstream change; it is proposed upstream as
+[PR #318](https://github.com/Tencent/BrowserSkill/pull/318).
 
 ## Retired patches
 
