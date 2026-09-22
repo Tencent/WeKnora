@@ -221,7 +221,7 @@ const (
 
 ```go
 var g errgroup.Group
-metricHook := NewHookMetric(len(dataset))
+metricHook := NewHookMetric(len(dataset), knowledge.ID)
 g.SetLimit(max(runtime.GOMAXPROCS(0)-1, 1))
 for i, qaPair := range dataset {
     g.Go(func() error {
@@ -248,7 +248,9 @@ type MetricInput struct {
 `metric_hook.go` 对每个样本遍历所有已注册指标计算器求分，最终 `Avg()` 对全部样本逐指标取均值，写入 `MetricResult`。
 
 ::: warning RetrievalIDs 的口径
-`RetrievalIDs` 必须是**数据集里的 passage ID**，不能直接用检索结果的 `ChunkIndex`——后者只是分块在知识库里的序号，与 passage ID 没有对应关系，直接使用会让所有检索指标恒为 0。`recordFinish` 因此把每条检索结果的正文与该样本的 ground truth passage 做双向包含匹配，反查出对应的 pid 并去重。重排结果为空时回退用原始检索结果，避免整条样本记成「什么都没召回」。
+`RetrievalIDs` 使用数据集段落标识（Passage ID，PID）。评估按 PID 索引组织 passage 列表，同步导入路径将 `ParsedChunk.Seq` 保留为 `Chunk.ChunkIndex`。`recordFinish` 仅接受本次临时评估知识 ID 对应的来源，再使用 `ChunkIndex` 关联 PID。
+
+未知来源、无效编号和重复 PID 保留其原排序位置并按未命中处理。例如参考 PID 为 `[3]`，返回结果为 `[未知来源, PID 3]` 时，Precision 和 MRR 均为 `0.5`。重排结果非空时优先使用重排结果，为空时使用搜索结果。
 
 语料灌入也必须**同步等待索引完成**（`CreateKnowledgeFromPassageSync`）：异步入库时评估查询会跑在索引建好之前，同样表现为指标恒为 0。另外 passage 列表按 `maxPID + 1` 分配长度，pid 是 0-based 且包含末位。
 :::
