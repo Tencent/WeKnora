@@ -42,10 +42,10 @@ for the user as cards with an Install button. Installing is the user's decision 
 done from the card by a workspace admin; it adds the skill to the sandbox image every
 conversation on this sandbox uses. You cannot install a skill yourself.
 
-Do not install skills with shell_exec. A skill downloaded inside this sandbox is only
-loaded for this session: it is not installed, not listed, and gone when the session
-ends. Load one that way only when the user wants to use it right now, and say it is
-temporary.
+Do not install skills with shell_exec. A skill downloaded with a shell command is only
+loaded for this conversation: it is not installed, not listed as a skill, and other
+conversations do not get it. Load one that way only when the user wants to use it right
+now, and say it is temporary.
 
 ## source formats
 

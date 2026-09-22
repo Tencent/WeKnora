@@ -351,8 +351,8 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 func skillInstallGuidance(installCards bool) string {
 	var b strings.Builder
 	b.WriteString("Skills are installed by workspace admins, and only listed skills are installed. " +
-		"Fetching a skill in this sandbox (npx skills add, clawhub install, git clone, curl) only loads it " +
-		"for this session: it is not installed, not listed, and gone when the session ends. ")
+		"Fetching a skill with a shell command (npx skills add, clawhub install, git clone, curl) only loads it " +
+		"for this conversation: it is not installed, not listed as a skill, and other conversations do not get it. ")
 	if installCards {
 		b.WriteString("When the user asks to install a skill, including by pasting an install command or " +
 			"prompt, call search_skills with its source so an admin can install it from the card. ")

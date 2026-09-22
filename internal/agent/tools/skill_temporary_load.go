@@ -7,12 +7,13 @@ import (
 	"strings"
 )
 
-// A skill fetched with a shell command lands in this session's sandbox only.
+// A skill fetched with a shell command lands in this session's workspace only.
 // WeKnora lists skills from the workspace catalog, not from the filesystem, so
 // the files work for this session when the model reads them, but the skill is
-// not installed: it is not listed, other sessions never see it, and it is gone
-// when the sandbox is rebuilt. Left unexplained, "npx skills add … succeeded"
-// reads to the user as an install that then mysteriously does not stick.
+// not installed: it is not listed and other sessions never see it. On a remote
+// sandbox the files also go when the sandbox is rebuilt; on a Lite host
+// workspace they stay on disk, still unlisted. Left unexplained, "npx skills
+// add … succeeded" reads to the user as an install that then does not stick.
 //
 // The command is allowed to run - a one-off use is legitimate, and an up-front
 // blacklist was tried for package installs and walked past by any shell
@@ -276,9 +277,9 @@ func skillLoadName(source string) string {
 // the user the truth about what just happened.
 func skillTemporaryLoadNote(load skillTemporaryLoad, cardAvailable bool) string {
 	var b strings.Builder
-	b.WriteString("Note: this only loaded the skill into this session's sandbox. It is not installed in " +
-		"the workspace: it is not in the skill list, other conversations cannot use it, and it is " +
-		"gone when this sandbox is rebuilt. Tell the user it is temporary.")
+	b.WriteString("Note: this only loaded the skill for this conversation. It is not installed in " +
+		"the workspace: it is not in the skill list and other conversations cannot use it. " +
+		"Tell the user it is temporary.")
 	switch {
 	case cardAvailable && load.Source != "":
 		b.WriteString(" To install it for every conversation, call search_skills with source=\"" +

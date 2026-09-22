@@ -83,17 +83,17 @@ func TestArtifactGuidanceUsesConfiguredOutputDirectory(t *testing.T) {
 // sends install requests to the card when search_skills is there.
 func TestSkillInstallGuidanceFollowsTheInstallCard(t *testing.T) {
 	withCard := formatToolGuidance([]string{"shell_exec", "search_skills"})
-	require.Contains(t, withCard, "only loads it for this session")
+	require.Contains(t, withCard, "only loads it for this conversation")
 	require.Contains(t, withCard, "call search_skills with its source")
 	require.Contains(t, withCard, "say it is temporary")
 
 	withoutCard := formatToolGuidance([]string{"shell_exec"})
-	require.Contains(t, withoutCard, "only loads it for this session")
+	require.Contains(t, withoutCard, "only loads it for this conversation")
 	require.Contains(t, withoutCard, "skill settings")
 	require.NotContains(t, withoutCard, "search_skills")
 
 	installer := formatToolGuidanceForMode([]string{"shell_exec"}, true, sandbox.WorkspaceLayout{})
-	require.NotContains(t, installer, "only loads it for this session",
+	require.NotContains(t, installer, "only loads it for this conversation",
 		"the installer agent is the one path that does install")
 	require.NotContains(t, formatToolGuidance([]string{"read_file"}), "search_skills")
 }

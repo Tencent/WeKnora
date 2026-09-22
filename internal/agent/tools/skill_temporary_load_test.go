@@ -85,7 +85,7 @@ func TestShellExecNotesThatAFetchedSkillIsOnlyTemporary(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, result.Success, result.Error)
-	assert.Contains(t, result.Output, "only loaded the skill into this session's sandbox")
+	assert.Contains(t, result.Output, "only loaded the skill for this conversation")
 	assert.Contains(t, result.Output, `call search_skills with source="skills-sh:anthropics/skills/pdf"`)
 	assert.Equal(t, map[string]interface{}{
 		"tool": "skills", "source": "skills-sh:anthropics/skills/pdf", "name": "pdf",
