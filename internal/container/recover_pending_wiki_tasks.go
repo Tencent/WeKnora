@@ -72,9 +72,12 @@ func recoverPendingWikiTasks(db *gorm.DB, task interfaces.TaskEnqueuer) {
 		if scope.ScopeID == "" {
 			continue
 		}
+		// The batch plans its taxonomy in the trigger's language; take it
+		// from the queued ops rather than defaulting to the server's.
 		payload, err := json.Marshal(service.WikiIngestPayload{
 			TenantID:        scope.TenantID,
 			KnowledgeBaseID: scope.ScopeID,
+			Language:        service.WikiPendingLanguage(ctx, db, scope.TenantID, scope.ScopeID),
 		})
 		if err != nil {
 			logger.Warnf(ctx, "[WikiRecovery] marshal trigger for KB %s failed: %v", scope.ScopeID, err)

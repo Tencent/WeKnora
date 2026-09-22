@@ -39,7 +39,7 @@ type wikiUnavailablePendingRepo struct {
 	drained   []string
 }
 
-func (r *wikiUnavailablePendingRepo) DrainUnclaimed(
+func (r *wikiUnavailablePendingRepo) DrainUnclaimedAndRelease(
 	_ context.Context, taskType, scope, scopeID, op string, _ time.Time,
 ) ([]string, error) {
 	r.drained = append(r.drained, taskType+"|"+scope+"|"+scopeID+"|"+op)
@@ -81,21 +81,33 @@ func TestWikiIngestReleasesDocumentsWhenWikiUnavailable(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			pending := &wikiUnavailablePendingRepo{drainKeys: []string{"k-1", "k-2"}}
-			knowledgeRepo := &wikiEnqueueFailureKnowledgeRepo{}
 			svc := &wikiIngestService{
-				kbService:     &wikiGuardKBService{kb: test.kb},
-				modelService:  &wikiUnavailableModelService{err: test.modelErr},
-				pendingRepo:   pending,
-				knowledgeRepo: knowledgeRepo,
+				kbService:    &wikiGuardKBService{kb: test.kb},
+				modelService: &wikiUnavailableModelService{err: test.modelErr},
+				pendingRepo:  pending,
 			}
 
 			err := svc.ProcessWikiIngest(context.Background(), asynq.NewTask(types.TypeWikiIngest, payload))
 
 			require.NoError(t, err)
 			assert.Equal(t, []string{wikiTaskType + "|" + wikiTaskScope + "|kb-1|" + WikiOpIngest}, pending.drained)
-			assert.Equal(t, []string{"k-1", "k-2"}, knowledgeRepo.finalized)
 		})
 	}
+}
+
+// A drain that fails (and so rolled back) is retried, not acked.
+func TestWikiIngestRetriesWhenReleaseFails(t *testing.T) {
+	payload, err := json.Marshal(WikiIngestPayload{TenantID: 7, KnowledgeBaseID: "kb-1"})
+	require.NoError(t, err)
+	releaseErr := errors.New("postgres unavailable")
+	svc := &wikiIngestService{
+		kbService:   &wikiGuardKBService{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		pendingRepo: &wikiUnavailablePendingRepo{drainErr: releaseErr},
+	}
+
+	err = svc.ProcessWikiIngest(context.Background(), asynq.NewTask(types.TypeWikiIngest, payload))
+
+	require.ErrorIs(t, err, releaseErr)
 }
 
 // A transient model lookup failure keeps the ops and retries as before.
@@ -148,7 +160,8 @@ func TestIsKnowledgeAbortedDistinguishesMissingFromUnreadable(t *testing.T) {
 		},
 		{
 			name: "transient read error", ctx: context.Background(),
-			repo: &abortCheckRepo{err: errors.New("connection reset")},
+			repo:        &abortCheckRepo{err: errors.New("connection reset")},
+			wantAborted: true, wantStatus: abortStatusUnreadable,
 		},
 		{
 			name: "worker context done", ctx: cancelled,
@@ -177,7 +190,8 @@ func TestIsKnowledgeAbortedDistinguishesMissingFromUnreadable(t *testing.T) {
 }
 
 // Rows held only by a durable wiki op get their KB's trigger re-armed, once
-// per KB and at most once per threshold.
+// per KB and at most once per threshold, in the language the ops were
+// queued with rather than the server default.
 func TestHousekeepingRearmsWikiTriggerForDurablyHeldRows(t *testing.T) {
 	db := setupHousekeepingDB(t)
 	queue := &wikiGuardTaskQueue{}
@@ -189,7 +203,12 @@ func TestHousekeepingRearmsWikiTriggerForDurablyHeldRows(t *testing.T) {
 			`INSERT INTO knowledges (id, tenant_id, knowledge_base_id, parse_status, updated_at)
 			 VALUES (?, 7, 'kb-1', ?, ?)`, id, types.ParseStatusFinalizing, stale,
 		).Error)
-		insertWikiPendingOp(t, db, "kb-1", id)
+		require.NoError(t, db.Exec(
+			`INSERT INTO task_pending_ops (tenant_id, task_type, scope, scope_id, op, dedup_key, payload)
+			 VALUES (7, ?, ?, 'kb-1', ?, ?, ?)`,
+			wikiTaskType, wikiTaskScope, WikiOpIngest, id,
+			`{"op":"ingest","knowledge_id":"`+id+`","language":"en-US"}`,
+		).Error)
 	}
 
 	svc.runSweep(context.Background())
@@ -201,7 +220,108 @@ func TestHousekeepingRearmsWikiTriggerForDurablyHeldRows(t *testing.T) {
 	require.NoError(t, json.Unmarshal(queue.tasks[0].Payload(), &payload))
 	assert.Equal(t, uint64(7), payload.TenantID)
 	assert.Equal(t, "kb-1", payload.KnowledgeBaseID)
+	assert.Equal(t, "en-US", payload.Language)
 	var status string
 	require.NoError(t, db.Raw(`SELECT parse_status FROM knowledges WHERE id = 'k-1'`).Scan(&status).Error)
 	assert.Equal(t, types.ParseStatusFinalizing, status)
+}
+
+type pipelineReadFailRepo struct {
+	interfaces.KnowledgeRepository
+	err     error
+	updates int
+}
+
+func (r *pipelineReadFailRepo) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
+	return nil, r.err
+}
+
+func (r *pipelineReadFailRepo) UpdateKnowledge(context.Context, *types.Knowledge) error {
+	r.updates++
+	return nil
+}
+
+// A row the abort check cannot read must stop the pipeline without writing
+// the in-memory row back (that Save would clobber an unseen cancel), and the
+// task must be retried rather than acked. chunkRepo is nil on purpose: going
+// on past the check would panic.
+func TestProcessChunksRetriesWhenAbortCheckCannotRead(t *testing.T) {
+	repo := &pipelineReadFailRepo{err: errors.New("connection reset")}
+	svc := &knowledgeService{repo: repo}
+	knowledge := &types.Knowledge{ID: "k-1", TenantID: 1, ParseStatus: types.ParseStatusProcessing}
+
+	err := svc.processChunks(context.Background(), &types.KnowledgeBase{ID: "kb-1"}, knowledge,
+		[]types.ParsedChunk{{Content: "body"}})
+
+	require.Error(t, err)
+	assert.Zero(t, repo.updates)
+}
+
+type vectorStoreOwnership struct {
+	owned bool
+	err   error
+}
+
+func (o vectorStoreOwnership) StoreOwnedBy(context.Context, string, uint64) (bool, error) {
+	return o.owned, o.err
+}
+
+type deleteCountingChunkRepo struct {
+	interfaces.ChunkRepository
+	deletes int
+}
+
+func (r *deleteCountingChunkRepo) DeleteChunksByKnowledgeID(context.Context, uint64, string) error {
+	r.deletes++
+	return nil
+}
+
+// The vector store is resolved before the old chunks are deleted: a store
+// that is gone fails the attempt with the document's data intact, and an
+// interrupted lookup is retried with nothing written.
+func TestProcessChunksResolvesVectorStoreBeforeDeletingChunks(t *testing.T) {
+	storeID := "store-1"
+	kb := &types.KnowledgeBase{
+		ID: "kb-1", TenantID: 1, EmbeddingModelID: "embedding-1", VectorStoreID: &storeID,
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+	}
+	tests := []struct {
+		name       string
+		ownership  vectorStoreOwnership
+		wantErr    bool
+		wantStatus string
+	}{
+		{name: "store gone", ownership: vectorStoreOwnership{owned: false}, wantStatus: types.ParseStatusFailed},
+		{name: "lookup interrupted", ownership: vectorStoreOwnership{err: context.Canceled}, wantErr: true},
+		{name: "lookup failed", ownership: vectorStoreOwnership{err: errors.New("connection reset")}, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			knowledge := &types.Knowledge{
+				ID: "k-1", TenantID: 1, KnowledgeBaseID: "kb-1", ParseStatus: types.ParseStatusProcessing,
+			}
+			repo := &embedFailureKnowledgeRepo{knowledge: knowledge}
+			chunks := &deleteCountingChunkRepo{}
+			svc := &knowledgeService{
+				repo:         repo,
+				chunkRepo:    chunks,
+				modelService: parentChildModelService{embedder: parentChildEmbedder{}},
+				ownership:    test.ownership,
+			}
+			ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{ID: 1})
+
+			err := svc.processChunks(ctx, kb, knowledge, []types.ParsedChunk{{Content: "body"}})
+
+			assert.Zero(t, chunks.deletes, "existing chunks must survive an unresolvable vector store")
+			if test.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, repo.updates)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, repo.updates, 1)
+			assert.Equal(t, test.wantStatus, repo.updates[0].ParseStatus)
+			assert.Contains(t, repo.updates[0].ErrorMessage, "failed to resolve vector store")
+		})
+	}
 }

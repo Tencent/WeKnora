@@ -189,7 +189,9 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 			opts.QuestionCount = 3
 		}
 	}
-	s.processChunks(ctx, kb, knowledge, chunks, opts)
+	if err := s.processChunks(ctx, kb, knowledge, chunks, opts); err != nil {
+		logger.Warnf(ctx, "process passages for knowledge %s: %v", knowledge.ID, err)
+	}
 }
 
 // ProcessChunksOptions contains options for processing chunks
@@ -263,16 +265,19 @@ func markKnowledgeProcessing(knowledge *types.Knowledge, now time.Time) {
 // replacement and mark the replacement's live attempt failed.
 func (s *knowledgeService) failKnowledgeOnEmbeddingModel(
 	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge, cause error,
-) {
-	s.failKnowledgeAtEmbedding(ctx, kb, knowledge, werrors.ErrCodeEmbeddingProviderFail,
+) error {
+	return s.failKnowledgeAtEmbedding(ctx, kb, knowledge, werrors.ErrCodeEmbeddingProviderFail,
 		"failed to get embedding model", cause)
 }
 
 // failKnowledgeAtEmbedding records cause as this attempt's terminal state at
-// the embedding stage; see failKnowledgeOnEmbeddingModel for the guards.
+// the embedding stage; see failKnowledgeOnEmbeddingModel for the guards. It
+// returns nil once the attempt is settled (failure recorded, or the row was
+// cancelled / deleted / replaced) and an error when nothing could be
+// recorded, so the task is retried instead of acked with the row in flight.
 func (s *knowledgeService) failKnowledgeAtEmbedding(
 	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge, code, what string, cause error,
-) {
+) error {
 	// A cancelled or expired context means the run was interrupted — the user
 	// cancelled (asynq CancelProcessing cancels the handler context), the
 	// worker was preempted, the process is shutting down. The model itself is
@@ -284,12 +289,12 @@ func (s *knowledgeService) failKnowledgeAtEmbedding(
 		logger.Infof(ctx,
 			"%s interrupted for %s (%v); leaving parse status untouched",
 			what, knowledge.ID, cause)
-		return
+		return fmt.Errorf("%s: %w", what, cause)
 	}
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx,
 			"Knowledge aborted (%s), not recording %q: %s", status, what, knowledge.ID)
-		return
+		return abortRetryErr(ctx, knowledge.ID, status)
 	}
 
 	knowledge.ParseStatus = types.ParseStatusFailed
@@ -297,6 +302,7 @@ func (s *knowledgeService) failKnowledgeAtEmbedding(
 	knowledge.UpdatedAt = time.Now()
 	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "failed to persist %q for %s: %v", what, knowledge.ID, err)
+		return fmt.Errorf("persist %s: %w", what, err)
 	}
 	s.beginStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
 		"model_id": kb.EmbeddingModelID,
@@ -305,6 +311,7 @@ func (s *knowledgeService) failKnowledgeAtEmbedding(
 	// error_detail is withheld from non-admin responses — so carry the same
 	// text the document list shows rather than a fixed generic string.
 	s.failStage(ctx, knowledge.ID, types.StageEmbedding, code, knowledge.ErrorMessage, cause)
+	return nil
 }
 
 // buildSplitterConfigFromChunking normalizes effective chunking settings with
@@ -334,7 +341,7 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
-) {
+) error {
 	// Get options
 	var options ProcessChunksOptions
 	if len(opts) > 0 {
@@ -363,11 +370,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// up yet so the branch is purely "stop early".
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
-		return
+		return abortRetryErr(ctx, knowledge.ID, status)
 	}
 	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
 		logger.Infof(ctx, "Knowledge source replaced, skipping chunk processing: %s", knowledge.ID)
-		return
+		return nil
 	}
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
@@ -377,22 +384,36 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
 			// Terminal for this attempt, and it has to be recorded as such.
-			// A KB that indexes vectors cannot proceed without an embedder,
-			// and processChunks reports nothing to its callers — returning
-			// silently leaves parse_status on "processing" with no task left
-			// to move it, so the row hangs until the housekeeping sweep fails
-			// it an hour later with a generic "stuck in processing" message.
-			// Failing here names the real cause instead: a model row that was
+			// A KB that indexes vectors cannot proceed without an embedder;
+			// returning without a status leaves parse_status on "processing",
+			// so the row hangs until the housekeeping sweep fails it hours
+			// later with a generic "stuck in processing" message. Failing
+			// here names the real cause instead: a model row that was
 			// deleted or deactivated, or a configuration the embedder factory
 			// refuses. (Credential and connectivity problems surface later, on
 			// the first BatchIndex round-trip — resolving a model only reads
 			// the row and constructs a client.)
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
-			s.failKnowledgeOnEmbeddingModel(ctx, kb, knowledge, err)
-			return
+			return s.failKnowledgeOnEmbeddingModel(ctx, kb, knowledge, err)
 		}
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
+	}
+
+	// Resolve the vector store before deleting anything: failing after the
+	// cleanup below would leave the document with neither old nor new chunks.
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
+	if err != nil && embeddingModel != nil {
+		// Indexing below dereferences the engine; a nil one would panic.
+		logger.Errorf(ctx, "processChunks resolve vector store for KB %s failed: %v", kb.ID, err)
+		if errors.Is(err, retriever.ErrVectorStoreUnavailable) {
+			// The lookup failed, not the store: retry rather than fail.
+			return fmt.Errorf("resolve vector store: %w", err)
+		}
+		return s.failKnowledgeAtEmbedding(ctx, kb, knowledge, werrors.ErrCodeVectorStoreWriteFailed,
+			"failed to resolve vector store", err)
 	}
 
 	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
@@ -405,16 +426,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
-	if err != nil && embeddingModel != nil {
-		// Indexing below dereferences the engine; a nil one would panic.
-		logger.Errorf(ctx, "processChunks resolve vector store for KB %s failed: %v", kb.ID, err)
-		s.failKnowledgeAtEmbedding(ctx, kb, knowledge, werrors.ErrCodeVectorStoreWriteFailed,
-			"failed to resolve vector store", err)
-		return
-	}
 	if embeddingModel != nil {
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
@@ -597,11 +608,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Nothing has been persisted yet, so both branches just bail.
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
-		return
+		return abortRetryErr(ctx, knowledge.ID, status)
 	}
 	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
 		logger.Infof(ctx, "Knowledge source replaced, skipping chunk write: %s", knowledge.ID)
-		return
+		return nil
 	}
 
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
@@ -617,7 +628,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
-		return
+		return nil
 	}
 	totalChunkChars := 0
 	for _, c := range insertChunks {
@@ -672,7 +683,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
-				return
+				return nil
 			}
 			// Check if there's enough storage quota available
 			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
@@ -680,7 +691,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
-				return
+				return nil
 			}
 		}
 
@@ -689,7 +700,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// cancelled → user wants to keep what was already persisted, just stop.
 		if s.isKnowledgeSourceReplaced(ctx, knowledge) {
 			logger.Infof(ctx, "Knowledge source replaced, skipping indexing: %s", knowledge.ID)
-			return
+			return nil
 		}
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) before indexing: %s", status, knowledge.ID)
@@ -698,7 +709,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 			}
-			return
+			return abortRetryErr(ctx, knowledge.ID, status)
 		}
 
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
@@ -727,7 +738,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			}
 			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
 				code, "batch index failed", err)
-			return
+			return nil
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
 		s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
@@ -741,7 +752,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// and downstream stages skip via the entry guards.
 		if s.isKnowledgeSourceReplaced(ctx, knowledge) {
 			logger.Infof(ctx, "Knowledge source replaced, skipping completion: %s", knowledge.ID)
-			return
+			return nil
 		}
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) after indexing: %s", status, knowledge.ID)
@@ -753,7 +764,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
 				}
 			}
-			return
+			return abortRetryErr(ctx, knowledge.ID, status)
 		}
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
@@ -799,6 +810,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
 	}
 	logger.GetLogger(ctx).Infof("processChunks successfully")
+	return nil
 }
 
 // defaultMaxInputChars is the default maximum characters used as input for
@@ -3351,7 +3363,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	// note in ProcessDocument for the cancel race this guards.
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "ProcessManualUpdate: knowledge aborted (%s), skipping: %s", status, knowledge.ID)
-		return nil
+		return abortRetryErr(ctx, knowledge.ID, status)
 	}
 	// Update status to processing
 	markKnowledgeProcessing(knowledge, time.Now())
@@ -3387,8 +3399,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	}
 
 	// Run manual processing (image resolution + chunking + embedding) synchronously within the worker
-	s.triggerManualProcessing(ctx, kb, knowledge, payload.Content, true)
-	return nil
+	return s.triggerManualProcessing(ctx, kb, knowledge, payload.Content, true)
 }
 
 // ProcessDocument handles Asynq document processing tasks
@@ -3501,7 +3512,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// and downstream checkpoints would treat the run as live).
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s) before marking processing: %s", status, knowledge.ID)
-		return nil
+		return abortRetryErr(ctx, knowledge.ID, status)
 	}
 	if payload.FilePath != "" && knowledge.FilePath != "" && payload.FilePath != knowledge.FilePath {
 		logger.Infof(ctx, "Document source replaced, skipping stale process task: %s", payload.KnowledgeID)
@@ -3678,8 +3689,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			EnableQuestionGeneration: payload.EnableQuestionGeneration,
 			QuestionCount:            payload.QuestionCount,
 		}
-		s.processChunks(ctx, kb, knowledge, passageChunks, passageOpts)
-		return nil
+		return s.processChunks(ctx, kb, knowledge, passageChunks, passageOpts)
 	} else {
 		// File import
 		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
@@ -3850,9 +3860,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
-	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
-
-	return nil
+	return s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 }
 
 // sanitizeReadResult protects every text field that can cross from a parser
