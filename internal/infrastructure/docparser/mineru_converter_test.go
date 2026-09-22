@@ -183,6 +183,12 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 			}
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Emulate real legacy servers: no V1 API, so the reader's
+				// version probe 404s and falls back to /file_parse.
+				if r.URL.Path == "/v1/health" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
 				got := capturedRequest{method: r.Method, path: r.URL.Path}
 				file, header, err := r.FormFile("files")
 				if err != nil {

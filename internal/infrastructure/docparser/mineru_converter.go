@@ -32,7 +32,8 @@ var (
 // MinerUReader calls a self-hosted MinerU API to read/convert documents.
 type MinerUReader struct {
 	endpoint      string
-	backend       string // "pipeline", "vlm-*", "hybrid-*"
+	apiKey        string // optional bearer for V1 servers started with an API key
+	backend       string // "pipeline", "vlm-*", "hybrid-*"; V1 maps to tier when the value names a tier
 	vlmServerURL  string // vLLM server URL for vlm-http-client / hybrid-http-client
 	formulaEnable bool
 	tableEnable   bool
@@ -50,6 +51,7 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 
 	c := &MinerUReader{
 		endpoint:      strings.TrimRight(overrides["mineru_endpoint"], "/"),
+		apiKey:        overrides["mineru_api_key"],
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
 		vlmServerURL:  overrides["mineru_vlm_server_url"],
 		formulaEnable: parseBoolOr(overrides["mineru_enable_formula"], true),
@@ -80,9 +82,24 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 
 	logger.Infof(context.Background(), "[MinerU] Parsing file=%s size=%d via %s", req.FileName, len(content), c.endpoint)
 
-	mdContent, imagesB64, err := c.callFileParse(ctx, content, req.FileName, req.FileType)
-	if err != nil {
-		return nil, fmt.Errorf("MinerU file_parse: %w", err)
+	var (
+		mdContent string
+		imagesB64 map[string]string
+		err       error
+	)
+	if detectMinerUAPI(ctx, c.endpoint, c.apiKey) {
+		// MinerU >= 4 (async V1 API). The V1 client returns the same
+		// (markdown, images) shape as the legacy /file_parse response.
+		v1 := newMinerUV1Client(c.endpoint, c.apiKey, c.backend, nil)
+		mdContent, imagesB64, err = v1.v1Parse(ctx, content, minerUUploadFileName(req.FileName, req.FileType))
+		if err != nil {
+			return nil, fmt.Errorf("MinerU V1 parse: %w", err)
+		}
+	} else {
+		mdContent, imagesB64, err = c.callFileParse(ctx, content, req.FileName, req.FileType)
+		if err != nil {
+			return nil, fmt.Errorf("MinerU file_parse: %w", err)
+		}
 	}
 
 	// MinerU already returns markdown with embedded HTML blocks (e.g. <table>, <details>).
@@ -358,7 +375,9 @@ func validateMinerUOutboundURL(rawURL string) error {
 	return nil
 }
 
-// PingMinerU checks if the self-hosted MinerU service is reachable.
+// PingMinerU checks if the self-hosted MinerU service is reachable. Both
+// flavors are accepted: the V1 API (GET /v1/health) and the legacy
+// synchronous API (GET /docs).
 func PingMinerU(endpoint string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
@@ -371,7 +390,15 @@ func PingMinerU(endpoint string) (bool, string) {
 		Timeout:      5 * time.Second,
 		MaxRedirects: 5,
 	})
-	resp, err := client.Get(endpoint + "/docs")
+	// V1 first (MinerU >= 4); fall back to the legacy /docs probe.
+	resp, err := client.Get(endpoint + "/v1/health")
+	if err == nil {
+		resp.Body.Close()
+		if resp.StatusCode < 400 {
+			return true, ""
+		}
+	}
+	resp, err = client.Get(endpoint + "/docs")
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
 	}
