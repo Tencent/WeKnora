@@ -336,4 +336,9 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 		wikiRead.GET("/issues", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.ListIssues)
 		wiki.PUT("/issues/:issue_id/status", g.OwnedWikiKBOrAdmin(), g.KBAccessWrite("kb_id"), wikiHandler.UpdateIssueStatus)
 	}
+
+	wikiSearch := g.apiKeyGroup(r.Group("/wiki-search", g.Viewer()), apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		wikiSearch.POST("", wikiHandler.SearchPagesAcross)
+	}
 }

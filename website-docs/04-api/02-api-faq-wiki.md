@@ -2,7 +2,7 @@
 
 管理知识库中的 FAQ 条目与 Wiki 页面，支持导入、检索、编辑和版本恢复。
 
-两组均为 KB 内容子资源：读为 Viewer+ 且 KB read（API key `retrieve`/full）；写为“KB 创建者 OR Admin+”且 KB write（API key `ingest`/full），并受 KB 白名单约束。
+两组均为 KB 内容子资源：读为 Viewer+ 且 KB read（API key `retrieve`/full）；写为“KB 创建者 OR Admin+”且 KB write（API key `ingest`/full），并受 KB 白名单约束。跨库 Wiki 搜索 `POST /wiki-search` 无路径 KB，Viewer+ 且 API key `retrieve`/full，handler 内校验每个目标库的 allow-list 与共享库 Viewer 权限。
 
 ## FAQ（/api/v1/knowledge-bases/:id/faq）
 
@@ -403,6 +403,40 @@ curl $BASE/api/v1/knowledgebase/kb-1/wiki/stats -H "Authorization: Bearer $TOKEN
 
 ```bash
 curl "$BASE/api/v1/knowledgebase/kb-1/wiki/search?q=部署" -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/wiki-search
+
+用途：跨知识库 Wiki 页面搜索（无会话、非混合检索）。Handler: `internal/handler/wiki_page.go` 的 `SearchPagesAcross`。算法与单库 `GET .../wiki/search` 相同（Postgres POSIX 正则 `~*`，标题 > slug > summary > 正文），对多个库做一次查询后按 `match_rank` 全局截断。API key：`retrieve`/full。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `query` | string | 是（`binding:"required"`） | 与单库 `q` 相同的 POSIX 正则（大小写不敏感） |
+| `knowledge_base_ids` | []string | 条件必填 | 多库；与 `knowledge_base_id` 至少提供一个，最多 32 个 |
+| `knowledge_base_id` | string | 否 | 单库兼容字段，合并进 ids |
+| `limit` | int | 否 | 全局 top-N，默认 10，最大 50 |
+
+任一目标库未开启 wiki → 400。库不存在或无读权限 → 404。API Key 白名单越权 → 403。非法正则 → 400。
+
+响应：200 `{"success":true,"data":[WikiSearchHit]}`。命中只含导航字段 + `match_snippet`，不含正文；全文用 `GET /knowledgebase/:kb_id/wiki/pages/{slug}`。
+
+| 响应字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 页面 ID |
+| `knowledge_base_id` | string | 来源库，跨库时用来拼读页 URL |
+| `slug` | string | 页面 slug |
+| `title` | string | 标题 |
+| `page_type` | string | 页面类型 |
+| `aliases` | []string | 别名 |
+| `summary` | string | 摘要 |
+| `match_snippet` | string | 正文中首次命中附近约 60+命中+60 字；无正文命中时省略 |
+
+`content`、树/链接/元数据、时间戳不在搜索结果里。单库 `GET .../wiki/search` 仍返回完整 `WikiPage`。
+
+```bash
+curl -X POST $BASE/api/v1/wiki-search -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"部署|发布","knowledge_base_ids":["kb-1","kb-2"],"limit":10}'
 ```
 
 ### POST /api/v1/knowledgebase/:kb_id/wiki/rebuild-links

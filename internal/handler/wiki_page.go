@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -1017,6 +1018,171 @@ func (h *WikiPageHandler) SearchPages(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"pages": pages})
+}
+
+// SearchWikiRequest is the body for POST /api/v1/wiki-search.
+type SearchWikiRequest struct {
+	Query            string   `json:"query" binding:"required"`
+	KnowledgeBaseID  string   `json:"knowledge_base_id"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	Limit            int      `json:"limit"`
+}
+
+// WikiSearchHit is the slim POST /wiki-search hit. Full page body is on
+// GET /knowledgebase/:kb_id/wiki/pages/*slug.
+type WikiSearchHit struct {
+	ID              string            `json:"id"`
+	KnowledgeBaseID string            `json:"knowledge_base_id"`
+	Slug            string            `json:"slug"`
+	Title           string            `json:"title"`
+	PageType        string            `json:"page_type"`
+	Aliases         types.StringArray `json:"aliases"`
+	Summary         string            `json:"summary"`
+	MatchSnippet    string            `json:"match_snippet,omitempty"`
+}
+
+const maxWikiSearchKnowledgeBases = 32
+
+// SearchPagesAcross godoc
+// @Summary      Cross-KB wiki search
+// @Description  Search wiki pages across multiple knowledge bases using the same POSIX regex ranking as single-KB wiki search
+// @Tags         Wiki
+// @Accept       json
+// @Produce      json
+// @Param        request  body  SearchWikiRequest  true  "Wiki search request"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  errors.AppError
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /wiki-search [post]
+func (h *WikiPageHandler) SearchPagesAcross(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var request SearchWikiRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	kbIDs := mergeWikiSearchKBIDs(request.KnowledgeBaseIDs, request.KnowledgeBaseID)
+	if strings.TrimSpace(request.Query) == "" {
+		c.Error(errors.NewBadRequestError("query is required"))
+		return
+	}
+	if len(kbIDs) == 0 {
+		c.Error(errors.NewBadRequestError("at least one knowledge_base_id or knowledge_base_ids must be provided"))
+		return
+	}
+	if len(kbIDs) > maxWikiSearchKnowledgeBases {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("at most %d knowledge_base_ids are allowed", maxWikiSearchKnowledgeBases)))
+		return
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, nil); err != nil {
+		c.Error(err)
+		return
+	}
+
+	logger.Infof(ctx, "Wiki search request, knowledge base IDs: %v, query: %s",
+		secutils.SanitizeForLogArray(kbIDs), secutils.SanitizeForLog(request.Query))
+
+	pages, err := h.wikiService.SearchPagesAcross(ctx, kbIDs, request.Query, request.Limit)
+	if err != nil {
+		if _, ok := errors.IsAppError(err); ok {
+			c.Error(err)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    wikiPagesToSearchHits(pages, request.Query),
+	})
+}
+
+func wikiPagesToSearchHits(pages []*types.WikiPage, query string) []WikiSearchHit {
+	hits := make([]WikiSearchHit, 0, len(pages))
+	for _, page := range pages {
+		if page == nil {
+			continue
+		}
+		hits = append(hits, WikiSearchHit{
+			ID:              page.ID,
+			KnowledgeBaseID: page.KnowledgeBaseID,
+			Slug:            page.Slug,
+			Title:           page.Title,
+			PageType:        page.PageType,
+			Aliases:         page.Aliases,
+			Summary:         page.Summary,
+			MatchSnippet:    extractWikiMatchSnippet(page.Content, query),
+		})
+	}
+	return hits
+}
+
+// extractWikiMatchSnippet matches Agent wiki_search: ~60 runes of context
+// around the first case-insensitive regex hit, match itself capped at 100.
+func extractWikiMatchSnippet(content string, query string) string {
+	if content == "" || query == "" {
+		return ""
+	}
+	re, err := regexp.Compile("(?i)" + query)
+	if err != nil {
+		return ""
+	}
+	loc := re.FindStringIndex(content)
+	if loc == nil {
+		return ""
+	}
+
+	matchStr := content[loc[0]:loc[1]]
+	before := content[:loc[0]]
+	after := content[loc[1]:]
+
+	beforeRunes := []rune(before)
+	if len(beforeRunes) > 60 {
+		beforeRunes = beforeRunes[len(beforeRunes)-60:]
+	}
+
+	afterRunes := []rune(after)
+	if len(afterRunes) > 60 {
+		afterRunes = afterRunes[:60]
+	}
+
+	matchRunes := []rune(matchStr)
+	if len(matchRunes) > 100 {
+		matchRunes = append(matchRunes[:100], []rune("...")...)
+	}
+
+	snippet := string(beforeRunes) + string(matchRunes) + string(afterRunes)
+	snippet = strings.ReplaceAll(snippet, "\n", " ")
+	for strings.Contains(snippet, "  ") {
+		snippet = strings.ReplaceAll(snippet, "  ", " ")
+	}
+
+	return "... " + strings.TrimSpace(snippet) + " ..."
+}
+
+func mergeWikiSearchKBIDs(ids []string, single string) []string {
+	out := make([]string, 0, len(ids)+1)
+	seen := make(map[string]struct{}, len(ids)+1)
+	appendID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, id := range ids {
+		appendID(id)
+	}
+	appendID(single)
+	return out
 }
 
 // RebuildLinks godoc

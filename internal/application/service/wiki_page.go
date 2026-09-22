@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -45,9 +47,12 @@ type wikiPageService struct {
 	repo            interfaces.WikiPageRepository
 	chunkRepo       interfaces.ChunkRepository
 	kbService       interfaces.KnowledgeBaseService
+	kbShareService  interfaces.KBShareService
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 	redisClient     *redis.Client
 }
+
+const maxWikiSearchKnowledgeBases = 32
 
 // NewWikiPageService creates a new wiki page service
 func NewWikiPageService(
@@ -56,11 +61,13 @@ func NewWikiPageService(
 	kbService interfaces.KnowledgeBaseService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
+	kbShareService interfaces.KBShareService,
 ) interfaces.WikiPageService {
 	return &wikiPageService{
 		repo:            repo,
 		chunkRepo:       chunkRepo,
 		kbService:       kbService,
+		kbShareService:  kbShareService,
 		taskPendingRepo: taskPendingRepo,
 		redisClient:     redisClient,
 	}
@@ -1020,6 +1027,148 @@ func (s *wikiPageService) CountByType(ctx context.Context, kbID string) (map[str
 // SearchPages performs full-text search over wiki pages
 func (s *wikiPageService) SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
 	return s.repo.Search(ctx, kbID, query, limit)
+}
+
+func (s *wikiPageService) SearchPagesAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, apperrors.NewBadRequestError("query is required")
+	}
+
+	ids := uniqueNonEmptyWikiSearchKBIDs(kbIDs)
+	if len(ids) == 0 {
+		return nil, apperrors.NewBadRequestError("at least one knowledge_base_id or knowledge_base_ids must be provided")
+	}
+	if len(ids) > maxWikiSearchKnowledgeBases {
+		return nil, apperrors.NewBadRequestError(fmt.Sprintf("at most %d knowledge_base_ids are allowed", maxWikiSearchKnowledgeBases))
+	}
+
+	if s.kbService == nil {
+		return nil, apperrors.NewInternalServerError("knowledge base service is not configured")
+	}
+
+	kbs, err := s.kbService.GetKnowledgeBasesByIDsOnly(ctx, ids)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_ids": ids,
+		})
+		return nil, err
+	}
+
+	kbByID := make(map[string]*types.KnowledgeBase, len(kbs))
+	for _, kb := range kbs {
+		if kb == nil || kb.ID == "" {
+			continue
+		}
+		kbByID[kb.ID] = kb
+	}
+
+	authorized := make([]*types.KnowledgeBase, 0, len(ids))
+	for _, id := range ids {
+		kb, ok := kbByID[id]
+		if !ok {
+			return nil, apperrors.NewNotFoundError("knowledge base not found")
+		}
+		if !kb.IsWikiEnabled() {
+			return nil, apperrors.NewBadRequestError("Wiki feature is not enabled for this knowledge base")
+		}
+		authorized = append(authorized, kb)
+	}
+
+	if types.CallerFromContext(ctx).TenantID == 0 {
+		return nil, apperrors.NewUnauthorizedError("tenant id is required")
+	}
+	if err := s.authorizeWikiKBAccess(ctx, authorized); err != nil {
+		return nil, err
+	}
+
+	pages, err := s.repo.SearchAcross(ctx, ids, query, limit)
+	if err != nil {
+		if isInvalidWikiSearchQuery(err) {
+			return nil, apperrors.NewBadRequestError("invalid search query")
+		}
+		return nil, err
+	}
+	if pages == nil {
+		return []*types.WikiPage{}, nil
+	}
+	return pages, nil
+}
+
+func uniqueNonEmptyWikiSearchKBIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func isInvalidWikiSearchQuery(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "invalid regular expression") ||
+		strings.Contains(msg, "invalid regex")
+}
+
+// authorizeWikiKBAccess mirrors knowledgeBaseService.authorizeKBAccess:
+// same-tenant KBs pass; foreign-tenant KBs need org Viewer permission via
+// access.NewKBPermissions. Unauthorized IDs surface as not-found so we do
+// not leak existence.
+func (s *wikiPageService) authorizeWikiKBAccess(
+	ctx context.Context,
+	kbs []*types.KnowledgeBase,
+) error {
+	if len(kbs) == 0 {
+		return nil
+	}
+
+	kbIDs := make([]string, 0, len(kbs))
+	for _, kb := range kbs {
+		kbIDs = append(kbIDs, kb.ID)
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbIDs...); err != nil {
+		return err
+	}
+
+	requestTenantID := types.CallerFromContext(ctx).TenantID
+	permissions := access.NewKBPermissions(ctx, s.kbShareService)
+
+	for _, kb := range kbs {
+		hasPermission, permErr := permissions.Check(kb.ID, kb.TenantID, types.OrgRoleViewer)
+		if permErr != nil {
+			logger.ErrorWithFields(ctx, permErr, map[string]interface{}{
+				"caller_tenant_id": requestTenantID,
+				"kb_tenant_id":     kb.TenantID,
+				"kb_id":            kb.ID,
+				"reason":           "shared-KB permission lookup failed",
+			})
+			return apperrors.NewInternalServerError("failed to verify knowledge base access")
+		}
+		if !hasPermission {
+			logger.WarnWithFields(ctx, logger.Fields{
+				"caller_tenant_id": requestTenantID,
+				"kb_tenant_id":     kb.TenantID,
+				"kb_id":            kb.ID,
+				"reason":           "tenant lacks viewer permission for foreign-tenant KB",
+			}, "search scope rejected: unauthorized foreign-tenant KB")
+			return apperrors.NewNotFoundError("knowledge base not found")
+		}
+	}
+	return nil
 }
 
 // --- Internal helpers ---

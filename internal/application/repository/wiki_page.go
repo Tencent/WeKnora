@@ -1331,6 +1331,24 @@ func escapeLikePattern(s string) string {
 // because they mention 王新 in their body and were updated more recently.
 // updated_at stays as the tiebreaker so same-rank ties stay deterministic.
 func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
+	return r.SearchAcross(ctx, []string{kbID}, query, limit)
+}
+
+func (r *wikiPageRepository) wikiSearchMatchOp() (op string, pattern func(string) string) {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+		return "LIKE", func(q string) string { return "%" + q + "%" }
+	}
+	return "~*", func(q string) string { return q }
+}
+
+// SearchAcross searches wiki pages in the given knowledge bases with the
+// same field-priority rank as the single-KB Search path, then truncates
+// to a global top-N. SQLite tests use LIKE; production Postgres keeps ~*.
+func (r *wikiPageRepository) SearchAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error) {
+	ids := uniqueNonEmptyWikiKBIDs(kbIDs)
+	if len(ids) == 0 {
+		return nil, nil
+	}
 	if limit <= 0 {
 		limit = 10
 	}
@@ -1338,22 +1356,25 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
+	op, wrap := r.wikiSearchMatchOp()
+	match := wrap(query)
+
 	// CASE expression is evaluated per-row during SELECT; we order by the
 	// alias so the DB only computes the rank once. Parameterized four
-	// times with the same regex to avoid coupling to GORM's positional
+	// times with the same pattern to avoid coupling to GORM's positional
 	// arg rewriting quirks.
 	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
+		"WHEN title " + op + " ? THEN 4 " +
+		"WHEN slug " + op + " ? THEN 3 " +
+		"WHEN summary " + op + " ? THEN 2 " +
+		"WHEN content " + op + " ? THEN 1 " +
 		"ELSE 0 END AS match_rank"
+	matchClause := "(title " + op + " ? OR content " + op + " ? OR summary " + op + " ? OR slug " + op + " ?)"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
-			kbID, query, query, query, query).
+		Select("*, "+rankExpr, match, match, match, match).
+		Where("knowledge_base_id IN ? AND "+matchClause, ids, match, match, match, match).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).
@@ -1361,6 +1382,26 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		return nil, err
 	}
 	return pages, nil
+}
+
+func uniqueNonEmptyWikiKBIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 // CountByType returns page counts grouped by type for a knowledge base
