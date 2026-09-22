@@ -116,7 +116,10 @@ func TestSanitizeMessages_KeepsToolCallsWhenAssistantMessagesMerge(t *testing.T)
 				},
 			}},
 		},
-		{Role: "tool", Content: "Successfully replaced 1 occurrence(s)", ToolCallID: "call_1", Name: "wiki_replace_text"},
+		{
+			Role: "tool", Content: "Successfully replaced 1 occurrence(s)",
+			ToolCallID: "call_1", Name: "wiki_replace_text",
+		},
 	}
 
 	result := SanitizeMessages(messages)
