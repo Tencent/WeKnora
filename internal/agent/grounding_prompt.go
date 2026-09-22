@@ -50,6 +50,9 @@ func formatGroundingGuidance(names []string) string {
 			"With an explicit source selection, KB retrieval is complementary, not a prerequisite. " +
 			"Directory entries are routing hints, not retrieved evidence; do not exhaust unrelated " +
 			"bases. Choose an available search or reader appropriate to the scope.\n")
+		b.WriteString("- When citing document chunks, copy the chunk_id exactly as returned by the " +
+			"knowledge tools. Never construct a chunk id from other fields such as knowledge_id " +
+			"plus chunk_index; fabricated ids cannot be resolved downstream.\n")
 	}
 	if slices.Contains(names, tools.ToolWebSearch) {
 		b.WriteString("- web_search is available: use it when relevant local evidence is missing, " +

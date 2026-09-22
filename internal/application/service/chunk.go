@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,18 +129,45 @@ func (s *chunkService) GetChunkByID(ctx context.Context, id string) (*types.Chun
 }
 
 // GetChunkByIDOnly retrieves a chunk by ID without tenant filter (for permission resolution).
+//
+// If no chunk matches the ID and it looks like a fabricated citation id of the
+// form "<knowledge_id>_chunk_<index>", it falls back to a lookup by
+// (knowledge_id, chunk_index). LLMs sometimes cite chunk position instead of
+// copying the real UUID from tool output (issue #1323); the fallback keeps
+// those citations resolvable instead of surfacing "Chunk not found" to users.
 func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error) {
 	chunk, err := s.chunkRepository.GetChunkByIDOnly(ctx, id)
-	if err != nil {
-		// errors.Is (not string equality) so the sentinel survives wrapping.
-		// ErrChunkNotFound aliases the repo sentinel, so this matches directly.
-		if errors.Is(err, ErrChunkNotFound) {
-			return nil, ErrChunkNotFound
-		}
+	if err == nil {
+		return chunk, nil
+	}
+	if !errors.Is(err, ErrChunkNotFound) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": id})
 		return nil, err
 	}
-	return chunk, nil
+	if knowledgeID, chunkIndex, ok := parseFabricatedChunkID(id); ok {
+		logger.Warnf(ctx, "Chunk id %q looks like a fabricated citation id, falling back to knowledge_id+chunk_index lookup", id)
+		return s.chunkRepository.GetChunkByKnowledgeAndIndexOnly(ctx, knowledgeID, chunkIndex)
+	}
+	return nil, ErrChunkNotFound
+}
+
+// fabricatedChunkIDRE matches citation ids the LLM invents from the
+// knowledge_id + chunk_index attributes in knowledge_search output, e.g.
+// "f91259e7-4f95-46c2-a928-6a558cc0d3d3_chunk_119".
+var fabricatedChunkIDRE = regexp.MustCompile(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})_chunk_(\d+)$`)
+
+// parseFabricatedChunkID splits a fabricated "<knowledge_id>_chunk_<index>"
+// id into its components.
+func parseFabricatedChunkID(id string) (knowledgeID string, chunkIndex int, ok bool) {
+	m := fabricatedChunkIDRE.FindStringSubmatch(id)
+	if m == nil {
+		return "", 0, false
+	}
+	index, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "", 0, false
+	}
+	return m[1], index, true
 }
 
 // ListChunksByKnowledgeID lists all chunks for a knowledge ID

@@ -24,6 +24,10 @@ type ChunkRepository interface {
 	GetChunkByID(ctx context.Context, tenantID uint64, id string) (*types.Chunk, error)
 	// GetChunkByIDOnly gets a chunk by id without tenant filter (for permission resolution)
 	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
+	// GetChunkByKnowledgeAndIndexOnly gets a chunk by knowledge ID and chunk
+	// index without tenant filter (resolves fabricated "<knowledge_id>_chunk_<index>"
+	// citation ids, issue #1323)
+	GetChunkByKnowledgeAndIndexOnly(ctx context.Context, knowledgeID string, chunkIndex int) (*types.Chunk, error)
 	// GetChunkBySeqID gets a chunk by seq_id
 	GetChunkBySeqID(ctx context.Context, tenantID uint64, seqID int64) (*types.Chunk, error)
 	// ListChunksByID lists chunks by ids
