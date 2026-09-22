@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -1006,40 +1005,23 @@ func (t *SearchKnowledgeTool) getEnrichedPassage(ctx context.Context, result *ty
 	return combinedText + strings.Join(imageTexts, "\n")
 }
 
-// compositeScore calculates a composite score considering multiple factors
+// compositeScore calculates a composite score considering multiple factors.
+// The weighted core is shared with the chat pipeline through searchutil; the
+// position prior — slightly favoring chunks earlier in the document — is the
+// one input this tool adds on top.
 func (t *SearchKnowledgeTool) compositeScore(
 	result *searchResultWithMeta,
 	modelScore, baseScore float64,
 ) float64 {
-	// Source weight: web_search results get slightly lower weight
-	sourceWeight := 1.0
-	if strings.ToLower(result.KnowledgeSource) == "web_search" {
-		sourceWeight = 0.95
-	}
-
-	// Position prior: slightly favor chunks earlier in the document
-	positionPrior := 1.0
-	if result.StartAt >= 0 && result.EndAt > result.StartAt {
-		positionRatio := 1.0 - float64(result.StartAt)/float64(result.EndAt+1)
-		positionPrior += t.clampFloat(positionRatio, -0.05, 0.05)
-	}
-
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
-	if composite < 0 {
-		composite = 0
-	}
-	if composite > 1 {
-		composite = 1
-	}
-	return composite
+	composite := searchutil.CompositeScoreRaw(modelScore, baseScore, result.KnowledgeSource)
+	composite *= searchutil.PositionPrior(result.StartAt, result.EndAt)
+	return searchutil.ClampFloat(composite, 0, 1)
 }
 
-func (t *SearchKnowledgeTool) clampFloat(v, minV, maxV float64) float64 {
-	return searchutil.ClampFloat(v, minV, maxV)
-}
-
-// applyMMR applies Maximal Marginal Relevance to reduce redundancy.
+// applyMMR applies Maximal Marginal Relevance to reduce redundancy. The
+// selection algorithm is shared with the chat pipeline through
+// searchutil.ApplyMMR; this side keeps its sequential enriched-passage
+// tokenization.
 func (t *SearchKnowledgeTool) applyMMR(
 	ctx context.Context,
 	results []*searchResultWithMeta,
@@ -1050,46 +1032,11 @@ func (t *SearchKnowledgeTool) applyMMR(
 		return nil
 	}
 
-	selected := make([]*searchResultWithMeta, 0, k)
-	candidates := make([]*searchResultWithMeta, len(results))
-	copy(candidates, results)
-
-	tokenSets := make([]map[string]struct{}, len(candidates))
-	for i, r := range candidates {
-		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
+	tokenSets := make([]map[string]struct{}, len(results))
+	for i, r := range results {
+		tokenSets[i] = searchutil.TokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
 	}
-
-	// Incremental form: maxRedundancy[i] caches candidate i's maximum jaccard
-	// against everything selected so far, so each round only needs one
-	// comparison per remaining candidate. Selection output is identical to
-	// the naive form, including tie-breaking.
-	maxRedundancy := make([]float64, len(candidates))
-	for len(selected) < k && len(candidates) > 0 {
-		bestIdx := 0
-		bestScore := -1.0
-		for i, r := range candidates {
-			mmr := lambda*r.Score - (1.0-lambda)*maxRedundancy[i]
-			if mmr > bestScore {
-				bestScore = mmr
-				bestIdx = i
-			}
-		}
-		selected = append(selected, candidates[bestIdx])
-		chosenTokens := tokenSets[bestIdx]
-		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
-		maxRedundancy = append(maxRedundancy[:bestIdx], maxRedundancy[bestIdx+1:]...)
-		for i := range candidates {
-			maxRedundancy[i] = math.Max(maxRedundancy[i], t.jaccard(tokenSets[i], chosenTokens))
-		}
-	}
+	selected, _ := searchutil.ApplyMMR(results, tokenSets, k, lambda,
+		func(r *searchResultWithMeta) float64 { return r.Score })
 	return selected
-}
-
-func (t *SearchKnowledgeTool) tokenizeSimple(text string) map[string]struct{} {
-	return searchutil.TokenizeSimple(text)
-}
-
-func (t *SearchKnowledgeTool) jaccard(a, b map[string]struct{}) float64 {
-	return searchutil.Jaccard(a, b)
 }
