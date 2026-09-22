@@ -66,19 +66,20 @@ PASSWORD="T21-verify-pass-1"
 
 register_and_login() {
     local email="$1"
+    local uname="${2:-t21-$SUFFIX}"
     curl -sS -X POST "$API/auth/register" -H 'Content-Type: application/json' \
-        -d "{\"username\":\"t21-$SUFFIX\",\"email\":\"$email\",\"password\":\"$PASSWORD\"}" >/dev/null
+        -d "{\"username\":\"$uname\",\"email\":\"$email\",\"password\":\"$PASSWORD\"}" >/dev/null
     curl -sS -X POST "$API/auth/login" -H 'Content-Type: application/json' \
         -d "{\"email\":\"$email\",\"password\":\"$PASSWORD\"}"
 }
 
 if [ -z "${TOKEN_A:-}" ]; then
-    resp="$(register_and_login "$EMAIL_A")"
+    resp="$(register_and_login "$EMAIL_A" "t21-a-$SUFFIX")"
     TOKEN_A="$(echo "$resp" | json_get '.token')"
     [ -n "$TOKEN_A" ] && [ "$TOKEN_A" != "null" ] || { echo "FAIL 租户 A 注册/登录失败：$resp"; exit 1; }
 fi
 if [ -z "${TOKEN_B:-}" ]; then
-    resp="$(register_and_login "$EMAIL_B")"
+    resp="$(register_and_login "$EMAIL_B" "t21-b-$SUFFIX")"
     TOKEN_B="$(echo "$resp" | json_get '.token')"
     [ -n "$TOKEN_B" ] && [ "$TOKEN_B" != "null" ] || { echo "FAIL 租户 B 注册/登录失败：$resp"; exit 1; }
 fi
