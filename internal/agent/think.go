@@ -587,7 +587,8 @@ func (e *AgentEngine) callLLMWithRetry(
 		// try to synthesize a final answer from them instead of losing everything.
 		if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
 			logger.Warnf(ctx, "[Agent] LLM failed but have %d steps with %d tool calls — "+
-				"attempting final answer synthesis from existing results",
+				"attempting final answer synthesis from existing results; that synthesis runs "+
+				"without tools, so any tool call the model emits there is text and will not run",
 				len(state.RoundSteps), totalTC)
 			common.PipelineWarn(ctx, "Agent", "llm_failed_synthesizing", map[string]interface{}{
 				"steps":      len(state.RoundSteps),

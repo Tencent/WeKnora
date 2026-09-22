@@ -610,7 +610,9 @@ loop:
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
 		case <-ctx.Done():
-			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: %v",
+			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: %v — remaining tool "+
+				"calls will not run, and the final answer below is synthesized without tools, "+
+				"so any tool call the model emits there is text",
 				state.CurrentRound+1, ctx.Err())
 			// Try to salvage existing results
 			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
