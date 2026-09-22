@@ -888,6 +888,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Use rerank model from RetrievalConfig if set, otherwise auto-select the first available
+	rerankModels := 0
 	if rc != nil && rc.RerankModelID != "" {
 		chatManage.RerankModelID = rc.RerankModelID
 	} else {
@@ -896,10 +897,27 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 				continue
 			}
 			if model.Type == types.ModelTypeRerank {
-				chatManage.RerankModelID = model.ID
-				break
+				rerankModels++
+				if chatManage.RerankModelID == "" {
+					chatManage.RerankModelID = model.ID
+				}
 			}
 		}
+	}
+	// An empty id here makes the rerank stage skip itself further down the
+	// pipeline, so the answer is returned unranked without an error anywhere. A
+	// configured id that no longer resolves — a catalog row this build refuses,
+	// for instance — looks exactly like "no rerank model configured at all"
+	// unless the two facts below are logged.
+	if chatManage.RerankModelID == "" {
+		configured := ""
+		if rc != nil {
+			configured = rc.RerankModelID
+		}
+		logger.Warnf(ctx,
+			"no usable rerank model resolved (configured=%q, rerank models in the catalog=%d); "+
+				"retrieval results will be returned unranked",
+			configured, rerankModels)
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
