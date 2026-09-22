@@ -1,8 +1,8 @@
-# BrowserSkill downstream patches
+# BrowserSkill upstream integration
 
 The extension and daemon are based on official `main` commit
-`c61eb7e4b1a5785d51b1a316dbf57686fecbf33d` (after `ext-v0.3.0`, including the
-merged upstream PRs #291, #296 and #297). Both still report version `0.3.0`;
+`3da449e9ff2a1f25adc7170fb41d5ed7a82d84d5` (after `ext-v0.3.0`, including the
+merged upstream PRs #291, #296, #297 and #318). Both still report version `0.3.0`;
 the exact source baseline is recorded in `scripts/browserskill-release.json`.
 The daemon is built with `cargo build --locked --release -p bsk` from the same
 commit. The published CLI 0.3.0 binary and the published 0.3.0 extension ZIP
@@ -10,19 +10,21 @@ predate this baseline and are not equivalent replacements. Native builds
 require Rust/Cargo and a C compiler (plus CMake on Linux). Docker builds on the
 target architecture.
 
-`scripts/build_browserskill.sh` applies the following patches in lexical order:
+`scripts/build_browserskill.sh` builds the unmodified upstream checkout. No
+BrowserSkill patches are applied or maintained downstream.
 
-| Patch | Purpose | Removal condition |
-| --- | --- | --- |
-| `01-browser-read-reliability.patch` | 10 s deadline on renderer reads (snapshot, accessibility, layout, frame tree, auto-attach); a timed-out read stops capture fallback, is reported as `cdp_failed` with `data.reason = renderer_read_timeout`, and further renderer reads on that tab are refused until the stuck command settles; auto-attach configured once per debugger session | Equivalent upstream behavior passes the read-timeout regressions |
-
-Patch 01 is the only remaining downstream change; it is proposed upstream as
-[PR #318](https://github.com/Tencent/BrowserSkill/pull/318).
+Renderer read reliability is provided by upstream PR #318: snapshot/AX captures
+have a 20 s deadline, other bounded reads use 10 s, and a pending timed-out read
+blocks further guarded reads until it settles or its debugger session detaches.
+Navigation alone does not clear the gate. Errors retain
+`data.reason = renderer_read_timeout`; unavailable child frames can be omitted
+without discarding healthy frame content.
 
 ## Retired patches
 
 | Former patch | Replacement |
 | --- | --- |
+| `01-browser-read-reliability.patch` | Upstream PR #318: bounded renderer reads, per-session read gates, capture fallback termination and debugger frame discovery. |
 | `02-gateway-task-controls.patch` | Upstream PR #296: the optional UI channel `ui.task_preview` / `ui.task_focus` (renamed from `gateway.*`). WeKnora calls the official methods. |
 | `03-vom-render-performance.patch` | Upstream PR #271 |
 | `04-task-popup-ownership.patch` | Upstream PR #297: popups opened by native click/key input inside the Agent Window become observed, controllable tabs that session stop preserves. |
@@ -44,7 +46,7 @@ stops preview polling in WeKnora. Completed tasks use native session stop.
 
 The preview and focus side channel is now the official optional UI channel
 documented in the upstream
-[remote connection contract](https://github.com/Tencent/BrowserSkill/blob/c61eb7e4b1a5785d51b1a316dbf57686fecbf33d/docs/remote-extension-connection.md#optional-ui-channel).
+[remote connection contract](https://github.com/Tencent/BrowserSkill/blob/3da449e9ff2a1f25adc7170fb41d5ed7a82d84d5/docs/remote-extension-connection.md#optional-ui-channel).
 Only authenticated remote sockets handle these request frames; they bypass the
 native automation queue and never start a session:
 
@@ -69,18 +71,24 @@ WeKnora then disables preview polling and reports the extension as outdated.
 
 - Remote tasks use official dedicated Agent Windows. No `tabGroups` permission.
 - Popup attribution follows upstream PR #297: only a main-frame navigation
-  target from a controlled source during native click/key input becomes an
-  observed tab. Observed tabs are readable and closable but never enter the
-  agent-created set; session stop preserves them and their window. Late or
-  unattributed targets use the ordinary borrow flow, and an unowned tab that
-  already sits in the Agent Window must be moved to a regular window before it
+  target from a controlled source during native click/key input, within the
+  same Agent Window, becomes an observed tab. Observed tabs are readable and
+  closable but never enter the agent-created set; session stop preserves them and their window. Independent
+  popup windows, late or unattributed targets use `tab_borrow` and `tab_return`.
+  An unowned tab that already sits in the Agent Window must be moved to a regular window before it
   can be borrowed.
 - Closing the last tab of the Agent Window through `tab_close` keeps an
   agent-owned blank tab until session stop (host-side, see above), so Chrome's
   window removal is not misreported as a human interruption. If the close is
   refused or interrupted while the target still exists, the blank tab is removed
   again. Actual user window closure still pauses the task.
-- Human help and borrowing follow the upstream focus/confirmation behavior.
+- Borrow confirmation follows the browser's preference and uses an HTTP(S) page
+  in a regular user window. The integration fixture supplies such a page; neither
+  extension settings nor a popup window can host the prompt. Borrowed tabs cannot
+  be closed through `tab_close`. Return them with `tab_return`; if the original
+  window disappeared, upstream may create a normal fallback window with a new-tab
+  placeholder. These returned user pages are preserved when the task ends.
+- Human help follows the upstream focus/confirmation behavior.
 - Remote upload/download remain unsupported, as defined upstream.
 
 Even though the version remains 0.3.0, users must install the rebuilt ZIP.
@@ -90,7 +98,7 @@ migrated credentials; installing under a new ID requires pairing again.
 
 ## Validation
 
-Apply the patch to a clean pinned checkout, install frozen dependencies and run:
+Use a clean pinned upstream checkout, install frozen dependencies and run:
 
 ```sh
 pnpm --filter @browser-skill/extension exec wxt prepare
@@ -107,16 +115,27 @@ cargo test --locked -p bsk daemon::ipc::tests
 ```
 
 Run WeKnora's `TestRealExtension` with the built extension, pinned daemon and an
-isolated Chromium profile; environment variables are documented in
-`website-docs/05-clients/09-local-browser.md`. It exercises actual pairing, screenshot and
-input RPC, agent popup selection/read/close, the in-window borrow rejection
-followed by borrow approval/revocation of a tab moved to a regular window,
+isolated Chromium profile. It exercises actual pairing, screenshot and input RPC,
+same-window target selection/read/close, independent popup borrow/read/return and
+access revocation, the in-window borrow rejection followed by borrow
+approval/revocation of a tab moved to a regular window,
 independent preview during help waits, focus, pause/resume, retained-session
 continuity and completed-task cleanup. It separately verifies that agent
 last-tab closure permits the next turn and manual window closure blocks
-automation until explicit resume.
+automation until explicit resume. Cleanup checks preserve the exact initial and
+returned user tab IDs, permitting only the new-tab placeholder recorded from an
+official fallback return; arbitrary extra tabs still fail the test.
+
+```sh
+BROWSERSKILL_TEST_EXTENSION=/path/to/unpacked/chrome-mv3 \
+BROWSERSKILL_TEST_BINARY=/path/to/bsk \
+BROWSERSKILL_TEST_CHROMIUM=/path/to/test-chromium \
+BROWSERSKILL_TEST_PLAYWRIGHT=/path/to/playwright-core/index.mjs \
+  go test ./internal/browserskill -run '^TestRealExtension$' -count=1 -v
+```
 
 Upstream references: [PR #227](https://github.com/Tencent/BrowserSkill/pull/227),
 [PR #291](https://github.com/Tencent/BrowserSkill/pull/291),
 [PR #296](https://github.com/Tencent/BrowserSkill/pull/296),
-[PR #297](https://github.com/Tencent/BrowserSkill/pull/297).
+[PR #297](https://github.com/Tencent/BrowserSkill/pull/297),
+[PR #318](https://github.com/Tencent/BrowserSkill/pull/318).

@@ -34,10 +34,6 @@ trap 'rm -rf "$build_dir"' EXIT
 
 git clone --no-checkout https://github.com/Tencent/BrowserSkill.git "$build_dir/source"
 git -C "$build_dir/source" checkout --detach "$source_commit"
-for patch in "$repo_root"/patches/browserskill/*.patch; do
-  git -C "$build_dir/source" apply --check "$patch"
-  git -C "$build_dir/source" apply "$patch"
-done
 (
   cd "$build_dir/source"
   npx --yes pnpm@10.17.0 install --frozen-lockfile

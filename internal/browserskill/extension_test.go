@@ -163,7 +163,7 @@ func TestRealExtension(t *testing.T) {
 		}
 	}()
 	if err = json.NewEncoder(input).Encode(map[string]string{
-		"pairing": link, "extension": extension,
+		"pairing": link, "extension": extension, "fixture": fixture.URL,
 		"chromium":   os.Getenv("BROWSERSKILL_TEST_CHROMIUM"),
 		"playwright": os.Getenv("BROWSERSKILL_TEST_PLAYWRIGHT"),
 	}); err != nil {
@@ -309,20 +309,92 @@ func TestRealExtension(t *testing.T) {
 		t.Fatalf("action result missing: %s", snap)
 	}
 	checkBackground()
-	// Agent-created navigation targets remain usable throughout their lifecycle.
-	// Cover both noopener links and script-created popup windows.
-	for _, selector := range []string{"#new-tab", "#popup"} {
-		if _, err = call(ctx, scope, "chat", "click", map[string]any{"selector": selector}); err != nil {
+	hostAck := func(command, expected string) {
+		t.Helper()
+		if _, err := fmt.Fprintln(input, command); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case line := <-hostLines:
+			if line != expected {
+				t.Fatalf("browser host %s: %s", command, line)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	assertDenied := func(tabID int) {
+		t.Helper()
+		for _, method := range []string{"tab_select", "snapshot", "tab_close"} {
+			_, err := call(ctx, scope, "chat", method, map[string]any{"tab_id": tabID})
+			if err == nil || !strings.Contains(err.Error(), "permission_denied") {
+				t.Fatalf("unauthorized tab %d accepted %s: %v", tabID, method, err)
+			}
+		}
+	}
+	borrowTab := func(tabID int) {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() {
+			_, err := call(ctx, scope, "chat", "tab_borrow", map[string]any{"tab_id": tabID})
+			done <- err
+		}()
+		for !m.Status(scope, "chat").NeedsHelp {
+			select {
+			case err := <-done:
+				t.Fatalf("borrow finished without browser confirmation: %v", err)
+			case <-tick.C:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		}
+		if m.Status(scope, "chat").Action != "tab_borrow" {
+			t.Fatal("borrow confirmation must identify its handoff separately from login help")
+		}
+		hostAck("approve-borrow", "approve-borrow-done")
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	returnTab := func(tabID int) {
+		t.Helper()
+		hostAck(fmt.Sprintf("before-tab-return %d", tabID), "return-recorded")
+		result, err := call(ctx, scope, "chat", "tab_return", map[string]any{"tab_id": tabID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, result); err != nil {
+			t.Fatal(err)
+		}
+		hostAck("expect-returned-tab "+compact.String(), "returned-tab-preserved")
+		assertDenied(tabID)
+	}
+	// Same-window navigation targets are observed; independent popup windows
+	// require the official borrow/return flow, even when opened by native input.
+	for _, target := range []struct {
+		selector string
+		path     string
+		borrow   bool
+	}{
+		{"#new-tab", "/linked", false},
+		{"#popup", "/popup", true},
+	} {
+		t.Logf("navigation target %s (borrow=%t)", target.selector, target.borrow)
+		if _, err = call(ctx, scope, "chat", "click", map[string]any{"selector": target.selector}); err != nil {
 			t.Fatal(err)
 		}
 		popupID := 0
-		var e error
-		deadline := time.NewTimer(3 * time.Second)
-	waitPopup:
+		deadline := time.After(3 * time.Second)
 		for popupID == 0 {
-			listed, listErr := call(ctx, scope, "chat", "tab_list", map[string]any{"scope": "all"})
-			if listErr != nil {
-				t.Fatal(listErr)
+			listed, err := call(ctx, scope, "chat", "tab_list", map[string]any{"scope": "all"})
+			if err != nil {
+				t.Fatal(err)
 			}
 			var result struct {
 				Tabs []struct {
@@ -330,34 +402,45 @@ func TestRealExtension(t *testing.T) {
 					URL string `json:"url"`
 				} `json:"tabs"`
 			}
-			if e = json.Unmarshal(listed, &result); e != nil {
-				t.Fatal(e)
+			if err := json.Unmarshal(listed, &result); err != nil {
+				t.Fatal(err)
 			}
 			for _, tab := range result.Tabs {
-				if strings.HasSuffix(tab.URL, "/linked") || strings.HasSuffix(tab.URL, "/popup") {
+				if tab.URL == fixture.URL+target.path {
 					popupID = tab.ID
 				}
 			}
 			if popupID != 0 {
-				break waitPopup
+				break
 			}
 			select {
 			case <-tick.C:
-			case <-deadline.C:
+			case <-deadline:
 				t.Fatalf("fixture popup missing: %s", listed)
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
 		}
-		deadline.Stop()
-		if _, e = call(ctx, scope, "chat", "tab_select", map[string]any{"tab_id": popupID}); e != nil {
-			t.Fatal(e)
+		if target.borrow {
+			assertDenied(popupID)
+			borrowTab(popupID)
 		}
-		if _, e = call(ctx, scope, "chat", "snapshot", map[string]any{"tab_id": popupID}); e != nil {
-			t.Fatal(e)
+		if _, err = call(ctx, scope, "chat", "tab_select", map[string]any{"tab_id": popupID}); err != nil {
+			t.Fatal(err)
 		}
-		if _, e = call(ctx, scope, "chat", "tab_close", map[string]any{"tab_id": popupID}); e != nil {
-			t.Fatal(e)
+		if _, err = call(ctx, scope, "chat", "snapshot", map[string]any{"tab_id": popupID}); err != nil {
+			t.Fatal(err)
+		}
+		if target.borrow {
+			if _, err = call(ctx, scope, "chat", "tab_close", map[string]any{"tab_id": popupID}); err == nil ||
+				!strings.Contains(err.Error(), "invalid_params") {
+				t.Fatalf("borrowed popup was closable: %v", err)
+			}
+			returnTab(popupID)
+			// Keep the returned page: later cleanup checks must prove that
+			// task stop preserves it and releases its debugger attachment.
+		} else if _, err = call(ctx, scope, "chat", "tab_close", map[string]any{"tab_id": popupID}); err != nil {
+			t.Fatal(err)
 		}
 	}
 	// A genuine user-created tab inside the task window remains unauthorized and
@@ -394,48 +477,11 @@ func TestRealExtension(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	borrowDone := make(chan error, 1)
-	go func() {
-		_, borrowErr := call(ctx, scope, "chat", "tab_borrow", map[string]any{"tab_id": userTab.ID})
-		borrowDone <- borrowErr
-	}()
-	for !m.Status(scope, "chat").NeedsHelp {
-		select {
-		case <-tick.C:
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-	}
-	if m.Status(scope, "chat").Action != "tab_borrow" {
-		t.Fatal("borrow confirmation must identify its handoff separately from login help")
-	}
-	_, _ = io.WriteString(input, "approve-borrow\n")
-	select {
-	case line := <-hostLines:
-		if line != "approve-borrow-done" {
-			t.Fatalf("borrow confirmation: %s", line)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	select {
-	case err = <-borrowDone:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
+	borrowTab(userTab.ID)
 	if _, err = call(ctx, scope, "chat", "snapshot", map[string]any{"tab_id": userTab.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = call(ctx, scope, "chat", "tab_return", map[string]any{"tab_id": userTab.ID}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = call(ctx, scope, "chat", "snapshot", map[string]any{"tab_id": userTab.ID}); err == nil ||
-		!strings.Contains(err.Error(), "permission_denied") {
-		t.Fatalf("returned tab remained readable: %v", err)
-	}
+	returnTab(userTab.ID)
 	_, _ = fmt.Fprintf(input, "remove-fixture-tab %d\n", userTab.ID)
 	select {
 	case line := <-hostLines:
@@ -757,7 +803,7 @@ func TestRealExtension(t *testing.T) {
 		select {
 		case line := <-hostLines:
 			if line != `{"cleaned":true}` {
-				t.Fatalf("browser task leaked tabs or groups: %s", line)
+				t.Fatalf("browser cleanup changed user tabs or leaked task tabs: %s", line)
 			}
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
@@ -830,8 +876,8 @@ func TestRealExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkCleanup()
-	// Repeated successful turns must return to the original user tabs, with
-	// no live task groups left over. The next turn can start without Resume.
+	// Repeated successful turns preserve the original and returned user tabs,
+	// with no agent-created tabs left over. The next turn needs no Resume.
 	for round := range 3 {
 		t.Logf("automatic cleanup round %d", round+1)
 		if err = m.Control(ctx, scope, "chat", "select"); err != nil {

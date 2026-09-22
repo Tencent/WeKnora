@@ -15,7 +15,9 @@ WeKnora 通过 BrowserSkill daemon 和配套 Chrome 扩展，将用户电脑上�
 
 ### 人工参与与任务恢复
 
-任务可操作自己创建的标签；用户原有标签需要明确借用授权，手动拖入任务窗口也不等于授权。结束任务时关闭任务新建页面、归还借用页面。
+任务可操作自己创建的标签；任务窗口内由点击或按键打开、且通过来源校验的新标签也可操作，结束任务时会保留。独立弹出窗口和用户原有标签通过 `tab_borrow` 借用，按浏览器设置确认授权后操作，完成后用 `tab_return` 归还。结束任务时关闭任务显式创建的页面、归还借用页面。
+
+手动拖入任务窗口不等于授权；未授权页面已在任务窗口内时，需要用户先移到普通窗口再借用。借用确认提示需要普通窗口中的 HTTP(S) 页面承载，扩展设置页、新标签页和独立弹窗不能承载。若借用后原窗口消失，归还可能创建普通备用窗口；归还页面不会随任务结束被关闭。
 
 登录、验证码或授权步骤由 `request_help` 发起。按预览提示进入浏览器，完成后在浏览器帮助提示中确认；Agent 再观察页面并继续。仅在聊天中说“请登录”不会创建人工接管提示。帮助等待最多五分钟，超时或取消会保留现场并暂停。
 
@@ -33,7 +35,7 @@ WeKnora 通过 BrowserSkill daemon 和配套 Chrome 扩展，将用户电脑上�
 ./scripts/build_browserskill.sh
 ```
 
-需要 Git、Node.js、Python 3、Rust/Cargo 和 C 编译器，Linux 还需要 CMake。固定源码版本由 `scripts/browserskill-release.json` 管理，补丁位于 `patches/browserskill/`，产物输出到 `artifacts/browserskill/`。使用对应操作系统与架构的 daemon，并按实际安装路径配置：
+需要 Git、Node.js、Python 3、Rust/Cargo 和 C 编译器，Linux 还需要 CMake。固定源码版本由 `scripts/browserskill-release.json` 管理，直接构建上游源码，不应用额外补丁，产物输出到 `artifacts/browserskill/`。使用对应操作系统与架构的 daemon，并按实际安装路径配置：
 
 ```dotenv
 BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk
@@ -49,7 +51,7 @@ BROWSERSKILL_PUBLIC_URL=wss://weknora.example.com/api/v1/local-browser/extension
 
 本机可用 localhost WS，远端要求浏览器信任的 WSS 证书。内网可以使用受信任的企业 CA。显式设置 `BROWSERSKILL_BINARY=` 可关闭能力；修改 Docker 环境变量后使用 `docker compose up -d app frontend` 重建容器。
 
-配套扩展和 daemon 必须一同升级，不能只按显示的 0.3.0 版本号判断兼容性；上游同版本原版不包含所有配套接口。覆盖原解压目录并重新加载可保留扩展 ID，重新安装导致 ID 改变时需要重新配对。分发时保留 `BrowserSkill-LICENSE`。
+配套扩展和 daemon 必须一同升级，不能只按显示的 0.3.0 版本号判断兼容性；上游早期发布的 0.3.0 二进制和 ZIP 早于当前固定提交，不包含所需修复和 UI 接口。覆盖原解压目录并重新加载可保留扩展 ID，重新安装导致 ID 改变时需要重新配对。分发时保留 `BrowserSkill-LICENSE`。
 
 ## 多副本与入口代理
 
