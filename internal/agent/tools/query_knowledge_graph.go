@@ -155,7 +155,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	// QUERY_UNDERSTAND -> ENTITY_SEARCH handoff.
 	entities := t.extractQueryEntities(ctx, query)
 	if len(entities) > 0 {
-		logger.Infof(ctx, "[Tool][QueryKnowledgeGraph] Extracted %d entities for graph traversal: %v", len(entities), entities)
+		logger.Infof(ctx, "[Tool][QueryKnowledgeGraph] Extracted %d entities for graph traversal: %v",
+			len(entities), entities)
 	}
 
 	// Concurrently query all knowledge bases
@@ -209,7 +210,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			results, err := t.knowledgeService.HybridSearch(ctx, id, searchParams)
 			if err != nil {
 				mu.Lock()
-				kbResults[id] = &graphQueryResult{kbID: id, kb: kb, graph: graphRes, err: fmt.Errorf("query failed: %v", err)}
+				kbResults[id] = &graphQueryResult{kbID: id, kb: kb, graph: graphRes, err: fmt.Errorf("query failed: %v",
+					err)}
 				mu.Unlock()
 				return
 			}
@@ -506,7 +508,8 @@ func (t *QueryKnowledgeGraphTool) traverseGraph(
 
 	graph, err := t.knowledgeService.SearchGraphNodes(ctx, kbID, entities)
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Graph traversal failed for KB %s, falling back to retrieval only: %v", kbID, err)
+		logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Graph traversal failed for KB %s,
+			falling back to retrieval only: %v", kbID, err)
 		res.skipped = fmt.Sprintf("graph traversal failed: %v", err)
 		return res
 	}
@@ -587,14 +590,16 @@ func (t *QueryKnowledgeGraphTool) graphChunkSearchResults(
 			if id, ok := types.TenantIDFromContext(ctx); ok {
 				tenantID = id
 			}
-			if knowledges, kerr := t.scopeKnowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs); kerr == nil {
+			if knowledges, kerr := t.scopeKnowledgeService.
+				GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs); kerr == nil {
 				for _, knowledge := range knowledges {
 					if knowledge != nil {
 						knowledgeByID[knowledge.ID] = knowledge
 					}
 				}
 			} else {
-				logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Failed to resolve knowledge titles for graph chunks: %v", kerr)
+				logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Failed to resolve knowledge titles
+				for graph chunks: %v", kerr)
 			}
 		}
 	}
@@ -697,7 +702,8 @@ func (t *QueryKnowledgeGraphTool) extractQueryEntities(ctx context.Context, quer
 	return entities
 }
 
-const queryEntityExtractionSystemPrompt = `Extract the entities from the user's question that could appear as nodes in a knowledge graph.
+const queryEntityExtractionSystemPrompt = `
+Extract the entities from the user's question that could appear as nodes in a knowledge graph.
 
 Rules:
 1. Output ONLY a JSON array of strings. No explanations, no markdown fences.

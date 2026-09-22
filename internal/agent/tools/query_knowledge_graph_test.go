@@ -69,7 +69,7 @@ func (s *stubKnowledgeBaseService) HybridSearch(context.Context, string, types.S
 	return s.results, nil
 }
 
-func (s *stubKnowledgeBaseService) SearchGraphNodes(_ context.Context, _ string, entities []string) (*types.GraphData, error) {
+func (s *stubKnowledgeBaseService) SearchGraphNodes(_ context.Context, _ string, _ []string) (*types.GraphData, error) {
 	if s.graphErr != nil {
 		return nil, s.graphErr
 	}
