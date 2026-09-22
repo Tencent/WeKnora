@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -93,15 +94,39 @@ func (g *PolicyGate) Evaluate(ctx context.Context, in ToolCallInput) (Verdict, e
 	return v, nil
 }
 
+// tenantCapabilityJudge 是可选接口：实现了 Enabled 的 judge（LLMJudge）
+// 支持按租户能力档降级（T31）。未实现该接口的 judge 视为恒可用。
+type tenantCapabilityJudge interface {
+	Enabled(ctx context.Context, tenantID uint64) bool
+}
+
 // judgeEscalate 把判定升级给语义层（设计 §8.1 漏斗）。judge 未配置时
 // 原样返回规则层的 uncertain（留"本该如何判"的观测数据）；judge 调用
 // 失败按设计 §9 fail-open 记 uncertain，绝不上抛成判定链路错误。
+// 租户模型弱于能力档时降级只跑规则层：verdict 保持规则层原值、layer
+// 记 rule，并留一条结构化降级日志（T31 [cli] 验收面）。
 // 升级时保留规则层的原始原因，便于事后对账"当初为什么进 judge"。
 func (g *PolicyGate) judgeEscalate(
 	ctx context.Context, policy *types.IntentPolicy, in ToolCallInput, ruleVerdict Verdict,
 ) Verdict {
 	if g.judge == nil {
 		return ruleVerdict
+	}
+	if tcj, ok := g.judge.(tenantCapabilityJudge); ok && !tcj.Enabled(ctx, in.TenantID) {
+		// T31 降级：语义层不可用，规则层说什么就是什么。layer 统一记
+		// rule（验收语义「降级只跑规则层并记 layer=rule」）；无 rule_expr
+		// 的策略此前 layer=judge（evaluatePolicyRule 的标记），此处一并
+		// 改记为 rule，避免降级后 layer 语义漂移。
+		v := ruleVerdict
+		v.Layer = LayerRule
+		v.Reason = ruleVerdict.Reason + "；语义层降级（模型弱于 judge 能力档，只跑规则层，T31）"
+		logger.WarnWithFields(ctx, logger.Fields{
+			"event":     "intentgate.judge_degraded",
+			"tenant_id": in.TenantID,
+			"policy_id": policy.ID,
+			"tool":      in.ToolName,
+		}, "[IntentGate] judge degraded to rule layer (weak model tier)")
+		return v
 	}
 	jv, err := g.judge.Judge(ctx, JudgeInput{
 		TenantID:       in.TenantID,

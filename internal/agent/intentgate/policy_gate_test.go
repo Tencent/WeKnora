@@ -534,3 +534,73 @@ func TestPolicyGateJudgeReasonPreservesEscalation(t *testing.T) {
 		t.Fatalf("reason 应组合理由链, got %q", v.Reason)
 	}
 }
+
+// fakeTieredJudge 实现 tenantCapabilityJudge：带能力档开关的 fake judge，
+// 用于 T31 降级路径测试。enabled=false 时 PolicyGate 不得调用 Judge。
+type fakeTieredJudge struct {
+	fakeJudge
+	enabled bool
+}
+
+func (f *fakeTieredJudge) Enabled(context.Context, uint64) bool { return f.enabled }
+
+// TestPolicyGateWeakTierDegradesToRule 验收 [unit]：弱档模型 → Evaluate
+// 不发起 judge 调用，verdict 记 rule 层（issue #15 验收语义）。
+func TestPolicyGateWeakTierDegradesToRule(t *testing.T) {
+	store := &fakeGatePolicyStore{policy: policyGateTestPolicy("")} // 无 rule_expr
+	judge := &fakeTieredJudge{
+		fakeJudge: fakeJudge{verdict: Verdict{Action: ActionDeny, Layer: LayerJudge, Reason: "不应被用到"}},
+		enabled:   false,
+	}
+	gate := NewPolicyGate(store, WithJudge(judge))
+
+	v, err := gate.Evaluate(context.Background(), ToolCallInput{
+		TenantID: 1,
+		ToolName: "wiki_delete_page",
+		Args:     json.RawMessage(`{"page_id":"p_1"}`),
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if judge.calls != 0 {
+		t.Fatalf("弱档模型不得发起 judge 调用, calls = %d", judge.calls)
+	}
+	if v.Action != ActionUncertain {
+		t.Fatalf("action = %q, want uncertain（规则层未决，降级后维持原判）", v.Action)
+	}
+	if v.Layer != LayerRule {
+		t.Fatalf("layer = %q, want rule（降级只跑规则层并记 layer=rule）", v.Layer)
+	}
+	if !strings.Contains(v.Reason, "降级") {
+		t.Fatalf("reason 应记录降级事件, got %q", v.Reason)
+	}
+	if v.PolicyID != "pol-t23" || v.PolicyVersion != 3 {
+		t.Fatalf("degraded verdict still belongs to the policy, got id=%q version=%d", v.PolicyID, v.PolicyVersion)
+	}
+}
+
+// TestPolicyGateCapableTierEscalates：对照面——强档模型正常升级 judge，
+// 行为与 T30 一致。
+func TestPolicyGateCapableTierEscalates(t *testing.T) {
+	store := &fakeGatePolicyStore{policy: policyGateTestPolicy("")}
+	judge := &fakeTieredJudge{
+		fakeJudge: fakeJudge{verdict: Verdict{Action: ActionAllow, Layer: LayerJudge, Reason: "意图对齐"}},
+		enabled:   true,
+	}
+	gate := NewPolicyGate(store, WithJudge(judge))
+
+	v, err := gate.Evaluate(context.Background(), ToolCallInput{
+		TenantID: 1,
+		ToolName: "wiki_delete_page",
+		Args:     json.RawMessage(`{"page_id":"p_1"}`),
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if judge.calls != 1 {
+		t.Fatalf("强档模型应正常升级 judge, calls = %d", judge.calls)
+	}
+	if v.Action != ActionAllow || v.Layer != LayerJudge {
+		t.Fatalf("verdict = %q/%q, want allow/judge", v.Action, v.Layer)
+	}
+}

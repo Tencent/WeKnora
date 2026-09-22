@@ -51,10 +51,18 @@ type Judge interface {
 	Judge(ctx context.Context, in JudgeInput) (Verdict, error)
 }
 
+// ResolvedJudgeModel 是 JudgeModelResolver 的返回：chat 实例 + 模型
+// 元数据。Model 供能力档判定（T31）；nil 表示解析器给不出元数据，
+// Enabled 按弱档处置。
+type ResolvedJudgeModel struct {
+	Chat  chat.Chat
+	Model *types.Model
+}
+
 // JudgeModelResolver 按租户解析 judge 用的 chat 模型。resolver 错误
 // （租户未配 chat 模型等）由 LLMJudge 转为 uncertain（fail-open），
 // 绝不上抛成判定链路错误（设计 §9）。
-type JudgeModelResolver func(ctx context.Context, tenantID uint64) (chat.Chat, error)
+type JudgeModelResolver func(ctx context.Context, tenantID uint64) (*ResolvedJudgeModel, error)
 
 const (
 	// judgeDefaultTimeout 是 judge 单次调用预算（设计 §12：+3s 上限）。
@@ -100,6 +108,17 @@ func NewLLMJudge(resolve JudgeModelResolver, opts ...LLMJudgeOption) *LLMJudge {
 	return j
 }
 
+// Enabled 报告该租户模型是否达到 judge 能力档（T31）。弱档/解析失败
+// 均返回 false——能力未知时 fail-closed（宁可降级只跑规则层，也不让
+// 弱模型把安全判定拖成满屏 uncertain）。
+func (j *LLMJudge) Enabled(ctx context.Context, tenantID uint64) bool {
+	resolved, err := j.resolve(ctx, tenantID)
+	if err != nil {
+		return false
+	}
+	return JudgeCapable(resolved.Model)
+}
+
 // judgeOutput 是强 schema 的模型输出（设计 §8.2 规则 3）。
 // verdict 只允许 allow/deny/require_approval/uncertain 四值，
 // 其余取值与任何解析失败都按 uncertain 处置。
@@ -113,7 +132,7 @@ type judgeOutput struct {
 // Layer=judge），错误仅在同为 uncertain 时一并返回供调用方记录——
 // 设计 §9：judge 故障默认 fail-open，由 verdict=uncertain 表达。
 func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
-	model, err := j.resolve(ctx, in.TenantID)
+	resolved, err := j.resolve(ctx, in.TenantID)
 	if err != nil {
 		return Verdict{
 			Action: ActionUncertain,
@@ -121,6 +140,7 @@ func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
 			Reason: fmt.Sprintf("judge 模型解析失败: %v", err),
 		}, nil
 	}
+	model := resolved.Chat
 	ctx, cancel := context.WithTimeout(ctx, j.timeout)
 	defer cancel()
 
