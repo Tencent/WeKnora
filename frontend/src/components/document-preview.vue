@@ -23,6 +23,7 @@ import {
   resolvePreviewKind,
   shouldPrettyPrintJson,
   isExcelPreviewTooLarge,
+  EXCEL_PREVIEW_PARSE_ROWS,
   sniffPreview,
   isValidUTF8,
   type FilePreviewKind,
@@ -252,17 +253,20 @@ async function renderExcel(blob: Blob, fileType?: string) {
 
   const XLSX = await import('xlsx');
   const arrayBuffer = await blob.arrayBuffer();
+  // Limit worksheet parsing as well as the later HTML rendering. One extra
+  // row lets the metrics check detect that SheetJS stopped at the limit.
+  const parseOptions = { sheetRows: EXCEL_PREVIEW_PARSE_ROWS };
 
   let workbook;
   const lowerType = fileType?.toLowerCase();
   if (lowerType === 'csv') {
     const csvText = decodeCSVBlob(arrayBuffer);
-    workbook = XLSX.read(csvText, { type: 'string' });
+    workbook = XLSX.read(csvText, { type: 'string', ...parseOptions });
   } else if (lowerType === 'tsv' || lowerType === 'tab') {
     const tsvText = decodeCSVBlob(arrayBuffer);
-    workbook = XLSX.read(tsvText, { type: 'string', FS: '\t' });
+    workbook = XLSX.read(tsvText, { type: 'string', FS: '\t', ...parseOptions });
   } else {
-    workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    workbook = XLSX.read(arrayBuffer, { type: 'array', ...parseOptions });
   }
 
   const sheetMetrics = workbook.SheetNames.map((name) => {

@@ -236,6 +236,9 @@ const SNIFF_BYTES = 16384
 export const EXCEL_PREVIEW_MAX_BYTES = 8 * 1024 * 1024
 
 export const EXCEL_PREVIEW_MAX_ROWS = 5000
+// Parse one extra row so a sheet truncated by SheetJS is rejected instead of
+// being rendered as if it were complete.
+export const EXCEL_PREVIEW_PARSE_ROWS = EXCEL_PREVIEW_MAX_ROWS + 1
 export const EXCEL_PREVIEW_MAX_CELLS = 50000
 
 export type ExcelPreviewSheetMetrics = {

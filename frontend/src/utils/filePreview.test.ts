@@ -5,6 +5,7 @@ import {
   EXCEL_PREVIEW_MAX_BYTES,
   EXCEL_PREVIEW_MAX_CELLS,
   EXCEL_PREVIEW_MAX_ROWS,
+  EXCEL_PREVIEW_PARSE_ROWS,
   getHighlightLang,
   getPreviewMimeType,
   isExcelPreviewTooLarge,
@@ -78,7 +79,8 @@ test('pretty-print helpers only rewrite canonical JSON documents', () => {
 test('large spreadsheets are rejected before HTML table rendering', () => {
   assert.equal(isExcelPreviewTooLarge(EXCEL_PREVIEW_MAX_BYTES), false)
   assert.equal(isExcelPreviewTooLarge(EXCEL_PREVIEW_MAX_BYTES + 1), true)
-  assert.equal(isExcelPreviewTooLarge(1, [{ rows: EXCEL_PREVIEW_MAX_ROWS + 1, columns: 1 }]), true)
+  assert.equal(EXCEL_PREVIEW_PARSE_ROWS, EXCEL_PREVIEW_MAX_ROWS + 1)
+  assert.equal(isExcelPreviewTooLarge(1, [{ rows: EXCEL_PREVIEW_PARSE_ROWS, columns: 1 }]), true)
   assert.equal(isExcelPreviewTooLarge(1, [{ rows: 100, columns: Math.ceil(EXCEL_PREVIEW_MAX_CELLS / 100) }]), false)
   assert.equal(isExcelPreviewTooLarge(1, [{ rows: 101, columns: Math.ceil(EXCEL_PREVIEW_MAX_CELLS / 100) }]), true)
 })
