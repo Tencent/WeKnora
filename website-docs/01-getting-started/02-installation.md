@@ -39,7 +39,7 @@ flowchart TB
 ## 硬件与依赖要求
 
 - **标准 Docker 部署**：Docker 20.10+ 与 Docker Compose v2（v1 `docker-compose` 也兼容，`scripts/start_all.sh` 会自动探测）；建议 4 核 CPU / 8GB 内存起步（docreader 含 LibreOffice、Playwright，较吃内存），磁盘按知识库规模预留（Postgres 卷 + `/data/files` 文件卷）。启用 Milvus / OpenSearch / Langfuse 等可选组件需相应增加内存。
-- **模型服务**：本地推理需 [Ollama](https://ollama.com)（`OLLAMA_BASE_URL`，Compose 默认 `http://host.docker.internal:11434`，未设置时进程用 `http://localhost:11434`；`OLLAMA_OPTIONAL=true` 时不可用仅告警不阻断）；或任意 OpenAI 兼容 API（DeepSeek、通义、智谱、硅基流动等）。`source=local` 的向量模型与对话模型共用这一个 Ollama，不必再起第二个实例。向量模型名是该 Embedding 模型的 `name`（Ollama 模型名，例如 `nomic-embed-text`），不是单独的环境变量；只有 `config/builtin_models.yaml` 写了 `${EMBEDDING_MODEL_NAME}` 时，`.env` 里的同名变量才会在启动时替换进去。上面的 8GB 不含 Ollama 权重，也不含默认关闭的 Neo4j（`neo4j` profile）。仓库没有记录向量模型、pgvector、Neo4j 与本地 LLM 同时运行的已测最低内存。
+- **模型服务**：本地推理需 [Ollama](https://ollama.com)（默认地址 `http://host.docker.internal:11434`，`OLLAMA_OPTIONAL=true` 时不可用仅告警不阻断）；或任意 OpenAI 兼容 API（DeepSeek、通义、智谱、硅基流动等）。上述 8GB 起步不含 Ollama 模型权重；Neo4j 默认关闭（需启用 `neo4j` profile）。
 - **源码编译**：Go 1.26（见 `docker/Dockerfile.app` builder 阶段 `golang:1.26-bookworm`）、CGO（依赖 `libsqlite3-dev`）、Node.js + npm（前端）、Python 3.10 + uv（docreader）。
 - **Kubernetes**：>= 1.25.0（`helm/Chart.yaml`）。
 

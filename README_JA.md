@@ -215,11 +215,7 @@ docker compose up -d    # コアサービスを起動
 
 > ローカル Ollama モデルを使用する場合は、先に `ollama serve > /dev/null 2>&1 &` を実行してください。
 
-ローカルの埋め込みとローカルの生成は、この 1 つの Ollama プロセスを共有します。接続先は `OLLAMA_BASE_URL` です。`.env.example` と Compose の既定値は `http://host.docker.internal:11434`、変数未設定のプロセスは `http://localhost:11434` です（`internal/models/utils/ollama/ollama.go`）。
-
-埋め込みモデル名は、`source=local` の `Embedding` モデルの `name`（Ollama のモデル名）です。「設定 → モデル」、`weknora model create nomic-embed-text --type Embedding --source local --dimension 768`、またはナレッジベース初期化の `embedding.modelName` で指定します（クイックスタートは `bge-m3`、次元 1024。[クイックスタート](./website-docs/01-getting-started/03-quickstart.md)）。名前が空のとき、ローカル埋め込みは `nomic-embed-text` を使います。環境変数から名前を渡すには `config/builtin_models.yaml`（`BUILTIN_MODELS_CONFIG`）に `${EMBEDDING_MODEL_NAME}` を書きます。[`.env.example`](./.env.example) の `EMBEDDING_MODEL_NAME` はそのプレースホルダです。[`config/builtin_models.yaml.example`](./config/builtin_models.yaml.example) と [`docs/BUILTIN_MODELS.md`](./docs/BUILTIN_MODELS.md) を参照してください。
-
-[インストール手順](./website-docs/01-getting-started/02-installation.md) の Docker スタックの出発点は 4 CPU / 8 GB で、Ollama のモデル重みは含みません。既定の検索は `postgres` サービスの ParadeDB（pgvector）です。Neo4j は `neo4j` プロファイルを有効にするまで起動しません。埋め込み、pgvector、Neo4j、ローカル LLM を同時に動かした検証済みの合計メモリ下限はリポジトリにありません。Compose のサービスに加え、この単一の Ollama に載せるモデル分の余裕を見てください。ナレッジグラフを使わないときは `neo4j` プロファイルを外したままにしてください。
+Ollama の埋め込みモデル名、`OLLAMA_BASE_URL`、メモリの注意は[設定ドキュメント](./website-docs/01-getting-started/04-configuration.md)を参照してください。
 
 ### 🔄 アップグレード
 
