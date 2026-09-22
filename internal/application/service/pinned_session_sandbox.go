@@ -25,20 +25,27 @@ type PinnedSessionSandbox struct {
 	pinner   sessionSandboxPinReader
 	resolver sandbox.TenantSandboxResolver
 	fallback sandbox.Manager
+	host     *HostSessionResolver
 }
 
 // NewPinnedSessionSandbox wires request-time sandbox access. Any dependency
 // may be nil; BoundSandboxID then reports ok=false and ExecShellCommand
 // fails, which WorkspaceCheckpointer treats as "no checkpoint".
+//
+// host is consulted only by VersionsWorkspace. manager() must not fall back
+// to it: that would hand WorkspaceCheckpointer a live ExecShellCommand and
+// start committing the user's real project.
 func NewPinnedSessionSandbox(
 	pinner sessionSandboxPinReader,
 	resolver sandbox.TenantSandboxResolver,
 	fallback sandbox.Manager,
+	host *HostSessionResolver,
 ) *PinnedSessionSandbox {
 	return &PinnedSessionSandbox{
 		pinner:   pinner,
 		resolver: resolver,
 		fallback: fallback,
+		host:     host,
 	}
 }
 
@@ -186,11 +193,31 @@ func (a *PinnedSessionSandbox) DeleteForkSnapshot(
 	return errors.New("sandbox: fork snapshot delete is not supported")
 }
 
+// VersionsWorkspace reports whether this session's backend keeps a git history
+// of the sandbox workspace. Host sessions return false: the workspace is a
+// real directory, often shared across sessions, and must not be auto-committed
+// or reset. Sessions without a host backend return true so fork keeps the
+// remote degrade chain rather than pretending the session is on host.
+func (a *PinnedSessionSandbox) VersionsWorkspace(ctx context.Context, sessionID string) bool {
+	if a == nil {
+		return true
+	}
+	if a.host != nil && a.host.HostManagerFor(ctx, sessionID) != nil {
+		return false
+	}
+	if mgr := a.manager(ctx, sessionID); mgr != nil && mgr.GetType() == sandbox.SandboxTypeHost {
+		return false
+	}
+	return true
+}
+
 var _ SandboxShellRunner = (*PinnedSessionSandbox)(nil)
 
 var _ SessionForkSandboxPort = (*PinnedSessionSandbox)(nil)
 
 var _ SessionRewindSandboxPort = (*PinnedSessionSandbox)(nil)
+
+var _ WorkspaceVersioning = (*PinnedSessionSandbox)(nil)
 
 var _ SessionForkSandboxPort = (*sandbox.SessionBoundManager)(nil)
 

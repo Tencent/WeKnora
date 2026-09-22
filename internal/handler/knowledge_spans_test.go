@@ -171,3 +171,148 @@ func TestKnowledgeSpansLastError_SkipsRecoveryFallbackWithoutMessage(t *testing.
 	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "", now, nil)
 	assert.Nil(t, got)
 }
+
+// stageStatuses maps each canonical stage to the status it renders as.
+func stageStatuses(t *testing.T, tree *types.SpanTreeNode) map[string]string {
+	t.Helper()
+	got := map[string]string{}
+	for _, child := range tree.Children {
+		if child.Kind == types.SpanKindStage {
+			got[child.Name] = child.Status
+		}
+	}
+	return got
+}
+
+// #3452: a text passage has no docreader stage, so an embedding failure used to
+// synthesize docreader as failed and the UI named it as the broken step.
+func TestBuildSpanTree_MissingStagesAroundRealFailure(t *testing.T) {
+	now := time.Now()
+	finished := now.Add(2 * time.Second)
+	rows := []types.KnowledgeProcessingSpan{
+		{KnowledgeID: "kid", Attempt: 1, SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusFailed, StartedAt: &now, FinishedAt: &finished},
+		{KnowledgeID: "kid", Attempt: 1, SpanID: "chunk", ParentSpanID: "root", Name: types.StageChunking, Kind: types.SpanKindStage, Status: types.SpanStatusDone, StartedAt: &now, FinishedAt: &finished},
+		{KnowledgeID: "kid", Attempt: 1, SpanID: "emb", ParentSpanID: "root", Name: types.StageEmbedding, Kind: types.SpanKindStage, Status: types.SpanStatusFailed, ErrorCode: "EMBED_UNREACHABLE", StartedAt: &now, FinishedAt: &finished},
+	}
+
+	tree, _, lastFail := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
+	a := assert.New(t)
+	got := stageStatuses(t, tree)
+
+	a.Equal(types.SpanStatusFailed, got[types.StageEmbedding],
+		"the stage that actually failed keeps its real row")
+	a.Equal(types.SpanStatusSkipped, got[types.StageDocReader],
+		"a stage before the failure with no row never ran; a text passage has no document to parse")
+	a.Equal(types.SpanStatusCancelled, got[types.StageMultimodal],
+		"a stage after the failure with no row was abandoned, not broken")
+	a.Equal(types.SpanStatusCancelled, got[types.StagePostProcess],
+		"postprocess depends on embedding, so it is cancelled rather than failed")
+
+	// The UI focuses the first failed stage in canonical order.
+	var firstFailed string
+	for _, name := range types.AllStages {
+		if got[name] == types.SpanStatusFailed {
+			firstFailed = name
+			break
+		}
+	}
+	a.Equal(types.StageEmbedding, firstFailed,
+		"the timeline must name embedding, not an earlier stage that never ran")
+	a.NotNil(lastFail)
+	a.Equal(types.StageEmbedding, lastFail.Name)
+}
+
+// No failed row means no position to reason from, so the fallback still applies.
+func TestBuildSpanTree_MissingStagesWithoutFailureKeepFallback(t *testing.T) {
+	now := time.Now()
+	rows := []types.KnowledgeProcessingSpan{
+		{KnowledgeID: "kid", Attempt: 1, SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusRunning, StartedAt: &now},
+		{KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusDone, StartedAt: &now},
+	}
+
+	tree, _, _ := buildSpanTree("kid", 1, rows, types.ParseStatusProcessing)
+	got := stageStatuses(t, tree)
+	a := assert.New(t)
+	a.Equal(types.SpanStatusPending, got[types.StageChunking],
+		"a run still in flight keeps pending placeholders")
+	a.Equal(types.SpanStatusPending, got[types.StagePostProcess])
+}
+
+// parse_status "cancelled" fell through to pending, leaving spinners on
+// stages the document never reached.
+func TestBuildSpanTree_CancelledParseRendersCancelled(t *testing.T) {
+	tree, _, _ := buildSpanTree("kid-cancelled", 0, nil, types.ParseStatusCancelled)
+	a := assert.New(t)
+	a.Equal(types.SpanStatusCancelled, tree.Status)
+	a.Len(tree.Children, len(types.AllStages))
+	for _, child := range tree.Children {
+		a.Equal(types.SpanStatusCancelled, child.Status,
+			"a cancelled parse must not render its unreached stages as pending")
+	}
+}
+
+// Failure at the first stage: nothing precedes it, so nothing is skipped.
+func TestBuildSpanTree_DocReaderFailureCancelsEverythingAfter(t *testing.T) {
+	now := time.Now()
+	rows := []types.KnowledgeProcessingSpan{
+		{KnowledgeID: "kid", Attempt: 1, SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusFailed, StartedAt: &now},
+		{KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusFailed, ErrorCode: "DOCREADER_TIMEOUT", StartedAt: &now},
+	}
+
+	tree, _, _ := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
+	got := stageStatuses(t, tree)
+	a := assert.New(t)
+	a.Equal(types.SpanStatusFailed, got[types.StageDocReader])
+	for _, name := range []string{types.StageChunking, types.StageEmbedding, types.StageMultimodal, types.StagePostProcess} {
+		a.Equal(types.SpanStatusCancelled, got[name],
+			"%s follows the failed docreader and never ran", name)
+	}
+	a.NotContains(got, types.SpanStatusSkipped)
+}
+
+// Post-process closes its stage once the enrichment tasks are fanned out, so
+// the stage owning a still-running subspan is the current one.
+func TestBuildSpanTree_CurrentStageFallsBackToRunningSubspan(t *testing.T) {
+	rows := []types.KnowledgeProcessingSpan{
+		{SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusDone},
+		{
+			SpanID: "post", ParentSpanID: "root", Name: types.StagePostProcess,
+			Kind: types.SpanKindStage, Status: types.SpanStatusDone,
+		},
+		{
+			SpanID: "wiki", ParentSpanID: "post", Name: "postprocess.wiki",
+			Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning,
+		},
+		{
+			SpanID: "page", ParentSpanID: "wiki", Name: "postprocess.wiki.page[a]",
+			Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning,
+		},
+	}
+	_, currentStage, _ := buildSpanTree("kid", 1, rows, types.ParseStatusFinalizing)
+	assert.Equal(t, types.StagePostProcess, currentStage)
+}
+
+// A later subtask failure must not hide the stage housekeeping marked stalled.
+func TestBuildSpanTree_StallFailureWinsOverLaterFailures(t *testing.T) {
+	rows := []types.KnowledgeProcessingSpan{
+		{SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusRunning},
+		{
+			SpanID: "mm", ParentSpanID: "root", Name: types.StageMultimodal, Kind: types.SpanKindStage,
+			Status: types.SpanStatusFailed, ErrorCode: "TASK_STALLED",
+		},
+		{
+			SpanID: "img0", ParentSpanID: "mm", Name: "multimodal.image[0]", Kind: types.SpanKindGeneration,
+			Status: types.SpanStatusFailed, ErrorCode: "MULTIMODAL_VLM_FAILED",
+		},
+	}
+	_, _, lastFailure := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
+	if assert.NotNil(t, lastFailure) {
+		assert.Equal(t, "mm", lastFailure.SpanID)
+	}
+
+	rows[1].ErrorCode = "UNKNOWN"
+	_, _, lastFailure = buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
+	if assert.NotNil(t, lastFailure) {
+		assert.Equal(t, "img0", lastFailure.SpanID, "without a stall, the latest failure still wins")
+	}
+}

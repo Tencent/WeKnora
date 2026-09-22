@@ -397,25 +397,50 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 	return knowledge.ParseStatus == types.ParseStatusDeleting
 }
 
+// Pseudo-statuses isKnowledgeAborted reports when it could not learn the
+// row's state: the worker's context is done, or the read failed. The caller
+// must stop without cleaning up or writing its in-memory row back (a full-row
+// Save would clobber a cancel it never saw), and hand abortRetryErr to asynq.
+const (
+	abortStatusInterrupted = "interrupted"
+	abortStatusUnreadable  = "unreadable"
+)
+
+// abortRetryErr is what a pipeline step returns after bailing on status:
+// nil for a settled abort (cancelled / deleting), an error for an unknown
+// state so the task is retried instead of acked with the row in flight.
+func abortRetryErr(ctx context.Context, knowledgeID, status string) error {
+	switch status {
+	case abortStatusInterrupted:
+		return fmt.Errorf("knowledge %s: interrupted: %w", knowledgeID, context.Cause(ctx))
+	case abortStatusUnreadable:
+		return fmt.Errorf("knowledge %s: abort check could not read the row", knowledgeID)
+	}
+	return nil
+}
+
 // isKnowledgeAborted returns (true, status) when the knowledge has been
 // marked as deleting OR cancelled so async pipeline workers should bail
 // out. Status is returned so callers can branch on cleanup behavior:
 // deleting → existing cleanup of partial chunks/index applies;
 // cancelled → keep partially written data per user expectation.
 //
-// When the row is missing or unreadable we conservatively return
-// (true, ParseStatusDeleting): the existing deleting branch already
-// handles cleanup-or-no-op semantics safely.
+// Only a row that is really gone reads as deleting. A transient read error
+// must not — callers would wipe a live document's chunks and index — nor may
+// it read as "not aborted", or the caller's later full-row Save could
+// overwrite a cancel it failed to see. It reports abortStatusUnreadable.
 func (s *knowledgeService) isKnowledgeAborted(
 	ctx context.Context, tenantID uint64, knowledgeID string,
 ) (bool, string) {
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to check knowledge abort status (assuming deleted): %v", err)
+	switch {
+	case err == nil && knowledge == nil, errors.Is(err, repository.ErrKnowledgeNotFound):
 		return true, types.ParseStatusDeleting
-	}
-	if knowledge == nil {
-		return true, types.ParseStatusDeleting
+	case err != nil && ctx.Err() != nil:
+		return true, abortStatusInterrupted
+	case err != nil:
+		logger.Warnf(ctx, "Failed to check knowledge abort status for %s: %v", knowledgeID, err)
+		return true, abortStatusUnreadable
 	}
 	switch knowledge.ParseStatus {
 	case types.ParseStatusDeleting, types.ParseStatusCancelled:

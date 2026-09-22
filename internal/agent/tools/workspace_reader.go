@@ -142,13 +142,20 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 		}, nil
 	}
 
-	// The source binds reads to the current session's sandbox. Preserve the
-	// familiar workspace roots in metadata, without restricting readable paths
-	// to them: temporary files and installed resources may live elsewhere.
-	clean := sandbox.ResolveWorkspacePath(trimmed)
-	rootDir, ok := matchingInspectableRoot(clean)
+	// The source binds reads to the current session's sandbox. Remote
+	// sessions may inspect /tmp and installed resources; host layouts
+	// refuse paths outside ReadRoots.
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.source)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
+	clean := resolveIn(layout, trimmed)
+	rootDir, ok := inspectRoot(layout, clean)
 	if !ok {
-		rootDir = "/"
+		return &types.ToolResult{
+			Success: false,
+			Error:   inspectScopeErrorIn(layout, clean),
+		}, nil
 	}
 
 	ctx = sandbox.WithSessionFileOperation(ctx)
