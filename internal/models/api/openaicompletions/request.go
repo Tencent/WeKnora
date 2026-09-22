@@ -283,9 +283,7 @@ func normalizeCompletionTokenFields(body map[string]any, primary string) {
 		// Unknown custom field name: still collapse the two standard aliases
 		// so a dual-write never reaches the provider.
 		if _, hasLegacy := body[tokenFieldLegacy]; hasLegacy {
-			if _, hasModern := body[tokenFieldModern]; hasModern {
-				delete(body, tokenFieldModern)
-			}
+			delete(body, tokenFieldModern)
 		}
 		return
 	}
