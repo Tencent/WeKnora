@@ -122,7 +122,7 @@ services:
   # OpenSearch k-NN (Phase 3 driver). Single-node dev profile with the
   # security plugin disabled → plain HTTP on :9200, no auth/TLS. The image
   # bundles the opensearch-knn plugin. For production use a secured,
-  # multi-node cluster. See docs/dev/opensearch-integration-test.md.
+  # multi-node cluster. See website-docs/03-features/05-retrieval-engines.md.
   opensearch:
     image: opensearchproject/opensearch:3.3.2
     container_name: WeKnora-opensearch-dev

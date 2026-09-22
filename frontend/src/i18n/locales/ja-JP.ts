@@ -788,6 +788,10 @@ export default {
     statusCompleted: '完了',
     statusProcessing: '処理中',
     statusFinalizing: '最適化中',
+    statusStalled: '停止の可能性',
+    stalledHint: '{minutes} 分間進捗がありません。停止している可能性があります。トレースで停止箇所を確認するか、解析を停止してドキュメントを再構築してください。',
+    statusQueued: '待機中',
+    queuedHint: '{minutes} 分間進捗がありませんが、タスクはまだキューで待機しています。通常はバックログによるもので、自動的に再開されます。',
     statusFailed: '失敗',
     statusCancelled: 'キャンセル済み',
     statusDraft: '下書き',
@@ -926,7 +930,15 @@ export default {
     minutesAgo: '{n}分前',
     noActivity: '解析の記録はまだありません',
     totalDuration: '合計: {d}',
+    stall: {
+      title: '{minutes} 分間進捗がありません。停止している可能性があります',
+      hint: 'このまま待つか、解析を停止してドキュメントを再構築できます。進捗がないままの場合は自動的に失敗としてマークされます。',
+      hintAtStage: '「{stage}」段階で止まっています。このまま待つか、解析を停止してドキュメントを再構築できます。進捗がないままの場合は自動的に失敗としてマークされます。',
+      queuedTitle: '{minutes} 分間進捗がありません。キューで待機中です',
+      queuedHint: 'このドキュメントのタスクはまだキューで待機しています。通常はバックログによるもので、自動的に再開されるため、操作は不要です。'
+    },
     head: {
+      lastProgress: '最終進捗',
       stagesDone: '主要ステージ',
       stagesProgress: '現在のステージ',
       attempt: '試行',
@@ -981,6 +993,8 @@ export default {
       cancelled: 'キャンセル済み'
     },
     errorCode: {
+      TASK_STALLED: '進捗がないため自動停止しました',
+      TASK_STALLED_SUGGESTION: 'しきい値を超えても進捗がなく、キューにも対応するタスクがないため失敗としてマークされました。「再試行」を押してください。繰り返し発生する場合は、この段階が依存するサービス（文書解析、モデル、ベクトルストア）を確認してください。',
       UNKNOWN_SUGGESTION: '詳細はアプリケーションログを確認してください。'
     }
   },

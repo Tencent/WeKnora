@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/filetransport"
@@ -35,6 +36,40 @@ type KnowledgeHandler struct {
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
+	backlog           backlogProbe
+}
+
+// backlogProbe tells a backlogged document (work still queued) from a stuck
+// one; HousekeepingService implements it with the sweep's own probes.
+type backlogProbe interface {
+	QueuedWork(ctx context.Context, ids []string) (map[string]bool, error)
+}
+
+// stallHintAfter is how long an in-flight row may go without progress before
+// it gets a stall verdict; keep in step with PROCESSING_STALL_THRESHOLD_MS in
+// the frontend.
+const stallHintAfter = 20 * time.Minute
+
+// stallVerdicts probes ids (all quiet past stallHintAfter) and returns each
+// one's StallState. Nil when the probe is unavailable or failed: an unknown
+// row gets no verdict rather than being called stuck.
+func (h *KnowledgeHandler) stallVerdicts(ctx context.Context, ids []string) map[string]string {
+	if h.backlog == nil || len(ids) == 0 {
+		return nil
+	}
+	queued, err := h.backlog.QueuedWork(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "backlog probe failed: %v", err)
+		return nil
+	}
+	out := make(map[string]string, len(ids))
+	for _, id := range ids {
+		out[id] = types.StallStateStalled
+		if queued[id] {
+			out[id] = types.StallStateQueued
+		}
+	}
+	return out
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -46,8 +81,14 @@ func NewKnowledgeHandler(
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
+	housekeeping *service.HousekeepingService,
 ) *KnowledgeHandler {
+	var backlog backlogProbe
+	if housekeeping != nil {
+		backlog = housekeeping
+	}
 	return &KnowledgeHandler{
+		backlog:           backlog,
 		cfg:               cfg,
 		kgService:         kgService,
 		kbService:         kbService,
@@ -676,6 +717,15 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 		"current_stage":   currentStageName,
 		"trace":           tree,
 	}
+	if isParseInFlight(knowledge.ParseStatus) {
+		last := spansLastActivity(knowledge.UpdatedAt, rows)
+		resp["last_activity_at"] = last
+		if time.Since(last) >= stallHintAfter {
+			if verdict := h.stallVerdicts(ctx, []string{knowledge.ID})[knowledge.ID]; verdict != "" {
+				resp["stall_state"] = verdict
+			}
+		}
+	}
 	if lastError := knowledgeSpansLastError(
 		currentAttempt,
 		latestAttempt,
@@ -814,10 +864,16 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 		if r.Status == types.SpanStatusRunning && r.Kind == types.SpanKindStage && currentStage == "" {
 			currentStage = r.Name
 		}
-		if r.Status == types.SpanStatusFailed {
+		// Housekeeping's TASK_STALLED marks where a stuck run stopped;
+		// an older subtask failure must not hide it.
+		if r.Status == types.SpanStatusFailed &&
+			(lastFailure == nil || !isStallFailure(lastFailure) || isStallFailure(&r)) {
 			cp := r
 			lastFailure = &cp
 		}
+	}
+	if currentStage == "" {
+		currentStage = stageOfRunningSpan(rows)
 	}
 
 	// Pick the synthesized stage status from parse_status. Without this,
@@ -1718,6 +1774,8 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		knowledges = filterKnowledgesByKBAllowSet(knowledges, allowedKBSet)
 	}
 
+	h.attachLastActivity(ctx, knowledges)
+
 	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
 		len(req.IDs), len(knowledges))
 
@@ -1725,6 +1783,99 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		"success": true,
 		"data":    knowledges,
 	})
+}
+
+func isStallFailure(span *types.KnowledgeProcessingSpan) bool {
+	return span.ErrorCode == errors.ErrCodeTaskStalled
+}
+
+// stageOfRunningSpan names the stage owning the newest running span, for the
+// window where no stage span is running but its work still is: post-process
+// closes its stage once summary / question / graph / wiki are fanned out.
+func stageOfRunningSpan(rows []types.KnowledgeProcessingSpan) string {
+	bySpanID := make(map[string]*types.KnowledgeProcessingSpan, len(rows))
+	for i := range rows {
+		bySpanID[rows[i].SpanID] = &rows[i]
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].Status != types.SpanStatusRunning || rows[i].Kind == types.SpanKindRoot {
+			continue
+		}
+		for span, depth := &rows[i], 0; span != nil && depth < 64; depth++ {
+			if span.Kind == types.SpanKindStage {
+				return span.Name
+			}
+			span = bySpanID[span.ParentSpanID]
+		}
+	}
+	return ""
+}
+
+// spansLastActivity is the latest of the row's updated_at and the listed
+// spans' writes.
+func spansLastActivity(updatedAt time.Time, rows []types.KnowledgeProcessingSpan) time.Time {
+	last := updatedAt
+	for _, row := range rows {
+		last = latestActivity(last, row.UpdatedAt)
+	}
+	return last
+}
+
+// attachLastActivity sets LastActivityAt on in-flight rows. updated_at only
+// moves at stage transitions, so the latest span write is folded in: it
+// advances with every subspan while a long stage is still working.
+func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []*types.Knowledge) {
+	var ids []string
+	for _, k := range knowledges {
+		if k != nil && isParseInFlight(k.ParseStatus) {
+			ids = append(ids, k.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var spanActivity map[string]time.Time
+	if h.spanRepo != nil {
+		var err error
+		if spanActivity, err = h.spanRepo.LastActivity(ctx, ids); err != nil {
+			logger.Warnf(ctx, "span last activity lookup failed: %v", err)
+		}
+	}
+	var quiet []*types.Knowledge
+	var quietIDs []string
+	for _, k := range knowledges {
+		if k == nil || !isParseInFlight(k.ParseStatus) {
+			continue
+		}
+		last := latestActivity(k.UpdatedAt, spanActivity[k.ID])
+		k.LastActivityAt = &last
+		if time.Since(last) >= stallHintAfter {
+			quiet = append(quiet, k)
+			quietIDs = append(quietIDs, k.ID)
+		}
+	}
+	verdicts := h.stallVerdicts(ctx, quietIDs)
+	for _, k := range quiet {
+		k.StallState = verdicts[k.ID]
+	}
+}
+
+func isParseInFlight(status string) bool {
+	switch status {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	}
+	return false
+}
+
+func latestActivity(times ...time.Time) time.Time {
+	var last time.Time
+	for _, t := range times {
+		if t.After(last) {
+			last = t
+		}
+	}
+	return last
 }
 
 // UpdateKnowledgeRequest defines the partial-update body for PUT /knowledge/:id.

@@ -788,6 +788,10 @@ export default {
     statusCompleted: 'Completed',
     statusProcessing: 'Processing',
     statusFinalizing: 'Optimizing',
+    statusStalled: 'May be stuck',
+    stalledHint: 'No progress for {minutes} minutes; it may be stuck. Open the trace to see where it stopped, or stop parsing and rebuild the document.',
+    statusQueued: 'Queued',
+    queuedHint: 'No progress for {minutes} minutes, but its tasks are still waiting in the queue, usually because of a backlog. It will continue on its own.',
     statusFailed: 'Failed',
     statusCancelled: 'Cancelled',
     statusDraft: 'Draft',
@@ -926,7 +930,15 @@ export default {
     minutesAgo: '{n}m ago',
     noActivity: 'No parsing activity yet',
     totalDuration: 'Total: {d}',
+    stall: {
+      title: 'No progress for {minutes} minutes; this may be stuck',
+      hint: 'You can keep waiting, or stop parsing and rebuild the document. If it still makes no progress, it will be marked as failed automatically.',
+      hintAtStage: 'It stopped at the {stage} stage. You can keep waiting, or stop parsing and rebuild the document. If it still makes no progress, it will be marked as failed automatically.',
+      queuedTitle: 'No progress for {minutes} minutes; still waiting in the queue',
+      queuedHint: 'Tasks for this document are still queued, usually because of a backlog. It will continue on its own; no action is usually needed.'
+    },
     head: {
+      lastProgress: 'Last progress',
       stagesDone: 'Main stages',
       stagesProgress: 'Current stage',
       attempt: 'Attempt',
@@ -981,6 +993,8 @@ export default {
       cancelled: 'Cancelled'
     },
     errorCode: {
+      TASK_STALLED: 'Stopped after no progress',
+      TASK_STALLED_SUGGESTION: 'Processing made no progress past the time limit and had no task left in the queue, so it was marked as failed. Click Retry; if this keeps happening, check the service this stage depends on (document parsing, model, or vector store).',
       UNKNOWN_SUGGESTION: 'Check the application logs for details.'
     }
   },

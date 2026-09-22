@@ -6575,6 +6575,8 @@ export default {
     noActivity: '暂无解析记录',
     totalDuration: '总耗时：{d}',
     errorCode: {
+      TASK_STALLED: '长时间无进展，已自动终止',
+      TASK_STALLED_SUGGESTION: '处理超过阈值仍没有任何进展，且队列中已无对应任务，已被系统标记为失败。请点击「重试」；如反复出现，请检查该阶段依赖的服务（文档解析、模型、向量库）是否正常。',
       UNKNOWN_SUGGESTION: '请查看应用日志获取详细信息。'
     },
     status: {
@@ -6625,7 +6627,15 @@ export default {
       overview: '概览',
       raw: '原始 JSON'
     },
+    stall: {
+      title: '已 {minutes} 分钟没有进展，可能已卡住',
+      hint: '可以继续等待，或停止解析后重建知识。长时间仍无进展时，系统会自动将其标记为失败。',
+      hintAtStage: '当前停在「{stage}」阶段。可以继续等待，或停止解析后重建知识。长时间仍无进展时，系统会自动将其标记为失败。',
+      queuedTitle: '已 {minutes} 分钟没有进展，任务仍在排队',
+      queuedHint: '这篇文档还有任务在队列中等待处理，通常是任务积压导致，稍后会自动继续，一般无需操作。'
+    },
     head: {
+      lastProgress: '最近进展',
       stagesDone: '主流程阶段',
       stagesProgress: '当前阶段',
       attempt: '尝试',
@@ -6961,6 +6971,10 @@ export default {
     statusCompleted: '已完成',
     statusProcessing: '解析中',
     statusFinalizing: '优化中',
+    statusStalled: '疑似卡住',
+    stalledHint: '已 {minutes} 分钟没有进展，可能已卡住。可打开 Trace 查看停在哪一步，或停止解析后重建知识。',
+    statusQueued: '排队中',
+    queuedHint: '已 {minutes} 分钟没有进展，但仍有任务在队列中等待处理，通常是任务积压，稍后会自动继续。',
     statusFailed: '失败',
     statusCancelled: '已取消',
     statusDraft: '草稿',
