@@ -194,7 +194,9 @@ func TestSQLiteMigrationsUpgradeV29AddsFileVersions(t *testing.T) {
 	require.False(t, dirty)
 	var fileName string
 	var fileVersion int
-	require.NoError(t, db.QueryRow("SELECT file_name, file_version FROM knowledges WHERE id = 'existing-file'").Scan(&fileName, &fileVersion))
+	require.NoError(t, db.QueryRow(
+		"SELECT file_name, file_version FROM knowledges WHERE id = 'existing-file'",
+	).Scan(&fileName, &fileVersion))
 	require.Equal(t, "existing.pdf", fileName)
 	require.Equal(t, 1, fileVersion)
 	assertSQLiteKnowledgeFileVersionsWork(t, db)
