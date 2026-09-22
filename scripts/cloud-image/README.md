@@ -1,5 +1,7 @@
 # WeKnora 云镜像打包脚本（Cloud-Agnostic）
 
+> 维护说明已迁至 [website-docs 云镜像维护说明](../../website-docs/06-development/01-dev-guide.md#cloud-image-scripts)。本文件保留脚本历史背景，参数和行为以脚本及新指南为准。
+
 > **本文档面向「想把 WeKnora 打包成云镜像（AMI / 自定义镜像 / Snapshot）分发给其他人」的用户。**
 > **如果你只是想自己用 WeKnora，请直接看主仓 [README](../../README.md)，`docker compose up -d` 即可。**
 
@@ -22,7 +24,7 @@
 - 火山引擎 / 华为云 / Vultr Snapshot
 - 本地 KVM / Proxmox 模板
 
-各平台具体的「制作镜像 / 共享 / 上架」操作步骤，请参考 [`docs/cloud-image/`](../../docs/cloud-image/) 下对应文档。
+当前脚本边界与首启排障见[云镜像维护说明](../../website-docs/06-development/01-dev-guide.md#cloud-image-scripts)。云平台共享与上架要求以实际控制台为准。
 
 ---
 

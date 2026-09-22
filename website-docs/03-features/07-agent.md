@@ -1,5 +1,7 @@
 # Agent 引擎
 
+提示词分段、模板引用和自定义正文的维护方式见[对话提示词拼装与可编辑范围](../06-development/05-agent-prompts.md)；浏览器配对与部署见[本机浏览器](../05-clients/09-local-browser.md)。
+
 智能体可结合知识库检索、联网搜索和外部工具处理多步骤任务，例如比较多份合同的条款。智能推理模式按问题选择工具并执行多轮调用，再根据获得的结果生成回答。
 
 对话框顶部可选择快速问答或智能推理：
@@ -88,7 +90,7 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 | --- | --- | --- |
 | 基础 | `agent_mode` | `quick-answer` / `smart-reasoning` |
 | 基础 | `agent_type` | smart-reasoning 下的预设类别，空/未知视为 custom |
-| 基础 | `system_prompt` / `system_prompt_id` | 直接内容或模板 ID（启动时经 `ResolveBuiltinAgentPromptRefs` 等解析） |
+| 基础 | `system_prompt` / `system_prompt_id` | 直接正文优先；自定义 Agent 的模板引用由 `ResolveCustomAgentPrompts` 在请求时解析 |
 | 基础 | `context_template` / `context_template_id` | 普通模式下检索片段的拼装模板 |
 | 模型 | `model_id`、`rerank_model_id`、`temperature`、`max_completion_tokens`、`thinking`、`citation_enabled` | temperature<0 → 0.7；max_completion_tokens=0 使用运行时默认：quick-answer 2048、smart-reasoning 4096、绑定沙箱的 smart-reasoning 24576；thinking 未设时固定为 false；citation 未设时视为 true |
 | Agent | `max_iterations` | 默认 10（服务层上限 100） |
@@ -109,7 +111,7 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 
 Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAgent`、`ListAgents`、`UpdateAgent`、`DeleteAgent`、`CopyAgent`、`GetPlaceholders`（返回 `types.PlaceholdersByField(PromptFieldAgentSystemPrompt)` 的占位符清单）、`GetAgentTypePresets`（带 i18n 的预设列表）、`GetSuggestedQuestions`。创建/更新时经 `authorizeAgentKnowledgeScope` 校验受限 API Key 的 KB 范围：`kb_selection_mode: all` 对 KB 受限 key 直接 403，`selected` 逐一鉴权。
 
-运行时映射：`buildAgentConfig`（`session_agent_qa.go`）把 `CustomAgentConfig` 转换为引擎的 `types.AgentConfig`（`internal/types/agent.go`），并叠加：web 搜索需 Agent 与请求同时开启（`customAgent.Config.WebSearchEnabled && req.WebSearchEnabled`）、web provider 回退租户默认、`SearchTargets` 由 KB/@文档/@标签 scope 统一构建、`MaxContextTokens` 兜底 200000、`@Skill` 的每轮优先提示与 `@MCP` 的每轮范围收窄（共享 Agent 的 @MCP 只能落在 Agent 预设集合内）。另外只有当 `search_knowledge` 实际可用时才要求配置 rerank 模型（`agentRequiresRerankModel`，旧名 `knowledge_search` / `grep_chunks` 经 `SuccessorToolName` 归一后同样计入）。
+运行时映射：`buildAgentConfig`（`session_agent_qa.go`）把 `CustomAgentConfig` 转换为引擎的 `types.AgentConfig`（`internal/types/agent.go`），并叠加：web 搜索需 Agent 与请求同时开启（`customAgent.Config.WebSearchEnabled && req.WebSearchEnabled`）、web provider 回退租户默认、`SearchTargets` 由 KB/@文档/@标签 scope 统一构建、`MaxContextTokens` 兜底 200000、`@Skill` 与 `@MCP` 的每轮优先提示（不移除其他已配置资源）（共享 Agent 的 @MCP 只能落在 Agent 预设集合内）。另外只有当 `search_knowledge` 实际可用时才要求配置 rerank 模型（`agentRequiresRerankModel`，旧名 `knowledge_search` / `grep_chunks` 经 `SuccessorToolName` 归一后同样计入）。
 
 #### 分享机制（agent_share） {#_7-3-分享机制-agent-share}
 
@@ -252,7 +254,7 @@ flowchart TB
         WEB["web_search / web_fetch"]
         DATA["data_schema / data_analysis（DuckDB）"]
         SKILL["read_file / shell_exec"]
-        MCP["MCP 工具 mcp_{service}_{tool}"]
+        MCP["MCP 目录与按需加载工具"]
     end
     GATE["approval.Gate<br/>（HITL 审批 / OAuth）"]
     SBX["sandbox.Manager<br/>（Docker / Cube / E2B）"]
@@ -275,30 +277,11 @@ flowchart TB
 
 #### System Prompt 的构建 {#_1-3-system-prompt-的构建}
 
-`internal/agent/prompts.go` 中的 `BuildSystemPromptWithOptions` 按以下优先级选择模板：
+`internal/agent/prompts.go` 的 `BuildSystemPromptSections` 先选择基础模板：显式正文优先，否则无知识库用 `pure`、有知识库用 `rag`；随后按顺序拼接中途补充、运行时约定、来源、工具、输出、技能、记忆和引用协议等段。技能段仅在具备 `read_file`、存在可用技能且不处于技能安装模式时加入。
 
-1. Agent 配置了自定义 system prompt（`AgentConfig.UseCustomSystemPrompt` 或 `SystemPrompt` 非空）→ 直接使用；
-2. 无任何绑定知识库 → `GetPureAgentSystemPrompt`（`config/prompt_templates/agent_system_prompt.yaml` 中 mode 为 `pure` 的模板）；
-3. 否则 → `GetProgressiveRAGSystemPrompt`（mode 为 `rag` 的模板）。
+当前轮的知识库摘要、固定文档、日期和会话信息由 `observe.go` 放入用户消息的 `runtime_context`，不持久化到历史；通用回答规则位于系统段。`@MCP` / `@Skill` 产生已授权资源的优先使用提示，不自动排除其他可用来源。
 
-模板支持的占位符（`renderPromptPlaceholdersWithStatus`）：
-
-| 占位符 | 展开为 |
-| --- | --- |
-| `{{knowledge_bases}}` | 历史遗留占位符；现在展开为一句指向 `<runtime_context>` 内 `<bound_knowledge_bases>` 的提示（KB 详情已移入用户消息） |
-| `{{web_search_status}}` | `Enabled` / `Disabled` |
-| `{{current_time}}` | RFC3339 当前时间 |
-| `{{language}}` | 用户语言名（如 "Chinese (Simplified)"） |
-| `{{skills}}` | 被清空；技能元数据由 `formatSkillsMetadata` 单独追加 |
-
-启用技能时，`formatSkillsMetadata` 会在 system prompt 末尾追加 "Available Skills" 段落（Level 1 元数据 + 强制的 Skill Matching Protocol），并说明 `read_file` 读取技能资源与 `shell_exec` 执行技能命令的用法。
-
-**运行时上下文（runtime_context）**：与 system prompt 不同，绑定 KB 的完整详情（capabilities、最近文档/FAQ 列表）、@提及的固定文档（pinned_documents）、当前时间、会话 ID，是以 XML 块 `<runtime_context scope="this_turn">` 注入到**当前轮用户消息**里的（`internal/agent/observe.go` 的 `buildRuntimeContextBlock`），且**不持久化**到历史，避免过期 scope 干扰后续轮次。块内还固定携带两条指令：
-
-- `<communication_instruction>`：禁止在答案/思考中出现内部工具名和内部 ID（要求说"知识库检索"而非 `search_knowledge` 等）；
-- `<answer_instruction>`：信息足够后直接以纯文本写出完整答案并停止（不要再发起工具调用）——这就是 Agent 的终止协议。
-
-当用户 @提及了 MCP 服务或技能时，`buildMustUseBlock` 会额外注入 `<must_use>` 块，强制模型使用对应前缀的 MCP 工具或先用 `read_file` 读取技能说明。
+段顺序、占位符、模板引用保存与消息角色边界统一维护在[对话提示词拼装](../06-development/05-agent-prompts.md)。
 
 ### ReAct 循环逐阶段详解 {#_2-react-循环逐阶段详解}
 
@@ -379,7 +362,7 @@ if !state.IsComplete && ctx.Err() == nil {
 - `CustomAgent.EnsureDefaults`：未配置时为 10（`internal/types/custom_agent.go`）;
 - 内置 Agent：智能推理 50、数据分析师 30、Wiki 问答/修订 30（`config/builtin_agents.yaml`）。
 
-达到上限后 `handleMaxIterations` 会用一个专门的合成 prompt（`internal/agent/finalize.go`）把全部工具结果作为 user 消息喂给 LLM 生成完整答案（合成阶段关闭 thinking），若检索结果含 Markdown 图片还会附加图片输出要求。
+达到上限后 `handleMaxIterations` 通过 `internal/agent/finalize.go` 沿用当前消息列表，保留原消息角色、图片和工具调用配对，并追加收尾请求生成最终答案；这次调用不提供工具，设置 `tool_choice=none` 并关闭 thinking。
 
 #### ReAct 循环流程图 {#_2-4-react-循环流程图}
 
@@ -442,7 +425,8 @@ flowchart TD
 | `wiki_flag_issue` | `slug`\*、`issue_type`\*（mixed_entities/contradictory_facts/out_of_date/other）、`description`\*、`suspected_knowledge_ids[]` | 标记页面事实错误/实体混淆等问题，记录 issue 供人工或自动维护 |
 | `wiki_read_issue` | `issue_id` / `slug` | 查看某条 issue 详情或列出某页面的 pending issue |
 | `wiki_update_issue` | `issue_id`\*、`status`\*（resolved/ignored/pending） | 更新 issue 状态 |
-| `mcp_{service}_{tool}`（动态） | 由 MCP 服务的 InputSchema 决定 | 包装外部 MCP 工具；描述前缀 `[MCP Service: X (external)]` 提示不可信来源；可挂人工审批与会话内 OAuth |
+| `discover_mcp_tools` / `call_mcp_tool` | 发现模式、服务 ID / 工具引用与参数 | 查询目录、读取完整定义并按需调用，见 [MCP 工具目录](08-mcp.md#mcp-tool-directory) |
+| `mcp_...`（动态，含稳定哈希后缀） | 由 MCP 服务的 InputSchema 决定 | 读取定义后发布的外部函数；描述标明服务和原始工具名，执行时重新校验权限，可挂人工审批与会话内 OAuth |
 
 默认工具白名单 `DefaultAllowedTools()`（新建 Agent 的默认值，也是旧 Agent 未配置 `allowed_tools` 时的回退）：`search_knowledge`、`read_document`、`list_documents`、`search_conversations`（`search_memory` 与 `web_search` 一样不在此列表里，由记忆 / 联网开关在注册工具时注入或剔除）。
 

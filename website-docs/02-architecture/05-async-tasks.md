@@ -99,6 +99,20 @@ opt := &asynq.RedisClientOpt{
 - **聊天附件优先**：`chat_attachment` 在 core pool 权重 3 高于 `default` 的 1，大批量 KB 导入不会让交互式聊天上传排队。
 - **滚动升级兼容**：`QueueMaintenance` 常量的物理 Redis 队列名保持旧版的 `"low"`，旧版本入队的任务在滚动部署期间仍可被消费。
 
+### 容量估算与扩容 {#capacity-planning}
+
+旧聚合配置 `asynq.concurrency` / `WEKNORA_ASYNQ_CONCURRENCY` 已停用，存量部署应改为上表的各池配置。设置修改后需要重启服务。默认前五个池合计每实例 32 个 worker，Wiki 的 8 个另外计算。
+
+可以用下面的估算作为起点，再以运行时面板和实际负载调整：
+
+```text
+所需 worker ≈ ceil(峰值任务到达率 × 平均执行时间 / 0.70)
+```
+
+其中 0.70 是示例目标利用率，不是系统配置或固定容量保证。到达率须按扇出后的任务数计算：一篇文档可能产生多批问题、逐分块图谱及多张图片任务。队列数量本身不能代表处理能力。
+
+Worker 控制每个服务实例允许同时执行多少任务；模型配额控制跨副本的并发、RPM 与 TPM；DocReader、向量库、数据库和对象存储另有容量上限。模型限流等待已很高时，增加 worker 只会增加等待者。应结合最老任务等待时间、活跃实例总容量、worker 利用率和下游资源判断：下游有余量且积压持续增长时再增加相应池；DocReader 已满时降低 core 接纳量。
+
 ### Worker Pool 架构图 {#_4-2-worker-pool-架构图}
 
 ```mermaid
