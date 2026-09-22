@@ -5692,6 +5692,8 @@ export default {
     retry: '再試行',
     unsupported: 'このファイル形式はオンラインプレビューに対応していません',
     unsupportedHint: 'ダウンロードして、ローカルのアプリケーションで開いてください',
+    tooLarge: 'このスプレッドシートは安全にプレビューできないサイズです',
+    tooLargeHint: 'ダウンロードボタンを使い、ローカルの表計算アプリで開いてください',
     fullscreen: '全画面表示',
     exitFullscreen: '全画面表示を終了',
     htmlRendered: 'レンダリング表示',

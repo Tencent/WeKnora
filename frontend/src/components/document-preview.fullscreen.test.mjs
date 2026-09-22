@@ -161,3 +161,11 @@ test('toolbar reserves layout space in normal and fullscreen modes and keeps exi
   for (const [, css] of toolbars) assert.doesNotMatch(css, /position:\s*(absolute|fixed)|opacity:/)
   assert.ok(toolbars.some(([, css]) => /flex-shrink:\s*0/.test(css)))
 })
+
+test('large Excel files are rejected before SheetJS allocates a workbook', () => {
+  const renderExcel = source.slice(source.indexOf('async function renderExcel('), source.indexOf('async function renderText(', source.indexOf('async function renderExcel(')))
+  assert.match(renderExcel, /if \(isExcelPreviewTooLarge\(blob\.size\)\)/)
+  assert.ok(renderExcel.indexOf('isExcelPreviewTooLarge(blob.size)') < renderExcel.indexOf("await import('xlsx')"))
+  assert.match(source, /previewTooLarge\.value = true/)
+  assert.match(source, /\$t\('preview\.tooLarge'\)/)
+})

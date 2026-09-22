@@ -5692,6 +5692,8 @@ export default {
     retry: 'Retry',
     unsupported: 'This file type does not support online preview',
     unsupportedHint: 'Please download and open with a local application',
+    tooLarge: 'This spreadsheet is too large to preview safely',
+    tooLargeHint: 'Please use the download button to open it in a local spreadsheet application',
     fullscreen: 'Fullscreen',
     exitFullscreen: 'Exit Fullscreen',
     htmlRendered: 'Rendered preview',

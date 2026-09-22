@@ -22,6 +22,7 @@ import {
   resolveFilePreviewExt,
   resolvePreviewKind,
   shouldPrettyPrintJson,
+  isExcelPreviewTooLarge,
   sniffPreview,
   isValidUTF8,
   type FilePreviewKind,
@@ -55,6 +56,7 @@ const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
 const excelHtml = ref('');
+const previewTooLarge = ref(false);
 const mermaidSvg = ref('');
 const htmlViewMode = ref<'render' | 'source'>('render');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
@@ -239,6 +241,15 @@ function decodeCSVBlob(arrayBuffer: ArrayBuffer): string {
 }
 
 async function renderExcel(blob: Blob, fileType?: string) {
+  // Refuse oversized workbooks before loading SheetJS or allocating a large
+  // intermediate HTML table. The document drawer still keeps its download
+  // action available, so metadata remains reachable without risking a tab
+  // freeze or renderer crash.
+  if (isExcelPreviewTooLarge(blob.size)) {
+    previewTooLarge.value = true;
+    return;
+  }
+
   const XLSX = await import('xlsx');
   const arrayBuffer = await blob.arrayBuffer();
 
@@ -252,6 +263,20 @@ async function renderExcel(blob: Blob, fileType?: string) {
     workbook = XLSX.read(tsvText, { type: 'string', FS: '\t' });
   } else {
     workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  }
+
+  const sheetMetrics = workbook.SheetNames.map((name) => {
+    const ref = workbook.Sheets[name]?.['!ref'];
+    if (!ref) return { rows: 0, columns: 0 };
+    const range = XLSX.utils.decode_range(ref);
+    return {
+      rows: range.e.r - range.s.r + 1,
+      columns: range.e.c - range.s.c + 1,
+    };
+  });
+  if (isExcelPreviewTooLarge(blob.size, sheetMetrics)) {
+    previewTooLarge.value = true;
+    return;
   }
 
   let html = '';
@@ -462,6 +487,7 @@ function cleanup() {
   highlightedCode.value = '';
   markdownHtml.value = '';
   excelHtml.value = '';
+  previewTooLarge.value = false;
   mermaidSvg.value = '';
   htmlViewMode.value = 'render';
   pptxData.value = null;
@@ -579,6 +605,11 @@ onUnmounted(() => {
     </div>
 
     <!-- Excel -->
+    <div v-else-if="previewType === 'excel' && previewTooLarge" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-unsupported preview-too-large">
+      <t-icon name="file-excel" size="48px" />
+      <p>{{ $t('preview.tooLarge') }}</p>
+      <p class="unsupported-hint">{{ $t('preview.tooLargeHint') }}</p>
+    </div>
     <div v-else-if="previewType === 'excel' && excelHtml" class="preview-excel">
       <div ref="previewContent" tabindex="0" :aria-label="fileName" class="excel-container" v-html="excelHtml" />
     </div>
