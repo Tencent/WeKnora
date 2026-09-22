@@ -317,8 +317,8 @@ const (
 	// <wiki_page> is unparseable for the UI and silently misleading to the model.
 	wikiMinPageBody = 400
 
-	// wikiBudgetReserve holds back room for the <errors> and <omitted_pages>
-	// trailers appended after the pages are rendered.
+	// wikiBudgetReserve holds back room for the <errors>, <truncated_pages> and
+	// <omitted_pages> trailers appended after the pages are rendered.
 	wikiBudgetReserve = 600
 )
 
@@ -701,6 +701,15 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	finalOutput, truncatedSlugs, omittedSlugs := renderWikiPagesWithinBudget(pending, OutputBudget(ctx))
+	if len(truncatedSlugs) > 0 {
+		finalOutput += fmt.Sprintf(
+			"\n\n<truncated_pages reason=\"output budget exceeded\">\n%s\n</truncated_pages>"+
+				"\n<hint>Only the head and tail of these pages are shown; the middle was cut to "+
+				"fit the output budget. Read each slug on its own before rewriting it with "+
+				"wiki_write_page, which replaces the whole page.</hint>",
+			strings.Join(truncatedSlugs, "\n"),
+		)
+	}
 	if len(omittedSlugs) > 0 {
 		finalOutput += fmt.Sprintf(
 			"\n\n<omitted_pages reason=\"output budget exceeded\">\n%s\n</omitted_pages>"+
