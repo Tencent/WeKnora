@@ -110,6 +110,7 @@ run: build
 
 # Run tests
 test:
+	bash scripts/docker-entrypoint_test.sh
 	go test -v ./...
 
 # Vendor catalog: invariants, legacy-behaviour parity and vendor facts.
@@ -367,5 +368,4 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
-
 
