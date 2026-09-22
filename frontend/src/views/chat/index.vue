@@ -1886,7 +1886,9 @@ onBeforeRouteUpdate((to, from, next) => {
     padding: 8px 0 0;
     box-sizing: border-box;
     overflow-y: auto;
-    overscroll-behavior-y: contain;
+    // Disable boundary bounce as well as scroll chaining: the sticky composer
+    // shares this viewport and otherwise moves with its rubber-band animation.
+    overscroll-behavior-y: none;
     scroll-padding-bottom: var(--chat-composer-height, 0px);
     scrollbar-gutter: stable;
     scrollbar-width: thin;
