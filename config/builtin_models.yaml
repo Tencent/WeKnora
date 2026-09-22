@@ -1,0 +1,23 @@
+# config/builtin_models.yaml — 声明式内置模型（WeKnora IntentGate 开发环境）
+#
+# 本文件由 T40 测试会话创建：注入本机 Kimi Coding Plan（pi 已登录的订阅）
+# 作为平台内置 chat 模型，使任何租户（含验收脚本动态新建的租户）都能
+# 直接跑 agent-chat，无需逐租户配模型。
+#
+# 密钥经 .env 的 ${KIMI_CODING_API_KEY} 注入（BUILTIN_MODELS_CONFIG 加载
+# 时解析），不入库到本文件。
+
+builtin_models:
+  - id: builtin-kimi-coding
+    type: KnowledgeQA # KnowledgeQA | Embedding | Rerank | VLLM | ASR
+    source: remote # remote (default) | local | ...
+    is_default: true
+    name: kimi-for-coding
+    display_name: Kimi for Coding (K2.8)
+    description: 本机 Kimi Coding Plan 订阅（api.kimi.com OpenAI 兼容端点），IntentGate 开发/验收专用
+    parameters:
+      base_url: ${KIMI_CODING_BASE_URL}
+      api_key: ${KIMI_CODING_API_KEY}
+      provider: openai # RemoteAPIChat OpenAI 兼容协议
+      context_window: 262144
+      max_output_tokens: 8192
