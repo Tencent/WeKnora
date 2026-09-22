@@ -63,18 +63,29 @@ const (
 type Verdict struct {
 	Action   Action `json:"action"`
 	PolicyID string `json:"policy_id,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-	Layer    Layer  `json:"layer,omitempty"`
+	// PolicyVersion 判定依据的策略版本（设计 §6.2：verdict 表记着每次判定
+	// 用的是哪个版本，dev/prod 行为不一致时可对账）。无策略命中时为 0。
+	PolicyVersion int `json:"policy_version,omitempty"`
+	// Mode 判定时的策略 mode（observe/enforce，取值与 types.VerdictMode*
+	// 一致），落库为 mode_at_decision。Gate 只记录不据此拦截——observe
+	// 的放行与 enforce 的阻断都由 engine 接缝执行（T40）。无策略命中时为空。
+	Mode   string `json:"mode,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	Layer  Layer  `json:"layer,omitempty"`
 }
 
 // ToolCallInput 是一次工具调用的判定输入。意图基准是原始 user prompt
 // 与会话历史，不是当前轮的模型输出（被审对象不能自证，设计 §8.2）。
 type ToolCallInput struct {
-	TenantID  uint64          `json:"tenant_id"`
-	SessionID string          `json:"session_id"`
-	ToolName  string          `json:"tool_name"`
-	ServiceID string          `json:"service_id,omitempty"` // MCP 工具才有
-	Args      json.RawMessage `json:"args,omitempty"`
+	TenantID  uint64 `json:"tenant_id"`
+	SessionID string `json:"session_id"`
+	ToolName  string `json:"tool_name"`
+	ServiceID string `json:"service_id,omitempty"` // MCP 工具才有
+	// AgentID / WorkspaceID 参与 scope 解析（设计 §8.3 的 agent/workspace
+	// 层级）；engine 接缝尚未填充时为空，对应层级不参与解析。
+	AgentID     string          `json:"agent_id,omitempty"`
+	WorkspaceID string          `json:"workspace_id,omitempty"`
+	Args        json.RawMessage `json:"args,omitempty"`
 	// UserPrompt 原始用户 prompt（本轮会话第一条 user message）。
 	UserPrompt string `json:"user_prompt,omitempty"`
 	// History engine 现有 messages 的窗口（默认最近 8 条）。

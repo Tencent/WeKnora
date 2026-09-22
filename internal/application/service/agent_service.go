@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/intentgate"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -117,6 +118,12 @@ type agentService struct {
 	sandboxResolver      sandbox.TenantSandboxResolver
 	sandboxPinner        *SessionSandboxPinner
 	sandboxPolicy        WorkspaceSandboxPolicy
+	// IntentGate（语义门禁层，设计 §7）：intentGate 是 PolicyStore 驱动的
+	// 判定入口，intentVerdictWriter 是 verdict 异步落库写入端。两者由
+	// NewAgentService 装配、被全部 engine 实例共享（PolicyGate 无状态、
+	// writer 内部队列串行化）。nil 时 engine 完全跳过门禁，行为零变化。
+	intentGate          intentgate.Gate
+	intentVerdictWriter intentgate.VerdictWriter
 }
 
 // NewAgentService creates a new agent service
@@ -145,8 +152,9 @@ func NewAgentService(
 	sandboxPolicy WorkspaceSandboxPolicy,
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
+	intentPolicyStore intentgate.PolicyStore,
 ) interfaces.AgentService {
-	return &agentService{
+	svc := &agentService{
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
 		cfg:                  cfg,
@@ -172,6 +180,19 @@ func NewAgentService(
 		sandboxPinner:        sandboxPinner,
 		sandboxPolicy:        sandboxPolicy,
 	}
+	// IntentGate 接线（T23，issue #13）：判定输入从硬编码规则切换为读策略库。
+	// 两个硬性要求：
+	//   1. intentPolicyStore 必须是与策略 CRUD handler 共享的容器单例——
+	//      策略变更的 InvalidateTenant 才能波及这里的判定（设计 §8.3）；
+	//   2. verdict 落库是观测面不是判定链路：writer 异步、fail-open，
+	//      进程级生命周期（随进程退出，观察数据允许丢失队尾）。
+	// store 或 db 缺失时两者保持 nil，engine 完全跳过门禁（行为零变化）。
+	if intentPolicyStore != nil && db != nil {
+		svc.intentGate = intentgate.NewPolicyGate(intentPolicyStore)
+		svc.intentVerdictWriter = intentgate.NewAsyncVerdictWriter(
+			repository.NewIntentVerdictRepository(db))
+	}
+	return svc
 }
 
 // CreateAgentEngine creates an agent engine with the given configuration and EventBus.
@@ -236,6 +257,15 @@ func (s *agentService) CreateAgentEngine(
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
+	// IntentGate 策略执行点（T23）：门禁与 verdict 写入端装上后，每个工具
+	// 调用在执行前先过门禁（observe：只记录不拦截）。任一为 nil 时 engine
+	// 跳过门禁，行为与未接入完全一致。
+	if s.intentGate != nil {
+		engine.SetIntentGate(s.intentGate)
+	}
+	if s.intentVerdictWriter != nil {
+		engine.SetIntentVerdictWriter(s.intentVerdictWriter)
+	}
 	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
 	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
 	engine.SetPinnedMentions(

@@ -700,11 +700,14 @@ func (e *AgentEngine) evaluateIntentGate(
 }
 
 // intentVerdictRecord 把一次判定整形为 intent_verdicts 表的一行
-// （设计 §6.2）。两个映射约定：
+// （设计 §6.2）。三个映射约定：
 //   - Layer 为空（无策略命中的 allow，如 spike 全规则未命中）落为
 //     baseline——设计 §6.2：policy_id NULL = 兜底判定；
-//   - ModeAtDecision 恒为 observe：spike 阶段没有策略表，一切判定都是
-//     observe 语义；enforce 接线（T40）落地后由策略 mode 填充。
+//   - PolicyVersion 来自 verdict（T23 起策略驱动判定携带）；无策略命中
+//     时为 0，NewVerdictRecord 落 NULL；
+//   - ModeAtDecision 来自 verdict.Mode（判定时的策略 mode）；为空
+//     （spike/基线判定）时落 observe——observe 是一切判定的下限语义，
+//     enforce 接线（T40）落地后由策略 mode 驱动实际阻断。
 //
 // 原始参数只用于计算 args_digest，不落库（types.NewVerdictRecord 保证）。
 func intentVerdictRecord(
@@ -721,12 +724,13 @@ func intentVerdictRecord(
 		AssistantMessageID: assistantMessageID,
 		ToolCallID:         tc.ID,
 		PolicyID:           v.PolicyID,
+		PolicyVersion:      v.PolicyVersion,
 		ToolName:           tc.Function.Name,
 		Args:               json.RawMessage(tc.Function.Arguments),
 		Layer:              layer,
 		Verdict:            string(v.Action),
 		Reason:             v.Reason,
-		ModeAtDecision:     types.VerdictModeObserve,
+		ModeAtDecision:     v.Mode,
 		LatencyMs:          int(latencyMs),
 	})
 }

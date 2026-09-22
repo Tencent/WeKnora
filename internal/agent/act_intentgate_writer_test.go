@@ -136,6 +136,49 @@ func TestIntentGateAllowEnqueuedAsBaseline(t *testing.T) {
 	}
 }
 
+// TestIntentGatePolicyVerdictCarriesVersionAndMode 验收 [unit]（issue #13）：
+// 策略驱动的 verdict 落库时 policy_id / policy_version / mode_at_decision
+// 全部来自策略（不再是 spike 阶段的硬编码 observe 与空版本）；
+// mode=observe 的 deny 只记录不拦截——工具照常执行成功。
+func TestIntentGatePolicyVerdictCarriesVersionAndMode(t *testing.T) {
+	engine, executed := intentGateTestEngine(t)
+	engine.SetIntentGate(&fakeGate{verdict: intentgate.Verdict{
+		Action:        intentgate.ActionDeny,
+		PolicyID:      "pol-t23",
+		PolicyVersion: 3,
+		Mode:          types.VerdictModeObserve,
+		Reason:        "违反策略约束「单笔退款不得超过 75」",
+		Layer:         intentgate.LayerRule,
+	}})
+	writer := &fakeVerdictWriter{}
+	engine.SetIntentVerdictWriter(writer)
+
+	toolCall := runGatedToolCall(engine)
+
+	// observe 语义：只记录不拦截，工具照常执行成功。
+	if *executed != 1 || toolCall.Result == nil || !toolCall.Result.Success {
+		t.Fatalf("observe-mode policy deny must not block execution: executed=%d result=%+v",
+			*executed, toolCall.Result)
+	}
+	records := writer.written()
+	if len(records) != 1 {
+		t.Fatalf("writer must receive exactly 1 record, got %d", len(records))
+	}
+	rec := records[0]
+	if rec.PolicyID == nil || *rec.PolicyID != "pol-t23" {
+		t.Fatalf("policy_id = %v, want pol-t23", rec.PolicyID)
+	}
+	if rec.PolicyVersion == nil || *rec.PolicyVersion != 3 {
+		t.Fatalf("policy_version = %v, want 3", rec.PolicyVersion)
+	}
+	if rec.ModeAtDecision != types.VerdictModeObserve {
+		t.Fatalf("mode_at_decision = %q, want observe", rec.ModeAtDecision)
+	}
+	if rec.Layer != types.VerdictLayerRule {
+		t.Fatalf("layer = %q, want rule", rec.Layer)
+	}
+}
+
 // TestIntentGatePersistFailureKeepsToolCallAlive 验收 [unit]：落库失败
 // 不影响 verdict 返回与工具执行（fail-open 于观测面）——用真
 // AsyncVerdictWriter + 必失败的 repo，走完整异步入队路径。
