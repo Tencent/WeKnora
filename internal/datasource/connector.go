@@ -310,6 +310,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical"},
 	},
+	types.ConnectorTypeSeafile: {
+		Type:         types.ConnectorTypeSeafile,
+		Name:         "Seafile",
+		Description:  "Sync folders and files from Seafile libraries",
+		Priority:     13,
+		AuthType:     "token",
+		Capabilities: []string{"incremental", "hierarchical", "deletion_sync"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata
