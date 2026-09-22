@@ -227,10 +227,10 @@ func TestGolden(t *testing.T) {
 			want: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}},
 		},
 		{
-			// The graded level the caller picked is not expressible in this
-			// dialect: the branch carries only the boolean and no
-			// reasoning_effort may leak onto the wire (capabilities must not
-			// advertise rungs for the same reason).
+			// Without the effort opt-in the graded level the caller picked is
+			// not expressible in this dialect: the branch carries only the
+			// boolean and no reasoning_effort may leak onto the wire
+			// (capabilities must not advertise rungs for the same reason).
 			name: "vllm: graded effort request still carries only the boolean",
 			mutate: func(c *Config) {
 				c.Settings.ThinkingFormat = catalog.ThinkingFormatChatTemplateKwargs
@@ -239,6 +239,21 @@ func TestGolden(t *testing.T) {
 			want: map[string]any{
 				"chat_template_kwargs": map[string]any{"enable_thinking": true},
 				"reasoning_effort":     nil,
+			},
+		},
+		{
+			// With the effort opt-in the graded level rides on top of the
+			// switch, exactly like the enable_thinking dialect (#3552
+			// review): capabilities keep the ladder for the same reason.
+			name: "nim-style opt-in: chat_template_kwargs plus reasoning_effort",
+			mutate: func(c *Config) {
+				c.Settings.ThinkingFormat = catalog.ThinkingFormatChatTemplateKwargs
+				c.Settings.SupportsReasoningEffort = true
+			},
+			opts: &api.Options{Thinking: ptrBool(true), ReasoningEffort: api.ReasoningHigh},
+			want: map[string]any{
+				"chat_template_kwargs": map[string]any{"enable_thinking": true},
+				"reasoning_effort":     "high",
 			},
 		},
 		{
