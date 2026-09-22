@@ -6630,7 +6630,9 @@ export default {
     stall: {
       title: '已 {minutes} 分钟没有进展，可能已卡住',
       hint: '可以继续等待，或停止解析后重建知识。长时间仍无进展时，系统会自动将其标记为失败。',
-      hintAtStage: '当前停在「{stage}」阶段。可以继续等待，或停止解析后重建知识。长时间仍无进展时，系统会自动将其标记为失败。'
+      hintAtStage: '当前停在「{stage}」阶段。可以继续等待，或停止解析后重建知识。长时间仍无进展时，系统会自动将其标记为失败。',
+      queuedTitle: '已 {minutes} 分钟没有进展，任务仍在排队',
+      queuedHint: '这篇文档还有任务在队列中等待处理，通常是任务积压导致，稍后会自动继续，一般无需操作。'
     },
     head: {
       lastProgress: '最近进展',
@@ -6971,6 +6973,8 @@ export default {
     statusFinalizing: '优化中',
     statusStalled: '疑似卡住',
     stalledHint: '已 {minutes} 分钟没有进展，可能已卡住。可打开 Trace 查看停在哪一步，或停止解析后重建知识。',
+    statusQueued: '排队中',
+    queuedHint: '已 {minutes} 分钟没有进展，但仍有任务在队列中等待处理，通常是任务积压，稍后会自动继续。',
     statusFailed: '失败',
     statusCancelled: '已取消',
     statusDraft: '草稿',

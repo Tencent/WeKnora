@@ -35,6 +35,8 @@ interface SpansResponse {
   last_error?: LastError | null
   // Latest row or span write; only sent while the parse is in flight.
   last_activity_at?: string
+  // Quiet, but its work is still queued: backlogged rather than stuck.
+  waiting_in_queue?: boolean
 }
 
 // IMPORTANT: Vue 3 coerces missing Boolean props to `false`, NOT
@@ -1645,7 +1647,14 @@ const processConfigLines = computed<string[]>(() => {
             </button>
           </div>
 
-          <div v-if="stalledMin > 0" class="kp-stall" role="status">
+          <div v-if="stalledMin > 0 && data?.waiting_in_queue" class="kp-stall kp-stall-queued" role="status">
+            <t-icon name="time" size="16px" class="kp-stall-icon" />
+            <div class="kp-stall-body">
+              <div class="kp-stall-title">{{ t('knowledgeStages.stall.queuedTitle', { minutes: stalledMin }) }}</div>
+              <div class="kp-stall-hint">{{ t('knowledgeStages.stall.queuedHint') }}</div>
+            </div>
+          </div>
+          <div v-else-if="stalledMin > 0" class="kp-stall" role="status">
             <t-icon name="time" size="16px" class="kp-stall-icon" />
             <div class="kp-stall-body">
               <div class="kp-stall-title">{{ t('knowledgeStages.stall.title', { minutes: stalledMin }) }}</div>
@@ -3066,6 +3075,18 @@ const processConfigLines = computed<string[]>(() => {
   border: 1px solid var(--td-warning-color-3);
   border-left: 3px solid var(--td-warning-color);
   border-radius: var(--td-radius-medium);
+}
+
+/* Backlogged, not stuck: neutral tone, and no stop button to invite
+   cancelling work that will still finish. */
+.kp-stall-queued {
+  background: var(--td-bg-color-secondarycontainer);
+  border-color: var(--td-component-border);
+  border-left-color: var(--td-text-color-placeholder);
+}
+
+.kp-stall-queued .kp-stall-icon {
+  color: var(--td-text-color-secondary);
 }
 
 .kp-stall-icon {

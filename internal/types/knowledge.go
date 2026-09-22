@@ -201,6 +201,9 @@ type Knowledge struct {
 	// Most recent processing progress (row or span write) for an in-flight
 	// row, so clients can tell a slow stage from a stalled one. Not stored.
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty" gorm:"-"`
+	// Set on an in-flight row gone quiet whose work is still queued: it is
+	// backlogged behind other tasks, not stuck. Not stored.
+	WaitingInQueue bool `json:"waiting_in_queue,omitempty" gorm:"-"`
 }
 
 // CustomMetadataText returns stable human-readable metadata for summaries and

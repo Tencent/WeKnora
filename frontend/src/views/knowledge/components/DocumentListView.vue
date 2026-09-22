@@ -30,6 +30,7 @@ interface KnowledgeItem {
   channel?: string;
   isMore?: boolean;
   stalled_minutes?: number;
+  waiting_in_queue?: boolean;
 }
 
 const props = defineProps<{
@@ -120,6 +121,14 @@ interface StatusInfo {
   hint?: string;
 }
 const computeStatus = (item: KnowledgeItem): StatusInfo => {
+  if (item.stalled_minutes && item.waiting_in_queue) {
+    return {
+      label: t('knowledgeBase.statusQueued'),
+      theme: 'default',
+      icon: 'time',
+      hint: t('knowledgeBase.queuedHint', { minutes: item.stalled_minutes }),
+    };
+  }
   if (item.stalled_minutes) {
     return {
       label: t('knowledgeBase.statusStalled'),

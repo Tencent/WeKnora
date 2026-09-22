@@ -790,6 +790,8 @@ export default {
     statusFinalizing: 'Optimizing',
     statusStalled: 'May be stuck',
     stalledHint: 'No progress for {minutes} minutes; it may be stuck. Open the trace to see where it stopped, or stop parsing and rebuild the document.',
+    statusQueued: 'Queued',
+    queuedHint: 'No progress for {minutes} minutes, but its tasks are still waiting in the queue, usually because of a backlog. It will continue on its own.',
     statusFailed: 'Failed',
     statusCancelled: 'Cancelled',
     statusDraft: 'Draft',
@@ -931,7 +933,9 @@ export default {
     stall: {
       title: 'No progress for {minutes} minutes; this may be stuck',
       hint: 'You can keep waiting, or stop parsing and rebuild the document. If it still makes no progress, it will be marked as failed automatically.',
-      hintAtStage: 'It stopped at the {stage} stage. You can keep waiting, or stop parsing and rebuild the document. If it still makes no progress, it will be marked as failed automatically.'
+      hintAtStage: 'It stopped at the {stage} stage. You can keep waiting, or stop parsing and rebuild the document. If it still makes no progress, it will be marked as failed automatically.',
+      queuedTitle: 'No progress for {minutes} minutes; still waiting in the queue',
+      queuedHint: 'Tasks for this document are still queued, usually because of a backlog. It will continue on its own; no action is usually needed.'
     },
     head: {
       lastProgress: 'Last progress',

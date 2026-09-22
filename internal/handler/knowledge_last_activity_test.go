@@ -74,3 +74,37 @@ func TestSpansLastActivity(t *testing.T) {
 	assert.Equal(t, base.Add(5*time.Minute), spansLastActivity(base, rows))
 	assert.Equal(t, base, spansLastActivity(base, nil))
 }
+
+type fakeBacklog struct {
+	queued map[string]bool
+	asked  []string
+}
+
+func (f *fakeBacklog) QueuedWork(_ context.Context, ids []string) map[string]bool {
+	f.asked = append(f.asked, ids...)
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = f.queued[id]
+	}
+	return out
+}
+
+// Only rows quiet past the stall hint are probed, and a backlogged one is
+// told apart from a stuck one.
+func TestAttachLastActivityFlagsBackloggedRows(t *testing.T) {
+	now := time.Now()
+	backlog := &fakeBacklog{queued: map[string]bool{"quiet-queued": true}}
+	h := &KnowledgeHandler{spanRepo: &lastActivitySpanRepo{}, backlog: backlog}
+	rows := []*types.Knowledge{
+		{ID: "recent", ParseStatus: types.ParseStatusProcessing, UpdatedAt: now.Add(-time.Minute)},
+		{ID: "quiet-queued", ParseStatus: types.ParseStatusFinalizing, UpdatedAt: now.Add(-time.Hour)},
+		{ID: "quiet-stuck", ParseStatus: types.ParseStatusProcessing, UpdatedAt: now.Add(-time.Hour)},
+	}
+
+	h.attachLastActivity(context.Background(), rows)
+
+	assert.ElementsMatch(t, []string{"quiet-queued", "quiet-stuck"}, backlog.asked)
+	assert.False(t, rows[0].WaitingInQueue)
+	assert.True(t, rows[1].WaitingInQueue)
+	assert.False(t, rows[2].WaitingInQueue)
+}

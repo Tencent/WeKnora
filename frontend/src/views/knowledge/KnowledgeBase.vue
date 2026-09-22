@@ -1292,6 +1292,8 @@ type KnowledgeCard = {
   last_activity_at?: string;
   // Minutes without progress while in flight; 0 unless it looks stuck.
   stalled_minutes?: number;
+  // Quiet, but its work is still queued: backlogged rather than stuck.
+  waiting_in_queue?: boolean;
 };
 // needsStatusPolling decides whether a card row is still "in flight"
 // enough that the doc list should keep refreshing it. Keep in sync with
@@ -1340,6 +1342,7 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
 
           const card = cardList.value[index];
           card.last_activity_at = item.last_activity_at;
+          card.waiting_in_queue = item.waiting_in_queue;
           card.stalled_minutes = stalledMinutes({ parse_status: parseStatus, last_activity_at: item.last_activity_at });
 
           if (cardList.value[index].parse_status !== parseStatus ||

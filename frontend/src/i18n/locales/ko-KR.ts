@@ -6628,7 +6628,9 @@ export default {
     stall: {
       title: '{minutes}분 동안 진행이 없어 멈췄을 수 있습니다',
       hint: '계속 기다리거나 파싱을 중지한 뒤 지식을 재구축할 수 있습니다. 계속 진행이 없으면 자동으로 실패 처리됩니다.',
-      hintAtStage: '「{stage}」 단계에서 멈춰 있습니다. 계속 기다리거나 파싱을 중지한 뒤 지식을 재구축할 수 있습니다. 계속 진행이 없으면 자동으로 실패 처리됩니다.'
+      hintAtStage: '「{stage}」 단계에서 멈춰 있습니다. 계속 기다리거나 파싱을 중지한 뒤 지식을 재구축할 수 있습니다. 계속 진행이 없으면 자동으로 실패 처리됩니다.',
+      queuedTitle: '{minutes}분 동안 진행이 없습니다. 아직 대기열에서 기다리는 중입니다',
+      queuedHint: '이 문서의 작업이 아직 대기열에 있습니다. 보통 작업 적체 때문이며 자동으로 이어지므로 대개 조치가 필요 없습니다.'
     },
     head: {
       lastProgress: '최근 진행',
@@ -6969,6 +6971,8 @@ export default {
     statusFinalizing: '최적화 중',
     statusStalled: '멈춤 의심',
     stalledHint: '{minutes}분 동안 진행이 없습니다. 멈췄을 수 있습니다. Trace에서 멈춘 위치를 확인하거나 파싱을 중지한 뒤 지식을 재구축하세요.',
+    statusQueued: '대기 중',
+    queuedHint: '{minutes}분 동안 진행이 없지만 작업이 아직 대기열에서 기다리고 있습니다. 보통 작업 적체 때문이며 곧 자동으로 이어집니다.',
     statusFailed: '실패',
     statusCancelled: '취소됨',
     statusDraft: '초안',

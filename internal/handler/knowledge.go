@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/filetransport"
@@ -35,7 +36,23 @@ type KnowledgeHandler struct {
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
+	backlog           backlogProbe
 }
+
+// backlogProbe tells a backlogged document (work still queued) from a stuck
+// one; HousekeepingService implements it with the sweep's own probes.
+type backlogProbe interface {
+	QueuedWork(ctx context.Context, ids []string) map[string]bool
+}
+
+const (
+	// stallHintAfter is when a quiet in-flight row gets the "may be stuck"
+	// hint; keep in step with PROCESSING_STALL_THRESHOLD_MS in the frontend.
+	// Only such rows are probed for a backlog.
+	stallHintAfter = 20 * time.Minute
+	// maxBacklogProbes caps the queue scans a single request may trigger.
+	maxBacklogProbes = 20
+)
 
 // NewKnowledgeHandler creates a new knowledge handler instance
 func NewKnowledgeHandler(
@@ -46,8 +63,14 @@ func NewKnowledgeHandler(
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
+	housekeeping *service.HousekeepingService,
 ) *KnowledgeHandler {
+	var backlog backlogProbe
+	if housekeeping != nil {
+		backlog = housekeeping
+	}
 	return &KnowledgeHandler{
+		backlog:           backlog,
 		cfg:               cfg,
 		kgService:         kgService,
 		kbService:         kbService,
@@ -677,7 +700,11 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 		"trace":           tree,
 	}
 	if isParseInFlight(knowledge.ParseStatus) {
-		resp["last_activity_at"] = spansLastActivity(knowledge.UpdatedAt, rows)
+		last := spansLastActivity(knowledge.UpdatedAt, rows)
+		resp["last_activity_at"] = last
+		if h.backlog != nil && time.Since(last) >= stallHintAfter {
+			resp["waiting_in_queue"] = h.backlog.QueuedWork(ctx, []string{knowledge.ID})[knowledge.ID]
+		}
 	}
 	if lastError := knowledgeSpansLastError(
 		currentAttempt,
@@ -817,10 +844,16 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 		if r.Status == types.SpanStatusRunning && r.Kind == types.SpanKindStage && currentStage == "" {
 			currentStage = r.Name
 		}
-		if r.Status == types.SpanStatusFailed {
+		// Housekeeping's TASK_STALLED marks where a stuck run stopped;
+		// an older subtask failure must not hide it.
+		if r.Status == types.SpanStatusFailed &&
+			(lastFailure == nil || !isStallFailure(lastFailure) || isStallFailure(&r)) {
 			cp := r
 			lastFailure = &cp
 		}
+	}
+	if currentStage == "" {
+		currentStage = stageOfRunningSpan(rows)
 	}
 
 	// Pick the synthesized stage status from parse_status. Without this,
@@ -1732,6 +1765,32 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	})
 }
 
+func isStallFailure(span *types.KnowledgeProcessingSpan) bool {
+	return span.ErrorCode == errors.ErrCodeTaskStalled
+}
+
+// stageOfRunningSpan names the stage owning the newest running span, for the
+// window where no stage span is running but its work still is: post-process
+// closes its stage once summary / question / graph / wiki are fanned out.
+func stageOfRunningSpan(rows []types.KnowledgeProcessingSpan) string {
+	bySpanID := make(map[string]*types.KnowledgeProcessingSpan, len(rows))
+	for i := range rows {
+		bySpanID[rows[i].SpanID] = &rows[i]
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].Status != types.SpanStatusRunning || rows[i].Kind == types.SpanKindRoot {
+			continue
+		}
+		for span, depth := &rows[i], 0; span != nil && depth < 64; depth++ {
+			if span.Kind == types.SpanKindStage {
+				return span.Name
+			}
+			span = bySpanID[span.ParentSpanID]
+		}
+	}
+	return ""
+}
+
 // spansLastActivity is the latest of the row's updated_at and the listed
 // spans' writes.
 func spansLastActivity(updatedAt time.Time, rows []types.KnowledgeProcessingSpan) time.Time {
@@ -1762,12 +1821,28 @@ func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []
 			logger.Warnf(ctx, "span last activity lookup failed: %v", err)
 		}
 	}
+	quiet := make(map[string][]*types.Knowledge)
+	var quietIDs []string
 	for _, k := range knowledges {
 		if k == nil || !isParseInFlight(k.ParseStatus) {
 			continue
 		}
 		last := latestActivity(k.UpdatedAt, spanActivity[k.ID])
 		k.LastActivityAt = &last
+		if time.Since(last) >= stallHintAfter {
+			if _, seen := quiet[k.ID]; !seen && len(quietIDs) < maxBacklogProbes {
+				quietIDs = append(quietIDs, k.ID)
+			}
+			quiet[k.ID] = append(quiet[k.ID], k)
+		}
+	}
+	if h.backlog == nil || len(quietIDs) == 0 {
+		return
+	}
+	for id, queued := range h.backlog.QueuedWork(ctx, quietIDs) {
+		for _, k := range quiet[id] {
+			k.WaitingInQueue = queued
+		}
 	}
 }
 

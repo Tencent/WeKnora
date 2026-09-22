@@ -58,7 +58,19 @@ type HousekeepingService struct {
 
 	kickMu    sync.Mutex
 	wikiKicks map[string]time.Time
+
+	queuedMu    sync.Mutex
+	queuedCache map[string]queuedProbe
 }
+
+type queuedProbe struct {
+	queued bool
+	at     time.Time
+}
+
+// queuedProbeTTL bounds how often QueuedWork rescans the queue for one
+// document; clients poll far more often than a backlog changes.
+const queuedProbeTTL = time.Minute
 
 // NewHousekeepingService constructs a HousekeepingService. It does NOT start
 // the cron — call Start in the application bootstrap so a misconfigured
@@ -67,11 +79,12 @@ func NewHousekeepingService(
 	db *gorm.DB, cfg *config.Config, inspector interfaces.TaskInspector, task interfaces.TaskEnqueuer,
 ) *HousekeepingService {
 	return &HousekeepingService{
-		db:        db,
-		cfg:       cfg,
-		inspector: inspector,
-		task:      task,
-		wikiKicks: make(map[string]time.Time),
+		db:          db,
+		cfg:         cfg,
+		inspector:   inspector,
+		task:        task,
+		wikiKicks:   make(map[string]time.Time),
+		queuedCache: make(map[string]queuedProbe),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
@@ -323,9 +336,12 @@ func (h *HousekeepingService) filterByLastSpanActivity(
 	return out, heartbeat
 }
 
-// recoverStalled fails each stuck row with a message naming the stage it
-// stalled in and when it last made progress, and closes its open spans so
-// the timeline stops showing that stage as running. Returns rows recovered.
+// recoverStalled fails each stuck row with a message naming where it stalled
+// and when it last made progress, and closes its open spans so the timeline
+// points at that spot instead of spinning. heartbeat is nil when the span
+// heartbeat query failed; the message then gives no time rather than the
+// row's updated_at, which can predate the last span write. Returns rows
+// recovered.
 func (h *HousekeepingService) recoverStalled(
 	ctx context.Context, stuck []types.Knowledge, heartbeat map[string]time.Time, threshold time.Duration,
 ) int64 {
@@ -333,33 +349,12 @@ func (h *HousekeepingService) recoverStalled(
 	for _, k := range stuck {
 		ids = append(ids, k.ID)
 	}
-	var running []types.KnowledgeProcessingSpan
-	if err := h.db.WithContext(ctx).
-		Select("knowledge_id", "attempt", "name").
-		Where("knowledge_id IN ? AND kind = ? AND status = ?", ids, types.SpanKindStage, types.SpanStatusRunning).
-		Order("attempt DESC").
-		Find(&running).Error; err != nil {
-		logger.Warnf(ctx, "[Housekeeping] running stage query failed: %v", err)
-	}
-	stage := make(map[string]string, len(running))
-	for _, span := range running {
-		if _, seen := stage[span.KnowledgeID]; !seen {
-			stage[span.KnowledgeID] = span.Name
-		}
-	}
+	sites := h.locateStalls(ctx, ids)
 
 	var recovered int64
 	for _, k := range stuck {
-		last := k.UpdatedAt
-		if beat, ok := heartbeat[k.ID]; ok && beat.After(last) {
-			last = beat
-		}
-		where := ""
-		if name := stage[k.ID]; name != "" {
-			where = " at " + name + " stage"
-		}
-		msg := fmt.Sprintf("task stuck in %s%s: no progress since %s (> %s), recovered by housekeeping",
-			k.ParseStatus, where, last.UTC().Format(time.RFC3339), threshold)
+		site := sites[k.ID]
+		msg := stallMessage(k, site, heartbeat, threshold)
 		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
 			Where("id = ? AND parse_status IN ?", k.ID,
 				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
@@ -376,34 +371,175 @@ func (h *HousekeepingService) recoverStalled(
 			continue
 		}
 		recovered += res.RowsAffected
-		h.closeStalledSpans(ctx, k.ID, msg)
+		if site != nil {
+			h.closeStalledSpans(ctx, k.ID, site, msg)
+		}
 	}
 	return recovered
 }
 
-// closeStalledSpans fails the running stage spans of a recovered row and
-// cancels its other open spans. Best-effort: the row is already failed.
-func (h *HousekeepingService) closeStalledSpans(ctx context.Context, knowledgeID, msg string) {
-	now := time.Now()
-	open := []string{types.SpanStatusPending, types.SpanStatusRunning}
-	closeAs := func(status string, scope *gorm.DB) {
-		if err := scope.Updates(map[string]interface{}{
-			"status":        status,
-			"error_code":    werrors.ErrCodeTaskStalled,
-			"error_message": msg,
-			"finished_at":   now,
-			"updated_at":    now,
-		}).Error; err != nil {
-			logger.Warnf(ctx, "[Housekeeping] close stalled spans for %s failed: %v", knowledgeID, err)
+// stallSite is where a stuck row stopped, read from its latest attempt.
+type stallSite struct {
+	// stages the run stalled in, in pipeline order.
+	stages []string
+	// tasks names the stalled spans when they are below a finished stage,
+	// e.g. postprocess.summary while the row sits in finalizing.
+	tasks []string
+	// open holds the attempt's pending/running spans; those in failed are
+	// marked failed, the rest cancelled.
+	open   []types.KnowledgeProcessingSpan
+	failed map[int64]bool
+}
+
+// locateStalls finds each row's stall site. The stalled spans are the running
+// stages; when no stage is running (post-process closes its stage once the
+// enrichment tasks are fanned out) they are the innermost running spans, and
+// the stage is the one they belong to. Best-effort: a query error yields no
+// sites and the rows are still failed.
+func (h *HousekeepingService) locateStalls(ctx context.Context, ids []string) map[string]*stallSite {
+	var rows []types.KnowledgeProcessingSpan
+	if err := h.db.WithContext(ctx).
+		Select("id", "knowledge_id", "attempt", "span_id", "parent_span_id", "name", "kind", "status", "started_at").
+		Where("knowledge_id IN ?", ids).
+		Order("id").
+		Find(&rows).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] stalled span query failed: %v", err)
+		return nil
+	}
+	latest := make(map[string]int, len(ids))
+	for _, r := range rows {
+		if r.Attempt > latest[r.KnowledgeID] {
+			latest[r.KnowledgeID] = r.Attempt
 		}
 	}
-	spans := func() *gorm.DB {
-		return h.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
-			Where("knowledge_id = ? AND status IN ?", knowledgeID, open)
+	byKnowledge := make(map[string][]types.KnowledgeProcessingSpan, len(ids))
+	for _, r := range rows {
+		if r.Attempt == latest[r.KnowledgeID] {
+			byKnowledge[r.KnowledgeID] = append(byKnowledge[r.KnowledgeID], r)
+		}
 	}
-	closeAs(types.SpanStatusFailed,
-		spans().Where("kind = ? AND status = ?", types.SpanKindStage, types.SpanStatusRunning))
-	closeAs(types.SpanStatusCancelled, spans())
+	sites := make(map[string]*stallSite, len(byKnowledge))
+	for kid, spans := range byKnowledge {
+		sites[kid] = stallSiteOf(spans)
+	}
+	return sites
+}
+
+func stallSiteOf(spans []types.KnowledgeProcessingSpan) *stallSite {
+	bySpanID := make(map[string]types.KnowledgeProcessingSpan, len(spans))
+	runningChildren := make(map[string]int)
+	for _, sp := range spans {
+		bySpanID[sp.SpanID] = sp
+		if sp.Status == types.SpanStatusRunning && sp.ParentSpanID != "" {
+			runningChildren[sp.ParentSpanID]++
+		}
+	}
+	stageOf := func(sp types.KnowledgeProcessingSpan) string {
+		for depth := 0; depth < 64; depth++ {
+			if sp.Kind == types.SpanKindStage {
+				return sp.Name
+			}
+			parent, ok := bySpanID[sp.ParentSpanID]
+			if !ok {
+				return ""
+			}
+			sp = parent
+		}
+		return ""
+	}
+
+	site := &stallSite{failed: make(map[int64]bool)}
+	var stalled []types.KnowledgeProcessingSpan
+	for _, sp := range spans {
+		if sp.Status == types.SpanStatusPending || sp.Status == types.SpanStatusRunning {
+			site.open = append(site.open, sp)
+		}
+		if sp.Status == types.SpanStatusRunning && sp.Kind == types.SpanKindStage {
+			stalled = append(stalled, sp)
+		}
+	}
+	if len(stalled) == 0 {
+		for _, sp := range spans {
+			innermost := runningChildren[sp.SpanID] == 0
+			if sp.Status == types.SpanStatusRunning && sp.Kind != types.SpanKindRoot && innermost {
+				stalled = append(stalled, sp)
+				site.tasks = append(site.tasks, sp.Name)
+			}
+		}
+	}
+	seen := make(map[string]bool)
+	for _, sp := range stalled {
+		site.failed[sp.ID] = true
+		if stage := stageOf(sp); stage != "" {
+			seen[stage] = true
+		}
+	}
+	for _, stage := range types.AllStages {
+		if seen[stage] {
+			site.stages = append(site.stages, stage)
+		}
+	}
+	return site
+}
+
+// stallMessage is the error_message for a recovered row, e.g. "task stuck in
+// finalizing at postprocess stage (postprocess.summary): no progress since
+// 2026-09-22T09:37:54Z (> 2h10m0s), recovered by housekeeping".
+func stallMessage(
+	k types.Knowledge, site *stallSite, heartbeat map[string]time.Time, threshold time.Duration,
+) string {
+	where := ""
+	if site != nil && len(site.stages) > 0 {
+		where = " at " + strings.Join(site.stages, "/") + " stage"
+		if len(site.tasks) > 0 {
+			tasks := site.tasks
+			if len(tasks) > 3 {
+				tasks = append(tasks[:3:3], "…")
+			}
+			where += " (" + strings.Join(tasks, ", ") + ")"
+		}
+	}
+	if heartbeat == nil {
+		return fmt.Sprintf("task stuck in %s%s: no progress for > %s, recovered by housekeeping",
+			k.ParseStatus, where, threshold)
+	}
+	last := k.UpdatedAt
+	if beat, ok := heartbeat[k.ID]; ok && beat.After(last) {
+		last = beat
+	}
+	return fmt.Sprintf("task stuck in %s%s: no progress since %s (> %s), recovered by housekeeping",
+		k.ParseStatus, where, last.UTC().Format(time.RFC3339), threshold)
+}
+
+// closeStalledSpans fails the site's stalled spans and cancels its other open
+// spans, all with TASK_STALLED and a duration, the way FailSpan closes a span.
+// Best-effort: the row is already failed.
+func (h *HousekeepingService) closeStalledSpans(
+	ctx context.Context, knowledgeID string, site *stallSite, msg string,
+) {
+	now := time.Now()
+	for _, sp := range site.open {
+		status := types.SpanStatusCancelled
+		if site.failed[sp.ID] {
+			status = types.SpanStatusFailed
+		}
+		var durationMs int64
+		if sp.StartedAt != nil {
+			durationMs = now.Sub(*sp.StartedAt).Milliseconds()
+		}
+		if err := h.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+			Where("id = ? AND status IN ?", sp.ID, []string{types.SpanStatusPending, types.SpanStatusRunning}).
+			Updates(map[string]interface{}{
+				"status":        status,
+				"error_code":    werrors.ErrCodeTaskStalled,
+				"error_message": msg,
+				"finished_at":   now,
+				"duration_ms":   durationMs,
+				"updated_at":    now,
+			}).Error; err != nil {
+			logger.Warnf(ctx, "[Housekeeping] close stalled span %s of %s failed: %v", sp.SpanID, knowledgeID, err)
+		}
+	}
 }
 
 // filterOutQueued returns the subset of candidates that have NO work left
@@ -482,6 +618,67 @@ func (h *HousekeepingService) filterOutQueued(
 		out = append(out, k)
 	}
 	return out, skipped, wikiHeld
+}
+
+// QueuedWork reports which of ids still have work waiting in the queue or in
+// the durable Wiki table, i.e. are backlogged rather than stuck, using the
+// same probes as the sweep. Results are cached for queuedProbeTTL. Unknown
+// (a probe failed) reads as not queued.
+func (h *HousekeepingService) QueuedWork(ctx context.Context, ids []string) map[string]bool {
+	out := make(map[string]bool, len(ids))
+	now := time.Now()
+	var misses []string
+	h.queuedMu.Lock()
+	for _, id := range ids {
+		if probe, ok := h.queuedCache[id]; ok && now.Sub(probe.at) < queuedProbeTTL {
+			out[id] = probe.queued
+			continue
+		}
+		misses = append(misses, id)
+	}
+	h.queuedMu.Unlock()
+	if len(misses) == 0 {
+		return out
+	}
+
+	var durableIDs []string
+	if err := h.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("task_type = ? AND scope = ? AND op = ? AND dedup_key IN ?",
+			wikiTaskType, wikiTaskScope, WikiOpIngest, misses).
+		Distinct("dedup_key").
+		Pluck("dedup_key", &durableIDs).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] durable queue probe failed: %v", err)
+		return out
+	}
+	durable := make(map[string]bool, len(durableIDs))
+	for _, id := range durableIDs {
+		durable[id] = true
+	}
+	fresh := make(map[string]bool, len(misses))
+	for _, id := range misses {
+		queued := durable[id]
+		if !queued && h.inspector != nil {
+			var err error
+			if queued, err = h.inspector.HasQueuedTasksForKnowledge(ctx, id); err != nil {
+				logger.Warnf(ctx, "[Housekeeping] queue probe failed for %s: %v", id, err)
+				continue
+			}
+		}
+		fresh[id] = queued
+		out[id] = queued
+	}
+	h.queuedMu.Lock()
+	for id, queued := range fresh {
+		h.queuedCache[id] = queuedProbe{queued: queued, at: now}
+	}
+	for id, probe := range h.queuedCache {
+		if now.Sub(probe.at) >= queuedProbeTTL {
+			delete(h.queuedCache, id)
+		}
+	}
+	h.queuedMu.Unlock()
+	return out
 }
 
 // rearmWikiTriggers enqueues one wiki ingest trigger per KB whose stale rows
