@@ -1,8 +1,8 @@
 diff --git a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-index 66b14ad..1eb2b1c 100644
+index 66b14ad..56da889 100644
 --- a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
 +++ b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-@@ -30,6 +30,126 @@ function fakeApi() {
+@@ -30,6 +30,184 @@ function fakeApi() {
  }
  
  describe("ChromiumCdp", () => {
@@ -126,10 +126,68 @@ index 66b14ad..1eb2b1c 100644
 +    }
 +  });
 +
++  it("refuses further reads while a timed-out read is still running, until it settles", async () => {
++    vi.useFakeTimers();
++    vi.spyOn(console, "warn").mockImplementation(() => {});
++    vi.spyOn(console, "debug").mockImplementation(() => {});
++    const { api } = fakeApi();
++    let finish!: (value: unknown) => void;
++    vi.mocked(api.sendCommand).mockImplementation(async (_target, method) => {
++      if (method === "DOMSnapshot.captureSnapshot")
++        return new Promise((resolve) => {
++          finish = resolve;
++        });
++      return {};
++    });
++    const cdp = new ChromiumCdp(api);
++    const reads = () =>
++      vi.mocked(api.sendCommand).mock.calls.filter((c) => c[1] === "DOMSnapshot.captureSnapshot");
++    try {
++      await cdp.ensureAttached(4);
++      const first = expect(cdp.send(4, "DOMSnapshot.captureSnapshot")).rejects.toThrow("timed out");
++      await vi.advanceTimersByTimeAsync(10_000);
++      await first;
++      await expect(cdp.send(4, "Accessibility.getFullAXTree")).rejects.toThrow(
++        "still running in the renderer",
++      );
++      await expect(cdp.send(4, "Runtime.evaluate", { expression: "1" })).resolves.toEqual({});
++      await expect(cdp.send(5, "Accessibility.getFullAXTree")).resolves.toEqual({});
++      expect(reads()).toHaveLength(1);
++      finish({ documents: [] });
++      await vi.advanceTimersByTimeAsync(0);
++      await expect(cdp.send(4, "Accessibility.getFullAXTree")).resolves.toEqual({});
++    } finally {
++      cdp.dispose();
++      vi.useRealTimers();
++    }
++  });
++
++  it("clears the stuck-read fence when the tab detaches", async () => {
++    vi.useFakeTimers();
++    vi.spyOn(console, "warn").mockImplementation(() => {});
++    vi.spyOn(console, "debug").mockImplementation(() => {});
++    const { api, onDetach } = fakeApi();
++    vi.mocked(api.sendCommand).mockImplementation(async (_target, method) =>
++      method === "DOMSnapshot.captureSnapshot" ? new Promise(() => {}) : {},
++    );
++    const cdp = new ChromiumCdp(api);
++    try {
++      await cdp.ensureAttached(4);
++      const first = expect(cdp.send(4, "DOMSnapshot.captureSnapshot")).rejects.toThrow("timed out");
++      await vi.advanceTimersByTimeAsync(10_000);
++      await first;
++      onDetach.fire({ tabId: 4 }, "canceled_by_user");
++      await expect(cdp.send(4, "Accessibility.getFullAXTree")).resolves.toEqual({});
++    } finally {
++      cdp.dispose();
++      vi.useRealTimers();
++    }
++  });
++
    it("changes attachment identity only across real debugger attachments", async () => {
      const { api, onEvent, onDetach } = fakeApi();
      const cdp = new ChromiumCdp(api);
-@@ -430,6 +550,7 @@ describe("ChromiumCdp", () => {
+@@ -430,6 +608,7 @@ describe("ChromiumCdp", () => {
      expect(api.sendCommand).toHaveBeenCalledWith({ tabId: 3 }, "Page.handleJavaScriptDialog", {
        accept: true,
      });
@@ -137,7 +195,7 @@ index 66b14ad..1eb2b1c 100644
      const dialogs = cdp.dialogsSince(3, cursor);
      expect(dialogs).toHaveLength(1);
      expect(dialogs[0]).toMatchObject({
-@@ -479,7 +600,7 @@ describe("ChromiumCdp", () => {
+@@ -479,7 +658,7 @@ describe("ChromiumCdp", () => {
        url: "https://example.com/",
      });
      await Promise.resolve();
@@ -148,14 +206,20 @@ index 66b14ad..1eb2b1c 100644
    });
 diff --git a/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts b/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts
 new file mode 100644
-index 0000000..f157ea9
+index 0000000..036a527
 --- /dev/null
 +++ b/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,166 @@
 +import { afterEach, expect, it, vi } from "vitest";
 +import { isAbortError, isCaptureTerminalError } from "@/tools/vom/capture-abort";
 +import { captureObservationFacts } from "@/tools/vom/capture-coordinator";
-+import { CdpReadTimeoutError, READ_TIMEOUT_MS, runCdpCommand } from "../command-deadline";
++import {
++  CdpReadTimeoutError,
++  READ_TIMEOUT_MS,
++  RENDERER_READ_TIMEOUT,
++  readTimeoutDetails,
++  runCdpCommand,
++} from "../command-deadline";
 +
 +afterEach(() => {
 +  vi.useRealTimers();
@@ -216,6 +280,46 @@ index 0000000..f157ea9
 +  expect(vi.getTimerCount()).toBe(0);
 +});
 +
++it("handles a late rejection of a timed-out read without an unhandled rejection", async () => {
++  vi.useFakeTimers();
++  vi.spyOn(console, "warn").mockImplementation(() => {});
++  vi.spyOn(console, "debug").mockImplementation(() => {});
++  const unhandled = vi.fn();
++  process.on("unhandledRejection", unhandled);
++  try {
++    let fail!: (error: Error) => void;
++    const work = runCdpCommand(
++      { tabId: 4 },
++      "DOMSnapshot.captureSnapshot",
++      () =>
++        new Promise<object>((_, reject) => {
++          fail = reject;
++        }),
++    );
++    const checked = expect(work).rejects.toBeInstanceOf(CdpReadTimeoutError);
++    await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS);
++    await checked;
++    fail(new Error("Detached while handling command"));
++    await vi.advanceTimersByTimeAsync(0);
++    vi.useRealTimers();
++    // Node reports unhandled rejections after the microtask queue drains.
++    await new Promise<void>((resolve) => setTimeout(resolve, 0));
++    expect(unhandled).not.toHaveBeenCalled();
++  } finally {
++    process.off("unhandledRejection", unhandled);
++  }
++});
++
++it("reports a renderer read timeout with a gateway-readable reason", () => {
++  expect(
++    readTimeoutDetails(new CdpReadTimeoutError("DOMSnapshot.captureSnapshot", 4, READ_TIMEOUT_MS)),
++  ).toEqual({ data: { reason: RENDERER_READ_TIMEOUT } });
++  expect(readTimeoutDetails(CdpReadTimeoutError.stillPending("Page.getLayoutMetrics", 4))).toEqual({
++    data: { reason: RENDERER_READ_TIMEOUT },
++  });
++  expect(readTimeoutDetails(new Error("boom"))).toEqual({});
++});
++
 +it("does not bound mutations, screenshots or evaluation", async () => {
 +  vi.useFakeTimers();
 +  vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -273,14 +377,14 @@ index 0000000..f157ea9
 +  expect(isAbortError(abort)).toBe(true);
 +});
 diff --git a/apps/extension/src/browser-driver/chromium-cdp.ts b/apps/extension/src/browser-driver/chromium-cdp.ts
-index ebdc304..6dfeb44 100644
+index ebdc304..13f4f96 100644
 --- a/apps/extension/src/browser-driver/chromium-cdp.ts
 +++ b/apps/extension/src/browser-driver/chromium-cdp.ts
 @@ -32,6 +32,7 @@ import type {
    NetworkResult,
  } from "@/transport/types";
  import { BackgroundExecution } from "./background-execution";
-+import { CdpReadTimeoutError, runCdpCommand } from "./command-deadline";
++import { CdpReadTimeoutError, isRendererRead, runCdpCommand } from "./command-deadline";
  import {
    buildFrameGraph,
    type CdpFrameGraph,
@@ -292,7 +396,17 @@ index ebdc304..6dfeb44 100644
  }
  
  async function settleBeforeDeadline(promises: Promise<void>[], deadline: number): Promise<boolean> {
-@@ -324,7 +326,7 @@ export class ChromiumCdp {
+@@ -167,6 +169,9 @@ export class ChromiumCdp {
+   private readonly attachedTabs = new Set<number>();
+   private readonly claimAttempts = new Map<number, Map<string, object>>();
+   private readonly attachmentVersions = new Map<number, number>();
++  /** Timed-out reads still running in Chrome, per tab. New reads are refused
++   * while one is pending so they do not queue behind the stuck command. */
++  private readonly stuckReads = new Map<number, Set<Promise<unknown>>>();
+   private readonly attachmentIds = new Map<number, string>();
+   private readonly attachInFlight = new Map<number, Promise<void>>();
+   private readonly detachInFlight = new Map<number, Promise<void>>();
+@@ -324,7 +329,7 @@ export class ChromiumCdp {
      await this.ensureAttached(tabId);
      signal?.throwIfAborted();
      try {
@@ -301,7 +415,7 @@ index ebdc304..6dfeb44 100644
        return result as T;
      } catch (err) {
        throw normalizeError(err);
-@@ -334,7 +336,7 @@ export class ChromiumCdp {
+@@ -334,7 +339,7 @@ export class ChromiumCdp {
    async sendToTarget<T = unknown>(target: CdpTarget, method: string, params?: object): Promise<T> {
      await this.ensureAttached(target.tabId);
      try {
@@ -310,7 +424,7 @@ index ebdc304..6dfeb44 100644
      } catch (err) {
        throw normalizeError(err);
      }
-@@ -342,7 +344,11 @@ export class ChromiumCdp {
+@@ -342,7 +347,11 @@ export class ChromiumCdp {
  
    async getFrameGraph(tabId: number): Promise<CdpFrameGraph> {
      await this.ensureAttached(tabId);
@@ -323,7 +437,7 @@ index ebdc304..6dfeb44 100644
      await this.drainFrameAttachTasks(tabId);
  
      const sources: CdpFrameTreeSource[] = [];
-@@ -364,7 +370,8 @@ export class ChromiumCdp {
+@@ -364,7 +373,8 @@ export class ChromiumCdp {
              {},
            );
            return reply.frameTree ? { target, tree: reply.frameTree } : null;
@@ -333,7 +447,7 @@ index ebdc304..6dfeb44 100644
            return null;
          }
        }),
-@@ -388,8 +395,9 @@ export class ChromiumCdp {
+@@ -388,8 +398,9 @@ export class ChromiumCdp {
              { frameId: frame.frameId },
            );
            if (owner.backendNodeId !== undefined) frame.ownerBackendNodeId = owner.backendNodeId;
@@ -344,12 +458,40 @@ index ebdc304..6dfeb44 100644
          }
        }),
      );
-@@ -633,8 +641,12 @@ export class ChromiumCdp {
+@@ -622,6 +633,7 @@ export class ChromiumCdp {
+     this.networkDomainsEnabledTabs.clear();
+     this.networkRequestMeta.clear();
+     this.frameDiscovery.clear();
++    this.stuckReads.clear();
+     await Promise.all(
+       tabs.map(async (tabId) => {
+         try {
+@@ -633,8 +645,32 @@ export class ChromiumCdp {
      );
    }
  
 +  private command(target: CdpDebuggee, method: string, params: object): Promise<unknown> {
-+    return runCdpCommand(target, method, () => this.api.sendCommand(target, method, params));
++    const tabId = target.tabId;
++    const rendererRead = tabId !== undefined && isRendererRead(method);
++    if (rendererRead && this.stuckReads.get(tabId)?.size)
++      return Promise.reject(CdpReadTimeoutError.stillPending(method, tabId));
++    return runCdpCommand(
++      target,
++      method,
++      () => this.api.sendCommand(target, method, params),
++      (pending) => {
++        if (!rendererRead) return;
++        const stuck = this.stuckReads.get(tabId) ?? new Set<Promise<unknown>>();
++        this.stuckReads.set(tabId, stuck);
++        stuck.add(pending);
++        const settle = () => {
++          stuck.delete(pending);
++          if (stuck.size === 0 && this.stuckReads.get(tabId) === stuck)
++            this.stuckReads.delete(tabId);
++        };
++        void pending.then(settle, settle);
++      },
++    );
 +  }
 +
    private async enablePageDomain(tabId: number): Promise<void> {
@@ -358,7 +500,7 @@ index ebdc304..6dfeb44 100644
    }
  
    private async enableConsoleDomains(tabId: number): Promise<void> {
-@@ -647,7 +659,7 @@ export class ChromiumCdp {
+@@ -647,7 +683,7 @@ export class ChromiumCdp {
      let failed = false;
      for (const method of ["Runtime.enable", "Log.enable"]) {
        try {
@@ -367,7 +509,7 @@ index ebdc304..6dfeb44 100644
        } catch (err) {
          failed = true;
          console.debug("[bsk cdp] console domain enable failed", { tabId, method, err });
-@@ -660,7 +672,7 @@ export class ChromiumCdp {
+@@ -660,7 +696,7 @@ export class ChromiumCdp {
  
    private async enableNetworkDomain(tabId: number): Promise<void> {
      if (this.networkDomainsEnabledTabs.has(tabId)) return;
@@ -376,7 +518,7 @@ index ebdc304..6dfeb44 100644
      this.networkDomainsEnabledTabs.add(tabId);
    }
  
-@@ -672,13 +684,27 @@ export class ChromiumCdp {
+@@ -672,13 +708,27 @@ export class ChromiumCdp {
      }
    }
  
@@ -407,7 +549,7 @@ index ebdc304..6dfeb44 100644
    }
  
    private bindFrameTargetHandler(): void {
-@@ -705,6 +731,7 @@ export class ChromiumCdp {
+@@ -705,6 +755,7 @@ export class ChromiumCdp {
  
        if (method === "Target.detachedFromTarget") {
          const state = this.frameDiscovery.get(tabId);
@@ -415,7 +557,7 @@ index ebdc304..6dfeb44 100644
          if (state?.sessions.delete(sessionId)) state.generation += 1;
          return;
        }
-@@ -729,10 +756,33 @@ export class ChromiumCdp {
+@@ -729,10 +780,33 @@ export class ChromiumCdp {
      };
    }
  
@@ -449,7 +591,7 @@ index ebdc304..6dfeb44 100644
        const state = this.frameDiscovery.get(target.tabId);
        if (state?.sessions.delete(target.sessionId as string)) state.generation += 1;
        console.debug("[bsk cdp] child frame target initialization failed", { target, err });
-@@ -771,6 +821,7 @@ export class ChromiumCdp {
+@@ -771,6 +845,7 @@ export class ChromiumCdp {
        sessions: new Set(),
        pending: new Set(),
        generation: 0,
@@ -457,7 +599,16 @@ index ebdc304..6dfeb44 100644
      };
      this.frameDiscovery.set(tabId, created);
      return created;
-@@ -810,7 +861,7 @@ export class ChromiumCdp {
+@@ -778,6 +853,8 @@ export class ChromiumCdp {
+ 
+   private clearFrameState(tabId: number): void {
+     this.frameDiscovery.delete(tabId);
++    // Detaching discards the stuck command in Chrome.
++    this.stuckReads.delete(tabId);
+   }
+ 
+   private bindDialogHandler(): void {
+@@ -810,7 +887,7 @@ export class ChromiumCdp {
        if (parsed.type === "prompt") {
          handleParams.promptText = parsed.defaultPrompt ?? "";
        }
@@ -466,7 +617,7 @@ index ebdc304..6dfeb44 100644
        if (!this.attachedTabs.has(tabId) && !this.attachInFlight.has(tabId)) return;
        const sequence = (this.dialogSequences.get(tabId) ?? 0) + 1;
        this.dialogSequences.set(tabId, sequence);
-@@ -1336,6 +1387,10 @@ function projectNetworkEntry(entry: NetworkEntry, maxTextChars: number): Network
+@@ -1336,6 +1413,10 @@ function projectNetworkEntry(entry: NetworkEntry, maxTextChars: number): Network
    };
  }
  
@@ -479,10 +630,11 @@ index ebdc304..6dfeb44 100644
    if (typeof err === "string") return new Error(err);
 diff --git a/apps/extension/src/browser-driver/command-deadline.ts b/apps/extension/src/browser-driver/command-deadline.ts
 new file mode 100644
-index 0000000..a088706
+index 0000000..433616e
 --- /dev/null
 +++ b/apps/extension/src/browser-driver/command-deadline.ts
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,105 @@
++import type { RpcErrorData, RpcErrorReason } from "@/transport/types";
 +import type { CdpDebuggee } from "./chromium-cdp";
 +
 +// Renderer reads that observation issues on the agent's behalf. A read that
@@ -491,8 +643,7 @@ index 0000000..a088706
 +// pipeline stop instead of issuing fallback reads against the same
 +// unresponsive page. Mutations, screenshots and user-requested waits keep
 +// their own limits.
-+const READ_COMMANDS = new Set([
-+  "Target.setAutoAttach",
++const RENDERER_READS = new Set([
 +  "DOMSnapshot.enable",
 +  "DOMSnapshot.captureSnapshot",
 +  "Accessibility.enable",
@@ -501,22 +652,49 @@ index 0000000..a088706
 +  "Page.getFrameTree",
 +  "DOM.getFrameOwner",
 +]);
++// Answered by the browser process; bounded so attach and frame discovery
++// cannot hang, but its timeout says nothing about the renderer.
++const READ_COMMANDS = new Set([...RENDERER_READS, "Target.setAutoAttach"]);
 +export const READ_TIMEOUT_MS = 10_000;
 +const SLOW_COMMAND_MS = 2_000;
++/** `data.reason` reported to gateways for a renderer that stopped answering. */
++export const RENDERER_READ_TIMEOUT: RpcErrorReason = "renderer_read_timeout";
++const RECOVERY =
++  "Do not repeat the same read on this tab; switch tab, navigate elsewhere, or finish the turn and report the unresponsive page.";
++
++export function isRendererRead(method: string): boolean {
++  return RENDERER_READS.has(method);
++}
 +
 +export class CdpReadTimeoutError extends Error {
 +  constructor(method: string, tabId: number | undefined, timeout: number) {
 +    super(
-+      `Browser read ${method} timed out after ${timeout}ms (tab ${tabId}). Do not repeat the same read in a loop; report the timeout and let the browser task release control before retrying.`,
++      `Browser read ${method} timed out after ${timeout}ms (tab ${tabId}); the renderer is not answering. ${RECOVERY}`,
 +    );
 +    this.name = "CdpReadTimeoutError";
 +  }
++
++  /** A read refused because an earlier, timed-out read on the tab is still
++   * running in Chrome. Queueing behind it would only add another deadline. */
++  static stillPending(method: string, tabId: number | undefined): CdpReadTimeoutError {
++    const error = new CdpReadTimeoutError(method, tabId, 0);
++    error.message = `Browser read ${method} refused: an earlier read on tab ${tabId} is still running in the renderer. ${RECOVERY}`;
++    return error;
++  }
++}
++
++/** RPC error details for a timed-out renderer read; empty for other errors. */
++export function readTimeoutDetails(error: unknown): { data?: RpcErrorData } {
++  return error instanceof Error && error.name === "CdpReadTimeoutError"
++    ? { data: { reason: RENDERER_READ_TIMEOUT } }
++    : {};
 +}
 +
 +export async function runCdpCommand<T>(
 +  target: CdpDebuggee,
 +  method: string,
 +  run: () => Promise<T>,
++  onTimeout?: (pending: Promise<unknown>) => void,
 +): Promise<T> {
 +  const started = Date.now();
 +  let timedOut = false;
@@ -551,6 +729,8 @@ index 0000000..a088706
 +        deadline = setTimeout(() => {
 +          timedOut = true;
 +          console.warn("[bsk cdp] read timed out", details());
++          // The race already observes `pending`; a late rejection is handled.
++          onTimeout?.(pending);
 +          reject(new CdpReadTimeoutError(method, target.tabId, READ_TIMEOUT_MS));
 +        }, READ_TIMEOUT_MS);
 +      }),
@@ -559,6 +739,26 @@ index 0000000..a088706
 +    clearTimeout(deadline);
 +  }
 +}
+diff --git a/apps/extension/src/tools/observation.ts b/apps/extension/src/tools/observation.ts
+index 2df451b..f240a48 100644
+--- a/apps/extension/src/tools/observation.ts
++++ b/apps/extension/src/tools/observation.ts
+@@ -29,6 +29,7 @@ import {
+   type VomScene,
+ } from "@browser-skill/vom";
+ import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
++import { readTimeoutDetails } from "@/browser-driver/command-deadline";
+ import type { CdpTarget } from "@/browser-driver/frame-graph";
+ import {
+   type CaptureSuppressSendToTab,
+@@ -1212,6 +1213,7 @@ async function handleVomObservation(
+     return {
+       code: "cdp_failed",
+       message: err instanceof Error ? err.message : String(err),
++      ...readTimeoutDetails(err),
+     };
+   }
+ }
 diff --git a/apps/extension/src/tools/visual-screenshot.ts b/apps/extension/src/tools/visual-screenshot.ts
 index 05fd07e..c06603b 100644
 --- a/apps/extension/src/tools/visual-screenshot.ts
@@ -742,3 +942,15 @@ index 4375cd5..d27308a 100644
    throwIfAborted as throwCaptureAborted,
  } from "./capture-abort";
  import {
+diff --git a/apps/extension/src/transport/types.ts b/apps/extension/src/transport/types.ts
+index bbf4a5a..31591fc 100644
+--- a/apps/extension/src/transport/types.ts
++++ b/apps/extension/src/transport/types.ts
+@@ -60,6 +60,7 @@ export type RpcErrorReason =
+   | "confirmation_ui_unavailable"
+   | "borrow_outcome_unknown"
+   | "screenshot_capture_failed"
++  | "renderer_read_timeout"
+   | "user_cancelled"
+   | "page_hidden"
+   | "navigation"

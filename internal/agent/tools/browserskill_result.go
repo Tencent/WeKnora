@@ -72,6 +72,11 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 	case "target_not_select", "option_not_found", "single_select_value_count":
 		return "select requires a native select and its option values. Inspect current options; " +
 			"use click/observe for a custom dropdown."
+	case "renderer_read_timeout":
+		return "This tab's page stopped answering and further reads on it are refused until it " +
+			"recovers. Do not repeat snapshot/observe on this tab. Switch to another tab or " +
+			"navigate elsewhere if that is safe; otherwise finish the turn and report the " +
+			"unresponsive page."
 	case "agent_window_scope", "borrow_conflict":
 		return "List actual user tabs and respect tab ownership. Borrow the intended available tab " +
 			"through extension confirmation; never guess its ID."

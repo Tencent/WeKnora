@@ -14,7 +14,7 @@ target architecture.
 
 | Patch | Purpose | Removal condition |
 | --- | --- | --- |
-| `01-browser-read-reliability.patch` | 10 s deadline on renderer reads (snapshot, accessibility, layout, frame tree, auto-attach); a timed-out read stops capture fallback and is reported as `cdp_failed`, never `cancelled`; auto-attach configured once per debugger session | Equivalent upstream behavior passes the read-timeout regressions |
+| `01-browser-read-reliability.patch` | 10 s deadline on renderer reads (snapshot, accessibility, layout, frame tree, auto-attach); a timed-out read stops capture fallback, is reported as `cdp_failed` with `data.reason = renderer_read_timeout`, and further renderer reads on that tab are refused until the stuck command settles; auto-attach configured once per debugger session | Equivalent upstream behavior passes the read-timeout regressions |
 
 Patch 01 is the only remaining downstream change; it is proposed upstream as
 [PR #318](https://github.com/Tencent/BrowserSkill/pull/318).
@@ -77,8 +77,9 @@ WeKnora then disables preview polling and reports the extension as outdated.
   can be borrowed.
 - Closing the last tab of the Agent Window through `tab_close` keeps an
   agent-owned blank tab until session stop (host-side, see above), so Chrome's
-  window removal is not misreported as a human interruption. Actual user window
-  closure still pauses the task.
+  window removal is not misreported as a human interruption. If the close is
+  refused or interrupted while the target still exists, the blank tab is removed
+  again. Actual user window closure still pauses the task.
 - Human help and borrowing follow the upstream focus/confirmation behavior.
 - Remote upload/download remain unsupported, as defined upstream.
 
