@@ -148,12 +148,12 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		previousMetadata = types.JSON("{}") // metadata is NOT NULL; an empty JSON writes NULL
 	}
 
-	// Drop queued parse tasks of the previous source before the row
-	// points at the new file. The new TypeDocumentProcess task is
-	// enqueued later by ReparseKnowledge.
-	if !versioned {
-		s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
-	}
+	// Drop queued parse tasks of the previous source before the row points
+	// at the new file. The new task is enqueued later by ReparseKnowledge.
+	// A versioned replacement keeps the old original, but a worker still
+	// inside the previous parse must be cancelled: its failure path deletes
+	// chunks and vectors by knowledge ID and would wipe the new version.
+	s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
 
 	sourceColumns := map[string]interface{}{
 		"title":         title,

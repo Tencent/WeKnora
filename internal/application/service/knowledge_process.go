@@ -416,6 +416,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			"failed to resolve vector store", err)
 	}
 
+	// A replacement can land while the embedding model or vector store is
+	// resolved. Deleting by knowledge ID after that would remove the new
+	// version's chunks and vectors.
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Knowledge source replaced, skipping chunk cleanup: %s", knowledge.ID)
+		return nil
+	}
+
 	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
@@ -714,6 +722,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
 		if err != nil {
+			// Cancellation after a replacement surfaces here as a failed
+			// index. The new version already owns this knowledge ID, so
+			// rolling back chunks or vectors would delete its data.
+			if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+				logger.Infof(ctx, "Knowledge source replaced, skipping failed-index cleanup: %s", knowledge.ID)
+				return nil
+			}
 			knowledge.ParseStatus = types.ParseStatusFailed
 			knowledge.ErrorMessage = err.Error()
 			knowledge.UpdatedAt = time.Now()

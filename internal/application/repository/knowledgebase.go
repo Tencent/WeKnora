@@ -39,6 +39,19 @@ func (r *knowledgeBaseRepository) GetKnowledgeBaseByID(ctx context.Context, id s
 	return &kb, nil
 }
 
+// GetKnowledgeBaseIncludingDeleted loads a soft-deleted knowledge base so
+// async cleanup can still resolve the storage provider it was using.
+func (r *knowledgeBaseRepository) GetKnowledgeBaseIncludingDeleted(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+	var kb types.KnowledgeBase
+	if err := r.db.WithContext(ctx).Unscoped().Where("id = ?", id).First(&kb).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrKnowledgeBaseNotFound
+		}
+		return nil, err
+	}
+	return &kb, nil
+}
+
 // GetKnowledgeBaseByIDAndTenant gets a knowledge base by id only if it belongs to the given tenant (enforces tenant isolation)
 func (r *knowledgeBaseRepository) GetKnowledgeBaseByIDAndTenant(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error) {
 	var kb types.KnowledgeBase

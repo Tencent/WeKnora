@@ -74,7 +74,7 @@ func TestKnowledgeFileVersionArchiveFailureRollsBackSource(t *testing.T) {
 }
 
 func TestKnowledgeFileVersionCASGuards(t *testing.T) {
-	for _, column := range []string{"tenant_id", "file_version", "file_path", "updated_at", "parse_status"} {
+	for _, column := range []string{"tenant_id", "file_version", "file_path", "parse_status"} {
 		t.Run(column, func(t *testing.T) {
 			repo, db, before := newKnowledgeFileVersionRepo(t)
 			values := map[string]interface{}{
@@ -91,6 +91,13 @@ func TestKnowledgeFileVersionCASGuards(t *testing.T) {
 			require.Zero(t, count, "a rejected source swap must not create history")
 		})
 	}
+}
+
+func TestKnowledgeFileVersionReplaceIgnoresUnrelatedTimestamp(t *testing.T) {
+	repo, db, before := newKnowledgeFileVersionRepo(t)
+	require.NoError(t, db.Model(&types.Knowledge{}).Where("id = ?", before.ID).
+		UpdateColumn("updated_at", before.UpdatedAt.Add(time.Minute)).Error)
+	require.NoError(t, repo.ReplaceKnowledgeSource(context.Background(), before, fileVersionReplacementColumns()))
 }
 
 func TestKnowledgeFileVersionRestoreAndTenantIsolation(t *testing.T) {

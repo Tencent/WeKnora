@@ -796,6 +796,10 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		EffectiveEngines: tenantInfo.GetEffectiveEngines(),
 		VectorStoreID:    vectorStoreIDSnapshot, // snapshot taken before soft-delete
 	}
+	if kb != nil {
+		payload.StorageProvider = kb.GetStorageProvider()
+		payload.StorageBackendID = kb.StorageBackendID
+	}
 	langfuse.InjectTracing(ctx, &payload)
 
 	payloadBytes, err := json.Marshal(payload)
@@ -957,12 +961,29 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
-		// Delete physical files, extracted images, and adjust storage
+		// Delete physical files, extracted images, and adjust storage.
+		// The KB row is already soft-deleted, so resolve storage from the
+		// unscoped row (or the enqueue-time snapshot) instead of the global
+		// file service.
+		versionCtx := ctx
+		if s.storageResolver != nil && s.tenantRepo != nil {
+			if tenant, err := s.tenantRepo.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
+				versionCtx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+			}
+		}
+		versionFiles := &knowledgeService{
+			fileSvc: s.fileSvc, storageResolver: s.storageResolver,
+			resourceCatalog: s.resourceCatalog, tenantRepo: s.tenantRepo,
+		}
+		versionKB := s.knowledgeBaseForVersionCleanup(ctx, kbID, tenantID, payload)
 		logger.Infof(ctx, "Deleting physical files and extracted images")
 		storageAdjust := int64(0)
 		for _, knowledge := range knowledgeList {
 			if knowledge.FilePath != "" {
-				if err := s.fileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+				fSvc := versionFiles.resolveFileServiceForPath(versionCtx, versionKB, knowledge.FilePath)
+				if fSvc == nil {
+					logger.Warnf(ctx, "No file service for knowledge %s", knowledge.ID)
+				} else if err := fSvc.DeleteFile(versionCtx, knowledge.FilePath); err != nil {
 					logger.Warnf(ctx, "Failed to delete file %s: %v", knowledge.FilePath, err)
 				}
 			}
@@ -990,6 +1011,22 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
+		// Historical originals are keyed by knowledge ID. Clean them up before the
+		// rows disappear so a storage failure can be retried by asynq.
+		var versionErr error
+		for _, knowledge := range knowledgeList {
+			if err := cleanupKnowledgeFileVersions(versionCtx, s.kgRepo, tenantID, knowledge.ID,
+				func(path string) interfaces.FileService {
+					return versionFiles.resolveFileServiceForPath(versionCtx, versionKB, path)
+				}); err != nil {
+				versionErr = errors.Join(versionErr, err)
+			}
+		}
+		if versionErr != nil {
+			logger.Errorf(ctx, "Historical file cleanup failed for knowledge base %s: %v", kbID, versionErr)
+			return versionErr
+		}
+
 		// Delete all knowledge entries from database
 		logger.Infof(ctx, "Deleting knowledge entries from database")
 		if err := s.kgRepo.DeleteKnowledgeList(ctx, tenantID, knowledgeIDs); err != nil {
@@ -998,26 +1035,40 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			})
 			return err
 		}
-		versionCtx := ctx
-		if s.storageResolver != nil && s.tenantRepo != nil {
-			if tenant, err := s.tenantRepo.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
-				versionCtx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
-			}
-		}
-		versionFiles := &knowledgeService{
-			fileSvc: s.fileSvc, storageResolver: s.storageResolver,
-			resourceCatalog: s.resourceCatalog, tenantRepo: s.tenantRepo,
-		}
-		for _, knowledge := range knowledgeList {
-			cleanupKnowledgeFileVersions(versionCtx, s.kgRepo, tenantID, knowledge.ID,
-				func(path string) interfaces.FileService {
-					return versionFiles.resolveFileServiceForPath(versionCtx, &types.KnowledgeBase{}, path)
-				})
-		}
 	}
 
 	logger.Infof(ctx, "KB resource cleanup finished, knowledge base ID: %s", kbID)
 	return nil
+}
+
+type deletedKnowledgeBaseLookup interface {
+	GetKnowledgeBaseIncludingDeleted(context.Context, string) (*types.KnowledgeBase, error)
+}
+
+// knowledgeBaseForVersionCleanup prefers the soft-deleted row, which still
+// carries the storage provider and legacy config. The enqueue snapshot is
+// only used when that row cannot be loaded.
+func (s *knowledgeBaseService) knowledgeBaseForVersionCleanup(
+	ctx context.Context, kbID string, tenantID uint64, payload types.KBDeletePayload,
+) *types.KnowledgeBase {
+	if lookup, ok := s.repo.(deletedKnowledgeBaseLookup); ok && kbID != "" {
+		kb, err := lookup.GetKnowledgeBaseIncludingDeleted(ctx, kbID)
+		if err == nil && kb != nil && kb.TenantID == tenantID {
+			return kb
+		}
+		if err != nil {
+			logger.Warnf(ctx, "Failed to load deleted knowledge base %s for file cleanup: %v", kbID, err)
+		}
+	}
+	kb := &types.KnowledgeBase{
+		ID:               kbID,
+		TenantID:         tenantID,
+		StorageBackendID: payload.StorageBackendID,
+	}
+	if provider := strings.TrimSpace(payload.StorageProvider); provider != "" {
+		kb.SetStorageProvider(provider)
+	}
+	return kb
 }
 
 // cleanupWikiForKnowledgeBase removes wiki pages, folders, revisions, and

@@ -14,7 +14,7 @@ import { isKnowledgeParseInFlight } from '../wikiStatusRefresh';
 
 const props = defineProps<{
   visible: boolean;
-  knowledge: { id: string; file_name?: string; title?: string; parse_status?: string } | null;
+  knowledge: { id: string; file_name?: string; title?: string; parse_status?: string; file_version?: number } | null;
   canUpload: boolean;
   canDownload: boolean;
   initialFile?: File | null;
@@ -64,7 +64,7 @@ async function loadPage(nextPage = 1) {
   }
 }
 
-watch(() => [props.visible, props.knowledge?.id] as const, () => {
+watch(() => [props.visible, props.knowledge?.id, props.knowledge?.file_version] as const, () => {
   ++loadGeneration;
   items.value = [];
   total.value = 0;

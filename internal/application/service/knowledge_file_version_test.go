@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -167,9 +168,67 @@ func TestVersionedHistoryCleanupDeletesRetainedFilesAndManifest(t *testing.T) {
 	h, _, versions := newVersionedReplaceHarness(t)
 	_, err := h.replace(t, "updated body", "notes/b.md", nil)
 	require.NoError(t, err)
-	cleanupKnowledgeFileVersions(h.ctx, h.svc.repo, 7, h.original.ID,
-		func(string) interfaces.FileService { return h.store })
+	require.NoError(t, cleanupKnowledgeFileVersions(h.ctx, h.svc.repo, 7, h.original.ID,
+		func(string) interfaces.FileService { return h.store }))
 	require.Equal(t, []string{"old/file.md"}, h.store.deleted)
+	_, total, err := versions.ListKnowledgeFileVersions(h.ctx, 7, h.original.ID, 10, 0)
+	require.NoError(t, err)
+	require.Zero(t, total)
+}
+
+func TestVersionedReplaceDequeuesPreviousTasks(t *testing.T) {
+	h, db, _ := newVersionedReplaceHarness(t)
+	require.NoError(t, db.Model(&types.Knowledge{}).Where("id = ?", h.original.ID).
+		UpdateColumn("parse_status", types.ParseStatusCancelled).Error)
+	_, err := h.replace(t, "updated body", "notes/b.md", nil)
+	require.NoError(t, err)
+	require.Contains(t, h.events, "dequeue:"+h.original.ID)
+}
+
+type failingDeleteStore struct {
+	*replaceFileStore
+	fail map[string]error
+}
+
+func (s *failingDeleteStore) DeleteFile(ctx context.Context, path string) error {
+	if err, ok := s.fail[path]; ok {
+		s.deleted = append(s.deleted, path)
+		return err
+	}
+	return s.replaceFileStore.DeleteFile(ctx, path)
+}
+
+func TestVersionedHistoryCleanupContinuesAfterDeleteFailure(t *testing.T) {
+	h, db, versions := newVersionedReplaceHarness(t)
+	_, err := h.replace(t, "updated body", "notes/b.md", nil)
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&types.KnowledgeFileVersion{
+		ID: uuid.NewString(), TenantID: 7, KnowledgeID: h.original.ID, Version: 3,
+		FileName: "older.md", FilePath: "older/file.md",
+	}).Error)
+	store := &failingDeleteStore{
+		replaceFileStore: h.store,
+		fail:             map[string]error{"old/file.md": errors.New("cos unavailable")},
+	}
+	err = cleanupKnowledgeFileVersions(h.ctx, h.svc.repo, 7, h.original.ID,
+		func(string) interfaces.FileService { return store })
+	require.Error(t, err)
+	require.ElementsMatch(t, []string{"old/file.md", "older/file.md"}, h.store.deleted)
+	_, total, err := versions.ListKnowledgeFileVersions(h.ctx, 7, h.original.ID, 10, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+}
+
+func TestVersionedHistoryCleanupTreatsMissingFileAsDeleted(t *testing.T) {
+	h, _, versions := newVersionedReplaceHarness(t)
+	_, err := h.replace(t, "updated body", "notes/b.md", nil)
+	require.NoError(t, err)
+	store := &failingDeleteStore{
+		replaceFileStore: h.store,
+		fail:             map[string]error{"old/file.md": os.ErrNotExist},
+	}
+	require.NoError(t, cleanupKnowledgeFileVersions(h.ctx, h.svc.repo, 7, h.original.ID,
+		func(string) interfaces.FileService { return store }))
 	_, total, err := versions.ListKnowledgeFileVersions(h.ctx, 7, h.original.ID, 10, 0)
 	require.NoError(t, err)
 	require.Zero(t, total)

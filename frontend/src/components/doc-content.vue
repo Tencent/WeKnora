@@ -22,7 +22,7 @@ import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
-import { isKnowledgeParseInFlight } from '@/views/knowledge/wikiStatusRefresh';
+import { applyPolledKnowledgeDetails, isKnowledgeParseInFlight } from '@/views/knowledge/wikiStatusRefresh';
 import KnowledgeFileVersionsPanel from '@/views/knowledge/components/KnowledgeFileVersionsPanel.vue';
 import DocumentFileIcon from '@/views/knowledge/components/DocumentFileIcon.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
@@ -293,12 +293,9 @@ const scheduleSummaryStatusPoll = () => {
       const result: any = await getKnowledgeDetails(knowledgeID);
       if (generation !== summaryStatusPollGeneration || props.details?.id !== knowledgeID) return;
       if (result?.success && result.data) {
-        // Ignore a status response for a source that was replaced during this request.
-        if (result.data.file_version && props.details.file_version && result.data.file_version !== props.details.file_version) throw new Error('File version changed');
-        const wasProcessing = isKnowledgeParseInFlight(props.details.parse_status);
-        if (result.data.parse_status) props.details.parse_status = result.data.parse_status;
+        const { refreshDocument } = applyPolledKnowledgeDetails(props.details, result.data);
         applySummaryState(result.data.summary_status, result.data.description);
-        if (wasProcessing && !isKnowledgeParseInFlight(props.details.parse_status)) emit('getDoc', 1);
+        if (refreshDocument) emit('getDoc', 1);
       }
     } catch {
       // Keep the current status visible and retry while the drawer remains open.

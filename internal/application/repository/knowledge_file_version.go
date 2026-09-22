@@ -16,11 +16,12 @@ func (r *knowledgeRepository) ReplaceKnowledgeSource(
 	ctx context.Context, before *types.Knowledge, columns map[string]interface{},
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// updated_at is intentionally not part of the predicate. A metadata-only
+		// write bumps it without changing the source this swap is guarding.
 		result := tx.Model(&types.Knowledge{}).
-			Where("id = ? AND tenant_id = ? AND file_version = ? AND file_path = ? "+
-				"AND updated_at = ? AND parse_status = ?",
+			Where("id = ? AND tenant_id = ? AND file_version = ? AND file_path = ? AND parse_status = ?",
 				before.ID, before.TenantID, before.CurrentFileVersion(), before.FilePath,
-				before.UpdatedAt, before.ParseStatus).
+				before.ParseStatus).
 			Updates(columns)
 		if result.Error != nil {
 			return result.Error

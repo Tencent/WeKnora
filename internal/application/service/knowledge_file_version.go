@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
+	"os"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -109,33 +111,45 @@ func mapFileVersionError(err error) error {
 	return err
 }
 
-// cleanupKnowledgeFileVersions runs only after knowledge deletion has committed.
-// On storage failures keep the manifest so retained bytes remain discoverable.
+// cleanupKnowledgeFileVersions removes retained originals and, only when every
+// object is gone, the manifest. A missing object counts as success so a retry
+// can finish the rest. Any other failure keeps the manifest and is returned:
+// knowledge-base deletion calls this before the knowledge rows are removed, so
+// the task can be retried while those rows still identify the versions.
 func cleanupKnowledgeFileVersions(
 	ctx context.Context, repo interfaces.KnowledgeRepository, tenantID uint64, id string,
 	resolve func(string) interfaces.FileService,
-) {
+) error {
 	versions, ok := repo.(interfaces.KnowledgeFileVersionRepository)
 	if !ok {
-		return
+		return nil
 	}
+	var failed error
 	for offset := 0; ; offset += 100 {
 		rows, total, err := versions.ListKnowledgeFileVersions(ctx, tenantID, id, 100, offset)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to list file versions for %s: %v", id, err)
-			return
+			return err
 		}
 		for _, row := range rows {
-			if err := resolve(row.FilePath).DeleteFile(ctx, row.FilePath); err != nil {
+			fileSvc := resolve(row.FilePath)
+			if fileSvc == nil {
+				failed = errors.Join(failed, fmt.Errorf("no file service for %s", row.FilePath))
+				continue
+			}
+			if err := fileSvc.DeleteFile(ctx, row.FilePath); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
 				logger.Warnf(ctx, "Failed to delete historical file for %s: %v", id, err)
-				return
+				failed = errors.Join(failed, err)
 			}
 		}
-		if int64(offset+len(rows)) >= total {
+		if len(rows) == 0 || int64(offset+len(rows)) >= total {
 			break
 		}
 	}
-	if err := versions.DeleteKnowledgeFileVersions(ctx, tenantID, id); err != nil {
-		logger.Warnf(ctx, "Failed to delete file version records for %s: %v", id, err)
+	if failed != nil {
+		return failed
 	}
+	return versions.DeleteKnowledgeFileVersions(ctx, tenantID, id)
 }
