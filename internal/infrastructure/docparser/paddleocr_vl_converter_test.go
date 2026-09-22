@@ -64,7 +64,8 @@ func TestPaddleOCRVLReadTimeout(t *testing.T) {
 				close(arrived)
 				if mode == "success" {
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = io.WriteString(w, `{"errorCode":0,"result":{"layoutParsingResults":[{"markdown":{"text":"parsed document","images":{}}}]}}`)
+					_, _ = io.WriteString(w, `{"errorCode":0,"result":{"layoutParsingResults":[
+ {"markdown":{"text":"parsed document","images":{}}}]}}`)
 					return
 				}
 				select {
@@ -91,7 +92,9 @@ func TestPaddleOCRVLReadTimeout(t *testing.T) {
 				}()
 			}
 			reader := NewPaddleOCRVLReader(map[string]string{"paddleocr_vl_endpoint": server.URL})
-			result, err := reader.Read(ctx, &types.ReadRequest{FileName: "test.pdf", FileType: "pdf", FileContent: []byte("test")})
+			result, err := reader.Read(ctx, &types.ReadRequest{
+				FileName: "test.pdf", FileType: "pdf", FileContent: []byte("test"),
+			})
 			if mode == "success" {
 				if err != nil {
 					t.Fatal(err)

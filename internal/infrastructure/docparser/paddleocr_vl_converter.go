@@ -52,7 +52,8 @@ func paddleOCRVLRequestTimeout() time.Duration {
 	}
 	timeout, err := time.ParseDuration(value)
 	if err != nil || timeout <= 0 {
-		logger.Warnf(context.Background(), "Invalid WEKNORA_PADDLEOCR_VL_TIMEOUT %q; using %s", value, defaultPaddleOCRVLTimeout)
+		logger.Warnf(context.Background(), "Invalid WEKNORA_PADDLEOCR_VL_TIMEOUT %q; using %s",
+			value, defaultPaddleOCRVLTimeout)
 		return defaultPaddleOCRVLTimeout
 	}
 	return timeout
