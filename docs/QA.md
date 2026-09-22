@@ -455,8 +455,6 @@ docker run -d -p 8081:80 weknora-site
 
 原 Local 配置需要按上面任一后端重建。每个空间可配多个沙箱实例，并可为每个配置设置**网络策略**（默认放行出站、关闭公网入站；可改成默认拒绝出站再写允许名单）。详见 [`docs/sandbox-docker-backend.md`](./sandbox-docker-backend.md) 与 [`docs/sandbox-protocol.md`](./sandbox-protocol.md)。
 
-Lite 桌面版另有 OS 强制隔离的 `host` 后端，**不是**这个已删除的 `local`：没有 `/workspace` 虚拟根，agent 在用户选定的本机目录里工作。详见 [本地沙盒后端](./sandbox-local-backend.md)。
-
 ## 46. 技能目录和沙箱配置是什么关系？安装一直转圈怎么办？
 
 0.8.0 把技能做成空间级目录（迁移 `000086_tenant_skills` / `000090_skill_catalog`），再**按沙箱配置安装成快照**：
