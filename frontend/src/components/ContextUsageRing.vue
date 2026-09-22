@@ -49,14 +49,28 @@
               class="context-usage-card__bar-seg"
               :style="{ width: segment.percent + '%', background: segment.color }"
             />
+            <span
+              v-if="thresholdPercent > 0"
+              class="context-usage-card__bar-tick"
+              :style="{ left: thresholdPercent + '%' }"
+              :title="$t('input.contextUsage.thresholdHint')"
+            />
           </div>
           <ul class="context-usage-card__rows">
-            <li v-for="row in CONTEXT_USAGE_CATEGORIES" :key="row.key" class="context-usage-card__row">
+            <li v-for="row in visibleRows" :key="row.key" class="context-usage-card__row">
               <span class="context-usage-card__dot" :style="{ background: row.color }" />
-              <span class="context-usage-card__label">{{ $t('input.contextUsage.categories.' + row.key) }}</span>
-              <span class="context-usage-card__value">~{{ formatContextUsageCount(categoryTokens(row.key)) }}</span>
+              <span class="context-usage-card__label">{{ row.label }}</span>
+              <span class="context-usage-card__value">{{ estimatedPrefix }}{{ formatContextUsageCount(row.tokens) }}</span>
+            </li>
+            <li class="context-usage-card__row context-usage-card__row--free">
+              <span class="context-usage-card__dot context-usage-card__dot--free" />
+              <span class="context-usage-card__label">{{ $t('input.contextUsage.freeSpace') }}</span>
+              <span class="context-usage-card__value">{{ formatContextUsageCount(freeSpace) }}</span>
             </li>
           </ul>
+          <button type="button" class="context-usage-card__toggle" @click="expanded = !expanded">
+            {{ expanded ? $t('input.contextUsage.collapse') : $t('input.contextUsage.expand') }}
+          </button>
         </template>
         <p v-else class="context-usage-card__empty">{{ $t('input.contextUsage.empty') }}</p>
       </div>
@@ -66,21 +80,27 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   CONTEXT_USAGE_CATEGORIES,
+  CONTEXT_USAGE_GROUPS,
   contextUsageBarSegments,
   contextUsageCategoryTokens,
+  contextUsageFreeSpace,
+  contextUsageGroupRows,
   contextUsagePercent,
+  contextUsageThresholdPercent,
   formatContextUsageCount,
   type ContextUsage,
-  type ContextUsageCategoryKey,
 } from '@/utils/contextUsage'
 
 const props = defineProps<{
   usage?: ContextUsage | null
 }>()
 
+const { t } = useI18n()
 const visible = ref(false)
+const expanded = ref(false)
 const radius = 7
 const circumference = 2 * Math.PI * radius
 
@@ -96,10 +116,26 @@ const ringColor = computed(() => {
   return '#22c55e'
 })
 const barSegments = computed(() => contextUsageBarSegments(props.usage))
+const freeSpace = computed(() => contextUsageFreeSpace(props.usage))
+const thresholdPercent = computed(() => contextUsageThresholdPercent(props.usage))
+const estimatedPrefix = computed(() => (props.usage?.estimated ? '~' : ''))
 
-function categoryTokens(key: ContextUsageCategoryKey): number {
-  return contextUsageCategoryTokens(props.usage, key)
-}
+const visibleRows = computed(() => {
+  if (expanded.value) {
+    return CONTEXT_USAGE_CATEGORIES.map((row) => ({
+      key: row.key as string,
+      color: row.color,
+      label: t(`input.contextUsage.categories.${row.key}`),
+      tokens: contextUsageCategoryTokens(props.usage, row.key),
+    }))
+  }
+  return contextUsageGroupRows(props.usage).map((row) => ({
+    key: row.key as string,
+    color: row.color,
+    label: t(`input.contextUsage.groups.${row.key}`),
+    tokens: row.tokens,
+  }))
+})
 </script>
 
 <style lang="less">
@@ -251,5 +287,32 @@ function categoryTokens(key: ContextUsageCategoryKey): number {
   font-size: 12px;
   color: var(--td-text-color-secondary);
   line-height: 1.5;
+}
+
+.context-usage-card__bar {
+  position: relative;
+}
+
+.context-usage-card__bar-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--td-text-color-placeholder, #bbb);
+  pointer-events: none;
+}
+
+.context-usage-card__dot--free {
+  background: var(--td-component-stroke, #e7e7e7);
+}
+
+.context-usage-card__toggle {
+  margin-top: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 0;
 }
 </style>

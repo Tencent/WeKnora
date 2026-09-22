@@ -1,19 +1,38 @@
 export type ContextUsage = {
   system_prompt?: number
-  tools?: number
-  conversation?: number
-  mcp?: number
+  memory?: number
   skills?: number
+  tools?: number
+  mcp?: number
+  conversation?: number
+  reasoning?: number
+  tool_results?: number
   total?: number
   window?: number
+  threshold?: number
+  estimated?: boolean
 }
 
+export const CONTEXT_USAGE_GROUPS = [
+  { key: 'instructions', color: '#3b82f6' },
+  { key: 'toolDefs', color: '#22c55e' },
+  { key: 'dialogue', color: '#f59e0b' },
+  { key: 'toolOutput', color: '#8b5cf6' },
+] as const
+
+export type ContextUsageGroupKey = typeof CONTEXT_USAGE_GROUPS[number]['key']
+
+// Shades within a group share its hue so the bar reads as four blocks even
+// when the row list is collapsed to groups.
 export const CONTEXT_USAGE_CATEGORIES = [
-  { key: 'system_prompt', color: '#3b82f6' },
-  { key: 'tools', color: '#22c55e' },
-  { key: 'conversation', color: '#f59e0b' },
-  { key: 'mcp', color: '#8b5cf6' },
-  { key: 'skills', color: '#ec4899' },
+  { key: 'system_prompt', group: 'instructions', color: '#3b82f6' },
+  { key: 'memory', group: 'instructions', color: '#60a5fa' },
+  { key: 'skills', group: 'instructions', color: '#93c5fd' },
+  { key: 'tools', group: 'toolDefs', color: '#22c55e' },
+  { key: 'mcp', group: 'toolDefs', color: '#4ade80' },
+  { key: 'conversation', group: 'dialogue', color: '#f59e0b' },
+  { key: 'reasoning', group: 'dialogue', color: '#fbbf24' },
+  { key: 'tool_results', group: 'toolOutput', color: '#8b5cf6' },
 ] as const
 
 export type ContextUsageCategoryKey = typeof CONTEXT_USAGE_CATEGORIES[number]['key']
@@ -105,4 +124,34 @@ export function contextUsageBarSegments(usage?: ContextUsage | null): Array<{
     return segs
   }
   return segs.map((row) => ({ ...row, percent: row.percent * (100 / filled) }))
+}
+
+export function contextUsageGroupRows(usage?: ContextUsage | null): Array<{
+  key: ContextUsageGroupKey
+  color: string
+  tokens: number
+}> {
+  return CONTEXT_USAGE_GROUPS.map((group) => ({
+    key: group.key,
+    color: group.color,
+    tokens: CONTEXT_USAGE_CATEGORIES
+      .filter((row) => row.group === group.key)
+      .reduce((sum, row) => sum + contextUsageCategoryTokens(usage, row.key), 0),
+  }))
+}
+
+export function contextUsageFreeSpace(usage?: ContextUsage | null): number {
+  const window = usage?.window ?? 0
+  const total = usage?.total ?? 0
+  return Math.max(0, window - total)
+}
+
+/** Percent position of the compaction tick along the bar. 0 hides it. */
+export function contextUsageThresholdPercent(usage?: ContextUsage | null): number {
+  const window = usage?.window ?? 0
+  const threshold = usage?.threshold ?? 0
+  if (window <= 0 || threshold <= 0) {
+    return 0
+  }
+  return Math.min(100, (threshold / window) * 100)
 }

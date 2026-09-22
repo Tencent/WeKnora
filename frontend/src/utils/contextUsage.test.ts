@@ -4,7 +4,10 @@ import test from 'node:test'
 import {
   CONTEXT_USAGE_CATEGORIES,
   contextUsageBarSegments,
+  contextUsageFreeSpace,
+  contextUsageGroupRows,
   contextUsagePercent,
+  contextUsageThresholdPercent,
   formatContextUsageCount,
   latestContextUsage,
 } from './contextUsage.ts'
@@ -67,10 +70,41 @@ test('an in-flight assistant with a live snapshot wins over the previous turn', 
   ]), live)
 })
 
-test('category palette covers the five prompt sources', () => {
+test('category palette covers the eight prompt sources in display order', () => {
   assert.deepEqual(CONTEXT_USAGE_CATEGORIES.map(row => row.key), [
-    'system_prompt', 'tools', 'conversation', 'mcp', 'skills',
+    'system_prompt', 'memory', 'skills',
+    'tools', 'mcp',
+    'conversation', 'reasoning',
+    'tool_results',
   ])
+})
+
+test('group rows roll up their own categories', () => {
+  const rows = contextUsageGroupRows({
+    system_prompt: 100, memory: 20, skills: 30,
+    tools: 400, mcp: 50,
+    conversation: 1000, reasoning: 700,
+    tool_results: 5000,
+    total: 7300, window: 200000,
+  })
+  assert.deepEqual(rows.map(row => [row.key, row.tokens]), [
+    ['instructions', 150],
+    ['toolDefs', 450],
+    ['dialogue', 1700],
+    ['toolOutput', 5000],
+  ])
+})
+
+test('free space is whatever the window has left', () => {
+  assert.equal(contextUsageFreeSpace({ total: 7300, window: 200000 }), 192700)
+  assert.equal(contextUsageFreeSpace({ total: 250000, window: 200000 }), 0)
+  assert.equal(contextUsageFreeSpace(null), 0)
+})
+
+test('threshold tick sits where compaction fires', () => {
+  assert.equal(contextUsageThresholdPercent({ window: 200000, threshold: 180000 }), 90)
+  assert.equal(contextUsageThresholdPercent({ window: 200000 }), 0)
+  assert.equal(contextUsageThresholdPercent(null), 0)
 })
 
 test('usage bar is a slice of the window, not stretched to 100%', () => {
