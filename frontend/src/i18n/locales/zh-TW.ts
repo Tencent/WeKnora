@@ -1,53 +1,165 @@
 export default {
-mcpMetadata: {
-  searchTools: '搜尋工具名稱或描述',
-  retry: '重試',
-  details: '詳情',
-  description: '說明',
-  parameters: '參數',
-  required: '必填',
-  fullSchema: '完整定義',
-  noDescription: '沒有說明',
-  noParameters: '沒有參數定義',
-  enabled: '啟用工具',
-  approval: '呼叫需審批',
-  noTools: '沒有匹配的工具',
-  next: '下一頁',
-  policyLoadFailed: '工具策略讀取失敗，請重試後再修改。',
-  policySaveFailed: '工具設定儲存失敗',
-  tools: 'Tools 清單',
-  cacheHint: '尚未同步時會自動連線並儲存完整說明；之後只在重新整理時存取 MCP 服務。',
-  refresh: '重新整理 Tools',
-  fetch: '重新拉取',
-  fetching: '正在連線並拉取 Tools…',
-  toolCount: '{count} 個工具',
-  stale: '連線或認證配置已改變。以下是舊目錄，重新同步後才能供模型使用。',
-  notSynced: '尚未同步工具。連線並拉取後，會儲存完整描述和參數定義。',
-  syncRequired: '請先連線並拉取 Tools，同步後的目錄才能給模型使用。',
-  needsRefresh: '需要重新同步',
-  saved: '已儲存目錄',
-  syncedAt: '同步時間：',
-  serverDocumentation: '服務端原始說明',
-  noServerDocumentation: '該 MCP Server 的 initialize 未返回 instructions / serverInfo.description（均為可選欄位）。工具說明在下方各工具的 description 裡。',
-  policyHint: '工具開關與審批設定即時儲存；重新整理目錄不會覆蓋這些設定。',
-  failed: '工具目錄讀取失敗',
-  setupProgress: 'MCP 配置步驟',
-  connection: '連線配置',
-  toolsAndUsage: '工具與用途說明',
-  previous: '上一步',
-  usage: '服務用途',
-  usageHint: '模型先讀取服務用途，再依需求載入具體工具。以下內容由你維護，重新整理不會覆蓋。',
-  summary: '用途摘要',
-  summaryPlaceholder: '例如：查詢訂單狀態、物流進度和退款記錄。',
-  usageInstructions: '使用說明',
-  instructionsPlaceholder: '簡要說明服務用途、適用場景和關鍵使用約束。',
-  generateUsage: 'AI 生成',
-  generateHint: '根據已同步且啟用的 Tools 生成精簡說明，填入後可編輯，儲存後生效。',
-  instructionsRequired: '使用說明不能為空',
-  generated: '已生成，請檢查後儲存',
-  generateFailed: '生成失敗，請確認 Tools 已同步且已配置可用的對話模型後重試。',
-  saveNext: '儲存並下一步',
-},
+  localBrowser: {
+    pipOpen: '彈出預覽',
+    pipReturn: '回到對話',
+    pipFailed: '無法開啟浮動視窗，請重試。',
+    captureScreenshot: '擷取畫面',
+    navigationIncomplete: '導航未到達所請的載入階段。請檢查目前頁面。',
+    noEntries: '沒有回傳任何項目。',
+    stopping: '正在結束任務…',
+    elapsedSeconds: '{seconds} 秒',
+    searchInstructionsTitle: '瀏覽器搜尋指令',
+    searchInstructionsDescription: '設定你偏好的搜尋引擎與搜尋 URL。',
+    searchInstructionsHint: '適用於你下一次的請求。留空則使用預設。',
+    searchInstructionsReset: '還原預設',
+    searchInstructionsSaved: '已儲存',
+    sourceHint: '本回合使用本地瀏覽器查詢與互動頁面，搭配網頁搜尋、知識庫及其他工具。',
+    pressKey: '按下按鍵',
+    hoverPage: '游標懸停在元素上',
+    scrollPage: '捲動頁面',
+    focusElement: '聚焦元素',
+    blurElement: '解除聚焦',
+    selectOption: '選擇選項',
+    closeTab: '關閉分頁',
+    runScript: '執行頁面指令碼',
+    readConsole: '讀取主控台',
+    readNetwork: '檢查網路請求',
+    resizeWindow: '縮放視窗',
+    emulateDevice: '模擬裝置',
+    actionPending: '正在操作用戶端瀏覽器…',
+    actionRecorded: '瀏覽器動作已記錄',
+    untitledTab: '未命名分頁',
+    contentTruncated: '僅顯示部分頁面內容。',
+    controlScope: '僅控制本次對話的瀏覽器',
+    pauseHint: '中斷瀏覽器動作並保留頁面以便續行。對話繼續。',
+    stopHint: '關閉本任務建立的TabIndex，歸還借用的TabIndex。保持瀏覽器開啟並已完成配對。',
+    openPage: '開啟頁面',
+    switchPage: '切換頁面',
+    readPage: '讀取頁面',
+    listTabs: '列出分頁',
+    clickPage: '點擊元素',
+    fillPage: '填入內容',
+    waitPage: '等待頁面',
+    openTab: '建立任務分頁',
+    switchTab: '切換任務分頁',
+    authorizeTab: '請求分頁授權',
+    returnTab: '歸還分頁',
+    needHelp: '需要你的輸入',
+    browserAction: '瀏覽器動作',
+    actionFailed: '未完成',
+    actionCompleted: '動作已完成',
+    commandBusy: '上一個瀏覽器指令仍在執行。請稍候再接續。',
+    invalidArguments: '瀏覽器工具引數無效或完整。Agent 必須更正後才能繼續。',
+    commandInterrupted: '瀏覽器動作中斷。請檢查頁面後再從預覽續行。',
+    actionFailedHint: '瀏覽器動作未完成。請檢查頁面後重試。',
+    previewStale: '預覽尚未更新',
+    previewIdle: '保留上一預覽',
+    previewLive: '預覽同步中',
+    previewLoading: '正在抓取預覽',
+    borrowHint: '切換到正在借用的頁面，並在 BrowserSkill 確認中選擇允許或拒絕。授權會自動繼續。僅續行暫停的任務，不代表核准借用。',
+    helpHint: '從預覽開啟瀏覽器，完成所請的步驟，然後在瀏覽器協助浮層確認完成。',
+    settingsTitle: '瀏覽器連線',
+    settingsDescription: '與本地 Chrome 配對 BrowserSkill，從對話操作真實網頁。',
+    openSettings: '開啟瀏覽器設定',
+    settingsHint: '在個人設定中連上 BrowserSkill，即可在本處使用本地瀏覽器。',
+    unavailable: '本伺服器的本地瀏覽器未啟用。請聯絡管理員。',
+    source: '瀏覽器來源',
+    sandbox: '沙盒瀏覽器',
+    local: '本地瀏覽器',
+    paused: '已暫停',
+    connected: '已連線',
+    disconnected: '已斷線',
+    resume: '續行瀏覽器',
+    pause: '暫停瀏覽器',
+    start: '開始任務',
+    stop: '結束瀏覽器任務',
+    pairHint: '把配對連結貼進擴充功能的遠端連線，並確認伺服器。',
+    copyPairing: '複製配對連結',
+    copied: '已複製',
+    windowHint: '任務在標有名稱的 Chrome 分頁群組中執行。既有的分頁需要你授權。',
+    preview: '本地瀏覽器任務預覽',
+    waiting: '等待任務頁面',
+    startHint: '瀏覽器請求會在背景建立標有名稱的任務分頁。',
+    revoke: '撤除裝置存取',
+    revokeConfirm: '使用前需重新配對。',
+    failed: '操作失敗，請重試。',
+    productDescription: '在你的 Chrome 執行瀏覽器任務',
+    offline: '離線',
+    notPaired: '未配對',
+    lastSeen: '上次連線',
+    readyHint: '就緒。回到對話並描述你的瀏覽器任務。',
+    reconnectHint: '授權已儲存。保持 Chrome 與 BrowserSkill 開啟即可自動重新連線。',
+    replaceDevice: '更換瀏覽器',
+    installExtension: '安裝 BrowserSkill',
+    installHint: '下載為此伺服器打造的擴充功能並安裝到 Chrome。',
+    downloadExtension: '下載擴充功能',
+    pairBrowser: '連入此瀏覽器',
+    packageUnavailable: '請向管理員索取相符的擴充功能套件；目前尚未設定下載。',
+    manualCopy: '選取並複製下方的連結。5 分鐘後過期，僅能用一次。',
+    pairingReady: '連結已複製。請在 5 分鐘內貼進擴充功能。僅能使用一次。',
+    copyAgain: '再複製一次',
+    usageTitle: '使用方式',
+    usageStep1Title: '安裝擴充功能',
+    usageStep1Text: '解壓縮套件，在 Chrome 擴充功能頁面啟用開發者模式，並選擇載入解壓縮套件。',
+    usageStep2Title: '配對此瀏覽器',
+    usageStep2Text: '複製配對連結並貼進擴充功能的遠端連線。在此空間的所有對話僅需配對一次。',
+    usageStep3Title: '在對話中描述任務',
+    usageStep3Text: '在輸入列開啟本地瀏覽器並描述網路任務。它會在標有名稱的分頁群組中執行。',
+    usageStep4Title: '預覽、定位與續行',
+    usageStep4Text: '對話中會出現小預覽。點擊它即可找到任務分頁。中斷的任務在重新連線後會保持暫停——可從預覽續行。既有的分頁需要你授權。',
+    running: '執行中',
+    locateWindow: '顯示瀏覽器',
+    reconnectShort: '等待重新連線'
+  },
+  mcpMetadata: {
+    searchTools: '搜尋工具名稱或描述',
+    retry: '重試',
+    details: '詳情',
+    description: '說明',
+    parameters: '參數',
+    required: '必填',
+    fullSchema: '完整定義',
+    noDescription: '沒有說明',
+    noParameters: '沒有參數定義',
+    enabled: '啟用工具',
+    approval: '呼叫需審批',
+    noTools: '沒有匹配的工具',
+    next: '下一頁',
+    policyLoadFailed: '工具策略讀取失敗，請重試後再修改。',
+    policySaveFailed: '工具設定儲存失敗',
+    tools: 'Tools 清單',
+    cacheHint: '尚未同步時會自動連線並儲存完整說明；之後只在重新整理時存取 MCP 服務。',
+    refresh: '重新整理 Tools',
+    fetch: '重新拉取',
+    fetching: '正在連線並拉取 Tools…',
+    toolCount: '{count} 個工具',
+    stale: '連線或認證配置已改變。以下是舊目錄，重新同步後才能供模型使用。',
+    notSynced: '尚未同步工具。連線並拉取後，會儲存完整描述和參數定義。',
+    syncRequired: '請先連線並拉取 Tools，同步後的目錄才能給模型使用。',
+    needsRefresh: '需要重新同步',
+    saved: '已儲存目錄',
+    syncedAt: '同步時間：',
+    serverDocumentation: '服務端原始說明',
+    noServerDocumentation: '該 MCP Server 的 initialize 未返回 instructions / serverInfo.description（均為可選欄位）。工具說明在下方各工具的 description 裡。',
+    policyHint: '工具開關與審批設定即時儲存；重新整理目錄不會覆蓋這些設定。',
+    failed: '工具目錄讀取失敗',
+    setupProgress: 'MCP 配置步驟',
+    connection: '連線配置',
+    toolsAndUsage: '工具與用途說明',
+    previous: '上一步',
+    usage: '服務用途',
+    usageHint: '模型先讀取服務用途，再依需求載入具體工具。以下內容由你維護，重新整理不會覆蓋。',
+    summary: '用途摘要',
+    summaryPlaceholder: '例如：查詢訂單狀態、物流進度和退款記錄。',
+    usageInstructions: '使用說明',
+    instructionsPlaceholder: '簡要說明服務用途、適用場景和關鍵使用約束。',
+    generateUsage: 'AI 生成',
+    generateHint: '根據已同步且啟用的 Tools 生成精簡說明，填入後可編輯，儲存後生效。',
+    instructionsRequired: '使用說明不能為空',
+    generated: '已生成，請檢查後儲存',
+    generateFailed: '生成失敗，請確認 Tools 已同步且已配置可用的對話模型後重試。',
+    saveNext: '儲存並下一步'
+  },
   platformApiKeys: {
     title: '平台 API Key',
     description: '為跨空間自動化建立平台級憑證；呼叫空間介面時透過 X-Tenant-ID 指定目標空間。',
@@ -247,7 +359,7 @@ mcpMetadata: {
       button: '邀請成員',
       dialogTitle: '邀請成員',
       emailLabel: '信箱',
-      emailPlaceholder: 'invitee{\'@\'}example.com',
+      emailPlaceholder: "invitee{'@'}example.com",
       roleLabel: '角色'
     },
     role: {
@@ -326,10 +438,10 @@ mcpMetadata: {
       copy: '複製',
       copyEnvSuccess: '已複製環境變數示例',
       copyCmdSuccess: '已複製安裝命令',
-      ecosystemNote: 'Skill 託管於 ClawHub（{\'@\'}lyingbug/weknora），完整 API 說明與版本歷史請參見 ClawHub 頁面。',
+      ecosystemNote: "Skill 託管於 ClawHub（{'@'}lyingbug/weknora），完整 API 說明與版本歷史請參見 ClawHub 頁面。",
       installCta: '前往 ClawHub',
       installCtaHint: '安裝 WeKnora Skill · 將在新標籤頁開啟',
-      hubMeta: 'ClawHub · {\'@\'}lyingbug/weknora · MIT-0',
+      hubMeta: "ClawHub · {'@'}lyingbug/weknora · MIT-0",
       steps: {
         verify: {
           title: '驗證連線',
@@ -598,7 +710,8 @@ mcpMetadata: {
       api: 'API 整合',
       chrome: 'Chrome 外掛',
       claw: 'Claw Skill',
-      cli: 'CLI'
+      cli: 'CLI',
+      mcpserver: 'MCP Server'
     },
     cli: {
       commandsDesc: '將 KB_ID 替換為知識庫 ID，按需替換檔案路徑、檢索詞和問題。上傳後的文件需解析完成才能檢索。',
@@ -618,6 +731,110 @@ mcpMetadata: {
       title: 'WeKnora CLI',
       verifyDesc: '檢查服務與認證狀態，並列出當前帳號可訪問的知識庫。',
       verifyTitle: '驗證連線'
+    },
+    mcpserver: {
+      title: 'MCP Server',
+      subtitle: '將此工作區發佈為可讓 Claude Desktop、Cursor、Claude Code 及其他 MCP 客戶端直接連入的 MCP Server。每個端點都有獨立的 token、知識庫範圍和工具清單。',
+      listTitle: '已發佈的端點',
+      empty: '尚無 MCP 端點',
+      disabled: '已停用',
+      cardSummary: '{tools} 個工具 · {scope}',
+      scopeAll: '全部知識庫',
+      scopeCount: '{count} 個知識庫',
+      create: '新增端點',
+      editTitle: '編輯 MCP 端點',
+      createTitle: '新增 MCP 端點',
+      drawerDesc: '端點決定客戶端能看到哪些知識庫、能呼叫哪些工具。token 只在建立與旋轉時顯示一次。',
+      sectionBasic: '基本',
+      nameLabel: '名稱',
+      namePlaceholder: '例如：產品文件助理',
+      descriptionLabel: '說明',
+      descriptionPlaceholder: '選用：誰會使用此端點、用於什麼',
+      enabledLabel: '已啟用',
+      sectionScope: '知識庫範圍',
+      kbScopeLabel: '可存取知識庫',
+      kbScopePlaceholder: '留空表示整個工作區的所有知識庫',
+      kbScopeHint: '每個檢索、問答與寫入工具都侷限於這些知識庫。空白表示整個工作區。',
+      sectionTools: '曝露的工具',
+      toolsHint: '僅勾選的工具會出現在客戶端工具清單；未勾選的工具即使依名稱呼叫也會被拒絕。寫入工具預設關閉。',
+      clearGroup: '清除',
+      selectGroup: '全選',
+      toolsRequired: '請至少勾選一個工具',
+      groups: {
+        retrieve: '檢索與讀取',
+        chat: '問答',
+        wiki: 'Wiki',
+        ingest: '寫入（謹慎開啟）'
+      },
+      tools: {
+        list_knowledge_bases: '列出知識庫',
+        list_knowledge_basesDesc: '列出範圍內的知識庫，以及各支援的檢索模式。',
+        search_knowledge: '語意搜尋',
+        search_knowledgeDesc: '為自然語言問題找到相關段落，並附上來源。',
+        grep_chunks: '關鍵字／正規表示式搜尋',
+        grep_chunksDesc: '對原始 chunk 進行大小寫不敏感的 regex 搜尋，適合精確的詞彙、程式碼和名稱。',
+        list_documents: '列出文件',
+        list_documentsDesc: '分頁瀏覽單一知識庫的文件。',
+        read_document: '讀取文件',
+        read_documentDesc: '依序讀取文件的欄位與 chunk。',
+        ask: '問答',
+        askDesc: '執行此端點設定的智慧體，返回帶引用的答案，支援後續回合。',
+        wiki_search: '搜尋 wiki',
+        wiki_searchDesc: '搜尋生成的 wiki 頁面。',
+        wiki_read_page: '讀取 wiki 頁面',
+        wiki_read_pageDesc: '依 slug 讀取單一 wiki 頁面。',
+        wiki_index: '瀏覽 wiki 索引',
+        wiki_indexDesc: '顯示知識庫 wiki 的目錄。',
+        add_document: '新增文件',
+        add_documentDesc: '由 Markdown 文字或 URL 新增文件。',
+        update_document: '更新文件',
+        update_documentDesc: '替換文件的內容或標題。',
+        delete_document: '刪除文件',
+        delete_documentDesc: '永久刪除文件及其索引資料。'
+      },
+      sectionAsk: '問答設定',
+      defaultAgentLabel: '預設智慧體',
+      defaultAgentPlaceholder: '空白時使用內建快速回答',
+      defaultAgentHint: 'ask 工具執行的智慧體，客戶端無法自行選擇；空白表示內建快速回答。',
+      sectionLimits: '速率限制',
+      rateLimitLabel: '每分鐘最大呼叫數',
+      rateLimitHint: '適用於此端點的所有工具呼叫；超過此值時客戶端會收到速率限制錯誤。',
+      sectionConnect: '連線',
+      stepConfig: '設定',
+      stepConnect: '連入',
+      snippetsLabel: '客戶端設定',
+      connectHintExisting: 'token 在建立時顯示一次（目前的 token 以 {hint} 開頭…）。旋轉 token 即可取得新的。',
+      tokenDialogTitle: '端點已就緒，請儲存 token',
+      connectDialogTitle: '連入此端點',
+      tokenOnce: '此 token 僅顯示一次，請現在複製並妥善保存。',
+      connectPlaceholderHint: '為安全起見不再顯示 token，以下範例使用佔位符，替換成你儲存的 token。',
+      tokenLabel: 'Token',
+      urlLabel: '端點 URL',
+      snippet: {
+        httpTitle: 'Cursor / VS Code / Claude Desktop',
+        httpDesc: '會說 Streamable HTTP 的客戶端，直接採用此 mcpServers block。',
+        claudeCodeTitle: 'Claude Code',
+        claudeCodeDesc: '一行終端指令。',
+        stdioTitle: '僅 stdio 的客戶端',
+        stdioDesc: '透過 mcp-remote 中繼，需要客戶端機器上有 Node.js。'
+      },
+      loadFailed: '載入 MCP 端點失敗',
+      nameRequired: '名稱是必填',
+      updated: '端點已更新',
+      created: '端點已建立',
+      saveFailed: '儲存失敗',
+      deleted: '端點已刪除',
+      deleteFailed: '刪除失敗',
+      rotated: 'token 已旋轉，舊 token 停用',
+      rotateFailed: '旋轉 token 失敗',
+      disabledToast: '端點已停用',
+      enabledToast: '端點已啟用',
+      menuConnect: '連線資訊',
+      menuDisable: '停用',
+      menuEnable: '啟用',
+      menuRotate: '旋轉 token',
+      copied: '已複製',
+      deleteConfirm: '使用此端點的客戶端會立即斷線。要刪除嗎？'
     }
   },
   datasource: {
@@ -743,7 +960,9 @@ mcpMetadata: {
     syncError: {
       deletion_lookup_failed: '刪除前查詢文件失敗，請檢視伺服器日誌',
       deletion_failed: '刪除失敗，請檢視伺服器日誌',
-      ingest_failed: '匯入失敗，請檢視伺服器日誌'
+      ingest_failed: '匯入失敗，請檢視伺服器日誌',
+      dingtalk_document_failed: '讀取钉檔檔案失敗，請檢查存取權並重試同步。',
+      dingtalk_resource_failed: '钉檔資源不可用，請檢查存取權與已選取的項目，再重試。'
     },
     resourceType: {
       wikiSpace: '知識庫空間',
@@ -769,7 +988,18 @@ mcpMetadata: {
       feedUrls: '訂閱源地址',
       feedUrlsHint: '每行一個 RSS / Atom 訂閱源地址，支援同時填寫多個',
       authHeaders: '自定義請求頭（可選）',
-      authHeadersHint: '用於訪問私有訂閱源，每行一個，格式為「名稱: 值」，例如 Authorization: Bearer xxxx'
+      authHeadersHint: '用於訪問私有訂閱源，每行一個，格式為「名稱: 值」，例如 Authorization: Bearer xxxx',
+      clientId: '客戶端 ID',
+      clientSecret: '客戶端密鑰',
+      confluenceApiToken: 'Confluence 雲端 API token',
+      confluenceBaseUrl: 'Confluence 網址',
+      confluenceEdition: '版本',
+      confluenceEditionCloud: '雲端',
+      confluenceEditionServer: '伺服器 / 資料中心',
+      confluencePassword: '伺服器 / DC 密碼',
+      confluenceUsername: '使用者名稱或信箱',
+      operatorId: '營運商聯合 ID（Union ID）',
+      operatorIdHint: '以此使用者的權限讀取知識庫。從钉檔使用者詳細資訊 API 取得。'
     },
     drive: {
       folderTokenLabel: '雲盤資料夾 Token',
@@ -793,7 +1023,9 @@ mcpMetadata: {
       yuque: '同步語雀知識庫中的文件',
       rss: '同步 RSS / Atom 訂閱源中的文章',
       ima: '同步騰訊 IMA 知識庫中的文件、筆記與檔案（暫不支援 AI 會話與影片解析）',
-      gitlab: '同步 GitLab 專案中的檔案'
+      gitlab: '同步 GitLab 專案中的檔案',
+      confluence: '從 Confluence 同步空間與頁面成 Markdown 檔。',
+      dingtalk: '從钉檔同步線上文件。'
     },
     connector: {
       feishu: '飛書',
@@ -804,7 +1036,9 @@ mcpMetadata: {
       yuque: '語雀',
       rss: 'RSS / Atom 訂閱',
       ima: '騰訊 IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      confluence: 'Confluence',
+      dingtalk: '钉檔'
     },
     logDetail: {
       startTime: '開始時間',
@@ -864,7 +1098,15 @@ mcpMetadata: {
     syncMode: {
       incremental: '增量同步',
       full: '全量同步'
-    }
+    },
+    prereqBarText_dingtalk: '第一次？點這裡看钉檔 app 設定指南。',
+    prereqOpenConsole_dingtalk: '開啟钉檔開發者控制台',
+    prereqStep1Brief_dingtalk: '建立企業內部 app',
+    prereqStep1Desc_dingtalk: '在钉檔 Open Platform 建立企業內部 app，並複製其 Client ID 與 Client Secret。',
+    prereqStep2Brief_dingtalk: '授權知識庫讀取權限',
+    prereqStep2Desc_dingtalk: '授予 Wiki.Workspace.Read、Wiki.Node.Read 與 Storage.File.Read。',
+    prereqStep3Brief_dingtalk: '輸入營運商聯合 ID（Union ID）',
+    prereqStep3Desc_dingtalk: '輸入可讀取目標知識庫的钉檔使用者的聯合 ID（Union ID）。'
   },
   ollama: {
     unknown: '未知',
@@ -1166,7 +1408,13 @@ mcpMetadata: {
       statusInactive: '有 {count} 個已勾選工具在當前配置下無法生效',
       effectiveLabel: '最終啟用的工具',
       effectiveDesc: '根據當前配置計算，這是智慧體儲存後實際能呼叫的工具集合',
-      effectiveEmpty: '當前沒有可用工具，智慧體將退化為純模型問答'
+      effectiveEmpty: '當前沒有可用工具，智慧體將退化為純模型問答',
+      listDocuments: '列出文件',
+      listDocumentsDesc: '分頁瀏覽單一知識庫的文件。',
+      readDocument: '讀取文件',
+      readDocumentDesc: '依序讀取文件的 metadata 與其 chunk，支援分頁與檔內搜尋。',
+      searchKnowledge: '搜尋知識',
+      searchKnowledgeDesc: '對知識庫 chunk 做語意、關鍵字或混合搜尋。'
     },
     desc: {
       name: '為智慧體設定一個易於識別的名稱',
@@ -1206,7 +1454,8 @@ mcpMetadata: {
       rerankThreshold: '重排序的最低相關性分數',
       fallbackStrategy: '當無法從知識庫找到相關內容時的處理方式',
       fallbackResponse: '當無法回答時返回的固定文字',
-      fallbackPrompt: '當無法從知識庫找到答案時，引導模型生成回覆的提示詞'
+      fallbackPrompt: '當無法從知識庫找到答案時，引導模型生成回覆的提示詞',
+      promptInheritance: '未改動的模板文字會隨模板更新；已編輯的文字會儲存為自訂提示。在 agent 模式下，此欄位定義角色與流程；工具權限與每回合的來源選取則獨立控制。'
     },
     selection: {
       all: '全部',
@@ -1233,7 +1482,7 @@ mcpMetadata: {
     placeholders: {
       available: '可用變數：',
       clickToInsert: '（點選插入）',
-      hint: '（點選插入，或輸入 {\'{{\'} 喚起列表）'
+      hint: "（點選插入，或輸入 {'{{'} 喚起列表）"
     },
     questionSuggestions: {
       navLabel: '問題推薦',
@@ -1332,7 +1581,10 @@ mcpMetadata: {
     },
     knowledgeChunksList: {
       chunkRange: '已載入 {fetched} / {total} 個分塊',
-      page: '第 {page} 頁，每頁 {pageSize} 個'
+      page: '第 {page} 頁，每頁 {pageSize} 個',
+      offsetRange: 'chunk {from}–{to}',
+      queryMatches: '在該文件中找到 {count} 個「{query}」的比配。',
+      queryNoMatch: '在該文件中未找到「{query}」。'
     },
     grepResults: {
       chunkHits: '{count} 片段',
@@ -1417,7 +1669,9 @@ mcpMetadata: {
       shellExec: '執行沙箱命令',
       dataAnalysis: '資料分析',
       dataSchema: '資料結構',
-      databaseQuery: '資料庫查詢'
+      databaseQuery: '資料庫查詢',
+      listDocuments: '列出文件',
+      readDocument: '讀取文件'
     },
     mcpOAuth: {
       waiting: '等待授權 · {target}',
@@ -1587,7 +1841,10 @@ mcpMetadata: {
     getDocumentInfo: '獲取文件資訊',
     queryKnowledgeGraph: '查詢知識圖譜',
     think: '深度思考',
-    todoWrite: '制定計劃'
+    todoWrite: '制定計劃',
+    listDocuments: '列出文件',
+    readDocument: '讀取文件',
+    searchKnowledge: '搜尋知識'
   },
   commandPalette: {
     placeholder: '搜尋知識庫、檔案、對話…',
@@ -1802,7 +2059,7 @@ mcpMetadata: {
       sharedAgents: '共享智慧體',
       noSharedAgents: '暫無共享的智慧體',
       sharedAgentsDesc: '已共享到本共享空間的智慧體，成員可在對話中使用',
-      sharedAgentsKbHint: '智慧體繫結的知識庫僅在成員使用該智慧體對話時可 {\'@\'} 使用（只讀），不會出現在「知識庫列表」中。若需成員在列表中看到或編輯知識庫，請單獨將知識庫共享到本共享空間。',
+      sharedAgentsKbHint: "智慧體繫結的知識庫僅在成員使用該智慧體對話時可 {'@'} 使用（只讀），不會出現在「知識庫列表」中。若需成員在列表中看到或編輯知識庫，請單獨將知識庫共享到本共享空間。",
       sharedAgentsKbHintShort: '智慧體繫結知識僅對話內只讀；需在列表看到或編輯請單獨共享知識庫',
       noSharedAgentsTip: '管理員可將智慧體從智慧體設定中共享到本共享空間',
       sharePermissionLabel: '共享空間許可權',
@@ -2025,14 +2282,25 @@ mcpMetadata: {
       updated: 'MCP 服務已更新',
       createFailed: '建立 MCP 服務失敗',
       updateFailed: '更新 MCP 服務失敗',
-      oauthRequired: '該服務需要 OAuth 授權，已自動切換為 OAuth 2.0，請儲存後點選「去授權」。'
+      oauthRequired: '該服務需要 OAuth 授權，已自動切換為 OAuth 2.0，請儲存後點選「去授權」。',
+      authorizeFailed: '啟動授權失敗。',
+      authorized: '授權成功。',
+      revokeFailed: '撤銷授權失敗。',
+      revoked: '已撤銷授權。'
     },
     rules: {
       nameRequired: '請輸入服務名稱',
       transportRequired: '請選擇傳輸型別',
       urlRequired: '請輸入服務 URL',
       urlInvalid: '請輸入有效的 URL'
-    }
+    },
+    oauthAuthorization: '授權狀態',
+    oauthAuthorize: '授權',
+    oauthAuthorized: '已授權',
+    oauthReauthorize: '重新授權',
+    oauthRevoke: '撤銷授權',
+    oauthScopes: '範圍（選用，以空格分隔）',
+    oauthUnauthorized: '未授權'
   },
   ollamaSettings: {
     title: 'Ollama 配置',
@@ -2126,8 +2394,13 @@ mcpMetadata: {
         reasoningChars: '推理字元數',
         reasoningReturned: '返回推理內容',
         textChars: '轉寫字元數',
-        segmentCount: '分段數量'
-      }
+        segmentCount: '分段數量',
+        api: '通訊協定',
+        requestedReasoningEffort: '要求的推理程度',
+        thinkingFormat: '思考格式'
+      },
+      reasoningEffort: '推理程度',
+      reasoningEffortDesc: '依模型編目回報的級別傳送 reasoning_effort。'
     },
     usage: {
       title: '模型無法刪除',
@@ -2149,7 +2422,8 @@ mcpMetadata: {
         query_understand_model: '問題理解模型',
         follow_up_model: '追問模型',
         extract_model: '記憶提取模型',
-        unknown: '其他模型配置'
+        unknown: '其他模型配置',
+        auto_tag_model: '自動標籤模型'
       }
     },
     builtinModels: {
@@ -2244,11 +2518,11 @@ mcpMetadata: {
     actions: {
       test: '測試連線'
     },
-  addUsageInstructions: '新增使用說明',
-  noUsageInstructions: '尚未填寫使用說明',
-  toolCount: '{count} 個工具',
-  toolsNotSynced: '尚未同步工具',
-  toolsStale: '需重新同步',
+    addUsageInstructions: '新增使用說明',
+    noUsageInstructions: '尚未填寫使用說明',
+    toolCount: '{count} 個工具',
+    toolsNotSynced: '尚未同步工具',
+    toolsStale: '需重新同步'
   },
   conversationSettings: {
     maxTokens: {
@@ -2378,7 +2652,7 @@ mcpMetadata: {
     monoFontDescription: '用於程式碼塊、終端命令、API 金鑰、檔案路徑等技術內容，每個字元等寬顯示，避免 0/O、1/l 混淆',
     selectFont: '選擇字型',
     sansPreview: '示例 Sample 字型 Font — Aa Gg Oo 0123',
-    monoPreview: 'const msg = \'Hello\'; // 0O1l',
+    monoPreview: "const msg = 'Hello'; // 0O1l",
     fontSize: '字型大小',
     fontSizeDescription: '整體縮放介面（文字、圖示、間距等），切換後立即生效',
     size: {
@@ -2443,7 +2717,76 @@ mcpMetadata: {
     selectModelPlaceholder: '請選擇模型',
     searchPlaceholder: '搜尋模型...',
     builtinTag: '內建',
+    reasoning: {
+      levels: {
+        off: '關閉',
+        auto: '自動',
+        minimal: '最小',
+        low: '低',
+        medium: '中',
+        high: '高',
+        xhigh: '極高',
+        max: '最高'
+      },
+      levelDescriptions: {
+        off: '思考已停用；不會傳送任何思考參數',
+        auto: '廠商預設強度，由模型自行決定思考量',
+        minimal: '最少思考，回應最快',
+        low: '淺層思考',
+        medium: '中等思考',
+        high: '深度思考，回應較慢',
+        xhigh: '極高思考預算（僅部分模型）',
+        max: '最高思考預算（僅部分模型）'
+      }
+    },
     editor: {
+      maxOutputTokensLabel: '最大輸出 token 數',
+      maxOutputTokensPlaceholder: '留空使用目錄預設',
+      maxOutputTokensDesc: '每則回應的輸出上限。留空則使用該模型的目錄預設。',
+      catalog: {
+        reasoning: '思考',
+        vision: '視覺',
+        hint: '從廠商目錄選擇模型，或自行輸入自訂模型名稱。'
+      },
+      resolved: {
+        title: '此模型如何被呼叫',
+        empty: '填寫廠商與模型名稱，才能看到此模型實際如何被呼叫',
+        failed: '解析失敗',
+        protocol: '請求協定',
+        catalog: '來自目錄的能力',
+        catalogedYes: '內建模型設定檔',
+        catalogedNo: '廠商預設（模型不在目錄中）',
+        endpoint: '請求端點',
+        thinkingFormat: '思考開關以何種形式傳入',
+        thinkingLevels: '可選擇的強度',
+        noThinking: '此模型無法思考'
+      },
+      advanced: {
+        toggle: '高階',
+        api: {
+          label: '協定覆寫',
+          auto: '自動（來自廠商 / URL）',
+          desc: '強制定求協定；通常不需要。'
+        },
+        remoteModelName: {
+          label: '遠端模型名稱',
+          placeholder: '留空使用模型名稱',
+          desc: '當實際傳給廠商的模型 ID 與上述名稱不同時，真正送出的模型 ID。'
+        },
+        legacyThinking: {
+          label: '思考參數格式（舊版）',
+          catalog: '跟隨目錄預設（建議）',
+          none: '不傳送思考欄位',
+          desc: '此模型仍帶有 legacy thinking_control 設定。選「跟隨目錄預設」讓目錄自行決定。'
+        },
+        compat: {
+          label: '協定相容覆寫（JSON）',
+          placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
+          desc: '相容開關在解析後協定的目錄預設之上合併；後端請參照 catalog/compat.go。留空表示不覆寫。',
+          invalid: '無效 JSON',
+          mustBeObject: '必須是 JSON 物件'
+        }
+      },
       addTitle: '新增模型',
       editTitle: '編輯模型',
       sectionType: '模型型別',
@@ -2470,6 +2813,10 @@ mcpMetadata: {
       customHeadersValuePlaceholder: 'Header 值',
       testing: '測試中...',
       testConnection: '測試連線',
+      saveAndClose: '儲存並關閉',
+      testDraftHint: '先測試目前的連線設定，不需要先儲存。',
+      testDraftEditHint: '使用另存的其他 API Key 測試目前的連線設定。',
+      testStale: '設定已變動。請重新執行測試。',
       downloadLabel: '下載: {keyword}',
       refreshList: '重新整理列表',
       dimensionLabel: '向量維度',
@@ -2510,6 +2857,7 @@ mcpMetadata: {
       goToOllamaSettings: '檢視設定',
       providerLabel: '服務商',
       providerPlaceholder: '選擇模型服務商',
+      providerDocs: '閱讀 {provider} 模型文件',
       providers: {
         novita: {
           label: 'Novita AI',
@@ -2617,6 +2965,7 @@ mcpMetadata: {
         }
       },
       validation: {
+        extraFieldRequired: '請填寫 {name}',
         modelNameRequired: '請輸入模型名稱',
         modelNameEmpty: '模型名稱不能為空',
         modelNameMax: '模型名稱不能超過100個字元',
@@ -2716,7 +3065,8 @@ mcpMetadata: {
       refreshTokenFailed: '重新整理Token失敗',
       logoutFailed: '登出失敗',
       validateTokenFailed: 'Token驗證失敗'
-    }
+    },
+    requestTimeout: '請求逾時。大檔或慢連線可能需要再試一次。'
   },
   mcp: {
     testResult: {
@@ -2929,7 +3279,7 @@ mcpMetadata: {
         confirmBtn: '確認儲存',
         cancelBtn: '取消',
         emptyValue: '（空）',
-        bodyAuthRegistrationMode: '即將把「{label}」改為：{value}\n\n如果切到 self_serve，公網任何人都可以註冊帳號 — 務必確認是預期行為。',
+        bodyAuthRegistrationMode: "即將把「{label}」改為：{value}\n\n如果切到 self_serve，公網任何人都可以註冊帳號 — 務必確認是預期行為。",
         bodySandboxDockerEnabled: '開啟後，空間管理員可以把沙箱指到本機 Docker。本機 docker.sock 等同宿主機 root，只適合已掛載 daemon 或配了 TLS 遠端 tcp:// 的私有化單機。'
       },
       enumLabels: {
@@ -3600,10 +3950,41 @@ mcpMetadata: {
       tabArtifacts: '產物',
       tabDesktop: '桌面',
       tabTerminal: '終端',
-      unsupported: '當前沙箱後端不支援互動終端'
+      unsupported: '當前沙箱後端不支援互動終端',
+      desktopBusy: '此對話已開啟一個桌面。一次只容許一個連接，否則兩人共用一個鍵盤滑鼠。',
+      desktopCreateAndStart: '建立並連接',
+      desktopDisconnected: '桌面已斷線',
+      desktopIdleDisconnected: '桌面閒置中斷線。沙箱將在自身的 TTL 自動暫停，你可重新連接。',
+      desktopNeedsProvision: '此對話沒有正在運行的沙箱。建立並連接會開啟新的沙箱，依工作區設定計費。',
+      desktopNotStarted: '桌面尚未連接。連接後會掛到這對話的沙箱。',
+      desktopPaused: '此對話的沙箱已暫停，連接桌面會繼續它。',
+      desktopRebuilt: '沙箱已為技能更新重新建構，先前桌面與未儲存的作業都已消失，重新連接可得到全新桌面。',
+      desktopRetry: '重新連接',
+      desktopStart: '連接桌面',
+      desktopStartFailed: '桌面啟動失敗，可重試。',
+      desktopStarting: '正在連接到桌面…（首次使用約 3–8 秒）',
+      desktopUnsupported: '此沙箱設定沒有桌面。請在工作區沙箱設定中選擇一個桌面影像範本（Cube 或 E2B 後端）。'
     },
     webFetchContentRange: '字元範圍 {start}–{end}，共 {total} 字元',
-    webFetchPartialContent: '部分頁面內容'
+    webFetchPartialContent: '部分頁面內容',
+    manualSourcesHeading: '來源',
+    questionMinimapPosition: '第 {current} / {total} 回合',
+    rewind: {
+      busy: '等這回合完成後再倒回。',
+      cancelButton: '取消',
+      confirmBody: '後續訊息會被刪除。從問題倒回也會刪掉該問題並將其放回輸入框。當檢查點可用時工作區會回退。此操作無法復原。',
+      confirmButton: '倒回',
+      failed: '倒回失敗，請再試一次。',
+      noCheckpoint: '無法倒回：此工作區為即時但仍無法連結檢查點。',
+      reloadFailed: '工作區已倒回，但歷史無法重新載入。舊訊息遺漏時，請重新整理。',
+      sandboxReplaced: '無法倒回：沙箱已被替換，舊檢查點無法連進。',
+      skipNoCheckpoint: '工作區已倒回，未變更工作區（無檢查點可供還原）。',
+      skipNoSandbox: '工作區已倒回，未變更工作區（未綁定沙箱）。',
+      skipped: '工作區已倒回，未變更工作區。',
+      success: '已倒回',
+      tooltip: '倒回至此'
+    },
+    truncatedHint: '這則回應在「每則輸出上限」處被截斷。以上為模型在截斷前产出的內容。'
   },
   knowledgeEditor: {
     titleCreate: '新建知識庫',
@@ -3648,6 +4029,16 @@ mcpMetadata: {
         instructionsLabel: '問題生成要求',
         instructionsDescription: '指定問題面向的人群、場景和表達方式，系統仍維護穩定輸出格式',
         instructionsPlaceholder: '例如：生成客服使用者常問的自然語言問題，避免考試題式表達…'
+      },
+      profile: {
+        description: '加入、移除或重新摘要文件後，由彙整出的文件 profile 衍生出描述。彙整本身不會呼叫模型；僅在彙整變更時才會跑一次小型呼叫。',
+        instructionsDescription: '列出受眾、欲保留的術語或口吻；輸出的格式維持固定。',
+        instructionsLabel: '描述指示',
+        instructionsPlaceholder: 'e.g. 寫給客服人員；用白話描述產品線，並保留型號…',
+        label: '自動生成知識庫描述',
+        modelDescription: '留空即沿用知識庫的摘要模型。',
+        modelLabel: '生成模型',
+        modelPlaceholder: '選擇一個生成模型'
       }
     },
     asr: {
@@ -3749,8 +4140,8 @@ mcpMetadata: {
         }
       },
       separators: {
-        doubleNewline: '雙換行 (\\n\\n)',
-        singleNewline: '單換行 (\\n)',
+        doubleNewline: "雙換行 (\\n\\n)",
+        singleNewline: "單換行 (\\n)",
         periodCn: '中文句號 (。)',
         exclamationCn: '感嘆號 (！)',
         questionCn: '問號 (？)',
@@ -3868,7 +4259,8 @@ mcpMetadata: {
         questionAnswer: '標準問 + 答案',
         combined: '合併索引',
         separate: '分別索引'
-      }
+      },
+      confirmDelete: '要刪除此 FAQ 條目嗎？此操作無法復原。'
     },
     document: {
       title: '文件',
@@ -4076,7 +4468,10 @@ mcpMetadata: {
       revisionDiffBasisLabel: '對比方式',
       revisionDiffIncrementalCaption: 'v{from} → v{to}（相鄰版本，紅色為舊、綠色為新）',
       revisionDiffCumulativeCaption: 'v{from} → v{to}（距當前的累計變更）',
-      revisionFirstVersionHint: '這是首個版本，沒有上一版可對比。'
+      revisionFirstVersionHint: '這是首個版本，沒有上一版可對比。',
+      revisionNotRetained: 'v{ver} · 完整內容',
+      revisionNotRetainedHint: '前一版 v{prev} 沒有保留的快照（升級前的版本未被快照，舊快照也可能已清除），因此改顯示 v{ver} 的完整內容。',
+      revisionNotRetainedRange: 'v{ver} · 完整內容'
     },
     indexing: {
       title: '索引策略',
@@ -4127,7 +4522,22 @@ mcpMetadata: {
       nameLabel: '知識庫名稱',
       namePlaceholder: '請輸入知識庫名稱',
       descriptionLabel: '知識庫描述',
-      descriptionPlaceholder: '請輸入知識庫描述（可選）'
+      descriptionPlaceholder: '請輸入知識庫描述（可選）',
+      profile: {
+        adopt: '採用為描述',
+        adopted: '已複製到描述；儲存後生效。',
+        empty: '尚未生成，請先上傳文件，等摘要完成後用下方的按鈕。',
+        failed: '上次生成失敗：{error}',
+        generate: '生成 AI 描述',
+        generateFailed: '生成 AI 描述失敗',
+        generated: '已生成 AI 描述',
+        generatedAt: '於 {time} 生成 · 依據 {count} 份文件',
+        hint: '由文件 profile 衍生。它从不取代下方的手動描述；agent 會兩者皆讀，以判斷問題是否屬於這知識庫。',
+        noDocuments: '這知識庫尚無已解析的文件。',
+        questions: '典型問題',
+        regenerate: '重新生成',
+        title: 'AI 生成的描述'
+      }
     },
     errors: {
       vectorStoreBindingInvalid: '無法使用所選向量儲存。請選擇其他儲存或使用系統預設值。',
@@ -4272,7 +4682,9 @@ mcpMetadata: {
         targetType: '物件型別',
         targetId: '物件 ID',
         actorId: '發起人 ID',
-        details: '詳情'
+        details: '詳情',
+        apiKeyId: 'API key ID',
+        apiKeyName: 'API key 名稱'
       },
       columns: {
         time: '時間',
@@ -4280,7 +4692,12 @@ mcpMetadata: {
         target: '物件',
         actor: '發起人',
         outcome: '結果'
-      }
+      },
+      actorAPIKey: 'API Key · {name}',
+      actorWithAPIKey: '使用者 · API Key · {name}'
+    },
+    footer: {
+      instantEffect: '此頁面的變更會立即生效，無需儲存。'
     }
   },
   embedPublish: {
@@ -4548,20 +4965,20 @@ mcpMetadata: {
       steerRemoveFailed: '刪除排隊訊息失敗，請重試',
       steerAlreadyInjected: '該訊息已被當前回答接收',
       steerFollowUpTimeout: '下一輪迴答未能及時開始，請重新傳送',
-      steerNoActiveRun: '當前沒有正在進行的回答，請直接傳送訊息',
+      steerNoActiveRun: '當前沒有正在進行的回答，請直接傳送訊息'
     },
     webSearch: {
       toggleOn: '開啟網路搜尋',
       toggleOff: '關閉網路搜尋',
       notConfigured: '未配置網路搜尋引擎'
     },
-  steerCurrent: '補充當前任務',
-  steerAfter: '完成後傳送',
-  steerAccepted: '本輪補充',
-  steerRetry: '重試傳送',
-  steerQueueSendNow: '補充當前任務',
-  steerQueueWaiting: '當前回答結束後傳送',
-  steerQueueInjecting: '等待接收補充',
+    steerCurrent: '補充當前任務',
+    steerAfter: '完成後傳送',
+    steerAccepted: '本輪補充',
+    steerRetry: '重試傳送',
+    steerQueueSendNow: '補充當前任務',
+    steerQueueWaiting: '當前回答結束後傳送',
+    steerQueueInjecting: '等待接收補充'
   },
   manualEditor: {
     description: '使用 Markdown 編寫知識內容，支援實時預覽',
@@ -4579,7 +4996,8 @@ mcpMetadata: {
     status: {
       draftTag: '當前狀態：草稿',
       publishedTag: '當前狀態：已釋出',
-      lastUpdated: '最近更新：{time}'
+      lastUpdated: '最近更新：{time}',
+      counter: '{chars} 字 · {lines} 行'
     },
     form: {
       knowledgeBaseLabel: '目標知識庫',
@@ -4618,7 +5036,12 @@ mcpMetadata: {
     },
     view: {
       editLabel: '返回編輯',
-      previewLabel: '預覽內容'
+      previewLabel: '預覽內容',
+      edit: '編輯',
+      groupLabel: '編輯器視圖',
+      preview: '預覽',
+      split: '分割',
+      splitUnavailable: '拉寬抽屜或全螢幕才能分割視圖。'
     },
     toolbar: {
       bold: '加粗',
@@ -4636,7 +5059,9 @@ mcpMetadata: {
       link: '插入連結',
       image: '插入圖片',
       table: '插入表格',
-      horizontalRule: '分割線'
+      horizontalRule: '分割線',
+      headingGroup: '標題',
+      insertGroup: '插入'
     },
     table: {
       column1: '列1',
@@ -4655,6 +5080,11 @@ mcpMetadata: {
       italic: '斜體文字',
       strike: '刪除線',
       inlineCode: 'code'
+    },
+    shortcuts: {
+      continueList: '繼續清單',
+      indent: '縮排 / Shift+Tab 取消縮排',
+      title: '快速鍵'
     }
   },
   file: {
@@ -4667,9 +5097,9 @@ mcpMetadata: {
     belongsToKb: '所屬知識庫：',
     belongsToOrg: '所屬空間：',
     noCompatibleKbForAgent: '當前智慧體的工具與作用域內知識庫的能力不匹配，暫無可引用的知識庫。',
-  mcpToolCount: '共 {count} 個工具',
-  mcpNotSynced: '尚未同步工具',
-  mcpStale: '需重新同步',
+    mcpToolCount: '共 {count} 個工具',
+    mcpNotSynced: '尚未同步工具',
+    mcpStale: '需重新同步'
   },
   common: {
     add: '新增',
@@ -4727,7 +5157,15 @@ mcpMetadata: {
     retry: '重試',
     expand: '展開',
     collapse: '收起',
-    copyFailed: '複製失敗'
+    copyFailed: '複製失敗',
+    exitFullscreen: '退出全螢幕',
+    fullscreen: '全螢幕',
+    unsavedChanges: {
+      body: '若現在關閉，你的變更將會遺失。還要關閉嗎？',
+      discard: '丟棄變更',
+      keepEditing: '繼續編輯',
+      title: '未儲存的變更'
+    }
   },
   authStore: {
     errors: {
@@ -4812,7 +5250,7 @@ mcpMetadata: {
     title: '完成註冊',
     subtitle: '您被邀請加入「{tenant}」',
     email: '信箱',
-    emailPlaceholder: 'your{\'@\'}example.com',
+    emailPlaceholder: "your{'@'}example.com",
     emailHint: '用您自己的信箱註冊即可。',
     emailInvalid: '請輸入有效的信箱地址',
     username: '姓名',
@@ -5160,7 +5598,7 @@ mcpMetadata: {
     envTag: 'DEFAULT',
     testConnection: '測試連線',
     testing: '測試中...',
-    immutableNotice: '建立後無法更改引擎型別、連線和索引設定。\n如需更改，請刪除後重新建立。',
+    immutableNotice: "建立後無法更改引擎型別、連線和索引設定。\n如需更改，請刪除後重新建立。",
     insecureSkipVerifyWarning: '關閉 TLS 證書校驗會使連線面臨中間人攻擊風險。僅可用於自簽名證書的開發叢集，切勿在生產環境使用。',
     toasts: {
       storeCreated: '向量資料庫已建立',
@@ -5416,7 +5854,7 @@ mcpMetadata: {
       saveHint: '儲存後將驗證服務可達性並加密儲存憑證',
       saveBtn: '儲存憑證',
       usageTitle: '使用說明',
-      usageSteps: '1. 填寫並儲存 APPID / APPSECRET\n2. 在下方「雲模型接入」中按行新增 chat、embedding、rerank、vlm\n3. 文件解析：知識庫設定 → 解析引擎，選擇 WeKnora Cloud 引擎',
+      usageSteps: "1. 填寫並儲存 APPID / APPSECRET\n2. 在下方「雲模型接入」中按行新增 chat、embedding、rerank、vlm\n3. 文件解析：知識庫設定 → 解析引擎，選擇 WeKnora Cloud 引擎",
       fillRequired: '請填寫 APPID 和 APPSECRET',
       saveSuccess: '憑證儲存成功',
       saveFailed: '憑證儲存失敗',
@@ -5509,7 +5947,24 @@ mcpMetadata: {
       addDrawerDesc: '貼上來源或上傳 zip，登記到目錄。可以選擇現在裝進哪些沙箱。',
       addRegisteredAs: '已登記為「{name}」',
       installedOn: '已安裝到',
-      manageOnSandbox: '管理沙箱「{name}」上的安裝'
+      manageOnSandbox: '管理沙箱「{name}」上的安裝',
+      noSandboxToUpgrade: '沒有沙箱需要升級。',
+      servedAfterFailure: '升級失敗；仍以前一版本執行。',
+      servedAfterFailurePlain: '升級失敗；仍以前一版本執行。',
+      servedWhileUpgrading: '升級中；仍以前一版本執行。',
+      servedWhileUpgradingPlain: '升級中；仍以前一版本執行。',
+      upgrade: '升級',
+      upgradeAccepted: '升級已展開',
+      upgradeAvailable: '有可用升級',
+      upgradeCount: '升級 {count}',
+      upgradeDrawerDesc: '把 {name} 在選定沙箱上升級到編目版本。每個沙箱會繼續執行目前版本，直到升級完成；若升級失敗則停留原版本。',
+      upgradeFromTo: '升級 {from} → {to}',
+      upgradeRowHint: '此沙箱的運行版本與編目不同，會繼續執行直到升級完成；若升級失敗則停留原版本。',
+      upgradeRowHintFailed: '此沙箱上的安裝未成功，且編目已前進。升級會改為安裝編目版本。',
+      upgradeRowHintFailedVersions: '在此沙箱安裝 {from} 未成功，且編目已是 {to}。升級會改為安裝 {to}。',
+      upgradeRowHintVersions: '此沙箱正运行 {from}；編目是 {to}。{from} 會繼續執行直到升級完成；若升級失敗則停留原版本。',
+      upgradeRowTitle: '有新版本可供升級',
+      upgradeTitle: '升級技能'
     },
     sandbox: {
       title: '沙箱後端',
@@ -5764,10 +6219,10 @@ mcpMetadata: {
       skillUploadHint: '安裝會在當前映象上生成新快照，可能需要數分鐘。當前這一輪對話不會中斷；下一輪提問時才會按新映象重建沙箱，會話工作區草稿會在那時清空。',
       skillUploadHintNewSession: '安裝會在當前映象上生成新快照，可能需要數分鐘。已開啟的會話繼續使用原沙箱，直到該會話結束；只有新開啟的會話才會帶上這次安裝的技能。',
       skillSourceSection: '從來源安裝',
-      skillSourceSectionHint: '貼上 ClawHub、GitHub 或 SkillHub 連結，或 {\'@\'}owner/slug。壓縮包不超過 {size} MB。',
+      skillSourceSectionHint: "貼上 ClawHub、GitHub 或 SkillHub 連結，或 {'@'}owner/slug。壓縮包不超過 {size} MB。",
       skillUploadSection: '上傳本地壓縮包',
       skillUploadSectionHint: '把包含 SKILL.md 的 zip 拖到下方，或點選選擇檔案。壓縮包不超過 {size} MB。',
-      skillSourcePlaceholder: 'ClawHub 用 {\'@\'}owner/slug，GitHub / SkillHub 請貼上完整連結',
+      skillSourcePlaceholder: "ClawHub 用 {'@'}owner/slug，GitHub / SkillHub 請貼上完整連結",
       skillSourceInstall: '安裝',
       skillInstallOr: '或',
       skillSourceFailed: '從託管平台安裝技能失敗',
@@ -5810,7 +6265,7 @@ mcpMetadata: {
         injected: '已注入',
         unprocessed: '未處理，請重新安裝時補充',
         unavailable: '當前階段暫不接收說明；安裝結束後可攜帶說明重試。',
-        failed: '傳送失敗，說明已保留，請重試。',
+        failed: '傳送失敗，說明已保留，請重試。'
       },
       skillTranscriptEmpty: '這次安裝沒有留下記錄。',
       skillTranscriptWaiting: '安裝已開始，正在等待過程記錄…',
@@ -5908,7 +6363,16 @@ mcpMetadata: {
         skills: '把技能裝進這份配置的沙箱映象；配置已儲存後可隨時回來增刪。'
       },
       terminalIdleDisconnect: '互動式終端空閒斷開（秒）',
-      terminalIdleDisconnectHelp: '開啟終端後，這段時間內沒有鍵盤輸入或終端輸出就斷開連線，沙箱隨後按 TTL 自行暫停。留空按 900 秒；最短 60 秒，最長 24 小時。'
+      terminalIdleDisconnectHelp: '開啟終端後，這段時間內沒有鍵盤輸入或終端輸出就斷開連線，沙箱隨後按 TTL 自行暫停。留空按 900 秒；最短 60 秒，最長 24 小時。',
+      createDesktopTemplate: '建立',
+      createDesktopTemplateHint: '由官方桌面影像建立 XFCE 視覺化桌面。它比 CLI 範本大很多，僅在你需要 GUI 時建立。',
+      desktopTemplateProvisioning: 'WeKnora 桌面範本正在建立中。稍候重新整理以查看其狀態。',
+      desktopTemplateReplaced: '先前的desktop範本已刪除並已展開重建。待其就绪。CLI 範本維持不變。',
+      desktopTemplateTag: '桌面',
+      installCommandRunning: '指令執行中',
+      installCommandWaiting: '等待指令輸出。已耗時會持續更新。',
+      replaceDesktopTemplateConfirm: '用目前的設定重建 WeKnora desktop範本，包含 DNS。替換就绪前不會刪除原先可啟動的desktop範本。CLI 範本維持不變。',
+      weknoraDesktopTemplate: 'WeKnora desktop範本'
     }
   },
   agent: {
@@ -5980,8 +6444,8 @@ mcpMetadata: {
       nameRequired: '請輸入智慧體名稱',
       systemPromptRequired: '請輸入系統提示詞',
       modelRequired: '請選擇模型',
-      queryMissingInRewrite: '改寫使用者提示詞必須包含 {\'{{\'}query{\'}}\'} 佔位符',
-      queryMissingInFallback: '兜底提示詞必須包含 {\'{{\'}query{\'}}\'} 佔位符',
+      queryMissingInRewrite: "改寫使用者提示詞必須包含 {'{{'}query{'}}'} 佔位符",
+      queryMissingInFallback: "兜底提示詞必須包含 {'{{'}query{'}}'} 佔位符",
       description: '描述',
       descriptionPlaceholder: '請輸入智慧體描述',
       normalDesc: '快速響應，直接回答問題',
@@ -5989,7 +6453,7 @@ mcpMetadata: {
       model: '模型',
       modelPlaceholder: '請選擇模型',
       systemPrompt: '系統提示詞',
-      systemPromptPlaceholder: '自定義系統提示詞，定義智慧體的行為和角色（使用 {\'{{\'}web_search_status{\'}}\'} 佔位符動態控制網路搜尋行為）',
+      systemPromptPlaceholder: "自定義系統提示詞，定義智慧體的行為和角色（使用 {'{{'}web_search_status{'}}'} 佔位符動態控制網路搜尋行為）",
       contextTemplateRequired: '請輸入上下文模板',
       temperature: '溫度',
       thinking: '思考模式',
@@ -6010,8 +6474,8 @@ mcpMetadata: {
       selectKnowledgeBasesDesc: '選擇要關聯的知識庫（包括協作知識庫）',
       myKnowledgeBases: '我的知識庫',
       sharedKnowledgeBases: '協作知識庫',
-      retrieveKBOnlyWhenMentioned: '僅在 {\'@\'} 提及時檢索',
-      retrieveKBOnlyWhenMentionedDesc: '關閉：自動檢索已配置的知識庫，開啟：僅當使用者 {\'@\'} 提及時才檢索',
+      retrieveKBOnlyWhenMentioned: "僅在 {'@'} 提及時檢索",
+      retrieveKBOnlyWhenMentionedDesc: "關閉：自動檢索已配置的知識庫，開啟：僅當使用者 {'@'} 提及時才檢索",
       rerankModel: 'ReRank 模型',
       rerankModelDesc: '用於對知識庫檢索結果進行重排序，提高回答準確性',
       rerankModelPlaceholder: '請選擇 ReRank 模型',
@@ -6086,7 +6550,10 @@ mcpMetadata: {
       },
       selectSkills: '選擇技能',
       skillsInfoTitle: '技能與沙箱如何聯動？',
-      skillsInfoContent: '技能是預裝的專業知識模組，指令碼在所選沙箱中隔離執行。可用列表來自該沙箱已安裝的技能；同一會話的沙箱一旦建立，後續附件、產物與銷燬都會鎖定在建立時那份配置上，改沙箱隻影響之後新建的會話。'
+      skillsInfoContent: '技能是預裝的專業知識模組，指令碼在所選沙箱中隔離執行。可用列表來自該沙箱已安裝的技能；同一會話的沙箱一旦建立，後續附件、產物與銷燬都會鎖定在建立時那份配置上，改沙箱隻影響之後新建的會話。',
+      reasoningEffortAlwaysOn: '所選模型的推理程度永遠開啟，無法關閉，只能調整用力程度。',
+      reasoningEffortUnsupported: '所選模型無法進行推理，除「關閉」外的選項皆不生效。',
+      upgradeOnThisSandbox: '在此沙箱上升級'
     },
     messages: {
       created: '智慧體建立成功',
@@ -6121,7 +6588,8 @@ mcpMetadata: {
       disabled: '關閉',
       mcpAll: '全部服務',
       mcpSelected: '指定 {count} 個服務',
-      mcpNone: '不使用'
+      mcpNone: '不使用',
+      skillSecretsWarning: '此 agent 使用技能。當區成員使用它時，技能會在該工作區的沙箱中執行，並使用管理員為其設定的環境變數（如 API key），區成員可能讓 agent 揭露這些值。僅在可接受時分享。'
     },
     detail: {
       title: '智慧體詳情',
@@ -6179,7 +6647,13 @@ mcpMetadata: {
       download: '下載',
       downloadFailed: '下載失敗，請稍後重試',
       inlinePreviewHint: '點選預覽',
-      inlineMissing: '檔案不可用'
+      inlineMissing: '檔案不可用',
+      delete: '刪除',
+      deleteConfirm: '「{name}」及其儲存內容將被永久刪除，此操作無法復原。',
+      deleteFailed: '刪除失敗，請重試。',
+      deleteTitle: '要刪此檔案嗎？',
+      deleted: '檔案已刪除',
+      inlineDeleted: '檔案已刪除'
     }
   },
   knowledgeStages: {
@@ -6270,6 +6744,15 @@ mcpMetadata: {
       title: '本次解析配置',
       kbDefault: '使用知識庫預設配置',
       graph: '知識圖譜'
+    },
+    copyError: '複製錯誤詳情',
+    notRun: '尚未執行',
+    stageFailed: '{stage} 失敗',
+    stat: {
+      attempt: '嘗試',
+      duration: '耗時',
+      tasks: '背景任務',
+      tasksValue: '{running} 進行中 · {failed} 失敗 · {completed} 完成'
     }
   },
   uploadConfirm: {
@@ -6325,7 +6808,11 @@ mcpMetadata: {
     },
     destinationToRoot: '改到根目錄',
     folderUploadTitle: '資料夾「{name}」',
-    folderUploadHint: '共 {count} 個檔案，將保留本地目錄結構'
+    folderUploadHint: '共 {count} 個檔案，將保留本地目錄結構',
+    documentSummary: '文件摘要',
+    documentSummaryDescription: '選擇是否自動摘要本批內的文件。',
+    generateSummary: '生成文件摘要',
+    generateSummaryHint: '預設為開啟。關閉後在解析、索引與其他已設定的步驟繼續時跳過摘要。'
   },
   knowledgeBase: {
     title: '知識庫',
@@ -6620,7 +7107,10 @@ mcpMetadata: {
       renameSuccess: '資料夾已重新命名',
       renameFailed: '資料夾重新命名失敗',
       renameInvalid: '不能把資料夾移動到它自己的子目錄下',
-      collapseFolder: '收起該資料夾'
+      collapseFolder: '收起該資料夾',
+      countHint: '這個資料夾有 {direct} 份文件；含子資料夾共 {total} 份。',
+      filteredCount: '{count} 份符合的文件',
+      totalDocuments: '共 {count} 份文件'
     },
     infoCard: {
       tooltip: '檢視知識庫資訊',
@@ -6658,7 +7148,26 @@ mcpMetadata: {
     deletePending: '刪除尚未完成，請稍後重新整理檢視結果。',
     deleteStatusUnavailable: '暫時無法確認刪除結果，請稍後重新整理檢視文件狀態。',
     deleteSubmitted: '刪除任務已提交，正在等待完成。',
-    deleteTaskFailed: '刪除任務失敗，請檢視文件錯誤詳情後重試。'
+    deleteTaskFailed: '刪除任務失敗，請檢視文件錯誤詳情後重試。',
+    batchDownload: '下載所選',
+    batchDownloadFailed: '批次下載失敗，請再試一次。',
+    batchDownloadHint: '每批可下載最多 200 份文件與 512 MiB 原始內容的 ZIP。全選只含已載入的文件；沒有原始檔的網頁會跳過。ZIP 會保留知識庫資料夾。',
+    batchDownloadNoFiles: '所選文件中，沒有任何一份有原始檔可供下載。',
+    batchDownloadSkipped: '跳過 {count} 份沒有原始檔的文件。',
+    batchDownloadStarted: 'ZIP 開始存檔。解壓後，再上傳這些檔與資料夾。',
+    batchDownloadTooLarge: '所選檔案總量大於 512 MiB。選 fewer documents 再試一次。',
+    batchDownloading: '準備下載中…',
+    channelConfluence: 'Confluence',
+    clearFilters: '清除篩選',
+    documentCount: '{count} 份文件',
+    filters: '篩選',
+    selectLoaded: '選取已載入',
+    tagAddAction: '新增標籤動作',
+    tagPickerDeleteConfirm: '要刪除標籤「{name}」嗎？',
+    tagPickerInUse: '此標籤正被使用。刪除前需先移除其關聯的文件。',
+    tagPickerSearch: '搜尋或建立標籤',
+    tagPickerSelected: '已選取',
+    tagPickerUnselected: '未選取'
   },
   resourceOrigin: {
     mine: '我建立',
@@ -6712,7 +7221,7 @@ mcpMetadata: {
         },
         kb: {
           title: '選擇知識範圍',
-          desc: '點選 {\'@\'} 可指定一個或多個知識庫/檔案，僅基於選中內容回答；不選則按當前智慧體配置檢索。'
+          desc: "點選 {'@'} 可指定一個或多個知識庫/檔案，僅基於選中內容回答；不選則按當前智慧體配置檢索。"
         }
       }
     },
@@ -6720,7 +7229,7 @@ mcpMetadata: {
       steps: {
         done: {
           title: '解析完成後即可使用',
-          desc: '文件解析入庫後，可在對話中 {\'@\'} 本知識庫提問，回答會附帶引用來源。'
+          desc: "文件解析入庫後，可在對話中 {'@'} 本知識庫提問，回答會附帶引用來源。"
         },
         upload: {
           title: '新增文件',
@@ -6985,6 +7494,103 @@ mcpMetadata: {
     myChats: '我的對話',
     apiChats: 'API 會話',
     noSessions: '暫無對話',
-    sessionInProgress: '會話進行中'
+    sessionInProgress: '會話進行中',
+    artifacts: '工件'
+  },
+  artifactLibrary: {
+    categories: {
+      all: '全部',
+      data: '資料',
+      document: '文件',
+      image: '影像',
+      presentation: '投影片',
+      spreadsheet: '試算表',
+      web: '網頁'
+    },
+    clearFilters: '清除篩選',
+    delete: '刪除',
+    deleteConfirm: '「{name}」及其儲存內容將被永久刪除，此操作無法復原。',
+    deleteConfirmVersions: '「{name}」的 {count} 個版本及其儲存內容將被永久刪除，此操作無法復原。',
+    deleteFailed: '刪除失敗，請重試。',
+    deleteTitle: '要刪此檔案嗎？',
+    deleted: '檔案已刪除',
+    download: '下載',
+    downloadFailed: '下載失敗，請稍後再試。',
+    empty: {
+      description: '讓 agent 產出一份報告、試算表或投影片，這些檔案便會出現在這裡。',
+      title: '尚無工件'
+    },
+    groups: {
+      earlier: '更早',
+      last30Days: '近 30 天',
+      last7Days: '近 7 天',
+      today: '今天',
+      yesterday: '昨天'
+    },
+    loadFailed: '無法載入工件。',
+    loadMore: '載入更多',
+    noMatches: {
+      description: '換個關鍵字或檔案類型再試。',
+      title: '無符合的檔案'
+    },
+    openSession: '開啟對話',
+    preview: '預覽',
+    retry: '重試',
+    searchPlaceholder: '搜尋檔名',
+    subtitle: '你的 agent 在整個對話中生成的檔案',
+    title: '工件',
+    total: '{count} 個檔案',
+    typeFilter: '依類型篩選',
+    untitledSession: '未命名對話',
+    versions: '{count} 個版本'
+  },
+  uploadTasks: {
+    cancel: '取消',
+    cancelAll: '全部取消',
+    close: '關閉',
+    closeConfirm: '關閉會停止尚未完成的上傳（{count}）。',
+    closeConfirmKeep: '繼續上傳',
+    closeConfirmOk: '取消上傳',
+    collapse: '收合',
+    destination: '目的地：{name}',
+    destinationMany: '目的地：{count} 個知識庫',
+    eta: {
+      hours: '{n} 小時',
+      minutes: '{n} 分鐘',
+      seconds: '{n} 秒'
+    },
+    expand: '展開',
+    filterAll: '全部',
+    filterIssues: '未完成',
+    hintParsing: '所有檔案已上傳。解析在背景繼續，你可離此頁面。',
+    hintUploading: '請保持此頁開啟，直到上傳完成。',
+    legend: {
+      active: '進行中',
+      duplicate: '已存在',
+      failed: '失敗',
+      ready: '可搜尋',
+      waiting: '佇列中'
+    },
+    open: '開啟',
+    panelLabel: '上傳',
+    phaseCancelled: '已取消',
+    phaseDeleted: '已刪除',
+    phaseDuplicate: '此知識庫已有相同檔案',
+    phaseFinalizing: '可搜尋，仍在最佳化',
+    phaseParseFailed: '解析失敗',
+    phaseParsing: '解析中',
+    phasePending: '等待解析',
+    phaseReady: '已完成',
+    phaseSaving: '儲存中…',
+    phaseUploadFailed: '上傳失敗',
+    phaseWaiting: '佇列中',
+    remaining: '約剩 {time}',
+    retry: '重試',
+    retryFailed: '重試（{count}）',
+    titleCancelled: '上傳已取消',
+    titleDone: '全部完成',
+    titleDoneWithIssues: '{ok} 完成，{bad} 未完成',
+    titleParsing: '解析 {done}/{total}',
+    titleUploading: '上傳 {done}/{total}'
   }
 }
