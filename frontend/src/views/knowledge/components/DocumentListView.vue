@@ -29,6 +29,7 @@ interface KnowledgeItem {
   description?: string;
   channel?: string;
   isMore?: boolean;
+  stalled_minutes?: number;
 }
 
 const props = defineProps<{
@@ -116,8 +117,17 @@ interface StatusInfo {
   theme: 'success' | 'warning' | 'danger' | 'primary' | 'default';
   icon?: string;
   spin?: boolean;
+  hint?: string;
 }
 const computeStatus = (item: KnowledgeItem): StatusInfo => {
+  if (item.stalled_minutes) {
+    return {
+      label: t('knowledgeBase.statusStalled'),
+      theme: 'warning',
+      icon: 'time',
+      hint: t('knowledgeBase.stalledHint', { minutes: item.stalled_minutes }),
+    };
+  }
   if (item.parse_status === 'pending' || item.parse_status === 'processing') {
     return { label: t('knowledgeBase.statusProcessing'), theme: 'primary', icon: 'loading', spin: true };
   }
@@ -312,7 +322,8 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
         <div class="cell cell-status" role="cell">
           <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
             <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
-              variant="light" class="row-status-tag" :class="`status-${statusByRow.get(item.id)!.theme}`">
+              variant="light" class="row-status-tag" :class="`status-${statusByRow.get(item.id)!.theme}`"
+              :title="statusByRow.get(item.id)!.hint">
               <template v-if="statusByRow.get(item.id)!.icon" #icon>
                 <t-icon :name="statusByRow.get(item.id)!.icon!"
                   :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }" />

@@ -483,3 +483,44 @@ func TestHousekeeping_NilInspectorDefersDeletingSweep(t *testing.T) {
 	status, _ := readKnowledgeStatus(t, db, "kid-nil-inspector")
 	assert.Equal(t, types.ParseStatusDeleting, status)
 }
+
+// A recovered row names the stage it stalled in and when it last moved, and
+// its open spans are closed so the timeline stops showing them as running.
+func TestHousekeeping_RecoveredRowNamesStalledStageAndClosesSpans(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	lastBeat := stale.Add(30 * time.Minute)
+	insertKnowledge(t, db, "kid-stalled", types.ParseStatusProcessing, stale)
+	insertSpan(t, db, "kid-stalled", 1, "doc-1", types.SpanStatusRunning, lastBeat)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_processing_spans
+		   (knowledge_id, attempt, span_id, parent_span_id, name, kind, status, updated_at)
+		 VALUES ('kid-stalled', 1, 'sub-1', 'doc-1', 'docreader.call', 'subspan', 'running', ?)`, stale,
+	).Error)
+
+	svc.runSweep(context.Background())
+
+	var status, errMsg string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, error_message FROM knowledges WHERE id = ?`, "kid-stalled",
+	).Row().Scan(&status, &errMsg))
+	assert.Equal(t, types.ParseStatusFailed, status)
+	assert.Contains(t, errMsg, "stuck in processing at docreader stage")
+	assert.Contains(t, errMsg, lastBeat.UTC().Format(time.RFC3339))
+
+	type spanState struct {
+		SpanID    string
+		Status    string
+		ErrorCode string
+	}
+	var spans []spanState
+	require.NoError(t, db.Raw(
+		`SELECT span_id, status, error_code FROM knowledge_processing_spans WHERE knowledge_id = ? ORDER BY span_id`,
+		"kid-stalled",
+	).Scan(&spans).Error)
+	assert.Equal(t, []spanState{
+		{SpanID: "doc-1", Status: types.SpanStatusFailed, ErrorCode: "TASK_STALLED"},
+		{SpanID: "sub-1", Status: types.SpanStatusCancelled, ErrorCode: "TASK_STALLED"},
+	}, spans)
+}

@@ -6573,6 +6573,8 @@ export default {
     noActivity: '파싱 활동 없음',
     totalDuration: '총 소요시간: {d}',
     errorCode: {
+      TASK_STALLED: '진행이 없어 자동 중단됨',
+      TASK_STALLED_SUGGESTION: '임계 시간을 넘도록 진행이 없고 대기열에도 해당 작업이 없어 실패로 표시되었습니다. 「다시 시도」를 누르세요. 반복되면 이 단계가 의존하는 서비스(문서 파싱, 모델, 벡터 저장소)를 확인하세요.',
       UNKNOWN_SUGGESTION: '자세한 내용은 애플리케이션 로그를 확인하세요.'
     },
     status: {
@@ -6623,7 +6625,13 @@ export default {
       overview: '개요',
       raw: '원본 JSON'
     },
+    stall: {
+      title: '{minutes}분 동안 진행이 없어 멈췄을 수 있습니다',
+      hint: '계속 기다리거나 파싱을 중지한 뒤 지식을 재구축할 수 있습니다. 계속 진행이 없으면 자동으로 실패 처리됩니다.',
+      hintAtStage: '「{stage}」 단계에서 멈춰 있습니다. 계속 기다리거나 파싱을 중지한 뒤 지식을 재구축할 수 있습니다. 계속 진행이 없으면 자동으로 실패 처리됩니다.'
+    },
     head: {
+      lastProgress: '최근 진행',
       stagesDone: '주요 단계',
       stagesProgress: '현재 단계',
       attempt: '시도',
@@ -6959,6 +6967,8 @@ export default {
     statusCompleted: '완료',
     statusProcessing: '처리 중',
     statusFinalizing: '최적화 중',
+    statusStalled: '멈춤 의심',
+    stalledHint: '{minutes}분 동안 진행이 없습니다. 멈췄을 수 있습니다. Trace에서 멈춘 위치를 확인하거나 파싱을 중지한 뒤 지식을 재구축하세요.',
     statusFailed: '실패',
     statusCancelled: '취소됨',
     statusDraft: '초안',

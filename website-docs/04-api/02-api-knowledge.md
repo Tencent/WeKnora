@@ -346,7 +346,7 @@ curl -X DELETE $BASE/api/v1/knowledge-bases/kb-1/knowledge -H "Authorization: Be
 | `agent_id` | string | 否 | 共享 Agent 范围 |
 | `agent_source_tenant_id` | uint64 | 否 | 共享 Agent 的来源空间选择器，与共享关系校验 |
 
-响应：200 `{"success":true,"data":[Knowledge]}`
+响应：200 `{"success":true,"data":[Knowledge]}`。处于 `pending`/`processing`/`finalizing` 的知识额外带 `last_activity_at`（RFC3339），取行的 `updated_at` 与该知识所有 span 最近一次写入中较晚的一个；前端据此判断“疑似卡住”（超过 20 分钟无进展）。
 
 ```bash
 curl "$BASE/api/v1/knowledge/batch?ids=k-1&ids=k-2" -H "Authorization: Bearer $TOKEN"
@@ -366,7 +366,9 @@ curl $BASE/api/v1/knowledge/k-1 -H "Authorization: Bearer $TOKEN"
 
 用途：解析阶段/trace（两条路径同一 handler `GetKnowledgeSpans`）。权限：Viewer+，父 KB read。查询参数：`attempt`（int，0=最新一次）。
 
-响应：200 `{"success":true,"data":{"knowledge_id","attempt","latest_attempt","parse_status","current_stage","trace":{...},"last_error":{...}}}`
+响应：200 `{"success":true,"data":{"knowledge_id","attempt","latest_attempt","parse_status","current_stage","last_activity_at","trace":{...},"last_error":{...}}}`
+
+`last_activity_at` 只在解析进行中返回，取行的 `updated_at` 与本次 attempt 各 span 最近一次写入中较晚的一个。被 housekeeping 判定卡死的知识，其卡住阶段的 span 会以 `TASK_STALLED` 标为失败，`last_error` 即指向该阶段。
 
 ```bash
 curl $BASE/api/v1/knowledge/k-1/spans -H "Authorization: Bearer $TOKEN"

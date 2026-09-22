@@ -20,12 +20,15 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -153,7 +156,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		return
 	}
 
-	stuck := h.filterByLastSpanActivity(ctx, candidates, cutoff)
+	stuck, heartbeat := h.filterByLastSpanActivity(ctx, candidates, cutoff)
 	spanSkipped := len(candidates) - len(stuck)
 
 	// Second-stage gate: a row can have a stale span heartbeat yet still
@@ -168,23 +171,9 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	h.rearmWikiTriggers(ctx, wikiHeld, threshold)
 
 	if len(stuck) > 0 {
-		stuckIDs := make([]string, 0, len(stuck))
-		for _, k := range stuck {
-			stuckIDs = append(stuckIDs, k.ID)
-		}
-		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
-			Where("id IN ? AND parse_status IN ?", stuckIDs,
-				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
-			Updates(map[string]interface{}{
-				"parse_status":           types.ParseStatusFailed,
-				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
-				"pending_subtasks_count": 0,
-			})
-		if res.Error != nil {
-			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed: %v", res.Error)
-		} else if res.RowsAffected > 0 {
+		if recovered := h.recoverStalled(ctx, stuck, heartbeat, threshold); recovered > 0 {
 			logger.Infof(ctx, "[Housekeeping] recovered %d stuck knowledge rows (threshold=%s)",
-				res.RowsAffected, threshold)
+				recovered, threshold)
 		}
 	}
 	if spanSkipped > 0 {
@@ -280,9 +269,11 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 // with no span rows at all also pass through (they're lite-mode or
 // pre-instrumentation tasks; the simple updated_at check already proved
 // them stuck and we have no heartbeat to override that).
-func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, candidates []types.Knowledge, cutoff time.Time) []types.Knowledge {
+func (h *HousekeepingService) filterByLastSpanActivity(
+	ctx context.Context, candidates []types.Knowledge, cutoff time.Time,
+) ([]types.Knowledge, map[string]time.Time) {
 	if len(candidates) == 0 {
-		return candidates
+		return candidates, nil
 	}
 	ids := make([]string, 0, len(candidates))
 	for _, k := range candidates {
@@ -312,11 +303,11 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 		// heartbeat (so all candidates are "stuck"). This matches
 		// the previous-version behaviour and never under-recovers.
 		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (will fail safe and recover all candidates)", err)
-		return candidates
+		return candidates, nil
 	}
 	heartbeat := make(map[string]time.Time, len(beats))
 	for _, b := range beats {
-		if t, ok := parseHeartbeatTime(b.LastSeen); ok {
+		if t, ok := apprepo.ParseAggregateTime(b.LastSeen); ok {
 			heartbeat[b.KnowledgeID] = t
 		}
 	}
@@ -329,7 +320,90 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 		}
 		out = append(out, k)
 	}
-	return out
+	return out, heartbeat
+}
+
+// recoverStalled fails each stuck row with a message naming the stage it
+// stalled in and when it last made progress, and closes its open spans so
+// the timeline stops showing that stage as running. Returns rows recovered.
+func (h *HousekeepingService) recoverStalled(
+	ctx context.Context, stuck []types.Knowledge, heartbeat map[string]time.Time, threshold time.Duration,
+) int64 {
+	ids := make([]string, 0, len(stuck))
+	for _, k := range stuck {
+		ids = append(ids, k.ID)
+	}
+	var running []types.KnowledgeProcessingSpan
+	if err := h.db.WithContext(ctx).
+		Select("knowledge_id", "attempt", "name").
+		Where("knowledge_id IN ? AND kind = ? AND status = ?", ids, types.SpanKindStage, types.SpanStatusRunning).
+		Order("attempt DESC").
+		Find(&running).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] running stage query failed: %v", err)
+	}
+	stage := make(map[string]string, len(running))
+	for _, span := range running {
+		if _, seen := stage[span.KnowledgeID]; !seen {
+			stage[span.KnowledgeID] = span.Name
+		}
+	}
+
+	var recovered int64
+	for _, k := range stuck {
+		last := k.UpdatedAt
+		if beat, ok := heartbeat[k.ID]; ok && beat.After(last) {
+			last = beat
+		}
+		where := ""
+		if name := stage[k.ID]; name != "" {
+			where = " at " + name + " stage"
+		}
+		msg := fmt.Sprintf("task stuck in %s%s: no progress since %s (> %s), recovered by housekeeping",
+			k.ParseStatus, where, last.UTC().Format(time.RFC3339), threshold)
+		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+			Where("id = ? AND parse_status IN ?", k.ID,
+				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
+			Updates(map[string]interface{}{
+				"parse_status":           types.ParseStatusFailed,
+				"error_message":          msg,
+				"pending_subtasks_count": 0,
+			})
+		if res.Error != nil {
+			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed for %s: %v", k.ID, res.Error)
+			continue
+		}
+		if res.RowsAffected == 0 {
+			continue
+		}
+		recovered += res.RowsAffected
+		h.closeStalledSpans(ctx, k.ID, msg)
+	}
+	return recovered
+}
+
+// closeStalledSpans fails the running stage spans of a recovered row and
+// cancels its other open spans. Best-effort: the row is already failed.
+func (h *HousekeepingService) closeStalledSpans(ctx context.Context, knowledgeID, msg string) {
+	now := time.Now()
+	open := []string{types.SpanStatusPending, types.SpanStatusRunning}
+	closeAs := func(status string, scope *gorm.DB) {
+		if err := scope.Updates(map[string]interface{}{
+			"status":        status,
+			"error_code":    werrors.ErrCodeTaskStalled,
+			"error_message": msg,
+			"finished_at":   now,
+			"updated_at":    now,
+		}).Error; err != nil {
+			logger.Warnf(ctx, "[Housekeeping] close stalled spans for %s failed: %v", knowledgeID, err)
+		}
+	}
+	spans := func() *gorm.DB {
+		return h.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+			Where("knowledge_id = ? AND status IN ?", knowledgeID, open)
+	}
+	closeAs(types.SpanStatusFailed,
+		spans().Where("kind = ? AND status = ?", types.SpanKindStage, types.SpanStatusRunning))
+	closeAs(types.SpanStatusCancelled, spans())
 }
 
 // filterOutQueued returns the subset of candidates that have NO work left
@@ -451,30 +525,6 @@ func (h *HousekeepingService) rearmWikiTriggers(
 	if rearmed > 0 {
 		logger.Infof(ctx, "[Housekeeping] re-armed wiki ingest trigger for %d knowledge base(s)", rearmed)
 	}
-}
-
-// parseHeartbeatTime accepts the timestamp formats Postgres and SQLite
-// emit for a TIMESTAMP column read back through MAX(). Returns false if
-// none parse — the caller treats unparseable rows as "no heartbeat",
-// which fails safe (the row gets recovered as stuck rather than
-// silently preserved).
-func parseHeartbeatTime(s string) (time.Time, bool) {
-	if s == "" {
-		return time.Time{}, false
-	}
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05.999999",
-		"2006-01-02 15:04:05",
-	} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, true
-		}
-	}
-	return time.Time{}, false
 }
 
 // staleThreshold returns how long a "processing" row may sit untouched

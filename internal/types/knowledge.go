@@ -198,6 +198,9 @@ type Knowledge struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+	// Most recent processing progress (row or span write) for an in-flight
+	// row, so clients can tell a slow stage from a stalled one. Not stored.
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty" gorm:"-"`
 }
 
 // CustomMetadataText returns stable human-readable metadata for summaries and

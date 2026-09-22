@@ -676,6 +676,9 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 		"current_stage":   currentStageName,
 		"trace":           tree,
 	}
+	if isParseInFlight(knowledge.ParseStatus) {
+		resp["last_activity_at"] = spansLastActivity(knowledge.UpdatedAt, rows)
+	}
 	if lastError := knowledgeSpansLastError(
 		currentAttempt,
 		latestAttempt,
@@ -1718,6 +1721,8 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		knowledges = filterKnowledgesByKBAllowSet(knowledges, allowedKBSet)
 	}
 
+	h.attachLastActivity(ctx, knowledges)
+
 	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
 		len(req.IDs), len(knowledges))
 
@@ -1725,6 +1730,63 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		"success": true,
 		"data":    knowledges,
 	})
+}
+
+// spansLastActivity is the latest of the row's updated_at and the listed
+// spans' writes.
+func spansLastActivity(updatedAt time.Time, rows []types.KnowledgeProcessingSpan) time.Time {
+	last := updatedAt
+	for _, row := range rows {
+		last = latestActivity(last, row.UpdatedAt)
+	}
+	return last
+}
+
+// attachLastActivity sets LastActivityAt on in-flight rows. updated_at only
+// moves at stage transitions, so the latest span write is folded in: it
+// advances with every subspan while a long stage is still working.
+func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []*types.Knowledge) {
+	var ids []string
+	for _, k := range knowledges {
+		if k != nil && isParseInFlight(k.ParseStatus) {
+			ids = append(ids, k.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var spanActivity map[string]time.Time
+	if h.spanRepo != nil {
+		var err error
+		if spanActivity, err = h.spanRepo.LastActivity(ctx, ids); err != nil {
+			logger.Warnf(ctx, "span last activity lookup failed: %v", err)
+		}
+	}
+	for _, k := range knowledges {
+		if k == nil || !isParseInFlight(k.ParseStatus) {
+			continue
+		}
+		last := latestActivity(k.UpdatedAt, spanActivity[k.ID])
+		k.LastActivityAt = &last
+	}
+}
+
+func isParseInFlight(status string) bool {
+	switch status {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	}
+	return false
+}
+
+func latestActivity(times ...time.Time) time.Time {
+	var last time.Time
+	for _, t := range times {
+		if t.After(last) {
+			last = t
+		}
+	}
+	return last
 }
 
 // UpdateKnowledgeRequest defines the partial-update body for PUT /knowledge/:id.

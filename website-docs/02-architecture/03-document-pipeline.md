@@ -447,14 +447,15 @@ stateDiagram-v2
 2. `filterByLastSpanActivity`：查 `knowledge_processing_spans` 的 `MAX(updated_at)` 心跳，心跳仍在阈值内的保留（仍在处理），无任何 span 的也判为卡死；
 3. `filterOutQueued`：通过 asynq TaskInspector 检查是否仍有排队任务，有则保留（只是在排队）。
 
-判定卡死的知识被更新为：
+判定卡死的知识逐行更新为 `parse_status = 'failed'`、`pending_subtasks_count = 0`，`error_message` 写明停在哪个阶段、最后一次进展时间，例如：
 
-```sql
-UPDATE knowledge SET parse_status = 'failed',
-    error_message = 'task stuck in processing > [threshold], recovered by housekeeping',
-    pending_subtasks_count = 0
-WHERE id IN (stuck_ids)
+```text
+task stuck in processing at docreader stage: no progress since 2026-09-22T09:37:54Z (> 2h10m0s), recovered by housekeeping
 ```
+
+同时关闭该知识仍处于 `pending`/`running` 的 span：正在运行的阶段 span 标为 `failed`，其余标为 `cancelled`，错误码均为 `TASK_STALLED`，这样时间线上会显示卡在哪个阶段，而不是一直转圈。
+
+前端在服务端判死之前会先给出提示：批量查询与 spans 接口为进行中的知识返回 `last_activity_at`，超过 20 分钟无进展即在列表、卡片和时间线上显示“疑似卡住”，时间线提供“停止解析”入口，同时把轮询间隔放宽到 15 秒。
 
 阈值 `staleThreshold() = max(1h, DocumentProcessTimeout) + 10min`。
 

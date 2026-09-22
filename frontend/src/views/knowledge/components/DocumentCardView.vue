@@ -27,6 +27,7 @@ interface KnowledgeCard {
   metadata?: any;
   error_message?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
+  stalled_minutes?: number;
   source?: string;
   created_at?: string;
   file_size?: number | string;
@@ -112,6 +113,7 @@ const isTraceMenuVisible = (item: KnowledgeCard): boolean => {
 };
 
 const inFlightCardStatusText = (item: KnowledgeCard): string => {
+  if (item.stalled_minutes) return t('knowledgeBase.statusStalled');
   if (item.parse_status === 'finalizing') {
     if (item.summary_status === 'pending' || item.summary_status === 'processing') {
       return t('knowledgeBase.generatingSummary');
@@ -478,13 +480,16 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 
         <div class="card-preview" @mouseenter="onCardMouseEnter($event, item)" @mouseleave="onCardMouseLeave">
         <!-- Parse status display -->
-        <div v-if="isParseInFlight(item.parse_status)" class="card-analyze card-analyze-trace">
-          <t-icon name="loading" class="card-analyze-loading"></t-icon>
+        <div v-if="isParseInFlight(item.parse_status)" class="card-analyze card-analyze-trace"
+          :class="{ stalled: item.stalled_minutes }">
+          <t-icon :name="item.stalled_minutes ? 'time' : 'loading'" class="card-analyze-loading"></t-icon>
           <span
             class="card-analyze-txt card-analyze-trace-link"
             role="button"
             tabindex="0"
-            :title="$t('knowledgeStages.viewTrace')"
+            :title="item.stalled_minutes
+              ? $t('knowledgeBase.stalledHint', { minutes: item.stalled_minutes })
+              : $t('knowledgeStages.viewTrace')"
             @click.stop="handleAction('view-trace', item)"
             @keydown.enter.stop="handleAction('view-trace', item)"
             @keydown.space.prevent.stop="handleAction('view-trace', item)"
@@ -840,6 +845,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   &:hover { background: var(--td-bg-color-component-hover); }
 }
 .card-analyze.failure { color: var(--td-error-color); }
+.card-analyze.stalled { color: var(--td-warning-color); }
 .card-draft { color: var(--td-warning-color); }
 .card-cancelled { color: var(--td-text-color-placeholder); }
 .card-draft-tip { font-size: var(--app-text-xs); }
