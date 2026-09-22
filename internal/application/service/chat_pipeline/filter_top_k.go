@@ -41,9 +41,15 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 	filterTopK := func(searchResult []*types.SearchResult, topK int) []*types.SearchResult {
 		sortSearchResultsDeterministically(searchResult)
 		if topK > 0 && len(searchResult) > topK {
-			pipelineInfo(ctx, "FilterTopK", "filter", map[string]interface{}{
-				"before": len(searchResult),
-				"after":  topK,
+			// Warn, not info: this drops candidates the answer model never sees,
+			// and nothing downstream tells it so — an aggregation question
+			// ("who holds X?") is then answered from the top K as if that were
+			// the whole set. Changing the retrieval strategy for that shape of
+			// question is a separate decision; making the cut observable is not.
+			pipelineWarn(ctx, "FilterTopK", "filter", map[string]interface{}{
+				"before":  len(searchResult),
+				"after":   topK,
+				"dropped": len(searchResult) - topK,
 			})
 			searchResult = searchResult[:topK]
 		}
