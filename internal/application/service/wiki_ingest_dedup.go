@@ -199,12 +199,13 @@ func dedupMergeRejectReason(srcSlug, dstSlug string, srcCandidates map[string]bo
 	return ""
 }
 
-// normalizeWikiIdentityTitle returns the conservative identity key used only
-// to prevent same-type, same-title pages from being created under different
-// slugs. It intentionally preserves punctuation: "寓言" and "《寓言》" can
-// represent a concept and a work/chapter and must remain distinguishable.
-// Removing whitespace and folding case is enough to close model formatting
-// drift such as "Acme Corp" vs "acme  corp".
+// normalizeWikiIdentityTitle returns the conservative identity key used to
+// prevent same-title pages from being created under different slugs, both
+// within a page type and across the entity ↔ concept types (see
+// exactIdentityTarget). It intentionally preserves punctuation: "寓言" and
+// "《寓言》" can represent a concept and a work/chapter and must remain
+// distinguishable. Removing whitespace and folding case is enough to close
+// model formatting drift such as "Acme Corp" vs "acme  corp".
 func normalizeWikiIdentityTitle(title string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {

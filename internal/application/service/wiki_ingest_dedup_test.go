@@ -260,7 +260,10 @@ func TestNormalizeWikiIdentityTitlePreservesSemanticPunctuation(t *testing.T) {
 	}
 }
 
-func TestExactIdentityTargetSameTypeOnly(t *testing.T) {
+// TestExactIdentityTargetPrefersSameType covers the same-type-wins rule of
+// exactIdentityTarget now that a cross-type exact-title page is reused when
+// no same-type page exists (issue #3526).
+func TestExactIdentityTargetPrefersSameType(t *testing.T) {
 	item := extractedItem{Name: "孔子", Slug: "entity/kong-zi"}
 	pages := map[string]*types.WikiPageLite{
 		"entity/confucius": {
@@ -626,7 +629,7 @@ func (s *stubNormalizedTitleWiki) FindPagesByNormalizedTitles(
 	}
 	out := make([]*types.WikiPageLite, 0, len(s.pages))
 	for _, p := range s.pages {
-		if p != nil && want[normalizeWikiIdentityTitle(p.Title)] {
+		if p != nil && p.PageType == pageType && want[normalizeWikiIdentityTitle(p.Title)] {
 			out = append(out, p)
 		}
 	}
@@ -637,6 +640,8 @@ func TestAttachExactIdentityPagesBatchesAndCaches(t *testing.T) {
 	stub := &stubNormalizedTitleWiki{
 		pages: []*types.WikiPageLite{
 			{Slug: "entity/confucius", Title: "孔 子", PageType: types.WikiPageTypeEntity},
+			// Cross-type twin used to assert the issue #3526 safety net.
+			{Slug: "concept/mencius", Title: "孟子", PageType: types.WikiPageTypeConcept},
 		},
 	}
 	svc := &wikiIngestService{wikiService: stub}
@@ -661,6 +666,14 @@ func TestAttachExactIdentityPagesBatchesAndCaches(t *testing.T) {
 	}
 	if itemCandidates["entity/mencius"]["entity/confucius"] {
 		t.Fatalf("confucius page leaked onto 孟子: %#v", itemCandidates)
+	}
+	// Cross-type safety net: the same-title concept page must be bound to
+	// the entity item so exactIdentityTarget can reuse it (issue #3526).
+	if !itemCandidates["entity/mencius"]["concept/mencius"] {
+		t.Fatalf("cross-type concept page not bound onto 孟子: %#v", itemCandidates["entity/mencius"])
+	}
+	if candidatePages["concept/mencius"] == nil {
+		t.Fatalf("cross-type page missing from candidatePages: %#v", candidatePages)
 	}
 
 	svc.attachExactIdentityPages(ctx, "kb-1", types.WikiPageTypeEntity, items, candidatePages, itemCandidates, batch)
