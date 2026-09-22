@@ -72,7 +72,7 @@ func mustImageInfoJSON(t *testing.T, imgs []types.ImageInfo) string {
 
 func TestCloneChunkImageInfo_Empty(t *testing.T) {
 	svc := &countingFileService{}
-	out, copied, err := cloneChunkImageInfo(context.Background(), svc, "", 1, "kb-1", map[string]string{})
+	out, copied, err := cloneChunkImageInfo(context.Background(), svc, "", 1, "kb-1", map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestCloneChunkImageInfo_RewritesURLAndMatchedOriginal(t *testing.T) {
 	src := mustImageInfoJSON(t, []types.ImageInfo{
 		{URL: "local://1/k0/a.png", OriginalURL: "local://1/k0/a.png", Caption: "cap"},
 	})
-	out, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 7, "k-dst", map[string]string{})
+	out, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 7, "k-dst", map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,7 +125,9 @@ func TestRewriteContentImageURLs_ParentTextChunk(t *testing.T) {
 		{URL: "local://1/k0/a.png", OriginalURL: "local://1/k0/a.png"},
 	})
 	urlCache := map[string]string{}
-	if _, _, err := cloneChunkImageInfo(context.Background(), svc, childImageInfo, 7, "k-dst", urlCache); err != nil {
+	_, _, err := cloneChunkImageInfo(
+		context.Background(), svc, childImageInfo, 7, "k-dst", urlCache, nil)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -156,7 +158,7 @@ func TestCloneChunkImageInfo_PreservesUnmatchedOriginalURL(t *testing.T) {
 	src := mustImageInfoJSON(t, []types.ImageInfo{
 		{URL: "local://1/k0/a.png", OriginalURL: "https://external.example.com/a.png"},
 	})
-	out, _, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", map[string]string{})
+	out, _, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,7 +178,7 @@ func TestCloneChunkImageInfo_DedupsIdenticalURLs(t *testing.T) {
 		{URL: "local://1/k0/same.png"},
 		{URL: "local://1/k0/other.png"},
 	})
-	_, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", map[string]string{})
+	_, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,10 +194,10 @@ func TestCloneChunkImageInfo_DedupsAcrossCallsViaSharedCache(t *testing.T) {
 	svc := &countingFileService{}
 	cache := map[string]string{}
 	src := mustImageInfoJSON(t, []types.ImageInfo{{URL: "local://1/k0/shared.png"}})
-	if _, _, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", cache); err != nil {
+	if _, _, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", cache, nil); err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
-	if _, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", cache); err != nil {
+	if _, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", cache, nil); err != nil {
 		t.Fatalf("second call error: %v", err)
 	} else if len(copied) != 0 {
 		t.Fatalf("second call should reuse cache (0 new copies), got %v", copied)
@@ -207,7 +209,7 @@ func TestCloneChunkImageInfo_DedupsAcrossCallsViaSharedCache(t *testing.T) {
 
 func TestCloneChunkImageInfo_ParseFailureAbortsClone(t *testing.T) {
 	svc := &countingFileService{}
-	_, _, err := cloneChunkImageInfo(context.Background(), svc, "{not valid json", 1, "k-dst", map[string]string{})
+	_, _, err := cloneChunkImageInfo(context.Background(), svc, "{not valid json", 1, "k-dst", map[string]string{}, nil)
 	if err == nil {
 		t.Fatal("expected error on invalid image_info JSON, got nil")
 	}
@@ -222,7 +224,7 @@ func TestCloneChunkImageInfo_CopyFailureReturnsPartialForCleanup(t *testing.T) {
 		{URL: "local://1/k0/good.png"},
 		{URL: "local://1/k0/bad.png"},
 	})
-	_, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", map[string]string{})
+	_, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", map[string]string{}, nil)
 	if err == nil {
 		t.Fatal("expected error when an image copy fails")
 	}
@@ -235,7 +237,7 @@ func TestCloneChunkImageInfo_CopyFailureReturnsPartialForCleanup(t *testing.T) {
 func TestCloneChunkImageInfo_SkipsEmptyURL(t *testing.T) {
 	svc := &countingFileService{}
 	src := mustImageInfoJSON(t, []types.ImageInfo{{URL: "", Caption: "no-image"}})
-	out, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", map[string]string{})
+	out, copied, err := cloneChunkImageInfo(context.Background(), svc, src, 1, "k-dst", map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -248,5 +250,88 @@ func TestCloneChunkImageInfo_SkipsEmptyURL(t *testing.T) {
 	}
 	if got[0].URL != "" {
 		t.Errorf("empty URL should stay empty, got %q", got[0].URL)
+	}
+}
+
+type handleCopyFileService struct {
+	countingFileService
+	saveRef string
+	deleted []string
+}
+
+func (f *handleCopyFileService) SaveBytes(_ context.Context, _ []byte, _ uint64, _ string, _ bool) (string, error) {
+	f.copyCalls++
+	return f.saveRef, nil
+}
+
+func (f *handleCopyFileService) DeleteFile(_ context.Context, filePath string) error {
+	f.deleted = append(f.deleted, filePath)
+	return nil
+}
+
+func TestCopyOwnedObjectBindsCatalogHandles(t *testing.T) {
+	ref := contentRef("z")
+	files := &handleCopyFileService{saveRef: ref}
+	catalog := &fakeCatalog{}
+
+	got, err := copyOwnedObject(
+		context.Background(), files, files, "local://7/src.png", 7, "kn-dst",
+		catalog, types.ResourceRelationExtractedImage,
+	)
+	if err != nil {
+		t.Fatalf("copyOwnedObject: %v", err)
+	}
+	if got != ref {
+		t.Fatalf("path = %q, want %q", got, ref)
+	}
+	if len(catalog.binds) != 1 {
+		t.Fatalf("binds = %v, want one extracted_image claim", catalog.binds)
+	}
+	gotBind := catalog.binds[0]
+	if gotBind.ref != ref || gotBind.ownerType != types.ResourceOwnerKnowledge ||
+		gotBind.ownerID != "kn-dst" || gotBind.relation != types.ResourceRelationExtractedImage {
+		t.Fatalf("bind = %+v", gotBind)
+	}
+}
+
+func TestCopyOwnedObjectSkipsLegacyProviderPaths(t *testing.T) {
+	files := &countingFileService{}
+	catalog := &fakeCatalog{}
+	got, err := copyOwnedObject(
+		context.Background(), files, files, "local://7/src.png", 7, "kn-dst",
+		catalog, types.ResourceRelationExtractedImage,
+	)
+	if err != nil {
+		t.Fatalf("copyOwnedObject: %v", err)
+	}
+	if !strings.HasPrefix(got, "local://") {
+		t.Fatalf("path = %q, want a legacy provider URL", got)
+	}
+	if len(catalog.binds) != 0 {
+		t.Fatalf("binds = %v, want none for provider:// paths", catalog.binds)
+	}
+}
+
+// A catalog hiccup must not fail the clone. Every other claim path logs and
+// continues; by the time the claim runs the copy is already written, so
+// aborting here would discard a correct copy and strand the object it points
+// at. The object stays reachable from its own workspace either way.
+func TestCopyOwnedObjectKeepsCopyWhenBindFails(t *testing.T) {
+	ref := contentRef("y")
+	files := &handleCopyFileService{saveRef: ref}
+	catalog := &fakeCatalog{bindErr: fmt.Errorf("db down")}
+
+	got, err := copyOwnedObject(
+		context.Background(), files, files, "local://7/src.png", 7, "kn-dst",
+		catalog, types.ResourceRelationSourceFile,
+	)
+	if err != nil {
+		t.Fatalf("copyOwnedObject must be best-effort, got %v", err)
+	}
+	if got != ref {
+		t.Fatalf("path = %q, want the copied object %q", got, ref)
+	}
+	if len(files.deleted) != 0 {
+		t.Fatalf("deleted %v, want the copy kept", files.deleted)
 	}
 }

@@ -951,7 +951,8 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		for _, ci := range chunkImageInfos {
 			imageInfoStrs = append(imageInfoStrs, ci.ImageInfo)
 		}
-		imageURLs := collectImageURLs(ctx, imageInfoStrs)
+		imageURLs := mergeKnowledgeReleaseURLs(
+			ctx, s.resourceCatalog, knowledgeIDs, collectImageURLs(ctx, imageInfoStrs))
 
 		// Delete all chunks
 		logger.Infof(ctx, "Deleting all chunks in knowledge base")
