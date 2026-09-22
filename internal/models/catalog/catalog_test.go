@@ -61,6 +61,31 @@ func registerTestVendors(t *testing.T) {
 		},
 		ModelTypes: []types.ModelType{types.ModelTypeKnowledgeQA},
 	})
+	// acme-nim mirrors the NVIDIA NIM entries before #3489: a chat-template
+	// switch that carries only the enable_thinking boolean, while the models
+	// carry ladders the branch cannot encode.
+	Register(&Vendor{
+		ID: "acme-nim", Name: "Acme NIM", API: api.APIOpenAICompletions,
+		ModelTypes: []types.ModelType{types.ModelTypeKnowledgeQA},
+		Compat: VendorCompat{OpenAICompletions: OpenAICompletionsCompat{
+			MaxTokensField: Ptr("max_tokens"), ThinkingFormat: Ptr(ThinkingFormatChatTemplateKwargs),
+		}},
+		Models: []ModelSpec{
+			{
+				ID: "acme-nim-glm", Reasoning: true,
+				ThinkingLevels: api.ThinkingLevelMap{
+					api.ReasoningOff:     nil,
+					api.ReasoningMinimal: api.StringPtr("low"),
+					api.ReasoningHigh:    api.StringPtr("high"),
+				},
+			},
+			{
+				ID: "acme-nim-effort", Reasoning: true,
+				Compat:         json.RawMessage(`{"supports_reasoning_effort": true}`),
+				ThinkingLevels: api.ThinkingLevelMap{api.ReasoningHigh: api.StringPtr("high")},
+			},
+		},
+	})
 }
 
 func TestFindModel_ExactAliasAndGlob(t *testing.T) {
@@ -226,6 +251,43 @@ func TestResolve_AlwaysOnModelCannotBeSwitchedOff(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, r.ThinkingLevels.Supports(api.ReasoningOff))
 	assert.NotContains(t, r.Capabilities().ThinkingLevels, api.ReasoningOff)
+}
+
+// A chat-template switch carries only the enable_thinking boolean, so every
+// graded rung is silently dropped on the wire — and a relay backend that does
+// not know enable_thinking drops the boolean too. Capabilities must not
+// advertise levels the wire format cannot express, or the UI renders a
+// selector whose choice does nothing. #3489 fixed the two catalogued NIM
+// entries with this defect; this pins the generic fallback and the
+// boolean-only vendor shape in general.
+func TestResolve_BooleanThinkingSwitchHidesGradedLevels(t *testing.T) {
+	registerTestVendors(t)
+
+	// Uncatalogued model on the generic vendor — a relay row. The empty level
+	// map's missing-key pass-through used to advertise six rungs here.
+	r, err := Resolve(Ref{Provider: "generic", Model: "glm-5.3", BaseURL: "https://relay.example.com/v1"})
+	require.NoError(t, err)
+	assert.False(t, r.Cataloged)
+	assert.Equal(t, []api.ReasoningEffort{api.ReasoningOff, api.ReasoningAuto},
+		r.Capabilities().ThinkingLevels, "only the boolean the switch can carry")
+
+	// Catalogued model whose ladder the chat-template branch cannot encode:
+	// the graded rungs stay hidden from the selector.
+	r, err = Resolve(Ref{Provider: "acme-nim", Model: "acme-nim-glm"})
+	require.NoError(t, err)
+	caps := r.Capabilities()
+	assert.Equal(t, []api.ReasoningEffort{api.ReasoningAuto}, caps.ThinkingLevels,
+		"always-on entry: off was already hidden, graded rungs must not appear")
+	assert.NotContains(t, caps.ThinkingLevels, api.ReasoningMinimal)
+	assert.NotContains(t, caps.ThinkingLevels, api.ReasoningHigh)
+
+	// A vendor that opts into a top-level effort field alongside the switch
+	// keeps its ladder (the future combo #3489's entries moved to).
+	r, err = Resolve(Ref{Provider: "acme-nim", Model: "acme-nim-effort"})
+	require.NoError(t, err)
+	caps = r.Capabilities()
+	assert.Contains(t, caps.ThinkingLevels, api.ReasoningMinimal, "pass-through rung kept")
+	assert.Contains(t, caps.ThinkingLevels, api.ReasoningHigh, "explicit ladder rung kept")
 }
 
 func TestResolve_RejectsUnknownCompatKeys(t *testing.T) {

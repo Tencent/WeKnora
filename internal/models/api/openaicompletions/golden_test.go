@@ -227,6 +227,21 @@ func TestGolden(t *testing.T) {
 			want: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}},
 		},
 		{
+			// The graded level the caller picked is not expressible in this
+			// dialect: the branch carries only the boolean and no
+			// reasoning_effort may leak onto the wire (capabilities must not
+			// advertise rungs for the same reason).
+			name: "vllm: graded effort request still carries only the boolean",
+			mutate: func(c *Config) {
+				c.Settings.ThinkingFormat = catalog.ThinkingFormatChatTemplateKwargs
+			},
+			opts: &api.Options{Thinking: ptrBool(true), ReasoningEffort: api.ReasoningHigh},
+			want: map[string]any{
+				"chat_template_kwargs": map[string]any{"enable_thinking": true},
+				"reasoning_effort":     nil,
+			},
+		},
+		{
 			name: "openrouter: reasoning effort object and enabled=false",
 			mutate: func(c *Config) {
 				c.Settings.ThinkingFormat = catalog.ThinkingFormatOpenRouter
