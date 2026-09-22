@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware/asynqdl"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -100,7 +101,8 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			}
 
 			attemptCtx := types.WithTaskRetryMetadata(ctx, attempt, maxRetry)
-			lastErr = handler(attemptCtx, task)
+			// An unrecovered panic here would take down the whole process.
+			lastErr = asynqdl.CallRecovered(attemptCtx, task, handler)
 			if lastErr == nil {
 				logger.Infof(ctx, "[SyncTask] Task completed type=%s id=%s elapsed=%v",
 					task.Type(), taskID, time.Since(start))

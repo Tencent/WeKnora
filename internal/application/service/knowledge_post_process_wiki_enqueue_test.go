@@ -17,6 +17,8 @@ type wikiEnqueueFailureKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	knowledge        *types.Knowledge
 	expectedSubtasks int
+	setFinalizingErr error
+	finalized        []string
 }
 
 func (r *wikiEnqueueFailureKnowledgeRepo) GetKnowledgeByIDOnly(
@@ -31,15 +33,19 @@ func (r *wikiEnqueueFailureKnowledgeRepo) SetFinalizing(
 	_ string,
 	expectedSubtasks int,
 ) (bool, error) {
+	if r.setFinalizingErr != nil {
+		return false, r.setFinalizingErr
+	}
 	r.expectedSubtasks = expectedSubtasks
 	r.knowledge.ParseStatus = types.ParseStatusFinalizing
 	return true, nil
 }
 
 func (r *wikiEnqueueFailureKnowledgeRepo) FinalizeSubtask(
-	context.Context,
-	string,
+	_ context.Context,
+	knowledgeID string,
 ) (int, bool, error) {
+	r.finalized = append(r.finalized, knowledgeID)
 	return 0, false, nil
 }
 

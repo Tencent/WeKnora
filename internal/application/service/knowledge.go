@@ -397,25 +397,32 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 	return knowledge.ParseStatus == types.ParseStatusDeleting
 }
 
+// abortStatusInterrupted is the pseudo-status isKnowledgeAborted reports
+// when the worker's own context is done: bail out, but clean up nothing.
+const abortStatusInterrupted = "interrupted"
+
 // isKnowledgeAborted returns (true, status) when the knowledge has been
 // marked as deleting OR cancelled so async pipeline workers should bail
 // out. Status is returned so callers can branch on cleanup behavior:
 // deleting → existing cleanup of partial chunks/index applies;
 // cancelled → keep partially written data per user expectation.
 //
-// When the row is missing or unreadable we conservatively return
-// (true, ParseStatusDeleting): the existing deleting branch already
-// handles cleanup-or-no-op semantics safely.
+// Only a row that is really gone reads as deleting. A transient read error
+// must not: callers would wipe a live document's chunks and index and leave
+// it stuck in processing, so the check reports "not aborted" and lets the
+// pipeline's next write surface a real outage.
 func (s *knowledgeService) isKnowledgeAborted(
 	ctx context.Context, tenantID uint64, knowledgeID string,
 ) (bool, string) {
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to check knowledge abort status (assuming deleted): %v", err)
+	switch {
+	case err == nil && knowledge == nil, errors.Is(err, repository.ErrKnowledgeNotFound):
 		return true, types.ParseStatusDeleting
-	}
-	if knowledge == nil {
-		return true, types.ParseStatusDeleting
+	case err != nil && ctx.Err() != nil:
+		return true, abortStatusInterrupted
+	case err != nil:
+		logger.Warnf(ctx, "Failed to check knowledge abort status for %s (continuing): %v", knowledgeID, err)
+		return false, ""
 	}
 	switch knowledge.ParseStatus {
 	case types.ParseStatusDeleting, types.ParseStatusCancelled:

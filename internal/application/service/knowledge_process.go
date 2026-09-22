@@ -264,6 +264,15 @@ func markKnowledgeProcessing(knowledge *types.Knowledge, now time.Time) {
 func (s *knowledgeService) failKnowledgeOnEmbeddingModel(
 	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge, cause error,
 ) {
+	s.failKnowledgeAtEmbedding(ctx, kb, knowledge, werrors.ErrCodeEmbeddingProviderFail,
+		"failed to get embedding model", cause)
+}
+
+// failKnowledgeAtEmbedding records cause as this attempt's terminal state at
+// the embedding stage; see failKnowledgeOnEmbeddingModel for the guards.
+func (s *knowledgeService) failKnowledgeAtEmbedding(
+	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge, code, what string, cause error,
+) {
 	// A cancelled or expired context means the run was interrupted — the user
 	// cancelled (asynq CancelProcessing cancels the handler context), the
 	// worker was preempted, the process is shutting down. The model itself is
@@ -273,21 +282,21 @@ func (s *knowledgeService) failKnowledgeOnEmbeddingModel(
 	// sweep when nothing else claims it.
 	if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
 		logger.Infof(ctx,
-			"Embedding model resolution interrupted for %s (%v); leaving parse status untouched",
-			knowledge.ID, cause)
+			"%s interrupted for %s (%v); leaving parse status untouched",
+			what, knowledge.ID, cause)
 		return
 	}
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx,
-			"Knowledge aborted (%s), not recording embedding model failure: %s", status, knowledge.ID)
+			"Knowledge aborted (%s), not recording %q: %s", status, what, knowledge.ID)
 		return
 	}
 
 	knowledge.ParseStatus = types.ParseStatusFailed
-	knowledge.ErrorMessage = fmt.Sprintf("failed to get embedding model: %v", cause)
+	knowledge.ErrorMessage = fmt.Sprintf("%s: %v", what, cause)
 	knowledge.UpdatedAt = time.Now()
 	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
-		logger.Errorf(ctx, "failed to persist embedding model failure for %s: %v", knowledge.ID, err)
+		logger.Errorf(ctx, "failed to persist %q for %s: %v", what, knowledge.ID, err)
 	}
 	s.beginStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
 		"model_id": kb.EmbeddingModelID,
@@ -295,8 +304,7 @@ func (s *knowledgeService) failKnowledgeOnEmbeddingModel(
 	// The span's error_message is what the timeline renders, and its
 	// error_detail is withheld from non-admin responses — so carry the same
 	// text the document list shows rather than a fixed generic string.
-	s.failStage(ctx, knowledge.ID, types.StageEmbedding,
-		werrors.ErrCodeEmbeddingProviderFail, knowledge.ErrorMessage, cause)
+	s.failStage(ctx, knowledge.ID, types.StageEmbedding, code, knowledge.ErrorMessage, cause)
 }
 
 // buildSplitterConfigFromChunking normalizes effective chunking settings with
@@ -400,7 +408,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
-	if err == nil && embeddingModel != nil {
+	if err != nil && embeddingModel != nil {
+		// Indexing below dereferences the engine; a nil one would panic.
+		logger.Errorf(ctx, "processChunks resolve vector store for KB %s failed: %v", kb.ID, err)
+		s.failKnowledgeAtEmbedding(ctx, kb, knowledge, werrors.ErrCodeVectorStoreWriteFailed,
+			"failed to resolve vector store", err)
+		return
+	}
+	if embeddingModel != nil {
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
 			// 不返回错误，继续处理（可能没有旧数据）
