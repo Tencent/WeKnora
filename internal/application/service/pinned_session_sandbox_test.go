@@ -67,7 +67,7 @@ func (m *stubPinnedManager) ExecShellCommand(
 func TestPinnedSessionSandboxBoundSandboxIDUsesPinnedManager(t *testing.T) {
 	mgr := &stubPinnedManager{id: "sbx-1", ok: true}
 	resolver := &stubTenantSandboxResolver{mgr: mgr}
-	access := NewPinnedSessionSandbox(stubPinReader{configID: "cfg-1"}, resolver, nil)
+	access := NewPinnedSessionSandbox(stubPinReader{configID: "cfg-1"}, resolver, nil, nil)
 
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(9))
 	id, ok := access.BoundSandboxID(ctx, "sess-1")
@@ -81,7 +81,7 @@ func TestPinnedSessionSandboxBoundSandboxIDUsesPinnedManager(t *testing.T) {
 
 func TestPinnedSessionSandboxBoundSandboxIDSkipsWhenUnpinned(t *testing.T) {
 	resolver := &stubTenantSandboxResolver{mgr: &stubPinnedManager{id: "sbx-1", ok: true}}
-	access := NewPinnedSessionSandbox(stubPinReader{}, resolver, nil)
+	access := NewPinnedSessionSandbox(stubPinReader{}, resolver, nil, nil)
 
 	id, ok := access.BoundSandboxID(context.Background(), "sess-1")
 
@@ -116,6 +116,7 @@ func TestPinnedSessionSandboxHasActiveTurnDelegates(t *testing.T) {
 		stubPinReader{configID: "cfg-1"},
 		&stubTenantSandboxResolver{mgr: mgr},
 		nil,
+		nil,
 	)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(9))
 
@@ -128,6 +129,7 @@ func TestPinnedSessionSandboxHasActiveTurnWhenManagerLacksMethod(t *testing.T) {
 	access := NewPinnedSessionSandbox(
 		stubPinReader{configID: "cfg-1"},
 		&stubTenantSandboxResolver{mgr: &stubPinnedManager{id: "sbx-1", ok: true}},
+		nil,
 		nil,
 	)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(9))
@@ -142,6 +144,7 @@ func TestPinnedSessionSandboxCreateForkSnapshotDelegates(t *testing.T) {
 	access := NewPinnedSessionSandbox(
 		stubPinReader{configID: "cfg-1"},
 		&stubTenantSandboxResolver{mgr: mgr},
+		nil,
 		nil,
 	)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(9))
@@ -158,9 +161,77 @@ func TestPinnedSessionSandboxCreateForkSnapshotErrorsWhenUnsupported(t *testing.
 		stubPinReader{configID: "cfg-1"},
 		&stubTenantSandboxResolver{mgr: &stubPinnedManager{id: "sbx-1", ok: true}},
 		nil,
+		nil,
 	)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(9))
 
 	_, err := access.CreateForkSnapshot(ctx, "sess-1", "fork-name")
 	require.Error(t, err)
+}
+
+type stubHostPinnedManager struct {
+	stubPinnedManager
+}
+
+func (m *stubHostPinnedManager) GetType() sandbox.SandboxType { return sandbox.SandboxTypeHost }
+
+func TestPinnedSessionSandboxVersionsWorkspaceFalseWhenHostResolved(t *testing.T) {
+	host := &stubHostPinnedManager{}
+	access := NewPinnedSessionSandbox(
+		stubPinReader{},
+		&stubTenantSandboxResolver{mgr: &stubPinnedManager{id: "sbx-1", ok: true}},
+		nil,
+		NewHostSessionResolver(stubPinReader{}, host),
+	)
+
+	require.False(t, access.VersionsWorkspace(context.Background(), "sess-1"))
+	_, err := access.ExecShellCommand(context.Background(), "sess-1", "true", "", time.Second, nil)
+	require.Error(t, err, "manager() must not fall back to host")
+	require.Zero(t, host.execs, "must not hand ExecShellCommand a live host runner")
+}
+
+func TestPinnedSessionSandboxVersionsWorkspaceTrueWithoutPinOrHost(t *testing.T) {
+	access := NewPinnedSessionSandbox(stubPinReader{}, &stubTenantSandboxResolver{}, nil, nil)
+
+	require.True(t, access.VersionsWorkspace(context.Background(), "sess-1"),
+		"without host, fork must keep the remote degrade chain rather than pretend this is host")
+}
+
+func TestPinnedSessionSandboxVersionsWorkspaceFalseWhenManagerTypeIsHost(t *testing.T) {
+	mgr := &stubHostPinnedManager{}
+	access := NewPinnedSessionSandbox(
+		stubPinReader{configID: "cfg-1"},
+		&stubTenantSandboxResolver{mgr: mgr},
+		nil,
+		nil,
+	)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(9))
+
+	require.False(t, access.VersionsWorkspace(ctx, "sess-1"))
+}
+
+func TestHostManagerForReturnsHostWhenSessionHasNoNamedConfig(t *testing.T) {
+	host := stubHostManager{}
+	r := NewHostSessionResolver(stubPinReader{}, host)
+
+	require.Equal(t, host, r.HostManagerFor(context.Background(), "s1"))
+}
+
+func TestHostManagerForNilWhenSessionHasNamedConfig(t *testing.T) {
+	r := NewHostSessionResolver(stubPinReader{configID: "cfg-1"}, stubHostManager{})
+
+	require.Nil(t, r.HostManagerFor(context.Background(), "s1"))
+}
+
+func TestHostManagerForNilWhenHostMissing(t *testing.T) {
+	r := NewHostSessionResolver(stubPinReader{}, nil)
+
+	require.Nil(t, r.HostManagerFor(context.Background(), "s1"))
+}
+
+func TestHostManagerForTreatsGlobalDefaultAsUnnamed(t *testing.T) {
+	host := stubHostManager{}
+	r := NewHostSessionResolver(stubPinReader{configID: types.SandboxConfigIDGlobalDefault}, host)
+
+	require.Equal(t, host, r.HostManagerFor(context.Background(), "s1"))
 }

@@ -128,6 +128,7 @@ type sessionService struct {
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
 	sandboxPolicy         WorkspaceSandboxPolicy
+	hostSandbox           sandbox.Manager
 	memoryService         interfaces.MemoryService // Service for cross-session long-term memory
 	// sandboxConfigRepo and tenantSkillRepo answer "which installed skills can
 	// this turn actually invoke". They are repositories rather than
@@ -160,6 +161,7 @@ func NewSessionService(cfg *config.Config,
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	hostSandbox HostSandboxManager,
 	memoryService interfaces.MemoryService,
 	sandboxConfigRepo repository.TenantSandboxConfigRepository,
 	tenantSkillRepo repository.TenantSkillRepository,
@@ -184,6 +186,7 @@ func NewSessionService(cfg *config.Config,
 		sandboxResolver:       sandboxResolver,
 		sandboxPinner:         sandboxPinner,
 		sandboxPolicy:         sandboxPolicy,
+		hostSandbox:           hostSandbox.Manager,
 		memoryService:         memoryService,
 		sandboxConfigRepo:     sandboxConfigRepo,
 		tenantSkillRepo:       tenantSkillRepo,
@@ -730,6 +733,10 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	if mgr == nil {
 		return
 	}
+	if mgr.GetType() == sandbox.SandboxTypeHost {
+		// Deleting a chat is not deleting the user's directory.
+		return
+	}
 	destroyer, ok := mgr.(interface {
 		DestroySession(context.Context, string) error
 	})
@@ -1046,8 +1053,10 @@ func (s *sessionService) holdSandboxTurn(
 	if s.sandboxResolver == nil || tenantID == 0 {
 		return releaseGate, nil
 	}
-	mgr, err := resolveTenantSandboxForConfig(
-		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
+	mgr, _, err := resolveSandboxForExecution(
+		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+		tenantID, sessionID, configID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox),
 	)
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] resolve config %s to begin turn of session %s failed: %v",

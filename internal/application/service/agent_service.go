@@ -117,6 +117,7 @@ type agentService struct {
 	sandboxResolver      sandbox.TenantSandboxResolver
 	sandboxPinner        *SessionSandboxPinner
 	sandboxPolicy        WorkspaceSandboxPolicy
+	hostSandbox          sandbox.Manager
 }
 
 // NewAgentService creates a new agent service
@@ -143,6 +144,7 @@ func NewAgentService(
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	hostSandbox HostSandboxManager,
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
 ) interfaces.AgentService {
@@ -171,6 +173,7 @@ func NewAgentService(
 		sandboxResolver:      sandboxResolver,
 		sandboxPinner:        sandboxPinner,
 		sandboxPolicy:        sandboxPolicy,
+		hostSandbox:          hostSandbox.Manager,
 	}
 }
 
@@ -513,7 +516,7 @@ func (s *agentService) registerSandboxShellIfAllowed(
 	sessionID string,
 	config *types.AgentConfig,
 ) {
-	if config == nil || (!config.SkillsEnabled && !config.SkillInstallMode()) {
+	if config == nil {
 		return
 	}
 	sandboxMgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
@@ -522,6 +525,13 @@ func (s *agentService) registerSandboxShellIfAllowed(
 		return
 	}
 	if sandboxMgr == nil {
+		return
+	}
+	// Remote backends keep the skills entitlement: a shell there only exists
+	// to serve skill scripts. The host backend IS the feature, so gating it on
+	// skills would leave Lite with a sandbox nobody can reach.
+	if sandboxMgr.GetType() != sandbox.SandboxTypeHost &&
+		!config.SkillsEnabled && !config.SkillInstallMode() {
 		return
 	}
 	s.registerSandboxShellTool(ctx, toolRegistry, sandboxMgr, config)
@@ -547,6 +557,7 @@ func (s *agentService) resolveWorkspaceSandbox(
 	sandboxMgr, _, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		tenantID, sessionID, configID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox),
 	)
 	if err != nil {
 		return nil, err
@@ -593,6 +604,7 @@ func (s *agentService) initializeSkillsManager(
 	sandboxMgr, pin, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		tenantID, sessionID, config.SandboxConfigID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)

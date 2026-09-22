@@ -201,6 +201,7 @@ func (s *sessionService) AgentQA(
 	if mgr, _, layoutErr := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		req.Session.TenantID, sessionID, agentConfig.SandboxConfigID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox),
 	); layoutErr == nil {
 		if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
 			sessionLayout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
