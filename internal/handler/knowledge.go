@@ -42,17 +42,35 @@ type KnowledgeHandler struct {
 // backlogProbe tells a backlogged document (work still queued) from a stuck
 // one; HousekeepingService implements it with the sweep's own probes.
 type backlogProbe interface {
-	QueuedWork(ctx context.Context, ids []string) map[string]bool
+	QueuedWork(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
-const (
-	// stallHintAfter is when a quiet in-flight row gets the "may be stuck"
-	// hint; keep in step with PROCESSING_STALL_THRESHOLD_MS in the frontend.
-	// Only such rows are probed for a backlog.
-	stallHintAfter = 20 * time.Minute
-	// maxBacklogProbes caps the queue scans a single request may trigger.
-	maxBacklogProbes = 20
-)
+// stallHintAfter is how long an in-flight row may go without progress before
+// it gets a stall verdict; keep in step with PROCESSING_STALL_THRESHOLD_MS in
+// the frontend.
+const stallHintAfter = 20 * time.Minute
+
+// stallVerdicts probes ids (all quiet past stallHintAfter) and returns each
+// one's StallState. Nil when the probe is unavailable or failed: an unknown
+// row gets no verdict rather than being called stuck.
+func (h *KnowledgeHandler) stallVerdicts(ctx context.Context, ids []string) map[string]string {
+	if h.backlog == nil || len(ids) == 0 {
+		return nil
+	}
+	queued, err := h.backlog.QueuedWork(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "backlog probe failed: %v", err)
+		return nil
+	}
+	out := make(map[string]string, len(ids))
+	for _, id := range ids {
+		out[id] = types.StallStateStalled
+		if queued[id] {
+			out[id] = types.StallStateQueued
+		}
+	}
+	return out
+}
 
 // NewKnowledgeHandler creates a new knowledge handler instance
 func NewKnowledgeHandler(
@@ -702,8 +720,10 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 	if isParseInFlight(knowledge.ParseStatus) {
 		last := spansLastActivity(knowledge.UpdatedAt, rows)
 		resp["last_activity_at"] = last
-		if h.backlog != nil && time.Since(last) >= stallHintAfter {
-			resp["waiting_in_queue"] = h.backlog.QueuedWork(ctx, []string{knowledge.ID})[knowledge.ID]
+		if time.Since(last) >= stallHintAfter {
+			if verdict := h.stallVerdicts(ctx, []string{knowledge.ID})[knowledge.ID]; verdict != "" {
+				resp["stall_state"] = verdict
+			}
 		}
 	}
 	if lastError := knowledgeSpansLastError(
@@ -1821,7 +1841,7 @@ func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []
 			logger.Warnf(ctx, "span last activity lookup failed: %v", err)
 		}
 	}
-	quiet := make(map[string][]*types.Knowledge)
+	var quiet []*types.Knowledge
 	var quietIDs []string
 	for _, k := range knowledges {
 		if k == nil || !isParseInFlight(k.ParseStatus) {
@@ -1830,19 +1850,13 @@ func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []
 		last := latestActivity(k.UpdatedAt, spanActivity[k.ID])
 		k.LastActivityAt = &last
 		if time.Since(last) >= stallHintAfter {
-			if _, seen := quiet[k.ID]; !seen && len(quietIDs) < maxBacklogProbes {
-				quietIDs = append(quietIDs, k.ID)
-			}
-			quiet[k.ID] = append(quiet[k.ID], k)
+			quiet = append(quiet, k)
+			quietIDs = append(quietIDs, k.ID)
 		}
 	}
-	if h.backlog == nil || len(quietIDs) == 0 {
-		return
-	}
-	for id, queued := range h.backlog.QueuedWork(ctx, quietIDs) {
-		for _, k := range quiet[id] {
-			k.WaitingInQueue = queued
-		}
+	verdicts := h.stallVerdicts(ctx, quietIDs)
+	for _, k := range quiet {
+		k.StallState = verdicts[k.ID]
 	}
 }
 

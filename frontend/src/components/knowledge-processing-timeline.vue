@@ -11,7 +11,7 @@ import {
   type KnowledgeTraceNode,
 } from '@/utils/knowledgeTrace'
 import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
-import { stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall'
+import { shownStall, stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall'
 import { axisGridStepPct, buildAxisTicks, computeTraceAxis } from '@/utils/traceAxis'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
@@ -35,8 +35,8 @@ interface SpansResponse {
   last_error?: LastError | null
   // Latest row or span write; only sent while the parse is in flight.
   last_activity_at?: string
-  // Quiet, but its work is still queued: backlogged rather than stuck.
-  waiting_in_queue?: boolean
+  // Server verdict once quiet past the stall hint: 'queued' or 'stalled'.
+  stall_state?: string
 }
 
 // IMPORTANT: Vue 3 coerces missing Boolean props to `false`, NOT
@@ -1647,14 +1647,15 @@ const processConfigLines = computed<string[]>(() => {
             </button>
           </div>
 
-          <div v-if="stalledMin > 0 && data?.waiting_in_queue" class="kp-stall kp-stall-queued" role="status">
+          <div v-if="shownStall(data?.stall_state, stalledMin) === 'queued'" class="kp-stall kp-stall-queued"
+            role="status">
             <t-icon name="time" size="16px" class="kp-stall-icon" />
             <div class="kp-stall-body">
               <div class="kp-stall-title">{{ t('knowledgeStages.stall.queuedTitle', { minutes: stalledMin }) }}</div>
               <div class="kp-stall-hint">{{ t('knowledgeStages.stall.queuedHint') }}</div>
             </div>
           </div>
-          <div v-else-if="stalledMin > 0" class="kp-stall" role="status">
+          <div v-else-if="shownStall(data?.stall_state, stalledMin) === 'stalled'" class="kp-stall" role="status">
             <t-icon name="time" size="16px" class="kp-stall-icon" />
             <div class="kp-stall-body">
               <div class="kp-stall-title">{{ t('knowledgeStages.stall.title', { minutes: stalledMin }) }}</div>

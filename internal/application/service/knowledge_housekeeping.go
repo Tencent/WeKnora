@@ -59,17 +59,13 @@ type HousekeepingService struct {
 	kickMu    sync.Mutex
 	wikiKicks map[string]time.Time
 
-	queuedMu    sync.Mutex
-	queuedCache map[string]queuedProbe
+	queuedMu  sync.Mutex
+	queuedIDs map[string]struct{}
+	queuedAt  time.Time
 }
 
-type queuedProbe struct {
-	queued bool
-	at     time.Time
-}
-
-// queuedProbeTTL bounds how often QueuedWork rescans the queue for one
-// document; clients poll far more often than a backlog changes.
+// queuedProbeTTL bounds how often QueuedWork rescans the queue; clients poll
+// far more often than a backlog changes.
 const queuedProbeTTL = time.Minute
 
 // NewHousekeepingService constructs a HousekeepingService. It does NOT start
@@ -79,12 +75,11 @@ func NewHousekeepingService(
 	db *gorm.DB, cfg *config.Config, inspector interfaces.TaskInspector, task interfaces.TaskEnqueuer,
 ) *HousekeepingService {
 	return &HousekeepingService{
-		db:          db,
-		cfg:         cfg,
-		inspector:   inspector,
-		task:        task,
-		wikiKicks:   make(map[string]time.Time),
-		queuedCache: make(map[string]queuedProbe),
+		db:        db,
+		cfg:       cfg,
+		inspector: inspector,
+		task:      task,
+		wikiKicks: make(map[string]time.Time),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
@@ -622,63 +617,55 @@ func (h *HousekeepingService) filterOutQueued(
 
 // QueuedWork reports which of ids still have work waiting in the queue or in
 // the durable Wiki table, i.e. are backlogged rather than stuck, using the
-// same probes as the sweep. Results are cached for queuedProbeTTL. Unknown
-// (a probe failed) reads as not queued.
-func (h *HousekeepingService) QueuedWork(ctx context.Context, ids []string) map[string]bool {
+// same probes as the sweep. The queue side is one shared scan (see
+// queuedSnapshot), so answering a whole page costs one DB query. An error
+// means the answer is unknown.
+func (h *HousekeepingService) QueuedWork(ctx context.Context, ids []string) (map[string]bool, error) {
 	out := make(map[string]bool, len(ids))
-	now := time.Now()
-	var misses []string
-	h.queuedMu.Lock()
-	for _, id := range ids {
-		if probe, ok := h.queuedCache[id]; ok && now.Sub(probe.at) < queuedProbeTTL {
-			out[id] = probe.queued
-			continue
-		}
-		misses = append(misses, id)
+	if len(ids) == 0 {
+		return out, nil
 	}
-	h.queuedMu.Unlock()
-	if len(misses) == 0 {
-		return out
-	}
-
 	var durableIDs []string
 	if err := h.db.WithContext(ctx).
 		Model(&types.TaskPendingOp{}).
 		Where("task_type = ? AND scope = ? AND op = ? AND dedup_key IN ?",
-			wikiTaskType, wikiTaskScope, WikiOpIngest, misses).
+			wikiTaskType, wikiTaskScope, WikiOpIngest, ids).
 		Distinct("dedup_key").
 		Pluck("dedup_key", &durableIDs).Error; err != nil {
-		logger.Warnf(ctx, "[Housekeeping] durable queue probe failed: %v", err)
-		return out
+		return nil, fmt.Errorf("durable queue probe: %w", err)
 	}
-	durable := make(map[string]bool, len(durableIDs))
+	queued, err := h.queuedSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		_, out[id] = queued[id]
+	}
 	for _, id := range durableIDs {
-		durable[id] = true
+		out[id] = true
 	}
-	fresh := make(map[string]bool, len(misses))
-	for _, id := range misses {
-		queued := durable[id]
-		if !queued && h.inspector != nil {
-			var err error
-			if queued, err = h.inspector.HasQueuedTasksForKnowledge(ctx, id); err != nil {
-				logger.Warnf(ctx, "[Housekeeping] queue probe failed for %s: %v", id, err)
-				continue
-			}
-		}
-		fresh[id] = queued
-		out[id] = queued
+	return out, nil
+}
+
+// queuedSnapshot returns the knowledge IDs referenced by queued tasks. One
+// scan of the whole queue serves every caller for queuedProbeTTL; concurrent
+// callers wait for the scan in flight rather than starting their own. A
+// failed scan is not cached.
+func (h *HousekeepingService) queuedSnapshot(ctx context.Context) (map[string]struct{}, error) {
+	if h.inspector == nil {
+		return nil, nil
 	}
 	h.queuedMu.Lock()
-	for id, queued := range fresh {
-		h.queuedCache[id] = queuedProbe{queued: queued, at: now}
+	defer h.queuedMu.Unlock()
+	if h.queuedIDs != nil && time.Since(h.queuedAt) < queuedProbeTTL {
+		return h.queuedIDs, nil
 	}
-	for id, probe := range h.queuedCache {
-		if now.Sub(probe.at) >= queuedProbeTTL {
-			delete(h.queuedCache, id)
-		}
+	ids, err := h.inspector.QueuedKnowledgeIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("queue probe: %w", err)
 	}
-	h.queuedMu.Unlock()
-	return out
+	h.queuedIDs, h.queuedAt = ids, time.Now()
+	return ids, nil
 }
 
 // rearmWikiTriggers enqueues one wiki ingest trigger per KB whose stale rows

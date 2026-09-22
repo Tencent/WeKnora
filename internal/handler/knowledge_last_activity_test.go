@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -77,34 +78,57 @@ func TestSpansLastActivity(t *testing.T) {
 
 type fakeBacklog struct {
 	queued map[string]bool
+	err    error
 	asked  []string
 }
 
-func (f *fakeBacklog) QueuedWork(_ context.Context, ids []string) map[string]bool {
+func (f *fakeBacklog) QueuedWork(_ context.Context, ids []string) (map[string]bool, error) {
 	f.asked = append(f.asked, ids...)
+	if f.err != nil {
+		return nil, f.err
+	}
 	out := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		out[id] = f.queued[id]
 	}
-	return out
+	return out, nil
 }
 
-// Only rows quiet past the stall hint are probed, and a backlogged one is
-// told apart from a stuck one.
-func TestAttachLastActivityFlagsBackloggedRows(t *testing.T) {
+// Every row quiet past the stall hint gets a verdict, however many there
+// are; rows still progressing are not probed.
+func TestAttachLastActivityGivesEveryQuietRowAVerdict(t *testing.T) {
 	now := time.Now()
-	backlog := &fakeBacklog{queued: map[string]bool{"quiet-queued": true}}
+	backlog := &fakeBacklog{queued: map[string]bool{"quiet-0": true}}
 	h := &KnowledgeHandler{spanRepo: &lastActivitySpanRepo{}, backlog: backlog}
-	rows := []*types.Knowledge{
-		{ID: "recent", ParseStatus: types.ParseStatusProcessing, UpdatedAt: now.Add(-time.Minute)},
-		{ID: "quiet-queued", ParseStatus: types.ParseStatusFinalizing, UpdatedAt: now.Add(-time.Hour)},
-		{ID: "quiet-stuck", ParseStatus: types.ParseStatusProcessing, UpdatedAt: now.Add(-time.Hour)},
+	rows := []*types.Knowledge{{ID: "recent", ParseStatus: types.ParseStatusProcessing, UpdatedAt: now}}
+	for i := 0; i < 40; i++ {
+		rows = append(rows, &types.Knowledge{
+			ID: fmt.Sprintf("quiet-%d", i), ParseStatus: types.ParseStatusProcessing, UpdatedAt: now.Add(-time.Hour),
+		})
 	}
 
 	h.attachLastActivity(context.Background(), rows)
 
-	assert.ElementsMatch(t, []string{"quiet-queued", "quiet-stuck"}, backlog.asked)
-	assert.False(t, rows[0].WaitingInQueue)
-	assert.True(t, rows[1].WaitingInQueue)
-	assert.False(t, rows[2].WaitingInQueue)
+	assert.Len(t, backlog.asked, 40)
+	assert.Empty(t, rows[0].StallState)
+	assert.Equal(t, types.StallStateQueued, rows[1].StallState)
+	for _, k := range rows[2:] {
+		assert.Equal(t, types.StallStateStalled, k.StallState, k.ID)
+	}
+}
+
+// A failed probe leaves the verdict unknown instead of calling rows stuck.
+func TestAttachLastActivityLeavesVerdictUnknownWhenProbeFails(t *testing.T) {
+	h := &KnowledgeHandler{
+		spanRepo: &lastActivitySpanRepo{},
+		backlog:  &fakeBacklog{err: errors.New("redis down")},
+	}
+	rows := []*types.Knowledge{
+		{ID: "quiet", ParseStatus: types.ParseStatusProcessing, UpdatedAt: time.Now().Add(-time.Hour)},
+	}
+
+	h.attachLastActivity(context.Background(), rows)
+
+	require.NotNil(t, rows[0].LastActivityAt)
+	assert.Empty(t, rows[0].StallState)
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { stalledMinutes, PROCESSING_STALL_THRESHOLD_MS } from './knowledgeProcessingStall.ts'
+import { shownStall, stalledMinutes, PROCESSING_STALL_THRESHOLD_MS } from './knowledgeProcessingStall.ts'
 
 const now = Date.parse('2026-09-22T10:00:00Z')
 const ago = (ms: number) => new Date(now - ms).toISOString()
@@ -17,4 +17,12 @@ test('recent activity, finished rows and unknown activity are not stalled', () =
   assert.equal(stalledMinutes({ parse_status: 'failed', last_activity_at: ago(3600000) }, now), 0)
   assert.equal(stalledMinutes({ parse_status: 'processing' }, now), 0)
   assert.equal(stalledMinutes({ parse_status: 'processing', last_activity_at: 'not a date' }, now), 0)
+})
+
+test('only a server verdict on a still-quiet document is shown', () => {
+  assert.equal(shownStall('queued', 25), 'queued')
+  assert.equal(shownStall('stalled', 25), 'stalled')
+  assert.equal(shownStall(undefined, 25), '', 'no verdict: the probe failed or was not run')
+  assert.equal(shownStall('stalled', 0), '', 'progress resumed since the verdict')
+  assert.equal(shownStall('bogus', 25), '')
 })

@@ -22,3 +22,14 @@ export function stalledMinutes(item: ProcessingActivity, now: number = Date.now(
   const idle = now - last
   return idle >= PROCESSING_STALL_THRESHOLD_MS ? Math.floor(idle / 60000) : 0
 }
+
+export type StallVerdict = 'queued' | 'stalled' | ''
+
+// shownStall is the stall verdict to display: the server's stall_state, and
+// only while the document is still quiet past the threshold. No verdict
+// (not sent, or the server could not probe the queue) shows as ordinary
+// processing: calling a backlogged document stuck invites stopping it.
+export function shownStall(stallState: string | undefined, minutes: number | undefined): StallVerdict {
+  if (!minutes) return ''
+  return stallState === 'queued' || stallState === 'stalled' ? stallState : ''
+}

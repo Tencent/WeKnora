@@ -6,6 +6,7 @@ import KnowledgeTagPopover from './KnowledgeTagPopover.vue';
 import DocumentFileIcon from './DocumentFileIcon.vue';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
+import { shownStall } from '@/utils/knowledgeProcessingStall';
 
 interface Tag {
   id: string;
@@ -30,7 +31,7 @@ interface KnowledgeItem {
   channel?: string;
   isMore?: boolean;
   stalled_minutes?: number;
-  waiting_in_queue?: boolean;
+  stall_state?: string;
 }
 
 const props = defineProps<{
@@ -121,7 +122,8 @@ interface StatusInfo {
   hint?: string;
 }
 const computeStatus = (item: KnowledgeItem): StatusInfo => {
-  if (item.stalled_minutes && item.waiting_in_queue) {
+  const stall = shownStall(item.stall_state, item.stalled_minutes);
+  if (stall === 'queued') {
     return {
       label: t('knowledgeBase.statusQueued'),
       theme: 'default',
@@ -129,7 +131,7 @@ const computeStatus = (item: KnowledgeItem): StatusInfo => {
       hint: t('knowledgeBase.queuedHint', { minutes: item.stalled_minutes }),
     };
   }
-  if (item.stalled_minutes) {
+  if (stall === 'stalled') {
     return {
       label: t('knowledgeBase.statusStalled'),
       theme: 'warning',

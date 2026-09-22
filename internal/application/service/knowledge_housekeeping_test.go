@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -152,6 +153,19 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 		return false, f.err
 	}
 	return f.queued[knowledgeID], nil
+}
+
+func (f fakeTaskInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[string]struct{})
+	for id, queued := range f.queued {
+		if queued {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
 }
 
 func (f fakeTaskInspector) HasQueuedDeleteTasksForKnowledge(
@@ -618,29 +632,58 @@ func TestStallMessageOmitsTimeWithoutHeartbeat(t *testing.T) {
 		"task stuck in processing at docreader stage: no progress for > 1h10m0s, recovered by housekeeping", msg)
 }
 
-// QueuedWork answers from the durable Wiki table and the queue, and caches
-// the answer so polling clients do not rescan the queue.
-func TestHousekeeping_QueuedWorkProbesAndCaches(t *testing.T) {
+// QueuedWork answers a whole batch from the durable Wiki table plus one shared
+// queue scan, reuses that scan across calls, and reports a failed scan as an
+// error without caching it.
+func TestHousekeeping_QueuedWorkSharesOneQueueScan(t *testing.T) {
 	db := setupHousekeepingDB(t)
 	inspector := &countingTaskInspector{queued: map[string]bool{"k-queued": true}}
 	svc := newHousekeepingSvcWithInspector(db, inspector)
 	insertWikiPendingOp(t, db, "kb-1", "k-wiki")
+	ids := []string{"k-wiki", "k-queued"}
+	for i := 0; i < 40; i++ {
+		ids = append(ids, fmt.Sprintf("k-idle-%d", i))
+	}
 
-	got := svc.QueuedWork(context.Background(), []string{"k-wiki", "k-queued", "k-idle"})
-	assert.Equal(t, map[string]bool{"k-wiki": true, "k-queued": true, "k-idle": false}, got)
-	assert.Equal(t, 2, inspector.calls, "the durable hit needs no queue scan")
+	got, err := svc.QueuedWork(context.Background(), ids)
+	require.NoError(t, err)
+	assert.Len(t, got, len(ids))
+	assert.True(t, got["k-wiki"])
+	assert.True(t, got["k-queued"])
+	assert.False(t, got["k-idle-39"])
+	assert.Equal(t, 1, inspector.scans, "one scan answers the whole batch")
 
-	svc.QueuedWork(context.Background(), []string{"k-queued", "k-idle"})
-	assert.Equal(t, 2, inspector.calls, "cached answers are reused")
+	_, err = svc.QueuedWork(context.Background(), []string{"k-queued"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, inspector.scans, "the scan is reused within its TTL")
+
+	svc.queuedAt = time.Now().Add(-2 * queuedProbeTTL)
+	inspector.err = errors.New("redis down")
+	_, err = svc.QueuedWork(context.Background(), []string{"k-queued"})
+	require.Error(t, err)
+	inspector.err = nil
+	_, err = svc.QueuedWork(context.Background(), []string{"k-queued"})
+	require.NoError(t, err)
+	assert.Equal(t, 3, inspector.scans, "a failed scan is not cached")
 }
 
 type countingTaskInspector struct {
 	fakeTaskInspector
 	queued map[string]bool
-	calls  int
+	err    error
+	scans  int
 }
 
-func (f *countingTaskInspector) HasQueuedTasksForKnowledge(_ context.Context, id string) (bool, error) {
-	f.calls++
-	return f.queued[id], nil
+func (f *countingTaskInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	f.scans++
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[string]struct{})
+	for id, queued := range f.queued {
+		if queued {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
 }
