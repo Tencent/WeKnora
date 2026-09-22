@@ -137,6 +137,60 @@ func TestFixedEstimateShrinksWhenItOvershootsTheRequest(t *testing.T) {
 	require.Greater(t, got.SystemPrompt, 0)
 }
 
+// When memory+skills consume the whole system message, SystemPrompt is 0 and
+// cannot absorb a negative rounding remainder after scaling. Shrink must still
+// leave the eight buckets summing to promptTokens.
+func TestShrinkedFixedBucketsSumToPromptWhenSystemPromptCannotAbsorb(t *testing.T) {
+	a := newTestAttributor(t)
+	est, err := token.NewEstimator()
+	require.NoError(t, err)
+
+	msgs := []chat.Message{
+		{Role: "system", Content: "You are a helpful agent."},
+		{Role: "user", Content: "hi"},
+	}
+	sys := est.EstimateMessage(&msgs[0])
+	secs := map[string]int{SectionMemory: sys, SectionSkills: 0}
+	tools := testTools()
+
+	estimated := a.Attribute(msgs, tools, secs, 0)
+	require.Zero(t, estimated.SystemPrompt)
+	require.Greater(t, estimated.Tools+estimated.MCP, 0)
+	require.Greater(t, estimated.Memory+estimated.Skills+estimated.Tools+estimated.MCP, 12)
+
+	a.kFixed = 1.4 // poisoned scale; shrink path must clear it
+	got := a.Attribute(msgs, tools, secs, 12)
+
+	require.Equal(t, 12, got.Total)
+	require.Equal(t, 12, sum(got), "buckets must reconcile after shrink")
+	require.Zero(t, got.Conversation)
+	require.Zero(t, got.Reasoning)
+	require.Zero(t, got.ToolResults)
+	require.GreaterOrEqual(t, got.SystemPrompt, 0)
+	require.GreaterOrEqual(t, got.Memory, 0)
+	require.GreaterOrEqual(t, got.Skills, 0)
+	require.GreaterOrEqual(t, got.Tools, 0)
+	require.GreaterOrEqual(t, got.MCP, 0)
+	require.Equal(t, 1.0, a.kFixed, "overshoot must reset kFixed so the lock cannot poison the next round")
+
+	// Changed fingerprint: unlocked fixed estimate, not a 1.4× scale of the prior lock.
+	next := a.Attribute(msgs, nil, secs, 0)
+	require.Zero(t, next.Tools)
+	require.Zero(t, next.MCP)
+	require.Equal(t, 1.0, a.kFixed)
+}
+
+func TestShrinkToAbsorbsRoundingDeficitFromLargestBucket(t *testing.T) {
+	// Two equal positive buckets round up past budget; SystemPrompt is 0 so the
+	// old clamp left sum > budget.
+	got := shrinkTo(fixed{Tools: 100, MCP: 100}, 3)
+	require.Equal(t, 3, got.sum())
+	require.GreaterOrEqual(t, got.SystemPrompt, 0)
+	require.GreaterOrEqual(t, got.Tools, 0)
+	require.GreaterOrEqual(t, got.MCP, 0)
+	require.Zero(t, got.SystemPrompt)
+}
+
 func TestToolChangeRelocksTheFixedBuckets(t *testing.T) {
 	a := newTestAttributor(t)
 

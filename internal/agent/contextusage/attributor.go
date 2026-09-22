@@ -278,11 +278,38 @@ func shrinkTo(f fixed, budget int) fixed {
 		return fixed{}
 	}
 	out := f.scaled(float64(budget) / float64(total))
-	out.SystemPrompt += budget - out.sum()
-	if out.SystemPrompt < 0 {
-		out.SystemPrompt = 0
-	}
+	// Rounding can push the scaled sum past the budget. The system prompt is
+	// often the bucket that should absorb that, and it is also often zero —
+	// clamping a negative remainder there used to leave the buckets above Total.
+	adjust(&out, budget-out.sum())
 	return out
+}
+
+// adjust moves delta onto the buckets without going negative. A surplus lands
+// on the largest bucket. A deficit is peeled from the largest positive buckets.
+func adjust(f *fixed, delta int) {
+	buckets := []*int{&f.SystemPrompt, &f.Memory, &f.Skills, &f.Tools, &f.MCP}
+	for delta != 0 {
+		var best *int
+		for _, b := range buckets {
+			if delta < 0 && *b <= 0 {
+				continue
+			}
+			if best == nil || *b > *best {
+				best = b
+			}
+		}
+		if best == nil {
+			return
+		}
+		if delta > 0 {
+			*best += delta
+			return
+		}
+		take := min(-delta, *best)
+		*best -= take
+		delta += take
+	}
 }
 
 func setFixed(u *types.ContextUsage, f fixed) {
