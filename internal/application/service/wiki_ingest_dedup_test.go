@@ -283,6 +283,40 @@ func TestExactIdentityTargetSameTypeOnly(t *testing.T) {
 	}
 }
 
+// TestExactIdentityTargetCrossTypeFallback covers issue #3526: a re-ingest
+// may judge the same real-world thing as the other page type. Without a
+// same-type page, the existing cross-type page must be reused instead of
+// materializing a concept/X + entity/X twin.
+func TestExactIdentityTargetCrossTypeFallback(t *testing.T) {
+	item := extractedItem{Name: "孔子", Slug: "entity/kong-zi"}
+	pages := map[string]*types.WikiPageLite{
+		"concept/confucius": {
+			Slug:     "concept/confucius",
+			Title:    "孔子",
+			PageType: types.WikiPageTypeConcept,
+		},
+	}
+	candidates := map[string]bool{"concept/confucius": true}
+	if got := exactIdentityTarget(item, types.WikiPageTypeEntity, candidates, pages); got != "concept/confucius" {
+		t.Fatalf("exactIdentityTarget = %q, want concept/confucius (cross-type reuse)", got)
+	}
+
+	// Same-type match still wins over the cross-type page.
+	pages["entity/confucius"] = &types.WikiPageLite{
+		Slug: "entity/confucius", Title: "孔 子", PageType: types.WikiPageTypeEntity,
+	}
+	candidates["entity/confucius"] = true
+	if got := exactIdentityTarget(item, types.WikiPageTypeEntity, candidates, pages); got != "entity/confucius" {
+		t.Fatalf("exactIdentityTarget = %q, want same-type entity/confucius", got)
+	}
+
+	// Differently-titled cross-type pages must not be reused.
+	other := extractedItem{Name: "孟子", Slug: "entity/mencius"}
+	if got := exactIdentityTarget(other, types.WikiPageTypeEntity, candidates, pages); got != "" {
+		t.Fatalf("exactIdentityTarget = %q, want empty for unrelated title", got)
+	}
+}
+
 func TestWikiIdentityClaimConvergesDifferentSlugs(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {
@@ -569,19 +603,23 @@ func TestWikiIdentityClaimReplacesInvalidRedisValue(t *testing.T) {
 
 type stubNormalizedTitleWiki struct {
 	interfaces.WikiPageService
-	mu    sync.Mutex
-	calls int
-	last  []string
-	pages []*types.WikiPageLite
+	mu          sync.Mutex
+	callsByType map[string]int
+	lastByType  map[string][]string
+	pages       []*types.WikiPageLite
 }
 
 func (s *stubNormalizedTitleWiki) FindPagesByNormalizedTitles(
-	_ context.Context, _, _ string, identities []string,
+	_ context.Context, _, pageType string, identities []string,
 ) ([]*types.WikiPageLite, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls++
-	s.last = append([]string(nil), identities...)
+	if s.callsByType == nil {
+		s.callsByType = make(map[string]int)
+		s.lastByType = make(map[string][]string)
+	}
+	s.callsByType[pageType]++
+	s.lastByType[pageType] = append([]string(nil), identities...)
 	want := make(map[string]bool, len(identities))
 	for _, id := range identities {
 		want[id] = true
@@ -613,8 +651,10 @@ func TestAttachExactIdentityPagesBatchesAndCaches(t *testing.T) {
 	candidatePages := make(map[string]*types.WikiPageLite)
 	itemCandidates := make(map[string]map[string]bool)
 	svc.attachExactIdentityPages(ctx, "kb-1", types.WikiPageTypeEntity, items, candidatePages, itemCandidates, batch)
-	if stub.calls != 1 {
-		t.Fatalf("expected 1 batched lookup, got %d identities=%v", stub.calls, stub.last)
+	// Same-type lookup plus the cross-type safety net (issue #3526) each
+	// batch per run: entity identities + concept identities.
+	if stub.callsByType[types.WikiPageTypeEntity] != 1 || stub.callsByType[types.WikiPageTypeConcept] != 1 {
+		t.Fatalf("expected 1 batched lookup per type, got byType=%v", stub.callsByType)
 	}
 	if !itemCandidates["entity/kong-zi"]["entity/confucius"] || !itemCandidates["entity/kongqiu"]["entity/confucius"] {
 		t.Fatalf("exact page not bound to both romanizations: %#v", itemCandidates)
@@ -624,17 +664,18 @@ func TestAttachExactIdentityPagesBatchesAndCaches(t *testing.T) {
 	}
 
 	svc.attachExactIdentityPages(ctx, "kb-1", types.WikiPageTypeEntity, items, candidatePages, itemCandidates, batch)
-	if stub.calls != 1 {
-		t.Fatalf("batch cache should skip the second lookup, got %d", stub.calls)
+	if stub.callsByType[types.WikiPageTypeEntity] != 1 {
+		t.Fatalf("batch cache should skip the second lookup, got byType=%v", stub.callsByType)
 	}
 
 	svc.attachExactIdentityPages(ctx, "kb-1", types.WikiPageTypeEntity, append(items,
 		extractedItem{Name: "荀子", Slug: "entity/xunzi"},
 	), candidatePages, itemCandidates, batch)
-	if stub.calls != 2 {
-		t.Fatalf("cache miss should query only the new identity, got %d last=%v", stub.calls, stub.last)
+	if stub.callsByType[types.WikiPageTypeEntity] != 2 {
+		t.Fatalf("cache miss should query only the new identity, got byType=%v", stub.callsByType)
 	}
-	if len(stub.last) != 1 || stub.last[0] != normalizeWikiIdentityTitle("荀子") {
-		t.Fatalf("second lookup should only ask for 荀子: %v", stub.last)
+	last := stub.lastByType[types.WikiPageTypeEntity]
+	if len(last) != 1 || last[0] != normalizeWikiIdentityTitle("荀子") {
+		t.Fatalf("second lookup should only ask for 荀子: %v", last)
 	}
 }
