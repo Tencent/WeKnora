@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"golang.org/x/sync/errgroup"
@@ -640,6 +642,44 @@ func intentVerdictSpanMetadata(v intentgate.Verdict, latencyMs int64) map[string
 	}
 }
 
+// gateIntentSnapshot 是一轮判定的意图基准快照（设计 §8.2 规则 1：
+// 意图基准 = 原始 user prompt + 会话历史，不是当前轮的模型输出）。
+// 由 runReActIteration 在每轮 Act 前构造（此刻当前轮 assistant 输出
+// 尚未 append 进 messages，快照天然不含被审对象），Act 后清除。
+type gateIntentSnapshot struct {
+	// userPrompt 是本轮会话的第一条 user message（全量 history 中找，
+	// 不走窗口）；找不到时回退当前轮 query。
+	userPrompt string
+	// history 是最近 intentGateHistoryWindow 条会话历史（旧→新，
+	// engine 的 chat.Message 只取 Role/Content 转成 types.Message）。
+	history []types.Message
+}
+
+// intentGateHistoryWindow 是送进 IntentGate（judge）的历史窗口
+// （与设计 judgeHistoryWindow 同值；此处独立常量避免 act 包反向依赖
+// judge 的私有常量，两处同改）。
+const intentGateHistoryWindow = 8
+
+// newGateIntentSnapshot 从 engine 循环的 messages 构造意图基准快照。
+// query 是当前轮用户输入，作为找不到历史 user message 时的回退。
+func newGateIntentSnapshot(query string, messages []chat.Message) *gateIntentSnapshot {
+	snap := &gateIntentSnapshot{userPrompt: query}
+	for _, m := range messages {
+		if m.Role == "user" && strings.TrimSpace(m.Content) != "" {
+			snap.userPrompt = m.Content
+			break
+		}
+	}
+	start := 0
+	if len(messages) > intentGateHistoryWindow {
+		start = len(messages) - intentGateHistoryWindow
+	}
+	for _, m := range messages[start:] {
+		snap.history = append(snap.history, types.Message{Role: m.Role, Content: m.Content})
+	}
+	return snap
+}
+
 // evaluateIntentGate 在工具执行点前调用 IntentGate（设计 §7 插入点）。
 // 现阶段只实现 observe 语义：任何 verdict（含 deny）都只记录不拦截。
 // 观测面（设计 §10）：verdict 的 action/layer/policy_id/latency_ms 写入
@@ -647,9 +687,9 @@ func intentVerdictSpanMetadata(v intentgate.Verdict, latencyMs int64) map[string
 // 日志。Evaluate 出错按设计 §9 fail-open：记 warn 日志后照常执行，observe
 // 期一个被误拦的调用都不能有。
 //
-// ToolCallInput 的 UserPrompt/History（意图基准）需要 engine 循环的
-// messages 管线，由规则引擎/judge 落地 ticket（T03/T30）接线；本接缝
-// 只填执行点本地可得的字段。
+// 意图基准（UserPrompt/History，设计 §8.2 规则 1）取自 engine 在每轮
+// Act 前写入的 e.intentGateIntent 快照；未填（gate 不启用外的异常路径）
+// 时按空值传，judge 拿到空意图基准只会更多判 uncertain（fail-open 方向）。
 func (e *AgentEngine) evaluateIntentGate(
 	ctx context.Context, tc types.LLMToolCall, target *types.ToolCallTarget,
 	toolSpan *langfuse.Span, sessionID, assistantMessageID string,
@@ -662,6 +702,10 @@ func (e *AgentEngine) evaluateIntentGate(
 		ToolName:  tc.Function.Name,
 		Args:      json.RawMessage(tc.Function.Arguments),
 		Principal: principal,
+	}
+	if e.intentGateIntent != nil {
+		input.UserPrompt = e.intentGateIntent.userPrompt
+		input.History = e.intentGateIntent.history
 	}
 	if target != nil {
 		input.ServiceID = target.ServiceName

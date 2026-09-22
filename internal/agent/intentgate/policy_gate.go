@@ -4,10 +4,12 @@
 //  1. PolicyStore.Resolve 解析本次调用命中的最具体策略（scope 顺序与
 //     per-tenant 缓存见 policy_store.go，设计 §8.3）；
 //  2. 命中策略且有 rule_expr → ① 确定性规则层判定（编译失败/不适用/
-//     超时一律记 uncertain 升级语义层，绝不静默放行或误拦）；
-//  3. 命中策略但无 rule_expr → 约束只能由语义层判定，judge 未接入
-//     （T30），记 uncertain、layer=judge；
-//  4. 无策略命中 → baseline 判定：复用 spike 规则做危险形态兜底扫描，
+//     超时记 uncertain 升级语义层，绝不静默放行或误拦）；
+//  3. 命中策略但无 rule_expr → 约束只能由语义层判定，升级 judge
+//     （T30 接入；judge 未配置时记 uncertain、layer=judge）；
+//  4. risk_tier=high 的策略即使规则层判 allow 也强制进语义层复核
+//     （设计 §8.1：高危操作要语义兜底）；
+//  5. 无策略命中 → baseline 判定：复用 spike 规则做危险形态兜底扫描，
 //     layer=baseline、policy_id 为空（设计 §6.2 兜底判定）。
 //
 // Gate 只产出 Verdict，不依据策略 mode 自行拦截：observe 只记录不拦截、
@@ -24,21 +26,35 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// PolicyGate 是设计 §7 Gate 结构的当前形态：store（策略读取）已接入，
-// judge（语义层）待 T30。baseline 规则引擎在无策略命中时兜底。
+// PolicyGate 是设计 §7 Gate 结构的当前形态：store（策略读取）+ baseline
+// 兜底扫描 + judge（语义层，T30 起接入，可为 nil）。
 //
-// 并发安全：PolicyGate 本身无状态（策略解析状态都在 PolicyStore 内），
-// 单实例可安全地被全部 engine 共享。
+// 并发安全：PolicyGate 本身无状态（策略解析状态都在 PolicyStore 内，
+// judge 实现亦无状态），单实例可安全地被全部 engine 共享。
 type PolicyGate struct {
 	store    PolicyStore
 	baseline *RuleEngine
+	judge    Judge
+}
+
+// PolicyGateOption 定制 PolicyGate（注入 judge 等）。
+type PolicyGateOption func(*PolicyGate)
+
+// WithJudge 装配语义层 judge（T30）。nil 表示语义层未配置：规则层
+// 未决的判定保持 uncertain（与 T23 行为一致）。
+func WithJudge(j Judge) PolicyGateOption {
+	return func(g *PolicyGate) { g.judge = j }
 }
 
 // NewPolicyGate 创建 PolicyStore 驱动的 Gate。store 必须是与策略 CRUD
 // handler 共享的同一实例——策略变更的 InvalidateTenant 才能生效
 // （设计 §8.3：策略变更按 tenant 失效解析缓存）。
-func NewPolicyGate(store PolicyStore) *PolicyGate {
-	return &PolicyGate{store: store, baseline: NewSpikeRuleEngine()}
+func NewPolicyGate(store PolicyStore, opts ...PolicyGateOption) *PolicyGate {
+	g := &PolicyGate{store: store, baseline: NewSpikeRuleEngine()}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 // Evaluate 实现 Gate 接口。
@@ -59,10 +75,57 @@ func (g *PolicyGate) Evaluate(ctx context.Context, in ToolCallInput) (Verdict, e
 		return g.baselineVerdict(in), nil
 	}
 	v := evaluatePolicyRule(policy, in)
+	switch {
+	case v.Action == ActionDeny:
+		// 规则层已决：约束被违反，deny 直接出，不再升级语义层
+		// （复核一个确定性结论只会引入不确定性和成本）。
+	case policy.RiskTier == types.RiskTierHigh:
+		// 设计 §8.1：high 策略即使规则层判 allow 也强制进语义层复核——
+		// 高危操作要语义兜底，不允许"规则没写全就当安全"。
+		v = g.judgeEscalate(ctx, policy, in, v)
+	case v.Action == ActionUncertain:
+		// 规则层未决（无 rule_expr / 编译失败 / 不适用 / 超时）→ 语义层。
+		v = g.judgeEscalate(ctx, policy, in, v)
+	}
 	v.PolicyID = policy.ID
 	v.PolicyVersion = policy.Version
 	v.Mode = policy.Mode
 	return v, nil
+}
+
+// judgeEscalate 把判定升级给语义层（设计 §8.1 漏斗）。judge 未配置时
+// 原样返回规则层的 uncertain（留"本该如何判"的观测数据）；judge 调用
+// 失败按设计 §9 fail-open 记 uncertain，绝不上抛成判定链路错误。
+// 升级时保留规则层的原始原因，便于事后对账"当初为什么进 judge"。
+func (g *PolicyGate) judgeEscalate(
+	ctx context.Context, policy *types.IntentPolicy, in ToolCallInput, ruleVerdict Verdict,
+) Verdict {
+	if g.judge == nil {
+		return ruleVerdict
+	}
+	jv, err := g.judge.Judge(ctx, JudgeInput{
+		TenantID:       in.TenantID,
+		ConstraintText: policy.ConstraintText,
+		ToolName:       in.ToolName,
+		ServiceID:      in.ServiceID,
+		Args:           in.Args,
+		UserPrompt:     in.UserPrompt,
+		History:        in.History,
+	})
+	if err != nil {
+		return Verdict{
+			Action: ActionUncertain,
+			Layer:  LayerJudge,
+			Reason: fmt.Sprintf("%s；judge 调用失败（fail-open）: %v", ruleVerdict.Reason, err),
+		}
+	}
+	switch {
+	case ruleVerdict.Reason != "" && jv.Reason != "":
+		jv.Reason = ruleVerdict.Reason + "；judge: " + jv.Reason
+	case ruleVerdict.Reason != "":
+		jv.Reason = ruleVerdict.Reason
+	}
+	return jv
 }
 
 // baselineVerdict 无策略命中时的兜底判定：复用三条 spike 规则扫描
@@ -85,7 +148,7 @@ func evaluatePolicyRule(policy *types.IntentPolicy, in ToolCallInput) Verdict {
 		return Verdict{
 			Action: ActionUncertain,
 			Layer:  LayerJudge,
-			Reason: "策略无 rule_expr，约束需语义层判定（judge 未接入，T30）",
+			Reason: "策略无 rule_expr，约束需语义层判定",
 		}
 	}
 	compiled, err := CompileRuleExpr(*policy.RuleExpr)
@@ -118,7 +181,7 @@ func evaluatePolicyRule(policy *types.IntentPolicy, in ToolCallInput) Verdict {
 		return Verdict{
 			Action: ActionUncertain,
 			Layer:  LayerRule,
-			Reason: fmt.Sprintf("rule_expr 对本次调用不适用（应升级语义层，judge 未接入 T30）: %v", err),
+			Reason: fmt.Sprintf("rule_expr 对本次调用不适用（应升级语义层）: %v", err),
 		}
 	}
 	if matched {

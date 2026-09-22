@@ -87,6 +87,12 @@ type AgentEngine struct {
 	// §6.2 intent_verdicts 表）。nil（默认）只记 Langfuse span + 结构化日志，
 	// 不落库。写入必须非阻塞：它是观测面，不是判定链路的一部分。
 	intentVerdictWriter intentgate.VerdictWriter
+	// intentGateIntent 是当前轮判定的意图基准快照（原始 user prompt +
+	// 历史窗口，设计 §8.2 规则 1）：由 runReActIteration 在每轮 Act 前从
+	// messages 管线写入、Act 后清除；本轮内的并行工具调用并发只读。
+	// 被审对象（当前轮 assistant 输出）此刻尚未 append 进 messages，
+	// 快照天然不含它。nil 表示本轮未填（gate 未启用时保持 nil）。
+	intentGateIntent *gateIntentSnapshot
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -1036,7 +1042,9 @@ func (e *AgentEngine) runReActIteration(
 	// Thought.
 
 	// 3. Act: Execute tool calls
+	e.intentGateIntent = newGateIntentSnapshot(query, *messagesPtr)
 	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
+	e.intentGateIntent = nil
 	toolCallCount = len(step.ToolCalls)
 
 	// 4. Observe: Add tool results to messages and write to context

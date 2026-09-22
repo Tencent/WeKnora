@@ -180,15 +180,22 @@ func NewAgentService(
 		sandboxPinner:        sandboxPinner,
 		sandboxPolicy:        sandboxPolicy,
 	}
-	// IntentGate 接线（T23，issue #13）：判定输入从硬编码规则切换为读策略库。
-	// 两个硬性要求：
+	// IntentGate 接线（T23→T30，issue #13/#14）：判定输入从硬编码规则切
+	// 换为读策略库，规则层未决时升级语义层 judge（租户自配 chat 模型）。
+	// 三个硬性要求：
 	//   1. intentPolicyStore 必须是与策略 CRUD handler 共享的容器单例——
 	//      策略变更的 InvalidateTenant 才能波及这里的判定（设计 §8.3）；
 	//   2. verdict 落库是观测面不是判定链路：writer 异步、fail-open，
-	//      进程级生命周期（随进程退出，观察数据允许丢失队尾）。
+	//      进程级生命周期（随进程退出，观察数据允许丢失队尾）；
+	//   3. judge 的模型解析失败只影响语义层（uncertain），不影响规则层
+	//      与 baseline 判定——resolver 错误在 LLMJudge 内吞掉（设计 §9）。
 	// store 或 db 缺失时两者保持 nil，engine 完全跳过门禁（行为零变化）。
 	if intentPolicyStore != nil && db != nil {
-		svc.intentGate = intentgate.NewPolicyGate(intentPolicyStore)
+		var judge intentgate.Judge
+		if modelService != nil {
+			judge = intentgate.NewLLMJudge(newJudgeModelResolver(modelService))
+		}
+		svc.intentGate = intentgate.NewPolicyGate(intentPolicyStore, intentgate.WithJudge(judge))
 		svc.intentVerdictWriter = intentgate.NewAsyncVerdictWriter(
 			repository.NewIntentVerdictRepository(db))
 	}
