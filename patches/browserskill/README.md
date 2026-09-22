@@ -1,96 +1,95 @@
 # BrowserSkill downstream patches
 
 The extension and daemon are based on official `main` commit
-`fa953dc6fcd868827b93164e3bea26198e691224` (after `ext-v0.3.0`). Both still
-report version `0.3.0`; the exact source baseline is recorded in
-`scripts/browserskill-release.json`. The daemon is built with
-`cargo build --locked --release -p bsk` and includes our navigation-response
-deadline patch, so the official CLI 0.3.0 binary is not an equivalent replacement.
-Native builds require Rust/Cargo and a C compiler (plus CMake on Linux).
-Docker builds on the target architecture.
+`c61eb7e4b1a5785d51b1a316dbf57686fecbf33d` (after `ext-v0.3.0`, including the
+merged upstream PRs #291, #296 and #297). Both still report version `0.3.0`;
+the exact source baseline is recorded in `scripts/browserskill-release.json`.
+The daemon is built with `cargo build --locked --release -p bsk` from the same
+commit. The published CLI 0.3.0 binary and the published 0.3.0 extension ZIP
+predate this baseline and are not equivalent replacements. Native builds
+require Rust/Cargo and a C compiler (plus CMake on Linux). Docker builds on the
+target architecture.
 
-The patches include extension fixes and a daemon navigation-response deadline fix.
 `scripts/build_browserskill.sh` applies the following patches in lexical order:
 
 | Patch | Purpose | Removal condition |
 | --- | --- | --- |
 | `01-browser-read-reliability.patch` | Bound CDP reads, prevent overlapping timed-out screenshots, reuse frame discovery configuration | Equivalent upstream behavior passes the background rendering and timeout regressions |
-| `02-gateway-task-controls.patch` | WeKnora preview and focus side channel; drain previews before native session stop | Upstream provides equivalent UI APIs and WeKnora migrates to them |
-| `04-task-popup-ownership.patch` | Attribute navigation targets to the active agent action; allow consent-based in-place borrowing inside the task window | Upstream supports this popup lifecycle without weakening per-tab authorization |
-| `05-last-tab-lifecycle.patch` | Keep a temporary owned blank tab when an agent closes the last remote task tab; normal session stop removes it | Upstream distinguishes agent last-tab cleanup from user window closure |
-| `06-navigation-response-deadline.patch` | Allow navigation lifecycle timeout results to arrive before the daemon transport deadline | Upstream adds equivalent navigation response grace |
+
+Patch 01 is the only remaining downstream change and has no upstream
+equivalent yet; it is the candidate for the next upstream PR.
+
+## Retired patches
+
+| Former patch | Replacement |
+| --- | --- |
+| `02-gateway-task-controls.patch` | Upstream PR #296: the optional UI channel `ui.task_preview` / `ui.task_focus` (renamed from `gateway.*`). WeKnora calls the official methods. |
+| `03-vom-render-performance.patch` | Upstream PR #271 |
+| `04-task-popup-ownership.patch` | Upstream PR #297: popups opened by native click/key input inside the Agent Window become observed, controllable tabs that session stop preserves. |
+| `05-last-tab-lifecycle.patch` | Host side. `Manager.Call` runs `tool.tab_list` with `scope: "agent"` before `tool.tab_close`; when the target is the only tab in the Agent Window it first creates an agent-owned `about:blank` tab through `tool.tab_create`. Only official RPCs are involved. |
+| `06-navigation-response-deadline.patch` | Upstream PR #291 (daemon navigation response grace). |
 
 Background execution and viewport/full-page screenshot support use upstream
-PRs #249, #250 and #253. VOM sibling-context caching is upstream PR #271, so
-patch 03 was removed. Redirect document tracking and cancelled-navigation
-reconciliation also use upstream code (including PR #280); patch 06 now changes
-only the daemon deadline. The numbering gaps preserve existing patch identities.
+PRs #249, #250 and #253. Redirect document tracking and cancelled-navigation
+reconciliation use upstream code including PR #280. Remote authentication,
+credential storage/migration, renewal, connection settings and dedicated Agent
+Windows use upstream PR #227. Do not restore the old
+`remote-extension-connection.patch`, `shouldKeepTaskActive` callback or a second
+focus-emulation cache.
 
-The preview side channel explicitly acquires upstream background execution
-because it bypasses the automation dispatcher. Native session stop drains
-in-flight previews before the official handler releases control and closes tabs.
 Retained tasks keep the official session and debugger; turn completion only
-stops preview polling in WeKnora. Do not restore the old
-`shouldKeepTaskActive` callback or a second focus-emulation cache.
+stops preview polling in WeKnora. Completed tasks use native session stop.
 
-Remote authentication, credential storage/migration, renewal, connection settings,
-and dedicated Agent Windows use upstream code. Patch 04 extends the
-upstream borrow/return flow while preserving explicit consent and per-tab isolation.
-Do not restore the old `remote-extension-connection.patch`: upstream PR #227
-already incorporates its remote connection support with different ownership and
-window semantics.
+## UI channel
 
-## Companion UI contract
-
-Only authenticated remote sockets handle these extra request frames. They do not
-enter the native daemon's automation queue:
+The preview and focus side channel is now the official optional UI channel
+documented in the upstream
+[remote connection contract](https://github.com/Tencent/BrowserSkill/blob/c61eb7e4b1a5785d51b1a316dbf57686fecbf33d/docs/remote-extension-connection.md#optional-ui-channel).
+Only authenticated remote sockets handle these request frames; they bypass the
+native automation queue and never start a session:
 
 ```json
-{"id":"wk-ui-unique","method":"gateway.task_preview","params":{"session_id":"server-owned-session"}}
+{"id":"wk-ui-unique","method":"ui.task_preview","params":{"session_id":"server-owned-session"}}
 ```
 
-- `gateway.task_preview`: returns `image_base64`, `format: "jpeg"`, `tab_id`,
-  `title`, and `captured_at`. The encoded image is at most 640 pixels wide.
-  Captures are coalesced and restricted to a concrete owned tab. Authorization,
-  document revision and debugger identity are checked before returning a frame.
-  UI previews include the extension's control and help overlays so periodic
-  captures do not hide and restore them in the user's browser. Agent screenshots
-  still suppress overlays to preserve unobstructed page content.
-- `gateway.task_focus`: explicitly activates an existing owned tab and its window;
-  returns `{ "focused": true }`. It never creates a session.
+- `ui.task_preview`: returns `image_base64`, `format: "jpeg"`, `tab_id`,
+  `title` and `captured_at`; the frame is at most 640 pixels wide, captures are
+  coalesced per task and a poll that arrives while Chrome still holds one is
+  refused with `timeout` / `preview_busy`. Overlays stay visible in previews.
+- `ui.task_focus`: activates the task's owned tab and raises its window,
+  returning `{ "focused": true }`.
 
-Errors use the native-shaped `{ "id": "…", "error": { "code": "…", "message": "…" } }`
-envelope. These two methods are downstream APIs, not official BrowserSkill RPCs.
-The official unmodified extension returns `unknown_method` for these UI requests.
-Turn cleanup needs no custom RPC: retained tasks keep their session, and completed
-tasks use native session stop. Keep serving the companion ZIP for preview/focus.
+Errors use the native envelope with typed codes (`not_found`, `timeout`,
+`cancelled`, `cdp_failed`) and an optional `data.reason`. WeKnora maps every
+error except `unknown_method` to a transient preview failure. Extensions built
+before PR #296, including the published 0.3.0 ZIP, answer `unknown_method`;
+WeKnora then disables preview polling and reports the extension as outdated.
 
-## Intentional behavior changes
+## Intentional behavior changes versus the published 0.3.0 extension
 
-- Remote tasks use official dedicated Agent Windows. The old background-tab-group
-  preference is no longer used; no `tabGroups` permission is added.
-- Only Chrome navigation-target events from an owned source during an agent action
-  grant popup ownership (including `rel=noopener`). A bounded 100 ms event tail
-  follows the input acknowledgement. Window membership/opener metadata alone do
-  not authorize tabs; delayed or unattributed targets use the borrow flow.
-- Unowned tabs already inside the task window can be borrowed with normal browser
-  approval. They remain borrowed user tabs, are returned without being closed,
-  and lose access immediately on return. Other task windows remain isolated.
-- Closing the last owned tab through `tab_close` keeps a temporary owned blank tab
-  until session stop, preventing Chrome window removal from being misreported as
-  a human interruption. Actual user window closure still pauses the task.
+- Remote tasks use official dedicated Agent Windows. No `tabGroups` permission.
+- Popup attribution follows upstream PR #297: only a main-frame navigation
+  target from a controlled source during native click/key input becomes an
+  observed tab. Observed tabs are readable and closable but never enter the
+  agent-created set; session stop preserves them and their window. Late or
+  unattributed targets use the ordinary borrow flow, and an unowned tab that
+  already sits in the Agent Window must be moved to a regular window before it
+  can be borrowed.
+- Closing the last tab of the Agent Window through `tab_close` keeps an
+  agent-owned blank tab until session stop (host-side, see above), so Chrome's
+  window removal is not misreported as a human interruption. Actual user window
+  closure still pauses the task.
 - Human help and borrowing follow the upstream focus/confirmation behavior.
 - Remote upload/download remain unsupported, as defined upstream.
 
 Even though the version remains 0.3.0, users must install the rebuilt ZIP.
-Upgrade users by replacing the existing unpacked extension directory and reloading
-it after ending active tasks. Keeping the extension ID allows upstream migration
-from legacy Chrome storage into extension-origin IndexedDB. Installing under a new
-ID requires pairing again. Old saved tab groups are not removed automatically.
+Upgrade users by replacing the existing unpacked extension directory and
+reloading it after ending active tasks. Keeping the extension ID preserves the
+migrated credentials; installing under a new ID requires pairing again.
 
 ## Validation
 
-Apply patches to a clean pinned checkout, install frozen dependencies and run:
+Apply the patch to a clean pinned checkout, install frozen dependencies and run:
 
 ```sh
 pnpm --filter @browser-skill/extension exec wxt prepare
@@ -110,10 +109,14 @@ cargo test --locked -p bsk daemon::ipc::tests
 Run WeKnora's `TestRealExtension` with the built extension, pinned daemon and an
 isolated Chromium profile; environment variables are documented in
 `docs/browser-skill-integration.md`. It exercises actual pairing, screenshot and
-input RPC, agent popup selection/read/close and in-place borrow approval/revocation, independent preview during help waits,
-focus, pause/resume, retained-session continuity and completed-task cleanup.
-It separately verifies that agent last-tab closure permits the next turn and
-manual window closure blocks automation until explicit resume.
+input RPC, agent popup selection/read/close, the in-window borrow rejection
+followed by borrow approval/revocation of a tab moved to a regular window,
+independent preview during help waits, focus, pause/resume, retained-session
+continuity and completed-task cleanup. It separately verifies that agent
+last-tab closure permits the next turn and manual window closure blocks
+automation until explicit resume.
 
 Upstream references: [PR #227](https://github.com/Tencent/BrowserSkill/pull/227),
-[remote connection contract](https://github.com/Tencent/BrowserSkill/blob/fa953dc6fcd868827b93164e3bea26198e691224/docs/remote-extension-connection.md).
+[PR #291](https://github.com/Tencent/BrowserSkill/pull/291),
+[PR #296](https://github.com/Tencent/BrowserSkill/pull/296),
+[PR #297](https://github.com/Tencent/BrowserSkill/pull/297).

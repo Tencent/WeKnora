@@ -128,6 +128,15 @@ try {
       }, id);
       process.stdout.write('fixture-window-closed\n');
     }
+    if (command.startsWith('move-fixture-tab-out ')) {
+      // Upstream refuses to borrow an unowned tab that already lives in the
+      // Agent Window; the user must move it to a regular window first.
+      const id = Number(command.split(' ')[1]);
+      await worker.evaluate(async ({tabId, windowId}) => {
+        await chrome.tabs.move(tabId, {windowId, index:-1});
+      }, {tabId:id, windowId:originalWindow.windowId});
+      process.stdout.write('fixture-tab-moved\n');
+    }
     if (command.startsWith('remove-fixture-tab ')) {
       const id = Number(command.split(' ')[1]);
       await worker.evaluate(async (tabId) => chrome.tabs.remove(tabId), id);

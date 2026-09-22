@@ -360,8 +360,9 @@ func TestRealExtension(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	// A genuine user-created tab inside the task window remains unauthorized,
-	// but can be borrowed there with an actual browser confirmation.
+	// A genuine user-created tab inside the task window remains unauthorized and
+	// cannot be borrowed in place (upstream PR #297). Once moved to a regular
+	// window it can be borrowed with an actual browser confirmation.
 	_, _ = io.WriteString(input, "create-unowned-tab\n")
 	var userTab struct {
 		ID int `json:"tab_id"`
@@ -379,6 +380,19 @@ func TestRealExtension(t *testing.T) {
 			!strings.Contains(err.Error(), "permission_denied") {
 			t.Fatalf("unowned user tab accepted %s: %v", method, err)
 		}
+	}
+	if _, err = call(ctx, scope, "chat", "tab_borrow", map[string]any{"tab_id": userTab.ID}); err == nil ||
+		!strings.Contains(err.Error(), "invalid_params") {
+		t.Fatalf("unowned tab inside the Agent Window was borrowed in place: %v", err)
+	}
+	_, _ = fmt.Fprintf(input, "move-fixture-tab-out %d\n", userTab.ID)
+	select {
+	case line := <-hostLines:
+		if line != "fixture-tab-moved" {
+			t.Fatalf("move fixture tab: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 	borrowDone := make(chan error, 1)
 	go func() {

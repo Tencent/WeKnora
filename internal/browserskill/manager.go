@@ -710,6 +710,54 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 	return reply.Result, nil
 }
 
+// preserveAgentWindow keeps a retained task's Agent Window open when the agent
+// closes its last tab there. Chrome removes a window together with its final
+// tab, and the extension reports that removal as a user-closed window, which
+// would pause the task and drop its session. A blank tab created through the
+// native tab_create RPC is agent-owned, so session stop closes it with the
+// other agent tabs. Tabs the browser user opened in that window keep it alive
+// on their own. Only official RPCs are used; the extension needs no patch.
+func preserveAgentWindow(ctx context.Context, d *device, session string, tabID any) error {
+	target, ok := numericID(tabID)
+	if !ok {
+		return nil // The extension reports the invalid parameter itself.
+	}
+	list, err := rpc(ctx, d, "tool.tab_list", map[string]any{"session_id": session, "scope": "agent"})
+	if err != nil {
+		return err
+	}
+	var listed struct {
+		Tabs []struct {
+			ID float64 `json:"tab_id"`
+		} `json:"tabs"`
+	}
+	if json.Unmarshal(list, &listed) != nil {
+		return errors.New("invalid BrowserSkill tab list")
+	}
+	if len(listed.Tabs) != 1 || listed.Tabs[0].ID != target {
+		return nil
+	}
+	_, err = rpc(ctx, d, "tool.tab_create", map[string]any{
+		"session_id": session, "url": "about:blank", "active": false,
+	})
+	return err
+}
+
+func numericID(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
 var methods = map[string]bool{
 	"snapshot":            true,
 	"observe":             true,
@@ -873,7 +921,14 @@ func (m *Manager) Call(
 			clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
 		}
 	}
-	result, err := rpc(callCtx, d, "tool."+method, clean)
+	var result json.RawMessage
+	var err error
+	if method == "tab_close" {
+		err = preserveAgentWindow(callCtx, d, id, clean["tab_id"])
+	}
+	if err == nil {
+		result, err = rpc(callCtx, d, "tool."+method, clean)
+	}
 	if method == "request_help" && err == nil {
 		var help struct {
 			Outcome string `json:"outcome"`
@@ -1146,7 +1201,7 @@ func (m *Manager) Preview(ctx context.Context, s Scope, session string) (json.Ra
 	id := t.id
 	d.mu.Unlock()
 	defer func() { d.mu.Lock(); t.previewBusy = false; d.mu.Unlock() }()
-	frame, err := m.callUI(ctx, s, session, "gateway.task_preview")
+	frame, err := m.callUI(ctx, s, session, "ui.task_preview")
 	if err != nil {
 		return nil, err
 	}

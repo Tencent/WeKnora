@@ -1,5 +1,5 @@
 diff --git a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
-index 8f99c94..16f7499 100644
+index 66b14ad..fd6b021 100644
 --- a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
 +++ b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
 @@ -30,6 +30,77 @@ function fakeApi() {
@@ -282,7 +282,7 @@ index 0000000..fe79f2a
 +  }, 20_000);
 +});
 diff --git a/apps/extension/src/browser-driver/chromium-cdp.ts b/apps/extension/src/browser-driver/chromium-cdp.ts
-index 2779da7..eebb362 100644
+index ebdc304..da94e1d 100644
 --- a/apps/extension/src/browser-driver/chromium-cdp.ts
 +++ b/apps/extension/src/browser-driver/chromium-cdp.ts
 @@ -32,6 +32,7 @@ import type {
@@ -301,10 +301,10 @@ index 2779da7..eebb362 100644
  }
  
  async function settleBeforeDeadline(promises: Promise<void>[], deadline: number): Promise<boolean> {
-@@ -165,13 +167,14 @@ async function settleBeforeDeadline(promises: Promise<void>[], deadline: number)
- export class ChromiumCdp {
-   private readonly api: CdpDebuggerApi;
+@@ -167,13 +169,14 @@ export class ChromiumCdp {
    private readonly attachedTabs = new Set<number>();
+   private readonly claimAttempts = new Map<number, Map<string, object>>();
+   private readonly attachmentVersions = new Map<number, number>();
 +  private readonly pendingScreenshots = new Map<number, Promise<unknown>>();
    private readonly attachmentIds = new Map<number, string>();
    private readonly attachInFlight = new Map<number, Promise<void>>();
@@ -317,16 +317,16 @@ index 2779da7..eebb362 100644
    );
    private readonly tabOwners = new Map<number, Set<string>>();
    private readonly dialogBuffers = new Map<number, JavaScriptDialogInfo[]>();
-@@ -295,7 +298,7 @@ export class ChromiumCdp {
-   async send<T = unknown>(tabId: number, method: string, params?: object): Promise<T> {
+@@ -324,7 +327,7 @@ export class ChromiumCdp {
      await this.ensureAttached(tabId);
+     signal?.throwIfAborted();
      try {
 -      const result = await this.api.sendCommand({ tabId }, method, params ?? {});
 +      const result = await this.command({ tabId }, method, params ?? {});
        return result as T;
      } catch (err) {
        throw normalizeError(err);
-@@ -305,7 +308,7 @@ export class ChromiumCdp {
+@@ -334,7 +337,7 @@ export class ChromiumCdp {
    async sendToTarget<T = unknown>(target: CdpTarget, method: string, params?: object): Promise<T> {
      await this.ensureAttached(target.tabId);
      try {
@@ -335,7 +335,7 @@ index 2779da7..eebb362 100644
      } catch (err) {
        throw normalizeError(err);
      }
-@@ -563,6 +566,7 @@ export class ChromiumCdp {
+@@ -622,6 +625,7 @@ export class ChromiumCdp {
      this.networkDomainsEnabledTabs.clear();
      this.networkRequestMeta.clear();
      this.frameDiscovery.clear();
@@ -343,7 +343,7 @@ index 2779da7..eebb362 100644
      await Promise.all(
        tabs.map(async (tabId) => {
          try {
-@@ -574,8 +578,31 @@ export class ChromiumCdp {
+@@ -633,8 +637,31 @@ export class ChromiumCdp {
      );
    }
  
@@ -376,7 +376,7 @@ index 2779da7..eebb362 100644
    }
  
    private async enableConsoleDomains(tabId: number): Promise<void> {
-@@ -588,7 +615,7 @@ export class ChromiumCdp {
+@@ -647,7 +674,7 @@ export class ChromiumCdp {
      let failed = false;
      for (const method of ["Runtime.enable", "Log.enable"]) {
        try {
@@ -385,7 +385,7 @@ index 2779da7..eebb362 100644
        } catch (err) {
          failed = true;
          console.debug("[bsk cdp] console domain enable failed", { tabId, method, err });
-@@ -601,7 +628,7 @@ export class ChromiumCdp {
+@@ -660,7 +687,7 @@ export class ChromiumCdp {
  
    private async enableNetworkDomain(tabId: number): Promise<void> {
      if (this.networkDomainsEnabledTabs.has(tabId)) return;
@@ -394,7 +394,7 @@ index 2779da7..eebb362 100644
      this.networkDomainsEnabledTabs.add(tabId);
    }
  
-@@ -613,13 +640,27 @@ export class ChromiumCdp {
+@@ -672,13 +699,27 @@ export class ChromiumCdp {
      }
    }
  
@@ -425,7 +425,7 @@ index 2779da7..eebb362 100644
    }
  
    private bindFrameTargetHandler(): void {
-@@ -646,6 +687,7 @@ export class ChromiumCdp {
+@@ -705,6 +746,7 @@ export class ChromiumCdp {
  
        if (method === "Target.detachedFromTarget") {
          const state = this.frameDiscovery.get(tabId);
@@ -433,7 +433,7 @@ index 2779da7..eebb362 100644
          if (state?.sessions.delete(sessionId)) state.generation += 1;
          return;
        }
-@@ -712,6 +754,7 @@ export class ChromiumCdp {
+@@ -771,6 +813,7 @@ export class ChromiumCdp {
        sessions: new Set(),
        pending: new Set(),
        generation: 0,
@@ -441,7 +441,7 @@ index 2779da7..eebb362 100644
      };
      this.frameDiscovery.set(tabId, created);
      return created;
-@@ -719,6 +762,7 @@ export class ChromiumCdp {
+@@ -778,6 +821,7 @@ export class ChromiumCdp {
  
    private clearFrameState(tabId: number): void {
      this.frameDiscovery.delete(tabId);
@@ -449,7 +449,7 @@ index 2779da7..eebb362 100644
    }
  
    private bindDialogHandler(): void {
-@@ -751,7 +795,7 @@ export class ChromiumCdp {
+@@ -810,7 +854,7 @@ export class ChromiumCdp {
        if (parsed.type === "prompt") {
          handleParams.promptText = parsed.defaultPrompt ?? "";
        }
@@ -546,7 +546,7 @@ diff --git a/apps/extension/src/tools/vom/capture-abort.ts b/apps/extension/src/
 index 7ca65bf..429c373 100644
 --- a/apps/extension/src/tools/vom/capture-abort.ts
 +++ b/apps/extension/src/tools/vom/capture-abort.ts
-@@ -4,10 +4,12 @@ function captureAbortError(): Error {
+@@ -4,11 +4,13 @@ function captureAbortError(): Error {
    return error;
  }
  
@@ -560,3 +560,4 @@ index 7ca65bf..429c373 100644
 +    ["AbortError", "CdpReadTimeoutError"].includes((error as { name?: string }).name ?? "")
    );
  }
+ 

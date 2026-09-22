@@ -52,11 +52,11 @@ WeKnora 使用 Tencent/BrowserSkill 的官方 daemon 和基于官方源码的配
 
 模型调用采用扁平参数，例如 `{"method":"navigate","url":"https://example.com"}`、`{"method":"click","ref":"e3"}`、`{"method":"observe"}`。Schema 不再提供 `params` 字段，旧的嵌套格式直接拒绝。服务端校验所选动作的必填字段、字段类型及定位条件，再将参数转换为 BrowserSkill 原生 RPC 信封；会话和设备 ID 始终由服务端绑定。
 
-`wait_ms` 的外层参数为 `duration_ms`，范围 0–10000 毫秒；工具描述、参数 schema 和执行前校验保持一致。命令超时或中断后暂停任务，不自动重放点击/提交。前端显示具体浏览器动作与可读错误，结果卡片分别展示网页内容、截图或标签列表，不展示原始协议 JSON。任务窗口沿用官方实现，标签归属及窗口内借用由配套补丁补充。
+`wait_ms` 的外层参数为 `duration_ms`，范围 0–10000 毫秒；工具描述、参数 schema 和执行前校验保持一致。命令超时或中断后暂停任务，不自动重放点击/提交。前端显示具体浏览器动作与可读错误，结果卡片分别展示网页内容、截图或标签列表，不展示原始协议 JSON。任务窗口和弹窗归属沿用官方实现（上游 PR #297）：任务窗口内未授权的用户标签不能就地借用，需先移到普通窗口。
 
 ## 构建与部署
 
-扩展和 daemon 均从官方 `main` 固定提交 `fa953dc6fcd868827b93164e3bea26198e691224` 构建（位于 `ext-v0.3.0` 之后，版本号仍为 0.3.0，协议 v1.3），固定于 `scripts/browserskill-release.json`。后台执行、后台截图、VOM 性能优化和导航重定向跟踪已采用官方实现；仍保留读取保护、任务控制、弹窗归属、末页生命周期及 daemon 导航响应宽限补丁。官方 CLI 0.3.0 二进制不包含最后一项修复，不能直接替代配套 daemon。构建按文件名顺序应用 `patches/browserskill/*.patch`，使用冻结的 pnpm 依赖和 Cargo.lock；本机构建需 Rust/Cargo、C 编译器，Linux 还需 CMake。可设置 `CARGO_TARGET_DIR` 复用编译缓存；Docker 构建阶段在目标架构运行，原生脚本不静默生成其他架构的二进制。详见 `patches/browserskill/README.md`。产物位于 `artifacts/browserskill/`，不提交二进制。
+扩展和 daemon 均从官方 `main` 固定提交 `c61eb7e4b1a5785d51b1a316dbf57686fecbf33d` 构建（位于 `ext-v0.3.0` 之后，已包含上游 PR #291、#296、#297，版本号仍为 0.3.0，协议 v1.3），固定于 `scripts/browserskill-release.json`。预览/定位 UI 通道、弹窗归属、daemon 导航响应宽限、后台执行、后台截图、VOM 性能优化和导航重定向跟踪均已采用官方实现；末页生命周期改由服务端用官方 `tab_list`/`tab_create` 处理；仅保留读取保护补丁。官方发布的 CLI 0.3.0 二进制和 0.3.0 扩展 ZIP 早于该基线，不能直接替代配套构建。构建按文件名顺序应用 `patches/browserskill/*.patch`，使用冻结的 pnpm 依赖和 Cargo.lock；本机构建需 Rust/Cargo、C 编译器，Linux 还需 CMake。可设置 `CARGO_TARGET_DIR` 复用编译缓存；Docker 构建阶段在目标架构运行，原生脚本不静默生成其他架构的二进制。详见 `patches/browserskill/README.md`。产物位于 `artifacts/browserskill/`，不提交二进制。
 
 虽然扩展显示版本号仍为 0.3.0，已有用户仍需下载本次重新构建的配套 ZIP，覆盖原解压目录并在 Chrome 扩展程序页面重新加载；仅重启服务端不会更新扩展。保持原扩展 ID 时，上游会将旧的本地凭据迁移到扩展源 IndexedDB；重新安装导致 ID 改变时需要重新配对。
 
@@ -89,7 +89,7 @@ BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.
 
 本机调试可用 `ws://localhost:8080/api/v1/local-browser/extension`；远程部署要求 WSS，内网可使用受浏览器信任的企业 CA。详细授权、重连、多副本路由、迁移及容量边界见 [生产部署链路](browser-skill-production.md)。
 
-扩展使用官方 MIT 许可，分发时保留 `BrowserSkill-LICENSE`。配对授权遵循上游第三方网关协议；`gateway.task_preview`、`gateway.task_focus` 仍是配套补丁接口。预览和定位需要配套 ZIP；保留会话及任务收尾均采用官方机制，不依赖定制收尾接口。
+扩展使用官方 MIT 许可，分发时保留 `BrowserSkill-LICENSE`。配对授权遵循上游第三方网关协议；预览和定位使用官方可选 UI 通道 `ui.task_preview`、`ui.task_focus`（上游 PR #296），官方发布的 0.3.0 ZIP 早于该通道，会返回 `unknown_method`，需要按固定基线重新构建的 ZIP；保留会话及任务收尾均采用官方机制，不依赖定制收尾接口。
 
 ## 验证
 
@@ -108,7 +108,7 @@ BROWSERSKILL_TEST_PLAYWRIGHT=/absolute/path/to/playwright-core/index.mjs
 BROWSERSKILL_TEST_HEADED=1
 ```
 
-测试使用独立浏览器资料目录，覆盖配对、独立窗口、任务弹窗完整操作、窗口内借用确认与权限释放、导航/输入/点击、目标标签截图、人工等待期间预览、显式定位、暂停/继续/结束、任务隔离、授权持久化和双节点路由。目标部署网络、真实模型任务与规模容量仍须现场验收；本机浏览器不保证免除网站验证或 403。
+测试使用独立浏览器资料目录，覆盖配对、独立窗口、任务弹窗完整操作、窗口内借用拒绝与移出后借用确认及权限释放、导航/输入/点击、目标标签截图、人工等待期间预览、显式定位、暂停/继续/结束、任务隔离、授权持久化和双节点路由。目标部署网络、真实模型任务与规模容量仍须现场验收；本机浏览器不保证免除网站验证或 403。
 
 补丁中的 `task-focus.browser.test.ts` 使用独立 Chrome 与原生 CDP 验证后台绘制、内容读取、截图和释放后的可见性恢复，避免 Playwright 默认的焦点模拟掩盖问题。在应用补丁后的 BrowserSkill 源码中，设置 `BSK_GEOMETRY_CHROME` 为测试 Chrome 路径，再执行 `pnpm --filter @browser-skill/extension exec vitest run src/browser-driver/__tests__/task-focus.browser.test.ts`（Node 20 另需 `NODE_OPTIONS=--experimental-websocket`）。
 

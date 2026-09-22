@@ -161,9 +161,9 @@ func connectSharedFixture(
 					return
 				}
 				result = map[string]any{"cancelled": true}
-			case "gateway.task_preview":
+			case "ui.task_preview":
 				result = map[string]any{"image_base64": "dGVzdA==", "format": "jpeg"}
-			case "gateway.task_focus":
+			case "ui.task_focus":
 				result = map[string]any{"focused": true}
 			case "system.ping":
 				result = map[string]any{"pong": true}
@@ -736,7 +736,7 @@ func TestFinishTurnUsesOfficialLifecycleWithoutGatewayCalls(t *testing.T) {
 			connectSharedFixture(ctx, t, owner, scope, "", "browser", func(
 				f *sharedFixture, id, method string, _ map[string]any,
 			) bool {
-				if !strings.HasPrefix(method, "gateway.") {
+				if !strings.HasPrefix(method, "ui.") {
 					return false
 				}
 				gatewayCalls.Add(1)
@@ -830,4 +830,63 @@ func TestBorrowConfirmationBudgetReachesExtension(t *testing.T) {
 			require.False(t, m.Status(s, "chat").NeedsHelp)
 		})
 	}
+}
+
+func TestAgentClosingLastTabKeepsAgentWindow(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "last-tab"}
+	var mu sync.Mutex
+	var methods []string
+	var created []map[string]any
+	tabs := []map[string]any{{"tab_id": 7, "window_id": 100, "scope": "agent"}}
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(
+		f *sharedFixture, id, method string, params map[string]any,
+	) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		var result any
+		switch method {
+		case "tool.tab_list":
+			if params["scope"] != "agent" {
+				_ = f.send(map[string]any{"id": id, "error": map[string]string{
+					"code": "invalid_params", "message": "fixture expects the agent scope",
+				}})
+				return true
+			}
+			result = map[string]any{"tabs": tabs}
+		case "tool.tab_create":
+			created = append(created, params)
+			tabs = append(tabs, map[string]any{"tab_id": 8, "window_id": 100, "scope": "agent"})
+			result = map[string]any{"tab_id": 8, "window_id": 100, "url": "about:blank"}
+		case "tool.tab_close":
+			result = map[string]any{"tab_id": params["tab_id"]}
+		default:
+			return false
+		}
+		methods = append(methods, method)
+		_ = f.send(map[string]any{"id": id, "result": result})
+		return true
+	})
+	require.NoError(t, m.Control(ctx, s, "chat", "select"))
+	// The final agent tab gets a blank replacement so Chrome keeps the window.
+	_, err := m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": float64(7)})
+	require.NoError(t, err)
+	mu.Lock()
+	require.Equal(t, []string{"tool.tab_list", "tool.tab_create", "tool.tab_close"}, methods)
+	require.Len(t, created, 1)
+	require.Equal(t, "about:blank", created[0]["url"])
+	require.Equal(t, false, created[0]["active"])
+	require.NotEmpty(t, created[0]["session_id"])
+	methods = nil
+	tabs = []map[string]any{
+		{"tab_id": 8, "window_id": 100, "scope": "agent"},
+		{"tab_id": 9, "window_id": 100, "scope": "user"},
+	}
+	mu.Unlock()
+	// Any other tab in the Agent Window, even a user's, keeps it open.
+	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 8})
+	require.NoError(t, err)
+	mu.Lock()
+	require.Equal(t, []string{"tool.tab_list", "tool.tab_close"}, methods)
+	mu.Unlock()
 }
