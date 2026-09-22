@@ -196,12 +196,14 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getSystemInfo, type SystemInfo } from '@/api/system'
+import type { SystemInfo } from '@/api/system'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
 
 // Reactive state
+const editorResources = useEditorResourcesStore()
 const systemInfo = ref<SystemInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -283,10 +285,11 @@ const loadInfo = async () => {
     loading.value = true
     error.value = ''
     
-    const systemResponse = await getSystemInfo()
-    
-    if (systemResponse.data) {
-      systemInfo.value = systemResponse.data
+    // 设置面板每次打开都要最新值；侧栏启动时拉过的快照走同一个 store。
+    await editorResources.ensureSystemInfo(true)
+
+    if (editorResources.systemInfo) {
+      systemInfo.value = editorResources.systemInfo
     } else {
       error.value = t('system.messages.fetchFailed')
     }

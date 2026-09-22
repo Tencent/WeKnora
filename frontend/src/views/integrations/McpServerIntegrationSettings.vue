@@ -260,8 +260,8 @@ import { useAuthStore } from '@/stores/auth'
 import { copyWithToast } from '@/utils/clipboard'
 import { useApiBaseUrlDisplay } from '@/composables/useApiBaseUrlDisplay'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import { listAgents, type CustomAgent } from '@/api/agent'
-import { listKnowledgeBases } from '@/api/knowledge-base'
+import type { CustomAgent } from '@/api/agent'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import {
   createMcpEndpoint,
   deleteMcpEndpoint,
@@ -283,6 +283,7 @@ import {
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const chatResources = useChatResourcesStore()
 const { apiBaseUrlDisplay } = useApiBaseUrlDisplay()
 
 const isAdmin = computed(() => authStore.hasRole('admin'))
@@ -398,13 +399,13 @@ async function loadOptions() {
   kbLoading.value = true
   agentsLoading.value = true
   try {
-    const [kbRes, agentRes] = await Promise.all([
-      listKnowledgeBases({ creator: 'all' }).catch(() => null),
-      listAgents().catch(() => null),
+    await Promise.all([
+      chatResources.ensureKnowledgeBases().catch(() => null),
+      chatResources.ensureAgents().catch(() => null),
     ])
-    const kbRows = ((kbRes as any)?.data ?? []) as Array<{ id: string | number; name?: string }>
+    const kbRows = chatResources.rawKnowledgeBases as Array<{ id: string | number; name?: string }>
     knowledgeBases.value = kbRows.map((kb) => ({ id: String(kb.id), name: kb.name || String(kb.id) }))
-    agents.value = ((agentRes as any)?.data ?? []) as CustomAgent[]
+    agents.value = chatResources.agents as CustomAgent[]
   } finally {
     kbLoading.value = false
     agentsLoading.value = false

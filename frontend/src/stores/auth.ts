@@ -337,7 +337,29 @@ export const useAuthStore = defineStore('auth', () => {
   // Login only populated memberships once; SPA navigations skip
   // hydrateSessionFromToken when isLoggedIn is already true — so inviting
   // flows or revokes would leave the sidebar switcher stale until reload.
-  const refreshFromAuthMe = async (): Promise<boolean> => {
+  //
+  // 同一时刻只允许一个 /auth/me 在飞行：启动（main.ts）、路由守卫、侧栏用户菜单
+  // 都可能在首屏同时要它，并发调用共用同一个请求。
+  let authMeInflight: Promise<boolean> | null = null
+  // 本次会话是否已经用 /auth/me 校准过。登录响应 / 自动初始化只写入登录时的快照，
+  // 之后第一次进入平台布局仍需校准一次；此后由写操作显式 refresh。
+  let authMeSynced = false
+
+  const refreshFromAuthMe = (): Promise<boolean> => {
+    if (authMeInflight) return authMeInflight
+    authMeInflight = refreshFromAuthMeUncached().finally(() => {
+      authMeInflight = null
+    })
+    return authMeInflight
+  }
+
+  /** 会话内已校准过就直接返回，否则拉一次 /auth/me。 */
+  const ensureAuthMe = (): Promise<boolean> => {
+    if (authMeSynced) return Promise.resolve(true)
+    return refreshFromAuthMe()
+  }
+
+  const refreshFromAuthMeUncached = async (): Promise<boolean> => {
     try {
       const { getCurrentUser } = await import('@/api/auth')
       const response = await getCurrentUser()
@@ -376,6 +398,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       setAutoAcceptInvitation(response.data?.capabilities?.auto_accept_invitation === true)
 
+      authMeSynced = true
       return true
     } catch {
       return false
@@ -432,6 +455,7 @@ export const useAuthStore = defineStore('auth', () => {
     pendingInvitationCount.value = 0
     canCreateTenant.value = false
     autoAcceptInvitation.value = false
+    authMeSynced = false
     clearSessionResourceCaches()
 
     // 清空localStorage
@@ -585,6 +609,7 @@ export const useAuthStore = defineStore('auth', () => {
     setAutoAcceptInvitation,
     fetchPendingInvitationCount,
     refreshFromAuthMe,
+    ensureAuthMe,
     acceptInvitationByTokenAndRefresh,
     getSelectedTenant,
     setLiteMode,
