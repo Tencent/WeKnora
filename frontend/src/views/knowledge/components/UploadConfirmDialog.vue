@@ -22,7 +22,7 @@
                       :tooltip="t('uploadConfirm.continueAdd')"
                       placement="bottom-left"
                       @files="appendFiles"
-                      @url="appendUrl"
+                      @urls="appendUrls"
                     />
                   </div>
                 </div>
@@ -433,7 +433,7 @@
                       </div>
                       <div v-if="issueSectionKeys.has('asr')" class="section-notice">
                         <t-icon name="info-circle-filled" />
-                        <span>{{ t('uploadConfirm.asrSetupHint') }}</span>
+                        <span>{{ t(hasAudio ? 'uploadConfirm.asrSetupHint' : 'uploadConfirm.asrYouTubeHint') }}</span>
                       </div>
                       <div class="settings-group">
                         <div class="setting-row">
@@ -581,6 +581,7 @@ import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { formatFileSize, getFileIcon } from '@/utils/files'
 import { getUploadFileKey } from '../utils/uploadSources'
+import { isYouTubeUrl } from '@/utils/youtube'
 import { listKnowledgeTags } from '@/api/knowledge-base'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue'
@@ -879,6 +880,11 @@ const hasAudio = computed(() => {
   return batchFileExts.value.some(ext => AUDIO_EXTENSIONS.includes(ext))
 })
 
+// YouTube videos without captions are transcribed with the ASR model. Unlike
+// audio files this does not block confirmation (captioned videos need no ASR),
+// but the ASR section is flagged so the requirement is visible up front.
+const hasYouTube = computed(() => localUrls.value.some(isYouTubeUrl))
+
 const isGraphDatabaseEnabled = computed(() => {
   const engine = editorResources.systemInfo?.graph_database_engine
   return !!engine && engine !== 'Not Enabled'
@@ -905,7 +911,7 @@ const issueSectionKeys = computed(() => {
   } else if (showMultimodalModelError.value) {
     keys.add('multimodal')
   }
-  if (hasAudio.value) {
+  if (hasAudio.value || hasYouTube.value) {
     if (!uiState.value.asrConfig.enabled || !uiState.value.asrConfig.modelId) {
       keys.add('asr')
     }
@@ -1365,13 +1371,16 @@ const appendFiles = (incoming: File[]) => {
   }
 }
 
-const appendUrl = (url: string) => {
-  if (localUrls.value.includes(url)) {
+const appendUrls = (urls: string[]) => {
+  const toAdd = urls.filter((url) => !localUrls.value.includes(url))
+  if (toAdd.length === 0) {
     MessagePlugin.warning(t('uploadConfirm.urlDuplicate'))
     return
   }
-  localUrls.value = [...localUrls.value, url]
-  MessagePlugin.success(t('uploadConfirm.urlAdded'))
+  localUrls.value = [...localUrls.value, ...toAdd]
+  MessagePlugin.success(toAdd.length === 1
+    ? t('uploadConfirm.urlAdded')
+    : t('uploadConfirm.urlsAdded', { count: toAdd.length }))
 }
 
 const removeUrl = (index: number) => {

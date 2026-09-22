@@ -284,6 +284,21 @@ export function createKnowledgeFromURL(
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
 
+// 批量导入 YouTube 视频与播放列表：展开播放列表并按视频去重，每个视频创建一条 URL 知识
+// data.urls: 最多 100 个链接；data.folder_path: 单个视频放入该文件夹，播放列表放入其下以列表标题命名的子文件夹
+export function createKnowledgeFromYouTube(
+  kbId: string,
+  data: {
+    urls: string[];
+    folder_path?: string;
+    enable_multimodel?: boolean;
+    tag_ids?: string[];
+    process_config?: KnowledgeProcessOverrides;
+  },
+) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/youtube`, data);
+}
+
 // 手工创建知识
 // data.tag_ids: 可选，指定知识所属的标签 ID
 export function createManualKnowledge(

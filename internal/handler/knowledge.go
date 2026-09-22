@@ -388,7 +388,8 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 // CreateKnowledgeFromURL godoc
 // @Summary      从URL创建知识
-// @Description  从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式
+// @Description  从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式。
+// @Description  YouTube 视频链接会抓取字幕（无字幕时下载音频并用知识库的 ASR 模型转写），再用摘要模型整理为文档；播放列表或批量链接请使用 youtube 接口
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -481,6 +482,70 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"data":    knowledge,
+	})
+}
+
+// CreateKnowledgeFromYouTube godoc
+// @Summary      批量导入YouTube视频与播放列表
+// @Description  接收一组 YouTube 视频或播放列表链接（最多 100 个），展开播放列表并按视频去重后，为每个视频创建一条 URL 知识
+// @Description  （异步抓取字幕或转写音频后生成文档并入库）。无法识别的链接与失败的视频计入 failed，已存在的视频计入 duplicates，
+// @Description  均不会导致整体失败；单个视频放入 folder_path，每个播放列表的视频放入 folder_path 下以播放列表标题命名的子文件夹；
+// @Description  单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        request  body      object{urls=[]string,folder_path=string,tag_ids=[]string}  true  "导入请求"
+// @Success      201      {object}  types.YouTubeImportResult  "导入结果"
+// @Failure      400      {object}  errors.AppError            "请求参数错误或没有可导入的视频"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/youtube [post]
+func (h *KnowledgeHandler) CreateKnowledgeFromYouTube(c *gin.Context) {
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(errors.NewForbiddenError("No permission to create knowledge"))
+		return
+	}
+
+	var req struct {
+		URLs             []string                         `json:"urls" binding:"required,min=1,max=100"`
+		FolderPath       string                           `json:"folder_path"`
+		EnableMultimodel *bool                            `json:"enable_multimodel"`
+		TagIDs           []string                         `json:"tag_ids"`
+		Channel          string                           `json:"channel"`
+		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Importing %d YouTube link(s) into knowledge base %s",
+		len(req.URLs), secutils.SanitizeForLog(kbID))
+
+	result, err := h.kgService.CreateKnowledgeFromYouTube(
+		ctx, kbID, req.URLs, req.EnableMultimodel, req.TagIDs, req.Channel, req.ProcessConfig, req.FolderPath,
+	)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    result,
 	})
 }
 

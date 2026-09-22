@@ -118,6 +118,10 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         gosu \
         ffmpeg && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
+    # yt-dlp powers YouTube knowledge import; the deno extra provides the JS
+    # runtime YouTube extraction needs. Rebuild regularly: YouTube changes break
+    # old yt-dlp releases.
+    python3 -m pip install --break-system-packages --upgrade "yt-dlp[default,deno]" && \
     mkdir -p /home/appuser/.local/bin && \
     curl -LsSf https://astral.sh/uv/install.sh | CARGO_HOME=/home/appuser/.cargo UV_INSTALL_DIR=/home/appuser/.local/bin sh && \
     chown -R appuser:appuser /home/appuser && \
