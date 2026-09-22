@@ -29,7 +29,9 @@ type fakeWikiSearchService struct {
 	}
 }
 
-func (f *fakeWikiSearchService) SearchPagesAcross(_ context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error) {
+func (f *fakeWikiSearchService) SearchPagesAcross(
+	_ context.Context, kbIDs []string, query string, limit int,
+) ([]*types.WikiPage, error) {
 	f.got.kbIDs = append([]string(nil), kbIDs...)
 	f.got.query = query
 	f.got.limit = limit
@@ -142,7 +144,8 @@ func TestSearchPagesAcross_ReturnsSlimHitsWithoutContent(t *testing.T) {
 func TestSearchPagesAcross_MergesSingleKnowledgeBaseID(t *testing.T) {
 	fake := &fakeWikiSearchService{pages: []*types.WikiPage{}}
 	h := &WikiPageHandler{wikiService: fake}
-	w := postWikiSearch(wikiSearchEngine(t, h, nil), `{"query":"q","knowledge_base_id":"kb-1","knowledge_base_ids":["kb-2"]}`)
+	body := `{"query":"q","knowledge_base_id":"kb-1","knowledge_base_ids":["kb-2"]}`
+	w := postWikiSearch(wikiSearchEngine(t, h, nil), body)
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, []string{"kb-2", "kb-1"}, fake.got.kbIDs)
 }
@@ -190,7 +193,9 @@ func TestSearchPagesAcross_PropagatesNotFound(t *testing.T) {
 }
 
 func TestSearchPagesAcross_PropagatesNonWikiBadRequest(t *testing.T) {
-	fake := &fakeWikiSearchService{err: errors.NewBadRequestError("Wiki feature is not enabled for this knowledge base")}
+	fake := &fakeWikiSearchService{
+		err: errors.NewBadRequestError("Wiki feature is not enabled for this knowledge base"),
+	}
 	h := &WikiPageHandler{wikiService: fake}
 	w := postWikiSearch(wikiSearchEngine(t, h, nil), `{"query":"q","knowledge_base_ids":["kb-a"]}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)

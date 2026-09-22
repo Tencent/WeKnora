@@ -1045,7 +1045,7 @@ const maxWikiSearchKnowledgeBases = 32
 
 // SearchPagesAcross godoc
 // @Summary      Cross-KB wiki search
-// @Description  Search wiki pages across multiple knowledge bases using the same POSIX regex ranking as single-KB wiki search
+// @Description  Cross-KB wiki search using the same POSIX regex ranking as single-KB wiki search
 // @Tags         Wiki
 // @Accept       json
 // @Produce      json
@@ -1060,25 +1060,27 @@ func (h *WikiPageHandler) SearchPagesAcross(c *gin.Context) {
 
 	var request SearchWikiRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
 	kbIDs := mergeWikiSearchKBIDs(request.KnowledgeBaseIDs, request.KnowledgeBaseID)
 	if strings.TrimSpace(request.Query) == "" {
-		c.Error(errors.NewBadRequestError("query is required"))
+		_ = c.Error(errors.NewBadRequestError("query is required"))
 		return
 	}
 	if len(kbIDs) == 0 {
-		c.Error(errors.NewBadRequestError("at least one knowledge_base_id or knowledge_base_ids must be provided"))
+		_ = c.Error(errors.NewBadRequestError(
+			"at least one knowledge_base_id or knowledge_base_ids must be provided"))
 		return
 	}
 	if len(kbIDs) > maxWikiSearchKnowledgeBases {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("at most %d knowledge_base_ids are allowed", maxWikiSearchKnowledgeBases)))
+		_ = c.Error(errors.NewBadRequestError(
+			fmt.Sprintf("at most %d knowledge_base_ids are allowed", maxWikiSearchKnowledgeBases)))
 		return
 	}
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, nil); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -1088,11 +1090,11 @@ func (h *WikiPageHandler) SearchPagesAcross(c *gin.Context) {
 	pages, err := h.wikiService.SearchPagesAcross(ctx, kbIDs, request.Query, request.Limit)
 	if err != nil {
 		if _, ok := errors.IsAppError(err); ok {
-			c.Error(err)
+			_ = c.Error(err)
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

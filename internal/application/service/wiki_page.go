@@ -1029,7 +1029,9 @@ func (s *wikiPageService) SearchPages(ctx context.Context, kbID string, query st
 	return s.repo.Search(ctx, kbID, query, limit)
 }
 
-func (s *wikiPageService) SearchPagesAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error) {
+func (s *wikiPageService) SearchPagesAcross(
+	ctx context.Context, kbIDs []string, query string, limit int,
+) ([]*types.WikiPage, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, apperrors.NewBadRequestError("query is required")
@@ -1037,10 +1039,12 @@ func (s *wikiPageService) SearchPagesAcross(ctx context.Context, kbIDs []string,
 
 	ids := uniqueNonEmptyWikiSearchKBIDs(kbIDs)
 	if len(ids) == 0 {
-		return nil, apperrors.NewBadRequestError("at least one knowledge_base_id or knowledge_base_ids must be provided")
+		return nil, apperrors.NewBadRequestError(
+			"at least one knowledge_base_id or knowledge_base_ids must be provided")
 	}
 	if len(ids) > maxWikiSearchKnowledgeBases {
-		return nil, apperrors.NewBadRequestError(fmt.Sprintf("at most %d knowledge_base_ids are allowed", maxWikiSearchKnowledgeBases))
+		return nil, apperrors.NewBadRequestError(
+			fmt.Sprintf("at most %d knowledge_base_ids are allowed", maxWikiSearchKnowledgeBases))
 	}
 
 	if s.kbService == nil {

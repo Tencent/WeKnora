@@ -1335,7 +1335,7 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 }
 
 func (r *wikiPageRepository) wikiSearchMatchOp() (op string, pattern func(string) string) {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+	if r.wikiDialect() == "sqlite" {
 		return "LIKE", func(q string) string { return "%" + q + "%" }
 	}
 	return "~*", func(q string) string { return q }
@@ -1344,7 +1344,9 @@ func (r *wikiPageRepository) wikiSearchMatchOp() (op string, pattern func(string
 // SearchAcross searches wiki pages in the given knowledge bases with the
 // same field-priority rank as the single-KB Search path, then truncates
 // to a global top-N. SQLite tests use LIKE; production Postgres keeps ~*.
-func (r *wikiPageRepository) SearchAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error) {
+func (r *wikiPageRepository) SearchAcross(
+	ctx context.Context, kbIDs []string, query string, limit int,
+) ([]*types.WikiPage, error) {
 	ids := uniqueNonEmptyWikiKBIDs(kbIDs)
 	if len(ids) == 0 {
 		return nil, nil

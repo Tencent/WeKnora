@@ -21,7 +21,9 @@ type wikiSearchKBService struct {
 	byID map[string]*types.KnowledgeBase
 }
 
-func (s *wikiSearchKBService) GetKnowledgeBasesByIDsOnly(_ context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+func (s *wikiSearchKBService) GetKnowledgeBasesByIDsOnly(
+	_ context.Context, ids []string,
+) ([]*types.KnowledgeBase, error) {
 	out := make([]*types.KnowledgeBase, 0, len(ids))
 	for _, id := range ids {
 		if kb, ok := s.byID[id]; ok {
