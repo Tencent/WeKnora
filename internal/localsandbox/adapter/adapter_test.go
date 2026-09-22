@@ -161,7 +161,8 @@ func TestAdapterWritesAndReadsWorkspaceFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("hello"), got)
 
-	require.ErrorIs(t, a.WriteSessionWorkspaceFile(ctx, "s1", "/etc/passwd", []byte("nope")), localsandbox.ErrPathDenied)
+	err = a.WriteSessionWorkspaceFile(ctx, "s1", "/etc/passwd", []byte("nope"))
+	require.ErrorIs(t, err, localsandbox.ErrPathDenied)
 }
 
 func TestAdapterWriteSessionInputFileIsDisabled(t *testing.T) {
@@ -268,7 +269,9 @@ func (s *stubBackend) Prepare(_ context.Context, p localsandbox.Policy) (localsa
 	return stubPrepared{fp: p.Fingerprint()}, nil
 }
 
-func (s *stubBackend) Spawn(_ context.Context, _ localsandbox.Prepared, _ localsandbox.Command) (localsandbox.Process, error) {
+func (s *stubBackend) Spawn(
+	_ context.Context, _ localsandbox.Prepared, _ localsandbox.Command,
+) (localsandbox.Process, error) {
 	return &stubProcess{
 		stdout: io.NopCloser(bytes.NewBufferString(s.stdout)),
 		stderr: io.NopCloser(bytes.NewBufferString(s.stderr)),

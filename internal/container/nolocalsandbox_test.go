@@ -57,7 +57,10 @@ func TestStubHostWiringRegistersWithoutLocalSandbox(t *testing.T) {
 }
 
 func TestContainerPackageImportListOmitsLocalSandbox(t *testing.T) {
-	cmd := exec.Command("go", "list", "-f", "{{join .Imports \"\\n\"}}", "github.com/Tencent/WeKnora/internal/container")
+	cmd := exec.Command(
+		"go", "list", "-f", "{{join .Imports \"\\n\"}}",
+		"github.com/Tencent/WeKnora/internal/container",
+	)
 	cmd.Dir = moduleRoot(t)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))

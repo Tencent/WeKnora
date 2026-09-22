@@ -35,7 +35,9 @@ type fakeSandboxSource struct {
 	readCalls  []string
 }
 
-func (f *fakeSandboxSource) ListSessionFiles(_ context.Context, sessionID, dir string) ([]sandbox.RemoteDirEntry, error) {
+func (f *fakeSandboxSource) ListSessionFiles(
+	_ context.Context, sessionID, dir string,
+) ([]sandbox.RemoteDirEntry, error) {
 	f.listCalls++
 	f.listedDirs = append(f.listedDirs, dir)
 	if f.listErr != nil {
@@ -1117,7 +1119,13 @@ func TestCollectTargetSkipsNilSource(t *testing.T) {
 
 func TestCollectTargetUsesRemoteOutputDir(t *testing.T) {
 	remote := sandbox.RemoteWorkspaceLayout()
-	c := NewArtifactCollector(&layoutArtifactSource{layout: remote}, &fakeFileService{}, &fakeStore{}, nil, ArtifactCollectorConfig{})
+	c := NewArtifactCollector(
+		&layoutArtifactSource{layout: remote},
+		&fakeFileService{},
+		&fakeStore{},
+		nil,
+		ArtifactCollectorConfig{},
+	)
 	dir, skip := c.CollectTarget(context.Background(), "s1")
 	if skip {
 		t.Fatal("CollectTarget() skip = true, want remote collection")
@@ -1142,7 +1150,13 @@ func TestCollectTargetSkipsHostLayoutWithoutOutputTree(t *testing.T) {
 }
 
 func TestCollectTargetSkipsWhenLayoutLookupFails(t *testing.T) {
-	c := NewArtifactCollector(&layoutArtifactSource{err: stderrors.New("unavailable")}, &fakeFileService{}, &fakeStore{}, nil, ArtifactCollectorConfig{})
+	c := NewArtifactCollector(
+		&layoutArtifactSource{err: stderrors.New("unavailable")},
+		&fakeFileService{},
+		&fakeStore{},
+		nil,
+		ArtifactCollectorConfig{},
+	)
 	dir, skip := c.CollectTarget(context.Background(), "s1")
 	if !skip || dir != "" {
 		t.Fatalf("CollectTarget() = %q, skip=%v, want skip on layout error", dir, skip)
@@ -1153,6 +1167,6 @@ func TestCollectTargetKeepsRemoteDefaultWhenSourceHasNoLayout(t *testing.T) {
 	c := NewArtifactCollector(&fakeSandboxSource{}, &fakeFileService{}, &fakeStore{}, nil, ArtifactCollectorConfig{})
 	dir, skip := c.CollectTarget(context.Background(), "s1")
 	if skip || dir != "" {
-		t.Fatalf("CollectTarget() = %q, skip=%v, want empty dir and skip=false for the caller's remote default", dir, skip)
+		t.Fatalf("CollectTarget() = %q, skip=%v, want empty dir and skip=false for the remote default", dir, skip)
 	}
 }

@@ -117,7 +117,7 @@ type WorkspaceVersioning interface {
 	VersionsWorkspace(ctx context.Context, sessionID string) bool
 }
 
-func versionsWorkspace(port SessionForkSandboxPort, ctx context.Context, sessionID string) bool {
+func versionsWorkspace(ctx context.Context, port SessionForkSandboxPort, sessionID string) bool {
 	if v, ok := port.(WorkspaceVersioning); ok {
 		return v.VersionsWorkspace(ctx, sessionID)
 	}
@@ -304,7 +304,7 @@ func (s *SessionForkService) prepareBootstrap(
 ) (*types.ForkBootstrap, ForkDegradeReason, bool, error) {
 	// Host workspaces are real directories, often shared across sessions.
 	// Copying messages is the success path; snapshot + git reset is not.
-	if s.sandbox != nil && !versionsWorkspace(s.sandbox, ctx, source.ID) {
+	if s.sandbox != nil && !versionsWorkspace(ctx, s.sandbox, source.ID) {
 		return nil, "", false, nil
 	}
 	checkpoint := latestCheckpoint(history)

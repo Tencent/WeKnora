@@ -195,7 +195,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 
 	hostDir, ok := bindHostWorkspaceDir(request.ProjectDir, h.approvedDirs())
 	if !ok {
-		c.Error(errors.NewBadRequestError("project_dir is not an approved project directory"))
+		_ = c.Error(errors.NewBadRequestError("project_dir is not an approved project directory"))
 		return
 	}
 

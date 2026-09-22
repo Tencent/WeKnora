@@ -29,6 +29,7 @@ type Adapter struct {
 	svc *localsandbox.Service
 }
 
+// New wraps a localsandbox Service as the session-scoped Manager the agent uses.
 func New(svc *localsandbox.Service) *Adapter { return &Adapter{svc: svc} }
 
 // maxListSessionFiles stops WalkDir once the listing is as large as the
@@ -44,14 +45,18 @@ var (
 	_ sandbox.SessionFileStore               = (*Adapter)(nil)
 )
 
+// GetType reports SandboxTypeHost.
 func (a *Adapter) GetType() sandbox.SandboxType { return sandbox.SandboxTypeHost }
-func (a *Adapter) GetSandbox() sandbox.Sandbox  { return nil }
+
+// GetSandbox is unused: host has no remote instance to expose.
+func (a *Adapter) GetSandbox() sandbox.Sandbox { return nil }
 
 // VersionsWorkspace is false on host: the workspace is the user's real
 // directory and must not be auto-committed, even if this adapter is injected
 // as the process-wide checkpoint runner.
 func (a *Adapter) VersionsWorkspace(context.Context, string) bool { return false }
 
+// Cleanup is a no-op; host holds no process-wide resources to tear down.
 func (a *Adapter) Cleanup(context.Context) error { return nil }
 
 // Execute is the legacy script entry point. The local sandbox exposes shell
@@ -60,6 +65,7 @@ func (a *Adapter) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.Exe
 	return nil, fmt.Errorf("localsandbox: script execution is not supported; use shell_exec")
 }
 
+// SessionShellExecutor returns the adapter when a service is wired.
 func (a *Adapter) SessionShellExecutor() sandbox.SessionShellExecutor {
 	if a.svc == nil {
 		return nil
@@ -67,6 +73,7 @@ func (a *Adapter) SessionShellExecutor() sandbox.SessionShellExecutor {
 	return a
 }
 
+// SessionFileStore returns the adapter when a service is wired.
 func (a *Adapter) SessionFileStore() sandbox.SessionFileStore {
 	if a.svc == nil {
 		return nil
@@ -93,6 +100,7 @@ func (a *Adapter) SessionWorkspaceLayout(
 	return layout, nil
 }
 
+// ExecShellCommand runs command under the OS sandbox for this session.
 func (a *Adapter) ExecShellCommand(
 	ctx context.Context,
 	sessionID, command, workDir string,
@@ -133,6 +141,7 @@ func (a *Adapter) guard(
 	return a.svc.GuardForSession(ctx, sessionID)
 }
 
+// EnsureSessionDir creates dir inside the session workspace when the policy allows it.
 func (a *Adapter) EnsureSessionDir(ctx context.Context, sessionID, dir string) error {
 	guard, ws, err := a.guard(ctx, sessionID)
 	if err != nil {
@@ -153,6 +162,7 @@ func (a *Adapter) EnsureSessionDir(ctx context.Context, sessionID, dir string) e
 	return nil
 }
 
+// ListSessionFiles walks dir under the session workspace, truncated at maxListSessionFiles.
 func (a *Adapter) ListSessionFiles(
 	ctx context.Context, sessionID, dir string,
 ) ([]sandbox.RemoteDirEntry, error) {
@@ -199,6 +209,7 @@ func (a *Adapter) ListSessionFiles(
 	return out, nil
 }
 
+// StatSessionFile returns metadata for p when the policy allows reading it.
 func (a *Adapter) StatSessionFile(
 	ctx context.Context, sessionID, p string,
 ) (*sandbox.RemoteStatEntry, error) {
@@ -223,6 +234,7 @@ func (a *Adapter) StatSessionFile(
 	}, nil
 }
 
+// ReadSessionFile returns the contents of p when the policy allows reading it.
 func (a *Adapter) ReadSessionFile(ctx context.Context, sessionID, p string) ([]byte, error) {
 	guard, ws, err := a.guard(ctx, sessionID)
 	if err != nil {
@@ -240,6 +252,7 @@ func (a *Adapter) ReadSessionFile(ctx context.Context, sessionID, p string) ([]b
 	return data, nil
 }
 
+// WriteSessionWorkspaceFile writes content to p when the policy allows it.
 func (a *Adapter) WriteSessionWorkspaceFile(
 	ctx context.Context, sessionID, p string, content []byte,
 ) error {
@@ -262,6 +275,7 @@ func (a *Adapter) WriteSessionWorkspaceFile(
 	return nil
 }
 
+// WriteSessionWorkspaceFiles writes each file in turn, stopping at the first error.
 func (a *Adapter) WriteSessionWorkspaceFiles(
 	ctx context.Context, sessionID string, files []sandbox.SessionWorkspaceFile,
 ) error {
@@ -281,6 +295,7 @@ func (a *Adapter) WriteSessionInputFile(
 	return errNoHostAttachmentDir
 }
 
+// RemoveSessionInputPath is unused on host: there is no attachment directory to clean.
 func (a *Adapter) RemoveSessionInputPath(context.Context, string, string) error {
 	return errNoHostAttachmentDir
 }
