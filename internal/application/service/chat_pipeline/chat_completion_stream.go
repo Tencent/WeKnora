@@ -267,7 +267,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						}
 						if thinkContent != "" {
 							thinkingOpen = true
-							eventBus.Emit(ctx, types.Event{
+							_ = eventBus.Emit(ctx, types.Event{
 								ID:        thinkingID,
 								Type:      types.EventType(event.EventAgentThought),
 								SessionID: chatManage.SessionID,

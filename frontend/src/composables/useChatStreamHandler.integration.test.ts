@@ -8,6 +8,7 @@ import * as finalContent from '../utils/finalArtifactContent.ts'
 import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
+import * as thinkBlocks from '../utils/thinkBlocks.ts'
 import { useProtectedImageRecovery } from './useProtectedImageRecovery.ts'
 import { clearProtectedFileFailureCache, hydrateProtectedFileImages } from '../utils/security.ts'
 import { setDefaultProtectedFileAccess } from '../utils/protectedFileAccess.ts'
@@ -25,6 +26,7 @@ const modules: Record<string, unknown> = {
   '@/utils/rag-pipeline-history': history,
   '@/utils/messageTimestamp': timestamps,
   '@/utils/steerStreamFork': steering,
+  '@/utils/thinkBlocks': thinkBlocks,
 }
 const exports: { useChatStreamHandler?: typeof StreamHandler } = {}
 vm.runInNewContext(compiled, {
