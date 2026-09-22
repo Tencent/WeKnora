@@ -207,12 +207,14 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
-| `OLLAMA_BASE_URL` | http://host.docker.internal:11434 | Ollama 地址 |
+| `OLLAMA_BASE_URL` | http://host.docker.internal:11434 | 唯一的本地 Ollama 地址。`source=local` 的向量与对话模型共用它；未设置时进程用 `http://localhost:11434` |
 | `OLLAMA_OPTIONAL` | true | Ollama 不可用时仅告警不阻断启动 |
 | `BATCH_EMBED_SIZE` | 空 | 批量 embedding 大小 |
 | `VLM_HTTP_TIMEOUT_SECONDS` | 180 | VLM 单次请求超时 |
 | `BUILTIN_MODELS_CONFIG` | config/builtin_models.yaml | 内置模型声明文件路径（见下文） |
 | `WEKNORA_LLM_STREAM_RAW_DUMP` / `_DIR` | 空 | LLM 流原始转储（排障用） |
+
+向量模型名不由环境变量决定。在模型记录里把 `type=Embedding`、`source=local` 的 `name` 设为 Ollama 模型名（CLI 示例 `nomic-embed-text`，维度 768；快速开始用 `bge-m3`，维度 1024）。名为空时本地 embedder 回退到 `nomic-embed-text`。`EMBEDDING_MODEL_NAME` 只在 `builtin_models.yaml` 引用 `${EMBEDDING_MODEL_NAME}` 时生效（见下文「config/builtin_models.yaml.example：声明式内置模型」，以及仓库 `docs/BUILTIN_MODELS.md`）。安装文档的 8GB 起点不含 Ollama 权重；Neo4j 默认关闭。仓库没有「向量 + pgvector + Neo4j + 本地 LLM」的已测合计内存下限。
 
 ### 认证、租户与安全
 
@@ -375,6 +377,8 @@ builtin_models:
 ```
 
 注意：未设置的 `${ENV}` 会保留字面量以便暴露配置错误；非字符串字段（`type`、`source`、`is_default`、`dimension` 等）必须写字面值；从文件删除条目**不会**自动删库，需手动清理。
+
+本地 Ollama 把 `source` 写成 `local`，`name` 用 Ollama 模型名（向量侧可以是 `${EMBEDDING_MODEL_NAME}`）。这类条目与对话模型一起走 `OLLAMA_BASE_URL`，共用一个 `ollama serve`。注释掉的完整例子在 `config/builtin_models.yaml.example` 的 “one local Ollama” 段。`dimension` 仍是字面量（CLI 示例 `nomic-embed-text` 为 768）。
 
 ## 配置优先级速记
 

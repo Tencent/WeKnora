@@ -141,6 +141,8 @@ builtin_models:
 
 #### 本地模型下载（Ollama）
 
+本地向量、对话与视觉模型共用 `OllamaService` 这一个客户端，地址只来自 `OLLAMA_BASE_URL`（未设置时为 `http://localhost:11434`）。因此 embedding 与 generation 可以、并且默认就会跑在同一个 `ollama serve` 上，不需要拆成两个 Ollama。向量模型名是 `type=Embedding`、`source=local` 那条模型的 `name`；名为空时 embedder 使用 `nomic-embed-text`。
+
 本地模型的生命周期由 `internal/models/utils/ollama/ollama.go` 的 `OllamaService` 管理（`IsModelAvailable` / `PullModel` / `EnsureModelAvailable` / `ListModelsDetailed` / `DeleteModel` 等），HTTP 入口在 `internal/handler/initialization.go`：
 
 | 路径 | 说明 |

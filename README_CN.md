@@ -226,6 +226,12 @@ docker compose up -d    # 启动核心服务
 
 > 如需使用本地 Ollama 模型，请先运行 `ollama serve > /dev/null 2>&1 &`
 
+本地向量模型与本地对话模型共用这一个 Ollama 进程。地址是 `OLLAMA_BASE_URL`：`.env.example` 与 Compose 默认为 `http://host.docker.internal:11434`；进程未设置该变量时使用 `http://localhost:11434`（`internal/models/utils/ollama/ollama.go`）。
+
+向量模型名写在 `source=local` 的 `Embedding` 模型的 `name` 上（即 Ollama 模型名）。可在「设置 → 模型」里添加，或执行 `weknora model create nomic-embed-text --type Embedding --source local --dimension 768`，或在知识库初始化请求里设置 `embedding.modelName`（快速开始示例为 `bge-m3`，维度 1024，见[快速开始](./website-docs/01-getting-started/03-quickstart.md)）。本地向量模型名为空时，代码回退到 `nomic-embed-text`。若要从环境变量注入名称，在 `config/builtin_models.yaml`（`BUILTIN_MODELS_CONFIG`）中写 `${EMBEDDING_MODEL_NAME}`。[`.env.example`](./.env.example) 里的 `EMBEDDING_MODEL_NAME` 只是这个占位符，见 [`config/builtin_models.yaml.example`](./config/builtin_models.yaml.example) 与 [`docs/BUILTIN_MODELS.md`](./docs/BUILTIN_MODELS.md)。
+
+[安装说明](./website-docs/01-getting-started/02-installation.md) 给出的 Docker 栈起点是 4 核 CPU / 8GB 内存，这个数字不含 Ollama 模型权重。默认检索是 `postgres` 服务里的 ParadeDB（pgvector）。Neo4j 在加上 `neo4j` profile 之前不会启动。仓库没有记录「向量模型 + pgvector + Neo4j + 本地 LLM」同时运行的已测最低内存。请为 Compose 服务再加上这一份 Ollama 里要加载的模型预留内存；不用知识图谱时不要启用 `neo4j` profile。
+
 ### 🔄 版本升级
 
 若已有部署并下载了更新的 release：

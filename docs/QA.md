@@ -21,39 +21,13 @@ docker compose logs -f app docreader postgres
 
 通常是Embedding模型和对话模型没有正确被设置导致。按照以下步骤进行排查
 
-1. 查看`.env`配置中的模型信息是否配置完整，其中如果使用ollama访问本地模型，需要确保本地ollama服务正常运行，同时在`.env`中的如下环境变量需要正确设置:
-```bash
-# LLM Model
-INIT_LLM_MODEL_NAME=your_llm_model
-# Embedding Model
-INIT_EMBEDDING_MODEL_NAME=your_embedding_model
-# Embedding模型向量维度
-INIT_EMBEDDING_MODEL_DIMENSION=your_embedding_model_dimension
-# Embedding模型的ID，通常是一个字符串
-INIT_EMBEDDING_MODEL_ID=your_embedding_model_id
-```
+1. 确认 Embedding 模型和对话模型已经在「设置 → 模型」中添加（或通过初始化接口 / `weknora model create` 注册），并且知识库绑定了它们。使用本地 Ollama 时：
 
-如果是通过remote api访问模型，则需要额外提供对应的`BASE_URL`和`API_KEY`:
-```bash
-# LLM模型的访问地址
-INIT_LLM_MODEL_BASE_URL=your_llm_model_base_url
-# LLM模型的API密钥，如果需要身份验证，可以设置
-INIT_LLM_MODEL_API_KEY=your_llm_model_api_key
-# Embedding模型的访问地址
-INIT_EMBEDDING_MODEL_BASE_URL=your_embedding_model_base_url
-# Embedding模型的API密钥，如果需要身份验证，可以设置
-INIT_EMBEDDING_MODEL_API_KEY=your_embedding_model_api_key
-```
+- 先运行 `ollama serve`，并设置 `OLLAMA_BASE_URL`（`.env.example` 与 Compose 默认为 `http://host.docker.internal:11434`；未设置时进程使用 `http://localhost:11434`）。
+- `source=local` 的向量模型与对话模型共用这一个 Ollama。向量模型名是该 Embedding 模型的 `name`（Ollama 模型名，例如 `nomic-embed-text`），不是 `INIT_EMBEDDING_MODEL_NAME`。
+- 只有 `config/builtin_models.yaml` 写了 `${EMBEDDING_MODEL_NAME}` 时，`.env` 里的 `EMBEDDING_MODEL_NAME` 才会在启动时替换进去。见 [内置模型管理](./BUILTIN_MODELS.md) 与 README 的 Ollama 说明。
 
-当需要重排序功能时，需要额外配置Rerank模型，具体配置如下：
-```bash
-# 使用的Rerank模型名称
-INIT_RERANK_MODEL_NAME=your_rerank_model_name
-# Rerank模型的访问地址
-INIT_RERANK_MODEL_BASE_URL=your_rerank_model_base_url
-# Rerank模型的API密钥，如果需要身份验证，可以设置
-INIT_RERANK_MODEL_API_KEY=your_rerank_model_api_key
-```
+`INIT_LLM_MODEL_*`、`INIT_EMBEDDING_MODEL_*`、`INIT_RERANK_MODEL_*` 不会被当前服务端读取。`scripts/check-env.sh` 仍会把 `INIT_LLM_MODEL_NAME` / `INIT_EMBEDDING_MODEL_NAME` 当作可选项打印；留空不影响启动。远程模型在模型记录里填写 `base_url` 与 `api_key`，或在 builtin YAML 里用 `${...}` 引用环境变量。重排序模型同样在模型配置里添加，而不是靠 `INIT_RERANK_MODEL_*`。
 
 2. 查看主服务日志，是否有`ERROR`日志输出
 

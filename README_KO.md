@@ -225,6 +225,12 @@ docker compose up -d    # 코어 서비스 시작
 
 > 로컬 Ollama 모델을 사용하려면 먼저 `ollama serve > /dev/null 2>&1 &` 를 실행하세요.
 
+로컬 임베딩과 로컬 생성은 이 Ollama 프로세스 하나를 공유합니다. 주소는 `OLLAMA_BASE_URL`입니다. `.env.example`과 Compose 기본값은 `http://host.docker.internal:11434`이고, 변수가 비어 있는 프로세스는 `http://localhost:11434`를 사용합니다(`internal/models/utils/ollama/ollama.go`).
+
+임베딩 모델 이름은 `source=local`인 `Embedding` 모델의 `name`(Ollama 모델 이름)입니다. **설정 → 모델**, `weknora model create nomic-embed-text --type Embedding --source local --dimension 768`, 또는 지식베이스 초기화의 `embedding.modelName`으로 지정합니다(퀵스타트는 `bge-m3`, 차원 1024. [퀵스타트](./website-docs/01-getting-started/03-quickstart.md)). 로컬 임베딩 이름이 비어 있으면 `nomic-embed-text`로 돌아갑니다. 환경 변수로 이름을 넣으려면 `config/builtin_models.yaml`(`BUILTIN_MODELS_CONFIG`)에 `${EMBEDDING_MODEL_NAME}`을 적습니다. [`.env.example`](./.env.example)의 `EMBEDDING_MODEL_NAME`은 그 자리표시자일 뿐입니다. [`config/builtin_models.yaml.example`](./config/builtin_models.yaml.example)와 [`docs/BUILTIN_MODELS.md`](./docs/BUILTIN_MODELS.md)를 보세요.
+
+[설치 안내](./website-docs/01-getting-started/02-installation.md)의 Docker 스택 시작점은 CPU 4코어 / 8GB이며, 여기에는 Ollama 가중치가 포함되지 않습니다. 기본 검색은 `postgres` 서비스의 ParadeDB(pgvector)입니다. Neo4j는 `neo4j` 프로필을 켜기 전에는 뜨지 않습니다. 임베딩, pgvector, Neo4j, 로컬 LLM을 함께 띄운 검증된 합산 RAM 하한은 저장소에 없습니다. Compose 서비스에 더해 이 Ollama 하나에 올릴 모델만큼 여유를 두세요. 지식 그래프를 쓰지 않으면 `neo4j` 프로필은 끄십시오.
+
 ### 🔄 업그레이드
 
 기존 배포가 있고 새 release를 다운로드한 경우:

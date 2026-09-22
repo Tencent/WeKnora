@@ -249,6 +249,12 @@ Once started, visit **http://localhost** to get started.
 
 > To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
 
+Local embedding and local generation share that one Ollama process. `OLLAMA_BASE_URL` is its address: `.env.example` and Compose default to `http://host.docker.internal:11434`, and a process with the variable unset uses `http://localhost:11434` (`internal/models/utils/ollama/ollama.go`).
+
+The embedding model is the `name` of an `Embedding` model whose `source` is `local` (the Ollama model name). Set it in **Settings → Models**, with `weknora model create nomic-embed-text --type Embedding --source local --dimension 768`, or on knowledge-base init as `embedding.modelName` (the quickstart uses `bge-m3` with dimension 1024; see [quickstart](./website-docs/01-getting-started/03-quickstart.md)). An empty local embedding name falls back to `nomic-embed-text`. To supply the name from the environment, reference `${EMBEDDING_MODEL_NAME}` in `config/builtin_models.yaml` (`BUILTIN_MODELS_CONFIG`). The `EMBEDDING_MODEL_NAME` line in [`.env.example`](./.env.example) is only that placeholder; see [`config/builtin_models.yaml.example`](./config/builtin_models.yaml.example) and [`docs/BUILTIN_MODELS.md`](./docs/BUILTIN_MODELS.md).
+
+The [installation guide](./website-docs/01-getting-started/02-installation.md) starts the Docker stack at 4 CPU cores and 8 GB. That figure does not include Ollama weights. Default retrieval is ParadeDB (pgvector) in the `postgres` service. Neo4j stays off until you add the `neo4j` profile. The repository does not record a combined RAM minimum tested with an embedding model, pgvector, Neo4j, and a local LLM together. Leave headroom for the Compose services plus the models loaded in this single Ollama process, and leave the `neo4j` profile off when you are not building a knowledge graph.
+
 ### 🔄 Upgrading
 
 If you already have WeKnora running and downloaded a newer release:

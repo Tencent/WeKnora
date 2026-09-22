@@ -135,6 +135,10 @@ builtin_models:
       provider: ${LLM_PROVIDER}
 ```
 
+#### 本地 Ollama（向量与对话共用一个实例）
+
+`source: local` 的对话模型和向量模型都走 `OLLAMA_BASE_URL` 上的那一个 Ollama 进程，不需要为 embedding 再起一份。向量模型名就是 Ollama 模型名，通过 `${EMBEDDING_MODEL_NAME}` 注入；`dimension` 必须写成字面量，并与所拉模型一致（CLI 示例 `nomic-embed-text` 为 768）。完整注释示例见 `config/builtin_models.yaml.example` 的 “one local Ollama” 段。安装文档的 8GB 起点不含这些模型权重，Neo4j 默认关闭。
+
 启动：
 ```bash
 docker compose up -d
