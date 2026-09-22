@@ -21,7 +21,12 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	conversation []chat.Message,
 ) error {
 	totalToolCalls := countTotalToolCalls(state.RoundSteps)
-	logger.Infof(ctx, "[Agent][FinalAnswer] Synthesizing from %d steps, %d tool calls",
+	// The request this function builds carries no tools and ToolChoice "none"
+	// (see the call below), so a tool call the model emits here arrives as prose
+	// and is never executed. Say that on the line an operator greps for: the
+	// alternative is a transcript that reads as if the model refused to act.
+	logger.Infof(ctx, "[Agent][FinalAnswer] Synthesizing from %d steps, %d tool calls "+
+		"(tools disabled for this call: any tool call emitted now is text and will not run)",
 		len(state.RoundSteps), totalToolCalls)
 	common.PipelineInfo(ctx, "Agent", "final_answer_start", map[string]interface{}{
 		"session_id":   sessionID,
