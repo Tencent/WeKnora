@@ -113,7 +113,9 @@ func (r *chunkRepository) GetChunkByIDOnly(ctx context.Context, id string) (*typ
 // index without tenant filter. It resolves legacy/fabricated citation ids of
 // the form "<knowledge_id>_chunk_<index>" (issue #1323) where the LLM cites
 // chunk position instead of the chunk's real UUID.
-func (r *chunkRepository) GetChunkByKnowledgeAndIndexOnly(ctx context.Context, knowledgeID string, chunkIndex int) (*types.Chunk, error) {
+func (r *chunkRepository) GetChunkByKnowledgeAndIndexOnly(
+	ctx context.Context, knowledgeID string, chunkIndex int,
+) (*types.Chunk, error) {
 	var chunk types.Chunk
 	if err := r.db.WithContext(ctx).
 		Where("knowledge_id = ? AND chunk_index = ?", knowledgeID, chunkIndex).

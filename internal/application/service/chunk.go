@@ -145,7 +145,7 @@ func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.
 		return nil, err
 	}
 	if knowledgeID, chunkIndex, ok := parseFabricatedChunkID(id); ok {
-		logger.Warnf(ctx, "Chunk id %q looks like a fabricated citation id, falling back to knowledge_id+chunk_index lookup", id)
+		logger.Warnf(ctx, "Chunk id %q looks fabricated, falling back to knowledge_id+chunk_index lookup", id)
 		return s.chunkRepository.GetChunkByKnowledgeAndIndexOnly(ctx, knowledgeID, chunkIndex)
 	}
 	return nil, ErrChunkNotFound
@@ -154,7 +154,8 @@ func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.
 // fabricatedChunkIDRE matches citation ids the LLM invents from the
 // knowledge_id + chunk_index attributes in knowledge_search output, e.g.
 // "f91259e7-4f95-46c2-a928-6a558cc0d3d3_chunk_119".
-var fabricatedChunkIDRE = regexp.MustCompile(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})_chunk_(\d+)$`)
+var fabricatedChunkIDRE = regexp.MustCompile(
+	`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})_chunk_(\d+)$`)
 
 // parseFabricatedChunkID splits a fabricated "<knowledge_id>_chunk_<index>"
 // id into its components.
