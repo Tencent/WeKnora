@@ -1,4 +1,9 @@
 export default {
+  toolbox: {
+    "title": "도구함",
+    "description": "에이전트의 스킬, 외부 도구 및 브라우저 연결을 관리합니다.",
+    "unavailable": "현재 워크스페이스에서 사용할 수 있는 도구가 없습니다."
+  },
   localBrowser: {
     pipOpen: "미리보기 팝업 열기",
     pipReturn: "대화 내 미리보기로 돌아가기",
@@ -65,7 +70,7 @@ export default {
     "settingsTitle": "브라우저 연결",
     "settingsDescription": "BrowserSkill로 내 Chrome을 연결하면 대화에서 실제 웹페이지를 조작할 수 있습니다.",
     "openSettings": "연결 설정 열기",
-    "settingsHint": "개인 설정에서 BrowserSkill을 연결하면 로컬 브라우저를 사용할 수 있습니다.",
+    "settingsHint": "도구함에서 BrowserSkill을 연결하면 로컬 브라우저를 사용할 수 있습니다.",
     "unavailable": "서버에서 로컬 브라우저가 활성화되지 않았습니다. 관리자에게 문의하세요.",
 
     "source": "브라우저 연결 대상",
@@ -91,11 +96,12 @@ export default {
     "revoke": "기기 인증 취소",
     "revokeConfirm": "취소하면 다시 연결해야 로컬 브라우저를 사용할 수 있습니다.",
     "failed": "작업에 실패했습니다. 다시 시도하세요.",
-    "productDescription": "내 Chrome에서 브라우저 작업 실행",
+    "productDescription": "에이전트가 브라우저에서 페이지를 열고 내용을 읽고 작업을 수행할 수 있게 해 주는 오픈소스 Chrome 확장 프로그램입니다.",
     "offline": "오프라인",
     "notPaired": "연결 설정 필요",
     "lastSeen": "최근 연결",
     "readyHint": "준비되었습니다. 대화로 돌아가 브라우저 작업을 요청하세요.",
+    "capabilitiesTitle": "에이전트가 할 수 있는 작업",
     "reconnectHint": "인증이 저장되어 있습니다. Chrome과 확장 프로그램을 열면 자동으로 다시 연결됩니다.",
     "replaceDevice": "브라우저 변경",
     "installExtension": "BrowserSkill 설치",
@@ -2249,6 +2255,7 @@ export default {
 },
   mcpServiceDialog: {
     addTitle: 'MCP 서비스 추가',
+    addDesc: '외부 MCP 서비스를 연결하면 에이전트가 해당 도구를 호출할 수 있습니다.',
     editTitle: 'MCP 서비스 편집',
     basicSection: '기본',
     connectionSection: '연결',

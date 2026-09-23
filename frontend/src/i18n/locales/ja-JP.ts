@@ -1,4 +1,9 @@
 export default {
+  toolbox: {
+    "title": "ツールボックス",
+    "description": "エージェントのスキル、外部ツール、ブラウザー接続を管理します。",
+    "unavailable": "現在のワークスペースで利用できるツールはありません。"
+  },
   resourceSort: {
     title: '並び替え',
     updatedTime: '更新日時',
@@ -80,7 +85,7 @@ export default {
     "settingsTitle": "ブラウザー接続",
     "settingsDescription": "BrowserSkill で手元の Chrome を接続すると、会話から実際のウェブページを操作できます。",
     "openSettings": "接続設定を開く",
-    "settingsHint": "個人設定で BrowserSkill を接続すると、ここでローカルブラウザーを利用できます。",
+    "settingsHint": "ツールボックスで BrowserSkill を接続すると、ここでローカルブラウザーを利用できます。",
     "unavailable": "サーバーでローカルブラウザーが有効になっていません。管理者に連絡してください。",
 
     "source": "ブラウザーの接続先",
@@ -106,11 +111,12 @@ export default {
     "revoke": "デバイスの認証を取り消す",
     "revokeConfirm": "取り消すと、ローカルブラウザーを使うには再度ペアリングが必要です。",
     "failed": "操作に失敗しました。再試行してください。",
-    "productDescription": "Chrome でブラウザータスクを実行",
+    "productDescription": "エージェントがブラウザーでページを開き、内容を読み取り、操作できるオープンソースの Chrome 拡張機能です。",
     "offline": "オフライン",
     "notPaired": "未ペアリング",
     "lastSeen": "最終接続",
     "readyHint": "準備完了。会話に戻り、ブラウザーで行うタスクを伝えてください。",
+    "capabilitiesTitle": "エージェントができること",
     "reconnectHint": "認証は保存されています。Chrome と拡張機能を開くと自動的に再接続します。",
     "replaceDevice": "ブラウザーを変更",
     "installExtension": "BrowserSkill をインストール",
@@ -5331,6 +5337,7 @@ export default {
 },
   mcpServiceDialog: {
     addTitle: 'MCPサービスを追加',
+    addDesc: '外部の MCP サービスを接続すると、エージェントがそのツールを呼び出せます。',
     editTitle: 'MCPサービスを編集',
     basicSection: '基本',
     connectionSection: '接続',

@@ -10,7 +10,7 @@
       :row-col="[{ width: '100%', height: '132px', type: 'rect' }]" />
     <p v-else-if="loaded && !status.enabled" class="empty-hint">{{ t('localBrowser.unavailable') }}</p>
 
-    <template v-else-if="loaded">
+    <div v-else-if="loaded" class="browser-layout">
       <article class="connection-card">
         <div class="product-row">
           <img class="product-logo" :src="browserLogo" width="44" height="44" alt="BrowserSkill" />
@@ -19,22 +19,34 @@
               <div class="product-name">
                 <strong>BrowserSkill</strong>
                 <span v-if="status.connected && status.extension_version" class="product-version">v{{ status.extension_version }}</span>
-                <a class="product-link" href="https://github.com/Tencent/BrowserSkill" target="_blank"
-                  rel="noopener noreferrer" aria-label="BrowserSkill">
-                  <t-icon name="jump" size="14px" />
-                </a>
               </div>
               <span class="status-pill" :class="{ online: status.connected, idle: !status.connected && status.device }">
                 <i />{{ t(status.connected ? 'localBrowser.connected' : status.device ? 'localBrowser.offline' : 'localBrowser.notPaired') }}
               </span>
             </div>
-            <p v-if="status.device" class="product-desc">{{ status.device.label }}</p>
+            <p class="product-desc">
+              {{ t('localBrowser.productDescription') }}
+              <a class="product-link" href="https://github.com/Tencent/BrowserSkill" target="_blank"
+                rel="noopener noreferrer">GitHub<t-icon name="jump" size="12px" /></a>
+            </p>
           </div>
         </div>
 
         <template v-if="status.device">
+          <div class="capabilities">
+            <p v-if="!status.connected" class="capabilities-hint">
+              <t-icon name="time" size="14px" />{{ t('localBrowser.reconnectHint') }}
+            </p>
+            <span class="capabilities-title">{{ t('localBrowser.capabilitiesTitle') }}</span>
+            <ul class="capabilities-grid">
+              <li v-for="item in capabilities" :key="item.label">
+                <t-icon :name="item.icon" size="16px" />{{ t(item.label) }}
+              </li>
+            </ul>
+          </div>
           <div class="device-block">
             <div class="device-meta">
+              <span>{{ status.device.label }}</span>
               <span>{{ t('localBrowser.lastSeen') }} {{ formatDate(status.device.last_seen_at) }}</span>
             </div>
             <div class="device-actions">
@@ -50,7 +62,6 @@
               </t-popconfirm>
             </div>
           </div>
-          <p v-if="!status.connected" class="device-hint">{{ t('localBrowser.reconnectHint') }}</p>
         </template>
 
         <ol v-else class="setup-steps">
@@ -101,10 +112,12 @@
         </div>
       </article>
 
-      <BrowserSearchPreferences />
+      <div class="browser-side">
+        <BrowserSearchPreferences />
+      </div>
 
-      <details class="usage">
-        <summary>{{ t('localBrowser.usageTitle') }}<t-icon name="chevron-down" size="16px" /></summary>
+      <section class="usage">
+        <h3>{{ t('localBrowser.usageTitle') }}</h3>
         <ol>
           <li>
             <span class="usage-index">1</span>
@@ -135,8 +148,8 @@
             </div>
           </li>
         </ol>
-      </details>
-    </template>
+      </section>
+    </div>
   </div>
 </template>
 <script setup lang="ts">
@@ -156,6 +169,14 @@ const endpoint = '/api/v1/me/browser'
 const controller = new AbortController()
 let revision = 0
 let alive = true, timer: ReturnType<typeof setTimeout> | undefined, expiry: ReturnType<typeof setTimeout> | undefined, pairExpires = 0
+const capabilities = [
+  { icon: 'link', label: 'localBrowser.openPage' },
+  { icon: 'file-search', label: 'localBrowser.readPage' },
+  { icon: 'cursor', label: 'localBrowser.clickPage' },
+  { icon: 'edit-1', label: 'localBrowser.fillPage' },
+  { icon: 'screenshot', label: 'localBrowser.captureScreenshot' },
+  { icon: 'layers', label: 'localBrowser.listTabs' },
+]
 const formatDate = (value: string) => new Date(value).toLocaleString(locale.value, { dateStyle: 'short', timeStyle: 'short' })
 function clearPairing() { pairing.value = ''; copied.value = false; copyFallback.value = false; clearTimeout(expiry) }
 async function refresh() {
@@ -216,6 +237,40 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
 .browser-settings {
   width: 100%;
+  container: browser-settings / inline-size;
+}
+
+// Stacked in the settings dialog; side by side once a full page gives it room.
+@container browser-settings (min-width: 960px) {
+  .browser-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 20px;
+  }
+
+  .connection-card {
+    display: flex;
+    flex-direction: column;
+
+    > .capabilities {
+      flex: 1;
+    }
+  }
+
+  .browser-side {
+    border-radius: 16px;
+    padding: 24px;
+    background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 65%, var(--td-bg-color-container));
+
+    > .browser-search-preferences {
+      margin-top: 0;
+    }
+  }
+
+  .usage {
+    grid-column: 1 / -1;
+    padding: 0 4px;
+  }
 }
 
 .section-header {
@@ -271,13 +326,15 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 .product-link {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  color: var(--td-text-color-placeholder);
-  line-height: 1;
+  gap: 2px;
+  margin-left: 6px;
+  color: var(--td-brand-color);
+  text-decoration: none;
+  white-space: nowrap;
 
   &:hover,
   &:focus-visible {
-    color: var(--td-text-color-primary);
+    text-decoration: underline;
   }
 }
 
@@ -358,11 +415,60 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   }
 }
 
-.device-hint {
-  margin: 8px 0 0;
+.capabilities {
+  margin-top: 18px;
+}
+
+.capabilities-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 14px;
+  color: var(--td-text-color-secondary);
   font-size: var(--app-text-md);
   line-height: 1.55;
+
+  .t-icon {
+    flex-shrink: 0;
+    margin-top: 3px;
+    color: var(--td-warning-color);
+  }
+}
+
+.capabilities-title {
+  display: block;
+  margin-bottom: 10px;
   color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+}
+
+.capabilities-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-md);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    .t-icon {
+      flex-shrink: 0;
+      color: var(--td-brand-color);
+    }
+  }
 }
 
 .device-actions {
@@ -556,26 +662,14 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 }
 
 .usage {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid var(--td-component-stroke);
+  margin-top: 32px;
 
-  summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    list-style: none;
-    cursor: pointer;
-    font-size: var(--app-text-md);
-    font-weight: 500;
-    color: var(--td-text-color-secondary);
-    &::-webkit-details-marker { display: none; }
-    &:hover { color: var(--td-text-color-primary); }
-    &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 4px; }
+  h3 {
+    margin: 0 0 16px;
+    font-size: var(--app-text-lg);
+    font-weight: 600;
+    color: var(--td-text-color-primary);
   }
-
-  &[open] summary { margin-bottom: 20px; }
-  &[open] summary :deep(.t-icon) { transform: rotate(180deg); }
 
   ol {
     list-style: none;

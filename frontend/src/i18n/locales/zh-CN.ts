@@ -1,4 +1,9 @@
 export default {
+  toolbox: {
+    "title": "工具箱",
+    "description": "管理智能体可用的技能、外部工具和浏览器连接。",
+    "unavailable": "当前空间暂无可用的工具。"
+  },
   localBrowser: {
     pipOpen: "弹出悬浮窗",
     pipReturn: "返回对话小窗",
@@ -65,7 +70,7 @@ export default {
     "settingsTitle": "浏览器连接",
     "settingsDescription": "通过 BrowserSkill 连接本机 Chrome，配对后即可在对话中操作真实网页。",
     "openSettings": "前往浏览器连接",
-    "settingsHint": "在个人设置中连接 BrowserSkill，即可在对话里使用本机浏览器。",
+    "settingsHint": "在工具箱中连接 BrowserSkill，即可在对话里使用本机浏览器。",
     "unavailable": "服务端尚未启用本机浏览器，请联系管理员。",
 
     "source": "浏览器来源",
@@ -91,11 +96,12 @@ export default {
     "revoke": "撤销设备授权",
     "revokeConfirm": "撤销后需要重新配对，才能继续使用本机浏览器。",
     "failed": "操作失败，请重试",
-    "productDescription": "在你的 Chrome 中执行浏览器任务",
+    "productDescription": "开源的 Chrome 扩展，让智能体在你的浏览器里打开网页、读取内容并完成操作。",
     "offline": "离线",
     "notPaired": "未配对",
     "lastSeen": "最近连接",
     "readyHint": "已准备就绪。回到对话，直接描述需要浏览器完成的任务。",
+    "capabilitiesTitle": "智能体可以",
     "reconnectHint": "保留授权，等待扩展自动重连。请确认 Chrome 和 BrowserSkill 扩展已开启。",
     "replaceDevice": "更换浏览器",
     "installExtension": "安装 BrowserSkill 扩展",
@@ -2251,6 +2257,7 @@ export default {
 },
   mcpServiceDialog: {
     addTitle: '添加 MCP 服务',
+    addDesc: '连接外部 MCP 服务，智能体即可调用其中的工具。',
     editTitle: '编辑 MCP 服务',
     basicSection: '基本信息',
     connectionSection: '连接配置',

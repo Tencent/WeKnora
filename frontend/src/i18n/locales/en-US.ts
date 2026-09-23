@@ -1,4 +1,9 @@
 export default {
+  toolbox: {
+    "title": "Toolbox",
+    "description": "Manage skills, external tools, and browser connections for your agents.",
+    "unavailable": "No tools are available in the current workspace."
+  },
   localBrowser: {
     pipOpen: "Pop out preview",
     pipReturn: "Return to conversation",
@@ -65,7 +70,7 @@ export default {
     "settingsTitle": "Browser connection",
     "settingsDescription": "Pair BrowserSkill with your local Chrome to operate real web pages from conversations.",
     "openSettings": "Open browser settings",
-    "settingsHint": "Connect BrowserSkill in personal settings to use your local browser here.",
+    "settingsHint": "Connect BrowserSkill in Toolbox to use your local browser here.",
     "unavailable": "Local browsing is not enabled on this server. Contact your administrator.",
 
     "source": "Browser source",
@@ -91,11 +96,12 @@ export default {
     "revoke": "Revoke device access",
     "revokeConfirm": "You will need to pair again before using the local browser.",
     "failed": "Operation failed. Please retry.",
-    "productDescription": "Run browser tasks in your Chrome",
+    "productDescription": "An open-source Chrome extension that lets agents open pages, read content, and take actions in your browser.",
     "offline": "Offline",
     "notPaired": "Not paired",
     "lastSeen": "Last connected",
     "readyHint": "Ready. Return to the conversation and describe your browser task.",
+    "capabilitiesTitle": "Your agent can",
     "reconnectHint": "Authorization is saved. Keep Chrome and BrowserSkill open to reconnect automatically.",
     "replaceDevice": "Change browser",
     "installExtension": "Install BrowserSkill",
@@ -5331,6 +5337,7 @@ export default {
 },
   mcpServiceDialog: {
     addTitle: 'Add MCP Service',
+    addDesc: 'Connect an external MCP service so agents can call its tools.',
     editTitle: 'Edit MCP Service',
     basicSection: 'Basic',
     connectionSection: 'Connection',

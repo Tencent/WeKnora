@@ -52,6 +52,7 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequestItem } from '@/types/mention';
+import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
 const route = useRoute();
@@ -870,7 +871,7 @@ const browserSourceUnavailableHint = computed(() => {
 });
 
 const openBrowserConnectionSettings = () => {
-  uiStore.openSettings('browserconnection');
+  void router.push(toolboxLocation('browserconnection'));
 };
 
 const toggleBrowserSource = () => {
