@@ -160,6 +160,19 @@ func TestSearchPagesAcross_ForeignTenantWithShareOK(t *testing.T) {
 	assert.Equal(t, "p-shared", pages[0].ID)
 }
 
+func TestSearchPagesAcross_RejectsTooManyKBs(t *testing.T) {
+	ids := make([]string, maxWikiSearchKnowledgeBases+1)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("kb-%d", i)
+	}
+	ctx, svc, _ := setupWikiSearchService(t, nil, &wikiSearchShareService{})
+	_, err := svc.SearchPagesAcross(ctx, ids, "q", 10)
+	require.Error(t, err)
+	app, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, apperrors.ErrBadRequest, app.Code)
+}
+
 func TestIsInvalidWikiSearchQuery(t *testing.T) {
 	assert.True(t, isInvalidWikiSearchQuery(fmt.Errorf("pq: invalid regular expression: quantifier operand invalid")))
 	assert.False(t, isInvalidWikiSearchQuery(fmt.Errorf("connection refused")))

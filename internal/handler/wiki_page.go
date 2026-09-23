@@ -5,7 +5,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -1041,8 +1041,6 @@ type WikiSearchHit struct {
 	MatchSnippet    string            `json:"match_snippet,omitempty"`
 }
 
-const maxWikiSearchKnowledgeBases = 32
-
 // SearchPagesAcross godoc
 // @Summary      Cross-KB wiki search
 // @Description  Cross-KB wiki search using the same POSIX regex ranking as single-KB wiki search
@@ -1072,11 +1070,6 @@ func (h *WikiPageHandler) SearchPagesAcross(c *gin.Context) {
 	if len(kbIDs) == 0 {
 		_ = c.Error(errors.NewBadRequestError(
 			"at least one knowledge_base_id or knowledge_base_ids must be provided"))
-		return
-	}
-	if len(kbIDs) > maxWikiSearchKnowledgeBases {
-		_ = c.Error(errors.NewBadRequestError(
-			fmt.Sprintf("at most %d knowledge_base_ids are allowed", maxWikiSearchKnowledgeBases)))
 		return
 	}
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, nil); err != nil {
@@ -1117,67 +1110,19 @@ func wikiPagesToSearchHits(pages []*types.WikiPage, query string) []WikiSearchHi
 			PageType:        page.PageType,
 			Aliases:         page.Aliases,
 			Summary:         page.Summary,
-			MatchSnippet:    extractWikiMatchSnippet(page.Content, query),
+			MatchSnippet:    searchutil.ExtractSnippet(page.Content, query),
 		})
 	}
 	return hits
 }
 
-// extractWikiMatchSnippet matches Agent wiki_search: ~60 runes of context
-// around the first case-insensitive regex hit, match itself capped at 100.
-func extractWikiMatchSnippet(content string, query string) string {
-	if content == "" || query == "" {
-		return ""
-	}
-	re, err := regexp.Compile("(?i)" + query)
-	if err != nil {
-		return ""
-	}
-	loc := re.FindStringIndex(content)
-	if loc == nil {
-		return ""
-	}
-
-	matchStr := content[loc[0]:loc[1]]
-	before := content[:loc[0]]
-	after := content[loc[1]:]
-
-	beforeRunes := []rune(before)
-	if len(beforeRunes) > 60 {
-		beforeRunes = beforeRunes[len(beforeRunes)-60:]
-	}
-
-	afterRunes := []rune(after)
-	if len(afterRunes) > 60 {
-		afterRunes = afterRunes[:60]
-	}
-
-	matchRunes := []rune(matchStr)
-	if len(matchRunes) > 100 {
-		matchRunes = append(matchRunes[:100], []rune("...")...)
-	}
-
-	snippet := string(beforeRunes) + string(matchRunes) + string(afterRunes)
-	snippet = strings.ReplaceAll(snippet, "\n", " ")
-	for strings.Contains(snippet, "  ") {
-		snippet = strings.ReplaceAll(snippet, "  ", " ")
-	}
-
-	return "... " + strings.TrimSpace(snippet) + " ..."
-}
-
 func mergeWikiSearchKBIDs(ids []string, single string) []string {
 	out := make([]string, 0, len(ids)+1)
-	seen := make(map[string]struct{}, len(ids)+1)
 	appendID := func(id string) {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			return
 		}
-		if _, ok := seen[id]; ok {
-			return
-		}
-		seen[id] = struct{}{}
 		out = append(out, id)
 	}
 	for _, id := range ids {

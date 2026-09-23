@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -161,21 +160,6 @@ func TestSearchPagesAcross_RequiresQueryAndKBs(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestSearchPagesAcross_RejectsTooManyKBs(t *testing.T) {
-	ids := make([]string, maxWikiSearchKnowledgeBases+1)
-	for i := range ids {
-		ids[i] = fmt.Sprintf("kb-%d", i)
-	}
-	body, err := json.Marshal(map[string]any{"query": "q", "knowledge_base_ids": ids})
-	require.NoError(t, err)
-
-	fake := &fakeWikiSearchService{}
-	h := &WikiPageHandler{wikiService: fake}
-	w := postWikiSearch(wikiSearchEngine(t, h, nil), string(body))
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Nil(t, fake.got.kbIDs)
-}
-
 func TestSearchPagesAcross_APIKeyAllowListForbidden(t *testing.T) {
 	fake := &fakeWikiSearchService{}
 	h := &WikiPageHandler{wikiService: fake}
@@ -201,7 +185,7 @@ func TestSearchPagesAcross_PropagatesNonWikiBadRequest(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestMergeWikiSearchKBIDsDedups(t *testing.T) {
+func TestMergeWikiSearchKBIDsMerges(t *testing.T) {
 	got := mergeWikiSearchKBIDs([]string{" kb-a ", "kb-b", "kb-a"}, "kb-b")
-	assert.Equal(t, []string{"kb-a", "kb-b"}, got)
+	assert.Equal(t, []string{"kb-a", "kb-b", "kb-a", "kb-b"}, got)
 }

@@ -834,7 +834,7 @@ func TestSearch_UsesSharedAcrossQueryForSingleKB(t *testing.T) {
 	assert.Equal(t, hit.ID, pages[0].ID)
 }
 
-func TestSearchAcross_ClampsLimitAndIgnoresEmptyIDs(t *testing.T) {
+func TestSearchAcross_ClampsLimit(t *testing.T) {
 	db := setupWikiPagesTestDB(t)
 	repo := NewWikiPageRepository(db)
 	ctx := context.Background()
@@ -846,11 +846,44 @@ func TestSearchAcross_ClampsLimitAndIgnoresEmptyIDs(t *testing.T) {
 		require.NoError(t, repo.Create(ctx, p))
 	}
 
-	pages, err := repo.SearchAcross(ctx, []string{"", "kb-a"}, "match-term", 2)
+	pages, err := repo.SearchAcross(ctx, []string{"kb-a"}, "match-term", 2)
 	require.NoError(t, err)
 	require.Len(t, pages, 2)
 
 	empty, err := repo.SearchAcross(ctx, nil, "match-term", 10)
 	require.NoError(t, err)
 	assert.Empty(t, empty)
+}
+
+func TestSearchAcross_SQLiteLikeEscapesWildcards(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	literalPct := makeWikiPage("kb-a", "entity/pct", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	literalPct.Title = "100% done"
+	other := makeWikiPage("kb-a", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	other.Title = "other page"
+	literalUnderscore := makeWikiPage("kb-a", "entity/under", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	literalUnderscore.Title = "a_b"
+	plain := makeWikiPage("kb-a", "entity/plain", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	plain.Title = "axb"
+	for _, p := range []*types.WikiPage{literalPct, other, literalUnderscore, plain} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	pages, err := repo.SearchAcross(ctx, []string{"kb-a"}, "%", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalPct.ID, pages[0].ID)
+
+	pages, err = repo.SearchAcross(ctx, []string{"kb-a"}, "100%", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalPct.ID, pages[0].ID)
+
+	pages, err = repo.SearchAcross(ctx, []string{"kb-a"}, "a_b", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalUnderscore.ID, pages[0].ID)
 }

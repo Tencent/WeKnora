@@ -1082,7 +1082,7 @@ func (s *wikiPageService) SearchPagesAcross(
 	if types.CallerFromContext(ctx).TenantID == 0 {
 		return nil, apperrors.NewUnauthorizedError("tenant id is required")
 	}
-	if err := s.authorizeWikiKBAccess(ctx, authorized); err != nil {
+	if err := access.AuthorizeKBAccess(ctx, s.kbShareService, authorized); err != nil {
 		return nil, err
 	}
 
@@ -1126,53 +1126,6 @@ func isInvalidWikiSearchQuery(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "invalid regular expression") ||
 		strings.Contains(msg, "invalid regex")
-}
-
-// authorizeWikiKBAccess mirrors knowledgeBaseService.authorizeKBAccess:
-// same-tenant KBs pass; foreign-tenant KBs need org Viewer permission via
-// access.NewKBPermissions. Unauthorized IDs surface as not-found so we do
-// not leak existence.
-func (s *wikiPageService) authorizeWikiKBAccess(
-	ctx context.Context,
-	kbs []*types.KnowledgeBase,
-) error {
-	if len(kbs) == 0 {
-		return nil
-	}
-
-	kbIDs := make([]string, 0, len(kbs))
-	for _, kb := range kbs {
-		kbIDs = append(kbIDs, kb.ID)
-	}
-	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbIDs...); err != nil {
-		return err
-	}
-
-	requestTenantID := types.CallerFromContext(ctx).TenantID
-	permissions := access.NewKBPermissions(ctx, s.kbShareService)
-
-	for _, kb := range kbs {
-		hasPermission, permErr := permissions.Check(kb.ID, kb.TenantID, types.OrgRoleViewer)
-		if permErr != nil {
-			logger.ErrorWithFields(ctx, permErr, map[string]interface{}{
-				"caller_tenant_id": requestTenantID,
-				"kb_tenant_id":     kb.TenantID,
-				"kb_id":            kb.ID,
-				"reason":           "shared-KB permission lookup failed",
-			})
-			return apperrors.NewInternalServerError("failed to verify knowledge base access")
-		}
-		if !hasPermission {
-			logger.WarnWithFields(ctx, logger.Fields{
-				"caller_tenant_id": requestTenantID,
-				"kb_tenant_id":     kb.TenantID,
-				"kb_id":            kb.ID,
-				"reason":           "tenant lacks viewer permission for foreign-tenant KB",
-			}, "search scope rejected: unauthorized foreign-tenant KB")
-			return apperrors.NewNotFoundError("knowledge base not found")
-		}
-	}
-	return nil
 }
 
 // --- Internal helpers ---
