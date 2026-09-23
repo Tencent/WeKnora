@@ -127,9 +127,12 @@ type KnowledgeListFilter struct {
 type KnowledgeListSortField string
 
 const (
+	// KnowledgeListSortByUpdatedAt 表示按最后更新时间排序。
 	KnowledgeListSortByUpdatedAt KnowledgeListSortField = "updated_at"
+	// KnowledgeListSortByCreatedAt 表示按创建时间排序。
 	KnowledgeListSortByCreatedAt KnowledgeListSortField = "created_at"
-	KnowledgeListSortByFileName  KnowledgeListSortField = "file_name"
+	// KnowledgeListSortByFileName 表示按展示文件名排序。
+	KnowledgeListSortByFileName KnowledgeListSortField = "file_name"
 )
 
 // Valid 返回排序字段是否属于公开接口允许的白名单。
@@ -146,7 +149,9 @@ func (field KnowledgeListSortField) Valid() bool {
 type KnowledgeListSortOrder string
 
 const (
-	KnowledgeListSortAscending  KnowledgeListSortOrder = "asc"
+	// KnowledgeListSortAscending 表示按升序排列。
+	KnowledgeListSortAscending KnowledgeListSortOrder = "asc"
+	// KnowledgeListSortDescending 表示按降序排列。
 	KnowledgeListSortDescending KnowledgeListSortOrder = "desc"
 )
 

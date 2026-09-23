@@ -1017,15 +1017,19 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
-		SortBy:      types.KnowledgeListSortField(c.DefaultQuery("sort_by", string(types.KnowledgeListSortByCreatedAt))),
-		SortOrder:   types.KnowledgeListSortOrder(c.DefaultQuery("sort_order", string(types.KnowledgeListSortDescending))),
+		SortBy: types.KnowledgeListSortField(
+			c.DefaultQuery("sort_by", string(types.KnowledgeListSortByCreatedAt)),
+		),
+		SortOrder: types.KnowledgeListSortOrder(
+			c.DefaultQuery("sort_order", string(types.KnowledgeListSortDescending)),
+		),
 	}
 	if !filter.SortBy.Valid() {
-		c.Error(errors.NewBadRequestError("invalid sort_by: must be updated_at, created_at, or file_name"))
+		_ = c.Error(errors.NewBadRequestError("invalid sort_by: must be updated_at, created_at, or file_name"))
 		return
 	}
 	if !filter.SortOrder.Valid() {
-		c.Error(errors.NewBadRequestError("invalid sort_order: must be asc or desc"))
+		_ = c.Error(errors.NewBadRequestError("invalid sort_order: must be asc or desc"))
 		return
 	}
 	if raw := c.Query("start_time"); raw != "" {
@@ -1057,7 +1061,9 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s sort_by=%s sort_order=%s page=%d page_size=%d effectiveTenantID=%d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s "+
+			"parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s "+
+			"sort_by=%s sort_order=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
 		secutils.SanitizeForLog(filter.Keyword),
