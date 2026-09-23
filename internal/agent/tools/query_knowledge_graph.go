@@ -508,8 +508,9 @@ func (t *QueryKnowledgeGraphTool) traverseGraph(
 
 	graph, err := t.knowledgeService.SearchGraphNodes(ctx, kbID, entities)
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Graph traversal failed for KB %s,
-			falling back to retrieval only: %v", kbID, err)
+		logger.Warnf(ctx,
+			"[Tool][QueryKnowledgeGraph] Graph traversal failed for KB %s, falling back to retrieval only: %v",
+			kbID, err)
 		res.skipped = fmt.Sprintf("graph traversal failed: %v", err)
 		return res
 	}
@@ -598,8 +599,9 @@ func (t *QueryKnowledgeGraphTool) graphChunkSearchResults(
 					}
 				}
 			} else {
-				logger.Warnf(ctx, "[Tool][QueryKnowledgeGraph] Failed to resolve knowledge titles
-				for graph chunks: %v", kerr)
+				logger.Warnf(ctx,
+					"[Tool][QueryKnowledgeGraph] Failed to resolve knowledge titles for graph chunks: %v",
+					kerr)
 			}
 		}
 	}
