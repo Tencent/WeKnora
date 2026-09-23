@@ -258,7 +258,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   }
 
   .browser-side {
-    border-radius: 16px;
+    border-radius: var(--app-radius-xl);
     padding: 24px;
     background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 65%, var(--td-bg-color-container));
 
@@ -278,7 +278,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 }
 
 .connection-card {
-  border-radius: 16px;
+  border-radius: var(--app-radius-xl);
   padding: 24px;
   background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 65%, var(--td-bg-color-container));
 }
@@ -456,7 +456,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
     gap: 8px;
     min-width: 0;
     padding: 8px 10px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-container);
     color: var(--td-text-color-primary);
     font-size: var(--app-text-md);

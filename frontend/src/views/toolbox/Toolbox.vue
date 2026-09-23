@@ -241,7 +241,7 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
     right: 0;
     bottom: -1px;
     height: 2px;
-    border-radius: 2px;
+    border-radius: var(--app-radius-pill);
     background: transparent;
     transition: background var(--app-motion-fast) ease;
   }
@@ -279,7 +279,7 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
   height: 20px;
   box-sizing: border-box;
   padding: 0 6px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   font-size: var(--app-text-xs);

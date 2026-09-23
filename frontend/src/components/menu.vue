@@ -1837,21 +1837,24 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
     background: var(--td-bg-color-container);
     color: var(--td-text-color-secondary);
     rotate: var(--stack-rotate, 0deg);
-    animation: menu-toolbox-stack-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    --stack-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: menu-toolbox-stack-in 420ms var(--stack-spring) both;
+    animation-delay: var(--stack-delay, 0ms);
     transition:
-        margin 320ms cubic-bezier(0.34, 1.56, 0.64, 1),
-        rotate 320ms cubic-bezier(0.34, 1.56, 0.64, 1),
-        translate 320ms cubic-bezier(0.34, 1.56, 0.64, 1),
-        color 200ms ease,
-        box-shadow 200ms ease;
+        margin var(--app-motion-slow) var(--stack-spring),
+        rotate var(--app-motion-slow) var(--stack-spring),
+        translate var(--app-motion-slow) var(--stack-spring),
+        color var(--app-motion-base) ease,
+        box-shadow var(--app-motion-base) ease;
+    transition-delay: var(--stack-delay, 0ms);
 
     & + & {
         margin-left: -6px;
     }
 
     &:nth-child(1) { z-index: 3; --stack-rotate: -10deg; }
-    &:nth-child(2) { z-index: 2; animation-delay: 60ms; transition-delay: 40ms; }
-    &:nth-child(3) { z-index: 1; --stack-rotate: 10deg; animation-delay: 120ms; transition-delay: 80ms; }
+    &:nth-child(2) { z-index: 2; --stack-delay: 50ms; }
+    &:nth-child(3) { z-index: 1; --stack-rotate: 10deg; --stack-delay: 100ms; }
 }
 
 @keyframes menu-toolbox-stack-in {
@@ -1875,7 +1878,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 @media (prefers-reduced-motion: reduce) {
     .menu-toolbox-stack__item {
         animation: none;
-        transition: color 200ms ease;
+        transition: color var(--app-motion-base) ease;
     }
 }
 
