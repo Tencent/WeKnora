@@ -352,5 +352,3 @@ return wrapChatConcurrency(c, config.MaxConcurrency, err)
 
 
 重构后的配置边界：每个模型仍单独保存 URL、API Key、额外参数和 `spec`，不新增连接实体，不修改模型 ID 或历史引用。部署覆盖每次从内置定义重新构建；通过 `runtime.Initialize` / `runtime.Reload` 校验后整体发布，失败保留旧版本。暂不监听文件变更，修改部署文件后仍需重启服务。
-
-完整目录、维护流程和验证范围见[模型管理重构说明](../06-development/model-management-refactor.md)，设计参考见 [PI 源码对照](../06-development/model-management-pi-analysis.md)。
