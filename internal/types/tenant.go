@@ -54,6 +54,9 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: OpenSearchRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: OpenSearchRetrieverEngineType},
 	},
+	"vastbase": {
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: VastbaseRetrieverEngineType},
+	},
 }
 
 // GetRetrieverEngineMapping returns the retriever engine mapping
