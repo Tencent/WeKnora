@@ -101,13 +101,13 @@ curl -X POST $BASE/api/v1/vector-stores/vs-1/test -H "Authorization: Bearer $TOK
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `name` | string | 是（`binding:"required"`） | 名称 |
-| `provider` | string | 是（`binding:"required"`） | 提供方（minio/cos/tos/s3/oss/ks3/obs…） |
-| `config` | object | 否 | 提供方配置（响应中凭证掩码） |
-| `status` | string | 否 | 状态 |
+| `provider` | string | 是（`binding:"required"`） | 提供方：`local`/`minio`/`cos`/`tos`/`s3`/`oss`/`ks3`/`obs`，受 `STORAGE_ALLOW_LIST` 限制 |
+| `config` | object | 否 | 提供方配置，字段见[存储后端](../03-features/19-storage-backends.md#连接参数)（响应中凭证掩码） |
+| `status` | string | 否 | `active`（默认）/`disabled` |
 
 ### GET /api/v1/storage-backends/types
 
-用途：允许的存储类型。权限：Viewer+。响应：200 `{"success":true,"data":[...]}`
+用途：`STORAGE_ALLOW_LIST` 允许的 provider 名称列表（未设置时返回全部）。权限：Viewer+。响应：200 `{"success":true,"data":["local","minio",...]}`
 
 ```bash
 curl $BASE/api/v1/storage-backends/types -H "Authorization: Bearer $TOKEN"
@@ -300,7 +300,7 @@ curl -X POST $BASE/api/v1/web-search-providers/wsp-1/test -H "Authorization: Bea
 
 外部内容连接器（Feishu/Notion/语雀等），同步任务会写入 KB。Handler: `internal/handler/datasource.go`。本组多数响应为原始对象/数组（无 `success` 包装）。
 
-当前已注册类型为 feishu、lark、gitlab、ima、notion、yuque、rss。GitLab/IMA 的 credentials、资源选择与同步限制见[数据源导入](../03-features/10-datasource.md)。sync_deletions 开启后会真实删除该数据源归属下的已删除知识；source_created_at/source_updated_at 保存在知识 metadata 中。
+当前已注册类型为 feishu、lark、feishu_drive、lark_drive、notion、confluence、yuque、dingtalk、ima、rss、gitlab。各连接器的 credentials、资源选择与同步限制见[数据源导入](../03-features/10-datasource.md)。sync_deletions 开启后会真实删除该数据源归属下的已删除知识；source_created_at/source_updated_at 保存在知识 metadata 中。
 
 ### GET /api/v1/datasource/types
 
@@ -325,7 +325,7 @@ curl $BASE/api/v1/datasource/types -H "Authorization: Bearer $TOKEN"
 
 ```bash
 curl -X POST $BASE/api/v1/datasource/validate-credentials -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"type":"notion","credentials":{"token":"secret"}}'
+  -H 'Content-Type: application/json' -d '{"type":"notion","credentials":{"api_key":"ntn_xxx"}}'
 ```
 
 ### POST /api/v1/datasource
@@ -397,7 +397,7 @@ curl -X DELETE $BASE/api/v1/datasource/ds-1 -H "Authorization: Bearer $TOKEN"
 
 ```bash
 curl -X PUT $BASE/api/v1/datasource/ds-1/credentials -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"credentials":{"token":"secret"}}'
+  -H 'Content-Type: application/json' -d '{"credentials":{"api_key":"ntn_xxx"}}'
 ```
 
 ### DELETE /api/v1/datasource/:id/credentials/:field
@@ -475,4 +475,4 @@ curl $BASE/api/v1/datasource/logs/log-1 -H "Authorization: Bearer $TOKEN"
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterVectorStoreRoutes`、`RegisterStorageBackendRoutes`、`RegisterWebSearchRoutes`、`RegisterWebSearchProviderRoutes`、`RegisterDataSourceRoutes`。Handler：`internal/handler/vectorstore.go`、`internal/handler/storagebackend.go`、`internal/handler/web_search.go`、`internal/handler/web_search_provider.go`、`internal/handler/web_search_provider_credentials.go`、`internal/handler/datasource.go`、`internal/handler/datasource_credentials.go`。
+路由注册：`internal/router/routes_infra.go` 的 `RegisterVectorStoreRoutes`、`RegisterStorageBackendRoutes`、`RegisterWebSearchRoutes`、`RegisterWebSearchProviderRoutes`、`RegisterDataSourceRoutes`。Handler：`internal/handler/vectorstore.go`、`internal/handler/storagebackend.go`、`internal/handler/web_search.go`、`internal/handler/web_search_provider.go`、`internal/handler/web_search_provider_credentials.go`、`internal/handler/datasource.go`、`internal/handler/datasource_credentials.go`。

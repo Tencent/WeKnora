@@ -182,7 +182,9 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/tags/t-1 -H "Authorization: Bearer
 
 ### DELETE /api/v1/knowledge-bases/:id/tags/:tag_id
 
-用途：删除标签。查询参数：`force`（bool，强制删除）、`content_only`（bool，仅删内容保留标签）。请求体（可选）：`{"exclude_ids":[int64]}`。
+用途：删除标签。查询参数：`force`（bool，强制删除被引用的标签）、`content_only`（bool，仅删除标签下的内容、保留标签）。请求体（可选）：`{"exclude_ids":[int64]}`，列出删除时保留的 FAQ 条目 seq_id。
+
+请求体格式不合法或 ID 非正整数返回 400；ID 不存在返回 404；ID 不属于当前知识库的 FAQ 条目返回 403。
 
 响应：200 `{"success":true}`
 
@@ -207,6 +209,8 @@ curl -X DELETE "$BASE/api/v1/knowledge-bases/kb-1/tags/t-1?force=true" -H "Autho
 | `chunking_config.languages` | []string | 否 | 语言提示 |
 | `chunking_config.enable_parent_child` | bool | 否 | 按父子分块试切，返回的是子块（与检索粒度一致） |
 | `chunking_config.parent_chunk_size` / `child_chunk_size` | int | 否 | 父/子块大小，缺省 4096 / 384 |
+
+样例文本中的内联 HTML `<table>` 会先转换为 Markdown 表格，与入库时的处理一致。
 
 响应：200 `{"success":true,"data":{"selected_tier","tier_chain","rejected","profile","chunks":[...],"stats":{count,avg_chars,min_chars,max_chars,stddev_chars,truncated_to}}}`；文本超长 413；分块超时（5s）504。
 

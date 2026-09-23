@@ -7,20 +7,23 @@
 <Screenshot
   src="/screenshots/kb-document-list.png"
   caption="知识库文档列表：解析状态、标签与批量操作"
-  hint="展示文档列表页，包含解析状态列、标签列、顶部筛选栏与勾选后出现的批量操作栏。" />
+  hint="展示文档列表页，包含解析状态列、标签列、顶部筛选栏与排序按钮，以及勾选后出现的批量操作栏（含标签、移动、批量下载）。" />
 
 ## 管理操作入口 {#_0-日常会用到的操作}
 
 | 操作 | 界面入口 |
 | --- | --- |
 | 建库、改分块大小与索引开关 | 知识库编辑弹窗的「分块」「索引策略」页签 |
-| 上传文件、导入网页或编写 Markdown | 文档列表页的上传区，或「新建」下拉 |
+| 上传文件、导入网页或编写 Markdown | 文档列表页的上传区，或「新建」下拉；上传进度在右下角的上传任务面板查看 |
+| 调整文档列表顺序 | 文档列表工具栏的「排序」：更新时间、上传/创建时间（默认最新上传在前）或文件名称 |
+| 查看解析进度或排查卡住的文档 | 文档卡片上的状态，或打开文档的解析时间线（见 [查看解析进度](#查看解析进度)） |
 | 用文件夹整理文档 | 文档列表左侧的文件夹树；上传整个目录会保留目录结构（见 [文件夹树](#_3-4-文件夹树)） |
 | 给文档打标签（一篇可多个） | 单篇在详情里改；多篇勾选后用批量操作栏的「标签」（见 [标签（KnowledgeTag）](#_3-5-标签-knowledgetag)） |
 | 检查解析结果、改错字 | 打开文档 → 分块列表 → 直接编辑分块（见 [分块编辑与版本历史](#_3-6-分块编辑与版本历史)） |
 | 补充部门、密级等自定义字段 | 文档详情里的自定义元数据（见 [模型要点](#_3-1-模型要点)） |
 | 查看操作记录 | 知识库设置 → 活动（见 [知识库活动流（KB Activity）](#_6-知识库活动流-kb-activity)） |
 | 复制知识库或跨库移动文档 | 知识库列表的复制，或文档批量操作里的移动（见 [知识库复制与知识移动](#_4-知识库复制与知识移动)） |
+| 批量下载原始文件 | 勾选文档后，批量操作栏的「批量下载」（见 [批量下载](#批量下载原始文件)） |
 
 <Screenshot
   src="/screenshots/kb-settings.png"
@@ -31,7 +34,25 @@
 
 创建知识库时选择内容类型、模型与索引方式，再上传文件、导入网页或编写 Markdown。普通资料使用文档库，标准问答使用 [FAQ 库](17-faq.md)。向量存储创建后不可更改，应在建库前确定。
 
-上传确认页可设置标签和本批文件的解析选项。单次处理选项优先于知识库配置，知识库配置再优先于空间默认值。上传后可在列表查看解析进度；已有文档需要重新解析才能使用修改后的分块参数。
+上传确认页可设置标签和本批文件的解析选项，包括是否生成文档摘要（默认开启；关闭后解析、索引及其他处理照常执行）。单次处理选项优先于知识库配置，知识库配置再优先于空间默认值。已有文档需要重新解析才能使用修改后的分块参数。
+
+批量上传时，页面右下角的上传任务面板汇总所有文件：最多同时传输 3 个，显示已传字节、剩余时间以及可检索、处理中、失败和已存在的数量。单个文件可以取消或重试，全部上传完成后可以离开页面，解析会在后台继续。大文件的上传超时按文件大小自动延长。
+
+<Screenshot
+  src="/screenshots/kb-upload-tasks.png"
+  caption="上传任务面板：批量上传的整体进度与逐个文件状态"
+  hint="展示右下角浮动面板：顶部进度环与「正在上传 x/y」标题、剩余时间、可检索/处理中/失败/已存在的分段进度条，以及文件列表中的取消、重试按钮。" />
+
+### 查看解析进度
+
+文档列表和卡片显示每篇文档的解析状态。超过 20 分钟没有进展时，状态会变为「排队中」或「疑似卡住」：前者表示仍有任务在队列中等待，通常无需处理；后者表示已无任务推进该文档，可以打开解析时间线查看停在哪个阶段，或停止解析后重试。长时间无进展的文档会被系统自动标记为失败，错误码为 `TASK_STALLED`。
+
+解析时间线按阶段展示耗时与结果。失败时，顶部错误卡片说明出错的阶段和原因，并提供重试入口。
+
+<Screenshot
+  src="/screenshots/kb-parse-timeline.png"
+  caption="解析时间线：各阶段耗时、失败原因与卡住提示"
+  hint="展示文档解析时间线抽屉：阶段瀑布图（文档解析/分块/向量化/多模态/后处理）、失败时的错误卡片（阶段名、错误码、后端原因与重试按钮），以及「已 N 分钟没有进展」的提示条和停止解析按钮。" />
 
 ## 整理文件夹与标签
 
@@ -61,9 +82,15 @@
 
 复制知识库可复用已有配置与内容。跨库移动时，可选择复用向量或重新解析：复用要求两库绑定同一向量存储，重新解析允许使用目标库的存储和处理配置。移动为异步任务，可查询进度。
 
+### 批量下载原始文件
+
+勾选文档后点击「批量下载」，所选文件的原始文件会打包为 ZIP，并保留知识库中的文件夹结构，解压后可按文件夹重新上传。每批最多 200 个文档、原始文件合计不超过 512 MiB；网页导入等没有原始文件的条目会被跳过。「全选已加载」只包含当前已加载的文档。批量下载与单个文件下载的权限相同，需要 Contributor 及以上且对知识库有编辑权限。
+
 ## 查看活动与用量
 
-知识库设置的「活动」记录配置、文档、分块、共享和 Wiki 变更。该入口面向符合资源管理权限的登录用户，API Key 不可访问。
+知识库设置的「活动」记录配置、文档、分块、共享和 Wiki 变更。该入口面向符合资源管理权限的登录用户，API Key 不可访问。通过 API Key 发起的操作会在操作人下方额外显示 Key 名称。
+
+通过组织共享以只读（Viewer）权限访问的知识库，界面不显示上传、编辑、删除和设置入口。
 
 存储配额按工作空间计算，涵盖文件、文本、向量和索引。创建知识库与上传前会检查配额，删除内容后回收对应用量。
 
@@ -184,7 +211,7 @@ graph TB
 
 #### KB 计算字段 {#_1-7-kb-计算字段}
 
-列表 / 详情响应附带：`knowledge_count`、`chunk_count`、`is_processing`（FAQ 库）、`processing_count`（文档库处理中知识数）、`share_count`（共享到的组织数）、`creator_name`、`is_pinned` / `pinned_at`（当前用户置顶状态）。
+列表 / 详情响应附带：`knowledge_count`（不含删除中的文档，与文档列表一致）、`chunk_count`、`is_processing`（FAQ 库）、`processing_count`（文档库处理中知识数）、`share_count`（共享到的组织数）、`creator_name`、`is_pinned` / `pinned_at`（当前用户置顶状态）。
 
 另有一个存储字段 `is_temporary`：标记**临时（ephemeral）知识库**，正常的知识库列表里不展示。它由系统内部使用，典型场景是联网搜索把抓回来的网页缓存成可检索内容。手工建库不会产生临时库。
 
@@ -231,7 +258,7 @@ graph TB
 
 实现中，`Knowledge.CustomMetadataText()` 按键排序生成 `键: 值` 文本，供摘要生成和文档级模型上下文使用。字段由迁移 `000078` 引入。
 
-摄入渠道常量：`web`、`api`、`browser_extension`、`wechat`、`wecom`、`feishu`、`dingtalk`、`slack`、`im`、`notion`、`yuque`、`rss`。
+摄入渠道常量：`web`、`api`、`browser_extension`、`wechat`、`wecom`、`feishu`、`feishu_drive`、`lark_drive`、`dingtalk`、`slack`、`im`、`notion`、`confluence`、`yuque`、`rss`、`ima`。
 
 解析状态机：
 
@@ -240,13 +267,19 @@ stateDiagram-v2
     [*] --> pending: 创建知识入队
     pending --> processing: Worker 领取 (DocReader 解析 / 分块 / 嵌入)
     processing --> finalizing: 主解析完成, 富化子任务进行中 (pending_subtasks_count > 0)
-    processing --> failed: 解析失败
+    processing --> completed: 无富化子任务
+    processing --> failed: 解析失败或巡检判定卡住
     processing --> cancelled: 用户取消
-    finalizing --> completed: 最后一个子任务完成 (计数原子递减到 0)
-    finalizing --> failed: 子任务失败
+    finalizing --> completed: 最后一个子任务结束 (计数原子递减到 0)
+    finalizing --> failed: 巡检判定卡住
     completed --> deleting: 删除中 (阻止异步任务冲突)
+    failed --> deleting: 删除
+    deleting --> failed: 删除任务丢失, 巡检恢复
     completed --> pending: reparse 重新解析
+    failed --> pending: reparse 重新解析
 ```
+
+单个富化子任务（摘要、问题生成、图谱、Wiki）失败不会让文档变为 `failed`，文档在子任务全部结束后进入 `completed`。卡在 `pending`、`processing`、`finalizing` 或 `deleting` 的文档由后台巡检回收，见[异步任务系统](../02-architecture/05-async-tasks.md#_7-3-兜底-housekeeping-清扫)。
 
 摘要独立状态：`summary_status ∈ {none, pending, processing, completed, failed}`。
 
@@ -257,7 +290,9 @@ stateDiagram-v2
 | POST | `/knowledge-bases/:id/knowledge/file` | 上传文件 | OwnedKBOrAdmin + KBAccessWrite |
 | POST | `/knowledge-bases/:id/knowledge/url` | URL 导入 | 同上 |
 | POST | `/knowledge-bases/:id/knowledge/manual` | 手动 Markdown 知识 | 同上 |
-| GET | `/knowledge-bases/:id/knowledge` | 列表（分页 + 过滤） | Viewer+ + KBAccessRead |
+| GET | `/knowledge-bases/:id/knowledge` | 列表（分页 + 过滤 + 排序） | Viewer+ + KBAccessRead |
+| POST | `/knowledge-bases/:id/knowledge/batch-download` | 批量下载原始文件（ZIP） | Contributor+ + KBAccessWrite |
+| GET / PUT | `/knowledge-bases/:id/knowledge/folders` | 文件夹树 / 重命名或移动文件夹 | Viewer+ + KBAccessRead / OwnedKBOrAdmin + KBAccessWrite |
 | DELETE | `/knowledge-bases/:id/knowledge` | 清空 KB 内容 | Admin + KBAccessWrite |
 | GET | `/knowledge/:id`、`/knowledge/batch` | 详情 / 批量获取 | Viewer+ |
 | GET | `/knowledge/:id/stages`、`/knowledge/:id/spans` | 处理阶段 / 跨度 | Viewer+ |
@@ -268,6 +303,7 @@ stateDiagram-v2
 | GET | `/knowledge/:id/preview` | 预览文件 | Viewer+ + KBAccessRead |
 | PUT | `/knowledge/tags` | 批量更新标签 | Contributor+ / `ingest` |
 | POST | `/knowledge/batch-reparse`、`/knowledge/batch-delete` | 批量重解析 / 删除 | Contributor+ / `ingest` |
+| POST | `/knowledge/folder` | 把文档归入文件夹 | Contributor+ / `ingest` |
 | POST | `/knowledge/move` | 移动知识 | Contributor+ / `ingest` |
 | GET | `/knowledge/move/progress/:task_id` | 移动进度 | Viewer+ |
 
@@ -277,13 +313,14 @@ stateDiagram-v2
 
 | 参数 | 说明 |
 | --- | --- |
-| `page` / `page_size` | 分页（默认按 `updated_at DESC` 排序） |
+| `page` / `page_size` | 分页（默认 1 / 20） |
+| `sort_by` / `sort_order` | 排序：`updated_at` / `created_at` / `file_name`，`asc` / `desc`；默认 `created_at desc` |
 | `keyword` | 按文件名 / 标题搜索 |
 | `file_type` | 文件类型过滤（`pdf` / `manual` / `url` …） |
 | `parse_status` | 解析状态过滤 |
 | `source` | 摄入渠道过滤（`api` / `web` / `feishu` …） |
-| `tag_id` | 标签过滤，逗号分隔多个（**OR 语义**） |
-| `updated_from` / `updated_to` | 更新时间范围（RFC3339） |
+| `tag_ids` | 标签过滤，逗号分隔多个（**OR 语义**） |
+| `start_time` / `end_time` | 更新时间范围（RFC3339） |
 | `folder_path` | 按文件夹筛选。**是否传这个参数决定列表模式**：不传是全库扁平视图，传空字符串是知识库根目录（不含子目录） |
 | `folder_recursive` | 配合 `folder_path` 使用，为 `true` 时连子目录里的文档一起返回 |
 
@@ -345,7 +382,7 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 
 | 字段 / 表 | 作用 |
 | --- | --- |
-| `chunks.source_content` | 解析器原始输出，**不可变**。历史行在首次手工编辑时从 `content` 惰性回填 |
+| `chunks.source_content` | 解析器原始输出，**不可变**。新建分块时不写入，首次手工编辑时从 `content` 惰性回填 |
 | `chunks.content` | 当前生效内容（检索、引用展示都用它） |
 | `chunks.content_revision` | 每次编辑或回滚 +1，用作乐观锁 |
 | `chunks.index_status` | `ready` / `processing` / `failed`，标识当前内容是否已反映到检索存储 |
@@ -378,13 +415,13 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 
 | 控制 | 实现 | 目的 |
 | --- | --- | --- |
-| 强制 `Content-Type: application/octet-stream` | 响应头固定 | 阻止浏览器把 HTML/SVG 当页面执行（防存储型 XSS） |
+| 按扩展名设置 `Content-Type` | PDF、图片、文本等按类型内联预览；HTML、SVG、XML、JS、CSS 等可被浏览器执行的类型强制为 `application/octet-stream` | 阻止浏览器把上传内容当页面执行（防存储型 XSS） |
 | `X-Content-Type-Options: nosniff` | 响应头 | 禁止 MIME 嗅探绕过 |
-| `Content-Disposition: attachment; filename=...` | 响应头 | 强制下载而非内联渲染 |
+| `Content-Disposition` | 可执行类型为 `attachment`，其余为 `inline` | 危险类型只能下载，不能内联渲染 |
 | 路径校验 | `ValidateKBScopedStoragePath()` | 文件路径必须落在该 KB 的授权存储范围内（防路径穿越 / 越权读取） |
 | 大小限制 | GetFile 响应体限制 | 防止超大文件拖垮预览 |
 
-测试用例明确验证：即使文件内容是 `<script>alert(1)</script>`，也只会作为二进制附件传输。下载端点（`/knowledge/:id/download`）要求更高的 Contributor+ 且走 KBAccessWrite 门禁。
+测试用例明确验证：HTML 文件即使内容是 `<script>alert(1)</script>`，也只会作为二进制附件传输。下载端点（`/knowledge/:id/download` 与批量下载 `/knowledge-bases/:id/knowledge/batch-download`）要求更高的 Contributor+ 且走 KBAccessWrite 门禁。
 
 预览返回的是原始文件本身，通过只读共享（组织共享的 viewer、经共享智能体可见）访问时同样可以预览。「只有 Editor 及以上才能下载」是产品上的便利性限制，不是访问控制边界：能读到一个 KB 的人，就能拿到其中的原文件。
 
@@ -450,6 +487,7 @@ nil & nil               → true   (同为 env-store)
 | POST/GET | `/knowledge-bases/:id/hybrid-search` | HybridSearch | Viewer+ + KBAccessRead |
 | POST | `/knowledge-bases/copy` | CopyKnowledgeBase | Contributor+ / `manage_kbs` |
 | POST | `/knowledge-bases/:id/duplicate` | DuplicateKnowledgeBase | Contributor+ / `manage_kbs` + KBAccessRead |
+| POST | `/knowledge-bases/:id/profile/generate` | GenerateKnowledgeBaseProfile | OwnedKBOrAdmin + KBAccessWrite / `manage_kbs` |
 | GET | `/knowledge-bases/copy/progress/:task_id` | GetKBCloneProgress | Viewer+ / `retrieve` 或 `manage_kbs` |
 | GET | `/knowledge-bases/:id/move-targets` | ListMoveTargets | Viewer+ + KBAccessRead |
 | GET | `/knowledge-bases/:id/activity` | ListKnowledgeBaseActivity | OwnedKBOrAdmin + KBAccessRead（仅 JWT） |
@@ -475,11 +513,12 @@ nil & nil               → true   (同为 env-store)
       → 图谱提取        (graph_enabled + ExtractConfig)
       → Wiki 生成       (wiki_enabled + WikiConfig)
       → 问题生成        (QuestionGenerationConfig.enabled)
+      → 文档摘要        (process_config.summary_enabled，默认开启)
   → parse_status=finalizing, pending_subtasks_count=N
   → 每个富化子任务完成后原子递减；归零 → parse_status=completed
 ```
 
-**配置合并优先级**（`EffectiveProcessConfig`）：`Knowledge.ProcessOverrides`（单次上传覆盖，存于知识 metadata 的 `KnowledgeProcessOverrides`，可覆盖 parser 规则 / 分块 / VLM / ASR / 问题生成 / 图谱开关等）> KB 配置 > 租户默认。
+**配置合并优先级**（`EffectiveProcessConfig`）：`Knowledge.ProcessOverrides`（单次上传覆盖，存于知识 metadata 的 `KnowledgeProcessOverrides`，可覆盖 parser 规则 / 分块 / VLM / ASR / 问题生成 / 图谱开关 / 摘要开关等）> KB 配置 > 租户默认。
 
 Chunk 类型（`internal/types/chunk.go`）：`text`、`parent_text`、`image_ocr`、`image_caption`、`summary`、`entity`、`relationship`、`faq`、`web_search`、`table_summary`、`table_column`、`wiki_page`；chunk 支持 `is_enabled` 开关与 `flags` 位标志（bit0 = 可推荐）。
 
@@ -513,5 +552,5 @@ Chunk 类型（`internal/types/chunk.go`）：`text`、`parent_text`、`image_oc
 | 知识创建 / 处理管线 | `internal/application/service/knowledge_create.go`、`knowledge_process.go`、`knowledge_process_config.go` |
 | 复制与移动 | `internal/application/service/knowledge_clone_move.go` |
 | 活动流 | `internal/application/service/kb_activity.go` |
-| 路由与门禁 | `internal/router/router.go`、`internal/router/rbac.go` |
+| 路由与门禁 | `internal/router/routes_knowledge.go`、`internal/router/rbac.go` |
 | 关键测试佐证 | `internal/handler/knowledge_preview_security_test.go`、`knowledge_move_gate_test.go`、`knowledgebase_copy_preflight_test.go` |
