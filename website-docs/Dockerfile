@@ -19,13 +19,16 @@ RUN npm run build
 FROM nginx:stable-alpine AS runtime
 # Some deployment platforms wrap the startup command with /bin/bash -c.
 RUN apk add --no-cache bash
-# The official image renders /etc/nginx/templates/*.template with envsubst at
-# startup, so `docker run -e WEBSITE_NGINX_PORT=8080` changes the listen port without a
-# rebuild. deploy/nginx.conf stays a plain config for static deployments.
 ENV WEBSITE_NGINX_PORT=80
-COPY deploy/nginx.conf /etc/nginx/templates/default.conf.template
-RUN sed -i 's/listen 80;/listen ${WEBSITE_NGINX_PORT};/' /etc/nginx/templates/default.conf.template \
+# Keep a default config alongside the template, as in the internal frontend image.
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+RUN mkdir -p /etc/nginx/templates \
+    && sed 's/listen 80;/listen ${WEBSITE_NGINX_PORT};/' /etc/nginx/conf.d/default.conf \
+      > /etc/nginx/templates/default.conf.template \
     && grep -q 'listen ${WEBSITE_NGINX_PORT};' /etc/nginx/templates/default.conf.template \
-    && rm -rf /etc/nginx/conf.d/default.conf /usr/share/nginx/html/*
+    && rm -rf /usr/share/nginx/html/*
 COPY --from=builder /build/static-site/ /usr/share/nginx/html/
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 EXPOSE 80
+ENTRYPOINT ["/docker-entrypoint.sh"]
