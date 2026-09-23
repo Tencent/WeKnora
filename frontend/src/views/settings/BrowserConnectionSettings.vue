@@ -37,6 +37,10 @@
             <p v-if="!status.connected" class="capabilities-hint">
               <t-icon name="time" size="14px" />{{ t('localBrowser.reconnectHint') }}
             </p>
+            <p v-else-if="extensionOutdated" class="capabilities-hint" role="status">
+              <t-icon name="error-circle" size="14px" />
+              {{ t('localBrowser.extensionOutdated', { current: status.extension_version, version: MIN_EXTENSION_VERSION }) }}
+            </p>
             <span class="capabilities-title">{{ t('localBrowser.capabilitiesTitle') }}</span>
             <ul class="capabilities-grid">
               <li v-for="item in capabilities" :key="item.label">
@@ -74,6 +78,7 @@
             <span class="step-index">1</span>
             <div class="step-copy">
               <strong>{{ t('localBrowser.usageStep1Title') }}</strong>
+              <p>{{ t('localBrowser.extensionMinVersion', { version: MIN_EXTENSION_VERSION }) }}</p>
               <details class="install-guide">
                 <summary>{{ t('localBrowser.manualInstall') }}<t-icon name="chevron-down" size="12px" /></summary>
                 <div class="setup-help">
@@ -88,10 +93,12 @@
                 </div>
               </details>
             </div>
-            <a class="setup-action setup-main-action store-action" href="https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi"
-              target="_blank" rel="noopener noreferrer">
-              {{ t('localBrowser.storeInstall') }}<t-icon name="jump" size="13px" />
-            </a>
+            <div class="store-actions">
+              <a v-for="store in EXTENSION_STORES" :key="store.label" class="setup-action setup-main-action store-action"
+                :href="store.url" target="_blank" rel="noopener noreferrer">
+                {{ t(store.label) }}<t-icon name="jump" size="13px" />
+              </a>
+            </div>
           </li>
           <li>
             <span class="step-index">2</span>
@@ -158,7 +165,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { get, post, getDown } from '@/utils/request'
 import { useBrowserConnectionStore } from '@/stores/browserConnection'
@@ -176,6 +183,19 @@ const endpoint = '/api/v1/me/browser'
 const controller = new AbortController()
 let revision = 0
 let alive = true, timer: ReturnType<typeof setTimeout> | undefined, expiry: ReturnType<typeof setTimeout> | undefined, pairExpires = 0
+const MIN_EXTENSION_VERSION = '0.3.1'
+const EXTENSION_STORES = [
+  { label: 'localBrowser.storeInstall', url: 'https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi' },
+  { label: 'localBrowser.edgeStoreInstall', url: 'https://microsoftedge.microsoft.com/addons/detail/browserskill/emacgiaaaiojkkpkddmmdfhmokgmnikg' },
+]
+const versionParts = (value: string) => value.replace(/^v/, '').split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0)
+const extensionOutdated = computed(() => {
+  const current = status.value.connected ? status.value.extension_version : ''
+  if (!current) return false
+  const [a, b] = [versionParts(current), versionParts(MIN_EXTENSION_VERSION)]
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! < b[i]!
+  return false
+})
 const capabilities = [
   { icon: 'link', label: 'localBrowser.openPage' },
   { icon: 'file-search', label: 'localBrowser.readPage' },
@@ -536,6 +556,13 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   gap: 12px;
 }
 
+.store-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
 .connection-card .setup-action {
   display: inline-flex;
   align-items: center;
@@ -766,9 +793,14 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
     grid-template-columns: 22px minmax(0, 1fr);
   }
 
-  .setup-steps li > .setup-action {
+  .setup-steps li > .setup-action,
+  .setup-steps li > .store-actions {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .store-actions {
+    flex-direction: row;
   }
 
   .status-pill {

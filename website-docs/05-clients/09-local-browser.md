@@ -1,13 +1,25 @@
 # 本机浏览器接入与部署
 
-WeKnora 通过 BrowserSkill daemon 和配套 Chrome 扩展，将用户电脑上的浏览器接入智能推理对话。浏览器在用户电脑上运行，daemon 在 WeKnora app 一侧运行，无需技能沙箱。网页剪藏和侧边栏知识库问答使用另一个[知识管理助手插件](06-chrome-extension.md)。
+WeKnora 通过 BrowserSkill daemon 和 [BrowserSkill](https://github.com/Tencent/BrowserSkill) 浏览器扩展，将用户电脑上的浏览器接入智能推理对话。扩展支持 Chrome 和 Microsoft Edge（基于 Chromium 125 及以上），其他 Chromium 浏览器不保证兼容。浏览器在用户电脑上运行，daemon 在 WeKnora app 一侧运行，无需技能沙箱。网页剪藏和侧边栏知识库问答使用另一个[知识管理助手插件](06-chrome-extension.md)。
+
+## 安装扩展
+
+扩展需要 **0.3.1 及以上**版本，任选一种方式安装：
+
+- Chrome：[Chrome 应用商店](https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi)
+- Edge：[Edge 加载项](https://microsoftedge.microsoft.com/addons/detail/browserskill/emacgiaaaiojkkpkddmmdfhmokgmnikg)
+- 配套 ZIP：无法访问商店时，在「浏览器连接」页的「手动安装（备用）」下载。解压后在 `chrome://extensions`（Edge 为 `edge://extensions`）开启「开发者模式」，选择「加载已解压的扩展程序」。
+
+已连接的扩展版本低于 0.3.1 时，「浏览器连接」页会提示升级。
 
 ## 配对与使用
 
-1. 在个人设置的「浏览器连接」下载配套 ZIP，解压后在 Chrome 扩展程序页面加载。
-2. 复制设置页生成的一次性配对链接，在扩展「连接设置 → 远程连接」粘贴并保存。
+1. 打开侧边栏「工具箱 → 浏览器连接」。旧的「设置 → 浏览器连接」链接会自动跳转到这里。
+2. 复制页面生成的一次性配对链接，在扩展「连接设置 → 远程连接」粘贴并保存。
 3. 在智能推理输入框开启「本机浏览器」，再提交任务。配对成功不代表每轮自动启用。
 4. 首次调用创建独立任务窗口；对话预览可定位页面、暂停、继续或结束当前浏览器任务。
+
+连接状态显示在「浏览器连接」标签上（已连接、离线或未配对）。已配对时，侧边栏「工具箱」右侧的浏览器小图标也会用圆点标出状态：绿色为已连接，橙色为离线。不需要时可以在「浏览器连接」页关闭「在侧边栏显示连接状态」，该设置只保存在当前浏览器。同一页还可以设置「浏览器搜索指令」，指定偏好的搜索引擎和搜索地址。
 
 授权按空间和用户保存；同一空间内多个对话共用设备授权，但各有任务。当前每个空间＋用户保留一个设备授权，激活新设备会替换旧设备。
 
@@ -39,7 +51,7 @@ WeKnora 通过 BrowserSkill daemon 和配套 Chrome 扩展，将用户电脑上�
 
 ```dotenv
 BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk
-BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.0.zip
+BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.1.zip
 BROWSERSKILL_MAX_CONNECTIONS=32
 ```
 
@@ -51,7 +63,7 @@ BROWSERSKILL_PUBLIC_URL=wss://weknora.example.com/api/v1/local-browser/extension
 
 本机可用 localhost WS，远端要求浏览器信任的 WSS 证书。内网可以使用受信任的企业 CA。显式设置 `BROWSERSKILL_BINARY=` 可关闭能力；修改 Docker 环境变量后使用 `docker compose up -d app frontend` 重建容器。
 
-配套扩展和 daemon 必须一同升级，不能只按显示的 0.3.0 版本号判断兼容性；上游早期发布的 0.3.0 二进制和 ZIP 早于当前固定提交，不包含所需修复和 UI 接口。覆盖原解压目录并重新加载可保留扩展 ID，重新安装导致 ID 改变时需要重新配对。分发时保留 `BrowserSkill-LICENSE`。
+配套扩展和 daemon 必须一同升级，扩展需要 0.3.1 及以上（Chrome 应用商店、Edge 加载项或配套 ZIP 均可）。覆盖原解压目录并重新加载可保留扩展 ID，重新安装导致 ID 改变时需要重新配对。分发时保留 `BrowserSkill-LICENSE`。
 
 ## 多副本与入口代理
 
@@ -79,6 +91,7 @@ Kubernetes 可使用 Pod IP 组成直连地址。不要用各副本独立的 SQL
 | 现象 | 检查方向 |
 | --- | --- |
 | 无配套扩展下载或能力不可用 | daemon 与扩展文件路径、可执行权限、目标架构和 app 镜像版本 |
+| 提示扩展版本过低 | 从 Chrome 应用商店、Edge 加载项或配套 ZIP 升级到 0.3.1 及以上，覆盖原解压目录后重新加载 |
 | 授权成功但 WSS 失败 | 公网地址/端口、受信任证书、外层代理 WebSocket Upgrade |
 | 设备连接正常但任务不执行 | 本轮开关、任务是否暂停、是否等待标签借用或人工帮助 |
 | 没有人工帮助提示 | 执行记录是否调用 `request_help`；扩展是否禁用了人工帮助 |
