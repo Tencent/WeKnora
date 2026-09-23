@@ -82,6 +82,8 @@ async function fixture(options: {
         } },
       }
       if (name === '@/stores/modelProviders') return { useModelProvidersStore: () => providersStore }
+      if (name === '@/api/model') return { getWeKnoraCloudStatus: async () => ({ has_models: true, needs_reinit: false }) }
+      if (name === '@/utils/weknoraCloudModels') return require('../utils/weknoraCloudModels.ts')
       if (name === '@/stores/modelProvidersState') return require('../stores/modelProvidersState.ts')
       if (name === '@/utils/reasoningEffort') return require('../utils/reasoningEffort.ts')
       if (name === '@/utils/contextWindow') return require('../utils/contextWindow.ts')
@@ -764,6 +766,49 @@ test('the vision picker lists the vendor models the backend scoped to it', async
     await nextTick()
     assert.deepEqual(f.vm.catalogModelOptions.map((o: any) => o.value), ['sees-images'])
     assert.equal(f.vm.catalogModelOptions[0].vision, true)
+  } finally { f.close() }
+})
+
+const cloudProvider = {
+  value: 'weknoracloud', label: 'WeKnora Cloud', description: '', order: 1,
+  modelTypes: ['chat', 'embedding', 'rerank', 'vllm'],
+  defaultUrls: Object.fromEntries(['chat', 'embedding', 'rerank', 'vllm'].map(type => [type, 'https://weknora.weixin.qq.com'])),
+  models: [],
+}
+
+for (const [type, modelName] of [['chat', 'chat'], ['embedding', 'embedding'], ['rerank', 'rerank'], ['vllm', 'vlm']]) {
+  test(`WeKnora Cloud ${type}: an empty catalog still offers the managed model`, async () => {
+    const f = await fixture({ type, providers: [cloudProvider] })
+    try {
+      f.vm.formData.provider = 'weknoracloud'
+      f.vm.handleProviderChange('weknoracloud')
+      await nextTick()
+      await f.vm.checkWkcCredentialStatus()
+      assert.equal(f.vm.wkcCredentialState, 'configured')
+      assert.deepEqual(Array.from(f.vm.catalogModelOptions, (o: any) => o.value), [modelName])
+      assert.equal(f.vm.catalogModelOptions[0].vision, type === 'vllm')
+      f.vm.formData.modelName = modelName
+      f.vm.handleCatalogModelChange(modelName)
+      await nextTick()
+      await f.vm.checkRemoteAPI()
+      assert.equal(f.requests[0].modelName, modelName)
+      assert.equal(f.requests[0].provider, 'weknoracloud')
+      assert.equal(f.vm.formData.contextWindow, undefined)
+      assert.equal(f.vm.formData.dimension, undefined)
+    } finally { f.close() }
+  })
+}
+
+test('switching WeKnora Cloud model types updates the managed choices', async () => {
+  const f = await fixture({ providers: [cloudProvider] })
+  try {
+    f.vm.formData.provider = 'weknoracloud'
+    f.vm.handleProviderChange('weknoracloud')
+    await nextTick()
+    f.vm.formData.modelName = 'chat'
+    await f.vm.selectModelType('vllm')
+    assert.equal(f.vm.formData.modelName, '')
+    assert.deepEqual(Array.from(f.vm.catalogModelOptions, (o: any) => o.value), ['vlm'])
   } finally { f.close() }
 })
 
