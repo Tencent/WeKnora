@@ -134,6 +134,7 @@ func (EngineAwareNormalizer) Normalize(
 		types.OpenSearchRetrieverEngineType,
 		types.WeaviateRetrieverEngineType,
 		types.PostgresRetrieverEngineType,
+		types.VastbaseRetrieverEngineType,
 		types.SQLiteRetrieverEngineType,
 		types.QdrantRetrieverEngineType,
 		types.InfinityRetrieverEngineType,
