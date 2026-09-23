@@ -3977,6 +3977,21 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
 
+	// Pipeline-level cap for #3539: the split already happened in memory, but
+	// rejecting here still prevents the DB writes, embeddings and queue work
+	// that make an amplified document starve other tenants. Deterministic
+	// outcome, so the document fails without a retry.
+	if budgetErr := enforceChunkBudget(len(chunks) + len(processOpts.ParentChunks)); budgetErr != nil {
+		logger.Warnf(ctx, "Rejecting knowledge %s: %v", knowledge.ID, budgetErr)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = budgetErr.Error()
+		knowledge.UpdatedAt = time.Now()
+		if updateErr := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); updateErr != nil {
+			logger.Errorf(ctx, "failed to record chunk-budget rejection for knowledge %s: %v", knowledge.ID, updateErr)
+		}
+		return nil
+	}
+
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	return s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 }
