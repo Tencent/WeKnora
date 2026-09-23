@@ -87,9 +87,21 @@ export function resolveCitationChunkId(
   refs?: CitationKnowledgeRef[] | null,
 ): string {
   const raw = String(rawChunkId || '').trim()
-  if (!raw || UUID_RE.test(raw)) return raw
-
   const list = (refs || []).filter((r) => r && r.chunk_type !== 'web_search')
+
+  if (!raw) return raw
+
+  if (UUID_RE.test(raw)) {
+    // Only trust a well-formed UUID when the retrieval refs confirm it —
+    // models sometimes hallucinate plausible-looking chunk ids instead of
+    // copying one from the tool output, and an unverified id would later hit
+    // the chunk endpoint and surface "Chunk not found".
+    if (!refs || !list.length) return raw
+    if (list.some((r) => r.id && r.id.toLowerCase() === raw.toLowerCase())) return raw
+    // Unknown id: fall through to the doc/kb-based recovery below instead of
+    // passing the bogus UUID through.
+  }
+
   if (!list.length) return raw
 
   const doc = (attrs.doc || '').trim()
