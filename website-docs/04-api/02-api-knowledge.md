@@ -292,6 +292,10 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/manual -H "Authorizatio
 | `parse_status` | string | 否 | `pending/processing/completed/failed` |
 | `source` | string | 否 | 渠道或 `manual`/`url` |
 | `start_time` / `end_time` | string | 否 | RFC3339，按 `updated_at` 过滤 |
+| `sort_by` | string | 否 | 排序字段：`updated_at`、`created_at` 或 `file_name`；默认 `created_at` |
+| `sort_order` | string | 否 | 排序方向：`asc` 或 `desc`；默认 `desc` |
+
+未传排序参数时，接口保持原有的 `created_at desc` 行为。显式使用 `updated_at` 时，重新解析、编辑或状态变化会影响顺序；使用 `file_name` 时按展示文件名忽略大小写排序，文件名为空会依次回退到标题和来源。所有排序都会使用知识 ID 作为稳定的次级排序条件，避免相同排序值下翻页结果漂移。
 
 响应：200 `{"success":true,"data":[Knowledge],"total","page","page_size"}`
 

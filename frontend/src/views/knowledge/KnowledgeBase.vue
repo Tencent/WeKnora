@@ -71,6 +71,14 @@ import {
   isFilteringDocuments,
   ROOT_FOLDER_PATH,
 } from './folderTree';
+import {
+  DEFAULT_DOCUMENT_SORT,
+  DOCUMENT_SORT_OPTIONS,
+  getDocumentSortOption,
+  getDocumentSortParams,
+  type DocumentSortOption,
+  type DocumentSortValue,
+} from './documentSorting';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
@@ -682,6 +690,52 @@ const clearDocumentFilters = () => {
 };
 // Disable any date after today so users cannot filter into the future.
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
+const documentSortPanelVisible = ref(false);
+const selectedDocumentSort = ref<DocumentSortValue>(DEFAULT_DOCUMENT_SORT);
+
+const documentSortOptionLabel = (option: DocumentSortOption) => {
+  switch (option.labelKey) {
+    case 'earliestUpdated':
+      return t('knowledgeBase.sort.earliestUpdated');
+    case 'newestCreated':
+      return t('knowledgeBase.sort.newestCreated');
+    case 'earliestCreated':
+      return t('knowledgeBase.sort.earliestCreated');
+    case 'nameAscending':
+      return t('knowledgeBase.sort.nameAscending');
+    case 'nameDescending':
+      return t('knowledgeBase.sort.nameDescending');
+    default:
+      return t('knowledgeBase.sort.recentlyUpdated');
+  }
+};
+
+const documentSortGroups = computed(() => [
+  {
+    key: 'updated_at',
+    label: t('knowledgeBase.sort.updatedTime'),
+    description: t('knowledgeBase.sort.updatedTimeDescription'),
+    options: DOCUMENT_SORT_OPTIONS.filter((option) => option.sortBy === 'updated_at'),
+  },
+  {
+    key: 'created_at',
+    label: t('knowledgeBase.sort.createdTime'),
+    description: t('knowledgeBase.sort.createdTimeDescription'),
+    options: DOCUMENT_SORT_OPTIONS.filter((option) => option.sortBy === 'created_at'),
+  },
+  {
+    key: 'file_name',
+    label: t('knowledgeBase.sort.fileName'),
+    description: t('knowledgeBase.sort.fileNameDescription'),
+    options: DOCUMENT_SORT_OPTIONS.filter((option) => option.sortBy === 'file_name'),
+  },
+]);
+
+const activeDocumentSortLabel = computed(() => {
+  const option = getDocumentSortOption(selectedDocumentSort.value);
+  const group = documentSortGroups.value.find((item) => item.key === option.sortBy);
+  return `${group?.label || ''} · ${documentSortOptionLabel(option)}`;
+});
 
 // ── Folder tree (documents uploaded as a folder keep their relative path) ──
 // The directory sidebar is now the sole folder navigation and starts expanded.
@@ -737,11 +791,27 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    ...getDocumentSortParams(selectedDocumentSort.value),
     folder_path: selectedFolderPath.value,
     // Filtering searches descendants; browsing shows this folder's documents.
     folder_recursive: isFiltering.value,
   };
 });
+
+const handleDocumentSortSelect = (value: DocumentSortValue) => {
+  documentSortPanelVisible.value = false;
+  if (selectedDocumentSort.value === value) return;
+
+  selectedDocumentSort.value = value;
+  clearSelection();
+  resetPage();
+  if (knowledgeScroll.value) {
+    knowledgeScroll.value.scrollTop = 0;
+  }
+  if (kbId.value && !isFAQ.value) {
+    loadKnowledgeFiles(kbId.value);
+  }
+};
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -2346,6 +2416,39 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     <t-icon :name="batchMode ? 'close' : 'check-rectangle'" size="16px" />
                     {{ $t(batchMode ? 'common.cancel' : 'menu.batchManage') }}
                   </button>
+                  <t-popup v-model:visible="documentSortPanelVisible" trigger="click" placement="bottom-right"
+                    overlay-class-name="document-sort-popup" :overlay-inner-style="{ padding: 0 }">
+                    <template #content>
+                      <div class="document-sort-panel" role="menu" :aria-label="$t('knowledgeBase.sort.title')">
+                        <section v-for="group in documentSortGroups" :key="group.key" class="document-sort-group">
+                          <div class="document-sort-group__heading">
+                            <div class="document-sort-group__label">{{ group.label }}</div>
+                            <div class="document-sort-group__description">{{ group.description }}</div>
+                          </div>
+                          <div class="document-sort-group__options">
+                            <button v-for="option in group.options" :key="option.value" type="button"
+                              class="document-sort-option"
+                              :class="{ active: selectedDocumentSort === option.value }"
+                              role="menuitemradio" :aria-checked="selectedDocumentSort === option.value"
+                              @click.stop="handleDocumentSortSelect(option.value)">
+                              <span>{{ documentSortOptionLabel(option) }}</span>
+                              <t-icon v-if="selectedDocumentSort === option.value" name="check" size="14px" />
+                            </button>
+                          </div>
+                        </section>
+                      </div>
+                    </template>
+                    <button type="button" class="doc-sort-trigger" :class="{ active: documentSortPanelVisible }"
+                      :title="`${$t('knowledgeBase.sort.title')}: ${activeDocumentSortLabel}`"
+                      :aria-label="`${$t('knowledgeBase.sort.title')}: ${activeDocumentSortLabel}`">
+                      <t-icon name="filter-sort" size="16px" />
+                      <span class="doc-sort-trigger__label">
+                        {{ $t('knowledgeBase.sort.title') }} · {{ activeDocumentSortLabel }}
+                      </span>
+                      <t-icon name="chevron-down" size="14px" class="doc-sort-trigger__caret"
+                        :class="{ open: documentSortPanelVisible }" />
+                      </button>
+                    </t-popup>
                   <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
                     <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
                       <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'grid' }"
@@ -2762,6 +2865,71 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     :deep(.t-date-range-picker) { width: 100%; }
   }
 }
+
+.document-sort-panel {
+  width: 330px;
+  max-width: min(330px, calc(100vw - 32px));
+  padding: 6px;
+  box-sizing: border-box;
+  color: var(--td-text-color-primary);
+}
+
+.document-sort-group {
+  padding: 7px 6px 8px;
+
+  & + & {
+    border-top: 1px solid var(--td-component-stroke);
+  }
+
+  &__heading {
+    padding: 0 4px 6px;
+  }
+
+  &__label {
+    font-size: var(--app-text-md);
+    line-height: 20px;
+    font-weight: 600;
+  }
+
+  &__description {
+    margin-top: 1px;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-xs);
+    line-height: 17px;
+  }
+
+  &__options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+}
+
+.document-sort-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-md);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.active {
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+}
 .doc-filter-tags {
   margin-top: 16px;
   padding-top: 14px;
@@ -2793,6 +2961,43 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   .doc-filter-bar { flex-wrap: wrap; gap: 12px; }
   .doc-filter-bar__trailing { width: 100%; }
   .doc-filter-bar .doc-search-input { flex: 1; width: auto; }
+}
+
+.doc-sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-md);
+  cursor: pointer;
+
+  &:hover,
+  &.active {
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__caret {
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+
+    &.open { transform: rotate(180deg); }
+  }
 }
 
 @container doc-card-area (max-width: 540px) {

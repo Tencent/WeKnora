@@ -225,6 +225,8 @@ docker compose up -d    # 코어 서비스 시작
 
 > 로컬 Ollama 모델을 사용하려면 먼저 `ollama serve > /dev/null 2>&1 &` 를 실행하세요.
 
+Ollama 임베딩 모델 이름, `OLLAMA_BASE_URL`, RAM 안내는 [설정 문서](./website-docs/01-getting-started/04-configuration.md)를 보세요.
+
 ### 🔄 업그레이드
 
 기존 배포가 있고 새 release를 다운로드한 경우:

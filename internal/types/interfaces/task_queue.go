@@ -114,6 +114,16 @@ type TaskPendingOpsKnowledgeBaseGuard interface {
 	EnqueueIfKnowledgeBaseActive(ctx context.Context, op *types.TaskPendingOp) (accepted bool, err error)
 }
 
+// TaskPendingOpsTenantLiveness reports whether a tenant is still alive (not
+// soft-deleted). Wiki task consumers use it to guarantee a deleted tenant
+// never triggers new model requests: the check runs at task entry (ingest
+// and finalize) and inside the guarded enqueue, alongside the KB-active
+// check — tenant soft-deletion removes the workspace without touching its
+// knowledge bases or durable pending ops.
+type TaskPendingOpsTenantLiveness interface {
+	HasActiveTenant(ctx context.Context, tenantID uint64) (bool, error)
+}
+
 // TaskPendingOpsFinalizingSeeder atomically hands a processing knowledge row
 // to the asynchronous finalizing pipeline while persisting the durable
 // pending operation that owns one of its subtask slots.

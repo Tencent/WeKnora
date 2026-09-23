@@ -42,6 +42,31 @@ func TestValidateSessionMode(t *testing.T) {
 	}
 }
 
+func TestIMChannelNormalizesAndValidatesLocale(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		locale  string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty uses deployment default", locale: "", want: ""},
+		{name: "supported locale", locale: "ja-JP", want: "ja-JP"},
+		{name: "trims supported locale", locale: "  ko-KR  ", want: "ko-KR"},
+		{name: "rejects unsupported locale", locale: "fr-FR", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ch := &IMChannel{Locale: tt.locale}
+			err := ch.normalizeAndValidateLocale()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("normalizeAndValidateLocale() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if ch.Locale != tt.want && !tt.wantErr {
+				t.Fatalf("Locale = %q, want %q", ch.Locale, tt.want)
+			}
+		})
+	}
+}
+
 func TestIMChannelBeforeCreate_SessionModeDefault(t *testing.T) {
 	tests := []struct {
 		name         string

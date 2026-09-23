@@ -12,10 +12,13 @@ import (
 	"github.com/google/uuid"
 )
 
-const emptyTruncatedAnswerFallback = "Sorry, this answer hit the model's per-response output limit " +
+// EmptyTruncatedAnswerFallback explains an output-budget exhaustion with no answer text.
+const EmptyTruncatedAnswerFallback = "Sorry, this answer hit the model's per-response output limit " +
 	"before any text was produced. Try narrowing the question, or raise max_completion_tokens."
 
-func isLengthFinishReason(reason string) bool {
+// IsLengthFinishReason reports whether a provider ended a response because its
+// completion-token budget was exhausted.
+func IsLengthFinishReason(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case "length", "max_tokens", "max_output_tokens":
 		return true
@@ -247,9 +250,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					if strings.TrimSpace(response.Content) != "" {
 						answerProduced = true
 					}
-					truncated := response.Done && isLengthFinishReason(response.FinishReason)
+					truncated := response.Done && IsLengthFinishReason(response.FinishReason)
 					if truncated && !answerProduced {
-						response.Content = emptyTruncatedAnswerFallback
+						response.Content = EmptyTruncatedAnswerFallback
 						answerProduced = true
 					}
 					closeThinking()
