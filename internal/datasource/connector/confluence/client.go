@@ -260,11 +260,16 @@ func (c *client) spaces(ctx context.Context) ([]space, error) {
 const serverPageExpand = "version,space"
 
 func serverSpacePagesEndpoint(spaceKey string) string {
+	escapedSpaceKey := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(spaceKey)
 	query := url.Values{
+		"cql":    []string{fmt.Sprintf(`space="%s" AND type=page`, escapedSpaceKey)},
 		"expand": []string{serverPageExpand},
 		"limit":  []string{"100"},
 	}
-	return "/rest/api/space/" + url.PathEscape(spaceKey) + "/content/page?" + query.Encode()
+	// Some Server/Data Center versions keep returning _links.next forever from
+	// /space/{key}/content/page, including on empty pages. CQL filters before
+	// pagination and supplies a terminal page, so a sync cannot spin indefinitely.
+	return "/rest/api/content/search?" + query.Encode()
 }
 
 // withServerPageExpand restores expand=version,space on pagination URLs.

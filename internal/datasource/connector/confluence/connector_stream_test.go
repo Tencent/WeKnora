@@ -64,7 +64,10 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 				"_links": map[string]any{"webui": "/wiki/spaces/ENG"},
 			}},
 		})
-	case path == "/wiki/rest/api/space/ENG/content/page":
+	case path == "/wiki/rest/api/content/search":
+		if req.URL.Query().Get("cql") != `space="ENG" AND type=page` {
+			return nil, errors.New("server page listing omitted the space CQL filter")
+		}
 		a.listCalls++
 		return a.jsonResponse(map[string]any{
 			"results": a.pageMaps(),

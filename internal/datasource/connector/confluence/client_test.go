@@ -37,8 +37,11 @@ func TestServerSpacePagesEndpointEscapesPersonalKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse endpoint: %v", err)
 	}
-	if parsed.Path != "/rest/api/space/~personal_space/content/page" {
+	if parsed.Path != "/rest/api/content/search" {
 		t.Fatalf("path = %q", parsed.Path)
+	}
+	if parsed.Query().Get("cql") != `space="~personal_space" AND type=page` {
+		t.Fatalf("cql = %q", parsed.Query().Get("cql"))
 	}
 	if parsed.Query().Get("expand") != "version,space" {
 		t.Fatalf("expand = %q", parsed.Query().Get("expand"))

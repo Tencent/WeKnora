@@ -8,12 +8,15 @@ import (
 	"testing"
 )
 
-func TestPagesUsesOfficialFlatListAndKeepsExpandOnNext(t *testing.T) {
+func TestPagesUsesCQLSearchAndKeepsExpandOnNext(t *testing.T) {
 	var expands []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rest/api/space/ENG/content/page" {
+		if r.URL.Path != "/rest/api/content/search" {
 			http.NotFound(w, r)
 			return
+		}
+		if r.URL.Query().Get("cql") != `space="ENG" AND type=page` {
+			t.Fatalf("cql = %q", r.URL.Query().Get("cql"))
 		}
 		expands = append(expands, r.URL.Query().Get("expand"))
 		w.Header().Set("Content-Type", "application/json")
@@ -24,7 +27,7 @@ func TestPagesUsesOfficialFlatListAndKeepsExpandOnNext(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(`{
-			"_links": {"next": "/rest/api/space/ENG/content/page?limit=100&start=100"},
+			"_links": {"next": "/rest/api/content/search?cql=space%3D%22ENG%22+AND+type%3Dpage&limit=100&start=100"},
 			"results": [{"id": "1", "title": "Root", "version": {"number": 3}}]
 		}`))
 	}))
