@@ -91,3 +91,39 @@ func TestSanitizeMessages(t *testing.T) {
 		assert.Empty(t, result)
 	})
 }
+
+// TestSanitizeMessages_KeepsToolCallsWhenAssistantMessagesMerge guards against
+// dropping ToolCalls when consecutive assistant messages are merged: a tool
+// result kept by the orphan check must always find its host call in the output.
+func TestSanitizeMessages_KeepsToolCallsWhenAssistantMessagesMerge(t *testing.T) {
+	messages := []chat.Message{
+		{Role: "system", Content: "system"},
+		{Role: "user", Content: "please fix the page"},
+		{Role: "assistant", Content: "Let me look at the page first."},
+		{Role: "assistant", Content: "Now replacing the text.", ToolCalls: []chat.ToolCall{
+			{ID: "call_1"},
+		}},
+		{Role: "tool", Content: "Successfully replaced 1 occurrence(s)", ToolCallID: "call_1", Name: "wiki_replace_text"},
+	}
+	result := SanitizeMessages(messages)
+	require.Len(t, result, 4) // system + user + merged assistant + tool
+	merged := result[2]
+	assert.Equal(t, "assistant", merged.Role)
+	require.Len(t, merged.ToolCalls, 1, "merged assistant message must keep the tool call")
+	assert.Equal(t, "call_1", merged.ToolCalls[0].ID)
+	// The tool result must stay a tool message because its host call still exists.
+	assert.Equal(t, "tool", result[3].Role)
+	assert.Equal(t, "call_1", result[3].ToolCallID)
+}
+
+func TestSanitizeMessages_MergesToolCallsInOrder(t *testing.T) {
+	messages := []chat.Message{
+		{Role: "assistant", Content: "first", ToolCalls: []chat.ToolCall{{ID: "call_1"}}},
+		{Role: "assistant", Content: "second", ToolCalls: []chat.ToolCall{{ID: "call_2"}}},
+	}
+	result := SanitizeMessages(messages)
+	require.Len(t, result, 1)
+	require.Len(t, result[0].ToolCalls, 2)
+	assert.Equal(t, "call_1", result[0].ToolCalls[0].ID)
+	assert.Equal(t, "call_2", result[0].ToolCalls[1].ID)
+}

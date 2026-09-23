@@ -32,6 +32,14 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 			if prev.Role == msg.Role && prev.Role != "tool" {
 				// Merge with previous message
 				result[len(result)-1].Content += "\n\n" + msg.Content
+				// Preserve tool calls (in order) so following tool result
+				// messages still find their host call after the merge.
+				if len(msg.ToolCalls) > 0 {
+					merged := make([]chat.ToolCall, 0, len(prev.ToolCalls)+len(msg.ToolCalls))
+					merged = append(merged, prev.ToolCalls...)
+					merged = append(merged, msg.ToolCalls...)
+					result[len(result)-1].ToolCalls = merged
+				}
 				continue
 			}
 		}
