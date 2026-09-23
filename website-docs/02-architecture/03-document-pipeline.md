@@ -294,11 +294,11 @@ transcriptionResult, err := asrModel.Transcribe(ctx, convertResult.AudioData, kn
 3. `SaveBytes` 上传到当前 KB 的存储后端，`savedRefs` 缓存去重；
 4. 把 Markdown 中的引用重写为存储 URL（`markdown_image_scanner.go` 精确定位 `![alt](target)` 位置）。
 
-随后 `ResolveRemoteImages` 再把 Markdown 里的外部 `http(s)` 图片下载转存（同样受 SSRF 防护）。产出 `storedImages []docparser.StoredImage` 供多模态阶段使用。
+随后 `ResolveRemoteImages` 再把 Markdown 里的外部 `http(s)` 图片下载转存（同样受 SSRF 防护）。产出 `storedImages []docparser.StoredImage` 供多模态阶段使用。切块前 `bindStoredImages` 把提取图绑到该文档（#3342），避免组织共享库里未绑定图片裂图。
 
 ### 分块（Stage: chunking） {#_6-4-分块-stage-chunking}
 
-若知识库开启 `desensitization_config`，Go 侧在分块前对 `MarkdownContent` 调用 `maskParsedMarkdown`（`internal/application/service/knowledge_desensitization.go`）。默认关闭；开启后禁止云解析。失败则该文档解析失败（fail-closed）。对象存储中的原件不改。库存标题和自定义元数据保持明文；拼进 Embedding / 摘要 / 问题生成的副本会再走同一套打码。
+若知识库开启 `desensitization_config`，Go 侧在 **`bindStoredImages` 之后、Split 之前** 对 `MarkdownContent` 调用 `maskParsedMarkdown`（`internal/application/service/knowledge_desensitization.go`）。默认关闭；开启后禁止云解析和 remote VLM。失败则该文档解析失败（fail-closed）。对象存储中的原件不改。库存标题和自定义元数据保持明文；拼进 Embedding / 摘要 / 问题生成的副本会再走同一套打码。字段与内置校验见[知识库文档脱敏](../03-features/02-knowledge-base.md)。
 
 分块在 **Go 侧**完成（`internal/infrastructure/chunker`，详见《分块机制》一章）：
 

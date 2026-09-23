@@ -41,7 +41,7 @@
 
 开启自动标签后，系统在解析完成时从已有候选标签中选择匹配项。默认每篇最多关联 3 个，已有标签时跳过。配置只影响后续解析，不自动补齐历史文档，模型失败也不会阻塞文档完成。
 
-知识库可在「处理 → 文档脱敏」打开文本脱敏：解析得到 Markdown 后、切块前打码，再进入 Embedding 与摘要。默认关闭，已有知识库与已入库文档不变。开启后禁止云解析（weknoracloud / mineru_cloud / paddleocr_vl_cloud）。
+知识库可在「处理 → 文档脱敏」打开文本脱敏：解析得到 Markdown 并绑定图片后、切块前打码，再进入 Embedding 与摘要。默认关闭，已有知识库与已入库文档不变。开启后禁止云解析（weknoracloud / mineru_cloud / paddleocr_vl_cloud）。预置类型校验、重叠规则、Presidio 环境变量和一期范围见[文档脱敏](#文档脱敏)。
 
 <Screenshot
   src="/screenshots/kb-batch-tag.png"
@@ -225,15 +225,37 @@ graph TB
 
 #### 文档脱敏
 
-`desensitization_config` 为知识库级 opt-in，默认关闭（`NULL` 或 `enabled: false` 时解析路径不改写）。开启后在本地解析得到 Markdown 后、切块前打码；OCR / caption 落库前同样打码。Embedding、摘要、RAG 聊天 prompt、Agent 工具标题和知识库 Profile 采样只接触打码后文本；对象存储中的原件与库存标题不改。开启后禁止云解析引擎和 remote VLM。`engine=llm` 与未知引擎名会被拒绝。试跑接口：`POST /desensitization/preview`（仅 builtin）。不保证检出全部 PII。
+`desensitization_config` 为知识库级 opt-in，默认关闭（`NULL` 或 `enabled: false` 时解析路径不改写）。开启后：本地解析得到 Markdown → 解析并绑定图片 → **切块前**打码；OCR / caption 落库前同样打码。Embedding、摘要、RAG 聊天 prompt、Agent 工具和知识库 Profile 采样只接触打码后文本；对象存储中的原件与库存标题不改。开启后禁止云解析（`weknoracloud` / `mineru_cloud` / `paddleocr_vl_cloud`）和 remote VLM。失败则该文档解析失败（fail-closed），不会带着未打码正文继续切块。已有库与已入库文档不变，改规则后需重新解析。不保证检出全部 PII。
+
+Postgres 迁移 `000111` / SQLite `000031` 只给 `knowledge_bases` 加一列。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | enabled | false | 是否启用文本脱敏 |
-| engine | builtin | `builtin` 或 `presidio` |
-| mask_style | replace | `replace` 占位符，`partial` 局部遮罩 |
-| entity_types | 空 | 预置类型：`cn_id_card` / `cn_mobile` / `cn_landline` / `cn_bank_card` / `cn_uscc` / `cn_plate` / `email` |
-| rules | 空 | 自定义正则（Go RE2），在预置类型之后应用 |
+| engine | builtin | `builtin` 或 `presidio`。`llm` 与未知名会被拒绝 |
+| mask_style | replace | `replace` 占位符（如 `<手机号>`），`partial` 局部遮罩 |
+| entity_types | 空 | 预置类型 ID 列表 |
+| rules | 空 | 自定义正则（Go RE2，最多 50 条、模式最长 500 字符），在预置类型之后应用 |
+
+**内置引擎**按勾选类型找候选，再做硬校验，然后跑自定义正则，最后合并重叠（同一起点取更长；相交则丢掉后到的）。银行卡校验会排除「去分隔符后仍是合法 18 位身份证」的串。自定义规则没有独立优先级表。
+
+| 类型 | 校验要点 | 占位符 |
+| --- | --- | --- |
+| `cn_id_card` | 18 位；GB 11643 MOD 11-2；省码白名单；出生日期合法。不支持 15 位旧证 | `<身份证>` |
+| `cn_mobile` | `+86`/`0086` 可有；去分隔符后 11 位；工信部式号段（不是单纯 `1[3-9]`） | `<手机号>` |
+| `cn_landline` | `0` + 区号 3–4 位 + 7–8 位，无校验位，误报高于身份证 | `<固定电话>` |
+| `cn_bank_card` | 银联 `62` 开头 16–19 位 + Luhn。不识别 Visa/MasterCard | `<银行卡>` |
+| `cn_uscc` | 18 位 GB 32100 字符集与校验位 | `<统一社会信用代码>` |
+| `cn_plate` | 民用普通/新能源格式，无校验位 | `<车牌号>` |
+| `email` | 本地 1–64、域名 1–255，禁止首尾 `.` 与 `..` | `<邮箱>` |
+
+身份证 / 手机 / 固话 / 银联卡还要求数字边界，避免从更长连续数字里挖片段。
+
+**Presidio：** 可选侧车。App 先跑内置，再 `POST {PRESIDIO_ANALYZER_URL}/analyze`（`language` 固定 `zh`）。URL 只来自部署环境变量，不写进知识库。未配置或侧车非 2xx：整篇 fail-closed。官方默认 Analyzer 镜像无中文识别器，`language=zh` 会失败。设置页试跑强制 builtin，不调侧车。
+
+**一期不做：** 原件与图片像素、旧文档/旧 OCR 回溯、护照、非银联卡、15 位身份证、`engine=llm`、对对象存储原文件改写。
+
+试跑：`POST /desensitization/preview`（登录或 retrieve/ingest API Key；仅 builtin；不入库）。字段与示例见 [知识库 API](../04-api/02-api-knowledge.md)。`PRESIDIO_ANALYZER_URL` 见 [配置说明](../01-getting-started/04-configuration.md)。
 
 ### 知识（Knowledge）管理 {#_3-知识-knowledge-管理}
 

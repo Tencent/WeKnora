@@ -240,6 +240,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA` | 空 / `searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio`（仅 app） | 出站请求 SSRF 白名单。`SSRF_WHITELIST` 为 app 与 docreader 共用；compose 只给 app 的 `SSRF_WHITELIST_EXTRA` 设了默认值，docreader 的同名变量默认为空 |
 | `SSRF_DNS_WHITELIST_ONLY` | false | 仅允许白名单出站。开启后，不在白名单的主机在 **DNS 查询前**即被拒绝，URL 校验处连 IP 直连也一并拒绝；域名只按名字匹配，写在白名单里的 CIDR 不再对域名生效。取值按布尔解析（`1/t/true` 开、`0/f/false` 关），**非空且无法解析的取值按「开」处理**。开启前的准备见下文 |
 | `IMAGE_HOST_KEEP_URL` | 空 | 保留原始 URL 的图片域名白名单 |
+| `PRESIDIO_ANALYZER_URL` | 空 | 可选 Presidio Analyzer 侧车，如 `http://presidio-analyzer:3000`。知识库 `engine=presidio` 时 App 调用 `POST {URL}/analyze`；未配置则 fail-closed。不写进知识库 JSON。见[文档脱敏](../03-features/02-knowledge-base.md) |
 
 #### 开启 `SSRF_DNS_WHITELIST_ONLY` 之前
 
