@@ -282,7 +282,7 @@ flowchart TD
 | 评估服务 | `internal/application/service/evaluation.go` |
 | 指标注册与汇聚 | `internal/application/service/metric_hook.go` |
 | 指标实现 | `internal/application/service/metric/`（`precision.go`、`recall.go`、`ndcg.go`、`mrr.go`、`map.go`、`bleu.go`、`rouge.go`、`rouge_score.go`、`common.go`） |
-| 数据集加载 | `internal/application/service/dataset.go`、`internal/handler/dataset.go` |
+| 数据集加载 | `internal/application/service/dataset.go` |
 | 类型定义 | `internal/types/evaluation.go`、`internal/types/dataset.go` |
 | 内置样例数据集 | `dataset/samples/`（Parquet 文件） |
 | 路由注册 | `internal/router/router.go` 的 `RegisterEvaluationRoutes` |
