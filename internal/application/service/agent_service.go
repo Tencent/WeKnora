@@ -124,6 +124,9 @@ type agentService struct {
 	// writer 内部队列串行化）。nil 时 engine 完全跳过门禁，行为零变化。
 	intentGate          intentgate.Gate
 	intentVerdictWriter intentgate.VerdictWriter
+	// auditLogService 供 enforce-deny 写 audit（T43）：engine 接缝回调
+	// buildEnforceDenyAuditor 产出的审计函数。
+	auditLogService interfaces.AuditLogService
 }
 
 // NewAgentService creates a new agent service
@@ -153,10 +156,12 @@ func NewAgentService(
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
 	intentPolicyStore intentgate.PolicyStore,
+	auditLogService interfaces.AuditLogService,
 ) interfaces.AgentService {
 	svc := &agentService{
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
+		auditLogService:      auditLogService,
 		cfg:                  cfg,
 		modelService:         modelService,
 		knowledgeBaseService: knowledgeBaseService,
@@ -272,6 +277,10 @@ func (s *agentService) CreateAgentEngine(
 	// 跳过门禁，行为与未接入完全一致。
 	if s.intentGate != nil {
 		engine.SetIntentGate(s.intentGate)
+		// enforce deny 的审计回调（T43）随门禁一起安装：没有门禁就没有
+		// 拦截，没有拦截就没有审计事件。nil auditLogService 时回调为 nil，
+		// engine 内部跳过，行为零变化。
+		engine.SetIntentGateAuditor(buildEnforceDenyAuditor(s.auditLogService))
 	}
 	if s.intentVerdictWriter != nil {
 		engine.SetIntentVerdictWriter(s.intentVerdictWriter)

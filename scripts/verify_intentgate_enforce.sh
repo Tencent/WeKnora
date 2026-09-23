@@ -250,6 +250,24 @@ fail=0
 run_with_retry A "$AGENT_A" "$POLICY_A" enforce true  "${AUTH_A[@]}" || fail=1
 run_with_retry B "$AGENT_B" "$POLICY_B" observe false "${AUTH_B[@]}" || fail=1
 
+# ---- 5. audit 断言（T43，issue #20）：enforce deny 进 audit_logs；------
+#      observe deny 不进（只进 verdict 观测表）。
+row_audit="$(db_query "SELECT action, target_type, target_id, outcome, length(actor_user_id) FROM audit_logs WHERE target_id = '$POLICY_A' AND action = 'intent_policy.enforced_deny' ORDER BY id DESC LIMIT 1" 2>/dev/null || true)"
+case "$row_audit" in
+    "intent_policy.enforced_deny|intent_policy|$POLICY_A|denied|"*[!0]*)
+        ok "A 策略 audit 行正确（action/target/outcome=denied/actor 非空）"
+        ;;
+    *)
+        bad "A 策略 audit 行 = ${row_audit:-<空>}，want intent_policy.enforced_deny|intent_policy|<id>|denied|<actorlen>"
+        ;;
+esac
+cnt_b="$(db_query "SELECT count(*) FROM audit_logs WHERE target_id = '$POLICY_B' AND action = 'intent_policy.enforced_deny'" 2>/dev/null || true)"
+if [ "$cnt_b" = "0" ]; then
+    ok "B 策略（observe）audit 表无记录（只进 verdict 表）"
+else
+    bad "B 策略 observe deny 竟出现在 audit 表（count=$cnt_b）"
+fi
+
 # ---- 收尾：停用双方策略，避免影响后续会话 ---------------------------------
 curl -sS -X POST "$API/intent-policies/$POLICY_A/disable" "${AUTH_A[@]}" >/dev/null 2>&1 || true
 curl -sS -X POST "$API/intent-policies/$POLICY_B/disable" "${AUTH_B[@]}" >/dev/null 2>&1 || true

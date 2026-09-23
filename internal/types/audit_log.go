@@ -47,6 +47,12 @@ const (
 	// a still-pending invitation before the invitee acts. Actor is
 	// the Owner; target is the invitee.
 	AuditActionInvitationRevoked AuditAction = "rbac.invitation_revoked"
+	// AuditActionIntentPolicyEnforcedDeny fires when IntentGate 在 enforce
+	// 模式下拦截一次工具调用（issue #20，T43）：策略自动判定的拒绝，与
+	// 审批门的人工拒绝（rbac/agent 域）分开记。observe 模式的 deny 只进
+	// verdict 观测表，不进 audit。
+	AuditActionIntentPolicyEnforcedDeny AuditAction = "intent_policy.enforced_deny"
+
 	// AuditActionInvitationExpired fires when the lazy sweep transitions
 	// an overdue pending row to expired. Actor is empty (system).
 	AuditActionInvitationExpired AuditAction = "rbac.invitation_expired"

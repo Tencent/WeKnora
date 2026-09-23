@@ -565,6 +565,18 @@ func (e *AgentEngine) runToolCall(
 		}
 		if enforcedDeny {
 			err = &intentgate.DeniedError{Verdict: verdict}
+			// T43：enforce 拦截落 audit（intent_policy.enforced_deny）。
+			// 审计回调必须 fail-open（实现内保证），这里不做错误处理。
+			if e.intentGateAuditor != nil {
+				gateTenantID, _ := types.TenantIDFromContext(toolCtx)
+				e.intentGateAuditor(toolCtx, EnforceDenyInfo{
+					TenantID:   gateTenantID,
+					SessionID:  sessionID,
+					ToolName:   tc.Function.Name,
+					ToolCallID: tc.ID,
+					Verdict:    verdict,
+				})
+			}
 		} else {
 			execCtx, toolCancel := context.WithTimeout(toolExecCtx, execTimeout)
 			result, err = e.toolRegistry.ExecuteTool(

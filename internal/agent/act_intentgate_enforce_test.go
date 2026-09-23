@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -126,5 +127,53 @@ func TestDeniedErrorMessage(t *testing.T) {
 	}
 	if !strings.Contains(msg, "禁止删除") {
 		t.Fatalf("message must carry reason, got %q", msg)
+	}
+}
+
+// TestIntentGateEnforceDenyTriggersAuditor（T43）：enforce deny 触发审计回调
+// 且信息完整；observe deny 与 allow 不触发（audit 只记动作，observe 无动作）。
+func TestIntentGateEnforceDenyTriggersAuditor(t *testing.T) {
+	engine, _ := intentGateTestEngine(t)
+	var got []EnforceDenyInfo
+	engine.SetIntentGateAuditor(func(_ context.Context, info EnforceDenyInfo) {
+		got = append(got, info)
+	})
+	engine.SetIntentGate(&fakeGate{verdict: intentgate.Verdict{
+		Action:   intentgate.ActionDeny,
+		PolicyID: "pol-audit",
+		Mode:     types.VerdictModeEnforce,
+		Layer:    intentgate.LayerRule,
+		Reason:   "违反策略约束「禁止删除」",
+	}})
+
+	runGatedToolCall(engine)
+
+	if len(got) != 1 {
+		t.Fatalf("auditor calls = %d, want 1", len(got))
+	}
+	if got[0].Verdict.PolicyID != "pol-audit" || got[0].ToolName != "search_knowledge" {
+		t.Fatalf("audit info wrong: %+v", got[0])
+	}
+	if got[0].SessionID != "session-1" || got[0].ToolCallID != "call-1" {
+		t.Fatalf("audit context wrong: %+v", got[0])
+	}
+}
+
+func TestIntentGateNonEnforceDenySkipsAuditor(t *testing.T) {
+	engine, _ := intentGateTestEngine(t)
+	calls := 0
+	engine.SetIntentGateAuditor(func(context.Context, EnforceDenyInfo) { calls++ })
+	// observe deny：只记录不拦截不审计。
+	engine.SetIntentGate(&fakeGate{verdict: intentgate.Verdict{
+		Action: intentgate.ActionDeny, PolicyID: "p", Reason: "r", Layer: intentgate.LayerRule,
+	}})
+	runGatedToolCall(engine)
+	// enforce allow：无拦截无审计。
+	engine.SetIntentGate(&fakeGate{verdict: intentgate.Verdict{
+		Action: intentgate.ActionAllow, Mode: types.VerdictModeEnforce, Layer: intentgate.LayerRule,
+	}})
+	runGatedToolCall(engine)
+	if calls != 0 {
+		t.Fatalf("auditor must not fire without enforced deny, calls=%d", calls)
 	}
 }

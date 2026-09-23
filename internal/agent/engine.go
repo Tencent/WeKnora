@@ -93,6 +93,19 @@ type AgentEngine struct {
 	// 被审对象（当前轮 assistant 输出）此刻尚未 append 进 messages，
 	// 快照天然不含它。nil 表示本轮未填（gate 未启用时保持 nil）。
 	intentGateIntent *gateIntentSnapshot
+	// intentGateAuditor 在 enforce deny 实际拦截时回调（T43）：把
+	// intent_policy.enforced_deny 写进 audit log。nil（默认）不写。
+	intentGateAuditor func(ctx context.Context, info EnforceDenyInfo)
+}
+
+// EnforceDenyInfo 是一次 enforce 拦截的审计上下文（T43）：actor 从 ctx
+// 的 Principal 解析（在 auditor 实现内），这里只带执行点现成字段。
+type EnforceDenyInfo struct {
+	TenantID   uint64
+	SessionID  string
+	ToolName   string
+	ToolCallID string
+	Verdict    intentgate.Verdict
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -169,6 +182,13 @@ func (e *AgentEngine) SetIntentGate(g intentgate.Gate) {
 // 写入端必须非阻塞且 fail-open（见 intentgate.AsyncVerdictWriter）。
 func (e *AgentEngine) SetIntentVerdictWriter(w intentgate.VerdictWriter) {
 	e.intentVerdictWriter = w
+}
+
+// SetIntentGateAuditor 安装 enforce deny 的审计回调（T43）。nil（默认）
+// 不写 audit。回调必须自身 fail-open：审计是观测/合规面，失败绝不能再
+// 放大成判定链路错误（拦截已经发生，agent 已在自我纠错路径上）。
+func (e *AgentEngine) SetIntentGateAuditor(fn func(ctx context.Context, info EnforceDenyInfo)) {
+	e.intentGateAuditor = fn
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
