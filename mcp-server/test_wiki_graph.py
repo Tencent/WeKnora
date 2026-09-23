@@ -1,31 +1,10 @@
 #!/usr/bin/env python3
 """Tests for MCP wiki_graph passthrough (issue #3177)."""
 
-import sys
-import types
 import unittest
 from unittest import mock
 
-if "mcp" not in sys.modules:
-    mcp_pkg = types.ModuleType("mcp")
-    mcp_server = types.ModuleType("mcp.server")
-
-    class _MCPServer:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def tool(self):
-            def decorator(fn):
-                return fn
-
-            return decorator
-
-    mcp_server.MCPServer = _MCPServer
-    mcp_pkg.server = mcp_server
-    sys.modules["mcp"] = mcp_pkg
-    sys.modules["mcp.server"] = mcp_server
-
-import weknora_mcp_server as srv  # noqa: E402
+import weknora_mcp_server as srv
 
 
 class WikiGraphClientTest(unittest.TestCase):
