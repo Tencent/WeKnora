@@ -13,6 +13,7 @@ function docker(...args) {
 }
 
 const portName = `${name}-port`;
+const bashName = `${name}-bash`;
 
 async function waitReady(origin, label) {
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -38,6 +39,17 @@ try {
   await waitReady(portOrigin, 'Container with WEBSITE_NGINX_PORT=8080');
   assert.match(docker('exec', portName, 'cat', '/etc/nginx/conf.d/default.conf'), /listen 8080;/);
   assert.equal((await fetch(portOrigin + '/docs/')).status, 200);
+
+  // Deployment platforms may replace the image entrypoint with /bin/bash -c.
+  // The wrapped command must still render the Nginx template before serving.
+  docker('run', '-d', '--name', bashName, '--entrypoint', '/bin/bash',
+    '-e', 'WEBSITE_NGINX_PORT=8088', '-p', '127.0.0.1::8088', image,
+    '-c', "exec /docker-entrypoint.sh nginx -g 'daemon off;'");
+  const bashOrigin = `http://${docker('port', bashName, '8088/tcp')}`;
+  await waitReady(bashOrigin, 'Container launched through Bash');
+  docker('exec', bashName, 'nginx', '-t');
+  assert.match(docker('exec', bashName, 'cat', '/etc/nginx/conf.d/default.conf'), /listen 8088;/);
+  assert.equal((await fetch(bashOrigin + '/docs/')).status, 200);
 
   const redirect = await fetch(`${origin}/docs`, { redirect: 'manual' });
   assert.equal(redirect.status, 308);
@@ -72,7 +84,7 @@ try {
     assert.equal(response.status, 404, path);
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   }
-  console.log(`Docker site check passed: homepage, docs routes, ${assets.size} assets, redirects, 404s, compression, headers, runtime isolation and WEBSITE_NGINX_PORT override.`);
+  console.log(`Docker site check passed: homepage, docs routes, ${assets.size} assets, redirects, 404s, compression, headers, runtime isolation, WEBSITE_NGINX_PORT override and Bash startup.`);
 } finally {
-  spawnSync('docker', ['rm', '-f', name, portName], { stdio: 'ignore' });
+  spawnSync('docker', ['rm', '-f', name, portName, bashName], { stdio: 'ignore' });
 }

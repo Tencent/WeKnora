@@ -17,6 +17,8 @@ COPY . .
 RUN npm run build
 
 FROM nginx:stable-alpine AS runtime
+# Some deployment platforms wrap the startup command with /bin/bash -c.
+RUN apk add --no-cache bash
 # The official image renders /etc/nginx/templates/*.template with envsubst at
 # startup, so `docker run -e WEBSITE_NGINX_PORT=8080` changes the listen port without a
 # rebuild. deploy/nginx.conf stays a plain config for static deployments.
