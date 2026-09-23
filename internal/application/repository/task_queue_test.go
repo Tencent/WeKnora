@@ -384,6 +384,10 @@ func TestTaskPendingOps_DeleteByScope_RejectsMissingScope(t *testing.T) {
 
 func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 	db := setupTaskQueueTestDB(t)
+	require.NoError(t, db.Exec(`CREATE TABLE tenants (
+		id INTEGER PRIMARY KEY,
+		deleted_at DATETIME
+	)`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE knowledge_bases (
     profile_config TEXT,
     generated_profile TEXT,
@@ -392,8 +396,12 @@ func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 		deleted_at DATETIME
 	)`).Error)
 	require.NoError(t, db.Exec(
-		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?)",
-		"kb-active", 1, "kb-deleted", 1, time.Now(),
+		"INSERT INTO tenants (id, deleted_at) VALUES (?, NULL), (?, ?)",
+		1, 2, time.Now(),
+	).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?), (?, ?, NULL)",
+		"kb-active", 1, "kb-deleted", 1, time.Now(), "kb-deleted-tenant", 2,
 	).Error)
 
 	repo := NewTaskPendingOpsRepository(db)
@@ -426,6 +434,12 @@ func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 			TenantID: 2, TaskType: types.TypeWikiIngest, Scope: types.TaskScopeKnowledgeBase,
 			ScopeID: "kb-active", Op: "ingest", DedupKey: "wrong-tenant",
 		}},
+		{
+			name: "deleted tenant",
+			op: makePendingOp(
+				types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-deleted-tenant", "ingest", "deleted-tenant", nil,
+			),
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			accepted, err := guard.EnqueueIfKnowledgeBaseActive(ctx, tc.op)

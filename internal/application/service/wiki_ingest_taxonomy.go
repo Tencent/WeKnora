@@ -152,6 +152,10 @@ func (s *wikiIngestService) selectRelevantFolders(
 	if len(pool) <= wikiTaxonomyFeedAllMaxFolders {
 		return pool
 	}
+	if err := s.ensureTenantActive(ctx); err != nil {
+		logger.Infof(ctx, "wiki ingest: skipping taxonomy embedding for inactive tenant: %v", err)
+		return nil
+	}
 
 	// Split into always-kept level-1 anchors and the deeper candidate folders
 	// that similarity selects among.
@@ -201,6 +205,10 @@ func (s *wikiIngestService) selectRelevantFolders(
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: taxonomy plan folder embed failed, feeding all folders: %v", err)
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
+	}
+	if err := s.ensureTenantActive(ctx); err != nil {
+		logger.Infof(ctx, "wiki ingest: skipping taxonomy item embedding for inactive tenant: %v", err)
+		return nil
 	}
 	itemVecs, err := embedder.BatchEmbedWithPool(ctx, embedder, itemTexts)
 	if err != nil {

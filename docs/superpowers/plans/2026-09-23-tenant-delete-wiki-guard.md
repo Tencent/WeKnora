@@ -17,7 +17,7 @@ Stop deleted tenants from starting or continuing Wiki generation work, so a soft
 
 1. Add a tenant-service dependency to `wikiIngestService` and a small `ensureTenantActive` helper. The helper reads the tenant ID already injected into Wiki task contexts, returns a dedicated inactive sentinel for a missing/soft-deleted tenant, and returns an error for other lookup failures.
 2. Gate `ProcessWikiIngest` and `ProcessWikiFinalize` before loading models. When the tenant is inactive, mark the task as skipped, clear its KB pending rows through the existing cleanup helper, and acknowledge the task without scheduling follow-up work.
-3. Gate `generateWithTemplate` immediately before each model attempt. This covers long-running batches and retry loops where the tenant can be deleted after the Worker started.
+3. Gate `generateWithTemplate` immediately before each model attempt and gate the optional taxonomy embedding passes before each provider batch. This covers long-running batches and retry loops where the tenant can be deleted after the Worker started.
 4. Strengthen `EnqueueIfKnowledgeBaseActive` and `recoverPendingWikiTasks` to require both an active KB and an active parent tenant. This closes the race where a detached Worker could create durable work or a restart could resurrect it.
 
 ## Tests
@@ -25,6 +25,7 @@ Stop deleted tenants from starting or continuing Wiki generation work, so a soft
 - Repository guard: active tenant + active KB accepts; deleted tenant, deleted KB, missing tenant, missing KB, and tenant mismatch reject.
 - Recovery: recreate triggers only for active tenant/KB lanes and delete pending rows for deleted-tenant, deleted-KB, and missing-KB lanes.
 - LLM guard: a deleted tenant returns the inactive sentinel before the fake chat model is called; an active tenant keeps the existing template behavior.
+- Taxonomy embedding guard: an inactive tenant skips provider embedding work instead of falling back into another model call.
 - Run focused Go tests for repository, container recovery, and Wiki ingest packages when the Go toolchain is available; run `gofmt` and `git diff --check`.
 
 ## Out of scope / follow-up

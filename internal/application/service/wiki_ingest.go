@@ -36,6 +36,10 @@ import (
 // lock (Phase 3) and never returns this.
 var ErrWikiIngestConcurrent = errors.New("concurrent wiki task active")
 
+// ErrWikiTenantInactive stops a Wiki worker from issuing new model requests
+// after its owning tenant has been soft-deleted.
+var ErrWikiTenantInactive = errors.New("wiki tenant inactive")
+
 const (
 	// maxContentForWiki limits the document content sent to LLM for wiki generation
 	maxContentForWiki = 32768
@@ -364,6 +368,7 @@ type WikiPendingOp struct {
 type wikiIngestService struct {
 	wikiService    interfaces.WikiPageService
 	kbService      interfaces.KnowledgeBaseService
+	tenantService  interfaces.TenantService
 	knowledgeSvc   interfaces.KnowledgeService
 	knowledgeRepo  interfaces.KnowledgeRepository
 	chunkRepo      interfaces.ChunkRepository
@@ -404,6 +409,7 @@ type wikiPromptWarmup struct {
 func NewWikiIngestService(
 	wikiService interfaces.WikiPageService,
 	kbService interfaces.KnowledgeBaseService,
+	tenantService interfaces.TenantService,
 	knowledgeSvc interfaces.KnowledgeService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
@@ -418,6 +424,7 @@ func NewWikiIngestService(
 	svc := &wikiIngestService{
 		wikiService:    wikiService,
 		kbService:      kbService,
+		tenantService:  tenantService,
 		knowledgeSvc:   knowledgeSvc,
 		knowledgeRepo:  knowledgeRepo,
 		chunkRepo:      chunkRepo,
@@ -430,6 +437,29 @@ func NewWikiIngestService(
 		spanTracker:    spanTracker,
 	}
 	return svc
+}
+
+// ensureTenantActive verifies the lifecycle owner of an asynchronous Wiki
+// task immediately before work that can issue a model request. TenantService
+// intentionally uses the normal soft-delete-aware lookup, so a deleted tenant
+// is indistinguishable from a missing tenant here and the worker fails closed.
+// Tests and legacy callers that do not provide a tenant service retain their
+// existing behavior; production wiring always supplies one through dig.
+func (s *wikiIngestService) ensureTenantActive(ctx context.Context) error {
+	if s.tenantService == nil {
+		return nil
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return nil
+	}
+	if _, err := s.tenantService.GetTenantByID(ctx, tenantID); err != nil {
+		if errors.Is(err, apprepo.ErrTenantNotFound) {
+			return ErrWikiTenantInactive
+		}
+		return fmt.Errorf("verify tenant %d is active: %w", tenantID, err)
+	}
+	return nil
 }
 
 // tracker returns a non-nil span tracker so callers don't have to
@@ -2643,6 +2673,9 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 
 		var lastErr error
 		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
+			if err := s.ensureTenantActive(ctx); err != nil {
+				return "", err
+			}
 			response, callErr := chatModel.Chat(ctx, messages, opts)
 			if callErr == nil && response != nil {
 				return response.Content, nil

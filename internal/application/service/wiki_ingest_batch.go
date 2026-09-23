@@ -253,6 +253,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
+	if err := s.ensureTenantActive(ctx); err != nil {
+		exitStatus = "tenant_inactive"
+		if errors.Is(err, ErrWikiTenantInactive) {
+			if cleanupErr := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); cleanupErr != nil {
+				return fmt.Errorf("wiki ingest: clear inactive-tenant queue: %w", cleanupErr)
+			}
+			return nil
+		}
+		return fmt.Errorf("wiki ingest: tenant lifecycle check: %w", err)
+	}
 
 	// Concurrency model (Phase 3):
 	//
@@ -926,6 +936,15 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
+	if err := s.ensureTenantActive(ctx); err != nil {
+		if errors.Is(err, ErrWikiTenantInactive) {
+			if cleanupErr := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); cleanupErr != nil {
+				return fmt.Errorf("wiki finalize: clear inactive-tenant queue: %w", cleanupErr)
+			}
+			return nil
+		}
+		return fmt.Errorf("wiki finalize: tenant lifecycle check: %w", err)
 	}
 	if s.pendingRepo == nil {
 		return nil

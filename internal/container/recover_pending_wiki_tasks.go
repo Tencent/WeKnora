@@ -36,14 +36,16 @@ func recoverPendingWikiTasks(db *gorm.DB, task interfaces.TaskEnqueuer) {
 	ctx := context.Background()
 	const activeKnowledgeBase = `EXISTS (
 		SELECT 1 FROM knowledge_bases kb
+		JOIN tenants tenant ON tenant.id = kb.tenant_id AND tenant.deleted_at IS NULL
 		WHERE kb.id = task_pending_ops.scope_id
 			AND kb.tenant_id = task_pending_ops.tenant_id
 			AND kb.deleted_at IS NULL
 	)`
 	wikiTaskTypes := []string{types.TypeWikiIngest, types.TypeWikiFinalize}
 
-	// Durable rows for a deleted/missing KB must not recreate ephemeral
-	// triggers at startup. Fail closed if this cleanup cannot be verified.
+	// Durable rows for a deleted/missing KB or parent tenant must not recreate
+	// ephemeral triggers at startup. Fail closed if this cleanup cannot be
+	// verified.
 	cleanup := db.WithContext(ctx).
 		Where("scope = ? AND task_type IN ?", types.TaskScopeKnowledgeBase, wikiTaskTypes).
 		Where("NOT " + activeKnowledgeBase).

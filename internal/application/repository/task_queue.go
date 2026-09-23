@@ -53,7 +53,7 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 }
 
 // EnqueueIfKnowledgeBaseActive prevents detached wiki cleanup from writing new
-// durable work after a KB was soft-deleted. On Postgres the share lock
+// durable work after a KB or its parent tenant was soft-deleted. On Postgres the share lock
 // serializes this check+insert transaction against the row update performed by
 // soft deletion: whichever operation acquires the row first determines the
 // order, and the deletion path's subsequent scope scrub removes any insert
@@ -71,8 +71,9 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 	accepted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Model(&types.KnowledgeBase{}).
-			Select("id").
-			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
+			Joins("JOIN tenants ON tenants.id = knowledge_bases.tenant_id AND tenants.deleted_at IS NULL").
+			Select("knowledge_bases.id").
+			Where("knowledge_bases.id = ? AND knowledge_bases.tenant_id = ?", op.ScopeID, op.TenantID)
 		dialector := tx.Dialector
 		if dialector.Name() == "postgres" {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})

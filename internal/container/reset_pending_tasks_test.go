@@ -89,6 +89,13 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 );
 `
 
+const resetPendingTenantsDDL = `
+CREATE TABLE IF NOT EXISTS tenants (
+    id          INTEGER PRIMARY KEY,
+    deleted_at  DATETIME
+);
+`
+
 func setupResetPendingDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -98,6 +105,7 @@ func setupResetPendingDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(resetPendingSpansDDL).Error)
 	require.NoError(t, db.Exec(resetPendingOpsDDL).Error)
 	require.NoError(t, db.Exec(resetPendingKnowledgeBasesDDL).Error)
+	require.NoError(t, db.Exec(resetPendingTenantsDDL).Error)
 	return db
 }
 
@@ -308,9 +316,14 @@ func (r *recordingTaskEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*a
 func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 	db := setupResetPendingDB(t)
 	require.NoError(t, db.Exec(
+		`INSERT INTO tenants (id, deleted_at)
+		 VALUES (?, NULL), (?, NULL), (?, ?), (?, ?)`,
+		7, 8, 9, time.Now(), 11, time.Now(),
+	).Error)
+	require.NoError(t, db.Exec(
 		`INSERT INTO knowledge_bases (id, tenant_id, deleted_at)
-		 VALUES (?, ?, NULL), (?, ?, NULL), (?, ?, ?)`,
-		"kb-a", 7, "kb-b", 8, "kb-deleted", 9, time.Now(),
+		 VALUES (?, ?, NULL), (?, ?, NULL), (?, ?, ?), (?, ?, NULL)`,
+		"kb-a", 7, "kb-b", 8, "kb-deleted", 9, time.Now(), "kb-deleted-tenant", 11,
 	).Error)
 	rows := []struct {
 		tenantID uint64
@@ -323,6 +336,7 @@ func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 		{7, types.TypeWikiFinalize, "kb-a", "slug-a"},
 		{8, types.TypeWikiIngest, "kb-b", "k-3"},
 		{9, types.TypeWikiIngest, "kb-deleted", "k-deleted"},
+		{11, types.TypeWikiIngest, "kb-deleted-tenant", "k-deleted-tenant"},
 		{10, types.TypeWikiFinalize, "kb-missing", "k-missing"},
 	}
 	for _, row := range rows {
