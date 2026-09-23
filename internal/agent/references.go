@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -85,7 +84,7 @@ collect:
 
 	state.KnowledgeRefs = append(state.KnowledgeRefs, fresh...)
 	if err := e.eventBus.Emit(ctx, event.Event{
-		ID:        fmt.Sprintf("round-%d-references", state.CurrentRound),
+		ID:        generateEventID("references"),
 		Type:      event.EventAgentReferences,
 		SessionID: sessionID,
 		Data:      event.AgentReferencesData{References: fresh},

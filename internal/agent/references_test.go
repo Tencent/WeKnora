@@ -119,3 +119,32 @@ func TestCollectKnowledgeRefsStopsAtTheTurnCap(t *testing.T) {
 	require.Len(t, *batches, 2, "the round that found no room must not announce")
 	require.Len(t, (*batches)[1], maxTurnKnowledgeRefs-150)
 }
+
+// The stream handler forwards evt.ID verbatim and the frontend binds a
+// references payload to an assistant row by that id, so an id built from the
+// round number would repeat across turns in a session and could attach a
+// turn's citations to an earlier row.
+func TestCollectKnowledgeRefsGivesEachEventAUniqueID(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	ids := []string{}
+	engine.eventBus.On(event.EventAgentReferences, func(_ context.Context, evt event.Event) error {
+		ids = append(ids, evt.ID)
+		return nil
+	})
+	ctx := context.Background()
+
+	// Two turns, each starting again at round 1 with its own state — exactly
+	// the shape that a round-numbered id collides on.
+	for range 2 {
+		state := &types.AgentState{CurrentRound: 1}
+		engine.collectKnowledgeRefs(ctx, state, []types.ToolCall{
+			retrievalCall("t1", &types.SearchResult{ID: "chunk-a"}),
+		}, "session")
+	}
+
+	require.Len(t, ids, 2)
+	require.NotEqual(t, ids[0], ids[1], "a references event id must not repeat across turns")
+	for _, id := range ids {
+		require.Regexp(t, `^[0-9a-f]{8}-references$`, id, "must match the id scheme of every other agent event")
+	}
+}
