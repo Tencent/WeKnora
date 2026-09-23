@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -32,7 +32,7 @@ var legacyProviderIDs = []string{
 // wrong thinking encoding).
 func TestLegacyProviderIDsStillRegistered(t *testing.T) {
 	for _, id := range legacyProviderIDs {
-		if _, ok := catalog.Get(id); !ok {
+		if _, ok := modelruntime.Get(id); !ok {
 			t.Errorf("provider id %q was writable by the old code but has no vendor now", id)
 		}
 	}
@@ -222,8 +222,8 @@ func TestLegacyRowsValidateAndResolve(t *testing.T) {
 // shipped model id — which is what the old model picker wrote — is known to
 // resolve.
 func TestEveryCataloguedModelResolves(t *testing.T) {
-	for _, v := range catalog.List() {
-		for _, m := range v.Models {
+	for _, v := range modelruntime.List() {
+		for _, m := range v.Models() {
 			if m.ID == "" {
 				continue
 			}
@@ -248,14 +248,14 @@ func TestEveryCataloguedModelResolves(t *testing.T) {
 // the only ones the old frontend wrote (frontend/src/utils/thinkingControl.ts),
 // but an unrecognized non-empty value historically fell back to
 // chat_template_kwargs and must keep doing so.
-var legacyThinkingControl = map[string]catalog.ThinkingFormat{
-	"none":                 catalog.ThinkingFormatNone,
-	"enable_thinking":      catalog.ThinkingFormatEnableThinking,
-	"thinking_type":        catalog.ThinkingFormatThinkingType,
-	"chat_template_kwargs": catalog.ThinkingFormatChatTemplateKwargs,
-	"enabled":              catalog.ThinkingFormatChatTemplateKwargs,
-	"ENABLE_THINKING":      catalog.ThinkingFormatEnableThinking,
-	"  thinking_type  ":    catalog.ThinkingFormatThinkingType,
+var legacyThinkingControl = map[string]api.ThinkingFormat{
+	"none":                 api.ThinkingFormatNone,
+	"enable_thinking":      api.ThinkingFormatEnableThinking,
+	"thinking_type":        api.ThinkingFormatThinkingType,
+	"chat_template_kwargs": api.ThinkingFormatChatTemplateKwargs,
+	"enabled":              api.ThinkingFormatChatTemplateKwargs,
+	"ENABLE_THINKING":      api.ThinkingFormatEnableThinking,
+	"  thinking_type  ":    api.ThinkingFormatThinkingType,
 }
 
 // TestLegacyThinkingControlMapping pins extra_config.thinking_control to the
@@ -292,7 +292,7 @@ func TestLegacyThinkingControlSurvivesCatalogSilencing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if resolved.OpenAICompletions.ThinkingFormat != catalog.ThinkingFormatChatTemplateKwargs {
+	if resolved.OpenAICompletions.ThinkingFormat != api.ThinkingFormatChatTemplateKwargs {
 		t.Fatalf("explicit thinking_control was overridden by the catalog: %q",
 			resolved.OpenAICompletions.ThinkingFormat)
 	}
@@ -313,7 +313,7 @@ func TestUncataloguedModelKeepsThinkingSwitch(t *testing.T) {
 	if unknown.Cataloged {
 		t.Fatal("expected the fine-tune to be uncatalogued")
 	}
-	if unknown.OpenAICompletions.ThinkingFormat != catalog.ThinkingFormatChatTemplateKwargs {
+	if unknown.OpenAICompletions.ThinkingFormat != api.ThinkingFormatChatTemplateKwargs {
 		t.Fatalf("uncatalogued model lost its thinking switch: %q",
 			unknown.OpenAICompletions.ThinkingFormat)
 	}
@@ -346,8 +346,8 @@ func TestUnknownProviderFallsBackToGeneric(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if resolved.Vendor.ID != catalog.GenericID {
-		t.Fatalf("unknown provider resolved to %q, want %q", resolved.Vendor.ID, catalog.GenericID)
+	if resolved.Vendor.ID != providers.GenericID {
+		t.Fatalf("unknown provider resolved to %q, want %q", resolved.Vendor.ID, providers.GenericID)
 	}
 	if resolved.API != api.APIOpenAICompletions {
 		t.Fatalf("unknown provider resolved to protocol %q", resolved.API)

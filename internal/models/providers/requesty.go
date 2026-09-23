@@ -39,7 +39,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -52,8 +51,8 @@ const RequestyID = "requesty"
 // RequestyBaseURL is the OpenAI-compatible router endpoint.
 const RequestyBaseURL = "https://router.requesty.ai/v1"
 
-func newRequestyProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newRequestyProvider() *Definition {
+	return &Definition{
 		ID:           RequestyID,
 		Name:         "Requesty",
 		Names:        map[string]string{"zh-CN": "Requesty"},
@@ -63,7 +62,7 @@ func newRequestyProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        42,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"router.requesty.ai", "requesty.ai"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: RequestyBaseURL,
@@ -76,27 +75,27 @@ func newRequestyProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
-		Compat: catalog.VendorCompat{
-			Transcriptions: catalog.TranscriptionsCompat{
+		Compat: VendorCompat{
+			Transcriptions: api.TranscriptionsCompat{
 				// https://docs.requesty.ai/api-reference/endpoint/audio-transcriptions-create:
 				// OpenAI-compatible multipart, json by default, verbose_json
 				// available. "The maximum upload size per request is 32 MB."
-				MaxFileBytes: catalog.Ptr(32 << 20),
+				MaxFileBytes: api.Ptr(32 << 20),
 				// "flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm"; language
 				// is an ISO 639-1 form field.
 				Formats:       []string{"flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"},
-				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+				LanguageParam: api.Ptr(api.LanguageForm),
 			},
-			Embeddings: catalog.EmbeddingsCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://docs.requesty.ai/api-reference/endpoint/embeddings-create:
 				// model, input, encoding_format, dimensions.
-				SendEncodingFormat: catalog.Ptr(true),
-				DimensionsField:    catalog.Ptr("dimensions"),
+				SendEncodingFormat: api.Ptr(true),
+				DimensionsField:    api.Ptr("dimensions"),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField:          catalog.Ptr("max_tokens"),
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
-				SupportsReasoningEffort: catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField:          api.Ptr("max_tokens"),
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatOpenAI),
+				SupportsReasoningEffort: api.Ptr(true),
 			},
 		},
 		// Requesty spells the weakest rung "min" and accepts the whole
@@ -107,6 +106,5 @@ func newRequestyProvider() *catalog.Vendor {
 			api.ReasoningXHigh:   api.StringPtr("xhigh"),
 			api.ReasoningMax:     api.StringPtr("max"),
 		},
-		Models: catalog.BuiltinModels("requesty"),
 	}
 }

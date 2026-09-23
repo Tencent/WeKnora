@@ -36,20 +36,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 //go:embed assets/generic.svg
 var genericIcon []byte
 
-// GenericID is the provider identifier stored on model rows. It must equal
-// catalog.GenericID because Resolve degrades unknown vendors to it.
-const GenericID = catalog.GenericID
-
-func newGenericProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newGenericProvider() *Definition {
+	return &Definition{
 		ID:              GenericID,
 		Name:            "Custom (OpenAI-compatible)",
 		Names:           map[string]string{"zh-CN": "自定义 (OpenAI兼容接口)"},
@@ -59,7 +55,7 @@ func newGenericProvider() *catalog.Vendor {
 		API:             api.APIOpenAICompletions,
 		Order:           0,
 		RequiresAuth:    false,
-		Auth:            catalog.AuthBearer,
+		Auth:            AuthBearer,
 		DefaultBaseURLs: map[types.ModelType]string{},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
@@ -68,12 +64,12 @@ func newGenericProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
-		ExtraFields: []catalog.ExtraField{{
-			Key:    catalog.ExtraScoreScale,
+		ExtraFields: []ExtraField{{
+			Key:    models.ExtraScoreScale,
 			Label:  "Rerank score scale",
 			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},
 			Type:   "select",
-			Options: []catalog.ExtraFieldOption{
+			Options: []ExtraFieldOption{
 				{
 					Label:  "Unbounded score (Qwen3-Reranker class)",
 					Labels: map[string]string{"zh-CN": "无界分数（Qwen3-Reranker 一类）"},
@@ -93,7 +89,7 @@ func newGenericProvider() *catalog.Vendor {
 			Required:   false,
 			ModelTypes: []types.ModelType{types.ModelTypeRerank},
 		}, {
-			Key:    catalog.ExtraTruncatePromptTokens,
+			Key:    models.ExtraTruncatePromptTokens,
 			Label:  "Rerank prompt truncation (vLLM)",
 			Labels: map[string]string{"zh-CN": "Rerank 提示词截断长度（vLLM）"},
 			Type:   "number",
@@ -104,7 +100,7 @@ func newGenericProvider() *catalog.Vendor {
 			Placeholders: map[string]string{"zh-CN": "留空，除非后端因文档过长而报错"},
 			ModelTypes:   []types.ModelType{types.ModelTypeRerank},
 		}},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// Transcriptions keeps the baseline, json by default. The
 			// pre-catalog client always asked for verbose_json, which not every
 			// model or server can produce: OpenAI's gpt-4o transcribers accept
@@ -113,30 +109,30 @@ func newGenericProvider() *catalog.Vendor {
 			// {"response_format": "verbose_json"} in its compat. The language
 			// hint goes as OpenAI's language form field, which a server that
 			// does not implement it ignores.
-			Transcriptions: catalog.TranscriptionsCompat{
-				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+			Transcriptions: api.TranscriptionsCompat{
+				LanguageParam: api.Ptr(api.LanguageForm),
 			},
-			Embeddings: catalog.EmbeddingsCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// Whatever the operator runs. Everything the pre-catalog client
 				// sent stays: vLLM, SGLang, TEI and Ollama's OpenAI route all
 				// accept it, and dimensions still goes out only when the row
 				// asks for a width.
-				SendEncodingFormat:          catalog.Ptr(true),
-				DimensionsField:             catalog.Ptr("dimensions"),
-				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+				SendEncodingFormat:          api.Ptr(true),
+				DimensionsField:             api.Ptr("dimensions"),
+				AcceptsTruncatePromptTokens: api.Ptr(true),
 			},
-			Rerank: catalog.RerankCompat{
+			Rerank: api.RerankCompat{
 				// Any OpenAI-compatible endpoint an operator points here is most
 				// often a vLLM or SGLang server, which is where
 				// truncate_prompt_tokens comes from.
-				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+				AcceptsTruncatePromptTokens: api.Ptr(true),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField: catalog.Ptr("max_tokens"),
-				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField: api.Ptr("max_tokens"),
+				ThinkingFormat: api.Ptr(api.ThinkingFormatChatTemplateKwargs),
 			},
 		},
-		Validate: func(cfg *catalog.Config) error {
+		Validate: func(cfg *Config) error {
 			if cfg == nil {
 				return fmt.Errorf("config is nil")
 			}
@@ -148,6 +144,5 @@ func newGenericProvider() *catalog.Vendor {
 			}
 			return nil
 		},
-		Models: catalog.BuiltinModels("generic"),
 	}
 }

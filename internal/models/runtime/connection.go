@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -14,7 +14,7 @@ import (
 // settings. It is never cached in the provider registry or model catalog.
 type Connection struct {
 	ModelID     string
-	Credentials catalog.Credentials
+	Credentials api.Credentials
 	Headers     map[string]string
 	Extra       map[string]string
 	Client      *http.Client
@@ -33,7 +33,7 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 	if kind == types.ModelTypeKnowledgeQA || kind == types.ModelTypeVLLM {
 		protocol, label = r.API, "provider"
 	}
-	if v.AuthStyleFor(protocol) == catalog.AuthSigned {
+	if v.AuthStyleFor(protocol) == providers.AuthSigned {
 		if creds.AppID == "" {
 			return api.Endpoint{}, fmt.Errorf("%s %s: AppID is required", v.Name, label)
 		}
@@ -56,7 +56,7 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 		Auth: v.AuthFunc(protocol, creds), Headers: headers, Client: c.Client,
 	}
 	if v.Endpoint != nil {
-		req := catalog.EndpointRequest{
+		req := providers.EndpointRequest{
 			BaseURL:   r.BaseURL,
 			Model:     r.RemoteModel,
 			ModelType: kind,

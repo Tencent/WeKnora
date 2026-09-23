@@ -47,7 +47,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -60,8 +59,8 @@ const MoonshotID = "moonshot"
 // MoonshotBaseURL is the global OpenAI-compatible endpoint.
 const MoonshotBaseURL = "https://api.moonshot.ai/v1"
 
-func newMoonshotProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newMoonshotProvider() *Definition {
+	return &Definition{
 		ID:           MoonshotID,
 		Name:         "Moonshot AI",
 		Names:        map[string]string{"zh-CN": "月之暗面 Moonshot"},
@@ -71,7 +70,7 @@ func newMoonshotProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        17,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"moonshot.ai", "moonshot.cn"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: MoonshotBaseURL,
@@ -81,15 +80,14 @@ func newMoonshotProvider() *catalog.Vendor {
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeVLLM,
 		},
-		Compat: catalog.VendorCompat{
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				ThinkingFormat:        catalog.Ptr(catalog.ThinkingFormatThinkingType),
-				PromptCacheAccounting: catalog.Ptr(true),
+		Compat: VendorCompat{
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				ThinkingFormat:        api.Ptr(api.ThinkingFormatThinkingType),
+				PromptCacheAccounting: api.Ptr(true),
 				// `required` is kimi-k3 only and a named function 400s while
 				// thinking is on, which is the default on every model.
 				ToolChoiceModes: []string{"none", "auto"},
 			},
 		},
-		Models: catalog.BuiltinModels("moonshot"),
 	}
 }

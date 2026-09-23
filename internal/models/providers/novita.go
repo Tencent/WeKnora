@@ -33,7 +33,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -46,8 +45,8 @@ const NovitaID = "novita"
 // NovitaBaseURL is the OpenAI-compatible gateway endpoint.
 const NovitaBaseURL = "https://api.novita.ai/openai/v1"
 
-func newNovitaProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newNovitaProvider() *Definition {
+	return &Definition{
 		ID:           NovitaID,
 		Name:         "Novita AI",
 		Names:        map[string]string{"zh-CN": "Novita AI"},
@@ -57,7 +56,7 @@ func newNovitaProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        52,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"api.novita.ai", "novita.ai"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: NovitaBaseURL,
@@ -71,17 +70,16 @@ func newNovitaProvider() *catalog.Vendor {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
-		Compat: catalog.VendorCompat{
-			Embeddings: catalog.EmbeddingsCompat{
+		Compat: VendorCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://novita.ai/docs/api-reference/model-apis-llm-create-embeddings:
 				// input, model, encoding_format. Nothing else.
-				SendEncodingFormat: catalog.Ptr(true),
+				SendEncodingFormat: api.Ptr(true),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField: catalog.Ptr("max_tokens"),
-				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatEnableThinking),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField: api.Ptr("max_tokens"),
+				ThinkingFormat: api.Ptr(api.ThinkingFormatEnableThinking),
 			},
 		},
-		Models: catalog.BuiltinModels("novita"),
 	}
 }

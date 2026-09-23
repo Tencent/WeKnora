@@ -11,7 +11,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/dashscopeembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/googleembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/openaiembeddings"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -46,7 +45,7 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 	vendor := resolved.Vendor
 	endpoint, err := resolved.Endpoint(types.ModelTypeEmbedding, modelruntime.Connection{
 		ModelID:     config.ModelID,
-		Credentials: catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
+		Credentials: api.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
 		Headers:     config.CustomHeaders,
 		Extra:       config.ExtraConfig,
 		Client:      newEmbeddingHTTPClient(time.Duration(resolved.Embeddings.RequestTimeout) * time.Second),
@@ -108,7 +107,7 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 // and telling the vendor which side of a search a text is on.
 type protocolEmbedder struct {
 	inner      api.Embedder
-	settings   catalog.EmbeddingsSettings
+	settings   api.EmbeddingsSettings
 	modelName  string
 	modelID    string
 	dimensions int

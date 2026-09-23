@@ -42,12 +42,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/google/uuid"
 )
 
 //go:embed assets/weknoracloud.svg
@@ -60,8 +58,8 @@ const WeKnoraCloudID = "weknoracloud"
 // appended by the Endpoint hook and the embedding / rerank clients.
 const WeKnoraCloudBaseURL = "https://weknora.weixin.qq.com"
 
-func newWeKnoraCloudProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newWeKnoraCloudProvider() *Definition {
+	return &Definition{
 		ID:           WeKnoraCloudID,
 		Name:         "WeKnora Cloud",
 		Names:        map[string]string{"zh-CN": "WeKnora 云服务"},
@@ -72,7 +70,7 @@ func newWeKnoraCloudProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        1,
 		RequiresAuth: true,
-		Auth:         catalog.AuthSigned,
+		Auth:         AuthSigned,
 		URLPatterns:  []string{"weknora.weixin.qq.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: WeKnoraCloudBaseURL,
@@ -86,27 +84,27 @@ func newWeKnoraCloudProvider() *catalog.Vendor {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
-		Compat: catalog.VendorCompat{
-			Embeddings: catalog.EmbeddingsCompat{
+		Compat: VendorCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// The OpenAI body on the service's own path, signed like the
 				// rest of it.
-				Path:            catalog.Ptr("/api/v1/embeddings"),
-				DimensionsField: catalog.Ptr("dimensions"),
-				RequestTimeout:  catalog.Ptr(60),
+				Path:            api.Ptr("/api/v1/embeddings"),
+				DimensionsField: api.Ptr("dimensions"),
+				RequestTimeout:  api.Ptr(60),
 			},
-			Rerank: catalog.RerankCompat{
-				Path: catalog.Ptr("/api/v1/rerank"),
+			Rerank: api.RerankCompat{
+				Path: api.Ptr("/api/v1/rerank"),
 				// The only rerank vendor that has ever had a client deadline
 				// here. Without it a hung endpoint holds the retrieval stage
 				// for as long as the caller's context allows.
-				RequestTimeout: catalog.Ptr(60),
+				RequestTimeout: api.Ptr(60),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				SupportsMultiContent:  catalog.Ptr(false),
-				PromptCacheAccounting: catalog.Ptr(false),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				SupportsMultiContent:  api.Ptr(false),
+				PromptCacheAccounting: api.Ptr(false),
 			},
 		},
-		Signer: func(creds catalog.Credentials) api.AuthFunc {
+		Signer: func(creds api.Credentials) api.AuthFunc {
 			return func(req *http.Request, body []byte) {
 				headers := modelutils.Sign(creds.AppID, creds.AppSecret, uuid.NewString(), string(body))
 				for k, v := range headers {
@@ -114,7 +112,7 @@ func newWeKnoraCloudProvider() *catalog.Vendor {
 				}
 			}
 		},
-		Endpoint: func(r catalog.EndpointRequest) (string, map[string]string) {
+		Endpoint: func(r EndpointRequest) (string, map[string]string) {
 			switch r.ModelType {
 			case types.ModelTypeEmbedding, types.ModelTypeRerank, types.ModelTypeASR:
 				// Those clients build their own paths; fall back.
@@ -124,7 +122,6 @@ func newWeKnoraCloudProvider() *catalog.Vendor {
 		},
 		// AppID / AppSecret are written by the dedicated initialization
 		// endpoint; only structural checks happen there.
-		Validate: func(_ *catalog.Config) error { return nil },
-		Models:   catalog.BuiltinModels("weknoracloud"),
+		Validate: func(_ *Config) error { return nil },
 	}
 }

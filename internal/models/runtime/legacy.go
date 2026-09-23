@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
 // inferAPIFromURL preserves protocol selection for legacy URLs.
@@ -23,17 +22,17 @@ func inferAPIFromURL(baseURL string, current api.API) api.API {
 // applyLegacyThinkingControl maps the pre-catalog thinking_control value
 // onto the new settings. Unknown non-empty values keep the historical
 // fallback (chat_template_kwargs).
-func applyLegacyThinkingControl(s *catalog.OpenAICompletionsSettings, value string) {
+func applyLegacyThinkingControl(s *api.OpenAICompletionsSettings, value string) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "":
 		return
 	case "none":
-		s.ThinkingFormat = catalog.ThinkingFormatNone
+		s.ThinkingFormat = api.ThinkingFormatNone
 	case "enable_thinking":
-		s.ThinkingFormat = catalog.ThinkingFormatEnableThinking
+		s.ThinkingFormat = api.ThinkingFormatEnableThinking
 	case "thinking_type":
-		s.ThinkingFormat = catalog.ThinkingFormatThinkingType
+		s.ThinkingFormat = api.ThinkingFormatThinkingType
 	default:
-		s.ThinkingFormat = catalog.ThinkingFormatChatTemplateKwargs
+		s.ThinkingFormat = api.ThinkingFormatChatTemplateKwargs
 	}
 }

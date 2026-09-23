@@ -50,7 +50,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -66,8 +65,8 @@ const GeminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 // GeminiOpenAICompatBaseURL keeps the OpenAI Chat Completions protocol.
 const GeminiOpenAICompatBaseURL = GeminiBaseURL + "/openai"
 
-func newGeminiProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newGeminiProvider() *Definition {
+	return &Definition{
 		ID:    GeminiID,
 		Name:  "Google Gemini",
 		Names: map[string]string{"zh-CN": "Google Gemini"},
@@ -84,13 +83,13 @@ func newGeminiProvider() *catalog.Vendor {
 		EmbeddingAPI: api.EmbeddingGoogle,
 		Order:        33,
 		RequiresAuth: true,
-		Auth:         catalog.AuthGoogleAPIKey,
+		Auth:         AuthGoogleAPIKey,
 		// The OpenAI-compatible facade documents only Authorization: Bearer.
 		// Sending x-goog-api-key there would change the credential of every
 		// row stored before the native protocol became the default — they all
 		// carry the .../v1beta/openai base URL.
-		AuthByAPI: map[api.API]catalog.AuthStyle{
-			api.APIOpenAICompletions: catalog.AuthBearer,
+		AuthByAPI: map[api.API]AuthStyle{
+			api.APIOpenAICompletions: AuthBearer,
 		},
 		URLPatterns: []string{"generativelanguage.googleapis.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
@@ -101,7 +100,7 @@ func newGeminiProvider() *catalog.Vendor {
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
 		},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// https://ai.google.dev/api/embeddings: per request model, content
 			// and embedContentConfig {taskType, title, outputDimensionality,
 			// autoTruncate, …}; the same option names at the top level of the
@@ -111,19 +110,18 @@ func newGeminiProvider() *catalog.Vendor {
 			// gemini-embedding-001 only and is deliberately not declared: it
 			// changes the document vectors, so turning it on would split every
 			// existing index across two spaces (Tencent/WeKnora#1401).
-			Embeddings: catalog.EmbeddingsCompat{
-				DimensionsField: catalog.Ptr("outputDimensionality"),
+			Embeddings: api.EmbeddingsCompat{
+				DimensionsField: api.Ptr("outputDimensionality"),
 			},
 			// Used when the operator points base_url at the /openai facade.
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
+			OpenAICompletions: api.OpenAICompletionsCompat{
 				ToolCallExtraFields:     []string{"extra_content"},
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
-				SupportsReasoningEffort: catalog.Ptr(true),
-				PromptCacheAccounting:   catalog.Ptr(true),
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatOpenAI),
+				SupportsReasoningEffort: api.Ptr(true),
+				PromptCacheAccounting:   api.Ptr(true),
 			},
 			// Native protocol keeps the generativelanguage defaults.
-			GoogleGenerativeAI: catalog.GoogleGenerativeAICompat{},
+			GoogleGenerativeAI: api.GoogleGenerativeAICompat{},
 		},
-		Models: catalog.BuiltinModels("gemini"),
 	}
 }

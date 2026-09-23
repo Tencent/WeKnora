@@ -42,7 +42,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -55,8 +54,8 @@ const AnthropicID = "anthropic"
 // AnthropicBaseURL is the documented first-party endpoint.
 const AnthropicBaseURL = "https://api.anthropic.com/v1"
 
-func newAnthropicProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newAnthropicProvider() *Definition {
+	return &Definition{
 		ID:    AnthropicID,
 		Name:  "Anthropic",
 		Names: map[string]string{"zh-CN": "Anthropic"},
@@ -67,7 +66,7 @@ func newAnthropicProvider() *catalog.Vendor {
 		API:          api.APIAnthropicMessages,
 		Order:        32,
 		RequiresAuth: true,
-		Auth:         catalog.AuthXAPIKey,
+		Auth:         AuthXAPIKey,
 		URLPatterns:  []string{"api.anthropic.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: AnthropicBaseURL,
@@ -77,11 +76,10 @@ func newAnthropicProvider() *catalog.Vendor {
 		},
 		// Protocol defaults (budget-mode thinking, 2023-06-01 version) apply
 		// at vendor level; adaptive-effort models override per entry.
-		Compat: catalog.VendorCompat{},
+		Compat: VendorCompat{},
 		// Anthropic's effort ladder has no "minimal" rung; fold it onto low
 		// for every model so a caller asking for minimal never sends a value
 		// the Messages API rejects.
 		ThinkingLevels: api.ThinkingLevelMap{api.ReasoningMinimal: api.StringPtr("low")},
-		Models:         catalog.BuiltinModels("anthropic"),
 	}
 }

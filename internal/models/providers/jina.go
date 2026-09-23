@@ -26,7 +26,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -39,8 +38,8 @@ const JinaID = "jina"
 // JinaBaseURL serves embeddings and rerank.
 const JinaBaseURL = "https://api.jina.ai/v1"
 
-func newJinaProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newJinaProvider() *Definition {
+	return &Definition{
 		ID:           JinaID,
 		Name:         "Jina AI",
 		Names:        map[string]string{"zh-CN": "Jina"},
@@ -50,7 +49,7 @@ func newJinaProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        50,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"api.jina.ai"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeEmbedding: JinaBaseURL,
@@ -60,8 +59,8 @@ func newJinaProvider() *catalog.Vendor {
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 		},
-		Compat: catalog.VendorCompat{
-			Embeddings: catalog.EmbeddingsCompat{
+		Compat: VendorCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://jina.ai/embeddings/: model, input, an optional task,
 				// dimensions, embedding_type, normalized, late_chunking and a
 				// boolean truncate that defaults to false (an over-long input is
@@ -70,17 +69,16 @@ func newJinaProvider() *catalog.Vendor {
 				// changes the document vectors, so turning it on would leave every
 				// existing index half in one space and half in another
 				// (Tencent/WeKnora#1401).
-				DimensionsField: catalog.Ptr("dimensions"),
-				TruncateField:   catalog.Ptr("truncate"),
-				TruncateValue:   catalog.Ptr("true"),
+				DimensionsField: api.Ptr("dimensions"),
+				TruncateField:   api.Ptr("truncate"),
+				TruncateValue:   api.Ptr("true"),
 			},
-			Rerank: catalog.RerankCompat{
+			Rerank: api.RerankCompat{
 				// return_documents echoes the text back. Results are matched
 				// by index, so this is not needed to map them; it is kept
 				// because it is what this vendor has always been sent.
-				SendReturnDocs: catalog.Ptr(true),
+				SendReturnDocs: api.Ptr(true),
 			},
 		},
-		Models: catalog.BuiltinModels("jina"),
 	}
 }

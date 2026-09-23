@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -22,8 +22,8 @@ import (
 // explicit compatibility decision, never part of normal model generation.
 func TestCatalogMigrationBaseline(t *testing.T) {
 	actual := map[string]string{}
-	for _, vendor := range catalog.List() {
-		for _, entry := range vendor.Models {
+	for _, vendor := range modelruntime.List() {
+		for _, entry := range vendor.Models() {
 			names := append([]string{entry.ID}, entry.Aliases...)
 			if entry.Match != "" {
 				names = append(names, strings.ReplaceAll(entry.Match, "*", "snapshot"))
@@ -47,7 +47,7 @@ func TestCatalogMigrationBaseline(t *testing.T) {
 				state := map[string]any{"resolved": r, "auth": vendor.AuthStyleFor(r.API)}
 				if vendor.Endpoint != nil {
 					u, q := vendor.Endpoint(
-						catalog.EndpointRequest{
+						providers.EndpointRequest{
 							BaseURL:      r.BaseURL,
 							Model:        name,
 							ModelType:    entry.Type,

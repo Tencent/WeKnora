@@ -34,7 +34,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -47,8 +46,8 @@ const OpenrouterID = "openrouter"
 // OpenrouterBaseURL is the OpenAI-compatible gateway endpoint.
 const OpenrouterBaseURL = "https://openrouter.ai/api/v1"
 
-func newOpenrouterProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newOpenrouterProvider() *Definition {
+	return &Definition{
 		ID:    OpenrouterID,
 		Name:  "OpenRouter",
 		Names: map[string]string{"zh-CN": "OpenRouter"},
@@ -59,7 +58,7 @@ func newOpenrouterProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        40,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"openrouter.ai"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: OpenrouterBaseURL,
@@ -74,17 +73,17 @@ func newOpenrouterProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
-		Compat: catalog.VendorCompat{
-			Transcriptions: catalog.TranscriptionsCompat{
+		Compat: VendorCompat{
+			Transcriptions: api.TranscriptionsCompat{
 				// https://openrouter.ai/docs/api/api-reference/stt/create-transcription:
 				// OpenAI-style multipart file + model, json by default. "Max 25
 				// MB; send larger files as base64 JSON via input_audio."
-				MaxFileBytes: catalog.Ptr(25 << 20),
+				MaxFileBytes: api.Ptr(25 << 20),
 				// language is an ISO-639-1 form field. The format "is derived
 				// from the filename extension", with no closed list.
-				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+				LanguageParam: api.Ptr(api.LanguageForm),
 			},
-			Embeddings: catalog.EmbeddingsCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://openrouter.ai/docs/api/api-reference/embeddings/create-embeddings:
 				// model, input, dimensions, encoding_format, input_type, provider,
 				// user. input_type is a free-form string handed to whichever
@@ -93,14 +92,14 @@ func newOpenrouterProvider() *catalog.Vendor {
 				// an asymmetric model it changes the document vectors. Not
 				// declared, for the reason Jina's task is not
 				// (Tencent/WeKnora#1401).
-				SendEncodingFormat: catalog.Ptr(true),
-				DimensionsField:    catalog.Ptr("dimensions"),
+				SendEncodingFormat: api.Ptr(true),
+				DimensionsField:    api.Ptr("dimensions"),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenRouter),
-				SupportsReasoningEffort: catalog.Ptr(true),
-				PromptCacheKey:          catalog.Ptr(true),
-				PromptCacheAccounting:   catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatOpenRouter),
+				SupportsReasoningEffort: api.Ptr(true),
+				PromptCacheKey:          api.Ptr(true),
+				PromptCacheAccounting:   api.Ptr(true),
 			},
 		},
 		// The reasoning.effort enum covers the whole ladder; per-model
@@ -109,6 +108,5 @@ func newOpenrouterProvider() *catalog.Vendor {
 			api.ReasoningXHigh: api.StringPtr("xhigh"),
 			api.ReasoningMax:   api.StringPtr("max"),
 		},
-		Models: catalog.BuiltinModels("openrouter"),
 	}
 }

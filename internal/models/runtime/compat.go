@@ -1,25 +1,13 @@
-package catalog
+package runtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
-)
 
-// VendorCompat carries a vendor's defaults for every protocol it may speak.
-type VendorCompat struct {
-	OpenAICompletions  OpenAICompletionsCompat  `json:"openai_completions,omitempty"`
-	OpenAIResponses    OpenAIResponsesCompat    `json:"openai_responses,omitempty"`
-	AnthropicMessages  AnthropicMessagesCompat  `json:"anthropic_messages,omitempty"`
-	GoogleGenerativeAI GoogleGenerativeAICompat `json:"google_generative_ai,omitempty"`
-	// Rerank is the rerank protocol overlay. It has no per-protocol variants:
-	// a vendor serves exactly one rerank dialect.
-	Rerank RerankCompat `json:"rerank,omitempty"`
-	// Embeddings is the embedding protocol overlay, likewise one per vendor.
-	Embeddings EmbeddingsCompat `json:"embeddings,omitempty"`
-	// Transcriptions is the speech-to-text overlay, likewise one per vendor.
-	Transcriptions TranscriptionsCompat `json:"transcriptions,omitempty"`
-}
+	"github.com/Tencent/WeKnora/internal/models/internal/configcopy"
+)
 
 // ApplyCompat writes the set fields of an overlay struct onto a settings struct
 // with matching field names, dereferencing pointers. Slices and maps
@@ -45,13 +33,13 @@ func ApplyCompat(settings any, compat any) {
 				continue
 			}
 			if target.Kind() == reflect.Pointer {
-				target.Set(cloneValue(f))
+				target.Set(configcopy.Value(f))
 			} else {
-				target.Set(cloneValue(f.Elem()))
+				target.Set(configcopy.Value(f.Elem()))
 			}
 		case reflect.Slice:
 			if f.Len() > 0 {
-				target.Set(cloneValue(f))
+				target.Set(configcopy.Value(f))
 			}
 		case reflect.Map:
 			if f.Len() == 0 {
@@ -62,7 +50,7 @@ func ApplyCompat(settings any, compat any) {
 			}
 			iter := f.MapRange()
 			for iter.Next() {
-				target.SetMapIndex(iter.Key(), cloneValue(iter.Value()))
+				target.SetMapIndex(iter.Key(), configcopy.Value(iter.Value()))
 			}
 		}
 	}
@@ -81,3 +69,5 @@ func DecodeCompat(raw json.RawMessage, into any) error {
 	}
 	return nil
 }
+
+func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }

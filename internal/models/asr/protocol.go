@@ -12,7 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/api/openaichataudio"
 	"github.com/Tencent/WeKnora/internal/models/api/openaitranscriptions"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -55,7 +55,7 @@ func newASR(config *Config) (ASR, error) {
 			return nil, fmt.Errorf("%s does not offer speech recognition in this build", resolved.Vendor.Name)
 		}
 		resolved, err = modelruntime.Resolve(modelruntime.Ref{
-			Provider:  catalog.GenericID,
+			Provider:  providers.GenericID,
 			Model:     config.ModelName,
 			BaseURL:   config.BaseURL,
 			ModelType: types.ModelTypeASR,
@@ -73,7 +73,7 @@ func newASR(config *Config) (ASR, error) {
 	vendor := resolved.Vendor
 	endpoint, err := resolved.Endpoint(types.ModelTypeASR, modelruntime.Connection{
 		ModelID:     config.ModelID,
-		Credentials: catalog.Credentials{APIKey: config.APIKey},
+		Credentials: api.Credentials{APIKey: config.APIKey},
 		Headers:     config.CustomHeaders,
 		Extra:       config.ExtraConfig,
 		Client:      newASRHTTPClient(time.Duration(resolved.Transcriptions.RequestTimeout) * time.Second),
@@ -116,7 +116,7 @@ func newASR(config *Config) (ASR, error) {
 // upload the vendor has documented it will not take, before sending it.
 type protocolASR struct {
 	inner     api.Transcriber
-	settings  catalog.TranscriptionsSettings
+	settings  api.TranscriptionsSettings
 	vendor    string
 	endpoint  string
 	modelName string

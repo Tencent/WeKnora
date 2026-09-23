@@ -58,7 +58,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -71,8 +70,8 @@ const HunyuanID = "hunyuan"
 // HunyuanBaseURL is the OpenAI-compatible endpoint (chat and embedding).
 const HunyuanBaseURL = "https://api.hunyuan.cloud.tencent.com/v1"
 
-func newHunyuanProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newHunyuanProvider() *Definition {
+	return &Definition{
 		ID:           HunyuanID,
 		Name:         "Tencent Hunyuan",
 		Names:        map[string]string{"zh-CN": "腾讯混元 Hunyuan"},
@@ -82,7 +81,7 @@ func newHunyuanProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        13,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"hunyuan.cloud.tencent.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: HunyuanBaseURL,
@@ -92,18 +91,17 @@ func newHunyuanProvider() *catalog.Vendor {
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
 		},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// Embeddings keeps the bare baseline on purpose: "Embedding 接口目前仅
 			// 支持 input 和 model 参数 … dimensions 固定为 1024"
 			// (https://cloud.tencent.com/document/product/1729/111007).
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField: catalog.Ptr("max_tokens"),
-				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatEnableThinking),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField: api.Ptr("max_tokens"),
+				ThinkingFormat: api.Ptr(api.ThinkingFormatEnableThinking),
 				// 可选值包括 none、auto、custom: neither "required" nor OpenAI's
 				// named-function object is documented.
 				ToolChoiceModes: []string{"none", "auto"},
 			},
 		},
-		Models: catalog.BuiltinModels("hunyuan"),
 	}
 }

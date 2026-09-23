@@ -1,8 +1,10 @@
-// Package catalog stores model and provider definitions and deployment overlays.
-// Runtime resolution and per-model credentials belong to models/runtime.
-package catalog
+// Package providers defines vendor defaults and routing rules independently of the model catalog.
+package providers
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -98,7 +100,7 @@ func (f ExtraField) LocalizedPlaceholder(locale string) string {
 
 // CredentialLabelFor returns the credential naming for a model type, or nil
 // when the vendor uses the generic API-key wording.
-func (v *Vendor) CredentialLabelFor(modelType types.ModelType) *CredentialLabel {
+func (v *Definition) CredentialLabelFor(modelType types.ModelType) *CredentialLabel {
 	for i := range v.CredentialLabels {
 		c := &v.CredentialLabels[i]
 		if len(c.ModelTypes) == 0 {
@@ -128,19 +130,6 @@ func (o ExtraFieldOption) LocalizedLabel(locale string) string {
 	return localizedOr(o.Labels, locale, o.Label)
 }
 
-// ModelSpec is shared metadata, independent of catalog storage.
-type ModelSpec = models.ModelSpec
-
-// ModelCost is shared pricing metadata.
-type ModelCost = models.ModelCost
-
-// Credentials is what the operator stored for one model row.
-type Credentials struct {
-	APIKey    string
-	AppID     string
-	AppSecret string
-}
-
 // EndpointRequest is the input to a vendor's Endpoint hook.
 type EndpointRequest struct {
 	BaseURL   string
@@ -155,8 +144,8 @@ type EndpointRequest struct {
 	Extra        map[string]string
 }
 
-// Vendor is one model vendor / gateway / self-hosted runtime.
-type Vendor struct {
+// Definition is one model vendor / gateway / self-hosted runtime.
+type Definition struct {
 	// ID is the stable identifier stored in models.parameters.provider.
 	ID string
 	// Name is the brand name; Names carries localized variants keyed by
@@ -201,8 +190,6 @@ type Vendor struct {
 	Compat VendorCompat
 	// ThinkingLevels is the vendor-level level map.
 	ThinkingLevels api.ThinkingLevelMap
-	// Models is the built-in catalog (from catalog/data/models.generated.json).
-	Models []ModelSpec
 	// Order sorts the vendor list in the UI (lower first).
 	Order int
 
@@ -212,10 +199,10 @@ type Vendor struct {
 	// PreferAPI, when set, may switch the protocol for a base URL / model
 	// pair after URL inference ran (OpenAI uses Responses on its own host
 	// and Chat Completions on relays). Returning "" keeps the current choice.
-	PreferAPI func(baseURL string, spec ModelSpec) api.API
+	PreferAPI func(baseURL string, spec models.ModelSpec) api.API
 	// Signer, when set (AuthSigned), builds the request signer from the
 	// stored credentials.
-	Signer func(creds Credentials) api.AuthFunc
+	Signer func(creds api.Credentials) api.AuthFunc
 	// Validate checks a configuration before it is saved or used. Nil means
 	// the default check (key required when RequiresAuth; model name required).
 	Validate func(cfg *Config) error
@@ -239,7 +226,7 @@ type Config struct {
 
 // GetDefaultURL returns the default base URL for a model type, falling back
 // to the chat URL.
-func (v *Vendor) GetDefaultURL(modelType types.ModelType) string {
+func (v *Definition) GetDefaultURL(modelType types.ModelType) string {
 	if v == nil {
 		return ""
 	}
@@ -253,7 +240,7 @@ func (v *Vendor) GetDefaultURL(modelType types.ModelType) string {
 }
 
 // SupportsType reports whether the vendor lists the model type.
-func (v *Vendor) SupportsType(modelType types.ModelType) bool {
+func (v *Definition) SupportsType(modelType types.ModelType) bool {
 	for _, t := range v.ModelTypes {
 		if t == modelType {
 			return true
@@ -263,7 +250,7 @@ func (v *Vendor) SupportsType(modelType types.ModelType) bool {
 }
 
 // LocalizedName returns the name for a locale, falling back to Name.
-func (v *Vendor) LocalizedName(locale string) string {
+func (v *Definition) LocalizedName(locale string) string {
 	if n, ok := v.Names[locale]; ok && n != "" {
 		return n
 	}
@@ -271,7 +258,7 @@ func (v *Vendor) LocalizedName(locale string) string {
 }
 
 // LocalizedDescription returns the description for a locale.
-func (v *Vendor) LocalizedDescription(locale string) string {
+func (v *Definition) LocalizedDescription(locale string) string {
 	if d, ok := v.Descriptions[locale]; ok && d != "" {
 		return d
 	}
@@ -280,7 +267,7 @@ func (v *Vendor) LocalizedDescription(locale string) string {
 
 // AuthStyleFor returns the auth style this vendor uses for one protocol,
 // falling back to the vendor-wide Auth.
-func (v *Vendor) AuthStyleFor(protocol api.API) AuthStyle {
+func (v *Definition) AuthStyleFor(protocol api.API) AuthStyle {
 	if style, ok := v.AuthByAPI[protocol]; ok && style != "" {
 		return style
 	}
@@ -289,8 +276,8 @@ func (v *Vendor) AuthStyleFor(protocol api.API) AuthStyle {
 
 // AuthFunc builds the request authenticator for the stored credentials. The
 // protocol matters because a vendor that serves a second protocol on a
-// sub-path may authenticate it differently (see Vendor.AuthByAPI).
-func (v *Vendor) AuthFunc(protocol api.API, creds Credentials) api.AuthFunc {
+// sub-path may authenticate it differently (see Definition.AuthByAPI).
+func (v *Definition) AuthFunc(protocol api.API, creds api.Credentials) api.AuthFunc {
 	switch v.AuthStyleFor(protocol) {
 	case AuthAPIKeyHeader:
 		return api.HeaderAuth("api-key", creds.APIKey)
@@ -311,7 +298,7 @@ func (v *Vendor) AuthFunc(protocol api.API, creds Credentials) api.AuthFunc {
 }
 
 // ValidateConfig runs the vendor's validation.
-func (v *Vendor) ValidateConfig(cfg *Config) error {
+func (v *Definition) ValidateConfig(cfg *Config) error {
 	if v.Validate != nil {
 		return v.Validate(cfg)
 	}
@@ -321,5 +308,21 @@ func (v *Vendor) ValidateConfig(cfg *Config) error {
 // IconContentType is the media type of vendor icons served inline.
 const IconContentType = "image/svg+xml"
 
-// Ptr returns a pointer to v; vendor packages use it to fill overlay structs.
-func Ptr[T any](v T) *T { return &v }
+// GenericID is the catch-all OpenAI-compatible provider.
+const GenericID = "generic"
+
+func defaultValidate(v *Definition, cfg *Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+	if v.RequiresAuth && v.Auth != AuthSigned && strings.TrimSpace(cfg.APIKey) == "" {
+		return fmt.Errorf("API key is required for %s", v.Name)
+	}
+	if v.ID == GenericID && strings.TrimSpace(cfg.BaseURL) == "" {
+		return fmt.Errorf("base URL is required for generic provider")
+	}
+	if strings.TrimSpace(cfg.ModelName) == "" {
+		return fmt.Errorf("model name is required")
+	}
+	return nil
+}

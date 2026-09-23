@@ -6,16 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
-	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestEveryCatalogASRTransport(t *testing.T) {
-	providers.EnsureBuiltins()
-	for _, v := range catalog.List() {
-		for _, m := range v.Models {
+	for _, v := range modelruntime.List() {
+		for _, m := range v.Models() {
 			if m.Type != types.ModelTypeASR {
 				continue
 			}

@@ -79,7 +79,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -107,9 +106,9 @@ const VolcengineRerankBaseURL = "https://api-knowledgebase.mlp.cn-beijing.volces
 // the default for this vendor; operators who want it configure it explicitly.
 const VolcengineAnthropicBaseURL = "https://ark.cn-beijing.volces.com/api/compatible/v1"
 
-func newVolcengineProvider() *catalog.Vendor {
+func newVolcengineProvider() *Definition {
 	rerankOnly := []types.ModelType{types.ModelTypeRerank}
-	return &catalog.Vendor{
+	return &Definition{
 		ID:    VolcengineID,
 		Name:  "Volcengine Ark",
 		Names: map[string]string{"zh-CN": "火山引擎 Volcengine"},
@@ -120,7 +119,7 @@ func newVolcengineProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        12,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"volces.com", "volcengine"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: VolcengineBaseURL,
@@ -136,7 +135,7 @@ func newVolcengineProvider() *catalog.Vendor {
 		},
 		// Rerank is signed with an IAM access-key pair, so the first
 		// credential is an Access Key ID rather than an Ark bearer token.
-		CredentialLabels: []catalog.CredentialLabel{{
+		CredentialLabels: []CredentialLabel{{
 			Label:        "Access Key ID",
 			Labels:       map[string]string{"zh-CN": "Access Key ID（AK/SK 签名）"},
 			Placeholder:  "Volcengine IAM access key id (AKLT...)",
@@ -146,7 +145,7 @@ func newVolcengineProvider() *catalog.Vendor {
 			ModelTypes:   rerankOnly,
 			Required:     true,
 		}},
-		ExtraFields: []catalog.ExtraField{
+		ExtraFields: []ExtraField{
 			{
 				Key:         "secret_key",
 				Label:       "Secret Key",
@@ -188,7 +187,7 @@ func newVolcengineProvider() *catalog.Vendor {
 		// multimodal URL that was the default, .../api/v3 like chat, and the
 		// bare host. All of them name the same service, so the request is
 		// placed from the host.
-		Endpoint: func(r catalog.EndpointRequest) (string, map[string]string) {
+		Endpoint: func(r EndpointRequest) (string, map[string]string) {
 			if r.ModelType != types.ModelTypeEmbedding {
 				return "", nil
 			}
@@ -203,7 +202,7 @@ func newVolcengineProvider() *catalog.Vendor {
 			}
 			return root + volcengineMultimodalEmbeddingPath, nil
 		},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// https://docs.volcengine.com/docs/ark/multimodal-vectorization-api:
 			// the only embedding API Ark still lists. It fuses everything in
 			// one request into a single vector, so a request carries one text.
@@ -212,23 +211,23 @@ func newVolcengineProvider() *catalog.Vendor {
 			// curl sends it. `instructions` is documented too and deliberately
 			// not declared: like Jina's task it changes the document vectors
 			// (Tencent/WeKnora#1401).
-			Embeddings: catalog.EmbeddingsCompat{
-				SendEncodingFormat: catalog.Ptr(true),
-				DimensionsField:    catalog.Ptr("dimensions"),
-				MaxBatchSize:       catalog.Ptr(1),
+			Embeddings: api.EmbeddingsCompat{
+				SendEncodingFormat: api.Ptr(true),
+				DimensionsField:    api.Ptr("dimensions"),
+				MaxBatchSize:       api.Ptr(1),
 			},
-			Rerank: catalog.RerankCompat{
+			Rerank: api.RerankCompat{
 				// datas "数组长度不超过 200"
 				// (https://docs.volcengine.com/docs/vector_database_vikingdb/Rerank).
 				// The pre-catalog client split at 50, a constant of its own
 				// rather than a documented ceiling.
-				MaxDocuments:   catalog.Ptr(200),
-				MaxConcurrency: catalog.Ptr(4),
+				MaxDocuments:   api.Ptr(200),
+				MaxConcurrency: api.Ptr(4),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatThinkingType),
-				SupportsReasoningEffort: catalog.Ptr(true),
-				PromptCacheAccounting:   catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatThinkingType),
+				SupportsReasoningEffort: api.Ptr(true),
+				PromptCacheAccounting:   api.Ptr(true),
 			},
 		},
 		// Ark accepts all seven effort rungs on every model that supports the
@@ -242,6 +241,5 @@ func newVolcengineProvider() *catalog.Vendor {
 			api.ReasoningXHigh:   api.StringPtr("xhigh"),
 			api.ReasoningMax:     api.StringPtr("max"),
 		},
-		Models: catalog.BuiltinModels("volcengine"),
 	}
 }

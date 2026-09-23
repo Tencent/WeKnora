@@ -1,4 +1,4 @@
-package catalog
+package runtime
 
 import (
 	"encoding/json"
@@ -6,11 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/internal/configcopy"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -37,12 +40,12 @@ type OverlayProvider struct {
 	BaseURLs map[string]string `json:"base_urls,omitempty"`
 	// APIKey is the deployment-level key used when a model row stores none.
 	// Supports ${ENV} / $ENV interpolation.
-	APIKey       string            `json:"api_key,omitempty"`
-	Headers      map[string]string `json:"headers,omitempty"`
-	Auth         AuthStyle         `json:"auth,omitempty"`
-	RequiresAuth *bool             `json:"requires_auth,omitempty"`
-	ModelTypes   []string          `json:"model_types,omitempty"`
-	URLPatterns  []string          `json:"url_patterns,omitempty"`
+	APIKey       string              `json:"api_key,omitempty"`
+	Headers      map[string]string   `json:"headers,omitempty"`
+	Auth         providers.AuthStyle `json:"auth,omitempty"`
+	RequiresAuth *bool               `json:"requires_auth,omitempty"`
+	ModelTypes   []string            `json:"model_types,omitempty"`
+	URLPatterns  []string            `json:"url_patterns,omitempty"`
 	// Icon is a path to an SVG file (relative to the overlay file) or an
 	// inline "<svg ...>" string.
 	Icon string `json:"icon,omitempty"`
@@ -58,7 +61,7 @@ type OverlayProvider struct {
 	ModelOverrides map[string]ModelSpecPatch `json:"model_overrides,omitempty"`
 }
 
-// ModelSpecPatch is a partial ModelSpec.
+// ModelSpecPatch is a partial models.ModelSpec.
 type ModelSpecPatch struct {
 	Name            string               `json:"name,omitempty"`
 	API             api.API              `json:"api,omitempty"`
@@ -66,7 +69,7 @@ type ModelSpecPatch struct {
 	Input           []string             `json:"input,omitempty"`
 	ContextWindow   int                  `json:"context_window,omitempty"`
 	MaxOutputTokens int                  `json:"max_output_tokens,omitempty"`
-	Cost            *ModelCost           `json:"cost,omitempty"`
+	Cost            *models.ModelCost    `json:"cost,omitempty"`
 	ThinkingLevels  api.ThinkingLevelMap `json:"thinking_levels,omitempty"`
 	Compat          json.RawMessage      `json:"compat,omitempty"`
 	Aliases         []string             `json:"aliases,omitempty"`
@@ -85,35 +88,14 @@ func interpolateEnv(s string) string {
 	})
 }
 
-var frontendTypes = map[string]types.ModelType{
-	"chat":      types.ModelTypeKnowledgeQA,
-	"embedding": types.ModelTypeEmbedding,
-	"rerank":    types.ModelTypeRerank,
-	"vlm":       types.ModelTypeVLLM,
-	"vllm":      types.ModelTypeVLLM,
-	"asr":       types.ModelTypeASR,
-}
-
-// ParseModelType accepts both frontend ("chat") and backend ("KnowledgeQA")
-// spellings.
-func ParseModelType(s string) (types.ModelType, bool) {
-	if t, ok := frontendTypes[strings.ToLower(strings.TrimSpace(s))]; ok {
-		return t, true
-	}
-	switch types.ModelType(s) {
-	case types.ModelTypeKnowledgeQA, types.ModelTypeEmbedding, types.ModelTypeRerank,
-		types.ModelTypeVLLM, types.ModelTypeASR:
-		return types.ModelType(s), true
-	}
-	return "", false
-}
-
 // LoadOverlay reads config/models.json (or the path in MODELS_CONFIG) and
 // applies it to the registry. A missing file is not an error.
-func LoadOverlay(configDir string) error { return LoadOverlayValidated(configDir, nil) }
+func (rt *Runtime) LoadOverlay(configDir string) error {
+	return rt.loadOverlayValidated(configDir, nil)
+}
 
-// LoadOverlayValidated validates every candidate before publishing a generation.
-func LoadOverlayValidated(configDir string, validate func(*Vendor) error) error {
+// loadOverlayValidated validates every candidate before publishing a generation.
+func (rt *Runtime) loadOverlayValidated(configDir string, validate func(*Provider) error) error {
 	path := os.Getenv("MODELS_CONFIG")
 	if path == "" {
 		path = filepath.Join(configDir, "models.json")
@@ -125,18 +107,18 @@ func LoadOverlayValidated(configDir string, validate func(*Vendor) error) error 
 		}
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	return ApplyOverlayValidated(data, filepath.Dir(path), validate)
+	return rt.applyOverlayValidated(data, filepath.Dir(path), validate)
 }
 
 // ApplyOverlay applies overlay JSON to the registry. baseDir resolves
 // relative icon paths.
-func ApplyOverlay(data []byte, baseDir string) error {
-	return ApplyOverlayValidated(data, baseDir, nil)
+func (rt *Runtime) ApplyOverlay(data []byte, baseDir string) error {
+	return rt.applyOverlayValidated(data, baseDir, nil)
 }
 
-// ApplyOverlayValidated rebuilds the overlay and validates it transactionally.
+// applyOverlayValidated rebuilds the overlay and validates it transactionally.
 // The validator must not access the live registry while the writer lock is held.
-func ApplyOverlayValidated(data []byte, baseDir string, validate func(*Vendor) error) error {
+func (rt *Runtime) applyOverlayValidated(data []byte, baseDir string, validate func(*Provider) error) error {
 	var file OverlayFile
 	dec := json.NewDecoder(bytesReader(data))
 	dec.DisallowUnknownFields()
@@ -148,9 +130,9 @@ func ApplyOverlayValidated(data []byte, baseDir string, validate func(*Vendor) e
 	}
 	// Build a fresh generation under the registry lock, then publish once.
 	// A failure leaves both the current generation and built-in baseline intact.
-	mu.Lock()
-	defer mu.Unlock()
-	next := cloneVendors(builtins)
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	next := cloneProviders(rt.builtins)
 	for id, p := range file.Providers {
 		id = strings.ToLower(strings.TrimSpace(id))
 		if id == "" {
@@ -158,7 +140,7 @@ func ApplyOverlayValidated(data []byte, baseDir string, validate func(*Vendor) e
 		}
 		vendor, exists := next[id]
 		if !exists {
-			vendor = &Vendor{
+			vendor = &Provider{Definition: &providers.Definition{
 				ID:              id,
 				Name:            id,
 				API:             api.APIOpenAICompletions,
@@ -167,14 +149,14 @@ func ApplyOverlayValidated(data []byte, baseDir string, validate func(*Vendor) e
 					types.ModelTypeKnowledgeQA,
 				},
 				RequiresAuth: true,
-				Auth:         AuthBearer,
+				Auth:         providers.AuthBearer,
 				Order:        1000,
-			}
+			}, catalog: catalog.New(nil)}
 		}
 		if err := applyOverlayProvider(vendor, p, baseDir); err != nil {
 			return fmt.Errorf("provider %s: %w", id, err)
 		}
-		normalizeVendor(vendor)
+		normalizeProvider(vendor)
 		if validate != nil {
 			if err := validate(vendor); err != nil {
 				return fmt.Errorf("provider %s: %w", id, err)
@@ -182,12 +164,13 @@ func ApplyOverlayValidated(data []byte, baseDir string, validate func(*Vendor) e
 		}
 		next[id] = vendor
 	}
-	vendors = next
+	rt.providers = next
 
 	return nil
 }
 
-func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
+func applyOverlayProvider(v *Provider, p OverlayProvider, baseDir string) error {
+	entries := v.Models()
 	if p.Name != "" {
 		v.Name = p.Name
 	}
@@ -213,7 +196,7 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 		v.DefaultBaseURLs[types.ModelTypeKnowledgeQA] = interpolateEnv(p.BaseURL)
 	}
 	for k, u := range p.BaseURLs {
-		t, ok := ParseModelType(k)
+		t, ok := models.ParseModelType(k)
 		if !ok {
 			return fmt.Errorf("unknown model type %q in base_urls", k)
 		}
@@ -238,7 +221,7 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 	if len(p.ModelTypes) > 0 {
 		v.ModelTypes = v.ModelTypes[:0]
 		for _, s := range p.ModelTypes {
-			t, ok := ParseModelType(s)
+			t, ok := models.ParseModelType(s)
 			if !ok {
 				return fmt.Errorf("unknown model type %q", s)
 			}
@@ -282,13 +265,13 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 		v.ThinkingLevels = levels
 	}
 	for _, raw := range p.Models {
-		if err := upsertOverlayModel(v, raw); err != nil {
+		if err := upsertOverlayModel(&entries, raw); err != nil {
 			return err
 		}
 	}
 	for id, patch := range p.ModelOverrides {
 		matches := 0
-		for _, m := range v.Models {
+		for _, m := range entries {
 			if strings.EqualFold(m.ID, id) {
 				matches++
 			}
@@ -297,23 +280,23 @@ func applyOverlayProvider(v *Vendor, p OverlayProvider, baseDir string) error {
 			return fmt.Errorf("model_overrides %s matches multiple types; use models with an explicit type", id)
 		}
 		found := false
-		for i := range v.Models {
-			if strings.EqualFold(v.Models[i].ID, id) {
-				// Clone first, for the same reason as upsertOverlayModel: the
-				// entry's slices are shared with the built-in definition.
-				spec := cloneModelSpec(v.Models[i])
+		for i := range entries {
+			if strings.EqualFold(entries[i].ID, id) {
+				// Keep the candidate entry independent while applying the patch.
+				spec := cloneModelSpec(entries[i])
 				applyPatch(&spec, patch)
-				v.Models[i] = spec
+				entries[i] = spec
 				found = true
 				break
 			}
 		}
 		if !found {
-			spec := ModelSpec{ID: id}
+			spec := models.ModelSpec{ID: id}
 			applyPatch(&spec, patch)
-			v.Models = append(v.Models, spec)
+			entries = append(entries, spec)
 		}
 	}
+	v.catalog = catalog.New(entries)
 	return nil
 }
 
@@ -437,16 +420,18 @@ func skipPast(s, end string) string {
 // A new id creates a full entry. An id that already exists is *patched*, not
 // replaced: both config/models.json.example and the docs present `models` as
 // the way to restate a known model with corrected facts, and most fields of
-// ModelSpec cannot tell "absent" from "zero" — Reasoning is a plain bool, so
+// models.ModelSpec cannot tell "absent" from "zero" — Reasoning is a plain bool, so
 // an entry that only fixes context_window used to silently turn reasoning
 // off and drop thinking levels, compat and input along with it. Unmarshaling
 // the operator's JSON onto a copy of the stored entry leaves every key they
 // did not write exactly as it was.
-func upsertOverlayModel(v *Vendor, raw json.RawMessage) error {
+func upsertOverlayModel(target *[]models.ModelSpec, raw json.RawMessage) error {
+	entries := *target
+	defer func() { *target = entries }()
 	// Decode strictly first: this is what rejects typos and wrong types, the
 	// same guarantee the rest of the overlay gives. The value is used only
 	// for the id, since the merge below re-reads the raw bytes.
-	var spec ModelSpec
+	var spec models.ModelSpec
 	dec := json.NewDecoder(bytesReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&spec); err != nil {
@@ -457,7 +442,7 @@ func upsertOverlayModel(v *Vendor, raw json.RawMessage) error {
 	}
 	if spec.Type == "" {
 		matches := 0
-		for _, m := range v.Models {
+		for _, m := range entries {
 			if strings.EqualFold(m.ID, spec.ID) {
 				matches++
 			}
@@ -466,33 +451,31 @@ func upsertOverlayModel(v *Vendor, raw json.RawMessage) error {
 			return fmt.Errorf("model %s matches multiple types; specify type", spec.ID)
 		}
 	}
-	for i := range v.Models {
-		if !strings.EqualFold(v.Models[i].ID, spec.ID) {
+	for i := range entries {
+		if !strings.EqualFold(entries[i].ID, spec.ID) {
 			continue
 		}
-		if spec.Type != "" && EntryType(v.Models[i].Type) != EntryType(spec.Type) {
+		if spec.Type != "" && catalog.EntryType(entries[i].Type) != catalog.EntryType(spec.Type) {
 			continue
 		}
-		// cloneModelSpec first: the vendor's Models slice was only shallow
-		// copied, so unmarshaling into the entry's slices/maps in place would
-		// write through to the built-in vendor's package-level definition.
-		merged := cloneModelSpec(v.Models[i])
+		// Decode into an owned entry so a failed patch never modifies the catalog.
+		merged := cloneModelSpec(entries[i])
 		if err := json.Unmarshal(raw, &merged); err != nil {
 			return fmt.Errorf("model %s: %w", spec.ID, err)
 		}
-		v.Models[i] = merged
+		entries[i] = merged
 		return nil
 	}
-	v.Models = append(v.Models, spec)
+	entries = append(entries, spec)
 	return nil
 }
 
 // cloneModelSpec deep-copies the reference-typed fields of a spec.
-func cloneModelSpec(m ModelSpec) ModelSpec {
-	return cloneValue(reflect.ValueOf(m)).Interface().(ModelSpec)
+func cloneModelSpec(m models.ModelSpec) models.ModelSpec {
+	return configcopy.Clone(m)
 }
 
-func applyPatch(m *ModelSpec, p ModelSpecPatch) {
+func applyPatch(m *models.ModelSpec, p ModelSpecPatch) {
 	if p.Name != "" {
 		m.Name = p.Name
 	}
@@ -551,3 +534,10 @@ func mergeRawObjects(a, b json.RawMessage) json.RawMessage {
 	out, _ := json.Marshal(merged)
 	return out
 }
+
+// ApplyOverlay and LoadOverlay retain the legacy unvalidated composition API.
+// Application configuration uses Initialize/Reload, which validate before publication.
+func ApplyOverlay(data []byte, baseDir string) error { return Default().ApplyOverlay(data, baseDir) }
+
+// LoadOverlay loads deployment JSON into the default runtime without resolution validation.
+func LoadOverlay(configDir string) error { return Default().LoadOverlay(configDir) }

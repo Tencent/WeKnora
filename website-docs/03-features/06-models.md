@@ -221,8 +221,8 @@ builtin_models:
 同一厂商的多种能力在一份定义中声明；共用协议不需要复制实现：
 
 1. 新建 `internal/models/providers/<id>.go`，声明名称、能力、各类型默认地址、认证方式、协议默认值及特殊端点钩子，写明官方文档依据；
-2. 在 `scripts/model-catalog/sources/seed.json` 的对应厂商中维护模型元数据；在 `internal/models/catalog/data/overrides.json` 中维护协议、思考映射与 compat 修正。模型键包含类型与 id / match，同名 Chat 和 Embedding 可以共存；
-3. 将图标放入 `providers/assets/<id>.svg` 并引用，在 `providers/builtin.go` 注册定义；
+2. 在 `internal/models/catalog/data/seed.json` 的对应厂商中维护模型元数据；在 `internal/models/catalog/data/overrides.json` 中维护协议、思考映射与 compat 修正。模型键包含类型与 id / match，同名 Chat 和 Embedding 可以共存；
+3. 将图标放入 `providers/assets/<id>.svg` 并引用，在 `providers/builtin.go` 的 `Builtins()` 列表加入定义，由 runtime 按厂商 ID 组合模型目录；
 4. 执行 `make model-catalog-generate` 生成统一目录。生成文件不直接手改；已有协议可以复用，新协议才增加 `api/<protocol>` 包。
 
 然后跑一条命令，目录层的守护测试会自动覆盖新厂商，无需为它单独写用例：
@@ -241,7 +241,7 @@ make model-catalog-check
 
 分两种情况：
 
-**只是新增 / 调整模型元数据**（新模型 id、上下文窗口、价格）。先拿差异报告，再人工核对厂商文档更新 `scripts/model-catalog/sources/seed.json`，再运行 `make model-catalog-generate`：
+**只是新增 / 调整模型元数据**（新模型 id、上下文窗口、价格）。先拿差异报告，再人工核对厂商文档更新 `internal/models/catalog/data/seed.json`，再运行 `make model-catalog-generate`：
 
 ```bash
 make model-catalog-diff                 # 全部厂商
@@ -260,7 +260,7 @@ make model-catalog-diff VENDOR=deepseek # 只看一家
 
 #### 升级到目录化实现的注意事项
 
-老库里的模型行**不需要任何迁移**：`parameters` 列只增加了可选的 `spec` 字段，旧的 26 个 `provider` 取值全部仍然注册，`extra_config` 的历史键（`thinking_control` 的每个取值、`remote_model_name`、`api_version`、`secret_key`、`region`、`instruction`、`truncate_prompt_tokens`）语义不变，目录里已没有的模型 id（自定义微调、已退役型号）照常解析并保留思考开关。这些由 `internal/models/catalog/legacy_rows_test.go` 与 `internal/types/legacy_persisted_json_test.go` 钉住。
+老库里的模型行**不需要任何迁移**：`parameters` 列只增加了可选的 `spec` 字段，旧的 26 个 `provider` 取值全部仍然注册，`extra_config` 的历史键（`thinking_control` 的每个取值、`remote_model_name`、`api_version`、`secret_key`、`region`、`instruction`、`truncate_prompt_tokens`）语义不变，目录里已没有的模型 id（自定义微调、已退役型号）照常解析并保留思考开关。这些由 `internal/models/runtime/legacy_rows_test.go` 与 `internal/types/legacy_persisted_json_test.go` 钉住。
 
 但有四处**既有模型行的运行时行为会变**，升级时需要知会使用者：
 

@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -14,18 +15,18 @@ import (
 
 func registerTestVendors(t *testing.T) {
 	t.Helper()
-	before := catalog.SnapshotCurrent()
-	t.Cleanup(func() { catalog.RestoreSnapshot(before) })
-	catalog.Register(&catalog.Vendor{
-		ID: catalog.GenericID, Name: "Custom", API: api.APIOpenAICompletions,
+	before := modelruntime.SnapshotCurrent()
+	t.Cleanup(func() { modelruntime.RestoreSnapshot(before) })
+	modelruntime.Register(&providers.Definition{
+		ID: providers.GenericID, Name: "Custom", API: api.APIOpenAICompletions,
 		DefaultBaseURLs: map[types.ModelType]string{},
 		ModelTypes:      []types.ModelType{types.ModelTypeKnowledgeQA},
-		Compat: catalog.VendorCompat{OpenAICompletions: catalog.OpenAICompletionsCompat{
-			MaxTokensField: catalog.Ptr("max_tokens"),
-			ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),
+		Compat: providers.VendorCompat{OpenAICompletions: api.OpenAICompletionsCompat{
+			MaxTokensField: api.Ptr("max_tokens"),
+			ThinkingFormat: api.Ptr(api.ThinkingFormatChatTemplateKwargs),
 		}},
 	})
-	catalog.Register(&catalog.Vendor{
+	modelruntime.Register(&providers.Definition{
 		ID: "acme", Name: "Acme", Names: map[string]string{"zh-CN": "极目"},
 		API:          api.APIOpenAICompletions,
 		RequiresAuth: true,
@@ -35,29 +36,28 @@ func registerTestVendors(t *testing.T) {
 			types.ModelTypeRerank:      "https://api.acme.ai/rerank",
 		},
 		ModelTypes: []types.ModelType{types.ModelTypeKnowledgeQA, types.ModelTypeRerank},
-		Compat: catalog.VendorCompat{OpenAICompletions: catalog.OpenAICompletionsCompat{
-			ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatThinkingType),
-			SupportsReasoningEffort: catalog.Ptr(true),
-			MaxTokensField:          catalog.Ptr("max_tokens"),
+		Compat: providers.VendorCompat{OpenAICompletions: api.OpenAICompletionsCompat{
+			ThinkingFormat:          api.Ptr(api.ThinkingFormatThinkingType),
+			SupportsReasoningEffort: api.Ptr(true),
+			MaxTokensField:          api.Ptr("max_tokens"),
 		}},
 		ThinkingLevels: api.ThinkingLevelMap{api.ReasoningMax: api.StringPtr("max")},
-		Models: []catalog.ModelSpec{
-			{
-				ID: "acme-pro", Name: "Acme Pro", Reasoning: true,
-				Input: []string{"text", "image"}, ContextWindow: 200000,
-				Compat: json.RawMessage(`{"supports_temperature": false}`),
-			},
-			{ID: "acme-r1", Reasoning: true, ThinkingLevels: api.ThinkingLevelMap{api.ReasoningOff: nil}},
-			{Match: "acme-lite*", Reasoning: false, Compat: json.RawMessage(`{"thinking_format": "none"}`)},
-			{Match: "acme-lite-vision*", Input: []string{"text", "image"}},
-			{ID: "acme-embed", Type: types.ModelTypeEmbedding, Dimension: 1024},
-			{
-				ID: "acme-claude", API: api.APIAnthropicMessages, Reasoning: true,
-				Compat: json.RawMessage(`{"thinking_mode": "adaptive", "supports_effort": true}`),
-			},
+	}, []models.ModelSpec{
+		{
+			ID: "acme-pro", Name: "Acme Pro", Reasoning: true,
+			Input: []string{"text", "image"}, ContextWindow: 200000,
+			Compat: json.RawMessage(`{"supports_temperature": false}`),
 		},
-	})
-	catalog.Register(&catalog.Vendor{
+		{ID: "acme-r1", Reasoning: true, ThinkingLevels: api.ThinkingLevelMap{api.ReasoningOff: nil}},
+		{Match: "acme-lite*", Reasoning: false, Compat: json.RawMessage(`{"thinking_format": "none"}`)},
+		{Match: "acme-lite-vision*", Input: []string{"text", "image"}},
+		{ID: "acme-embed", Type: types.ModelTypeEmbedding, Dimension: 1024},
+		{
+			ID: "acme-claude", API: api.APIAnthropicMessages, Reasoning: true,
+			Compat: json.RawMessage(`{"thinking_mode": "adaptive", "supports_effort": true}`),
+		},
+	}...)
+	modelruntime.Register(&providers.Definition{
 		ID: "tencent-lkeap", Name: "LKEAP", API: api.APIOpenAICompletions,
 		URLPatterns: []string{"api.lkeap.cloud.tencent.com", "tencent"},
 		DefaultBaseURLs: map[types.ModelType]string{
@@ -69,7 +69,7 @@ func registerTestVendors(t *testing.T) {
 
 func TestFindModel_ExactAliasAndGlob(t *testing.T) {
 	registerTestVendors(t)
-	v, _ := catalog.Get("acme")
+	v, _ := modelruntime.Get("acme")
 
 	chat := types.ModelTypeKnowledgeQA
 	m, ok := v.FindModel("ACME-PRO", chat)
@@ -92,7 +92,7 @@ func TestFindModel_ExactAliasAndGlob(t *testing.T) {
 // model that accepts images, so it sees the chat entries.
 func TestFindModel_IsTyped(t *testing.T) {
 	registerTestVendors(t)
-	v, _ := catalog.Get("acme")
+	v, _ := modelruntime.Get("acme")
 
 	_, ok := v.FindModel("acme-embed", types.ModelTypeKnowledgeQA)
 	assert.False(t, ok, "a chat row must not pick up an embedding entry")
@@ -126,10 +126,10 @@ func TestResolve_ModelNameInsideAChatGlobStillResolvesForOtherTypes(t *testing.T
 
 func TestDetectByURL_LongestPatternWins(t *testing.T) {
 	registerTestVendors(t)
-	assert.Equal(t, "tencent-lkeap", catalog.DetectByURL("https://api.lkeap.cloud.tencent.com/v1"))
-	assert.Equal(t, "acme", catalog.DetectByURL("https://api.acme.ai/v1"))
-	assert.Equal(t, catalog.GenericID, catalog.DetectByURL("http://localhost:8000/v1"))
-	assert.Equal(t, catalog.GenericID, catalog.DetectByURL(""))
+	assert.Equal(t, "tencent-lkeap", modelruntime.DetectByURL("https://api.lkeap.cloud.tencent.com/v1"))
+	assert.Equal(t, "acme", modelruntime.DetectByURL("https://api.acme.ai/v1"))
+	assert.Equal(t, providers.GenericID, modelruntime.DetectByURL("http://localhost:8000/v1"))
+	assert.Equal(t, providers.GenericID, modelruntime.DetectByURL(""))
 }
 
 func TestResolve_MergesVendorModelAndOverrideLayers(t *testing.T) {
@@ -141,7 +141,7 @@ func TestResolve_MergesVendorModelAndOverrideLayers(t *testing.T) {
 	assert.Equal(t, api.APIOpenAICompletions, r.API)
 	assert.Equal(t, "https://api.acme.ai/v1", r.BaseURL, "default base URL is filled in")
 	assert.Equal(t, "max_tokens", r.OpenAICompletions.MaxTokensField)
-	assert.Equal(t, catalog.ThinkingFormatThinkingType, r.OpenAICompletions.ThinkingFormat)
+	assert.Equal(t, api.ThinkingFormatThinkingType, r.OpenAICompletions.ThinkingFormat)
 	assert.True(t, r.OpenAICompletions.SupportsReasoningEffort)
 	assert.False(t, r.OpenAICompletions.SupportsTemperature, "model compat overrides the protocol default")
 	assert.True(t, r.OpenAICompletions.SupportsUsageInStreaming, "untouched defaults survive")
@@ -183,15 +183,15 @@ func TestResolve_UnknownModelAndVendorDegradeToGeneric(t *testing.T) {
 	assert.Equal(t, "brand-new", r.Spec.ID)
 	assert.Equal(
 		t,
-		catalog.ThinkingFormatThinkingType,
+		api.ThinkingFormatThinkingType,
 		r.OpenAICompletions.ThinkingFormat,
 		"vendor defaults still apply",
 	)
 
 	r, err = modelruntime.Resolve(modelruntime.Ref{Provider: "nope", Model: "x", BaseURL: "http://localhost:8000/v1"})
 	require.NoError(t, err)
-	assert.Equal(t, catalog.GenericID, r.Vendor.ID)
-	assert.Equal(t, catalog.ThinkingFormatChatTemplateKwargs, r.OpenAICompletions.ThinkingFormat)
+	assert.Equal(t, providers.GenericID, r.Vendor.ID)
+	assert.Equal(t, api.ThinkingFormatChatTemplateKwargs, r.OpenAICompletions.ThinkingFormat)
 
 	r, err = modelruntime.Resolve(modelruntime.Ref{Model: "x", BaseURL: "https://api.acme.ai/v1"})
 	require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestResolve_ProtocolInference(t *testing.T) {
 	r, err := modelruntime.Resolve(modelruntime.Ref{Provider: "acme", Model: "acme-claude"})
 	require.NoError(t, err)
 	assert.Equal(t, api.APIAnthropicMessages, r.API)
-	assert.Equal(t, catalog.AnthropicThinkingAdaptive, r.AnthropicMessages.ThinkingMode)
+	assert.Equal(t, api.AnthropicThinkingAdaptive, r.AnthropicMessages.ThinkingMode)
 	assert.True(t, r.AnthropicMessages.SupportsEffort)
 	assert.Equal(t, "thinking.adaptive", r.Capabilities().ThinkingFormat)
 
@@ -223,7 +223,7 @@ func TestResolve_ProtocolInference(t *testing.T) {
 			Provider: "acme",
 			Model:    "acme-pro",
 			Extra: map[string]string{
-				catalog.ExtraAPI: "openai-responses",
+				models.ExtraAPI: "openai-responses",
 			},
 		},
 	)
@@ -235,7 +235,7 @@ func TestResolve_ProtocolInference(t *testing.T) {
 			Provider: "acme",
 			Model:    "acme-pro",
 			Extra: map[string]string{
-				catalog.ExtraAPI: "bogus",
+				models.ExtraAPI: "bogus",
 			},
 		},
 	)
@@ -245,11 +245,11 @@ func TestResolve_ProtocolInference(t *testing.T) {
 func TestResolve_LegacyThinkingControlAndRemoteModelName(t *testing.T) {
 	registerTestVendors(t)
 	r, err := modelruntime.Resolve(modelruntime.Ref{Provider: "acme", Model: "acme-pro", Extra: map[string]string{
-		catalog.ExtraThinkingControl: "enable_thinking",
-		catalog.ExtraRemoteModelName: "acme-pro-2026",
+		models.ExtraThinkingControl: "enable_thinking",
+		models.ExtraRemoteModelName: "acme-pro-2026",
 	}})
 	require.NoError(t, err)
-	assert.Equal(t, catalog.ThinkingFormatEnableThinking, r.OpenAICompletions.ThinkingFormat)
+	assert.Equal(t, api.ThinkingFormatEnableThinking, r.OpenAICompletions.ThinkingFormat)
 	assert.Equal(t, "acme-pro-2026", r.RemoteModel)
 
 	r, err = modelruntime.Resolve(
@@ -257,7 +257,7 @@ func TestResolve_LegacyThinkingControlAndRemoteModelName(t *testing.T) {
 			Provider: "acme",
 			Model:    "acme-pro",
 			Extra: map[string]string{
-				catalog.ExtraThinkingControl: "none",
+				models.ExtraThinkingControl: "none",
 			},
 		},
 	)
@@ -290,7 +290,7 @@ func TestResolve_RejectsUnknownCompatKeys(t *testing.T) {
 
 func TestModelsByType(t *testing.T) {
 	registerTestVendors(t)
-	v, _ := catalog.Get("acme")
+	v, _ := modelruntime.Get("acme")
 	chat := v.ModelsByType(types.ModelTypeKnowledgeQA)
 	ids := make([]string, 0, len(chat))
 	for _, m := range chat {
@@ -328,9 +328,9 @@ func TestApplyOverlay(t *testing.T) {
 	    }
 	  }
 	}`
-	require.NoError(t, catalog.ApplyOverlay([]byte(overlay), t.TempDir()))
+	require.NoError(t, modelruntime.ApplyOverlay([]byte(overlay), t.TempDir()))
 
-	acme, ok := catalog.Get("acme")
+	acme, ok := modelruntime.Get("acme")
 	require.True(t, ok)
 	assert.Equal(t, "https://acme.internal/v1", acme.GetDefaultURL(types.ModelTypeKnowledgeQA))
 	assert.Equal(t, "https://api.acme.ai/rerank", acme.GetDefaultURL(types.ModelTypeRerank), "other URLs untouched")
@@ -349,21 +349,21 @@ func TestApplyOverlay(t *testing.T) {
 	assert.Equal(t, 123, r.Spec.ContextWindow)
 	assert.True(t, r.OpenAICompletions.SupportsTemperature, "model_overrides compat merges over the built-in compat")
 
-	lab, ok := catalog.Get("my-vllm")
+	lab, ok := modelruntime.Get("my-vllm")
 	require.True(t, ok)
 	assert.Equal(t, "实验室 vLLM", lab.LocalizedName("zh-CN"))
 	assert.Equal(t, "Lab vLLM", lab.LocalizedName("en-US"))
 	assert.False(t, lab.RequiresAuth)
 	r, err = modelruntime.Resolve(modelruntime.Ref{Provider: "my-vllm", Model: "Qwen/Qwen3-32B"})
 	require.NoError(t, err)
-	assert.Equal(t, catalog.ThinkingFormatChatTemplateKwargs, r.OpenAICompletions.ThinkingFormat)
+	assert.Equal(t, api.ThinkingFormatChatTemplateKwargs, r.OpenAICompletions.ThinkingFormat)
 	assert.Equal(t, "max_tokens", r.OpenAICompletions.MaxTokensField)
 	assert.True(t, r.Spec.Reasoning)
 	assert.Equal(t, "http://vllm.lab:8000/v1", r.BaseURL)
 
 	assert.Error(
 		t,
-		catalog.ApplyOverlay(
+		modelruntime.ApplyOverlay(
 			[]byte(
 				`{"providers": {"x": {"bogus": 1}}}`,
 			),
@@ -371,7 +371,7 @@ func TestApplyOverlay(t *testing.T) {
 		),
 		"unknown keys rejected",
 	)
-	assert.Error(t, catalog.ApplyOverlay([]byte(`{"providers": {"x": {"api": "nope"}}}`), t.TempDir()))
+	assert.Error(t, modelruntime.ApplyOverlay([]byte(`{"providers": {"x": {"api": "nope"}}}`), t.TempDir()))
 }
 
 func TestThinkingLevelMap(t *testing.T) {

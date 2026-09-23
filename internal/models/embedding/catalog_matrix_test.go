@@ -6,8 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
-	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -15,9 +14,8 @@ import (
 // Exercise the production factory and HTTP transport for every embedding rule,
 // including aliases, pattern entries and both query/document task modes.
 func TestEveryCatalogEmbeddingTransport(t *testing.T) {
-	providers.EnsureBuiltins()
-	for _, v := range catalog.List() {
-		for _, m := range v.Models {
+	for _, v := range modelruntime.List() {
+		for _, m := range v.Models() {
 			if m.Type != types.ModelTypeEmbedding {
 				continue
 			}

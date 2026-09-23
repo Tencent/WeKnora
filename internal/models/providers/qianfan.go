@@ -59,7 +59,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -72,8 +71,8 @@ const QianfanID = "qianfan"
 // QianfanBaseURL is the OpenAI-compatible v2 endpoint for every model type.
 const QianfanBaseURL = "https://qianfan.baidubce.com/v2"
 
-func newQianfanProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newQianfanProvider() *Definition {
+	return &Definition{
 		ID:           QianfanID,
 		Name:         "Baidu Qianfan",
 		Names:        map[string]string{"zh-CN": "百度千帆 Baidu Cloud"},
@@ -83,7 +82,7 @@ func newQianfanProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        20,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"qianfan.baidubce.com", "baidubce.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: QianfanBaseURL,
@@ -97,31 +96,30 @@ func newQianfanProvider() *catalog.Vendor {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 		},
-		Compat: catalog.VendorCompat{
-			Embeddings: catalog.EmbeddingsCompat{
+		Compat: VendorCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://cloud.baidu.com/doc/qianfan-api/s/Fm7u3ropn: model,
 				// input, user, encoding_format ("当前只支持float"). The model list
 				// (https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j) caps a request
 				// at 16 texts; tao-8k takes one.
-				SendEncodingFormat: catalog.Ptr(true),
-				MaxBatchSize:       catalog.Ptr(16),
+				SendEncodingFormat: api.Ptr(true),
+				MaxBatchSize:       api.Ptr(16),
 			},
-			Rerank: catalog.RerankCompat{
+			Rerank: api.RerankCompat{
 				// "文本数量不超过64"; query "长度不超过1600个字符"; each document
 				// "长度不超过4096个字符".
-				MaxDocuments:     catalog.Ptr(64),
-				MaxQueryChars:    catalog.Ptr(1600),
-				MaxDocumentChars: catalog.Ptr(4096),
+				MaxDocuments:     api.Ptr(64),
+				MaxQueryChars:    api.Ptr(1600),
+				MaxDocumentChars: api.Ptr(4096),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
+			OpenAICompletions: api.OpenAICompletionsCompat{
 				// Both spellings are accepted; max_completion_tokens is the
 				// one that also covers the thinking chain.
-				MaxTokensField:        catalog.Ptr("max_completion_tokens"),
-				ThinkingFormat:        catalog.Ptr(catalog.ThinkingFormatEnableThinking),
-				ThinkingBudgetField:   catalog.Ptr("thinking_budget"),
-				PromptCacheAccounting: catalog.Ptr(true),
+				MaxTokensField:        api.Ptr("max_completion_tokens"),
+				ThinkingFormat:        api.Ptr(api.ThinkingFormatEnableThinking),
+				ThinkingBudgetField:   api.Ptr("thinking_budget"),
+				PromptCacheAccounting: api.Ptr(true),
 			},
 		},
-		Models: catalog.BuiltinModels("qianfan"),
 	}
 }

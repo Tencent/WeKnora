@@ -55,7 +55,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -68,8 +67,8 @@ const QiniuID = "qiniu"
 // QiniuBaseURL is the OpenAI-compatible chat endpoint.
 const QiniuBaseURL = "https://api.qnaigc.com/v1"
 
-func newQiniuProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newQiniuProvider() *Definition {
+	return &Definition{
 		ID:           QiniuID,
 		Name:         "Qiniu Cloud",
 		Names:        map[string]string{"zh-CN": "七牛云 Qiniu"},
@@ -79,7 +78,7 @@ func newQiniuProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        21,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		// api.modelink.ai is the gateway's documented international host.
 		URLPatterns: []string{"qiniuapi.com", "qiniu", "qnaigc.com", "modelink.ai"},
 		DefaultBaseURLs: map[types.ModelType]string{
@@ -88,13 +87,12 @@ func newQiniuProvider() *catalog.Vendor {
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 		},
-		Compat: catalog.VendorCompat{
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField:          catalog.Ptr("max_tokens"),
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatThinkingType),
-				SupportsReasoningEffort: catalog.Ptr(true),
+		Compat: VendorCompat{
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField:          api.Ptr("max_tokens"),
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatThinkingType),
+				SupportsReasoningEffort: api.Ptr(true),
 			},
 		},
-		Models: catalog.BuiltinModels("qiniu"),
 	}
 }

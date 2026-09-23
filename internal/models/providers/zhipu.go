@@ -57,7 +57,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -76,8 +75,8 @@ const ZhipuRerankBaseURL = "https://open.bigmodel.cn/api/paas/v4/rerank"
 // ZhipuAnthropicBaseURL is the Anthropic Messages compatibility facade.
 const ZhipuAnthropicBaseURL = "https://open.bigmodel.cn/api/anthropic"
 
-func newZhipuProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newZhipuProvider() *Definition {
+	return &Definition{
 		ID:    ZhipuID,
 		Name:  "Zhipu BigModel",
 		Names: map[string]string{"zh-CN": "智谱 BigModel"},
@@ -91,7 +90,7 @@ func newZhipuProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        11,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"open.bigmodel.cn", "zhipu"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: ZhipuBaseURL,
@@ -106,37 +105,37 @@ func newZhipuProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
-		Compat: catalog.VendorCompat{
-			Transcriptions: catalog.TranscriptionsCompat{
+		Compat: VendorCompat{
+			Transcriptions: api.TranscriptionsCompat{
 				// https://docs.bigmodel.cn/api-reference/模型-api/语音转文本:
 				// POST {base}/audio/transcriptions, multipart file + model
 				// (glm-asr-2512), answering {text}. The file is ".wav / .mp3",
 				// at most 25 MB and 30 seconds — the duration cannot be checked
 				// here without decoding, so a longer file is the vendor's error.
-				MaxFileBytes: catalog.Ptr(25 << 20),
+				MaxFileBytes: api.Ptr(25 << 20),
 				// No language field; prompt and hotwords are its only hints.
 				Formats: []string{"wav", "mp3"},
 			},
-			Embeddings: catalog.EmbeddingsCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入: model,
 				// input, dimensions — no encoding_format. embedding-2 is fixed at
 				// 1024 and its entry turns dimensions off; embedding-3 takes at
 				// most 64 inputs per request.
-				DimensionsField: catalog.Ptr("dimensions"),
+				DimensionsField: api.Ptr("dimensions"),
 			},
-			Rerank: catalog.RerankCompat{
+			Rerank: api.RerankCompat{
 				// The reference gives 最大长度为 4096 字符 for the query and for each
 				// document, and caps documents at 128 per request.
-				SendReturnDocs:   catalog.Ptr(true),
-				MaxDocuments:     catalog.Ptr(128),
-				MaxQueryChars:    catalog.Ptr(4096),
-				MaxDocumentChars: catalog.Ptr(4096),
+				SendReturnDocs:   api.Ptr(true),
+				MaxDocuments:     api.Ptr(128),
+				MaxQueryChars:    api.Ptr(4096),
+				MaxDocumentChars: api.Ptr(4096),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField:          catalog.Ptr("max_tokens"),
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatThinkingType),
-				SupportsReasoningEffort: catalog.Ptr(true),
-				PromptCacheAccounting:   catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField:          api.Ptr("max_tokens"),
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatThinkingType),
+				SupportsReasoningEffort: api.Ptr(true),
+				PromptCacheAccounting:   api.Ptr(true),
 				// "默认 auto 且仅支持 auto": none / required / named function
 				// are rejected.
 				ToolChoiceModes: []string{"auto"},
@@ -151,6 +150,5 @@ func newZhipuProvider() *catalog.Vendor {
 			api.ReasoningXHigh:   api.StringPtr("xhigh"),
 			api.ReasoningMax:     api.StringPtr("max"),
 		},
-		Models: catalog.BuiltinModels("zhipu"),
 	}
 }

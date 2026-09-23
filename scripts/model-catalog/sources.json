@@ -2,7 +2,7 @@
   "version": 1,
   "metadata": [
     {
-      "path": "sources/seed.json",
+      "path": "../../internal/models/catalog/data/seed.json",
       "description": "Pinned migration metadata; per-entry source links point to vendor documentation."
     }
   ],

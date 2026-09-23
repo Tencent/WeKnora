@@ -13,7 +13,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -210,7 +211,7 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 		{
 			name: "gpustack sends the row's truncation budget and answers logits", provider: "gpustack",
 			model: "bge-reranker-v2-m3", base: "/v1",
-			extra:      map[string]string{catalog.ExtraTruncatePromptTokens: "256"},
+			extra:      map[string]string{models.ExtraTruncatePromptTokens: "256"},
 			cohereLogs: true,
 			wantPath:   "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("bge-reranker-v2-m3", three, map[string]any{"truncate_prompt_tokens": float64(256)}),
@@ -351,7 +352,7 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 
 // OpenAI has no rerank API, so the vendor does not offer the type.
 func TestOpenAIDoesNotOfferRerank(t *testing.T) {
-	v, ok := catalog.Get("openai")
+	v, ok := modelruntime.Get("openai")
 	require.True(t, ok)
 	assert.False(t, v.SupportsType(types.ModelTypeRerank))
 }

@@ -54,7 +54,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -67,8 +66,8 @@ const DeepseekID = "deepseek"
 // DeepseekBaseURL is the documented first-party endpoint.
 const DeepseekBaseURL = "https://api.deepseek.com/v1"
 
-func newDeepseekProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newDeepseekProvider() *Definition {
+	return &Definition{
 		ID:           DeepseekID,
 		Name:         "DeepSeek",
 		Names:        map[string]string{"zh-CN": "DeepSeek 深度求索"},
@@ -78,19 +77,19 @@ func newDeepseekProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        30,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"api.deepseek.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: DeepseekBaseURL,
 		},
 		ModelTypes: []types.ModelType{types.ModelTypeKnowledgeQA},
-		Compat: catalog.VendorCompat{
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField:          catalog.Ptr("max_tokens"),
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatThinkingType),
-				SupportsReasoningEffort: catalog.Ptr(true),
-				PromptCacheAccounting:   catalog.Ptr(true),
-				SupportsStore:           catalog.Ptr(false),
+		Compat: VendorCompat{
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField:          api.Ptr("max_tokens"),
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatThinkingType),
+				SupportsReasoningEffort: api.Ptr(true),
+				PromptCacheAccounting:   api.Ptr(true),
+				SupportsStore:           api.Ptr(false),
 				// `required` and named functions 400 while thinking is on,
 				// which is the default on every current model.
 				ToolChoiceModes: []string{"none", "auto"},
@@ -107,6 +106,5 @@ func newDeepseekProvider() *catalog.Vendor {
 			api.ReasoningXHigh:   api.StringPtr("max"),
 			api.ReasoningMax:     api.StringPtr("max"),
 		},
-		Models: catalog.BuiltinModels("deepseek"),
 	}
 }

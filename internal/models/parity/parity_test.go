@@ -25,9 +25,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -253,7 +254,7 @@ func TestLegacyWireParity(t *testing.T) {
 		{
 			name:     "openai reasoning model keeps max_completion_tokens and drops sampling",
 			provider: "openai", model: "gpt-5.5",
-			extra: map[string]string{catalog.ExtraAPI: "openai-completions"},
+			extra: map[string]string{models.ExtraAPI: "openai-completions"},
 			opts:  &api.Options{MaxTokens: 100, Temperature: 0.7, TopP: 0.9},
 			want: map[string]any{
 				"max_completion_tokens": float64(100), "max_tokens": nil,
@@ -325,7 +326,7 @@ func TestLegacyWireParity(t *testing.T) {
 			// precedence rule: an explicit legacy override outranks that gate.
 			name:     "legacy extra_config.thinking_control still overrides the vendor default",
 			provider: "deepseek", model: "deepseek-chat",
-			extra: map[string]string{catalog.ExtraThinkingControl: "chat_template_kwargs"},
+			extra: map[string]string{models.ExtraThinkingControl: "chat_template_kwargs"},
 			opts:  &api.Options{Thinking: ptrBool(true)},
 			want: map[string]any{
 				"chat_template_kwargs": map[string]any{"enable_thinking": true}, "thinking": nil,
@@ -334,14 +335,14 @@ func TestLegacyWireParity(t *testing.T) {
 		{
 			name:     "legacy extra_config.thinking_control=none silences thinking",
 			provider: "volcengine", model: "doubao-seed-1-6-251015",
-			extra: map[string]string{catalog.ExtraThinkingControl: "none"},
+			extra: map[string]string{models.ExtraThinkingControl: "none"},
 			opts:  &api.Options{Thinking: ptrBool(true)},
 			want:  map[string]any{"thinking": nil, "reasoning_effort": nil},
 		},
 		{
 			name:     "remote_model_name still overrides the wire model id",
 			provider: "deepseek", model: "deepseek-chat",
-			extra: map[string]string{catalog.ExtraRemoteModelName: "deepseek-v4-pro-internal"},
+			extra: map[string]string{models.ExtraRemoteModelName: "deepseek-v4-pro-internal"},
 			opts:  &api.Options{},
 			want:  map[string]any{"model": "deepseek-v4-pro-internal"},
 		},
@@ -441,7 +442,7 @@ func TestLegacyProviderDetection(t *testing.T) {
 		"":                                                  "generic",
 	}
 	for url, want := range cases {
-		assert.Equal(t, want, catalog.DetectByURL(url), "DetectByURL(%q)", url)
+		assert.Equal(t, want, modelruntime.DetectByURL(url), "DetectByURL(%q)", url)
 	}
 }
 
@@ -449,7 +450,7 @@ func TestLegacyProviderDetection(t *testing.T) {
 // net that catches a newly added vendor or model entry that is malformed,
 // contradictory, or unresolvable — without anyone updating this test.
 func TestCatalogInvariants(t *testing.T) {
-	vendors := catalog.List()
+	vendors := modelruntime.List()
 	require.NotEmpty(t, vendors, "no vendors registered")
 	seenID := map[string]bool{}
 
@@ -467,7 +468,7 @@ func TestCatalogInvariants(t *testing.T) {
 			if v.RequiresAuth {
 				assert.NotEmpty(t, v.Auth, "RequiresAuth without an auth style")
 			}
-			if v.Auth == catalog.AuthSigned {
+			if v.Auth == providers.AuthSigned {
 				assert.NotNil(t, v.Signer, "signed auth without a Signer hook")
 			}
 
@@ -489,7 +490,7 @@ func TestCatalogInvariants(t *testing.T) {
 			}
 
 			ids := map[string]bool{}
-			for _, m := range v.Models {
+			for _, m := range v.Models() {
 				label := m.ID
 				if label == "" {
 					label = "match:" + m.Match
@@ -542,7 +543,7 @@ func TestCatalogInvariants(t *testing.T) {
 // model, with thinking on and off, and asserts the invariants that hold for
 // every vendor. A new model whose compat contradicts itself fails here.
 func TestEveryChatModelRequestShape(t *testing.T) {
-	for _, v := range catalog.List() {
+	for _, v := range modelruntime.List() {
 		if !v.SupportsType(types.ModelTypeKnowledgeQA) {
 			continue
 		}
@@ -580,7 +581,7 @@ func TestEveryChatModelRequestShape(t *testing.T) {
 						assert.NotContains(t, body, "temperature",
 							"thinking=%v: model rejects sampling parameters", thinking)
 					}
-					if settings.ThinkingFormat == catalog.ThinkingFormatNone {
+					if settings.ThinkingFormat == api.ThinkingFormatNone {
 						for _, field := range []string{"thinking", "enable_thinking", "reasoning_effort", "reasoning"} {
 							assert.NotContains(t, body, field,
 								"thinking=%v: %s must not be sent when the vendor has no thinking format",
@@ -611,10 +612,10 @@ func TestEveryChatModelRequestShape(t *testing.T) {
 // other vendor does: a signed request to a non-standard path, and plain-text
 // content because the endpoint rejects multi-part messages.
 func TestWeKnoraCloudTransport(t *testing.T) {
-	v, ok := catalog.Get("weknoracloud")
+	v, ok := modelruntime.Get("weknoracloud")
 	require.True(t, ok)
 	require.NotNil(t, v.Endpoint, "WeKnora Cloud needs a custom endpoint")
-	url, _ := v.Endpoint(catalog.EndpointRequest{
+	url, _ := v.Endpoint(providers.EndpointRequest{
 		BaseURL: "https://weknora.weixin.qq.com", ModelType: types.ModelTypeKnowledgeQA,
 	})
 	assert.Equal(t, "https://weknora.weixin.qq.com/api/v1/chat/completions", url)
@@ -699,7 +700,7 @@ func TestGeminiCredentialFollowsTheProtocol(t *testing.T) {
 // registry map and the per-vendor slices are shared, so a resolver that
 // mutated them would corrupt another request. Run with -race.
 func TestConcurrentResolve(t *testing.T) {
-	vendors := catalog.List()
+	vendors := modelruntime.List()
 	require.NotEmpty(t, vendors)
 
 	const goroutines = 32
@@ -721,7 +722,7 @@ func TestConcurrentResolve(t *testing.T) {
 				// Touch the derived views the handlers use.
 				_ = r.Capabilities()
 				_ = r.ThinkingLevels.SupportedLevels()
-				_ = catalog.DetectByURL(r.BaseURL)
+				_ = modelruntime.DetectByURL(r.BaseURL)
 			}
 		}(i)
 	}
@@ -740,8 +741,8 @@ func TestConcurrentResolve(t *testing.T) {
 // covers the generator preserving per-entry sources — previously it was parsed and
 // dropped, and most entries had nothing to link to.
 func TestEveryCatalogModelDocumentsItsSource(t *testing.T) {
-	for _, vendor := range catalog.List() {
-		for _, model := range vendor.Models {
+	for _, vendor := range modelruntime.List() {
+		for _, model := range vendor.Models() {
 			name := model.ID
 			if name == "" {
 				name = model.Match

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -25,7 +24,7 @@ func TestApplyOverlay_ModelsUpsertPatchesExistingEntry(t *testing.T) {
 	  {"id": "acme-pro", "max_output_tokens": 8192},
 	  {"id": "acme-r1", "context_window": 128000}
 	]}}}`
-	require.NoError(t, catalog.ApplyOverlay([]byte(overlay), t.TempDir()))
+	require.NoError(t, modelruntime.ApplyOverlay([]byte(overlay), t.TempDir()))
 
 	r, err := modelruntime.Resolve(modelruntime.Ref{Provider: "acme", Model: "acme-pro"})
 	require.NoError(t, err)
@@ -48,14 +47,14 @@ func TestApplyOverlay_ModelsUpsertPatchesExistingEntry(t *testing.T) {
 // with the vendor package's own (package-level) models.json data.
 func TestApplyOverlay_ModelsUpsertDoesNotMutateBuiltinVendor(t *testing.T) {
 	registerTestVendors(t)
-	builtin, ok := catalog.Get("acme")
+	builtin, ok := modelruntime.Get("acme")
 	require.True(t, ok)
 
 	overlay := `{"providers": {"acme": {"models": [{"id": "acme-pro", "input": ["audio"]}]}}}`
-	require.NoError(t, catalog.ApplyOverlay([]byte(overlay), t.TempDir()))
+	require.NoError(t, modelruntime.ApplyOverlay([]byte(overlay), t.TempDir()))
 
-	require.Equal(t, "acme-pro", builtin.Models[0].ID)
-	assert.Equal(t, []string{"text", "image"}, builtin.Models[0].Input,
+	require.Equal(t, "acme-pro", builtin.Models()[0].ID)
+	assert.Equal(t, []string{"text", "image"}, builtin.Models()[0].Input,
 		"the built-in spec must be untouched by the overlay")
 
 	r, err := modelruntime.Resolve(modelruntime.Ref{Provider: "acme", Model: "acme-pro"})
@@ -69,7 +68,7 @@ func TestApplyOverlay_ModelsUpsertExplicitFalseAndNewEntries(t *testing.T) {
 	  {"id": "acme-pro", "reasoning": false},
 	  {"id": "acme-ultra", "context_window": 400000}
 	]}}}`
-	require.NoError(t, catalog.ApplyOverlay([]byte(overlay), t.TempDir()))
+	require.NoError(t, modelruntime.ApplyOverlay([]byte(overlay), t.TempDir()))
 
 	r, err := modelruntime.Resolve(modelruntime.Ref{Provider: "acme", Model: "acme-pro"})
 	require.NoError(t, err)
@@ -86,10 +85,10 @@ func TestApplyOverlay_ModelsEntryValidation(t *testing.T) {
 	registerTestVendors(t)
 	dir := t.TempDir()
 	assert.ErrorContains(t,
-		catalog.ApplyOverlay([]byte(`{"providers": {"acme": {"models": [{"id": "x", "bogus": 1}]}}}`), dir),
+		modelruntime.ApplyOverlay([]byte(`{"providers": {"acme": {"models": [{"id": "x", "bogus": 1}]}}}`), dir),
 		"bogus", "unknown keys inside a model entry are still rejected")
 	assert.ErrorContains(t,
-		catalog.ApplyOverlay([]byte(`{"providers": {"acme": {"models": [{"context_window": 1}]}}}`), dir),
+		modelruntime.ApplyOverlay([]byte(`{"providers": {"acme": {"models": [{"context_window": 1}]}}}`), dir),
 		"model without id")
 }
 
@@ -108,13 +107,13 @@ func TestApplyOverlay_IconAcceptsInlineAndContainedFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "icons"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "icons", "lab.svg"), []byte(testSVG), 0o600))
 
-	require.NoError(t, catalog.ApplyOverlay([]byte(overlayWithIcon("icons/lab.svg")), dir))
-	lab, ok := catalog.Get("lab")
+	require.NoError(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("icons/lab.svg")), dir))
+	lab, ok := modelruntime.Get("lab")
 	require.True(t, ok)
 	assert.Equal(t, testSVG, string(lab.Icon))
 
-	require.NoError(t, catalog.ApplyOverlay([]byte(overlayWithIcon("<svg><rect/></svg>")), dir))
-	lab, _ = catalog.Get("lab")
+	require.NoError(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("<svg><rect/></svg>")), dir))
+	lab, _ = modelruntime.Get("lab")
 	assert.Equal(t, "<svg><rect/></svg>", string(lab.Icon))
 }
 
@@ -127,22 +126,22 @@ func TestApplyOverlay_IconRejectsUncontainedPaths(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "secret.svg")
 	require.NoError(t, os.WriteFile(outside, []byte(testSVG), 0o600))
 
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon(outside)), dir),
+	assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon(outside)), dir),
 		"absolute paths are not allowed")
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("/etc/passwd")), dir),
+	assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("/etc/passwd")), dir),
 		"absolute paths are not allowed")
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("../secret.svg")), dir),
+	assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("../secret.svg")), dir),
 		"escapes the overlay directory")
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("icons/../../secret.svg")), dir),
+	assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("icons/../../secret.svg")), dir),
 		"escapes the overlay directory")
 
 	link := filepath.Join(dir, "link.svg")
 	if err := os.Symlink(outside, link); err == nil {
-		assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("link.svg")), dir),
+		assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("link.svg")), dir),
 			"escapes the overlay directory", "a symlink out of the directory is still out of it")
 	}
 
-	_, exists := catalog.Get("lab")
+	_, exists := modelruntime.Get("lab")
 	assert.False(t, exists, "a rejected icon must not register the provider")
 }
 
@@ -151,19 +150,20 @@ func TestApplyOverlay_IconRejectsNonSVGAndOversizedFiles(t *testing.T) {
 	dir := t.TempDir()
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "passwd.svg"), []byte("root:x:0:0:root:/root:/bin/sh\n"), 0o600))
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("passwd.svg")), dir), "not an SVG document")
+	assert.ErrorContains(t,
+		modelruntime.ApplyOverlay([]byte(overlayWithIcon("passwd.svg")), dir), "not an SVG document")
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "png.svg"), []byte("\x89PNG\r\n\x1a\n"), 0o600))
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("png.svg")), dir), "not an SVG document")
+	assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("png.svg")), dir), "not an SVG document")
 
 	big := append([]byte(`<svg xmlns="http://www.w3.org/2000/svg">`), make([]byte, 256*1024)...)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "big.svg"), big, 0o600))
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("big.svg")), dir), "limit is")
+	assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("big.svg")), dir), "limit is")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "dir.svg"), 0o755))
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("dir.svg")), dir), "not a regular file")
+	assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("dir.svg")), dir), "not a regular file")
 
-	assert.ErrorContains(t, catalog.ApplyOverlay([]byte(overlayWithIcon("missing.svg")), dir), "read icon")
+	assert.ErrorContains(t, modelruntime.ApplyOverlay([]byte(overlayWithIcon("missing.svg")), dir), "read icon")
 }
 
 // The icon path is relative to the overlay file's own directory.
@@ -175,8 +175,8 @@ func TestLoadOverlay_ResolvesIconRelativeToConfigDir(t *testing.T) {
 		[]byte(overlayWithIcon("lab.svg")), 0o600))
 	t.Setenv("MODELS_CONFIG", "")
 
-	require.NoError(t, catalog.LoadOverlay(dir))
-	lab, ok := catalog.Get("lab")
+	require.NoError(t, modelruntime.LoadOverlay(dir))
+	lab, ok := modelruntime.Get("lab")
 	require.True(t, ok)
 	assert.Equal(t, testSVG, string(lab.Icon))
 	assert.Equal(t, []types.ModelType{types.ModelTypeKnowledgeQA}, lab.ModelTypes)

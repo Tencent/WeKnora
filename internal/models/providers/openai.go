@@ -52,8 +52,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -66,8 +66,8 @@ const OpenaiID = "openai"
 // OpenaiBaseURL is the documented first-party endpoint.
 const OpenaiBaseURL = "https://api.openai.com/v1"
 
-func newOpenaiProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newOpenaiProvider() *Definition {
+	return &Definition{
 		ID:           OpenaiID,
 		Name:         "OpenAI",
 		Names:        map[string]string{"zh-CN": "OpenAI"},
@@ -77,7 +77,7 @@ func newOpenaiProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        30,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"api.openai.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: OpenaiBaseURL,
@@ -95,39 +95,39 @@ func newOpenaiProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
-		Compat: catalog.VendorCompat{
-			Transcriptions: catalog.TranscriptionsCompat{
+		Compat: VendorCompat{
+			Transcriptions: api.TranscriptionsCompat{
 				// The transcription reference (URL in openaitranscriptions):
 				// response_format differs per model — "For gpt-4o-transcribe
 				// and gpt-4o-mini-transcribe, the only supported format is
 				// json", the default — so it is declared per entry, not here.
 				// "Files can be up to 25 MB"
 				// (https://developers.openai.com/api/docs/guides/speech-to-text).
-				MaxFileBytes: catalog.Ptr(25 << 20),
+				MaxFileBytes: api.Ptr(25 << 20),
 				// "flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm", and a
 				// language field in ISO-639-1.
 				Formats:       []string{"flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"},
-				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+				LanguageParam: api.Ptr(api.LanguageForm),
 			},
-			Embeddings: catalog.EmbeddingsCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://developers.openai.com/api/reference/resources/embeddings/methods/create:
 				// model, input, dimensions (text-embedding-3 and later; the ada-002
 				// entry turns it off), encoding_format, user. An input array
 				// "must be 2048 dimensions or less" — elements, despite the word.
-				SendEncodingFormat: catalog.Ptr(true),
-				DimensionsField:    catalog.Ptr("dimensions"),
-				MaxBatchSize:       catalog.Ptr(2048),
+				SendEncodingFormat: api.Ptr(true),
+				DimensionsField:    api.Ptr("dimensions"),
+				MaxBatchSize:       api.Ptr(2048),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
-				SupportsReasoningEffort: catalog.Ptr(true),
-				SupportsDeveloperRole:   catalog.Ptr(true),
-				SupportsStore:           catalog.Ptr(true),
-				PromptCacheKey:          catalog.Ptr(true),
-				PromptCacheAccounting:   catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatOpenAI),
+				SupportsReasoningEffort: api.Ptr(true),
+				SupportsDeveloperRole:   api.Ptr(true),
+				SupportsStore:           api.Ptr(true),
+				PromptCacheKey:          api.Ptr(true),
+				PromptCacheAccounting:   api.Ptr(true),
 			},
 		},
-		Models:    catalog.BuiltinModels("openai"),
+
 		PreferAPI: OpenaiPreferResponsesOnFirstParty,
 	}
 }
@@ -135,7 +135,7 @@ func newOpenaiProvider() *catalog.Vendor {
 // OpenaiPreferResponsesOnFirstParty switches chat traffic aimed at api.openai.com
 // to the Responses protocol. Anything else (Azure-style relays, LiteLLM,
 // enterprise gateways) keeps Chat Completions, the protocol they document.
-func OpenaiPreferResponsesOnFirstParty(baseURL string, spec catalog.ModelSpec) api.API {
+func OpenaiPreferResponsesOnFirstParty(baseURL string, spec models.ModelSpec) api.API {
 	if spec.Type != "" && spec.Type != types.ModelTypeKnowledgeQA {
 		return ""
 	}

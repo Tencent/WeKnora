@@ -38,7 +38,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -51,8 +50,8 @@ const ModelscopeID = "modelscope"
 // ModelscopeBaseURL is the OpenAI-compatible inference endpoint.
 const ModelscopeBaseURL = "https://api-inference.modelscope.cn/v1"
 
-func newModelscopeProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newModelscopeProvider() *Definition {
+	return &Definition{
 		ID:           ModelscopeID,
 		Name:         "ModelScope",
 		Names:        map[string]string{"zh-CN": "魔搭 ModelScope"},
@@ -62,7 +61,7 @@ func newModelscopeProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        19,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"modelscope.cn"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: ModelscopeBaseURL,
@@ -74,14 +73,13 @@ func newModelscopeProvider() *catalog.Vendor {
 			types.ModelTypeEmbedding,
 			types.ModelTypeVLLM,
 		},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// Embeddings keeps the bare baseline: /v1/embeddings answers, but no
 			// ModelScope page documents a single parameter of it.
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField: catalog.Ptr("max_tokens"),
-				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatEnableThinking),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField: api.Ptr("max_tokens"),
+				ThinkingFormat: api.Ptr(api.ThinkingFormatEnableThinking),
 			},
 		},
-		Models: catalog.BuiltinModels("modelscope"),
 	}
 }

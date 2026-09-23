@@ -4,14 +4,14 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestVolcengineCompletionBudgetFieldsAreMutuallyExclusive(t *testing.T) {
-	vendor, ok := catalog.Get("volcengine")
+	vendor, ok := modelruntime.Get("volcengine")
 	require.True(t, ok)
 	for _, model := range vendor.ModelsByType(types.ModelTypeKnowledgeQA) {
 		t.Run(model.ID, func(t *testing.T) {

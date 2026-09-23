@@ -82,8 +82,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -103,8 +103,8 @@ const AzureOpenaiBaseURL = "https://{resource}.openai.azure.com"
 // deployments need a preview version such as 2025-04-01-preview instead.
 const AzureOpenaiLegacyAPIVersion = "2024-10-21"
 
-func newAzureOpenaiProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newAzureOpenaiProvider() *Definition {
+	return &Definition{
 		ID:           AzureOpenaiID,
 		Name:         "Azure OpenAI",
 		Names:        map[string]string{"zh-CN": "Azure OpenAI"},
@@ -114,7 +114,7 @@ func newAzureOpenaiProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        31,
 		RequiresAuth: true,
-		Auth:         catalog.AuthAPIKeyHeader,
+		Auth:         AuthAPIKeyHeader,
 		URLPatterns:  []string{"openai.azure.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: AzureOpenaiBaseURL,
@@ -136,9 +136,9 @@ func newAzureOpenaiProvider() *catalog.Vendor {
 			types.ModelTypeEmbedding,
 			types.ModelTypeVLLM,
 		},
-		ExtraFields: []catalog.ExtraField{
+		ExtraFields: []ExtraField{
 			{
-				Key:      catalog.ExtraAPIVersion,
+				Key:      models.ExtraAPIVersion,
 				Label:    "API Version (legacy deployments path)",
 				Labels:   map[string]string{"zh-CN": "API 版本（旧版 deployments 路径）"},
 				Type:     "string",
@@ -152,23 +152,23 @@ func newAzureOpenaiProvider() *catalog.Vendor {
 				},
 			},
 		},
-		Compat: catalog.VendorCompat{
-			Embeddings: catalog.EmbeddingsCompat{
+		Compat: VendorCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// The same body as OpenAI's; the Endpoint hook below supplies the
 				// v1 or deployments URL.
-				SendEncodingFormat: catalog.Ptr(true),
-				DimensionsField:    catalog.Ptr("dimensions"),
+				SendEncodingFormat: api.Ptr(true),
+				DimensionsField:    api.Ptr("dimensions"),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
-				SupportsReasoningEffort: catalog.Ptr(true),
-				SupportsDeveloperRole:   catalog.Ptr(true),
-				SupportsStore:           catalog.Ptr(true),
-				PromptCacheKey:          catalog.Ptr(true),
-				PromptCacheAccounting:   catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatOpenAI),
+				SupportsReasoningEffort: api.Ptr(true),
+				SupportsDeveloperRole:   api.Ptr(true),
+				SupportsStore:           api.Ptr(true),
+				PromptCacheKey:          api.Ptr(true),
+				PromptCacheAccounting:   api.Ptr(true),
 			},
 		},
-		Endpoint: func(r catalog.EndpointRequest) (string, map[string]string) {
+		Endpoint: func(r EndpointRequest) (string, map[string]string) {
 			var path string
 			switch r.ModelType {
 			case types.ModelTypeEmbedding:
@@ -186,7 +186,7 @@ func newAzureOpenaiProvider() *catalog.Vendor {
 			// An explicit api-version selects the legacy deployments path;
 			// otherwise use the v1 GA data plane, which carries the
 			// deployment name in the body instead of the URL.
-			if version := strings.TrimSpace(r.Extra[catalog.ExtraAPIVersion]); version != "" {
+			if version := strings.TrimSpace(r.Extra[models.ExtraAPIVersion]); version != "" {
 				legacy := root + "/openai/deployments/" + url.PathEscape(r.Model) + path
 				return legacy, map[string]string{"api-version": version}
 			}
@@ -195,6 +195,5 @@ func newAzureOpenaiProvider() *catalog.Vendor {
 			}
 			return root + "/openai/v1" + path, nil
 		},
-		Models: catalog.BuiltinModels("azure_openai"),
 	}
 }

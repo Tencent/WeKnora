@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -24,7 +23,7 @@ type VendorRef struct {
 func (r VendorRef) vendorID() string {
 	id := strings.ToLower(strings.TrimSpace(r.Provider))
 	if id == "" {
-		id = catalog.DetectByURL(r.BaseURL)
+		id = modelruntime.DetectByURL(r.BaseURL)
 	}
 	return id
 }
@@ -36,7 +35,7 @@ func (r VendorRef) names() bool {
 	return strings.TrimSpace(r.Provider) != "" || strings.TrimSpace(r.BaseURL) != ""
 }
 
-func secretKeysOf(v *catalog.Vendor, into map[string]bool) map[string]bool {
+func secretKeysOf(v *modelruntime.Provider, into map[string]bool) map[string]bool {
 	for _, f := range v.ExtraFields {
 		if !f.Secret && f.Type != "password" {
 			continue
@@ -50,7 +49,7 @@ func secretKeysOf(v *catalog.Vendor, into map[string]bool) map[string]bool {
 }
 
 // SecretExtraConfigKeys returns the extra_config keys the vendor declares as
-// secret (catalog.ExtraField.Secret, or a password input). These are real
+// secret (providers.ExtraField.Secret, or a password input). These are real
 // credentials — LKEAP and Volcengine rerank keep an IAM/CAM secret key there
 // — so they get the same treatment as api_key / app_secret: never echoed,
 // only reported as present.
@@ -59,7 +58,7 @@ func secretKeysOf(v *catalog.Vendor, into map[string]bool) map[string]bool {
 // secret for any model type of the vendor is redacted for every row of that
 // vendor.
 func SecretExtraConfigKeys(provider, baseURL string) map[string]bool {
-	v, ok := catalog.Get(VendorRef{Provider: provider, BaseURL: baseURL}.vendorID())
+	v, ok := modelruntime.Get(VendorRef{Provider: provider, BaseURL: baseURL}.vendorID())
 	if !ok {
 		return nil
 	}
@@ -77,7 +76,7 @@ func SecretExtraConfigKeys(provider, baseURL string) map[string]bool {
 // withholding a value that happened to reuse the name.
 func AllSecretExtraConfigKeys() map[string]bool {
 	var keys map[string]bool
-	for _, v := range catalog.List() {
+	for _, v := range modelruntime.List() {
 		keys = secretKeysOf(v, keys)
 	}
 	return keys

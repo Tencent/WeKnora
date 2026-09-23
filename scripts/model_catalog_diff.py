@@ -3,7 +3,7 @@
 
 Development-time helper, never run at runtime: it reports numeric facts
 (context window, max output, cost, new/retired ids) so a maintainer can update
-scripts/model-catalog/sources/seed.json by hand. Behavioural facts (compat,
+internal/models/catalog/data/seed.json by hand. Behavioural facts (compat,
 thinking format) are intentionally out of scope — models.dev does not carry
 them and they must come from vendor documentation.
 

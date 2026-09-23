@@ -34,8 +34,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -50,8 +50,8 @@ const GpustackID = "gpustack"
 // hangs off /v1.
 const GpustackBaseURL = "http://your_gpustack_server_url/v1"
 
-func newGpustackProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newGpustackProvider() *Definition {
+	return &Definition{
 		ID:           GpustackID,
 		Name:         "GPUStack",
 		Names:        map[string]string{"zh-CN": "GPUStack"},
@@ -62,7 +62,7 @@ func newGpustackProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        60,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"gpustack"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: GpustackBaseURL,
@@ -78,12 +78,12 @@ func newGpustackProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
-		ExtraFields: []catalog.ExtraField{{
-			Key:    catalog.ExtraScoreScale,
+		ExtraFields: []ExtraField{{
+			Key:    models.ExtraScoreScale,
 			Label:  "Rerank score scale",
 			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},
 			Type:   "select",
-			Options: []catalog.ExtraFieldOption{
+			Options: []ExtraFieldOption{
 				{
 					Label:  "Unbounded score (Qwen3-Reranker class)",
 					Labels: map[string]string{"zh-CN": "无界分数（Qwen3-Reranker 一类）"},
@@ -103,7 +103,7 @@ func newGpustackProvider() *catalog.Vendor {
 			Required:   false,
 			ModelTypes: []types.ModelType{types.ModelTypeRerank},
 		}, {
-			Key:    catalog.ExtraTruncatePromptTokens,
+			Key:    models.ExtraTruncatePromptTokens,
 			Label:  "Rerank prompt truncation (vLLM)",
 			Labels: map[string]string{"zh-CN": "Rerank 提示词截断长度（vLLM）"},
 			Type:   "number",
@@ -114,7 +114,7 @@ func newGpustackProvider() *catalog.Vendor {
 			Placeholders: map[string]string{"zh-CN": "留空，除非后端因文档过长而报错"},
 			ModelTypes:   []types.ModelType{types.ModelTypeRerank},
 		}},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// Transcriptions keeps the baseline, json by default. GPUStack
 			// serves audio through vox-box (https://github.com/gpustack/vox-box),
 			// whose route wraps a json answer as {"text": ...} but returns
@@ -123,34 +123,34 @@ func newGpustackProvider() *catalog.Vendor {
 			// format. The pre-catalog client's verbose_json therefore arrived
 			// as a JSON string that could not be decoded. The route reads a
 			// language form field.
-			Transcriptions: catalog.TranscriptionsCompat{
-				LanguageParam: catalog.Ptr(catalog.LanguageForm),
+			Transcriptions: api.TranscriptionsCompat{
+				LanguageParam: api.Ptr(api.LanguageForm),
 			},
-			Embeddings: catalog.EmbeddingsCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// vLLM's embedding server: dimensions for Matryoshka models, the
 				// row's truncation budget, and encoding_format.
-				SendEncodingFormat:          catalog.Ptr(true),
-				DimensionsField:             catalog.Ptr("dimensions"),
-				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+				SendEncodingFormat:          api.Ptr(true),
+				DimensionsField:             api.Ptr("dimensions"),
+				AcceptsTruncatePromptTokens: api.Ptr(true),
 			},
-			Rerank: catalog.RerankCompat{
+			Rerank: api.RerankCompat{
 				// GPUStack's built-in backends are vLLM, SGLang, Ascend MindIE and
 				// VoxBox, so the vLLM rerank extension reaches the model.
-				AcceptsTruncatePromptTokens: catalog.Ptr(true),
+				AcceptsTruncatePromptTokens: api.Ptr(true),
 				// The field is spelled relevance_score like the Cohere shape, but
 				// it is not a probability: the rerank API page's own example
 				// returns 1.951932668685913, -3.7347371578216553 and
 				// -6.157620906829834. Read as a probability, every negative score
 				// falls below a relevance threshold tuned for 0..1.
 				// https://docs.gpustack.ai/2.0/user-guide/rerank-api/
-				ScoreScale: catalog.Ptr(api.ScoreLogit),
+				ScoreScale: api.Ptr(api.ScoreLogit),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField: catalog.Ptr("max_tokens"),
-				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField: api.Ptr("max_tokens"),
+				ThinkingFormat: api.Ptr(api.ThinkingFormatChatTemplateKwargs),
 			},
 		},
-		Validate: func(cfg *catalog.Config) error {
+		Validate: func(cfg *Config) error {
 			if cfg == nil {
 				return fmt.Errorf("config is nil")
 			}
@@ -165,6 +165,5 @@ func newGpustackProvider() *catalog.Vendor {
 			}
 			return nil
 		},
-		Models: catalog.BuiltinModels("gpustack"),
 	}
 }

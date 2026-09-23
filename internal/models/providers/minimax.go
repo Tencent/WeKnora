@@ -50,7 +50,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -69,8 +68,8 @@ const MinimaxGlobalBaseURL = "https://api.minimax.io/v1"
 // MinimaxAnthropicBaseURL is the Anthropic Messages compatibility facade.
 const MinimaxAnthropicBaseURL = "https://api.minimaxi.com/anthropic"
 
-func newMinimaxProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newMinimaxProvider() *Definition {
+	return &Definition{
 		ID:    MinimaxID,
 		Name:  "MiniMax",
 		Names: map[string]string{"zh-CN": "MiniMax"},
@@ -85,7 +84,7 @@ func newMinimaxProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        16,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"minimax.io", "minimaxi.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: MinimaxBaseURL,
@@ -94,27 +93,26 @@ func newMinimaxProvider() *catalog.Vendor {
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeASR,
 		},
-		Compat: catalog.VendorCompat{
-			Transcriptions: catalog.TranscriptionsCompat{
+		Compat: VendorCompat{
+			Transcriptions: api.TranscriptionsCompat{
 				// https://platform.minimax.io/docs/api-reference/speech-to-text
 				// (and the same page on platform.minimax.cn): multipart model
 				// (asr-1.0) + file on /v1/speech_to_text rather than the OpenAI
 				// path, answering {text, duration, trace_id} for the default
 				// json. At most 50 MB and 500 seconds; "超出会返回 400 而不会被截断".
-				Path:         catalog.Ptr("/speech_to_text"),
-				MaxFileBytes: catalog.Ptr(50 << 20),
+				Path:         api.Ptr("/speech_to_text"),
+				MaxFileBytes: api.Ptr(50 << 20),
 				// "wav / aiff / flac / alac(m4a) / mp3 / aac / opus / ogg";
 				// "不支持无容器的裸 PCM 数据". The language hint is a request
 				// header, a BCP-47 tag, not a form field.
 				Formats:       []string{"wav", "aiff", "flac", "m4a", "mp3", "aac", "opus", "ogg"},
-				LanguageParam: catalog.Ptr(catalog.LanguageHeader),
+				LanguageParam: api.Ptr(api.LanguageHeader),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				ThinkingFormat:        catalog.Ptr(catalog.ThinkingFormatThinkingType),
-				ThinkingEnabledValue:  catalog.Ptr("adaptive"),
-				PromptCacheAccounting: catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				ThinkingFormat:        api.Ptr(api.ThinkingFormatThinkingType),
+				ThinkingEnabledValue:  api.Ptr("adaptive"),
+				PromptCacheAccounting: api.Ptr(true),
 			},
 		},
-		Models: catalog.BuiltinModels("minimax"),
 	}
 }

@@ -31,8 +31,8 @@ package providers
 import (
 	_ "embed"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -49,19 +49,19 @@ const LitellmBaseURL = "http://your_litellm_proxy/v1"
 // rather than /v1/rerank, so it does not hang off the chat base URL.
 const LitellmRerankBaseURL = "http://your_litellm_proxy"
 
-func newLitellmProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newLitellmProvider() *Definition {
+	return &Definition{
 		ID:           LitellmID,
 		Name:         "LiteLLM",
 		Names:        map[string]string{"zh-CN": "LiteLLM"},
-		Description:  "Self-hosted LiteLLM proxy: one OpenAI-compatible endpoint to 100+ providers.",
+		Description:  "Self-hosted LiteLLM proxy: one OpenAI-compatible endpoint to 100+ ",
 		Descriptions: map[string]string{"zh-CN": "自建 LiteLLM 代理：一个 OpenAI 兼容入口对接 100+ 模型服务。"},
 		Website:      "https://docs.litellm.ai",
 		Icon:         litellmIcon,
 		API:          api.APIOpenAICompletions,
 		Order:        41,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"litellm"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: LitellmBaseURL,
@@ -76,12 +76,12 @@ func newLitellmProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
-		ExtraFields: []catalog.ExtraField{{
-			Key:    catalog.ExtraScoreScale,
+		ExtraFields: []ExtraField{{
+			Key:    models.ExtraScoreScale,
 			Label:  "Rerank score scale",
 			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},
 			Type:   "select",
-			Options: []catalog.ExtraFieldOption{
+			Options: []ExtraFieldOption{
 				{
 					Label:  "Unbounded score (Qwen3-Reranker class)",
 					Labels: map[string]string{"zh-CN": "无界分数（Qwen3-Reranker 一类）"},
@@ -101,20 +101,20 @@ func newLitellmProvider() *catalog.Vendor {
 			Required:   false,
 			ModelTypes: []types.ModelType{types.ModelTypeRerank},
 		}},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// Transcriptions keeps the baseline: the proxy serves the OpenAI
 			// /audio/transcriptions route for whichever upstream it is
 			// configured with (https://docs.litellm.ai/docs/audio_transcription).
-			Embeddings: catalog.EmbeddingsCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://docs.litellm.ai/docs/embedding/supported_embedding:
 				// model, input, user, dimensions, encoding_format; anything else
 				// is forwarded to the upstream as a provider-specific kwarg.
-				SendEncodingFormat: catalog.Ptr(true),
-				DimensionsField:    catalog.Ptr("dimensions"),
+				SendEncodingFormat: api.Ptr(true),
+				DimensionsField:    api.Ptr("dimensions"),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatOpenAI),
-				SupportsReasoningEffort: catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatOpenAI),
+				SupportsReasoningEffort: api.Ptr(true),
 			},
 		},
 		// LiteLLM documents the whole ladder plus "none" as the off switch.
@@ -123,6 +123,5 @@ func newLitellmProvider() *catalog.Vendor {
 			api.ReasoningXHigh: api.StringPtr("xhigh"),
 			api.ReasoningMax:   api.StringPtr("max"),
 		},
-		Models: catalog.BuiltinModels("litellm"),
 	}
 }

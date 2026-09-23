@@ -8,27 +8,31 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 )
 
 // Initialize is the application composition entry point. A failed deployment
 // overlay leaves the previous catalog generation untouched.
-func Initialize(configDir string) error {
-	providers.EnsureBuiltins()
-	return catalog.LoadOverlayValidated(configDir, validateDefinition)
+func Initialize(configDir string) error { return Default().Initialize(configDir) }
+
+// Initialize loads and validates deployment configuration for this instance.
+func (rt *Runtime) Initialize(configDir string) error {
+	return rt.loadOverlayValidated(configDir, validateDefinition)
 }
 
 // Reload replaces the deployment overlay without retaining removed overrides.
-func Reload(data []byte, baseDir string) error {
-	providers.EnsureBuiltins()
-	return catalog.ApplyOverlayValidated(data, baseDir, validateDefinition)
+func Reload(data []byte, baseDir string) error { return Default().Reload(data, baseDir) }
+
+// Reload validates and publishes a replacement deployment overlay for this instance.
+func (rt *Runtime) Reload(data []byte, baseDir string) error {
+	return rt.applyOverlayValidated(data, baseDir, validateDefinition)
 }
 
-func validateDefinition(v *catalog.Vendor) error {
+func validateDefinition(v *Provider) error {
 	switch v.Auth {
-	case catalog.AuthBearer, catalog.AuthAPIKeyHeader, catalog.AuthXAPIKey,
-		catalog.AuthGoogleAPIKey, catalog.AuthNone, catalog.AuthSigned:
+	case providers.AuthBearer, providers.AuthAPIKeyHeader, providers.AuthXAPIKey,
+		providers.AuthGoogleAPIKey, providers.AuthNone, providers.AuthSigned:
 	default:
 		return fmt.Errorf("unknown auth style %q", v.Auth)
 	}
@@ -39,7 +43,7 @@ func validateDefinition(v *catalog.Vendor) error {
 			return err
 		}
 	}
-	for _, entry := range v.Models {
+	for _, entry := range v.Models() {
 		name := entry.ID
 		if name == "" {
 			name = strings.ReplaceAll(entry.Match, "*", "snapshot")
@@ -54,7 +58,7 @@ func validateDefinition(v *catalog.Vendor) error {
 		if entry.ContextWindow < 0 || entry.MaxOutputTokens < 0 || entry.Dimension < 0 {
 			return fmt.Errorf("model %s: negative model limit", name)
 		}
-		if _, valid := catalog.ParseModelType(string(entry.Type)); entry.Type != "" && !valid {
+		if _, valid := models.ParseModelType(string(entry.Type)); entry.Type != "" && !valid {
 			return fmt.Errorf("model %s: unsupported type %q", name, entry.Type)
 		}
 	}

@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -26,7 +27,7 @@ func TestAllVendorsRegistered(t *testing.T) {
 		t.Fatalf("expected 27 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
-		v, ok := catalog.Get(id)
+		v, ok := modelruntime.Get(id)
 		if !ok {
 			t.Errorf("vendor %q is not registered", id)
 			continue
@@ -46,7 +47,7 @@ func TestAllVendorsRegistered(t *testing.T) {
 		if v.RequiresAuth && v.Auth == "" {
 			t.Errorf("vendor %q: RequiresAuth without Auth style", id)
 		}
-		if v.Auth == catalog.AuthSigned && v.Signer == nil {
+		if v.Auth == providers.AuthSigned && v.Signer == nil {
 			t.Errorf("vendor %q: AuthSigned without Signer", id)
 		}
 		if !v.API.Known() {
@@ -56,7 +57,7 @@ func TestAllVendorsRegistered(t *testing.T) {
 			t.Errorf("vendor %q: no ModelTypes", id)
 		}
 	}
-	for _, v := range catalog.List() {
+	for _, v := range modelruntime.List() {
 		found := false
 		for _, id := range expectedIDs {
 			if id == v.ID {
@@ -72,11 +73,11 @@ func TestAllVendorsRegistered(t *testing.T) {
 
 func TestEveryCatalogEntryResolves(t *testing.T) {
 	for _, id := range expectedIDs {
-		v, ok := catalog.Get(id)
+		v, ok := modelruntime.Get(id)
 		if !ok {
 			t.Fatalf("vendor %q missing", id)
 		}
-		for _, m := range v.Models {
+		for _, m := range v.Models() {
 			if m.ID == "" && m.Match == "" {
 				t.Errorf("%s: model entry %q has neither id nor match", id, m.Name)
 				continue
@@ -155,7 +156,7 @@ func TestNamesInsideChatGlobsResolveForOtherTypes(t *testing.T) {
 
 func TestDetectByURLRoundTrip(t *testing.T) {
 	for _, id := range expectedIDs {
-		v, _ := catalog.Get(id)
+		v, _ := modelruntime.Get(id)
 		if len(v.URLPatterns) == 0 {
 			continue
 		}
@@ -163,19 +164,19 @@ func TestDetectByURLRoundTrip(t *testing.T) {
 		if !strings.HasPrefix(u, "https://") || strings.Contains(u, "{") {
 			continue // placeholder or http-only self-hosted default
 		}
-		if got := catalog.DetectByURL(u); got != v.ID {
+		if got := modelruntime.DetectByURL(u); got != v.ID {
 			t.Errorf("DetectByURL(%q) = %q, want %q", u, got, v.ID)
 		}
 	}
-	if got := catalog.DetectByURL("http://your_litellm_proxy/v1"); got != "litellm" {
+	if got := modelruntime.DetectByURL("http://your_litellm_proxy/v1"); got != "litellm" {
 		t.Errorf("litellm placeholder detected as %q", got)
 	}
 	// GPUStack 2.x serves the OpenAI-compatible surface at /v1; the 0.x
 	// /v1-openai path must keep resolving for rows saved before the move.
-	if got := catalog.DetectByURL("http://your_gpustack_server_url/v1-openai"); got != "gpustack" {
+	if got := modelruntime.DetectByURL("http://your_gpustack_server_url/v1-openai"); got != "gpustack" {
 		t.Errorf("gpustack placeholder detected as %q", got)
 	}
-	if got := catalog.DetectByURL("https://api.moonshot.cn/v1"); got != "moonshot" {
+	if got := modelruntime.DetectByURL("https://api.moonshot.cn/v1"); got != "moonshot" {
 		t.Errorf("moonshot.cn detected as %q", got)
 	}
 }
@@ -279,15 +280,15 @@ func TestFamilyExpectations(t *testing.T) {
 	if r := resolve(t, "gemini", "gemini-2.5-flash"); r.API != api.APIGoogleGenerativeAI {
 		t.Errorf("gemini/gemini-2.5-flash API = %q", r.API)
 	}
-	if r := resolve(t, "gemini", "gemini-3.8-flash"); r.GoogleGenerativeAI.ThinkingMode != catalog.GoogleThinkingLevel {
+	if r := resolve(t, "gemini", "gemini-3.8-flash"); r.GoogleGenerativeAI.ThinkingMode != api.GoogleThinkingLevel {
 		t.Errorf("gemini/gemini-3.8-flash thinking mode = %q", r.GoogleGenerativeAI.ThinkingMode)
 	}
 	if r := resolve(t, "anthropic", "claude-opus-5"); r.AnthropicMessages.ThinkingMode !=
-		catalog.AnthropicThinkingAdaptive || !r.AnthropicMessages.SupportsEffort {
+		api.AnthropicThinkingAdaptive || !r.AnthropicMessages.SupportsEffort {
 		t.Error("anthropic/claude-opus-5 should use adaptive thinking with effort")
 	}
 	if r := resolve(t, "anthropic", "claude-sonnet-4-5"); r.AnthropicMessages.ThinkingMode !=
-		catalog.AnthropicThinkingBudget {
+		api.AnthropicThinkingBudget {
 		t.Error("anthropic/claude-sonnet-4-5 should keep budget thinking")
 	}
 	if r := resolve(t, "anthropic", "claude-sonnet-4-5-20250929"); !r.Cataloged {
@@ -330,13 +331,13 @@ func TestFamilyExpectations(t *testing.T) {
 	// default (chat_template_kwargs) would silently drop the level.
 	for _, model := range []string{"z-ai/glm-5.3", "moonshotai/kimi-k3"} {
 		r := resolve(t, "nvidia", model)
-		if r.OpenAICompletions.ThinkingFormat != catalog.ThinkingFormatOpenAI ||
+		if r.OpenAICompletions.ThinkingFormat != api.ThinkingFormatOpenAI ||
 			!r.OpenAICompletions.SupportsReasoningEffort {
 			t.Errorf("nvidia/%s should grade with a top-level reasoning_effort", model)
 		}
 	}
 	if r := resolve(t, "nvidia", "nvidia/nemotron-3-ultra-550b-a55b"); r.OpenAICompletions.ThinkingFormat !=
-		catalog.ThinkingFormatChatTemplateKwargs {
+		api.ThinkingFormatChatTemplateKwargs {
 		t.Error("nvidia nemotron should keep the chat-template switch")
 	}
 	// DashScope errors when qwen3.8-max gets both fields.
@@ -351,12 +352,12 @@ func TestFamilyExpectations(t *testing.T) {
 }
 
 func TestHooks(t *testing.T) {
-	azure, _ := catalog.Get("azure_openai")
-	u, q := azure.Endpoint(catalog.EndpointRequest{
+	azure, _ := modelruntime.Get("azure_openai")
+	u, q := azure.Endpoint(providers.EndpointRequest{
 		BaseURL:   "https://my-res.openai.azure.com/",
 		Model:     "gpt-4o deploy",
 		ModelType: types.ModelTypeKnowledgeQA,
-		Extra:     map[string]string{catalog.ExtraAPIVersion: "2025-01-01-preview"},
+		Extra:     map[string]string{models.ExtraAPIVersion: "2025-01-01-preview"},
 	})
 	if u != "https://my-res.openai.azure.com/openai/deployments/gpt-4o%20deploy/chat/completions" {
 		t.Errorf("azure endpoint = %q", u)
@@ -367,20 +368,20 @@ func TestHooks(t *testing.T) {
 	// Without an explicit api_version the hook emits the v1 GA data plane,
 	// which carries the deployment name in the body and takes no
 	// api-version at all.
-	u, q = azure.Endpoint(catalog.EndpointRequest{BaseURL: "https://x.openai.azure.com", Model: "d"})
+	u, q = azure.Endpoint(providers.EndpointRequest{BaseURL: "https://x.openai.azure.com", Model: "d"})
 	if u != "https://x.openai.azure.com/openai/v1/chat/completions" {
 		t.Errorf("azure v1 endpoint = %q", u)
 	}
 	if len(q) != 0 {
 		t.Errorf("azure v1 query = %v, want none", q)
 	}
-	if azure.Auth != catalog.AuthAPIKeyHeader {
+	if azure.Auth != providers.AuthAPIKeyHeader {
 		t.Errorf("azure auth = %q", azure.Auth)
 	}
 	// Embedding obeys the same rule as chat for the same stored row, so one
 	// Azure resource never ends up serving chat on v1 and embedding on the
 	// dated deployments path. internal/models/embedding calls this hook.
-	u, q = azure.Endpoint(catalog.EndpointRequest{
+	u, q = azure.Endpoint(providers.EndpointRequest{
 		BaseURL: "https://x.openai.azure.com", Model: "embed-deploy",
 		ModelType: types.ModelTypeEmbedding,
 	})
@@ -390,10 +391,10 @@ func TestHooks(t *testing.T) {
 	if len(q) != 0 {
 		t.Errorf("azure v1 embedding query = %v, want none", q)
 	}
-	u, q = azure.Endpoint(catalog.EndpointRequest{
+	u, q = azure.Endpoint(providers.EndpointRequest{
 		BaseURL: "https://x.openai.azure.com", Model: "embed-deploy",
 		ModelType: types.ModelTypeEmbedding,
-		Extra:     map[string]string{catalog.ExtraAPIVersion: "2024-10-21"},
+		Extra:     map[string]string{models.ExtraAPIVersion: "2024-10-21"},
 	})
 	if u != "https://x.openai.azure.com/openai/deployments/embed-deploy/embeddings" {
 		t.Errorf("azure legacy embedding endpoint = %q", u)
@@ -402,34 +403,34 @@ func TestHooks(t *testing.T) {
 		t.Errorf("azure legacy embedding api-version = %q", q["api-version"])
 	}
 
-	wk, _ := catalog.Get("weknoracloud")
-	u, _ = wk.Endpoint(catalog.EndpointRequest{
+	wk, _ := modelruntime.Get("weknoracloud")
+	u, _ = wk.Endpoint(providers.EndpointRequest{
 		BaseURL: "https://weknora.weixin.qq.com/", ModelType: types.ModelTypeKnowledgeQA,
 	})
 	if u != "https://weknora.weixin.qq.com/api/v1/chat/completions" {
 		t.Errorf("weknoracloud endpoint = %q", u)
 	}
-	if wk.Auth != catalog.AuthSigned || wk.Signer == nil {
+	if wk.Auth != providers.AuthSigned || wk.Signer == nil {
 		t.Error("weknoracloud should use a signer")
 	}
-	if err := wk.ValidateConfig(&catalog.Config{}); err != nil {
+	if err := wk.ValidateConfig(&providers.Config{}); err != nil {
 		t.Errorf("weknoracloud validate should pass without key: %v", err)
 	}
 
-	generic, _ := catalog.Get("generic")
-	if err := generic.ValidateConfig(&catalog.Config{ModelName: "m"}); err == nil {
+	generic, _ := modelruntime.Get("generic")
+	if err := generic.ValidateConfig(&providers.Config{ModelName: "m"}); err == nil {
 		t.Error("generic validate should require a base URL")
 	}
-	if err := generic.ValidateConfig(&catalog.Config{BaseURL: "http://x/v1", ModelName: "m"}); err != nil {
+	if err := generic.ValidateConfig(&providers.Config{BaseURL: "http://x/v1", ModelName: "m"}); err != nil {
 		t.Errorf("generic validate: %v", err)
 	}
-	gpustack, _ := catalog.Get("gpustack")
-	if err := gpustack.ValidateConfig(&catalog.Config{APIKey: "k", ModelName: "m"}); err == nil {
+	gpustack, _ := modelruntime.Get("gpustack")
+	if err := gpustack.ValidateConfig(&providers.Config{APIKey: "k", ModelName: "m"}); err == nil {
 		t.Error("gpustack validate should require a base URL")
 	}
 
 	for _, id := range []string{"volcengine", "lkeap"} {
-		v, _ := catalog.Get(id)
+		v, _ := modelruntime.Get(id)
 		found := false
 		for _, f := range v.ExtraFields {
 			if f.Key == "secret_key" {
@@ -455,7 +456,7 @@ func TestSignedRerankCredentialLabels(t *testing.T) {
 		{"volcengine", "Access Key ID"},
 	} {
 		t.Run(tc.vendor, func(t *testing.T) {
-			v, ok := catalog.Get(tc.vendor)
+			v, ok := modelruntime.Get(tc.vendor)
 			if !ok {
 				t.Fatalf("vendor %s is not registered", tc.vendor)
 			}

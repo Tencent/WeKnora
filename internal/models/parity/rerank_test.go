@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,7 +21,7 @@ import (
 // TestEveryRerankVendorResolvesToAKnownProtocol walks the catalog, so a newly
 // added vendor is covered without touching this file.
 func TestEveryRerankVendorResolvesToAKnownProtocol(t *testing.T) {
-	vendors := catalog.ListByType(types.ModelTypeRerank)
+	vendors := modelruntime.ListByType(types.ModelTypeRerank)
 	require.NotEmpty(t, vendors, "no vendor serves rerank")
 
 	for _, v := range vendors {
@@ -37,7 +38,7 @@ func TestEveryRerankVendorResolvesToAKnownProtocol(t *testing.T) {
 				"unknown rerank protocol %q", resolved.RerankAPI)
 			// The catch-all vendor has no endpoint of its own: the operator
 			// supplies one, and Validate requires it.
-			if v.ID != catalog.GenericID {
+			if v.ID != providers.GenericID {
 				assert.NotEmpty(t, resolved.BaseURL, "rerank vendors need a default endpoint")
 			}
 
@@ -217,7 +218,7 @@ func TestSignedRerankVendorRequiresItsIdentityPair(t *testing.T) {
 // managed vendor documents the field, and sending it to one is how an
 // undocumented parameter ends up on every request.
 func TestTruncatePromptTokensOnlyReachesVLLMClassVendors(t *testing.T) {
-	optIn := map[string]string{catalog.ExtraTruncatePromptTokens: "512"}
+	optIn := map[string]string{models.ExtraTruncatePromptTokens: "512"}
 
 	for _, id := range []string{"generic", "gpustack"} {
 		t.Run(id+" accepts it", func(t *testing.T) {
@@ -246,7 +247,7 @@ func TestTruncatePromptTokensRejectsAnInvalidValue(t *testing.T) {
 		_, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: "generic", Model: "m", ModelType: types.ModelTypeRerank,
 			BaseURL: "http://127.0.0.1:9/v1",
-			Extra:   map[string]string{catalog.ExtraTruncatePromptTokens: raw},
+			Extra:   map[string]string{models.ExtraTruncatePromptTokens: raw},
 		})
 		require.Error(t, err, "value %q", raw)
 	}
@@ -257,7 +258,7 @@ func TestTruncatePromptTokensRejectsAnInvalidValue(t *testing.T) {
 // test watched them; now they are declarations, so they need their own guard —
 // TestEveryRerankVendorResolvesToAKnownProtocol only checks they are sane.
 func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
-	for id, want := range map[string]catalog.RerankSettings{
+	for id, want := range map[string]api.RerankSettings{
 		// docs.bigmodel.cn: 最多 128 条，query 与单条文档各 4096 字符
 		"zhipu": {MaxDocuments: 128, MaxQueryChars: 4096, MaxDocumentChars: 4096},
 		// cloud.tencent.com/document/product/1772: RunRerank 60 docs,
@@ -317,10 +318,10 @@ func TestWeKnoraCloudRerankKeepsItsDeadline(t *testing.T) {
 // all it takes — and it must be declared exactly where the extension is
 // accepted, or the form offers a switch the vendor will reject.
 func TestTruncatePromptTokensIsReachableFromTheEditor(t *testing.T) {
-	for _, v := range catalog.ListByType(types.ModelTypeRerank) {
-		var field *catalog.ExtraField
+	for _, v := range modelruntime.ListByType(types.ModelTypeRerank) {
+		var field *providers.ExtraField
 		for i := range v.ExtraFields {
-			if v.ExtraFields[i].Key == catalog.ExtraTruncatePromptTokens {
+			if v.ExtraFields[i].Key == models.ExtraTruncatePromptTokens {
 				field = &v.ExtraFields[i]
 			}
 		}
@@ -351,7 +352,7 @@ func TestRerankScoreScalesMatchTheVendorDocs(t *testing.T) {
 	//   GPUStack: relevance_score,  e.g. 1.951 / -3.734 / -6.157
 	logitScaled := map[string]bool{"nvidia": true, "gpustack": true}
 
-	for _, v := range catalog.ListByType(types.ModelTypeRerank) {
+	for _, v := range modelruntime.ListByType(types.ModelTypeRerank) {
 		resolved, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: v.ID, Model: "m", ModelType: types.ModelTypeRerank,
 		})
@@ -370,7 +371,7 @@ func TestRerankScoreScalesMatchTheVendorDocs(t *testing.T) {
 // construction with the reason beats sending a request shaped for the wrong
 // protocol and reporting whatever the decoder makes of the reply.
 func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
-	v, ok := catalog.Get("aliyun")
+	v, ok := modelruntime.Get("aliyun")
 	require.True(t, ok)
 
 	offered := make([]string, 0)
@@ -441,17 +442,17 @@ func TestScoreScaleIsOverridablePerRow(t *testing.T) {
 			base := "http://127.0.0.1:9/v1"
 			overridden, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: id, Model: "bge-reranker-v2-m3", ModelType: types.ModelTypeRerank,
-				BaseURL: base, Extra: map[string]string{catalog.ExtraScoreScale: "probability"},
+				BaseURL: base, Extra: map[string]string{models.ExtraScoreScale: "probability"},
 			})
 			require.NoError(t, err)
 			assert.Equal(t, api.ScoreProbability, overridden.Rerank.ScoreScale)
 
 			// And the input to set it is rendered by the editor.
-			v, ok := catalog.Get(id)
+			v, ok := modelruntime.Get(id)
 			require.True(t, ok)
-			var field *catalog.ExtraField
+			var field *providers.ExtraField
 			for i := range v.ExtraFields {
-				if v.ExtraFields[i].Key == catalog.ExtraScoreScale {
+				if v.ExtraFields[i].Key == models.ExtraScoreScale {
 					field = &v.ExtraFields[i]
 				}
 			}
@@ -464,7 +465,7 @@ func TestScoreScaleIsOverridablePerRow(t *testing.T) {
 	_, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider: "gpustack", Model: "m", ModelType: types.ModelTypeRerank,
 		BaseURL: "http://127.0.0.1:9/v1",
-		Extra:   map[string]string{catalog.ExtraScoreScale: "sigmoid"},
+		Extra:   map[string]string{models.ExtraScoreScale: "sigmoid"},
 	})
 	require.Error(t, err, "an unknown scale must not be treated as a probability")
 }
@@ -477,10 +478,10 @@ func TestScoreScaleIsOverridablePerRow(t *testing.T) {
 func TestGatewayVendorsOfferTheScoreScaleOverride(t *testing.T) {
 	gateways := map[string]bool{"generic": true, "gpustack": true, "litellm": true}
 
-	for _, v := range catalog.ListByType(types.ModelTypeRerank) {
-		var field *catalog.ExtraField
+	for _, v := range modelruntime.ListByType(types.ModelTypeRerank) {
+		var field *providers.ExtraField
 		for i := range v.ExtraFields {
-			if v.ExtraFields[i].Key == catalog.ExtraScoreScale {
+			if v.ExtraFields[i].Key == models.ExtraScoreScale {
 				field = &v.ExtraFields[i]
 			}
 		}
@@ -503,7 +504,7 @@ func TestGatewayVendorsOfferTheScoreScaleOverride(t *testing.T) {
 // Every operator-facing string a vendor declares has to exist in both
 // languages, or half the product reads English prose in a Chinese form.
 func TestEveryExtraFieldProseIsLocalized(t *testing.T) {
-	for _, v := range catalog.List() {
+	for _, v := range modelruntime.List() {
 		for _, field := range v.ExtraFields {
 			if field.Placeholder != "" && strings.Contains(field.Placeholder, " ") {
 				assert.NotEqual(t, field.Placeholder, field.LocalizedPlaceholder("zh-CN"),

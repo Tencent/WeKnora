@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -48,8 +47,7 @@ func TestProtocolOverrideDoesNotDecodeCatalogCompatAsAnotherProtocol(t *testing.
 }
 
 func TestEveryProviderKeepsModelCredentialsIsolated(t *testing.T) {
-	providers.EnsureBuiltins()
-	for _, v := range catalog.List() {
+	for _, v := range modelruntime.List() {
 		t.Run(v.ID, func(t *testing.T) {
 			r, err := modelruntime.Resolve(
 				modelruntime.Ref{
@@ -64,7 +62,7 @@ func TestEveryProviderKeepsModelCredentialsIsolated(t *testing.T) {
 					types.ModelTypeKnowledgeQA,
 					modelruntime.Connection{
 						ModelID: key,
-						Credentials: catalog.Credentials{
+						Credentials: api.Credentials{
 							APIKey:    key,
 							AppID:     key,
 							AppSecret: key,
@@ -79,15 +77,15 @@ func TestEveryProviderKeepsModelCredentialsIsolated(t *testing.T) {
 				require.NoError(t, err)
 				ep.Auth(req, []byte(`{}`))
 				switch v.AuthStyleFor(r.API) {
-				case catalog.AuthBearer:
+				case providers.AuthBearer:
 					require.Equal(t, "Bearer "+key, req.Header.Get("Authorization"))
-				case catalog.AuthAPIKeyHeader:
+				case providers.AuthAPIKeyHeader:
 					require.Equal(t, key, req.Header.Get("api-key"))
-				case catalog.AuthXAPIKey:
+				case providers.AuthXAPIKey:
 					require.Equal(t, key, req.Header.Get("x-api-key"))
-				case catalog.AuthGoogleAPIKey:
+				case providers.AuthGoogleAPIKey:
 					require.Equal(t, key, req.Header.Get("x-goog-api-key"))
-				case catalog.AuthSigned:
+				case providers.AuthSigned:
 					require.Equal(t, key, req.Header.Get("X-APPID"))
 				}
 				require.Equal(t, key, ep.ModelID)
@@ -98,10 +96,10 @@ func TestEveryProviderKeepsModelCredentialsIsolated(t *testing.T) {
 }
 
 func TestOverlayReloadRestoresBaselineAndRollsBackFailure(t *testing.T) {
-	before := catalog.SnapshotCurrent()
-	t.Cleanup(func() { catalog.RestoreSnapshot(before) })
-	original, _ := catalog.Get("openai")
-	require.NoError(t, catalog.ApplyOverlay([]byte(`{
+	before := modelruntime.SnapshotCurrent()
+	t.Cleanup(func() { modelruntime.RestoreSnapshot(before) })
+	original, _ := modelruntime.Get("openai")
+	require.NoError(t, modelruntime.ApplyOverlay([]byte(`{
   "providers": {
     "openai": {
       "base_url": "https://relay.example/v1",
@@ -119,31 +117,32 @@ func TestOverlayReloadRestoresBaselineAndRollsBackFailure(t *testing.T) {
     }
   }
 }`), ""))
-	changed, _ := catalog.Get("openai")
+	changed, _ := modelruntime.Get("openai")
 	require.Equal(t, "https://relay.example/v1", changed.GetDefaultURL(types.ModelTypeKnowledgeQA))
 	require.Error(
 		t,
-		catalog.ApplyOverlay(
+		modelruntime.ApplyOverlay(
 			[]byte(
 				`{"providers":{"openai":{"base_url":"https://wrong.example"},"broken":{"api":"typo"}}}`,
 			),
 			"",
 		),
 	)
-	current, _ := catalog.Get("openai")
-	require.Same(t, changed, current)
-	require.Error(t, catalog.ApplyOverlay([]byte(`{"providers":{}} {"providers":{}}`), ""))
-	require.NoError(t, catalog.ApplyOverlay([]byte(`{"providers":{}}`), ""))
-	restored, _ := catalog.Get("openai")
+	current, _ := modelruntime.Get("openai")
+	require.Equal(t, changed.DefaultBaseURLs, current.DefaultBaseURLs)
+	require.Equal(t, changed.Models(), current.Models())
+	require.Error(t, modelruntime.ApplyOverlay([]byte(`{"providers":{}} {"providers":{}}`), ""))
+	require.NoError(t, modelruntime.ApplyOverlay([]byte(`{"providers":{}}`), ""))
+	restored, _ := modelruntime.Get("openai")
 	require.Equal(t, original.DefaultBaseURLs, restored.DefaultBaseURLs)
-	require.Equal(t, original.Models, restored.Models)
-	_, exists := catalog.Get("temporary")
+	require.Equal(t, original.Models(), restored.Models())
+	_, exists := modelruntime.Get("temporary")
 	require.False(t, exists)
 }
 
 func TestConcurrentOverlayAndModelResolution(t *testing.T) {
-	before := catalog.SnapshotCurrent()
-	t.Cleanup(func() { catalog.RestoreSnapshot(before) })
+	before := modelruntime.SnapshotCurrent()
+	t.Cleanup(func() { modelruntime.RestoreSnapshot(before) })
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
@@ -161,7 +160,7 @@ func TestConcurrentOverlayAndModelResolution(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		require.NoError(
 			t,
-			catalog.ApplyOverlay(
+			modelruntime.ApplyOverlay(
 				[]byte(
 					`{"providers":{"openai":{"headers":{"X-Deployment":"one"}}}}`,
 				),
@@ -173,10 +172,10 @@ func TestConcurrentOverlayAndModelResolution(t *testing.T) {
 }
 
 func TestEveryProviderDefinitionCanBeReloaded(t *testing.T) {
-	before := catalog.SnapshotCurrent()
-	t.Cleanup(func() { catalog.RestoreSnapshot(before) })
+	before := modelruntime.SnapshotCurrent()
+	t.Cleanup(func() { modelruntime.RestoreSnapshot(before) })
 	entries := map[string]any{}
-	for _, v := range catalog.List() {
+	for _, v := range modelruntime.List() {
 		entries[v.ID] = map[string]any{}
 	}
 	data, err := json.Marshal(map[string]any{"providers": entries})
@@ -198,8 +197,8 @@ func TestEveryProviderDefinitionCanBeReloaded(t *testing.T) {
 }
 
 func TestOverlayCanDeclareSameModelNameForDifferentCapabilities(t *testing.T) {
-	before := catalog.SnapshotCurrent()
-	t.Cleanup(func() { catalog.RestoreSnapshot(before) })
+	before := modelruntime.SnapshotCurrent()
+	t.Cleanup(func() { modelruntime.RestoreSnapshot(before) })
 	require.NoError(t, modelruntime.Reload([]byte(`{
   "providers": {
     "generic": {

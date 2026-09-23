@@ -33,7 +33,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -46,8 +45,8 @@ const SiliconflowID = "siliconflow"
 // SiliconflowBaseURL serves every model type.
 const SiliconflowBaseURL = "https://api.siliconflow.cn/v1"
 
-func newSiliconflowProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newSiliconflowProvider() *Definition {
+	return &Definition{
 		ID:           SiliconflowID,
 		Name:         "SiliconFlow",
 		Names:        map[string]string{"zh-CN": "硅基流动 SiliconFlow"},
@@ -57,7 +56,7 @@ func newSiliconflowProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        14,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"siliconflow.cn"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: SiliconflowBaseURL,
@@ -73,30 +72,29 @@ func newSiliconflowProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},
-		Compat: catalog.VendorCompat{
-			Transcriptions: catalog.TranscriptionsCompat{
+		Compat: VendorCompat{
+			Transcriptions: api.TranscriptionsCompat{
 				// https://api-docs.siliconflow.cn/docs/api/audio-transcriptions-post:
 				// file and model only — no response_format — and a file of
 				// "时长不超过 1 小时，文件大小不超过 50MB".
-				MaxFileBytes: catalog.Ptr(50 << 20),
+				MaxFileBytes: api.Ptr(50 << 20),
 			},
-			Embeddings: catalog.EmbeddingsCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://api-docs.siliconflow.cn/docs/api/embeddings-post: model,
 				// input, encoding_format, and dimensions "仅 Qwen/Qwen3 系列支持"
 				// — the bge-m3 entry turns it off. The input array schema says
 				// "当前最大数组大小为 32" (maxItems 32).
-				SendEncodingFormat: catalog.Ptr(true),
-				DimensionsField:    catalog.Ptr("dimensions"),
-				MaxBatchSize:       catalog.Ptr(32),
+				SendEncodingFormat: api.Ptr(true),
+				DimensionsField:    api.Ptr("dimensions"),
+				MaxBatchSize:       api.Ptr(32),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField:          catalog.Ptr("max_tokens"),
-				ThinkingFormat:          catalog.Ptr(catalog.ThinkingFormatEnableThinking),
-				ThinkingBudgetField:     catalog.Ptr("thinking_budget"),
-				SupportsReasoningEffort: catalog.Ptr(true),
-				PromptCacheAccounting:   catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField:          api.Ptr("max_tokens"),
+				ThinkingFormat:          api.Ptr(api.ThinkingFormatEnableThinking),
+				ThinkingBudgetField:     api.Ptr("thinking_budget"),
+				SupportsReasoningEffort: api.Ptr(true),
+				PromptCacheAccounting:   api.Ptr(true),
 			},
 		},
-		Models: catalog.BuiltinModels("siliconflow"),
 	}
 }

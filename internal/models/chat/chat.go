@@ -15,7 +15,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/googlegenai"
 	"github.com/Tencent/WeKnora/internal/models/api/openaicompletions"
 	"github.com/Tencent/WeKnora/internal/models/api/openairesponses"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -182,7 +181,7 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 
 	endpoint, err := resolved.Endpoint(types.ModelTypeKnowledgeQA, modelruntime.Connection{
 		ModelID:     config.ModelID,
-		Credentials: catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
+		Credentials: api.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
 		Headers:     config.CustomHeaders,
 		Extra:       config.ExtraConfig,
 	})

@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/internal/configcopy"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -31,9 +32,9 @@ type Ref struct {
 // Resolved is the fully merged view of one model: which vendor, which
 // protocol, which settings.
 type Resolved struct {
-	Vendor *catalog.Vendor
+	Vendor *providers.Definition
 	// Spec is the effective catalog entry (synthesized when unknown).
-	Spec catalog.ModelSpec
+	Spec models.ModelSpec
 	// Cataloged reports whether the model name matched a catalog entry.
 	Cataloged bool
 	API       api.API
@@ -42,37 +43,39 @@ type Resolved struct {
 	RemoteModel    string
 	ThinkingLevels api.ThinkingLevelMap
 
-	OpenAICompletions  catalog.OpenAICompletionsSettings
-	OpenAIResponses    catalog.OpenAIResponsesSettings
-	AnthropicMessages  catalog.AnthropicMessagesSettings
-	GoogleGenerativeAI catalog.GoogleGenerativeAISettings
+	OpenAICompletions  api.OpenAICompletionsSettings
+	OpenAIResponses    api.OpenAIResponsesSettings
+	AnthropicMessages  api.AnthropicMessagesSettings
+	GoogleGenerativeAI api.GoogleGenerativeAISettings
 
 	// RerankAPI and Rerank are filled only when the reference asked for a
 	// rerank model. Chat resolution is on every request's hot path, so the
 	// rerank overlay is not merged for it.
 	RerankAPI api.RerankAPI
-	Rerank    catalog.RerankSettings
+	Rerank    api.RerankSettings
 
 	// EmbeddingAPI and Embeddings are filled only for an embedding reference,
 	// for the same reason.
 	EmbeddingAPI api.EmbeddingAPI
-	Embeddings   catalog.EmbeddingsSettings
+	Embeddings   api.EmbeddingsSettings
 
 	// TranscriptionAPI and Transcriptions are filled only for an ASR
 	// reference.
 	TranscriptionAPI api.TranscriptionAPI
-	Transcriptions   catalog.TranscriptionsSettings
+	Transcriptions   api.TranscriptionsSettings
 }
 
 // Resolve merges the vendor, catalog entry, extra-config and per-row
 // overrides for a model reference. It never fails for unknown vendors or
 // models: they degrade to the generic OpenAI-compatible baseline.
-func Resolve(ref Ref) (*Resolved, error) {
-	providers.EnsureBuiltins()
-	return resolveWithVendor(ref, catalog.Select(ref.Provider, ref.BaseURL))
+func Resolve(ref Ref) (*Resolved, error) { return Default().Resolve(ref) }
+
+// Resolve merges one model against a single generation of this runtime.
+func (rt *Runtime) Resolve(ref Ref) (*Resolved, error) {
+	return resolveWithVendor(ref, rt.selectProvider(ref.Provider, ref.BaseURL))
 }
 
-func resolveWithVendor(ref Ref, vendor *catalog.Vendor) (*Resolved, error) {
+func resolveWithVendor(ref Ref, vendor *Provider) (*Resolved, error) {
 	if vendor == nil {
 		return nil, fmt.Errorf("catalog: no vendors registered")
 	}
@@ -88,7 +91,7 @@ func resolveWithVendor(ref Ref, vendor *catalog.Vendor) (*Resolved, error) {
 
 	spec, cataloged := vendor.FindModel(ref.Model, modelType)
 	if !cataloged {
-		spec = catalog.ModelSpec{ID: ref.Model, Type: catalog.EntryType(modelType)}
+		spec = models.ModelSpec{ID: ref.Model, Type: catalog.EntryType(modelType)}
 	}
 	if spec.API == "" {
 		spec.API = vendor.API
@@ -109,7 +112,7 @@ func resolveWithVendor(ref Ref, vendor *catalog.Vendor) (*Resolved, error) {
 	}
 
 	resolvedAPI := spec.API
-	if forced := strings.TrimSpace(ref.Extra[catalog.ExtraAPI]); forced != "" {
+	if forced := strings.TrimSpace(ref.Extra[models.ExtraAPI]); forced != "" {
 		resolvedAPI = api.API(forced)
 	} else if ref.Override == nil || ref.Override.API == "" {
 		resolvedAPI = inferAPIFromURL(baseURL, resolvedAPI)
@@ -137,7 +140,7 @@ func resolveWithVendor(ref Ref, vendor *catalog.Vendor) (*Resolved, error) {
 	}
 
 	out := &Resolved{
-		Vendor:         vendor,
+		Vendor:         configcopy.Clone(vendor.Definition),
 		Spec:           spec,
 		Cataloged:      cataloged,
 		API:            resolvedAPI,
@@ -145,7 +148,7 @@ func resolveWithVendor(ref Ref, vendor *catalog.Vendor) (*Resolved, error) {
 		RemoteModel:    ref.Model,
 		ThinkingLevels: levels,
 	}
-	if override := strings.TrimSpace(ref.Extra[catalog.ExtraRemoteModelName]); override != "" {
+	if override := strings.TrimSpace(ref.Extra[models.ExtraRemoteModelName]); override != "" {
 		out.RemoteModel = override
 	}
 
@@ -154,65 +157,65 @@ func resolveWithVendor(ref Ref, vendor *catalog.Vendor) (*Resolved, error) {
 	// Every protocol's settings are resolved so callers can inspect any of
 	// them, but only the layers whose API matches contribute model/override
 	// compat (a flat compat object is meaningless for another protocol).
-	completions := catalog.DefaultOpenAICompletions()
-	catalog.ApplyCompat(&completions, &vendor.Compat.OpenAICompletions)
+	completions := api.DefaultOpenAICompletions()
+	ApplyCompat(&completions, &vendor.Compat.OpenAICompletions)
 	if err := applyRawCompat(
-		&completions, &catalog.OpenAICompletionsCompat{}, spec.Compat, catalogAPI, api.APIOpenAICompletions,
+		&completions, &api.OpenAICompletionsCompat{}, spec.Compat, catalogAPI, api.APIOpenAICompletions,
 	); err != nil {
 		return nil, err
 	}
 	if err := applyRawCompat(
-		&completions, &catalog.OpenAICompletionsCompat{}, overrideCompat, resolvedAPI, api.APIOpenAICompletions,
+		&completions, &api.OpenAICompletionsCompat{}, overrideCompat, resolvedAPI, api.APIOpenAICompletions,
 	); err != nil {
 		return nil, err
 	}
-	applyLegacyThinkingControl(&completions, ref.Extra[catalog.ExtraThinkingControl])
+	applyLegacyThinkingControl(&completions, ref.Extra[models.ExtraThinkingControl])
 	out.OpenAICompletions = completions
 
-	responses := catalog.DefaultOpenAIResponses()
-	catalog.ApplyCompat(&responses, &vendor.Compat.OpenAIResponses)
+	responses := api.DefaultOpenAIResponses()
+	ApplyCompat(&responses, &vendor.Compat.OpenAIResponses)
 	if err := applyRawCompat(
-		&responses, &catalog.OpenAIResponsesCompat{}, spec.Compat, catalogAPI, api.APIOpenAIResponses,
+		&responses, &api.OpenAIResponsesCompat{}, spec.Compat, catalogAPI, api.APIOpenAIResponses,
 	); err != nil {
 		return nil, err
 	}
 	if err := applyRawCompat(
-		&responses, &catalog.OpenAIResponsesCompat{}, overrideCompat, resolvedAPI, api.APIOpenAIResponses,
+		&responses, &api.OpenAIResponsesCompat{}, overrideCompat, resolvedAPI, api.APIOpenAIResponses,
 	); err != nil {
 		return nil, err
 	}
 	out.OpenAIResponses = responses
 
-	anthropic := catalog.DefaultAnthropicMessages()
-	catalog.ApplyCompat(&anthropic, &vendor.Compat.AnthropicMessages)
+	anthropic := api.DefaultAnthropicMessages()
+	ApplyCompat(&anthropic, &vendor.Compat.AnthropicMessages)
 	if err := applyRawCompat(
-		&anthropic, &catalog.AnthropicMessagesCompat{}, spec.Compat, catalogAPI, api.APIAnthropicMessages,
+		&anthropic, &api.AnthropicMessagesCompat{}, spec.Compat, catalogAPI, api.APIAnthropicMessages,
 	); err != nil {
 		return nil, err
 	}
 	if err := applyRawCompat(
-		&anthropic, &catalog.AnthropicMessagesCompat{}, overrideCompat, resolvedAPI, api.APIAnthropicMessages,
+		&anthropic, &api.AnthropicMessagesCompat{}, overrideCompat, resolvedAPI, api.APIAnthropicMessages,
 	); err != nil {
 		return nil, err
 	}
 	out.AnthropicMessages = anthropic
 
-	google := catalog.DefaultGoogleGenerativeAI()
-	catalog.ApplyCompat(&google, &vendor.Compat.GoogleGenerativeAI)
+	google := api.DefaultGoogleGenerativeAI()
+	ApplyCompat(&google, &vendor.Compat.GoogleGenerativeAI)
 	if err := applyRawCompat(
-		&google, &catalog.GoogleGenerativeAICompat{}, spec.Compat, catalogAPI, api.APIGoogleGenerativeAI,
+		&google, &api.GoogleGenerativeAICompat{}, spec.Compat, catalogAPI, api.APIGoogleGenerativeAI,
 	); err != nil {
 		return nil, err
 	}
 	if err := applyRawCompat(
-		&google, &catalog.GoogleGenerativeAICompat{}, overrideCompat, resolvedAPI, api.APIGoogleGenerativeAI,
+		&google, &api.GoogleGenerativeAICompat{}, overrideCompat, resolvedAPI, api.APIGoogleGenerativeAI,
 	); err != nil {
 		return nil, err
 	}
 	out.GoogleGenerativeAI = google
 	// An explicit legacy thinking_control is the operator saying "this row
 	// does think, send the switch this way", so it outranks the catalog.
-	if strings.TrimSpace(ref.Extra[catalog.ExtraThinkingControl]) == "" {
+	if strings.TrimSpace(ref.Extra[models.ExtraThinkingControl]) == "" {
 		out.silenceThinkingForNonReasoningModel()
 	}
 
@@ -233,10 +236,10 @@ func (r *Resolved) silenceThinkingForNonReasoningModel() {
 	if !r.Cataloged || r.Spec.Reasoning {
 		return
 	}
-	r.OpenAICompletions.ThinkingFormat = catalog.ThinkingFormatNone
+	r.OpenAICompletions.ThinkingFormat = api.ThinkingFormatNone
 	r.OpenAICompletions.ThinkingBudgetField = ""
 	r.OpenAICompletions.SupportsReasoningEffort = false
-	r.GoogleGenerativeAI.ThinkingMode = catalog.GoogleThinkingNone
+	r.GoogleGenerativeAI.ThinkingMode = api.GoogleThinkingNone
 	r.ThinkingLevels = api.ThinkingLevelMap{}
 	for _, level := range api.ReasoningLadder {
 		r.ThinkingLevels[level] = nil
@@ -250,14 +253,14 @@ func applyRawCompat(settings any, overlayPtr any, raw json.RawMessage, layerAPI,
 	if len(raw) == 0 || layerAPI != target {
 		return nil
 	}
-	if err := catalog.DecodeCompat(raw, overlayPtr); err != nil {
+	if err := DecodeCompat(raw, overlayPtr); err != nil {
 		return fmt.Errorf("%s compat: %w", target, err)
 	}
-	catalog.ApplyCompat(settings, overlayPtr)
+	ApplyCompat(settings, overlayPtr)
 	return nil
 }
 
-func applySpecOverride(spec *catalog.ModelSpec, o *types.ModelSpecOverride) {
+func applySpecOverride(spec *models.ModelSpec, o *types.ModelSpecOverride) {
 	if o == nil {
 		return
 	}
@@ -299,7 +302,7 @@ func (r *Resolved) Capabilities() Capabilities {
 	case api.APIOpenAICompletions:
 		caps.ThinkingFormat = string(r.OpenAICompletions.ThinkingFormat)
 		caps.MaxTokensField = r.OpenAICompletions.MaxTokensField
-		if caps.ThinkingFormat == string(catalog.ThinkingFormatNone) {
+		if caps.ThinkingFormat == string(api.ThinkingFormatNone) {
 			caps.ThinkingLevels = []api.ReasoningEffort{}
 			return caps
 		}
@@ -312,7 +315,7 @@ func (r *Resolved) Capabilities() Capabilities {
 	case api.APIGoogleGenerativeAI:
 		caps.ThinkingFormat = "thinkingConfig." + string(r.GoogleGenerativeAI.ThinkingMode)
 		caps.MaxTokensField = "maxOutputTokens"
-		if r.GoogleGenerativeAI.ThinkingMode == catalog.GoogleThinkingNone {
+		if r.GoogleGenerativeAI.ThinkingMode == api.GoogleThinkingNone {
 			caps.ThinkingLevels = []api.ReasoningEffort{}
 			return caps
 		}
@@ -328,7 +331,7 @@ func (r *Resolved) Capabilities() Capabilities {
 // rather than one per protocol, so the model entry's compat object is decoded
 // unconditionally instead of being matched against a protocol.
 func resolveRerank(
-	ref Ref, vendor *catalog.Vendor, spec catalog.ModelSpec, cataloged bool, baseURL string,
+	ref Ref, vendor *Provider, spec models.ModelSpec, cataloged bool, baseURL string,
 ) (*Resolved, error) {
 	protocol := vendor.RerankAPI
 	if protocol == "" {
@@ -341,44 +344,44 @@ func resolveRerank(
 	// Lowest precedence first: protocol default, vendor, model entry, row spec
 	// override. extra_config is the operator speaking about this one row, so it
 	// comes last.
-	settings := catalog.DefaultRerank()
-	catalog.ApplyCompat(&settings, &vendor.Compat.Rerank)
+	settings := api.DefaultRerank()
+	ApplyCompat(&settings, &vendor.Compat.Rerank)
 	if len(spec.Compat) > 0 {
-		overlay := &catalog.RerankCompat{}
-		if err := catalog.DecodeCompat(spec.Compat, overlay); err != nil {
+		overlay := &api.RerankCompat{}
+		if err := DecodeCompat(spec.Compat, overlay); err != nil {
 			return nil, fmt.Errorf("rerank compat: %w", err)
 		}
-		catalog.ApplyCompat(&settings, overlay)
+		ApplyCompat(&settings, overlay)
 	}
 	if raw := ref.Override.CompatJSON(); len(raw) > 0 {
-		overlay := &catalog.RerankCompat{}
-		if err := catalog.DecodeCompat(raw, overlay); err != nil {
+		overlay := &api.RerankCompat{}
+		if err := DecodeCompat(raw, overlay); err != nil {
 			return nil, fmt.Errorf("rerank compat: %w", err)
 		}
-		catalog.ApplyCompat(&settings, overlay)
+		ApplyCompat(&settings, overlay)
 	}
 
-	if raw := strings.TrimSpace(ref.Extra[catalog.ExtraScoreScale]); raw != "" {
+	if raw := strings.TrimSpace(ref.Extra[models.ExtraScoreScale]); raw != "" {
 		scale := api.ScoreScale(strings.ToLower(raw))
 		if scale != api.ScoreProbability && scale != api.ScoreLogit {
 			return nil, fmt.Errorf(
 				"catalog: invalid %s in extra_config: %q (expected %q or %q)",
-				catalog.ExtraScoreScale, raw, api.ScoreProbability, api.ScoreLogit,
+				models.ExtraScoreScale, raw, api.ScoreProbability, api.ScoreLogit,
 			)
 		}
 		settings.ScoreScale = scale
 	}
-	if raw := strings.TrimSpace(ref.Extra[catalog.ExtraTruncatePromptTokens]); raw != "" {
+	if raw := strings.TrimSpace(ref.Extra[models.ExtraTruncatePromptTokens]); raw != "" {
 		if !settings.AcceptsTruncatePromptTokens {
 			return nil, fmt.Errorf(
 				"catalog: %s is a vLLM extension and %s does not implement it; "+
 					"remove it from extra_config (it is accepted by self-hosted runtimes only)",
-				catalog.ExtraTruncatePromptTokens, vendor.ID,
+				models.ExtraTruncatePromptTokens, vendor.ID,
 			)
 		}
 		budget, err := strconv.Atoi(raw)
 		if err != nil || budget <= 0 {
-			return nil, fmt.Errorf("catalog: invalid %s in extra_config: %q", catalog.ExtraTruncatePromptTokens, raw)
+			return nil, fmt.Errorf("catalog: invalid %s in extra_config: %q", models.ExtraTruncatePromptTokens, raw)
 		}
 		settings.TruncatePromptTokens = budget
 	}
@@ -388,7 +391,7 @@ func resolveRerank(
 		return nil, &UnsupportedModelError{Provider: vendor.ID, Model: spec.ID, Reason: settings.UnsupportedReason}
 	}
 	out := &Resolved{
-		Vendor:      vendor,
+		Vendor:      configcopy.Clone(vendor.Definition),
 		Spec:        spec,
 		Cataloged:   cataloged,
 		BaseURL:     baseURL,
@@ -396,7 +399,7 @@ func resolveRerank(
 		RerankAPI:   protocol,
 		Rerank:      settings,
 	}
-	if override := strings.TrimSpace(ref.Extra[catalog.ExtraRemoteModelName]); override != "" {
+	if override := strings.TrimSpace(ref.Extra[models.ExtraRemoteModelName]); override != "" {
 		out.RemoteModel = override
 	}
 	return out, nil
@@ -406,7 +409,7 @@ func resolveRerank(
 // resolveRerank: protocol default, vendor, model entry, row spec override,
 // then extra_config, which is the operator speaking about this one row.
 func resolveEmbeddings(
-	ref Ref, vendor *catalog.Vendor, spec catalog.ModelSpec, cataloged bool, baseURL string,
+	ref Ref, vendor *Provider, spec models.ModelSpec, cataloged bool, baseURL string,
 ) (*Resolved, error) {
 	protocol := vendor.EmbeddingAPI
 	if protocol == "" {
@@ -416,21 +419,21 @@ func resolveEmbeddings(
 		return nil, fmt.Errorf("catalog: unknown embedding api %q for provider %s", protocol, vendor.ID)
 	}
 
-	settings := catalog.DefaultEmbeddings()
-	catalog.ApplyCompat(&settings, &vendor.Compat.Embeddings)
+	settings := api.DefaultEmbeddings()
+	ApplyCompat(&settings, &vendor.Compat.Embeddings)
 	if len(spec.Compat) > 0 {
-		overlay := &catalog.EmbeddingsCompat{}
-		if err := catalog.DecodeCompat(spec.Compat, overlay); err != nil {
+		overlay := &api.EmbeddingsCompat{}
+		if err := DecodeCompat(spec.Compat, overlay); err != nil {
 			return nil, fmt.Errorf("embeddings compat: %w", err)
 		}
-		catalog.ApplyCompat(&settings, overlay)
+		ApplyCompat(&settings, overlay)
 	}
 	if raw := ref.Override.CompatJSON(); len(raw) > 0 {
-		overlay := &catalog.EmbeddingsCompat{}
-		if err := catalog.DecodeCompat(raw, overlay); err != nil {
+		overlay := &api.EmbeddingsCompat{}
+		if err := DecodeCompat(raw, overlay); err != nil {
 			return nil, fmt.Errorf("embeddings compat: %w", err)
 		}
-		catalog.ApplyCompat(&settings, overlay)
+		ApplyCompat(&settings, overlay)
 	}
 	// The row may carry a truncation budget, but the extension is vLLM's and
 	// appears in no managed vendor's schema. Dropping it where the vendor
@@ -446,7 +449,7 @@ func resolveEmbeddings(
 	if settings.AcceptsTruncatePromptTokens {
 		settings.TruncatePromptTokens = ref.TruncatePromptTokens
 		if settings.TruncatePromptTokens <= 0 {
-			settings.TruncatePromptTokens = catalog.LegacyTruncatePromptTokens
+			settings.TruncatePromptTokens = models.LegacyTruncatePromptTokens
 		}
 	}
 
@@ -461,7 +464,7 @@ func resolveEmbeddings(
 	settings.API = protocol
 
 	out := &Resolved{
-		Vendor:       vendor,
+		Vendor:       configcopy.Clone(vendor.Definition),
 		Spec:         spec,
 		Cataloged:    cataloged,
 		BaseURL:      baseURL,
@@ -469,7 +472,7 @@ func resolveEmbeddings(
 		EmbeddingAPI: protocol,
 		Embeddings:   settings,
 	}
-	if override := strings.TrimSpace(ref.Extra[catalog.ExtraRemoteModelName]); override != "" {
+	if override := strings.TrimSpace(ref.Extra[models.ExtraRemoteModelName]); override != "" {
 		out.RemoteModel = override
 	}
 	return out, nil
@@ -479,23 +482,23 @@ func resolveEmbeddings(
 // as resolveEmbeddings: protocol default, vendor compat, the catalog entry,
 // the row's own compat, then remote_model_name.
 func resolveTranscriptions(
-	ref Ref, vendor *catalog.Vendor, spec catalog.ModelSpec, cataloged bool, baseURL string,
+	ref Ref, vendor *Provider, spec models.ModelSpec, cataloged bool, baseURL string,
 ) (*Resolved, error) {
 	protocol := vendor.TranscriptionAPI
 	if protocol == "" {
 		protocol = api.TranscriptionOpenAI
 	}
-	settings := catalog.DefaultTranscriptions()
-	catalog.ApplyCompat(&settings, &vendor.Compat.Transcriptions)
+	settings := api.DefaultTranscriptions()
+	ApplyCompat(&settings, &vendor.Compat.Transcriptions)
 	for _, raw := range []json.RawMessage{spec.Compat, ref.Override.CompatJSON()} {
 		if len(raw) == 0 {
 			continue
 		}
-		overlay := &catalog.TranscriptionsCompat{}
-		if err := catalog.DecodeCompat(raw, overlay); err != nil {
+		overlay := &api.TranscriptionsCompat{}
+		if err := DecodeCompat(raw, overlay); err != nil {
 			return nil, fmt.Errorf("transcriptions compat: %w", err)
 		}
-		catalog.ApplyCompat(&settings, overlay)
+		ApplyCompat(&settings, overlay)
 	}
 	if settings.API != "" {
 		protocol = settings.API
@@ -505,7 +508,7 @@ func resolveTranscriptions(
 	}
 	settings.API = protocol
 	switch settings.LanguageParam {
-	case "", catalog.LanguageForm, catalog.LanguageHeader, catalog.LanguageASROptions:
+	case "", api.LanguageForm, api.LanguageHeader, api.LanguageASROptions:
 	default:
 		return nil, fmt.Errorf("catalog: unknown language_param %q for %s/%s",
 			settings.LanguageParam, vendor.ID, spec.ID)
@@ -517,7 +520,7 @@ func resolveTranscriptions(
 	}
 
 	out := &Resolved{
-		Vendor:           vendor,
+		Vendor:           configcopy.Clone(vendor.Definition),
 		Spec:             spec,
 		Cataloged:        cataloged,
 		BaseURL:          baseURL,
@@ -525,7 +528,7 @@ func resolveTranscriptions(
 		TranscriptionAPI: protocol,
 		Transcriptions:   settings,
 	}
-	if override := strings.TrimSpace(ref.Extra[catalog.ExtraRemoteModelName]); override != "" {
+	if override := strings.TrimSpace(ref.Extra[models.ExtraRemoteModelName]); override != "" {
 		out.RemoteModel = override
 	}
 	return out, nil

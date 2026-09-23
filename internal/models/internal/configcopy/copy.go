@@ -1,35 +1,17 @@
-package catalog
+// Package configcopy copies exported configuration data and immutable function values.
+package configcopy
 
 import "reflect"
 
-// Snapshot retains a registry generation, including its built-in baseline.
-// Its maps are private; callers cannot mutate a saved generation.
-type Snapshot struct {
-	current map[string]*Vendor
-	base    map[string]*Vendor
-}
-
-// SnapshotCurrent captures the current definitions and their built-in baseline.
-func SnapshotCurrent() Snapshot {
-	mu.RLock()
-	defer mu.RUnlock()
-	return Snapshot{cloneVendors(vendors), cloneVendors(builtins)}
-}
-
-// RestoreSnapshot is intended for isolated registry tests and configuration rollback.
-func RestoreSnapshot(s Snapshot) {
-	mu.Lock()
-	defer mu.Unlock()
-	vendors, builtins = cloneVendors(s.current), cloneVendors(s.base)
-}
-
-func cloneVendors(in map[string]*Vendor) map[string]*Vendor {
-	out := make(map[string]*Vendor, len(in))
-	for id, v := range in {
-		out[id] = cloneValue(reflect.ValueOf(v)).Interface().(*Vendor)
-	}
+// Clone copies exported configuration fields while retaining immutable functions.
+func Clone[T any](value T) T {
+	var out T
+	reflect.ValueOf(&out).Elem().Set(cloneValue(reflect.ValueOf(&value).Elem()))
 	return out
 }
+
+// Value preserves the static type of reflected optional configuration fields.
+func Value(value reflect.Value) reflect.Value { return cloneValue(value) }
 
 // Definitions contain only exported data fields and immutable function values.
 // Copy every pointer, map and slice, including nested compatibility settings.

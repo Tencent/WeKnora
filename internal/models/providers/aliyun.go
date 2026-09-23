@@ -85,7 +85,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -109,8 +108,8 @@ const AliyunAnthropicBaseURL = "https://dashscope.aliyuncs.com/apps/anthropic"
 // (https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference).
 const AliyunMultimodalEmbeddingPath = "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
 
-func newAliyunProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newAliyunProvider() *Definition {
+	return &Definition{
 		ID:           AliyunID,
 		Name:         "Alibaba Cloud DashScope",
 		Names:        map[string]string{"zh-CN": "阿里云 DashScope"},
@@ -120,7 +119,7 @@ func newAliyunProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        10,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"dashscope.aliyuncs.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: AliyunBaseURL,
@@ -142,7 +141,7 @@ func newAliyunProvider() *catalog.Vendor {
 		// URL without either root is taken as the host itself, which keeps a
 		// workspace or international domain instead of replacing it with the
 		// Beijing default as the pre-catalog client did.
-		Endpoint: func(r catalog.EndpointRequest) (string, map[string]string) {
+		Endpoint: func(r EndpointRequest) (string, map[string]string) {
 			if r.ModelType != types.ModelTypeEmbedding {
 				return "", nil
 			}
@@ -157,7 +156,7 @@ func newAliyunProvider() *catalog.Vendor {
 			}
 			return root + "/compatible-mode/v1/embeddings", nil
 		},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// ASR: qwen3-asr-flash is the one recognition model callable with
 			// the audio in the request, on the compatible chat endpoint as a
 			// base64 data URI; its catalog entry declares that. Every other
@@ -172,34 +171,33 @@ func newAliyunProvider() *catalog.Vendor {
 			// in models.json. The native APIs' text_type / instruct are not
 			// declared: both change the document vectors
 			// (Tencent/WeKnora#1401).
-			Embeddings: catalog.EmbeddingsCompat{
-				SendEncodingFormat: catalog.Ptr(true),
-				DimensionsField:    catalog.Ptr("dimensions"),
+			Embeddings: api.EmbeddingsCompat{
+				SendEncodingFormat: api.Ptr(true),
+				DimensionsField:    api.Ptr("dimensions"),
 			},
-			Rerank: catalog.RerankCompat{
-				SendReturnDocs: catalog.Ptr(true),
+			Rerank: api.RerankCompat{
+				SendReturnDocs: api.Ptr(true),
 				// 500 documents per request for the native text-rerank models.
 				// The query (4,000 tokens) and per-document limits are stated in
 				// tokens, which a rune count cannot express, so they are not
 				// declared.
-				MaxDocuments: catalog.Ptr(500),
+				MaxDocuments: api.Ptr(500),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
+			OpenAICompletions: api.OpenAICompletionsCompat{
 				// Explicit although it matches the protocol default, because
 				// this vendor's own parameter table deprecates the other
 				// field and the choice should be visible here.
-				MaxTokensField:      catalog.Ptr("max_completion_tokens"),
-				ThinkingFormat:      catalog.Ptr(catalog.ThinkingFormatEnableThinking),
-				ThinkingBudgetField: catalog.Ptr("thinking_budget"),
-				CacheControlFormat:  catalog.Ptr("anthropic"),
+				MaxTokensField:      api.Ptr("max_completion_tokens"),
+				ThinkingFormat:      api.Ptr(api.ThinkingFormatEnableThinking),
+				ThinkingBudgetField: api.Ptr("thinking_budget"),
+				CacheControlFormat:  api.Ptr("anthropic"),
 				// usage carries prompt_tokens_details.cached_tokens and
 				// cache_creation.ephemeral_5m_input_tokens.
-				PromptCacheAccounting: catalog.Ptr(true),
+				PromptCacheAccounting: api.Ptr(true),
 				// reasoning_effort exists but only on the families that enable
 				// it per entry (qwen3.8, DeepSeek-V4, glm-5.3).
-				SupportsReasoningEffort: catalog.Ptr(false),
+				SupportsReasoningEffort: api.Ptr(false),
 			},
 		},
-		Models: catalog.BuiltinModels("aliyun"),
 	}
 }

@@ -39,7 +39,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -52,8 +51,8 @@ const MimoID = "mimo"
 // MimoBaseURL is the OpenAI-compatible chat endpoint.
 const MimoBaseURL = "https://api.xiaomimimo.com/v1"
 
-func newMimoProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newMimoProvider() *Definition {
+	return &Definition{
 		ID:           MimoID,
 		Name:         "Xiaomi MiMo",
 		Names:        map[string]string{"zh-CN": "小米 MiMo"},
@@ -63,7 +62,7 @@ func newMimoProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        18,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"xiaomimimo.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: MimoBaseURL,
@@ -73,24 +72,23 @@ func newMimoProvider() *catalog.Vendor {
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeASR,
 		},
-		Compat: catalog.VendorCompat{
+		Compat: VendorCompat{
 			// ASR: mimo-v2.5-asr on the chat endpoint, WAV or MP3 as a base64
 			// data URI whose "encoded string size must not exceed 10 MB"
 			// (https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/Speech-Recognition).
-			Transcriptions: catalog.TranscriptionsCompat{
+			Transcriptions: api.TranscriptionsCompat{
 				// The ceiling counts the whole data URI as sent.
-				MaxEncodedBytes: catalog.Ptr(10 << 20),
+				MaxEncodedBytes: api.Ptr(10 << 20),
 				Formats:         []string{"wav", "mp3"},
 				// asr_options.language: "auto|zh|en".
-				LanguageParam: catalog.Ptr(catalog.LanguageASROptions),
+				LanguageParam: api.Ptr(api.LanguageASROptions),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				ThinkingFormat:        catalog.Ptr(catalog.ThinkingFormatThinkingType),
-				PromptCacheAccounting: catalog.Ptr(true),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				ThinkingFormat:        api.Ptr(api.ThinkingFormatThinkingType),
+				PromptCacheAccounting: api.Ptr(true),
 				// Only `auto` is honoured; everything else is stripped.
 				ToolChoiceModes: []string{"auto"},
 			},
 		},
-		Models: catalog.BuiltinModels("mimo"),
 	}
 }

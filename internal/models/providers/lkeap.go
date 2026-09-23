@@ -45,7 +45,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -61,9 +60,9 @@ const LkeapBaseURL = "https://api.lkeap.cloud.tencent.com/v1"
 // LkeapRerankBaseURL is the TC3-signed cloud API host used for rerank.
 const LkeapRerankBaseURL = "https://lkeap.tencentcloudapi.com"
 
-func newLkeapProvider() *catalog.Vendor {
+func newLkeapProvider() *Definition {
 	rerankOnly := []types.ModelType{types.ModelTypeRerank}
-	return &catalog.Vendor{
+	return &Definition{
 		ID:          LkeapID,
 		Name:        "Tencent Cloud LKEAP",
 		Names:       map[string]string{"zh-CN": "腾讯云 LKEAP"},
@@ -76,7 +75,7 @@ func newLkeapProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        23,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"lkeap.cloud.tencent.com", "api.lkeap", "lkeap.tencentcloudapi.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: LkeapBaseURL,
@@ -90,7 +89,7 @@ func newLkeapProvider() *catalog.Vendor {
 		// first credential is a SecretId, not a bearer token. Left as the
 		// generic "API Key" an operator pastes an `sk-` key that can never
 		// sign a request.
-		CredentialLabels: []catalog.CredentialLabel{{
+		CredentialLabels: []CredentialLabel{{
 			Label:        "SecretId",
 			Labels:       map[string]string{"zh-CN": "SecretId（TC3 签名）"},
 			Placeholder:  "Tencent Cloud SecretId (AKID...)",
@@ -100,7 +99,7 @@ func newLkeapProvider() *catalog.Vendor {
 			ModelTypes:   rerankOnly,
 			Required:     true,
 		}},
-		ExtraFields: []catalog.ExtraField{
+		ExtraFields: []ExtraField{
 			{
 				Key:         "secret_key",
 				Label:       "Secret Key",
@@ -122,7 +121,7 @@ func newLkeapProvider() *catalog.Vendor {
 				Type:        "select",
 				Default:     "ap-guangzhou",
 				Placeholder: "ap-guangzhou",
-				Options: []catalog.ExtraFieldOption{
+				Options: []ExtraFieldOption{
 					{Label: "ap-guangzhou", Value: "ap-guangzhou"},
 					{Label: "ap-beijing", Value: "ap-beijing"},
 				},
@@ -130,23 +129,22 @@ func newLkeapProvider() *catalog.Vendor {
 			},
 		},
 		RerankAPI: api.RerankTencentLKEAP,
-		Compat: catalog.VendorCompat{
-			Rerank: catalog.RerankCompat{
+		Compat: VendorCompat{
+			Rerank: api.RerankCompat{
 				// RunRerank takes at most 60 documents, and Query plus Docs
 				// together at most 2000 characters.
-				MaxDocuments:    catalog.Ptr(60),
-				MaxRequestChars: catalog.Ptr(2000),
+				MaxDocuments:    api.Ptr(60),
+				MaxRequestChars: api.Ptr(2000),
 				// Batches went out one at a time before the shared batching
 				// layer existed. A 2000-character budget splits a large
 				// candidate set into many requests, so the default fan-out of
 				// four would be a new burst against RunRerank.
-				MaxConcurrency: catalog.Ptr(1),
+				MaxConcurrency: api.Ptr(1),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField: catalog.Ptr("max_tokens"),
-				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatThinkingType),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField: api.Ptr("max_tokens"),
+				ThinkingFormat: api.Ptr(api.ThinkingFormatThinkingType),
 			},
 		},
-		Models: catalog.BuiltinModels("lkeap"),
 	}
 }

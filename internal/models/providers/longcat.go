@@ -48,7 +48,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -64,8 +63,8 @@ const LongcatBaseURL = "https://api.longcat.chat/openai/v1"
 // LongcatAnthropicBaseURL is the Anthropic Messages surface of the same platform.
 const LongcatAnthropicBaseURL = "https://api.longcat.chat/anthropic/v1"
 
-func newLongcatProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newLongcatProvider() *Definition {
+	return &Definition{
 		ID:           LongcatID,
 		Name:         "LongCat AI",
 		Names:        map[string]string{"zh-CN": "美团 LongCat"},
@@ -75,7 +74,7 @@ func newLongcatProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        22,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"longcat.chat"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: LongcatBaseURL,
@@ -83,12 +82,11 @@ func newLongcatProvider() *catalog.Vendor {
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 		},
-		Compat: catalog.VendorCompat{
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField: catalog.Ptr("max_tokens"),
-				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatThinkingType),
+		Compat: VendorCompat{
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField: api.Ptr("max_tokens"),
+				ThinkingFormat: api.Ptr(api.ThinkingFormatThinkingType),
 			},
 		},
-		Models: catalog.BuiltinModels("longcat"),
 	}
 }

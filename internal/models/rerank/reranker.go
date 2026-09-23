@@ -12,7 +12,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 
 	// modelruntime.Resolve answers from the vendor catalog, which is empty until
@@ -165,7 +164,7 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 	vendor := resolved.Vendor
 	endpoint, err := resolved.Endpoint(types.ModelTypeRerank, modelruntime.Connection{
 		ModelID:     config.ModelID,
-		Credentials: catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
+		Credentials: api.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
 		Headers:     config.CustomHeaders,
 		Extra:       config.ExtraConfig,
 		Client:      newRerankHTTPClient(time.Duration(resolved.Rerank.RequestTimeout) * time.Second),

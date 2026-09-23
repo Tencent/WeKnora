@@ -6,47 +6,52 @@
 
 ```text
 internal/models/
-├── model.go                         # 不含凭据的模型元数据
-├── capabilities.go                  # 前端能力描述契约
-├── catalog/
+├── model.go / capabilities.go       # 模型元数据与能力契约
+├── model_type.go / legacy_keys.go   # 模型类型和旧模型行配置键
+├── catalog/                        # 无厂商行为、无可变全局注册表
 │   ├── data/
-│   │   ├── models.generated.json     # 统一生成的模型目录
-│   │   └── overrides.json           # 人工维护的协议及参数修正
-│   ├── loader.go                    # 加载生成数据
-│   ├── registry.go                  # 查询与按类型匹配
-│   ├── overlay.go                   # 部署级覆盖
-│   └── snapshot.go                  # 深复制与原子替换
+│   │   ├── seed.json               # 固定版本的模型元数据及来源链接
+│   │   ├── overrides.json          # 人工审核的模型级协议修正
+│   │   └── models.generated.json    # 离线生成结果
+│   ├── loader.go                   # 读取内置数据
+│   └── catalog.go                  # 不可变目录及精确名、别名、系列查询
 ├── providers/
-│   ├── builtin.go                   # 显式注册，不靠厂商包 init
-│   ├── openai.go / aliyun.go / …     # 一家厂商一份定义，涵盖多种能力
+│   ├── definition.go / compat.go    # 厂商默认规则、认证和端点声明，不含 Models
+│   ├── builtin.go                  # 返回独立定义，不注册全局状态
+│   ├── openai.go / aliyun.go / …
 │   └── assets/*.svg
 ├── runtime/
-│   ├── runtime.go                   # 初始化、校验与重载
-│   ├── resolve.go                   # 合并厂商、目录、模型行配置
-│   ├── auth.go                      # 单模型认证、请求头与端点装配
-│   ├── legacy.go                    # 旧 URL / thinking_control 推断
-│   └── validate.go                  # 保存模型前的公共校验
+│   ├── registry.go                 # Runtime 实例，组合厂商与目录
+│   ├── runtime.go                  # 应用初始化、校验与重载
+│   ├── overlay.go / snapshot.go     # 部署覆盖、基线恢复和整代发布
+│   ├── resolve.go / compat.go       # 合并默认值、模型目录与单行配置
+│   ├── connection.go               # 单模型认证、请求头与端点装配
+│   ├── legacy.go                   # 旧 URL / thinking_control 推断
+│   └── validate.go                 # 保存模型前的公共校验
 ├── api/
-│   ├── *_settings.go                # 协议拥有自己的参数契约
-│   ├── openaicompletions/
-│   ├── openairesponses/
+│   ├── credentials.go              # 传输认证输入
+│   ├── *_settings.go               # 协议自己的参数契约
+│   ├── openaicompletions/ / openairesponses/
 │   ├── anthropicmessages/ / googlegenai/
 │   ├── openaiembeddings/ / dashscopeembeddings/ / arkembeddings/ / googleembeddings/
 │   ├── cohererank/ / dashscoperank/ / nimrerank/
 │   ├── tencentlkeap/ / volcengineknowledge/  # SDK 签名和协议实现
 │   └── openaitranscriptions/ / openaichataudio/
 ├── chat/ / embedding/ / rerank/ / vlm/ / asr/  # 业务接口、批处理、并发及观测包装
-├── parity/                          # 跨厂商、跨模型回归基线
+├── internal/configcopy/            # 引用字段隔离，限于内部配置数据
+├── parity/                         # 跨厂商、跨模型回归基线
 └── limiter/ / utils/
 
 scripts/model-catalog/
 ├── generate.py
-├── sources.json                     # 数据来源与 models.dev 厂商映射
-└── sources/seed.json                # 固定版本的模型元数据及来源链接
+└── sources.json                    # 数据来源与 models.dev 厂商映射
 ```
 
-协议包不再导入 catalog。厂商定义声明各能力的协议和默认行为，模型列表来自统一数据文件；同一厂商的 Chat、Embedding、Rerank、ASR 共用认证与端点装配。只有接口方言不同才增加协议实现。OpenAI Completions 与 Responses 各自保留独立协议实现。
+`providers.Definition` 只声明厂商规则，不引用 catalog，也不持有模型列表。`catalog.Catalog` 只保存模型数据并按类型匹配。`runtime.New()` 按厂商 ID 组合两者；协议参数直接使用 `api.*Settings` / `api.*Compat`，已移除 catalog 的转发别名。新增已有协议的模型只需维护目录数据；新增厂商还需增加定义和内置定义列表；只有接口方言不同时才增加协议实现。
 
+应用模型工厂保留包级入口，由 `runtime.Default()` 指向共享 Runtime；未把全应用工厂改成依赖注入。需要独立配置的调用方可用 `runtime.New()`，其注册、覆盖和快照不影响其他实例。`Resolve` 不再触发隐式厂商注册。`Get` / `List` 返回独立厂商定义，模型查询返回独立元数据，完整目录不会在每次解析时复制。运行时的 `Provider` 视图组合同一代厂商与目录，预览能力通过该视图解析，避免重载期间混用两代配置。
+
+部署配置由 runtime 从内置基线构造、验证并发布。应用使用 `Initialize` / `Reload`；保留的低层 `Register` / `ApplyOverlay` 供受信任的组合与兼容测试使用。腾讯与火山的专用 SDK 签名入口继续保留；本次边界调整不改变其认证、超时或请求参数。
 模型行仍单独保存 URL、认证信息、额外参数及 `spec`；没有新增连接表，没有重建模型 ID，没有迁移知识库、Agent 或历史会话引用。旧版 `extra_config`、URL 推断、云凭据回退继续兼容。共享的是厂商规则和代码，不是用户凭据。
 
 ## 修复的配置一致性问题
@@ -62,7 +67,7 @@ scripts/model-catalog/
 
 ```bash
 make model-catalog-diff                 # 只读比较 models.dev；需要网络
-# 审核官方资料，修改 sources/seed.json 或 catalog/data/overrides.json
+# 审核官方资料，修改 internal/models/catalog/data/seed.json 或同目录 overrides.json
 make model-catalog-generate             # 离线、可重复生成
 make model-catalog-check                # 检查生成文件及模型模块全部测试
 ```
@@ -83,12 +88,14 @@ make model-catalog-check                # 检查生成文件及模型模块全�
 | 49 个 Embedding 样例 | 真实工厂、本地 HTTP、query/document 模式、维度选择、分批与结果顺序 |
 | 16 个 Rerank 样例 | 包含 SDK 签名链路，本地 HTTP 与结果解析；明确不支持的条目验证拒绝调用 |
 | 15 个 ASR 样例 | multipart / Chat Audio、语言参数与结果解析；不支持条目验证拒绝调用 |
-| 配置隔离 | 每个厂商连续组装不同模型凭据，确认认证、请求头、模型 ID 不串用 |
-| 覆盖与并发 | 覆盖删除恢复、失败回滚、价格等字段不污染基线、重载期间并发解析 |
+| 配置隔离 | 每个厂商连续组装不同模型凭据；独立 Runtime 互不影响；注册输入、查询结果及解析结果修改不污染配置 |
+| 覆盖与并发 | 覆盖删除恢复、失败回滚、价格等字段不污染基线；重载期间端点、厂商头与模型参数始终来自同一代配置；已取得视图保留旧代配置 |
 | 前后端一致性 | 保存配置 → 工厂 → 请求参数；未保存 spec → 预览 / 测试连接；修改参数使旧结果失效 |
 
-通过的检查：`make model-catalog-check`；`LOG_FORMAT='' go test ./...`；模型模块竞态检查；模型管理、路由、业务服务及容器测试；前端 72 项相关测试；`npm run type-check`；golangci-lint v2.12.2 对改动涉及 Go 包的增量检查；`git diff --check`。
+初次迁移通过的检查：`make model-catalog-check`；`LOG_FORMAT='' go test ./...`；模型模块竞态检查；模型管理、路由、业务服务及容器测试；前端 72 项相关测试；`npm run type-check`；golangci-lint v2.12.2 对改动涉及 Go 包的增量检查；`git diff --check`。
 
-扩大竞态检查到 `internal/handler/...` 时，未改动的 `handler/session` 桌面会话测试 `TestDesktopSlotCancelsHoldWhenKeyExpires` 报告测试清理函数与续租 goroutine 竞争同一计时变量（`sandbox_desktop_ws_test.go:111` / `sandbox_desktop_ws.go:473`）。模型模块及模型管理 handler 的竞态检查通过，该问题不混入本次重构。已在临时目录安装仓库指定的 golangci-lint v2.12.2 完成增量检查，未替换机器原有的 v1 工具。
+2026-09-23 的边界收紧在同一分支继续完成：拆开厂商定义和模型目录，迁移连接契约及协议类型，增加独立 Runtime、查询结果隔离和同代快照测试。生成目录与 351 个样例基线的预期文件未修改。此次实际通过 `LOG_FORMAT='' go test ./...`、`LOG_FORMAT='' go test -race ./internal/models/... ./internal/handler ./internal/handler/dto`、golangci-lint v2.12.2 对模型、handler 和 agent 改动的增量检查，以及生成一致性检查和 `git diff --check`。本轮没有改动前端，没有重复运行前端检查，也未进行真实厂商线上调用。
+
+初次迁移扩大竞态检查到 `internal/handler/...` 时，未改动的 `handler/session` 桌面会话测试 `TestDesktopSlotCancelsHoldWhenKeyExpires` 报告测试清理函数与续租 goroutine 竞争同一计时变量（`sandbox_desktop_ws_test.go:111` / `sandbox_desktop_ws.go:473`）。模型模块及模型管理 handler 的竞态检查通过，该问题不混入本次重构。已在临时目录安装仓库指定的 golangci-lint v2.12.2 完成增量检查，未替换机器原有的 v1 工具。
 
 本次验证没有使用真实厂商凭据，也没有对所有模型进行付费线上调用。上述覆盖证明配置迁移与请求装配行为，不能替代账号权限、地区、模型下线等线上可用性验证。官方文档抽查包含 [百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[Gemini Embeddings](https://ai.google.dev/gemini-api/docs/embeddings)、[NVIDIA Embeddings](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3-embed-1b-infer)；全部条目保留原来源链接，并未宣称重新逐页审核了所有上游文档。

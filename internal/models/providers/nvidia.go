@@ -56,7 +56,6 @@ import (
 	_ "embed"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -72,8 +71,8 @@ const NvidiaBaseURL = "https://integrate.api.nvidia.com/v1"
 // NvidiaRerankBaseURL is the retrieval reranking NIM.
 const NvidiaRerankBaseURL = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
 
-func newNvidiaProvider() *catalog.Vendor {
-	return &catalog.Vendor{
+func newNvidiaProvider() *Definition {
+	return &Definition{
 		ID:    NvidiaID,
 		Name:  "NVIDIA",
 		Names: map[string]string{"zh-CN": "NVIDIA"},
@@ -84,7 +83,7 @@ func newNvidiaProvider() *catalog.Vendor {
 		API:          api.APIOpenAICompletions,
 		Order:        51,
 		RequiresAuth: true,
-		Auth:         catalog.AuthBearer,
+		Auth:         AuthBearer,
 		URLPatterns:  []string{"nvidia.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: NvidiaBaseURL,
@@ -99,8 +98,8 @@ func newNvidiaProvider() *catalog.Vendor {
 			types.ModelTypeVLLM,
 		},
 		RerankAPI: api.RerankNIM,
-		Compat: catalog.VendorCompat{
-			Embeddings: catalog.EmbeddingsCompat{
+		Compat: VendorCompat{
+			Embeddings: api.EmbeddingsCompat{
 				// https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3-embed-1b-infer:
 				// input, model, input_type (passage | query), encoding_format,
 				// truncate (NONE | START | END, default NONE), user. There is no
@@ -110,28 +109,27 @@ func newNvidiaProvider() *catalog.Vendor {
 				// insists they must. This is the hosted API: a self-hosted NIM
 				// (https://docs.nvidia.com/nim/nemo-retriever/embedding/latest/reference.html)
 				// does take dimensions, and belongs on a generic row pointed at it.
-				SendEncodingFormat: catalog.Ptr(true),
-				InputTypeField:     catalog.Ptr("input_type"),
+				SendEncodingFormat: api.Ptr(true),
+				InputTypeField:     api.Ptr("input_type"),
 				InputTypeValues:    map[string]string{"document": "passage", "query": "query"},
 				// NONE fails the request on an over-long input instead of
 				// cutting it.
-				TruncateField: catalog.Ptr("truncate"),
-				TruncateValue: catalog.Ptr("END"),
+				TruncateField: api.Ptr("truncate"),
+				TruncateValue: api.Ptr("END"),
 			},
-			Rerank: catalog.RerankCompat{
+			Rerank: api.RerankCompat{
 				// rankings[].logit is unbounded and routinely negative, so the
 				// caller must be told this is not a 0..1 relevance score.
-				ScoreScale: catalog.Ptr(api.ScoreLogit),
+				ScoreScale: api.Ptr(api.ScoreLogit),
 				// truncate defaults to NONE upstream, which fails the request on
 				// an over-long passage instead of cutting it.
-				Truncate:     catalog.Ptr("END"),
-				MaxDocuments: catalog.Ptr(512),
+				Truncate:     api.Ptr("END"),
+				MaxDocuments: api.Ptr(512),
 			},
-			OpenAICompletions: catalog.OpenAICompletionsCompat{
-				MaxTokensField: catalog.Ptr("max_tokens"),
-				ThinkingFormat: catalog.Ptr(catalog.ThinkingFormatChatTemplateKwargs),
+			OpenAICompletions: api.OpenAICompletionsCompat{
+				MaxTokensField: api.Ptr("max_tokens"),
+				ThinkingFormat: api.Ptr(api.ThinkingFormatChatTemplateKwargs),
 			},
 		},
-		Models: catalog.BuiltinModels("nvidia"),
 	}
 }
