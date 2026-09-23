@@ -343,6 +343,7 @@ func (s *sessionService) buildAgentConfig(
 		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
+		SkillInstallCards:           req.SkillInstallCards,
 	}
 	// An unset MCP mode means "all" at runtime, but the share scope and the
 	// agent UI both present it as none. A shared run must not hand receivers
@@ -371,6 +372,7 @@ func (s *sessionService) buildAgentConfig(
 		sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
 	)
 	agentConfig.TenantSkills = tenantSkills
+	agentConfig.SkillSandboxConfigID = skillConfigID
 	if len(tenantSkills) > 0 {
 		// The config named here is the one the skills came from, which is the
 		// pinned one whenever it differs from the agent's - the only case the

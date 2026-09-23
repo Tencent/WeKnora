@@ -155,6 +155,14 @@ type AgentConfig struct {
 	// invoke. Runtime only: it is derived per turn from the config the agent
 	// selected, never stored on the agent record.
 	TenantSkills []*TenantSkillEntity `json:"-"`
+	// SkillSandboxConfigID is the sandbox config this run's sandbox boots:
+	// the session's pinned config when it differs from SandboxConfigID. It is
+	// where a skill installed from a chat card lands, so it names the image
+	// the conversation will actually run on. Runtime only.
+	SkillSandboxConfigID string `json:"-"`
+	// SkillInstallCards reports that the client renders install cards, which
+	// is what search_skills produces. Runtime only.
+	SkillInstallCards bool `json:"-"`
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`

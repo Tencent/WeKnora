@@ -325,6 +325,9 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 		b.WriteString("In older instructions, translate execute_skill_script(skill_name, script_path, ...) " +
 			"to shell_exec(skill_name=..., command=...).\n")
 	}
+	if !skillInstallMode && has("shell_exec") {
+		b.WriteString(skillInstallGuidance(has("search_skills")))
+	}
 	if has("discover_mcp_tools") {
 		b.WriteString("For MCP tools, use already offered functions directly. Otherwise inspect the " +
 			"relevant listed server, describe the exact tool, and wait for its definition before making " +
@@ -338,6 +341,26 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 			"through another tool.\n")
 	}
 
+	return b.String()
+}
+
+// skillInstallGuidance keeps "the command succeeded" from being reported as
+// an install. Skills are listed from the workspace catalog, so a skill fetched
+// into the sandbox works only for this session, and the way to a real install
+// is an admin's click on a search_skills card (or the skill settings).
+func skillInstallGuidance(installCards bool) string {
+	var b strings.Builder
+	b.WriteString("Skills are installed by workspace admins, and only listed skills are installed. " +
+		"Fetching a skill with a shell command (npx skills add, clawhub install, git clone, curl) only loads it " +
+		"for this conversation: it is not installed, not listed as a skill, and other conversations do not get it. ")
+	if installCards {
+		b.WriteString("When the user asks to install a skill, including by pasting an install command or " +
+			"prompt, call search_skills with its source so an admin can install it from the card. ")
+	} else {
+		b.WriteString("When the user asks to install a skill, tell them a workspace admin installs skills " +
+			"in the skill settings. ")
+	}
+	b.WriteString("Load one in the sandbox only when the user wants to use it right now, and say it is temporary.\n")
 	return b.String()
 }
 

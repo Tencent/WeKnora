@@ -194,6 +194,11 @@
                     </div>
                   </div>
 
+                  <div v-if="!event.pending && event.tool_name === 'search_skills' && event.tool_data"
+                    class="search-results-summary-fixed">
+                    <div class="results-summary-text">{{ getSkillSearchSummary(event.tool_data) }}</div>
+                  </div>
+
                   <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data"
                     class="search-results-summary-fixed grep-summary">
                     <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
@@ -382,6 +387,7 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
+              <SkillInstallCards v-if="showSkillCards && event === finalAnswerEvent" :groups="skillCardGroups" />
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
                 class="answer-toolbar">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
@@ -516,6 +522,11 @@
                   </div>
                 </div>
 
+                <div v-if="!event.pending && event.tool_name === 'search_skills' && event.tool_data"
+                  class="search-results-summary-fixed">
+                  <div class="results-summary-text">{{ getSkillSearchSummary(event.tool_data) }}</div>
+                </div>
+
                 <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data"
                   class="search-results-summary-fixed grep-summary">
                   <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
@@ -578,6 +589,9 @@
         </div>
       </div>
     </div>
+    <!-- Skill install cards follow the answer; without one (still working, or
+         stopped) they sit here, outside the folded steps. -->
+    <SkillInstallCards v-if="showSkillCards && !finalAnswerEvent" :groups="skillCardGroups" />
   </div>
   <!-- 引用 hover 浮层（与历史消息共用同一组件） -->
   <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose" :on-leave="scheduleCitationClose" />
@@ -636,6 +650,8 @@ import 'katex/dist/katex.min.css';
 import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
+import SkillInstallCards from './SkillInstallCards.vue';
+import { collectSkillCardGroups } from '@/utils/skillInstallCards';
 import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
@@ -735,6 +751,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   knowledge_search: 'agentStream.tools.searchKnowledge',
   grep_chunks: 'agentStream.tools.grepChunks',
   web_search: 'agentStream.tools.webSearch',
+  search_skills: 'agentStream.tools.searchSkills',
   web_fetch: 'agentStream.tools.webFetch',
   get_document_info: 'agentStream.tools.getDocumentInfo',
   list_knowledge_chunks: 'agentStream.tools.listKnowledgeChunks',
@@ -2103,6 +2120,46 @@ const intermediateEvents = computed(() => {
 // answer follows, so tool activity remains the primary structure.
 const visibleIntermediateEvents = computed(() => intermediateEvents.value);
 
+// Skill install cards from search_skills results and from commands that only
+// loaded a skill into the sandbox. They are not tool details: they sit under
+// the answer so they stay visible after the steps fold.
+const skillCardGroups = computed(() => {
+  const stream = eventStream.value;
+  if (!stream || !Array.isArray(stream)) return [];
+  return collectSkillCardGroups(buildFullEventList(stream));
+});
+
+const showSkillCards = computed(() => !props.embeddedMode && !props.ragMode && skillCardGroups.value.length > 0);
+
+// The rendered answer the cards hang under. Taken from displayEvents rather
+// than the raw stream so it is the very object the template renders, including
+// an answer synthesized from a natural stop.
+const finalAnswerEvent = computed(() => {
+  const events = displayEvents.value;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]?.type === 'answer') return events[i];
+  }
+  return null;
+});
+
+const getSkillSearchSummary = (toolData: any): string => {
+  const count = Array.isArray(toolData?.candidates) ? toolData.candidates.length : 0;
+  const unavailable: string[] = Array.isArray(toolData?.unavailable_sources) ? toolData.unavailable_sources : [];
+  let text = '';
+  if (toolData?.mode === 'source' && count > 0) {
+    const first = toolData.candidates[0];
+    text = t('agentStream.skillCards.resolved', { name: first?.display_name || first?.name || '' });
+  } else if (count > 0) {
+    text = t('agentStream.skillCards.found', { count });
+  } else {
+    text = t('agentStream.skillCards.notFound');
+  }
+  if (unavailable.length > 0) {
+    text += ' · ' + t('agentStream.skillCards.unavailable', { sources: unavailable.join(', ') });
+  }
+  return text;
+};
+
 // Events to display (non-tree: before answer starts show all, after answer starts show only answer)
 const displayEvents = computed(() => {
   const stream = eventStream.value;
@@ -2239,6 +2296,8 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
 
 const hasExpandableResults = (event: any): boolean => {
   if (isReferenceDrawerTool(event?.tool_name)) return false;
+  // Its results are the install cards, which stay visible below the answer.
+  if (event?.tool_name === 'search_skills') return false;
   return hasResults(event);
 };
 

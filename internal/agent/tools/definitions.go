@@ -54,6 +54,13 @@ const (
 	// must not become selectable on a tenant-editable agent config.
 	ToolWriteSkillFile = "write_skill_file"
 	ToolEditSkillFile  = "edit_skill_file"
+	// ToolSearchSkills finds installable skills and shows them to the user as
+	// install cards; the install itself is an admin's click on the card.
+	//
+	// Absent from AvailableToolDefinitions for the same reason as shell_exec:
+	// it follows the skills switch and the run's sandbox config, not a
+	// per-agent checkbox.
+	ToolSearchSkills = "search_skills"
 	// ToolShellExec lets the LLM execute ad-hoc shell commands inside the
 	// current session's sandbox (dependency installs, environment probing).
 	// Registered only when the resolved backend advertises the session shell

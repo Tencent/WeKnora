@@ -266,10 +266,23 @@ type ShellExecTool struct {
 	// inject them. Install-mode tools never invoke it.
 	envCapture       SkillEnvCapture
 	skillEnvironment *skills.Manager
+	// skillInstall is set when search_skills is registered: a note on a
+	// shell-fetched skill then points at the install card instead of the
+	// settings, and the chat builds that card with this target.
+	skillInstall *SkillInstallTarget
 }
 
 func (t *ShellExecTool) WithSkillEnvironment(manager *skills.Manager) *ShellExecTool {
 	t.skillEnvironment = manager
+	return t
+}
+
+// WithSkillInstallCard tells the tool that search_skills is available in this
+// run and where its cards install. It changes where a temporarily loaded
+// skill's note sends the model, and lets the chat offer the same install card
+// for it.
+func (t *ShellExecTool) WithSkillInstallCard(target SkillInstallTarget) *ShellExecTool {
+	t.skillInstall = &target
 	return t
 }
 
@@ -645,6 +658,20 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		b.WriteString(hint)
 		b.WriteString("\n")
 	}
+	var temporaryLoad map[string]interface{}
+	if load, ok := t.skillTemporaryLoad(command, res.ExitCode); ok {
+		b.WriteString("\n")
+		b.WriteString(skillTemporaryLoadNote(load, t.skillInstall != nil))
+		b.WriteString("\n")
+		temporaryLoad = map[string]interface{}{"tool": load.Tool}
+		if load.Source != "" {
+			temporaryLoad["source"] = load.Source
+			temporaryLoad["name"] = skillLoadName(load.Source)
+		}
+		if t.skillInstall != nil {
+			t.skillInstall.installCardData(temporaryLoad)
+		}
+	}
 	visibleOutput := b.String()
 	visibleOutput, totalTruncated := truncateShellStream(visibleOutput, maxShellExecVisibleBytes)
 	truncated = truncated || errorTruncated || totalTruncated
@@ -682,6 +709,9 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		"visible_returned_bytes": len(visibleOutput),
 		"max_output_bytes":       outputLimit,
 		"max_stderr_bytes":       stderrLimit,
+	}
+	if temporaryLoad != nil {
+		resultData["skill_temporary_load"] = temporaryLoad
 	}
 
 	logger.Infof(ctx, "[Tool][ShellExec] session=%s exit=%d duration=%v killed=%v truncated=%v",
@@ -746,6 +776,16 @@ func dropResolvedNames(supplied, resolved map[string]string) map[string]string {
 		out[name] = value
 	}
 	return out
+}
+
+// skillTemporaryLoad recognises a successful command that fetched a skill
+// into this session's sandbox. The installer agent is exempt: its whole job is
+// putting a skill on disk, and that one does get installed.
+func (t *ShellExecTool) skillTemporaryLoad(command string, exitCode int) (skillTemporaryLoad, bool) {
+	if exitCode != 0 || t.isInstallMode() {
+		return skillTemporaryLoad{}, false
+	}
+	return detectSkillTemporaryLoad(command)
 }
 
 func (t *ShellExecTool) isInstallMode() bool {

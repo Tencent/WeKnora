@@ -410,7 +410,8 @@ flowchart TD
 | `web_search` | `query`\*，可选 `count`、`country`、`freshness`、`content` | 联网搜索，直接返回提供商的标题、摘要和 `wN` 页面短 ID；按任务需要选择知识库或联网检索，Agent 搜索不再自动进行 RAG 压缩；Brave 支持地区/时效过滤，`content=true` 并行抓取前 3 条正文并返回完整正文地址 |
 | `web_fetch` | `items[]`\*（每项 `url`\*=`wN` 或 HTTP(S) URL，可选 `offset`、`limit`） | 并发抓取最多 8 个网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），直接返回 Markdown 或支持的文本正文；60s 超时。按字符分页，使用 `next_offset` 续读；完整正文保存在 `full_output_path`，可用 `read_file` 跨轮按行读取；逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码，部分失败不影响其它页面 |
 | `read_file` | `path`、offset、limit、max_bytes；网页可带 line_offset | 读取工作区文本、skill:// 资源和 web:// 网页快照，按结果续读 |
-| `shell_exec` | `command`；skill_name、work_dir、timeout_sec、max_output_bytes、max_stderr_bytes、env | 在当前会话沙箱运行命令，指定技能时解析技能目录和变量 |
+| `shell_exec` | `command`；skill_name、work_dir、timeout_sec、max_output_bytes、max_stderr_bytes、env | 在当前会话沙箱运行命令，指定技能时解析技能目录和变量；识别到 `npx skills add`、`clawhub install` 等技能下载命令时，在结果里注明这只是本会话的临时加载 |
+| `search_skills` | `query` 或 `source`，可选 `limit`（默认 6，上限 10） | 在 ClawHub（含其收录的 skills.sh 列表）和 SkillHub 查找技能，或解析一个指定来源；结果在对话中渲染为安装卡片，由管理员点击安装，模型本身不能安装 |
 | `list_sandbox_files` | 路径等 | 浏览沙箱文件和可用产物 |
 | `write_sandbox_file` | path、content、mode | 写入或追加工作区文件 |
 | `edit_sandbox_file` | path、edits | 基于原版本批量精确替换 |
@@ -428,7 +429,7 @@ flowchart TD
 | `discover_mcp_tools` / `call_mcp_tool` | 发现模式、服务 ID / 工具引用与参数 | 查询目录、读取完整定义并按需调用，见 [MCP 工具目录](08-mcp.md#mcp-tool-directory) |
 | `mcp_...`（动态，含稳定哈希后缀） | 由 MCP 服务的 InputSchema 决定 | 读取定义后发布的外部函数；描述标明服务和原始工具名，执行时重新校验权限，可挂人工审批与会话内 OAuth |
 
-默认工具白名单 `DefaultAllowedTools()`（新建 Agent 的默认值，也是旧 Agent 未配置 `allowed_tools` 时的回退）：`search_knowledge`、`read_document`、`list_documents`、`search_conversations`（`search_memory` 与 `web_search` 一样不在此列表里，由记忆 / 联网开关在注册工具时注入或剔除）。
+默认工具白名单 `DefaultAllowedTools()`（新建 Agent 的默认值，也是旧 Agent 未配置 `allowed_tools` 时的回退）：`search_knowledge`、`read_document`、`list_documents`、`search_conversations`（`search_memory` 与 `web_search` 一样不在此列表里，由记忆 / 联网开关在注册工具时注入或剔除）。`search_skills` 也不在列表里：仅在控制台对话、智能体启用技能、本轮能确定沙箱配置时注册，见[在对话中查找和安装技能](22-skills-sandbox.md#在对话中查找和安装技能)。
 
 **旧工具名的兼容**：`knowledge_search`、`grep_chunks` 已合并为 `search_knowledge`；`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc` 已合并为 `read_document`。`definitions.go` 的 `legacyToolSuccessors` 记录这组映射，`NormalizeAllowedTools` 在注册工具时把已保存 Agent 配置、预设与 API 调用里的旧名字自动改写为新工具，无需数据迁移；历史消息中记录的旧工具名仍能正常渲染。
 
