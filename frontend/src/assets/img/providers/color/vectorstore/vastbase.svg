@@ -10,5 +10,5 @@
         <!-- rounded bottom vertex -->
         <circle cx="117" cy="172" r="24" fill="#EE7524"/>
     </g>
-    <text x="225" y="196" font-family="Arial, 'Helvetica Neue', Helvetica, sans-serif" font-size="165" font-weight="700" letter-spacing="-4"><tspan fill="#EE7524">ast</tspan><tspan fill="#1A1A1A">base</tspan></text>
+    <text x="195" y="196" font-family="Arial, 'Helvetica Neue', Helvetica, sans-serif" font-size="165" font-weight="700" letter-spacing="-4"><tspan fill="#EE7524">ast</tspan><tspan fill="#1A1A1A">base</tspan></text>
 </svg>
