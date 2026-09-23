@@ -12,20 +12,31 @@ function docker(...args) {
   return result.stdout.trim();
 }
 
+const portName = `${name}-port`;
+
+async function waitReady(origin, label) {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      if ((await fetch(origin, { signal: AbortSignal.timeout(2000) })).ok) return;
+    } catch { /* Nginx may still be starting. */ }
+    await setTimeout(200);
+  }
+  assert.fail(`${label} did not become ready`);
+}
+
 try {
   docker('run', '-d', '--name', name, '-p', '127.0.0.1::80', image);
   const origin = `http://${docker('port', name, '80/tcp')}`;
   docker('exec', name, 'nginx', '-t');
   docker('exec', name, 'sh', '-c', '! command -v node && test ! -d /build && test ! -e /usr/share/nginx/html/package.json');
-  let ready = false;
-  for (let attempt = 0; attempt < 30; attempt++) {
-    try {
-      ready = (await fetch(origin, { signal: AbortSignal.timeout(2000) })).ok;
-      if (ready) break;
-    } catch { /* Nginx may still be starting. */ }
-    await setTimeout(200);
-  }
-  assert.ok(ready, 'Container did not become ready');
+  await waitReady(origin, 'Container');
+
+  // PORT moves the listen port without a rebuild; the default stays 80.
+  docker('run', '-d', '--name', portName, '-e', 'PORT=8080', '-p', '127.0.0.1::8080', image);
+  const portOrigin = `http://${docker('port', portName, '8080/tcp')}`;
+  await waitReady(portOrigin, 'Container with PORT=8080');
+  assert.match(docker('exec', portName, 'cat', '/etc/nginx/conf.d/default.conf'), /listen 8080;/);
+  assert.equal((await fetch(portOrigin + '/docs/')).status, 200);
 
   const redirect = await fetch(`${origin}/docs`, { redirect: 'manual' });
   assert.equal(redirect.status, 308);
@@ -60,7 +71,7 @@ try {
     assert.equal(response.status, 404, path);
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   }
-  console.log(`Docker site check passed: homepage, docs routes, ${assets.size} assets, redirects, 404s, compression, headers and runtime isolation.`);
+  console.log(`Docker site check passed: homepage, docs routes, ${assets.size} assets, redirects, 404s, compression, headers, runtime isolation and PORT override.`);
 } finally {
-  spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
+  spawnSync('docker', ['rm', '-f', name, portName], { stdio: 'ignore' });
 }
