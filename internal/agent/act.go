@@ -585,7 +585,12 @@ func (e *AgentEngine) runToolCall(
 			// 「人工审批通道只覆盖 MCP 工具」）。把强制审批标记挂在执行
 			// ctx 上，MCP 工具执行时读到即走 RequestAndWait；内置工具无此
 			// 通道，放行并留结构化告警——需要真正的暂停-恢复点，不在本票范围。
-			if target != nil && target.ServiceName != "" {
+			//
+			// issue #35：MCP 通道判定从「target 解析成功」放宽为「registry
+			// 里该名字是 MCP 工具」。MCPCallTarget 在授权上下文不匹配时返回
+			// nil（e2e 实测），但审批等待在 MCP 工具执行体内部完成——若只看
+			// target，直注册 MCP 工具的强制审批会掉进 no_channel 分支静默放行。
+			if e.hasApprovalChannel(target, tc.Function.Name) {
 				toolExecCtx = approval.WithIntentRequirement(toolExecCtx, verdict.Reason)
 			} else {
 				logger.WarnWithFields(toolCtx, logger.Fields{
@@ -720,6 +725,18 @@ func newGateIntentSnapshot(query string, messages []chat.Message) *gateIntentSna
 	return snap
 }
 
+// hasApprovalChannel 判定一次工具调用是否有人工审批通道（T41 / issue #35）。
+// 优先看 presentation target（携带 ServiceName 即 MCP 调用）；target 解析
+// 失败（授权上下文不匹配等）时回落到 registry 工具类型判定——直注册
+// MCP 工具与 call_mcp_tool 代理都走 MCP 执行体内部的 RequestAndWait。
+// engine 测试里 toolRegistry 可能为 nil（纯门禁断言），此时只看 target。
+func (e *AgentEngine) hasApprovalChannel(target *types.ToolCallTarget, toolName string) bool {
+	if target != nil && target.ServiceName != "" {
+		return true
+	}
+	return e.toolRegistry != nil && e.toolRegistry.IsMCPTool(toolName)
+}
+
 // evaluateIntentGate 在工具执行点前调用 IntentGate（设计 §7 插入点）。
 // 返回 (verdict, enforcedDeny)：enforcedDeny 仅当 verdict.Action==Deny 且
 // Verdict.Enforced()（判定时的策略 mode=enforce）时为 true——调用方据此
@@ -827,5 +844,6 @@ func intentVerdictRecord(
 		ModeAtDecision:     v.Mode,
 		LatencyMs:          int(latencyMs),
 		JudgeTokens:        v.JudgeTokens, // T32：judge 调用的 token 成本（规则层/baseline 为 0）
+		JudgeModel:         v.JudgeModel, // T61：judge 模型归属（语料按此分层导出）
 	})
 }

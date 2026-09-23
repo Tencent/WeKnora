@@ -71,5 +71,12 @@ miniprogram/project.private.config.json
 # 本地开发产物
 /weknora-server.exe
 /server.exe
+/mcp-echo-server.exe
+*.exe~
 /bin/
 /data/
+
+# E2E 运行产物（Playwright 截图，可再生，不入库）
+/tests/e2e/artifacts/
+/tests/e2e/node_modules/
+/tests/e2e/package-lock.json
