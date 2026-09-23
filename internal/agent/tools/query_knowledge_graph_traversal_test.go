@@ -29,7 +29,8 @@ func (m *stubChatModel) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOp
 }
 
 func (m *stubChatModel) ChatStream(_ context.Context, _ []chat.Message,
-	_ *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+	_ *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -270,8 +271,10 @@ func TestParseEntityList(t *testing.T) {
 		{"prose prefix", `Here are the entities: ["A", "B"]`, []string{"A", "B"}},
 		{"deduplicates", `["A", "A", "B"]`, []string{"A", "B"}},
 		{"trims whitespace", `[" A ", ""]`, []string{"A"}},
-		{"caps entity count", `["1","2","3","4","5","6","7","8","9","10"]`,
-			[]string{"1", "2", "3", "4", "5", "6", "7", "8"}},
+		{
+			"caps entity count", `["1","2","3","4","5","6","7","8","9","10"]`,
+			[]string{"1", "2", "3", "4", "5", "6", "7", "8"},
+		},
 		{"empty array", `[]`, nil},
 		{"not json", `Docker and Kubernetes`, nil},
 		{"empty", ``, nil},
