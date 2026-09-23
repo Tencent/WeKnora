@@ -168,3 +168,39 @@ func TestFailCloseDegradedPath(t *testing.T) {
 		t.Fatalf("reason 应说明 fail-close, got %q", v.Reason)
 	}
 }
+
+// TestRequireApprovalSentinel：哨兵值确定产出 require_approval（#31 的
+// 确定性验收触发器）；high 策略也不被 judge 复核绕过。
+func TestRequireApprovalSentinel(t *testing.T) {
+	sentinel := RuleExprRequireApprovalSentinel
+	policy := policyGateTestPolicy("")
+	policy.RuleExpr = &sentinel
+	policy.Mode = types.VerdictModeEnforce
+	policy.RiskTier = types.RiskTierHigh // 连 high 也不得绕过
+	store := &fakeGatePolicyStore{policy: policy}
+	judge := &fakeJudge{verdict: Verdict{Action: ActionAllow, Layer: LayerJudge, Reason: "judge 说放行"}}
+	gate := NewPolicyGate(store, WithJudge(judge))
+
+	v, err := gate.Evaluate(context.Background(), ToolCallInput{
+		TenantID: 1, ToolName: "mcp__svc__danger", Args: json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if v.Action != ActionRequireApproval {
+		t.Fatalf("action = %q, want require_approval（哨兵）", v.Action)
+	}
+	if v.Layer != LayerRule {
+		t.Fatalf("layer = %q, want rule", v.Layer)
+	}
+	if !v.Enforced() {
+		t.Fatal("enforce 策略的哨兵 verdict 必须 Enforced（seam 才会挂审批标记）")
+	}
+	if !strings.Contains(v.Reason, "require_approval") {
+		t.Fatalf("reason 应说明哨兵, got %q", v.Reason)
+	}
+	// judge 不得被调用（哨兵是终态）。
+	if judge.calls != 0 {
+		t.Fatalf("哨兵不得升级 judge, calls=%d", judge.calls)
+	}
+}

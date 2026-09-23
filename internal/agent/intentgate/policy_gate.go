@@ -111,6 +111,10 @@ func (g *PolicyGate) Evaluate(ctx context.Context, in ToolCallInput) (Verdict, e
 	case v.Action == ActionDeny:
 		// 规则层已决：约束被违反，deny 直接出，不再升级语义层
 		// （复核一个确定性结论只会引入不确定性和成本）。
+	case v.Action == ActionRequireApproval:
+		// 哨兵已决：require_approval 是管理员的显式指令，与 deny 同级
+		// 的终态——high 策略的 judge 复核不得绕过人工确认（复核模型
+		// 说 allow 也不能取消管理员要求的审批）。
 	case policy.RiskTier == types.RiskTierHigh:
 		// 设计 §8.1：high 策略即使规则层判 allow 也强制进语义层复核——
 		// 高危操作要语义兜底，不允许"规则没写全就当安全"。
@@ -237,7 +241,25 @@ func (g *PolicyGate) baselineVerdict(in ToolCallInput) Verdict {
 // evaluatePolicyRule 对命中策略做①规则层判定。rule_expr 表达的是约束
 // 本身（"单笔退款不得超过 $75" → `value <= 75`）：求值为 true = 约束
 // 满足 = allow，false = 约束被违反 = deny。
+// RuleExprRequireApprovalSentinel 是 rule_expr 的显式哨兵值：整串等于
+// "require_approval" 时，策略管辖的每次调用一律产出 require_approval
+// verdict（LayerRule）——「本策略管辖的调用必须先经人工确认」是合法的
+// 管理员诉求；同时它是 require_approval 链路（T41）的确定性验收触发器
+//（issue #31：LLM judge 产出的 require_approval 无法稳定复现）。
+const RuleExprRequireApprovalSentinel = "require_approval"
+
+// evaluatePolicyRule 对命中策略做①规则层判定。rule_expr 表达的是约束
+// 本身（"单笔退款不得超过 $75" → `value <= 75`）：求值为 true = 约束
+// 满足 = allow，false = 约束被违反 = deny。哨兵值 require_approval 见
+// RuleExprRequireApprovalSentinel。
 func evaluatePolicyRule(policy *types.IntentPolicy, in ToolCallInput) Verdict {
+	if policy.RuleExpr != nil && strings.TrimSpace(*policy.RuleExpr) == RuleExprRequireApprovalSentinel {
+		return Verdict{
+			Action: ActionRequireApproval,
+			Layer:  LayerRule,
+			Reason: "策略显式要求人工审批（rule_expr 哨兵 require_approval）",
+		}
+	}
 	if policy.RuleExpr == nil || strings.TrimSpace(*policy.RuleExpr) == "" {
 		// 无确定性表达式可判：约束只能走语义层（设计 §8.1 漏斗）。judge
 		// 未接入（T30），记 uncertain——observe 放行并留下"本该如何判"

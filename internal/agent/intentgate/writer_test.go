@@ -29,6 +29,13 @@ type fakeVerdictRepo struct {
 	entered chan struct{}
 }
 
+func (*fakeVerdictRepo) CountByVerdictGrouped(context.Context, uint64, string) (map[string]int64, error) {
+	return nil, nil
+}
+func (*fakeVerdictRepo) ListByTenant(context.Context, uint64, int) ([]*types.VerdictRecord, error) {
+	return nil, nil
+}
+
 func (f *fakeVerdictRepo) Create(_ context.Context, rec *types.VerdictRecord) error {
 	if f.entered != nil {
 		select {
