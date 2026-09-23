@@ -58,6 +58,10 @@
               <t-icon class="icon" name="file-copy" />
               <span>{{ t('chatHeader.copyMarkdown') }}</span>
             </button>
+            <button type="button" class="card-menu-item" @click="onMenuAction('exportHtml')">
+              <t-icon class="icon" name="download" />
+              <span>{{ t('chatHeader.exportHtml') }}</span>
+            </button>
             <button type="button" class="card-menu-item danger" @click="enterConfirmMode('delete')">
               <t-icon class="icon" name="delete" />
               <span>{{ t('chatHeader.deleteSession') }}</span>
@@ -104,6 +108,7 @@ import {
 import { normalizeSessionTitleDraft, SESSION_TITLE_MAX_LENGTH } from './sessionTitleEdit'
 import { buildSessionMarkdown, collectAllSessionMessages } from '@/utils/sessionMarkdown'
 import { useSessionTitleMotion } from '@/composables/useSessionTitleMotion'
+import { exportSessionHtml } from '@/utils/sessionHtmlExport'
 
 interface ChatHeaderSession {
   id: string
@@ -119,7 +124,7 @@ const props = defineProps<{
   session: ChatHeaderSession | null
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const busyAction = ref('')
 const menuVisible = ref(false)
 const menuMode = ref<MenuMode>('menu')
@@ -155,6 +160,7 @@ function onMenuAction(value: string): void {
   }
   menuVisible.value = false
   if (value === 'copyMarkdown') void copyMarkdown()
+  if (value === 'exportHtml') void exportHtml()
 }
 
 async function copyText(text: string): Promise<void> {
@@ -209,34 +215,61 @@ async function copyMarkdown(): Promise<void> {
   if (!session || busyAction.value) return
   busyAction.value = 'markdown'
   try {
-    const messages = await collectAllSessionMessages(async (beforeTime, limit) => {
-      const response: any = await getMessageList({
-        session_id: session.id,
-        created_at: beforeTime,
-        limit,
-      })
-      if (!response?.success || !Array.isArray(response.data)) {
-        throw new Error(response?.message || 'failed to load session messages')
-      }
-      return response.data
-    })
     const markdown = buildSessionMarkdown({
       sessionId: session.id,
       title: session.title || t('menu.newSession'),
-      messages,
-      labels: {
-        sessionId: t('chatHeader.markdown.sessionId'),
-        exportedAt: t('chatHeader.markdown.exportedAt'),
-        user: t('chatHeader.markdown.user'),
-        assistant: t('chatHeader.markdown.assistant'),
-        attachments: t('chatHeader.markdown.attachments'),
-        references: t('chatHeader.markdown.references'),
-      },
+      messages: await collectSessionMessages(session.id),
+      labels: sessionExportLabels(),
     })
     await copyText(markdown)
     MessagePlugin.success(t('chatHeader.markdownCopied'))
   } catch {
     MessagePlugin.error(t('chatHeader.markdownCopyFailed'))
+  } finally {
+    busyAction.value = ''
+  }
+}
+
+function sessionExportLabels() {
+  return {
+    sessionId: t('chatHeader.markdown.sessionId'),
+    exportedAt: t('chatHeader.markdown.exportedAt'),
+    user: t('chatHeader.markdown.user'),
+    assistant: t('chatHeader.markdown.assistant'),
+    attachments: t('chatHeader.markdown.attachments'),
+    references: t('chatHeader.markdown.references'),
+  }
+}
+
+async function collectSessionMessages(sessionId: string) {
+  return collectAllSessionMessages(async (beforeTime, limit) => {
+    const response: any = await getMessageList({
+      session_id: sessionId,
+      created_at: beforeTime,
+      limit,
+    })
+    if (!response?.success || !Array.isArray(response.data)) {
+      throw new Error(response?.message || 'failed to load session messages')
+    }
+    return response.data
+  })
+}
+
+async function exportHtml(): Promise<void> {
+  const session = props.session
+  if (!session || busyAction.value) return
+  busyAction.value = 'exportHtml'
+  try {
+    await exportSessionHtml({
+      sessionId: session.id,
+      title: session.title || t('menu.newSession'),
+      messages: await collectSessionMessages(session.id),
+      labels: sessionExportLabels(),
+      lang: String(locale.value || ''),
+    })
+    MessagePlugin.success(t('chatHeader.htmlExported'))
+  } catch {
+    MessagePlugin.error(t('chatHeader.htmlExportFailed'))
   } finally {
     busyAction.value = ''
   }
