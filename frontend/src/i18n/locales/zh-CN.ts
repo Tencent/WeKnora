@@ -758,6 +758,8 @@ export default {
         list_documentsDesc: '分页列出某个知识库下的文档',
         read_document: '阅读文档',
         read_documentDesc: '按顺序读取文档的元信息和分块内容',
+        get_image: '读取图片',
+        get_imageDesc: '读取经过授权的知识库图片，返回 MCP ImageContent',
         ask: '问答',
         askDesc: '运行端点配置的默认 Agent，返回带引用的完整回答，支持多轮续聊',
         wiki_search: '搜索 Wiki',

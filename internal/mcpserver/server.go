@@ -52,6 +52,8 @@ type Server struct {
 	kbShareService   interfaces.KBShareService
 	tenantService    interfaces.TenantService
 	endpointRepo     interfaces.MCPEndpointRepository
+	resourceCatalog  interfaces.ResourceCatalog
+	storageResolver  interfaces.StorageBackendResolver
 	db               *gorm.DB
 	cfg              *config.Config
 
@@ -77,6 +79,8 @@ func NewServer(
 	db *gorm.DB,
 	cfg *config.Config,
 	redisClient *redis.Client,
+	resourceCatalog interfaces.ResourceCatalog,
+	storageResolver interfaces.StorageBackendResolver,
 ) *Server {
 	s := &Server{
 		kbService:        kbService,
@@ -89,6 +93,8 @@ func NewServer(
 		kbShareService:   kbShareService,
 		tenantService:    tenantService,
 		endpointRepo:     endpointRepo,
+		resourceCatalog:  resourceCatalog,
+		storageResolver:  storageResolver,
 		db:               db,
 		cfg:              cfg,
 		limiter:          ratelimit.New(redisClient, rateLimitKeyPrefix, time.Minute, ""),
@@ -121,7 +127,8 @@ func (s *Server) Handler() http.Handler {
 
 const serverInstructions = "WeKnora knowledge workspace. Start with list_knowledge_bases to see what is in scope, " +
 	"then use search_knowledge for semantic questions, grep_chunks for exact keywords, read_document to read " +
-	"a whole document, and ask to get a synthesized answer with citations. Wiki tools browse the generated " +
+	"a whole document, get_image to fetch a referenced image, and ask to get a " +
+	"synthesized answer with citations. Wiki tools browse the generated " +
 	"wiki when a knowledge base has one. Write tools (add/update/delete_document) exist only on endpoints " +
 	"that enabled them."
 
@@ -198,6 +205,7 @@ func (s *Server) toolCatalog() []server.ServerTool {
 		{Tool: grepChunksTool(), Handler: s.handleGrepChunks},
 		{Tool: listDocumentsTool(), Handler: s.handleListDocuments},
 		{Tool: readDocumentTool(), Handler: s.handleReadDocument},
+		{Tool: getImageTool(), Handler: s.handleGetImage},
 		{Tool: askTool(), Handler: s.handleAsk},
 		{Tool: wikiSearchTool(), Handler: s.handleWikiSearch},
 		{Tool: wikiReadPageTool(), Handler: s.handleWikiReadPage},

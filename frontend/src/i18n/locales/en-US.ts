@@ -6867,6 +6867,8 @@ export default {
         list_documentsDesc: 'Page through the documents of one knowledge base',
         read_document: 'Read document',
         read_documentDesc: 'Read a document\'s metadata and its chunks in order',
+        get_image: 'Read image',
+        get_imageDesc: 'Fetch one authorized knowledge-base image as MCP ImageContent',
         ask: 'Ask',
         askDesc: 'Run the agent configured on this endpoint and return a cited answer; supports follow-up turns',
         wiki_search: 'Search wiki',

@@ -758,6 +758,8 @@ export default {
         list_documentsDesc: 'Постраничный список документов одной базы знаний',
         read_document: 'Прочитать документ',
         read_documentDesc: 'Метаданные документа и его фрагменты по порядку',
+        get_image: 'Получить изображение',
+        get_imageDesc: 'Fetch one authorized knowledge-base image as MCP ImageContent',
         ask: 'Задать вопрос',
         askDesc: 'Запускает агента, настроенного на конечной точке, и возвращает ответ с цитатами; поддерживает продолжение диалога',
         wiki_search: 'Поиск по Wiki',

@@ -758,6 +758,8 @@ export default {
         list_documentsDesc: '지식 베이스의 문서를 페이지 단위로 나열합니다',
         read_document: '문서 읽기',
         read_documentDesc: '문서의 메타데이터와 청크를 순서대로 읽습니다',
+        get_image: '이미지 가져오기',
+        get_imageDesc: '권한이 있는 지식 베이스에서 이미지를 가져와 MCP ImageContent로 반환합니다',
         ask: '질문하기',
         askDesc: '엔드포인트에 설정된 에이전트를 실행하여 인용이 포함된 답변을 반환합니다. 후속 질문 지원',
         wiki_search: 'Wiki 검색',
