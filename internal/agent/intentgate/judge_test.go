@@ -207,6 +207,58 @@ func TestLLMJudgeResolverError(t *testing.T) {
 	}
 }
 
+// TestLLMJudgeJudgeModel（T61，issue #24）验收 [unit]：judge 判定须记录
+// 判定时使用的模型 ID（verdict.judge_model 的数据源，语料按此分层过滤）。
+// 模型元数据缺失（resolver 只给 chat 实例）时留空串，不得编造。
+func TestLLMJudgeJudgeModel(t *testing.T) {
+	fake := &fakeJudgeChat{resp: `{"verdict":"allow","reason":"意图一致","confidence":0.9}`}
+	judge := NewLLMJudge(func(context.Context, uint64) (*ResolvedJudgeModel, error) {
+		return &ResolvedJudgeModel{
+			Chat:  fake,
+			Model: &types.Model{ID: "builtin-kimi-coding", Name: "kimi-for-coding"},
+		}, nil
+	})
+	v, err := judge.Judge(context.Background(), judgeTestInput())
+	if err != nil {
+		t.Fatalf("Judge: %v", err)
+	}
+	if v.JudgeModel != "builtin-kimi-coding" {
+		t.Fatalf("JudgeModel = %q, want builtin-kimi-coding", v.JudgeModel)
+	}
+
+	// 成功/失败/解析失败各路径都不得丢模型归属。
+	for name, chat := range map[string]*fakeJudgeChat{
+		"model_error": {err: errors.New("provider 500")},
+		"garbage":     {resp: "not json"},
+	} {
+		judge := NewLLMJudge(func(context.Context, uint64) (*ResolvedJudgeModel, error) {
+			return &ResolvedJudgeModel{
+				Chat:  chat,
+				Model: &types.Model{ID: "builtin-kimi-coding"},
+			}, nil
+		})
+		v, err := judge.Judge(context.Background(), judgeTestInput())
+		if err != nil {
+			t.Fatalf("%s: Judge: %v", name, err)
+		}
+		if v.JudgeModel != "builtin-kimi-coding" {
+			t.Fatalf("%s: JudgeModel = %q, want builtin-kimi-coding", name, v.JudgeModel)
+		}
+	}
+
+	// 无模型元数据：空串（导出端把空串视作「无 judge 模型归属」）。
+	judge = NewLLMJudge(func(context.Context, uint64) (*ResolvedJudgeModel, error) {
+		return &ResolvedJudgeModel{Chat: &fakeJudgeChat{resp: `{"verdict":"allow"}`}}, nil
+	})
+	v, err = judge.Judge(context.Background(), judgeTestInput())
+	if err != nil {
+		t.Fatalf("Judge: %v", err)
+	}
+	if v.JudgeModel != "" {
+		t.Fatalf("JudgeModel = %q, want empty（无模型元数据）", v.JudgeModel)
+	}
+}
+
 // 验收 [unit] ③：judge 输入构造不含任何工具能力——ChatOptions.Tools
 // 为空、ToolChoice=none（judge 无工具，设计 §8.2 规则 2）。
 func TestLLMJudgeNoToolCapability(t *testing.T) {

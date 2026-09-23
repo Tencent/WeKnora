@@ -24,7 +24,7 @@ func TestSQLiteMigrationsCreateIntentVerdicts(t *testing.T) {
 		"id", "tenant_id", "session_id", "assistant_message_id", "tool_call_id",
 		"policy_id", "policy_version", "tool_name", "args_digest",
 		"layer", "verdict", "reason", "mode_at_decision",
-		"latency_ms", "judge_tokens", "human_override", "created_at",
+		"latency_ms", "judge_tokens", "judge_model", "human_override", "created_at",
 	}
 	for _, col := range wantColumns {
 		require.True(t, sqliteColumnExists(t, db, "intent_verdicts", col),

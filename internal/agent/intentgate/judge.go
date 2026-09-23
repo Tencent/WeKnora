@@ -145,6 +145,17 @@ func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
 		}, nil
 	}
 	model := resolved.Chat
+	// judgeModel 落 verdict.judge_model（T61 语料按 judge 模型分层，
+	// issue #24）：取解析出的模型元数据 ID；元数据缺失（resolver 只给
+	// chat 实例）时留空串——导出端把空串视作「无 judge 模型归属」。
+	judgeModel := ""
+	if resolved.Model != nil {
+		judgeModel = resolved.Model.ID
+	}
+	withModel := func(v Verdict) Verdict {
+		v.JudgeModel = judgeModel
+		return v
+	}
 	ctx, cancel := context.WithTimeout(ctx, j.timeout)
 	defer cancel()
 
@@ -167,7 +178,7 @@ func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
 		if ctx.Err() == context.DeadlineExceeded {
 			reason = fmt.Sprintf("judge 超时（预算 %s）", j.timeout)
 		}
-		return Verdict{Action: ActionUncertain, Layer: LayerJudge, Reason: reason}, nil
+		return withModel(Verdict{Action: ActionUncertain, Layer: LayerJudge, Reason: reason}), nil
 	}
 	judgeTokens := resp.Usage.TotalTokens
 	if judgeTokens <= 0 {
@@ -175,28 +186,28 @@ func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
 	}
 	out, err := parseJudgeOutput(resp.Content)
 	if err != nil {
-		return Verdict{
+		return withModel(Verdict{
 			Action: ActionUncertain,
 			Layer:  LayerJudge,
 			Reason: fmt.Sprintf("judge 输出解析失败（按设计 §8.2 规则 3 记 uncertain）: %v", err),
-		}, nil
+		}), nil
 	}
 	action := Action(strings.TrimSpace(out.Verdict))
 	switch action {
 	case ActionAllow, ActionDeny, ActionRequireApproval, ActionUncertain:
 	default:
-		return Verdict{
+		return withModel(Verdict{
 			Action: ActionUncertain,
 			Layer:  LayerJudge,
 			Reason: fmt.Sprintf("judge 输出 verdict 取值非法 %q（按 uncertain 处置）", out.Verdict),
-		}, nil
+		}), nil
 	}
-	return Verdict{
+	return withModel(Verdict{
 		Action:      action,
 		Layer:       LayerJudge,
 		Reason:      strings.TrimSpace(out.Reason),
 		JudgeTokens: judgeTokens, // 成本观测（T32）：落 intent_verdicts.judge_tokens
-	}, nil
+	}), nil
 }
 
 // judgeSystemPrompt 构造 system 消息：角色、标尺（约束原文）、输出 schema、

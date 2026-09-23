@@ -85,6 +85,10 @@ type VerdictRecord struct {
 	JudgeTokens int `json:"judge_tokens" gorm:"column:judge_tokens;not null;default:0"`
 	// HumanOverride 记录人工后续动作（审批改参数等），飞轮关键字段。
 	HumanOverride string    `json:"human_override" gorm:"column:human_override;type:varchar(16);not null;default:'none'"`
+	// JudgeModel 是判定时使用的 judge 模型 ID（models.id；规则层/baseline
+	// 判定为空串）。T61（issue #24）语料导出按此分层过滤——设计 §12 决策 2：
+	// 杂牌 judge 产生的 verdict 语料质量方差大，蒸馏前按 judge 模型过滤。
+	JudgeModel    string    `json:"judge_model"    gorm:"column:judge_model;type:varchar(64);not null;default:''"`
 	CreatedAt     time.Time `json:"created_at"     gorm:"column:created_at;not null;index:idx_intent_verdicts_session,priority:3;index:idx_intent_verdicts_policy,priority:3"`
 }
 
@@ -108,6 +112,10 @@ type VerdictRecordInput struct {
 	ModeAtDecision     string // 空 = observe
 	LatencyMs          int
 	JudgeTokens        int
+	// JudgeModel 是判定时使用的 judge 模型 ID（LLMJudge 从解析出的模型
+	// 元数据填入；规则层/baseline 判定为空）。落库为 judge_model 列
+	// （T61 语料导出按此分层过滤，issue #24）。
+	JudgeModel string
 }
 
 // ValidVerdictLayer 报告 layer 是否是合法枚举值。
@@ -199,6 +207,7 @@ func NewVerdictRecord(in VerdictRecordInput) (*VerdictRecord, error) {
 		ModeAtDecision:     mode,
 		LatencyMs:          in.LatencyMs,
 		JudgeTokens:        in.JudgeTokens,
+		JudgeModel:         in.JudgeModel,
 		HumanOverride:      HumanOverrideNone,
 		CreatedAt:          time.Now().UTC(),
 	}

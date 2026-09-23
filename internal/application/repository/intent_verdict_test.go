@@ -84,6 +84,21 @@ func TestNewVerdictRecordBaselinePolicyIsNull(t *testing.T) {
 	require.Nil(t, rec.PolicyVersion)
 }
 
+// TestNewVerdictRecordJudgeModel：judge 模型归属透传（T61，issue #24）。
+// 规则层/baseline 判定输入 JudgeModel 为空串，落库即空串（judge_model
+// 列默认 ''）；judge 层判定由 LLMJudge 填模型 ID。
+func TestNewVerdictRecordJudgeModel(t *testing.T) {
+	in := verdictInput("s1")
+	rec := mustVerdictRecord(t, in)
+	require.Equal(t, "", rec.JudgeModel, "规则层判定无 judge 模型归属")
+
+	in = verdictInput("s1")
+	in.Layer = types.VerdictLayerJudge
+	in.JudgeModel = "builtin-kimi-coding"
+	rec = mustVerdictRecord(t, in)
+	require.Equal(t, "builtin-kimi-coding", rec.JudgeModel)
+}
+
 // TestNewVerdictRecordRedactsSensitiveArgs 是验收标准「args_digest 脱敏」的
 // 核心断言：database_query 这类敏感工具的原始参数（SQL 原文）绝不落库，
 // 整条记录任何字段都不得出现原文，只存 digest。
@@ -196,6 +211,53 @@ func TestIntentVerdictListByPolicy(t *testing.T) {
 	rows, err = repo.ListByPolicy(ctx, 2, policyID, 0)
 	require.NoError(t, err)
 	require.Empty(t, rows)
+}
+
+// TestIntentVerdictListByJudgeModel 验收 [unit]（T61，issue #24）：
+// 按 judge 模型分层过滤——空串取规则层/baseline 判定，具体模型 ID 只取
+// 该 judge 产出的行；租户隔离与 limit 同时生效。
+func TestIntentVerdictListByJudgeModel(t *testing.T) {
+	repo := newIntentVerdictTestRepo(t)
+	ctx := context.Background()
+
+	base := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
+	mk := func(model, session string, at time.Time) *types.VerdictRecord {
+		in := verdictInput(session)
+		in.Layer = types.VerdictLayerJudge
+		in.JudgeModel = model
+		r := mustVerdictRecord(t, in)
+		r.CreatedAt = at
+		return r
+	}
+	rKimi := mk("builtin-kimi-coding", "sess-kimi", base)
+	rKimi2 := mk("builtin-kimi-coding", "sess-kimi", base.Add(time.Second))
+	rOther := mk("builtin-qwen", "sess-qwen", base.Add(2*time.Second))
+	inRule := verdictInput("sess-rule")
+	rRule := mustVerdictRecord(t, inRule) // JudgeModel 缺省 = 规则层
+	rRule.CreatedAt = base.Add(3 * time.Second)
+	for _, r := range []*types.VerdictRecord{rKimi, rKimi2, rOther, rRule} {
+		require.NoError(t, repo.Create(ctx, r))
+	}
+
+	rows, err := repo.ListByJudgeModel(ctx, 1, "builtin-kimi-coding", 0)
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "只取该 judge 模型产出的行")
+	require.Equal(t, rKimi.ID, rows[0].ID, "created_at 升序（导出语料的稳定顺序）")
+	require.Equal(t, rKimi2.ID, rows[1].ID)
+	require.Equal(t, "builtin-kimi-coding", rows[0].JudgeModel)
+
+	rows, err = repo.ListByJudgeModel(ctx, 1, "", 0)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "空 judge_model = 规则层/baseline 判定")
+	require.Equal(t, rRule.ID, rows[0].ID)
+
+	// 租户隔离 + limit。
+	rows, err = repo.ListByJudgeModel(ctx, 2, "builtin-kimi-coding", 0)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	rows, err = repo.ListByJudgeModel(ctx, 1, "builtin-kimi-coding", 1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
 }
 
 func TestIntentVerdictGetAndUpdateHumanOverride(t *testing.T) {
