@@ -75,7 +75,8 @@ type hnswIndexRow struct {
 // left alone. The whole sequence runs on one pinned connection under a
 // session advisory lock, so replicas take turns instead of dropping each
 // other's builds, and CREATE INDEX CONCURRENTLY runs outside a transaction
-// as PostgreSQL requires.
+// as PostgreSQL requires. statement_timeout is lifted for the DDL and reset
+// before the connection is returned to the pool.
 func (g *pgRepository) createHNSWIndex(dimension int) error {
 	ctx := context.Background()
 	log := logger.GetLogger(ctx)
@@ -120,6 +121,23 @@ func (g *pgRepository) createHNSWIndex(dimension int) error {
 				return nil
 			}
 		}
+
+		// Everything from here may run a CONCURRENTLY statement, which can take
+		// a long time on a large table. A statement_timeout set on the role or
+		// the database would cancel it and leave exactly the invalid index this
+		// function exists to repair — which then waits for a restart to be
+		// retried. Lift it for this session only. SET LOCAL is not an option:
+		// CONCURRENTLY cannot run inside a transaction. The connection goes
+		// back to the pool afterwards, so the RESET is not optional either.
+		if err := on().Exec("SET statement_timeout = 0").Error; err != nil {
+			return fmt.Errorf("could not lift statement_timeout for the build: %w", err)
+		}
+		defer func() {
+			if err := on().Exec("RESET statement_timeout").Error; err != nil {
+				log.Warnf("[Postgres] Could not reset statement_timeout after the HNSW build: %v "+
+					"(this pooled connection may run without the configured timeout until it is recycled)", err)
+			}
+		}()
 		for _, row := range rows {
 			if row.Name != name {
 				log.Warnf("[Postgres] Invalid HNSW index %s over %d-dim embeddings is not the app's; leaving it alone "+

@@ -72,6 +72,8 @@ const (
 		`WITH \(m = 16, ef_construction = 64\) WHERE \(dimension = 2560\)`
 	verifySQL = `SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass\(\$1\)`
 	unlockSQL = `SELECT pg_advisory_unlock\(\$1, \$2\)`
+	liftSQL   = `SET statement_timeout = 0`
+	resetSQL  = `RESET statement_timeout`
 )
 
 func expectLock(mock sqlmock.Sqlmock, dimension int, granted bool) {
@@ -89,6 +91,16 @@ func catalogRows(entries ...hnswIndexRow) *sqlmock.Rows {
 		rows.AddRow(e.Name, e.Valid)
 	}
 	return rows
+}
+
+// expectTimeoutLifted brackets the DDL stage: the timeout is lifted once the
+// catalog shows no valid index, and reset before the lock is released.
+func expectTimeoutLifted(mock sqlmock.Sqlmock) {
+	mock.ExpectExec(liftSQL).WillReturnResult(sqlmock.NewResult(0, 0))
+}
+
+func expectTimeoutReset(mock sqlmock.Sqlmock) {
+	mock.ExpectExec(resetSQL).WillReturnResult(sqlmock.NewResult(0, 0))
 }
 
 func expectUnlock(mock sqlmock.Sqlmock, dimension int) {
@@ -129,8 +141,10 @@ func TestCreateHNSWIndexBuildsWhenMissing(t *testing.T) {
 	repo, mock := newHNSWTestRepo(t)
 	expectLock(mock, 2560, true)
 	expectCatalog(mock, 2560, catalogRows())
+	expectTimeoutLifted(mock)
 	mock.ExpectExec(createSQL).WillReturnResult(sqlmock.NewResult(0, 0))
 	expectVerify(mock, true)
+	expectTimeoutReset(mock)
 	expectUnlock(mock, 2560)
 
 	require.NoError(t, repo.createHNSWIndex(2560))
@@ -151,11 +165,13 @@ func TestCreateHNSWIndexReplacesItsOwnInvalidIndexWhenNoBuildIsRunning(t *testin
 	repo, mock := newHNSWTestRepo(t)
 	expectLock(mock, 2560, true)
 	expectCatalog(mock, 2560, catalogRows(hnswIndexRow{Name: "embeddings_embedding_idx_2560", Valid: false}))
+	expectTimeoutLifted(mock)
 	mock.ExpectQuery(progressSQL).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectExec(`DROP INDEX CONCURRENTLY IF EXISTS embeddings_embedding_idx_2560`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(createSQL).WillReturnResult(sqlmock.NewResult(0, 0))
 	expectVerify(mock, true)
+	expectTimeoutReset(mock)
 	expectUnlock(mock, 2560)
 
 	require.NoError(t, repo.createHNSWIndex(2560))
@@ -166,7 +182,9 @@ func TestCreateHNSWIndexLeavesAnIndexAnotherSessionIsStillBuilding(t *testing.T)
 	repo, mock := newHNSWTestRepo(t)
 	expectLock(mock, 2560, true)
 	expectCatalog(mock, 2560, catalogRows(hnswIndexRow{Name: "embeddings_embedding_idx_2560", Valid: false}))
+	expectTimeoutLifted(mock)
 	mock.ExpectQuery(progressSQL).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	expectTimeoutReset(mock)
 	expectUnlock(mock, 2560)
 
 	require.NoError(t, repo.createHNSWIndex(2560))
@@ -177,8 +195,10 @@ func TestCreateHNSWIndexLeavesAForeignInvalidIndexAloneAndBuildsItsOwn(t *testin
 	repo, mock := newHNSWTestRepo(t)
 	expectLock(mock, 2560, true)
 	expectCatalog(mock, 2560, catalogRows(hnswIndexRow{Name: "hand_built_hnsw_2560", Valid: false}))
+	expectTimeoutLifted(mock)
 	mock.ExpectExec(createSQL).WillReturnResult(sqlmock.NewResult(0, 0))
 	expectVerify(mock, true)
+	expectTimeoutReset(mock)
 	expectUnlock(mock, 2560)
 
 	require.NoError(t, repo.createHNSWIndex(2560))
@@ -204,7 +224,9 @@ func TestCreateHNSWIndexReportsABuildFailureAndReleasesTheLock(t *testing.T) {
 	repo, mock := newHNSWTestRepo(t)
 	expectLock(mock, 2560, true)
 	expectCatalog(mock, 2560, catalogRows())
+	expectTimeoutLifted(mock)
 	mock.ExpectExec(createSQL).WillReturnError(errors.New("ERROR: permission denied for schema public"))
+	expectTimeoutReset(mock)
 	expectUnlock(mock, 2560)
 
 	err := repo.createHNSWIndex(2560)
@@ -217,13 +239,46 @@ func TestCreateHNSWIndexReportsAnIndexLeftInvalid(t *testing.T) {
 	repo, mock := newHNSWTestRepo(t)
 	expectLock(mock, 2560, true)
 	expectCatalog(mock, 2560, catalogRows())
+	expectTimeoutLifted(mock)
 	mock.ExpectExec(createSQL).WillReturnResult(sqlmock.NewResult(0, 0))
 	expectVerify(mock, false)
+	expectTimeoutReset(mock)
 	expectUnlock(mock, 2560)
 
 	err := repo.createHNSWIndex(2560)
 
 	require.ErrorContains(t, err, "missing or invalid")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCreateHNSWIndexDoesNotBuildWhenTheTimeoutCannotBeLifted(t *testing.T) {
+	// A build that a role-level statement_timeout would cancel is not started:
+	// it would only leave the invalid index this function exists to repair.
+	repo, mock := newHNSWTestRepo(t)
+	expectLock(mock, 2560, true)
+	expectCatalog(mock, 2560, catalogRows())
+	mock.ExpectExec(liftSQL).WillReturnError(errors.New("ERROR: permission denied to set parameter"))
+	expectUnlock(mock, 2560)
+
+	err := repo.createHNSWIndex(2560)
+
+	require.ErrorContains(t, err, "statement_timeout")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCreateHNSWIndexKeepsItsResultWhenTheResetFails(t *testing.T) {
+	// The index is built and verified; a failed RESET is logged, not turned
+	// into a build failure, and the lock is still released after it.
+	repo, mock := newHNSWTestRepo(t)
+	expectLock(mock, 2560, true)
+	expectCatalog(mock, 2560, catalogRows())
+	expectTimeoutLifted(mock)
+	mock.ExpectExec(createSQL).WillReturnResult(sqlmock.NewResult(0, 0))
+	expectVerify(mock, true)
+	mock.ExpectExec(resetSQL).WillReturnError(errors.New("connection reset by peer"))
+	expectUnlock(mock, 2560)
+
+	require.NoError(t, repo.createHNSWIndex(2560))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
