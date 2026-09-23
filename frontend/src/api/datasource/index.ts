@@ -82,6 +82,7 @@ export interface Resource {
   url: string
   parent_id?: string
   has_children?: boolean
+  metadata?: Record<string, unknown>
 }
 
 // --- API calls ---
