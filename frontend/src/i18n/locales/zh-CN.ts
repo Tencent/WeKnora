@@ -1869,6 +1869,19 @@ export default {
     }
   },
   preview: {
+    spreadsheet: {
+      worksheet: "工作表",
+      dimensions: "{rows} 行 · {columns} 列",
+      previousColumns: "上一组列",
+      nextColumns: "下一组列",
+      contents: "表格内容",
+      rowNumber: "行号",
+      empty: "此工作表没有数据。",
+      valuesOnly: "单元格内容按页显示，完整排版请下载原文件查看。",
+      truncated: "部分单元格内容在预览中已缩短，完整内容请下载原文件查看。",
+      tooLarge: "超过 {size} MiB 的文件无法预览，请下载原文件查看。",
+      timeout: "表格预览超时，请重试或下载原文件查看。",
+    },
     tab: '预览',
     loading: '正在加载文档预览...',
     loadFailed: '加载文档预览失败',

@@ -5727,6 +5727,19 @@ export default {
     }
   },
   preview: {
+    spreadsheet: {
+      worksheet: "Worksheet",
+      dimensions: "{rows} rows · {columns} columns",
+      previousColumns: "Previous columns",
+      nextColumns: "Next columns",
+      contents: "Spreadsheet contents",
+      rowNumber: "Row",
+      empty: "This worksheet has no data.",
+      valuesOnly: "Cell values are shown by page. Download the original file for its full formatting.",
+      truncated: "Some cell values are shortened in this preview. Download the original file to read them in full.",
+      tooLarge: "Files larger than {size} MiB cannot be previewed. Please download the original file.",
+      timeout: "Spreadsheet preview took too long. Please retry or download the original file.",
+    },
     tab: 'Preview',
     loading: 'Loading document preview...',
     loadFailed: 'Failed to load document preview',

@@ -5727,6 +5727,19 @@ export default {
     }
   },
   preview: {
+    spreadsheet: {
+      worksheet: "ワークシート",
+      dimensions: "{rows} 行 · {columns} 列",
+      previousColumns: "前の列",
+      nextColumns: "次の列",
+      contents: "表の内容",
+      rowNumber: "行",
+      empty: "このワークシートにデータはありません。",
+      valuesOnly: "セルの値をページごとに表示します。元の書式はファイルをダウンロードしてご確認ください。",
+      truncated: "一部のセルは省略表示されています。全文は元のファイルをご確認ください。",
+      tooLarge: "{size} MiB を超えるファイルはプレビューできません。元のファイルをダウンロードしてください。",
+      timeout: "表のプレビューがタイムアウトしました。再試行するか、元のファイルをダウンロードしてください。",
+    },
     tab: 'プレビュー',
     loading: 'ドキュメントのプレビューを読み込み中...',
     loadFailed: 'ドキュメントのプレビューの読み込みに失敗しました',

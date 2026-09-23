@@ -372,6 +372,12 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 
 文档分块按页加载，切换文档和检索跳转会更新分页状态。完整字段见[知识 API](../04-api/02-api-knowledge.md)与[分块 API](../04-api/02-api-chunks.md)。
 
+#### 表格分页预览
+
+Excel、CSV、TSV 表格在浏览器后台线程中解析，按实际有值的范围显示，避免仅有格式的空白行列拖慢页面。可切换工作表、跳转行页及切换列组，每页最多显示 50 行、25 列。原始行号和列字母保持可见。
+
+预览显示格式化后的单元格值，不还原合并单元格和完整工作簿排版；超长单元格会显示省略提示。完整内容和排版可通过原文件下载查看。超过 32 MiB 或解析超过 30 秒时会显示提示，文档详情和下载仍可用。这些限制仅影响浏览器预览，不影响文档解析、索引和检索。
+
 #### 下载与预览安全 {#_3-7-下载与预览安全}
 
 `GET /knowledge/:id/preview` 的安全机制由 `internal/handler/knowledge_preview_security_test.go` 固化验证：

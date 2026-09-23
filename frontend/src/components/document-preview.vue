@@ -8,7 +8,8 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { sanitizeMarkdownHTML } from '@/utils/security';
+import SpreadsheetPreview from '@/components/spreadsheet-preview.vue';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
@@ -23,7 +24,6 @@ import {
   resolvePreviewKind,
   shouldPrettyPrintJson,
   sniffPreview,
-  isValidUTF8,
   type FilePreviewKind,
 } from '@/utils/filePreview';
 
@@ -54,7 +54,9 @@ const blobUrl = ref('');
 const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
-const excelHtml = ref('');
+const excelBlob = shallowRef<Blob | null>(null);
+const excelFileType = ref('');
+let previewGeneration = 0;
 const mermaidSvg = ref('');
 const htmlViewMode = ref<'render' | 'source'>('render');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
@@ -227,47 +229,6 @@ async function renderDocx(blob: Blob) {
   }
 }
 
-function decodeCSVBlob(arrayBuffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(arrayBuffer);
-  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
-    return new TextDecoder('utf-8').decode(bytes);
-  }
-  if (isValidUTF8(bytes)) {
-    return new TextDecoder('utf-8').decode(bytes);
-  }
-  return new TextDecoder('gbk').decode(bytes);
-}
-
-async function renderExcel(blob: Blob, fileType?: string) {
-  const XLSX = await import('xlsx');
-  const arrayBuffer = await blob.arrayBuffer();
-
-  let workbook;
-  const lowerType = fileType?.toLowerCase();
-  if (lowerType === 'csv') {
-    const csvText = decodeCSVBlob(arrayBuffer);
-    workbook = XLSX.read(csvText, { type: 'string' });
-  } else if (lowerType === 'tsv' || lowerType === 'tab') {
-    const tsvText = decodeCSVBlob(arrayBuffer);
-    workbook = XLSX.read(tsvText, { type: 'string', FS: '\t' });
-  } else {
-    workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  }
-
-  let html = '';
-  workbook.SheetNames.forEach((name, sheetIdx) => {
-    const sheet = workbook.Sheets[name];
-    const sheetHtml = XLSX.utils.sheet_to_html(sheet, { id: `sheet-${sheetIdx}` });
-    html += `<div class="excel-sheet">`;
-    if (workbook.SheetNames.length > 1) {
-      html += `<div class="excel-sheet-name">${name}</div>`;
-    }
-    html += sheetHtml;
-    html += `</div>`;
-  });
-  excelHtml.value = sanitizeHTML(html);
-}
-
 async function renderText(blob: Blob, fileType: string) {
   let text = await blob.text();
   if (shouldPrettyPrintJson(fileType)) {
@@ -372,6 +333,7 @@ async function loadPreview() {
   if (loadedForId === sourceKey) return;
 
   cleanup();
+  const generation = previewGeneration;
   loading.value = true;
   error.value = '';
   htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
@@ -381,6 +343,7 @@ async function loadPreview() {
 
   try {
     const rawBlob = await fetchPreviewBlob();
+    if (generation !== previewGeneration || !props.active) return;
     let kind = resolvePreviewKind(ft);
     if (kind === 'unsupported') {
       const sample = new Uint8Array(await rawBlob.slice(0, FILE_PREVIEW_SNIFF_BYTES).arrayBuffer());
@@ -400,6 +363,7 @@ async function loadPreview() {
 
     loading.value = false;
     await nextTick();
+    if (generation !== previewGeneration || !props.active) return;
 
     switch (kind) {
       case 'pdf':
@@ -422,7 +386,8 @@ async function loadPreview() {
         break;
       }
       case 'excel': {
-        await renderExcel(blob, ft);
+        excelFileType.value = ft || '';
+        excelBlob.value = blob;
         break;
       }
       case 'text': {
@@ -446,14 +411,16 @@ async function loadPreview() {
       }
     }
   } catch (err: any) {
+    if (generation !== previewGeneration) return;
     console.error('Document preview failed:', err);
     error.value = err?.message || t('preview.loadFailed');
   } finally {
-    loading.value = false;
+    if (generation === previewGeneration) loading.value = false;
   }
 }
 
 function cleanup() {
+  ++previewGeneration;
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';
@@ -461,7 +428,7 @@ function cleanup() {
   textContent.value = '';
   highlightedCode.value = '';
   markdownHtml.value = '';
-  excelHtml.value = '';
+  excelBlob.value = null;
   mermaidSvg.value = '';
   htmlViewMode.value = 'render';
   pptxData.value = null;
@@ -579,8 +546,10 @@ onUnmounted(() => {
     </div>
 
     <!-- Excel -->
-    <div v-else-if="previewType === 'excel' && excelHtml" class="preview-excel">
-      <div ref="previewContent" tabindex="0" :aria-label="fileName" class="excel-container" v-html="excelHtml" />
+    <div v-else-if="previewType === 'excel' && excelBlob" class="preview-excel">
+      <div ref="previewContent" tabindex="0" :aria-label="fileName" class="excel-container">
+        <SpreadsheetPreview :blob="excelBlob" :file-type="excelFileType" :active="active" />
+      </div>
     </div>
 
     <!-- Markdown -->

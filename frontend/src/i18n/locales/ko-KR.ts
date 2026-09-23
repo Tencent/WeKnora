@@ -1867,6 +1867,19 @@ export default {
     }
   },
   preview: {
+    spreadsheet: {
+      worksheet: "워크시트",
+      dimensions: "{rows}행 · {columns}열",
+      previousColumns: "이전 열",
+      nextColumns: "다음 열",
+      contents: "표 내용",
+      rowNumber: "행",
+      empty: "이 워크시트에는 데이터가 없습니다.",
+      valuesOnly: "셀 값을 페이지별로 표시합니다. 원래 서식은 원본 파일을 다운로드하여 확인하세요.",
+      truncated: "일부 셀 내용이 미리보기에서 생략되었습니다. 전체 내용은 원본 파일을 다운로드하여 확인하세요.",
+      tooLarge: "{size} MiB보다 큰 파일은 미리 볼 수 없습니다. 원본 파일을 다운로드하세요.",
+      timeout: "표 미리보기 시간이 초과되었습니다. 다시 시도하거나 원본 파일을 다운로드하세요.",
+    },
     tab: '미리보기',
     loading: '문서 미리보기 로딩 중...',
     loadFailed: '문서 미리보기 로드 실패',
