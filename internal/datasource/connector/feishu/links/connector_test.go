@@ -33,9 +33,11 @@ func startFake(t *testing.T, api *fakeAPI) (*httptest.Server, *core.Config) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, core.TokenResponse{ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200})
+		writeJSON(w, core.TokenResponse{
+			ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200,
+		})
 	})
-	mux.HandleFunc("GET /open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /open-apis/wiki/v2/spaces", func(w http.ResponseWriter, _ *http.Request) {
 		api.listSpacesHit++
 		writeJSON(w, core.WikiSpaceListResponse{ApiResponse: core.ApiResponse{Code: 0}})
 	})
@@ -111,10 +113,13 @@ func startFake(t *testing.T, api *fakeAPI) (*httptest.Server, *core.Config) {
 			},
 		})
 	})
-	mux.HandleFunc("/open-apis/drive/v1/export_tasks/file/ft-links/download", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		_, _ = w.Write([]byte("fake-export"))
-	})
+	mux.HandleFunc(
+		"/open-apis/drive/v1/export_tasks/file/ft-links/download",
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("fake-export"))
+		},
+	)
 
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -124,7 +129,9 @@ func startFake(t *testing.T, api *fakeAPI) (*httptest.Server, *core.Config) {
 func TestListResources_WikiSingleNodeNoRecursion(t *testing.T) {
 	api := &fakeAPI{
 		nodes: map[string]core.WikiNode{
-			"P0uPwE6DgiAG44kVoZucLxbSnC6": wikiNodeJSON("P0uPwE6DgiAG44kVoZucLxbSnC6", "objDOC", "docx", "产品说明", "1700000000"),
+			"P0uPwE6DgiAG44kVoZucLxbSnC6": wikiNodeJSON(
+				"P0uPwE6DgiAG44kVoZucLxbSnC6", "objDOC", "docx", "产品说明", "1700000000",
+			),
 		},
 	}
 	ts, cfg := startFake(t, api)
@@ -248,7 +255,8 @@ func TestFetchStream_ExportAndBlocks(t *testing.T) {
 	if len(h.emitted) == 0 {
 		t.Fatal("export path emitted nothing")
 	}
-	if !strings.Contains(string(h.emitted[0].Content), "fake-export") && h.emitted[0].ContentType != "application/octet-stream" {
+	exported := string(h.emitted[0].Content)
+	if !strings.Contains(exported, "fake-export") && h.emitted[0].ContentType != "application/octet-stream" {
 		// export returns binary
 		if len(h.emitted[0].Content) == 0 {
 			t.Errorf("empty export content: %+v", h.emitted[0])

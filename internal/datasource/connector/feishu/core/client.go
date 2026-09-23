@@ -932,7 +932,7 @@ func (c *Client) BatchQueryMetas(ctx context.Context, docs []DriveDocMetaRequest
 		chunk := docs[start:end]
 		reqDocs := make([]driveBatchQueryDoc, 0, len(chunk))
 		for _, d := range chunk {
-			reqDocs = append(reqDocs, driveBatchQueryDoc{DocToken: d.DocToken, DocType: d.DocType})
+			reqDocs = append(reqDocs, driveBatchQueryDoc(d))
 		}
 		var resp driveBatchQueryResponse
 		if err := c.DoRequest(ctx, http.MethodPost, "/open-apis/drive/v1/metas/batch_query", driveBatchQueryRequest{

@@ -24,7 +24,7 @@ const (
 	ConnectorTypeFeishuDrive = "feishu_drive"
 	// ConnectorTypeLarkDrive is the Lark (international) Drive mode, the
 	// international counterpart of ConnectorTypeFeishuDrive.
-	ConnectorTypeLarkDrive   = "lark_drive"
+	ConnectorTypeLarkDrive = "lark_drive"
 	// ConnectorTypeFeishuLinks syncs user-supplied Feishu document URLs (wiki
 	// copylink, /docx/, /sheets/, …) without enumerating a wiki space or Drive
 	// folder. Shares feishu/core with the wiki and Drive connectors.

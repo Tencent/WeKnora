@@ -1,3 +1,4 @@
+// Package links implements the Feishu/Lark document-URL-list connector.
 package links
 
 import (
@@ -28,10 +29,12 @@ func NewConnector(region core.Region) *Connector {
 
 var _ datasource.StreamingConnector = (*Connector)(nil)
 
+// Type returns the connector type identifier.
 func (c *Connector) Type() string {
 	return c.region.ConnectorType
 }
 
+// Validate verifies that the Feishu/Lark configuration is valid by testing connectivity.
 func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
 	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
@@ -44,6 +47,8 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	return nil
 }
 
+// ListResources resolves the configured document URLs into picker rows.
+// parentID is unused: the list is flat and has no children.
 func (c *Connector) ListResources(
 	ctx context.Context, config *types.DataSourceConfig, parentID string,
 ) ([]types.Resource, error) {
@@ -60,6 +65,7 @@ func (c *Connector) ListResources(
 	return resources, nil
 }
 
+// ResolveResourceAncestors is a no-op: URL-list resources are not nested.
 func (c *Connector) ResolveResourceAncestors(
 	_ context.Context, _ *types.DataSourceConfig, _ []string,
 ) ([]string, error) {
@@ -68,8 +74,9 @@ func (c *Connector) ResolveResourceAncestors(
 
 const linksRootResourceID = "links"
 
+// FetchAll performs a full sync of the configured document URLs.
 func (c *Connector) FetchAll(
-	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+	ctx context.Context, config *types.DataSourceConfig, _ []string,
 ) ([]types.FetchedItem, error) {
 	feishuConfig, err := core.ParseFeishuConfig(config, c.region)
 	if err != nil {
@@ -80,6 +87,7 @@ func (c *Connector) FetchAll(
 	return core.FetchAllEngine(ctx, client, cfg, cfg.ResourceIDs, newLinksOps(c.region, config))
 }
 
+// FetchIncremental performs an incremental sync of the configured document URLs.
 func (c *Connector) FetchIncremental(
 	ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
@@ -95,6 +103,7 @@ func (c *Connector) FetchIncremental(
 	return core.FetchIncrementalEngine(ctx, client, withLinksRoot(config), cursor, ops)
 }
 
+// FetchStream performs a resumable sync of the configured document URLs.
 func (c *Connector) FetchStream(
 	ctx context.Context, config *types.DataSourceConfig,
 	cursor *types.SyncCursor, h datasource.StreamHandler,
@@ -396,7 +405,9 @@ func resolveURLs(ctx context.Context, client *core.Client, urls []string) ([]lin
 			continue
 		}
 		if f, ok := failedSet[p.Token]; ok {
-			resources = append(resources, errorResource(p, classifyMetaFailCode(f.Code), fmt.Sprintf("code=%d", f.Code)))
+			resources = append(resources, errorResource(
+				p, classifyMetaFailCode(f.Code), fmt.Sprintf("code=%d", f.Code),
+			))
 			continue
 		}
 		resources = append(resources, errorResource(p, "not_found", "document meta not returned"))
