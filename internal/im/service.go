@@ -28,6 +28,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	mcppkg "github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/mcp/headertemplate"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -421,10 +422,14 @@ func formatQuotedContext(quote *QuotedMessage) string {
 func withIMIdentity(ctx context.Context, tenantID uint64, channelID string, msg *IncomingMessage) context.Context {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, fmt.Sprintf("system-%d", tenantID))
+	values := map[string]string{"tenant.id": fmt.Sprint(tenantID)}
 	if msg != nil {
 		principalID := fmt.Sprintf("%d:%s:%s:%s", tenantID, channelID, msg.Platform, msg.UserID)
 		ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalIMUser, ID: principalID})
+		values["principal.id"], values["principal.type"] = principalID, string(types.PrincipalIMUser)
+		values["im.user_id"], values["im.platform"] = msg.UserID, string(msg.Platform)
 	}
+	ctx = types.WithMCPHeaderContext(ctx, headertemplate.NewContext(values, nil))
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
 	// IM bots have no live client that can complete an in-conversation MCP OAuth
 	// prompt, so mark the context non-interactive: the agent emits a one-shot

@@ -5271,6 +5271,7 @@ export default {
     "stale": "接続または認証設定が変更されました。モデルで使用する前に一覧を更新してください。",
     "notSynced": "未同期です。取得すると説明とパラメーター定義が保存されます。",
     "syncRequired": "先に接続して Tools を取得してください。モデルは同期済みの一覧のみ使用できます。",
+    "unsyncedSaveHint": "ツール未同期でも用途を手動入力して保存できます。後のリクエストでツールを検出できます。",
     "needsRefresh": "更新が必要",
     "saved": "保存済み",
     "syncedAt": "同期日時：",
@@ -5353,10 +5354,20 @@ export default {
     },
     customHeaders: {
       label: 'カスタムヘッダー（任意）',
-      desc: 'すべてのMCPリクエストに付与されるHTTPヘッダーです。企業向けゲートウェイの認証やトレースなどに利用します。',
+      desc: 'MCPリクエスト用のHTTPヘッダーです。user.email、external.user_id、im.user_id、request.headers.X-AAAを参照でき、値がなければヘッダーを省略します。テンプレート開始記号を文字列として送る方法はAPI文書を参照してください。',
       add: 'ヘッダーを追加',
       keyPlaceholder: 'ヘッダー名',
-      valuePlaceholder: 'ヘッダーの値'
+      valuePlaceholder: 'ヘッダーの値',
+      insertVariable: 'IDを挿入',
+      metadataContext: 'ツール一覧はワークスペースで共有し、動的ヘッダーは接続だけを分離します。設定画面では欠けた業務ヘッダーを省略します。上流が取得を拒否した場合も用途を入力して保存できます。ネイティブIMでは request.headers は使えず、im.user_id を使えます。',
+      errors: {
+        invalidName: '有効なHTTPヘッダー名を入力してください。',
+        duplicateName: 'ヘッダー名は大文字と小文字を区別せず一意にしてください。',
+        invalidValue: 'ヘッダー値に制御文字は使用できません。',
+        unclosedExpression: 'テンプレート式に終了記号がありません。',
+        invalidVariable: '未対応の変数または式が含まれています。',
+        protectedHeader: '認証情報、ID、通信ヘッダーは動的に読み書きできません。'
+      }
     },
     codeImport: {
       toggle: 'コードからインポート',

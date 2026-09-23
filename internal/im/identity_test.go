@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/mcp/headertemplate"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -47,5 +48,26 @@ func TestWithIMIdentity(t *testing.T) {
 
 	if !types.IsMCPOAuthNonInteractive(ctx) {
 		t.Fatal("IM context should mark MCP OAuth as non-interactive")
+	}
+	template, err := headertemplate.Parse("{{im.user_id}}/{{im.platform}}/{{principal.id}}/{{tenant.id}}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := template.Resolve(types.MCPHeaderContextFromContext(ctx))
+	if err != nil || got != "open-id-1/feishu/42:channel-1:feishu:open-id-1/42" {
+		t.Fatalf("resolved MCP IM identity = %q, %v", got, err)
+	}
+}
+
+func TestWithIMIdentityExposesWeComSenderIDToMCPHeaders(t *testing.T) {
+	msg := &IncomingMessage{Platform: PlatformWeCom, UserID: "wecom-sender-42"}
+	ctx := withIMIdentity(context.Background(), 42, "channel-wecom", msg)
+	template, err := headertemplate.Parse("{{im.user_id}}/{{im.platform}}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := template.Resolve(types.MCPHeaderContextFromContext(ctx))
+	if err != nil || got != "wecom-sender-42/wecom" {
+		t.Fatalf("resolved MCP WeCom identity = %q, %v", got, err)
 	}
 }

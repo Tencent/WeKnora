@@ -2207,6 +2207,7 @@ export default {
     "stale": "连接或认证配置已改变。以下是旧目录，重新同步后才能供模型使用。",
     "notSynced": "尚未同步工具。连接并拉取后，会保存完整描述和参数定义。",
     "syncRequired": "请先连接并拉取 Tools，同步后的目录才能给模型使用。",
+    "unsyncedSaveHint": "工具尚未同步时也可手动填写使用说明并保存；模型将在后续请求中按需发现工具。",
     "needsRefresh": "需要重新同步",
     "saved": "已保存目录",
     "syncedAt": "同步时间：",
@@ -2289,10 +2290,20 @@ export default {
     },
     customHeaders: {
       label: '自定义请求头（可选）',
-      desc: '附加到每次 MCP 请求的 HTTP 请求头，常用于企业网关鉴权、链路追踪等场景。',
+      desc: '附加到 MCP 请求。值可引用 user.email、external.user_id、im.user_id 或 request.headers.X-AAA；缺值时省略该 Header。字面量模板起始符请按 API 文档转义。',
       add: '添加请求头',
       keyPlaceholder: 'Header 名称',
-      valuePlaceholder: 'Header 值'
+      valuePlaceholder: 'Header 值',
+      insertVariable: '插入身份变量',
+      metadataContext: '工具目录在工作区内共用；动态 Header 值仅隔离连接。设置页缺少业务 Header 时会省略它，若上游拒绝拉取，仍可手动填写用途并保存。企微没有 request.headers 入站值，可用 im.user_id。',
+      errors: {
+        invalidName: '请输入合法的 HTTP 请求头名称。',
+        duplicateName: '请求头名称不能重复（忽略大小写）。',
+        invalidValue: '请求头值不能包含控制字符。',
+        unclosedExpression: '模板表达式缺少结束标记。',
+        invalidVariable: '模板包含不支持的变量或表达式。',
+        protectedHeader: '不能动态读取或设置凭证、身份及传输协议请求头。'
+      }
     },
     toasts: {
       created: 'MCP 服务已创建',

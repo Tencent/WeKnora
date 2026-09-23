@@ -4,7 +4,7 @@
     :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
     :class="`mcp-drawer mcp-drawer--${formData.transport_type}`"
     :confirm-loading="submitting"
-    :confirm-disabled="metadataBusy || generatingUsage || (step === 1 && !toolsSynced)"
+    :confirm-disabled="metadataBusy || generatingUsage"
     :confirm-text="t(step === 0 ? 'mcpMetadata.saveNext' : 'common.save')"
     width="680px"
     :min-width="560"
@@ -161,6 +161,13 @@
                 v-model="item.value"
                 :placeholder="t('mcpServiceDialog.customHeaders.valuePlaceholder')"
                 class="custom-header-value"
+              />
+              <t-select
+                :value="''"
+                :placeholder="t('mcpServiceDialog.customHeaders.insertVariable')"
+                :options="mcpHeaderVariableOptions"
+                class="custom-header-variable"
+                @change="insertHeaderTemplate(idx, $event)"
               />
               <t-button
                 variant="text"
@@ -351,9 +358,13 @@
               :disabled="generatingUsage || submitting"
               :placeholder="t('mcpMetadata.instructionsPlaceholder')" />
             <p class="form-desc">{{ t('mcpMetadata.generateHint') }}</p>
+            <p v-if="!toolsSynced && !metadataBusy" class="form-desc">
+              {{ t('mcpMetadata.unsyncedSaveHint') }}
+            </p>
           </div>
         </section>
         <McpMetadataPanel v-if="currentService?.id" :key="currentService.id" :service-id="currentService.id"
+          :context-hint="hasDynamicHeaders ? t('mcpServiceDialog.customHeaders.metadataContext') : undefined"
           :disabled="submitting || generatingUsage" @busy="metadataBusy = $event" @synced="toolsSynced = $event" />
       </template>
     </t-form>
@@ -386,6 +397,7 @@ import CredentialResource, {
   type CredentialFieldDef,
   type CredentialResourceApi,
 } from '@/components/credentials/CredentialResource.vue'
+import { hasDynamicMCPHeaders, mcpHeaderVariables, validateMCPHeaders } from '@/utils/mcpHeaderTemplate'
 
 interface Props {
   visible: boolean
@@ -415,6 +427,11 @@ let usageGeneration = 0
 const formRef = ref<FormInstanceFunctions>()
 const submitting = ref(false)
 const { t, locale } = useI18n()
+const mcpHeaderVariableOptions = mcpHeaderVariables.map((value) => ({ label: value, value }))
+const hasDynamicHeaders = computed(() => {
+  const headers = Object.fromEntries(formData.value.headers.map(({ key, value }) => [key, value]))
+  return hasDynamicMCPHeaders(headers)
+})
 const codeImportPlaceholder = `{
   "mcpServers": {
     "my-server": {
@@ -935,11 +952,20 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
   return data
 }
 
+function insertHeaderTemplate(index: number, rawVariable: unknown) {
+  const variable = String(rawVariable ?? '')
+  if (!mcpHeaderVariables.includes(variable)) return
+  const row = formData.value.headers[index]
+  if (row) row.value += `{{${variable}}}`
+}
+
 async function saveConnection(): Promise<MCPService | null> {
   if (submitting.value) return null
   const valid = await formRef.value?.validate()
   if (valid !== true) return null
   if (!formData.value.name.trim()) { MessagePlugin.warning(t('mcpServiceDialog.rules.nameRequired')); return null }
+  const headerError = validateMCPHeaders(formData.value.headers, formData.value.auth_config.api_key_header.trim())
+  if (headerError) { MessagePlugin.warning(t(`mcpServiceDialog.customHeaders.errors.${headerError}`)); return null }
   try { const url = new URL(formData.value.url); if (!['https:', 'http:'].includes(url.protocol)) throw new Error('url') }
   catch { MessagePlugin.warning(t('mcpServiceDialog.rules.urlInvalid')); return null }
   submitting.value = true
@@ -985,10 +1011,6 @@ const handleSubmit = async () => {
   const instructions = formData.value.usage_instructions.trim()
   if (!instructions) {
     MessagePlugin.warning(t('mcpMetadata.instructionsRequired'))
-    return
-  }
-  if (!toolsSynced.value) {
-    MessagePlugin.warning(t('mcpMetadata.syncRequired'))
     return
   }
   submitting.value = true
@@ -1152,6 +1174,11 @@ const handleClose = () => {
 
 .custom-header-value {
   flex: 1;
+  min-width: 0;
+}
+
+.custom-header-variable {
+  flex: 0 0 190px;
   min-width: 0;
 }
 

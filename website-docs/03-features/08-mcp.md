@@ -24,6 +24,8 @@ MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 M
 
 OAuth 服务按调用者分别授权。工具需要审批时，在对话中检查参数并确认；单独停用某个工具后，运行时不会执行该工具。WeKnora 的 MCP 客户端不支持 stdio 传输。
 
+自定义 Header 的值可以引用当前请求，例如 `AAA: {{request.headers.X-AAA}}`，也可以使用 `user.email`、`external.user_id`、`im.user_id`、`tenant.id` 等身份变量及 `??` 回退。`request.headers.*` 仅来自 Web/API HTTP 请求；原生企微没有此类入站 Header，可用当前发送者 ID 对应的 `im.user_id`。变量缺值时会省略整个出站业务 Header，固定 MCP 鉴权配置仍会发送。动态连接按实际 Header 值隔离；非 OAuth 工具目录在空间内共用。字面量 `{{` 应写为 `\{{`，详细规则见 [MCP 服务 API](/04-api/02-api-agent-mcp)。
+
 ## 供外部客户端调用
 
 在「设置 → 发布与集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，需要问答时再指定默认 Agent。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面同时给出 Cursor / VS Code / Claude Desktop 的 `mcpServers` 配置、Claude Code 的一行命令，以及仅支持 stdio 的客户端通过 `mcp-remote` 桥接的写法。
@@ -162,10 +164,10 @@ type MCPService struct {
 
 `internal/mcp/manager.go` 的 `MCPManager` 维护 `map[cacheKey]MCPClient` 连接缓存：
 
-- **缓存键**（`cacheKey` 函数）：非 OAuth 服务按 `service.ID` 共享一条连接；OAuth 服务按 `service.ID + "\x00" + principal.StorageID()` **每个身份一条连接**，保证每个用户用自己的 token 连接。
+- **缓存键**（`cacheKey` 函数）：静态 Header 的非 OAuth 服务按 `service.ID` 共享连接；OAuth 服务按授权主体隔离。配置动态 Header 时，连接额外按调用主体和实际转发值隔离。
 - **GetOrCreateClient**：先查缓存（`IsConnected()` 才复用），未命中则 `NewMCPClient` → `Connect`（使用 manager 的长生命周期 context，SSE 需要持久连接）→ `Initialize`（受 timeout 限制）→ 存入缓存。OAuth 服务从 ctx 提取 `TenantID` 与 `MCPOAuthPrincipalFromContext`（embed 场景映射到 per-visitor principal）。
 - **CloseClient(serviceID)**：断开并删除该服务的全部缓存连接——包括所有 `serviceID\x00principal` 形式的 per-principal OAuth 连接。凭据变更、服务禁用/配置变更、OAuth 授权完成/撤销后都会调用它强制下次重连。
-- **后台清理**：每 5 分钟一轮 `removeDisconnectedClients()` 移除已断开的客户端。
+- **后台清理**：每 30 秒一轮 `removeDisconnectedClients()` 移除已断开的客户端；动态 Header 连接闲置 2 分钟后回收。
 - **会话失效自愈**：`client.go` 的 `checkErrorAndDisconnectIfNeeded` 识别服务器返回的 `"Invalid session ID"` / `"No active connection"`（SSE 与 Streamable HTTP 都用 `Mcp-Session-Id` 会话），主动断连使下次调用重建会话；`OnConnectionLost` 回调同理。
 
 `Initialize` 握手中客户端标识为：
