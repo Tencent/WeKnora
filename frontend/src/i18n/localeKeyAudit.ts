@@ -104,6 +104,11 @@ const EXTRA_PREFIXES = [
   'organization.role.',
   'inviteRegister.',
   'modelSettings.builtinModels.',
+  // Image-attribute display text is keyed by the backend attribute registry
+  // (imageAttr.contain_text.label …), built from the schema response at runtime,
+  // so it is registered as a whole prefix: a new backend attribute must keep
+  // being translated without touching the audit.
+  'imageAttr.',
 ] as const
 
 /** Keys that must survive pruning even when static analysis misses them. */

@@ -3930,7 +3930,16 @@ export default {
         descriptionLanguageAuto: '문서 언어 자동 사용',
         customInstructionsLabel: '이미지 처리 지침',
         customInstructionsDescription: 'OCR 및 Markdown 형식은 유지하면서 시각적 우선순위를 추가합니다',
-        customInstructionsPlaceholder: '예: 명판, 모델 번호, 경고 코드 및 표 단위를 중점적으로 인식…'
+        customInstructionsPlaceholder: '예: 명판, 모델 번호, 경고 코드 및 표 단위를 중점적으로 인식…',
+        imageAttrsLabel: '이미지 속성 관찰',
+        imageAttrsDescription: '켜면 각 이미지를 먼저 속성 관찰+설명한 뒤, 속성에 따라 이미지 내 텍스트에 OCR을 실행할지 결정합니다. 끄면 기본 모드: 모든 이미지를 하나씩 설명하고 모두 OCR합니다',
+        imageAttrsSchemaLabel: '관찰 가능한 이미지 속성',
+        imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',
+        imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
+        imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
+        imageAttrsOcrOnUnobserved: '이미지 속성 관찰에 실패해도 OCR 실행',
+        imageAttrsOcrOnUnobservedDesc: '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
+        imagePipelineKbNote: '기본값은 지식베이스 설정을 따르며 이번 작업에 맞게 조정할 수 있습니다'
       },
       tableMetadataInstructions: {
         label: '테이블 메타데이터 지침',
@@ -7466,5 +7475,28 @@ export default {
     myChats: '내 대화',
     apiChats: 'API 세션',
     noSessions: '대화가 없습니다'
+  },
+  // 관찰 속성의 표시 문구. 속성 이름으로 색인하며 여기서는 번역만 담당합니다.
+  // 속성 이름의 점은 밑줄로 이스케이프합니다(contain.text → contain_text) —— vue-i18n 은
+  // 키를 점 단위로 순회하므로 리터럴 'contain.text' 키는 해석되지 않습니다.
+  // 번역이 없는 속성은 백엔드 등록표의 설명으로 대체됩니다.
+  imageAttr: {
+    contain_text: {
+      label: '이미지 내 텍스트 양',
+      description: '이미지 자체가 담고 있는 본문 텍스트의 양입니다. 텍스트를 읽기 위해 별도 OCR을 돌릴 가치가 있는지 판단합니다.',
+      values: {
+        none: '텍스트 없음',
+        sparse: '약간의 글자만 —— 로고, 도로 표지판, 단일 라벨',
+        block: '문단 단위 본문 —— 스크린샷, 표, 문서 페이지'
+      }
+    },
+    contain_data_visual: {
+      label: '데이터 시각화',
+      description: '이미지가 차트, 그래프, 도표, 인포그래픽으로 데이터를 전달하는지 여부입니다. 글자가 적어 보여도 OCR 대상으로 유지합니다.',
+      values: {
+        'true': '예 —— 차트, 그래프, 도표',
+        'false': '아니오 —— 사진, 삽화, 아이콘, 장식'
+      }
+    }
   }
 }

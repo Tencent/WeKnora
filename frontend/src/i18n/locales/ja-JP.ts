@@ -3690,7 +3690,16 @@ export default {
         descriptionLanguageAuto: 'ドキュメントの言語に従う',
         customInstructionsLabel: '画像処理の指示',
         customInstructionsDescription: 'OCRとMarkdown出力の仕様は固定したまま、視覚的に優先する対象を追加できます',
-        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…'
+        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…',
+        imageAttrsLabel: '画像属性の観察',
+        imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
+        imageAttrsSchemaLabel: '観察可能な画像属性',
+        imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
+        imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
+        imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
+        imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
+        imageAttrsOcrOnUnobservedDesc: 'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
+        imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
   },
@@ -7466,5 +7475,28 @@ export default {
     capabilityRequired: '権限を1つ以上選択してください',
     loadFailed: 'プラットフォームAPIキーの読み込みに失敗しました',
     createFailed: 'プラットフォームAPIキーの作成に失敗しました'
+  },
+  // 観察属性の表示文言。属性名で索引し、ここでは翻訳のみを担当します。
+  // 属性名のドットはアンダースコアにエスケープします（contain.text → contain_text）——
+  // vue-i18n はキーをドットで辿るため、リテラルの 'contain.text' は解決できません。
+  // 未翻訳の属性はバックエンド登録表の説明にフォールバックします。
+  imageAttr: {
+    contain_text: {
+      label: '画像内のテキスト量',
+      description: '画像自体がどれだけ本文テキストを含むか。テキスト読み取りのために別途 OCR を行う価値があるかを判断します。',
+      values: {
+        none: 'テキストなし',
+        sparse: 'わずかな文字のみ —— ロゴ、道路標識、単一のラベル',
+        block: 'まとまった本文 —— スクリーンショット、表、文書ページ'
+      }
+    },
+    contain_data_visual: {
+      label: 'データ可視化',
+      description: '画像がグラフ・図表・ダイアグラム・インフォグラフィックとしてデータを伝えているか。文字が少なく見えても OCR の対象に残します。',
+      values: {
+        'true': 'はい —— グラフ・図表・ダイアグラム',
+        'false': 'いいえ —— 写真・イラスト・アイコン・装飾'
+      }
+    }
   }
 }

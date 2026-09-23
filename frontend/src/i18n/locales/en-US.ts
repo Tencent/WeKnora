@@ -3690,7 +3690,16 @@ export default {
         descriptionLanguageAuto: 'Follow document language',
         customInstructionsLabel: 'Image Processing Instructions',
         customInstructionsDescription: 'Add visual priorities while OCR and Markdown output contracts remain fixed',
-        customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…'
+        customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…',
+        imageAttrsLabel: 'Image attribute observation',
+        imageAttrsDescription: 'When on, each image is first observed for attributes and described, then the attributes decide whether an OCR round runs for the text in the image. When off, the basic mode applies: every image is described and OCR runs for all of them',
+        imageAttrsSchemaLabel: 'Observable image attributes',
+        imageAttrsSchemaDescription: 'The model observes the attributes below (defined by the backend registry) to drive the OCR policy',
+        imageAttrsOcrConditions: 'Trigger OCR based on the observed attribute conditions',
+        imageAttrsOcrConditionsDesc: 'When the observed attributes match the conditions below, OCR runs on the image',
+        imageAttrsOcrOnUnobserved: 'Run OCR when image-attribute observation fails',
+        imageAttrsOcrOnUnobservedDesc: 'When the model fails to observe the image attributes correctly, OCR runs by default so body text is never lost; turn off to skip. (A small vision model such as 4B, or custom image-instruction prompts that conflict with the system prompt, can cause the observation to fail; 8B and above rarely fail, so leaving this on is recommended)',
+        imagePipelineKbNote: 'Defaults follow the knowledge base settings; adjust them for this task'
       }
     }
   },
@@ -7466,5 +7475,29 @@ export default {
     capabilityRequired: 'Select at least one capability',
     loadFailed: 'Failed to load platform API keys',
     createFailed: 'Failed to create platform API key'
+  },
+  // Display text for the observed image attributes, keyed by attribute name.
+  // Attribute names escape their dots (contain.text → contain_text) because
+  // vue-i18n walks a key segment by segment on the dots, so a literal
+  // 'contain.text' key would never resolve. An attribute without a translation
+  // falls back to the registry's own wording.
+  imageAttr: {
+    contain_text: {
+      label: 'Text in the image',
+      description: 'How much body text the picture itself carries. Decides whether reading its text is worth a separate OCR pass.',
+      values: {
+        none: 'no text at all',
+        sparse: 'a few words — a logo, a road sign, a single label',
+        block: 'a block of body text — a screenshot, a table, a document page'
+      }
+    },
+    contain_data_visual: {
+      label: 'Data visual',
+      description: 'Whether the picture conveys data as a chart, graph, diagram or infographic. Such images keep their labels on the OCR path even when the text looks sparse.',
+      values: {
+        'true': 'yes — a chart, graph or diagram',
+        'false': 'no — a photo, drawing, icon or decoration'
+      }
+    }
   }
 }

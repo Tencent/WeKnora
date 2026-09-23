@@ -250,6 +250,20 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	}
 }
 
+// RegisterImageAttrRoutes wires the global, read-only image-attribute registry
+// that drives the KB editor's attribute panel.
+//
+// The registry is a single source of truth, so adding an attribute is a
+// backend-only change (one registry row) and the UI follows automatically. It
+// carries no KB id and needs only the Viewer role, so — like the other
+// read-only KB-editor helpers GET /chunker/preview and GET
+// /system/parser-engines — it is mounted at the top level rather than under
+// the /knowledge-bases collection.
+func RegisterImageAttrRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
+	g.apiKeyRoute(r, http.MethodGet, "/image-attrs/schema",
+		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.GetImageAttrsSchema)
+}
+
 // RegisterKnowledgeBaseActivityRoutes exposes the read-only per-KB activity
 // feed. It intentionally stays JWT-only: audit history is a sensitive owner
 // surface and no existing workspace API-key capability grants audit access.

@@ -3932,7 +3932,16 @@ export default {
         descriptionLanguageAuto: '自动跟随文档语言',
         customInstructionsLabel: '图片解析要求',
         customInstructionsDescription: '补充需要重点识别的视觉信息，OCR 和 Markdown 格式协议保持不变',
-        customInstructionsPlaceholder: '例如：重点识别设备铭牌、型号、告警代码和表格中的单位…'
+        customInstructionsPlaceholder: '例如：重点识别设备铭牌、型号、告警代码和表格中的单位…',
+        imageAttrsLabel: '图片属性观察',
+        imageAttrsDescription: '开启后，解析时对每张图片先「观察属性＋描述」，再按属性决定是否对图内文字再跑一轮 OCR；关闭则沿用基础模式：所有图片逐张描述并全部 OCR',
+        imageAttrsSchemaLabel: '可观察的图片属性',
+        imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',
+        imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
+        imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
+        imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
+        imageAttrsOcrOnUnobservedDesc: '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
+        imagePipelineKbNote: '默认跟随知识库设置，可针对本次任务调整'
       },
       tableMetadataInstructions: {
         label: '表格元数据生成要求',
@@ -7468,5 +7477,28 @@ export default {
     myChats: '我的对话',
     apiChats: 'API 会话',
     noSessions: '暂无对话'
+  },
+  // 图片属性的展示文案，按属性名索引（后端注册表给出属性名，这里只做翻译）。
+  // 注意：属性名里的点号要转义成下划线（contain.text → contain_text）——vue-i18n 按点号
+  // 逐段下钻，写成字面量 'contain.text' 的键永远取不到。
+  // 未翻译的属性会回落到后端注册表自带的说明，所以新增属性不会显示成空行。
+  imageAttr: {
+    contain_text: {
+      label: '图中文字量',
+      description: '图片自身承载多少正文文字，决定是否值得为它单独跑一轮 OCR。',
+      values: {
+        none: '没有文字',
+        sparse: '只有少量文字 —— 图标、路牌、单个标签',
+        block: '成段正文 —— 截图、表格、文档页面'
+      }
+    },
+    contain_data_visual: {
+      label: '数据可视化',
+      description: '图片是否以图表、曲线、示意图或信息图的方式承载数据；这类图即使看起来文字很少，也会保留在 OCR 路径上。',
+      values: {
+        'true': '是 —— 图表、曲线或示意图',
+        'false': '否 —— 照片、插画、图标或装饰图'
+      }
+    }
   }
 }
