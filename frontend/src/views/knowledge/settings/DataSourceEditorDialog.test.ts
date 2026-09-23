@@ -18,7 +18,12 @@ const compiled = ts.transpileModule(script, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
 
-async function fixture({ configured = true, create = false } = {}) {
+async function fixture({
+  configured = true,
+  create = false,
+  type = 'gitlab',
+  settings = { projects: [{ project_id: '123', paths: [] }] },
+} = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
   let storedToken = configured ? 'expired-token' : ''
   const api = {
@@ -42,9 +47,9 @@ async function fixture({ configured = true, create = false } = {}) {
   const props = reactive({
     visible: false, kbId: 'kb-one',
     dataSource: create ? null : {
-      id: 'source-one', name: 'GitLab', type: 'gitlab',
+      id: 'source-one', name: 'GitLab', type,
       credentials: { credentials: { configured } },
-      config: { resource_ids: [], settings: { projects: [{ project_id: '123', paths: [] }] } },
+      config: { resource_ids: [], settings },
       sync_schedule: '0 0 */6 * * *', sync_mode: 'incremental',
       conflict_strategy: 'overwrite', sync_deletions: true,
     },
@@ -155,5 +160,32 @@ test('new GitLab data sources continue to test credentials without persistence',
     await f.vm.testConnection()
     assert.equal(f.vm.testResult, 'success')
     assert.deepEqual(f.calls.map(call => call.method), ['validateCredentials'])
+  } finally { f.close() }
+})
+
+test('a new Yuque data source adopts the TOC folder layout', async () => {
+  const f = await fixture({ create: true })
+  try {
+    assert.equal(f.vm.form.config.settings.folder_mode, undefined)
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'yuque'))
+    assert.equal(f.vm.form.config.settings.folder_mode, 'toc')
+  } finally { f.close() }
+})
+
+test('an existing Yuque data source is never switched to the TOC layout', async () => {
+  const f = await fixture({ type: 'yuque', settings: {} })
+  try {
+    // Opening a source created before this control existed must not inject
+    // folder_mode: the connector default (flat) has to stand, otherwise editing
+    // an unrelated field would silently re-file the whole knowledge base.
+    assert.equal(f.vm.form.config.settings.folder_mode, undefined)
+    assert.equal(f.vm.yuqueFolderMode, 'none')
+  } finally { f.close() }
+})
+
+test('an existing Yuque data source on the TOC layout reports it', async () => {
+  const f = await fixture({ type: 'yuque', settings: { folder_mode: 'toc' } })
+  try {
+    assert.equal(f.vm.yuqueFolderMode, 'toc')
   } finally { f.close() }
 })

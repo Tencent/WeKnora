@@ -162,8 +162,8 @@ func (c *Connector) walk(
 	cli := newClient(cfg)
 	settings := parseFolderSettings(ctx, config)
 	if settings.FolderMode != folderModeNone {
-		logger.Infof(ctx, "[Yuque] folder path derivation enabled: folder_mode=%s include_book_title=%t toc_only=%t",
-			settings.FolderMode, settings.IncludeBookTitle, settings.TOCOnly)
+		logger.Infof(ctx, "[Yuque] folder path derivation enabled: folder_mode=%s toc_only=%t",
+			settings.FolderMode, settings.TOCOnly)
 	}
 
 	newCursor := &yuqueCursor{LastSyncTime: time.Now(), BookDocTimes: make(map[string]map[string]string)}
@@ -225,8 +225,18 @@ func (c *Connector) walk(
 				}
 				continue
 			}
-			// Filter to documents that appear in the TOC. Applies only when the
-			// TOC was actually fetched — see the tocOK comment above. The
+			// Mark the document as seen so the deletion detector does not treat a
+			// filtered document as removed from the source. toc_only is an
+			// admission filter: it decides what enters the knowledge base, not what
+			// leaves it. Reporting these as deleted would remove exactly the
+			// documents the Yuque web UI cannot show (created through the API,
+			// never attached to the TOC), leaving their content unreachable from
+			// both sides.
+			docIDStr := strconv.FormatInt(d.ID, 10)
+			currentDocs[docIDStr] = true
+
+			// Filter out documents that do not appear in the TOC. Applies only when
+			// the TOC was actually fetched — see the tocOK comment above. The
 			// predicate is membership in the TOC node list, not "has a path":
 			// a document may sit in the TOC with no enclosing group.
 			if settings.TOCOnly && tocOK && !inTOC[d.ID] {
@@ -237,8 +247,10 @@ func (c *Connector) walk(
 				continue
 			}
 			kept++
-			docIDStr := strconv.FormatInt(d.ID, 10)
-			currentDocs[docIDStr] = true
+			// Only admitted documents enter the cursor. A filtered document has to
+			// stay unknown to the incremental comparison, so that admitting it
+			// later — by attaching it to the TOC, or by switching toc_only off —
+			// ingests it rather than dismissing it as unchanged.
 			newCursor.BookDocTimes[bookIDStr][docIDStr] = d.ContentUpdatedAt
 
 			// Incremental: skip if content hasn't changed.

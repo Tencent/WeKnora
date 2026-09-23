@@ -249,8 +249,7 @@ func TestBuildFolderFileName_DefaultIsUnchanged(t *testing.T) {
 }
 
 func TestBuildFolderFileName_TOCMode(t *testing.T) {
-	withBook := folderSettings{FolderMode: folderModeTOC, IncludeBookTitle: true}
-	withoutBook := folderSettings{FolderMode: folderModeTOC, IncludeBookTitle: false}
+	tocMode := folderSettings{FolderMode: folderModeTOC}
 
 	cases := []struct {
 		name     string
@@ -260,13 +259,12 @@ func TestBuildFolderFileName_TOCMode(t *testing.T) {
 		segs     []string
 		want     string
 	}{
-		{"book + group", withBook, true, "My Book", []string{"A", "B"}, "My Book/A/B/Doc.md"},
-		{"book only (doc not in TOC)", withBook, true, "My Book", nil, "My Book/Doc.md"},
-		{"no book segment", withoutBook, true, "My Book", []string{"A"}, "A/Doc.md"},
-		{"book segment only, no toc", withoutBook, true, "My Book", nil, "Doc.md"},
-		{"empty book name", withBook, true, "", []string{"A"}, "A/Doc.md"},
-		{"book name needs sanitising", withBook, true, "A/B", nil, "A_B/Doc.md"},
-		{"toc unavailable degrades to flat", withBook, false, "My Book", []string{"A"}, "Doc.md"},
+		{"book + group", tocMode, true, "My Book", []string{"A", "B"}, "My Book/A/B/Doc.md"},
+		{"book only (doc not in TOC)", tocMode, true, "My Book", nil, "My Book/Doc.md"},
+		{"empty book name", tocMode, true, "", []string{"A"}, "A/Doc.md"},
+		{"book name needs sanitising", tocMode, true, "A/B", nil, "A_B/Doc.md"},
+		{"toc unavailable degrades to flat", tocMode, false, "My Book", []string{"A"}, "Doc.md"},
+		{"default mode stays flat", defaultFolderSettings(), true, "My Book", []string{"A"}, "Doc.md"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,12 +294,11 @@ func TestParseFolderSettings_Defaults(t *testing.T) {
 func TestParseFolderSettings_ReadsValues(t *testing.T) {
 	got := parseFolderSettings(context.Background(), &types.DataSourceConfig{
 		Settings: map[string]interface{}{
-			"folder_mode":        "toc",
-			"include_book_title": false,
-			"toc_only":           true,
+			"folder_mode": "toc",
+			"toc_only":    true,
 		},
 	})
-	if got.FolderMode != folderModeTOC || got.IncludeBookTitle || !got.TOCOnly {
+	if got.FolderMode != folderModeTOC || !got.TOCOnly {
 		t.Errorf("got %+v", got)
 	}
 }
@@ -316,14 +313,22 @@ func TestParseFolderSettings_TolerantOfBadInput(t *testing.T) {
 		{"wrong type for mode", map[string]interface{}{"folder_mode": 42}, defaultFolderSettings()},
 		{
 			"string bools",
-			map[string]interface{}{"toc_only": "true", "include_book_title": "no"},
-			folderSettings{FolderMode: folderModeNone, IncludeBookTitle: false, TOCOnly: true},
+			map[string]interface{}{"toc_only": "true"},
+			folderSettings{FolderMode: folderModeNone, TOCOnly: true},
 		},
 		{"unrecognised bool", map[string]interface{}{"toc_only": "maybe"}, defaultFolderSettings()},
 		{
 			"mixed case mode",
 			map[string]interface{}{"folder_mode": " TOC "},
-			folderSettings{FolderMode: folderModeTOC, IncludeBookTitle: true, TOCOnly: false},
+			folderSettings{FolderMode: folderModeTOC},
+		},
+		{
+			// include_book_title was removed. A data source that still carries
+			// the key must keep syncing — the book segment is now unconditional,
+			// so the stale value simply has no effect.
+			"retired include_book_title is ignored",
+			map[string]interface{}{"folder_mode": "toc", "include_book_title": false},
+			folderSettings{FolderMode: folderModeTOC},
 		},
 	}
 	for _, tc := range cases {
@@ -412,7 +417,10 @@ func TestConnector_FetchAll_TOCPaths(t *testing.T) {
 	}
 }
 
-func TestConnector_FetchAll_TOCModeWithoutBookTitle(t *testing.T) {
+// include_book_title was removed in favour of an unconditional book segment.
+// A data source created while the key still existed must keep syncing, and its
+// stale value must be ignored rather than honoured.
+func TestConnector_FetchAll_RetiredIncludeBookTitleIsIgnored(t *testing.T) {
 	f := newFakeYuque()
 	defer f.Close()
 	fakeBookDocs(f)
@@ -426,11 +434,12 @@ func TestConnector_FetchAll_TOCModeWithoutBookTitle(t *testing.T) {
 		t.Fatalf("FetchAll: %v", err)
 	}
 	got := fileNames(items)
-	if got["101"] != "Group/Grouped.md" {
-		t.Errorf("doc 101: FileName = %q, want %q", got["101"], "Group/Grouped.md")
+	if got["101"] != "My Book/Group/Grouped.md" {
+		t.Errorf("doc 101: FileName = %q, want %q (a stale include_book_title must be ignored)",
+			got["101"], "My Book/Group/Grouped.md")
 	}
-	if got["103"] != "Unfiled.md" {
-		t.Errorf("doc 103: FileName = %q, want %q", got["103"], "Unfiled.md")
+	if got["103"] != "My Book/Unfiled.md" {
+		t.Errorf("doc 103: FileName = %q, want %q", got["103"], "My Book/Unfiled.md")
 	}
 }
 
@@ -485,6 +494,142 @@ func TestConnector_FetchAll_TOCOnly(t *testing.T) {
 	}
 }
 
+// toc_only is an admission filter, not a reaper. A document that was already
+// ingested and is then filtered out must not be reported as deleted: Yuque's
+// own web UI cannot show documents created through the API that were never
+// attached to the TOC, so removing them here would leave their content
+// reachable from neither side.
+func TestConnector_FetchIncremental_TOCOnlyDoesNotDelete(t *testing.T) {
+	// First sync: folder paths on, no admission filter — all three land.
+	f1 := newFakeYuque()
+	fakeBookDocs(f1)
+	fakeBookTOC(f1, 200)
+	_, cursor1, err := NewConnector().FetchIncremental(context.Background(),
+		makeDSConfigWithSettings(f1, []string{"7"}, map[string]interface{}{"folder_mode": "toc"}), nil)
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	f1.Close()
+
+	// Second sync: same source, now with toc_only. Doc 103 is absent from the
+	// TOC so it is filtered, but it is still present in the book's document list.
+	f2 := newFakeYuque()
+	defer f2.Close()
+	fakeBookDocs(f2)
+	fakeBookTOC(f2, 200)
+
+	items, _, err := NewConnector().FetchIncremental(context.Background(),
+		makeDSConfigWithSettings(f2, []string{"7"}, map[string]interface{}{
+			"folder_mode": "toc", "toc_only": true,
+		}), cursor1)
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	for _, it := range items {
+		if it.ExternalID == "103" {
+			t.Errorf("doc 103 was filtered by toc_only but is still reported "+
+				"(IsDeleted=%t); an admission filter must not turn into a deletion", it.IsDeleted)
+		}
+	}
+}
+
+// Admitting a previously filtered document must ingest it. A filtered document
+// is deliberately kept out of the cursor, so attaching it to the TOC later — or
+// switching toc_only off — has to read as new rather than as unchanged.
+func TestConnector_FetchIncremental_AdmitsPreviouslyFilteredDoc(t *testing.T) {
+	// First sync with toc_only on: doc 103 is absent from the TOC and filtered.
+	f1 := newFakeYuque()
+	fakeBookDocs(f1)
+	fakeBookTOC(f1, 200)
+	items1, cursor1, err := NewConnector().FetchIncremental(context.Background(),
+		makeDSConfigWithSettings(f1, []string{"7"}, map[string]interface{}{
+			"folder_mode": "toc", "toc_only": true,
+		}), nil)
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	for _, it := range items1 {
+		if it.ExternalID == "103" {
+			t.Fatalf("doc 103 should have been filtered on the first sync: %+v", it)
+		}
+	}
+	f1.Close()
+
+	// Second sync: doc 103 has been attached to the TOC. Its content is
+	// unchanged, so only the admission decision can bring it in.
+	f2 := newFakeYuque()
+	defer f2.Close()
+	fakeBookDocs(f2)
+	f2.handleJSON("/api/v2/repos/7/toc", 200, v2TOCResponse{Data: []v2TOCNode{
+		tocTitle("t1", "", "Group"),
+		tocDoc("d1", "t1", 101, "Grouped"),
+		tocDoc("d2", "", 102, "Loose"),
+		tocDoc("d3", "t1", 103, "Unfiled"),
+	}})
+
+	items2, _, err := NewConnector().FetchIncremental(context.Background(),
+		makeDSConfigWithSettings(f2, []string{"7"}, map[string]interface{}{
+			"folder_mode": "toc", "toc_only": true,
+		}), cursor1)
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	var admitted bool
+	for _, it := range items2 {
+		if it.ExternalID != "103" || it.IsDeleted {
+			continue
+		}
+		admitted = true
+		if want := "My Book/Group/Unfiled.md"; it.FileName != want {
+			t.Errorf("doc 103: FileName = %q, want %q", it.FileName, want)
+		}
+	}
+	if !admitted {
+		t.Errorf("doc 103 was attached to the TOC but was not ingested; items=%+v", items2)
+	}
+}
+
+// A document that really is gone from the source must still be reported — the
+// admission filter must not have disabled deletion detection.
+func TestConnector_FetchIncremental_StillDetectsRealDeletion(t *testing.T) {
+	f1 := newFakeYuque()
+	fakeBookDocs(f1)
+	fakeBookTOC(f1, 200)
+	_, cursor1, err := NewConnector().FetchIncremental(context.Background(),
+		makeDSConfigWithSettings(f1, []string{"7"}, map[string]interface{}{
+			"folder_mode": "toc", "toc_only": true,
+		}), nil)
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	f1.Close()
+
+	// Doc 101 disappears from the source entirely.
+	f2 := newFakeYuque()
+	defer f2.Close()
+	f2.handleJSON("/api/v2/repos/7/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 102, Type: "Doc", Status: "1", Title: "Loose", Slug: "l", BookID: 7, ContentUpdatedAt: testTS},
+	}})
+	fakeBookTOC(f2, 200)
+
+	items, _, err := NewConnector().FetchIncremental(context.Background(),
+		makeDSConfigWithSettings(f2, []string{"7"}, map[string]interface{}{
+			"folder_mode": "toc", "toc_only": true,
+		}), cursor1)
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	deleted := 0
+	for _, it := range items {
+		if it.IsDeleted && it.ExternalID == "101" {
+			deleted++
+		}
+	}
+	if deleted != 1 {
+		t.Errorf("expected doc 101 to be reported as deleted once, got %d; items=%+v", deleted, items)
+	}
+}
+
 // If the TOC endpoint is unavailable, toc_only must not filter anything —
 // otherwise an outage would silently drop the whole book.
 func TestConnector_FetchAll_TOCUnavailableDegrades(t *testing.T) {
@@ -496,7 +641,7 @@ func TestConnector_FetchAll_TOCUnavailableDegrades(t *testing.T) {
 
 	items, err := NewConnector().FetchAll(context.Background(),
 		makeDSConfigWithSettings(f, []string{"7"}, map[string]interface{}{
-			"folder_mode": "toc", "include_book_title": true, "toc_only": true,
+			"folder_mode": "toc", "toc_only": true,
 		}), []string{"7"})
 	if err != nil {
 		t.Fatalf("FetchAll must not fail when the TOC is unavailable: %v", err)

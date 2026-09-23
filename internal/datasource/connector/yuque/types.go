@@ -376,10 +376,9 @@ const (
 type folderSettings struct {
 	// FolderMode is folderModeNone or folderModeTOC.
 	FolderMode string
-	// IncludeBookTitle prefixes the path with the book title. Only meaningful
-	// when FolderMode is folderModeTOC.
-	IncludeBookTitle bool
-	// TOCOnly syncs only documents that appear in the book's TOC. Only
+	// TOCOnly admits only documents that appear in the book's TOC. It is an
+	// admission filter, not a reaper: a filtered document is simply not
+	// ingested, and one already in the knowledge base is left untouched. Only
 	// meaningful when FolderMode is folderModeTOC.
 	TOCOnly bool
 }
@@ -389,9 +388,8 @@ type folderSettings struct {
 // existing data source keeps working unchanged after an upgrade.
 func defaultFolderSettings() folderSettings {
 	return folderSettings{
-		FolderMode:       folderModeNone,
-		IncludeBookTitle: true,
-		TOCOnly:          false,
+		FolderMode: folderModeNone,
+		TOCOnly:    false,
 	}
 }
 
@@ -412,7 +410,6 @@ func parseFolderSettings(ctx context.Context, ds *types.DataSourceConfig) folder
 			logger.Warnf(ctx, "[Yuque] unknown folder_mode %q, keeping %q", mode, s.FolderMode)
 		}
 	}
-	s.IncludeBookTitle = settingBool(ds.Settings["include_book_title"], s.IncludeBookTitle)
 	s.TOCOnly = settingBool(ds.Settings["toc_only"], s.TOCOnly)
 	return s
 }
@@ -444,6 +441,11 @@ func settingBool(v interface{}, def bool) bool {
 // With the default settings — or whenever the book's TOC could not be loaded —
 // this returns exactly "<title>.md", which is the byte-for-byte behaviour of
 // previous releases.
+//
+// When the TOC is in play the book name is always the first segment. It is the
+// only carrier of the "which book" dimension — the automatic tag granularity is
+// per data source, not per book — and omitting it would silently merge
+// same-named top-level groups from different books into one folder.
 func buildFolderFileName(
 	settings folderSettings, tocOK bool, bookName string, tocSegs []string, title string,
 ) string {
@@ -452,7 +454,7 @@ func buildFolderFileName(
 		return fileName
 	}
 	segments := make([]string, 0, len(tocSegs)+1)
-	if settings.IncludeBookTitle && bookName != "" {
+	if bookName != "" {
 		segments = append(segments, datasource.SanitizeFileName(bookName))
 	}
 	// tocSegs are already sanitised by buildTOCPaths.
