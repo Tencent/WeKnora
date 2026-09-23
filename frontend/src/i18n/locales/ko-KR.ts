@@ -102,6 +102,7 @@ export default {
     "lastSeen": "최근 연결",
     "readyHint": "준비되었습니다. 대화로 돌아가 브라우저 작업을 요청하세요.",
     "capabilitiesTitle": "에이전트가 할 수 있는 작업",
+    "sidebarStatus": "사이드바에 연결 상태 표시",
     "reconnectHint": "인증이 저장되어 있습니다. Chrome과 확장 프로그램을 열면 자동으로 다시 연결됩니다.",
     "replaceDevice": "브라우저 변경",
     "installExtension": "BrowserSkill 설치",

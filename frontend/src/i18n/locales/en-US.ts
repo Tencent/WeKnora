@@ -102,6 +102,7 @@ export default {
     "lastSeen": "Last connected",
     "readyHint": "Ready. Return to the conversation and describe your browser task.",
     "capabilitiesTitle": "Your agent can",
+    "sidebarStatus": "Show connection status in the sidebar",
     "reconnectHint": "Authorization is saved. Keep Chrome and BrowserSkill open to reconnect automatically.",
     "replaceDevice": "Change browser",
     "installExtension": "Install BrowserSkill",

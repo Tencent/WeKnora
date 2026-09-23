@@ -117,6 +117,7 @@ export default {
     "lastSeen": "最終接続",
     "readyHint": "準備完了。会話に戻り、ブラウザーで行うタスクを伝えてください。",
     "capabilitiesTitle": "エージェントができること",
+    "sidebarStatus": "サイドバーに接続状態を表示",
     "reconnectHint": "認証は保存されています。Chrome と拡張機能を開くと自動的に再接続します。",
     "replaceDevice": "ブラウザーを変更",
     "installExtension": "BrowserSkill をインストール",

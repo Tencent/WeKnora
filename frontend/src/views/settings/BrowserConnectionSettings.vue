@@ -43,6 +43,11 @@
                 <t-icon :name="item.icon" size="16px" />{{ t(item.label) }}
               </li>
             </ul>
+            <label class="sidebar-status-toggle">
+              <span>{{ t('localBrowser.sidebarStatus') }}</span>
+              <t-switch size="small" :value="uiStore.sidebarBrowserStatus"
+                @change="(value: unknown) => uiStore.setSidebarBrowserStatus(value === true)" />
+            </label>
           </div>
           <div class="device-block">
             <div class="device-meta">
@@ -157,12 +162,14 @@ import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { get, post, getDown } from '@/utils/request'
 import { useBrowserConnectionStore } from '@/stores/browserConnection'
+import { useUIStore } from '@/stores/ui'
 import browserLogo from '@/assets/browserskill/logo.png'
 import BrowserSearchPreferences from './BrowserSearchPreferences.vue'
 interface Device { id: string; label: string; last_seen_at: string }
 interface Connection { enabled: boolean; connected: boolean; device?: Device; extension_available: boolean; extension_version?: string }
 const { t, locale } = useI18n()
 const browserConnection = useBrowserConnectionStore()
+const uiStore = useUIStore()
 const status = ref<Connection>({ enabled: false, connected: false, extension_available: false })
 const busy = ref(false), loaded = ref(false), error = ref(''), refreshError = ref(''), pairing = ref(''), copied = ref(false), copyFallback = ref(false), downloading = ref(false)
 const endpoint = '/api/v1/me/browser'
@@ -433,6 +440,17 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
     margin-top: 3px;
     color: var(--td-warning-color);
   }
+}
+
+.sidebar-status-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  cursor: pointer;
 }
 
 .capabilities-title {

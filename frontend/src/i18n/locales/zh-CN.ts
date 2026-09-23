@@ -102,6 +102,7 @@ export default {
     "lastSeen": "最近连接",
     "readyHint": "已准备就绪。回到对话，直接描述需要浏览器完成的任务。",
     "capabilitiesTitle": "智能体可以",
+    "sidebarStatus": "在侧边栏显示连接状态",
     "reconnectHint": "保留授权，等待扩展自动重连。请确认 Chrome 和 BrowserSkill 扩展已开启。",
     "replaceDevice": "更换浏览器",
     "installExtension": "安装 BrowserSkill 扩展",

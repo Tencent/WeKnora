@@ -102,6 +102,7 @@ export default {
     "lastSeen": "Последнее подключение",
     "readyHint": "Готово. Вернитесь в диалог и опишите задачу для браузера.",
     "capabilitiesTitle": "Агент может",
+    "sidebarStatus": "Показывать статус подключения на боковой панели",
     "reconnectHint": "Авторизация сохранена. Откройте Chrome и BrowserSkill для автоматического подключения.",
     "replaceDevice": "Сменить браузер",
     "installExtension": "Установите BrowserSkill",
