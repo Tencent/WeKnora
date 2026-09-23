@@ -43,7 +43,7 @@ for (const file of pages) {
   if (/11\.141\.160\.83/.test(html)) failures.push(`${route}: stale private docs host`);
   if (route.startsWith('/docs/') && !route.endsWith('/404.html') && !/class="wk-brand"[^>]*href="\/"[^>]*target="_self"/.test(html)) failures.push(`${route}: documentation logo must navigate to the main site`);
 }
-for (const path of ['/docs/', '/docs/03-features/22-skills-sandbox.html', '/docs/03-features/23-memory.html']) assert.ok(await resolveSiteFile(root, path), path);
+for (const path of ['/docs/', '/docs/03-features/22-skills-sandbox.html', '/docs/03-features/23-memory.html', '/docs/07-releases/v0.8.2.html', '/docs/07-releases/v0.8.0.html']) assert.ok(await resolveSiteFile(root, path), path);
 assert.equal(failures.length, 0, [...new Set(failures)].join('\n'));
 if (pendingShots.size) console.warn(`Screenshots still pending (placeholder shown): ${[...pendingShots].sort().join(', ')}`);
 console.log(`Unified site check passed: ${pages.length} pages, ${checked.size} local routes/assets, same-tab homepage links and documentation logos.`);

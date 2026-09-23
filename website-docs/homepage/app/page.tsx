@@ -75,7 +75,7 @@ export default function Home() {
         </article>)}</div>
       </section>
       <section id="release" className={s.release} aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.8.2</p><h2 id="release-title">智能体能操作浏览器，<br />知识库能接入其他 AI。</h2></div><a className={s.textLink} href={`${repo}/blob/main/CHANGELOG.md#082---2026-09-23`} target="_blank" rel="noreferrer">查看版本更新 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.8.2</p><h2 id="release-title">智能体能操作浏览器，<br />知识库能接入其他 AI。</h2></div><a className={s.textLink} href={guide("07-releases/v0.8.2")}>查看版本说明 <Icon name="arrow" /></a></div>
         <ProductGallery id="release-gallery" label="v0.8.2" slides={releaseSlides} />
         <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <p key={item}>{item}</p>)}</div>
       </div></section>
