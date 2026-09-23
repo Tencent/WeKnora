@@ -1,26 +1,39 @@
 package tools
 
-// StripThinkBlocks removes top-level <think>…</think> blocks from LLM output
-// content. Some models (DeepSeek, Qwen, etc.) embed chain-of-thought reasoning
-// inside <think> tags in the content field. These should be stripped before:
+import "regexp"
+
+// thinkBlockRe matches <think>…</think> blocks that some models embed in content.
+// Uses (?s) flag so . matches newlines.
+var thinkBlockRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+// unterminatedThinkRe matches a <think> that never closes, through end of
+// input. Applied after thinkBlockRe, so any <think> still present opens a
+// block the output was cut off inside.
+var unterminatedThinkRe = regexp.MustCompile(`(?s)<think>.*$`)
+
+// StripThinkBlocks removes <think>…</think> blocks from LLM output content.
+// Some models (DeepSeek, Qwen, etc.) embed chain-of-thought reasoning inside
+// <think> tags in the content field. These should be stripped before:
 //   - Displaying content to users
 //   - Storing content in agent state / context manager
 //   - Emitting content via EventBus
-//
-// Think-tag markup inside fenced code blocks (``` / ~~~) or inline code spans
-// is literal document content and is preserved (#3132) — the same rule the
-// streaming ThinkStreamSplitter and the frontend parser apply. An unterminated
-// trailing <think> block is treated as reasoning and dropped as well.
 //
 // Returns the cleaned string, or empty string if input is empty or becomes empty.
 func StripThinkBlocks(content string) string {
 	if content == "" {
 		return ""
 	}
-	sp := NewThinkStreamSplitter()
-	_, answer := sp.Feed(content)
-	_, tail := sp.Flush()
-	return trimWhitespace(answer + tail)
+	cleaned := thinkBlockRe.ReplaceAllString(content, "")
+	// A block the completion cap cut off mid-reasoning never gets its closing
+	// tag, so the pair regex leaves it whole. Everything from the dangling
+	// <think> to the end is reasoning: the streaming splitter routes exactly
+	// that text to the thought area (ThinkStreamSplitter.Flush), and a caller
+	// asking "is there an answer here?" must get the same answer as the
+	// splitter, not a chain of thought with a tag glued to its front.
+	cleaned = unterminatedThinkRe.ReplaceAllString(cleaned, "")
+	// Trim leading/trailing whitespace that may remain after removal
+	result := trimWhitespace(cleaned)
+	return result
 }
 
 // trimWhitespace trims leading and trailing whitespace without importing strings.
