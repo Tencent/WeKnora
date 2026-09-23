@@ -249,6 +249,8 @@ Once started, visit **http://localhost** to get started.
 
 > To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
 
+For Ollama embedding model name, `OLLAMA_BASE_URL`, and RAM notes, see [configuration](./website-docs/01-getting-started/04-configuration.md).
+
 ### 🔄 Upgrading
 
 If you already have WeKnora running and downloaded a newer release:

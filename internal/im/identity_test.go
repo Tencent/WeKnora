@@ -11,7 +11,8 @@ import (
 func TestWithIMIdentity(t *testing.T) {
 	const tenantID uint64 = 42
 	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "open-id-1"}
-	ctx := withIMIdentity(context.Background(), tenantID, "channel-1", msg)
+	channel := &IMChannel{ID: "channel-1", TenantID: tenantID, Locale: "ja-JP"}
+	ctx := withIMIdentity(context.Background(), channel, msg)
 
 	gotTenant, ok := types.TenantIDFromContext(ctx)
 	if !ok || gotTenant != tenantID {
@@ -57,11 +58,14 @@ func TestWithIMIdentity(t *testing.T) {
 	if err != nil || got != "open-id-1/feishu/42:channel-1:feishu:open-id-1/42" {
 		t.Fatalf("resolved MCP IM identity = %q, %v", got, err)
 	}
+	if got, ok := types.LanguageFromContext(ctx); !ok || got != "ja-JP" {
+		t.Fatalf("Language = %q, want %q", got, "ja-JP")
+	}
 }
 
 func TestWithIMIdentityExposesWeComSenderIDToMCPHeaders(t *testing.T) {
 	msg := &IncomingMessage{Platform: PlatformWeCom, UserID: "wecom-sender-42"}
-	ctx := withIMIdentity(context.Background(), 42, "channel-wecom", msg)
+	ctx := withIMIdentity(context.Background(), &IMChannel{ID: "channel-wecom", TenantID: 42}, msg)
 	template, err := headertemplate.Parse("{{im.user_id}}/{{im.platform}}")
 	if err != nil {
 		t.Fatal(err)
@@ -69,5 +73,29 @@ func TestWithIMIdentityExposesWeComSenderIDToMCPHeaders(t *testing.T) {
 	got, err := template.Resolve(types.MCPHeaderContextFromContext(ctx))
 	if err != nil || got != "wecom-sender-42/wecom" {
 		t.Fatalf("resolved MCP WeCom identity = %q, %v", got, err)
+	}
+}
+
+func TestWithIMIdentityUsesDeploymentDefaultWithoutChannelLocale(t *testing.T) {
+	t.Setenv("WEKNORA_LANGUAGE", "ko-KR")
+	ctx := context.WithValue(context.Background(), types.LanguageContextKey, "en-US")
+	ctx = withIMIdentity(ctx, &IMChannel{ID: "channel-1", TenantID: 42}, nil)
+
+	if got, ok := types.LanguageFromContext(ctx); !ok || got != "ko-KR" {
+		t.Fatalf("Language = %q, want deployment default %q", got, "ko-KR")
+	}
+}
+
+func TestWithIMIdentityAppliesChannelLocaleAcrossTransports(t *testing.T) {
+	for _, mode := range []string{"webhook", "websocket", "longpoll"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), types.LanguageContextKey, "en-US")
+			channel := &IMChannel{ID: "channel-1", TenantID: 42, Mode: mode, Locale: "ru-RU"}
+			ctx = withIMIdentity(ctx, channel, nil)
+
+			if got, ok := types.LanguageFromContext(ctx); !ok || got != "ru-RU" {
+				t.Fatalf("Language = %q, want channel locale %q", got, "ru-RU")
+			}
+		})
 	}
 }

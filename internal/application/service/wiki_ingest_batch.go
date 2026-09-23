@@ -254,6 +254,18 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// A soft-deleted tenant owns no reachable workspace anymore; its KBs and
+	// durable pending ops survive the deletion, so without this guard the
+	// batch would keep issuing model requests (and finalize would rebuild
+	// index pages) for a tenant nobody can see (#3593). Drop the KB's queue.
+	if s.tenantIsDeleted(ctx, payload.TenantID) {
+		exitStatus = "tenant_deleted"
+		if err := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); err != nil {
+			return fmt.Errorf("wiki ingest: clear deleted tenant queue: %w", err)
+		}
+		return nil
+	}
+
 	// Concurrency model (Phase 3):
 	//
 	//   - Standard (Redis) mode: NO exclusive per-KB lock. Multiple batches
@@ -928,6 +940,16 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 	if s.pendingRepo == nil {
+		return nil
+	}
+
+	// Same tenant-liveness guard as the ingest batch: finalize calls the
+	// synthesis model to rebuild the index page, and a deleted tenant must
+	// never accrue new model requests (#3593). Drop the KB's queue.
+	if s.tenantIsDeleted(ctx, payload.TenantID) {
+		if err := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); err != nil {
+			return fmt.Errorf("wiki finalize: clear deleted tenant queue: %w", err)
+		}
 		return nil
 	}
 

@@ -226,6 +226,8 @@ docker compose up -d    # 启动核心服务
 
 > 如需使用本地 Ollama 模型，请先运行 `ollama serve > /dev/null 2>&1 &`
 
+Ollama 向量模型名、`OLLAMA_BASE_URL` 与内存说明见[配置文档](./website-docs/01-getting-started/04-configuration.md)。
+
 ### 🔄 版本升级
 
 若已有部署并下载了更新的 release：

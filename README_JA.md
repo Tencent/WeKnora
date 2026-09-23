@@ -215,6 +215,8 @@ docker compose up -d    # コアサービスを起動
 
 > ローカル Ollama モデルを使用する場合は、先に `ollama serve > /dev/null 2>&1 &` を実行してください。
 
+Ollama の埋め込みモデル名、`OLLAMA_BASE_URL`、メモリの注意は[設定ドキュメント](./website-docs/01-getting-started/04-configuration.md)を参照してください。
+
 ### 🔄 アップグレード
 
 既存のデプロイがあり、新しい release をダウンロードした場合：

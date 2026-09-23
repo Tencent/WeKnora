@@ -172,6 +172,21 @@ export default {
       description: 'Try a different keyword or file type'
     }
   },
+  resourceSort: {
+    title: 'Sort',
+    updatedTime: 'Updated time',
+    updatedTimeDescription: 'Default option.',
+    createdTime: 'Created time',
+    createdTimeDescription: 'View the newest or earliest created items',
+    name: 'Name',
+    nameDescription: 'Quickly find an item when you know its name',
+    recentlyUpdated: 'Recently updated',
+    earliestUpdated: 'Earliest updated',
+    recentlyCreated: 'Recently created',
+    earliestCreated: 'Earliest created',
+    nameAscending: 'A–Z',
+    nameDescending: 'Z–A',
+  },
   menu: {
     sessionInProgress: 'Conversation in progress',
     knowledgeBase: 'Knowledge Base',
@@ -211,6 +226,7 @@ export default {
     deleteSession: 'Delete Conversation',
     renamePlaceholder: 'Enter a conversation title',
     unpinSuccess: 'Conversation unpinned',
+    temporaryWorkspace: 'Temporary workspace',
     sessionIdCopied: 'Session ID copied',
     linkCopied: 'Conversation link copied',
     copyFailed: 'Copy failed. Check your browser clipboard permission.',
@@ -544,6 +560,21 @@ export default {
     name: 'Name',
     description: 'Description',
     settings: 'Settings',
+    sort: {
+      title: 'Sort',
+      updatedTime: 'Updated time',
+      updatedTimeDescription: 'Sort by the latest change made to each file.',
+      createdTime: 'Upload/created time',
+      createdTimeDescription: 'Default. Review the newest additions or the earliest accumulated material.',
+      fileName: 'File name',
+      fileNameDescription: 'Quickly find a file whose name you already know.',
+      recentlyUpdated: 'Recently updated',
+      earliestUpdated: 'Earliest updated',
+      newestCreated: 'Newest uploaded',
+      earliestCreated: 'Earliest uploaded',
+      nameAscending: 'A–Z',
+      nameDescending: 'Z–A',
+    },
     tagUpdateSuccess: 'Tag updated successfully',
     tagEditDialogHeading: 'Edit tags',
     folderTree: {
@@ -2746,6 +2777,9 @@ export default {
   createChat: {
     title: 'Hi, I am WeKnora — your knowledge, within reach',
     newSessionTitle: 'New Session',
+    openProject: 'Select project',
+    clearProject: 'Clear',
+    pickFailed: 'Could not open the selected path',
     messages: {
       createFailed: 'Failed to create session',
       createError: 'Failed to create session, please try again later'
@@ -6341,6 +6375,9 @@ export default {
       sessionModeUser: 'Per User (default)',
       sessionModeThread: 'Per Thread',
       sessionModeHint: 'User mode: each person has their own conversation. Use /clear to start fresh. Thread mode: each message thread is a separate conversation. Multiple people can collaborate in the same thread.',
+      replyLanguage: 'Reply Language',
+      replyLanguageDefault: 'Use system default',
+      replyLanguageHint: 'Fix the agent reply language for this channel. Leave unset to use the deployment default.',
       wechatScanBind: 'Scan to bind WeChat',
       wechatScanning: 'Scan the QR code with WeChat',
       wechatBindSuccess: 'WeChat bound successfully',
