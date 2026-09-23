@@ -720,6 +720,31 @@ func (s *wikiIngestService) clearDeletedKnowledgeBasePendingOps(ctx context.Cont
 	return cleaner.DeleteByScope(cleanupCtx, types.TaskScopeKnowledgeBase, kbID)
 }
 
+// tenantIsDeleted reports whether the payload's tenant has been soft-deleted.
+// A tenant deletion removes the workspace but leaves its knowledge bases and
+// durable pending ops in place, so wiki tasks restored from those ops would
+// otherwise keep issuing model requests for a tenant nobody can reach (#3593).
+//
+// Fail-open on transient lookup errors and when the pending repo does not
+// expose tenant liveness (legacy test doubles): the retry machinery still
+// covers the task, and the guarded enqueue / startup recovery paths enforce
+// the same invariant on their own DB access.
+func (s *wikiIngestService) tenantIsDeleted(ctx context.Context, tenantID uint64) bool {
+	if tenantID == 0 {
+		return false
+	}
+	checker, ok := s.pendingRepo.(interfaces.TaskPendingOpsTenantLiveness)
+	if !ok {
+		return false
+	}
+	active, err := checker.HasActiveTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "wiki: tenant liveness lookup failed for tenant %d: %v (failing open)", tenantID, err)
+		return false
+	}
+	return !active
+}
+
 // releaseIngestForUnavailableWiki drops the KB's queued ingest ops when the
 // wiki cannot run for a reason retries will not fix, and releases each
 // document's wiki slot in the same transaction so it leaves "finalizing".
