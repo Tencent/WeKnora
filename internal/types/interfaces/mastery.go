@@ -14,6 +14,8 @@ type MasteryRepository interface {
 	// BumpCitation records that an answer cited documents, in the guidance
 	// citation ledger (decoupled from memory_doc_affinity).
 	BumpCitation(ctx context.Context, scope MemoryScope, docs []types.MemoryDocAffinity) error
+	// BumpCitationEvent records a message-scoped citation event idempotently.
+	BumpCitationEvent(ctx context.Context, scope MemoryScope, messageID string, docs []types.MemoryDocAffinity) error
 	// BumpPageView records one effective page view with its duration.
 	BumpPageView(ctx context.Context, scope MemoryScope, kbID, slug string, duration int64) error
 	// RecordAnswerLike upserts a like bound to a message, storing its
@@ -71,7 +73,7 @@ type MasteryService interface {
 	// RecordCitations records cited docs, called alongside the existing answer
 	// source recording so the guidance ledger stays in sync without touching
 	// memory_doc_affinity.
-	RecordCitations(ctx context.Context, refs []types.MemoryDocAffinity)
+	RecordCitations(ctx context.Context, messageID string, refs []types.MemoryDocAffinity)
 	// RecordPageView records an effective page view. neighbors are the slugs linked
 	// to and from the viewed page (one hop, deduplicated by the caller); a fraction
 	// of the reading time is credited to them as neighbour warmth.

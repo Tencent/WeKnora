@@ -1977,6 +1977,6 @@ func (h *Handler) recordAnswerSources(ctx context.Context, assistantMessage *typ
 	if h.masteryService != nil {
 		// Double-write into the guidance citation ledger so the knowledge map
 		// has its own, independently deletable record of the same citations.
-		h.masteryService.RecordCitations(ctx, refs)
+		h.masteryService.RecordCitations(ctx, assistantMessage.ID, refs)
 	}
 }

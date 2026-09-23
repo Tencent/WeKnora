@@ -1,6 +1,17 @@
 -- Knowledge guidance (personal knowledge state) ledgers (Lite).
 -- Mirrors migrations/versioned/000111. JSONB maps to TEXT; timestamptz to DATETIME.
 
+CREATE TABLE IF NOT EXISTS memory_citation_events (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    subject_id VARCHAR(512) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mastery_citation_event ON memory_citation_events (tenant_id, subject_id, message_id, knowledge_id);
+
 CREATE TABLE IF NOT EXISTS memory_citations (
     id                VARCHAR(36) PRIMARY KEY,
     tenant_id         INTEGER NOT NULL,

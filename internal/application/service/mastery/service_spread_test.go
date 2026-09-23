@@ -72,6 +72,12 @@ func newMasteryServiceDB(t *testing.T, name string) *gorm.DB {
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	if err := db.Exec("DROP INDEX IF EXISTS idx_mastery_view_scope").Error; err != nil {
+		t.Fatalf("drop page-view index: %v", err)
+	}
+	if err := db.Exec("CREATE UNIQUE INDEX idx_mastery_view_scope ON memory_page_views (tenant_id, subject_id, knowledge_base_id, slug)").Error; err != nil {
+		t.Fatalf("create page-view unique index: %v", err)
+	}
 	return db
 }
 

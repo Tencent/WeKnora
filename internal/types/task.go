@@ -286,8 +286,9 @@ type MemoryExtractPayload struct {
 // must not rely on worker context for either value.
 type MasteryCitationPayload struct {
 	TracingContext
-	TenantID  uint64             `json:"tenant_id"`
-	SubjectID string             `json:"subject_id"`
+	TenantID  uint64              `json:"tenant_id"`
+	SubjectID string              `json:"subject_id"`
+	MessageID string              `json:"message_id"`
 	Refs      []MemoryDocAffinity `json:"refs"`
 }
 

@@ -76,6 +76,19 @@ type MemoryCitation struct {
 
 func (MemoryCitation) TableName() string { return "memory_citations" }
 
+// MemoryCitationEvent is the immutable idempotency ledger for one answer citation.
+type MemoryCitationEvent struct {
+	ID              string    `json:"id" gorm:"primaryKey;type:varchar(36)"`
+	TenantID        uint64    `json:"tenant_id" gorm:"column:tenant_id;not null;uniqueIndex:idx_mastery_citation_event,priority:1"`
+	SubjectID       string    `json:"subject_id" gorm:"column:subject_id;type:varchar(512);not null;uniqueIndex:idx_mastery_citation_event,priority:2"`
+	MessageID       string    `json:"message_id" gorm:"column:message_id;type:varchar(36);not null;uniqueIndex:idx_mastery_citation_event,priority:3"`
+	KnowledgeID     string    `json:"knowledge_id" gorm:"column:knowledge_id;type:varchar(36);not null;uniqueIndex:idx_mastery_citation_event,priority:4"`
+	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"column:knowledge_base_id;type:varchar(36);not null;default:''"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func (MemoryCitationEvent) TableName() string { return "memory_citation_events" }
+
 // MemoryPageView records how often, and for how long, a person actively viewed a
 // Wiki page. total_duration is the cumulative *effective* viewing duration in
 // seconds (front-end cleans misfires, tab-switch and hang time).
@@ -83,7 +96,7 @@ type MemoryPageView struct {
 	ID              string    `json:"id" gorm:"primaryKey;type:varchar(36)"`
 	TenantID        uint64    `json:"tenant_id" gorm:"column:tenant_id;not null;uniqueIndex:idx_mastery_view_scope,priority:1"`
 	SubjectID       string    `json:"subject_id" gorm:"column:subject_id;type:varchar(512);not null;uniqueIndex:idx_mastery_view_scope,priority:2"`
-	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"type:varchar(36);not null;default:'';uniqueIndex:idx_mastery_view_scope,priority:3"`
+	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"column:knowledge_base_id;type:varchar(36);not null;default:''"`
 	Slug            string    `json:"slug" gorm:"type:varchar(255);not null;uniqueIndex:idx_mastery_view_scope,priority:4"`
 	ViewCount       int       `json:"view_count" gorm:"column:view_count;not null;default:0"`
 	TotalDuration   int64     `json:"total_duration" gorm:"column:total_duration;not null;default:0"`

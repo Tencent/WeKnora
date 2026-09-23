@@ -34,6 +34,7 @@ var versionedSQLiteTables = []string{
 	"tenant_skill_snapshots",
 	"tenant_skill_catalog",
 	"tenant_user_env_vars",
+	"memory_citation_events",
 	"memory_citations",
 	"memory_page_views",
 	"memory_answer_likes",

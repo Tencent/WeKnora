@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS memory_citation_events;
 -- Migration 000111 down: drop knowledge guidance ledgers.
 
 DROP TABLE IF EXISTS memory_mastery_daily;
