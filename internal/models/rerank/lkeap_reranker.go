@@ -21,6 +21,14 @@ const (
 	LKEAPDefaultRerankModel = "lke-reranker-base"
 )
 
+// lkeapEndpoint and lkeapScheme are where the SDK sends RunRerank: the public
+// API host, as it has always been, whatever the row's base URL says. They are
+// variables only so a test can point the SDK at a local server.
+var (
+	lkeapEndpoint = LKEAPRerankEndpoint
+	lkeapScheme   = "HTTPS"
+)
+
 // lkeapClient calls Tencent Cloud's RunRerank action through the official
 // SDK, which owns the TC3 signing this API requires. It implements
 // api.Reranker and nothing else: the per-request ceilings (60 documents,
@@ -50,7 +58,8 @@ func newLKEAPClient(config *RerankerConfig, resolved *catalog.Resolved) (api.Rer
 
 	credential := common.NewCredential(secretID, secretKey)
 	cpf := profile.NewClientProfile()
-	cpf.HttpProfile.Endpoint = LKEAPRerankEndpoint
+	cpf.HttpProfile.Endpoint = lkeapEndpoint
+	cpf.HttpProfile.Scheme = lkeapScheme
 
 	client, err := lkeap.NewClient(credential, region, cpf)
 	if err != nil {

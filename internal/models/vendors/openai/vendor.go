@@ -21,8 +21,8 @@
 //     gpt-5* / o1* / o3* / o4* families set supports_temperature false;
 //   - `store: false` is sent so completions are not retained, and
 //     `prompt_cache_key` steers cache routing; usage reports cached tokens;
-//   - every model type (chat, embedding, rerank via generic clients, VLM,
-//     ASR) is served from https://api.openai.com/v1;
+//   - chat, embedding, VLM and ASR are served from https://api.openai.com/v1;
+//     there is no rerank API;
 //   - requests that go to api.openai.com itself use the Responses protocol
 //     (https://developers.openai.com/api/docs/api-reference/responses),
 //     OpenAI's primary API where reasoning items and encrypted reasoning are
@@ -85,14 +85,16 @@ func init() {
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: BaseURL,
 			types.ModelTypeEmbedding:   BaseURL,
-			types.ModelTypeRerank:      BaseURL,
 			types.ModelTypeVLLM:        BaseURL,
 			types.ModelTypeASR:         BaseURL,
 		},
+		// No rerank: OpenAI's API has no rerank endpoint — the reference
+		// index (https://developers.openai.com/api/llms.txt) does not mention
+		// one — so a row created here would only ever 404. A relay that
+		// serves rerank behind an OpenAI-style URL is a generic row.
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
-			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
 		},

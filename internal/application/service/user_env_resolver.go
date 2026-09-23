@@ -21,6 +21,11 @@ type userEnvResolver struct {
 	// byName indexes the rows by the name the model addresses skills with.
 	byName   map[string]*types.TenantSkillEntity
 	userEnvs userEnvReader
+	// containerEnv is the sandbox config's env_vars, already loaded by the
+	// caller. They were baked into the container at creation and only
+	// participate in the required check — they are not copied into the
+	// per-exec map.
+	containerEnv map[string]string
 	// tenantID and configID are the scope the rows came from, not whatever the
 	// context happens to hold, so a lookup cannot resolve into another
 	// workspace or another config.
@@ -32,7 +37,11 @@ type userEnvResolver struct {
 // installed skills, already carrying their declarations and admin values; they
 // may be empty, in which case only config-wide variables are resolved.
 func NewUserEnvResolver(
-	rows []*types.TenantSkillEntity, userEnvs userEnvReader, tenantID uint64, configID string,
+	rows []*types.TenantSkillEntity,
+	userEnvs userEnvReader,
+	containerEnv map[string]string,
+	tenantID uint64,
+	configID string,
 ) *userEnvResolver {
 	byName := make(map[string]*types.TenantSkillEntity, len(rows))
 	for _, row := range rows {
@@ -41,7 +50,11 @@ func NewUserEnvResolver(
 		}
 	}
 	return &userEnvResolver{
-		byName: byName, userEnvs: userEnvs, tenantID: tenantID, configID: configID,
+		byName:       byName,
+		userEnvs:     userEnvs,
+		containerEnv: containerEnv,
+		tenantID:     tenantID,
+		configID:     configID,
 	}
 }
 
@@ -53,6 +66,10 @@ func NewUserEnvResolver(
 // An empty skillName resolves only the config-wide variables, which is what
 // shell_exec gets when the model names no skill. An unknown name behaves the
 // same way: host-staged skills carry no declaration.
+//
+// Sandbox-config env_vars (baked into the container at creation) are not in
+// that overlay. They still satisfy a required declaration so a key filled in
+// before the sandbox was created is not reported as unset.
 func (r *userEnvResolver) ResolveEnv(
 	ctx context.Context, skillName string,
 ) (map[string]string, []string, error) {
@@ -88,7 +105,7 @@ func (r *userEnvResolver) ResolveEnv(
 	var missing []string
 	if row != nil {
 		for _, declared := range row.Envs {
-			if declared.Required && env[declared.Name] == "" {
+			if declared.Required && env[declared.Name] == "" && r.containerEnv[declared.Name] == "" {
 				missing = append(missing, declared.Name)
 			}
 		}

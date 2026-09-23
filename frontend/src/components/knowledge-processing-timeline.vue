@@ -11,6 +11,7 @@ import {
   type KnowledgeTraceNode,
 } from '@/utils/knowledgeTrace'
 import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
+import { shownStall, stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall'
 import { axisGridStepPct, buildAxisTicks, computeTraceAxis } from '@/utils/traceAxis'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
@@ -32,6 +33,10 @@ interface SpansResponse {
   current_stage?: string
   trace: SpanNode
   last_error?: LastError | null
+  // Latest row or span write; only sent while the parse is in flight.
+  last_activity_at?: string
+  // Server verdict once quiet past the stall hint: 'queued' or 'stalled'.
+  stall_state?: string
 }
 
 // IMPORTANT: Vue 3 coerces missing Boolean props to `false`, NOT
@@ -484,6 +489,21 @@ async function onManualRefresh() {
 
 const cancelling = ref(false)
 
+// Minutes the latest attempt has gone without progress; 0 unless it looks
+// stuck. Historical attempts are never "stalled".
+const stalledMin = computed<number>(() => {
+  const d = data.value
+  if (!d || d.attempt !== (d.latest_attempt || d.attempt)) return 0
+  return stalledMinutes(d, nowTick.value)
+})
+
+const stalledStageLabel = computed(() => {
+  const stage = data.value?.current_stage
+  return stage && (STAGES as readonly string[]).includes(stage)
+    ? t(`knowledgeStages.stage.${stage}`)
+    : ''
+})
+
 // Mirrors the backend CancelKnowledgeParse gate (pending / processing /
 // finalizing). Uses the freshest status we have: live span data first,
 // the parent's hint before the first fetch lands.
@@ -572,6 +592,8 @@ onMounted(() => {
       if (unmounted) return
       if (fetchInFlight) return
       if (!shouldPollNow()) return
+      // Nothing is moving on a stalled trace; check back less often.
+      if (stalledMin.value > 0 && Date.now() - lastFetchedAt.value < STALLED_POLL_INTERVAL_MS) return
       fetchSpans()
     }, POLL_INTERVAL_MS)
   }
@@ -1324,6 +1346,16 @@ const headStats = computed<HeadStat[]>(() => {
       mono: true,
     })
   }
+  const lastActivity = parseTime(data.value.last_activity_at)
+  if (lastActivity !== null && isLive.value) {
+    out.push({
+      key: 'progress',
+      label: t('knowledgeStages.head.lastProgress'),
+      value: formatRelativeTime(lastActivity),
+      mono: false,
+      note: stalledMin.value > 0,
+    })
+  }
   if (lastFetchedAt.value && isLive.value) {
     let updated = formatRelativeTime(lastFetchedAt.value)
     if (!lastFetchOk.value) {
@@ -1613,6 +1645,40 @@ const processConfigLines = computed<string[]>(() => {
               <span class="kp-attempt-glyph" :class="attemptGlyph(tab.status).cls">{{ attemptGlyph(tab.status).ch
                 }}</span>
             </button>
+          </div>
+
+          <div v-if="shownStall(data?.stall_state, stalledMin) === 'queued'" class="kp-stall kp-stall-queued"
+            role="status">
+            <t-icon name="time" size="16px" class="kp-stall-icon" />
+            <div class="kp-stall-body">
+              <div class="kp-stall-title">{{ t('knowledgeStages.stall.queuedTitle', { minutes: stalledMin }) }}</div>
+              <div class="kp-stall-hint">{{ t('knowledgeStages.stall.queuedHint') }}</div>
+            </div>
+          </div>
+          <div v-else-if="shownStall(data?.stall_state, stalledMin) === 'stalled'" class="kp-stall" role="status">
+            <t-icon name="time" size="16px" class="kp-stall-icon" />
+            <div class="kp-stall-body">
+              <div class="kp-stall-title">{{ t('knowledgeStages.stall.title', { minutes: stalledMin }) }}</div>
+              <div class="kp-stall-hint">
+                {{ stalledStageLabel
+                  ? t('knowledgeStages.stall.hintAtStage', { stage: stalledStageLabel })
+                  : t('knowledgeStages.stall.hint') }}
+              </div>
+            </div>
+            <t-popconfirm
+              v-if="canCancelParse"
+              theme="warning"
+              :content="t('knowledgeBase.cancelParseConfirmBody', { title: props.docTitle || props.knowledgeId })"
+              :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+              :cancel-btn="{ content: t('common.cancel') }"
+              placement="bottom"
+              @confirm="onCancelParseConfirm"
+            >
+              <button type="button" class="kp-stall-btn" :disabled="cancelling" @click.stop>
+                <t-icon :name="cancelling ? 'loading' : 'close-circle'" size="14px" />
+                <span>{{ t('knowledgeBase.cancelParse') }}</span>
+              </button>
+            </t-popconfirm>
           </div>
 
           <div v-if="showLastError && data?.last_error" class="kp-last-error" role="alert">
@@ -2996,6 +3062,82 @@ const processConfigLines = computed<string[]>(() => {
 .kp-err-btn:hover {
   background: var(--td-error-color);
   color: var(--td-text-color-anti);
+}
+
+/* Same card shape as .kp-last-error in the warning tone: the run may still
+   finish, so this nudges rather than alarms. */
+.kp-stall {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--td-warning-color-light);
+  border: 1px solid var(--td-warning-color-3);
+  border-left: 3px solid var(--td-warning-color);
+  border-radius: var(--td-radius-medium);
+}
+
+/* Backlogged, not stuck: neutral tone, and no stop button to invite
+   cancelling work that will still finish. */
+.kp-stall-queued {
+  background: var(--td-bg-color-secondarycontainer);
+  border-color: var(--td-component-border);
+  border-left-color: var(--td-text-color-placeholder);
+}
+
+.kp-stall-queued .kp-stall-icon {
+  color: var(--td-text-color-secondary);
+}
+
+.kp-stall-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--td-warning-color);
+}
+
+.kp-stall-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.kp-stall-title {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.kp-stall-hint {
+  margin-top: 4px;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
+.kp-stall-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--td-warning-color);
+  border-radius: var(--td-radius-default);
+  background: var(--td-bg-color-container);
+  color: var(--td-warning-color-7);
+  font-size: var(--app-text-sm);
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+}
+
+.kp-stall-btn:hover:not(:disabled) {
+  background: var(--td-warning-color);
+  color: var(--td-text-color-anti);
+}
+
+.kp-stall-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 /* ============== DETAIL PANEL ==============

@@ -1234,12 +1234,55 @@ func (s *knowledgeService) bindContentResources(
 	}
 }
 
+// bindStoredImages claims the images a document parse extracted and stored,
+// so file authorization can later prove which knowledge owns each image. The
+// KB- and message-scoped file proxies only serve resources with a live
+// binding (#3342): an extracted image without one stays invisible to
+// cross-workspace viewers no matter what the retrieving chunk text says.
+//
+// Best-effort by design, mirroring bindContentResources: a parse is expensive
+// to redo, and a missed claim degrades to same-workspace rendering instead of
+// failing the document.
+func (s *knowledgeService) bindStoredImages(
+	ctx context.Context, knowledge *types.Knowledge, images []docparser.StoredImage,
+) {
+	if s.resourceCatalog == nil || knowledge == nil || len(images) == 0 {
+		return
+	}
+	bound := 0
+	for _, img := range images {
+		ref := strings.TrimSpace(img.ServingURL)
+		if ref == "" {
+			continue
+		}
+		resource, err := s.resourceCatalog.Resolve(ctx, ref)
+		if err != nil || resource == nil {
+			logger.Warnf(ctx, "Skip binding unknown stored image %s to knowledge %s: %v", ref, knowledge.ID, err)
+			continue
+		}
+		if resource.TenantID != knowledge.TenantID {
+			logger.Warnf(ctx, "Skip binding cross-workspace stored image %s to knowledge %s", ref, knowledge.ID)
+			continue
+		}
+		if err := s.resourceCatalog.Bind(
+			ctx, ref, types.ResourceOwnerKnowledge, knowledge.ID, types.ResourceRelationExtractedImage,
+		); err != nil {
+			logger.Warnf(ctx, "Failed to bind stored image %s to knowledge %s: %v", ref, knowledge.ID, err)
+			continue
+		}
+		bound++
+	}
+	if bound > 0 {
+		logger.Infof(ctx, "Bound %d/%d stored images to knowledge %s", bound, len(images), knowledge.ID)
+	}
+}
+
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool,
-) {
+) error {
 	clean := strings.TrimSpace(content)
 	if clean == "" {
-		return
+		return nil
 	}
 
 	// Resolve embedded data:base64 images and remote http(s) images → storage, replace URLs.
@@ -1268,6 +1311,10 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	// released the previous run's claims, so a republished document keeps the
 	// files its new body still references.
 	s.bindContentResources(ctx, knowledge.TenantID, knowledge.ID, clean)
+	// bindContentResources only sees resource:// handles in the final text;
+	// freshly resolved images may still carry provider:// URLs, so claim them
+	// from the resolver's own list as well.
+	s.bindStoredImages(ctx, knowledge, resolvedImages)
 
 	// Keep manually entered CRLF text aligned with the LF values sent by the
 	// chunking preview endpoint.
@@ -1331,10 +1378,14 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	}
 
 	if doSync {
-		s.processChunks(ctx, kb, knowledge, parsed, opts)
-		return
+		return s.processChunks(ctx, kb, knowledge, parsed, opts)
 	}
 
 	newCtx := logger.CloneContext(ctx)
-	go s.processChunks(newCtx, kb, knowledge, parsed, opts)
+	go func() {
+		if err := s.processChunks(newCtx, kb, knowledge, parsed, opts); err != nil {
+			logger.Warnf(newCtx, "manual processing for knowledge %s: %v", knowledge.ID, err)
+		}
+	}()
+	return nil
 }

@@ -9,7 +9,7 @@
 //
 // Contract:
 //   - Never delete files from the sandbox — skills can share files across
-//     turns; deletion would break that (spec §2, "不清空输出目录").
+//     turns; deletion would break that ("不清空输出目录").
 //   - Never lazy-create a sandbox: the collector reads from an already-live
 //     sandbox and returns an empty slice when none exists.
 //   - Best-effort: individual errors are logged and skipped, never returned,
@@ -88,9 +88,8 @@ const (
 	artifactBindingRelation  = types.ResourceRelationArtifact
 )
 
-// ArtifactCollector implements the "drain sandbox artifacts on turn
-// completion" step described in
-// docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md §4.
+// ArtifactCollector drains skill-generated files from the sandbox when a
+// turn completes.
 type ArtifactCollector struct {
 	source      SandboxArtifactSource
 	fileService interfaces.FileService
@@ -105,6 +104,10 @@ type ArtifactCollector struct {
 	// nil keeps the process-wide source for every workspace.
 	resolver sandbox.TenantSandboxResolver
 	pinner   *SessionSandboxPinner
+	// host answers "is this an unpinned host session?" so Collect can drain
+	// Lite workspaces that never write a sandbox pin. Optional: nil keeps
+	// the remote "no pin, nothing to attach" path.
+	host *HostSessionResolver
 	// fallbackMgr is the deployment-wide SessionBoundManager. Sentinel pins
 	// ("-") resolve to it rather than a per-config manager.
 	fallbackMgr sandbox.Manager
@@ -144,6 +147,7 @@ func NewArtifactCollectorFromSandboxManager(
 	sandboxMgr sandbox.Manager,
 	sandboxResolver sandbox.TenantSandboxResolver,
 	pinner *SessionSandboxPinner,
+	host *HostSessionResolver,
 	fileService interfaces.FileService,
 	repo interfaces.MessageRepository,
 	catalog interfaces.ResourceCatalog,
@@ -164,6 +168,7 @@ func NewArtifactCollectorFromSandboxManager(
 	)
 	collector.resolver = sandboxResolver
 	collector.pinner = pinner
+	collector.host = host
 	collector.fallbackMgr = sandboxMgr
 	return collector
 }
@@ -185,7 +190,7 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 		return nil
 	}
 	if pin.IsZero() {
-		return nil
+		return c.hostSessionSource(ctx, sessionID)
 	}
 	mgr, err := resolveTenantSandboxForConfig(
 		ctx, c.resolver, c.fallbackMgr, pin.TenantOr(sessionTenantID), pin.ConfigID, nil,
@@ -208,6 +213,58 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 		return c.source
 	}
 	return nil
+}
+
+func (c *ArtifactCollector) hostSessionSource(ctx context.Context, sessionID string) SandboxArtifactSource {
+	if c.host == nil {
+		return nil
+	}
+	mgr := c.host.HostManagerFor(ctx, sessionID)
+	if mgr == nil {
+		return nil
+	}
+	if source, ok := mgr.(SandboxArtifactSource); ok {
+		return source
+	}
+	return nil
+}
+
+// CollectTarget reports the directory Collect should scan for this session,
+// and whether collection must be skipped entirely.
+//
+// skip is true when collecting would scan the user's project: the backend
+// advertised a workspace with no separate output tree, OutputDir is Root, or
+// the layout provider failed. A nil source is also skip: there is nothing to
+// drain, and skip=false would let the caller fill /workspace/output. An empty
+// dir with skip false means the backend advertises no layout at all — the
+// caller's remote default applies.
+//
+// The directory and the skip decision come from one lookup on purpose. Asking
+// twice re-resolved the session's sandbox (a pin read plus a manager resolve)
+// and let the two answers disagree: a second lookup that failed after the
+// first succeeded returned no directory, sending a host session's collection
+// back to the remote /workspace/output.
+func (c *ArtifactCollector) CollectTarget(ctx context.Context, sessionID string) (string, bool) {
+	if c == nil {
+		return "", true
+	}
+	source := c.sessionSource(ctx, sessionID)
+	if source == nil {
+		return "", true
+	}
+	provider, ok := source.(sandbox.SessionWorkspaceLayoutProvider)
+	if !ok || provider == nil {
+		return "", false
+	}
+	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+	if err != nil {
+		return "", true
+	}
+	layout = layout.Normalized()
+	if layout.Root == "" || layout.OutputDir == "" || layout.OutputDir == layout.Root {
+		return "", true
+	}
+	return layout.OutputDir, false
 }
 
 // newBoundedConfig fills in defaults so callers can pass a zero

@@ -1,11 +1,9 @@
 //go:build windows
 
-// Package winhost will implement the sandbox backend for Windows using the
-// Route B design: a dedicated hidden account, a restricted token, per-root
-// capability SIDs, firewall rules and a job object for the process tree.
-// See spec section 6.2. Phase 3 splits this package into account.go, token.go,
-// acl.go, firewall.go, install.go, spawn.go and teardown.go plus an elevated
-// helper executable.
+// Package winhost is the Windows sandbox backend. The intended isolation is a
+// dedicated hidden account, a restricted token, per-root capability SIDs,
+// firewall rules, and a job object for the process tree. This build reports
+// Windows as unavailable rather than running unsandboxed.
 package winhost
 
 import (

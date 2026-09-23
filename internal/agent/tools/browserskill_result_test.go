@@ -159,6 +159,19 @@ func TestBorrowRecoveryDoesNotConfuseResumeWithApproval(t *testing.T) {
 	require.Contains(t, hint, "does not grant tab access")
 	require.Contains(t, hint, "After explicit resume")
 	require.Contains(t, hint, "Do not call request_help")
+	hint = browserRecoveryHint("tab_borrow", &browserskill.RPCError{
+		Code: "unsupported", Message: "No user tab can display the borrow confirmation",
+		Data: json.RawMessage(`{"reason":"confirmation_ui_unavailable"}`),
+	})
+	require.Contains(t, hint, "HTTP(S) page in a regular browser window")
+	require.Contains(t, hint, "Do not retry until a page is available")
+	hint = browserRecoveryHint("tab_borrow", &browserskill.RPCError{
+		Code: "invalid_params",
+		Message: "tab_borrow: tab 7 is not authorized and already lives in the Agent Window; " +
+			"move it to a regular browser window, then borrow it",
+	})
+	require.Contains(t, hint, "Ask the user to move")
+	require.Contains(t, hint, "navigate in an owned task tab")
 	// Unrelated permission denials must not suggest a way to borrow around them.
 	hint = browserRecoveryHint("click", &browserskill.RPCError{Code: "permission_denied", Message: "policy denied"})
 	require.NotContains(t, hint, "call tab_borrow")

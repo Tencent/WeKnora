@@ -654,7 +654,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	// One-time legacy upgrade (feishu deep adaptation): feishu/lark data
 	// sources predating the per-source parse_mode setting carry a
-	// resync_required marker stamped by migration 000096 (sqlite 000017).
+	// resync_required marker stamped by migration 000110 (sqlite 000030).
 	// resyncRequired(config) below upgrades their next sync (even an
 	// incremental one) to a full pass and clears it on success.
 
@@ -982,12 +982,12 @@ func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*type
 }
 
 // feishuSettingResyncRequired is the one-shot upgrade marker key. Legacy
-// feishu/lark data sources are stamped by migration 000096 (sqlite 000017).
+// feishu/lark data sources are stamped by migration 000110 (sqlite 000030).
 const feishuSettingResyncRequired = "resync_required"
 
 // resyncRequired reads the one-shot upgrade marker out of parsed config
 // Settings. Tolerates both bool and string encodings. The marker is stamped
-// onto legacy feishu/lark data sources by migration 000096 (sqlite 000017)
+// onto legacy feishu/lark data sources by migration 000110 (sqlite 000030)
 // when the per-source parse_mode shipped; it upgrades their next sync — even
 // a scheduled incremental one — to a full pass so existing documents re-ingest
 // with folder paths and block-level parsing.

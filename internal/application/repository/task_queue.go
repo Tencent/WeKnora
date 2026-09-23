@@ -366,6 +366,54 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 		Delete(&types.TaskPendingOp{}).Error
 }
 
+// DrainUnclaimedAndRelease deletes the lane's op rows for documents no live
+// batch holds and releases each such document's finalizing slot, in one
+// transaction: a failed release rolls the delete back so a retry finds the
+// rows again. A document with any freshly claimed row in the lane (whatever
+// its op) is skipped whole, matching ClaimBatch's per-key claim, since the
+// live batch will release it. Returns the released dedup keys.
+func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
+	ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time,
+) ([]string, error) {
+	if taskType == "" || scope == "" || scopeID == "" || op == "" {
+		return nil, errors.New("task pending ops: task_type, scope, scope_id and op are required")
+	}
+	var keys []string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var removed []string
+		if err := tx.Raw(
+			`DELETE FROM task_pending_ops
+			WHERE task_type = ? AND scope = ? AND scope_id = ? AND op = ?
+				AND (claimed_at IS NULL OR claimed_at < ?)
+				AND dedup_key NOT IN (
+					SELECT dedup_key FROM task_pending_ops
+					WHERE task_type = ? AND scope = ? AND scope_id = ? AND claimed_at >= ?
+				)
+			RETURNING dedup_key`,
+			taskType, scope, scopeID, op, staleBefore,
+			taskType, scope, scopeID, staleBefore,
+		).Scan(&removed).Error; err != nil {
+			return err
+		}
+		seen := make(map[string]struct{}, len(removed))
+		for _, key := range removed {
+			if _, ok := seen[key]; ok || key == "" {
+				continue
+			}
+			seen[key] = struct{}{}
+			if _, err := finalizeSubtask(tx, key); err != nil {
+				return fmt.Errorf("release finalizing slot for %s: %w", key, err)
+			}
+			keys = append(keys, key)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
 // IncrFailCount atomically bumps fail_count for one row and returns the
 // new value. We use UPDATE ... RETURNING so the read+write happens in
 // one round trip and races between concurrent IncrFailCount callers

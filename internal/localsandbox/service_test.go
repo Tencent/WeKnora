@@ -94,14 +94,14 @@ func (p *fakeProcess) Wait(context.Context) (ExitStatus, error) { return p.exit,
 
 type fakeProjects struct{}
 
-func (fakeProjects) ProjectDirForSession(context.Context, string) (string, bool) {
-	return "", false
+func (fakeProjects) ProjectDirForSession(context.Context, string) (string, bool, error) {
+	return "", false, nil
 }
 
 type fixedProject string
 
-func (p fixedProject) ProjectDirForSession(context.Context, string) (string, bool) {
-	return string(p), true
+func (p fixedProject) ProjectDirForSession(context.Context, string) (string, bool, error) {
+	return string(p), true, nil
 }
 
 type fixedMode ApprovalMode

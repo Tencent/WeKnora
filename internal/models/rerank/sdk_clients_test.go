@@ -65,7 +65,10 @@ func TestVolcengineClientOutboundShape(t *testing.T) {
 	require.NotNil(t, request.Datas[0].Content)
 	assert.Equal(t, "会保留", *request.Datas[0].Content)
 	require.NotNil(t, request.RerankInstruction)
-	assert.Contains(t, *request.RerankInstruction, "Document")
+	// The console's default, verbatim, so results match what the console shows.
+	assert.Equal(t, volcengineRerankDefaultInstruction, *request.RerankInstruction)
+	assert.Equal(t, "Whether the document answers the query or matches the content retrieval intent",
+		*request.RerankInstruction)
 }
 
 func TestVolcengineClientSurfacesAnInBodyErrorCode(t *testing.T) {

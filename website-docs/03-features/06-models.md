@@ -269,6 +269,12 @@ make model-catalog-diff VENDOR=deepseek # 只看一家
 3. **`api.openai.com` 的一方流量改走 Responses 协议**（`PreferAPI` 只对官方域生效）。各类中转 / 网关仍走 Chat Completions，`parity` 包里有断言钉住这一点。
 4. **7 家厂商的输出上限字段按文档纠正**：hunyuan、modelscope、qiniu、requesty、longcat、novita 由 `max_completion_tokens` 改回 `max_tokens`，moonshot 反向改为 `max_completion_tokens`。每一处在 `internal/models/parity/parity_test.go` 里都记了变更理由与厂商文档。aliyun 保持 `max_completion_tokens` 不变：兼容模式两个字段都收，但 DashScope 的参数表已经把 `max_tokens` 标为即将废弃并指名了继任者。
 
+Rerank 行（逐厂商的出站请求由 `internal/models/rerank/wire_test.go` 钉住，含火山与 LKEAP 两个签名 SDK 客户端）：
+
+1. **OpenAI 不再出现在 rerank 的厂商列表里**。OpenAI 的 API 没有 rerank 接口，在这里建的行只会 404；架在 OpenAI 风格地址后面、自带 rerank 的中转请建成 generic 行。已有的行照常解析。
+2. **火山 rerank 每次最多 200 条**（文档：datas「数组长度不超过 200」），旧实现按自己定的 50 条切分。
+3. **火山 rerank 的默认指令改为控制台原文** `Whether the document answers the query or matches the content retrieval intent`，文档要求「如需对齐控制台效果，请使用相同指令」；旧默认值把 Document / Query 写成了大写。已在额外字段里保存了指令的行不受影响。
+
 Embedding 行也有几处按厂商文档纠正的行为变化（逐厂商的出站请求由 `internal/models/embedding/wire_test.go` 钉住）：
 
 1. **托管厂商不再收到 `truncate_prompt_tokens`**。此前所有 OpenAI 兼容厂商都被塞了一个 511，它只是 vLLM 的扩展参数；`generic`、`gpustack` 照旧发送。

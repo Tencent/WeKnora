@@ -292,7 +292,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	if !kb.IsWikiEnabled() {
 		exitStatus = "kb_not_wiki_enabled"
-		return fmt.Errorf("wiki ingest: KB %s is not wiki type", kb.ID)
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "wiki disabled")
 	}
 
 	var synthesisModelID string
@@ -304,9 +304,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	if synthesisModelID == "" {
 		exitStatus = "missing_synthesis_model"
-		return fmt.Errorf("wiki ingest: no synthesis model configured for KB %s", kb.ID)
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "no synthesis model configured")
 	}
 	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
+	if errors.Is(err, ErrModelNotFound) {
+		exitStatus = "synthesis_model_not_found"
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "synthesis model "+synthesisModelID+" not found")
+	}
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		return fmt.Errorf("wiki ingest: get chat model: %w", err)

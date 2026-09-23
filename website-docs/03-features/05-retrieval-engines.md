@@ -118,7 +118,7 @@ flowchart TD
 
 `internal/application/repository/retriever/postgres/repository.go`。数据与业务库同库（`embeddings` 表，GORM 管理）。
 
-- **向量检索**：pgvector `halfvec`（半精度，2 字节/维）。`embedding` 列不定维，HNSW 索引建在表达式 `(embedding::halfvec(dim)) halfvec_cosine_ops` 上——**ORDER BY 表达式必须与索引表达式完全一致**（两侧显式 cast），否则退化为顺序扫描（源码注释引 pgvector issue #702/#835）。查询用子查询先取 `expandedTopK`（TopK*2，夹在 [100,200]，避免大 LIMIT 拖垮 HNSW）个候选算 `distance = embedding <=> query`，再按 `distance <= 1-threshold` 过滤，`score = 1 - distance`。事务内 `SET LOCAL hnsw.ef_search`（≥40）与 `SET LOCAL hnsw.iterative_scan = strict_order`（pgvector ≥ 0.8，选择性过滤下持续补召回），老版本 GUC 不存在时自动降级重试。
+- **向量检索**：pgvector `halfvec`（半精度，2 字节/维）。`embedding` 列不定维，HNSW 索引建在表达式 `(embedding::halfvec(dim)) halfvec_cosine_ops` 上——**ORDER BY 表达式必须与索引表达式完全一致**（两侧显式 cast），否则退化为顺序扫描（源码注释引 pgvector issue [#702](https://github.com/pgvector/pgvector/issues/702)/[#835](https://github.com/pgvector/pgvector/issues/835)）。查询用子查询先取 `expandedTopK`（TopK*2，夹在 [100,200]，避免大 LIMIT 拖垮 HNSW）个候选算 `distance = embedding <=> query`，再按 `distance <= 1-threshold` 过滤，`score = 1 - distance`。事务内 `SET LOCAL hnsw.ef_search`（≥40）与 `SET LOCAL hnsw.iterative_scan = strict_order`（pgvector ≥ 0.8，选择性过滤下持续补召回），老版本 GUC 不存在时自动降级重试。
 - **关键词检索**：ParadeDB `pg_search` BM25——`content ||| query`（任意 token 匹配）+ `paradedb.score(id) as score`。
 - **过滤**：`knowledge_base_id` / `knowledge_id` / `tag_id` IN 过滤（AND 语义），`is_enabled` 为 NULL 或 true。
 - **建索引**：`BatchSave` + `ON CONFLICT DO NOTHING`；删除按 chunk/source/knowledge ID 物理删除。
@@ -149,7 +149,7 @@ flowchart TD
 
 #### OpenSearch {#_2-5-opensearch}
 
-`internal/application/repository/retriever/opensearch/`（多文件拆分：`repository.go`、`retrieve.go`、`query.go`、`mapping.go`、`crud.go` 等）。工程化最完整的驱动。
+`internal/application/repository/retriever/opensearch/`（多文件拆分：`repository.go`、`retrieve.go`、`query.go`、`mapping.go`、`crud.go` 等）。
 
 - **版本门禁** `probeVersion`：拒绝 ES 发行版与 OS 1.x / 2.0-2.3（Lucene HNSW 预览版）；2.4-2.10 警告接受；2.11+ / 3.x 干净接受（主测 3.3.2）。`probeKNNPlugin` 要求所有节点装有 `opensearch-knn` 插件。
 - **向量检索**：k-NN 插件 `knn` 查询（`query.go buildKNNQuery`）；k-NN 的 `COSINESIMIL` space type 返回 `(1+cosine)/2`，天然 [0,1]。
@@ -222,7 +222,8 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 | SQLite | 每维度一张 `vec0` 虚表（启动时按存量数据维度自动补建） |
 | Qdrant / Milvus / TencentVectorDB | 每维度一个 collection：`{base}_{dim}`，首写时 `ensureCollection` 惰性创建（sync.Map 记忆已建维度） |
 | Doris | 每维度一张表：`{prefix}_{dim}`，`schema.go` 生成 DDL 并轮询 ANN 索引就绪 |
-| Elasticsearch / OpenSearch | 单索引 `dense_vector`/`knn_vector` mapping（`ELASTICSEARCH_INDEX` / `OPENSEARCH_INDEX`），维度在 mapping 中固定 |
+| Elasticsearch | 单索引 `dense_vector` mapping（`ELASTICSEARCH_INDEX`），维度在 mapping 中固定 |
+| OpenSearch | 按维度创建 `{OPENSEARCH_INDEX}_{dim}` 别名及物理索引；另有无维度的关键词索引 |
 
 检索侧的一致性由 `validateSameEmbeddingModel`（`knowledgebase_search_shared.go`）保证：一次多库检索中的所有 KB 必须共享同一 embedding 模型身份（`model.Name + BaseURL`，跨租户可等价），否则拒绝——避免跨向量空间的分数不可比。查询向量按模型身份分组只计算一次（`ResolveEmbeddingModelKeys` + `GetQueryEmbedding`），随 `params.QueryEmbedding` 传播到所有 store 组，杜绝重复 embedding API 调用。
 
@@ -305,3 +306,41 @@ sequenceDiagram
 | 引擎类型常量 | `internal/types/retriever.go` |
 | 租户默认引擎 | `internal/types/tenant.go`（`GetDefaultRetrieverEngines`） |
 | 环境变量清单 | `.env.example`（C1 节）、`docker-compose.yml` |
+
+## 本地验证与升级
+
+- [ParadeDB 存量库升级](../01-getting-started/06-paradedb-upgrade.md)：保留数据卷、扩展 SQL 升级与恢复。
+
+### OpenSearch 本地联调 {#opensearch-local-testing}
+
+在仓库根目录启动开发集群：
+
+```bash
+docker compose -f docker-compose.dev.yml --profile opensearch up -d opensearch
+curl -fsS 'http://localhost:9200/'
+curl -fsS 'http://localhost:9200/_cat/plugins?format=json'
+```
+
+确认版本和 `opensearch-knn` 插件。默认端口为 9200，修改过 `OPENSEARCH_PORT` 时同步调整地址。此 profile 关闭安全插件，仅用于隔离的本地测试；可选 Dashboards 使用 `--profile opensearch-ui up -d opensearch-dashboards` 启动。
+
+宿主机后端在 `.env` 中设置并重新启动：
+
+```dotenv
+RETRIEVE_DRIVER=opensearch
+OPENSEARCH_ADDR=http://localhost:9200
+SSRF_WHITELIST=localhost
+```
+
+也可通过管理界面/API 注册 `engine_type: opensearch` 的存储，`connection_config.addr` 使用该地址。容器内后端要使用可达的服务地址；生产连接另需 TLS、认证和按实际目标配置的 SSRF 规则。配置方式见[基础设施 API](../04-api/02-api-infra.md)。
+
+**单节点副本限制**：当前驱动默认 1 个副本，`index_config.number_of_replicas: 0` 也会回退为 1（`opensearch/config.go` 的零值处理）。因此不能用填写 0 来保证集群变为 Green。主分片正常、副本无法分配时可呈 Yellow；结合 `/_cluster/health` 和 `/_cat/shards?v` 检查具体原因，再验证实际读写。
+
+创建测试知识库并绑定该存储，上传少量文档，等待解析完成后验证向量与关键词检索。检查 `/_cat/indices?v` 与 `/_cat/aliases?v`，再验证修改、停用、重新启用和删除条目的检索结果；若测试知识库复制，还应检查目标库内容。索引按需创建，不应要求保存存储配置时就出现全部索引。
+
+结束后仅停止本次使用的服务，保留开发数据：
+
+```bash
+docker compose -f docker-compose.dev.yml --profile opensearch stop opensearch
+# 若启动过 Dashboards
+docker compose -f docker-compose.dev.yml --profile opensearch-ui stop opensearch-dashboards
+```

@@ -12,6 +12,10 @@ type CreateSessionRequest struct {
 	Title string `json:"title"`
 	// Description for the session (optional)
 	Description string `json:"description"`
+	// ProjectDir is an optional Lite host-sandbox binding. When set it must
+	// be an absolute path already present in the user-approved ProjectDirs
+	// list. Empty means the session gets an auto-allocated workspace.
+	ProjectDir string `json:"project_dir,omitempty"`
 }
 
 // GenerateTitleRequest defines the request structure for generating a session title

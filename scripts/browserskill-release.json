@@ -2,10 +2,10 @@
   "version": "0.3.0",
   "extension": {
     "version": "0.3.0",
-    "source_commit": "fa953dc6fcd868827b93164e3bea26198e691224"
+    "source_commit": "3da449e9ff2a1f25adc7170fb41d5ed7a82d84d5"
   },
   "daemon": {
-    "source_commit": "fa953dc6fcd868827b93164e3bea26198e691224",
+    "source_commit": "3da449e9ff2a1f25adc7170fb41d5ed7a82d84d5",
     "build": "cargo build --locked --release -p bsk"
   }
 }

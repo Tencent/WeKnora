@@ -60,6 +60,7 @@ import {
   knowledgeNeedsStatusPolling,
   shouldRefreshWikiStatusAfterKnowledgePoll,
 } from './wikiStatusRefresh';
+import { stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
 import {
@@ -1266,7 +1267,8 @@ watch(() => cardList.value, (newValue) => {
     timeout = null;
   }
   if (analyzeList.length) {
-    updateStatus(analyzeList)
+    // The deep watch refires as stalled_minutes ticks; keep the backoff.
+    updateStatus(analyzeList, pollDelayFor(analyzeList))
   }
 
 }, { deep: true })
@@ -1287,6 +1289,11 @@ type KnowledgeCard = {
   metadata?: any;
   error_message?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
+  last_activity_at?: string;
+  // Minutes without progress while in flight; 0 unless it looks stuck.
+  stalled_minutes?: number;
+  // Server verdict on a quiet row: 'queued' (backlogged) or 'stalled'.
+  stall_state?: string;
 };
 // needsStatusPolling decides whether a card row is still "in flight"
 // enough that the doc list should keep refreshing it. Keep in sync with
@@ -1298,7 +1305,14 @@ const needsStatusPolling = (item: KnowledgeCard) => {
   return knowledgeNeedsStatusPolling(item);
 };
 
-const updateStatus = (analyzeList: KnowledgeCard[]) => {
+// Back off once every in-flight row looks stuck: nothing is moving, and a
+// page left open on it should not keep hammering the batch endpoint.
+const pollDelayFor = (items: KnowledgeCard[]) =>
+  items.length > 0 && items.every(item => (item.stalled_minutes ?? 0) > 0)
+    ? STALLED_POLL_INTERVAL_MS
+    : 1500;
+
+const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
@@ -1326,6 +1340,11 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
             }
           }
 
+          const card = cardList.value[index];
+          card.last_activity_at = item.last_activity_at;
+          card.stall_state = item.stall_state;
+          card.stalled_minutes = stalledMinutes({ parse_status: parseStatus, last_activity_at: item.last_activity_at });
+
           if (cardList.value[index].parse_status !== parseStatus ||
             cardList.value[index].summary_status !== item.summary_status ||
             cardList.value[index].description !== item.description) {
@@ -1350,16 +1369,16 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
       // The watch will clear this timeout if it triggers.
       const stillPending = cardList.value.filter(needsStatusPolling);
       if (stillPending.length > 0) {
-        updateStatus(stillPending);
+        updateStatus(stillPending, pollDelayFor(stillPending));
       }
     }).catch((_err) => {
       // 错误处理
       const stillPending = cardList.value.filter(needsStatusPolling);
       if (stillPending.length > 0) {
-        updateStatus(stillPending);
+        updateStatus(stillPending, pollDelayFor(stillPending));
       }
     });
-  }, 1500);
+  }, delay);
 };
 
 
