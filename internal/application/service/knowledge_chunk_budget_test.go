@@ -32,7 +32,8 @@ func TestEnforceChunkBudgetBoundaries(t *testing.T) {
 			if err != nil {
 				for _, want := range []string{"100000", "chunk_size"} {
 					if !strings.Contains(err.Error(), want) {
-						t.Fatalf("error message %q missing %q: the reporter needs the limit and the way out", err.Error(), want)
+						t.Fatalf("error %q missing %q (limit + remedy must reach the reporter)",
+							err.Error(), want)
 					}
 				}
 			}
@@ -63,7 +64,7 @@ func TestChunkBudgetRejectsAmplifiedSplit(t *testing.T) {
 	cfg := chunker.NormalizeSplitterConfig(chunker.SplitterConfig{ChunkSize: 1, ChunkOverlap: 64})
 	amplified := chunker.Split(text, cfg)
 	if len(amplified) <= MaxChunksPerDocument {
-		t.Fatalf("fixture no longer amplifies: %d chunks at chunk_size=1, want more than %d — regenerate the input shape",
+		t.Fatalf("fixture no longer amplifies: %d chunks at chunk_size=1, want > %d — regenerate the input",
 			len(amplified), MaxChunksPerDocument)
 	}
 	if err := enforceChunkBudget(len(amplified)); err == nil {
