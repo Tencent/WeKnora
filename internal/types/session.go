@@ -120,6 +120,15 @@ type Session struct {
 	// before the column existed.
 	SandboxConfigTenantID uint64 `json:"-" gorm:"column:sandbox_config_tenant_id;type:bigint;default:0"`
 
+	// HostWorkspaceDir is the user-selected project directory this session
+	// operates in, for the WeKnora Lite host sandbox only. Empty means the session
+	// gets an auto-allocated workspace instead.
+	//
+	// Written once at creation and never updated: re-pointing a live session
+	// at a different directory would leave its transcript describing files
+	// that are no longer there. Standard edition never writes it.
+	HostWorkspaceDir string `json:"host_workspace_dir,omitempty" gorm:"type:varchar(1024)"`
+
 	// ParentSessionID names the session this one was forked from. Empty for
 	// ordinary sessions. Deliberately not a foreign key: the parent may be
 	// deleted while the branch lives on, and a branch must not cascade away

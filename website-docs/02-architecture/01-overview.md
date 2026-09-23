@@ -198,7 +198,7 @@ sequenceDiagram
 | `tests/`、`testdata/` | 集成测试与测试数据 |
 | `misc/` | 杂项（如 `dex-config.yaml` OIDC 测试配置） |
 | `packages/` | 预留的本地包目录 |
-| `docs/` | 早期文档，部分内容已过时 |
+| `docs/` | 停止维护的旧文档；暂存 Swagger 生成包、发布资源和历史图片 |
 
 > 说明：Go 模块路径为 `github.com/Tencent/WeKnora`；根目录还包含 `docker-compose.yml`（生产编排）与 `docker-compose.dev.yml`（开发编排）、`Makefile`、`VERSION` 等。
 

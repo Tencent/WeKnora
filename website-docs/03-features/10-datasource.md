@@ -50,6 +50,8 @@
 
 #### Feishu / Lark（`connector/feishu/`）
 
+云盘应用权限、文件夹授权、资源选择和 `FEISHU_DOCX_PARSE_MODE` 取舍见[飞书云盘接入](24-feishu-drive.md)。默认 export 与 blocks 模式的图片、附件语义不同；开启同步删除时会删除当前数据源对应的知识条目。
+
 飞书与 Lark（国际版 open.larksuite.com）是部署在两朵隔离云上的同一产品，Wiki/docx/drive API 完全一致，因此**共用同一份连接器代码**，由 `region.go` 中的 `Region` 结构选择云端（`RegionFeishu` / `RegionLark`，分别对应类型 `feishu` / `lark`、API 域名 `open.feishu.cn` / `open.larksuite.com`）。`base_url` 凭据字段可显式覆盖（兼容历史上把 feishu 连接器指向 larksuite 的存量数据源）。
 
 - **认证**（`client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。

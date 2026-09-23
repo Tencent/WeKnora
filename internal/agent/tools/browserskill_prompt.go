@@ -75,11 +75,16 @@ Task tabs:
 - tab_list scope=user means not authorized for this task. Call tab_borrow before
   tab_select, reading, request_help or other operations on such a tab. Listing a tab
   does not authorize it. Follow extension confirmation and return borrowed tabs when done.
-- New tabs opened directly by your action on a controlled page belong to this task when
-  the extension can verify their source. List tabs and use the returned tab_id to continue.
+- New tabs opened by native click/key input within the Agent Window can be controlled
+  when the extension verifies their source. They are observed tabs, preserved at task end.
+  Separate popup windows and unattributed tabs require tab_borrow before content access.
+  List tabs and use the returned tab_id; never infer authorization from window membership.
 - If a tab is unauthorized, call tab_borrow once and let the extension request approval;
-  this also works inside the task window. Never ask the user to move it out merely to borrow.
-  During borrowing, the user must approve in the target page's BrowserSkill confirmation.
+  an unowned tab already inside the Agent Window must first be moved by the user to a
+  regular browser window. For a lookup that does not need its live state, navigate in an
+  owned task tab instead. Borrow confirmation appears on a regular browser window's
+  HTTP(S) page; if no page can display it, ask the user to open one before retrying.
+  Follow the extension's browser-controlled confirmation preference.
   A denied or timed-out borrow requires user intervention, not repeated select/read/close
   or request_help attempts. Continue operation only resumes a paused task; it does not
   approve borrowing. After explicit resume, a fresh borrow still needs browser approval.

@@ -13,14 +13,17 @@ import (
 )
 
 const (
-	volcengineRerankDefaultModel       = "doubao-seed-rerank"
-	volcengineRerankDefaultRegion      = "cn-beijing"
-	volcengineRerankDefaultInstruction = "Whether the Document answers the Query or matches the content retrieval intent"
+	volcengineRerankDefaultModel  = "doubao-seed-rerank"
+	volcengineRerankDefaultRegion = "cn-beijing"
+	// The console's default instruction, verbatim: "如需对齐控制台效果，请使用
+	// 相同指令" (https://docs.volcengine.com/docs/vector_database_vikingdb/Rerank).
+	volcengineRerankDefaultInstruction = "Whether the document answers the query " +
+		"or matches the content retrieval intent"
 )
 
 // volcengineClient calls the managed Knowledge Service rerank through the
 // vikingdb SDK, which owns the AK/SK signing. It implements api.Reranker and
-// nothing else: the 50-document ceiling and the batch concurrency are
+// nothing else: the 200-document ceiling and the batch concurrency are
 // declared on the vendor and enforced by protocolReranker.
 type volcengineClient struct {
 	modelName   string

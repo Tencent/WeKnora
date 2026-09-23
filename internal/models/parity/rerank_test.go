@@ -67,7 +67,6 @@ func TestRerankProtocolAssignment(t *testing.T) {
 		"qianfan":      api.RerankCohere,
 		"gpustack":     api.RerankCohere,
 		"generic":      api.RerankCohere,
-		"openai":       api.RerankCohere,
 		"weknoracloud": api.RerankCohere,
 		"novita":       api.RerankCohere,
 		"openrouter":   api.RerankCohere,
@@ -263,8 +262,8 @@ func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
 		// cloud.tencent.com/document/product/1772: RunRerank 60 docs,
 		// Query + Docs together 2000 characters, one request at a time.
 		"lkeap": {MaxDocuments: 60, MaxRequestChars: 2000, MaxConcurrency: 1},
-		// Ark Knowledge Service rerank: 50 per request.
-		"volcengine": {MaxDocuments: 50, MaxConcurrency: 4},
+		// VikingDB Knowledge Service rerank: datas "数组长度不超过 200".
+		"volcengine": {MaxDocuments: 200, MaxConcurrency: 4},
 		// NIM reranking: passages is capped at 512 items.
 		"nvidia": {MaxDocuments: 512},
 		// cloud.baidu.com/doc/qianfan-api: 文本数量不超过64, query 不超过

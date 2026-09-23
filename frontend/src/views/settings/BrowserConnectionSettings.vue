@@ -61,6 +61,16 @@
             <div class="step-copy">
               <strong>{{ t('localBrowser.installExtension') }}</strong>
               <p>{{ t('localBrowser.installHint') }}</p>
+              <a class="official-extension-link"
+                href="https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi"
+                target="_blank" rel="noopener noreferrer">
+                {{ t('localBrowser.officialExtension') }}
+                <t-icon name="jump" size="14px" />
+              </a>
+              <details class="install-guide">
+                <summary>{{ t('localBrowser.installGuide') }}</summary>
+                <p>{{ t('localBrowser.usageStep1Text') }}</p>
+              </details>
             </div>
             <t-button theme="default" variant="outline" size="small"
               :disabled="!status.extension_available || downloading" @click="download">
@@ -423,6 +433,34 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   font-size: var(--app-text-md);
   line-height: 1.65;
   color: var(--td-text-color-secondary);
+}
+
+.official-extension-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--td-brand-color);
+  font-size: var(--app-text-sm);
+  line-height: 1.6;
+  text-decoration: none;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
+}
+
+.install-guide {
+  margin-top: 6px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 1.6;
+
+  summary {
+    cursor: pointer;
+    width: fit-content;
+  }
 }
 
 .pairing-feedback {

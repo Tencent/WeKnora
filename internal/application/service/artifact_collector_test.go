@@ -23,20 +23,28 @@ import (
 // responses. Concrete tests populate `entries` (one map per session) and
 // `contents` (one map per absolute path).
 type fakeSandboxSource struct {
-	entries  map[string][]sandbox.RemoteDirEntry
-	contents map[string][]byte
+	entries      map[string][]sandbox.RemoteDirEntry
+	entriesByDir map[string][]sandbox.RemoteDirEntry
+	contents     map[string][]byte
 
 	listErr error
 	readErr error
 
-	listCalls int
-	readCalls []string
+	listCalls  int
+	listedDirs []string
+	readCalls  []string
 }
 
-func (f *fakeSandboxSource) ListSessionFiles(_ context.Context, sessionID, _ string) ([]sandbox.RemoteDirEntry, error) {
+func (f *fakeSandboxSource) ListSessionFiles(
+	_ context.Context, sessionID, dir string,
+) ([]sandbox.RemoteDirEntry, error) {
 	f.listCalls++
+	f.listedDirs = append(f.listedDirs, dir)
 	if f.listErr != nil {
 		return nil, f.listErr
+	}
+	if f.entriesByDir != nil {
+		return f.entriesByDir[dir], nil
 	}
 	return f.entries[sessionID], nil
 }
@@ -204,6 +212,33 @@ func newTestCollector(src *fakeSandboxSource, store *fakeStore, fs *fakeFileServ
 	// "fake://" paths, so no resource binding is attempted. Binding behaviour
 	// is covered separately in TestArtifactCollector_BindsResourceToMessage.
 	return NewArtifactCollector(src, fs, store, nil, ArtifactCollectorConfig{MaxFileBytes: max})
+}
+
+// hostArtifactManager is a host-typed sandbox.Manager that reads artifacts
+// from a fake filesystem. Host sessions never write a pin, so tests use this
+// as HostSessionResolver's manager.
+type hostArtifactManager struct {
+	artifactFallbackManager
+}
+
+func (m *hostArtifactManager) GetType() sandbox.SandboxType { return sandbox.SandboxTypeHost }
+
+func newHostCollector(t *testing.T, hostSource *fakeSandboxSource) *ArtifactCollector {
+	t.Helper()
+	pinner := NewSessionSandboxPinner(newPinTestDB(t))
+	collector := NewArtifactCollector(
+		&fakeSandboxSource{},
+		&fakeFileService{},
+		&fakeStore{},
+		nil,
+		ArtifactCollectorConfig{MaxFileBytes: 1 << 20},
+	)
+	collector.resolver = stubSandboxResolver{}
+	collector.pinner = pinner
+	collector.host = NewHostSessionResolver(pinner, &hostArtifactManager{
+		artifactFallbackManager: artifactFallbackManager{source: hostSource},
+	})
+	return collector
 }
 
 func TestArtifactCollector_CollectsNewFiles(t *testing.T) {
@@ -756,6 +791,132 @@ func TestArtifactCollector_BindsResourceToMessage(t *testing.T) {
 	}
 }
 
+// Host sessions have no pin, so the collector must resolve them explicitly or
+// every generated file renders as a broken sandbox: link.
+func TestCollectResolvesHostSessionWithoutPin(t *testing.T) {
+	ctx := context.Background()
+	hostSource := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-host": {
+				{
+					Name:    "report.pptx",
+					Path:    "/Users/dev/AppData/s1/output/report.pptx",
+					Type:    sandbox.RemoteEntryFile,
+					Size:    4,
+					ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
+			},
+		},
+		contents: map[string][]byte{
+			"/Users/dev/AppData/s1/output/report.pptx": []byte("PPTX"),
+		},
+	}
+	c := newHostCollector(t, hostSource)
+
+	got, err := c.Collect(ctx, "sess-host", "msg-1", 42, "/Users/dev/AppData/s1/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Collect() len = %d, want 1 (host session without pin must still drain OutputDir)", len(got))
+	}
+	if got[0].FileName != "report.pptx" {
+		t.Fatalf("Collect() file = %q, want report.pptx", got[0].FileName)
+	}
+}
+
+// The collector reads and uploads every file it lists. Pointing it at the
+// project root would copy the user's whole repository into object storage.
+func TestCollectOnHostOnlyScansOutputDir(t *testing.T) {
+	ctx := context.Background()
+	workspaceRoot := "/Users/dev/proj"
+	outputDir := "/Users/dev/AppData/s1/output"
+	hostSource := &fakeSandboxSource{
+		entriesByDir: map[string][]sandbox.RemoteDirEntry{
+			workspaceRoot: {
+				{
+					Name:    "main.go",
+					Path:    workspaceRoot + "/src/main.go",
+					Type:    sandbox.RemoteEntryFile,
+					Size:    12,
+					ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
+			},
+			outputDir: {
+				{
+					Name:    "report.pptx",
+					Path:    outputDir + "/report.pptx",
+					Type:    sandbox.RemoteEntryFile,
+					Size:    4,
+					ModTime: mustParseTime("2026-07-10T10:20:34Z"),
+				},
+			},
+		},
+		contents: map[string][]byte{
+			workspaceRoot + "/src/main.go": []byte("package main"),
+			outputDir + "/report.pptx":     []byte("PPTX"),
+		},
+	}
+	c := newHostCollector(t, hostSource)
+
+	got, err := c.Collect(ctx, "sess-host", "msg-1", 42, outputDir)
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Collect() len = %d, want 1 (only OutputDir files)", len(got))
+	}
+	if got[0].FileName != "report.pptx" {
+		t.Fatalf("Collect() file = %q, want report.pptx", got[0].FileName)
+	}
+	if len(hostSource.listedDirs) == 0 {
+		t.Fatal("ListSessionFiles was not called")
+	}
+	for _, dir := range hostSource.listedDirs {
+		if dir != outputDir {
+			t.Fatalf("ListSessionFiles dir = %q, want only %q", dir, outputDir)
+		}
+		if dir == workspaceRoot {
+			t.Fatal("ListSessionFiles must never scan the workspace root")
+		}
+	}
+}
+
+// Remote deployments must be untouched: no host resolver, pin still required.
+func TestCollectWithoutHostResolverStillRequiresPin(t *testing.T) {
+	ctx := context.Background()
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{
+					Name:    "report.pptx",
+					Path:    "/workspace/output/report.pptx",
+					Type:    sandbox.RemoteEntryFile,
+					Size:    4,
+					ModTime: mustParseTime("2026-07-10T10:20:33Z"),
+				},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": []byte("PPTX"),
+		},
+	}
+	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
+	c.resolver = stubSandboxResolver{}
+	c.pinner = NewSessionSandboxPinner(newPinTestDB(t))
+
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Collect() len = %d, want 0 (unpinned remote session has no sandbox to drain)", len(got))
+	}
+	if src.listCalls != 0 {
+		t.Fatalf("ListSessionFiles calls = %d, want 0", src.listCalls)
+	}
+}
+
 func TestArtifactCollector_BindFailureDoesNotDropArtifact(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{
@@ -924,5 +1085,88 @@ func TestArtifactCollector_LiveRestoreStillSkipsAlongsideATombstone(t *testing.T
 	}
 	if len(got) != 0 {
 		t.Fatalf("Collect() len = %d, want 0: the live version still matches, so this is a restore", len(got))
+	}
+}
+
+type layoutArtifactSource struct {
+	fakeSandboxSource
+	layout sandbox.WorkspaceLayout
+	err    error
+}
+
+func (s *layoutArtifactSource) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	if s.err != nil {
+		return sandbox.WorkspaceLayout{}, s.err
+	}
+	return s.layout, nil
+}
+
+func TestCollectTargetSkipsNilCollector(t *testing.T) {
+	var c *ArtifactCollector
+	dir, skip := c.CollectTarget(context.Background(), "s1")
+	if !skip || dir != "" {
+		t.Fatalf("CollectTarget() = %q, skip=%v, want skip with empty dir", dir, skip)
+	}
+}
+
+func TestCollectTargetSkipsNilSource(t *testing.T) {
+	c := NewArtifactCollector(nil, &fakeFileService{}, &fakeStore{}, nil, ArtifactCollectorConfig{})
+	dir, skip := c.CollectTarget(context.Background(), "s1")
+	if !skip || dir != "" {
+		t.Fatalf("CollectTarget() = %q, skip=%v, want skip when there is no artifact source", dir, skip)
+	}
+}
+
+func TestCollectTargetUsesRemoteOutputDir(t *testing.T) {
+	remote := sandbox.RemoteWorkspaceLayout()
+	c := NewArtifactCollector(
+		&layoutArtifactSource{layout: remote},
+		&fakeFileService{},
+		&fakeStore{},
+		nil,
+		ArtifactCollectorConfig{},
+	)
+	dir, skip := c.CollectTarget(context.Background(), "s1")
+	if skip {
+		t.Fatal("CollectTarget() skip = true, want remote collection")
+	}
+	if dir != remote.Normalized().OutputDir {
+		t.Fatalf("CollectTarget() dir = %q, want %q", dir, remote.Normalized().OutputDir)
+	}
+}
+
+func TestCollectTargetSkipsHostLayoutWithoutOutputTree(t *testing.T) {
+	root := "/Users/dev/My Project"
+	c := NewArtifactCollector(&layoutArtifactSource{layout: sandbox.WorkspaceLayout{
+		Origin:     sandbox.WorkspaceOriginHost,
+		Root:       root,
+		WriteRoots: []string{root},
+		ReadRoots:  []string{root},
+	}}, &fakeFileService{}, &fakeStore{}, nil, ArtifactCollectorConfig{})
+	dir, skip := c.CollectTarget(context.Background(), "s1")
+	if !skip || dir != "" {
+		t.Fatalf("CollectTarget() = %q, skip=%v, want skip so host Root is not uploaded", dir, skip)
+	}
+}
+
+func TestCollectTargetSkipsWhenLayoutLookupFails(t *testing.T) {
+	c := NewArtifactCollector(
+		&layoutArtifactSource{err: stderrors.New("unavailable")},
+		&fakeFileService{},
+		&fakeStore{},
+		nil,
+		ArtifactCollectorConfig{},
+	)
+	dir, skip := c.CollectTarget(context.Background(), "s1")
+	if !skip || dir != "" {
+		t.Fatalf("CollectTarget() = %q, skip=%v, want skip on layout error", dir, skip)
+	}
+}
+
+func TestCollectTargetKeepsRemoteDefaultWhenSourceHasNoLayout(t *testing.T) {
+	c := NewArtifactCollector(&fakeSandboxSource{}, &fakeFileService{}, &fakeStore{}, nil, ArtifactCollectorConfig{})
+	dir, skip := c.CollectTarget(context.Background(), "s1")
+	if skip || dir != "" {
+		t.Fatalf("CollectTarget() = %q, skip=%v, want empty dir and skip=false for the remote default", dir, skip)
 	}
 }

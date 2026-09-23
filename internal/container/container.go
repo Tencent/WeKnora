@@ -201,9 +201,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(mcp.NewOAuthManager))
 
 	// Sandbox manager fallback is disabled; executable backends are resolved
-	// from named workspace configurations.
+	// from named workspace configurations. Lite additionally provides a host
+	// manager that resolveSandboxForExecution uses only when the process is
+	// Lite and the session has no named remote config. Web never gets one.
 	logger.Debugf(ctx, "[Container] Registering sandbox manager...")
 	must(container.Provide(newSandboxManager))
+	must(container.Provide(provideHostApprovalModeLoader))
+	must(container.Provide(provideHostProjectDirsLoader))
+	must(container.Provide(hostProjectLookup))
+	must(container.Provide(hostModeLookup))
+	must(container.Provide(provideHostSandboxManager))
 	// Per-tenant sandbox backends: the resolver builds a manager per request
 	// from the tenant's own configuration, falling back to the singleton above
 	// for tenants that configured nothing.
@@ -342,10 +349,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewUserEnvService))
 
 	// ArtifactCollector drains skill-generated files from the sandbox on
-	// each agent turn (see spec at
-	// docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
-	// The factory returns nil when the sandbox backend does not support
-	// per-session file inspection; downstream code guards on nil.
+	// each agent turn. The factory returns nil when the sandbox backend does
+	// not support per-session file inspection; downstream code guards on nil.
 	must(container.Provide(service.NewArtifactCollectorFromSandboxManager))
 
 	// WorkspaceCheckpointer commits the sandbox /workspace after each agent
@@ -355,11 +360,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// ArtifactCollector already uses. Direct Manager type-asserts still win
 	// when a deployment injects a SessionBoundManager as the process default.
 	must(container.Provide(func(
+		pinner *service.SessionSandboxPinner,
+		host service.HostSandboxManager,
+	) *service.HostSessionResolver {
+		return service.NewHostSessionResolver(pinner, host.Manager)
+	}))
+	must(container.Provide(func(
 		mgr sandbox.Manager,
 		resolver sandbox.TenantSandboxResolver,
 		pinner *service.SessionSandboxPinner,
+		host *service.HostSessionResolver,
 	) *service.PinnedSessionSandbox {
-		return service.NewPinnedSessionSandbox(pinner, resolver, mgr)
+		return service.NewPinnedSessionSandbox(pinner, resolver, mgr, host)
 	}))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
@@ -678,7 +690,7 @@ func must(err error) {
 
 // initLangfuse initializes the Langfuse ingestion client.
 // Configuration is read from LANGFUSE_* environment variables (see
-// docs/langfuse.md). Returns a disabled manager if credentials are absent —
+// website-docs/03-features/16-observability.md). Returns a disabled manager if credentials are absent —
 // never an error — so deployments that don't use Langfuse are unaffected.
 func initLangfuse() (*langfuse.Manager, error) {
 	cfg := langfuse.LoadConfigFromEnv()

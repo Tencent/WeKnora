@@ -22,8 +22,8 @@
     {"id": "Qwen/Qwen3-Embedding-8B", "name": "Qwen3 Embedding 8B", "type": "Embedding", "dimension": 4096, "source": "https://api-docs.siliconflow.cn/docs/api/embeddings-post"},
     {"id": "Qwen/Qwen3-Embedding-4B", "name": "Qwen3 Embedding 4B", "type": "Embedding", "dimension": 2560, "source": "https://api-docs.siliconflow.cn/docs/api/embeddings-post"},
     {"id": "Qwen/Qwen3-Embedding-0.6B", "name": "Qwen3 Embedding 0.6B", "type": "Embedding", "dimension": 1024, "source": "https://api-docs.siliconflow.cn/docs/api/embeddings-post"},
-    {"id": "BAAI/bge-reranker-v2-m3", "name": "BGE Reranker v2 M3", "type": "Rerank", "source": "https://docs.siliconflow.cn/cn/api-reference/rerank/create-rerank"},
-    {"id": "Qwen/Qwen3-Reranker-8B", "name": "Qwen3 Reranker 8B", "type": "Rerank", "source": "https://docs.siliconflow.cn/cn/api-reference/rerank/create-rerank"},
+    {"id": "BAAI/bge-reranker-v2-m3", "name": "BGE Reranker v2 M3", "type": "Rerank", "source": "https://api-docs.siliconflow.cn/docs/api/rerank-post"},
+    {"id": "Qwen/Qwen3-Reranker-8B", "name": "Qwen3 Reranker 8B", "type": "Rerank", "source": "https://api-docs.siliconflow.cn/docs/api/rerank-post"},
     {"id": "FunAudioLLM/SenseVoiceSmall", "name": "SenseVoice Small", "type": "ASR", "source": "https://api-docs.siliconflow.cn/docs/api/audio-transcriptions-post"},
     {"id": "TeleAI/TeleSpeechASR", "name": "TeleSpeechASR", "type": "ASR", "source": "https://api-docs.siliconflow.cn/docs/api/audio-transcriptions-post"}
   ]

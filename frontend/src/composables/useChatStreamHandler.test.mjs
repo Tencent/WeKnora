@@ -118,17 +118,13 @@ test('injected user messages fork a continuation assistant below the bubble', ()
   assert.match(source, /expandSteerForksInHistory\(\[\.\.\.messagesList\]\)/)
 })
 
-test('agent answer.done does not mark the session idle', () => {
+test('answer.done never marks the session idle before persisted completion', () => {
   const chunkStart = source.indexOf("case 'answer':")
   const chunkEnd = source.indexOf("case 'artifacts_pending'", chunkStart)
   assert.notEqual(chunkStart, -1)
   assert.notEqual(chunkEnd, -1)
   const chunk = source.slice(chunkStart, chunkEnd)
-  assert.match(chunk, /if \(!isAgentStreamSession\(\)\)/)
-  assert.ok(
-    chunk.indexOf('isAgentStreamSession') < chunk.indexOf('isReplying.value = false'),
-    'agent turns must wait for complete before clearing isReplying',
-  )
+  assert.doesNotMatch(chunk, /isReplying.value = false/)
 })
 
 // continue-stream replays the event log from the start, so after a refresh
