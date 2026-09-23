@@ -127,6 +127,8 @@ type agentService struct {
 	// auditLogService 供 enforce-deny 写 audit（T43）：engine 接缝回调
 	// buildEnforceDenyAuditor 产出的审计函数。
 	auditLogService interfaces.AuditLogService
+	// intentVerdictRepo 供 T60 审批决策回写 human_override。
+	intentVerdictRepo interfaces.IntentVerdictRepository
 }
 
 // NewAgentService creates a new agent service
@@ -157,11 +159,13 @@ func NewAgentService(
 	userRepo interfaces.UserRepository,
 	intentPolicyStore intentgate.PolicyStore,
 	auditLogService interfaces.AuditLogService,
+	intentVerdictRepo interfaces.IntentVerdictRepository,
 ) interfaces.AgentService {
 	svc := &agentService{
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
 		auditLogService:      auditLogService,
+		intentVerdictRepo:    intentVerdictRepo,
 		cfg:                  cfg,
 		modelService:         modelService,
 		knowledgeBaseService: knowledgeBaseService,
@@ -281,6 +285,7 @@ func (s *agentService) CreateAgentEngine(
 		// 拦截，没有拦截就没有审计事件。nil auditLogService 时回调为 nil，
 		// engine 内部跳过，行为零变化。
 		engine.SetIntentGateAuditor(buildEnforceDenyAuditor(s.auditLogService))
+		engine.SetIntentApprovalRecorder(buildApprovalRecorder(s.intentVerdictRepo))
 	}
 	if s.intentVerdictWriter != nil {
 		engine.SetIntentVerdictWriter(s.intentVerdictWriter)

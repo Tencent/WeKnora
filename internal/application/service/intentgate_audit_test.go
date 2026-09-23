@@ -117,3 +117,41 @@ func TestBuildEnforceDenyAuditorFallsBackToPrincipal(t *testing.T) {
 		t.Fatalf("actor fallback wrong: %+v", svc.entries)
 	}
 }
+
+// capturingOverrideRepo 记录回写的测试缝。
+type capturingOverrideRepo struct {
+	interfaces.IntentVerdictRepository
+	toolCallID string
+	override   string
+}
+
+func (c *capturingOverrideRepo) UpdateHumanOverrideByToolCallID(_ context.Context, _ uint64, toolCallID, override string) error {
+	c.toolCallID = toolCallID
+	c.override = override
+	return nil
+}
+
+// TestBuildApprovalRecorderMapsDecisions（T60 [unit]）：批准→approved、
+// 改参数→modified、拒绝→rejected；nil repo→nil 回调。
+func TestBuildApprovalRecorderMapsDecisions(t *testing.T) {
+	if buildApprovalRecorder(nil) != nil {
+		t.Fatal("nil repo must yield nil recorder")
+	}
+	cases := []struct {
+		name            string
+		approved, modif bool
+		want            string
+	}{
+		{"approve", true, false, types.HumanOverrideApproved},
+		{"approve modified", true, true, types.HumanOverrideModified},
+		{"reject", false, false, types.HumanOverrideRejected},
+	}
+	for _, tc := range cases {
+		repo := &capturingOverrideRepo{}
+		fn := buildApprovalRecorder(repo)
+		fn("call-42", tc.approved, tc.modif)
+		if repo.toolCallID != "call-42" || repo.override != tc.want {
+			t.Fatalf("%s: got %s/%s, want call-42/%s", tc.name, repo.toolCallID, repo.override, tc.want)
+		}
+	}
+}

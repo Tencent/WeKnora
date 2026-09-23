@@ -209,6 +209,12 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						Error:   fmt.Sprintf("Tool approval failed: %v", waitErr),
 					}, nil
 				}
+				// T60：审批决策（批准/拒绝/改参数）回写对应 verdict 行——
+				// (坏调用, 正确调用, 理由) 偏好数据的飞轮来源。nil  recorder
+				//（未装配 IntentGate 审计链）时静默跳过。
+				if meta.ApprovalRecorder != nil {
+					meta.ApprovalRecorder(meta.ToolCallID, decision.Approved, len(decision.ModifiedArgs) > 0)
+				}
 				if !decision.Approved {
 					msg := decision.Reason
 					if msg == "" {

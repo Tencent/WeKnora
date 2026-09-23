@@ -96,6 +96,9 @@ type AgentEngine struct {
 	// intentGateAuditor 在 enforce deny 实际拦截时回调（T43）：把
 	// intent_policy.enforced_deny 写进 audit log。nil（默认）不写。
 	intentGateAuditor func(ctx context.Context, info EnforceDenyInfo)
+	// intentApprovalRecorder 在人工审批决策落地后回写 verdict 行的
+	// human_override（T60）。nil（默认）不写。
+	intentApprovalRecorder func(toolCallID string, approved, modified bool)
 }
 
 // EnforceDenyInfo 是一次 enforce 拦截的审计上下文（T43）：actor 从 ctx
@@ -189,6 +192,11 @@ func (e *AgentEngine) SetIntentVerdictWriter(w intentgate.VerdictWriter) {
 // 放大成判定链路错误（拦截已经发生，agent 已在自我纠错路径上）。
 func (e *AgentEngine) SetIntentGateAuditor(fn func(ctx context.Context, info EnforceDenyInfo)) {
 	e.intentGateAuditor = fn
+}
+
+// SetIntentApprovalRecorder 安装审批决策回写回调（T60）。nil 不安装。
+func (e *AgentEngine) SetIntentApprovalRecorder(fn func(toolCallID string, approved, modified bool)) {
+	e.intentApprovalRecorder = fn
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.

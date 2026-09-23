@@ -207,6 +207,16 @@ func TestIntentGatePersistFailureKeepsToolCallAlive(t *testing.T) {
 }
 
 // alwaysFailVerdictRepo 是 Create 必失败的 repository 桩。
+func (*alwaysFailVerdictRepo) CountByVerdictGrouped(context.Context, uint64, string) (map[string]int64, error) {
+	return nil, nil
+}
+func (*alwaysFailVerdictRepo) ListByTenant(context.Context, uint64, int) ([]*types.VerdictRecord, error) {
+	return nil, nil
+}
+func (*alwaysFailVerdictRepo) UpdateHumanOverrideByToolCallID(context.Context, uint64, string, string) error {
+	return nil
+}
+
 type alwaysFailVerdictRepo struct{ err error }
 
 func (r *alwaysFailVerdictRepo) Create(context.Context, *types.VerdictRecord) error { return r.err }

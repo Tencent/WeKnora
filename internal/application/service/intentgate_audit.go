@@ -61,3 +61,28 @@ func buildEnforceDenyAuditor(auditSvc interfaces.AuditLogService) func(context.C
 		}
 	}
 }
+
+// buildApprovalRecorder 返回审批决策的 verdict 回写回调（T60，issue #23）：
+// 批准 → approved；改参数批准 → modified；拒绝 → rejected。tool_call_id
+// 是 UUID、全局唯一，tenantID 传 0 表示任意租户（决策回调里没有租户
+// 上下文）。repo 为 nil 时返回 nil（调用方不装配，行为零变化）。
+//
+// 竞态说明：verdict 异步落库可能晚于审批决策到达，回写 miss 是观测面
+// 损失、fail-open，绝不重试阻塞审批路径。
+func buildApprovalRecorder(repo interfaces.IntentVerdictRepository) func(toolCallID string, approved, modified bool) {
+	if repo == nil {
+		return nil
+	}
+	return func(toolCallID string, approved, modified bool) {
+		override := types.HumanOverrideRejected
+		switch {
+		case approved && modified:
+			override = types.HumanOverrideModified
+		case approved:
+			override = types.HumanOverrideApproved
+		}
+		if err := repo.UpdateHumanOverrideByToolCallID(context.Background(), 0, toolCallID, override); err != nil {
+			logger.Warnf(context.Background(), "[IntentGate] human_override write-back missed (fail-open): %v", err)
+		}
+	}
+}

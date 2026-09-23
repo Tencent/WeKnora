@@ -240,6 +240,31 @@ else
     bad "verdict 表 require_approval 落库 $vc 条，want >=2"
 fi
 
+# ---- 6. T60（#23）：审批决策回写 verdict 行 human_override ---------------
+# 异步落库竞态：verdict 行可能晚于审批决策，轮询 60s。
+ov_a=""
+for _ in $(seq 1 20); do
+    ov_a="$(db_scalar "SELECT human_override FROM intent_verdicts WHERE session_id = '$SESS_A' ORDER BY created_at DESC LIMIT 1" 2>/dev/null || true)"
+    [ "$ov_a" = "modified" ] && break
+    sleep 3
+done
+if [ "$ov_a" = "modified" ]; then
+    ok "T60 Run A verdict 行 human_override=modified（改参数批准回写）"
+else
+    bad "T60 Run A human_override=${ov_a:-<空>}，want modified"
+fi
+ov_b=""
+for _ in $(seq 1 20); do
+    ov_b="$(db_scalar "SELECT human_override FROM intent_verdicts WHERE session_id = '$SESS_B' ORDER BY created_at DESC LIMIT 1" 2>/dev/null || true)"
+    [ "$ov_b" = "rejected" ] && break
+    sleep 3
+done
+if [ "$ov_b" = "rejected" ]; then
+    ok "T60 Run B verdict 行 human_override=rejected（拒绝回写）"
+else
+    bad "T60 Run B human_override=${ov_b:-<空>}，want rejected"
+fi
+
 curl -sS -X POST "$API/intent-policies/$POLICY_ID/disable" "${AUTH[@]}" >/dev/null 2>&1 || true
 
 if [ "$fail" -eq 0 ]; then

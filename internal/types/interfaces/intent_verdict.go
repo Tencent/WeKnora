@@ -26,6 +26,10 @@ type IntentVerdictRepository interface {
 	// 数据源），policyID 为空时统计租户内全部 verdict（含 baseline 的
 	// policy_id NULL 行）。返回 verdict 取值 → 计数。
 	CountByVerdictGrouped(ctx context.Context, tenantID uint64, policyID string) (map[string]int64, error)
+	// UpdateHumanOverrideByToolCallID 按工具调用 ID 回写人工后续动作
+	//（T60：审批决策落地后回写对应 verdict 行）。tool_call_id 在会话内
+	// 唯一，取该租户最新一条匹配行。
+	UpdateHumanOverrideByToolCallID(ctx context.Context, tenantID uint64, toolCallID, override string) error
 	// UpdateHumanOverride 记录人工后续动作（飞轮关键字段）。
 	UpdateHumanOverride(ctx context.Context, tenantID uint64, id string, override string) error
 	// Delete 删除一条记录。

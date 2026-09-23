@@ -138,6 +138,24 @@ func (r *IntentVerdictRepository) CountByVerdictGrouped(ctx context.Context, ten
 	return out, nil
 }
 
+// UpdateHumanOverrideByToolCallID 按 tool_call_id 回写（T60）。
+func (r *IntentVerdictRepository) UpdateHumanOverrideByToolCallID(ctx context.Context, tenantID uint64, toolCallID, override string) error {
+	q := r.db.WithContext(ctx).Model(&types.VerdictRecord{}).
+		Where("tool_call_id = ?", toolCallID)
+	if tenantID != 0 {
+		q = q.Where("tenant_id = ?", tenantID)
+	}
+	res := q.Order("created_at DESC").Limit(1).
+		Update("human_override", override)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrIntentVerdictNotFound
+	}
+	return nil
+}
+
 // UpdateHumanOverride 更新人工后续动作（飞轮关键字段：审批改参数、
 // 人工修正都会回写这里，设计 §3.3）。override 必须是合法枚举值。
 func (r *IntentVerdictRepository) UpdateHumanOverride(ctx context.Context, tenantID uint64, id string, override string) error {

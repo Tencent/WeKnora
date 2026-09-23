@@ -29,6 +29,9 @@ type fakeVerdictRepo struct {
 	entered chan struct{}
 }
 
+func (*fakeVerdictRepo) UpdateHumanOverrideByToolCallID(context.Context, uint64, string, string) error {
+	return nil
+}
 func (*fakeVerdictRepo) CountByVerdictGrouped(context.Context, uint64, string) (map[string]int64, error) {
 	return nil, nil
 }
