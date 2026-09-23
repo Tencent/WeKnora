@@ -493,7 +493,7 @@ const reopenGuide = () => {
 
 const openDocs = () => {
   menuVisible.value = false
-  window.open('https://github.com/Tencent/WeKnora/tree/main/docs', '_blank')
+  window.open('https://github.com/Tencent/WeKnora/tree/main/website-docs', '_blank')
 }
 
 // 打开 GitHub
