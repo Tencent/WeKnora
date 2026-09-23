@@ -58,8 +58,9 @@ var (
 )
 
 var (
-	_ datasource.Connector          = (*Connector)(nil)
-	_ datasource.FullSyncWithCursor = (*Connector)(nil)
+	_ datasource.Connector              = (*Connector)(nil)
+	_ datasource.StreamingConnector     = (*Connector)(nil)
+	_ datasource.FullStreamingConnector = (*Connector)(nil)
 )
 
 // Connector syncs a local directory. It is stateless: the per-file sync state
@@ -92,28 +93,57 @@ func (c *Connector) ResolveResourceAncestors(
 	return []string{}, nil
 }
 
-// FetchAll emits every in-scope file and never reports deletions. The service
-// prefers FetchAllFromCursor for full syncs.
-func (c *Connector) FetchAll(ctx context.Context, ds *types.DataSourceConfig, _ []string) ([]types.FetchedItem, error) {
+// FetchStream is the one sync engine: it walks the folder and reads, emits and
+// checkpoints one file at a time, so peak memory is a single file rather than
+// every changed file in the folder (Tencent/WeKnora#2136). A file enters the
+// cursor only after Emit has accepted it, which is what makes a checkpoint a
+// safe restart point.
+func (c *Connector) FetchStream(
+	ctx context.Context, ds *types.DataSourceConfig, cursor *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	return c.fetchStream(ctx, ds, cursor, h, false)
+}
+
+// FetchFullStream re-reads every in-scope file, so a file whose previous ingest
+// failed is retried (unchanged content is still deduplicated at ingest without
+// re-parsing), while cursor is retained purely as the baseline for deletion
+// reconciliation. An interrupted full sync resumes from its last checkpoint
+// instead of starting over.
+func (c *Connector) FetchFullStream(
+	ctx context.Context, ds *types.DataSourceConfig, cursor *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	return c.fetchStream(ctx, ds, cursor, h, true)
+}
+
+func (c *Connector) fetchStream(
+	ctx context.Context, ds *types.DataSourceConfig,
+	cursor *types.SyncCursor, h datasource.StreamHandler, forceFull bool,
+) (*types.SyncCursor, error) {
 	cfg, err := parseConfig(ds)
 	if err != nil {
 		return nil, err
 	}
-	items, _, err := cfg.sync(ctx, nil, false, true)
-	return items, err
+	return cfg.stream(ctx, cursor, h, forceFull)
 }
 
-// FetchAllFromCursor is the full-sync path. It re-emits every in-scope file, so
-// a file whose previous ingest failed is retried (unchanged content is skipped
-// at ingest without re-parsing), and still reports files deleted since cursor.
-func (c *Connector) FetchAllFromCursor(
-	ctx context.Context, ds *types.DataSourceConfig, _ []string, cursor *types.SyncCursor,
-) ([]types.FetchedItem, *types.SyncCursor, error) {
-	cfg, err := parseConfig(ds)
-	if err != nil {
-		return nil, nil, err
-	}
-	return cfg.sync(ctx, decodeCursor(cursor), true, true)
+// collector adapts the stream to the batch Connector methods, which the service
+// only uses for connectors that cannot stream. It buffers, so the streaming path
+// above is what keeps a real sync memory-bounded.
+type collector struct{ items []types.FetchedItem }
+
+func (h *collector) Emit(_ context.Context, item types.FetchedItem) error {
+	h.items = append(h.items, item)
+	return nil
+}
+
+func (*collector) Checkpoint(context.Context, *types.SyncCursor) error { return nil }
+
+// FetchAll emits every in-scope file and never reports deletions: with no
+// cursor there is no baseline to reconcile against.
+func (c *Connector) FetchAll(ctx context.Context, ds *types.DataSourceConfig, _ []string) ([]types.FetchedItem, error) {
+	h := &collector{}
+	_, err := c.FetchStream(ctx, ds, nil, h)
+	return h.items, err
 }
 
 // FetchIncremental diffs the folder against the file states recorded in cursor,
@@ -122,11 +152,9 @@ func (c *Connector) FetchAllFromCursor(
 func (c *Connector) FetchIncremental(
 	ctx context.Context, ds *types.DataSourceConfig, cursor *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
-	cfg, err := parseConfig(ds)
-	if err != nil {
-		return nil, nil, err
-	}
-	return cfg.sync(ctx, decodeCursor(cursor), true, false)
+	h := &collector{}
+	next, err := c.FetchStream(ctx, ds, cursor, h)
+	return h.items, next, err
 }
 
 // fileState is the per-file sync state kept in the cursor, keyed by the file's
@@ -137,15 +165,68 @@ type fileState struct {
 	SHA256  string    `json:"sha256"`
 }
 
-func decodeCursor(cursor *types.SyncCursor) map[string]fileState {
-	var state struct {
-		Files map[string]fileState `json:"files"`
-	}
+// cursorState is what this connector stores in the data source cursor. Files is
+// the state of every file synced so far. A full sync moves that snapshot into
+// FullBaseline and rebuilds Files from scratch, so a run interrupted halfway
+// still knows both which files it has already re-read and which files existed
+// before it started — the latter being the only safe basis for deletions.
+type cursorState struct {
+	Files        map[string]fileState `json:"files"`
+	FullSync     bool                 `json:"full_sync,omitempty"`
+	FullBaseline map[string]fileState `json:"full_baseline,omitempty"`
+}
+
+func decodeCursor(cursor *types.SyncCursor) cursorState {
+	var state cursorState
 	if cursor != nil && cursor.ConnectorCursor != nil {
 		raw, _ := json.Marshal(cursor.ConnectorCursor)
 		_ = json.Unmarshal(raw, &state)
 	}
-	return state.Files
+	if state.Files == nil {
+		state.Files = map[string]fileState{}
+	}
+	return state
+}
+
+// syncCursor snapshots the state for a checkpoint. StreamHandler.Checkpoint only
+// borrows the cursor for the duration of the call, so the maps are copied rather
+// than shared with the walk that keeps mutating them.
+func (c cursorState) syncCursor() *types.SyncCursor {
+	snapshot := cursorState{
+		Files:    maps.Clone(c.Files),
+		FullSync: c.FullSync,
+	}
+	if c.FullBaseline != nil {
+		snapshot.FullBaseline = maps.Clone(c.FullBaseline)
+	}
+	raw, _ := json.Marshal(snapshot)
+	fields := map[string]interface{}{}
+	_ = json.Unmarshal(raw, &fields)
+	return &types.SyncCursor{LastSyncTime: time.Now().UTC(), ConnectorCursor: fields}
+}
+
+// prepareCursors splits the stored cursor into the deletion baseline and the
+// cursor being built. An incremental run carries its files forward. A full run
+// parks them in FullBaseline once and then rebuilds Files, so resuming a partly
+// finished full sync keeps both halves instead of re-reading everything.
+func prepareCursors(old *types.SyncCursor, forceFull bool) (baseline map[string]fileState, next cursorState) {
+	previous := decodeCursor(old)
+	next = cursorState{Files: maps.Clone(previous.Files)}
+	if !forceFull {
+		return previous.Files, next
+	}
+	if previous.FullSync {
+		// Resuming a full sync already in progress: Files is this run's progress.
+		next.FullBaseline = previous.FullBaseline
+	} else {
+		next.FullBaseline = maps.Clone(previous.Files)
+		next.Files = map[string]fileState{}
+	}
+	next.FullSync = true
+	if next.FullBaseline == nil {
+		next.FullBaseline = map[string]fileState{}
+	}
+	return next.FullBaseline, next
 }
 
 type config struct {
@@ -257,102 +338,144 @@ func resolveRoot(rootPath string) (string, error) {
 		datasource.ErrInvalidConfig, AllowedRootsEnv)
 }
 
-// sync scans the folder and diffs it against prev, returning the items to
-// ingest and the cursor to persist. reportDeletions emits files that are in
-// prev but gone from the folder; emitAll emits settled files even when their
-// recorded state is unchanged.
-func (cfg *config) sync(
-	ctx context.Context, prev map[string]fileState, reportDeletions, emitAll bool,
-) ([]types.FetchedItem, *types.SyncCursor, error) {
+// stream walks the folder once, handling a single file at a time: read it, emit
+// it, record it, checkpoint. Only one file's bytes are held at any moment, so
+// peak memory does not grow with the size of the folder.
+//
+// baseline is what the folder looked like when the last sync finished (for a
+// full run, before it started) and is the only basis for deletions; next is the
+// cursor being built. A file is recorded in next only after Emit accepted it, so
+// an interrupted run resumes at the first file it had not finished.
+func (cfg *config) stream(
+	ctx context.Context, cursor *types.SyncCursor, h datasource.StreamHandler, forceFull bool,
+) (*types.SyncCursor, error) {
 	root, err := os.OpenRoot(cfg.root)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open root_path: %w", err)
+		return nil, fmt.Errorf("open root_path: %w", err)
 	}
 	defer func() { _ = root.Close() }() // read-only handle; a close error changes nothing
 
 	files, err := cfg.scan(root)
 	if err != nil {
 		// A partial listing would make every unlisted file look deleted.
-		return nil, nil, fmt.Errorf("scan root_path: %w", err)
+		return nil, fmt.Errorf("scan root_path: %w", err)
 	}
-	if reportDeletions && !cfg.manual && len(files) == 0 && len(prev) > 0 {
+	baseline, next := prepareCursors(cursor, forceFull)
+	if !cfg.manual && len(files) == 0 && len(baseline) > 0 {
 		// A scheduled sync cannot tell an emptied folder from a mount that broke
 		// or was replaced by an empty directory, so it fails instead of deleting
 		// everything. A manual sync is the user pointing at this folder and asking
 		// for it to be reconciled now, so it goes through and an intentionally
 		// emptied folder is applied (deletions still honour sync_deletions).
-		return nil, nil, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"root_path has no matching files but %d were synced before; refusing to delete them all. "+
-				"Use \"sync now\" to confirm an intentionally emptied folder", len(prev))
+				"Use \"sync now\" to confirm an intentionally emptied folder", len(baseline))
 	}
 
 	settledBefore := time.Now().Add(-cfg.quiet)
 	maxSize := utils.GetMaxFileSize()
-	next := make(map[string]fileState, len(files))
-	var items []types.FetchedItem
 	for _, rel := range slices.Sorted(maps.Keys(files)) {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		info := files[rel]
-		old, known := prev[rel]
-		if known {
-			// Until a newer state is confirmed, keep the last synced one so the file
-			// is neither reported deleted nor considered up to date.
-			next[rel] = old
+		prior, known := baseline[rel]
+		// keepKnown stops a full sync from forgetting a file it did not get to.
+		// A full run rebuilds Files from scratch, so a file skipped here would
+		// drop out of the cursor even though it is still on disk, and a later
+		// deletion of it could no longer be reconciled. Carrying the previous
+		// state over keeps it known without claiming it was re-read.
+		keepKnown := func() {
+			if forceFull && known {
+				next.Files[rel] = prior
+			}
+		}
+		if cur, seen := next.Files[rel]; forceFull && seen &&
+			cur.Size == info.Size() && cur.ModTime.Equal(info.ModTime()) {
+			continue // already re-read at this exact version in this run; resume past it
 		}
 		switch {
 		case info.ModTime().After(settledBefore):
+			keepKnown()
 			continue // still being written; a later sync picks it up
-		case !emitAll && known && old.Size == info.Size() && old.ModTime.Equal(info.ModTime()):
+		case !forceFull && known && prior.Size == info.Size() && prior.ModTime.Equal(info.ModTime()):
 			continue
 		case info.Size() > maxSize:
-			items = append(items, failedItem(rel, fmt.Sprintf("file exceeds %d MB", utils.GetMaxFileSizeMB())))
+			// The current state is not recorded, so a file that shrinks back under
+			// the limit is picked up again rather than silently staying skipped.
+			keepKnown()
+			if emitErr := h.Emit(ctx, failedItem(rel,
+				fmt.Sprintf("file exceeds %d MB", utils.GetMaxFileSizeMB()))); emitErr != nil {
+				return nil, emitErr
+			}
 			continue
 		}
 		content, err := root.ReadFile(filepath.FromSlash(rel))
 		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				items = append(items, failedItem(rel, err.Error()))
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // removed between the scan and the read
+			}
+			keepKnown()
+			if emitErr := h.Emit(ctx, failedItem(rel, err.Error())); emitErr != nil {
+				return nil, emitErr
 			}
 			continue
 		}
 		sum := sha256.Sum256(content)
 		state := fileState{ModTime: info.ModTime(), Size: info.Size(), SHA256: hex.EncodeToString(sum[:])}
-		next[rel] = state
-		if !emitAll && known && old.SHA256 == state.SHA256 {
-			continue // touched without a content change
-		}
-		if len(content) == 0 && (!known || old.Size == 0) {
-			continue // nothing to index; only a file that became empty needs its knowledge updated
-		}
-		items = append(items, types.FetchedItem{
-			ExternalID:    externalIDPrefix + rel,
-			Title:         path.Base(rel),
-			Content:       content,
-			ContentType:   mime.TypeByExtension(path.Ext(rel)),
-			FileName:      rel, // path-qualified, so knowledge folders mirror the directory tree
-			UpdatedAt:     info.ModTime(),
-			UpdateInPlace: true,
-			Metadata:      itemMetadata(rel),
-		})
-	}
-	if reportDeletions {
-		for _, rel := range slices.Sorted(maps.Keys(prev)) {
-			if _, ok := files[rel]; !ok {
-				items = append(items, types.FetchedItem{
-					ExternalID: externalIDPrefix + rel,
-					Title:      path.Base(rel),
-					IsDeleted:  true,
-					Metadata:   itemMetadata(rel),
-				})
+		switch {
+		case !forceFull && known && prior.SHA256 == state.SHA256:
+			// Touched without a content change: record the new mtime so the next
+			// sync stops re-reading it, but there is nothing to ingest.
+		case len(content) == 0 && (!known || prior.Size == 0):
+			// Nothing to index; only a file that became empty needs its knowledge
+			// updated, and that case has a prior non-empty state.
+		default:
+			if emitErr := h.Emit(ctx, types.FetchedItem{
+				ExternalID:    externalIDPrefix + rel,
+				Title:         path.Base(rel),
+				Content:       content,
+				ContentType:   mime.TypeByExtension(path.Ext(rel)),
+				FileName:      rel, // path-qualified, so knowledge folders mirror the directory tree
+				UpdatedAt:     info.ModTime(),
+				UpdateInPlace: true,
+				Metadata:      itemMetadata(rel),
+			}); emitErr != nil {
+				return nil, emitErr
 			}
 		}
+		next.Files[rel] = state
+		if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
+			return nil, err
+		}
 	}
-	return items, &types.SyncCursor{
-		LastSyncTime:    time.Now().UTC(),
-		ConnectorCursor: map[string]interface{}{"files": next},
-	}, nil
+
+	for _, rel := range slices.Sorted(maps.Keys(baseline)) {
+		if _, stillOnDisk := files[rel]; stillOnDisk {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if emitErr := h.Emit(ctx, types.FetchedItem{
+			ExternalID: externalIDPrefix + rel,
+			Title:      path.Base(rel),
+			IsDeleted:  true,
+			Metadata:   itemMetadata(rel),
+		}); emitErr != nil {
+			return nil, emitErr
+		}
+		delete(next.Files, rel)
+		if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
+			return nil, err
+		}
+	}
+
+	// The walk finished, so the full-sync baseline has served its purpose and the
+	// next run is an ordinary incremental sync again.
+	next.FullSync = false
+	next.FullBaseline = nil
+	return next.syncCursor(), nil
 }
 
 // scan lists the in-scope regular files under root by slash-separated relative

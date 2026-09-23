@@ -2,6 +2,7 @@ package localfolder
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -383,7 +384,7 @@ func TestManualSyncReconcilesIntentionallyEmptiedRoot(t *testing.T) {
 			t.Fatalf("%s should be reported deleted: %+v", id, item)
 		}
 	}
-	if files := decodeCursor(next); len(files) != 0 {
+	if files := decodeCursor(next).Files; len(files) != 0 {
 		t.Fatalf("cursor should be empty after the folder was emptied: %v", files)
 	}
 }
@@ -412,18 +413,22 @@ func TestFullSyncReemitsUnchangedFilesAndReportsDeletions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, next, err := NewConnector().FetchAllFromCursor(context.Background(), cfg, nil, cursor)
+	h := &streamRecorder{}
+	next, err := NewConnector().FetchFullStream(context.Background(), cfg, cursor, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got := byExternalID(t, items)
+	got := byExternalID(t, h.items)
 	assertItems(t, got, "local_folder:keep.md", "local_folder:gone.md")
 	if got["local_folder:keep.md"].IsDeleted || !got["local_folder:gone.md"].IsDeleted {
 		t.Fatalf("deletion flags wrong: %+v", got)
 	}
-	if files := decodeCursor(next); len(files) != 1 {
+	if files := decodeCursor(next).Files; len(files) != 1 {
 		t.Fatalf("cursor files = %v, want only keep.md", files)
+	}
+	if state := decodeCursor(next); state.FullSync || state.FullBaseline != nil {
+		t.Fatalf("a finished full sync must clear its baseline: %+v", state)
 	}
 }
 
@@ -439,7 +444,7 @@ func TestOversizedFileIsReportedWithoutReadingIt(t *testing.T) {
 	if item.Metadata["error"] == "" || len(item.Content) != 0 {
 		t.Fatalf("oversized file should surface as a failed item, got %+v", item)
 	}
-	if files := decodeCursor(cursor); len(files) != 0 {
+	if files := decodeCursor(cursor).Files; len(files) != 0 {
 		t.Fatalf("an unread file must not enter the cursor: %v", files)
 	}
 }
@@ -472,4 +477,261 @@ func TestFetchAllEmitsEveryFileWithoutDeletions(t *testing.T) {
 
 	got := byExternalID(t, items)
 	assertItems(t, got, "local_folder:a.md", "local_folder:b/c.md")
+}
+
+// errStreamInterrupted stands in for the timeout, crash or cancelled context a
+// long sync has to survive.
+var errStreamInterrupted = errors.New("stream interrupted")
+
+// streamRecorder captures what a streaming sync emits and checkpoints. Setting
+// stopAfter aborts the stream once that many items have been emitted.
+type streamRecorder struct {
+	items       []types.FetchedItem
+	checkpoints []*types.SyncCursor
+	ckptAtEmit  []int
+	stopAfter   int
+}
+
+func (h *streamRecorder) Emit(_ context.Context, item types.FetchedItem) error {
+	if h.stopAfter > 0 && len(h.items) >= h.stopAfter {
+		return errStreamInterrupted
+	}
+	h.ckptAtEmit = append(h.ckptAtEmit, len(h.checkpoints))
+	h.items = append(h.items, item)
+	return nil
+}
+
+func (h *streamRecorder) Checkpoint(_ context.Context, cursor *types.SyncCursor) error {
+	h.checkpoints = append(h.checkpoints, cursor)
+	return nil
+}
+
+func (h *streamRecorder) lastCheckpoint() *types.SyncCursor {
+	if len(h.checkpoints) == 0 {
+		return nil
+	}
+	return h.checkpoints[len(h.checkpoints)-1]
+}
+
+func TestStreamingSyncInterleavesEmitAndCheckpoint(t *testing.T) {
+	root, cfg := newVault(t)
+	for _, name := range []string{"a.md", "b.md", "c.md"} {
+		writeFile(t, root, name, "body of "+name, time.Hour)
+	}
+
+	h := &streamRecorder{}
+	if _, err := NewConnector().FetchStream(context.Background(), cfg, nil, h); err != nil {
+		t.Fatal(err)
+	}
+
+	assertItems(t, byExternalID(t, h.items),
+		"local_folder:a.md", "local_folder:b.md", "local_folder:c.md")
+	// Each file is checkpointed before the next is emitted, so the walk never
+	// accumulates content: the Nth emit must see exactly N-1 checkpoints.
+	for i, seen := range h.ckptAtEmit {
+		if seen != i {
+			t.Fatalf("emit %d saw %d checkpoints, want %d: items are being buffered", i, seen, i)
+		}
+	}
+	if len(h.checkpoints) != 3 {
+		t.Fatalf("checkpoints = %d, want one per file", len(h.checkpoints))
+	}
+}
+
+func TestInterruptedStreamResumesFromLastCheckpoint(t *testing.T) {
+	root, cfg := newVault(t)
+	for _, name := range []string{"a.md", "b.md", "c.md"} {
+		writeFile(t, root, name, "body of "+name, time.Hour)
+	}
+
+	first := &streamRecorder{stopAfter: 2}
+	_, err := NewConnector().FetchStream(context.Background(), cfg, nil, first)
+	if !errors.Is(err, errStreamInterrupted) {
+		t.Fatalf("interrupted stream error = %v, want the emit failure", err)
+	}
+	assertItems(t, byExternalID(t, first.items), "local_folder:a.md", "local_folder:b.md")
+	resume := first.lastCheckpoint()
+	if resume == nil {
+		t.Fatal("an interrupted stream must leave a checkpoint to resume from")
+	}
+
+	second := &streamRecorder{}
+	next, err := NewConnector().FetchStream(context.Background(), cfg, resume, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Files already checkpointed are not re-emitted; the one left over is.
+	assertItems(t, byExternalID(t, second.items), "local_folder:c.md")
+	if files := decodeCursor(next).Files; len(files) != 3 {
+		t.Fatalf("cursor after resume = %v, want all three files", files)
+	}
+}
+
+func TestInterruptedFullStreamKeepsDeletionBaseline(t *testing.T) {
+	root, cfg := newVault(t)
+	for _, name := range []string{"a.md", "b.md", "gone.md"} {
+		writeFile(t, root, name, "body of "+name, time.Hour)
+	}
+	_, cursor := syncFolder(t, cfg, nil)
+	if err := os.Remove(filepath.Join(root, "gone.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	first := &streamRecorder{stopAfter: 1}
+	_, err := NewConnector().FetchFullStream(context.Background(), cfg, cursor, first)
+	if !errors.Is(err, errStreamInterrupted) {
+		t.Fatalf("interrupted full stream error = %v, want the emit failure", err)
+	}
+	mid := decodeCursor(first.lastCheckpoint())
+	if !mid.FullSync || len(mid.FullBaseline) != 3 {
+		t.Fatalf("an interrupted full sync must keep its deletion baseline: %+v", mid)
+	}
+
+	second := &streamRecorder{}
+	next, err := NewConnector().FetchFullStream(context.Background(), cfg, first.lastCheckpoint(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// a.md was re-read before the interruption, b.md still had to be, and the
+	// deletion is still reconciled against the pre-full-sync baseline.
+	got := byExternalID(t, second.items)
+	assertItems(t, got, "local_folder:b.md", "local_folder:gone.md")
+	if !got["local_folder:gone.md"].IsDeleted {
+		t.Fatalf("the deleted file was not reported: %+v", got)
+	}
+	state := decodeCursor(next)
+	if state.FullSync || state.FullBaseline != nil {
+		t.Fatalf("a finished full sync must clear its baseline: %+v", state)
+	}
+	if len(state.Files) != 2 {
+		t.Fatalf("cursor files = %v, want a.md and b.md", state.Files)
+	}
+}
+
+func TestCancelledContextStopsStreamAtLastCheckpoint(t *testing.T) {
+	root, cfg := newVault(t)
+	for _, name := range []string{"a.md", "b.md", "c.md"} {
+		writeFile(t, root, name, "body of "+name, time.Hour)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	h := &cancellingRecorder{streamRecorder: streamRecorder{}, cancelAfter: 1, cancel: cancel}
+	_, err := NewConnector().FetchStream(ctx, cfg, nil, h)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled stream error = %v, want context.Canceled", err)
+	}
+
+	// Whatever was checkpointed stays valid, and the next run continues there.
+	resume := h.lastCheckpoint()
+	if files := decodeCursor(resume).Files; len(files) != 1 {
+		t.Fatalf("checkpoint after cancel = %v, want only the finished file", files)
+	}
+	second := &streamRecorder{}
+	if _, err := NewConnector().FetchStream(context.Background(), cfg, resume, second); err != nil {
+		t.Fatal(err)
+	}
+	assertItems(t, byExternalID(t, second.items), "local_folder:b.md", "local_folder:c.md")
+}
+
+// cancellingRecorder cancels the sync's context part-way, the way an Asynq
+// timeout does, instead of failing an Emit.
+type cancellingRecorder struct {
+	streamRecorder
+	cancelAfter int
+	cancel      context.CancelFunc
+}
+
+func (h *cancellingRecorder) Emit(ctx context.Context, item types.FetchedItem) error {
+	if err := h.streamRecorder.Emit(ctx, item); err != nil {
+		return err
+	}
+	if len(h.items) >= h.cancelAfter {
+		h.cancel()
+	}
+	return nil
+}
+
+func TestUnchangedFilesNeitherEmitNorCheckpoint(t *testing.T) {
+	root, cfg := newVault(t)
+	for _, name := range []string{"a.md", "b.md", "c.md"} {
+		writeFile(t, root, name, "body of "+name, time.Hour)
+	}
+	_, cursor := syncFolder(t, cfg, nil)
+
+	// Nothing changed, so the cursor cannot advance and the sync must not
+	// persist it: a quiet folder costs no writes, however many files it holds.
+	quiet := &streamRecorder{}
+	if _, err := NewConnector().FetchStream(context.Background(), cfg, cursor, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if len(quiet.items) != 0 || len(quiet.checkpoints) != 0 {
+		t.Fatalf("no-op sync emitted %d items and wrote %d checkpoints, want none",
+			len(quiet.items), len(quiet.checkpoints))
+	}
+
+	// A file touched without a content change does advance the cursor (its
+	// recorded mtime), so it checkpoints once — without re-ingesting.
+	writeFile(t, root, "b.md", "body of b.md", settled)
+	touched := &streamRecorder{}
+	if _, err := NewConnector().FetchStream(context.Background(), cfg, cursor, touched); err != nil {
+		t.Fatal(err)
+	}
+	if len(touched.items) != 0 || len(touched.checkpoints) != 1 {
+		t.Fatalf("touched file produced %d items and %d checkpoints, want 0 and 1",
+			len(touched.items), len(touched.checkpoints))
+	}
+}
+
+func TestFullStreamKeepsDeferredAndOversizedFilesInsteadOfDeletingThem(t *testing.T) {
+	root, cfg := newVault(t)
+	writeFile(t, root, "steady.md", "steady", time.Hour)
+	writeFile(t, root, "quiet.md", "first draft", time.Hour)
+	writeFile(t, root, "huge.md", "small for now", time.Hour)
+	_, cursor := syncFolder(t, cfg, nil)
+
+	// quiet.md is being typed right now, huge.md has grown past the size cap.
+	// Both are still on disk, so neither may be reported as deleted.
+	writeFile(t, root, "quiet.md", "still being edited", 0)
+	t.Setenv("MAX_FILE_SIZE_MB", "1")
+	writeFile(t, root, "huge.md", strings.Repeat("x", 1024*1024+1), time.Hour)
+
+	h := &streamRecorder{}
+	next, err := NewConnector().FetchFullStream(context.Background(), cfg, cursor, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := byExternalID(t, h.items)
+	for _, id := range []string{"local_folder:quiet.md", "local_folder:huge.md", "local_folder:steady.md"} {
+		if item, ok := got[id]; ok && item.IsDeleted {
+			t.Fatalf("%s is still on disk and must not be reported deleted: %+v", id, item)
+		}
+	}
+	if _, emitted := got["local_folder:quiet.md"]; emitted {
+		t.Fatalf("a file inside the quiet period should be deferred, not emitted: %+v", got)
+	}
+	if item := got["local_folder:huge.md"]; item.Metadata["error"] == "" {
+		t.Fatalf("the oversized file should surface as a failed item: %+v", item)
+	}
+
+	// Both must stay in the cursor: a full sync rebuilds it, and a file it never
+	// got to would otherwise be forgotten and could never be reconciled again.
+	files := decodeCursor(next).Files
+	for _, rel := range []string{"steady.md", "quiet.md", "huge.md"} {
+		if _, known := files[rel]; !known {
+			t.Fatalf("%s dropped out of the cursor after a full sync: %v", rel, files)
+		}
+	}
+
+	// Proof that nothing was orphaned: deleting the deferred file is still
+	// reconciled by the next ordinary sync.
+	if err := os.Remove(filepath.Join(root, "quiet.md")); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := syncFolder(t, cfg, next)
+	if item, ok := items["local_folder:quiet.md"]; !ok || !item.IsDeleted {
+		t.Fatalf("deleting a previously deferred file must be reconciled, got %+v", items)
+	}
 }
