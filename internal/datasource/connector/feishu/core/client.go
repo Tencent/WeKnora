@@ -920,7 +920,9 @@ const feishuMetasBatchSize = 200
 // BatchQueryMetas looks up title / latest_modify_time / url for drive docs
 // (docx, doc, sheet, bitable, file). Callers should chunk request_docs
 // themselves; this helper splits into pages of 200 (API max).
-func (c *Client) BatchQueryMetas(ctx context.Context, docs []DriveDocMetaRequest) (metas []DriveDocMeta, failed []DriveMetaFailedItem, err error) {
+func (c *Client) BatchQueryMetas(
+	ctx context.Context, docs []DriveDocMetaRequest,
+) (metas []DriveDocMeta, failed []DriveMetaFailedItem, err error) {
 	if len(docs) == 0 {
 		return nil, nil, nil
 	}

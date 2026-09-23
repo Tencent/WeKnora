@@ -153,8 +153,40 @@ type linksOps struct {
 	region core.Region
 	urls   []string
 
-	mu   sync.Mutex
-	docs map[string]linkDoc
+	mu       sync.Mutex
+	docs     map[string]linkDoc
+	failures []linkResolveFailure
+}
+
+// linkResolveFailure is one URL that could not be resolved via get_node /
+// BatchQueryMetas (rate limit, 5xx, missing scope, ACL). Distinct from
+// deterministic rejects (wiki_space / drive_folder / unrecognized).
+type linkResolveFailure struct {
+	URL   string
+	Token string
+	Code  string
+	Err   error
+}
+
+// PartialLinkResolveError tells the shared engine a listing was incomplete so
+// it must skip deletion detection (Tencent/WeKnora#3312).
+type PartialLinkResolveError struct {
+	Failures []linkResolveFailure
+}
+
+func (e *PartialLinkResolveError) Error() string {
+	if e == nil || len(e.Failures) == 0 {
+		return "partial feishu link resolve failed"
+	}
+	parts := make([]string, 0, len(e.Failures))
+	for _, f := range e.Failures {
+		if f.Err != nil {
+			parts = append(parts, f.Err.Error())
+			continue
+		}
+		parts = append(parts, f.URL)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func newLinksOps(region core.Region, config *types.DataSourceConfig) *linksOps {
@@ -171,11 +203,12 @@ func (o *linksOps) resolve(ctx context.Context, client *core.Client) {
 	if o.docs != nil {
 		return
 	}
-	docs, _ := resolveURLs(ctx, client, o.urls)
+	docs, resources := resolveURLs(ctx, client, o.urls)
 	o.docs = make(map[string]linkDoc, len(docs))
 	for _, d := range docs {
 		o.docs[d.ResourceID] = d
 	}
+	o.failures = transientFailures(resources)
 }
 
 func (o *linksOps) List(ctx context.Context, client *core.Client, resourceID string) ([]linkDoc, error, error) {
@@ -185,7 +218,13 @@ func (o *linksOps) List(ctx context.Context, client *core.Client, resourceID str
 		for _, d := range o.docs {
 			out = append(out, d)
 		}
-		return out, nil, nil
+		var partial error
+		if len(o.failures) > 0 {
+			partial = &PartialLinkResolveError{
+				Failures: append([]linkResolveFailure(nil), o.failures...),
+			}
+		}
+		return out, partial, nil
 	}
 	if d, ok := o.docs[resourceID]; ok {
 		return []linkDoc{d}, nil, nil
@@ -205,7 +244,10 @@ func (o *linksOps) List(ctx context.Context, client *core.Client, resourceID str
 		return []linkDoc{d}, nil, nil
 	}
 	if len(failed) > 0 {
-		return nil, nil, fmt.Errorf("document %s inaccessible: token=%s code=%d", resourceID, failed[0].Token, failed[0].Code)
+		return nil, nil, fmt.Errorf(
+			"document %s inaccessible: token=%s code=%d",
+			resourceID, failed[0].Token, failed[0].Code,
+		)
 	}
 	return nil, nil, fmt.Errorf("document %s not found", resourceID)
 }
@@ -215,12 +257,51 @@ func (o *linksOps) Title(n linkDoc) string    { return n.Title }
 func (o *linksOps) ObjType(n linkDoc) string  { return n.ObjType }
 func (o *linksOps) EditTime(n linkDoc) string { return n.EditTime }
 
-func (o *linksOps) Fetch(ctx context.Context, client *core.Client, n linkDoc, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
+func (o *linksOps) Fetch(
+	ctx context.Context, client *core.Client, n linkDoc,
+	resourceID string, multimodal bool,
+) ([]*types.FetchedItem, error) {
 	return fetchLinkDoc(ctx, client, n, resourceID, multimodal, o.region)
 }
 
-func (o *linksOps) ListFailureItems(_ string, _ error) []types.FetchedItem { return nil }
-func (o *linksOps) ResourceNoun() string                                   { return "documents" }
+func (o *linksOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
+	var pe *PartialLinkResolveError
+	if !errors.As(partial, &pe) {
+		return nil
+	}
+	channel := types.ChannelFeishuLinks
+	if o.region.ConnectorType == types.ConnectorTypeLarkLinks {
+		channel = types.ChannelLarkLinks
+	}
+	items := make([]types.FetchedItem, 0, len(pe.Failures))
+	for _, f := range pe.Failures {
+		err := f.Err
+		if err == nil {
+			err = errors.New(f.Code)
+		}
+		extID := f.Token
+		if extID == "" {
+			extID = f.URL
+		}
+		title := f.URL
+		if title == "" {
+			title = extID
+		}
+		items = append(items, types.FetchedItem{
+			ExternalID:       extID,
+			Title:            title,
+			SourceResourceID: resourceID,
+			Metadata: core.FeishuErrorItemMeta(err, map[string]string{
+				"channel":       channel,
+				"original_url":  f.URL,
+				"failure_stage": "resolve",
+			}),
+		})
+	}
+	return items
+}
+
+func (o *linksOps) ResourceNoun() string { return "documents" }
 func (o *linksOps) EmptyResourceIDsError() string {
 	return "no resource IDs (Feishu document links) configured"
 }
@@ -543,4 +624,42 @@ func classifyMetaFailCode(code int) string {
 	default:
 		return "resolve_failed"
 	}
+}
+
+func isTransientResolveCode(code string) bool {
+	switch code {
+	case "resolve_failed", "no_permission", "not_found":
+		return true
+	default:
+		return false
+	}
+}
+
+func transientFailures(resources []types.Resource) []linkResolveFailure {
+	var out []linkResolveFailure
+	for _, r := range resources {
+		if r.Type != "link_error" {
+			continue
+		}
+		code, _ := r.Metadata["error_code"].(string)
+		if !isTransientResolveCode(code) {
+			continue
+		}
+		msg, _ := r.Metadata["error"].(string)
+		url, _ := r.Metadata["original_url"].(string)
+		if url == "" {
+			url = r.URL
+		}
+		if msg == "" {
+			msg = code
+		}
+		p := core.ParseFeishuDocURL(url)
+		out = append(out, linkResolveFailure{
+			URL:   url,
+			Token: p.Token,
+			Code:  code,
+			Err:   errors.New(msg),
+		})
+	}
+	return out
 }

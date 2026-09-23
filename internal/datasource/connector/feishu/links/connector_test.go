@@ -12,15 +12,17 @@ import (
 )
 
 type fakeAPI struct {
-	nodes         map[string]core.WikiNode
-	forbidden     map[string]bool
-	metas         []core.DriveDocMeta
-	failed        []core.DriveMetaFailedItem
-	listSpacesHit int
-	listFilesHit  int
-	getNodeHit    int
-	blocksMode    string
-	docToken      string
+	nodes          map[string]core.WikiNode
+	forbidden      map[string]bool
+	metas          []core.DriveDocMeta
+	failed         []core.DriveMetaFailedItem
+	metasHit       int
+	metasFailAfter int
+	listSpacesHit  int
+	listFilesHit   int
+	getNodeHit     int
+	blocksMode     string
+	docToken       string
 }
 
 func startFake(t *testing.T, api *fakeAPI) (*httptest.Server, *core.Config) {
@@ -60,6 +62,12 @@ func startFake(t *testing.T, api *fakeAPI) (*httptest.Server, *core.Config) {
 		})
 	})
 	mux.HandleFunc("/open-apis/drive/v1/metas/batch_query", func(w http.ResponseWriter, _ *http.Request) {
+		api.metasHit++
+		if api.metasFailAfter > 0 && api.metasHit > api.metasFailAfter {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"code":1,"msg":"upstream 5xx"}`))
+			return
+		}
 		writeJSON(w, map[string]interface{}{
 			"code": 0,
 			"data": map[string]interface{}{
@@ -339,6 +347,45 @@ func TestFetchStream_DeletedLink(t *testing.T) {
 	}
 	if !deleted {
 		t.Fatalf("expected IsDeleted for removed link, got %+v", h.emitted)
+	}
+}
+
+func TestFetchStream_Resolve5xxDoesNotDelete(t *testing.T) {
+	api := &fakeAPI{
+		metas: []core.DriveDocMeta{
+			{DocToken: "objDOC", DocType: "docx", Title: "标题", LatestModifyTime: "100"},
+		},
+		docToken:       "objDOC",
+		metasFailAfter: 1,
+	}
+	_, cfg := startFake(t, api)
+	c := NewConnector(core.RegionFeishuLinks)
+	ds := makeLinksConfig(cfg, []string{"https://x.feishu.cn/docx/objDOC"}, []string{"docx:objDOC"})
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "export")
+
+	cur, err := c.FetchStream(context.Background(), ds, nil, &recordingHandler{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := &recordingHandler{}
+	if _, err := c.FetchStream(context.Background(), ds, cur, h); err != nil {
+		t.Fatal(err)
+	}
+	var deleted, failed bool
+	for _, it := range h.emitted {
+		if it.IsDeleted {
+			deleted = true
+		}
+		if it.Metadata["failure_stage"] == "resolve" {
+			failed = true
+		}
+	}
+	if deleted {
+		t.Fatalf("transient batch_query 5xx must not emit IsDeleted, got %+v", h.emitted)
+	}
+	if !failed {
+		t.Fatalf("expected resolve failure item in sync log, got %+v", h.emitted)
 	}
 }
 
