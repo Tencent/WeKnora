@@ -141,7 +141,12 @@ type EndpointRequest struct {
 	// embeddings on different paths under one base URL, so the hook has to
 	// know which one the model speaks.
 	EmbeddingAPI api.EmbeddingAPI
-	Extra        map[string]string
+	// RerankAPI is the resolved rerank protocol on a rerank request, for the
+	// same reason: Aliyun serves qwen3-rerank on the flat compatibility
+	// route and its other rerank models on the native one, under one base
+	// URL.
+	RerankAPI api.RerankAPI
+	Extra     map[string]string
 }
 
 // Definition is one model vendor / gateway / self-hosted runtime.

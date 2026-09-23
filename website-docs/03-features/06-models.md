@@ -214,7 +214,7 @@ builtin_models:
 
 `GET /api/v1/models/providers?model_type=chat` 返回全部厂商定义（图标 data URI、默认地址、额外字段、内置模型与思考能力），前端完全据此动态渲染，没有本地厂商表。目前内置 27 个厂商：`generic`、`weknoracloud`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`siliconflow`、`deepseek`、`minimax`、`moonshot`、`mimo`、`modelscope`、`qianfan`、`qiniu`、`longcat`、`lkeap`、`openai`、`azure_openai`、`anthropic`、`gemini`、`openrouter`、`litellm`、`requesty`、`jina`、`nvidia`、`novita`、`gpustack`；Ollama 走 `source=local` 独立路径。
 
-协议选择：Anthropic 走 Messages 协议；Gemini 默认走原生 `generateContent`（`base_url` 指向 `/v1beta/openai` 则保持 OpenAI 兼容）；OpenAI 在 `api.openai.com` 上走 Responses 协议，中转/代理保持 Chat Completions；任何厂商 `base_url` 以 `/anthropic` 结尾时自动切到 Messages 协议（MiniMax、智谱、Kimi 的 Anthropic 兼容口）。单行 `spec.api` 的明确选择优先于 URL 和厂商推断；兼容旧配置的 `extra_config.api` 仍具有最高优先级。`extra_config.api` 可强制指定对话协议，只对 chat / VLM 行生效；embedding 行的协议覆盖写在 `spec.compat` 的 `"api"` 里，取值是向量协议（`openai-embeddings`、`dashscope-embeddings`、`ark-embeddings`、`google-embeddings`）。
+协议选择：Anthropic 走 Messages 协议；Gemini 默认走原生 `generateContent`（`base_url` 指向 `/v1beta/openai` 则保持 OpenAI 兼容）；OpenAI 在 `api.openai.com` 上走 Responses 协议，中转/代理保持 Chat Completions；任何厂商 `base_url` 以 `/anthropic` 结尾时自动切到 Messages 协议（MiniMax、智谱、Kimi 的 Anthropic 兼容口）。单行 `spec.api` 的明确选择优先于 URL 和厂商推断；兼容旧配置的 `extra_config.api` 仍具有最高优先级。`extra_config.api` 可强制指定对话协议，只对 chat / VLM 行生效；embedding 行的协议覆盖写在 `spec.compat` 的 `"api"` 里，取值是向量协议（`openai-embeddings`、`dashscope-embeddings`、`ark-embeddings`、`google-embeddings`）；rerank 行同样用 `spec.compat` 的 `"api"` 选方言（目前取值 `dashscope-compat-rerank`，百炼的 qwen3-rerank 走扁平兼容路由）。
 
 目录条目按模型类型查找：embedding 行只匹配 embedding 条目，不会被同名前缀的对话通配（如百炼的 `qwen3*`、OpenAI 的 `gpt-5*`）套上对话的 compat。目录里还没有的新 id、带日期的快照照常按厂商默认解析。
 

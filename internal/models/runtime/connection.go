@@ -67,8 +67,11 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 			req.EmbeddingAPI = r.EmbeddingAPI
 		}
 		// Preserve historical rerank hook input; its routing uses ModelType.
+		// The resolved dialect still travels, because one vendor serves two
+		// of them under one base URL.
 		if kind == types.ModelTypeRerank {
 			req.API = ""
+			req.RerankAPI = r.RerankAPI
 		}
 		if url, query := v.Endpoint(req); url != "" {
 			ep.URL, ep.Query = url, query

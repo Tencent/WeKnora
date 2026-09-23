@@ -106,12 +106,19 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"logit":%v}`, i, logit(docs[i])))
 		}
 		return `{"rankings":[` + strings.Join(parts, ",") + `]}`
-	case strings.Contains(r.URL.Path, "/text-rerank"): // DashScope
+	case strings.Contains(r.URL.Path, "/text-rerank"): // DashScope native
 		docs := texts(body["input"].(map[string]any)["documents"])
 		for i := len(docs) - 1; i >= 0; i-- {
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"relevance_score":%v}`, i, probability(docs[i])))
 		}
 		return `{"output":{"results":[` + strings.Join(parts, ",") + `]}}`
+	case strings.HasSuffix(r.URL.Path, "/compatible-api/v1/reranks"): // qwen3-rerank's flat dialect
+		docs := texts(body["documents"])
+		for i := len(docs) - 1; i >= 0; i-- {
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"relevance_score":%v}`, i, probability(docs[i])))
+		}
+		return `{"object":"list","results":[` + strings.Join(parts, ",") +
+			`],"model":"qwen3-rerank","usage":{"total_tokens":1}}`
 	default: // Cohere
 		docs := texts(body["documents"])
 		score := probability
@@ -251,6 +258,36 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 				"model":      "gte-rerank-v2",
 				"input":      map[string]any{"query": query, "documents": anyStrings(three)},
 				"parameters": map[string]any{"return_documents": true, "top_n": float64(3)},
+			},
+		},
+		{
+			// qwen3-rerank is the same vendor's second dialect: the same row
+			// base URL — the native endpoint, which is what the type defaults
+			// to — has to reach the flat route instead, and the body is flat
+			// with no return_documents even though the vendor declares one for
+			// its native models.
+			name: "aliyun qwen3-rerank speaks the flat compatibility shape", provider: "aliyun", model: "qwen3-rerank",
+			base:     "/api/v1/services/rerank/text-rerank/text-rerank",
+			wantPath: "/compatible-api/v1/reranks",
+			wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{
+				"model":     "qwen3-rerank",
+				"query":     query,
+				"documents": anyStrings(three),
+				"top_n":     float64(3),
+			},
+		},
+		{
+			name: "aliyun qwen3-rerank splits at 500 documents", provider: "aliyun", model: "qwen3-rerank",
+			base: "/api/v1/services/rerank/text-rerank/text-rerank",
+			docs: documents(501), wantRequests: 2,
+			wantPath: "/compatible-api/v1/reranks",
+			wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{
+				"model":     "qwen3-rerank",
+				"query":     query,
+				"documents": anyStrings(documents(500)),
+				"top_n":     float64(500),
 			},
 		},
 		{

@@ -56,18 +56,21 @@
 //     (/compatible-mode/v1/embeddings); text-embedding-v4 and -v3 default to
 //     1024 dimensions (https://help.aliyun.com/zh/model-studio/embedding);
 //   - rerank is a separate DashScope-native endpoint
-//     (/api/v1/services/rerank/text-rerank/text-rerank).
+//     (/api/v1/services/rerank/text-rerank/text-rerank), except for the
+//     qwen3-rerank model, which is on the flat compatibility route described
+//     below.
 //
-// qwen3-rerank is a second, incompatible rerank protocol on the same vendor.
-// The text-rerank page puts it on /compatible-api/v1/reranks and states
-// outright that "两种接口的请求体结构和响应格式不同": its request is flat
-// (query / documents at the top level, no input/parameters wrapper) and its
-// response carries `results` at the top level with no `output` object. This
-// package implements only the native shape that gte-rerank-v2 and
-// qwen3.7-text-rerank use, so the entry is marked deprecated: it stays
-// resolvable for a row that already names it, but the picker no longer offers
-// a model that would be sent to the wrong path and decoded with the wrong
-// shape. Serving it needs a fourth rerank protocol package
+// qwen3-rerank is a second rerank protocol on the same vendor, and this
+// package serves both. The text-rerank page puts qwen3-rerank on
+// /compatible-api/v1/reranks and states outright that "两种接口的请求体结构和
+// 响应格式不同": its request is flat (query / documents / top_n at the top
+// level, no input/parameters wrapper) and its response carries `results` at
+// the top level with no `output` object. That dialect is implemented by
+// internal/models/api/dashscopecompatrerank, and the model entry names it
+// with compat.api; every other rerank model here — gte-rerank-v2,
+// qwen3.7-text-rerank, qwen3-vl-rerank — stays on the native shape this
+// vendor's RerankAPI names, which is also the base URL the type defaults to.
+// Both routes document the same 500-document ceiling
 // (https://help.aliyun.com/zh/model-studio/text-rerank-api).
 //
 // unverified: no page states whether `prompt_cache_key` is accepted, so the
@@ -100,6 +103,12 @@ const AliyunBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 // AliyunRerankBaseURL is the DashScope-native text rerank endpoint.
 const AliyunRerankBaseURL = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
 
+// AliyunRerankCompatiblePath is the flat rerank route qwen3-rerank answers on,
+// on the same host. It is a path rather than a base URL because the row's base
+// URL is shared with the native models, so the request is placed from the
+// host.
+const AliyunRerankCompatiblePath = "/compatible-api/v1/reranks"
+
 // AliyunAnthropicBaseURL is the documented Anthropic Messages facade. It is not the
 // default for this vendor; operators who want it configure it explicitly.
 const AliyunAnthropicBaseURL = "https://dashscope.aliyuncs.com/apps/anthropic"
@@ -107,6 +116,28 @@ const AliyunAnthropicBaseURL = "https://dashscope.aliyuncs.com/apps/anthropic"
 // AliyunMultimodalEmbeddingPath is the native multimodal embedding method
 // (https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference).
 const AliyunMultimodalEmbeddingPath = "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
+
+// aliyunRoots are the path prefixes this vendor serves its APIs under. A
+// base URL naming one of them is a full endpoint rather than a root.
+var aliyunRoots = []string{"/compatible-mode", "/compatible-api", "/api/v1"}
+
+// aliyunRoot returns the scheme://host part of a base URL that names one of
+// this vendor's API roots. It reports false for anything else — a bare host,
+// or an operator's own gateway — so the caller can fall back to the
+// protocol's own path instead of appending to a suffix it does not know.
+func aliyunRoot(baseURL string) (string, bool) {
+	root := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	cut := -1
+	for _, marker := range aliyunRoots {
+		if i := strings.Index(root, marker); i >= 0 && (cut < 0 || i < cut) {
+			cut = i
+		}
+	}
+	if cut < 0 {
+		return "", false
+	}
+	return root[:cut], true
+}
 
 func newAliyunProvider() *Definition {
 	return &Definition{
@@ -142,6 +173,20 @@ func newAliyunProvider() *Definition {
 		// workspace or international domain instead of replacing it with the
 		// Beijing default as the pre-catalog client did.
 		Endpoint: func(r EndpointRequest) (string, map[string]string) {
+			if r.ModelType == types.ModelTypeRerank && r.RerankAPI == api.RerankDashScopeCompat {
+				// qwen3-rerank is served on the compatibility route while
+				// every other rerank model here is on the native one, and
+				// the row's base URL is the native endpoint — it is this
+				// type's default. The host in front of it is recovered the
+				// same way, so a workspace or international domain is kept.
+				// A base URL that names none of the roots (an operator's own
+				// gateway, a bare host) is left alone and the protocol
+				// client appends its documented path.
+				if root, ok := aliyunRoot(r.BaseURL); ok {
+					return root + AliyunRerankCompatiblePath, nil
+				}
+				return "", nil
+			}
 			if r.ModelType != types.ModelTypeEmbedding {
 				return "", nil
 			}
@@ -176,11 +221,17 @@ func newAliyunProvider() *Definition {
 				DimensionsField:    api.Ptr("dimensions"),
 			},
 			Rerank: api.RerankCompat{
+				// return_documents is not documented for qwen3-rerank's
+				// compatibility route (the model reference names
+				// gte-rerank-v2 and qwen3-vl-rerank only), so the flat
+				// protocol package never sends the field even though this
+				// declaration reaches it. The declaration stays because the
+				// native models do echo documents.
 				SendReturnDocs: api.Ptr(true),
-				// 500 documents per request for the native text-rerank models.
-				// The query (4,000 tokens) and per-document limits are stated in
-				// tokens, which a rune count cannot express, so they are not
-				// declared.
+				// 500 documents per request, documented for both routes: the
+				// native text-rerank models and qwen3-rerank alike. The query
+				// (4,000 tokens) and per-document limits are stated in tokens,
+				// which a rune count cannot express, so they are not declared.
 				MaxDocuments: api.Ptr(500),
 			},
 			OpenAICompletions: api.OpenAICompletionsCompat{

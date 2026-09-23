@@ -116,6 +116,26 @@ func TestRerankOutboundShapePerProtocol(t *testing.T) {
 			},
 		},
 		{
+			name: "dashscope compatibility shape", provider: "aliyun", model: "qwen3-rerank",
+			reply: `{"object":"list","results":[{"index":0,"relevance_score":0.5}],` +
+				`"model":"qwen3-rerank","usage":{"total_tokens":9}}`,
+			assert: func(t *testing.T, path string, body map[string]any) {
+				// The row's base URL is the vendor's rerank default — the
+				// native endpoint — so the flat request also proves the host
+				// is recovered rather than the path appended to the native
+				// one.
+				assert.Equal(t, "/compatible-api/v1/reranks", path)
+				assert.Equal(t, "qwen3-rerank", body["model"])
+				assert.Equal(t, "q", body["query"])
+				assert.Equal(t, []any{"d0"}, body["documents"])
+				assert.Equal(t, float64(1), body["top_n"])
+				assert.NotContains(t, body, "input")
+				assert.NotContains(t, body, "parameters")
+				assert.NotContains(t, body, "return_documents",
+					"the flat route carries no document echo")
+			},
+		},
+		{
 			name: "nim shape", provider: "nvidia", model: "nvidia/nv-rerankqa-mistral-4b-v3",
 			reply: `{"rankings":[{"index":0,"logit":0.0}]}`,
 			assert: func(t *testing.T, _ string, body map[string]any) {
@@ -365,12 +385,13 @@ func TestRerankScoreScalesMatchTheVendorDocs(t *testing.T) {
 	}
 }
 
-// TestUnimplementedRerankDialectsAreRefused covers a model that names a
-// protocol no package implements. Hiding it from the picker stops new rows;
-// a row that already names it has to fail somewhere, and failing at
-// construction with the reason beats sending a request shaped for the wrong
-// protocol and reporting whatever the decoder makes of the reply.
-func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
+// TestQwen3RerankIsOfferedOnTheFlatProtocol covers the model that used to be
+// this catalog's one unimplemented rerank dialect. It speaks the flat
+// /compatible-api/v1/reranks shape, which dashscopecompatrerank implements,
+// so it is callable: the picker offers it, Resolve names that protocol, and
+// it keeps the vendor's documented batching ceiling. Its sibling stays on the
+// native shape.
+func TestQwen3RerankIsOfferedOnTheFlatProtocol(t *testing.T) {
 	v, ok := modelruntime.Get("aliyun")
 	require.True(t, ok)
 
@@ -378,20 +399,64 @@ func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
 	for _, m := range v.ModelsByType(types.ModelTypeRerank) {
 		offered = append(offered, m.ID)
 	}
-	assert.NotContains(t, offered, "qwen3-rerank", "the picker must not offer an unimplemented dialect")
+	assert.Contains(t, offered, "qwen3-rerank", "the model is callable now, so the picker offers it")
 	assert.Contains(t, offered, "gte-rerank-v2")
 
-	_, err := modelruntime.Resolve(modelruntime.Ref{
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider: "aliyun", Model: "qwen3-rerank", ModelType: types.ModelTypeRerank,
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "/compatible-api/v1/reranks",
-		"the error should name the protocol the model actually speaks")
+	require.NoError(t, err)
+	assert.Equal(t, api.RerankDashScopeCompat, resolved.RerankAPI)
+	assert.True(t, resolved.RerankAPI.HTTPServed(), "a protocol package has to be behind the name")
+	assert.Equal(t, 500, resolved.Rerank.MaxDocuments,
+		"the compatibility route documents the same 500-document ceiling")
 
-	// The vendor's other rerank model is unaffected.
-	_, err = modelruntime.Resolve(modelruntime.Ref{
+	// The vendor's other rerank models are unaffected.
+	native, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider: "aliyun", Model: "gte-rerank-v2", ModelType: types.ModelTypeRerank,
 	})
+	require.NoError(t, err)
+	assert.Equal(t, api.RerankDashScope, native.RerankAPI)
+}
+
+// TestUnknownRerankProtocolOnAModelEntryIsRefused pins the other side of the
+// per-model override: a name no package implements must fail at resolve time
+// rather than fall through to the vendor default and be sent somewhere it
+// would be decoded wrongly.
+func TestUnknownRerankProtocolOnAModelEntryIsRefused(t *testing.T) {
+	_, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: "aliyun", Model: "gte-rerank-v2", ModelType: types.ModelTypeRerank,
+		Override: &types.ModelSpecOverride{Compat: map[string]any{"api": "no-such-rerank"}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown rerank api")
+}
+
+// TestUnimplementedRerankDialectsAreRefused keeps the gate qwen3-rerank used
+// to exercise. Hiding a model from the picker stops new rows; a row that
+// already names a dialect no package implements has to fail somewhere, and
+// failing at construction with the reason beats sending a request shaped for
+// the wrong protocol and reporting whatever the decoder makes of the reply.
+//
+// No rerank entry in the catalog refuses anymore, so the declaration is made
+// where the field is equally reachable: a row's own compat, which is the
+// layer config/models.json and the database both write.
+func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
+	ref := modelruntime.Ref{
+		Provider: "aliyun", Model: "gte-rerank-v2", ModelType: types.ModelTypeRerank,
+		Override: &types.ModelSpecOverride{Compat: map[string]any{
+			"unsupported_reason": "speaks /some/other/rerank, a dialect no protocol package implements yet",
+		}},
+	}
+	_, err := modelruntime.Resolve(ref)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "/some/other/rerank",
+		"the error should name the dialect the model actually speaks")
+
+	// The same row without the declaration resolves: the gate is the
+	// declaration, not the vendor or the model.
+	ref.Override = nil
+	_, err = modelruntime.Resolve(ref)
 	require.NoError(t, err)
 }
 

@@ -53,6 +53,7 @@ func TestCatalogMigrationBaseline(t *testing.T) {
 							ModelType:    entry.Type,
 							API:          r.API,
 							EmbeddingAPI: r.EmbeddingAPI,
+							RerankAPI:    r.RerankAPI,
 						},
 					)
 					state["endpoint"], state["query"] = u, q

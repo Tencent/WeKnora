@@ -19,6 +19,13 @@ const (
 	// RerankDashScope is Alibaba Model Studio's native shape, which wraps
 	// the same fields in input/parameters and answers under output.
 	RerankDashScope RerankAPI = "dashscope-rerank"
+	// RerankDashScopeCompat is the flat shape the same vendor serves
+	// qwen3-rerank on, under /compatible-api/v1/reranks: model, query,
+	// documents and top_n at the top level of the request, results at the
+	// top level of the reply. It is not a variant of RerankDashScope —
+	// Alibaba documents the two routes as incompatible, and each model is
+	// callable through only one of them.
+	RerankDashScopeCompat RerankAPI = "dashscope-compat-rerank"
 	// RerankNIM is NVIDIA NIM's retrieval shape: a query object, a passages
 	// array, and rankings carrying an unbounded logit instead of a
 	// probability.
@@ -34,7 +41,7 @@ const (
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM,
+	case RerankCohere, RerankDashScope, RerankDashScopeCompat, RerankNIM,
 		RerankTencentLKEAP, RerankVolcengineKnowledge:
 		return true
 	}
@@ -46,7 +53,7 @@ func (a RerankAPI) Known() bool {
 // vendor SDKs are imported.
 func (a RerankAPI) HTTPServed() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM:
+	case RerankCohere, RerankDashScope, RerankDashScopeCompat, RerankNIM:
 		return true
 	}
 	return false

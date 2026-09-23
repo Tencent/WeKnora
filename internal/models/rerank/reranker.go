@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
+	"github.com/Tencent/WeKnora/internal/models/api/dashscopecompatrerank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
@@ -179,6 +180,9 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = cohererank.New(cohererank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankDashScope:
 		client = dashscoperank.New(dashscoperank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankDashScopeCompat:
+		client = dashscopecompatrerank.New(
+			dashscopecompatrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankNIM:
 		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTencentLKEAP:

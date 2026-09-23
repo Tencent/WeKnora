@@ -4,6 +4,11 @@ package api
 // settings. JSON keys are the documented names used in models.json and
 // config/models.json.
 type RerankCompat struct {
+	// API overrides the vendor's rerank protocol for one model. Aliyun
+	// serves two: the native text-rerank shape for gte-rerank-v2 and the
+	// flat compatibility one qwen3-rerank answers on, chosen by which model
+	// the row names.
+	API              *RerankAPI  `json:"api,omitempty"`
 	Path             *string     `json:"path,omitempty"`
 	SendTopN         *bool       `json:"send_top_n,omitempty"`
 	SendReturnDocs   *bool       `json:"send_return_documents,omitempty"`
@@ -24,6 +29,11 @@ type RerankCompat struct {
 
 // RerankSettings is the resolved (fully defaulted) form.
 type RerankSettings struct {
+	// API is the protocol this model speaks, which may differ from the
+	// vendor's default. It is what the resolved RerankAPI carries; the field
+	// exists here because a model entry — not the vendor — is what names a
+	// second dialect.
+	API RerankAPI
 	// Path is appended to the base URL by protocols that use one. Vendors
 	// whose default base URL already names the full endpoint leave it empty.
 	Path string

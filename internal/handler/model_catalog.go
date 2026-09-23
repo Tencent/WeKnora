@@ -341,6 +341,7 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 				ModelType:    modelType,
 				API:          resolved.API,
 				EmbeddingAPI: resolved.EmbeddingAPI,
+				RerankAPI:    resolved.RerankAPI,
 				Extra:        extra,
 			})
 			if endpointURL != "" {

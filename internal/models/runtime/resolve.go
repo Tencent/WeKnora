@@ -385,6 +385,18 @@ func resolveRerank(
 		}
 		settings.TruncatePromptTokens = budget
 	}
+	// A model entry may name a different dialect than the vendor default:
+	// Aliyun serves qwen3-rerank on the flat compatibility route while every
+	// other rerank model it hosts is on the native one. An unknown name is
+	// refused the same way an unknown vendor-level protocol is.
+	if settings.API != "" {
+		if !settings.API.Known() {
+			return nil, fmt.Errorf(
+				"catalog: unknown rerank api %q on %s/%s", settings.API, vendor.ID, spec.ID)
+		}
+		protocol = settings.API
+	}
+	settings.API = protocol
 	// Checked after every layer: a model entry is what declares a dialect
 	// this build cannot speak.
 	if settings.UnsupportedReason != "" {
