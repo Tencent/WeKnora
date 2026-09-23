@@ -69,3 +69,21 @@ e2e 脚本约定：放 `tests/e2e/`（独立 package.json，playwright@1.63.0 �
 5. **`gh` 的 POST 偶发 TLS 超时但 curl 正常**；超时的 POST 可能已生效，重试前先查重。
 6. **fork 的 Issues 默认关闭**（410 Gone），已手动开启。
 7. **`cmd/server` 不读 `.env`**（只有 `cmd/desktop` 用 godotenv）：原生运行前必须 `set -a; source .env; set +a`，否则报 `unsupported database driver: `（空值）。
+
+## LLM 测试环境（Kimi Coding Plan）
+
+需要真实 LLM 的验收（T23/T40 及后续 e2e）用本机 Kimi Coding Plan：
+
+- `config/builtin_models.yaml` 声明内置模型 `builtin-kimi-coding`
+  （remote/OpenAI 兼容，`api.kimi.com/coding/v1`，`kimi-for-coding`）；
+  密钥经 `.env` 的 `${KIMI_CODING_API_KEY}` 注入（pi 的 kimi-coding 登录
+  凭证，.env 已 gitignored），对所有租户可见，验收脚本新建的租户直接可用
+- **SSRF 白名单**：出站走代理的机器，模型 BaseURL 主机（api.kimi.com）
+  必须加进 `.env` 的 `SSRF_WHITELIST`，否则 DNS fake-ip（198.18.0.0/15）
+  会被 SSRF 校验拒绝
+- **Windows 批处理行尾**：用 `.cmd` 包装启动服务时，文件必须 CRLF 行尾——
+  LF 行尾会让 cmd 静默丢弃部分 `set` 行（踩坑记录：SSRF_WHITELIST 丢失）
+- 新建租户的验收注意：agent 必须显式挂 `model_id`（无默认模型映射）；
+  `allowed_tools` 避开 `search_knowledge`（工具链强制 rerank 模型，新租户
+  没有会硬失败）；`search_conversations` + 强制先调工具的 system_prompt
+  是最小可用触发组合

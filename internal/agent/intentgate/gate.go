@@ -78,6 +78,33 @@ type Verdict struct {
 	JudgeTokens int `json:"judge_tokens,omitempty"`
 }
 
+// Enforced 报告该 verdict 是否应按 enforce 语义动作：判定时的策略 mode
+// 为 enforce（types.VerdictModeEnforce）。只有 Action==Deny 且 Enforced()
+// 的 verdict 才在 engine 接缝转成 DeniedError 阻断工具调用（T40，设计 §9）；
+// observe 的 deny 只记录不拦截，require_approval/uncertain 的 enforce
+// 处置归 T41/T42。
+func (v Verdict) Enforced() bool {
+	return v.Mode == types.VerdictModeEnforce
+}
+
+// DeniedError 是 enforce 模式下 deny verdict 的错误形态（设计 §7「deny
+// 走现有 err 路径」）：toolCall.Result.Success=false、Error 携带策略 NLC
+// 理由，agent 下一轮凭理由在对话中解释并自我纠错。区别于审批门的
+// 拒绝（人工 Decision），这是策略自动判定。
+type DeniedError struct {
+	Verdict Verdict
+}
+
+// Error 实现 error 接口。文本必须包含 verdict.Reason（含策略 NLC 原文），
+// 这是 agent 自我纠错的全部依据；前缀固定便于日志检索与 e2e 断言。
+func (e *DeniedError) Error() string {
+	v := e.Verdict
+	if v.Reason == "" {
+		v.Reason = "未说明原因"
+	}
+	return fmt.Sprintf("[IntentGate] 工具调用被意图策略拒绝：%s", v.Reason)
+}
+
 // ToolCallInput 是一次工具调用的判定输入。意图基准是原始 user prompt
 // 与会话历史，不是当前轮的模型输出（被审对象不能自证，设计 §8.2）。
 type ToolCallInput struct {
