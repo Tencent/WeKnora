@@ -25,22 +25,14 @@ WeKnora 内的连接测试验证应用凭据；随后加载资源树才会验证
 
 普通文件下载后按文件类型进入解析流程；表格/多维表格导出为 xlsx，文件夹递归遍历，快捷方式解析到目标文件。不支持的云文档类型会跳过，应查看同步日志中的跳过原因。
 
-新版 docx 有两条路径，由 **app 服务**的 `FEISHU_DOCX_PARSE_MODE` 控制，同时影响 Wiki 与云盘连接器：
+新版 docx 有两条路径，在**知识库设置 → 数据源编辑页 → 解析模式**按数据源选择（存于数据源的 `settings.parse_mode`），默认 `blocks`，同时影响 Wiki 与云盘连接器：
 
 | 模式 | 路径 | 适用与限制 |
 | --- | --- | --- |
-| 留空或 `export`（默认） | 异步导出 docx，再进入文档解析 | 图片随父文档解析；导出和解析耗时较长，内嵌 file block 附件不随导出保留 |
-| `blocks` | blocks API 转 Markdown；API 失败或正文为空时回退导出 | 保留可解析附件为独立条目；开启多模态同步时图片作为独立条目，不能假定检索会自动关联回正文 |
+| `blocks`（默认） | blocks API 转 Markdown；API 失败或正文为空时回退导出 | 图片/画板随父文档入库并建立关联；可解析附件（pdf/office 等）保留为独立条目并与父文档互相关联；内嵌电子表格/多维表格转为文档内 Markdown 表格 |
+| `export` | 异步导出 docx，再进入文档解析 | 图片随父文档解析；导出和解析耗时较长；内嵌 file block 附件不随导出保留；电子表格/多维表格变为 docx 内嵌表格，无法按表格解析 |
 
-需要 blocks 模式时在 `.env` 设置并重建 app：
-
-```dotenv
-FEISHU_DOCX_PARSE_MODE=blocks
-```
-
-```bash
-docker compose up -d app
-```
+已废弃的环境变量 `FEISHU_DOCX_PARSE_MODE` 仅在数据源未配置解析模式时作为回退读取（打印弃用警告，后续版本移除）；在 `.env` 中显式设为 `export` 的部署升级后行为不变。
 
 修改模式影响之后的抓取，不会把已入库内容自动转换成另一种格式。图片内容能否被检索还取决于对象存储、OCR/多模态处理和索引状态，见[文档解析](03-document-parsing.md)。
 
@@ -52,7 +44,7 @@ docker compose up -d app
 | 加载文件夹失败 | 使用具体文件夹链接；检查 API 权限及文件夹分享授权 |
 | 云文档失败而普通文件正常 | 检查导出权限；blocks 模式另需 docx 读取权限 |
 | 同步数少于目录文件数 | 检查不支持类型、子目录授权、失败/跳过统计 |
-| 图片无法随正文召回 | 确认解析模式和多模态状态；blocks 独立图片与 export 内联图片语义不同 |
+| 图片无法随正文召回 | 确认对象存储、OCR/多模态处理与索引状态；两种解析模式的图片均与父文档建立关联 |
 | 文档变更后短暂不可检索 | 更新可能删除旧知识并重新入库，等待新版本解析和索引完成 |
 
 实现参考：`internal/datasource/connector/feishu/drive/`、`core/shared.go` 和 `internal/application/service/datasource_service.go`。

@@ -50,9 +50,14 @@
 
 #### Feishu / Lark（`connector/feishu/`）
 
-云盘应用权限、文件夹授权、资源选择和 `FEISHU_DOCX_PARSE_MODE` 取舍见[飞书云盘接入](24-feishu-drive.md)。默认 export 与 blocks 模式的图片、附件语义不同；开启同步删除时会删除当前数据源对应的知识条目。
+云盘应用权限、文件夹授权、资源选择和解析模式取舍见[飞书云盘接入](24-feishu-drive.md)。默认 `blocks` 与 `export` 模式的图片、附件语义见下文；开启同步删除时会删除当前数据源对应的知识条目。
 
 飞书与 Lark（国际版 open.larksuite.com）是部署在两朵隔离云上的同一产品，Wiki/docx/drive API 完全一致，因此**共用同一份连接器代码**，由 `region.go` 中的 `Region` 结构选择云端（`RegionFeishu` / `RegionLark`，分别对应类型 `feishu` / `lark`、API 域名 `open.feishu.cn` / `open.larksuite.com`）。`base_url` 凭据字段可显式覆盖（兼容历史上把 feishu 连接器指向 larksuite 的存量数据源）。
+
+> **从旧版本升级**：解析模式改为数据源级配置后，升级到本版本有三处行为变化。
+> 1. 环境变量 `FEISHU_DOCX_PARSE_MODE` 已废弃：仅在数据源未配置解析模式时作为回退读取并打印弃用警告，后续版本移除；在 `.env` 中显式设为 `export` 的部署升级后行为不变。
+> 2. 未设置任何解析模式的存量飞书/Lark 数据源，默认解析模式由 `export` 变为 `blocks`。
+> 3. 迁移会给所有存量飞书/Lark 数据源打一次性全量重同步标记：升级后的下一次同步（含计划增量）自动按全量执行，全部文档重新入库并重新计算 embedding/VLM 摘要，产生相应耗时与模型调用开销，完成后标记自动清除。
 
 - **认证**（`client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。

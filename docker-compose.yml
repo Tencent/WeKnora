@@ -370,6 +370,9 @@ services:
       - OIDC_AUTH_SCOPES=${OIDC_AUTH_SCOPES:-}
       - OIDC_USER_INFO_MAPPING_USER_NAME=${OIDC_USER_INFO_MAPPING_USER_NAME:-}
       - OIDC_USER_INFO_MAPPING_EMAIL=${OIDC_USER_INFO_MAPPING_EMAIL:-}
+      # 已废弃：解析模式改在数据源编辑页按数据源配置（默认 blocks）。此变量仅在
+      # 数据源未配置 parse_mode 时回退读取并打印弃用警告，后续版本将移除。
+      - FEISHU_DOCX_PARSE_MODE=${FEISHU_DOCX_PARSE_MODE:-}
     depends_on:
       redis:
         condition: service_started

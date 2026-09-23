@@ -16,8 +16,8 @@ import (
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Feishu deep-adaptation legacy upgrade: legacy feishu data sources carry a
-// one-shot Settings["resync_required"] marker (stamped by migration 000096 /
-// sqlite 000017). The sync entry upgrades such a sync — even a scheduled
+// one-shot Settings["resync_required"] marker (stamped by migration 000110 /
+// sqlite 000030). The sync entry upgrades such a sync — even a scheduled
 // incremental one — to a full pass and clears the marker on success.
 // ─────────────────────────────────────────────────────────────────────────────
 

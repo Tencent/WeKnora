@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -228,25 +229,37 @@ func ParseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, 
 	}
 
 	// parse_mode is likewise a per-data-source display setting, read from
-	// Settings (set on the data source edit form). Unset or empty falls back to
-	// blocks — the default since the FEISHU_DOCX_PARSE_MODE env var was retired;
-	// an unrecognized value falls back to blocks with a warning rather than
-	// failing the whole sync.
-	feishuConfig.ParseMode = ParseModeBlocks
+	// Settings (set on the data source edit form). When the per-source setting
+	// is unset, the deprecated FEISHU_DOCX_PARSE_MODE env var is still honored
+	// for one release (with a warning) so deployments that pinned "export"
+	// keep their behavior across the upgrade. Everything unset (or
+	// unrecognized) resolves to blocks — the default; an unrecognized value
+	// falls back to blocks with a warning rather than failing the whole sync.
+	parseMode := ""
 	if config.Settings != nil {
 		if pm, ok := config.Settings["parse_mode"].(string); ok {
-			feishuConfig.ParseMode = strings.ToLower(strings.TrimSpace(pm))
+			parseMode = strings.ToLower(strings.TrimSpace(pm))
 		}
 	}
-	switch feishuConfig.ParseMode {
+	if parseMode == "" {
+		if legacy := strings.TrimSpace(os.Getenv("FEISHU_DOCX_PARSE_MODE")); legacy != "" {
+			logger.Warnf(context.Background(),
+				"[Feishu] FEISHU_DOCX_PARSE_MODE=%q is deprecated and will be removed; "+
+					"set parse_mode on the data source edit form instead",
+				legacy)
+			parseMode = strings.ToLower(legacy)
+		}
+	}
+	switch parseMode {
 	case "", ParseModeBlocks:
 		feishuConfig.ParseMode = ParseModeBlocks
 	case ParseModeExport:
 		// keep the explicit export selection
+		feishuConfig.ParseMode = ParseModeExport
 	default:
 		logger.Warnf(context.Background(),
-			"[Feishu] invalid parse_mode %q in data source settings, falling back to %q",
-			feishuConfig.ParseMode, ParseModeBlocks)
+			"[Feishu] invalid parse_mode %q, falling back to %q",
+			parseMode, ParseModeBlocks)
 		feishuConfig.ParseMode = ParseModeBlocks
 	}
 
