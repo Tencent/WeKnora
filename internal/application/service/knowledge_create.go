@@ -1323,8 +1323,7 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	masked, maskErr := s.maskParsedMarkdown(ctx, kb, clean)
 	if maskErr != nil {
 		logger.Errorf(ctx, "desensitization failed for passage knowledge %s: %v", knowledge.ID, maskErr)
-		_ = persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
-		return
+		return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
 	}
 	clean = masked
 

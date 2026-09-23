@@ -388,8 +388,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
 	if maskErr != nil {
 		logger.Errorf(ctx, "desensitization failed for knowledge title %s: %v", knowledge.ID, maskErr)
-		_ = persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
-		return
+		return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
 	}
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
