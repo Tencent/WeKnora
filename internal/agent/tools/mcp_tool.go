@@ -165,11 +165,15 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		}, err
 	}
 
-	// Human approval gate for dangerous tools (issue #1173)
+	// Human approval gate for dangerous tools (issue #1173).
+	// T41：IntentGate 在 enforce 下判 require_approval 时，engine 接缝已在
+	// ctx 上挂了强制审批标记（含策略理由）——即便工具未配置审批策略也
+	// 走同一条 RequestAndWait 通道（阻塞等待 + 跨实例广播 + 改参数放行）。
 	if t.gate != nil {
 		if meta, ok := ToolExecFromContext(ctx); ok && meta != nil && meta.EventBus != nil {
 			tenantID, _ := types.TenantIDFromContext(ctx)
-			if t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
+			intentReason, intentForced := approval.IntentRequirementFromContext(ctx)
+			if t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) || intentForced {
 				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
 				// human approval can legitimately wait longer than the per-tool 60s.
 				// User-stop / request cancel still propagates because ApprovalCtx is a
@@ -177,6 +181,12 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				waitCtx := ctx
 				if meta.ApprovalCtx != nil {
 					waitCtx = meta.ApprovalCtx
+				}
+				description := t.mcpTool.Description
+				if intentForced {
+					// 策略理由置顶展示：审批人看到的是"为什么这次调用被策略
+					// 要求人工确认"，而不是工具的普通描述。
+					description = "[意图策略要求人工审批] " + intentReason + "\n\n" + description
 				}
 				decision, waitErr := t.gate.RequestAndWait(waitCtx, approval.PendingRequest{
 					TenantID:           tenantID,
@@ -189,7 +199,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 					ServiceName:        t.service.Name,
 					MCPToolName:        t.mcpTool.Name,
 					RegisteredToolName: t.Name(),
-					Description:        t.mcpTool.Description,
+					Description:        description,
 					Args:               args,
 					ToolCallID:         meta.ToolCallID,
 				})

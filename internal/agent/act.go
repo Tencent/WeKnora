@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/intentgate"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
@@ -563,7 +564,8 @@ func (e *AgentEngine) runToolCall(
 		if e.intentGate != nil {
 			verdict, enforcedDeny = e.evaluateIntentGate(toolCtx, tc, target, toolSpan, sessionID, assistantMessageID)
 		}
-		if enforcedDeny {
+		switch {
+		case enforcedDeny:
 			err = &intentgate.DeniedError{Verdict: verdict}
 			// T43：enforce 拦截落 audit（intent_policy.enforced_deny）。
 			// 审计回调必须 fail-open（实现内保证），这里不做错误处理。
@@ -577,7 +579,23 @@ func (e *AgentEngine) runToolCall(
 					Verdict:    verdict,
 				})
 			}
-		} else {
+		case verdict.Action == intentgate.ActionRequireApproval && verdict.Enforced():
+			// T41：enforce 的 require_approval 复用人工审批通道（设计 §7
+			// 「人工审批通道只覆盖 MCP 工具」）。把强制审批标记挂在执行
+			// ctx 上，MCP 工具执行时读到即走 RequestAndWait；内置工具无此
+			// 通道，放行并留结构化告警——需要真正的暂停-恢复点，不在本票范围。
+			if target != nil && target.ServiceName != "" {
+				toolExecCtx = approval.WithIntentRequirement(toolExecCtx, verdict.Reason)
+			} else {
+				logger.WarnWithFields(toolCtx, logger.Fields{
+					"event":      "intentgate.require_approval_no_channel",
+					"policy_id":  verdict.PolicyID,
+					"tool":       tc.Function.Name,
+					"session_id": sessionID,
+				}, "[IntentGate] require_approval on non-MCP tool: no approval channel, passing (T41)")
+			}
+			fallthrough
+		default:
 			execCtx, toolCancel := context.WithTimeout(toolExecCtx, execTimeout)
 			result, err = e.toolRegistry.ExecuteTool(
 				execCtx, tc.Function.Name,

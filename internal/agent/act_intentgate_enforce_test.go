@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/intentgate"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -175,5 +178,35 @@ func TestIntentGateNonEnforceDenySkipsAuditor(t *testing.T) {
 	runGatedToolCall(engine)
 	if calls != 0 {
 		t.Fatalf("auditor must not fire without enforced deny, calls=%d", calls)
+	}
+}
+
+// TestIntentGateRequireApprovalNonMCPPassesWithWarn（T41）：enforce 的
+// require_approval 落在内置工具上（无审批通道）→ 放行 + 结构化告警，
+// 绝不静默（设计 §7 注记：内置工具无人工审批通道）。
+func TestIntentGateRequireApprovalNonMCPPassesWithWarn(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stdout)
+
+	engine, executed := intentGateTestEngine(t)
+	engine.SetIntentGate(&fakeGate{verdict: intentgate.Verdict{
+		Action:   intentgate.ActionRequireApproval,
+		PolicyID: "pol-ra-1",
+		Mode:     types.VerdictModeEnforce,
+		Layer:    intentgate.LayerJudge,
+		Reason:   "策略判定：需人工确认",
+	}})
+
+	toolCall := runGatedToolCall(engine)
+
+	if *executed != 1 {
+		t.Fatalf("require_approval on non-MCP tool must pass in T41 scope, executed=%d", *executed)
+	}
+	if toolCall.Result == nil || !toolCall.Result.Success {
+		t.Fatalf("tool call must succeed, got %+v", toolCall.Result)
+	}
+	if !strings.Contains(buf.String(), "intentgate.require_approval_no_channel") {
+		t.Fatalf("no-channel warn missing, logs: %s", buf.String())
 	}
 }
