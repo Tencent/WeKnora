@@ -323,7 +323,8 @@ func (r *Resolved) Capabilities() Capabilities {
 		caps.ThinkingFormat = "think"
 		caps.MaxTokensField = "num_predict"
 	}
-	if caps.ThinkingFormat == string(api.ThinkingFormatChatTemplateKwargs) && !hasExplicitGradedLevels(r.ThinkingLevels) {
+	isCTK := caps.ThinkingFormat == string(api.ThinkingFormatChatTemplateKwargs)
+	if isCTK && !hasExplicitGradedLevels(r.ThinkingLevels) {
 		// The chat_template_kwargs wire format only carries
 		// enable_thinking; a graded effort picked in the UI would be
 		// silently dropped (issue #3551). Unless the operator configured
