@@ -217,6 +217,16 @@ const yuqueFolderMode = computed({
   },
 })
 
+// toc_only is an admission filter, and the connector only reads the table of
+// contents when folder_mode is 'toc' — under the flat layout the flag has no
+// effect at all, which is why the control is disabled there.
+const yuqueTOCOnly = computed({
+  get: () => form.value.config.settings?.toc_only === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, toc_only: on }
+  },
+})
+
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
@@ -1911,14 +1921,45 @@ const drawerConfirmText = computed(() => {
         </div>
       </section>
 
-      <!-- Yuque only: how synced documents are laid out in the knowledge base. -->
+      <!-- Yuque only: how synced documents are laid out, and what may be admitted. -->
       <section v-if="form.type === 'yuque'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.yuqueFolderModeLabel') }}</h4>
-        <t-select v-model="yuqueFolderMode">
-          <t-option value="toc" :label="t('datasource.yuqueFolderModeToc')" />
-          <t-option value="none" :label="t('datasource.yuqueFolderModeNone')" />
-        </t-select>
+        <div class="form-item form-item--flat">
+          <div
+            class="option-group"
+            role="radiogroup"
+            :aria-label="t('datasource.yuqueFolderModeLabel')"
+          >
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': yuqueFolderMode === 'toc' }"
+              role="radio"
+              :aria-checked="yuqueFolderMode === 'toc'"
+              @click="yuqueFolderMode = 'toc'"
+            >
+              {{ t('datasource.yuqueFolderModeToc') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': yuqueFolderMode === 'none' }"
+              role="radio"
+              :aria-checked="yuqueFolderMode === 'none'"
+              @click="yuqueFolderMode = 'none'"
+            >
+              {{ t('datasource.yuqueFolderModeNone') }}
+            </button>
+          </div>
+        </div>
         <p class="form-desc">{{ t('datasource.yuqueFolderModeHint') }}</p>
+
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="yuqueTOCOnly" :disabled="yuqueFolderMode !== 'toc'">
+            {{ t('datasource.yuqueTOCOnly') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.yuqueTOCOnlyHint') }}</p>
       </section>
     </template>
   </SettingDrawer>

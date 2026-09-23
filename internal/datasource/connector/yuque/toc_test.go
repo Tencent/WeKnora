@@ -323,11 +323,10 @@ func TestParseFolderSettings_TolerantOfBadInput(t *testing.T) {
 			folderSettings{FolderMode: folderModeTOC},
 		},
 		{
-			// include_book_title was removed. A data source that still carries
-			// the key must keep syncing — the book segment is now unconditional,
-			// so the stale value simply has no effect.
-			"retired include_book_title is ignored",
-			map[string]interface{}{"folder_mode": "toc", "include_book_title": false},
+			// Unknown keys are ignored rather than failing the sync — settings
+			// arrive from JSON, and a typo must not take a data source down.
+			"unknown key is ignored",
+			map[string]interface{}{"folder_mode": "toc", "no_such_setting": false},
 			folderSettings{FolderMode: folderModeTOC},
 		},
 	}
@@ -414,32 +413,6 @@ func TestConnector_FetchAll_TOCPaths(t *testing.T) {
 		if got[id] != wantName {
 			t.Errorf("doc %s: FileName = %q, want %q", id, got[id], wantName)
 		}
-	}
-}
-
-// include_book_title was removed in favour of an unconditional book segment.
-// A data source created while the key still existed must keep syncing, and its
-// stale value must be ignored rather than honoured.
-func TestConnector_FetchAll_RetiredIncludeBookTitleIsIgnored(t *testing.T) {
-	f := newFakeYuque()
-	defer f.Close()
-	fakeBookDocs(f)
-	fakeBookTOC(f, 200)
-
-	items, err := NewConnector().FetchAll(context.Background(),
-		makeDSConfigWithSettings(f, []string{"7"}, map[string]interface{}{
-			"folder_mode": "toc", "include_book_title": false,
-		}), []string{"7"})
-	if err != nil {
-		t.Fatalf("FetchAll: %v", err)
-	}
-	got := fileNames(items)
-	if got["101"] != "My Book/Group/Grouped.md" {
-		t.Errorf("doc 101: FileName = %q, want %q (a stale include_book_title must be ignored)",
-			got["101"], "My Book/Group/Grouped.md")
-	}
-	if got["103"] != "My Book/Unfiled.md" {
-		t.Errorf("doc 103: FileName = %q, want %q", got["103"], "My Book/Unfiled.md")
 	}
 }
 

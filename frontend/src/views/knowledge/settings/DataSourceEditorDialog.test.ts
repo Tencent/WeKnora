@@ -23,6 +23,11 @@ async function fixture({
   create = false,
   type = 'gitlab',
   settings = { projects: [{ project_id: '123', paths: [] }] },
+}: {
+  configured?: boolean
+  create?: boolean
+  type?: string
+  settings?: Record<string, unknown>
 } = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
   let storedToken = configured ? 'expired-token' : ''
@@ -163,12 +168,23 @@ test('new GitLab data sources continue to test credentials without persistence',
   } finally { f.close() }
 })
 
-test('a new Yuque data source adopts the TOC folder layout', async () => {
+test('a new Yuque data source adopts the TOC folder layout, but not the filter', async () => {
   const f = await fixture({ create: true })
   try {
     assert.equal(f.vm.form.config.settings.folder_mode, undefined)
     f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'yuque'))
     assert.equal(f.vm.form.config.settings.folder_mode, 'toc')
+    // The layout is a presentation choice; toc_only decides what may enter the
+    // knowledge base, so a new source is deliberately left without it.
+    assert.equal(f.vm.form.config.settings.toc_only, undefined)
+    assert.equal(f.vm.yuqueTOCOnly, false)
+  } finally { f.close() }
+})
+
+test('an existing Yuque data source reports its admission filter', async () => {
+  const f = await fixture({ type: 'yuque', settings: { folder_mode: 'toc', toc_only: true } })
+  try {
+    assert.equal(f.vm.yuqueTOCOnly, true)
   } finally { f.close() }
 })
 
