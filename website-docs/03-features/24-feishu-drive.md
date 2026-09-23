@@ -4,15 +4,7 @@
 
 ## 应用身份与文件夹权限
 
-使用对应区域的企业自建应用 App ID 与 App Secret；飞书与 Lark 的凭据不能混用。云盘连接器需要开通 3 个必要权限：
-
-| 权限 | 用途 | 缺少时的表现 |
-| --- | --- | --- |
-| `drive:drive:readonly` | 列举文件夹、下载文件、下载 docx 内嵌图片/附件 | 加载文件夹或同步报 403，提示「需先将文件夹分享给应用所在的群」 |
-| `drive:export:readonly` | 导出 docx/doc/sheet/bitable 再解析 | 云文档类文件同步失败 |
-| `docx:document:readonly` | blocks API 解析新版文档正文（默认模式主路径） | docx 解析失败或回退导出也失败 |
-
-云盘连接器**不需要** `wiki:wiki:readonly`。可选增强权限（@成员真实姓名、云文档引用标题、画板导出、内嵌表格转换等，缺失时降级不阻断同步）以及知识库连接器的完整权限说明见[数据源同步](10-datasource.md)的 Feishu/Lark 小节。权限名称与申请要求以飞书开放平台的[文件夹列表接口](https://open.feishu.cn/document/server-docs/docs/drive-v1/folder/list)与[导出接口](https://open.feishu.cn/document/server-docs/docs/drive-v1/export_task/create)等接口说明为准。
+使用对应区域的企业自建应用 App ID 与 App Secret；飞书与 Lark 的凭据不能混用。应按实际使用的接口开通读取权限：目录列举与文件下载、云文档导出，以及 blocks 模式下的 docx 内容读取。权限名称、可替代权限和申请要求以飞书开放平台的[文件夹列表接口](https://open.feishu.cn/document/server-docs/docs/drive-v1/folder/list)与[导出接口](https://open.feishu.cn/document/server-docs/docs/drive-v1/export_task/create)等接口说明为准。
 
 配置权限后发布应用版本，并把目标文件夹授权给应用可访问的范围。若通过应用所在群分享，核对应用、文件夹管理者和群的授权关系。API 权限与文件访问权是两层检查：能取得 tenant access token，不代表能读取任意文件夹。
 
