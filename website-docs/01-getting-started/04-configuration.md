@@ -235,8 +235,24 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_AUDIT_RETENTION_DAYS` | 90 | 审计日志保留天数 |
 | `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` | 空 | 引导第一个系统管理员。**不会创建用户**：该邮箱需先自行注册，下次启动时若部署内还没有任何系统管理员，才把它提升；已有管理员后本变量不再生效。详见[租户、用户与认证授权](../03-features/01-tenant-auth.md) |
 | `OIDC_AUTH_ENABLE` 及 `OIDC_AUTH_*` / `OIDC_USER_INFO_MAPPING_*` | false / 空 | OIDC 单点登录全套配置 |
-| `SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA` | 空 / `searxng,qdrant,milvus,weaviate,doris-fe,doris-be` | 出站请求 SSRF 白名单（app 与 docreader 共用） |
+| `SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA` | 空 / `searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio`（仅 app） | 出站请求 SSRF 白名单。`SSRF_WHITELIST` 为 app 与 docreader 共用；compose 只给 app 的 `SSRF_WHITELIST_EXTRA` 设了默认值，docreader 的同名变量默认为空 |
+| `SSRF_DNS_WHITELIST_ONLY` | false | 仅允许白名单出站。开启后，不在白名单的主机在 **DNS 查询前**即被拒绝，URL 校验处连 IP 直连也一并拒绝；域名只按名字匹配，写在白名单里的 CIDR 不再对域名生效。取值按布尔解析（`1/t/true` 开、`0/f/false` 关），**非空且无法解析的取值按「开」处理**。开启前的准备见下文 |
 | `IMAGE_HOST_KEEP_URL` | 空 | 保留原始 URL 的图片域名白名单 |
+
+#### 开启 `SSRF_DNS_WHITELIST_ONLY` 之前
+
+开启后白名单就是全部出站策略，需要先把所有出站地址写进 `SSRF_WHITELIST` 或 `SSRF_WHITELIST_EXTRA`。docreader 也要访问 compose 内的主机时，请写进两个服务共用的 `SSRF_WHITELIST`（它的 `SSRF_WHITELIST_EXTRA` 默认为空）。通常还要补上：
+
+- 模型服务地址（chat / embedding / rerank / VLM / ASR，含本机 Ollama 的 `localhost`）
+- OIDC 登录的 `dex`（或你的 IdP 域名）、MCP 服务地址、`docreader`
+- 对象存储（外部 S3/COS/OSS 等）、外部向量库、Langfuse 地址
+- 沙箱控制面地址：开启后「允许私网端点」不再能绕过白名单
+
+仍未覆盖的出站路径，按影响排序：
+
+1. **gRPC 向量库的运行时解析**：qdrant / milvus 客户端由 gRPC 自己的 resolver 解析 target，拨号器拿到的已是地址，因此这类主机是在**建客户端之前按名字**判断的（环境变量配置在启动时判断，控制台保存的配置走 URL 校验），而不是每次连接前。
+2. **Langfuse 的 OTLP 导出器**自带 HTTP 客户端，完全不走本机制。`LANGFUSE_HOST` 默认是 SaaS 地址，离线部署请关闭追踪或改成内网地址。
+3. **`HTTP(S)_PROXY`**：拨号器对代理主机的放行条件是「拨号地址与代理 URL 的 host 完全相等」。相等时代理主机即使不在白名单也会被解析和连接；不相等时（例如代理 URL 没写端口）会被当成非白名单直接拒绝。离线部署请 unset 代理，或把代理主机一并写进白名单。
 
 ### Docreader 解析（docreader 容器）
 
