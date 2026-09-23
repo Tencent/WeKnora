@@ -84,10 +84,10 @@ docker run -d --name weknora-site --restart unless-stopped -p 8080:80 weknora-si
 
 访问 `http://服务器地址:8080/`。如使用域名和 HTTPS，让现有反向代理转发到该端口即可。镜像内已经包含官网、文档和 Nginx 路由配置。
 
-容器内的 Nginx 默认监听 80 端口，可以用环境变量 `PORT` 修改，无需重新构建。使用 `--network host`，或者部署平台要求容器监听指定端口时，这样设置：
+容器内的 Nginx 默认监听 80 端口，可以用环境变量 `WEBSITE_NGINX_PORT` 修改，无需重新构建。使用 `--network host`，或者部署平台要求容器监听指定端口时，这样设置：
 
 ```bash
-docker run -d --name weknora-site --restart unless-stopped -e PORT=8080 -p 8080:8080 weknora-site:0.8.0
+docker run -d --name weknora-site --restart unless-stopped -e WEBSITE_NGINX_PORT=8080 -p 8080:8080 weknora-site:0.8.0
 ```
 
 只是想换一个对外端口时，改 `-p` 左侧的宿主机端口就够了，例如 `-p 9000:80`。

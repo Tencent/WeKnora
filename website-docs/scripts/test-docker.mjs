@@ -25,16 +25,17 @@ async function waitReady(origin, label) {
 }
 
 try {
-  docker('run', '-d', '--name', name, '-p', '127.0.0.1::80', image);
+  docker('run', '-d', '--name', name, '-e', 'PORT=9999', '-p', '127.0.0.1::80', image);
   const origin = `http://${docker('port', name, '80/tcp')}`;
   docker('exec', name, 'nginx', '-t');
   docker('exec', name, 'sh', '-c', '! command -v node && test ! -d /build && test ! -e /usr/share/nginx/html/package.json');
   await waitReady(origin, 'Container');
 
-  // PORT moves the listen port without a rebuild; the default stays 80.
-  docker('run', '-d', '--name', portName, '-e', 'PORT=8080', '-p', '127.0.0.1::8080', image);
+  // An unrelated PORT must not affect the default or overridden listener.
+  // WEBSITE_NGINX_PORT moves the listen port without a rebuild; the default stays 80.
+  docker('run', '-d', '--name', portName, '-e', 'WEBSITE_NGINX_PORT=8080', '-e', 'PORT=9999', '-p', '127.0.0.1::8080', image);
   const portOrigin = `http://${docker('port', portName, '8080/tcp')}`;
-  await waitReady(portOrigin, 'Container with PORT=8080');
+  await waitReady(portOrigin, 'Container with WEBSITE_NGINX_PORT=8080');
   assert.match(docker('exec', portName, 'cat', '/etc/nginx/conf.d/default.conf'), /listen 8080;/);
   assert.equal((await fetch(portOrigin + '/docs/')).status, 200);
 
@@ -71,7 +72,7 @@ try {
     assert.equal(response.status, 404, path);
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   }
-  console.log(`Docker site check passed: homepage, docs routes, ${assets.size} assets, redirects, 404s, compression, headers, runtime isolation and PORT override.`);
+  console.log(`Docker site check passed: homepage, docs routes, ${assets.size} assets, redirects, 404s, compression, headers, runtime isolation and WEBSITE_NGINX_PORT override.`);
 } finally {
   spawnSync('docker', ['rm', '-f', name, portName], { stdio: 'ignore' });
 }
