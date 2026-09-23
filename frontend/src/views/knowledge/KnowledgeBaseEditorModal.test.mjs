@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const source = readFileSync(new URL('./KnowledgeBaseEditorModal.vue', import.meta.url), 'utf8')
+const graphSettingsSource = readFileSync(new URL('./settings/GraphSettings.vue', import.meta.url), 'utf8')
 
 test('editing a knowledge base closes the editor after a successful save', () => {
   assert.match(source, /emit\('success', kbId\)\s*handleClose\(\)/)
@@ -29,4 +30,31 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /const isPostCreateSession = computed\(\(\) => !!savedKbId\.value\)/)
   assert.match(source, /settings-footer-note/)
   assert.match(source, /knowledgeEditor\.postCreateHint\.followUpDesc/)
+})
+
+test('blocks incomplete graph extraction config and opens graph settings', () => {
+  const validationBlock = source.match(
+    /if \(formData\.value\.type !== 'faq' && !isGraphExtractConfigComplete\(formData\.value\.nodeExtractConfig\)\) \{([\s\S]*?)^\s{2}\}/m
+  )?.[1]
+
+  assert.ok(validationBlock, 'expected to find the graph extraction validation block')
+  assert.match(validationBlock, /MessagePlugin\.warning\(t\('graphSettings\.completeConfigRequired'\)\)/)
+  assert.match(validationBlock, /currentSection\.value = 'graph'/)
+  assert.match(validationBlock, /return false/)
+  assert.match(source, /if \(!validateForm\(\)\) \{\s*return\s*\}/)
+})
+
+test('never enables graph extraction in FAQ payloads', () => {
+  assert.match(
+    source,
+    /enabled: formData\.value\.type !== 'faq' && !!formData\.value\.nodeExtractConfig\.enabled/
+  )
+})
+
+test('graph required fields use the same asterisk marker as model settings', () => {
+  assert.equal(
+    graphSettingsSource.match(/<span class="required">\*<\/span>/g)?.length,
+    4
+  )
+  assert.doesNotMatch(graphSettingsSource, /graphSettings\.required/)
 })
