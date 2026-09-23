@@ -59,6 +59,31 @@
 > 2. 未设置任何解析模式的存量飞书/Lark 数据源，默认解析模式由 `export` 变为 `blocks`。
 > 3. 迁移会给所有存量飞书/Lark 数据源打一次性全量重同步标记：升级后的下一次同步（含计划增量）自动按全量执行，全部文档重新入库并重新计算 embedding/VLM 摘要，产生相应耗时与模型调用开销，完成后标记自动清除。
 
+**应用权限**（飞书/Lark 开放平台 → 企业自建应用 → 权限管理；开通后需创建并发布新版本才生效）。
+
+必要权限：
+
+| 权限 | 用途 | 缺少时的表现 |
+|---|---|---|
+| `wiki:wiki:readonly` | 列举知识库空间与节点树（仅知识库连接器；云盘连接器不需要） | 加载资源树失败 |
+| `drive:drive:readonly` | 云盘文件夹列举、文件下载、docx 内嵌图片/附件的字节下载 | 加载文件夹或同步报 403，内嵌媒体无法下载 |
+| `drive:export:readonly` | docx/doc/sheet/bitable 异步导出（export 模式主路径，也是 blocks 失败/正文为空时的回退） | 云文档类文件同步失败 |
+| `docx:document:readonly` | blocks API 读取新版文档正文（默认模式主路径） | docx 解析失败，回退导出也失败 |
+
+云盘文件夹列举接口也接受 `drive:drive`（读写）或 `space:document:retrieve` 作为替代，推荐只开只读的 `drive:drive:readonly` 做最小授权。
+
+可选增强权限（缺失时不阻断同步，仅对应能力降级）：
+
+| 权限 | 用途 | 缺失时 |
+|---|---|---|
+| `sheets:spreadsheet:readonly` | 内嵌电子表格转为 Markdown 表格 | 该块显示「无法读取」占位 |
+| `bitable:app:readonly` | 内嵌多维表格转为 Markdown 表格 | 该块显示「无法读取」占位 |
+| `board:whiteboard:node:read` | 画板（含思维导图/流程图）导出为图片内嵌正文 | 占位标记 |
+| `contact:user.base:readonly` | @成员 显示真实姓名 | 降级为「@成员」 |
+| `drive:drive.metadata:readonly` | 正文中的云文档引用回填文档标题 | 保持 URL 形式 |
+
+飞书（open.feishu.cn）与 Lark（open.larksuite.com）的权限标识相同，但应用互不通用；权限与文件访问是两层检查，云盘场景还需把目标文件夹分享给应用（见[飞书云盘接入](24-feishu-drive.md)）。
+
 - **认证**（`client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。
 - **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。Wiki 侧节点改名/移动会更新节点编辑时间，下一次增量同步文档自动落到新目录；Drive 侧目录改名/文件移动不改变文件修改时间，增量同步不感知，需手动全量同步刷新目录结构；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式节点按其指向的实体去重，不重复入库。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
