@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS knowledges (
     knowledge_base_id      VARCHAR(64) NOT NULL,
     parse_status           VARCHAR(32) NOT NULL,
     pending_subtasks_count INTEGER NOT NULL DEFAULT 0,
+    error_message          TEXT,
+    processed_at           DATETIME,
     updated_at             DATETIME,
     deleted_at             DATETIME
 );
@@ -918,4 +920,99 @@ func TestTaskDeadLetter_DeleteByID_IsIdempotent(t *testing.T) {
 	rows, _, err := repo.ListByScope(ctx, "knowledge_base", "kb", "", 10)
 	require.NoError(t, err)
 	assert.Len(t, rows, 0)
+}
+
+func setupDrainTest(t *testing.T) (*gorm.DB, interfaces.TaskPendingOpsRepository, interfaces.TaskPendingOpsDrainer) {
+	t.Helper()
+	db := setupTaskQueueTestDB(t)
+	require.NoError(t, db.Exec(taskQueueKnowledgeTestDDL).Error)
+	repo := NewTaskPendingOpsRepository(db)
+	drainer, ok := repo.(interfaces.TaskPendingOpsDrainer)
+	require.True(t, ok)
+	return db, repo, drainer
+}
+
+func insertFinalizingKnowledge(t *testing.T, db *gorm.DB, id string, pending int) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, tenant_id, knowledge_base_id, parse_status, pending_subtasks_count)
+		 VALUES (?, 1, 'kb-1', ?, ?)`, id, types.ParseStatusFinalizing, pending,
+	).Error)
+}
+
+func wikiLane(scopeID, op, dedup string) *types.TaskPendingOp {
+	return makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, scopeID, op, dedup, []byte(`{}`))
+}
+
+// Draining releases each drained document's slot once, and leaves alone any
+// document a live batch holds, even through an unclaimed row of its own.
+func TestTaskPendingOps_DrainUnclaimedAndReleaseSparesLiveDocuments(t *testing.T) {
+	db, repo, drainer := setupDrainTest(t)
+	ctx := context.Background()
+	for _, op := range []*types.TaskPendingOp{
+		wikiLane("kb-1", "ingest", "k-unclaimed"),
+		wikiLane("kb-1", "ingest", "k-unclaimed"),
+		wikiLane("kb-1", "ingest", "k-stale"),
+		wikiLane("kb-1", "ingest", "k-live"),
+		wikiLane("kb-1", "ingest", "k-live"), // enqueued after the live claim
+		wikiLane("kb-1", "retract", "k-retract-live"),
+		wikiLane("kb-1", "ingest", "k-retract-live"),
+		wikiLane("kb-1", "retract", "k-retract"),
+		wikiLane("kb-2", "ingest", "k-other-kb"),
+	} {
+		require.NoError(t, repo.Enqueue(ctx, op))
+	}
+	staleBefore := time.Now().Add(-time.Hour)
+	claim := func(where string, at time.Time) {
+		require.NoError(t, db.Exec(`UPDATE task_pending_ops SET claimed_at = ? WHERE `+where, at).Error)
+	}
+	claim(`dedup_key = 'k-stale'`, staleBefore.Add(-time.Minute))
+	claim(`id = (SELECT MIN(id) FROM task_pending_ops WHERE dedup_key = 'k-live')`, time.Now())
+	claim(`dedup_key = 'k-retract-live' AND op = 'retract'`, time.Now())
+	insertFinalizingKnowledge(t, db, "k-unclaimed", 1)
+	insertFinalizingKnowledge(t, db, "k-stale", 2)
+	insertFinalizingKnowledge(t, db, "k-live", 1)
+	insertFinalizingKnowledge(t, db, "k-retract-live", 1)
+
+	keys, err := drainer.DrainUnclaimedAndRelease(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1",
+		"ingest", staleBefore)
+
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"k-unclaimed", "k-stale"}, keys)
+	var left []string
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Order("dedup_key").Pluck("dedup_key", &left).Error)
+	assert.Equal(t, []string{"k-live", "k-live", "k-other-kb", "k-retract", "k-retract-live", "k-retract-live"}, left)
+
+	type row struct {
+		ID                   string
+		ParseStatus          string
+		PendingSubtasksCount int
+	}
+	var rows []row
+	require.NoError(t, db.Raw(
+		`SELECT id, parse_status, pending_subtasks_count FROM knowledges ORDER BY id`,
+	).Scan(&rows).Error)
+	assert.Equal(t, []row{
+		{ID: "k-live", ParseStatus: types.ParseStatusFinalizing, PendingSubtasksCount: 1},
+		{ID: "k-retract-live", ParseStatus: types.ParseStatusFinalizing, PendingSubtasksCount: 1},
+		{ID: "k-stale", ParseStatus: types.ParseStatusFinalizing, PendingSubtasksCount: 1},
+		{ID: "k-unclaimed", ParseStatus: types.ParseStatusCompleted, PendingSubtasksCount: 0},
+	}, rows)
+}
+
+// A failed release rolls the delete back, so the retry still finds the ops.
+func TestTaskPendingOps_DrainUnclaimedAndReleaseRollsBackOnReleaseFailure(t *testing.T) {
+	db, repo, drainer := setupDrainTest(t)
+	ctx := context.Background()
+	require.NoError(t, repo.Enqueue(ctx, wikiLane("kb-1", "ingest", "k-1")))
+	require.NoError(t, db.Exec(`DROP TABLE knowledges`).Error)
+
+	keys, err := drainer.DrainUnclaimedAndRelease(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1",
+		"ingest", time.Now().Add(-time.Hour))
+
+	require.Error(t, err)
+	assert.Empty(t, keys)
+	var count int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
 }

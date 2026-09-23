@@ -123,8 +123,8 @@ Access Neo4j Browser:
 --------------------------------------------------------------------------------
 
   GitHub:  https://github.com/Tencent/WeKnora
-  API Docs: https://github.com/Tencent/WeKnora/blob/main/docs/api/README.md
-  FAQ:     https://github.com/Tencent/WeKnora/blob/main/docs/QA.md
+  API Docs: https://github.com/Tencent/WeKnora/blob/main/website-docs/04-api/01-api-overview.md
+  FAQ:     https://github.com/Tencent/WeKnora/blob/main/website-docs/01-getting-started/05-troubleshooting.md
 
 --------------------------------------------------------------------------------
   TROUBLESHOOTING

@@ -146,6 +146,31 @@ curl -X DELETE $BASE/api/v1/sessions/s-1/pin -H "Authorization: Bearer $TOKEN"
 curl -N "$BASE/api/v1/sessions/continue-stream/s-1?message_id=m-1" -H "Authorization: Bearer $TOKEN"
 ```
 
+## 沙箱图形桌面 {#sandbox-desktop}
+
+这些路由由 `internal/router/routes_chat.go` 注册，尚未进入 Swagger。仅 Cube/E2B 桌面模板支持；部署和代理要求见[沙箱部署](../06-development/04-sandbox-deployment.md)。
+
+### POST /api/v1/sessions/:session_id/sandbox/desktop-ticket
+
+签发两分钟有效的一次性 WebSocket 票据。需要会话属主的有效登录 Bearer access token，不能只用 API Key。JWT 只放在本次 POST 的认证头中。
+
+```bash
+curl -X POST "$BASE/api/v1/sessions/$SESSION_ID/sandbox/desktop-ticket" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+响应：200 `{"success":true,"data":{"ticket":"<opaque-ticket>","expires_in":120}}`。
+
+### GET /api/v1/sessions/:id/sandbox/desktop
+
+WebSocket 握手使用 `?ticket=<opaque-ticket>`，不走普通 JWT 中间件。票据绑定用户、空间、会话与原 access token，使用一次即失效；用过、过期、未知票据统一拒绝。代理日志不能记录 ticket query。
+
+每会话同时仅允许一条中继。沙箱未绑定、暂停、不支持桌面或启动失败等状态可能先完成 WebSocket upgrade，再以 `SANDBOX_NOT_BOUND`、`SANDBOX_PAUSED`、`DESKTOP_UNSUPPORTED`、`DESKTOP_START_FAILED` 等 close reason 断开，客户端应读取关闭原因。
+
+### POST /api/v1/sessions/:session_id/sandbox/desktop/activity
+
+会话属主上报键鼠活动，响应 200 `{"success":true}`。仅当服务端 RFB parser 降级时用于续期；parser 正常时忽略，不应通过轮询延长沙箱寿命。
+
 ## 会话附件（临时文档）
 
 Handler: `internal/handler/session/temporary_document.go`

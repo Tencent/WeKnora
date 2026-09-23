@@ -37,6 +37,9 @@ except ValueError:
     logger.warning("WEKNORA_CHAT_TIMEOUT is not a valid integer; falling back to 300s.")
     WEKNORA_CHAT_TIMEOUT = 300
 
+# Bound the data accumulated while waiting for an SSE event's blank line.
+MAX_SSE_EVENT_BYTES = 8 * 1024 * 1024
+
 # Network transport defaults kept for backward compatibility with pre-2.x deployments.
 SSE_MESSAGE_PATH = "/sse/messages/"
 STREAMABLE_HTTP_STATELESS = True
@@ -507,6 +510,7 @@ class WeKnoraClient:
           data: {"response_type": "references", "knowledge_references": [...]}
           data: {"response_type": "complete"}
         
+        A blank line ends each event; multiple data lines are joined with newlines.
         We accumulate answer chunks and extract references, returning them as a dict.
         """
         try:
@@ -521,19 +525,35 @@ class WeKnoraClient:
             answer_chunks: list = []
             references: list = []
             debug_events: list = []
+            data_lines: list[str] = []
+            event_bytes = 0
 
             # Use context manager to ensure the connection is returned to the pool
             # even when breaking early on a 'complete' event.
             with response:
                 for raw_line in response.iter_lines():
-                    if not raw_line:
-                        continue
                     if isinstance(raw_line, bytes):
                         raw_line = raw_line.decode("utf-8")
-                    # Each SSE event is prefixed with "data: " followed by JSON payload
-                    if not raw_line.startswith("data:"):
+                    if raw_line:
+                        field, _, value = raw_line.partition(":")
+                        if field == "data":
+                            # SSE removes at most one leading space from a value.
+                            if value.startswith(" "):
+                                value = value[1:]
+                            event_bytes += len(value.encode("utf-8")) + 1
+                            if event_bytes > MAX_SSE_EVENT_BYTES:
+                                raise RequestException(
+                                    f"SSE event exceeds {MAX_SSE_EVENT_BYTES} bytes"
+                                )
+                            data_lines.append(value)
                         continue
-                    payload = raw_line[5:].lstrip(" ")
+                    # Dispatch only at the blank-line boundary. Incomplete data
+                    # at EOF is discarded, as required by the SSE protocol.
+                    if not data_lines:
+                        continue
+                    payload = "\n".join(data_lines)
+                    data_lines = []
+                    event_bytes = 0
                     try:
                         event_data = json.loads(payload)
                     except json.JSONDecodeError:

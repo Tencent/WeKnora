@@ -295,3 +295,15 @@ export LANGFUSE_SECRET_KEY=sk-lf-xxx
 ### 分块策略诊断 {#_6-6-分块策略诊断}
 
 chunker 提供 `SplitWithDiagnostics()`（`internal/infrastructure/chunker/strategy.go`），返回策略链选择、各 tier 被拒原因与文档画像，配合 `LOG_LEVEL=debug`（`chunker: tier %s rejected` 日志）可排查分块效果问题。
+
+### 云镜像维护脚本 {#cloud-image-scripts}
+
+`scripts/cloud-image/` 用于在专用、可丢弃的 Linux 制作机上准备分发镜像。常规部署使用[安装部署](../01-getting-started/02-installation.md)，不需要运行这些脚本。
+
+- `prepare.sh` 下载 `WEKNORA_REF` 对应的运行文件、拉取镜像并安装 systemd 服务。该引用还用于设置镜像版本，必须确认对应镜像标签存在。随仓库提供的 systemd 单元固定使用 `/opt/WeKnora`，只修改脚本的目录变量不足以迁移安装位置。
+- `cleanup.sh` 清除制镜像机的数据、密钥、SSH 授权、日志与 Docker 缓存并关机；其影响不限于 WeKnora 目录，只能用于检查过的专用制作机。
+- `firstboot.sh` 在新实例上生成密钥、写入 `.env` 并启动 Compose；完成后禁用首启服务，不会自删除脚本。
+
+制镜像前需检查脚本与所选版本是否匹配。分发前必须用新实例验证启动、服务健康和密钥独立性；本说明不代表当前脚本已通过特定云平台的部署或上架验收。
+
+首启排障查看 `journalctl -u weknora-firstboot`、`/var/log/weknora-firstboot.log` 与 `/opt/WeKnora` 下的 Compose 状态。`.firstboot.done` 在生成密钥之后、启动 Compose 之前写入，标记存在不代表服务健康。启动失败时保留已生成的 `.env` 和标记，修复原因后重新启动 Compose；删除标记重新生成密钥可能造成配置与已初始化数据库不一致。

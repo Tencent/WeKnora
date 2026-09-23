@@ -24,6 +24,7 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
+	"gorm.io/gorm"
 )
 
 // ErrWikiIngestConcurrent is returned by the wiki ingest handler in Lite mode
@@ -532,6 +533,31 @@ func EnqueueWikiIngest(
 	return true, nil
 }
 
+// WikiPendingLanguage returns the language recorded on the KB's newest queued
+// wiki ingest op, or "" if none. A trigger re-armed without a request context
+// must carry it: batch-level taxonomy planning reads the trigger's language,
+// and would otherwise fall back to the server default.
+func WikiPendingLanguage(ctx context.Context, db *gorm.DB, tenantID uint64, kbID string) string {
+	if db == nil || kbID == "" {
+		return ""
+	}
+	// Plucked as text: SQLite returns the column as a string, which does not
+	// scan into json.RawMessage.
+	var payloads []string
+	if err := db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Where("tenant_id = ? AND task_type = ? AND scope = ? AND scope_id = ? AND op = ?",
+			tenantID, wikiTaskType, wikiTaskScope, kbID, WikiOpIngest).
+		Order("id DESC").Limit(1).
+		Pluck("payload", &payloads).Error; err != nil || len(payloads) == 0 {
+		return ""
+	}
+	var op WikiPendingOp
+	if err := json.Unmarshal([]byte(payloads[0]), &op); err != nil {
+		return ""
+	}
+	return op.Language
+}
+
 func newWikiIngestPendingOp(
 	ctx context.Context,
 	tenantID uint64,
@@ -692,6 +718,28 @@ func (s *wikiIngestService) clearDeletedKnowledgeBasePendingOps(ctx context.Cont
 	cleanupCtx, cancel := wikiIngestCleanupContext(ctx)
 	defer cancel()
 	return cleaner.DeleteByScope(cleanupCtx, types.TaskScopeKnowledgeBase, kbID)
+}
+
+// releaseIngestForUnavailableWiki drops the KB's queued ingest ops when the
+// wiki cannot run for a reason retries will not fix, and releases each
+// document's wiki slot in the same transaction so it leaves "finalizing".
+// Retract ops stay queued for when the wiki is usable again. Documents a live
+// batch holds are left to it.
+func (s *wikiIngestService) releaseIngestForUnavailableWiki(ctx context.Context, kbID, reason string) error {
+	drainer, ok := s.pendingRepo.(interfaces.TaskPendingOpsDrainer)
+	if !ok {
+		return fmt.Errorf("wiki ingest: KB %s unavailable (%s)", kbID, reason)
+	}
+	cleanupCtx, cancel := wikiIngestCleanupContext(ctx)
+	defer cancel()
+	knowledgeIDs, err := drainer.DrainUnclaimedAndRelease(cleanupCtx, wikiTaskType, wikiTaskScope, kbID,
+		WikiOpIngest, time.Now().Add(-wikiClaimStaleAfter))
+	if err != nil {
+		return fmt.Errorf("wiki ingest: KB %s unavailable (%s), drain pending ingest: %w", kbID, reason, err)
+	}
+	logger.Warnf(ctx, "wiki ingest: KB %s unavailable (%s), dropped pending ingest for %d document(s)",
+		kbID, reason, len(knowledgeIDs))
+	return nil
 }
 
 func (s *wikiIngestService) enqueueFinalizeRow(ctx context.Context, op *types.TaskPendingOp) bool {

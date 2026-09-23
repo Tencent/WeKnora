@@ -198,7 +198,20 @@ type Knowledge struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+	// Most recent processing progress (row or span write) for an in-flight
+	// row, so clients can tell a slow stage from a stalled one. Not stored.
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty" gorm:"-"`
+	// Verdict on an in-flight row gone quiet: StallStateQueued (its work is
+	// still queued, i.e. backlogged) or StallStateStalled (nothing left to
+	// run it). Empty while it is progressing or the probe failed. Not stored.
+	StallState string `json:"stall_state,omitempty" gorm:"-"`
 }
+
+// Stall verdicts for Knowledge.StallState.
+const (
+	StallStateQueued  = "queued"
+	StallStateStalled = "stalled"
+)
 
 // CustomMetadataText returns stable human-readable metadata for summaries and
 // document-scoped model context. Internal ingestion metadata is intentionally

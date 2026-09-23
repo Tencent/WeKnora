@@ -328,7 +328,7 @@ make migrate-goto version=60       # 迁移/回滚到指定版本
 
 ## 如何新增一个迁移 {#_6-如何新增一个迁移}
 
-1. **创建文件**：`make migrate-create name=add_my_feature`，在 `migrations/versioned/` 下生成下一个版本号（当前最大为 `000091`；创建前再次检查目录，使用下一个空闲版本的 up/down 文件）；
+1. **创建文件**：`make migrate-create name=add_my_feature`，在 `migrations/versioned/` 下生成下一个版本号（创建前检查目录，使用下一个空闲版本的 up/down 文件）；
 2. **编写 up SQL**：注意 PostgreSQL 方言（JSONB、部分索引、`TIMESTAMP WITH TIME ZONE`）；若涉及 `embeddings` 表，参考既有迁移用 `app.skip_embedding` GUC 做条件门控（`SELECT current_setting('app.skip_embedding', true)`），保证非 postgres 检索引擎部署也能通过迁移；
 3. **编写 down SQL**：必须可逆（drop column/table/index），否则回滚链会断；
 4. **同步 SQLite**：`migrations/sqlite/000000_init.up.sql` 是压平的全量 schema，**新增列/表必须合并进去**（注意方言转换：JSONB→TEXT、SERIAL→INTEGER AUTOINCREMENT、无部分索引语法差异等）。若变更需要在已有 Lite 库上生效（例如删表、删数据），还要在 `migrations/sqlite/` 追加一个增量版本；
@@ -336,6 +336,8 @@ make migrate-goto version=60       # 迁移/回滚到指定版本
 6. **验证**：`make migrate-up` → `make migrate-down` → `make migrate-up` 三连确认可逆；SQLite 侧用 `DB_DRIVER=sqlite` 启动一次 Lite 版验证初始化脚本。
 
 ## 常见迁移问题排查 {#_7-常见迁移问题排查}
+
+面向部署的诊断顺序、扩展检查与恢复边界见[数据库迁移排障](../01-getting-started/05-troubleshooting.md#database-migrations)。`force` 只修改版本标记，不撤销 SQL；先备份并核对实际 schema，不能假定失败迁移已完整回滚。
 
 ### dirty state（最常见） {#_7-1-dirty-state-最常见}
 
@@ -347,9 +349,10 @@ make migrate-version            # 输出形如 "74 (dirty)"
 # 或直接查表
 # SELECT version, dirty FROM schema_migrations;
 
-# 2. 人工检查该版本的 up SQL 实际执行到哪，把残留补齐或清理
+# 2. 停止写入、备份，核对实际 schema 和失败 SQL 的执行位置
 
-# 3. 强制回到上一个干净版本后重试
+# 3. 仅在确认 schema 符合版本 73 且失败迁移可安全重跑后执行
+# 73 仅为示例，不能机械地用失败版本减一
 make migrate-force version=73
 make migrate-up
 ```
