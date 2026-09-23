@@ -15,9 +15,11 @@
 #      且 policy_version / mode_at_decision 正确。
 #
 # 前置条件：
-#   1. weknora-server 已启动且本脚本创建的新租户能完成初始化向导之外的
-#      模型配置——agent-chat 需要可用的 chat 模型与至少一个可用工具
-#      （知识库检索 / MCP / shell 任一）。可通过环境变量跳过自建触发：
+#   1. weknora-server 已启动；agent-chat 需要一个可用的 chat 模型——脚本
+#      默认给创建的 agent 显式挂内置模型 builtin-kimi-coding（可用
+#      T23_MODEL_ID 覆盖为其他模型 id）。至少一个可用工具（知识库检索 /
+#      MCP / shell 任一）由 smart-reasoning 默认工具集提供。可通过环境
+#      变量跳过自建触发：
 #        TOKEN=<jwt> T23_SESSION_ID=<已有 agent 会话> \
 #        T23_AGENT_ID=<agent id> bash scripts/verify_intentgate_policy_verdict.sh
 #   2. DB 访问：lite 模式（sqlite）用 python3 读 DB_PATH（默认 ./data/weknora.db，
@@ -73,8 +75,12 @@ db_query() {
         DOCKER_API_VERSION=1.47 docker exec "$PG_CONTAINER" \
             psql -U postgres -d "$PG_DB" -tAc "$sql"
     else
-        require_tool python3
-        SQL="$sql" DB_PATH="$DB_PATH" python3 -c "
+        # Windows 上 python3 常指向应用商店占位 stub（执行静默失败），
+        # 优先用真解释器 python，退回 python3。
+        local py=python
+        command -v python >/dev/null || py=python3
+        require_tool "$py"
+        SQL="$sql" DB_PATH="$DB_PATH" "$py" -c "
 import os, sqlite3
 conn = sqlite3.connect('file:%s?mode=ro' % os.environ['DB_PATH'], uri=True)
 try:
@@ -87,6 +93,10 @@ finally:
 
 # ---- 1. 注册唯一用户（username 必须唯一，避免与其他验收脚本撞名） ----------
 SUFFIX="$(date +%s)$$"
+# agent-chat 必须显式挂 chat 模型：新建的租户没有任何默认模型映射，
+# 不显式给 model_id 会在 agent-chat 阶段报 "chat model is not configured"。
+# 默认用平台内置模型（对所有租户可见），可用 T23_MODEL_ID 覆盖。
+MODEL_ID="${T23_MODEL_ID:-builtin-kimi-coding}"
 if [ -z "${TOKEN:-}" ]; then
     EMAIL="intentgate-t23-$SUFFIX@example.com"
     UNAME="t23-$SUFFIX"
@@ -120,10 +130,14 @@ fi
     || bad "mode 期望 observe 实际 $MODE"
 
 # ---- 3. 触发一次工具调用 ----------------------------------------------------
-QUESTION="${T23_QUESTION:-请使用你可用的工具（知识库检索或 shell）回答：1+1 等于几？必须调用一次工具。}"
+# 默认问题引导模型调用会话检索工具（allowed_tools 只留 search_conversations：
+# 知识库检索工具链强制要求 rerank 模型，新建租户没有会硬失败；门禁钩子
+# 挂在所有工具调用的执行点上，任何工具触发都能产出 verdict）。模型可能
+# 无视指令直接作答，故同时给 agent 挂了强制先调工具的 system_prompt。
+QUESTION="${T23_QUESTION:-请先调用 search_conversations 工具（query 参数填"1+1"），引用工具返回的结果，然后告诉我 1+1 等于几。}"
 if [ -z "${T23_SESSION_ID:-}" ]; then
     resp="$(curl -sS -X POST "$API/agents" "${AUTH[@]}" "${JSON[@]}" \
-        -d "{\"name\":\"t23-verify-$SUFFIX\",\"config\":{\"agent_mode\":\"smart-reasoning\"}}")"
+        -d "{\"name\":\"t23-verify-$SUFFIX\",\"config\":{\"agent_mode\":\"smart-reasoning\",\"model_id\":\"$MODEL_ID\",\"allowed_tools\":[\"search_conversations\"],\"system_prompt\":\"你必须先调用 search_conversations 工具，再基于工具返回作答；禁止不调用工具直接回答。\"}}")"
     AGENT_ID="$(echo "$resp" | json_get '.data.id')"
     [ -n "$AGENT_ID" ] && [ "$AGENT_ID" != "null" ] \
         || { echo "FAIL 创建 agent 失败：$resp"; exit 1; }
