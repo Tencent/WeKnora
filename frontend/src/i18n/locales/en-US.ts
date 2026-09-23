@@ -4736,7 +4736,8 @@ export default {
         compat: {
           label: 'Protocol compat override (JSON)',
           placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
-          desc: 'Compat switches merged over the catalog defaults for the resolved protocol; see catalog/compat.go on the backend. Leave empty for no override.',
+          desc: 'Only needed when the endpoint differs from the catalog defaults; include just the fields to change. Leave empty for no override.',
+          docLink: 'Field reference',
           invalid: 'Invalid JSON',
           mustBeObject: 'Must be a JSON object',
         },

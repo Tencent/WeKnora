@@ -2864,7 +2864,8 @@ export default {
         compat: {
           label: '프로토콜 호환 재정의(JSON)',
           placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
-          desc: '해석된 프로토콜의 카탈로그 기본값 위에 병합되는 호환 스위치입니다. 백엔드 catalog/compat.go 참조. 비워 두면 재정의하지 않습니다.',
+          desc: '엔드포인트 동작이 카탈로그 기본값과 다를 때만 변경할 필드만 입력합니다. 비워 두면 재정의하지 않습니다.',
+          docLink: '필드 설명 보기',
           invalid: '잘못된 JSON',
           mustBeObject: 'JSON 객체여야 합니다',
         },

@@ -589,7 +589,13 @@
                 :placeholder="$t('model.editor.advanced.compat.placeholder')" class="compat-textarea"
                 :status="specCompatError ? 'error' : undefined" />
               <p v-if="specCompatError" class="form-desc form-desc--error">{{ $t('model.editor.advanced.compat.invalid') }}: {{ specCompatError }}</p>
-              <p v-else class="form-desc">{{ $t('model.editor.advanced.compat.desc') }}</p>
+              <p v-else class="form-desc">
+                {{ $t('model.editor.advanced.compat.desc') }}
+                <a :href="COMPAT_DOC_URL" target="_blank" rel="noopener noreferrer" class="compat-doc-link">
+                  {{ $t('model.editor.advanced.compat.docLink') }}
+                  <t-icon name="jump" size="12px" />
+                </a>
+              </p>
             </div>
           </template>
         </template>
@@ -695,6 +701,10 @@ const PROTOCOL_OPTIONS = [
   'anthropic-messages',
   'google-generative-ai',
 ] as const
+
+/** Field reference for parameters.spec.compat, per protocol and model type. */
+const COMPAT_DOC_URL =
+  'https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/06-models.md#协议兼容覆盖-compat-json'
 
 /** Legacy thinking_control values still honoured by catalog.Resolve. */
 const LEGACY_THINKING_CONTROL_VALUES = ['none', 'enable_thinking', 'thinking_type', 'chat_template_kwargs'] as const
@@ -2176,17 +2186,18 @@ const handleCancel = () => {
 <style lang="less" scoped>
 .provider-doc-link {
   margin-top: 6px;
+}
 
-  a {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    color: var(--td-text-color-link);
-    text-decoration: none;
+.provider-doc-link a,
+.compat-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--td-text-color-link);
+  text-decoration: none;
 
-    &:hover {
-      text-decoration: underline;
-    }
+  &:hover {
+    text-decoration: underline;
   }
 }
 

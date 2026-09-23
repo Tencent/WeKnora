@@ -4736,7 +4736,8 @@ export default {
         compat: {
           label: 'プロトコル互換上書き（JSON）',
           placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
-          desc: '解決されたプロトコルのカタログ既定値に上書きマージされる互換スイッチ。バックエンドの catalog/compat.go を参照。空欄で上書きなし。',
+          desc: 'エンドポイントの挙動がカタログ既定値と異なる場合のみ、変更するフィールドだけを記入します。空欄で上書きなし。',
+          docLink: 'フィールドの説明',
           invalid: 'JSON が不正です',
           mustBeObject: 'JSON オブジェクトが必要です',
         },

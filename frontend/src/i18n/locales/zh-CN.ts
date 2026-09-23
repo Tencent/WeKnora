@@ -2866,7 +2866,8 @@ export default {
         compat: {
           label: '协议兼容覆盖（JSON）',
           placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
-          desc: '按协议合并到目录默认值的兼容开关，字段见后端 catalog/compat.go。留空表示不覆盖。',
+          desc: '只在接口与目录默认值不一致时填写，只写需要改的字段。留空表示不覆盖。',
+          docLink: '查看字段说明',
           invalid: 'JSON 格式不正确',
           mustBeObject: '必须是 JSON 对象',
         },
