@@ -34,6 +34,7 @@ type KnowledgeHandler struct {
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
+	chunkService      interfaces.ChunkService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
 	backlog           backlogProbe
@@ -79,6 +80,7 @@ func NewKnowledgeHandler(
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
+	chunkService interfaces.ChunkService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
 	housekeeping *service.HousekeepingService,
@@ -94,6 +96,7 @@ func NewKnowledgeHandler(
 		kbService:         kbService,
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
+		chunkService:      chunkService,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
 	}
@@ -1115,6 +1118,81 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// ListImages lists the image assets of a knowledge base for the gallery view.
+//
+// @Summary      列出知识库图片资产
+// @Description  浏览某知识库内的全部图片资产，支持关键字搜索（caption/OCR 文本）、按图片属性筛选（attr_<name> 查询参数）与排序分页。
+// @Tags         knowledge
+// @Accept       json
+// @Produce      json
+// @Param        id          path      string  true  "知识库 ID"
+// @Param        page        query     int     false "页码，默认 1"
+// @Param        page_size   query     int     false "每页数量，默认 20，最大 1000"
+// @Param        keyword     query     string  false "关键字，匹配图片描述或 OCR 文本"
+// @Param        sort_by     query     string  false "排序字段：created_at / updated_at / caption，默认 created_at"
+// @Param        sort_order  query     string  false "排序方向：asc / desc，默认 desc"
+// @Param        is_enabled  query     bool    false "仅包含启用状态的图片"
+// @Param        attr_<name> query     string  false "按图片属性筛选（如 attr_contain.text=block），同一属性可重复传参以 OR 多个值"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/images [get]
+func (h *KnowledgeHandler) ListImages(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+
+	var pagination types.Pagination
+	if err := c.ShouldBindQuery(&pagination); err != nil {
+		logger.Error(ctx, "Failed to parse pagination parameters", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	filter := &types.ImageListFilter{
+		Keyword:   strings.TrimSpace(c.Query("keyword")),
+		SortBy:    c.DefaultQuery("sort_by", "created_at"),
+		SortOrder: c.DefaultQuery("sort_order", "desc"),
+	}
+	if v := c.Query("is_enabled"); v != "" {
+		enabled := v == "true"
+		filter.IsEnabled = &enabled
+	}
+	attrFilters := map[string][]string{}
+	for key, values := range c.Request.URL.Query() {
+		if !strings.HasPrefix(key, "attr_") {
+			continue
+		}
+		attrName := strings.TrimPrefix(key, "attr_")
+		if attrName == "" {
+			continue
+		}
+		attrFilters[attrName] = append(attrFilters[attrName], values...)
+	}
+	if len(attrFilters) > 0 {
+		filter.AttrFilters = attrFilters
+	}
+
+	result, err := h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &pagination, filter)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"data":      result.Data,
+		"total":     result.Total,
+		"page":      result.Page,
+		"page_size": result.PageSize,
+	})
+}
+
 // @Router       /knowledge-bases/{id}/knowledge/folders [get]
 func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	ctx := c.Request.Context()

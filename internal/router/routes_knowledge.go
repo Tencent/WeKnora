@@ -83,6 +83,15 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.With(apiKeyFullAccess()).DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
 	}
 
+	// Image gallery: list every image asset of a KB (read-only, Viewer+).
+	// Lives directly under /knowledge-bases/:id so it parallels /knowledge,
+	// /faq and /tags rather than nesting under /knowledge (documents).
+	kbImages := g.apiKeyGroup(r.Group("/knowledge-bases/:id"), apiKeyRetrieve(apiKeyFullAccess()))
+	kbImagesRead := kbImages.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		kbImagesRead.GET("/images", g.Viewer(), g.KBAccessRead("id"), handler.ListImages)
+	}
+
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
 	kgrp := r.Group("/knowledge")
 	k := g.apiKeyGroup(kgrp, apiKeyIngest(apiKeyFullAccess()))

@@ -652,6 +652,22 @@ func (r *chunkRepository) ListImageInfoByKnowledgeIDs(
 	return results, err
 }
 
+// ListImageChunksByKnowledgeBaseID returns the chunks of a KB that carry a
+// non-empty image_info. It selects only the columns the gallery needs so the
+// potentially large Content field is left out of the result set.
+func (r *chunkRepository) ListImageChunksByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	err := r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Select("id, knowledge_id, knowledge_base_id, chunk_type, image_info, is_enabled, status, created_at, updated_at").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND image_info != ''", tenantID, kbID).
+		Order("updated_at DESC").
+		Find(&chunks).Error
+	return chunks, err
+}
+
 // DeleteByKnowledgeList deletes all chunks for a knowledge list
 func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error {
 	return r.db.WithContext(ctx).Where(

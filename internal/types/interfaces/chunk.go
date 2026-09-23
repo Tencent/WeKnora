@@ -112,6 +112,10 @@ type ChunkRepository interface {
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
 	ListImageInfoByKnowledgeIDs(ctx context.Context, tenantID uint64, knowledgeIDs []string) ([]ChunkImageInfo, error)
+	// ListImageChunksByKnowledgeBaseID returns the chunks of a KB that carry a
+	// non-empty image_info (image_ocr / image_caption children and text chunks
+	// with embedded images). Used by the gallery to enumerate image assets.
+	ListImageChunksByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Chunk, error)
 	// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
 	MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error
 	// DeleteChunksByTagID deletes all chunks with the specified tag ID
@@ -175,6 +179,14 @@ type ChunkService interface {
 		knowledgeID string,
 		page *types.Pagination,
 		chunkType []types.ChunkType,
+	) (*types.PageResult, error)
+	// ListImagesByKnowledgeBaseID lists the image assets of a KB with keyword
+	// search, schema-driven attribute filters, sorting and pagination.
+	ListImagesByKnowledgeBaseID(
+		ctx context.Context,
+		kbID string,
+		page *types.Pagination,
+		filter *types.ImageListFilter,
 	) (*types.PageResult, error)
 	// UpdateChunk updates a chunk
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error

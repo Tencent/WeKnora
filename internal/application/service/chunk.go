@@ -5,9 +5,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -207,6 +209,223 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 
 	logger.Infof(ctx, "Retrieved %d chunks out of %d total chunks", len(chunks), total)
 	return types.NewPageResult(total, page, chunks), nil
+}
+
+// ListImagesByKnowledgeBaseID enumerates the image assets of a KB. Each image is
+// projected from a chunk's image_info array (a chunk may hold several images),
+// de-duplicated by URL, then filtered by keyword / attribute / enabled state,
+// sorted, and paginated in memory. In-memory filtering keeps the repo query
+// backend-agnostic (sqlite in tests, postgres in production) and correct for the
+// JSON attribute maps; a KB's image population is small enough for this to be
+// cheap. Pagination is applied after filtering so the page reflects the filter.
+func (s *chunkService) ListImagesByKnowledgeBaseID(
+	ctx context.Context,
+	kbID string,
+	page *types.Pagination,
+	filter *types.ImageListFilter,
+) (*types.PageResult, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+
+	chunks, err := s.chunkRepository.ListImageChunksByKnowledgeBaseID(ctx, tenantID, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID, "tenant_id": tenantID})
+		return nil, err
+	}
+
+	assets := make([]types.ImageAsset, 0, len(chunks))
+	seen := make(map[string]bool)
+	for _, chunk := range chunks {
+		if chunk.ImageInfo == "" {
+			continue
+		}
+		var infos []types.ImageInfo
+		if err := json.Unmarshal([]byte(chunk.ImageInfo), &infos); err != nil || len(infos) == 0 {
+			continue
+		}
+		for i, info := range infos {
+			key := info.URL
+			if key == "" {
+				key = info.OriginalURL
+			}
+			if key == "" {
+				key = chunk.ID + "#" + strconv.Itoa(i)
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
+			attrs := info.Attrs.Attrs
+			if attrs == nil {
+				attrs = map[string]any{}
+			}
+			assets = append(assets, types.ImageAsset{
+				ID:          chunk.ID + "#" + strconv.Itoa(i),
+				ChunkID:     chunk.ID,
+				KnowledgeID: chunk.KnowledgeID,
+				ChunkType:   string(chunk.ChunkType),
+				URL:         info.URL,
+				OriginalURL: info.OriginalURL,
+				Caption:     info.Caption,
+				OCRText:     info.OCRText,
+				Attrs:       attrs,
+				IsEnabled:   chunk.IsEnabled,
+				Status:      chunk.Status,
+				CreatedAt:   chunk.CreatedAt,
+				UpdatedAt:   chunk.UpdatedAt,
+			})
+		}
+	}
+
+	// Resolve the human-readable name of each source knowledge item in one
+	// batch so the viewer can show "来源" without a per-image round trip.
+	sourceNames := resolveImageAssetSourceNames(ctx, s, tenantID, assets)
+	for i := range assets {
+		assets[i].SourceName = sourceNames[assets[i].KnowledgeID]
+	}
+
+	assets = filterImageAssets(assets, filter)
+
+	sortImageAssets(assets, filter)
+
+	total := int64(len(assets))
+	start := (page.GetPage() - 1) * page.GetPageSize()
+	if start < 0 || start >= len(assets) {
+		return types.NewPageResult(total, page, []types.ImageAsset{}), nil
+	}
+	end := start + page.GetPageSize()
+	if end > len(assets) {
+		end = len(assets)
+	}
+	return types.NewPageResult(total, page, assets[start:end]), nil
+}
+
+// resolveImageAssetSourceNames maps each distinct KnowledgeID among the assets
+// to its knowledge item's display name. Missing items (deleted) simply yield an
+// empty name, and the UI falls back to the raw KnowledgeID.
+func resolveImageAssetSourceNames(
+	ctx context.Context,
+	s *chunkService,
+	tenantID uint64,
+	assets []types.ImageAsset,
+) map[string]string {
+	names := make(map[string]string)
+	ids := make([]string, 0, len(assets))
+	seenID := make(map[string]bool)
+	for _, a := range assets {
+		if a.KnowledgeID == "" || seenID[a.KnowledgeID] {
+			continue
+		}
+		seenID[a.KnowledgeID] = true
+		ids = append(ids, a.KnowledgeID)
+	}
+	if len(ids) == 0 || s.knowledgeRepo == nil {
+		return names
+	}
+	items, err := s.knowledgeRepo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"knowledge_ids": ids,
+			"error":         err.Error(),
+		}, "failed to resolve image source names")
+		return names
+	}
+	for _, item := range items {
+		names[item.ID] = item.Title
+	}
+	return names
+}
+
+// filterImageAssets applies keyword, attribute and enabled-state constraints.
+// Attribute filters are AND-ed across attributes and OR-ed within one attribute's
+// allowed values; an attribute that was not observed on an image fails the match.
+func filterImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter) []types.ImageAsset {
+	if filter == nil {
+		return assets
+	}
+	kw := strings.ToLower(strings.TrimSpace(filter.Keyword))
+	out := assets[:0]
+	for _, a := range assets {
+		if filter.IsEnabled != nil && a.IsEnabled != *filter.IsEnabled {
+			continue
+		}
+		if kw != "" {
+			hay := strings.ToLower(a.Caption + " " + a.OCRText)
+			if !strings.Contains(hay, kw) {
+				continue
+			}
+		}
+		if !matchAttrFilters(a, filter.AttrFilters) {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func matchAttrFilters(a types.ImageAsset, attrFilters map[string][]string) bool {
+	for name, allowed := range attrFilters {
+		if len(allowed) == 0 {
+			continue
+		}
+		observed, ok := a.Attrs[name]
+		if !ok {
+			return false
+		}
+		normalized := normalizeAttrValue(observed)
+		hit := false
+		for _, want := range allowed {
+			if normalized == strings.TrimSpace(want) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeAttrValue(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case bool:
+		return strconv.FormatBool(t)
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	default:
+		return fmt.Sprintf("%v", t)
+	}
+}
+
+func sortImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter) {
+	sortBy := "created_at"
+	sortOrder := "desc"
+	if filter != nil {
+		if filter.SortBy == "updated_at" || filter.SortBy == "caption" {
+			sortBy = filter.SortBy
+		}
+		if filter.SortOrder == "asc" {
+			sortOrder = "asc"
+		}
+	}
+	sort.SliceStable(assets, func(i, j int) bool {
+		var less bool
+		switch sortBy {
+		case "updated_at":
+			less = assets[i].UpdatedAt.Before(assets[j].UpdatedAt)
+		case "caption":
+			less = strings.ToLower(assets[i].Caption) < strings.ToLower(assets[j].Caption)
+		default:
+			less = assets[i].CreatedAt.Before(assets[j].CreatedAt)
+		}
+		if sortOrder == "desc" {
+			return !less
+		}
+		return less
+	})
 }
 
 // updateChunk updates a chunk
