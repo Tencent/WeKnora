@@ -107,13 +107,20 @@ func TestBrowserRPCFailureReachesModelAndAllowsFreshObservation(t *testing.T) {
 	require.True(t, fresh.Success)
 	require.Equal(t, 2, manager.calls)
 	invalid, err := registry.ExecuteTool(
-		ctx, "local_browser", json.RawMessage(`{"method":"observe","max_text_chars":3000}`),
+		ctx, "local_browser", json.RawMessage(`{"method":"observe","max_tokens":750}`),
 	)
 	require.NoError(t, err)
 	require.False(t, invalid.Success)
 	require.Contains(t, invalid.Error, "allowed fields:")
-	require.Contains(t, invalid.Error, "max_tokens")
+	require.Contains(t, invalid.Error, "max_text_chars")
 	require.Equal(t, 2, manager.calls, "invalid method fields must fail before dispatch")
+	capped, err := registry.ExecuteTool(
+		ctx, "local_browser", json.RawMessage(`{"method":"observe","max_text_chars":3000}`),
+	)
+	require.NoError(t, err)
+	require.True(t, capped.Success)
+	require.Equal(t, map[string]any{"max_tokens": 750}, manager.params)
+	require.Equal(t, 3, manager.calls)
 }
 
 func TestNavigationTimeoutRetainsTask(t *testing.T) {

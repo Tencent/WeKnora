@@ -22,7 +22,44 @@ func browserDescription(instructions []string) string {
 // templates or the upstream CLI skill. Uses the paired CLI/extension 0.3.0
 // source baseline, remote ownership contract and WeKnora task controls.
 const browserToolDescription = `Control the user's connected Chrome through local_browser; no shell, installation or CLI
-session commands are needed. Arguments are top-level beside method; sessions are server-managed.
+session commands are needed. Sessions are server-managed. Pass fields beside method, and only
+the fields of that method, for example {"method":"navigate","url":"https://example.com"}.
+keep_open is optional on every call.
+
+Methods:
+observe(tab_id?, max_text_chars?, max_depth?, probe_hover?, debug_surfaces?)
+snapshot(tab_id?, max_text_chars?, max_depth?)
+screenshot(tab_id?, ref?)
+navigate(url, tab_id?, wait_until?, timeout_ms?)
+navigate_back(tab_id?, wait_until?, timeout_ms?)
+navigate_forward(tab_id?, wait_until?, timeout_ms?)
+reload(tab_id?, hard?, wait_until?, timeout_ms?)
+click(ref | selector, button?, click_count?, modifiers?, tab_id?, timeout_ms?)
+fill(ref | selector, value, clear_before?, tab_id?, timeout_ms?)
+press(key, ref?, selector?, hold_ms?, modifiers?, tab_id?, timeout_ms?)
+hover(ref | selector, settle_ms?, modifiers?, tab_id?, timeout_ms?)
+wheel(delta_x?, delta_y?, ref?, selector?, modifiers?, tab_id?, timeout_ms?)
+scroll_to(ref | selector, tab_id?, timeout_ms?)
+focus(ref | selector, tab_id?, timeout_ms?)
+blur(ref?, selector?, tab_id?, timeout_ms?)
+select(ref | selector, values, tab_id?, timeout_ms?)
+tab_list(scope?)
+tab_create(url?, active?, index?)
+tab_select(tab_id)
+tab_close(tab_id)
+tab_borrow(tab_id, confirm?)
+tab_return(tab_id)
+get_html(tab_id?, ref?, max_bytes?)
+evaluate(expression, tab_id?, await_promise?, return_by_value?, timeout_ms?)
+console(tab_id?, limit?, max_text_chars?, since?, include_stack?)
+network(tab_id?, limit?, max_text_chars?, since?)
+wait_for_navigation(tab_id?, wait_until?, timeout_ms?)
+wait_ms(duration_ms)
+window_resize(width, height)
+emulate(off | overrides, tab_id?)
+request_help(prompt, tab_id?, title?, targets?, timeout_ms?)
+click, fill, hover, scroll_to, focus, and select take exactly one of ref or selector.
+press, wheel, and blur take at most one. emulate takes either off or overrides.
 
 Workflow:
 - Use a supplied URL or observed link. If no reliable entry is available, use the search
@@ -36,7 +73,7 @@ Workflow:
   alone is not model-visible evidence.
 - Prefer refs for iframe/shadow-root targets; selectors search the main document. Use snapshot
   or get_html for missing structure. Reserve evaluate for a specific gap and return bounded
-  serializable data. Follow the parameter descriptions and recovery hints in tool results.
+  serializable data. Follow the method list above and recovery hints in tool results.
 - Use wheel with delta_y to scroll the viewport; scroll_to brings an observed ref or
   selector into view. evaluate accepts a JavaScript expression/script; put return inside
   an IIFE such as (() => { return document.title; })(), never at the top level.
