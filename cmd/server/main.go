@@ -34,12 +34,18 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
+	"github.com/Tencent/WeKnora/internal/envfile"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 func main() {
+	// Load the packaged Lite dotenv file before any container provider reads
+	// configuration. Explicit process variables remain authoritative.
+	if err := envfile.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
