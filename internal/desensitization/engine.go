@@ -1,3 +1,4 @@
+// Package desensitization redacts PII in knowledge-base text before chunking.
 package desensitization
 
 import (
@@ -46,7 +47,9 @@ type builtinEngine struct{}
 
 func (builtinEngine) Name() string { return types.DesensitizationEngineBuiltin }
 
-func (builtinEngine) Mask(ctx context.Context, text string, cfg types.DesensitizationConfig) (string, types.JSONMap, error) {
+func (builtinEngine) Mask(
+	ctx context.Context, text string, cfg types.DesensitizationConfig,
+) (string, types.JSONMap, error) {
 	return builtin.Mask(ctx, text, cfg)
 }
 
@@ -54,7 +57,9 @@ type presidioEngine struct{ deps Deps }
 
 func (presidioEngine) Name() string { return types.DesensitizationEnginePresidio }
 
-func (e presidioEngine) Mask(ctx context.Context, text string, cfg types.DesensitizationConfig) (string, types.JSONMap, error) {
+func (e presidioEngine) Mask(
+	ctx context.Context, text string, cfg types.DesensitizationConfig,
+) (string, types.JSONMap, error) {
 	return maskWithPresidio(ctx, text, cfg, e.deps)
 }
 
@@ -85,7 +90,9 @@ func MaskIfEnabled(ctx context.Context, kb *types.KnowledgeBase, text string, de
 }
 
 // Apply masks markdown according to cfg. Disabled configs are a no-op.
-func Apply(ctx context.Context, text string, cfg types.DesensitizationConfig, deps Deps) (string, types.JSONMap, error) {
+func Apply(
+	ctx context.Context, text string, cfg types.DesensitizationConfig, deps Deps,
+) (string, types.JSONMap, error) {
 	cfg.Normalize()
 	if !cfg.Enabled {
 		return text, types.JSONMap{"masked": false}, nil

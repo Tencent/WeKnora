@@ -3860,12 +3860,14 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 3: Optionally mask the parsed markdown, then split into chunks.
 	// Line endings and inline HTML tables were normalized before image resolution above.
-	masked, maskErr := s.maskParsedMarkdown(ctx, kb, convertResult.MarkdownContent)
-	if maskErr != nil {
-		logger.Errorf(ctx, "desensitization failed for knowledge %s: %v", knowledge.ID, maskErr)
-		return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+	if convertResult != nil {
+		masked, maskErr := s.maskParsedMarkdown(ctx, kb, convertResult.MarkdownContent)
+		if maskErr != nil {
+			logger.Errorf(ctx, "desensitization failed for knowledge %s: %v", knowledge.ID, maskErr)
+			return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+		}
+		convertResult.MarkdownContent = masked
 	}
-	convertResult.MarkdownContent = masked
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	processOpts := ProcessChunksOptions{
@@ -4002,11 +4004,16 @@ func (s *knowledgeService) convert(
 		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
 	}
 	if err := desensitization.ValidateParserEngine(kb.DesensitizationConfig, parserEngine); err != nil {
-		logger.Errorf(ctx, "[convert] desensitization forbids cloud parser kb=%s engine=%q: %v", kb.ID, parserEngine, err)
+		logger.Errorf(
+			ctx, "[convert] desensitization forbids cloud parser kb=%s engine=%q: %v",
+			kb.ID, parserEngine, err,
+		)
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = "Cloud parser engines cannot be used when desensitization is enabled"
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		if updErr := s.repo.UpdateKnowledge(ctx, knowledge); updErr != nil {
+			logger.Errorf(ctx, "[convert] persist cloud-parser rejection failed: %v", updErr)
+		}
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderParseFailed, knowledge.ErrorMessage, err)
 		return nil, nil

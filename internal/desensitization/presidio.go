@@ -21,7 +21,9 @@ type presidioAnalyzerHit struct {
 	EntityType string  `json:"entity_type"`
 }
 
-func maskWithPresidio(ctx context.Context, text string, cfg types.DesensitizationConfig, deps Deps) (string, types.JSONMap, error) {
+func maskWithPresidio(
+	ctx context.Context, text string, cfg types.DesensitizationConfig, deps Deps,
+) (string, types.JSONMap, error) {
 	analyzer := trimURL(deps.PresidioAnalyzerURL)
 	if analyzer == "" {
 		return "", nil, fmt.Errorf("%w: presidio analyzer URL is not configured", ErrEngineUnavailable)
@@ -106,7 +108,7 @@ func analyzePresidio(ctx context.Context, client *http.Client, base, text string
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrEngineUnavailable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err

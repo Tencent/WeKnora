@@ -14,7 +14,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-func maskModelFacingText(ctx context.Context, kb *types.KnowledgeBase, text string, deps desensitization.Deps) (string, error) {
+func maskModelFacingText(
+	ctx context.Context, kb *types.KnowledgeBase, text string, deps desensitization.Deps,
+) (string, error) {
 	return desensitization.MaskIfEnabled(ctx, kb, text, deps)
 }
 
@@ -31,13 +33,16 @@ func (s *knowledgeService) desensitizationDeps(kb *types.KnowledgeBase) desensit
 	if s != nil {
 		deps = desensitizationDepsFromConfig(s.config)
 	}
-	if kb != nil && kb.DesensitizationConfig != nil && kb.DesensitizationConfig.Engine == types.DesensitizationEngineLLM {
+	if kb != nil && kb.DesensitizationConfig != nil &&
+		kb.DesensitizationConfig.Engine == types.DesensitizationEngineLLM {
 		deps.Complete = s.desensitizationCompleter(kb)
 	}
 	return deps
 }
 
-func (s *knowledgeService) maskParsedMarkdown(ctx context.Context, kb *types.KnowledgeBase, text string) (string, error) {
+func (s *knowledgeService) maskParsedMarkdown(
+	ctx context.Context, kb *types.KnowledgeBase, text string,
+) (string, error) {
 	if kb == nil || !kb.DesensitizationConfig.IsEnabled() {
 		return text, nil
 	}
@@ -51,7 +56,9 @@ func (s *knowledgeService) maskParsedMarkdown(ctx context.Context, kb *types.Kno
 
 // indexKnowledge returns a model-facing copy whose Title is masked. The stored
 // knowledge.Title is left unchanged so operators can still match the original file.
-func (s *knowledgeService) indexKnowledge(ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge) (*types.Knowledge, error) {
+func (s *knowledgeService) indexKnowledge(
+	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge,
+) (*types.Knowledge, error) {
 	if knowledge == nil {
 		return nil, nil
 	}
@@ -95,7 +102,9 @@ func (s *knowledgeService) desensitizationCompleter(kb *types.KnowledgeBase) des
 	}
 }
 
-func maskStringSlice(ctx context.Context, kb *types.KnowledgeBase, items []string, deps desensitization.Deps) ([]string, error) {
+func maskStringSlice(
+	ctx context.Context, kb *types.KnowledgeBase, items []string, deps desensitization.Deps,
+) ([]string, error) {
 	if len(items) == 0 {
 		return items, nil
 	}
@@ -131,7 +140,9 @@ func maskProfileAggregate(
 	return &out, nil
 }
 
-func persistDesensitizationFailure(ctx context.Context, repo interfaces.KnowledgeRepository, knowledge *types.Knowledge, err error) error {
+func persistDesensitizationFailure(
+	ctx context.Context, repo interfaces.KnowledgeRepository, knowledge *types.Knowledge, err error,
+) error {
 	out := failDesensitization(knowledge, err)
 	if knowledge != nil && repo != nil {
 		knowledge.UpdatedAt = time.Now()

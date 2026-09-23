@@ -64,7 +64,10 @@ func TestBuiltinRejectsIDCardUnknownProvinceOrFutureBirth(t *testing.T) {
 	unknownProv := mustCNID("99010119900307851")
 	future := mustCNID("11010120990101123")
 	for _, id := range []string{unknownProv, future} {
-		out := mask(t, "证件"+id+"已登记", []string{types.DesensitizationEntityCNIDCard}, types.DesensitizationMaskReplace)
+		out := mask(
+			t, "证件"+id+"已登记",
+			[]string{types.DesensitizationEntityCNIDCard}, types.DesensitizationMaskReplace,
+		)
 		assert.Contains(t, out, id)
 		assert.NotContains(t, out, "<身份证>")
 	}
@@ -100,7 +103,8 @@ func TestBuiltinMasksMobileWithCountryCodeAndSeparators(t *testing.T) {
 		assert.Contains(t, out, "<手机号>", "input %q", raw)
 	}
 
-	partial := mask(t, "请拨打+86 138-1234-5678联系", []string{types.DesensitizationEntityCNMobile}, types.DesensitizationMaskPartial)
+	entities := []string{types.DesensitizationEntityCNMobile}
+	partial := mask(t, "请拨打+86 138-1234-5678联系", entities, types.DesensitizationMaskPartial)
 	assert.Contains(t, partial, "+86")
 	assert.Contains(t, partial, "138")
 	assert.Contains(t, partial, "5678")
@@ -110,7 +114,10 @@ func TestBuiltinMasksMobileWithCountryCodeAndSeparators(t *testing.T) {
 func TestBuiltinKeepsMobileMIITSegments(t *testing.T) {
 	// 144 is outside 14[5-9]; 160 is outside 16[2567]. Do not widen to 1[3-9].
 	for _, raw := range []string{"14400144000", "16012345678"} {
-		out := mask(t, "号码"+raw+"结束", []string{types.DesensitizationEntityCNMobile}, types.DesensitizationMaskReplace)
+		out := mask(
+			t, "号码"+raw+"结束",
+			[]string{types.DesensitizationEntityCNMobile}, types.DesensitizationMaskReplace,
+		)
 		assert.Contains(t, out, raw)
 		assert.NotContains(t, out, "<手机号>")
 	}
@@ -145,7 +152,11 @@ func TestBuiltinMasksUnionPayCardWithSpacesAndHyphens(t *testing.T) {
 		assert.Contains(t, out, "<银行卡>", "input %q", formatted)
 	}
 
-	partial := mask(t, "卡号"+spaced+"已绑定", []string{types.DesensitizationEntityCNBankCard}, types.DesensitizationMaskPartial)
+	partial := mask(
+		t, "卡号"+spaced+"已绑定",
+		[]string{types.DesensitizationEntityCNBankCard},
+		types.DesensitizationMaskPartial,
+	)
 	assert.NotContains(t, partial, card)
 	assert.Contains(t, partial, card[:4])
 	assert.Contains(t, partial, card[len(card)-4:])
@@ -156,7 +167,10 @@ func TestBuiltinMasksUnionPayCardWithConsecutiveSpaces(t *testing.T) {
 	card := mustLuhn("622202001234567")
 	require.Len(t, card, 16)
 	spaced := card[0:4] + "  " + card[4:8] + "  " + card[8:12] + "  " + card[12:16]
-	out := mask(t, "卡号"+spaced+"已绑定", []string{types.DesensitizationEntityCNBankCard}, types.DesensitizationMaskReplace)
+	out := mask(
+		t, "卡号"+spaced+"已绑定",
+		[]string{types.DesensitizationEntityCNBankCard}, types.DesensitizationMaskReplace,
+	)
 	assert.NotContains(t, out, spaced)
 	assert.Contains(t, out, "<银行卡>")
 }
@@ -164,7 +178,10 @@ func TestBuiltinMasksUnionPayCardWithConsecutiveSpaces(t *testing.T) {
 func TestBuiltinDoesNotMaskNonUnionPayLuhnCard(t *testing.T) {
 	// Visa test PAN 4111… passes Luhn but is not UnionPay 62.
 	visa := "4111111111111111"
-	out := mask(t, "卡号"+visa+"已绑定", []string{types.DesensitizationEntityCNBankCard}, types.DesensitizationMaskReplace)
+	out := mask(
+		t, "卡号"+visa+"已绑定",
+		[]string{types.DesensitizationEntityCNBankCard}, types.DesensitizationMaskReplace,
+	)
 	assert.Contains(t, out, visa)
 	assert.NotContains(t, out, "<银行卡>")
 }
@@ -175,7 +192,11 @@ func TestBuiltinLeavesFormattedCardIfLuhnFails(t *testing.T) {
 	badDigit := byte('0' + (int(good[15]-'0')+1)%10)
 	bad := good[:15] + string(badDigit)
 	formatted := bad[0:4] + " " + bad[4:8] + " " + bad[8:12] + " " + bad[12:16]
-	out := mask(t, "卡号"+formatted+"已绑定", []string{types.DesensitizationEntityCNBankCard}, types.DesensitizationMaskReplace)
+	out := mask(
+		t, "卡号"+formatted+"已绑定",
+		[]string{types.DesensitizationEntityCNBankCard},
+		types.DesensitizationMaskReplace,
+	)
 	assert.Contains(t, out, formatted)
 	assert.NotContains(t, out, "<银行卡>")
 }
@@ -201,7 +222,9 @@ func TestBuiltinMasksUSCC(t *testing.T) {
 
 func TestBuiltinMasksPlateAndEmail(t *testing.T) {
 	in := "车辆京A12345，邮箱user@example.com"
-	out := mask(t, in, []string{types.DesensitizationEntityCNPlate, types.DesensitizationEntityEmail}, types.DesensitizationMaskReplace)
+	out := mask(t, in, []string{
+		types.DesensitizationEntityCNPlate, types.DesensitizationEntityEmail,
+	}, types.DesensitizationMaskReplace)
 	assert.NotContains(t, out, "京A12345")
 	assert.NotContains(t, out, "user@example.com")
 	assert.Contains(t, out, "<车牌号>")
@@ -210,14 +233,20 @@ func TestBuiltinMasksPlateAndEmail(t *testing.T) {
 
 func TestBuiltinRejectsMalformedEmails(t *testing.T) {
 	for _, raw := range []string{"test@.com", "test@example..com", ".user@example.com", "user.@example.com"} {
-		out := mask(t, "邮箱"+raw+"结束", []string{types.DesensitizationEntityEmail}, types.DesensitizationMaskReplace)
+		out := mask(
+			t, "邮箱"+raw+"结束",
+			[]string{types.DesensitizationEntityEmail}, types.DesensitizationMaskReplace,
+		)
 		assert.Contains(t, out, raw)
 		assert.NotContains(t, out, "<邮箱>")
 	}
 }
 
 func TestBuiltinPartialEmailMasksDomain(t *testing.T) {
-	out := mask(t, "邮箱user@example.com结束", []string{types.DesensitizationEntityEmail}, types.DesensitizationMaskPartial)
+	out := mask(
+		t, "邮箱user@example.com结束",
+		[]string{types.DesensitizationEntityEmail}, types.DesensitizationMaskPartial,
+	)
 	assert.NotContains(t, out, "user@example.com")
 	assert.NotContains(t, out, "example.com")
 	assert.Contains(t, out, "us")

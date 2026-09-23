@@ -52,7 +52,9 @@ func TestModelFacingDocumentHeaderMasksTitleAndLeavesOriginal(t *testing.T) {
 			EntityTypes: []string{types.DesensitizationEntityCNMobile},
 		},
 	}
-	masked, err := maskSearchResultsForModel(context.Background(), []*types.SearchResult{original}, stubKBLookup{kb: kb}, nil)
+	masked, err := maskSearchResultsForModel(
+		context.Background(), []*types.SearchResult{original}, stubKBLookup{kb: kb}, nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -363,10 +363,12 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if err := desensitization.ValidateConfig(kb.DesensitizationConfig, kb.ChunkingConfig); err != nil {
 		if stderrors.Is(err, desensitization.ErrCloudParserForbidden) {
-			c.Error(errors.NewBadRequestError("Cloud parser engines cannot be used when desensitization is enabled"))
+			_ = c.Error(errors.NewBadRequestError(
+				"Cloud parser engines cannot be used when desensitization is enabled",
+			))
 			return
 		}
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 

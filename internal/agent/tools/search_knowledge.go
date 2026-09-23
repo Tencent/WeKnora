@@ -694,7 +694,10 @@ func (t *SearchKnowledgeTool) rerankPassage(ctx context.Context, result *types.S
 	passage := t.getEnrichedPassage(ctx, result)
 	title := strings.TrimSpace(result.KnowledgeTitle)
 	if t.knowledgeBaseService != nil && result.KnowledgeBaseID != "" {
-		if masked, err := maskModelFacing(ctx, t.knowledgeBaseService, t.config, result.KnowledgeBaseID, title); err == nil {
+		masked, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, result.KnowledgeBaseID, title,
+		)
+		if err == nil {
 			title = masked
 		} else {
 			title = ""
@@ -817,19 +820,28 @@ func (t *SearchKnowledgeTool) applyModelFacingTitles(ctx context.Context, result
 			continue
 		}
 		copyResult := *r.SearchResult
-		title, err := maskModelFacing(ctx, t.knowledgeBaseService, t.config, copyResult.KnowledgeBaseID, copyResult.KnowledgeTitle)
+		kbID := copyResult.KnowledgeBaseID
+		title, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, kbID, copyResult.KnowledgeTitle,
+		)
 		if err != nil {
 			return err
 		}
-		filename, err := maskModelFacing(ctx, t.knowledgeBaseService, t.config, copyResult.KnowledgeBaseID, copyResult.KnowledgeFilename)
+		filename, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, kbID, copyResult.KnowledgeFilename,
+		)
 		if err != nil {
 			return err
 		}
-		desc, err := maskModelFacing(ctx, t.knowledgeBaseService, t.config, copyResult.KnowledgeBaseID, copyResult.KnowledgeDescription)
+		desc, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, kbID, copyResult.KnowledgeDescription,
+		)
 		if err != nil {
 			return err
 		}
-		meta, err := maskModelFacing(ctx, t.knowledgeBaseService, t.config, copyResult.KnowledgeBaseID, copyResult.KnowledgeCustomMetadata)
+		meta, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, kbID, copyResult.KnowledgeCustomMetadata,
+		)
 		if err != nil {
 			return err
 		}

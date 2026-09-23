@@ -72,7 +72,9 @@ func (e *capturingRetrieveEngine) DeleteByChunkIDList(_ context.Context, ids []s
 	return nil
 }
 
-func (e *capturingRetrieveEngine) BatchIndex(_ context.Context, _ embedding.Embedder, infos []*types.IndexInfo, _ []types.RetrieverType) error {
+func (e *capturingRetrieveEngine) BatchIndex(
+	_ context.Context, _ embedding.Embedder, infos []*types.IndexInfo, _ []types.RetrieverType,
+) error {
 	e.indexed = append([]*types.IndexInfo(nil), infos...)
 	return nil
 }
@@ -82,22 +84,29 @@ type capturingRetrieveRegistry struct {
 	engine interfaces.RetrieveEngineService
 }
 
-func (r capturingRetrieveRegistry) GetRetrieveEngineService(types.RetrieverEngineType) (interfaces.RetrieveEngineService, error) {
+func (r capturingRetrieveRegistry) GetRetrieveEngineService(
+	types.RetrieverEngineType,
+) (interfaces.RetrieveEngineService, error) {
 	return r.engine, nil
 }
 
 type stubEmbedder struct{}
 
 func (stubEmbedder) Embed(context.Context, string) ([]float32, error) { return []float32{1}, nil }
+
 func (stubEmbedder) BatchEmbed(context.Context, []string) ([][]float32, error) {
 	return [][]float32{{1}}, nil
 }
+
 func (stubEmbedder) BatchEmbedWithPool(context.Context, embedding.Embedder, []string) ([][]float32, error) {
 	return [][]float32{{1}}, nil
 }
+
 func (stubEmbedder) GetModelName() string { return "stub" }
-func (stubEmbedder) GetDimensions() int   { return 1 }
-func (stubEmbedder) GetModelID() string   { return "stub" }
+
+func (stubEmbedder) GetDimensions() int { return 1 }
+
+func (stubEmbedder) GetModelID() string { return "stub" }
 
 type stubEmbeddingModelService struct {
 	interfaces.ModelService
@@ -191,7 +200,9 @@ type editableChunkKnowledgeRepoWithTitle struct {
 	title string
 }
 
-func (r editableChunkKnowledgeRepoWithTitle) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
+func (r editableChunkKnowledgeRepoWithTitle) GetKnowledgeByID(
+	context.Context, uint64, string,
+) (*types.Knowledge, error) {
 	return &types.Knowledge{
 		ID: "knowledge", TenantID: 1, KnowledgeBaseID: "kb", Title: r.title,
 	}, nil

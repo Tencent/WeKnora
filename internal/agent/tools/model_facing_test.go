@@ -38,7 +38,8 @@ func TestMaskKnowledgeForModelCopiesTitle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if knowledge.Title != "劳动合同-张三-13800138000" || knowledge.FileName != "劳动合同-张三-13800138000.pdf" {
+	if knowledge.Title != "劳动合同-张三-13800138000" ||
+		knowledge.FileName != "劳动合同-张三-13800138000.pdf" {
 		t.Fatalf("stored knowledge rewritten: %+v", knowledge)
 	}
 	for _, got := range []string{title, filename, desc} {
@@ -66,7 +67,8 @@ func TestApplyModelFacingTitlesLeavesOriginalSearchResult(t *testing.T) {
 		KnowledgeTitle:  "劳动合同-张三-13800138000",
 	}
 	tool := &SearchKnowledgeTool{knowledgeBaseService: stubKBLookup{kb: kb}}
-	if err := tool.applyModelFacingTitles(context.Background(), []*searchResultWithMeta{{SearchResult: original}}); err != nil {
+	results := []*searchResultWithMeta{{SearchResult: original}}
+	if err := tool.applyModelFacingTitles(context.Background(), results); err != nil {
 		t.Fatal(err)
 	}
 	if original.KnowledgeTitle != "劳动合同-张三-13800138000" {

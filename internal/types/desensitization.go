@@ -7,20 +7,32 @@ import (
 )
 
 const (
-	DesensitizationEngineBuiltin  = "builtin"
+	// DesensitizationEngineBuiltin is the default regex+checksum engine.
+	DesensitizationEngineBuiltin = "builtin"
+	// DesensitizationEnginePresidio is the optional HTTP Analyzer sidecar.
 	DesensitizationEnginePresidio = "presidio"
-	DesensitizationEngineLLM      = "llm"
+	// DesensitizationEngineLLM is rejected in this release.
+	DesensitizationEngineLLM = "llm"
 
+	// DesensitizationMaskReplace swaps matches for a placeholder.
 	DesensitizationMaskReplace = "replace"
+	// DesensitizationMaskPartial keeps a prefix and suffix of the match.
 	DesensitizationMaskPartial = "partial"
 
-	DesensitizationEntityCNIDCard   = "cn_id_card"
-	DesensitizationEntityCNMobile   = "cn_mobile"
+	// DesensitizationEntityCNIDCard is an 18-digit mainland ID number.
+	DesensitizationEntityCNIDCard = "cn_id_card"
+	// DesensitizationEntityCNMobile is a mainland mobile number.
+	DesensitizationEntityCNMobile = "cn_mobile"
+	// DesensitizationEntityCNLandline is a mainland landline number.
 	DesensitizationEntityCNLandline = "cn_landline"
+	// DesensitizationEntityCNBankCard is a UnionPay card number.
 	DesensitizationEntityCNBankCard = "cn_bank_card"
-	DesensitizationEntityCNUSCC     = "cn_uscc"
-	DesensitizationEntityCNPlate    = "cn_plate"
-	DesensitizationEntityEmail      = "email"
+	// DesensitizationEntityCNUSCC is a unified social credit code.
+	DesensitizationEntityCNUSCC = "cn_uscc"
+	// DesensitizationEntityCNPlate is a civilian vehicle plate.
+	DesensitizationEntityCNPlate = "cn_plate"
+	// DesensitizationEntityEmail is an email address.
+	DesensitizationEntityEmail = "email"
 )
 
 // CloudParserEngineNames must not run when desensitization is enabled —
@@ -51,9 +63,9 @@ const (
 // existing deployments do not rewrite ingested text.
 type DesensitizationConfig struct {
 	Enabled     bool                  `yaml:"enabled" json:"enabled" example:"false"`
-	Engine      string                `yaml:"engine,omitempty" json:"engine,omitempty" example:"builtin" enums:"builtin,presidio"`
-	MaskStyle   string                `yaml:"mask_style,omitempty" json:"mask_style,omitempty" example:"replace" enums:"replace,partial"`
-	EntityTypes []string              `yaml:"entity_types,omitempty" json:"entity_types,omitempty" example:"cn_mobile,email"`
+	Engine      string                `yaml:"engine,omitempty" json:"engine,omitempty" example:"builtin" enums:"builtin,presidio"`        //nolint:lll // one-line struct tag
+	MaskStyle   string                `yaml:"mask_style,omitempty" json:"mask_style,omitempty" example:"replace" enums:"replace,partial"` //nolint:lll // one-line struct tag
+	EntityTypes []string              `yaml:"entity_types,omitempty" json:"entity_types,omitempty" example:"cn_mobile,email"`             //nolint:lll // one-line struct tag
 	Rules       []DesensitizationRule `yaml:"rules,omitempty" json:"rules,omitempty"`
 	LLMModelID  string                `yaml:"llm_model_id,omitempty" json:"llm_model_id,omitempty"`
 }

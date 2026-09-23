@@ -62,7 +62,10 @@ func TestValidateConfigRejectsCloudParserAndBadRegexp(t *testing.T) {
 		ParserEngineRules: []types.ParserEngineRule{{Engine: "anydoc", FileTypes: []string{"pdf"}}},
 	}))
 	require.NoError(t, ValidateParserEngine(cfg, "anydoc"))
-	require.ErrorIs(t, ValidateParserEngine(&types.DesensitizationConfig{Enabled: true}, "weknoracloud"), ErrCloudParserForbidden)
+	require.ErrorIs(
+		t, ValidateParserEngine(&types.DesensitizationConfig{Enabled: true}, "weknoracloud"),
+		ErrCloudParserForbidden,
+	)
 }
 
 func TestApplyPresidioMergesAnalyzerHits(t *testing.T) {
@@ -103,7 +106,7 @@ func TestApplyPresidioUsesRuneOffsetsWithCJKPrefix(t *testing.T) {
 	end := start + len([]rune(phone))
 	require.NotEqual(t, start, len("中文 "), "byte offset must differ from rune offset")
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		require.NoError(t, json.NewEncoder(w).Encode([]map[string]any{{
 			"start": start, "end": end, "score": 0.99, "entity_type": "PHONE_NUMBER",
 		}}))
@@ -131,7 +134,7 @@ func TestApplyPresidioFailsClosedWithoutURL(t *testing.T) {
 }
 
 func TestApplyLLMIsRejected(t *testing.T) {
-	complete := Completer(func(ctx context.Context, _, _ string) (string, error) {
+	complete := Completer(func(_ context.Context, _, _ string) (string, error) {
 		t.Fatal("llm completer must not be called")
 		return "", nil
 	})

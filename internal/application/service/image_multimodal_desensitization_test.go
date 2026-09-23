@@ -29,14 +29,21 @@ func TestRejectRemoteVLMIfDesensitized(t *testing.T) {
 		modelService: &stubVLMModelService{model: &types.Model{ID: "vlm-remote", Source: types.ModelSourceRemote}},
 	}
 
-	require.NoError(t, svc.rejectRemoteVLMIfDesensitized(context.Background(), &types.KnowledgeBase{}, types.VLMConfig{ModelID: "vlm-remote"}))
-	require.ErrorIs(t, svc.rejectRemoteVLMIfDesensitized(context.Background(), enabled, types.VLMConfig{}), desensitization.ErrCloudVLMForbidden)
-	require.ErrorIs(t, svc.rejectRemoteVLMIfDesensitized(context.Background(), enabled, types.VLMConfig{ModelID: "vlm-remote"}), desensitization.ErrCloudVLMForbidden)
+	emptyKB := &types.KnowledgeBase{}
+	remoteCfg := types.VLMConfig{ModelID: "vlm-remote"}
+	require.NoError(t, svc.rejectRemoteVLMIfDesensitized(context.Background(), emptyKB, remoteCfg))
+	require.ErrorIs(t, svc.rejectRemoteVLMIfDesensitized(
+		context.Background(), enabled, types.VLMConfig{},
+	), desensitization.ErrCloudVLMForbidden)
+	require.ErrorIs(t, svc.rejectRemoteVLMIfDesensitized(
+		context.Background(), enabled, remoteCfg,
+	), desensitization.ErrCloudVLMForbidden)
 
 	local := &ImageMultimodalService{
 		modelService: &stubVLMModelService{model: &types.Model{ID: "vlm-local", Source: types.ModelSourceLocal}},
 	}
-	require.NoError(t, local.rejectRemoteVLMIfDesensitized(context.Background(), enabled, types.VLMConfig{ModelID: "vlm-local"}))
+	localCfg := types.VLMConfig{ModelID: "vlm-local"}
+	require.NoError(t, local.rejectRemoteVLMIfDesensitized(context.Background(), enabled, localCfg))
 }
 
 func TestMaskOCRTextBeforePersist(t *testing.T) {
@@ -48,7 +55,9 @@ func TestMaskOCRTextBeforePersist(t *testing.T) {
 			EntityTypes: []string{types.DesensitizationEntityCNMobile},
 		},
 	}
-	out, err := maskModelFacingText(context.Background(), kb, "身份证背面 13800138000", desensitizationDepsFromConfig(nil))
+	out, err := maskModelFacingText(
+		context.Background(), kb, "身份证背面 13800138000", desensitizationDepsFromConfig(nil),
+	)
 	require.NoError(t, err)
 	require.NotContains(t, out, "13800138000")
 	require.Contains(t, out, "<手机号>")

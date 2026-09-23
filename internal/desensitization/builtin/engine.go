@@ -1,3 +1,4 @@
+// Package builtin implements mainland-China regex and checksum PII detectors.
 package builtin
 
 import (
@@ -77,15 +78,21 @@ var (
 	// 18-digit mainland ID; digits may be grouped with spaces.
 	reDigits18 = regexp.MustCompile(`[1-9](?:\s*\d){16}\s*[\dXx]`)
 	// MIIT-like 11-digit segments, optional +86/0086 and space/hyphen grouping.
-	reMobile     = regexp.MustCompile(`(?:(?:\+86|0086)\s*)?1(?:3\d|4[5-9]|5[0-35-9]|6[2567]|7\d|8\d|9\d)(?:[\s-]?\d){8}`)
+	reMobile = regexp.MustCompile( //nolint:lll // regex
+		`(?:(?:\+86|0086)\s*)?1(?:3\d|4[5-9]|5[0-35-9]|6[2567]|7\d|8\d|9\d)(?:[\s-]?\d){8}`,
+	)
 	reMobileBare = regexp.MustCompile(`^1(?:3\d|4[5-9]|5[0-35-9]|6[2567]|7\d|8\d|9\d)\d{8}$`)
 	reLandline   = regexp.MustCompile(`0\d{2,3}-?\d{7,8}`)
 	// UnionPay 16–19 digits; consecutive whitespace and/or hyphens between digits.
 	reUnionPay = regexp.MustCompile(`62(?:[\s\-]*\d){14,17}`)
 	reUSCC     = regexp.MustCompile(`[0-9A-HJ-NPQRTUWXY]{2}\d{6}[0-9A-HJ-NPQRTUWXY]{10}`)
-	rePlateStd = regexp.MustCompile(`[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤川青藏琼宁][A-Z][A-HJ-NP-Z0-9]{4}[A-HJ-NP-Z0-9挂学警港澳]`)
-	rePlateNEV = regexp.MustCompile(`[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤川青藏琼宁][A-Z](?:[0-9A-HJ-NP-Z]{5}[DF]|[DF][0-9A-HJ-NP-Z]{5})`)
-	reEmail    = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
+	rePlateStd = regexp.MustCompile(
+		`[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤川青藏琼宁][A-Z][A-HJ-NP-Z0-9]{4}[A-HJ-NP-Z0-9挂学警港澳]`, //nolint:lll // CJK
+	)
+	rePlateNEV = regexp.MustCompile(
+		`[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤川青藏琼宁][A-Z](?:[0-9A-HJ-NP-Z]{5}[DF]|[DF][0-9A-HJ-NP-Z]{5})`, //nolint:lll // CJK
+	)
+	reEmail = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
 )
 
 func findCNIDCards(text string) []span {

@@ -33,11 +33,11 @@ func maskModelFacing(
 func maskKnowledgeForModel(
 	ctx context.Context, kbSvc interfaces.KnowledgeBaseService, cfg *config.Config, knowledge *types.Knowledge,
 ) (title, filename, description string, err error) {
-	copy, err := copyKnowledgeForModel(ctx, kbSvc, cfg, knowledge)
-	if err != nil || copy == nil {
+	facing, err := copyKnowledgeForModel(ctx, kbSvc, cfg, knowledge)
+	if err != nil || facing == nil {
 		return "", "", "", err
 	}
-	return copy.Title, copy.FileName, copy.Description, nil
+	return facing.Title, facing.FileName, facing.Description, nil
 }
 
 // copyKnowledgeForModel returns a shallow copy safe to send to the chat model.
@@ -50,38 +50,38 @@ func copyKnowledgeForModel(
 	if knowledge == nil {
 		return nil, nil
 	}
-	copy := *knowledge
+	facing := *knowledge
 	if knowledge.KnowledgeBaseID == "" || kbSvc == nil {
-		return &copy, nil
+		return &facing, nil
 	}
 	kb, err := kbSvc.GetKnowledgeBaseByIDOnly(ctx, knowledge.KnowledgeBaseID)
 	if err != nil {
 		return nil, err
 	}
 	deps := desensitizationDeps(cfg)
-	copy.Title, err = desensitization.MaskIfEnabled(ctx, kb, knowledge.Title, deps)
+	facing.Title, err = desensitization.MaskIfEnabled(ctx, kb, knowledge.Title, deps)
 	if err != nil {
 		return nil, err
 	}
-	copy.FileName, err = desensitization.MaskIfEnabled(ctx, kb, knowledge.FileName, deps)
+	facing.FileName, err = desensitization.MaskIfEnabled(ctx, kb, knowledge.FileName, deps)
 	if err != nil {
 		return nil, err
 	}
-	copy.Description, err = desensitization.MaskIfEnabled(ctx, kb, knowledge.Description, deps)
+	facing.Description, err = desensitization.MaskIfEnabled(ctx, kb, knowledge.Description, deps)
 	if err != nil {
 		return nil, err
 	}
 	if !kb.DesensitizationConfig.IsEnabled() {
-		return &copy, nil
+		return &facing, nil
 	}
-	copy.Metadata = nil
-	if copy.Type == "url" {
-		copy.Source = ""
+	facing.Metadata = nil
+	if facing.Type == "url" {
+		facing.Source = ""
 	} else {
-		copy.Source, err = desensitization.MaskIfEnabled(ctx, kb, knowledge.Source, deps)
+		facing.Source, err = desensitization.MaskIfEnabled(ctx, kb, knowledge.Source, deps)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return &copy, nil
+	return &facing, nil
 }

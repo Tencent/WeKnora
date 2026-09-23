@@ -117,7 +117,7 @@ type KnowledgeBase struct {
 	// never overwrites the user-authored Description; both are shown to agents.
 	GeneratedProfile *KnowledgeBaseProfile `yaml:"generated_profile" json:"generated_profile,omitempty" gorm:"column:generated_profile;type:json"` //nolint:lll // one-line struct tag
 	// DesensitizationConfig optionally masks parsed markdown before chunking.
-	DesensitizationConfig *DesensitizationConfig `yaml:"desensitization_config" json:"desensitization_config" gorm:"type:json"`
+	DesensitizationConfig *DesensitizationConfig `yaml:"desensitization_config" json:"desensitization_config" gorm:"type:json"` //nolint:lll // one-line struct tag
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.

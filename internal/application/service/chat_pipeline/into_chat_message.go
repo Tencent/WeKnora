@@ -297,16 +297,24 @@ func maskSearchResultsForModel(
 				cache[r.KnowledgeBaseID] = kb
 			}
 			var err error
-			if copyResult.KnowledgeTitle, err = desensitization.MaskIfEnabled(ctx, kb, copyResult.KnowledgeTitle, deps); err != nil {
+			if copyResult.KnowledgeTitle, err = desensitization.MaskIfEnabled(
+				ctx, kb, copyResult.KnowledgeTitle, deps,
+			); err != nil {
 				return nil, err
 			}
-			if copyResult.KnowledgeFilename, err = desensitization.MaskIfEnabled(ctx, kb, copyResult.KnowledgeFilename, deps); err != nil {
+			if copyResult.KnowledgeFilename, err = desensitization.MaskIfEnabled(
+				ctx, kb, copyResult.KnowledgeFilename, deps,
+			); err != nil {
 				return nil, err
 			}
-			if copyResult.KnowledgeDescription, err = desensitization.MaskIfEnabled(ctx, kb, copyResult.KnowledgeDescription, deps); err != nil {
+			if copyResult.KnowledgeDescription, err = desensitization.MaskIfEnabled(
+				ctx, kb, copyResult.KnowledgeDescription, deps,
+			); err != nil {
 				return nil, err
 			}
-			if copyResult.KnowledgeCustomMetadata, err = desensitization.MaskIfEnabled(ctx, kb, copyResult.KnowledgeCustomMetadata, deps); err != nil {
+			if copyResult.KnowledgeCustomMetadata, err = desensitization.MaskIfEnabled(
+				ctx, kb, copyResult.KnowledgeCustomMetadata, deps,
+			); err != nil {
 				return nil, err
 			}
 		}

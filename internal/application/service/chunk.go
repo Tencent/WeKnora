@@ -749,7 +749,8 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	}}
 	for _, question := range questions {
 		items = append(items, &types.IndexInfo{
-			Content: buildKnowledgeIndexContent(indexKB, question.question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.id),
+			Content:    buildKnowledgeIndexContent(indexKB, question.question),
+			SourceID:   types.GeneratedQuestionSourceID(chunk.ID, question.id),
 			SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 			KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 			KnowledgeType: kb.Type, IsEnabled: true,

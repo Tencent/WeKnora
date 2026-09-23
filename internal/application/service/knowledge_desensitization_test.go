@@ -24,7 +24,9 @@ func enabledBuiltinKB() *types.KnowledgeBase {
 
 func TestMaskModelFacingTextBuiltin(t *testing.T) {
 	t.Parallel()
-	out, err := maskModelFacingText(context.Background(), enabledBuiltinKB(), "劳动合同-张三-13800138000", desensitization.Deps{})
+	out, err := maskModelFacingText(
+		context.Background(), enabledBuiltinKB(), "劳动合同-张三-13800138000", desensitization.Deps{},
+	)
 	require.NoError(t, err)
 	assert.Contains(t, out, "<手机号>")
 	assert.NotContains(t, out, "13800138000")
@@ -39,7 +41,9 @@ func TestMaskModelFacingTextPresidioWithoutURLFailsClosed(t *testing.T) {
 			Engine:  types.DesensitizationEnginePresidio,
 		},
 	}
-	_, err := maskModelFacingText(context.Background(), kb, "劳动合同-张三-13800138000", desensitizationDepsFromConfig(nil))
+	_, err := maskModelFacingText(
+		context.Background(), kb, "劳动合同-张三-13800138000", desensitizationDepsFromConfig(nil),
+	)
 	require.ErrorIs(t, err, desensitization.ErrEngineUnavailable)
 }
 

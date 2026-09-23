@@ -17,7 +17,10 @@ import (
 // rest of the RBAC matrix in this file.
 func RegisterChunkerDebugRoutes(r *gin.RouterGroup, g *rbacGuards) {
 	g.apiKeyRoute(r, http.MethodPost, "/chunker/preview", apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.PreviewChunking)
-	g.apiKeyRoute(r, http.MethodPost, "/desensitization/preview", apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.PreviewDesensitization)
+	g.apiKeyRoute(
+		r, http.MethodPost, "/desensitization/preview",
+		apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.PreviewDesensitization,
+	)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由
