@@ -59,6 +59,43 @@
 > 2. 未设置任何解析模式的存量飞书/Lark 数据源，默认解析模式由 `export` 变为 `blocks`。
 > 3. 迁移会给所有存量飞书/Lark 数据源打一次性全量重同步标记：升级后的下一次同步（含计划增量）自动按全量执行，全部文档重新入库并重新计算 embedding/VLM 摘要，产生相应耗时与模型调用开销，完成后标记自动清除。
 
+**应用权限**（飞书/Lark 开放平台 → 企业自建应用 → 权限管理；均为只读权限，开通后需创建并发布新版本才生效）。飞书与 Lark 的权限标识相同，但应用互不通用。
+
+#### 飞书知识库（feishu / lark）所需权限
+
+必选权限：
+
+| 权限 | blocks 模式（默认） | export 模式 | 缺失时的表现 |
+| --- | --- | --- | --- |
+| `wiki:wiki:readonly` | 必选：列举知识库空间与节点树 | 必选 | 加载资源树失败 |
+| `docx:document:readonly` | 必选：blocks API 读取新版文档正文 | 不需要 | docx 文档无法解析 |
+| `drive:drive:readonly` | 必选：下载 docx 内嵌图片/附件、file 类型节点原文件 | 按需：仅同步 file 类型节点时需要 | 内嵌图片/附件或 file 节点下载失败 |
+| `drive:export:readonly` | 按需：sheet/bitable 节点导出 xlsx；blocks 失败或正文为空时的回退导出 | 必选：docx/doc/sheet/bitable 全部走异步导出 | sheet/bitable 节点失败；blocks 回退不可用 |
+
+可选增强权限（仅 blocks 渲染路径使用，缺失时同步不失败、对应能力降级）：
+
+| 权限 | 用途 | 缺失时 |
+| --- | --- | --- |
+| `sheets:spreadsheet:readonly` | docx 内嵌电子表格转为 Markdown 表格 | 该块显示「无法读取」占位 |
+| `bitable:app:readonly` | docx 内嵌多维表格转为 Markdown 表格 | 该块显示「无法读取」占位 |
+| `board:whiteboard:node:read` | 画板（含思维导图/流程图）导出为图片内嵌正文 | 占位标记 |
+| `contact:user.base:readonly` | @成员 显示真实姓名 | 降级为「@成员」 |
+| `drive:drive.metadata:readonly` | 正文中的云文档引用回填文档标题 | 保持 URL 形式 |
+
+#### 飞书云盘（feishu_drive / lark_drive）所需权限
+
+不需要 `wiki:wiki:readonly`，其余与知识库连接器同源：
+
+| 权限 | blocks 模式（默认） | export 模式 | 缺失时的表现 |
+| --- | --- | --- | --- |
+| `drive:drive:readonly` | 必选：列举文件夹、下载普通文件、下载 docx 内嵌图片/附件 | 必选：列举文件夹、下载普通文件 | 加载文件夹或同步报 403 |
+| `docx:document:readonly` | 必选：blocks API 读取新版文档正文 | 不需要 | 云文档 docx 无法解析 |
+| `drive:export:readonly` | 按需：表格/多维表格文件导出 xlsx；blocks 回退导出 | 必选：docx/doc/sheet/bitable 全部走异步导出 | 表格类文件失败；blocks 回退不可用 |
+
+可选增强权限与知识库连接器完全相同（见上表），仅 blocks 渲染路径使用。
+
+除上表推荐的只读最小集外，部分接口也接受替代权限（文件夹清单/文件下载可用 `drive:drive`、`space:document:retrieve`、`drive:file:download` 等，素材下载可用 `docs:document.media:download`，导出可用 `docs:document:export`），按最小授权原则不建议开通读写权限。另外，API 权限之外还有一层资源授权：知识库需要知识库管理员授权应用，云盘需要把目标文件夹分享给应用（见[飞书云盘接入](24-feishu-drive.md)）。
+
 - **认证**（`client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。
 - **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。Wiki 侧节点改名/移动会更新节点编辑时间，下一次增量同步文档自动落到新目录；Drive 侧目录改名/文件移动不改变文件修改时间，增量同步不感知，需手动全量同步刷新目录结构；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式节点按其指向的实体去重，不重复入库。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
