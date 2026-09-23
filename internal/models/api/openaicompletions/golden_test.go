@@ -306,7 +306,11 @@ func TestMessages_RolesToolsAndReasoningReplay(t *testing.T) {
 	assistant := msgs[2].(map[string]any)
 	assert.Equal(t, "thinking...", assistant["reasoning_content"])
 	_, hasContent := assistant["content"]
-	assert.False(t, hasContent, "empty content omitted next to tool_calls")
+	// Issue #1487: assistant tool-call turns must carry an explicit
+	// `"content": ""` — vLLM/Xinference Qwen-family Jinja templates crash on
+	// a missing (undefined/null) content field when replaying history.
+	assert.True(t, hasContent, "empty content must be emitted next to tool_calls")
+	assert.Equal(t, "", assistant["content"], "emitted content must be empty string")
 	tc := assistant["tool_calls"].([]any)[0].(map[string]any)
 	assert.Equal(t, "call_1", tc["id"])
 	assert.Equal(t, `{"q":"x"}`, tc["function"].(map[string]any)["arguments"])

@@ -122,6 +122,17 @@ func (c *Client) convertMessages(messages []api.Message) []wireMessage {
 		default:
 			if msg.Content != "" || len(msg.ToolCalls) == 0 {
 				wm.Content = msg.Content
+			} else {
+				// Assistant tool-call turn with empty content: emit an
+				// explicit `"content": ""` instead of omitting the field.
+				// Strict local engines (vLLM / Xinference serving Qwen-family
+				// Jinja chat templates) treat a missing content field as
+				// undefined/null and crash when rendering the assistant turn
+				// for the next round. Issue #1487. The *string keeps
+				// `omitempty` from dropping the field: a non-nil interface
+				// holding a pointer serializes as "".
+				empty := ""
+				wm.Content = &empty
 			}
 		}
 
