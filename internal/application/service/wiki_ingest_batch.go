@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -2045,8 +2046,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		if len(additions) > 0 {
 			hasAdditionsStr = "1"
 		}
+		hasRetractions := len(retracts) > 0
 		hasRetractionsStr := ""
-		if len(retracts) > 0 {
+		if hasRetractions {
 			hasRetractionsStr = "1"
 		}
 
@@ -2088,16 +2090,37 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// encoded context back to their real slugs BEFORE the content is
 			// parsed/stored, so out_links reflect real pages again.
 			updatedContent = slugHandles.decodeContent(updatedContent)
-			updatedSummary, updatedBody := splitSummaryLine(updatedContent)
-			if updatedBody != "" {
-				page.Content = updatedBody
+
+			// The editor answered in full (this is not a finish_reason=length
+			// truncation — generateWithTemplateResult already continued and
+			// refused those), but "in full" often means "without the last
+			// thirty rows of the table". applyRewriteToPage refuses that
+			// rewrite instead of shrinking the page; see
+			// wiki_rewrite_row_guard.go.
+			applied, dropped := applyRewriteToPage(page, updatedContent, hasRetractions)
+			if applied {
+				changed = true
 			} else {
-				page.Content = updatedContent
+				// Loud on purpose: the page keeps the rows, but this document's
+				// new information did not land, and nothing else in the batch
+				// records that. Without this line the only symptom would be the
+				// page quietly not changing.
+				examples := dropped
+				if len(examples) > wikiDroppedRowLogLimit {
+					examples = examples[:wikiDroppedRowLogLimit]
+				}
+				logger.Warnf(ctx,
+					"wiki ingest: refusing page rewrite for slug %s — the model dropped %d table "+
+						"row(s) that are still on the page (e.g. %s); those rows are still in the "+
+						"source documents and the model simply did not re-emit them, so the existing "+
+						"page is kept unchanged",
+					slug, len(dropped), strings.Join(examples, ", "))
+				common.PipelineWarn(ctx, "WikiIngest", "page_rewrite_dropped_rows", map[string]interface{}{
+					"slug":         slug,
+					"dropped_rows": len(dropped),
+					"examples":     strings.Join(examples, ", "),
+				})
 			}
-			if updatedSummary != "" {
-				page.Summary = updatedSummary
-			}
-			changed = true
 		} else if err != nil {
 			logger.Warnf(ctx, "wiki ingest: update/retract failed for slug %s: %v", slug, err)
 			// Flag addition failures so the batch can sanitize stale
