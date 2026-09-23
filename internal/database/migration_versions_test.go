@@ -1,6 +1,7 @@
 package database
 
 import (
+	"net/url"
 	"path/filepath"
 	"testing"
 
@@ -17,7 +18,10 @@ import (
 func TestMigrationDirectoriesLoad(t *testing.T) {
 	root := sqliteRepoRoot(t)
 	for _, dir := range []string{"versioned", "sqlite"} {
-		src, err := source.Open("file://" + filepath.Join(root, "migrations", dir))
+		path := filepath.Join(root, "migrations", dir)
+		// Build a real file URI instead of concatenating a Windows path
+		// after file:// (which parses D:\ as a port).
+		src, err := source.Open((&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String())
 		require.NoError(t, err, "migrations/%s must load", dir)
 		require.NoError(t, src.Close())
 	}
