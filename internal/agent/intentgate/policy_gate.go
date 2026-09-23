@@ -21,6 +21,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -36,6 +38,10 @@ type PolicyGate struct {
 	store    PolicyStore
 	baseline *RuleEngine
 	judge    Judge
+	// failClose 是 T42 全局失败语义开关（WEKNORA_INTENTGATE_FAIL_CLOSE）：
+	// true 时 enforce 策略下一切"未决"（规则不适用/judge 故障/降级）一律
+	// 拦截；false（默认）时仅 risk_tier=high 策略故障拦截，其余放行并告警。
+	failClose bool
 }
 
 // PolicyGateOption 定制 PolicyGate（注入 judge 等）。
@@ -47,11 +53,36 @@ func WithJudge(j Judge) PolicyGateOption {
 	return func(g *PolicyGate) { g.judge = j }
 }
 
+// FailCloseEnvVar 是全局失败语义开关的环境变量名（设计 §9 决策 3）。
+// 任意可 strconv.ParseBool 的真值（true/1/on…）开启：enforce 策略下
+// 一切未决判定 fail-close。
+const FailCloseEnvVar = "WEKNORA_INTENTGATE_FAIL_CLOSE"
+
+// WithFailClose 覆盖 fail-close 全局开关（默认读 FailCloseEnvVar，
+// 未设/不可解析为 false）。测试用它避免污染环境变量。
+func WithFailClose(enabled bool) PolicyGateOption {
+	return func(g *PolicyGate) { g.failClose = enabled }
+}
+
+// failCloseFromEnv 解析全局开关环境变量；未设置或不可解析一律 false
+//（fail-open 是默认值，方向安全的缺省：误配不得悄悄变成全局拦截）。
+func failCloseFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv(FailCloseEnvVar))
+	if raw == "" {
+		return false
+	}
+	on, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return on
+}
+
 // NewPolicyGate 创建 PolicyStore 驱动的 Gate。store 必须是与策略 CRUD
 // handler 共享的同一实例——策略变更的 InvalidateTenant 才能生效
 // （设计 §8.3：策略变更按 tenant 失效解析缓存）。
 func NewPolicyGate(store PolicyStore, opts ...PolicyGateOption) *PolicyGate {
-	g := &PolicyGate{store: store, baseline: NewSpikeRuleEngine()}
+	g := &PolicyGate{store: store, baseline: NewSpikeRuleEngine(), failClose: failCloseFromEnv()}
 	for _, opt := range opts {
 		opt(g)
 	}
@@ -88,10 +119,49 @@ func (g *PolicyGate) Evaluate(ctx context.Context, in ToolCallInput) (Verdict, e
 		// 规则层未决（无 rule_expr / 编译失败 / 不适用 / 超时）→ 语义层。
 		v = g.judgeEscalate(ctx, policy, in, v)
 	}
+	// T42 失败语义（设计 §9 决策 3）：enforce 下的"未决"（规则不适用/
+	// 编译失败/judge 故障/能力档降级）默认 fail-open 放行并告警；
+	// risk_tier=high 策略或全局开关时 fail-close 拦截。observe 永不拦截。
+	v = g.applyFailSemantics(ctx, policy, in, v)
 	v.PolicyID = policy.ID
 	v.PolicyVersion = policy.Version
 	v.Mode = policy.Mode
 	return v, nil
+}
+
+// applyFailSemantics 对未决 verdict 应用失败语义。非 uncertain 原样通过；
+// observe 策略永不 fail-close（observe 的定义就是只记录不拦截）。enforce
+// 的未决：high 策略或全局开关 → 转 deny（fail-close）；否则放行并留
+// intentgate.fail_open 结构化告警（验收 [unit] 的 warn 断言面）。
+func (g *PolicyGate) applyFailSemantics(
+	ctx context.Context, policy *types.IntentPolicy, in ToolCallInput, v Verdict,
+) Verdict {
+	if v.Action != ActionUncertain || policy.Mode != types.VerdictModeEnforce {
+		return v
+	}
+	if policy.RiskTier == types.RiskTierHigh || g.failClose {
+		v.Action = ActionDeny
+		why := "高危策略故障即拦截（fail-close）"
+		if g.failClose && policy.RiskTier != types.RiskTierHigh {
+			why = "全局 fail-close 开关（" + FailCloseEnvVar + "）开启"
+		}
+		v.Reason = v.Reason + "；" + why
+		logger.WarnWithFields(ctx, logger.Fields{
+			"event":     "intentgate.fail_close",
+			"tenant_id": in.TenantID,
+			"policy_id": policy.ID,
+			"tool":      in.ToolName,
+			"risk_tier": policy.RiskTier,
+		}, "[IntentGate] fail-close: uncertain escalated to deny")
+		return v
+	}
+	logger.WarnWithFields(ctx, logger.Fields{
+		"event":     "intentgate.fail_open",
+		"tenant_id": in.TenantID,
+		"policy_id": policy.ID,
+		"tool":      in.ToolName,
+	}, "[IntentGate] fail-open: uncertain passed in enforce mode")
+	return v
 }
 
 // tenantCapabilityJudge 是可选接口：实现了 Enabled 的 judge（LLMJudge）
