@@ -323,8 +323,37 @@ func (r *Resolved) Capabilities() Capabilities {
 		caps.ThinkingFormat = "think"
 		caps.MaxTokensField = "num_predict"
 	}
+	if caps.ThinkingFormat == string(api.ThinkingFormatChatTemplateKwargs) && !hasExplicitGradedLevels(r.ThinkingLevels) {
+		// The chat_template_kwargs wire format only carries
+		// enable_thinking; a graded effort picked in the UI would be
+		// silently dropped (issue #3551). Unless the operator configured
+		// explicit graded levels (with vendor mappings), advertise only
+		// the toggle levels the wire can actually honor.
+		// Mark every graded level as unavailable (nil = unsupported), so
+		// only the toggle levels off/auto remain advertised.
+		levels := api.ThinkingLevelMap{}
+		for _, level := range api.ReasoningLadder {
+			if level.Graded() {
+				levels[level] = nil
+			}
+		}
+		caps.ThinkingLevels = levels.SupportedLevels()
+		return caps
+	}
 	caps.ThinkingLevels = r.ThinkingLevels.SupportedLevels()
 	return caps
+}
+
+// hasExplicitGradedLevels reports whether the map contains any explicit
+// minimal/low/medium/high (etc.) entry, as opposed to the empty lenient map
+// that tolerates every level by default.
+func hasExplicitGradedLevels(m api.ThinkingLevelMap) bool {
+	for level := range m {
+		if level.Graded() {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveRerank merges the rerank layers. Rerank has one settings struct
