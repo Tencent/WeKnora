@@ -24,6 +24,7 @@ const (
 	MCPEndpointToolGrepChunks         = "grep_chunks"
 	MCPEndpointToolListDocuments      = "list_documents"
 	MCPEndpointToolReadDocument       = "read_document"
+	MCPEndpointToolGetImage           = "get_image"
 	MCPEndpointToolAsk                = "ask"
 	MCPEndpointToolWikiSearch         = "wiki_search"
 	MCPEndpointToolWikiReadPage       = "wiki_read_page"
@@ -51,6 +52,7 @@ var mcpEndpointToolCatalog = []MCPEndpointToolDefinition{
 	{Name: MCPEndpointToolGrepChunks, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolListDocuments, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolReadDocument, Group: MCPEndpointToolGroupRetrieve},
+	{Name: MCPEndpointToolGetImage, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolAsk, Group: MCPEndpointToolGroupChat},
 	{Name: MCPEndpointToolWikiSearch, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiReadPage, Group: MCPEndpointToolGroupWiki},

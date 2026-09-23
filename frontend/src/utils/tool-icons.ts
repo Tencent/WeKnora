@@ -14,6 +14,7 @@ export const toolIcons: Record<string, string> = {
     list_documents: 'ℹ️',
     get_chunk_detail: '📄',
     list_knowledge_bases: '📂',
+    get_image: '🖼️',
     query_knowledge_graph: '🕸️',
     think: '💭',
     todo_write: '📋',
@@ -64,6 +65,7 @@ const toolDisplayNameKeys: Record<string, string> = {
     list_documents: 'tools.listDocuments',
     get_chunk_detail: 'tools.getChunkDetail',
     list_knowledge_bases: 'tools.listKnowledgeBases',
+    get_image: 'tools.getImage',
     query_knowledge_graph: 'tools.queryKnowledgeGraph',
     think: 'tools.think',
     todo_write: 'tools.todoWrite',
@@ -87,4 +89,3 @@ export function getToolDisplayName(toolName: string): string {
 
     return toolName;
 }
-
