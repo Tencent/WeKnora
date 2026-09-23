@@ -1745,6 +1745,21 @@ export default {
       servedAfterFailurePlain: 'アップグレード失敗。以前のバージョンを使用中',
       loadFailed: '読み込みに失敗しました',
     },
+    intentVerdict: {
+      title: '判定レポート',
+      description: 'ポリシーごとの IntentGate 判定の分布。数値は intent_verdicts テーブルの直接照査と照合可能です。',
+      pickPolicy: 'ポリシー系列を選択',
+      total: '合計',
+      empty: 'このポリシーにはまだ判定がありません',
+      noReason: '（理由なし）',
+      loadFailed: '判定レポートの読み込みに失敗しました',
+      values: {
+        allow: '許可',
+        deny: '拒否',
+        require_approval: '承認が必要',
+        uncertain: '未決定',
+      },
+    },
     mcpService: 'MCPサービス',
     intentPolicy: {
       title: 'インテントポリシー',

@@ -97,6 +97,47 @@ func (r *IntentVerdictRepository) ListByPolicy(ctx context.Context, tenantID uin
 	return rows, nil
 }
 
+// ListByTenant 全租户最近 limit 条，created_at 降序。
+func (r *IntentVerdictRepository) ListByTenant(ctx context.Context, tenantID uint64, limit int) ([]*types.VerdictRecord, error) {
+	q := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Order("created_at DESC")
+	if limit > 0 {
+		if limit > 1000 {
+			limit = 1000
+		}
+		q = q.Limit(limit)
+	}
+	var rows []*types.VerdictRecord
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// CountByVerdictGrouped 按 verdict 分组计数（T51）。policyID 为空时
+// 统计租户全部（含 policy_id NULL 的 baseline 行）。
+func (r *IntentVerdictRepository) CountByVerdictGrouped(ctx context.Context, tenantID uint64, policyID string) (map[string]int64, error) {
+	var rows []struct {
+		Verdict string
+		Cnt     int64
+	}
+	q := r.db.WithContext(ctx).Model(&types.VerdictRecord{}).
+		Select("verdict, count(*) AS cnt").
+		Where("tenant_id = ?", tenantID)
+	if policyID != "" {
+		q = q.Where("policy_id = ?", policyID)
+	}
+	if err := q.Group("verdict").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.Verdict] = row.Cnt
+	}
+	return out, nil
+}
+
 // UpdateHumanOverride 更新人工后续动作（飞轮关键字段：审批改参数、
 // 人工修正都会回写这里，设计 §3.3）。override 必须是合法枚举值。
 func (r *IntentVerdictRepository) UpdateHumanOverride(ctx context.Context, tenantID uint64, id string, override string) error {

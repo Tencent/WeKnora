@@ -1745,6 +1745,21 @@ export default {
       servedAfterFailurePlain: 'Upgrade failed; still running the previous version',
       loadFailed: 'Failed to load',
     },
+    intentVerdict: {
+      title: 'Verdict Report',
+      description: 'Per-policy intent-gate verdict distribution. Numbers are reconcilable against the intent_verdicts table.',
+      pickPolicy: 'Select a policy lineage',
+      total: 'Total',
+      empty: 'No verdicts for this policy yet',
+      noReason: '(no reason recorded)',
+      loadFailed: 'Failed to load verdict report',
+      values: {
+        allow: 'Allow',
+        deny: 'Deny',
+        require_approval: 'Require approval',
+        uncertain: 'Uncertain',
+      },
+    },
     mcpService: 'MCP Service',
     intentPolicy: {
       title: 'Intent Policies',

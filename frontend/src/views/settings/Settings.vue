@@ -199,6 +199,11 @@
         <div v-if="currentSection === 'intentpolicy'" class="section">
           <IntentPolicySettings />
         </div>
+
+        <!-- IntentGate 判定报表（T51） -->
+        <div v-if="currentSection === 'intentverdict'" class="section">
+          <IntentVerdictReport />
+        </div>
       </template>
     </div>
   </SettingsModalShell>
@@ -225,6 +230,7 @@ import ModelSettings from './ModelSettings.vue'
 import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
 import IntentPolicySettings from './IntentPolicySettings.vue'
+import IntentVerdictReport from './IntentVerdictReport.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
 import MemorySettings from './MemorySettings.vue'
@@ -369,6 +375,7 @@ const navItems = computed(() => {
     { key: 'skills', icon: SKILL_ICON, label: t('settings.skills.title') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
   { key: 'intentpolicy', icon: 'secured', label: t('settings.intentPolicy.title') },
+  { key: 'intentverdict', icon: 'chart', label: t('settings.intentVerdict.title') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
@@ -431,6 +438,7 @@ const navGroups = computed<NavGroup[]>(() => {
         'websearch',
         'mcp',
         'intentpolicy',
+        'intentverdict',
       ]),
     },
     {

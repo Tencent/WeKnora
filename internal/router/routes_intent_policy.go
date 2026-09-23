@@ -28,3 +28,14 @@ func RegisterIntentPolicyRoutes(r *gin.RouterGroup, h *handler.IntentPolicyHandl
 		policies.POST("/:id/enable", g.Admin(), h.EnablePolicy)
 	}
 }
+
+// RegisterIntentVerdictRoutes registers the IntentGate verdict report routes
+// (T51，issue #22)：分布汇总 + 单条下钻，只读、Admin+（理由可能含业务
+// 上下文，与策略管理同门槛）。
+func RegisterIntentVerdictRoutes(r *gin.RouterGroup, h *handler.IntentVerdictHandler, g *rbacGuards) {
+	verdicts := g.apiKeyGroup(r.Group("/intent-verdicts"), apiKeyFullAccess())
+	{
+		verdicts.GET("", g.Admin(), h.ListVerdicts)
+		verdicts.GET("/summary", g.Admin(), h.VerdictSummary)
+	}
+}

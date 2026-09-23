@@ -548,6 +548,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// PolicyStore.InvalidateTenant 失效解析缓存（PolicyStore 本身在
 	// repository 块已注册，见上）。
 	must(container.Provide(handler.NewIntentPolicyHandler))
+	must(container.Provide(handler.NewIntentVerdictHandler))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))

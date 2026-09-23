@@ -19,6 +19,13 @@ type IntentVerdictRepository interface {
 	// ListByPolicy 按策略查询（跨 version，供策略生命周期对账），
 	// created_at 升序；limit<=0 表示不限。
 	ListByPolicy(ctx context.Context, tenantID uint64, policyID string, limit int) ([]*types.VerdictRecord, error)
+	// ListByTenant 全租户最近 limit 条（created_at 降序；报表页下钻列表），
+	// limit<=0 表示不限（上限 1000 防失控）。
+	ListByTenant(ctx context.Context, tenantID uint64, limit int) ([]*types.VerdictRecord, error)
+	// CountByVerdictGrouped 按 verdict 分组计数（T51 报表页分布数字的
+	// 数据源），policyID 为空时统计租户内全部 verdict（含 baseline 的
+	// policy_id NULL 行）。返回 verdict 取值 → 计数。
+	CountByVerdictGrouped(ctx context.Context, tenantID uint64, policyID string) (map[string]int64, error)
 	// UpdateHumanOverride 记录人工后续动作（飞轮关键字段）。
 	UpdateHumanOverride(ctx context.Context, tenantID uint64, id string, override string) error
 	// Delete 删除一条记录。

@@ -6071,6 +6071,21 @@ export default {
       servedAfterFailurePlain: 'Обновление не удалось; работает предыдущая версия',
       loadFailed: 'Не удалось загрузить',
     },
+    intentVerdict: {
+      title: 'Отчёт по вердиктам',
+      description: 'Распределение вердиктов IntentGate по политикам. Числа сверяются с прямым запросом к таблице intent_verdicts.',
+      pickPolicy: 'Выберите линию политики',
+      total: 'Всего',
+      empty: 'По этой политике пока нет вердиктов',
+      noReason: '(причина не записана)',
+      loadFailed: 'Не удалось загрузить отчёт по вердиктам',
+      values: {
+        allow: 'Разрешено',
+        deny: 'Отклонено',
+        require_approval: 'Нужно одобрение',
+        uncertain: 'Неопределённо',
+      },
+    },
     mcpService: 'Сервис MCP',
     intentPolicy: {
       title: 'Политики намерений',

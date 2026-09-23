@@ -25,6 +25,8 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   // IntentGate 策略是租户管理员的运营配置资产（设计 §3.2），后端路由
   // 全走 g.Admin()，入口同收 admin。
   intentpolicy: 'admin',
+  // 判定理由可能含业务上下文，与策略管理同门槛 Admin+。
+  intentverdict: 'admin',
   system: 'viewer',
   userprofile: 'viewer',
   browserconnection: 'viewer',

@@ -6073,6 +6073,21 @@ export default {
       servedAfterFailurePlain: '升级失败，仍在使用旧版本',
       loadFailed: '加载失败',
     },
+    intentVerdict: {
+      title: '判定报表',
+      description: '按策略查看 IntentGate 判定的分布。数字可与 intent_verdicts 表直查对账。',
+      pickPolicy: '选择策略谱系',
+      total: '总计',
+      empty: '该策略还没有判定记录',
+      noReason: '（未记录理由）',
+      loadFailed: '判定报表加载失败',
+      values: {
+        allow: '放行',
+        deny: '拒绝',
+        require_approval: '需人工审批',
+        uncertain: '未决',
+      },
+    },
     mcpService: 'MCP服务',
     intentPolicy: {
       title: '意图策略',

@@ -6071,6 +6071,21 @@ export default {
       servedAfterFailurePlain: '업그레이드 실패, 이전 버전 사용 중',
       loadFailed: '불러오지 못했습니다',
     },
+    intentVerdict: {
+      title: '판정 보고서',
+      description: '정책별 IntentGate 판정 분포입니다. 숫자는 intent_verdicts 테이블 직접 조회와 대조할 수 있습니다.',
+      pickPolicy: '정책 계보 선택',
+      total: '합계',
+      empty: '이 정책에는 아직 판정이 없습니다',
+      noReason: '(사유 없음)',
+      loadFailed: '판정 보고서를 불러오지 못했습니다',
+      values: {
+        allow: '허용',
+        deny: '거부',
+        require_approval: '승인 필요',
+        uncertain: '미결정',
+      },
+    },
     mcpService: 'MCP 서비스',
     intentPolicy: {
       title: '의도 정책',
