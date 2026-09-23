@@ -124,3 +124,60 @@ def _rewrite_zip(
         for name, data in files.items():
             zout.writestr(name, data)
     return out.getvalue()
+
+
+STYLES_PART_SUFFIX = "styles.xml"
+_REPLACEMENT_FILL = b'<fill><patternFill patternType="none"/></fill>'
+_FILLS_BLOCK_RE = re.compile(rb"<fills\b[^>]*>.*?</fills>", re.S)
+# Case-insensitive so wrong-case <Fill>…</Fill> entries are caught too.
+_FILL_ELEMENT_RE = re.compile(rb"<fill\s*/>|<fill\s*>.*?</fill\s*>", re.S | re.I)
+# A fill openpyxl can deserialize starts (case-sensitively) with a
+# patternFill or gradientFill child — everything else, including the
+# self-closing <fill/>, is rejected by its sequence descriptor.
+_WELL_FORMED_FILL_RE = re.compile(rb"<fill\s*>\s*<(?:patternFill|gradientFill)[\s/>]")
+
+
+def sanitize_xlsx_styles(content: bytes) -> bytes | None:
+    """Rewrite styles.xml fills that openpyxl cannot deserialize.
+
+    Some exporters (cloud-doc systems, LabView, Acumatica ERP) write ``<fill>``
+    elements with no child, or a child that is neither patternFill nor
+    gradientFill. openpyxl's strict sequence descriptor raises
+    ``TypeError: expected <class 'openpyxl.styles.fills.Fill'>`` on them and
+    treats the workbook as non-conformant, so both parse engines die on a
+    file Excel itself opens fine (#3637). Replacing each malformed fill in
+    place with a no-op patternFill keeps the fill list length — and therefore
+    every cellXf fillId reference — stable. Returns None when nothing needs
+    fixing, so callers pay one styles.xml scan on the happy path.
+    """
+    if not zipfile.is_zipfile(io.BytesIO(content)):
+        return None
+
+    with zipfile.ZipFile(io.BytesIO(content)) as zin:
+        names = _normalized_names(zin.namelist())
+        styles_path = next(
+            (n for n in names if n.lower().endswith(STYLES_PART_SUFFIX)), None
+        )
+        if styles_path is None:
+            return None
+        styles = zin.read(styles_path)
+
+        block = _FILLS_BLOCK_RE.search(styles)
+        if block is None:
+            return None
+
+        fixed_any = False
+
+        def _fix(match: "re.Match[bytes]") -> bytes:
+            nonlocal fixed_any
+            if _WELL_FORMED_FILL_RE.match(match.group(0)):
+                return match.group(0)
+            fixed_any = True
+            return _REPLACEMENT_FILL
+
+        patched_block = _FILL_ELEMENT_RE.sub(_fix, block.group(0))
+        if not fixed_any:
+            return None
+
+        patched = styles[: block.start()] + patched_block + styles[block.end():]
+        return _rewrite_zip(zin, lambda files: {**files, styles_path: patched})
