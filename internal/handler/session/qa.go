@@ -151,8 +151,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 
-	// Validate before session lookup or QA work, preserving the original query text.
-	validatedQuery, valid := secutils.ValidateInput(request.Query)
+	// Validate syntax before session lookup or QA work, preserving the original
+	// query text. KnowledgeQA applies its XSS-pattern check later in the chat
+	// pipeline; AgentQA must allow frontend code in conversation text.
+	validatedQuery, valid := secutils.ValidateInputSyntax(request.Query)
 	if !valid {
 		logger.Error(ctx, "Query content is invalid")
 		return nil, nil, errors.NewBadRequestError("Query content contains invalid content")

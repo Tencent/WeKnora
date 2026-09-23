@@ -30,18 +30,20 @@ func (s *queryValidationSessionStub) GetOwnedSession(context.Context, string) (*
 func TestQAQueryValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
-		name    string
-		query   string
-		invalid bool
+		name               string
+		query              string
+		rejectBeforeLookup bool
 	}{
-		{name: "empty", invalid: true},
-		{name: "whitespace", query: " \t\r\n ", invalid: true},
-		{name: "unicode whitespace", query: "\u3000\u00a0", invalid: true},
-		{name: "null byte", query: "hello\x00world", invalid: true},
-		{name: "escape character", query: "hello\x1bworld", invalid: true},
-		{name: "script element", query: "<script>alert(1)</script>", invalid: true},
-		{name: "event handler", query: `<img src=x onerror="alert(1)">`, invalid: true},
-		{name: "script URL", query: "javascript:alert(1)", invalid: true},
+		{name: "empty", rejectBeforeLookup: true},
+		{name: "whitespace", query: " \t\r\n ", rejectBeforeLookup: true},
+		{name: "unicode whitespace", query: "\u3000\u00a0", rejectBeforeLookup: true},
+		{name: "null byte", query: "hello\x00world", rejectBeforeLookup: true},
+		{name: "escape character", query: "hello\x1bworld", rejectBeforeLookup: true},
+		{name: "script element", query: "<script>alert(1)</script>"},
+		{name: "event handler", query: `<img src=x onerror="alert(1)">`},
+		{name: "script URL", query: "javascript:alert(1)"},
+		{name: "agent frontend snippet", query: `Why doesn't my <button onclick="save()">Save</button> fire?`},
+		{name: "agent javascript snippet", query: "What does javascript:void(0) do?"},
 		{name: "English", query: "What is retrieval augmented generation?"},
 		{name: "Unicode", query: "请解释厄尔尼诺现象 🌊"},
 		{name: "multiline", query: "Compare:\n\tGo\r\n\tPython"},
@@ -65,7 +67,7 @@ func TestQAQueryValidation(t *testing.T) {
 					response := httptest.NewRecorder()
 					router.ServeHTTP(response, request)
 
-					if tt.invalid {
+					if tt.rejectBeforeLookup {
 						assert.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
 						assert.Contains(t, response.Header().Get("Content-Type"), "application/json")
 						assert.Zero(t, sessions.lookupCalls, "reject the query before session lookup or QA work")

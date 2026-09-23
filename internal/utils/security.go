@@ -77,12 +77,10 @@ func EscapeHTML(input string) string {
 	return html.EscapeString(input)
 }
 
-// ValidateInput 验证用户输入
-func ValidateInput(input string) (string, bool) {
-	if input == "" {
-		return "", true
-	}
-
+// ValidateInputSyntax checks the input properties shared by all user-query
+// entry points. It deliberately does not apply the XSS pattern list because
+// some callers, such as AgentQA, accept frontend code as conversation text.
+func ValidateInputSyntax(input string) (string, bool) {
 	// 检查是否包含控制字符
 	for _, r := range input {
 		if r < 32 && r != 9 && r != 10 && r != 13 {
@@ -95,6 +93,16 @@ func ValidateInput(input string) (string, bool) {
 		return "", false
 	}
 
+	return strings.TrimSpace(input), true
+}
+
+// ValidateInput 验证用户输入
+func ValidateInput(input string) (string, bool) {
+	validatedInput, valid := ValidateInputSyntax(input)
+	if !valid {
+		return "", false
+	}
+
 	// 检查是否包含潜在的 XSS 攻击
 	for _, pattern := range xssPatterns {
 		if pattern.MatchString(input) {
@@ -102,7 +110,7 @@ func ValidateInput(input string) (string, bool) {
 		}
 	}
 
-	return strings.TrimSpace(input), true
+	return validatedInput, true
 }
 
 // SafePathUnderBase 校验 filePath 是否落在 baseDir 下，防止路径遍历（如 ../../）。
