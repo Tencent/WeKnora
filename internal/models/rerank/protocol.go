@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -19,7 +18,7 @@ import (
 // ceilings, and putting the returned scores on one scale.
 type protocolReranker struct {
 	inner     api.Reranker
-	settings  catalog.RerankSettings
+	settings  api.RerankSettings
 	endpoint  string
 	modelName string
 	modelID   string

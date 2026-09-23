@@ -15,11 +15,17 @@ func osMkdirAll(dir string) error { return os.MkdirAll(dir, 0o755) }
 
 type fakeProjects struct{ dir string }
 
-func (f fakeProjects) ProjectDirForSession(context.Context, string) (string, bool) {
+func (f fakeProjects) ProjectDirForSession(context.Context, string) (string, bool, error) {
 	if f.dir == "" {
-		return "", false
+		return "", false, nil
 	}
-	return f.dir, true
+	return f.dir, true, nil
+}
+
+type revokedProjects struct{}
+
+func (revokedProjects) ProjectDirForSession(context.Context, string) (string, bool, error) {
+	return "", false, ErrProjectDirRevoked
 }
 
 func workspaceFixture(t *testing.T, projectDir string) WorkspaceResolver {
@@ -112,6 +118,21 @@ func TestResolveSessionWorkspaceIsPerSession(t *testing.T) {
 func TestResolveRejectsEmptySessionID(t *testing.T) {
 	_, err := workspaceFixture(t, "").Resolve(context.Background(), "")
 	require.Error(t, err)
+}
+
+func TestResolveFailsClosedWhenBoundProjectIsRevoked(t *testing.T) {
+	base := t.TempDir()
+	sessionRoot := filepath.Join(base, "Documents", "WeKnora")
+	r := NewWorkspaceResolver(DirLayout{SessionRoot: sessionRoot}, revokedProjects{})
+
+	_, err := r.Resolve(context.Background(), "sess-revoked")
+	require.ErrorIs(t, err, ErrProjectDirRevoked)
+
+	if _, statErr := os.Stat(sessionRoot); !os.IsNotExist(statErr) {
+		entries, readErr := os.ReadDir(sessionRoot)
+		require.NoError(t, readErr)
+		require.Empty(t, entries, "revoking a project must not allocate a replacement workspace")
+	}
 }
 
 func TestResolveSessionWorkspaceKeepsPathAfterMidnight(t *testing.T) {

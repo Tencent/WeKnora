@@ -57,8 +57,9 @@
 | Docker | 镜像；可选 daemon 地址、TLS 证书目录、CPU/内存/PID 限制、网络模式、runtime、空闲 TTL | 一个会话一个长驻容器 |
 | CubeSandbox | 控制面地址、数据面代理、沙箱域名、模板；按集群配置 API Key | 会话级远端沙箱 |
 | E2B | API Key、模板；自托管时补 API 地址、沙箱域名和数据面代理 | E2B Cloud 或 E2B 兼容控制面 |
+| host | 不用填写。仅 Lite 桌面版，当前仅 macOS | 未选远程沙箱时，在用户选定的本机目录内执行，越界由操作系统拦截 |
 
-`local` 宿主机进程后端已移除。当前配置的完整字段见[沙箱与技能 API](../04-api/02-api-sandbox-skills.md)。
+`local` 宿主机进程后端已移除：它在本机裸跑，没有任何隔离。Lite 的 `host` 不属于上述空间命名配置，也不是 `local` 的替代项。`host` 由操作系统强制隔离，工作区是真实主机路径，没有 `/workspace`。用户在新对话页选择项目；不选则使用自动会话目录。配了 Docker、E2B 或 Cube 的智能体仍走远程沙箱。当前配置的完整字段见[沙箱与技能 API](../04-api/02-api-sandbox-skills.md)。
 
 Docker 后端默认关闭。系统管理员在「系统设置 → 网络安全」启用，或用 `WEKNORA_SANDBOX_DOCKER_ENABLED=true` 作为未落库时的回退。本机连接还需要把实际 Docker socket 挂给 app；这授予 app 控制宿主机 Docker 的能力。远端 TCP daemon 要配置 TLS 证书目录，其中包括 `ca.pem`、`cert.pem`、`key.pem`。Docker 网络仅接受 `bridge` 或 `none`，可选 `runsc` 等已安装 OCI runtime。
 
@@ -102,6 +103,10 @@ Cube/E2B 的 `config.network` 同时用于对话沙箱、技能安装和完整�
 <Screenshot
   src="/screenshots/skill-sandbox-chat.png"
   caption="沙箱生成 Word 文件后，在对话中预览并下载" />
+
+## 部署与排障
+
+Docker socket/TLS、模板版本、远端网关、多副本 Redis、技能快照磁盘占用和桌面中继要求见[沙箱部署与排障](../06-development/04-sandbox-deployment.md)。
 
 ## 实现参考
 

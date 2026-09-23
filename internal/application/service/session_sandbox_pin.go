@@ -228,7 +228,10 @@ func resolveSandboxForExecution(
 	sessionID string,
 	agentConfigID string,
 	policy WorkspaceSandboxPolicy,
+	opts ...resolveOption,
 ) (sandbox.Manager, SandboxPin, error) {
+	o := applyResolveOptions(opts)
+
 	if pinner != nil && strings.TrimSpace(sessionID) != "" {
 		pinned, err := pinner.Read(ctx, sessionID)
 		if err != nil {
@@ -266,7 +269,18 @@ func resolveSandboxForExecution(
 		}
 	}
 
-	pin := SandboxPin{ConfigID: strings.TrimSpace(agentConfigID), TenantID: tenantID}
+	configID := strings.TrimSpace(agentConfigID)
+	if !hasNamedSandboxConfig(configID) {
+		if workspaceScriptsDisabled(ctx, policy, tenantID) {
+			return sandbox.NewDisabledManager(), SandboxPin{}, nil
+		}
+		if lite := liteHostSandbox(o.liteHost); lite != nil {
+			return lite, SandboxPin{}, nil
+		}
+		return sandbox.NewDisabledManager(), SandboxPin{}, nil
+	}
+
+	pin := SandboxPin{ConfigID: configID, TenantID: tenantID}
 	mgr, err := resolveTenantSandboxForConfig(
 		ctx, resolver, fallback, tenantID, pin.ConfigID, policy,
 	)

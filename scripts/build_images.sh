@@ -233,7 +233,7 @@ build_sandbox_image() {
     fi
 
     # Cube 从镜像直接构建模板，并以 :49983/health 探活，缺 envd 必然失败，
-    # 因此 Cube 用的是注入了 envd 的变体镜像。详见 docs/sandbox-cluster.md。
+    # 因此 Cube 用的是注入了 envd 的变体镜像。详见 website-docs/06-development/04-sandbox-deployment.md。
     # 固定 linux/amd64：envd 的来源镜像 cubesandbox-base 不发布 arm64。
     log_info "构建沙箱镜像 Cube 变体 (weknora-sandbox:main-cube)..."
 

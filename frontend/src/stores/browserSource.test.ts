@@ -46,6 +46,32 @@ test('browser and web search selections are independent and persisted', () => {
   assert.equal(store.isLocalBrowserEnabled, false)
   assert.equal(store.settings.webSearchEnabled, true)
 })
+
+test('reasoning overrides belong to the session, restore on reload and never become global defaults', () => {
+  items.clear()
+  const store = useSettingsStore(createPinia())
+  assert.equal(store.reasoningEffortOverride, '')
+  store.reasoningEffortOverride = 'high'
+  store.toggleWebSearch(true)
+  assert.equal(JSON.stringify(JSON.parse(items.get('WeKnora_settings')!)).includes('high'), false)
+  store.hydrateSessionInputState({}, true)
+  assert.equal(store.reasoningEffortOverride, 'high', 'first send keeps the createChat choice')
+  store.restoreDefaultsIfSnapshotted()
+  assert.equal(store.reasoningEffortOverride, '', 'leaving even a new session clears the choice')
+  store.hydrateSessionInputState({ reasoning_effort: 'off' })
+  assert.equal(store.reasoningEffortOverride, 'off')
+  store.restoreDefaultsIfSnapshotted()
+  assert.equal(store.reasoningEffortOverride, '')
+  store.applyLastRequestState({ reasoning_effort: 'max' })
+  assert.equal(store.reasoningEffortOverride, 'max')
+  store.applyLastRequestState({})
+  assert.equal(store.reasoningEffortOverride, '', 'old sessions inherit')
+  store.applyLastRequestState({ reasoning_effort: 'unsupported' })
+  assert.equal(store.reasoningEffortOverride, '')
+  store.reasoningEffortOverride = 'high'
+  store.selectAgent('another-agent')
+  assert.equal(store.reasoningEffortOverride, '')
+})
 test('session restore follows saved browser choice and clears it for older sessions', () => {
   const store = useSettingsStore(createPinia())
   store.applyLastRequestState({ local_browser_enabled: true, web_search_enabled: true })

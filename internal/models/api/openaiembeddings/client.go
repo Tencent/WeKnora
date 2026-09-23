@@ -3,7 +3,7 @@
 // answering {data: [{embedding, index}]}.
 //
 // The vendors that speak it disagree about everything optional, so nothing
-// optional is sent unless catalog.EmbeddingsSettings says the vendor
+// optional is sent unless api.EmbeddingsSettings says the vendor
 // documents it:
 //
 //   - `dimensions` does not exist on NVIDIA NIM or Volcengine's text endpoint;
@@ -21,13 +21,12 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
-// Config is everything the client needs, already resolved by the catalog.
+// Config is everything the client needs, already resolved by the api.
 type Config struct {
 	Endpoint api.Endpoint
-	Settings catalog.EmbeddingsSettings
+	Settings api.EmbeddingsSettings
 	// Dimensions is the width the row asked for; it is sent only when the
 	// vendor names a field for it.
 	Dimensions int

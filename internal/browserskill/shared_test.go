@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +38,23 @@ type sharedFixture struct {
 	ws    *websocket.Conn
 	mu    sync.Mutex
 	calls chan map[string]any
+}
+
+func TestAccountReportsConnectedExtensionVersion(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	scope := Scope{1, "extension-version"}
+	fixture := connectSharedFixture(ctx, t, m, scope, "", "chrome")
+	account, err := m.Account(ctx, scope)
+	require.NoError(t, err)
+	require.True(t, account.Connected)
+	require.Equal(t, "0.3.0", account.ExtensionVersion)
+
+	require.NoError(t, fixture.ws.Close())
+	require.Eventually(t, func() bool { return !m.Status(scope, "").Connected }, time.Second, 10*time.Millisecond)
+	account, err = m.Account(ctx, scope)
+	require.NoError(t, err)
+	require.NotNil(t, account.Device, "authorization survives a transient disconnection")
+	require.Empty(t, account.ExtensionVersion, "do not display a stale version as the connected extension")
 }
 
 func TestConcurrentCommandsShareAutomaticSessionCreation(t *testing.T) {
@@ -161,9 +179,9 @@ func connectSharedFixture(
 					return
 				}
 				result = map[string]any{"cancelled": true}
-			case "gateway.task_preview":
+			case "ui.task_preview":
 				result = map[string]any{"image_base64": "dGVzdA==", "format": "jpeg"}
-			case "gateway.task_focus":
+			case "ui.task_focus":
 				result = map[string]any{"focused": true}
 			case "system.ping":
 				result = map[string]any{"pong": true}
@@ -736,7 +754,7 @@ func TestFinishTurnUsesOfficialLifecycleWithoutGatewayCalls(t *testing.T) {
 			connectSharedFixture(ctx, t, owner, scope, "", "browser", func(
 				f *sharedFixture, id, method string, _ map[string]any,
 			) bool {
-				if !strings.HasPrefix(method, "gateway.") {
+				if !strings.HasPrefix(method, "ui.") {
 					return false
 				}
 				gatewayCalls.Add(1)
@@ -830,4 +848,112 @@ func TestBorrowConfirmationBudgetReachesExtension(t *testing.T) {
 			require.False(t, m.Status(s, "chat").NeedsHelp)
 		})
 	}
+}
+
+func TestAgentClosingLastTabKeepsAgentWindow(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "last-tab"}
+	var mu sync.Mutex
+	var methods []string
+	var created []map[string]any
+	var closeError string // error code the fixture returns when closing tab 9
+	var closeDrops bool   // the extension closed the tab before failing the reply
+	tabs := []map[string]any{{"tab_id": 7, "window_id": 100, "scope": "agent"}}
+	removeTab := func(id any) {
+		want, _ := numericID(id)
+		tabs = slices.DeleteFunc(tabs, func(tab map[string]any) bool {
+			got, _ := numericID(tab["tab_id"])
+			return got == want
+		})
+	}
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(
+		f *sharedFixture, id, method string, params map[string]any,
+	) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		var result any
+		switch method {
+		case "tool.tab_list":
+			if params["scope"] != "agent" {
+				_ = f.send(map[string]any{"id": id, "error": map[string]string{
+					"code": "invalid_params", "message": "fixture expects the agent scope",
+				}})
+				return true
+			}
+			result = map[string]any{"tabs": append([]map[string]any(nil), tabs...)}
+		case "tool.tab_create":
+			created = append(created, params)
+			tabs = append(tabs, map[string]any{"tab_id": 8, "window_id": 100, "scope": "agent"})
+			result = map[string]any{"tab_id": 8, "window_id": 100, "url": "about:blank"}
+		case "tool.tab_close":
+			methods = append(methods, fmt.Sprintf("tool.tab_close:%v", params["tab_id"]))
+			if target, _ := numericID(params["tab_id"]); closeError != "" && target == 9 {
+				if closeDrops {
+					removeTab(params["tab_id"])
+				}
+				_ = f.send(map[string]any{"id": id, "error": map[string]string{
+					"code": closeError, "message": "fixture refused",
+				}})
+				return true
+			}
+			removeTab(params["tab_id"])
+			_ = f.send(map[string]any{"id": id, "result": map[string]any{"tab_id": params["tab_id"]}})
+			return true
+		default:
+			return false
+		}
+		methods = append(methods, method)
+		_ = f.send(map[string]any{"id": id, "result": result})
+		return true
+	})
+	require.NoError(t, m.Control(ctx, s, "chat", "select"))
+	// The final agent tab gets a blank replacement so Chrome keeps the window.
+	_, err := m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": float64(7)})
+	require.NoError(t, err)
+	mu.Lock()
+	require.Equal(t, []string{"tool.tab_list", "tool.tab_create", "tool.tab_close:7"}, methods)
+	require.Len(t, created, 1)
+	require.Equal(t, "about:blank", created[0]["url"])
+	require.Equal(t, false, created[0]["active"])
+	require.NotEmpty(t, created[0]["session_id"])
+	methods = nil
+	tabs = []map[string]any{
+		{"tab_id": 8, "window_id": 100, "scope": "agent"},
+		{"tab_id": 9, "window_id": 100, "scope": "user"},
+	}
+	mu.Unlock()
+	// Any other tab in the Agent Window, even a user's, keeps it open.
+	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 8})
+	require.NoError(t, err)
+	mu.Lock()
+	require.Equal(t, []string{"tool.tab_list", "tool.tab_close:8"}, methods)
+	// A refused close (unauthorized or borrowed tab) must not leave the
+	// placeholder behind: the target is still there, so the blank tab goes.
+	methods, created = nil, nil
+	tabs = []map[string]any{{"tab_id": 9, "window_id": 100, "scope": "agent"}}
+	closeError = "permission_denied"
+	mu.Unlock()
+	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 9})
+	require.ErrorContains(t, err, "permission_denied")
+	mu.Lock()
+	require.Equal(t, []string{
+		"tool.tab_list", "tool.tab_create", "tool.tab_close:9", "tool.tab_list", "tool.tab_close:8",
+	}, methods)
+	require.Len(t, tabs, 1)
+	require.Equal(t, 9, tabs[0]["tab_id"])
+	require.False(t, m.Status(s, "chat").Paused)
+	// When the extension already removed the target before the reply failed,
+	// the placeholder is what keeps the window open and must stay.
+	methods, created = nil, nil
+	closeError, closeDrops = "cdp_failed", true
+	mu.Unlock()
+	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 9})
+	require.ErrorContains(t, err, "cdp_failed")
+	mu.Lock()
+	require.Equal(t, []string{
+		"tool.tab_list", "tool.tab_create", "tool.tab_close:9", "tool.tab_list",
+	}, methods)
+	require.Len(t, tabs, 1)
+	require.Equal(t, 8, tabs[0]["tab_id"])
+	mu.Unlock()
 }

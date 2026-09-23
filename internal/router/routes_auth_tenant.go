@@ -245,6 +245,10 @@ func RegisterSystemRoutes(
 	handler *handler.SystemHandler,
 	g *rbacGuards,
 ) {
+	// JWT-only: this pops a native dialog on the Lite machine. API keys must
+	// not trigger it. Undeclared for the API-key gate, so keys are denied.
+	r.POST("/system/host-project-dir", g.Viewer(), handler.PickHostProjectDir)
+
 	systemRoutes := g.apiKeyGroup(r.Group("/system"), apiKeyManageVectorStores(apiKeyFullAccess()))
 	{
 		systemRoutes.With(apiKeyAny()).GET("/capabilities", g.Viewer(), handler.GetDeploymentCapabilities)

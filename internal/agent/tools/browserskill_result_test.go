@@ -107,13 +107,20 @@ func TestBrowserRPCFailureReachesModelAndAllowsFreshObservation(t *testing.T) {
 	require.True(t, fresh.Success)
 	require.Equal(t, 2, manager.calls)
 	invalid, err := registry.ExecuteTool(
-		ctx, "local_browser", json.RawMessage(`{"method":"observe","max_text_chars":3000}`),
+		ctx, "local_browser", json.RawMessage(`{"method":"observe","max_tokens":750}`),
 	)
 	require.NoError(t, err)
 	require.False(t, invalid.Success)
 	require.Contains(t, invalid.Error, "allowed fields:")
-	require.Contains(t, invalid.Error, "max_tokens")
+	require.Contains(t, invalid.Error, "max_text_chars")
 	require.Equal(t, 2, manager.calls, "invalid method fields must fail before dispatch")
+	capped, err := registry.ExecuteTool(
+		ctx, "local_browser", json.RawMessage(`{"method":"observe","max_text_chars":3000}`),
+	)
+	require.NoError(t, err)
+	require.True(t, capped.Success)
+	require.Equal(t, map[string]any{"max_tokens": 750}, manager.params)
+	require.Equal(t, 3, manager.calls)
 }
 
 func TestNavigationTimeoutRetainsTask(t *testing.T) {
@@ -159,6 +166,19 @@ func TestBorrowRecoveryDoesNotConfuseResumeWithApproval(t *testing.T) {
 	require.Contains(t, hint, "does not grant tab access")
 	require.Contains(t, hint, "After explicit resume")
 	require.Contains(t, hint, "Do not call request_help")
+	hint = browserRecoveryHint("tab_borrow", &browserskill.RPCError{
+		Code: "unsupported", Message: "No user tab can display the borrow confirmation",
+		Data: json.RawMessage(`{"reason":"confirmation_ui_unavailable"}`),
+	})
+	require.Contains(t, hint, "HTTP(S) page in a regular browser window")
+	require.Contains(t, hint, "Do not retry until a page is available")
+	hint = browserRecoveryHint("tab_borrow", &browserskill.RPCError{
+		Code: "invalid_params",
+		Message: "tab_borrow: tab 7 is not authorized and already lives in the Agent Window; " +
+			"move it to a regular browser window, then borrow it",
+	})
+	require.Contains(t, hint, "Ask the user to move")
+	require.Contains(t, hint, "navigate in an owned task tab")
 	// Unrelated permission denials must not suggest a way to borrow around them.
 	hint = browserRecoveryHint("click", &browserskill.RPCError{Code: "permission_denied", Message: "policy denied"})
 	require.NotContains(t, hint, "call tab_borrow")

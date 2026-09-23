@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -24,7 +23,7 @@ func newTestClient(t *testing.T, baseURL string, mutate func(*Config)) *Client {
 			ModelID: "model-123",
 			Auth:    api.HeaderAuth("x-goog-api-key", "test-key"),
 		},
-		Settings:  catalog.DefaultGoogleGenerativeAI(),
+		Settings:  api.DefaultGoogleGenerativeAI(),
 		Reasoning: true,
 	}
 	if mutate != nil {
@@ -196,7 +195,7 @@ func TestBuildRequestBodyGolden(t *testing.T) {
 		{
 			name: "level mode",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingMode = catalog.GoogleThinkingLevel
+				c.Settings.ThinkingMode = api.GoogleThinkingLevel
 				c.ThinkingLevels = api.ThinkingLevelMap{api.ReasoningHigh: api.StringPtr("high")}
 			},
 			thinking: `{"thinkingLevel": "high", "includeThoughts": true}`,
@@ -253,26 +252,26 @@ func TestThinkingConfigVariants(t *testing.T) {
 		},
 		{
 			name:   "mode none",
-			mutate: func(c *Config) { c.Settings.ThinkingMode = catalog.GoogleThinkingNone },
+			mutate: func(c *Config) { c.Settings.ThinkingMode = api.GoogleThinkingNone },
 			opts:   &api.Options{ReasoningEffort: api.ReasoningHigh},
 			want:   "",
 		},
 		{
 			name:   "level off unmapped",
-			mutate: func(c *Config) { c.Settings.ThinkingMode = catalog.GoogleThinkingLevel },
+			mutate: func(c *Config) { c.Settings.ThinkingMode = api.GoogleThinkingLevel },
 			opts:   &api.Options{ReasoningEffort: api.ReasoningOff},
 			want:   "",
 		},
 		{
 			name:   "level auto",
-			mutate: func(c *Config) { c.Settings.ThinkingMode = catalog.GoogleThinkingLevel },
+			mutate: func(c *Config) { c.Settings.ThinkingMode = api.GoogleThinkingLevel },
 			opts:   &api.Options{ReasoningEffort: api.ReasoningAuto},
 			want:   `{"includeThoughts": true}`,
 		},
 		{
 			name: "level clamps unsupported rung",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingMode = catalog.GoogleThinkingLevel
+				c.Settings.ThinkingMode = api.GoogleThinkingLevel
 				c.ThinkingLevels = api.ThinkingLevelMap{
 					api.ReasoningMedium: nil,
 					api.ReasoningHigh:   api.StringPtr("high"),
