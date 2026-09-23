@@ -78,7 +78,7 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeImageMultimodal}},
 	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeChunkExtract}},
 	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeQuestionGeneration}},
-	{Name: QueueMemory, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeMemoryExtract}},
+	{Name: QueueMemory, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeMemoryExtract, TypeMasteryCitation}},
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
@@ -255,6 +255,9 @@ const (
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
 	// TypeMemoryExtract 长期记忆抽取任务（会话轮次防抖后异步执行）
 	TypeMemoryExtract = "memory:extract"
+	// TypeMasteryCitation records the independent citation ledger off the
+	// interactive answer-completion path.
+	TypeMasteryCitation = "mastery:citation"
 )
 
 // MemoryExtractPayload carries everything the background distillation task
@@ -276,6 +279,16 @@ type MemoryExtractPayload struct {
 	// is what the settings UI promises.
 	ChatModelID string `json:"chat_model_id,omitempty"`
 	Language    string `json:"language,omitempty"`
+}
+
+// MasteryCitationPayload carries the caller scope and the immutable answer
+// citation snapshot to the background citation-ledger task. The answer path
+// must not rely on worker context for either value.
+type MasteryCitationPayload struct {
+	TracingContext
+	TenantID  uint64             `json:"tenant_id"`
+	SubjectID string             `json:"subject_id"`
+	Refs      []MemoryDocAffinity `json:"refs"`
 }
 
 // ExtractChunkPayload represents the extract chunk task payload

@@ -210,3 +210,33 @@ func TestWikiWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 		})
 	}
 }
+
+func TestMasteryReadRoutesDenyCrossTenantKB(t *testing.T) {
+	kbLookup := &stubWikiKBLookup{
+		kbs: map[string]*types.KnowledgeBase{
+			"kb-victim": {ID: "kb-victim", TenantID: 999, Type: types.KnowledgeBaseTypeWiki},
+		},
+	}
+	engine := newKBRouteTestEngine(t, 1, kbLookup, nil, func(r *gin.RouterGroup, guards *rbacGuards) {
+		RegisterMasteryRoutes(r, handler.NewMasteryHandler(nil, nil, nil, nil), guards)
+	})
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/knowledge-bases/kb-victim/memory/page-view"},
+		{http.MethodPost, "/api/v1/knowledge-bases/kb-victim/memory/exposure"},
+		{http.MethodPost, "/api/v1/knowledge-bases/kb-victim/memory/exposure/click"},
+		{http.MethodGet, "/api/v1/knowledge-bases/kb-victim/memory/mastery"},
+		{http.MethodGet, "/api/v1/knowledge-bases/kb-victim/memory/mastery/export"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			engine.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+		})
+	}
+}
