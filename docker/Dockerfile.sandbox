@@ -9,7 +9,7 @@
 #   cube             - the same environment plus Cube's envd daemon. Cube
 #                      builds templates straight from the image and probes
 #                      :49983/health, so an image without envd can only ever
-#                      fail. See docs/sandbox-cluster.md.
+#                      fail. See website-docs/06-development/04-sandbox-deployment.md.
 #   desktop-runtime  - runtime plus XFCE / x11vnc / websockify. Not a published
 #                      tag; the desktop and desktop-cube targets sit on it.
 #   desktop          - desktop-runtime, tagged for E2B (and a future Docker

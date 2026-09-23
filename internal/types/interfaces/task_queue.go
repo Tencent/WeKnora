@@ -95,12 +95,33 @@ type TaskPendingOpsScopeCleaner interface {
 	DeleteByScope(ctx context.Context, scope, scopeID string) error
 }
 
+// TaskPendingOpsDrainer is an optional extension for consumers that must give
+// up on a queue lane. DrainUnclaimedAndRelease deletes the lane's op rows for
+// documents no live batch holds (no row claimed at or after staleBefore) and
+// releases one finalizing slot per such document, atomically; it returns the
+// released dedup keys.
+type TaskPendingOpsDrainer interface {
+	DrainUnclaimedAndRelease(
+		ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time,
+	) ([]string, error)
+}
+
 // TaskPendingOpsKnowledgeBaseGuard atomically persists a KB-scoped operation
 // only while its knowledge base is still active. Implementations must
 // serialize the active-KB check with soft deletion so a detached worker cannot
 // recreate durable work after the deletion scrub has finished.
 type TaskPendingOpsKnowledgeBaseGuard interface {
 	EnqueueIfKnowledgeBaseActive(ctx context.Context, op *types.TaskPendingOp) (accepted bool, err error)
+}
+
+// TaskPendingOpsTenantLiveness reports whether a tenant is still alive (not
+// soft-deleted). Wiki task consumers use it to guarantee a deleted tenant
+// never triggers new model requests: the check runs at task entry (ingest
+// and finalize) and inside the guarded enqueue, alongside the KB-active
+// check — tenant soft-deletion removes the workspace without touching its
+// knowledge bases or durable pending ops.
+type TaskPendingOpsTenantLiveness interface {
+	HasActiveTenant(ctx context.Context, tenantID uint64) (bool, error)
 }
 
 // TaskPendingOpsFinalizingSeeder atomically hands a processing knowledge row
