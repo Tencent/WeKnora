@@ -118,6 +118,12 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		// retrieve capability declared by kRead; role guards intentionally defer
 		// machine-principal authorization to the API-key gate.
 		kRead.GET("/:id/download", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
+		kRead.GET("/:id/versions", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"),
+			handler.ListKnowledgeFileVersions)
+		k.POST("/:id/versions", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"),
+			handler.UploadKnowledgeFileVersion)
+		kRead.GET("/:id/versions/:version/download", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"),
+			handler.DownloadKnowledgeFileVersion)
 		kRead.GET("/:id/preview", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFile)
 		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)

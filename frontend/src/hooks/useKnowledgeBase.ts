@@ -27,6 +27,7 @@ export default function (knowledgeBaseId?: string) {
     source: "",
     channel: "",
     file_type: "",
+    file_version: 0,
     description: "",
     summary_status: "",
     parse_status: "",
@@ -38,6 +39,7 @@ export default function (knowledgeBaseId?: string) {
   });
   let knowledgeListGeneration = 0;
   let chunkRequestGeneration = 0;
+  let metadataRequestGeneration = 0;
   let activeKnowledgeId = '';
   const getKnowled = (
     query: ListKnowledgeFilesParams = { page: 1, page_size: 35 },
@@ -89,10 +91,13 @@ export default function (knowledgeBaseId?: string) {
       moreIndex.value = -1;
     }
   };
-  const getCardDetails = (item: any) => {
+  const getCardDetails = (item: any, preserveMetadata = false) => {
     activeKnowledgeId = item.id;
+    const metadataGeneration = ++metadataRequestGeneration;
     chunkRequestGeneration++;
-    Object.assign(details, {
+    details.md = [];
+    details.total = 0;
+    if (!preserveMetadata) Object.assign(details, {
       title: "",
       time: "",
       md: [],
@@ -101,6 +106,7 @@ export default function (knowledgeBaseId?: string) {
       source: "",
       channel: "",
       file_type: "",
+      file_version: 0,
       description: "",
       summary_status: "",
       parse_status: "",
@@ -111,6 +117,7 @@ export default function (knowledgeBaseId?: string) {
     });
     getKnowledgeDetails(item.id)
       .then((result: any) => {
+        if (metadataGeneration !== metadataRequestGeneration) return;
         if (result.success && result.data) {
           const { data } = result;
           Object.assign(details, {
@@ -121,6 +128,7 @@ export default function (knowledgeBaseId?: string) {
             source: data.source || '',
             channel: data.channel || '',
             file_type: data.file_type || '',
+            file_version: data.file_version || 1,
             description: data.description || '',
             summary_status: data.summary_status || '',
             parse_status: data.parse_status || '',

@@ -6736,6 +6736,21 @@ export default {
     }
   },
   knowledgeBase: {
+    fileVersions: {
+      confirmUpload: "업로드 확인",
+      title: "파일 버전",
+      uploadHint: "문서가 다시 처리됩니다. 이전 파일과 기존 참조는 유지됩니다.",
+      processing: "문서 처리가 완료된 후 새 버전을 업로드하세요.",
+      selectFile: "파일 선택",
+      upload: "새 버전 업로드",
+      current: "현재 버전",
+      empty: "버전 기록이 없습니다",
+      loadFailed: "버전 기록을 불러오지 못했습니다.",
+      uploadFailed: "새 버전을 업로드하지 못했습니다.",
+      uploaded: "새 버전이 업로드되었습니다. 문서 처리가 시작되었습니다.",
+      conflict: "문서가 변경되었거나 처리 중이거나 파일이 이미 존재합니다. 기록을 새로 고쳤으니 확인 후 다시 시도하세요.",
+      invalidSize: "{size} MB 이하의 비어 있지 않은 파일을 선택하세요.",
+    },
     tagAddAction: '태그 추가',
     documentCount: '문서 {count}개',
     filters: '필터',

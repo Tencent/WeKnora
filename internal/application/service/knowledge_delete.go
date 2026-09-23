@@ -569,6 +569,14 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 
 	storageAdjust := int64(0)
 	for _, knowledge := range knowledgeList {
+		if err := cleanupKnowledgeFileVersions(ctx, s.repo, knowledge.TenantID, knowledge.ID,
+			func(path string) interfaces.FileService {
+				return s.resolveFileServiceForPath(ctx, knowledgeBases[knowledge.KnowledgeBaseID], path)
+			}); err != nil {
+			// Rows are already gone, so failing the request cannot retry this
+			// cleanup. Keep going so the remaining objects are still removed.
+			logger.Warnf(ctx, "Historical files remain for knowledge %s: %v", knowledge.ID, err)
+		}
 		if knowledge.FilePath != "" {
 			fSvc := kbFileServices[knowledge.KnowledgeBaseID]
 			if err := fSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {

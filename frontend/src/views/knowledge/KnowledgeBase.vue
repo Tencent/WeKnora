@@ -1455,15 +1455,43 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
 // 恢复文档处理状态（用于刷新后恢复）
 
 const closeDoc = () => {
+  versionUploadFile.value = null;
   isCardDetails.value = false;
 };
-const openCardDetails = (item: KnowledgeCard) => {
+const versionHistoryRequested = ref(false);
+const versionUploadFile = ref<File | null>(null);
+const versionUploadInput = ref<HTMLInputElement>();
+let versionUploadTarget: { item: KnowledgeCard; kbId: string } | null = null;
+const chooseFileVersion = (item: KnowledgeCard) => {
+  if (item.type !== 'file' || !canEdit.value || !canDownloadKnowledge.value) return;
+  if (isParseInFlight(item.parse_status)) {
+    MessagePlugin.info(t('knowledgeBase.fileVersions.processing'));
+    return;
+  }
+  versionUploadTarget = { item, kbId: kbId.value };
+  versionUploadInput.value?.click();
+};
+const onVersionFileSelected = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  const target = versionUploadTarget;
+  input.value = '';
+  versionUploadTarget = null;
+  if (!file || !target || target.kbId !== kbId.value || !canEdit.value || !canDownloadKnowledge.value) return;
+  openCardDetails(target.item, true);
+  versionUploadFile.value = file;
+};
+const openCardDetails = (item: KnowledgeCard, showVersions = false) => {
+  versionUploadFile.value = null;
+  versionHistoryRequested.value = showVersions;
   isCardDetails.value = true;
   getCardDetails(item);
 };
 
 // Open source document preview from WikiBrowser
 const openSourceDoc = (knowledgeId: string) => {
+  versionUploadFile.value = null;
+  versionHistoryRequested.value = false;
   isCardDetails.value = true;
   getCardDetails({ id: knowledgeId });
 };
@@ -2154,12 +2182,24 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
   }
 };
 
+const onFileVersionUploaded = async (knowledgeId: string) => {
+  if (details.id === knowledgeId) {
+    details.parse_status = 'pending';
+    details.description = '';
+    getCardDetails({ id: knowledgeId }, true);
+  }
+  await loadKnowledgeFiles(kbId.value);
+  scheduleWikiStatusProbes();
+};
+
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'upload-version' | 'versions' | 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'upload-version') return chooseFileVersion(item);
+  if (action === 'versions' && item.type === 'file') { openCardDetails(item, true); return; }
   if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') {
@@ -2175,10 +2215,12 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'upload-version' | 'versions' | 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'upload-version') return chooseFileVersion(item);
+  if (action === 'versions' && item.type === 'file') { openCardDetails(item, true); return; }
   if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
@@ -2582,9 +2624,13 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
         </div>
       </template>
 
+      <input ref="versionUploadInput" type="file" hidden :aria-label="t('knowledgeBase.fileVersions.selectFile')"
+        @change="onVersionFileSelected" />
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
-        :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
+        :canDownloadKB="canDownloadKnowledge" :kbId="kbId" :showVersionHistory="versionHistoryRequested"
+        :versionUploadFile="versionUploadFile" @versionUploadFileConsumed="versionUploadFile = null"
+        @fileVersionUploaded="onFileVersionUploaded"
         @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
       </DocContent>
     </div>

@@ -517,6 +517,21 @@ export default {
     sharedTooltip: '共有スペース経由で外部ワークスペースからアクセス'
   },
   knowledgeBase: {
+    fileVersions: {
+      confirmUpload: "アップロードを確定",
+      title: "ファイルのバージョン",
+      uploadHint: "文書を再処理します。過去のファイルと既存の参照は保持されます。",
+      processing: "文書の処理が完了してから、新しいバージョンをアップロードしてください。",
+      selectFile: "ファイルを選択",
+      upload: "新しいバージョンをアップロード",
+      current: "現在のバージョン",
+      empty: "バージョン履歴はありません",
+      loadFailed: "バージョン履歴を読み込めませんでした。",
+      uploadFailed: "新しいバージョンをアップロードできませんでした。",
+      uploaded: "新しいバージョンをアップロードしました。文書を処理しています。",
+      conflict: "文書が更新されたか、処理中か、同じファイルが存在します。履歴を更新しました。確認してから再試行してください。",
+      invalidSize: "{size} MB 以下の空でないファイルを選択してください。",
+    },
     tagAddAction: 'タグを追加',
     documentCount: '{count} 件のドキュメント',
     filters: '絞り込み',

@@ -29,6 +29,7 @@ var versionedSQLiteTables = []string{
 	"fork_snapshot_leases",
 	"mcp_endpoints",
 	"message_artifacts",
+	"knowledge_file_versions",
 	"tenant_skills",
 	"tenant_skill_snapshots",
 	"tenant_skill_catalog",
@@ -38,11 +39,13 @@ var versionedSQLiteTables = []string{
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"memory_subjects": {"extraction_state"},                                                 // 000094
-	"memory_items":    {"replaces_id"},                                                      // 000094
-	"tenants":         {"api_principal_config"},                                             // 000064
-	"users":           {"is_system_admin"},                                                  // 000053
-	"knowledges":      {"pending_subtasks_count", "profile"},                                // 000056, 000101
+	"memory_subjects": {"extraction_state"},     // 000094
+	"memory_items":    {"replaces_id"},          // 000094
+	"tenants":         {"api_principal_config"}, // 000064
+	"users":           {"is_system_admin"},      // 000053
+	"knowledges": {
+		"pending_subtasks_count", "profile", "file_version", "file_version_created_at", // 000056/101/110
+	},
 	"knowledge_bases": {"profile_config", "generated_profile"},                              // 000101
 	"messages":        {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
 	"sessions": {
@@ -55,7 +58,11 @@ var versionedSQLiteColumns = map[string][]string{
 	"im_channels":        {"locale"},                         // 000030
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
 	"mcp_tool_approvals": {"enabled"},                        // 000091
-	"message_artifacts":  {"deleted_at"},                     // 000107
+	"knowledge_file_versions": {
+		"tenant_id", "knowledge_id", "version", "file_name", "file_type",
+		"file_size", "file_hash", "file_path", "created_at",
+	},
+	"message_artifacts": {"deleted_at"}, // 000107
 	"tenant_skills": {
 		"envs", "served", "catalog_id", "install_session_id", "install_message_id",
 	}, // 000028
@@ -98,6 +105,7 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 		"SQLite migrations must add the session/created_at index") // 000106
 	assertSQLiteAgentHistoryQueriesUseTheIndex(t, db)
 
+	assertSQLiteKnowledgeFileVersionsWork(t, db)
 	assertSQLiteShareLinkInvitationsWork(t, db)
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"),
@@ -164,6 +172,35 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	).Scan(&relationCount))
 	require.Equal(t, 1, relationCount)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"))
+}
+
+func TestSQLiteMigrationsUpgradeV29AddsFileVersions(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 29)
+	chdirAndRestore(t, legacyRoot)
+	dbPath := filepath.Join(t.TempDir(), "upgrade-v29.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+	require.False(t, sqliteTableExists(t, db, "knowledge_file_versions"))
+	require.False(t, sqliteColumnExists(t, db, "knowledges", "file_version"))
+	_, err := db.Exec(`INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, file_name)
+		VALUES ('existing-file', 1, 'existing-kb', 'file', 'Existing document', 'upload', 'existing.pdf')`)
+	require.NoError(t, err)
+
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db = openSQLiteDB(t, dbPath)
+	version, dirty := sqliteMigrationState(t, db)
+	require.Equal(t, expectedSQLiteMigrationVersion, version)
+	require.False(t, dirty)
+	var fileName string
+	var fileVersion int
+	require.NoError(t, db.QueryRow(
+		"SELECT file_name, file_version FROM knowledges WHERE id = 'existing-file'",
+	).Scan(&fileName, &fileVersion))
+	require.Equal(t, "existing.pdf", fileName)
+	require.Equal(t, 1, fileVersion)
+	assertSQLiteKnowledgeFileVersionsWork(t, db)
 }
 
 func TestSQLiteMigrationsUpgradeV16AddsSessionForkColumns(t *testing.T) {
@@ -384,4 +421,20 @@ func copySQLiteMigrationsThrough(t *testing.T, repoRoot string, maxVersion int) 
 	}
 	require.Greater(t, copied, 0)
 	return dest
+}
+
+// Check the actual migration constraints, beyond the GORM-created test schema.
+func assertSQLiteKnowledgeFileVersionsWork(t *testing.T, db *sql.DB) {
+	t.Helper()
+	require.True(t, sqliteIndexExists(t, db, "idx_knowledge_file_version"))
+	require.True(t, sqliteIndexExists(t, db, "idx_knowledge_file_versions_tenant_id"))
+	insert := `INSERT INTO knowledge_file_versions
+ (id, tenant_id, knowledge_id, version, file_name, file_type, file_size, file_hash, file_path, created_at)
+ VALUES (?, 1, 'versioned-file', ?, 'file.md', 'md', 3, 'hash', 'retained/file.md', CURRENT_TIMESTAMP)`
+	_, err := db.Exec(insert, "archive-1", 1)
+	require.NoError(t, err)
+	_, err = db.Exec(insert, "duplicate-archive-1", 1)
+	require.Error(t, err, "a document version can only be archived once")
+	_, err = db.Exec(insert, "archive-2", 2)
+	require.NoError(t, err)
 }
