@@ -92,7 +92,7 @@ function selectOption(value: ResourceSortValue) {
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   cursor: pointer;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
   transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
@@ -141,7 +141,7 @@ function selectOption(value: ResourceSortValue) {
   }
 
   &__label {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 20px;
     font-weight: 600;
   }
@@ -149,7 +149,7 @@ function selectOption(value: ResourceSortValue) {
   &__description {
     margin-top: 1px;
     color: var(--td-text-color-secondary);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 17px;
   }
 
@@ -172,7 +172,7 @@ function selectOption(value: ResourceSortValue) {
   background: transparent;
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   cursor: pointer;
 
   &:hover {
