@@ -61,7 +61,9 @@ func recoverPendingWikiTasks(db *gorm.DB, task interfaces.TaskEnqueuer) {
 		return
 	}
 	if cleanup.RowsAffected > 0 {
-		logger.Infof(ctx, "[WikiRecovery] removed %d pending row(s) for deleted knowledge bases or tenants", cleanup.RowsAffected)
+		logger.Infof(ctx,
+			"[WikiRecovery] removed %d pending row(s) for deleted knowledge bases or tenants",
+			cleanup.RowsAffected)
 	}
 
 	var scopes []pendingWikiScope
