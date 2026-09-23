@@ -154,6 +154,21 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 // Graph extraction can return many nodes and relations; 4096 tokens can truncate the JSON payload.
 const entityExtractionMaxTokens = 8192
 
+// errModelDeclined marks an LLM response that is prose (or empty) rather than
+// the requested structured output — typically a refusal for chunks that carry
+// no extractable entities (table-of-contents pages, prompts with no content).
+// Retrying the same input cannot change the outcome (issue #3600).
+var errModelDeclined = errors.New("model output is prose, not extractable structured content")
+
+// previewDeclinedText truncates the model's prose for compact error logs.
+func previewDeclinedText(s string) string {
+	runes := []rune(strings.TrimSpace(s))
+	if len(runes) > 120 {
+		return string(runes[:120]) + "…"
+	}
+	return string(runes)
+}
+
 // Extractor is a struct for extracting entities
 type Extractor struct {
 	chat     chat.Chat
@@ -380,12 +395,12 @@ func (f *Formater) formatExtraction(nodes []*types.GraphNode, relations []*types
 
 func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]interface{}, error) {
 	if text == "" {
-		return nil, errors.New("empty or invalid input string")
+		return nil, fmt.Errorf("%w: empty response", errModelDeclined)
 	}
 	content := f.extractContent(ctx, text)
 	// logger.Debugf(ctx, "Extracted content: %s", content)
 	if content == "" {
-		return nil, errors.New("empty or invalid input string")
+		return nil, fmt.Errorf("%w: empty response", errModelDeclined)
 	}
 
 	var parsed interface{}
@@ -394,6 +409,15 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 		err = json.Unmarshal([]byte(content), &parsed)
 	}
 	if err != nil {
+		// Distinguish "the model answered in prose" (e.g. it declined to
+		// extract a table-of-contents chunk with a Chinese "抱歉…" refusal)
+		// from "the model produced JSON that is malformed/truncated". A
+		// refusal contains no JSON structure at all; retrying the exact
+		// same input can never succeed, so callers treat it as a terminal
+		// skip instead of a retriable failure (issue #3600).
+		if !strings.ContainsAny(content, "{[") {
+			return nil, fmt.Errorf("%w: %s", errModelDeclined, previewDeclinedText(content))
+		}
 		return nil, fmt.Errorf("failed to parse %s content: %s", strings.ToUpper(string(f.formatType)), err.Error())
 	}
 	if parsed == nil {
@@ -423,6 +447,15 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphData, error) {
 	matchData, err := f.parseOutput(ctx, text)
 	if err != nil {
+		// A prose refusal (or empty response) means the chunk carries
+		// nothing extractable — e.g. a table-of-contents page. Return an
+		// empty graph instead of an error so the per-chunk task completes
+		// successfully and asynq does not replay a doomed LLM call
+		// (issue #3600). Malformed/truncated JSON still fails normally.
+		if errors.Is(err, errModelDeclined) {
+			logger.Warnf(ctx, "graph extraction skipped, model declined: %v", err)
+			return &types.GraphData{}, nil
+		}
 		return nil, err
 	}
 	if len(matchData) == 0 {
