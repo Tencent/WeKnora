@@ -863,6 +863,8 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 		Depth:           depth,
 		Types:           typesFilter,
 		Limit:           limit,
+		// 知识引导视图开关：前端切换按钮通过 mastery=true 请求掌握状态。
+		MasteryEnabled: strings.EqualFold(c.Query("mastery"), "true") || c.Query("mastery") == "1",
 	}
 	if h.memoryService != nil {
 		req.FamiliarKnowledgeIDs = h.memoryService.FamiliarKnowledgeIDs(c.Request.Context())
