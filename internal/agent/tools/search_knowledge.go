@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -288,7 +289,10 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
-	result := t.formatOutput(ctx, final, kbIDs, query, mode)
+	result, omitted := t.formatWithinBudget(ctx, final, kbIDs, query, mode)
+	if omitted > 0 {
+		result.Data["omitted_for_budget"] = omitted
+	}
 	annotateModeFallback(result.Data, mode, kbModes)
 	if rerankRejected > 0 {
 		result.Data["rerank_rejected"] = rerankRejected
@@ -297,6 +301,33 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		result.Output = emptySearchStatement(query, result.Data, len(kbIDs))
 	}
 	return result, nil
+}
+
+// formatWithinBudget renders results, dropping the lowest-ranked ones until
+// the rendering fits in four fifths of the tool output budget, and reports
+// how many were dropped. The model reads a view rebuilt from Data, which the
+// registry's output truncation does not reach, so 30 full chunks used to go
+// into the context whatever the budget. The best result is always kept.
+func (t *SearchKnowledgeTool) formatWithinBudget(
+	ctx context.Context,
+	results []*searchResultWithMeta,
+	kbIDs []string,
+	query, mode string,
+) (*types.ToolResult, int) {
+	budget := OutputBudget(ctx) * 4 / 5
+	kept := results
+	result := t.formatOutput(ctx, kept, kbIDs, query, mode)
+	for len(kept) > 1 {
+		size := utf8.RuneCountInString(result.Output)
+		if size <= budget {
+			break
+		}
+		// Shrink in proportion to the overshoot, at least one row per round.
+		n := min(len(kept)-1, max(1, len(kept)*budget/size))
+		kept = kept[:n]
+		result = t.formatOutput(ctx, kept, kbIDs, query, mode)
+	}
+	return result, len(results) - len(kept)
 }
 
 // emptySearchStatement describes an empty result, including any mode
@@ -555,6 +586,11 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						KeywordThreshold:     keywordThreshold,
 						DisableVectorMatch:   usedMode == SearchModeKeyword,
 						DisableKeywordsMatch: usedMode == SearchModeSemantic,
+						// Neighbor, parent and related chunks came back as
+						// extra rows that were never retrieved, tripling the
+						// rerank input; read_document(cN, context=k) serves
+						// surrounding text on demand.
+						SkipContextEnrichment: true,
 					})
 					if err != nil {
 						logger.Warnf(ctx, "[Tool][SearchKnowledge] Combined search failed for KBs %v: %v",
@@ -583,6 +619,11 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						ScopeTagIDs:          st.ScopeTagIDs,
 						DisableVectorMatch:   usedMode == SearchModeKeyword,
 						DisableKeywordsMatch: usedMode == SearchModeSemantic,
+						// Neighbor, parent and related chunks came back as
+						// extra rows that were never retrieved, tripling the
+						// rerank input; read_document(cN, context=k) serves
+						// surrounding text on demand.
+						SkipContextEnrichment: true,
 					})
 					if err != nil {
 						logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to search KB %s: %v", st.KnowledgeBaseID, err)
@@ -622,6 +663,7 @@ func (t *SearchKnowledgeTool) rerankResults(
 	res := reranking.Rerank(ctx, t.rerankModel, query, rows, reranking.Options{
 		Threshold:        threshold,
 		FallbackMinScore: reranking.FallbackMinScore(t.searchTargets.HasRecallThresholdOverride()),
+		MaxCandidates:    reranking.DefaultMaxCandidates,
 	})
 	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {
 		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %s",

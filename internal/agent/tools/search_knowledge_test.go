@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -287,5 +289,41 @@ func TestFormatOutputRendersFAQFromResultMetadata(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "<faq ") {
 		t.Fatalf("FAQ hit should render as <faq>: %q", res.Output)
+	}
+}
+
+// The model reads a view rebuilt from Data, which registry truncation does not
+// reach, so the tool fits its own rows to the output budget, keeps the best
+// ones, and says how many it left out.
+func TestFormatWithinBudgetDropsLowestRankedRows(t *testing.T) {
+	tool := &SearchKnowledgeTool{}
+	results := make([]*searchResultWithMeta, 10)
+	for i := range results {
+		results[i] = &searchResultWithMeta{
+			SearchResult: &types.SearchResult{
+				ID: fmt.Sprintf("c%d", i), KnowledgeID: "doc", ChunkIndex: i,
+				Content: strings.Repeat("内容", 500), Score: 1 - float64(i)/10,
+			},
+			KnowledgeBaseID: "kb-1",
+		}
+	}
+	ctx := WithOutputBudget(context.Background(), 5000)
+
+	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "q", SearchModeHybrid)
+	rows, _ := res.Data["results"].([]map[string]interface{})
+	if omitted == 0 || len(rows)+omitted != 10 {
+		t.Fatalf("rows=%d omitted=%d", len(rows), omitted)
+	}
+	if rows[0]["chunk_id"] != "c0" {
+		t.Fatalf("best row not kept first: %v", rows[0]["chunk_id"])
+	}
+	if n := utf8.RuneCountInString(res.Output); n > 4000 && len(rows) > 1 {
+		t.Fatalf("output has %d runes with %d rows, over the 4000-rune share of the budget", n, len(rows))
+	}
+
+	// A single row is always kept, even over budget.
+	single, omittedSingle := tool.formatWithinBudget(ctx, results[:1], []string{"kb-1"}, "q", SearchModeHybrid)
+	if omittedSingle != 0 || single.Data["count"] != 1 {
+		t.Fatalf("single row dropped: omitted=%d count=%v", omittedSingle, single.Data["count"])
 	}
 }

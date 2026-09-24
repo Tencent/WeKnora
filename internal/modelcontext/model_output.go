@@ -49,7 +49,7 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 			mode = "semantic"
 		}
 		output := r.modelKnowledgeOutput(mode, mapsValue(result.Data["results"]), result.Output)
-		return r.annotateModeFallbacks(output, result.Data)
+		return annotateOmittedResults(r.annotateModeFallbacks(output, result.Data), result.Data)
 	case "knowledge_chunks_list":
 		return r.modelKnowledgeChunksOutput(result.Data, result.Output)
 	case "document_info":
@@ -289,6 +289,19 @@ func (r *sourceRegistry) annotateModeFallbacks(output string, data map[string]in
 			escapeAttr(stringValue(fb, "mode")), escapeAttr(stringValue(fb, "reason")))
 	}
 	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
+// annotateOmittedResults tells the model how many lower-ranked results were
+// left out to fit the tool output budget, so it narrows the query or lowers
+// the limit instead of concluding nothing else matched.
+func annotateOmittedResults(output string, data map[string]interface{}) string {
+	omitted := intValue(data, "omitted_for_budget")
+	if omitted <= 0 || !strings.HasSuffix(output, "</retrieval>") {
+		return output
+	}
+	return strings.TrimSuffix(output, "</retrieval>") +
+		fmt.Sprintf("  <omitted count=\"%d\" reason=\"output_budget\">Lower-ranked results were left out to fit "+
+			"the output size. Narrow the query or lower limit to see them.</omitted>\n</retrieval>", omitted)
 }
 
 func viewForRow(row map[string]interface{}, mode string) string {

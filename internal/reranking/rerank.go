@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -30,6 +31,12 @@ const (
 	// at degradeFactor times itself, but never below degradeFloor.
 	degradeFloor  = 0.3
 	degradeFactor = 0.7
+
+	// DefaultMaxCandidates bounds how many candidates the chat pipeline and
+	// the agent tool send to the rerank model. Query expansion and
+	// per-document or per-tag targets each add a full retrieval list, and
+	// every candidate is a billed passage and a share of the latency.
+	DefaultMaxCandidates = 200
 )
 
 // FallbackMinScore returns the score the best candidate needs to survive an
@@ -54,6 +61,10 @@ type Options struct {
 	// FallbackMinScore is the score the best candidate needs to be kept when
 	// nothing passes the threshold. See FallbackMinScore().
 	FallbackMinScore float64
+	// MaxCandidates, when positive, reranks only the MaxCandidates rows with
+	// the highest retrieval score. Retrieval scores share one [0, 1] scale
+	// across searches, so the cut keeps the strongest candidates of each.
+	MaxCandidates int
 	// FAQScoreBoost, when above 1, multiplies the composite score of FAQ
 	// entries. The result is not capped at 1: capping made every strong FAQ
 	// tie at exactly 1, so their order among themselves fell to the
@@ -101,9 +112,10 @@ func Rerank(
 		},
 	}
 
+	keep := topByScore(results, opts.MaxCandidates)
 	candidateIdx := make([]int, 0, len(results))
 	for i, r := range results {
-		if r == nil {
+		if r == nil || (keep != nil && !keep[i]) {
 			continue
 		}
 		passage := ModelPassage(ctx, r)
@@ -119,6 +131,7 @@ func Rerank(
 		res.Diagnostics.Outcome = types.RerankOutcomeNoCandidates
 		return res
 	}
+	fitPassages(ctx, res.Passages, rerank.MaxPassageRunes(model, query))
 
 	scores, err := model.Rerank(ctx, query, res.Passages)
 	if err != nil {
@@ -187,6 +200,51 @@ func Rerank(
 	logger.Infof(ctx, "[Rerank] %d candidates -> %d results, outcome=%s threshold=%.3f effective=%.3f top=%.4f",
 		len(res.Candidates), len(res.Results), outcome, opts.Threshold, effective, res.Diagnostics.TopScore)
 	return res
+}
+
+// topByScore returns the positions of the limit highest-scoring rows, or nil
+// when limit is not positive or every row fits. Ties keep the earlier row.
+func topByScore(results []*types.SearchResult, limit int) map[int]bool {
+	if limit <= 0 || len(results) <= limit {
+		return nil
+	}
+	order := make([]int, 0, len(results))
+	for i, r := range results {
+		if r != nil {
+			order = append(order, i)
+		}
+	}
+	if len(order) <= limit {
+		return nil
+	}
+	sort.SliceStable(order, func(a, b int) bool { return results[order[a]].Score > results[order[b]].Score })
+	keep := make(map[int]bool, limit)
+	for _, i := range order[:limit] {
+		keep[i] = true
+	}
+	return keep
+}
+
+// fitPassages trims passages longer than limit runes (0 = no limit). A
+// passage is the title, then the chunk body, then captions, OCR text and
+// generated questions, so trimming the tail drops the least essential text
+// first. Vendors reject an oversized document, and the protocol layer fails
+// the whole request rather than truncate it, so a single chunk with a large
+// screenshot's OCR text used to cost every candidate its rerank score.
+func fitPassages(ctx context.Context, passages []string, limit int) {
+	if limit <= 0 {
+		return
+	}
+	trimmed := 0
+	for i, p := range passages {
+		if utf8.RuneCountInString(p) > limit {
+			passages[i] = string([]rune(p)[:limit])
+			trimmed++
+		}
+	}
+	if trimmed > 0 {
+		logger.Infof(ctx, "[Rerank] Trimmed %d passages to the model's %d-character limit", trimmed, limit)
+	}
 }
 
 // applyThreshold keeps the scores at or above opts.Threshold. When none

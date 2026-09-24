@@ -31,7 +31,8 @@ func TestNormalizedMatchCount(t *testing.T) {
 		{name: "omitted arrives as zero", requested: 0, want: types.DefaultRetrievalTopK},
 		{name: "negative cannot index a slice", requested: -1, want: types.DefaultRetrievalTopK},
 		{name: "explicit value is honored", requested: 3, want: 3},
-		{name: "large explicit value is not clamped here", requested: 10000, want: 10000},
+		{name: "large explicit value is clamped to the pool", requested: 10000, want: maxRetrievalPoolSize},
+		{name: "overflow-sized value is clamped", requested: 1 << 62, want: maxRetrievalPoolSize},
 	}
 
 	for _, tt := range tests {

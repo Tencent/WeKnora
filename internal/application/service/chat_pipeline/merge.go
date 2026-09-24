@@ -97,17 +97,26 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 }
 
 // selectInputResults picks rerank results if available, falling back to search
-// results sorted by score descending.
+// results sorted by score descending and cut to RerankTopK. Without the cut,
+// a turn whose rerank did not run (no model, model unavailable, API error)
+// resolved parents, FAQ answers and neighbors for every search hit — up to
+// hundreds with query expansion and per-document targets — before top-k
+// dropped most of them.
 func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
 	if len(chatManage.RerankResult) > 0 {
 		return chatManage.RerankResult
 	}
-	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
-		"reason": "empty_rerank_result",
-	})
 	result := chatManage.SearchResult
-	sort.Slice(result, func(i, j int) bool {
+	sort.SliceStable(result, func(i, j int) bool {
 		return result[i].Score > result[j].Score
+	})
+	if k := chatManage.RerankTopK; k > 0 && len(result) > k {
+		result = result[:k]
+	}
+	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
+		"reason":    "empty_rerank_result",
+		"input_cnt": len(chatManage.SearchResult),
+		"kept_cnt":  len(result),
 	})
 	return result
 }

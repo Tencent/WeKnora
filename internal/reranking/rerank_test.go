@@ -243,3 +243,65 @@ func TestFallbackMinScore(t *testing.T) {
 		t.Fatalf("explicit-scope fallback minimum = %v, want -Inf", got)
 	}
 }
+
+// limitedReranker is a stubReranker whose vendor documents a passage limit.
+type limitedReranker struct {
+	stubReranker
+	limit int
+}
+
+func (l *limitedReranker) MaxPassageRunes(string) int { return l.limit }
+
+// An oversized passage used to fail the whole request, costing every
+// candidate its score. Passages are now fitted to the documented limit,
+// keeping the title and body ahead of the appended enrichments.
+func TestRerank_fitsPassagesToModelLimit(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("长", 50)
+	model := &limitedReranker{stubReranker: stubReranker{scores: []float64{0.9, 0.8}}, limit: 20}
+	res := Rerank(context.Background(), model, "q", rows(long, "short"), Options{Threshold: 0.3})
+	if len(model.documents) != 2 {
+		t.Fatalf("documents sent = %d", len(model.documents))
+	}
+	if n := len([]rune(model.documents[0])); n != 20 {
+		t.Fatalf("long passage has %d runes, want 20", n)
+	}
+	if model.documents[1] != "short" {
+		t.Fatalf("short passage changed: %q", model.documents[1])
+	}
+	if len(res.Results) != 2 {
+		t.Fatalf("results = %d", len(res.Results))
+	}
+}
+
+// An OCR chunk's body is the OCR text and its image_info repeats it.
+func TestEnrichedPassage_skipsImageTextRepeatingTheBody(t *testing.T) {
+	t.Parallel()
+	r := &types.SearchResult{
+		Content:   "Invoice total 42",
+		ChunkType: string(types.ChunkTypeImageOCR),
+		ImageInfo: `[{"url":"u","ocr_text":"Invoice total 42","caption":"a scanned invoice"}]`,
+	}
+	got := EnrichedPassage(context.Background(), r)
+	if strings.Count(got, "Invoice total 42") != 1 || !strings.Contains(got, "a scanned invoice") {
+		t.Fatalf("passage = %q", got)
+	}
+}
+
+// MaxCandidates sends only the best-scored rows to the model, and indices
+// still point into the caller's slice.
+func TestRerank_maxCandidatesKeepsBestRetrievalScores(t *testing.T) {
+	t.Parallel()
+	in := rows("a", "b", "c", "d")
+	for i, s := range []float64{0.2, 0.9, 0.1, 0.8} {
+		in[i].Score = s
+	}
+	model := &stubReranker{scores: []float64{0.7, 0.6}}
+	res := Rerank(context.Background(), model, "q", in, Options{Threshold: 0.3, MaxCandidates: 2})
+	if strings.Join(model.documents, ",") != "b,d" {
+		t.Fatalf("documents sent = %v, want the two best-scored rows in input order", model.documents)
+	}
+	if len(res.Indices) != 2 || res.Indices[0] != 1 || res.Indices[1] != 3 {
+		t.Fatalf("indices = %v, want [1 3]", res.Indices)
+	}
+}

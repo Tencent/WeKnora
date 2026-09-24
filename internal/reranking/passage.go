@@ -120,6 +120,14 @@ func CleanPassage(text string) string {
 func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 	combinedText := CleanPassage(result.Content)
 	var enrichments []string
+	// An image OCR or caption chunk's body is that same text, and its
+	// image_info repeats it; appending it again doubled the passage.
+	body := strings.TrimSpace(result.Content)
+	addImageText := func(text string) {
+		if text != "" && strings.TrimSpace(text) != body {
+			enrichments = append(enrichments, text)
+		}
+	}
 
 	if result.ImageInfo != "" {
 		var imageInfos []types.ImageInfo
@@ -127,12 +135,8 @@ func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 			logger.Warnf(ctx, "[Rerank] Failed to parse image info of chunk %s: %v", result.ID, err)
 		} else {
 			for _, img := range imageInfos {
-				if img.Caption != "" {
-					enrichments = append(enrichments, img.Caption)
-				}
-				if img.OCRText != "" {
-					enrichments = append(enrichments, img.OCRText)
-				}
+				addImageText(img.Caption)
+				addImageText(img.OCRText)
 			}
 		}
 	}

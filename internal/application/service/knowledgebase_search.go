@@ -329,7 +329,11 @@ func normalizedMatchCount(requested int) int {
 	if requested <= 0 {
 		return types.DefaultRetrievalTopK
 	}
-	return requested
+	// A search never returns more than the pool it draws from, so capping here
+	// changes no result; it keeps the over-retrieval arithmetic
+	// (MatchCount*5*len(KBs), the FAQ path's MatchCount*3) from overflowing
+	// into a negative TopK on absurd input.
+	return min(requested, maxRetrievalPoolSize)
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in
