@@ -41,17 +41,27 @@ type ImageAsset struct {
 }
 
 // ImageListFilter holds the gallery query constraints coming from the UI.
+// Attribute references use namespaced gallery attribute ids
+// ("<sourceID>:<name>", e.g. "builtin:caption", "system:contain.text").
 type ImageListFilter struct {
-	// Keyword matches caption OR ocr_text (case-insensitive substring).
+	// Keyword is matched as a case-insensitive substring against the union
+	// of the SearchIn fields' values.
 	Keyword string
-	// SortBy is one of "created_at", "updated_at", "caption".
+	// SearchIn lists the namespaced attribute ids to search. Empty means
+	// the gallery default (builtin caption + ocr_text). The handler only
+	// forwards ids whose resolved usage has in_searchfield=true.
+	SearchIn []string
+	// SortBy is a namespaced attribute id with in_sortfield=true. The bare
+	// legacy values ("created_at", "updated_at", "caption") are still
+	// accepted and mapped onto their builtin ids.
 	SortBy string
 	// SortOrder is "asc" or "desc".
 	SortOrder string
-	// AttrFilters maps an attribute name (e.g. "contain.text") to the set of
-	// allowed values. Values within one attribute are OR-ed; attributes are
-	// AND-ed. An attribute present in this map but with no observed value on an
-	// image fails the match (so "unobserved" is a distinct, filterable state).
+	// AttrFilters maps a namespaced attribute id to the set of allowed
+	// values. Values within one attribute are OR-ed; attributes are
+	// AND-ed. An attribute present in this map but with no value on an
+	// image fails the match (so "unobserved" is a distinct, filterable
+	// state).
 	AttrFilters map[string][]string
 	// IsEnabled, when non-nil, restricts to chunks with that enabled state.
 	IsEnabled *bool

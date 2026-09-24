@@ -1,0 +1,211 @@
+package service
+
+import (
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// ---------------------------------------------------------------------------
+// Gallery attribute plumbing
+//
+// The gallery reads every attribute through one resolver keyed by the
+// namespaced attribute id ("<sourceID>:<name>"). Builtin attributes resolve
+// from the asset's own fields; every other source resolves from the generic
+// attribute map stored in image_info. This keeps the gallery decoupled from
+// any particular attribute pipeline: it compiles and runs whether or not the
+// observation feature is deployed, and new sources light up without changes
+// here.
+// ---------------------------------------------------------------------------
+
+// galleryImageInfo is the gallery's generic read model of one entry in a
+// chunk's image_info JSON array. It is deliberately local and free of the
+// attribute pipeline's types; the observations are read as a plain map.
+type galleryImageInfo struct {
+	URL         string `json:"url"`
+	OriginalURL string `json:"original_url"`
+	Caption     string `json:"caption"`
+	OCRText     string `json:"ocr_text"`
+	// Attrs mirrors the persisted observation envelope; the usable
+	// attribute map is nested one level down under "attrs".
+	Attrs struct {
+		Attrs map[string]any `json:"attrs"`
+	} `json:"attrs"`
+}
+
+// galleryBuiltinSourceID is the id of the builtin attribute source the types
+// package registers; its values come from asset fields, not image_info.
+const galleryBuiltinSourceID = "builtin"
+
+// galleryDefaultSearchFields is the search field set used when the request
+// does not name one (older clients, API callers).
+var galleryDefaultSearchFields = []string{
+	types.GalleryAttrID(galleryBuiltinSourceID, "caption"),
+	types.GalleryAttrID(galleryBuiltinSourceID, "ocr_text"),
+}
+
+// galleryBuiltinValue resolves one builtin attribute to its normalized
+// string value for the asset.
+func galleryBuiltinValue(asset types.ImageAsset, name string) (string, bool) {
+	switch name {
+	case "caption":
+		return asset.Caption, true
+	case "ocr_text":
+		return asset.OCRText, true
+	case "created_at":
+		return asset.CreatedAt.UTC().Format(time.RFC3339), true
+	case "updated_at":
+		return asset.UpdatedAt.UTC().Format(time.RFC3339), true
+	case "is_enabled":
+		return strconv.FormatBool(asset.IsEnabled), true
+	}
+	return "", false
+}
+
+// galleryAttrValue resolves any namespaced gallery attribute id to its
+// normalized string value. ok is false when the attribute has no value on
+// this image — "unobserved" stays distinct from any observed value.
+func galleryAttrValue(asset types.ImageAsset, id string) (string, bool) {
+	source, name, ok := types.SplitGalleryAttrID(id)
+	if !ok {
+		return "", false
+	}
+	if source == galleryBuiltinSourceID {
+		return galleryBuiltinValue(asset, name)
+	}
+	if v, present := asset.Attrs[name]; present {
+		return galleryAttrValueString(v), true
+	}
+	return "", false
+}
+
+// galleryAttrValueString normalizes an arbitrary observed attribute value
+// (string / bool / number / array) into the string space search, filter and
+// sort all operate in. Arrays join their elements so "keyword list" values
+// remain substring-searchable as a whole.
+func galleryAttrValueString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case bool:
+		return strconv.FormatBool(t)
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, item := range t {
+			parts = append(parts, galleryAttrValueString(item))
+		}
+		return strings.Join(parts, " ")
+	default:
+		return ""
+	}
+}
+
+// filterImageAssets applies keyword, attribute and enabled-state constraints.
+// Attribute filters are AND-ed across attributes and OR-ed within one
+// attribute's allowed values; an attribute that has no value on an image
+// fails the match. The keyword is a case-insensitive substring match against
+// the union of the requested search fields.
+func filterImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter) []types.ImageAsset {
+	if filter == nil {
+		return assets
+	}
+	kw := strings.ToLower(strings.TrimSpace(filter.Keyword))
+	fields := filter.SearchIn
+	if len(fields) == 0 {
+		fields = galleryDefaultSearchFields
+	}
+	out := assets[:0]
+	for _, a := range assets {
+		if filter.IsEnabled != nil && a.IsEnabled != *filter.IsEnabled {
+			continue
+		}
+		if kw != "" {
+			var b strings.Builder
+			for _, f := range fields {
+				if v, ok := galleryAttrValue(a, f); ok {
+					b.WriteString(v)
+					b.WriteByte(' ')
+				}
+			}
+			if !strings.Contains(strings.ToLower(b.String()), kw) {
+				continue
+			}
+		}
+		if !matchAttrFilters(a, filter.AttrFilters) {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func matchAttrFilters(a types.ImageAsset, attrFilters map[string][]string) bool {
+	for name, allowed := range attrFilters {
+		if len(allowed) == 0 {
+			continue
+		}
+		observed, ok := galleryAttrValue(a, name)
+		if !ok {
+			return false
+		}
+		hit := false
+		for _, want := range allowed {
+			if observed == strings.TrimSpace(want) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			return false
+		}
+	}
+	return true
+}
+
+// sortImageAssets orders the assets by the requested namespaced attribute.
+// Legacy bare field names ("created_at" / "updated_at" / "caption") map onto
+// their builtin ids. Attribute sorts compare the normalized string values;
+// an image without a value for the sort attribute compares as empty.
+func sortImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter) {
+	sortBy := types.GalleryAttrID(galleryBuiltinSourceID, "created_at")
+	sortOrder := "desc"
+	if filter != nil {
+		switch filter.SortBy {
+		case "created_at", "updated_at", "caption":
+			sortBy = types.GalleryAttrID(galleryBuiltinSourceID, filter.SortBy)
+		case "":
+			// keep default
+		default:
+			sortBy = filter.SortBy
+		}
+		if filter.SortOrder == "asc" {
+			sortOrder = "asc"
+		}
+	}
+	sort.SliceStable(assets, func(i, j int) bool {
+		less := galleryAssetLess(assets[i], assets[j], sortBy)
+		if sortOrder == "desc" {
+			return !less
+		}
+		return less
+	})
+}
+
+func galleryAssetLess(a, b types.ImageAsset, sortBy string) bool {
+	av, _ := galleryAttrValue(a, sortBy)
+	bv, _ := galleryAttrValue(b, sortBy)
+	// Timestamp fields compare chronologically; everything else as text.
+	if av != "" && bv != "" {
+		if at, err1 := time.Parse(time.RFC3339, av); err1 == nil {
+			if bt, err2 := time.Parse(time.RFC3339, bv); err2 == nil {
+				return at.Before(bt)
+			}
+		}
+	}
+	return strings.ToLower(av) < strings.ToLower(bv)
+}

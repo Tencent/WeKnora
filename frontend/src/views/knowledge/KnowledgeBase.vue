@@ -2283,7 +2283,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
               </template>
               <span :class="['breadcrumb-tab', { active: activeKbTab === 'gallery' }]"
                 @click="activeKbTab = 'gallery'">
-                <t-icon name="image" />
                 {{ $t('knowledgeEditor.wikiBrowser.tabGallery') }}
               </span>
             </h2>

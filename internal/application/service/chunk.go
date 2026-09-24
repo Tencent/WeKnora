@@ -238,7 +238,7 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 		if chunk.ImageInfo == "" {
 			continue
 		}
-		var infos []types.ImageInfo
+		var infos []galleryImageInfo
 		if err := json.Unmarshal([]byte(chunk.ImageInfo), &infos); err != nil || len(infos) == 0 {
 			continue
 		}
@@ -334,98 +334,6 @@ func resolveImageAssetSourceNames(
 		names[item.ID] = item.Title
 	}
 	return names
-}
-
-// filterImageAssets applies keyword, attribute and enabled-state constraints.
-// Attribute filters are AND-ed across attributes and OR-ed within one attribute's
-// allowed values; an attribute that was not observed on an image fails the match.
-func filterImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter) []types.ImageAsset {
-	if filter == nil {
-		return assets
-	}
-	kw := strings.ToLower(strings.TrimSpace(filter.Keyword))
-	out := assets[:0]
-	for _, a := range assets {
-		if filter.IsEnabled != nil && a.IsEnabled != *filter.IsEnabled {
-			continue
-		}
-		if kw != "" {
-			hay := strings.ToLower(a.Caption + " " + a.OCRText)
-			if !strings.Contains(hay, kw) {
-				continue
-			}
-		}
-		if !matchAttrFilters(a, filter.AttrFilters) {
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
-}
-
-func matchAttrFilters(a types.ImageAsset, attrFilters map[string][]string) bool {
-	for name, allowed := range attrFilters {
-		if len(allowed) == 0 {
-			continue
-		}
-		observed, ok := a.Attrs[name]
-		if !ok {
-			return false
-		}
-		normalized := normalizeAttrValue(observed)
-		hit := false
-		for _, want := range allowed {
-			if normalized == strings.TrimSpace(want) {
-				hit = true
-				break
-			}
-		}
-		if !hit {
-			return false
-		}
-	}
-	return true
-}
-
-func normalizeAttrValue(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case bool:
-		return strconv.FormatBool(t)
-	case float64:
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	default:
-		return fmt.Sprintf("%v", t)
-	}
-}
-
-func sortImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter) {
-	sortBy := "created_at"
-	sortOrder := "desc"
-	if filter != nil {
-		if filter.SortBy == "updated_at" || filter.SortBy == "caption" {
-			sortBy = filter.SortBy
-		}
-		if filter.SortOrder == "asc" {
-			sortOrder = "asc"
-		}
-	}
-	sort.SliceStable(assets, func(i, j int) bool {
-		var less bool
-		switch sortBy {
-		case "updated_at":
-			less = assets[i].UpdatedAt.Before(assets[j].UpdatedAt)
-		case "caption":
-			less = strings.ToLower(assets[i].Caption) < strings.ToLower(assets[j].Caption)
-		default:
-			less = assets[i].CreatedAt.Before(assets[j].CreatedAt)
-		}
-		if sortOrder == "desc" {
-			return !less
-		}
-		return less
-	})
 }
 
 // updateChunk updates a chunk

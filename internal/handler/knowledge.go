@@ -35,6 +35,8 @@ type KnowledgeHandler struct {
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 	chunkService      interfaces.ChunkService
+	systemSettingSvc  interfaces.SystemSettingService
+	userSvc           interfaces.UserService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
 	backlog           backlogProbe
@@ -81,6 +83,8 @@ func NewKnowledgeHandler(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	chunkService interfaces.ChunkService,
+	systemSettingSvc interfaces.SystemSettingService,
+	userSvc interfaces.UserService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
 	housekeeping *service.HousekeepingService,
@@ -97,6 +101,8 @@ func NewKnowledgeHandler(
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
 		chunkService:      chunkService,
+		systemSettingSvc:  systemSettingSvc,
+		userSvc:           userSvc,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
 	}
@@ -1128,11 +1134,12 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Param        id          path      string  true  "知识库 ID"
 // @Param        page        query     int     false "页码，默认 1"
 // @Param        page_size   query     int     false "每页数量，默认 20，最大 1000"
-// @Param        keyword     query     string  false "关键字，匹配图片描述或 OCR 文本"
-// @Param        sort_by     query     string  false "排序字段：created_at / updated_at / caption，默认 created_at"
+// @Param        keyword     query     string  false "关键字，对 search_in 指定字段做不区分大小写的子串匹配"
+// @Param        search_in   query     string  false "参与搜索的属性 ID（逗号分隔，如 builtin:caption,system:keyword）；须为契约中 in_searchfield=true 的字段"
+// @Param        sort_by     query     string  false "排序属性 ID（如 builtin:created_at）；须为契约中 in_sortfield=true 的字段，默认 created_at"
 // @Param        sort_order  query     string  false "排序方向：asc / desc，默认 desc"
 // @Param        is_enabled  query     bool    false "仅包含启用状态的图片"
-// @Param        attr_<name> query     string  false "按图片属性筛选（如 attr_contain.text=block），同一属性可重复传参以 OR 多个值"
+// @Param        attr_filters query    string  false "属性筛选 JSON（如 {\"system:contain.text\":[\"block\"]}），同一属性多值 OR、属性间 AND，且须为 in_filter=true 的字段"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/images [get]
@@ -1155,26 +1162,57 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 
 	filter := &types.ImageListFilter{
 		Keyword:   strings.TrimSpace(c.Query("keyword")),
-		SortBy:    c.DefaultQuery("sort_by", "created_at"),
+		SortBy:    strings.TrimSpace(c.Query("sort_by")),
 		SortOrder: c.DefaultQuery("sort_order", "desc"),
 	}
 	if v := c.Query("is_enabled"); v != "" {
 		enabled := v == "true"
 		filter.IsEnabled = &enabled
 	}
-	attrFilters := map[string][]string{}
-	for key, values := range c.Request.URL.Query() {
-		if !strings.HasPrefix(key, "attr_") {
-			continue
+
+	// Every gallery attribute reference is validated against the resolved
+	// contract: a client may only search / sort / filter on fields whose
+	// usage flags allow it, so stale or hand-rolled callers cannot smuggle
+	// in fields the configuration no longer serves.
+	resolved := h.resolveGalleryConfig(ctx, kbID)
+	filterable, searchable, sortable := galleryEligibility(resolved)
+
+	// Attribute filters arrive as one JSON object keyed by namespaced
+	// attribute id ({"system:contain.text":["block"]}); values within one
+	// attribute are OR-ed, attributes are AND-ed.
+	if raw := c.Query("attr_filters"); raw != "" {
+		var attrFilters map[string][]string
+		if err := json.Unmarshal([]byte(raw), &attrFilters); err == nil && len(attrFilters) > 0 {
+			kept := make(map[string][]string, len(attrFilters))
+			for id, values := range attrFilters {
+				if filterable[id] && len(values) > 0 {
+					kept[id] = values
+				}
+			}
+			if len(kept) > 0 {
+				filter.AttrFilters = kept
+			}
 		}
-		attrName := strings.TrimPrefix(key, "attr_")
-		if attrName == "" {
-			continue
-		}
-		attrFilters[attrName] = append(attrFilters[attrName], values...)
 	}
-	if len(attrFilters) > 0 {
-		filter.AttrFilters = attrFilters
+
+	// search_in: comma-separated namespaced attribute ids; ineligible ids
+	// are dropped, and an empty remainder falls back to the service default
+	// (builtin caption + ocr_text).
+	if raw := strings.TrimSpace(c.Query("search_in")); raw != "" {
+		var searchIn []string
+		for _, id := range strings.Split(raw, ",") {
+			id = strings.TrimSpace(id)
+			if id != "" && searchable[id] {
+				searchIn = append(searchIn, id)
+			}
+		}
+		filter.SearchIn = searchIn
+	}
+
+	// sort_by must be sort-eligible; anything else falls back to the
+	// service default (builtin created_at, descending).
+	if filter.SortBy != "" && !sortable[filter.SortBy] {
+		filter.SortBy = ""
 	}
 
 	result, err := h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &pagination, filter)
@@ -1190,6 +1228,96 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 		"total":     result.Total,
 		"page":      result.Page,
 		"page_size": result.PageSize,
+	})
+}
+
+// galleryEligibility extracts the per-attribute usage sets that incoming
+// query parameters are validated against, keyed by namespaced attribute id.
+func galleryEligibility(resolved *types.GalleryResolvedConfig) (filterable, searchable, sortable map[string]bool) {
+	filterable = map[string]bool{}
+	searchable = map[string]bool{}
+	sortable = map[string]bool{}
+	if resolved == nil {
+		return
+	}
+	for _, attr := range resolved.Attributes {
+		if attr.Usage.InFilter {
+			filterable[attr.ID] = true
+		}
+		if attr.Usage.InSearchField {
+			searchable[attr.ID] = true
+		}
+		if attr.Usage.InSortField {
+			sortable[attr.ID] = true
+		}
+	}
+	return
+}
+
+// resolveGalleryConfig merges the gallery configuration tiers for one
+// request: the system tier from system_settings ("gallery.policy"), the user
+// tier from the caller's saved preferences. The KB tier slot is reserved for
+// the per-KB config (not wired yet — the merge engine already accepts it).
+// A missing or malformed tier degrades to "no overrides", never to an error:
+// the gallery must render even on a half-configured deployment.
+func (h *KnowledgeHandler) resolveGalleryConfig(ctx context.Context, kbID string) *types.GalleryResolvedConfig {
+	var systemTier *types.GalleryPolicyTier
+	if h.systemSettingSvc != nil {
+		if row, err := h.systemSettingSvc.Get(ctx, "gallery.policy"); err == nil && row != nil {
+			if raw, err := row.AsString(); err == nil && strings.TrimSpace(raw) != "" {
+				tier := &types.GalleryPolicyTier{}
+				if err := json.Unmarshal([]byte(raw), tier); err == nil {
+					systemTier = tier
+				} else {
+					logger.Warnf(ctx, "gallery.policy is not valid JSON; ignoring: %v", err)
+				}
+			}
+		}
+	}
+
+	var userTier *types.GalleryPolicyTier
+	if h.userSvc != nil {
+		if userID, ok := types.UserIDFromContext(ctx); ok && userID != "" {
+			if u, err := h.userSvc.GetUserByID(ctx, userID); err == nil && u != nil && u.Preferences.Gallery != nil {
+				g := u.Preferences.Gallery
+				userTier = &types.GalleryPolicyTier{Mode: g.Mode, Status: g.Status}
+			}
+		}
+	}
+
+	return types.ResolveGalleryConfig(kbID, systemTier, nil, userTier)
+}
+
+// GetGalleryConfig serves the gallery's self-describing contract: which
+// attribute sources are live, every resolved attribute (definition + merged
+// usage + which tier decided it), and the caller's search activation state
+// (mode + per-field status). The frontend renders its filter panel, search
+// field checkboxes and sort dropdown purely from this response — no gallery
+// UI rule is hardcoded client-side.
+func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = types.WithExecutionTenant(ctx, effectiveTenantID)
+
+	resolved := h.resolveGalleryConfig(ctx, kbID)
+	status := resolved.Status
+	if status == nil {
+		status = map[string]string{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"attribute_sources": resolved.AttributeSources,
+			"attributes":        resolved.Attributes,
+			"mode":              resolved.Mode,
+			"status":            status,
+		},
 	})
 }
 

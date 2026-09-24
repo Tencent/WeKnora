@@ -1,23 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   listGalleryImages,
+  fetchGalleryConfig,
+  type GalleryConfig,
+  type GalleryResolvedAttr,
   type ImageAsset,
   type ImageListParams,
-  type ImageSortBy,
 } from '@/api/image-gallery'
-import {
-  fetchImageAttrSchema,
-  FALLBACK_IMAGE_ATTR_SCHEMA,
-  type ImageAttrSchema,
-  type ImageAttrSpec,
-} from '@/api/knowledge-base'
-import {
-  imageAttrDisplay,
-  type ImageAttrDisplay,
-  type ImageAttrValueDisplay,
-} from '@/utils/imageAttrDisplay'
+import { updateMyPreferences } from '@/api/auth'
+import { buildProtectedFileRequest } from '@/utils/protectedFileAccess'
 
 const props = defineProps<{
   knowledgeBaseId: string
@@ -36,15 +29,42 @@ const page = ref(1)
 const pageSize = ref(24)
 
 const keyword = ref('')
-const sortBy = ref<ImageSortBy>('created_at')
+const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('desc')
-const enabledFilter = ref<'all' | 'enabled' | 'disabled'>('all')
-// Attribute multi-select: attribute name -> selected allowed values (OR within).
+// Attribute selections: namespaced attr id -> selected allowed values (OR
+// within the attribute, AND across attributes).
 const attrSelections = ref<Record<string, string[]>>({})
 
-// Schema-driven filter options.
-const schema = ref<ImageAttrSchema>(FALLBACK_IMAGE_ATTR_SCHEMA)
-const schemaDisplays = ref<ImageAttrDisplay[]>([])
+// ---------------------------------------------------------------------------
+// Gallery contract (self-describing, fetched once per mount)
+//
+// Everything the UI offers — filter panel sections, searchable fields, sort
+// options — comes from the contract. No gallery rule is hardcoded here, so
+// new backend attributes and runtime policy edits light up on reload.
+// ---------------------------------------------------------------------------
+const configLoaded = ref(false)
+const config = ref<GalleryConfig>({
+  attribute_sources: [],
+  attributes: [],
+  mode: 'all',
+  status: {},
+})
+const searchMode = ref<'all' | 'custom'>('all')
+// Per-attribute search toggle, keyed by namespaced attr id ("on"/"off").
+// Unrecorded fields are off in custom mode; source declarations carry no
+// on/off — activation is always the user's own record.
+const searchStatus = ref<Record<string, string>>({})
+
+const filterAttrs = computed(() => config.value.attributes.filter((a) => a.usage.in_filter))
+const searchAttrs = computed(() => config.value.attributes.filter((a) => a.usage.in_searchfield))
+const sortAttrs = computed(() => config.value.attributes.filter((a) => a.usage.in_sortfield))
+
+// The fields actually searched right now: every eligible field in "all"
+// mode; the user's on-record in custom mode.
+const activeSearchIds = computed(() => {
+  if (searchMode.value === 'all') return searchAttrs.value.map((a) => a.id)
+  return searchAttrs.value.filter((a) => searchStatus.value[a.id] === 'on').map((a) => a.id)
+})
 
 // ---------------------------------------------------------------------------
 // Viewer state
@@ -58,38 +78,124 @@ const current = computed<ImageAsset | null>(() =>
 )
 
 // ---------------------------------------------------------------------------
-// Attribute display helpers (uses the schema registry for human wording)
+// Image URL resolution
+//
+// Backend returns `resource://` handles (internal storage handles) which the
+// browser cannot render directly. They must be fetched through the KB file
+// proxy (buildProtectedFileRequest) and turned into object URLs first.
+// Normal http(s) URLs pass through untouched.
 // ---------------------------------------------------------------------------
-function buildSchemaDisplays(specs: ImageAttrSpec[]) {
-  schemaDisplays.value = specs.map((spec) => imageAttrDisplay(spec, t, te))
+const thumbUrls = ref<Record<string, string>>({})
+const thumbBroken = ref<Record<string, boolean>>({})
+const viewerUrl = ref('')
+const createdBlobs = new Set<string>()
+
+function isRenderable(url: string): boolean {
+  return !!url && !/^(resource|provider|storage):\/\//i.test(url)
 }
 
-/** Render one observed attribute value in words, falling back to the raw value. */
-function displayAttrValue(name: string, raw: unknown): string {
-  const attr = schemaDisplays.value.find((a) => a.name === name)
-  if (!attr) return String(raw)
-  let normalized: string
-  if (typeof raw === 'boolean') normalized = String(raw).toLowerCase()
-  else if (typeof raw === 'number') normalized = String(raw)
-  else normalized = String(raw)
-  const match: ImageAttrValueDisplay | undefined = attr.values.find(
-    (v) => v.value === normalized,
-  )
-  return match ? match.label : normalized
+async function resolveImageSrc(rawUrl: string): Promise<string> {
+  if (!rawUrl || isRenderable(rawUrl)) return rawUrl
+  const req = buildProtectedFileRequest(rawUrl, {
+    mode: 'knowledgeBase',
+    kbId: props.knowledgeBaseId,
+  })
+  if (!req) return rawUrl
+  try {
+    const resp = await fetch(req.url, { headers: req.headers })
+    if (!resp.ok) return rawUrl
+    const blob = await resp.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    createdBlobs.add(objectUrl)
+    return objectUrl
+  } catch {
+    return rawUrl
+  }
 }
 
-function attrLabel(name: string): string {
-  const attr = schemaDisplays.value.find((a) => a.name === name)
-  return attr ? attr.label : name
+function thumbUrl(img: ImageAsset): string {
+  return thumbUrls.value[img.id] || img.url
+}
+
+async function resolveThumbnails() {
+  const prev = thumbUrls.value
+  const next: Record<string, string> = {}
+  for (const img of items.value) {
+    next[img.id] = await resolveImageSrc(img.url)
+  }
+  // Revoke blob URLs that are no longer on screen to avoid leaks.
+  for (const id of Object.keys(prev)) {
+    const prevUrl = prev[id]
+    if (!(id in next) && createdBlobs.has(prevUrl)) {
+      URL.revokeObjectURL(prevUrl)
+      createdBlobs.delete(prevUrl)
+    }
+  }
+  thumbUrls.value = next
+  thumbBroken.value = {}
+}
+
+function onThumbError(id: string) {
+  thumbBroken.value = { ...thumbBroken.value, [id]: true }
+}
+
+watch(
+  () => current.value,
+  async (img) => {
+    if (!img) {
+      viewerUrl.value = ''
+      return
+    }
+    imageFailed.value = false
+    viewerUrl.value = await resolveImageSrc(img.url)
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Label helpers
+//
+// The contract carries the backend's default-language wording. Locale files
+// overlay translations keyed by the (sanitized) attribute id; anything not
+// translated falls back to the contract text.
+// ---------------------------------------------------------------------------
+const sanitizeKey = (id: string) => id.replace(/[:.]/g, '_')
+
+function attrLabel(attr: GalleryResolvedAttr): string {
+  const key = `gallery.attr.${sanitizeKey(attr.id)}`
+  if (te(key)) return t(key)
+  // Overlay the attribute pipeline's own translations when present.
+  const legacy = `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}`
+  if (te(legacy)) return t(legacy)
+  return attr.label || attr.id
+}
+
+function attrValueLabel(attr: GalleryResolvedAttr, value: string): string {
+  const key = `gallery.attr.${sanitizeKey(attr.id)}_value_${value}`
+  if (te(key)) return t(key)
+  return attr.value_labels?.[value] || value
+}
+
+/** One observed attribute value of an image, in words where possible. */
+function displayObservedValue(attr: GalleryResolvedAttr | undefined, raw: unknown): string {
+  const normalized = typeof raw === 'boolean' ? String(raw) : String(raw ?? '')
+  if (!attr) return normalized
+  return attr.value_labels?.[normalized] || normalized
+}
+
+function findAttrByRawName(name: string): GalleryResolvedAttr | undefined {
+  return config.value.attributes.find((a) => a.name === name)
 }
 
 const currentAttrs = computed(() => {
-  if (!current.value) return [] as Array<{ name: string; label: string; value: string }>
-  return Object.entries(current.value.attrs).map(([name, raw]) => ({
-    name,
-    label: attrLabel(name),
-    value: displayAttrValue(name, raw),
-  }))
+  if (!current.value) return [] as Array<{ key: string; label: string; value: string }>
+  return Object.entries(current.value.attrs).map(([name, raw]) => {
+    const attr = findAttrByRawName(name)
+    return {
+      key: name,
+      label: attr ? attrLabel(attr) : name,
+      value: displayObservedValue(attr, raw),
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -97,24 +203,30 @@ const currentAttrs = computed(() => {
 // ---------------------------------------------------------------------------
 function buildParams(): ImageListParams {
   const attrFilters: Record<string, string[]> = {}
-  for (const [name, values] of Object.entries(attrSelections.value)) {
-    if (values && values.length) attrFilters[name] = values
+  for (const [id, values] of Object.entries(attrSelections.value)) {
+    if (values && values.length) attrFilters[id] = values
   }
   const params: ImageListParams = {
     keyword: keyword.value.trim() || undefined,
-    sortBy: sortBy.value,
+    searchIn: activeSearchIds.value,
+    sortBy: sortBy.value || undefined,
     sortOrder: sortOrder.value,
     attrFilters: Object.keys(attrFilters).length ? attrFilters : undefined,
     page: page.value,
     pageSize: pageSize.value,
   }
-  if (enabledFilter.value === 'enabled') params.isEnabled = true
-  else if (enabledFilter.value === 'disabled') params.isEnabled = false
   return params
 }
 
 async function reload() {
   if (!props.knowledgeBaseId) return
+  // Searching with every field switched off would silently fall back to the
+  // server default — not what a custom-mode user asked for. Short-circuit.
+  if (keyword.value.trim() && activeSearchIds.value.length === 0) {
+    items.value = []
+    total.value = 0
+    return
+  }
   loading.value = true
   error.value = ''
   try {
@@ -122,10 +234,12 @@ async function reload() {
     items.value = res.items
     total.value = res.total
     if (viewerOpen.value && viewerIndex.value >= res.items.length) closeViewer()
+    void resolveThumbnails()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     items.value = []
     total.value = 0
+    thumbUrls.value = {}
   } finally {
     loading.value = false
   }
@@ -134,6 +248,38 @@ async function reload() {
 function resetPageAndReload() {
   page.value = 1
   reload()
+}
+
+// ---------------------------------------------------------------------------
+// Personal state persistence (mode + per-field search toggles)
+// ---------------------------------------------------------------------------
+let prefsTimer: ReturnType<typeof setTimeout> | undefined
+function persistSearchPrefs() {
+  if (!configLoaded.value) return
+  if (prefsTimer) clearTimeout(prefsTimer)
+  prefsTimer = setTimeout(() => {
+    void updateMyPreferences({
+      gallery: { mode: searchMode.value, status: { ...searchStatus.value } },
+    })
+  }, 500)
+}
+
+function onSearchModeChange(value: string | number | boolean) {
+  searchMode.value = value === 'custom' ? 'custom' : 'all'
+  persistSearchPrefs()
+  resetPageAndReload()
+}
+
+// Reconcile the whole on/off map from one checkbox-group change, then
+// persist and re-query.
+function onSearchFieldsChange(vals: Array<string | number | boolean>) {
+  const next: Record<string, string> = { ...searchStatus.value }
+  for (const attr of searchAttrs.value) {
+    next[attr.id] = vals.includes(attr.id) ? 'on' : 'off'
+  }
+  searchStatus.value = next
+  persistSearchPrefs()
+  resetPageAndReload()
 }
 
 // ---------------------------------------------------------------------------
@@ -149,19 +295,35 @@ function onSearchInput() {
   searchTimer = setTimeout(() => resetPageAndReload(), 350)
 }
 
-function onAttrGroupChange(attrName: string, values: Array<string | number | boolean>) {
+function onAttrGroupChange(attrId: string, values: Array<string | number | boolean>) {
   attrSelections.value = {
     ...attrSelections.value,
-    [attrName]: values.map((v) => String(v)),
+    [attrId]: values.map((v) => String(v)),
   }
   resetPageAndReload()
 }
 
+function onKeywordsInput(attrId: string, raw: string) {
+  const values = raw
+    .split(/[,，;；\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  attrSelections.value = { ...attrSelections.value, [attrId]: values }
+  resetPageAndReload()
+}
+
+function keywordsInputValue(attrId: string): string {
+  return (attrSelections.value[attrId] || []).join(', ')
+}
+
 function clearFilters() {
   keyword.value = ''
-  enabledFilter.value = 'all'
   attrSelections.value = {}
   resetPageAndReload()
+}
+
+function hasActiveFilters(): boolean {
+  return !!keyword.value.trim() || Object.values(attrSelections.value).some((v) => v.length)
 }
 
 function onPageChange(next: number) {
@@ -210,11 +372,18 @@ function sourceLabel(img: ImageAsset): string {
 // ---------------------------------------------------------------------------
 onMounted(async () => {
   try {
-    schema.value = await fetchImageAttrSchema(props.knowledgeBaseId)
+    const cfg = await fetchGalleryConfig(props.knowledgeBaseId)
+    config.value = cfg
+    searchMode.value = cfg.mode
+    searchStatus.value = { ...cfg.status }
+    configLoaded.value = true
   } catch {
-    schema.value = FALLBACK_IMAGE_ATTR_SCHEMA
+    // Degraded mode: no contract, no attribute UI — builtin listing and
+    // default search still work.
   }
-  buildSchemaDisplays(schema.value.attributes)
+  if (!sortBy.value && sortAttrs.value.length) {
+    sortBy.value = sortAttrs.value[0].id
+  }
   await reload()
 })
 </script>
@@ -226,34 +395,53 @@ onMounted(async () => {
       <aside class="ig-filters">
         <div class="ig-filters-title">{{ t('knowledgeEditor.wikiBrowser.gallery.filtersTitle') }}</div>
 
-        <div class="ig-filter-group">
-          <label class="ig-filter-label">{{ t('knowledgeEditor.wikiBrowser.gallery.statusLabel') }}</label>
-          <t-radio-group v-model="enabledFilter" variant="default-filled" @change="resetPageAndReload">
-            <t-radio value="all">{{ t('knowledgeEditor.wikiBrowser.gallery.statusAll') }}</t-radio>
-            <t-radio value="enabled">{{ t('knowledgeEditor.wikiBrowser.gallery.statusEnabled') }}</t-radio>
-            <t-radio value="disabled">{{ t('knowledgeEditor.wikiBrowser.gallery.statusDisabled') }}</t-radio>
+        <!-- Search fields: activation mode + per-field toggles -->
+        <div v-if="searchAttrs.length" class="ig-filter-group">
+          <label class="ig-filter-label">{{ t('knowledgeEditor.wikiBrowser.gallery.searchFields') }}</label>
+          <t-radio-group :value="searchMode" variant="default-filled" @change="onSearchModeChange">
+            <t-radio value="all">{{ t('knowledgeEditor.wikiBrowser.gallery.modeAll') }}</t-radio>
+            <t-radio value="custom">{{ t('knowledgeEditor.wikiBrowser.gallery.modeCustom') }}</t-radio>
           </t-radio-group>
-        </div>
-
-        <div v-if="schemaDisplays.length" class="ig-filter-group">
-          <label class="ig-filter-label">{{ t('knowledgeEditor.wikiBrowser.gallery.attrSection') }}</label>
-          <div v-for="attr in schemaDisplays" :key="attr.name" class="ig-attr-filter">
-            <div class="ig-attr-name" :title="attr.description">{{ attr.label }}</div>
+          <div v-if="searchMode === 'all'" class="ig-search-hint">
+            {{ t('knowledgeEditor.wikiBrowser.gallery.searchAllHint') }}
+          </div>
+          <div v-else class="ig-search-fields">
             <t-checkbox-group
-              :value="attrSelections[attr.name] || []"
-              @change="(vals: Array<string | number | boolean>) => onAttrGroupChange(attr.name, vals)"
+              :value="activeSearchIds"
+              @change="(vals: Array<string | number | boolean>) => onSearchFieldsChange(vals)"
             >
-              <t-checkbox
-                v-for="v in attr.values"
-                :key="v.value"
-                :value="v.value"
-              >
-                {{ v.label }}
-              </t-checkbox>
+              <t-checkbox v-for="attr in searchAttrs" :key="attr.id" :value="attr.id" :label="attrLabel(attr)" />
             </t-checkbox-group>
           </div>
         </div>
-        <div v-else class="ig-no-attrs">{{ t('knowledgeEditor.wikiBrowser.gallery.noAttrs') }}</div>
+
+        <!-- Attribute filters, rendered from the contract -->
+        <div v-if="filterAttrs.length" class="ig-filter-group">
+          <label class="ig-filter-label">{{ t('knowledgeEditor.wikiBrowser.gallery.attrSection') }}</label>
+          <div v-for="attr in filterAttrs" :key="attr.id" class="ig-attr-filter">
+            <div class="ig-attr-name" :title="attr.description">{{ attrLabel(attr) }}</div>
+            <t-checkbox-group
+              v-if="attr.type === 'extent' || attr.type === 'presence'"
+              :value="attrSelections[attr.id] || []"
+              @change="(vals: Array<string | number | boolean>) => onAttrGroupChange(attr.id, vals)"
+            >
+              <t-checkbox v-for="v in attr.values || []" :key="v" :value="v">
+                {{ attrValueLabel(attr, v) }}
+              </t-checkbox>
+            </t-checkbox-group>
+            <t-input
+              v-else-if="attr.type === 'keywords'"
+              :value="keywordsInputValue(attr.id)"
+              clearable
+              :placeholder="t('knowledgeEditor.wikiBrowser.gallery.keywordsPlaceholder')"
+              @change="(v: string) => onKeywordsInput(attr.id, v)"
+              @enter="(v: string) => onKeywordsInput(attr.id, v)"
+            />
+          </div>
+        </div>
+        <div v-if="!filterAttrs.length" class="ig-no-attrs">
+          {{ t('knowledgeEditor.wikiBrowser.gallery.noAttrs') }}
+        </div>
 
         <t-button theme="default" variant="text" class="ig-clear" @click="clearFilters">
           {{ t('knowledgeEditor.wikiBrowser.gallery.clearFilters') }}
@@ -275,10 +463,8 @@ onMounted(async () => {
             <template #prefix-icon><t-icon name="search" /></template>
           </t-input>
 
-          <t-select v-model="sortBy" class="ig-sort" @change="resetPageAndReload">
-            <t-option value="created_at" :label="t('knowledgeEditor.wikiBrowser.gallery.sortCreatedAt')" />
-            <t-option value="updated_at" :label="t('knowledgeEditor.wikiBrowser.gallery.sortUpdatedAt')" />
-            <t-option value="caption" :label="t('knowledgeEditor.wikiBrowser.gallery.sortCaption')" />
+          <t-select v-if="sortAttrs.length" v-model="sortBy" class="ig-sort" @change="resetPageAndReload">
+            <t-option v-for="attr in sortAttrs" :key="attr.id" :value="attr.id" :label="attrLabel(attr)" />
           </t-select>
 
           <t-button theme="default" variant="outline" @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'; resetPageAndReload()">
@@ -293,7 +479,7 @@ onMounted(async () => {
           <div v-if="error" class="ig-error">{{ error }}</div>
 
           <div v-else-if="!items.length" class="ig-empty">
-            {{ keyword || enabledFilter !== 'all' || Object.values(attrSelections).some((v) => v.length)
+            {{ hasActiveFilters()
               ? t('knowledgeEditor.wikiBrowser.gallery.emptyFiltered')
               : t('knowledgeEditor.wikiBrowser.gallery.empty') }}
           </div>
@@ -307,7 +493,16 @@ onMounted(async () => {
               @click="openViewer(idx)"
             >
               <div class="ig-card-thumb">
-                <img :src="img.url" :alt="img.caption" loading="lazy" />
+                <img
+                  v-if="!thumbBroken[img.id]"
+                  :src="thumbUrl(img)"
+                  :alt="img.caption"
+                  loading="lazy"
+                  @error="onThumbError(img.id)"
+                />
+                <div v-else class="ig-thumb-error">
+                  {{ t('knowledgeEditor.wikiBrowser.gallery.imageLoadError') }}
+                </div>
               </div>
               <div class="ig-card-meta">
                 <div class="ig-card-caption">{{ img.caption || t('knowledgeEditor.wikiBrowser.gallery.noCaption') }}</div>
@@ -339,7 +534,7 @@ onMounted(async () => {
         </button>
 
         <div class="ig-viewer-image">
-          <img v-if="!imageFailed" :src="current.url" :alt="current.caption" @error="imageFailed = true" />
+          <img v-if="!imageFailed" :src="viewerUrl" :alt="current.caption" @error="imageFailed = true" />
           <div v-else class="ig-viewer-image-error">{{ t('knowledgeEditor.wikiBrowser.gallery.imageLoadError') }}</div>
         </div>
 
@@ -350,7 +545,7 @@ onMounted(async () => {
         <aside class="ig-viewer-info">
           <h3>{{ t('knowledgeEditor.wikiBrowser.gallery.attributes') }}</h3>
           <div v-if="currentAttrs.length">
-            <div v-for="a in currentAttrs" :key="a.name" class="ig-info-row">
+            <div v-for="a in currentAttrs" :key="a.key" class="ig-info-row">
               <span class="ig-info-key">{{ a.label }}</span>
               <span class="ig-info-val">{{ a.value }}</span>
             </div>
@@ -414,6 +609,17 @@ onMounted(async () => {
   font-size: 13px;
   color: var(--td-text-color-secondary, #666);
   margin-bottom: 8px;
+}
+.ig-search-hint {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder, #999);
+  margin-top: 6px;
+}
+.ig-search-fields {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .ig-attr-filter {
   margin-bottom: 12px;
@@ -506,6 +712,12 @@ onMounted(async () => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.ig-thumb-error {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder, #999);
+  padding: 0 8px;
+  text-align: center;
 }
 .ig-card-meta {
   padding: 8px 10px;

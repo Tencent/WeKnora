@@ -90,6 +90,11 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kbImagesRead := kbImages.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
 		kbImagesRead.GET("/images", g.Viewer(), g.KBAccessRead("id"), handler.ListImages)
+		// Self-describing gallery contract: live attribute sources, the
+		// resolved attribute list (definitions + merged usage) and the
+		// caller's search activation state. Per-KB because KB-defined
+		// attribute sources resolve against :id.
+		kbImagesRead.GET("/gallery-config", g.Viewer(), g.KBAccessRead("id"), handler.GetGalleryConfig)
 	}
 
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
