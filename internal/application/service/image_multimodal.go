@@ -420,7 +420,11 @@ func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig) string {
 			"Output one line per observation using exactly this format, then a DESCRIPTION line:\n\n",
 		language)
 	for _, spec := range types.ImageAttrRegistry {
-		fmt.Fprintf(&b, "%s: <%s>\n", spec.Name, strings.Join(spec.Values, " | "))
+		allowed := make([]string, 0, len(spec.Values))
+		for _, value := range spec.Values {
+			allowed = append(allowed, value.Value)
+		}
+		fmt.Fprintf(&b, "%s: <%s>\n", spec.Name, strings.Join(allowed, " | "))
 	}
 	b.WriteString("DESCRIPTION: <one or two sentences>\n\nRules:\n")
 	for _, spec := range types.ImageAttrRegistry {

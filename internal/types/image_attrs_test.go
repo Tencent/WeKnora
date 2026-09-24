@@ -24,16 +24,19 @@ func TestImageAttrRegistryHasActiveAttributes(t *testing.T) {
 		if strings.TrimSpace(spec.Description) == "" {
 			t.Errorf("%s has no display description", spec.Name)
 		}
-		values := spec.Values
-		if spec.Type == AttrTypePresence && len(values) == 0 {
-			values = []string{"true", "false"}
-		}
-		if len(values) == 0 {
+		if len(spec.Values) == 0 {
+			if spec.Type == AttrTypePresence {
+				t.Errorf("%s is presence but declares no values", spec.Name)
+				continue
+			}
 			t.Errorf("%s declares no values", spec.Name)
 		}
-		for _, v := range values {
-			if strings.TrimSpace(spec.ValueLabels[v]) == "" {
-				t.Errorf("%s value %q has no human explanation", spec.Name, v)
+		for _, v := range spec.Values {
+			if strings.TrimSpace(v.Label) == "" {
+				t.Errorf("%s value %q has no short label", spec.Name, v.Value)
+			}
+			if strings.TrimSpace(v.Description) == "" {
+				t.Errorf("%s value %q has no human explanation", spec.Name, v.Value)
 			}
 		}
 		switch spec.Name {
