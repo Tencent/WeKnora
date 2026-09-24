@@ -218,6 +218,14 @@ func (c *Connector) walk(
 
 			detail, err := cli.GetDocDetail(ctx, d.ID)
 			if err != nil {
+				// Do not acknowledge a version whose content was not fetched. Keep
+				// the old version for retries and subsequent deletion detection.
+				delete(newCursor.BookDocTimes[bookIDStr], docIDStr)
+				if prev != nil {
+					if oldTime, ok := prev.BookDocTimes[bookIDStr][docIDStr]; ok {
+						newCursor.BookDocTimes[bookIDStr][docIDStr] = oldTime
+					}
+				}
 				// Record failure but continue (placeholder item with error metadata).
 				// Keep doc_id/book_id/slug for observability pipelines that join on these.
 				out = append(out, types.FetchedItem{
