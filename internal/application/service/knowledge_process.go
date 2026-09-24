@@ -3369,7 +3369,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	markKnowledgeProcessing(knowledge, time.Now())
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to update status to processing: %v", err)
-		return nil
+		return fmt.Errorf("mark manual knowledge processing: %w", err)
 	}
 
 	// Allocate a fresh span-tracking attempt for this manual (re)index.
@@ -3525,7 +3525,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	markKnowledgeProcessing(knowledge, time.Now())
 	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "failed to update knowledge status to processing: %v", err)
-		return nil
+		return fmt.Errorf("mark knowledge processing: %w", err)
 	}
 	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
 		logger.Infof(ctx, "Document source replaced, aborting after status update: %s", payload.KnowledgeID)
