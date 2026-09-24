@@ -3,6 +3,7 @@ package searchutil
 import (
 	"math"
 	"math/rand"
+	"strings"
 	"testing"
 )
 
@@ -13,7 +14,7 @@ import (
 
 func legacyChatComposite(modelScore, baseScore float64, knowledgeSource string) float64 {
 	sourceWeight := 1.0
-	if lowerASCII(knowledgeSource) == "web_search" {
+	if strings.ToLower(knowledgeSource) == "web_search" {
 		sourceWeight = 0.95
 	}
 	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
@@ -28,7 +29,7 @@ func legacyChatComposite(modelScore, baseScore float64, knowledgeSource string) 
 
 func legacyAgentComposite(startAt, endAt int, modelScore, baseScore float64, knowledgeSource string) float64 {
 	sourceWeight := 1.0
-	if lowerASCII(knowledgeSource) == "web_search" {
+	if strings.ToLower(knowledgeSource) == "web_search" {
 		sourceWeight = 0.95
 	}
 	positionPrior := 1.0

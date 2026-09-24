@@ -1,6 +1,9 @@
 package searchutil
 
-import "math"
+import (
+	"math"
+	"strings"
+)
 
 // ranking.go is the single implementation of the post-rerank ranking core
 // shared by the chat pipeline and the agent knowledge-search tool. Both sides
@@ -23,31 +26,17 @@ func CompositeScoreRaw(modelScore, baseScore float64, knowledgeSource string) fl
 }
 
 func isWebSearchSource(knowledgeSource string) bool {
-	return lowerASCII(knowledgeSource) == "web_search"
+	return strings.EqualFold(knowledgeSource, "web_search")
 }
 
-// lowerASCII avoids importing strings for one comparison. KnowledgeSource is
-// produced by WeKnora itself, so non-ASCII case folding is not a concern.
-func lowerASCII(value string) string {
-	changed := false
-	bytes := []byte(value)
-	for i, b := range bytes {
-		if b >= 'A' && b <= 'Z' {
-			bytes[i] = b + ('a' - 'A')
-			changed = true
-		}
-	}
-	if !changed {
-		return value
-	}
-	return string(bytes)
-}
-
-// PositionPrior returns the agent pipeline's document-position multiplier:
-// chunks earlier in the document get up to +0.05, later ones down to -0.05.
-// An invalid or empty range yields the neutral 1.0. Whether the chat pipeline
-// should adopt this factor is a maintainer decision; until then it stays an
-// explicit, centrally-documented agent-side input.
+// PositionPrior returns the agent pipeline's document-position multiplier.
+// startAt/endAt are the chunk's own character offsets, so the ratio
+// 1 - startAt/(endAt+1) is always positive and the multiplier stays within
+// [1.0, 1.05]: an early-in-span chunk gets the full +0.05, and there is no
+// below-1.0 penalty. An invalid or empty range yields the neutral 1.0.
+// Whether the chat pipeline should adopt this factor is a maintainer
+// decision; until then it stays an explicit, centrally-documented
+// agent-side input.
 func PositionPrior(startAt, endAt int) float64 {
 	if startAt < 0 || endAt <= startAt {
 		return 1.0
