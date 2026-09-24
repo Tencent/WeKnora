@@ -240,37 +240,45 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 **사용자 컴퓨터의 브라우저 조작.** Tencent가 오픈소스로 공개한 BrowserSkill 확장 프로그램으로 에이전트가 사용자의 Chrome이나 Edge에서 페이지를 열고 양식을 입력합니다. 로그인이나 CAPTCHA는 사용자에게 넘깁니다. [문서 →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
 
+<a href="./docs/images/readme/spotlight-browser-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-browser-dark.webp">
   <img src="./docs/images/readme/spotlight-browser-light.webp" alt="로컬 브라우저" width="100%">
 </picture>
+</a>
 
 ### 스킬과 샌드박스
 
 **스킬을 실행하고 파일을 생성.** Docker, E2B, Cube를 지원합니다. 같은 세션의 여러 턴이 하나의 작업 공간을 공유하며, 생성된 파일은 미리 보고 내려받을 수 있습니다. 대화 옆에서 그래픽 데스크톱이나 대화형 터미널을 열어 에이전트의 각 단계를 확인하고, 필요하면 직접 이어받을 수 있습니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
 
+<a href="./docs/images/readme/spotlight-sandbox-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
   <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="스킬과 샌드박스" width="100%">
 </picture>
+</a>
 
 ### 자동 Wiki
 
 **문서를 탐색 가능한 Wiki로.** Wiki를 켜면 지식베이스 문서에서 인물, 제품, 개념을 추출해 출처가 달린 페이지를 만들고 디렉터리별로 탐색할 수 있습니다. 지식 그래프에서 페이지 간 관계를 보고, 페이지를 직접 편집하며 변경 내역을 되돌릴 수 있습니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/14-wiki)
 
+<a href="./docs/images/readme/spotlight-wiki-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-wiki-dark.webp">
   <img src="./docs/images/readme/spotlight-wiki-light.webp" alt="자동 Wiki" width="100%">
 </picture>
+</a>
 
 ### 관측 가능성
 
 **추적과 런타임 모니터링.** Langfuse가 에이전트 각 단계의 추론, 도구 호출, 토큰 사용량을 추적합니다. 문서 파싱 타임라인은 단계별 진행 상황을 보여 주고, 작업 큐 대시보드는 대기 중이거나 실패한 작업을 나열합니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/16-observability)
 
+<a href="./docs/images/readme/spotlight-observability-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-observability-dark.webp">
   <img src="./docs/images/readme/spotlight-observability-light.webp" alt="관측 가능성" width="100%">
 </picture>
+</a>
 
 ### 추가 스크린샷
 

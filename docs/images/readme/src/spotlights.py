@@ -27,7 +27,7 @@ THEMES = {
     "dark": dict(bar=(22, 31, 48), border=(190, 208, 232, 46), dots=[(104, 86, 56)] * 3, shadow=(0, 0, 0, 150)),
 }
 W, H = 1600, 900
-SCALE = 2  # draw at 2x, then downsample for smooth edges
+SCALE = 2  # layout is in 1600x900 units; the image is written at 2x so it stays sharp when opened
 BAR = 30
 
 
@@ -77,6 +77,5 @@ for name, (main, side, crop, side_w, corner) in SETS.items():
         side_x = W - side_w - 24 if corner == "right" else 24
         drop_shadow(canvas, a, (main_x * SCALE, 24 * SCALE), theme)
         drop_shadow(canvas, b, (side_x * SCALE, (H - 24) * SCALE - b.height), theme)
-        img = canvas.resize((W, H), Image.LANCZOS)
-        img.save(os.path.join(OUT, f"spotlight-{name}-{theme}.webp"), "WEBP", quality=84, method=6)
+        canvas.save(os.path.join(OUT, f"spotlight-{name}-{theme}.webp"), "WEBP", quality=84, method=6)
 print("ok")

@@ -230,37 +230,45 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 **コンピューターのブラウザを操作。** Tencent がオープンソースで公開する BrowserSkill 拡張機能を通じて、エージェントがあなたの Chrome や Edge でページを開き、フォームに入力します。ログインや CAPTCHA ではあなたに引き継ぎます。 [ドキュメント →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
 
+<a href="./docs/images/readme/spotlight-browser-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-browser-dark.webp">
   <img src="./docs/images/readme/spotlight-browser-light.webp" alt="ローカルブラウザ" width="100%">
 </picture>
+</a>
 
 ### スキルとサンドボックス
 
 **スキルを実行し、ファイルを生成。** Docker、E2B、Cube に対応。同じセッションの複数ターンは 1 つのワークスペースを共有し、生成ファイルはプレビューとダウンロードができます。会話の横でグラフィカルデスクトップやインタラクティブターミナルを開き、エージェントの各ステップを確認し、必要に応じて操作を引き継げます。 [ドキュメント →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
 
+<a href="./docs/images/readme/spotlight-sandbox-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
   <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="スキルとサンドボックス" width="100%">
 </picture>
+</a>
 
 ### 自動 Wiki
 
 **ドキュメントを閲覧できる Wiki に。** Wiki を有効にすると、ナレッジベースの文書から人物・製品・概念を抽出し、出典付きのページを生成してディレクトリ別に閲覧できます。ナレッジグラフでページ間の関係を確認でき、ページは直接編集でき、変更はさかのぼれます。 [ドキュメント →](https://weknora.weixin.qq.com/docs/03-features/14-wiki)
 
+<a href="./docs/images/readme/spotlight-wiki-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-wiki-dark.webp">
   <img src="./docs/images/readme/spotlight-wiki-light.webp" alt="自動 Wiki" width="100%">
 </picture>
+</a>
 
 ### 可観測性
 
 **トレーシングとランタイム監視。** Langfuse がエージェントの各ステップの推論、ツール呼び出し、トークン使用量を追跡します。文書解析タイムラインはステージごとの進捗を表示し、タスクキューダッシュボードは待機中と失敗したタスクを一覧します。 [ドキュメント →](https://weknora.weixin.qq.com/docs/03-features/16-observability)
 
+<a href="./docs/images/readme/spotlight-observability-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-observability-dark.webp">
   <img src="./docs/images/readme/spotlight-observability-light.webp" alt="可観測性" width="100%">
 </picture>
+</a>
 
 ### その他のスクリーンショット
 

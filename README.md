@@ -230,37 +230,45 @@ Full history: [`CHANGELOG.md`](./CHANGELOG.md).
 
 **Operate the browser on your computer.** Through Tencent's open-source BrowserSkill extension, the agent opens pages and fills in forms in your own Chrome or Edge, and hands over to you for logins and CAPTCHAs. [Docs →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
 
+<a href="./docs/images/readme/spotlight-browser-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-browser-dark.webp">
   <img src="./docs/images/readme/spotlight-browser-light.webp" alt="Local browser" width="100%">
 </picture>
+</a>
 
 ### Skills and sandbox
 
 **Run skills and produce files.** Docker, E2B and Cube backends are supported. Turns in the same session share one workspace, and generated files can be previewed and downloaded. Open the graphical desktop or interactive terminal beside the chat to follow each step and take over when needed. [Docs →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
 
+<a href="./docs/images/readme/spotlight-sandbox-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
   <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="Skills and sandbox" width="100%">
 </picture>
+</a>
 
 ### Automatic wiki
 
 **Documents organized into a browsable wiki.** With Wiki enabled, WeKnora extracts people, products and concepts from knowledge-base documents into pages with source citations, organized by directory. The knowledge graph shows how pages relate; pages can be edited directly and every change can be rolled back. [Docs →](https://weknora.weixin.qq.com/docs/03-features/14-wiki)
 
+<a href="./docs/images/readme/spotlight-wiki-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-wiki-dark.webp">
   <img src="./docs/images/readme/spotlight-wiki-light.webp" alt="Automatic wiki" width="100%">
 </picture>
+</a>
 
 ### Observability
 
 **Tracing and runtime monitoring.** Langfuse traces the reasoning, tool calls and token usage of each agent step. The document parsing timeline shows progress stage by stage, and the task-queue dashboard lists queued and failed tasks. [Docs →](https://weknora.weixin.qq.com/docs/03-features/16-observability)
 
+<a href="./docs/images/readme/spotlight-observability-light.webp">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-observability-dark.webp">
   <img src="./docs/images/readme/spotlight-observability-light.webp" alt="Observability" width="100%">
 </picture>
+</a>
 
 ### More screenshots
 
