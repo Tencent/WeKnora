@@ -21,6 +21,11 @@ const (
 	maxErrorResponseRunes       = 1000
 	maxRetryDelay               = 60 * time.Second
 	maxPaginationHops           = 10000
+	// maxEmptyServerPages bounds how far a Server/Data Center page listing
+	// follows _links.next through empty pages. Some builds keep returning
+	// next past the end of a space (#3596); permission filtering can also
+	// empty one page mid-listing, so a single empty page is not the end.
+	maxEmptyServerPages = 3
 )
 
 type apiError struct {
@@ -299,7 +304,11 @@ func withCloudPageQuery(next string) string {
 	return parsed.String()
 }
 
-func (c *client) pages(ctx context.Context, s space) ([]page, error) {
+// pages lists every current page in a space. complete is false when a Server
+// listing was cut short after maxEmptyServerPages empty pages that still
+// linked onward; the caller must not treat pages missing from such a listing
+// as deleted.
+func (c *client) pages(ctx context.Context, s space) (pages []page, complete bool, err error) {
 	if c.cfg.cloud() {
 		var all []page
 		start := "/api/v2/spaces/" + url.PathEscape(s.ID) + "/pages?status=current&depth=all&limit=250"
@@ -323,27 +332,39 @@ func (c *client) pages(ctx context.Context, s space) ([]page, error) {
 			}
 			return next, nil
 		})
-		return all, err
+		return all, true, err
 	}
 	var all []page
-	err := c.paginate(ctx, serverSpacePagesEndpoint(s.Key), func(pageURL string) (string, error) {
+	complete = true
+	emptyPages := 0
+	err = c.paginate(ctx, serverSpacePagesEndpoint(s.Key), func(pageURL string) (string, error) {
 		var result serverSpacePageList
 		if err := c.get(ctx, pageURL, &result); err != nil {
 			return "", err
 		}
-		for _, listed := range result.pages() {
+		listedPages := result.pages()
+		for _, listed := range listedPages {
 			if listed.Space.Key == "" {
 				listed.Space.Key, listed.Space.Name = s.Key, s.Name
 			}
 			all = append(all, listed)
 		}
 		next := result.nextLink()
-		if next != "" {
-			next = withServerPageExpand(next)
+		if next == "" {
+			return "", nil
 		}
-		return next, nil
+		if len(listedPages) > 0 {
+			emptyPages = 0
+		} else {
+			emptyPages++
+			if emptyPages >= maxEmptyServerPages {
+				complete = false
+				return "", nil
+			}
+		}
+		return withServerPageExpand(next), nil
 	})
-	return all, err
+	return all, complete, err
 }
 
 func (c *client) body(ctx context.Context, id string) (pageBody, error) {

@@ -3,6 +3,7 @@ package confluence
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,7 +32,7 @@ func TestPagesUsesOfficialFlatListAndKeepsExpandOnNext(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
-	pages, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
+	pages, _, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +50,63 @@ func TestPagesUsesOfficialFlatListAndKeepsExpandOnNext(t *testing.T) {
 	}
 }
 
+func TestServerPagesStopAfterRepeatedEmptyPages(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		results := `[]`
+		if r.URL.Query().Get("start") == "" {
+			results = `[{"id": "1", "title": "Root", "version": {"number": 1}}]`
+		}
+		next := fmt.Sprintf("/rest/api/space/ENG/content/page?limit=100&start=%d", calls*100)
+		_, _ = fmt.Fprintf(w, `{"results": %s, "_links": {"next": %q}}`, results, next)
+	}))
+	t.Cleanup(server.Close)
+
+	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
+	pages, complete, err := c.pages(context.Background(), space{Key: "ENG", Name: "Engineering"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if complete {
+		t.Fatal("a listing cut short by empty pages must not report complete")
+	}
+	if len(pages) != 1 || pages[0].ID != "1" {
+		t.Fatalf("pages = %#v", pages)
+	}
+	if calls != 1+maxEmptyServerPages {
+		t.Fatalf("calls = %d, want %d", calls, 1+maxEmptyServerPages)
+	}
+}
+
+func TestServerPagesContinuePastOneEmptyPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("start") {
+		case "":
+			_, _ = w.Write([]byte(`{"results": [{"id": "1", "title": "A"}],
+				"_links": {"next": "/rest/api/space/ENG/content/page?limit=100&start=100"}}`))
+		case "100":
+			// Every page in this window was filtered out by permissions.
+			_, _ = w.Write([]byte(`{"results": [],
+				"_links": {"next": "/rest/api/space/ENG/content/page?limit=100&start=200"}}`))
+		default:
+			_, _ = w.Write([]byte(`{"results": [{"id": "2", "title": "B"}]}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
+	pages, complete, err := c.pages(context.Background(), space{Key: "ENG", Name: "Engineering"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete || len(pages) != 2 {
+		t.Fatalf("complete = %v, pages = %#v", complete, pages)
+	}
+}
+
 func TestPagesAcceptsNestedContentEnvelope(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -61,7 +119,7 @@ func TestPagesAcceptsNestedContentEnvelope(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
-	pages, err := c.pages(context.Background(), space{Key: "ENG", Name: "Engineering"})
+	pages, _, err := c.pages(context.Background(), space{Key: "ENG", Name: "Engineering"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +166,7 @@ func TestPagesCloudFollowsNextAndKeepsDepth(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	c := &client{cfg: config{baseURL: server.URL + "/wiki", edition: editionCloud}, http: server.Client()}
-	pages, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
+	pages, _, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
 	if err != nil {
 		t.Fatal(err)
 	}

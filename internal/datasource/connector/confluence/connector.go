@@ -10,6 +10,7 @@ import (
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -174,9 +175,15 @@ func (c *Connector) fetchStream(
 				resourceID,
 			)
 		}
-		pages, err := client.pages(ctx, s)
+		pages, complete, err := client.pages(ctx, s)
 		if err != nil {
 			return nil, fmt.Errorf("list pages in Confluence space %s: %w", s.Key, err)
+		}
+		if !complete {
+			logger.Warnf(ctx,
+				"[Confluence] space %s: listing stopped after %d empty pages that still linked onward; "+
+					"imported %d pages and skipped deletion reconciliation",
+				s.Key, maxEmptyServerPages, len(pages))
 		}
 		priorPages, hadBaseline := baseline.SpacePages[resourceID]
 		if next.SpacePages[resourceID] == nil {
@@ -221,7 +228,16 @@ func (c *Connector) fetchStream(
 				return nil, err
 			}
 		}
-		if hadBaseline {
+		if !complete {
+			// A cut-short listing proves nothing about the pages it did not
+			// reach: keep tracking them so a later complete listing can still
+			// reconcile them, and delete nothing now.
+			for id, version := range priorPages {
+				if _, exists := seen[id]; !exists {
+					next.SpacePages[resourceID][id] = version
+				}
+			}
+		} else if hadBaseline {
 			if len(pages) == 0 && len(priorPages) > 0 {
 				return nil, fmt.Errorf(
 					"refusing Confluence mirror deletion in %s: listing returned 0 pages against a %d-page baseline",

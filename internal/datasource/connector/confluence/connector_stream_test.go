@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -30,6 +31,9 @@ type streamAPI struct {
 	bodyCalls  int
 	bodyStatus map[string]int
 	listCalls  int
+	// endlessNext mimics Server/Data Center builds that keep linking to a
+	// next page after the last one, returning empty results forever (#3596).
+	endlessNext bool
 }
 
 func (a *streamAPI) jsonResponse(value any) (*http.Response, error) {
@@ -66,8 +70,19 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 		})
 	case path == "/wiki/rest/api/space/ENG/content/page":
 		a.listCalls++
+		if !a.endlessNext {
+			return a.jsonResponse(map[string]any{
+				"results": a.pageMaps(),
+			})
+		}
+		results := a.pageMaps()
+		if a.listCalls > 1 {
+			results = []any{}
+		}
+		next := fmt.Sprintf("/rest/api/space/ENG/content/page?limit=100&start=%d", a.listCalls*100)
 		return a.jsonResponse(map[string]any{
-			"results": a.pageMaps(),
+			"results": results,
+			"_links":  map[string]any{"next": next},
 		})
 	case strings.HasPrefix(path, "/wiki/rest/api/content/"):
 		if req.URL.Query().Get("expand") != "body.view,version,space" {
@@ -385,5 +400,39 @@ func TestListResourcesKeepsInvalidWebUI(t *testing.T) {
 	resources, err = foreign.ListResources(context.Background(), streamConfig(), "")
 	if err != nil || len(resources) != 1 || resources[0].URL != "https://confluence.test/wiki" {
 		t.Fatalf("ListResources() with hostile webui = %#v, %v", resources, err)
+	}
+}
+
+func TestFetchStreamKeepsUnreachedPagesWhenServerListingNeverEnds(t *testing.T) {
+	for _, full := range []bool{false, true} {
+		t.Run(fmt.Sprintf("full=%v", full), func(t *testing.T) {
+			api := &streamAPI{endlessNext: true, pages: []streamPage{{id: "p1", title: "Page", version: 2}}}
+			h := &captureHandler{}
+			old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
+			connector := newStreamConnector(api)
+			fetch := connector.FetchStream
+			if full {
+				fetch = connector.FetchFullStream
+			}
+			got, err := fetch(context.Background(), streamConfig(), old, h)
+			if err != nil {
+				t.Fatalf("fetch: %v", err)
+			}
+			if api.listCalls != 1+maxEmptyServerPages {
+				t.Fatalf("listCalls = %d, want %d", api.listCalls, 1+maxEmptyServerPages)
+			}
+			for _, item := range h.items {
+				if item.IsDeleted {
+					t.Fatalf("cut-short listing emitted a deletion for %s", item.ExternalID)
+				}
+			}
+			if len(h.items) != 1 || h.items[0].ExternalID != "p1" {
+				t.Fatalf("items = %#v, want the changed page p1 only", h.items)
+			}
+			pages := decodeCursor(got).SpacePages["1"]
+			if pages["p1"] != "v:2" || pages["p2"] != "v:1" {
+				t.Fatalf("cursor pages = %#v, want p1 advanced and unreached p2 kept", pages)
+			}
+		})
 	}
 }
