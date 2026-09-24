@@ -444,8 +444,10 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 			}
 		}
 
-		// 使用 needDelete=false，因为 EFPutDocument 会自动覆盖相同 SourceID 的文档
-		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, false); err != nil {
+		// needDelete=true：同一 SourceID 重建索引并非所有引擎都会覆盖
+		// （ES v8、Qdrant 每次写入生成新文档 ID），不先删会留下过期内容。
+		err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -599,8 +601,10 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 			return nil, err
 		}
 	} else {
-		// Combined mode, re-index the whole entry
-		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, false); err != nil {
+		// Combined mode, re-index the whole entry. Delete first: not every
+		// engine overwrites an existing SourceID on re-index.
+		err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
+		if err != nil {
 			return nil, err
 		}
 	}

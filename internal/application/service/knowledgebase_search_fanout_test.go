@@ -928,7 +928,7 @@ func TestApplyFAQPostProcessing_PropagatesError(t *testing.T) {
 		vectorResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("v%d", i)}
 	}
 	params := types.SearchParams{QueryText: "q", MatchCount: 10}
-	out, err := s.applyFAQPostProcessing(ctx, kb, chunks, vectorResults, groups, params, 5)
+	out, err := s.applyFAQPostProcessing(ctx, kb, []*types.KnowledgeBase{kb}, chunks, vectorResults, groups, params, 5)
 	require.Error(t, err)
 	assert.Nil(t, out)
 	_, ok := apperrors.IsAppError(err)

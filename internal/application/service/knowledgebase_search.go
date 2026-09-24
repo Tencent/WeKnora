@@ -307,7 +307,7 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	// timeout surfaced as ErrVectorStoreUnavailable) must surface to the
 	// caller rather than be silently converted to a truncated chunk list.
 	return s.applyFAQPostProcessing(
-		ctx, kb, deduplicatedChunks, vectorResults, groups, params, matchCount)
+		ctx, kb, kbs, deduplicatedChunks, vectorResults, groups, params, matchCount)
 }
 
 // normalizedMatchCount resolves the effective primary-match cap for a search.

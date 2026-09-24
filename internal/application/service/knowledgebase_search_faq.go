@@ -13,7 +13,10 @@ import (
 
 // applyFAQPostProcessing handles FAQ-specific post-processing: iterative retrieval
 // when not enough unique chunks are found, or negative question filtering otherwise.
-// For non-FAQ knowledge bases, returns the input unchanged.
+// Iterative retrieval follows the primary KB's type; negative questions are
+// filtered whenever any KB in scope is an FAQ KB, so an FAQ searched alongside
+// a document KB still honours them. Without an FAQ KB in scope the input is
+// returned unchanged.
 //
 // The iterative retrieval path fans out across the supplied storeGroups so
 // multi-store FAQ searches grow TopK uniformly across every bound vector
@@ -24,20 +27,22 @@ import (
 func (s *knowledgeBaseService) applyFAQPostProcessing(
 	ctx context.Context,
 	kb *types.KnowledgeBase,
+	scopeKBs []*types.KnowledgeBase,
 	chunks []*types.IndexWithScore,
 	vectorResults []*types.IndexWithScore,
 	groups []*storeGroup,
 	params types.SearchParams,
 	matchCount int,
 ) ([]*types.IndexWithScore, error) {
-	if kb.Type != types.KnowledgeBaseTypeFAQ {
+	isFAQ := func(k *types.KnowledgeBase) bool { return k != nil && k.Type == types.KnowledgeBaseTypeFAQ }
+	if !isFAQ(kb) && !slices.ContainsFunc(scopeKBs, isFAQ) {
 		return chunks, nil
 	}
 
 	// Check if we need iterative retrieval for FAQ with separate indexing.
 	// Only use iterative retrieval if we don't have enough unique chunks
 	// after first deduplication.
-	needsIterativeRetrieval := len(chunks) < params.MatchCount && len(vectorResults) == matchCount
+	needsIterativeRetrieval := isFAQ(kb) && len(chunks) < params.MatchCount && len(vectorResults) == matchCount
 	if needsIterativeRetrieval {
 		logger.Info(ctx, "Not enough unique chunks, using iterative retrieval for FAQ")
 		return s.iterativeRetrieveWithDeduplication(
@@ -144,7 +149,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 
 		// Batch fetch only new chunks
 		if len(newChunkIDs) > 0 {
-			newChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, newChunkIDs)
+			newChunks, err := s.listChunksByIDWithShared(ctx, tenantID, newChunkIDs)
 			if err != nil {
 				logger.Warnf(ctx, "Failed to fetch chunks at iteration %d: %v", i+1, err)
 			} else {
@@ -244,8 +249,10 @@ func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 		chunkIDs = append(chunkIDs, chunk.ChunkID)
 	}
 
-	// Batch fetch chunks to get negative questions
-	allChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
+	// Batch fetch chunks to get negative questions. Shared-KB chunks belong to
+	// the sharing workspace; a tenant-scoped lookup missed them and the
+	// "not found, keep it" branch below let them bypass the filter.
+	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, chunkIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to fetch chunks for negative question filtering: %v", err)
 		// If we can't fetch chunks, return original results

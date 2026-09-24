@@ -80,10 +80,10 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	mergedChunks := p.groupAndMergeCurrentContent(ctx, searchResult)
 
 	// Step 6: Populate FAQ answers
-	mergedChunks = p.populateFAQAnswers(ctx, chatManage, mergedChunks)
+	mergedChunks = p.populateFAQAnswers(ctx, mergedChunks)
 
 	// Step 7: Expand short contexts
-	mergedChunks = p.expandShortContextWithNeighbors(ctx, chatManage, mergedChunks)
+	mergedChunks = p.expandShortContextWithNeighbors(ctx, mergedChunks)
 
 	// Step 7.5: Re-merge overlapping ranges introduced by expansion
 	mergedChunks = p.groupAndMergeCurrentContent(ctx, mergedChunks)

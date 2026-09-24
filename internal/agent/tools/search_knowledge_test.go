@@ -254,3 +254,38 @@ func TestFormatOutputRowsCarryHandlesAndSnippets(t *testing.T) {
 		t.Fatalf("legacy annotations must be gone: %s", res.Output)
 	}
 }
+
+// A shared FAQ KB belongs to another workspace, so re-reading the chunk with
+// the caller's tenant fails. The answers must come from the metadata the
+// retrieval result already carries; the tool has no chunk service here.
+func TestFormatOutputRendersFAQFromResultMetadata(t *testing.T) {
+	chunk := &types.Chunk{}
+	if err := chunk.SetFAQMetadata(&types.FAQChunkMetadata{
+		StandardQuestion: "How do refunds work?",
+		Answers:          []string{"Refunds are issued within 7 days."},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tool := &SearchKnowledgeTool{}
+	results := []*searchResultWithMeta{
+		{
+			SearchResult: &types.SearchResult{
+				ID: "faq-1", KnowledgeID: "faq-doc", Content: "How do refunds work?", Score: 0.9,
+				ChunkMetadata: chunk.Metadata,
+			},
+			KnowledgeBaseID: "kb-faq", KnowledgeBaseType: types.KnowledgeBaseTypeFAQ,
+		},
+	}
+	res := tool.formatOutput(context.Background(), results, []string{"kb-faq"}, "refunds", SearchModeHybrid)
+	rows, ok := res.Data["results"].([]map[string]interface{})
+	if !ok || len(rows) != 1 {
+		t.Fatalf("results rows = %#v", res.Data["results"])
+	}
+	answers, _ := rows[0]["faq_answers"].([]string)
+	if len(answers) != 1 || answers[0] != "Refunds are issued within 7 days." {
+		t.Fatalf("faq answers = %#v", rows[0]["faq_answers"])
+	}
+	if !strings.Contains(res.Output, "<faq ") {
+		t.Fatalf("FAQ hit should render as <faq>: %q", res.Output)
+	}
+}

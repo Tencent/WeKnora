@@ -640,33 +640,16 @@ func (t *SearchKnowledgeTool) rerankResults(
 	return reranked, nil
 }
 
-func (t *SearchKnowledgeTool) getFAQMetadata(
-	ctx context.Context,
-	chunkID string,
-	cache map[string]*types.FAQChunkMetadata,
-) (*types.FAQChunkMetadata, error) {
-	if chunkID == "" || t.chunkService == nil {
+// faqMetadataFromResult parses FAQ metadata carried on the search result.
+// Retrieval already loaded the chunk, including its metadata; re-reading it
+// per hit cost one query each and, being tenant scoped, failed for FAQ KBs
+// shared from another workspace, which then rendered as plain chunks without
+// their answers.
+func faqMetadataFromResult(result *types.SearchResult) (*types.FAQChunkMetadata, error) {
+	if result == nil || len(result.ChunkMetadata) == 0 {
 		return nil, nil
 	}
-	if meta, ok := cache[chunkID]; ok {
-		return meta, nil
-	}
-	chunk, err := t.chunkService.GetChunkByID(ctx, chunkID)
-	if err != nil {
-		cache[chunkID] = nil
-		return nil, err
-	}
-	if chunk == nil {
-		cache[chunkID] = nil
-		return nil, nil
-	}
-	meta, err := chunk.FAQMetadata()
-	if err != nil {
-		cache[chunkID] = nil
-		return nil, err
-	}
-	cache[chunkID] = meta
-	return meta, nil
+	return (&types.Chunk{Metadata: result.ChunkMetadata}).FAQMetadata()
 }
 
 func (t *SearchKnowledgeTool) rerankThreshold() float64 {
@@ -792,13 +775,12 @@ func (t *SearchKnowledgeTool) formatOutput(
 	writeKnowledgeMetadataHeader(&ob, results)
 
 	formattedResults := make([]map[string]interface{}, 0, len(results))
-	faqMetadataCache := make(map[string]*types.FAQChunkMetadata)
 	queries := []string{query}
 
 	for i, result := range results {
 		var faqMeta *types.FAQChunkMetadata
 		if result.KnowledgeBaseType == types.KnowledgeBaseTypeFAQ {
-			meta, err := t.getFAQMetadata(ctx, result.ID, faqMetadataCache)
+			meta, err := faqMetadataFromResult(result.SearchResult)
 			if err != nil {
 				logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load FAQ metadata for chunk %s: %v",
 					result.ID, err)
