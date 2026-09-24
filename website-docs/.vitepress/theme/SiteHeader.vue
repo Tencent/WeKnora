@@ -12,6 +12,7 @@ const docsNavigation = [
   { label: 'API', href: '/docs/04-api/01-api-overview', section: '/docs/04-api/' },
   { label: '客户端', href: '/docs/05-clients/01-frontend', section: '/docs/05-clients/' },
   { label: '开发', href: '/docs/06-development/01-dev-guide', section: '/docs/06-development/' },
+  { label: '版本', href: '/docs/07-releases/v0.8.2', section: '/docs/07-releases/' },
 ]
 const open = ref(false)
 watch(() => route.path, () => open.value = false)

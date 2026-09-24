@@ -24,6 +24,7 @@ export const useUIStore = defineStore('ui', {
     sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true',
     sidebarWidth: clampSidebarWidth(Number(localStorage.getItem('sidebar_width'))),
     sidebarResizing: false,
+    sidebarBrowserStatus: localStorage.getItem('sidebar_browser_status') !== 'false',
   }),
 
   getters: {
@@ -125,6 +126,11 @@ export const useUIStore = defineStore('ui', {
 
     clearSelectedTagIds() {
       this.selectedTagIds = []
+    },
+
+    setSidebarBrowserStatus(visible: boolean) {
+      this.sidebarBrowserStatus = visible
+      localStorage.setItem('sidebar_browser_status', String(visible))
     },
 
     toggleSidebar() {

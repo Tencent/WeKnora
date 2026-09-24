@@ -10,7 +10,7 @@
       :row-col="[{ width: '100%', height: '132px', type: 'rect' }]" />
     <p v-else-if="loaded && !status.enabled" class="empty-hint">{{ t('localBrowser.unavailable') }}</p>
 
-    <template v-else-if="loaded">
+    <div v-else-if="loaded" class="browser-layout">
       <article class="connection-card">
         <div class="product-row">
           <img class="product-logo" :src="browserLogo" width="44" height="44" alt="BrowserSkill" />
@@ -19,22 +19,43 @@
               <div class="product-name">
                 <strong>BrowserSkill</strong>
                 <span v-if="status.connected && status.extension_version" class="product-version">v{{ status.extension_version }}</span>
-                <a class="product-link" href="https://github.com/Tencent/BrowserSkill" target="_blank"
-                  rel="noopener noreferrer" aria-label="BrowserSkill">
-                  <t-icon name="jump" size="14px" />
-                </a>
               </div>
               <span class="status-pill" :class="{ online: status.connected, idle: !status.connected && status.device }">
                 <i />{{ t(status.connected ? 'localBrowser.connected' : status.device ? 'localBrowser.offline' : 'localBrowser.notPaired') }}
               </span>
             </div>
-            <p v-if="status.device" class="product-desc">{{ status.device.label }}</p>
+            <p class="product-desc">
+              {{ t('localBrowser.productDescription') }}
+              <a class="product-link" href="https://github.com/Tencent/BrowserSkill" target="_blank"
+                rel="noopener noreferrer">GitHub<t-icon name="jump" size="12px" /></a>
+            </p>
           </div>
         </div>
 
         <template v-if="status.device">
+          <div class="capabilities">
+            <p v-if="!status.connected" class="capabilities-hint">
+              <t-icon name="time" size="14px" />{{ t('localBrowser.reconnectHint') }}
+            </p>
+            <p v-else-if="extensionOutdated" class="capabilities-hint" role="status">
+              <t-icon name="error-circle" size="14px" />
+              {{ t('localBrowser.extensionOutdated', { current: status.extension_version, version: MIN_EXTENSION_VERSION }) }}
+            </p>
+            <span class="capabilities-title">{{ t('localBrowser.capabilitiesTitle') }}</span>
+            <ul class="capabilities-grid">
+              <li v-for="item in capabilities" :key="item.label">
+                <t-icon :name="item.icon" size="16px" />{{ t(item.label) }}
+              </li>
+            </ul>
+            <label class="sidebar-status-toggle">
+              <span>{{ t('localBrowser.sidebarStatus') }}</span>
+              <t-switch size="small" :value="uiStore.sidebarBrowserStatus"
+                @change="(value: unknown) => uiStore.setSidebarBrowserStatus(value === true)" />
+            </label>
+          </div>
           <div class="device-block">
             <div class="device-meta">
+              <span>{{ status.device.label }}</span>
               <span>{{ t('localBrowser.lastSeen') }} {{ formatDate(status.device.last_seen_at) }}</span>
             </div>
             <div class="device-actions">
@@ -50,7 +71,6 @@
               </t-popconfirm>
             </div>
           </div>
-          <p v-if="!status.connected" class="device-hint">{{ t('localBrowser.reconnectHint') }}</p>
         </template>
 
         <ol v-else class="setup-steps">
@@ -58,6 +78,7 @@
             <span class="step-index">1</span>
             <div class="step-copy">
               <strong>{{ t('localBrowser.usageStep1Title') }}</strong>
+              <p>{{ t('localBrowser.extensionMinVersion', { version: MIN_EXTENSION_VERSION }) }}</p>
               <details class="install-guide">
                 <summary>{{ t('localBrowser.manualInstall') }}<t-icon name="chevron-down" size="12px" /></summary>
                 <div class="setup-help">
@@ -72,10 +93,12 @@
                 </div>
               </details>
             </div>
-            <a class="setup-action setup-main-action store-action" href="https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi"
-              target="_blank" rel="noopener noreferrer">
-              {{ t('localBrowser.storeInstall') }}<t-icon name="jump" size="13px" />
-            </a>
+            <div class="store-actions">
+              <a v-for="store in EXTENSION_STORES" :key="store.label" class="setup-action setup-main-action store-action"
+                :href="store.url" target="_blank" rel="noopener noreferrer">
+                {{ t(store.label) }}<t-icon name="jump" size="13px" />
+              </a>
+            </div>
           </li>
           <li>
             <span class="step-index">2</span>
@@ -101,10 +124,12 @@
         </div>
       </article>
 
-      <BrowserSearchPreferences />
+      <div class="browser-side">
+        <BrowserSearchPreferences />
+      </div>
 
-      <details class="usage">
-        <summary>{{ t('localBrowser.usageTitle') }}<t-icon name="chevron-down" size="16px" /></summary>
+      <section class="usage">
+        <h3>{{ t('localBrowser.usageTitle') }}</h3>
         <ol>
           <li>
             <span class="usage-index">1</span>
@@ -135,27 +160,50 @@
             </div>
           </li>
         </ol>
-      </details>
-    </template>
+      </section>
+    </div>
   </div>
 </template>
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { get, post, getDown } from '@/utils/request'
 import { useBrowserConnectionStore } from '@/stores/browserConnection'
+import { useUIStore } from '@/stores/ui'
 import browserLogo from '@/assets/browserskill/logo.png'
 import BrowserSearchPreferences from './BrowserSearchPreferences.vue'
 interface Device { id: string; label: string; last_seen_at: string }
 interface Connection { enabled: boolean; connected: boolean; device?: Device; extension_available: boolean; extension_version?: string }
 const { t, locale } = useI18n()
 const browserConnection = useBrowserConnectionStore()
+const uiStore = useUIStore()
 const status = ref<Connection>({ enabled: false, connected: false, extension_available: false })
 const busy = ref(false), loaded = ref(false), error = ref(''), refreshError = ref(''), pairing = ref(''), copied = ref(false), copyFallback = ref(false), downloading = ref(false)
 const endpoint = '/api/v1/me/browser'
 const controller = new AbortController()
 let revision = 0
 let alive = true, timer: ReturnType<typeof setTimeout> | undefined, expiry: ReturnType<typeof setTimeout> | undefined, pairExpires = 0
+const MIN_EXTENSION_VERSION = '0.3.1'
+const EXTENSION_STORES = [
+  { label: 'localBrowser.storeInstall', url: 'https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi' },
+  { label: 'localBrowser.edgeStoreInstall', url: 'https://microsoftedge.microsoft.com/addons/detail/browserskill/emacgiaaaiojkkpkddmmdfhmokgmnikg' },
+]
+const versionParts = (value: string) => value.replace(/^v/, '').split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0)
+const extensionOutdated = computed(() => {
+  const current = status.value.connected ? status.value.extension_version : ''
+  if (!current) return false
+  const [a, b] = [versionParts(current), versionParts(MIN_EXTENSION_VERSION)]
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! < b[i]!
+  return false
+})
+const capabilities = [
+  { icon: 'link', label: 'localBrowser.openPage' },
+  { icon: 'file-search', label: 'localBrowser.readPage' },
+  { icon: 'cursor', label: 'localBrowser.clickPage' },
+  { icon: 'edit-1', label: 'localBrowser.fillPage' },
+  { icon: 'screenshot', label: 'localBrowser.captureScreenshot' },
+  { icon: 'layers', label: 'localBrowser.listTabs' },
+]
 const formatDate = (value: string) => new Date(value).toLocaleString(locale.value, { dateStyle: 'short', timeStyle: 'short' })
 function clearPairing() { pairing.value = ''; copied.value = false; copyFallback.value = false; clearTimeout(expiry) }
 async function refresh() {
@@ -216,6 +264,40 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
 .browser-settings {
   width: 100%;
+  container: browser-settings / inline-size;
+}
+
+// Stacked in the settings dialog; side by side once a full page gives it room.
+@container browser-settings (min-width: 960px) {
+  .browser-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 20px;
+  }
+
+  .connection-card {
+    display: flex;
+    flex-direction: column;
+
+    > .capabilities {
+      flex: 1;
+    }
+  }
+
+  .browser-side {
+    border-radius: var(--app-radius-xl);
+    padding: 24px;
+    background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 65%, var(--td-bg-color-container));
+
+    > .browser-search-preferences {
+      margin-top: 0;
+    }
+  }
+
+  .usage {
+    grid-column: 1 / -1;
+    padding: 0 4px;
+  }
 }
 
 .section-header {
@@ -223,7 +305,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 }
 
 .connection-card {
-  border-radius: 16px;
+  border-radius: var(--app-radius-xl);
   padding: 24px;
   background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 65%, var(--td-bg-color-container));
 }
@@ -271,13 +353,15 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 .product-link {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  color: var(--td-text-color-placeholder);
-  line-height: 1;
+  gap: 2px;
+  margin-left: 6px;
+  color: var(--td-brand-color);
+  text-decoration: none;
+  white-space: nowrap;
 
   &:hover,
   &:focus-visible {
-    color: var(--td-text-color-primary);
+    text-decoration: underline;
   }
 }
 
@@ -358,11 +442,71 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   }
 }
 
-.device-hint {
-  margin: 8px 0 0;
+.capabilities {
+  margin-top: 18px;
+}
+
+.capabilities-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 14px;
+  color: var(--td-text-color-secondary);
   font-size: var(--app-text-md);
   line-height: 1.55;
+
+  .t-icon {
+    flex-shrink: 0;
+    margin-top: 3px;
+    color: var(--td-warning-color);
+  }
+}
+
+.sidebar-status-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
   color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  cursor: pointer;
+}
+
+.capabilities-title {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+}
+
+.capabilities-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-md);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    .t-icon {
+      flex-shrink: 0;
+      color: var(--td-brand-color);
+    }
+  }
 }
 
 .device-actions {
@@ -410,6 +554,13 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: flex-start;
   gap: 12px;
+}
+
+.store-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .connection-card .setup-action {
@@ -556,26 +707,14 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 }
 
 .usage {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid var(--td-component-stroke);
+  margin-top: 32px;
 
-  summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    list-style: none;
-    cursor: pointer;
-    font-size: var(--app-text-md);
-    font-weight: 500;
-    color: var(--td-text-color-secondary);
-    &::-webkit-details-marker { display: none; }
-    &:hover { color: var(--td-text-color-primary); }
-    &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 4px; }
+  h3 {
+    margin: 0 0 16px;
+    font-size: var(--app-text-lg);
+    font-weight: 600;
+    color: var(--td-text-color-primary);
   }
-
-  &[open] summary { margin-bottom: 20px; }
-  &[open] summary :deep(.t-icon) { transform: rotate(180deg); }
 
   ol {
     list-style: none;
@@ -654,9 +793,14 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
     grid-template-columns: 22px minmax(0, 1fr);
   }
 
-  .setup-steps li > .setup-action {
+  .setup-steps li > .setup-action,
+  .setup-steps li > .store-actions {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .store-actions {
+    flex-direction: row;
   }
 
   .status-pill {

@@ -10,7 +10,7 @@ WeKnora 由三个可独立开发的进程组成：
 | --- | --- | --- | --- |
 | 主后端 `app` | `cmd/server` + `internal/` | Go | **Go 1.26.0**（`go.mod` 中 `go 1.26.0`），需 CGO（DuckDB、sqlite-vec 绑定） |
 | 文档解析服务 `docreader` | `docreader/` | Python + gRPC | **Python >= 3.10.18**（`docreader/pyproject.toml` 中 `requires-python`），依赖用 **uv** 管理（仓库含 `uv.lock`，Docker 内 `uv sync --locked`） |
-| 前端 `frontend` | `frontend/` | Node.js + Vue 3 | Node 22 系（`devDependencies` 含 `@tsconfig/node22`、`@types/node ^22`），Vite 7 + TypeScript ~6.0 + Vue 3.5 + TDesign，版本号 `0.8.0` |
+| 前端 `frontend` | `frontend/` | Node.js + Vue 3 | Node 22 系（`devDependencies` 含 `@tsconfig/node22`、`@types/node ^22`），Vite 7 + TypeScript ~6.0 + Vue 3.5 + TDesign，版本号 `0.8.2` |
 | CLI | `cli/`（独立 Go module） | Go | Go 1.26（`.github/workflows/cli.yml` 矩阵 `go: ['1.26']`） |
 
 推荐额外安装的开发工具：
@@ -129,7 +129,7 @@ make package-mac-app  # 打 macOS .app（scripts/package-mac-app.sh）
 | --- | --- |
 | `docker-build-app` | 构建 `wechatopenai/weknora-app`（`docker/Dockerfile.app`，注入 `scripts/get_version.sh` 的版本信息） |
 | `docker-build-docreader` | 构建 `wechatopenai/weknora-docreader`（`docker/Dockerfile.docreader`） |
-| `docker-build-frontend` | 多阶段构建 `wechatopenai/weknora-ui`（builder 内 `npm ci` + `npm run build`，无需宿主机预构建 dist） |
+| `docker-build-frontend` | 多阶段构建 `wechatopenai/weknora-ui`（builder 内 `npm ci` + `npm run build`，无需宿主机预构建 dist；自动从 git 注入 `VITE_FRONTEND_COMMIT`） |
 | `docker-build-all` | 以上三个镜像 |
 | `docker-run` | 确保 `.env` 存在（缺失时从 `.env.example` 复制或 touch）后 `docker-compose up` |
 | `docker-stop` / `docker-restart` | `docker-compose down` / `stop -t 60` + `up` |
@@ -159,6 +159,16 @@ make package-mac-app  # 打 macOS .app（scripts/package-mac-app.sh）
 | `dev-frontend` | 本地 `npm run dev` |
 | `build-lite` / `run-lite` / `package-lite` / `package-mac-app` | Lite 模式构建/运行/打包（见 2.3） |
 | `download_spatial` | `go run cmd/download/duckdb/duckdb.go` 下载 DuckDB spatial 扩展（数据分析工具用） |
+
+### 模型厂商目录 {#_3-5-模型厂商目录}
+
+| 目标 | 作用 |
+| --- | --- |
+| `model-catalog-generate` | `python3 scripts/model-catalog/generate.py`，重新生成厂商目录的元数据与协议覆盖 |
+| `model-catalog-check` | 校验生成结果是否最新，并运行 `go test ./internal/models/...`（CI 同样校验） |
+| `model-catalog-diff` | 对比 models.dev 输出模型元数据差异报告，仅供人工审阅，不写回文件；可用 `VENDOR=deepseek` 只看单个厂商 |
+
+厂商接入方式见[扩展点](03-extension-points.md)。
 
 ## 测试体系 {#_4-测试体系}
 
@@ -236,20 +246,27 @@ make fmt && make lint && make test
 
 注意格式化标准是 **gofumpt**（比 gofmt 更严格），行宽上限 120。
 
+也可以安装仓库自带的 Git hooks（`./scripts/install-git-hooks.sh`，把 `core.hooksPath` 指向 `scripts/git-hooks`）：pre-commit 检查空白字符、自动 gofmt 并在已安装时运行 golangci-lint；pre-push 按 CI 执行 gofmt 与 `go vet` / `go test` / `go build`。临时跳过可设 `SKIP_HOOKS=1`，只跳过 pre-push 的测试可设 `HOOK_SKIP_TEST=1`。
+
+新增或升级第三方依赖、改动随发行物分发的数据文件时，需同步更新 `THIRD_PARTY_NOTICES.md` 与 `licenses/`，并用 `scripts/check-license-bundle.sh` 自检（`app.yml` 会执行同样的检查）。
+
 ### CI 与提交流程 {#_5-2-ci-与提交流程}
 
 `.github/` 下的实际配置：
 
 | 文件 | 触发路径 | 作用 |
 | --- | --- | --- |
-| `workflows/app.yml` | 根模块 Go 代码、`go.mod`、`config/`、`migrations/`、`scripts/`、`docker/Dockerfile.app` | 主模块检查：gofmt 格式校验（只针对 PR 内的提交）、`go vet`、`go test`、`go build ./cmd/server` |
-| `workflows/frontend.yml` | `frontend/`、`scripts/build_frontend_dist.sh` | Node 24：`npm test` + `npm run type-check` + `npm run build`；另构建 `frontend/Dockerfile` 多阶段镜像（不推送） |
+| `workflows/app.yml` | 根模块 Go 代码、`go.mod`、`config/`、`migrations/`、`scripts/`、`docker/Dockerfile.app`、许可证文件、模型目录数据 | 主模块检查：gofmt 格式校验（只针对 PR 内的提交）、`go vet`、`go test`、`go build ./cmd/server`；另校验第三方许可证包、模型厂商目录生成结果与 Git hooks 测试 |
+| `workflows/go-lint.yml` / `go-lint-cache.yml` | PR / main | golangci-lint 只报告 PR 相对合并基线新增的问题；`go-lint-cache.yml` 在 main 上预热缓存 |
+| `workflows/frontend.yml` | `frontend/`、`scripts/build_frontend_dist.sh` | Node 24：`npm test` + `npm run type-check` + `npm run build`；另构建 `frontend/Dockerfile` 多阶段镜像（不推送），并验证镜像内嵌入页与 MCP 代理路由（`scripts/test_embed_nginx.py`） |
 | `workflows/docreader.yml` | `docreader/`、`testdata/`、`packages/`、相关 Dockerfile | uv 装依赖 → `compileall` → `unittest discover docreader/tests`；再拉起 docreader gRPC 服务跑 `go test ./docreader/client ./docreader/proto` |
 | `workflows/mcp-server.yml` | `mcp-server/` | Python 3.10-3.13 矩阵测试；合入 main 后按 `pyproject.toml` 里的版本号用 PyPI Trusted Publishing 自动发布（版本已存在则跳过上传，不依赖打 tag） |
 | `workflows/cli.yml` | `cli/` | ubuntu/macos/windows 三平台矩阵，Go 1.26，`go build` + `go test -race -coverprofile` + `go vet` + skill wire 词表检查 |
 | `workflows/cli-e2e.yml` | 手动 / label | CLI 端到端验收（label `acceptance-e2e` 或手动触发，见 4.3） |
 | `workflows/docker-image.yml` | — | Docker 镜像构建发布 |
 | `workflows/release-lite.yml` | — | Lite 版本发布 |
+| `workflows/anydoc.yml` | `third_party/anydoc-go/`、`internal/infrastructure/docparser/` | 进程内 Office 解析引擎构建与测试 |
+| `workflows/dsh-plugin.yml` | `packages/dsh-weknora/` | DeepSeek Harness 插件测试与发布 |
 | `pull_request_template.md` | — | PR 模板 |
 | `ISSUE_TEMPLATE/` | — | Issue 模板 |
 | `dependabot.yml` | — | 依赖升级机器人 |

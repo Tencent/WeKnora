@@ -3,7 +3,7 @@
 
 Development-time helper, never run at runtime: it reports numeric facts
 (context window, max output, cost, new/retired ids) so a maintainer can update
-internal/models/vendors/<id>/models.json by hand. Behavioural facts (compat,
+internal/models/catalog/data/seed.json by hand. Behavioural facts (compat,
 thinking format) are intentionally out of scope — models.dev does not carry
 them and they must come from vendor documentation.
 
@@ -27,29 +27,10 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VENDORS_DIR = ROOT / "internal" / "models" / "vendors"
+CATALOG = ROOT / "internal/models/catalog/data/models.generated.json"
 
 # WeKnora vendor id -> models.dev provider id.
-PROVIDER_MAP = {
-    "openai": "openai",
-    "anthropic": "anthropic",
-    "gemini": "google",
-    "deepseek": "deepseek",
-    "zhipu": "zhipuai",
-    "aliyun": "alibaba-cn",
-    "volcengine": "volcengine",
-    "moonshot": "moonshotai-cn",
-    "minimax": "minimax-cn",
-    "mimo": "xiaomi",
-    "siliconflow": "siliconflow-cn",
-    "modelscope": "modelscope",
-    "qiniu": "qiniu-ai",
-    "longcat": "longcat",
-    "novita": "novita-ai",
-    "nvidia": "nvidia",
-    "openrouter": "openrouter",
-    "requesty": "requesty",
-}
+PROVIDER_MAP = json.loads((ROOT / "scripts/model-catalog/sources.json").read_text())["models_dev"]["provider_map"]
 
 
 MODELS_DEV_URL = "https://models.dev/api.json"
@@ -80,11 +61,8 @@ def load_api(path):
 
 
 def load_catalog(vendor):
-    file = VENDORS_DIR / vendor / "models.json"
-    if not file.exists():
-        return {}
-    data = json.loads(file.read_text())
-    return {m["id"]: m for m in data.get("models", []) if m.get("id")}
+    entries = json.loads(CATALOG.read_text())["providers"].get(vendor, [])
+    return {m["id"]: m for m in entries if m.get("id")}
 
 
 def compare(vendor, upstream, ours):

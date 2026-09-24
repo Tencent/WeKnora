@@ -1,7 +1,7 @@
 // Product navigation and shared masthead icons.
 export const siteNavigation = [
   { label: '产品能力', href: '/#capabilities', badge: '' },
-  { label: 'v0.8.0', href: '/#release', badge: 'NEW' },
+  { label: 'v0.8.2', href: '/#release', badge: 'NEW' },
   { label: '生态集成', href: '/#ecosystem', badge: '' },
   { label: '企业部署', href: '/#enterprise', badge: '' },
   { label: '文档', href: '/docs/', badge: '' },

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,7 +22,7 @@ func newClient(t *testing.T, baseURL string, mutate func(*Config)) *Client {
 			Auth:    api.HeaderAuth("x-api-key", "test-key"),
 			Headers: map[string]string{"anthropic-beta": "test-beta"},
 		},
-		Settings:       catalog.DefaultAnthropicMessages(),
+		Settings:       api.DefaultAnthropicMessages(),
 		ThinkingLevels: api.ThinkingLevelMap{},
 		Reasoning:      true,
 	}
@@ -98,7 +97,7 @@ func TestBuildRequestBody_BudgetThinkingAndTools(t *testing.T) {
 
 func TestBuildRequestBody_AdaptiveEffort(t *testing.T) {
 	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
-		cfg.Settings.ThinkingMode = catalog.AnthropicThinkingAdaptive
+		cfg.Settings.ThinkingMode = api.AnthropicThinkingAdaptive
 		cfg.Settings.SupportsEffort = true
 		cfg.ThinkingLevels = api.ThinkingLevelMap{api.ReasoningXHigh: api.StringPtr("max")}
 	})

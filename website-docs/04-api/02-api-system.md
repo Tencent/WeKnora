@@ -16,6 +16,14 @@ Viewer+；API Key 可读。返回 `{code:0,data:{edition,capabilities}}`，每�
 curl "$BASE/api/v1/system/capabilities" -H "Authorization: Bearer $TOKEN"
 ```
 
+`capabilities` 中的 `settings.sandbox.host` 表示当前部署能否使用本机操作系统沙箱，目前仅 macOS 原生桌面应用可能为 supported。
+
+### POST /api/v1/system/host-project-dir
+
+用途：在运行 WeKnora 的本机弹出系统文件夹选择框，供新会话绑定本机项目目录（v0.8.2 起，仅原生桌面应用）。权限：Viewer+，仅 JWT，API Key 一律拒绝。无请求体。
+
+响应：200 `{"code":0,"msg":"success","data":{"dir":"/Users/me/project"}}`，用户取消选择时 `dir` 为空字符串；非桌面部署返回 404。
+
 ### GET /api/v1/system/info
 
 用途：系统版本与引擎信息。权限：Viewer+。

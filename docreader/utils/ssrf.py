@@ -126,6 +126,21 @@ def _load_whitelist() -> Tuple[FrozenSet[str], Tuple[str, ...], Tuple[Union[ipad
     return frozenset(exact_hosts), tuple(suffix_hosts), tuple(cidr_nets)
 
 
+def _whitelist_only_enabled() -> bool:
+    """Whether SSRF_DNS_WHITELIST_ONLY makes the whitelist the whole egress
+    policy: a host outside it is refused before any DNS query (#3378).
+
+    Parsed like the Go side: 1/t/true enable it, 0/f/false disable it, and a
+    non-empty value that is neither enables it — silently leaving an egress
+    lockdown off because someone wrote "yes" is the one failure mode this
+    control must not have.
+    """
+    raw = os.environ.get("SSRF_DNS_WHITELIST_ONLY", "").strip()
+    if not raw:
+        return False
+    return raw.lower() not in {"0", "f", "false"}
+
+
 def _is_whitelisted(hostname: str) -> bool:
     lowered = hostname.lower()
     exact_hosts, suffix_hosts, cidr_nets = _load_whitelist()
@@ -245,6 +260,15 @@ def is_ssrf_safe_url(raw_url: str) -> Tuple[bool, str]:
     hostname_lower = hostname.lower()
     if _is_whitelisted(hostname_lower):
         return True, ""
+
+    # Whitelist-only mode stops here: everything below resolves the name, and
+    # a host outside the whitelist must not reach DNS at all (#3378).
+    if _whitelist_only_enabled():
+        return (
+            False,
+            f"host is not in the SSRF whitelist: {hostname_lower} "
+            "(SSRF_DNS_WHITELIST_ONLY is on; add it to SSRF_WHITELIST to allow it)",
+        )
 
     if hostname_lower in RESTRICTED_HOSTNAMES:
         return False, f"hostname {hostname_lower} is restricted"

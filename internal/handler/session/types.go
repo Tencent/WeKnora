@@ -67,6 +67,9 @@ type CreateKnowledgeQARequest struct {
 	SuggestionAttribution *types.SuggestionAttribution `json:"suggestion_attribution,omitempty"`
 	// QuestionOrigin is the knowledge source of a picked suggested question.
 	QuestionOrigin *types.QuestionOrigin `json:"question_origin,omitempty"`
+
+	// ReasoningEffort overrides thinking for this request; empty inherits the agent configuration.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // AttachmentUpload represents a file attachment upload from the client

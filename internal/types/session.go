@@ -335,6 +335,7 @@ type SessionLastRequestState struct {
 	AgentID             string         `json:"agent_id,omitempty"`
 	AgentEnabled        bool           `json:"agent_enabled"`
 	ModelID             string         `json:"model_id,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
 	KnowledgeBaseIDs    []string       `json:"knowledge_base_ids,omitempty"`
 	KnowledgeIDs        []string       `json:"knowledge_ids,omitempty"`
 	TagIDs              []string       `json:"tag_ids,omitempty"`
