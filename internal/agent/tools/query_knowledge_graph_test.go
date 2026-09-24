@@ -178,7 +178,7 @@ func TestQueryKnowledgeGraph_ReportsConfiguredEntityAndRelationTypes(t *testing.
 	assert.Contains(t, result.Output, "审批流程")
 	assert.Contains(t, result.Output, "管理")
 	assert.Contains(t, result.Output, "审批")
-	assert.Contains(t, result.Output, "✓ Found 3 relevant results (deduplicated)")
+	assert.Contains(t, result.Output, "✓ Found 0 relations and 3 relevant chunks (deduplicated)")
 	assert.Contains(t, result.Output, "Result #1:")
 	assert.Contains(t, result.Output, "Result #2:")
 	assert.Contains(t, result.Output, "Result #3:")

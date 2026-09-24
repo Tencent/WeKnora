@@ -225,10 +225,18 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	// Skip when params already carries an embedding (e.g. the agent
 	// pre-computed it) or when the primary KB has no vector indexing
 	// configured.
-	if len(params.QueryEmbedding) == 0 &&
-		kb.IsVectorEnabled() && kb.EmbeddingModelID != "" &&
-		!params.DisableVectorMatch {
-		emb, embErr := s.GetQueryEmbedding(ctx, kb.ID, params.QueryText)
+	embeddingKB := kb
+	if !hasEmbeddingModel(embeddingKB) {
+		embeddingKB = nil
+		for _, candidate := range kbs {
+			if hasEmbeddingModel(candidate) {
+				embeddingKB = candidate
+				break
+			}
+		}
+	}
+	if len(params.QueryEmbedding) == 0 && embeddingKB != nil && !params.DisableVectorMatch {
+		emb, embErr := s.GetQueryEmbedding(ctx, embeddingKB.ID, params.QueryText)
 		if embErr != nil {
 			return nil, embErr
 		}
@@ -336,6 +344,12 @@ func normalizedMatchCount(requested int) int {
 	return min(requested, maxRetrievalPoolSize)
 }
 
+// hasEmbeddingModel reports whether kb is vector-indexed with a configured
+// embedding model, i.e. whether it can embed a query for vector retrieval.
+func hasEmbeddingModel(kb *types.KnowledgeBase) bool {
+	return kb != nil && kb.IsVectorEnabled() && kb.EmbeddingModelID != ""
+}
+
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in
 // scope. Callers map a nil result to NotFound; there is intentionally no
 // kbs[0] fallback because it would mask caller bugs and could leak an
@@ -414,8 +428,19 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	// scope happens to include them (e.g. KBSelectionMode=all picking up a
 	// wiki-only KB).
 	var faqVectorKBIDs, docVectorKBIDs, docKeywordKBIDs []string
+	// The query is embedded with the primary's model, or with the first
+	// vector KB of the group when the primary has none (a wiki primary
+	// searched together with document KBs): asking the primary for its empty
+	// model ID failed the whole search.
+	embeddingKB := primary
+	if !hasEmbeddingModel(primary) {
+		embeddingKB = nil
+	}
 	for _, kb := range groupKBs {
-		if kb.IsVectorEnabled() && kb.EmbeddingModelID != "" {
+		if hasEmbeddingModel(kb) {
+			if embeddingKB == nil {
+				embeddingKB = kb
+			}
 			if kb.Type == types.KnowledgeBaseTypeFAQ {
 				faqVectorKBIDs = append(faqVectorKBIDs, kb.ID)
 			} else {
@@ -435,7 +460,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		(len(faqVectorKBIDs) > 0 || len(docVectorKBIDs) > 0) {
 		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
 
-		queryEmbedding, err := s.resolveQueryEmbedding(ctx, primary, params, currentTenantID)
+		queryEmbedding, err := s.resolveQueryEmbedding(ctx, embeddingKB, params, currentTenantID)
 		if err != nil {
 			return nil, err
 		}

@@ -327,3 +327,41 @@ func TestFormatWithinBudgetDropsLowestRankedRows(t *testing.T) {
 		t.Fatalf("single row dropped: omitted=%d count=%v", omittedSingle, single.Data["count"])
 	}
 }
+
+func TestDeduplicateResultsKeepsSiblingsImagesAndBestScore(t *testing.T) {
+	tool := &SearchKnowledgeTool{}
+	row := func(
+		id, knowledgeID string, index int, chunkType, parent, content string, score float64,
+	) *searchResultWithMeta {
+		return &searchResultWithMeta{SearchResult: &types.SearchResult{
+			ID: id, KnowledgeID: knowledgeID, ChunkIndex: index, ChunkType: chunkType,
+			ParentChunkID: parent, Content: content, Score: score,
+		}}
+	}
+	ocr := string(types.ChunkTypeImageOCR)
+	in := []*searchResultWithMeta{
+		// Siblings under one parent are different text.
+		row("child-a", "d1", 3, "", "p1", "first child", 0.4),
+		row("child-b", "d1", 4, "", "p1", "second child", 0.9),
+		// Image chunks all carry chunk_index 0.
+		row("img-1", "d1", 0, ocr, "", "ocr one", 0.5),
+		row("img-2", "d1", 0, ocr, "", "ocr two", 0.5),
+		row("text-0", "d1", 0, "", "", "intro", 0.3),
+		// The same chunk from two searches: the better score wins.
+		row("dup", "d2", 1, "", "", "dup text", 0.2),
+		row("dup", "d2", 1, "", "", "dup text", 0.8),
+	}
+	out := tool.deduplicateResults(in)
+	got := map[string]float64{}
+	for _, r := range out {
+		got[r.ID] = r.Score
+	}
+	for _, id := range []string{"child-a", "child-b", "img-1", "img-2", "text-0", "dup"} {
+		if _, ok := got[id]; !ok {
+			t.Fatalf("%s dropped; kept %v", id, got)
+		}
+	}
+	if len(out) != 6 || got["dup"] != 0.8 || out[0].ID != "child-b" {
+		t.Fatalf("dedup = %v (first %s)", got, out[0].ID)
+	}
+}

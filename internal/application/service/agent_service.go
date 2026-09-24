@@ -95,6 +95,7 @@ func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[stri
 type agentService struct {
 	browserSkill          *browserskill.Manager
 	userRepo              interfaces.UserRepository
+	graphRepo             interfaces.RetrieveGraphRepository
 	cfg                   *config.Config
 	modelService          interfaces.ModelService
 	mcpServiceService     interfaces.MCPServiceService
@@ -151,10 +152,12 @@ func NewAgentService(
 	hostSandbox HostSandboxManager,
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
+	graphRepo interfaces.RetrieveGraphRepository,
 ) interfaces.AgentService {
 	svc := &agentService{
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
+		graphRepo:            graphRepo,
 		cfg:                  cfg,
 		modelService:         modelService,
 		knowledgeBaseService: knowledgeBaseService,
@@ -1235,8 +1238,13 @@ func (s *agentService) registerTools(
 		case tools.ToolListDocuments:
 			toolToRegister = tools.NewListDocumentsTool(s.knowledgeService, config.SearchTargets)
 		case tools.ToolQueryKnowledgeGraph:
+			var chunkRepo interfaces.ChunkRepository
+			if s.chunkService != nil {
+				chunkRepo = s.chunkService.GetRepository()
+			}
 			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
-				WithKnowledgeScope(s.knowledgeService)
+				WithKnowledgeScope(s.knowledgeService).
+				WithGraph(s.graphRepo, chunkRepo)
 		case tools.ToolSearchConversations:
 			// The owner is captured from the caller's identity here, not read
 			// from the model's arguments, so no prompt can redirect the search

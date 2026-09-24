@@ -64,7 +64,7 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	// QUERY_UNDERSTAND has already classified the turn. Entities only feed the
 	// knowledge-base graph search, so a greeting or chit-chat turn that skips
 	// KB retrieval must not pay for this second LLM call.
-	if !chatManage.Intent.NeedsKBRetrieval() {
+	if !chatManage.NeedsRetrieval() {
 		logger.Debugf(ctx, "skipping extract entity, intent %q needs no KB retrieval", chatManage.Intent)
 		return next()
 	}

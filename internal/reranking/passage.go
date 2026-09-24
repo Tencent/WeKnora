@@ -167,11 +167,21 @@ func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 //
 // An empty enriched body stays empty: a title alone is not evidence that
 // the chunk answers anything.
+//
+// The chunk's heading breadcrumb (ContextHeader) goes between the two for the
+// same reason: it was embedded with the chunk, so vector search can find
+// "7 天内可申请" under "## 退款政策" while a model scoring the bare body
+// rejects it.
 func ModelPassage(ctx context.Context, result *types.SearchResult) string {
 	passage := EnrichedPassage(ctx, result)
-	title := strings.TrimSpace(result.KnowledgeTitle)
-	if strings.TrimSpace(passage) == "" || title == "" || result.ChunkType == string(types.ChunkTypeFAQ) {
+	if strings.TrimSpace(passage) == "" || result.ChunkType == string(types.ChunkTypeFAQ) {
 		return passage
 	}
-	return title + "\n\n" + passage
+	if header := strings.TrimSpace(result.ContextHeader); header != "" {
+		passage = header + "\n\n" + passage
+	}
+	if title := strings.TrimSpace(result.KnowledgeTitle); title != "" {
+		passage = title + "\n\n" + passage
+	}
+	return passage
 }

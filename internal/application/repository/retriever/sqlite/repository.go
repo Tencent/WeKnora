@@ -745,15 +745,25 @@ func sanitizeFTS5Query(q string) string {
 
 	var parts []string
 	for _, f := range fields {
-		if f != "" {
-			parts = append(parts, `"`+f+`"`)
+		if f == "" {
+			continue
 		}
+		term := `"` + strings.ReplaceAll(f, `"`, `""`) + `"`
+		// The index holds CJK text as bigrams, so a lone Han character
+		// (the 股 of "A股") was never a token; match bigrams starting with it.
+		if runes := []rune(f); len(runes) == 1 && unicode.Is(unicode.Han, runes[0]) {
+			term += "*"
+		}
+		parts = append(parts, term)
 	}
 
 	if len(parts) == 0 {
 		return ""
 	}
 
-	// Use OR because we want fuzzy match across multiple bigrams/words
-	return strings.Join(parts, " OR ")
+	// Use OR because we want fuzzy match across multiple bigrams/words.
+	// Only the content column is searched: the FTS table also indexes
+	// source, chunk, knowledge and KB IDs, so a query for "2023" could match
+	// a UUID fragment.
+	return "content : (" + strings.Join(parts, " OR ") + ")"
 }
