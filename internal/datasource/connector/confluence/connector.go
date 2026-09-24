@@ -10,6 +10,7 @@ import (
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -174,9 +175,15 @@ func (c *Connector) fetchStream(
 				resourceID,
 			)
 		}
-		pages, err := client.pages(ctx, s)
+		pages, complete, err := client.pages(ctx, s)
 		if err != nil {
 			return nil, fmt.Errorf("list pages in Confluence space %s: %w", s.Key, err)
+		}
+		if !complete {
+			logger.Warnf(ctx,
+				"[Confluence] space %s: listing stopped after %d empty pages that still linked onward; "+
+					"listed %d pages, checking unlisted ones one by one before deleting",
+				s.Key, maxEmptyServerPages, len(pages))
 		}
 		priorPages, hadBaseline := baseline.SpacePages[resourceID]
 		if next.SpacePages[resourceID] == nil {
@@ -221,7 +228,11 @@ func (c *Connector) fetchStream(
 				return nil, err
 			}
 		}
-		if hadBaseline {
+		if !complete {
+			if err := reconcileUnlisted(ctx, client, h, s, resourceID, priorPages, seen, &next); err != nil {
+				return nil, err
+			}
+		} else if hadBaseline {
 			if len(pages) == 0 && len(priorPages) > 0 {
 				return nil, fmt.Errorf(
 					"refusing Confluence mirror deletion in %s: listing returned 0 pages against a %d-page baseline",
@@ -244,15 +255,7 @@ func (c *Connector) fetchStream(
 				if _, exists := seen[id]; exists {
 					continue
 				}
-				deleted := types.FetchedItem{
-					ExternalID: id, IsDeleted: true, SourceResourceID: resourceID,
-					Metadata: map[string]string{"channel": types.ChannelConfluence},
-				}
-				if err := h.Emit(ctx, deleted); err != nil {
-					return nil, err
-				}
-				delete(next.SpacePages[resourceID], id)
-				if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
+				if err := emitDeleted(ctx, h, &next, resourceID, id); err != nil {
 					return nil, err
 				}
 			}
@@ -261,6 +264,63 @@ func (c *Connector) fetchStream(
 	next.FullSync = false
 	next.FullSyncBaseline = nil
 	return next.syncCursor(), nil
+}
+
+// reconcileUnlisted handles the pages a cut-short listing did not return. The
+// listing proves nothing about them, so each one is looked up on its own and
+// deleted only when Confluence confirms it is gone from the space. Pages that
+// are still there, could not be checked, or exceed the per-run probe budget
+// stay tracked with their prior version and are checked again next run.
+func reconcileUnlisted(
+	ctx context.Context,
+	c *client,
+	h datasource.StreamHandler,
+	s space,
+	resourceID string,
+	priorPages map[string]string,
+	seen map[string]struct{},
+	next *cursor,
+) error {
+	probed := 0
+	for id, version := range priorPages {
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		if probed >= maxDeletionProbes {
+			next.SpacePages[resourceID][id] = version
+			continue
+		}
+		probed++
+		present, err := c.pageInSpace(ctx, id, s.Key)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			logger.Warnf(ctx, "[Confluence] space %s: could not check unlisted page %s, keeping it: %v", s.Key, id, err)
+			next.SpacePages[resourceID][id] = version
+			continue
+		}
+		if present {
+			next.SpacePages[resourceID][id] = version
+			continue
+		}
+		if err := emitDeleted(ctx, h, next, resourceID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func emitDeleted(ctx context.Context, h datasource.StreamHandler, next *cursor, resourceID, id string) error {
+	deleted := types.FetchedItem{
+		ExternalID: id, IsDeleted: true, SourceResourceID: resourceID,
+		Metadata: map[string]string{"channel": types.ChannelConfluence},
+	}
+	if err := h.Emit(ctx, deleted); err != nil {
+		return err
+	}
+	delete(next.SpacePages[resourceID], id)
+	return h.Checkpoint(ctx, next.syncCursor())
 }
 
 func failedPageItem(resourceID string, summary page, err error) types.FetchedItem {

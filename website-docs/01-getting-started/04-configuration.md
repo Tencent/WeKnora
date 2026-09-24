@@ -5,7 +5,7 @@ WeKnora 的配置由四层组成，**优先级从低到高**：
 | 层 | 位置 | 用途 |
 | --- | --- | --- |
 | 主配置文件 | `config/config.yaml` | 结构化的默认值，随镜像分发 |
-| 模板 / 预设 | `config/prompt_templates/*.yaml`、`builtin_agents.yaml`、`agent_type_presets.yaml`、`builtin_models.yaml` | 提示词、内置 Agent、内置模型 |
+| 模板 / 预设 | `config/prompt_templates/*.yaml`、`builtin_agents.yaml`、`agent_type_presets.yaml`、`builtin_models.yaml`、`models.json` | 提示词、内置 Agent、内置模型、模型厂商目录叠加 |
 | 环境变量 | `.env` / 容器 environment | 部署级覆盖，改完需重启 |
 | 运行时系统设置 | 数据库 `system_settings` 表，界面在「设置 → 系统」 | 支持的设置可在线修改，优先于环境变量，多数立即生效 |
 
@@ -143,12 +143,13 @@ flowchart LR
 | `LOG_LEVEL` / `LOG_PATH` / `LOG_FORMAT` | debug / 空 / 空 | 日志级别、文件路径（空则仅 stdout）、自定义格式 |
 | `LLM_DEBUG_LOG` | false | true 时在 LOG_PATH 同目录写 `llm_debug.log` |
 | `TZ` | Asia/Shanghai | 时区 |
-| `WEKNORA_LANGUAGE` | 空 | 文档处理语言（问题/摘要生成）。优先级：本变量 > 请求的 `Accept-Language` > 内置 `zh-CN`。文档处理语言可独立于界面语言设置，例如使用英文界面处理韩文文档 |
+| `DEFAULT_LOCALE` | 空 | 前端界面默认语言（frontend 容器读取）：`zh-CN` / `en-US` / `ru-RU` / `ko-KR` / `ja-JP`，非法值忽略。仅影响未手动切换过语言的用户，优先级：用户已选语言 > 本变量 > `zh-CN`；改完重启 frontend 容器即可，无需重建镜像 |
+| `WEKNORA_LANGUAGE` | 空 | 文档处理语言（问题/摘要生成）。优先级：本变量 > 请求的 `Accept-Language` > 内置 `zh-CN`。文档处理语言可独立于界面语言设置，例如使用英文界面处理韩文文档。未设置回复语言的 IM 渠道也以本变量（未设置时为 `zh-CN`）作为默认回复语言 |
 | `AUTO_MIGRATE` | true | 启动时自动执行数据库迁移 |
 | `AUTO_RECOVER_DIRTY` | true | 自动修复 golang-migrate 的 dirty 状态（上次迁移中断留下的）。手工排查迁移问题时应临时设为 false，否则启动会自动改写迁移版本记录，见[数据库与迁移](../06-development/02-database-schema.md) |
 | `WEKNORA_TRUSTED_PROXIES` | 空 | gin 信任代理 CIDR（逗号分隔） |
 | `MAX_SKILL_BUNDLE_SIZE_MB` | 256 MiB（默认不小于 MAX_FILE_SIZE_MB，上限 512 MiB） | 技能 ZIP 上传与来源下载上限；反向代理请求体限制也需足够大 |
-| `MAX_FILE_SIZE_MB` | 50 | 上传文件大小限制（app/frontend/docreader 三处共用） |
+| `MAX_FILE_SIZE_MB` | 50 | 上传文件大小限制（app/frontend/docreader 三处共用）；Helm 部署使用 `global.maxFileSizeMB` |
 | `CONCURRENCY_POOL_SIZE` | 5 | 通用并发池 |
 | `APP_EXTERNAL_URL` / `FRONTEND_BASE_URL` | 空 | IM 渠道图片/文件外链的外部可达 URL / 前端外部 origin |
 | `RESOURCE_URL_MODE` | handle | API 响应里文件引用的默认形式：`handle` 返回内部 `resource://`，`public` 返回可直接加载的限时外链。单次请求可用 `?resource_urls=` 覆盖，详见 [API 总览](../04-api/01-api-overview.md) |
@@ -195,7 +196,7 @@ flowchart LR
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | `STORAGE_TYPE` | local | `local` / `minio` / `cos` / `tos` / `s3` / `obs` / `oss` |
-| `STORAGE_ALLOW_LIST` | 空 | 允许用户选择的存储类型白名单（逗号分隔） |
+| `STORAGE_ALLOW_LIST` | 空 | 允许用户选择的存储类型白名单（逗号分隔），可选值 `local`、`minio`、`cos`、`tos`、`s3`、`oss`、`ks3`、`obs` |
 | `LOCAL_STORAGE_BASE_DIR` | /data/files | 本地存储根目录 |
 | `MINIO_ENDPOINT/ACCESS_KEY_ID/SECRET_ACCESS_KEY/BUCKET_NAME/USE_SSL` | minio:9000 / minioadmin / minioadmin / 空 / false | MinIO |
 | `COS_SECRET_ID/SECRET_KEY/REGION/BUCKET_NAME/APP_ID/PATH_PREFIX` | 空 | 腾讯云 COS（另有 TEMP_BUCKET/TEMP_REGION） |
@@ -207,19 +208,23 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
-| `OLLAMA_BASE_URL` | http://host.docker.internal:11434 | Ollama 地址 |
+| `OLLAMA_BASE_URL` | http://host.docker.internal:11434 | 唯一的本地 Ollama 地址。`source=local` 的向量与对话模型共用它；未设置时进程用 `http://localhost:11434` |
 | `OLLAMA_OPTIONAL` | true | Ollama 不可用时仅告警不阻断启动 |
 | `BATCH_EMBED_SIZE` | 空 | 批量 embedding 大小 |
 | `VLM_HTTP_TIMEOUT_SECONDS` | 180 | VLM 单次请求超时 |
 | `BUILTIN_MODELS_CONFIG` | config/builtin_models.yaml | 内置模型声明文件路径（见下文） |
+| `MODELS_CONFIG` | config/models.json | 模型厂商目录的部署叠加文件路径（补充厂商、覆盖地址或模型参数），格式见[模型管理](../03-features/06-models.md) |
 | `WEKNORA_LLM_STREAM_RAW_DUMP` / `_DIR` | 空 | LLM 流原始转储（排障用） |
+
+向量模型名不由环境变量决定。在模型记录里把 `type=Embedding`、`source=local` 的 `name` 设为 Ollama 模型名（CLI 示例 `nomic-embed-text`，维度 768；快速开始用 `bge-m3`，维度 1024）。名为空时本地 embedder 回退到 `nomic-embed-text`。`EMBEDDING_MODEL_NAME` 只在 `builtin_models.yaml` 引用 `${EMBEDDING_MODEL_NAME}` 时生效（见下文「config/builtin_models.yaml.example：声明式内置模型」与仓库 `config/builtin_models.yaml.example`）。安装文档的 8GB 起点不含 Ollama 权重；Neo4j 默认关闭（`neo4j` profile）。
 
 ### 认证、租户与安全
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
-| `JWT_SECRET` | 空 | JWT 签名密钥（必填） |
-| `SYSTEM_AES_KEY` | 空 | 敏感字段落盘加密的 AES-256 主密钥，**必须 32 字节**；丢失则已加密数据（租户 API Key、模型 key、向量库凭证等）不可恢复。v0.4.0 起取代 `TENANT_AES_KEY`/`CRYPTO_MASTER_KEY`/`CRYPTO_SALT` |
+| `JWT_SECRET` | 空 | JWT 签名密钥（必填，可用 `openssl rand -hex 32` 生成）。留空或使用示例值时每次启动随机生成，重启后已登录用户需重新登录；多副本必须配置相同的值 |
+| `SYSTEM_AES_KEY` | 空 | 敏感字段落盘加密的 AES-256 主密钥，**必须 32 字节**（可用 `openssl rand -hex 16` 生成）；丢失则已加密数据（租户 API Key、模型 key、向量库凭证等）不可恢复，升级时沿用原值。v0.4.0 起取代 `TENANT_AES_KEY`/`CRYPTO_MASTER_KEY`/`CRYPTO_SALT` |
+| `SYSTEM_SIGNING_KEY` | 空（回退到 `SYSTEM_AES_KEY`） | 嵌入会话与预签名文件链接的签名密钥（可用 `openssl rand -hex 32` 生成）。未设置时使用 `SYSTEM_AES_KEY`；两者都缺失、长度不足 16 或为示例值时无法签发签名链接与嵌入会话。更换后已签发的链接失效；多副本须使用同一个值 |
 | `DISABLE_REGISTRATION` | false | true 时强制 `registration_mode=invite_only` |
 | `WEKNORA_AUTH_DEFAULT_TENANT_MODE` | create_personal | 注册后建空间策略（`create_personal` / `tenantless`） |
 | `WEKNORA_TENANT_ENABLE_RBAC` | （默认 true） | 空间角色强制鉴权开关 |
@@ -235,8 +240,34 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_AUDIT_RETENTION_DAYS` | 90 | 审计日志保留天数 |
 | `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` | 空 | 引导第一个系统管理员。**不会创建用户**：该邮箱需先自行注册，下次启动时若部署内还没有任何系统管理员，才把它提升；已有管理员后本变量不再生效。详见[租户、用户与认证授权](../03-features/01-tenant-auth.md) |
 | `OIDC_AUTH_ENABLE` 及 `OIDC_AUTH_*` / `OIDC_USER_INFO_MAPPING_*` | false / 空 | OIDC 单点登录全套配置 |
-| `SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA` | 空 / `searxng,qdrant,milvus,weaviate,doris-fe,doris-be` | 出站请求 SSRF 白名单（app 与 docreader 共用） |
+| `SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA` | 空 / `searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio`（仅 app） | 出站请求 SSRF 白名单。`SSRF_WHITELIST` 为 app 与 docreader 共用；compose 只给 app 的 `SSRF_WHITELIST_EXTRA` 设了默认值，docreader 的同名变量默认为空 |
+| `SSRF_DNS_WHITELIST_ONLY` | false | 仅允许白名单出站（app 与 docreader 均读取）。开启后，不在白名单的主机在 **DNS 查询前**即被拒绝，URL 校验处不在白名单的 IP 直连也一并拒绝；域名只按名字匹配，写在白名单里的 CIDR 不再对域名生效。取值按布尔解析（`1/t/true` 开、`0/f/false` 关），**非空且无法解析的取值按「开」处理**。开启前的准备见下文 |
 | `IMAGE_HOST_KEEP_URL` | 空 | 保留原始 URL 的图片域名白名单 |
+
+#### 开启 `SSRF_DNS_WHITELIST_ONLY` 之前
+
+开启后白名单就是全部出站策略，需要先把所有出站地址写进 `SSRF_WHITELIST` 或 `SSRF_WHITELIST_EXTRA`。docreader 也要访问 compose 内的主机时，请写进两个服务共用的 `SSRF_WHITELIST`（它的 `SSRF_WHITELIST_EXTRA` 默认为空）。通常还要补上：
+
+- 模型服务地址（chat / embedding / rerank / VLM / ASR，含本机 Ollama 的 `localhost`）
+- OIDC 登录的 `dex`（或你的 IdP 域名）、MCP 服务地址、`docreader`
+- 对象存储（外部 S3/COS/OSS 等）、外部向量库、Langfuse 地址
+- 沙箱控制面地址：开启后「允许私网端点」不再能绕过白名单
+
+仍未覆盖的出站路径，按影响排序：
+
+1. **gRPC 向量库的运行时解析**：qdrant / milvus 客户端由 gRPC 自己的 resolver 解析 target，拨号器拿到的已是地址，因此这类主机是在**建客户端之前按名字**判断的（环境变量配置在启动时判断，控制台保存的配置走 URL 校验），而不是每次连接前。
+2. **Langfuse 的 OTLP 导出器**自带 HTTP 客户端，完全不走本机制。`LANGFUSE_HOST` 默认是 SaaS 地址，离线部署请关闭追踪或改成内网地址。
+3. **`HTTP(S)_PROXY`**：拨号器对代理主机的放行条件是「拨号地址与代理 URL 的 host 完全相等」。相等时代理主机即使不在白名单也会被解析和连接；不相等时（例如代理 URL 没写端口）会被当成非白名单直接拒绝。离线部署请 unset 代理，或把代理主机一并写进白名单。
+
+### 镜像构建参数（从源码构建时）
+
+以下变量只在 `docker compose build` / `make docker-build-frontend` 构建 frontend 镜像时使用，拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
+
+| 名称 | 默认值 | 说明 |
+| --- | --- | --- |
+| `VITE_FRONTEND_COMMIT` | unknown | 写入「系统信息」页的前端短 commit。`make docker-build-frontend` 与 `start_all.sh --no-pull` 会从 git 自动填充；直接 `docker compose build` 时需自行导出 |
+| `NPM_REGISTRY` | 空（默认源） | 构建阶段使用的 npm registry，国内可设 `https://registry.npmmirror.com` |
+| `NODE_MAX_OLD_SPACE_SIZE` | 4096 | Vite 构建的 Node 堆上限（MB），Docker Desktop 内存较小时可降到 2048 |
 
 ### Docreader 解析（docreader 容器）
 
@@ -256,14 +287,29 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | Sandbox 配置 | 设置页按空间维护 | 后端、凭据、模板、超时和私网访问策略按空间保存 |
-| `WEKNORA_SANDBOX_DOCKER_ENABLED` | false | Docker 沙箱后端回退开关。系统管理员也可在「设置 → 系统设置」打开（DB 优先，立即生效）。默认关闭，因为本机 `docker.sock` 等同宿主机 root |
+| `WEKNORA_SANDBOX_DOCKER_ENABLED` | false | Docker 沙箱后端回退开关。系统管理员也可在「设置 → 系统设置 → 网络安全」打开（DB 优先，立即生效）。默认关闭，因为本机 `docker.sock` 等同宿主机 root |
 | `WEKNORA_AGENT_LLM_TIMEOUT` | 120s | Agent 单次 LLM 调用超时（Go duration 或纯数字秒） |
 | `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT` / `_FAIL_OPEN` | 600s / fail-close | MCP 工具人工审批等待与失败策略 |
 | `WEKNORA_CHAT_ATTACHMENT_TTL_HOURS` / `_WAIT_TIMEOUT_SEC` / `_OCR_CONCURRENCY` / `_OCR_MAX_PAGES` | 24 / 60 / 8 / 8 | 聊天附件解析保留时长、等待超时与 OCR 并发/页数上限 |
 | `WEKNORA_HOUSEKEEPING_ENABLED` | 启用 | 回收卡在 processing 的脏数据 |
 | `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` / `WEKNORA_DOCREADER_CALL_TIMEOUT` | 2h / 30m | 文档处理任务与单次 RPC 超时 |
+| `WEKNORA_PADDLEOCR_VL_TIMEOUT` | 1000s | 自建 PaddleOCR-VL HTTP 请求超时，支持正数 Go duration（如 `5400s`、`90m`）；空值、无效值或非正数使用默认值。外层超时需留余量，例如本项 `90m`、DocReader `100m`、文档任务 `2h` |
 
 沙箱后端、网络策略、脚本开关与个人环境变量使用空间配置/API 管理，见[技能与沙箱](../03-features/22-skills-sandbox.md)。长期记忆与自动标签均默认关闭，分别使用租户 memory_config 和知识库 auto_tag_config，不用全局环境变量替代各空间配置。
+
+### 本机浏览器（BrowserSkill，可选）
+
+用户通过 Chrome 扩展把本机浏览器连接到 WeKnora。Docker app 镜像已内置 `bsk` 与配套扩展，默认根据用户当前访问的页面地址生成连接地址，通常无需配置。
+
+| 名称 | 默认值 | 说明 |
+| --- | --- | --- |
+| `BROWSERSKILL_BINARY` | Docker 镜像内 `/opt/weknora/browserskill/bsk` | `bsk` 可执行文件绝对路径；原生部署需自行构建并配置，显式设为空可关闭本功能 |
+| `BROWSERSKILL_EXTENSION_PATH` | Docker 镜像内已预设 | 供用户在「工具箱 → 浏览器连接」的「手动安装（备用）」下载的扩展 ZIP 路径 |
+| `BROWSERSKILL_PUBLIC_URL` | 空（按页面地址生成） | 仅在网关使用独立域名或路径时覆盖；远程部署必须使用 `wss://` |
+| `BROWSERSKILL_MAX_CONNECTIONS` | 32 | 单个应用实例同时在线的浏览器设备上限 |
+| `BROWSERSKILL_INTERNAL_URL` / `BROWSERSKILL_CLUSTER_SECRET` | 空 | 多副本部署：每个节点填写其他节点可直连的地址（不要用负载均衡地址），所有副本使用相同的随机密钥（至少 32 字符） |
+
+部署方式与限制见[本机浏览器](../05-clients/09-local-browser.md)。
 
 ### 可观测性（Langfuse）
 
@@ -277,7 +323,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
-| `SEARXNG_PORT` | 8888 | 宿主机端口 |
+| `SEARXNG_PORT` | 8888 | 宿主机端口。不要与 `APP_PORT`（默认 8080）相同，否则 `localhost` 上的请求可能先命中 SearXNG，登录接口返回 HTML 404 |
 | `SEARXNG_BIND` | 127.0.0.1 | **默认只监听本机**。WeKnora 打包的配置关掉了 SearXNG 自身的限流（否则后端会被节流），所以不应直接暴露到 LAN；确实要开放请显式改成 `0.0.0.0` 并自行加固 |
 | `SEARXNG_SECRET` | 空 | 入口脚本用它替换 `settings.yml` 里的 `secret_key`，对外开放时必须设 |
 
@@ -375,6 +421,8 @@ builtin_models:
 ```
 
 注意：未设置的 `${ENV}` 会保留字面量以便暴露配置错误；非字符串字段（`type`、`source`、`is_default`、`dimension` 等）必须写字面值；从文件删除条目**不会**自动删库，需手动清理。
+
+本地 Ollama：把 `source` 写成 `local`，`name` 用 Ollama 模型名（向量侧可用 `${EMBEDDING_MODEL_NAME}`）。完整注释示例见 `config/builtin_models.yaml.example` 的 “one local Ollama” 段；`dimension` 须为字面量（CLI 示例 `nomic-embed-text` 为 768）。
 
 ## 配置优先级速记
 

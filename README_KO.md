@@ -31,7 +31,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="버전" src="https://img.shields.io/badge/version-0.8.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="버전" src="https://img.shields.io/badge/version-0.8.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -53,12 +53,13 @@
 
 [**WeKnora**](https://weknora.weixin.qq.com)는 엔터프라이즈급 문서 이해, 시맨틱 검색, 자율 추론 시나리오를 위해 설계된 오픈소스 LLM 기반 지식 프레임워크입니다.
 
-본 프레임워크는 **세 가지 핵심 역량**을 중심으로 구성됩니다. 일상 검색에 최적화된 **RAG 기반 빠른 Q&A**, 지식 검색·MCP 도구·**스킬 카탈로그**·세션 지속 **Docker / E2B / Cube 샌드박스**·웹 검색을 자율적으로 오케스트레이션하여 복잡한 다단계 작업을 처리하는 **ReAct Agent 추론**, 그리고 Agent가 원본 문서에서 상호 연결된 마크다운 지식베이스와 인터랙티브 지식 그래프를 스스로 생성·유지하는 완전히 새로운 **Wiki 모드**(수동 편집·버전 이력·원클릭 롤백 지원)입니다. **크로스 세션 장기 메모리**는 당신이 누구이며 무엇을 반복해서 묻는지 기억합니다. 지식 가공 과정도 세밀하게 제어할 수 있습니다. **트리형 폴더**가 업로드 시의 디렉터리 구조를 그대로 유지하고, **청크 편집 및 버전 이력**을 통해 검색 청크를 문서처럼 수정·비교·롤백할 수 있습니다. 다양한 데이터 소스 연동(Feishu 지식베이스 / Feishu 클라우드 드라이브 / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS, 지속 확장 중), **웹사이트 임베드 Widget**으로 외부 사이트에 에이전트 게시, 프로그램 연동을 위한 **범위 지정 API 키 및 Principal 모델**, 워크스페이스별 **다중 인스턴스 스토리지 백엔드**, 20개 이상의 LLM 프로바이더 통합(LiteLLM 포함), Langfuse 기반 풀스택 관측 가능성과 **런타임 작업 큐 대시보드 + Worker 풀 거버넌스**, **엔터프라이즈 멀티 테넌트 RBAC(4단계 역할 매트릭스 + 리소스 소유권 + 테넌트 감사 로그)**, 완전 셀프호스팅이 가능한 모듈형 아키텍처를 결합하여, WeKnora는 흩어진 문서를 검색·추론 가능하며 지속적으로 진화하는 전용 지식 자산으로 탈바꿈시킵니다.
+본 프레임워크는 **세 가지 핵심 역량**을 중심으로 구성됩니다. 일상 검색에 최적화된 **RAG 기반 빠른 Q&A**, 지식 검색·MCP 도구·**스킬 카탈로그**·세션 지속 **Docker / E2B / Cube 샌드박스**·**BrowserSkill**을 통한 사용자 브라우저·웹 검색을 자율적으로 오케스트레이션하여 복잡한 다단계 작업을 처리하는 **ReAct Agent 추론**, 그리고 Agent가 원본 문서에서 상호 연결된 마크다운 지식베이스와 인터랙티브 지식 그래프를 스스로 생성·유지하는 완전히 새로운 **Wiki 모드**(수동 편집·버전 이력·원클릭 롤백 지원)입니다. **크로스 세션 장기 메모리**는 당신이 누구이며 무엇을 반복해서 묻는지 기억합니다. 지식 가공 과정도 세밀하게 제어할 수 있습니다. **트리형 폴더**가 업로드 시의 디렉터리 구조를 그대로 유지하고, **청크 편집 및 버전 이력**을 통해 검색 청크를 문서처럼 수정·비교·롤백할 수 있습니다. 다양한 데이터 소스 연동(Feishu 지식베이스 / Feishu 클라우드 드라이브 / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS, 지속 확장 중), **웹사이트 임베드 Widget**으로 외부 사이트에 에이전트 게시, 지식베이스를 Cursor·Claude 등 AI 도구에 공개하는 **내장 MCP Server**, 프로그램 연동을 위한 **범위 지정 API 키 및 Principal 모델**, 워크스페이스별 **다중 인스턴스 스토리지 백엔드**, 자동 생성 모델 카탈로그를 갖춘 27개 내장 모델 벤더(LiteLLM 포함), Langfuse 기반 풀스택 관측 가능성과 **런타임 작업 큐 대시보드 + Worker 풀 거버넌스**, **엔터프라이즈 멀티 테넌트 RBAC(4단계 역할 매트릭스 + 리소스 소유권 + 테넌트 감사 로그)**, 완전 셀프호스팅이 가능한 모듈형 아키텍처를 결합하여, WeKnora는 흩어진 문서를 검색·추론 가능하며 지속적으로 진화하는 전용 지식 자산으로 탈바꿈시킵니다.
 
-Feishu, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가 데이터 소스 개발 중), PDF, Word, 이미지, Excel, XMind 등 10가지 이상의 문서 포맷을 처리합니다. WeChat Work, Feishu, Slack, Telegram 등의 IM 채널을 통해 Q&A 서비스를 직접 제공할 수 있습니다. 모델 레이어에서 OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, Ollama 등 주요 프로바이더를 지원합니다. Office 문서는 **anydoc**으로 프로세스 내 파싱할 수 있습니다. 전체 프로세스가 모듈화 설계되어 LLM, 벡터 DB, 스토리지 등 구성 요소를 유연하게 교체 가능하며, 로컬 및 프라이빗 클라우드 배포를 지원하여 데이터 완전 자체 관리가 가능합니다. 또한 WeKnora는 **Langfuse**와 원활하게 통합되어 Agent 추론, 토큰 사용량 및 파이프라인에 대한 포괄적인 관측 가능성(Observability)을 제공합니다.
+Feishu, Confluence, DingTalk Docs, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가 데이터 소스 개발 중), PDF, Word, 이미지, Excel, XMind 등 10가지 이상의 문서 포맷을 처리합니다. WeChat Work, Feishu, Slack, Telegram 등의 IM 채널을 통해 Q&A 서비스를 직접 제공할 수 있습니다. 모델 레이어에서 OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, Ollama 등 주요 프로바이더를 지원합니다. Office 문서는 **anydoc**으로 프로세스 내 파싱할 수 있습니다. 전체 프로세스가 모듈화 설계되어 LLM, 벡터 DB, 스토리지 등 구성 요소를 유연하게 교체 가능하며, 로컬 및 프라이빗 클라우드 배포를 지원하여 데이터 완전 자체 관리가 가능합니다. 또한 WeKnora는 **Langfuse**와 원활하게 통합되어 Agent 추론, 토큰 사용량 및 파이프라인에 대한 포괄적인 관측 가능성(Observability)을 제공합니다.
 
 ## ✨ 최신 업데이트
 
+- **v0.8.2** — **로컬 브라우저(BrowserSkill)**: 오픈소스 BrowserSkill 확장 프로그램을 통해 에이전트가 사용자 자신의 Chrome / Edge를 조작(실시간 작업 미리보기, 일시정지 / 재개, 로그인과 CAPTCHA는 사용자에게 인계); **내장 MCP Server**(워크스페이스별 `/mcp/<endpoint_id>` 엔드포인트, Streamable HTTP, 엔드포인트마다 별도 토큰·지식베이스 범위·요청 제한·도구 그룹; Python 버전 `mcp-server/`는 지원 중단); 스킬·MCP 서비스·브라우저 연결을 모은 사이드바 **도구 상자**; **대화 제어**(실행 중인 턴에 요구 사항 추가, 이전 질문에서 대화 분기, 샌드박스 체크포인트와 함께 제자리 되감기, 세션별 추론 강도); **산출물 라이브러리**; 샌드박스 **대화형 터미널**과 **그래픽 데스크톱**; macOS **Lite 호스트 샌드박스**와 프로젝트 폴더; 재구축된 **모델 카탈로그**(27개 내장 벤더, 컨텍스트 윈도우·최대 출력·추론 단계·비전 지원 자동 채움); Agent 검색 도구를 `search_knowledge` / `read_document` / `list_documents`로 통합; Confluence 및 DingTalk Docs 데이터 소스; Bocha 및 Serply 웹 검색; 일본어 UI; IM 채널별 응답 언어; 화이트리스트 전용 외부 통신 모드. 호환성 변경: DingTalk 채널은 Stream 모드만 지원하며, 샌드박스 명령은 기본적으로 `root`로 실행됩니다. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.8.0** — **스킬 샌드박스 런타임**(세션 지속 Docker / E2B / Cube 백엔드, 테넌트 단위 네트워크 정책; Local 호스트 프로세스 백엔드 제거; Docker는 옵트인); **테넌트 스킬 카탈로그**(ClawHub / SkillHub / git / zip에서 설치, 샌드박스별 스냅샷, 실시간 진행률, 파일 탐색/편집, 개인·워크스페이스 환경 변수); **크로스 세션 장기 메모리**(profile / preference / fact / task / interest, 확인이 필요한 자동 추출, `search_memory`); 프로세스 내 **anydoc** Office 파서; 공식 **DeepSeek Harness 플러그인** `@wxg-prc-cpg/dsh-weknora`; GitLab 및 Tencent IMA 데이터 소스; LiteLLM; Exa 및 Metaso 웹 검색; XMind 파싱; 채팅 산출물, 질문 개요, 타임스탬프; 컨텍스트 압축 및 프로바이더 Prompt Cache 마커. 또한 OIDC JWKS 검증, 선택적 복잡한 비밀번호, 문서 자동 태깅, 광범위한 샌드박스/보안 강화. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.7.2** — **공식 제품 문서 사이트** 공개(VitePress, 6개 섹션 약 50편으로 약 360개 API 엔드포인트와 약 150개 환경 변수를 다루며, 독립 Docker/Nginx 배포·빠른 시작 샘플 데이터·로컬 MCP 데모 포함); **지식베이스 폴더 트리**(업로드 경로를 독립 데이터로 저장하여 파일 관리자처럼 탐색·이름 변경·문서 재배치); **청크 편집 및 버전 이력**(UI에서 검색 청크 직접 편집, 버전별 diff와 롤백, 편집 후 인덱스 자동 재구축, 문서 커스텀 메타데이터); **Wiki 페이지 버전 이력**(스냅샷 + 라인 단위 diff + 원클릭 롤백 + 브라우저 내 수동 편집); **파일 직접 링크 모드** `resource_urls=public` / `RESOURCE_URL_MODE`(서드파티 앱이 인증 프록시를 다시 호출하지 않고 이미지와 파일을 렌더링); **Feishu 클라우드 드라이브 데이터 소스** 및 docx blocks API 동기화; 문서 일괄 태깅; **MCP Server 1.1.x**(mcp 2.x 고수준 API로 마이그레이션, 공식 PyPI 패키지 `tencent-weknora-mcp`, `create_knowledge_from_text`와 `list_shared_knowledge_bases` 추가로 총 29개 도구); AWS S3 기본 자격 증명 체인(IAM Role / IRSA); 로컬 HTML 업로드 파싱; QQBot Markdown 응답; app / frontend / docreader / mcp-server PR CI 검사 추가. 또한 router와 `modelcontext` 대규모 리팩터링, 리랭크·청킹 품질 개선 및 광범위한 안정성 수정. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.7.1** — 새로운 **Yunzhijia(云之家) IM 통합**(WebSocket + 이미지 메시지 + Markdown 응답); **Volcengine Rerank** 제공자(요청 자동 분할)와 **Zhipu AI 웹 검색** 제공자; 컨트롤 플레인 자동화를 위한 **플랫폼 범위 API 키**(테넌트 관리, 시스템 설정, 런타임 큐, 감사 로그); **KB 단위 활동 감사 추적**; FAQ 관리 강화(필터링, 태깅, 내보내기, 가져오기 결과 추적); **Langfuse OTLP/OTel 트레이싱** 마이그레이션 및 W3C traceparent 전파; 채팅 헤더 액션을 통한 원클릭 **Markdown 내보내기** 및 참조 드로어의 Wiki 도구 결과 표시; 프롬프트 캐시 가시성; 세션 채널 거버넌스(IM/임베드/API 세션을 관리자 범위로 분리); Feishu 대규모 Wiki 동기화 견고화; 레거시 Neo4j 대화 메모리 의존성 제거. 또한 광범위한 slug 무결성, SSRF 전송, 상태 동기화 강화. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
@@ -66,7 +67,7 @@ Feishu, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자
 - **v0.6.3** — 웹사이트 임베드 Widget 및 통합 센터(보안 모드 Token 교환 + 속도 제한); 채팅 경험 전면 개편(인용 팝오버, RAG 파이프라인 진행, 스트리밍 Markdown); 문서 다중 태그 및 일괄 reparse; Wiki 폴더 및 계층 탐색; RSS 데이터 소스; MCP OAuth2; EPUB / MHTML 파싱; Agent 모델 준비 상태 검사; 모델 디버거; 세션 소스 필터; 워크스페이스 삭제 UI. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.2** — 업로드 단위 파싱 설정(`process_config`) + 업로드 확인 대화상자; reparse 시 설정 덮어쓰기; `weknora` CLI v0.9(번들 Agent Skills, `session stop`, auth/profile 통합); KB 마키 선택 다중 선택; pgvector 1024차원 HNSW 인덱스; 채팅 리소스 Store 리팩터; Langfuse 단일 추적(Jaeger 제거). 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.1** — 문서 파싱 추적 타임라인(Langfuse 스타일 Span 트리, 단계별 진행 표시 + 파싱 중단); OpenSearch 벡터 저장소 드라이버; YAML 선언형 내장 모델 구성; 시스템 관리자와 통합 플랫폼 설정 + 감사 로그; 신규 사용자 온보딩 가이드; 설정 UI 리디자인; `weknora` CLI v0.7 / v0.8(Agent 우선 와이어 프로토콜, NDJSON, `--dry-run`); OpenDataLoader 및 PaddleOCR-VL 파싱 엔진; MCP 서버 멀티 트랜스포트(stdio / SSE / HTTP); 모델별 사고 모드 설정; Tencent LKEAP 리랭크 + 네이티브 Gemini 임베딩 + MiniMax-M3. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md) 참고.
-- **v0.6.0** — 테넌트 RBAC(4단계 역할 매트릭스 `Owner` / `Admin` / `Contributor` / `Viewer` + KB 단위 소유 + 테넌트별 감사 로그), 테넌트 멤버 관리와 멀티 워크스페이스 UX, 셀프 서비스 워크스페이스 생성; `weknora` CLI v0.4 GA + `mcp serve`; 여러 벡터 저장소에 걸친 KB 검색 팬아웃; MCP / 데이터 소스 자격 증명 AES-256-GCM 암호화 + docreader gRPC TLS + Token; Zhipu 임베더와 화웨이 클라우드 OBS 추가; 서버 사이드 사용자 환경설정; Go 1.26.0. 자세한 내용은 [`docs/RBAC说明.md`](./docs/RBAC说明.md)과 [`CHANGELOG.md`](./CHANGELOG.md) 참고.
+- **v0.6.0** — 테넌트 RBAC(4단계 역할 매트릭스 `Owner` / `Admin` / `Contributor` / `Viewer` + KB 단위 소유 + 테넌트별 감사 로그), 테넌트 멤버 관리와 멀티 워크스페이스 UX, 셀프 서비스 워크스페이스 생성; `weknora` CLI v0.4 GA + `mcp serve`; 여러 벡터 저장소에 걸친 KB 검색 팬아웃; MCP / 데이터 소스 자격 증명 AES-256-GCM 암호화 + docreader gRPC TLS + Token; Zhipu 임베더와 화웨이 클라우드 OBS 추가; 서버 사이드 사용자 환경설정; Go 1.26.0. 자세한 내용은 [`website-docs/03-features/01-tenant-auth.md`](./website-docs/03-features/01-tenant-auth.md)과 [`CHANGELOG.md`](./CHANGELOG.md) 참고.
 - **v0.5.2** — Wiki 인제스트가 만 건 규모 KB 지원(작업 큐 + DLQ); MCP 휴먼인더루프 도구 승인; Anthropic / Apache Doris / Tencent VectorDB / Kingsoft Cloud KS3 / SearXNG 백엔드; 적응형 3단계 청킹 + 라이브 미리보기; 글로벌 ⌘K 명령 팔레트; Yuque 커넥터 + WeChat 미니프로그램; `weknora` CLI 프리뷰.
 - **v0.5.1** — 지식베이스 일괄 관리; 테넌트 전체 IM 채널 개요; 세션 검색 + 사용자 단위 핀; 모델 / 웹 검색 / MCP 통일 카드 설정; Agent별 LLM 타임아웃; 데스크탑 테넌트 전환.
 - **v0.5.0** — Wiki 모드 GA — Agent가 원본 문서에서 구조화·상호 연결된 Markdown Wiki 페이지와 지식 그래프 자동 생성, Wiki 브라우저 및 시각화 그래프를 UI에 탑재.
@@ -129,12 +130,15 @@ Feishu, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자
 
 | 기능 | 상세 |
 |------|------|
-| 지능형 추론 | ReACT 점진적 멀티스텝 추론, 지식 검색·MCP 도구·스킬 샌드박스·웹 검색을 자율 오케스트레이션 |
+| 지능형 추론 | ReACT 점진적 멀티스텝 추론, 지식 검색·MCP 도구·스킬 샌드박스·로컬 브라우저·웹 검색을 자율 오케스트레이션 |
 | 빠른 Q&A | 지식베이스 기반 RAG Q&A, 빠르고 정확한 답변 |
 | Wiki 모드 | Agent가 주도하여 원본 문서에서 구조화된 마크다운 Wiki 페이지를 자동 생성 및 유지 관리; 브라우저 내 수동 편집, 페이지 버전 이력, 라인 단위 diff 및 원클릭 롤백 |
-| 스킬 카탈로그와 샌드박스 | 워크스페이스 스킬 카탈로그(ClawHub / SkillHub / git / zip)를 세션 지속 Docker / E2B / Cube 샌드박스에 설치; `shell_exec`, 파일 도구, 산출물, 설정 단위 네트워크 정책; Local 호스트 프로세스 백엔드 제거 |
+| 스킬 카탈로그와 샌드박스 | 워크스페이스 스킬 카탈로그(ClawHub / SkillHub / git / zip)를 세션 지속 Docker / E2B / Cube 샌드박스에 설치; `shell_exec`, 파일 도구, 산출물, 설정 단위 네트워크 정책; Local 호스트 프로세스 백엔드 제거; 채팅 옆 대화형 터미널과 브라우저 기반 그래픽 데스크톱; macOS 데스크톱 앱은 고정 샌드박스가 없는 세션을 OS 샌드박스(Seatbelt)에서 실행하며, 선택한 프로젝트 폴더 또는 날짜별 임시 작업 공간에 연결 |
+| 로컬 브라우저 | 오픈소스 BrowserSkill 확장 프로그램을 통해 에이전트가 전용 작업 창에서 사용자 자신의 Chrome / Edge를 조작(페이지 열기, 클릭, 양식 입력, 내용 읽기); 실시간 미리보기, 일시정지 / 재개 / 종료, 로그인과 CAPTCHA는 사용자에게 인계 |
+| 대화 제어 | 실행 중인 턴에 요구 사항 추가, 이전 질문에서 대화 분기, 제자리 되감기(샌드박스 작업 공간도 해당 체크포인트로 복원), 세션별 추론 강도 선택 |
+| 산출물 라이브러리 | 모든 대화에서 생성된 파일을 사이드바에서 한눈에 보기, 유형 필터·검색·날짜별 그룹·버전 이력 지원 |
 | 장기 메모리 | 크로스 세션 메모리(profile / preference / fact / task / interest), 자동 추출, 사용자 확인, 온디맨드 `search_memory` |
-| 도구 호출 | 내장 도구, MCP 도구(OAuth2 원격 서비스·대화 중 OAuth 포함), 웹 검색; `@Skill / @MCP` 멘션으로 턴 단위 Agent 런타임 범위 지정 |
+| 도구 호출 | 내장 도구, MCP 도구(OAuth2 원격 서비스·대화 중 OAuth 포함), 웹 검색; `@Skill / @MCP` 멘션으로 턴 단위 Agent 런타임 범위 지정; MCP 도구는 필요할 때 탐색·호출되며 도구별로 켜고 끌 수 있음 |
 | 대화 전략 | 온라인 프롬프트 편집, 검색 임계값 조정, 멀티턴 문맥 인식, Agent별 인용 출력 토글 |
 | 추천 질문 | 지식베이스 콘텐츠 기반 질문 자동 생성 및 답변 후 후속 질문 |
 | 임시 첨부 | 세션 범위로 이미지 / 문서를 업로드하고 비동기 파싱하여 일회성 Q&A에 사용(이미지 + 첨부 통합 한도) |
@@ -150,7 +154,7 @@ Feishu, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자
 | 청크 편집 및 버전 | UI에서 검색 청크를 직접 편집하고 버전별 스냅샷·diff·원클릭 롤백, 편집 후 인덱스 자동 재구축; 생성 질문 추가·수정·삭제·재생성; 문서 커스텀 메타데이터 지원 |
 | 업로드 단위 파싱 설정 | 업로드 확인 대화상자 또는 `process_config` API로 파서·청킹·멀티모달(VLM / ASR)·그래프 추출·질문 생성을 배치 단위로 덮어쓰기; reparse 시 설정 변경 지원 |
 | 일괄 reparse | 여러 문서의 파싱을 한 번에 재큐잉, 배치 단위 `process_config` 지원 |
-| 데이터 소스 임포트 | Feishu 지식베이스 / Feishu 클라우드 드라이브 / Lark / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS 피드 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
+| 데이터 소스 임포트 | Feishu 지식베이스 / Feishu 클라우드 드라이브 / Lark / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS 피드 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
 | 문서 포맷 | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / 이미지 / CSV / Excel / PPT / JSON / XMind |
 | 자동 태깅 | 파싱 후 지식베이스 기존 태그에서 일치 항목을 증분 연결(새 태그 생성·수동 태그 덮어쓰기 없음) |
 | 검색 전략 | BM25 희소 / Dense 밀집 / GraphRAG 그래프 강화 / 부모-자식 청킹 / pgvector HNSW 가속(1024차원) / 다차원 인덱싱 |
@@ -167,19 +171,19 @@ Feishu, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자
 | 오브젝트 스토리지 | 로컬 / MinIO / AWS S3(IAM Role / IRSA 기본 자격 증명 체인 지원) / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS; **워크스페이스당 여러 스토리지 인스턴스**, KB 단위 바인딩 및 기본 인스턴스 |
 | IM 통합 | WeChat Work / Feishu / Lark(Feishu 국제판) / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
 | 웹사이트 임베드 | 임베드 Widget으로 에이전트 게시, 도메인 허용 목록·속도 제한·보안 모드 Token 교환 |
-| 웹 검색 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso |
+| 웹 검색 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso / Bocha / Serply |
 | API 통합 | 범위 지정 API 키(능력 단위 권한 + KB 단위 제한 + 스로틀링된 last_used 추적)와 API 통합 플레이그라운드; MCP OAuth 및 임베드 세션을 Principal 단위로 격리; `resource_urls=public`으로 바로 로드 가능한 파일 / 이미지 URL을 반환하여 인증 프록시 재호출 제거 |
-| MCP Server | 공식 PyPI 패키지 `tencent-weknora-mcp`, 29개 도구, stdio / SSE / HTTP 3가지 트랜스포트 지원 |
+| MCP Server | 내장: 워크스페이스별 `/mcp/<endpoint_id>` 엔드포인트 게시(Streamable HTTP), 엔드포인트마다 별도 토큰·지식베이스 범위·요청 제한·도구 그룹(검색, `ask`, Wiki, 명시적으로 켜는 쓰기 도구); Python 패키지 `tencent-weknora-mcp`는 지원 중단 |
 
 **플랫폼**
 
 | 기능 | 상세 |
 |------|------|
 | 배포 | 로컬 / Docker / Kubernetes (Helm), 프라이빗/오프라인 배포 지원 |
-| UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / 웹사이트 임베드 Widget / WeChat 미니 프로그램 |
+| UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / 웹사이트 임베드 Widget / WeChat 미니 프로그램; UI는 중국어 / 영어 / 일본어 / 한국어 / 러시아어 지원 |
 | 관측 가능성 | Langfuse(단일 추적 백엔드)로 ReAct 루프·토큰 소비·도구 호출·파이프라인 추적; Langfuse 스타일의 문서 파싱 추적 타임라인 내장으로 단계별 진행 표시; 시스템 관리자용 런타임 작업 큐 대시보드(큐 깊이·모델별 동시성·실패 작업 조사 및 수동 재시도) |
 | 작업 관리 | MQ 비동기 작업, 단계별 Worker 풀 거버넌스(core / 후처리 / enrichment / maintenance + 탄력적 공유 풀, Wiki 독립 풀)와 모델별 백그라운드 동시성 거버너; 버전 업그레이드 시 자동 DB 마이그레이션 |
-| 모델 관리 | 중앙 설정, YAML 선언형 내장 모델 구성, 지식베이스별 모델 선택, 모델별 사고 모드·Embedding 차원 덮어쓰기, 대화형 모델 디버거, 멀티테넌트 내장 모델 공유, WeKnora Cloud 호스팅 모델 및 문서 파싱 |
+| 모델 관리 | 중앙 설정, YAML 선언형 내장 모델 구성, 지식베이스별 모델 선택, 모델별 사고 모드·Embedding 차원 덮어쓰기, 대화형 모델 디버거, 멀티테넌트 내장 모델 공유, WeKnora Cloud 호스팅 모델 및 문서 파싱; 모델 카탈로그가 컨텍스트 윈도우·최대 출력·추론 단계·비전 지원을 자동으로 채우고, 실제 호출 미리보기와 모델별 프로토콜 덮어쓰기 지원 |
 
 ## 🧩 Chrome 확장 프로그램
 
@@ -225,6 +229,8 @@ docker compose up -d    # 코어 서비스 시작
 
 > 로컬 Ollama 모델을 사용하려면 먼저 `ollama serve > /dev/null 2>&1 &` 를 실행하세요.
 
+Ollama 임베딩 모델 이름, `OLLAMA_BASE_URL`, RAM 안내는 [설정 문서](./website-docs/01-getting-started/04-configuration.md)를 보세요.
+
 ### 🔄 업그레이드
 
 기존 배포가 있고 새 release를 다운로드한 경우:
@@ -265,11 +271,11 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 WeKnora는 문서를 지식 그래프로 변환해 문서 내 서로 다른 섹션 간 관계를 시각화할 수 있습니다. 지식 그래프 기능을 활성화하면 문서 내부의 시맨틱 연관 네트워크를 분석/구성하여 문서 이해를 돕고, 인덱싱과 검색에 구조화된 지원을 제공해 검색 결과의 관련성과 폭을 향상시킵니다.
 
-자세한 설정은 [지식 그래프 설정 가이드](./docs/KnowledgeGraph.md)를 참고하세요.
+자세한 설정은 [지식 그래프 설정 가이드](./website-docs/03-features/09-knowledge-graph.md)를 참고하세요.
 
 ## MCP 서버
 
-필요한 설정은 [MCP 설정 가이드](./mcp-server/MCP_CONFIG.md)를 참고하세요.
+WeKnora에는 MCP Server가 내장되어 있습니다. 「설정 → 게시 및 통합 → MCP 서버」에서 엔드포인트를 만들고, 클라이언트에서 Streamable HTTP로 `/mcp/<endpoint_id>`에 연결하세요. 자세한 내용은 [MCP 문서](./website-docs/03-features/08-mcp.md)(중국어)를 참고하세요. [`mcp-server/`](./mcp-server/MCP_CONFIG.md)의 독립 Python 서버는 지원 중단되었으며 기존 배포와의 호환을 위해서만 남아 있습니다.
 
 ## 🔌 WeChat 대화 오픈 플랫폼 사용
 
@@ -284,11 +290,11 @@ WeKnora는 [WeChat 대화 오픈 플랫폼](https://chatbot.weixin.qq.com)의 �
 
 **공식 제품 문서**: [`website-docs/`](./website-docs/README.md) — 「입문 → 아키텍처 → 기능 → API → 클라이언트 → 개발」 6개 섹션으로 구성된 완전한 문서 세트로, 약 360개 API 엔드포인트, 약 150개 환경 변수, 9개 확장 지점을 다룹니다. 이 디렉터리는 VitePress 사이트이기도 하여 `cd website-docs && npm install && npm run dev`로 로컬 미리보기가 가능하며, 디렉터리 내 `Dockerfile`로 단독 배포할 수도 있습니다.
 
-문제 해결 FAQ: [문제 해결 FAQ](./docs/QA.md)
+문제 해결 FAQ: [문제 해결 FAQ](./website-docs/01-getting-started/05-troubleshooting.md)
 
-상세 API 문서: [API Docs](./docs/api/README.md)
+상세 API 문서: [API Docs](./website-docs/04-api/01-api-overview.md)
 
-제품 계획 및 예정 기능: [Roadmap](./docs/ROADMAP.md)
+제품 기능: [제품 소개](./website-docs/01-getting-started/01-introduction.md)
 
 ## 🧭 개발자 가이드
 
@@ -313,7 +319,7 @@ make dev-frontend
 - ✅ Docker 이미지 재빌드 불필요
 - ✅ IDE 브레이크포인트 디버깅 지원
 
-**상세 문서:** [개발 환경 빠른 시작](./docs/开发指南.md)
+**상세 문서:** [개발 환경 빠른 시작](./website-docs/06-development/01-dev-guide.md)
 
 ## 🤝 기여하기
 

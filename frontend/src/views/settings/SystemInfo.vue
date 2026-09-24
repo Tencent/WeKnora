@@ -246,7 +246,7 @@ function formatUptime(totalSeconds: number): string {
 }
 
 const troubleshootingDocsURL =
-  'https://github.com/Tencent/WeKnora/blob/main/docs/migration-troubleshooting.md'
+  'https://github.com/Tencent/WeKnora/blob/main/website-docs/01-getting-started/05-troubleshooting.md#database-migrations'
 
 // Pre-fills a new issue with the current migration error so users don't have to
 // paste it manually. Body is intentionally minimal — the bug template will fill

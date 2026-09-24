@@ -31,7 +31,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.8.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.8.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -57,13 +57,14 @@ https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc
 
 *2:25 · 1080p · English narration & captions.*
 
-It is organized around three core capabilities: **RAG-based Quick Q&A** for everyday lookups, a **ReAct Agent** that autonomously orchestrates retrieval, MCP tools, a **tenant skill catalog**, session-persistent **Docker / E2B / Cube sandboxes** and web search to handle complex multi-step tasks, and a brand-new **Wiki Mode** in which agents distill raw documents into a self-maintaining, interlinked markdown knowledge base with an interactive knowledge graph, complete with manual editing, revision history and one-click rollback. **Cross-session long-term memory** remembers who you are and what you keep asking about. Knowledge curation is equally hands-on: a **tree-structured folder view** preserves the directory layout of uploads, and **chunk editing with revision history** lets retrieval chunks be edited, diffed and reverted like documents. Combined with multi-source ingestion (Feishu wiki / Feishu Drive / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS, and growing), **website embed widgets** for publishing agents to external sites, **scoped API keys with a principal model** for programmatic integrations, **multi-instance storage backends** per workspace for flexible data placement, 20+ LLM provider integrations (including LiteLLM), full Langfuse observability plus a **runtime task-queue dashboard with worker-pool governance**, **enterprise-ready multi-workspace RBAC** (4-tier role matrix + per-resource ownership + per-workspace audit log), and a fully self-hostable modular architecture, WeKnora turns scattered documents into a queryable, reasoning-capable, continuously evolving knowledge asset.
+It is organized around three core capabilities: **RAG-based Quick Q&A** for everyday lookups, a **ReAct Agent** that autonomously orchestrates retrieval, MCP tools, a **tenant skill catalog**, session-persistent **Docker / E2B / Cube sandboxes**, the user's own browser via **BrowserSkill** and web search to handle complex multi-step tasks, and a brand-new **Wiki Mode** in which agents distill raw documents into a self-maintaining, interlinked markdown knowledge base with an interactive knowledge graph, complete with manual editing, revision history and one-click rollback. **Cross-session long-term memory** remembers who you are and what you keep asking about. Knowledge curation is equally hands-on: a **tree-structured folder view** preserves the directory layout of uploads, and **chunk editing with revision history** lets retrieval chunks be edited, diffed and reverted like documents. Combined with multi-source ingestion (Feishu wiki / Feishu Drive / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS, and growing), **website embed widgets** for publishing agents to external sites, a **built-in MCP Server** that publishes knowledge bases to Cursor, Claude and other AI tools, **scoped API keys with a principal model** for programmatic integrations, **multi-instance storage backends** per workspace for flexible data placement, 27 built-in model vendors backed by a generated model catalog (including LiteLLM), full Langfuse observability plus a **runtime task-queue dashboard with worker-pool governance**, **enterprise-ready multi-workspace RBAC** (4-tier role matrix + per-resource ownership + per-workspace audit log), and a fully self-hostable modular architecture, WeKnora turns scattered documents into a queryable, reasoning-capable, continuously evolving knowledge asset.
 
-The framework supports auto-syncing knowledge from Feishu, GitLab, Tencent IMA, Notion, and Yuque (more data sources coming soon), handles 10+ document formats including PDF, Word, images, Excel and XMind, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, and Ollama. Office files can be parsed in-process with **anydoc**. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty. WeKnora also integrates with **Langfuse** for comprehensive observability into agent reasoning, token usage, and pipeline tracing.
+The framework supports auto-syncing knowledge from Feishu, Confluence, DingTalk Docs, GitLab, Tencent IMA, Notion, and Yuque (more data sources coming soon), handles 10+ document formats including PDF, Word, images, Excel and XMind, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, and Ollama. Office files can be parsed in-process with **anydoc**. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty. WeKnora also integrates with **Langfuse** for comprehensive observability into agent reasoning, token usage, and pipeline tracing.
 
 
 ## ✨ Latest Updates
 
+- **v0.8.2** — **Local Browser (BrowserSkill)**: agents drive the user's own Chrome / Edge through the open-source BrowserSkill extension, with a live task preview, pause / resume and hand-off for logins and CAPTCHAs; **built-in MCP Server** (per-workspace `/mcp/<endpoint_id>` endpoints over Streamable HTTP, each with its own token, knowledge-base scope, rate limit and tool groups; the Python `mcp-server/` is deprecated); a sidebar **Toolbox** for skills, MCP services and the browser connection; **conversation control** (append requirements to a running turn, fork from any earlier question, rewind in place with sandbox checkpoints, per-session reasoning effort); **artifacts library**; sandbox **interactive terminal** and **graphical desktop**; macOS **Lite host sandbox** with project folders; rebuilt **model catalog** (27 built-in vendors with generated context-window, max-output, reasoning and vision metadata); agent retrieval tools consolidated into `search_knowledge` / `read_document` / `list_documents`; Confluence and DingTalk Docs data sources; Bocha and Serply web search; Japanese UI; per-channel IM reply language; whitelist-only outbound mode. Breaking: DingTalk channels are Stream-only, and sandbox commands run as `root`. See [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.8.0** — **Skill sandbox runtime** (session-persistent Docker / E2B / Cube backends with per-tenant network policy; Local host-process backend removed; Docker opt-in); **tenant skill catalog** (install from ClawHub / SkillHub / git / zip, per-sandbox snapshots, live progress, file browse/edit, personal and workspace env vars); **cross-session long-term memory** (profile / preference / fact / task / interest, auto-extract with confirm, `search_memory`); **in-process anydoc office parser**; official **DeepSeek Harness plugin** `@wxg-prc-cpg/dsh-weknora`; GitLab and Tencent IMA data sources; LiteLLM; Exa and Metaso web search; XMind parsing; chat artifacts, question outline and timestamps; context compaction and provider prompt-cache markers. Plus OIDC JWKS verification, optional complex passwords, document auto-tagging, and broad sandbox/security hardening. See [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.7.2** — Launched the **official product documentation site** (VitePress; six sections, ~50 pages covering ~360 API endpoints and ~150 environment variables, with standalone Docker/Nginx deployment, quickstart sample data and a local MCP demo); **knowledge base folder tree** (upload paths stored as first-class data, browse/rename/re-file documents like a file manager); **chunk editing with revision history** (edit retrieval chunks in the UI, per-version diff and rollback, automatic reindexing, plus custom document metadata); **Wiki page revision history** (snapshots + line-level diff + one-click rollback + in-browser manual editing); **directly loadable file URLs** via `resource_urls=public` / `RESOURCE_URL_MODE` (third-party apps render images and files without a second authenticated proxy call); **Feishu Drive data source** and docx sync through the blocks API; batch document tagging; **MCP Server 1.1.x** (migrated to the mcp 2.x high-level API, official PyPI package `tencent-weknora-mcp`, new `create_knowledge_from_text` and `list_shared_knowledge_bases` for 29 tools total); AWS S3 default credential chain (IAM Role / IRSA); local HTML upload parsing; QQBot markdown replies; new PR CI checks for app / frontend / docreader / mcp-server. Plus large-scale router and `modelcontext` refactors, rerank and chunking quality work, and broad stability fixes. See [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.7.1** — New **Yunzhijia (云之家) IM integration** (WebSocket + image messages + markdown replies); **Volcengine rerank** provider (with request batching) and **Zhipu AI web search** provider; **platform-scoped API keys** for control-plane automation (tenant management, system settings, runtime queues, audit logs); **per-KB activity audit trail**; FAQ management enhancements (filtering, tagging, export, import tracking); **Langfuse OTLP/OTel tracing** migration with W3C traceparent propagation; chat header actions with one-click **Markdown export** and wiki tool results in the references drawer; prompt-cache observability; session channel governance (admin-scoped IM/embed/API sessions); resilient Feishu large-wiki sync; and removal of the legacy Neo4j conversation-memory dependency. Plus broad slug-integrity, SSRF-transport, and state-sync hardening. See [`CHANGELOG.md`](./CHANGELOG.md).
@@ -71,7 +72,7 @@ The framework supports auto-syncing knowledge from Feishu, GitLab, Tencent IMA, 
 - **v0.6.3** — Website embed widget & Integrations Center (secure-mode token exchange + rate limits); chat experience overhaul (citation popovers, RAG pipeline progress, streaming markdown); document multi-tag & batch reparse; Wiki folders & hierarchy navigation; RSS data source; MCP OAuth2; EPUB / MHTML parsing; agent model-readiness checks; model test debugger; session source filter; workspace deletion UI. See [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.2** — Per-upload process configuration with upload-confirm dialog; document reparse with `process_config`; `weknora` CLI v0.9 (bundled Agent Skills, `session stop`, auth/profile harmonization); KB marquee multi-select; HNSW index for 1024-dim pgvector embeddings; chat resources store refactor; Langfuse-only tracing (Jaeger removed). See [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.1** — Document parsing trace timeline (Langfuse-style span tree with stage-by-stage progress + stop-parse); OpenSearch vector store driver; declarative built-in models via YAML; system admin & consolidated platform settings + audit log; new-user onboarding guide; settings UI redesign; `weknora` CLI v0.7 / v0.8 (agent-first wire contract, NDJSON, `--dry-run`); OpenDataLoader + PaddleOCR-VL parsers; MCP server multi-transport (stdio / SSE / HTTP); per-model thinking-mode config; Tencent LKEAP rerank + native Gemini embeddings + MiniMax-M3. See [`CHANGELOG.md`](./CHANGELOG.md).
-- **v0.6.0** — Workspace RBAC (4-tier role matrix `Owner` / `Admin` / `Contributor` / `Viewer` + per-KB ownership + per-workspace audit log), workspace member management & multi-workspace UX, self-service workspaces; `weknora` CLI v0.4 GA with `mcp serve`; KB retrieval fan-out across vector stores; AES-256-GCM credential encryption + docreader gRPC TLS + Token; Zhipu embedder + Huawei OBS; server-side user preferences; Go 1.26.0. See [`docs/RBAC说明.md`](./docs/RBAC说明.md) and [`CHANGELOG.md`](./CHANGELOG.md).
+- **v0.6.0** — Workspace RBAC (4-tier role matrix `Owner` / `Admin` / `Contributor` / `Viewer` + per-KB ownership + per-workspace audit log), workspace member management & multi-workspace UX, self-service workspaces; `weknora` CLI v0.4 GA with `mcp serve`; KB retrieval fan-out across vector stores; AES-256-GCM credential encryption + docreader gRPC TLS + Token; Zhipu embedder + Huawei OBS; server-side user preferences; Go 1.26.0. See [`website-docs/03-features/01-tenant-auth.md`](./website-docs/03-features/01-tenant-auth.md) and [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.5.2** — Wiki ingest scales to 40k-document KBs (task queue + DLQ); MCP human-in-the-loop tool approval; Anthropic / Apache Doris / Tencent VectorDB / KS3 / SearXNG backends; adaptive 3-tier chunking with live preview; global ⌘K command palette; Yuque connector + WeChat Mini Program; `weknora` CLI preview.
 - **v0.5.1** — Knowledge-base batch management; workspace-wide IM channels overview; session search + user-scoped pinning; unified Model / Web Search / MCP settings cards; per-agent LLM timeout; desktop workspace switching.
 - **v0.5.0** — Wiki Mode GA — agents auto-generate structured, interlinked Markdown wiki pages with a knowledge graph; wiki browser + visual graph in the UI.
@@ -124,12 +125,15 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 
 | Capability | Details |
 |------------|---------|
-| Intelligent Reasoning | ReACT progressive multi-step reasoning, autonomously orchestrating knowledge retrieval, MCP tools, skill sandboxes, and web search |
+| Intelligent Reasoning | ReACT progressive multi-step reasoning, autonomously orchestrating knowledge retrieval, MCP tools, skill sandboxes, the local browser, and web search |
 | Quick Q&A | RAG-based Q&A over knowledge bases for fast and accurate answers |
 | Wiki Mode | Agent-driven auto-generation of structured, interlinked markdown Wiki pages from raw documents; in-browser manual editing, page revision history, line-level diff and one-click rollback |
-| Skill Catalog & Sandbox | Workspace skill catalog (ClawHub / SkillHub / git / zip) installed onto session-persistent Docker / E2B / Cube sandboxes; `shell_exec`, file tools, artifacts, per-config network policy; Local host-process backend removed |
+| Skill Catalog & Sandbox | Workspace skill catalog (ClawHub / SkillHub / git / zip) installed onto session-persistent Docker / E2B / Cube sandboxes; `shell_exec`, file tools, artifacts, per-config network policy; Local host-process backend removed; an interactive terminal and a browser-based graphical desktop beside the chat; the macOS desktop app runs sessions without a pinned sandbox in an OS sandbox (Seatbelt), bound to a chosen project folder or a dated temporary workspace |
+| Local Browser | Agents drive the user's own Chrome / Edge through the open-source BrowserSkill extension in a dedicated task window (open pages, click, fill forms, read content), with a live preview, pause / resume / end, and hand-off to the user for logins and CAPTCHAs |
+| Conversation Control | Append requirements to a running turn, fork a conversation from any earlier question, rewind in place (resetting the sandbox workspace to the matching checkpoint), and choose reasoning effort per session |
+| Artifacts Library | A sidebar page listing every generated file across conversations, with type filters, search, date grouping and version history |
 | Long-term Memory | Cross-session memory (profile / preference / fact / task / interest) with auto-extract, user confirm, and on-demand `search_memory` |
-| Tool Calling | Built-in tools, MCP tools (incl. OAuth2 remote services, mid-conversation OAuth), web search; `@Skill / @MCP` mentions to scope the agent runtime per turn |
+| Tool Calling | Built-in tools, MCP tools (incl. OAuth2 remote services, mid-conversation OAuth), web search; `@Skill / @MCP` mentions to scope the agent runtime per turn; MCP tools are discovered and called on demand and can be enabled per tool |
 | Conversation Strategy | Online Prompt editing, retrieval threshold tuning, multi-turn context awareness, per-agent citation output toggle |
 | Suggested Questions | Auto-generated question suggestions and after-answer follow-ups based on knowledge base content |
 | Temporary Attachments | Session-scoped image / document uploads with async parsing for one-off Q&A, with a combined image + attachment limit |
@@ -145,7 +149,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Chunk Editing & Revisions | Edit retrieval chunks directly in the UI with per-version snapshots, diff and one-click rollback, and automatic reindexing after an edit; generated questions can be added, edited, deleted and regenerated; custom document metadata supported |
 | Per-Upload Process Config | Override parser, chunking, multimodal (VLM / ASR), graph extraction, and question generation per upload batch via upload-confirm dialog or `process_config` API; reparse with new settings |
 | Batch Reparse | Re-queue parsing for multiple documents at once with optional per-batch `process_config` |
-| Data Source Import | Auto-sync from Feishu wiki / Feishu Drive / Lark / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS feeds (more data sources coming soon); incremental and full sync |
+| Data Source Import | Auto-sync from Feishu wiki / Feishu Drive / Lark / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS feeds (more data sources coming soon); incremental and full sync |
 | Document Formats | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / Images / CSV / Excel / PPT / JSON / XMind |
 | Auto-Tagging | After parse, pick matching tags from the knowledge base's existing set without creating tags or overwriting manual ones |
 | Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / HNSW-accelerated pgvector (1024-dim) / multi-dimensional indexing |
@@ -162,21 +166,21 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Object Storage | Local / MinIO / AWS S3 (IAM Role / IRSA default credential chain) / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS; **multiple storage instances per workspace** with per-KB binding and a default instance |
 | IM Channels | WeCom / Feishu / Lark (Feishu International) / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
 | Website Embed | Publish agents via embed widget with domain allowlists, rate limits, and secure-mode token exchange |
-| Web Search | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso |
+| Web Search | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso / Bocha / Serply |
 | API Integration | Scoped API keys (capability-level grants + per-KB restriction + throttled last-used tracking) with an API integration playground; MCP OAuth and embed sessions isolated per principal; `resource_urls=public` returns directly loadable file/image URLs, removing the second authenticated proxy call |
-| MCP Server | Official PyPI package `tencent-weknora-mcp` with 29 tools over stdio / SSE / HTTP transports |
+| MCP Server | Built in: publish per-workspace endpoints at `/mcp/<endpoint_id>` (Streamable HTTP), each with its own token, knowledge-base scope, rate limit and tool groups (retrieval, `ask`, Wiki, opt-in write tools); the Python `tencent-weknora-mcp` package is deprecated |
 
 **Platform**
 
 | Capability | Details |
 |------------|---------|
 | Deployment | Local / Docker / Kubernetes (Helm) with private and offline support |
-| UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / Website Embed Widget / WeChat Mini Program |
+| UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / Website Embed Widget / WeChat Mini Program; UI in Chinese / English / Japanese / Korean / Russian |
 | Access Control | Workspace RBAC with 4-tier role matrix (Owner / Admin / Contributor / Viewer), per-KB resource ownership, per-workspace audit log, invite-only workspaces, tenantless provisioning & gated self-service workspace creation, admin password reset (session revocation), cross-workspace superuser, scoped API keys |
-| Security | AES-256-GCM at-rest encryption for API keys and MCP / data-source credentials with graceful key rotation; gRPC TLS + Token between app and docreader; Redis TLS; SSRF-safe HTTP client (data sources, URL import, redirect chains); secret redaction in responses; skill sandbox isolation (Docker opt-in / E2B / Cube) with per-config network policy; OIDC ID-token JWKS verification; optional complex-password policy |
+| Security | AES-256-GCM at-rest encryption for API keys and MCP / data-source credentials with graceful key rotation; gRPC TLS + Token between app and docreader; Redis TLS; SSRF-safe HTTP client (data sources, URL import, redirect chains); secret redaction in responses; skill sandbox isolation (Docker opt-in / E2B / Cube) with per-config network policy; OIDC ID-token JWKS verification; optional complex-password policy; whitelist-only outbound mode (`SSRF_DNS_WHITELIST_ONLY`) |
 | Observability | Integrated Langfuse (sole tracing backend) for ReAct loops, token tracking, tool calls, and pipeline tracing; built-in Langfuse-style document parsing trace timeline with stage-by-stage progress; system-admin runtime task-queue dashboard (queue depth, per-model concurrency, failed-task inspection & manual retry) |
 | Task Management | MQ async tasks with per-stage worker-pool governance (core / post-process / enrichment / maintenance + elastic shared pool, plus an independent Wiki pool) and per-model background concurrency governors; automatic database migration on version upgrade |
-| Model Management | Centralized config, declarative built-in models via YAML, per-knowledge-base model selection, per-model thinking-mode and embedding-dimension overrides, interactive model test debugger, multi-workspace built-in model sharing, WeKnora Cloud hosted models and parsing |
+| Model Management | Centralized config, declarative built-in models via YAML, per-knowledge-base model selection, per-model thinking-mode and embedding-dimension overrides, interactive model test debugger, multi-workspace built-in model sharing, WeKnora Cloud hosted models and parsing; a generated model catalog fills context window, max output, reasoning levels and vision support, with a resolved-call preview and per-model protocol override |
 
 ## 🧩 Chrome Extension
 
@@ -249,6 +253,8 @@ Once started, visit **http://localhost** to get started.
 
 > To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
 
+For Ollama embedding model name, `OLLAMA_BASE_URL`, and RAM notes, see [configuration](./website-docs/01-getting-started/04-configuration.md).
+
 ### 🔄 Upgrading
 
 If you already have WeKnora running and downloaded a newer release:
@@ -287,7 +293,7 @@ Stop services: `docker compose down`
 
 ## MCP Server
 
-Please refer to the [MCP Configuration Guide](./mcp-server/MCP_CONFIG.md) for the necessary setup.
+WeKnora has a built-in MCP Server: create an endpoint under Settings → Publish & Integrations → MCP Server and connect clients over Streamable HTTP at `/mcp/<endpoint_id>`. See the [MCP guide](./website-docs/03-features/08-mcp.md). The standalone Python server in [`mcp-server/`](./mcp-server/MCP_CONFIG.md) is deprecated and kept only for existing deployments.
 
 ## 🔌 Using WeChat Dialog Open Platform
 
@@ -303,11 +309,11 @@ WeKnora serves as the core technology framework for the [WeChat Dialog Open Plat
 
 **Official website and product documentation**: [`website-docs/`](./website-docs/README.md) contains the product homepage and the complete documentation set organized as Getting Started → Architecture → Features → API → Clients → Development. With Node.js 24, run `cd website-docs && npm run setup && npm run build && npm run preview` to preview both together. The unified static output serves the homepage at `/` and documentation at `/docs/`; see the directory's README for Nginx and Docker deployment.
 
-Troubleshooting FAQ: [Troubleshooting FAQ](./docs/QA.md)
+Troubleshooting FAQ: [Troubleshooting FAQ](./website-docs/01-getting-started/05-troubleshooting.md)
 
-Detailed API documentation is available at: [API Docs](./docs/api/README.md)
+Detailed API documentation is available at: [API Docs](./website-docs/04-api/01-api-overview.md)
 
-Product plans and upcoming features: [Roadmap](./docs/ROADMAP.md)
+Product capabilities: [Introduction](./website-docs/01-getting-started/01-introduction.md)
 
 ## 🧭 Developer Guide
 
@@ -332,7 +338,7 @@ make dev-frontend
 - ✅ No need to rebuild Docker images
 - ✅ Support IDE breakpoint debugging
 
-**Detailed Documentation:** [Development Environment Quick Start](./docs/开发指南.md)
+**Detailed Documentation:** [Development Environment Quick Start](./website-docs/06-development/01-dev-guide.md)
 
 
 ## 🤝 Contributing

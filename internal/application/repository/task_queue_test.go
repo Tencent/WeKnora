@@ -392,14 +392,31 @@ func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 		deleted_at DATETIME
 	)`).Error)
 	require.NoError(t, db.Exec(
-		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?)",
-		"kb-active", 1, "kb-deleted", 1, time.Now(),
+		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?), (?, ?, NULL)",
+		"kb-active", 1, "kb-deleted", 1, time.Now(), "kb-t2", 2,
+	).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE tenants (
+		id INTEGER PRIMARY KEY,
+		deleted_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO tenants (id, deleted_at) VALUES (?, NULL), (?, ?)",
+		1, 2, time.Now(),
 	).Error)
 
 	repo := NewTaskPendingOpsRepository(db)
 	guard, ok := repo.(interfaces.TaskPendingOpsKnowledgeBaseGuard)
 	require.True(t, ok)
+	liveness, ok := repo.(interfaces.TaskPendingOpsTenantLiveness)
+	require.True(t, ok, "task pending repository must expose tenant liveness for wiki task guards")
 	ctx := context.Background()
+
+	activeTenant, err := liveness.HasActiveTenant(ctx, 1)
+	require.NoError(t, err)
+	assert.True(t, activeTenant)
+	deletedTenant, err := liveness.HasActiveTenant(ctx, 2)
+	require.NoError(t, err)
+	assert.False(t, deletedTenant)
 
 	accepted, err := guard.EnqueueIfKnowledgeBaseActive(ctx,
 		makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-active", "ingest", "active", nil))
@@ -425,6 +442,10 @@ func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 		{name: "tenant mismatch", op: &types.TaskPendingOp{
 			TenantID: 2, TaskType: types.TypeWikiIngest, Scope: types.TaskScopeKnowledgeBase,
 			ScopeID: "kb-active", Op: "ingest", DedupKey: "wrong-tenant",
+		}},
+		{name: "deleted tenant with live KB", op: &types.TaskPendingOp{
+			TenantID: 2, TaskType: types.TypeWikiIngest, Scope: types.TaskScopeKnowledgeBase,
+			ScopeID: "kb-t2", Op: "ingest", DedupKey: "deleted-tenant",
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

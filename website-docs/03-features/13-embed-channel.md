@@ -47,6 +47,8 @@ publish token 只保存在业务后端，页面通过 `data-token-endpoint` 指�
 
 业务后端实现该 endpoint：服务端持有 `em_` token，调用 `POST /api/v1/embed/{channel_id}/exchange` 换取 `ems_` 短效 token 并返回 `{ "token": "ems_...", "expiresIn": 1800 }`。挂件会在约 80% TTL 时（不早于 30 秒）自动刷新 token（见 `weknora-widget.js` 中的 `scheduleRefresh`）。**publish token 永不到达浏览器。**
 
+换取接口必须先验证业务侧 Session/JWT 的有效性和访客访问权；仅判断 Cookie 或 Authorization 头是否存在不构成身份验证。服务端调用 exchange 时须手动发送与渠道白名单一致的业务宿主 `Origin`，例如 `Origin: https://shop.example.com`；不要把 WeKnora 的管理 Token 暴露给访客。
+
 其余可选属性：`data-base-url`（默认从 script src 推导）、`data-width` / `data-height`（面板尺寸，默认 400×600）、`data-sandbox`（iframe sandbox 策略；跨域嵌入时自动加 `allow-scripts allow-forms allow-popups allow-modals allow-same-origin`）。
 
 ### 方式三：编程式 API
@@ -109,7 +111,17 @@ publish token 只保存在业务后端，页面通过 `data-token-endpoint` 指�
 
 A 网站嵌入 B 的 WeKnora 时，白名单填 A。标准 Nginx 使用 `/api/v1/embed-frame-policy` 获取渠道策略（无需 token，仅返回 CSP，不返回渠道配置），并在 `/embed/:channelId` 的 HTML 响应中设置 `frame-ancestors`；Lite 使用同一策略。该页面不缓存，策略获取失败时不返回嵌入 HTML。
 
-升级时，过去仅填 B 的渠道需改填实际宿主 A，并同时更新前后端。自定义反向代理需保留 CSP、原始 Host（含端口）、协议及 `Sec-Fetch-Site`；详见 [embed-subdomain.md](https://github.com/Tencent/WeKnora/blob/main/docs/embed-subdomain.md)。白名单限制浏览器嵌入，不能代替访客认证或阻止持有 token 的非浏览器客户端；此类访问控制使用安全模式和限流。
+升级时，过去仅填 B 的渠道需改填实际宿主 A，并同时更新前后端。自定义反向代理需保留 CSP、原始 Host（含端口）、协议及 `Sec-Fetch-Site`。白名单限制浏览器嵌入，不能代替访客认证或阻止持有 token 的非浏览器客户端；此类访问控制使用安全模式和限流。
+
+#### 独立子域（可选） {#embed-subdomain}
+
+默认 embed 页面和管理端共用域名即可。需要独立入口或 Cookie 隔离时，可以把 embed 页面放在 `https://embed.example.com`，管理端留在 `https://app.example.com`，业务宿主为 `https://shop.example.com`。
+
+管理端通过 `frontend/public/config.js` 的 `window.__RUNTIME_CONFIG__.EMBED_BASE_URL` 指定 embed 源站，或使用构建期 `VITE_EMBED_BASE_URL`；留空则跟随当前页面 origin。修改后确认生成的 Widget/iframe 代码指向新地址。
+
+独立 Nginx server 只提供 `/embed/*`、`/weknora-widget.js`、`/assets/*` 和必要的后端代理，不挂管理端 `index.html`。保留标准 `frontend/nginx.conf` 中 `/embed/` 的 `auth_request`、内部 `/_embed-frame-policy` 和 CSP 响应头：获取策略失败时必须拒绝返回页面，网关/CDN 不应缓存或丢弃该策略。
+
+白名单仍填写实际业务宿主 `https://shop.example.com`，安全模式 exchange 声明相同 Origin；不需要为正常同源聊天请求额外加入 embed 源站。Widget 在宿主与 embed 不同源时自动添加 iframe sandbox。验证时从实际宿主打开页面，检查 iframe、API、CSP 和生成代码，不能只在管理端预览。
 
 ### Token 交换（安全模式核心）
 
@@ -191,7 +203,7 @@ type EmbedChannel struct {
 | `name` | string | — | 渠道显示名称 |
 | `enabled` | bool | `true` | 渠道开关，关闭后所有公开接口拒绝访问 |
 | `agent_id` | string | `builtin-quick-answer` | 绑定的 Agent，决定知识库范围与对话能力 |
-| `allowed_origins` | string[] | — | **必填至少一项，填写嵌入宿主 A，不是 WeKnora 地址 B**。支持三种形式：完整 `http(s)://` Origin、子域名通配 `*.example.com`、全通配 `*`（仅开发模式允许，生产环境拒绝） |
+| `allowed_origins` | string[] | — | **必填至少一项，填写嵌入宿主 A，不是 WeKnora 地址 B**。支持三种形式：完整 `http(s)://` Origin（不含路径、查询参数）、子域名通配 `*.example.com`（只匹配子域，不含 `example.com` 本身；未写端口时匹配任意端口）、全通配 `*`（`GIN_MODE=release` 时拒绝保存，仅供开发） |
 | `welcome_message` | string | 空 | 打开挂件时的欢迎语 |
 | `rate_limit_per_minute` | int | `30` | 单 IP 每分钟请求上限 |
 | `rate_limit_per_day` | int | `10000` | 渠道级每日请求总量上限 |
@@ -208,7 +220,7 @@ type EmbedChannel struct {
 
 ### 管理 API（需登录鉴权）
 
-由 `RegisterEmbedChannelRoutes`（`internal/router/router.go`）注册，支持 API Key 的 `ManageChannels` 能力：
+由 `RegisterEmbedChannelRoutes`（`internal/router/routes_agent.go`）注册，支持 API Key 的 `ManageChannels` 能力：
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -308,7 +320,8 @@ sequenceDiagram
 | 匿名会话/Token | `internal/application/service/embed_session.go` |
 | Webhook 分发 | `internal/application/service/embed_webhook.go` |
 | 鉴权中间件 | `internal/middleware/embed_auth.go` |
-| 路由注册 | `internal/router/router.go`（`RegisterEmbedPublicRoutes` / `RegisterEmbedChannelRoutes`） |
+| 路由注册 | `internal/router/routes_agent.go`（`RegisterEmbedPublicRoutes` / `RegisterEmbedChannelRoutes` / 嵌入页 CSP 策略） |
+| 宿主来源规则 | `internal/embedpolicy/origin.go` |
 | 挂件加载器（SDK） | `frontend/public/weknora-widget.js` |
 | 嵌入页 SPA 入口 | `frontend/src/embed-main.ts`、`frontend/src/composables/useEmbedBridge.ts`、`useEmbedChatSession.ts` |
 | 数据库迁移 | `migrations/versioned/000060_embed_channels.up.sql` |

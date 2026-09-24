@@ -7,6 +7,7 @@ import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
+import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -138,6 +139,12 @@ const router = createRouter({
           name: "artifactLibrary",
           component: () => import("../views/artifacts/ArtifactLibrary.vue"),
           meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'settings.sandbox' }
+        },
+        {
+          path: "toolbox/:section?",
+          name: "toolbox",
+          component: () => import("../views/toolbox/Toolbox.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
         },
         {
           path: "agents",
@@ -319,6 +326,13 @@ router.beforeEach(async (to, from, next) => {
   // 如果这里先按“未登录”拦截到 /login，会导致回调结果没有机会落盘。
   if (hasPendingOIDCCallback()) {
     next()
+    return
+  }
+
+  // Preserve bookmarks for tools that have moved out of Settings.
+  if (to.path === '/platform/settings' && isToolboxSection(to.query.section)) {
+    next({ ...toolboxLocation(to.query.section,
+      typeof to.query.sandboxId === 'string' ? to.query.sandboxId : undefined), replace: true })
     return
   }
 

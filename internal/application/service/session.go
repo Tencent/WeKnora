@@ -783,26 +783,6 @@ func (s *sessionService) releaseForkSnapshots(ctx context.Context, sessions []*t
 	}
 }
 
-// maxSessionTitleRunes bounds the auto-generated session title. sessions.title
-// is VARCHAR(255) in every shipped migration, so an over-long model response
-// would be rejected by the database; 100 runes stays well clear of that limit
-// while still being a reasonable title length in the UI.
-const maxSessionTitleRunes = 100
-
-// sanitizeGeneratedTitle turns a raw title completion into something safe to
-// persist: the reasoning prefix some models emit is dropped, surrounding
-// whitespace is trimmed, and the result is truncated by rune (not byte) so a
-// multi-byte character is never cut in half. It reports whether truncation
-// happened so the caller can log it.
-func sanitizeGeneratedTitle(raw string) (string, bool) {
-	title := strings.TrimSpace(strings.TrimPrefix(raw, "<think>\n\n</think>"))
-	runes := []rune(title)
-	if len(runes) <= maxSessionTitleRunes {
-		return title, false
-	}
-	return strings.TrimSpace(string(runes[:maxSessionTitleRunes])), true
-}
-
 // GenerateTitle generates a title for the current conversation content
 // modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
 func (s *sessionService) GenerateTitle(ctx context.Context,
@@ -880,13 +860,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	titlePrompt := types.RenderPromptPlaceholders(s.cfg.Conversation.GenerateSessionTitlePrompt, types.PlaceholderValues{
 		"language": types.LanguageNameFromContext(ctx),
 	})
-	var chatMessages []chat.Message
-	chatMessages = append(chatMessages,
-		chat.Message{Role: "system", Content: titlePrompt},
-	)
-	chatMessages = append(chatMessages,
-		chat.Message{Role: "user", Content: message.Content},
-	)
+	chatMessages := buildSessionTitleMessages(titlePrompt, message.Content)
 
 	// Call model to generate title
 	thinking := false
@@ -900,14 +874,20 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	}
 
 	// Process and store the generated title
-	title, truncated := sanitizeGeneratedTitle(response.Content)
-	if truncated {
+	sanitized := sanitizeGeneratedTitle(response.Content, message.Content)
+	if sanitized.Truncated {
 		logger.Warnf(ctx,
 			"Generated session title exceeded %d runes and was truncated, session=%s, model=%s",
 			maxSessionTitleRunes, session.ID, modelID,
 		)
 	}
-	session.Title = title
+	if sanitized.FromQuery {
+		logger.Warnf(ctx,
+			"Generated session title was not plain text, falling back to the user query, session=%s, model=%s",
+			session.ID, modelID,
+		)
+	}
+	session.Title = sanitized.Title
 
 	// Update session with new title
 	_, err = s.sessionRepo.Update(ctx, session, session.UserID)

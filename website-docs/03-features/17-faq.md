@@ -38,7 +38,7 @@ type FAQBatchUpsertPayload struct {
     Entries     []FAQEntryPayload `json:"entries" binding:"required"` // 也可经 EntriesURL 从对象存储拉取
     Mode        string            `json:"mode" binding:"oneof=append replace"`
     KnowledgeID string            `json:"knowledge_id"`
-    TaskID      string            `json:"task_id"` // 可选，不传自动生成 UUID
+    TaskID      string            `json:"task_id"` // 可选，不传自动生成；自定义值仅允许 [A-Za-z0-9_-]，≤128 字符
     DryRun      bool              `json:"dry_run"` // 仅验证不落库
 }
 ```
@@ -153,11 +153,11 @@ type FAQEntry struct {
 
 ### API 端点 {#_2-api-端点}
 
-`internal/handler/faq.go`（路由注册于 `internal/router/router.go`，KB 门禁与知识库一致：读走 KBAccessRead，写走 KBAccessWrite；API Key 需 `ingest` / `retrieve` 能力）：
+`internal/handler/faq.go`（路由注册于 `internal/router/routes_knowledge.go`，KB 门禁与知识库一致：读走 KBAccessRead，写走 KBAccessWrite；API Key 需 `ingest` / `retrieve` 能力）：
 
 | 方法 | 路径 | 功能 |
 | --- | --- | --- |
-| GET | `/knowledge-bases/:id/faq/entries` | 条目列表（分页 / 标签 / 关键词） |
+| GET | `/knowledge-bases/:id/faq/entries` | 条目列表（分页 / 标签 / 关键词 / 启用状态） |
 | GET | `/knowledge-bases/:id/faq/entries/:entry_id` | 单条详情 |
 | POST | `/knowledge-bases/:id/faq/entry` | 同步创建单条 |
 | PUT | `/knowledge-bases/:id/faq/entries/:entry_id` | 更新单条（增量索引） |
@@ -171,7 +171,7 @@ type FAQEntry struct {
 | GET | `/faq/import/progress/:task_id` | 导入任务进度 |
 | PUT | `/knowledge-bases/:id/faq/import/last-result/display` | 导入结果面板显示状态（open/close） |
 
-列表查询参数：`page` / `page_size`、`tag_id`（单标签）或 `tag_ids`（逗号分隔，OR 语义）、`keyword` + `search_field`（`standard_question` / `similar_questions` / `answers`，缺省搜全部）、`sort_order`（`asc`，默认倒序）。
+列表查询参数：`page` / `page_size`、`tag_id`（标签 seq_id，兼容旧版单标签）或 `tag_ids`（标签 UUID，逗号分隔，OR 语义）、`keyword` + `search_field`（`standard_question` / `similar_questions` / `answers`，缺省搜全部）、`sort_order`（`asc`，默认按更新时间倒序）、`is_enabled`（`true` / `false` 按启用状态筛选，不传返回全部）。
 
 **写入校验**（`sanitizeFAQEntryPayload` + `checkFAQQuestionDuplicate`）：标准问必填；答案至少一个；`answer_strategy` 只能是 `all` / `random`（默认 `all`）；相似问 / 反例 / 答案去空白去重；并做四级重复检查——相似问 vs 标准问、相似问互查、反例 vs 标准问及相似问、DB 内跨条目冲突（返回详细冲突信息）。
 

@@ -24,6 +24,8 @@ export const useModelProvidersStore = defineStore('modelProviders', () => {
   const byType = ref<Record<string, ModelProviderOption[]>>({})
   const byId = ref<Record<string, ModelProviderOption>>({})
   const loadingByType = ref<Record<string, boolean>>({})
+  let generation = 0
+  const requestTokens = new Map<string, symbol>()
   const pending = new Map<string, Promise<ModelProviderOption[]>>()
 
   const currentLocale = computed(() => String(i18n.global.locale.value || ''))
@@ -42,16 +44,23 @@ export const useModelProvidersStore = defineStore('modelProviders', () => {
     const inflight = pending.get(key)
     if (inflight && !force) return inflight
 
+    const requestGeneration = generation
+    const token = Symbol(key)
+    requestTokens.set(key, token)
     const request = (async () => {
       loadingByType.value = { ...loadingByType.value, [key]: true }
       try {
         const { providers, cacheable } = await loadProvidersForType(listModelProviders, key)
-        if (!cacheable) return providers
+        if (!cacheable || requestGeneration !== generation || requestTokens.get(key) !== token) return providers
         byType.value = { ...byType.value, [key]: providers }
-        byId.value = mergeProviderIndex(byId.value, providers)
+        // The freshest list is merged first so its metadata wins over older types.
+        byId.value = [providers, ...Object.entries(byType.value).filter(([type]) => type !== key).map(([, entries]) => entries)]
+          .reduce((index, entries) => mergeProviderIndex(index, entries), {} as Record<string, ModelProviderOption>)
         return providers
       } finally {
-        loadingByType.value = { ...loadingByType.value, [key]: false }
+        if (requestGeneration === generation && requestTokens.get(key) === token) {
+          loadingByType.value = { ...loadingByType.value, [key]: false }
+        }
       }
     })()
     pending.set(key, request)
@@ -83,6 +92,8 @@ export const useModelProvidersStore = defineStore('modelProviders', () => {
     providerDescription(providerById(id), locale ?? currentLocale.value)
 
   const reset = () => {
+    generation++
+    requestTokens.clear()
     byType.value = {}
     byId.value = {}
     loadingByType.value = {}
