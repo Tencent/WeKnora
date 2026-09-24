@@ -1,10 +1,10 @@
--- Migration: 000109_intent_policies
+-- Migration: 000112_intent_policies
 -- IntentGate 策略表（设计文档 docs/plans/2026-09-21-intent-gate-design.md
 -- §6.1）：IntentPolicy 是版本化的配置资产，绑定 scope
 -- （tool/service/agent/workspace/tenant），含 NLC 原文、可编译规则表达式
 -- 与 mode；按租户隔离。术语见 CONTEXT.md（IntentPolicy / NLC / Observe /
 -- Enforce）。
-DO $$ BEGIN RAISE NOTICE '[Migration 000109] Creating intent_policies table'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000112] Creating intent_policies table'; END $$;
 
 CREATE TABLE IF NOT EXISTS intent_policies (
     id VARCHAR(36) PRIMARY KEY,

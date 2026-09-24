@@ -63,10 +63,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenant_user_env_vars": {
 		"principal_type", "principal_id", "sandbox_config_id", "skill_id", "name", "value",
 	}, // 000028
-}
-
-	"message_artifacts":  {"deleted_at"},                                                       // 000107
-	"intent_verdicts":    {"judge_model"},                                                       // 000113
+	"intent_verdicts": {"judge_model"}, // 000113
 }
 
 const expectedSQLiteMigrationVersion = 33

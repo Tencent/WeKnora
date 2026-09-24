@@ -1,4 +1,4 @@
--- Mirrors versioned migration 000108_intent_verdicts: IntentGate 判定日志
+-- Mirrors versioned migration 000111_intent_verdicts: IntentGate 判定日志
 -- （设计文档 §6.2），每行一次工具调用的 Verdict 落库记录。
 
 CREATE TABLE IF NOT EXISTS intent_verdicts (

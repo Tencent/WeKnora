@@ -1,8 +1,8 @@
--- Migration: 000108_intent_verdicts
+-- Migration: 000111_intent_verdicts
 -- IntentGate 判定日志（设计文档 docs/plans/2026-09-21-intent-gate-design.md
 -- §6.2）：每行是一次工具调用的 Verdict 落库记录，是策略运营报表与数据飞轮
 -- 的数据源。术语见 CONTEXT.md（IntentGate / Verdict / Observe / Enforce）。
-DO $$ BEGIN RAISE NOTICE '[Migration 000108] Creating intent_verdicts table'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000111] Creating intent_verdicts table'; END $$;
 
 CREATE TABLE IF NOT EXISTS intent_verdicts (
     id VARCHAR(36) PRIMARY KEY,

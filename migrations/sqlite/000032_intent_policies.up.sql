@@ -1,4 +1,4 @@
--- Mirrors versioned migration 000109_intent_policies: IntentGate 策略表
+-- Mirrors versioned migration 000112_intent_policies: IntentGate 策略表
 -- （设计文档 §6.1），版本化意图策略，按 scope 绑定、按租户隔离。
 
 CREATE TABLE IF NOT EXISTS intent_policies (
