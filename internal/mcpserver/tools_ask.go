@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -105,8 +106,8 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 			fmt.Fprintf(&b, "[%d] %s (document %s)\n", i+1, title, r.KnowledgeID)
 			for _, img := range r.Images {
 				// Preserve image references for text-only MCP hosts as well.
-				url, _ := json.Marshal(img.URL)
-				fmt.Fprintf(&b, "  Image: %s\n", url)
+				// strconv.Quote, unlike json.Marshal, keeps & < > literal.
+				fmt.Fprintf(&b, "  Image: %s\n", strconv.Quote(img.URL))
 			}
 		}
 		fmt.Fprintf(&b, "\nsession_id: %s", session.ID)
@@ -429,20 +430,37 @@ func summarizeReferences(refs []*types.SearchResult) []askReference {
 			continue
 		}
 		seen[key] = len(out)
-		excerpt := strings.TrimSpace(r.Content)
-		if runes := []rune(excerpt); len(runes) > askExcerptMaxRunes {
-			excerpt = string(runes[:askExcerptMaxRunes]) + "…"
-		}
 		out = append(out, askReference{
 			KnowledgeID:    r.KnowledgeID,
 			KnowledgeTitle: r.KnowledgeTitle,
 			ChunkID:        r.ID,
 			Score:          r.Score,
-			Excerpt:        excerpt,
+			Excerpt:        truncateExcerpt(strings.TrimSpace(r.Content)),
 			Images:         summarizeReferenceImages(r.ImageInfo, nil),
 		})
 	}
 	return out
+}
+
+// truncateExcerpt cuts at askExcerptMaxRunes but never inside a storage
+// reference: half a handle is unusable and would only cost a failed lookup.
+// Whole image references are kept in askReference.Images instead.
+func truncateExcerpt(excerpt string) string {
+	runes := []rune(excerpt)
+	if len(runes) <= askExcerptMaxRunes {
+		return excerpt
+	}
+	cut := len(string(runes[:askExcerptMaxRunes]))
+	for _, loc := range types.StorageReferencePattern.FindAllStringIndex(excerpt, -1) {
+		if loc[0] >= cut {
+			break
+		}
+		if cut < loc[1] {
+			cut = loc[0]
+			break
+		}
+	}
+	return excerpt[:cut] + "…"
 }
 
 func summarizeReferenceImages(raw string, out []askImage) []askImage {

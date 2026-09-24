@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -54,6 +56,7 @@ func (s *resourceURLFiles) GetFileURL(ctx context.Context, path string) (string,
 type resourceURLStorage struct {
 	interfaces.StorageBackendResolver
 	files   interfaces.FileService
+	catalog interfaces.ResourceCatalog
 	err     error
 	calls   int
 	tenant  uint64
@@ -66,7 +69,13 @@ func (s *resourceURLStorage) ResolveFileService(
 	s.calls++
 	s.tenant = tenant.ID
 	s.backend = backend
-	return s.files, provider, s.err
+	// Like StorageBackendService, wrap per call so APP_EXTERNAL_URL is read then.
+	return filesvc.NewResourceCatalogFileService(s.files, s.catalog), provider, s.err
+}
+
+// catalogWrapped mirrors initFileService, which decorates the global service.
+func (f *resourceURLFixture) catalogWrapped() interfaces.FileService {
+	return filesvc.NewResourceCatalogFileService(f.files, f.srv.resourceCatalog)
 }
 
 // The real binding repository distinguishes extracted images from unowned
@@ -100,7 +109,7 @@ func newResourceURLFixture(t *testing.T) *resourceURLFixture {
 		context.Background(), ref, types.ResourceOwnerKnowledge, "doc-1", types.ResourceRelationExtractedImage,
 	))
 	files := &resourceURLFiles{url: "https://storage.example/figure.png?signature=test"}
-	storage := &resourceURLStorage{files: files}
+	storage := &resourceURLStorage{files: files, catalog: catalog}
 	srv := &Server{
 		kbService:       &stubKBService{kbs: map[string]*types.KnowledgeBase{kb.ID: kb}},
 		kbShareService:  &stubKBShareService{shared: map[string]types.OrgMemberRole{kb.ID: types.OrgRoleViewer}},
@@ -216,6 +225,40 @@ func TestMCPResourceURLsRequireExistingPreviewPermission(t *testing.T) {
 	}
 }
 
+func TestMCPResourceURLsUnrestrictedEndpointCoversSharedKB(t *testing.T) {
+	// ask on an unrestricted endpoint searches the agent's KBs, which can be
+	// shared from another workspace; the caller's viewer grant is what counts.
+	f := newResourceURLFixture(t)
+	f.ep.KnowledgeBaseIDs = nil
+	kbs := f.srv.kbService.(*stubKBService)
+	for i := 0; i < 20; i++ {
+		id := "own-" + strconv.Itoa(i)
+		kbs.kbs[id] = &types.KnowledgeBase{ID: id, TenantID: 1}
+	}
+	result := f.rewrite(mcp.NewToolResultText(f.ref))
+	require.True(t, strings.HasPrefix(result.Content[0].(mcp.TextContent).Text, "https://weknora.example/prefix/r/"))
+	require.Equal(t, 1, kbs.lookups, "only KBs that bind the reference are authorized")
+
+	f = newResourceURLFixture(t)
+	f.ep.KnowledgeBaseIDs = nil
+	f.srv.kbShareService = &stubKBShareService{}
+	result = f.rewrite(mcp.NewToolResultText(f.ref))
+	require.Equal(t, f.ref, result.Content[0].(mcp.TextContent).Text)
+}
+
+func TestMCPResourceURLsStructuredContentShapes(t *testing.T) {
+	f := newResourceURLFixture(t)
+	result := f.rewrite(mcp.NewToolResultStructured([]map[string]string{{"url": f.ref}}, "list"))
+	raw, err := json.Marshal(result.StructuredContent)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "resource://")
+	require.Contains(t, string(raw), "https://weknora.example/prefix/r/")
+
+	type plain struct{ Count uint64 }
+	result = f.rewrite(mcp.NewToolResultStructured(plain{Count: 7}, "no references"))
+	require.Equal(t, plain{Count: 7}, result.StructuredContent, "no reference keeps the typed value")
+}
+
 func TestMCPResourceURLsLegacyGlobalFallbackUsesOwner(t *testing.T) {
 	f := newResourceURLFixture(t)
 	t.Setenv("APP_EXTERNAL_URL", "")
@@ -224,7 +267,7 @@ func TestMCPResourceURLsLegacyGlobalFallbackUsesOwner(t *testing.T) {
 	f.srv.storageResolver = service.NewStorageBackendService(
 		repository.NewStorageBackendRepository(f.db), nil, f.srv.resourceCatalog,
 	)
-	f.srv.fileService = f.files
+	f.srv.fileService = f.catalogWrapped()
 	result := f.rewrite(mcp.NewToolResultText(f.ref))
 	require.Equal(t, f.files.url, result.Content[0].(mcp.TextContent).Text)
 	require.Equal(t, "minio://bucket/2/exports/figure.png", f.files.path)
@@ -244,7 +287,7 @@ func TestMCPResourceURLsLegacyPathsAndSafeFallback(t *testing.T) {
 	result = f.rewrite(mcp.NewToolResultText(f.ref))
 	require.Equal(t, f.ref, result.Content[0].(mcp.TextContent).Text)
 	f.storage.err = errors.New("backend unavailable")
-	f.srv.fileService = f.files
+	f.srv.fileService = f.catalogWrapped()
 	f.updateResource(t, map[string]any{
 		"storage_backend_id": "explicit", "physical_path": "storage://explicit/" + f.path,
 	})

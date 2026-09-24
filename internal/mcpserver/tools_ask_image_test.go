@@ -29,6 +29,12 @@ func TestSummarizeReferencesPreservesImagesOutsideExcerpt(t *testing.T) {
 	require.Equal(t, strings.Repeat("长", askExcerptMaxRunes)+"…", refs[0].Excerpt)
 	require.Equal(t, []askImage{{URL: ref, Caption: "diagram", OCRText: "details"}}, refs[0].Images)
 	require.Empty(t, refs[1].Images)
+
+	cut := summarizeReferences([]*types.SearchResult{{
+		ID: "cut", Content: strings.Repeat("x", askExcerptMaxRunes-10) + "![](" + ref + ")",
+	}})
+	require.Equal(t, strings.Repeat("x", askExcerptMaxRunes-10)+"![](…", cut[0].Excerpt,
+		"a reference crossing the limit is dropped, never halved")
 	raw, err := json.Marshal(refs)
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "private-source")
@@ -72,9 +78,10 @@ func (s *imageAskMessageService) UpdateMessage(context.Context, *types.Message) 
 
 func TestAskExposesImageHandlesToTextAndStructuredClients(t *testing.T) {
 	f := newResourceURLFixture(t)
+	const publicURL = "https://cdn.example/img.png?a=1&b=2"
 	info, err := json.Marshal([]types.ImageInfo{{
 		URL: f.ref, Caption: "chart", OCRText: "values", OriginalURL: "private-parser-locator",
-	}})
+	}, {URL: publicURL}})
 	require.NoError(t, err)
 	f.srv.sessionService = &imageAskSessionService{refs: []*types.SearchResult{{
 		ID: "chunk", KnowledgeID: "doc-1", Content: strings.Repeat("long text ", 100), ImageInfo: string(info),
@@ -89,6 +96,7 @@ func TestAskExposesImageHandlesToTextAndStructuredClients(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.IsError, "%#v", result.Content)
 	require.Contains(t, result.Content[0].(mcp.TextContent).Text, `Image: "`+f.ref+`"`)
+	require.Contains(t, result.Content[0].(mcp.TextContent).Text, `Image: "`+publicURL+`"`)
 	result = f.rewrite(result)
 	raw, err := json.Marshal(result.StructuredContent)
 	require.NoError(t, err)
@@ -97,7 +105,8 @@ func TestAskExposesImageHandlesToTextAndStructuredClients(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &parsed))
 	require.Len(t, parsed.References, 1)
-	require.Len(t, parsed.References[0].Images, 1)
+	require.Len(t, parsed.References[0].Images, 2)
+	require.Equal(t, publicURL, parsed.References[0].Images[1].URL)
 	img := parsed.References[0].Images[0]
 	require.True(t, strings.HasPrefix(img.URL, "https://weknora.example/prefix/r/"))
 	require.Equal(t, "chart", img.Caption)
