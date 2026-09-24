@@ -4333,7 +4333,6 @@ export default {
         searchFields: 'Поля поиска',
         modeAll: 'Все поля',
         modeCustom: 'Свои поля',
-        searchAllHint: 'Выполняется поиск по всем доступным полям',
         keywordsPlaceholder: 'Разделяйте ключевые слова запятыми',
         applyAll: 'Применить ко всем атрибутам',
         count: '{count} изображений',

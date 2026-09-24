@@ -3301,7 +3301,6 @@ export default {
         searchFields: '検索フィールド',
         modeAll: 'すべてのフィールド',
         modeCustom: 'カスタム',
-        searchAllHint: '利用可能なすべてのフィールドを検索中',
         keywordsPlaceholder: 'キーワードはカンマで区切る',
         applyAll: '全属性に一括設定',
         count: '{count} 枚の画像',

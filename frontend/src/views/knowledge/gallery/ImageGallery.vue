@@ -751,12 +751,13 @@ onMounted(async () => {
             </div>
 
             <div v-if="searchAttrs.length">
-              <div v-if="searchMode === 'all'" class="ig-hint">{{ t('knowledgeEditor.wikiBrowser.gallery.searchAllHint') }}</div>
               <!--
                 The checkboxes stay visible next to the master switch like the
                 filter panel's verdicts do. In "all" mode they are dimmed —
                 every field is searched, so the ticks carry no weight — yet
-                still clickable: touching one drops the mode to custom.
+                still clickable: touching one drops the mode to custom. No
+                caption above them: showing and hiding it would shift them
+                when the switch is flipped.
               -->
               <t-checkbox-group
                 :value="activeSearchIds"
@@ -1195,6 +1196,11 @@ onMounted(async () => {
 }
 .ig-order {
   white-space: nowrap;
+}
+/* An inline svg sits on the text baseline by default, which reads as riding
+   high next to the label; middle lines it up with the text's optical center. */
+.ig-order :deep(.t-icon) {
+  vertical-align: middle;
 }
 .ig-count {
   margin-left: auto;

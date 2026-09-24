@@ -4335,7 +4335,6 @@ export default {
         searchFields: '搜索字段',
         modeAll: '全部字段',
         modeCustom: '自定义',
-        searchAllHint: '正在搜索全部可用字段',
         keywordsPlaceholder: '多个关键词用逗号分隔',
         applyAll: '全部属性统一设置',
         count: '{count} 张图片',

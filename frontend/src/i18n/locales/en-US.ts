@@ -3301,7 +3301,6 @@ export default {
         searchFields: 'Search fields',
         modeAll: 'All fields',
         modeCustom: 'Custom',
-        searchAllHint: 'Searching all available fields',
         keywordsPlaceholder: 'Separate keywords with commas',
         applyAll: 'Apply to all attributes',
         count: '{count} images',

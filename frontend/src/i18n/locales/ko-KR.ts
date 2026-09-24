@@ -4333,7 +4333,6 @@ export default {
         searchFields: '검색 필드',
         modeAll: '전체 필드',
         modeCustom: '사용자 지정',
-        searchAllHint: '사용 가능한 모든 필드를 검색하는 중',
         keywordsPlaceholder: '쉼표로 키워드 구분',
         applyAll: '모든 속성에 일괄 적용',
         count: '{count}개의 이미지',
