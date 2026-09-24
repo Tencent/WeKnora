@@ -338,6 +338,16 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
+// deleteUnindexedChunks drops the chunks processChunks wrote for a knowledge
+// that failed before BatchIndex ran. Nothing reached the vector store yet, so
+// only the chunk rows need removing; left alone they would stay active under a
+// failed knowledge, the same leftovers the BatchIndex failure path cleans up.
+func (s *knowledgeService) deleteUnindexedChunks(ctx context.Context, knowledge *types.Knowledge) {
+	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
+		logger.Errorf(ctx, "Delete chunks failed: %v", err)
+	}
+}
+
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
@@ -683,6 +693,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
 			// Check if there's enough storage quota available
@@ -691,6 +702,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
 		}
