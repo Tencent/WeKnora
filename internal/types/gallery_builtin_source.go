@@ -43,11 +43,10 @@ func init() {
 			{
 				Name:  "is_enabled",
 				Type:  "presence",
-				Values: []string{"true", "false"},
 				Label: "Enabled",
-				ValueLabels: map[string]string{
-					"true":  "Enabled",
-					"false": "Disabled",
+				Values: []GalleryAttrValue{
+					{Value: "true", Label: "Enabled"},
+					{Value: "false", Label: "Disabled"},
 				},
 				Usage: GalleryUsage{InFilter: true},
 			},

@@ -3304,12 +3304,20 @@ export default {
         next: '次へ',
         openSource: 'ソース文書を開く',
         imageLoadError: '画像の読み込みに失敗しました',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
         attr: {
           builtin_caption: '説明',
+          builtin_caption_description: 'モデルが生成した画像の説明',
           builtin_ocr_text: 'OCR テキスト',
+          builtin_ocr_text_description: 'OCR で画像から抽出した文字',
           builtin_created_at: '作成日時',
+          builtin_created_at_description: '所属ドキュメントチャンクの作成日時',
           builtin_updated_at: '更新日時',
+          builtin_updated_at_description: '所属ドキュメントチャンクの最終更新日時',
           builtin_is_enabled: '有効状態',
+          builtin_is_enabled_description: '所属ドキュメントチャンクが検索対象かどうか',
           builtin_is_enabled_value_true: '有効',
           builtin_is_enabled_value_false: '無効',
         },
@@ -7526,17 +7534,17 @@ export default {
       label: '画像内のテキスト量',
       description: '画像自体がどれだけ本文テキストを含むか。テキスト読み取りのために別途 OCR を行う価値があるかを判断します。',
       values: {
-        none: 'テキストなし',
-        sparse: 'わずかな文字のみ —— ロゴ、道路標識、単一のラベル',
-        block: 'まとまった本文 —— スクリーンショット、表、文書ページ'
+        none: { label: 'テキストなし', description: 'テキストは一切含まれていません' },
+        sparse: { label: 'わずかな文字', description: 'わずかな文字のみ —— ロゴ、道路標識、単一のラベル' },
+        block: { label: 'まとまった本文', description: 'まとまった本文 —— スクリーンショット、表、文書ページ' }
       }
     },
     contain_data_visual: {
       label: 'データ可視化',
       description: '画像がグラフ・図表・ダイアグラム・インフォグラフィックとしてデータを伝えているか。文字が少なく見えても OCR の対象に残します。',
       values: {
-        'true': 'はい —— グラフ・図表・ダイアグラム',
-        'false': 'いいえ —— 写真・イラスト・アイコン・装飾'
+        'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
+        'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
       }
     }
   }

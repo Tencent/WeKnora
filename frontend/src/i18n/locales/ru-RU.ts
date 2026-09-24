@@ -4336,12 +4336,20 @@ export default {
         next: 'Вперёд',
         openSource: 'Открыть исходный документ',
         imageLoadError: 'Не удалось загрузить изображение',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
         attr: {
           builtin_caption: 'Описание',
+          builtin_caption_description: 'Описание изображения, сгенерированное моделью.',
           builtin_ocr_text: 'OCR-текст',
+          builtin_ocr_text_description: 'Текст, извлечённый из изображения OCR.',
           builtin_created_at: 'Время создания',
+          builtin_created_at_description: 'Когда был создан фрагмент исходного документа.',
           builtin_updated_at: 'Время изменения',
+          builtin_updated_at_description: 'Когда фрагмент исходного документа был изменён последний раз.',
           builtin_is_enabled: 'Состояние',
+          builtin_is_enabled_description: 'Участвует ли фрагмент исходного документа в поиске.',
           builtin_is_enabled_value_true: 'Включено',
           builtin_is_enabled_value_false: 'Отключено',
         },
@@ -7526,17 +7534,17 @@ export default {
       label: 'Количество текста на изображении',
       description: 'Сколько основного текста содержит само изображение. Определяет, стоит ли запускать для него отдельный проход OCR.',
       values: {
-        none: 'текста нет',
-        sparse: 'несколько слов —— логотип, дорожный знак, одна надпись',
-        block: 'блок основного текста —— скриншот, таблица, страница документа'
+        none: { label: 'Нет текста', description: 'текста нет' },
+        sparse: { label: 'Немного текста', description: 'несколько слов —— логотип, дорожный знак, одна надпись' },
+        block: { label: 'Блок текста', description: 'блок основного текста —— скриншот, таблица, страница документа' }
       }
     },
     contain_data_visual: {
       label: 'Визуализация данных',
       description: 'Передаёт ли изображение данные в виде графика, диаграммы, схемы или инфографики. Такие изображения остаются в очереди OCR, даже если текста на вид немного.',
       values: {
-        'true': 'да —— график, диаграмма или схема',
-        'false': 'нет —— фото, рисунок, значок или декор'
+        'true': { label: 'Да', description: 'да —— график, диаграмма или схема' },
+        'false': { label: 'Нет', description: 'нет —— фото, рисунок, значок или декор' }
       }
     }
   }

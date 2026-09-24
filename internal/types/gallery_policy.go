@@ -68,15 +68,17 @@ const (
 // merged in. ID is the namespaced attribute id; Name stays source-local for
 // raw lookups in image_info.
 type GalleryResolvedAttr struct {
-	ID          string            `json:"id"`
-	Source      string            `json:"source"`
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Values      []string          `json:"values,omitempty"`
-	Label       string            `json:"label"`
-	Description string            `json:"description,omitempty"`
-	ValueLabels map[string]string `json:"value_labels,omitempty"`
-	Usage       GalleryUsage      `json:"usage"`
+	ID     string `json:"id"`
+	Source string `json:"source"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	// Values keeps each allowed value's raw form plus the short label to
+	// show and the sentence to explain it. A source that declares no
+	// values (a free-text or date attribute) simply omits the field.
+	Values      []GalleryAttrValue `json:"values,omitempty"`
+	Label       string             `json:"label"`
+	Description string             `json:"description,omitempty"`
+	Usage       GalleryUsage       `json:"usage"`
 	// UsageFrom names the highest tier that touched this attribute's usage:
 	// "source" | "system" | "kb" | "user". Debugging aid for "why does this
 	// attribute (not) show up".
@@ -131,7 +133,6 @@ func ResolveGalleryConfig(kbID string, system, kb, user *GalleryPolicyTier) *Gal
 				Values:      def.Values,
 				Label:       def.Label,
 				Description: def.Description,
-				ValueLabels: def.ValueLabels,
 				Usage:       def.Usage,
 				UsageFrom:   galleryFromSource,
 			}

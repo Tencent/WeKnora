@@ -20,20 +20,42 @@ type GalleryUsage struct {
 	InSortField bool `json:"in_sortfield"`
 }
 
+// GalleryAttrValue is one allowed value of an attribute together with the
+// words to show for it. A value carries two pieces of text on purpose:
+// Label is the short name that goes on screen (a filter checkbox, a search
+// field, a sort option), while Description holds the longer explanation that
+// would blow a compact control apart if it were shown inline. Callers pick
+// the one they need — the filter panel renders Label and moves Description
+// into a tooltip, the detail panel can show both.
+//
+// Value stays the raw machine value: it is what gets filtered, searched and
+// stored in image_info, and it must never be localized.
+type GalleryAttrValue struct {
+	// Value is the raw string the attribute can hold.
+	Value string `json:"value"`
+	// Label is the short, on-screen name for this value.
+	Label string `json:"label"`
+	// Description explains the value in a sentence; empty when the source
+	// has nothing more to say.
+	Description string `json:"description,omitempty"`
+}
+
 // GalleryAttrDef is one gallery-consumable attribute as a source declares
 // it. Name is source-local (unprefixed); the gallery namespaces it under the
 // declaring source's id when it builds the contract (see GalleryAttrID).
 // Type drives frontend rendering: "text" (substring search), "date",
 // "extent" (ordered value set -> multi-select), "presence" (boolean ->
 // true/false checkboxes) and "keywords" (array of tags -> tag search).
+//
+// Like values, the attribute itself carries a short Label for the UI and a
+// longer Description for wherever there is room for a sentence.
 type GalleryAttrDef struct {
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Values      []string          `json:"values,omitempty"`
-	Label       string            `json:"label"`
-	Description string            `json:"description,omitempty"`
-	ValueLabels map[string]string `json:"value_labels,omitempty"`
-	Usage       GalleryUsage      `json:"usage"`
+	Name        string             `json:"name"`
+	Type        string             `json:"type"`
+	Values      []GalleryAttrValue `json:"values,omitempty"`
+	Label       string             `json:"label"`
+	Description string             `json:"description,omitempty"`
+	Usage       GalleryUsage       `json:"usage"`
 }
 
 // GalleryAttrSource is the aggregated view of one registered attribute

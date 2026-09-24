@@ -3304,12 +3304,20 @@ export default {
         next: 'Next',
         openSource: 'Open source document',
         imageLoadError: 'Image failed to load',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
         attr: {
           builtin_caption: 'Caption',
+          builtin_caption_description: 'The model-generated description of the image.',
           builtin_ocr_text: 'OCR text',
+          builtin_ocr_text_description: 'Text extracted from the image by OCR.',
           builtin_created_at: 'Created time',
+          builtin_created_at_description: 'When the owning document chunk was created.',
           builtin_updated_at: 'Updated time',
+          builtin_updated_at_description: 'When the owning document chunk was last updated.',
           builtin_is_enabled: 'Enabled',
+          builtin_is_enabled_description: 'Whether the owning document chunk takes part in retrieval.',
           builtin_is_enabled_value_true: 'Enabled',
           builtin_is_enabled_value_false: 'Disabled',
         },
@@ -7522,22 +7530,27 @@ export default {
   // vue-i18n walks a key segment by segment on the dots, so a literal
   // 'contain.text' key would never resolve. An attribute without a translation
   // falls back to the registry's own wording.
+  //
+  // Every value carries a short label for compact controls (a filter
+  // checkbox) and a description for wherever there is room (a tooltip). One
+  // bundle therefore serves both the settings panel and the image gallery,
+  // including the gallery's fallback for attributes it does not declare.
   imageAttr: {
     contain_text: {
       label: 'Text in the image',
       description: 'How much body text the picture itself carries. Decides whether reading its text is worth a separate OCR pass.',
       values: {
-        none: 'no text at all',
-        sparse: 'a few words — a logo, a road sign, a single label',
-        block: 'a block of body text — a screenshot, a table, a document page'
+        none: { label: 'None', description: 'no text at all' },
+        sparse: { label: 'Sparse', description: 'a few words — a logo, a road sign, a single label' },
+        block: { label: 'Block', description: 'a block of body text — a screenshot, a table, a document page' }
       }
     },
     contain_data_visual: {
       label: 'Data visual',
       description: 'Whether the picture conveys data as a chart, graph, diagram or infographic. Such images keep their labels on the OCR path even when the text looks sparse.',
       values: {
-        'true': 'yes — a chart, graph or diagram',
-        'false': 'no — a photo, drawing, icon or decoration'
+        'true': { label: 'Yes', description: 'a chart, graph or diagram with plotted values' },
+        'false': { label: 'No', description: 'a photo, drawing, icon or decoration' }
       }
     }
   }

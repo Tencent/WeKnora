@@ -157,6 +157,12 @@ watch(
 // The contract carries the backend's default-language wording. Locale files
 // overlay translations keyed by the (sanitized) attribute id; anything not
 // translated falls back to the contract text.
+//
+// Every attribute and value carries two pieces of text on purpose: a short
+// `label` for space-constrained controls (a filter checkbox, a sort option)
+// and a `description` sentence for wherever there is room. The helpers below
+// always return the short one and expose the long one separately, so a compact
+// panel never has to stretch to a full sentence.
 // ---------------------------------------------------------------------------
 const sanitizeKey = (id: string) => id.replace(/[:.]/g, '_')
 
@@ -169,17 +175,47 @@ function attrLabel(attr: GalleryResolvedAttr): string {
   return attr.label || attr.id
 }
 
+/** The sentence explaining an attribute, in words where the source gave one. */
+function attrDescription(attr: GalleryResolvedAttr): string {
+  const key = `gallery.attr.${sanitizeKey(attr.id)}_description`
+  if (te(key)) return t(key)
+  // Attributes contributed by an attribute pipeline ship no gallery-specific
+  // text, so fall through to the pipeline's own translations.
+  const legacy = `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}.description`
+  if (te(legacy)) return t(legacy)
+  return attr.description || ''
+}
+
+/**
+ * The short display name of one allowed value. A source that never spelled a
+ * label out still reads as the raw value rather than as a blank.
+ */
 function attrValueLabel(attr: GalleryResolvedAttr, value: string): string {
   const key = `gallery.attr.${sanitizeKey(attr.id)}_value_${value}`
   if (te(key)) return t(key)
-  return attr.value_labels?.[value] || value
+  const declared = attr.values?.find((v) => v.value === value)?.label
+  if (declared) return declared
+  const legacy = `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}.values.${value}.label`
+  if (te(legacy)) return t(legacy)
+  return value
+}
+
+/** The sentence explaining one allowed value; empty when the source has none. */
+function attrValueDescription(attr: GalleryResolvedAttr, value: string): string {
+  const key = `gallery.attr.${sanitizeKey(attr.id)}_value_${value}_description`
+  if (te(key)) return t(key)
+  const declared = attr.values?.find((v) => v.value === value)?.description
+  if (declared) return declared
+  const legacy = `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}.values.${value}.description`
+  if (te(legacy)) return t(legacy)
+  return ''
 }
 
 /** One observed attribute value of an image, in words where possible. */
 function displayObservedValue(attr: GalleryResolvedAttr | undefined, raw: unknown): string {
   const normalized = typeof raw === 'boolean' ? String(raw) : String(raw ?? '')
   if (!attr) return normalized
-  return attr.value_labels?.[normalized] || normalized
+  return attrValueLabel(attr, normalized)
 }
 
 function findAttrByRawName(name: string): GalleryResolvedAttr | undefined {
@@ -419,15 +455,19 @@ onMounted(async () => {
         <div v-if="filterAttrs.length" class="ig-filter-group">
           <label class="ig-filter-label">{{ t('knowledgeEditor.wikiBrowser.gallery.attrSection') }}</label>
           <div v-for="attr in filterAttrs" :key="attr.id" class="ig-attr-filter">
-            <div class="ig-attr-name" :title="attr.description">{{ attrLabel(attr) }}</div>
+            <div class="ig-attr-name" :title="attrDescription(attr)">{{ attrLabel(attr) }}</div>
             <t-checkbox-group
               v-if="attr.type === 'extent' || attr.type === 'presence'"
               :value="attrSelections[attr.id] || []"
               @change="(vals: Array<string | number | boolean>) => onAttrGroupChange(attr.id, vals)"
             >
-              <t-checkbox v-for="v in attr.values || []" :key="v" :value="v">
-                {{ attrValueLabel(attr, v) }}
-              </t-checkbox>
+              <!--
+                The value's short label goes on the checkbox; the sentence
+                that explains it waits in the tooltip so the row stays compact.
+              -->
+              <t-tooltip v-for="v in attr.values || []" :key="v.value" :content="attrValueDescription(attr, v.value)">
+                <t-checkbox :value="v.value">{{ attrValueLabel(attr, v.value) }}</t-checkbox>
+              </t-tooltip>
             </t-checkbox-group>
             <t-input
               v-else-if="attr.type === 'keywords'"

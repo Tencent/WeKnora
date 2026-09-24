@@ -4336,12 +4336,20 @@ export default {
         next: '다음',
         openSource: '출처 문서 열기',
         imageLoadError: '이미지를 불러오지 못했습니다',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
         attr: {
           builtin_caption: '설명',
+          builtin_caption_description: '모델이 생성한 이미지 설명',
           builtin_ocr_text: 'OCR 텍스트',
+          builtin_ocr_text_description: 'OCR 로 이미지에서 추출한 텍스트',
           builtin_created_at: '생성 시간',
+          builtin_created_at_description: '소유 문서 조각이 생성된 시각',
           builtin_updated_at: '수정 시간',
+          builtin_updated_at_description: '소유 문서 조각이 마지막으로 수정된 시각',
           builtin_is_enabled: '활성 상태',
+          builtin_is_enabled_description: '소유 문서 조각이 검색에 참여하는지 여부',
           builtin_is_enabled_value_true: '활성화',
           builtin_is_enabled_value_false: '비활성화',
         },
@@ -7526,17 +7534,17 @@ export default {
       label: '이미지 내 텍스트 양',
       description: '이미지 자체가 담고 있는 본문 텍스트의 양입니다. 텍스트를 읽기 위해 별도 OCR을 돌릴 가치가 있는지 판단합니다.',
       values: {
-        none: '텍스트 없음',
-        sparse: '약간의 글자만 —— 로고, 도로 표지판, 단일 라벨',
-        block: '문단 단위 본문 —— 스크린샷, 표, 문서 페이지'
+        none: { label: '텍스트 없음', description: '텍스트가 전혀 없습니다' },
+        sparse: { label: '약간의 글자', description: '약간의 글자만 —— 로고, 도로 표지판, 단일 라벨' },
+        block: { label: '문단 단위 본문', description: '문단 단위 본문 —— 스크린샷, 표, 문서 페이지' }
       }
     },
     contain_data_visual: {
       label: '데이터 시각화',
       description: '이미지가 차트, 그래프, 도표, 인포그래픽으로 데이터를 전달하는지 여부입니다. 글자가 적어 보여도 OCR 대상으로 유지합니다.',
       values: {
-        'true': '예 —— 차트, 그래프, 도표',
-        'false': '아니오 —— 사진, 삽화, 아이콘, 장식'
+        'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
+        'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
       }
     }
   }

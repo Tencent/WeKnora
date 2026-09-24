@@ -141,6 +141,20 @@ export interface GalleryAttrUsage {
  * ("<sourceID>:<name>"); `usage_from` names the highest tier that touched
  * the usage ("source" | "system" | "kb" | "user").
  */
+/**
+ * One allowed value of an attribute.
+ *
+ * Display text is deliberately split: `label` is the short name that fits a
+ * filter checkbox, `description` is the sentence shown where there is room
+ * (a tooltip). `value` stays the raw machine value — it is what gets
+ * filtered and searched, and it is never localized.
+ */
+export interface GalleryAttrValue {
+  value: string;
+  label: string;
+  description?: string;
+}
+
 export interface GalleryResolvedAttr {
   id: string;
   source: string;
@@ -148,10 +162,11 @@ export interface GalleryResolvedAttr {
   name: string;
   /** "text" | "date" | "extent" | "presence" | "keywords" */
   type: string;
-  values?: string[];
+  values?: GalleryAttrValue[];
+  /** Short on-screen name; falls back to the attribute id when absent. */
   label: string;
+  /** Sentence explaining the attribute; shown where there is room. */
   description?: string;
-  value_labels?: Record<string, string>;
   usage: GalleryAttrUsage;
   usage_from: string;
 }

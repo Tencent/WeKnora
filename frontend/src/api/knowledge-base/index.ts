@@ -80,18 +80,28 @@ export function listKnowledgeBases(params?: {
 // so the UI still compiles and can render a fallback before the schema loads.
 // ---------------------------------------------------------------------------
 
+// One allowed value of an image attribute.
+//
+// Display text is split for the same reasons the gallery splits it: `label` is
+// what fits on a checkbox or a table cell, `description` is the sentence that
+// explains the value where there is room. `value` stays the raw machine value.
+export interface ImageAttrValue {
+  value: string;
+  label: string;
+  description?: string;
+}
+
 // One observable image attribute, as returned by the schema endpoint. The
 // registry is authoritative for both the behaviour and the wording: label,
-// description and value_labels are what the settings panel shows to an operator
-// who does not read identifiers like "contain.text".
+// description and the per-value texts are what the settings panel shows to an
+// operator who does not read identifiers like "contain.text".
 export interface ImageAttrSpec {
   name: string;
   type: 'extent' | 'presence';
-  values?: string[];
+  values?: ImageAttrValue[];
   question: string;
   label: string;
   description?: string;
-  value_labels?: Record<string, string>;
   consumers?: string[];
 }
 
@@ -143,28 +153,26 @@ export const FALLBACK_IMAGE_ATTR_SCHEMA: ImageAttrSchema = {
     {
       name: 'contain.text',
       type: 'extent',
-      values: ['none', 'sparse', 'block'],
+      values: [
+        { value: 'none', label: 'None', description: 'no text at all' },
+        { value: 'sparse', label: 'Sparse', description: 'a few words — a logo, a road sign, a single label' },
+        { value: 'block', label: 'Block', description: 'a block of body text — a screenshot, a table, a document page' },
+      ],
       question: '',
       label: 'Text in the image',
       description: 'How much body text the picture itself carries.',
-      value_labels: {
-        none: 'no text at all',
-        sparse: 'a few words — a logo, a road sign, a single label',
-        block: 'a block of body text — a screenshot, a table, a document page',
-      },
       consumers: ['ocr'],
     },
     {
       name: 'contain.data_visual',
       type: 'presence',
-      values: ['true', 'false'],
+      values: [
+        { value: 'true', label: 'Yes', description: 'a chart, graph or diagram with plotted values' },
+        { value: 'false', label: 'No', description: 'a photo, drawing, icon or decoration' },
+      ],
       question: '',
       label: 'Data visual',
       description: 'Whether the picture conveys data as a chart, graph, diagram or infographic.',
-      value_labels: {
-        true: 'yes — a chart, graph or diagram',
-        false: 'no — a photo, drawing, icon or decoration',
-      },
       consumers: ['ocr'],
     },
   ],

@@ -14,15 +14,14 @@ import { imageAttrConditionDisplay, imageAttrDisplay, imageAttrKeyBase } from '.
 const SPEC: ImageAttrSpec = {
   name: 'contain.text',
   type: 'extent',
-  values: ['none', 'sparse', 'block'],
+  values: [
+    { value: 'none', label: 'no text at all', description: 'the image carries no text at all' },
+    { value: 'sparse', label: 'a few words', description: 'a logo, a road sign, a single label' },
+    { value: 'block', label: 'a block of body text', description: 'a screenshot, a table, a document page' },
+  ],
   question: '',
   label: 'Text in the image',
   description: 'How much body text the picture carries.',
-  value_labels: {
-    none: 'no text at all',
-    sparse: 'a few words',
-    block: 'a block of body text',
-  },
 }
 
 const PRESENCE: ImageAttrSpec = {
@@ -31,7 +30,10 @@ const PRESENCE: ImageAttrSpec = {
   question: '',
   label: 'Data visual',
   description: 'Whether the picture conveys data as a chart.',
-  value_labels: { true: 'yes', false: 'no' },
+  values: [
+    { value: 'true', label: 'yes' },
+    { value: 'false', label: 'no' },
+  ],
 }
 
 const SCHEMA: ImageAttrSchema = {
@@ -69,7 +71,8 @@ test('prefers the translation overlay, keyed by attribute name', () => {
   // Keys escape the dots in the attribute name (see imageAttrKeyBase).
   const zh: Record<string, string> = {
     'imageAttr.contain_text.label': '图中文字量',
-    'imageAttr.contain_text.values.block': '成段正文',
+    'imageAttr.contain_text.values.block.label': '成段正文',
+    'imageAttr.contain_text.values.block.description': '成段正文 —— 截图、表格或文档页面',
   }
   const display = imageAttrDisplay(SPEC, (key) => zh[key] ?? key, (key) => key in zh)
 
@@ -78,6 +81,9 @@ test('prefers the translation overlay, keyed by attribute name', () => {
   assert.equal(display.description, 'How much body text the picture carries.')
   assert.equal(display.values[0].label, 'no text at all')
   assert.equal(display.values[2].label, '成段正文')
+  // The same split applies to a value's longer text.
+  assert.equal(display.values[2].description, '成段正文 —— 截图、表格或文档页面')
+  assert.equal(display.values[0].description, 'the image carries no text at all')
 })
 
 test('never shows a blank label when the registry omits display text', () => {
@@ -85,7 +91,11 @@ test('never shows a blank label when the registry omits display text', () => {
     ...SPEC,
     label: '',
     description: undefined,
-    value_labels: undefined,
+    values: [
+      { value: 'none', label: '', description: '' },
+      { value: 'sparse', label: '', description: '' },
+      { value: 'block', label: '', description: '' },
+    ],
   }
   const display = imageAttrDisplay(bare, noI18n.t, noI18n.te)
 
@@ -110,7 +120,7 @@ test('a presence attribute without an explicit value list offers true/false', ()
 test('renders a policy condition in words next to its raw pair', () => {
   const zh: Record<string, string> = {
     'imageAttr.contain_text.label': '图中文字量',
-    'imageAttr.contain_text.values.block': '成段正文',
+    'imageAttr.contain_text.values.block.label': '成段正文',
   }
   const condition = imageAttrConditionDisplay(
     { prop: 'contain.text', is: 'block' },
@@ -193,7 +203,9 @@ test('every shipped locale translates every attribute key', () => {
       const keys = [
         `${base}.label`,
         `${base}.description`,
-        ...imageAttrDisplay(spec, t, te).values.map((value) => `${base}.values.${value.value}`),
+        ...imageAttrDisplay(spec, t, te).values.map(
+          (value) => `${base}.values.${value.value}.label`,
+        ),
       ]
       for (const key of keys) {
         assert.equal(te(key), true, `${locale}: ${key} does not resolve`)
@@ -211,9 +223,9 @@ test('every shipped locale translates every OCR condition key', () => {
       const base = imageAttrKeyBase(cond.prop)
       assert.equal(te(`${base}.label`), true, `${locale}: ${base}.label does not resolve`)
       assert.equal(
-        te(`${base}.values.${cond.is}`),
+        te(`${base}.values.${cond.is}.label`),
         true,
-        `${locale}: ${base}.values.${cond.is} does not resolve`,
+        `${locale}: ${base}.values.${cond.is}.label does not resolve`,
       )
     }
   }
