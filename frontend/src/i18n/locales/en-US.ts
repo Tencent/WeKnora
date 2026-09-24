@@ -685,6 +685,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: 'Upload',
     channelManual: 'Manual',
@@ -6587,6 +6588,12 @@ export default {
       paths: 'Directories', pathsPlaceholder: 'One directory per line; leave empty to sync the whole project',
       addProject: 'Add project', projectRequired: 'Add at least one GitLab project',
     },
+    seafile: {
+      baseUrl: 'Seafile URL', apiToken: 'API token',
+      apiTokenHint: 'Generate it under "Settings → Web API token" in Seafile; the account only needs read access to the libraries you select, and the token is never sent with file downloads.',
+      singleLibraryOnly: 'A data source syncs one library; clear the current library before selecting another.',
+      selectionRequired: 'Select at least one library, folder or file',
+    },
     resourceHint: 'Select the spaces or folders to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
@@ -6600,6 +6607,10 @@ export default {
     guideStep1_notion: 'Open the page or database you want to sync in Notion',
     guideStep2_notion: 'Click the "···" menu at the top right, select "Connect to" or "Add connections"',
     guideStep3_notion: 'Search and select your Integration app, then come back and click Retry',
+    noResourcesDesc_seafile: 'The token can reach no libraries, or every library is encrypted (encrypted libraries cannot be synced)',
+    guideStep1_seafile: 'Sign in to Seafile and confirm the account can read at least one unencrypted library',
+    guideStep2_seafile: 'Generate or regenerate the token under "Settings → Web API token"',
+    guideStep3_seafile: 'Come back, enter the new token and click Retry',
     permissionDocLink: 'View Feishu wiki permission docs',
     syncScheduleLabel: 'Sync schedule',
     conflictLabel: 'Conflict strategy',
@@ -6658,7 +6669,8 @@ export default {
       dingtalk: 'DingTalk Docs',
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -6671,7 +6683,8 @@ export default {
       dingtalk: 'Sync online documents from DingTalk knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
-      gitlab: 'Sync files from GitLab projects'
+      gitlab: 'Sync files from GitLab projects',
+      seafile: 'Sync folders and files from Seafile libraries'
     },
     drive: {
       folderTokenLabel: 'Drive folder token',
@@ -6787,7 +6800,8 @@ export default {
     resourceType: {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
-      book: 'Yuque Book'
+      book: 'Yuque Book',
+      library: 'Seafile Library'
     },
     neverSynced: 'Never synced',
     justNow: 'Just now',
@@ -6799,7 +6813,15 @@ export default {
       dingtalk_resource_failed: 'DingTalk resource is unavailable; check access and the saved selection, then retry.',
       deletion_lookup_failed: 'Failed to look up the item before deletion; see server logs',
       deletion_failed: 'Deletion failed; see server logs',
-      ingest_failed: 'Ingest failed; see server logs'
+      ingest_failed: 'Ingest failed; see server logs',
+      seafile_permission_denied: 'Access to the Seafile file was denied; check the library permissions of the token owner.',
+      seafile_not_found: 'The Seafile file no longer exists or was moved; the next sync retries it.',
+      seafile_file_too_large: 'The Seafile file exceeds the size limit; raise MAX_FILE_SIZE_MB or shrink the file.',
+      seafile_empty_file: 'The Seafile file is empty and was skipped.',
+      seafile_source_changed: 'The Seafile file changed while it was being fetched; the next sync retries it.',
+      seafile_invalid_response: 'Seafile returned a response that could not be parsed; check the server version and reverse proxy.',
+      seafile_ssrf_blocked: 'The Seafile download URL was blocked by the SSRF policy; add the fileserver host to SSRF_WHITELIST.',
+      seafile_fetch_failed: 'Failed to fetch the file from Seafile; the next sync retries it.'
     }
   },
   integrations: {

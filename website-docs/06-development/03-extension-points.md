@@ -496,6 +496,7 @@ type StreamingConnector interface {
 | `ima` | `internal/datasource/connector/ima/` | 腾讯 ima 知识库 |
 | `rss` | `internal/datasource/connector/rss/` | RSS 订阅 |
 | `gitlab` | `internal/datasource/connector/gitlab/` | GitLab 仓库 |
+| `seafile` | `internal/datasource/connector/seafile/` | 资料库目录与文件 |
 
 `internal/types/datasource.go` 中还有 `github`、`google_drive` 等尚未注册实现的类型常量。
 

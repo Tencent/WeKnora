@@ -231,6 +231,18 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+// Seafile resource IDs are "<repo_id>:<path>"; one data source syncs one
+// library, so the picker refuses a selection that spans two libraries.
+const isSeafileConnector = (type: string) => type === 'seafile'
+const seafileLibraryOf = (id: string) => id.split(':')[0]
+// Seafile IDs encode the hierarchy, so a saved selection whose node has
+// vanished from the tree can still be recognised as living under `parent`.
+function seafileWithin(id: string, parent: string): boolean {
+  const [repo, path] = [seafileLibraryOf(id), id.slice(id.indexOf(':') + 1)]
+  const parentPath = parent.slice(parent.indexOf(':') + 1)
+  return repo === seafileLibraryOf(parent) &&
+    (parentPath === '/' || path === parentPath || path.startsWith(parentPath + '/'))
+}
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -688,6 +700,14 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
     ],
   },
+  {
+    type: 'seafile', available: true, docUrl: 'https://help.seafile.com/',
+    permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.seafile.baseUrl', placeholder: 'https://seafile.example.com' },
+      { key: 'api_token', labelKey: 'datasource.seafile.apiToken', placeholder: '', secret: true, hintKey: 'datasource.seafile.apiTokenHint' },
+    ],
+  },
 ])
 
 
@@ -1023,10 +1043,22 @@ function uncheckResource(id: string, cover: Set<string>) {
 
 function toggleResource(id: string) {
   const cover = new Set(selectedResourceIds.value)
+  const seafile = isSeafileConnector(form.value.type)
   if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
     checkResource(id, cover)
   } else {
     uncheckResource(id, cover)
+    // Unchecking also drops saved Seafile selections below this node that
+    // the tree no longer lists; otherwise they could never be cleared.
+    if (seafile) {
+      for (const sel of [...cover]) {
+        if (seafileWithin(sel, id)) cover.delete(sel)
+      }
+    }
+  }
+  if (seafile && new Set([...cover].map(seafileLibraryOf)).size > 1) {
+    MessagePlugin.warning(t('datasource.seafile.singleLibraryOnly'))
+    return
   }
   selectedResourceIds.value = [...cover]
 }
@@ -1081,6 +1113,11 @@ async function nextStep() {
       MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
       return
     }
+  }
+  // Seafile has no "whole account" scope: the backend rejects an empty selection.
+  if (step.value === 2 && isSeafileConnector(form.value.type) && selectedResourceIds.value.length === 0) {
+    MessagePlugin.warning(t('datasource.seafile.selectionRequired'))
+    return
   }
   step.value++
   if (step.value === 2) {
@@ -1226,6 +1263,9 @@ const selectedResourceCount = computed(() => {
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
 
 function resourceIconName(r: Resource): string {
+  // Seafile libraries expand like folders but are the top-level unit a data
+  // source binds to, so they keep the root icon.
+  if (r.type === 'library') return 'root-list'
   if (r.has_children) return 'folder'
   switch (r.type) {
     case 'wiki_space':
@@ -1256,6 +1296,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  library: 'datasource.resourceType.library',
 }
 
 function resourceTypeLabel(type: string): string {
