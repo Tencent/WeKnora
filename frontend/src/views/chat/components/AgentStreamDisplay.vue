@@ -4010,4 +4010,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 </style>
 
-<style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>
+<!-- Inlined @import instead of <style src>: plugin-vue 6.0.6 keys unscoped
+     src-style descriptors by the imported file path, so two SFCs sharing the
+     same src style (this file and WikiBrowser.vue) overwrite each other's
+     descriptor during the build and crash with "reading 'scoped'". -->
+<style lang="less">
+@import "@/components/css/wiki-graph-drawer.less";
+</style>
