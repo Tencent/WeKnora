@@ -163,52 +163,62 @@ watch(
 // and a `description` sentence for wherever there is room. The helpers below
 // always return the short one and expose the long one separately, so a compact
 // panel never has to stretch to a full sentence.
+//
+// A translation always wins: the contract's wording is only the fallback for
+// attributes no locale knows yet. Asking the locale first matters, because a
+// source carries its own default-language text and would otherwise shadow the
+// translation for every locale but its own.
 // ---------------------------------------------------------------------------
+/** Where the gallery's own attribute wording lives in the locale files. */
+const ATTR_NAMESPACE = 'knowledgeEditor.wikiBrowser.gallery.attr'
+
 const sanitizeKey = (id: string) => id.replace(/[:.]/g, '_')
 
+/** The pipeline's own wording for an attribute, keyed by its source-local name. */
+function pipelineKey(attr: GalleryResolvedAttr, suffix = ''): string {
+  return `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}${suffix}`
+}
+
 function attrLabel(attr: GalleryResolvedAttr): string {
-  const key = `gallery.attr.${sanitizeKey(attr.id)}`
+  const key = `${ATTR_NAMESPACE}.${sanitizeKey(attr.id)}`
   if (te(key)) return t(key)
   // Overlay the attribute pipeline's own translations when present.
-  const legacy = `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}`
+  const legacy = pipelineKey(attr, '.label')
   if (te(legacy)) return t(legacy)
   return attr.label || attr.id
 }
 
 /** The sentence explaining an attribute, in words where the source gave one. */
 function attrDescription(attr: GalleryResolvedAttr): string {
-  const key = `gallery.attr.${sanitizeKey(attr.id)}_description`
+  const key = `${ATTR_NAMESPACE}.${sanitizeKey(attr.id)}_description`
   if (te(key)) return t(key)
   // Attributes contributed by an attribute pipeline ship no gallery-specific
   // text, so fall through to the pipeline's own translations.
-  const legacy = `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}.description`
+  const legacy = pipelineKey(attr, '.description')
   if (te(legacy)) return t(legacy)
   return attr.description || ''
 }
 
 /**
- * The short display name of one allowed value. A source that never spelled a
- * label out still reads as the raw value rather than as a blank.
+ * The short display name of one allowed value. The locale wins over the
+ * wording the source shipped; only a value no locale knows about falls back to
+ * the source text, and one that spelled nothing out reads as the raw value.
  */
 function attrValueLabel(attr: GalleryResolvedAttr, value: string): string {
-  const key = `gallery.attr.${sanitizeKey(attr.id)}_value_${value}`
+  const key = `${ATTR_NAMESPACE}.${sanitizeKey(attr.id)}_value_${value}`
   if (te(key)) return t(key)
-  const declared = attr.values?.find((v) => v.value === value)?.label
-  if (declared) return declared
-  const legacy = `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}.values.${value}.label`
+  const legacy = pipelineKey(attr, `.values.${value}.label`)
   if (te(legacy)) return t(legacy)
-  return value
+  return attr.values?.find((v) => v.value === value)?.label || value
 }
 
 /** The sentence explaining one allowed value; empty when the source has none. */
 function attrValueDescription(attr: GalleryResolvedAttr, value: string): string {
-  const key = `gallery.attr.${sanitizeKey(attr.id)}_value_${value}_description`
+  const key = `${ATTR_NAMESPACE}.${sanitizeKey(attr.id)}_value_${value}_description`
   if (te(key)) return t(key)
-  const declared = attr.values?.find((v) => v.value === value)?.description
-  if (declared) return declared
-  const legacy = `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}.values.${value}.description`
+  const legacy = pipelineKey(attr, `.values.${value}.description`)
   if (te(legacy)) return t(legacy)
-  return ''
+  return attr.values?.find((v) => v.value === value)?.description || ''
 }
 
 /** One observed attribute value of an image, in words where possible. */

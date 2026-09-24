@@ -110,10 +110,11 @@ const EXTRA_PREFIXES = [
   // being translated without touching the audit.
   'imageAttr.',
   // Gallery attribute labels are keyed by the namespaced attribute id from
-  // the gallery contract (gallery.attr.builtin_caption …), likewise runtime-
-  // built; static labels for the five builtin attributes ship in the locale
-  // files, everything else falls back to the contract wording.
-  'gallery.attr.',
+  // the gallery contract, likewise runtime-built; static labels for the few
+  // builtin attributes ship in the locale files as
+  // knowledgeEditor.wikiBrowser.gallery.attr.builtin_caption …, and
+  // everything else falls back to the contract wording.
+  'knowledgeEditor.wikiBrowser.gallery.attr.',
 ] as const
 
 /** Keys that must survive pruning even when static analysis misses them. */
