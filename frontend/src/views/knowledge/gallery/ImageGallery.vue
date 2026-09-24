@@ -1197,10 +1197,11 @@ onMounted(async () => {
 .ig-order {
   white-space: nowrap;
 }
-/* An inline svg sits on the text baseline by default, which reads as riding
-   high next to the label; middle lines it up with the text's optical center. */
-.ig-order :deep(.t-icon) {
-  vertical-align: middle;
+/* The button wraps its content in .t-button__text, an inline-flex box whose
+   default stretch pins the explicitly-sized 16px icon to the top of the 22px
+   line box, so the arrow reads as riding high; center it instead. */
+.ig-order :deep(.t-button__text) {
+  align-items: center;
 }
 .ig-count {
   margin-left: auto;
