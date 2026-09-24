@@ -39,7 +39,7 @@ data/weknora.db-wal
 data/weknora.db-shm
 skills-lock.json
 
-web/
+/web/
 
 **/__pycache__
 /scripts/scale_dev_jobs.sh
@@ -63,3 +63,6 @@ miniprogram/project.private.config.json
 
 # Locally built BrowserSkill runtime and extension bundles
 /artifacts/browserskill/
+
+# Evaluation Dataset Studio local workspace (contains saved API keys and run data)
+/local/evaluation-datasets/

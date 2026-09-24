@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "data": [
+    {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "knowledge_id": "00000000-0000-4000-8000-000000000011",
+      "knowledge_base_id": "00000000-0000-4000-8000-000000000001",
+      "content": "This is an example text chunk used only for contract tests.",
+      "chunk_index": 0,
+      "is_enabled": true,
+      "chunk_type": "text",
+      "index_status": "ready"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 1
+}
