@@ -53,9 +53,10 @@ https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc
   <img src="./docs/images/readme/capabilities-ko-light.svg" alt="01 RAG: 근거 있는 답변. 하이브리드 검색, 멀티모달 파싱, 원문 인용. 02 Agent: 지식과 도구로 작업 완료. 다단계 추론, 스킬과 샌드박스, 로컬 브라우저, MCP 도구, 장기 메모리. 03 Wiki: 문서를 Wiki로 정리. 자동 정리, 지식 그래프, 버전 롤백." width="100%">
 </picture>
 
+**Agent 도구 상자.** ClawHub / SkillHub / Git / ZIP에서 설치한 스킬은 세션 단위로 유지되는 Docker / E2B / Cube 샌드박스에서 실행되며, 채팅 옆에서 대화형 터미널과 그래픽 데스크톱을 열 수 있습니다. BrowserSkill 확장 프로그램으로 Agent가 사용자의 Chrome / Edge를 직접 조작하고, 외부 MCP 서비스(OAuth 지원)를 연결해 도구별로 활성화할 수 있습니다.
+
 그 밖에:
 
-- **Agent 도구와 실행**: ClawHub / SkillHub / Git / ZIP에서 설치한 스킬을 세션 단위로 유지되는 Docker / E2B / Cube 샌드박스에서 실행하고, 채팅 옆에서 대화형 터미널과 그래픽 데스크톱을 열 수 있습니다. Agent는 BrowserSkill 확장 프로그램으로 사용자의 Chrome / Edge를 직접 조작합니다. 외부 MCP 서비스(OAuth 지원)를 연결해 도구별로 활성화할 수 있고, 10가지 이상의 웹 검색도 지원합니다.
 - **메모리와 지식 정리**: 크로스 세션 장기 메모리가 사용자가 확인한 프로필, 선호, 사실을 보관합니다. 폴더 업로드는 원래 디렉터리 구조를 유지하고, 검색 청크는 편집·비교·롤백할 수 있습니다.
 - **데이터 소스와 포맷**: Feishu 지식베이스 / Feishu 클라우드 드라이브 / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS 자동 동기화(지속 확장 중). PDF, Word, 이미지, Excel, XMind 등 10가지 이상의 포맷을 지원하며, Office 문서는 anydoc으로 프로세스 내 파싱합니다.
 - **채널과 연동**: WeChat Work, Feishu, Slack, Telegram 등 IM에서 바로 Q&A, 웹사이트 임베드 Widget으로 외부 사이트에 에이전트 게시, 내장 MCP Server로 Cursor·Claude 등 AI 도구와 연결, 범위 지정 API 키와 Principal 모델로 프로그램 연동.
