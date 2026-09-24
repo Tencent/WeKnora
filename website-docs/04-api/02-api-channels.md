@@ -30,6 +30,8 @@ API key：`manage_channels`/full。IM 渠道携带外部 bot 凭证：列表 Vie
 | `name` | string | 否 | 显示名 |
 | `mode` | string | 否 | `websocket`（默认）/`webhook`/`longpoll`（wechat 强制 longpoll） |
 | `output_mode` | string | 否 | `stream`（默认）/`full`（wechat 强制 full） |
+| `locale` | string | 否 | 固定回复语言：`zh-CN/en-US/ko-KR/ja-JP/ru-RU`；空值使用部署默认语言 |
+| `language_mode` | string | 否 | `fixed`（默认，使用 `locale`）/`follow_user`（按消息语言回复） |
 | `knowledge_base_id` | string | 否 | 关联 KB |
 | `credentials` | object | 否 | 平台凭证 |
 | `enabled` | bool | 否 | 默认 true |
@@ -63,7 +65,7 @@ curl $BASE/api/v1/im-channels -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/im-channels/:id
 
-用途：更新渠道（局部更新：`name/mode/output_mode/knowledge_base_id/credentials/enabled/agent_id` 均可选）。权限：Admin+。
+用途：更新渠道（局部更新：`name/mode/output_mode/locale/language_mode/knowledge_base_id/credentials/enabled/agent_id` 均可选）。权限：Admin+。
 
 响应：200 `{"data":{IMChannel}}`
 
