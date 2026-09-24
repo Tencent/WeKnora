@@ -301,7 +301,7 @@ docreader 侧的图片契约非常简单：每个解析器把图片以 `Document
 - unary `Read`：`_resolve_images()` 把全部图片 base64 解码为 `ImageRef.image_data` **内联字节**一次性返回（`image_dir_path` 恒为空——历史上"写共享卷目录"的模式已废弃，注释明确 *"The Go App is solely responsible for persisting images to the configured storage backend (local/minio/cos/tos)"*）；
 - streaming `ReadStream`：`_iter_image_refs()` 逐张 yield，边发边 `pop` 释放内存。
 
-Go 侧接手后（`internal/infrastructure/docparser/image_resolver.go`）：将 inline bytes 上传对象存储、把 markdown 中的 `images/...` 引用重写为存储 URL；随后 `internal/application/service/image_multimodal.go` 依据 metadata 的 `image_source_type` 决策——`scanned_pdf` 的整页图走 OCR（带专用 `ocr_prompt`），普通插图走 VLM caption。该服务有两条管线（处理轨迹里 `pipeline` 分别记为 `caption_ocr` / `observation_driven`）：历史管线（KB 未开启 `image_attrs_enabled`）对每张图各发一次描述、各发一次 OCR；属性观察管线（开启后）第一轮先用同一张图的「属性观察＋描述」结果确定属性（`contain.text` / `contain.data_visual`），再由代码纯函数 `DecideOCR` 按 KB 的 `image_actions` 决定该图是否值得再跑 OCR——`contain.text ∈ {sparse, none}` 且已确认观察、且 `data_visual == false` 的图默认只留描述、不花 OCR。两条管线的**图片理解都在 Go 侧**。**docreader 内没有任何 VLM 调用**；`models/read_config.py` 中的 `vlm_config`/`storage_config` 字段只是为了老构造函数签名兼容而保留的空壳（"Legacy config kept for backward compatibility"）。
+Go 侧接手后（`internal/infrastructure/docparser/image_resolver.go`）：将 inline bytes 上传对象存储、把 markdown 中的 `images/...` 引用重写为存储 URL；随后 `internal/application/service/image_multimodal.go` 依据 metadata 的 `image_source_type` 决策——`scanned_pdf` 的整页图走 OCR（带专用 `ocr_prompt`），普通插图走 VLM caption。**docreader 内没有任何 VLM 调用**；`models/read_config.py` 中的 `vlm_config`/`storage_config` 字段只是为了老构造函数签名兼容而保留的空壳（"Legacy config kept for backward compatibility"）。
 
 ---
 
