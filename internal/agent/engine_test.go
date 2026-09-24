@@ -1176,7 +1176,10 @@ func TestStreamFinalAnswerDoesNotPublishLiveContextUsage(t *testing.T) {
 		ContextUsage: types.ContextUsage{Tools: 4000, MCP: 1500, Total: 5500, Window: 200000},
 	}
 
-	require.NoError(t, engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1", emptyMessages()))
+	err := engine.streamFinalAnswerToEventBus(
+		context.Background(), "test query", state, "sess-1", emptyMessages(),
+	)
+	require.NoError(t, err)
 	require.Empty(t, snapshots, "synthesis must not flash Tools/MCP to zero on the live ring")
 	require.Equal(t, 4000, state.ContextUsage.Tools, "the ReAct snapshot survives synthesis")
 }
@@ -1400,7 +1403,10 @@ func TestExecuteLoopPublishesContextUsageDuringTheTurn(t *testing.T) {
 		return nil
 	})
 
-	_, err := engine.executeLoop(context.Background(), &types.AgentState{}, "test query", emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	_, err := engine.executeLoop(
+		context.Background(), &types.AgentState{}, "test query",
+		emptyMessages(), emptyTools(), "sess-1", "msg-1",
+	)
 	require.NoError(t, err)
 	require.Len(t, snapshots, 1, "one calibrated snapshot per round; the pre-LLM estimate stays off the wire")
 	require.Equal(t, promptTokens, snapshots[0].Total)

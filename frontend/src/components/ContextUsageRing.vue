@@ -145,7 +145,7 @@ const visibleRows = computed(() => {
 .context-usage-popup {
   .t-popup__content {
     padding: 0;
-    border-radius: 12px;
+    border-radius: var(--app-radius-xl);
     box-shadow: var(--td-shadow-2);
   }
 }
@@ -160,13 +160,13 @@ const visibleRows = computed(() => {
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   cursor: pointer;
   flex-shrink: 0;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
+    background: var(--td-bg-color-secondarycontainer-hover);
   }
 
   svg {
@@ -182,12 +182,12 @@ const visibleRows = computed(() => {
 }
 
 .context-usage-ring__track {
-  stroke: var(--td-component-stroke, #e7e7e7);
+  stroke: var(--td-component-stroke);
 }
 
 .context-usage-ring__fill {
   stroke-linecap: round;
-  transition: stroke-dashoffset 0.2s ease, stroke 0.2s ease;
+  transition: stroke-dashoffset var(--app-motion-base) ease, stroke var(--app-motion-base) ease;
 }
 
 .context-usage-card {
@@ -204,7 +204,7 @@ const visibleRows = computed(() => {
 }
 
 .context-usage-card__title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
@@ -213,7 +213,7 @@ const visibleRows = computed(() => {
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   line-height: 1;
   padding: 0 2px;
 }
@@ -226,13 +226,13 @@ const visibleRows = computed(() => {
 }
 
 .context-usage-card__percent {
-  font-size: 22px;
+  font-size: var(--app-text-4xl);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .context-usage-card__used {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -244,9 +244,9 @@ const visibleRows = computed(() => {
 .context-usage-card__bar {
   display: flex;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   overflow: hidden;
-  background: var(--td-bg-color-secondarycontainer, #f2f2f2);
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .context-usage-card__bar-seg {
@@ -269,7 +269,7 @@ const visibleRows = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .context-usage-card__dot {
@@ -291,7 +291,7 @@ const visibleRows = computed(() => {
 
 .context-usage-card__empty {
   margin: 4px 0 2px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
@@ -301,11 +301,11 @@ const visibleRows = computed(() => {
   top: -2px;
   bottom: -2px;
   width: 2px;
-  background: var(--td-text-color-placeholder, #bbb);
+  background: var(--td-text-color-placeholder);
 }
 
 .context-usage-card__dot--free {
-  background: var(--td-component-stroke, #e7e7e7);
+  background: var(--td-component-stroke);
 }
 
 .context-usage-card__toggle {
@@ -314,7 +314,7 @@ const visibleRows = computed(() => {
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   padding: 2px 0;
 }
 </style>

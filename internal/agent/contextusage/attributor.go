@@ -100,6 +100,8 @@ type Attributor struct {
 	hasPrev    bool
 }
 
+// New returns an attributor for one turn. A non-positive window falls back to
+// the default context size so a report always has a denominator.
 func New(est *token.Estimator, window, threshold int) *Attributor {
 	if window <= 0 {
 		window = types.DefaultMaxContextTokens

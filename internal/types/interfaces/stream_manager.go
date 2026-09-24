@@ -9,13 +9,14 @@ import (
 
 // StreamEvent represents a single event in the stream
 type StreamEvent struct {
-	ID        string                 `json:"id"`              // Unique event ID
-	Type      types.ResponseType     `json:"type"`            // Event type (thinking, tool_call, complete, etc.)
-	Content   string                 `json:"content"`         // Event content (chunk for streaming events)
-	Done      bool                   `json:"done"`            // Whether this event is done
-	Timestamp time.Time              `json:"timestamp"`       // When this event occurred
-	Data      map[string]interface{} `json:"data,omitempty"`  // Additional event data (references, metadata, etc.)
-	Usage     *types.TokenUsage      `json:"usage,omitempty"` // Turn totals on complete; classified prompt mix on context_usage
+	ID        string                 `json:"id"`             // Unique event ID
+	Type      types.ResponseType     `json:"type"`           // Event type (thinking, tool_call, complete, etc.)
+	Content   string                 `json:"content"`        // Event content (chunk for streaming events)
+	Done      bool                   `json:"done"`           // Whether this event is done
+	Timestamp time.Time              `json:"timestamp"`      // When this event occurred
+	Data      map[string]interface{} `json:"data,omitempty"` // Additional event data (references, metadata, etc.)
+	// Usage is turn totals on complete, and the classified prompt mix on context_usage.
+	Usage *types.TokenUsage `json:"usage,omitempty"`
 }
 
 // StreamManager stream manager interface - minimal append-only design
