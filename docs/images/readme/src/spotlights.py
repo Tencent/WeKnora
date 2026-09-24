@@ -1,7 +1,8 @@
 """Compose the README feature spotlights: two real screenshots framed as app windows.
 
 Writes spotlight-{name}-{light,dark}.webp into the directory above this script.
-Screenshots come from website-docs (the same ones the product homepage uses).
+Screenshots come from website-docs/public/screenshots (the ones the product docs and homepage use)
+and, for Q&A, docs/images.
 
     python3 docs/images/readme/src/spotlights.py
 """
@@ -17,6 +18,8 @@ SHOTS = os.path.join(ROOT, "website-docs", "public", "screenshots")
 # The side window sits in the bottom corner where it hides the least of the main shot;
 # the browser shot keeps its task preview in the bottom right, so its side window goes left.
 SETS = {
+    "qa": ("../../../docs/images/qa.png", "../../../docs/images/agent-qa.png", (0.30, 0.0, 0.84, 0.70), 640, "right"),
+    "toolbox": ("mcp-services.png", "toolbox.png", (0.11, 0.0, 0.762, 0.32), 760, "left"),
     "browser": ("local-browser-task.png", "browser-connection.png", (0.12, 0.0, 0.62, 0.48), 700, "left"),
     "sandbox": ("skill-sandbox-chat.png", "sandbox-desktop.png", (0.545, 0.12, 1.0, 0.9), 560, "right"),
     "wiki": ("wiki-browser.png", "wiki-graph.png", (0.15, 0.05, 0.75, 0.72), 680, "right"),

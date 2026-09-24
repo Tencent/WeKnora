@@ -226,6 +226,17 @@ Full history: [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Product Tour
 
+### Quick Q&A and smart reasoning
+
+**Two ways to ask.** Quick Q&A answers from the knowledge base with RAG and cites the sources it used. In smart reasoning the agent plans multi-step work, searching, reading documents and calling tools and skills, and shows each step in the conversation. [Docs →](https://weknora.weixin.qq.com/docs/03-features/18-chat-experience)
+
+<a href="./docs/images/readme/spotlight-qa-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-qa-dark.webp">
+  <img src="./docs/images/readme/spotlight-qa-light.webp" alt="Quick Q&A and smart reasoning" width="100%">
+</picture>
+</a>
+
 ### Local browser
 
 **Operate the browser on your computer.** Through Tencent's open-source BrowserSkill extension, the agent opens pages and fills in forms in your own Chrome or Edge, and hands over to you for logins and CAPTCHAs. [Docs →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
@@ -245,6 +256,17 @@ Full history: [`CHANGELOG.md`](./CHANGELOG.md).
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
   <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="Skills and sandbox" width="100%">
+</picture>
+</a>
+
+### Toolbox: MCP services and skills
+
+**Tools the agent can use.** Connect external MCP services and choose, tool by tool, which are enabled and which calls need approval. Install skills from ClawHub, SkillHub, Git or ZIP, manage them per workspace, and reuse them across sandboxes. [Docs →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
+
+<a href="./docs/images/readme/spotlight-toolbox-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-toolbox-dark.webp">
+  <img src="./docs/images/readme/spotlight-toolbox-light.webp" alt="Toolbox: MCP services and skills" width="100%">
 </picture>
 </a>
 
@@ -269,23 +291,6 @@ Full history: [`CHANGELOG.md`](./CHANGELOG.md).
   <img src="./docs/images/readme/spotlight-observability-light.webp" alt="Observability" width="100%">
 </picture>
 </a>
-
-### More screenshots
-
-<table>
-  <tr>
-    <td width="50%" align="center"><b>Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation" width="100%"></td>
-    <td width="50%" align="center"><b>Agent Mode · search, read a skill, write sandbox files</b><br/><img src="./docs/images/agent-qa.png" alt="Agent searching the knowledge base, reading the docx skill, and writing a sandbox script" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>Skill Catalog · install onto an E2B sandbox</b><br/><img src="./docs/images/skill-catalog.png" alt="Workspace skill catalog with docx pptx pdf installed on E2B" width="100%"></td>
-    <td width="50%" align="center"><b>Wiki Page Revision History & Rollback</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki Page Revision History and Rollback" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>Chunk Editing & Revision History</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="Chunk Editing and Revision History" width="100%"></td>
-    <td width="50%" align="center"><b>Folder Tree & Batch Operations</b><br/><img src="./docs/images/kb-document-list.png" alt="Knowledge Base Folder Tree and Batch Operations" width="100%"></td>
-  </tr>
-</table>
 
 ## Architecture
 

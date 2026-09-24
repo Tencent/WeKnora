@@ -236,6 +236,17 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 ## 기능 데모
 
+### 빠른 Q&A와 스마트 추론
+
+**두 가지 질문 방식.** 빠른 Q&A는 지식베이스를 RAG로 검색해 답하고 참고한 출처를 표시합니다. 스마트 추론에서는 에이전트가 다단계 작업을 계획해 검색, 문서 읽기, 도구와 스킬 호출을 수행하며 각 단계를 대화에 보여 줍니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/18-chat-experience)
+
+<a href="./docs/images/readme/spotlight-qa-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-qa-dark.webp">
+  <img src="./docs/images/readme/spotlight-qa-light.webp" alt="빠른 Q&A와 스마트 추론" width="100%">
+</picture>
+</a>
+
 ### 로컬 브라우저
 
 **사용자 컴퓨터의 브라우저 조작.** Tencent가 오픈소스로 공개한 BrowserSkill 확장 프로그램으로 에이전트가 사용자의 Chrome이나 Edge에서 페이지를 열고 양식을 입력합니다. 로그인이나 CAPTCHA는 사용자에게 넘깁니다. [문서 →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
@@ -255,6 +266,17 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
   <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="스킬과 샌드박스" width="100%">
+</picture>
+</a>
+
+### 도구 상자: MCP 서비스와 스킬
+
+**에이전트가 쓰는 도구.** 외부 MCP 서비스를 연결하고, 켤 도구와 승인이 필요한 호출을 도구별로 고를 수 있습니다. 스킬은 ClawHub, SkillHub, Git, ZIP에서 설치해 워크스페이스에서 관리하고 여러 샌드박스에서 재사용합니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
+
+<a href="./docs/images/readme/spotlight-toolbox-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-toolbox-dark.webp">
+  <img src="./docs/images/readme/spotlight-toolbox-light.webp" alt="도구 상자: MCP 서비스와 스킬" width="100%">
 </picture>
 </a>
 
@@ -279,23 +301,6 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
   <img src="./docs/images/readme/spotlight-observability-light.webp" alt="관측 가능성" width="100%">
 </picture>
 </a>
-
-### 추가 스크린샷
-
-<table>
-  <tr>
-    <td width="50%" align="center"><b>지능형 Q&A 대화</b><br/><img src="./docs/images/qa.png" alt="지능형 Q&A 대화" width="100%"></td>
-    <td width="50%" align="center"><b>Agent 모드 · 검색, 스킬 읽기, 샌드박스 파일 쓰기</b><br/><img src="./docs/images/agent-qa.png" alt="Agent가 지식베이스를 검색하고 docx 스킬을 읽은 뒤 샌드박스에 스크립트를 씀" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>스킬 카탈로그 · E2B 샌드박스에 설치</b><br/><img src="./docs/images/skill-catalog.png" alt="워크스페이스 스킬 카탈로그: docx / pptx / pdf가 E2B에 설치됨" width="100%"></td>
-    <td width="50%" align="center"><b>Wiki 페이지 버전 이력 및 롤백</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki 페이지 버전 이력 및 롤백" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>청크 편집 및 버전 이력</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="청크 편집 및 버전 이력" width="100%"></td>
-    <td width="50%" align="center"><b>폴더 트리 및 일괄 작업</b><br/><img src="./docs/images/kb-document-list.png" alt="지식베이스 폴더 트리 및 일괄 작업" width="100%"></td>
-  </tr>
-</table>
 
 ## 아키텍처
 

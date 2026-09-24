@@ -226,6 +226,17 @@ docker compose up -d    # 用新镜像重建容器
 
 ## 功能展示
 
+### 快速问答与智能推理
+
+**两种提问方式。** 快速问答基于知识库做 RAG 检索作答，并标注引用来源；智能推理由智能体规划多步任务，检索、阅读文档、调用工具与技能，每一步都在对话中展示。 [文档 →](https://weknora.weixin.qq.com/docs/03-features/18-chat-experience)
+
+<a href="./docs/images/readme/spotlight-qa-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-qa-dark.webp">
+  <img src="./docs/images/readme/spotlight-qa-light.webp" alt="快速问答与智能推理" width="100%">
+</picture>
+</a>
+
 ### 本机浏览器
 
 **操作你电脑上的浏览器。** 借助腾讯开源的 BrowserSkill 扩展，智能体直接在你的 Chrome 或 Edge 中打开网页、填写表单；遇到登录或验证码时交给你。 [文档 →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
@@ -245,6 +256,17 @@ docker compose up -d    # 用新镜像重建容器
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
   <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="技能与沙箱" width="100%">
+</picture>
+</a>
+
+### 工具箱：MCP 服务与技能
+
+**智能体可用的工具。** 接入外部 MCP 服务，逐个选择启用哪些工具、哪些调用需要审批；从 ClawHub、SkillHub、Git 或 ZIP 安装技能，在空间内统一管理，供各个沙箱复用。 [文档 →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
+
+<a href="./docs/images/readme/spotlight-toolbox-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-toolbox-dark.webp">
+  <img src="./docs/images/readme/spotlight-toolbox-light.webp" alt="工具箱：MCP 服务与技能" width="100%">
 </picture>
 </a>
 
@@ -269,23 +291,6 @@ docker compose up -d    # 用新镜像重建容器
   <img src="./docs/images/readme/spotlight-observability-light.webp" alt="可观测性" width="100%">
 </picture>
 </a>
-
-### 更多截图
-
-<table>
-  <tr>
-    <td width="50%" align="center"><b>智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话" width="100%"></td>
-    <td width="50%" align="center"><b>Agent 模式 · 检索、读技能、写入沙箱文件</b><br/><img src="./docs/images/agent-qa.png" alt="Agent 检索知识库、读取 docx 技能并写入沙箱脚本" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>技能目录 · 安装到 E2B 沙箱</b><br/><img src="./docs/images/skill-catalog.png" alt="空间技能目录：docx / pptx / pdf 已安装到 E2B" width="100%"></td>
-    <td width="50%" align="center"><b>Wiki 页面版本历史与回滚</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki 页面版本历史与回滚" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>分块编辑与版本历史</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="分块编辑与版本历史" width="100%"></td>
-    <td width="50%" align="center"><b>文件夹树与批量操作</b><br/><img src="./docs/images/kb-document-list.png" alt="知识库文件夹树与批量操作" width="100%"></td>
-  </tr>
-</table>
 
 ## 架构设计
 

@@ -226,6 +226,17 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 ## 機能デモ
 
+### クイック Q&A とスマート推論
+
+**2 つの質問方法。** クイック Q&A はナレッジベースを RAG で検索して回答し、参照した出典を示します。スマート推論ではエージェントがマルチステップの作業を計画し、検索、文書の読み込み、ツールやスキルの呼び出しを行い、各ステップを会話内に表示します。 [ドキュメント →](https://weknora.weixin.qq.com/docs/03-features/18-chat-experience)
+
+<a href="./docs/images/readme/spotlight-qa-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-qa-dark.webp">
+  <img src="./docs/images/readme/spotlight-qa-light.webp" alt="クイック Q&A とスマート推論" width="100%">
+</picture>
+</a>
+
 ### ローカルブラウザ
 
 **コンピューターのブラウザを操作。** Tencent がオープンソースで公開する BrowserSkill 拡張機能を通じて、エージェントがあなたの Chrome や Edge でページを開き、フォームに入力します。ログインや CAPTCHA ではあなたに引き継ぎます。 [ドキュメント →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
@@ -245,6 +256,17 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
   <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="スキルとサンドボックス" width="100%">
+</picture>
+</a>
+
+### ツールボックス：MCP サービスとスキル
+
+**エージェントが使えるツール。** 外部の MCP サービスを接続し、有効にするツールと承認が必要な呼び出しをツールごとに選べます。スキルは ClawHub、SkillHub、Git、ZIP からインストールしてワークスペースで管理し、各サンドボックスで再利用できます。 [ドキュメント →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
+
+<a href="./docs/images/readme/spotlight-toolbox-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-toolbox-dark.webp">
+  <img src="./docs/images/readme/spotlight-toolbox-light.webp" alt="ツールボックス：MCP サービスとスキル" width="100%">
 </picture>
 </a>
 
@@ -269,23 +291,6 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
   <img src="./docs/images/readme/spotlight-observability-light.webp" alt="可観測性" width="100%">
 </picture>
 </a>
-
-### その他のスクリーンショット
-
-<table>
-  <tr>
-    <td width="50%" align="center"><b>インテリジェント Q&A 対話</b><br/><img src="./docs/images/qa.png" alt="インテリジェント Q&A 対話" width="100%"></td>
-    <td width="50%" align="center"><b>Agent モード · 検索、スキル読取、サンドボックスへ書き込み</b><br/><img src="./docs/images/agent-qa.png" alt="Agent が知識ベースを検索し、docx スキルを読み、サンドボックスにスクリプトを書き込む" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>スキルカタログ · E2B サンドボックスへインストール</b><br/><img src="./docs/images/skill-catalog.png" alt="ワークスペースのスキルカタログ（docx / pptx / pdf を E2B にインストール）" width="100%"></td>
-    <td width="50%" align="center"><b>Wiki ページのバージョン履歴とロールバック</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki ページのバージョン履歴とロールバック" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>チャンク編集とバージョン履歴</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="チャンク編集とバージョン履歴" width="100%"></td>
-    <td width="50%" align="center"><b>フォルダーツリーと一括操作</b><br/><img src="./docs/images/kb-document-list.png" alt="ナレッジベースのフォルダーツリーと一括操作" width="100%"></td>
-  </tr>
-</table>
 
 ## アーキテクチャ設計
 
