@@ -13,12 +13,14 @@ OUT = os.path.dirname(HERE)
 ROOT = os.path.abspath(os.path.join(OUT, "..", "..", ".."))
 SHOTS = os.path.join(ROOT, "website-docs", "public", "screenshots")
 
-# (main shot, side shot, side crop as fractions of width/height, side window width)
+# (main shot, side shot, side crop as fractions of width/height, side window width, side corner)
+# The side window sits in the bottom corner where it hides the least of the main shot;
+# the browser shot keeps its task preview in the bottom right, so its side window goes left.
 SETS = {
-    "browser": ("local-browser-task.png", "browser-connection.png", (0.12, 0.0, 0.62, 0.48), 700),
-    "sandbox": ("skill-sandbox-chat.png", "sandbox-desktop.png", (0.545, 0.12, 1.0, 0.9), 560),
-    "wiki": ("wiki-browser.png", "wiki-graph.png", (0.15, 0.05, 0.75, 0.72), 680),
-    "observability": ("observability-langfuse.png", "kb-parse-timeline.png", (0.44, 0.0, 1.0, 0.5), 700),
+    "browser": ("local-browser-task.png", "browser-connection.png", (0.12, 0.0, 0.62, 0.48), 700, "left"),
+    "sandbox": ("skill-sandbox-chat.png", "sandbox-desktop.png", (0.545, 0.12, 1.0, 0.9), 560, "right"),
+    "wiki": ("wiki-browser.png", "wiki-graph.png", (0.15, 0.05, 0.75, 0.72), 680, "right"),
+    "observability": ("observability-langfuse.png", "kb-parse-timeline.png", (0.44, 0.0, 1.0, 0.5), 700, "right"),
 }
 THEMES = {
     "light": dict(bar=(246, 243, 237), border=(16, 31, 56, 34), dots=[(223, 209, 185)] * 3, shadow=(16, 31, 56, 70)),
@@ -66,13 +68,15 @@ def drop_shadow(canvas, win, xy, theme):
     canvas.alpha_composite(win, (x, y))
 
 
-for name, (main, side, crop, side_w) in SETS.items():
+for name, (main, side, crop, side_w, corner) in SETS.items():
     for theme in THEMES:
         canvas = Image.new("RGBA", (W * SCALE, H * SCALE), (0, 0, 0, 0))
         a = window(os.path.join(SHOTS, main), 1180, theme)
         b = window(os.path.join(SHOTS, side), side_w, theme, crop)
-        drop_shadow(canvas, a, (24 * SCALE, 24 * SCALE), theme)
-        drop_shadow(canvas, b, ((W - side_w - 24) * SCALE, (H - 24) * SCALE - b.height), theme)
+        main_x = 24 if corner == "right" else W - 1180 - 24
+        side_x = W - side_w - 24 if corner == "right" else 24
+        drop_shadow(canvas, a, (main_x * SCALE, 24 * SCALE), theme)
+        drop_shadow(canvas, b, (side_x * SCALE, (H - 24) * SCALE - b.height), theme)
         img = canvas.resize((W, H), Image.LANCZOS)
         img.save(os.path.join(OUT, f"spotlight-{name}-{theme}.webp"), "WEBP", quality=84, method=6)
 print("ok")
