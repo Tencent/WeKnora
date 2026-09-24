@@ -177,3 +177,34 @@ func TestPagesCloudFollowsNextAndKeepsDepth(t *testing.T) {
 		t.Fatalf("depth query = %#v", depths)
 	}
 }
+
+func TestPageInSpace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("expand") != "space" {
+			t.Errorf("expand = %q, want space", r.URL.Query().Get("expand"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/api/content/current":
+			_, _ = w.Write([]byte(`{"id": "current", "status": "current", "space": {"key": "ENG"}}`))
+		case "/rest/api/content/trashed":
+			_, _ = w.Write([]byte(`{"id": "trashed", "status": "trashed", "space": {"key": "ENG"}}`))
+		case "/rest/api/content/moved":
+			_, _ = w.Write([]byte(`{"id": "moved", "status": "current", "space": {"key": "OPS"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
+	for id, want := range map[string]bool{"current": true, "trashed": false, "moved": false, "deleted": false} {
+		got, err := c.pageInSpace(context.Background(), id, "ENG")
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if got != want {
+			t.Errorf("pageInSpace(%s) = %v, want %v", id, got, want)
+		}
+	}
+}

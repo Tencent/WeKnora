@@ -34,6 +34,16 @@ type streamAPI struct {
 	// endlessNext mimics Server/Data Center builds that keep linking to a
 	// next page after the last one, returning empty results forever (#3596).
 	endlessNext bool
+	// probe answers the per-page existence check (GET content/{id}?expand=space)
+	// for pages that are not in the listing: an HTTP status, or 200 with the
+	// space key the page now belongs to.
+	probe      map[string]probeReply
+	probeCalls int
+}
+
+type probeReply struct {
+	status   int
+	spaceKey string
 }
 
 func (a *streamAPI) jsonResponse(value any) (*http.Response, error) {
@@ -83,6 +93,23 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 		return a.jsonResponse(map[string]any{
 			"results": results,
 			"_links":  map[string]any{"next": next},
+		})
+	case strings.HasPrefix(path, "/wiki/rest/api/content/") && req.URL.Query().Get("expand") == "space":
+		a.probeCalls++
+		id := strings.TrimPrefix(path, "/wiki/rest/api/content/")
+		reply, ok := a.probe[id]
+		if !ok {
+			return nil, errors.New("unexpected existence check for page " + id)
+		}
+		if reply.status != http.StatusOK {
+			return &http.Response{
+				StatusCode: reply.status,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("{}")),
+			}, nil
+		}
+		return a.jsonResponse(map[string]any{
+			"id": id, "status": "current", "space": map[string]any{"key": reply.spaceKey},
 		})
 	case strings.HasPrefix(path, "/wiki/rest/api/content/"):
 		if req.URL.Query().Get("expand") != "body.view,version,space" {
@@ -403,12 +430,23 @@ func TestListResourcesKeepsInvalidWebUI(t *testing.T) {
 	}
 }
 
-func TestFetchStreamKeepsUnreachedPagesWhenServerListingNeverEnds(t *testing.T) {
+func TestFetchStreamChecksUnlistedPagesWhenServerListingNeverEnds(t *testing.T) {
 	for _, full := range []bool{false, true} {
 		t.Run(fmt.Sprintf("full=%v", full), func(t *testing.T) {
-			api := &streamAPI{endlessNext: true, pages: []streamPage{{id: "p1", title: "Page", version: 2}}}
+			api := &streamAPI{
+				endlessNext: true,
+				pages:       []streamPage{{id: "p1", title: "Page", version: 2}},
+				probe: map[string]probeReply{
+					"gone":   {status: http.StatusNotFound},
+					"moved":  {status: http.StatusOK, spaceKey: "OPS"},
+					"kept":   {status: http.StatusOK, spaceKey: "ENG"},
+					"denied": {status: http.StatusForbidden},
+				},
+			}
 			h := &captureHandler{}
-			old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
+			old := streamCursor(map[string]string{
+				"p1": "v:1", "gone": "v:1", "moved": "v:1", "kept": "v:3", "denied": "v:1",
+			})
 			connector := newStreamConnector(api)
 			fetch := connector.FetchStream
 			if full {
@@ -421,17 +459,27 @@ func TestFetchStreamKeepsUnreachedPagesWhenServerListingNeverEnds(t *testing.T) 
 			if api.listCalls != 1+maxEmptyServerPages {
 				t.Fatalf("listCalls = %d, want %d", api.listCalls, 1+maxEmptyServerPages)
 			}
+			if api.probeCalls != 4 {
+				t.Fatalf("probeCalls = %d, want one per unlisted page", api.probeCalls)
+			}
+			deleted := map[string]bool{}
 			for _, item := range h.items {
 				if item.IsDeleted {
-					t.Fatalf("cut-short listing emitted a deletion for %s", item.ExternalID)
+					deleted[item.ExternalID] = true
 				}
 			}
-			if len(h.items) != 1 || h.items[0].ExternalID != "p1" {
-				t.Fatalf("items = %#v, want the changed page p1 only", h.items)
+			if len(deleted) != 2 || !deleted["gone"] || !deleted["moved"] {
+				t.Fatalf("deleted = %v, want only the pages Confluence confirmed gone from the space", deleted)
 			}
 			pages := decodeCursor(got).SpacePages["1"]
-			if pages["p1"] != "v:2" || pages["p2"] != "v:1" {
-				t.Fatalf("cursor pages = %#v, want p1 advanced and unreached p2 kept", pages)
+			want := map[string]string{"p1": "v:2", "kept": "v:3", "denied": "v:1"}
+			if len(pages) != len(want) {
+				t.Fatalf("cursor pages = %#v, want %#v", pages, want)
+			}
+			for id, version := range want {
+				if pages[id] != version {
+					t.Fatalf("cursor pages = %#v, want %#v", pages, want)
+				}
 			}
 		})
 	}
