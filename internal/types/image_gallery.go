@@ -61,8 +61,19 @@ type ImageListFilter struct {
 	// values. Values within one attribute are OR-ed; attributes are
 	// AND-ed. An attribute present in this map but with no value on an
 	// image fails the match (so "unobserved" is a distinct, filterable
-	// state).
+	// state). The older, positional form of attribute filtering; see
+	// AttrRules for the per-value verdicts the gallery panel now edits.
 	AttrFilters map[string][]string
+	// AttrRules maps a namespaced attribute id to a verdict per allowed
+	// value: "" (or absent) leaves the image alone, "off" hides it, "on"
+	// shows it. A verdict only speaks about images that actually carry
+	// that value, so an image is judged by the rules it matches.
+	//
+	// When more than one rule speaks about the same image, "on" outranks
+	// "off": a forced display beats a forced hide. Everything unclaimed
+	// stays visible, which is what makes the default state usable — a
+	// filter narrows the list, it never empties it.
+	AttrRules map[string]map[string]string
 	// IsEnabled, when non-nil, restricts to chunks with that enabled state.
 	IsEnabled *bool
 }

@@ -107,9 +107,10 @@ func galleryAttrValueString(v any) string {
 
 // filterImageAssets applies keyword, attribute and enabled-state constraints.
 // Attribute filters are AND-ed across attributes and OR-ed within one
-// attribute's allowed values; an attribute that has no value on an image
-// fails the match. The keyword is a case-insensitive substring match against
-// the union of the requested search fields.
+// attribute's allowed values. An image that has never been observed for one
+// of the filtered attributes is not disqualified by it — see matchAttrFilters
+// for why absence is not a verdict. The keyword is a case-insensitive
+// substring match against the union of the requested search fields.
 func filterImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter) []types.ImageAsset {
 	if filter == nil {
 		return assets
@@ -139,9 +140,50 @@ func filterImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter)
 		if !matchAttrFilters(a, filter.AttrFilters) {
 			continue
 		}
+		if !matchAttrRules(a, filter) {
+			continue
+		}
 		out = append(out, a)
 	}
 	return out
+}
+
+// The two verdicts an attribute rule can carry.
+const (
+	galleryRuleOff = "off"
+	galleryRuleOn  = "on"
+)
+
+// matchAttrRules judges one image against the per-value verdicts the gallery
+// panel set up. A verdict only speaks about images that actually carry the
+// value it names, so what decides is the image's own observed value, not the
+// rule's existence. An image no rule touches stays visible.
+func matchAttrRules(a types.ImageAsset, filter *types.ImageListFilter) bool {
+	if filter == nil || len(filter.AttrRules) == 0 {
+		return true
+	}
+	var offHit, onHit bool
+	for name, verdicts := range filter.AttrRules {
+		observed, ok := galleryAttrValue(a, name)
+		if !ok {
+			// Never looked at for this attribute, so no rule here has an
+			// opinion about this image. Silence is not a verdict.
+			continue
+		}
+		switch verdicts[observed] {
+		case galleryRuleOff:
+			offHit = true
+		case galleryRuleOn:
+			onHit = true
+		}
+	}
+	// A forced display outranks a forced hide: the panel's "on" marks an
+	// image someone deliberately asked to see, so it wins over a rule that
+	// deliberately wants it gone.
+	if onHit {
+		return true
+	}
+	return !offHit
 }
 
 func matchAttrFilters(a types.ImageAsset, attrFilters map[string][]string) bool {
@@ -151,7 +193,14 @@ func matchAttrFilters(a types.ImageAsset, attrFilters map[string][]string) bool 
 		}
 		observed, ok := galleryAttrValue(a, name)
 		if !ok {
-			return false
+			// An image that was never looked at for this attribute carries no
+			// key at all, and "no key" must not read as "wrong key". A filter
+			// narrows a list; taking the whole population out because a
+			// pipeline has not reached these chunks yet is not narrowing, it
+			// is losing the list. So the attribute places no constraint on the
+			// image and stays out of the decision; re-running the pipeline
+			// fills the attribute in, and the filter binds again from then on.
+			continue
 		}
 		hit := false
 		for _, want := range allowed {

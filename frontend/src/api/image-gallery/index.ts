@@ -71,6 +71,13 @@ export interface ImageListParams {
    * JSON query param.
    */
   attrFilters?: Record<string, string[]>;
+  /**
+   * Per-value verdicts keyed by namespaced attribute id, each mapping a value
+   * to "off" (hide images carrying it) or "on" (show them regardless). An
+   * omitted value stays neutral. Sent as one `attr_rules` JSON query param;
+   * "on" outranks "off" when both speak about the same image.
+   */
+  attrRules?: Record<string, Record<string, string>>;
   page?: number;
   pageSize?: number;
 }
@@ -103,6 +110,9 @@ export async function listGalleryImages(
   }
   if (params.attrFilters && Object.keys(params.attrFilters).length) {
     query.set('attr_filters', JSON.stringify(params.attrFilters));
+  }
+  if (params.attrRules && Object.keys(params.attrRules).length) {
+    query.set('attr_rules', JSON.stringify(params.attrRules));
   }
   if (params.page) query.set('page', String(params.page));
   if (params.pageSize) query.set('page_size', String(params.pageSize));

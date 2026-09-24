@@ -31,9 +31,30 @@ const pageSize = ref(24)
 const keyword = ref('')
 const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('desc')
+
+// The two scope switches in the toolbar row. Each has the same shape: the
+// inclusive position drops the constraint entirely, the custom position
+// opens the panel that edits it. "筛选：全显示" therefore really is a
+// switch — when it reads "全显示", no attribute constraint is sent at all.
+const searchScope = ref<'all' | 'custom'>('all')
+const filterScope = ref<'all' | 'custom'>('all')
+
+// Which settings panel is on screen. A panel opens as a popover next to the
+// control that summoned it, and a pin moves it into the right-hand rail,
+// where the two panels take turns as tabs instead of both eating space.
+const openPanel = ref<'search' | 'filter' | ''>('')
+const pinnedPanel = ref<'search' | 'filter' | ''>('')
+const panelTab = ref<'search' | 'filter'>('filter')
+
 // Attribute selections: namespaced attr id -> selected allowed values (OR
-// within the attribute, AND across attributes).
+// within the attribute, AND across attributes). Free-text attributes have no
+// value list to pick from, so they carry their own literal selection.
 const attrSelections = ref<Record<string, string[]>>({})
+
+// Per-value verdicts, namespaced attr id -> value -> "off" | "on". An absent
+// key is the middle position: an image carrying that value stays exactly as
+// visible as it was, which is what makes the default state show everything.
+const attrVerdicts = ref<Record<string, Record<string, string>>>({})
 
 // ---------------------------------------------------------------------------
 // Gallery contract (self-describing, fetched once per mount)
@@ -245,6 +266,90 @@ const currentAttrs = computed(() => {
 })
 
 // ---------------------------------------------------------------------------
+// Filter verdicts
+//
+// One attribute value moves through three positions by click: neutral (leave
+// those images alone), "off" (hide them), "on" (show them whatever else says).
+// The middle position is the one a user starts at and returns to, so a value
+// the user never touched is absent from the map rather than stored as a word,
+// and never reaches the server.
+// ---------------------------------------------------------------------------
+// The filter panel's own switch: off means the verdicts are not imposed at
+// all, which is what the toolbar's 全显示 position shows.
+const filterScopeOn = computed({
+  get: () => filterScope.value === 'custom',
+  set: (on: boolean) => onFilterScopeChange(on ? 'custom' : 'all'),
+})
+
+const VERDICTS = ['default', 'off', 'on'] as const
+type Verdict = (typeof VERDICTS)[number]
+
+/** The verdicts that carry meaning, i.e. the ones worth putting on the wire. */
+const activeRules = computed(() => {
+  const out: Record<string, Record<string, string>> = {}
+  for (const [id, perValue] of Object.entries(attrVerdicts.value)) {
+    const clean: Record<string, string> = {}
+    for (const [value, verdict] of Object.entries(perValue)) {
+      if (verdict === 'off' || verdict === 'on') clean[value] = verdict
+    }
+    if (Object.keys(clean).length > 0) out[id] = clean
+  }
+  return out
+})
+
+function verdictOf(attrId: string, value: string): Verdict {
+  return (attrVerdicts.value[attrId]?.[value] as Verdict) || 'default'
+}
+
+function setVerdict(attrId: string, value: string, verdict: Verdict): void {
+  const perValue = { ...(attrVerdicts.value[attrId] || {}) }
+  if (verdict === 'default') delete perValue[value]
+  else perValue[value] = verdict
+  attrVerdicts.value = { ...attrVerdicts.value, [attrId]: perValue }
+  resetPageAndReload()
+}
+
+function verdictLabel(v: Verdict): string {
+  if (v === 'off') return t('knowledgeEditor.wikiBrowser.gallery.verdictOff')
+  if (v === 'on') return t('knowledgeEditor.wikiBrowser.gallery.verdictOn')
+  return t('knowledgeEditor.wikiBrowser.gallery.verdictDefault')
+}
+
+// ---------------------------------------------------------------------------
+// Settings panels
+//
+// Both panels answer the same question — what may the gallery show — and both
+// open the same way: an arrow beside the toolbar control summons them as a
+// popover, and the pin on the panel's header moves it into the right-hand
+// rail. Pinning one keeps the other out of the rail, so the two never split
+// the image area between them.
+// ---------------------------------------------------------------------------
+function openSettingsPanel(panel: 'search' | 'filter'): void {
+  panelTab.value = panel
+  openPanel.value = panel
+}
+
+function togglePin(panel: 'search' | 'filter'): void {
+  if (pinnedPanel.value === panel) {
+    pinnedPanel.value = ''
+    return
+  }
+  pinnedPanel.value = panel
+  panelTab.value = panel
+  openPanel.value = ''
+}
+
+function onSearchScopeChange(value: string | number | boolean): void {
+  searchScope.value = value === 'custom' ? 'custom' : 'all'
+  resetPageAndReload()
+}
+
+function onFilterScopeChange(value: string | number | boolean): void {
+  filterScope.value = value === 'custom' ? 'custom' : 'all'
+  resetPageAndReload()
+}
+
+// ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------
 function buildParams(): ImageListParams {
@@ -252,12 +357,16 @@ function buildParams(): ImageListParams {
   for (const [id, values] of Object.entries(attrSelections.value)) {
     if (values && values.length) attrFilters[id] = values
   }
+  // The filter switch decides whether verdicts are imposed at all: reading
+  // "全显示" means the panel's verdicts are not applied, whatever is set in it.
+  const rules = filterScope.value === 'custom' ? activeRules.value : {}
   const params: ImageListParams = {
     keyword: keyword.value.trim() || undefined,
     searchIn: activeSearchIds.value,
     sortBy: sortBy.value || undefined,
     sortOrder: sortOrder.value,
     attrFilters: Object.keys(attrFilters).length ? attrFilters : undefined,
+    attrRules: Object.keys(rules).length ? rules : undefined,
     page: page.value,
     pageSize: pageSize.value,
   }
@@ -309,6 +418,13 @@ function persistSearchPrefs() {
     })
   }, 500)
 }
+
+// The search panel's master switch: on searches every eligible field, off
+// restricts the search to the fields the user switched on below it.
+const searchAllOn = computed({
+  get: () => searchMode.value === 'all',
+  set: (on: boolean) => onSearchModeChange(on ? 'all' : 'custom'),
+})
 
 function onSearchModeChange(value: string | number | boolean) {
   searchMode.value = value === 'custom' ? 'custom' : 'all'
@@ -436,70 +552,119 @@ onMounted(async () => {
 
 <template>
   <div class="image-gallery" @keydown="onViewerKey">
-    <div class="ig-layout">
-      <!-- Filter sidebar -->
-      <aside class="ig-filters">
-        <div class="ig-filters-title">{{ t('knowledgeEditor.wikiBrowser.gallery.filtersTitle') }}</div>
-
-        <!-- Search fields: activation mode + per-field toggles -->
-        <div v-if="searchAttrs.length" class="ig-filter-group">
-          <label class="ig-filter-label">{{ t('knowledgeEditor.wikiBrowser.gallery.searchFields') }}</label>
-          <t-radio-group :value="searchMode" variant="default-filled" @change="onSearchModeChange">
-            <t-radio value="all">{{ t('knowledgeEditor.wikiBrowser.gallery.modeAll') }}</t-radio>
-            <t-radio value="custom">{{ t('knowledgeEditor.wikiBrowser.gallery.modeCustom') }}</t-radio>
-          </t-radio-group>
-          <div v-if="searchMode === 'all'" class="ig-search-hint">
-            {{ t('knowledgeEditor.wikiBrowser.gallery.searchAllHint') }}
-          </div>
-          <div v-else class="ig-search-fields">
-            <t-checkbox-group
-              :value="activeSearchIds"
-              @change="(vals: Array<string | number | boolean>) => onSearchFieldsChange(vals)"
-            >
-              <t-checkbox v-for="attr in searchAttrs" :key="attr.id" :value="attr.id" :label="attrLabel(attr)" />
-            </t-checkbox-group>
-          </div>
+    <div class="ig-layout" :class="{ 'has-rail': !!pinnedPanel }">
+      <!--
+        One settings panel, two placements: pinning it moves it out of the
+        grid and into the right-hand rail, where the two panels take turns as
+        tabs. Only one can hold the rail, so the image area never has to share
+        its width with both of them.
+      -->
+      <aside
+        v-if="openPanel || pinnedPanel"
+        class="ig-panel-slot"
+        :class="{ 'is-floating': openPanel && !pinnedPanel }"
+      >
+        <div class="ig-panel-head">
+          <t-tabs v-model="panelTab" class="ig-panel-tabs">
+            <t-tab-panel value="filter" :label="t('knowledgeEditor.wikiBrowser.gallery.panelFilter')" />
+            <t-tab-panel value="search" :label="t('knowledgeEditor.wikiBrowser.gallery.panelSearch')" />
+          </t-tabs>
+          <button
+            class="ig-pin"
+            :class="{ 'is-pinned': !!pinnedPanel }"
+            :title="pinnedPanel === panelTab ? t('knowledgeEditor.wikiBrowser.gallery.unpin') : t('knowledgeEditor.wikiBrowser.gallery.pin')"
+            @click="togglePin(panelTab)"
+          >
+            <t-icon name="pushpin" />
+          </button>
         </div>
 
-        <!-- Attribute filters, rendered from the contract -->
-        <div v-if="filterAttrs.length" class="ig-filter-group">
-          <label class="ig-filter-label">{{ t('knowledgeEditor.wikiBrowser.gallery.attrSection') }}</label>
-          <div v-for="attr in filterAttrs" :key="attr.id" class="ig-attr-filter">
-            <div class="ig-attr-name" :title="attrDescription(attr)">{{ attrLabel(attr) }}</div>
-            <t-checkbox-group
-              v-if="attr.type === 'extent' || attr.type === 'presence'"
-              :value="attrSelections[attr.id] || []"
-              @change="(vals: Array<string | number | boolean>) => onAttrGroupChange(attr.id, vals)"
-            >
-              <!--
-                The value's short label goes on the checkbox; the sentence
-                that explains it waits in the tooltip so the row stays compact.
-              -->
-              <t-tooltip v-for="v in attr.values || []" :key="v.value" :content="attrValueDescription(attr, v.value)">
-                <t-checkbox :value="v.value">{{ attrValueLabel(attr, v.value) }}</t-checkbox>
-              </t-tooltip>
-            </t-checkbox-group>
-            <t-input
-              v-else-if="attr.type === 'keywords'"
-              :value="keywordsInputValue(attr.id)"
-              clearable
-              :placeholder="t('knowledgeEditor.wikiBrowser.gallery.keywordsPlaceholder')"
-              @change="(v: string) => onKeywordsInput(attr.id, v)"
-              @enter="(v: string) => onKeywordsInput(attr.id, v)"
-            />
-          </div>
-        </div>
-        <div v-if="!filterAttrs.length" class="ig-no-attrs">
-          {{ t('knowledgeEditor.wikiBrowser.gallery.noAttrs') }}
-        </div>
+        <div class="ig-panel-body">
+          <template v-if="panelTab === 'filter'">
+            <div class="ig-row">
+              <span class="ig-row-label">{{ t('knowledgeEditor.wikiBrowser.gallery.enableFilter') }}</span>
+              <t-switch v-model="filterScopeOn" />
+            </div>
 
-        <t-button theme="default" variant="text" class="ig-clear" @click="clearFilters">
-          {{ t('knowledgeEditor.wikiBrowser.gallery.clearFilters') }}
-        </t-button>
+            <div v-if="filterAttrs.length" class="ig-attr-blocks">
+              <div v-for="attr in filterAttrs" :key="attr.id" class="ig-attr-block">
+                <div class="ig-attr-name" :title="attrDescription(attr)">{{ attrLabel(attr) }}</div>
+
+                <!--
+                  An attribute that declares values gets one row per value,
+                  each with three positions: leave the images carrying it
+                  alone, hide them, or force them back in.
+                -->
+                <div v-if="attr.type !== 'keywords'" class="ig-verdict-rows">
+                  <div v-for="v in attr.values || []" :key="v.value" class="ig-verdict-row">
+                    <t-tooltip :content="attrValueDescription(attr, v.value)">
+                      <span class="ig-verdict-value">{{ attrValueLabel(attr, v.value) }}</span>
+                    </t-tooltip>
+                    <div class="ig-verdict-group">
+                      <button
+                        v-for="verdict in VERDICTS"
+                        :key="verdict"
+                        type="button"
+                        class="ig-verdict"
+                        :class="['is-' + verdict, { 'is-active': verdictOf(attr.id, v.value) === verdict }]"
+                        @click="setVerdict(attr.id, v.value, verdict)"
+                      >
+                        {{ verdictLabel(verdict) }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <!--
+                  A free-text attribute has no value list to position, so it
+                  keeps the plain keyword box.
+                -->
+                <t-input
+                  v-else
+                  :value="keywordsInputValue(attr.id)"
+                  clearable
+                  class="ig-keywords"
+                  :placeholder="t('knowledgeEditor.wikiBrowser.gallery.keywordsPlaceholder')"
+                  @change="(v: string) => onKeywordsInput(attr.id, v)"
+                  @enter="(v: string) => onKeywordsInput(attr.id, v)"
+                />
+              </div>
+            </div>
+            <div v-else class="ig-no-attrs">{{ t('knowledgeEditor.wikiBrowser.gallery.noAttrs') }}</div>
+
+            <t-button theme="default" variant="text" class="ig-clear" @click="clearFilters">
+              {{ t('knowledgeEditor.wikiBrowser.gallery.clearFilters') }}
+            </t-button>
+          </template>
+
+          <template v-else>
+            <div class="ig-row">
+              <span class="ig-row-label">{{ t('knowledgeEditor.wikiBrowser.gallery.searchAll') }}</span>
+              <t-switch v-model="searchAllOn" />
+            </div>
+
+            <div v-if="searchAttrs.length">
+              <div v-if="searchMode === 'all'" class="ig-hint">{{ t('knowledgeEditor.wikiBrowser.gallery.searchAllHint') }}</div>
+              <t-checkbox-group
+                v-else
+                :value="activeSearchIds"
+                @change="(vals: Array<string | number | boolean>) => onSearchFieldsChange(vals)"
+              >
+                <t-checkbox v-for="attr in searchAttrs" :key="attr.id" :value="attr.id" :label="attrLabel(attr)" />
+              </t-checkbox-group>
+            </div>
+          </template>
+        </div>
       </aside>
 
       <!-- Main content -->
       <section class="ig-main">
+        <!--
+          Everything that controls the list sits on one horizontal bar, so
+          the image area below keeps all the vertical space it can get. The
+          two scope switches read as 全显示 / 自定义: the inclusive position
+          drops the constraint, and only the custom one has an arrow that
+          opens the panel editing it.
+        -->
         <div class="ig-toolbar">
           <t-input
             v-model="keyword"
@@ -513,11 +678,45 @@ onMounted(async () => {
             <template #prefix-icon><t-icon name="search" /></template>
           </t-input>
 
+          <div class="ig-scope">
+            <span class="ig-scope-name">{{ t('knowledgeEditor.wikiBrowser.gallery.searchScope') }}</span>
+            <t-select v-model="searchScope" class="ig-scope-value" @change="onSearchScopeChange">
+              <t-option value="all" :label="t('knowledgeEditor.wikiBrowser.gallery.scopeAll')" />
+              <t-option value="custom" :label="t('knowledgeEditor.wikiBrowser.gallery.scopeCustom')" />
+            </t-select>
+            <button
+              class="ig-scope-arrow"
+              :disabled="searchScope !== 'custom'"
+              :title="t('knowledgeEditor.wikiBrowser.gallery.editSearch')"
+              @click="openSettingsPanel('search')"
+            >
+              <t-icon name="chevron-down" />
+            </button>
+          </div>
+
+          <div class="ig-scope">
+            <span class="ig-scope-name">{{ t('knowledgeEditor.wikiBrowser.gallery.filterScope') }}</span>
+            <t-select v-model="filterScope" class="ig-scope-value" @change="onFilterScopeChange">
+              <t-option value="all" :label="t('knowledgeEditor.wikiBrowser.gallery.filterOff')" />
+              <t-option value="custom" :label="t('knowledgeEditor.wikiBrowser.gallery.filterOn')" />
+            </t-select>
+            <button
+              class="ig-scope-arrow"
+              :disabled="filterScope !== 'custom'"
+              :title="t('knowledgeEditor.wikiBrowser.gallery.editFilter')"
+              @click="openSettingsPanel('filter')"
+            >
+              <t-icon name="chevron-down" />
+            </button>
+          </div>
+
+          <span class="ig-scope-sep" />
+
           <t-select v-if="sortAttrs.length" v-model="sortBy" class="ig-sort" @change="resetPageAndReload">
             <t-option v-for="attr in sortAttrs" :key="attr.id" :value="attr.id" :label="attrLabel(attr)" />
           </t-select>
 
-          <t-button theme="default" variant="outline" @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'; resetPageAndReload()">
+          <t-button theme="default" variant="outline" class="ig-order" @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'; resetPageAndReload()">
             <t-icon :name="sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'" />
             {{ sortOrder === 'asc' ? t('knowledgeEditor.wikiBrowser.gallery.orderAsc') : t('knowledgeEditor.wikiBrowser.gallery.orderDesc') }}
           </t-button>
@@ -621,6 +820,7 @@ onMounted(async () => {
 
 <style scoped>
 .image-gallery {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -630,27 +830,232 @@ onMounted(async () => {
 
 .ig-layout {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 1fr;
   gap: 16px;
   flex: 1;
   min-height: 0;
 }
 
-/* Filters */
-.ig-filters {
-  border: 1px solid var(--td-component-border, #e7e7e7);
-  border-radius: 8px;
-  padding: 14px;
+/* A pinned panel takes the right column; the image area keeps the rest. */
+.ig-layout.has-rail {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+/* -------------------------------------------------------------------------
+   Settings panel
+   One element, two placements: pinned it sits in the rail, otherwise it is
+   lifted out of the grid and floats over the image area near its toolbar
+   control. Keeping a single element means the two never drift apart.
+   ------------------------------------------------------------------------- */
+.ig-panel-slot {
+  display: none;
   align-self: start;
   max-height: 100%;
+}
+.ig-layout.has-rail .ig-panel-slot {
+  display: block;
+}
+
+.ig-panel-slot.is-floating {
+  display: block;
+  position: absolute;
+  top: 92px;
+  right: 28px;
+  width: 320px;
+  z-index: 20;
+  max-height: calc(100% - 120px);
   overflow: auto;
   background: var(--td-bg-color-container, #fff);
+  border: 1px solid var(--td-component-border, #dcdcdc);
+  border-radius: var(--td-radius-medium, 8px);
+  box-shadow: var(--td-shadow-card, 0 2px 8px rgba(0, 0, 0, 0.08));
 }
-.ig-filters-title {
+
+.ig-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--td-component-border, #eee);
+}
+.ig-panel-tabs {
+  flex: 1;
+  min-width: 0;
+}
+.ig-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-secondary, #666);
+  cursor: pointer;
+}
+.ig-pin:hover {
+  background: var(--td-bg-color-container-hover, #f3f3f3);
+}
+.ig-pin.is-pinned {
+  color: var(--td-brand-color, #0052d9);
+}
+
+.ig-panel-body {
+  padding: 12px;
+}
+
+.ig-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ig-row-label {
+  font-size: 13px;
+  color: var(--td-text-color-primary, #333);
+}
+.ig-hint {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder, #999);
+}
+.ig-attr-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ig-attr-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ig-attr-name {
+  font-size: 13px;
   font-weight: 600;
-  margin-bottom: 12px;
-  font-size: 14px;
+  color: var(--td-text-color-primary, #333);
 }
+.ig-verdict-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ig-verdict-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ig-verdict-value {
+  font-size: 13px;
+  color: var(--td-text-color-primary, #333);
+  cursor: default;
+}
+.ig-verdict-group {
+  display: inline-flex;
+  border: 1px solid var(--td-component-border, #dcdcdc);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ig-verdict {
+  min-width: 30px;
+  padding: 2px 6px;
+  border: none;
+  border-right: 1px solid var(--td-component-border, #eee);
+  background: var(--td-bg-color-container, #fff);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--td-text-color-secondary, #666);
+  cursor: pointer;
+}
+.ig-verdict:last-child {
+  border-right: none;
+}
+.ig-verdict:hover {
+  background: var(--td-bg-color-container-hover, #f3f3f3);
+}
+.ig-verdict.is-active.is-default {
+  background: var(--td-bg-color-secondary, #f3f3f3);
+  color: var(--td-text-color-primary, #333);
+  font-weight: 600;
+}
+.ig-verdict.is-active.is-off {
+  background: var(--td-error-color-1, #f8e8e8);
+  color: var(--td-error-color, #d54941);
+  font-weight: 600;
+}
+.ig-verdict.is-active.is-on {
+  background: var(--td-success-color-1, #e8f8ed);
+  color: var(--td-success-color, #2ba471);
+  font-weight: 600;
+}
+
+/* Toolbar: one row, so nothing steals vertical space from the grid. */
+.ig-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.ig-search {
+  width: 200px;
+  max-width: 260px;
+}
+.ig-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ig-scope-name {
+  font-size: 13px;
+  color: var(--td-text-color-secondary, #666);
+  white-space: nowrap;
+}
+.ig-scope-value {
+  width: 108px;
+}
+.ig-scope-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--td-component-border, #dcdcdc);
+  border-radius: var(--td-radius-medium, 6px);
+  background: var(--td-bg-color-container, #fff);
+  color: var(--td-text-color-secondary, #666);
+  cursor: pointer;
+}
+.ig-scope-arrow:hover:not(:disabled) {
+  border-color: var(--td-brand-color, #0052d9);
+  color: var(--td-brand-color, #0052d9);
+}
+.ig-scope-arrow:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ig-scope-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--td-component-border, #e7e7e7);
+}
+.ig-sort {
+  width: 140px;
+}
+.ig-order {
+  white-space: nowrap;
+}
+.ig-count {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--td-text-color-secondary, #666);
+  white-space: nowrap;
+}
+
 .ig-filter-group {
   margin-bottom: 18px;
 }

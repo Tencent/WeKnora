@@ -1195,6 +1195,36 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 		}
 	}
 
+	// Attribute rules arrive as one JSON object keyed by namespaced
+	// attribute id, each holding a verdict per value
+	// ({"system:contain.text":{"block":"on","none":"off"}}). Only values
+	// the image actually carries take part; see AttrRules for the
+	// precedence between "on" and "off".
+	if raw := c.Query("attr_rules"); raw != "" {
+		var attrRules map[string]map[string]string
+		if err := json.Unmarshal([]byte(raw), &attrRules); err == nil && len(attrRules) > 0 {
+			kept := make(map[string]map[string]string, len(attrRules))
+			for id, verdicts := range attrRules {
+				if !filterable[id] || len(verdicts) == 0 {
+					continue
+				}
+				clean := make(map[string]string, len(verdicts))
+				for value, verdict := range verdicts {
+					switch verdict {
+					case "off", "on":
+						clean[value] = verdict
+					}
+				}
+				if len(clean) > 0 {
+					kept[id] = clean
+				}
+			}
+			if len(kept) > 0 {
+				filter.AttrRules = kept
+			}
+		}
+	}
+
 	// search_in: comma-separated namespaced attribute ids; ineligible ids
 	// are dropped, and an empty remainder falls back to the service default
 	// (builtin caption + ocr_text).
