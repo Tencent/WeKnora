@@ -180,7 +180,7 @@ make docker-build-frontend
 
 ## 六、Helm 部署（helm/）
 
-`helm/Chart.yaml`：apiVersion v2，chart 名 `weknora`，appVersion 跟随版本（如 v0.8.0），要求 Kubernetes >= 1.25.0。
+`helm/Chart.yaml`：apiVersion v2，chart 名 `weknora`，appVersion 跟随版本（如 v0.8.2），要求 Kubernetes >= 1.25.0。
 
 Chart 内包含五个组件：`app`（`wechatopenai/weknora-app`）、`frontend`（`wechatopenai/weknora-ui`）、`docreader`、`postgresql`（ParadeDB 镜像，chart 默认 `paradedb/paradedb:v0.18.9-pg17`，与 Compose 的版本不同）、`redis`（`redis:7-alpine`），并可选启用 `minio` 与 `neo4j`。
 

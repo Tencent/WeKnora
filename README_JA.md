@@ -31,7 +31,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="バージョン" src="https://img.shields.io/badge/version-0.8.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="バージョン" src="https://img.shields.io/badge/version-0.8.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
