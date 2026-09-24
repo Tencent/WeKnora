@@ -141,6 +141,8 @@ builtin_models:
 
 #### 本地模型下载（Ollama）
 
+本地 embedding 与对话共用同一 `OLLAMA_BASE_URL`；向量模型名与环境变量说明见 [配置文档](../01-getting-started/04-configuration.md)。
+
 本地模型的生命周期由 `internal/models/utils/ollama/ollama.go` 的 `OllamaService` 管理（`IsModelAvailable` / `PullModel` / `EnsureModelAvailable` / `ListModelsDetailed` / `DeleteModel` 等），HTTP 入口在 `internal/handler/initialization.go`：
 
 | 路径 | 说明 |
@@ -172,24 +174,25 @@ builtin_models:
 
 ### 厂商目录（catalog）
 
-模型接入分三层，每层只做一件事：
+模型接入按数据、厂商、运行时、协议分工：
 
 | 层 | 位置 | 职责 |
 |----|------|------|
-| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`。各自持有请求/响应结构与解析，不含任何厂商名 |
-| 厂商层 | `internal/models/vendors/<id>/` | 一个厂商一个目录：`vendor.go`（注册 `catalog.Vendor`）、`models.json`（模型目录）、`icon.svg`（品牌图标，`go:embed` 进二进制） |
-| 目录层 | `internal/models/catalog` | 合并厂商定义、模型条目、部署叠加与单行覆盖，`Resolve` 得出「这个模型到底怎么发请求」 |
+| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`。各自持有请求/响应结构与解析，不依赖厂商注册表或模型目录 |
+| 厂商层 | `internal/models/providers/<id>.go` | 一个厂商一份定义，同时声明 Chat、Embedding、Rerank、ASR；图标放 `providers/assets/`，在 `builtin.go` 显式注册 |
+| 目录层 | `internal/models/catalog` | 加载统一生成的目录，管理部署叠加与原子替换 |
+| 运行时 | `internal/models/runtime` | 合并单个模型配置、选择协议、组装该模型的认证和端点，隔离旧字段推断 |
 
-`catalog.Resolve(Ref{Provider, Model, BaseURL, Extra, Override})` 的合并顺序从低到高：
+`runtime.Resolve(Ref{Provider, Model, BaseURL, Extra, Override})` 的合并顺序从低到高：
 
 1. 协议默认值（`DefaultOpenAICompletions()` 等）；
-2. 厂商级 `Compat`（`vendor.go` 里声明，例如 DeepSeek 的 `max_tokens_field: max_tokens`）；
-3. `models.json` 里匹配到的条目（精确 id → `aliases` → `match` 通配，最长字面前缀优先）；
+2. 厂商级 `Compat`（`providers/<id>.go` 里声明，例如 DeepSeek 的 `max_tokens_field: max_tokens`）；
+3. `catalog/data/models.generated.json` 里匹配到的条目（精确 id → `aliases` → `match` 通配，最长字面前缀优先）；
 4. 部署叠加 `config/models.json`（见下）；
 5. 模型行上的 `parameters.spec`（UI「高级」里的协议覆盖与 compat JSON）；
 6. `extra_config.api` 强制协议、`extra_config.thinking_control` 旧版思考编码、`extra_config.remote_model_name`。
 
-厂商事实全部忠实厂商文档，每个 `vendor.go` 的包注释列出依据与文档链接，`models.json` 的 `source` 字段记录来源。对应的出站 JSON 由各协议包的 golden 测试钉死（如 `openaicompletions/golden_test.go`）。
+厂商参数依据厂商文档维护，每个 `providers/<id>.go` 的包注释列出依据与文档链接，目录条目的 `source` 字段记录来源。对应的出站 JSON 由各协议包的 golden 测试钉死（如 `openaicompletions/golden_test.go`）。
 
 #### 关键 compat 字段（OpenAI Chat Completions 方言）
 
@@ -211,19 +214,18 @@ builtin_models:
 
 `GET /api/v1/models/providers?model_type=chat` 返回全部厂商定义（图标 data URI、默认地址、额外字段、内置模型与思考能力），前端完全据此动态渲染，没有本地厂商表。目前内置 27 个厂商：`generic`、`weknoracloud`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`siliconflow`、`deepseek`、`minimax`、`moonshot`、`mimo`、`modelscope`、`qianfan`、`qiniu`、`longcat`、`lkeap`、`openai`、`azure_openai`、`anthropic`、`gemini`、`openrouter`、`litellm`、`requesty`、`jina`、`nvidia`、`novita`、`gpustack`；Ollama 走 `source=local` 独立路径。
 
-协议选择：Anthropic 走 Messages 协议；Gemini 默认走原生 `generateContent`（`base_url` 指向 `/v1beta/openai` 则保持 OpenAI 兼容）；OpenAI 在 `api.openai.com` 上走 Responses 协议，中转/代理保持 Chat Completions；任何厂商 `base_url` 以 `/anthropic` 结尾时自动切到 Messages 协议（MiniMax、智谱、Kimi 的 Anthropic 兼容口）。`extra_config.api` 可强制指定对话协议，只对 chat / VLM 行生效；embedding 行的协议覆盖写在 `spec.compat` 的 `"api"` 里，取值是向量协议（`openai-embeddings`、`dashscope-embeddings`、`ark-embeddings`、`google-embeddings`）。
+协议选择：Anthropic 走 Messages 协议；Gemini 默认走原生 `generateContent`（`base_url` 指向 `/v1beta/openai` 则保持 OpenAI 兼容）；OpenAI 在 `api.openai.com` 上走 Responses 协议，中转/代理保持 Chat Completions；任何厂商 `base_url` 以 `/anthropic` 结尾时自动切到 Messages 协议（MiniMax、智谱、Kimi 的 Anthropic 兼容口）。单行 `spec.api` 的明确选择优先于 URL 和厂商推断；兼容旧配置的 `extra_config.api` 仍具有最高优先级。`extra_config.api` 可强制指定对话协议，只对 chat / VLM 行生效；embedding 行的协议覆盖写在 `spec.compat` 的 `"api"` 里，取值是向量协议（`openai-embeddings`、`dashscope-embeddings`、`ark-embeddings`、`google-embeddings`）。
 
 目录条目按模型类型查找：embedding 行只匹配 embedding 条目，不会被同名前缀的对话通配（如百炼的 `qwen3*`、OpenAI 的 `gpt-5*`）套上对话的 compat。目录里还没有的新 id、带日期的快照照常按厂商默认解析。
 
 #### 新增厂商
 
-代码侧新增一个厂商只需要一个目录，四个文件，不用改协议层和前端：
+同一厂商的多种能力在一份定义中声明；共用协议不需要复制实现：
 
-1. 复制一个相近的目录到 `internal/models/vendors/<id>/`，改 `vendor.go` 的 id、名称（`Names` 放中文名）、`Description`、默认地址、`Auth`、`Compat`、`ThinkingLevels`、`URLPatterns`，并在包注释里逐条写清依据的厂商文档链接；无法从文档确认的字段标 `unverified:`，不要臆测；
-2. 按厂商文档填 `models.json`（`id`、`reasoning`、`input`、`context_window`、`max_output_tokens`、`cost`、`thinking_levels`、`compat`、`source`），同一家族用 `match` 通配（如 `"match": "gpt-5*"`），精确 id 优先于通配；
-3. 放一个 `icon.svg`（LobeHub icons 或手绘，6 KB 以内），会 `go:embed` 进二进制并以 data URI 下发给前端；
-4. 在 `vendors/all.go` 加一行 blank import；
-5. 需要特殊 URL、协议选择或签名时实现 `Endpoint` / `PreferAPI` / `Signer` 钩子（参考 `azure_openai`、`openai`、`weknoracloud`）。
+1. 新建 `internal/models/providers/<id>.go`，声明名称、能力、各类型默认地址、认证方式、协议默认值及特殊端点钩子，写明官方文档依据；
+2. 在 `internal/models/catalog/data/seed.json` 的对应厂商中维护模型元数据；在 `internal/models/catalog/data/overrides.json` 中维护协议、思考映射与 compat 修正。模型键包含类型与 id / match，同名 Chat 和 Embedding 可以共存；
+3. 将图标放入 `providers/assets/<id>.svg` 并引用，在 `providers/builtin.go` 的 `Builtins()` 列表加入定义，由 runtime 按厂商 ID 组合模型目录；
+4. 执行 `make model-catalog-generate` 生成统一目录。生成文件不直接手改；已有协议可以复用，新协议才增加 `api/<protocol>` 包。
 
 然后跑一条命令，目录层的守护测试会自动覆盖新厂商，无需为它单独写用例：
 
@@ -231,17 +233,17 @@ builtin_models:
 make model-catalog-check
 ```
 
-它包含三层校验：`vendors` 的注册与图标检查；`catalog` 的解析与叠加；`parity` 包的**不变量**（每个模型条目的字段合法性、compat 键名可解码、上下文与最大输出自洽）和**逐模型出站请求检查**（每个对话模型在思考开 / 关两种情况下，只能出现一个输出上限字段；不支持采样参数的模型不得带 temperature；始终思考的模型不得收到关闭开关等）。新加的厂商和模型一旦违反这些规则，测试直接失败。
+它先检查生成数据是否过期，再运行模型模块全部测试：`providers` 的注册与图标检查；`runtime` 的解析与叠加；`parity` 包的**不变量**（每个模型条目的字段合法性、compat 键名可解码、上下文与最大输出自洽）和**逐模型出站请求检查**（每个对话模型在思考开 / 关两种情况下，只能出现一个输出上限字段；不支持采样参数的模型不得带 temperature；始终思考的模型不得收到关闭开关等）。新加的厂商和模型一旦违反这些规则，测试直接失败。
 
 前端不需要任何改动：厂商下拉、图标、额外字段、内置模型列表都由 `GET /api/v1/models/providers` 动态渲染。
 
-写入侧也有一道闸：`catalog.ValidateRow` 会在创建 / 更新模型（REST）和加载 `config/builtin_models.yaml`（启动）时解析这行配置（全部模型类型），未知协议、拼错的 compat 键、非法的思考档位在写入时就被拒绝（YAML 行只打 WARN 不阻塞启动，避免一次重启把线上模型下线）。
+写入侧也有一道闸：`runtime.ValidateRow` 会在创建 / 更新模型（REST）和加载 `config/builtin_models.yaml`（启动）时解析这行配置（全部模型类型），未知协议、拼错的 compat 键、非法的思考档位在写入时就被拒绝（YAML 行只打 WARN 不阻塞启动，避免一次重启把线上模型下线）。
 
 #### 厂商更新了模型怎么办
 
 分两种情况：
 
-**只是新增 / 调整模型元数据**（新模型 id、上下文窗口、价格）。先拿差异报告，再人工核对厂商文档改 `models.json`：
+**只是新增 / 调整模型元数据**（新模型 id、上下文窗口、价格）。先拿差异报告，再人工核对厂商文档更新 `internal/models/catalog/data/seed.json`，再运行 `make model-catalog-generate`：
 
 ```bash
 make model-catalog-diff                 # 全部厂商
@@ -250,17 +252,17 @@ make model-catalog-diff VENDOR=deepseek # 只看一家
 
 报告对比 [models.dev](https://models.dev/api.json) 的公开元数据：`+` 是上游有而我们没有的模型，`~` 是数值差异，`?` 是上游没收录的条目（国内厂商和别名经常如此，不代表错）。脚本只读不写，也从不在运行时调用——**字段名、思考格式这类行为事实不会被自动同步**，必须以厂商文档为准手工维护，这是刻意的取舍：models.dev 不携带这些信息，自动同步会让线上请求悄悄改变行为。
 
-**厂商改了接口行为**（换了输出上限字段、新增 effort 取值、思考开关格式变化）。改 `vendor.go` 或对应模型条目的 `compat`，并同步更新包注释里的文档链接；`internal/models/api/openaicompletions/golden_test.go` 之类的快照测试会把出站 JSON 钉死，改动必须先改测试预期，评审时一眼能看到行为变化。
+**厂商改了接口行为**（换了输出上限字段、新增 effort 取值、思考开关格式变化）。改 `providers/<id>.go` 或 `catalog/data/overrides.json` 中对应模型的 `compat`，再生成目录，并同步更新包注释里的文档链接；`internal/models/api/openaicompletions/golden_test.go` 之类的快照测试会把出站 JSON 钉死，改动必须先改测试预期，评审时一眼能看到行为变化。
 
 **紧急情况不必等发版**：用下面的部署叠加在配置里先改，验证无误后再补回代码。
 
 #### 部署叠加 `config/models.json`
 
-不改代码也能加厂商、改地址、补模型：复制 `config/models.json.example` 到 `config/models.json`（或用 `MODELS_CONFIG` 指定路径），结构与 PI 的 `~/.pi/agent/models.json` 一致：`providers` 按厂商 id 键入，已知 id 打补丁，新 id 声明新厂商；支持 `base_url` / `base_urls`、`api_key`（`${ENV}` 插值）、`headers`、`compat`、`thinking_levels`、`models`（按 id upsert：已存在的 id 只覆盖你写出来的字段，没写的 `reasoning`、`thinking_levels`、`compat`、`input` 保持原样；新 id 则整条新建）、`model_overrides`、`icon`（内联 `<svg …>` 字符串，或相对于叠加文件所在目录的 `.svg` 路径——不接受绝对路径、不能越出该目录、必须是 256 KB 以内的 SVG，因为图标会以 data URI 下发给所有能打开模型页的人）。未知键在启动时报错。运行时不会自动从外部拉取模型数据：字段名、思考格式这类行为事实必须由人维护。
+不改代码也能加厂商、改地址、补模型：复制 `config/models.json.example` 到 `config/models.json`（或用 `MODELS_CONFIG` 指定路径），采用按厂商组织的部署覆盖结构：`providers` 按厂商 id 键入，已知 id 打补丁，新 id 声明新厂商；支持 `base_url` / `base_urls`、`api_key`（`${ENV}` 插值）、`headers`、`compat`、`thinking_levels`、`models`（按 id upsert：已存在的 id 只覆盖你写出来的字段，没写的 `reasoning`、`thinking_levels`、`compat`、`input` 保持原样；新 id 则整条新建）、`model_overrides`、`icon`（内联 `<svg …>` 字符串，或相对于叠加文件所在目录的 `.svg` 路径——不接受绝对路径、不能越出该目录、必须是 256 KB 以内的 SVG，因为图标会以 data URI 下发给所有能打开模型页的人）。未知键在启动时报错。运行时不会自动从外部拉取模型数据：字段名、思考格式这类行为事实必须由人维护。
 
 #### 升级到目录化实现的注意事项
 
-老库里的模型行**不需要任何迁移**：`parameters` 列只增加了可选的 `spec` 字段，旧的 26 个 `provider` 取值全部仍然注册，`extra_config` 的历史键（`thinking_control` 的每个取值、`remote_model_name`、`api_version`、`secret_key`、`region`、`instruction`、`truncate_prompt_tokens`）语义不变，目录里已没有的模型 id（自定义微调、已退役型号）照常解析并保留思考开关。这些由 `internal/models/catalog/legacy_rows_test.go` 与 `internal/types/legacy_persisted_json_test.go` 钉住。
+老库里的模型行**不需要任何迁移**：`parameters` 列只增加了可选的 `spec` 字段，旧的 26 个 `provider` 取值全部仍然注册，`extra_config` 的历史键（`thinking_control` 的每个取值、`remote_model_name`、`api_version`、`secret_key`、`region`、`instruction`、`truncate_prompt_tokens`）语义不变，目录里已没有的模型 id（自定义微调、已退役型号）照常解析并保留思考开关。这些由 `internal/models/runtime/legacy_rows_test.go` 与 `internal/types/legacy_persisted_json_test.go` 钉住。
 
 但有四处**既有模型行的运行时行为会变**，升级时需要知会使用者：
 
@@ -311,7 +313,7 @@ flowchart TD
     S --> CF["ConfigFromModel<br/>(chat / embedding / rerank / vlm / asr)"]
     CF --> F{"工厂函数<br/>NewChat / NewEmbedder / ..."}
     F -->|"source = local"| OL["OllamaService<br/>(internal/models/utils/ollama)"]
-    F -->|"source = remote"| PD{"catalog.Resolve<br/>(厂商 + 模型 + 叠加 + 行覆盖)"}
+    F -->|"source = remote"| PD{"runtime.Resolve<br/>(厂商 + 模型 + 叠加 + 行覆盖)"}
     PD -->|"anthropic-messages"| AN["anthropicmessages.Client"]
     PD -->|"openai-responses"| RS["openairesponses.Client"]
     PD -->|"google-generative-ai"| GG["googlegenai.Client"]
@@ -347,3 +349,6 @@ return wrapChatConcurrency(c, config.MaxConcurrency, err)
 仓库根目录的 `rerank_server_demo.py` 是一个**自托管 Rerank 服务的最小参考实现**：FastAPI + HuggingFace `AutoModelForSequenceClassification`，暴露 `POST /rerank`，请求体 `{query, documents}`，返回 `{"results": [{index, document: {text}, score}]}`。
 
 示例服务返回 `score` 字段，可用于验证客户端兼容性。`RankResult.UnmarshalJSON` 优先读取 `relevance_score`，缺失时读取 `score`；`DocumentInfo.UnmarshalJSON` 同时接受字符串和 `{text}` 对象。遵循此协议的私有重排服务可通过 `generic` provider 接入。
+
+
+重构后的配置边界：每个模型仍单独保存 URL、API Key、额外参数和 `spec`，不新增连接实体，不修改模型 ID 或历史引用。部署覆盖每次从内置定义重新构建；通过 `runtime.Initialize` / `runtime.Reload` 校验后整体发布，失败保留旧版本。暂不监听文件变更，修改部署文件后仍需重启服务。

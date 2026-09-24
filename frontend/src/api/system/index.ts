@@ -37,7 +37,7 @@ export interface SystemInfo {
   db_version?: string
   /** Human-readable error message when the startup migration failed.
    *  When non-empty, the system info view should surface a troubleshooting
-   *  banner (see docs/migration-troubleshooting.md). */
+   *  banner (see website-docs/01-getting-started/05-troubleshooting.md#database-migrations). */
   db_migration_error?: string
   /** Server process boot time (RFC3339, UTC). */
   started_at?: string

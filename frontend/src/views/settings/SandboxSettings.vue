@@ -238,7 +238,7 @@ const dockerBackendEnabled = computed(() =>
   deploymentCapabilities.isSupported('settings.sandbox.docker'),
 )
 
-const sandboxGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
+const sandboxGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/website-docs/06-development/04-sandbox-deployment.md'
 
 const backendTypes = [...NAMED_SANDBOX_BACKEND_TYPES]
 
@@ -569,8 +569,8 @@ async function forceRemove(record: SandboxConfigRecord) {
   await removeRecord(record, true)
 }
 
-onMounted(() => {
-  void deploymentCapabilities.ensureLoaded()
+onMounted(async () => {
+  await deploymentCapabilities.ensureLoaded()
   load()
 })
 </script>

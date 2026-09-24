@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -195,6 +196,25 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	return query
 }
 
+// knowledgeListOrderClause 只从固定白名单生成排序语句，避免将请求参数直接拼入 SQL。
+func knowledgeListOrderClause(filter types.KnowledgeListFilter) string {
+	// 零值保留仓储层和公开接口原有的创建时间倒序行为。
+	column := "created_at"
+	switch filter.SortBy {
+	case types.KnowledgeListSortByUpdatedAt:
+		column = "updated_at"
+	case types.KnowledgeListSortByFileName:
+		// 与前端展示名称保持一致：文件名为空时依次使用标题和来源。
+		column = "LOWER(COALESCE(NULLIF(file_name, ''), NULLIF(title, ''), source))"
+	}
+
+	direction := "DESC"
+	if filter.SortOrder == types.KnowledgeListSortAscending {
+		direction = "ASC"
+	}
+	return fmt.Sprintf("%s %s", column, direction)
+}
+
 // ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination
 func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	ctx context.Context,
@@ -218,7 +238,9 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	}
 
 	if err := scope(r.db.WithContext(ctx)).
-		Order("created_at DESC").
+		Order(knowledgeListOrderClause(filter)).
+		// 相同排序值使用主键兜底，保证 OFFSET 分页顺序稳定。
+		Order("id ASC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).
 		Find(&knowledges).Error; err != nil {
@@ -634,19 +656,42 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 func (r *knowledgeRepository) FinalizeSubtask(
 	ctx context.Context, id string,
 ) (int, bool, error) {
+	promoted, err := finalizeSubtask(r.db.WithContext(ctx), id)
+	if err != nil {
+		return 0, false, err
+	}
+
+	// 3) Best-effort re-read of the new count for diagnostics/return value
+	//    only. This read may be replica-stale and is intentionally NOT used
+	//    to decide whether to promote (see finalizeSubtask). A read failure here does
+	//    not affect correctness, so we don't propagate it as an error.
+	var snap struct {
+		PendingSubtasksCount int `gorm:"column:pending_subtasks_count"`
+	}
+	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Select("pending_subtasks_count").
+		Where("id = ?", id).Take(&snap).Error; err != nil {
+		return 0, promoted, nil
+	}
+	return snap.PendingSubtasksCount, promoted, nil
+}
+
+// finalizeSubtask releases one finalizing slot on db, which may be a
+// transaction: decrement, then promote when the counter reaches zero.
+func finalizeSubtask(db *gorm.DB, id string) (bool, error) {
 	now := time.Now()
 	// 1) Atomic decrement, clamped at zero. The `pending_subtasks_count > 0`
 	//    guard is purely a safety net for accounting bugs — under normal
 	//    operation each subtask handler decrements at most once per task,
 	//    so the counter cannot go negative.
-	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+	res := db.Model(&types.Knowledge{}).
 		Where("id = ? AND pending_subtasks_count > 0", id).
 		Updates(map[string]interface{}{
 			"pending_subtasks_count": gorm.Expr("pending_subtasks_count - 1"),
 			"updated_at":             now,
 		})
 	if res.Error != nil {
-		return 0, false, res.Error
+		return false, res.Error
 	}
 
 	// 2) Guarded promote. EVERY caller unconditionally attempts this after
@@ -661,7 +706,7 @@ func (r *knowledgeRepository) FinalizeSubtask(
 	//    the single authoritative, atomic check on the live row: only the
 	//    caller whose decrement actually brought the counter to zero matches,
 	//    and cancel/delete cannot be clobbered by a late promote.
-	promoteRes := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+	promoteRes := db.Model(&types.Knowledge{}).
 		Where("id = ? AND parse_status = ? AND pending_subtasks_count = 0",
 			id, types.ParseStatusFinalizing).
 		Updates(map[string]interface{}{
@@ -671,23 +716,10 @@ func (r *knowledgeRepository) FinalizeSubtask(
 			"updated_at":    now,
 		})
 	if promoteRes.Error != nil {
-		return 0, false, promoteRes.Error
+		return false, promoteRes.Error
 	}
 	promoted := promoteRes.RowsAffected > 0
-
-	// 3) Best-effort re-read of the new count for diagnostics/return value
-	//    only. This read may be replica-stale and is intentionally NOT used
-	//    to decide whether to promote (see above). A read failure here does
-	//    not affect correctness, so we don't propagate it as an error.
-	var snap struct {
-		PendingSubtasksCount int `gorm:"column:pending_subtasks_count"`
-	}
-	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Select("pending_subtasks_count").
-		Where("id = ?", id).Take(&snap).Error; err != nil {
-		return 0, promoted, nil
-	}
-	return snap.PendingSubtasksCount, promoted, nil
+	return promoted, nil
 }
 
 // SetFinalizing atomically transitions a row from 'processing' to

@@ -92,6 +92,8 @@ var (
 	ErrPathDenied = core.ErrPathDenied
 	// ErrWorkspaceTooBroad is returned when a workspace or grant is too wide.
 	ErrWorkspaceTooBroad = core.ErrWorkspaceTooBroad
+	// ErrProjectDirRevoked is returned when a stored host project is no longer approved.
+	ErrProjectDirRevoked = core.ErrProjectDirRevoked
 )
 
 // BuildCommandEnv filters the host environment and overlays explicit vars.

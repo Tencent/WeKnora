@@ -328,11 +328,12 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			promoted, err = s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expectedSubtasks)
 		}
 		if err != nil {
+			// Acking here would read as "no longer processing" below and
+			// strand the row; retry so the handoff (or dead-letter) happens.
 			logger.Warnf(ctx, "[KnowledgePostProcess] SetFinalizing failed for %s: %v",
 				payload.KnowledgeID, err)
-			if willSpawnWiki {
-				return fmt.Errorf("seed finalizing with wiki pending op: %w", err)
-			}
+			s.tracker().FailSpan(ctx, postSpan, "FINALIZING_HANDOFF_FAILED", err.Error(), err)
+			return fmt.Errorf("enter finalizing: %w", err)
 		}
 		if promoted {
 			enteredFinalizing = true

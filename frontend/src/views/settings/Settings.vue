@@ -37,7 +37,6 @@
               <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2"
                 stroke-linecap="round" />
             </svg>
-            <BrowserIcon v-else-if="item.key === 'browserconnection'" class="nav-icon" width="17" height="17" />
             <span v-else-if="item.emoji" class="nav-icon nav-icon-emoji">{{ item.emoji }}</span>
             <t-icon v-else :name="item.icon" class="nav-icon" />
             <span class="nav-label">{{ item.label }}</span>
@@ -139,11 +138,6 @@
           <SandboxSettings />
         </div>
 
-        <!-- 技能目录：登记后可装到多份沙箱，智能体只从当前沙箱的就绪集合选用 -->
-        <div v-if="currentSection === 'skills'" class="section">
-          <SkillSettings :initial-sandbox-id="currentSubSection" />
-        </div>
-
         <!-- 系统信息 -->
         <div v-if="currentSection === 'system'" class="section">
           <SystemInfo />
@@ -173,8 +167,6 @@
           <UserProfile />
         </div>
 
-        <div v-if="currentSection === 'browserconnection'" class="section"><BrowserConnectionSettings /></div>
-
         <!-- 空间信息 -->
         <div v-if="currentSection === 'tenant'" class="section">
           <TenantInfo />
@@ -188,11 +180,6 @@
         <!-- 发布集成 -->
         <div v-if="isIntegrationSection(currentSection)" class="section">
           <IntegrationSettingsSection :tab="integrationTabFromSection(currentSection)" />
-        </div>
-
-        <!-- MCP 服务 -->
-        <div v-if="currentSection === 'mcp'" class="section">
-          <McpSettings />
         </div>
       </template>
     </div>
@@ -214,11 +201,8 @@ import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
 import GeneralSettings from './GeneralSettings.vue'
-import BrowserConnectionSettings from './BrowserConnectionSettings.vue'
-import BrowserIcon from '@/components/icons/BrowserIcon.vue'
 import ModelSettings from './ModelSettings.vue'
 import OllamaSettings from './OllamaSettings.vue'
-import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
 import MemorySettings from './MemorySettings.vue'
@@ -228,7 +212,6 @@ import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageBackendSettings from './StorageBackendSettings.vue'
 import SandboxSettings from './SandboxSettings.vue'
-import SkillSettings from './SkillSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
@@ -246,7 +229,7 @@ import {
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from '@/config/settingsAccess'
 import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
-import { SKILL_ICON } from '@/types/mention'
+import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
 import {
   buildSettingsRouteQuery,
   integrationSectionKey,
@@ -360,15 +343,12 @@ const navItems = computed(() => {
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'sandbox', icon: 'code', label: t('settings.sandbox.title') },
-    { key: 'skills', icon: SKILL_ICON, label: t('settings.skills.title') },
-    { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
     { key: 'platform-api-keys', icon: 'secured', label: t('platformApiKeys.title') },
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
-    { key: 'browserconnection', icon: 'laptop', label: t('localBrowser.settingsTitle') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
     { key: 'envvars', icon: 'key', label: t('envVarSettings.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
@@ -395,7 +375,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'account',
       label: t('settings.navGroups.account'),
-      items: pickItems(['general', 'userprofile', 'browserconnection', 'mymemory', 'envvars']),
+      items: pickItems(['general', 'userprofile', 'mymemory', 'envvars']),
     },
     {
       key: 'workspace',
@@ -420,9 +400,7 @@ const navGroups = computed<NavGroup[]>(() => {
         'parser',
         'storage',
         'sandbox',
-        'skills',
         'websearch',
-        'mcp',
       ]),
     },
     {
@@ -496,10 +474,20 @@ const handleClose = () => {
   }
 }
 
+// Existing in-product shortcuts can still call openSettings; moved tools
+// always navigate to the toolbox, with the requested sandbox selection intact.
+const redirectToToolbox = (section: string, subSection?: string | null) => {
+  if (!isToolboxSection(section)) return false
+  uiStore.closeSettings()
+  void router.push(toolboxLocation(section, subSection || undefined))
+  return true
+}
+
 // 监听初始导航设置
 watch(() => uiStore.settingsInitialSection, (section) => {
   if (section && visible.value) {
     const normalizedSection = normalizeSettingsSection(section)
+    if (redirectToToolbox(normalizedSection, uiStore.settingsInitialSubSection)) return
     if (deploymentCapabilities.loaded && !isSectionSupported(normalizedSection)) {
       MessagePlugin.warning(t('settings.capabilityUnavailable'))
       currentSection.value = navItems.value[0]?.key || 'general'
@@ -522,21 +510,11 @@ watch(() => uiStore.settingsInitialSection, (section) => {
           }
         }, 300)
       }
-    } else if (normalizedSection === 'skills') {
-      // Sandbox config id from the agent editor / sandbox cards. Skills has
-      // no nav children, so this is the only way to preselect the target image.
-      currentSubSection.value = uiStore.settingsInitialSubSection || ''
     } else {
       currentSubSection.value = ''
     }
   }
 }, { immediate: true })
-
-watch(() => uiStore.settingsInitialSubSection, (sub) => {
-  if (uiStore.settingsInitialSection === 'skills' && visible.value) {
-    currentSubSection.value = sub || ''
-  }
-})
 
 watch(
   () => [visible.value, route.path, route.query.section, deploymentCapabilities.loaded] as const,
@@ -559,9 +537,7 @@ watch(
       return
     }
     currentSection.value = normalizedSection
-    currentSubSection.value = normalizedSection === 'skills'
-      ? (uiStore.settingsInitialSubSection || '')
-      : ''
+    currentSubSection.value = ''
     syncSettingsRoute(normalizedSection)
   },
   { immediate: true },
@@ -589,6 +565,7 @@ const handleSettingsNav = (e: CustomEvent) => {
   const { section, subsection } = e.detail
   if (section) {
     const normalizedSection = normalizeSettingsSection(section)
+    if (redirectToToolbox(normalizedSection, subsection)) return
     if (deploymentCapabilities.loaded && !isSectionSupported(normalizedSection)) {
       MessagePlugin.warning(t('settings.capabilityUnavailable'))
       currentSection.value = navItems.value[0]?.key || 'general'

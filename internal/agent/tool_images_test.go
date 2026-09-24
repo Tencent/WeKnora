@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/api/openaicompletions"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +30,7 @@ func TestToolImagesReachNextModelTurnAfterAllReplies(t *testing.T) {
 			require.Equal(t, "user", messages[3].Role)
 			require.Equal(t, step.ToolCalls[0].Result.Images, messages[3].Images)
 			require.Contains(t, messages[3].Content, "untrusted tool evidence")
-			client := openaicompletions.New(openaicompletions.Config{Settings: catalog.DefaultOpenAICompletions()})
+			client := openaicompletions.New(openaicompletions.Config{Settings: api.DefaultOpenAICompletions()})
 			body, err := client.BuildRequestBody(messages, nil, false)
 			require.NoError(t, err)
 			raw, err := json.Marshal(body["messages"])

@@ -9,7 +9,6 @@ with a focus on image and text data conversion:
 """
 
 import base64
-import binascii
 import io
 import logging
 from typing import List, Union
@@ -84,7 +83,7 @@ def encode_image(image: str, errors="strict") -> bytes:
     Args:
         image: Base64 encoded string representation of an image
         errors: Error handling scheme for decoding errors:
-            - 'strict' (default): Raise binascii.Error on decoding errors
+            - 'strict' (default): Raise on decoding errors
             - 'ignore': Return empty bytes on decoding errors
             - Any other name registered with codecs.register_error
 
@@ -92,7 +91,10 @@ def encode_image(image: str, errors="strict") -> bytes:
         bytes: Decoded image bytes, or empty bytes if errors='ignore' and decoding fails
 
     Raises:
-        binascii.Error: If decoding fails and errors='strict'
+        ValueError: If decoding fails and errors='strict'. base64.b64decode
+            signals bad padding or a bad alphabet with binascii.Error, and a
+            non-ASCII str with a plain ValueError; binascii.Error subclasses
+            ValueError, so both arrive as one.
 
     Example:
         >>> base64_str = "iVBORw0KGgoAAAANSUhEUgAAAAUA..."
@@ -103,8 +105,10 @@ def encode_image(image: str, errors="strict") -> bytes:
     try:
         # Attempt to decode the base64 string to bytes
         image_bytes = base64.b64decode(image)
-    except binascii.Error as e:
-        # Handle decoding errors based on the errors parameter
+    except ValueError as e:
+        # Catching binascii.Error alone would miss the non-ASCII case: a str
+        # that is not pure ASCII fails before the decoder runs and surfaces as
+        # a plain ValueError, which errors="ignore" is supposed to absorb.
         if errors == "ignore":
             return b""
         else:

@@ -61,6 +61,58 @@ type WorkspaceSandboxPolicy interface {
 	WorkspaceScriptsDisabled(ctx context.Context, tenantID uint64) (bool, error)
 }
 
+// HostSandboxManager is Lite's OS sandbox. A nil Manager means this process
+// is not Lite (or cannot enforce a sandbox). Web binaries always inject nil,
+// so empty remote configs resolve to disabled rather than host.
+type HostSandboxManager struct {
+	Manager sandbox.Manager
+}
+
+type resolveOption func(*resolveOptions)
+
+type resolveOptions struct {
+	// liteHost is Lite's OS sandbox. Nil on the web binary. Named remote
+	// configs never consult it; an empty config on web stays disabled.
+	liteHost sandbox.Manager
+}
+
+// withLiteHostSandbox opts a resolve into Lite's host backend when the
+// session has no named remote config. Web callers pass a nil manager.
+func withLiteHostSandbox(m sandbox.Manager) resolveOption {
+	return func(o *resolveOptions) { o.liteHost = liteHostSandbox(m) }
+}
+
+func liteHostSandbox(m sandbox.Manager) sandbox.Manager {
+	if m == nil || m.GetType() != sandbox.SandboxTypeHost {
+		return nil
+	}
+	return m
+}
+
+func applyResolveOptions(opts []resolveOption) resolveOptions {
+	var o resolveOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	return o
+}
+
+func workspaceScriptsDisabled(ctx context.Context, policy WorkspaceSandboxPolicy, tenantID uint64) bool {
+	if policy == nil || tenantID == 0 {
+		return false
+	}
+	disabled, err := policy.WorkspaceScriptsDisabled(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx,
+			"[sandbox] failed to read workspace sandbox policy for %d: %v",
+			tenantID, err)
+		return false
+	}
+	return disabled
+}
+
 // resolveTenantSandboxForConfig returns the Manager for an explicit config.
 //
 // Unlike the previous tenant-only helper this does NOT degrade to the default
@@ -75,25 +127,19 @@ func resolveTenantSandboxForConfig(
 	configID string,
 	policy WorkspaceSandboxPolicy,
 ) (sandbox.Manager, error) {
-	// ① Workspace kill switch — independent of resolver availability.
-	if policy != nil && tenantID != 0 {
-		disabled, err := policy.WorkspaceScriptsDisabled(ctx, tenantID)
-		if err != nil {
-			logger.Warnf(ctx,
-				"[sandbox] failed to read workspace sandbox policy for %d: %v",
-				tenantID, err)
-		} else if disabled {
-			return sandbox.NewDisabledManager(), nil
-		}
+	if workspaceScriptsDisabled(ctx, policy, tenantID) {
+		return sandbox.NewDisabledManager(), nil
 	}
 
-	// ② No named workspace config means sandbox execution is disabled. There is
-	// no deployment-level provider fallback anymore.
+	// No named workspace config means disabled. Lite host is not selected
+	// here: web and Lite share this helper, and an empty config on web must
+	// not become host. Lite passes withLiteHostSandbox to
+	// resolveSandboxForExecution instead.
 	if configID == "" || configID == types.SandboxConfigIDGlobalDefault {
 		return sandbox.NewDisabledManager(), nil
 	}
 
-	// ③ Named config: must not silently fall back to another backend.
+	// Named config: must not silently fall back to another backend.
 	if tenantID == 0 {
 		return nil, fmt.Errorf(
 			"sandbox: resolve config %q: missing workspace context", configID)

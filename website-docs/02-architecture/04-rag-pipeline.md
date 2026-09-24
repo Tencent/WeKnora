@@ -268,16 +268,16 @@ pipeline = types.NewPipelineBuilder().
 - `prepareChatModel`：取 chat model 并从 `SummaryConfig` 装配 `ChatOptions`（Temperature/TopP/Seed/MaxTokens/Thinking 等）；
 - `prepareMessagesWithHistory`：system prompt = `SystemPromptOverride`（意图覆盖）或 `SummaryConfig.Prompt`（`system_prompt.yaml`），渲染占位符后若检索上下文含 Markdown 图片则追加"检索图片输出要求"段落（`appendRetrievedImageOutputRequirement`）；随后按时间序追加历史 Q/A 对，最后是当前 user 消息（视觉模型附带 `Images`）。
 
-`references.go` 的 `prepareMessagesWithReferences` 在此之上做**引用别名替换**（详见 [引用（Citation）生成机制](#_7-引用-citation-生成机制)）：把 `RenderedContexts` 中的位置编号上下文替换为 `llmreference.Registry` 生成的按请求隔离的 chunk 别名视图，并在 system prompt 末尾追加引用协议。
+`references.go` 的 `prepareMessagesWithModelContext` 在此之上做**引用别名替换**（详见 [引用（Citation）生成机制](#_7-引用-citation-生成机制)）：把 `RenderedContexts` 中的位置编号上下文替换为 `modelcontext.Registry` 生成的按请求隔离的 chunk 别名视图，并在 system prompt 末尾追加引用协议。
 
 **流式版**（`chat_completion_stream.go`）要求 `EventBus` 必须存在，调用 `chatModel.ChatStream` 后启动 goroutine 消费响应通道：
 
-- `ResponseTypeThinking` → 经 `llmresource.StreamDecoder`（还原 res:// 资源别名）与 `llmreference.StreamExpander`（展开 ref 引用标签）后以 `EventAgentThought` 发出；
-- `ResponseTypeAnswer` → 同样双解码后以 `EventAgentFinalAnswer` 发出。带 `Done` 的终态回答**只转发一次**：部分厂商会先按 `finish_reason` 发一次完成、再按流结束哨兵发一次，重复转发会让答案事件排到会话 complete 事件之后；
+- `ResponseTypeThinking` → 经 `modelcontext.StreamDecoder`（同一个解码器既还原 res:// 资源别名，也展开 ref 引用标签）后以 `EventAgentThought` 发出；
+- `ResponseTypeAnswer` → 同样解码后以 `EventAgentFinalAnswer` 发出。带 `Done` 的终态回答**只转发一次**：部分厂商会先按 `finish_reason` 发一次完成、再按流结束哨兵发一次，重复转发会让答案事件排到会话 complete 事件之后；
 - `ResponseTypeError` → `EventError`；
 - 通道关闭或 ctx 取消时 `flushDecoders` 冲刷解码器缓存的尾部字节（跨 chunk 的别名不丢失）再关闭 thinking 流。
 
-**非流式版**（`chat_completion.go`）直接 `Chat`，然后 `resourceRefs.DecodeResponse` + `sourceRefs.ExpandResponse` 还原全文，结果写 `chatManage.ChatResponse`。
+**非流式版**（`chat_completion.go`）直接 `Chat`，然后 `modelContext.DecodeResponse` 一次还原全文（资源句柄与引用标签），结果写 `chatManage.ChatResponse`。
 
 ## 完整 RAG 流程图 {#_4-完整-rag-流程图}
 
@@ -440,19 +440,19 @@ sequenceDiagram
 
 ## 引用（Citation）生成机制 {#_7-引用-citation-生成机制}
 
-### llmreference：请求级来源别名与 ref 展开 {#_7-1-llmreference-请求级来源别名与-ref-展开}
+### 请求级来源别名与 ref 展开（sources.go / citations.go） {#_7-1-请求级来源别名与-ref-展开}
 
-`internal/llmreference/registry.go`。目标：**内部 ID 不进模型上下文、模型输出的引用可安全展开**。
+`internal/modelcontext/`（`sources.go`、`citations.go`，统一由 `registry.go` 的 `Registry` 对外暴露；原 `internal/llmreference/` 已并入此包）。目标：**内部 ID 不进模型上下文、模型输出的引用可安全展开**。
 
 - `Registry`（每次回答一个实例，含 Agent 的所有工具轮次，绝不跨请求持久化）为来源分配低熵别名：`cN`=知识 chunk、`wN`=网页、`dN`=文档、`bN`=知识库。
-- `ProtocolPrompt(citationsEnabled)` 追加到 system prompt：启用引用时要求模型用 `ref id="cN"` 形式的自闭合标签内联引用（禁止自造 kb/web 标签）；禁用时（`PipelineRequest.CitationEnabled=false`，默认为启用）禁止任何引用输出。
-- `references.go` 的 `prepareMessagesWithReferences` 把 `MergeResult` 按 FAQ 优先序 `RegisterSearchResults` 注册，用 `ModelOutput`（`model_output.go`）把知识/网页结果渲染为面向模型的紧凑 XML 视图（`display_type=search_results` / `web_search_results`），并**替换**消息中原来的 `RenderedContexts`。
-- 模型输出中的 `ref` 标签由 `ExpandText` / `StreamExpander`（流式，处理跨 chunk 分裂的标签）展开为公开标签：chunk → `kb` 标签（携带 chunk_id、knowledge_id 等属性），网页 → `web url title` 标签；未知别名 fail-closed 直接删除。前端据此渲染角标引用。
+- `ProtocolPrompt()` 追加到 system prompt（是否启用引用在 `NewRegistry(citationsEnabled)` 时确定）：启用引用时要求模型用 `ref id="cN"` 形式的自闭合标签内联引用（禁止自造 kb/web 标签）；禁用时（`PipelineRequest.CitationEnabled=false`，默认为启用）禁止任何引用输出。
+- `references.go` 的 `prepareMessagesWithModelContext` 把 `MergeResult` 按 FAQ 优先序 `RegisterSearchResults` 注册，用 `ModelToolResult`（内部走 `model_output.go` 的 `ModelOutput`）把知识/网页结果渲染为面向模型的紧凑 XML 视图（`display_type=search_results` / `web_search_results`），并**替换**消息中原来的 `RenderedContexts`。
+- 模型输出中的 `ref` 标签由 `ExpandText` / `StreamDecoder`（流式，处理跨 chunk 分裂的标签）展开为公开标签：chunk → `kb` 标签（携带 chunk_id、knowledge_id 等属性），网页 → `web url title` 标签；未知别名 fail-closed 直接删除。前端据此渲染角标引用。
 - 独立于内联引用，`MergeResult` 始终以 `references` SSE 事件整体推送（驱动"召回结果"面板），即使内联引用被禁用。
 
-### llmresource：存储资源句柄别名 {#_7-2-llmresource-存储资源句柄别名}
+### 存储资源句柄别名（resources.go） {#_7-2-存储资源句柄别名}
 
-`internal/llmresource/registry.go` 解决另一类问题：`resource://`、`minio://`、`cos://` 等高熵存储句柄以及 wiki `summary/<uuid>` slug 进入模型上下文后，模型复述时容易篡改 URL。`EncodeMessages` 把它们替换为 `res://0001` 形态的低熵别名；流式输出经 `StreamDecoder` 还原（`Flush` 保证跨 chunk 别名不截断丢失），工具调用参数在解码后同样回填真实句柄。
+`internal/modelcontext/resources.go`（原 `internal/llmresource/`）解决另一类问题：`resource://`、`minio://`、`cos://` 等高熵存储句柄以及 wiki `summary/<uuid>` slug 进入模型上下文后，模型复述时容易篡改 URL。同一个 `Registry` 的 `EncodeMessages` 把它们替换为 `res://0001` 形态的低熵别名（资源句柄先于来源别名编码，顺序固定在 `Registry` 内部，见 `registry.go` 的类型注释）；流式输出经 `StreamDecoder` 还原（`Flush` 保证跨 chunk 别名不截断丢失），工具调用参数经 `DecodeToolCalls` 回填真实句柄。
 
 ## 跨库并发检索与融合（HybridSearch） {#_8-跨库并发检索与融合-hybridsearch}
 
@@ -505,7 +505,7 @@ FAQ 在管线侧的配套策略（Agent 配置 `FAQPriorityEnabled` / `FAQScoreB
 | `graph_extraction.yaml` | `ExtractManager.ExtractEntity/ExtractGraph` | 查询实体抽取（`extract_entity.go`）与图谱构建 |
 | `agent_system_prompt.yaml` | — | Agent 模式 system prompt（见 Agent 文档） |
 
-占位符统一用 `types.RenderPromptPlaceholders` 渲染（`{query}`、`{contexts}`、`{conversation}`、`{language}` 等）。引用协议（[llmreference：请求级来源别名与 ref 展开](#_7-1-llmreference-请求级来源别名与-ref-展开)）是系统级追加，**不在**任何用户可编辑模板中。
+占位符统一用 `types.RenderPromptPlaceholders` 渲染（`{query}`、`{contexts}`、`{conversation}`、`{language}` 等）。引用协议（[请求级来源别名与 ref 展开](#_7-1-请求级来源别名与-ref-展开)）是系统级追加，**不在**任何用户可编辑模板中。
 
 ## 实现参考
 
@@ -522,6 +522,6 @@ FAQ 在管线侧的配套策略（Agent 配置 `FAQPriorityEnabled` / `FAQScoreB
 | 跨库混合检索 | `internal/application/service/knowledgebase_search*.go` |
 | 流管理器（断线续传） | `internal/stream/`（`factory.go`、`memory_manager.go`、`redis_manager.go`） |
 | 会话 / 消息管理 | `internal/application/service/session.go`、`message.go` |
-| 引用别名与展开 | `internal/llmreference/`、`internal/llmresource/` |
+| 引用别名与展开 | `internal/modelcontext/`（`sources.go`、`citations.go`、`resources.go`、`stream.go`） |
 | 文本工具 | `internal/searchutil/` |
 | Prompt 模板 | `config/prompt_templates/`、`internal/config/config.go` |

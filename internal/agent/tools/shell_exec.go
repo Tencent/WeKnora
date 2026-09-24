@@ -9,7 +9,9 @@
 //
 //   - Session-sandbox capability: registration is feature-gated on the
 //     sandbox backend exposing SandboxCommandExecutor (Cube, E2B, Docker).
-//     shell_exec never runs on the WeKnora host.
+//     Remote sessions never run on the WeKnora host. Host layouts clamp
+//     work_dir to the layout's writable roots; the OS sandbox is the
+//     process perimeter.
 //   - Session-scoped: the sandbox is resolved from ToolExecContext.SessionID
 //     so the LLM cannot execute against a foreign session, and installed
 //     dependencies persist across subsequent tool calls in the same session.
@@ -67,9 +69,6 @@ type SandboxCommandExecutor interface {
 // Limits — kept generous enough for `pip install tensorflow` while still
 // bounding the LLM context blast radius.
 const (
-	// defaultShellExecWorkDir is where commands land when the caller omits
-	// work_dir. Matches CubeSandbox.Execute's remote directory convention.
-	defaultShellExecWorkDir = "/workspace"
 	// defaultShellExecTimeout is applied when the caller omits timeout_sec.
 	// 120s is enough for most pip installs; heavier installs can opt in via
 	// timeout_sec up to shellExecMaxTimeout.
@@ -127,8 +126,14 @@ var shellExecBlacklist = []struct {
 // Tool schema
 
 var shellExecTool = BaseTool{
-	name: ToolShellExec,
-	description: `Execute a command in the current session's isolated sandbox as root.
+	name:        ToolShellExec,
+	description: legacyShellExecDescription,
+	schema:      utils.GenerateSchema[ShellExecInput](),
+}
+
+// legacyShellExecDescription is the remote /workspace prompt text. Host
+// layouts rewrite the same copy through shellExecDescription.
+const legacyShellExecDescription = `Execute a command in the current session's isolated sandbox as root.
 The sandbox belongs to this session alone; nothing here runs on the host.
 - CWD defaults to /workspace on every call; cd does not persist.
   work_dir selects any directory inside the session sandbox; missing directories are created as the same user.
@@ -149,9 +154,28 @@ The sandbox belongs to this session alone; nothing here runs on the host.
   Changes live and die with this session.
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
-- Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.`,
-	schema: utils.GenerateSchema[ShellExecInput](),
+- Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.`
+
+func shellExecDescription(l sandbox.WorkspaceLayout) string {
+	if l.IsHost() {
+		root := layoutRootOrGeneric(l)
+		return fmt.Sprintf(hostShellExecDescription, root, root, root)
+	}
+	return rewriteRemoteWorkspaceCopy(legacyShellExecDescription, l)
 }
+
+const hostShellExecDescription = "Execute a command in %s. The process is OS-sandboxed on this machine.\n" +
+	"- CWD defaults to %s on every call; cd does not persist. " +
+	"work_dir must be that folder or a subdirectory.\n" +
+	"- Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. " +
+	"Read known paths directly.\n" +
+	"- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. " +
+	"Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).\n" +
+	"- Edit files in place under %s.\n" +
+	"- Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. " +
+	"Do not bypass permission or policy denials through another tool.\n" +
+	"- stdout/stderr have independent byte limits. " +
+	"Redirect verbose commands to a workspace log when output must be kept."
 
 // ShellExecInput defines the input parameters for shell_exec.
 type ShellExecInput struct {
@@ -220,16 +244,14 @@ func (e installShellExecutor) ExecShellCommand(
 // ShellExecTool executes shell commands inside the session's sandbox.
 type ShellExecTool struct {
 	BaseTool
+	sessionBound
 	executor SandboxCommandExecutor
-	// workDirRoots restrict install-mode working directories. Ordinary
-	// sessions may work anywhere inside their own sandbox.
+	// installMode owns its own working-directory scope; session layouts
+	// must not replace the skill-image roots.
+	installMode bool
+	// workDirRoots restrict install-mode working directories.
 	workDirRoots []string
-	// defaultWorkDir is where a call that omits work_dir lands. Empty means
-	// /workspace, which is right for an ordinary session and wrong for an
-	// install: an install works in one skill directory and is told not to
-	// touch /workspace at all (it is wiped before the snapshot). Leaving the
-	// default there made the model prefix `cd <skill-dir> &&` onto command
-	// after command, since that is the spelling guaranteed to work.
+	// defaultWorkDir is where an install-mode call that omits work_dir lands.
 	defaultWorkDir string
 	// defaultTimeout is applied when the caller omits timeout_sec. Ordinary
 	// sessions keep the 120s default; install mode uses the 10-minute cap
@@ -261,11 +283,37 @@ type SkillEnvCapture func(ctx context.Context, skillName string, pairs map[strin
 // does not support ad-hoc shell execution (i.e. is not Cube).
 func NewShellExecTool(executor SandboxCommandExecutor, envResolver skills.SkillEnvResolver) *ShellExecTool {
 	return &ShellExecTool{
-		BaseTool:     shellExecTool,
-		executor:     executor,
-		envResolver:  envResolver,
-		workDirRoots: []string{"/"},
+		BaseTool: BaseTool{
+			name:   shellExecTool.name,
+			schema: shellExecTool.schema,
+		},
+		executor:    executor,
+		envResolver: envResolver,
 	}
+}
+
+// Description is generated from the session sandbox layout. Install mode
+// keeps the constructor-built text.
+func (t *ShellExecTool) Description() string {
+	if t != nil && t.installMode {
+		return t.description
+	}
+	return shellExecDescription(t.boundLayout())
+}
+
+// Parameters rewrites workspace paths in the schema to match the session layout.
+func (t *ShellExecTool) Parameters() json.RawMessage {
+	if t != nil && t.installMode {
+		return t.schema
+	}
+	return schemaForLayout(t.schema, t.boundLayout())
+}
+
+func (t *ShellExecTool) boundLayout() sandbox.WorkspaceLayout {
+	if t == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return t.describeLayout(t.executor)
 }
 
 // NewInstallShellExecTool constructs the install-mode variant: commands run as
@@ -281,13 +329,14 @@ func NewInstallShellExecTool(
 	base := shellExecTool
 	defaultWorkDir, ok := sandbox.ValidatedImageSkillDir(skillDir)
 	if !ok {
-		defaultWorkDir = defaultShellExecWorkDir
+		defaultWorkDir = sandbox.RemoteWorkspaceLayout().Root
 	}
 	base.description = installShellExecDescription(defaultWorkDir)
 	return &ShellExecTool{
 		BaseTool:       base,
 		executor:       installShellExecutor{inner: executor},
-		workDirRoots:   []string{defaultShellExecWorkDir, sandbox.SkillsImageRoot},
+		installMode:    true,
+		workDirRoots:   []string{sandbox.RemoteWorkspaceLayout().Root, sandbox.SkillsImageRoot},
 		defaultWorkDir: defaultWorkDir,
 		defaultTimeout: shellExecMaxTimeout,
 	}
@@ -404,20 +453,24 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, nil
 	}
 
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.executor)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
 	workDir := strings.TrimSpace(input.WorkDir)
 	if workDir == "" {
-		workDir = t.effectiveDefaultWorkDir()
+		workDir = t.defaultWorkDirFor(layout)
 	}
 	if !path.IsAbs(workDir) {
-		workDir = path.Join(t.effectiveDefaultWorkDir(), workDir)
+		workDir = path.Join(t.defaultWorkDirFor(layout), workDir)
 	}
 	cleanWorkDir := path.Clean(workDir)
-	if !t.workDirAllowed(cleanWorkDir) {
+	if !t.workDirAllowedIn(layout, cleanWorkDir) {
 		return &types.ToolResult{
 			Success: false,
 			Error: fmt.Sprintf(
 				"work_dir %q is outside the allowed sandbox roots %s",
-				input.WorkDir, strings.Join(t.allowedWorkDirRoots(), ", "),
+				input.WorkDir, strings.Join(t.workDirRootsFor(layout), ", "),
 			),
 		}, nil
 	}
@@ -502,23 +555,24 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		ExecShellCommandWithOutputSnapshot(
 			context.Context, string, string, sandbox.ShellExecOptions, string,
 		) (*sandbox.ExecuteResult, *sandbox.ShellOutputSnapshot, error)
-	}); ok {
+	}); ok && layoutOutputDir(layout) != "" {
 		var snapshot *sandbox.ShellOutputSnapshot
 		res, snapshot, err = executor.ExecShellCommandWithOutputSnapshot(execCtx, sessionID, execCommand,
-			sandbox.ShellExecOptions{WorkDir: workDir, Timeout: timeout, Env: env}, skills.ArtifactOutputDir())
+			sandbox.ShellExecOptions{WorkDir: workDir, Timeout: timeout, Env: env}, layoutOutputDir(layout))
 		if snapshot != nil {
 			outputFiles = changedOutputLinks(
+				layoutOutputDir(layout),
 				outputEntriesSnapshot(snapshot.Before), outputEntriesSnapshot(snapshot.After),
 			)
 		}
 	} else {
 		// Keep support for executors without the combined operation (including
 		// install mode); production session managers use one handle above.
-		before, inspected := sandboxOutputSnapshot(ctx, t.executor, sessionID)
+		before, inspected := sandboxOutputSnapshot(ctx, t.executor, sessionID, layoutOutputDir(layout))
 		res, err = t.executor.ExecShellCommand(execCtx, sessionID, execCommand, workDir, timeout, env)
 		if err == nil && res != nil && inspected {
-			if after, ok := sandboxOutputSnapshot(ctx, t.executor, sessionID); ok {
-				outputFiles = changedOutputLinks(before, after)
+			if after, ok := sandboxOutputSnapshot(ctx, t.executor, sessionID, layoutOutputDir(layout)); ok {
+				outputFiles = changedOutputLinks(layoutOutputDir(layout), before, after)
 			}
 		}
 	}
@@ -695,34 +749,61 @@ func dropResolvedNames(supplied, resolved map[string]string) map[string]string {
 }
 
 func (t *ShellExecTool) isInstallMode() bool {
-	for _, root := range t.workDirRoots {
-		if root == sandbox.SkillsImageRoot {
-			return true
+	return t != nil && t.installMode
+}
+
+func (t *ShellExecTool) defaultWorkDirFor(layout sandbox.WorkspaceLayout) string {
+	if t.isInstallMode() {
+		if strings.TrimSpace(t.defaultWorkDir) != "" {
+			return t.defaultWorkDir
 		}
+		return sandbox.RemoteWorkspaceLayout().Root
 	}
-	return false
+	if strings.TrimSpace(layout.Root) != "" {
+		return layout.Root
+	}
+	return sandbox.RemoteWorkspaceLayout().Root
 }
 
-// effectiveDefaultWorkDir keeps a zero-value tool on the ordinary /workspace
-// contract; only the install-mode constructor sets anything else.
+// effectiveDefaultWorkDir is the listing/test view of defaultWorkDirFor.
 func (t *ShellExecTool) effectiveDefaultWorkDir() string {
-	if strings.TrimSpace(t.defaultWorkDir) == "" {
-		return defaultShellExecWorkDir
-	}
-	return t.defaultWorkDir
+	return t.defaultWorkDirFor(t.boundLayout())
 }
 
-// allowedWorkDirRoots allows any sandbox directory for ordinary sessions.
-// Install-mode tools provide an explicit scope.
-func (t *ShellExecTool) allowedWorkDirRoots() []string {
-	if len(t.workDirRoots) == 0 {
+// workDirRootsFor returns the directories ordinary work_dir may name.
+//
+// A remote sandbox is a disposable container the session owns outright, so any
+// directory in it stays allowed; clamping those to /workspace would break
+// skills that legitimately build in /tmp or /opt. A host workspace is the
+// user's own disk, so there work_dir is clamped to the layout's writable
+// roots. Install mode keeps the skill-image roots and ignores session layouts.
+func (t *ShellExecTool) workDirRootsFor(layout sandbox.WorkspaceLayout) []string {
+	if t.isInstallMode() {
+		if len(t.workDirRoots) == 0 {
+			return []string{sandbox.RemoteWorkspaceLayout().Root, sandbox.SkillsImageRoot}
+		}
+		return t.workDirRoots
+	}
+	if !layout.IsHost() {
 		return []string{"/"}
 	}
-	return t.workDirRoots
+	if len(layout.WriteRoots) > 0 {
+		return layout.WriteRoots
+	}
+	return []string{layout.Root}
+}
+
+// allowedWorkDirRoots is the listing/test view of workDirRootsFor.
+func (t *ShellExecTool) allowedWorkDirRoots() []string {
+	return t.workDirRootsFor(t.boundLayout())
 }
 
 func (t *ShellExecTool) workDirAllowed(cleanWorkDir string) bool {
-	for _, root := range t.allowedWorkDirRoots() {
+	return t.workDirAllowedIn(t.boundLayout(), cleanWorkDir)
+}
+
+func (t *ShellExecTool) workDirAllowedIn(layout sandbox.WorkspaceLayout, cleanWorkDir string) bool {
+	for _, root := range t.workDirRootsFor(layout) {
 		if isUnderRoot(cleanWorkDir, root) {
 			return true
 		}

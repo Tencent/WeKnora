@@ -22,7 +22,7 @@
                 </t-tooltip>
             </div>
         </div>
-        <div class="chat_thread" :style="{ '--chat-composer-height': `${composerHeight}px` }">
+        <div class="chat_thread" :style="{ '--chat-composer-height': `${composerHeight}px`, '--chat-scrollbar-gutter': `${scrollbarGutter}px` }">
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
                 <div class="chat_scroll_content">
                     <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
@@ -149,26 +149,26 @@
                             <span class="chat-global-wait__spinner" aria-hidden="true"></span>
                         </div>
                     </div>
-                    <div ref="composerElement" class="chat_composer">
-                        <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
-                            <transition name="scroll-btn-fade">
-                                <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
-                                    <t-icon name="chevron-down" size="18px" />
-                                </div>
-                            </transition>
-                            <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
-                                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
-                                @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
-                                @promote-steer="handlePromoteSteer"
-                                @remove-steer="handleRemoveSteer"
-                                @retry-steer="handleRetrySteer"
-                                @stop-generation="handleStopGeneration"
-                                @stop-confirmed="handleStopConfirmed"
-                                @stop-failed="handleStopFailed" :isReplying="isReplying" :composer-locked="composerLocked" :sessionId="session_id"
-                                :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
-                                :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
+                </div>
+            </div>
+            <div ref="composerElement" class="chat_composer">
+                <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
+                    <transition name="scroll-btn-fade">
+                        <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
+                            <t-icon name="chevron-down" size="18px" />
                         </div>
-                    </div>
+                    </transition>
+                    <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
+                        @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
+                        @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
+                        @promote-steer="handlePromoteSteer"
+                        @remove-steer="handleRemoveSteer"
+                        @retry-steer="handleRetrySteer"
+                        @stop-generation="handleStopGeneration"
+                        @stop-confirmed="handleStopConfirmed"
+                        @stop-failed="handleStopFailed" :isReplying="isReplying" :composer-locked="composerLocked" :sessionId="session_id"
+                        :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
+                        :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
                 </div>
             </div>
             <div v-if="!embeddedMode" class="chat_overlays">
@@ -566,9 +566,11 @@ const isFirstEnter = ref(true);
 const loading = ref(false);
 const sessionActivity = useSessionActivityStore();
 const activitySessionId = ref('');
-watch([activitySessionId, isReplying, isStreaming, isImRecovering, currentAssistantMessageId], () => {
+watch([activitySessionId, isReplying, isImRecovering, currentAssistantMessageId], () => {
     if (props.embeddedMode || !activitySessionId.value) return;
-    sessionActivity.update(activitySessionId.value, isReplying.value || isStreaming.value || isImRecovering.value, currentAssistantMessageId.value);
+    // SSE may stay connected after a stop/complete event. The sidebar tracks
+    // generation, not the transport, just like the composer's Stop button.
+    sessionActivity.update(activitySessionId.value, isReplying.value || isImRecovering.value, currentAssistantMessageId.value);
 }, { flush: 'sync' });
 const historyLoading = ref(true);
 const historyLoadingMore = ref(false);
@@ -585,14 +587,19 @@ let fullContent = ref('')
 const scrollContainer = ref(null)
 const composerElement = ref(null)
 const composerHeight = ref(0)
-// Keep floating previews above the sticky composer, including when its controls
-// wrap after a drawer opens or the user adds multiple lines/attachments.
-watch(composerElement, (element, _, onCleanup) => {
-    if (!element) return
-    const measure = () => { composerHeight.value = element.offsetHeight }
+const scrollbarGutter = ref(0)
+// Reserve space for the independent composer and keep it aligned with the
+// message column when drawers, multiline input or attachments change its size.
+watch([composerElement, scrollContainer], ([element, scroller], _, onCleanup) => {
+    if (!element || !scroller) return
+    const measure = () => {
+        composerHeight.value = element.offsetHeight
+        scrollbarGutter.value = scroller.offsetWidth - scroller.clientWidth
+    }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(element)
+    observer.observe(scroller)
     onCleanup(() => observer.disconnect())
 }, { flush: 'post' })
 const userHasScrolledUp = ref(false)
@@ -943,7 +950,7 @@ const {
         const lastMessage = findLastMessage(
             (message) => message.role === 'assistant' && !message.is_completed
         );
-        const locallyRunning = isReplying.value || isStreaming.value || isImRecovering.value;
+        const locallyRunning = isReplying.value || isImRecovering.value;
         // History reload can finish after sendMsg already marked this session
         // running. Do not clear that marker just because the snapshot's last
         // message still looks completed. A scanned incomplete assistant counts: a
@@ -1362,6 +1369,7 @@ const attachSteerFollowUp = async (completedAssistantId) => {
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
     if (composerLocked.value) return
+    const reasoningEffort = props.embeddedMode ? undefined : (useSettingsStoreInstance.reasoningEffortOverride || undefined);
     stopStream();
     prepareForNewOutgoingMessage();
     activitySessionId.value = String(session_id.value);
@@ -1531,6 +1539,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         web_search_enabled: webSearchEnabled,
         local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled && !useBrowserConnectionStore().knownOffline,
         summary_model_id: modelId,
+        reasoning_effort: reasoningEffort,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,
@@ -1886,6 +1895,7 @@ onBeforeRouteUpdate((to, from, next) => {
     padding: 8px 0 0;
     box-sizing: border-box;
     overflow-y: auto;
+    // Keep native message bounce without chaining scroll to the outer page.
     overscroll-behavior-y: contain;
     scroll-padding-bottom: var(--chat-composer-height, 0px);
     scrollbar-gutter: stable;
@@ -1916,20 +1926,27 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
-// One scroll viewport spans the messages and composer, so the scrollbar reaches
-// the bottom of the chat column. The composer stays in flow to reserve its own
-// height, and sticks to the bottom while reading earlier messages.
+// Keep the full-height message scrollbar and reserve space below the last
+// message for the composer, which sits outside the bouncing scroll viewport.
 .chat_scroll_content {
     display: flex;
     flex-direction: column;
     min-height: 100%;
+
+    // Use an in-flow spacer so the content ResizeObserver also detects composer
+    // height changes and keeps the last message visible when following replies.
+    &::after {
+        content: '';
+        flex: 0 0 var(--chat-composer-height, 0px);
+    }
 }
 
 .chat_composer {
-    position: sticky;
+    position: absolute;
     bottom: 0;
+    left: 0;
+    right: var(--chat-scrollbar-gutter, 0px);
     z-index: 12;
-    flex-shrink: 0;
     padding: 16px 0 max(8px, env(safe-area-inset-bottom));
     background: var(--td-bg-color-container);
 }

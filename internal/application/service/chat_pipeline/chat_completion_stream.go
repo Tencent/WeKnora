@@ -4,12 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 )
+
+// EmptyTruncatedAnswerFallback explains an output-budget exhaustion with no answer text.
+const EmptyTruncatedAnswerFallback = "Sorry, this answer hit the model's per-response output limit " +
+	"before any text was produced. Try narrowing the question, or raise max_completion_tokens."
+
+// IsLengthFinishReason reports whether a provider ended a response because its
+// completion-token budget was exhausted.
+func IsLengthFinishReason(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "length", "max_tokens", "max_output_tokens":
+		return true
+	default:
+		return false
+	}
+}
 
 // PluginChatCompletionStream implements streaming chat completion functionality
 // as a plugin that can be registered to EventManager
@@ -114,6 +130,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
 		answerCompleted := false
+		answerProduced := false
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -230,14 +247,23 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						response.Content += answerDecoder.Flush()
 						answerCompleted = true
 					}
+					if strings.TrimSpace(response.Content) != "" {
+						answerProduced = true
+					}
+					truncated := response.Done && IsLengthFinishReason(response.FinishReason)
+					if truncated && !answerProduced {
+						response.Content = EmptyTruncatedAnswerFallback
+						answerProduced = true
+					}
 					closeThinking()
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
 						SessionID: chatManage.SessionID,
 						Data: event.AgentFinalAnswerData{
-							Content: response.Content,
-							Done:    response.Done,
+							Content:   response.Content,
+							Done:      response.Done,
+							Truncated: truncated,
 						},
 					})
 				}

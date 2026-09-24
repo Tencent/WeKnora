@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDeploymentCapabilityKeysMatchFrontend(t *testing.T) {
@@ -97,4 +98,19 @@ func readFrontendDeploymentCapabilityKeys() ([]string, error) {
 		keys = append(keys, line)
 	}
 	return keys, nil
+}
+
+func TestHostSandboxCapabilityFollowsAvailability(t *testing.T) {
+	data := BuildDeploymentCapabilities("lite", DeploymentFeatureAvailability{
+		Sandbox:     true,
+		SandboxHost: true,
+	})
+	require.True(t, data.Capabilities["settings.sandbox.host"].Supported)
+
+	off := BuildDeploymentCapabilities("lite", DeploymentFeatureAvailability{
+		Sandbox: true,
+	})
+	require.False(t, off.Capabilities["settings.sandbox.host"].Supported)
+	require.Equal(t, "platform_unsupported",
+		off.Capabilities["settings.sandbox.host"].Reason)
 }

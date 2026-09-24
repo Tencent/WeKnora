@@ -171,6 +171,9 @@ func (s *sessionService) KnowledgeQA(
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
+	applyRequestReasoningEffort(
+		req.ReasoningEffort, &chatManage.SummaryConfig.Thinking, &chatManage.SummaryConfig.ReasoningEffort,
+	)
 
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall
@@ -1188,6 +1191,10 @@ func (s *sessionService) consumeFallbackStream(
 			if response.Done {
 				response.Content += decoder.Flush()
 			}
+			truncated := response.Done && chatpipeline.IsLengthFinishReason(response.FinishReason)
+			if truncated && strings.TrimSpace(finalContent+response.Content) == "" {
+				response.Content = chatpipeline.EmptyTruncatedAnswerFallback
+			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
 				ID:        fallbackID,
@@ -1197,6 +1204,7 @@ func (s *sessionService) consumeFallbackStream(
 					Content:    response.Content,
 					Done:       response.Done,
 					IsFallback: true,
+					Truncated:  truncated,
 				},
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)

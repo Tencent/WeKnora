@@ -5,7 +5,7 @@
 // tool-call assembly, prompt-cache bookkeeping and usage logging.
 //
 // Protocol packages live under api/<protocol>; vendor facts live in
-// internal/models/catalog and internal/models/vendors. This package must not
+// internal/models/catalog and internal/models/providers. This package must not
 // import either of them.
 package api
 
