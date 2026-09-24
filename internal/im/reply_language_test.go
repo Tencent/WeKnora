@@ -23,7 +23,8 @@ func TestFollowUserLanguageFallsBackWithinSessionAndClearResetsIt(t *testing.T) 
 	cs := &ChannelSession{ID: "old"}
 	ctx := s.withIMReplyLanguage(context.Background(), cs, &IncomingMessage{
 		MessageType: MessageTypeText,
-		Content:     "Tôi muốn tìm thông tin về đơn hàng của mình. Bạn có thể giúp tôi kiểm tra trạng thái giao hàng không?",
+		Content: "Tôi muốn tìm thông tin về đơn hàng của mình. " +
+			"Bạn có thể giúp tôi kiểm tra trạng thái giao hàng không?",
 	})
 	if got, _ := types.LanguageFromContext(ctx); got != "Vietnamese" {
 		t.Fatalf("Vietnamese turn language = %q", got)
@@ -38,7 +39,10 @@ func TestFollowUserLanguageFallsBackWithinSessionAndClearResetsIt(t *testing.T) 
 	if err := db.Exec(`INSERT INTO im_channel_sessions(id) VALUES ('new')`).Error; err != nil {
 		t.Fatal(err)
 	}
-	ctx = s.withIMReplyLanguage(context.Background(), &ChannelSession{ID: "new"}, &IncomingMessage{MessageType: MessageTypeText, Content: "ok"})
+	ctx = s.withIMReplyLanguage(context.Background(), &ChannelSession{ID: "new"}, &IncomingMessage{
+		MessageType: MessageTypeText,
+		Content:     "ok",
+	})
 	if got, _ := types.LanguageFromContext(ctx); got != "en-US" {
 		t.Fatalf("new session language = %q, want deployment default", got)
 	}

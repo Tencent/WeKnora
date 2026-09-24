@@ -24,7 +24,9 @@ func (s *Service) withIMReplyLanguage(ctx context.Context, cs *ChannelSession, m
 		}
 	} else {
 		var current ChannelSession
-		if err := s.db.Select("last_detected_language").Where("id = ? AND deleted_at IS NULL", cs.ID).First(&current).Error; err == nil {
+		if err := s.db.Select("last_detected_language").
+			Where("id = ? AND deleted_at IS NULL", cs.ID).
+			First(&current).Error; err == nil {
 			language = current.LastDetectedLanguage
 		} else {
 			logger.Warnf(ctx, "[IM] Failed to read detected language for session %s: %v", cs.ID, err)
