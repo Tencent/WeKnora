@@ -169,14 +169,6 @@ docker compose up -d    # 用新镜像重建容器
 
 智能体可以操作你电脑上的浏览器，知识库可以通过 MCP 接入其他 AI 工具，进行中的对话可以补充要求、分叉或回滚。
 
-<table>
-  <tr>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/local-browser-task.png" alt="智能推理对话正在操作本机浏览器，对话中显示任务预览与暂停、继续、结束控制" width="100%"><br/><b>操作你电脑上的浏览器</b></td>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/mcp-server-endpoint.png" alt="MCP 端点的连接信息，包含端点地址与 Cursor、Claude Desktop 的 mcpServers 配置" width="100%"><br/><b>把知识库发布给其他 AI 工具</b></td>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/chat-steer-queue.png" alt="回答生成期间，输入框上方排队等待的补充要求" width="100%"><br/><b>随时调整进行中的对话</b></td>
-  </tr>
-</table>
-
 - **[本地浏览器（BrowserSkill）](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#local-browser)**：智能体通过开源 BrowserSkill 扩展操作用户自己的 Chrome / Edge，支持实时任务预览、暂停 / 继续，登录和验证码交给用户处理。
 - **[内置 MCP Server](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#mcp-server)**：按空间发布 `/mcp/<endpoint_id>` 端点，Streamable HTTP，每个端点独立令牌、知识库范围、限流与工具分组；Python 版 `mcp-server/` 已弃用。
 - **[对话控制](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#conversation-control)**：运行中追加要求、从任意历史问题分叉、原地回滚并还原沙箱检查点、按会话选择思考强度；生成的文件统一收在新增的产物库中。

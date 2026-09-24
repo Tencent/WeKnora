@@ -169,14 +169,6 @@ All options, hardware requirements and deployment topologies: [Installation guid
 
 Agents can operate the browser on your computer, knowledge bases can be published to other AI tools over MCP, and a running conversation can be steered, forked or rewound.
 
-<table>
-  <tr>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/local-browser-task.png" alt="A smart-reasoning chat driving the connected Chrome through BrowserSkill, with the in-chat task preview and pause and end controls" width="100%"><br/><b>Operate the browser on your computer</b></td>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/mcp-server-endpoint.png" alt="Connection details of an MCP endpoint, with its address and mcpServers configuration for Cursor and Claude Desktop" width="100%"><br/><b>Publish knowledge bases to other AI tools</b></td>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/chat-steer-queue.png" alt="Follow-up requirements queued above the input box while an answer is being generated" width="100%"><br/><b>Adjust a conversation while it runs</b></td>
-  </tr>
-</table>
-
 - **[Local Browser (BrowserSkill)](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#local-browser)**: agents drive the user's own Chrome / Edge through the open-source BrowserSkill extension, with a live task preview, pause / resume and hand-off for logins and CAPTCHAs.
 - **[Built-in MCP Server](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#mcp-server)**: per-workspace `/mcp/<endpoint_id>` endpoints over Streamable HTTP, each with its own token, knowledge-base scope, rate limit and tool groups. The Python `mcp-server/` is deprecated.
 - **[Conversation control](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#conversation-control)**: append requirements to a running turn, fork from any earlier question, rewind in place with sandbox checkpoints, and pick reasoning effort per session. Generated files are collected in a new artifacts library.

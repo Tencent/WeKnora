@@ -179,14 +179,6 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 에이전트가 사용자 컴퓨터의 브라우저를 조작할 수 있고, 지식베이스를 MCP로 다른 AI 도구에 공개할 수 있으며, 진행 중인 대화에 요구 사항을 추가하거나 분기·되감기할 수 있습니다.
 
-<table>
-  <tr>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/local-browser-task.png" alt="스마트 추론 대화가 로컬 브라우저를 조작하며, 대화 안에 작업 미리보기와 일시정지·재개·종료 컨트롤을 표시" width="100%"><br/><b>사용자 컴퓨터의 브라우저 조작</b></td>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/mcp-server-endpoint.png" alt="MCP 엔드포인트 연결 정보. 엔드포인트 주소와 Cursor, Claude Desktop용 mcpServers 설정" width="100%"><br/><b>지식베이스를 다른 AI 도구에 공개</b></td>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/chat-steer-queue.png" alt="답변 생성 중 입력창 위에 대기 중인 추가 요구 사항" width="100%"><br/><b>진행 중인 대화를 언제든 조정</b></td>
-  </tr>
-</table>
-
 - **[로컬 브라우저(BrowserSkill)](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#local-browser)**: 오픈소스 BrowserSkill 확장 프로그램을 통해 에이전트가 사용자 자신의 Chrome / Edge를 조작합니다. 실시간 작업 미리보기, 일시정지 / 재개를 지원하며 로그인과 CAPTCHA는 사용자에게 인계합니다.
 - **[내장 MCP Server](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#mcp-server)**: 워크스페이스별 `/mcp/<endpoint_id>` 엔드포인트(Streamable HTTP). 엔드포인트마다 별도 토큰·지식베이스 범위·요청 제한·도구 그룹을 둡니다. Python 버전 `mcp-server/`는 지원 중단되었습니다.
 - **[대화 제어](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#conversation-control)**: 실행 중인 턴에 요구 사항 추가, 이전 질문에서 대화 분기, 샌드박스 체크포인트와 함께 제자리 되감기, 세션별 추론 강도. 생성된 파일은 새 산출물 라이브러리에 모입니다.

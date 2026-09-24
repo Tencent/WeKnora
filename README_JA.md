@@ -169,14 +169,6 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 エージェントがあなたのコンピューターのブラウザを操作できるようになり、ナレッジベースを MCP で他の AI ツールに公開でき、実行中の会話に要件を追加したり分岐・巻き戻ししたりできます。
 
-<table>
-  <tr>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/local-browser-task.png" alt="スマート推論の会話がローカルブラウザを操作し、会話内にタスクプレビューと一時停止・再開・終了の操作を表示" width="100%"><br/><b>コンピューターのブラウザを操作</b></td>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/mcp-server-endpoint.png" alt="MCP エンドポイントの接続情報。エンドポイントのアドレスと Cursor、Claude Desktop 用の mcpServers 設定" width="100%"><br/><b>ナレッジベースを他の AI ツールに公開</b></td>
-    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/chat-steer-queue.png" alt="回答の生成中、入力欄の上に並んだ追加の要件" width="100%"><br/><b>進行中の会話をいつでも調整</b></td>
-  </tr>
-</table>
-
 - **[ローカルブラウザ（BrowserSkill）](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#local-browser)**：オープンソースの BrowserSkill 拡張機能を通じて、エージェントがユーザー自身の Chrome / Edge を操作します。ライブのタスクプレビュー、一時停止 / 再開に対応し、ログインや CAPTCHA はユーザーに引き継ぎます。
 - **[組み込み MCP Server](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#mcp-server)**：ワークスペース単位の `/mcp/<endpoint_id>` エンドポイント（Streamable HTTP）。エンドポイントごとにトークン・ナレッジベース範囲・レート制限・ツールグループを設定します。Python 版 `mcp-server/` は非推奨です。
 - **[会話コントロール](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#conversation-control)**：実行中のターンへの要件追加、過去の任意の質問からの分岐、サンドボックスのチェックポイントと連動したその場での巻き戻し、セッション単位の推論強度。生成ファイルは新しい成果物ライブラリにまとまります。
