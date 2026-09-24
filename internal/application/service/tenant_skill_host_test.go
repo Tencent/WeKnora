@@ -289,6 +289,24 @@ func TestWriteHostSkillFilesRejectsEscapes(t *testing.T) {
 	require.Equal(t, os.FileMode(0o755), info.Mode().Perm())
 }
 
+// The installer writes the version dir from inside the sandbox; the host
+// process must not follow a link it planted there.
+func TestHostVersionDirSymlinksAreNotFollowed(t *testing.T) {
+	versionDir, outside := t.TempDir(), t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(outside, "cache"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "requirements.json"), []byte(`{"env":[]}`), 0o600))
+	require.NoError(t, os.Symlink(outside, filepath.Join(versionDir, ".weknora")))
+
+	_, err := noSymlinkPath(versionDir, ".weknora", "cache")
+	require.Error(t, err)
+	_, err = readNoSymlinkFile(versionDir, sandbox.SkillRequirementsPathIn(versionDir))
+	require.Error(t, err)
+
+	missing, err := noSymlinkPath(t.TempDir(), ".weknora", "cache")
+	require.NoError(t, err)
+	require.True(t, strings.HasSuffix(missing, filepath.Join(".weknora", "cache")))
+}
+
 // skillRowOrNil loads a row that may already be gone (post-remove).
 func (fx *installFixture) skillRowOrNil(configID, skillID string) *types.TenantSkillEntity {
 	row, err := fx.skillRepo.GetSkill(context.Background(), 7, configID, skillID)

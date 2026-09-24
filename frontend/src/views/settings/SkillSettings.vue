@@ -11,6 +11,14 @@
       <p class="section-description">{{ skillText('description') }}</p>
     </div>
 
+    <!-- Lite has no sandbox settings page, so its script kill switch is cleared here. -->
+    <div v-if="hostOnly && scriptsDisabled" class="skill-settings__scripts-off" role="status">
+      <p>{{ $t('settings.sandbox.scriptsDisabled') }}</p>
+      <t-button size="small" theme="primary" variant="outline" :loading="policySaving" @click="enableScripts">
+        {{ $t('settings.sandbox.enableScripts') }}
+      </t-button>
+    </div>
+
     <div v-if="loading" class="loading-container">
       <t-loading :text="$t('common.loading')" />
     </div>
@@ -371,6 +379,7 @@ import {
 import {
   isNamedSandboxBackend,
   listSandboxConfigs,
+  setSandboxWorkspacePolicy,
   type SandboxConfigRecord,
 } from '@/api/system'
 
@@ -397,6 +406,8 @@ const hostRecord = computed(() => hostSkillTargetRecord(t('settings.skills.hostT
 
 const loading = ref(false)
 const records = ref<SandboxConfigRecord[]>([])
+const scriptsDisabled = ref(false)
+const policySaving = ref(false)
 const catalog = ref<SkillCatalogItem[]>([])
 const focusedCatalogId = ref('')
 const deletingId = ref('')
@@ -1211,15 +1222,27 @@ async function load() {
   loading.value = true
   try {
     await deploymentCapabilities.ensureLoaded()
-    const [configRes] = await Promise.all([
-      hostOnly.value ? Promise.resolve({ data: [] as SandboxConfigRecord[] }) : listSandboxConfigs(),
-      loadCatalog(),
-    ])
-    records.value = configRes?.data || []
+    // Lite lists no configs but still reports the workspace script policy.
+    const [configRes] = await Promise.all([listSandboxConfigs(), loadCatalog()])
+    records.value = hostOnly.value ? [] : configRes?.data || []
+    scriptsDisabled.value = configRes?.workspace_scripts_disabled === true
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))
   } finally {
     loading.value = false
+  }
+}
+
+async function enableScripts() {
+  policySaving.value = true
+  try {
+    const res = await setSandboxWorkspacePolicy(false)
+    scriptsDisabled.value = res?.workspace_scripts_disabled === true
+    MessagePlugin.success(t('settings.sandbox.scriptsEnabled'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('settings.sandbox.policySaveFailed'))
+  } finally {
+    policySaving.value = false
   }
 }
 
@@ -1291,6 +1314,23 @@ onUnmounted(() => {
 
 .skill-settings {
   width: 100%;
+}
+
+.skill-settings__scripts-off {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-warning-color-3);
+  border-radius: var(--app-radius-md);
+  background: var(--td-warning-color-1);
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-primary);
+  }
 }
 
 .section-header {

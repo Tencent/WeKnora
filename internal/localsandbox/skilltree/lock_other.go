@@ -9,3 +9,8 @@ func (t *Tree) Lock(name string) (func(), error) {
 	}
 	return func() {}, nil
 }
+
+func (t *Tree) tryLock(name string) (func(), bool, error) {
+	unlock, err := t.Lock(name)
+	return unlock, err == nil, err
+}

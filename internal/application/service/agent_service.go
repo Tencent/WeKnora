@@ -887,10 +887,18 @@ func sandboxCreateTimeEnvVars(
 // against. Errors stay inside the callback so a failed persist cannot change
 // the tool result the model already received.
 func (s *agentService) skillEnvCapture(config *types.AgentConfig) tools.SkillEnvCapture {
-	if s.db == nil || config == nil || config.SandboxConfigID == "" {
+	if s.db == nil || config == nil {
 		return nil
 	}
 	configID := config.SandboxConfigID
+	if s.hostDesktop {
+		// Lite agents store no config; values live under the host target,
+		// which is where userEnvResolver reads them.
+		configID = sandbox.HostSkillTargetID
+	}
+	if configID == "" {
+		return nil
+	}
 	return func(ctx context.Context, skillName string, pairs map[string]string) {
 		svc := NewUserEnvService(
 			repository.NewTenantSkillRepository(s.db),

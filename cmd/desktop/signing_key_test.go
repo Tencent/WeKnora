@@ -53,4 +53,20 @@ func TestDesktopJWTSecretIsNotTheAESKey(t *testing.T) {
 	require.Equal(t, jwt, os.Getenv("JWT_SECRET"))
 	require.Equal(t, aes, string(utils.SystemHMACKey()))
 	require.Equal(t, aes, os.Getenv("SYSTEM_AES_KEY"))
+	_, err := os.Stat(filepath.Join(dir, "signing.key"))
+	require.True(t, os.IsNotExist(err), "the AES key must not be copied into signing.key")
+}
+
+func TestDesktopSigningKeyKeepsAnExplicitKey(t *testing.T) {
+	dir := t.TempDir()
+	stale := []byte("stale-file-key-0123456789abcdefgh")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "signing.key"), stale, 0o600))
+	const explicit = "explicit-24-byte-signkey"
+	t.Setenv("SYSTEM_SIGNING_KEY", explicit)
+	t.Setenv("SYSTEM_AES_KEY", "")
+	t.Setenv("JWT_SECRET", "")
+
+	require.NoError(t, ensureDesktopSigningKeyInDir(dir))
+	require.Equal(t, explicit, string(utils.SystemHMACKey()))
+	require.NotEqual(t, explicit, os.Getenv("JWT_SECRET"))
 }

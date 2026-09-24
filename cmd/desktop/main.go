@@ -221,7 +221,7 @@ func main() {
 		_ = os.Setenv("STREAM_MANAGER_TYPE", stream.TypeMemory)
 	}
 	configureDesktopStorage(execPath)
-	configureDesktopFileStorage()
+	configureDesktopFileStorage(execPath)
 	logger.ConfigureFromEnv()
 
 	// Set Gin mode
@@ -456,8 +456,9 @@ func configureDesktopStorage(execPath string) {
 // configureDesktopFileStorage points Lite file uploads at ~/.weknora/data/files.
 // wails dev is not always inside a packaged .app, so this runs for every
 // desktop process. An explicit absolute directory is kept; the Docker default
-// /data/files is not writable on macOS and is replaced.
-func configureDesktopFileStorage() {
+// /data/files is not writable on macOS and is replaced. Uploads move over from
+// wherever the previous build kept them.
+func configureDesktopFileStorage(execPath string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		logger.Warnf(context.Background(), "Failed to resolve home dir for file storage: %v", err)
@@ -468,8 +469,8 @@ func configureDesktopFileStorage() {
 	if !useDesktopFilesDir(raw) {
 		return
 	}
-	if appSupport, err := defaultMacAppSupportDir(""); err == nil {
-		migrateDesktopFiles(filepath.Join(appSupport, "data", "files"), filesPath)
+	if appSupport, err := defaultMacAppSupportDir(execPath); err == nil {
+		migrateDesktopFiles(legacyDesktopFilesDir(raw, appSupport), filesPath)
 	}
 	if err := os.MkdirAll(filesPath, 0o755); err != nil {
 		logger.Warnf(context.Background(), "Failed to create desktop files directory %s: %v", filesPath, err)
@@ -494,6 +495,16 @@ func useDesktopFilesDir(raw string) bool {
 	default:
 		return !filepath.IsAbs(cleaned)
 	}
+}
+
+// legacyDesktopFilesDir is where the previous build stored uploads: raw
+// resolved under the bundle's Application Support dir, or its data/files
+// default when raw is empty or the absolute Docker default.
+func legacyDesktopFilesDir(raw, appSupportDir string) string {
+	if filepath.IsAbs(strings.TrimSpace(raw)) {
+		raw = ""
+	}
+	return resolveDesktopDataPath(raw, filepath.Join("data", "files"), appSupportDir)
 }
 
 func migrateDesktopFiles(oldDir, newDir string) {

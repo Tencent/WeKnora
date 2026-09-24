@@ -228,28 +228,31 @@ func (t *Tree) Installed(name string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// Sweep deletes leftovers of runs that died. Call it only while no install
-// can be running (process start).
+// Sweep deletes leftovers of runs that died: stale .next- links and version
+// directories that never became active (newer than the live one, or of a
+// skill with no live link). Versions at or below the live one are Prune's to
+// manage, so the previous version a rollback relies on survives. A skill whose
+// lock another Lite process holds is mid-install there and is skipped.
 func (t *Tree) Sweep() error {
 	entries, err := os.ReadDir(t.root)
 	if err != nil {
 		return err
 	}
-	targets := map[string]bool{}
+	live := map[string]int{}
 	var errs []error
 	for _, e := range entries {
 		if e.Type()&os.ModeSymlink == 0 {
 			continue
 		}
 		p := filepath.Join(t.root, e.Name())
-		if strings.HasPrefix(e.Name(), nextPrefix) {
-			if err := os.Remove(p); err != nil {
-				errs = append(errs, err)
-			}
+		if name, ok := strings.CutPrefix(e.Name(), nextPrefix); ok {
+			errs = append(errs, t.sweepLocked(name, p))
 			continue
 		}
 		if target, err := os.Readlink(p); err == nil {
-			targets[filepath.Clean(target)] = true
+			if n, ok := versionNumber(e.Name(), filepath.Base(filepath.Clean(target))); ok {
+				live[e.Name()] = n
+			}
 		}
 	}
 	versions, err := os.ReadDir(t.VersionsRoot())
@@ -258,12 +261,39 @@ func (t *Tree) Sweep() error {
 	}
 	for _, e := range versions {
 		dir := filepath.Join(t.VersionsRoot(), e.Name())
-		if targets[dir] {
+		name, n, ok := splitVersion(e.Name())
+		if !ok {
+			if err := os.RemoveAll(dir); err != nil {
+				errs = append(errs, err)
+			}
 			continue
 		}
-		if err := os.RemoveAll(dir); err != nil {
-			errs = append(errs, err)
+		if cur, linked := live[name]; linked && n <= cur {
+			continue
 		}
+		errs = append(errs, t.sweepLocked(name, dir))
 	}
 	return errors.Join(errs...)
+}
+
+// sweepLocked removes p under name's lock, and leaves it when another process
+// holds that lock.
+func (t *Tree) sweepLocked(name, p string) error {
+	unlock, ok, err := t.tryLock(name)
+	if err != nil || !ok {
+		return err
+	}
+	defer unlock()
+	return os.RemoveAll(p)
+}
+
+// splitVersion parses "<name>-<n>" without knowing name.
+func splitVersion(base string) (string, int, bool) {
+	i := strings.LastIndex(base, "-")
+	if i <= 0 {
+		return "", 0, false
+	}
+	name := base[:i]
+	n, ok := versionNumber(name, base)
+	return name, n, ok && validName(name) == nil
 }

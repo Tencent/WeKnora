@@ -71,6 +71,7 @@ func TestBuildAskModeKeepsWorkspaceReadableButNotWritable(t *testing.T) {
 	require.Contains(t, p.ReadableRoots, ws.Root)
 	require.Empty(t, p.WritableRoots)
 	require.Equal(t, ws.Root, p.Cwd)
+	require.Equal(t, NetworkDenied, p.Network)
 }
 
 // Full access has no policy at all; representing it as a very wide policy

@@ -82,13 +82,19 @@ func NewSandboxConfigHandler(
 }
 
 // liteHidden answers every sandbox-config route on Lite: the desktop build has
-// no remote sandboxes. Listing succeeds empty so shared pages still load.
+// no remote sandboxes. Listing succeeds empty so shared pages still load, and
+// still reports the workspace script policy, which Lite's host sandbox obeys.
 func (h *SandboxConfigHandler) liteHidden(c *gin.Context, list bool) bool {
 	if !h.desktop {
 		return false
 	}
 	if list {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+		disabled, err := h.service.WorkspaceScriptsDisabled(c.Request.Context(), sandboxConfigTenantID(c))
+		if err != nil {
+			_ = c.Error(err)
+			return true
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "workspace_scripts_disabled": disabled})
 		return true
 	}
 	_ = c.Error(apperrors.NewNotFoundError("sandbox configs are not available in Lite"))
@@ -275,10 +281,8 @@ type workspacePolicyRequest struct {
 }
 
 // SetWorkspacePolicy toggles script execution for the whole workspace.
+// It stays open on Lite: the host sandbox honours the same switch.
 func (h *SandboxConfigHandler) SetWorkspacePolicy(c *gin.Context) {
-	if h.liteHidden(c, false) {
-		return
-	}
 	var req workspacePolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewBadRequestError(err.Error()))

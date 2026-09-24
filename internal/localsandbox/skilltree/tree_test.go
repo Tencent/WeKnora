@@ -133,6 +133,35 @@ func TestSweepRemovesOrphansAndStaleNextLinks(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 }
 
+func TestSweepKeepsThePreviousVersion(t *testing.T) {
+	tree := newTree(t)
+	previous, _ := tree.NewVersion("pdf")
+	writeSkill(t, previous)
+	live, _ := tree.NewVersion("pdf")
+	writeSkill(t, live)
+	_, err := tree.Activate("pdf", live)
+	require.NoError(t, err)
+
+	require.NoError(t, tree.Sweep())
+	require.DirExists(t, previous)
+	require.DirExists(t, live)
+}
+
+// Another Lite process holding the lock is mid-install; its version dir stays.
+func TestSweepSkipsASkillLockedElsewhere(t *testing.T) {
+	tree := newTree(t)
+	installing, _ := tree.NewVersion("pdf")
+	unlock, err := tree.Lock("pdf")
+	require.NoError(t, err)
+
+	require.NoError(t, tree.Sweep())
+	require.DirExists(t, installing)
+
+	unlock()
+	require.NoError(t, tree.Sweep())
+	require.NoDirExists(t, installing)
+}
+
 func TestLockIsExclusivePerSkill(t *testing.T) {
 	tree := newTree(t)
 	unlock, err := tree.Lock("pdf")

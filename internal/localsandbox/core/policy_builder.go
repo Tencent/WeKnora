@@ -148,8 +148,9 @@ func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 	}
 
 	p := Policy{
-		// Chat commands need outbound access for package installs, APIs, and
-		// skill tests. Install policies already use the same stance.
+		// Auto-mode chat commands need outbound access for package installs,
+		// APIs, and skill tests. Ask mode keeps it denied below: a network
+		// denial is what routes a command to the approval prompt.
 		Network:       NetworkUnrestricted,
 		Cwd:           ws.Root,
 		ReadableRoots: b.readableRoots(ws),
@@ -167,9 +168,11 @@ func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 		}
 		p.WritableRoots = []WritableRoot{root}
 	case ModeAsk:
-		// Nothing is writable up front; approved commands are re-prepared
-		// through Relax. Cwd stays the workspace so the process has a home.
+		// Nothing is writable and nothing leaves the machine up front;
+		// approved commands are re-prepared through Relax. Cwd stays the
+		// workspace so the process has a home.
 		p.WritableRoots = nil
+		p.Network = NetworkDenied
 		p.Cwd = ws.Root
 	default:
 		return Policy{}, fmt.Errorf("localsandbox: unknown approval mode %q", mode)

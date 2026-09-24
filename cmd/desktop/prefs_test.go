@@ -20,9 +20,8 @@ func TestDesktopSigningKeyKeepsExistingAESHMAC(t *testing.T) {
 	require.Equal(t, aes, string(utils.SystemHMACKey()))
 	require.NoError(t, ensureDesktopSigningKeyInDir(dir))
 	require.Equal(t, aes, string(utils.SystemHMACKey()))
-	got, err := os.ReadFile(filepath.Join(dir, "signing.key"))
-	require.NoError(t, err)
-	require.Equal(t, aes, string(got))
+	_, err := os.Stat(filepath.Join(dir, "signing.key"))
+	require.True(t, os.IsNotExist(err), "the AES key must not be copied into signing.key")
 	require.NotEqual(t, aes, os.Getenv("JWT_SECRET"))
 	require.GreaterOrEqual(t, len(os.Getenv("JWT_SECRET")), 32)
 }
@@ -42,11 +41,31 @@ func TestConfigureDesktopFileStorageUsesHomeWeKnora(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", "/data/files")
-	configureDesktopFileStorage()
+	configureDesktopFileStorage("")
 	require.Equal(t, filepath.Join(home, ".weknora", "data", "files"), os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	info, err := os.Stat(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
+}
+
+func TestLegacyDesktopFilesDirFollowsTheOldResolution(t *testing.T) {
+	appSupport := "/Users/dev/Library/Application Support/WeKnora"
+	require.Equal(t, filepath.Join(appSupport, "data", "files"), legacyDesktopFilesDir("", appSupport))
+	require.Equal(t, filepath.Join(appSupport, "data", "files"), legacyDesktopFilesDir("/data/files", appSupport))
+	require.Equal(t, filepath.Join(appSupport, "custom", "files"), legacyDesktopFilesDir("custom/files", appSupport))
+}
+
+func TestConfigureDesktopFileStorageMigratesFromTheBundleDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", "custom/files")
+	old := filepath.Join(home, "Library", "Application Support", "WeKnora", "custom", "files")
+	require.NoError(t, os.MkdirAll(filepath.Join(old, "1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(old, "1", "a.txt"), []byte("a"), 0o600))
+
+	configureDesktopFileStorage("/Applications/WeKnora.app/Contents/MacOS/WeKnora")
+
+	require.FileExists(t, filepath.Join(home, ".weknora", "data", "files", "1", "a.txt"))
 }
 
 func TestEnsureDesktopLiteEditionOverridesDefaultStandard(t *testing.T) {

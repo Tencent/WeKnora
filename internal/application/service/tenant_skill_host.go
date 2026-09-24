@@ -109,7 +109,9 @@ func (s *TenantSkillService) runHostInstall(ctx context.Context, r hostInstallRu
 		return err
 	}
 	declaredEnvs, envsDeclared := readHostEnvDeclaration(ctx, r.skillID, versionDir, r.bundle)
-	if err := os.RemoveAll(filepath.Join(versionDir, ".weknora", "cache")); err != nil {
+	if cache, err := noSymlinkPath(versionDir, ".weknora", "cache"); err != nil {
+		logger.Warnf(ctx, "[skill] clear install cache of %s refused: %v", versionDir, err)
+	} else if err := os.RemoveAll(cache); err != nil {
 		logger.Warnf(ctx, "[skill] clear install cache of %s failed: %v", versionDir, err)
 	}
 	s.publishProgress(ctx, r.tenantID, r.configID, r.skillID, SkillProgress{Percent: 90, Stage: "verified"})
@@ -243,7 +245,7 @@ func readHostEnvDeclaration(
 		return nil, false
 	}
 	p := sandbox.SkillRequirementsPathIn(versionDir)
-	raw, err := os.ReadFile(p)
+	raw, err := readNoSymlinkFile(versionDir, p)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			logger.Infof(ctx, "[skill] %s declared no environment variables (no %s)", skillID, p)
@@ -264,6 +266,42 @@ func readHostEnvDeclaration(
 		return nil, false
 	}
 	return envs, true
+}
+
+// noSymlinkPath joins parts under dir and refuses any component that is a
+// symlink. The installer agent writes dir from inside the sandbox; this process
+// is not sandboxed, so following a link it planted would reach the rest of the
+// user's files. A missing component is fine: nothing is there to follow.
+func noSymlinkPath(dir string, parts ...string) (string, error) {
+	p := dir
+	for _, part := range parts {
+		p = filepath.Join(p, part)
+		info, err := os.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return filepath.Join(append([]string{dir}, parts...)...), nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("%s is a symlink", p)
+		}
+	}
+	return p, nil
+}
+
+// readNoSymlinkFile reads p, a path inside dir, without following a symlink
+// anywhere below dir.
+func readNoSymlinkFile(dir, p string) ([]byte, error) {
+	rel, err := filepath.Rel(dir, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("%s is outside %s", p, dir)
+	}
+	safe, err := noSymlinkPath(dir, strings.Split(rel, string(filepath.Separator))...)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(safe)
 }
 
 // restoreHostSkillLink puts the previous version back after a failed ready

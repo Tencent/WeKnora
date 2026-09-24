@@ -323,13 +323,20 @@ func newSandboxConfigTestRouter(h *SandboxConfigHandler) *gin.Engine {
 }
 
 func TestSandboxConfigRoutesAreHiddenOnLiteDesktop(t *testing.T) {
-	h := NewSandboxConfigHandler(nil, service.HostSandboxManager{Desktop: true})
+	h := &SandboxConfigHandler{service: &fakeSandboxConfigService{}, desktop: true}
 	r := newSandboxConfigTestRouter(h)
+	r.PUT("/sandbox-configs/workspace-policy", h.SetWorkspacePolicy)
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sandbox-configs", nil))
 	require.Equal(t, http.StatusOK, w.Code)
-	require.JSONEq(t, `{"success":true,"data":[]}`, w.Body.String())
+	require.JSONEq(t, `{"success":true,"data":[],"workspace_scripts_disabled":false}`, w.Body.String())
+
+	// The script switch still governs the host sandbox, so it stays reachable.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/sandbox-configs/workspace-policy",
+		strings.NewReader(`{"scripts_disabled":false}`)))
+	require.Equal(t, http.StatusOK, w.Code)
 
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sandbox-configs", strings.NewReader(`{"name":"x"}`)))

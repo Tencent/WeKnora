@@ -115,6 +115,10 @@ export function useConfigSkillInstallProgress(options?: {
           // that frame arrives on every connection.
           if (installRunFinished(parsed)) {
             options?.onDone?.({ configId, skillId }, parsed)
+          } else if (parsed.stage === 'detached') {
+            // The server stopped following at its cap while the run goes on.
+            // Keep following; the cap bounds how often this reconnects.
+            follow(configId, skillId)
           }
         }
       },
