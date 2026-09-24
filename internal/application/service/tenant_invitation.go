@@ -43,7 +43,7 @@ var (
 	ErrInvitationExpired = errors.New("invitation has expired")
 
 	// ErrInvitationForbidden is returned by Accept / Decline when the
-	// caller is not the invitee. Owner-driven Revoke is gated at the
+	// caller is not the invitee. Admin-driven Revoke is gated at the
 	// route layer so this error only surfaces on the /me/ paths.
 	ErrInvitationForbidden = errors.New("only the invitee can accept or decline this invitation")
 
@@ -476,7 +476,7 @@ func (s *tenantInvitationService) Decline(
 	return nil
 }
 
-// Revoke transitions the pending row into revoked. Route-layer Owner
+// Revoke transitions the pending row into revoked. Route-layer Admin+
 // gate guarantees the caller is allowed to act on this tenant; this
 // method does not re-check role.
 func (s *tenantInvitationService) Revoke(ctx context.Context, invID uint64) error {

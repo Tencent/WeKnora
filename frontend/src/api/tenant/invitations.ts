@@ -145,7 +145,7 @@ export async function listTenantInvitations(
 /**
  * Send a new invitation. The invitee will see it in /me/invitations
  * and must accept before they actually become a member.
- * Backend: POST /api/v1/tenants/:id/invitations (Owner+).
+ * Backend: POST /api/v1/tenants/:id/invitations (Admin+).
  *
  * 404 when the email is not a registered user (ask them to register).
  * 409 when an existing pending invitation already covers this pair, or
@@ -165,7 +165,7 @@ export async function createInvitation(
  * Revoke a still-pending invitation. Already-finalised rows return
  * 409; rows from another tenant render as 404 to avoid existence
  * leaks across tenants.
- * Backend: DELETE /api/v1/tenants/:id/invitations/:inv_id (Owner+).
+ * Backend: DELETE /api/v1/tenants/:id/invitations/:inv_id (Admin+).
  */
 export async function revokeInvitation(
   tenantId: number,
@@ -215,7 +215,8 @@ export async function acceptInvitation(invId: number): Promise<AcceptInvitationR
 
 /**
  * 已登录用户用共享链接 token 加入空间（需鉴权，不创建新账号）。
- * 用于 invite_only 模式下的邀请链接流程：链接导向登录而非注册，登录后再兑换 token。
+ * 新用户走 /register?token=… → register-by-invite；已有账号在注册页
+ * 切到登录后，登录成功再调用本接口兑换 token。
  * Backend: POST /api/v1/me/invitations/accept-by-token (authenticated).
  */
 export async function acceptInvitationByToken(

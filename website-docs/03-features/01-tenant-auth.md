@@ -112,7 +112,7 @@ func (c *AuthConfig) IsInviteOnly() bool {
 
 #### 邀请注册（register-by-invite） {#_2-3-邀请注册-register-by-invite}
 
-`internal/handler/auth_register_by_invite.go`。租户 Owner 生成的**共享邀请链接**（share link，见 [共享邀请链接（invite link）](#_7-2-共享邀请链接-invite-link)）持有 token，注册页凭 token 完成注册，即使系统处于 `invite_only` 模式：
+`internal/handler/auth_register_by_invite.go`。租户 Admin+ 生成的**共享邀请链接**（share link，见 [共享邀请链接（invite link）](#_7-2-共享邀请链接-invite-link)）持有 token，注册页凭 token 完成注册，即使系统处于 `invite_only` 模式：
 
 ```go
 // POST /auth/register-by-invite
@@ -143,12 +143,12 @@ Handler：`internal/handler/tenant_member.go`、`tenant_invitation.go`。`/tenan
 | 端点 | 最低角色 | 说明 |
 | --- | --- | --- |
 | `GET /tenants/:id/members` | Viewer | 分页列出 active 成员，`q` 按邮箱/用户名模糊过滤 |
-| `POST /tenants/:id/members` | Owner | 直接添加现有用户 `{email, role}` |
-| `PUT /tenants/:id/members/:user_id` | Owner | 修改角色 |
-| `DELETE /tenants/:id/members/:user_id` | Owner | 移除成员 |
-| `POST /tenants/:id/invitations` | Owner | 定向邀请现有用户 `{email, role, message}` |
+| `POST /tenants/:id/members` | Admin+ | 直接添加现有用户 `{email, role}` |
+| `PUT /tenants/:id/members/:user_id` | Admin+ | 修改角色 |
+| `DELETE /tenants/:id/members/:user_id` | Admin+ | 移除成员 |
+| `POST /tenants/:id/invitations` | Admin+ | 定向邀请现有用户 `{email, role, message}` |
 | `GET /tenants/:id/invitations` | Viewer | 列出邀请 |
-| `DELETE /tenants/:id/invitations/:inv_id` | Owner | 撤销邀请 |
+| `DELETE /tenants/:id/invitations/:inv_id` | Admin+ | 撤销邀请 |
 | `GET /me/invitations` | 本人 | 邀请收件箱 |
 | `POST /me/invitations/:inv_id/accept` / `.../decline` | 本人 | 接受 / 拒绝 |
 
@@ -158,8 +158,8 @@ Handler：`internal/handler/tenant_member.go`、`tenant_invitation.go`。`/tenan
 
 `internal/handler/tenant_invite_link.go`。与定向邀请同表存储：`InviteeUserID` 为空即共享链接（多人可用，`AcceptedCount` 计数），非空即定向邀请。
 
-- `POST /tenants/:id/invite-links`（Owner）：`{role, message}` → 返回 `invite_url`（`{FrontendBaseURL}/register?token=...`，`FrontendBaseURL` 取 YAML `frontend_base_url` → 环境变量 `FRONTEND_BASE_URL` → 相对路径兜底）；
-- `GET /tenants/:id/invite-links`（Viewer）列出；`DELETE /tenants/:id/invite-links/:inv_id`（Owner）撤销。
+- `POST /tenants/:id/invite-links`（Admin+）：`{role, message}` → 返回 `invite_url`（`{FrontendBaseURL}/register?token=...`，`FrontendBaseURL` 取 YAML `frontend_base_url` → 环境变量 `FRONTEND_BASE_URL` → 相对路径兜底）；
+- `GET /tenants/:id/invite-links`（Viewer）列出；`DELETE /tenants/:id/invite-links/:inv_id`（Admin+）撤销。
 
 链接持续有效直到过期或撤销，配合 [邀请注册（register-by-invite）](#_2-3-邀请注册-register-by-invite) 的 `register-by-invite` 打通 invite-only 模式下的开户闭环。
 
@@ -261,7 +261,7 @@ flowchart LR
 | 能力 | Owner (40) | Admin (30) | Contributor (20) | Viewer (10) |
 | --- | --- | --- | --- | --- |
 | 删除租户 / 转移所有权 / 管理 API Key | ✓ | ✗ | ✗ | ✗ |
-| 添加 / 移除成员、改角色、发邀请 | ✓ | ✗（handler 限 Owner） | ✗ | ✗ |
+| 添加 / 移除成员、改角色、发邀请 | ✓ | ✓ | ✗ | ✗ |
 | 配置租户基础设施（模型 / 向量库 / IM / MCP / Web 搜索 / 存储后端 / 数据源） | ✓ | ✓ | ✗ | ✗ |
 | 清空知识库内容（`DELETE /knowledge-bases/:id/knowledge`） | ✓ | ✓ | ✗ | ✗ |
 | 修改 / 删除**他人**创建的 KB / Agent / 知识 / chunk / Wiki / 标签 | ✓ | ✓ | ✗ | ✗ |
@@ -277,7 +277,7 @@ flowchart LR
 > - Viewer：全部只读；
 > - 创建新资源至少需要 Contributor；配置租户基础设施需要 Admin+。
 
-两处容易踩空的例外：**成员增删改角色与发邀请是 Owner 独有**，Admin 也不行（`routes_auth_tenant.go` 上挂的是 `g.Owner()`，成员列表才是 Viewer+）；**Viewer 并非「什么都不能建」**——会话属于自己的工作数据，Viewer 也能建会话、提问，只是建不了知识库和 Agent。
+例外：**Viewer 并非「什么都不能建」**——会话属于自己的工作数据，Viewer 也能建会话、提问，只是建不了知识库和 Agent。成员增删改角色与发邀请为 Admin+（`routes_auth_tenant.go` 挂 `g.Admin()`）；删除空间 / 转移所有权 / API Key 仍为 Owner 独有。
 
 #### 守卫选择规则（Q1 / Q2） {#_6-2-守卫选择规则-q1-q2}
 

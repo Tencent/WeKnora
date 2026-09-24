@@ -21,7 +21,7 @@ import (
 
 // TenantInvitationHandler exposes the tenant-scoped CRUD on the
 // `tenant_invitations` table plus the user-self-service inbox endpoints
-// (/me/invitations*). Route-level RBAC: tenant routes are Owner-gated
+// (/me/invitations*). Route-level RBAC: tenant routes are Admin-gated
 // (POST/DELETE) or Viewer-gated (GET); inbox routes only require
 // authentication (the service enforces "only invitee can act").
 type TenantInvitationHandler struct {
@@ -139,9 +139,9 @@ func projectInvitation(
 }
 
 // projectInvitationWithLink layers invite_url on top of projectInvitation
-// for share-link rows that are still pending. The Owner-facing list and
+// for share-link rows that are still pending. The Admin+-facing list and
 // the create response go through here so a "copy link" button can sit
-// on every active row — Owners can dispatch the link on demand without
+// on every active row — operators can dispatch the link on demand without
 // the "copy now or revoke" pressure.
 //
 // The /me/invitations inbox path does NOT use this helper: per-user
@@ -269,12 +269,12 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 
 	usersByID := h.hydrateUsers(c, rows)
 	orgUnitsByID := h.hydrateOrgUnits(c, rows)
-	showShareLinks := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleOwner)
+	showShareLinks := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)
 	resp := make([]types.TenantInvitationResponse, 0, len(rows))
 	for _, inv := range rows {
 		// Within the tenant view we don't bother hydrating tenant name
 		// (the caller already knows the tenant). Pass an empty map.
-		// Share-link URLs embed the registration token — only Owners may
+		// Share-link URLs embed the registration token — only Admin+ may
 		// re-copy them; other roles see metadata without invite_url.
 		if showShareLinks {
 			resp = append(resp, h.projectInvitationWithLink(inv, usersByID, nil, orgUnitsByID))
@@ -295,7 +295,7 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 
 // CreateInvitation godoc
 // @Summary      发出空间邀请
-// @Description  Owner 通过邮箱邀请已注册用户加入空间。开启 tenant.auto_accept_invitation 后被邀请人立即自动加入（响应为成员结构），否则需在 /me/invitations 接受后成为成员。
+// @Description  Admin+ 通过邮箱邀请已注册用户加入空间。开启 tenant.auto_accept_invitation 后被邀请人立即自动加入（响应为成员结构），否则需在 /me/invitations 接受后成为成员。
 // @Tags         空间邀请
 // @Accept       json
 // @Produce      json
@@ -459,7 +459,7 @@ func (h *TenantInvitationHandler) bindAutoAcceptOrgUnit(
 
 // RevokeInvitation godoc
 // @Summary      撤销待接受邀请
-// @Description  Owner 取消一条还在 pending 的邀请；已 accepted/declined/revoked/expired 的行不可再撤销。
+// @Description  Admin+ 取消一条还在 pending 的邀请；已 accepted/declined/revoked/expired 的行不可再撤销。
 // @Tags         空间邀请
 // @Produce      json
 // @Param        id      path  string  true  "空间 ID"
@@ -479,10 +479,10 @@ func (h *TenantInvitationHandler) RevokeInvitation(c *gin.Context) {
 	}
 
 	// Cross-check the invitation lives in the URL :id. The route layer
-	// already verifies the caller has Owner on the active tenant AND
+	// already verifies the caller has Admin+ on the active tenant AND
 	// the URL :id matches the active tenant (PathTenantMatch), but the
 	// invitation row itself carries its own tenant_id we have to honour
-	// — otherwise an Owner of A could revoke invitations of B by URL-
+	// — otherwise an Admin of A could revoke invitations of B by URL-
 	// crafting against /tenants/A/invitations/<inv-of-B>.
 	inv, err := h.invitationService.GetByID(ctx, invID)
 	if err != nil {

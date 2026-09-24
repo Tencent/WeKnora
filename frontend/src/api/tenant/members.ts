@@ -108,7 +108,7 @@ export async function fetchAllTenantMembers(tenantId: number): Promise<TenantMem
 
 /**
  * Invite an existing user (by email) to the tenant with the given role.
- * Backend: POST /api/v1/tenants/:id/members (Owner+).
+ * Backend: POST /api/v1/tenants/:id/members (Admin+).
  *
  * Returns 404 when the email does not match any registered user — the
  * caller should ask the invitee to register first. PR 3 does not yet
@@ -123,7 +123,7 @@ export async function addMember(
 
 /**
  * Change an existing member's role.
- * Backend: PUT /api/v1/tenants/:id/members/:user_id (Owner+).
+ * Backend: PUT /api/v1/tenants/:id/members/:user_id (Admin+).
  *
  * Returns 409 when this would demote the last active Owner of the tenant.
  */
@@ -137,7 +137,7 @@ export async function updateMemberRole(
 
 /**
  * Remove a member from the tenant.
- * Backend: DELETE /api/v1/tenants/:id/members/:user_id (Owner+).
+ * Backend: DELETE /api/v1/tenants/:id/members/:user_id (Admin+).
  *
  * Returns 409 when this would remove the last active Owner.
  */

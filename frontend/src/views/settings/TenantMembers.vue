@@ -892,11 +892,11 @@ async function loadOrgUnits(role?: TenantRole) {
 // Role-aware gates. The server enforces every mutation; UI gates here
 // are presentational only, matching the security note in stores/auth.ts.
 const currentRole = computed<TenantRole | ''>(() => (authStore.currentTenantRole || '') as TenantRole | '')
-// Cross-tenant superusers (org-level operators) bypass the Owner gate
+// Cross-tenant superusers (org-level operators) bypass the Admin gate
 // on the server (see middleware/rbac.go RequireRole). The UI must
 // mirror that or the buttons would be invisible to the exact admins
-// who actually need them. Local Owners of their own tenant come in via
-// the role branch.
+// who actually need them. Local Admin+/Owner of their own tenant come
+// in via the role branch.
 const canManage = computed(
   () =>
     authStore.hasRole('admin') ||

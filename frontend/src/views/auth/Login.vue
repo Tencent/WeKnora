@@ -159,7 +159,7 @@
       <div class="form-panel">
         <!-- Login Card -->
         <div class="form-card" v-if="!isRegisterMode">
-          <!-- invite_only 模式下共享链接停在登录卡，同样需要邀请上下文。 -->
+          <!-- 分享链接用户切回登录时，同样展示邀请上下文。 -->
           <div v-if="inviteLookup" class="invite-banner">
             <t-icon name="link" class="invite-banner__icon" />
             <div class="invite-banner__text">
@@ -197,7 +197,9 @@
                 {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
               </t-button>
 
-              <div class="register-cta" v-if="registrationEnabled">
+              <!-- 公开注册开启，或持有有效分享链接时可建号（register-by-invite
+                   绕过 invite_only）。后者保证从注册切回登录后仍能返回注册。 -->
+              <div class="register-cta" v-if="registrationEnabled || inviteLookup">
                 <div class="register-cta__divider">
                   <span>{{ $t('auth.firstTime') }}</span>
                 </div>
@@ -785,11 +787,13 @@ onMounted(async () => {
       return
     }
 
-    // 3. 未登录：按注册模式决定界面。invite_only 停在登录页、登录后再兑换；self_serve 保持注册流程。
+    // 3. 未登录：有有效分享链接时默认进注册页（register-by-invite 绕过
+    // invite_only）。已有账号可通过「返回登录」切到登录卡，登录后再兑换。
+    // registrationEnabled 仍只反映公网自助注册开关，不影响邀请建号入口。
     const cfg = await getAuthConfig()
     const inviteOnly = cfg.registration_mode === 'invite_only'
     registrationEnabled.value = !inviteOnly
-    isRegisterMode.value = !inviteOnly
+    isRegisterMode.value = true
     loadOIDCConfig()
     return
   }

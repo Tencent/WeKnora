@@ -241,7 +241,7 @@ curl $BASE/api/v1/tenants/1/members -H "Authorization: Bearer $TOKEN"
 
 ### POST /api/v1/tenants/:id/members
 
-用途：直接添加成员。权限：Owner。
+用途：直接添加成员。权限：Admin+。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -257,7 +257,7 @@ curl -X POST $BASE/api/v1/tenants/1/members -H "Authorization: Bearer $TOKEN" \
 
 ### PUT /api/v1/tenants/:id/members/:user_id
 
-用途：修改成员角色。权限：Owner。请求体：`{"role":"admin"}`（`binding:"required"`）。
+用途：修改成员角色。权限：Admin+。请求体：`{"role":"admin"}`（`binding:"required"`）。
 
 响应：200 `{"success":true}`
 
@@ -268,7 +268,7 @@ curl -X PUT $BASE/api/v1/tenants/1/members/u-123 -H "Authorization: Bearer $TOKE
 
 ### DELETE /api/v1/tenants/:id/members/:user_id
 
-用途：移除成员。权限：Owner。
+用途：移除成员。权限：Admin+。
 
 响应：200 `{"success":true}`
 
@@ -307,7 +307,7 @@ curl $BASE/api/v1/tenants/1/invitations -H "Authorization: Bearer $TOKEN"
 
 ### POST /api/v1/tenants/:id/invitations
 
-用途：邀请成员（被邀请人在 `/me/invitations` 确认后才入库）。权限：Owner。
+用途：邀请成员（被邀请人在 `/me/invitations` 确认后才入库）。权限：Admin+。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -324,7 +324,7 @@ curl -X POST $BASE/api/v1/tenants/1/invitations -H "Authorization: Bearer $TOKEN
 
 ### DELETE /api/v1/tenants/:id/invitations/:inv_id
 
-用途：撤销邀请。权限：Owner。
+用途：撤销邀请。权限：Admin+。
 
 响应：200 `{"success":true}`
 
@@ -334,7 +334,7 @@ curl -X DELETE $BASE/api/v1/tenants/1/invitations/12 -H "Authorization: Bearer $
 
 ### POST /api/v1/tenants/:id/invite-links
 
-用途：创建分享链接（多次可用的注册邀请链接）。权限：Owner。Handler: `internal/handler/tenant_invite_link.go`
+用途：创建分享链接（多次可用的注册邀请链接）。权限：Admin+。Handler: `internal/handler/tenant_invite_link.go`
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |

@@ -39,7 +39,8 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
  * corresponding read-only Settings page.
  */
 export const SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE = {
-  members: 'owner',
+  // 与侧栏 menu.minRole / 后端 g.Admin() 成员突变一致（Admin+ 可邀请）。
+  members: 'admin',
   models: 'admin',
   skills: 'admin',
 } as const satisfies Record<string, SettingsRoleKey>

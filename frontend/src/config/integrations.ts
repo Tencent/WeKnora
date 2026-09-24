@@ -9,11 +9,12 @@ export type IntegrationTab = 'im' | 'embed' | 'api' | 'cli' | 'chrome' | 'claw'
 
 export const INTEGRATION_TABS: IntegrationTab[] = ['im', 'embed', 'api', 'cli', 'chrome', 'claw']
 
-/** Aligns with Settings.vue SECTION_MIN_ROLE.api and router.go g.Owner() on /api-principal-config. */
+/** Aligns with Settings SECTION_MIN_ROLE.api and routes_auth_tenant.go
+ *  g.Owner() on /api-keys + /api-principal-config. */
 export type IntegrationTabRole = 'viewer' | 'contributor' | 'admin' | 'owner'
 
 export const INTEGRATION_TAB_MIN_ROLE: Partial<Record<IntegrationTab, IntegrationTabRole>> = {
-  api: 'admin',
+  api: 'owner',
 }
 
 export const INTEGRATION_TAB_CAPABILITY: Partial<Record<IntegrationTab, DeploymentCapabilityKey>> = {

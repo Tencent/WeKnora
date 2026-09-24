@@ -36,7 +36,7 @@ func frontendBaseURLFor(cfg *config.Config) string {
 	return strings.TrimRight(candidate, "/")
 }
 
-// buildInviteRegisterURL composes the registration URL Owners hand
+// buildInviteRegisterURL composes the registration URL Admin+ hand
 // to invitees. Plaintext token is URL-safe by construction (base64url)
 // so no extra escaping is required.
 func buildInviteRegisterURL(cfg *config.Config, plainToken string) string {
@@ -48,7 +48,7 @@ func buildInviteRegisterURL(cfg *config.Config, plainToken string) string {
 
 // createInviteLinkRequest is the body for POST /tenants/:id/invite-links.
 // Only role + optional message — share-link rows have no specific
-// invitee, so the Owner just picks "what role does the holder get".
+// invitee, so Admin+ just picks "what role does the holder get".
 type createInviteLinkRequest struct {
 	Role      types.TenantRole `json:"role"    binding:"required"`
 	OrgUnitID string           `json:"org_unit_id"`
