@@ -6557,6 +6557,12 @@ export default {
     pauseFailed: '一時停止に失敗しました',
     logs: 'ログ',
     syncModeLabel: '同期モード',
+    parseModeLabel: '解析モード',
+    parseMode: {
+      blocks: 'ブロック解析（デフォルト）',
+      export: 'エクスポート解析（docx）',
+    },
+    parseModeHint: 'Feishuクラウドドキュメントの解析方式。ブロック解析は高速でドキュメント内の添付ファイルを保持します。エクスポート解析はdocxに変換して解析し、画像とドキュメントの関連付けがより正確になります。',
     syncMode: {
       incremental: '増分',
       full: '全量'

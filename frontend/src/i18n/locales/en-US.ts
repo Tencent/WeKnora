@@ -6557,6 +6557,12 @@ export default {
     pauseFailed: 'Failed to pause',
     logs: 'Logs',
     syncModeLabel: 'Sync mode',
+    parseModeLabel: 'Parse mode',
+    parseMode: {
+      blocks: 'Blocks (default)',
+      export: 'Export (docx)',
+    },
+    parseModeHint: 'How Feishu cloud documents are parsed. Blocks is faster and keeps in-document attachments; Export converts documents to docx for parsing and keeps images associated with the document.',
     syncMode: {
       incremental: 'Incremental',
       full: 'Full'

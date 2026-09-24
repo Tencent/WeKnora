@@ -8,7 +8,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
@@ -431,6 +431,10 @@ async function loadPreview() {
       }
       case 'markdown': {
         await renderMarkdown(blob);
+        // Markdown 里的 resource:// 等受保护图片需要带鉴权换 blob（无 override
+        // 时走应用默认鉴权面：登录态 /files 代理）。已换过的元素幂等跳过。
+        await nextTick();
+        await hydrateProtectedFileImages(previewContent.value);
         break;
       }
       case 'pptx': {
@@ -1064,6 +1068,32 @@ onUnmounted(() => {
   }
   ul, ol { padding-left: 24px; margin: 8px 0; }
   li { margin: 4px 0; }
+  ul li:has(> .task-checkbox) { list-style: none; }
+  .task-checkbox {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    border: 1px solid @border-color;
+    border-radius: 3px;
+    vertical-align: -2px;
+    position: relative;
+    &.checked {
+      background: @accent;
+      border-color: @accent;
+      &::after {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 1px;
+        width: 4px;
+        height: 8px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+  }
 
   table {
     .preview-table(@bg-muted; var(--td-bg-color-container-hover));

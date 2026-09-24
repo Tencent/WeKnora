@@ -652,6 +652,12 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 
+	// One-time legacy upgrade (feishu deep adaptation): feishu/lark data
+	// sources predating the per-source parse_mode setting carry a
+	// resync_required marker stamped by migration 000110 (sqlite 000030).
+	// resyncRequired(config) below upgrades their next sync (even an
+	// incremental one) to a full pass and clears it on success.
+
 	// Parse configuration
 	config, err := ds.ParseConfig()
 	if err != nil {
@@ -667,10 +673,6 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
-	// Surface the KB's multimodal/VLM state to the connector so it only extracts
-	// embedded images for OCR when the KB can actually ingest them (never persisted).
-	config.MultimodalEnabled = kb.IsMultimodalEnabled()
-
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
 	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.
@@ -951,16 +953,6 @@ func (s *DataSourceService) applyFetchedItem(
 			// Duplicate file/URL is not a failure — count as skipped.
 			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
 			result.Skipped++
-		case item.Metadata["embedded_image"] == "true":
-			// An image extracted from a document for OCR is a best-effort
-			// enrichment, not the document itself. If the KB cannot ingest it
-			// (VLM/object-storage not configured for images, or a transient error),
-			// skip it rather than failing the whole sync: the doc body already
-			// synced, and the image stays in SubtreeKeep for a later retry once the
-			// KB is configured.
-			logger.Infof(ctx, "skipping embedded image %q (external_id=%s), not ingested: %v",
-				item.Title, item.ExternalID, err)
-			result.Skipped++
 		default:
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
@@ -987,6 +979,67 @@ func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*type
 		return nil, nil
 	}
 	return ds.ParseSyncCursor()
+}
+
+// feishuSettingResyncRequired is the one-shot upgrade marker key. Legacy
+// feishu/lark data sources are stamped by migration 000110 (sqlite 000030).
+const feishuSettingResyncRequired = "resync_required"
+
+// resyncRequired reads the one-shot upgrade marker out of parsed config
+// Settings. Tolerates both bool and string encodings. The marker is stamped
+// onto legacy feishu/lark data sources by migration 000110 (sqlite 000030)
+// when the per-source parse_mode shipped; it upgrades their next sync — even
+// a scheduled incremental one — to a full pass so existing documents re-ingest
+// with folder paths and block-level parsing.
+func resyncRequired(cfg *types.DataSourceConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	switch v := cfg.Settings[feishuSettingResyncRequired].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	default:
+		return false
+	}
+}
+
+// clearResyncMarker removes the one-shot upgrade marker after the upgraded sync
+// succeeded so it never fires again. Streaming path only: the feishu/lark
+// connectors the migration tags all implement StreamingConnector.
+func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.DataSource) {
+	cfg, err := ds.ParseConfig()
+	if err == nil && cfg.Settings[feishuSettingResyncRequired] == nil {
+		return
+	}
+	// Re-read the row before writing: the upgraded sync may have run long, and
+	// a full-row Update from the sync-start snapshot would silently revert
+	// concurrent user edits (settings, resource_ids, schedule…). Only the
+	// marker removal is ours to persist.
+	fresh, err := s.dsRepo.FindByID(ctx, ds.ID)
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, re-read failed: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	cfg, err = fresh.ParseConfig()
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, config unreadable: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	if cfg.Settings[feishuSettingResyncRequired] == nil {
+		return
+	}
+	delete(cfg.Settings, feishuSettingResyncRequired)
+	blob, err := cfg.ToJSON()
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, config re-encode failed: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	fresh.Config = blob
+	if err := s.dsRepo.Update(ctx, fresh); err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker: ds=%s err=%v", ds.ID, err)
+	}
 }
 
 // streamSyncHandler adapts a streaming fetch to the knowledge-base ingest path.
@@ -1085,6 +1138,14 @@ func (s *DataSourceService) processSyncStreaming(
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
+	if resyncRequired(config) {
+		// One-shot legacy upgrade (design §7): a data source tagged
+		// resync_required upgrades this sync — even a scheduled incremental one —
+		// to a full pass so existing documents re-ingest under the current
+		// parse mode. The marker is cleared only after the run succeeds below;
+		// a failure keeps it so the retry upgrades again from scratch.
+		forceFull = true
+	}
 	attempt, _ := asynq.GetRetryCount(ctx)
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
@@ -1154,6 +1215,12 @@ func (s *DataSourceService) processSyncStreaming(
 		}
 	}
 	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused)
+	// The upgraded full pass succeeded (success or partial — per-document
+	// failures are a normal retryable condition): retire the marker so it
+	// never fires again. Failed runs returned earlier and keep it.
+	if resyncRequired(config) {
+		s.clearResyncMarker(ctx, ds)
+	}
 	logger.Infof(ctx, "streaming sync completed: ds=%s created=%d updated=%d deleted=%d skipped=%d failed=%d",
 		payload.DataSourceID, result.Created, result.Updated, result.Deleted, result.Skipped, result.Failed)
 	return nil
@@ -1335,6 +1402,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 
 	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile
 	if len(item.Content) > 0 {
+		// Images ride inline as base64 data URIs; ProcessDocument's image
+		// resolver stores them on the file service and swaps in persistent
+		// provider:// URLs before chunking.
 		fh, err := bytesToFileHeader(item.Content, item.FileName)
 		if err != nil {
 			return isUpdate, fmt.Errorf("build file header: %w", err)

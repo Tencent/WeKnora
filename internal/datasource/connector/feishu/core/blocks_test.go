@@ -83,6 +83,70 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 	}
 }
 
+// TestSheetMerges_SplitsTokenAndReturnsRegions anchors the v3 metadata read:
+// the embed token splits on the last "_", the sheet entry is matched by
+// sheet_id, and merge indices decode from both JSON numbers and strings.
+func TestSheetMerges_SplitsTokenAndReturnsRegions(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
+			return
+		}
+		gotPath = r.URL.Path
+		// One sheet with numeric merge indices, one with string form, and one
+		// with no merges field at all (a spreadsheet without merged cells).
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+			"sheets": []any{
+				map[string]any{"sheet_id": "0", "merges": []any{
+					map[string]any{
+						"start_row_index": 0, "end_row_index": 1,
+						"start_column_index": 1, "end_column_index": 2,
+					},
+				}},
+				map[string]any{"sheet_id": "9", "merges": []any{
+					map[string]any{
+						"start_row_index": "2", "end_row_index": "3",
+						"start_column_index": "0", "end_column_index": "0",
+					},
+				}},
+				map[string]any{"sheet_id": "7"},
+			},
+		}})
+	}))
+	defer srv.Close()
+
+	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
+	merges, err := c.sheetMerges(context.Background(), "sht_abc_0")
+	if err != nil {
+		t.Fatalf("sheetMerges: %v", err)
+	}
+	if gotPath != "/open-apis/sheets/v3/spreadsheets/sht_abc/sheets/query" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if len(merges) != 1 ||
+		merges[0].StartRow != 0 || merges[0].EndRow != 1 ||
+		merges[0].StartCol != 1 || merges[0].EndCol != 2 {
+		t.Errorf("numeric merges = %+v", merges)
+	}
+
+	mergesStr, err := c.sheetMerges(context.Background(), "sht_abc_9")
+	if err != nil {
+		t.Fatalf("sheetMerges (string form): %v", err)
+	}
+	if len(mergesStr) != 1 || mergesStr[0].StartRow != 2 || mergesStr[0].EndCol != 0 {
+		t.Errorf("string merges = %+v", mergesStr)
+	}
+
+	mergesNone, err := c.sheetMerges(context.Background(), "sht_abc_7")
+	if err != nil {
+		t.Fatalf("sheetMerges (no merges field): %v", err)
+	}
+	if len(mergesNone) != 0 {
+		t.Errorf("expected no merges, got %+v", mergesNone)
+	}
+}
+
 func TestReadSheetRange_TruncatesLargeTable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal" {

@@ -847,6 +847,12 @@ export default {
     pauseFailed: '暂停失败',
     logs: '日志',
     syncModeLabel: '同步模式',
+    parseModeLabel: '解析模式',
+    parseMode: {
+      blocks: '块级解析（默认）',
+      export: '导出解析（docx）',
+    },
+    parseModeHint: '飞书云文档的解析方式。块级解析更快并保留文档内附件；导出解析将文档导出为 docx 后解析，图片与文档的关联更完整。',
     createTitle: '添加数据源',
     editTitle: '编辑数据源',
     nameLabel: '名称',

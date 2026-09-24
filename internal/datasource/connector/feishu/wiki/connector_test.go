@@ -3,6 +3,7 @@ package wiki
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -612,7 +613,7 @@ func TestFetchAll_DocxNode(t *testing.T) {
 		t.Errorf("Content = %q, want %q", string(item.Content), "fake-docx-content")
 	}
 	if item.FileName != "exported.docx" {
-		t.Errorf("FileName = %q, want %q", item.FileName, "exported.docx")
+		t.Errorf("FileName = %q, want %q (top-level node, KB-root relative)", item.FileName, "exported.docx")
 	}
 	if item.Metadata["obj_type"] != "docx" {
 		t.Errorf("Metadata[obj_type] = %q", item.Metadata["obj_type"])
@@ -718,7 +719,7 @@ func TestFetchAll_FileNode(t *testing.T) {
 		t.Errorf("Content = %q, want %q", string(item.Content), "fake-pdf-binary")
 	}
 	if item.FileName != "manual.pdf" {
-		t.Errorf("FileName = %q, want %q", item.FileName, "manual.pdf")
+		t.Errorf("FileName = %q, want %q (top-level node, KB-root relative)", item.FileName, "manual.pdf")
 	}
 	if item.Metadata["obj_type"] != "file" {
 		t.Errorf("obj_type = %q, want file", item.Metadata["obj_type"])
@@ -919,6 +920,14 @@ func TestFetchIncremental_FirstSync(t *testing.T) {
 
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items on first sync, got %d", len(items))
+	}
+	// Deletion detection must not fire on a first sync: with no prior cursor
+	// there is nothing to compare against, so no IsDeleted items may appear.
+	for _, item := range items {
+		if item.IsDeleted {
+			t.Errorf("first sync emitted IsDeleted item for %q — deletion must be suppressed without a prior cursor",
+				item.ExternalID)
+		}
 	}
 	if cursor == nil {
 		t.Fatal("expected non-nil cursor")
@@ -1311,7 +1320,6 @@ func fakeFeishuWithBlocks(nodes []core.WikiNode, docToken, attToken, attName str
 // TestFetchDocxWithBlocks_MultiItem verifies that a docx node returns a main
 // Markdown item plus an attachment sub-item when the blocks API succeeds.
 func TestFetchDocxWithBlocks_MultiItem(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx"
 		objToken  = "obj-docx"
@@ -1337,34 +1345,40 @@ func TestFetchDocxWithBlocks_MultiItem(t *testing.T) {
 		t.Fatalf("FetchAll() error: %v", err)
 	}
 
+	// P3 contract: sub-items are emitted BEFORE the parent document.
 	if len(items) != 2 {
-		t.Fatalf("want 2 items (main doc + attachment), got %d: %+v", len(items), items)
+		t.Fatalf("want 2 items (attachment + main doc), got %d: %+v", len(items), items)
 	}
 
-	main := items[0]
-	if main.ExternalID != nodeToken {
-		t.Errorf("items[0].ExternalID = %q, want %q", main.ExternalID, nodeToken)
-	}
-	if main.ContentType != "text/markdown" {
-		t.Errorf("items[0].ContentType = %q, want text/markdown", main.ContentType)
-	}
-	if !main.ReplacesSubtree {
-		t.Errorf("items[0].ReplacesSubtree = false, want true")
-	}
-	if !strings.Contains(string(main.Content), "Hello blocks") {
-		t.Errorf("items[0].Content missing expected text; got %q", string(main.Content))
-	}
-
-	att := items[1]
+	att := items[0]
 	wantAttID := nodeToken + "#file#" + attToken
 	if att.ExternalID != wantAttID {
-		t.Errorf("items[1].ExternalID = %q, want %q", att.ExternalID, wantAttID)
+		t.Errorf("items[0].ExternalID = %q, want %q", att.ExternalID, wantAttID)
 	}
 	if att.Metadata["attachment"] != "true" {
-		t.Errorf("items[1].Metadata[attachment] = %q, want true", att.Metadata["attachment"])
+		t.Errorf("items[0].Metadata[attachment] = %q, want true", att.Metadata["attachment"])
 	}
-	if att.Title != attName {
-		t.Errorf("items[1].Title = %q, want %q", att.Title, attName)
+	if att.Metadata["parent_doc_id"] != nodeToken {
+		t.Errorf("items[0].Metadata[parent_doc_id] = %q, want %q", att.Metadata["parent_doc_id"], nodeToken)
+	}
+
+	main := items[1]
+	if main.ExternalID != nodeToken {
+		t.Errorf("items[1].ExternalID = %q, want %q", main.ExternalID, nodeToken)
+	}
+	if main.ContentType != "text/markdown" {
+		t.Errorf("items[1].ContentType = %q, want text/markdown", main.ContentType)
+	}
+	if !main.ReplacesSubtree {
+		t.Errorf("items[1].ReplacesSubtree = false, want true")
+	}
+	if !strings.Contains(string(main.Content), "Hello blocks") {
+		t.Errorf("items[1].Content missing expected text; got %q", string(main.Content))
+	}
+	// The produced attachment is recorded on the parent's attachment_ids.
+	if !strings.Contains(main.Metadata["attachment_ids"], wantAttID) {
+		t.Errorf("main.Metadata[attachment_ids] = %q, want it to contain %q",
+			main.Metadata["attachment_ids"], wantAttID)
 	}
 }
 
@@ -1433,7 +1447,6 @@ func fakeFeishuWithBlocksAndDownloadStatus(nodes []core.WikiNode, docToken, attT
 // subtree sweep is suppressed so a transient failure never deletes the good prior
 // copy of the attachment. One bad attachment must not block the whole document.
 func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-fail"
 		objToken  = "obj-docx-fail"
@@ -1462,14 +1475,13 @@ func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
 		"channel":    types.ChannelFeishu,
 	}
 	items, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
-		DocToken:          nodeToken,
-		ObjToken:          objToken,
-		Title:             "Doc With Bad Attachment",
-		URL:               conn.region.WikiURL(nodeToken),
-		ResourceID:        "space1:nt-docx-fail",
-		EditTime:          core.ParseFeishuTimestamp("1711468800"),
-		BaseMeta:          baseMeta,
-		MultimodalEnabled: true,
+		DocToken:   nodeToken,
+		ObjToken:   objToken,
+		Title:      "Doc With Bad Attachment",
+		URL:        conn.region.WikiURL(nodeToken),
+		ResourceID: "space1:nt-docx-fail",
+		EditTime:   core.ParseFeishuTimestamp("1711468800"),
+		BaseMeta:   baseMeta,
 	})
 	if err != nil {
 		t.Fatalf("a failed attachment must not fail the whole node, got error: %v", err)
@@ -1514,12 +1526,12 @@ func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
 	}
 }
 
-// TestFetchDocxWithBlocks_EmbeddedImage verifies that embedded images are emitted
-// as standalone sub-items (whose bytes flow into the VLM OCR pipeline) only when
-// the KB has multimodal enabled, but their external_id is ALWAYS kept in
-// SubtreeKeep so toggling VLM off later does not sweep previously OCR'd images.
+// TestFetchDocxWithBlocks_EmbeddedImage verifies that embedded images are
+// always emitted as standalone sub-items (the image pipeline is not gated by
+// the KB multimodal switch — that only affects ImageMultimodal sub-chunks in
+// the service layer), the parent carries the image_map marker mapping, and the
+// external_id stays in SubtreeKeep so a later removal doesn't sweep it.
 func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-img"
 		objToken  = "obj-docx-img"
@@ -1559,97 +1571,44 @@ func TestFetchDocxWithBlocks_EmbeddedImage(t *testing.T) {
 	defer ts.Close()
 
 	cfg := &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
-	conn := NewConnector(core.RegionFeishu)
 	ctx := context.Background()
 	client := core.NewClient(cfg)
 	node := core.WikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Image", NodeEditTime: "1711468800"}
-	baseMeta := map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu}
-	imgChildID := nodeToken + "#image#" + imgToken
 
-	// multimodal ON → image emitted as a sub-item and kept.
+	// Orthodox flow: the image rides inline in the parent markdown as a base64
+	// data URI — no image sub-item, no image_map.
 	items, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
-		DocToken:          node.NodeToken,
-		ObjToken:          node.ObjToken,
-		Title:             node.Title,
-		URL:               conn.region.WikiURL(node.NodeToken),
-		ResourceID:        "space1:" + nodeToken,
-		EditTime:          core.ParseFeishuTimestamp("1711468800"),
-		BaseMeta:          baseMeta,
-		MultimodalEnabled: true,
+		DocToken:   node.NodeToken,
+		ObjToken:   node.ObjToken,
+		Title:      node.Title,
+		URL:        "https://example.feishu.cn/wiki/" + nodeToken,
+		ResourceID: "space1:" + nodeToken,
+		EditTime:   core.ParseFeishuTimestamp("1711468800"),
+		BaseMeta:   map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu},
 	})
 	if err != nil {
-		t.Fatalf("core.FetchDocxWithBlocks (multimodal on): %v", err)
+		t.Fatalf("core.FetchDocxWithBlocks: %v", err)
 	}
-	var main, img *types.FetchedItem
-	for _, it := range items {
-		switch it.ExternalID {
-		case nodeToken:
-			main = it
-		case imgChildID:
-			img = it
-		}
+	if len(items) != 1 {
+		t.Fatalf("want 1 item (main only), got %d: %+v", len(items), items)
 	}
-	if main == nil {
-		t.Fatal("main doc item missing")
+	main := items[0]
+	wantURI := "![图片](data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes) + ")"
+	if !strings.Contains(string(main.Content), wantURI) {
+		t.Errorf("image not inlined as base64 data URI:\n%s", main.Content[:min(len(main.Content), 400)])
 	}
-	if img == nil {
-		t.Fatalf("embedded image sub-item missing; got %+v", items)
+	if strings.Contains(string(main.Content), "weknora-img://") {
+		t.Errorf("internal marker leaked into stored markdown:\n%s", main.Content[:400])
 	}
-	if !strings.HasSuffix(img.FileName, ".png") {
-		t.Errorf("image FileName = %q, want a .png extension", img.FileName)
-	}
-	if img.Metadata["embedded_image"] != "true" {
-		t.Errorf("image Metadata[embedded_image] = %q, want true", img.Metadata["embedded_image"])
-	}
-	if img.Metadata["attachment"] == "true" {
-		t.Error("an embedded image must not be marked as a file attachment")
-	}
-	if len(img.Content) != len(pngBytes) {
-		t.Errorf("image Content = %d bytes, want %d", len(img.Content), len(pngBytes))
-	}
-	if !slices.Contains(main.SubtreeKeep, imgChildID) {
-		t.Errorf("SubtreeKeep must contain image %q, got %+v", imgChildID, main.SubtreeKeep)
-	}
-
-	// multimodal OFF → no image sub-item, but the id is still kept (not swept).
-	itemsOff, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
-		DocToken:          node.NodeToken,
-		ObjToken:          node.ObjToken,
-		Title:             node.Title,
-		URL:               conn.region.WikiURL(node.NodeToken),
-		ResourceID:        "space1:" + nodeToken,
-		EditTime:          core.ParseFeishuTimestamp("1711468800"),
-		BaseMeta:          baseMeta,
-		MultimodalEnabled: false,
-	})
-	if err != nil {
-		t.Fatalf("core.FetchDocxWithBlocks (multimodal off): %v", err)
-	}
-	var mainOff *types.FetchedItem
-	for _, it := range itemsOff {
-		if it.ExternalID == imgChildID {
-			t.Errorf("multimodal off must NOT Emit an image sub-item, got %+v", it)
-		}
-		if it.ExternalID == nodeToken {
-			mainOff = it
-		}
-	}
-	if mainOff == nil {
-		t.Fatal("main doc item missing (multimodal off)")
-	}
-	if !slices.Contains(mainOff.SubtreeKeep, imgChildID) {
-		t.Errorf("SubtreeKeep must contain image %q even when multimodal off (so it isn't swept), got %+v",
-			imgChildID, mainOff.SubtreeKeep)
+	if main.Metadata["image_map"] != "" {
+		t.Errorf("image_map must be gone, got %q", main.Metadata["image_map"])
 	}
 }
 
 // TestFetchDocxWithBlocks_ImageDownloadFailure verifies that a failed image
-// download (a genuine core.Fetch failure — revoked token, permission gap, transient
-// error) surfaces a visible error sub-item exactly like a failed attachment
-// download, rather than being silently dropped to a server log. The image is
-// still kept in SubtreeKeep so any prior OCR'd copy is preserved.
+// download degrades inline to a plain placeholder: the document still syncs,
+// no error sub-item is produced, and no marker leaks.
 func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-img-fail"
 		objToken  = "obj-docx-img-fail"
@@ -1666,88 +1625,42 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 			Data: core.DocxBlocksData{
 				Items: []core.DocxBlock{
 					{BlockID: "b1", BlockType: core.BlockTypePage},
-					{BlockID: "b2", BlockType: core.BlockTypeImage, Image: &core.BlockTokenRef{Token: imgToken}},
+					{BlockID: "b3", BlockType: core.BlockTypeImage, Image: &core.BlockTokenRef{Token: imgToken}},
 				},
 			},
 		})
 	})
-	// Media download always fails.
 	mux.HandleFunc("/open-apis/drive/v1/medias/", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "boom", http.StatusInternalServerError)
+		http.Error(w, "denied", http.StatusForbidden)
 	})
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
 	cfg := &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
-	conn := NewConnector(core.RegionFeishu)
 	ctx := context.Background()
 	client := core.NewClient(cfg)
-	node := core.WikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Bad Image", NodeEditTime: "1711468800"}
-	baseMeta := map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu}
-	imgChildID := nodeToken + "#image#" + imgToken
+	node := core.WikiNode{NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc With Broken Image"}
 
-	// multimodal ON → the download is attempted and fails → a visible error item.
 	items, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
-		DocToken:          node.NodeToken,
-		ObjToken:          node.ObjToken,
-		Title:             node.Title,
-		URL:               conn.region.WikiURL(node.NodeToken),
-		ResourceID:        "space1:" + nodeToken,
-		EditTime:          core.ParseFeishuTimestamp("1711468800"),
-		BaseMeta:          baseMeta,
-		MultimodalEnabled: true,
+		DocToken:   node.NodeToken,
+		ObjToken:   node.ObjToken,
+		Title:      node.Title,
+		URL:        "https://example.feishu.cn/wiki/" + nodeToken,
+		ResourceID: "space1:" + nodeToken,
+		BaseMeta:   map[string]string{"node_token": nodeToken, "channel": types.ChannelFeishu},
 	})
 	if err != nil {
-		t.Fatalf("a failed image download must not fail the whole node, got error: %v", err)
+		t.Fatalf("core.FetchDocxWithBlocks: %v", err)
 	}
-	var main, errItem *types.FetchedItem
-	for _, it := range items {
-		switch it.ExternalID {
-		case nodeToken:
-			main = it
-		case imgChildID:
-			errItem = it
-		}
+	if len(items) != 1 {
+		t.Fatalf("want 1 item (main only), got %d: %+v", len(items), items)
 	}
-	if main == nil {
-		t.Fatal("main doc item missing")
+	main := items[0]
+	if !strings.Contains(string(main.Content), "![图片]()") {
+		t.Errorf("broken image must degrade to a placeholder:\n%s", main.Content)
 	}
-	if errItem == nil {
-		t.Fatalf("failed image download must Emit a visible error sub-item, got %+v", items)
-	}
-	if len(errItem.Content) != 0 {
-		t.Errorf("image error item must carry no content, got %d bytes", len(errItem.Content))
-	}
-	if errItem.Metadata["error"] == "" {
-		t.Error("image error item must carry error metadata for UI visibility")
-	}
-	if errItem.Metadata["embedded_image"] != "true" {
-		t.Errorf("image error item must stay tagged embedded_image=true, got %q", errItem.Metadata["embedded_image"])
-	}
-	if !slices.Contains(main.SubtreeKeep, imgChildID) {
-		t.Errorf("SubtreeKeep must contain the failed image %q so its prior copy is preserved, got %+v",
-			imgChildID, main.SubtreeKeep)
-	}
-
-	// multimodal OFF → the download is never attempted, so no error item, but the
-	// id is still kept (not swept).
-	itemsOff, err := core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
-		DocToken:          node.NodeToken,
-		ObjToken:          node.ObjToken,
-		Title:             node.Title,
-		URL:               conn.region.WikiURL(node.NodeToken),
-		ResourceID:        "space1:" + nodeToken,
-		EditTime:          core.ParseFeishuTimestamp("1711468800"),
-		BaseMeta:          baseMeta,
-		MultimodalEnabled: false,
-	})
-	if err != nil {
-		t.Fatalf("core.FetchDocxWithBlocks (multimodal off): %v", err)
-	}
-	for _, it := range itemsOff {
-		if it.ExternalID == imgChildID {
-			t.Errorf("multimodal off must NOT attempt the image download or Emit an item, got %+v", it)
-		}
+	if strings.Contains(string(main.Content), "weknora-img://") {
+		t.Errorf("internal marker leaked into stored markdown:\n%s", main.Content)
 	}
 }
 
@@ -1755,7 +1668,6 @@ func TestFetchDocxWithBlocks_ImageDownloadFailure(t *testing.T) {
 // whose extension is not in the parseable-attachment whitelist (e.g. .png) is NOT
 // promoted to a sub-item, but its inline reference IS present in the main document.
 func TestFetchDocxWithBlocks_NonWhitelistedExtNotPromoted(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-png"
 		objToken  = "obj-docx-png"
@@ -1786,7 +1698,8 @@ func TestFetchDocxWithBlocks_NonWhitelistedExtNotPromoted(t *testing.T) {
 		t.Fatalf("want 1 item (main doc only, .png not promoted), got %d: %+v", len(items), items)
 	}
 	mainContent := string(items[0].Content)
-	if !strings.Contains(mainContent, "📎 附件：icon.png") {
+	// Non-whitelisted files degrade to a reference carrying the source link.
+	if !strings.Contains(mainContent, "> [附件: icon.png](") {
 		t.Errorf("main doc missing inline reference for icon.png; got:\n%s", mainContent)
 	}
 }
@@ -1795,7 +1708,6 @@ func TestFetchDocxWithBlocks_NonWhitelistedExtNotPromoted(t *testing.T) {
 // whitelisted-extension file block whose download is smaller than core.MinAttachmentBytes
 // is NOT promoted to a sub-item, but its inline reference IS present in the main doc.
 func TestFetchDocxWithBlocks_WhitelistedTinyAttachmentNotPromoted(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-docx-tiny"
 		objToken  = "obj-docx-tiny"
@@ -1826,8 +1738,10 @@ func TestFetchDocxWithBlocks_WhitelistedTinyAttachmentNotPromoted(t *testing.T) 
 		t.Fatalf("want 1 item (main doc only, tiny .pdf not promoted), got %d: %+v", len(items), items)
 	}
 	mainContent := string(items[0].Content)
-	if !strings.Contains(mainContent, "📎 附件：tiny.pdf") {
-		t.Errorf("main doc missing inline reference for tiny.pdf; got:\n%s", mainContent)
+	// A whitelisted file block always renders as a file-name list entry, even
+	// when the download itself is too small to promote.
+	if !strings.Contains(mainContent, "- tiny.pdf") {
+		t.Errorf("main doc missing file-name list entry for tiny.pdf; got:\n%s", mainContent)
 	}
 }
 

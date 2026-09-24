@@ -227,14 +227,6 @@ type DataSourceConfig struct {
 
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
-
-	// MultimodalEnabled mirrors the target knowledge base's VLM/multimodal
-	// setting for the current sync run. The service populates it before each fetch
-	// and it is never persisted (json:"-") — the KB owns the setting. Connectors
-	// use it to decide whether extracting embedded images for OCR is worthwhile:
-	// ingesting an image into a KB without VLM is rejected, so image extraction is
-	// skipped when this is false.
-	MultimodalEnabled bool `json:"-"`
 }
 
 // HasCredentials reports whether the credentials map carries any value at

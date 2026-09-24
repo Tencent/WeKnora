@@ -50,14 +50,71 @@
 
 #### Feishu / Lark（`connector/feishu/`）
 
-云盘应用权限、文件夹授权、资源选择和 `FEISHU_DOCX_PARSE_MODE` 取舍见[飞书云盘接入](24-feishu-drive.md)。默认 export 与 blocks 模式的图片、附件语义不同；开启同步删除时会删除当前数据源对应的知识条目。
+云盘应用权限、文件夹授权、资源选择和解析模式取舍见[飞书云盘接入](24-feishu-drive.md)。默认 `blocks` 与 `export` 模式的图片、附件语义见下文；开启同步删除时会删除当前数据源对应的知识条目。
 
 飞书与 Lark（国际版 open.larksuite.com）是部署在两朵隔离云上的同一产品，Wiki/docx/drive API 完全一致，因此**共用同一份连接器代码**，由 `region.go` 中的 `Region` 结构选择云端（`RegionFeishu` / `RegionLark`，分别对应类型 `feishu` / `lark`、API 域名 `open.feishu.cn` / `open.larksuite.com`）。`base_url` 凭据字段可显式覆盖（兼容历史上把 feishu 连接器指向 larksuite 的存量数据源）。
 
+> **从旧版本升级**：解析模式改为数据源级配置后，升级到本版本有三处行为变化。
+> 1. 环境变量 `FEISHU_DOCX_PARSE_MODE` 已废弃：仅在数据源未配置解析模式时作为回退读取并打印弃用警告，后续版本移除；在 `.env` 中显式设为 `export` 的部署升级后行为不变。
+> 2. 未设置任何解析模式的存量飞书/Lark 数据源，默认解析模式由 `export` 变为 `blocks`。
+> 3. 迁移会给所有存量飞书/Lark 数据源打一次性全量重同步标记：升级后的下一次同步（含计划增量）自动按全量执行，全部文档重新入库并重新计算 embedding/VLM 摘要，产生相应耗时与模型调用开销，完成后标记自动清除。
+
+**应用权限**（飞书/Lark 开放平台 → 企业自建应用 → 权限管理；均为只读权限，开通后需创建并发布新版本才生效）。飞书与 Lark 的权限标识相同，但应用互不通用。
+
+#### 飞书知识库（feishu / lark）所需权限
+
+必选权限：
+
+| 权限 | blocks 模式（默认） | export 模式 | 缺失时的表现 |
+| --- | --- | --- | --- |
+| `wiki:wiki:readonly` | 必选：列举知识库空间与节点树 | 必选 | 加载资源树失败 |
+| `docx:document:readonly` | 必选：blocks API 读取新版文档正文 | 不需要 | docx 文档无法解析 |
+| `drive:drive:readonly` | 必选：下载 docx 内嵌图片/附件、file 类型节点原文件 | 按需：仅同步 file 类型节点时需要 | 内嵌图片/附件或 file 节点下载失败 |
+| `drive:export:readonly` | 按需：sheet/bitable 节点导出 xlsx；blocks 失败或正文为空时的回退导出 | 必选：docx/doc/sheet/bitable 全部走异步导出 | sheet/bitable 节点失败；blocks 回退不可用 |
+
+可选增强权限（仅 blocks 渲染路径使用，缺失时同步不失败、对应能力降级）：
+
+| 权限 | 用途 | 缺失时 |
+| --- | --- | --- |
+| `sheets:spreadsheet:readonly` | docx 内嵌电子表格转为 Markdown 表格 | 该块显示「无法读取」占位 |
+| `bitable:app:readonly` | docx 内嵌多维表格转为 Markdown 表格 | 该块显示「无法读取」占位 |
+| `board:whiteboard:node:read` | 画板（含思维导图/流程图）导出为图片内嵌正文 | 占位标记 |
+| `contact:user.base:readonly` | @成员 显示真实姓名 | 降级为「@成员」 |
+| `drive:drive.metadata:readonly` | 正文中的云文档引用回填文档标题 | 保持 URL 形式 |
+
+#### 飞书云盘（feishu_drive / lark_drive）所需权限
+
+不需要 `wiki:wiki:readonly`，其余与知识库连接器同源：
+
+| 权限 | blocks 模式（默认） | export 模式 | 缺失时的表现 |
+| --- | --- | --- | --- |
+| `drive:drive:readonly` | 必选：列举文件夹、下载普通文件、下载 docx 内嵌图片/附件 | 必选：列举文件夹、下载普通文件 | 加载文件夹或同步报 403 |
+| `docx:document:readonly` | 必选：blocks API 读取新版文档正文 | 不需要 | 云文档 docx 无法解析 |
+| `drive:export:readonly` | 按需：表格/多维表格文件导出 xlsx；blocks 回退导出 | 必选：docx/doc/sheet/bitable 全部走异步导出 | 表格类文件失败；blocks 回退不可用 |
+
+可选增强权限与知识库连接器完全相同（见上表），仅 blocks 渲染路径使用。
+
+除上表推荐的只读最小集外，部分接口也接受替代权限（文件夹清单/文件下载可用 `drive:drive`、`space:document:retrieve`、`drive:file:download` 等，素材下载可用 `docs:document.media:download`，导出可用 `docs:document:export`），按最小授权原则不建议开通读写权限。另外，API 权限之外还有一层资源授权：知识库需要知识库管理员授权应用，云盘需要把目标文件夹分享给应用（见[飞书云盘接入](24-feishu-drive.md)）。
+
 - **认证**（`client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。
+- **目录映射**：同步时按 Wiki 节点树 / Drive 文件夹树在知识库内重建同名目录（`knowledges.folder_path`，目录名中的 `/` 等非法字符替换为 `_`）。Wiki 侧节点改名/移动会更新节点编辑时间，下一次增量同步文档自动落到新目录；Drive 侧目录改名/文件移动不改变文件修改时间，增量同步不感知，需手动全量同步刷新目录结构；节点删除时文档跟随删除（彻底删除，不可恢复，可在数据源关闭"同步删除"）。Wiki 快捷方式节点按其指向的实体去重，不重复入库。存量数据源升级后会在下一次同步（含增量）自动按全量执行一次完成目录收敛，无需手动操作。
+- **docx 解析模式**（数据源编辑页 → 解析模式，配置存于数据源级 `settings.parse_mode`，默认 `blocks`）：
+  - `blocks`（默认）→ blocks API 逐块读取并转为 GFM Markdown（`core/blocks.go`/`markdown.go`），保留代码块语言、LaTeX 公式（`$...$`）、原生表格（**合并单元格拆分为独立单元格并填充左上值**，列对齐随源文档）、任务列表、分栏、高亮块等；文档内嵌的电子表格/多维表格块直接转为文档内 Markdown 表格（合并单元格同样以左上值填充）；文档小组件中的时间轴转为 Markdown 列表；覆盖不到的块类型（会话卡片、OKR、议程等无公开内容 API 的少数类型）降级为占位标记，不影响文档其余部分；
+  - `export` → 异步导出 API（`POST /drive/v1/export_tasks`）导出 `.docx` 走通用文档解析。
+  - `doc`（旧版文档）/`sheet`/`bitable` 不受此开关影响，仍走导出通道。
+  - 取舍：**blocks** 快、保留 docx 内 file block 附件、需 `docx:document:readonly`；**export** 慢（异步导出 + docreader 解析）、丢失 docx 内附件、但解析表现与普通 docx 手工上传完全一致。只要正文与附件用默认 blocks 即可；需要与上传流程一致的解析表现时选 export。
+- **内嵌对象**（blocks 模式）：
+  - **图片**：下载后存入 WeKnora 存储，Markdown 正文内嵌 WeKnora 持久图片地址；配置了 VLM 的知识库会自动生成 OCR/描述子分块（未配置则仅保留图片，不报错）。**画板**（block 43）经官方 `download_as_image` 接口导出为图片走同一管线，无权限/失败时降级占位（需应用具备 `board:whiteboard:node:read` 权限）。
+  - **文档类附件**（PDF/Markdown/Excel/PPT/Word 等）：下载后作为独立知识入库，落在父文档同目录，文件名用附件自身名称；父文档元数据与附件元数据互相记录对方 ID，正文中附件位置以文件名列表展示。同字节文件在多个文档出现时共享同一份知识（去重）。
+  - **电子表格/多维表格块**：转为 GFM 内联表格（非独立文件），检索时保持文档上下文。
+  - **视频**：不存储不解析，正文留占位与飞书原链接。
+- **mention 渲染增强**（blocks 模式，缺权限时同步不失败，仅降级展示）：
+  - `mention_user`（@成员）：经 contacts API 反查 open_id 显示真实姓名，需 `contact:user.base:readonly`，缺失时降级为「@成员」；
+  - `mention_doc`（云文档引用）：经 `POST /drive/v1/metas/batch_query` 批量回填文档标题（≤200/次），需 `drive:drive.metadata:readonly`；无权限（970003）、文档已删（970005）或接口失败时回退为 `[URL](URL)` 形式；
+  - 时间轴等文档小组件块无公开读取 API，渲染为占位注记，不影响文档其余部分。
 - **内容抓取**（`fetchNodeContent`）按 `obj_type` 分派：
-  - `docx`/`doc` → 异步导出 API（`POST /drive/v1/export_tasks`）导出 `.docx`；
+  - `docx`/`doc` → 按上述解析模式分派；
   - `sheet`/`bitable` → 导出 `.xlsx`；
   - `file` → drive 原文件下载（PDF/Word/图片等）；
   - `mindnote`/`slides` → **跳过**（无内容读取 API），并通过 `fetchTally` 统计输出 `discovered/fetched/failed/skipped_unsupported by_type` 摘要日志，解释"发现 13 篇为何只同步了 3 篇"（issue #2136）。

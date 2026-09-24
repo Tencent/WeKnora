@@ -125,15 +125,23 @@ func fakeFeishuGolden(nodes []core.WikiNode, docToken string, blocks []core.Docx
 		w.Write(data)
 	})
 
+	// ParseMode is set explicitly even though blocks is now the default, so the
+	// golden baseline stays valid if the default ever flips again (the env var
+	// FEISHU_DOCX_PARSE_MODE was retired in favor of per-data-source Settings).
 	ts := httptest.NewServer(mux)
-	return ts, &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	return ts, &core.Config{
+		AppID: "test-app-id", AppSecret: "test-app-secret",
+		BaseURL: ts.URL, ParseMode: core.ParseModeBlocks,
+	}
 }
 
 func TestGolden_RichDocxAllCapabilities(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const docToken = "obj-golden"
 	bigPDF := bytes.Repeat([]byte("A"), core.MinAttachmentBytes+512) // kept
 	tinyPDF := bytes.Repeat([]byte("B"), 100)                        // whitelisted but too small → dropped
+	// Valid PNG for the embedded image block (image items are unconditional in
+	// the P3 marker pipeline; the media token stays out of the Markdown).
+	png := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte("x"), core.MinAttachmentBytes)...)
 
 	blocks := []core.DocxBlock{
 		{BlockID: "root", BlockType: core.BlockTypePage},
@@ -165,7 +173,7 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		NodeToken: "nt-golden", ObjToken: docToken, ObjType: "docx",
 		Title: "季度报告文档", NodeEditTime: "1711468800",
 	}}
-	media := map[string][]byte{"tok-big": bigPDF, "tok-small": tinyPDF}
+	media := map[string][]byte{"tok-big": bigPDF, "tok-small": tinyPDF, "img-tok-SECRET": png}
 
 	ts, cfg := fakeFeishuGolden(nodes, docToken, blocks, media)
 	defer ts.Close()
@@ -176,20 +184,28 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		t.Fatalf("FetchAll error: %v", err)
 	}
 
-	// ── main markdown item + exactly one attachment sub-item ──
+	// ── sub-items first (attachment), then the main markdown item ──
+	// Orthodox image flow (2026-09-20): images ride inline in the parent
+	// markdown as base64 data URIs — no image sub-items at all.
 	if len(items) != 2 {
-		t.Fatalf("want 2 items (main + 1 kept attachment), got %d:\n%+v", len(items), items)
+		t.Fatalf("want 2 items (1 kept attachment + main), got %d:\n%+v", len(items), items)
 	}
 	var main, att *types.FetchedItem
 	for i := range items {
-		if items[i].ExternalID == "nt-golden" {
+		switch items[i].ExternalID {
+		case "nt-golden":
 			main = &items[i]
-		} else {
+		case "nt-golden#file#tok-big":
 			att = &items[i]
 		}
 	}
 	if main == nil {
 		t.Fatal("main markdown item missing")
+	}
+	// P3 contract: sub-items precede the parent document.
+	if items[len(items)-1].ExternalID != "nt-golden" {
+		order := []string{items[0].ExternalID, items[1].ExternalID, items[2].ExternalID}
+		t.Errorf("main item must be emitted last, got order: %v", order)
 	}
 	if main.ContentType != "text/markdown" {
 		t.Errorf("main ContentType = %q, want text/markdown", main.ContentType)
@@ -203,6 +219,11 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 	md := string(main.Content)
 
 	// ── every text construct rendered correctly ──
+	// Baseline re-recorded (2026-09-20, orthodox image flow): image blocks
+	// render inline base64 data URIs (stored to provider:// URLs by the
+	// doc-process image resolver), and file blocks render as
+	// `- 文件名` list entries (whitelisted) or `> [附件: …](链接)` references
+	// (non-whitelisted), replacing the old `📎 附件：…` placeholder.
 	fragments := []string{
 		"# 季度报告",
 		"本季度概览。",
@@ -214,16 +235,16 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		"- [ ] 完成复盘",
 		"> 注意风险",
 		"---",
-		"| 列A | 列B |", // native docx table header
-		"| 1 | 2 |",   // native docx table row
-		"| 名称 | 数量 |", // embedded sheet header
-		"| 苹果 | 3 |",  // embedded sheet row
-		"| 任务 | 状态 |", // embedded bitable header
-		"| 写码 | 完成 |", // embedded bitable row
-		"![图片]()",     // token-free image placeholder
-		"📎 附件：手册.pdf",
-		"📎 附件：logo.png",
-		"📎 附件：small.pdf",
+		"| 列A | 列B |",                  // native docx table header
+		"| 1 | 2 |",                    // native docx table row
+		"| 名称 | 数量 |",                  // embedded sheet header
+		"| 苹果 | 3 |",                   // embedded sheet row
+		"| 任务 | 状态 |",                  // embedded bitable header
+		"| 写码 | 完成 |",                  // embedded bitable row
+		"![图片](data:image/png;base64,", // image inlined as base64 data URI
+		"- 手册.pdf",
+		"> [附件: logo.png](",
+		"- small.pdf",
 	}
 	for _, f := range fragments {
 		if !strings.Contains(md, f) {
@@ -232,7 +253,7 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 	}
 
 	// ── document order preserved (heading before table before attachments) ──
-	order := []string{"# 季度报告", "## 关键指标", "| 列A | 列B |", "| 名称 | 数量 |", "| 任务 | 状态 |", "📎 附件：手册.pdf"}
+	order := []string{"# 季度报告", "## 关键指标", "| 列A | 列B |", "| 名称 | 数量 |", "| 任务 | 状态 |", "- 手册.pdf"}
 	last := -1
 	for _, f := range order {
 		idx := strings.Index(md, f)
@@ -245,6 +266,13 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 	// ── the internal image media token must NEVER leak into embeddings ──
 	if strings.Contains(md, "img-tok-SECRET") {
 		t.Errorf("internal image token leaked into markdown:\n%s", md)
+	}
+	// The internal image media token must map to nothing: markers are gone.
+	if main.Metadata["image_map"] != "" {
+		t.Errorf("image_map must be gone, got %q", main.Metadata["image_map"])
+	}
+	if !strings.Contains(main.Metadata["attachment_ids"], "nt-golden#file#tok-big") {
+		t.Errorf("main.Metadata[attachment_ids] = %q, want it to contain tok-big", main.Metadata["attachment_ids"])
 	}
 
 	// ── attachment filtering: only the big whitelisted PDF becomes a sub-item ──

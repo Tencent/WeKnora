@@ -31,6 +31,10 @@ function highlightPreviewCode(source: string, lang?: string): string {
 
 function createPreviewMarkdownRenderer(): Renderer {
   const renderer = new Renderer()
+  // GFM task lists: marked emits <input type="checkbox">, which the DOMPurify
+  // tag allowlist strips (leaving a plain bullet) — render a styled span.
+  renderer.checkbox = ({ checked }) =>
+    `<span class="task-checkbox${checked ? ' checked' : ''}"></span>`
   renderer.image = ({ href, title, text }) => {
     if (!isSafePreviewImageHref(href)) return ''
     const safeHref = href.trim().replace(/"/g, '&quot;')

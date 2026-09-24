@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,7 +172,8 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	return core.FetchAllEngine(ctx, client, config, resourceIDs, wikiOps{region: c.region})
+	return core.FetchAllEngine(ctx, client, config, resourceIDs,
+		&wikiOps{region: c.region, parseMode: feishuConfig.ParseMode})
 }
 
 // FetchIncremental performs an incremental sync by comparing node edit times
@@ -185,7 +187,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		return nil, nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	ops := wikiOps{region: c.region}
+	ops := &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode}
 	if len(config.ResourceIDs) == 0 {
 		return nil, nil, errors.New(ops.EmptyResourceIDsError())
 	}
@@ -209,7 +211,7 @@ func (c *Connector) FetchStream(
 		return nil, err
 	}
 	client := core.NewClient(feishuConfig)
-	ops := wikiOps{region: c.region}
+	ops := &wikiOps{region: c.region, parseMode: feishuConfig.ParseMode}
 	if len(config.ResourceIDs) == 0 {
 		return nil, errors.New(ops.EmptyResourceIDsError())
 	}
@@ -217,48 +219,80 @@ func (c *Connector) FetchStream(
 }
 
 // wikiOps adapts the wiki Connector to the generic sync engine. It carries the
-// region (for URL rendering) and encodes/decodes the wiki cursor wire format
-// (core.FeishuCursor / space_node_times) so the engine can stay format-agnostic.
+// region (for URL rendering), encodes/decodes the wiki cursor wire format
+// (core.FeishuCursor / space_node_times), and holds the per-run directory
+// mapping state (P1): dirPaths maps node token → cleaned directory prefix
+// relative to the selected space (KB root). List builds the state for the
+// resource being synced; Fetch reads it. runSync processes one resource at a
+// time, so the mutation is race-free.
 type wikiOps struct {
-	region core.Region
+	region    core.Region
+	parseMode string
+	dirPaths  map[string]string
 }
 
-func (o wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
+func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID string) ([]core.WikiNode, error, error) {
 	spaceID, nodeToken := parseWikiResourceID(resourceID)
 	nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
-	if err == nil {
-		return nodes, nil, nil
-	}
-	var partial *core.PartialWikiNodeListError
-	if errors.As(err, &partial) {
+	if err != nil {
+		var partial *core.PartialWikiNodeListError
+		if !errors.As(err, &partial) {
+			// Total listing failure: nothing usable — abort the sync.
+			return nodes, nil, err
+		}
 		// Partial listing: nodes are still usable; the failed sub-trees are
 		// surfaced via ListFailureItems, and the sync continues.
+	}
+	nodes = filterShortcutSubtrees(nodes)
+	o.prepareDirPaths(nodes)
+	if err != nil {
 		return nodes, err, nil
 	}
-	return nodes, nil, err
+	return nodes, nil, nil
 }
 
-func (o wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
-func (o wikiOps) Title(n core.WikiNode) string   { return n.Title }
-func (o wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
+func (o *wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
+func (o *wikiOps) Title(n core.WikiNode) string   { return n.Title }
+func (o *wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
 
-// EditTime is the change-detection timestamp: ObjEditTime (document content)
-// with a NodeEditTime fallback for nodes that lack obj_edit_time. It drives the
-// cursor comparison and, parsed, FetchedItem.UpdatedAt (see contentEditTime),
-// so the persisted source_updated_at tracks content edits, not node moves.
-func (o wikiOps) EditTime(n core.WikiNode) string {
-	if n.ObjEditTime != "" {
+// EditTime is the incremental-sync change key: the later of the object edit
+// time and the node edit time. It drives the cursor comparison only — the
+// fetched item's source_updated_at keeps tracking content edits (see
+// contentEditTime). Moves/renames are node-level operations and may
+// not bump obj_edit_time, so keying on the object alone would skip a moved
+// document forever (stale KB folder path) until its next content edit.
+func (o *wikiOps) EditTime(n core.WikiNode) string {
+	obj, objErr := strconv.ParseInt(n.ObjEditTime, 10, 64)
+	node, nodeErr := strconv.ParseInt(n.NodeEditTime, 10, 64)
+	switch {
+	case objErr != nil && nodeErr != nil:
+		return n.ObjEditTime
+	case objErr != nil:
+		return n.NodeEditTime
+	case nodeErr != nil:
+		return n.ObjEditTime
+	case node > obj:
+		return n.NodeEditTime
+	default:
 		return n.ObjEditTime
 	}
-	return n.NodeEditTime
 }
 
-func (o wikiOps) Fetch(ctx context.Context, client *core.Client, n core.WikiNode, resourceID string, multimodal bool) ([]*types.FetchedItem, error) {
+func (o *wikiOps) Fetch(
+	ctx context.Context, client *core.Client, n core.WikiNode, resourceID string,
+) ([]*types.FetchedItem, error) {
 	spaceID, _ := parseWikiResourceID(resourceID)
-	return fetchNodeContent(ctx, client, n, spaceID, resourceID, multimodal, o.region)
+	items, err := fetchNodeContent(ctx, client, n, spaceID, resourceID, o.region, o.parseMode)
+	if err != nil {
+		return nil, err
+	}
+	// P1 directory mapping: prefix the FileName with the node's cleaned
+	// directory path so ingestion derives the KB folder_path from it.
+	qualifyItemFileNames(items, o.dirPaths[n.NodeToken])
+	return items, nil
 }
 
-func (o wikiOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
+func (o *wikiOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {
 	spaceID, _ := parseWikiResourceID(resourceID)
 	var pe *core.PartialWikiNodeListError
 	if errors.As(partial, &pe) {
@@ -267,20 +301,20 @@ func (o wikiOps) ListFailureItems(resourceID string, partial error) []types.Fetc
 	return nil
 }
 
-func (o wikiOps) ResourceNoun() string { return "nodes" }
-func (o wikiOps) EmptyResourceIDsError() string {
+func (o *wikiOps) ResourceNoun() string { return "nodes" }
+func (o *wikiOps) EmptyResourceIDsError() string {
 	return "no resource IDs (wiki space IDs or wiki node IDs) configured"
 }
-func (o wikiOps) LogTag() string { return "[Feishu]" }
+func (o *wikiOps) LogTag() string { return "[Feishu]" }
 
-func (o wikiOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string {
+func (o *wikiOps) DecodeCursorTimes(m map[string]interface{}) map[string]map[string]string {
 	var prev core.FeishuCursor
 	b, _ := json.Marshal(m)
 	_ = json.Unmarshal(b, &prev)
 	return prev.SpaceNodeTimes
 }
 
-func (o wikiOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
+func (o *wikiOps) EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor {
 	fc := core.FeishuCursor{LastSyncTime: lastSync, SpaceNodeTimes: times}
 	m := make(map[string]interface{})
 	b, _ := json.Marshal(fc)
@@ -319,7 +353,10 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, r
 //   - file       → drive download → original file (PDF/Word/image/etc.)
 //   - mindnote   → Skip (no API)
 //   - slides     → Skip (no API)
-func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNode, spaceID string, resourceID string, multimodalEnabled bool, region core.Region) ([]*types.FetchedItem, error) {
+func fetchNodeContent(
+	ctx context.Context, client *core.Client, node core.WikiNode,
+	spaceID string, resourceID string, region core.Region, parseMode string,
+) ([]*types.FetchedItem, error) {
 	if !core.IsSupportedDocType(node.ObjType) {
 		return nil, nil
 	}
@@ -339,15 +376,15 @@ func fetchNodeContent(ctx context.Context, client *core.Client, node core.WikiNo
 	switch node.ObjType {
 	case "docx":
 		return core.FetchDocxWithBlocks(ctx, client, core.DocxFetchInput{
-			DocToken:          node.NodeToken,
-			ObjToken:          node.ObjToken,
-			Title:             node.Title,
-			URL:               region.WikiURL(node.NodeToken),
-			ResourceID:        resourceID,
-			EditTime:          editTime,
-			CreateTime:        createTime,
-			BaseMeta:          baseMeta,
-			MultimodalEnabled: multimodalEnabled,
+			DocToken:   node.NodeToken,
+			ObjToken:   node.ObjToken,
+			Title:      node.Title,
+			URL:        region.WikiURL(node.NodeToken),
+			ResourceID: resourceID,
+			EditTime:   editTime,
+			CreateTime: createTime,
+			ParseMode:  parseMode,
+			BaseMeta:   baseMeta,
 		})
 	case "doc", "sheet", "bitable":
 		item, err := fetchViaExport(ctx, client, node, resourceID, editTime, baseMeta, region)
@@ -409,7 +446,7 @@ func fetchDriveFile(ctx context.Context, client *core.Client, node core.WikiNode
 	}
 
 	// Use the node title as file name; it usually preserves the original extension
-	fileName := node.Title
+	fileName := core.SanitizeFileName(node.Title)
 	if fileName == "" {
 		fileName = node.ObjToken
 	}
