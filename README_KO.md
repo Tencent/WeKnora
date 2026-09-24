@@ -304,7 +304,12 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 ## 아키텍처
 
-![WeKnora 아키텍처](./docs/images/architecture.png)
+<a href="./docs/images/readme/architecture-ko-light.svg">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/architecture-ko-dark.svg">
+  <img src="./docs/images/readme/architecture-ko-light.svg" alt="WeKnora 아키텍처: 클라이언트와 채널이 WeKnora 앱에 연결되고, RAG Q&A·Agent 추론·자동 Wiki가 같은 지식 처리 파이프라인을 공유. 앱은 런타임 서비스를 호출하고 PostgreSQL·Redis와 선택적 스토리지에 데이터를 저장" width="100%">
+</picture>
+</a>
 
 문서 파싱, 벡터화, 검색부터 LLM 추론까지 각 단계를 모듈화하여 구성 요소를 교체·확장할 수 있습니다. 로컬과 프라이빗 클라우드 배포를 지원하며 Web UI로 바로 시작할 수 있습니다. 자세히 보기: [아키텍처 개요](https://weknora.weixin.qq.com/docs/02-architecture/01-overview) · [RAG 파이프라인](https://weknora.weixin.qq.com/docs/02-architecture/04-rag-pipeline) · [확장 지점](https://weknora.weixin.qq.com/docs/06-development/03-extension-points)(중국어).
 

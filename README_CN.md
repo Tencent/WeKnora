@@ -294,7 +294,12 @@ docker compose up -d    # 用新镜像重建容器
 
 ## 架构设计
 
-![WeKnora 架构](./docs/images/architecture.png)
+<a href="./docs/images/readme/architecture-cn-light.svg">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/architecture-cn-dark.svg">
+  <img src="./docs/images/readme/architecture-cn-light.svg" alt="WeKnora 架构：客户端与渠道接入 WeKnora 主服务，RAG 问答、Agent 推理与自动 Wiki 共享同一条知识处理流水线；主服务调用运行时服务，数据存放在 PostgreSQL、Redis 及可选存储中" width="100%">
+</picture>
+</a>
 
 从文档解析、向量化、检索到大模型推理，各环节模块化解耦，组件可替换、可扩展。支持本地与私有云部署，Web UI 开箱即用。延伸阅读：[架构总览](https://weknora.weixin.qq.com/docs/02-architecture/01-overview) · [RAG 流水线](https://weknora.weixin.qq.com/docs/02-architecture/04-rag-pipeline) · [扩展点](https://weknora.weixin.qq.com/docs/06-development/03-extension-points)。
 

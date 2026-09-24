@@ -294,7 +294,12 @@ Full history: [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Architecture
 
-![WeKnora architecture](./docs/images/architecture.png)
+<a href="./docs/images/readme/architecture-en-light.svg">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/architecture-en-dark.svg">
+  <img src="./docs/images/readme/architecture-en-light.svg" alt="WeKnora architecture: clients and channels connect to the WeKnora app, where RAG Q&A, agent reasoning and auto wiki share one knowledge pipeline; the app calls runtime services and stores data in PostgreSQL, Redis and optional stores" width="100%">
+</picture>
+</a>
 
 A modular pipeline from document parsing, vectorization and retrieval to LLM inference, in which every component can be replaced or extended. It runs locally or on a private cloud, and the Web UI needs no setup to get started. More: [Architecture overview](https://weknora.weixin.qq.com/docs/02-architecture/01-overview) · [RAG pipeline](https://weknora.weixin.qq.com/docs/02-architecture/04-rag-pipeline) · [Extension points](https://weknora.weixin.qq.com/docs/06-development/03-extension-points).
 

@@ -6,19 +6,38 @@
 <text x="68" y="428" font-family="'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, AppleMyungjo, 'Nanum Myeongjo', 'Noto Serif CJK KR', serif" font-size="88" fill="#b8863b">지식을 실천으로.</text>
 <text x="72" y="500" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="27" fill="#40536f">Tencent가 오픈소스로 공개한 엔터프라이즈 지식 관리 프레임워크입니다.</text>
 <text x="72" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="27" fill="#40536f">팀 자료를 모아 Q&amp;A, 작업 실행, Wiki 정리에 활용합니다.</text>
-<path d="M1252 250V458" stroke="#dfd1b9" stroke-width="2" stroke-dasharray="4 6"/>
-<rect x="1216" y="178" width="312" height="76" rx="14" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
-<rect x="1230" y="192" width="48" height="48" rx="10" fill="#f6f1e7"/>
-<g transform="translate(1240 202) scale(1.1666666666666667)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 8h5M8 11h3"/></g>
-<text x="1298" y="226" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="25" font-weight="600" fill="#101f38">RAG <tspan font-weight="400" fill="#40536f">Q&amp;A</tspan></text>
-<rect x="1216" y="282" width="312" height="76" rx="14" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
-<rect x="1230" y="296" width="48" height="48" rx="10" fill="#f6f1e7"/>
-<g transform="translate(1240 306) scale(1.1666666666666667)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6"/><circle cx="12" cy="2.5" r=".5"/></g>
-<text x="1298" y="330" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="25" font-weight="600" fill="#101f38">Agent <tspan font-weight="400" fill="#40536f">추론</tspan></text>
-<rect x="1216" y="386" width="312" height="76" rx="14" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
-<rect x="1230" y="400" width="48" height="48" rx="10" fill="#f6f1e7"/>
-<g transform="translate(1240 410) scale(1.1666666666666667)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15"/><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3"/></g>
-<text x="1298" y="434" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="25" font-weight="600" fill="#101f38">자동 <tspan font-weight="400" fill="#40536f">Wiki</tspan></text>
+<rect x="1002" y="178" width="256" height="62" rx="12" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
+<rect x="1013" y="189" width="40" height="40" rx="9" fill="#f6f1e7"/>
+<g transform="translate(1021 197) scale(1.0)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 8h5M8 11h3"/></g>
+<text x="1066" y="216" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" font-weight="600" fill="#101f38">RAG Q&amp;A</text>
+<rect x="1272" y="178" width="256" height="62" rx="12" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
+<rect x="1283" y="189" width="40" height="40" rx="9" fill="#f6f1e7"/>
+<g transform="translate(1291 197) scale(1.0)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6"/><circle cx="12" cy="2.5" r=".5"/></g>
+<text x="1336" y="216" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" font-weight="600" fill="#101f38">Agent 추론</text>
+<rect x="1002" y="252" width="256" height="62" rx="12" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
+<rect x="1013" y="263" width="40" height="40" rx="9" fill="#f6f1e7"/>
+<g transform="translate(1021 271) scale(1.0)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15"/><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3"/></g>
+<text x="1066" y="290" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" font-weight="600" fill="#101f38">자동 Wiki</text>
+<rect x="1272" y="252" width="256" height="62" rx="12" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
+<rect x="1283" y="263" width="40" height="40" rx="9" fill="#f6f1e7"/>
+<g transform="translate(1291 271) scale(1.0)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M6 6.5h.01M9 6.5h.01"/><path d="m11 13 6 2.5-2.6.9-.9 2.6Z"/></g>
+<text x="1336" y="290" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" font-weight="600" fill="#101f38">로컬 브라우저</text>
+<rect x="1002" y="326" width="256" height="62" rx="12" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
+<rect x="1013" y="337" width="40" height="40" rx="9" fill="#f6f1e7"/>
+<g transform="translate(1021 345) scale(1.0)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5v10l-9 5-9-5V7l9-5Zm0 10 9-5M12 12 3 7m9 5v10"/><path d="m7 4.8 10 5.5"/></g>
+<text x="1066" y="364" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" font-weight="600" fill="#101f38">스킬과 샌드박스</text>
+<rect x="1272" y="326" width="256" height="62" rx="12" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
+<rect x="1283" y="337" width="40" height="40" rx="9" fill="#f6f1e7"/>
+<g transform="translate(1291 345) scale(1.0)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v5m6-5v5M6 7h12v4a6 6 0 0 1-12 0V7Zm6 10v5"/></g>
+<text x="1336" y="364" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" font-weight="600" fill="#101f38">MCP Server</text>
+<rect x="1002" y="400" width="256" height="62" rx="12" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
+<rect x="1013" y="411" width="40" height="40" rx="9" fill="#f6f1e7"/>
+<g transform="translate(1021 419) scale(1.0)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7c-1-5-7-5-7 0-4 1-4 7 0 8-1 5 5 7 7 3 2 4 8 2 7-3 4-1 4-7 0-8 0-5-6-5-7 0Zm0 0v11M5 7c0 2 2 3 3 3m11-3c0 2-2 3-3 3M5 15l3-1m11 1-3-1"/></g>
+<text x="1066" y="438" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" font-weight="600" fill="#101f38">장기 메모리</text>
+<rect x="1272" y="400" width="256" height="62" rx="12" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
+<rect x="1283" y="411" width="40" height="40" rx="9" fill="#f6f1e7"/>
+<g transform="translate(1291 419) scale(1.0)" fill="none" stroke="#b8863b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h7l2 3h9v10H3V7Zm3 0V3h11l3 3v4"/><path d="M7 14h10m-10 3h6"/></g>
+<text x="1336" y="438" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" font-weight="600" fill="#101f38">데이터 소스와 IM</text>
 <path d="M72 598H1528" stroke="rgba(16,31,56,.07)" stroke-width="2"/>
 <g transform="translate(72.0 632) scale(1.0833333333333333)" fill="none" stroke="#6d7d94" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-4.3 1.3-4.3-2.2-6-2.7m12 5v-3.5c0-1 .1-1.4-.5-2 3.4-.4 7-1.7 7-7.5a5.7 5.7 0 0 0-1.5-4 5.4 5.4 0 0 0-.1-4S18.6-.1 15.5 2a14 14 0 0 0-7 0C5.4-.1 4.1.3 4.1.3A5.4 5.4 0 0 0 4 4.3a5.7 5.7 0 0 0-1.5 4c0 5.8 3.6 7.1 7 7.5-.6.6-.6 1.2-.5 2V21"/></g>
 <text x="112.0" y="653" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="22" fill="#40536f">Tencent 오픈소스 · MIT License</text>
