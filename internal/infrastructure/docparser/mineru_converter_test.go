@@ -28,7 +28,7 @@ func TestNewMinerUReaderResolvesParseMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := NewMinerUReader(tt.overrides)
+			reader := NewMinerUReader(tt.overrides, 0)
 			if reader.parseMethod != tt.want {
 				t.Fatalf("parseMethod = %q, want %q", reader.parseMethod, tt.want)
 			}
@@ -200,7 +200,7 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 			}))
 			defer server.Close()
 
-			reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL})
+			reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL}, 0)
 			result, err := reader.Read(context.Background(), &types.ReadRequest{
 				FileContent: []byte(fileContent),
 				FileName:    tt.fileName,

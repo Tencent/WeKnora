@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -103,6 +104,7 @@ type sessionAttachmentLookup interface {
 }
 
 type temporaryDocumentService struct {
+	config             *config.Config
 	repo               interfaces.TemporaryDocumentRepository
 	fileService        interfaces.FileService
 	resourceCatalog    interfaces.ResourceCatalog
@@ -115,6 +117,7 @@ type temporaryDocumentService struct {
 }
 
 func NewTemporaryDocumentService(
+	cfg *config.Config,
 	repo interfaces.TemporaryDocumentRepository,
 	fileService interfaces.FileService,
 	resourceCatalog interfaces.ResourceCatalog,
@@ -126,7 +129,8 @@ func NewTemporaryDocumentService(
 	messages interfaces.MessageRepository,
 ) interfaces.TemporaryDocumentService {
 	return &temporaryDocumentService{
-		repo: repo, fileService: fileService, resourceCatalog: resourceCatalog,
+		config: cfg,
+		repo:   repo, fileService: fileService, resourceCatalog: resourceCatalog,
 		documentReader: documentReader, imageResolver: imageResolver,
 		modelService: modelService, tenantService: tenantService, taskEnqueuer: taskEnqueuer,
 		sessionAttachments: messages,
@@ -454,7 +458,9 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
 		request.ParserEngineOverrides = tenant.ParserEngineConfig.ToOverridesMap()
 	}
-	deps := docparser.ReaderDeps{Overrides: request.ParserEngineOverrides, Remote: s.documentReader}
+	deps := docparser.ReaderDeps{
+		Config: s.config, Overrides: request.ParserEngineOverrides, Remote: s.documentReader,
+	}
 	if s.tenantService != nil {
 		deps.WeKnoraCloudCredentials = s.tenantService.GetWeKnoraCloudCredentials
 	}

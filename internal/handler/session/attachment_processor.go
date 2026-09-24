@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -28,6 +29,7 @@ const (
 // AttachmentProcessor saves uploaded file attachments and extracts their text content
 // for injection into the LLM prompt.
 type AttachmentProcessor struct {
+	config         *config.Config
 	fileService    interfaces.FileService
 	documentReader interfaces.DocumentReader
 	imageResolver  *docparser.ImageResolver
@@ -36,12 +38,14 @@ type AttachmentProcessor struct {
 
 // NewAttachmentProcessor creates an AttachmentProcessor with the given dependencies.
 func NewAttachmentProcessor(
+	cfg *config.Config,
 	fileService interfaces.FileService,
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
 	modelService interfaces.ModelService,
 ) *AttachmentProcessor {
 	return &AttachmentProcessor{
+		config:         cfg,
 		fileService:    fileService,
 		documentReader: documentReader,
 		imageResolver:  imageResolver,
@@ -252,6 +256,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	// cloud engine whose credentials this path cannot resolve — falls back to
 	// the docreader, which is where every engine name went before.
 	reader, err := docparser.NewReader(ctx, parserEngine, normalizedType, false, docparser.ReaderDeps{
+		Config:    p.config,
 		Overrides: overrides,
 		Remote:    p.documentReader,
 	})

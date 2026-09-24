@@ -9,17 +9,15 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
-
-const defaultPaddleOCRVLTimeout = 1000 * time.Second // large scanned PDFs can take a while
 
 // PaddleOCRVLReader calls a self-hosted PaddleOCR-VL pipeline service
 // (the full document-parsing API, not the bare VLM inference server).
@@ -34,29 +32,16 @@ type PaddleOCRVLReader struct {
 }
 
 // NewPaddleOCRVLReader creates a reader from ParserEngineOverrides.
-func NewPaddleOCRVLReader(overrides map[string]string) *PaddleOCRVLReader {
+func NewPaddleOCRVLReader(overrides map[string]string, timeout time.Duration) *PaddleOCRVLReader {
+	if timeout <= 0 {
+		timeout = config.DefaultSelfHostedParserTimeout
+	}
 	return &PaddleOCRVLReader{
-		timeout:  paddleOCRVLRequestTimeout(),
+		timeout:  timeout,
 		endpoint: strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
 		useSeal:  parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
 		useChart: parseBoolOr(overrides["paddleocr_vl_use_chart_recognition"], false),
 	}
-}
-
-// paddleOCRVLRequestTimeout bounds a self-hosted layout-parsing request.
-// The caller's context may impose an earlier deadline.
-func paddleOCRVLRequestTimeout() time.Duration {
-	value := strings.TrimSpace(os.Getenv("WEKNORA_PADDLEOCR_VL_TIMEOUT"))
-	if value == "" {
-		return defaultPaddleOCRVLTimeout
-	}
-	timeout, err := time.ParseDuration(value)
-	if err != nil || timeout <= 0 {
-		logger.Warnf(context.Background(), "Invalid WEKNORA_PADDLEOCR_VL_TIMEOUT %q; using %s",
-			value, defaultPaddleOCRVLTimeout)
-		return defaultPaddleOCRVLTimeout
-	}
-	return timeout
 }
 
 func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
