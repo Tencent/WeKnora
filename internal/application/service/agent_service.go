@@ -285,9 +285,7 @@ func (s *agentService) CreateAgentEngine(
 
 	// Browser operations are native BrowserSkill RPCs, independent of shell and sandbox setup.
 	if config.LocalBrowserEnabled && s.browserSkill.Enabled() && !config.SkillInstallMode() {
-		tenant, _ := types.TenantIDFromContext(ctx)
-		user, _ := types.UserIDFromContext(ctx)
-		scope := browserskill.Scope{Tenant: tenant, User: user}
+		scope := tools.BrowserSkillScope(ctx)
 		instructions, err := s.browserSearchInstructions(ctx)
 		if err != nil {
 			return nil, err
