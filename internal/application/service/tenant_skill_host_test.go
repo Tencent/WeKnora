@@ -83,14 +83,17 @@ func (f *fakeHostSkillTree) Activate(name, dir string) (string, error) {
 	f.active[name] = dir
 	return prev, nil
 }
+
 func (f *fakeHostSkillTree) Discard(dir string) error {
 	f.discarded = append(f.discarded, dir)
 	return os.RemoveAll(dir)
 }
+
 func (f *fakeHostSkillTree) Prune(name string, keep ...string) error {
 	f.pruned[name] = keep
 	return nil
 }
+
 func (f *fakeHostSkillTree) Remove(name string) error {
 	f.removed = append(f.removed, name)
 	delete(f.active, name)
@@ -114,9 +117,11 @@ func (f *fakeHostSkillInstaller) Bind(sessionID, dir string) func() {
 	f.bound[sessionID] = dir
 	return func() { delete(f.bound, sessionID) }
 }
+
 func (f *fakeHostSkillInstaller) SessionInstallShellExecutor() sandbox.SessionInstallShellExecutor {
 	return f
 }
+
 func (f *fakeHostSkillInstaller) ExecShellCommandWithOptions(
 	_ context.Context, _ string, command string, _ sandbox.ShellExecOptions,
 ) (*sandbox.ExecuteResult, error) {
@@ -126,6 +131,7 @@ func (f *fakeHostSkillInstaller) ExecShellCommandWithOptions(
 	}
 	return &sandbox.ExecuteResult{}, nil
 }
+
 func (f *fakeHostSkillInstaller) ReadSessionFile(_ context.Context, sessionID, filePath string) ([]byte, error) {
 	if dir := f.bound[sessionID]; dir != "" {
 		target := filePath
@@ -143,9 +149,11 @@ func (f *fakeHostSkillInstaller) ReadSessionFile(_ context.Context, sessionID, f
 	}
 	return nil, os.ErrNotExist
 }
+
 func (f *fakeHostSkillInstaller) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
 	return nil, os.ErrNotExist
 }
+
 func (f *fakeHostSkillInstaller) WriteSessionFile(_ context.Context, sessionID, filePath string, content []byte) error {
 	dir := f.bound[sessionID]
 	if dir == "" {
