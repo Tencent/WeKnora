@@ -1833,6 +1833,13 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		}
 	}
 
+	// Resolve the reply language only after the mapping is known to be live.
+	// /clear soft-deletes that mapping, so a new conversation starts without
+	// inheriting its last detected language.
+	if channel.LanguageMode == "follow_user" {
+		sessionCtx = s.withIMReplyLanguage(sessionCtx, channelSession, msg)
+	}
+
 	// Title an untitled IM session from its first text message, like web chats.
 	// GenerateTitleAsync self-guards on a non-empty title and persists to the DB;
 	// nil eventBus is fine (IM has no live stream — the sidebar reloads it).
