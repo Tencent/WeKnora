@@ -859,6 +859,12 @@ export default {
     connectionFailed: '연결 실패',
     isRequired: '은(는) 필수입니다',
     credentialsLabel: '자격 증명',
+    localFolder: {
+      title: '로컬 폴더', rootPath: '폴더 경로',
+      rootPathHint: 'WeKnora 서버 또는 컨테이너 내부의 절대 경로이며(사용 중인 PC의 경로가 아닙니다) WEKNORA_LOCAL_FOLDER_ROOTS에 지정된 디렉터리 아래에 있어야 합니다(예: 읽기 전용으로 마운트한 Obsidian 볼트).',
+      include: '포함 패턴', exclude: '제외 패턴',
+      patternsHint: '한 줄에 하나의 glob 패턴(폴더 기준 상대 경로, **는 임의 깊이의 디렉터리와 일치). 비워 두면 기본값(Markdown, 텍스트, PDF, Office, CSV, HTML, EPUB 등 일반 문서 형식)을 사용합니다. 이미지와 오디오는 VLM/ASR이 필요하므로 패턴을 직접 추가하세요. WeKnora에서 가져올 수 없는 형식은 건너뜁니다.',
+    },
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: '개인 액세스 토큰', projects: 'GitLab 프로젝트',
       projectsHint: '프로젝트 ID 또는 네임스페이스 경로(예: group/project)를 입력하고, 필요에 따라 브랜치와 디렉터리를 지정하세요.',
@@ -1011,7 +1017,8 @@ export default {
       dingtalk: 'DingTalk 지식베이스의 온라인 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
-      gitlab: 'GitLab 프로젝트의 파일 동기화'
+      gitlab: 'GitLab 프로젝트의 파일 동기화',
+      local_folder: '마운트한 Obsidian 볼트 등 서버의 폴더에서 파일을 동기화합니다'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -1024,7 +1031,8 @@ export default {
       dingtalk: 'DingTalk 문서',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      local_folder: '로컬 폴더'
     },
     logDetail: {
       startTime: '시작 시간',
@@ -6873,6 +6881,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelLocalFolder: '로컬 폴더',
     channelUpload: '업로드',
     channelManual: '수동',
     channelUrl: '웹',
