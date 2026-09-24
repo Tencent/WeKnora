@@ -27,8 +27,14 @@ var mcpImageMIMETypes = map[string]bool{
 
 func getImageTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolGetImage,
-		mcp.WithDescription("Read one image referenced by a knowledge-base result and return standard MCP image content."),
-		mcp.WithString("resource_id", mcp.Required(), mcp.Description("A resource:// image identifier returned by search_knowledge or read_document")),
+		mcp.WithDescription(
+			"Read one image referenced by a knowledge-base result and return standard MCP image content.",
+		),
+		mcp.WithString(
+			"resource_id",
+			mcp.Required(),
+			mcp.Description("A resource:// image identifier returned by search_knowledge or read_document"),
+		),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
@@ -112,7 +118,9 @@ func (s *Server) handleGetImage(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError("image could not be read"), nil
 	}
-	defer reader.Close()
+	defer func() {
+		_ = reader.Close()
+	}()
 	data, err := io.ReadAll(io.LimitReader(reader, maxMCPImageBytes+1))
 	if err != nil {
 		return mcp.NewToolResultError("image could not be read"), nil

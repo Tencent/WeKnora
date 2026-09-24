@@ -130,7 +130,8 @@ func (s *Server) Handler() http.Handler {
 
 const serverInstructions = "WeKnora knowledge workspace. Start with list_knowledge_bases to see what is in scope, " +
 	"then use search_knowledge for semantic questions, grep_chunks for exact keywords, read_document to read " +
-	"a whole document, get_image to fetch a referenced knowledge-base image, and ask to get a synthesized answer with citations. Wiki tools browse the generated " +
+	"a whole document, get_image to fetch a referenced knowledge-base image, and ask to get a synthesized answer " +
+	"with citations. Wiki tools browse the generated " +
 	"wiki when a knowledge base has one. Write tools (add/update/delete_document) exist only on endpoints " +
 	"that enabled them."
 
