@@ -206,7 +206,13 @@ func filterSeenChunk(ctx context.Context, graph *types.GraphData, searchResult [
 	return chunkIDs
 }
 
-// chunk2SearchResult converts a chunk to a search result
+// chunk2SearchResult converts a chunk to a search result.
+//
+// Graph hits come from entity lookups, not similarity search, so they have no
+// retrieval score. They used to carry a fixed 1.0, which ranked them above
+// every scored hit whenever rerank did not run. With 0 they fill the slots
+// scored hits leave; when rerank runs, CompositeScore substitutes the model
+// score for the missing retrieval score.
 func chunk2SearchResult(chunk *types.Chunk, knowledge *types.Knowledge) *types.SearchResult {
 	return &types.SearchResult{
 		ID:                chunk.ID,
@@ -218,7 +224,7 @@ func chunk2SearchResult(chunk *types.Chunk, knowledge *types.Knowledge) *types.S
 		StartAt:           chunk.StartAt,
 		EndAt:             chunk.EndAt,
 		Seq:               chunk.ChunkIndex,
-		Score:             1.0,
+		Score:             0,
 		MatchType:         types.MatchTypeGraph,
 		Metadata:          knowledge.GetMetadata(),
 		ChunkType:         string(chunk.ChunkType),

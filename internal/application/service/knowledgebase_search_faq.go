@@ -29,7 +29,7 @@ func (s *knowledgeBaseService) applyFAQPostProcessing(
 	kb *types.KnowledgeBase,
 	scopeKBs []*types.KnowledgeBase,
 	chunks []*types.IndexWithScore,
-	vectorResults []*types.IndexWithScore,
+	vectorLists [][]*types.IndexWithScore,
 	groups []*storeGroup,
 	params types.SearchParams,
 	matchCount int,
@@ -41,8 +41,14 @@ func (s *knowledgeBaseService) applyFAQPostProcessing(
 
 	// Check if we need iterative retrieval for FAQ with separate indexing.
 	// Only use iterative retrieval if we don't have enough unique chunks
-	// after first deduplication.
-	needsIterativeRetrieval := isFAQ(kb) && len(chunks) < params.MatchCount && len(vectorResults) == matchCount
+	// after first deduplication, some vector list came back full (so a
+	// deeper search can find more), and the depth can still grow. A full
+	// list is judged per list: the concatenation of several lists is larger
+	// than matchCount whenever more than one vector list exists, which kept
+	// this from ever triggering in multi-list searches.
+	listFull := slices.ContainsFunc(vectorLists, func(l []*types.IndexWithScore) bool { return len(l) >= matchCount })
+	needsIterativeRetrieval := isFAQ(kb) && len(chunks) < params.MatchCount && listFull &&
+		matchCount < maxRetrievalPoolSize
 	if needsIterativeRetrieval {
 		logger.Info(ctx, "Not enough unique chunks, using iterative retrieval for FAQ")
 		return s.iterativeRetrieveWithDeduplication(
@@ -50,6 +56,7 @@ func (s *knowledgeBaseService) applyFAQPostProcessing(
 			groups,
 			params.MatchCount,
 			params.QueryText,
+			matchCount,
 		)
 	}
 
@@ -62,6 +69,12 @@ func (s *knowledgeBaseService) applyFAQPostProcessing(
 // iterativeRetrieveWithDeduplication performs iterative retrieval until enough unique chunks are found.
 // This is used for FAQ knowledge bases with separate indexing mode.
 // Negative question filtering is applied after each iteration with chunk data caching.
+//
+// Each round searches twice as deep as the one before, starting at twice
+// initialDepth (the depth the first search already used), and fuses its
+// lists exactly like the first search (fuseOrDeduplicate), so the scores it
+// returns are on the same scale. A deeper round returns a superset of the
+// previous one, so each round's fused list replaces the last.
 //
 // Each iteration only updates group.TopK; the underlying BaseParams stays
 // immutable so the fan-out goroutines inside retrieveFromStores never
@@ -79,15 +92,14 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	groups []*storeGroup,
 	matchCount int,
 	queryText string,
+	initialDepth int,
 ) ([]*types.IndexWithScore, error) {
 	maxIterations := 5
-	// Start with a larger TopK since we're called when first retrieval wasn't enough
-	// The first retrieval already used matchCount*3, so start from there.
 	// matchCount is caller-supplied, so both the seed and the per-iteration
 	// doubling are bounded by maxRetrievalPoolSize — otherwise a single request
 	// could drive the vector-store query depth arbitrarily deep.
-	currentTopK := min(matchCount*3, maxRetrievalPoolSize)
-	uniqueChunks := make(map[string]*types.IndexWithScore)
+	currentTopK := min(max(matchCount*3, initialDepth*2), maxRetrievalPoolSize)
+	var uniqueChunks []*types.IndexWithScore
 	// Cache chunk data to avoid repeated DB queries across iterations
 	chunkDataCache := make(map[string]*types.Chunk)
 	// Track chunks that have been filtered out by negative questions
@@ -95,6 +107,10 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 
 	queryTextLower := strings.ToLower(strings.TrimSpace(queryText))
 	tenantID := types.MustTenantIDFromContext(ctx)
+	var retrievalCfg *types.RetrievalConfig
+	if tenantInfo, _ := types.TenantInfoFromContext(ctx); tenantInfo != nil {
+		retrievalCfg = tenantInfo.RetrievalConfig
+	}
 
 	for i := 0; i < maxIterations; i++ {
 		// Bump only the per-group TopK. BaseParams is immutable and read
@@ -124,22 +140,20 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			break
 		}
 
-		// Collect results
-		iterationResults := []*types.IndexWithScore{}
-		for _, retrieveResult := range retrieveResults {
-			iterationResults = append(iterationResults, retrieveResult.Results...)
-		}
-
-		if len(iterationResults) == 0 {
+		vectorLists, keywordLists := classifyRetrievalResults(ctx, retrieveResults)
+		if len(vectorLists) == 0 && len(keywordLists) == 0 {
 			logger.Infof(ctx, "No results found at iteration %d", i+1)
 			break
 		}
-
-		totalRetrieved := len(iterationResults)
+		// A list shorter than the requested depth is exhausted; when every
+		// list is, searching deeper cannot find anything new.
+		exhausted := !slices.ContainsFunc(append(vectorLists, keywordLists...),
+			func(l []*types.IndexWithScore) bool { return len(l) >= currentTopK })
+		fused := fuseOrDeduplicate(ctx, vectorLists, keywordLists, retrievalCfg)
 
 		// Collect new chunk IDs that need to be fetched from DB
 		newChunkIDs := make([]string, 0)
-		for _, result := range iterationResults {
+		for _, result := range fused {
 			if _, cached := chunkDataCache[result.ChunkID]; !cached {
 				if _, filtered := filteredOutChunks[result.ChunkID]; !filtered {
 					newChunkIDs = append(newChunkIDs, result.ChunkID)
@@ -159,37 +173,27 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			}
 		}
 
-		// Deduplicate, merge, and filter in one pass
-		for _, result := range iterationResults {
-			// Skip if already filtered out
+		// Filter negative questions using cached data
+		uniqueChunks = uniqueChunks[:0]
+		for _, result := range fused {
 			if _, filtered := filteredOutChunks[result.ChunkID]; filtered {
 				continue
 			}
-
-			// Check negative questions using cached data
-			if chunkData, ok := chunkDataCache[result.ChunkID]; ok {
-				if chunkData.ChunkType == types.ChunkTypeFAQ {
-					if meta, err := chunkData.FAQMetadata(); err == nil && meta != nil {
-						if s.matchesNegativeQuestions(queryTextLower, meta.NegativeQuestions) {
-							filteredOutChunks[result.ChunkID] = struct{}{}
-							delete(uniqueChunks, result.ChunkID)
-							continue
-						}
-					}
+			if chunkData, ok := chunkDataCache[result.ChunkID]; ok && chunkData.ChunkType == types.ChunkTypeFAQ {
+				if meta, err := chunkData.FAQMetadata(); err == nil && meta != nil &&
+					s.matchesNegativeQuestions(queryTextLower, meta.NegativeQuestions) {
+					filteredOutChunks[result.ChunkID] = struct{}{}
+					continue
 				}
 			}
-
-			// Keep highest score for each chunk
-			if existing, ok := uniqueChunks[result.ChunkID]; !ok || result.Score > existing.Score {
-				uniqueChunks[result.ChunkID] = result
-			}
+			uniqueChunks = append(uniqueChunks, result)
 		}
 
 		logger.Infof(
 			ctx,
-			"After iteration %d: retrieved %d results, found %d valid unique chunks (target: %d)",
+			"After iteration %d: depth %d, found %d valid unique chunks (target: %d)",
 			i+1,
-			totalRetrieved,
+			currentTopK,
 			len(uniqueChunks),
 			matchCount,
 		)
@@ -200,9 +204,9 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			break
 		}
 
-		// Early stop: If we got fewer results than TopK, there are no more results to retrieve
-		if totalRetrieved < currentTopK {
-			logger.Infof(ctx, "No more results available (got %d < %d), stopping iteration", totalRetrieved, currentTopK)
+		// Early stop: If every list came back short, there are no more results to retrieve
+		if exhausted {
+			logger.Infof(ctx, "No more results available at depth %d, stopping iteration", currentTopK)
 			break
 		}
 
@@ -215,16 +219,8 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 		currentTopK = min(currentTopK*2, maxRetrievalPoolSize)
 	}
 
-	// Convert map to slice and sort by score
-	result := make([]*types.IndexWithScore, 0, len(uniqueChunks))
-	for _, chunk := range uniqueChunks {
-		result = append(result, chunk)
-	}
-
-	slices.SortFunc(result, sortByScoreDesc)
-
-	logger.Infof(ctx, "Iterative retrieval completed: %d unique chunks found after filtering", len(result))
-	return result, nil
+	logger.Infof(ctx, "Iterative retrieval completed: %d unique chunks found after filtering", len(uniqueChunks))
+	return uniqueChunks, nil
 }
 
 // filterByNegativeQuestions filters out chunks that match negative questions for FAQ knowledge bases.

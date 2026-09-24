@@ -285,7 +285,8 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	}
 
 	// Separate and fuse retrieval results.
-	vectorResults, keywordResults := classifyRetrievalResults(ctx, retrieveResults)
+	vectorLists, keywordLists := classifyRetrievalResults(ctx, retrieveResults)
+	vectorResults, keywordResults := flattenLists(vectorLists), flattenLists(keywordLists)
 	if len(vectorResults) == 0 && len(keywordResults) == 0 {
 		logger.Info(ctx, "No search results found")
 		return nil, nil
@@ -297,7 +298,7 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	if tenantInfo != nil {
 		retrievalCfg = tenantInfo.RetrievalConfig
 	}
-	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, retrievalCfg)
+	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorLists, keywordLists, retrievalCfg)
 
 	kb.EnsureDefaults()
 
@@ -307,7 +308,7 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	// timeout surfaced as ErrVectorStoreUnavailable) must surface to the
 	// caller rather than be silently converted to a truncated chunk list.
 	return s.applyFAQPostProcessing(
-		ctx, kb, kbs, deduplicatedChunks, vectorResults, groups, params, matchCount)
+		ctx, kb, kbs, deduplicatedChunks, vectorLists, groups, params, matchCount)
 }
 
 // normalizedMatchCount resolves the effective primary-match cap for a search.

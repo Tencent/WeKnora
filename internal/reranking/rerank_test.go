@@ -164,9 +164,52 @@ func TestRerank_topKAppliesMMRAndFAQBoost(t *testing.T) {
 	if len(res.Results) != 2 || len(res.Scored) != 3 {
 		t.Fatalf("results=%d scored=%d", len(res.Results), len(res.Scored))
 	}
-	// The FAQ entry is boosted from 0.67 to 1.0 and ranks first.
-	if res.Results[0].ID != "c3" || res.Results[0].Metadata["faq_boosted"] != "true" || res.Results[0].Score != 1 {
-		t.Fatalf("FAQ boost not applied: %+v", res.Results[0])
+	// The FAQ entry is boosted from 0.67 to 1.005 and ranks first; its
+	// pre-boost score stays available for absolute thresholds.
+	top := res.Results[0]
+	if top.ID != "c3" || top.Metadata["faq_boosted"] != "true" || math.Abs(top.Score-1.005) > 1e-9 {
+		t.Fatalf("FAQ boost not applied: %+v", top)
+	}
+	if got := PreBoostScore(top); math.Abs(got-0.67) > 1e-9 {
+		t.Fatalf("pre-boost score = %v, want 0.67", got)
+	}
+}
+
+// Strong FAQ entries used to be capped at 1 and tie; their order must follow
+// relevance.
+func TestRerank_boostedFAQsKeepRelevanceOrder(t *testing.T) {
+	t.Parallel()
+	in := rows("faq weaker", "faq stronger")
+	for _, r := range in {
+		r.ChunkType = string(types.ChunkTypeFAQ)
+	}
+	res := Rerank(context.Background(), &stubReranker{scores: []float64{0.9, 0.95}}, "q", in,
+		Options{Threshold: 0.3, FAQScoreBoost: 1.5})
+	if len(res.Results) != 2 || res.Results[0].ID != "c2" || res.Results[0].Score <= res.Results[1].Score {
+		t.Fatalf("boosted FAQs lost their order: %+v / %+v", res.Results[0], res.Results[1])
+	}
+}
+
+// Graph hits have no retrieval score; the model score stands in for it.
+func TestCompositeScore_graphHitUsesModelScoreAsBase(t *testing.T) {
+	t.Parallel()
+	graph := &types.SearchResult{MatchType: types.MatchTypeGraph}
+	if got := CompositeScore(graph, 0.8, 0); math.Abs(got-(0.9*0.8+0.1)) > 1e-9 {
+		t.Fatalf("graph composite = %v", got)
+	}
+	vector := &types.SearchResult{MatchType: types.MatchTypeEmbedding}
+	if got := CompositeScore(vector, 0.8, 0); math.Abs(got-(0.6*0.8+0.1)) > 1e-9 {
+		t.Fatalf("vector composite = %v", got)
+	}
+}
+
+func TestPreBoostScore_fallsBackToScore(t *testing.T) {
+	t.Parallel()
+	if got := PreBoostScore(&types.SearchResult{Score: 0.42}); got != 0.42 {
+		t.Fatalf("PreBoostScore without rerank metadata = %v", got)
+	}
+	if got := PreBoostScore(nil); got != 0 {
+		t.Fatalf("PreBoostScore(nil) = %v", got)
 	}
 }
 

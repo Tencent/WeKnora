@@ -65,7 +65,7 @@ func TestIterativeRetrieve_CapsSeedTopK(t *testing.T) {
 	s := &knowledgeBaseService{}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 
-	results, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 100000, "q")
+	results, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 100000, "q", 50)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 	assert.Equal(t, maxRetrievalPoolSize, groups[0].TopK,

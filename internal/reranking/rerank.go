@@ -55,7 +55,10 @@ type Options struct {
 	// nothing passes the threshold. See FallbackMinScore().
 	FallbackMinScore float64
 	// FAQScoreBoost, when above 1, multiplies the composite score of FAQ
-	// entries (capped at 1).
+	// entries. The result is not capped at 1: capping made every strong FAQ
+	// tie at exactly 1, so their order among themselves fell to the
+	// tie-breaker instead of relevance. Compare absolute thresholds against
+	// PreBoostScore.
 	FAQScoreBoost float64
 }
 
@@ -234,33 +237,59 @@ func bestScore(scores []rerank.RankResult) (rerank.RankResult, bool) {
 	return top, true
 }
 
+// CompositeScoreKey is the Metadata key holding a reranked row's composite
+// score before any boost (FAQ boost here, wiki or memory boosts later in the
+// chat pipeline) changes Score.
+const CompositeScoreKey = "composite_score"
+
 // scoredCopy returns a copy of r whose Score is the composite of the model
 // score and its retrieval score, recording both in Metadata.
 func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.SearchResult {
 	c := *r
 	c.Metadata = maps.Clone(r.Metadata)
 	if c.Metadata == nil {
-		c.Metadata = make(map[string]string, 2)
+		c.Metadata = make(map[string]string, 3)
 	}
 	base := r.Score
 	c.Metadata["base_score"] = strconv.FormatFloat(base, 'f', 4, 64)
 	c.Metadata["model_score"] = strconv.FormatFloat(modelScore, 'f', 4, 64)
 	c.Score = CompositeScore(&c, modelScore, base)
+	c.Metadata[CompositeScoreKey] = strconv.FormatFloat(c.Score, 'f', 4, 64)
 	if faqBoost > 1.0 && c.ChunkType == string(types.ChunkTypeFAQ) {
 		c.Metadata["faq_boosted"] = "true"
 		c.Metadata["faq_original_score"] = strconv.FormatFloat(c.Score, 'f', 4, 64)
-		c.Score = math.Min(c.Score*faqBoost, 1.0)
+		c.Score *= faqBoost
 	}
 	return &c
 }
 
 // CompositeScore blends the rerank model score with the retrieval score and a
-// source weight, clamped to [0, 1].
+// source weight, clamped to [0, 1]. Graph hits carry no retrieval score (they
+// come from entity lookups, not similarity search), so the model score stands
+// in for it rather than a made-up constant.
 func CompositeScore(r *types.SearchResult, modelScore, baseScore float64) float64 {
 	sourceWeight := 1.0
 	if strings.EqualFold(r.KnowledgeSource, "web_search") {
 		sourceWeight = 0.95
 	}
+	if r.MatchType == types.MatchTypeGraph {
+		baseScore = modelScore
+	}
 	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
 	return math.Min(math.Max(composite, 0), 1)
+}
+
+// PreBoostScore returns the score to compare against absolute thresholds such
+// as the FAQ direct-answer threshold: the composite score before any boost
+// when the row was reranked, and its retrieval score otherwise.
+func PreBoostScore(r *types.SearchResult) float64 {
+	if r == nil {
+		return 0
+	}
+	if v, ok := r.Metadata[CompositeScoreKey]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return r.Score
 }
