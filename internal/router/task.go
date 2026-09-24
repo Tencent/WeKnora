@@ -245,6 +245,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// UI signal users actually see.
 	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker)
 	mux.Use(asynqdl.MiddlewareWithCallback(params.DeadLetterRepo, knowledgeFailer))
+	mux.Use(asynqdl.RecoverMiddleware())
 
 	// Mark every asynq worker execution as a background task so the chat
 	// concurrency governor throttles ingestion/enrichment LLM traffic while

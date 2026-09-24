@@ -193,7 +193,7 @@ func TestPinnedSessionSandboxResolvesTheLentWorkspace(t *testing.T) {
 	mgr := &destroyRecordingManager{bound: "sbx-1"}
 	resolver := &lendingResolver{mgr: mgr}
 	access := NewPinnedSessionSandbox(
-		stubPinReader{configID: lentSandboxConfig, tenantID: lenderTenant}, resolver, nil)
+		stubPinReader{configID: lentSandboxConfig, tenantID: lenderTenant}, resolver, nil, nil)
 
 	id, ok := access.BoundSandboxID(borrowerCtx(), "s-1")
 

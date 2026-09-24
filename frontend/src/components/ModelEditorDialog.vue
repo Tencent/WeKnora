@@ -333,7 +333,7 @@
               :meta="credentialMeta" @changed="invalidateConnectionTest()" />
             <t-input v-else v-model="formData.apiKey" type="password"
               :placeholder="apiKeyPlaceholder"
-              class="api-key-input" autocomplete="off" spellcheck="false">
+              class="api-key-input" autocomplete="new-password" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
             <p v-if="apiKeyHint" class="form-desc">{{ apiKeyHint }}</p>
@@ -346,7 +346,7 @@
           <div v-if="secretExtraField && !isEdit && formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label" :class="{ required: secretExtraField.required }">{{ extraFieldDisplayLabel(secretExtraField) }}</label>
             <t-input v-model="formData.appSecret" type="password"
-              :placeholder="secretExtraField.placeholder || ''" autocomplete="off" spellcheck="false">
+              :placeholder="secretExtraField.placeholder || ''" autocomplete="new-password" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
             <p v-if="secretExtraField.placeholder" class="form-desc">{{ secretExtraField.placeholder }}</p>
@@ -370,7 +370,7 @@
               type="number" :placeholder="extraFieldDisplayPlaceholder(field)"
               @update:model-value="(v: string | number) => setExtraConfig(field.key, String(v ?? ''))" />
             <t-input v-else-if="field.type === 'password'" :model-value="formData.extraConfig[field.key] || ''"
-              type="password" :placeholder="extraFieldDisplayPlaceholder(field)" autocomplete="off" spellcheck="false"
+              type="password" :placeholder="extraFieldDisplayPlaceholder(field)" autocomplete="new-password" spellcheck="false"
               @update:model-value="(v: string) => setExtraConfig(field.key, v)">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
@@ -639,6 +639,7 @@ import CredentialResource, {
   type CredentialResourceApi,
 } from '@/components/credentials/CredentialResource.vue'
 import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
+import { WEKNORA_CLOUD_PROVIDER, WKC_MODEL_KINDS, WKC_MODEL_NAME_BY_KIND } from '@/utils/weknoraCloudModels'
 
 interface CustomHeaderItem {
   key: string
@@ -879,12 +880,23 @@ interface CatalogModelOption {
 }
 
 const catalogEntries = computed<ModelCatalogEntry[]>(() => {
+  const entries = selectedProvider.value?.models || []
+  // Managed aliases are already used by the cloud setup page. They have no
+  // published limits, so the backend catalog is empty, but they can still be
+  // offered by name without inventing context windows or embedding dimensions.
+  if (formData.value.provider === WEKNORA_CLOUD_PROVIDER && entries.length === 0) {
+    const kind = WKC_MODEL_KINDS.find(kind => kind === activeModelType.value)
+    if (kind) {
+      const name = WKC_MODEL_NAME_BY_KIND[kind]
+      return [{ id: name, name, type: kind === 'vllm' ? 'chat' : kind, input: kind === 'vllm' ? ['text', 'image'] : ['text'] }]
+    }
+  }
   // The list is already scoped: providers are fetched per model type, so the
   // backend returned exactly the entries that type can use. Filtering again
   // here on entry.type was wrong for 视觉 — a VLM entry is a chat model that
   // accepts images, so it arrives typed "chat" and every one of them was
   // dropped, leaving the picker empty for every vendor.
-  return selectedProvider.value?.models || []
+  return entries
 })
 
 const catalogModelOptions = computed<CatalogModelOption[]>(() => {
@@ -1003,6 +1015,7 @@ const runResolve = async () => {
   try {
     const result = await resolveModelCatalog({
       provider,
+      spec: buildSpec(),
       model: formData.value.modelName || '',
       base_url: formData.value.baseUrl || '',
       model_type: activeModelType.value,
@@ -1066,6 +1079,16 @@ const specCompatError = computed(() => {
     return error?.message || 'invalid JSON'
   }
 })
+
+// Match the parent save path: retain row metadata, replace the edited compat.
+const buildSpec = (): ModelSpecOverride => {
+  if (specCompatError.value) throw new Error(specCompatError.value)
+  const spec: ModelSpecOverride = { ...(formData.value.spec || {}) }
+  const text = (formData.value.specCompat || '').trim()
+  if (text) spec.compat = JSON.parse(text)
+  else delete spec.compat
+  return spec
+}
 
 const dialogVisible = computed({
   get: () => props.visible,
@@ -1303,6 +1326,7 @@ watch(
     props.visible, formData.value.source, formData.value.provider, formData.value.modelName,
     formData.value.baseUrl, formData.value.extraConfig?.api, formData.value.extraConfig?.remote_model_name,
     formData.value.thinkingControl, activeModelType.value,
+ formData.value.specCompat, JSON.stringify(formData.value.spec),
   ],
   () => {
     if (!props.visible) return
@@ -1503,6 +1527,7 @@ watch(
     formData.value.apiKey, formData.value.appSecret, formData.value.customHeaders,
     formData.value.dimension, formData.value.supportsDimensionOverride,
     formData.value.extraConfig, formData.value.thinkingControl,
+ formData.value.specCompat, formData.value.spec,
   ],
   () => {
     if (!applyingDetectedDimension) invalidateConnectionTest(props.visible && !hydratingForm.value)
@@ -1826,6 +1851,7 @@ const checkRemoteAPI = async () => {
     // 使测试连接走与生产调用相同的目录解析路径。
     const extraConfig = buildExtraConfig()
     const extraPayload = {
+      spec: buildSpec(),
       ...(Object.keys(extraConfig).length > 0 ? { extraConfig } : {}),
       ...(formData.value.appSecret?.trim() ? { appSecret: formData.value.appSecret.trim() } : {}),
     }

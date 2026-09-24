@@ -60,6 +60,7 @@ type Config struct {
 	// Provider is the vendor id stored on the row; empty detects it from
 	// BaseURL.
 	Provider    string
+	Spec        *types.ModelSpecOverride `json:"spec,omitempty"`
 	ExtraConfig map[string]string
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
@@ -79,6 +80,7 @@ func ConfigFromModel(m *types.Model) *Config {
 		ModelName:     m.Name,
 		Source:        m.Source,
 		Provider:      m.Parameters.Provider,
+		Spec:          m.Parameters.Spec,
 		ExtraConfig:   m.Parameters.ExtraConfig,
 		CustomHeaders: m.Parameters.CustomHeaders,
 	}

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +40,7 @@ const nimResponse = `{
   "usage": {"prompt_tokens": 4, "total_tokens": 4}
 }`
 
-func newClient(url string, settings catalog.EmbeddingsSettings, dims int) *Client {
+func newClient(url string, settings api.EmbeddingsSettings, dims int) *Client {
 	return New(Config{
 		Endpoint:   api.Endpoint{BaseURL: url, Model: "m", Auth: api.BearerAuth("k")},
 		Settings:   settings,
@@ -66,7 +65,7 @@ func serve(t *testing.T, payload string) (*httptest.Server, *string, *map[string
 // The baseline sends model and input and nothing else: those are the only two
 // fields every vendor in the catalog documents.
 func TestBaselineSendsOnlyModelAndInput(t *testing.T) {
-	c := newClient("https://example.invalid/v1", catalog.EmbeddingsSettings{}, 1024)
+	c := newClient("https://example.invalid/v1", api.EmbeddingsSettings{}, 1024)
 	body := c.BuildRequestBody([]string{"a"}, api.EmbedDocument)
 	assert.Equal(t, map[string]any{"model": "m", "input": []string{"a"}}, body,
 		"a width the row asked for must not be sent to a vendor that names no field for it")
@@ -75,7 +74,7 @@ func TestBaselineSendsOnlyModelAndInput(t *testing.T) {
 // NIM documents no `dimensions`, requires `input_type` and defaults
 // `truncate` to NONE, which fails a request on over-long input.
 func TestNIMRequestMatchesItsReference(t *testing.T) {
-	c := newClient("https://integrate.api.nvidia.com/v1", catalog.EmbeddingsSettings{
+	c := newClient("https://integrate.api.nvidia.com/v1", api.EmbeddingsSettings{
 		SendEncodingFormat: true,
 		InputTypeField:     "input_type",
 		InputTypeValues:    map[string]string{"document": "passage", "query": "query"},
@@ -94,7 +93,7 @@ func TestNIMRequestMatchesItsReference(t *testing.T) {
 
 // Jina spells the same idea `task`, and its truncate is a boolean.
 func TestJinaRequestMatchesItsReference(t *testing.T) {
-	c := newClient("https://api.jina.ai/v1", catalog.EmbeddingsSettings{
+	c := newClient("https://api.jina.ai/v1", api.EmbeddingsSettings{
 		DimensionsField: "dimensions",
 		InputTypeField:  "task",
 		InputTypeValues: map[string]string{"document": "retrieval.passage", "query": "retrieval.query"},
@@ -112,12 +111,12 @@ func TestJinaRequestMatchesItsReference(t *testing.T) {
 // truncate_prompt_tokens is a vLLM extension. It appears in no managed
 // vendor's schema and used to be sent to every one of them, hardcoded to 511.
 func TestTruncatePromptTokensReachesOnlyVLLMClassRuntimes(t *testing.T) {
-	managed := newClient("https://api.openai.com/v1", catalog.EmbeddingsSettings{
+	managed := newClient("https://api.openai.com/v1", api.EmbeddingsSettings{
 		TruncatePromptTokens: 511,
 	}, 0)
 	assert.NotContains(t, managed.BuildRequestBody([]string{"a"}, api.EmbedDocument), "truncate_prompt_tokens")
 
-	vllm := newClient("http://vllm.internal/v1", catalog.EmbeddingsSettings{
+	vllm := newClient("http://vllm.internal/v1", api.EmbeddingsSettings{
 		AcceptsTruncatePromptTokens: true, TruncatePromptTokens: 512,
 	}, 0)
 	assert.Equal(t, 512, vllm.BuildRequestBody([]string{"a"}, api.EmbedDocument)["truncate_prompt_tokens"])
@@ -127,7 +126,7 @@ func TestDecodesArkTextResponse(t *testing.T) {
 	server, path, body := serve(t, arkTextResponse)
 	defer server.Close()
 
-	c := newClient(server.URL+"/api/v3", catalog.EmbeddingsSettings{SendEncodingFormat: true}, 0)
+	c := newClient(server.URL+"/api/v3", api.EmbeddingsSettings{SendEncodingFormat: true}, 0)
 	got, err := c.Embed(context.Background(), []string{"天很蓝", "海很深"}, api.EmbedDocument)
 	require.NoError(t, err)
 	assert.Equal(t, [][]float32{{0.11, 0.12}, {0.21, 0.22}}, got)
@@ -139,7 +138,7 @@ func TestDecodesNIMResponse(t *testing.T) {
 	server, _, _ := serve(t, nimResponse)
 	defer server.Close()
 
-	c := newClient(server.URL+"/v1", catalog.EmbeddingsSettings{}, 0)
+	c := newClient(server.URL+"/v1", api.EmbeddingsSettings{}, 0)
 	got, err := c.Embed(context.Background(), []string{"a"}, api.EmbedQuery)
 	require.NoError(t, err)
 	assert.Equal(t, [][]float32{{0.5, 0.6}}, got)
@@ -153,7 +152,7 @@ func TestOutOfOrderIndicesArePlacedByIndex(t *testing.T) {
 	]}`)
 	defer server.Close()
 
-	got, err := newClient(server.URL, catalog.EmbeddingsSettings{}, 0).
+	got, err := newClient(server.URL, api.EmbeddingsSettings{}, 0).
 		Embed(context.Background(), []string{"a", "b"}, api.EmbedDocument)
 	require.NoError(t, err)
 	assert.Equal(t, [][]float32{{1}, {2}}, got)
@@ -165,7 +164,7 @@ func TestReplyWithoutIndicesIsReadInOrder(t *testing.T) {
 	server, _, _ := serve(t, `{"data":[{"embedding":[1]},{"embedding":[2]},{"embedding":[3]}]}`)
 	defer server.Close()
 
-	got, err := newClient(server.URL, catalog.EmbeddingsSettings{}, 0).
+	got, err := newClient(server.URL, api.EmbeddingsSettings{}, 0).
 		Embed(context.Background(), []string{"a", "b", "c"}, api.EmbedDocument)
 	require.NoError(t, err)
 	assert.Equal(t, [][]float32{{1}, {2}, {3}}, got)
@@ -177,7 +176,7 @@ func TestRepeatedIndexIsStillAnError(t *testing.T) {
 	server, _, _ := serve(t, `{"data":[{"embedding":[1],"index":0},{"embedding":[2],"index":0}]}`)
 	defer server.Close()
 
-	_, err := newClient(server.URL, catalog.EmbeddingsSettings{}, 0).
+	_, err := newClient(server.URL, api.EmbeddingsSettings{}, 0).
 		Embed(context.Background(), []string{"a", "b"}, api.EmbedDocument)
 	assert.Error(t, err)
 }
@@ -187,7 +186,7 @@ func TestShortReplyIsAnError(t *testing.T) {
 	server, _, _ := serve(t, `{"data":[{"embedding":[1],"index":0}]}`)
 	defer server.Close()
 
-	_, err := newClient(server.URL, catalog.EmbeddingsSettings{}, 0).
+	_, err := newClient(server.URL, api.EmbeddingsSettings{}, 0).
 		Embed(context.Background(), []string{"a", "b"}, api.EmbedDocument)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no embedding returned for input 1")
@@ -197,7 +196,7 @@ func TestDoesNotDoubleTheEmbeddingsPath(t *testing.T) {
 	server, path, _ := serve(t, `{"data":[{"embedding":[1],"index":0}]}`)
 	defer server.Close()
 
-	_, err := newClient(server.URL+"/openai/v1/embeddings", catalog.EmbeddingsSettings{}, 0).
+	_, err := newClient(server.URL+"/openai/v1/embeddings", api.EmbeddingsSettings{}, 0).
 		Embed(context.Background(), []string{"a"}, api.EmbedDocument)
 	require.NoError(t, err)
 	assert.Equal(t, "/openai/v1/embeddings", *path)
@@ -211,7 +210,7 @@ func TestSurfacesTheVendorErrorBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newClient(server.URL, catalog.EmbeddingsSettings{}, 0).
+	_, err := newClient(server.URL, api.EmbeddingsSettings{}, 0).
 		Embed(context.Background(), []string{"a"}, api.EmbedDocument)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input exceeds 4096 characters")

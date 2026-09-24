@@ -53,6 +53,24 @@ test('the skill catalog follows the sandbox capability', () => {
   assert.equal(SETTINGS_SECTION_CAPABILITY.skills, SETTINGS_SECTION_CAPABILITY.sandbox)
 })
 
+test('host sandbox stays hidden unless the deployment explicitly enables it', () => {
+  assert.equal(isDeploymentCapabilitySupported({}, 'settings.sandbox.host'), false)
+  assert.equal(
+    isDeploymentCapabilitySupported(
+      { 'settings.sandbox.host': { supported: false, reason: 'platform_unsupported' } },
+      'settings.sandbox.host',
+    ),
+    false,
+  )
+  assert.equal(
+    isDeploymentCapabilitySupported(
+      { 'settings.sandbox.host': { supported: true } },
+      'settings.sandbox.host',
+    ),
+    true,
+  )
+})
+
 test('docker sandbox stays hidden unless the deployment explicitly enables it', () => {
   assert.equal(isDeploymentCapabilitySupported({}, 'settings.sandbox.docker'), false)
   assert.equal(

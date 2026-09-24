@@ -292,6 +292,10 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/manual -H "Authorizatio
 | `parse_status` | string | 否 | `pending/processing/completed/failed` |
 | `source` | string | 否 | 渠道或 `manual`/`url` |
 | `start_time` / `end_time` | string | 否 | RFC3339，按 `updated_at` 过滤 |
+| `sort_by` | string | 否 | 排序字段：`updated_at`、`created_at` 或 `file_name`；默认 `created_at` |
+| `sort_order` | string | 否 | 排序方向：`asc` 或 `desc`；默认 `desc` |
+
+未传排序参数时，接口保持原有的 `created_at desc` 行为。显式使用 `updated_at` 时，重新解析、编辑或状态变化会影响顺序；使用 `file_name` 时按展示文件名忽略大小写排序，文件名为空会依次回退到标题和来源。所有排序都会使用知识 ID 作为稳定的次级排序条件，避免相同排序值下翻页结果漂移。
 
 响应：200 `{"success":true,"data":[Knowledge],"total","page","page_size"}`
 
@@ -346,7 +350,7 @@ curl -X DELETE $BASE/api/v1/knowledge-bases/kb-1/knowledge -H "Authorization: Be
 | `agent_id` | string | 否 | 共享 Agent 范围 |
 | `agent_source_tenant_id` | uint64 | 否 | 共享 Agent 的来源空间选择器，与共享关系校验 |
 
-响应：200 `{"success":true,"data":[Knowledge]}`
+响应：200 `{"success":true,"data":[Knowledge]}`。处于 `pending`/`processing`/`finalizing` 的知识额外带 `last_activity_at`（RFC3339），取行的 `updated_at` 与该知识所有 span 最近一次写入中较晚的一个。超过 20 分钟无进展的知识再带 `stall_state`：`queued` 表示仍有任务在 asynq 队列或 Wiki 持久队列中等待（积压），`stalled` 表示已无任务可推进它（疑似卡住）。判定与 housekeeping 的积压判定相同；队列侧是一次全队列扫描，所有请求共享、缓存 60 秒。探测失败时不返回 `stall_state`，前端按普通解析中显示。
 
 ```bash
 curl "$BASE/api/v1/knowledge/batch?ids=k-1&ids=k-2" -H "Authorization: Bearer $TOKEN"
@@ -366,7 +370,9 @@ curl $BASE/api/v1/knowledge/k-1 -H "Authorization: Bearer $TOKEN"
 
 用途：解析阶段/trace（两条路径同一 handler `GetKnowledgeSpans`）。权限：Viewer+，父 KB read。查询参数：`attempt`（int，0=最新一次）。
 
-响应：200 `{"success":true,"data":{"knowledge_id","attempt","latest_attempt","parse_status","current_stage","trace":{...},"last_error":{...}}}`
+响应：200 `{"success":true,"data":{"knowledge_id","attempt","latest_attempt","parse_status","current_stage","last_activity_at","stall_state","trace":{...},"last_error":{...}}}`
+
+`last_activity_at` 只在解析进行中返回，取行的 `updated_at` 与本次 attempt 各 span 最近一次写入中较晚的一个；`stall_state` 含义同上。`current_stage` 是仍在运行的阶段；没有运行中的阶段时（如 `finalizing`，后处理阶段已关闭、摘要等子任务仍在跑），取仍在运行的子 span 所属的阶段。被 housekeeping 判定卡死的知识，其卡住位置的 span 会以 `TASK_STALLED` 标为失败，`last_error` 优先指向它。
 
 ```bash
 curl $BASE/api/v1/knowledge/k-1/spans -H "Authorization: Bearer $TOKEN"

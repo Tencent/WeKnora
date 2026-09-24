@@ -1,8 +1,6 @@
 import { get, post, put, del, postChat, getDown } from "../../utils/request";
 
-
-
-export async function createSessions(data = {}) {
+export async function createSessions(data: Record<string, unknown> = {}) {
   return post("/api/v1/sessions", data);
 }
 

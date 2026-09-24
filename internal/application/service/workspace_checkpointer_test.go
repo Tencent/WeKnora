@@ -116,3 +116,19 @@ func TestCheckpointReturnsNilWithoutSandboxID(t *testing.T) {
 	require.Nil(t, cp.Checkpoint(context.Background(), "s1", "", "msg-1"))
 	require.Empty(t, runner.calls)
 }
+
+type hostShellRunner struct {
+	fakeShellRunner
+}
+
+func (h *hostShellRunner) VersionsWorkspace(context.Context, string) bool { return false }
+
+func TestCheckpointSkippedWhenBackendDoesNotVersionWorkspace(t *testing.T) {
+	runner := &hostShellRunner{fakeShellRunner: fakeShellRunner{result: &sandbox.ExecuteResult{
+		ExitCode: 0, Stdout: strings.Repeat("a", 40) + "\n",
+	}}}
+	cp := NewWorkspaceCheckpointer(runner)
+
+	require.Nil(t, cp.Checkpoint(context.Background(), "s1", "sbx-1", "msg-1"))
+	require.Empty(t, runner.calls, "must not git commit the user's real project")
+}

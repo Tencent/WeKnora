@@ -25,10 +25,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	"github.com/Tencent/WeKnora/internal/models/vendors/lkeap"
-	"github.com/Tencent/WeKnora/internal/models/vendors/volcengine"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -1764,16 +1763,17 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 // 所有 provider/model 通用字段都在这里集中声明；若未来新增字段（比如现在的
 // custom_headers），只需改一处，生产路径和测试路径会同时生效。
 type ModelTestRequest struct {
-	Source                    string            `json:"source"` // 为空时按需默认为 "remote"
-	ModelName                 string            `json:"modelName" binding:"required"`
-	BaseURL                   string            `json:"baseUrl"`
-	APIKey                    string            `json:"apiKey"`
-	Provider                  string            `json:"provider"`
-	InterfaceType             string            `json:"interfaceType,omitempty"`
-	Dimension                 int               `json:"dimension,omitempty"`
-	SupportsDimensionOverride bool              `json:"supportsDimensionOverride,omitempty"`
-	CustomHeaders             map[string]string `json:"customHeaders,omitempty"`
-	ExtraConfig               map[string]string `json:"extraConfig,omitempty"`
+	Spec                      *types.ModelSpecOverride `json:"spec,omitempty"`
+	Source                    string                   `json:"source"` // 为空时按需默认为 "remote"
+	ModelName                 string                   `json:"modelName" binding:"required"`
+	BaseURL                   string                   `json:"baseUrl"`
+	APIKey                    string                   `json:"apiKey"`
+	Provider                  string                   `json:"provider"`
+	InterfaceType             string                   `json:"interfaceType,omitempty"`
+	Dimension                 int                      `json:"dimension,omitempty"`
+	SupportsDimensionOverride bool                     `json:"supportsDimensionOverride,omitempty"`
+	CustomHeaders             map[string]string        `json:"customHeaders,omitempty"`
+	ExtraConfig               map[string]string        `json:"extraConfig,omitempty"`
 	// AppSecret 用于 LKEAP / Volcengine Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。
 	AppSecret string `json:"appSecret,omitempty"`
 	// ModelID, when set, instructs the handler to substitute any missing
@@ -1806,7 +1806,7 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	// secret stored in extra_config (LKEAP / Volcengine secret_key) is
 	// redacted by GET, so "extraConfig is present" does not mean it is
 	// complete.
-	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil &&
+	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil && req.Spec != nil &&
 		dto.HasAllSecretExtras(req.Provider, req.BaseURL, req.ExtraConfig) {
 		return
 	}
@@ -1815,6 +1815,9 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 		logger.Warnf(ctx, "test-connection: stored model %s not found, leaving secrets empty: %v",
 			utils.SanitizeForLog(req.ModelID), err)
 		return
+	}
+	if req.Spec == nil && req.Provider == stored.Parameters.Provider {
+		req.Spec = stored.Parameters.Spec
 	}
 	if req.APIKey == "" {
 		req.APIKey = stored.Parameters.APIKey
@@ -1872,6 +1875,7 @@ func (h *InitializationHandler) buildTestModel(
 			Provider:      req.Provider,
 			InterfaceType: req.InterfaceType,
 			ExtraConfig:   req.ExtraConfig,
+			Spec:          req.Spec,
 			CustomHeaders: req.CustomHeaders,
 			EmbeddingParameters: types.EmbeddingParameters{
 				Dimension:                 req.Dimension,
@@ -2170,7 +2174,7 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
 	// LKEAP and Volcengine rerank sign with a key pair stored on the row
 	// itself, not with the tenant's WeKnora Cloud credentials.
-	if p := model.Parameters.Provider; p == lkeap.ID || p == volcengine.ID {
+	if p := model.Parameters.Provider; p == providers.LkeapID || p == providers.VolcengineID {
 		appID = ""
 		appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
 	}

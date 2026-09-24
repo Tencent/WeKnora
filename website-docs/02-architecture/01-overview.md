@@ -58,7 +58,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | 配置 | `github.com/spf13/viper` + `config/config.yaml` + 环境变量 | — |
 | 可观测 | OpenTelemetry + Langfuse（`internal/tracing/langfuse`） | LLM 调用级 trace |
 | gRPC | `google.golang.org/grpc` v1.81.0 | 调用 docreader |
-| LLM 接入 | 自研协议层 `internal/models/api`（OpenAI / Anthropic / Gemini / DashScope 等线格式各一个包）、Ollama、腾讯云 LKE SDK 等 | 27 家厂商由 `internal/models/vendors` 声明，见[模型管理](../03-features/06-models.md) |
+| LLM 接入 | 自研协议层 `internal/models/api`（OpenAI / Anthropic / Gemini / DashScope 等线格式各一个包）、Ollama、腾讯云 LKE SDK 等 | 27 家厂商由 `internal/models/providers` 声明，见[模型管理](../03-features/06-models.md) |
 | 向量/检索 | pgvector、ES v7/v8、OpenSearch、Qdrant、Milvus、Weaviate、Doris、腾讯 VectorDB、sqlite-vec | 由 `RETRIEVE_DRIVER` 与 `vector_stores` 表动态装配 |
 | 知识图谱 | `neo4j-go-driver/v6` | 可选 |
 | 数据分析 | DuckDB（`duckdb-go/v2`）、`pg_query_go` SQL 校验 | Agent 数据分析工具 |
@@ -198,7 +198,7 @@ sequenceDiagram
 | `tests/`、`testdata/` | 集成测试与测试数据 |
 | `misc/` | 杂项（如 `dex-config.yaml` OIDC 测试配置） |
 | `packages/` | 预留的本地包目录 |
-| `docs/` | 早期文档，部分内容已过时 |
+| `docs/` | 停止维护的旧文档；暂存 Swagger 生成包、发布资源和历史图片 |
 
 > 说明：Go 模块路径为 `github.com/Tencent/WeKnora`；根目录还包含 `docker-compose.yml`（生产编排）与 `docker-compose.dev.yml`（开发编排）、`Makefile`、`VERSION` 等。
 

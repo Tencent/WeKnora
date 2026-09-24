@@ -776,22 +776,33 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// persisted without artifacts. Collect is a no-op when either the
 		// collector wasn't wired in, no sandbox is bound, or no files were
 		// produced — those cases must not disturb the completion path.
+		//
+		// Layouts without a separate output tree must not be collected
+		// (scanning Root would upload the whole project). Remote backends keep
+		// skills.ArtifactOutputDir(), or layout.OutputDir when advertised.
 		var previous types.MessageArtifacts
 		if h.artifactCollector != nil {
 			collectCtx := context.WithoutCancel(h.ctx)
-			artifacts, err := h.artifactCollector.CollectWithNotify(
-				collectCtx,
-				h.sessionID,
-				h.assistantMessageID,
-				h.tenantID,
-				skills.ArtifactOutputDir(),
-				h.emitArtifactsPending,
-			)
-			if err != nil {
-				logger.GetLogger(h.ctx).Warnf(
-					"artifact collect failed session=%s message=%s: %v",
-					h.sessionID, h.assistantMessageID, err,
+			var artifacts types.MessageArtifacts
+			if collectDir, skip := h.artifactCollector.CollectTarget(collectCtx, h.sessionID); !skip {
+				if collectDir == "" {
+					collectDir = skills.ArtifactOutputDir()
+				}
+				var err error
+				artifacts, err = h.artifactCollector.CollectWithNotify(
+					collectCtx,
+					h.sessionID,
+					h.assistantMessageID,
+					h.tenantID,
+					collectDir,
+					h.emitArtifactsPending,
 				)
+				if err != nil {
+					logger.GetLogger(h.ctx).Warnf(
+						"artifact collect failed session=%s message=%s: %v",
+						h.sessionID, h.assistantMessageID, err,
+					)
+				}
 			}
 
 			// Resolve the files the answer names against this turn's artifacts

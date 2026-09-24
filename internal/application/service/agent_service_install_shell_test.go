@@ -58,7 +58,7 @@ func TestInstallerAgentGetsTheRootShellWithTheSkillsRoot(t *testing.T) {
 }
 
 func TestOrdinaryAgentUsesSessionShellForSandboxPaths(t *testing.T) {
-	for _, workDir := range []string{"", "/tmp/task/previews", sandbox.SkillsImageRoot + "/sk-1"} {
+	for _, workDir := range []string{"", sandbox.SessionWorkspaceRoot, sandbox.SessionWorkspaceRoot + "/scratch"} {
 		t.Run(workDir, func(t *testing.T) {
 			installer := &stubInstallShellExecutor{}
 			ordinary := &stubShellExecutor{}

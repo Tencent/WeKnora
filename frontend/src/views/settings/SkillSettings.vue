@@ -370,6 +370,7 @@ import {
 const props = defineProps<{
   initialSandboxId?: string
 }>()
+const emit = defineEmits<{ count: [value: number] }>()
 
 const { t } = useI18n()
 const uiStore = useUIStore()
@@ -1171,6 +1172,7 @@ async function loadCatalog(silent = false) {
   try {
     const res = await listSkillCatalog()
     catalog.value = res?.data || []
+    emit('count', catalog.value.length)
   } catch (e: any) {
     if (!silent) MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))
   } finally {
@@ -1242,6 +1244,8 @@ watch(busyPickTargets, (targets) => {
 }, { immediate: true })
 
 onMounted(load)
+
+defineExpose({ openAdd })
 onUnmounted(() => {
   stopPoll()
   stopInstallProgress()

@@ -93,9 +93,14 @@ func RunnableWorkspaceScript(scriptPath string) (string, bool) {
 // and fell back to SessionOutputRoot, while the tools and the artifact
 // collector took the host value as-is. Keep this separate from shell working
 // directories: access to a sandbox path does not make it a delivery directory.
+//
+// SessionWorkspaceRoot itself is refused. An artifact directory equal to the
+// workspace root is not a delivery tree — it is the whole workspace, drafts
+// included — and callers that compare the two (artifact collection) read
+// that as "this backend collects nothing", silently dropping every artifact.
 func ValidatedSessionOutputDir(dir string) (string, bool) {
 	clean := path.Clean(strings.TrimSpace(dir))
-	if clean != SessionWorkspaceRoot && !strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
+	if !strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
 		return "", false
 	}
 	return clean, true

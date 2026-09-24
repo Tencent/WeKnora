@@ -39,7 +39,9 @@ type fakeAgentKnowledgeService struct {
 }
 
 type fakeAgentChatModel struct {
-	lastToolNames []string
+	lastToolNames        []string
+	lastToolDescriptions map[string]string
+	lastSystemPrompt     string
 }
 
 func (*fakeAgentChatModel) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
@@ -47,12 +49,21 @@ func (*fakeAgentChatModel) Chat(context.Context, []chat.Message, *chat.ChatOptio
 }
 
 func (m *fakeAgentChatModel) ChatStream(
-	_ context.Context, _ []chat.Message, opts *chat.ChatOptions,
+	_ context.Context, messages []chat.Message, opts *chat.ChatOptions,
 ) (<-chan types.StreamResponse, error) {
 	m.lastToolNames = nil
+	m.lastToolDescriptions = map[string]string{}
+	m.lastSystemPrompt = ""
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			m.lastSystemPrompt = msg.Content
+			break
+		}
+	}
 	if opts != nil {
 		for _, tool := range opts.Tools {
 			m.lastToolNames = append(m.lastToolNames, tool.Function.Name)
+			m.lastToolDescriptions[tool.Function.Name] = tool.Function.Description
 		}
 	}
 
@@ -581,6 +592,149 @@ func TestGetKnowledgeBaseInfos_ExcludesUnprocessedDocuments(t *testing.T) {
 	assert.Equal(t, 1, infos[0].DocCount)
 	require.Len(t, infos[0].RecentDocs, 1)
 	assert.Equal(t, "doc-completed", infos[0].RecentDocs[0].KnowledgeID)
+}
+
+func TestRegisterSandboxShellIfAllowedHostIgnoresSkillsGate(t *testing.T) {
+	registry := tools.NewToolRegistry()
+	svc := &agentService{
+		hostSandbox: &capableManager{
+			typ:   sandbox.SandboxTypeHost,
+			shell: &stubShellExecutor{},
+		},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	svc.registerSandboxShellIfAllowed(ctx, registry, "sess-1", &types.AgentConfig{
+		SkillsEnabled: false,
+	})
+
+	require.True(t, toolRegistered(registry, tools.ToolShellExec),
+		"the host backend is the Lite feature and must not wait on SkillsEnabled")
+}
+
+type hostLayoutManager struct {
+	capableManager
+	layout sandbox.WorkspaceLayout
+}
+
+func (m *hostLayoutManager) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	layout := m.layout
+	if layout.Origin == sandbox.WorkspaceOriginUnspecified {
+		layout.Origin = sandbox.WorkspaceOriginHost
+	}
+	return layout, nil
+}
+
+func TestCreateAgentEngineInjectsHostWorkspaceIntoPromptAndTools(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	root := "/Users/dev/My Project"
+	layout := sandbox.WorkspaceLayout{
+		Origin:     sandbox.WorkspaceOriginHost,
+		Root:       root,
+		WriteRoots: []string{root},
+		ReadRoots:  []string{root},
+		Hint:       root,
+	}
+	chatModel := &fakeAgentChatModel{}
+	svc := &agentService{
+		hostSandbox: &hostLayoutManager{
+			capableManager: capableManager{
+				typ:   sandbox.SandboxTypeHost,
+				shell: &stubShellExecutor{layout: layout},
+				files: stubSessionFileStore{},
+			},
+			layout: layout,
+		},
+	}
+
+	engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+		SkillsEnabled: false,
+		AllowedTools:  []string{tools.ToolShellExec},
+	}, chatModel, nil, nil, "sess-1", "msg-1")
+	require.NoError(t, err)
+	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+	require.NoError(t, err)
+
+	require.Contains(t, chatModel.lastSystemPrompt, root)
+	require.NotContains(t, chatModel.lastSystemPrompt, "Session workspace: /workspace")
+	require.NotContains(t, chatModel.lastSystemPrompt, "There is no /workspace")
+	require.Contains(t, chatModel.lastToolDescriptions[tools.ToolShellExec], root)
+	require.NotContains(t, chatModel.lastToolDescriptions[tools.ToolShellExec], sandbox.SessionWorkspaceRoot)
+}
+
+func TestLookupSessionWorkspaceLayoutFailsClosedWhenHostPinReadFails(t *testing.T) {
+	db := newPinTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	svc := &agentService{
+		hostSandbox:   &capableManager{typ: sandbox.SandboxTypeHost},
+		sandboxPinner: NewSessionSandboxPinner(db),
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{})
+
+	require.Equal(t, sandbox.FailedHostWorkspaceLayout(), layout)
+	require.NotEqual(t, sandbox.RemoteWorkspaceLayout().Root, layout.Root)
+}
+
+func TestLookupSessionWorkspaceLayoutFailsClosedWhenHostScriptsDisabled(t *testing.T) {
+	svc := &agentService{
+		hostSandbox:   &capableManager{typ: sandbox.SandboxTypeHost},
+		sandboxPolicy: disabledPolicy{},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{})
+
+	require.Equal(t, sandbox.FailedHostWorkspaceLayout(), layout)
+}
+
+func TestLookupSessionWorkspaceLayoutStaysRemoteWithoutHostSandbox(t *testing.T) {
+	layout := (&agentService{}).lookupSessionWorkspaceLayout(
+		context.Background(), "sess-1", &types.AgentConfig{},
+	)
+	require.Equal(t, sandbox.RemoteWorkspaceLayout(), layout)
+}
+
+func TestLookupSessionWorkspaceLayoutKeepsRemoteWhenNamedConfigFails(t *testing.T) {
+	svc := &agentService{
+		hostSandbox: &capableManager{typ: sandbox.SandboxTypeHost},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{
+		SandboxConfigID: "cfg-cube",
+	})
+
+	require.Equal(t, sandbox.RemoteWorkspaceLayout(), layout)
+}
+
+func TestRegisterSandboxShellIfAllowedRemoteKeepsSkillsGate(t *testing.T) {
+	registry := tools.NewToolRegistry()
+	svc := &agentService{
+		sandboxResolver: stubSandboxResolver{
+			mgr: &capableManager{
+				typ:   sandbox.SandboxTypeE2B,
+				shell: &stubShellExecutor{},
+			},
+		},
+		hostSandbox: &capableManager{
+			typ:   sandbox.SandboxTypeHost,
+			shell: &stubShellExecutor{},
+		},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	svc.registerSandboxShellIfAllowed(ctx, registry, "sess-1", &types.AgentConfig{
+		SandboxConfigID: "cfg-1",
+		SkillsEnabled:   false,
+	})
+
+	require.False(t, toolRegistered(registry, tools.ToolShellExec),
+		"a remote shell still exists only to serve skill scripts")
 }
 
 func TestValidateConfigMaxIterationsUnlimited(t *testing.T) {

@@ -53,11 +53,13 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 }
 
 // EnqueueIfKnowledgeBaseActive prevents detached wiki cleanup from writing new
-// durable work after a KB was soft-deleted. On Postgres the share lock
-// serializes this check+insert transaction against the row update performed by
-// soft deletion: whichever operation acquires the row first determines the
-// order, and the deletion path's subsequent scope scrub removes any insert
-// that committed before it.
+// durable work after a KB was soft-deleted. The tenant must also be alive: a
+// tenant soft-deletion removes the workspace without touching its knowledge
+// bases, and a deleted tenant must never accrue new model-backed work. On
+// Postgres the share lock serializes this check+insert transaction against
+// the row update performed by soft deletion: whichever operation acquires the
+// row first determines the order, and the deletion path's subsequent scope
+// scrub removes any insert that committed before it.
 func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 	ctx context.Context,
 	op *types.TaskPendingOp,
@@ -84,6 +86,10 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 			}
 			return err
 		}
+		active, err := tenantActiveWithinTx(tx, op.TenantID)
+		if err != nil || !active {
+			return err
+		}
 		if err := tx.Create(op).Error; err != nil {
 			return err
 		}
@@ -91,6 +97,31 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 		return nil
 	})
 	return accepted, err
+}
+
+// tenantActiveWithinTx reports whether the tenant row exists and is not
+// soft-deleted, inside the caller's transaction. Callers that cannot see a
+// tenants table (legacy test doubles) fail closed.
+func tenantActiveWithinTx(tx *gorm.DB, tenantID uint64) (bool, error) {
+	if tenantID == 0 {
+		return false, nil
+	}
+	var tenant types.Tenant
+	err := tx.Model(&types.Tenant{}).Select("id").Where("id = ?", tenantID).Take(&tenant).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// HasActiveTenant reports whether the tenant exists and has not been
+// soft-deleted. Wiki task consumers call this before doing durable or
+// model-backed work on the tenant's behalf (#3593).
+func (r *taskPendingOpsRepository) HasActiveTenant(ctx context.Context, tenantID uint64) (bool, error) {
+	return tenantActiveWithinTx(r.db.WithContext(ctx), tenantID)
 }
 
 // SeedKnowledgeFinalizingWithPendingOp commits the finalizing counter and the
@@ -364,6 +395,54 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 	return r.db.WithContext(ctx).
 		Where("scope = ? AND scope_id = ?", scope, scopeID).
 		Delete(&types.TaskPendingOp{}).Error
+}
+
+// DrainUnclaimedAndRelease deletes the lane's op rows for documents no live
+// batch holds and releases each such document's finalizing slot, in one
+// transaction: a failed release rolls the delete back so a retry finds the
+// rows again. A document with any freshly claimed row in the lane (whatever
+// its op) is skipped whole, matching ClaimBatch's per-key claim, since the
+// live batch will release it. Returns the released dedup keys.
+func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
+	ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time,
+) ([]string, error) {
+	if taskType == "" || scope == "" || scopeID == "" || op == "" {
+		return nil, errors.New("task pending ops: task_type, scope, scope_id and op are required")
+	}
+	var keys []string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var removed []string
+		if err := tx.Raw(
+			`DELETE FROM task_pending_ops
+			WHERE task_type = ? AND scope = ? AND scope_id = ? AND op = ?
+				AND (claimed_at IS NULL OR claimed_at < ?)
+				AND dedup_key NOT IN (
+					SELECT dedup_key FROM task_pending_ops
+					WHERE task_type = ? AND scope = ? AND scope_id = ? AND claimed_at >= ?
+				)
+			RETURNING dedup_key`,
+			taskType, scope, scopeID, op, staleBefore,
+			taskType, scope, scopeID, staleBefore,
+		).Scan(&removed).Error; err != nil {
+			return err
+		}
+		seen := make(map[string]struct{}, len(removed))
+		for _, key := range removed {
+			if _, ok := seen[key]; ok || key == "" {
+				continue
+			}
+			seen[key] = struct{}{}
+			if _, err := finalizeSubtask(tx, key); err != nil {
+				return fmt.Errorf("release finalizing slot for %s: %w", key, err)
+			}
+			keys = append(keys, key)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 // IncrFailCount atomically bumps fail_count for one row and returns the

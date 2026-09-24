@@ -102,6 +102,9 @@ func (c *WorkspaceCheckpointer) Checkpoint(
 	if strings.TrimSpace(sandboxID) == "" {
 		return nil
 	}
+	if v, ok := c.runner.(WorkspaceVersioning); ok && !v.VersionsWorkspace(ctx, sessionID) {
+		return nil
+	}
 
 	var result *sandbox.ExecuteResult
 	var err error

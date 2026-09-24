@@ -23,6 +23,7 @@ var DeploymentCapabilityKeys = []string{
 	"settings.storage",
 	"settings.sandbox",
 	"settings.sandbox.docker",
+	"settings.sandbox.host",
 }
 
 // DeploymentCapability describes whether a deployment exposes a feature route.
@@ -51,6 +52,7 @@ type DeploymentFeatureAvailability struct {
 	Storage       bool
 	Sandbox       bool
 	SandboxDocker bool
+	SandboxHost   bool
 }
 
 func supportedDeploymentCapability(supported bool) DeploymentCapability {
@@ -80,6 +82,16 @@ func BuildDeploymentCapabilities(
 		sandboxDocker.Reason = "route_not_registered"
 	}
 
+	sandboxHost := DeploymentCapability{
+		Supported: available.Sandbox && available.SandboxHost,
+	}
+	if available.Sandbox && !available.SandboxHost {
+		// The platform has no OS-enforced backend (Windows/Linux today).
+		sandboxHost.Reason = "platform_unsupported"
+	} else if !available.Sandbox {
+		sandboxHost.Reason = "route_not_registered"
+	}
+
 	return DeploymentCapabilitiesData{
 		Edition: edition,
 		Capabilities: map[string]DeploymentCapability{
@@ -95,6 +107,7 @@ func BuildDeploymentCapabilities(
 			"settings.storage":        supportedDeploymentCapability(available.Storage),
 			"settings.sandbox":        supportedDeploymentCapability(available.Sandbox),
 			"settings.sandbox.docker": sandboxDocker,
+			"settings.sandbox.host":   sandboxHost,
 		},
 	}
 }
