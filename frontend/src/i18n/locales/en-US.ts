@@ -4932,6 +4932,8 @@ export default {
       dimensionOverrideDesc: 'Enable only if the provider documentation says this model accepts a dimensions parameter.',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      embeddingImageInputLabel: 'Image Input',
+      embeddingImageInputDesc: 'The model embeds images into the same vector space as text. Catalogued models are detected automatically; declare it for custom models',
       contextWindowLabel: 'Context Window',
       contextWindowPlaceholder: 'Default {value}',
       contextWindowDesc: 'How many tokens this model can take in one request. Agent history compaction uses this limit. Leave empty for the default 200000 (200K). Use the provider’s real window — a larger guess means compaction never fires and the provider rejects the request.',

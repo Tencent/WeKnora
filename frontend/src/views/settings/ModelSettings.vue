@@ -132,7 +132,8 @@
                   :title="contextWindowTitle(model.contextWindow)"
                 >{{ formatContextWindow(model.contextWindow) }}</span>
               </template>
-              <template v-if="model._modelType === 'chat' && model.supportsVision">
+              <template v-if="(model._modelType === 'chat' && model.supportsVision)
+                || (model._modelType === 'embedding' && model.capabilities?.input?.includes('image'))">
                 <span class="model-card__sep">·</span>
                 <span class="model-card__vision" :title="$t('model.editor.supportsVisionLabel')"
                   :aria-label="$t('model.editor.supportsVisionLabel')">

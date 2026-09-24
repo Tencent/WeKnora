@@ -193,8 +193,10 @@ type ModelResponse struct {
 	// Per-field "configured?" map. Omitted for builtin models unless the
 	// caller is a system administrator. See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
-	// Capabilities is the catalog view of the model: protocol, whether it
-	// can think and at which levels, context window. Chat models only.
+	// Capabilities is the catalog view of the model. Chat models get the
+	// protocol, thinking levels and context window; embedding models get the
+	// input modalities, which decide whether images can be embedded in the
+	// same space as text.
 	Capabilities *modelruntime.Capabilities `json:"capabilities,omitempty"`
 }
 
@@ -308,7 +310,8 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		}
 	}
 	var caps *modelruntime.Capabilities
-	if m.Type == types.ModelTypeKnowledgeQA || m.Type == types.ModelTypeVLLM {
+	switch m.Type {
+	case types.ModelTypeKnowledgeQA, types.ModelTypeVLLM, types.ModelTypeEmbedding:
 		if resolved, err := modelruntime.Resolve(modelruntime.Ref{
 			Provider: m.Parameters.Provider, Model: m.Name, BaseURL: m.Parameters.BaseURL,
 			ModelType: m.Type, Extra: m.Parameters.ExtraConfig, Override: m.Parameters.Spec,
