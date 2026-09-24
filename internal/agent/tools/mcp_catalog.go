@@ -420,6 +420,18 @@ func mcpDiscoveryFailure(err error, status string) (*types.ToolResult, error) {
 	return &types.ToolResult{Success: false, Error: err.Error(), Data: map[string]any{"status": status}}, nil
 }
 
+// errMCPSchemaNotDescribed 是「未 describe 就调用」的统一 fast-fail 文案。
+// call_mcp_tool 代理路径与 MCPRegisteredTool 直注册路径共用同一句错误，
+// 保证模型无论走哪条入口收到的自我纠错提示完全一致（issue #35）：
+// 两条路径的 describe 不变量是同一个（knownCallableRef），文案也必须同一个。
+func errMCPSchemaNotDescribed(serviceID, toolName string) error {
+	return fmt.Errorf(
+		"tool schema has not been described; use discover_mcp_tools(mode=\"describe\", "+
+			"server_id=%q, tool_name=%q) before calling",
+		serviceID, toolName,
+	)
+}
+
 func mcpJSONResult(value any) (*types.ToolResult, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -887,11 +899,7 @@ func (t *MCPCallTool) resolve(ctx context.Context, raw json.RawMessage) (*MCPToo
 				return nil, nil, err
 			}
 			if !t.catalog.knownCallableRef(ref) {
-				return nil, nil, fmt.Errorf(
-					"tool schema has not been described; use discover_mcp_tools(mode=\"describe\", "+
-						"server_id=%q, tool_name=%q) before calling",
-					tool.service.ID, tool.mcpTool.Name,
-				)
+				return nil, nil, errMCPSchemaNotDescribed(tool.service.ID, tool.mcpTool.Name)
 			}
 			return tool, args, nil
 		}
@@ -955,6 +963,25 @@ func (r *ToolRegistry) MCPCallTarget(ctx context.Context, name string, raw json.
 		Args:        input,
 		ServiceName: tool.service.Name,
 		ToolName:    tool.mcpTool.Name,
+	}
+}
+
+// IsMCPTool reports whether name is backed by the MCP channel: a direct-
+// registered tool (MCPRegisteredTool) or the call_mcp_tool proxy (MCPCallTool).
+// IntentGate 的 require_approval 接缝用它判定审批通道存在性（issue #35）：
+// MCPCallTarget 在授权上下文不匹配时返回 nil，但审批等待发生在 MCP 工具
+// 执行体内部（MCPTool.Execute 的 RequestAndWait），与 presentation target
+// 是否解析成功无关——registry 里的工具类型才是通道存在性的可靠判据。
+func (r *ToolRegistry) IsMCPTool(name string) bool {
+	registered, err := r.GetTool(name)
+	if err != nil {
+		return false
+	}
+	switch registered.(type) {
+	case *MCPRegisteredTool, *MCPCallTool:
+		return true
+	default:
+		return false
 	}
 }
 

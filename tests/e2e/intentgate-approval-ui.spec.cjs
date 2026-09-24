@@ -2,6 +2,10 @@
 //
 // Run A：对话中触发需审批调用 → 审批卡片出现（描述含策略理由）→ 点「批准」
 //         → 工具执行成功（页面可见 echo 结果）。
+// 触发路径（issue #35）：模型按名直注册工具（mcp_<服务>_<工具>）调用——
+// 哨兵策略 scope_ref=mcp_<服务名前缀>_* 只命中直注册名，不命中 call_mcp_tool
+// 代理；若模型走代理路径，哨兵不触发、本用例不产卡片（属策略 scope 语义，
+// 不是本用例的回归）。
 // 前置：后端 :8080（含 T41+#31）、前端 :5173、mcp-echo-server :8765。
 // 用法：node tests/e2e/intentgate-approval-ui.spec.cjs
 const { chromium } = require('playwright');
@@ -67,7 +71,7 @@ const bad = (msg) => { console.log(`FAIL ${msg}`); failures += 1; };
         allowed_tools: ['discover_mcp_tools', 'call_mcp_tool'],
         mcp_selection_mode: 'selected',
         mcp_services: [svcId],
-        system_prompt: `你必须依次完成两步：第一步调用 discover_mcp_tools（参数 {"mode":"list_tools","server_id":"${svcId}"}），从返回结果中取 echo 工具的 tool_ref；第二步用该 tool_ref 调用 call_mcp_tool（arguments 为 {"text":"hello"}）。禁止不调用工具直接作答。`,
+        system_prompt: `你必须依次完成三步：第一步调用 discover_mcp_tools（参数 {"mode":"list_tools","server_id":"${svcId}"}），从返回结果中取 echo 工具的 function_name 字段（mcp_ 开头的直注册名字）；第二步用 mode=\"describe\" describe 该工具（server_id 同上，tool_name=\"echo\"）；第三步直接用第一步拿到的 function_name 以参数 {"text":"hello"} 调用该工具。禁止调用 call_mcp_tool，禁止不调用工具直接作答。`,
       },
     }),
   }).then((r) => r.json());

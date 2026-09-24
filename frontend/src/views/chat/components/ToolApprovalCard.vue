@@ -7,6 +7,13 @@
       </div>
     </div>
 
+    <!-- 命中理由（设计 §1 用户故事 13：审批请求里看到工具名、参数和命中理由）。
+         IntentGate 强制审批时 description 带「[意图策略要求人工审批] + 策略理由」；
+         普通 MCP 审批时为工具描述。多行文本保留换行。 -->
+    <div v-if="props.description" class="action-details approval-description">
+      <div class="approval-description-text">{{ props.description }}</div>
+    </div>
+
     <div class="interaction-status-summary">
       <div class="results-summary-text">
         <span v-if="resolved" class="status-label">{{ statusLine }}</span>
@@ -246,4 +253,16 @@ const submit = async (decision: 'approve' | 'reject') => {
 
 <style scoped lang="less">
 @import './agent-interaction-card.less';
+
+.approval-description {
+  padding: 4px 12px 8px;
+
+  .approval-description-text {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--td-text-color-secondary, rgba(0, 0, 0, 0.6));
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
 </style>

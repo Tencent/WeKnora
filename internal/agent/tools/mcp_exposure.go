@@ -42,6 +42,18 @@ func (t *MCPRegisteredTool) Description() string {
 
 // Execute revalidates the catalog before invoking the bound tool.
 func (t *MCPRegisteredTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	// issue #35（T41 seam）：直注册路径与 call_mcp_tool 代理路径执行同一条
+	// describe 不变量——schema 未 describe 时两条入口都 fast-fail，同文案。
+	// 缺这条检查时，经会话历史重放的直注册工具（RememberMCPHistory 只登记
+	// 名字、不豁免 describe）会以过期 schema 继续执行，在 agent-chat 里挂起
+	// 到 SSE 客户端超时。knownCallableRef = 本轮 describe 过 或 历史调用过
+	// 的 ref，与代理路径（MCPCallTool.resolve）的判定完全一致。
+	// 语义注记：fast-fail 发生在审批等待之前——未 describe 的调用不产审批
+	// 卡片，直接带着 describe 指引返回给模型自我纠错（issue #35 验收 ②
+	// 的「fast-fail 前不产卡」分支）。describe 过的直注册工具不受影响。
+	if !t.catalog.knownCallableRef(t.ref) {
+		return mcpDiscoveryFailure(errMCPSchemaNotDescribed(t.service.ID, t.mcpTool.Name), "unavailable")
+	}
 	tools, _, err := t.catalog.snapshot(ctx, t.service.ID, false)
 	if err != nil {
 		return mcpDiscoveryFailure(err, "unavailable")
