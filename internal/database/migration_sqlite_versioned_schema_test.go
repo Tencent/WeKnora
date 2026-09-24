@@ -66,7 +66,7 @@ var versionedSQLiteColumns = map[string][]string{
 }
 
 	"message_artifacts":  {"deleted_at"},                                                       // 000107
-	"intent_verdicts":    {"judge_model"},                                                       // 000111
+	"intent_verdicts":    {"judge_model"},                                                       // 000113
 }
 
 const expectedSQLiteMigrationVersion = 33
