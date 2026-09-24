@@ -417,7 +417,7 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 
 ### POST /api/v1/knowledge-search
 
-用途：无会话知识检索（非流式），和产品内问答走同一条检索链路（召回 → rerank → 合并 → 截断）。Handler: `internal/handler/session/qa.go` 的 `SearchKnowledge`。和 `hybrid-search` 的区别见[检索接口怎么选](./01-api-overview.md#retrieval-api)。
+用途：无会话知识检索（非流式），外部系统取检索结果的首选接口。和产品内问答走同一条检索流程（召回 → rerank → 合并 → 截断），排序与页面问答一致。和 `hybrid-search` 怎么选见[检索接口怎么选](./01-api-overview.md#retrieval-api)。Handler: `internal/handler/session/qa.go` 的 `SearchKnowledge`。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |

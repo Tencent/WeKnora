@@ -814,7 +814,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 
 // SearchKnowledge godoc
 // @Summary      知识搜索
-// @Description  在知识库中搜索（不使用LLM总结）
+// @Description  在知识库中搜索（不使用LLM总结）。与产品内问答使用同一检索流程（召回、rerank、合并），外部检索首选；可覆盖召回参数与 rerank
 // @Tags         问答
 // @Accept       json
 // @Produce      json

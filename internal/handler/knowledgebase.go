@@ -305,7 +305,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 
 // HybridSearch godoc
 // @Summary      混合搜索
-// @Description  在知识库中执行向量和关键词混合搜索，可选 rerank 重排序。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
+// @Description  底层召回：向量+关键词混合检索，默认不 rerank（可用 rerank 字段开启）；一般检索请用 /knowledge-search。推荐 POST，GET 带 JSON 体仅兼容旧客户端。
 // @Tags         知识库
 // @Accept       json
 // @Produce      json

@@ -131,7 +131,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 
 ### POST /api/v1/knowledge-bases/:id/hybrid-search（兼容 GET）
 
-用途：KB 内混合检索（向量+关键词），可选 rerank。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。和 `knowledge-search` 的区别见[检索接口怎么选](./01-api-overview.md#retrieval-api)。
+用途：KB 内的底层召回（向量+关键词），默认不做 rerank，返回召回分；可选开启 rerank。适合评测召回、传预计算向量等需要控制原始召回的场景，一般的检索请用 [`knowledge-search`](./02-api-chat.md)，选择方法见[检索接口怎么选](./01-api-overview.md#retrieval-api)。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。
 
 查询参数：`resource_urls=handle|public`（`public` 把结果 `content` / `image_info` 里的 `resource://` 换成可加载直链，详见 [API 总览](./01-api-overview.md)）。
 

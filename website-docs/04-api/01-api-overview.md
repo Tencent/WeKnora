@@ -213,17 +213,38 @@ X-Accel-Buffering: no
 
 ## 检索接口怎么选 {#retrieval-api}
 
-对外有两个检索接口，都要求 API Key 有 `retrieve`（或 full）权限，都返回 `SearchResult` 列表：
+对外有两个检索接口，都要求 API Key 有 `retrieve`（或 full）权限，都返回 `SearchResult` 列表。
 
-| | `POST /knowledge-search` | `POST /knowledge-bases/{id}/hybrid-search` |
+**默认用 `POST /knowledge-search`**。它和产品内的问答走同一条检索流程（召回 → rerank → 合并 → 截断），返回的就是页面上问答会用到的那些片段。`POST /knowledge-bases/{id}/hybrid-search` 是更底层的召回接口：默认不做 rerank，分数就是召回分，适合需要看到或控制召回原始结果的场景。
+
+### 按场景选
+
+| 我想…… | 用哪个 | 请求体要点 |
 | --- | --- | --- |
-| 定位 | 和产品内问答走同一条检索链路：召回 → rerank → 合并 → 截断 | 底层召回原语：召回 → 融合 → 截断；rerank 需要显式开启 |
-| 检索范围 | 多个知识库，可以使用不同的 embedding 模型；也可以只给 `knowledge_ids` 或带知识库范围的标签 | 路径上的知识库；`knowledge_base_ids` 可扩展到多个知识库，但它们的 embedding 模型必须相同 |
-| 召回参数 | `vector_threshold`、`keyword_threshold`、`match_count`、`disable_*_match`；省略时用空间的检索配置 | 同名参数，另外支持 `query_embedding` 预计算向量 |
-| rerank | 默认开启（用空间配置），`rerank` 对象可以覆盖或关闭 | 默认关闭，传 `rerank` 对象后开启 |
-| 上下文补齐 | 父块、相邻块在合并阶段拼进 `content` | 父块、相邻块、关联块作为额外结果行返回（`skip_context_enrichment` 可关） |
+| 给自己的 RAG / 智能体拿检索结果，排序和页面问答一致 | `knowledge-search` | `query` + `knowledge_base_ids`，其余不填 |
+| 同时搜多个知识库，且它们用的 embedding 模型不同 | `knowledge-search` | `knowledge_base_ids` |
+| 只在某几个文档或标签里搜 | `knowledge-search` | `knowledge_ids` / `tag_ids` |
+| 调整返回条数或召回阈值，但仍然要 rerank | `knowledge-search` | `match_count`、`vector_threshold`、`keyword_threshold` |
+| 换一个 rerank 模型，或改 rerank 阈值 | `knowledge-search` | `rerank.model_id`、`rerank.threshold` |
+| 不要 rerank，直接拿召回结果 | `knowledge-search` 或 `hybrid-search` | 前者传 `"rerank":{"enabled":false}`；后者不传 `rerank` |
+| 结果为空，想知道原因 | `knowledge-search` | 看响应里的 `meta.rerank.outcome` |
+| 已经自己算好了查询向量 | `hybrid-search` | `query_embedding` + `disable_keywords_match: true` |
+| 评测召回质量：固定一个库、固定参数，看原始召回分 | `hybrid-search` | 不传 `rerank` |
+| 在上面的评测基础上，再对比加 rerank 后的效果 | `hybrid-search` | 同一请求加上 `rerank` |
+| 父块、相邻块要作为单独的结果行返回，而不是拼进正文 | `hybrid-search` | 默认如此，`skip_context_enrichment: true` 可关 |
 
-一般的外部 RAG 调用，想拿到和页面问答一致的排序，用 `knowledge-search`。需要精确控制召回（评测流水线要固定参数、传预计算向量、只查一个库做 A/B 对比），用 `hybrid-search`；需要的话加上 `rerank`。
+### 两者的差别
+
+| | `knowledge-search` | `hybrid-search` |
+| --- | --- | --- |
+| rerank | 默认开（用空间配置），`rerank` 对象可以覆盖或关闭 | 默认关，传 `rerank` 对象才开 |
+| 多知识库 | 可以，embedding 模型可以不同 | `knowledge_base_ids` 可以，但 embedding 模型必须相同，路径上的 `{id}` 也要在其中 |
+| 预计算向量 | 不支持 | `query_embedding` |
+| 上下文块 | 合并进结果的 `content` | 作为额外的结果行返回 |
+| `match_count` 省略时 | 空间配置的 `rerank_top_k`（默认 10） | 50 |
+| `meta.rerank` | 每次都返回 | 带了 `rerank` 才返回 |
+
+两个接口的召回参数（`vector_threshold`、`keyword_threshold`、`match_count`、`disable_keywords_match`、`disable_vector_match`）和 `rerank` 对象含义相同；`knowledge-search` 省略的参数沿用空间的检索配置（`GET /tenants/kv/retrieval-config`）。
 
 ### rerank 对象
 
