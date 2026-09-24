@@ -75,7 +75,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"memory_guide_exposures": {"knowledge_base_id"}, // 000033
 }
 
-const expectedSQLiteMigrationVersion = 36
+const expectedSQLiteMigrationVersion = 35
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
