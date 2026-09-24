@@ -94,6 +94,8 @@ type RouterParams struct {
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
 	HostSandbox                  service.HostSandboxManager
+	IntentPolicyHandler          *handler.IntentPolicyHandler
+	IntentVerdictHandler         *handler.IntentVerdictHandler
 }
 
 // NewRouter 创建新的路由
@@ -325,6 +327,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
+		RegisterIntentPolicyRoutes(v1, params.IntentPolicyHandler, rbacGuards)
+		RegisterIntentVerdictRoutes(v1, params.IntentVerdictHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route

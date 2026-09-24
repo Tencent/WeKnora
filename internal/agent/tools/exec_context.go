@@ -21,6 +21,9 @@ type ToolExecContext struct {
 	// must wait for human approval that may exceed normal tool exec timeout (issue #1173).
 	// Falls back to the per-tool execCtx when nil.
 	ApprovalCtx context.Context
+	// ApprovalRecorder 在人工审批决策落地后回调（T60）：把
+	// approved/modified/rejected 回写对应 intent_verdict 行。nil 不写。
+	ApprovalRecorder func(toolCallID string, approved, modified bool)
 	// ExecTimeout mirrors the per-tool exec timeout the engine applied to the
 	// outer ctx. Tools that legitimately consume that ctx (e.g. MCP human
 	// approval) can re-derive a fresh timeout from ApprovalCtx using this

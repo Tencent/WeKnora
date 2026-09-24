@@ -37,6 +37,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/intentgate"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -176,6 +177,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
+	must(container.Provide(repository.NewIntentVerdictRepository))
+	must(container.Provide(repository.NewIntentPolicyRepository))
+	// IntentGate 策略运行期 scope 解析缓存（设计 §8.3）：必须在任何
+	// Invoke 消费它的构造函数（NewAgentService，T23 起）之前注册——
+	// dig 的 Invoke 在 Provide 语句执行到时立即建图，注册顺序即依赖
+	// 可用顺序（T23 曾把本 Provide 放在 handler 块里，晚于 chat pipeline
+	// 的 Invoke，导致启动 panic：missing type intentgate.PolicyStore）。
+	must(container.Provide(func(repo interfaces.IntentPolicyRepository) intentgate.PolicyStore {
+		return intentgate.NewPolicyStore(repo)
+	}))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
 	must(container.Provide(repository.NewTenantSkillRepository))
@@ -578,6 +589,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
+
+	// IntentGate 策略 CRUD handler。策略变更后 handler 通过
+	// PolicyStore.InvalidateTenant 失效解析缓存（PolicyStore 本身在
+	// repository 块已注册，见上）。
+	must(container.Provide(handler.NewIntentPolicyHandler))
+	must(container.Provide(handler.NewIntentVerdictHandler))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))

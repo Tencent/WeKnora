@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/intentgate"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -118,6 +119,17 @@ type agentService struct {
 	sandboxPinner        *SessionSandboxPinner
 	sandboxPolicy        WorkspaceSandboxPolicy
 	hostSandbox          sandbox.Manager
+	// IntentGate（语义门禁层，设计 §7）：intentGate 是 PolicyStore 驱动的
+	// 判定入口，intentVerdictWriter 是 verdict 异步落库写入端。两者由
+	// NewAgentService 装配、被全部 engine 实例共享（PolicyGate 无状态、
+	// writer 内部队列串行化）。nil 时 engine 完全跳过门禁，行为零变化。
+	intentGate          intentgate.Gate
+	intentVerdictWriter intentgate.VerdictWriter
+	// auditLogService 供 enforce-deny 写 audit（T43）：engine 接缝回调
+	// buildEnforceDenyAuditor 产出的审计函数。
+	auditLogService interfaces.AuditLogService
+	// intentVerdictRepo 供 T60 审批决策回写 human_override。
+	intentVerdictRepo interfaces.IntentVerdictRepository
 }
 
 // NewAgentService creates a new agent service
@@ -147,10 +159,15 @@ func NewAgentService(
 	hostSandbox HostSandboxManager,
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
+	intentPolicyStore intentgate.PolicyStore,
+	auditLogService interfaces.AuditLogService,
+	intentVerdictRepo interfaces.IntentVerdictRepository,
 ) interfaces.AgentService {
-	return &agentService{
+	svc := &agentService{
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
+		auditLogService:      auditLogService,
+		intentVerdictRepo:    intentVerdictRepo,
 		cfg:                  cfg,
 		modelService:         modelService,
 		knowledgeBaseService: knowledgeBaseService,
@@ -175,6 +192,29 @@ func NewAgentService(
 		sandboxPolicy:        sandboxPolicy,
 		hostSandbox:          hostSandbox.Manager,
 	}
+	// IntentGate 接线（T23→T30，issue #13/#14）：判定输入从硬编码规则切
+	// 换为读策略库，规则层未决时升级语义层 judge（租户自配 chat 模型）。
+	// 三个硬性要求：
+	//   1. intentPolicyStore 必须是与策略 CRUD handler 共享的容器单例——
+	//      策略变更的 InvalidateTenant 才能波及这里的判定（设计 §8.3）；
+	//   2. verdict 落库是观测面不是判定链路：writer 异步、fail-open，
+	//      进程级生命周期（随进程退出，观察数据允许丢失队尾）；
+	//   3. judge 的模型解析失败只影响语义层（uncertain），不影响规则层
+	//      与 baseline 判定——resolver 错误在 LLMJudge 内吞掉（设计 §9）。
+	// store 或 db 缺失时两者保持 nil，engine 完全跳过门禁（行为零变化）。
+	if intentPolicyStore != nil && db != nil {
+		var judge intentgate.Judge
+		if modelService != nil {
+			// 判定缓存（T32）：同 session 同 (policy_id, args_digest) 5 分钟
+			// 去重，包在 LLMJudge 外面——缓存命中时连模型解析都不发生。
+			judge = intentgate.NewCachingJudge(
+				intentgate.NewLLMJudge(newJudgeModelResolver(modelService)))
+		}
+		svc.intentGate = intentgate.NewPolicyGate(intentPolicyStore, intentgate.WithJudge(judge))
+		svc.intentVerdictWriter = intentgate.NewAsyncVerdictWriter(
+			repository.NewIntentVerdictRepository(db))
+	}
+	return svc
 }
 
 // CreateAgentEngine creates an agent engine with the given configuration and EventBus.
@@ -239,6 +279,20 @@ func (s *agentService) CreateAgentEngine(
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
+	// IntentGate 策略执行点（T23）：门禁与 verdict 写入端装上后，每个工具
+	// 调用在执行前先过门禁（observe：只记录不拦截）。任一为 nil 时 engine
+	// 跳过门禁，行为与未接入完全一致。
+	if s.intentGate != nil {
+		engine.SetIntentGate(s.intentGate)
+		// enforce deny 的审计回调（T43）随门禁一起安装：没有门禁就没有
+		// 拦截，没有拦截就没有审计事件。nil auditLogService 时回调为 nil，
+		// engine 内部跳过，行为零变化。
+		engine.SetIntentGateAuditor(buildEnforceDenyAuditor(s.auditLogService))
+		engine.SetIntentApprovalRecorder(buildApprovalRecorder(s.intentVerdictRepo))
+	}
+	if s.intentVerdictWriter != nil {
+		engine.SetIntentVerdictWriter(s.intentVerdictWriter)
+	}
 	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
 	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
 	engine.SetPinnedMentions(

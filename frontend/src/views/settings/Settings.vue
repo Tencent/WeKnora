@@ -181,6 +181,22 @@
         <div v-if="isIntegrationSection(currentSection)" class="section">
           <IntegrationSettingsSection :tab="integrationTabFromSection(currentSection)" />
         </div>
+
+
+        <!-- MCP 服务 -->
+        <div v-if="currentSection === 'mcp'" class="section">
+          <McpSettings />
+        </div>
+
+        <!-- IntentGate 意图策略（设计 docs/plans/2026-09-21-intent-gate-design.md） -->
+        <div v-if="currentSection === 'intentpolicy'" class="section">
+          <IntentPolicySettings />
+        </div>
+
+        <!-- IntentGate 判定报表（T51） -->
+        <div v-if="currentSection === 'intentverdict'" class="section">
+          <IntentVerdictReport />
+        </div>
       </template>
     </div>
   </SettingsModalShell>
@@ -203,6 +219,9 @@ import UserProfile from './UserProfile.vue'
 import GeneralSettings from './GeneralSettings.vue'
 import ModelSettings from './ModelSettings.vue'
 import OllamaSettings from './OllamaSettings.vue'
+import McpSettings from './McpSettings.vue'
+import IntentPolicySettings from './IntentPolicySettings.vue'
+import IntentVerdictReport from './IntentVerdictReport.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
 import MemorySettings from './MemorySettings.vue'
@@ -343,6 +362,10 @@ const navItems = computed(() => {
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'sandbox', icon: 'code', label: t('settings.sandbox.title') },
+    { key: 'skills', icon: SKILL_ICON, label: t('settings.skills.title') },
+    { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
+    { key: 'intentpolicy', icon: 'secured', label: t('settings.intentPolicy.title') },
+    { key: 'intentverdict', icon: 'chart', label: t('settings.intentVerdict.title') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
@@ -401,6 +424,9 @@ const navGroups = computed<NavGroup[]>(() => {
         'storage',
         'sandbox',
         'websearch',
+        'mcp',
+        'intentpolicy',
+        'intentverdict',
       ]),
     },
     {

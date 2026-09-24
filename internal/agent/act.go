@@ -6,14 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/intentgate"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"golang.org/x/sync/errgroup"
@@ -530,6 +534,7 @@ func (e *AgentEngine) runToolCall(
 	principal, _ := types.PrincipalFromContext(ctx)
 	execTimeout := toolExecutionTimeout(tc.Function.Name, tc.Function.Arguments)
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
+		ApprovalRecorder:   e.intentApprovalRecorder,
 		SessionID:          sessionID,
 		AssistantMessageID: assistantMessageID,
 		EventBus:           e.eventBus,
@@ -549,12 +554,56 @@ func (e *AgentEngine) runToolCall(
 		// never reach persistence, an external service, or a routing decision.
 		err = fmt.Errorf("tool arguments contain unresolved model handles: %v", tc.UnresolvedHandles)
 	} else {
-		execCtx, toolCancel := context.WithTimeout(toolExecCtx, execTimeout)
-		result, err = e.toolRegistry.ExecuteTool(
-			execCtx, tc.Function.Name,
-			json.RawMessage(tc.Function.Arguments),
-		)
-		toolCancel()
+		// IntentGate 策略执行点（设计 §7 插入点）：工具执行前先过门禁。
+		// observe 语义（默认）：任何 verdict 只记录不拦截；enforce 语义
+		// （T40）：deny 且 Verdict.Enforced() 时走现有 err 路径——工具不
+		// 执行、toolCall.Result.Success=false、错误文本含策略理由，agent
+		// 下一轮可见并自我纠错（设计 §9）。nil Gate 时此调用完全跳过，
+		// 行为零变化。
+		var verdict intentgate.Verdict
+		var enforcedDeny bool
+		if e.intentGate != nil {
+			verdict, enforcedDeny = e.evaluateIntentGate(toolCtx, tc, target, toolSpan, sessionID, assistantMessageID)
+		}
+		switch {
+		case enforcedDeny:
+			err = &intentgate.DeniedError{Verdict: verdict}
+			// T43：enforce 拦截落 audit（intent_policy.enforced_deny）。
+			// 审计回调必须 fail-open（实现内保证），这里不做错误处理。
+			if e.intentGateAuditor != nil {
+				gateTenantID, _ := types.TenantIDFromContext(toolCtx)
+				e.intentGateAuditor(toolCtx, EnforceDenyInfo{
+					TenantID:   gateTenantID,
+					SessionID:  sessionID,
+					ToolName:   tc.Function.Name,
+					ToolCallID: tc.ID,
+					Verdict:    verdict,
+				})
+			}
+		case verdict.Action == intentgate.ActionRequireApproval && verdict.Enforced():
+			// T41：enforce 的 require_approval 复用人工审批通道（设计 §7
+			// 「人工审批通道只覆盖 MCP 工具」）。把强制审批标记挂在执行
+			// ctx 上，MCP 工具执行时读到即走 RequestAndWait；内置工具无此
+			// 通道，放行并留结构化告警——需要真正的暂停-恢复点，不在本票范围。
+			if target != nil && target.ServiceName != "" {
+				toolExecCtx = approval.WithIntentRequirement(toolExecCtx, verdict.Reason)
+			} else {
+				logger.WarnWithFields(toolCtx, logger.Fields{
+					"event":      "intentgate.require_approval_no_channel",
+					"policy_id":  verdict.PolicyID,
+					"tool":       tc.Function.Name,
+					"session_id": sessionID,
+				}, "[IntentGate] require_approval on non-MCP tool: no approval channel, passing (T41)")
+			}
+			fallthrough
+		default:
+			execCtx, toolCancel := context.WithTimeout(toolExecCtx, execTimeout)
+			result, err = e.toolRegistry.ExecuteTool(
+				execCtx, tc.Function.Name,
+				json.RawMessage(tc.Function.Arguments),
+			)
+			toolCancel()
+		}
 	}
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
@@ -619,4 +668,164 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	return toolCall
+}
+
+// intentVerdictSpanMetadata 把一次判定结果整形为 agent.tool.<name> span 的
+// metadata（设计 §10）。四个 intent.* 键恒在：spike/基线判定无策略命中时
+// intent.policy_id 为空串（键不缺席，便于按字段对账）。
+func intentVerdictSpanMetadata(v intentgate.Verdict, latencyMs int64) map[string]interface{} {
+	return map[string]interface{}{
+		"intent.verdict":    string(v.Action),
+		"intent.layer":      string(v.Layer),
+		"intent.policy_id":  v.PolicyID,
+		"intent.latency_ms": latencyMs,
+	}
+}
+
+// gateIntentSnapshot 是一轮判定的意图基准快照（设计 §8.2 规则 1：
+// 意图基准 = 原始 user prompt + 会话历史，不是当前轮的模型输出）。
+// 由 runReActIteration 在每轮 Act 前构造（此刻当前轮 assistant 输出
+// 尚未 append 进 messages，快照天然不含被审对象），Act 后清除。
+type gateIntentSnapshot struct {
+	// userPrompt 是本轮会话的第一条 user message（全量 history 中找，
+	// 不走窗口）；找不到时回退当前轮 query。
+	userPrompt string
+	// history 是最近 intentGateHistoryWindow 条会话历史（旧→新，
+	// engine 的 chat.Message 只取 Role/Content 转成 types.Message）。
+	history []types.Message
+}
+
+// intentGateHistoryWindow 是送进 IntentGate（judge）的历史窗口
+// （与设计 judgeHistoryWindow 同值；此处独立常量避免 act 包反向依赖
+// judge 的私有常量，两处同改）。
+const intentGateHistoryWindow = 8
+
+// newGateIntentSnapshot 从 engine 循环的 messages 构造意图基准快照。
+// query 是当前轮用户输入，作为找不到历史 user message 时的回退。
+func newGateIntentSnapshot(query string, messages []chat.Message) *gateIntentSnapshot {
+	snap := &gateIntentSnapshot{userPrompt: query}
+	for _, m := range messages {
+		if m.Role == "user" && strings.TrimSpace(m.Content) != "" {
+			snap.userPrompt = m.Content
+			break
+		}
+	}
+	start := 0
+	if len(messages) > intentGateHistoryWindow {
+		start = len(messages) - intentGateHistoryWindow
+	}
+	for _, m := range messages[start:] {
+		snap.history = append(snap.history, types.Message{Role: m.Role, Content: m.Content})
+	}
+	return snap
+}
+
+// evaluateIntentGate 在工具执行点前调用 IntentGate（设计 §7 插入点）。
+// 返回 (verdict, enforcedDeny)：enforcedDeny 仅当 verdict.Action==Deny 且
+// Verdict.Enforced()（判定时的策略 mode=enforce）时为 true——调用方据此
+// 走 DeniedError 阻断（T40，设计 §9「deny 走现有 err 路径」）。observe 的
+// deny、require_approval/uncertain 一律返回 false（只记录不拦截；后两者
+// 的 enforce 处置归 T41/T42）。Evaluate 出错按设计 §9 fail-open：记 warn
+// 日志后照常执行（返回零值 verdict + false）。
+//
+// 观测面（设计 §10）：verdict 的 action/layer/policy_id/latency_ms 写入
+// agent.tool.<name> span 的 metadata，同时发一条带 verdict 字段的结构化
+// 日志。
+//
+// 意图基准（UserPrompt/History，设计 §8.2 规则 1）取自 engine 在每轮
+// Act 前写入的 e.intentGateIntent 快照；未填（gate 不启用外的异常路径）
+// 时按空值传，judge 拿到空意图基准只会更多判 uncertain（fail-open 方向）。
+func (e *AgentEngine) evaluateIntentGate(
+	ctx context.Context, tc types.LLMToolCall, target *types.ToolCallTarget,
+	toolSpan *langfuse.Span, sessionID, assistantMessageID string,
+) (intentgate.Verdict, bool) {
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	principal, _ := types.PrincipalFromContext(ctx)
+	input := intentgate.ToolCallInput{
+		TenantID:  tenantID,
+		SessionID: sessionID,
+		ToolName:  tc.Function.Name,
+		Args:      json.RawMessage(tc.Function.Arguments),
+		Principal: principal,
+	}
+	if e.intentGateIntent != nil {
+		input.UserPrompt = e.intentGateIntent.userPrompt
+		input.History = e.intentGateIntent.history
+	}
+	if target != nil {
+		input.ServiceID = target.ServiceName
+	}
+	evalStart := time.Now()
+	verdict, err := e.intentGate.Evaluate(ctx, input)
+	latencyMs := time.Since(evalStart).Milliseconds()
+	if err != nil {
+		logger.Warnf(ctx, "[Agent][IntentGate] evaluate failed for tool %s (fail-open): %v",
+			tc.Function.Name, err)
+		return intentgate.Verdict{}, false
+	}
+	toolSpan.SetMetadata(intentVerdictSpanMetadata(verdict, latencyMs))
+	// 结构化日志：verdict/layer/policy_id/latency_ms 等作为日志字段输出，
+	// 日志采集侧无需解析自由文本即可按字段检索。
+	logger.Infof(logger.WithFields(ctx, logger.Fields{
+		"verdict":        string(verdict.Action),
+		"layer":          string(verdict.Layer),
+		"policy_id":      verdict.PolicyID,
+		"policy_version": verdict.PolicyVersion,
+		"mode":           verdict.Mode,
+		"latency_ms":     latencyMs,
+		"tool":           tc.Function.Name,
+		"tool_call_id":   tc.ID,
+		"session_id":     sessionID,
+		"tenant_id":      tenantID,
+		"reason":         verdict.Reason,
+	}), "[Agent][IntentGate] verdict")
+	// 异步落库（设计 §7 verdicts 字段）：Write 非阻塞且 fail-open，
+	// 落库失败/队列满只影响观测数据，绝不影响本次工具调用。
+	if e.intentVerdictWriter != nil {
+		if rec, err := intentVerdictRecord(tenantID, sessionID, assistantMessageID, tc, verdict, latencyMs); err != nil {
+			logger.Warnf(ctx, "[Agent][IntentGate] build verdict record failed (skip persist): %v", err)
+		} else {
+			e.intentVerdictWriter.Write(rec)
+		}
+	}
+	// T40：enforce 的 deny 在此升级为阻断信号。observe 的 deny、
+	// require_approval/uncertain 只记录不拦截（enforce 处置归 T41/T42）。
+	return verdict, verdict.Action == intentgate.ActionDeny && verdict.Enforced()
+}
+
+// intentVerdictRecord 把一次判定整形为 intent_verdicts 表的一行
+// （设计 §6.2）。三个映射约定：
+//   - Layer 为空（无策略命中的 allow，如 spike 全规则未命中）落为
+//     baseline——设计 §6.2：policy_id NULL = 兜底判定；
+//   - PolicyVersion 来自 verdict（T23 起策略驱动判定携带）；无策略命中
+//     时为 0，NewVerdictRecord 落 NULL；
+//   - ModeAtDecision 来自 verdict.Mode（判定时的策略 mode）；为空
+//     （spike/基线判定）时落 observe——observe 是一切判定的下限语义，
+//     enforce 接线（T40）落地后由策略 mode 驱动实际阻断。
+//
+// 原始参数只用于计算 args_digest，不落库（types.NewVerdictRecord 保证）。
+func intentVerdictRecord(
+	tenantID uint64, sessionID, assistantMessageID string,
+	tc types.LLMToolCall, v intentgate.Verdict, latencyMs int64,
+) (*types.VerdictRecord, error) {
+	layer := string(v.Layer)
+	if layer == "" {
+		layer = types.VerdictLayerBaseline
+	}
+	return types.NewVerdictRecord(types.VerdictRecordInput{
+		TenantID:           tenantID,
+		SessionID:          sessionID,
+		AssistantMessageID: assistantMessageID,
+		ToolCallID:         tc.ID,
+		PolicyID:           v.PolicyID,
+		PolicyVersion:      v.PolicyVersion,
+		ToolName:           tc.Function.Name,
+		Args:               json.RawMessage(tc.Function.Arguments),
+		Layer:              layer,
+		Verdict:            string(v.Action),
+		Reason:             v.Reason,
+		ModeAtDecision:     v.Mode,
+		LatencyMs:          int(latencyMs),
+		JudgeTokens:        v.JudgeTokens, // T32：judge 调用的 token 成本（规则层/baseline 为 0）
+	})
 }
