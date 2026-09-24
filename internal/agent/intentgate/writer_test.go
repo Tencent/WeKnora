@@ -77,6 +77,9 @@ func (f *fakeVerdictRepo) ListBySession(context.Context, uint64, string, int) ([
 func (f *fakeVerdictRepo) ListByPolicy(context.Context, uint64, string, int) ([]*types.VerdictRecord, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeVerdictRepo) ListByJudgeModel(context.Context, uint64, string, int) ([]*types.VerdictRecord, error) {
+	return nil, errors.New("not implemented")
+}
 func (f *fakeVerdictRepo) UpdateHumanOverride(context.Context, uint64, string, string) error {
 	return errors.New("not implemented")
 }

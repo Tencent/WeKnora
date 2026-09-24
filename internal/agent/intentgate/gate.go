@@ -76,6 +76,10 @@ type Verdict struct {
 	// 落 intent_verdicts.judge_tokens）。规则层/baseline 判定为 0；命中
 	// 判定缓存时为原始那次调用的消耗。T32 起由 LLMJudge 填充。
 	JudgeTokens int `json:"judge_tokens,omitempty"`
+	// JudgeModel 是本次判定使用的 judge 模型 ID（LLMJudge 从解析出的
+	// 模型元数据填入，issue #24/T61）。落 intent_verdicts.judge_model，
+	// 语料导出按此分层过滤（设计 §12 决策 2）；规则层/baseline 判定为空。
+	JudgeModel string `json:"judge_model,omitempty"`
 }
 
 // Enforced 报告该 verdict 是否应按 enforce 语义动作：判定时的策略 mode

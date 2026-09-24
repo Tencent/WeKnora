@@ -22,6 +22,10 @@ type IntentVerdictRepository interface {
 	// ListByTenant 全租户最近 limit 条（created_at 降序；报表页下钻列表），
 	// limit<=0 表示不限（上限 1000 防失控）。
 	ListByTenant(ctx context.Context, tenantID uint64, limit int) ([]*types.VerdictRecord, error)
+	// ListByJudgeModel 按 judge 模型过滤（T61 语料导出，issue #24）：
+	// judgeModel 为空串返回规则层/baseline 判定（无 judge 模型归属的行）；
+	// created_at 升序（导出语料的稳定顺序）。
+	ListByJudgeModel(ctx context.Context, tenantID uint64, judgeModel string, limit int) ([]*types.VerdictRecord, error)
 	// CountByVerdictGrouped 按 verdict 分组计数（T51 报表页分布数字的
 	// 数据源），policyID 为空时统计租户内全部 verdict（含 baseline 的
 	// policy_id NULL 行）。返回 verdict 取值 → 计数。

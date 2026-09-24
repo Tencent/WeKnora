@@ -37,5 +37,7 @@ func RegisterIntentVerdictRoutes(r *gin.RouterGroup, h *handler.IntentVerdictHan
 	{
 		verdicts.GET("", g.Admin(), h.ListVerdicts)
 		verdicts.GET("/summary", g.Admin(), h.VerdictSummary)
+		// T61 语料导出（issue #24）：按 judge 模型分层，Admin+。
+		verdicts.GET("/export", g.Admin(), h.ExportCorpus)
 	}
 }

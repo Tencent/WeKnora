@@ -115,6 +115,27 @@ func (r *IntentVerdictRepository) ListByTenant(ctx context.Context, tenantID uin
 	return rows, nil
 }
 
+// ListByJudgeModel 按 judge 模型过滤（T61 语料导出，issue #24）。
+// judgeModel 为空串时返回规则层/baseline 判定（无 judge 模型归属的行）；
+// limit<=0 表示不限（同样封顶 1000 防失控）。created_at 升序——导出
+// 语料的稳定顺序（按时间先后训练/评测切分）。
+func (r *IntentVerdictRepository) ListByJudgeModel(ctx context.Context, tenantID uint64, judgeModel string, limit int) ([]*types.VerdictRecord, error) {
+	q := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND judge_model = ?", tenantID, judgeModel).
+		Order("created_at ASC, id ASC")
+	if limit > 0 {
+		if limit > 1000 {
+			limit = 1000
+		}
+		q = q.Limit(limit)
+	}
+	var rows []*types.VerdictRecord
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list intent verdicts by judge model: %w", err)
+	}
+	return rows, nil
+}
+
 // CountByVerdictGrouped 按 verdict 分组计数（T51）。policyID 为空时
 // 统计租户全部（含 policy_id NULL 的 baseline 行）。
 func (r *IntentVerdictRepository) CountByVerdictGrouped(ctx context.Context, tenantID uint64, policyID string) (map[string]int64, error) {

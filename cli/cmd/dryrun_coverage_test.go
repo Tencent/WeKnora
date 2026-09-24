@@ -62,6 +62,9 @@ var dryRunExpectation = map[string]bool{
 	"auth login": false,
 	// long-running stdio server, not a one-shot command.
 	"mcp serve": false,
+	// read-only operator export: the whole purpose is the server round-trip
+	// (download + file write), which a side-effect-free dry-run cannot exercise.
+	"intent-verdicts export": false,
 	// offline help topic: prints the static exit-code matrix.
 	"exit-codes": false,
 	// offline introspection: prints command contracts from the in-binary tree.

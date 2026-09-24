@@ -105,6 +105,32 @@ func TestIntentGateVerdictEnqueuedWithFields(t *testing.T) {
 	if rec.HumanOverride != types.HumanOverrideNone {
 		t.Fatalf("human_override = %q, want none", rec.HumanOverride)
 	}
+	if rec.JudgeModel != "" {
+		t.Fatalf("judge_model = %q, want empty（rule 层判定无 judge 模型归属）", rec.JudgeModel)
+	}
+}
+
+// TestIntentGateVerdictEnqueuedWithJudgeModel（T61，issue #24）：judge 层
+// verdict 的 JudgeModel 透传到落库记录——语料导出按此分层过滤的数据源。
+func TestIntentGateVerdictEnqueuedWithJudgeModel(t *testing.T) {
+	engine, _ := intentGateTestEngine(t)
+	engine.SetIntentGate(&fakeGate{verdict: intentgate.Verdict{
+		Action:     intentgate.ActionAllow,
+		Layer:      intentgate.LayerJudge,
+		JudgeModel: "builtin-kimi-coding",
+	}})
+	writer := &fakeVerdictWriter{}
+	engine.SetIntentVerdictWriter(writer)
+
+	runGatedToolCall(engine)
+
+	records := writer.written()
+	if len(records) != 1 {
+		t.Fatalf("writer must receive exactly 1 record, got %d", len(records))
+	}
+	if rec := records[0]; rec.JudgeModel != "builtin-kimi-coding" {
+		t.Fatalf("judge_model = %q, want builtin-kimi-coding", rec.JudgeModel)
+	}
 }
 
 // TestIntentGateAllowEnqueuedAsBaseline 验收：无策略命中的 allow 判定
@@ -227,6 +253,9 @@ func (r *alwaysFailVerdictRepo) ListBySession(context.Context, uint64, string, i
 	return nil, r.err
 }
 func (r *alwaysFailVerdictRepo) ListByPolicy(context.Context, uint64, string, int) ([]*types.VerdictRecord, error) {
+	return nil, r.err
+}
+func (r *alwaysFailVerdictRepo) ListByJudgeModel(context.Context, uint64, string, int) ([]*types.VerdictRecord, error) {
 	return nil, r.err
 }
 func (r *alwaysFailVerdictRepo) UpdateHumanOverride(context.Context, uint64, string, string) error {
