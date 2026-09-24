@@ -6,15 +6,24 @@ import (
 	"fmt"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // ListUsableSkills returns the installed skills a chat turn can actually
 // invoke on this config: ready, enabled, and carried by the live snapshot.
 // Failures and a missing config yield an empty list so @ mention never 500s.
+//
+// Lite has no sandbox config and no snapshot. The host target uses the same
+// on-disk set hostSkillsForRun offers the model. The standard edition never
+// takes that branch.
 func (s *TenantSkillService) ListUsableSkills(
 	ctx context.Context, tenantID uint64, configID string,
 ) []*types.TenantSkillEntity {
+	if s.host.Desktop && sandbox.IsHostSkillTarget(configID) {
+		_, rows := hostSkillsForRun(ctx, s.skills, s.host.SkillTree, tenantID)
+		return rows
+	}
 	return effectiveTenantSkills(ctx, s.configs, s.skills, tenantID, configID)
 }
 
@@ -25,12 +34,8 @@ func (s *TenantSkillService) ListUsableSkills(
 func (s *TenantSkillService) ListSkills(
 	ctx context.Context, tenantID uint64, configID string,
 ) ([]*types.TenantSkillEntity, error) {
-	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
-	if err != nil {
+	if err := s.requireSkillTarget(ctx, tenantID, configID); err != nil {
 		return nil, err
-	}
-	if cfgEntity == nil {
-		return nil, apperrors.NewNotFoundError("sandbox config not found")
 	}
 	return s.skills.ListSkillsByConfig(ctx, tenantID, configID)
 }

@@ -28,6 +28,11 @@
 (allow file-read* file-write* file-ioctl (regex #"^/dev/ttys[0-9]+$"))
 (allow file-read* (subpath "/dev/fd"))
 
+;; Host temp, for chat and install alike. /tmp is a symlink of /private/tmp
+;; and Seatbelt matches the resolved vnode, so both names are required.
+;; /var/folders stays closed; only this temp directory is opened.
+(allow file-read* file-write* (subpath "/tmp") (subpath "/private/tmp"))
+
 ;; Python multiprocessing (sem) and OpenMP (named shm).
 (allow ipc-posix-sem)
 (allow ipc-posix-shm-read-data

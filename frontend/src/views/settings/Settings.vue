@@ -228,8 +228,9 @@ import {
   SETTINGS_SECTION_MIN_ROLE,
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from '@/config/settingsAccess'
-import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
+import { SETTINGS_SECTION_CAPABILITY, skillSettingsSupported } from '@/config/deploymentCapabilities'
 import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
+import { hostSkillsOnly } from '@/utils/skillTarget'
 import {
   buildSettingsRouteQuery,
   integrationSectionKey,
@@ -244,7 +245,16 @@ const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
-const { t } = useI18n()
+const { t, te } = useI18n()
+const hostSkills = computed(() => hostSkillsOnly(
+  deploymentCapabilities.isSupported('settings.sandbox.remote'),
+  deploymentCapabilities.isSupported('settings.sandbox.host'),
+))
+function envNavLabel(): string {
+  const hostKey = 'envVarSettings.host.title'
+  if (hostSkills.value && te(hostKey)) return t(hostKey)
+  return t('envVarSettings.title')
+}
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
@@ -301,6 +311,9 @@ const isSectionSupported = (key: string): boolean => {
       INTEGRATION_TAB_CAPABILITY[integrationTabFromSection(key)],
     )
   }
+  if (key === 'skills' || key === 'envvars') {
+    return skillSettingsSupported(deploymentCapabilities.capabilities)
+  }
   return deploymentCapabilities.isSupported(SETTINGS_SECTION_CAPABILITY[key])
 }
 
@@ -350,7 +363,7 @@ const navItems = computed(() => {
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
-    { key: 'envvars', icon: 'key', label: t('envVarSettings.title') },
+    { key: 'envvars', icon: 'key', label: envNavLabel() },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
     ...integrationItems,

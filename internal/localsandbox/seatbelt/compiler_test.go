@@ -124,6 +124,13 @@ func TestCompileSeatbeltDeniesNetworkByDefault(t *testing.T) {
 	require.NotContains(t, prog.Profile, "network-outbound")
 }
 
+func TestCompileSeatbeltBasePolicyOpensTmp(t *testing.T) {
+	prog, err := compileSeatbelt(seatbeltPolicy())
+	require.NoError(t, err)
+	require.Contains(t, prog.Profile,
+		`(allow file-read* file-write* (subpath "/tmp") (subpath "/private/tmp"))`)
+}
+
 func TestCompileSeatbeltBasePolicyAllowsUnfilteredFileRead(t *testing.T) {
 	prog, err := compileSeatbelt(seatbeltPolicy())
 	require.NoError(t, err)

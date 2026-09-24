@@ -16,6 +16,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -310,4 +311,27 @@ func (s *fakeSandboxConfigService) QueryTemplates(
 	service.SandboxTemplateQueryInput,
 ) (*service.SandboxTemplateCatalog, error) {
 	return &service.SandboxTemplateCatalog{}, nil
+}
+
+func newSandboxConfigTestRouter(h *SandboxConfigHandler) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.GET("/sandbox-configs", h.List)
+	r.POST("/sandbox-configs", h.Create)
+	return r
+}
+
+func TestSandboxConfigRoutesAreHiddenOnLiteDesktop(t *testing.T) {
+	h := NewSandboxConfigHandler(nil, service.HostSandboxManager{Desktop: true})
+	r := newSandboxConfigTestRouter(h)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sandbox-configs", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"success":true,"data":[]}`, w.Body.String())
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sandbox-configs", strings.NewReader(`{"name":"x"}`)))
+	require.Equal(t, http.StatusNotFound, w.Code)
 }

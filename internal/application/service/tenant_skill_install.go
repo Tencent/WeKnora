@@ -85,12 +85,8 @@ func (s *TenantSkillService) installSkillArchive(
 	ctx context.Context, tenantID uint64, configID string, archive []byte,
 	origin skillArchiveOrigin, instructions ...string,
 ) (string, error) {
-	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
-	if err != nil {
+	if err := s.requireSkillTarget(ctx, tenantID, configID); err != nil {
 		return "", err
-	}
-	if cfgEntity == nil {
-		return "", apperrors.NewNotFoundError("sandbox config not found")
 	}
 
 	bundle, err := ParseSkillBundle(archive)
@@ -487,6 +483,15 @@ func (s *TenantSkillService) runInstall(
 	stopHeartbeat := s.startInstallHeartbeat(ctx, tenantID, configID, skillID)
 	defer stopHeartbeat()
 
+	if sandbox.IsHostSkillTarget(configID) {
+		return s.runHostInstall(ctx, hostInstallRun{
+			tenantID: tenantID, configID: configID, skillID: skillID,
+			bundle: bundle, instructions: instructions,
+			handle: handle, cleanupBase: cleanupBase,
+			stopHeartbeat: stopHeartbeat, activated: &pointerSwitched,
+		})
+	}
+
 	// The name comes from SKILL.md and is already validated on parse, so a
 	// rejection here means the bundle was accepted by a looser rule than the
 	// one the image path enforces. Failing before any sandbox work keeps that
@@ -545,7 +550,7 @@ func (s *TenantSkillService) runInstall(
 	// Locators must land before the file seed. A large skill is copied file by
 	// file over the sandbox API and can take minutes; the console attaches to
 	// the transcript as soon as the directory is ready, not after that copy.
-	transcript, prompt := s.beginInstallTranscript(ctx, tenantID, skillID, sess, mgr, skillDir, bundle, instructions...)
+	transcript, prompt := s.beginInstallTranscript(ctx, tenantID, configID, skillID, sess, mgr, skillDir, bundle, instructions...)
 
 	fileCount := 0
 	if bundle != nil {
@@ -869,11 +874,15 @@ func packSkillTar(bundle *SkillBundle) ([]byte, error) {
 // skill directory is reset, so a console that opens during the file seed
 // finds something to follow instead of 404-polling for minutes.
 func (s *TenantSkillService) beginInstallTranscript(
-	ctx context.Context, tenantID uint64, skillID string,
+	ctx context.Context, tenantID uint64, configID, skillID string,
 	sess *types.Session, mgr sandbox.Manager, skillDir string, bundle *SkillBundle, instructions ...string,
 ) (*installTranscript, string) {
 	assistantMessageID := uuid.NewString()
-	prompt := buildInstallPrompt(skillDir, bundle, s.probeInstallTools(ctx, mgr, sess.ID))
+	tools := s.probeInstallTools(ctx, mgr, sess.ID)
+	prompt := buildInstallPrompt(skillDir, bundle, tools)
+	if sandbox.IsHostSkillTarget(configID) {
+		prompt = buildHostInstallPrompt(skillDir, bundle, tools)
+	}
 	if guidance := strings.TrimSpace(strings.Join(instructions, "\n")); guidance != "" {
 		prompt += "\n\nAdditional instructions from the installing administrator:\n" + guidance
 	}
@@ -882,7 +891,7 @@ func (s *TenantSkillService) beginInstallTranscript(
 		// bar within the 35→79 span, so the number the admin watches moves
 		// while the agent works instead of sitting at seeded until agent_done.
 		func(steps int, lastCmd string) {
-			s.publishProgress(ctx, tenantID, sess.SandboxConfigID, skillID, SkillProgress{
+			s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 				Percent: asymptoticInstallPercent(steps),
 				Stage:   "agent",
 				Log:     lastCmd,
@@ -892,7 +901,7 @@ func (s *TenantSkillService) beginInstallTranscript(
 		logger.Warnf(ctx, "[skill] seed install transcript for %s failed: %v", skillID, err)
 	}
 	transcript.Subscribe()
-	if err := s.updateSkillFields(ctx, tenantID, sess.SandboxConfigID, skillID,
+	if err := s.updateSkillFields(ctx, tenantID, configID, skillID,
 		func(e *types.TenantSkillEntity) {
 			e.InstallSessionID = sess.ID
 			e.InstallMessageID = assistantMessageID
@@ -935,7 +944,7 @@ type installerJob struct {
 func (s *TenantSkillService) installDependenciesAndVerify(
 	ctx context.Context, job installerJob,
 ) (err error) {
-	run, err := s.openInstallerRun(ctx, job.tenantID, job.sess, job.skillDir, job.transcript)
+	run, err := s.openInstallerRun(ctx, job.tenantID, job.configID, job.sess, job.skillDir, job.transcript)
 	if err != nil {
 		job.transcript.Finish(context.WithoutCancel(ctx), err)
 		return err
@@ -1002,6 +1011,7 @@ type installerRun struct {
 func (s *TenantSkillService) openInstallerRun(
 	ctx context.Context,
 	tenantID uint64,
+	configID string,
 	sess *types.Session,
 	skillDir string,
 	transcript *installTranscript,
@@ -1021,7 +1031,7 @@ func (s *TenantSkillService) openInstallerRun(
 		return nil, fmt.Errorf("load installer agent: %w", err)
 	}
 	agentConfig := installerAgentConfig(
-		installerAgentDefaults(ctx, tenantID), sess.SandboxConfigID, skillDir)
+		installerAgentDefaults(ctx, tenantID), configID, skillDir)
 
 	chatModel, err := s.resolveInstallerModel(ctx, tenantID, record)
 	if err != nil {

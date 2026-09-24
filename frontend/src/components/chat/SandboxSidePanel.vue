@@ -107,6 +107,7 @@ import SandboxDesktop from '@/views/chat/components/SandboxDesktop.vue'
 import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
 const props = withDefaults(
@@ -134,12 +135,14 @@ const emit = defineEmits<{ (e: 'artifactDeleted', payload: { messageId: string; 
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
 const chatResources = useChatResourcesStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const sandboxConfigsReady = ref(false)
 
 // Hide the desktop tab for CLI / Docker configs. Shared agents whose
 // sandbox row is not in this workspace still show the tab and let the
 // backend return DESKTOP_UNSUPPORTED.
 const desktopTabVisible = computed(() => {
+  if (!deploymentCapabilities.isSupported('settings.sandbox.remote')) return false
   const agentId = props.agentId?.trim()
   if (!agentId) return false
   const agent = chatResources.agents.find((item) => item.id === agentId)

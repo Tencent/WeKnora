@@ -98,13 +98,13 @@ var toolchainBinNames = []string{
 }
 
 // extraPrivateRoots tighten Seatbelt's blanket file-read* on darwin.
-// /Users and /Volumes cover other homes and mounted disks; /tmp and /var
-// (plus their /private aliases) cover host temp dirs that hold tokens.
-// Seatbelt matches the resolved vnode, so denying /private/tmp also
-// blocks /tmp and denying /private/var also blocks /var/folders.
+// /Users and /Volumes cover other homes and mounted disks. /var (and
+// /private/var) covers /var/folders, where per-user temp tokens live.
+// /tmp is not in this list: the base Seatbelt profile opens it for read
+// and write. A private deny here is emitted after that allow and would
+// close reads again.
 var extraPrivateRoots = []string{
 	"/Users", "/Volumes",
-	"/tmp", "/private/tmp",
 	"/var", "/private/var",
 }
 
@@ -118,10 +118,15 @@ var platformReadRoots = []string{
 	"/opt/homebrew", "/usr/local",
 }
 
+// ErrInstallDirOutsideSkillsRoot refuses an install policy for any directory
+// that is not inside the configured skills root.
+var ErrInstallDirOutsideSkillsRoot = errors.New("localsandbox: install directory is outside the skills root")
+
 // PolicyBuilder derives a Policy from an approval mode and a workspace.
 type PolicyBuilder struct {
 	homeDir    string
 	appDataDir string
+	skillsRoot string
 }
 
 // NewPolicyBuilder returns a builder scoped to the user's home and app-data dirs.
@@ -143,7 +148,9 @@ func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 	}
 
 	p := Policy{
-		Network:       NetworkDenied,
+		// Chat commands need outbound access for package installs, APIs, and
+		// skill tests. Install policies already use the same stance.
+		Network:       NetworkUnrestricted,
 		Cwd:           ws.Root,
 		ReadableRoots: b.readableRoots(ws),
 		PrivateRoots:  b.privateRoots(),
@@ -200,7 +207,44 @@ func (b *PolicyBuilder) readableRoots(ws Workspace) []string {
 	for _, name := range homeReadableNames {
 		roots = append(roots, filepath.Join(b.homeDir, filepath.FromSlash(name)))
 	}
+	if b.skillsRoot != "" {
+		roots = append(roots, b.skillsRoot)
+	}
 	return roots
+}
+
+// WithSkillsRoot makes installed skills readable to every chat command.
+func (b *PolicyBuilder) WithSkillsRoot(root string) *PolicyBuilder {
+	if root = strings.TrimSpace(root); root != "" {
+		b.skillsRoot = filepath.Clean(root)
+	}
+	return b
+}
+
+// BuildInstall is the policy one skill install runs under: only dir is
+// writable, the network is open for package downloads, and deny-read is the
+// same set auto mode enforces.
+func (b *PolicyBuilder) BuildInstall(dir string) (Policy, error) {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if b.skillsRoot == "" || !filepath.IsAbs(dir) ||
+		!PathUnder(dir, b.skillsRoot) || samePath(dir, b.skillsRoot) {
+		return Policy{}, fmt.Errorf("%w: %q", ErrInstallDirOutsideSkillsRoot, dir)
+	}
+	if err := b.rejectBroadWorkspace(dir); err != nil {
+		return Policy{}, err
+	}
+	p := Policy{
+		Network:       NetworkUnrestricted,
+		Cwd:           dir,
+		WritableRoots: []WritableRoot{{Path: dir}},
+		ReadableRoots: b.readableRoots(Workspace{Root: dir}),
+		PrivateRoots:  b.privateRoots(),
+		DenyRead:      b.denyRead(),
+	}
+	if err := p.Validate(); err != nil {
+		return Policy{}, err
+	}
+	return p, nil
 }
 
 // ToolchainBins returns existing per-user and platform toolchain directories

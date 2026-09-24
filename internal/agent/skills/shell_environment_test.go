@@ -37,3 +37,30 @@ func TestShellEnvironmentSelectsOnlyAllowedInstalledSkills(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+type hostLayoutManager struct {
+	sandbox.Manager
+	root string
+}
+
+func (h hostLayoutManager) GetType() sandbox.SandboxType { return sandbox.SandboxTypeHost }
+func (h hostLayoutManager) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	return sandbox.WorkspaceLayout{Origin: sandbox.WorkspaceOriginHost, Root: h.root}, nil
+}
+
+func TestPrepareShellEnvironmentOnHostUsesLocalSkillsAndWorkspace(t *testing.T) {
+	root := "/Users/dev/.weknora/skills"
+	rows := []*types.TenantSkillEntity{{Name: "pdf", Status: types.SkillStatusReady, Enabled: true}}
+	m := NewManager(&ManagerConfig{Enabled: true}, hostLayoutManager{root: "/Users/dev/My Project"}).
+		WithSkillsRoot(root).
+		WithTenantSource(NewTenantSkillSourceAt(root, rows, nil))
+
+	cmd, env, err := m.PrepareShellEnvironment(context.Background(), "s1", "pdf", "python3 run.py", nil)
+	require.NoError(t, err)
+	require.Contains(t, cmd, root+"/pdf/.venv/bin")
+	require.Equal(t, root+"/pdf", env["WEKNORA_SKILL_DIR"])
+	require.Equal(t, "/Users/dev/My Project", env["WEKNORA_SKILL_OUTPUT_DIR"])
+	require.Equal(t, "/Users/dev/My Project", env["WEKNORA_SKILL_HISTORY_ROOT"])
+	_, hasInput := env["WEKNORA_SESSION_INPUT_DIR"]
+	require.False(t, hasInput)
+}
