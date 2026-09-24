@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   listGalleryImages,
@@ -39,12 +39,16 @@ const sortOrder = ref<'asc' | 'desc'>('desc')
 const searchScope = ref<'all' | 'custom'>('all')
 const filterScope = ref<'all' | 'custom'>('all')
 
-// Which settings panel is on screen. A panel opens as a popover next to the
-// control that summoned it, and a pin moves it into the right-hand rail,
+// Which settings panel is on screen. A panel opens as a popover under the
+// arrow that summoned it, and a pin moves it into the right-hand rail,
 // where the two panels take turns as tabs instead of both eating space.
 const openPanel = ref<'search' | 'filter' | ''>('')
 const pinnedPanel = ref<'search' | 'filter' | ''>('')
 const panelTab = ref<'search' | 'filter'>('filter')
+// Where the floating panel hangs: captured from the arrow that opened it,
+// so it sits directly beneath that control instead of at a guessed spot.
+const panelPos = ref<{ top: number; left: number } | null>(null)
+const rootEl = ref<HTMLElement | null>(null)
 
 // Attribute selections: namespaced attr id -> selected allowed values (OR
 // within the attribute, AND across attributes). Free-text attributes have no
@@ -160,6 +164,8 @@ function onThumbError(id: string) {
   thumbBroken.value = { ...thumbBroken.value, [id]: true }
 }
 
+let viewerToken = 0
+
 watch(
   () => current.value,
   async (img) => {
@@ -167,8 +173,18 @@ watch(
       viewerUrl.value = ''
       return
     }
+    // Opening the viewer renders the <img> at once, while the blob the
+    // browser can actually display only exists after the proxy fetch below.
+    // In the meantime the element still shows the previous (or empty)
+    // source, whose error event flipped the failure flag — and the real
+    // image then arrived to a viewer already showing its failure state.
+    // The token keeps a stale fetch from winning a fast navigation race,
+    // and the flag is reset here, after the real source is in hand.
+    const token = ++viewerToken
+    const url = await resolveImageSrc(img.url)
+    if (token !== viewerToken) return
     imageFailed.value = false
-    viewerUrl.value = await resolveImageSrc(img.url)
+    viewerUrl.value = url
   },
 )
 
@@ -324,9 +340,51 @@ function verdictLabel(v: Verdict): string {
 // rail. Pinning one keeps the other out of the rail, so the two never split
 // the image area between them.
 // ---------------------------------------------------------------------------
-function openSettingsPanel(panel: 'search' | 'filter'): void {
-  panelTab.value = panel
+function openSettingsPanel(panel: 'search' | 'filter', ev?: MouseEvent): void {
+  // A pinned rail already holds both panels as tabs; an arrow click merely
+  // turns to the requested one instead of spawning a second surface.
+  if (pinnedPanel.value) {
+    panelTab.value = panel
+    openPanel.value = ''
+    return
+  }
+  // The arrow is a toggle: a second press on the same arrow retracts the
+  // panel, which is also why its icon points up while the panel is out.
+  if (openPanel.value === panel) {
+    openPanel.value = ''
+    return
+  }
   openPanel.value = panel
+  panelTab.value = panel
+  if (ev) updatePanelPosition(ev)
+}
+
+/** Anchor the floating panel just below the arrow that summoned it. */
+function updatePanelPosition(ev: MouseEvent): void {
+  const root = rootEl.value?.getBoundingClientRect()
+  const btn = (ev.currentTarget as HTMLElement | null)?.getBoundingClientRect()
+  if (!root || !btn) return
+  const width = 320
+  const left = Math.max(8, Math.min(btn.left - root.left, root.width - width - 12))
+  panelPos.value = { top: btn.bottom - root.top + 6, left }
+}
+
+const floatingStyle = computed(() =>
+  panelPos.value
+    ? { top: `${panelPos.value.top}px`, left: `${panelPos.value.left}px`, right: 'auto' }
+    : {},
+)
+
+// Any click landing outside the floating panel and outside the arrows closes
+// it: moving on to another toolbar control means leaving the panel. Clicks
+// inside the panel itself, and on the toggling arrows, are left alone.
+function onDocClick(e: MouseEvent): void {
+  if (!openPanel.value || pinnedPanel.value) return
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  if (target.closest('.ig-panel-slot')) return
+  if (target.closest('.ig-scope-arrow')) return
+  openPanel.value = ''
 }
 
 function togglePin(panel: 'search' | 'filter'): void {
@@ -337,11 +395,6 @@ function togglePin(panel: 'search' | 'filter'): void {
   pinnedPanel.value = panel
   panelTab.value = panel
   openPanel.value = ''
-}
-
-function onSearchScopeChange(value: string | number | boolean): void {
-  searchScope.value = value === 'custom' ? 'custom' : 'all'
-  resetPageAndReload()
 }
 
 function onFilterScopeChange(value: string | number | boolean): void {
@@ -532,6 +585,14 @@ function sourceLabel(img: ImageAsset): string {
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
+})
+
 onMounted(async () => {
   try {
     const cfg = await fetchGalleryConfig(props.knowledgeBaseId)
@@ -551,7 +612,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="image-gallery" @keydown="onViewerKey">
+  <div ref="rootEl" class="image-gallery" @keydown="onViewerKey">
     <div class="ig-layout" :class="{ 'has-rail': !!pinnedPanel }">
       <!--
         One settings panel, two placements: pinning it moves it out of the
@@ -563,6 +624,7 @@ onMounted(async () => {
         v-if="openPanel || pinnedPanel"
         class="ig-panel-slot"
         :class="{ 'is-floating': openPanel && !pinnedPanel }"
+        :style="openPanel && !pinnedPanel ? floatingStyle : undefined"
       >
         <div class="ig-panel-head">
           <t-tabs v-model="panelTab" class="ig-panel-tabs">
@@ -575,7 +637,7 @@ onMounted(async () => {
             :title="pinnedPanel === panelTab ? t('knowledgeEditor.wikiBrowser.gallery.unpin') : t('knowledgeEditor.wikiBrowser.gallery.pin')"
             @click="togglePin(panelTab)"
           >
-            <t-icon name="pushpin" />
+            <t-icon :name="pinnedPanel === panelTab ? 'pin-filled' : 'pin'" />
           </button>
         </div>
 
@@ -680,33 +742,34 @@ onMounted(async () => {
 
           <div class="ig-scope">
             <span class="ig-scope-name">{{ t('knowledgeEditor.wikiBrowser.gallery.searchScope') }}</span>
-            <t-select v-model="searchScope" class="ig-scope-value" @change="onSearchScopeChange">
-              <t-option value="all" :label="t('knowledgeEditor.wikiBrowser.gallery.scopeAll')" />
-              <t-option value="custom" :label="t('knowledgeEditor.wikiBrowser.gallery.scopeCustom')" />
-            </t-select>
+            <!--
+              The scope word is a status, not a control: it names the mode
+              the search is in, and only the arrow beside it opens the panel
+              that changes it.
+            -->
+            <span class="ig-scope-value">
+              {{ searchScope === 'all' ? t('knowledgeEditor.wikiBrowser.gallery.scopeAll') : t('knowledgeEditor.wikiBrowser.gallery.scopeCustom') }}
+            </span>
             <button
               class="ig-scope-arrow"
-              :disabled="searchScope !== 'custom'"
               :title="t('knowledgeEditor.wikiBrowser.gallery.editSearch')"
-              @click="openSettingsPanel('search')"
+              @click="openSettingsPanel('search', $event)"
             >
-              <t-icon name="chevron-down" />
+              <t-icon :name="openPanel === 'search' && !pinnedPanel ? 'chevron-up' : 'chevron-down'" />
             </button>
           </div>
 
           <div class="ig-scope">
             <span class="ig-scope-name">{{ t('knowledgeEditor.wikiBrowser.gallery.filterScope') }}</span>
-            <t-select v-model="filterScope" class="ig-scope-value" @change="onFilterScopeChange">
-              <t-option value="all" :label="t('knowledgeEditor.wikiBrowser.gallery.filterOff')" />
-              <t-option value="custom" :label="t('knowledgeEditor.wikiBrowser.gallery.filterOn')" />
-            </t-select>
+            <span class="ig-scope-value">
+              {{ filterScope === 'all' ? t('knowledgeEditor.wikiBrowser.gallery.filterOff') : t('knowledgeEditor.wikiBrowser.gallery.filterOn') }}
+            </span>
             <button
               class="ig-scope-arrow"
-              :disabled="filterScope !== 'custom'"
               :title="t('knowledgeEditor.wikiBrowser.gallery.editFilter')"
-              @click="openSettingsPanel('filter')"
+              @click="openSettingsPanel('filter', $event)"
             >
-              <t-icon name="chevron-down" />
+              <t-icon :name="openPanel === 'filter' && !pinnedPanel ? 'chevron-up' : 'chevron-down'" />
             </button>
           </div>
 
@@ -783,8 +846,13 @@ onMounted(async () => {
         </button>
 
         <div class="ig-viewer-image">
-          <img v-if="!imageFailed" :src="viewerUrl" :alt="current.caption" @error="imageFailed = true" />
-          <div v-else class="ig-viewer-image-error">{{ t('knowledgeEditor.wikiBrowser.gallery.imageLoadError') }}</div>
+          <!--
+            Rendered only once a displayable source exists: the raw
+            resource:// handle (or an empty string) would fire the error
+            handler and mask the image that is still being fetched.
+          -->
+          <img v-if="viewerUrl && !imageFailed" :src="viewerUrl" :alt="current.caption" @error="imageFailed = true" />
+          <div v-else-if="imageFailed" class="ig-viewer-image-error">{{ t('knowledgeEditor.wikiBrowser.gallery.imageLoadError') }}</div>
         </div>
 
         <button class="ig-nav ig-nav-next" :title="t('knowledgeEditor.wikiBrowser.gallery.next')" @click="nextImage">
@@ -836,9 +904,19 @@ onMounted(async () => {
   min-height: 0;
 }
 
-/* A pinned panel takes the right column; the image area keeps the rest. */
+/* A pinned panel takes the right column; the image area keeps the rest.
+   The panel precedes the main section in the DOM, so the columns it lands
+   in are pinned down explicitly instead of left to source order. */
 .ig-layout.has-rail {
   grid-template-columns: minmax(0, 1fr) 300px;
+}
+.ig-layout.has-rail .ig-main {
+  grid-row: 1;
+  grid-column: 1;
+}
+.ig-layout.has-rail .ig-panel-slot {
+  grid-row: 1;
+  grid-column: 2;
 }
 
 /* -------------------------------------------------------------------------
@@ -879,17 +957,19 @@ onMounted(async () => {
   border-bottom: 1px solid var(--td-component-border, #eee);
 }
 .ig-panel-tabs {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
 }
 .ig-pin {
+  /* The tab bar would otherwise stretch and shove the pin out of the head. */
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
   color: var(--td-text-color-secondary, #666);
@@ -1014,7 +1094,9 @@ onMounted(async () => {
   white-space: nowrap;
 }
 .ig-scope-value {
-  width: 108px;
+  font-size: 13px;
+  color: var(--td-text-color-primary, #333);
+  white-space: nowrap;
 }
 .ig-scope-arrow {
   display: inline-flex;
