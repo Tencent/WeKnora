@@ -30,8 +30,8 @@ func TestDesktopAPIProxyRewritesWailsHostToLoopback(t *testing.T) {
 	req.Host = "wails.localhost"
 	resp, err := front.Client().Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
+	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	require.Equal(t, target.Host, got)
 }
@@ -54,8 +54,8 @@ func TestDesktopAPIProxyKeepsHostForOtherRoutes(t *testing.T) {
 	req.Host = "wails.localhost"
 	resp, err := front.Client().Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
+	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	require.Equal(t, "wails.localhost", got)
 }
