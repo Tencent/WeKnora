@@ -245,6 +245,8 @@ type Adapter interface {
 4. 普通消息调用 WeKnora QA 流水线（`KnowledgeQA` / `AgentQA`）；
 5. 收集流式回答并通过 Adapter 回发。
 
+IM 渠道的回复语言由 `language_mode` 控制。默认的 `fixed` 模式使用渠道 `locale`，未设置时使用部署默认语言。`follow_user` 模式从当前文本消息检测语言；短消息、链接等无法可靠判断时，沿用当前 IM 会话上次可信的检测结果，若会话尚无结果则使用部署默认语言。用户模式按平台、用户、聊天、租户和 Agent 复用会话；线程模式按平台、聊天、线程、租户和 Agent 复用会话。执行 `/clear` 后创建新会话，语言记录也随之重置。IM 平台回调中的 `Accept-Language` 不代表发消息的用户，不参与检测。
+
 平台适配器通过 `AdapterFactory` 注册（`internal/container/container.go` 的 `registerIMAdapterFactories`）：
 
 ```go

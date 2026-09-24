@@ -25,6 +25,7 @@ type IMChannel struct {
 	Mode            string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
 	OutputMode      string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
 	Locale          string         `json:"locale"            gorm:"type:varchar(16);not null;default:''"`
+	LanguageMode    string         `json:"language_mode"     gorm:"type:varchar(20);not null;default:'fixed'"`
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
 	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
 	SessionMode     string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
@@ -51,6 +52,7 @@ type IMChannelSummary struct {
 	Mode                  string    `json:"mode"`
 	OutputMode            string    `json:"output_mode"`
 	Locale                string    `json:"locale"`
+	LanguageMode          string    `json:"language_mode"`
 	KnowledgeBaseID       string    `json:"knowledge_base_id"`
 	BotIdentity           string    `json:"bot_identity"`
 	SessionMode           string    `json:"session_mode"`
@@ -71,6 +73,7 @@ func SummarizeIMChannel(ch IMChannel) IMChannelSummary {
 		Mode:                  ch.Mode,
 		OutputMode:            ch.OutputMode,
 		Locale:                ch.Locale,
+		LanguageMode:          ch.LanguageMode,
 		KnowledgeBaseID:       ch.KnowledgeBaseID,
 		BotIdentity:           ch.BotIdentity,
 		SessionMode:           ch.SessionMode,
@@ -117,6 +120,9 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 	if err := ch.normalizeAndValidateLocale(); err != nil {
 		return err
 	}
+	if err := ch.validateLanguageMode(); err != nil {
+		return err
+	}
 	ch.BotIdentity = ch.computeBotIdentity()
 	return nil
 }
@@ -131,6 +137,9 @@ func (ch *IMChannel) BeforeSave(tx *gorm.DB) error {
 		return err
 	}
 	if err := ch.normalizeAndValidateLocale(); err != nil {
+		return err
+	}
+	if err := ch.validateLanguageMode(); err != nil {
 		return err
 	}
 	ch.BotIdentity = ch.computeBotIdentity()
@@ -148,6 +157,27 @@ func (ch *IMChannel) normalizeAndValidateLocale() error {
 		return nil
 	}
 	return fmt.Errorf("invalid locale: %s", locale)
+}
+
+func (ch *IMChannel) validateLanguageMode() error {
+	mode, err := NormalizeLanguageMode(ch.LanguageMode)
+	if err != nil {
+		return err
+	}
+	ch.LanguageMode = mode
+	return nil
+}
+
+// NormalizeLanguageMode keeps the accepted API values and persistence default
+// in one place so channels created outside the HTTP handler behave the same way.
+func NormalizeLanguageMode(mode string) (string, error) {
+	if mode == "" {
+		return "fixed", nil
+	}
+	if mode != "fixed" && mode != "follow_user" {
+		return "", fmt.Errorf("language_mode must be 'fixed' or 'follow_user': %q", mode)
+	}
+	return mode, nil
 }
 
 // validateSessionMode checks that SessionMode holds a supported value.
@@ -255,6 +285,8 @@ type ChannelSession struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"deleted_at"    gorm:"index"`
+
+	LastDetectedLanguage string `json:"-" gorm:"type:varchar(64);not null;default:''"`
 }
 
 func (ChannelSession) TableName() string {
