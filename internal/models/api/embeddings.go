@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 )
 
@@ -53,6 +54,31 @@ const (
 // shared layer's job, not the protocol's.
 type Embedder interface {
 	Embed(ctx context.Context, texts []string, kind EmbedInputType) ([][]float32, error)
+}
+
+// EmbedImage is one image to embed. It travels inline rather than as a URL:
+// the object store WeKnora reads images from is usually not reachable from
+// the vendor, and every multimodal vendor in the catalog accepts base64.
+type EmbedImage struct {
+	Data     []byte
+	MIMEType string
+}
+
+// Base64 is the image in standard base64, Gemini's inlineData form.
+func (i EmbedImage) Base64() string { return base64.StdEncoding.EncodeToString(i.Data) }
+
+// DataURI is the data:{mime};base64,{data} form Ark, DashScope and Jina
+// document.
+func (i EmbedImage) DataURI() string { return "data:" + i.MIMEType + ";base64," + i.Base64() }
+
+// ImageEmbedder is implemented by the protocols that can carry an image.
+// Whether a given model maps images into the space of its text vectors is
+// the catalog entry's input, not the protocol's, so the caller checks that
+// first. Callers pass a batch within EmbeddingsSettings.ImageBatchLimit.
+type ImageEmbedder interface {
+	// AcceptsImages reports whether this endpoint can carry an image at all.
+	AcceptsImages() bool
+	EmbedImages(ctx context.Context, images []EmbedImage, kind EmbedInputType) ([][]float32, error)
 }
 
 // PlaceEmbeddings puts returned vectors back in the order the texts were

@@ -57,6 +57,23 @@ func (c *Client) BuildRequestBody(texts []string, _ api.EmbedInputType) map[stri
 	for _, text := range texts {
 		input = append(input, map[string]any{"type": "text", "text": text})
 	}
+	return c.body(input)
+}
+
+// BuildImageRequestBody is the golden-test entry point for images. The
+// reference takes an image as a URL or as
+// "data:image/{图片格式};base64,{图片Base64编码}" under image_url.url.
+func (c *Client) BuildImageRequestBody(images []api.EmbedImage, _ api.EmbedInputType) map[string]any {
+	input := make([]any, 0, len(images))
+	for _, img := range images {
+		input = append(input, map[string]any{
+			"type": "image_url", "image_url": map[string]any{"url": img.DataURI()},
+		})
+	}
+	return c.body(input)
+}
+
+func (c *Client) body(input []any) map[string]any {
 	body := map[string]any{
 		"model": c.cfg.Endpoint.Model,
 		"input": input,
@@ -87,11 +104,29 @@ func (c *Client) Embed(
 			len(texts),
 		)
 	}
+	return c.post(ctx, c.BuildRequestBody(texts, kind))
+}
+
+// AcceptsImages is always true: the image part is part of the schema.
+func (c *Client) AcceptsImages() bool { return true }
+
+// EmbedImages vectorizes one image, for the same reason Embed takes one text.
+func (c *Client) EmbedImages(
+	ctx context.Context, images []api.EmbedImage, kind api.EmbedInputType,
+) ([][]float32, error) {
+	if len(images) != 1 {
+		return nil, fmt.Errorf(
+			"ark embedding fuses its input into one vector, so it takes one image per request, got %d",
+			len(images),
+		)
+	}
+	return c.post(ctx, c.BuildImageRequestBody(images, kind))
+}
+
+func (c *Client) post(ctx context.Context, body map[string]any) ([][]float32, error) {
 	var decoded response
 	url := c.cfg.Endpoint.Resolve(c.cfg.Settings.Path)
-	err := c.cfg.Endpoint.PostJSONWithRetry(
-		ctx, url, c.BuildRequestBody(texts, kind), &decoded, c.cfg.Retry, "embedding",
-	)
+	err := c.cfg.Endpoint.PostJSONWithRetry(ctx, url, body, &decoded, c.cfg.Retry, "embedding")
 	if err != nil {
 		return nil, err
 	}

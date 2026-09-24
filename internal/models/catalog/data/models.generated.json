@@ -811,7 +811,9 @@
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
         "compat": {
           "api": "dashscope-embeddings",
-          "dimensions_field": ""
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -826,7 +828,9 @@
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
         "compat": {
           "api": "dashscope-embeddings",
-          "dimensions_field": ""
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -842,7 +846,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -858,7 +864,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 10,
+          "max_image_bytes": 10000000
         }
       },
       {
@@ -874,7 +882,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 1
+          "max_batch_size": 1,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 5000000
         }
       },
       {
@@ -890,7 +900,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -1895,7 +1907,14 @@
           "input": 0.2,
           "output": 0
         },
-        "source": "https://ai.google.dev/gemini-api/docs/embeddings"
+        "source": "https://ai.google.dev/gemini-api/docs/embeddings",
+        "compat": {
+          "max_image_batch_size": 6,
+          "image_mime_types": [
+            "image/png",
+            "image/jpeg"
+          ]
+        }
       }
     ],
     "generic": [

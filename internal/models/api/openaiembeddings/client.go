@@ -75,10 +75,26 @@ type response struct {
 // BuildRequestBody is the golden-test entry point: it returns the exact JSON
 // object that would be sent.
 func (c *Client) BuildRequestBody(texts []string, kind api.EmbedInputType) map[string]any {
+	return c.body(texts, kind)
+}
+
+// BuildImageRequestBody is the golden-test entry point for images. The shape
+// has no standard image input; a vendor that extends it names the key of the
+// object that carries one, and Jina's reference gives
+// {"image": URL or data URI}.
+func (c *Client) BuildImageRequestBody(images []api.EmbedImage, kind api.EmbedInputType) map[string]any {
+	input := make([]any, 0, len(images))
+	for _, img := range images {
+		input = append(input, map[string]any{c.cfg.Settings.ImageField: img.DataURI()})
+	}
+	return c.body(input, kind)
+}
+
+func (c *Client) body(input any, kind api.EmbedInputType) map[string]any {
 	s := c.cfg.Settings
 	body := map[string]any{
 		"model": c.cfg.Endpoint.Model,
-		"input": texts,
+		"input": input,
 	}
 	if s.SendEncodingFormat {
 		body["encoding_format"] = "float"
@@ -111,17 +127,34 @@ func (c *Client) BuildRequestBody(texts []string, kind api.EmbedInputType) map[s
 func (c *Client) Embed(
 	ctx context.Context, texts []string, kind api.EmbedInputType,
 ) ([][]float32, error) {
+	return c.post(ctx, c.BuildRequestBody(texts, kind), len(texts))
+}
+
+// AcceptsImages reports whether the vendor names an image field. Without
+// one a plain OpenAI-compatible server would read the objects as malformed
+// text input.
+func (c *Client) AcceptsImages() bool { return c.cfg.Settings.ImageField != "" }
+
+// EmbedImages vectorizes one batch of images, in the order it was given.
+func (c *Client) EmbedImages(
+	ctx context.Context, images []api.EmbedImage, kind api.EmbedInputType,
+) ([][]float32, error) {
+	if !c.AcceptsImages() {
+		return nil, fmt.Errorf("this embedding endpoint declares no image input")
+	}
+	return c.post(ctx, c.BuildImageRequestBody(images, kind), len(images))
+}
+
+func (c *Client) post(ctx context.Context, body map[string]any, want int) ([][]float32, error) {
 	var decoded response
-	err := c.cfg.Endpoint.PostJSONWithRetry(
-		ctx, c.url(), c.BuildRequestBody(texts, kind), &decoded, c.cfg.Retry, "embedding",
-	)
+	err := c.cfg.Endpoint.PostJSONWithRetry(ctx, c.url(), body, &decoded, c.cfg.Retry, "embedding")
 	if err != nil {
 		return nil, err
 	}
 	if decoded.Error != nil && decoded.Error.Message != "" {
 		return nil, fmt.Errorf("embedding API error: %s", decoded.Error.Message)
 	}
-	return api.PlaceEmbeddings(len(texts), len(decoded.Data), func(i int) (int, []float32) {
+	return api.PlaceEmbeddings(want, len(decoded.Data), func(i int) (int, []float32) {
 		if decoded.Data[i].Index == nil {
 			return i, decoded.Data[i].Embedding
 		}

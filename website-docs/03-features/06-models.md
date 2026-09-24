@@ -191,6 +191,10 @@
 | `accepts_truncate_prompt_tokens` | bool | false | 服务是否支持 vLLM 的 `truncate_prompt_tokens` |
 | `request_timeout_seconds` | int | 60 | 单次请求超时（秒） |
 | `extra_body` | object | 空 | 附加到每次请求的字段 |
+| `image_field` | string | 空 | 仅 `openai-embeddings`：`input` 里承载图片的对象键名（Jina 为 `image`）。留空表示该端点不收图片 |
+| `max_image_batch_size` | int | 1 | 单次请求的最大图片数，超出自动分批 |
+| `max_image_bytes` | int | 0（不限） | 单张图片的字节上限，超出的图片直接拒绝、不发请求 |
+| `image_mime_types` | array | 空（不限） | 厂商接受的图片格式，如 `["image/png", "image/jpeg"]` |
 
 **重排模型**
 
