@@ -85,6 +85,7 @@ async function fixture(options: {
       if (name === '@/stores/modelProviders') return { useModelProvidersStore: () => providersStore }
       if (name === '@/api/model') return { getWeKnoraCloudStatus: async () => ({ has_models: true, needs_reinit: false }) }
       if (name === '@/utils/weknoraCloudModels') return require('../utils/weknoraCloudModels.ts')
+      if (name === '@/utils/docsUrl') return require('../utils/docsUrl.ts')
       if (name === '@/stores/modelProvidersState') return require('../stores/modelProvidersState.ts')
       if (name === '@/utils/reasoningEffort') return require('../utils/reasoningEffort.ts')
       if (name === '@/utils/contextWindow') return require('../utils/contextWindow.ts')

@@ -646,6 +646,7 @@ import CredentialResource, {
 } from '@/components/credentials/CredentialResource.vue'
 import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
 import { WEKNORA_CLOUD_PROVIDER, WKC_MODEL_KINDS, WKC_MODEL_NAME_BY_KIND } from '@/utils/weknoraCloudModels'
+import { docsUrl } from '@/utils/docsUrl'
 
 interface CustomHeaderItem {
   key: string
@@ -703,8 +704,7 @@ const PROTOCOL_OPTIONS = [
 ] as const
 
 /** Field reference for parameters.spec.compat, per protocol and model type. */
-const COMPAT_DOC_URL =
-  'https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/06-models.md#协议兼容覆盖-compat-json'
+const COMPAT_DOC_URL = docsUrl('modelsCompat')
 
 /** Legacy thinking_control values still honoured by catalog.Resolve. */
 const LEGACY_THINKING_CONTROL_VALUES = ['none', 'enable_thinking', 'thinking_type', 'chat_template_kwargs'] as const

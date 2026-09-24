@@ -54,7 +54,7 @@
         {{ $t('tenantMember.sectionDescription') }}
         <a
           class="doc-link"
-          href="https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/01-tenant-auth.md"
+          :href="docsUrl('tenantAuth')"
           target="_blank"
           rel="noopener noreferrer"
         >
@@ -535,6 +535,7 @@ import {
   revokeInvitation,
   type TenantInvitation,
 } from '@/api/tenant/invitations'
+import { docsUrl } from '@/utils/docsUrl'
 import {
   listAuditLog,
   type AuditLog,

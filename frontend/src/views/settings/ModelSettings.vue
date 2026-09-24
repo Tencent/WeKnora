@@ -41,7 +41,7 @@
             ? 'modelSettings.builtinModels.descriptionAdmin'
             : 'modelSettings.builtinModels.description') }}
         </p>
-        <a class="doc-link" href="https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/06-models.md" target="_blank"
+        <a class="doc-link" :href="docsUrl('models')" target="_blank"
           rel="noopener noreferrer">
           {{ $t('modelSettings.builtinModels.viewGuide') }}
           <t-icon name="link" class="link-icon" />
@@ -311,6 +311,7 @@ import { useUIStore } from '@/stores/ui'
 import { focusKbEditorSection } from '@/config/contextualGuides'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useModelProvidersStore } from '@/stores/modelProviders'
+import { docsUrl } from '@/utils/docsUrl'
 import {
   formatContextWindow,
   isDefaultContextWindow,
