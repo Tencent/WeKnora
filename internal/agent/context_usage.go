@@ -12,21 +12,32 @@ import (
 // be sent (or was just sent). promptTokens of 0 means the provider has not
 // priced it yet and the snapshot is marked as an estimate.
 //
-// Live SSE is opt-in: round-start snapshots stay on state so the ring does not
-// jump estimate to measured mid-round. Call publishContextUsage after the
-// response lands.
+// An unpriced snapshot does not replace a mix the provider already priced.
+// Live SSE stays opt-in: call publishContextUsage after the response lands,
+// so the ring does not jump from estimate to measured mid-round.
 func (e *AgentEngine) snapshotContextUsage(
 	_ context.Context,
 	state *types.AgentState,
 	messages []chat.Message,
 	tools []chat.Tool,
 	promptTokens int,
-) {
+) types.ContextUsage {
 	if e == nil || state == nil {
-		return
+		return types.ContextUsage{}
 	}
-	state.ContextUsage = e.contextAttributor().
+	usage := e.contextAttributor().
 		Attribute(messages, tools, e.promptSectionTokens, promptTokens)
+	// A round that starts before the provider prices it must not wipe a mix
+	// we already measured. The estimate would otherwise be what gets persisted
+	// if the turn ends in between.
+	if promptTokens > 0 || !measuredContext(state.ContextUsage) {
+		state.ContextUsage = usage
+	}
+	return usage
+}
+
+func measuredContext(usage types.ContextUsage) bool {
+	return !usage.Estimated && usage.Total > 0
 }
 
 // recalibrateContextUsage re-reports the round's request now that the provider

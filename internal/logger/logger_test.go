@@ -19,6 +19,20 @@ func newEntry(level logrus.Level, msg string, data logrus.Fields) *logrus.Entry 
 	return e
 }
 
+func TestDebugEnabledFollowsTheLoggerLevel(t *testing.T) {
+	prev := appLogger.GetLevel()
+	t.Cleanup(func() { appLogger.SetLevel(prev) })
+
+	appLogger.SetLevel(logrus.InfoLevel)
+	if DebugEnabled(context.Background()) {
+		t.Fatal("info level must not report debug as enabled")
+	}
+	appLogger.SetLevel(logrus.DebugLevel)
+	if !DebugEnabled(context.Background()) {
+		t.Fatal("debug level must report debug as enabled")
+	}
+}
+
 func TestAnsiStripWriter(t *testing.T) {
 	var buf strings.Builder
 	w := &ansiStripWriter{w: &buf}

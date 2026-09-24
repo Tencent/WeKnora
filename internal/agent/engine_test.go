@@ -1145,6 +1145,31 @@ func TestMultiRoundTurnKeepsTheFixedBucketsStable(t *testing.T) {
 	require.Equal(t, 12000, second.Total)
 }
 
+func TestSnapshotKeepsAMeasuredMixWhenTheNextRoundIsUnpriced(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	state := &types.AgentState{}
+
+	engine.snapshotContextUsage(context.Background(), state, emptyMessages(), emptyTools(), 8000)
+	measured := state.ContextUsage
+	require.False(t, measured.Estimated)
+	require.Equal(t, 8000, measured.Total)
+
+	engine.snapshotContextUsage(context.Background(), state, emptyMessages(), emptyTools(), 0)
+
+	require.Equal(t, measured, state.ContextUsage,
+		"an unpriced round must not replace a measured mix with an estimate that then gets persisted")
+}
+
+func TestContextUsageWindowAndThresholdComeFromTheCompactor(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{}, withMaxContextTokens(128000))
+	state := &types.AgentState{}
+	engine.snapshotContextUsage(context.Background(), state, emptyMessages(), emptyTools(), 1000)
+
+	settings := engine.compactor.Settings()
+	require.Equal(t, settings.MaxContextTokens, state.ContextUsage.Window)
+	require.Equal(t, settings.Threshold(), state.ContextUsage.Threshold)
+}
+
 func TestSnapshotContextUsagePublishesToEventBus(t *testing.T) {
 	engine := newTestEngine(t, &mockChat{})
 	var got []types.ContextUsage

@@ -122,6 +122,23 @@ func TestEstimateMessagePartsSplitsReasoningFromTheRest(t *testing.T) {
 		"the split must be exhaustive, or attribution silently drops tokens")
 }
 
+func TestRequestOverheadIsTheGapBetweenTheMessageSumAndEstimateMessages(t *testing.T) {
+	e, err := NewEstimator()
+	assert.NoError(t, err)
+
+	msgs := []chat.Message{
+		{Role: "system", Content: "You are a helpful assistant."},
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there!", ReasoningContent: "thought"},
+	}
+	sum := 0
+	for i := range msgs {
+		sum += e.EstimateMessage(&msgs[i])
+	}
+	assert.Equal(t, 3, e.RequestOverhead())
+	assert.Equal(t, sum+e.RequestOverhead(), e.EstimateMessages(msgs))
+}
+
 func TestEstimateMessagePartsChargesNoReasoningWhenAbsent(t *testing.T) {
 	e, err := NewEstimator()
 	assert.NoError(t, err)

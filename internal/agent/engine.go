@@ -198,6 +198,13 @@ func (e *AgentEngine) compactionThreshold() int {
 }
 
 func (e *AgentEngine) contextWindowTokens() int {
+	// The ring's window and its compaction tick have to share one window.
+	// The compactor already normalized the value the threshold is subtracted from.
+	if e != nil && e.compactor != nil {
+		if window := e.compactor.Settings().MaxContextTokens; window > 0 {
+			return window
+		}
+	}
 	if e != nil && e.config != nil && e.config.MaxContextTokens > 0 {
 		return e.config.MaxContextTokens
 	}
@@ -705,8 +712,8 @@ func (e *AgentEngine) runReActIteration(
 
 	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
 		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
-	e.logContextPrediction(ctx, round, *messagesPtr, tools, currentTokens)
-	e.snapshotContextUsage(ctx, state, *messagesPtr, tools, 0)
+	snap := e.snapshotContextUsage(ctx, state, *messagesPtr, tools, 0)
+	e.logContextPrediction(ctx, round, *messagesPtr, tools, currentTokens, snap)
 	common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
 		"iteration":      state.CurrentRound,
 		"round":          round,

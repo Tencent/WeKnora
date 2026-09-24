@@ -89,22 +89,14 @@ func (e *Estimator) EstimateString(s string) int {
 // again the next round. Reasoning content is counted alongside text and tool
 // calls for that reason.
 func (e *Estimator) EstimateMessage(msg *chat.Message) int {
-	tokens := perMessageOverhead
-	tokens += e.EstimateString(msg.Role)
-	tokens += e.EstimateString(msg.Content)
-	tokens += e.EstimateString(msg.Name)
-	tokens += e.EstimateString(msg.ToolCallID)
-	tokens += e.EstimateString(msg.ReasoningContent)
-	tokens += e.estimateImageParts(msg)
-
-	for _, tc := range msg.ToolCalls {
-		tokens += e.EstimateString(tc.Function.Name)
-		tokens += e.EstimateString(tc.Function.Arguments)
-		tokens += perToolCallOverhead
-	}
-
-	return tokens
+	parts := e.EstimateMessageParts(msg)
+	return parts.Reasoning + parts.Rest
 }
+
+// RequestOverhead is the per-request tail EstimateMessages adds on top of the
+// per-message sum. Callers that already walked each message add this instead
+// of tokenizing the history again.
+func (e *Estimator) RequestOverhead() int { return perConversationTail }
 
 // MessageParts splits a message estimate into its reasoning half and
 // everything else. Context attribution reports reasoning separately because
@@ -119,7 +111,18 @@ type MessageParts struct {
 // caller can attribute reasoning on its own.
 func (e *Estimator) EstimateMessageParts(msg *chat.Message) MessageParts {
 	reasoning := e.EstimateString(msg.ReasoningContent)
-	return MessageParts{Reasoning: reasoning, Rest: e.EstimateMessage(msg) - reasoning}
+	rest := perMessageOverhead
+	rest += e.EstimateString(msg.Role)
+	rest += e.EstimateString(msg.Content)
+	rest += e.EstimateString(msg.Name)
+	rest += e.EstimateString(msg.ToolCallID)
+	rest += e.estimateImageParts(msg)
+	for _, tc := range msg.ToolCalls {
+		rest += e.EstimateString(tc.Function.Name)
+		rest += e.EstimateString(tc.Function.Arguments)
+		rest += perToolCallOverhead
+	}
+	return MessageParts{Reasoning: reasoning, Rest: rest}
 }
 
 // estimateImageParts counts multimodal content. MultiContent is the assembled

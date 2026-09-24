@@ -90,27 +90,123 @@ func TestAttributeChargesReasoningAndToolResultsSeparately(t *testing.T) {
 	require.Zero(t, got.Skills)
 }
 
-// The bug this rework exists to fix: the system prompt is frozen for the whole
-// turn, but proportional calibration made it climb every round as the
-// conversation grew.
-func TestFixedBucketsDoNotMoveWhenTheConversationGrows(t *testing.T) {
+// A growth too small to calibrate must not move the fixed prefix. The old
+// proportional scaler climbed every round; the lock exists to stop that.
+func TestFixedBucketsDoNotMoveOnAGrowthTooSmallToCalibrate(t *testing.T) {
 	a := newTestAttributor(t)
 	tools := testTools()
 
 	first := a.Attribute(testMessages(), tools, sections(), 5000)
+	nudged := append(testMessages(), chat.Message{Role: "user", Content: "ok"})
+	second := a.Attribute(nudged, tools, sections(), 5100)
 
-	grown := append(testMessages(), chat.Message{
-		Role: "user", Content: strings.Repeat("a much longer follow-up question. ", 500),
-	})
-	second := a.Attribute(grown, tools, sections(), 10000)
-
+	require.Equal(t, 1.0, a.kFixed)
 	require.Equal(t, first.SystemPrompt, second.SystemPrompt)
 	require.Equal(t, first.Memory, second.Memory)
 	require.Equal(t, first.Skills, second.Skills)
 	require.Equal(t, first.Tools, second.Tools)
 	require.Equal(t, first.MCP, second.MCP)
-	require.Greater(t, second.Conversation, first.Conversation,
-		"the growth must land on the variable buckets")
+}
+
+// kFixed is measured on the second priced round. It has to reach the buckets
+// on that same round — a turn's prefix usually never changes, so deferring
+// the scale until the next fingerprint change means it is never reported.
+// Once applied, more conversation must not move the prefix again.
+func TestCalibratedFixedScaleReachesTheBucketsAndThenHolds(t *testing.T) {
+	a := newTestAttributor(t)
+	tools := testTools()
+
+	first := a.Attribute(testMessages(), tools, sections(), 5000)
+	grown := append(testMessages(), chat.Message{
+		Role: "user", Content: strings.Repeat("a much longer follow-up question. ", 500),
+	})
+	second := a.Attribute(grown, tools, sections(), 20000)
+
+	require.NotEqual(t, 1.0, a.kFixed, "a large delta measures the prefix scale")
+	require.Equal(t, scale(first.SystemPrompt, a.kFixed), second.SystemPrompt)
+	require.Equal(t, scale(first.Memory, a.kFixed), second.Memory)
+	require.Equal(t, scale(first.Skills, a.kFixed), second.Skills)
+	require.Equal(t, scale(first.Tools, a.kFixed), second.Tools)
+	require.Equal(t, scale(first.MCP, a.kFixed), second.MCP)
+	require.Equal(t, 20000, second.Total)
+	require.Equal(t, 20000, sum(second))
+
+	grownAgain := append(grown, chat.Message{
+		Role: "user", Content: strings.Repeat("still growing. ", 500),
+	})
+	third := a.Attribute(grownAgain, tools, sections(), 40000)
+	require.Equal(t, second.SystemPrompt, third.SystemPrompt)
+	require.Equal(t, second.Memory, third.Memory)
+	require.Equal(t, second.Skills, third.Skills)
+	require.Equal(t, second.Tools, third.Tools)
+	require.Equal(t, second.MCP, third.MCP)
+	require.Greater(t, third.Conversation, second.Conversation)
+	require.Equal(t, 40000, sum(third))
+}
+
+// A short dialogue must not be blamed for a gap that is larger than any
+// plausible tokenizer error on that dialogue. The gap belongs to the prefix.
+func TestShortConversationDoesNotAbsorbAPrefixGap(t *testing.T) {
+	a := newTestAttributor(t)
+
+	msgs := []chat.Message{
+		{Role: "system", Content: strings.Repeat("你是一个智能助手，请严格遵守以下规则。", 60)},
+		{Role: "user", Content: "你好"},
+	}
+	fixedEst, varEst := a.estimate(msgs, nil, nil)
+	require.Greater(t, fixedEst.sum(), varEst.sum())
+	require.Less(t, varEst.sum(), minCalibrationDelta)
+
+	prompt := 2*fixedEst.sum() + varEst.sum()
+	got := a.Attribute(msgs, nil, nil, prompt)
+
+	variableCap := scale(varEst.sum(), maxVarScale)
+	require.LessOrEqual(t, got.Conversation+got.Reasoning+got.ToolResults, variableCap)
+	require.Greater(t, got.SystemPrompt, fixedEst.SystemPrompt,
+		"the implausible gap is prefix error, so it stays on the system prompt")
+	require.Equal(t, prompt, got.Total)
+	require.Equal(t, prompt, sum(got))
+}
+
+// Adding tool schemas between rounds makes the prompt delta a mix of new
+// schemas and new dialogue. That sample must not become the turn's frozen scale.
+func TestCalibrationSkipsWhenTheFixedPrefixChanged(t *testing.T) {
+	a := newTestAttributor(t)
+	base := testMessages()
+	a.Attribute(base, testTools(), sections(), 8000)
+
+	grown := append(append([]chat.Message{}, base...), chat.Message{
+		Role: "user", Content: strings.Repeat("a long follow-up question. ", 2000),
+	})
+	a.Attribute(grown, nil, sections(), 30000)
+	require.Equal(t, 1.0, a.kFixed)
+	require.False(t, a.calibrated)
+
+	grownAgain := append(grown, chat.Message{
+		Role: "tool", Content: strings.Repeat("more tool output. ", 2000),
+	})
+	a.Attribute(grownAgain, nil, sections(), 60000)
+	require.True(t, a.calibrated)
+	require.NotEqual(t, 1.0, a.kFixed)
+}
+
+// Memory and skills are both slices of one system message. When their section
+// estimates do not fit, each keeps its share instead of skills going to zero.
+func TestMemoryAndSkillsShareATightSystemBudget(t *testing.T) {
+	a := newTestAttributor(t)
+	est, err := token.NewEstimator()
+	require.NoError(t, err)
+
+	msgs := []chat.Message{
+		{Role: "system", Content: "hi"},
+		{Role: "user", Content: "yo"},
+	}
+	sys := est.EstimateMessage(&msgs[0])
+	got := a.Attribute(msgs, nil, map[string]int{SectionMemory: sys, SectionSkills: sys}, 0)
+
+	require.Greater(t, got.Memory, 0)
+	require.Greater(t, got.Skills, 0)
+	require.Equal(t, sys, got.SystemPrompt+got.Memory+got.Skills)
 }
 
 func TestTotalAlwaysEqualsPromptTokens(t *testing.T) {

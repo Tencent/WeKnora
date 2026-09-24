@@ -11,7 +11,12 @@
 // every round as the conversation grows.
 //
 // So the fixed prefix is anchored and the residual goes to the variable
-// buckets, which is where the error came from.
+// buckets, which is where the error came from — once there is enough variable
+// text to measure. A short dialogue cannot absorb a gap larger than the
+// tokenizer's plausible error on that dialogue; that gap stays on the prefix.
+// The prefix scale measured from a later round is applied on that same round.
+// Waiting for the prefix to change would drop it: within a turn the prefix
+// usually does not change, and the attributor does not outlive the turn.
 package contextusage
 
 import (
@@ -91,6 +96,8 @@ type Attributor struct {
 	calibrated bool
 	prevPrompt int
 	prevVarEst int
+	prevFixed  fixed
+	hasPrev    bool
 }
 
 func New(est *token.Estimator, window, threshold int) *Attributor {
@@ -136,7 +143,14 @@ func (a *Attributor) report(promptTokens int) types.ContextUsage {
 		return usage
 	}
 
-	a.calibrate(promptTokens)
+	// freshPrefix is true when this estimate has not been reported before.
+	// A matched lock must keep its numbers: folding the residual in again
+	// would make the system prompt climb every time the bill does.
+	freshPrefix := !a.hasLocked || a.lockedEst != a.lastFixed
+	if a.calibrate(promptTokens) {
+		a.hasLocked = false
+		freshPrefix = true
+	}
 	f := a.resolveFixed()
 
 	residual := promptTokens - f.sum()
@@ -148,14 +162,33 @@ func (a *Attributor) report(promptTokens int) types.ContextUsage {
 		a.hasLocked = false
 		a.calibrated = false
 		a.kFixed = 1
+		freshPrefix = false
+	}
+
+	assigned := residual
+	if freshPrefix && !a.calibrated && residual > 0 && f.sum() > 0 &&
+		a.lastVar.sum() < minCalibrationDelta {
+		// Below the calibration floor the variable pool is too small for its
+		// estimate to be the residual's explanation. Cap it at the same ratio
+		// the calibration itself trusts, and keep the rest on the prefix.
+		capTokens := scale(a.lastVar.sum(), maxVarScale)
+		if residual > capTokens {
+			f = growBy(f, residual-capTokens)
+			assigned = capTokens
+			a.lockedEst = a.lastFixed
+			a.lockedFixed = f
+			a.hasLocked = true
+		}
 	}
 
 	setFixed(&usage, f)
-	setVariable(&usage, distribute(a.lastVar, residual))
+	setVariable(&usage, distribute(a.lastVar, assigned))
 	usage.Total = promptTokens
 
 	a.prevPrompt = promptTokens
 	a.prevVarEst = a.lastVar.sum()
+	a.prevFixed = a.lastFixed
+	a.hasPrev = true
 	return usage
 }
 
@@ -174,24 +207,26 @@ func (a *Attributor) resolveFixed() fixed {
 // calibrate measures how far the tokenizer is off on variable content, then
 // reads the fixed prefix's true size off the same request. Two consecutive
 // rounds share the prefix, so everything that grew between them is variable.
-func (a *Attributor) calibrate(promptTokens int) {
-	if a.calibrated || a.prevPrompt <= 0 {
-		return
+// A prefix that changed between the two rounds (a tool schema appeared, a
+// skill was installed) mixes that change into the delta; the sample is
+// dropped and a later stable pair can still calibrate.
+func (a *Attributor) calibrate(promptTokens int) bool {
+	if a.calibrated || a.prevPrompt <= 0 || !a.hasPrev || a.prevFixed != a.lastFixed {
+		return false
 	}
 	deltaEst := a.lastVar.sum() - a.prevVarEst
 	deltaActual := promptTokens - a.prevPrompt
 	if deltaEst < minCalibrationDelta || deltaActual <= 0 {
-		return
+		return false
 	}
 	kVar := clamp(float64(deltaActual)/float64(deltaEst), minVarScale, maxVarScale)
 	fixedActual := float64(promptTokens) - kVar*float64(a.lastVar.sum())
 	if fixedActual <= 0 || a.lastFixed.sum() <= 0 {
-		return
+		return false
 	}
 	a.kFixed = clamp(fixedActual/float64(a.lastFixed.sum()), minFixedScale, maxFixedScale)
 	a.calibrated = true
-	// Leave hasLocked alone: an unchanged fingerprint must keep the reported
-	// fixed buckets. The new kFixed applies on the next fingerprint change.
+	return true
 }
 
 func (a *Attributor) estimate(
@@ -230,17 +265,31 @@ func (a *Attributor) estimate(
 	// only be charged against what the system messages actually cost. Per-section
 	// estimates do not add up to the rendered whole — sections are joined with
 	// blank lines and BPE merges across the seams — and that difference stays
-	// with the system prompt rather than being dropped.
+	// with the system prompt rather than being dropped. When both claims do not
+	// fit, each keeps its share; charging memory first used to zero skills.
 	if system > 0 {
-		f.Memory = min(sectionTokens[SectionMemory], system)
-		f.Skills = min(sectionTokens[SectionSkills], system-f.Memory)
-		f.SystemPrompt = system - f.Memory - f.Skills
+		mem := sectionTokens[SectionMemory]
+		sk := sectionTokens[SectionSkills]
+		if mem < 0 {
+			mem = 0
+		}
+		if sk < 0 {
+			sk = 0
+		}
+		if mem+sk > system && mem+sk > 0 {
+			mem = system * mem / (mem + sk)
+			sk = system - mem
+		}
+		f.Memory = mem
+		f.Skills = sk
+		f.SystemPrompt = system - mem - sk
 	}
 
+	// EstimateMessages adds a fixed per-request tail on top of the per-message
+	// sum. The sum is already in system + v, so another full tokenization
+	// would only ever rediscover this constant.
 	if len(messages) > 0 {
-		if tail := a.est.EstimateMessages(messages) - (system + v.sum()); tail > 0 {
-			v.Conversation += tail
-		}
+		v.Conversation += a.est.RequestOverhead()
 	}
 	return f, v
 }
@@ -269,6 +318,21 @@ func distribute(est variable, residual int) variable {
 		largest = &out.ToolResults
 	}
 	*largest += residual - out.sum()
+	return out
+}
+
+// growBy adds extra tokens to the fixed buckets by their current share.
+// A zero prefix has nothing to scale, so the extra lands on the system prompt.
+func growBy(f fixed, extra int) fixed {
+	if extra <= 0 {
+		return f
+	}
+	total := f.sum()
+	if total <= 0 {
+		return fixed{SystemPrompt: extra}
+	}
+	out := f.scaled(float64(total+extra) / float64(total))
+	adjust(&out, total+extra-out.sum())
 	return out
 }
 

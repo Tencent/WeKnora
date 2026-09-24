@@ -435,6 +435,16 @@ func Debugf(c context.Context, format string, args ...interface{}) {
 	addCaller(GetLogger(c), 2).Debugf(format, args...)
 }
 
+// DebugEnabled reports whether a debug log emitted with this context would be
+// printed. Callers use it to skip work whose only consumer is a debug line.
+func DebugEnabled(c context.Context) bool {
+	entry := GetLogger(c)
+	if entry == nil || entry.Logger == nil {
+		return false
+	}
+	return entry.Logger.GetLevel() >= logrus.DebugLevel
+}
+
 // Info 输出信息级别的日志
 func Info(c context.Context, args ...interface{}) {
 	addCaller(GetLogger(c), 2).Info(args...)
