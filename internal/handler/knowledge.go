@@ -1135,28 +1135,26 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Param        page        query     int     false "页码，默认 1"
 // @Param        page_size   query     int     false "每页数量，默认 20，最大 1000"
 // @Param        keyword     query     string  false "关键字，对 search_in 指定字段做不区分大小写的子串匹配"
-// @Param        search_in   query     string  false "参与搜索的属性 ID（逗号分隔，如 builtin:caption,system:keyword）；须为契约中 in_searchfield=true 的字段"
-// @Param        sort_by     query     string  false "排序属性 ID（如 builtin:created_at）；须为契约中 in_sortfield=true 的字段，默认 created_at"
+// @Param        search_in   query     string  false "参与搜索的属性 ID（逗号分隔）；须为 in_searchfield=true"
+// @Param        sort_by     query     string  false "排序属性 ID；须为 in_sortfield=true，默认 created_at"
 // @Param        sort_order  query     string  false "排序方向：asc / desc，默认 desc"
 // @Param        is_enabled  query     bool    false "仅包含启用状态的图片"
-// @Param        attr_filters query    string  false "属性筛选 JSON（如 {\"system:contain.text\":[\"block\"]}），同一属性多值 OR、属性间 AND，且须为 in_filter=true 的字段"
+// @Param        attr_filters query    string  false "属性筛选 JSON，同一属性多值 OR、属性间 AND"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/images [get]
 func (h *KnowledgeHandler) ListImages(c *gin.Context) {
-	ctx := c.Request.Context()
-
 	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
-	ctx = types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
 
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Error(ctx, "Failed to parse pagination parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -1248,7 +1246,7 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 	result, err := h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &pagination, filter)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
