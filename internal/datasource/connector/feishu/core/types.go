@@ -249,6 +249,49 @@ type driveFileMetaResponse struct {
 	Data driveFileMetaData `json:"data"`
 }
 
+// DriveDocMeta is one successful entry from POST /drive/v1/metas/batch_query.
+type DriveDocMeta struct {
+	DocToken         string `json:"doc_token"`
+	DocType          string `json:"doc_type"`
+	Title            string `json:"title"`
+	LatestModifyTime string `json:"latest_modify_time"`
+	URL              string `json:"url"`
+}
+
+// DriveMetaFailedItem is one entry of batch_query's failed_list.
+type DriveMetaFailedItem struct {
+	Token string `json:"token"`
+	Code  int    `json:"code"`
+}
+
+type driveBatchQueryRequest struct {
+	RequestDocs []driveBatchQueryDoc `json:"request_docs"`
+	WithURL     bool                 `json:"with_url"`
+}
+
+type driveBatchQueryDoc struct {
+	DocToken string `json:"doc_token"`
+	DocType  string `json:"doc_type"`
+}
+
+type driveBatchQueryData struct {
+	Metas      []DriveDocMeta        `json:"metas"`
+	FailedList []DriveMetaFailedItem `json:"failed_list"`
+}
+
+type driveBatchQueryResponse struct {
+	ApiResponse
+	Data driveBatchQueryData `json:"data"`
+}
+
+// FeishuLinksCursor stores incremental sync state for the document-URL-list
+// connector. Outer key = resourceID ("obj_type:obj_token"), inner key =
+// obj_token, value = latest_modify_time / obj_edit_time.
+type FeishuLinksCursor struct {
+	LastSyncTime time.Time                    `json:"last_sync_time"`
+	DocTimes     map[string]map[string]string `json:"doc_times,omitempty"`
+}
+
 // FeishuCursor stores incremental sync state for Feishu.
 type FeishuCursor struct {
 	// LastSyncTime is the timestamp of the last successful sync.

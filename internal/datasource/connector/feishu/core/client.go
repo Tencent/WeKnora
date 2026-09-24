@@ -914,3 +914,46 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 	}
 	return all, nil
 }
+
+const feishuMetasBatchSize = 200
+
+// BatchQueryMetas looks up title / latest_modify_time / url for drive docs
+// (docx, doc, sheet, bitable, file). Callers should chunk request_docs
+// themselves; this helper splits into pages of 200 (API max).
+func (c *Client) BatchQueryMetas(
+	ctx context.Context, docs []DriveDocMetaRequest,
+) (metas []DriveDocMeta, failed []DriveMetaFailedItem, err error) {
+	if len(docs) == 0 {
+		return nil, nil, nil
+	}
+	for start := 0; start < len(docs); start += feishuMetasBatchSize {
+		end := start + feishuMetasBatchSize
+		if end > len(docs) {
+			end = len(docs)
+		}
+		chunk := docs[start:end]
+		reqDocs := make([]driveBatchQueryDoc, 0, len(chunk))
+		for _, d := range chunk {
+			reqDocs = append(reqDocs, driveBatchQueryDoc(d))
+		}
+		var resp driveBatchQueryResponse
+		if err := c.DoRequest(ctx, http.MethodPost, "/open-apis/drive/v1/metas/batch_query", driveBatchQueryRequest{
+			RequestDocs: reqDocs,
+			WithURL:     true,
+		}, &resp); err != nil {
+			return metas, failed, fmt.Errorf("batch query metas: %w", err)
+		}
+		if resp.Code != 0 {
+			return metas, failed, fmt.Errorf("batch query metas error: code=%d msg=%s", resp.Code, resp.Msg)
+		}
+		metas = append(metas, resp.Data.Metas...)
+		failed = append(failed, resp.Data.FailedList...)
+	}
+	return metas, failed, nil
+}
+
+// DriveDocMetaRequest is one document to look up via BatchQueryMetas.
+type DriveDocMetaRequest struct {
+	DocToken string
+	DocType  string
+}
