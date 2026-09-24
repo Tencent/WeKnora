@@ -226,28 +226,56 @@ docker compose up -d    # 用新镜像重建容器
 
 ## 功能展示
 
+### 本机浏览器
+
+**操作你电脑上的浏览器。** 借助腾讯开源的 BrowserSkill 扩展，智能体直接在你的 Chrome 或 Edge 中打开网页、填写表单；遇到登录或验证码时交给你。 [文档 →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-browser-dark.webp">
+  <img src="./docs/images/readme/spotlight-browser-light.webp" alt="本机浏览器" width="100%">
+</picture>
+
+### 技能与沙箱
+
+**运行技能，生成文件。** 支持 Docker、E2B、Cube。同一会话的多轮任务共用一个工作区，生成的文件可预览和下载；还可以在对话旁打开图形桌面或交互终端，查看智能体的每一步操作，必要时亲自接手。 [文档 →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
+  <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="技能与沙箱" width="100%">
+</picture>
+
+### 自动 Wiki
+
+**把文档整理成可浏览的 Wiki。** 开启 Wiki 后，从知识库文档中提取人物、产品和概念，生成带来源引用的页面，按目录浏览；在知识图谱中查看页面之间的关系，页面可直接编辑，改动可回溯。 [文档 →](https://weknora.weixin.qq.com/docs/03-features/14-wiki)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-wiki-dark.webp">
+  <img src="./docs/images/readme/spotlight-wiki-light.webp" alt="自动 Wiki" width="100%">
+</picture>
+
+### 可观测性
+
+**追踪与运行监控。** Langfuse 追踪智能体每一步的推理、工具调用与 Token 用量；文档解析时间线逐阶段展示进度；任务队列面板列出排队与失败的任务。 [文档 →](https://weknora.weixin.qq.com/docs/03-features/16-observability)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-observability-dark.webp">
+  <img src="./docs/images/readme/spotlight-observability-light.webp" alt="可观测性" width="100%">
+</picture>
+
+### 更多截图
+
 <table>
   <tr>
-    <td colspan="2" align="center"><b>沙箱技能对话 · 生成并预览 Word</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="沙箱技能对话：生成并预览 Word 文档" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>技能目录 · 安装到 E2B 沙箱</b><br/><img src="./docs/images/skill-catalog.png" alt="空间技能目录：docx / pptx / pdf 已安装到 E2B" width="100%"></td>
+    <td width="50%" align="center"><b>智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话" width="100%"></td>
     <td width="50%" align="center"><b>Agent 模式 · 检索、读技能、写入沙箱文件</b><br/><img src="./docs/images/agent-qa.png" alt="Agent 检索知识库、读取 docx 技能并写入沙箱脚本" width="100%"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><b>智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>Wiki 浏览器</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki 浏览器" width="100%"></td>
-    <td width="50%" align="center"><b>Wiki 知识图谱</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki 知识图谱" width="100%"></td>
-  </tr>
-  <tr>
+    <td width="50%" align="center"><b>技能目录 · 安装到 E2B 沙箱</b><br/><img src="./docs/images/skill-catalog.png" alt="空间技能目录：docx / pptx / pdf 已安装到 E2B" width="100%"></td>
     <td width="50%" align="center"><b>Wiki 页面版本历史与回滚</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki 页面版本历史与回滚" width="100%"></td>
-    <td width="50%" align="center"><b>分块编辑与版本历史</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="分块编辑与版本历史" width="100%"></td>
   </tr>
   <tr>
+    <td width="50%" align="center"><b>分块编辑与版本历史</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="分块编辑与版本历史" width="100%"></td>
     <td width="50%" align="center"><b>文件夹树与批量操作</b><br/><img src="./docs/images/kb-document-list.png" alt="知识库文件夹树与批量操作" width="100%"></td>
-    <td width="50%" align="center"><b>可观测性 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
   </tr>
 </table>
 

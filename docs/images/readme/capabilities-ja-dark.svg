@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 600" width="1600" height="600" role="img">
+<rect x="1.0" y="1" width="512.6666666666666" height="598" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="40.0" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(52.0 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 8h5M8 11h3"/></g>
+<text x="474.66666666666663" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">01 / RAG</text>
+<text x="40.0" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">根拠のある回答</text>
+<text x="40.0" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">セマンティック検索とキーワード検索を</text>
+<text x="40.0" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">組み合わせて関連資料を探し、回答には</text>
+<text x="40.0" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">出典が付きます。原文を開いて確認でき</text>
+<text x="40.0" y="320" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">ます。</text>
+<rect x="40.0" y="466" width="192.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="56.0" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">ハイブリッド検索</text>
+<rect x="242.0" y="466" width="212.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="258.0" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">マルチモーダル解析</text>
+<rect x="40.0" y="516" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="56.0" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">原文引用</text>
+<rect x="543.6666666666666" y="1" width="512.6666666666666" height="598" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="582.6666666666666" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(594.6666666666666 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6"/><circle cx="12" cy="2.5" r=".5"/></g>
+<text x="1017.3333333333333" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">02 / AGENT</text>
+<text x="582.6666666666666" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">知識とツールでタスクを完了</text>
+<text x="582.6666666666666" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">エージェントがタスクに応じてナレッジ</text>
+<text x="582.6666666666666" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">ベースや Web を検索し、MCP ツール</text>
+<text x="582.6666666666666" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">やスキルを呼び出し、サンドボックスで</text>
+<text x="582.6666666666666" y="320" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">ファイル処理やスクリプト実行を行いま</text>
+<text x="582.6666666666666" y="360" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">す。確認済みの好みはセッションをまた</text>
+<text x="582.6666666666666" y="400" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">いで記憶します。</text>
+<rect x="582.6666666666666" y="466" width="212.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="598.6666666666666" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">マルチステップ推論</text>
+<rect x="804.6666666666666" y="466" width="172.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="820.6666666666666" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">ツール呼び出し</text>
+<rect x="582.6666666666666" y="516" width="132.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="598.6666666666666" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">スキル実行</text>
+<rect x="724.6666666666666" y="516" width="132.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="740.6666666666666" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">長期メモリ</text>
+<rect x="1086.3333333333333" y="1" width="512.6666666666666" height="598" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1125.3333333333333" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(1137.3333333333333 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15"/><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3"/></g>
+<text x="1560.0" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">03 / WIKI</text>
+<text x="1125.3333333333333" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">ドキュメントを Wiki に整理</text>
+<text x="1125.3333333333333" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">原文書から相互リンクされた Wiki ペー</text>
+<text x="1125.3333333333333" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">ジとナレッジグラフを生成し、閲覧・編</text>
+<text x="1125.3333333333333" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">集・バージョンのロールバックに対応し</text>
+<text x="1125.3333333333333" y="320" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="24" fill="#a9b6c9">ます。</text>
+<rect x="1125.3333333333333" y="466" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1141.3333333333333" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">自動整理</text>
+<rect x="1247.3333333333333" y="466" width="172.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1263.3333333333333" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">ナレッジグラフ</text>
+<rect x="1125.3333333333333" y="516" width="152.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1141.3333333333333" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, 'Noto Sans CJK JP', sans-serif" font-size="20" fill="#e8c176">ロールバック</text>
+</svg>
