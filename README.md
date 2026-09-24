@@ -1,81 +1,98 @@
 <p align="center">
-  <img src="./docs/images/logo.png" alt="WeKnora Logo" height="120"/>
-</p>
-
-<h3 align="center">Turn documents into living knowledge — RAG, Agents and Auto-Wiki in one self-hostable framework</h3>
-
-<p align="center">
-  <a href="https://trendshift.io/repositories/15289" target="_blank">
-    <img src="https://trendshift.io/api/badge/repositories/15289" alt="Tencent/WeKnora | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/>
+  <a href="https://weknora.weixin.qq.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/hero-en-dark.svg">
+      <img src="./docs/images/readme/hero-en-light.svg" alt="WeKnora: find the answers, and put knowledge to work. Tencent's open-source knowledge management framework for Q&A, tasks and wikis." width="100%">
+    </picture>
   </a>
 </p>
 
 <p align="center">
-  <a href="https://weknora.weixin.qq.com" target="_blank"><img alt="Official Website" src="https://img.shields.io/badge/Official Website-WeKnora-4e6b99"></a>
-  <a href="https://weknora.weixin.qq.com/docs/" target="_blank"><img alt="Documentation" src="https://img.shields.io/badge/Docs-weknora.weixin.qq.com-2e6cc4"></a>
-  <a href="https://chatbot.weixin.qq.com" target="_blank"><img alt="WeChat Dialog Open Platform" src="https://img.shields.io/badge/WeChat Dialog Open Platform-5ac725"></a>
-  <a href="https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd" target="_blank"><img alt="Chrome Extension" src="https://img.shields.io/badge/Chrome Extension-WeKnora-4285F4"></a>
-  <a href="https://clawhub.ai/lyingbug/weknora" target="_blank"><img alt="ClawHub Skill" src="https://img.shields.io/badge/ClawHub Skill-WeKnora-ff6b35"></a>
-  <a href="https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora" target="_blank"><img alt="npm @wxg-prc-cpg/dsh-weknora" src="https://img.shields.io/npm/v/@wxg-prc-cpg/dsh-weknora?label=dsh-weknora"></a>
-  <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License"></a>
-  <a href="./CHANGELOG.md"><img alt="Version" src="https://img.shields.io/badge/version-0.8.2-2e6cc4?labelColor=d4eaf7"></a>
+  <a href="https://weknora.weixin.qq.com"><img alt="Website" src="https://img.shields.io/badge/website-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="https://weknora.weixin.qq.com/docs/"><img alt="Docs" src="https://img.shields.io/badge/docs-read-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="Release" src="https://img.shields.io/badge/release-v0.8.2-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
+  <br/>
+  <a href="https://chatbot.weixin.qq.com"><img alt="WeChat Dialog Open Platform" src="https://img.shields.io/badge/WeChat_Dialog-Open_Platform-07c160?style=flat-square&labelColor=101f38&logo=wechat&logoColor=white"></a>
+  <a href="https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd"><img alt="Chrome Extension" src="https://img.shields.io/badge/Chrome-extension-4285f4?style=flat-square&labelColor=101f38&logo=googlechrome&logoColor=white"></a>
+  <a href="https://clawhub.ai/lyingbug/weknora"><img alt="ClawHub Skill" src="https://img.shields.io/badge/ClawHub-skill-ff6b35?style=flat-square&labelColor=101f38"></a>
+  <a href="https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora"><img alt="npm @wxg-prc-cpg/dsh-weknora" src="https://img.shields.io/npm/v/@wxg-prc-cpg/dsh-weknora?style=flat-square&label=dsh-weknora&labelColor=101f38&color=cb3837&logo=npm&logoColor=white"></a>
 </p>
 
 <p align="center">
-  <b>English</b> | <a href="./README_CN.md">简体中文</a> | <a href="./README_JA.md">日本語</a> | <a href="./README_KO.md">한국어</a>
+  <b>English</b> · <a href="./README_CN.md">简体中文</a> · <a href="./README_JA.md">日本語</a> · <a href="./README_KO.md">한국어</a>
 </p>
 
 <p align="center">
-  <a href="#-overview">Overview</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-whats-new">What's New</a> •
-  <a href="#-features">Features</a> •
-  <a href="#-clients-and-integrations">Clients</a> •
-  <a href="#-documentation">Docs</a> •
-  <a href="#-development">Development</a>
+  <a href="#overview">Overview</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#whats-new">What's New</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#clients-and-integrations">Clients</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="#development">Development</a>
 </p>
 
----
+<p align="center">
+  <a href="https://trendshift.io/repositories/15289"><img src="https://trendshift.io/api/badge/repositories/15289" alt="Tencent/WeKnora | Trendshift" width="220" height="48"/></a>
+</p>
 
-## 📌 Overview
+## Overview
 
-[**WeKnora**](https://weknora.weixin.qq.com) is an open-source, LLM-powered knowledge framework built for enterprise-grade document understanding, semantic retrieval, and autonomous reasoning. It turns scattered documents into a queryable, reasoning-capable, continuously evolving knowledge asset — and runs entirely on your own infrastructure.
+[WeKnora](https://weknora.weixin.qq.com) is an open-source, LLM-powered knowledge framework for enterprise document understanding, semantic retrieval and reasoning. It brings a team's documents together so they can be searched, reasoned over and kept up to date.
 
 https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc
 
-<p align="center"><sub>2:25 · 1080p · English narration & captions</sub></p>
+<p align="center"><sub>2:25 · 1080p · English narration and captions</sub></p>
 
-WeKnora is organized around three core capabilities:
+Use RAG to look things up, the agent for multi-step tasks, and the wiki to organize knowledge. All three work on the same knowledge bases.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/capabilities-en-dark.svg">
+  <img src="./docs/images/readme/capabilities-en-light.svg" alt="01 RAG: answers you can check, with hybrid search, multimodal parsing and citations. 02 Agent: tasks done with knowledge and tools, with multi-step reasoning, tool calling, skills and memory. 03 Wiki: documents organized into a wiki, with a knowledge graph and rollback." width="100%">
+</picture>
+
+Beyond the three modes:
+
+- **Memory and curation**: cross-session long-term memory keeps the profile, preferences and facts a user has confirmed. Folder uploads keep their directory tree, and retrieval chunks can be edited, diffed and rolled back.
+- **Data sources and formats**: auto-sync from Feishu wiki / Feishu Drive / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS, with more on the way. 10+ document formats including PDF, Word, images, Excel and XMind; Office files are parsed in-process by anydoc.
+- **Channels and integrations**: Q&A in WeCom, Feishu, Slack, Telegram and other IM apps; an embed widget for external websites; a built-in MCP Server for Cursor, Claude and other AI tools; scoped API keys with a principal model for programmatic access.
+- **Models**: 27 built-in vendors with a generated model catalog, including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM and Ollama.
+- **Permissions and operations**: multi-workspace RBAC (four roles, per-resource ownership, per-workspace audit log), several storage instances per workspace, a runtime task-queue dashboard with worker-pool governance, and Langfuse tracing for agent steps, token usage and pipelines.
+- **Deployment**: LLMs, vector databases and storage backends are all swappable. Deploy locally or on a private cloud and keep the data in your own environment.
+
+## Quick Start
 
 <table>
   <tr>
     <td width="33%" valign="top">
-      <h4>💬 RAG Quick Q&A</h4>
-      Fast, grounded answers over your knowledge bases for everyday lookups, with inline citations and stage-by-stage pipeline progress.
+      <img src="./website-docs/homepage/public/docs/_home/brands/wechat-dialog.png" width="28" height="28" alt=""><br/>
+      <sub>ONLINE</sub><br/>
+      <b>WeChat Dialog Open Platform</b><br/>
+      Manage knowledge bases online and connect Q&A to Official Accounts, Mini Programs and other WeChat scenarios.<br/><br/>
+      <a href="https://chatbot.weixin.qq.com/login">Open the platform →</a>
     </td>
     <td width="33%" valign="top">
-      <h4>🤖 ReAct Agent</h4>
-      Autonomously orchestrates retrieval, MCP tools, a <b>tenant skill catalog</b>, session-persistent <b>Docker / E2B / Cube sandboxes</b>, the user's own browser via <b>BrowserSkill</b>, and web search to handle complex multi-step tasks.
+      <img src="./website-docs/homepage/public/docs/_home/brands/tencent-cloud.ico" width="28" height="28" alt=""><br/>
+      <sub>CLOUD</sub><br/>
+      <b>Tencent Cloud Lighthouse</b><br/>
+      Deploy WeKnora from an application template and run it on your own cloud server.<br/><br/>
+      <a href="https://mc.tencent.com/s69nKCVz">Deploy on Tencent Cloud →</a>
     </td>
     <td width="33%" valign="top">
-      <h4>📖 Wiki Mode</h4>
-      Agents distill raw documents into a self-maintaining, interlinked Markdown knowledge base with an interactive knowledge graph — plus manual editing, revision history and one-click rollback.
+      <img src="./docs/images/readme/icons/server.svg" width="28" height="28" alt=""><br/>
+      <sub>SELF-HOSTED</sub><br/>
+      <b>Your own environment</b><br/>
+      Deploy with Docker or Kubernetes and configure models, storage and networking yourself.<br/><br/>
+      <a href="#run-with-docker-compose">Run with Docker Compose ↓</a>
     </td>
   </tr>
 </table>
 
-Around that core:
+### Run with Docker Compose
 
-- **Remembers and curates** — **cross-session long-term memory** remembers who you are and what you keep asking about; a **tree-structured folder view** preserves upload directory layout; **chunk editing with revision history** lets retrieval chunks be edited, diffed and reverted like documents.
-- **Ingests from anywhere** — auto-sync from Feishu wiki / Feishu Drive / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS (and growing); 10+ document formats including PDF, Word, images, Excel and XMind; Office files parsed in-process with **anydoc**.
-- **Answers everywhere** — IM channels such as WeCom, Feishu, Slack and Telegram; **website embed widgets** to publish agents on external sites; a **built-in MCP Server** that publishes knowledge bases to Cursor, Claude and other AI tools; **scoped API keys with a principal model** for programmatic integrations.
-- **Works with your models** — 27 built-in model vendors backed by a generated model catalog, including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM and Ollama.
-- **Enterprise-ready** — **multi-workspace RBAC** (4-tier role matrix + per-resource ownership + per-workspace audit log), **multi-instance storage backends** per workspace, a **runtime task-queue dashboard with worker-pool governance**, and full **Langfuse** observability into agent reasoning, token usage and pipeline tracing.
-- **Fully self-hostable** — a modular architecture where LLMs, vector databases and storage backends are all swappable, with local and private-cloud deployment for complete data sovereignty.
-
-## 🚀 Quick Start
-
-**Prerequisites:** [Docker](https://www.docker.com/), [Docker Compose](https://docs.docker.com/compose/) and [Git](https://git-scm.com/).
+Requires [Docker](https://www.docker.com/), [Docker Compose](https://docs.docker.com/compose/) and [Git](https://git-scm.com/).
 
 ```bash
 git clone https://github.com/Tencent/WeKnora.git
@@ -85,7 +102,7 @@ docker compose pull     # Pull the latest images
 docker compose up -d    # Start core services
 ```
 
-Then open **http://localhost** and follow the onboarding guide. A guided walkthrough with sample data is in the [Quickstart](https://weknora.weixin.qq.com/docs/01-getting-started/03-quickstart).
+Then open **http://localhost** and follow the onboarding guide. A walkthrough with sample data is in the [Quickstart](https://weknora.weixin.qq.com/docs/01-getting-started/03-quickstart).
 
 > [!TIP]
 > To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first. For the Ollama embedding model name, `OLLAMA_BASE_URL`, and RAM notes, see [Configuration](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration).
@@ -131,10 +148,10 @@ docker compose up -d    # Recreate containers with new images
 
 | Option | When to use it |
 |--------|----------------|
-| **Docker Compose** | The standard deployment above — all features, multi-service |
-| **Kubernetes (Helm)** | Production clusters; chart lives in [`helm/`](./helm) |
-| **Lite single binary** | Local or low-resource use with zero external dependencies (SQLite + in-memory queue); see [Lite vs. standard](./docs/LITE.md) |
-| **Desktop app** | Lite runtime with a GUI, login-free start and a macOS host sandbox; not yet shipped as an installer — build from source |
+| **Docker Compose** | The standard deployment above: all features, multiple services |
+| **Kubernetes (Helm)** | Production clusters; the chart is in [`helm/`](./helm) |
+| **Lite single binary** | Local or low-resource use with no external dependencies (SQLite + in-memory queue); see [Lite vs. standard](./docs/LITE.md) |
+| **Desktop app** | The Lite runtime with a GUI, login-free start and a macOS host sandbox; no installer is published yet, so build it from source |
 
 All options, hardware requirements and deployment topologies: [Installation guide](https://weknora.weixin.qq.com/docs/01-getting-started/02-installation).
 
@@ -145,31 +162,39 @@ All options, hardware requirements and deployment topologies: [Installation guid
 > - configure proper firewall rules and access controls for the deployment environment;
 > - regularly update to the latest version for security patches and improvements.
 
-## ✨ What's New
+## What's New
 
 ### v0.8.2 <sub>· 2026-09-24 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
 
-Agents step outside the chat box: they can drive the browser on your computer, knowledge bases can be published to other AI tools as an MCP Server, and conversations become steerable mid-flight.
+Agents can operate the browser on your computer, knowledge bases can be published to other AI tools over MCP, and a running conversation can be steered, forked or rewound.
 
-- 🌐 **[Local Browser (BrowserSkill)](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#local-browser)** — agents drive the user's own Chrome / Edge through the open-source BrowserSkill extension, with a live task preview, pause / resume and hand-off for logins and CAPTCHAs.
-- 🔌 **[Built-in MCP Server](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#mcp-server)** — per-workspace `/mcp/<endpoint_id>` endpoints over Streamable HTTP, each with its own token, knowledge-base scope, rate limit and tool groups; the Python `mcp-server/` is deprecated.
-- 🧭 **[Conversation control](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#conversation-control)** — append requirements to a running turn, fork from any earlier question, rewind in place with sandbox checkpoints, and pick reasoning effort per session; plus an **artifacts library**.
-- 🖥️ **[Sandbox](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#sandbox)** — **interactive terminal** and **graphical desktop**; macOS **Lite host sandbox** with project folders; a sidebar **Toolbox** gathers skills, MCP services and the browser connection.
-- 🧠 **[Models](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#models)** — rebuilt **model catalog** (27 built-in vendors with generated context-window, max-output, reasoning and vision metadata); agent retrieval tools consolidated into `search_knowledge` / `read_document` / `list_documents`.
-- 📚 **[Knowledge & platform](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#knowledge)** — Confluence and DingTalk Docs data sources; Bocha and Serply web search; Japanese UI; per-channel IM reply language; whitelist-only outbound mode.
+<table>
+  <tr>
+    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/local-browser-task.png" alt="A smart-reasoning chat driving the connected Chrome through BrowserSkill, with the in-chat task preview and pause and end controls" width="100%"><br/><b>Operate the browser on your computer</b></td>
+    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/mcp-server-endpoint.png" alt="Connection details of an MCP endpoint, with its address and mcpServers configuration for Cursor and Claude Desktop" width="100%"><br/><b>Publish knowledge bases to other AI tools</b></td>
+    <td width="33%" valign="top"><img src="./website-docs/homepage/public/docs/_home/product/chat-steer-queue.png" alt="Follow-up requirements queued above the input box while an answer is being generated" width="100%"><br/><b>Adjust a conversation while it runs</b></td>
+  </tr>
+</table>
+
+- **[Local Browser (BrowserSkill)](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#local-browser)**: agents drive the user's own Chrome / Edge through the open-source BrowserSkill extension, with a live task preview, pause / resume and hand-off for logins and CAPTCHAs.
+- **[Built-in MCP Server](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#mcp-server)**: per-workspace `/mcp/<endpoint_id>` endpoints over Streamable HTTP, each with its own token, knowledge-base scope, rate limit and tool groups. The Python `mcp-server/` is deprecated.
+- **[Conversation control](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#conversation-control)**: append requirements to a running turn, fork from any earlier question, rewind in place with sandbox checkpoints, and pick reasoning effort per session. Generated files are collected in a new artifacts library.
+- **[Sandbox](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#sandbox)**: interactive terminal and graphical desktop; macOS Lite host sandbox with project folders; a sidebar Toolbox for skills, MCP services and the browser connection.
+- **[Models](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#models)**: rebuilt model catalog (27 built-in vendors with generated context-window, max-output, reasoning and vision metadata). Agent retrieval tools are consolidated into `search_knowledge` / `read_document` / `list_documents`.
+- **[Knowledge and platform](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#knowledge)**: Confluence and DingTalk Docs data sources; Bocha and Serply web search; Japanese UI; per-channel IM reply language; whitelist-only outbound mode.
 
 > [!IMPORTANT]
 > **Breaking:** DingTalk channels are Stream-only, and sandbox commands run as `root`. See the [upgrade notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#upgrade-notes).
 
 ### v0.8.0 <sub>· [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.0)</sub>
 
-- 🧪 **Skill sandbox runtime** — session-persistent Docker / E2B / Cube backends with per-tenant network policy; Local host-process backend removed; Docker opt-in.
-- 📦 **Tenant skill catalog** — install from ClawHub / SkillHub / git / zip, per-sandbox snapshots, live progress, file browse/edit, personal and workspace env vars.
-- 🧠 **Cross-session long-term memory** — profile / preference / fact / task / interest, auto-extract with confirm, `search_memory`.
-- 📄 **Parsing & sources** — in-process **anydoc** office parser; GitLab and Tencent IMA data sources; XMind parsing.
-- 🧩 **Ecosystem** — official **DeepSeek Harness plugin** `@wxg-prc-cpg/dsh-weknora`; LiteLLM; Exa and Metaso web search.
-- 💬 **Chat** — chat artifacts, question outline and timestamps; context compaction and provider prompt-cache markers.
-- 🔒 **Security** — OIDC JWKS verification, optional complex passwords, document auto-tagging, and broad sandbox/security hardening.
+- **Skill sandbox runtime**: session-persistent Docker / E2B / Cube backends with per-tenant network policy; the Local host-process backend is removed and Docker is opt-in.
+- **Tenant skill catalog**: install from ClawHub / SkillHub / git / zip, with per-sandbox snapshots, live progress, file browse/edit, and personal and workspace env vars.
+- **Cross-session long-term memory**: profile / preference / fact / task / interest, auto-extracted with user confirmation, plus `search_memory`.
+- **Parsing and sources**: in-process anydoc office parser; GitLab and Tencent IMA data sources; XMind parsing.
+- **Ecosystem**: official DeepSeek Harness plugin `@wxg-prc-cpg/dsh-weknora`; LiteLLM; Exa and Metaso web search.
+- **Chat**: chat artifacts, question outline and timestamps; context compaction and provider prompt-cache markers.
+- **Security**: OIDC JWKS verification, optional complex passwords, document auto-tagging, and broad sandbox/security hardening.
 
 <details>
 <summary><b>Earlier releases (v0.2.0 – v0.7.2)</b></summary>
@@ -199,40 +224,40 @@ Full history: [`CHANGELOG.md`](./CHANGELOG.md).
 
 </details>
 
-## 📸 Screenshots
+## Screenshots
 
 <table>
   <tr>
-    <td colspan="2" align="center"><b>🛠️ Skill Sandbox Chat · generate and preview a Word file</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="Skill sandbox conversation generating and previewing a Word document" width="100%"></td>
+    <td colspan="2" align="center"><b>Skill Sandbox Chat · generate and preview a Word file</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="Skill sandbox conversation generating and previewing a Word document" width="100%"></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><b>📦 Skill Catalog · install onto an E2B sandbox</b><br/><img src="./docs/images/skill-catalog.png" alt="Workspace skill catalog with docx pptx pdf installed on E2B" width="100%"></td>
-    <td width="50%" align="center"><b>🤖 Agent Mode · search, read a skill, write sandbox files</b><br/><img src="./docs/images/agent-qa.png" alt="Agent searching the knowledge base, reading the docx skill, and writing a sandbox script" width="100%"></td>
+    <td width="50%" align="center"><b>Skill Catalog · install onto an E2B sandbox</b><br/><img src="./docs/images/skill-catalog.png" alt="Workspace skill catalog with docx pptx pdf installed on E2B" width="100%"></td>
+    <td width="50%" align="center"><b>Agent Mode · search, read a skill, write sandbox files</b><br/><img src="./docs/images/agent-qa.png" alt="Agent searching the knowledge base, reading the docx skill, and writing a sandbox script" width="100%"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><b>💬 Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation" width="100%"></td>
+    <td colspan="2" align="center"><b>Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation" width="100%"></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><b>📖 Wiki Browser</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki Browser" width="100%"></td>
-    <td width="50%" align="center"><b>🕸️ Wiki Knowledge Graph</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki Knowledge Graph" width="100%"></td>
+    <td width="50%" align="center"><b>Wiki Browser</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki Browser" width="100%"></td>
+    <td width="50%" align="center"><b>Wiki Knowledge Graph</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki Knowledge Graph" width="100%"></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><b>🕘 Wiki Page Revision History & Rollback</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki Page Revision History and Rollback" width="100%"></td>
-    <td width="50%" align="center"><b>✂️ Chunk Editing & Revision History</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="Chunk Editing and Revision History" width="100%"></td>
+    <td width="50%" align="center"><b>Wiki Page Revision History & Rollback</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki Page Revision History and Rollback" width="100%"></td>
+    <td width="50%" align="center"><b>Chunk Editing & Revision History</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="Chunk Editing and Revision History" width="100%"></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><b>📁 Folder Tree & Batch Operations</b><br/><img src="./docs/images/kb-document-list.png" alt="Knowledge Base Folder Tree and Batch Operations" width="100%"></td>
-    <td width="50%" align="center"><b>🔭 Observability · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Observability Langfuse Tracing" width="100%"></td>
+    <td width="50%" align="center"><b>Folder Tree & Batch Operations</b><br/><img src="./docs/images/kb-document-list.png" alt="Knowledge Base Folder Tree and Batch Operations" width="100%"></td>
+    <td width="50%" align="center"><b>Observability · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Observability Langfuse Tracing" width="100%"></td>
   </tr>
 </table>
 
-## 🏗️ Architecture
+## Architecture
 
 ![WeKnora architecture](./docs/images/architecture.png)
 
-A fully modular pipeline from document parsing, vectorization and retrieval to LLM inference — every component is swappable and extensible. Supports local / private-cloud deployment with full data sovereignty and a zero-barrier Web UI for quick onboarding. Deep dive: [Architecture overview](https://weknora.weixin.qq.com/docs/02-architecture/01-overview) · [RAG pipeline](https://weknora.weixin.qq.com/docs/02-architecture/04-rag-pipeline) · [Extension points](https://weknora.weixin.qq.com/docs/06-development/03-extension-points).
+A modular pipeline from document parsing, vectorization and retrieval to LLM inference, in which every component can be replaced or extended. It runs locally or on a private cloud, and the Web UI needs no setup to get started. More: [Architecture overview](https://weknora.weixin.qq.com/docs/02-architecture/01-overview) · [RAG pipeline](https://weknora.weixin.qq.com/docs/02-architecture/04-rag-pipeline) · [Extension points](https://weknora.weixin.qq.com/docs/06-development/03-extension-points).
 
-## 🧩 Features
+## Features
 
 ### Intelligent Conversation
 
@@ -304,22 +329,22 @@ A fully modular pipeline from document parsing, vectorization and retrieval to L
 | Task Management | MQ async tasks with per-stage worker-pool governance (core / post-process / enrichment / maintenance + elastic shared pool, plus an independent Wiki pool) and per-model background concurrency governors · automatic database migration on version upgrade |
 | Model Management | Centralized config, declarative built-in models via YAML, per-knowledge-base model selection, per-model thinking-mode and embedding-dimension overrides, interactive model test debugger, multi-workspace built-in model sharing, WeKnora Cloud hosted models and parsing · a generated model catalog fills context window, max output, reasoning levels and vision support, with a resolved-call preview and per-model protocol override |
 
-## 🔌 Clients and Integrations
+## Clients and Integrations
 
 | | Client | What it does |
 |:-:|--------|--------------|
-| ⌨️ | [**CLI `weknora`**](./cli/README.md) | Agent-first command line for the full API, with a curated MCP tool surface and bundled Agent Skills |
-| 🔌 | [**Built-in MCP Server**](https://weknora.weixin.qq.com/docs/03-features/08-mcp) | Publishes knowledge bases to Cursor, Claude and other MCP clients |
-| 🌐 | [**Local Browser (BrowserSkill)**](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser) | Lets agents operate the user's own Chrome / Edge |
-| 🧩 | [**Chrome Extension**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) | Select text, images, or entire pages in the browser and save them as knowledge entries with one click — no copy-paste or file upload needed |
-| 📱 | [**WeChat Mini Program**](./miniprogram/README.md) | Lightweight mobile client: configure API access, select knowledge bases, import URLs, and ask knowledge chat from WeChat |
-| 🦞 | [**ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) | A WeKnora skill on ClawHub for document import, hybrid search and knowledge management via the REST API |
-| 🐋 | [**DeepSeek Harness plugin**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | Gives `dsh` coding agents read-only access to your documents |
-| 🪟 | [**Website Embed Widget**](https://weknora.weixin.qq.com/docs/03-features/13-embed-channel) | Publishes agents on external sites |
-| 🐹 | [**Go SDK**](https://weknora.weixin.qq.com/docs/05-clients/03-go-sdk) | CRUD for knowledge bases, documents and sessions, plus SSE streaming Q&A |
-| 💬 | [**WeChat Dialog Open Platform**](https://chatbot.weixin.qq.com) | Zero-code hosted Q&A inside the WeChat ecosystem, powered by WeKnora |
+| <img src="./docs/images/readme/icons/terminal.svg" width="22" height="22" alt=""> | [**CLI `weknora`**](./cli/README.md) | Agent-first command line for the full API, with a curated MCP tool surface and bundled Agent Skills |
+| <img src="./docs/images/readme/icons/plug.svg" width="22" height="22" alt=""> | [**Built-in MCP Server**](https://weknora.weixin.qq.com/docs/03-features/08-mcp) | Publishes knowledge bases to Cursor, Claude and other MCP clients |
+| <img src="./website-docs/homepage/public/docs/_home/brands/browserskill.png" width="22" height="22" alt=""> | [**Local Browser (BrowserSkill)**](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser) | Lets agents operate the user's own Chrome / Edge |
+| <img src="./website-docs/homepage/public/docs/_home/brands/chrome.svg" width="22" height="22" alt=""> | [**Chrome Extension**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) | Select text, images, or entire pages in the browser and save them as knowledge entries with one click, without copy-paste or file upload |
+| <img src="./docs/images/readme/icons/phone.svg" width="22" height="22" alt=""> | [**WeChat Mini Program**](./miniprogram/README.md) | Lightweight mobile client: configure API access, select knowledge bases, import URLs, and ask knowledge chat from WeChat |
+| <img src="./docs/images/readme/icons/skills.svg" width="22" height="22" alt=""> | [**ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) | A WeKnora skill on ClawHub for document import, hybrid search and knowledge management via the REST API |
+| <img src="./website-docs/homepage/public/docs/_home/brands/deepseek-color.svg" width="22" height="22" alt=""> | [**DeepSeek Harness plugin**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | Gives `dsh` coding agents read-only access to your documents |
+| <img src="./docs/images/readme/icons/code.svg" width="22" height="22" alt=""> | [**Website Embed Widget**](https://weknora.weixin.qq.com/docs/03-features/13-embed-channel) | Publishes agents on external sites |
+| <img src="./docs/images/readme/icons/braces.svg" width="22" height="22" alt=""> | [**Go SDK**](https://weknora.weixin.qq.com/docs/05-clients/03-go-sdk) | CRUD for knowledge bases, documents and sessions, plus SSE streaming Q&A |
+| <img src="./website-docs/homepage/public/docs/_home/brands/wechat-dialog.png" width="22" height="22" alt=""> | [**WeChat Dialog Open Platform**](https://chatbot.weixin.qq.com) | Hosted Q&A built on WeKnora: upload knowledge and publish a Q&A service in WeChat without writing code |
 
-### ⌨️ Command-Line Interface
+### Command-Line Interface
 
 `weknora` is the official CLI for driving the API from a terminal or an AI agent. It is **agent-first**: every command emits a stable JSON envelope by default (with typed error codes mapped to exit codes), and `--format text` renders for humans. It also serves a curated MCP tool surface (`weknora mcp serve`) and ships bundled Agent Skills.
 
@@ -332,68 +357,68 @@ weknora doc upload notes.md
 weknora chat "summarise the design doc"
 ```
 
-For headless / CI use, set `WEKNORA_API_KEY` + `WEKNORA_HOST` and skip `auth login` entirely — no credentials written to disk. See [`cli/README.md`](./cli/README.md) for install + 5-minute quickstart and [`cli/AGENTS.md`](./cli/AGENTS.md) for the operational contract AI agents rely on.
+For headless / CI use, set `WEKNORA_API_KEY` + `WEKNORA_HOST` and skip `auth login`; no credentials are written to disk. See [`cli/README.md`](./cli/README.md) for install + 5-minute quickstart and [`cli/AGENTS.md`](./cli/AGENTS.md) for the operational contract AI agents rely on.
 
-### 🔌 MCP Server
+### MCP Server
 
 WeKnora has a built-in MCP Server: create an endpoint under **Settings → Publish & Integrations → MCP Server** and connect clients over Streamable HTTP at `/mcp/<endpoint_id>`. See the [MCP guide](https://weknora.weixin.qq.com/docs/03-features/08-mcp). The standalone Python server in [`mcp-server/`](./mcp-server/MCP_CONFIG.md) is deprecated and kept only for existing deployments.
 
 <details>
-<summary><b>🦞 ClawHub Skill</b></summary>
+<summary><b>ClawHub Skill</b></summary>
 
 <br/>
 
 [**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) is a WeKnora skill published on the ClawHub platform. Once installed, it enables document import (file / URL / Markdown), hybrid search (vector + keyword) across knowledge bases, and knowledge entry management — all through the WeKnora REST API.
 
-- **Document Import** — Upload files, import web pages, or write Markdown knowledge via the agent
-- **Hybrid Search** — Search within or across knowledge bases with vector + keyword retrieval
-- **Knowledge Management** — List, browse, edit, and delete knowledge entries programmatically
+- **Document Import**: Upload files, import web pages, or write Markdown knowledge via the agent
+- **Hybrid Search**: Search within or across knowledge bases with vector + keyword retrieval
+- **Knowledge Management**: List, browse, edit, and delete knowledge entries programmatically
 
 </details>
 
 <details>
-<summary><b>🐋 DeepSeek Harness Plugin</b></summary>
+<summary><b>DeepSeek Harness Plugin</b></summary>
 
 <br/>
 
 [**`@wxg-prc-cpg/dsh-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) is the official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) plugin ([docs](./packages/dsh-weknora/README.md)). The harness ships no retrieval, embedding or knowledge-base capability of its own, so the plugin gives a coding agent your documents: `dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`, point it at a deployment, and four read-only tools appear in the agent's tool set.
 
-- **`weknora_search`** — hybrid retrieval returning source passages verbatim, each with a reusable `knowledge_id`
-- **`weknora_read_document`** — one document's passages reassembled in order, with paging
-- **`weknora_ask`** — WeKnora's own composed answer with citations, over the RAG or the ReAct pipeline
-- **`weknora_list_knowledge_bases`** — knowledge base names and ids, so the agent can scope its own search
+- **`weknora_search`**: hybrid retrieval returning source passages verbatim, each with a reusable `knowledge_id`
+- **`weknora_read_document`**: one document's passages reassembled in order, with paging
+- **`weknora_ask`**: WeKnora's own composed answer with citations, over the RAG or the ReAct pipeline
+- **`weknora_list_knowledge_bases`**: knowledge base names and ids, so the agent can scope its own search
 
 </details>
 
 <details>
-<summary><b>💬 WeChat Dialog Open Platform</b></summary>
+<summary><b>WeChat Dialog Open Platform</b></summary>
 
 <br/>
 
-WeKnora serves as the core technology framework for the [WeChat Dialog Open Platform](https://chatbot.weixin.qq.com), providing a more convenient usage approach:
+The [WeChat Dialog Open Platform](https://chatbot.weixin.qq.com) is built on WeKnora and offers it as a hosted service:
 
-- **Zero-code Deployment** — Simply upload knowledge to quickly deploy intelligent Q&A services within the WeChat ecosystem, achieving an "ask and answer" experience
-- **Efficient Question Management** — Categorized management of high-frequency questions, with rich data tools to ensure accurate, reliable, and easily maintainable answers
-- **WeChat Ecosystem Integration** — WeKnora's intelligent Q&A capabilities can be seamlessly integrated into WeChat Official Accounts, Mini Programs, and other WeChat scenarios
+- **Zero-code deployment**: upload knowledge and publish a Q&A service in the WeChat ecosystem.
+- **Question management**: group frequent questions by category, with data tools that keep answers accurate and easy to maintain.
+- **WeChat integration**: connect Q&A to Official Accounts, Mini Programs and other WeChat scenarios.
 
 </details>
 
-## 📚 Documentation
+## Documentation
 
 The full product documentation lives at **[weknora.weixin.qq.com/docs](https://weknora.weixin.qq.com/docs/)** (in Chinese), organized as Getting Started → Architecture → Features → API → Clients → Development and covering ~360 API endpoints and ~150 environment variables.
 
 | Start here | |
 |------------|---|
-| 👋 [Introduction](https://weknora.weixin.qq.com/docs/01-getting-started/01-introduction) | What WeKnora can do |
-| 📦 [Installation](https://weknora.weixin.qq.com/docs/01-getting-started/02-installation) | Docker Compose, Helm, Lite and desktop |
-| ⚙️ [Configuration](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | Environment variables and models |
-| 🩺 [Troubleshooting FAQ](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | Common problems and fixes |
-| 📘 [API reference](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API overview |
-| 🗒️ [Release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2) | What changed in each release |
+| [Introduction](https://weknora.weixin.qq.com/docs/01-getting-started/01-introduction) | Capabilities overview |
+| [Installation](https://weknora.weixin.qq.com/docs/01-getting-started/02-installation) | Docker Compose, Helm, Lite and desktop |
+| [Configuration](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | Environment variables and models |
+| [Troubleshooting FAQ](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | Common problems and fixes |
+| [API reference](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API overview |
+| [Release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2) | What changed in each release |
 
-## 🛠️ Development
+## Development
 
-If you need to frequently modify code, **you don't need to rebuild Docker images every time** — use fast development mode:
+If you need to frequently modify code, you don't need to rebuild Docker images every time. Use fast development mode:
 
 ```bash
 make dev-start      # Start infrastructure
@@ -401,16 +426,16 @@ make dev-app        # Start backend (new terminal)
 make dev-frontend   # Start frontend (new terminal)
 ```
 
-- ✅ Frontend modifications auto hot-reload (no restart needed)
-- ✅ Backend modifications quick restart (5-10 seconds, supports Air hot-reload)
-- ✅ No need to rebuild Docker images
-- ✅ Supports IDE breakpoint debugging
+- Frontend modifications auto hot-reload (no restart needed)
+- Backend modifications quick restart (5-10 seconds, supports Air hot-reload)
+- No need to rebuild Docker images
+- Supports IDE breakpoint debugging
 
 See the [Development guide](https://weknora.weixin.qq.com/docs/06-development/01-dev-guide) for details.
 
 The documentation site and product homepage are built from [`website-docs/`](./website-docs/README.md). With Node.js 24, run `cd website-docs && npm run setup && npm run build && npm run preview` to preview both together; the unified static output serves the homepage at `/` and documentation at `/docs/`. See the directory's README for Nginx and Docker deployment.
 
-## 🤝 Contributing
+## Contributing
 
 Welcome to submit [Issues](https://github.com/Tencent/WeKnora/issues) or Pull Requests.
 
@@ -445,12 +470,12 @@ make test
 
 </details>
 
-### 👥 Contributors
+### Contributors
 
-Thanks to these excellent contributors:
+Thanks to everyone who has contributed:
 
 [![Contributors](https://contrib.rocks/image?repo=Tencent/WeKnora)](https://github.com/Tencent/WeKnora/graphs/contributors)
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](./LICENSE). You are free to use, modify, and distribute the code with proper attribution.
