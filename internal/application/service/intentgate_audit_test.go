@@ -121,11 +121,13 @@ func TestBuildEnforceDenyAuditorFallsBackToPrincipal(t *testing.T) {
 // capturingOverrideRepo 记录回写的测试缝。
 type capturingOverrideRepo struct {
 	interfaces.IntentVerdictRepository
+	tenantID   uint64
 	toolCallID string
 	override   string
 }
 
-func (c *capturingOverrideRepo) UpdateHumanOverrideByToolCallID(_ context.Context, _ uint64, toolCallID, override string) error {
+func (c *capturingOverrideRepo) UpdateHumanOverrideByToolCallID(_ context.Context, tenantID uint64, toolCallID, override string) error {
+	c.tenantID = tenantID
 	c.toolCallID = toolCallID
 	c.override = override
 	return nil
@@ -149,9 +151,9 @@ func TestBuildApprovalRecorderMapsDecisions(t *testing.T) {
 	for _, tc := range cases {
 		repo := &capturingOverrideRepo{}
 		fn := buildApprovalRecorder(repo)
-		fn("call-42", tc.approved, tc.modif)
-		if repo.toolCallID != "call-42" || repo.override != tc.want {
-			t.Fatalf("%s: got %s/%s, want call-42/%s", tc.name, repo.toolCallID, repo.override, tc.want)
+		fn(context.Background(), 42, "call-42", tc.approved, tc.modif)
+		if repo.tenantID != 42 || repo.toolCallID != "call-42" || repo.override != tc.want {
+			t.Fatalf("%s: got %d/%s/%s, want 42/call-42/%s", tc.name, repo.tenantID, repo.toolCallID, repo.override, tc.want)
 		}
 	}
 }

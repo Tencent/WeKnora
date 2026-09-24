@@ -23,7 +23,9 @@ type ToolExecContext struct {
 	ApprovalCtx context.Context
 	// ApprovalRecorder 在人工审批决策落地后回调（T60）：把
 	// approved/modified/rejected 回写对应 intent_verdict 行。nil 不写。
-	ApprovalRecorder func(toolCallID string, approved, modified bool)
+	// tenantID 取自执行 ctx（调用点传入），回写必须保持租户隔离——
+	// tool_call_id 并非全局唯一（模型可见的 id 如 call-1 会原样保留）。
+	ApprovalRecorder func(ctx context.Context, tenantID uint64, toolCallID string, approved, modified bool)
 	// ExecTimeout mirrors the per-tool exec timeout the engine applied to the
 	// outer ctx. Tools that legitimately consume that ctx (e.g. MCP human
 	// approval) can re-derive a fresh timeout from ApprovalCtx using this

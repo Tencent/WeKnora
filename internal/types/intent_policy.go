@@ -8,12 +8,12 @@ import (
 )
 
 // intent_policies 表（设计文档 §6.1）是 IntentGate 的策略表：IntentPolicy
-// 是版本化的配置资产，绑定 scope（tool/service/agent/workspace/tenant），
+// 是版本化的配置资产，绑定 scope（tool/service/agent/tenant；workspace 为预留层级），
 // 含自然语言约束（NLC）原文、可编译规则表达式与 mode。按租户隔离。
 // 术语见 CONTEXT.md（IntentPolicy / 自然语言约束 / Observe / Enforce）。
 
 // IntentPolicy 的 scope_type 取值（设计 §6.1 scope 枚举）。scope 解析顺序
-// tool > service > agent > workspace > tenant（设计 §8.3）。
+// tool > service > agent > tenant（设计 §8.3；workspace 预留未接线）。
 const (
 	// PolicyScopeTool 单个工具；scope_ref 为 `service_id:tool_name`，
 	// 支持 `*:wiki_*` 前缀通配。
@@ -22,7 +22,9 @@ const (
 	PolicyScopeService = "service"
 	// PolicyScopeAgent 单个 agent。
 	PolicyScopeAgent = "agent"
-	// PolicyScopeWorkspace 整个 workspace。
+	// PolicyScopeWorkspace 整个 workspace——预留层级。工具调用接缝目前没有
+	// workspace 运行时标识（仅有 tenant/agent/service/tool），暂不开放创建
+	// workspace 级策略（review：不支持的能力不得 advertised）。
 	PolicyScopeWorkspace = "workspace"
 	// PolicyScopeTenant 整个租户（兜底级）。
 	PolicyScopeTenant = "tenant"
@@ -38,10 +40,11 @@ const (
 // IntentPolicy 的 mode 取值复用 VerdictModeObserve / VerdictModeEnforce
 // （定义在 intent_verdict.go，枚举值逐字一致，保证落库可对账）。
 
-// ValidPolicyScope 报告 scope_type 是否是合法枚举值。
+// ValidPolicyScope 报告 scope_type 是否是合法（可创建）的枚举值。
+// workspace 为预留层级：枚举保留（旧数据/文档兼容），但不接受新策略。
 func ValidPolicyScope(scope string) bool {
 	switch scope {
-	case PolicyScopeTool, PolicyScopeService, PolicyScopeAgent, PolicyScopeWorkspace, PolicyScopeTenant:
+	case PolicyScopeTool, PolicyScopeService, PolicyScopeAgent, PolicyScopeTenant:
 		return true
 	}
 	return false
@@ -61,10 +64,10 @@ func ValidRiskTier(tier string) bool {
 // 由 (tenant_id, scope_type, scope_ref) 标识，version 单调递增。
 type IntentPolicy struct {
 	ID       string `json:"id"        gorm:"type:varchar(36);primaryKey"`
-	TenantID uint64 `json:"tenant_id" gorm:"column:tenant_id;not null;index:idx_intent_policies_scope,priority:1"`
+	TenantID uint64 `json:"tenant_id" gorm:"column:tenant_id;not null;index:idx_intent_policies_scope,priority:1;uniqueIndex:idx_intent_policies_lineage_version,priority:1"`
 	// ScopeType / ScopeRef 决定这条策略管谁（设计 §6.1）。
-	ScopeType string `json:"scope_type" gorm:"column:scope_type;type:varchar(16);not null;index:idx_intent_policies_scope,priority:2"`
-	ScopeRef  string `json:"scope_ref"  gorm:"column:scope_ref;type:varchar(512);not null;default:'';index:idx_intent_policies_scope,priority:3"`
+	ScopeType string `json:"scope_type" gorm:"column:scope_type;type:varchar(16);not null;index:idx_intent_policies_scope,priority:2;uniqueIndex:idx_intent_policies_lineage_version,priority:2"`
+	ScopeRef  string `json:"scope_ref"  gorm:"column:scope_ref;type:varchar(512);not null;default:'';index:idx_intent_policies_scope,priority:3;uniqueIndex:idx_intent_policies_lineage_version,priority:3"`
 	// ArgPath 是参数路径表达式（如 `$.amount`）；NULL = 整条调用。
 	ArgPath *string `json:"arg_path,omitempty" gorm:"column:arg_path;type:varchar(256)"`
 	// ConstraintText 是 NLC 原文（"单笔退款不得超过 $75"）。
@@ -75,7 +78,7 @@ type IntentPolicy struct {
 	RiskTier string  `json:"risk_tier"         gorm:"column:risk_tier;type:varchar(8);not null;default:'low'"`
 	// Mode 默认 observe：只记录不拦截（设计 §9）。
 	Mode      string    `json:"mode"    gorm:"column:mode;type:varchar(16);not null;default:'observe'"`
-	Version   int       `json:"version" gorm:"column:version;not null;default:1"`
+	Version   int       `json:"version" gorm:"column:version;not null;default:1;uniqueIndex:idx_intent_policies_lineage_version,priority:4"`
 	Enabled   bool      `json:"enabled" gorm:"column:enabled;not null;default:true"`
 	CreatedBy string    `json:"created_by" gorm:"column:created_by;type:varchar(36);not null;default:''"`
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;not null"`

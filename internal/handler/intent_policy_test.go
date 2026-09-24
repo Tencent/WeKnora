@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -342,4 +345,58 @@ func TestIntentPolicyGetNotFound(t *testing.T) {
 
 	rec := doPolicyJSON(t, engine, http.MethodGet, "/api/v1/intent-policies/"+uuid.NewString(), nil)
 	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// TestIsDuplicatePolicy 覆盖唯一冲突的判定矩阵（review 修复的并发兜底：
+// read-then-insert 挡不住并发双插入，数据库唯一索引是最终裁决）。
+func TestIsDuplicatePolicy(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"gorm sentinel", gorm.ErrDuplicatedKey, true},
+		{"sqlite message wrapped", fmt.Errorf("create intent policy: %w", errors.New("UNIQUE constraint failed: intent_policies.tenant_id")), true},
+		{"postgres message wrapped", fmt.Errorf("create intent policy: %w", errors.New(`pq: duplicate key value violates unique constraint "idx_intent_policies_lineage_version"`)), true},
+		{"unrelated", errors.New("connection reset"), false},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, isDuplicatePolicy(tc.err), tc.name)
+	}
+}
+
+// TestIntentPolicyLineageVersionUniqueEnforced：唯一索引真实落库——同
+// (tenant, scope_type, scope_ref, version) 的第二行必须被数据库拒绝
+// （AutoMigrate 依据模型的 uniqueIndex tag 建索引，与迁移 000114/000034
+// 同约束）。
+func TestIntentPolicyLineageVersionUniqueEnforced(t *testing.T) {
+	repo := newIntentPolicyHandlerTestRepo(t)
+	ctx := context.Background()
+	first := validCreatedPolicy(t, ctx, repo, 1)
+	dup := *first
+	dup.ID = uuid.NewString()
+	require.Error(t, repo.Create(ctx, &dup), "同谱系同 version 的第二行必须被唯一索引拒绝")
+	require.True(t, isDuplicatePolicy(repo.Create(ctx, &dup)),
+		"repo 返回的冲突错误必须能被 isDuplicatePolicy 识别（→ handler 409）")
+}
+
+// validCreatedPolicy 造一条已落库的策略（v=version）。
+func validCreatedPolicy(t *testing.T, ctx context.Context, repo interfaces.IntentPolicyRepository, version int) *types.IntentPolicy {
+	t.Helper()
+	p := &types.IntentPolicy{
+		ID:             uuid.NewString(),
+		TenantID:       1,
+		ScopeType:      "tool",
+		ScopeRef:       fmt.Sprintf("mcp_x_%s:*", uuid.NewString()[:8]),
+		ConstraintText: "c",
+		RiskTier:       types.RiskTierLow,
+		Mode:           types.VerdictModeObserve,
+		Version:        version,
+		Enabled:        true,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	require.NoError(t, repo.Create(ctx, p))
+	return p
 }

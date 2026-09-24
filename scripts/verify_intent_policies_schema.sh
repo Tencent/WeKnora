@@ -8,10 +8,10 @@
 #   1. postgres dev 容器运行中：
 #        DOCKER_API_VERSION=1.47 docker compose -f docker-compose.dev.yml \
 #          -f docker-compose.dev.fix.yml up -d postgres
-#   2. 已应用 versioned 迁移 000109（全量模式启动 app 会自动迁移：
+#   2. 已应用 versioned 迁移 000112（全量模式启动 app 会自动迁移：
 #        .env 设 DB_DRIVER=postgres / RETRIEVE_DRIVER=postgres 后启动
 #        weknora-server；或手动 psql 执行
-#        migrations/versioned/000109_intent_policies.up.sql）
+#        migrations/versioned/000112_intent_policies.up.sql）
 #
 # 用法：bash scripts/verify_intent_policies_schema.sh
 # 退出码：0 = 结构符合 §6.1；1 = 不符合 / 表不存在。
@@ -28,7 +28,7 @@ psql_desc() {
 if ! output="$(psql_desc 2>&1)"; then
     echo "FAIL: \\d intent_policies 执行失败（表不存在或容器未运行）："
     echo "$output"
-    echo "提示：先启动 postgres 容器并应用 versioned 迁移 000109（见脚本头部注释）。"
+    echo "提示：先启动 postgres 容器并应用 versioned 迁移 000112（见脚本头部注释）。"
     exit 1
 fi
 

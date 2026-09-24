@@ -83,13 +83,39 @@ func (r *IntentVerdictRepository) ListBySession(ctx context.Context, tenantID ui
 
 // ListByPolicy 按策略查询判定记录（跨 version，供策略生命周期报表
 // 对比 v1/v2 的判定分布，设计 §3.2），created_at 升序。
-func (r *IntentVerdictRepository) ListByPolicy(ctx context.Context, tenantID uint64, policyID string, limit int) ([]*types.VerdictRecord, error) {
-	q := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND policy_id = ?", tenantID, policyID).
-		Order("created_at ASC, id ASC")
-	if limit > 0 {
-		q = q.Limit(limit)
+// policyLineageIDs 返回一个谱系的全部版本 ID 集合。谱系 ≡
+// (scope_type, scope_ref)（与前端 policyLineageKey 同口径）：PUT 版本化
+// 会为每个版本生成新 UUID，verdict 行的 policy_id 指向具体版本——
+// 按 lineage 查（review 修复跨版本遗漏）须先展开版本 ID。policy 不存在
+// 时回退为只查传入 ID。
+func (r *IntentVerdictRepository) policyLineageIDs(ctx context.Context, tenantID uint64, policyID string) []string {
+	var pol types.IntentPolicy
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND id = ?", tenantID, policyID).
+		First(&pol).Error
+	if err != nil {
+		return []string{policyID}
 	}
+	var ids []string
+	if err := r.db.WithContext(ctx).Model(&types.IntentPolicy{}).
+		Where("tenant_id = ? AND scope_type = ? AND scope_ref = ?", tenantID, pol.ScopeType, pol.ScopeRef).
+		Pluck("id", &ids).Error; err != nil || len(ids) == 0 {
+		return []string{policyID}
+	}
+	return ids
+}
+
+// ListByPolicy 按策略谱系查询（跨 version，供策略生命周期对账与报表
+// 下钻），created_at 升序；limit<=0 用默认上限 1000（封顶防失控）。
+func (r *IntentVerdictRepository) ListByPolicy(ctx context.Context, tenantID uint64, policyID string, limit int) ([]*types.VerdictRecord, error) {
+	ids := r.policyLineageIDs(ctx, tenantID, policyID)
+	q := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND policy_id IN ?", tenantID, ids).
+		Order("created_at ASC, id ASC")
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	q = q.Limit(limit)
 	var rows []*types.VerdictRecord
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list intent verdicts by policy: %w", err)
@@ -98,16 +124,16 @@ func (r *IntentVerdictRepository) ListByPolicy(ctx context.Context, tenantID uin
 }
 
 // ListByTenant 全租户最近 limit 条，created_at 降序。
+// ListByTenant 全租户最近 limit 条（created_at 降序；报表页下钻列表），
+// limit<=0 用默认上限 1000（封顶防失控）。
 func (r *IntentVerdictRepository) ListByTenant(ctx context.Context, tenantID uint64, limit int) ([]*types.VerdictRecord, error) {
 	q := r.db.WithContext(ctx).
 		Where("tenant_id = ?", tenantID).
 		Order("created_at DESC")
-	if limit > 0 {
-		if limit > 1000 {
-			limit = 1000
-		}
-		q = q.Limit(limit)
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
 	}
+	q = q.Limit(limit)
 	var rows []*types.VerdictRecord
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, err
@@ -117,18 +143,16 @@ func (r *IntentVerdictRepository) ListByTenant(ctx context.Context, tenantID uin
 
 // ListByJudgeModel 按 judge 模型过滤（T61 语料导出，issue #24）。
 // judgeModel 为空串时返回规则层/baseline 判定（无 judge 模型归属的行）；
-// limit<=0 表示不限（同样封顶 1000 防失控）。created_at 升序——导出
+// limit<=0 用默认上限 1000（封顶防失控）。created_at 升序——导出
 // 语料的稳定顺序（按时间先后训练/评测切分）。
 func (r *IntentVerdictRepository) ListByJudgeModel(ctx context.Context, tenantID uint64, judgeModel string, limit int) ([]*types.VerdictRecord, error) {
 	q := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND judge_model = ?", tenantID, judgeModel).
 		Order("created_at ASC, id ASC")
-	if limit > 0 {
-		if limit > 1000 {
-			limit = 1000
-		}
-		q = q.Limit(limit)
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
 	}
+	q = q.Limit(limit)
 	var rows []*types.VerdictRecord
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list intent verdicts by judge model: %w", err)
@@ -147,7 +171,8 @@ func (r *IntentVerdictRepository) CountByVerdictGrouped(ctx context.Context, ten
 		Select("verdict, count(*) AS cnt").
 		Where("tenant_id = ?", tenantID)
 	if policyID != "" {
-		q = q.Where("policy_id = ?", policyID)
+		// 报表分布与下钻列表同口径：按策略谱系（跨版本）统计。
+		q = q.Where("policy_id IN ?", r.policyLineageIDs(ctx, tenantID, policyID))
 	}
 	if err := q.Group("verdict").Scan(&rows).Error; err != nil {
 		return nil, err

@@ -117,7 +117,9 @@ func runExport(ctx context.Context, opts *ExportOptions, fopts *cmdutil.FormatOp
 		if err != nil {
 			return fmt.Errorf("encode corpus document: %w", err)
 		}
-		if err := os.WriteFile(opts.Out, raw, 0o644); err != nil {
+		// 0600：导出内容含 prompt、工具参数原文与策略理由，按敏感文件
+		// 落盘（review：0644 对本机其他用户可读）。
+		if err := os.WriteFile(opts.Out, raw, 0o600); err != nil {
 			return &cmdutil.Error{
 				Code:    cmdutil.CodeInputInvalidArgument,
 				Message: fmt.Sprintf("write corpus file: %v", err),

@@ -62,12 +62,14 @@ func (h *IntentVerdictHandler) tenantID(c *gin.Context) uint64 {
 func (h *IntentVerdictHandler) ListVerdicts(c *gin.Context) {
 	tenantID := h.tenantID(c)
 	policyID := c.Query("policy_id")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if err != nil || limit <= 0 {
+		// 非法/非正 limit 归一到默认页大小：repository 侧另有 1000 封顶
+		// （review：limit=0 或畸形值不得把整表拉进内存）。
+		limit = 100
+	}
 
-	var (
-		rows []*types.VerdictRecord
-		err  error
-	)
+	var rows []*types.VerdictRecord
 	if policyID != "" {
 		rows, err = h.repo.ListByPolicy(c.Request.Context(), tenantID, policyID, limit)
 	} else {
@@ -80,9 +82,13 @@ func (h *IntentVerdictHandler) ListVerdicts(c *gin.Context) {
 	if rows == nil {
 		rows = []*types.VerdictRecord{}
 	}
-	// 报表消费倒序（最新在前），与 verdict 表的 created_at DESC 习惯一致。
-	for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
-		rows[i], rows[j] = rows[j], rows[i]
+	// 报表消费倒序（最新在前）。ListByPolicy 升序返回需反转；ListByTenant
+	// 本身就是 DESC，直接返回（review：此前对两条路径无差别反转，导致
+	// 全量下钻实际返回最旧在前，与文档/报表语义相反）。
+	if policyID != "" {
+		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+			rows[i], rows[j] = rows[j], rows[i]
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
 }
@@ -125,7 +131,12 @@ func (h *IntentVerdictHandler) VerdictSummary(c *gin.Context) {
 func (h *IntentVerdictHandler) ExportCorpus(c *gin.Context) {
 	tenantID := h.tenantID(c)
 	judgeModel := c.Query("judge_model")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "1000"))
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "1000"))
+	if err != nil || limit <= 0 {
+		// 非法/非正 limit 归一到默认导出上限（review：limit=0 不得意为
+		// "不限"——repository 对非正值兜 1000，这里显式归一更清晰）。
+		limit = 1000
+	}
 
 	rows, err := h.repo.ListByJudgeModel(c.Request.Context(), tenantID, judgeModel, limit)
 	if err != nil {

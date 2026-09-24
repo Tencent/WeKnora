@@ -396,7 +396,10 @@ type ToolCallTarget struct {
 	Name        string                 `json:"name"`
 	Args        map[string]interface{} `json:"args"`
 	ServiceName string                 `json:"service_name"`
-	ToolName    string                 `json:"tool_name"`
+	// ServiceID 是 MCP 服务的数据库 ID——策略 scope 匹配（service 级 /
+	// `service_id:tool_name` 的 tool 级）用它而不是展示名 ServiceName。
+	ServiceID string `json:"service_id,omitempty"`
+	ToolName  string `json:"tool_name"`
 }
 
 // ExecutionName returns the resolved target name for presentation and tracing.

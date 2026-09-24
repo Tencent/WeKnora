@@ -66,7 +66,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"intent_verdicts": {"judge_model"}, // 000113
 }
 
-const expectedSQLiteMigrationVersion = 33
+const expectedSQLiteMigrationVersion = 34
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

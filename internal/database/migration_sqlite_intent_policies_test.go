@@ -33,4 +33,7 @@ func TestSQLiteMigrationsCreateIntentPolicies(t *testing.T) {
 	// scope 解析按 (tenant_id, scope_type, scope_ref) 取数，索引必须存在。
 	require.True(t, sqliteIndexExists(t, db, "idx_intent_policies_scope"),
 		"intent_policies 缺索引 idx_intent_policies_scope")
+	// 谱系版本唯一性（并发防护，见 versioned 000114）。
+	require.True(t, sqliteIndexExists(t, db, "idx_intent_policies_lineage_version"),
+		"intent_policies 缺唯一索引 idx_intent_policies_lineage_version")
 }

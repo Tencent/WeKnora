@@ -765,12 +765,18 @@ func (e *AgentEngine) evaluateIntentGate(
 		Args:      json.RawMessage(tc.Function.Arguments),
 		Principal: principal,
 	}
+	if agentID, ok := types.AgentIDFromContext(ctx); ok {
+		input.AgentID = agentID
+	}
 	if e.intentGateIntent != nil {
 		input.UserPrompt = e.intentGateIntent.userPrompt
 		input.History = e.intentGateIntent.history
 	}
 	if target != nil {
-		input.ServiceID = target.ServiceName
+		// ServiceID 是策略 scope 匹配用的服务 ID（scope_ref 形如
+		// `service_id:tool_name`）；ServiceName 仅供展示，两者不可混用
+		//（review：展示名当 ID 会让 service/tool scope 策略全部 miss）。
+		input.ServiceID = target.ServiceID
 	}
 	evalStart := time.Now()
 	verdict, err := e.intentGate.Evaluate(ctx, input)

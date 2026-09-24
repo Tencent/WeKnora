@@ -6,7 +6,7 @@ import { get, post, put } from '@/utils/request'
 // 读取 GET /:id、更新 PUT（= 同谱系插入 version+1 新行，旧版本保留）、
 // 启停 POST /:id/enable|disable（原地改，不产生新版本）。
 
-export type PolicyScopeType = 'tool' | 'service' | 'agent' | 'workspace' | 'tenant'
+export type PolicyScopeType = 'tool' | 'service' | 'agent' | 'tenant'
 export type PolicyRiskTier = 'low' | 'high'
 export type PolicyMode = 'observe' | 'enforce'
 

@@ -7,9 +7,10 @@
 // ① 层命中率是核心指标"——缓存不解决命中率，只消灭重复。
 //
 // 缓存语义保守：
-//   - 键含 tenant_id + session_id + policy_id + args_digest：跨租户/
-//     跨 session/跨策略永不串（digest 用 types.DigestArgs 规范化 JSON
-//     后计算，与 verdict 表 args_digest 同口径，可对账）；
+//   - 键含 tenant_id + session_id + policy_id + tool + service +
+//     args_digest + prompt_digest：跨租户/跨 session/跨策略/跨工具
+//     永不串（digest 用 types.DigestArgs 规范化 JSON 后计算，与 verdict
+//     表 args_digest 同口径，可对账）；
 //   - 只缓存成功的 judge 产出（uncertain 也缓存——同一输入的解析失败
 //     大概率重复失败，且 uncertain 是 fail-open 语义，缓存不改变处置）；
 //   - 命中返回原始 verdict（含 JudgeTokens）：成本记账保持"只付过一次"；
@@ -18,6 +19,8 @@ package intentgate
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"sync"
 	"time"
 
@@ -33,15 +36,25 @@ const judgeCacheDefaultTTL = 5 * time.Minute
 const judgeCacheMaxEntries = 4096
 
 type judgeCacheKey struct {
-	tenantID   uint64
-	sessionID  string
-	policyID   string
-	argsDigest string
+	tenantID     uint64
+	sessionID    string
+	policyID     string
+	toolName     string
+	serviceID    string
+	argsDigest   string
+	promptDigest string
 }
 
 type judgeCacheEntry struct {
 	verdict   Verdict
 	expiresAt time.Time
+}
+
+// digestString 计算任意字符串的 sha256 hex（prompt 等非 JSON 输入的
+// 缓存键维度）。
+func digestString(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 // CachingJudge 是 Judge 的缓存装饰器。实现 Enabled 委托（内层 judge
@@ -64,7 +77,9 @@ func WithJudgeCacheTTL(d time.Duration) JudgeCacheOption {
 }
 
 // NewCachingJudge 包装 inner：Judge 调用按 (tenant, session, policy,
-// args_digest) 缓存 ttl。inner 为 nil 时返回 nil（装配侧零行为变化）。
+// tool, service, args_digest) 缓存 ttl——key 覆盖判定的全部输入维度
+// （review：缺 tool/service 会让同参数的不同工具调用互相复用 verdict）。
+// inner 为 nil 时返回 nil（装配侧零行为变化）。
 func NewCachingJudge(inner Judge, opts ...JudgeCacheOption) *CachingJudge {
 	c := &CachingJudge{
 		inner:   inner,
@@ -84,7 +99,13 @@ func (c *CachingJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error
 		tenantID:   in.TenantID,
 		sessionID:  in.SessionID,
 		policyID:   in.PolicyID,
+		toolName:   in.ToolName,
+		serviceID:  in.ServiceID,
 		argsDigest: types.DigestArgs(in.Args),
+		// 意图基准（原始 user prompt）是判定的输入维度之一；history 窗口
+		// 每轮变化，进 key 会让缓存失效成摆设，按设计 §11 预算接受其
+		// 近似（同 prompt + 同参数视为同判定语境）。
+		promptDigest: digestString(in.UserPrompt),
 	}
 	c.mu.Lock()
 	if e, ok := c.entries[key]; ok && c.now().Before(e.expiresAt) {

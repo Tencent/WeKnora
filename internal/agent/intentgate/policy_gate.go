@@ -194,6 +194,15 @@ func (g *PolicyGate) judgeEscalate(
 		v := ruleVerdict
 		v.Layer = LayerRule
 		v.Reason = ruleVerdict.Reason + "；语义层降级（模型弱于 judge 能力档，只跑规则层，T31）"
+		// high 策略的 fail-close 语义（设计 §9 用户故事 9：判定系统故障时
+		// 高危操作必须有兜底）：规则判 allow 但语义复核不可用 = 判定系统
+		// 不完整，enforce 下必须拦，绝不能"规则没写全就当安全"。deny /
+		// require_approval 是终态，不二次改写。
+		if policy.RiskTier == types.RiskTierHigh &&
+			(ruleVerdict.Action == ActionAllow || ruleVerdict.Action == ActionUncertain) {
+			v.Action = ActionDeny
+			v.Reason += "；high 策略语义复核不可用，fail-close 拦截"
+		}
 		logger.WarnWithFields(ctx, logger.Fields{
 			"event":     "intentgate.judge_degraded",
 			"tenant_id": in.TenantID,

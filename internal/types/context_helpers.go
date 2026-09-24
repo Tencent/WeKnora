@@ -49,6 +49,19 @@ func RequestIDFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// WithAgentID returns a ctx carrying the agent executing the current turn.
+// Tool-call seams (IntentGate scope resolution) read it via AgentIDFromContext.
+func WithAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, AgentIDContextKey, agentID)
+}
+
+// AgentIDFromContext extracts the current-turn agent ID from ctx.
+// Returns ("", false) when the caller did not identify an agent.
+func AgentIDFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(AgentIDContextKey).(string)
+	return v, ok && v != ""
+}
+
 // UserIDFromContext extracts the user ID string from ctx.
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(UserIDContextKey).(string)

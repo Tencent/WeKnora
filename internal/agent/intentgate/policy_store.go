@@ -34,11 +34,10 @@ type PolicyStore interface {
 
 // scope 层级特异度：tool 最具体，tenant 最一般（设计 §8.3）。
 var scopeRank = map[string]int{
-	types.PolicyScopeTool:      0,
-	types.PolicyScopeService:   1,
-	types.PolicyScopeAgent:     2,
-	types.PolicyScopeWorkspace: 3,
-	types.PolicyScopeTenant:    4,
+	types.PolicyScopeTool:    0,
+	types.PolicyScopeService: 1,
+	types.PolicyScopeAgent:   2,
+	types.PolicyScopeTenant:  3,
 }
 
 // cachedResolution 是一次解析结果的缓存项。policy 为 nil 表示"无命中"
@@ -50,15 +49,25 @@ type cachedResolution struct {
 // CachedPolicyStore implements PolicyStore：内存解析 + per-tenant 缓存。
 // 缓存结构与并发安全：外层 map 按 tenantID 分桶，失效时整桶丢弃，
 // 天然保证租户间隔离；单桶内按查询键存结果。
+//
+// 世代守卫（review 修复）：读 miss → 读库 → 回填 之间可能插入
+// InvalidateTenant。gens 记录每租户世代，miss 时先取 gen0，回填前
+// 复查——世代已变说明策略刚被改/删，丢弃本次解析结果，绝不让旧
+// 数据重新进缓存（否则要等到下一次失效才纠正）。
 type CachedPolicyStore struct {
 	repo  interfaces.IntentPolicyRepository
 	mu    sync.RWMutex
 	cache map[uint64]map[string]*cachedResolution
+	gens  map[uint64]uint64
 }
 
 // NewPolicyStore 创建带 per-tenant 缓存的 PolicyStore。
 func NewPolicyStore(repo interfaces.IntentPolicyRepository) PolicyStore {
-	return &CachedPolicyStore{repo: repo, cache: map[uint64]map[string]*cachedResolution{}}
+	return &CachedPolicyStore{
+		repo:  repo,
+		cache: map[uint64]map[string]*cachedResolution{},
+		gens:  map[uint64]uint64{},
+	}
 }
 
 // cacheKey 把一次解析查询编码为缓存键（对应设计 §8.3 的
@@ -78,6 +87,7 @@ func (s *CachedPolicyStore) Resolve(ctx context.Context, q ScopeQuery) (*types.I
 			return hit.policy, nil
 		}
 	}
+	gen0 := s.gens[q.TenantID]
 	s.mu.RUnlock()
 
 	policies, err := s.repo.ListByTenant(ctx, q.TenantID)
@@ -87,6 +97,11 @@ func (s *CachedPolicyStore) Resolve(ctx context.Context, q ScopeQuery) (*types.I
 	resolved := resolveMostSpecific(policies, q)
 
 	s.mu.Lock()
+	if s.gens[q.TenantID] != gen0 {
+		// 失效发生在读库期间：丢弃过期解析结果，下一次调用自然重读。
+		s.mu.Unlock()
+		return resolved, nil
+	}
 	bucket, ok := s.cache[q.TenantID]
 	if !ok {
 		bucket = map[string]*cachedResolution{}
@@ -100,6 +115,7 @@ func (s *CachedPolicyStore) Resolve(ctx context.Context, q ScopeQuery) (*types.I
 // InvalidateTenant implements PolicyStore.
 func (s *CachedPolicyStore) InvalidateTenant(tenantID uint64) {
 	s.mu.Lock()
+	s.gens[tenantID]++
 	delete(s.cache, tenantID)
 	s.mu.Unlock()
 }
@@ -144,8 +160,6 @@ func matchScope(p *types.IntentPolicy, q ScopeQuery) bool {
 		return q.ServiceID != "" && p.ScopeRef == q.ServiceID
 	case types.PolicyScopeAgent:
 		return q.AgentID != "" && p.ScopeRef == q.AgentID
-	case types.PolicyScopeWorkspace:
-		return q.WorkspaceID != "" && p.ScopeRef == q.WorkspaceID
 	case types.PolicyScopeTenant:
 		return true
 	}

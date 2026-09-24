@@ -63,17 +63,19 @@ func buildEnforceDenyAuditor(auditSvc interfaces.AuditLogService) func(context.C
 }
 
 // buildApprovalRecorder 返回审批决策的 verdict 回写回调（T60，issue #23）：
-// 批准 → approved；改参数批准 → modified；拒绝 → rejected。tool_call_id
-// 是 UUID、全局唯一，tenantID 传 0 表示任意租户（决策回调里没有租户
-// 上下文）。repo 为 nil 时返回 nil（调用方不装配，行为零变化）。
+// 批准 → approved；改参数批准 → modified；拒绝 → rejected。tenantID 由
+// MCP 工具执行点从执行 ctx 传入（types.TenantIDFromContext），回写保持
+// 租户隔离——tool_call_id 并非全局唯一（模型可见的 id 如 `call-1` 会经
+// NormalizeToolCallID 原样保留），传 0 会让 A 租户审批回写到 B 租户的同
+// id verdict 行。repo 为 nil 时返回 nil（调用方不装配，行为零变化）。
 //
 // 竞态说明：verdict 异步落库可能晚于审批决策到达，回写 miss 是观测面
 // 损失、fail-open，绝不重试阻塞审批路径。
-func buildApprovalRecorder(repo interfaces.IntentVerdictRepository) func(toolCallID string, approved, modified bool) {
+func buildApprovalRecorder(repo interfaces.IntentVerdictRepository) func(ctx context.Context, tenantID uint64, toolCallID string, approved, modified bool) {
 	if repo == nil {
 		return nil
 	}
-	return func(toolCallID string, approved, modified bool) {
+	return func(ctx context.Context, tenantID uint64, toolCallID string, approved, modified bool) {
 		override := types.HumanOverrideRejected
 		switch {
 		case approved && modified:
@@ -81,8 +83,8 @@ func buildApprovalRecorder(repo interfaces.IntentVerdictRepository) func(toolCal
 		case approved:
 			override = types.HumanOverrideApproved
 		}
-		if err := repo.UpdateHumanOverrideByToolCallID(context.Background(), 0, toolCallID, override); err != nil {
-			logger.Warnf(context.Background(), "[IntentGate] human_override write-back missed (fail-open): %v", err)
+		if err := repo.UpdateHumanOverrideByToolCallID(ctx, tenantID, toolCallID, override); err != nil {
+			logger.Warnf(ctx, "[IntentGate] human_override write-back missed (fail-open): %v", err)
 		}
 	}
 }

@@ -41,6 +41,10 @@ func (s *sessionService) AgentQA(
 		logger.Warnf(ctx, "Custom agent not provided for session: %s", sessionID)
 		return errors.New("custom agent configuration is required for agent QA")
 	}
+	// 把本轮 agent 身份带进 ctx：工具调用接缝（IntentGate agent scope）
+	// 经 types.AgentIDFromContext 读取。builtin（如 builtin-quick-answer）
+	// 的 ID 同样有效——agent 级策略可以只管某个内置智能体。
+	ctx = types.WithAgentID(ctx, req.CustomAgent.ID)
 
 	// Resolve retrieval tenant using shared helper
 	agentTenantID := s.resolveRetrievalTenantID(ctx, req)

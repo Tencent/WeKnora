@@ -3,12 +3,15 @@ package intentgate
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // fakePolicyRepo 是 interfaces.IntentPolicyRepository 的内存实现，
@@ -148,7 +151,6 @@ func TestPolicyStoreResolve_MostSpecificWins(t *testing.T) {
 		{types.PolicyScopeTool, "svc_wiki:wiki_delete_page"},
 		{types.PolicyScopeService, "svc_wiki"},
 		{types.PolicyScopeAgent, "agent_ops"},
-		{types.PolicyScopeWorkspace, "ws_wiki"},
 		{types.PolicyScopeTenant, ""},
 	}
 	// 从最具体到最一般逐级加策略：每加一条更具体的，胜者就应换成它。
@@ -291,4 +293,51 @@ func TestPolicyStoreCache_NegativeResultCached(t *testing.T) {
 		require.Nil(t, got)
 	}
 	require.Equal(t, 1, repo.listCallCount(7), "空结果也应缓存")
+}
+
+// slowListRepo 阻塞 ListByTenant 直到测试放行——制造「读 miss → 读库 →
+// 回填」窗口，供 InvalidateTenant 插入（review 修复：失效与回填的竞态）。
+type slowListRepo struct {
+	interfaces.IntentPolicyRepository
+	policies []*types.IntentPolicy
+	release  chan struct{}
+	calls    int32
+}
+
+func (s *slowListRepo) ListByTenant(_ context.Context, _ uint64) ([]*types.IntentPolicy, error) {
+	atomic.AddInt32(&s.calls, 1)
+	<-s.release
+	return s.policies, nil
+}
+
+// TestCachedPolicyStoreInvalidateDuringMissDiscardsStale（review 修复）：
+// 读 miss 并发失效时，回填不得把旧策略集重新写进缓存——否则该租户要
+// 等到下一次失效才纠正，期间判定一直用旧策略。
+func TestCachedPolicyStoreInvalidateDuringMissDiscardsStale(t *testing.T) {
+	old := mkPolicy(t, 1, types.PolicyScopeTenant, "", 1)
+	repo := &slowListRepo{policies: []*types.IntentPolicy{old}, release: make(chan struct{})}
+	store := NewPolicyStore(repo)
+
+	q := ScopeQuery{TenantID: 7, ToolName: "web_search"}
+	done := make(chan struct{})
+	go func() {
+		_, _ = store.Resolve(context.Background(), q)
+		close(done)
+	}()
+
+	// 等读库开始（短轮询 + Gosched，避免 sleep 定死时序）。
+	for atomic.LoadInt32(&repo.calls) == 0 {
+		runtime.Gosched()
+	}
+	store.InvalidateTenant(7)
+	close(repo.release)
+	<-done
+
+	// 世代守卫应丢弃过期回填：桶已被 InvalidateTenant 删除且未被重建，
+	// 下一次 Resolve 必须重新读库（calls=2），而不是吃到旧结果。
+	stale, err := store.Resolve(context.Background(), q)
+	require.NoError(t, err)
+	require.Equal(t, old, stale, "本次调用的返回值不受后至失效影响（语义不变）")
+	require.EqualValues(t, 2, atomic.LoadInt32(&repo.calls),
+		"失效期间的回填必须被丢弃：缓存不得保留旧策略集")
 }

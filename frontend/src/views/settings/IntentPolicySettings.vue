@@ -219,10 +219,10 @@ const lineages = computed<Lineage[]>(() => {
 })
 
 const scopeTheme = (scope: PolicyScopeType) =>
-  ({ tool: 'primary', service: 'success', agent: 'warning', workspace: 'default', tenant: 'danger' })[scope]
+  ({ tool: 'primary', service: 'success', agent: 'warning', tenant: 'danger' })[scope]
 
 const scopeTypeOptions = computed(() =>
-  (['tool', 'service', 'agent', 'workspace', 'tenant'] as PolicyScopeType[]).map((value) => ({
+  (['tool', 'service', 'agent', 'tenant'] as PolicyScopeType[]).map((value) => ({
     value,
     label: t(`settings.intentPolicy.scopes.${value}`),
   })),

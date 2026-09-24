@@ -320,3 +320,87 @@ func TestIntentVerdictCreateValidation(t *testing.T) {
 	rec.Verdict = ""
 	require.Error(t, repo.Create(ctx, rec))
 }
+
+// newIntentVerdictLineageTestRepo 建带 policies 表的测试库（谱系查询要
+// 联查 intent_policies 展开版本 ID）。返回 gorm 句柄供直接种 policies。
+func newIntentVerdictLineageTestRepo(t *testing.T) (interfaces.IntentVerdictRepository, *gorm.DB) {
+	t.Helper()
+	dsn := "file:" + uuid.NewString() + "?mode=memory&cache=shared&_busy_timeout=5000"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, db.AutoMigrate(&types.IntentPolicy{}, &types.VerdictRecord{}))
+	return NewIntentVerdictRepository(db), db
+}
+
+// TestIntentVerdictListByPolicyAcrossVersions（review 修复）：PUT 版本化
+// 为每个版本生成新 UUID，verdict 行的 policy_id 指向具体版本——按
+// lineage（≡ scope_type+scope_ref，与前端 policyLineageKey 同口径）查
+// 必须跨版本返回，否则报表在策略编辑一次后就丢掉 v1 的全部历史判定。
+func TestIntentVerdictListByPolicyAcrossVersions(t *testing.T) {
+	repo, db := newIntentVerdictLineageTestRepo(t)
+	ctx := context.Background()
+
+	mkPol := func(id string, version int) *types.IntentPolicy {
+		return &types.IntentPolicy{
+			ID: id, TenantID: 1, ScopeType: "tool", ScopeRef: "mcp_orders_*",
+			ConstraintText: "c", Mode: types.VerdictModeObserve, Version: version,
+			Enabled: true, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		}
+	}
+	require.NoError(t, db.Create(mkPol("pol-v1", 1)).Error)
+	require.NoError(t, db.Create(mkPol("pol-v2", 2)).Error)
+	// 别的谱系不应混入。
+	other := mkPol("pol-other", 1)
+	other.ScopeRef = "mcp_calendar_*"
+	require.NoError(t, db.Create(other).Error)
+
+	base := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	mkVerdict := func(policyID string, at time.Time) *types.VerdictRecord {
+		in := verdictInput("s1")
+		in.PolicyID = policyID
+		in.PolicyVersion = 1
+		r := mustVerdictRecord(t, in)
+		r.CreatedAt = at
+		return r
+	}
+	v1 := mkVerdict("pol-v1", base)
+	v2 := mkVerdict("pol-v2", base.Add(time.Second))
+	vOther := mkVerdict("pol-other", base.Add(2*time.Second))
+	for _, r := range []*types.VerdictRecord{v1, v2, vOther} {
+		require.NoError(t, repo.Create(ctx, r))
+	}
+
+	// 用最新版本 id 查 → 谱系内两个版本的判定都回来，别的谱系不混入。
+	rows, err := repo.ListByPolicy(ctx, 1, "pol-v2", 0)
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "跨版本：v1 的判定不得因 PUT 版本化而丢失")
+	require.Equal(t, v1.ID, rows[0].ID)
+	require.Equal(t, v2.ID, rows[1].ID)
+
+	// 分布统计与下钻列表同口径（跨版本）。
+	counts, err := repo.CountByVerdictGrouped(ctx, 1, "pol-v2")
+	require.NoError(t, err)
+	require.EqualValues(t, 2, counts[types.VerdictActionAllow])
+}
+
+// TestIntentVerdictListCapsNonPositiveLimit（review 修复）：limit<=0 必须
+// 回落默认上限，绝不解释为「不限」。
+func TestIntentVerdictListCapsNonPositiveLimit(t *testing.T) {
+	repo := newIntentVerdictTestRepo(t)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		r := mustVerdictRecord(t, verdictInput("s1"))
+		r.CreatedAt = time.Date(2026, 9, 24, 10, 0, 0, i, time.UTC)
+		require.NoError(t, repo.Create(ctx, r))
+	}
+	rows, err := repo.ListByTenant(ctx, 1, 0)
+	require.NoError(t, err)
+	require.Len(t, rows, 5, "limit=0 回落默认上限（>=5 条小批量不受影响）")
+	rows, err = repo.ListByJudgeModel(ctx, 1, "", -3)
+	require.NoError(t, err)
+	require.Len(t, rows, 5)
+}

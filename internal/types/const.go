@@ -42,6 +42,10 @@ const (
 	// so that stateful sandbox backends (notably CubeSandbox) can route script
 	// execution to the persistent, per-session MicroVM instance.
 	SessionIDContextKey ContextKey = "SessionID"
+	// AgentIDContextKey carries the agent (builtin or custom) executing the
+	// current turn, so tool-call seams can resolve agent-scoped policies
+	// (IntentGate). Empty when the caller did not identify an agent.
+	AgentIDContextKey ContextKey = "AgentID"
 	// SandboxTenantIDContextKey carries the tenant that owns the session whose
 	// sandbox is being addressed, which is NOT always the tenant in
 	// TenantIDContextKey: a shared agent runs under the agent owner's tenant so

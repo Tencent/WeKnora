@@ -3,8 +3,10 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent/intentgate"
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -92,6 +94,23 @@ func respondPolicyError(c *gin.Context, err error, action string) {
 	c.Error(weerrors.NewInternalServerError("Failed to " + action + " intent policy"))
 }
 
+// isDuplicatePolicy 检测谱系版本唯一索引冲突（并发兜底）：handler 的
+// read-then-insert 行先检查挡不住并发双插入，数据库唯一索引
+// idx_intent_policies_lineage_version 是最终裁决。gorm.ErrDuplicatedKey
+// 覆盖 TranslateError 开启的方言翻译；字符串兜底覆盖原始驱动报错
+// （pg "duplicate key value violates unique constraint"、sqlite "UNIQUE
+// constraint failed"）。
+func isDuplicatePolicy(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "unique constraint")
+}
+
 // CreatePolicy godoc
 // @Summary      创建意图策略
 // @Description  创建一条 IntentGate 策略（version=1）。同一谱系（scope_type+scope_ref）已存在时返回 409，修改请用 PUT。mode 缺省 observe。
@@ -146,6 +165,14 @@ func (h *IntentPolicyHandler) CreatePolicy(c *gin.Context) {
 	}
 
 	if err := h.repo.Create(ctx, policy); err != nil {
+		if isDuplicatePolicy(err) {
+			// 并发兜底：唯一索引 idx_intent_policies_lineage_version 拦下
+			// 了行先检查没挡住的并发双插入（review：read-then-insert
+			// 不是原子操作）。
+			c.Error(weerrors.NewConflictError(
+				"Intent policy lineage already exists for this scope; use PUT to create a new version"))
+			return
+		}
 		respondPolicyError(c, err, "create")
 		return
 	}
@@ -264,6 +291,15 @@ func (h *IntentPolicyHandler) UpdatePolicy(c *gin.Context) {
 	// default:true 标签，零值会被 INSERT 省略回落到 DB 默认值；
 	// 必须在插入后显式翻转。
 	if err := h.repo.Create(ctx, policy); err != nil {
+		if isDuplicatePolicy(err) {
+			// 并发兜底：两个并发 PUT 算出同一 nextVersion，唯一索引
+			// idx_intent_policies_lineage_version 拦下后插入者；调用方
+			// 重试即可拿到新版本（review：nextVersion 的读-算-写不是
+			// 原子操作）。
+			c.Error(weerrors.NewConflictError(
+				"Concurrent policy update conflicted on the next version; retry the PUT"))
+			return
+		}
 		respondPolicyError(c, err, "update")
 		return
 	}

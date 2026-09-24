@@ -99,8 +99,9 @@ type AgentEngine struct {
 	// intent_policy.enforced_deny 写进 audit log。nil（默认）不写。
 	intentGateAuditor func(ctx context.Context, info EnforceDenyInfo)
 	// intentApprovalRecorder 在人工审批决策落地后回写 verdict 行的
-	// human_override（T60）。nil（默认）不写。
-	intentApprovalRecorder func(toolCallID string, approved, modified bool)
+	// human_override（T60）。nil（默认）不写。tenantID 由 MCP 工具
+	// 执行点从 ctx 传入，回写必须保持租户隔离。
+	intentApprovalRecorder func(ctx context.Context, tenantID uint64, toolCallID string, approved, modified bool)
 }
 
 // EnforceDenyInfo 是一次 enforce 拦截的审计上下文（T43）：actor 从 ctx
@@ -197,7 +198,7 @@ func (e *AgentEngine) SetIntentGateAuditor(fn func(ctx context.Context, info Enf
 }
 
 // SetIntentApprovalRecorder 安装审批决策回写回调（T60）。nil 不安装。
-func (e *AgentEngine) SetIntentApprovalRecorder(fn func(toolCallID string, approved, modified bool)) {
+func (e *AgentEngine) SetIntentApprovalRecorder(fn func(ctx context.Context, tenantID uint64, toolCallID string, approved, modified bool)) {
 	e.intentApprovalRecorder = fn
 }
 

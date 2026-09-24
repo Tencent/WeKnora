@@ -75,6 +75,11 @@ func TestCachingJudgeKeyVariation(t *testing.T) {
 		func() JudgeInput { in := base; in.SessionID = "s-2"; return in }(),
 		func() JudgeInput { in := base; in.PolicyID = "pol-2"; return in }(),
 		func() JudgeInput { in := base; in.TenantID = 8; return in }(),
+		// review 修复：tool/service/prompt 是判定的输入维度，缺了会让
+		// 同参数的不同工具调用互相复用 verdict。
+		func() JudgeInput { in := base; in.ToolName = "refund_foreign"; return in }(),
+		func() JudgeInput { in := base; in.ServiceID = "svc-orders"; return in }(),
+		func() JudgeInput { in := base; in.UserPrompt = "完全不同的原始意图"; return in }(),
 	}
 	judge.Judge(context.Background(), base)
 	for _, v := range variants {

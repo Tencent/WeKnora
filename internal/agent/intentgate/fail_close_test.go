@@ -169,6 +169,37 @@ func TestFailCloseDegradedPath(t *testing.T) {
 	}
 }
 
+// disabledCapabilityJudge 模拟租户模型弱于 judge 能力档的降级形态：
+// Enabled=false（judgeEscalate 走降级分支），Judge 不应被调用。
+type disabledCapabilityJudge struct{}
+
+func (disabledCapabilityJudge) Enabled(context.Context, uint64) bool { return false }
+func (disabledCapabilityJudge) Judge(context.Context, JudgeInput) (Verdict, error) {
+	return Verdict{Action: ActionUncertain, Layer: LayerJudge, Reason: "不应被调用"}, nil
+}
+
+// TestFailCloseHighTierJudgeDegradedBlocks（review 修复）：high 策略规则层
+// 未决（无 rule_expr → uncertain），语义层又因能力档不足降级——判定系统
+// 不完整，enforce 下必须 fail-close 拦截，绝不让 uncertain 按普通策略
+// fail-open 透出（设计 §9 用户故事 9：判定系统故障时高危操作有兜底）。
+func TestFailCloseHighTierJudgeDegradedBlocks(t *testing.T) {
+	store := &fakeGatePolicyStore{policy: failClosePolicy(types.RiskTierHigh)}
+	gate := NewPolicyGate(store, WithJudge(disabledCapabilityJudge{}))
+
+	v, err := gate.Evaluate(context.Background(), ToolCallInput{
+		TenantID: 1, ToolName: "wiki_delete_page", Args: json.RawMessage(`{"page_id":"p1"}`),
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if v.Action != ActionDeny {
+		t.Fatalf("action = %q, want deny（high + 语义层降级 → fail-close）", v.Action)
+	}
+	if !strings.Contains(v.Reason, "fail-close") {
+		t.Fatalf("reason 应说明 fail-close, got %q", v.Reason)
+	}
+}
+
 // TestRequireApprovalSentinel：哨兵值确定产出 require_approval（#31 的
 // 确定性验收触发器）；high 策略也不被 judge 复核绕过。
 func TestRequireApprovalSentinel(t *testing.T) {

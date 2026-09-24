@@ -65,8 +65,8 @@ func TestNewIntentPolicy_RejectsUnknownEnums(t *testing.T) {
 }
 
 func TestNewIntentPolicy_ScopeRefRules(t *testing.T) {
-	// tool/service/agent/workspace 级必须有 scope_ref，否则永远命中不了。
-	for _, scope := range []string{PolicyScopeTool, PolicyScopeService, PolicyScopeAgent, PolicyScopeWorkspace} {
+	// tool/service/agent 级必须有 scope_ref，否则永远命中不了。
+	for _, scope := range []string{PolicyScopeTool, PolicyScopeService, PolicyScopeAgent} {
 		in := validPolicyInput()
 		in.ScopeType = scope
 		in.ScopeRef = ""
