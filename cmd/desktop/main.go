@@ -188,11 +188,12 @@ func main() {
 	// Mute Gin's per-route registration spam; replaced by a single
 	// summary printed after router build.
 	runtime.SilenceGinRouteSpam()
-	runtime.LogStartupEnv(context.Background())
-
+	// Provision the signing key first so the startup banner reflects it
+	// instead of warning about a key the desktop is about to create.
 	if err := ensureDesktopSigningKey(); err != nil {
 		panic(fmt.Sprintf("initialize desktop signing key: %v", err))
 	}
+	runtime.LogStartupEnv(context.Background())
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
