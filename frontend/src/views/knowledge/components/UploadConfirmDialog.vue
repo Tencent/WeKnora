@@ -468,10 +468,14 @@
                               </ul>
                             </div>
                           </div>
+                        </div>
 
-                          <!-- 观察失败兜底：与上方整块开关同级（不再嵌在属性面板里）。
-                               开关仍包在 setting-control 里，与其它开关行共用同一套
-                               右对齐 / 垂直居中 / 预留右列的排版，避免顶到行首 -->
+                        <!-- 观察失败兜底：真正与上方属性面板行同级。此前它嵌在
+                             setting-row-vertical 里，而垂直行的后代选择器把所有
+                             .setting-info / .setting-control 都撑成 100% 宽，水平
+                             排布必然溢出，开关被顶到容器右缘之外。挪出来后与其它
+                             开关行共用同一套排版，右缘与「图片属性观察」对齐 -->
+                        <template v-if="uiState.multimodalConfig.enabled && uiState.imageAttrsEnabled">
                           <div class="setting-row">
                             <div class="setting-info">
                               <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
@@ -484,7 +488,7 @@
                           <div class="image-pipeline-kb-note">
                             {{ t('knowledgeEditor.advanced.multimodal.imagePipelineKbNote') }}
                           </div>
-                        </div>
+                        </template>
                       </div>
                     </div>
                   </div>
