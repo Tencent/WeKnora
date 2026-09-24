@@ -7487,17 +7487,17 @@ export default {
       label: '图中文字量',
       description: '图片自身承载多少正文文字，决定是否值得为它单独跑一轮 OCR。',
       values: {
-        none: '没有文字',
-        sparse: '只有少量文字 —— 图标、路牌、单个标签',
-        block: '成段正文 —— 截图、表格、文档页面'
+        none: { label: '无文字', description: '完全没有文字' },
+        sparse: { label: '少量文字', description: '只有少量文字 —— 图标、路牌、单个标签' },
+        block: { label: '成段正文', description: '成段正文 —— 截图、表格、文档页面' }
       }
     },
     contain_data_visual: {
       label: '数据可视化',
       description: '图片是否以图表、曲线、示意图或信息图的方式承载数据；这类图即使看起来文字很少，也会保留在 OCR 路径上。',
       values: {
-        'true': '是 —— 图表、曲线或示意图',
-        'false': '否 —— 照片、插画、图标或装饰图'
+        'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
+        'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
       }
     }
   }

@@ -7485,17 +7485,17 @@ export default {
       label: '이미지 내 텍스트 양',
       description: '이미지 자체가 담고 있는 본문 텍스트의 양입니다. 텍스트를 읽기 위해 별도 OCR을 돌릴 가치가 있는지 판단합니다.',
       values: {
-        none: '텍스트 없음',
-        sparse: '약간의 글자만 —— 로고, 도로 표지판, 단일 라벨',
-        block: '문단 단위 본문 —— 스크린샷, 표, 문서 페이지'
+        none: { label: '텍스트 없음', description: '텍스트가 전혀 없습니다' },
+        sparse: { label: '약간의 글자', description: '약간의 글자만 —— 로고, 도로 표지판, 단일 라벨' },
+        block: { label: '문단 단위 본문', description: '문단 단위 본문 —— 스크린샷, 표, 문서 페이지' }
       }
     },
     contain_data_visual: {
       label: '데이터 시각화',
       description: '이미지가 차트, 그래프, 도표, 인포그래픽으로 데이터를 전달하는지 여부입니다. 글자가 적어 보여도 OCR 대상으로 유지합니다.',
       values: {
-        'true': '예 —— 차트, 그래프, 도표',
-        'false': '아니오 —— 사진, 삽화, 아이콘, 장식'
+        'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
+        'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
       }
     }
   }

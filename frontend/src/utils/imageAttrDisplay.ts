@@ -2,6 +2,7 @@ import type {
   ImageAttrCondition,
   ImageAttrSchema,
   ImageAttrSpec,
+  ImageAttrValue,
 } from '@/api/knowledge-base'
 
 // ---------------------------------------------------------------------------
@@ -28,8 +29,10 @@ type HasTranslation = (key: string) => boolean
 export interface ImageAttrValueDisplay {
   /** The raw value as it appears in the registry and the processing trace. */
   value: string
-  /** The same value in words. */
+  /** The short, on-screen name for this value. */
   label: string
+  /** The sentence explaining the value; empty when the registry has none. */
+  description: string
 }
 
 /** One attribute as the settings panel shows it. */
@@ -53,9 +56,9 @@ export interface ImageAttrConditionDisplay {
 }
 
 /** The values a spec declares; presence attributes list true/false implicitly. */
-function specValues(attr: ImageAttrSpec): string[] {
+function specValues(attr: ImageAttrSpec): ImageAttrValue[] {
   if (attr.values && attr.values.length) return attr.values
-  return attr.type === 'presence' ? ['true', 'false'] : []
+  return attr.type === 'presence' ? [{ value: 'true', label: 'true' }, { value: 'false', label: 'false' }] : []
 }
 
 /**
@@ -94,8 +97,19 @@ export function imageAttrDisplay(
     label: pick(`${base}.label`, attr.label || attr.name, t, te),
     description: pick(`${base}.description`, attr.description ?? '', t, te),
     values: specValues(attr).map((value) => ({
-      value,
-      label: pick(`${base}.values.${value}`, attr.value_labels?.[value] ?? value, t, te),
+      value: value.value,
+      label: pick(
+        `${base}.values.${value.value}.label`,
+        value.label || value.value,
+        t,
+        te,
+      ),
+      description: pick(
+        `${base}.values.${value.value}.description`,
+        value.description ?? '',
+        t,
+        te,
+      ),
     })),
   }
 }

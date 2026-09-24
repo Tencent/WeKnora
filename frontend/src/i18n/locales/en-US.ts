@@ -7486,17 +7486,17 @@ export default {
       label: 'Text in the image',
       description: 'How much body text the picture itself carries. Decides whether reading its text is worth a separate OCR pass.',
       values: {
-        none: 'no text at all',
-        sparse: 'a few words — a logo, a road sign, a single label',
-        block: 'a block of body text — a screenshot, a table, a document page'
+        none: { label: 'None', description: 'no text at all' },
+        sparse: { label: 'Sparse', description: 'a few words — a logo, a road sign, a single label' },
+        block: { label: 'Block', description: 'a block of body text — a screenshot, a table, a document page' }
       }
     },
     contain_data_visual: {
       label: 'Data visual',
       description: 'Whether the picture conveys data as a chart, graph, diagram or infographic. Such images keep their labels on the OCR path even when the text looks sparse.',
       values: {
-        'true': 'yes — a chart, graph or diagram',
-        'false': 'no — a photo, drawing, icon or decoration'
+        'true': { label: 'Yes', description: 'a chart, graph or diagram with plotted values' },
+        'false': { label: 'No', description: 'a photo, drawing, icon or decoration' }
       }
     }
   }

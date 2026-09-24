@@ -7485,17 +7485,17 @@ export default {
       label: '画像内のテキスト量',
       description: '画像自体がどれだけ本文テキストを含むか。テキスト読み取りのために別途 OCR を行う価値があるかを判断します。',
       values: {
-        none: 'テキストなし',
-        sparse: 'わずかな文字のみ —— ロゴ、道路標識、単一のラベル',
-        block: 'まとまった本文 —— スクリーンショット、表、文書ページ'
+        none: { label: 'テキストなし', description: 'テキストは一切含まれていません' },
+        sparse: { label: 'わずかな文字', description: 'わずかな文字のみ —— ロゴ、道路標識、単一のラベル' },
+        block: { label: 'まとまった本文', description: 'まとまった本文 —— スクリーンショット、表、文書ページ' }
       }
     },
     contain_data_visual: {
       label: 'データ可視化',
       description: '画像がグラフ・図表・ダイアグラム・インフォグラフィックとしてデータを伝えているか。文字が少なく見えても OCR の対象に残します。',
       values: {
-        'true': 'はい —— グラフ・図表・ダイアグラム',
-        'false': 'いいえ —— 写真・イラスト・アイコン・装飾'
+        'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
+        'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
       }
     }
   }
