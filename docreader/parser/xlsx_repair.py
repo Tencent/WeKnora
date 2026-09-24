@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import io
+import logging
 import re
 import zipfile
 from typing import Callable, Dict, Iterable, Set
+
+logger = logging.getLogger(__name__)
 
 SST_PART = "xl/sharedStrings.xml"
 _SST_OVERRIDE_RE = re.compile(
@@ -149,7 +152,22 @@ def sanitize_xlsx_styles(content: bytes) -> bytes | None:
     place with a no-op patternFill keeps the fill list length — and therefore
     every cellXf fillId reference — stable. Returns None when nothing needs
     fixing, so callers pay one styles.xml scan on the happy path.
+
+    Never raises: on any internal failure the original bytes flow on
+    unchanged, so a caller recovering from its own error keeps that error's
+    cause instead of trading it for a sanitizer failure.
     """
+    try:
+        return _sanitize_xlsx_styles(content)
+    except Exception:
+        logger.warning(
+            "XLSX styles sanitize failed; passing original bytes through",
+            exc_info=True,
+        )
+        return None
+
+
+def _sanitize_xlsx_styles(content: bytes) -> bytes | None:
     if not zipfile.is_zipfile(io.BytesIO(content)):
         return None
 
@@ -166,18 +184,25 @@ def sanitize_xlsx_styles(content: bytes) -> bytes | None:
         if block is None:
             return None
 
-        fixed_any = False
+        fixed_count = 0
 
         def _fix(match: "re.Match[bytes]") -> bytes:
-            nonlocal fixed_any
+            nonlocal fixed_count
             if _WELL_FORMED_FILL_RE.match(match.group(0)):
                 return match.group(0)
-            fixed_any = True
+            fixed_count += 1
             return _REPLACEMENT_FILL
 
         patched_block = _FILL_ELEMENT_RE.sub(_fix, block.group(0))
-        if not fixed_any:
+        if fixed_count == 0:
             return None
+
+        # Doubles as the recurrence meter for #3637: how often real uploads
+        # carry non-conforming fills, and how many per file.
+        logger.info(
+            "Sanitized %d non-conforming fill(s) in XLSX styles.xml before parse",
+            fixed_count,
+        )
 
         patched = styles[: block.start()] + patched_block + styles[block.end():]
         return _rewrite_zip(zin, lambda files: {**files, styles_path: patched})

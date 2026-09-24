@@ -10,6 +10,7 @@ import io
 import re
 import unittest
 import zipfile
+from unittest.mock import patch
 
 import openpyxl
 import pandas as pd
@@ -63,6 +64,28 @@ class TestSanitizeXlsxStyles(unittest.TestCase):
 
     def test_non_zip_input_is_ignored(self):
         self.assertIsNone(sanitize_xlsx_styles(b"not a zip"))
+
+    def test_repair_is_logged_with_count(self):
+        fixture = _with_first_fill_replaced(
+            _workbook_bytes(), CRASHING_FILLS["empty-self-closing"]
+        )
+        with self.assertLogs("docreader.parser.xlsx_repair", level="INFO") as logs:
+            sanitize_xlsx_styles(fixture)
+        self.assertTrue(
+            any("Sanitized 1 non-conforming fill" in line for line in logs.output),
+            logs.output,
+        )
+
+    def test_internal_failure_returns_none_instead_of_raising(self):
+        fixture = _with_first_fill_replaced(
+            _workbook_bytes(), CRASHING_FILLS["empty-self-closing"]
+        )
+        with patch(
+            "docreader.parser.xlsx_repair._rewrite_zip", side_effect=OSError("boom")
+        ):
+            with self.assertLogs("docreader.parser.xlsx_repair", level="WARNING"):
+                result = sanitize_xlsx_styles(fixture)
+        self.assertIsNone(result)
 
     def test_each_malformed_form_is_repaired_in_place(self):
         for name, fragment in {**CRASHING_FILLS, "tolerated-unknown-child": TOLERATED_FILL}.items():
