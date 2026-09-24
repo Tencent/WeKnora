@@ -1,5 +1,5 @@
 -- Neighbour-spread credit for the knowledge-guidance overlay (Lite).
--- Mirrors versioned 000114.
+-- Mirrors versioned 000115.
 
 CREATE TABLE IF NOT EXISTS memory_spread_views (
     id                VARCHAR(36) PRIMARY KEY,
@@ -14,3 +14,5 @@ CREATE TABLE IF NOT EXISTS memory_spread_views (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mastery_spread_scope
     ON memory_spread_views (tenant_id, subject_id, knowledge_base_id, slug, event_date);
+
+

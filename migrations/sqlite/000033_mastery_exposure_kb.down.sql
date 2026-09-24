@@ -1,4 +1,4 @@
--- Down for Lite 000035: drop the knowledge_base_id column.
+-- Down for Lite 000033: drop the knowledge_base_id column.
 -- SQLite does not support DROP COLUMN before 3.35; recreate the table without it.
 
 CREATE TABLE memory_guide_exposures_new (
@@ -24,3 +24,4 @@ ALTER TABLE memory_guide_exposures_new RENAME TO memory_guide_exposures;
 
 CREATE INDEX IF NOT EXISTS idx_mastery_exposure_scope
     ON memory_guide_exposures (tenant_id, subject_id, shown_at);
+

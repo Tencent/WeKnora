@@ -1,4 +1,4 @@
--- Migration 000114: neighbour-spread credit for the knowledge-guidance overlay.
+-- Migration 000115: neighbour-spread credit for the knowledge-guidance overlay.
 --
 -- Reading one page credits the pages adjacent to it with a fraction of the
 -- reader's time, so a node the person has not opened yet still picks up a little
@@ -24,3 +24,4 @@ CREATE TABLE IF NOT EXISTS memory_spread_views (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mastery_spread_scope
     ON memory_spread_views (tenant_id, subject_id, knowledge_base_id, slug, event_date);
+
