@@ -25,7 +25,9 @@ type pgVector struct {
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
-	IsEnabled       bool                `json:"is_enabled"        gorm:"column:is_enabled;default:true;index"`
+	// A pointer, like the SQLite driver's: GORM leaves a zero value out of the INSERT
+	// when the column has a default, so a plain false would be stored as true.
+	IsEnabled *bool `json:"is_enabled"        gorm:"column:is_enabled;default:true;index"`
 }
 
 // pgVectorWithScore extends pgVector with similarity score field
@@ -66,7 +68,7 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
 		TagID:           indexInfo.TagID,
 		Content:         common.CleanInvalidUTF8(indexInfo.Content),
-		IsEnabled:       indexInfo.IsEnabled,
+		IsEnabled:       &indexInfo.IsEnabled,
 	}
 	// Add embedding data if available in additionalParams
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {
@@ -79,7 +81,7 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 	if additionalParams != nil {
 		if chunkEnabledMap, ok := additionalParams["chunk_enabled"].(map[string]bool); ok {
 			if enabled, exists := chunkEnabledMap[indexInfo.ChunkID]; exists {
-				pgVector.IsEnabled = enabled
+				pgVector.IsEnabled = &enabled
 			}
 		}
 	}

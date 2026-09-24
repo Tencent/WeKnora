@@ -581,6 +581,7 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 				KnowledgeBaseID: targetKnowledgeBaseID, // Update to target knowledge base ID
 				Dimension:       sourceVector.Dimension,
 				Embedding:       sourceVector.Embedding, // Copy the vector embedding directly, avoid recalculation
+				IsEnabled:       sourceVector.IsEnabled, // nil (legacy row) keeps the column default
 			}
 
 			targetVectors = append(targetVectors, targetVector)
