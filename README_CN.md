@@ -195,9 +195,9 @@ docker compose up -d    # 用新镜像重建容器
 
 <br/>
 
-- **v0.7.2** —— 上线**官方产品文档站**（VitePress，六大板块约 50 篇，覆盖约 360 个 API 端点与约 150 个环境变量，含独立 Docker/Nginx 部署、快速上手样例数据与本地 MCP demo）；**知识库文件夹树**（文件夹路径独立入库，可像文件管理器一样浏览、重命名与重新归档）；**分块编辑与版本历史**（可视化编辑检索分块、逐版本 diff 与回滚、自动重建索引、文档自定义元数据）；**Wiki 页面版本历史**（快照 + 行级 diff + 一键回滚 + 浏览器内手动编辑）；**API 文件直链模式** `resource_urls=public` / `RESOURCE_URL_MODE`（第三方 App 无需二次调用鉴权代理即可加载图片与文件）；**飞书云盘数据源**与 docx blocks 逐类型下钻同步；文档批量打标签；**MCP Server 1.1.x**（迁移到 mcp 2.x 高级 API，官方 PyPI 包 `tencent-weknora-mcp`，新增 `create_knowledge_from_text` 与 `list_shared_knowledge_bases`，共 29 个工具）；AWS S3 默认凭据链（IAM Role / IRSA）；本地 HTML 上传解析；QQBot Markdown 回复；新增 app / frontend / docreader / mcp-server 的 PR CI 检查。另有 router 与 modelcontext 大规模重构、重排与分块质量优化，以及大量稳定性修复。
-- **v0.7.1** —— 新增**云之家 IM 集成**（WebSocket + 图片消息 + Markdown 回复）；**火山引擎 Rerank** 供应商（自动分批请求）与**智谱 AI 网络搜索**供应商；**平台级 API Key**，用于控制面自动化（空间管理、系统设置、运行时队列、审计日志）；**按知识库的活动审计追踪**；FAQ 管理增强（筛选、打标签、导出、导入结果追踪）；**Langfuse OTLP/OTel 追踪**迁移，支持 W3C traceparent 跨服务传播；对话头部操作栏，支持一键 **Markdown 导出**，并在引用抽屉中展示 Wiki 工具结果；Prompt 缓存可观测性；会话渠道治理（IM/嵌入/API 会话按管理员范围隔离）；飞书大型 Wiki 同步韧性增强；移除旧版 Neo4j 会话记忆依赖。另有大范围的 slug 完整性、SSRF 传输与状态同步加固。
-- **v0.7.0** —— 细粒度**权限范围 API Key 与 Principal 模型**（能力级授权 + 按 KB 限制 + API 集成调试台）；**运行时任务队列可观测面板与 Worker 池治理**（分阶段独立池 + 按模型并发治理 + 失败任务排查/重试）；**多实例存储后端**（每空间多存储实例、按 KB 绑定、默认实例）；**会话级临时附件**（图片/文档异步解析 + 合并限额）；推荐问题与追问；稳定资源注册表与 LLM 上下文别名压缩；`@Skill / @MCP` 提及范围化 Agent 运行时；会话内 MCP OAuth 授权；QQBot 与 Lark（飞书国际版）IM 集成；Redis TLS；Requesty 模型厂商 + Keenable 网络搜索；无空间预置与受控自助创建工作区；管理员密码重置；知识库复制流程；`weknora` CLI v0.10。同时完成大范围安全加固（SSRF、密钥脱敏、SQL 校验、越权）。
+- **v0.7.2** —— 产品文档站；知识库文件夹树；分块编辑与版本历史；Wiki 页面版本历史；可直接加载的文件链接（`resource_urls=public`）；飞书云盘数据源；批量打标签；MCP Server 1.1（29 个工具）；AWS S3 默认凭据链。
+- **v0.7.1** —— 云之家 IM；火山引擎重排序；智谱 AI 网络搜索；平台级 API Key；知识库活动审计；FAQ 筛选、打标签与导出；Langfuse OTLP 追踪；一键导出 Markdown。
+- **v0.7.0** —— 权限范围 API Key 与 Principal 模型；任务队列面板与 Worker 池治理；每空间多实例存储；对话临时附件；`@Skill / @MCP` 提及；会话内 MCP OAuth；QQBot 与 Lark IM；Redis TLS；`weknora` CLI v0.10。
 - **v0.6.3** —— 网站嵌入 Widget 与发布集成中心（安全模式 Token 交换 + 限流）；对话体验全面革新（引用浮层、RAG 流水线进度、流式 Markdown）；文档多标签与批量重新解析；Wiki 文件夹与层级导航；RSS 数据源；MCP OAuth2；EPUB / MHTML 解析；Agent 模型就绪校验；模型调试器；会话来源筛选；工作区删除 UI。
 - **v0.6.2** —— 按批次解析配置（`process_config`）+ 上传确认对话框；文档重新解析（reparse）支持覆盖配置；`weknora` CLI v0.9（内置 Agent Skills、`session stop`、auth/profile 统一）；知识库框选多选；pgvector 1024 维 HNSW 索引；对话资源 Store 重构；仅保留 Langfuse 追踪（移除 Jaeger）。
 - **v0.6.1** —— 文档解析追踪时间线（Langfuse 风格 Span 树，逐阶段进度展示 + 解析中止）；OpenSearch 向量库驱动；YAML 声明式内置模型配置；系统管理员与统一平台设置 + 审计日志；新用户引导；设置页 UI 重构；`weknora` CLI v0.7 / v0.8（Agent 优先线协议、NDJSON、`--dry-run`）；OpenDataLoader 与 PaddleOCR-VL 解析引擎；MCP Server 多传输（stdio / SSE / HTTP）；按模型的思考模式配置；腾讯云 LKEAP 重排 + 原生 Gemini Embedding + MiniMax-M3。
@@ -299,87 +299,41 @@ docker compose up -d    # 用新镜像重建容器
 
 ## 功能概览
 
-### 智能对话
-
-<sub>文档：[Agent](https://weknora.weixin.qq.com/docs/03-features/07-agent) · [Wiki](https://weknora.weixin.qq.com/docs/03-features/14-wiki) · [技能与沙箱](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox) · [长期记忆](https://weknora.weixin.qq.com/docs/03-features/23-memory) · [对话体验](https://weknora.weixin.qq.com/docs/03-features/18-chat-experience)</sub>
-
-| 能力 | 详情 |
+| 领域 | 要点 |
 |------|------|
-| 智能推理 | ReACT 渐进式多步推理，自主编排知识检索、MCP 工具、技能沙箱、本地浏览器与网络搜索 |
-| 快速问答 | 基于知识库的 RAG 问答，快速准确地回答问题 |
-| Wiki 模式 | Agent 驱动从原始文档中自动生成并维护结构化、相互链接的 Markdown Wiki 知识页面；支持浏览器内人工编辑、页面版本历史、行级 diff 与一键回滚 |
-| 技能目录与沙箱 | 空间技能目录（ClawHub / SkillHub / git / zip）安装到会话级 Docker / E2B / Cube 沙箱 · `shell_exec`、文件工具、产物收集、按配置网络策略 · 对话旁提供交互终端与浏览器内图形桌面 · macOS 桌面版把未固定沙箱的会话放在系统沙箱（Seatbelt）中运行，可绑定所选项目文件夹或使用按日期创建的临时工作区 · 已移除 Local 宿主机进程后端 |
-| 本地浏览器 | 智能体通过开源 BrowserSkill 扩展在独立任务窗口中操作用户自己的 Chrome / Edge（打开页面、点击、填表、读取内容），支持实时预览、暂停 / 继续 / 结束，登录与验证码交由用户处理 |
-| 对话控制 | 运行中追加要求、从任意历史问题分叉对话、原地回滚（沙箱工作区同步还原到对应检查点），按会话选择思考强度 |
-| 产物库 | 侧边栏集中列出所有对话生成的文件，支持类型筛选、搜索、按日期分组与版本历史 |
-| 长期记忆 | 跨会话记忆（profile / preference / fact / task / interest），支持自动抽取、用户确认与按需 `search_memory` |
-| 工具调用 | 内置工具、MCP 工具（含 OAuth2 远程服务、会话内 OAuth 授权）、网络搜索 · 支持 `@Skill / @MCP` 提及以按轮次范围化 Agent 运行时 · MCP 工具按需发现与调用，可逐个启用或停用 |
-| 对话策略 | 在线 Prompt 编辑、检索阈值调节、多轮上下文感知、按 Agent 引用输出开关 |
-| 推荐问题 | 基于知识库内容自动生成推荐问题与答后追问 |
-| 临时附件 | 会话级临时上传图片 / 文档，异步解析后用于一次性问答，支持图片与附件合并限额 |
-| 引用与 RAG 进度 | 对话内引用浮层与引用抽屉（区分网络 / 知识库来源）、统一 Markdown 渲染、RAG 流水线分阶段进度展示 |
-| 会话管理 | 侧边栏按来源（Web / IM / 嵌入）筛选与分组会话，支持会话标题内联重命名 |
+| [问答与 Agent](https://weknora.weixin.qq.com/docs/03-features/07-agent) | 快速问答基于知识库作答并附来源引用；智能推理由 ReAct Agent 编排知识库、网络搜索、MCP 工具、技能与本机浏览器。进行中的对话可以补充要求、分叉或回滚，并支持跨会话的[长期记忆](https://weknora.weixin.qq.com/docs/03-features/23-memory) |
+| [Wiki](https://weknora.weixin.qq.com/docs/03-features/14-wiki) | Agent 生成相互链接的 Wiki 页面与知识图谱；支持浏览器内编辑、版本 diff 与回滚 |
+| [技能与沙箱](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox) | 技能目录支持从 ClawHub / SkillHub / Git / ZIP 安装；会话级持久的 Docker / E2B / Cube 沙箱，按配置设置网络策略；对话旁提供交互式终端与图形桌面 |
+| [知识库](https://weknora.weixin.qq.com/docs/03-features/02-knowledge-base) | FAQ、文档、Wiki 三类知识库；文件夹树；分块编辑与版本历史；按批次设置解析、分块与多模态；自动打标签 |
+| [检索](https://weknora.weixin.qq.com/docs/03-features/05-retrieval-engines) | 关键词 + 向量混合检索、重排序、父子分块与 GraphRAG（[Neo4j](https://weknora.weixin.qq.com/docs/03-features/09-knowledge-graph)）；端到端评测召回命中率与 BLEU / ROUGE |
+| [权限与安全](https://weknora.weixin.qq.com/docs/03-features/01-tenant-auth) | 空间 RBAC 四级角色与审计日志；权限范围 API Key；OIDC；凭据 AES-256-GCM 加密；防 SSRF 的出站请求与仅白名单出站模式 |
+| [运维](https://weknora.weixin.qq.com/docs/03-features/16-observability) | Langfuse 追踪 Agent 步骤、Token 用量与任务流水线；文档解析时间线；带 Worker 池的任务队列面板；版本升级自动迁移数据库 |
 
-### 知识管理
+### 支持的组件
 
-<sub>文档：[知识库](https://weknora.weixin.qq.com/docs/03-features/02-knowledge-base) · [文档解析](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) · [分块](https://weknora.weixin.qq.com/docs/03-features/04-chunking) · [检索引擎](https://weknora.weixin.qq.com/docs/03-features/05-retrieval-engines) · [知识图谱](https://weknora.weixin.qq.com/docs/03-features/09-knowledge-graph) · [数据源](https://weknora.weixin.qq.com/docs/03-features/10-datasource)</sub>
-
-| 能力 | 详情 |
-|------|------|
-| 知识库类型 | FAQ / 文档 / Wiki，支持文件夹导入、URL 导入、多标签管理、在线录入 |
-| 文件夹树 | 文件夹上传保留原始目录结构，侧栏树形浏览、重命名文件夹、把文档重新归档到其他文件夹 |
-| 分块编辑与版本历史 | 在界面直接编辑检索分块，保留逐版本快照，支持 diff 与一键回滚，编辑后自动重建索引 · 生成问题可增删改与重新生成 · 支持文档自定义元数据 |
-| 按批次解析配置 | 上传确认对话框或 `process_config` API 覆盖解析引擎、分块、多模态（VLM / ASR）、图谱抽取与问题生成；支持 reparse 时调整配置 |
-| 批量重新解析 | 一次为多篇文档重新排队解析，可携带批次级 `process_config` |
-| 数据源导入 | 飞书知识库 / 飞书云盘 / Lark / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / RSS 订阅自动同步（更多数据源开发中），支持增量与全量同步 |
-| 文档格式 | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / 图片 / CSV / Excel / PPT / JSON / XMind |
-| 自动打标签 | 解析完成后从知识库已有标签中选择匹配项增量关联，不创建新标签、不覆盖人工标签 |
-| 检索策略 | BM25 稀疏召回 / Dense 稠密召回 / GraphRAG 图谱增强 / 父子分块 / pgvector HNSW 加速（1024 维）/ 多维度索引 |
-| 文档知识图谱 | 将文档转化为知识图谱，展示不同段落之间的关联关系，为索引和检索提供结构化支撑，提升检索结果的相关性和广度（需部署 Neo4j：启用 `neo4j` profile 并设置 `NEO4J_ENABLE=true`） |
-| 批量选择与打标签 | 知识库文档列表支持框选（marquee）多选，可批量重新解析、批量打标签（自动预选公共标签） |
-| 端到端测试 | 检索+生成全链路可视化，评估召回命中率、BLEU / ROUGE 等指标 |
-
-### 集成与扩展
-
-<sub>文档：[模型](https://weknora.weixin.qq.com/docs/03-features/06-models) · [MCP](https://weknora.weixin.qq.com/docs/03-features/08-mcp) · [网络搜索](https://weknora.weixin.qq.com/docs/03-features/11-web-search) · [IM 集成](https://weknora.weixin.qq.com/docs/03-features/12-im-integration) · [网站嵌入](https://weknora.weixin.qq.com/docs/03-features/13-embed-channel) · [存储后端](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends)</sub>
-
-| 能力 | 详情 |
-|------|------|
-| 模型厂商 | OpenAI / Azure OpenAI / Anthropic（Claude）/ DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / LiteLLM / Ollama |
-| 向量数据库 | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / 腾讯云 VectorDB |
+| 组件 | 可选项 |
+|------|--------|
+| [模型厂商](https://weknora.weixin.qq.com/docs/03-features/06-models) | 内置 27 家，包括 OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama |
 | Embedding | Ollama / BGE / GTE / 智谱 / OpenAI 兼容接口 |
-| 对象存储 | 本地 / 腾讯云 COS / 火山引擎 TOS / MinIO / AWS S3（支持 IAM Role / IRSA 默认凭据链）/ 阿里云 OSS / 金山云 KS3 / 华为云 OBS · 支持**每空间多实例存储后端**，不同知识库可绑定不同实例并设置默认实例 |
-| IM 集成 | 企业微信 / 飞书 / Lark（飞书国际版）/ QQBot / Slack / Telegram / 钉钉 / Mattermost / 微信 / 云之家 |
-| 网站嵌入 | 通过嵌入 Widget 发布智能体，支持域名白名单、限流与安全模式 Token 交换 |
-| 网络搜索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / 智谱 AI / Exa / Metaso / 博查 / Serply |
-| API 集成 | 权限范围 API Key（能力级授权 + 按 KB 限制 + 节流的 last_used 追踪）与 API 集成调试台 · MCP OAuth 与嵌入会话按 Principal 隔离 · `resource_urls=public` 直接返回可加载的文件/图片直链，免去二次鉴权代理调用 |
-| MCP Server | 内置：按空间发布 `/mcp/<endpoint_id>` 端点（Streamable HTTP），每个端点独立令牌、知识库范围、限流与工具分组（检索、`ask`、Wiki、需手动开启的写入工具）；Python 包 `tencent-weknora-mcp` 已弃用 |
-
-### 平台能力
-
-<sub>文档：[多租户与认证](https://weknora.weixin.qq.com/docs/03-features/01-tenant-auth) · [可观测性](https://weknora.weixin.qq.com/docs/03-features/16-observability) · [平台管理](https://weknora.weixin.qq.com/docs/03-features/20-platform-admin) · [异步任务](https://weknora.weixin.qq.com/docs/02-architecture/05-async-tasks)</sub>
-
-| 能力 | 详情 |
-|------|------|
-| 部署 | 本地 / Docker / Kubernetes (Helm)，支持私有化离线部署 |
-| 界面 | Web UI / RESTful API / 命令行（`weknora`）/ Chrome Extension / 网站嵌入 Widget / 微信小程序 · 界面支持中文 / 英文 / 日文 / 韩文 / 俄文 |
-| 权限控制 | 空间 RBAC 四级角色矩阵（Owner / Admin / Contributor / Viewer），按知识库的资源归属，每空间审计日志，invite-only 准入，无空间预置与受控自助创建工作区，管理员密码重置（会话吊销），跨空间超级管理员，权限范围 API Key |
-| 安全 | API Key 与 MCP / 数据源凭据 AES-256-GCM 静态加密、支持平滑密钥轮换 · app ↔ docreader gRPC TLS + Token · Redis TLS · 防 SSRF HTTP 客户端（覆盖数据源、URL 导入、重定向链等）· 密钥响应脱敏 · 技能沙箱隔离（Docker 需开启 / E2B / Cube）与按配置网络策略 · OIDC ID Token JWKS 验签 · 可选复杂密码策略 · 仅白名单出站模式（`SSRF_DNS_WHITELIST_ONLY`） |
-| 可观测性 | 集成 Langfuse（唯一追踪后端）以追踪 ReAct 循环、Token 消耗、工具调用和任务流水线 · 内置 Langfuse 风格的文档解析追踪时间线，逐阶段展示解析进度 · 系统管理员运行时任务队列面板（队列深度、按模型并发、失败任务排查与手动重试） |
-| 任务管理 | MQ 异步任务，分阶段独立 Worker 池治理（core / 后处理 / enrichment / maintenance + 弹性共享池，Wiki 独立池）与按模型后台并发治理 · 版本升级自动数据库迁移 |
-| 模型管理 | 集中配置，YAML 声明式内置模型配置，知识库级别模型选择，按模型思考模式与 Embedding 维度覆盖，交互式模型调试器，多空间共享内置模型，WeKnora Cloud 托管模型与文档解析 · 模型目录自动补全上下文窗口、最大输出、思考档位与视觉能力，提供实际调用预览与按模型协议覆盖 |
+| 向量数据库 | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / 腾讯云 VectorDB |
+| [对象存储](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | 本地 / 腾讯云 COS / MinIO / AWS S3 / 火山引擎 TOS / 阿里云 OSS / 金山云 KS3 / 华为云 OBS |
+| [文档格式](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) | PDF / Word / PPT / Excel / CSV / TXT / Markdown / HTML / EPUB / MHTML / JSON / XMind / 图片 |
+| [数据源](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | 飞书知识库 / 飞书云盘 / Lark / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / RSS |
+| [IM 渠道](https://weknora.weixin.qq.com/docs/03-features/12-im-integration) | 企业微信 / 飞书 / Lark / QQBot / Slack / Telegram / 钉钉 / Mattermost / 微信 / 云之家 |
+| [网络搜索](https://weknora.weixin.qq.com/docs/03-features/11-web-search) | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / 智谱 AI / Exa / Metaso / 博查 / Serply |
+| 部署 | Docker Compose / Kubernetes (Helm) / Lite 单二进制 / 桌面版；支持离线与私有云部署；界面支持中文、英文、日文、韩文、俄文 |
 
 ## 客户端与生态
 
 | | 客户端 | 用途 |
 |:-:|--------|------|
 | <img src="./docs/images/readme/icons/terminal.svg" width="22" height="22" alt=""> | [**命令行 `weknora`**](./cli/README.md) | Agent 优先的命令行，覆盖完整 API，附带精选 MCP 工具面与内置 Agent Skills |
-| <img src="./docs/images/readme/icons/plug.svg" width="22" height="22" alt=""> | [**内置 MCP Server**](https://weknora.weixin.qq.com/docs/03-features/08-mcp) | 把知识库开放给 Cursor、Claude 等 MCP 客户端 |
+| <img src="./docs/images/readme/icons/plug.svg" width="22" height="22" alt=""> | [**内置 MCP Server**](https://weknora.weixin.qq.com/docs/03-features/08-mcp) | 通过 Streamable HTTP 把知识库开放给 Cursor、Claude 等 MCP 客户端；[`mcp-server/`](./mcp-server/MCP_CONFIG.md) 下的 Python 服务已弃用 |
 | <img src="./website-docs/homepage/public/docs/_home/brands/browserskill.png" width="22" height="22" alt=""> | [**本地浏览器（BrowserSkill）**](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser) | 让智能体操作用户自己的 Chrome / Edge |
 | <img src="./website-docs/homepage/public/docs/_home/brands/chrome.svg" width="22" height="22" alt=""> | [**Chrome 插件**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) | 在浏览器中选中文本、图片或整个页面，一键保存为知识条目，无需复制粘贴或手动上传文件 |
 | <img src="./docs/images/readme/icons/phone.svg" width="22" height="22" alt=""> | [**微信小程序**](./miniprogram/README.md) | 轻量移动端：配置 WeKnora API、选择知识库、导入 URL，并在微信内向知识库提问 |
 | <img src="./docs/images/readme/icons/skills.svg" width="22" height="22" alt=""> | [**ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) | 发布在 ClawHub 上的 WeKnora 技能，通过 REST API 导入文档、混合检索与管理知识条目 |
-| <img src="./website-docs/homepage/public/docs/_home/brands/deepseek-color.svg" width="22" height="22" alt=""> | [**DeepSeek Harness 插件**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | 让 `dsh` 编码 Agent 只读访问你的文档 |
+| <img src="./website-docs/homepage/public/docs/_home/brands/deepseek-color.svg" width="22" height="22" alt=""> | [**DeepSeek Harness 插件**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | 为 `dsh` 编码 Agent 提供四个只读工具：检索、读取文档、提问、列出知识库 |
 | <img src="./docs/images/readme/icons/code.svg" width="22" height="22" alt=""> | [**网站嵌入 Widget**](https://weknora.weixin.qq.com/docs/03-features/13-embed-channel) | 将智能体发布到外部站点 |
 | <img src="./docs/images/readme/icons/braces.svg" width="22" height="22" alt=""> | [**Go SDK**](https://weknora.weixin.qq.com/docs/05-clients/03-go-sdk) | 知识库、文档、会话等资源的 CRUD 与 SSE 流式问答 |
 | <img src="./website-docs/homepage/public/docs/_home/brands/wechat-dialog.png" width="22" height="22" alt=""> | [**微信对话开放平台**](https://chatbot.weixin.qq.com) | 基于 WeKnora 的托管问答平台，上传知识即可在微信内发布问答服务，无需写代码 |
@@ -398,50 +352,6 @@ weknora chat "总结一下设计文档"
 ```
 
 在无界面 / CI 场景下，设置 `WEKNORA_API_KEY` 与 `WEKNORA_HOST` 即可跳过 `auth login`，不会有凭据写入磁盘。安装与 5 分钟上手见 [`cli/README.md`](./cli/README.md)，AI Agent 依赖的操作约定见 [`cli/AGENTS.md`](./cli/AGENTS.md)。
-
-### MCP Server
-
-WeKnora 已内置 MCP Server：在「**设置 → 发布集成 → MCP Server**」新建端点，客户端通过 Streamable HTTP 连接 `/mcp/<endpoint_id>` 即可，详见 [MCP 文档](https://weknora.weixin.qq.com/docs/03-features/08-mcp)。[`mcp-server/`](./mcp-server/MCP_CONFIG.md) 下的独立 Python 服务已弃用，仅为兼容旧部署保留。
-
-<details>
-<summary><b>ClawHub Skill</b></summary>
-
-<br/>
-
-[**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) 是 WeKnora 发布在 ClawHub 平台上的技能。安装后，可通过 WeKnora REST API 上传文档（文件 / URL / Markdown）、执行混合检索（向量 + 关键词）以及管理知识条目。
-
-- **文档导入**：通过 Agent 上传文件、导入网页或写入 Markdown 知识
-- **混合检索**：在单个或多个知识库中进行向量 + 关键词混合搜索
-- **知识管理**：以编程方式浏览、编辑和删除知识条目
-
-</details>
-
-<details>
-<summary><b>DeepSeek Harness 插件</b></summary>
-
-<br/>
-
-[**`@wxg-prc-cpg/dsh-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) 是官方的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）插件（[说明](./packages/dsh-weknora/README_CN.md)）。harness 自身不带任何检索、向量或知识库能力，这个插件把你的文档接进编码 Agent：`dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`，指向一个部署，Agent 的工具集里就会出现四个只读工具。
-
-- **`weknora_search`**：混合检索，返回原文片段，每条都带可复用的 `knowledge_id`
-- **`weknora_read_document`**：把单个文档的分块按序拼回正文，支持翻页
-- **`weknora_ask`**：WeKnora 自己带引用的成稿答案，走 RAG 或 ReAct 流水线
-- **`weknora_list_knowledge_bases`**：知识库名称与 id，便于 Agent 自己缩小检索范围
-
-</details>
-
-<details>
-<summary><b>微信对话开放平台</b></summary>
-
-<br/>
-
-[微信对话开放平台](https://chatbot.weixin.qq.com)以 WeKnora 为核心技术框架，以托管服务的形式提供：
-
-- **零代码部署**：上传知识即可在微信生态中发布问答服务。
-- **问题管理**：高频问题按类别独立管理，配套数据工具，便于保持回答准确、易于维护。
-- **微信场景接入**：问答能力可接入公众号、小程序等微信场景。
-
-</details>
 
 ## 文档
 
