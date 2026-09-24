@@ -42,9 +42,9 @@
 
 [WeKnora](https://weknora.weixin.qq.com) is an open-source, LLM-powered knowledge framework for enterprise document understanding, semantic retrieval and reasoning. It brings a team's documents together so they can be searched, reasoned over and kept up to date.
 
-https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc
+https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
 
-<p align="center"><sub>2:25 · 1080p · English narration and captions</sub></p>
+<p align="center"><sub>1:52 · 1080p · No narration, English on-screen text</sub></p>
 
 Use RAG to look things up, the agent for multi-step tasks, and the wiki to organize knowledge. All three work on the same knowledge bases.
 
