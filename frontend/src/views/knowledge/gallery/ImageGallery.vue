@@ -494,13 +494,17 @@ function onSearchModeChange(value: string | number | boolean) {
 }
 
 // Reconcile the whole on/off map from one checkbox-group change, then
-// persist and re-query.
+// persist and re-query. In "all" mode every field is searched and the
+// checkboxes are only decorative (dimmed): touching one means the user
+// wants a custom selection, so the master switch drops to custom with
+// every field still on except the one just unticked.
 function onSearchFieldsChange(vals: Array<string | number | boolean>) {
   const next: Record<string, string> = { ...searchStatus.value }
   for (const attr of searchAttrs.value) {
     next[attr.id] = vals.includes(attr.id) ? 'on' : 'off'
   }
   searchStatus.value = next
+  if (searchMode.value === 'all') searchMode.value = 'custom'
   persistSearchPrefs()
   resetPageAndReload()
 }
@@ -665,7 +669,7 @@ onMounted(async () => {
                   each with three positions: leave the images carrying it
                   alone, hide them, or force them back in.
                 -->
-                <div v-if="attr.type !== 'keywords'" class="ig-verdict-rows">
+                <div v-if="attr.type !== 'keywords'" class="ig-verdict-rows" :class="{ 'is-idle': !filterScopeOn }">
                   <div v-for="v in attr.values || []" :key="v.value" class="ig-verdict-row">
                     <t-tooltip :content="attrValueDescription(attr, v.value)">
                       <span class="ig-verdict-value">{{ attrValueLabel(attr, v.value) }}</span>
@@ -714,9 +718,16 @@ onMounted(async () => {
 
             <div v-if="searchAttrs.length">
               <div v-if="searchMode === 'all'" class="ig-hint">{{ t('knowledgeEditor.wikiBrowser.gallery.searchAllHint') }}</div>
+              <!--
+                The checkboxes stay visible next to the master switch like the
+                filter panel's verdicts do. In "all" mode they are dimmed —
+                every field is searched, so the ticks carry no weight — yet
+                still clickable: touching one drops the mode to custom.
+              -->
               <t-checkbox-group
-                v-else
                 :value="activeSearchIds"
+                class="ig-search-fields"
+                :class="{ 'is-idle': searchMode === 'all' }"
                 @change="(vals: Array<string | number | boolean>) => onSearchFieldsChange(vals)"
               >
                 <t-checkbox v-for="attr in searchAttrs" :key="attr.id" :value="attr.id" :label="attrLabel(attr)" />
@@ -1025,6 +1036,17 @@ onMounted(async () => {
   color: var(--td-text-color-primary, #333);
 }
 .ig-verdict-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* A gated block reads as inactive: dimmed text and buttons, but still
+   clickable so the first touch can activate the master switch. */
+.ig-verdict-rows.is-idle,
+.ig-search-fields.is-idle {
+  opacity: 0.4;
+}
+.ig-search-fields {
   display: flex;
   flex-direction: column;
   gap: 4px;
