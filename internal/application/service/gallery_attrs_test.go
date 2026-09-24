@@ -21,7 +21,7 @@ func rules(t *testing.T, raw string) *types.ImageListFilter {
 func TestMatchAttrRules(t *testing.T) {
 	// An image two attributes have been looked at for: it carries both values.
 	observed := types.ImageAsset{ID: "img-block", Attrs: map[string]any{
-		"contain.text":       "block",
+		"contain.text":        "block",
 		"contain.data_visual": "true",
 	}}
 	// An image no pipeline has ever examined, so the keys are absent.
@@ -56,7 +56,7 @@ func TestMatchAttrRules(t *testing.T) {
 			why:      "A forced display outranks everything else.",
 		},
 		{
-			name: "on outranks off for the same image",
+			name:  "on outranks off for the same image",
 			asset: observed,
 			// Both rules speak about this image; one wants it gone, one wants
 			// it kept, and the two verdicts come from different attributes.

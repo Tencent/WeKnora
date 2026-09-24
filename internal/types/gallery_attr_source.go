@@ -61,7 +61,7 @@ type GalleryAttrDef struct {
 // GalleryAttrSource is the aggregated view of one registered attribute
 // source: the source id plus the attributes it provides for a KB.
 type GalleryAttrSource struct {
-	ID    string          `json:"id"`
+	ID    string           `json:"id"`
 	Attrs []GalleryAttrDef `json:"attrs"`
 }
 

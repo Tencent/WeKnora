@@ -27,9 +27,9 @@ const (
 // its translations on top (see imageAttrDisplay in the web app) and falls
 // back to these strings for anything not translated yet.
 type AttrValue struct {
-	Value       string `json:"value"`                  // raw machine value, never localized
-	Label       string `json:"label"`                  // short on-screen name
-	Description string `json:"description,omitempty"`  // sentence explaining the value
+	Value       string `json:"value"`                 // raw machine value, never localized
+	Label       string `json:"label"`                 // short on-screen name
+	Description string `json:"description,omitempty"` // sentence explaining the value
 }
 
 // The same row also carries the attribute's display text. The settings panel
@@ -39,11 +39,11 @@ type AttrValue struct {
 // endpoint. An attribute is always accompanied by a short label for compact
 // spaces and a sentence for places with room.
 type AttrSpec struct {
-	Name        string      `json:"name"`             // stable key, e.g. "contain.text"
-	Type        AttrType    `json:"type"`             // extent | presence
-	Values      []AttrValue `json:"values,omitempty"` // ordered low->high for extent attrs
-	Question    string      `json:"question"`         // sentence shown to the model in the describe round
-	Label       string      `json:"label"`            // human-readable name for the settings panel
+	Name        string      `json:"name"`                  // stable key, e.g. "contain.text"
+	Type        AttrType    `json:"type"`                  // extent | presence
+	Values      []AttrValue `json:"values,omitempty"`      // ordered low->high for extent attrs
+	Question    string      `json:"question"`              // sentence shown to the model in the describe round
+	Label       string      `json:"label"`                 // human-readable name for the settings panel
 	Description string      `json:"description,omitempty"` // one line explaining what the attribute measures
 	Consumers   []string    `json:"consumers,omitempty"`   // downstream steps that read this attribute
 }

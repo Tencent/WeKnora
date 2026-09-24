@@ -89,7 +89,7 @@ type GalleryResolvedAttr struct {
 // live, the resolved attribute list, and the user's search activation state.
 type GalleryResolvedConfig struct {
 	// AttributeSources lists the live source ids in priority order.
-	AttributeSources []string `json:"attribute_sources"`
+	AttributeSources []string              `json:"attribute_sources"`
 	Attributes       []GalleryResolvedAttr `json:"attributes"`
 	// Mode is the user's search activation mode ("all" by default).
 	Mode string `json:"mode"`
