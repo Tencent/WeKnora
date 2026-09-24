@@ -3275,8 +3275,8 @@ export default {
       tabDocuments: 'Documents',
       tabGallery: 'Gallery',
       gallery: {
-        panelFilter: 'Filter settings',
-        panelSearch: 'Search settings',
+        panelFilter: 'Filter',
+        panelSearch: 'Search',
         enableFilter: 'Enable filter',
         searchAll: 'Search all fields',
         verdictDefault: '-',

@@ -4307,8 +4307,8 @@ export default {
       tabDocuments: 'Документы',
       tabGallery: 'Галерея',
       gallery: {
-        panelFilter: 'Настройки фильтра',
-        panelSearch: 'Настройки поиска',
+        panelFilter: 'Фильтр',
+        panelSearch: 'Поиск',
         enableFilter: 'Включить фильтр',
         searchAll: 'Искать во всех полях',
         verdictDefault: '-',
