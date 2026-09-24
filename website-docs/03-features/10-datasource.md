@@ -167,8 +167,7 @@ Outline（getoutline.com，支持公有云与私有化部署）以集合（colle
 - **图片相关约束**：单篇最多内联 30 张（对齐 `ImageResolver.maxRemoteImages`），单张上限 9MB（低于 `maxRemoteImageSize` 的 10MB），超限或下载失败的图片保留原链接并打告警，不会删除正文。仅当目标知识库启用了多模态（`DataSourceConfig.MultimodalEnabled`）时才下载图片——未启用时图片无法入库，下载只会白白膨胀上传体积。另外，重写出的 Markdown 必须是 `![alt](data:...)` 且 data URI 后不能再跟 `"title"`：`imgMarkdownDataURI` 会把右括号前的内容全部当作 payload，残留的标题会让 base64 解码失败、图片被丢弃，因此 Outline 的链接标题被提升为 alt 文本。
 - **增量逻辑**：游标 `outlineCursor.CollectionDocRevisions`（`collectionID → documentID → revision`）。Outline 的 `revision` 只在正文或标题变更时递增，比 `updatedAt` 更贴近"内容是否变了"。删除检测：游标里有、当前列表没有 → `IsDeleted`；回收站与归档中的文档同样不出现在列表里，因此两种情况都能覆盖。
 - **跳过的内容**：模板（`templateId` 非空）、已删除与已归档文档。
-- **文本清理**：Outline 序列化空段落/硬换行时会留下整行只有 `\` 或字面量 `
-` 的噪声（在一个 1123 篇文档的实例上测得 687 行与 1463 个 token，分布在 15 个集合中的 13 个）。连接器只在**整行仅由这些 token 组成**时删除该行，并跳过 fenced code block 内部，因此行内的合法转义（`\[`、`\]`、`\*`）与代码示例不受影响。标题层级与正文结构保持原样，不做任何美化改写。
+- **文本清理**：Outline 序列化空段落/硬换行时会留下整行只有 `\` 或字面量 `\n` 的噪声（在一个 1123 篇文档的实例上测得 687 行与 1463 个 token，分布在 15 个集合中的 13 个）。连接器只在**整行仅由这些 token 组成**时删除该行，并跳过 fenced code block 内部，因此行内的合法转义（`\[`、`\]`、`\*`）与代码示例不受影响。标题层级与正文结构保持原样，不做任何美化改写。
 
 #### RSS / Atom（`connector/rss/`）
 
