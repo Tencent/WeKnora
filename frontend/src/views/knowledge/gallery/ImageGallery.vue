@@ -44,7 +44,7 @@ const filterScope = ref<'all' | 'custom'>('all')
 // where the two panels take turns as tabs instead of both eating space.
 const openPanel = ref<'search' | 'filter' | ''>('')
 const pinnedPanel = ref<'search' | 'filter' | ''>('')
-const panelTab = ref<'search' | 'filter'>('filter')
+const panelTab = ref<'search' | 'filter'>('search')
 // Where the floating panel hangs: captured from the arrow that opened it,
 // so it sits directly beneath that control instead of at a guessed spot.
 const panelPos = ref<{ top: number; left: number } | null>(null)
@@ -543,9 +543,25 @@ function keywordsInputValue(attrId: string): string {
   return (attrSelections.value[attrId] || []).join(', ')
 }
 
-function clearFilters() {
-  keyword.value = ''
-  attrSelections.value = {}
+// Apply one verdict to every value of every value-typed filter attribute.
+// The "-" position clears all verdicts, which also drops the scope back to
+// "全显示": custom mode with no rules constrains nothing.
+function setAllVerdicts(verdict: Verdict): void {
+  const next: Record<string, Record<string, string>> = {}
+  for (const attr of filterAttrs.value) {
+    if (attr.type === 'keywords') continue
+    const perValue: Record<string, string> = { ...(attrVerdicts.value[attr.id] || {}) }
+    for (const v of attr.values || []) {
+      if (verdict === 'default') delete perValue[v.value]
+      else perValue[v.value] = verdict
+    }
+    if (Object.keys(perValue).length > 0) next[attr.id] = perValue
+  }
+  attrVerdicts.value = next
+  const hasRules = Object.values(next).some((perValue) =>
+    Object.values(perValue).some((v) => v === 'off' || v === 'on'),
+  )
+  filterScope.value = hasRules ? 'custom' : 'all'
   resetPageAndReload()
 }
 
@@ -640,8 +656,9 @@ onMounted(async () => {
       >
         <div class="ig-panel-head">
           <t-tabs v-model="panelTab" class="ig-panel-tabs">
-            <t-tab-panel value="filter" :label="t('knowledgeEditor.wikiBrowser.gallery.panelFilter')" />
+            <!-- Same order as the toolbar: search on the left, filter on the right. -->
             <t-tab-panel value="search" :label="t('knowledgeEditor.wikiBrowser.gallery.panelSearch')" />
+            <t-tab-panel value="filter" :label="t('knowledgeEditor.wikiBrowser.gallery.panelFilter')" />
           </t-tabs>
           <button
             class="ig-pin"
@@ -705,9 +722,26 @@ onMounted(async () => {
             </div>
             <div v-else class="ig-no-attrs">{{ t('knowledgeEditor.wikiBrowser.gallery.noAttrs') }}</div>
 
-            <t-button theme="default" variant="text" class="ig-clear" @click="clearFilters">
-              {{ t('knowledgeEditor.wikiBrowser.gallery.clearFilters') }}
-            </t-button>
+            <!--
+              One row to speak for every attribute at once: the same three
+              positions as a per-value row, applied to all of them in one
+              click.
+            -->
+            <div class="ig-row ig-apply-all">
+              <span class="ig-row-label">{{ t('knowledgeEditor.wikiBrowser.gallery.applyAll') }}</span>
+              <div class="ig-verdict-group">
+                <button
+                  v-for="verdict in VERDICTS"
+                  :key="verdict"
+                  type="button"
+                  class="ig-verdict"
+                  :class="['is-' + verdict]"
+                  @click="setAllVerdicts(verdict)"
+                >
+                  {{ verdictLabel(verdict) }}
+                </button>
+              </div>
+            </div>
           </template>
 
           <template v-else>
@@ -973,7 +1007,8 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--td-component-border, #eee);
+  /* No bottom border here: the tab bar already draws one, and a second
+     divider under it just reads as visual noise. */
 }
 .ig-panel-tabs {
   flex: 1 1 0;
@@ -1196,12 +1231,14 @@ onMounted(async () => {
   font-weight: 500;
   margin-bottom: 4px;
 }
-.ig-no-attrs,
-.ig-clear {
+.ig-no-attrs {
   font-size: 13px;
 }
-.ig-clear {
+.ig-apply-all {
   margin-top: 4px;
+}
+.ig-apply-all .ig-verdict-group {
+  flex-shrink: 0;
 }
 
 /* Main */
