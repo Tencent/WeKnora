@@ -661,7 +661,8 @@ func (r *chunkRepository) ListImageChunksByKnowledgeBaseID(
 	var chunks []*types.Chunk
 	err := r.db.WithContext(ctx).
 		Model(&types.Chunk{}).
-		Select("id, knowledge_id, knowledge_base_id, chunk_type, image_info, is_enabled, status, created_at, updated_at").
+		Select("id, knowledge_id, knowledge_base_id, chunk_type, image_info, " +
+			"is_enabled, status, created_at, updated_at").
 		Where("tenant_id = ? AND knowledge_base_id = ? AND image_info != ''", tenantID, kbID).
 		Order("updated_at DESC").
 		Find(&chunks).Error

@@ -1327,7 +1327,7 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 
 	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	ctx = types.WithExecutionTenant(ctx, effectiveTenantID)
