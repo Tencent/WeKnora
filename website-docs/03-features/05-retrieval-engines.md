@@ -27,6 +27,7 @@
 | Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | GraphQL 生态、需副本/分片配置 |
 | Doris | `doris` | ANN HNSW inner_product/cosine | 倒排索引 MATCH_ANY | 倒排命中 | 建表声明 chinese parser | 每维一张表 | SQL 内 | 高 | 已有 Doris 数仓，检索与分析一体 |
 | 腾讯云 VectorDB | `tencent_vectordb` | HNSW COSINE | 稀疏向量 BM25（SPARSE_INVERTED） | BM25 | SDK SparseEncoder | 每维一个 collection | 应用侧 | 低（云托管） | 腾讯云托管、免运维 |
+| Vastbase G100 | `vastbase` | 原生 halfvector + Graph_Index 表达式索引（cosine） | 不支持（Support 仅 vector） | — | — | 单表混维，按维惰性建 Graph_Index | 距离阈值 SQL 内 | 低（PG 协议直连） | 国产化海量数据库；与 PG 生态兼容，支持量化/异步插入调优 |
 
 > 说明：无论引擎自身是否提供"混合检索"，WeKnora 的混合始终是**上层统一的 RRF 融合**（`knowledgebase_search_fusion.go`）——向量与关键词各自独立检索，按 rank 加权合并（见 [混合检索打分与归一化](#_5-混合检索打分与归一化)），因此各引擎只需分别提供两类单模检索。
 
@@ -36,7 +37,7 @@
 
 | 环境变量 | 默认 | 说明 |
 |----------|------|------|
-| `RETRIEVE_DRIVER` | `postgres` | 逗号分隔多驱动：`postgres` / `sqlite` / `elasticsearch_v7` / `elasticsearch_v8` / `opensearch` / `qdrant` / `milvus` / `weaviate` / `doris` / `tencent_vectordb`。多驱动时写操作广播到全部，检索按类型路由 |
+| `RETRIEVE_DRIVER` | `postgres` | 逗号分隔多驱动：`postgres` / `sqlite` / `vastbase` / `elasticsearch_v7` / `elasticsearch_v8` / `opensearch` / `qdrant` / `milvus` / `weaviate` / `doris` / `tencent_vectordb`。多驱动时写操作广播到全部，检索按类型路由 |
 | `MULTI_STORE_RETRIEVE_TIMEOUT_SEC` | 30 | 多 store 并行检索每组超时 |
 | `ELASTICSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` | — / `WeKnora` | ES v7/v8 共用 |
 | `OPENSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` / `_INSECURE_SKIP_VERIFY` | — | OpenSearch |
@@ -45,6 +46,8 @@
 | `WEAVIATE_HOST` / `_GRPC_ADDRESS` / `_SCHEME` / `_AUTH_ENABLED` / `_API_KEY` / `_COLLECTION` | `weaviate:8080` / `weaviate:50051` / `http` | 容器内用服务名 |
 | `DORIS_ADDR` / `_HTTP_PORT` / `_DATABASE` / `_USERNAME` / `_PASSWORD` / `_TABLE_PREFIX` / `_COMPAT_MODE` | `doris-fe:9030` / 8030 / `weknora` / `root` / — / `weknora_embeddings` / `auto` | Doris 4.1+；compat 模式建表后不可互换 |
 | `TENCENT_VECTORDB_ADDR` / `_USERNAME` / `_API_KEY` / `_DATABASE` / `_COLLECTION` | — | 三项核心缺一跳过注册 |
+| `VASTBASE_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_DATABASE` / `_SSLMODE` | `localhost` / 5432 / `vastbase` / — / `weknora` / `disable` | Vastbase G100 连接（PG 协议） |
+| `VASTBASE_GRAPH_INDEX_M` / `_EF_CONSTRUCTION` / `_PARALLEL_WORKERS` / `_QUANTIZER` / `_ASYNC_INSERT` | 16 / 64 / 0 / — / `false` | Graph_Index 构建调优（quantizer 取 `pq`\|`rabitq`） |
 | `NEO4J_ENABLE` / `NEO4J_URI` / `_USERNAME` / `_PASSWORD` | `false` / `bolt://neo4j:7687` | 图谱检索（独立于向量引擎体系） |
 
 除环境变量（env store，进程级全局）外，还可在管理端为租户创建 `VectorStore` 记录（DB store）并绑定到具体 KB——同一引擎类型可接多套集群实例，检索时按 KB 绑定自动路由并做租户属主校验（[检索时的引擎选择](#_1-2-检索时的引擎选择)）。
@@ -209,7 +212,20 @@ flowchart TD
 - **关键词检索**：本地 `encoder.SparseEncoder`（BM25）把查询编码为稀疏向量，对 `sparse_vector` 字段做稀疏检索，遍历匹配维度的所有 collection。
 - 配置：`TENCENT_VECTORDB_ADDR` / `TENCENT_VECTORDB_USERNAME` / `TENCENT_VECTORDB_API_KEY` / `TENCENT_VECTORDB_DATABASE` / `TENCENT_VECTORDB_COLLECTION`。三项核心配置缺一则跳过注册。
 
-#### Neo4j — 图谱检索（不在 Registry 体系内） {#_2-11-neo4j-—-图谱检索-不在-registry-体系内}
+#### Vastbase G100 {#_2-11-vastbase-g100}
+
+`internal/application/repository/retriever/vastbase/`（`repository.go` + `structs.go` + `move.go`）。海量数据库 Vastbase G100 兼容 PostgreSQL 协议，复用 gorm postgres dialector（pgx）连接；向量能力为 Vastbase 原生（无需任何 extension）。仅提供**向量检索**（`Support()` 只有 vector），需要关键词检索时与其他驱动组合（如 `RETRIEVE_DRIVER=vastbase,elasticsearch_v8`）。
+
+- **建表**：仓库初始化时幂等自建 `embeddings` 表（Vastbase 库不走 WeKnora 的 golang-migrate 管线）：`embedding halfvector`（无固定维度，单表混维）+ `(source_id, source_type)` 唯一索引 + kb/tag/is_enabled 辅助索引。
+- **索引**：首次写入/检索某维度时惰性创建**按维度的部分表达式 Graph_Index**：
+  `CREATE INDEX IF NOT EXISTS embeddings_graph_idx_cosine_{dim} ON embeddings USING graph_index((embedding::halfvector({dim})) halfvector_cosine_ops) WITH (m, ef_construction, parallel_workers[, quantizer][, enable_async_insert]) WHERE (dimension = {dim})`。
+  Graph_Index 是 Vastbase 主推的多层图 ANN 索引（HNSW/IVFFlat 已弃用）；`quantizer=pq|rabitq` 可开启向量量化（Build 8 Patch 4+，数据量不足时自动退化为普通 Graph_Index）。
+- **向量检索**：查询表达式的 cast 与索引表达式**逐字节一致**（否则规划器不走 ANN 扫描）；`dimension` 谓词内联为字面量以命中部分索引；事务内 `SET LOCAL hnsw_ef_search`（注意是下划线，非 pgvector 的 `hnsw.ef_search`）扩大候选集；余弦距离 `<=>`，`score = 1 - distance`，阈值在 SQL 内下推。
+- **写入**：Vastbase 的 `INSERT ... ON CONFLICT` 不支持 `RETURNING`，批量写入走原生 SQL `ON CONFLICT (source_id, source_type) DO NOTHING`（500 行/批），语义与 postgres 驱动的 upsert-skip 一致。
+- **性能**（V3.0 Build 9 实测，20k × 1024 维）：ANN Index Scan 命中部分 Graph_Index，TopK=10 平均检索延迟约 3.5ms；`parallel_workers` 建议设为 CPU 核数的 75%；大批量灌入可开 `VASTBASE_GRAPH_INDEX_ASYNC_INSERT=true`（需服务端 `enable_async_vec_insert=on`）。
+- 配置：`VASTBASE_HOST` / `VASTBASE_PORT` / `VASTBASE_USER` / `VASTBASE_PASSWORD` / `VASTBASE_DATABASE` / `VASTBASE_SSLMODE` / `VASTBASE_GRAPH_INDEX_*`。
+
+#### Neo4j — 图谱检索（不在 Registry 体系内） {#_2-12-neo4j-—-图谱检索-不在-registry-体系内}
 
 `internal/application/repository/retriever/neo4j/repository.go` 实现的是 `RetrieveGraphRepository`（`SearchNode(ctx, NameSpace, entities)`），不是向量/关键词引擎：按 `NameSpace{KnowledgeBase, Knowledge}` 检索实体节点与关系，服务于 chat pipeline 的 `ENTITY_SEARCH` 阶段（GraphRAG）。由 `NEO4J_ENABLE=true` + `NEO4J_URI`/`NEO4J_USERNAME`/`NEO4J_PASSWORD` 启用。单次查询最多从 200 个种子实体展开、最多返回 2000 行，详见[知识图谱](09-knowledge-graph.md)。
 

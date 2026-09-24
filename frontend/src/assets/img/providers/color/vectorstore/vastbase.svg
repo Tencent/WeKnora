@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<svg width="800px" height="250px" viewBox="0 0 800 250" version="1.1" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid">
+    <!-- Vastbase wordmark: two-tone orange "V" check mark + orange "ast" + black "base" -->
+    <g>
+        <!-- right arm of the V (light orange), drawn first so the dark arm
+             overlaps it at the bottom vertex -->
+        <polygon points="140,62 205,62 135,196 95,196" fill="#F79A4D"/>
+        <!-- left arm of the V (brand orange) -->
+        <polygon points="30,62 95,62 140,196 100,196" fill="#EE7524"/>
+        <!-- rounded bottom vertex -->
+        <circle cx="117" cy="172" r="24" fill="#EE7524"/>
+    </g>
+    <text x="195" y="196" font-family="Arial, 'Helvetica Neue', Helvetica, sans-serif" font-size="165" font-weight="700" letter-spacing="-4"><tspan fill="#EE7524">ast</tspan><tspan fill="#1A1A1A">base</tspan></text>
+</svg>

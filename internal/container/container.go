@@ -48,6 +48,7 @@ import (
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
 	tencentVectorDBRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/tencentvectordb"
+	vastbaseRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/vastbase"
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -1595,12 +1596,78 @@ func initRetrieveEngineRegistry(
 			}
 		}
 	}
+	if slices.Contains(retrieveDriver, "vastbase") {
+		vastbaseDB, err := initVastbaseRetrieverDB()
+		if err != nil {
+			log.Errorf("Init vastbase retrieve connection failed: %v", err)
+		} else {
+			vastbaseRepository, err := vastbaseRepo.NewVastbaseRetrieveEngineRepository(
+				vastbaseDB, vastbaseRepo.ConfigFromEnv(),
+			)
+			if err != nil {
+				log.Errorf("Init vastbase retrieve engine repository failed: %v", err)
+			} else if err := registry.Register(
+				retriever.NewKVHybridRetrieveEngine(
+					vastbaseRepository, types.VastbaseRetrieverEngineType,
+				),
+			); err != nil {
+				log.Errorf("Register vastbase retrieve engine failed: %v", err)
+			} else {
+				log.Infof("Register vastbase retrieve engine success")
+			}
+		}
+	}
 	// ─── DB store registration (byStoreID) ───
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
 		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink)
 	}
 
 	return registry, nil
+}
+
+// initVastbaseRetrieverDB opens a dedicated gorm connection to the Vastbase
+// G100 instance used for vector retrieval. Vastbase speaks the PostgreSQL
+// wire protocol, so the standard postgres dialector (pgx) is reused; the
+// vector capabilities (halfvector type, graph_index) are native to Vastbase
+// and need no extension.
+func initVastbaseRetrieverDB() (*gorm.DB, error) {
+	getEnv := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	host := getEnv("VASTBASE_HOST", "localhost")
+	port := getEnv("VASTBASE_PORT", "5432")
+	user := getEnv("VASTBASE_USER", "vastbase")
+	password := os.Getenv("VASTBASE_PASSWORD")
+	dbname := getEnv("VASTBASE_DATABASE", "weknora")
+	sslmode := getEnv("VASTBASE_SSLMODE", "disable")
+
+	dsn := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
+		host, port, user, password, dbname, sslmode,
+	)
+	logger.Infof(context.Background(), "Vastbase Config: user=%s host=%s port=%s dbname=%s", user, host, port, dbname)
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to vastbase: %w", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get underlying sql.DB for vastbase: %w", err)
+	}
+	if err := sqlDB.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping vastbase: %w", err)
+	}
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetConnMaxLifetime(10 * time.Minute)
+	return db, nil
 }
 
 // loadDBStoresIntoRegistry loads VectorStore records from DB and registers them
