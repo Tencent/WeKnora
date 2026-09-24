@@ -50,11 +50,12 @@ https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/capabilities-cn-dark.svg">
-  <img src="./docs/images/readme/capabilities-cn-light.svg" alt="01 RAG：回答有据可查，混合检索、多模态解析、原文引用。02 Agent：用知识和工具完成任务，多步推理、工具调用、技能执行、长期记忆。03 Wiki：把文档整理成 Wiki，自动组织、知识图谱、版本回滚。" width="100%">
+  <img src="./docs/images/readme/capabilities-cn-light.svg" alt="01 RAG：回答有据可查，混合检索、多模态解析、原文引用。02 Agent：用知识和工具完成任务，多步推理、技能与沙箱、本机浏览器、MCP 工具、长期记忆。03 Wiki：把文档整理成 Wiki，自动组织、知识图谱、版本回滚。" width="100%">
 </picture>
 
 除此之外：
 
+- **Agent 工具与执行**：技能可从 ClawHub / SkillHub / Git / ZIP 安装，在会话级持久的 Docker / E2B / Cube 沙箱中运行，对话旁可打开交互式终端与图形桌面；Agent 通过 BrowserSkill 扩展操作用户自己的 Chrome / Edge；可接入外部 MCP 服务（支持 OAuth）并按工具逐个启用，另有十余种联网搜索引擎可选。
 - **记忆与知识整理**：跨会话长期记忆保存用户确认过的个人信息、偏好与事实；文件夹上传保留原始目录结构；检索分块可以编辑、比对与回滚。
 - **数据源与格式**：飞书知识库 / 飞书云盘 / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / RSS 自动同步，更多数据源持续接入中；覆盖 PDF、Word、图片、Excel、XMind 等十余种格式，Office 文档由 anydoc 在 Go 进程内解析。
 - **渠道与集成**：企业微信、飞书、Slack、Telegram 等 IM 频道内直接问答；网站嵌入 Widget 把智能体发布到外部站点；内置 MCP Server 供 Cursor、Claude 等 AI 工具连接；权限范围 API Key 与 Principal 模型用于程序化集成。

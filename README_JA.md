@@ -50,11 +50,12 @@ https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/capabilities-ja-dark.svg">
-  <img src="./docs/images/readme/capabilities-ja-light.svg" alt="01 RAG：根拠のある回答。ハイブリッド検索、マルチモーダル解析、原文引用。02 Agent：知識とツールでタスクを完了。マルチステップ推論、ツール呼び出し、スキル実行、長期メモリ。03 Wiki：ドキュメントを Wiki に整理。自動整理、ナレッジグラフ、ロールバック。" width="100%">
+  <img src="./docs/images/readme/capabilities-ja-light.svg" alt="01 RAG：根拠のある回答。ハイブリッド検索、マルチモーダル解析、原文引用。02 Agent：知識とツールでタスクを完了。マルチステップ推論、サンドボックス、ローカルブラウザ、MCP ツール、長期メモリ。03 Wiki：ドキュメントを Wiki に整理。自動整理、ナレッジグラフ、ロールバック。" width="100%">
 </picture>
 
 そのほか：
 
+- **Agent のツールと実行**：ClawHub / SkillHub / Git / ZIP からインストールしたスキルを、セッション単位で永続する Docker / E2B / Cube サンドボックスで実行し、チャットの横でインタラクティブターミナルとグラフィカルデスクトップを開けます。Agent は BrowserSkill 拡張機能を通じてユーザー自身の Chrome / Edge を操作します。外部 MCP サービス（OAuth 対応）を接続してツールごとに有効化でき、10 種以上の Web 検索にも対応します。
 - **メモリとナレッジ整理**：クロスセッション長期メモリが、ユーザーが確認したプロフィール・好み・事実を保持します。フォルダーアップロードは元のディレクトリ構造を保ち、検索チャンクは編集・差分比較・ロールバックできます。
 - **データソースとフォーマット**：Feishu ナレッジベース / Feishu クラウドドライブ / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS の自動同期（順次拡充中）。PDF、Word、画像、Excel、XMind など 10 以上のフォーマットに対応し、Office 文書は anydoc でプロセス内解析します。
 - **チャネルと連携**：WeChat Work、Feishu、Slack、Telegram などの IM で直接 Q&A、ウェブサイト埋め込み Widget で外部サイトにエージェントを公開、組み込み MCP Server で Cursor や Claude などの AI ツールと接続、スコープ付き API キーと Principal モデルでプログラム連携。
