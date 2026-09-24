@@ -339,7 +339,7 @@ func main() {
 
 	// Wait for the backend URL to be set
 	targetURL, _ := url.Parse(app.backendURL)
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy := desktopAPIProxy(targetURL)
 
 	// Start Wails application
 	// We use a Reverse Proxy to seamlessly proxy Wails' frontend to our Go backend
@@ -440,6 +440,26 @@ func resolveDesktopDataPath(rawPath, defaultRelativePath, appSupportDir string) 
 	}
 	trimmed = strings.TrimPrefix(trimmed, "."+string(filepath.Separator))
 	return filepath.Join(appSupportDir, filepath.Clean(trimmed))
+}
+
+// desktopAPIProxy forwards the webview to the loopback Gin server. Pairing
+// needs the API listener as Host so the link cannot be aimed at another
+// machine. Other routes keep the page Host (wails.localhost), which OIDC
+// callbacks and embed origin checks still compare against.
+func desktopAPIProxy(target *url.URL) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(target)
+			r.SetXForwarded()
+			if !isBrowserPairingRequest(r.In) {
+				r.Out.Host = r.In.Host
+			}
+		},
+	}
+}
+
+func isBrowserPairingRequest(req *http.Request) bool {
+	return req != nil && req.URL != nil && req.Method == http.MethodPost && req.URL.Path == "/api/v1/me/browser"
 }
 
 // desktopBackendListenAddr returns the TCP address for the embedded Gin server (Wails desktop).
