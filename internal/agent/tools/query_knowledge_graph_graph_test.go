@@ -72,7 +72,8 @@ func TestQueryKnowledgeGraph_QueriesTheGraph(t *testing.T) {
 	result, err := tool.Execute(context.Background(), args)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"Docker Kubernetes", "kubernetes", "docker"}, graphRepo.terms)
+	assert.Equal(t, []string{"Docker Kubernetes", "Kubernetes", "Docker"}, graphRepo.terms,
+		"terms keep case: Neo4j CONTAINS is case-sensitive")
 	rows, ok := result.Data["results"].([]map[string]interface{})
 	require.True(t, ok)
 	ids := make([]interface{}, 0, len(rows))

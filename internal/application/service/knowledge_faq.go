@@ -423,29 +423,10 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 			return nil, err
 		}
 	} else {
-		// Combined 模式或首次创建，使用全量索引
-		// 增量删除：只删除被移除的相似问索引
-		oldSimilarQuestionCount := len(oldSimilarQuestions)
-		newSimilarQuestionCount := len(meta.SimilarQuestions)
-		if questionIndexMode == types.FAQQuestionIndexModeSeparate && oldSimilarQuestionCount > newSimilarQuestionCount {
-			retrieveEngine, engineErr := retriever.CreateRetrieveEngineForKB(
-				ctx, s.retrieveEngine, s.ownership, types.MustTenantIDFromContext(ctx), kb.VectorStoreID)
-			if engineErr == nil {
-				sourceIDsToDelete := make([]string, 0, oldSimilarQuestionCount-newSimilarQuestionCount)
-				for i := newSimilarQuestionCount; i < oldSimilarQuestionCount; i++ {
-					sourceIDsToDelete = append(sourceIDsToDelete, fmt.Sprintf("%s-%d", chunk.ID, i))
-				}
-				if len(sourceIDsToDelete) > 0 {
-					logger.Debugf(ctx, "UpdateFAQEntry: incremental delete %d obsolete source IDs", len(sourceIDsToDelete))
-					if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil {
-						logger.Warnf(ctx, "UpdateFAQEntry: failed to delete obsolete source IDs: %v", delErr)
-					}
-				}
-			}
-		}
-
-		// needDelete=true：同一 SourceID 重建索引并非所有引擎都会覆盖
-		// （ES v8、Qdrant 每次写入生成新文档 ID），不先删会留下过期内容。
+		// Combined 模式或首次创建，使用全量索引。needDelete=true 按 chunk
+		// 删除该条目的全部旧索引（含已移除的相似问），再整体重建。
+		// 同一 SourceID 重建索引并非所有引擎都会覆盖（ES v8、Qdrant 每次写入
+		// 生成新文档 ID），不先删会留下过期内容。
 		err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
 		if err != nil {
 			return nil, err

@@ -313,7 +313,7 @@ func matchAddsToContent(match, content string) bool {
 // the model never sees once there are chunk rows to render.
 func annotateGraphResult(output string, data map[string]interface{}) string {
 	relations := mapsValue(data["relations"])
-	failures := stringsValue(data["errors"])
+	failures := stringSliceValue(data["errors"])
 	if (len(relations) == 0 && len(failures) == 0) || !strings.HasSuffix(output, "</retrieval>") {
 		return output
 	}
@@ -329,24 +329,6 @@ func annotateGraphResult(output string, data map[string]interface{}) string {
 	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
 }
 
-// stringsValue decodes a []string stored in tool Data.
-func stringsValue(value interface{}) []string {
-	switch v := value.(type) {
-	case []string:
-		return v
-	case []interface{}:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
 // annotateSearchNotes tells the model what a search result does not show:
 // how many lower-ranked results were left out to fit the tool output budget
 // (so it narrows the query or lowers the limit instead of concluding nothing
@@ -354,7 +336,7 @@ func stringsValue(value interface{}) []string {
 // failure is not read as an absence of evidence).
 func annotateSearchNotes(output string, data map[string]interface{}) string {
 	omitted := intValue(data, "omitted_for_budget")
-	failures := stringsValue(data["partial_failures"])
+	failures := stringSliceValue(data["partial_failures"])
 	if (omitted <= 0 && len(failures) == 0) || !strings.HasSuffix(output, "</retrieval>") {
 		return output
 	}

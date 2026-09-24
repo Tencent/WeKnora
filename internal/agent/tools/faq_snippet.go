@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -290,7 +290,7 @@ func searchQueryTokens(queries []string) []string {
 			// A Chinese question has no spaces, so the whole question was one
 			// token that never occurred in any chunk and every snippet fell
 			// back to the chunk's opening. Segment it into words instead.
-			if containsHan(field) {
+			if searchutil.ContainsChinese(field) {
 				for _, word := range types.Jieba.CutForSearch(field, true) {
 					add(word)
 				}
@@ -310,15 +310,6 @@ func isSnippetSeparator(r rune) bool {
 		'(', ')', '[', ']', '{', '}', '"', '\'',
 		'，', '。', '；', '：', '？', '！', '、', '（', '）', '【', '】', '“', '”', '‘', '’':
 		return true
-	}
-	return false
-}
-
-func containsHan(s string) bool {
-	for _, r := range s {
-		if unicode.Is(unicode.Han, r) {
-			return true
-		}
 	}
 	return false
 }

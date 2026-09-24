@@ -370,6 +370,12 @@ func emptySearchStatement(query string, data map[string]interface{}, kbCount int
 		msg += fmt.Sprintf(" Knowledge base %v was searched with mode=%v (%v).",
 			fb["knowledge_base_id"], fb["mode"], fb["reason"])
 	}
+	// An empty result renders from this text alone, so a failed search in
+	// part of the scope must be stated here, or it reads as "not found".
+	if failures, _ := data["partial_failures"].([]string); len(failures) > 0 {
+		msg += " Some knowledge bases could not be searched, so this is not evidence that they lack the " +
+			"answer: " + strings.Join(failures, "; ") + "."
+	}
 	return msg
 }
 
@@ -492,7 +498,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	topK int,
 	vectorThreshold, keywordThreshold float64,
 	kbTypeMap map[string]string,
-) (results []*searchResultWithMeta, failures []string, calls int) {
+) (_ []*searchResultWithMeta, failures []string, calls int) {
 	// Filter out non-searchable KBs (wiki-only / graph-only). Feeding a
 	// wiki-only KB into HybridSearch causes spurious "model ID cannot be
 	// empty" errors because such KBs have no EmbeddingModelID configured.

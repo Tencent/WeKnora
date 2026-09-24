@@ -166,13 +166,13 @@ type ChatManage struct {
 
 // NeedsRetrieval returns true when the current pipeline execution should
 // run the retrieval stages (search, rerank, merge, etc.).
-// A web_search intent always retrieves: the search stage adds web results
-// only when web search is enabled, and otherwise the knowledge bases are the
-// only source left. Skipping retrieval there answered a lookup question from
-// nothing. Other intents delegate to QueryIntent.NeedsKBRetrieval().
+// For IntentWebSearch, retrieval is only needed if web search is enabled;
+// otherwise the intent prompt (intent_prompts.yaml "web_search") tells the
+// user web search is unavailable. All other intents delegate to
+// QueryIntent.NeedsKBRetrieval().
 func (c *ChatManage) NeedsRetrieval() bool {
 	if c.Intent == IntentWebSearch {
-		return true
+		return c.WebSearchEnabled
 	}
 	return c.Intent.NeedsKBRetrieval()
 }

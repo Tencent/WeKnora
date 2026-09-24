@@ -184,3 +184,26 @@ func TestEnableImageChunkIndexesRepairsOnlyEnabledImageChunks(t *testing.T) {
 		"ocr": true, "caption": true, "ocr-off": false, "text-off": false,
 	}, enabled)
 }
+
+// Replacing a source is atomic: when the insert fails, the old row stays.
+func TestBatchSaveKeepsOldRowWhenInsertFails(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	info := sqliteTestIndex("faq", "kb", "knowledge", "", true)
+	info.Content = "old answer"
+	saveSQLiteTestVector(t, repository, info, []float32{1, 0})
+
+	require.NoError(t, repository.db.Exec(`CREATE TRIGGER reject_boom BEFORE INSERT ON lite_embeddings
+		WHEN NEW.content = 'boom' BEGIN SELECT RAISE(ABORT, 'rejected'); END`).Error)
+	edited := *info
+	edited.Content = "boom"
+	require.Error(t, repository.BatchSave(context.Background(), []*types.IndexInfo{&edited}, map[string]any{
+		"embedding": map[string][]float32{edited.SourceID: {0, 1}},
+	}))
+
+	var rows []sqliteEmbedding
+	require.NoError(t, repository.db.Find(&rows).Error)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "old answer", rows[0].Content)
+	hits := vectorSearch(t, repository, []float32{1, 0})
+	require.Len(t, hits, 1, "the old vector must survive the failed replace")
+}

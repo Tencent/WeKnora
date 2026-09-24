@@ -183,7 +183,4 @@ func TestParseOutputNormalizesIntent(t *testing.T) {
 	if !(&types.ChatManage{PipelineState: types.PipelineState{Intent: ""}}).NeedsRetrieval() {
 		t.Fatal("an unknown intent must still retrieve")
 	}
-	if !(&types.ChatManage{PipelineState: types.PipelineState{Intent: types.IntentWebSearch}}).NeedsRetrieval() {
-		t.Fatal("web_search with web search off must fall back to the knowledge bases")
-	}
 }

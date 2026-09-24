@@ -69,29 +69,46 @@ const (
 )
 
 // graphSearchTerms turns the query into entity-name terms. The graph store
-// matches node names by substring, so the whole query only matches when it
-// is itself an entity name; its longer tokens catch the entities a question
-// mentions ("Docker 和 Kubernetes 的关系" → Docker, Kubernetes).
+// matches node names by case-sensitive substring, so the whole query only
+// matches when it is itself an entity name; its words catch the entities a
+// question mentions ("Docker 和 Kubernetes 的关系" → Docker, Kubernetes).
+// Words keep their case: lowercased terms never matched "Docker".
 func graphSearchTerms(query string) []string {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil
 	}
-	terms := []string{query}
-	tokens := make([]string, 0)
-	for token := range searchutil.TokenizeSimple(query) {
-		if token != strings.ToLower(query) {
-			tokens = append(tokens, token)
+	seen := map[string]bool{query: true}
+	var tokens []string
+	add := func(word string) {
+		word = strings.TrimSpace(word)
+		if len([]rune(word)) < 2 || seen[word] {
+			return
 		}
+		if _, stop := snippetStopwords[strings.ToLower(word)]; stop {
+			return
+		}
+		seen[word] = true
+		tokens = append(tokens, word)
+	}
+	for _, field := range strings.FieldsFunc(query, isSnippetSeparator) {
+		if searchutil.ContainsChinese(field) {
+			for _, word := range types.Jieba.CutForSearch(field, true) {
+				add(word)
+			}
+			continue
+		}
+		add(field)
 	}
 	// Longer tokens are more specific entity candidates; sort for stability.
-	sort.Slice(tokens, func(i, j int) bool {
+	sort.SliceStable(tokens, func(i, j int) bool {
 		li, lj := len([]rune(tokens[i])), len([]rune(tokens[j]))
 		if li != lj {
 			return li > lj
 		}
 		return tokens[i] < tokens[j]
 	})
+	terms := []string{query}
 	for _, token := range tokens {
 		if len(terms) >= graphQueryMaxTerms {
 			break
@@ -305,9 +322,15 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	}
 
 	if len(allResults) == 0 && len(relations) == 0 {
+		// The model reads an empty result from Output alone, so failures
+		// must be stated here or they read as "the graph has no such entity".
+		output := "No relevant graph information found."
+		if len(errs) > 0 {
+			output += " Some knowledge bases could not be queried: " + strings.Join(errs, "; ") + "."
+		}
 		return &types.ToolResult{
 			Success: true,
-			Output:  "No relevant graph information found.",
+			Output:  output,
 			Data: map[string]interface{}{
 				"knowledge_base_ids": input.KnowledgeBaseIDs,
 				"query":              query,

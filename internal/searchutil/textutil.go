@@ -23,8 +23,8 @@ func BuildContentSignature(content string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// containsChinese checks whether text contains any CJK unified ideographs.
-func containsChinese(text string) bool {
+// ContainsChinese reports whether text contains any CJK unified ideographs.
+func ContainsChinese(text string) bool {
 	for _, r := range text {
 		if unicode.Is(unicode.Han, r) {
 			return true
@@ -44,7 +44,7 @@ func TokenizeSimple(text string) map[string]struct{} {
 	}
 
 	var words []string
-	if containsChinese(text) {
+	if ContainsChinese(text) {
 		// Use jieba for Chinese text segmentation (search mode for finer granularity)
 		words = types.Jieba.CutForSearch(text, true)
 	} else {
