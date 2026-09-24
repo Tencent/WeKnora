@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
@@ -27,6 +29,8 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
+	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -144,7 +148,17 @@ const wailsThemeSyncJS = `(function(){try{var t=localStorage.getItem('WeKnora_th
 
 const weknoraGitHubRepoURL = "https://github.com/Tencent/WeKnora"
 
+// ensureDesktopLiteEdition marks this process as Lite. cmd/desktop is the
+// Lite app; packaged builds also inject this via ldflags. wails dev often
+// does not, and auto-setup / the embedded SPA / capabilities still key off
+// the string. Host sandbox is gated by the desktop build tag, not this.
+func ensureDesktopLiteEdition() {
+	handler.Edition = "lite"
+}
+
 func main() {
+	ensureDesktopLiteEdition()
+
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
 	// We need to change the working directory to the Resources folder where our configs are.
 	execPath, errPath := os.Executable()
@@ -176,11 +190,32 @@ func main() {
 	runtime.SilenceGinRouteSpam()
 	runtime.LogStartupEnv(context.Background())
 
+	if err := ensureDesktopSigningKey(); err != nil {
+		panic(fmt.Sprintf("initialize desktop signing key: %v", err))
+	}
+
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
+	if err := c.Decorate(func(container.HostApprovalModeLoader) container.HostApprovalModeLoader {
+		return LoadApprovalMode
+	}); err != nil {
+		panic(fmt.Sprintf("wire desktop approval mode: %v", err))
+	}
+	if err := c.Decorate(func(session.HostProjectDirsLoader) session.HostProjectDirsLoader {
+		return LoadProjectDirs
+	}); err != nil {
+		panic(fmt.Sprintf("wire desktop project dirs: %v", err))
+	}
 
 	// Initialize the WeKnora App struct
 	app := NewApp()
+	setupBytes := make([]byte, 32)
+	if _, err := rand.Read(setupBytes); err != nil {
+		panic("failed to generate desktop authentication capability")
+	}
+	app.setupToken = base64.RawURLEncoding.EncodeToString(setupBytes)
+	handler.SetLiteSetupToken(app.setupToken)
+	handler.SetHostProjectPicker(app.PickProjectDir)
 
 	// Error channel to capture server startup errors
 	serverErrCh := make(chan error, 1)
@@ -249,7 +284,6 @@ func main() {
 			}
 			return nil
 		})
-
 		if err != nil {
 			serverErrCh <- err
 			logger.Fatalf(context.Background(), "Failed to run backend: %v", err)
@@ -345,7 +379,6 @@ func main() {
 			WindowIsTranslucent:  false,
 		},
 	})
-
 	if err != nil {
 		println("Error:", err.Error())
 	}

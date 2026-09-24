@@ -65,6 +65,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		Name            string     `json:"name"`
 		Mode            string     `json:"mode"`
 		OutputMode      string     `json:"output_mode"`
+		Locale          string     `json:"locale"`
 		SessionMode     string     `json:"session_mode"`
 		KnowledgeBaseID string     `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
@@ -79,18 +80,33 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": invalidIMPlatformError})
 		return
 	}
+	locale, err := normalizeIMLocale(req.Locale)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	channel := &im.IMChannel{
-		TenantID:        tenantID,
-		AgentID:         agentID,
-		Platform:        req.Platform,
-		Name:            req.Name,
-		Mode:            req.Mode,
-		OutputMode:      req.OutputMode,
-		SessionMode:     req.SessionMode,
-		KnowledgeBaseID: req.KnowledgeBaseID,
-		Credentials:     req.Credentials,
-		Enabled:         true,
+		TenantID:    tenantID,
+		AgentID:     agentID,
+		Platform:    req.Platform,
+		Name:        req.Name,
+		Mode:        req.Mode,
+		OutputMode:  req.OutputMode,
+		Locale:      locale,
+		SessionMode: req.SessionMode,
+		Credentials: req.Credentials,
+		Enabled:     true,
+	}
+	// The route guard passes an agent it cannot find in this workspace; both
+	// the agent and the file-saving KB must belong to the channel's workspace.
+	if err := h.imService.SetChannelAgentID(c.Request.Context(), channel, agentID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent not found"})
+		return
+	}
+	if err := h.imService.SetChannelKnowledgeBaseID(c.Request.Context(), channel, req.KnowledgeBaseID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "knowledge base not found"})
+		return
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
@@ -174,12 +190,12 @@ func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
 //
 // UpdateIMChannel godoc
 // @Summary      更新 IM 渠道
-// @Description  更新指定 IM 渠道的名称、模式、知识库、凭证或启用状态
+// @Description  更新指定 IM 渠道的名称、模式、回复语言、知识库、凭证或启用状态
 // @Tags         IM 渠道
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string                  true  "渠道 ID"
-// @Param        request  body      map[string]interface{}  true  "更新字段（name/mode/output_mode/knowledge_base_id/credentials/enabled）"
+// @Param        request  body      map[string]interface{}  true  "更新字段（含 locale）"
 // @Success      200      {object}  map[string]interface{}  "更新后的渠道"
 // @Failure      400      {object}  map[string]interface{}  "请求参数错误"
 // @Failure      404      {object}  map[string]interface{}  "渠道不存在"
@@ -209,6 +225,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		Name            *string    `json:"name"`
 		Mode            *string    `json:"mode"`
 		OutputMode      *string    `json:"output_mode"`
+		Locale          *string    `json:"locale"`
 		SessionMode     *string    `json:"session_mode"`
 		KnowledgeBaseID *string    `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
@@ -229,11 +246,23 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	if req.OutputMode != nil {
 		channel.OutputMode = *req.OutputMode
 	}
+	if req.Locale != nil {
+		locale, err := normalizeIMLocale(*req.Locale)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		channel.Locale = locale
+	}
 	if req.SessionMode != nil {
 		channel.SessionMode = *req.SessionMode
 	}
 	if req.KnowledgeBaseID != nil {
-		channel.KnowledgeBaseID = *req.KnowledgeBaseID
+		ctx := c.Request.Context()
+		if err := h.imService.SetChannelKnowledgeBaseID(ctx, channel, *req.KnowledgeBaseID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "knowledge base not found"})
+			return
+		}
 	}
 	if req.Credentials != nil {
 		channel.Credentials = req.Credentials
@@ -263,6 +292,17 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": channel})
+}
+
+func normalizeIMLocale(locale string) (string, error) {
+	locale = strings.TrimSpace(locale)
+	if locale == "" {
+		return "", nil
+	}
+	if normalized := types.NormalizeSupportedLocale(locale); normalized != "" {
+		return normalized, nil
+	}
+	return "", errors.New("locale must be one of: 'en-US', 'ja-JP', 'ko-KR', 'ru-RU', 'zh-CN'")
 }
 
 // DeleteIMChannel deletes an IM channel.
@@ -389,6 +429,16 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 		}
 		logger.Errorf(ctx, "[IM] Channel unavailable for callback %s: %v", channelID, err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
+		return
+	}
+
+	defaultMode := "websocket"
+	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
+		defaultMode = "webhook"
+	}
+	if im.ResolveMode(channel, defaultMode) != "webhook" ||
+		channel.Platform == "qqbot" || channel.Platform == "wechat" || channel.Platform == "dingtalk" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "HTTP callbacks are disabled for this channel"})
 		return
 	}
 

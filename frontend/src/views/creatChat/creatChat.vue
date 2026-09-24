@@ -35,7 +35,7 @@
                             <div v-for="(item, index) in suggestedQuestions" :key="item.question"
                                 class="suggested-question-card" :class="{ 'sq-card-visible': sqCardsRevealed }"
                                 :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
-                                @click="handleSuggestedQuestionClick(item.question)">
+                                @click="handleSuggestedQuestionClick(item)">
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
                             </div>
@@ -43,7 +43,22 @@
                     </div>
                 </transition>
             </div>
-            <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+            <div class="create-chat-composer">
+                <div v-if="hostSandboxEnabled" class="project-dir-bar">
+                    <button type="button" class="project-dir-bar__btn"
+                        :class="{ 'is-bound': !!selectedProjectDir, 'is-picking': pickingProjectDir }"
+                        :disabled="pickingProjectDir" :title="selectedProjectDir || $t('createChat.openProject')"
+                        @click="openProjectDir">
+                        <t-icon :name="pickingProjectDir ? 'loading' : 'folder'" />
+                        <span class="project-dir-bar__name">{{
+                            selectedProjectDir ? projectDirBasename(selectedProjectDir) : $t('createChat.openProject')
+                        }}</span>
+                    </button>
+                    <button v-if="selectedProjectDir" type="button" class="project-dir-bar__clear"
+                        :aria-label="$t('createChat.clearProject')" @click="clearProjectDir">×</button>
+                </div>
+                <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+            </div>
         </div>
     </div>
 
@@ -59,12 +74,16 @@ import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
+import { pickHostProjectDir } from '@/utils/desktopProjectDir';
+import { projectDirBasename, shouldRenderHostProjectSettings, withOptionalProjectDir } from '@/utils/hostWorkspace';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import type { SuggestedQuestion } from "@/api/agent/index";
+import { questionOriginFromSuggestion, type SendMessageOptions } from '@/utils/questionOrigin';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
-import { useRoute, useRouter } from 'vue-router';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
@@ -74,9 +93,23 @@ const router = useRouter();
 const route = useRoute();
 const usemenuStore = useMenuStore();
 const settingsStore = useSettingsStore();
+onBeforeRouteLeave((to) => {
+    // The first send carries the draft into its new session; abandoning the
+    // composer must not make this a default for the next conversation.
+    if (!to.path.startsWith('/platform/chat/') || !usemenuStore.isFirstSession) {
+        settingsStore.reasoningEffortOverride = '';
+    }
+});
 const uiStore = useUIStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const { t } = useI18n();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
+
+const hostSandboxEnabled = computed(() =>
+    shouldRenderHostProjectSettings(deploymentCapabilities.isSupported('settings.sandbox.host')),
+);
+const selectedProjectDir = ref('');
+const pickingProjectDir = ref(false);
 
 const showChatContextualGuide = computed(() => {
     return route.name === 'globalCreatChat' || route.name === 'kbCreatChat';
@@ -177,19 +210,23 @@ watch(
     { deep: true },
 );
 
-onMounted(() => { fetchSuggestedQuestions(); });
+onMounted(() => {
+    fetchSuggestedQuestions();
+});
 
 const inputFieldRef = ref();
 
-const handleSuggestedQuestionClick = (question: string) => {
-    inputFieldRef.value?.triggerSend(question);
+// The suggestion's source rides with this send to the new session's first
+// request, so the agent searches it before answering.
+const handleSuggestedQuestionClick = (item: SuggestedQuestion) => {
+    inputFieldRef.value?.triggerSend(item.question, { questionOrigin: questionOriginFromSuggestion(item) });
 };
 
-const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
-    createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles);
+const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
+    createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
 }
 
-async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = []) {
+async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) {
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
 
@@ -207,9 +244,9 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     };
 
     try {
-        const res = await createSessions(sessionData);
+        const res = await createSessions(withOptionalProjectDir(sessionData, selectedProjectDir.value));
         if (res.data && res.data.id) {
-            await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles);
+            await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
             console.error('[createChat] Failed to create session');
             MessagePlugin.error(t('createChat.messages.createFailed'));
@@ -220,7 +257,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     }
 }
 
-const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
+const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
     const now = new Date().toISOString();
     let obj = {
         title: t('createChat.newSessionTitle'),
@@ -233,12 +270,29 @@ const navigateToSession = async (sessionId: string, value: string, modelId: stri
     };
     usemenuStore.updataMenuChildren(obj);
     usemenuStore.changeIsFirstSession(true);
-    usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles);
+    usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles, options.questionOrigin ?? null);
     router.push(`/platform/chat/${sessionId}`);
 }
 
 const handleKBEditorSuccess = (kbId: string) => {
     navigateToKnowledgeBaseList(kbId)
+}
+
+function clearProjectDir() {
+    selectedProjectDir.value = '';
+}
+
+async function openProjectDir() {
+    if (pickingProjectDir.value) return;
+    pickingProjectDir.value = true;
+    try {
+        const picked = await pickHostProjectDir();
+        if (picked) selectedProjectDir.value = picked;
+    } catch (e: any) {
+        MessagePlugin.error(e?.message || t('createChat.pickFailed'));
+    } finally {
+        pickingProjectDir.value = false;
+    }
 }
 
 </script>
@@ -265,6 +319,67 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
+.create-chat-composer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+}
+
+.project-dir-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    max-width: 960px;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.project-dir-bar__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    height: 28px;
+    padding: 0 10px;
+    border: 0.5px solid var(--td-component-border);
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+    cursor: pointer;
+}
+
+.project-dir-bar__btn.is-bound {
+    color: var(--td-text-color-primary);
+}
+
+.project-dir-bar__btn.is-picking,
+.project-dir-bar__btn:disabled {
+    cursor: default;
+    opacity: 0.75;
+}
+
+.project-dir-bar__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-dir-bar__clear {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    padding: 0 4px;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-base);
+    line-height: 1;
+    cursor: pointer;
+}
+
 .dialogue-title {
     display: flex;
     color: var(--td-text-color-primary);
@@ -280,7 +395,7 @@ const handleKBEditorSuccess = (kbId: string) => {
         height: 32px;
         justify-content: center;
         align-items: center;
-        border-radius: 6px;
+        border-radius: var(--app-radius-sm);
         background: var(--td-bg-color-container);
         box-shadow: var(--td-shadow-1);
         margin-right: 12px;
@@ -320,7 +435,7 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 .sq-slide-fade-leave-active {
-    transition: opacity 0.15s cubic-bezier(0.4, 0, 1, 1),
+    transition: opacity var(--app-motion-fast) cubic-bezier(0.4, 0, 1, 1),
         transform 0.15s cubic-bezier(0.4, 0, 1, 1);
 }
 
@@ -360,46 +475,6 @@ const handleKBEditorSuccess = (kbId: string) => {
 
     &.sq-card-visible:active {
         transform: scale(0.98);
-    }
-}
-
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
     }
 }
 </style>

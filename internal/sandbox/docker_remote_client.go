@@ -14,7 +14,7 @@
 //	Get/List → GET  /containers/json?filters=label=…
 //	Delete   → DELETE /containers/{id}?force=1
 //	Exec     → POST /containers/{id}/exec → /exec/{id}/start (hijack)
-//	Snapshot → POST /commit (skill images under weknora-skill/)
+//	Snapshot → POST /commit (skill images under weknora-skill/, fork images under weknora-fork/)
 //
 // Every file operation uses exec with an explicit account (root by default),
 // timeout and activity tracking. Archive endpoints bypass those exec settings.
@@ -417,6 +417,14 @@ func (c *DockerRemoteClient) Connect(
 		id:       inspected.Container.ID,
 		metadata: dockerSandboxMetadata(labels),
 	}, nil
+}
+
+// ConnectSession already gets the lifecycle state from Connect's container
+// inspection, including terminal detection and resuming a stopped container.
+func (c *DockerRemoteClient) ConnectSession(
+	ctx context.Context, req RemoteConnectRequest,
+) (RemoteSandboxHandle, error) {
+	return c.Connect(ctx, req)
 }
 
 // dockerStartReadyTimeout bounds how long Create/Connect/Exec wait for PID 1
@@ -1183,8 +1191,12 @@ func (c *DockerRemoteClient) ensureImage(ctx context.Context, image string) erro
 	// Skill snapshots are daemon-local commits, not registry tags. Pulling
 	// one would hit Docker Hub for a name we minted and never pushed, and a
 	// miss here means "this daemon does not have the image", not "fetch it".
-	if dockerIsSkillSnapshotRef(image) {
-		return dockerInvalidRequest("Create", "skill snapshot image "+image+" is not on this daemon")
+	if dockerIsLocalSnapshotRef(image) {
+		kind := "skill"
+		if dockerIsForkSnapshotRef(image) {
+			kind = "fork"
+		}
+		return dockerInvalidRequest("Create", kind+" snapshot image "+image+" is not on this daemon")
 	}
 	pullCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dockerImagePullBudget)
 	defer cancel()

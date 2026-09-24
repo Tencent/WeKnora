@@ -153,6 +153,10 @@ type CustomAgentConfig struct {
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
+	// ReasoningEffort selects the thinking intensity (off | auto | minimal |
+	// low | medium | high | xhigh | max). Empty keeps the boolean Thinking
+	// semantics: true means "auto". See internal/models/api.ReasoningEffort.
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty" json:"reasoning_effort,omitempty"`
 	// Whether final answers include knowledge/web source citations. Nil defaults to true
 	// so agents saved before this option was introduced keep their existing behavior.
 	CitationEnabled *bool `yaml:"citation_enabled" json:"citation_enabled"`
@@ -274,7 +278,7 @@ type CustomAgentConfig struct {
 	// ===== Multi-turn Conversation Settings =====
 	// Whether multi-turn conversation is enabled
 	MultiTurnEnabled bool `yaml:"multi_turn_enabled" json:"multi_turn_enabled"`
-	// Number of history turns to keep in context
+	// Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window
 	HistoryTurns int `yaml:"history_turns" json:"history_turns"`
 	// Whether this agent may read the user's long-term memory. Nil inherits
 	// the workspace setting; false opts a single agent out of memory even when
@@ -490,6 +494,35 @@ func (CustomAgent) TableName() string {
 	return "custom_agents"
 }
 
+// reasoningEffortEnablesThinking mirrors api.ParseReasoningEffort followed by
+// api.ReasoningEffort.Enabled(), for the strings this package can see.
+// internal/types cannot import internal/models/api (api imports types), so the
+// whole vocabulary — api.AllReasoningEfforts plus the aliases
+// api.ParseReasoningEffort accepts — is restated here. Keep the two in sync:
+// the cases below are exactly that function's, in the same order, and like it
+// they neither trim nor lowercase, so a spelling it rejects is rejected here
+// too.
+//
+// known is false for anything outside that vocabulary. Reporting it separately
+// is what keeps a typo from meaning "thinking on": the runtime drops such a
+// level (api.SanitizeReasoningEffort) and falls back to the Thinking boolean,
+// so deriving true from it here would enable thinking at the provider default
+// for a value the write path answers with a 400.
+func reasoningEffortEnablesThinking(level string) (enabled, known bool) {
+	switch level {
+	case "off":
+		return false, true
+	case "auto", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true, true
+	// Aliases the legacy boolean UI and provider docs use.
+	case "none", "false", "disabled":
+		return false, true
+	case "true", "enabled", "default", "on":
+		return true, true
+	}
+	return false, false
+}
+
 // EnsureDefaults sets default values for the agent
 func (a *CustomAgent) EnsureDefaults() {
 	if a == nil {
@@ -560,6 +593,21 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.AgentMode == AgentModeSmartReasoning {
 		a.Config.MultiTurnEnabled = true
 	}
+	// Keep the legacy boolean consistent with the graded level. ReasoningEffort
+	// wins wherever both are read (api.Options.Reasoning), but everything that
+	// still reads only Thinking — the agent editor, the pipeline logs, the
+	// "thinking is off" warning in applyAgentOverridesToChatManage — would
+	// otherwise report an agent configured for `high` as thinking-off.
+	//
+	// A level outside that vocabulary is left alone rather than read as "on":
+	// it is dropped at call time, so the boolean derived here would be the
+	// only thing left deciding, and a typo would silently buy thinking at the
+	// provider default.
+	if a.Config.ReasoningEffort != "" {
+		if enabled, known := reasoningEffortEnablesThinking(a.Config.ReasoningEffort); known {
+			a.Config.Thinking = &enabled
+		}
+	}
 	// Pin thinking to an explicit false when unset so provider-specific wire
 	// formats (e.g. thinking_control=thinking_type) always receive a value.
 	if a.Config.Thinking == nil {
@@ -587,6 +635,8 @@ type SuggestedQuestion struct {
 	Source string `json:"source"`
 	// 来源知识库ID（仅 faq/document/wiki 来源时有值）
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// 来源文档ID（仅 faq/document 来源时有值）
+	KnowledgeID string `json:"knowledge_id,omitempty"`
 }
 
 // BuiltinAgentRegistry provides a registry of all built-in agents.

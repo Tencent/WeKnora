@@ -1,1803 +1,1803 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal">
-      <div v-if="visible" class="settings-overlay" @click.self="handleClose">
-        <div class="settings-modal">
-          <div v-if="editorInitializing" class="editor-initializing" role="status" :aria-label="$t('common.loading')">
-            <t-loading size="medium" :text="$t('common.loading')" />
+  <SettingsModalShell :visible="visible"
+    :title="editorMode === 'create' ? $t('agent.editor.createTitle') : $t('agent.editor.editTitle')"
+    v-model="currentSection" :nav-groups="navGroups" :loading="editorInitializing" :z-index="1000"
+    nav-guide="agent-editor-sidebar" nav-item-guide-prefix="agent-editor-nav" @close="modalShell.requestClose">
+    <div ref="contentWrapperRef" class="content-wrapper" :class="{ 'content-wrapper--prompts': currentSection === 'prompts' }">
+      <!-- 基础设置 -->
+      <div v-show="currentSection === 'basic'" class="section">
+        <div class="section-header">
+          <div class="section-header-title">
+            <h2>{{ $t('agent.editor.basicInfo') }}</h2>
+            <t-tooltip v-if="isBuiltinAgent" :content="$t('agentEditor.builtinHint')" placement="top">
+              <span class="builtin-agent-hint" tabindex="0" role="img"
+                :aria-label="$t('agentEditor.builtinHint')">
+                <t-icon name="info-circle" />
+              </span>
+            </t-tooltip>
           </div>
-          <!-- 关闭按钮 -->
-          <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
+          <p class="section-description">{{ $t('agent.editor.basicInfoDesc') }}</p>
+        </div>
 
-          <div class="settings-container">
-            <!-- 左侧导航 -->
-            <div class="settings-sidebar">
-              <div class="sidebar-header">
-                <h2 class="sidebar-title">{{ editorMode === 'create' ? $t('agent.editor.createTitle') :
-                  $t('agent.editor.editTitle') }}</h2>
+        <div class="settings-group">
+          <!-- 智能体 ID（用于 API 集成） -->
+          <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.agentId') }}</label>
+              <p class="desc">{{ $t('agent.editor.agentIdDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="agent-id-field">
+                <code class="agent-id-value" :title="editorAgent.id">{{ editorAgent.id }}</code>
+                <t-tooltip :content="$t('common.copy')" placement="top">
+                  <t-button theme="default" size="small" variant="text" class="agent-id-copy"
+                    @click="copyAgentId">
+                    <t-icon name="file-copy" />
+                  </t-button>
+                </t-tooltip>
               </div>
-              <div class="settings-nav" data-guide="agent-editor-sidebar">
-                <template v-for="group in navGroups" :key="group.key">
-                  <div class="nav-group-title">{{ group.label }}</div>
-                  <div v-for="(item, index) in group.items" :key="index"
-                    :class="['nav-item', { 'active': currentSection === item.key }]"
-                    :data-guide="`agent-editor-nav-${item.key}`" @click="currentSection = item.key">
-                    <t-icon :name="item.icon" class="nav-icon" />
-                    <span class="nav-label">{{ item.label }}</span>
-                    <span v-if="item.key === 'prompts' && promptNavItems.length > 1" class="nav-badge">
-                      {{ promptNavItems.length }}
-                    </span>
+            </div>
+          </div>
+
+          <!-- 集成渠道状态（编辑模式，配置在集成中心） -->
+          <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('integrations.agentEditor.label') }}</label>
+              <p class="desc">{{ isPostCreateSession ? $t('agent.editor.postCreateHint.integrationDesc') : $t('integrations.agentEditor.desc') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="integration-inline">
+                <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('im')">
+                  <span>{{ $t('integrations.tabs.im') }} · {{ agentIMChannelCount }}</span>
+                  <t-icon name="chevron-right" size="14px" />
+                </button>
+                <span class="integration-inline__sep" aria-hidden="true">|</span>
+                <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('embed')">
+                  <span>{{ $t('integrations.tabs.embed') }} · {{ agentEmbedChannelCount }}</span>
+                  <t-icon name="chevron-right" size="14px" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 运行模式（首先选择） -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.mode') }} <span class="required">*</span></label>
+              <p class="desc">{{ agentMode === 'smart-reasoning' ? $t('agent.editor.agentDesc') :
+                $t('agent.editor.normalDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent" data-guide="agent-create-mode">
+                <t-radio-button value="quick-answer">
+                  {{ $t('agent.type.normal') }}
+                </t-radio-button>
+                <t-radio-button value="smart-reasoning">
+                  {{ $t('agent.type.agent') }}
+                </t-radio-button>
+              </t-radio-group>
+            </div>
+          </div>
+
+          <!-- 智能体类型（仅智能推理模式下显示） -->
+          <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize"
+            data-guide="agent-create-agent-type">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.agentType.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.agentType.desc') }}</p>
+              <p v-if="activeAgentTypePreset" class="desc agent-type-preset-desc">{{
+                agentTypePresetDescription(activeAgentTypePreset) }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select :value="agentType" @change="onAgentTypeChange" :disabled="isBuiltinAgent"
+                :placeholder="$t('agentEditor.agentType.label')" :options="agentTypeSelectOptions"
+                :popup-props="{ overlayClassName: 'agent-type-popup' }" class="agent-type-select">
+                <template #option="{ option }">
+                  <div class="agent-type-option">
+                    <span class="agent-type-option-label">{{ option.label }}</span>
+                    <span v-if="option.desc" class="agent-type-option-desc">{{ option.desc }}</span>
                   </div>
+                </template>
+              </t-select>
+            </div>
+          </div>
+
+          <!-- 名称 -->
+          <div class="setting-row" data-guide="agent-create-name">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.name') }} <span v-if="!isBuiltinAgent"
+                  class="required">*</span></label>
+              <p class="desc">{{ $t('agentEditor.desc.name') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="name-input-wrapper">
+                <!-- 内置智能体使用简洁图标 -->
+                <div v-if="isBuiltinAgent" class="builtin-avatar" :class="isAgentMode ? 'agent' : 'normal'">
+                  <t-icon :name="isAgentMode ? 'control-platform' : 'chat'" size="24px" />
+                </div>
+                <!-- 自定义智能体使用 AgentAvatar -->
+                <AgentAvatar v-else :name="formData.name || '?'" size="medium" />
+                <t-input v-model="formData.name" :placeholder="$t('agent.editor.namePlaceholder')"
+                  class="name-input" :disabled="isBuiltinAgent" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 描述 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.description') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.description') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-textarea v-model="formData.description"
+                :placeholder="$t('agent.editor.descriptionPlaceholder')"
+                :autosize="{ minRows: 2, maxRows: 4 }" :disabled="isBuiltinAgent" />
+            </div>
+          </div>
+
+          <!-- 长期记忆。留在基础信息这一组而不是「多轮对话」，是因为它与
+               多轮历史窗口无关，且智能推理恰恰是最需要这个开关的模式。
+               这个开关只能"关"：空间或个人设置关闭时，这里打开也不生效。 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.memoryEnabled') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.memoryEnabled') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.memory_enabled" />
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 提示词 -->
+      <div v-show="currentSection === 'prompts'" class="section section--prompts">
+        <div class="prompts-panel">
+          <div class="prompts-panel__header">
+            <div class="section-header section-header--compact">
+              <h2>{{ $t('agent.editor.promptsConfig') }}</h2>
+              <p class="section-description">{{ $t('agent.editor.promptsConfigDesc') }}</p>
+            </div>
+
+            <nav v-if="promptNavItems.length > 1" class="prompts-outline"
+              :aria-label="$t('agentEditor.promptNav.ariaLabel')">
+              <button v-for="item in promptNavItems" :key="item.key" type="button"
+                class="prompts-outline__pill"
+                :class="{ 'prompts-outline__pill--active': activePromptAnchor === item.key }"
+                @click="activePromptAnchor = item.key">
+                <span>{{ item.label }}</span>
+                <span v-if="item.customized" class="prompts-outline__dot"
+                  :title="$t('agentEditor.intentPrompts.customized')" />
+              </button>
+            </nav>
+          </div>
+
+          <div class="prompts-panel__body">
+            <div class="settings-group">
+              <!-- 系统提示词 -->
+              <div v-show="activePromptAnchor === 'system'"
+                class="setting-row setting-row-vertical prompts-panel__pane">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.systemPrompt') }} <span v-if="!isBuiltinAgent"
+                  class="required">*</span></label>
+              <p class="desc">{{ $t('agentEditor.desc.systemPrompt') }}{{ isBuiltinAgent ?
+                $t('agentEditor.desc.leaveEmptyDefault') : '' }}</p>
+              <p class="desc">{{ $t('agentEditor.desc.promptInheritance') }}</p>
+              <div class="placeholder-tags">
+                <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                <t-tooltip v-for="placeholder in availablePlaceholders" :key="placeholder.name"
+                  :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                  placement="top">
+                  <span class="placeholder-tag" @click="handlePlaceholderClick('system', placeholder.name)"
+                    v-text="'{{' + placeholder.name + '}}'"></span>
+                </t-tooltip>
+                <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
+              </div>
+            </div>
+            <div class="setting-control setting-control-full" style="position: relative;">
+              <!-- Agent模式：统一提示词（使用 {{web_search_status}} 占位符动态控制行为） -->
+              <div v-if="isAgentMode" class="textarea-with-template">
+                <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
+                  :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
+                  @input="handlePromptInput" class="system-prompt-textarea" />
+                <PromptTemplateSelector type="agentSystemPrompt" position="corner"
+                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
+                  @reset-default="handleAgentSystemPromptResetDefault" />
+              </div>
+              <!-- 普通模式：单个提示词 -->
+              <div v-else class="textarea-with-template">
+                <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
+                  :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
+                  @input="handlePromptInput" class="system-prompt-textarea" />
+                <PromptTemplateSelector type="systemPrompt" position="corner"
+                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
+                  @reset-default="handleSystemPromptTemplateSelect" />
+              </div>
+              <!-- 占位符提示下拉框 -->
+              <Teleport to="body">
+                <div v-if="showPlaceholderPopup && filteredPlaceholders.length > 0"
+                  class="placeholder-popup-wrapper" :style="popupStyle">
+                  <div class="placeholder-popup">
+                    <div v-for="(placeholder, index) in filteredPlaceholders" :key="placeholder.name"
+                      class="placeholder-item" :class="{ active: selectedPlaceholderIndex === index }"
+                      @mousedown.prevent="insertPlaceholder(placeholder.name, true)"
+                      @mouseenter="selectedPlaceholderIndex = index">
+                      <div class="placeholder-name">
+                        <code v-html="`{{${placeholder.name}}}`"></code>
+                      </div>
+                      <div class="placeholder-desc">{{ placeholder.description }}</div>
+                    </div>
+                  </div>
+                </div>
+              </Teleport>
+            </div>
+          </div>
+
+          <!-- 上下文模板（仅普通模式） -->
+          <div v-if="!isAgentMode" v-show="activePromptAnchor === 'context'"
+            class="setting-row setting-row-vertical prompts-panel__pane">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.contextTemplate') }} <span v-if="!isBuiltinAgent"
+                  class="required">*</span></label>
+              <p class="desc">{{ $t('agentEditor.desc.contextTemplate') }}{{ isBuiltinAgent ?
+                $t('agentEditor.desc.leaveEmptyDefault') : '' }}</p>
+              <div class="placeholder-tags">
+                <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                <t-tooltip v-for="placeholder in contextTemplatePlaceholders" :key="placeholder.name"
+                  :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                  placement="top">
+                  <span class="placeholder-tag" @click="handlePlaceholderClick('context', placeholder.name)"
+                    v-text="'{{' + placeholder.name + '}}'"></span>
+                </t-tooltip>
+                <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
+              </div>
+            </div>
+            <div class="setting-control setting-control-full" style="position: relative;">
+              <div class="textarea-with-template">
+                <t-textarea ref="contextTemplateTextareaRef" v-model="formData.config.context_template"
+                  :placeholder="contextTemplatePlaceholder" :autosize="{ minRows: 8, maxRows: 20 }"
+                  @input="handleContextTemplateInput" class="system-prompt-textarea" />
+                <PromptTemplateSelector type="contextTemplate" position="corner"
+                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleContextTemplateSelect"
+                  @reset-default="handleContextTemplateSelect" />
+              </div>
+              <!-- 上下文模板占位符提示下拉框 -->
+              <Teleport to="body">
+                <div v-if="showContextPlaceholderPopup && filteredContextPlaceholders.length > 0"
+                  class="placeholder-popup-wrapper" :style="contextPopupStyle">
+                  <div class="placeholder-popup">
+                    <div v-for="(placeholder, index) in filteredContextPlaceholders" :key="placeholder.name"
+                      class="placeholder-item" :class="{ active: selectedContextPlaceholderIndex === index }"
+                      @mousedown.prevent="insertContextPlaceholder(placeholder.name, true)"
+                      @mouseenter="selectedContextPlaceholderIndex = index">
+                      <div class="placeholder-name">
+                        <code v-html="`{{${placeholder.name}}}`"></code>
+                      </div>
+                      <div class="placeholder-desc">{{ placeholder.description }}</div>
+                    </div>
+                  </div>
+                </div>
+              </Teleport>
+            </div>
+          </div>
+
+          <!-- 意图提示词（仅普通模式） -->
+          <div v-if="!isAgentMode" v-show="activePromptAnchor === 'intent'"
+            class="setting-row setting-row-vertical prompts-panel__pane">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.intentPrompts.title') }}</label>
+              <p class="desc">{{ $t('agentEditor.intentPrompts.sectionDesc') }}</p>
+            </div>
+            <div class="setting-control setting-control-full">
+              <div class="intent-prompts-editor">
+                <div v-if="intentPromptTemplates.length === 0" class="prompt-disabled-hint">
+                  {{ $t('agentEditor.intentPrompts.empty') }}
+                </div>
+                <template v-else>
+                  <div class="intent-toggle-group" role="tablist"
+                    :aria-label="$t('agentEditor.intentPrompts.intentLabel')">
+                    <t-button v-for="template in intentPromptTemplates" :key="template.id" theme="default"
+                      variant="outline" size="small" class="intent-toggle-btn"
+                      :class="{ 'intent-toggle-btn--active': selectedIntent === template.id }"
+                      :disabled="props.readOnly" @click="selectedIntent = template.id">
+                      <span class="intent-toggle-label">
+                        {{ template.name || template.id }}
+                        <t-tooltip v-if="isIntentCustomized(template.id)"
+                          :content="$t('agentEditor.intentPrompts.customized')" placement="top">
+                          <span class="intent-toggle-dot" />
+                        </t-tooltip>
+                      </span>
+                    </t-button>
+                  </div>
+                  <p v-if="currentIntentTemplateDesc" class="intent-active-desc">{{ currentIntentTemplateDesc
+                  }}</p>
+
+                  <div v-if="placeholderData.system_prompt.length > 0" class="placeholder-tags">
+                    <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                    <t-tooltip v-for="placeholder in placeholderData.system_prompt" :key="placeholder.name"
+                      :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                      placement="top">
+                      <span class="placeholder-tag"
+                        @click="handlePlaceholderClick('intent', placeholder.name)"
+                        v-text="'{{' + placeholder.name + '}}'" />
+                    </t-tooltip>
+                    <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
+                  </div>
+
+                  <div class="textarea-with-template">
+                    <t-textarea ref="intentPromptTextareaRef" v-model="intentEditorValue"
+                      class="system-prompt-textarea" :autosize="{ minRows: 10, maxRows: 25 }"
+                      :disabled="props.readOnly || !selectedIntent"
+                      :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
+                      @input="handleIntentPromptInput" />
+                    <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
+                      :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
+                  </div>
+
+                  <Teleport to="body">
+                    <div v-if="intentPromptPopup.show && filteredIntentPlaceholders.length > 0"
+                      class="placeholder-popup-wrapper" :style="intentPromptPopup.style">
+                      <div class="placeholder-popup">
+                        <div v-for="(placeholder, index) in filteredIntentPlaceholders" :key="placeholder.name"
+                          class="placeholder-item"
+                          :class="{ active: intentPromptPopup.selectedIndex === index }"
+                          @mousedown.prevent="insertGenericPlaceholder('intent', placeholder.name, true)"
+                          @mouseenter="intentPromptPopup.selectedIndex = index">
+                          <div class="placeholder-name">
+                            <code v-html="`{{${placeholder.name}}}`" />
+                          </div>
+                          <div class="placeholder-desc">{{ placeholder.description }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </Teleport>
                 </template>
               </div>
             </div>
-
-            <!-- 右侧内容区域 -->
-            <div class="settings-content">
-              <div ref="contentWrapperRef" class="content-wrapper" :class="{ 'content-wrapper--prompts': currentSection === 'prompts' }">
-                <!-- 基础设置 -->
-                <div v-show="currentSection === 'basic'" class="section">
-                  <div class="section-header">
-                    <div class="section-header-title">
-                      <h2>{{ $t('agent.editor.basicInfo') }}</h2>
-                      <t-tooltip v-if="isBuiltinAgent" :content="$t('agentEditor.builtinHint')" placement="top">
-                        <span class="builtin-agent-hint" tabindex="0" role="img"
-                          :aria-label="$t('agentEditor.builtinHint')">
-                          <t-icon name="info-circle" />
-                        </span>
-                      </t-tooltip>
-                    </div>
-                    <p class="section-description">{{ $t('agent.editor.basicInfoDesc') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- 智能体 ID（用于 API 集成） -->
-                    <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.agentId') }}</label>
-                        <p class="desc">{{ $t('agent.editor.agentIdDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="agent-id-field">
-                          <code class="agent-id-value" :title="editorAgent.id">{{ editorAgent.id }}</code>
-                          <t-tooltip :content="$t('common.copy')" placement="top">
-                            <t-button theme="default" size="small" variant="text" class="agent-id-copy"
-                              @click="copyAgentId">
-                              <t-icon name="file-copy" />
-                            </t-button>
-                          </t-tooltip>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 集成渠道状态（编辑模式，配置在集成中心） -->
-                    <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('integrations.agentEditor.label') }}</label>
-                        <p class="desc">{{ isPostCreateSession ? $t('agent.editor.postCreateHint.integrationDesc') : $t('integrations.agentEditor.desc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="integration-inline">
-                          <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('im')">
-                            <span>{{ $t('integrations.tabs.im') }} · {{ agentIMChannelCount }}</span>
-                            <t-icon name="chevron-right" size="14px" />
-                          </button>
-                          <span class="integration-inline__sep" aria-hidden="true">|</span>
-                          <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('embed')">
-                            <span>{{ $t('integrations.tabs.embed') }} · {{ agentEmbedChannelCount }}</span>
-                            <t-icon name="chevron-right" size="14px" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 运行模式（首先选择） -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.mode') }} <span class="required">*</span></label>
-                        <p class="desc">{{ agentMode === 'smart-reasoning' ? $t('agent.editor.agentDesc') :
-                          $t('agent.editor.normalDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent" data-guide="agent-create-mode">
-                          <t-radio-button value="quick-answer">
-                            {{ $t('agent.type.normal') }}
-                          </t-radio-button>
-                          <t-radio-button value="smart-reasoning">
-                            {{ $t('agent.type.agent') }}
-                          </t-radio-button>
-                        </t-radio-group>
-                      </div>
-                    </div>
-
-                    <!-- 智能体类型（仅智能推理模式下显示） -->
-                    <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize"
-                      data-guide="agent-create-agent-type">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.agentType.label') }}</label>
-                        <p class="desc">{{ $t('agentEditor.agentType.desc') }}</p>
-                        <p v-if="activeAgentTypePreset" class="desc agent-type-preset-desc">{{
-                          agentTypePresetDescription(activeAgentTypePreset) }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-select :value="agentType" @change="onAgentTypeChange" :disabled="isBuiltinAgent"
-                          :placeholder="$t('agentEditor.agentType.label')" :options="agentTypeSelectOptions"
-                          :popup-props="{ overlayClassName: 'agent-type-popup' }" class="agent-type-select">
-                          <template #option="{ option }">
-                            <div class="agent-type-option">
-                              <span class="agent-type-option-label">{{ option.label }}</span>
-                              <span v-if="option.desc" class="agent-type-option-desc">{{ option.desc }}</span>
-                            </div>
-                          </template>
-                        </t-select>
-                      </div>
-                    </div>
-
-                    <!-- 名称 -->
-                    <div class="setting-row" data-guide="agent-create-name">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.name') }} <span v-if="!isBuiltinAgent"
-                            class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.name') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="name-input-wrapper">
-                          <!-- 内置智能体使用简洁图标 -->
-                          <div v-if="isBuiltinAgent" class="builtin-avatar" :class="isAgentMode ? 'agent' : 'normal'">
-                            <t-icon :name="isAgentMode ? 'control-platform' : 'chat'" size="24px" />
-                          </div>
-                          <!-- 自定义智能体使用 AgentAvatar -->
-                          <AgentAvatar v-else :name="formData.name || '?'" size="medium" />
-                          <t-input v-model="formData.name" :placeholder="$t('agent.editor.namePlaceholder')"
-                            class="name-input" :disabled="isBuiltinAgent" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 描述 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.description') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.description') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-textarea v-model="formData.description"
-                          :placeholder="$t('agent.editor.descriptionPlaceholder')"
-                          :autosize="{ minRows: 2, maxRows: 4 }" :disabled="isBuiltinAgent" />
-                      </div>
-                    </div>
-
-                    <!-- 长期记忆。留在基础信息这一组而不是「多轮对话」，是因为它与
-                         多轮历史窗口无关，且智能推理恰恰是最需要这个开关的模式。
-                         这个开关只能"关"：空间或个人设置关闭时，这里打开也不生效。 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.memoryEnabled') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.memoryEnabled') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.memory_enabled" />
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-
-                <!-- 提示词 -->
-                <div v-show="currentSection === 'prompts'" class="section section--prompts">
-                  <div class="prompts-panel">
-                    <div class="prompts-panel__header">
-                      <div class="section-header section-header--compact">
-                        <h2>{{ $t('agent.editor.promptsConfig') }}</h2>
-                        <p class="section-description">{{ $t('agent.editor.promptsConfigDesc') }}</p>
-                      </div>
-
-                      <nav v-if="promptNavItems.length > 1" class="prompts-outline"
-                        :aria-label="$t('agentEditor.promptNav.ariaLabel')">
-                        <button v-for="item in promptNavItems" :key="item.key" type="button"
-                          class="prompts-outline__pill"
-                          :class="{ 'prompts-outline__pill--active': activePromptAnchor === item.key }"
-                          @click="activePromptAnchor = item.key">
-                          <span>{{ item.label }}</span>
-                          <span v-if="item.customized" class="prompts-outline__dot"
-                            :title="$t('agentEditor.intentPrompts.customized')" />
-                        </button>
-                      </nav>
-                    </div>
-
-                    <div class="prompts-panel__body">
-                      <div class="settings-group">
-                        <!-- 系统提示词 -->
-                        <div v-show="activePromptAnchor === 'system'"
-                          class="setting-row setting-row-vertical prompts-panel__pane">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.systemPrompt') }} <span v-if="!isBuiltinAgent"
-                            class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.systemPrompt') }}{{ isBuiltinAgent ?
-                          $t('agentEditor.desc.leaveEmptyDefault') : '' }}</p>
-                        <p class="desc">{{ $t('agentEditor.desc.promptInheritance') }}</p>
-                        <div class="placeholder-tags">
-                          <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                          <t-tooltip v-for="placeholder in availablePlaceholders" :key="placeholder.name"
-                            :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                            placement="top">
-                            <span class="placeholder-tag" @click="handlePlaceholderClick('system', placeholder.name)"
-                              v-text="'{{' + placeholder.name + '}}'"></span>
-                          </t-tooltip>
-                          <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
-                        </div>
-                      </div>
-                      <div class="setting-control setting-control-full" style="position: relative;">
-                        <!-- Agent模式：统一提示词（使用 {{web_search_status}} 占位符动态控制行为） -->
-                        <div v-if="isAgentMode" class="textarea-with-template">
-                          <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
-                            :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
-                            @input="handlePromptInput" class="system-prompt-textarea" />
-                          <PromptTemplateSelector type="agentSystemPrompt" position="corner"
-                            :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
-                            @reset-default="handleAgentSystemPromptResetDefault" />
-                        </div>
-                        <!-- 普通模式：单个提示词 -->
-                        <div v-else class="textarea-with-template">
-                          <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
-                            :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
-                            @input="handlePromptInput" class="system-prompt-textarea" />
-                          <PromptTemplateSelector type="systemPrompt" position="corner"
-                            :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
-                            @reset-default="handleSystemPromptTemplateSelect" />
-                        </div>
-                        <!-- 占位符提示下拉框 -->
-                        <Teleport to="body">
-                          <div v-if="showPlaceholderPopup && filteredPlaceholders.length > 0"
-                            class="placeholder-popup-wrapper" :style="popupStyle">
-                            <div class="placeholder-popup">
-                              <div v-for="(placeholder, index) in filteredPlaceholders" :key="placeholder.name"
-                                class="placeholder-item" :class="{ active: selectedPlaceholderIndex === index }"
-                                @mousedown.prevent="insertPlaceholder(placeholder.name, true)"
-                                @mouseenter="selectedPlaceholderIndex = index">
-                                <div class="placeholder-name">
-                                  <code v-html="`{{${placeholder.name}}}`"></code>
-                                </div>
-                                <div class="placeholder-desc">{{ placeholder.description }}</div>
-                              </div>
-                            </div>
-                          </div>
-                        </Teleport>
-                      </div>
-                    </div>
-
-                    <!-- 上下文模板（仅普通模式） -->
-                    <div v-if="!isAgentMode" v-show="activePromptAnchor === 'context'"
-                      class="setting-row setting-row-vertical prompts-panel__pane">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.contextTemplate') }} <span v-if="!isBuiltinAgent"
-                            class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.contextTemplate') }}{{ isBuiltinAgent ?
-                          $t('agentEditor.desc.leaveEmptyDefault') : '' }}</p>
-                        <div class="placeholder-tags">
-                          <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                          <t-tooltip v-for="placeholder in contextTemplatePlaceholders" :key="placeholder.name"
-                            :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                            placement="top">
-                            <span class="placeholder-tag" @click="handlePlaceholderClick('context', placeholder.name)"
-                              v-text="'{{' + placeholder.name + '}}'"></span>
-                          </t-tooltip>
-                          <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
-                        </div>
-                      </div>
-                      <div class="setting-control setting-control-full" style="position: relative;">
-                        <div class="textarea-with-template">
-                          <t-textarea ref="contextTemplateTextareaRef" v-model="formData.config.context_template"
-                            :placeholder="contextTemplatePlaceholder" :autosize="{ minRows: 8, maxRows: 20 }"
-                            @input="handleContextTemplateInput" class="system-prompt-textarea" />
-                          <PromptTemplateSelector type="contextTemplate" position="corner"
-                            :hasKnowledgeBase="hasKnowledgeBase" @select="handleContextTemplateSelect"
-                            @reset-default="handleContextTemplateSelect" />
-                        </div>
-                        <!-- 上下文模板占位符提示下拉框 -->
-                        <Teleport to="body">
-                          <div v-if="showContextPlaceholderPopup && filteredContextPlaceholders.length > 0"
-                            class="placeholder-popup-wrapper" :style="contextPopupStyle">
-                            <div class="placeholder-popup">
-                              <div v-for="(placeholder, index) in filteredContextPlaceholders" :key="placeholder.name"
-                                class="placeholder-item" :class="{ active: selectedContextPlaceholderIndex === index }"
-                                @mousedown.prevent="insertContextPlaceholder(placeholder.name, true)"
-                                @mouseenter="selectedContextPlaceholderIndex = index">
-                                <div class="placeholder-name">
-                                  <code v-html="`{{${placeholder.name}}}`"></code>
-                                </div>
-                                <div class="placeholder-desc">{{ placeholder.description }}</div>
-                              </div>
-                            </div>
-                          </div>
-                        </Teleport>
-                      </div>
-                    </div>
-
-                    <!-- 意图提示词（仅普通模式） -->
-                    <div v-if="!isAgentMode" v-show="activePromptAnchor === 'intent'"
-                      class="setting-row setting-row-vertical prompts-panel__pane">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.intentPrompts.title') }}</label>
-                        <p class="desc">{{ $t('agentEditor.intentPrompts.sectionDesc') }}</p>
-                      </div>
-                      <div class="setting-control setting-control-full">
-                        <div class="intent-prompts-editor">
-                          <div v-if="intentPromptTemplates.length === 0" class="prompt-disabled-hint">
-                            {{ $t('agentEditor.intentPrompts.empty') }}
-                          </div>
-                          <template v-else>
-                            <div class="intent-toggle-group" role="tablist"
-                              :aria-label="$t('agentEditor.intentPrompts.intentLabel')">
-                              <t-button v-for="template in intentPromptTemplates" :key="template.id" theme="default"
-                                variant="outline" size="small" class="intent-toggle-btn"
-                                :class="{ 'intent-toggle-btn--active': selectedIntent === template.id }"
-                                :disabled="props.readOnly" @click="selectedIntent = template.id">
-                                <span class="intent-toggle-label">
-                                  {{ template.name || template.id }}
-                                  <t-tooltip v-if="isIntentCustomized(template.id)"
-                                    :content="$t('agentEditor.intentPrompts.customized')" placement="top">
-                                    <span class="intent-toggle-dot" />
-                                  </t-tooltip>
-                                </span>
-                              </t-button>
-                            </div>
-                            <p v-if="currentIntentTemplateDesc" class="intent-active-desc">{{ currentIntentTemplateDesc
-                            }}</p>
-
-                            <div v-if="placeholderData.system_prompt.length > 0" class="placeholder-tags">
-                              <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                              <t-tooltip v-for="placeholder in placeholderData.system_prompt" :key="placeholder.name"
-                                :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                                placement="top">
-                                <span class="placeholder-tag"
-                                  @click="handlePlaceholderClick('intent', placeholder.name)"
-                                  v-text="'{{' + placeholder.name + '}}'" />
-                              </t-tooltip>
-                              <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
-                            </div>
-
-                            <div class="textarea-with-template">
-                              <t-textarea ref="intentPromptTextareaRef" v-model="intentEditorValue"
-                                class="system-prompt-textarea" :autosize="{ minRows: 10, maxRows: 25 }"
-                                :disabled="props.readOnly || !selectedIntent"
-                                :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
-                                @input="handleIntentPromptInput" />
-                              <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
-                                :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
-                            </div>
-
-                            <Teleport to="body">
-                              <div v-if="intentPromptPopup.show && filteredIntentPlaceholders.length > 0"
-                                class="placeholder-popup-wrapper" :style="intentPromptPopup.style">
-                                <div class="placeholder-popup">
-                                  <div v-for="(placeholder, index) in filteredIntentPlaceholders" :key="placeholder.name"
-                                    class="placeholder-item"
-                                    :class="{ active: intentPromptPopup.selectedIndex === index }"
-                                    @mousedown.prevent="insertGenericPlaceholder('intent', placeholder.name, true)"
-                                    @mouseenter="intentPromptPopup.selectedIndex = index">
-                                    <div class="placeholder-name">
-                                      <code v-html="`{{${placeholder.name}}}`" />
-                                    </div>
-                                    <div class="placeholder-desc">{{ placeholder.description }}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </Teleport>
-                          </template>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 改写提示词（多轮对话 + 问题改写开启时） -->
-                    <template
-                      v-if="!isAgentMode && formData.config.multi_turn_enabled && formData.config.enable_rewrite">
-                      <div v-show="activePromptAnchor === 'rewrite-system'"
-                        class="setting-row setting-row-vertical prompts-panel__pane">
-                        <div class="setting-info">
-                          <label>{{ $t('agent.editor.rewritePromptSystem') }}</label>
-                          <p class="desc">{{ $t('agentEditor.desc.rewriteSystemPrompt') }}</p>
-                          <div class="placeholder-tags" v-if="rewriteSystemPlaceholders.length > 0">
-                            <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                            <t-tooltip v-for="placeholder in rewriteSystemPlaceholders" :key="placeholder.name"
-                              :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                              placement="top">
-                              <span class="placeholder-tag"
-                                @click="handlePlaceholderClick('rewriteSystem', placeholder.name)"
-                                v-text="'{{' + placeholder.name + '}}'"></span>
-                            </t-tooltip>
-                            <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
-                          </div>
-                        </div>
-                        <div class="setting-control setting-control-full" style="position: relative;">
-                          <div class="textarea-with-template">
-                            <t-textarea ref="rewriteSystemTextareaRef" v-model="formData.config.rewrite_prompt_system"
-                              :placeholder="defaultRewritePromptSystem || $t('agent.editor.rewritePromptSystemPlaceholder')"
-                              :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteSystemInput" />
-                            <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
-                              @reset-default="handleRewriteTemplateSelect" />
-                          </div>
-                          <Teleport to="body">
-                            <div v-if="rewriteSystemPopup.show && filteredRewriteSystemPlaceholders.length > 0"
-                              class="placeholder-popup-wrapper" :style="rewriteSystemPopup.style">
-                              <div class="placeholder-popup">
-                                <div v-for="(placeholder, index) in filteredRewriteSystemPlaceholders"
-                                  :key="placeholder.name" class="placeholder-item"
-                                  :class="{ active: rewriteSystemPopup.selectedIndex === index }"
-                                  @mousedown.prevent="insertGenericPlaceholder('rewriteSystem', placeholder.name, true)"
-                                  @mouseenter="rewriteSystemPopup.selectedIndex = index">
-                                  <div class="placeholder-name">
-                                    <code v-html="`{{${placeholder.name}}}`"></code>
-                                  </div>
-                                  <div class="placeholder-desc">{{ placeholder.description }}</div>
-                                </div>
-                              </div>
-                            </div>
-                          </Teleport>
-                        </div>
-                      </div>
-
-                      <div v-show="activePromptAnchor === 'rewrite-user'"
-                        class="setting-row setting-row-vertical prompts-panel__pane">
-                        <div class="setting-info">
-                          <label>{{ $t('agent.editor.rewritePromptUser') }}</label>
-                          <p class="desc">{{ $t('agentEditor.desc.rewriteUserPrompt') }}</p>
-                          <div class="placeholder-tags" v-if="rewritePlaceholders.length > 0">
-                            <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                            <t-tooltip v-for="placeholder in rewritePlaceholders" :key="placeholder.name"
-                              :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                              placement="top">
-                              <span class="placeholder-tag"
-                                @click="handlePlaceholderClick('rewriteUser', placeholder.name)"
-                                v-text="'{{' + placeholder.name + '}}'"></span>
-                            </t-tooltip>
-                            <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
-                          </div>
-                        </div>
-                        <div class="setting-control setting-control-full" style="position: relative;">
-                          <div class="textarea-with-template">
-                            <t-textarea ref="rewriteUserTextareaRef" v-model="formData.config.rewrite_prompt_user"
-                              :placeholder="defaultRewritePromptUser || $t('agent.editor.rewritePromptUserPlaceholder')"
-                              :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteUserInput" />
-                            <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
-                              @reset-default="handleRewriteTemplateSelect" />
-                          </div>
-                          <Teleport to="body">
-                            <div v-if="rewriteUserPopup.show && filteredRewriteUserPlaceholders.length > 0"
-                              class="placeholder-popup-wrapper" :style="rewriteUserPopup.style">
-                              <div class="placeholder-popup">
-                                <div v-for="(placeholder, index) in filteredRewriteUserPlaceholders"
-                                  :key="placeholder.name" class="placeholder-item"
-                                  :class="{ active: rewriteUserPopup.selectedIndex === index }"
-                                  @mousedown.prevent="insertGenericPlaceholder('rewriteUser', placeholder.name, true)"
-                                  @mouseenter="rewriteUserPopup.selectedIndex = index">
-                                  <div class="placeholder-name">
-                                    <code v-html="`{{${placeholder.name}}}`"></code>
-                                  </div>
-                                  <div class="placeholder-desc">{{ placeholder.description }}</div>
-                                </div>
-                              </div>
-                            </div>
-                          </Teleport>
-                        </div>
-                      </div>
-                    </template>
-
-                    <!-- 检索兜底（普通模式 + 启用知识库） -->
-                    <div v-if="!isAgentMode && hasKnowledgeBase" v-show="activePromptAnchor === 'fallback'"
-                      class="prompts-panel__pane prompts-panel__pane--stack">
-                      <div class="setting-row">
-                        <div class="setting-info">
-                          <label>{{ $t('agent.editor.fallbackStrategy') }}</label>
-                          <p class="desc">{{ $t('agentEditor.desc.fallbackStrategy') }}</p>
-                        </div>
-                        <div class="setting-control">
-                          <t-radio-group v-model="formData.config.fallback_strategy">
-                            <t-radio-button value="fixed">{{ $t('agentEditor.fallback.fixed') }}</t-radio-button>
-                            <t-radio-button value="model">{{ $t('agentEditor.fallback.model') }}</t-radio-button>
-                          </t-radio-group>
-                        </div>
-                      </div>
-
-                      <div v-if="formData.config.fallback_strategy === 'fixed'"
-                        class="setting-row setting-row-vertical">
-                        <div class="setting-info">
-                          <label>{{ $t('agent.editor.fallbackResponse') }}</label>
-                          <p class="desc">{{ $t('agentEditor.desc.fallbackResponse') }}</p>
-                        </div>
-                        <div class="setting-control setting-control-full">
-                          <div class="textarea-with-template">
-                            <t-textarea v-model="formData.config.fallback_response"
-                              :placeholder="defaultFallbackResponse || $t('agent.editor.fallbackResponsePlaceholder')"
-                              :autosize="{ minRows: 2, maxRows: 6 }" />
-                            <PromptTemplateSelector type="fallback" position="corner" fallbackMode="fixed"
-                              @select="handleFallbackResponseTemplateSelect"
-                              @reset-default="handleFallbackResponseTemplateSelect" />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div v-if="formData.config.fallback_strategy === 'model'"
-                        class="setting-row setting-row-vertical">
-                        <div class="setting-info">
-                          <label>{{ $t('agent.editor.fallbackPrompt') }}</label>
-                          <p class="desc">{{ $t('agentEditor.desc.fallbackPrompt') }}</p>
-                          <div class="placeholder-tags" v-if="fallbackPlaceholders.length > 0">
-                            <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                            <t-tooltip v-for="placeholder in fallbackPlaceholders" :key="placeholder.name"
-                              :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                              placement="top">
-                              <span class="placeholder-tag"
-                                @click="handlePlaceholderClick('fallback', placeholder.name)"
-                                v-text="'{{' + placeholder.name + '}}'"></span>
-                            </t-tooltip>
-                            <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
-                          </div>
-                        </div>
-                        <div class="setting-control setting-control-full" style="position: relative;">
-                          <div class="textarea-with-template">
-                            <t-textarea ref="fallbackPromptTextareaRef" v-model="formData.config.fallback_prompt"
-                              :placeholder="defaultFallbackPrompt || $t('agent.editor.fallbackPromptPlaceholder')"
-                              :autosize="{ minRows: 4, maxRows: 10 }" @input="handleFallbackPromptInput" />
-                            <PromptTemplateSelector type="fallback" position="corner" fallbackMode="model"
-                              @select="handleFallbackPromptTemplateSelect"
-                              @reset-default="handleFallbackPromptTemplateSelect" />
-                          </div>
-                          <Teleport to="body">
-                            <div v-if="fallbackPromptPopup.show && filteredFallbackPlaceholders.length > 0"
-                              class="placeholder-popup-wrapper" :style="fallbackPromptPopup.style">
-                              <div class="placeholder-popup">
-                                <div v-for="(placeholder, index) in filteredFallbackPlaceholders"
-                                  :key="placeholder.name" class="placeholder-item"
-                                  :class="{ active: fallbackPromptPopup.selectedIndex === index }"
-                                  @mousedown.prevent="insertGenericPlaceholder('fallback', placeholder.name, true)"
-                                  @mouseenter="fallbackPromptPopup.selectedIndex = index">
-                                  <div class="placeholder-name">
-                                    <code v-html="`{{${placeholder.name}}}`"></code>
-                                  </div>
-                                  <div class="placeholder-desc">{{ placeholder.description }}</div>
-                                </div>
-                              </div>
-                            </div>
-                          </Teleport>
-                        </div>
-                      </div>
-                    </div>
-
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 模型配置 -->
-                <div v-show="currentSection === 'model'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.modelConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.modelConfigDesc') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- 模型选择 -->
-                    <div
-                      class="setting-row"
-                      data-guide="agent-create-model"
-                      data-agent-field="summary_model"
-                      :class="{ 'setting-row--field-highlight': highlightedField === 'summary_model' }"
-                    >
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.model_id = val"
-                          @add-model="handleAddModel('llm')" :placeholder="$t('agent.editor.modelPlaceholder')" />
-                      </div>
-                    </div>
-
-                    <!-- 温度 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.temperature') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.temperature') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.temperature" :min="0" :max="1" :step="0.1" />
-                          <span class="slider-value">{{ formData.config.temperature }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 最大生成Token数：0 表示跟随系统默认；自定义后按输入值保存 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.maxCompletionTokens') }}</label>
-                        <p class="desc">{{ isAgentMode ? $t('agentEditor.desc.maxTokensAgent') :
-                          $t('agentEditor.desc.maxTokens') }}
-                        </p>
-                      </div>
-                      <div class="setting-control max-tokens-control">
-                        <t-radio-group v-model="maxCompletionTokensMode">
-                          <t-radio-button value="default">{{ $t('agent.editor.maxCompletionTokensDefault')
-                            }}</t-radio-button>
-                          <t-radio-button value="custom">{{ $t('agent.editor.maxCompletionTokensCustom')
-                            }}</t-radio-button>
-                        </t-radio-group>
-                        <span v-if="maxCompletionTokensMode === 'default'" class="max-tokens-value">
-                          {{ effectiveDefaultMaxCompletionTokens }}
-                        </span>
-                        <t-input-number v-else v-model="formData.config.max_completion_tokens" :min="100" :max="100000"
-                          :step="100" theme="column" />
-                      </div>
-                    </div>
-
-                    <!-- 思考模式 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.thinking') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="thinkingEnabled" />
-                      </div>
-                    </div>
-
-                    <!-- 来源引用 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.citationEnabled') }}</label>
-                        <p class="desc">{{ $t('agent.editor.citationEnabledDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.citation_enabled" />
-                      </div>
-                    </div>
-
-                    <!-- ReRank 模型（启用知识库或 knowledge_search 工具时显示） -->
-                    <div
-                      v-if="showRerankModelField"
-                      class="setting-row"
-                      data-agent-field="rerank_model"
-                      :class="{ 'setting-row--field-highlight': highlightedField === 'rerank_model' }"
-                    >
-                      <div class="setting-info">
-                        <label>
-                          {{ $t('agent.editor.rerankModel') }}
-                          <span v-if="needsRerankModel" class="required">*</span>
-                        </label>
-                        <p class="desc">
-                          {{ $t('agent.editor.rerankModelDesc') }}
-                          <template v-if="!needsRerankModel">
-                            <br />
-                            <span class="hint">{{ $t('agent.editor.rerankModelOptionalHint') }}</span>
-                          </template>
-                        </p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector model-type="Rerank" :selected-model-id="formData.config.rerank_model_id"
-                          :all-models="allModels"
-                          :clearable="!needsRerankModel"
-                          @update:selected-model-id="(val: string) => formData.config.rerank_model_id = val"
-                          @add-model="handleAddModel('rerank')"
-                          :placeholder="$t('agent.editor.rerankModelPlaceholder')" />
-                      </div>
-                    </div>
-
-                    <!-- 问题理解模型（多轮改写时，留空则复用主对话模型） -->
-                    <div
-                      v-if="!isAgentMode && formData.config.multi_turn_enabled && formData.config.enable_rewrite"
-                      class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.queryUnderstandModel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.queryUnderstandModel') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector model-type="KnowledgeQA"
-                          :selected-model-id="formData.config.query_understand_model_id" :all-models="allModels"
-                          clearable
-                          @update:selected-model-id="(val: string) => formData.config.query_understand_model_id = val"
-                          @add-model="handleAddModel('llm')"
-                          :placeholder="$t('agent.editor.queryUnderstandModelPlaceholder')" />
-                      </div>
-                    </div>
-
-                    <!-- 最大迭代次数（Agent 模式）：正数为上限，-1 为不限制 -->
-                    <div v-if="isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.maxIterations') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.maxIterations') }}</p>
-                      </div>
-                      <div class="setting-control max-tokens-control">
-                        <t-radio-group v-model="maxIterationsMode">
-                          <t-radio-button value="limit">{{ $t('agent.editor.maxIterationsLimit') }}</t-radio-button>
-                          <t-radio-button value="unlimited">{{ $t('agent.editor.maxIterationsUnlimited') }}</t-radio-button>
-                        </t-radio-group>
-                        <t-input-number v-if="maxIterationsMode === 'limit'" v-model="formData.config.max_iterations"
-                          :min="2" :max="50" theme="column" />
-                      </div>
-                    </div>
-
-                    <!-- LLM 调用超时（Agent 模式） -->
-                    <div v-if="isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.llmCallTimeout.label') }}</label>
-                        <p class="desc">{{ $t('agentEditor.llmCallTimeout.desc') }}</p>
-                        <p class="desc-hint">{{ $t('agentEditor.llmCallTimeout.hint') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.llm_call_timeout" :min="0" :max="3600" theme="column"
-                          :placeholder="$t('agentEditor.llmCallTimeout.placeholder')" clearable />
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-
-                <!-- 附件上传 -->
-                <div v-show="currentSection === 'multimodal'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agentEditor.imageUpload.sectionTitle') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.imageUpload.sectionDesc') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- 图片上传 -->
-                    <div class="setting-row" data-guide="agent-create-multimodal">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.label') }}</label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.desc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.image_upload_enabled" />
-                      </div>
-                    </div>
-
-                    <!-- VLM 模型（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.vlmModel') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.vlmModelDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector model-type="VLLM" :selected-model-id="formData.config.vlm_model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
-                          @add-model="handleAddModel('vllm')"
-                          :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')" />
-                      </div>
-                    </div>
-
-                    <!-- 附件图片理解 / 扫描件 OCR（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.imageUnderstandingLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.imageUnderstandingDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.attachment_image_understanding" />
-                      </div>
-                    </div>
-
-                    <!-- 扫描件 OCR 最大页数（开启附件图片理解时） -->
-                    <div v-if="formData.config.image_upload_enabled && formData.config.attachment_image_understanding"
-                      class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.ocrMaxPagesLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.ocrMaxPagesDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.attachment_ocr_max_pages" :min="0" :max="64"
-                          :step="1" theme="normal" style="width: 160px;"
-                          :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
-                      </div>
-                    </div>
-
-                    <!-- 图片存储 Provider（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.storageProvider') }}</label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.storageProviderDesc') }}</p>
-                      </div>
-                      <div class="setting-control" style="flex-direction: column; align-items: flex-end;">
-                        <t-select v-model="formData.config.image_storage_provider" style="width: 280px;"
-                          :placeholder="$t('agentEditor.imageUpload.storageProviderPlaceholder')" clearable>
-                          <t-option value="" :label="$t('agentEditor.imageUpload.storageDefault')" />
-                          <t-option v-for="opt in imageStorageOptions" :key="opt.value" :value="opt.value"
-                            :label="opt.label" :disabled="opt.disabled">
-                            <span class="select-option-with-tag">
-                              <span>{{ opt.label }}</span>
-                              <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">{{
-                                $t('agentEditor.imageUpload.notConfigured') }}</t-tag>
-                            </span>
-                          </t-option>
-                        </t-select>
-                        <a href="javascript:void(0)" class="go-settings-link"
-                          @click.prevent="uiStore.openSettings('storage')">
-                          {{ $t('agentEditor.imageUpload.goStorageSettings') }}
-                        </a>
-                      </div>
-                    </div>
-
-                    <!-- 音频上传开关 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.audioUpload.label') }}</label>
-                        <p class="desc">{{ $t('agentEditor.audioUpload.desc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.audio_upload_enabled" />
-                      </div>
-                    </div>
-
-                    <!-- ASR 模型（音频上传启用时） -->
-                    <div v-if="formData.config.audio_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.audioUpload.asrModel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.audioUpload.asrModelDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector model-type="ASR" :selected-model-id="formData.config.asr_model_id"
-                          :all-models="allModels"
-                          clearable
-                          @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
-                          @add-model="handleAddModel('asr')"
-                          :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')" />
-                      </div>
-                    </div>
-
-                    <!-- 单轮等待附件解析超时（秒） -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.chatParser.waitTimeoutLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.chatParser.waitTimeoutDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.attachment_parse_wait_timeout_sec" :min="0" :max="600"
-                          :step="10" theme="normal" style="width: 160px;"
-                          :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
-                      </div>
-                    </div>
-
-                    <!-- 聊天附件解析策略 -->
-                    <div class="parser-policy-block">
-                      <div class="parser-policy-block__header">
-                        <label>{{ $t('agentEditor.chatParser.label') }}</label>
-                        <p class="desc">{{ $t('agentEditor.chatParser.desc') }}</p>
-                      </div>
-                      <KBParserSettings
-                        embedded
-                        :parser-engine-rules="formData.config.chat_parser_engine_rules"
-                        :relevant-extensions="CHAT_PARSER_EXTENSIONS"
-                        @update:parser-engine-rules="(val: any) => formData.config.chat_parser_engine_rules = val"
-                      />
-                    </div>
-
-                  </div>
-                </div>
-
-                <!-- 多轮对话。Agent 模式下 history_turns 同样生效（session_agent_qa.go
-                     经 LoadAgentHistory 读取），所以本组不再整体按模式隐藏；开关本身仍由
-                     EnsureDefaults 强制开启，故只在普通模式展示。 -->
-                <div v-show="currentSection === 'conversation'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
-                    <p class="section-description">{{ conversationSectionDesc }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- 多轮对话开关（仅普通模式：Agent 模式由 EnsureDefaults 强制开启，
-                         展示可关闭的开关只会被服务端改回去） -->
-                    <div v-if="!isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.multiTurn') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.multiTurn') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.multi_turn_enabled" />
-                      </div>
-                    </div>
-
-                    <!-- 保留轮数（Agent 模式恒为多轮，故不受开关状态影响） -->
-                    <div v-if="formData.config.multi_turn_enabled || isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.historyTurns') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.historyRounds') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.history_turns" :min="1" :max="100" theme="column" />
-                      </div>
-                    </div>
-
-                    <!-- 跨轮保留检索结果。只有 agent 链路读取该值（internal/agent/observe.go），
-                         且改写的只是 KB/Wiki 这八个工具的历史结果，所以没有知识库时不展示。 -->
-                    <div v-if="isAgentMode && hasKnowledgeBase" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.retainRetrievalHistory') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.retainRetrievalHistory') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.retain_retrieval_history" />
-                      </div>
-                    </div>
-
-                    <!-- 问题改写（仅多轮对话开启且普通模式时显示） -->
-                    <div v-if="formData.config.multi_turn_enabled && !isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.enableRewrite') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.rewrite') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.enable_rewrite" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 对话问题推荐 -->
-                <div v-show="currentSection === 'suggestions'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agentEditor.questionSuggestions.title') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.questionSuggestions.description') }}</p>
-                  </div>
-
-                  <t-tabs v-model="suggestionTab" class="suggestion-tabs">
-                    <t-tab-panel value="starters"
-                      :label="$t('agentEditor.questionSuggestions.startersTitle')" />
-                    <t-tab-panel value="followUps"
-                      :label="$t('agentEditor.questionSuggestions.followUpsTitle')" />
-                  </t-tabs>
-
-                  <div v-show="suggestionTab === 'starters'" class="settings-group">
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.questionSuggestions.enableStarters') }}</label>
-                        <p class="desc">{{ $t('agentEditor.questionSuggestions.enableStartersDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.question_suggestions.starters.enabled"
-                          :aria-label="$t('agentEditor.questionSuggestions.enableStarters')" />
-                      </div>
-                    </div>
-
-                    <div v-if="formData.config.question_suggestions.starters.enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.questionSuggestions.sourceMode') }}</label>
-                      </div>
-                      <div class="setting-control">
-                        <t-select v-model="formData.config.question_suggestions.starters.mode"
-                          :options="starterSuggestionModeOptions" />
-                      </div>
-                    </div>
-
-                    <div v-if="formData.config.question_suggestions.starters.enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.questionSuggestions.count') }}</label>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.question_suggestions.starters.count"
-                          :min="1" :max="8" theme="column" />
-                      </div>
-                    </div>
-
-                    <div
-                      v-if="formData.config.question_suggestions.starters.enabled && ['curated', 'hybrid'].includes(formData.config.question_suggestions.starters.mode)"
-                      class="setting-row setting-row-vertical">
-                      <div class="setting-info">
-                        <div class="setting-info-header setting-info-header--inline">
-                          <label>{{ $t('agentEditor.questionSuggestions.curatedItems') }}</label>
-                          <span class="curated-items-count">
-                            {{ formData.config.question_suggestions.starters.items.length }}/8
-                          </span>
-                        </div>
-                        <p class="desc">{{ $t('agentEditor.questionSuggestions.curatedItemsDesc') }}</p>
-                      </div>
-                      <div class="setting-control setting-control-full">
-                        <div class="suggested-prompts-list">
-                          <div v-for="(_prompt, index) in formData.config.question_suggestions.starters.items"
-                            :key="index" class="prompt-item">
-                            <t-input v-model="formData.config.question_suggestions.starters.items[index]"
-                              :maxlength="200" />
-                            <t-button variant="text" theme="danger" shape="square"
-                              :aria-label="$t('common.delete')" @click="removeStarterSuggestion(Number(index))">
-                              <t-icon name="delete" />
-                            </t-button>
-                          </div>
-                          <t-button variant="dashed"
-                            :disabled="formData.config.question_suggestions.starters.items.length >= 8"
-                            @click="addStarterSuggestion">
-                            <template #icon><t-icon name="add" /></template>
-                            {{ $t('agentEditor.questionSuggestions.addItem') }}
-                          </t-button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-show="suggestionTab === 'followUps'" class="settings-group">
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.questionSuggestions.enableFollowUps') }}</label>
-                        <p class="desc">{{ $t('agentEditor.questionSuggestions.enableFollowUpsDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.question_suggestions.follow_ups.enabled"
-                          :aria-label="$t('agentEditor.questionSuggestions.enableFollowUps')" />
-                      </div>
-                    </div>
-
-                    <template v-if="formData.config.question_suggestions.follow_ups.enabled">
-                      <div class="setting-row">
-                        <div class="setting-info">
-                          <label>{{ $t('agentEditor.questionSuggestions.sourceMode') }}</label>
-                        </div>
-                        <div class="setting-control">
-                          <t-select v-model="formData.config.question_suggestions.follow_ups.mode"
-                            :options="followUpSuggestionModeOptions" />
-                        </div>
-                      </div>
-
-                      <div class="setting-row">
-                        <div class="setting-info">
-                          <label>{{ $t('agentEditor.questionSuggestions.count') }}</label>
-                        </div>
-                        <div class="setting-control">
-                          <t-input-number v-model="formData.config.question_suggestions.follow_ups.count"
-                            :min="1" :max="5" theme="column" />
-                        </div>
-                      </div>
-
-                      <div v-if="formData.config.question_suggestions.follow_ups.mode !== 'knowledge'"
-                        class="setting-row">
-                        <div class="setting-info">
-                          <label>{{ $t('agentEditor.questionSuggestions.model') }}</label>
-                          <p class="desc">{{ $t('agentEditor.questionSuggestions.modelDesc') }}</p>
-                        </div>
-                        <div class="setting-control">
-                          <ModelSelector model-type="KnowledgeQA"
-                            :selected-model-id="formData.config.question_suggestions.follow_ups.model_id"
-                            :all-models="allModels"
-                            clearable
-                            @update:selected-model-id="(val: string) => formData.config.question_suggestions.follow_ups.model_id = val"
-                            @add-model="handleAddModel('summary')" />
-                        </div>
-                      </div>
-
-                      <div class="suggestion-advanced-divider">
-                        <span>{{ $t('agentEditor.questionSuggestions.advancedSettings') }}</span>
-                      </div>
-
-                      <div class="setting-row">
-                        <div class="setting-info">
-                          <label>{{ $t('agentEditor.questionSuggestions.contextTurns') }}</label>
-                        </div>
-                        <div class="setting-control">
-                          <t-input-number
-                            v-model="formData.config.question_suggestions.follow_ups.max_context_turns"
-                            :min="1" :max="5" theme="column" />
-                        </div>
-                      </div>
-
-                      <div class="setting-row setting-row-vertical">
-                        <div class="setting-info">
-                          <label>{{ $t('agentEditor.questionSuggestions.categories') }}</label>
-                        </div>
-                        <div class="setting-control setting-control-full">
-                          <t-checkbox-group v-model="formData.config.question_suggestions.follow_ups.categories"
-                            :options="followUpCategoryOptions" />
-                        </div>
-                      </div>
-
-                      <div class="setting-row setting-row-vertical">
-                        <div class="setting-info">
-                          <label>{{ $t('agentEditor.questionSuggestions.instruction') }}</label>
-                        </div>
-                        <div class="setting-control setting-control-full">
-                          <t-textarea
-                            v-model="formData.config.question_suggestions.follow_ups.additional_instruction"
-                            :placeholder="$t('agentEditor.questionSuggestions.instructionPlaceholder')"
-                            :maxlength="2000" :autosize="{ minRows: 3, maxRows: 8 }" />
-                        </div>
-                      </div>
-
-                      <div class="setting-row setting-row-vertical">
-                        <div class="setting-info">
-                          <label>{{ $t('agentEditor.questionSuggestions.displayRules') }}</label>
-                        </div>
-                        <div class="setting-control setting-control-full">
-                          <div class="suggestion-checkboxes">
-                            <t-checkbox v-model="formData.config.question_suggestions.follow_ups.suppress_on_fallback">{{ $t('agentEditor.questionSuggestions.suppressFallback') }}</t-checkbox>
-                            <t-checkbox v-model="formData.config.question_suggestions.follow_ups.suppress_when_answer_asks_question">{{ $t('agentEditor.questionSuggestions.suppressQuestion') }}</t-checkbox>
-                            <t-checkbox v-model="formData.config.question_suggestions.follow_ups.knowledge_fallback">{{ $t('agentEditor.questionSuggestions.knowledgeFallback') }}</t-checkbox>
-                            <t-checkbox v-model="formData.config.question_suggestions.follow_ups.allow_regenerate">{{ $t('agentEditor.questionSuggestions.allowRegenerate') }}</t-checkbox>
-                          </div>
-                        </div>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-
-                <!-- 工具配置（仅 Agent 模式） -->
-                <div v-show="currentSection === 'tools' && isAgentMode" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.toolsConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.toolsConfigDesc') }}</p>
-                  </div>
-
-                  <!-- 合并面板：能力状态 + 预设切换 -->
-                  <div class="tools-overview">
-                    <div class="tools-overview-row">
-                      <div class="tools-status-chip">
-                        <t-icon name="folder" />
-                        <template v-if="kbSelectionMode === 'none'">
-                          <span>{{ $t('agentEditor.tools.statusNoKb') }}</span>
-                        </template>
-                        <template v-else>
-                          <span class="tools-status-metric">
-                            <strong>{{ ragKbCount }}</strong> {{ $t('agentEditor.tools.kbMetricRag') }}
-                          </span>
-                          <span class="tools-status-sep">·</span>
-                          <span class="tools-status-metric">
-                            <strong>{{ wikiKbCount }}</strong> {{ $t('agentEditor.tools.kbMetricWiki') }}
-                          </span>
-                        </template>
-                      </div>
-                      <div v-if="inactiveToolCount > 0" class="tools-status-chip tools-status-chip--warn">
-                        <t-icon name="error-circle" />
-                        <span>{{ $t('agentEditor.tools.statusInactive', { count: inactiveToolCount }) }}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- 允许的工具（按组渲染，统一网格） -->
-                    <div
-                      class="setting-row setting-row-vertical"
-                      data-agent-field="allowed_tools"
-                      :class="{ 'setting-row--field-highlight': highlightedField === 'allowed_tools' }"
-                    >
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.allowedTools') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.selectTools') }}</p>
-                      </div>
-                      <div class="setting-control setting-control-full">
-                        <t-checkbox-group v-model="formData.config.allowed_tools" class="tool-groups">
-                          <section v-for="group in groupedAvailableTools" :key="group.key"
-                            :class="['tool-group', `tool-group--${group.key}`]">
-                            <header class="tool-group-header">
-                              <span class="tool-group-bar" />
-                              <span class="tool-group-title">{{ group.label }}</span>
-                              <span class="tool-group-count">{{ group.tools.length }}</span>
-                              <span v-if="group.key === 'wiki_edit'" class="tool-group-warning">
-                                <t-icon name="error-circle" />
-                                {{ $t('agentEditor.tools.writeWarning') }}
-                              </span>
-                            </header>
-                            <div class="tool-grid">
-                              <t-checkbox v-for="tool in group.tools" :key="tool.value" :value="tool.value"
-                                :disabled="tool.disabled"
-                                :class="['tool-card', { 'tool-card--disabled': tool.disabled, 'tool-card--danger': tool.danger }]">
-                                <div class="tool-card-body">
-                                  <div class="tool-card-head">
-                                    <span class="tool-card-name">{{ tool.label }}</span>
-                                    <span v-if="tool.danger" class="tool-card-badge">
-                                      {{ $t('agentEditor.tools.dangerTag') }}
-                                    </span>
-                                  </div>
-                                  <span v-if="tool.description" class="tool-card-desc">{{ tool.description }}</span>
-                                  <span v-if="tool.disabled && tool.disabledReason" class="tool-card-hint">
-                                    {{ tool.disabledReason }}
-                                  </span>
-                                </div>
-                              </t-checkbox>
-                            </div>
-                          </section>
-                        </t-checkbox-group>
-                      </div>
-                    </div>
-
-                    <!-- 有效工具预览：所见即所得 -->
-                    <div class="setting-row setting-row-vertical">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.tools.effectiveLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.tools.effectiveDesc') }}</p>
-                      </div>
-                      <div class="setting-control setting-control-full">
-                        <div class="effective-tools">
-                          <template v-if="effectiveTools.length === 0">
-                            <div class="effective-tools-empty">
-                              {{ $t('agentEditor.tools.effectiveEmpty') }}
-                            </div>
-                          </template>
-                          <template v-else>
-                            <span v-for="item in effectiveTools" :key="item.value"
-                              :class="['effective-chip', { 'effective-chip--inactive': !item.active }]"
-                              :title="item.reason || ''">
-                              <span class="effective-chip-label">{{ item.label }}</span>
-                              <span v-if="!item.active" class="effective-chip-reason">{{ item.reason }}</span>
-                            </span>
-                          </template>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- MCP 服务配置（仅 Agent 模式） -->
-                <div v-show="currentSection === 'mcp' && isAgentMode" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agentEditor.mcp.label') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.mcp.desc') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- MCP 服务选择 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.mcp.label') }}</label>
-                        <p class="desc">{{ $t('agentEditor.mcp.desc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-radio-group v-model="mcpSelectionMode">
-                          <t-radio-button value="all">{{ $t('agentEditor.selection.all') }}</t-radio-button>
-                          <t-radio-button value="selected">{{ $t('agentEditor.selection.selected') }}</t-radio-button>
-                          <t-radio-button value="none">{{ $t('agentEditor.selection.disabled') }}</t-radio-button>
-                        </t-radio-group>
-                      </div>
-                    </div>
-
-                    <!-- 选择指定 MCP 服务 -->
-                    <div v-if="mcpSelectionMode === 'selected' && showMcpServiceSelect" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.mcp.selectLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.mcp.selectDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-select v-model="formData.config.mcp_services" multiple
-                          :placeholder="$t('agentEditor.mcp.selectPlaceholder')" filterable>
-                          <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label"
-                            :disabled="mcp.disabled" />
-                        </t-select>
-                      </div>
-                    </div>
-
-                    <!-- 授权等待超时：对话中触发 OAuth 授权时的等待秒数 -->
-                    <div v-if="mcpSelectionMode !== 'none'" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.mcp.authWaitTimeout') }}</label>
-                        <p class="desc">{{ $t('agentEditor.mcp.authWaitTimeoutDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.mcp_auth_wait_timeout" :min="5" :max="3600"
-                          theme="column" :placeholder="$t('agentEditor.mcp.authWaitTimeoutPlaceholder')" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 技能：脚本跑在所选沙箱里，可用列表也来自这份配置 -->
-                <div v-show="currentSection === 'skills' && isAgentMode" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.skillsConfigDesc') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.sandboxBackend') }}</label>
-                        <p class="desc">{{ $t('agent.editor.sandboxBackendHint') }}</p>
-                      </div>
-                      <div class="setting-control sandbox-select-control">
-                        <t-select
-                          v-model="formData.config.sandbox_config_id"
-                          :placeholder="$t('agent.editor.sandboxBackendDefault')"
-                          class="sandbox-config-select"
-                          filterable
-                          :popup-props="{ overlayClassName: 'sandbox-config-select-popup' }"
-                        >
-                          <t-option value="" :label="$t('agent.editor.sandboxBackendDefault')" />
-                          <t-option
-                            v-for="cfg in sandboxConfigOptions"
-                            :key="cfg.id"
-                            :value="cfg.id"
-                            :label="cfg.name"
-                          >
-                            <div class="sandbox-option">
-                              <div class="sandbox-option__row">
-                                <span class="sandbox-option__name">{{ cfg.name }}</span>
-                                <span v-if="cfg.sandbox_type" class="sandbox-option__type">{{ backendLabel(cfg.sandbox_type) }}</span>
-                              </div>
-                              <div v-if="sandboxTargetLine(cfg)" class="sandbox-option__target">{{ sandboxTargetLine(cfg) }}</div>
-                            </div>
-                          </t-option>
-                        </t-select>
-                        <p v-if="selectedSandboxSummary" class="sandbox-selected-meta">{{ selectedSandboxSummary }}</p>
-                        <div class="sandbox-select-links">
-                          <a href="javascript:void(0)" class="go-settings-link"
-                            @click.prevent="uiStore.openSettings('sandbox')">
-                            {{ $t('agent.editor.goSandboxSettings') }}
-                          </a>
-                          <template v-if="hasSandboxSelected && canInstallSkills">
-                            <span class="sandbox-select-links__sep" aria-hidden="true">·</span>
-                            <a
-                              href="javascript:void(0)"
-                              class="go-settings-link"
-                              @click.prevent="openSkillSettings"
-                            >
-                              {{ $t('agent.editor.goSkillSettings') }}
-                            </a>
-                          </template>
-                        </div>
-                        <p v-if="sandboxConfigOptions.length === 0" class="desc empty-hint">
-                          {{ $t('agent.editor.sandboxNoConfigs') }}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.skillsSelection') }}</label>
-                        <p class="desc">{{ skillsSelectionHint }}</p>
-                      </div>
-                      <div class="setting-control sandbox-select-control">
-                        <t-radio-group v-model="skillsSelectionMode">
-                          <t-radio-button value="all" :disabled="!canEnableSkills">{{ $t('agent.editor.skillsAll') }}</t-radio-button>
-                          <t-radio-button value="selected" :disabled="!canEnableSkills">{{ $t('agent.editor.skillsSelected') }}</t-radio-button>
-                          <t-radio-button value="none">{{ $t('agent.editor.skillsNone') }}</t-radio-button>
-                        </t-radio-group>
-                        <p v-if="!hasSandboxSelected && sandboxConfigOptions.length > 1" class="desc empty-hint">
-                          {{ $t('agent.editor.skillsNeedSandbox') }}
-                        </p>
-                        <p v-else-if="hasSandboxSelected && skillCatalog.length === 0" class="desc empty-hint">
-                          <span>{{ $t('agent.editor.noSkillsAvailable') }}</span>
-                          <a
-                            v-if="canInstallSkills"
-                            href="javascript:void(0)"
-                            class="go-settings-link"
-                            @click.prevent="openSkillSettings"
-                          >
-                            {{ $t('agent.editor.goSkillSettings') }}
-                          </a>
-                        </p>
-                      </div>
-                    </div>
-
-                    <div v-if="showCatalogSkillList" class="setting-row setting-row-vertical">
-                      <div class="setting-control setting-control-full">
-                        <t-checkbox-group
-                          v-model="formData.config.selected_skills"
-                          class="skill-pick-list"
-                        >
-                          <section
-                            v-for="group in catalogSkillGroups"
-                            :key="group.key"
-                            class="skill-pick-group"
-                            :class="`skill-pick-group--${group.key}`"
-                          >
-                            <header class="skill-pick-group__header">
-                              <span class="skill-pick-group__bar" />
-                              <span class="skill-pick-group__title">{{ group.label }}</span>
-                              <span class="skill-pick-group__count">{{ group.skills.length }}</span>
-                            </header>
-                            <article
-                              v-for="skill in group.skills"
-                              :key="skill.name"
-                              class="skill-pick"
-                              :class="{
-                                'skill-pick--ready': skill.selectable,
-                                'skill-pick--pending': !skill.selectable,
-                                'skill-pick--busy': isSkillBusy(skill),
-                              }"
-                            >
-                              <t-checkbox
-                                v-if="skillsSelectionMode === 'selected'"
-                                :value="skill.name"
-                                :disabled="!skill.selectable"
-                                class="skill-pick__check"
-                              />
-                              <div class="skill-pick__badge" aria-hidden="true">
-                                <t-icon :name="SKILL_ICON" size="16px" />
-                              </div>
-                              <div class="skill-pick__body">
-                                <div class="skill-pick__title-row">
-                                  <span class="skill-name" :title="skill.name">{{ skill.name }}</span>
-                                  <span
-                                    v-if="!skill.selectable"
-                                    class="skill-pick__hint"
-                                    :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
-                                  >
-                                    <t-icon :name="skillStatusIcon(skill)" size="14px" />
-                                    {{ skillStatusHint(skill) }}
-                                  </span>
-                                </div>
-                                <p
-                                  v-if="skill.description"
-                                  class="skill-desc"
-                                  :title="skill.description"
-                                >{{ skill.description }}</p>
-                              </div>
-                              <t-button
-                                v-if="canInstallSkillRow(skill)"
-                                size="small"
-                                variant="text"
-                                theme="primary"
-                                :loading="installingCatalogId === skill.id"
-                                :title="$t('agent.editor.installToThisSandbox')"
-                                @click.stop="installCatalogToCurrent(skill)"
-                              >
-                                {{ $t('agent.editor.installShort') }}
-                              </t-button>
-                              <t-button
-                                v-else-if="isSkillBusy(skill)"
-                                size="small"
-                                variant="text"
-                                theme="primary"
-                                :title="$t('agent.editor.viewInstallProgress')"
-                                @click.stop="openSkillInstallProgress(skill)"
-                              >
-                                {{ $t('agent.editor.viewInstallProgress') }}
-                              </t-button>
-                            </article>
-                          </section>
-                        </t-checkbox-group>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 知识库配置 -->
-                <div v-show="currentSection === 'knowledge'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.knowledgeConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.knowledgeConfigDesc') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- 关联知识库 -->
-                    <div class="setting-row" data-guide="agent-create-knowledge">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.knowledgeBases') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.kbScope') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-radio-group v-model="kbSelectionMode">
-                          <t-radio-button value="all">{{ $t('agent.editor.allKnowledgeBases') }}</t-radio-button>
-                          <t-radio-button value="selected">{{ $t('agent.editor.selectedKnowledgeBases')
-                            }}</t-radio-button>
-                          <t-radio-button value="none">{{ $t('agent.editor.noKnowledgeBase') }}</t-radio-button>
-                        </t-radio-group>
-                      </div>
-                    </div>
-
-                    <!-- 选择指定知识库（仅在选择"指定知识库"时显示） -->
-                    <div v-if="kbSelectionMode === 'selected'" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.selectKnowledgeBases') }}</label>
-                        <p class="desc">{{ $t('agent.editor.selectKnowledgeBasesDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-select v-model="formData.config.knowledge_bases" multiple
-                          :placeholder="$t('agent.editor.selectKnowledgeBases')" filterable :min-collapsed-num="3">
-                          <t-option-group v-if="filteredMyKbOptions.length"
-                            :label="$t('agent.editor.myKnowledgeBases')">
-                            <t-option v-for="kb in filteredMyKbOptions" :key="kb.value" :value="kb.value"
-                              :label="kb.label" :disabled="kb.disabled">
-                              <div class="kb-option-item" :title="kb.disabled ? kb.disabledReason : ''">
-                                <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
-                                  <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
-                                </span>
-                                <span class="kb-option-label">{{ kb.label }}</span>
-                                <span v-if="kb.ragEnabled" class="kb-option-tag tag-rag">RAG</span>
-                                <span v-if="kb.wikiEnabled" class="kb-option-tag tag-wiki">Wiki</span>
-                                <span class="kb-option-count">{{ kb.count || 0 }}</span>
-                                <span v-if="kb.disabled" class="kb-option-disabled-hint">{{ kb.disabledReason }}</span>
-                              </div>
-                            </t-option>
-                          </t-option-group>
-                          <t-option-group v-if="filteredSharedKbOptions.length"
-                            :label="$t('agent.editor.sharedKnowledgeBases')">
-                            <t-option v-for="kb in filteredSharedKbOptions" :key="kb.value" :value="kb.value"
-                              :label="kb.label" :disabled="kb.disabled">
-                              <div class="kb-option-item" :title="kb.disabled ? kb.disabledReason : ''">
-                                <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
-                                  <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
-                                </span>
-                                <span class="kb-option-label">{{ kb.label }}</span>
-                                <span v-if="kb.ragEnabled" class="kb-option-tag tag-rag">RAG</span>
-                                <span v-if="kb.wikiEnabled" class="kb-option-tag tag-wiki">Wiki</span>
-                                <span v-if="kb.orgName" class="kb-option-org">{{ kb.orgName }}</span>
-                                <span class="kb-option-count">{{ kb.count || 0 }}</span>
-                                <span v-if="kb.disabled" class="kb-option-disabled-hint">{{ kb.disabledReason }}</span>
-                              </div>
-                            </t-option>
-                          </t-option-group>
-                        </t-select>
-                      </div>
-                    </div>
-
-                    <!-- 支持的文件类型（限制用户可选择的文件类型） -->
-                    <div v-if="hasKnowledgeBase" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.fileTypes.label') }}</label>
-                        <p class="desc">{{ $t('agentEditor.fileTypes.desc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-select v-model="formData.config.supported_file_types" multiple
-                          :placeholder="$t('agentEditor.fileTypes.allTypes')" :min-collapsed-num="3" clearable>
-                          <t-option v-for="ft in availableFileTypes" :key="ft.value" :value="ft.value"
-                            :label="ft.label" />
-                        </t-select>
-                      </div>
-                    </div>
-
-                    <!-- 仅在提及时检索知识库（当配置了知识库时显示） -->
-                    <div v-if="hasKnowledgeBase" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.retrieveKBOnlyWhenMentioned') }}</label>
-                        <p class="desc">{{ $t('agent.editor.retrieveKBOnlyWhenMentionedDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.retrieve_kb_only_when_mentioned" />
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-
-                <!-- 网络搜索配置 -->
-                <div v-show="currentSection === 'websearch'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.webSearchConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.webSearchConfigDesc') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- 网络搜索 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.webSearch') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.webSearch') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.web_search_enabled" />
-                      </div>
-                    </div>
-
-                    <!-- 网络搜索最大结果数 -->
-                    <div v-if="formData.config.web_search_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.webSearchProvider') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.webSearchProvider') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-select v-model="formData.config.web_search_provider_id" clearable
-                          :placeholder="$t('agent.editor.webSearchProviderPlaceholder')" style="width: 240px;">
-                          <t-option v-for="p in webSearchProviderList" :key="p.id" :value="p.id" :label="p.name">
-                            <span>{{ p.name }}</span>
-                            <t-tag v-if="p.is_default" theme="primary" size="small" style="margin-left: 6px;">{{
-                              $t('common.default')
-                              }}</t-tag>
-                          </t-option>
-                        </t-select>
-                      </div>
-                    </div>
-
-                    <!-- 网络搜索最大结果数 -->
-                    <div v-if="formData.config.web_search_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.webSearchMaxResults') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.webSearchMaxResults') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.web_search_max_results" :min="1" :max="10" />
-                          <span class="slider-value">{{ formData.config.web_search_max_results }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 自动抓取页面内容 -->
-                    <div v-if="formData.config.web_search_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.webFetchEnabled') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.webFetchEnabled') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.web_fetch_enabled" />
-                      </div>
-                    </div>
-
-                    <!-- 抓取页面数 -->
-                    <div v-if="formData.config.web_search_enabled && formData.config.web_fetch_enabled"
-                      class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.webFetchTopN') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.webFetchTopN') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.web_fetch_top_n" :min="1" :max="10" />
-                          <span class="slider-value">{{ formData.config.web_fetch_top_n }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 检索策略（仅在有知识库能力时显示） -->
-                <div v-show="currentSection === 'retrieval' && hasKnowledgeBase" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.retrievalStrategy') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.desc.retrievalSection') }}</p>
-                  </div>
-
-                  <div class="settings-group">
-                    <!-- 查询扩展（仅普通模式） -->
-                    <div v-if="!isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.enableQueryExpansion') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.queryExpansion') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.enable_query_expansion" />
-                      </div>
-                    </div>
-
-                    <!-- 向量召回TopK -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.embeddingTopK') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.embeddingTopK') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.embedding_top_k" :min="1" :max="50" theme="column" />
-                      </div>
-                    </div>
-
-                    <!-- 关键词阈值 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.keywordThreshold') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.keywordThreshold') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.keyword_threshold" :min="0" :max="1" :step="0.01" />
-                          <span class="slider-value">{{ formData.config.keyword_threshold?.toFixed(2) }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 向量阈值 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.vectorThreshold') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.vectorThreshold') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.vector_threshold" :min="0" :max="1" :step="0.01" />
-                          <span class="slider-value">{{ formData.config.vector_threshold?.toFixed(2) }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 重排TopK（仅在配置了 Rerank 模型时展示） -->
-                    <div v-if="formData.config.rerank_model_id" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.rerankTopK') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.rerankTopK') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.rerank_top_k" :min="1" :max="20" theme="column" />
-                      </div>
-                    </div>
-
-                    <!-- 重排阈值（仅在配置了 Rerank 模型时展示） -->
-                    <div v-if="formData.config.rerank_model_id" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.rerankThreshold') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.rerankThreshold') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.rerank_threshold" :min="-10" :max="10" :step="0.01" />
-                          <span class="slider-value">{{ formData.config.rerank_threshold?.toFixed(1) }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- FAQ 优先策略（关联 FAQ 类型知识库时显示） -->
-                    <div v-if="hasFaqKnowledgeBase" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.faq.enableLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.faq.enableDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.faq_priority_enabled" />
-                      </div>
-                    </div>
-
-                    <div v-if="hasFaqKnowledgeBase && formData.config.faq_priority_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.faq.thresholdLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.faq.thresholdDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.faq_direct_answer_threshold" :min="0.7" :max="1"
-                            :step="0.05" />
-                          <span class="slider-value">{{ formData.config.faq_direct_answer_threshold?.toFixed(2)
-                            }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div v-if="hasFaqKnowledgeBase && formData.config.faq_priority_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.faq.boostLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.faq.boostDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.faq_score_boost" :min="1" :max="2" :step="0.1" />
-                          <span class="slider-value">{{ formData.config.faq_score_boost?.toFixed(1) }}x</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 表格数据分析（仅普通模式，命中 CSV/Excel 时会多一次 LLM 调用生成 SQL） -->
-                    <div v-if="!isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.dataAnalysis.enableLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.dataAnalysis.enableDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.data_analysis_enabled" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 共享管理（仅编辑模式且非内置智能体） -->
-                <div v-if="editorMode === 'edit' && editorAgent?.id && !editorAgent?.is_builtin"
-                  v-show="currentSection === 'share'" class="section">
-                  <AgentShareSettings :agent-id="editorAgent.id" :agent="editorAgent" />
+          </div>
+
+          <!-- 改写提示词（多轮对话 + 问题改写开启时） -->
+          <template
+            v-if="!isAgentMode && formData.config.multi_turn_enabled && formData.config.enable_rewrite">
+            <div v-show="activePromptAnchor === 'rewrite-system'"
+              class="setting-row setting-row-vertical prompts-panel__pane">
+              <div class="setting-info">
+                <label>{{ $t('agent.editor.rewritePromptSystem') }}</label>
+                <p class="desc">{{ $t('agentEditor.desc.rewriteSystemPrompt') }}</p>
+                <div class="placeholder-tags" v-if="rewriteSystemPlaceholders.length > 0">
+                  <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                  <t-tooltip v-for="placeholder in rewriteSystemPlaceholders" :key="placeholder.name"
+                    :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                    placement="top">
+                    <span class="placeholder-tag"
+                      @click="handlePlaceholderClick('rewriteSystem', placeholder.name)"
+                      v-text="'{{' + placeholder.name + '}}'"></span>
+                  </t-tooltip>
+                  <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
                 </div>
               </div>
-
-              <!-- 底部操作栏 -->
-              <div class="settings-footer">
-                <p v-if="isPostCreateSession" class="settings-footer-note">
-                  <t-icon name="check-circle-filled" class="settings-footer-note__icon" />
-                  <span>
-                    <strong>{{ $t('agent.editor.postCreateHint.title') }}</strong>
-                    {{ $t('agent.editor.postCreateHint.footer') }}
-                  </span>
-                </p>
-                <div class="settings-footer-actions">
-                  <t-button variant="outline" @click="handleClose">{{ props.readOnly ? $t('common.close') :
-                    $t('common.cancel')
-                    }}</t-button>
-                  <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
-                    :disabled="editorInitializing"
-                    @click="handleSave">{{
-                    saveButtonLabel
-                    }}</t-button>
+              <div class="setting-control setting-control-full" style="position: relative;">
+                <div class="textarea-with-template">
+                  <t-textarea ref="rewriteSystemTextareaRef" v-model="formData.config.rewrite_prompt_system"
+                    :placeholder="defaultRewritePromptSystem || $t('agent.editor.rewritePromptSystemPlaceholder')"
+                    :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteSystemInput" />
+                  <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
+                    @reset-default="handleRewriteTemplateSelect" />
                 </div>
+                <Teleport to="body">
+                  <div v-if="rewriteSystemPopup.show && filteredRewriteSystemPlaceholders.length > 0"
+                    class="placeholder-popup-wrapper" :style="rewriteSystemPopup.style">
+                    <div class="placeholder-popup">
+                      <div v-for="(placeholder, index) in filteredRewriteSystemPlaceholders"
+                        :key="placeholder.name" class="placeholder-item"
+                        :class="{ active: rewriteSystemPopup.selectedIndex === index }"
+                        @mousedown.prevent="insertGenericPlaceholder('rewriteSystem', placeholder.name, true)"
+                        @mouseenter="rewriteSystemPopup.selectedIndex = index">
+                        <div class="placeholder-name">
+                          <code v-html="`{{${placeholder.name}}}`"></code>
+                        </div>
+                        <div class="placeholder-desc">{{ placeholder.description }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </Teleport>
+              </div>
+            </div>
+
+            <div v-show="activePromptAnchor === 'rewrite-user'"
+              class="setting-row setting-row-vertical prompts-panel__pane">
+              <div class="setting-info">
+                <label>{{ $t('agent.editor.rewritePromptUser') }}</label>
+                <p class="desc">{{ $t('agentEditor.desc.rewriteUserPrompt') }}</p>
+                <div class="placeholder-tags" v-if="rewritePlaceholders.length > 0">
+                  <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                  <t-tooltip v-for="placeholder in rewritePlaceholders" :key="placeholder.name"
+                    :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                    placement="top">
+                    <span class="placeholder-tag"
+                      @click="handlePlaceholderClick('rewriteUser', placeholder.name)"
+                      v-text="'{{' + placeholder.name + '}}'"></span>
+                  </t-tooltip>
+                  <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
+                </div>
+              </div>
+              <div class="setting-control setting-control-full" style="position: relative;">
+                <div class="textarea-with-template">
+                  <t-textarea ref="rewriteUserTextareaRef" v-model="formData.config.rewrite_prompt_user"
+                    :placeholder="defaultRewritePromptUser || $t('agent.editor.rewritePromptUserPlaceholder')"
+                    :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteUserInput" />
+                  <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
+                    @reset-default="handleRewriteTemplateSelect" />
+                </div>
+                <Teleport to="body">
+                  <div v-if="rewriteUserPopup.show && filteredRewriteUserPlaceholders.length > 0"
+                    class="placeholder-popup-wrapper" :style="rewriteUserPopup.style">
+                    <div class="placeholder-popup">
+                      <div v-for="(placeholder, index) in filteredRewriteUserPlaceholders"
+                        :key="placeholder.name" class="placeholder-item"
+                        :class="{ active: rewriteUserPopup.selectedIndex === index }"
+                        @mousedown.prevent="insertGenericPlaceholder('rewriteUser', placeholder.name, true)"
+                        @mouseenter="rewriteUserPopup.selectedIndex = index">
+                        <div class="placeholder-name">
+                          <code v-html="`{{${placeholder.name}}}`"></code>
+                        </div>
+                        <div class="placeholder-desc">{{ placeholder.description }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </Teleport>
+              </div>
+            </div>
+          </template>
+
+          <!-- 检索兜底（普通模式 + 启用知识库） -->
+          <div v-if="!isAgentMode && hasKnowledgeBase" v-show="activePromptAnchor === 'fallback'"
+            class="prompts-panel__pane prompts-panel__pane--stack">
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('agent.editor.fallbackStrategy') }}</label>
+                <p class="desc">{{ $t('agentEditor.desc.fallbackStrategy') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-radio-group v-model="formData.config.fallback_strategy">
+                  <t-radio-button value="fixed">{{ $t('agentEditor.fallback.fixed') }}</t-radio-button>
+                  <t-radio-button value="model">{{ $t('agentEditor.fallback.model') }}</t-radio-button>
+                </t-radio-group>
+              </div>
+            </div>
+
+            <div v-if="formData.config.fallback_strategy === 'fixed'"
+              class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('agent.editor.fallbackResponse') }}</label>
+                <p class="desc">{{ $t('agentEditor.desc.fallbackResponse') }}</p>
+              </div>
+              <div class="setting-control setting-control-full">
+                <div class="textarea-with-template">
+                  <t-textarea v-model="formData.config.fallback_response"
+                    :placeholder="defaultFallbackResponse || $t('agent.editor.fallbackResponsePlaceholder')"
+                    :autosize="{ minRows: 2, maxRows: 6 }" />
+                  <PromptTemplateSelector type="fallback" position="corner" fallbackMode="fixed"
+                    @select="handleFallbackResponseTemplateSelect"
+                    @reset-default="handleFallbackResponseTemplateSelect" />
+                </div>
+              </div>
+            </div>
+
+            <div v-if="formData.config.fallback_strategy === 'model'"
+              class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('agent.editor.fallbackPrompt') }}</label>
+                <p class="desc">{{ $t('agentEditor.desc.fallbackPrompt') }}</p>
+                <div class="placeholder-tags" v-if="fallbackPlaceholders.length > 0">
+                  <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                  <t-tooltip v-for="placeholder in fallbackPlaceholders" :key="placeholder.name"
+                    :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                    placement="top">
+                    <span class="placeholder-tag"
+                      @click="handlePlaceholderClick('fallback', placeholder.name)"
+                      v-text="'{{' + placeholder.name + '}}'"></span>
+                  </t-tooltip>
+                  <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
+                </div>
+              </div>
+              <div class="setting-control setting-control-full" style="position: relative;">
+                <div class="textarea-with-template">
+                  <t-textarea ref="fallbackPromptTextareaRef" v-model="formData.config.fallback_prompt"
+                    :placeholder="defaultFallbackPrompt || $t('agent.editor.fallbackPromptPlaceholder')"
+                    :autosize="{ minRows: 4, maxRows: 10 }" @input="handleFallbackPromptInput" />
+                  <PromptTemplateSelector type="fallback" position="corner" fallbackMode="model"
+                    @select="handleFallbackPromptTemplateSelect"
+                    @reset-default="handleFallbackPromptTemplateSelect" />
+                </div>
+                <Teleport to="body">
+                  <div v-if="fallbackPromptPopup.show && filteredFallbackPlaceholders.length > 0"
+                    class="placeholder-popup-wrapper" :style="fallbackPromptPopup.style">
+                    <div class="placeholder-popup">
+                      <div v-for="(placeholder, index) in filteredFallbackPlaceholders"
+                        :key="placeholder.name" class="placeholder-item"
+                        :class="{ active: fallbackPromptPopup.selectedIndex === index }"
+                        @mousedown.prevent="insertGenericPlaceholder('fallback', placeholder.name, true)"
+                        @mouseenter="fallbackPromptPopup.selectedIndex = index">
+                        <div class="placeholder-name">
+                          <code v-html="`{{${placeholder.name}}}`"></code>
+                        </div>
+                        <div class="placeholder-desc">{{ placeholder.description }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </Teleport>
+              </div>
+            </div>
+          </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 模型配置 -->
+      <div v-show="currentSection === 'model'" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agent.editor.modelConfig') }}</h2>
+          <p class="section-description">{{ $t('agent.editor.modelConfigDesc') }}</p>
+        </div>
+
+        <div class="settings-group">
+          <!-- 模型选择 -->
+          <div
+            class="setting-row"
+            data-guide="agent-create-model"
+            data-agent-field="summary_model"
+            :class="{ 'setting-row--field-highlight': highlightedField === 'summary_model' }"
+          >
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
+              <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
+            </div>
+            <div class="setting-control">
+              <ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.model_id"
+                :all-models="allModels"
+                @update:selected-model-id="(val: string) => formData.config.model_id = val"
+                @add-model="handleAddModel('llm')" :placeholder="$t('agent.editor.modelPlaceholder')" />
+            </div>
+          </div>
+
+          <!-- 温度 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.temperature') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.temperature') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="slider-wrapper">
+                <t-slider v-model="formData.config.temperature" :min="0" :max="1" :step="0.1" />
+                <span class="slider-value">{{ formData.config.temperature }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 最大生成Token数：0 表示跟随系统默认；自定义后按输入值保存 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.maxCompletionTokens') }}</label>
+              <p class="desc">{{ isAgentMode ? $t('agentEditor.desc.maxTokensAgent') :
+                $t('agentEditor.desc.maxTokens') }}
+              </p>
+            </div>
+            <div class="setting-control max-tokens-control">
+              <t-radio-group v-model="maxCompletionTokensMode">
+                <t-radio-button value="default">{{ $t('agent.editor.maxCompletionTokensDefault')
+                  }}</t-radio-button>
+                <t-radio-button value="custom">{{ $t('agent.editor.maxCompletionTokensCustom')
+                  }}</t-radio-button>
+              </t-radio-group>
+              <span v-if="maxCompletionTokensMode === 'default'" class="max-tokens-value">
+                {{ effectiveDefaultMaxCompletionTokens }}
+              </span>
+              <t-input-number v-else v-model="formData.config.max_completion_tokens" :min="100" :max="100000"
+                :step="100" theme="column" />
+            </div>
+          </div>
+
+          <!-- 思考强度：off / auto + 所选对话模型目录上报的等级 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.thinking') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
+              <p v-if="selectedChatModel && !selectedChatModelCanThink" class="desc">
+                {{ $t('agent.editor.reasoningEffortUnsupported') }}
+              </p>
+              <p v-else-if="selectedChatModelAlwaysThinks" class="desc">
+                {{ $t('agent.editor.reasoningEffortAlwaysOn') }}
+              </p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="reasoningEffortLevel" class="reasoning-effort-select"
+                :popup-props="{ overlayClassName: 'reasoning-level-select-popup' }">
+                <t-option v-for="level in reasoningEffortOptions" :key="level" :value="level"
+                  :label="$t(levelLabelKey(level))" :show-overflow-tooltip="false">
+                  <div class="reasoning-level-option">
+                    <span class="reasoning-level-option__title">{{ $t(levelLabelKey(level)) }}</span>
+                    <span class="reasoning-level-option__hint">{{ $t(levelDescriptionKey(level)) }}</span>
+                  </div>
+                </t-option>
+              </t-select>
+            </div>
+          </div>
+
+          <!-- 来源引用 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.citationEnabled') }}</label>
+              <p class="desc">{{ $t('agent.editor.citationEnabledDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.citation_enabled" />
+            </div>
+          </div>
+
+          <!-- ReRank 模型（启用知识库或 search_knowledge 工具时显示） -->
+          <div
+            v-if="showRerankModelField"
+            class="setting-row"
+            data-agent-field="rerank_model"
+            :class="{ 'setting-row--field-highlight': highlightedField === 'rerank_model' }"
+          >
+            <div class="setting-info">
+              <label>
+                {{ $t('agent.editor.rerankModel') }}
+                <span v-if="needsRerankModel" class="required">*</span>
+              </label>
+              <p class="desc">
+                {{ $t('agent.editor.rerankModelDesc') }}
+                <template v-if="!needsRerankModel">
+                  <br />
+                  <span class="hint">{{ $t('agent.editor.rerankModelOptionalHint') }}</span>
+                </template>
+              </p>
+            </div>
+            <div class="setting-control">
+              <ModelSelector model-type="Rerank" :selected-model-id="formData.config.rerank_model_id"
+                :all-models="allModels"
+                :clearable="!needsRerankModel"
+                @update:selected-model-id="(val: string) => formData.config.rerank_model_id = val"
+                @add-model="handleAddModel('rerank')"
+                :placeholder="$t('agent.editor.rerankModelPlaceholder')" />
+            </div>
+          </div>
+
+          <!-- 问题理解模型（多轮改写时，留空则复用主对话模型） -->
+          <div
+            v-if="!isAgentMode && formData.config.multi_turn_enabled && formData.config.enable_rewrite"
+            class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.queryUnderstandModel') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.queryUnderstandModel') }}</p>
+            </div>
+            <div class="setting-control">
+              <ModelSelector model-type="KnowledgeQA"
+                :selected-model-id="formData.config.query_understand_model_id" :all-models="allModels"
+                clearable
+                @update:selected-model-id="(val: string) => formData.config.query_understand_model_id = val"
+                @add-model="handleAddModel('llm')"
+                :placeholder="$t('agent.editor.queryUnderstandModelPlaceholder')" />
+            </div>
+          </div>
+
+          <!-- 最大迭代次数（Agent 模式）：正数为上限，-1 为不限制 -->
+          <div v-if="isAgentMode" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.maxIterations') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.maxIterations') }}</p>
+            </div>
+            <div class="setting-control max-tokens-control">
+              <t-radio-group v-model="maxIterationsMode">
+                <t-radio-button value="limit">{{ $t('agent.editor.maxIterationsLimit') }}</t-radio-button>
+                <t-radio-button value="unlimited">{{ $t('agent.editor.maxIterationsUnlimited') }}</t-radio-button>
+              </t-radio-group>
+              <t-input-number v-if="maxIterationsMode === 'limit'" v-model="formData.config.max_iterations"
+                :min="2" :max="50" theme="column" />
+            </div>
+          </div>
+
+          <!-- LLM 调用超时（Agent 模式） -->
+          <div v-if="isAgentMode" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.llmCallTimeout.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.llmCallTimeout.desc') }}</p>
+              <p class="desc-hint">{{ $t('agentEditor.llmCallTimeout.hint') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="formData.config.llm_call_timeout" :min="0" :max="3600" theme="column"
+                :placeholder="$t('agentEditor.llmCallTimeout.placeholder')" clearable />
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 附件上传 -->
+      <div v-show="currentSection === 'multimodal'" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agentEditor.imageUpload.sectionTitle') }}</h2>
+          <p class="section-description">{{ $t('agentEditor.imageUpload.sectionDesc') }}</p>
+        </div>
+
+        <div class="settings-group">
+          <!-- 图片上传 -->
+          <div class="setting-row" data-guide="agent-create-multimodal">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.imageUpload.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.imageUpload.desc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.image_upload_enabled" />
+            </div>
+          </div>
+
+          <!-- VLM 模型（图片上传启用时） -->
+          <div v-if="formData.config.image_upload_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.imageUpload.vlmModel') }} <span class="required">*</span></label>
+              <p class="desc">{{ $t('agentEditor.imageUpload.vlmModelDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <ModelSelector model-type="VLLM" :selected-model-id="formData.config.vlm_model_id"
+                :all-models="allModels"
+                @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
+                @add-model="handleAddModel('vllm')"
+                :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')" />
+            </div>
+          </div>
+
+          <!-- 附件图片理解 / 扫描件 OCR（图片上传启用时） -->
+          <div v-if="formData.config.image_upload_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.imageUpload.imageUnderstandingLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.imageUpload.imageUnderstandingDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.attachment_image_understanding" />
+            </div>
+          </div>
+
+          <!-- 扫描件 OCR 最大页数（开启附件图片理解时） -->
+          <div v-if="formData.config.image_upload_enabled && formData.config.attachment_image_understanding"
+            class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.imageUpload.ocrMaxPagesLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.imageUpload.ocrMaxPagesDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="formData.config.attachment_ocr_max_pages" :min="0" :max="64"
+                :step="1" theme="normal" style="width: 160px;"
+                :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
+            </div>
+          </div>
+
+          <!-- 图片存储 Provider（图片上传启用时） -->
+          <div v-if="formData.config.image_upload_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.imageUpload.storageProvider') }}</label>
+              <p class="desc">{{ $t('agentEditor.imageUpload.storageProviderDesc') }}</p>
+            </div>
+            <div class="setting-control" style="flex-direction: column; align-items: flex-end;">
+              <t-select v-model="formData.config.image_storage_provider" style="width: 280px;"
+                :placeholder="$t('agentEditor.imageUpload.storageProviderPlaceholder')" clearable>
+                <t-option value="" :label="$t('agentEditor.imageUpload.storageDefault')" />
+                <t-option v-for="opt in imageStorageOptions" :key="opt.value" :value="opt.value"
+                  :label="opt.label" :disabled="opt.disabled">
+                  <span class="select-option-with-tag">
+                    <span>{{ opt.label }}</span>
+                    <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">{{
+                      $t('agentEditor.imageUpload.notConfigured') }}</t-tag>
+                  </span>
+                </t-option>
+              </t-select>
+              <a href="javascript:void(0)" class="go-settings-link"
+                @click.prevent="uiStore.openSettings('storage')">
+                {{ $t('agentEditor.imageUpload.goStorageSettings') }}
+              </a>
+            </div>
+          </div>
+
+          <!-- 音频上传开关 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.audioUpload.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.audioUpload.desc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.audio_upload_enabled" />
+            </div>
+          </div>
+
+          <!-- ASR 模型（音频上传启用时） -->
+          <div v-if="formData.config.audio_upload_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.audioUpload.asrModel') }}</label>
+              <p class="desc">{{ $t('agentEditor.audioUpload.asrModelDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <ModelSelector model-type="ASR" :selected-model-id="formData.config.asr_model_id"
+                :all-models="allModels"
+                clearable
+                @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
+                @add-model="handleAddModel('asr')"
+                :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')" />
+            </div>
+          </div>
+
+          <!-- 单轮等待附件解析超时（秒） -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.chatParser.waitTimeoutLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.chatParser.waitTimeoutDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="formData.config.attachment_parse_wait_timeout_sec" :min="0" :max="600"
+                :step="10" theme="normal" style="width: 160px;"
+                :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
+            </div>
+          </div>
+
+          <!-- 聊天附件解析策略 -->
+          <div class="parser-policy-block">
+            <div class="parser-policy-block__header">
+              <label>{{ $t('agentEditor.chatParser.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.chatParser.desc') }}</p>
+            </div>
+            <KBParserSettings
+              embedded
+              :parser-engine-rules="formData.config.chat_parser_engine_rules"
+              :relevant-extensions="CHAT_PARSER_EXTENSIONS"
+              @update:parser-engine-rules="(val: any) => formData.config.chat_parser_engine_rules = val"
+            />
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 多轮对话。两种模式都保留本组：Agent 模式在这里说明历史按上下文窗口
+           自动管理，并承载跨轮保留检索结果；开关由 EnsureDefaults 强制开启，
+           故只在普通模式展示。 -->
+      <div v-show="currentSection === 'conversation'" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
+          <p class="section-description">{{ conversationSectionDesc }}</p>
+        </div>
+
+        <div class="settings-group">
+          <!-- 多轮对话开关（仅普通模式：Agent 模式由 EnsureDefaults 强制开启，
+               展示可关闭的开关只会被服务端改回去） -->
+          <div v-if="!isAgentMode" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.multiTurn') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.multiTurn') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.multi_turn_enabled" />
+            </div>
+          </div>
+
+          <!-- 保留轮数（仅普通模式：Agent 模式按上下文窗口加载历史、超出时压缩成
+               摘要，见 session_agent_qa.go -> LoadAgentHistory，不读 history_turns） -->
+          <div v-if="!isAgentMode && formData.config.multi_turn_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.historyTurns') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.historyRounds') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="formData.config.history_turns" :min="1" :max="100" theme="column" />
+            </div>
+          </div>
+
+          <!-- 跨轮保留检索结果。只有 agent 链路读取该值（internal/agent/observe.go），
+               且改写的只是 KB/Wiki 这八个工具的历史结果，所以没有知识库时不展示。 -->
+          <div v-if="isAgentMode && hasKnowledgeBase" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.retainRetrievalHistory') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.retainRetrievalHistory') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.retain_retrieval_history" />
+            </div>
+          </div>
+
+          <!-- 问题改写（仅多轮对话开启且普通模式时显示） -->
+          <div v-if="formData.config.multi_turn_enabled && !isAgentMode" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.enableRewrite') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.rewrite') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.enable_rewrite" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 对话问题推荐 -->
+      <div v-show="currentSection === 'suggestions'" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agentEditor.questionSuggestions.title') }}</h2>
+          <p class="section-description">{{ $t('agentEditor.questionSuggestions.description') }}</p>
+        </div>
+
+        <t-tabs v-model="suggestionTab" class="suggestion-tabs">
+          <t-tab-panel value="starters"
+            :label="$t('agentEditor.questionSuggestions.startersTitle')" />
+          <t-tab-panel value="followUps"
+            :label="$t('agentEditor.questionSuggestions.followUpsTitle')" />
+        </t-tabs>
+
+        <div v-show="suggestionTab === 'starters'" class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.questionSuggestions.enableStarters') }}</label>
+              <p class="desc">{{ $t('agentEditor.questionSuggestions.enableStartersDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.question_suggestions.starters.enabled"
+                :aria-label="$t('agentEditor.questionSuggestions.enableStarters')" />
+            </div>
+          </div>
+
+          <div v-if="formData.config.question_suggestions.starters.enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.questionSuggestions.sourceMode') }}</label>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.question_suggestions.starters.mode"
+                :options="starterSuggestionModeOptions" />
+            </div>
+          </div>
+
+          <div v-if="formData.config.question_suggestions.starters.enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.questionSuggestions.count') }}</label>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="formData.config.question_suggestions.starters.count"
+                :min="1" :max="8" theme="column" />
+            </div>
+          </div>
+
+          <div
+            v-if="formData.config.question_suggestions.starters.enabled && ['curated', 'hybrid'].includes(formData.config.question_suggestions.starters.mode)"
+            class="setting-row setting-row-vertical">
+            <div class="setting-info">
+              <div class="setting-info-header setting-info-header--inline">
+                <label>{{ $t('agentEditor.questionSuggestions.curatedItems') }}</label>
+                <span class="curated-items-count">
+                  {{ formData.config.question_suggestions.starters.items.length }}/8
+                </span>
+              </div>
+              <p class="desc">{{ $t('agentEditor.questionSuggestions.curatedItemsDesc') }}</p>
+            </div>
+            <div class="setting-control setting-control-full">
+              <div class="suggested-prompts-list">
+                <div v-for="(_prompt, index) in formData.config.question_suggestions.starters.items"
+                  :key="index" class="prompt-item">
+                  <t-input v-model="formData.config.question_suggestions.starters.items[index]"
+                    :maxlength="200" />
+                  <t-button variant="text" theme="danger" shape="square"
+                    :aria-label="$t('common.delete')" @click="removeStarterSuggestion(Number(index))">
+                    <t-icon name="delete" />
+                  </t-button>
+                </div>
+                <t-button variant="dashed"
+                  :disabled="formData.config.question_suggestions.starters.items.length >= 8"
+                  @click="addStarterSuggestion">
+                  <template #icon><t-icon name="add" /></template>
+                  {{ $t('agentEditor.questionSuggestions.addItem') }}
+                </t-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-show="suggestionTab === 'followUps'" class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.questionSuggestions.enableFollowUps') }}</label>
+              <p class="desc">{{ $t('agentEditor.questionSuggestions.enableFollowUpsDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.question_suggestions.follow_ups.enabled"
+                :aria-label="$t('agentEditor.questionSuggestions.enableFollowUps')" />
+            </div>
+          </div>
+
+          <template v-if="formData.config.question_suggestions.follow_ups.enabled">
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('agentEditor.questionSuggestions.sourceMode') }}</label>
+              </div>
+              <div class="setting-control">
+                <t-select v-model="formData.config.question_suggestions.follow_ups.mode"
+                  :options="followUpSuggestionModeOptions" />
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('agentEditor.questionSuggestions.count') }}</label>
+              </div>
+              <div class="setting-control">
+                <t-input-number v-model="formData.config.question_suggestions.follow_ups.count"
+                  :min="1" :max="5" theme="column" />
+              </div>
+            </div>
+
+            <div v-if="formData.config.question_suggestions.follow_ups.mode !== 'knowledge'"
+              class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('agentEditor.questionSuggestions.model') }}</label>
+                <p class="desc">{{ $t('agentEditor.questionSuggestions.modelDesc') }}</p>
+              </div>
+              <div class="setting-control">
+                <ModelSelector model-type="KnowledgeQA"
+                  :selected-model-id="formData.config.question_suggestions.follow_ups.model_id"
+                  :all-models="allModels"
+                  clearable
+                  @update:selected-model-id="(val: string) => formData.config.question_suggestions.follow_ups.model_id = val"
+                  @add-model="handleAddModel('summary')" />
+              </div>
+            </div>
+
+            <div class="suggestion-advanced-divider">
+              <span>{{ $t('agentEditor.questionSuggestions.advancedSettings') }}</span>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('agentEditor.questionSuggestions.contextTurns') }}</label>
+              </div>
+              <div class="setting-control">
+                <t-input-number
+                  v-model="formData.config.question_suggestions.follow_ups.max_context_turns"
+                  :min="1" :max="5" theme="column" />
+              </div>
+            </div>
+
+            <div class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('agentEditor.questionSuggestions.categories') }}</label>
+              </div>
+              <div class="setting-control setting-control-full">
+                <t-checkbox-group v-model="formData.config.question_suggestions.follow_ups.categories"
+                  :options="followUpCategoryOptions" />
+              </div>
+            </div>
+
+            <div class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('agentEditor.questionSuggestions.instruction') }}</label>
+              </div>
+              <div class="setting-control setting-control-full">
+                <t-textarea
+                  v-model="formData.config.question_suggestions.follow_ups.additional_instruction"
+                  :placeholder="$t('agentEditor.questionSuggestions.instructionPlaceholder')"
+                  :maxlength="2000" :autosize="{ minRows: 3, maxRows: 8 }" />
+              </div>
+            </div>
+
+            <div class="setting-row setting-row-vertical">
+              <div class="setting-info">
+                <label>{{ $t('agentEditor.questionSuggestions.displayRules') }}</label>
+              </div>
+              <div class="setting-control setting-control-full">
+                <div class="suggestion-checkboxes">
+                  <t-checkbox v-model="formData.config.question_suggestions.follow_ups.suppress_on_fallback">{{ $t('agentEditor.questionSuggestions.suppressFallback') }}</t-checkbox>
+                  <t-checkbox v-model="formData.config.question_suggestions.follow_ups.suppress_when_answer_asks_question">{{ $t('agentEditor.questionSuggestions.suppressQuestion') }}</t-checkbox>
+                  <t-checkbox v-model="formData.config.question_suggestions.follow_ups.knowledge_fallback">{{ $t('agentEditor.questionSuggestions.knowledgeFallback') }}</t-checkbox>
+                  <t-checkbox v-model="formData.config.question_suggestions.follow_ups.allow_regenerate">{{ $t('agentEditor.questionSuggestions.allowRegenerate') }}</t-checkbox>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- 工具配置（仅 Agent 模式） -->
+      <div v-show="currentSection === 'tools' && isAgentMode" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agent.editor.toolsConfig') }}</h2>
+          <p class="section-description">{{ $t('agent.editor.toolsConfigDesc') }}</p>
+        </div>
+
+        <!-- 合并面板：能力状态 + 预设切换 -->
+        <div class="tools-overview">
+          <div class="tools-overview-row">
+            <div class="tools-status-chip">
+              <t-icon name="folder" />
+              <template v-if="kbSelectionMode === 'none'">
+                <span>{{ $t('agentEditor.tools.statusNoKb') }}</span>
+              </template>
+              <template v-else>
+                <span class="tools-status-metric">
+                  <strong>{{ ragKbCount }}</strong> {{ $t('agentEditor.tools.kbMetricRag') }}
+                </span>
+                <span class="tools-status-sep">·</span>
+                <span class="tools-status-metric">
+                  <strong>{{ wikiKbCount }}</strong> {{ $t('agentEditor.tools.kbMetricWiki') }}
+                </span>
+              </template>
+            </div>
+            <div v-if="inactiveToolCount > 0" class="tools-status-chip tools-status-chip--warn">
+              <t-icon name="error-circle" />
+              <span>{{ $t('agentEditor.tools.statusInactive', { count: inactiveToolCount }) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <!-- 允许的工具（按组渲染，统一网格） -->
+          <div
+            class="setting-row setting-row-vertical"
+            data-agent-field="allowed_tools"
+            :class="{ 'setting-row--field-highlight': highlightedField === 'allowed_tools' }"
+          >
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.allowedTools') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.selectTools') }}</p>
+            </div>
+            <div class="setting-control setting-control-full">
+              <t-checkbox-group v-model="formData.config.allowed_tools" class="tool-groups">
+                <section v-for="group in groupedAvailableTools" :key="group.key"
+                  :class="['tool-group', `tool-group--${group.key}`]">
+                  <header class="tool-group-header">
+                    <span class="tool-group-bar" />
+                    <span class="tool-group-title">{{ group.label }}</span>
+                    <span class="tool-group-count">{{ group.tools.length }}</span>
+                    <span v-if="group.key === 'wiki_edit'" class="tool-group-warning">
+                      <t-icon name="error-circle" />
+                      {{ $t('agentEditor.tools.writeWarning') }}
+                    </span>
+                  </header>
+                  <div class="tool-grid">
+                    <t-checkbox v-for="tool in group.tools" :key="tool.value" :value="tool.value"
+                      :disabled="tool.disabled"
+                      :class="['tool-card', { 'tool-card--disabled': tool.disabled, 'tool-card--danger': tool.danger }]">
+                      <div class="tool-card-body">
+                        <div class="tool-card-head">
+                          <span class="tool-card-name">{{ tool.label }}</span>
+                          <span v-if="tool.danger" class="tool-card-badge">
+                            {{ $t('agentEditor.tools.dangerTag') }}
+                          </span>
+                        </div>
+                        <span v-if="tool.description" class="tool-card-desc">{{ tool.description }}</span>
+                        <span v-if="tool.disabled && tool.disabledReason" class="tool-card-hint">
+                          {{ tool.disabledReason }}
+                        </span>
+                      </div>
+                    </t-checkbox>
+                  </div>
+                </section>
+              </t-checkbox-group>
+            </div>
+          </div>
+
+          <!-- 有效工具预览：所见即所得 -->
+          <div class="setting-row setting-row-vertical">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.tools.effectiveLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.tools.effectiveDesc') }}</p>
+            </div>
+            <div class="setting-control setting-control-full">
+              <div class="effective-tools">
+                <template v-if="effectiveTools.length === 0">
+                  <div class="effective-tools-empty">
+                    {{ $t('agentEditor.tools.effectiveEmpty') }}
+                  </div>
+                </template>
+                <template v-else>
+                  <span v-for="item in effectiveTools" :key="item.value"
+                    :class="['effective-chip', { 'effective-chip--inactive': !item.active }]"
+                    :title="item.reason || ''">
+                    <span class="effective-chip-label">{{ item.label }}</span>
+                    <span v-if="!item.active" class="effective-chip-reason">{{ item.reason }}</span>
+                  </span>
+                </template>
               </div>
             </div>
           </div>
         </div>
       </div>
-    </Transition>
-  </Teleport>
+
+      <!-- MCP 服务配置（仅 Agent 模式） -->
+      <div v-show="currentSection === 'mcp' && isAgentMode" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agentEditor.mcp.label') }}</h2>
+          <p class="section-description">{{ $t('agentEditor.mcp.desc') }}</p>
+        </div>
+
+        <div class="settings-group">
+          <!-- MCP 服务选择 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.mcp.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.mcp.desc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-radio-group v-model="mcpSelectionMode">
+                <t-radio-button value="all">{{ $t('agentEditor.selection.all') }}</t-radio-button>
+                <t-radio-button value="selected">{{ $t('agentEditor.selection.selected') }}</t-radio-button>
+                <t-radio-button value="none">{{ $t('agentEditor.selection.disabled') }}</t-radio-button>
+              </t-radio-group>
+            </div>
+          </div>
+
+          <!-- 选择指定 MCP 服务 -->
+          <div v-if="mcpSelectionMode === 'selected' && showMcpServiceSelect" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.mcp.selectLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.mcp.selectDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.mcp_services" multiple
+                :placeholder="$t('agentEditor.mcp.selectPlaceholder')" filterable>
+                <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label"
+                  :disabled="mcp.disabled" />
+              </t-select>
+            </div>
+          </div>
+
+          <!-- 授权等待超时：对话中触发 OAuth 授权时的等待秒数 -->
+          <div v-if="mcpSelectionMode !== 'none'" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.mcp.authWaitTimeout') }}</label>
+              <p class="desc">{{ $t('agentEditor.mcp.authWaitTimeoutDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="formData.config.mcp_auth_wait_timeout" :min="5" :max="3600"
+                theme="column" :placeholder="$t('agentEditor.mcp.authWaitTimeoutPlaceholder')" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 技能：脚本跑在所选沙箱里，可用列表也来自这份配置 -->
+      <div v-show="currentSection === 'skills' && isAgentMode" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
+          <p class="section-description">{{ $t('agent.editor.skillsConfigDesc') }}</p>
+        </div>
+
+        <div class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.sandboxBackend') }}</label>
+              <p class="desc">{{ $t('agent.editor.sandboxBackendHint') }}</p>
+            </div>
+            <div class="setting-control sandbox-select-control">
+              <t-select
+                v-model="formData.config.sandbox_config_id"
+                :placeholder="$t('agent.editor.sandboxBackendDefault')"
+                class="sandbox-config-select"
+                filterable
+                :popup-props="{ overlayClassName: 'sandbox-config-select-popup' }"
+              >
+                <t-option value="" :label="$t('agent.editor.sandboxBackendDefault')" />
+                <t-option
+                  v-for="cfg in sandboxConfigOptions"
+                  :key="cfg.id"
+                  :value="cfg.id"
+                  :label="cfg.name"
+                >
+                  <div class="sandbox-option">
+                    <div class="sandbox-option__row">
+                      <span class="sandbox-option__name">{{ cfg.name }}</span>
+                      <span v-if="cfg.sandbox_type" class="sandbox-option__type">{{ backendLabel(cfg.sandbox_type) }}</span>
+                    </div>
+                    <div v-if="sandboxTargetLine(cfg)" class="sandbox-option__target">{{ sandboxTargetLine(cfg) }}</div>
+                  </div>
+                </t-option>
+              </t-select>
+              <p v-if="selectedSandboxSummary" class="sandbox-selected-meta">{{ selectedSandboxSummary }}</p>
+              <div class="sandbox-select-links">
+                <a href="javascript:void(0)" class="go-settings-link"
+                  @click.prevent="uiStore.openSettings('sandbox')">
+                  {{ $t('agent.editor.goSandboxSettings') }}
+                </a>
+                <template v-if="hasSandboxSelected && canInstallSkills">
+                  <span class="sandbox-select-links__sep" aria-hidden="true">·</span>
+                  <a
+                    href="javascript:void(0)"
+                    class="go-settings-link"
+                    @click.prevent="openSkillSettings"
+                  >
+                    {{ $t('agent.editor.goSkillSettings') }}
+                  </a>
+                </template>
+              </div>
+              <p v-if="sandboxConfigOptions.length === 0" class="desc empty-hint">
+                {{ $t('agent.editor.sandboxNoConfigs') }}
+              </p>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.skillsSelection') }}</label>
+              <p class="desc">{{ skillsSelectionHint }}</p>
+            </div>
+            <div class="setting-control sandbox-select-control">
+              <t-radio-group v-model="skillsSelectionMode">
+                <t-radio-button value="all" :disabled="!canEnableSkills">{{ $t('agent.editor.skillsAll') }}</t-radio-button>
+                <t-radio-button value="selected" :disabled="!canEnableSkills">{{ $t('agent.editor.skillsSelected') }}</t-radio-button>
+                <t-radio-button value="none">{{ $t('agent.editor.skillsNone') }}</t-radio-button>
+              </t-radio-group>
+              <p v-if="!hasSandboxSelected && sandboxConfigOptions.length > 1" class="desc empty-hint">
+                {{ $t('agent.editor.skillsNeedSandbox') }}
+              </p>
+              <p v-else-if="hasSandboxSelected && skillCatalog.length === 0" class="desc empty-hint">
+                <span>{{ $t('agent.editor.noSkillsAvailable') }}</span>
+                <a
+                  v-if="canInstallSkills"
+                  href="javascript:void(0)"
+                  class="go-settings-link"
+                  @click.prevent="openSkillSettings"
+                >
+                  {{ $t('agent.editor.goSkillSettings') }}
+                </a>
+              </p>
+            </div>
+          </div>
+
+          <div v-if="showCatalogSkillList" class="setting-row setting-row-vertical">
+            <div class="setting-control setting-control-full">
+              <t-checkbox-group
+                v-model="formData.config.selected_skills"
+                class="skill-pick-list"
+              >
+                <section
+                  v-for="group in catalogSkillGroups"
+                  :key="group.key"
+                  class="skill-pick-group"
+                  :class="`skill-pick-group--${group.key}`"
+                >
+                  <header class="skill-pick-group__header">
+                    <span class="skill-pick-group__bar" />
+                    <span class="skill-pick-group__title">{{ group.label }}</span>
+                    <span class="skill-pick-group__count">{{ group.skills.length }}</span>
+                  </header>
+                  <article
+                    v-for="skill in group.skills"
+                    :key="skill.name"
+                    class="skill-pick"
+                    :class="{
+                      'skill-pick--ready': skill.selectable,
+                      'skill-pick--pending': !skill.selectable,
+                      'skill-pick--busy': isSkillBusy(skill),
+                    }"
+                  >
+                    <t-checkbox
+                      v-if="skillsSelectionMode === 'selected'"
+                      :value="skill.name"
+                      :disabled="!skill.selectable"
+                      class="skill-pick__check"
+                    />
+                    <div class="skill-pick__badge" aria-hidden="true">
+                      <t-icon :name="SKILL_ICON" size="16px" />
+                    </div>
+                    <div class="skill-pick__body">
+                      <div class="skill-pick__title-row">
+                        <span class="skill-name" :title="skill.name">{{ skill.name }}</span>
+                        <span
+                          v-if="!skill.selectable"
+                          class="skill-pick__hint"
+                          :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
+                        >
+                          <t-icon :name="skillStatusIcon(skill)" size="14px" />
+                          {{ skillStatusHint(skill) }}
+                        </span>
+                        <span
+                          v-if="skill.selectable && skill.servedNote"
+                          class="skill-pick__hint"
+                          :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
+                        >
+                          <t-icon :name="isSkillBusy(skill) ? 'refresh' : 'error-circle'" size="14px" />
+                          {{ skill.servedNote }}
+                        </span>
+                        <span
+                          v-if="canUpgradeSkillRow(skill)"
+                          class="skill-pick__hint skill-pick__hint--upgrade"
+                        >
+                          <t-icon name="arrow-up" size="14px" />
+                          {{ skillUpgradeHint(skill) }}
+                        </span>
+                      </div>
+                      <p
+                        v-if="skill.description"
+                        class="skill-desc"
+                        :title="skill.description"
+                      >{{ skill.description }}</p>
+                    </div>
+                    <t-button
+                      v-if="canInstallSkillRow(skill)"
+                      size="small"
+                      variant="text"
+                      theme="primary"
+                      :loading="installingCatalogId === skill.id"
+                      :title="installsAnUpgrade(skill) ? $t('agent.editor.upgradeOnThisSandbox') : $t('agent.editor.installToThisSandbox')"
+                      @click.stop="installCatalogToCurrent(skill)"
+                    >
+                      {{ installsAnUpgrade(skill) ? $t('settings.skills.upgrade') : $t('agent.editor.installShort') }}
+                    </t-button>
+                    <t-button
+                      v-else-if="canUpgradeSkillRow(skill)"
+                      size="small"
+                      variant="text"
+                      theme="primary"
+                      :loading="installingCatalogId === skill.id"
+                      :title="$t('agent.editor.upgradeOnThisSandbox')"
+                      @click.stop="installCatalogToCurrent(skill)"
+                    >
+                      {{ $t('settings.skills.upgrade') }}
+                    </t-button>
+                    <t-button
+                      v-else-if="canInstallSkills && isSkillBusy(skill)"
+                      size="small"
+                      variant="text"
+                      theme="primary"
+                      :title="$t('agent.editor.viewInstallProgress')"
+                      @click.stop="openSkillInstallProgress(skill)"
+                    >
+                      {{ $t('agent.editor.viewInstallProgress') }}
+                    </t-button>
+                  </article>
+                </section>
+              </t-checkbox-group>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 知识库配置 -->
+      <div v-show="currentSection === 'knowledge'" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agent.editor.knowledgeConfig') }}</h2>
+          <p class="section-description">{{ $t('agent.editor.knowledgeConfigDesc') }}</p>
+        </div>
+
+        <div class="settings-group">
+          <!-- 关联知识库 -->
+          <div class="setting-row" data-guide="agent-create-knowledge">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.knowledgeBases') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.kbScope') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-radio-group v-model="kbSelectionMode">
+                <t-radio-button value="all">{{ $t('agent.editor.allKnowledgeBases') }}</t-radio-button>
+                <t-radio-button value="selected">{{ $t('agent.editor.selectedKnowledgeBases')
+                  }}</t-radio-button>
+                <t-radio-button value="none">{{ $t('agent.editor.noKnowledgeBase') }}</t-radio-button>
+              </t-radio-group>
+            </div>
+          </div>
+
+          <!-- 选择指定知识库（仅在选择"指定知识库"时显示） -->
+          <div v-if="kbSelectionMode === 'selected'" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.selectKnowledgeBases') }}</label>
+              <p class="desc">{{ $t('agent.editor.selectKnowledgeBasesDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.knowledge_bases" multiple
+                :placeholder="$t('agent.editor.selectKnowledgeBases')" filterable :min-collapsed-num="3">
+                <t-option-group v-if="filteredMyKbOptions.length"
+                  :label="$t('agent.editor.myKnowledgeBases')">
+                  <t-option v-for="kb in filteredMyKbOptions" :key="kb.value" :value="kb.value"
+                    :label="kb.label" :disabled="kb.disabled">
+                    <div class="kb-option-item" :title="kb.disabled ? kb.disabledReason : ''">
+                      <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
+                      </span>
+                      <span class="kb-option-label">{{ kb.label }}</span>
+                      <span v-if="kb.ragEnabled" class="kb-option-tag tag-rag">RAG</span>
+                      <span v-if="kb.wikiEnabled" class="kb-option-tag tag-wiki">Wiki</span>
+                      <span class="kb-option-count">{{ kb.count || 0 }}</span>
+                      <span v-if="kb.disabled" class="kb-option-disabled-hint">{{ kb.disabledReason }}</span>
+                    </div>
+                  </t-option>
+                </t-option-group>
+                <t-option-group v-if="filteredSharedKbOptions.length"
+                  :label="$t('agent.editor.sharedKnowledgeBases')">
+                  <t-option v-for="kb in filteredSharedKbOptions" :key="kb.value" :value="kb.value"
+                    :label="kb.label" :disabled="kb.disabled">
+                    <div class="kb-option-item" :title="kb.disabled ? kb.disabledReason : ''">
+                      <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
+                      </span>
+                      <span class="kb-option-label">{{ kb.label }}</span>
+                      <span v-if="kb.ragEnabled" class="kb-option-tag tag-rag">RAG</span>
+                      <span v-if="kb.wikiEnabled" class="kb-option-tag tag-wiki">Wiki</span>
+                      <span v-if="kb.orgName" class="kb-option-org">{{ kb.orgName }}</span>
+                      <span class="kb-option-count">{{ kb.count || 0 }}</span>
+                      <span v-if="kb.disabled" class="kb-option-disabled-hint">{{ kb.disabledReason }}</span>
+                    </div>
+                  </t-option>
+                </t-option-group>
+              </t-select>
+            </div>
+          </div>
+
+          <!-- 支持的文件类型（限制用户可选择的文件类型） -->
+          <div v-if="hasKnowledgeBase" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.fileTypes.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.fileTypes.desc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.supported_file_types" multiple
+                :placeholder="$t('agentEditor.fileTypes.allTypes')" :min-collapsed-num="3" clearable>
+                <t-option v-for="ft in availableFileTypes" :key="ft.value" :value="ft.value"
+                  :label="ft.label" />
+              </t-select>
+            </div>
+          </div>
+
+          <!-- 仅在提及时检索知识库（当配置了知识库时显示） -->
+          <div v-if="hasKnowledgeBase" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.retrieveKBOnlyWhenMentioned') }}</label>
+              <p class="desc">{{ $t('agent.editor.retrieveKBOnlyWhenMentionedDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.retrieve_kb_only_when_mentioned" />
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 网络搜索配置 -->
+      <div v-show="currentSection === 'websearch'" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agent.editor.webSearchConfig') }}</h2>
+          <p class="section-description">{{ $t('agent.editor.webSearchConfigDesc') }}</p>
+        </div>
+
+        <div class="settings-group">
+          <!-- 网络搜索 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.webSearch') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.webSearch') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.web_search_enabled" />
+            </div>
+          </div>
+
+          <!-- 网络搜索最大结果数 -->
+          <div v-if="formData.config.web_search_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.webSearchProvider') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.webSearchProvider') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.web_search_provider_id" clearable
+                :placeholder="$t('agent.editor.webSearchProviderPlaceholder')" style="width: 240px;">
+                <t-option v-for="p in webSearchProviderList" :key="p.id" :value="p.id" :label="p.name">
+                  <span>{{ p.name }}</span>
+                  <t-tag v-if="p.is_default" theme="primary" size="small" style="margin-left: 6px;">{{
+                    $t('common.default')
+                    }}</t-tag>
+                </t-option>
+              </t-select>
+            </div>
+          </div>
+
+          <!-- 网络搜索最大结果数 -->
+          <div v-if="formData.config.web_search_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.webSearchMaxResults') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.webSearchMaxResults') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="slider-wrapper">
+                <t-slider v-model="formData.config.web_search_max_results" :min="1" :max="10" />
+                <span class="slider-value">{{ formData.config.web_search_max_results }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 自动抓取页面内容 -->
+          <div v-if="formData.config.web_search_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.webFetchEnabled') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.webFetchEnabled') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.web_fetch_enabled" />
+            </div>
+          </div>
+
+          <!-- 抓取页面数 -->
+          <div v-if="formData.config.web_search_enabled && formData.config.web_fetch_enabled"
+            class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.webFetchTopN') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.webFetchTopN') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="slider-wrapper">
+                <t-slider v-model="formData.config.web_fetch_top_n" :min="1" :max="10" />
+                <span class="slider-value">{{ formData.config.web_fetch_top_n }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 检索策略（仅在有知识库能力时显示） -->
+      <div v-show="currentSection === 'retrieval' && hasKnowledgeBase" class="section">
+        <div class="section-header">
+          <h2>{{ $t('agent.editor.retrievalStrategy') }}</h2>
+          <p class="section-description">{{ $t('agentEditor.desc.retrievalSection') }}</p>
+        </div>
+
+        <div class="settings-group">
+          <!-- 查询扩展（仅普通模式） -->
+          <div v-if="!isAgentMode" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.enableQueryExpansion') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.queryExpansion') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.enable_query_expansion" />
+            </div>
+          </div>
+
+          <!-- 向量召回TopK -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.embeddingTopK') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.embeddingTopK') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="formData.config.embedding_top_k" :min="1" :max="50" theme="column" />
+            </div>
+          </div>
+
+          <!-- 关键词阈值 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.keywordThreshold') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.keywordThreshold') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="slider-wrapper">
+                <t-slider v-model="formData.config.keyword_threshold" :min="0" :max="1" :step="0.01" />
+                <span class="slider-value">{{ formData.config.keyword_threshold?.toFixed(2) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 向量阈值 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.vectorThreshold') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.vectorThreshold') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="slider-wrapper">
+                <t-slider v-model="formData.config.vector_threshold" :min="0" :max="1" :step="0.01" />
+                <span class="slider-value">{{ formData.config.vector_threshold?.toFixed(2) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 重排TopK（仅在配置了 Rerank 模型时展示） -->
+          <div v-if="formData.config.rerank_model_id" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.rerankTopK') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.rerankTopK') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input-number v-model="formData.config.rerank_top_k" :min="1" :max="20" theme="column" />
+            </div>
+          </div>
+
+          <!-- 重排阈值（仅在配置了 Rerank 模型时展示） -->
+          <div v-if="formData.config.rerank_model_id" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.rerankThreshold') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.rerankThreshold') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="slider-wrapper">
+                <t-slider v-model="formData.config.rerank_threshold" :min="-10" :max="10" :step="0.01" />
+                <span class="slider-value">{{ formData.config.rerank_threshold?.toFixed(1) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- FAQ 优先策略（关联 FAQ 类型知识库时显示） -->
+          <div v-if="hasFaqKnowledgeBase" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.faq.enableLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.faq.enableDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.faq_priority_enabled" />
+            </div>
+          </div>
+
+          <div v-if="hasFaqKnowledgeBase && formData.config.faq_priority_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.faq.thresholdLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.faq.thresholdDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="slider-wrapper">
+                <t-slider v-model="formData.config.faq_direct_answer_threshold" :min="0.7" :max="1"
+                  :step="0.05" />
+                <span class="slider-value">{{ formData.config.faq_direct_answer_threshold?.toFixed(2)
+                  }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="hasFaqKnowledgeBase && formData.config.faq_priority_enabled" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.faq.boostLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.faq.boostDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="slider-wrapper">
+                <t-slider v-model="formData.config.faq_score_boost" :min="1" :max="2" :step="0.1" />
+                <span class="slider-value">{{ formData.config.faq_score_boost?.toFixed(1) }}x</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 表格数据分析（仅普通模式，命中 CSV/Excel 时会多一次 LLM 调用生成 SQL） -->
+          <div v-if="!isAgentMode" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.dataAnalysis.enableLabel') }}</label>
+              <p class="desc">{{ $t('agentEditor.dataAnalysis.enableDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="formData.config.data_analysis_enabled" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 共享管理（仅编辑模式且非内置智能体） -->
+      <div v-if="editorMode === 'edit' && editorAgent?.id && !editorAgent?.is_builtin"
+        v-show="currentSection === 'share'" class="section">
+        <AgentShareSettings :agent-id="editorAgent.id" :agent="editorAgent" />
+      </div>
+    </div>
+
+    <template #footer-note>
+      <p v-if="isPostCreateSession" class="settings-footer-note">
+        <t-icon name="check-circle-filled" class="settings-footer-note__icon" />
+        <span>
+          <strong>{{ $t('agent.editor.postCreateHint.title') }}</strong>
+          {{ $t('agent.editor.postCreateHint.footer') }}
+        </span>
+      </p>
+    </template>
+    <template #footer>
+      <t-button variant="outline" @click="modalShell.requestClose">
+        {{ props.readOnly ? $t('common.close') : $t('common.cancel') }}
+      </t-button>
+      <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
+        :disabled="editorInitializing" @click="handleSave">
+        {{ saveButtonLabel }}
+      </t-button>
+    </template>
+  </SettingsModalShell>
 
   <SettingDrawer
     v-model:visible="showSkillProgress"
@@ -1837,6 +1837,8 @@ import { selectInitialModelId } from '@/utils/modelDefaults';
 import { hydrateAgentPromptRefs, serializeAgentPrompts } from '@/utils/agentPromptTemplates';
 import { copyWithToast } from '@/utils/clipboard';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { useModalShell } from '@/composables/useModalShell'
+import SettingsModalShell from '@/components/SettingsModalShell.vue'
 import {
   createAgent,
   updateAgent,
@@ -1850,7 +1852,9 @@ import {
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
+import { normalizeLegacyToolNames } from '@/utils/legacy-tool-names';
 import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill';
+import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import {
   isNamedSandboxBackend,
@@ -1875,12 +1879,24 @@ import { SKILL_ICON } from '@/types/mention';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { integrationSectionKey } from '@/config/settingsRoute';
+import { toolboxLocation } from '@/config/toolbox';
 import {
   evaluateToolRequirement,
   deriveKbFilterFromTools,
   type RequirementMissKind,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
+import {
+  clampLevel,
+  levelDescriptionKey,
+  levelEnablesThinking,
+  levelFromLegacy,
+  levelLabelKey,
+  modelCanThink,
+  modelCannotDisableThinking,
+  optionsFor,
+  type ReasoningLevel,
+} from '@/utils/reasoningEffort';
 
 // File extensions offered in the agent-level chat attachment parsing policy.
 const CHAT_PARSER_EXTENSIONS = [
@@ -2088,6 +2104,12 @@ type CatalogSkillRow = SkillCatalogItem & {
   selectable: boolean
   installStatus: string
   installEnabled: boolean
+  // The install on this sandbox is still on an archive the catalog has moved past.
+  upgradable: boolean
+  installVersion: string
+  // Set while a newer install runs or after it failed: the sandbox still runs
+  // the previous version, so the skill stays usable.
+  servedNote: string
 }
 
 const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
@@ -2099,8 +2121,13 @@ const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
     const installStatus = inst?.status || ''
     const installEnabled = Boolean(inst?.enabled)
     const installed = Boolean(inst) && installStatus !== 'removed'
-    const selectable = installStatus === 'ready' && installEnabled
-    return { ...item, installed, selectable, installStatus, installEnabled }
+    const servedNote = inst ? servedPreviousText(t, inst) : ''
+    const selectable = installEnabled && (installStatus === 'ready' || Boolean(servedNote))
+    const upgradable = Boolean(inst && installUpgradable(item, inst))
+    return {
+      ...item, installed, selectable, installStatus, installEnabled,
+      upgradable, installVersion: inst?.version || '', servedNote,
+    }
   })
 })
 
@@ -2164,6 +2191,26 @@ function canInstallSkillRow(skill: CatalogSkillRow): boolean {
   return !skill.installed || skill.installStatus === 'failed'
 }
 
+// Upgrading writes the sandbox image through the same admin-only catalog
+// install, so it is offered, and even mentioned, only to those who can run it.
+function canUpgradeSkillRow(skill: CatalogSkillRow): boolean {
+  return canInstallSkills.value && hasSandboxSelected.value && skill.upgradable
+}
+
+// Installing the catalog version over what this sandbox has is an upgrade:
+// over an outdated install, or over a failed upgrade whose previous version
+// still runs. Only a skill the sandbox has never carried is a plain install.
+function installsAnUpgrade(skill: CatalogSkillRow): boolean {
+  return skill.upgradable || Boolean(skill.servedNote)
+}
+
+function skillUpgradeHint(skill: CatalogSkillRow): string {
+  const versions = upgradeVersions(skill, { version: skill.installVersion })
+  return versions
+    ? t('settings.skills.upgradeFromTo', versions)
+    : t('settings.skills.upgradeAvailable')
+}
+
 function namedSandboxConfigs(): SandboxConfigRecord[] {
   return chatResources.sandboxConfigs.filter((cfg) => isNamedSandboxBackend(cfg.sandbox_type))
 }
@@ -2179,7 +2226,9 @@ function autoBindSoleSandbox() {
 
 function openSkillSettings() {
   const configId = formData.value.config.sandbox_config_id || ''
-  uiStore.openSettings('skills', configId || undefined)
+  modalShell.requestClose(() => {
+    void router.push(toolboxLocation('skills', configId || undefined))
+  })
 }
 
 const showSkillProgress = ref(false)
@@ -2233,7 +2282,11 @@ function onSkillProgressChanged() {
 
 function pruneSelectedSkills() {
   if (!catalogReady.value) return
-  const names = new Set(catalogSkillRows.value.filter((skill) => skill.selectable).map((skill) => skill.name))
+  // A skill being upgraded is briefly not ready, and dropping it here would
+  // silently unselect it for good once the agent is saved.
+  const names = new Set(catalogSkillRows.value
+    .filter((skill) => skill.selectable || (skill.installed && isSkillBusy(skill)))
+    .map((skill) => skill.name))
   const selected: string[] = formData.value.config.selected_skills || []
   const kept = selected.filter((name: string) => names.has(name))
   if (kept.length !== selected.length) {
@@ -2244,7 +2297,9 @@ function pruneSelectedSkills() {
 async function syncInstalledSkills(force = false) {
   autoBindSoleSandbox()
   const configId = formData.value.config.sandbox_config_id || ''
-  await editorResources.ensureSkills(configId, force)
+  // The editor only edits this workspace's agents, so the sandbox config is
+  // local and needs no source-workspace scope.
+  await editorResources.ensureSkills(configId, undefined, force)
   try {
     await editorResources.ensureSkillCatalog(force)
     skillCatalog.value = [...editorResources.skillCatalog]
@@ -2259,13 +2314,14 @@ async function installCatalogToCurrent(skill: CatalogSkillRow) {
   const configId = formData.value.config.sandbox_config_id || ''
   if (!configId || installingCatalogId.value) return
   installingCatalogId.value = skill.id
+  const upgrading = installsAnUpgrade(skill)
   try {
     const res = await installSkillCatalog(skill.id, [configId])
     const failed = Object.keys(res?.data?.errors || {}).length
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
     } else {
-      MessagePlugin.success(t('settings.skills.installAccepted'))
+      MessagePlugin.success(t(upgrading ? 'settings.skills.upgradeAccepted' : 'settings.skills.installAccepted'))
     }
     await syncInstalledSkills(true)
   } catch (e: any) {
@@ -2360,10 +2416,10 @@ const defaultMaxCompletionTokensFor = (mode: string, sandboxConfigId?: string) =
 };
 
 // 知识库相关工具列表（用于 watch(hasKnowledgeBase) 从"无"变"有"时 seed 默认工具）
-const knowledgeBaseTools = ['grep_chunks', 'knowledge_search', 'list_knowledge_chunks', 'get_document_info'];
+const knowledgeBaseTools = ['search_knowledge', 'read_document', 'list_documents'];
 
 // Wiki 读取类工具（用于 watch(agentMode) 切到 smart-reasoning 时 seed 默认工具）
-const wikiReadTools = ['wiki_search', 'wiki_read_page', 'wiki_read_source_doc', 'wiki_flag_issue'];
+const wikiReadTools = ['wiki_search', 'wiki_read_page', 'read_document', 'wiki_flag_issue'];
 
 // 初始化标志，防止初始化时触发 watch 自动添加工具
 const isInitializing = ref(false);
@@ -2383,17 +2439,16 @@ const allTools = computed(() => [
   // 基础思考类
   { value: 'thinking', label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc'), group: 'base' },
   { value: 'todo_write', label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc'), group: 'base' },
-  // 知识库语义/关键词检索
-  { value: 'grep_chunks', label: t('agentEditor.tools.grepChunks'), description: t('agentEditor.tools.grepChunksDesc'), group: 'rag' },
-  { value: 'knowledge_search', label: t('agentEditor.tools.knowledgeSearch'), description: t('agentEditor.tools.knowledgeSearchDesc'), group: 'rag' },
-  { value: 'list_knowledge_chunks', label: t('agentEditor.tools.listChunks'), description: t('agentEditor.tools.listChunksDesc'), group: 'rag' },
+  // 知识库检索 / 文档阅读（旧的 grep_chunks / knowledge_search / list_knowledge_chunks /
+  // get_document_info 已合并，旧配置加载时由 normalizeLegacyToolNames 映射到新名字）
+  { value: 'search_knowledge', label: t('agentEditor.tools.searchKnowledge'), description: t('agentEditor.tools.searchKnowledgeDesc'), group: 'rag' },
+  { value: 'read_document', label: t('agentEditor.tools.readDocument'), description: t('agentEditor.tools.readDocumentDesc'), group: 'rag' },
+  { value: 'list_documents', label: t('agentEditor.tools.listDocuments'), description: t('agentEditor.tools.listDocumentsDesc'), group: 'rag' },
   { value: 'query_knowledge_graph', label: t('agentEditor.tools.queryGraph'), description: t('agentEditor.tools.queryGraphDesc'), group: 'rag' },
-  { value: 'get_document_info', label: t('agentEditor.tools.getDocInfo'), description: t('agentEditor.tools.getDocInfoDesc'), group: 'rag' },
   { value: 'database_query', label: t('agentEditor.tools.dbQuery'), description: t('agentEditor.tools.dbQueryDesc'), group: 'rag' },
   // Wiki 读取类（阅读、搜索、标记问题）
   { value: 'wiki_search', label: t('agentEditor.tools.wikiSearch'), description: t('agentEditor.tools.wikiSearchDesc'), group: 'wiki_read' },
   { value: 'wiki_read_page', label: t('agentEditor.tools.wikiReadPage'), description: t('agentEditor.tools.wikiReadPageDesc'), group: 'wiki_read' },
-  { value: 'wiki_read_source_doc', label: t('agentEditor.tools.wikiReadSourceDoc'), description: t('agentEditor.tools.wikiReadSourceDocDesc'), group: 'wiki_read' },
   { value: 'wiki_flag_issue', label: t('agentEditor.tools.wikiFlagIssue'), description: t('agentEditor.tools.wikiFlagIssueDesc'), group: 'wiki_read' },
   // Wiki 编辑类（会直接修改 Wiki 内容）
   { value: 'wiki_write_page', label: t('agentEditor.tools.wikiWritePage'), description: t('agentEditor.tools.wikiWritePageDesc'), group: 'wiki_edit', danger: true },
@@ -2658,13 +2713,13 @@ const rewriteUserTextareaRef = ref<any>(null);
 const fallbackPromptTextareaRef = ref<any>(null);
 
 const navItems = computed(() => {
-  const items: { key: string; icon: string; label: string }[] = [
+  const items: { key: string; icon: string; label: string; badge?: number }[] = [
     { key: 'basic', icon: 'info-circle', label: t('agent.editor.basicInfo') },
-    { key: 'prompts', icon: 'file-paste', label: t('agent.editor.promptsConfig') },
+    { key: 'prompts', icon: 'file-paste', label: t('agent.editor.promptsConfig'), badge: promptNavItems.value.length > 1 ? promptNavItems.value.length : undefined },
     { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
     { key: 'suggestions', icon: 'help-circle', label: t('agentEditor.questionSuggestions.navLabel') },
   ];
-  // 多轮对话（两种模式都需要：Agent 模式同样按 history_turns 截断历史）
+  // 多轮对话（两种模式都需要：Agent 模式在这里说明历史自动管理、保留检索结果）
   items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
   // 知识库与检索
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
@@ -2731,6 +2786,7 @@ const defaultFormData = {
     temperature: 0.7,
     max_completion_tokens: 0,
     thinking: false, // 默认禁用思考模式
+    reasoning_effort: 'off', // 思考强度；与 thinking 布尔保持同步
     citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
@@ -3303,7 +3359,7 @@ const applyAgentTypePreset = (preset: AgentTypePreset | null) => {
   }
   if (typeof c.temperature === 'number') target.temperature = c.temperature;
   if (typeof c.max_iterations === 'number') target.max_iterations = c.max_iterations;
-  if (Array.isArray(c.allowed_tools)) target.allowed_tools = [...c.allowed_tools];
+  if (Array.isArray(c.allowed_tools)) target.allowed_tools = normalizeLegacyToolNames(c.allowed_tools);
   if (typeof c.retain_retrieval_history === 'boolean') target.retain_retrieval_history = c.retain_retrieval_history;
   if (typeof c.faq_priority_enabled === 'boolean') target.faq_priority_enabled = c.faq_priority_enabled;
   if (typeof c.web_search_enabled === 'boolean') target.web_search_enabled = c.web_search_enabled;
@@ -3351,11 +3407,47 @@ const onAgentTypeChange = (val: AgentType) => {
   }
 };
 
-// 思考模式计算属性（直接绑定 boolean）
-const thinkingEnabled = computed({
-  get: () => formData.value.config.thinking === true,
-  set: (val: boolean) => { formData.value.config.thinking = val; }
+// 思考强度：reasoning_effort 为准，旧数据只有 thinking 布尔时按 true→auto / false→off 推导。
+// 写入时同步维护 thinking 布尔，保证旧后端 / 旧读取路径继续工作。
+const selectedChatModel = computed(() =>
+  allModels.value.find(model => model.id === formData.value.config.model_id),
+);
+const selectedChatModelCanThink = computed(() => modelCanThink(selectedChatModel.value?.capabilities));
+// 所选模型无法关闭思考（deepseek-reasoner / qwq-plus / gemini-3 等）时给出提示，
+// 否则下拉里没有「关闭」看起来像 bug。
+const selectedChatModelAlwaysThinks = computed(
+  () => modelCannotDisableThinking(selectedChatModel.value?.capabilities),
+);
+// 目录上报 capabilities 时严格按 thinking_levels 出选项（含「没有 off」这一事实）；
+// 没有 capabilities 的模型（本地 / Ollama / 模型列表未加载）才退回通用梯度。
+const reasoningEffortOptions = computed<ReasoningLevel[]>(() => optionsFor(selectedChatModel.value?.capabilities));
+const reasoningEffortLevel = computed<ReasoningLevel>({
+  get: () => levelFromLegacy(formData.value.config.thinking, formData.value.config.reasoning_effort),
+  set: (level: ReasoningLevel) => {
+    formData.value.config.reasoning_effort = level;
+    formData.value.config.thinking = levelEnablesThinking(level);
+  },
 });
+// 已存等级可能不在所选模型的可用集合里（换模型，或加载了一个旧智能体）：
+// 夹到可用集合上，并同步 thinking 布尔（由 setter 负责），避免界面显示「关闭」
+// 而后端其实没下发任何开关、模型照样思考。
+//
+// 只在模型真正解析出来之后才夹：模型列表异步加载期间 capabilities 还是 undefined，
+// 此时的通用梯度会把已保存的 max/xhigh 误降级成 auto。
+const clampReasoningEffortToModel = () => {
+  if (editorInitializing.value || !selectedChatModel.value) return;
+  const clamped = clampLevel(reasoningEffortLevel.value, reasoningEffortOptions.value);
+  if (clamped !== reasoningEffortLevel.value) reasoningEffortLevel.value = clamped;
+};
+watch(
+  () => [
+    editorInitializing.value,
+    formData.value.config.model_id,
+    reasoningEffortOptions.value.join(','),
+  ].join('|'),
+  () => clampReasoningEffortToModel(),
+  { immediate: true },
+);
 
 // 是否为内置智能体
 const isBuiltinAgent = computed(() => {
@@ -3415,6 +3507,10 @@ watch(() => props.visible, async (val) => {
       if (agentData.config.thinking == null) {
         agentData.config.thinking = false;
       }
+      // Legacy rows carry only the boolean: derive the graded level once so
+      // the selector and the persisted config agree (true → auto, false → off).
+      agentData.config.reasoning_effort = levelFromLegacy(agentData.config.thinking, agentData.config.reasoning_effort);
+      agentData.config.thinking = levelEnablesThinking(agentData.config.reasoning_effort);
 
       agentData.config.question_suggestions = {
         starters: {
@@ -3431,7 +3527,10 @@ watch(() => props.visible, async (val) => {
       };
       // 确保数组字段存在
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
-      if (!agentData.config.allowed_tools) agentData.config.allowed_tools = [];
+      // 旧配置里可能还带着已合并的工具名（knowledge_search / grep_chunks /
+      // list_knowledge_chunks / get_document_info / wiki_read_source_doc），
+      // 映射到新名字并去重，否则复选框对不上 allTools。
+      agentData.config.allowed_tools = normalizeLegacyToolNames(agentData.config.allowed_tools);
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];
       // 授权等待超时：旧数据缺省时用默认 600 秒
       if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
@@ -3550,6 +3649,7 @@ watch(() => props.visible, async (val) => {
     } finally {
       if (generation === editorInitializationGeneration && props.visible) {
         editorInitializing.value = false;
+        modalShell.markClean();
       }
     }
   } else {
@@ -3937,6 +4037,19 @@ const handleClose = () => {
   fallbackPromptPopup.value.show = false;
   emit('update:visible', false);
 };
+
+const modalShell = useModalShell({
+  visible: () => props.visible,
+  close: handleClose,
+  snapshot: () => formData.value,
+  ignoreEscape: () =>
+    showPlaceholderPopup.value ||
+    showContextPlaceholderPopup.value ||
+    intentPromptPopup.value.show ||
+    rewriteSystemPopup.value.show ||
+    rewriteUserPopup.value.show ||
+    fallbackPromptPopup.value.show,
+});
 
 // 过滤后的占位符列表
 const filteredPlaceholders = computed(() => {
@@ -4762,10 +4875,6 @@ const handleSave = async () => {
     }
   }
 
-
-
-
-
   // 校验占位符（普通模式 + 开启多轮对话改写）
   if (!isAgentMode.value && formData.value.config.multi_turn_enabled && formData.value.config.enable_rewrite) {
     const rewritePrompt = formData.value.config.rewrite_prompt_user || '';
@@ -4804,7 +4913,7 @@ const handleSave = async () => {
   }
 
   // ReRank 模型按运行范围按需使用：知识库范围为 none，或未启用
-  // knowledge_search 时不需要；其余情况由对话入口在使用前给出明确提示。
+  // search_knowledge 时不需要；其余情况由对话入口在使用前给出明确提示。
 
   formData.value.config.question_suggestions.starters.items =
     formData.value.config.question_suggestions.starters.items
@@ -4828,6 +4937,7 @@ const handleSave = async () => {
       }
       savedAgent.value = created;
       formData.value.id = created.id;
+      modalShell.markClean();
       markContextualGuideDone('agentCreate')
       currentSection.value = 'basic';
       void loadAgentIntegrationCounts(created.id);
@@ -4849,172 +4959,7 @@ const handleSave = async () => {
 
 <style scoped lang="less">
 // 复用创建知识库的样式
-.settings-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.settings-modal {
-  position: relative;
-  width: 90vw;
-  max-width: 1100px;
-  height: 85vh;
-  max-height: 750px;
-  background: var(--td-bg-color-container);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.editor-initializing {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--td-bg-color-container);
-}
-
-.close-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--td-text-color-secondary);
-  transition: all 0.2s ease;
-  z-index: 10;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-    color: var(--td-text-color-primary);
-  }
-}
-
-.settings-container {
-  display: flex;
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-}
-
 /* 左侧导航：与「头像-设置」弹窗对齐 */
-.settings-sidebar {
-  width: 208px;
-  background-color: var(--td-bg-color-settings-modal);
-  border-right: 1px solid var(--td-component-stroke);
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.sidebar-header {
-  padding: 16px 14px 12px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  flex-shrink: 0;
-}
-
-.sidebar-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-}
-
-.settings-nav {
-  flex: 1;
-  padding: 8px 8px 12px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.nav-group-title {
-  padding: 6px 14px 2px;
-  color: var(--td-text-color-placeholder);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-
-  .settings-nav > &:first-child {
-    padding-top: 2px;
-  }
-
-  .settings-nav > &:not(:first-child) {
-    padding-top: 8px;
-  }
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  padding: 6px 12px;
-  margin-bottom: 2px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 14px;
-  color: var(--td-text-color-primary);
-  user-select: none;
-
-  &:hover {
-    background-color: var(--td-bg-color-container-hover);
-    color: var(--td-text-color-primary);
-  }
-
-  &.active {
-    background-color: var(--td-bg-color-secondarycontainer);
-    color: var(--td-brand-color);
-    font-weight: 500;
-  }
-}
-
-.nav-icon {
-  margin-right: 9px;
-  font-size: 16px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: inherit;
-}
-
-.nav-label {
-  flex: 1;
-}
-
-.nav-badge {
-  flex-shrink: 0;
-  margin-left: 2px;
-  padding: 0 6px;
-  border-radius: 8px;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
-  font-size: 11px;
-  line-height: 16px;
-  font-weight: 500;
-  text-align: center;
-}
-
 .section--prompts {
   flex: 1;
   min-height: 0;
@@ -5065,7 +5010,7 @@ const handleSave = async () => {
   }
 
   .section-description {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 }
 
@@ -5082,14 +5027,14 @@ const handleSave = async () => {
     gap: 5px;
     padding: 5px 12px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: var(--td-bg-color-secondarycontainer);
     font: inherit;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.4;
     color: var(--td-text-color-secondary);
     cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
     &:hover,
     &:focus-visible {
@@ -5112,16 +5057,6 @@ const handleSave = async () => {
     background: var(--td-brand-color);
     flex-shrink: 0;
   }
-}
-
-.settings-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background-color: var(--td-bg-color-container);
-  min-width: 0;
-  min-height: 0;
 }
 
 .content-wrapper {
@@ -5172,14 +5107,14 @@ const handleSave = async () => {
   }
 
   h2 {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 6px 0;
   }
 
   .section-description {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -5206,7 +5141,7 @@ const handleSave = async () => {
 
     label {
       display: block;
-      font-size: 15px;
+      font-size: var(--app-text-lg);
       font-weight: 500;
       color: var(--td-text-color-primary);
       margin-bottom: 4px;
@@ -5214,7 +5149,7 @@ const handleSave = async () => {
 
     .desc {
       margin: 0;
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
       line-height: 1.5;
     }
@@ -5258,7 +5193,7 @@ const handleSave = async () => {
       bottom: 18px;
       width: 3px;
       border-radius: 2px;
-      background: var(--td-brand-color, #0052d9);
+      background: var(--td-brand-color);
     }
 
     .setting-info label {
@@ -5267,7 +5202,7 @@ const handleSave = async () => {
   }
 
   &.setting-row--field-highlight {
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     animation: agent-field-flash 0.8s ease-in-out 3;
   }
 }
@@ -5280,7 +5215,7 @@ const handleSave = async () => {
   }
 
   50% {
-    background-color: var(--td-warning-color-light, #fff7e8);
+    background-color: var(--td-warning-color-light);
     box-shadow: inset 0 0 0 1px rgba(237, 123, 47, 0.35);
   }
 }
@@ -5308,7 +5243,7 @@ const handleSave = async () => {
   }
 
   label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 500;
     color: var(--td-text-color-primary);
     display: block;
@@ -5321,13 +5256,13 @@ const handleSave = async () => {
   }
 
   .desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
 
     .hint {
-      color: var(--td-warning-color, var(--td-text-color-placeholder));
+      color: var(--td-warning-color);
     }
   }
 }
@@ -5340,6 +5275,11 @@ const handleSave = async () => {
   justify-content: flex-end;
   align-items: flex-start;
   overflow: hidden;
+
+  .reasoning-effort-select {
+    width: 100%;
+    max-width: 220px;
+  }
 
   &.setting-control-full {
     width: 100%;
@@ -5394,7 +5334,7 @@ const handleSave = async () => {
   justify-content: flex-end;
 
   &__stat {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
 
     &.integration-inline__link {
@@ -5416,7 +5356,7 @@ const handleSave = async () => {
 
   &__sep {
     color: var(--td-component-stroke);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   &__link {
@@ -5427,7 +5367,7 @@ const handleSave = async () => {
     padding: 0;
     border: none;
     background: transparent;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1;
     color: var(--td-brand-color);
     cursor: pointer;
@@ -5451,7 +5391,7 @@ const handleSave = async () => {
 }
 
 .go-settings-link {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-brand-color);
   margin-top: 0;
   text-decoration: none;
@@ -5472,7 +5412,7 @@ const handleSave = async () => {
 
 .sandbox-select-links__sep {
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .sandbox-select-control {
@@ -5510,7 +5450,7 @@ const handleSave = async () => {
 .sandbox-option__type {
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .sandbox-option__target {
@@ -5518,14 +5458,14 @@ const handleSave = async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.35;
 }
 
 .sandbox-selected-meta {
   margin: 6px 0 0;
   max-width: 280px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-secondary);
   word-break: break-word;
@@ -5551,7 +5491,7 @@ const handleSave = async () => {
   padding: 6px 8px 6px 12px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 
   .agent-id-value {
     flex: 1;
@@ -5561,7 +5501,7 @@ const handleSave = async () => {
     background: none;
     border: none;
     font-family: var(--app-font-family-mono);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -5579,66 +5519,9 @@ const handleSave = async () => {
   }
 }
 
-.settings-footer {
-  padding: 12px 40px;
-  border-top: 1px solid var(--td-component-stroke);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 16px;
-  flex-shrink: 0;
-  background-color: var(--td-bg-color-container);
-}
-
-.settings-footer-note {
-  margin: 0;
-  margin-right: auto;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--td-text-color-secondary);
-
-  strong {
-    margin-right: 4px;
-    color: var(--td-text-color-primary);
-    font-weight: 500;
-  }
-
-  &__icon {
-    flex-shrink: 0;
-    margin-top: 2px;
-    font-size: 14px;
-    color: var(--td-success-color);
-  }
-}
-
-.settings-footer-actions {
-  display: flex;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
 /* 滚动条：与设置弹窗一致 */
-.settings-nav::-webkit-scrollbar,
 .content-wrapper::-webkit-scrollbar {
   width: 6px;
-}
-
-.settings-nav::-webkit-scrollbar-track {
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.settings-nav::-webkit-scrollbar-thumb {
-  background: var(--td-gray-color-5);
-  border-radius: 3px;
-}
-
-.settings-nav::-webkit-scrollbar-thumb:hover {
-  background: var(--td-gray-color-6);
 }
 
 .content-wrapper::-webkit-scrollbar-track {
@@ -5660,28 +5543,14 @@ const handleSave = async () => {
   align-items: center;
   padding: 10px 14px;
   background: var(--td-success-color-light);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: 1px solid var(--td-success-color-focus);
   color: var(--td-brand-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
 }
 
 // 过渡动画
-.modal-enter-active,
-.modal-leave-active {
-  transition: all 0.3s ease;
-}
-
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-
-  .settings-modal {
-    transform: scale(0.95);
-  }
-}
-
 // Slider 样式
 .slider-wrapper {
   display: flex;
@@ -5698,14 +5567,14 @@ const handleSave = async () => {
   width: 40px;
   text-align: right;
   font-family: var(--app-font-family-mono);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
 }
 
 .max-tokens-value {
   font-family: var(--app-font-family-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -5732,7 +5601,7 @@ const handleSave = async () => {
   margin-bottom: 4px;
 
   :deep(.t-tabs__nav-item) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   :deep(.t-tabs__operations) {
@@ -5751,7 +5620,7 @@ const handleSave = async () => {
   gap: 12px;
   padding: 4px 0 2px;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
 
   &::before,
@@ -5782,9 +5651,9 @@ const handleSave = async () => {
   height: 20px;
   display: inline-flex;
   align-items: center;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
 }
@@ -5804,7 +5673,7 @@ const handleSave = async () => {
   margin-bottom: 12px;
   padding: 12px 14px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
 }
 
@@ -5826,15 +5695,15 @@ const handleSave = async () => {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-container);
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   border: 1px solid var(--td-component-stroke);
 
   .t-icon {
     color: var(--td-text-color-secondary);
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .tools-status-metric {
@@ -5843,7 +5712,7 @@ const handleSave = async () => {
     gap: 4px;
 
     strong {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
@@ -5855,8 +5724,8 @@ const handleSave = async () => {
 
   &--warn {
     color: var(--td-warning-color);
-    background: var(--td-warning-color-1, rgba(237, 118, 20, 0.08));
-    border-color: var(--td-warning-color-light, #fcd7b6);
+    background: var(--td-warning-color-1);
+    border-color: var(--td-warning-color-light);
 
     .t-icon {
       color: var(--td-warning-color);
@@ -5893,7 +5762,7 @@ const handleSave = async () => {
   }
 
   .tool-group-title {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     color: var(--td-text-color-primary);
     letter-spacing: 0.2px;
@@ -5902,10 +5771,10 @@ const handleSave = async () => {
   .tool-group-count {
     min-width: 20px;
     padding: 0 6px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     text-align: center;
     line-height: 18px;
   }
@@ -5916,21 +5785,21 @@ const handleSave = async () => {
     align-items: center;
     gap: 4px;
     padding: 2px 8px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-warning-color);
-    background: var(--td-warning-color-1, rgba(237, 118, 20, 0.08));
-    border: 1px solid var(--td-warning-color-light, #fcd7b6);
-    border-radius: 999px;
+    background: var(--td-warning-color-1);
+    border: 1px solid var(--td-warning-color-light);
+    border-radius: var(--app-radius-pill);
 
     .t-icon {
-      font-size: 13px;
+      font-size: var(--app-text-md);
     }
   }
 }
 
 // 不同分组的左侧色条
 .tool-group--base .tool-group-bar {
-  background: var(--td-gray-color-6, #a0a7ab);
+  background: var(--td-gray-color-6);
 }
 
 .tool-group--rag .tool-group-bar {
@@ -5938,11 +5807,11 @@ const handleSave = async () => {
 }
 
 .tool-group--wiki_read .tool-group-bar {
-  background: var(--td-success-color, #2ba471);
+  background: var(--td-success-color);
 }
 
 .tool-group--wiki_edit .tool-group-bar {
-  background: var(--td-warning-color, #ed7b2f);
+  background: var(--td-warning-color);
 }
 
 .tool-group--wiki_issue .tool-group-bar {
@@ -5970,15 +5839,15 @@ const handleSave = async () => {
   margin: 0; // 清掉 TDesign checkbox 默认外边距
   padding: 12px 14px;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: 1px solid var(--td-component-stroke);
-  transition: border-color .2s, background .2s;
+  transition: border-color var(--app-motion-base), background var(--app-motion-base);
   cursor: pointer;
   overflow: hidden;
 
   &:hover:not(.tool-card--disabled) {
     border-color: var(--td-brand-color);
-    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.06));
+    background: var(--td-brand-color-1);
   }
 
   // checkbox 的勾选框 + label 改造
@@ -5995,7 +5864,7 @@ const handleSave = async () => {
 
   &.t-is-checked {
     border-color: var(--td-brand-color);
-    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.08));
+    background: var(--td-brand-color-1);
   }
 
   &--disabled {
@@ -6004,16 +5873,16 @@ const handleSave = async () => {
   }
 
   &--danger {
-    border-color: var(--td-warning-color-light, #fcd7b6);
+    border-color: var(--td-warning-color-light);
 
     &:hover:not(.tool-card--disabled) {
       border-color: var(--td-warning-color);
-      background: var(--td-warning-color-1, rgba(237, 118, 20, 0.06));
+      background: var(--td-warning-color-1);
     }
 
     &.t-is-checked {
       border-color: var(--td-warning-color);
-      background: var(--td-warning-color-1, rgba(237, 118, 20, 0.08));
+      background: var(--td-warning-color-1);
     }
   }
 }
@@ -6051,13 +5920,13 @@ const handleSave = async () => {
   padding: 3px 6px;
   color: var(--td-warning-color);
   background: transparent;
-  border: 1px solid var(--td-warning-color-light, #fcd7b6);
-  border-radius: 4px;
+  border: 1px solid var(--td-warning-color-light);
+  border-radius: var(--app-radius-xs);
   letter-spacing: 0.3px;
 }
 
 .tool-card-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
   display: -webkit-box;
@@ -6067,7 +5936,7 @@ const handleSave = async () => {
 }
 
 .tool-card-hint {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-warning-color);
   font-style: italic;
   line-height: 1.4;
@@ -6088,7 +5957,7 @@ const handleSave = async () => {
   gap: 6px;
   padding: 12px;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: 1px dashed var(--td-component-stroke);
   min-height: 52px;
   align-items: flex-start;
@@ -6099,12 +5968,12 @@ const handleSave = async () => {
   align-items: center;
   gap: 4px;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-brand-color);
   background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--td-brand-color) 22%, transparent);
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   max-width: 100%;
 }
 
@@ -6113,7 +5982,7 @@ const handleSave = async () => {
 }
 
 .effective-chip-reason {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-warning-color);
   font-style: normal;
 
@@ -6135,7 +6004,7 @@ const handleSave = async () => {
 }
 
 .effective-tools-empty {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-style: italic;
 }
@@ -6173,7 +6042,7 @@ const handleSave = async () => {
 }
 
 .skill-pick-group__title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   letter-spacing: 0.2px;
@@ -6182,10 +6051,10 @@ const handleSave = async () => {
 .skill-pick-group__count {
   min-width: 20px;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   text-align: center;
   line-height: 18px;
 }
@@ -6198,7 +6067,7 @@ const handleSave = async () => {
   padding: 8px 10px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .skill-pick--pending {
@@ -6248,7 +6117,7 @@ const handleSave = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
@@ -6258,7 +6127,7 @@ const handleSave = async () => {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 
   .t-icon {
@@ -6266,17 +6135,16 @@ const handleSave = async () => {
   }
 }
 
+.skill-pick__hint--upgrade {
+  color: var(--td-warning-color);
+}
+
 .skill-pick__hint--busy {
   color: var(--td-brand-color);
 
   .t-icon {
-    animation: skill-pick-spin 1s linear infinite;
+    animation: wk-spin 1s linear infinite;
   }
-}
-
-@keyframes skill-pick-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .skill-desc {
@@ -6286,7 +6154,7 @@ const handleSave = async () => {
   line-clamp: 2;
   margin: 2px 0 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.45;
   white-space: pre-line;
@@ -6299,7 +6167,7 @@ const handleSave = async () => {
   justify-content: center;
   padding: 2px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: help;
@@ -6322,14 +6190,14 @@ const handleSave = async () => {
 .hint-popover__title {
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .hint-popover__text {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
@@ -6342,7 +6210,6 @@ const handleSave = async () => {
     font-style: normal;
   }
 }
-
 
 // textarea 与模板选择器容器
 .textarea-with-template {
@@ -6364,14 +6231,14 @@ const handleSave = async () => {
 }
 
 .intent-toggle-group :deep(.intent-toggle-btn--active) {
-  background-color: rgba(7, 192, 95, 0.1);
+  background-color: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   border-color: var(--td-brand-color);
   color: var(--td-brand-color);
   font-weight: 500;
 
   &:hover,
   &:focus-visible {
-    background-color: rgba(7, 192, 95, 0.14);
+    background-color: color-mix(in srgb, var(--td-brand-color) 14%, transparent);
     border-color: var(--td-brand-color);
     color: var(--td-brand-color);
   }
@@ -6398,7 +6265,7 @@ const handleSave = async () => {
 
 .intent-active-desc {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   line-height: 1.5;
 }
@@ -6407,7 +6274,7 @@ const handleSave = async () => {
 .system-prompt-textarea {
   width: 100%;
   font-family: var(--app-font-family-mono);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   :deep(textarea) {
     resize: vertical !important;
@@ -6421,7 +6288,7 @@ const handleSave = async () => {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   overflow-x: auto;
   white-space: nowrap;
@@ -6440,13 +6307,13 @@ const handleSave = async () => {
   }
 
   .placeholder-label {
-    color: var(--td-text-color-secondary, #666);
+    color: var(--td-text-color-secondary);
     flex-shrink: 0;
   }
 
   .placeholder-hint {
-    color: var(--td-text-color-placeholder, #999);
-    font-size: 11px;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-xs);
     user-select: none;
     flex-shrink: 0;
   }
@@ -6457,23 +6324,23 @@ const handleSave = async () => {
     padding: 1px 5px;
     border-radius: 3px;
     font-family: var(--app-font-family-mono);
-    font-size: 11px;
-    color: var(--td-text-color-primary, #333);
-    background-color: var(--td-bg-color-secondarycontainer, #f3f3f3);
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-primary);
+    background-color: var(--td-bg-color-secondarycontainer);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--app-motion-base);
     user-select: none;
     border: 1px solid transparent;
     flex-shrink: 0;
 
     &:hover {
-      color: var(--td-brand-color, #0052d9);
-      background-color: var(--td-brand-color-light, #ecf2fe);
-      border-color: var(--td-brand-color-focus, #d0e0fd);
+      color: var(--td-brand-color);
+      background-color: var(--td-brand-color-light);
+      border-color: var(--td-brand-color-focus);
     }
 
     &:active {
-      background-color: var(--td-brand-color-focus, #d0e0fd);
+      background-color: var(--td-brand-color-focus);
     }
   }
 }
@@ -6485,9 +6352,9 @@ const handleSave = async () => {
 }
 
 .placeholder-popup {
-  background: var(--td-bg-color-container, #fff);
-  border: 1px solid var(--td-component-stroke, #e5e7eb);
-  border-radius: 6px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-sm);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   max-width: 320px;
   max-height: 240px;
@@ -6498,30 +6365,30 @@ const handleSave = async () => {
 .placeholder-item {
   padding: 6px 10px;
   cursor: pointer;
-  transition: background-color 0.15s;
-  border-radius: 4px;
+  transition: background-color var(--app-motion-fast);
+  border-radius: var(--app-radius-xs);
 
   &:hover,
   &.active {
-    background-color: var(--td-bg-color-container-hover, #f5f7fa);
+    background-color: var(--td-bg-color-container-hover);
   }
 
   .placeholder-name {
     margin-bottom: 2px;
 
     code {
-      background: var(--td-bg-color-container-hover, #f5f7fa);
+      background: var(--td-bg-color-container-hover);
       padding: 2px 5px;
       border-radius: 3px;
       font-family: var(--app-font-family-mono);
-      font-size: 11px;
-      color: var(--td-brand-color, #0052d9);
+      font-size: var(--app-text-xs);
+      color: var(--td-brand-color);
     }
   }
 
   .placeholder-desc {
-    font-size: 11px;
-    color: var(--td-text-color-secondary, #666);
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -6529,10 +6396,10 @@ const handleSave = async () => {
   display: inline-flex;
   align-items: center;
   color: var(--td-text-color-placeholder);
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   line-height: 1;
   cursor: help;
-  transition: color 0.2s;
+  transition: color var(--app-motion-base);
 
   &:hover,
   &:focus-visible {
@@ -6553,11 +6420,11 @@ const handleSave = async () => {
   justify-content: center;
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   flex-shrink: 0;
 
   &.normal {
-    background: linear-gradient(135deg, rgba(7, 192, 95, 0.15) 0%, rgba(7, 192, 95, 0.08) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color) 15%, transparent) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%);
     color: var(--td-brand-color-active);
   }
 
@@ -6575,7 +6442,7 @@ const handleSave = async () => {
   margin-top: 12px;
 
   .prompt-toggle-label {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
   }
 }
@@ -6583,11 +6450,11 @@ const handleSave = async () => {
 // 提示词禁用提示
 .prompt-disabled-hint {
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-style: italic;
   padding: 12px 16px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 }
 
 // 系统提示词Tabs
@@ -6616,8 +6483,8 @@ const handleSave = async () => {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
-  font-size: 14px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-base);
 
   // Document KB
   &.doc-icon {
@@ -6637,17 +6504,17 @@ const handleSave = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
 }
 
 .kb-option-org {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-secondarycontainer);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6656,11 +6523,11 @@ const handleSave = async () => {
 
 .kb-option-disabled-hint {
   flex-shrink: 0;
-  font-size: 11px;
-  color: var(--td-warning-color-6, #d46b08);
-  background: var(--td-warning-color-1, #fff7e6);
+  font-size: var(--app-text-xs);
+  color: var(--td-warning-color-6);
+  background: var(--td-warning-color-1);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6670,7 +6537,7 @@ const handleSave = async () => {
 .agent-type-preset-desc {
   margin-top: 4px;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 }
 
@@ -6682,16 +6549,16 @@ const handleSave = async () => {
 
 .kb-option-count {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-secondarycontainer);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .kb-option-tag {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 500;
   padding: 0 5px;
   border-radius: 3px;
@@ -6713,6 +6580,37 @@ const handleSave = async () => {
 <!-- Non-scoped styles: TDesign teleports the popup outside this component, so
      scoped selectors can't reach .agent-type-popup .t-select-option. -->
 <style lang="less">
+.reasoning-level-select-popup {
+  padding: 4px;
+
+  .t-select-option {
+    height: auto !important;
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin: 2px 0;
+    white-space: normal;
+  }
+}
+
+.reasoning-level-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  min-width: 0;
+
+  &__title {
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    font-size: var(--app-text-sm);
+    color: var(--td-text-color-placeholder);
+    word-break: break-word;
+  }
+}
+
 .agent-type-popup {
   .t-select-option {
     // 默认 option 是 32px 单行；我们要双行显示，取消固定高度并放宽 padding
@@ -6740,14 +6638,14 @@ const handleSave = async () => {
 }
 
 .agent-type-option-label {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
 }
 
 .agent-type-option-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.4;
   white-space: normal;

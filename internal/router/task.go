@@ -43,6 +43,7 @@ type AsynqTaskParams struct {
 	ImageMultimodal      interfaces.TaskHandler `name:"imageMultimodal"`
 	KnowledgePostProcess interfaces.TaskHandler `name:"knowledgePostProcess"`
 	KnowledgeAutoTag     interfaces.TaskHandler `name:"knowledgeAutoTag"`
+	KnowledgeBaseProfile interfaces.TaskHandler `name:"knowledgeBaseProfile"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
 	TemporaryDocument    interfaces.TemporaryDocumentService
 	MemoryService        interfaces.MemoryService
@@ -244,6 +245,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// UI signal users actually see.
 	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker)
 	mux.Use(asynqdl.MiddlewareWithCallback(params.DeadLetterRepo, knowledgeFailer))
+	mux.Use(asynqdl.RecoverMiddleware())
 
 	// Mark every asynq worker execution as a background task so the chat
 	// concurrency governor throttles ingestion/enrichment LLM traffic while
@@ -303,6 +305,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Register knowledge post process handler
 	mux.HandleFunc(types.TypeKnowledgePostProcess, params.KnowledgePostProcess.Handle)
 	mux.HandleFunc(types.TypeKnowledgeAutoTag, params.KnowledgeAutoTag.Handle)
+	mux.HandleFunc(types.TypeKnowledgeBaseProfile, params.KnowledgeBaseProfile.Handle)
 
 	// Register data source sync handler
 	mux.HandleFunc(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)

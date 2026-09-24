@@ -133,7 +133,7 @@ const handleSubmit = async () => {
 
 .create-tenant-tip {
   margin: 0 0 16px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }

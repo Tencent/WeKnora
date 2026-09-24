@@ -17,7 +17,7 @@ func TestContextUsageReachesChatStreamWithoutCompletingTurn(t *testing.T) {
 	bus := event.NewEventBus()
 	streams := &completionEventRecorder{}
 	message := &types.Message{ID: "message"}
-	h := NewAgentStreamHandler(ctx, "session", "message", "request", 1, time.Now(), message, streams, bus, nil)
+	h := NewAgentStreamHandler(ctx, "session", "message", "request", 1, time.Now(), message, streams, bus, nil, nil, nil)
 	h.Subscribe()
 
 	usage := types.ContextUsage{SystemPrompt: 20, Conversation: 80, Total: 100, Window: 200000}

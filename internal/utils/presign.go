@@ -23,11 +23,15 @@ const (
 )
 
 // SystemHMACKey returns the deployment-wide HMAC key derived from
-// SYSTEM_AES_KEY, or nil when it is unset or too short to be a real secret.
+// SYSTEM_SIGNING_KEY (falling back to SYSTEM_AES_KEY for existing deployments),
+// or nil when unset, too short, or a known example value.
 // Callers must treat nil as "this deployment cannot sign", not as an empty key.
 func SystemHMACKey() []byte {
-	key := os.Getenv("SYSTEM_AES_KEY")
-	if len(key) < 16 {
+	key := os.Getenv("SYSTEM_SIGNING_KEY")
+	if key == "" {
+		key = os.Getenv("SYSTEM_AES_KEY")
+	}
+	if len(key) < 16 || key == "weknora-system-aes-key-32bytes!!" || key == "your-32-byte-long-encryption-key!" {
 		return nil
 	}
 	return []byte(key)

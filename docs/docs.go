@@ -791,7 +791,7 @@ const docTemplate = `{
         },
         "/auth/auto-setup": {
             "post": {
-                "description": "Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程",
+                "description": "Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，首次及后续启动均须通过桌面原生凭据认证，免除手动注册/登录流程",
                 "consumes": [
                     "application/json"
                 ],
@@ -5193,6 +5193,91 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-bases/{id}/knowledge/batch-download": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "将同一知识库的最多 200 个文档打包为 ZIP，原始内容合计不超过 512 MiB。无原文件的条目会被跳过；无权访问、跨库或读取失败时不返回残缺压缩包。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "批量下载知识文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "文档ID列表",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.BatchDownloadKnowledgeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ZIP 压缩包",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge-bases/{id}/knowledge/file": {
             "post": {
                 "security": [
@@ -8243,6 +8328,303 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats"
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-endpoints": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP端点"
+                ],
+                "summary": "获取 MCP 端点列表",
+                "responses": {
+                    "200": {
+                        "description": "端点列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "为当前工作空间发布一个 MCP 端点，响应中的 token 只返回一次",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP端点"
+                ],
+                "summary": "创建 MCP 端点",
+                "parameters": [
+                    {
+                        "description": "端点配置：name、description、enabled、knowledge_base_ids、tools 等",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建的端点，含一次性 token",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-endpoints/tools": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回工作空间 MCP 端点可勾选的工具清单、分组和默认勾选项",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP端点"
+                ],
+                "summary": "获取 MCP 端点工具目录",
+                "responses": {
+                    "200": {
+                        "description": "工具目录",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-endpoints/{endpoint_id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP端点"
+                ],
+                "summary": "获取 MCP 端点详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "端点 ID",
+                        "name": "endpoint_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "端点详情",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "端点不存在",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP端点"
+                ],
+                "summary": "更新 MCP 端点",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "端点 ID",
+                        "name": "endpoint_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要更新的字段，未提供的字段保持不变",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的端点",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "端点不存在",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP端点"
+                ],
+                "summary": "删除 MCP 端点",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "端点 ID",
+                        "name": "endpoint_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "端点不存在",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-endpoints/{endpoint_id}/rotate-token": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "生成新令牌并立即作废旧令牌，响应中的 token 只返回一次",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP端点"
+                ],
+                "summary": "轮换 MCP 端点令牌",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "端点 ID",
+                        "name": "endpoint_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "含新 token 的端点",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "端点不存在",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -11475,14 +11857,13 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "组织管理"
                 ],
-                "summary": "搜索可邀请的空间",
+                "summary": "Resolve a workspace ID for invitation",
                 "parameters": [
                     {
                         "type": "string",
@@ -11493,17 +11874,10 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "搜索关键词（空间名）",
+                        "description": "Exact workspace ID",
                         "name": "q",
                         "in": "query",
                         "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "返回数量限制",
-                        "name": "limit",
-                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -11512,12 +11886,6 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -13260,6 +13628,74 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}/fork": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "从指定的用户或助手消息处分叉出一个新会话。用户消息：复制其之前的历史并预填该问题；助手消息：复制含该回答在内的历史，从该轮沙箱状态继续。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "分叉会话",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "源会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "分叉请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_session.ForkSessionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "新会话",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误 / 分叉点角色不支持",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "会话或消息不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "源会话正在生成中",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -18332,49 +18768,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.ContextUsage": {
-            "type": "object",
-            "properties": {
-                "conversation": {
-                    "type": "integer"
-                },
-                "estimated": {
-                    "description": "Estimated marks a snapshot the provider never priced, so the numbers are\nthe tokenizer's guess rather than a measured prompt_tokens split.",
-                    "type": "boolean"
-                },
-                "mcp": {
-                    "type": "integer"
-                },
-                "memory": {
-                    "type": "integer"
-                },
-                "reasoning": {
-                    "type": "integer"
-                },
-                "skills": {
-                    "type": "integer"
-                },
-                "system_prompt": {
-                    "type": "integer"
-                },
-                "threshold": {
-                    "description": "Threshold is the context size above which history gets compacted. It\nexplains why compaction fires well before the window is full.",
-                    "type": "integer"
-                },
-                "tool_results": {
-                    "type": "integer"
-                },
-                "tools": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                },
-                "window": {
-                    "type": "integer"
-                }
-            }
-        },
         "github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest": {
             "type": "object",
             "required": [
@@ -18601,7 +18994,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "history_turns": {
-                    "description": "Number of history turns to keep in context",
+                    "description": "Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window",
                     "type": "integer"
                 },
                 "image_storage_provider": {
@@ -19872,6 +20265,10 @@ const docTemplate = `{
                 "question_generation_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
                 },
+                "summary_enabled": {
+                    "description": "SummaryEnabled defaults to true when omitted for backward compatibility.",
+                    "type": "boolean"
+                },
                 "vlm_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
                 }
@@ -20449,6 +20846,14 @@ const docTemplate = `{
                     "description": "Message role: \"user\", \"assistant\", \"system\"",
                     "type": "string"
                 },
+                "sandbox_checkpoint": {
+                    "description": "SandboxCheckpoint is the git commit this assistant turn produced in the\nsession sandbox's /workspace. Nil for user messages, for turns that ran\nwithout a sandbox, and for turns whose commit failed (best-effort — a\nfailed checkpoint must never block the reply). A message without a\ncheckpoint cannot serve as a fork point with sandbox state.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SandboxCheckpoint"
+                        }
+                    ]
+                },
                 "session_id": {
                     "description": "ID of the session this message belongs to",
                     "type": "string"
@@ -20477,6 +20882,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.MessageArtifact": {
             "type": "object",
             "properties": {
+                "content_hash": {
+                    "description": "SHA-256 of the persisted bytes",
+                    "type": "string"
+                },
                 "created_at": {
                     "description": "When WeKnora persisted the blob",
                     "type": "string"
@@ -21136,6 +21545,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.QuestionOrigin": {
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig": {
             "type": "object",
             "properties": {
@@ -21628,6 +22048,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.SandboxCheckpoint": {
+            "type": "object",
+            "properties": {
+                "commit_sha": {
+                    "type": "string"
+                },
+                "committed_at": {
+                    "type": "string"
+                },
+                "sandbox_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.SandboxNetworkPolicy": {
             "type": "object",
             "properties": {
@@ -21855,6 +22289,10 @@ const docTemplate = `{
                     "description": "Description",
                     "type": "string"
                 },
+                "forked_from_message_id": {
+                    "description": "ForkedFromMessageID is the user or assistant message, IN THE PARENT\nSESSION, that the fork branched at. For a user point, messages strictly\nbefore it were copied here. For an assistant point, that answer is\nincluded so the branch continues after it.",
+                    "type": "string"
+                },
                 "id": {
                     "description": "ID",
                     "type": "string"
@@ -21874,6 +22312,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState"
                         }
                     ]
+                },
+                "parent_session_id": {
+                    "description": "ParentSessionID names the session this one was forked from. Empty for\nordinary sessions. Deliberately not a foreign key: the parent may be\ndeleted while the branch lives on, and a branch must not cascade away\nwith it. A dangling value simply renders as an ordinary session.",
+                    "type": "string"
                 },
                 "pinned_at": {
                     "description": "PinnedAt records when the session was pinned; nil when not pinned.",
@@ -22574,13 +23016,9 @@ const docTemplate = `{
                 "completion_tokens": {
                     "type": "integer"
                 },
-                "context": {
-                    "description": "Context is the last request's classified prompt breakdown. It is a\nsnapshot, not a sum: Accumulate keeps the latest non-zero value.\nomitzero is required: encoding/json treats a zero struct as non-empty\nfor omitempty, which would otherwise emit \"context\":{} on every usage.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextUsage"
-                        }
-                    ]
+                "context_token_scale": {
+                    "description": "ContextTokenScale is provider prompt tokens per cl100k-estimated token,\nmeasured over the turn's rounds. Persisted with the turn so the next\nturn's history loading and first compaction check are calibrated before\nany provider count of their own. Zero when the turn measured none.",
+                    "type": "number"
                 },
                 "prompt_tokens": {
                     "type": "integer"
@@ -23111,7 +23549,8 @@ const docTemplate = `{
                 "zhipu",
                 "exa",
                 "metaso",
-                "bocha"
+                "bocha",
+                "serply"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBrave",
@@ -23126,7 +23565,8 @@ const docTemplate = `{
                 "WebSearchProviderTypeZhipu",
                 "WebSearchProviderTypeExa",
                 "WebSearchProviderTypeMetaso",
-                "WebSearchProviderTypeBocha"
+                "WebSearchProviderTypeBocha",
+                "WebSearchProviderTypeSerply"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WikiConfig": {
@@ -23882,6 +24322,22 @@ const docTemplate = `{
                 },
                 "kb_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.BatchDownloadKnowledgeRequest": {
+            "type": "object",
+            "required": [
+                "ids"
+            ],
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -25746,6 +26202,14 @@ const docTemplate = `{
                     "description": "Query text for knowledge base search",
                     "type": "string"
                 },
+                "question_origin": {
+                    "description": "QuestionOrigin is the knowledge source of a picked suggested question.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionOrigin"
+                        }
+                    ]
+                },
                 "skill_names": {
                     "description": "Per-request Skills selected via @mention",
                     "type": "array",
@@ -25782,6 +26246,22 @@ const docTemplate = `{
                 },
                 "title": {
                     "description": "Title for the session (optional)",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_session.ForkSessionRequest": {
+            "type": "object",
+            "required": [
+                "message_id"
+            ],
+            "properties": {
+                "message_id": {
+                    "description": "MessageID is the message to branch at. A user message copies history\nstrictly before it (the client prefills that question). An assistant\nmessage copies history through that answer so the branch continues after it.",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "Title is optional. Empty falls back to the source title plus a suffix.",
                     "type": "string"
                 }
             }

@@ -48,8 +48,13 @@ func skillsForRun(
 			sessionID, err)
 		return "", nil
 	}
-	if pinned != "" {
-		configID = pinned
+	if !pinned.IsZero() {
+		configID = pinned.ConfigID
+		// A config is read in the workspace that owns it, which for a shared
+		// agent is the lending one. tenantID is that same workspace on every
+		// path today (the chat turn runs there); taking it from the pin is
+		// what keeps the two from drifting apart again.
+		tenantID = pinned.TenantOr(tenantID)
 	}
 	return configID, effectiveTenantSkills(ctx, configs, skills, tenantID, configID)
 }
@@ -65,9 +70,11 @@ func skillsForRun(
 //     snapshot, sessions boot the BASE template, which carries none of these
 //     skills. Announcing them then costs the model several turns on calls that
 //     can only fail, so ZERO skills are returned - not a degraded subset.
-//   - The row must be ready and enabled. Anything else is either not in the
-//     image yet, not in it any more, or deliberately hidden by an
-//     administrator.
+//   - The row must be enabled and the image must serve a version of it: the
+//     row itself when ready, or the version kept while a newer install is in
+//     flight or has failed (see TenantSkillEntity.ServedView). Anything else is
+//     either not in the image yet, not in it any more, or deliberately hidden
+//     by an administrator.
 //
 // Every failure returns nothing: a chat turn must not fail because a skill
 // lookup did, and a workspace with no installed skills is the common case.
@@ -108,10 +115,12 @@ func effectiveTenantSkills(
 	}
 	usable := make([]*types.TenantSkillEntity, 0, len(rows))
 	for _, row := range rows {
-		if row == nil || !row.Enabled || row.Status != types.SkillStatusReady {
+		if row == nil || !row.Enabled {
 			continue
 		}
-		usable = append(usable, row)
+		if served := row.ServedView(); served != nil {
+			usable = append(usable, served)
+		}
 	}
 	if len(usable) == 0 {
 		return nil

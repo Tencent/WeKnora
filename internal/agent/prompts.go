@@ -8,26 +8,9 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
-
-// formatFileSize formats file size in human-readable format
-func formatFileSize(size int64) string {
-	const (
-		KB = 1024
-		MB = 1024 * KB
-		GB = 1024 * MB
-	)
-
-	if size < KB {
-		return fmt.Sprintf("%d B", size)
-	} else if size < MB {
-		return fmt.Sprintf("%.2f KB", float64(size)/KB)
-	} else if size < GB {
-		return fmt.Sprintf("%.2f MB", float64(size)/MB)
-	}
-	return fmt.Sprintf("%.2f GB", float64(size)/GB)
-}
 
 // formatDocSummary cleans and truncates document summaries for table display
 func formatDocSummary(summary string, maxLen int) string {
@@ -72,6 +55,15 @@ type SelectedDocumentInfo struct {
 	FileType        string // File type (pdf, docx, etc.)
 }
 
+// QuestionOriginInfo is the knowledge source a suggested question was
+// generated from, when the user picked that question. Rendered into
+// runtime_context so the model searches the source before answering.
+type QuestionOriginInfo struct {
+	KnowledgeBaseID   string
+	KnowledgeBaseName string
+	Document          *SelectedDocumentInfo // nil when only the base is known
+}
+
 // PinnedMCPServiceInfo describes an MCP service explicitly @mentioned for this turn.
 type PinnedMCPServiceInfo struct {
 	Discoverable bool // Available through the scoped MCP directory.
@@ -101,6 +93,11 @@ type KnowledgeBaseInfo struct {
 	// significantly more reliable than running probing searches.
 	Capabilities []string
 	RecentDocs   []RecentDocInfo // Recently added documents (up to 10)
+	// Profile is the generated description (gist, merged topics, typical
+	// questions) derived from document profiles. It complements the manual
+	// Description: that one says what the KB is for, this one says what is
+	// actually in it. nil when never generated.
+	Profile *types.KnowledgeBaseProfile
 }
 
 // PlaceholderDefinition defines a placeholder exposed to UI/configuration
@@ -149,6 +146,7 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 		if kb.Description != "" {
 			fmt.Fprintf(&b, "<description>%s</description>\n", escapeXMLAttr(formatDocSummary(kb.Description, 240)))
 		}
+		writeKnowledgeBaseProfile(&b, kb.Profile)
 		if len(kb.RecentDocs) > 0 {
 			b.WriteString("<recent_documents>\n")
 			for j, doc := range kb.RecentDocs {
@@ -175,6 +173,35 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	}
 	b.WriteString("</knowledge_bases>")
 	return b.String()
+}
+
+// writeKnowledgeBaseProfile renders the generated description so the model
+// can route a question to the right bound knowledge base without probing it.
+// Every value is untrusted model output stored in the database, so it is
+// escaped and capped like the manual description.
+func writeKnowledgeBaseProfile(b *strings.Builder, profile *types.KnowledgeBaseProfile) {
+	if profile == nil || !profile.HasText() {
+		return
+	}
+	b.WriteString("<generated_profile>\n")
+	if gist := strings.TrimSpace(profile.Gist); gist != "" {
+		fmt.Fprintf(b, "<gist>%s</gist>\n", escapeXMLAttr(formatDocSummary(gist, 300)))
+	}
+	if len(profile.Topics) > 0 {
+		fmt.Fprintf(b, "<topics>%s</topics>\n",
+			escapeXMLAttr(formatDocSummary(strings.Join(profile.Topics, ", "), 300)))
+	}
+	if len(profile.TypicalQuestions) > 0 {
+		b.WriteString("<typical_questions>\n")
+		for i, q := range profile.TypicalQuestions {
+			if i >= types.KnowledgeBaseProfileMaxQuestions {
+				break
+			}
+			fmt.Fprintf(b, "<question>%s</question>\n", escapeXMLAttr(formatDocSummary(q, 160)))
+		}
+		b.WriteString("</typical_questions>\n")
+	}
+	b.WriteString("</generated_profile>\n")
 }
 
 // renderPromptPlaceholders renders placeholders in the prompt template.
@@ -232,10 +259,10 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata, shellExecEnabl
 // formatToolGuidance uses the actual registry, so disabled capabilities never
 // leak into the runtime instructions. Mechanics and limits live in tool schemas.
 func formatToolGuidance(names []string) string {
-	return formatToolGuidanceForMode(names, false)
+	return formatToolGuidanceForMode(names, false, sandbox.WorkspaceLayout{})
 }
 
-func formatToolGuidanceForMode(names []string, skillInstallMode bool) string {
+func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout sandbox.WorkspaceLayout) string {
 	if len(names) == 0 {
 		return ""
 	}
@@ -264,13 +291,31 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool) string {
 			"read_file(path=skill://<name>/<file_path or SKILL.md>) and read_sandbox_file to read_file.\n")
 	}
 	if !skillInstallMode && (has("shell_exec") || has("write_sandbox_file")) {
-		b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. " +
-			"/workspace/output is the only directory collected for download, " +
-			"so it takes finished deliverables only; " +
-			"keep drafts and intermediate files in another directory under /workspace. " +
-			"Commands start from their specified working directory on every call. " +
-			"Files and installed packages persist within the session.\n")
-		b.WriteString(sandboxArtifactReferenceGuidance())
+		if layout.IsHost() {
+			// A host root is a directory the user picked. PromptSafePath
+			// refuses names carrying newlines or markup rather than
+			// sanitizing them, so a forged instruction cannot reach the
+			// model and a real path is never shown altered. Without a
+			// usable root the workspace line is omitted entirely, which is
+			// the same fail-closed shape as a failed layout lookup.
+			if root := sandbox.PromptSafePath(layout.Root); root != "" {
+				b.WriteString("Session workspace: ")
+				b.WriteString(root)
+				b.WriteString(". Edit files in place under that folder. Commands start from ")
+				b.WriteString(root)
+				b.WriteString(" on every call unless work_dir names a subdirectory. " +
+					"Files persist on the user's machine.\n")
+			}
+		} else {
+			b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. ")
+			b.WriteString(skills.ArtifactOutputDir())
+			b.WriteString(" is the only directory collected for download, " +
+				"so it takes finished deliverables only; " +
+				"keep drafts and intermediate files in another directory under /workspace. " +
+				"Commands start from their specified working directory on every call. " +
+				"Files and installed packages persist within the session.\n")
+			b.WriteString(sandboxArtifactReferenceGuidance())
+		}
 	}
 	if !skillInstallMode && has("shell_exec") && has("read_file") {
 		b.WriteString("For listed skills, run bundled scripts and your own scripts with " +
@@ -307,6 +352,15 @@ func sandboxArtifactReferenceGuidance() string {
 	var builder strings.Builder
 	builder.WriteString("  - Include key generated deliverables in your final answer as ")
 	builder.WriteString("`![description](sandbox:<file name>)` using the exact file name and no directory path\n")
+	builder.WriteString("    - Copy the exact links supplied in the tool result's appended Output files list. ")
+	builder.WriteString("Each list covers that call's changes; earlier supplied links remain usable. ")
+	builder.WriteString("A path or filename in stdout/stderr (including ls output) is not a user-visible file link. ")
+	builder.WriteString("Never construct sandbox: links from it.\n")
+	builder.WriteString("    - Files outside the output directory, including /tmp/task/previews, " +
+		"are internal working files. ")
+	builder.WriteString("Rendering pages for your own layout checks does not publish them to the user. ")
+	builder.WriteString("If the user requests those previews, copy the requested files into the output directory ")
+	builder.WriteString("and use the output links returned by the tool.\n")
 	builder.WriteString("    - Images render inline; charts, tables, and documents ")
 	builder.WriteString("render as a card the user clicks to preview\n")
 	builder.WriteString("    - Never reference a sandbox path (`/workspace/output/...`) ")
@@ -357,6 +411,7 @@ type BuildSystemPromptOptions struct {
 	Config           *config.Config // Config for reading prompt templates; nil leaves the default base empty
 	MemoryPrompt     string
 	ProtocolPrompt   string
+	WorkspaceLayout  sandbox.WorkspaceLayout
 }
 
 // BuildSystemPrompt builds the progressive RAG system prompt
@@ -445,6 +500,10 @@ func BuildSystemPromptSections(
 		names = options.SelectedTools
 	}
 	skillInstallMode := options != nil && options.SkillInstallMode
+	var layout sandbox.WorkspaceLayout
+	if options != nil {
+		layout = options.WorkspaceLayout
+	}
 	sources := formatGroundingGuidance(names)
 	if skillInstallMode {
 		sources = "Installation verification: inspect the supplied skill and dependency " +
@@ -453,7 +512,7 @@ func BuildSystemPromptSections(
 			"as part of installation."
 	}
 	sections = append(sections, SystemPromptSection{"sources", sources},
-		SystemPromptSection{"tools", formatToolGuidanceForMode(names, skillInstallMode)},
+		SystemPromptSection{"tools", formatToolGuidanceForMode(names, skillInstallMode, layout)},
 		SystemPromptSection{"output", types.SourcedAnswerOutputPrompt})
 	if options != nil {
 		if !skillInstallMode && slices.Contains(names, "read_file") && len(options.SkillsMetadata) > 0 {

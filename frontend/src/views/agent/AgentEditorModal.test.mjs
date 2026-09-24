@@ -50,8 +50,8 @@ function settingRowGuard(labelKey) {
 }
 
 test('conversation settings stay reachable in smart-reasoning mode', () => {
-  // The agent path reads history_turns (session_agent_qa.go -> LoadAgentHistory),
-  // so the section must not be gated on the running mode.
+  // Agent mode keeps the section: it explains that history follows the context
+  // window and hosts retain_retrieval_history, so it must not be gated on mode.
   assert.match(source, /v-show="currentSection === 'conversation'"/)
   assert.doesNotMatch(source, /currentSection === 'conversation' && !isAgentMode/)
 
@@ -66,12 +66,12 @@ test('conversation settings stay reachable in smart-reasoning mode', () => {
   assert.doesNotMatch(modeWatch, /conversation/)
 })
 
-test('history turns is editable in smart-reasoning mode', () => {
-  // A new agent defaults to smart-reasoning with multi_turn_enabled=false in the
-  // form, while the server forces multi-turn on. Gating the input on the local
-  // switch alone would hide it exactly where it is needed.
+test('history turns stays hidden in smart-reasoning mode', () => {
+  // The agent path sizes history by the context window and never reads
+  // history_turns (session_agent_qa.go -> LoadAgentHistory), so an input there
+  // would change nothing. KnowledgeQA still caps its history by it.
   const guard = settingRowGuard('agent.editor.historyTurns')
-  assert.match(guard, /formData\.config\.multi_turn_enabled \|\| isAgentMode/)
+  assert.match(guard, /v-if="!isAgentMode && formData\.config\.multi_turn_enabled"/)
 })
 
 test('multi-turn switch stays hidden in smart-reasoning mode', () => {
@@ -94,8 +94,8 @@ test('the section description matches what the mode actually shows', () => {
 })
 
 test('history turns can be raised beyond the old 20 cap', () => {
-  // A 5-to-20 range sits two orders of magnitude below the 200k token budget
-  // the agent engine already manages, so the turn cap always bites first.
+  // KnowledgeQA history is capped by turns alone; 20 was too tight for the
+  // windows current models have.
   const input = source.match(/<t-input-number v-model="formData\.config\.history_turns"[^>]*>/)
   assert.ok(input, 'expected to find the history turns input')
   assert.match(input[0], /:max="100"/)
@@ -155,4 +155,24 @@ test('agent skill picker uses the catalog and only enables ready installs', () =
   assert.doesNotMatch(source, /skillsSelectionMode === 'selected' && catalogSkillRows/)
   assert.doesNotMatch(source, /skill-list-summary/)
   assert.doesNotMatch(source, /skill-ready-stat/)
+})
+
+test('agent skill picker offers upgrades to admins only and keeps upgrading skills selected', () => {
+  assert.match(source, /from '@\/utils\/skillUpgrade'/)
+  assert.match(source, /const upgradable = Boolean\(inst && installUpgradable\(item, inst\)\)/)
+  assert.match(source, /canInstallSkills\.value && hasSandboxSelected\.value && skill\.upgradable/)
+  assert.match(source, /v-if="canUpgradeSkillRow\(skill\)"/)
+  assert.match(source, /v-else-if="canUpgradeSkillRow\(skill\)"/)
+  assert.match(source, /agent\.editor\.upgradeOnThisSandbox/)
+  // The progress drawer reads admin-only endpoints, so it is not offered to others.
+  assert.match(source, /v-else-if="canInstallSkills && isSkillBusy\(skill\)"/)
+  assert.match(source, /skill\.selectable \|\| \(skill\.installed && isSkillBusy\(skill\)\)/)
+})
+
+test('a skill whose previous version still runs stays selectable during and after an upgrade', () => {
+  assert.match(source, /installEnabled && \(installStatus === 'ready' \|\| Boolean\(servedNote\)\)/)
+  assert.match(source, /v-if="skill\.selectable && skill\.servedNote"/)
+  // Installing the catalog version over a failed upgrade is the upgrade retried.
+  assert.match(source, /installsAnUpgrade\(skill\) \? \$t\('settings\.skills\.upgrade'\) : \$t\('agent\.editor\.installShort'\)/)
+  assert.match(source, /return skill\.upgradable \|\| Boolean\(skill\.servedNote\)/)
 })

@@ -317,6 +317,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return out
   }
 
+  const agentStepsAreTruncated = (agentSteps: unknown[] | undefined) =>
+    Array.isArray(agentSteps) &&
+    agentSteps.some((step) => (step as ChatMessage | undefined)?.truncated === true)
+
   const reconstructEventStreamFromSteps = (
     agentSteps: unknown[],
     messageContent: string,
@@ -407,6 +411,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         done: true,
       }
       if (isFallback) answerEvent.is_fallback = true
+      // A round the completion cap cut off marks its step. Live streaming
+      // carries the same fact on the answer event, but history is rebuilt from
+      // agent_steps and never sees those events, so without this a reloaded
+      // half-written answer looks finished.
+      if (agentStepsAreTruncated(agentSteps)) answerEvent.truncated = true
       events.push(answerEvent)
     } else if (isCompleted) {
       events.push({
@@ -459,6 +468,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ),
         )
         item.hideContent = true
+        if (agentStepsAreTruncated(item.agent_steps as unknown[])) item.truncated = true
       }
 
       restoreQuickAnswerFlags(item)
@@ -917,7 +927,21 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           if (eventId) eventMap.set(eventId, answerEvent)
         }
         if (!answerEvent.content && message.content && String(message.content).trim()) {
-          answerEvent.content = message.content
+          // Seeding exists for resume paths where message.content holds text no
+          // stream event carries. When a live prior answer event exists, its
+          // text is already counted by recomposeAgentAnswer, so seeding the new
+          // event would duplicate every prior round on the next recompose.
+          const hasLivePriorAnswer = stream.some(
+            (e) =>
+              e !== answerEvent &&
+              e.type === 'answer' &&
+              !e.superseded &&
+              e.content &&
+              String(e.content).trim(),
+          )
+          if (!hasLivePriorAnswer) {
+            answerEvent.content = message.content
+          }
         }
         if (data.content) {
           answerEvent.content = String(answerEvent.content || '') + String(data.content)
@@ -928,18 +952,19 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           answerEvent.is_fallback = true
           message.is_fallback = true
         }
+        // The completion cap cut this answer off. The backend sends it on the
+        // content chunks and again on the Done marker, because an answer that
+        // streamed live only learns of the cap at the close.
+        if (dataPayload?.truncated) {
+          answerEvent.truncated = true
+          message.truncated = true
+        }
         if (data.done && !answerEvent.done) {
           answerEvent.done = true
           onAgentAnswerDone?.(message)
-          // Agent turns may continue after a finishing-round inject. Closing
-          // isReplying here lets the composer start a second AgentQA. Wait
-          // for `complete` (or a non-agent answer) to mark the session idle.
-          if (!isAgentStreamSession()) {
-            loading.value = false
-            isReplying.value = false
-            fullContent.value = ''
-            currentAssistantMessageId.value = ''
-          }
+          // This closes only the answer segment. Both Agent and quick-answer
+          // turns still have to collect artifacts/checkpoint/persist before
+          // `complete` makes their files readable and marks the session idle.
         }
         break
       }
@@ -1071,6 +1096,28 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       session_id: data.session_id,
       assistant_message_id: data.assistant_message_id,
     })
+
+    // Persistence can fail after the entire answer has streamed. Surface the
+    // failure separately; the generic error path replaces the answer content.
+    if (data.response_type === 'error' && (data.data as ChatMessage | undefined)?.stage === 'message_persistence') {
+      const message = resolveActiveAssistantMessage(data)
+      const errorMsg = String(data.content || t('chat.processError'))
+      if (message) {
+        message.persistence_error = errorMsg
+        message.is_completed = true
+        message.thinking = false
+        message.artifactsCollecting = false
+        emitMessageUpdated(message)
+      }
+      loading.value = false
+      isReplying.value = false
+      fullContent.value = ''
+      currentAssistantMessageId.value = ''
+      if (data.id) replaySegments.delete(String(data.id))
+      reportError(errorMsg)
+      scrollToBottom()
+      return
+    }
 
     if (data.response_type === 'agent_query') {
       if (data.id) replaySegments.delete(String(data.id))
@@ -1212,6 +1259,26 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       if (item.request_id === data.id) return true
       return item.id === data.id
     })
+    if (data.response_type === 'complete' && existingMessage) {
+      if (existingMessage.is_completed) return
+      const metadata = data.data as ChatMessage | undefined
+      applyFinalArtifactContent(existingMessage, metadata?.final_content)
+      if (Array.isArray(metadata?.artifacts)) existingMessage.artifacts = metadata.artifacts
+      const usage = metadata?.usage || data.usage
+      if (usage) existingMessage.usage = usage
+      existingMessage.artifactsCollecting = false
+      existingMessage.thinking = false
+      existingMessage.is_completed = true
+      loading.value = false
+      isReplying.value = false
+      fullContent.value = ''
+      currentAssistantMessageId.value = ''
+      emitMessageUpdated(existingMessage, { ...data, is_completed: true })
+      onReplyComplete?.(String(existingMessage.content || ''))
+      onTurnComplete?.(existingMessage)
+      scrollToBottom()
+      return
+    }
     if (existingMessage?.is_completed && data.done && !data.content) {
       log('[Non-Agent] Ignoring duplicate completion event for completed message')
       return
@@ -1246,7 +1313,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     if (!existingMessage) loading.value = false
 
-    if (data.done) {
+    // answer.done closes the token stream, not the persisted turn. In
+    // particular the final image retry must wait for the subsequent complete.
+    // Untyped legacy streams retain their original done behavior.
+    const turnDone = data.done && data.response_type !== 'answer'
+    if (turnDone) {
       obj.is_completed = true
       onReplyComplete?.(String(obj.content || ''))
       isReplying.value = false
@@ -1254,7 +1325,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       currentAssistantMessageId.value = ''
     }
     updateAssistantSession(obj)
-    if (data.done) {
+    if (turnDone) {
       const completed = resolveActiveAssistantMessage(data) || obj
       onTurnComplete?.(completed)
     }

@@ -43,12 +43,32 @@ func (c *lifecycleFactoryCounters) factory() AdapterFactory {
 	}
 }
 
+// lifecycleDBSeq makes each database name unique within the process, so a name
+// can never be reused: t.Name() alone repeats under -count>1, and the wall
+// clock collides between tests started in the same tick.
+var lifecycleDBSeq atomic.Int64
+
 func newLifecycleTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:im-lifecycle-%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
+	name := fmt.Sprintf("file:im-lifecycle-%s-%d?mode=memory&cache=shared", t.Name(), lifecycleDBSeq.Add(1))
+	db, err := gorm.Open(sqlite.Open(name), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// A shared-cache in-memory database lives as long as one connection to it
+	// remains open, so without this the schema outlives the test that created
+	// it. Registered before the caller's own cleanups, which therefore run
+	// first and can still use the database while shutting a service down.
+	t.Cleanup(func() {
+		sqlDB, err := db.DB()
+		if err != nil {
+			t.Errorf("resolve sql.DB for cleanup: %v", err)
+			return
+		}
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close sqlite: %v", err)
+		}
+	})
 	// IMChannel's production schema uses PostgreSQL's uuid_generate_v4()
 	// default, which SQLite cannot parse. Keep an equivalent minimal table for
 	// lifecycle tests; IDs are assigned explicitly below.
@@ -61,6 +81,7 @@ func newLifecycleTestDB(t *testing.T) *gorm.DB {
 		enabled NUMERIC NOT NULL DEFAULT 1,
 		mode TEXT NOT NULL DEFAULT 'websocket',
 		output_mode TEXT NOT NULL DEFAULT 'stream',
+		locale TEXT NOT NULL DEFAULT '',
 		knowledge_base_id TEXT DEFAULT '',
 		bot_identity TEXT NOT NULL DEFAULT '',
 		session_mode TEXT NOT NULL DEFAULT 'user',
@@ -72,6 +93,63 @@ func newLifecycleTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("create im_channels: %v", err)
 	}
 	return db
+}
+
+// Regression test for a shared in-memory database between two lifecycle
+// tests: run the subtests in parallel, the closest a test can get to the
+// original wall-clock collision, and confirm the second's table is empty
+// rather than seeing the first's row or a "table already exists" error.
+func TestNewLifecycleTestDBIsolatesConcurrentTests(t *testing.T) {
+	t.Run("seeds a channel", func(t *testing.T) {
+		t.Parallel()
+		createLifecycleChannel(t, newLifecycleTestDB(t), "marker", "agent-1")
+	})
+	t.Run("starts from an empty table", func(t *testing.T) {
+		t.Parallel()
+		db := newLifecycleTestDB(t)
+		var count int64
+		if err := db.Table("im_channels").Count(&count).Error; err != nil {
+			t.Fatalf("count im_channels: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("im_channels has %d rows, want a fresh database isolated from other tests", count)
+		}
+	})
+}
+
+// Repeated -count runs reuse one process, so a database name derived only from
+// t.Name() is handed out twice. Calling the helper twice here is what a second
+// -count iteration does, and it caught the regression that closing the
+// connection and adding a per-call sequence number fixes (review on #3415).
+func TestNewLifecycleTestDBIsUsableTwiceInOneProcess(t *testing.T) {
+	first := newLifecycleTestDB(t)
+	createLifecycleChannel(t, first, "marker", "agent-1")
+
+	second := newLifecycleTestDB(t)
+	var count int64
+	if err := second.Table("im_channels").Count(&count).Error; err != nil {
+		t.Fatalf("count im_channels on the second database: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("second database has %d rows, want a fresh one rather than the first's", count)
+	}
+}
+
+// The cleanup has to release the connection, or the shared-cache database
+// outlives the test and the next call to the helper reconnects to it.
+func TestNewLifecycleTestDBClosesItsConnection(t *testing.T) {
+	var leaked *gorm.DB
+	t.Run("inner", func(t *testing.T) {
+		leaked = newLifecycleTestDB(t)
+	})
+
+	sqlDB, err := leaked.DB()
+	if err != nil {
+		t.Fatalf("resolve sql.DB: %v", err)
+	}
+	if err := sqlDB.Ping(); err == nil {
+		t.Fatal("connection still open after the subtest finished, want it closed by t.Cleanup")
+	}
 }
 
 func newLifecycleTestService(db *gorm.DB, redisClient *redis.Client, instanceID string) *Service {
@@ -96,6 +174,7 @@ func createLifecycleChannel(t *testing.T, db *gorm.DB, id, agentID string) *IMCh
 		Enabled:     true,
 		Mode:        "webhook",
 		OutputMode:  "full",
+		Locale:      "en-US",
 		SessionMode: string(SessionModeUser),
 		Credentials: types.JSON(`{"token":"v1"}`),
 	}
@@ -334,6 +413,7 @@ func TestSameChannelRuntimeConfigUsesSemanticCredentials(t *testing.T) {
 		Enabled:     true,
 		Mode:        "webhook",
 		OutputMode:  "full",
+		Locale:      "en-US",
 		SessionMode: string(SessionModeUser),
 		Credentials: types.JSON(`{"token":"secret","timeout":10}`),
 		UpdatedAt:   now,
@@ -348,6 +428,11 @@ func TestSameChannelRuntimeConfigUsesSemanticCredentials(t *testing.T) {
 	fresh.Credentials = types.JSON(`{"timeout":10,"token":"changed"}`)
 	if sameChannelRuntimeConfig(cached, &fresh) {
 		t.Fatal("changed credentials did not trigger a rebuild")
+	}
+	fresh = *cached
+	fresh.Locale = "ja-JP"
+	if sameChannelRuntimeConfig(cached, &fresh) {
+		t.Fatal("changed locale did not trigger a rebuild")
 	}
 }
 

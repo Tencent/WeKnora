@@ -15,7 +15,7 @@
 -->
 <template>
   <t-popup :visible="visible" trigger="click" placement="left-top" :destroy-on-close="!locked"
-    overlay-class-name="system-admin-action-popup-overlay" @visible-change="onVisibleChange">
+    overlay-class-name="wk-popover system-admin-action-popup-overlay" @visible-change="onVisibleChange">
     <span class="system-admin-action-popup-anchor">
       <slot />
     </span>
@@ -297,7 +297,7 @@ function acknowledge() {
   gap: 0;
   padding: 2px 0 0;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-page);
   overflow: hidden;
 }
@@ -315,13 +315,13 @@ function acknowledge() {
 }
 
 .create-user-reveal-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 16px;
   color: var(--td-text-color-secondary);
 }
 
 .create-user-reveal-value {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 20px;
   color: var(--td-text-color-primary);
   word-break: break-all;
@@ -329,8 +329,8 @@ function acknowledge() {
 
 .create-user-reveal-value--mono {
   margin: 0;
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: 12px;
+  font-family: var(--td-font-family-mono);
+  font-size: var(--app-text-sm);
   line-height: 18px;
   white-space: pre-wrap;
   user-select: all;

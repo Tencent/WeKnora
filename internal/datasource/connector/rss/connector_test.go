@@ -413,3 +413,28 @@ func TestConnector_ResolveResourceAncestors_Empty(t *testing.T) {
 		t.Fatalf("expected empty ancestors, got %v", got)
 	}
 }
+
+func TestResolveItem_FileNamePolicy(t *testing.T) {
+	for _, tt := range []struct{ name, title, want string }{
+		{"empty", "", "untitled.md"},
+		{"blank", " \n\t\u2003", "untitled.md"},
+		{"line breaks and punctuation", "\u2003 A\nB\rC\tD/E \u2003", "A B C D_E.md"},
+		{"existing extension", "Title.md", "Title.md.md"},
+		{"long title", strings.Repeat("测", 100), strings.Repeat("测", 66) + ".md"},
+		{"space at truncation boundary", strings.Repeat("a", 199) + "\nmore", strings.Repeat("a", 199) + " .md"},
+		{"other controls retained", "a\x01b", "a\x01b.md"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result := NewConnector().resolveItem(
+				context.Background(), nil, &gofeed.Feed{}, &gofeed.Item{Title: tt.title},
+				"https://example.com/feed", "id", "<p>content</p>",
+			)
+			if result.item.FileName != tt.want {
+				t.Fatalf("FileName = %q, want %q", result.item.FileName, tt.want)
+			}
+			if strings.TrimSpace(tt.title) != "" && result.item.Title != tt.title {
+				t.Fatalf("source title changed: %q", result.item.Title)
+			}
+		})
+	}
+}

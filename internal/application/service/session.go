@@ -128,12 +128,18 @@ type sessionService struct {
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
 	sandboxPolicy         WorkspaceSandboxPolicy
+	hostSandbox           sandbox.Manager
 	memoryService         interfaces.MemoryService // Service for cross-session long-term memory
 	// sandboxConfigRepo and tenantSkillRepo answer "which installed skills can
 	// this turn actually invoke". They are repositories rather than
 	// TenantSkillService because that service depends on this one.
 	sandboxConfigRepo repository.TenantSandboxConfigRepository
 	tenantSkillRepo   repository.TenantSkillRepository
+	// forkSnapshots retires provider snapshots when a forked session is deleted
+	// before its sandbox is provisioned. Nil uses NewResolverForkSnapshotDeleter
+	// from sandboxResolver/sandboxMgr.
+	forkSnapshots ForkSnapshotDeleter
+	busyGate      *SessionBusyGate
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -155,9 +161,11 @@ func NewSessionService(cfg *config.Config,
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	hostSandbox HostSandboxManager,
 	memoryService interfaces.MemoryService,
 	sandboxConfigRepo repository.TenantSandboxConfigRepository,
 	tenantSkillRepo repository.TenantSkillRepository,
+	busyGate *SessionBusyGate,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -178,9 +186,11 @@ func NewSessionService(cfg *config.Config,
 		sandboxResolver:       sandboxResolver,
 		sandboxPinner:         sandboxPinner,
 		sandboxPolicy:         sandboxPolicy,
+		hostSandbox:           hostSandbox.Manager,
 		memoryService:         memoryService,
 		sandboxConfigRepo:     sandboxConfigRepo,
 		tenantSkillRepo:       tenantSkillRepo,
+		busyGate:              busyGate,
 	}
 }
 
@@ -480,7 +490,8 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	userID := sessionUserIDFromContext(ctx)
 
-	if _, err := s.sessionRepo.Get(ctx, tenantID, userID, id); err != nil {
+	session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
+	if err != nil {
 		return err
 	}
 
@@ -534,6 +545,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		return apperrors.ErrSessionNotFound
 	}
 
+	s.releaseForkSnapshot(ctx, session)
 	return nil
 }
 
@@ -548,9 +560,12 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	tenantID := types.MustTenantIDFromContext(ctx)
 	userID := sessionUserIDFromContext(ctx)
 
+	visible := make([]*types.Session, 0, len(ids))
 	visibleIDs := make([]string, 0, len(ids))
 	for _, id := range ids {
-		if _, err := s.sessionRepo.Get(ctx, tenantID, userID, id); err == nil {
+		session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
+		if err == nil {
+			visible = append(visible, session)
 			visibleIDs = append(visibleIDs, id)
 		} else if !stderrors.Is(err, apperrors.ErrSessionNotFound) {
 			return err
@@ -605,6 +620,7 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		}
 	}
 
+	s.releaseForkSnapshots(ctx, visible)
 	return nil
 }
 
@@ -663,6 +679,7 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 		}
 	}
 
+	s.releaseForkSnapshots(ctx, sessions)
 	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)
 	return nil
 }
@@ -685,8 +702,8 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	// Resolve the workspace's own manager: the sandbox to release lives on
 	// whichever backend that workspace is configured for, not necessarily the
 	// process-wide default.
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	configID, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
+	pin, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to read sandbox pin for session %s cleanup: %v", sessionID, err)
 		return
@@ -697,14 +714,27 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	// binding lookup that no-ops when the session truly has no sandbox, whereas
 	// skipping would abandon a paused instance that keeps billing.
 	//
+	// The workspace comes from the pin. This runs from a plain DELETE whose
+	// only tenant is the session's own, but a shared agent's sandbox was
+	// created on the LENDING workspace's config: resolving that here as the
+	// session owner finds nothing and abandons a paused MicroVM that keeps
+	// billing with nobody holding its id.
+	//
 	// Pass nil policy so the workspace kill switch cannot strand an already
 	// created sandbox: disabling script execution must still allow teardown.
-	mgr, err := resolveTenantSandboxForConfig(ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, nil)
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, s.sandboxResolver, s.sandboxMgr,
+		pin.TenantOr(sessionTenantID), pin.ConfigID, nil,
+	)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to resolve sandbox for session %s cleanup: %v", sessionID, err)
 		return
 	}
 	if mgr == nil {
+		return
+	}
+	if mgr.GetType() == sandbox.SandboxTypeHost {
+		// Deleting a chat is not deleting the user's directory.
 		return
 	}
 	destroyer, ok := mgr.(interface {
@@ -721,6 +751,35 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 		if err := s.sandboxPinner.Clear(ctx, sessionID); err != nil {
 			logger.Warnf(ctx, "Failed to clear sandbox pin for session %s: %v", sessionID, err)
 		}
+	}
+}
+
+func (s *sessionService) releaseForkSnapshot(ctx context.Context, session *types.Session) {
+	if s == nil || session == nil {
+		return
+	}
+	snapshots := s.forkSnapshots
+	if snapshots == nil {
+		snapshots = NewResolverForkSnapshotDeleter(s.sandboxResolver, s.sandboxMgr)
+	}
+	releaseForkSnapshotOnDelete(ctx, s.sessionRepo, snapshots, session)
+}
+
+func (s *sessionService) releaseForkSnapshots(ctx context.Context, sessions []*types.Session) {
+	seen := make(map[string]struct{}, len(sessions))
+	for _, session := range sessions {
+		if session == nil || session.ForkBootstrap == nil {
+			continue
+		}
+		snapshotID := strings.TrimSpace(session.ForkBootstrap.SnapshotID)
+		if snapshotID == "" {
+			continue
+		}
+		if _, ok := seen[snapshotID]; ok {
+			continue
+		}
+		seen[snapshotID] = struct{}{}
+		s.releaseForkSnapshot(ctx, session)
 	}
 }
 
@@ -940,54 +999,123 @@ func (s *sessionService) GenerateTitleAsync(
 // a skill-image change mid-turn cannot rebuild the VM between tool calls.
 // The first resolve of this turn may still pick up a stale mark from the
 // previous turn. The returned closer must be called.
+//
+// A rewind in progress is a hard failure: the agent must not start on a
+// workspace that git reset is about to rewrite. Every other lease error
+// degrades to "no lease" and lets the turn run, as it did before rewind
+// existed — a Redis blip on the lease script must not reject the user's
+// message, and rewind reads the same Redis to decide it is busy, so it
+// cannot silently proceed while this store is unreachable either.
 func (s *sessionService) holdSandboxTurn(
 	ctx context.Context, sessionID, configID string,
-) func() {
+) (func(), error) {
+	noop := func() {}
 	if strings.TrimSpace(sessionID) == "" {
-		return func() {}
+		return noop, nil
 	}
-	begin := func(mgr sandbox.Manager) sandbox.SessionTurnHolder {
+	releaseGate, err := s.busyGate.HoldSend(sessionID)
+	if err != nil {
+		return noop, err
+	}
+	begin := func(mgr sandbox.Manager) (sandbox.SessionTurnHolder, error) {
 		if mgr == nil {
-			return nil
+			return nil, nil
 		}
 		holder, ok := mgr.(sandbox.SessionTurnHolder)
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		if err := holder.BeginSessionTurn(ctx, sessionID); err != nil {
 			logger.Warnf(ctx, "[sandbox] begin turn for session %s failed: %v", sessionID, err)
-			return nil
+			if stderrors.Is(err, sandbox.ErrSessionRewindLocked) {
+				return nil, err
+			}
+			return nil, nil
 		}
-		return holder
+		return holder, nil
 	}
 
-	if holder := begin(s.sandboxMgr); holder != nil {
+	holder, err := begin(s.sandboxMgr)
+	if err != nil {
+		releaseGate()
+		return noop, err
+	}
+	if holder != nil {
 		return func() {
 			if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
 				logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
 			}
-		}
+			releaseGate()
+		}, nil
 	}
 
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	if s.sandboxResolver == nil || tenantID == 0 {
-		return func() {}
+		return releaseGate, nil
 	}
-	mgr, err := resolveTenantSandboxForConfig(
-		ctx, s.sandboxResolver, s.sandboxMgr, tenantID, configID, s.sandboxPolicy,
+	mgr, _, err := resolveSandboxForExecution(
+		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+		tenantID, sessionID, configID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox),
 	)
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] resolve config %s to begin turn of session %s failed: %v",
 			configID, sessionID, err)
-		return func() {}
+		return releaseGate, nil
 	}
-	holder := begin(mgr)
+	holder, err = begin(mgr)
+	if err != nil {
+		releaseGate()
+		return noop, err
+	}
 	if holder == nil {
-		return func() {}
+		return releaseGate, nil
 	}
 	return func() {
 		if err := holder.EndSessionTurn(ctx, sessionID); err != nil {
 			logger.Warnf(ctx, "[sandbox] end turn for session %s failed: %v", sessionID, err)
 		}
+		releaseGate()
+	}, nil
+}
+
+// RejectSendIfRewinding fails when rewind currently holds sessionID, so
+// knowledge-chat (no sandbox turn lease) cannot persist a new turn on a
+// session that is about to delete those messages.
+func (s *sessionService) RejectSendIfRewinding(ctx context.Context, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
 	}
+	if s.busyGate != nil && s.busyGate.RewindHeld(sessionID) {
+		return sandbox.ErrSessionRewindLocked
+	}
+	type rewindLockReader interface {
+		HasRewindLock(context.Context, string) (bool, error)
+	}
+	check := func(mgr sandbox.Manager) error {
+		if mgr == nil {
+			return nil
+		}
+		reader, ok := mgr.(rewindLockReader)
+		if !ok {
+			return nil
+		}
+		held, err := reader.HasRewindLock(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if held {
+			return sandbox.ErrSessionRewindLocked
+		}
+		return nil
+	}
+	return check(s.sandboxMgr)
+}
+
+// HoldSandboxTurn is the exported turn-lease entry so HTTP send can take the
+// lease before persisting messages, matching rewind's busy check.
+func (s *sessionService) HoldSandboxTurn(
+	ctx context.Context, sessionID, configID string,
+) (func(), error) {
+	return s.holdSandboxTurn(ctx, sessionID, configID)
 }

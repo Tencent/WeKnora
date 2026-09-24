@@ -56,6 +56,11 @@ type TokenUsage struct {
 	CacheMissTokens  int               `json:"cache_miss_tokens,omitempty"`
 	CacheReported    bool              `json:"cache_reported"`
 	CacheStatus      PromptCacheStatus `json:"cache_status,omitempty"`
+	// ContextTokenScale is provider prompt tokens per cl100k-estimated token,
+	// measured over the turn's rounds. Persisted with the turn so the next
+	// turn's history loading and first compaction check are calibrated before
+	// any provider count of their own. Zero when the turn measured none.
+	ContextTokenScale float64 `json:"context_token_scale,omitempty"`
 	// Context is the last request's classified prompt breakdown. It is a
 	// snapshot, not a sum: Accumulate keeps the latest non-zero value.
 	// omitzero is required: encoding/json treats a zero struct as non-empty
@@ -122,6 +127,10 @@ func (u *TokenUsage) Accumulate(other TokenUsage) {
 	u.CacheWriteTokens += other.CacheWriteTokens
 	u.CacheMissTokens += other.CacheMissTokens
 	u.CacheReported = u.CacheReported || other.CacheReported
+	// A scale is a ratio, not a count: the newest measurement stands.
+	if other.ContextTokenScale > 0 {
+		u.ContextTokenScale = other.ContextTokenScale
+	}
 	if other.Context.Total > 0 || other.Context.Window > 0 {
 		u.Context = other.Context
 	}
@@ -211,6 +220,12 @@ type LLMToolCall struct {
 // with the assistant tool call, without teaching core agent code vendor fields.
 type ToolCallMetadata map[string]json.RawMessage
 
+// ProviderMetadata carries opaque provider state attached to an assistant
+// turn as a whole (OpenAI Responses reasoning items, OpenRouter
+// reasoning_details, ...). Keyed by protocol / vendor namespace so several
+// providers can coexist on one persisted message without collisions.
+type ProviderMetadata map[string]json.RawMessage
+
 // FunctionCall represents the function details
 type FunctionCall struct {
 	Name      string `json:"name"`
@@ -222,10 +237,16 @@ type ChatResponse struct {
 	Content string `json:"content"`
 	// ReasoningContent 是支持思考链的模型（DeepSeek thinking、小米 MiMo、vLLM reasoning 等）
 	// 在本轮输出的推理内容。需要在后续多轮请求中原样回传给那些严格校验的供应商。
-	ReasoningContent string        `json:"reasoning_content,omitempty"`
-	ToolCalls        []LLMToolCall `json:"tool_calls,omitempty"`
-	FinishReason     string        `json:"finish_reason,omitempty"`
-	Usage            TokenUsage    `json:"usage"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// ReasoningSignature and ReasoningMetadata are the provider-issued
+	// artifacts that must be replayed together with ReasoningContent on the
+	// next turn (Anthropic thinking signatures, Gemini thought signatures,
+	// OpenAI Responses encrypted reasoning items).
+	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
+	ReasoningMetadata  ProviderMetadata `json:"reasoning_metadata,omitempty"`
+	ToolCalls          []LLMToolCall    `json:"tool_calls,omitempty"`
+	FinishReason       string           `json:"finish_reason,omitempty"`
+	Usage              TokenUsage       `json:"usage"`
 
 	// AnswerStreamed reports whether the user-facing answer text was already
 	// streamed live to the final-answer UI area during this round (i.e. the

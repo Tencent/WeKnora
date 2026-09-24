@@ -53,6 +53,8 @@ CREATE TABLE knowledge_bases (
     vlm_config JSON NOT NULL,
     extract_config JSON NULL,
     auto_tag_config JSON NULL,
+    profile_config JSON NULL,
+    generated_profile JSON NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -78,6 +80,7 @@ CREATE TABLE knowledges (
     file_hash VARCHAR(64),
     storage_size BIGINT NOT NULL DEFAULT 0,
     metadata JSON,
+    profile JSON,
     custom_metadata JSON NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

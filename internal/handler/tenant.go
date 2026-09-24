@@ -1614,15 +1614,16 @@ func (h *TenantHandler) GetPromptTemplates(c *gin.Context) {
 
 	// Build a localized copy so the original config is never mutated
 	localized := &config.PromptTemplatesConfig{
-		SystemPrompt:         config.LocalizeTemplates(templates.SystemPrompt, lang),
-		ContextTemplate:      config.LocalizeTemplates(templates.ContextTemplate, lang),
-		Rewrite:              config.LocalizeTemplates(templates.Rewrite, lang),
-		Fallback:             config.LocalizeTemplates(templates.Fallback, lang),
-		GenerateSessionTitle: templates.GenerateSessionTitle,
-		GenerateSummary:      templates.GenerateSummary,
-		KeywordsExtraction:   templates.KeywordsExtraction,
-		AgentSystemPrompt:    config.LocalizeTemplates(templates.AgentSystemPrompt, lang),
-		IntentPrompts:        config.LocalizeTemplates(templates.IntentPrompts, lang),
+		SystemPrompt:          config.LocalizeTemplates(templates.SystemPrompt, lang),
+		ContextTemplate:       config.LocalizeTemplates(templates.ContextTemplate, lang),
+		Rewrite:               config.LocalizeTemplates(templates.Rewrite, lang),
+		Fallback:              config.LocalizeTemplates(templates.Fallback, lang),
+		GenerateSessionTitle:  templates.GenerateSessionTitle,
+		GenerateSummary:       templates.GenerateSummary,
+		GenerateKBDescription: templates.GenerateKBDescription,
+		KeywordsExtraction:    templates.KeywordsExtraction,
+		AgentSystemPrompt:     config.LocalizeTemplates(templates.AgentSystemPrompt, lang),
+		IntentPrompts:         config.LocalizeTemplates(templates.IntentPrompts, lang),
 	}
 
 	c.JSON(http.StatusOK, gin.H{

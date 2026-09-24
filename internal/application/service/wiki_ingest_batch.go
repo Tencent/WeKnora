@@ -254,6 +254,18 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// A soft-deleted tenant owns no reachable workspace anymore; its KBs and
+	// durable pending ops survive the deletion, so without this guard the
+	// batch would keep issuing model requests (and finalize would rebuild
+	// index pages) for a tenant nobody can see (#3593). Drop the KB's queue.
+	if s.tenantIsDeleted(ctx, payload.TenantID) {
+		exitStatus = "tenant_deleted"
+		if err := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); err != nil {
+			return fmt.Errorf("wiki ingest: clear deleted tenant queue: %w", err)
+		}
+		return nil
+	}
+
 	// Concurrency model (Phase 3):
 	//
 	//   - Standard (Redis) mode: NO exclusive per-KB lock. Multiple batches
@@ -292,7 +304,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	if !kb.IsWikiEnabled() {
 		exitStatus = "kb_not_wiki_enabled"
-		return fmt.Errorf("wiki ingest: KB %s is not wiki type", kb.ID)
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "wiki disabled")
 	}
 
 	var synthesisModelID string
@@ -304,9 +316,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	if synthesisModelID == "" {
 		exitStatus = "missing_synthesis_model"
-		return fmt.Errorf("wiki ingest: no synthesis model configured for KB %s", kb.ID)
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "no synthesis model configured")
 	}
 	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
+	if errors.Is(err, ErrModelNotFound) {
+		exitStatus = "synthesis_model_not_found"
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "synthesis model "+synthesisModelID+" not found")
+	}
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		return fmt.Errorf("wiki ingest: get chat model: %w", err)
@@ -924,6 +940,16 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 	if s.pendingRepo == nil {
+		return nil
+	}
+
+	// Same tenant-liveness guard as the ingest batch: finalize calls the
+	// synthesis model to rebuild the index page, and a deleted tenant must
+	// never accrue new model requests (#3593). Drop the KB's queue.
+	if s.tenantIsDeleted(ctx, payload.TenantID) {
+		if err := s.clearDeletedKnowledgeBasePendingOps(ctx, payload.KnowledgeBaseID); err != nil {
+			return fmt.Errorf("wiki finalize: clear deleted tenant queue: %w", err)
+		}
 		return nil
 	}
 
@@ -1879,14 +1905,14 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 
 		for _, ref := range page.SourceRefs {
-			pipeIdx := strings.Index(ref, "|")
-			var refKnowledgeID, refTitle string
-			if pipeIdx > 0 {
-				refKnowledgeID = ref[:pipeIdx]
-				refTitle = ref[pipeIdx+1:]
-			} else {
-				refKnowledgeID = ref
-				refTitle = ref
+			refKnowledgeID, refTitle := types.ParseWikiSourceRef(ref)
+			if refKnowledgeID == "" {
+				continue
+			}
+			if refTitle == "" {
+				// Legacy bare refs carry no title; the ID is the only label
+				// available for the retract prompt.
+				refTitle = refKnowledgeID
 			}
 
 			if retractKIDs[refKnowledgeID] {
@@ -1905,12 +1931,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 
 		newRefs := types.StringArray{}
 		for _, ref := range page.SourceRefs {
-			pipeIdx := strings.Index(ref, "|")
-			refKnowledgeID := ref
-			if pipeIdx > 0 {
-				refKnowledgeID = ref[:pipeIdx]
-			}
-			if !retractKIDs[refKnowledgeID] {
+			if !retractKIDs[types.WikiSourceKnowledgeID(ref)] {
 				newRefs = append(newRefs, ref)
 			}
 		}

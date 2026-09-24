@@ -116,6 +116,71 @@ func TestRecordKBActivityCanSuppressCompositeTaskChildren(t *testing.T) {
 	}
 }
 
+func TestRecordKBActivityIncludesAPIKeyFromScope(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KeyID: 9, Name: "alice-mcp",
+	})
+	audit := &captureKBActivityAudit{}
+	recordKBActivity(ctx, audit, 7, "kb-1", types.AuditActionKnowledgeCreated,
+		"knowledge", "k-1", types.AuditOutcomeSuccess, map[string]any{"title": "doc"})
+
+	if audit.entry == nil {
+		t.Fatal("expected an activity entry")
+	}
+	var details map[string]any
+	if err := json.Unmarshal(audit.entry.Details, &details); err != nil {
+		t.Fatalf("unmarshal details: %v", err)
+	}
+	if details["api_key_id"] != float64(9) || details["api_key_name"] != "alice-mcp" {
+		t.Fatalf("details = %#v", details)
+	}
+	if details["title"] != "doc" {
+		t.Fatalf("business details lost: %#v", details)
+	}
+}
+
+func TestRecordKBActivityIncludesAPIKeyFromInitiatorWithoutScope(t *testing.T) {
+	ctx := types.TaskInitiator{APIKeyID: 4, APIKeyName: "bob-mcp"}.Apply(context.Background())
+	audit := &captureKBActivityAudit{}
+	recordKBActivity(ctx, audit, 7, "kb-1", types.AuditActionKnowledgeCreated,
+		"knowledge", "k-1", types.AuditOutcomeSuccess, nil)
+
+	if audit.entry == nil {
+		t.Fatal("expected an activity entry")
+	}
+	if audit.entry.ActorUserID != "" {
+		t.Fatalf("actor should stay empty for API-key-only initiator, got %q", audit.entry.ActorUserID)
+	}
+	var details map[string]any
+	if err := json.Unmarshal(audit.entry.Details, &details); err != nil {
+		t.Fatalf("unmarshal details: %v", err)
+	}
+	if details["api_key_id"] != float64(4) || details["api_key_name"] != "bob-mcp" {
+		t.Fatalf("details = %#v", details)
+	}
+	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		t.Fatal("worker context must not carry TenantAPIKeyScope")
+	}
+}
+
+func TestRecordKBActivityOmitsAPIKeyForJWTUser(t *testing.T) {
+	ctx := types.TaskInitiator{UserID: "user-1", Role: types.TenantRoleAdmin}.Apply(context.Background())
+	audit := &captureKBActivityAudit{}
+	recordKBActivity(ctx, audit, 7, "kb-1", types.AuditActionKnowledgeCreated,
+		"knowledge", "k-1", types.AuditOutcomeSuccess, map[string]any{"count": 1})
+
+	var details map[string]any
+	if err := json.Unmarshal(audit.entry.Details, &details); err != nil {
+		t.Fatalf("unmarshal details: %v", err)
+	}
+	if _, ok := details["api_key_id"]; ok {
+		t.Fatalf("jwt activity should not record api_key_id: %#v", details)
+	}
+	if _, ok := details["api_key_name"]; ok {
+		t.Fatalf("jwt activity should not record api_key_name: %#v", details)
+	}
+}
+
 func TestRecordWikiContentActivityUsesUnifiedActivityFeed(t *testing.T) {
 	audit := &captureKBActivityAudit{}
 	RecordWikiContentActivity(context.Background(), audit, 7, "kb-1", map[string]int{

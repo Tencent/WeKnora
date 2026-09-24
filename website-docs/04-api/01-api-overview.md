@@ -1,6 +1,6 @@
 # API 总览
 
-WeKnora HTTP API 使用 `/api/v1` 前缀，支持 JWT、API Key 和 Embed token 认证。调用各资源接口前，需按客户端类型选择凭证，并遵循统一的响应、错误处理、分页和流式事件约定。
+WeKnora HTTP API 使用 `/api/v1` 前缀，支持 JWT、API Key 和 Embed token 认证；内置 MCP Server 端点另用端点令牌认证。调用各资源接口前，需按客户端类型选择凭证，并遵循统一的响应、错误处理、分页和流式事件约定。
 
 ## Base URL 与版本前缀
 
@@ -23,7 +23,7 @@ BASE=http://localhost:8080
 Authorization: Bearer <access_token>
 ```
 
-- 通过 `POST /api/v1/auth/login`（或 register / auto-setup / OIDC）获得 `token` 与 `refresh_token`；`POST /api/v1/auth/refresh` 换发新 token。
+- 通过 `POST /api/v1/auth/login`（或 register / OIDC；原生桌面应用使用 auto-setup）获得 `token` 与 `refresh_token`；`POST /api/v1/auth/refresh` 换发新 token。
 - 可选请求头 `X-Tenant-ID: <tenant_id>`：在 JWT 指向的空间之外切换目标空间（须为该空间活跃成员，或具备 `CanAccessAllTenants` 跨空间超管属性）。畸形或 `0` 值直接返回 400。
 - 若 JWT 未解析出任何空间且接口非“无空间可用”白名单（如 `/auth/me`、`/me/invitations` 等），返回 409 `{"code":"TENANT_REQUIRED"}`。
 
@@ -52,6 +52,16 @@ Authorization: Embed <publish_token 或 session_token>
 
 - `POST /embed/:channel_id/exchange` 用 publish token 换取短时效 session token；会话级操作还需 `X-Embed-Session: <sig>`（创建会话时返回的签名句柄）。
 - IM 回调路由（`/api/v1/im/callback/:channel_id`）注册在全局认证中间件之前，使用各 IM 平台自身的签名验证。
+
+### MCP 端点令牌（内置 MCP Server）
+
+`/mcp/:endpoint_id`（不带 `/api/v1` 前缀）是空间对外暴露的 MCP Streamable HTTP 端点，由 `internal/middleware/mcp_endpoint_auth.go` 校验：
+
+```
+Authorization: Bearer <endpoint_token>
+```
+
+令牌在「设置 → 发布集成 → MCP Server」创建端点时一次性展示，可轮换。请求以端点所属空间的机器主体执行，权限限定在端点勾选的工具和知识库范围内。端点管理接口为 `/api/v1/mcp-endpoints`（Viewer+ 读取、Admin+ 变更，API Key 需 `manage_channels`），用法见 [MCP 集成](../03-features/08-mcp.md)。
 
 ### 认证流程图
 
@@ -166,16 +176,17 @@ X-Accel-Buffering: no
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | string | 请求 ID |
-| `response_type` | string | `answer` / `references` / `thinking` / `tool_call` / `tool_result` / `reflection` / `session_title` / `agent_query` / `tool_approval_required` / `tool_approval_resolved` / `mcp_oauth_required` / `mcp_oauth_resolved` / `error` / `complete` |
+| `response_type` | string | `answer` / `references` / `thinking` / `tool_call` / `tool_result` / `command_output` / `reflection` / `session_title` / `agent_query` / `artifacts_pending` / `memory_recalled` / `user_message_injected` / `context_compacted` / `tool_approval_required` / `tool_approval_resolved` / `mcp_oauth_required` / `mcp_oauth_resolved` / `error` / `complete`；技能安装记录流另有 `install_prompt` / `install_output` |
 | `content` | string | 增量文本 |
 | `done` | bool | 该类型事件是否结束 |
 | `knowledge_references` | []SearchResult | `references` 事件携带的引用 |
 | `tool_calls` | []LLMToolCall | 工具调用事件 |
+| `data` | object | 事件附加元数据（如工具结果的 `success`、回答的 `truncated`） |
 | `session_id` / `assistant_message_id` | string | `agent_query` 事件携带 |
 | `usage` | TokenUsage | `prompt_tokens/completion_tokens/total_tokens/cache_*` |
 | `finish_reason` | string | 结束原因 |
 
-流以 `response_type:"complete"`（`done:true`）终止；出错时以 `response_type:"error"`（`done:true`）终止。`continue-stream` 采用重放 + 100ms 轮询追增量的续传语义（`?message_id=` 必填）。
+流以 `response_type:"complete"`（`done:true`）终止；出错时以 `response_type:"error"`（`done:true`）终止。工具执行失败以 `tool_result`（`data.success=false`）返回，`error` 只表示整轮失败；回答因输出上限被截断时，`answer` 事件带 `data.truncated=true`。`continue-stream` 采用重放 + 100ms 轮询追增量的续传语义（`?message_id=` 必填）。
 
 ## 文件引用形式（resource_urls）
 
@@ -225,6 +236,8 @@ X-Accel-Buffering: no
 | 系统与平台管理 | [02-api-system.md](./02-api-system.md) | `/system`、`/system/admin` |
 | 基础设施与数据源 | [02-api-infra.md](./02-api-infra.md) | `/vector-stores`、`/storage-backends`、`/web-search-providers`、`/datasource` |
 | Agent 与 MCP | [02-api-agent-mcp.md](./02-api-agent-mcp.md) | `/agents`、`/mcp-services`、`/agent`、`/user/favorites` |
+| 内置 MCP Server | [MCP 集成](../03-features/08-mcp.md) | `/mcp-endpoints`、`/mcp/:endpoint_id` |
+| 本机浏览器 | [本机浏览器](../05-clients/09-local-browser.md) | `/me/browser`、`/local-browser` |
 | 沙箱、技能与个人变量 | [02-api-sandbox-skills.md](./02-api-sandbox-skills.md) | `/sandbox-configs`、`/skills`、`/me/env-vars` |
 | 长期记忆 | [02-api-memory.md](./02-api-memory.md) | `/memory`、`/tenants/kv/memory-config` |
 | IM、Embed 与文件服务 | [02-api-channels.md](./02-api-channels.md) | `/im`、`/im-channels`、`/wechat`、`/embed-channels`、`/embed`、`/files`、`/r/:token` |

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
 // handleFor builds a syntactically valid 22-character resource handle for
@@ -205,4 +206,111 @@ func TestArtifactRefByNameKeepsFirstDuplicate(t *testing.T) {
 	if byName["b.html"] != refFor(2) {
 		t.Fatalf("b.html resolved to %q, want %q", byName["b.html"], refFor(2))
 	}
+}
+
+func TestReferencedArtifactsMatchesNamesAndHandles(t *testing.T) {
+	artifacts := artifactsFixture("report.pptx", "chart.html", "data.csv")
+
+	cases := []struct {
+		name    string
+		content string
+		want    types.MessageArtifacts
+	}{
+		{
+			name:    "sandbox-prefixed name",
+			content: "已生成 ![报告](sandbox:report.pptx)",
+			want:    types.MessageArtifacts{artifacts[0]},
+		},
+		{
+			name:    "bare name in an image",
+			content: "![图表](chart.html)",
+			want:    types.MessageArtifacts{artifacts[1]},
+		},
+		{
+			name:    "output path in an ordinary link",
+			content: "[数据](./output/data.csv)",
+			want:    types.MessageArtifacts{artifacts[2]},
+		},
+		{
+			name:    "canonical handle",
+			content: "![报告](" + refFor(0) + ")",
+			want:    types.MessageArtifacts{artifacts[0]},
+		},
+		{
+			name:    "prose mention is not a reference",
+			content: "生成了 report.pptx 和 chart.html 两个文件。",
+			want:    nil,
+		},
+		{
+			name:    "bare name in an ordinary link is not a reference",
+			content: "见 [说明](report.pptx)",
+			want:    nil,
+		},
+		{
+			name:    "unknown name",
+			content: "![别的](missing.pptx)",
+			want:    nil,
+		},
+		{
+			name:    "code sample is not a reference",
+			content: "```\n![报告](sandbox:report.pptx)\n```",
+			want:    nil,
+		},
+		{
+			// Go regexp.Split does not interleave the matched fences, so
+			// walking parts with i+=2 would skip the segment after the first
+			// fence and miss a real citation that rewrite still rewrites.
+			name:    "reference after a code fence",
+			content: "![报告](sandbox:report.pptx)\n\n```\n![忽略](sandbox:chart.html)\n```\n\n![图表](sandbox:chart.html)",
+			want:    types.MessageArtifacts{artifacts[0], artifacts[1]},
+		},
+		{
+			name:    "multiple references keep candidate order",
+			content: "![数据](data.csv)\n\n![报告](sandbox:report.pptx)",
+			want:    types.MessageArtifacts{artifacts[0], artifacts[2]},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, referencedArtifacts(tc.content, artifacts))
+		})
+	}
+}
+
+// A regenerated file shadows the older version of itself: the name resolves to
+// the first candidate, while an explicit handle still reaches the old one.
+func TestReferencedArtifactsPrefersTheFirstCandidate(t *testing.T) {
+	old := types.MessageArtifact{FileName: "deck.pptx", URL: refFor(0)}
+	fresh := types.MessageArtifact{FileName: "deck.pptx", URL: refFor(1)}
+	candidates := types.MessageArtifacts{fresh, old}
+
+	require.Equal(t, types.MessageArtifacts{fresh},
+		referencedArtifacts("![deck](sandbox:deck.pptx)", candidates))
+	require.Equal(t, types.MessageArtifacts{old},
+		referencedArtifacts("![deck]("+old.URL+")", candidates))
+}
+
+// KnownArtifacts is oldest-first. Reverse it before merging so a hash-skipped
+// name binds the latest file; this turn still shadows that latest file.
+func TestMergeArtifactListsPrefersThisTurnThenLatestKnown(t *testing.T) {
+	old := types.MessageArtifact{FileName: "deck.pptx", URL: refFor(0)}
+	latest := types.MessageArtifact{FileName: "deck.pptx", URL: refFor(1)}
+	fresh := types.MessageArtifact{FileName: "deck.pptx", URL: refFor(2)}
+	known := types.MessageArtifacts{old, latest}
+
+	require.Equal(t, types.MessageArtifacts{latest},
+		referencedArtifacts("![deck](sandbox:deck.pptx)",
+			mergeArtifactLists(nil, artifactsNewestFirst(known))))
+	require.Equal(t, types.MessageArtifacts{fresh},
+		referencedArtifacts("![deck](sandbox:deck.pptx)",
+			mergeArtifactLists(types.MessageArtifacts{fresh}, artifactsNewestFirst(known))))
+}
+
+func TestArtifactsNewestFirstDoesNotMutateInput(t *testing.T) {
+	in := artifactsFixture("a.html", "b.html")
+	got := artifactsNewestFirst(in)
+	require.Equal(t, "b.html", got[0].FileName)
+	require.Equal(t, "a.html", got[1].FileName)
+	require.Equal(t, "a.html", in[0].FileName)
 }

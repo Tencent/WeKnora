@@ -11,6 +11,8 @@ import {
   type KnowledgeTraceNode,
 } from '@/utils/knowledgeTrace'
 import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
+import { shownStall, stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall'
+import { axisGridStepPct, buildAxisTicks, computeTraceAxis } from '@/utils/traceAxis'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
 type SpanNode = KnowledgeTraceNode
@@ -31,6 +33,10 @@ interface SpansResponse {
   current_stage?: string
   trace: SpanNode
   last_error?: LastError | null
+  // Latest row or span write; only sent while the parse is in flight.
+  last_activity_at?: string
+  // Server verdict once quiet past the stall hint: 'queued' or 'stalled'.
+  stall_state?: string
 }
 
 // IMPORTANT: Vue 3 coerces missing Boolean props to `false`, NOT
@@ -92,6 +98,10 @@ const refreshing = ref(false)
 const selectedAttempt = ref<number | undefined>(undefined)
 const expandedRows = ref<Set<string>>(new Set(['__root__']))
 const selectedSpanId = ref<string | null>(null)
+// Guards the one-shot auto-selection below. Cleared once the panel has
+// opened itself, or the moment the user closes it — a 2s poll must never
+// reopen a panel the user just dismissed.
+const autoSelectPending = ref(true)
 const expandedJsonKeys = ref<Set<string>>(new Set())
 const nowTick = ref(Date.now())
 const detailTab = ref<'overview' | 'input' | 'output' | 'metadata' | 'raw'>('overview')
@@ -385,6 +395,9 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       attemptStatuses.set(data.value.attempt, tabStatus)
       ensureAttemptStatuses()
       emit('update:hasSpans', knowledgeSpansPayloadHasTrace(data.value))
+      // flatRows is derived from data.value; wait for it to recompute
+      // before picking a row out of it.
+      nextTick(autoSelectSpan)
     } else {
       emit('update:hasSpans', false)
     }
@@ -462,6 +475,7 @@ async function onRetry() {
     selectedAttempt.value = undefined
     attemptStatuses.clear()
     selectedSpanId.value = null
+    autoSelectPending.value = true
     await fetchSpans()
   } catch {
     // ignore
@@ -474,6 +488,21 @@ async function onManualRefresh() {
 }
 
 const cancelling = ref(false)
+
+// Minutes the latest attempt has gone without progress; 0 unless it looks
+// stuck. Historical attempts are never "stalled".
+const stalledMin = computed<number>(() => {
+  const d = data.value
+  if (!d || d.attempt !== (d.latest_attempt || d.attempt)) return 0
+  return stalledMinutes(d, nowTick.value)
+})
+
+const stalledStageLabel = computed(() => {
+  const stage = data.value?.current_stage
+  return stage && (STAGES as readonly string[]).includes(stage)
+    ? t(`knowledgeStages.stage.${stage}`)
+    : ''
+})
 
 // Mirrors the backend CancelKnowledgeParse gate (pending / processing /
 // finalizing). Uses the freshest status we have: live span data first,
@@ -503,6 +532,7 @@ function onAttemptChange(n: number) {
   if (Number.isNaN(n)) return
   selectedAttempt.value = n
   selectedSpanId.value = null
+  autoSelectPending.value = true
   // New attempt: forget per-row user choices so the auto-expand
   // rule re-evaluates cleanly against the new attempt's tree.
   userToggledRows.value = new Set()
@@ -519,6 +549,7 @@ watch(
     currentKnowledgeFileType.value = ''
     expandedRows.value = new Set(['__root__'])
     selectedSpanId.value = null
+    autoSelectPending.value = true
     attemptStatuses.clear()
     userToggledRows.value = new Set()
     fetchSpans()
@@ -528,7 +559,7 @@ watch(
 
 function onKeydown(ev: KeyboardEvent) {
   if (ev.key === 'Escape' && selectedSpanId.value) {
-    selectedSpanId.value = null
+    closeDetail()
   }
 }
 
@@ -561,6 +592,8 @@ onMounted(() => {
       if (unmounted) return
       if (fetchInFlight) return
       if (!shouldPollNow()) return
+      // Nothing is moving on a stalled trace; check back less often.
+      if (stalledMin.value > 0 && Date.now() - lastFetchedAt.value < STALLED_POLL_INTERVAL_MS) return
       fetchSpans()
     }, POLL_INTERVAL_MS)
   }
@@ -686,25 +719,21 @@ const totalMs = computed<number>(() => {
 
 const showRuler = computed(() => totalMs.value >= 50)
 
-const rulerTicks = computed(() => {
-  if (!showRuler.value) return [] as { left: string; label: string }[]
-  const total = totalMs.value
-  const fmt = (ms: number) => formatDuration(ms)
-  return [
-    { left: '0%', label: fmt(0) },
-    { left: '25%', label: fmt(total * 0.25) },
-    { left: '50%', label: fmt(total * 0.5) },
-    { left: '75%', label: fmt(total * 0.75) },
-    { left: '100%', label: fmt(total) },
-  ]
-})
+// ---------- Time axis ----------
+// See utils/traceAxis: the ruler is a rounded 1/2/2.5/5 axis, and every
+// bar is positioned against axis.maxMs rather than the raw total so the
+// bars and the ruler above them cannot disagree.
+const timeAxis = computed(() => computeTraceAxis(totalMs.value))
+const axisMaxMs = computed(() => timeAxis.value.maxMs)
+const gridStepPct = computed(() => axisGridStepPct(timeAxis.value))
+const rulerTicks = computed(() => (showRuler.value ? buildAxisTicks(timeAxis.value) : []))
 
 // "Now" position on the waterfall scale, used to draw the live cursor
 // while polling so the user can see time advancing even when the running
 // stage's bar grows slowly toward the right edge.
 const nowMarkerPct = computed<number | null>(() => {
-  if (!isLive.value || !t0.value || !totalMs.value) return null
-  const pct = ((nowTick.value - t0.value) / totalMs.value) * 100
+  if (!isLive.value || !t0.value || !axisMaxMs.value) return null
+  const pct = ((nowTick.value - t0.value) / axisMaxMs.value) * 100
   return Math.max(0, Math.min(100, pct))
 })
 
@@ -781,7 +810,7 @@ const selectedRow = computed<FlatRow | null>(() => {
 const detailOpen = computed(() => selectedSpanId.value !== null && selectedRow.value !== null)
 
 function barStyle(node: SpanNode): Record<string, string> {
-  const total = totalMs.value
+  const total = axisMaxMs.value
   if (!total || t0.value === null) return { display: 'none' }
   const start = nodeStart(node)
   if (start === null) return { display: 'none' }
@@ -816,7 +845,7 @@ function descendantMaxEnd(node: SpanNode): number | null {
 }
 
 function wrapStyle(node: SpanNode): Record<string, string> | null {
-  const total = totalMs.value
+  const total = axisMaxMs.value
   if (!total || t0.value === null) return null
   const start = nodeStart(node)
   if (start === null) return null
@@ -843,7 +872,7 @@ function wrapDurationMs(node: SpanNode): number {
 }
 
 function barOffsetPct(node: SpanNode): number | null {
-  const total = totalMs.value
+  const total = axisMaxMs.value
   if (!total || t0.value === null) return null
   const start = nodeStart(node)
   if (start === null) return null
@@ -864,6 +893,20 @@ function liveElapsedMs(node: SpanNode): number {
 
 function isPlaceholder(node: SpanNode): boolean {
   return !node.span_id && !node.started_at
+}
+
+// The trace has reached a terminal state and nothing is still ticking.
+const traceTerminal = computed<boolean>(
+  () => isHardTerminal(data.value?.parse_status) && !traceActive.value,
+)
+
+// A synthesized stage still marked 'pending' on a finished trace never
+// ran and never will — docreader failed, so chunking/embedding/... were
+// abandoned. v1 rendered them as ordinary pending rows with a dashed
+// stub pinned to the right edge of the track, which reads as leftover
+// rendering junk. Say "not run" in words and let the row recede.
+function isNotRun(node: SpanNode): boolean {
+  return traceTerminal.value && node.status === 'pending' && isPlaceholder(node)
 }
 
 function isRowExpanded(key: string): boolean {
@@ -921,6 +964,22 @@ function selectRow(row: FlatRow) {
 
 function closeDetail() {
   selectedSpanId.value = null
+  autoSelectPending.value = false
+}
+
+// v1 opened with nothing selected, so a short trace showed a handful of
+// rows above half a panel of white space, and nothing suggested the rows
+// were clickable at all. Open on the span the reader came for: the one
+// that failed, or the root (whose detail is the stage breakdown).
+function autoSelectSpan() {
+  if (props.compact) return
+  if (!autoSelectPending.value || selectedSpanId.value) return
+  const rows = flatRows.value
+  if (rows.length === 0) return
+  const failed = rows.find((r) => !r.isRoot && r.node.status === 'failed')
+  selectedSpanId.value = (failed || rows[0]).key
+  detailTab.value = 'overview'
+  autoSelectPending.value = false
 }
 
 function isObjectWithKeys(v: any): boolean {
@@ -957,10 +1016,13 @@ function rowLabel(row: FlatRow): string {
   return row.node.name
 }
 
+// v1 stamped ROOT / STAGE / SPAN on every row and flung the label to the
+// far right of the name column with margin-left:auto, which opened a
+// ~200px gap mid-row and told the reader nothing that indentation hadn't
+// already said. Only `generation` (an LLM/VLM call) is worth a chip.
 function rowKindLabel(row: FlatRow): string {
-  if (row.isRoot) return 'root'
-  if (row.isStage) return 'stage'
-  return row.node.kind || 'span'
+  if (row.isRoot || row.isStage) return ''
+  return row.node.kind === 'generation' ? 'generation' : ''
 }
 
 function jsonExpandKey(section: string, key: string): string {
@@ -1178,6 +1240,38 @@ const showLastError = computed(() =>
   Boolean(data.value?.last_error && data.value?.parse_status === 'failed'),
 )
 
+const failedStage = computed<SpanNode | null>(
+  () => stages.value.find((s) => s.status === 'failed') || null,
+)
+
+// v1's headline was localizedErrorTitle(code), which falls back to the
+// raw code when no translation exists — so the card printed
+// DOCREADER_PARSE_FAILED as its title AND again as the chip beside it,
+// while the one line that actually explains the failure
+// ("Unsupported file type: htm") sat at the bottom in 11px grey mono.
+// The headline now says WHERE it broke, the code appears exactly once,
+// and the message is promoted to the card's primary line.
+const errorHeadline = computed(() => {
+  const err = data.value?.last_error
+  const localized = localizedErrorTitle(err?.error_code)
+  if (localized && localized !== err?.error_code) return localized
+  // Prefer a stage row that actually carries the failure; fall back to
+  // the span name the backend recorded on last_error, which covers a
+  // failure raised before any stage span opened.
+  const name = failedStage.value?.name
+    || (STAGES as readonly string[]).find((n) => n === err?.name)
+  if (name) {
+    return t('knowledgeStages.stageFailed', { stage: t(`knowledgeStages.stage.${name}`) })
+  }
+  return t('knowledgeStages.status.failed')
+})
+
+// Retry stays reachable from the toolbar when a failure has no
+// last_error payload to hang the in-card button off.
+const showToolbarRetry = computed(
+  () => data.value?.parse_status === 'failed' && !showLastError.value,
+)
+
 const stagesStatDisplay = computed(() => {
   const total = stages.value.length
   const completedCount = stages.value.filter(
@@ -1202,38 +1296,80 @@ const postprocessTaskStats = computed(() =>
   summarizePostprocessTasks(data.value?.trace),
 )
 
-const headMetaParts = computed(() => {
+interface HeadStat {
+  key: string
+  label: string
+  value: string
+  mono: boolean
+  note?: boolean
+}
+
+// v1 glued five unrelated facts into one dot-separated grey sentence —
+// "处理流水线 · 总耗时 494ms · 当前阶段 1/5 · 第 1 次尝试" — which reads
+// as a run-on and buries the numbers among the words. Label/value pairs
+// with the numbers in tabular mono scan in one pass instead. The panel's
+// own name moves out of the sentence and onto the overline above the
+// title, where it belongs.
+const headStats = computed<HeadStat[]>(() => {
   if (!data.value) return []
-  const parts: string[] = [t('knowledgeStages.title')]
+  const out: HeadStat[] = []
   if (totalMs.value > 0) {
-    parts.push(t('knowledgeStages.total', { d: formatDuration(totalMs.value) }))
+    out.push({
+      key: 'duration',
+      label: t('knowledgeStages.stat.duration'),
+      value: formatDuration(totalMs.value),
+      mono: true,
+    })
   }
   const st = stagesStatDisplay.value
-  parts.push(`${st.label} ${st.value}`)
+  out.push({ key: 'stages', label: st.label, value: st.value, mono: true })
+
   const postprocess = postprocessTaskStats.value
   if (postprocess.total > 0) {
-    parts.push(t('knowledgeStages.head.postprocessTasks', {
-      running: postprocess.running,
-      failed: postprocess.failed,
-      completed: postprocess.completed,
-    }))
-  }
-  if (data.value.parse_status === 'completed' && postprocess.running > 0) {
-    parts.push(t('knowledgeStages.head.completedWithActiveTrace', {
-      n: postprocess.running,
-    }))
+    out.push({
+      key: 'tasks',
+      label: t('knowledgeStages.stat.tasks'),
+      value: t('knowledgeStages.stat.tasksValue', {
+        running: postprocess.running,
+        failed: postprocess.failed,
+        completed: postprocess.completed,
+      }),
+      mono: false,
+      note: postprocess.running > 0 || postprocess.failed > 0,
+    })
   }
   if (attemptTabs.value.length === 0 && data.value.current_attempt) {
-    parts.push(t('knowledgeStages.attempt', { n: data.value.current_attempt }))
+    out.push({
+      key: 'attempt',
+      label: t('knowledgeStages.stat.attempt'),
+      value: `#${data.value.current_attempt}`,
+      mono: true,
+    })
+  }
+  const lastActivity = parseTime(data.value.last_activity_at)
+  if (lastActivity !== null && isLive.value) {
+    out.push({
+      key: 'progress',
+      label: t('knowledgeStages.head.lastProgress'),
+      value: formatRelativeTime(lastActivity),
+      mono: false,
+      note: stalledMin.value > 0,
+    })
   }
   if (lastFetchedAt.value && isLive.value) {
     let updated = formatRelativeTime(lastFetchedAt.value)
     if (!lastFetchOk.value) {
       updated += ` (${t('knowledgeStages.fetchFailedShort')})`
     }
-    parts.push(`${t('knowledgeStages.head.updated')} ${updated}`)
+    out.push({
+      key: 'updated',
+      label: t('knowledgeStages.head.updated'),
+      value: updated,
+      mono: false,
+      note: !lastFetchOk.value,
+    })
   }
-  return parts
+  return out
 })
 
 const primaryHeadTitle = computed(() => props.docTitle || t('knowledgeStages.title'))
@@ -1385,6 +1521,9 @@ const processConfigLines = computed<string[]>(() => {
   if (o.asr_config?.enabled != null) lines.push(`${t(k('asr'))}: ${onOff(o.asr_config.enabled)}`)
 
   const qg = o.question_generation_config
+  if (o.summary_enabled != null) {
+    lines.push(`${t('uploadConfirm.documentSummary')}: ${onOff(o.summary_enabled)}`)
+  }
   if (qg?.enabled != null) {
     lines.push(`${t(k('question'))}: ${qg.enabled ? t(k('questionOn'), { n: qg.question_count ?? 3 }) : t(k('off'))}`)
   }
@@ -1427,21 +1566,26 @@ const processConfigLines = computed<string[]>(() => {
         <!-- ============== HEADER ============== -->
         <div class="kp-head">
           <div class="kp-head-toolbar">
-            <h2 class="kp-head-doc-title" :title="primaryHeadTitle">{{ primaryHeadTitle }}</h2>
-            <t-tag v-if="data && headerStatusText" size="small" :theme="headerStatusTheme" variant="light"
-              class="kp-head-status-tag">
-              {{ headerStatusText }}
-            </t-tag>
-            <span v-if="isLive" class="kp-live-badge" :title="t('knowledgeStages.liveTooltip')">
-              <span class="kp-live-dot" />
-              <span class="kp-live-text">{{ t('knowledgeStages.live') }}</span>
-            </span>
+            <div class="kp-head-titles">
+              <div class="kp-head-overline">{{ t('knowledgeStages.title') }}</div>
+              <div class="kp-head-title-row">
+                <h2 class="kp-head-doc-title" :title="primaryHeadTitle">{{ primaryHeadTitle }}</h2>
+                <t-tag v-if="data && headerStatusText" size="small" :theme="headerStatusTheme" variant="light"
+                  class="kp-head-status-tag">
+                  {{ headerStatusText }}
+                </t-tag>
+                <span v-if="isLive" class="kp-live-badge" :title="t('knowledgeStages.liveTooltip')">
+                  <span class="kp-live-dot" />
+                  <span class="kp-live-text">{{ t('knowledgeStages.live') }}</span>
+                </span>
+              </div>
+            </div>
             <div class="kp-head-actions">
               <t-popup trigger="hover" placement="bottom-right" :overlay-style="{ maxWidth: '340px' }">
                 <button type="button" class="kp-icon-btn"
                   :title="t('knowledgeStages.processConfig.title')"
                   :aria-label="t('knowledgeStages.processConfig.title')">
-                  <t-icon name="info-circle" size="14px" />
+                  <t-icon name="info-circle" size="16px" />
                 </button>
                 <template #content>
                   <div class="kp-proccfg-pop">
@@ -1457,7 +1601,7 @@ const processConfigLines = computed<string[]>(() => {
                 :title="isLive ? t('knowledgeStages.autoRefreshOn') : t('knowledgeStages.refresh')"
                 :aria-label="isLive ? t('knowledgeStages.autoRefreshOn') : t('knowledgeStages.refresh')"
                 @click="onManualRefresh">
-                <t-icon name="refresh" size="14px" />
+                <t-icon name="refresh" size="16px" />
               </button>
               <t-popconfirm
                 v-if="canCancelParse"
@@ -1475,8 +1619,7 @@ const processConfigLines = computed<string[]>(() => {
                   <t-icon :name="cancelling ? 'loading' : 'close-circle'" size="15px" />
                 </button>
               </t-popconfirm>
-              <t-button v-if="data?.parse_status === 'failed'" size="small" theme="primary" variant="outline"
-                @click="onRetry">
+              <t-button v-if="showToolbarRetry" size="small" theme="danger" variant="outline" @click="onRetry">
                 <t-icon name="refresh" size="14px" />
                 <span style="margin-left: 4px">{{ t('knowledgeStages.retry') }}</span>
               </t-button>
@@ -1487,12 +1630,13 @@ const processConfigLines = computed<string[]>(() => {
             </div>
           </div>
 
-          <p v-if="headMetaParts.length > 0" class="kp-head-meta">
-            <template v-for="(part, idx) in headMetaParts" :key="idx">
-              <span v-if="idx > 0" class="kp-head-meta-sep" aria-hidden="true">·</span>
-              <span class="kp-head-meta-part">{{ part }}</span>
-            </template>
-          </p>
+          <div v-if="headStats.length > 0" class="kp-stat-strip">
+            <span v-for="stat in headStats" :key="stat.key" class="kp-stat">
+              <span class="kp-stat-label">{{ stat.label }}</span>
+              <span class="kp-stat-value"
+                :class="{ 'kp-stat-value-text': !stat.mono, 'kp-stat-note': stat.note }">{{ stat.value }}</span>
+            </span>
+          </div>
 
           <div v-if="attemptTabs.length > 0" class="kp-attempts">
             <button v-for="tab in attemptTabs" :key="tab.n" type="button" class="kp-attempt"
@@ -1503,19 +1647,59 @@ const processConfigLines = computed<string[]>(() => {
             </button>
           </div>
 
+          <div v-if="shownStall(data?.stall_state, stalledMin) === 'queued'" class="kp-stall kp-stall-queued"
+            role="status">
+            <t-icon name="time" size="16px" class="kp-stall-icon" />
+            <div class="kp-stall-body">
+              <div class="kp-stall-title">{{ t('knowledgeStages.stall.queuedTitle', { minutes: stalledMin }) }}</div>
+              <div class="kp-stall-hint">{{ t('knowledgeStages.stall.queuedHint') }}</div>
+            </div>
+          </div>
+          <div v-else-if="shownStall(data?.stall_state, stalledMin) === 'stalled'" class="kp-stall" role="status">
+            <t-icon name="time" size="16px" class="kp-stall-icon" />
+            <div class="kp-stall-body">
+              <div class="kp-stall-title">{{ t('knowledgeStages.stall.title', { minutes: stalledMin }) }}</div>
+              <div class="kp-stall-hint">
+                {{ stalledStageLabel
+                  ? t('knowledgeStages.stall.hintAtStage', { stage: stalledStageLabel })
+                  : t('knowledgeStages.stall.hint') }}
+              </div>
+            </div>
+            <t-popconfirm
+              v-if="canCancelParse"
+              theme="warning"
+              :content="t('knowledgeBase.cancelParseConfirmBody', { title: props.docTitle || props.knowledgeId })"
+              :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+              :cancel-btn="{ content: t('common.cancel') }"
+              placement="bottom"
+              @confirm="onCancelParseConfirm"
+            >
+              <button type="button" class="kp-stall-btn" :disabled="cancelling" @click.stop>
+                <t-icon :name="cancelling ? 'loading' : 'close-circle'" size="14px" />
+                <span>{{ t('knowledgeBase.cancelParse') }}</span>
+              </button>
+            </t-popconfirm>
+          </div>
+
           <div v-if="showLastError && data?.last_error" class="kp-last-error" role="alert">
-            <div class="kp-last-error-bar" />
-            <div class="kp-last-error-body">
-              <div class="kp-last-error-row">
-                <span class="kp-last-error-glyph">!</span>
-                <span class="kp-last-error-title">{{ localizedErrorTitle(data.last_error.error_code) }}</span>
-                <span v-if="data.last_error.error_code" class="kp-last-error-code kp-mono">{{ data.last_error.error_code
-                  }}</span>
-              </div>
-              <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
-              <div v-if="data.last_error.error_message" class="kp-last-error-raw kp-mono">{{
-                data.last_error.error_message }}
-              </div>
+            <div class="kp-err-top">
+              <span class="kp-err-glyph" aria-hidden="true">!</span>
+              <span class="kp-err-where">{{ errorHeadline }}</span>
+              <span v-if="data.last_error.error_code" class="kp-err-code kp-mono">{{ data.last_error.error_code }}</span>
+              <button type="button" class="kp-err-copy" :title="t('knowledgeStages.copyError')"
+                :aria-label="t('knowledgeStages.copyError')" @click="copyValue(data.last_error)">
+                <t-icon name="copy" size="14px" />
+              </button>
+            </div>
+            <div v-if="data.last_error.error_message" class="kp-err-message">{{ data.last_error.error_message }}</div>
+            <div v-if="localizedErrorSuggestion(data.last_error.error_code)" class="kp-err-hint">
+              {{ localizedErrorSuggestion(data.last_error.error_code) }}
+            </div>
+            <div class="kp-err-actions">
+              <button type="button" class="kp-err-btn" @click="onRetry">
+                <t-icon name="refresh" size="14px" />
+                <span>{{ t('knowledgeStages.retry') }}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1546,17 +1730,20 @@ const processConfigLines = computed<string[]>(() => {
             </div>
 
             <div ref="scrollRef" class="kp-scroll">
-            <div class="kp-rows">
+            <div class="kp-rows" :class="{ 'kp-rows-gridless': !showRuler }"
+              :style="{ '--kp-grid-step': gridStepPct }">
               <div v-for="row in flatRows" :key="row.key" class="kp-row" :data-span-key="row.key" :class="{
                 'kp-row-active': selectedSpanId === row.key,
                 'kp-row-root': row.isRoot,
                 'kp-row-stage': row.isStage,
                 'kp-row-span': !row.isRoot && !row.isStage,
                 'kp-row-expandable': row.hasChildren && !row.isRoot,
+                'kp-row-inert': isNotRun(row.node),
               }" :title="row.hasChildren && !row.isRoot ? t('knowledgeStages.rowSelectHint') : undefined"
                 @click="selectRow(row)">
                 <div class="kp-cell-name">
-                  <div class="kp-name-inner" :style="{ paddingLeft: row.depth * 16 + 'px' }">
+                  <div class="kp-name-inner">
+                    <span v-for="d in row.depth" :key="d" class="kp-name-guide" aria-hidden="true" />
                     <button v-if="row.hasChildren && !row.isRoot" type="button" class="kp-tree-toggle"
                       :aria-expanded="isRowExpanded(row.key)" :aria-label="treeToggleAriaLabel(row)"
                       @click="toggleTree(row, $event)">
@@ -1565,15 +1752,18 @@ const processConfigLines = computed<string[]>(() => {
                     <span v-else class="kp-tree-toggle-spacer" />
                     <span class="kp-status-dot"
                       :class="['kp-dot-' + row.node.status, { 'kp-dot-placeholder': isPlaceholder(row.node) }]" />
-                    <span class="kp-name-text"
+                    <span class="kp-name-text" :title="rowLabel(row)"
                       :class="{ 'kp-name-root': row.isRoot, 'kp-name-mono': !row.isRoot && !row.isStage }">{{
                         rowLabel(row) }}</span>
-                    <span class="kp-name-kind">{{ rowKindLabel(row) }}</span>
+                    <span v-if="rowKindLabel(row)" class="kp-name-kind">{{ rowKindLabel(row) }}</span>
                   </div>
                 </div>
 
-                <div class="kp-cell-dur kp-mono">
-                  <template v-if="row.node.status === 'running'">
+                <div class="kp-cell-dur" :class="isNotRun(row.node) ? 'kp-dur-inert' : 'kp-mono'">
+                  <template v-if="isNotRun(row.node)">
+                    {{ t('knowledgeStages.notRun') }}
+                  </template>
+                  <template v-else-if="row.node.status === 'running'">
                     <span class="kp-running-time">{{ formatDuration(liveElapsedMs(row.node)) }}</span>
                   </template>
                   <template v-else>
@@ -1584,7 +1774,7 @@ const processConfigLines = computed<string[]>(() => {
                 <div class="kp-cell-bar">
                   <span v-if="nowMarkerPct !== null && row.isRoot" class="kp-now-marker"
                     :style="{ left: nowMarkerPct + '%' }" />
-                  <div v-if="isPlaceholder(row.node)" class="kp-bar kp-bar-placeholder" />
+                  <div v-if="isPlaceholder(row.node) && !isNotRun(row.node)" class="kp-bar kp-bar-placeholder" />
                   <template v-else>
                     <!-- Wrapping outline: descendants extend past this
                          span's own end (e.g. async postprocess subspans
@@ -1614,7 +1804,9 @@ const processConfigLines = computed<string[]>(() => {
                       </span>
                     </div>
                     <span v-if="barOffsetPct(row.node) !== null && barOffsetMs(row.node) > 0"
-                      class="kp-bar-offset kp-mono" :style="{ left: barOffsetPct(row.node) + '%' }">
+                      class="kp-bar-offset kp-mono"
+                      :style="{ '--kp-offset-position': barOffsetPct(row.node) + '%' }"
+                      :title="'+' + formatDuration(barOffsetMs(row.node))">
                       +{{ formatDuration(barOffsetMs(row.node)) }}
                     </span>
                   </template>
@@ -1852,7 +2044,7 @@ const processConfigLines = computed<string[]>(() => {
 <style scoped lang="less">
 .kp-timeline {
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   width: 100%;
   height: 100%;
@@ -1878,7 +2070,7 @@ const processConfigLines = computed<string[]>(() => {
 /* ============== HEADER ============== */
 .kp-head {
   flex: 0 0 auto;
-  padding: 14px 20px 10px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--td-component-stroke);
   background: var(--td-bg-color-container);
 }
@@ -1890,13 +2082,39 @@ const processConfigLines = computed<string[]>(() => {
   min-width: 0;
 }
 
-.kp-head-doc-title {
+.kp-head-titles {
   flex: 1;
   min-width: 0;
-  margin: 0;
-  font-size: 15px;
+}
+
+/* The panel's own name. It used to be the first crumb of the grey meta
+   sentence below the title, where it read as just another fact about the
+   document rather than as the label for the view you are looking at. */
+.kp-head-overline {
+  margin-bottom: 3px;
+  font-size: var(--app-text-2xs);
   font-weight: 600;
-  line-height: 1.35;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  color: var(--td-text-color-placeholder);
+}
+
+.kp-head-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Natural width, so the status tag sits against the filename instead of
+   being pushed across the header to sit among the toolbar buttons. */
+.kp-head-doc-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--app-text-xl);
+  font-weight: 600;
+  line-height: 1.3;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1917,7 +2135,7 @@ const processConfigLines = computed<string[]>(() => {
   border-radius: var(--td-radius-medium);
   background: var(--td-warning-color-light);
   color: var(--td-warning-color);
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1958,35 +2176,59 @@ const processConfigLines = computed<string[]>(() => {
   margin-left: auto;
 }
 
-.kp-head-meta {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--td-text-color-secondary);
-  word-break: break-word;
+/* Label/value pairs in place of the old dot-joined run-on sentence.
+   Values are tabular mono so successive polls don't jiggle the row. */
+.kp-stat-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
+  margin-top: 9px;
 }
 
-.kp-head-meta-sep {
-  margin: 0 6px;
+.kp-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.kp-stat-label {
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
+  white-space: nowrap;
 }
 
-.kp-head-meta-part {
-  display: inline;
+.kp-stat-value {
+  font-family: var(--app-font-family-mono);
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--td-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Prose values (task counts, "just now") read badly in tabular mono. */
+.kp-stat-value-text {
+  font-family: var(--app-font-family);
+  font-weight: 500;
+}
+
+.kp-stat-note {
+  color: var(--td-warning-color);
 }
 
 .kp-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: none;
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
   border-radius: var(--td-radius-default);
-  transition: background 150ms ease, color 150ms ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 }
 
 .kp-icon-btn:hover:not(:disabled) {
@@ -2008,21 +2250,15 @@ const processConfigLines = computed<string[]>(() => {
 }
 
 .kp-icon-btn-spin :deep(.t-icon) {
-  animation: kpSpin 0.9s linear infinite;
+  animation: wk-spin 0.9s linear infinite;
 }
 
 /* Slow rotation while auto-polling — visually distinct from the
    manual-refresh fast spin. Tells the user "refresh is happening on
    its own" without an extra label or badge. */
 .kp-icon-btn-autoflow :deep(.t-icon) {
-  animation: kpSpin 4s linear infinite;
+  animation: wk-spin 4s linear infinite;
   color: var(--td-warning-color);
-}
-
-@keyframes kpSpin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .kp-meta-glyph {
@@ -2031,7 +2267,7 @@ const processConfigLines = computed<string[]>(() => {
   justify-content: center;
   width: 12px;
   height: 12px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1;
 }
 
@@ -2070,11 +2306,11 @@ const processConfigLines = computed<string[]>(() => {
   border-radius: var(--td-radius-default);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  transition: background var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 }
 
 .kp-attempt:not(.kp-attempt-active):hover {
@@ -2102,7 +2338,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-attempt-num {
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 .kp-attempt-glyph {
@@ -2120,6 +2356,12 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-bg-color-container);
 }
 
+/* Sized by its rows once the detail panel is open — see .kp-detail. */
+.kp-body-with-detail {
+  flex: 0 0 auto;
+  max-height: 60%;
+}
+
 .kp-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -2135,7 +2377,7 @@ const processConfigLines = computed<string[]>(() => {
   gap: 8px;
   flex: 1 1 auto;
   padding: 56px 20px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -2143,10 +2385,10 @@ const processConfigLines = computed<string[]>(() => {
 .kp-ruler {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: minmax(220px, 42%) 64px 1fr;
+  grid-template-columns: minmax(210px, 32%) 76px 1fr;
   height: 24px;
   align-items: end;
-  padding: 12px 20px 6px;
+  padding: 10px 20px 6px;
   background: var(--td-bg-color-container);
   border-bottom: 1px dashed var(--td-component-stroke);
   box-shadow: 0 4px 8px -6px rgba(0, 0, 0, 0.12);
@@ -2170,7 +2412,7 @@ const processConfigLines = computed<string[]>(() => {
   flex-direction: column;
   align-items: center;
   transform: translateX(-50%);
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   color: var(--td-text-color-placeholder);
 }
 
@@ -2192,7 +2434,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-tick-label {
   margin-top: 2px;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   letter-spacing: 0.02em;
 }
 
@@ -2204,13 +2446,13 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-row {
   display: grid;
-  grid-template-columns: minmax(220px, 42%) 64px 1fr;
+  grid-template-columns: minmax(210px, 32%) 76px 1fr;
   align-items: center;
-  height: 32px;
+  height: 34px;
   cursor: pointer;
   position: relative;
   padding: 0 20px;
-  transition: background 150ms ease;
+  transition: background var(--app-motion-fast) ease;
 }
 
 .kp-row::before {
@@ -2222,7 +2464,7 @@ const processConfigLines = computed<string[]>(() => {
   width: 2px;
   background: transparent;
   border-radius: 0 2px 2px 0;
-  transition: background 150ms ease;
+  transition: background var(--app-motion-fast) ease;
 }
 
 .kp-row:hover {
@@ -2237,16 +2479,18 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-brand-color);
 }
 
+/* v1 painted three near-identical tints (root / stage / subspan) that
+   read as banding artifacts rather than as hierarchy, and fought the
+   hover tint on top of them. Depth is carried by the indent guides in
+   the name cell; background is reserved for hover and selection. */
 .kp-row-root {
   font-weight: 600;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
-.kp-row-stage:not(.kp-row-active) {
-  background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 55%, transparent);
-}
-
-.kp-row-span:not(.kp-row-active):not(:hover) {
-  background: color-mix(in srgb, var(--td-bg-color-container) 92%, var(--td-bg-color-secondarycontainer));
+/* Stages that never ran because an upstream stage failed. */
+.kp-row-inert {
+  opacity: 0.45;
 }
 
 .kp-row-expandable:hover .kp-tree-toggle {
@@ -2264,6 +2508,18 @@ const processConfigLines = computed<string[]>(() => {
   align-items: center;
   gap: 7px;
   min-width: 0;
+  height: 100%;
+}
+
+/* One hairline per depth level, replacing v1's blind left padding. It
+   costs the same horizontal space but actually shows which parent a
+   nested subspan belongs to. */
+.kp-name-guide {
+  width: 1px;
+  align-self: stretch;
+  flex-shrink: 0;
+  margin-right: 8px;
+  background: var(--td-component-stroke);
 }
 
 .kp-tree-toggle {
@@ -2278,7 +2534,7 @@ const processConfigLines = computed<string[]>(() => {
   width: 22px;
   height: 22px;
   margin: -3px 0;
-  transition: color 120ms ease, background 150ms ease;
+  transition: color var(--app-motion-instant) ease, background var(--app-motion-fast) ease;
   flex-shrink: 0;
   border-radius: var(--td-radius-default);
 }
@@ -2305,7 +2561,7 @@ const processConfigLines = computed<string[]>(() => {
 }
 
 .kp-name-text {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2314,32 +2570,45 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-name-mono {
   font-family: var(--app-font-family-mono);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 .kp-name-root {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
+/* Only rendered for `generation` spans now. v1 pushed a ROOT / STAGE /
+   SPAN label to the far right of the name column with margin-left:auto,
+   which opened a wide empty gap in every single row. */
 .kp-name-kind {
-  font-family: var(--app-font-family-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--td-text-color-placeholder);
-  margin-left: auto;
-  padding-left: 8px;
   flex-shrink: 0;
+  margin-left: 6px;
+  padding: 1px 4px;
+  border-radius: var(--td-radius-small);
+  font-family: var(--app-font-family-mono);
+  font-size: var(--app-text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-component);
 }
 
 /* Duration cell */
 .kp-cell-dur {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   text-align: right;
-  padding-right: 12px;
+  padding-right: 14px;
   letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Never ran" beats an em dash the reader has to decode. */
+.kp-dur-inert {
+  font-family: var(--app-font-family);
+  color: var(--td-text-color-placeholder);
 }
 
 .kp-running-time {
@@ -2350,8 +2619,22 @@ const processConfigLines = computed<string[]>(() => {
 /* Bar cell */
 .kp-cell-bar {
   position: relative;
-  height: 32px;
+  height: 34px;
   margin-right: 16px;
+  /* Gridlines on every ruler tick. An 8px bar floating in 600px of
+     white cannot be read against an axis that only exists at the top of
+     a scrolling list; --kp-grid-step is set from the axis step. */
+  background-image: repeating-linear-gradient(to right,
+      var(--td-component-stroke) 0 1px,
+      transparent 1px var(--kp-grid-step, 25%));
+  border-right: 1px solid var(--td-component-stroke);
+}
+
+/* No ruler (sub-50ms trace) means no axis for the gridlines to line up
+   with, so they would just be decoration. */
+.kp-rows-gridless .kp-cell-bar {
+  background-image: none;
+  border-right: none;
 }
 
 /* Vertical "now" cursor — animates left during polling so the user can
@@ -2383,7 +2666,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-bar {
   position: absolute;
-  top: 12px;
+  top: 13px;
   height: 8px;
   border-radius: var(--td-radius-small);
   background: var(--td-text-color-placeholder);
@@ -2408,13 +2691,13 @@ const processConfigLines = computed<string[]>(() => {
   transform: translateX(-50%);
   background: var(--td-text-color-primary);
   color: var(--td-text-color-anti);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   padding: 4px 8px;
   border-radius: var(--td-radius-default);
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 150ms ease;
+  transition: opacity var(--app-motion-fast) ease;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -2522,7 +2805,7 @@ const processConfigLines = computed<string[]>(() => {
 }
 
 .kp-bar-wrap-done {
-  border-color: rgba(7, 192, 95, 0.35);
+  border-color: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
 }
 
 .kp-bar-wrap-failed {
@@ -2568,14 +2851,20 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-bar-offset {
   position: absolute;
-  bottom: -1px;
+  bottom: 0;
+  /* Keep the offset centered on its start time where space allows, then
+     clamp the label inside the chart instead of letting it cover duration. */
+  left: clamp(0px, calc(var(--kp-offset-position) - 45px), max(0px, calc(100% - 90px)));
+  width: min(90px, 100%);
+  line-height: 11px;
   font-size: 9px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--td-text-color-placeholder);
-  pointer-events: none;
   white-space: nowrap;
-  transform: translateX(-50%);
   opacity: 0;
-  transition: opacity 150ms ease;
+  transition: opacity var(--app-motion-fast) ease;
 }
 
 .kp-row:hover .kp-bar-offset,
@@ -2640,36 +2929,32 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-text-color-placeholder);
 }
 
-/* Last error block — pinned in the header so long trace trees don't bury it */
+/* ============== LAST ERROR ==============
+   Pinned in the header so long trace trees don't bury it.
+
+   v1 stacked this the wrong way up: the headline was the error code, a
+   solid red pill repeated that same code on the right, the generic
+   "check the logs" filler sat in the middle at body size, and the one
+   line that actually explains the failure — the backend's message —
+   was last, smallest and greyest. v2 leads with the message, states the
+   code once quietly, and puts the recovery action in the card. */
 .kp-last-error {
-  margin: 10px 0 0;
-  display: flex;
+  margin-top: 12px;
+  padding: 12px 14px;
   background: var(--td-error-color-light);
-  border-radius: var(--td-radius-medium);
-  overflow: hidden;
   border: 1px solid var(--td-error-color-3);
+  border-left: 3px solid var(--td-error-color);
+  border-radius: var(--td-radius-medium);
 }
 
-.kp-last-error-bar {
-  width: 3px;
-  background: var(--td-error-color);
-  flex-shrink: 0;
-}
-
-.kp-last-error-body {
-  flex: 1;
-  padding: 10px 14px;
-  min-width: 0;
-}
-
-.kp-last-error-row {
+.kp-err-top {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  min-width: 0;
 }
 
-.kp-last-error-glyph {
+.kp-err-glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2678,40 +2963,189 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-error-color);
   color: var(--td-text-color-anti);
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 700;
+  line-height: 1;
   flex-shrink: 0;
 }
 
-.kp-last-error-title {
+/* Says WHERE it broke ("文档解析阶段失败"), which the raw code never did.
+   Deliberately NOT --td-error-color: that tone lands around 3:1 against
+   the card's own error tint in both themes. The red bar, glyph and
+   border already say "error"; the words just have to be readable. */
+.kp-err-where {
+  font-size: var(--app-text-sm);
   font-weight: 600;
-  font-size: 12px;
-  color: var(--td-error-color);
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.kp-last-error-code {
-  font-size: 10px;
-  background: var(--td-error-color);
-  color: var(--td-text-color-anti);
-  padding: 1px 6px;
-  border-radius: var(--td-radius-small);
+.kp-err-code {
   margin-left: auto;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: var(--td-radius-small);
+  font-size: var(--app-text-2xs);
+  color: var(--td-error-color-7);
+  background: color-mix(in srgb, var(--td-error-color) 12%, transparent);
+  white-space: nowrap;
 }
 
-.kp-last-error-suggestion {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  margin-bottom: 4px;
+.kp-err-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--td-error-color);
+  opacity: 0.7;
+  border-radius: var(--td-radius-default);
+  cursor: pointer;
+  transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 }
 
-.kp-last-error-raw {
-  font-size: 11px;
-  color: var(--td-text-color-placeholder);
+.kp-err-copy:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--td-error-color) 12%, transparent);
+}
+
+/* The actual diagnostic, promoted from 11px grey to the card's primary
+   line. Stays mono because it is verbatim backend output, and stays
+   selectable because people paste it into bug reports. */
+.kp-err-message {
+  margin-top: 7px;
+  font-family: var(--app-font-family-mono);
+  font-size: var(--app-text-md);
+  line-height: 1.5;
+  color: var(--td-text-color-primary);
   white-space: pre-wrap;
   word-break: break-word;
+  user-select: text;
 }
 
-/* ============== DETAIL PANEL ============== */
+.kp-err-hint {
+  margin-top: 5px;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
+.kp-err-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Recovery, not destruction — hence the outline rather than a solid
+   danger fill. It also replaces v1's brand-green outline button, which
+   sat in the toolbar glowing green against a red failure. */
+.kp-err-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--td-error-color);
+  border-radius: var(--td-radius-default);
+  background: var(--td-bg-color-container);
+  color: var(--td-error-color-7);
+  font-size: var(--app-text-sm);
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+}
+
+.kp-err-btn:hover {
+  background: var(--td-error-color);
+  color: var(--td-text-color-anti);
+}
+
+/* Same card shape as .kp-last-error in the warning tone: the run may still
+   finish, so this nudges rather than alarms. */
+.kp-stall {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--td-warning-color-light);
+  border: 1px solid var(--td-warning-color-3);
+  border-left: 3px solid var(--td-warning-color);
+  border-radius: var(--td-radius-medium);
+}
+
+/* Backlogged, not stuck: neutral tone, and no stop button to invite
+   cancelling work that will still finish. */
+.kp-stall-queued {
+  background: var(--td-bg-color-secondarycontainer);
+  border-color: var(--td-component-border);
+  border-left-color: var(--td-text-color-placeholder);
+}
+
+.kp-stall-queued .kp-stall-icon {
+  color: var(--td-text-color-secondary);
+}
+
+.kp-stall-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--td-warning-color);
+}
+
+.kp-stall-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.kp-stall-title {
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.kp-stall-hint {
+  margin-top: 4px;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
+.kp-stall-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--td-warning-color);
+  border-radius: var(--td-radius-default);
+  background: var(--td-bg-color-container);
+  color: var(--td-warning-color-7);
+  font-size: var(--app-text-sm);
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+}
+
+.kp-stall-btn:hover:not(:disabled) {
+  background: var(--td-warning-color);
+  color: var(--td-text-color-anti);
+}
+
+.kp-stall-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* ============== DETAIL PANEL ==============
+   v1 gave the waterfall flex:1 and the detail a fixed 50% / 320px. On a
+   short trace that meant ~55% of the panel was blank whenever nothing
+   was selected, and rows got clipped mid-height as soon as something
+   was. Now the waterfall is content-sized (capped at 60% so a long
+   trace still leaves room) and the detail absorbs whatever is left. */
 .kp-detail {
   flex: 0 0 auto;
   display: flex;
@@ -2720,12 +3154,28 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-bg-color-container);
   height: 0;
   overflow: hidden;
-  transition: height 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* flex-basis 0 (not auto) so the detail claims the remaining space
+   instead of its own content height — otherwise a tall detail body
+   squeezes the waterfall back out of view. */
 .kp-detail-open {
-  height: 50%;
-  min-height: 320px;
+  flex: 1 1 0;
+  height: auto;
+  min-height: 220px;
+  animation: kpDetailIn var(--app-motion-base) ease both;
+}
+
+@keyframes kpDetailIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .kp-detail-head {
@@ -2753,7 +3203,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-detail-name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2763,7 +3213,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-detail-kind {
   font-family: var(--app-font-family-mono);
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--td-text-color-placeholder);
@@ -2777,7 +3227,7 @@ const processConfigLines = computed<string[]>(() => {
   align-items: center;
   padding: 1px 8px;
   border-radius: var(--td-radius-default);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   background: var(--td-bg-color-component);
   color: var(--td-text-color-primary);
@@ -2838,10 +3288,10 @@ const processConfigLines = computed<string[]>(() => {
   border: none;
   background: transparent;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   cursor: pointer;
   position: relative;
-  transition: color 150ms ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .kp-tab:hover {
@@ -2882,12 +3332,12 @@ const processConfigLines = computed<string[]>(() => {
   align-items: center;
   justify-content: center;
   padding: 48px 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
 .kp-detail-hint {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
@@ -2903,7 +3353,7 @@ const processConfigLines = computed<string[]>(() => {
 }
 
 .kp-section-title {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -2912,7 +3362,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-section-desc {
   margin: 4px 0 8px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -2931,11 +3381,11 @@ const processConfigLines = computed<string[]>(() => {
   border: 1px solid var(--td-component-border);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   padding: 3px 8px;
   border-radius: var(--td-radius-default);
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
 }
 
 .kp-section-action:hover {
@@ -2964,7 +3414,7 @@ const processConfigLines = computed<string[]>(() => {
   grid-template-columns: 130px 1fr;
   gap: 12px;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   min-width: 0;
   padding: 8px 12px;
   background: var(--td-bg-color-container);
@@ -2980,7 +3430,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-kv-key {
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -3017,14 +3467,14 @@ const processConfigLines = computed<string[]>(() => {
 }
 
 .kp-kv-scalar {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .kp-kv-running {
   color: var(--td-warning-color);
   font-style: italic;
   font-family: var(--app-font-family);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 .kp-kv-tag-live {
@@ -3062,7 +3512,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-mono {
   font-family: var(--app-font-family-mono);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   letter-spacing: 0;
 }
 
@@ -3094,7 +3544,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-kv-summary-static {
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 .kp-kv-toggle {
@@ -3107,7 +3557,7 @@ const processConfigLines = computed<string[]>(() => {
   align-items: baseline;
   gap: 8px;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   flex-wrap: wrap;
 }
 
@@ -3116,7 +3566,7 @@ const processConfigLines = computed<string[]>(() => {
 }
 
 .kp-kv-toggle-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-brand-color);
   font-weight: 500;
 }
@@ -3141,7 +3591,7 @@ const processConfigLines = computed<string[]>(() => {
   grid-template-columns: 110px 1fr 64px;
   gap: 10px;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .kp-breakdown-label {
@@ -3203,20 +3653,20 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-error-color);
   color: var(--td-text-color-anti);
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 700;
   flex-shrink: 0;
 }
 
 .kp-error-title {
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-error-color);
 }
 
 .kp-error-code {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   background: var(--td-error-color);
   color: var(--td-text-color-anti);
   padding: 1px 6px;
@@ -3225,7 +3675,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-error-msg {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -3248,7 +3698,7 @@ const processConfigLines = computed<string[]>(() => {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-primary);
   line-height: 1.6;
 }
@@ -3279,7 +3729,7 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-compact-caption {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -3301,13 +3751,13 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-proccfg-title {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   margin-bottom: 2px;
 }
 
 .kp-proccfg-line {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.6;
   color: var(--td-text-color-secondary);
   word-break: break-word;

@@ -37,7 +37,7 @@ export interface SystemInfo {
   db_version?: string
   /** Human-readable error message when the startup migration failed.
    *  When non-empty, the system info view should surface a troubleshooting
-   *  banner (see docs/migration-troubleshooting.md). */
+   *  banner (see website-docs/01-getting-started/05-troubleshooting.md#database-migrations). */
   db_migration_error?: string
   /** Server process boot time (RFC3339, UTC). */
   started_at?: string
@@ -1098,6 +1098,9 @@ export interface ConfigSkill {
   // decides whether to offer the "view install" entry point.
   install_session_id?: string
   install_message_id?: string
+  // Present while a newer install is in flight or has failed and the sandbox
+  // still runs the previous version.
+  served?: { version?: string }
   created_at: string
   updated_at: string
   // Absent for a skill whose installer declared nothing, which is how the

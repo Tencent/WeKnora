@@ -40,7 +40,7 @@ func TestParallelReadsRespectMutationBarriers(t *testing.T) {
 			},
 		})
 	}
-	for _, name := range []string{tools.ToolKnowledgeSearch, tools.ToolGrepChunks} {
+	for _, name := range []string{tools.ToolSearchKnowledge, tools.ToolReadDocument} {
 		register(name, func(ctx context.Context) {
 			readStarts <- struct{}{}
 			select {
@@ -53,7 +53,10 @@ func TestParallelReadsRespectMutationBarriers(t *testing.T) {
 	register(tools.ToolShellExec, func(context.Context) {})
 	register(tools.ToolReadFile, func(context.Context) {})
 	register("mcp_unknown_mutation", func(context.Context) {})
-	names := []string{tools.ToolKnowledgeSearch, tools.ToolGrepChunks, tools.ToolWriteSandboxFile, tools.ToolShellExec, tools.ToolReadFile, "mcp_unknown_mutation"}
+	names := []string{
+		tools.ToolSearchKnowledge, tools.ToolReadDocument, tools.ToolWriteSandboxFile,
+		tools.ToolShellExec, tools.ToolReadFile, "mcp_unknown_mutation",
+	}
 	response := &types.ChatResponse{}
 	for _, name := range names {
 		response.ToolCalls = append(response.ToolCalls, types.LLMToolCall{ID: name, Function: types.FunctionCall{Name: name, Arguments: `{}`}})

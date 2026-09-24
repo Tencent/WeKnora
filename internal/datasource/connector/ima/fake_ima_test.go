@@ -30,7 +30,7 @@ type fakeFile struct {
 	Title          string
 	ParentFolderID string
 
-	// MediaType is what get_media_info reports for this file.
+	// MediaType is reported by both get_knowledge_list and get_media_info.
 	MediaType int32
 	// Body is what the download URL serves.
 	Body string
@@ -190,6 +190,7 @@ func (f *fakeIMA) handleAPI(w http.ResponseWriter, r *http.Request) {
 
 	case "get_knowledge_list":
 		kbID, folderID := str("knowledge_base_id"), str("folder_id")
+		f.record("get_knowledge_list:" + folderID)
 		f.mu.Lock()
 		files := f.files[kbID][folderID]
 		folders := f.folders[kbID][folderID]
@@ -197,19 +198,21 @@ func (f *fakeIMA) handleAPI(w http.ResponseWriter, r *http.Request) {
 
 		var list []json.RawMessage
 		for _, folder := range folders {
-			b, _ := json.Marshal(folderInfo{
-				FolderID:       folder.FolderID,
-				Name:           folder.Name,
-				ParentFolderID: folder.ParentFolderID,
+			// Folder entries use the same fields as files in list responses.
+			b, _ := json.Marshal(map[string]interface{}{
+				"media_id":         folder.FolderID,
+				"title":            folder.Name,
+				"parent_folder_id": folder.ParentFolderID,
+				"media_type":       99,
 			})
 			list = append(list, b)
 		}
 		for _, file := range files {
-			// IMA omits media_type in list responses.
 			b, _ := json.Marshal(map[string]interface{}{
 				"media_id":         file.MediaID,
 				"title":            file.Title,
 				"parent_folder_id": file.ParentFolderID,
+				"media_type":       file.MediaType,
 			})
 			list = append(list, b)
 		}

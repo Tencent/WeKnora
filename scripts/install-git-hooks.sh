@@ -27,6 +27,6 @@ git -C "$ROOT" config core.hooksPath scripts/git-hooks
 
 echo "Installed git hooks -> scripts/git-hooks"
 echo "  pre-commit: whitespace, gofmt (auto-fix), golangci-lint (if installed)"
-echo "  pre-push:   PR gofmt + full go vet/build (like CI); scoped go test"
+echo "  pre-push:   PR gofmt + full app go vet/test/build (like CI)"
 echo ""
 echo "Optional: SKIP_HOOKS=1 or HOOK_SKIP_TEST=1 — see script header."

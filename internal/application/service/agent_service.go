@@ -117,6 +117,7 @@ type agentService struct {
 	sandboxResolver      sandbox.TenantSandboxResolver
 	sandboxPinner        *SessionSandboxPinner
 	sandboxPolicy        WorkspaceSandboxPolicy
+	hostSandbox          sandbox.Manager
 }
 
 // NewAgentService creates a new agent service
@@ -143,6 +144,7 @@ func NewAgentService(
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	hostSandbox HostSandboxManager,
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
 ) interfaces.AgentService {
@@ -171,6 +173,7 @@ func NewAgentService(
 		sandboxResolver:      sandboxResolver,
 		sandboxPinner:        sandboxPinner,
 		sandboxPolicy:        sandboxPolicy,
+		hostSandbox:          hostSandbox.Manager,
 	}
 }
 
@@ -242,6 +245,7 @@ func (s *agentService) CreateAgentEngine(
 		pinnedMCP,
 		s.resolvePinnedSkillInfos(config),
 	)
+	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
 
 	// Non-vision chat models use the configured VLM to describe tool images.
 	// Vision chat models receive the original images after the tool replies.
@@ -290,6 +294,9 @@ func (s *agentService) CreateAgentEngine(
 		}
 		toolRegistry.RegisterTool(tools.NewBrowserSkillTool(s.browserSkill, scope, sessionID, instructions))
 	}
+
+	toolRegistry.BindSession(sessionID)
+	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
 
 	return engine, nil
 }
@@ -509,7 +516,7 @@ func (s *agentService) registerSandboxShellIfAllowed(
 	sessionID string,
 	config *types.AgentConfig,
 ) {
-	if config == nil || (!config.SkillsEnabled && !config.SkillInstallMode()) {
+	if config == nil {
 		return
 	}
 	sandboxMgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
@@ -518,6 +525,13 @@ func (s *agentService) registerSandboxShellIfAllowed(
 		return
 	}
 	if sandboxMgr == nil {
+		return
+	}
+	// Remote backends keep the skills entitlement: a shell there only exists
+	// to serve skill scripts. The host backend IS the feature, so gating it on
+	// skills would leave Lite with a sandbox nobody can reach.
+	if sandboxMgr.GetType() != sandbox.SandboxTypeHost &&
+		!config.SkillsEnabled && !config.SkillInstallMode() {
 		return
 	}
 	s.registerSandboxShellTool(ctx, toolRegistry, sandboxMgr, config)
@@ -543,6 +557,7 @@ func (s *agentService) resolveWorkspaceSandbox(
 	sandboxMgr, _, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		tenantID, sessionID, configID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox),
 	)
 	if err != nil {
 		return nil, err
@@ -551,6 +566,54 @@ func (s *agentService) resolveWorkspaceSandbox(
 		return nil, nil
 	}
 	return sandboxMgr, nil
+}
+
+func (s *agentService) lookupSessionWorkspaceLayout(
+	ctx context.Context,
+	sessionID string,
+	config *types.AgentConfig,
+) sandbox.WorkspaceLayout {
+	configID := ""
+	if config != nil {
+		configID = config.SandboxConfigID
+	}
+	mgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
+	return sessionWorkspaceLayout(ctx, sessionID, mgr, err, s.hostSandbox, configID)
+}
+
+// sessionWorkspaceLayout is the layout prompts and attachment staging share.
+// A Lite host session must never fall back to /workspace: that path is the
+// remote contract, and describing it after a pin/layout miss sends the model
+// to a directory that does not exist on the machine.
+func sessionWorkspaceLayout(
+	ctx context.Context,
+	sessionID string,
+	mgr sandbox.Manager,
+	resolveErr error,
+	host sandbox.Manager,
+	configID string,
+) sandbox.WorkspaceLayout {
+	if resolveErr != nil || mgr == nil {
+		return fallbackSessionWorkspaceLayout(host, configID)
+	}
+	if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
+		layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+		if err != nil || !layout.HasRoot() {
+			return sandbox.FailedHostWorkspaceLayout()
+		}
+		return layout.Normalized()
+	}
+	if mgr.GetType() == sandbox.SandboxTypeHost {
+		return sandbox.FailedHostWorkspaceLayout()
+	}
+	return sandbox.RemoteWorkspaceLayout()
+}
+
+func fallbackSessionWorkspaceLayout(host sandbox.Manager, configID string) sandbox.WorkspaceLayout {
+	if liteHostSandbox(host) != nil && !hasNamedSandboxConfig(configID) {
+		return sandbox.FailedHostWorkspaceLayout()
+	}
+	return sandbox.RemoteWorkspaceLayout()
 }
 
 // initializeSkillsManager creates and initializes the skills manager.
@@ -567,9 +630,10 @@ func (s *agentService) initializeSkillsManager(
 	toolRegistry *tools.ToolRegistry,
 ) (*skills.Manager, error) {
 	tenantID, _ := types.TenantIDFromContext(ctx)
-	sandboxMgr, configID, err := resolveSandboxForExecution(
+	sandboxMgr, pin, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		tenantID, sessionID, config.SandboxConfigID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
@@ -578,7 +642,8 @@ func (s *agentService) initializeSkillsManager(
 		sandboxMgr = sandbox.NewDisabledManager()
 	}
 
-	logger.Infof(ctx, "Workspace sandbox in use: config=%s type=%s", configID, sandboxMgr.GetType())
+	logger.Infof(ctx, "Workspace sandbox in use: config=%s workspace=%d type=%s",
+		pin.ConfigID, pin.TenantOr(tenantID), sandboxMgr.GetType())
 
 	// Create skills manager
 	skillsConfig := &skills.ManagerConfig{
@@ -732,7 +797,39 @@ func (s *agentService) userEnvResolver(
 	if tenantID == 0 {
 		return nil
 	}
-	return NewUserEnvResolver(rows, repository.NewTenantSkillRepository(s.db), tenantID, configID)
+	return NewUserEnvResolver(
+		rows,
+		repository.NewTenantSkillRepository(s.db),
+		sandboxCreateTimeEnvVars(ctx, s.db, tenantID, configID),
+		tenantID, configID,
+	)
+}
+
+// sandboxCreateTimeEnvVars loads the config's env_vars once per agent run for
+// the required check. They are not re-injected: the container already has them.
+// A read failure degrades to empty so a DB blip does not surface as "nobody
+// has set this credential".
+func sandboxCreateTimeEnvVars(
+	ctx context.Context, db *gorm.DB, tenantID uint64, configID string,
+) map[string]string {
+	if db == nil || db.Config == nil {
+		return nil
+	}
+	cfg, err := repository.NewTenantSandboxConfigRepository(db).GetByID(ctx, tenantID, configID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] sandbox config %s: create-time env unavailable: %v", configID, err)
+		return nil
+	}
+	if cfg == nil || cfg.Config == nil {
+		return nil
+	}
+	env := map[string]string{}
+	for name, value := range cfg.Config.EnvVars {
+		if value != "" {
+			env[name] = value
+		}
+	}
+	return env
 }
 
 // skillEnvCapture writes declared skill credentials a successful shell_exec
@@ -801,7 +898,8 @@ func (s *agentService) readSkillBundle(
 // The skill installer agent gets the install-mode variant, which runs as root
 // and may work inside the skills image root — it exists to install
 // dependencies into the image, which the ordinary contract forbids on both
-// counts. Every other agent keeps the non-root, /workspace-only executor.
+// counts. Every other agent keeps the session-layout executor: remote
+// work_dir is the whole sandbox, host work_dir is clamped to writable roots.
 // AgentConfig.SkillInstallMode is settable only through
 // EnableSkillInstallMode, which refuses every agent but the built-in
 // installer, so no tenant agent can reach this branch.
@@ -853,19 +951,21 @@ func (s *agentService) registerTools(
 	//   - Legacy agents without AllowedTools fall back to DefaultAllowedTools().
 	var allowedTools []string
 	if len(config.AllowedTools) > 0 {
-		allowedTools = make([]string, len(config.AllowedTools))
-		copy(allowedTools, config.AllowedTools)
+		// Retired retrieval tool names in stored configs map onto their
+		// successors here, so no data migration is needed.
+		allowedTools = tools.NormalizeAllowedTools(config.AllowedTools)
 		logger.Infof(ctx, "Using custom allowed tools from config: %v", allowedTools)
 	} else {
 		allowedTools = tools.DefaultAllowedTools()
 		logger.Infof(ctx, "Using default allowed tools: %v", allowedTools)
 	}
 	if config.SharedAgentReadOnly {
-		allowedTools = filterSharedAgentWriteTools(allowedTools)
+		allowedTools = withoutWikiWriteTools(allowedTools)
 	}
 
 	// ---- Capability detection from SearchTargets ----
 	var hasVectorKB bool
+	var hasGraphKB bool
 	var wikiKBIDs []string
 	wikiRoutes := tools.NewWikiRouteResolver()
 	for _, target := range config.SearchTargets {
@@ -878,6 +978,9 @@ func (s *agentService) registerTools(
 		}
 		if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
 			hasVectorKB = true
+		}
+		if kb.IsGraphEnabled() {
+			hasGraphKB = true
 		}
 		if kb.IsWikiEnabled() {
 			wikiKBIDs = append(wikiKBIDs, kb.ID)
@@ -894,31 +997,36 @@ func (s *agentService) registerTools(
 	}
 	wikiKBIDs = scopedWikiKBIDs
 	hasWikiKB := len(wikiKBIDs) > 0
+	// Search targets only need read access. Wiki mutations stay on the KBs the
+	// caller may edit, so a viewer share (or the caller's own agent pointed at
+	// one) cannot become a write path into another workspace's wiki.
+	writableWikiKBIDs := intersectStrings(wikiKBIDs, config.WritableKBIDs)
+	if len(writableWikiKBIDs) == 0 {
+		allowedTools = withoutWikiWriteTools(allowedTools)
+	}
 
 	// Filter out knowledge base tools if no knowledge scope is configured for this turn.
 	hasKnowledge := agentHasKnowledgeScope(config)
 	if !hasKnowledge {
 		filteredTools := make([]string, 0)
 		kbTools := map[string]bool{
-			tools.ToolKnowledgeSearch:     true,
-			tools.ToolGrepChunks:          true,
-			tools.ToolListKnowledgeChunks: true,
+			tools.ToolSearchKnowledge:     true,
+			tools.ToolReadDocument:        true,
+			tools.ToolListDocuments:       true,
 			tools.ToolQueryKnowledgeGraph: true,
-			tools.ToolGetDocumentInfo:     true,
 			tools.ToolDatabaseQuery:       true,
 			tools.ToolDataAnalysis:        true,
 			tools.ToolDataSchema:          true,
 			// Wiki tools also require at least one KB in scope.
-			tools.ToolWikiReadPage:      true,
-			tools.ToolWikiSearch:        true,
-			tools.ToolWikiReadSourceDoc: true,
-			tools.ToolWikiFlagIssue:     true,
-			tools.ToolWikiWritePage:     true,
-			tools.ToolWikiReplaceText:   true,
-			tools.ToolWikiRenamePage:    true,
-			tools.ToolWikiDeletePage:    true,
-			tools.ToolWikiReadIssue:     true,
-			tools.ToolWikiUpdateIssue:   true,
+			tools.ToolWikiReadPage:    true,
+			tools.ToolWikiSearch:      true,
+			tools.ToolWikiFlagIssue:   true,
+			tools.ToolWikiWritePage:   true,
+			tools.ToolWikiReplaceText: true,
+			tools.ToolWikiRenamePage:  true,
+			tools.ToolWikiDeletePage:  true,
+			tools.ToolWikiReadIssue:   true,
+			tools.ToolWikiUpdateIssue: true,
 		}
 
 		// If no knowledge and no web search, also disable todo_write (not useful for simple chat)
@@ -968,24 +1076,27 @@ func (s *agentService) registerTools(
 	// in AgentEditorModal.vue. These are *all* tools that retrieve/inspect
 	// content from RAG-style knowledge bases.
 	ragToolSet := map[string]bool{
-		tools.ToolKnowledgeSearch:     true,
-		tools.ToolGrepChunks:          true,
-		tools.ToolListKnowledgeChunks: true,
+		tools.ToolSearchKnowledge:     true,
 		tools.ToolQueryKnowledgeGraph: true,
-		tools.ToolGetDocumentInfo:     true,
 		tools.ToolDatabaseQuery:       true,
 	}
+	// Document readers work on stored chunks, which every KB writes whatever
+	// its indexing strategy, so a wiki-only scope keeps them: they are how a
+	// wiki reader checks the source documents a page cites.
+	documentToolSet := map[string]bool{
+		tools.ToolReadDocument:  true,
+		tools.ToolListDocuments: true,
+	}
 	allWikiToolSet := map[string]bool{
-		tools.ToolWikiReadPage:      true,
-		tools.ToolWikiSearch:        true,
-		tools.ToolWikiReadSourceDoc: true,
-		tools.ToolWikiFlagIssue:     true,
-		tools.ToolWikiWritePage:     true,
-		tools.ToolWikiReplaceText:   true,
-		tools.ToolWikiRenamePage:    true,
-		tools.ToolWikiDeletePage:    true,
-		tools.ToolWikiReadIssue:     true,
-		tools.ToolWikiUpdateIssue:   true,
+		tools.ToolWikiReadPage:    true,
+		tools.ToolWikiSearch:      true,
+		tools.ToolWikiFlagIssue:   true,
+		tools.ToolWikiWritePage:   true,
+		tools.ToolWikiReplaceText: true,
+		tools.ToolWikiRenamePage:  true,
+		tools.ToolWikiDeletePage:  true,
+		tools.ToolWikiReadIssue:   true,
+		tools.ToolWikiUpdateIssue: true,
 	}
 
 	// Hard safety nets: drop tools whose runtime prerequisite is missing.
@@ -1010,7 +1121,7 @@ func (s *agentService) registerTools(
 		filtered := make([]string, 0, len(allowedTools))
 		dropped := make([]string, 0)
 		for _, t := range allowedTools {
-			if ragToolSet[t] {
+			if ragToolSet[t] || (documentToolSet[t] && !hasWikiKB) {
 				dropped = append(dropped, t)
 				continue
 			}
@@ -1019,6 +1130,15 @@ func (s *agentService) registerTools(
 		allowedTools = filtered
 		if len(dropped) > 0 {
 			logger.Warnf(ctx, "Dropped RAG tools %v because no RAG-capable KB is in scope", dropped)
+		}
+	}
+	// The graph tool only answers on graph-enabled bases; offering it on a
+	// scope without one produced degraded plain-search results and a tool
+	// the model kept trying. It follows the graph capability instead.
+	if !hasGraphKB {
+		if trimmed := withoutString(allowedTools, tools.ToolQueryKnowledgeGraph); len(trimmed) != len(allowedTools) {
+			allowedTools = trimmed
+			logger.Infof(ctx, "Dropped query_knowledge_graph because no graph-enabled KB is in scope")
 		}
 	}
 
@@ -1035,8 +1155,8 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewSequentialThinkingTool()
 		case tools.ToolTodoWrite:
 			toolToRegister = tools.NewTodoWriteTool()
-		case tools.ToolKnowledgeSearch:
-			toolToRegister = tools.NewKnowledgeSearchTool(
+		case tools.ToolSearchKnowledge:
+			toolToRegister = tools.NewSearchKnowledgeTool(
 				s.knowledgeBaseService,
 				s.knowledgeService,
 				s.chunkService,
@@ -1044,16 +1164,13 @@ func (s *agentService) registerTools(
 				rerankModel,
 				s.cfg,
 			)
-		case tools.ToolGrepChunks:
-			toolToRegister = tools.NewGrepChunksTool(s.db, config.SearchTargets)
-			logger.Infof(ctx, "Registered grep_chunks tool with searchTargets: %d targets", len(config.SearchTargets))
-		case tools.ToolListKnowledgeChunks:
-			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+		case tools.ToolReadDocument:
+			toolToRegister = tools.NewReadDocumentTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+		case tools.ToolListDocuments:
+			toolToRegister = tools.NewListDocumentsTool(s.knowledgeService, config.SearchTargets)
 		case tools.ToolQueryKnowledgeGraph:
 			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
 				WithKnowledgeScope(s.knowledgeService)
-		case tools.ToolGetDocumentInfo:
-			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolSearchConversations:
 			// The owner is captured from the caller's identity here, not read
 			// from the model's arguments, so no prompt can redirect the search
@@ -1095,25 +1212,25 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
 		case tools.ToolWikiSearch:
 			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
-		case tools.ToolWikiReadSourceDoc:
-			toolToRegister = tools.NewWikiReadSourceDocTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolWikiFlagIssue:
-			toolToRegister = tools.NewWikiFlagIssueTool(s.wikiPageService, wikiKBIDs, wikiRoutes).
+			toolToRegister = tools.NewWikiFlagIssueTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes).
 				WithKnowledgeScope(s.knowledgeService, config.SearchTargets)
 		case tools.ToolWikiReadIssue:
 			toolToRegister = tools.NewWikiReadIssueTool(s.wikiPageService, wikiKBIDs)
 		case tools.ToolWikiUpdateIssue:
-			toolToRegister = tools.NewWikiUpdateIssueTool(s.wikiPageService, wikiKBIDs)
+			toolToRegister = tools.NewWikiUpdateIssueTool(s.wikiPageService, writableWikiKBIDs)
 		case tools.ToolWikiWritePage:
-			toolToRegister = tools.NewWikiWritePageTool(s.wikiPageService, wikiKBIDs, s.knowledgeService, wikiRoutes).
-				WithSearchTargets(config.SearchTargets)
+			toolToRegister = tools.NewWikiWritePageTool(
+				s.wikiPageService, writableWikiKBIDs, s.knowledgeService, wikiRoutes,
+			).WithSearchTargets(config.SearchTargets)
 		case tools.ToolWikiReplaceText:
-			toolToRegister = tools.NewWikiReplaceTextTool(s.wikiPageService, wikiKBIDs, s.knowledgeService, wikiRoutes).
-				WithSearchTargets(config.SearchTargets)
+			toolToRegister = tools.NewWikiReplaceTextTool(
+				s.wikiPageService, writableWikiKBIDs, s.knowledgeService, wikiRoutes,
+			).WithSearchTargets(config.SearchTargets)
 		case tools.ToolWikiRenamePage:
-			toolToRegister = tools.NewWikiRenamePageTool(s.wikiPageService, wikiKBIDs, wikiRoutes)
+			toolToRegister = tools.NewWikiRenamePageTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes)
 		case tools.ToolWikiDeletePage:
-			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, wikiKBIDs, wikiRoutes)
+			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes)
 
 		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
 			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,
@@ -1140,11 +1257,12 @@ func (s *agentService) registerTools(
 	return nil
 }
 
-// filterSharedAgentWriteTools enforces the read-only contract of AgentShare.
-// These tools write source-workspace Wiki state and otherwise bypass the HTTP
-// KB permission middleware because they execute inside the agent engine.
-func filterSharedAgentWriteTools(allowed []string) []string {
-	sourceWorkspaceWrites := map[string]bool{
+// withoutWikiWriteTools drops the tools that write Wiki state. They execute
+// inside the agent engine and so bypass the HTTP KB permission middleware; they
+// are removed for shared agents (read-only by contract) and whenever no
+// writable wiki KB is in scope.
+func withoutWikiWriteTools(allowed []string) []string {
+	wikiWrites := map[string]bool{
 		tools.ToolWikiFlagIssue:   true,
 		tools.ToolWikiUpdateIssue: true,
 		tools.ToolWikiWritePage:   true,
@@ -1154,7 +1272,7 @@ func filterSharedAgentWriteTools(allowed []string) []string {
 	}
 	filtered := make([]string, 0, len(allowed))
 	for _, name := range allowed {
-		if !sourceWorkspaceWrites[name] {
+		if !wikiWrites[name] {
 			filtered = append(filtered, name)
 		}
 	}
@@ -1290,6 +1408,10 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 		if kbType == "" {
 			kbType = "document" // Default type
 		}
+		var profile *types.KnowledgeBaseProfile
+		if kb.GeneratedProfile.HasText() {
+			profile = kb.GeneratedProfile
+		}
 		kbInfos = append(kbInfos, &agent.KnowledgeBaseInfo{
 			ID:           kb.ID,
 			Name:         kb.Name,
@@ -1298,6 +1420,7 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 			DocCount:     docCount,
 			Capabilities: kbRetrievalCapabilities(kb),
 			RecentDocs:   recentDocs,
+			Profile:      profile,
 		})
 	}
 
@@ -1328,6 +1451,45 @@ func kbRetrievalCapabilities(kb *types.KnowledgeBase) []string {
 
 // getSelectedDocumentInfos retrieves detailed information for user-selected documents (via @ mention)
 // This loads the actual content of the documents to include in the system prompt
+// resolveQuestionOriginInfo turns a suggested question's origin into the
+// names the runtime context shows. It re-checks the base against this turn's
+// search targets rather than trusting the caller, and keeps a document only
+// when it belongs to that base. A base reached only through a document or tag
+// scope is not in kbInfos when other bases are selected, so its name is
+// looked up directly.
+func (s *agentService) resolveQuestionOriginInfo(
+	ctx context.Context, origin *types.QuestionOrigin, targets types.SearchTargets,
+	kbInfos []*agent.KnowledgeBaseInfo,
+) *agent.QuestionOriginInfo {
+	if origin == nil || origin.KnowledgeBaseID == "" || !targets.ContainsKB(origin.KnowledgeBaseID) {
+		return nil
+	}
+	info := &agent.QuestionOriginInfo{KnowledgeBaseID: origin.KnowledgeBaseID}
+	for _, kb := range kbInfos {
+		if kb != nil && kb.ID == origin.KnowledgeBaseID {
+			info.KnowledgeBaseName = kb.Name
+			break
+		}
+	}
+	if info.KnowledgeBaseName == "" && s.knowledgeBaseService != nil {
+		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, origin.KnowledgeBaseID)
+		if err == nil && kb != nil {
+			info.KnowledgeBaseName = kb.Name
+		}
+	}
+	if origin.KnowledgeID == "" {
+		return info
+	}
+	docs, err := s.getSelectedDocumentInfos(ctx, []string{origin.KnowledgeID})
+	if err != nil || len(docs) != 1 || docs[0].KnowledgeBaseID != origin.KnowledgeBaseID {
+		logger.Infof(ctx, "Question origin document %s dropped: not found in knowledge base %s",
+			secutils.SanitizeForLog(origin.KnowledgeID), secutils.SanitizeForLog(origin.KnowledgeBaseID))
+		return info
+	}
+	info.Document = docs[0]
+	return info
+}
+
 func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeIDs []string) ([]*agent.SelectedDocumentInfo, error) {
 	if len(knowledgeIDs) == 0 {
 		return []*agent.SelectedDocumentInfo{}, nil

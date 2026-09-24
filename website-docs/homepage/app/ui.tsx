@@ -1,0 +1,35 @@
+import type { ReactNode } from "react";
+const paths: Record<string, ReactNode> = {
+  arrow: <path d="M4 12h15m-6-6 6 6-6 6" />,
+  external: <path d="M8 5H5v14h14v-3M12 5h7v7M10 14 19 5" />,
+  play: <path d="m9 5 11 7-11 7Z" />,
+  search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5M8 8h5M8 11h3" /></>,
+  agent: <><rect x="5" y="7" width="14" height="13" rx="3" /><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6" /><circle cx="12" cy="2.5" r=".5" /></>,
+  wiki: <><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15" /><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3" /></>,
+  history: <><path d="M3 11a9 9 0 1 1 2.6 7.4M3 4v7h7M12 7v5l3 2" /></>,
+  skills: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 17.5h7m-3.5-3.5v7" /></>,
+  sandbox: <><path d="m12 2 9 5v10l-9 5-9-5V7l9-5Zm0 10 9-5M12 12 3 7m9 5v10" /><path d="m7 4.8 10 5.5" /></>,
+  memory: <><path d="M12 7c-1-5-7-5-7 0-4 1-4 7 0 8-1 5 5 7 7 3 2 4 8 2 7-3 4-1 4-7 0-8 0-5-6-5-7 0Zm0 0v11M5 7c0 2 2 3 3 3m11-3c0 2-2 3-3 3M5 15l3-1m11 1-3-1" /></>,
+  file: <><path d="M14 2H5v20h14V7l-5-5Zm0 0v5h5M8 12h8m-8 4h6" /></>,
+  sources: <><path d="M3 7h7l2 3h9v10H3V7Zm3 0V3h11l3 3v4" /><path d="M7 14h10m-10 3h6" /></>,
+  channels: <><rect x="7" y="2" width="10" height="7" rx="1" /><rect x="2" y="16" width="8" height="6" rx="1" /><rect x="14" y="16" width="8" height="6" rx="1" /><path d="M12 9v4m-6 3v-3h12v3" /></>,
+  server: <><rect x="3" y="3" width="18" height="7" rx="1" /><rect x="3" y="14" width="18" height="7" rx="1" /><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5m-5 11h5" /></>,
+  model: <><path d="m12 2 10 5-10 5L2 7l10-5Zm-10 10 10 5 10-5M2 17l10 5 10-5" /></>,
+  shield: <><path d="m12 2 9 4v6c0 5-5 8-9 10-4-2-9-5-9-10V6l9-4Z" /><path d="m8 12 3 3 5-6" /></>,
+  trace: <><path d="M3 3v18h18M6 15l4-5 4 3 6-8" /><circle cx="10" cy="10" r="1" /><circle cx="14" cy="13" r="1" /></>,
+  browser: <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M2 9h20M6 6.5h.01M9 6.5h.01" /><path d="m11 13 6 2.5-2.6.9-.9 2.6Z" /></>,
+  plug: <><path d="M9 2v5m6-5v5M6 7h12v4a6 6 0 0 1-12 0V7Zm6 10v5" /></>,
+  branch: <><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="8" r="2" /><path d="M6 7v10m12-7c0 4-6 3-11.2 7.4" /></>,
+  monitor: <><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8m-4-4v4M6 7h5m-5 3h3" /></>,
+  swap: <path d="M4 8h13l-3-3m6 11H7l3 3" />,
+  menu: <path d="M4 6h16M4 12h16M4 18h16" />,
+  close: <path d="m5 5 14 14M5 19 19 5" />,
+  code: <path d="m7 7-5 5 5 5m10-10 5 5-5 5m-3-14-4 18" />,
+  terminal: <><rect x="2" y="3" width="20" height="18" rx="2" /><path d="m6 8 4 4-4 4m7 0h5" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></>,
+  moon: <path d="M20.8 13A9 9 0 0 1 11 3.2 9 9 0 1 0 20.8 13Z" />,
+  github: <path d="M9 19c-4.3 1.3-4.3-2.2-6-2.7m12 5v-3.5c0-1 .1-1.4-.5-2 3.4-.4 7-1.7 7-7.5a5.7 5.7 0 0 0-1.5-4 5.4 5.4 0 0 0-.1-4S18.6-.1 15.5 2a14 14 0 0 0-7 0C5.4-.1 4.1.3 4.1.3A5.4 5.4 0 0 0 4 4.3a5.7 5.7 0 0 0-1.5 4c0 5.8 3.6 7.1 7 7.5-.6.6-.6 1.2-.5 2V21" />,
+};
+export function Icon({ name }: { name: string }) {
+  return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}

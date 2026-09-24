@@ -37,6 +37,7 @@ type AgentQARequest struct {
 	MCPServiceIDs    []string          `json:"mcp_service_ids,omitempty"`    // Optional MCP service allow list (deprecated)
 	Images           []ImageAttachment `json:"images,omitempty"`             // Attached images for multimodal chat
 	Channel          string            `json:"channel,omitempty"`            // Source channel: "web", "api", "im", etc.
+	QuestionOrigin   *QuestionOrigin   `json:"question_origin,omitempty"`    // Source of a picked suggested question
 }
 
 // AgentResponseType defines the type of agent response
@@ -86,16 +87,17 @@ type ContextUsage struct {
 
 // TokenUsage is the turn or event usage payload on the agent stream.
 type TokenUsage struct {
-	PromptTokens     int          `json:"prompt_tokens"`
-	CompletionTokens int          `json:"completion_tokens"`
-	TotalTokens      int          `json:"total_tokens"`
-	CachedTokens     int          `json:"cached_tokens,omitempty"`
-	CacheReadTokens  int          `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int          `json:"cache_write_tokens,omitempty"`
-	CacheMissTokens  int          `json:"cache_miss_tokens,omitempty"`
-	CacheReported    bool         `json:"cache_reported"`
-	CacheStatus      string       `json:"cache_status,omitempty"`
-	Context          ContextUsage `json:"context,omitempty,omitzero"`
+	PromptTokens      int          `json:"prompt_tokens"`
+	CompletionTokens  int          `json:"completion_tokens"`
+	TotalTokens       int          `json:"total_tokens"`
+	CachedTokens      int          `json:"cached_tokens,omitempty"`
+	CacheReadTokens   int          `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens  int          `json:"cache_write_tokens,omitempty"`
+	CacheMissTokens   int          `json:"cache_miss_tokens,omitempty"`
+	CacheReported     bool         `json:"cache_reported"`
+	CacheStatus       string       `json:"cache_status,omitempty"`
+	ContextTokenScale float64      `json:"context_token_scale,omitempty"`
+	Context           ContextUsage `json:"context,omitempty,omitzero"`
 }
 
 // AgentStreamResponse agent streaming response

@@ -1,4 +1,9 @@
 export default {
+  toolbox: {
+    "title": "Toolbox",
+    "description": "Manage skills, external tools, and browser connections for your agents.",
+    "unavailable": "No tools are available in the current workspace."
+  },
   localBrowser: {
     pipOpen: "Pop out preview",
     pipReturn: "Return to conversation",
@@ -59,12 +64,13 @@ export default {
     "previewIdle": "Last preview retained",
     "previewLive": "Preview syncing",
     "previewLoading": "Fetching preview",
+    "borrowHint": "Switch to the page being borrowed and choose Allow or Deny in the BrowserSkill confirmation. Approval continues automatically. Continue operation only resumes a paused task; it does not approve borrowing.",
     "helpHint": "Open the browser from the preview, complete the requested step, then confirm completion in the browser help overlay.",
 
     "settingsTitle": "Browser connection",
-    "settingsDescription": "Pair BrowserSkill with your local Chrome to operate real web pages from conversations.",
+    "settingsDescription": "Pair BrowserSkill with your local Chrome or Edge to operate real web pages from conversations.",
     "openSettings": "Open browser settings",
-    "settingsHint": "Connect BrowserSkill in personal settings to use your local browser here.",
+    "settingsHint": "Connect BrowserSkill in Toolbox to use your local browser here.",
     "unavailable": "Local browsing is not enabled on this server. Contact your administrator.",
 
     "source": "Browser source",
@@ -77,26 +83,40 @@ export default {
     "pause": "Pause browser",
     "start": "Start task",
     "stop": "End browser task",
-    "pairHint": "Paste the pairing link into Remote connection in the extension and confirm the server.",
+    "resumeShort": "Resume",
+    "pauseShort": "Pause",
+    "stopShort": "End",
+    "pairHint": "Open Connection settings → Remote connection in the extension, paste the pairing link, and confirm the server. The link is valid for 5 minutes and can be used once.",
     "copyPairing": "Copy pairing link",
     "copied": "Copied",
-    "windowHint": "Tasks run in a labeled Chrome tab group. Existing tabs require your permission.",
+    "windowHint": "Tasks run in a separate browser Agent Window. Borrowing existing tabs requires your permission.",
     "preview": "Local browser task preview",
     "waiting": "Waiting for a task page",
-    "startHint": "A browser request creates labeled task tabs in the background.",
+    "startHint": "A browser request creates a separate Agent Window.",
     "revoke": "Revoke device access",
     "revokeConfirm": "You will need to pair again before using the local browser.",
     "failed": "Operation failed. Please retry.",
-    "productDescription": "Run browser tasks in your Chrome",
+    "productDescription": "An open-source Chrome and Edge extension that lets agents open pages, read content, and take actions in your browser.",
     "offline": "Offline",
     "notPaired": "Not paired",
     "lastSeen": "Last connected",
     "readyHint": "Ready. Return to the conversation and describe your browser task.",
-    "reconnectHint": "Authorization is saved. Keep Chrome and BrowserSkill open to reconnect automatically.",
+    "capabilitiesTitle": "Your agent can",
+    "sidebarStatus": "Show connection status in the sidebar",
+    "reconnectHint": "Authorization is saved. Keep your browser and BrowserSkill open to reconnect automatically.",
     "replaceDevice": "Change browser",
     "installExtension": "Install BrowserSkill",
-    "installHint": "Download the extension built for this server and install it in Chrome.",
-    "downloadExtension": "Download extension",
+    "storeInstall": "Chrome Web Store",
+    "edgeStoreInstall": "Edge Add-ons",
+    "extensionMinVersion": "Requires BrowserSkill v{version} or later. Works with Chrome and Edge.",
+    "extensionOutdated": "Extension v{current} is out of date. Update to v{version} or later.",
+    "manualInstall": "Install manually (alternative)",
+    "storeInstallHint": "Install BrowserSkill from the Chrome Web Store or Edge Add-ons, then return here to pair.",
+    "installHint": "If the store is unavailable or its version is incompatible, download the matching package and install it manually.",
+    "downloadExtension": "Download matching package",
+    "officialExtension": "Official extension (Chrome Web Store)",
+    "installGuide": "How do I install the downloaded package?",
+    "pairGuide": "How do I use the pairing link?",
     "pairBrowser": "Connect this browser",
     "packageUnavailable": "Ask your administrator for the matching extension package; a download is not configured yet.",
     "manualCopy": "Select and copy the link below. It expires in 5 minutes and can be used once.",
@@ -104,21 +124,84 @@ export default {
     "copyAgain": "Copy again",
     "usageTitle": "How to use",
     "usageStep1Title": "Install the extension",
-    "usageStep1Text": "Unzip the package, enable Developer mode on the Chrome extensions page, and choose Load unpacked.",
+    "usageStep1Text": "Unzip the downloaded ZIP, enter chrome://extensions (edge://extensions in Edge) in the address bar, enable Developer mode, choose Load unpacked, and select the extracted extension folder.",
     "usageStep2Title": "Pair this browser",
-    "usageStep2Text": "Copy the pairing link and paste it into Remote connection in the extension. Pair once for all conversations in this space.",
+    "usageStep2Text": "Copy the pairing link into Connection settings → Remote connection in the extension and confirm the server. Pair once for all conversations in this space.",
     "usageStep3Title": "Describe the task in chat",
-    "usageStep3Text": "Turn on the local browser in the input bar and describe the web task. It runs in a labeled tab group.",
+    "usageStep3Text": "Turn on Local browser in the conversation input bar before sending a web task. Pairing does not enable this option automatically. Tasks run in a separate Agent Window.",
     "usageStep4Title": "Preview, locate, and resume",
     "usageStep4Text": "A small preview appears in the conversation. Click it to find the task tab. Interrupted tasks stay paused after reconnect — resume them from the preview. Existing tabs require your permission.",
     "running": "Running",
     "locateWindow": "Show browser",
     "reconnectShort": "Waiting to reconnect",
 },
+  artifactLibrary: {
+    title: 'Artifacts',
+    subtitle: 'Files your agents generated across all of your conversations',
+    typeFilter: 'Filter by type',
+    searchPlaceholder: 'Search filenames',
+    categories: {
+      all: 'All',
+      document: 'Documents',
+      spreadsheet: 'Spreadsheets',
+      presentation: 'Presentations',
+      image: 'Images',
+      web: 'Web pages',
+      data: 'Data'
+    },
+    groups: {
+      today: 'Today',
+      yesterday: 'Yesterday',
+      last7Days: 'Last 7 days',
+      last30Days: 'Last 30 days',
+      earlier: 'Earlier'
+    },
+    total: '{count} files',
+    versions: '{count} versions',
+    preview: 'Preview',
+    delete: 'Delete',
+    deleteTitle: 'Delete this file?',
+    deleteConfirm: '“{name}” and its stored contents will be permanently deleted. This cannot be undone.',
+    deleteConfirmVersions: 'All {count} versions of “{name}” and their stored contents will be permanently deleted. This cannot be undone.',
+    deleted: 'File deleted',
+    deleteFailed: 'Delete failed, please retry.',
+    download: 'Download',
+    downloadFailed: 'Download failed. Please try again later.',
+    openSession: 'Open conversation',
+    untitledSession: 'Untitled conversation',
+    loadMore: 'Load more',
+    loadFailed: 'Could not load artifacts',
+    retry: 'Retry',
+    clearFilters: 'Clear filters',
+    empty: {
+      title: 'No artifacts yet',
+      description: 'Ask an agent to produce a report, spreadsheet or slide deck and the files will show up here'
+    },
+    noMatches: {
+      title: 'No matching files',
+      description: 'Try a different keyword or file type'
+    }
+  },
+  resourceSort: {
+    title: 'Sort',
+    updatedTime: 'Updated time',
+    updatedTimeDescription: 'Default option.',
+    createdTime: 'Created time',
+    createdTimeDescription: 'View the newest or earliest created items',
+    name: 'Name',
+    nameDescription: 'Quickly find an item when you know its name',
+    recentlyUpdated: 'Recently updated',
+    earliestUpdated: 'Earliest updated',
+    recentlyCreated: 'Recently created',
+    earliestCreated: 'Earliest created',
+    nameAscending: 'A–Z',
+    nameDescending: 'Z–A',
+  },
   menu: {
     sessionInProgress: 'Conversation in progress',
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
+    artifacts: 'Artifacts',
     organizations: 'Shared Spaces',
     newChat: 'New Chat',
     settings: 'System Settings',
@@ -153,6 +236,7 @@ export default {
     deleteSession: 'Delete Conversation',
     renamePlaceholder: 'Enter a conversation title',
     unpinSuccess: 'Conversation unpinned',
+    temporaryWorkspace: 'Temporary workspace',
     sessionIdCopied: 'Session ID copied',
     linkCopied: 'Conversation link copied',
     copyFailed: 'Copy failed. Check your browser clipboard permission.',
@@ -443,6 +527,11 @@ export default {
     sharedTooltip: 'Accessed from an external workspace via a shared space'
   },
   knowledgeBase: {
+    tagAddAction: 'Add tags',
+    documentCount: '{count} documents',
+    filters: 'Filters',
+    clearFilters: 'Clear filters',
+
     title: 'Knowledge Base',
     fileContent: 'File Content',
     accessInfo: {
@@ -481,13 +570,27 @@ export default {
     name: 'Name',
     description: 'Description',
     settings: 'Settings',
+    sort: {
+      title: 'Sort',
+      updatedTime: 'Updated time',
+      updatedTimeDescription: 'Sort by the latest change made to each file.',
+      createdTime: 'Upload/created time',
+      createdTimeDescription: 'Default. Review the newest additions or the earliest accumulated material.',
+      fileName: 'File name',
+      fileNameDescription: 'Quickly find a file whose name you already know.',
+      recentlyUpdated: 'Recently updated',
+      earliestUpdated: 'Earliest updated',
+      newestCreated: 'Newest uploaded',
+      earliestCreated: 'Earliest uploaded',
+      nameAscending: 'A–Z',
+      nameDescending: 'Z–A',
+    },
     tagUpdateSuccess: 'Tag updated successfully',
     tagEditDialogHeading: 'Edit tags',
-    tagEditSearch: 'Search tags...',
-    tagEditSelectedSection: 'Selected',
-    tagEditAvailableSection: 'Available',
-    tagEditNoSelected: 'None selected',
     folderTree: {
+      totalDocuments: '{count} documents total',
+      countHint: '{direct} documents in this folder; {total} including subfolders',
+      filteredCount: '{count} matching documents',
       title: 'Folders',
       rootRow: 'Root',
       rootRowTip: 'Knowledge base root; documents not in a subfolder live here',
@@ -528,10 +631,13 @@ export default {
     tagManageListSection: 'Tags',
     tagManageDocCount: '{count} documents',
     tagManageFaqCount: '{count} FAQ entries',
+    tagPickerSelected: 'Selected',
+    tagPickerUnselected: 'Not selected',
     tagSelectedCount: '{count} selected',
-    tagNewPlaceholder: 'New tag name, press Enter to add',
+    tagPickerSearch: "Search or create a tag",
+    tagPickerInUse: "This tag is in use. Remove its document associations before deleting it.",
+    tagPickerDeleteConfirm: "Delete tag “{name}”?",
     untagged: 'Untagged',
-    tagClearAction: 'Clear selection',
     tagCreateAction: 'Create tag',
     tagSearchPlaceholder: 'Type to filter tags',
     tagNamePlaceholder: 'Enter tag name',
@@ -546,13 +652,6 @@ export default {
     tagLabel: 'Tag',
     tagPlaceholder: 'Select tags',
     noTags: 'No tags',
-    uploadSuccess: 'File uploaded successfully!',
-    uploadFailed: 'File upload failed!',
-    fileExists: 'File already exists',
-    uploadAllSuccess: 'Successfully uploaded {count} files!',
-    uploadPartialSuccess: 'Upload completed: {success} succeeded, {fail} failed',
-    uploadAllFailed: 'All files failed to upload',
-    uploadingFolder: 'Uploading {total} files from folder...',
     videosFilteredNoVLM: 'Skipped {count} video file(s) (video upload is not supported)',
     unsupportedTypesHint: 'Some document types ({types}) have no available parser engine and cannot be processed',
     goToParserSettings: 'Configure',
@@ -583,6 +682,7 @@ export default {
     channelSlack: 'Slack',
     channelIm: 'IM Channel',
     channelNotion: 'Notion',
+    channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
@@ -709,6 +809,15 @@ export default {
     selectedCount: '{count} selected',
     clearSelection: 'Deselect all',
     batchDelete: 'Delete selected',
+    batchDownload: 'Download selected',
+    batchDownloading: 'Preparing download…',
+    batchDownloadHint: 'Download a ZIP of up to 200 documents and 512 MiB of original content per batch. Select all includes loaded documents only; web pages without original files are skipped. The ZIP keeps knowledge-base folders.',
+    batchDownloadStarted: 'ZIP saving started. Extract it, then upload the files and folders.',
+    batchDownloadFailed: 'Batch download failed. Please try again.',
+    batchDownloadSkipped: 'Skipped {count} documents that have no original file.',
+    batchDownloadNoFiles: 'None of the selected documents have an original file to download.',
+    batchDownloadTooLarge: 'Selected files total more than 512 MiB. Choose fewer documents and try again.',
+    selectLoaded: 'Select loaded',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',
     deleteSubmitted: 'Delete request submitted. Waiting for completion.',
     deletePending: 'Deletion is still pending. Refresh later to check the result.',
@@ -719,9 +828,6 @@ export default {
     batchTag: 'Batch Tag',
     batchTagDialogHeading: 'Batch Tag',
     batchTagSubtitle: 'Set tags for {count} selected documents (will replace existing tags)',
-    batchTagSelectedSection: 'Selected',
-    batchTagAvailableSection: 'Available',
-    batchTagNoSelected: 'None selected',
     batchTagSuccess: 'Tags applied to {count} documents',
     batchTagFailed: 'Batch tag failed',
     confirmBatchReparseDocument: 'Rebuild {count} selected documents? Existing content will be cleared and each document will be re-parsed.',
@@ -732,6 +838,10 @@ export default {
     statusCompleted: 'Completed',
     statusProcessing: 'Processing',
     statusFinalizing: 'Optimizing',
+    statusStalled: 'May be stuck',
+    stalledHint: 'No progress for {minutes} minutes; it may be stuck. Open the trace to see where it stopped, or stop parsing and rebuild the document.',
+    statusQueued: 'Queued',
+    queuedHint: 'No progress for {minutes} minutes, but its tasks are still waiting in the queue, usually because of a backlog. It will continue on its own.',
     statusFailed: 'Failed',
     statusCancelled: 'Cancelled',
     statusDraft: 'Draft',
@@ -769,13 +879,15 @@ export default {
     operationNotSupportedForType: 'This operation is not supported for the current knowledge base type',
     allFilesSkippedNoEngine: 'All selected files were skipped due to no available parser engine',
     filesSkippedNoEngine: '{count} file(s) skipped due to no available parser engine',
-    allUploadSuccess: 'All files uploaded successfully ({count} files)',
-    partialUploadSuccess: 'Partial upload success (success: {success}, failed: {fail})',
-    allUploadFailed: 'All files failed to upload ({count} files)',
     deleteSuccess: 'Knowledge deleted successfully!',
     chunkLoadFailed: 'Failed to load chunks'
   },
   uploadConfirm: {
+    documentSummary: "Document summary",
+    documentSummaryDescription: "Choose whether to automatically summarize documents in this import.",
+    generateSummary: "Generate document summaries",
+    generateSummaryHint: "Enabled by default. Disable to skip summaries while parsing, indexing, and other configured steps continue.",
+
     title: 'Confirm Upload',
     parseConfig: 'Parse settings',
     configNav: 'Parse settings navigation',
@@ -840,6 +952,15 @@ export default {
     },
     attempt: 'Attempt {n}',
     retry: 'Retry parsing',
+    notRun: 'Not run',
+    stageFailed: '{stage} failed',
+    copyError: 'Copy error details',
+    stat: {
+      duration: 'Duration',
+      attempt: 'Attempt',
+      tasks: 'Background tasks',
+      tasksValue: '{running} running · {failed} failed · {completed} done'
+    },
     refresh: 'Refresh now',
     copy: 'Copy',
     copyDetails: 'Copy details',
@@ -859,12 +980,17 @@ export default {
     minutesAgo: '{n}m ago',
     noActivity: 'No parsing activity yet',
     totalDuration: 'Total: {d}',
-    total: 'Total {d}',
+    stall: {
+      title: 'No progress for {minutes} minutes; this may be stuck',
+      hint: 'You can keep waiting, or stop parsing and rebuild the document. If it still makes no progress, it will be marked as failed automatically.',
+      hintAtStage: 'It stopped at the {stage} stage. You can keep waiting, or stop parsing and rebuild the document. If it still makes no progress, it will be marked as failed automatically.',
+      queuedTitle: 'No progress for {minutes} minutes; still waiting in the queue',
+      queuedHint: 'Tasks for this document are still queued, usually because of a backlog. It will continue on its own; no action is usually needed.'
+    },
     head: {
+      lastProgress: 'Last progress',
       stagesDone: 'Main stages',
       stagesProgress: 'Current stage',
-      postprocessTasks: 'Postprocess: {running} running / {failed} failed / {completed} completed',
-      completedWithActiveTrace: 'Processing completed, but {n} trace task(s) remain active',
       attempt: 'Attempt',
       updated: 'Updated'
     },
@@ -917,6 +1043,8 @@ export default {
       cancelled: 'Cancelled'
     },
     errorCode: {
+      TASK_STALLED: 'Stopped after no progress',
+      TASK_STALLED_SUGGESTION: 'Processing made no progress past the time limit and had no task left in the queue, so it was marked as failed. Click Retry; if this keeps happening, check the service this stage depends on (document parsing, model, or vector store).',
       UNKNOWN_SUGGESTION: 'Check the application logs for details.'
     }
   },
@@ -932,10 +1060,16 @@ export default {
       preview: 'Preview',
       previewBack: 'Back to list',
       collecting: 'Saving generated files…',
+      delete: 'Delete',
+      deleteTitle: 'Delete this file?',
+      deleteConfirm: '“{name}” and its stored contents will be permanently deleted. This cannot be undone.',
+      deleted: 'File deleted',
+      deleteFailed: 'Delete failed, please retry.',
       download: 'Download',
       downloadFailed: 'Download failed, please retry.',
       inlinePreviewHint: 'Click to preview',
       inlineMissing: 'File unavailable',
+      inlineDeleted: 'File deleted',
     },
     updatePlan: 'Update Plan',
     webSearchFound: 'Found <strong>{count}</strong> web search result(s)',
@@ -1010,6 +1144,7 @@ export default {
     shareScope: {
       title: 'Share Scope',
       desc: 'Space members have read-only access to this agent and will use it according to your current configuration; your changes to the agent will sync to shared spaces. To allow space members to edit knowledge base content, share the knowledge base to the space.',
+      skillSecretsWarning: 'This agent uses skills. When space members use it, the skills run in this workspace\'s sandbox with the environment variables admins configured for them (such as API keys), and members can have the agent reveal those values. Share it only if that is acceptable.',
       knowledgeBase: 'Knowledge bases',
       chatModel: 'Chat model',
       rerankModel: 'Rerank model',
@@ -1043,6 +1178,8 @@ export default {
       enabled: 'Agent enabled'
     },
     editor: {
+      reasoningEffortUnsupported: 'The selected model cannot think; every option except "Off" is ignored.',
+      reasoningEffortAlwaysOn: 'The selected model always reasons and cannot be switched off; only the effort level can be changed.',
       createTitle: 'Create Agent',
       editTitle: 'Edit Agent',
       buttons: {
@@ -1159,6 +1296,7 @@ export default {
       goSandboxSettings: 'Manage sandboxes',
       goSkillSettings: 'Manage skills',
       installToThisSandbox: 'Install onto this sandbox',
+      upgradeOnThisSandbox: 'Upgrade this sandbox to the catalog version',
       installShort: 'Install',
       viewInstallProgress: 'View progress',
       skillNotInstalled: 'Not installed',
@@ -1654,6 +1792,23 @@ export default {
       installAccepted: 'Install started',
       installPartial: 'Started on some sandboxes. {failed} could not start.',
       installOutdated: 'Differs from catalog',
+      upgrade: 'Upgrade',
+      upgradeCount: 'Upgrade {count}',
+      upgradeTitle: 'Upgrade skill',
+      upgradeDrawerDesc: 'Upgrade {name} on the selected sandboxes to the catalog version. Each sandbox keeps running its current version until the upgrade finishes, and a failed upgrade leaves it in place.',
+      upgradeAvailable: 'Upgrade available',
+      upgradeFromTo: 'Upgrade {from} → {to}',
+      upgradeAccepted: 'Upgrade started',
+      noSandboxToUpgrade: 'No sandbox needs an upgrade.',
+      upgradeRowTitle: 'New version available',
+      upgradeRowHint: 'This sandbox runs a different version from the catalog. It keeps running it until the upgrade finishes, and a failed upgrade leaves it in place.',
+      upgradeRowHintVersions: 'This sandbox runs {from}; the catalog has {to}. {from} keeps running until the upgrade finishes, and a failed upgrade leaves it in place.',
+      upgradeRowHintFailed: 'The install on this sandbox did not succeed, and the catalog has moved on. Upgrading installs the catalog version instead.',
+      upgradeRowHintFailedVersions: 'Installing {from} on this sandbox did not succeed, and the catalog has {to}. Upgrading installs {to} instead.',
+      servedWhileUpgrading: 'Upgrading; still running {version}',
+      servedWhileUpgradingPlain: 'Upgrading; still running the previous version',
+      servedAfterFailure: 'Upgrade failed; still running {version}',
+      servedAfterFailurePlain: 'Upgrade failed; still running the previous version',
       loadFailed: 'Failed to load',
     },
     mcpService: 'MCP Service',
@@ -2388,6 +2543,14 @@ export default {
     me: 'Me',
     confirm: 'Confirm',
     cancel: 'Cancel',
+    unsavedChanges: {
+      title: 'Unsaved changes',
+      body: 'Your changes will be lost if you close now. Close anyway?',
+      discard: 'Discard changes',
+      keepEditing: 'Keep editing',
+    },
+    fullscreen: 'Full screen',
+    exitFullscreen: 'Exit full screen',
     save: 'Save',
     delete: 'Delete',
     edit: 'Edit',
@@ -2490,11 +2653,21 @@ export default {
       link: 'Insert link',
       image: 'Insert image',
       table: 'Insert table',
-      horizontalRule: 'Horizontal rule'
+      horizontalRule: 'Horizontal rule',
+      headingGroup: 'Heading',
+      insertGroup: 'Insert'
+    },
+    shortcuts: {
+      title: 'Shortcuts',
+      continueList: 'Continue the list',
+      indent: 'Indent / Shift+Tab to outdent'
     },
     view: {
-      editLabel: 'Back to edit',
-      previewLabel: 'Preview content'
+      edit: 'Edit',
+      split: 'Split',
+      preview: 'Preview',
+      splitUnavailable: 'Widen the drawer or go full screen to split the view',
+      groupLabel: 'Editor view'
     },
     preview: {
       empty: 'No content yet'
@@ -2503,9 +2676,7 @@ export default {
       edit: 'Edit Markdown Knowledge',
       create: 'Create Markdown Knowledge'
     },
-    description: 'Write knowledge in Markdown with live preview',
     section: {
-      basic: 'Basic Info',
       content: 'Content'
     },
     labels: {
@@ -2527,9 +2698,9 @@ export default {
       published: 'Knowledge published and indexing started'
     },
     form: {
-      knowledgeBaseLabel: 'Target knowledge base',
       knowledgeBasePlaceholder: 'Select knowledge base',
       titleLabel: 'Knowledge title',
+      knowledgeBaseLabel: 'Target knowledge base',
       titlePlaceholder: 'Enter title',
       contentPlaceholder: 'Supports Markdown. Use # headings, lists, code blocks, etc.'
     },
@@ -2537,7 +2708,8 @@ export default {
     status: {
       draftTag: 'Status: Draft',
       publishedTag: 'Status: Published',
-      lastUpdated: 'Last updated: {time}'
+      lastUpdated: 'Last updated: {time}',
+      counter: '{chars} characters · {lines} lines'
     },
     loading: {
       content: 'Loading content...',
@@ -2551,11 +2723,7 @@ export default {
   },
   input: {
     addModel: 'Add Model',
-    placeholder: 'Ask questions directly to the model',
-    placeholderWithContext: 'Enter your question, will answer based on selected knowledge bases/files above',
-    placeholderWebOnly: 'Enter your question, will answer with web search',
-    placeholderKbAndWeb: 'Enter your question, will answer based on knowledge base and web search',
-    placeholderAgent: 'Ask {name}',
+    placeholder: 'Ask a question or describe a task…',
     agentMode: 'Smart Reasoning',
     normalMode: 'Quick Answer',
     normalModeDesc: 'Knowledge base RAG Q&A',
@@ -2644,6 +2812,9 @@ export default {
   createChat: {
     title: 'Hi, I am WeKnora — your knowledge, within reach',
     newSessionTitle: 'New Session',
+    openProject: 'Select project',
+    clearProject: 'Clear',
+    pickFailed: 'Could not open the selected path',
     messages: {
       createFailed: 'Failed to create session',
       createError: 'Failed to create session, please try again later'
@@ -2716,16 +2887,6 @@ export default {
       questionGeneration: 'Question Generation',
       wiki: 'Wiki'
     },
-    uploadProgress: {
-      uploadingTitle: 'Uploading folder documents to "{name}"',
-      detail: '{completed}/{total} files finished',
-      keepPageOpen: 'Please keep this page open while files upload.',
-      completedTitle: 'Upload finished for "{name}"',
-      completedDetail: 'All {total} files uploaded. Refreshing list to show parsing status...',
-      refreshing: 'Refreshing list to show parsing status...',
-      errorTip: 'Some files failed to upload. Please check the notifications.',
-      unknownKb: 'Knowledge Base {id}'
-    }
   },
   embedPublish: {
     create: 'New embed channel',
@@ -2879,6 +3040,8 @@ export default {
         targetType: 'Target type',
         targetId: 'Target ID',
         actorId: 'Initiator ID',
+        apiKeyName: 'API key name',
+        apiKeyId: 'API key ID',
         details: 'Details'
       },
       drawer: {
@@ -2888,6 +3051,8 @@ export default {
         targetChange: 'Change details'
       },
       systemActor: 'System',
+      actorWithAPIKey: '{actor} · API Key · {name}',
+      actorAPIKey: 'API Key · {name}',
       knowledgeBase: 'Knowledge base',
       countItems: '{count} items',
       titleWithCount: '{title} and {count} more',
@@ -3022,7 +3187,22 @@ export default {
       nameLabel: 'Knowledge Base Name',
       namePlaceholder: 'Enter knowledge base name',
       descriptionLabel: 'Knowledge Base Description',
-      descriptionPlaceholder: 'Enter knowledge base description (optional)'
+      descriptionPlaceholder: 'Enter knowledge base description (optional)',
+      profile: {
+        title: 'AI-generated description',
+        hint: 'Derived from the document profiles. It never overwrites the manual description above; agents read both to decide whether a question belongs to this knowledge base.',
+        empty: 'Not generated yet. Upload documents, let their summaries finish, then use the button below.',
+        noDocuments: 'No parsed documents in this knowledge base yet.',
+        questions: 'Typical questions',
+        generate: 'Generate AI description',
+        regenerate: 'Regenerate',
+        adopt: 'Use as description',
+        generated: 'AI description generated',
+        generateFailed: 'Failed to generate the AI description',
+        adopted: 'Copied into the description; save to apply',
+        failed: 'Last generation failed: {error}',
+        generatedAt: 'Generated {time} · based on {count} documents'
+      }
     },
     wiki: {
       title: 'Wiki Settings',
@@ -3117,6 +3297,9 @@ export default {
       revisionDiffContent: 'Body',
       revisionDiffEmpty: 'No differences in title, summary, or body vs current',
       revisionLoadFailed: 'Failed to load revision history',
+      revisionNotRetained: 'This version has no retained snapshot or it was cleaned up',
+      revisionNotRetainedRange: 'v{ver} · full content',
+      revisionNotRetainedHint: 'No snapshot is retained for the previous version v{prev} (versions from before the upgrade were not snapshotted; old snapshots may also have been pruned) — showing the full content of v{ver} from scratch.',
       revertBtn: 'Revert to this version',
       revertConfirm: 'Revert to v{ver}? The current content is snapshotted first, so the revert itself can be undone.',
       revertSuccess: 'Reverted to v{ver}',
@@ -3237,6 +3420,9 @@ export default {
       save: 'Save Configuration',
       saveAndClose: 'Save and Close',
     },
+    footer: {
+      instantEffect: 'Changes on this page take effect immediately; no save needed',
+    },
     postCreateHint: {
       title: 'Created successfully',
       footer: 'Keep adjusting settings, configure sharing and data sources, then click "Save and Close".',
@@ -3335,6 +3521,7 @@ export default {
       batchDisable: 'Disable selected',
       batchDelete: 'Delete selected',
       confirmBatchDelete: 'Delete the selected {count} FAQ entries? This action cannot be undone.',
+      confirmDelete: 'Delete this FAQ entry? This cannot be undone.',
       batchDeleteSuccess: 'Deleted {count} FAQ entries'
     },
     faqImport: {
@@ -3501,6 +3688,16 @@ export default {
         instructionsDescription: 'Specify audience, scenario, and wording while the system retains the stable output format',
         instructionsPlaceholder: 'For example: generate natural customer-support questions and avoid exam-style wording…'
       },
+      profile: {
+        label: 'Auto-generate knowledge base description',
+        description: 'After documents are added, removed or re-summarized, derive the description from the aggregated document profiles. The aggregation itself makes no model call; one small call runs only when the aggregate changed.',
+        modelLabel: 'Generation model',
+        modelDescription: 'Leave empty to reuse the knowledge-base summary model.',
+        modelPlaceholder: 'Select a generation model',
+        instructionsLabel: 'Description instructions',
+        instructionsDescription: 'Name the audience, terms to keep or the tone; the output format stays fixed.',
+        instructionsPlaceholder: 'e.g. Written for support agents; describe product lines in plain words and keep model numbers…'
+      },
       autoTag: {
         label: 'Automatic Tagging',
         description: 'After parsing, select suitable tags from the existing knowledge-base tags. Tags are never created or deleted, but one extra model call is required.',
@@ -3607,10 +3804,27 @@ export default {
         authRevoked: 'Your session is no longer valid, so the terminal was disconnected. Sign in again, then reconnect.',
     },
     questionMinimapTitle: 'Q&A',
+    questionMinimapPosition: 'Turn {current} of {total}',
     questionMinimapAriaLabel: 'Question outline',
     questionMinimapAttachmentPlaceholder: '(Attachment)',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
+    truncatedHint: 'This answer was cut off at the per-response output limit. Above is what the model produced before the cut.',
+    rewind: {
+      tooltip: 'Rewind to here',
+      confirmBody: 'Later messages will be deleted. Rewinding from a question also removes that question and puts it back in the input. The workspace rolls back when a checkpoint is available. This cannot be undone.',
+      confirmButton: 'Rewind',
+      cancelButton: 'Cancel',
+      success: 'Rewound',
+      busy: 'Wait until this turn finishes before rewinding',
+      noCheckpoint: 'Cannot rewind: this session has a live workspace but no reachable checkpoint',
+      sandboxReplaced: 'Cannot rewind: the sandbox was replaced, so the old checkpoint is unreachable',
+      reloadFailed: 'Conversation was rewound, but history could not be reloaded. Refresh if older messages are missing',
+      failed: 'Rewind failed. Please try again',
+      skipped: 'Conversation rewound; workspace was left unchanged',
+      skipNoSandbox: 'Conversation rewound; workspace was left unchanged (no sandbox is bound)',
+      skipNoCheckpoint: 'Conversation rewound; workspace was left unchanged (no checkpoint to restore)',
+    },
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',
@@ -3706,6 +3920,7 @@ export default {
     processError: 'Processing error',
     sessionExcerpt: 'Session Excerpt',
     noAnswerContent: '(No answer content)',
+    manualSourcesHeading: 'Sources',
     noMatchFound: 'No matching content found',
     deleteSessionFailed: 'Delete failed, please try again later!',
     imageTooMany: 'Maximum 5 images allowed',
@@ -4433,6 +4648,7 @@ export default {
   },
   error: {
     networkError: 'Network error, please check your connection',
+    requestTimeout: 'Request timed out. Large files or slow connections may need another try.',
     invalidCredentials: 'Invalid username or password',
     tokenRefreshFailed: 'Token refresh failed',
     pleaseRelogin: 'Please log in again',
@@ -4474,6 +4690,28 @@ export default {
     }
   },
   model: {
+    reasoning: {
+      levels: {
+        off: 'Off',
+        auto: 'Auto',
+        minimal: 'Minimal',
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        xhigh: 'Extra high',
+        max: 'Max',
+      },
+      levelDescriptions: {
+        off: 'Thinking disabled; no thinking parameters are sent',
+        auto: 'Vendor default intensity; the model decides how much to think',
+        minimal: 'Least thinking, fastest responses',
+        low: 'Light thinking',
+        medium: 'Moderate thinking',
+        high: 'Deep thinking, slower responses',
+        xhigh: 'Very high thinking budget (select models only)',
+        max: 'Maximum thinking budget (select models only)',
+      },
+    },
     modelName: 'Model Name',
     defaultTag: 'Default',
     addModelInSettings: 'Go to global settings to add models',
@@ -4481,6 +4719,54 @@ export default {
     selectModelPlaceholder: 'Select a model',
     searchPlaceholder: 'Search models...',
     editor: {
+      maxOutputTokensLabel: 'Max output tokens',
+      maxOutputTokensPlaceholder: 'Leave empty for the catalog default',
+      maxOutputTokensDesc: 'Output cap per response. Leave empty to use the catalog default for this model.',
+      catalog: {
+        reasoning: 'Reasoning',
+        vision: 'Vision',
+        hint: 'Pick a model from the vendor catalog or type a custom model name.',
+      },
+      resolved: {
+        title: 'How this model is called',
+        empty: 'Fill in the vendor and model name to see how this model will be called',
+        failed: 'Resolve failed',
+        protocol: 'Request protocol',
+        catalog: 'Capabilities from',
+        catalogedYes: 'Built-in model profile',
+        catalogedNo: 'Vendor defaults (model not in the catalog)',
+        endpoint: 'Request endpoint',
+        thinkingFormat: 'Thinking switch sent as',
+        thinkingLevels: 'Selectable effort',
+        noThinking: 'This model cannot think',
+      },
+      advanced: {
+        toggle: 'Advanced',
+        api: {
+          label: 'Protocol override',
+          auto: 'Auto (from vendor / URL)',
+          desc: 'Force a request protocol; normally unnecessary.',
+        },
+        remoteModelName: {
+          label: 'Remote model name',
+          placeholder: 'Leave empty to use the model name',
+          desc: 'Model id actually sent to the vendor when it differs from the name above.',
+        },
+        legacyThinking: {
+          label: 'Thinking parameter format (legacy)',
+          catalog: 'Follow catalog default (recommended)',
+          none: 'Do not send thinking fields',
+          desc: 'This model still carries a legacy thinking_control setting. Choose "Follow catalog default" to let the catalog decide.',
+        },
+        compat: {
+          label: 'Protocol compat override (JSON)',
+          placeholder: "{'{'} \"max_tokens_field\": \"max_tokens\" {'}'}",
+          desc: 'Only needed when the endpoint differs from the catalog defaults; include just the fields to change. Leave empty for no override.',
+          docLink: 'Field reference',
+          invalid: 'Invalid JSON',
+          mustBeObject: 'Must be a JSON object',
+        },
+      },
       addTitle: 'Add Model',
       editTitle: 'Edit Model',
       sectionType: 'Model Type',
@@ -4515,23 +4801,6 @@ export default {
       baseUrlPlaceholderAsr: 'e.g. https://api.openai.com/v1',
       apiKeyOptional: 'API Key (optional)',
       apiKeyPlaceholder: 'Enter API Key',
-      lkeap: {
-        secretIdLabel: 'SecretId',
-        secretIdPlaceholder: 'Tencent Cloud API SecretId',
-        secretKeyLabel: 'SecretKey',
-        secretKeyPlaceholder: 'Tencent Cloud API SecretKey',
-        regionLabel: 'Region',
-        regionPlaceholder: 'ap-guangzhou',
-        regionDesc: 'RunRerank supports ap-beijing, ap-guangzhou, etc. Default: ap-guangzhou',
-        rerankCredentialHint: 'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.'
-      },
-      volcengine: {
-        accessKeyLabel: 'Access Key ID',
-        accessKeyPlaceholder: 'Volcengine Access Key ID',
-        secretKeyLabel: 'Secret Access Key',
-        secretKeyPlaceholder: 'Volcengine Secret Access Key',
-        rerankCredentialHint: 'Rerank uses VikingDB AK/SK signing, not an Ark API key. Recommended model: doubao-seed-rerank.'
-      },
       customHeadersLabel: 'Custom Request Headers (optional)',
       customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored.',
       customHeadersAdd: 'Add Header',
@@ -4559,26 +4828,6 @@ export default {
       maxConcurrencyLabel: 'Background concurrency limit',
       maxConcurrencyPlaceholder: '0 = use global default',
       maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
-      thinkingControlLabel: 'Thinking mode request format',
-      thinkingControlDesc: 'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
-      thinkingControl: {
-        none: {
-          label: 'Do not send thinking fields',
-          hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)'
-        }
-      },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
       listRefreshed: 'List refreshed',
@@ -4600,6 +4849,7 @@ export default {
       ollamaNotSupportRerank: 'Ollama does not support ReRank models, please use a remote API instead',
       goToOllamaSettings: 'Open Settings',
       validation: {
+        extraFieldRequired: 'Please fill in {name}',
         modelNameRequired: 'Please enter the model name',
         modelNameEmpty: 'Model name cannot be empty',
         modelNameMax: 'Model name cannot exceed 100 characters',
@@ -4609,112 +4859,7 @@ export default {
       },
       providerLabel: 'Provider',
       providerPlaceholder: 'Select model provider',
-      providers: {
-        openai: {
-          label: 'OpenAI',
-          description: 'gpt-5.2, gpt-5-mini, etc.'
-        },
-        anthropic: {
-          label: 'Anthropic',
-          description: 'Claude models via native Anthropic Messages API'
-        },
-        azure_openai: {
-          label: 'Azure OpenAI',
-          description: 'OpenAI service hosted on Microsoft Azure'
-        },
-        aliyun: {
-          label: 'Aliyun DashScope',
-          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.'
-        },
-        zhipu: {
-          label: 'Zhipu BigModel',
-          description: 'glm-4.7, embedding-3, rerank, etc.'
-        },
-        openrouter: {
-          label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
-        },
-        litellm: {
-          label: 'LiteLLM',
-          description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.). Replace the placeholder URL; loopback hosts need SSRF_WHITELIST.'
-        },
-        requesty: {
-          label: 'Requesty',
-          description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'
-        },
-        generic: {
-          label: 'Custom (OpenAI-compatible)',
-          description: 'Generic API endpoint'
-        },
-        siliconflow: {
-          label: 'SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1, etc.'
-        },
-        jina: {
-          label: 'Jina',
-          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.'
-        },
-        volcengine: {
-          label: 'Volcengine',
-          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.'
-        },
-        deepseek: {
-          label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner, etc.'
-        },
-        hunyuan: {
-          label: 'Hunyuan',
-          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.'
-        },
-        minimax: {
-          label: 'MiniMax',
-          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.'
-        },
-        mimo: {
-          label: 'MiMo',
-          description: 'mimo-v2-flash'
-        },
-        gemini: {
-          label: 'Google Gemini',
-          description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.'
-        },
-        gpustack: {
-          label: 'GPUStack',
-          description: 'Choose your deployed model on GPUStack'
-        },
-        modelscope: {
-          label: 'ModelScope',
-          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.'
-        },
-        qiniu: {
-          label: 'Qiniu Cloud',
-          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.'
-        },
-        moonshot: {
-          label: 'Moonshot',
-          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.'
-        },
-        qianfan: {
-          label: 'Baidu Qianfan',
-          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.'
-        },
-        longcat: {
-          label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.'
-        },
-        lkeap: {
-          label: 'Tencent Cloud LKEAP',
-          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base, etc.'
-        },
-        nvidia: {
-          label: 'NVIDIA',
-          description: 'deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.'
-        },
-        novita: {
-          label: 'Novita AI',
-          description: 'moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b, etc.'
-        }
-      }
+      providerDocs: 'Read the {provider} model docs',
     },
     builtinTag: 'Built-in'
   },
@@ -4820,6 +4965,55 @@ export default {
     uploadFolder: 'Upload Folder',
     onlineEdit: 'Online Edit',
     deleteRecord: 'Delete Record'
+  },
+  uploadTasks: {
+    panelLabel: 'Uploads',
+    titleUploading: 'Uploading {done} of {total}',
+    titleParsing: 'Parsing {done} of {total}',
+    titleDone: 'All done',
+    titleDoneWithIssues: '{ok} done, {bad} not completed',
+    titleCancelled: 'Upload cancelled',
+    destination: 'Destination: {name}',
+    destinationMany: 'Destination: {count} knowledge bases',
+    remaining: 'about {time} left',
+    eta: {
+      seconds: '{n} sec',
+      minutes: '{n} min',
+      hours: '{n} hr'
+    },
+    hintUploading: 'Keep this page open until the upload finishes',
+    hintParsing: 'All files are uploaded. Parsing continues in the background, so you can leave this page',
+    legend: {
+      ready: 'Searchable',
+      active: 'In progress',
+      waiting: 'Queued',
+      failed: 'Failed',
+      duplicate: 'Already exists'
+    },
+    filterAll: 'All',
+    filterIssues: 'Not completed',
+    phaseWaiting: 'Queued',
+    phaseSaving: 'Saving…',
+    phasePending: 'Waiting to parse',
+    phaseParsing: 'Parsing',
+    phaseFinalizing: 'Searchable, still optimizing',
+    phaseReady: 'Done',
+    phaseUploadFailed: 'Upload failed',
+    phaseParseFailed: 'Parsing failed',
+    phaseDuplicate: 'Same file already in this knowledge base',
+    phaseCancelled: 'Cancelled',
+    phaseDeleted: 'Deleted',
+    cancel: 'Cancel',
+    cancelAll: 'Cancel all',
+    retry: 'Retry',
+    retryFailed: 'Retry ({count})',
+    open: 'Open',
+    collapse: 'Collapse',
+    expand: 'Expand',
+    close: 'Close',
+    closeConfirm: 'Closing stops the unfinished uploads ({count})',
+    closeConfirmOk: 'Cancel upload',
+    closeConfirmKeep: 'Keep uploading'
   },
   agentSettings: {
     modelRecommendation: {
@@ -5031,6 +5225,8 @@ export default {
       }
     },
     debug: {
+      reasoningEffort: 'Reasoning effort',
+      reasoningEffortDesc: 'Sends reasoning_effort using the levels reported by the model catalog',
       title: 'Model Test',
       description: 'Send a real request using saved model settings. Save pending edits before testing here.',
       groupModel: 'Select model',
@@ -5053,15 +5249,11 @@ export default {
       audioFile: 'Audio file',
       chooseFile: 'Choose file',
       parameters: 'Request parameters',
-      thinking: 'Thinking mode',
-      thinkingDesc: 'Only applies to models that support thinking',
       systemPrompt: 'System Prompt',
       systemPromptPlaceholder: 'Optional system prompt',
       run: 'Run test',
       copyResult: 'Copy result',
       history: 'History',
-      thinkOn: 'Thinking on',
-      thinkOff: 'Thinking off',
       runLabel: 'Run #{n}',
       success: 'Request succeeded',
       failed: 'Request failed',
@@ -5069,6 +5261,9 @@ export default {
       requestPreview: 'Request preview',
       requestFailed: 'Model test request failed',
       metrics: {
+        api: 'Protocol',
+        thinkingFormat: 'Thinking format',
+        requestedReasoningEffort: 'Requested effort',
         dimension: 'Dimensions',
         resultCount: 'Result count',
         answerChars: 'Answer chars',
@@ -5172,6 +5367,7 @@ export default {
 },
   mcpServiceDialog: {
     addTitle: 'Add MCP Service',
+    addDesc: 'Connect an external MCP service so agents can call its tools.',
     editTitle: 'Edit MCP Service',
     basicSection: 'Basic',
     connectionSection: 'Connection',
@@ -5529,9 +5725,9 @@ export default {
       button: 'Add Member',
       dialogTitle: 'Add Member',
       tipTenant: 'Membership is at the workspace level: once a workspace joins, all of its users share access to this space. Results below are deduplicated by workspace.',
-      searchTenant: 'Select Workspace',
-      searchTenantPlaceholder: 'Search by workspace name...',
-      searchTenantHint: 'Type at least 2 characters; results are deduplicated by workspace and exclude workspaces already in this space',
+      searchTenant: 'Workspace ID',
+      searchTenantPlaceholder: 'Enter the exact workspace ID',
+      searchTenantHint: 'Look up an exact workspace ID, or share an invitation link.',
       selectRole: 'Assign Role',
       confirmBtn: 'Add',
       success: 'Member added successfully',
@@ -5628,6 +5824,9 @@ export default {
   },
   tools: {
     multiKbSearch: 'Cross-KB Search',
+    searchKnowledge: 'Search knowledge',
+    readDocument: 'Read document',
+    listDocuments: 'List documents',
     knowledgeSearch: 'Knowledge Search',
     grepChunks: 'Text Pattern Search',
     getChunkDetail: 'Get Chunk Detail',
@@ -5779,6 +5978,8 @@ export default {
       getRelatedDocuments: 'Find Related Documents',
       getDocumentContent: 'Get Document Content',
       wikiReadSourceDoc: 'Deep-read Source Doc',
+      readDocument: 'Read document',
+      listDocuments: 'List documents',
       todoWrite: 'Plan Management',
       knowledgeGraphExtract: 'Knowledge Graph Extraction',
       thinking: 'Thinking',
@@ -5856,7 +6057,10 @@ export default {
     },
     knowledgeChunksList: {
       chunkRange: 'Loaded {fetched} / {total} chunks',
-      page: 'Page {page}, {pageSize} per page'
+      page: 'Page {page}, {pageSize} per page',
+      offsetRange: 'Chunks {from}–{to}',
+      queryMatches: '{count} matches for "{query}" in this document',
+      queryNoMatch: 'No matches for "{query}" in this document'
     },
     attachmentParsing: {
       parsedSummary: 'Parsed {count} attachment(s)',
@@ -6021,7 +6225,7 @@ export default {
       maxTokensAgent: 'Maximum tokens generated in each reasoning round, including tool-call JSON. Default is 4096 without a sandbox, or 24576 when a sandbox can write or edit files. A custom value is saved as entered and is not changed later.',
       thinking: 'Enable extended thinking capability (requires model support)',
       conversationSection: 'Configure multi-turn conversation and query rewriting parameters',
-      conversationSectionAgent: 'How much earlier conversation each turn carries. Smart reasoning is always multi-turn',
+      conversationSectionAgent: 'Smart reasoning is always multi-turn. Earlier conversation is kept up to the model context window, and older turns are summarized automatically once it fills',
       multiTurn: 'When enabled, historical conversation context will be preserved',
       historyRounds: 'Number of recent conversation rounds to keep as context',
       retainRetrievalHistory: 'Keep knowledge base results from earlier turns. When off, each turn searches again',
@@ -6054,6 +6258,12 @@ export default {
       thinkingDesc: 'Dynamic and reflective problem-solving thinking tool',
       todoWrite: 'Plan',
       todoWriteDesc: 'Create structured research plans',
+      searchKnowledge: 'Search knowledge',
+      searchKnowledgeDesc: 'Semantic, keyword or hybrid search over knowledge-base chunks',
+      readDocument: 'Read document',
+      readDocumentDesc: 'Read a document\'s metadata and chunks, with paging and in-document search',
+      listDocuments: 'List documents',
+      listDocumentsDesc: 'Page through the documents of a knowledge base',
       grepChunks: 'Keyword Search',
       grepChunksDesc: 'Quickly locate documents and chunks containing specific keywords',
       knowledgeSearch: 'Semantic Search',
@@ -6191,6 +6401,9 @@ export default {
       sessionModeUser: 'Per User (default)',
       sessionModeThread: 'Per Thread',
       sessionModeHint: 'User mode: each person has their own conversation. Use /clear to start fresh. Thread mode: each message thread is a separate conversation. Multiple people can collaborate in the same thread.',
+      replyLanguage: 'Reply Language',
+      replyLanguageDefault: 'Use system default',
+      replyLanguageHint: 'Fix the agent reply language for this channel. Leave unset to use the deployment default.',
       wechatScanBind: 'Scan to bind WeChat',
       wechatScanning: 'Scan the QR code with WeChat',
       wechatBindSuccess: 'WeChat bound successfully',
@@ -6465,6 +6678,7 @@ export default {
       feishu_drive: 'Feishu Drive',
       lark_drive: 'Lark Drive',
       notion: 'Notion',
+      confluence: 'Confluence',
       yuque: 'Yuque',
       dingtalk: 'DingTalk Docs',
       rss: 'RSS / Atom Feed',
@@ -6477,6 +6691,7 @@ export default {
       feishu_drive: 'Sync documents, spreadsheets and files from a Feishu Drive folder',
       lark_drive: 'Sync documents, spreadsheets and files from a Lark Drive folder (Feishu international)',
       notion: 'Sync pages and databases from Notion',
+      confluence: 'Sync spaces and pages from Confluence as Markdown',
       yuque: 'Sync documents from Yuque knowledge bases',
       dingtalk: 'Sync online documents from DingTalk knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
@@ -6505,6 +6720,13 @@ export default {
       operatorIdHint: 'Reads knowledge bases with this user’s permissions. Obtain it from the DingTalk user details API.',
       integrationToken: 'Integration Token',
       apiToken: 'API Token',
+      confluenceEdition: 'Edition',
+      confluenceEditionServer: 'Server / Data Center',
+      confluenceEditionCloud: 'Cloud',
+      confluenceBaseUrl: 'Confluence URL',
+      confluenceUsername: 'Username or email',
+      confluencePassword: 'Server/DC password',
+      confluenceApiToken: 'Cloud API token',
       imaClientId: 'IMA ClientID',
       imaApiKey: 'IMA APIKey',
       baseUrl: 'Base URL (optional)',
@@ -6626,13 +6848,118 @@ export default {
       copied: 'Copied',
     },
     title: 'Publish & Integrations',
+    mcpserver: {
+      title: 'MCP Server',
+      subtitle: 'Publish this workspace as an MCP server that Claude Desktop, Cursor, Claude Code and other MCP clients connect to directly. Each endpoint has its own token, knowledge-base scope and tool list.',
+      listTitle: 'Published endpoints',
+      empty: 'No MCP endpoints yet',
+      disabled: 'Disabled',
+      cardSummary: '{tools} tools · {scope}',
+      scopeAll: 'All knowledge bases',
+      scopeCount: '{count} knowledge bases',
+      create: 'New endpoint',
+      editTitle: 'Edit MCP endpoint',
+      createTitle: 'New MCP endpoint',
+      drawerDesc: 'The endpoint decides which knowledge bases a client can see and which tools it can call. The token is shown once, on creation and rotation.',
+      sectionBasic: 'Basics',
+      nameLabel: 'Name',
+      namePlaceholder: 'e.g. Product docs assistant',
+      descriptionLabel: 'Description',
+      descriptionPlaceholder: 'Optional: who uses this endpoint and for what',
+      enabledLabel: 'Enabled',
+      sectionScope: 'Knowledge-base scope',
+      kbScopeLabel: 'Accessible knowledge bases',
+      kbScopePlaceholder: 'Leave empty for every knowledge base in the workspace',
+      kbScopeHint: 'Every retrieval, ask and write tool is confined to these knowledge bases. Empty means the whole workspace.',
+      sectionTools: 'Exposed tools',
+      toolsHint: 'Only checked tools appear in the client tool list; unchecked tools are refused even when called by name. Write tools are off by default.',
+      clearGroup: 'Clear',
+      selectGroup: 'Select all',
+      toolsRequired: 'Select at least one tool',
+      groups: {
+        retrieve: 'Retrieval & reading',
+        chat: 'Question answering',
+        wiki: 'Wiki',
+        ingest: 'Writes (enable with care)',
+      },
+      tools: {
+        list_knowledge_bases: 'List knowledge bases',
+        list_knowledge_basesDesc: 'Return the knowledge bases in scope and the retrieval modes each supports',
+        search_knowledge: 'Semantic search',
+        search_knowledgeDesc: 'Find relevant passages for a natural-language question, with sources',
+        grep_chunks: 'Keyword / regex search',
+        grep_chunksDesc: 'Case-insensitive regex over raw chunks; best for exact terms, codes and names',
+        list_documents: 'List documents',
+        list_documentsDesc: 'Page through the documents of one knowledge base',
+        read_document: 'Read document',
+        read_documentDesc: 'Read a document\'s metadata and its chunks in order',
+        ask: 'Ask',
+        askDesc: 'Run the agent configured on this endpoint and return a cited answer; supports follow-up turns',
+        wiki_search: 'Search wiki',
+        wiki_searchDesc: 'Search the generated wiki pages',
+        wiki_read_page: 'Read wiki page',
+        wiki_read_pageDesc: 'Read one wiki page by slug',
+        wiki_index: 'Browse wiki index',
+        wiki_indexDesc: 'Show the table of contents of a knowledge base wiki',
+        add_document: 'Add document',
+        add_documentDesc: 'Add a document from Markdown text or a URL',
+        update_document: 'Update document',
+        update_documentDesc: 'Replace the content or title of a Markdown document',
+        delete_document: 'Delete document',
+        delete_documentDesc: 'Permanently delete a document and its index data',
+      },
+      sectionAsk: 'Ask settings',
+      defaultAgentLabel: 'Default agent',
+      defaultAgentPlaceholder: 'Built-in quick answer when empty',
+      defaultAgentHint: 'The agent the ask tool runs. Clients cannot choose an agent themselves; empty means the built-in quick answer.',
+      sectionLimits: 'Rate limit',
+      rateLimitLabel: 'Max calls per minute',
+      rateLimitHint: 'Applies to all tool calls on this endpoint; clients get a rate-limit error above it.',
+      sectionConnect: 'Connection',
+      stepConfig: 'Configure',
+      stepConnect: 'Connect',
+      snippetsLabel: 'Client configuration',
+      connectHintExisting: 'The token was shown once at creation (current token starts with {hint}…). Rotate the token to get a new one.',
+      tokenDialogTitle: 'Endpoint ready, save the token',
+      connectDialogTitle: 'Connect to this endpoint',
+      tokenOnce: 'This token is shown only once. Copy it now and store it somewhere safe.',
+      connectPlaceholderHint: 'For security the token is not shown again; the examples below use a placeholder you must replace with the token you saved.',
+      tokenLabel: 'Token',
+      urlLabel: 'Endpoint URL',
+      snippet: {
+        httpTitle: 'Cursor / VS Code / Claude Desktop',
+        httpDesc: 'Clients that speak Streamable HTTP take this mcpServers block as is.',
+        claudeCodeTitle: 'Claude Code',
+        claudeCodeDesc: 'One command in the terminal.',
+        stdioTitle: 'stdio-only clients',
+        stdioDesc: 'Bridged through mcp-remote; requires Node.js on the client machine.',
+      },
+      loadFailed: 'Failed to load MCP endpoints',
+      nameRequired: 'Name is required',
+      updated: 'Endpoint updated',
+      created: 'Endpoint created',
+      saveFailed: 'Save failed',
+      deleted: 'Endpoint deleted',
+      deleteFailed: 'Delete failed',
+      rotated: 'Token rotated; the old token stopped working',
+      rotateFailed: 'Failed to rotate token',
+      disabledToast: 'Endpoint disabled',
+      enabledToast: 'Endpoint enabled',
+      menuConnect: 'Connection info',
+      menuDisable: 'Disable',
+      menuEnable: 'Enable',
+      menuRotate: 'Rotate token',
+      copied: 'Copied',
+      deleteConfirm: 'Clients using this endpoint disconnect immediately. Delete it?',
+    },
     tabs: {
       im: 'IM Integration',
       embed: 'Web Embed',
       api: 'API Integration',
       chrome: 'Chrome Extension',
       cli: 'CLI',
-      claw: 'Claw Skill'
+      claw: 'Claw Skill',
+      mcpserver: 'MCP Server'
     },
     api: {
       title: 'API Integration',

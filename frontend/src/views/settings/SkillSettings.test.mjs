@@ -80,6 +80,25 @@ test('catalog cards can install onto sandboxes and manage one install', () => {
   assert.doesNotMatch(source, /install-chip/)
 })
 
+test('outdated installs can be upgraded from the catalog card', () => {
+  assert.match(source, /from '@\/utils\/skillUpgrade'/)
+  assert.match(source, /installUpgradable\(item, inst\)/)
+  assert.match(source, /skill-card__chip--upgrade/)
+  assert.match(source, /@click="openUpgrade\(item\)"/)
+  assert.match(source, /installsView\(item\)\.upgradable/)
+  assert.match(source, /settings\.skills\.upgradeTitle/)
+  assert.match(source, /settings\.skills\.upgradeFromTo/)
+  assert.match(source, /settings\.skills\.upgradeAccepted/)
+  // A ready install used to be unpickable, which left an outdated sandbox
+  // with no way to take the catalog version.
+  assert.match(source, /selectable: !busy && \(!ready \|\| upgradable\)/)
+  assert.doesNotMatch(source, /selectable: !busy && !ready,/)
+  // Upgrading goes through the catalog install, never the per-sandbox retry,
+  // which replays the archive that sandbox already has.
+  assert.doesNotMatch(source, /reinstallConfigSkill/)
+  assert.match(source, /:catalog-item="catalogItemById\(manageCatalogId\)"/)
+})
+
 test('adding a skill uses a two-step drawer like sandbox setup', () => {
   assert.match(source, /skill-add-steps/)
   assert.match(source, /settings\.skills\.addStepRegister/)
@@ -97,4 +116,8 @@ test('install step shows parsed skill and sandbox backend details', () => {
   assert.match(source, /sandbox-pick-list/)
   assert.doesNotMatch(source, /t-alert/)
   assert.doesNotMatch(source, /registered-alert/)
+})
+
+test('install status names the version still running while an upgrade is pending or failed', () => {
+  assert.match(source, /const served = servedPreviousText\(t, inst\)\n  if \(served\) return served/)
 })

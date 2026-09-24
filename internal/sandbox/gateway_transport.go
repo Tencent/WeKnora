@@ -154,25 +154,20 @@ func (p *SandboxGatewayTransportPool) dataTransport(target string) http.RoundTri
 	return actual.(http.RoundTripper)
 }
 
-// newGatewayDataTransport dials target regardless of the request's authority,
-// mirroring the SDK's proxy rewrite while adding the outbound address guard
-// the SDKs have no notion of.
-func newGatewayDataTransport(target string) *http.Transport {
-	return newGatewayDataTransportWithPolicy(target, DefaultOutboundURLPolicy())
-}
-
+// newGatewayDataTransportWithPolicy dials target regardless of the request's
+// authority, preserving the gateway rewrite and the configured outbound guard.
 func newGatewayDataTransportWithPolicy(target string, policy OutboundURLPolicy) *http.Transport {
-	dialer := &net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-		Control:   SafeDialControlForPolicy(policy),
-	}
+	// The same guarded dial as the websocket data plane: in whitelist-only
+	// mode a non-whitelisted gateway hostname is refused before this resolves
+	// it, and the policy's Control hook then judges the address (#3378). The
+	// SDK's authority is ignored — the gateway is addressed by `target`.
+	guardedDial := GuardedDialContext(policy)
 	return &http.Transport{
 		// The gateway is addressed directly; an ambient HTTP proxy would
 		// defeat the rewrite.
 		Proxy: nil,
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, target)
+			return guardedDial(ctx, network, target)
 		},
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 4,

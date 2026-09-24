@@ -525,3 +525,27 @@ func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
 	require.Equal(t, base.Separators, parent.Separators)
 	require.Equal(t, base.Separators, child.Separators)
 }
+
+func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {
+	kb := &types.KnowledgeBase{}
+	require.True(t, ResolveProcessConfig(kb, nil).SummaryEnabled)
+	for _, tc := range []struct {
+		name  string
+		value *bool
+		want  bool
+	}{
+		{"omitted", nil, true},
+		{"enabled", processConfigBoolPtr(true), true},
+		{"disabled", processConfigBoolPtr(false), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			knowledge := &types.Knowledge{}
+			_, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge,
+				&types.KnowledgeProcessOverrides{SummaryEnabled: tc.value}, nil, nil)
+			require.NoError(t, err)
+			overrides, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			require.Equal(t, tc.want, ResolveProcessConfig(kb, overrides).SummaryEnabled)
+		})
+	}
+}

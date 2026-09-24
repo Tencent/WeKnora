@@ -67,22 +67,6 @@ type dedupSurface struct {
 	nameGramSets []map[string]struct{}
 }
 
-// countEntityConceptPages returns how many of the given pages are
-// entity- or concept-typed. Used only for logging the prefilter's
-// reduction ratio.
-func countEntityConceptPages(pages []*types.WikiPage) int {
-	n := 0
-	for _, p := range pages {
-		if p == nil {
-			continue
-		}
-		if p.PageType == types.WikiPageTypeEntity || p.PageType == types.WikiPageTypeConcept {
-			n++
-		}
-	}
-	return n
-}
-
 // selectDedupCandidatePages returns the subset of allPages plausibly
 // related to at least one of newItems. Non-entity/concept pages are
 // dropped unconditionally. The returned slice preserves the input order
@@ -215,12 +199,13 @@ func dedupMergeRejectReason(srcSlug, dstSlug string, srcCandidates map[string]bo
 	return ""
 }
 
-// normalizeWikiIdentityTitle returns the conservative identity key used only
-// to prevent same-type, same-title pages from being created under different
-// slugs. It intentionally preserves punctuation: "寓言" and "《寓言》" can
-// represent a concept and a work/chapter and must remain distinguishable.
-// Removing whitespace and folding case is enough to close model formatting
-// drift such as "Acme Corp" vs "acme  corp".
+// normalizeWikiIdentityTitle returns the conservative identity key used to
+// prevent same-title pages from being created under different slugs, both
+// within a page type and across the entity ↔ concept types (see
+// exactIdentityTarget). It intentionally preserves punctuation: "寓言" and
+// "《寓言》" can represent a concept and a work/chapter and must remain
+// distinguishable. Removing whitespace and folding case is enough to close
+// model formatting drift such as "Acme Corp" vs "acme  corp".
 func normalizeWikiIdentityTitle(title string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {
@@ -231,10 +216,15 @@ func normalizeWikiIdentityTitle(title string) string {
 }
 
 // exactIdentityTarget returns the stable existing page for an extracted item
-// when a same-type candidate has the exact normalized display title. The LLM
-// remains responsible for semantic/alias matches; this deterministic fast path
-// only covers the unambiguous identity invariant that one page type should not
-// carry two pages with the same visible title.
+// when a candidate has the exact normalized display title. Same-type matches
+// win; if none exists, a cross-type page with the same title is reused. The
+// model's type judgment drifts between ingests, so the same real-world thing
+// is often first extracted as "concept" and later as "entity" (issue #3526);
+// reusing the existing page keeps one page per title instead of materializing
+// a twin whose slug differs only by the type prefix. The LLM remains
+// responsible for semantic/alias matches; this deterministic fast path only
+// covers the unambiguous identity invariant that one visible title should map
+// to a single page.
 func exactIdentityTarget(
 	item extractedItem,
 	pageType string,
@@ -246,25 +236,35 @@ func exactIdentityTarget(
 		return ""
 	}
 	matches := make([]string, 0, 2)
+	crossMatches := make([]string, 0, 2)
 	for slug := range candidates {
 		page := pages[slug]
-		if page == nil || page.PageType != pageType {
+		if page == nil || normalizeWikiIdentityTitle(page.Title) != identity {
 			continue
 		}
-		if normalizeWikiIdentityTitle(page.Title) == identity {
+		if page.PageType == pageType {
 			matches = append(matches, page.Slug)
+		} else {
+			crossMatches = append(crossMatches, page.Slug)
 		}
 	}
-	if len(matches) == 0 {
-		return ""
-	}
-	for _, slug := range matches {
-		if slug == item.Slug {
-			return slug
+	if len(matches) > 0 {
+		for _, slug := range matches {
+			if slug == item.Slug {
+				return slug
+			}
 		}
+		sort.Strings(matches)
+		return matches[0]
 	}
-	sort.Strings(matches)
-	return matches[0]
+	// Cross-type fallback: reuse the existing page even though its type
+	// prefix differs from this batch's judgment. Downstream writes are keyed
+	// by slug and adopt the existing page's type, so the twin never forms.
+	if len(crossMatches) > 0 {
+		sort.Strings(crossMatches)
+		return crossMatches[0]
+	}
+	return ""
 }
 
 func identityClaimString(v interface{}) string {
@@ -446,6 +446,16 @@ func identityPageCacheKey(pageType, identity string) string {
 	return pageType + "\x00" + identity
 }
 
+// otherWikiPageType returns the entity/concept counterpart of a page type.
+// The cross-type identity fallback (issue #3526) only applies between these
+// two; summary/index pages are excluded.
+func otherWikiPageType(pageType string) string {
+	if pageType == types.WikiPageTypeEntity {
+		return types.WikiPageTypeConcept
+	}
+	return types.WikiPageTypeEntity
+}
+
 func loadCachedIdentityPages(batchCtx *WikiBatchContext, pageType, identity string) ([]*types.WikiPageLite, bool) {
 	if batchCtx == nil {
 		return nil, false
@@ -562,6 +572,67 @@ func (s *wikiIngestService) attachExactIdentityPages(
 
 	for identity, slugs := range slugsByIdentity {
 		bindExactIdentityPages(slugs, cached[identity], pageType, identity, candidatePages, itemCandidates)
+	}
+
+	// Cross-type safety net (issue #3526): the trigram probe that feeds
+	// itemCandidates usually surfaces a same-title page of the other type,
+	// but not always (formatting drift beyond whitespace/case). Fetch those
+	// pages explicitly so exactIdentityTarget can reuse them instead of
+	// materializing a concept/X + entity/X twin on re-ingest.
+	other := otherWikiPageType(pageType)
+	crossCached := make(map[string][]*types.WikiPageLite, len(slugsByIdentity))
+	crossMiss := make([]string, 0, len(slugsByIdentity))
+	for identity := range slugsByIdentity {
+		if pages, ok := loadCachedIdentityPages(batchCtx, other, identity); ok {
+			crossCached[identity] = pages
+			continue
+		}
+		crossMiss = append(crossMiss, identity)
+	}
+	if len(crossMiss) > 0 {
+		pages, err := s.wikiService.FindPagesByNormalizedTitles(ctx, kbID, other, crossMiss)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: cross-type identity lookup failed for %s (%d titles): %v",
+				other, len(crossMiss), err)
+		} else {
+			byIdentity := make(map[string][]*types.WikiPageLite, len(crossMiss))
+			for _, p := range pages {
+				if p == nil {
+					continue
+				}
+				identity := normalizeWikiIdentityTitle(p.Title)
+				if identity == "" {
+					continue
+				}
+				byIdentity[identity] = append(byIdentity[identity], p)
+			}
+			for _, identity := range crossMiss {
+				hits := byIdentity[identity]
+				if hits == nil {
+					hits = []*types.WikiPageLite{}
+				}
+				crossCached[identity] = hits
+				storeCachedIdentityPages(batchCtx, other, identity, hits)
+			}
+		}
+	}
+	for identity, slugs := range slugsByIdentity {
+		for _, p := range crossCached[identity] {
+			if p == nil || p.Slug == "" || p.PageType != other {
+				continue
+			}
+			if _, ok := candidatePages[p.Slug]; !ok {
+				candidatePages[p.Slug] = p
+			}
+			for _, slug := range slugs {
+				own := itemCandidates[slug]
+				if own == nil {
+					own = make(map[string]bool)
+					itemCandidates[slug] = own
+				}
+				own[p.Slug] = true
+			}
+		}
 	}
 }
 

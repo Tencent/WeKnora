@@ -1,6 +1,9 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
+import { buildListKnowledgeFilesQuery } from './knowledgeFileListQuery';
+
+export { buildListKnowledgeFilesQuery } from './knowledgeFileListQuery';
 
 export type KnowledgeBaseActivity = AuditLog;
 
@@ -151,6 +154,7 @@ export function updateKnowledgeBase(id: string, data: {
       extraction_instructions?: string;
     };
     auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
+    profile_config?: KnowledgeBaseProfileConfig;
     indexing_strategy?: {
       vector_enabled: boolean;
       keyword_enabled: boolean;
@@ -160,6 +164,49 @@ export function updateKnowledgeBase(id: string, data: {
   }
 }) {
   return put(`/api/v1/knowledge-bases/${id}`, data);
+}
+
+/** Opt-in automatic generation of the knowledge-base description. */
+export interface KnowledgeBaseProfileConfig {
+  enabled: boolean;
+  model_id?: string;
+  custom_instructions?: string;
+}
+
+export interface KnowledgeBaseProfileNamedCount {
+  name: string;
+  count: number;
+}
+
+/**
+ * Machine-generated knowledge-base description. Derived from per-document
+ * profiles; never overwrites the user-authored description.
+ */
+export interface KnowledgeBaseProfile {
+  gist?: string;
+  topics?: string[];
+  typical_questions?: string[];
+  stats?: {
+    document_count: number;
+    profiled_count: number;
+    file_types?: KnowledgeBaseProfileNamedCount[];
+    tags?: KnowledgeBaseProfileNamedCount[];
+    raw_topics?: KnowledgeBaseProfileNamedCount[];
+    doc_types?: KnowledgeBaseProfileNamedCount[];
+    folders?: string[];
+    earliest_at?: string;
+    latest_at?: string;
+  };
+  aggregate_hash?: string;
+  status?: 'ready' | 'empty' | 'failed' | string;
+  error?: string;
+  model_id?: string;
+  generated_at?: string;
+}
+
+/** Regenerates the AI description of a knowledge base synchronously. */
+export function generateKnowledgeBaseProfile(id: string) {
+  return post(`/api/v1/knowledge-bases/${id}/profile/generate`, {});
 }
 
 export function rebuildKBIndex(kbId: string) {
@@ -214,6 +261,7 @@ export function uploadKnowledgeFile(
     [key: string]: any
   } = { file: new File([], '') },
   onProgress?: (progressEvent: any) => void,
+  config?: { signal?: AbortSignal },
 ) {
   const formData = new FormData();
   Object.keys(data).forEach(key => {
@@ -227,7 +275,7 @@ export function uploadKnowledgeFile(
       formData.append(key, value);
     }
   });
-  return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress);
+  return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress, config);
 }
 
 // 从URL创建知识
@@ -254,44 +302,31 @@ export function createManualKnowledge(
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/manual`, data);
 }
 
-export function listKnowledgeFiles(
-  kbId: string,
-  params: {
-    page: number;
-    page_size: number;
-    tag_ids?: string;
-    keyword?: string;
-    file_type?: string;
-    parse_status?: string;
-    source?: string;
-    start_time?: string;
-    end_time?: string;
-    /**
-     * Folder to browse. An empty string means the knowledge base root, so the
-     * parameter is only sent when it is defined — leaving it out lists every
-     * folder (the flat view).
-     */
-    folder_path?: string;
-    /** Include documents stored in sub-folders of folder_path. */
-    folder_recursive?: boolean;
-  },
-) {
-  const query = new URLSearchParams();
-  query.append('page', String(params.page));
-  query.append('page_size', String(params.page_size));
-  if (params.tag_ids) query.append('tag_ids', params.tag_ids);
-  if (params.keyword) query.append('keyword', params.keyword);
-  if (params.file_type) query.append('file_type', params.file_type);
-  if (params.parse_status) query.append('parse_status', params.parse_status);
-  if (params.source) query.append('source', params.source);
-  if (params.start_time) query.append('start_time', params.start_time);
-  if (params.end_time) query.append('end_time', params.end_time);
-  if (params.folder_path !== undefined) {
-    query.append('folder_path', params.folder_path);
-    if (params.folder_recursive) query.append('folder_recursive', 'true');
-  }
-  const qs = query.toString();
-  return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+export type KnowledgeListSortField = 'updated_at' | 'created_at' | 'file_name';
+export type KnowledgeListSortOrder = 'asc' | 'desc';
+
+export interface ListKnowledgeFilesParams {
+  page: number;
+  page_size: number;
+  tag_ids?: string;
+  keyword?: string;
+  file_type?: string;
+  parse_status?: string;
+  source?: string;
+  start_time?: string;
+  end_time?: string;
+  sort_by?: KnowledgeListSortField;
+  sort_order?: KnowledgeListSortOrder;
+  /**
+   * 当前浏览的目录。空字符串表示知识库根目录；未定义时不按目录筛选。
+   */
+  folder_path?: string;
+  /** 是否同时包含 folder_path 下所有子目录中的文档。 */
+  folder_recursive?: boolean;
+}
+
+export function listKnowledgeFiles(kbId: string, params: ListKnowledgeFilesParams) {
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${buildListKnowledgeFilesQuery(params)}`);
 }
 
 /** One node of the knowledge base folder tree. */
@@ -376,6 +411,15 @@ export function batchDeleteKnowledge(kbId: string, ids: string[]) {
 
 export function downKnowledgeDetails(id: string) {
   return getDown(`/api/v1/knowledge/${id}/download`);
+}
+
+// 使用已有登录和租户请求头下载 ZIP，不将凭据放入下载链接。
+export function batchDownloadKnowledge(kbId: string, ids: string[], signal?: AbortSignal): Promise<Blob> {
+  return post<Blob>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/knowledge/batch-download`, { ids }, {
+    responseType: 'blob',
+    timeout: 300000,
+    signal,
+  });
 }
 
 export function previewKnowledgeFile(id: string) {

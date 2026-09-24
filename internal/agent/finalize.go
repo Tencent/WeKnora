@@ -186,7 +186,11 @@ func turnUsage(state *types.AgentState) *types.TokenUsage {
 	}
 	usage := state.TurnUsage
 	usage.Context = state.ContextUsage
-	if usage.TotalTokens == 0 && usage.Context.Total == 0 && usage.Context.Window == 0 {
+	// A token scale is worth persisting on its own: the next turn's history
+	// loading is calibrated by it even when this provider reported no total.
+	// A snapshot always carries Window, so context-only turns still emit usage.
+	if usage.TotalTokens == 0 && usage.ContextTokenScale <= 0 &&
+		usage.Context.Total == 0 && usage.Context.Window == 0 {
 		return nil
 	}
 	return &usage

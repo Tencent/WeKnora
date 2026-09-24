@@ -142,9 +142,23 @@ func (c *client) project(ctx context.Context, id string) (*project, error) {
 	return &p, err
 }
 func (c *client) projects(ctx context.Context) ([]project, error) {
-	var p []project
-	err := c.get(ctx, "/projects?membership=true&per_page=100&order_by=path_with_namespace&sort=asc", &p)
-	return p, err
+	q := url.Values{
+		"membership": {"true"}, "per_page": {"100"}, "page": {"1"},
+		"order_by": {"path_with_namespace"}, "sort": {"asc"},
+	}
+	var all []project
+	for {
+		var page []project
+		nextPage, err := c.getPage(ctx, "/projects", q, &page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if nextPage == "" {
+			return all, nil
+		}
+		q.Set("page", nextPage)
+	}
 }
 
 // ping verifies that the supplied private token is accepted by this GitLab
@@ -172,7 +186,7 @@ func (c *client) tree(ctx context.Context, id, ref, dir string) ([]treeEntry, er
 	var all []treeEntry
 	for {
 		var page []treeEntry
-		nextPage, err := c.getTreePage(ctx, endpoint, q, &page)
+		nextPage, err := c.getPage(ctx, endpoint, q, &page)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +198,7 @@ func (c *client) tree(ctx context.Context, id, ref, dir string) ([]treeEntry, er
 	}
 }
 
-func (c *client) getTreePage(ctx context.Context, endpoint string, query url.Values, out interface{}) (string, error) {
+func (c *client) getPage(ctx context.Context, endpoint string, query url.Values, out interface{}) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpoint+"?"+query.Encode(), nil)
 	if err != nil {
 		return "", err

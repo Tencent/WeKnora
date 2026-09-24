@@ -16,12 +16,14 @@ var DeploymentCapabilityKeys = []string{
 	"integrations.im",
 	"integrations.embed",
 	"integrations.api",
+	"integrations.mcpserver",
 	"settings.mcp",
 	"settings.websearch",
 	"settings.vectorstore",
 	"settings.storage",
 	"settings.sandbox",
 	"settings.sandbox.docker",
+	"settings.sandbox.host",
 }
 
 // DeploymentCapability describes whether a deployment exposes a feature route.
@@ -43,12 +45,14 @@ type DeploymentFeatureAvailability struct {
 	IM            bool
 	Embed         bool
 	API           bool
+	MCPServer     bool
 	MCP           bool
 	WebSearch     bool
 	VectorStore   bool
 	Storage       bool
 	Sandbox       bool
 	SandboxDocker bool
+	SandboxHost   bool
 }
 
 func supportedDeploymentCapability(supported bool) DeploymentCapability {
@@ -78,6 +82,16 @@ func BuildDeploymentCapabilities(
 		sandboxDocker.Reason = "route_not_registered"
 	}
 
+	sandboxHost := DeploymentCapability{
+		Supported: available.Sandbox && available.SandboxHost,
+	}
+	if available.Sandbox && !available.SandboxHost {
+		// The platform has no OS-enforced backend (Windows/Linux today).
+		sandboxHost.Reason = "platform_unsupported"
+	} else if !available.Sandbox {
+		sandboxHost.Reason = "route_not_registered"
+	}
+
 	return DeploymentCapabilitiesData{
 		Edition: edition,
 		Capabilities: map[string]DeploymentCapability{
@@ -86,12 +100,14 @@ func BuildDeploymentCapabilities(
 			"integrations.im":         supportedDeploymentCapability(available.IM),
 			"integrations.embed":      supportedDeploymentCapability(available.Embed),
 			"integrations.api":        supportedDeploymentCapability(available.API),
+			"integrations.mcpserver":  supportedDeploymentCapability(available.MCPServer),
 			"settings.mcp":            supportedDeploymentCapability(available.MCP),
 			"settings.websearch":      supportedDeploymentCapability(available.WebSearch),
 			"settings.vectorstore":    supportedDeploymentCapability(available.VectorStore),
 			"settings.storage":        supportedDeploymentCapability(available.Storage),
 			"settings.sandbox":        supportedDeploymentCapability(available.Sandbox),
 			"settings.sandbox.docker": sandboxDocker,
+			"settings.sandbox.host":   sandboxHost,
 		},
 	}
 }

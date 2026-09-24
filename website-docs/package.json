@@ -3,12 +3,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vitepress dev",
-    "build": "vitepress build",
-    "preview": "vitepress preview",
+    "setup": "npm ci && npm --prefix homepage ci",
+    "dev": "node scripts/serve-site.mjs",
+    "dev:docs": "vitepress dev",
+    "dev:homepage": "npm --prefix homepage run dev",
+    "build": "node scripts/build-site.mjs",
+    "build:docs": "vitepress build",
+    "build:homepage": "npm --prefix homepage run build",
+    "preview": "node scripts/serve-site.mjs",
     "check:mermaid": "node scripts/check-mermaid.mjs",
     "check:links": "node scripts/check-links.mjs",
-    "check": "npm run check:links && npm run check:mermaid"
+    "check:docs": "npm run check:links && npm run check:mermaid",
+    "check:site": "node scripts/check-site.mjs",
+    "check": "npm run check:docs && npm run check:site",
+    "package:site": "node scripts/package-site.mjs",
+    "test:integration": "node scripts/test-integration.mjs",
+    "test:docker": "node scripts/test-docker.mjs"
   },
   "devDependencies": {
     "mermaid": "^11.16.0",
@@ -17,5 +27,9 @@
     "vitepress-plugin-mermaid": "^2.0.17",
     "vue": "^3.5.13",
     "jsdom": "^28.0.0"
+  },
+  "version": "0.8.2",
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
   }
 }

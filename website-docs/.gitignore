@@ -1,7 +1,13 @@
-# 仓库根 .gitignore 忽略了所有隐藏目录，这里把站点源码目录放回来
 !.vitepress/
+!.dockerignore
+!.nvmrc
 .vitepress/cache/
 .vitepress/dist/
-
-node_modules/
+**/node_modules/
+homepage/.next/
+homepage/out/
+static-site/
+releases/
+*.tsbuildinfo
 .shots/
+.DS_Store

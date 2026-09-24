@@ -56,7 +56,10 @@ func (e *AgentEngine) breakdownContext(messages []chat.Message, tools []chat.Too
 			}
 		}
 
-		if reasoning := est.EstimateString(msg.ReasoningContent); reasoning > 0 {
+		// Reasoning is the text plus the opaque artifacts replayed with it, so
+		// the line stays comparable to the message total the estimator reports.
+		if reasoning := est.EstimateString(msg.ReasoningContent) +
+			est.EstimateReasoningArtifacts(msg); reasoning > 0 {
 			b.Reasoning += reasoning
 		}
 		for _, tc := range msg.ToolCalls {

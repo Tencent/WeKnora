@@ -156,9 +156,9 @@
                 :class="{ 'option-chip--active': formData.mode === 'websocket' }"
                 :disabled="formData.platform === 'mattermost'"
                 @click="formData.mode = 'websocket'">
-                WebSocket
+                {{ formData.platform === 'dingtalk' ? 'Stream' : 'WebSocket' }}
               </button>
-              <button type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
+              <button v-if="formData.platform !== 'dingtalk' && formData.platform !== 'qqbot'" type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
                 @click="formData.mode = 'webhook'">
                 Webhook
               </button>
@@ -204,6 +204,12 @@
               </button>
             </div>
             <p class="form-desc">{{ $t('agentEditor.im.sessionModeHint') }}</p>
+          </div>
+
+          <div class="form-item">
+            <label class="form-label">{{ $t('agentEditor.im.replyLanguage') }}</label>
+            <t-select v-model="formData.locale" :options="localeOptions" />
+            <p class="form-desc">{{ $t('agentEditor.im.replyLanguageHint') }}</p>
           </div>
         </section>
 
@@ -608,6 +614,7 @@ import qqbotLogo from '@/assets/img/im/qqbot.png';
 import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
 
 type IMPlatform = IMChannel['platform'];
+type IMLocale = NonNullable<IMChannel['locale']>;
 
 const PLATFORM_LOGO: Record<string, string> = {
   wecom: wecomLogo,
@@ -674,6 +681,15 @@ const platformOptions = computed(() => ([
   { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
 ]));
 
+const localeOptions = computed(() => ([
+  { value: '' as IMLocale, label: t('agentEditor.im.replyLanguageDefault') },
+  { value: 'zh-CN' as IMLocale, label: '简体中文' },
+  { value: 'en-US' as IMLocale, label: 'English' },
+  { value: 'ja-JP' as IMLocale, label: '日本語' },
+  { value: 'ko-KR' as IMLocale, label: '한국어' },
+  { value: 'ru-RU' as IMLocale, label: 'Русский' },
+]));
+
 // Feishu and Lark are the same product on separate clouds, so each has its own
 // open platform console. Bots must be created on the one matching the channel.
 const openPlatformConsole = computed(() =>
@@ -730,6 +746,7 @@ const formData = ref({
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket' | 'longpoll',
   output_mode: 'stream' as 'stream' | 'full',
+  locale: '' as IMLocale,
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
@@ -788,6 +805,7 @@ function platformSupportsThread(platform: string): boolean {
 watch(
   () => formData.value.platform,
   (p) => {
+    if (p === 'dingtalk' || p === 'qqbot') formData.value.mode = 'websocket';
     if (p === 'mattermost') {
       formData.value.mode = 'webhook';
       if (typeof formData.value.credentials.post_to_main !== 'boolean') {
@@ -984,6 +1002,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     name: fullChannel.name,
     mode: fullChannel.mode,
     output_mode: fullChannel.output_mode,
+    locale: fullChannel.locale || '',
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
@@ -1008,6 +1027,7 @@ function resetForm() {
     name: defaultChannelName('wecom'),
     mode: 'websocket',
     output_mode: 'stream',
+    locale: '',
     session_mode: 'user',
     knowledge_base_id: '',
     credentials: defaultCredentials(),
@@ -1037,6 +1057,7 @@ async function handleSave() {
         name: resolvedChannelName(),
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        locale: formData.value.locale,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
@@ -1055,6 +1076,7 @@ async function handleSave() {
         name: resolvedChannelName(),
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        locale: formData.value.locale,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
@@ -1134,7 +1156,7 @@ onUnmounted(() => {
   gap: 6px;
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -1163,7 +1185,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   border: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-placeholder);
@@ -1183,7 +1205,7 @@ onUnmounted(() => {
 }
 
 .im-step-check {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .im-step-body {
@@ -1210,7 +1232,7 @@ onUnmounted(() => {
 
 .mono-text-input :deep(input) {
   font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .drawer-form {
@@ -1226,7 +1248,7 @@ onUnmounted(() => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -1263,7 +1285,7 @@ onUnmounted(() => {
 
 .form-desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-placeholder);
 
@@ -1278,7 +1300,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 4px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 }
 
@@ -1287,12 +1309,12 @@ onUnmounted(() => {
   background: transparent;
   color: var(--td-text-color-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.3;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
   white-space: nowrap;
 
   &:hover:not(:disabled) {
@@ -1341,7 +1363,7 @@ onUnmounted(() => {
   label {
     display: block;
     margin: 0 0 4px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.4;
@@ -1349,7 +1371,7 @@ onUnmounted(() => {
 
   .desc {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     color: var(--td-text-color-placeholder);
   }
@@ -1365,7 +1387,7 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 
@@ -1386,12 +1408,12 @@ onUnmounted(() => {
   padding: 12px 16px;
   background: rgba(7, 193, 96, 0.06);
   border: 1px solid rgba(7, 193, 96, 0.2);
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
 
   .bound-icon {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     color: #07c160;
   }
 }
@@ -1420,7 +1442,7 @@ onUnmounted(() => {
   width: 200px;
   height: 200px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   // QR code images are always black-on-white; force white background
   // so the code remains scannable in dark mode.
@@ -1447,15 +1469,15 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 
   .refresh-icon {
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
   }
 }
 
 .qr-hint {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   text-align: center;
 }
@@ -1463,7 +1485,7 @@ onUnmounted(() => {
 
 <style lang="less">
 .im-channel-drawer .setting-drawer__header-icon:has(.drawer-platform-icon) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 

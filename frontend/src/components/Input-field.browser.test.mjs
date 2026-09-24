@@ -14,7 +14,7 @@ test('composer browser button is disabled and opens settings when the extension 
   assert.match(button, /active: settingsStore\.isLocalBrowserEnabled && browserConnection\.online/)
   assert.match(button, /:aria-disabled="browserConnection\.knownOffline"/)
   assert.match(inputField, /if \(browserConnection\.knownOffline\) \{\s*openBrowserConnectionSettings\(\)/)
-  assert.match(inputField, /uiStore\.openSettings\('browserconnection'\)/)
+  assert.match(inputField, /router\.push\(toolboxLocation\('browserconnection'\)\)/)
   assert.match(inputField, /browserConnection\.watchStatus\(\)/)
   assert.match(inputField, /\$t\('localBrowser\.reconnectHint'\)|\$t\(browserSourceUnavailableHint\)/)
 })
@@ -29,7 +29,7 @@ test('mention button matches icon controls and the stream artifact count badge',
   assert.match(count, /right: -2px/)
   assert.match(count, /min-width: 14px/)
   assert.match(count, /height: 14px/)
-  assert.match(count, /font-size: 10px/)
+  assert.match(count, /font-size: (?:10px|var\(--app-text-2xs\))/)
   assert.match(count, /border-radius: 7px/)
   assert.match(count, /font-variant-numeric: tabular-nums/)
   assert.doesNotMatch(count, /border: 2px solid/)
@@ -71,47 +71,19 @@ test('context usage ring matches the 28px composer icon buttons', () => {
   assert.match(ring, /viewBox="0 0 18 18"/)
 })
 
-test('chat thread scrollbar is a dark thumb that clears the floating composer', () => {
+test('context usage sits on the composer and the thread scrollbar stays clear of it', () => {
+  assert.match(chatPage, /:context-usage="latestContextUsage"/)
   assert.match(chatPage, /scrollbar-width: thin/)
-  assert.match(chatPage, /scrollbar-color: rgba\(0, 0, 0, 0\.4\) transparent/)
-  assert.match(chatPage, /&::-webkit-scrollbar-track \{\s*background: transparent/)
+  assert.match(chatPage, /scrollbar-gutter: stable/)
+  assert.match(chatPage, /scrollbar-color: var\(--td-component-stroke\) transparent/)
   assert.doesNotMatch(chatPage, /scrollbar-width: auto/)
-  assert.doesNotMatch(chatPage, /background-color: initial !important/)
 
-  const input = chatPage.slice(
-    chatPage.indexOf('.input-container {'),
-    chatPage.indexOf('.msg_list {'),
+  const composer = chatPage.slice(
+    chatPage.indexOf('.chat_composer {'),
+    chatPage.indexOf('.is-embedded .chat_composer'),
   )
-  const overlay = input.slice(0, input.indexOf('&.is-embedded'))
-  assert.match(overlay, /position: absolute/)
-  assert.match(overlay, /pointer-events: none/)
-  assert.match(overlay, /^\s*bottom: 0;/m)
-  assert.match(overlay, /padding-bottom: 16px/)
-  assert.match(overlay, /right: var\(--chat-right-inset/)
-  // left+right stretch only if width is auto. width:100% makes CSS ignore
-  // `right`, so widening the sandbox panel would leave the composer stuck.
-  assert.match(overlay, /width: auto/)
-  assert.doesNotMatch(overlay, /width: 100%/)
-  // Opaque dock from the composer top to the viewport bottom: messages
-  // disappear at the dialog's top edge, not after sliding past its bottom.
-  // The last 8px stay transparent so the overlay scrollbar can be dragged
-  // through to the viewport bottom.
-  assert.match(overlay, /--chat-scrollbar-gutter/)
-  assert.match(overlay, /linear-gradient/)
-  assert.match(overlay, /transparent/)
-  assert.doesNotMatch(overlay, /&::after \{/)
-  assert.match(chatPage, /--chat-scrollbar-gutter: 8px/)
-
-  assert.match(chatPage, /--chat-composer-space/)
-  assert.match(chatPage, /padding-bottom: var\(--chat-composer-space/)
-  assert.match(chatPage, /:class="\{ 'is-docked': !embeddedMode \}"/)
-})
-
-test('docked composer stays in flow so it cannot cover the thread scrollbar', () => {
-  const start = inputField.indexOf('&.is-docked')
-  assert.notEqual(start, -1)
-  const docked = inputField.slice(start, inputField.indexOf('.steer-queue {', start))
-  assert.match(docked, /position: relative/)
-  assert.match(docked, /bottom: auto/)
-  assert.match(docked, /pointer-events: auto/)
+  assert.match(composer, /position: absolute/)
+  assert.match(composer, /^\s*bottom: 0;/m)
+  assert.match(composer, /right: var\(--chat-scrollbar-gutter/)
+  assert.match(chatPage, /flex: 0 0 var\(--chat-composer-height, 0px\)/)
 })

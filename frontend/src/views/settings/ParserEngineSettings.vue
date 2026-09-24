@@ -719,26 +719,16 @@ onMounted(loadAll)
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/provider-card.less';
+
+@import (reference) '@/components/css/settings-section.less';
+
 .parser-engine-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 28px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
+  .settings-section-header();
 }
 
 .loading-state {
@@ -748,7 +738,7 @@ onMounted(loadAll)
   gap: 8px;
   padding: 48px 0;
   color: var(--td-text-color-placeholder);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .error-inline {
@@ -760,7 +750,7 @@ onMounted(loadAll)
   text-align: center;
 
   .empty-text {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin: 0;
   }
@@ -777,95 +767,52 @@ onMounted(loadAll)
 // 与 ModelSettings / WebSearchSettings / McpSettings 同形的提供者卡片。
 // 这里整张卡是一个 button —— 单击即打开配置抽屉；active 状态用品牌色描边。
 .engine-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 14px 14px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
+  .provider-card();
+  .provider-card-interactive();
   text-align: left;
   font: inherit;
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
-  min-width: 0;
-
-  &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  }
 
   &--active {
     border-color: var(--td-brand-color);
-    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.06));
+    background: var(--td-brand-color-1);
   }
 }
 
 .engine-card__badge {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 1px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge();
+  .provider-card-badge-color(#0052d9);
 }
 
 // 解析引擎徽章配色 —— 内置/官方系绿，外部工具按性质各取一色。
 .engine-card--builtin .engine-card__badge,
 .engine-card--weknoracloud .engine-card__badge {
-  background: rgba(7, 192, 95, 0.12);
-  color: #07C05F;
+  .provider-card-badge-color(#07c05f);
 }
 .engine-card--simple .engine-card__badge {
-  background: rgba(70, 70, 70, 0.1);
-  color: #464646;
+  .provider-card-badge-color(#464646);
 }
 .engine-card--markitdown .engine-card__badge {
-  background: rgba(0, 137, 255, 0.12);
-  color: #0089FF;
+  .provider-card-badge-color(#0089ff);
 }
 .engine-card--mineru .engine-card__badge,
 .engine-card--mineru_cloud .engine-card__badge,
 .engine-card--paddleocr_vl .engine-card__badge,
 .engine-card--paddleocr_vl_cloud .engine-card__badge {
-  background: rgba(98, 53, 187, 0.12);
-  color: #6235BB;
+  .provider-card-badge-color(#6235bb);
 }
 
 .engine-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  .provider-card-body();
 }
 
 .engine-card__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  .provider-card-header();
 }
 
 .engine-card__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .provider-card-title();
 }
 
 // 与 McpSettings 一致的 dot+文字状态徽章。on=绿、err=红、help 用 cursor:help 提示。
@@ -875,22 +822,22 @@ onMounted(loadAll)
   align-items: center;
   gap: 5px;
   padding: 1px 8px 1px 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 16px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
 
   &--on {
-    color: var(--td-success-color-7, #118053);
+    color: var(--td-success-color-7);
 
-    .engine-card__status-dot { background: var(--td-success-color, #118053); }
+    .engine-card__status-dot { background: var(--td-success-color); }
   }
 
   &--err {
-    color: var(--td-error-color-7, #C93E3E);
+    color: var(--td-error-color-7);
 
-    .engine-card__status-dot { background: var(--td-error-color, #C93E3E); }
+    .engine-card__status-dot { background: var(--td-error-color); }
   }
 
   &--help {
@@ -905,7 +852,7 @@ onMounted(loadAll)
 }
 
 .engine-card__desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   margin: 0;
   line-height: 1.5;
@@ -925,7 +872,7 @@ onMounted(loadAll)
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -942,7 +889,7 @@ onMounted(loadAll)
 
 .form-desc {
   margin: 4px 0 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -953,14 +900,14 @@ onMounted(loadAll)
 :deep(.t-textarea),
 :deep(.t-input-number) {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 :deep(.t-checkbox) {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   .t-checkbox__label {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
   }
 }
@@ -973,7 +920,7 @@ onMounted(loadAll)
   padding: 12px 14px;
   background: var(--td-bg-color-container-hover);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 
   .form-desc {
     margin-top: 0;
@@ -988,7 +935,7 @@ onMounted(loadAll)
 }
 
 .env-hint {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -1005,11 +952,11 @@ onMounted(loadAll)
   align-items: center;
   height: 22px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-component);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   letter-spacing: 0.02em;
 }
@@ -1021,14 +968,14 @@ onMounted(loadAll)
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   flex-wrap: wrap;
 }
 
 .inline-alert__icon {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
 }
@@ -1041,7 +988,7 @@ onMounted(loadAll)
   color: var(--td-text-color-primary);
 
   .inline-alert__icon {
-    color: var(--td-warning-color, #f97316);
+    color: var(--td-warning-color);
   }
 }
 
@@ -1055,29 +1002,24 @@ onMounted(loadAll)
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color-active);
   }
 
   .t-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 .spinning {
-  animation: spin 1s linear infinite;
+  animation: wk-spin 1s linear infinite;
 }
 
 // ---- 表单切换组（公式/表格/OCR） ----
@@ -1090,7 +1032,7 @@ onMounted(loadAll)
 
 // ---- footer-left 测试连接消息（与 ModelEditorDialog 同款） ----
 .footer-test-message {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   flex: 1;
   min-width: 0;
@@ -1108,7 +1050,7 @@ onMounted(loadAll)
 }
 
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 
   &.available {
@@ -1125,44 +1067,44 @@ onMounted(loadAll)
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   text-decoration: none;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color-active);
   }
 
   .link-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   // 副标题里的 inline 文档链接：与描述文字平铺一行，体量等同小字
   &--inline {
     margin-left: 6px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     vertical-align: baseline;
 
     .link-icon {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 }
 
 // ---- Header 图标的首字母 monogram（per-engine 配色见非 scoped 块）----
 .header-icon__text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
 </style>
 
 <!--
-  Non-scoped block: per-engine header-icon coloring. Same approach as
-  StorageEngineSettings — keep these rules global so they always apply
+  Non-scoped block: per-engine header-icon coloring. Keep these rules global
+  so they always apply
   regardless of whether the drawer panel inherits the parent's scoped
   data attributes. Each rule mirrors the matching .engine-card--{name}
   .engine-card__badge from the scoped block above.
@@ -1170,7 +1112,7 @@ onMounted(loadAll)
 <style lang="less">
 .parser-engine-drawer--builtin .setting-drawer__header-icon,
 .parser-engine-drawer--weknoracloud .setting-drawer__header-icon {
-  background: rgba(7, 192, 95, 0.12);
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   color: #07C05F;
 }
 .parser-engine-drawer--simple .setting-drawer__header-icon {

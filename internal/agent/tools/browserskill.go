@@ -73,11 +73,10 @@ func (t *BrowserSkillTool) Execute(ctx context.Context, args json.RawMessage) (*
 		return nil, err
 	}
 	method := input["method"].(string)
-	delete(input, "method")
 	if keep, supplied := input["keep_open"].(bool); supplied {
 		t.keepOpen.Store(keep)
 	}
-	delete(input, "keep_open")
+	params := browserCallParams(method, input)
 	if method == "request_help" {
 		t.keepOpen.Store(true)
 	}
@@ -117,7 +116,7 @@ func (t *BrowserSkillTool) Execute(ctx context.Context, args json.RawMessage) (*
 		return &types.ToolResult{Success: false, Error: t.prepareErr.Error()}, nil
 	}
 	t.used.Store(true)
-	result, err := t.manager.Call(ctx, t.scope, t.session, method, input)
+	result, err := t.manager.Call(ctx, t.scope, t.session, method, params)
 	if err != nil {
 		t.failed.Store(true)
 		return browserToolFailure(method, err), nil

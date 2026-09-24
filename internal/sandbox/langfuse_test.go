@@ -23,6 +23,21 @@ func TestWrapLangfuseRemoteClientPreservesSnapshotCapability(t *testing.T) {
 	require.NotEmpty(t, ref.ID)
 }
 
+func TestWrapLangfuseRemoteClientPreservesForkSnapshotCapability(t *testing.T) {
+	inner := newFakeRemoteClient(SandboxTypeCube)
+	inner.capabilities.SupportsSnapshots = true
+	client := &recordingForkSnapshotClient{fakeRemoteClient: inner}
+
+	wrapped := wrapLangfuseRemoteClient(client)
+	creator, ok := wrapped.(forkSnapshotCreator)
+	require.True(t, ok, "wrapping must not hide CreateForkSnapshot")
+
+	ref, err := creator.CreateForkSnapshot(context.Background(), "sb-1", "fork-1")
+	require.NoError(t, err)
+	require.Equal(t, "fork-sb-1", ref.ID)
+	require.Equal(t, 1, client.forkCalls)
+}
+
 func TestWrapLangfuseRemoteClientDoesNotInventSnapshotSupport(t *testing.T) {
 	inner := &noSnapshotClient{}
 	wrapped := wrapLangfuseRemoteClient(inner)

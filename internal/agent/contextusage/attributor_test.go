@@ -22,7 +22,7 @@ func newTestAttributor(t *testing.T) *Attributor {
 func testTools() []chat.Tool {
 	return []chat.Tool{
 		{Type: "function", Function: chat.FunctionDef{
-			Name:        agenttools.ToolKnowledgeSearch,
+			Name:        agenttools.ToolSearchKnowledge,
 			Description: "Search bound knowledge bases",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
 		}},
@@ -345,5 +345,5 @@ func TestIsMCPToolSchema(t *testing.T) {
 	require.True(t, IsMCPToolSchema(agenttools.ToolDiscoverMCPTools))
 	require.True(t, IsMCPToolSchema(agenttools.ToolCallMCPTool))
 	require.True(t, IsMCPToolSchema("mcp_weather_getforecast"))
-	require.False(t, IsMCPToolSchema(agenttools.ToolKnowledgeSearch))
+	require.False(t, IsMCPToolSchema(agenttools.ToolSearchKnowledge))
 }
