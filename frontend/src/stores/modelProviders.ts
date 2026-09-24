@@ -53,7 +53,9 @@ export const useModelProvidersStore = defineStore('modelProviders', () => {
         const { providers, cacheable } = await loadProvidersForType(listModelProviders, key)
         if (!cacheable || requestGeneration !== generation || requestTokens.get(key) !== token) return providers
         byType.value = { ...byType.value, [key]: providers }
-        byId.value = Object.values(byType.value).reduce((index, entries) => mergeProviderIndex(index, entries), {} as Record<string, ModelProviderOption>)
+        // The freshest list is merged first so its metadata wins over older types.
+        byId.value = [providers, ...Object.entries(byType.value).filter(([type]) => type !== key).map(([, entries]) => entries)]
+          .reduce((index, entries) => mergeProviderIndex(index, entries), {} as Record<string, ModelProviderOption>)
         return providers
       } finally {
         if (requestGeneration === generation && requestTokens.get(key) === token) {

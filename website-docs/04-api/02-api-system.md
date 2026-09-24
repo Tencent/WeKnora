@@ -288,7 +288,7 @@ curl $BASE/api/v1/system/admin/audit-log -H "Authorization: Bearer $TOKEN"
 | 方法与路径 | 作用 |
 | --- | --- |
 | `GET /system/admin/model-catalog` | 返回当前 `version`、`baseline`、管理员 `overlay`、最近 20 个历史版本，以及 `builtin` / `deployment` / `effective` 目录 |
-| `POST /system/admin/model-catalog/preview` | 校验覆盖文档并返回候选目录，不持久化、不发布 |
+| `POST /system/admin/model-catalog/preview` | 校验覆盖文档并返回候选目录（仅 `effective` 与规范化后的 `overlay`，`history` / `builtin` / `deployment` 为 `null`），不持久化、不发布 |
 | `PUT /system/admin/model-catalog` | 校验、保存新版本并发布；审计仅记录版本元信息 |
 
 预览和发布使用相同请求体：

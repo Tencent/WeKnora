@@ -35,8 +35,10 @@ export interface CatalogState {
   sync_error?: string
   applied_version: number
 }
+// A check returns only the candidate; history and the lower layers are omitted.
+export type CatalogPreview = Omit<CatalogState, 'history' | 'builtin' | 'deployment'>
 export interface CatalogUpdate { version: number; baseline: string; overlay: CatalogOverlay }
 const root = '/api/v1/system/admin/model-catalog'
 export const getModelCatalog = () => get(root) as unknown as Promise<CatalogState>
-export const previewModelCatalog = (request: CatalogUpdate) => post(`${root}/preview`, request) as unknown as Promise<CatalogState>
+export const previewModelCatalog = (request: CatalogUpdate) => post(`${root}/preview`, request) as unknown as Promise<CatalogPreview>
 export const publishModelCatalog = (request: CatalogUpdate) => put(root, request) as unknown as Promise<CatalogState>

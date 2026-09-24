@@ -9,8 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -89,10 +87,17 @@ type ModelCatalogService struct {
 	target          *modelruntime.Runtime
 	baseline        string
 	deploymentError string
+	// Both lower layers are fixed after construction, so their views are too.
+	builtinViews    []CatalogProviderView
+	deploymentViews []CatalogProviderView
 	mu              sync.Mutex
 	applied         uint64
 	loaded          bool
-	startOnce       sync.Once
+	// failed remembers a stored version this replica cannot compile, so the
+	// poll does not re-read and recompile it until the version changes.
+	failed    uint64
+	failedErr error
+	startOnce sync.Once
 }
 
 // NewModelCatalogService loads the deployment layer and applies the stored overlay.
@@ -100,22 +105,19 @@ func NewModelCatalogService(
 	repo *repository.ModelCatalogRepository, audit interfaces.AuditLogService,
 ) *ModelCatalogService {
 	s := &ModelCatalogService{repo: repo, audit: audit, base: modelruntime.New(), target: modelruntime.Default()}
-	path := os.Getenv("MODELS_CONFIG")
-	if path == "" {
-		path = filepath.Join(config.ConfigDir(), "models.json")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
+	data, baseDir, err := modelruntime.ReadDeploymentOverlay(config.ConfigDir())
+	if err != nil {
 		s.deploymentError = err.Error()
-	}
-	if err == nil {
-		if err = s.base.Reload(data, filepath.Dir(path)); err != nil {
+	} else if data != nil {
+		if err = s.base.Reload(data, baseDir); err != nil {
 			s.deploymentError = err.Error()
 		}
 	}
+	s.builtinViews = catalogProviderViews(modelruntime.New())
+	s.deploymentViews = catalogProviderViews(s.base)
 	// Include the executable's baseline as well as the file in the preview
 	// token, so a rolling upgrade cannot publish against another replica's base.
-	builtins, _ := json.Marshal(catalogProviderViews(modelruntime.New()))
+	builtins, _ := json.Marshal(s.builtinViews)
 	hash := sha256.Sum256(append(builtins, data...))
 	s.baseline = hex.EncodeToString(hash[:])
 	if err := s.Sync(context.Background()); err != nil {
@@ -148,16 +150,14 @@ func (s *ModelCatalogService) Start(ctx context.Context) {
 func (s *ModelCatalogService) Sync(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.loaded {
-		version, err := s.repo.Version(ctx)
-		if err != nil {
-			return err
-		}
-		if version == s.applied {
-			return nil
-		}
+	version, err := s.repo.Version(ctx)
+	if err != nil {
+		return err
 	}
-	_, err := s.syncLocked(ctx)
+	if (s.loaded && version == s.applied) || (s.failedErr != nil && version == s.failed) {
+		return nil
+	}
+	_, err = s.syncLocked(ctx)
 	return err
 }
 
@@ -169,17 +169,20 @@ func (s *ModelCatalogService) syncLocked(ctx context.Context) (*types.ModelCatal
 	if s.loaded && row.Version == s.applied {
 		return row, nil
 	}
+	if s.failedErr != nil && row.Version == s.failed {
+		return row, s.failedErr
+	}
 	overlay, err := validateConsoleOverlay(row.Overlay)
-	if err != nil {
-		return row, err
+	if err == nil {
+		var candidate *modelruntime.Runtime
+		if candidate, err = s.base.WithOverlay(overlay, ""); err == nil {
+			s.target.RestoreSnapshot(candidate.SnapshotCurrent())
+			s.applied, s.loaded, s.failedErr = row.Version, true, nil
+			return row, nil
+		}
 	}
-	candidate, err := s.base.WithOverlay(overlay, "")
-	if err != nil {
-		return row, err
-	}
-	s.target.RestoreSnapshot(candidate.SnapshotCurrent())
-	s.applied, s.loaded = row.Version, true
-	return row, nil
+	s.failed, s.failedErr = row.Version, err
+	return row, err
 }
 
 // State returns the current catalog state for the console.
@@ -203,7 +206,7 @@ func (s *ModelCatalogService) state(row *types.ModelCatalogConfig, runtime *mode
 	return &CatalogState{
 		Version: row.Version, AppliedVersion: s.applied, Baseline: s.baseline,
 		Overlay: json.RawMessage(row.Overlay), History: history,
-		Builtin: catalogProviderViews(modelruntime.New()), Deployment: catalogProviderViews(s.base),
+		Builtin: s.builtinViews, Deployment: s.deploymentViews,
 		Effective: catalogProviderViews(runtime), DeploymentError: s.deploymentError,
 	}
 }
@@ -231,9 +234,13 @@ func (s *ModelCatalogService) change(ctx context.Context, req CatalogUpdate, pub
 		return nil, fmt.Errorf("%w: %v", ErrInvalidCatalog, err)
 	}
 	if !publish {
-		draft := *row
-		draft.Overlay = types.JSON(overlay)
-		return s.state(&draft, candidate), nil
+		// A check only reads the candidate; history and the lower layers are
+		// unchanged, so they are left out of the response.
+		return &CatalogState{
+			Version: row.Version, AppliedVersion: s.applied, Baseline: s.baseline,
+			Overlay: json.RawMessage(overlay), Effective: catalogProviderViews(candidate),
+			DeploymentError: s.deploymentError,
+		}, nil
 	}
 	history := []CatalogRevision{}
 	if err := json.Unmarshal(row.History, &history); err != nil {
@@ -255,7 +262,7 @@ func (s *ModelCatalogService) change(ctx context.Context, req CatalogUpdate, pub
 		return nil, err
 	}
 	s.target.RestoreSnapshot(candidate.SnapshotCurrent())
-	s.applied, s.loaded = next.Version, true
+	s.applied, s.loaded, s.failedErr = next.Version, true, nil
 	if s.audit != nil {
 		details, _ := json.Marshal(map[string]any{
 			"key": "model_catalog", "previous_version": row.Version, "version": next.Version,
@@ -286,7 +293,9 @@ func catalogProviderViews(runtime *modelruntime.Runtime) []CatalogProviderView {
 			ID: p.ID, Name: p.Name, API: string(p.API), ModelTypes: p.ModelTypes, Models: p.Models(),
 			Settings: map[string]any{
 				"names": p.Names, "description": p.Description, "descriptions": p.Descriptions,
-				"website": p.Website, "base_urls": p.DefaultBaseURLs, "auth": p.Auth,
+				// Base URLs are omitted: deployment values may carry
+				// interpolated tokens, and the console cannot change them.
+				"website": p.Website, "auth": p.Auth,
 				"requires_auth": p.RequiresAuth, "url_patterns": p.URLPatterns,
 				"compat": p.Compat, "thinking_levels": p.ThinkingLevels,
 				"icon_sha256": fmt.Sprintf("%x", sha256.Sum256(p.Icon)),
@@ -294,13 +303,14 @@ func catalogProviderViews(runtime *modelruntime.Runtime) []CatalogProviderView {
 		}
 		view.ModelThinkingLevels = map[string][]api.ReasoningEffort{}
 		view.VendorThinkingLevels = []api.ReasoningEffort{}
-		if resolved, err := p.Resolve(modelruntime.Ref{Provider: p.ID, Model: "__vendor_default__"}); err == nil {
-			view.VendorThinkingLevels = resolved.Capabilities().ThinkingLevels
-		}
 		// Resolve as if thinking were on: a non-reasoning model reports no
 		// levels, which would hide what enabling reasoning would offer.
 		enabled := true
 		override := &types.ModelSpecOverride{Reasoning: &enabled}
+		vendorRef := modelruntime.Ref{Provider: p.ID, Model: "__vendor_default__", Override: override}
+		if resolved, err := p.Resolve(vendorRef); err == nil {
+			view.VendorThinkingLevels = resolved.Capabilities().ThinkingLevels
+		}
 		for _, m := range p.ModelsByType(types.ModelTypeKnowledgeQA) {
 			if m.ID == "" {
 				continue
@@ -357,7 +367,10 @@ func validateConsoleOverlay(raw []byte) ([]byte, error) {
 				return nil, fmt.Errorf("provider %s: field names must use lowercase: %s", id, field)
 			}
 		}
-		for _, field := range []string{"api_key", "headers"} {
+		// Routing fields stay deployment-owned too: moving a vendor's default
+		// URL would send its deployment api_key, and the keys of rows without
+		// their own base URL, to another host.
+		for _, field := range []string{"api_key", "headers", "base_url", "base_urls", "url_patterns", "auth"} {
 			if _, exists := fields[field]; exists {
 				return nil, fmt.Errorf(
 					"provider %s: %s must be managed in deployment configuration or model credentials", id, field)
@@ -372,35 +385,10 @@ func validateConsoleOverlay(raw []byte) ([]byte, error) {
 			}
 		}
 	}
+	// Environment interpolation only applies to the fields rejected above, so
+	// a '$' anywhere else (names, descriptions, SVG) is plain text.
 	root["providers"], _ = json.Marshal(normalizedProviders)
 	canonical, _ := json.Marshal(root)
-	var value any
-	_ = json.Unmarshal(canonical, &value)
-	var check func(any) error
-	check = func(v any) error {
-		switch x := v.(type) {
-		case string:
-			if strings.Contains(x, "$") {
-				return fmt.Errorf("environment interpolation is only supported in deployment files")
-			}
-		case []any:
-			for _, item := range x {
-				if err := check(item); err != nil {
-					return err
-				}
-			}
-		case map[string]any:
-			for _, item := range x {
-				if err := check(item); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	if err := check(value); err != nil {
-		return nil, err
-	}
 	return canonical, nil
 }
 

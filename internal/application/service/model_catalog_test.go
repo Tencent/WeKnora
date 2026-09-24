@@ -47,6 +47,8 @@ func TestModelCatalogPreviewPublishRollbackAndReplica(t *testing.T) {
 	preview, err := s.Preview(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), preview.Version)
+	require.Nil(t, preview.History)
+	require.NotEmpty(t, preview.Effective)
 	row, err := repo.Get(ctx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), row.Version)
@@ -97,6 +99,10 @@ func TestModelCatalogInvalidOverlayDoesNotPersistOrPublish(t *testing.T) {
 		"secret":               `{"providers":{"openai":{"api_key":"secret"}}}`,
 		"headers":              `{"providers":{"openai":{"headers":{"Authorization":"secret"}}}}`,
 		"environment":          `{"providers":{"openai":{"base_url":"https://${SECRET}.example"}}}`,
+		"base url":             `{"providers":{"openai":{"base_url":"https://other.example/v1"}}}`,
+		"base urls":            `{"providers":{"openai":{"base_urls":{"embedding":"https://other.example"}}}}`,
+		"url patterns":         `{"providers":{"openai":{"url_patterns":["other.example"]}}}`,
+		"auth":                 `{"providers":{"openai":{"auth":"none"}}}`,
 		"file read":            `{"providers":{"openai":{"icon":"icons/provider.svg"}}}`,
 		"normalized collision": `{"providers":{"OpenAI":{},"openai":{}}}`,
 		"wrong format":         `{"version":1,"providers":{"openai":[]}}`,
@@ -115,6 +121,18 @@ func TestModelCatalogInvalidOverlayDoesNotPersistOrPublish(t *testing.T) {
 			require.Equal(t, 12345, r.Spec.ContextWindow)
 		})
 	}
+}
+
+func TestModelCatalogAcceptsDollarSignsInMetadata(t *testing.T) {
+	s, _ := catalogFixture(t)
+	ctx := context.Background()
+	overlay := `{"providers":{"openai":{"description":"Pro ($20 plan)",` +
+		`"models":[{"id":"gpt-5","name":"GPT-5 ($)"}]}}}`
+	_, err := s.Publish(ctx, CatalogUpdate{Baseline: s.baseline, Overlay: json.RawMessage(overlay)})
+	require.NoError(t, err)
+	resolved, err := s.target.Resolve(modelruntime.Ref{Provider: "openai", Model: "gpt-5"})
+	require.NoError(t, err)
+	require.Equal(t, "GPT-5 ($)", resolved.Spec.Name)
 }
 
 func TestModelCatalogStorageCASAndHistoryBound(t *testing.T) {
@@ -146,6 +164,8 @@ func TestModelCatalogCanRepairAnOverlayRejectedByCurrentDeployment(t *testing.T)
 		Overlay: types.JSON(`{"providers":{"openai":{"api":"unsupported"}}}`), History: types.JSON(`[]`),
 	}))
 	require.Error(t, s.Sync(ctx))
+	// The rejected version is remembered instead of being recompiled each poll.
+	require.NoError(t, s.Sync(ctx))
 	state, err := s.State(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, state.SyncError)

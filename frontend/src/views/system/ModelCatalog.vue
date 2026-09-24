@@ -196,7 +196,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="field in layerFields" :key="field.key">
+              <tr v-for="field in editFields" :key="field.key">
                 <td>{{ field.label }}</td>
                 <td v-for="layer in (['builtin', 'deployment', 'effective'] as const)" :key="layer"
                   :class="{ 'layer-table__changed': layer !== 'builtin' && layerValue(layer, field) !== layerValue(layer === 'effective' ? 'deployment' : 'builtin', field) }">
@@ -337,7 +337,7 @@ import { MessagePlugin, type TableProps } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { levelLabelKey } from '@/utils/reasoningEffort'
 import FieldControl from './ModelCatalogFieldControl.vue'
-import { getModelCatalog, previewModelCatalog, publishModelCatalog, type CatalogModel, type CatalogOverlay, type CatalogState } from '@/api/system/modelCatalog'
+import { getModelCatalog, previewModelCatalog, publishModelCatalog, type CatalogModel, type CatalogOverlay, type CatalogPreview, type CatalogState } from '@/api/system/modelCatalog'
 import { useModelProvidersStore } from '@/stores/modelProviders'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import {
@@ -489,7 +489,6 @@ const fieldDefs = computed<FieldDef[]>(() => [
 ])
 const fieldsFor = (type?: string) => fieldDefs.value.filter(field => !field.types || field.types.includes(type || 'KnowledgeQA'))
 const editFields = computed(() => fieldsFor(selected.value?.model.type))
-const layerFields = editFields
 const levelOptions = computed(() => THINKING_LEVELS.map(level => ({ label: t(levelLabelKey(level)), value: level })))
 
 const editVisible = ref(false)
@@ -662,7 +661,7 @@ async function saveAdd() {
 const jsonVisible = ref(false)
 const draft = ref(emptyOverlay)
 const jsonError = ref('')
-const jsonPreview = ref<CatalogState>()
+const jsonPreview = ref<CatalogPreview>()
 const jsonChanges = computed<CatalogChangeSummary[]>(() => jsonPreview.value
   ? summarizeChanges(catalogChanges(state.value?.effective || [], jsonPreview.value.effective)) : [])
 watch(draft, () => { jsonPreview.value = undefined; jsonError.value = '' })

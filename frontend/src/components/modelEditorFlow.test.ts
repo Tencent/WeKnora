@@ -40,8 +40,7 @@ async function fixture(options: {
   const providers: any[] = options.providers || []
   const catalogEvents: string[] = []
   const providersStore = {
-    reset: () => { catalogEvents.push('reset') },
-    ensureLoaded: async () => { catalogEvents.push('load'); return providers },
+    ensureLoaded: async (_type?: string, force?: boolean) => { catalogEvents.push(force ? 'refresh' : 'load'); return providers },
     providersFor: () => providers,
     isLoading: () => false,
     providerById: (id: string) => providers.find((p) => p.value === id),
@@ -960,15 +959,15 @@ test('capability preview includes the same edited spec as connection tests', asy
   } finally { f.close() }
 })
 
-test('opening the model editor invalidates the catalog before fetching new candidates', async () => {
+test('opening the model editor refreshes its catalog candidates', async () => {
   const f = await fixture()
   try {
-    assert.deepEqual(f.catalogEvents.slice(0, 2), ['reset', 'load'])
+    assert.equal(f.catalogEvents[0], 'refresh')
     f.props.visible = false
     await nextTick()
     f.catalogEvents.length = 0
     f.props.visible = true
     await nextTick()
-    assert.deepEqual(f.catalogEvents.slice(0, 2), ['reset', 'load'])
+    assert.equal(f.catalogEvents[0], 'refresh')
   } finally { f.close() }
 })
