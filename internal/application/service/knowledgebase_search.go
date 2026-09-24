@@ -130,6 +130,28 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// copy, so this stays local to the call.
 	params.MatchCount = normalizedMatchCount(params.MatchCount)
 
+	chunks, err := s.hybridSearchCandidates(ctx, id, params)
+	if err != nil || len(chunks) == 0 {
+		return nil, err
+	}
+
+	// Truncate to the primary-match cap. MatchCount is guaranteed positive by
+	// the normalization at the top of this function; the slice bound below
+	// depends on that.
+	if len(chunks) > params.MatchCount {
+		chunks = chunks[:params.MatchCount]
+	}
+
+	return s.processSearchResults(ctx, chunks, params.SkipContextEnrichment)
+}
+
+// hybridSearchCandidates runs retrieval, fusion and FAQ post-processing for
+// HybridSearch and returns the fused chunks, best first, before the
+// MatchCount cut. params.MatchCount must already be normalized.
+func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
+	id string,
+	params types.SearchParams,
+) ([]*types.IndexWithScore, error) {
 	// Determine the set of KB IDs to search.
 	searchKBIDs := params.KnowledgeBaseIDs
 	if len(searchKBIDs) == 0 {
@@ -284,20 +306,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// AppError from inside the iterative fan-out path (e.g. a per-group
 	// timeout surfaced as ErrVectorStoreUnavailable) must surface to the
 	// caller rather than be silently converted to a truncated chunk list.
-	deduplicatedChunks, err = s.applyFAQPostProcessing(
+	return s.applyFAQPostProcessing(
 		ctx, kb, deduplicatedChunks, vectorResults, groups, params, matchCount)
-	if err != nil {
-		return nil, err
-	}
-
-	// Truncate to the primary-match cap. MatchCount is guaranteed positive by
-	// the normalization at the top of this function; the slice bound below
-	// depends on that.
-	if len(deduplicatedChunks) > params.MatchCount {
-		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
-	}
-
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
 }
 
 // normalizedMatchCount resolves the effective primary-match cap for a search.

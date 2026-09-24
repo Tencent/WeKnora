@@ -105,6 +105,13 @@ func (s *processSyncKBService) HybridSearch(context.Context, string, types.Searc
 	return nil, nil
 }
 
+func (s *processSyncKBService) HybridSearchWithRerank(
+	ctx context.Context, id string, params types.SearchParams,
+) (*types.RetrievalResult, error) {
+	results, err := s.HybridSearch(ctx, id, params)
+	return &types.RetrievalResult{Results: results}, err
+}
+
 func (s *processSyncKBService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
 	return nil, nil
 }

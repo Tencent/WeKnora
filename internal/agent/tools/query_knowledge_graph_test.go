@@ -67,6 +67,13 @@ func (s *stubKnowledgeBaseService) HybridSearch(context.Context, string, types.S
 	return s.results, nil
 }
 
+func (s *stubKnowledgeBaseService) HybridSearchWithRerank(
+	ctx context.Context, id string, params types.SearchParams,
+) (*types.RetrievalResult, error) {
+	results, err := s.HybridSearch(ctx, id, params)
+	return &types.RetrievalResult{Results: results}, err
+}
+
 func (s *stubKnowledgeBaseService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
 	return nil, nil
 }

@@ -249,6 +249,10 @@ type SearchParams struct {
 	// in processSearchResults. Used by the chat pipeline where context assembly
 	// is handled separately in the merge stage.
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+	// Rerank, when present and enabled, reranks the fused candidates before
+	// truncating to MatchCount. Only the hybrid-search API reads it; internal
+	// callers rerank on their own.
+	Rerank *RerankOptions `json:"rerank,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

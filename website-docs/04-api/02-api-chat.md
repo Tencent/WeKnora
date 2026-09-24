@@ -417,7 +417,7 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 
 ### POST /api/v1/knowledge-search
 
-用途：无会话知识检索（非流式）。Handler: `internal/handler/session/qa.go` 的 `SearchKnowledge`。
+用途：无会话知识检索（非流式），和产品内问答走同一条检索链路（召回 → rerank → 合并 → 截断）。Handler: `internal/handler/session/qa.go` 的 `SearchKnowledge`。和 `hybrid-search` 的区别见[检索接口怎么选](./01-api-overview.md#retrieval-api)。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -427,12 +427,23 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 | `knowledge_ids` | []string | 否 | 限定文件 |
 | `tag_ids` | []string | 否 | 标签过滤 |
 | `mentioned_items` | []object | 否 | 带 KB 范围的标签提及 |
+| `vector_threshold` / `keyword_threshold` | float | 否 | 召回阈值；省略时用空间检索配置（默认 0.15 / 0.3） |
+| `match_count` | int | 否 | 返回条数；省略时用空间配置的 `rerank_top_k`（默认 10）。召回深度会自动加大到不小于它 |
+| `disable_keywords_match` / `disable_vector_match` | bool | 否 | 关闭某一路召回；两个都为 `true` 返回 400 |
+| `rerank` | object | 否 | 覆盖 rerank 设置；`{"enabled":false}` 关闭 rerank。字段见 [rerank 对象](./01-api-overview.md#retrieval-api)。`rerank.top_k` 同时给出时优先于 `match_count` |
 
-响应：200 `{"success":true,"data":[SearchResult]}`（`id,content,knowledge_id,knowledge_title,score,chunk_type,knowledge_base_id,...`）
+省略的字段都沿用空间的检索配置（`GET /tenants/kv/retrieval-config`），不传任何新字段时行为和以前一样。
+
+响应：200 `{"success":true,"data":[SearchResult],"meta":{"rerank":{...}}}`。`SearchResult` 含 `id,content,knowledge_id,knowledge_title,score,chunk_type,knowledge_base_id,...`；经过 rerank 的结果 `metadata` 带 `model_score` 和 `base_score`。`data` 为空时看 `meta.rerank.outcome` 判断原因，见 [meta.rerank 诊断](./01-api-overview.md#retrieval-api)。
 
 ```bash
 curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' -d '{"query":"部署要求","knowledge_base_ids":["kb-1"]}'
+
+# 只用向量召回、取 5 条，并关闭 rerank
+curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"部署要求","knowledge_base_ids":["kb-1"],"disable_keywords_match":true,"match_count":5,"rerank":{"enabled":false}}'
 ```
 
 ## 消息（/api/v1/messages）

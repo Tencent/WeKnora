@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -55,75 +56,6 @@ func newRerankTestResults() []*searchResultWithMeta {
 	return []*searchResultWithMeta{
 		{SearchResult: &types.SearchResult{ID: "c1", Content: "alpha", Score: 0.02}},
 		{SearchResult: &types.SearchResult{ID: "c2", Content: "beta", Score: 0.01}},
-	}
-}
-
-func TestFilterRerankRankResults_thresholdAndFallback(t *testing.T) {
-	t.Parallel()
-	rankResults := []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.05},
-		{Index: 1, RelevanceScore: 0.02},
-	}
-	filtered := filterRerankRankResults(rankResults, 0.3, false)
-	if len(filtered) != 0 {
-		t.Fatalf("expected empty filter, got %#v", filtered)
-	}
-
-	rankResults = []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.05},
-		{Index: 1, RelevanceScore: 0.20},
-	}
-	filtered = filterRerankRankResults(rankResults, 0.3, false)
-	if len(filtered) != 1 || filtered[0].Index != 1 {
-		t.Fatalf("expected fallback top score, got %#v", filtered)
-	}
-
-	rankResults = []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.05},
-		{Index: 1, RelevanceScore: 0.02},
-	}
-	filtered = filterRerankRankResults(rankResults, 0.3, true)
-	if len(filtered) != 1 || filtered[0].Index != 0 {
-		t.Fatalf("expected explicit scope to preserve top result, got %#v", filtered)
-	}
-
-	rankResults = []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.8},
-		{Index: 1, RelevanceScore: 0.4},
-		{Index: 2, RelevanceScore: 0.1},
-	}
-	filtered = filterRerankRankResults(rankResults, 0.3, false)
-	if len(filtered) != 2 {
-		t.Fatalf("expected 2 passing scores, got %#v", filtered)
-	}
-}
-
-func TestApplyModelRerankScores_faqUsesCompositeScale(t *testing.T) {
-	t.Parallel()
-	tool := &SearchKnowledgeTool{
-		config: &config.Config{
-			Conversation: &config.ConversationConfig{RerankThreshold: 0.3},
-		},
-	}
-	originals := []*searchResultWithMeta{
-		{
-			SearchResult:      &types.SearchResult{ID: "faq-1", Content: "Q: WeKnora", Score: 0.011},
-			KnowledgeBaseType: types.KnowledgeBaseTypeFAQ,
-		},
-		{
-			SearchResult: &types.SearchResult{ID: "doc-1", Content: "swimming club", Score: 0.02},
-		},
-	}
-	rankResults := []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.05},
-		{Index: 1, RelevanceScore: 0.9},
-	}
-	out := tool.applyModelRerankScores(originals, rankResults, 0.3, false)
-	if len(out) != 1 || out[0].ID != "doc-1" {
-		t.Fatalf("weak FAQ should be filtered out, got %#v", out)
-	}
-	if out[0].Score <= 0.011 {
-		t.Fatalf("composite score should exceed raw retrieval score, got %.4f", out[0].Score)
 	}
 }
 
@@ -194,51 +126,6 @@ func TestRerankResults_withoutModelIsPassthrough(t *testing.T) {
 	}
 }
 
-// A chunk rarely names its document's subject, so the rerank model must see
-// the document title; FAQ entries are scored on their own question.
-func TestRerankScores_prefixDocumentTitle(t *testing.T) {
-	t.Parallel()
-	model := &stubReranker{scores: []float64{0.5, 0.5, 0.5}}
-	tool := newRerankTestTool(model)
-	results := []*searchResultWithMeta{
-		{SearchResult: &types.SearchResult{
-			ID: "c1", Content: "allocate inference across open-weight models",
-			KnowledgeTitle: " Show HN: Echo ", ChunkType: string(types.ChunkTypeText),
-		}},
-		{SearchResult: &types.SearchResult{
-			ID: "c2", Content: "What is Echo?", KnowledgeTitle: "FAQ set", ChunkType: string(types.ChunkTypeFAQ),
-		}},
-		{SearchResult: &types.SearchResult{ID: "c3", Content: "untitled"}},
-	}
-
-	if _, err := tool.rerankScores(context.Background(), "query", results); err != nil {
-		t.Fatalf("rerankScores returned error: %v", err)
-	}
-	want := []string{"Show HN: Echo\n\nallocate inference across open-weight models", "What is Echo?", "untitled"}
-	for i, w := range want {
-		if model.documents[i] != w {
-			t.Fatalf("passage %d = %q, want %q", i, model.documents[i], w)
-		}
-	}
-}
-
-// Title is shared by every chunk of a document, so a passage whose body never
-// names the query subject still goes to the reranker as title + chunk.
-func TestRerankPassage_prefixesTitleWhenChunkOmitsSubject(t *testing.T) {
-	t.Parallel()
-	got := (&SearchKnowledgeTool{}).rerankPassage(context.Background(), &types.SearchResult{
-		Content:        "installation prerequisites and docker compose flags",
-		KnowledgeTitle: "Show HN: Echo – Fable-level results at 1/3 the cost using open-weight models",
-		ChunkType:      string(types.ChunkTypeText),
-	})
-	if !strings.HasPrefix(got, "Show HN: Echo") {
-		t.Fatalf("expected document title prefix, got %q", got)
-	}
-	if !strings.Contains(got, "installation prerequisites") {
-		t.Fatalf("chunk body must still be present: %q", got)
-	}
-}
-
 // Execute must surface rerank_rejected through Data and the empty statement
 // when the model scores every retrieved candidate below the fallback floor.
 func TestExecuteReportsRerankRejection(t *testing.T) {
@@ -286,7 +173,7 @@ func TestExecuteReportsRerankRejection(t *testing.T) {
 func TestRerankThreshold_default(t *testing.T) {
 	t.Parallel()
 	tool := &SearchKnowledgeTool{}
-	if got := tool.rerankThreshold(); got != 0.3 {
-		t.Fatalf("default threshold = %v, want 0.3", got)
+	if got := tool.rerankThreshold(); got != reranking.DefaultThreshold {
+		t.Fatalf("default threshold = %v, want %v", got, reranking.DefaultThreshold)
 	}
 }

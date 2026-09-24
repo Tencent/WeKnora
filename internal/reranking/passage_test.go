@@ -1,4 +1,4 @@
-package chatpipeline
+package reranking
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func TestGetEnrichedPassageKeepsQuestionsFromEarlierRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	passage := getEnrichedPassage(context.Background(), &types.SearchResult{
+	passage := EnrichedPassage(context.Background(), &types.SearchResult{
 		Content:       "edited chunk body",
 		ChunkMetadata: types.JSON(metadata),
 	})
@@ -49,7 +49,7 @@ func TestGetEnrichedPassageKeepsCodeAndMathCandidates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			passage := getEnrichedPassage(context.Background(), &types.SearchResult{Content: tt.content})
+			passage := EnrichedPassage(context.Background(), &types.SearchResult{Content: tt.content})
 			if strings.TrimSpace(passage) == "" {
 				t.Fatal("semantic-only candidate was removed from the rerank passage")
 			}
@@ -171,9 +171,9 @@ func TestCleanPassageForRerank(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := cleanPassageForRerank(tt.input)
+			got := CleanPassage(tt.input)
 			if got != tt.expect {
-				t.Errorf("cleanPassageForRerank():\ngot:    %q\nexpect: %q", got, tt.expect)
+				t.Errorf("CleanPassage():\ngot:    %q\nexpect: %q", got, tt.expect)
 			}
 		})
 	}

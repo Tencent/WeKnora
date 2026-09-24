@@ -66,7 +66,9 @@ func filterHistoryResults(
 		}
 		r.MatchType = types.MatchTypeHistory
 		r.Score = r.Score * historyScoreDiscount
-		r.Metadata = ensureMetadata(r.Metadata)
+		if r.Metadata == nil {
+			r.Metadata = make(map[string]string)
+		}
 		r.Metadata["history_similarity"] = strings.TrimRight(strings.TrimRight(
 			fmt.Sprintf("%.4f", sim), "0"), ".")
 		filtered = append(filtered, r)

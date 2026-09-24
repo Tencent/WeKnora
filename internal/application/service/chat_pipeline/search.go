@@ -412,9 +412,9 @@ func (p *PluginSearch) searchByTargets(
 			// only targets that have a real keyword index; vector-only targets must
 			// propagate the embedding failure instead of looking like empty recall.
 			var queryEmbedding []float32
-			disableVector := false
+			disableVector := chatManage.DisableVectorMatch
 			searchableTargets := targets
-			if modelKey != "" {
+			if modelKey != "" && !disableVector {
 				emb, err := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, queryText)
 				if err != nil {
 					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
@@ -475,6 +475,7 @@ func (p *PluginSearch) searchByTargets(
 						MatchCount:            chatManage.EmbeddingTopK,
 						SkipContextEnrichment: true,
 						DisableVectorMatch:    disableVector,
+						DisableKeywordsMatch:  chatManage.DisableKeywordsMatch,
 					}
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
 					if err != nil {
@@ -554,6 +555,7 @@ func (p *PluginSearch) searchSingleTarget(
 		ScopeTagIDs:           t.ScopeTagIDs,
 		SkipContextEnrichment: true,
 		DisableVectorMatch:    disableVector,
+		DisableKeywordsMatch:  chatManage.DisableKeywordsMatch,
 	}
 	if t.Type == types.SearchTargetTypeKnowledge {
 		params.KnowledgeIDs = t.KnowledgeIDs

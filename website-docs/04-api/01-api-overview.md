@@ -211,6 +211,90 @@ X-Accel-Buffering: no
 
 各渠道（Web / IM / 嵌入挂件 / API）分别拿到哪种形式、以及图片加载不出来时怎么排查，见[图片与文件的对外访问](../03-features/21-file-access.md)。
 
+## 检索接口怎么选 {#retrieval-api}
+
+对外有两个检索接口，都要求 API Key 有 `retrieve`（或 full）权限，都返回 `SearchResult` 列表：
+
+| | `POST /knowledge-search` | `POST /knowledge-bases/{id}/hybrid-search` |
+| --- | --- | --- |
+| 定位 | 和产品内问答走同一条检索链路：召回 → rerank → 合并 → 截断 | 底层召回原语：召回 → 融合 → 截断；rerank 需要显式开启 |
+| 检索范围 | 多个知识库，可以使用不同的 embedding 模型；也可以只给 `knowledge_ids` 或带知识库范围的标签 | 路径上的知识库；`knowledge_base_ids` 可扩展到多个知识库，但它们的 embedding 模型必须相同 |
+| 召回参数 | `vector_threshold`、`keyword_threshold`、`match_count`、`disable_*_match`；省略时用空间的检索配置 | 同名参数，另外支持 `query_embedding` 预计算向量 |
+| rerank | 默认开启（用空间配置），`rerank` 对象可以覆盖或关闭 | 默认关闭，传 `rerank` 对象后开启 |
+| 上下文补齐 | 父块、相邻块在合并阶段拼进 `content` | 父块、相邻块、关联块作为额外结果行返回（`skip_context_enrichment` 可关） |
+
+一般的外部 RAG 调用，想拿到和页面问答一致的排序，用 `knowledge-search`。需要精确控制召回（评测流水线要固定参数、传预计算向量、只查一个库做 A/B 对比），用 `hybrid-search`；需要的话加上 `rerank`。
+
+### rerank 对象
+
+两个接口的 `rerank` 字段结构相同：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | 设为 `false` 关闭 rerank，结果保持召回顺序 |
+| `model_id` | string | 见下文 | rerank 模型 ID（`GET /models` 里 `type` 为 `Rerank` 的模型）。ID 不存在、未激活或不是 rerank 模型时返回 400，不会悄悄换成别的模型 |
+| `top_k` | int | 接口的返回条数 | rerank 后最多保留几条；负数返回 400 |
+| `threshold` | float | 空间检索配置里的 `rerank_threshold`（未配置时 0.2） | 模型分数下限；`0` 和负数都是合法值 |
+
+不传 `model_id` 时依次使用：空间检索配置里的 `rerank_model_id` → 空间里第一个 rerank 模型。都没有时不做 rerank，按召回顺序返回，`meta.rerank.outcome` 为 `no_model`。
+
+rerank 的过程和问答链路、智能推理的 `search_knowledge` 工具共用同一套实现（`internal/reranking`）：
+
+1. 送给模型打分的文本 = 文档标题 + 去掉 Markdown 标记的分块正文 + 图片描述与 OCR 文本 + 生成的问题。FAQ 条目不加标题。
+2. 保留分数不低于 `threshold` 的结果。如果一条都没有、而 `threshold` 高于 0.3，就把阈值降到 `max(threshold×0.7, 0.3)` 再筛一次。还是没有的话，最高分不低于 0.15 时只保留这一条，否则返回空列表。
+3. 排序分 = `0.6×模型分 + 0.3×召回分 + 0.1×来源权重`；结果的 `metadata` 里带 `model_score` 和 `base_score`。
+4. 用 MMR（λ=0.7）从中挑出 `top_k` 条，降低内容重复。
+
+`hybrid-search` 开启 rerank 时，候选池是融合后排名前 `max(top_k, 50)` 的分块，所以 `match_count` 很小也有足够的候选给模型挑。
+
+rerank 模型加载失败或调用出错时，请求不会失败，而是按召回顺序返回，并在 `meta.rerank` 里写明原因。
+
+### meta.rerank 诊断
+
+`knowledge-search` 的响应总是带 `meta.rerank`；`hybrid-search` 只在请求里带了 `rerank` 对象时才带。
+
+```json
+{
+  "success": true,
+  "data": [],
+  "meta": {
+    "rerank": {
+      "applied": true,
+      "outcome": "all_below_threshold",
+      "model_id": "rr-1",
+      "model_source": "tenant",
+      "threshold": 0.3,
+      "effective_threshold": 0.3,
+      "top_score": 0.08,
+      "candidate_count": 24,
+      "result_count": 0
+    }
+  }
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `applied` | rerank 分数是否决定了返回顺序 |
+| `outcome` | 见下表 |
+| `model_id` / `model_source` | 使用的模型，以及它从哪来：`request`（请求指定）、`tenant`（空间配置）、`auto`（自动选择） |
+| `threshold` / `effective_threshold` | 请求的阈值，以及降级后实际使用的阈值 |
+| `top_score` | 候选中的最高模型分 |
+| `candidate_count` / `result_count` | 送去 rerank 的候选数 / 返回条数 |
+| `error` | `model_error`、`model_unavailable` 时的错误信息 |
+
+| `outcome` | 含义 |
+| --- | --- |
+| `ok` | 有结果达到阈值 |
+| `threshold_degraded` | 原阈值下没有结果，降低阈值后才有 |
+| `fallback_top1` | 所有阈值都没过，只保留了最高分的一条 |
+| `all_below_threshold` | 模型认为没有候选相关，结果为空。可以换个说法重新提问，或者调低 `rerank.threshold` |
+| `model_error` | 模型调用失败，按召回顺序返回 |
+| `model_unavailable` | 模型加载失败（凭证、地址等配置问题），按召回顺序返回 |
+| `no_model` | 空间里没有 rerank 模型，按召回顺序返回 |
+| `disabled` | 请求里 `rerank.enabled` 为 `false` |
+| `no_candidates` | 召回阶段没有结果 |
+
 ## 限流说明
 
 | 面 | 限制 | 来源 |

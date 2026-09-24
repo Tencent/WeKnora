@@ -17,6 +17,10 @@ type PipelineRequest struct {
 	KeywordThreshold float64       `json:"keyword_threshold"`
 	EmbeddingTopK    int           `json:"embedding_top_k"`
 	VectorDatabase   string        `json:"vector_database"`
+	// DisableVectorMatch / DisableKeywordsMatch turn off one recall path for
+	// every search target. Set by the knowledge-search API.
+	DisableVectorMatch   bool `json:"disable_vector_match,omitempty"`
+	DisableKeywordsMatch bool `json:"disable_keywords_match,omitempty"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -134,6 +138,8 @@ type PipelineState struct {
 	// UsedMemories mirrors MemoryPrompt in structured form so the answer can
 	// tell the user which memories it saw.
 	UsedMemories UsedMemories `json:"-"`
+	// RerankDiagnostics records what the rerank stage did this turn.
+	RerankDiagnostics *RerankDiagnostics `json:"-"`
 }
 
 // PipelineContext holds runtime context for the current pipeline execution.
@@ -217,6 +223,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			KeywordThreshold:         c.KeywordThreshold,
 			EmbeddingTopK:            c.EmbeddingTopK,
 			VectorDatabase:           c.VectorDatabase,
+			DisableVectorMatch:       c.DisableVectorMatch,
+			DisableKeywordsMatch:     c.DisableKeywordsMatch,
 			RerankModelID:            c.RerankModelID,
 			RerankTopK:               c.RerankTopK,
 			RerankThreshold:          c.RerankThreshold,

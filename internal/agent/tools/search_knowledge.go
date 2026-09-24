@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -248,11 +248,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	if len(ranked) > 0 {
-		mmrK := len(ranked)
-		if mmrK > retrievalLimit {
-			mmrK = retrievalLimit
-		}
-		if selected := t.applyMMR(ctx, ranked, mmrK, 0.7); len(selected) > 0 {
+		if selected := selectMMR(ctx, ranked, min(len(ranked), retrievalLimit)); len(selected) > 0 {
 			ranked = selected
 		}
 	}
@@ -602,14 +598,13 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	return allResults
 }
 
-// rerankResults applies reranking to all search results (including FAQ entries)
-// using the configured rerank model, then filters by threshold and applies
-// composite scoring so MMR/sorting uses a single score scale.
+// rerankResults scores all search results (including FAQ entries) with the
+// configured rerank model through the shared rerank stage, keeping those
+// that pass the threshold with composite scores, best first.
 //
 // A failed rerank call degrades to the raw retrieval order. An empty result
-// after threshold filtering is kept empty: filterRerankRankResults already
-// preserves the top candidate down to agentRerankFallbackMinScore, so reaching
-// zero means even the best match is below that floor.
+// is kept empty: the shared stage already preserves the top candidate down to
+// its fallback floor, so reaching zero means even the best match is below it.
 func (t *SearchKnowledgeTool) rerankResults(
 	ctx context.Context,
 	query string,
@@ -619,21 +614,29 @@ func (t *SearchKnowledgeTool) rerankResults(
 		return results, nil
 	}
 
-	rankResults, err := t.rerankScores(ctx, query, results)
-	if err != nil {
-		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %v", err)
+	rows := make([]*types.SearchResult, len(results))
+	for i, r := range results {
+		rows[i] = r.SearchResult
+	}
+	threshold := t.rerankThreshold()
+	res := reranking.Rerank(ctx, t.rerankModel, query, rows, reranking.Options{
+		Threshold:        threshold,
+		FallbackMinScore: reranking.FallbackMinScore(t.searchTargets.HasRecallThresholdOverride()),
+	})
+	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %s",
+			res.Diagnostics.Error)
 		return results, nil
 	}
 
-	threshold := t.rerankThreshold()
-	reranked := t.applyModelRerankScores(
-		results,
-		rankResults,
-		threshold,
-		t.searchTargets.HasRecallThresholdOverride(),
-	)
-	logger.Infof(ctx, "[Tool][SearchKnowledge] Reranked %d/%d results above threshold %.2f",
-		len(reranked), len(results), threshold)
+	reranked := make([]*searchResultWithMeta, 0, len(res.Results))
+	for i, row := range res.Results {
+		withMeta := *results[res.Indices[i]]
+		withMeta.SearchResult = row
+		reranked = append(reranked, &withMeta)
+	}
+	logger.Infof(ctx, "[Tool][SearchKnowledge] Reranked %d/%d results above threshold %.2f (%s)",
+		len(reranked), len(results), threshold, res.Diagnostics.Outcome)
 	return reranked, nil
 }
 
@@ -666,98 +669,11 @@ func (t *SearchKnowledgeTool) getFAQMetadata(
 	return meta, nil
 }
 
-// rerankScores scores the candidates with the configured rerank model and
-// returns the raw relevance scores, leaving threshold filtering and composite
-// scoring to the caller.
-func (t *SearchKnowledgeTool) rerankScores(
-	ctx context.Context,
-	query string,
-	results []*searchResultWithMeta,
-) ([]rerank.RankResult, error) {
-	passages := make([]string, len(results))
-	for i, result := range results {
-		passages[i] = t.rerankPassage(ctx, result.SearchResult)
-	}
-	rerankResp, err := t.rerankModel.Rerank(ctx, query, passages)
-	if err != nil {
-		return nil, fmt.Errorf("rerank call failed: %w", err)
-	}
-	return rerankResp, nil
-}
-
-// rerankPassage is the text the rerank model scores: the document title
-// followed by the enriched chunk. A chunk rarely restates what its document
-// is about, so without the title a passage from "Show HN: Echo - ... using
-// open-weight models" scored 0.002 against "Echo open-weight models reduce
-// cost" and 0.45 with it. FAQ entries carry their own question instead.
-func (t *SearchKnowledgeTool) rerankPassage(ctx context.Context, result *types.SearchResult) string {
-	passage := t.getEnrichedPassage(ctx, result)
-	title := strings.TrimSpace(result.KnowledgeTitle)
-	if title == "" || result.ChunkType == string(types.ChunkTypeFAQ) {
-		return passage
-	}
-	return title + "\n\n" + passage
-}
-
 func (t *SearchKnowledgeTool) rerankThreshold() float64 {
 	if t.config != nil && t.config.Conversation != nil && t.config.Conversation.RerankThreshold > 0 {
 		return t.config.Conversation.RerankThreshold
 	}
-	return 0.3
-}
-
-const agentRerankFallbackMinScore = 0.15
-
-func filterRerankRankResults(
-	rankResults []rerank.RankResult,
-	threshold float64,
-	preserveTop bool,
-) []rerank.RankResult {
-	if len(rankResults) == 0 {
-		return nil
-	}
-	filtered := make([]rerank.RankResult, 0, len(rankResults))
-	for _, r := range rankResults {
-		if r.RelevanceScore >= threshold {
-			filtered = append(filtered, r)
-		}
-	}
-	if len(filtered) == 0 {
-		top := rankResults[0]
-		for _, r := range rankResults[1:] {
-			if r.RelevanceScore > top.RelevanceScore {
-				top = r
-			}
-		}
-		if preserveTop || top.RelevanceScore >= agentRerankFallbackMinScore {
-			return []rerank.RankResult{top}
-		}
-	}
-	return filtered
-}
-
-func (t *SearchKnowledgeTool) applyModelRerankScores(
-	originals []*searchResultWithMeta,
-	rankResults []rerank.RankResult,
-	threshold float64,
-	preserveTop bool,
-) []*searchResultWithMeta {
-	filtered := filterRerankRankResults(rankResults, threshold, preserveTop)
-	out := make([]*searchResultWithMeta, 0, len(filtered))
-	for _, rr := range filtered {
-		if rr.Index < 0 || rr.Index >= len(originals) {
-			continue
-		}
-		newResult := *originals[rr.Index]
-		baseScore := newResult.Score
-		modelScore := rr.RelevanceScore
-		newResult.Score = t.compositeScore(&newResult, modelScore, baseScore)
-		out = append(out, &newResult)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Score > out[j].Score
-	})
-	return out
+	return reranking.DefaultThreshold
 }
 
 // deduplicateResults removes duplicate chunks, keeping the first occurrence.
@@ -973,8 +889,9 @@ func (t *SearchKnowledgeTool) formatOutput(
 	return &types.ToolResult{Success: true, Output: ob.String(), Data: data}
 }
 
-// getEnrichedPassage merges chunk content with image captions / OCR text so
-// the reranker and MMR see the same evidence the model will.
+// getEnrichedPassage merges the raw chunk content with image captions / OCR
+// text. The pattern filter matches against it, so unlike the rerank passage
+// it keeps markdown, URLs and other literal text a grep may target.
 func (t *SearchKnowledgeTool) getEnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 	if result.ImageInfo == "" {
 		return result.Content
@@ -1006,90 +923,19 @@ func (t *SearchKnowledgeTool) getEnrichedPassage(ctx context.Context, result *ty
 	return combinedText + strings.Join(imageTexts, "\n")
 }
 
-// compositeScore calculates a composite score considering multiple factors
-func (t *SearchKnowledgeTool) compositeScore(
-	result *searchResultWithMeta,
-	modelScore, baseScore float64,
-) float64 {
-	// Source weight: web_search results get slightly lower weight
-	sourceWeight := 1.0
-	if strings.ToLower(result.KnowledgeSource) == "web_search" {
-		sourceWeight = 0.95
+// selectMMR reduces redundancy among results through the shared MMR stage.
+func selectMMR(ctx context.Context, results []*searchResultWithMeta, k int) []*searchResultWithMeta {
+	rows := make([]*types.SearchResult, len(results))
+	for i, r := range results {
+		rows[i] = r.SearchResult
 	}
-
-	// Position prior: slightly favor chunks earlier in the document
-	positionPrior := 1.0
-	if result.StartAt >= 0 && result.EndAt > result.StartAt {
-		positionRatio := 1.0 - float64(result.StartAt)/float64(result.EndAt+1)
-		positionPrior += t.clampFloat(positionRatio, -0.05, 0.05)
-	}
-
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
-	if composite < 0 {
-		composite = 0
-	}
-	if composite > 1 {
-		composite = 1
-	}
-	return composite
-}
-
-func (t *SearchKnowledgeTool) clampFloat(v, minV, maxV float64) float64 {
-	return searchutil.ClampFloat(v, minV, maxV)
-}
-
-// applyMMR applies Maximal Marginal Relevance to reduce redundancy.
-func (t *SearchKnowledgeTool) applyMMR(
-	ctx context.Context,
-	results []*searchResultWithMeta,
-	k int,
-	lambda float64,
-) []*searchResultWithMeta {
-	if k <= 0 || len(results) == 0 {
+	picks := reranking.SelectMMR(ctx, rows, k, reranking.DefaultMMRLambda)
+	if picks == nil {
 		return nil
 	}
-
-	selected := make([]*searchResultWithMeta, 0, k)
-	candidates := make([]*searchResultWithMeta, len(results))
-	copy(candidates, results)
-
-	tokenSets := make([]map[string]struct{}, len(candidates))
-	for i, r := range candidates {
-		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
-	}
-
-	// Incremental form: maxRedundancy[i] caches candidate i's maximum jaccard
-	// against everything selected so far, so each round only needs one
-	// comparison per remaining candidate. Selection output is identical to
-	// the naive form, including tie-breaking.
-	maxRedundancy := make([]float64, len(candidates))
-	for len(selected) < k && len(candidates) > 0 {
-		bestIdx := 0
-		bestScore := -1.0
-		for i, r := range candidates {
-			mmr := lambda*r.Score - (1.0-lambda)*maxRedundancy[i]
-			if mmr > bestScore {
-				bestScore = mmr
-				bestIdx = i
-			}
-		}
-		selected = append(selected, candidates[bestIdx])
-		chosenTokens := tokenSets[bestIdx]
-		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
-		maxRedundancy = append(maxRedundancy[:bestIdx], maxRedundancy[bestIdx+1:]...)
-		for i := range candidates {
-			maxRedundancy[i] = math.Max(maxRedundancy[i], t.jaccard(tokenSets[i], chosenTokens))
-		}
+	selected := make([]*searchResultWithMeta, len(picks))
+	for i, p := range picks {
+		selected[i] = results[p]
 	}
 	return selected
-}
-
-func (t *SearchKnowledgeTool) tokenizeSimple(text string) map[string]struct{} {
-	return searchutil.TokenizeSimple(text)
-}
-
-func (t *SearchKnowledgeTool) jaccard(a, b map[string]struct{}) float64 {
-	return searchutil.Jaccard(a, b)
 }
