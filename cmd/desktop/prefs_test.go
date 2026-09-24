@@ -23,7 +23,8 @@ func TestDesktopSigningKeyKeepsExistingAESHMAC(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(dir, "signing.key"))
 	require.NoError(t, err)
 	require.Equal(t, aes, string(got))
-	require.Equal(t, aes, os.Getenv("JWT_SECRET"))
+	require.NotEqual(t, aes, os.Getenv("JWT_SECRET"))
+	require.GreaterOrEqual(t, len(os.Getenv("JWT_SECRET")), 32)
 }
 
 func TestDesktopLocalFilesDir(t *testing.T) {

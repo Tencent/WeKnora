@@ -15,7 +15,9 @@ import (
 
 // InstallRunner is the slice of localsandbox.Service an install needs.
 type InstallRunner interface {
-	RunWithPolicy(ctx context.Context, policy localsandbox.Policy, req localsandbox.RunRequest) (*localsandbox.RunResult, error)
+	RunWithPolicy(
+		ctx context.Context, policy localsandbox.Policy, req localsandbox.RunRequest,
+	) (*localsandbox.RunResult, error)
 }
 
 // InstallPolicies builds the install-only policy for one version directory.

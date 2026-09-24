@@ -77,6 +77,7 @@ func (f *fakeHostSkillTree) NewVersion(name string) (string, error) {
 	f.versions = append(f.versions, dir)
 	return dir, nil
 }
+
 func (f *fakeHostSkillTree) Activate(name, dir string) (string, error) {
 	prev := f.active[name]
 	f.active[name] = dir
@@ -272,7 +273,9 @@ func TestHostInstallPromptNamesTheVersionDir(t *testing.T) {
 func TestWriteHostSkillFilesRejectsEscapes(t *testing.T) {
 	dir := t.TempDir()
 	require.Error(t, writeHostSkillFiles(dir, &SkillBundle{Files: map[string][]byte{"../x": []byte("x")}}))
-	require.NoError(t, writeHostSkillFiles(dir, &SkillBundle{Files: map[string][]byte{"scripts/run.py": []byte("print(1)")}}))
+	require.NoError(t, writeHostSkillFiles(dir, &SkillBundle{Files: map[string][]byte{
+		"scripts/run.py": []byte("print(1)"),
+	}}))
 	info, err := os.Stat(filepath.Join(dir, "scripts", "run.py"))
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o755), info.Mode().Perm())

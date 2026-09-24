@@ -9,7 +9,10 @@ import (
 
 func TestHostSkillsAvailableNeedsEveryPart(t *testing.T) {
 	host := &capableManager{typ: sandbox.SandboxTypeHost}
-	full := HostSandboxManager{Manager: host, Desktop: true, SkillTree: &fakeHostSkillTree{}, SkillInstaller: &fakeHostSkillInstaller{}}
+	full := HostSandboxManager{
+		Manager: host, Desktop: true,
+		SkillTree: &fakeHostSkillTree{}, SkillInstaller: &fakeHostSkillInstaller{},
+	}
 	require.True(t, full.SkillsAvailable())
 
 	for name, h := range map[string]HostSandboxManager{

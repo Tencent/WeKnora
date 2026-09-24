@@ -550,7 +550,8 @@ func (s *TenantSkillService) runInstall(
 	// Locators must land before the file seed. A large skill is copied file by
 	// file over the sandbox API and can take minutes; the console attaches to
 	// the transcript as soon as the directory is ready, not after that copy.
-	transcript, prompt := s.beginInstallTranscript(ctx, tenantID, configID, skillID, sess, mgr, skillDir, bundle, instructions...)
+	transcript, prompt := s.beginInstallTranscript(
+		ctx, tenantID, configID, skillID, sess, mgr, skillDir, bundle, instructions...)
 
 	fileCount := 0
 	if bundle != nil {
@@ -1962,7 +1963,8 @@ Hard requirements:
 - When finished, report what you installed and any global/system packages you changed.
 - Declare the environment variables this skill needs AT RUN TIME. Decide from the SKILL.md text
   at the end of this message: declare what it documents as needed to run the skill. Ignore 
-  anything only the installation itself needed. Write the declaration with write_skill_file to %s, as JSON of this exact shape:
+  anything only the installation itself needed. Write the declaration with write_skill_file to %s,
+  as JSON of this exact shape:
   {"env":[{"name":"TAVILY_API_KEY","description":"what the skill uses it for","required":true}]}
   Each name must be UPPER_SNAKE_CASE and must appear literally somewhere in the skill's own files.
   Never write any value, placeholder or example credential: this file declares what is needed, and

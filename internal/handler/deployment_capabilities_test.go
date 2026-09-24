@@ -119,7 +119,9 @@ func TestRemoteSandboxCapabilityIsOffOnLiteDesktop(t *testing.T) {
 	on := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{Sandbox: true, SandboxRemote: true})
 	require.True(t, on.Capabilities["settings.sandbox.remote"].Supported)
 
-	off := BuildDeploymentCapabilities("lite", DeploymentFeatureAvailability{Sandbox: true, SandboxRemote: false, SandboxHost: true})
+	off := BuildDeploymentCapabilities("lite", DeploymentFeatureAvailability{
+		Sandbox: true, SandboxRemote: false, SandboxHost: true,
+	})
 	require.False(t, off.Capabilities["settings.sandbox.remote"].Supported)
 	require.Equal(t, "not_supported_in_lite", off.Capabilities["settings.sandbox.remote"].Reason)
 

@@ -304,7 +304,8 @@ Hard requirements:
   Names must be UPPER_SNAKE_CASE and appear literally in the skill's files. Never write a value.
   If the skill needs none, write {"env":[]}. Do not declare WEKNORA_SKILL_DIR,
   WEKNORA_SKILL_OUTPUT_DIR, WEKNORA_SKILL_HISTORY_ROOT or WEKNORA_SESSION_INPUT_DIR.
-- Create the venv with pip present: `+"`uv venv --seed %s/.venv`"+`, or `+"`python3 -m venv %s/.venv`"+` when uv is missing.
+- Create the venv with pip present: `+"`uv venv --seed %s/.venv`"+`,
+  or `+"`python3 -m venv %s/.venv`"+` when uv is missing.
 
 Before you finish, PROVE the skill's imports resolve by running them:
 `+"`%s/.venv/bin/python -c 'import x'`"+`, or each script's `+"`--help`"+`.
