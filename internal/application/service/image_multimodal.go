@@ -12,6 +12,8 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/desensitization"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -102,6 +104,7 @@ type ImageMultimodalService struct {
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
 	spanTracker SpanTracker
+	config      *config.Config
 }
 
 func NewImageMultimodalService(
@@ -119,6 +122,7 @@ func NewImageMultimodalService(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 	spanTracker SpanTracker,
+	cfg *config.Config,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:    chunkService,
@@ -135,6 +139,7 @@ func NewImageMultimodalService(
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
 		spanTracker:     spanTracker,
+		config:          cfg,
 	}
 }
 
@@ -253,6 +258,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		imgOut["vlm_model_id"] = "legacy_inline"
 	}
 
+	kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if kbErr != nil {
+		handleErr = fmt.Errorf("get knowledge base: %w", kbErr)
+		return handleErr
+	}
+	if err := s.rejectRemoteVLMIfDesensitized(ctx, kb, vlmCfg); err != nil {
+		handleErr = err
+		return handleErr
+	}
+
 	// Read image bytes. A provider:// URL must be resolved via FileService —
 	// it must NEVER be handed to the HTTP downloader (which would fail with
 	// "unsupported URL scheme"). On unrecoverable read failure for a single
@@ -287,9 +302,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		} else {
 			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
-				imageInfo.OCRText = ocrText
-				imgOut["ocr_chars"] = len([]rune(ocrText))
-				imgOut["ocr_preview"] = previewText(ocrText, 200)
+				masked, maskErr := maskModelFacingText(ctx, kb, ocrText, desensitizationDepsFromConfig(s.config))
+				if maskErr != nil {
+					handleErr = fmt.Errorf("desensitize OCR text: %w", maskErr)
+					return handleErr
+				}
+				imageInfo.OCRText = masked
+				imgOut["ocr_chars"] = len([]rune(masked))
+				imgOut["ocr_preview"] = previewText(masked, 200)
 			} else {
 				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
 				imgOut["ocr_chars"] = 0
@@ -303,9 +323,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
 	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+		masked, maskErr := maskModelFacingText(ctx, kb, caption, desensitizationDepsFromConfig(s.config))
+		if maskErr != nil {
+			handleErr = fmt.Errorf("desensitize caption: %w", maskErr)
+			return handleErr
+		}
+		imageInfo.Caption = masked
+		imgOut["caption_chars"] = len([]rune(masked))
+		imgOut["caption_preview"] = previewText(masked, 200)
 	}
 
 	// Build child chunks for OCR and caption results
@@ -555,6 +580,28 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	// Legacy: create VLM from inline config
 	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
 	return model, vlmCfg, err
+}
+
+func (s *ImageMultimodalService) rejectRemoteVLMIfDesensitized(
+	ctx context.Context, kb *types.KnowledgeBase, vlmCfg types.VLMConfig,
+) error {
+	if kb == nil || !kb.DesensitizationConfig.IsEnabled() {
+		return nil
+	}
+	if strings.TrimSpace(vlmCfg.ModelID) == "" {
+		return desensitization.ErrCloudVLMForbidden
+	}
+	if s == nil || s.modelService == nil {
+		return desensitization.ErrCloudVLMForbidden
+	}
+	model, err := s.modelService.GetModelByID(ctx, vlmCfg.ModelID)
+	if err != nil {
+		return err
+	}
+	if model == nil || model.Source != types.ModelSourceLocal {
+		return desensitization.ErrCloudVLMForbidden
+	}
+	return nil
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.

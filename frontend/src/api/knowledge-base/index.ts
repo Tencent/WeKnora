@@ -91,6 +91,14 @@ export function createKnowledgeBase(data: {
   embedding_model_id?: string;
   summary_model_id?: string;
   auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
+  desensitization_config?: {
+    enabled: boolean;
+    engine?: string;
+    mask_style?: string;
+    entity_types?: string[];
+    rules?: { name: string; pattern: string; replacement?: string }[];
+    llm_model_id?: string;
+  };
   // Opt-in binding to a specific tenant-owned VectorStore. Omit (or
   // send undefined / empty string) to fall back to the env-configured
   // store. Immutable after creation — UpdateKnowledgeBase intentionally
@@ -155,6 +163,14 @@ export function updateKnowledgeBase(id: string, data: {
     };
     auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
     profile_config?: KnowledgeBaseProfileConfig;
+    desensitization_config?: {
+      enabled: boolean;
+      engine?: string;
+      mask_style?: string;
+      entity_types?: string[];
+      rules?: { name: string; pattern: string; replacement?: string }[];
+      llm_model_id?: string;
+    };
     indexing_strategy?: {
       vector_enabled: boolean;
       keyword_enabled: boolean;

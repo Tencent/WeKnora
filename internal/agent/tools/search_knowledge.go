@@ -693,6 +693,16 @@ func (t *SearchKnowledgeTool) rerankScores(
 func (t *SearchKnowledgeTool) rerankPassage(ctx context.Context, result *types.SearchResult) string {
 	passage := t.getEnrichedPassage(ctx, result)
 	title := strings.TrimSpace(result.KnowledgeTitle)
+	if t.knowledgeBaseService != nil && result.KnowledgeBaseID != "" {
+		masked, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, result.KnowledgeBaseID, title,
+		)
+		if err == nil {
+			title = masked
+		} else {
+			title = ""
+		}
+	}
 	if title == "" || result.ChunkType == string(types.ChunkTypeFAQ) {
 		return passage
 	}
@@ -804,6 +814,46 @@ func (t *SearchKnowledgeTool) deduplicateResults(results []*searchResultWithMeta
 	return uniqueResults
 }
 
+func (t *SearchKnowledgeTool) applyModelFacingTitles(ctx context.Context, results []*searchResultWithMeta) error {
+	for _, r := range results {
+		if r == nil || r.SearchResult == nil {
+			continue
+		}
+		copyResult := *r.SearchResult
+		kbID := copyResult.KnowledgeBaseID
+		title, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, kbID, copyResult.KnowledgeTitle,
+		)
+		if err != nil {
+			return err
+		}
+		filename, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, kbID, copyResult.KnowledgeFilename,
+		)
+		if err != nil {
+			return err
+		}
+		desc, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, kbID, copyResult.KnowledgeDescription,
+		)
+		if err != nil {
+			return err
+		}
+		meta, err := maskModelFacing(
+			ctx, t.knowledgeBaseService, t.config, kbID, copyResult.KnowledgeCustomMetadata,
+		)
+		if err != nil {
+			return err
+		}
+		copyResult.KnowledgeTitle = title
+		copyResult.KnowledgeFilename = filename
+		copyResult.KnowledgeDescription = desc
+		copyResult.KnowledgeCustomMetadata = meta
+		r.SearchResult = &copyResult
+	}
+	return nil
+}
+
 // writeKnowledgeMetadataHeader emits document-scoped metadata once per
 // knowledge item. Chunk entries keep only chunk-specific content so repeated
 // results from the same document do not waste context.
@@ -863,6 +913,9 @@ func (t *SearchKnowledgeTool) formatOutput(
 				query, mode, len(kbsToSearch)),
 			Data: data,
 		}
+	}
+	if err := t.applyModelFacingTitles(ctx, results); err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error(), Data: data}
 	}
 
 	kbCounts := make(map[string]int)

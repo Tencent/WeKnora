@@ -116,6 +116,8 @@ type KnowledgeBase struct {
 	// topics, typical questions and the aggregate snapshot they came from. It
 	// never overwrites the user-authored Description; both are shown to agents.
 	GeneratedProfile *KnowledgeBaseProfile `yaml:"generated_profile" json:"generated_profile,omitempty" gorm:"column:generated_profile;type:json"` //nolint:lll // one-line struct tag
+	// DesensitizationConfig optionally masks parsed markdown before chunking.
+	DesensitizationConfig *DesensitizationConfig `yaml:"desensitization_config" json:"desensitization_config" gorm:"type:json"` //nolint:lll // one-line struct tag
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
@@ -170,6 +172,8 @@ type KnowledgeBaseConfig struct {
 	// ProfileConfig controls optional automatic knowledge-base description
 	// generation. nil means "no change" when updating.
 	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config"`
+	// DesensitizationConfig optionally masks parsed markdown before chunking.
+	DesensitizationConfig *DesensitizationConfig `yaml:"desensitization_config" json:"desensitization_config"`
 	// IndexingStrategy controls which indexing pipelines are active.
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
@@ -748,8 +752,14 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.Type != KnowledgeBaseTypeDocument {
 		kb.AutoTagConfig = nil
 		kb.ProfileConfig = nil
-	} else if kb.AutoTagConfig != nil {
-		kb.AutoTagConfig.Normalize()
+		kb.DesensitizationConfig = nil
+	} else {
+		if kb.AutoTagConfig != nil {
+			kb.AutoTagConfig.Normalize()
+		}
+		if kb.DesensitizationConfig != nil {
+			kb.DesensitizationConfig.Normalize()
+		}
 	}
 	// Set defaults for FAQ
 	if kb.Type == KnowledgeBaseTypeFAQ {

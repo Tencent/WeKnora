@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -34,6 +35,7 @@ type chunkService struct {
 	ownership       retriever.TenantStoreOwnership
 	task            interfaces.TaskEnqueuer
 	spanTracker     SpanTracker
+	config          *config.Config
 }
 
 // NewChunkService creates a new chunk service
@@ -52,6 +54,7 @@ func NewChunkService(
 	ownership retriever.TenantStoreOwnership,
 	task interfaces.TaskEnqueuer,
 	spanTracker SpanTracker,
+	cfg *config.Config,
 ) interfaces.ChunkService {
 	return &chunkService{
 		chunkRepository: chunkRepository,
@@ -62,6 +65,7 @@ func NewChunkService(
 		ownership:       ownership,
 		task:            task,
 		spanTracker:     spanTracker,
+		config:          cfg,
 	}
 }
 
@@ -428,6 +432,11 @@ func (s *chunkService) UpdateDocumentChunk(
 		if len(newContent) > maxEditableChunkLength {
 			return nil, fmt.Errorf("chunk content exceeds %d bytes", maxEditableChunkLength)
 		}
+		masked, maskErr := s.maskChunkText(ctx, chunk.KnowledgeBaseID, newContent)
+		if maskErr != nil {
+			return nil, maskErr
+		}
+		newContent = masked
 	}
 	newEnabled := chunk.IsEnabled
 	if isEnabled != nil {
@@ -666,6 +675,17 @@ func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.C
 	return s.chunkRepository.UpdateChunk(ctx, parent)
 }
 
+func (s *chunkService) maskChunkText(ctx context.Context, kbID, text string) (string, error) {
+	if s == nil || s.kbRepository == nil || kbID == "" {
+		return text, nil
+	}
+	kb, err := s.kbRepository.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return "", err
+	}
+	return maskModelFacingText(ctx, kb, text, desensitizationDepsFromConfig(s.config))
+}
+
 func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) error {
 	kb, err := s.kbRepository.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
 	if err != nil {
@@ -682,38 +702,59 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	if err != nil {
 		return err
 	}
-	if err := engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type); err != nil {
-		return err
-	}
 	if !chunk.IsEnabled {
-		return nil
+		return engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type)
 	}
 	knowledge, err := s.knowledgeRepo.GetKnowledgeByID(ctx, chunk.TenantID, chunk.KnowledgeID)
 	if err != nil {
 		return err
 	}
-	items := []*types.IndexInfo{{
-		Content: buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()), SourceID: chunk.ID,
-		SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
-		KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
-		KnowledgeType: kb.Type, IsEnabled: true,
-	}}
+	maskedTitle, err := maskModelFacingText(ctx, kb, knowledge.Title, desensitizationDepsFromConfig(s.config))
+	if err != nil {
+		return err
+	}
+	maskedBody, err := maskModelFacingText(ctx, kb, chunk.EmbeddingContent(), desensitizationDepsFromConfig(s.config))
+	if err != nil {
+		return err
+	}
 	meta, err := chunk.DocumentMetadata()
 	if err != nil {
 		return err
 	}
+	type maskedQuestion struct {
+		id, question string
+	}
+	var questions []maskedQuestion
 	if meta != nil {
 		for _, question := range meta.GeneratedQuestions {
 			if strings.TrimSpace(question.Question) == "" {
 				continue
 			}
-			items = append(items, &types.IndexInfo{
-				Content: buildKnowledgeIndexContent(knowledge, question.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
-				SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
-				KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
-				KnowledgeType: kb.Type, IsEnabled: true,
-			})
+			masked, maskErr := maskModelFacingText(ctx, kb, question.Question, desensitizationDepsFromConfig(s.config))
+			if maskErr != nil {
+				return maskErr
+			}
+			questions = append(questions, maskedQuestion{id: question.ID, question: masked})
 		}
+	}
+	if err := engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type); err != nil {
+		return err
+	}
+	indexKB := knowledgeWithIndexTitle(knowledge, maskedTitle)
+	items := []*types.IndexInfo{{
+		Content: buildKnowledgeIndexContent(indexKB, maskedBody), SourceID: chunk.ID,
+		SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
+		KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
+		KnowledgeType: kb.Type, IsEnabled: true,
+	}}
+	for _, question := range questions {
+		items = append(items, &types.IndexInfo{
+			Content:    buildKnowledgeIndexContent(indexKB, question.question),
+			SourceID:   types.GeneratedQuestionSourceID(chunk.ID, question.id),
+			SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
+			KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
+			KnowledgeType: kb.Type, IsEnabled: true,
+		})
 	}
 	return engine.BatchIndex(ctx, embedder, items)
 }
@@ -726,6 +767,10 @@ func (s *chunkService) UpsertGeneratedQuestion(
 		return nil, fmt.Errorf("question cannot be empty")
 	}
 	chunk, err := s.writableChunk(ctx, chunkID)
+	if err != nil {
+		return nil, err
+	}
+	question, err = s.maskChunkText(ctx, chunk.KnowledgeBaseID, question)
 	if err != nil {
 		return nil, err
 	}

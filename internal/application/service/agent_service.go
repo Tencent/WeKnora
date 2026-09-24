@@ -1165,9 +1165,14 @@ func (s *agentService) registerTools(
 				s.cfg,
 			)
 		case tools.ToolReadDocument:
-			toolToRegister = tools.NewReadDocumentTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+			toolToRegister = tools.NewReadDocumentTool(
+				s.knowledgeService, s.chunkService, config.SearchTargets,
+				s.knowledgeBaseService, s.cfg,
+			)
 		case tools.ToolListDocuments:
-			toolToRegister = tools.NewListDocumentsTool(s.knowledgeService, config.SearchTargets)
+			toolToRegister = tools.NewListDocumentsTool(
+				s.knowledgeService, config.SearchTargets, s.knowledgeBaseService, s.cfg,
+			)
 		case tools.ToolQueryKnowledgeGraph:
 			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
 				WithKnowledgeScope(s.knowledgeService)

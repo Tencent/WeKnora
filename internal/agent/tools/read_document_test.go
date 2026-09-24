@@ -196,6 +196,7 @@ func newReadDocumentFixture(chunkCount int) (*ReadDocumentTool, *readDocChunkRep
 		&readDocKnowledgeService{docs: map[string]*types.Knowledge{doc.ID: doc}},
 		&readDocChunkService{repo: repo},
 		types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 7}},
+		nil, nil,
 	)
 	return tool, repo
 }

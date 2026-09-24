@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/desensitization"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -164,13 +165,20 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		return
 	}
 
-	// Convert passages to chunks
+	// Convert passages to chunks after masking so embedding/summary see only redacted text.
 	chunks := make([]types.ParsedChunk, 0, len(passage))
 	start, end := 0, 0
 	for i, p := range passage {
 		if p == "" {
 			continue
 		}
+		masked, maskErr := s.maskParsedMarkdown(ctx, kb, p)
+		if maskErr != nil {
+			logger.Errorf(ctx, "desensitization failed for passage knowledge %s: %v", knowledge.ID, maskErr)
+			_ = persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+			return
+		}
+		p = masked
 		end += len([]rune(p))
 		chunks = append(chunks, types.ParsedChunk{
 			Content: p,
@@ -375,6 +383,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
 		logger.Infof(ctx, "Knowledge source replaced, skipping chunk processing: %s", knowledge.ID)
 		return nil
+	}
+
+	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
+	if maskErr != nil {
+		logger.Errorf(ctx, "desensitization failed for knowledge title %s: %v", knowledge.ID, maskErr)
+		return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
 	}
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
@@ -661,7 +675,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			// when the chunker populated it during Tier-1 splitting; falls back
 			// to plain Content otherwise. The document title sits outermost;
 			// custom metadata remains document-scoped model context.
-			indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
+			indexContent := buildKnowledgeIndexContent(indexKB, chunk.EmbeddingContent())
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
 				Content:         indexContent,
 				SourceID:        chunk.ID,
@@ -1097,6 +1111,17 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// metadata remains excluded because it contains IDs and pipeline controls.
 	contentWithMetadata := chunkContents
 	if custom := knowledge.CustomMetadataText(); custom != "" {
+		if s.kbService != nil && knowledge.KnowledgeBaseID != "" {
+			kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+			if kbErr != nil {
+				return nil, kbErr
+			}
+			masked, maskErr := s.maskParsedMarkdown(ctx, kb, custom)
+			if maskErr != nil {
+				return nil, maskErr
+			}
+			custom = masked
+		}
 		contentWithMetadata = "Document metadata:\n" + custom + "\n\nDocument content:\n" + chunkContents
 	}
 	contentWithMetadata = sampleLongContent(contentWithMetadata, maxInputChars)
@@ -1762,6 +1787,12 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		qErr = err
 		return nil
 	}
+	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
+	if maskErr != nil {
+		exitStatus = "desensitization_failed"
+		qErr = maskErr
+		return maskErr
+	}
 	// Short-circuit when the user cancelled parsing or the row is being deleted.
 	if knowledge != nil {
 		switch knowledge.ParseStatus {
@@ -1882,7 +1913,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		generationRevision := chunk.ContentRevision
 		llmCallAttempts++
 		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
-			knowledge.Title, questionCount, customInstructions)
+			indexKB.Title, questionCount, customInstructions)
 		if err != nil {
 			llmCallFailed++
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
@@ -1936,7 +1967,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		for _, gq := range generatedQuestions {
 			sourceID := types.GeneratedQuestionSourceID(chunk.ID, gq.ID)
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         buildKnowledgeIndexContent(knowledge, gq.Question),
+				Content:         buildKnowledgeIndexContent(indexKB, gq.Question),
 				SourceID:        sourceID,
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
@@ -2101,6 +2132,12 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		qErr = err
 		return nil
 	}
+	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
+	if maskErr != nil {
+		exitStatus = "desensitization_failed"
+		qErr = maskErr
+		return maskErr
+	}
 	// Short-circuit when the user cancelled parsing or the row is being
 	// deleted — batched fan-out means we get this check for free on every
 	// batch, so a cancel stops burning LLM quota on the remaining batches.
@@ -2221,7 +2258,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 		generationRevision := chunk.ContentRevision
 		questions, gerr := s.generateQuestionsWithContext(
-			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
+			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), indexKB.Title, questionCount,
 			customInstructions)
 		if gerr != nil {
 			llmCallFailed++
@@ -2265,7 +2302,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 		for _, gq := range generatedQuestions {
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         buildKnowledgeIndexContent(knowledge, gq.Question),
+				Content:         buildKnowledgeIndexContent(indexKB, gq.Question),
 				SourceID:        types.GeneratedQuestionSourceID(chunk.ID, gq.ID),
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
@@ -2413,9 +2450,13 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 	if count > 10 {
 		count = 10
 	}
+	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
+	if maskErr != nil {
+		return nil, maskErr
+	}
 	questions, err := s.generateQuestionsWithContext(
 		ctx, chatModel, chunk.Content, resolveNeighbor(chunk.PreChunkID),
-		resolveNeighbor(chunk.NextChunkID), knowledge.Title, count, config.CustomInstructions,
+		resolveNeighbor(chunk.NextChunkID), indexKB.Title, count, config.CustomInstructions,
 	)
 	if err != nil {
 		return nil, err
@@ -3058,6 +3099,10 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			if err != nil {
 				return err
 			}
+			knowledge, err = s.indexKnowledge(ctx, sourceKB, knowledge)
+			if err != nil {
+				return err
+			}
 			knowledgeCache[chunk.KnowledgeID] = knowledge
 		}
 		indexInfo = append(indexInfo, &types.IndexInfo{
@@ -3676,6 +3721,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			if p == "" {
 				continue
 			}
+			masked, maskErr := s.maskParsedMarkdown(ctx, kb, p)
+			if maskErr != nil {
+				return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+			}
+			p = masked
 			end += len([]rune(p))
 			passageChunks = append(passageChunks, types.ParsedChunk{
 				Content: p,
@@ -3808,8 +3858,16 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// unbound extracted image renders broken for org-shared KB viewers (#3342).
 	s.bindStoredImages(ctx, knowledge, storedImages)
 
-	// Step 3: Split into chunks using Go chunker. Line endings and inline
-	// HTML tables were normalized before image resolution above.
+	// Step 3: Optionally mask the parsed markdown, then split into chunks.
+	// Line endings and inline HTML tables were normalized before image resolution above.
+	if convertResult != nil {
+		masked, maskErr := s.maskParsedMarkdown(ctx, kb, convertResult.MarkdownContent)
+		if maskErr != nil {
+			logger.Errorf(ctx, "desensitization failed for knowledge %s: %v", knowledge.ID, maskErr)
+			return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+		}
+		convertResult.MarkdownContent = masked
+	}
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	processOpts := ProcessChunksOptions{
@@ -3944,6 +4002,21 @@ func (s *knowledgeService) convert(
 	parserEngine := eff.ChunkingConfig.ResolveParserEngine(fileType)
 	if isURL {
 		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
+	}
+	if err := desensitization.ValidateParserEngine(kb.DesensitizationConfig, parserEngine); err != nil {
+		logger.Errorf(
+			ctx, "[convert] desensitization forbids cloud parser kb=%s engine=%q: %v",
+			kb.ID, parserEngine, err,
+		)
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = "Cloud parser engines cannot be used when desensitization is enabled"
+		knowledge.UpdatedAt = time.Now()
+		if updErr := s.repo.UpdateKnowledge(ctx, knowledge); updErr != nil {
+			logger.Errorf(ctx, "[convert] persist cloud-parser rejection failed: %v", updErr)
+		}
+		s.failStage(ctx, knowledge.ID, types.StageDocReader,
+			werrors.ErrCodeDocReaderParseFailed, knowledge.ErrorMessage, err)
+		return nil, nil
 	}
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",

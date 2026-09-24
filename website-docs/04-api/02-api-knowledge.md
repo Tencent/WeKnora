@@ -25,6 +25,7 @@
 | `storage_provider_config` | object | 否 | 存储配置 |
 | `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |
 | `faq_config` / `wiki_config` / `extract_config` / `indexing_strategy` | object | 否 | 类型相关配置 |
+| `desensitization_config` | object | 否 | 文档文本脱敏，默认关闭；仅 `document` 知识库。字段见[知识库文档脱敏](../03-features/02-knowledge-base.md) |
 
 响应：201 `{"success":true,"data":{KnowledgeBase}}`
 
@@ -35,7 +36,7 @@ curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
 
 ### 文档自动标签配置
 
-创建知识库时 `auto_tag_config`、`profile_config` 位于顶层；更新时放在 `config.auto_tag_config`、`config.profile_config`。两者仅 document 知识库支持，默认 enabled=false。`profile_config` 开启后，文档新增/删除/摘要更新会自动刷新 `generated_profile`（AI 知识库描述，见下文 `profile/generate`）。
+创建知识库时 `auto_tag_config`、`profile_config`、`desensitization_config` 位于顶层；更新时放在 `config.auto_tag_config`、`config.profile_config`、`config.desensitization_config`。三者仅 document 知识库支持，默认 enabled=false。`profile_config` 开启后，文档新增/删除/摘要更新会自动刷新 `generated_profile`（AI 知识库描述，见下文 `profile/generate`）。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -86,13 +87,30 @@ curl $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN"
 | --- | --- | --- | --- |
 | `name` | string | 是（`binding:"required"`） | 名称 |
 | `description` | string | 否 | 描述 |
-| `config` | object | 否 | 局部配置更新（分块/图像/wiki/索引策略） |
+| `config` | object | 否 | 局部配置更新（分块/图像/wiki/索引策略/自动标签/Profile/脱敏） |
 
 响应：200 `{"success":true,"data":{KnowledgeBase}}`
 
 ```bash
 curl -X PUT $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档 v2"}'
+```
+
+### POST /api/v1/desensitization/preview
+
+用途：对样例文本跑内置脱敏引擎，不入库、不切块、不 Embedding。权限：登录用户或具备 `retrieve`/`ingest` 的 API Key。试跑强制 `enabled=true` 且只用 `builtin`，即使请求里写了 `engine=presidio`。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `text` | string | 是 | 样例文本，最长 32 KiB（按 rune） |
+| `desensitization_config` | object | 否 | 与知识库配置相同的字段 |
+
+响应：200 `{"success":true,"data":{"text":"...","report":{...}}}`。`report` 含引擎名与命中数。行为说明见[文档脱敏](../03-features/02-knowledge-base.md)。
+
+```bash
+curl -X POST $BASE/api/v1/desensitization/preview -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"联系 13800138000","desensitization_config":{"entity_types":["cn_mobile"],"mask_style":"replace"}}'
 ```
 
 ### DELETE /api/v1/knowledge-bases/:id

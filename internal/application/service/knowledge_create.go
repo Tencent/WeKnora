@@ -1320,6 +1320,13 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	// chunking preview endpoint.
 	clean = chunker.NormalizeLineEndings(clean)
 
+	masked, maskErr := s.maskParsedMarkdown(ctx, kb, clean)
+	if maskErr != nil {
+		logger.Errorf(ctx, "desensitization failed for passage knowledge %s: %v", knowledge.ID, maskErr)
+		return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+	}
+	clean = masked
+
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
 

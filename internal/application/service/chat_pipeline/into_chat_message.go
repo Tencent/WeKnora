@@ -6,6 +6,8 @@ import (
 	"html"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/desensitization"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -14,12 +16,23 @@ import (
 
 // PluginIntoChatMessage handles the transformation of search results into chat messages
 type PluginIntoChatMessage struct {
-	messageService interfaces.MessageService
+	messageService       interfaces.MessageService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	config               *config.Config
 }
 
 // NewPluginIntoChatMessage creates and registers a new PluginIntoChatMessage instance
-func NewPluginIntoChatMessage(eventManager *EventManager, messageService interfaces.MessageService) *PluginIntoChatMessage {
-	res := &PluginIntoChatMessage{messageService: messageService}
+func NewPluginIntoChatMessage(
+	eventManager *EventManager,
+	messageService interfaces.MessageService,
+	knowledgeBaseService interfaces.KnowledgeBaseService,
+	cfg *config.Config,
+) *PluginIntoChatMessage {
+	res := &PluginIntoChatMessage{
+		messageService:       messageService,
+		knowledgeBaseService: knowledgeBaseService,
+		config:               cfg,
+	}
 	eventManager.Register(res)
 	return res
 }
@@ -125,7 +138,10 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	if chatManage.FAQPriorityEnabled && len(faqResults) > 0 {
 		allResults = append(faqResults, docResults...)
 	}
-	docHeader := buildDocumentHeader(allResults)
+	docHeader, err := p.modelFacingDocumentHeader(ctx, allResults)
+	if err != nil {
+		return ErrDesensitization.WithError(err)
+	}
 	if docHeader != "" {
 		contextsBuilder.WriteString(docHeader)
 		contextsBuilder.WriteString("\n")
@@ -232,6 +248,79 @@ func (p *PluginIntoChatMessage) persistRenderedContent(ctx context.Context, chat
 			})
 		}
 	}()
+}
+
+// modelFacingDocumentHeader copies title/filename/description/custom metadata
+// for the chat prompt without mutating the original SearchResult used by citations.
+func (p *PluginIntoChatMessage) modelFacingDocumentHeader(
+	ctx context.Context, results []*types.SearchResult,
+) (string, error) {
+	masked, err := maskSearchResultsForModel(ctx, results, p.knowledgeBaseService, p.config)
+	if err != nil {
+		return "", err
+	}
+	return buildDocumentHeader(masked), nil
+}
+
+type knowledgeBaseLookup interface {
+	GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error)
+}
+
+func maskSearchResultsForModel(
+	ctx context.Context,
+	results []*types.SearchResult,
+	kbService knowledgeBaseLookup,
+	cfg *config.Config,
+) ([]*types.SearchResult, error) {
+	if len(results) == 0 {
+		return results, nil
+	}
+	out := make([]*types.SearchResult, len(results))
+	cache := make(map[string]*types.KnowledgeBase)
+	deps := desensitization.Deps{}
+	if cfg != nil && cfg.Desensitization != nil {
+		deps.PresidioAnalyzerURL = cfg.Desensitization.PresidioAnalyzerURL
+	}
+	for i, r := range results {
+		if r == nil {
+			continue
+		}
+		copyResult := *r
+		if kbService != nil && r.KnowledgeBaseID != "" {
+			kb, ok := cache[r.KnowledgeBaseID]
+			if !ok {
+				var err error
+				kb, err = kbService.GetKnowledgeBaseByIDOnly(ctx, r.KnowledgeBaseID)
+				if err != nil {
+					return nil, err
+				}
+				cache[r.KnowledgeBaseID] = kb
+			}
+			var err error
+			if copyResult.KnowledgeTitle, err = desensitization.MaskIfEnabled(
+				ctx, kb, copyResult.KnowledgeTitle, deps,
+			); err != nil {
+				return nil, err
+			}
+			if copyResult.KnowledgeFilename, err = desensitization.MaskIfEnabled(
+				ctx, kb, copyResult.KnowledgeFilename, deps,
+			); err != nil {
+				return nil, err
+			}
+			if copyResult.KnowledgeDescription, err = desensitization.MaskIfEnabled(
+				ctx, kb, copyResult.KnowledgeDescription, deps,
+			); err != nil {
+				return nil, err
+			}
+			if copyResult.KnowledgeCustomMetadata, err = desensitization.MaskIfEnabled(
+				ctx, kb, copyResult.KnowledgeCustomMetadata, deps,
+			); err != nil {
+				return nil, err
+			}
+		}
+		out[i] = &copyResult
+	}
+	return out, nil
 }
 
 // buildDocumentHeader generates a document metadata section listing each unique

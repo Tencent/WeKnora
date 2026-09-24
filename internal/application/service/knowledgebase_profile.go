@@ -335,8 +335,12 @@ func (s *KnowledgeBaseProfileService) describeAggregate(
 		"language":            types.LanguageNameFromContext(ctx),
 		"custom_instructions": custom,
 	})
+	maskedAgg, err := maskProfileAggregate(ctx, kb, agg, s.config)
+	if err != nil {
+		return nil, err
+	}
 	userPrompt := "Knowledge base name: " + strings.TrimSpace(kb.Name) + "\n\n" +
-		renderKnowledgeBaseProfileAggregate(agg)
+		renderKnowledgeBaseProfileAggregate(maskedAgg)
 
 	thinking := false
 	response, err := chatModel.Chat(types.WithLLMCallMetadata(ctx, "knowledge_base_description", ""), []chat.Message{

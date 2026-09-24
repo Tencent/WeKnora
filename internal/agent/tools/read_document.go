@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -88,9 +89,11 @@ type ReadDocumentInput struct {
 // handle, or by an in-document text search.
 type ReadDocumentTool struct {
 	BaseTool
-	knowledgeService interfaces.KnowledgeService
-	chunkService     interfaces.ChunkService
-	searchTargets    types.SearchTargets
+	knowledgeService     interfaces.KnowledgeService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	chunkService         interfaces.ChunkService
+	searchTargets        types.SearchTargets
+	config               *config.Config
 }
 
 // NewReadDocumentTool creates a new read_document tool.
@@ -98,12 +101,16 @@ func NewReadDocumentTool(
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
 	searchTargets types.SearchTargets,
+	knowledgeBaseService interfaces.KnowledgeBaseService,
+	cfg *config.Config,
 ) *ReadDocumentTool {
 	return &ReadDocumentTool{
-		BaseTool:         readDocumentTool,
-		knowledgeService: knowledgeService,
-		chunkService:     chunkService,
-		searchTargets:    searchTargets,
+		BaseTool:             readDocumentTool,
+		knowledgeService:     knowledgeService,
+		knowledgeBaseService: knowledgeBaseService,
+		chunkService:         chunkService,
+		searchTargets:        searchTargets,
+		config:               cfg,
 	}
 }
 
@@ -152,6 +159,10 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 	query := strings.TrimSpace(input.Query)
 
 	knowledge, chunk, err := t.resolveTarget(ctx, id)
+	if err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
+	}
+	knowledge, err = copyKnowledgeForModel(ctx, t.knowledgeBaseService, t.config, knowledge)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
@@ -609,6 +620,9 @@ func formatSource(knowledgeType, source string) string {
 	case "file":
 		return "File Upload"
 	case "url":
+		if strings.TrimSpace(source) == "" {
+			return "URL"
+		}
 		return fmt.Sprintf("URL: %s", source)
 	case "passage":
 		return "Text Input"

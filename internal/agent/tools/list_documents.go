@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -60,18 +61,23 @@ type ListDocumentsInput struct {
 // ListDocumentsTool pages through the documents of one knowledge base.
 type ListDocumentsTool struct {
 	BaseTool
-	knowledgeService interfaces.KnowledgeService
-	searchTargets    types.SearchTargets
+	knowledgeService     interfaces.KnowledgeService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	searchTargets        types.SearchTargets
+	config               *config.Config
 }
 
 // NewListDocumentsTool creates a new list_documents tool.
 func NewListDocumentsTool(
 	knowledgeService interfaces.KnowledgeService, searchTargets types.SearchTargets,
+	knowledgeBaseService interfaces.KnowledgeBaseService, cfg *config.Config,
 ) *ListDocumentsTool {
 	return &ListDocumentsTool{
-		BaseTool:         listDocumentsTool,
-		knowledgeService: knowledgeService,
-		searchTargets:    searchTargets,
+		BaseTool:             listDocumentsTool,
+		knowledgeService:     knowledgeService,
+		searchTargets:        searchTargets,
+		knowledgeBaseService: knowledgeBaseService,
+		config:               cfg,
 	}
 }
 
@@ -121,7 +127,11 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 	b.WriteString(">\n")
 	for _, k := range filtered {
-		fmt.Fprintf(&b, "<document knowledge_id=\"%s\" title=\"%s\"", xmlEscape(k.ID), xmlEscape(k.Title))
+		title, filename, desc, err := maskKnowledgeForModel(ctx, t.knowledgeBaseService, t.config, k)
+		if err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
+		fmt.Fprintf(&b, "<document knowledge_id=\"%s\" title=\"%s\"", xmlEscape(k.ID), xmlEscape(title))
 		if k.FileType != "" {
 			fmt.Fprintf(&b, " file_type=\"%s\"", xmlEscape(k.FileType))
 		}
@@ -131,18 +141,18 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 		if !k.UpdatedAt.IsZero() {
 			fmt.Fprintf(&b, " updated_at=\"%s\"", k.UpdatedAt.Format("2006-01-02"))
 		}
-		if k.Description != "" {
-			fmt.Fprintf(&b, ">%s</document>\n", xmlEscape(k.Description))
+		if desc != "" {
+			fmt.Fprintf(&b, ">%s</document>\n", xmlEscape(desc))
 		} else {
 			b.WriteString(" />\n")
 		}
 		doc := map[string]interface{}{
 			"knowledge_id": k.ID,
-			"title":        k.Title,
-			"description":  k.Description,
+			"title":        title,
+			"description":  desc,
 			"type":         k.Type,
 			"source":       k.Source,
-			"file_name":    k.FileName,
+			"file_name":    filename,
 			"file_type":    k.FileType,
 			"file_size":    k.FileSize,
 			"parse_status": k.ParseStatus,
