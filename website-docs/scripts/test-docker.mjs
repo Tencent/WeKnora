@@ -67,7 +67,7 @@ try {
   assert.equal(redirect.status, 308);
   assert.equal(new URL(redirect.headers.get('location'), origin).origin, origin);
   assert.equal(new URL(redirect.headers.get('location'), origin).pathname, '/docs/');
-  const assets = new Set(['/brand/weknora-original.png', '/product/wiki-browser.png', '/docs/favicon.ico']);
+  const assets = new Set(['/docs/_home/brand/weknora-original.png', '/docs/_home/product/wiki-browser.png', '/docs/favicon.ico']);
   for (const path of ['/', '/docs/', '/docs/03-features/14-wiki', '/docs/03-features/14-wiki.html']) {
     const response = await fetch(origin + path);
     assert.equal(response.status, 200, path);
@@ -82,7 +82,7 @@ try {
       if (url.origin === origin) assets.add(url.pathname);
     }
   }
-  assert.ok([...assets].some(path => path.startsWith('/_next/')), 'Homepage scripts are missing');
+  assert.ok([...assets].some(path => path.startsWith('/docs/_home/_next/')), 'Homepage scripts are missing');
   assert.ok([...assets].some(path => path.startsWith('/docs/assets/')), 'Documentation scripts are missing');
   for (const asset of assets) {
     const response = await fetch(origin + asset);

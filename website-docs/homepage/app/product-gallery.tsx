@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Icon } from "./ui";
+import { homeAssets } from "../../shared/header";
 import s from "./home.module.css";
 
 export type GalleryShot = { label?: string; icon?: string; image: string; alt: string; available: boolean };
@@ -91,7 +92,7 @@ export function ProductGallery({ id, label, slides }: { id: string; label: strin
           </div>}
           {(slide.link || slide.external) && <div className={s.slideLinks}>
             {slide.link && <a className={s.textLink} href={slide.link}>了解更多 <Icon name="arrow" /></a>}
-            {slide.external && <a className={`${s.textLink} ${s.externalLink}`} href={slide.external.href} target="_blank" rel="noreferrer">{slide.external.logo && <Image src={`/brands/${slide.external.logo}`} alt="" aria-hidden="true" width={20} height={20} />}{slide.external.label}<Icon name="github" /></a>}
+            {slide.external && <a className={`${s.textLink} ${s.externalLink}`} href={slide.external.href} target="_blank" rel="noreferrer">{slide.external.logo && <Image src={`${homeAssets}/brands/${slide.external.logo}`} alt="" aria-hidden="true" width={20} height={20} />}{slide.external.label}<Icon name="github" /></a>}
           </div>}
         </div>
       </div>)}
@@ -101,7 +102,7 @@ export function ProductGallery({ id, label, slides }: { id: string; label: strin
         <span><Icon name={activeShot.icon ?? active.icon} />{active.name}{active.shots.length > 1 && activeShot.label && <em className={s.viewLabel}>· {activeShot.label}</em>}</span>
         <div className={s.cardActions}>
           {activeShot.available
-            ? <a className={s.textLink} href={`/product/${activeShot.image}.png`} target="_blank" rel="noreferrer" aria-label={`查看${active.name}原图（新窗口）`}>查看原图 <Icon name="external" /></a>
+            ? <a className={s.textLink} href={`${homeAssets}/product/${activeShot.image}.png`} target="_blank" rel="noreferrer" aria-label={`查看${active.name}原图（新窗口）`}>查看原图 <Icon name="external" /></a>
             : <span className={s.pendingLabel}>待补充</span>}
         </div>
       </div>
@@ -111,8 +112,8 @@ export function ProductGallery({ id, label, slides }: { id: string; label: strin
           const current = index === item && shotIndex === shot;
           return <div key={entry.image} className={s.shotLayer} data-active={current} aria-hidden={!current}>
             {entry.available
-              ? <Image src={`/product/${entry.image}.png`} alt={entry.alt} width={3840} height={2112} sizes="(min-width: 1100px) 60vw, 100vw" />
-              : <div className={s.shotPlaceholder} role="img" aria-label={entry.alt}><span>截图待补充</span><code>{`website-docs/homepage/public/product/${entry.image}.png`}</code></div>}
+              ? <Image src={`${homeAssets}/product/${entry.image}.png`} alt={entry.alt} width={3840} height={2112} sizes="(min-width: 1100px) 60vw, 100vw" />
+              : <div className={s.shotPlaceholder} role="img" aria-label={entry.alt}><span>截图待补充</span><code>{`website-docs/homepage/public${homeAssets}/product/${entry.image}.png`}</code></div>}
           </div>;
         }))}
       </div>

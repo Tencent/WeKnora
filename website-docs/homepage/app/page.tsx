@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import Image from "next/image";
-import Link from "next/link";
 import { BrandLogo } from "./brand-logo";
 import { Icon } from "./ui";
+import { homeAssets } from "../../shared/header";
 import { ProductGallery, type GalleryShot, type GallerySlide } from "./product-gallery";
 import { Header, ProductVideo } from "./interactive";
 import { clients, dataSources, modelProviders, IntegrationMark } from "./brands";
@@ -23,7 +23,7 @@ const productShotExists = (src: string) => existsSync(join(process.cwd(), "publi
 type SlideSource = Omit<GallerySlide, "shots"> & ({ image: string; alt: string } | { shots: Omit<GalleryShot, "available">[] });
 const withAvailability = (slide: SlideSource): GallerySlide => {
   const shots = "shots" in slide ? slide.shots : [{ image: slide.image, alt: slide.alt }];
-  return { name: slide.name, icon: slide.icon, title: slide.title, description: slide.description, link: slide.link, external: slide.external, shots: shots.map(shot => ({ ...shot, available: productShotExists(`/product/${shot.image}.png`) })) };
+  return { name: slide.name, icon: slide.icon, title: slide.title, description: slide.description, link: slide.link, external: slide.external, shots: shots.map(shot => ({ ...shot, available: productShotExists(`${homeAssets}/product/${shot.image}.png`) })) };
 };
 const releaseSlides = [
   { name: "本机浏览器", icon: "browser", shots: [
@@ -107,13 +107,13 @@ export default function Home() {
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>GET STARTED</p><h2 id="closing-title">选择适合你的使用方式。</h2></div></div>
         <div className={s.startGrid}>
           <article className={s.startCard}>
-            <div className={s.startLabel}><Image className={s.startBrand} src="/brands/wechat-dialog.png" alt="微信对话开放平台 Logo" width={32} height={32} /><span>在线使用</span></div>
+            <div className={s.startLabel}><Image className={s.startBrand} src={`${homeAssets}/brands/wechat-dialog.png`} alt="微信对话开放平台 Logo" width={32} height={32} /><span>在线使用</span></div>
             <h3>微信对话开放平台</h3>
             <p>在线管理知识库，将问答服务接入公众号、小程序等微信场景。</p>
             <a className={s.textLink} href="https://chatbot.weixin.qq.com/login" target="_blank" rel="noreferrer">进入平台 <Icon name="external" /></a>
           </article>
           <article className={s.startCard}>
-            <div className={s.startLabel}><Image className={s.startBrand} src="/brands/tencent-cloud.ico" alt="腾讯云 Logo" width={32} height={32} /><span>云端部署</span></div>
+            <div className={s.startLabel}><Image className={s.startBrand} src={`${homeAssets}/brands/tencent-cloud.ico`} alt="腾讯云 Logo" width={32} height={32} /><span>云端部署</span></div>
             <h3>腾讯云轻量应用服务器</h3>
             <p>通过应用模板部署 WeKnora，在自己的云服务器上运行。</p>
             <a className={s.textLink} href="https://mc.tencent.com/s69nKCVz" target="_blank" rel="noreferrer">前往腾讯云部署 <Icon name="external" /></a>
@@ -127,6 +127,6 @@ export default function Home() {
         </div>
       </section>
     </main>
-    <footer className={`${s.shell} ${s.footer}`}><Link className={s.brand} href="/" aria-label="WeKnora 首页"><BrandLogo /></Link><p>Tencent Open Source · MIT License</p><nav aria-label="页脚导航"><a href={docs}>文档</a><a href={repo} target="_blank" rel="noreferrer">GitHub <Icon name="external" /></a><a href={`${repo}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">更新日志</a></nav></footer>
+    <footer className={`${s.shell} ${s.footer}`}><a className={s.brand} href="/" aria-label="WeKnora 首页"><BrandLogo /></a><p>Tencent Open Source · MIT License</p><nav aria-label="页脚导航"><a href={docs}>文档</a><a href={repo} target="_blank" rel="noreferrer">GitHub <Icon name="external" /></a><a href={`${repo}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">更新日志</a></nav></footer>
   </div>;
 }
