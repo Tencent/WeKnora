@@ -17,22 +17,35 @@ const (
 // line here plus a decision clause, and never a struct change elsewhere. That
 // is what makes "add an attribute = add a row" a real, low-risk operation.
 //
+// AttrValue is one allowed value of an attribute: the raw value plus the
+// words to show for it.
+//
+// Display text is split in two on purpose. Label is the short name that fits
+// on a filter checkbox or a table cell; Description is the sentence that
+// explains the value where there is room (a tooltip, the settings panel).
+// Both are written in the project's default language; the frontend overlays
+// its translations on top (see imageAttrDisplay in the web app) and falls
+// back to these strings for anything not translated yet.
+type AttrValue struct {
+	Value       string `json:"value"`                  // raw machine value, never localized
+	Label       string `json:"label"`                  // short on-screen name
+	Description string `json:"description,omitempty"`  // sentence explaining the value
+}
+
 // The same row also carries the attribute's display text. The settings panel
 // that explains the attributes to a non-technical operator is rendered from
 // these fields, so adding an attribute needs no frontend change either: Label,
-// Description and ValueLabels travel to the UI through the schema endpoint. The
-// text is written in the project's default language; the frontend overlays its
-// translations on top (see imageAttrDisplay in the web app) and falls back to
-// these strings for anything not translated yet.
+// Description and the per-value texts travel to the UI through the schema
+// endpoint. An attribute is always accompanied by a short label for compact
+// spaces and a sentence for places with room.
 type AttrSpec struct {
-	Name        string            `json:"name"`                   // stable key, e.g. "contain.text"
-	Type        AttrType          `json:"type"`                   // extent | presence
-	Values      []string          `json:"values,omitempty"`       // ordered low->high for extent attrs
-	Question    string            `json:"question"`               // sentence shown to the model in the describe round
-	Label       string            `json:"label"`                  // human-readable name for the settings panel
-	Description string            `json:"description,omitempty"`  // one line explaining what the attribute measures
-	ValueLabels map[string]string `json:"value_labels,omitempty"` // human meaning of each value, keyed by value
-	Consumers   []string          `json:"consumers,omitempty"`    // downstream steps that read this attribute
+	Name        string      `json:"name"`             // stable key, e.g. "contain.text"
+	Type        AttrType    `json:"type"`             // extent | presence
+	Values      []AttrValue `json:"values,omitempty"` // ordered low->high for extent attrs
+	Question    string      `json:"question"`         // sentence shown to the model in the describe round
+	Label       string      `json:"label"`            // human-readable name for the settings panel
+	Description string      `json:"description,omitempty"` // one line explaining what the attribute measures
+	Consumers   []string    `json:"consumers,omitempty"`   // downstream steps that read this attribute
 }
 
 // ImageAttrRegistry is the canonical, ordered list of observed attributes for
@@ -43,35 +56,33 @@ type AttrSpec struct {
 //     equivalence with the old 7-class model.
 var ImageAttrRegistry = []AttrSpec{
 	{
-		Name:   "contain.text",
-		Type:   AttrTypeExtent,
-		Values: []string{"none", "sparse", "block"},
+		Name: "contain.text",
+		Type: AttrTypeExtent,
+		Values: []AttrValue{
+			{Value: "none", Label: "None", Description: "no text at all"},
+			{Value: "sparse", Label: "Sparse", Description: "a few words — a logo, a road sign, a single label"},
+			{Value: "block", Label: "Block", Description: "a block of body text — a screenshot, a table, a document page"},
+		},
 		Question: "How much body text does the image carry? Answer exactly one of: " +
 			"none (no text), sparse (a few words such as a logo or a road sign), " +
 			"block (a block of body text such as a screenshot, table, or document page).",
 		Label: "Text in the image",
 		Description: "How much body text the picture itself carries. " +
 			"Decides whether reading its text is worth a separate OCR pass.",
-		ValueLabels: map[string]string{
-			"none":   "no text at all",
-			"sparse": "a few words — a logo, a road sign, a single label",
-			"block":  "a block of body text — a screenshot, a table, a document page",
-		},
 		Consumers: []string{"ocr"},
 	},
 	{
-		Name:   "contain.data_visual",
-		Type:   AttrTypePresence,
-		Values: []string{"true", "false"},
+		Name: "contain.data_visual",
+		Type: AttrTypePresence,
+		Values: []AttrValue{
+			{Value: "true", Label: "Yes", Description: "a chart, graph or diagram with plotted values"},
+			{Value: "false", Label: "No", Description: "a photo, drawing, icon or decoration"},
+		},
 		Question: "Does the image present quantitative data as a chart, graph, diagram, or infographic " +
 			"(axis labels, legends, plotted values)? Answer exactly one of: true, false.",
 		Label: "Data visual",
 		Description: "Whether the picture conveys data as a chart, graph, diagram or infographic. " +
 			"Such images keep their labels on the OCR path even when the text looks sparse.",
-		ValueLabels: map[string]string{
-			"true":  "yes — a chart, graph or diagram",
-			"false": "no — a photo, drawing, icon or decoration",
-		},
 		Consumers: []string{"ocr"},
 	},
 }
@@ -325,8 +336,8 @@ func coerceAttrValue(spec AttrSpec, raw string) (any, bool) {
 	switch spec.Type {
 	case AttrTypeExtent:
 		for _, allowed := range spec.Values {
-			if v == allowed {
-				return allowed, true
+			if v == allowed.Value {
+				return allowed.Value, true
 			}
 		}
 	case AttrTypePresence:

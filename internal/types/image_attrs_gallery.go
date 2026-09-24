@@ -15,13 +15,20 @@ func init() {
 	RegisterGalleryAttrSource("system", func(string) []GalleryAttrDef {
 		defs := make([]GalleryAttrDef, 0, len(ImageAttrRegistry))
 		for _, spec := range ImageAttrRegistry {
+			values := make([]GalleryAttrValue, 0, len(spec.Values))
+			for _, value := range spec.Values {
+				values = append(values, GalleryAttrValue{
+					Value:       value.Value,
+					Label:       value.Label,
+					Description: value.Description,
+				})
+			}
 			defs = append(defs, GalleryAttrDef{
 				Name:        spec.Name,
 				Type:        string(spec.Type),
-				Values:      spec.Values,
+				Values:      values,
 				Label:       spec.Label,
 				Description: spec.Description,
-				ValueLabels: spec.ValueLabels,
 				// Extent / presence observations are filter material by
 				// default; searching and sorting on them is an operator
 				// decision made through the gallery policy tiers.
