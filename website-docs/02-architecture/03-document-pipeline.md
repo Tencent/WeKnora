@@ -393,6 +393,8 @@ promoted, err := s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expecte
 1. `readImageBytes` 从存储/URL 取图；`resolveVLM` 取 KB 的 VLM 配置；
 2. 生成 Caption（VLM，prompt 由 `buildVLMCaptionPrompt` 按 `DescriptionLanguage/CustomInstructions` 组装）与 OCR 文本；
 3. 结果写回所属文本 Chunk 的 `ImageInfo`（JSON），并创建/更新两个**子 Chunk**：`ChunkTypeImageCaption` 与 `ChunkTypeImageOCR`，`ParentChunkID` 指向文本块，随后单独 `indexChunks` 入向量索引 —— 使"搜图片描述也能召回原文块"；
+   - **图片向量**：知识库的向量模型能处理图片时（模型能力 `input` 含 `image`，且厂商协议能传图片，见 `embedding.AsImageEmbedder`），`indexImageVector` 再用该模型直接对图片编码，存为第三个子 Chunk `ChunkTypeImageVector`：索引行的 `SourceType` 为 `ImageSourceType`，向量是图片本身的（经 `CompositeRetrieveEngine.BatchIndexVectors` 写入预先算好的向量），`Content` 复用图片描述（没有描述时用 OCR 文本），供重排与回答上下文使用。图片先经 `embedding.PrepareImage` 按厂商限制转格式、压缩；扫描件 PDF 页不做（OCR 更准）。这一步失败只记日志，不影响任务；
+   - `ChunkTypeImageVector` 的向量不能由文本重建：`syncChunkIndex` 对它只同步启用状态，`updateChunkVector` 跳过它；图片描述被修改时只更新它的 `Content`；
 4. `shouldDropOrphanedMultimodal` 检查父块是否已被删除/取代，孤儿任务直接丢弃；
 5. `checkAndFinalizeAllImages`：全部图片处理完毕后，`enqueueKnowledgePostProcessTask` 触发 [后处理编排（knowledge_post_process.go，Stage: postprocess）](#_6-6-后处理编排-knowledge-post-process-go-stage-postprocess) 的后处理编排。
 

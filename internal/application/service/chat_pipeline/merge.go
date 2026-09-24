@@ -264,7 +264,7 @@ func (p *PluginMerge) resolveParentChunks(
 	// without using editable StartAt/EndAt coordinates.
 	imageTextParentIDs := make(map[string]struct{})
 	for _, r := range results {
-		if r.ChunkType == string(types.ChunkTypeImageOCR) || r.ChunkType == string(types.ChunkTypeImageCaption) {
+		if types.IsImageChildChunkType(r.ChunkType) {
 			imageTextParentIDs[r.ParentChunkID] = struct{}{}
 		}
 	}
@@ -338,7 +338,7 @@ func (p *PluginMerge) resolveParentChunks(
 				r.SubChunkID = append(r.SubChunkID, r.ID)
 			}
 
-		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption):
+		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption), string(types.ChunkTypeImageVector):
 			textParent, ok := parentMap[r.ParentChunkID]
 			if !ok || textParent.Content == "" || textParent.ChunkType != types.ChunkTypeText {
 				continue
@@ -418,7 +418,7 @@ func collectScopedTextChildIDs(
 			}
 			seen[r.ID] = struct{}{}
 			ids = append(ids, r.ID)
-		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption):
+		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption), string(types.ChunkTypeImageVector):
 			if _, ok := seen[r.ParentChunkID]; ok {
 				continue
 			}

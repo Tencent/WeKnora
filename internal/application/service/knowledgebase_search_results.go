@@ -192,10 +192,10 @@ func (s *knowledgeBaseService) collectParentChunkIDs(
 	return ids
 }
 
-// hasImageChunks returns true if any chunk is an image_ocr or image_caption type.
+// hasImageChunks returns true if any chunk is one of the image child types.
 func (s *knowledgeBaseService) hasImageChunks(chunks []*types.Chunk) bool {
 	for _, c := range chunks {
-		if c.ChunkType == types.ChunkTypeImageOCR || c.ChunkType == types.ChunkTypeImageCaption {
+		if types.IsImageChildChunkType(c.ChunkType) {
 			return true
 		}
 	}
@@ -373,6 +373,6 @@ func (s *knowledgeBaseService) isSearchableChunk(chunk *types.Chunk) bool {
 		types.ChunkTypeText, types.ChunkTypeSummary,
 		types.ChunkTypeTableColumn, types.ChunkTypeTableSummary,
 		types.ChunkTypeFAQ,
-		types.ChunkTypeImageOCR, types.ChunkTypeImageCaption,
+		types.ChunkTypeImageOCR, types.ChunkTypeImageCaption, types.ChunkTypeImageVector,
 	}, chunk.ChunkType)
 }

@@ -3048,6 +3048,11 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			logger.Warnf(ctx, "Knowledge base ID mismatch: %s != %s", chunk.KnowledgeBaseID, kbID)
 			continue
 		}
+		// Its index row holds the image's own vector, which re-embedding
+		// Content here would replace with a text vector of the caption.
+		if chunk.ChunkType == types.ChunkTypeImageVector {
+			continue
+		}
 		ids = append(ids, chunk.ID)
 		if !chunk.IsEnabled || chunk.ChunkType == types.ChunkTypeParentText {
 			continue
@@ -3198,6 +3203,15 @@ func (s *knowledgeService) UpdateImageInfo(
 			// Update OCR if it has changed
 			if image.OCRText != cImageInfo[0].OCRText {
 				child.Content = image.OCRText
+				child.ImageInfo = imageInfo
+				updateChunk = append(updateChunk, chunkChildren[i])
+			}
+		case types.ChunkTypeImageVector:
+			// The image's vector does not change with its caption, only the
+			// text shown and reranked for it; updateChunkVector leaves the
+			// vector alone.
+			if image.Caption != "" && image.Caption != child.Content {
+				child.Content = image.Caption
 				child.ImageInfo = imageInfo
 				updateChunk = append(updateChunk, chunkChildren[i])
 			}

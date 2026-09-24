@@ -241,7 +241,7 @@ pipeline = types.NewPipelineBuilder().
 1. **选择输入**：优先 `RerankResult`，为空则回退 `SearchResult`（按分排序）；
 2. **去重**：ID + 内容签名；
 3. **注入历史引用**（`merge_history.go`）：从最近一轮带引用的历史取 `KnowledgeReferences`，与当前查询做 Jaccard 相似度过滤（阈值 0.15），分数打 0.6 折，最多注入 3 条，标记 `MatchTypeHistory`；
-4. **父子块解析** `resolveParentChunks`：text 子块与 image_ocr/image_caption 子块都用**当前** parent_text 内容补齐上下文；图片 Markdown 的收窄靠稳定的图片 URL（`PruneMarkdownImagesByImageInfo`）而不是解析器坐标；ImageInfo 严格限定在命中的 text 子块，避免图片密集的父块把兄弟页面的 OCR 全部灌进上下文。image → text → parent_text 这条链只在确实命中图片结果时才多查一次祖父块；
+4. **父子块解析** `resolveParentChunks`：text 子块与 image_ocr/image_caption/image_vector 子块都用**当前** parent_text 内容补齐上下文；图片 Markdown 的收窄靠稳定的图片 URL（`PruneMarkdownImagesByImageInfo`）而不是解析器坐标；ImageInfo 严格限定在命中的 text 子块，避免图片密集的父块把兄弟页面的 OCR 全部灌进上下文。image → text → parent_text 这条链只在确实命中图片结果时才多查一次祖父块；
 5. **分组顺序合并** `groupAndMergeCurrentContent`：按 `KnowledgeID + ChunkType` 分组，组内按 `ChunkIndex` 排序后 `mergeSequentialChunks`——序号连续、或一方内容包含另一方时用 `searchutil.JoinChunkContent` 拼接，保留最高分，`SubChunkID` 记录被合并块，`mergeImageInfo` 按 URL 去重合并图片信息；
 6. **FAQ 答案填充**（`merge_faq.go`）：FAQ 类型 chunk 批量回表读 `FAQMetadata`，重写 Content 为 `Q: 标准问题 + Answer: 答案列表`；
 7. **短上下文邻居扩展**（`merge_expand.go`）：text 块内容不足 350 字符时，批量取 `PreChunkID`/`NextChunkID` 邻居拼接至最长 850 字符；
@@ -484,14 +484,15 @@ sequenceDiagram
 2. **入参归一化 + 过召回**：`MatchCount <= 0`（调用方未传时 JSON 反序列化即为 0）先经 `normalizedMatchCount` 归一化为 `types.DefaultRetrievalTopK`（50），使过召回下限、FAQ 迭代触发条件、末尾截断三处读到同一个值——否则截断会把结果集切成 `[:0]`，负数还会越界 panic；随后 `matchCount = max(MatchCount*5, 50) * len(KBs)`，上限 `maxRetrievalPoolSize`（500）。
 3. **查询向量只算一次**，随 `params.QueryEmbedding` 传播到所有 store 组。
 4. **storeGroup 分组**（`knowledgebase_search_storegroup.go`）：按 `(VectorStoreID, 属主租户)` 分组；每组经 `retriever.CreateRetrieveEngineForKB` 解析出 `CompositeRetrieveEngine`。`buildRetrievalParams` 按组内每个 KB 的类型路由：FAQ 库走 FAQ 向量索引（`KnowledgeType=faq`，无关键词索引），文档库走默认向量索引 + 关键词索引。
-5. **fan-out**（`knowledgebase_search_fanout.go`）：单组直查零开销；多组用 `errgroup` 并发（上限 4），每组超时 `MULTI_STORE_RETRIEVE_TIMEOUT_SEC`（默认 30s），all-or-nothing 失败策略；结果跨引擎类型时用 `EngineAwareNormalizer` 把向量分归一化到 [0,1]（详见检索引擎文档）。
-6. **融合**（`knowledgebase_search_fusion.go`）：
+5. **图片召回**（`knowledgebase_search_image.go`）：主库的向量模型能处理图片时，各组 `ImageRecall` 置位，文档向量检索的 TopK 放大 1.5 倍（仍封顶 500）、阈值降到 `min(VectorThreshold, 0.1)`。文本查询与图片的相似度天然低于与文本（模态鸿沟），共用文本阈值会把图片几乎全部挡掉。每组结果在归一化前经 `filterImageHits` 按来源分别过阈值：文本命中仍按 `VectorThreshold`，图片命中（`ImageSourceType`）按 `min(VectorThreshold, 0.1)`；关键词命中里的图片行一律丢弃（其 `Content` 就是图片描述，描述块已有自己的关键词索引）。
+6. **fan-out**（`knowledgebase_search_fanout.go`）：单组直查零开销；多组用 `errgroup` 并发（上限 4），每组超时 `MULTI_STORE_RETRIEVE_TIMEOUT_SEC`（默认 30s），all-or-nothing 失败策略；结果跨引擎类型时用 `EngineAwareNormalizer` 把向量分归一化到 [0,1]（详见检索引擎文档）。
+7. **融合**（`knowledgebase_search_fusion.go`）：
    - 仅向量或仅关键词 → `deduplicateByScore`（按 chunk 保留最高分）；
    - 混合 → **加权 RRF**：`score = vectorWeight/(k+vectorRank) + keywordWeight/(k+keywordRank)`，`k` 与权重来自租户 `RetrievalConfig`（有缺省值），rank 基于各自检索器返回顺序（1-indexed），对分数尺度免疫。
-7. **FAQ 命中策略**（`knowledgebase_search_faq.go`，仅 FAQ 类型 KB）：
+8. **FAQ 命中策略**（`knowledgebase_search_faq.go`，仅 FAQ 类型 KB）：
    - **迭代检索**：去重后不足 `MatchCount` 且首轮已打满 → 从 `TopK*3` 起最多 5 轮翻倍扩大 TopK 重检索，跨 store 组统一生效，chunk 数据缓存避免重复回表；种子与每轮增长均封顶 `maxRetrievalPoolSize`，触顶即停（再迭代只会重发同一个查询）；
    - **负例问题过滤**：查询与 FAQ 的 `NegativeQuestions` 精确匹配（小写去空格）即剔除该条——支持"这个问题不要用这条 FAQ 答"的运营配置。
-8. 截断到 `MatchCount` 后 `processSearchResults` 补全 chunk 元数据（管线场景 `SkipContextEnrichment=true`，上下文组装留给 merge 阶段）。
+9. 截断到 `MatchCount` 后 `processSearchResults` 补全 chunk 元数据（管线场景 `SkipContextEnrichment=true`，上下文组装留给 merge 阶段）。
 
 FAQ 在管线侧的配套策略（Agent 配置 `FAQPriorityEnabled` / `FAQScoreBoost` / `FAQDirectAnswerThreshold`）见 [CHUNK_RERANK — 重排、复合打分、MMR、Wiki 加权](#_3-4-chunk-rerank-—-重排、复合打分、mmr、wiki-加权) 与 [INTO_CHAT_MESSAGE — 上下文组装](#_3-9-into-chat-message-—-上下文组装)。
 
