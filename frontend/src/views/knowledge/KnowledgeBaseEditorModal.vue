@@ -411,14 +411,17 @@
                 </div>
               </div>
 
-              <!-- 观察失败兜底：与上方整块开关同级（不再嵌在属性面板里），
-                   尺寸与对齐因此和其它开关完全一致 -->
+              <!-- 观察失败兜底：与上方整块开关同级（不再嵌在属性面板里）。
+                   开关仍包在 setting-control 里，与其它开关行共用同一套
+                   右对齐 / 垂直居中 / 预留右列的排版，避免顶到行首 -->
               <div class="setting-row">
                 <div class="setting-info">
                   <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
                   <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobservedDesc') }}</p>
                 </div>
-                <t-switch v-model="formData.imageActions.ocr.on_unobserved" size="medium" />
+                <div class="setting-control">
+                  <t-switch v-model="formData.imageActions.ocr.on_unobserved" size="medium" />
+                </div>
               </div>
             </div>
           </div>
