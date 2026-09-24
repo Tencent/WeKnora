@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 520" width="1600" height="520" role="img">
+<rect x="1.0" y="1" width="512.6666666666666" height="518" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="40.0" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(52.0 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 8h5M8 11h3"/></g>
+<text x="474.66666666666663" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">01 / RAG</text>
+<text x="40.0" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">回答有据可查</text>
+<text x="40.0" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">结合语义与关键词检索查找相关资料，回</text>
+<text x="40.0" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">答附带来源引用，可打开原文核对。</text>
+<rect x="40.0" y="386" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="56.0" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">混合检索</text>
+<rect x="162.0" y="386" width="132.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="178.0" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">多模态解析</text>
+<rect x="304.0" y="386" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="320.0" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">原文引用</text>
+<rect x="543.6666666666666" y="1" width="512.6666666666666" height="518" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="582.6666666666666" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(594.6666666666666 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6"/><circle cx="12" cy="2.5" r=".5"/></g>
+<text x="1017.3333333333333" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">02 / AGENT</text>
+<text x="582.6666666666666" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">用知识和工具完成任务</text>
+<text x="582.6666666666666" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">智能体根据任务检索知识库、搜索网页、</text>
+<text x="582.6666666666666" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">调用 MCP 工具与技能，在沙箱中处理文</text>
+<text x="582.6666666666666" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">件、运行脚本，并可跨会话记住你确认过</text>
+<text x="582.6666666666666" y="320" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">的偏好。</text>
+<rect x="582.6666666666666" y="386" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="598.6666666666666" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">多步推理</text>
+<rect x="704.6666666666666" y="386" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="720.6666666666666" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">工具调用</text>
+<rect x="826.6666666666666" y="386" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="842.6666666666666" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">技能执行</text>
+<rect x="582.6666666666666" y="436" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="598.6666666666666" y="462" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">长期记忆</text>
+<rect x="1086.3333333333333" y="1" width="512.6666666666666" height="518" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1125.3333333333333" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(1137.3333333333333 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15"/><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3"/></g>
+<text x="1560.0" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">03 / WIKI</text>
+<text x="1125.3333333333333" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">把文档整理成 Wiki</text>
+<text x="1125.3333333333333" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">从原始文档生成相互链接的 Wiki 页面与</text>
+<text x="1125.3333333333333" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">知识图谱，支持浏览、编辑和版本回滚。</text>
+<rect x="1125.3333333333333" y="386" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1141.3333333333333" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">自动组织</text>
+<rect x="1247.3333333333333" y="386" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1263.3333333333333" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">知识图谱</text>
+<rect x="1369.3333333333333" y="386" width="112.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1385.3333333333333" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">版本回滚</text>
+</svg>
