@@ -322,6 +322,14 @@ function setVerdict(attrId: string, value: string, verdict: Verdict): void {
   if (verdict === 'default') delete perValue[value]
   else perValue[value] = verdict
   attrVerdicts.value = { ...attrVerdicts.value, [attrId]: perValue }
+  // A verdict the user just expressed must take effect immediately: staying
+  // in "全显示" while the panel shows an off/on would silently ignore it.
+  // Clearing the last meaningful verdict returns to "全显示", since custom
+  // mode with no rules constrains nothing anyway.
+  const hasRules = Object.values(attrVerdicts.value).some((perValueInner) =>
+    Object.values(perValueInner).some((v) => v === 'off' || v === 'on'),
+  )
+  filterScope.value = hasRules ? 'custom' : 'all'
   resetPageAndReload()
 }
 
