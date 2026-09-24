@@ -997,10 +997,10 @@ onMounted(async () => {
   z-index: 20;
   max-height: calc(100% - 120px);
   overflow: auto;
-  background: var(--td-bg-color-container, #fff);
-  border: 1px solid var(--td-component-border, #dcdcdc);
-  border-radius: var(--td-radius-medium, 8px);
-  box-shadow: var(--td-shadow-card, 0 2px 8px rgba(0, 0, 0, 0.08));
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--td-radius-medium);
+  box-shadow: var(--td-shadow-card));
 }
 
 .ig-panel-head {
@@ -1025,16 +1025,16 @@ onMounted(async () => {
   height: 28px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
 }
 .ig-pin:hover {
-  background: var(--td-bg-color-container-hover, #f3f3f3);
+  background: var(--td-bg-color-container-hover);
 }
 .ig-pin.is-pinned {
-  color: var(--td-brand-color, #0052d9);
+  color: var(--td-brand-color);
 }
 
 .ig-panel-body {
@@ -1049,12 +1049,12 @@ onMounted(async () => {
   margin-bottom: 14px;
 }
 .ig-row-label {
-  font-size: 13px;
-  color: var(--td-text-color-primary, #333);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-primary);
 }
 .ig-hint {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
 }
 .ig-attr-blocks {
   display: flex;
@@ -1067,9 +1067,9 @@ onMounted(async () => {
   gap: 6px;
 }
 .ig-attr-name {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
-  color: var(--td-text-color-primary, #333);
+  color: var(--td-text-color-primary);
 }
 .ig-verdict-rows {
   display: flex;
@@ -1094,46 +1094,46 @@ onMounted(async () => {
   gap: 8px;
 }
 .ig-verdict-value {
-  font-size: 13px;
-  color: var(--td-text-color-primary, #333);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-primary);
   cursor: default;
 }
 .ig-verdict-group {
   display: inline-flex;
-  border: 1px solid var(--td-component-border, #dcdcdc);
-  border-radius: 6px;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-sm);
   overflow: hidden;
 }
 .ig-verdict {
   min-width: 30px;
   padding: 2px 6px;
   border: none;
-  border-right: 1px solid var(--td-component-border, #eee);
-  background: var(--td-bg-color-container, #fff);
-  font-size: 12px;
+  border-right: 1px solid var(--td-component-border);
+  background: var(--td-bg-color-container);
+  font-size: var(--app-text-sm);
   line-height: 20px;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
 }
 .ig-verdict:last-child {
   border-right: none;
 }
 .ig-verdict:hover {
-  background: var(--td-bg-color-container-hover, #f3f3f3);
+  background: var(--td-bg-color-container-hover);
 }
 .ig-verdict.is-active.is-default {
-  background: var(--td-bg-color-secondary, #f3f3f3);
-  color: var(--td-text-color-primary, #333);
+  background: var(--td-bg-color-secondary);
+  color: var(--td-text-color-primary);
   font-weight: 600;
 }
 .ig-verdict.is-active.is-off {
-  background: var(--td-error-color-1, #f8e8e8);
-  color: var(--td-error-color, #d54941);
+  background: var(--td-error-color-1);
+  color: var(--td-error-color);
   font-weight: 600;
 }
 .ig-verdict.is-active.is-on {
-  background: var(--td-success-color-1, #e8f8ed);
-  color: var(--td-success-color, #2ba471);
+  background: var(--td-success-color-1);
+  color: var(--td-success-color);
   font-weight: 600;
 }
 
@@ -1155,13 +1155,13 @@ onMounted(async () => {
   gap: 4px;
 }
 .ig-scope-name {
-  font-size: 13px;
-  color: var(--td-text-color-secondary, #666);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
   white-space: nowrap;
 }
 .ig-scope-value {
-  font-size: 13px;
-  color: var(--td-text-color-primary, #333);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-primary);
   white-space: nowrap;
 }
 .ig-scope-arrow {
@@ -1171,15 +1171,15 @@ onMounted(async () => {
   width: 24px;
   height: 28px;
   padding: 0;
-  border: 1px solid var(--td-component-border, #dcdcdc);
-  border-radius: var(--td-radius-medium, 6px);
-  background: var(--td-bg-color-container, #fff);
-  color: var(--td-text-color-secondary, #666);
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--td-radius-medium);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
 }
 .ig-scope-arrow:hover:not(:disabled) {
-  border-color: var(--td-brand-color, #0052d9);
-  color: var(--td-brand-color, #0052d9);
+  border-color: var(--td-brand-color);
+  color: var(--td-brand-color);
 }
 .ig-scope-arrow:disabled {
   opacity: 0.45;
@@ -1189,7 +1189,7 @@ onMounted(async () => {
   width: 1px;
   height: 20px;
   margin: 0 2px;
-  background: var(--td-component-border, #e7e7e7);
+  background: var(--td-component-border);
 }
 .ig-sort {
   width: 140px;
@@ -1205,8 +1205,8 @@ onMounted(async () => {
 }
 .ig-count {
   margin-left: auto;
-  font-size: 13px;
-  color: var(--td-text-color-secondary, #666);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
   white-space: nowrap;
 }
 
@@ -1215,13 +1215,13 @@ onMounted(async () => {
 }
 .ig-filter-label {
   display: block;
-  font-size: 13px;
-  color: var(--td-text-color-secondary, #666);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
   margin-bottom: 8px;
 }
 .ig-search-hint {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
   margin-top: 6px;
 }
 .ig-search-fields {
@@ -1234,12 +1234,12 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 .ig-attr-name {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   margin-bottom: 4px;
 }
 .ig-no-attrs {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 .ig-apply-all {
   margin-top: 4px;
@@ -1270,8 +1270,8 @@ onMounted(async () => {
   width: 160px;
 }
 .ig-count {
-  font-size: 13px;
-  color: var(--td-text-color-secondary, #666);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
   white-space: nowrap;
 }
 .ig-loading-area {
@@ -1280,11 +1280,11 @@ onMounted(async () => {
   overflow: auto;
 }
 .ig-error {
-  color: var(--td-error-color, #e34d59);
+  color: var(--td-error-color);
   padding: 16px 0;
 }
 .ig-empty {
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
   padding: 48px 0;
   text-align: center;
 }
@@ -1296,14 +1296,14 @@ onMounted(async () => {
   gap: 14px;
 }
 .ig-card {
-  border: 1px solid var(--td-component-border, #e7e7e7);
-  border-radius: 8px;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-md);
   overflow: hidden;
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   cursor: pointer;
   padding: 0;
   text-align: left;
-  transition: box-shadow 0.15s, transform 0.15s;
+  transition: box-shadow var(--app-motion-fast), transform var(--app-motion-fast);
   display: flex;
   flex-direction: column;
 }
@@ -1325,8 +1325,8 @@ onMounted(async () => {
   object-fit: cover;
 }
 .ig-thumb-error {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
   padding: 0 8px;
   text-align: center;
 }
@@ -1334,7 +1334,7 @@ onMounted(async () => {
   padding: 8px 10px;
 }
 .ig-card-caption {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -1342,8 +1342,8 @@ onMounted(async () => {
   overflow: hidden;
 }
 .ig-card-source {
-  font-size: 12px;
-  color: var(--td-text-color-secondary, #666);
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
   margin-top: 4px;
   white-space: nowrap;
   overflow: hidden;
@@ -1374,8 +1374,8 @@ onMounted(async () => {
   gap: 0;
   width: min(1100px, 96vw);
   height: min(80vh, 760px);
-  background: var(--td-bg-color-container, #fff);
-  border-radius: 12px;
+  background: var(--td-bg-color-container);
+  border-radius: var(--app-radius-xl);
   overflow: hidden;
 }
 .ig-viewer-image {
@@ -1397,13 +1397,13 @@ onMounted(async () => {
 .ig-viewer-info {
   padding: 20px;
   overflow: auto;
-  border-left: 1px solid var(--td-component-border, #e7e7e7);
+  border-left: 1px solid var(--td-component-border);
 }
 .ig-viewer-info h3 {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   margin: 16px 0 8px;
 }
 .ig-viewer-info h3:first-child {
@@ -1414,30 +1414,30 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 12px;
   padding: 4px 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 .ig-info-key {
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 }
 .ig-info-val {
   font-weight: 500;
   text-align: right;
 }
 .ig-info-text {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
 }
 .ig-info-muted {
-  color: var(--td-text-color-placeholder, #999);
-  font-size: 14px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-base);
 }
 .ig-info-sub {
   display: block;
-  font-size: 12px;
-  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
   margin-top: 2px;
   word-break: break-all;
 }
