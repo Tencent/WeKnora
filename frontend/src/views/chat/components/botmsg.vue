@@ -20,7 +20,9 @@
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
                     :embedded-mode="embeddedMode"
                     :can-fork="canFork"
+                    :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
+                    @rewind="emit('rewind', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
@@ -35,7 +37,9 @@
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
                     :embedded-mode="embeddedMode"
                     :can-fork="canFork"
+                    :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
+                    @rewind="emit('rewind', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
@@ -55,6 +59,22 @@
                         <t-icon name="git-branch" />
                     </t-button>
                 </t-tooltip>
+                <t-popconfirm
+                    v-if="canRewind"
+                    :content="t('chat.rewind.confirmBody')"
+                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                    :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                    theme="warning"
+                    placement="top"
+                    overlay-class-name="chat-rewind-popconfirm"
+                    @confirm="emitRewind"
+                >
+                    <t-tooltip :content="rewindTooltip">
+                        <t-button size="small" variant="outline" shape="round" @click.stop>
+                            <t-icon name="rollback" />
+                        </t-button>
+                    </t-tooltip>
+                </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
                     <t-icon name="copy" />
@@ -134,6 +154,7 @@ import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import { persistedAssistantId } from '@/utils/steerStreamFork';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
+import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
 import {
     artifactIndexFromEventTarget,
     hydrateArtifactImages,
@@ -178,7 +199,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 'rewind'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -223,14 +244,24 @@ const props = defineProps({
     canFork: {
         type: Boolean,
         default: false
+    },
+    canRewind: {
+        type: Boolean,
+        default: false
     }
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
 const forkTooltip = '从这条回答继续分叉'
+const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
     const messageId = persistedAssistantId(props.session) || props.session?.id
     if (messageId) emit('fork', messageId)
+}
+const emitRewind = () => {
+    const messageId = persistedAssistantId(props.session) || props.session?.id
+    if (messageId) emit('rewind', messageId)
 }
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
@@ -297,6 +328,14 @@ const artifactRefContext = computed(() => {
     return { sessionId: props.sessionId, messageId };
 });
 
+// Shared replies must authorize files through the persisted message, just as
+// AgentStreamDisplay does. The default embed plane still takes precedence.
+const protectedFileAccess = computed(() => {
+    const messageId = persistedAssistantId(props.session);
+    if (!props.sessionId || !messageId) return undefined;
+    return { mode: 'message', sessionId: props.sessionId, messageId };
+});
+
 const artifactRefLabels = computed(() => ({
     previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
     missingHint: t('agent.artifactDrawer.inlineMissing'),
@@ -359,6 +398,8 @@ const { displayed: typedAnswer } = useTypewriter(
 const answerFullyRendered = computed(() =>
     Boolean(props.session?.is_completed) && typedAnswer.value.length >= answerText.value.length
 );
+useProtectedImageRecovery(() => parentMd.value, () => protectedFileAccess.value,
+    () => !props.session?.isAgentMode && !props.session?.persistence_error && answerFullyRendered.value);
 
 watch(
     answerFullyRendered,
@@ -454,7 +495,7 @@ watch(renderedHTML, () => {
 // 渲染 Mermaid 图表的函数
 onUpdated(() => {
     nextTick(async () => {
-        await hydrateProtectedFileImages(parentMd.value);
+        await hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value);
         await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         refreshMarkdownEnhancements(parentMd.value);
         if (props.session?.is_completed) {
@@ -470,7 +511,7 @@ onMounted(async () => {
             parentMd.value.addEventListener('click', handleMarkdownImageClick, true);
         }
         rebindCitations();
-        await hydrateProtectedFileImages(parentMd.value);
+        await hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value);
         await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         await enhanceMarkdownContainer(parentMd.value);
     });

@@ -122,6 +122,16 @@ func (w *Rewriter) CopyData(ctx context.Context, data map[string]interface{}) ma
 	return out
 }
 
+// CopyValue is CopyData for a decoded JSON value of any shape (object, array
+// or scalar). Unchanged values are returned as-is.
+func (w *Rewriter) CopyValue(ctx context.Context, value interface{}) interface{} {
+	if !w.Enabled() {
+		return value
+	}
+	rewritten, _ := w.copyValue(ctx, value, 0)
+	return rewritten
+}
+
 // maxDataDepth bounds recursion into tool-defined metadata. Renderable content
 // sits within a couple of levels; the cap only guards against a pathologically
 // nested payload.

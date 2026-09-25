@@ -169,9 +169,15 @@ func (s *sessionService) AgentQA(
 	// Hold the sandbox across this turn so an install that finishes while we
 	// are running cannot rebuild the VM between tool calls. Staging below is
 	// the first resolve: if the previous turn left a stale mark, that is
-	// where the new image is picked up.
-	releaseTurn := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
-	defer releaseTurn()
+	// where the new image is picked up. HTTP send already holds the lease it
+	// took before persisting the turn, so only direct callers take one here.
+	if !req.TurnLeaseHeld {
+		releaseTurn, err := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+		if err != nil {
+			return err
+		}
+		defer releaseTurn()
+	}
 
 	// Reconcile all durable session attachments into the session's remote
 	// sandbox before the model can request shell or skill execution. The
@@ -190,12 +196,22 @@ func (s *sessionService) AgentQA(
 	if storeErr != nil {
 		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
 	}
-	if inputStore != nil {
+	mgr, _, layoutErr := resolveSandboxForExecution(
+		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+		req.Session.TenantID, sessionID, agentConfig.SandboxConfigID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox), withLiteDesktop(s.hostDesktop),
+	)
+	layout := sessionWorkspaceLayout(
+		ctx, sessionID, mgr, layoutErr, s.hostSandbox, agentConfig.SandboxConfigID,
+	)
+	if inputStore != nil && strings.TrimSpace(layout.InputDir) != "" {
 		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
 		if loadErr != nil {
 			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
 		}
-		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments)
+		stagedAttachments, err = stager.stageSessionAttachments(
+			ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments, layout,
+		)
 		if err != nil {
 			return fmt.Errorf("restore session attachments into sandbox: %w", err)
 		}
@@ -269,7 +285,7 @@ func (s *sessionService) AgentQA(
 		agentQuery += req.Attachments.BuildPrompt()
 		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
 	}
-	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments); manifest != "" {
+	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments, layout); manifest != "" {
 		agentQuery += manifest
 		logger.Infof(ctx, "Appended %d staged sandbox attachment path(s) to agent query", len(stagedAttachments))
 	}
@@ -320,13 +336,21 @@ func (s *sessionService) buildAgentConfig(
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
+		ReasoningEffort:             customAgent.Config.ReasoningEffort,
 		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
+		// The model is always told it may call tools in parallel; without
+		// this the engine still ran them one by one, so three searches in
+		// one reply cost three sequential embed/retrieve/rerank rounds.
+		// Only read-only tools overlap (agenttools.CanRunConcurrently);
+		// anything else is a barrier that runs alone, in model order.
+		ParallelToolCalls: true,
 	}
+	applyRequestReasoningEffort(req.ReasoningEffort, &agentConfig.Thinking, &agentConfig.ReasoningEffort)
 	// An unset MCP mode means "all" at runtime, but the share scope and the
 	// agent UI both present it as none. A shared run must not hand receivers
 	// every MCP service (with the owner's credentials) that its owner believes
@@ -349,10 +373,18 @@ func (s *sessionService) buildAgentConfig(
 	// because that is where resolveSandboxForExecution reads it; skillsForRun
 	// picks the config the same way the sandbox resolution does.
 	sandboxTenantID, _ := types.TenantIDFromContext(ctx)
-	skillConfigID, tenantSkills := skillsForRun(
-		ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
-		sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+	var (
+		skillConfigID string
+		tenantSkills  []*types.TenantSkillEntity
 	)
+	if s.hostDesktop {
+		skillConfigID, tenantSkills = hostSkillsForRun(ctx, s.tenantSkillRepo, s.hostSkillTree, sandboxTenantID)
+	} else {
+		skillConfigID, tenantSkills = skillsForRun(
+			ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
+			sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+		)
+	}
 	agentConfig.TenantSkills = tenantSkills
 	if len(tenantSkills) > 0 {
 		// The config named here is the one the skills came from, which is the

@@ -299,5 +299,30 @@ func (m *MemoryStreamManager) ClearLiveRun(
 	return nil
 }
 
+// DropMessageStreams removes event and steer buffers for deleted messages so a
+// later rewind cannot replay or steer a turn that no longer exists.
+func (m *MemoryStreamManager) DropMessageStreams(
+	_ context.Context, sessionID string, messageIDs []string,
+) error {
+	if sessionID == "" || len(messageIDs) == 0 {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sessionMap := m.streams[sessionID]
+	for _, messageID := range messageIDs {
+		if sessionMap != nil {
+			delete(sessionMap, messageID)
+		}
+		if marker, ok := m.liveRuns[sessionID]; ok && marker.assistantMessageID == messageID {
+			delete(m.liveRuns, sessionID)
+		}
+	}
+	if sessionMap != nil && len(sessionMap) == 0 {
+		delete(m.streams, sessionID)
+	}
+	return nil
+}
+
 // Ensure MemoryStreamManager implements StreamManager interface
 var _ interfaces.StreamManager = (*MemoryStreamManager)(nil)

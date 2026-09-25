@@ -1,13 +1,19 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	"github.com/Tencent/WeKnora/internal/browserskill"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 )
@@ -91,24 +97,46 @@ func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	return defaultToolExecTimeout
 }
 
-// transientErrorMarkers are substrings that indicate a transient (retryable) error.
+// transientErrorMarkers are substrings that indicate a transient (retryable)
+// error in a message that lost its type on the way here: stream failures reach
+// the agent as text carried on an error chunk.
 var transientErrorMarkers = []string{
-	"429", "rate limit",
-	"500", "502", "503", "504",
+	"rate limit",
 	"overloaded", "timeout", "timed out",
 	"connection", "server error", "temporarily unavailable",
 	// A broken or silent stream is worth one more attempt: the round produced
 	// no usable turn, and the alternative is ending the conversation on a
 	// partial response.
-	"deadline exceeded", "stalled",
+	"deadline exceeded", "stalled", "unexpected eof",
+	strings.ToLower(types.StreamEndedEarlyError),
 }
+
+// transientStatusPattern matches a retryable HTTP status as a whole number, so
+// "max_tokens 5000" or a request id with 429 inside it does not read as one.
+var transientStatusPattern = regexp.MustCompile(`\b(408|429|500|502|503|504|529)\b`)
 
 // isTransientError checks whether an error is likely transient and worth retrying.
 func isTransientError(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
+	// Typed errors decide on their own: a 400 whose body happens to mention
+	// "timeout" or "500" is still the same bad request on every retry.
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		code := httpErr.StatusCode
+		return code == http.StatusRequestTimeout || code == http.StatusTooManyRequests ||
+			code >= http.StatusInternalServerError
+	}
+	var transportErr *api.TransportError
+	if errors.As(err, &transportErr) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	errStr := strings.ToLower(err.Error())
+	if transientStatusPattern.MatchString(errStr) {
+		return true
+	}
 	for _, marker := range transientErrorMarkers {
 		if strings.Contains(errStr, marker) {
 			return true

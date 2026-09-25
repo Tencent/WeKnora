@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -58,6 +59,18 @@ const sessionInputEnvVar = "WEKNORA_SESSION_INPUT_DIR"
 // SessionWorkspaceRoot is the writable workspace root inside remote sandboxes.
 // shell_exec work_dir must stay underneath this path.
 const SessionWorkspaceRoot = "/workspace"
+
+// SessionGitDir is the git metadata directory for per-turn workspace
+// checkpoints. It lives on the sandbox root filesystem so a fork snapshot
+// still copies the object store, but outside SessionWorkspaceRoot so
+// `rm -rf /workspace` (or an agent cleaning the work tree) cannot drop
+// checkpoint history that rewind and fork later reset to.
+//
+// Checkpoints used to live in SessionWorkspaceRoot/.git, and sandboxes
+// provisioned before this constant existed still hold theirs there. The
+// shared git preamble adopts that repository on first use so SHAs recorded
+// before the move keep resolving; see gitWorkspaceAdoptLegacyRepo.
+const SessionGitDir = "/var/lib/weknora/workspace.git"
 
 // sessionArtifactDirBootstrapTimeout bounds directory creation and access
 // checks, performed with the execution identity.
@@ -900,6 +913,40 @@ func (m *SessionBoundManager) SessionInstallShellExecutor() SessionInstallShellE
 	return m
 }
 
+// SessionWorkspaceLayout reports the /workspace contract every remote
+// session shares. sessionID is ignored: remote layouts are not per-session.
+// A validated WEKNORA_SKILL_OUTPUT_DIR overlays OutputDir and the matching
+// ReadRoots entry; RemoteWorkspaceLayout itself stays the constant baseline.
+func (m *SessionBoundManager) SessionWorkspaceLayout(context.Context, string) (WorkspaceLayout, error) {
+	return withValidatedSkillOutputDir(RemoteWorkspaceLayout()), nil
+}
+
+func withValidatedSkillOutputDir(layout WorkspaceLayout) WorkspaceLayout {
+	raw := strings.TrimSpace(os.Getenv(skillOutputEnvVar))
+	if raw == "" {
+		return layout
+	}
+	clean, ok := ValidatedSessionOutputDir(raw)
+	if !ok {
+		return layout
+	}
+	previous := layout.OutputDir
+	layout.OutputDir = clean
+	if previous == clean || len(layout.ReadRoots) == 0 {
+		return layout
+	}
+	roots := append([]string(nil), layout.ReadRoots...)
+	for i, root := range roots {
+		if root == previous {
+			roots[i] = clean
+		}
+	}
+	layout.ReadRoots = roots
+	return layout
+}
+
+var _ SessionWorkspaceLayoutProvider = (*SessionBoundManager)(nil)
+
 // SessionFileStore advertises the session-scoped filesystem capability while
 // a real remote backend is active and the provider implements the enumeration
 // operations (ListDir / Stat / MakeDir / Remove).
@@ -1120,6 +1167,45 @@ func (m *SessionBoundManager) HasActiveTurn(ctx context.Context, sessionID strin
 	}
 	active, _, err := leaser.TurnState(ctx, key)
 	return active, err
+}
+
+// TryLockRewind takes an exclusive rewind lock for sessionID. Stores that do
+// not implement rewind locking succeed as a no-op so local tests without a
+// lease store still rewind.
+func (m *SessionBoundManager) TryLockRewind(ctx context.Context, sessionID string) (func(), error) {
+	noop := func() {}
+	if m == nil {
+		return noop, nil
+	}
+	locker, ok := m.bindings.(interface {
+		TryLockRewind(context.Context, SessionSandboxKey) (func(), error)
+	})
+	if !ok {
+		return noop, nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return locker.TryLockRewind(ctx, key)
+}
+
+// HasRewindLock reports whether rewind currently holds sessionID.
+func (m *SessionBoundManager) HasRewindLock(ctx context.Context, sessionID string) (bool, error) {
+	if m == nil {
+		return false, nil
+	}
+	reader, ok := m.bindings.(interface {
+		HasRewindLock(context.Context, SessionSandboxKey) (bool, error)
+	})
+	if !ok {
+		return false, nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return reader.HasRewindLock(ctx, key)
 }
 
 // CreateForkSnapshot snapshots the session's already-bound sandbox. It never
@@ -1427,7 +1513,7 @@ func cleanSessionInputPath(filePath string) (string, error) {
 // cleanSessionWorkspaceWritePath normalizes model-authored sandbox writes and
 // protects staged attachments. The remote session binding isolates the files.
 func cleanSessionWorkspaceWritePath(filePath string) (string, error) {
-	clean := ResolveWorkspacePath(filePath)
+	clean := ResolveWorkspacePathIn(RemoteWorkspaceLayout(), filePath)
 	if !path.IsAbs(clean) || clean == "." || clean == "/" {
 		return "", fmt.Errorf("sandbox: workspace write path %q must be an absolute file path", filePath)
 	}

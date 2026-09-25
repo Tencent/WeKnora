@@ -25,7 +25,9 @@ type pgVector struct {
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
-	IsEnabled       bool                `json:"is_enabled"        gorm:"column:is_enabled;default:true;index"`
+	// No GORM default tag: GORM swaps a zero bool for the tag's default on
+	// insert, which indexed disabled chunks as enabled. Writers always set it.
+	IsEnabled bool `json:"is_enabled"        gorm:"column:is_enabled;index"`
 }
 
 // pgVectorWithScore extends pgVector with similarity score field

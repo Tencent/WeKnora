@@ -245,6 +245,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// UI signal users actually see.
 	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker)
 	mux.Use(asynqdl.MiddlewareWithCallback(params.DeadLetterRepo, knowledgeFailer))
+	mux.Use(asynqdl.RecoverMiddleware())
 
 	// Mark every asynq worker execution as a background task so the chat
 	// concurrency governor throttles ingestion/enrichment LLM traffic while
@@ -415,6 +416,14 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 		switch row.ParseStatus {
 		case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
 		default:
+			return
+		}
+		// The row belongs to a newer run (a reparse cancelled this task or
+		// raced it): failing it would kill a run that is still healthy.
+		if tracker != nil && probe.Attempt > 0 &&
+			tracker.LatestAttempt(ctx, probe.KnowledgeID) > probe.Attempt {
+			logger.Infof(ctx, "dead-letter callback: attempt %d of knowledge %s superseded, leaving row alone",
+				probe.Attempt, probe.KnowledgeID)
 			return
 		}
 		errMsg := "task " + t.Type() + " exhausted retries: " + taskErr.Error()

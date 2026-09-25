@@ -16,7 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -220,11 +219,9 @@ func newDockerEngineClient(endpoint dockerEndpoint) (*client.Client, error) {
 	// "allow private endpoints" switch. Must come after WithHost, which
 	// installs its own dialer.
 	if dockerHostNeedsDialGuard(host) {
-		opts = append(opts, client.WithDialContext((&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-			Control:   SafeDialControlForPolicy(OutboundURLPolicy{AllowPrivate: endpoint.AllowPrivate}),
-		}).DialContext))
+		opts = append(opts, client.WithDialContext(
+			GuardedDialContext(OutboundURLPolicy{AllowPrivate: endpoint.AllowPrivate}),
+		))
 	}
 
 	built, err := client.New(opts...)

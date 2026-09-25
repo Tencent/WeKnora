@@ -389,6 +389,22 @@
                     <t-icon name="git-branch" />
                   </t-button>
                 </t-tooltip>
+                <t-popconfirm
+                  v-if="canRewind"
+                  :content="t('chat.rewind.confirmBody')"
+                  :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                  :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                  theme="warning"
+                  placement="top"
+                  overlay-class-name="chat-rewind-popconfirm"
+                  @confirm="emitRewind"
+                >
+                  <t-tooltip :content="rewindTooltip">
+                    <t-button size="small" variant="outline" shape="round" @click.stop>
+                      <t-icon name="rollback" />
+                    </t-button>
+                  </t-tooltip>
+                </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -638,6 +654,7 @@ import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
+import { citationAnchorText } from '@/utils/citationAnchor';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -645,7 +662,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
-import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
+import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security';
+import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
 import {
   artifactIndexFromEventTarget,
   hydrateArtifactImages,
@@ -975,18 +993,26 @@ const props = defineProps<{
   ragMode?: boolean;
   followUpLoading?: boolean;
   canFork?: boolean;
+  canRewind?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: 'render-complete-change', ready: boolean): void;
   (event: 'fork', messageId: string): void;
+  (event: 'rewind', messageId: string): void;
 }>();
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
 const forkTooltip = '从这条回答继续分叉'
+const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
   const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
   if (messageId) emit('fork', messageId)
+}
+const emitRewind = () => {
+  const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
+  if (messageId) emit('rewind', messageId)
 }
 
 const embedAuthProps = computed(() => ({
@@ -1028,25 +1054,6 @@ const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() 
   }
   return undefined;
 });
-
-// Re-hydrate when the message authorization anchor becomes available or is
-// corrected (e.g. request_id → persisted assistant_message_id after agent_query).
-watch(
-  () => {
-    const access = protectedFileAccess.value;
-    if (access?.mode === 'message') {
-      return `${access.sessionId}\0${access.messageId}`;
-    }
-    return '';
-  },
-  (scopeKey, previousScopeKey) => {
-    if (!scopeKey || scopeKey === previousScopeKey) return;
-    clearProtectedFileFailureCache();
-    nextTick(async () => {
-      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
-    });
-  },
-);
 
 // -----------------------------------------------------------------------------
 // Skill artifact download drawer (Agent path)
@@ -1686,15 +1693,12 @@ const answerFullyRendered = computed(
     isSegmentDone.value &&
     typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
+useProtectedImageRecovery(() => rootElement.value, () => protectedFileAccess.value,
+  () => !props.session?.persistence_error && answerFullyRendered.value);
 watch(answerFullyRendered, (ready) => {
   emit('render-complete-change', ready);
   if (!ready) return;
-  // Clear before this reactive update renders, so a source that returned 404
-  // mid-stream gets one real final-attempt <img> node instead of remaining
-  // suppressed by the missing-source cache.
-  clearProtectedFileFailureCache();
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await enhanceMarkdownContainer(rootElement.value);
   });
 }, { immediate: true });
@@ -2400,6 +2404,8 @@ const onRootClick = (e: Event) => {
       chunkId,
       documentTitle: title,
       knowledgeBaseId: kbId,
+      anchorText: citationAnchorText(kbEl),
+      openSource: !props.embeddedMode,
     })) {
       return;
     }
@@ -2485,6 +2491,8 @@ const onRootKeydown = (e: KeyboardEvent) => {
         chunkId,
         documentTitle: title,
         knowledgeBaseId: kbId,
+        anchorText: citationAnchorText(kbEl),
+        openSource: !props.embeddedMode,
       })) {
         return;
       }
@@ -4007,4 +4015,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 </style>
 
-<style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>
+<!-- Inlined @import instead of <style src>: plugin-vue 6.0.6 keys unscoped
+     src-style descriptors by the imported file path, so two SFCs sharing the
+     same src style (this file and WikiBrowser.vue) overwrite each other's
+     descriptor during the build and crash with "reading 'scoped'". -->
+<style lang="less">
+@import "@/components/css/wiki-graph-drawer.less";
+</style>

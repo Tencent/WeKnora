@@ -19,7 +19,7 @@ import (
 // on the second page. Browsing remains shallow; fetching must visit every level.
 func TestConnectorFetchesNestedDirectories(t *testing.T) {
 	for _, mode := range []string{
-		"all", "incremental", "stream", "incremental compare fallback", "stream compare fallback",
+		"all", "incremental", "stream",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			allowLocalGitLabServer(t)
@@ -104,6 +104,152 @@ func TestConnectorFetchesNestedDirectories(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, resources, 1)
 			require.Equal(t, "1:docs/a", resources[0].ExternalID)
+		})
+	}
+}
+
+func TestConnectorCompareFailuresDoNotFallBackToFullSync(t *testing.T) {
+	for _, failure := range []struct {
+		name       string
+		statusCode int
+		body       string
+	}{
+		{name: "timeout response", statusCode: http.StatusOK, body: `{"compare_timeout":true}`},
+		{name: "API error", statusCode: http.StatusInternalServerError, body: `{"message":"compare failed"}`},
+	} {
+		for _, mode := range []string{"incremental", "stream"} {
+			t.Run(failure.name+" "+mode, func(t *testing.T) {
+				allowLocalGitLabServer(t)
+				downstreamRequests := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch r.URL.Path {
+					case "/api/v4/projects/1":
+						_, _ = w.Write([]byte(`{
+							"id":1,"name":"docs","path_with_namespace":"group/docs","default_branch":"main"
+						}`))
+					case "/api/v4/projects/1/repository/commits/main":
+						_, _ = w.Write([]byte(`{"id":"head"}`))
+					case "/api/v4/projects/1/repository/compare":
+						w.WriteHeader(failure.statusCode)
+						_, _ = w.Write([]byte(failure.body))
+					case "/api/v4/projects/1/repository/tree":
+						downstreamRequests++
+						_, _ = w.Write([]byte(`[{"name":"README.md","path":"README.md","type":"blob"}]`))
+					default:
+						if strings.Contains(r.URL.EscapedPath(), "/repository/files/") {
+							downstreamRequests++
+							_, _ = w.Write([]byte("# unchanged"))
+							return
+						}
+						http.NotFound(w, r)
+					}
+				}))
+				defer server.Close()
+
+				cfg := &types.DataSourceConfig{
+					Credentials: map[string]interface{}{"base_url": server.URL, "access_token": "token"},
+					Settings: map[string]interface{}{"projects": []interface{}{
+						map[string]interface{}{"project_id": "1", "paths": []interface{}{}},
+					}},
+				}
+				old := gitLabCursor(cursor{Projects: map[string]string{"1": "previous"}})
+				connector := NewConnector()
+
+				switch mode {
+				case "incremental":
+					items, next, err := connector.FetchIncremental(context.Background(), cfg, old)
+					require.ErrorContains(t, err, "gitlab compare project 1")
+					require.Empty(t, items)
+					require.Nil(t, next)
+				case "stream":
+					handler := &gitLabStreamRecorder{}
+					next, err := connector.FetchStream(context.Background(), cfg, old, handler)
+					require.ErrorContains(t, err, "gitlab compare project 1")
+					require.Nil(t, next)
+					require.Empty(t, handler.items)
+					require.Empty(t, handler.checkpoints)
+				}
+				require.Zero(t, downstreamRequests, "compare failures must not trigger a full repository walk")
+			})
+		}
+	}
+}
+
+func TestConnectorSuccessfulCompareStillEmitsOnlyChangedFiles(t *testing.T) {
+	for _, mode := range []string{"incremental", "stream"} {
+		t.Run(mode, func(t *testing.T) {
+			allowLocalGitLabServer(t)
+			var compareQuery string
+			treeRequests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v4/projects/1":
+					_, _ = w.Write([]byte(`{
+						"id":1,"name":"docs","path_with_namespace":"group/docs",
+						"web_url":"https://gitlab.test/group/docs","default_branch":"main"
+					}`))
+				case "/api/v4/projects/1/repository/commits/main":
+					_, _ = w.Write([]byte(`{"id":"head"}`))
+				case "/api/v4/projects/1/repository/compare":
+					compareQuery = r.URL.RawQuery
+					_, _ = w.Write([]byte(`{"diffs":[
+						{"old_path":"removed.md","new_path":"removed.md","deleted_file":true},
+						{"old_path":"old.md","new_path":"renamed.md","renamed_file":true},
+						{"old_path":"guide.md","new_path":"guide.md"},
+						{"old_path":"server.go","new_path":"server.go"}
+					]}`))
+				case "/api/v4/projects/1/repository/tree":
+					treeRequests++
+					http.Error(w, "unexpected full repository walk", http.StatusInternalServerError)
+				default:
+					if strings.Contains(r.URL.EscapedPath(), "/repository/files/") {
+						_, _ = w.Write([]byte("# changed"))
+						return
+					}
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			cfg := &types.DataSourceConfig{
+				Credentials: map[string]interface{}{"base_url": server.URL, "access_token": "token"},
+				Settings: map[string]interface{}{"projects": []interface{}{
+					map[string]interface{}{"project_id": "1", "paths": []interface{}{}},
+				}},
+			}
+			old := gitLabCursor(cursor{Projects: map[string]string{"1": "previous"}})
+			connector := NewConnector()
+			var items []types.FetchedItem
+			var next *types.SyncCursor
+
+			switch mode {
+			case "incremental":
+				var err error
+				items, next, err = connector.FetchIncremental(context.Background(), cfg, old)
+				require.NoError(t, err)
+			case "stream":
+				handler := &gitLabStreamRecorder{}
+				var err error
+				next, err = connector.FetchStream(context.Background(), cfg, old, handler)
+				require.NoError(t, err)
+				items = handler.items
+				require.Len(t, handler.checkpoints, 1)
+			}
+
+			require.Equal(t, "from=previous&to=head", compareQuery)
+			require.Zero(t, treeRequests)
+			require.Len(t, items, 4)
+			require.True(t, items[0].IsDeleted)
+			require.Equal(t, "removed.md", items[0].Metadata["gitlab_path"])
+			require.True(t, items[1].IsDeleted)
+			require.Equal(t, "old.md", items[1].Metadata["gitlab_path"])
+			require.False(t, items[2].IsDeleted)
+			require.Equal(t, "renamed.md", items[2].Metadata["gitlab_path"])
+			require.False(t, items[3].IsDeleted)
+			require.Equal(t, "guide.md", items[3].Metadata["gitlab_path"])
+			require.Equal(t, "head", next.ConnectorCursor["projects"].(map[string]string)["1"])
 		})
 	}
 }

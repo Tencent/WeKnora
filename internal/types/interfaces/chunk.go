@@ -80,6 +80,9 @@ type ChunkRepository interface {
 	) ([]*types.Chunk, error)
 	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list
 	ListChunksByParentIDs(ctx context.Context, tenantID uint64, parentIDs []string) ([]*types.Chunk, error)
+	// ListChunksByParentIDsOnly lists chunks by parent IDs without tenant filter
+	// (for shared KB resolution).
+	ListChunksByParentIDsOnly(ctx context.Context, parentIDs []string) ([]*types.Chunk, error)
 	// UpdateChunk updates a chunk
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
 	// CreateChunkRevision stores an immutable snapshot of a superseded revision.
@@ -109,6 +112,12 @@ type ChunkRepository interface {
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
 	ListImageInfoByKnowledgeIDs(ctx context.Context, tenantID uint64, knowledgeIDs []string) ([]ChunkImageInfo, error)
+	// ListImageAssets returns one page of a KB's de-duplicated image assets
+	// (one per image_info entry, keyed by URL) with the query's filters and
+	// sort applied in the database, plus the filtered total.
+	ListImageAssets(
+		ctx context.Context, tenantID uint64, kbID string, q *types.ImageAssetQuery,
+	) ([]types.ImageAssetRow, int64, error)
 	// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
 	MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error
 	// DeleteChunksByTagID deletes all chunks with the specified tag ID
@@ -172,6 +181,14 @@ type ChunkService interface {
 		knowledgeID string,
 		page *types.Pagination,
 		chunkType []types.ChunkType,
+	) (*types.PageResult, error)
+	// ListImagesByKnowledgeBaseID lists the image assets of a KB with keyword
+	// search, schema-driven attribute filters, sorting and pagination.
+	ListImagesByKnowledgeBaseID(
+		ctx context.Context,
+		kbID string,
+		page *types.Pagination,
+		filter *types.ImageListFilter,
 	) (*types.PageResult, error)
 	// UpdateChunk updates a chunk
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error

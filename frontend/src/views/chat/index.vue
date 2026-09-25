@@ -3,7 +3,10 @@
         'is-embedded': embeddedMode,
         'has-references-panel': referencesDrawerVisible,
         'has-sandbox-panel': sandboxPanel.visible.value,
-    }" :style="{ '--sandbox-panel-width': `${sandboxPanel.width.value}px` }">
+    }" :style="{
+        '--sandbox-panel-width': `${sandboxPanel.width.value}px`,
+        '--references-panel-width': `${referencesPanelWidth}px`,
+    }">
         <div v-if="!embeddedMode" class="chat-topbar">
             <ChatHeader :session="currentSession" />
             <div v-if="!sandboxPanel.visible.value" class="sandbox-header-toggle">
@@ -22,7 +25,7 @@
                 </t-tooltip>
             </div>
         </div>
-        <div class="chat_thread" :style="{ '--chat-composer-height': `${composerHeight}px` }">
+        <div class="chat_thread" :style="{ '--chat-composer-height': `${composerHeight}px`, '--chat-scrollbar-gutter': `${scrollbarGutter}px` }">
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
                 <div class="chat_scroll_content">
                     <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
@@ -105,17 +108,20 @@
                                 :value="session.created_at" />
 
                             <div v-if="session.role == 'user'" class="message-row"
-                                :data-message-id="session.id || undefined">
+                                :data-message-id="session.id || undefined"
+                                :class="{ 'is-minimap-target': session.id && session.id === minimapTargetId }">
                                 <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
                                     :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
                                     :session-id="session_id"
                                     :message-id="session.id"
                                     :created-at="session.created_at"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="canRewindMessage(session.id)"
                                     :steer-failed="Boolean(session._steerFailed)"
                                     @retry-steer="handleRetrySteer(session.steer_id)"
                                     @remove-steer="handleRemoveSteer(session.steer_id)"
-                                    @fork="handleFork">
+                                    @fork="handleFork"
+                                    @rewind="handleRewind">
                                 </usermsg>
                             </div>
                             <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
@@ -126,7 +132,9 @@
                                     :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                                     :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="canRewindMessage(session.id)"
                                     @fork="handleFork"
+                                    @rewind="handleRewind"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                                 </botmsg>
                                 <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
@@ -144,26 +152,26 @@
                             <span class="chat-global-wait__spinner" aria-hidden="true"></span>
                         </div>
                     </div>
-                    <div ref="composerElement" class="chat_composer">
-                        <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
-                            <transition name="scroll-btn-fade">
-                                <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
-                                    <t-icon name="chevron-down" size="18px" />
-                                </div>
-                            </transition>
-                            <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
-                                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
-                                @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
-                                @promote-steer="handlePromoteSteer"
-                                @remove-steer="handleRemoveSteer"
-                                @retry-steer="handleRetrySteer"
-                                @stop-generation="handleStopGeneration"
-                                @stop-confirmed="handleStopConfirmed"
-                                @stop-failed="handleStopFailed" :isReplying="isReplying" :sessionId="session_id"
-                                :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
-                                :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
+                </div>
+            </div>
+            <div ref="composerElement" class="chat_composer">
+                <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
+                    <transition name="scroll-btn-fade">
+                        <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
+                            <t-icon name="chevron-down" size="18px" />
                         </div>
-                    </div>
+                    </transition>
+                    <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
+                        @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
+                        @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
+                        @promote-steer="handlePromoteSteer"
+                        @remove-steer="handleRemoveSteer"
+                        @retry-steer="handleRetrySteer"
+                        @stop-generation="handleStopGeneration"
+                        @stop-confirmed="handleStopConfirmed"
+                        @stop-failed="handleStopFailed" :isReplying="isReplying" :composer-locked="composerLocked" :sessionId="session_id"
+                        :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
+                        :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
                 </div>
             </div>
             <div v-if="!embeddedMode" class="chat_overlays">
@@ -182,6 +190,7 @@
         :agent-id="useSettingsStoreInstance.selectedAgentId"
         :agent-source-tenant-id="useSettingsStoreInstance.selectedAgentSourceTenantId"
         :shifted="referencesDrawerVisible"
+        :shift-width="referencesPanelWidth"
         :artifacts="sessionArtifacts" :artifacts-collecting="sessionArtifactsCollecting"
         @artifact-deleted="handleArtifactDeleted" />
 </template>
@@ -193,8 +202,10 @@ import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vu
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
-import { getMessageList, getSession, forkSession } from "@/api/chat/index";
+import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
+import { rewindSkipMessage } from './rewindNotice';
+import { rewindPrefillText, rewindBlockedByOutgoingWork, canReplaceRewindTranscript, shouldApplyRewindLocally, rewindHistoryHasMore, keepMessagesThroughRewindPoint, rewindableMessageIds, rewindHttpConflictCode, rewindConflictI18nKey } from './rewindView';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -239,7 +250,7 @@ import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 const referencesDrawer = provideChatReferencesDrawer();
 provideChatAttachmentPreviewDrawer();
 const sandboxPanel = provideChatSandboxPanel();
-const { visible: referencesDrawerVisible } = referencesDrawer;
+const { visible: referencesDrawerVisible, panelWidth: referencesPanelWidth } = referencesDrawer;
 
 const props = defineProps({
     session_id: { type: String, default: '' },
@@ -325,8 +336,24 @@ function forkAffordanceOf(messageId) {
     return resolveForkAffordance(messagesList, messageId)
 }
 
+// One pass over the transcript per render instead of two per rendered row:
+// the template asks this for every message and re-asks on every streamed token.
+const rewindableIds = computed(() => rewindableMessageIds(messagesList, {
+    embeddedMode: props.embeddedMode,
+    outgoingWork: outgoingWorkBlocksRewind.value,
+}))
+
+function canRewindMessage(messageId) {
+    return Boolean(messageId) && rewindableIds.value.has(String(messageId))
+}
+
 const FORK_PREFILL_KEY = 'weknora:fork-prefill'
 let forkInFlight = false
+const rewindInFlight = ref(false)
+const rewindLockSessionId = ref('')
+const composerLocked = computed(() =>
+    rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value
+)
 
 function stashForkLanding(sessionId, text) {
     const payload = JSON.stringify({ sessionId, text })
@@ -372,7 +399,7 @@ function applyForkLanding() {
 
 async function handleFork(messageId) {
     if (props.embeddedMode) return
-    if (forkInFlight) return
+    if (forkInFlight || composerLocked.value) return
     if (!messageId || !session_id.value) return
     const source = messagesList.find((m) => m.id === messageId)
     if (!source) return
@@ -415,6 +442,102 @@ async function handleFork(messageId) {
     }
 }
 
+async function handleRewind(messageId) {
+    if (props.embeddedMode) return
+    if (forkInFlight || composerLocked.value) return
+    if (rewindBlockedByOutgoingWork({
+        isReplying: isReplying.value,
+        isStreaming: isStreaming.value,
+        isRecovering: isImRecovering.value,
+    })) return
+    if (!messageId || !session_id.value) return
+    const source = messagesList.find((m) => m.id === messageId || persistedAssistantId(m) === messageId)
+    if (!source) return
+    const sourceSessionId = session_id.value
+    const sourceRole = source.role
+    const sourceContent = source.content
+
+    rewindInFlight.value = true
+    rewindLockSessionId.value = sourceSessionId
+    try {
+        const res = await rewindSession(sourceSessionId, { message_id: messageId })
+        const data = res?.data
+        if (!data) return
+        if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
+
+        let batch
+        let reloadFailed = false
+        try {
+            const history = await fetchMessageList({
+                session_id: sourceSessionId,
+                created_at: '',
+                limit: limit.value,
+            })
+            batch = history?.data
+            if (!Array.isArray(batch)) {
+                throw new Error('rewind history reload returned no list')
+            }
+        } catch {
+            reloadFailed = true
+        }
+        if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
+
+        steerQueue.value = []
+        historyLoading.value = false
+        if (reloadFailed) {
+            const kept = keepMessagesThroughRewindPoint(
+                [...messagesList],
+                messageId,
+                sourceRole,
+                (m) => m.id === messageId || persistedAssistantId(m) === messageId,
+            )
+            messagesList.splice(0, messagesList.length, ...kept)
+            // created_at still points at the oldest message we actually hold.
+            // Clearing it here would send the next scroll-up back to the newest
+            // page, which this prefix already contains, instead of older ones.
+            MessagePlugin.warning(t('chat.rewind.reloadFailed'))
+        } else {
+            if (!canReplaceRewindTranscript(String(session_id.value || ''), sourceSessionId, undefined)) return
+            messagesList.splice(0)
+            created_at.value = ''
+            if (batch.length) {
+                created_at.value = batch[0].created_at
+                hasMoreHistory.value = rewindHistoryHasMore(batch.length, limit.value)
+                await handleMsgList(batch, false)
+            } else {
+                hasMoreHistory.value = false
+            }
+        }
+
+        const prefill = rewindPrefillText(sourceRole, sourceContent)
+        if (prefill) {
+            inputFieldRef.value?.prefill(prefill)
+        }
+
+        if (reloadFailed) {
+            return
+        }
+        if (data.workspace_reset) {
+            MessagePlugin.success(t('chat.rewind.success'))
+            return
+        }
+        const skip = rewindSkipMessage(String(data.reason || ''), t)
+        if (skip) {
+            MessagePlugin.info(skip)
+        }
+    } catch (err) {
+        const conflictCode = rewindHttpConflictCode(err)
+        if (conflictCode || err?.status === 409 || err?.$httpStatus === 409) {
+            MessagePlugin.warning(t(rewindConflictI18nKey(conflictCode)))
+            return
+        }
+        MessagePlugin.error(t('chat.rewind.failed'))
+    } finally {
+        rewindInFlight.value = false
+        rewindLockSessionId.value = ''
+    }
+}
+
 const sessionArtifacts = computed(() => collectSessionArtifacts(messagesList));
 // The panel already deleted the file server side; flag it in the loaded
 // history so the computed drops it without reloading the conversation.
@@ -437,14 +560,21 @@ let recoverPollTimer = null;
 // the same "generating" typing indicator the normal reply path shows, so the wait
 // isn't a silent gap. IM-only: false everywhere else, so other flows are unchanged.
 const isImRecovering = ref(false);
+const outgoingWorkBlocksRewind = computed(() => rewindBlockedByOutgoingWork({
+    isReplying: isReplying.value,
+    isStreaming: isStreaming.value,
+    isRecovering: isImRecovering.value,
+}))
 const scrollLock = ref(false);
 const isFirstEnter = ref(true);
 const loading = ref(false);
 const sessionActivity = useSessionActivityStore();
 const activitySessionId = ref('');
-watch([activitySessionId, isReplying, isStreaming, isImRecovering, currentAssistantMessageId], () => {
+watch([activitySessionId, isReplying, isImRecovering, currentAssistantMessageId], () => {
     if (props.embeddedMode || !activitySessionId.value) return;
-    sessionActivity.update(activitySessionId.value, isReplying.value || isStreaming.value || isImRecovering.value, currentAssistantMessageId.value);
+    // SSE may stay connected after a stop/complete event. The sidebar tracks
+    // generation, not the transport, just like the composer's Stop button.
+    sessionActivity.update(activitySessionId.value, isReplying.value || isImRecovering.value, currentAssistantMessageId.value);
 }, { flush: 'sync' });
 const historyLoading = ref(true);
 const historyLoadingMore = ref(false);
@@ -461,14 +591,19 @@ let fullContent = ref('')
 const scrollContainer = ref(null)
 const composerElement = ref(null)
 const composerHeight = ref(0)
-// Keep floating previews above the sticky composer, including when its controls
-// wrap after a drawer opens or the user adds multiple lines/attachments.
-watch(composerElement, (element, _, onCleanup) => {
-    if (!element) return
-    const measure = () => { composerHeight.value = element.offsetHeight }
+const scrollbarGutter = ref(0)
+// Reserve space for the independent composer and keep it aligned with the
+// message column when drawers, multiline input or attachments change its size.
+watch([composerElement, scrollContainer], ([element, scroller], _, onCleanup) => {
+    if (!element || !scroller) return
+    const measure = () => {
+        composerHeight.value = element.offsetHeight
+        scrollbarGutter.value = scroller.offsetWidth - scroller.clientWidth
+    }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(element)
+    observer.observe(scroller)
     onCleanup(() => observer.disconnect())
 }, { flush: 'post' })
 const userHasScrolledUp = ref(false)
@@ -819,7 +954,7 @@ const {
         const lastMessage = findLastMessage(
             (message) => message.role === 'assistant' && !message.is_completed
         );
-        const locallyRunning = isReplying.value || isStreaming.value || isImRecovering.value;
+        const locallyRunning = isReplying.value || isImRecovering.value;
         // History reload can finish after sendMsg already marked this session
         // running. Do not clear that marker just because the snapshot's last
         // message still looks completed. A scanned incomplete assistant counts: a
@@ -892,7 +1027,10 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
         if (historyLoadingMore.value || !hasMoreHistory.value) return;
         historyLoadingMore.value = true;
     }
-    fetchMessageList(data).then(async (res) => {
+    return fetchMessageList(data).then(async (res) => {
+        if (data?.session_id && String(data.session_id) !== String(session_id.value || '')) {
+            return
+        }
         const batch = res?.data;
         if (!batch?.length) {
             if (isScrollType) {
@@ -960,6 +1098,7 @@ const findSteerQueueItem = (steerId) =>
 
 // Enter queues a follow-up; an explicit inject appears in the transcript immediately.
 const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after', retryId = '') => {
+    if (composerLocked.value) return
     if (!session_id.value || !value?.trim()) return;
     if (!isReplying.value && !retryId) {
         // 空闲时没有运行中的 turn 可排队：直接走正常发送，而不是把
@@ -1233,6 +1372,8 @@ const attachSteerFollowUp = async (completedAssistantId) => {
 };
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
+    if (composerLocked.value) return
+    const reasoningEffort = props.embeddedMode ? undefined : (useSettingsStoreInstance.reasoningEffortOverride || undefined);
     stopStream();
     prepareForNewOutgoingMessage();
     activitySessionId.value = String(session_id.value);
@@ -1402,6 +1543,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         web_search_enabled: webSearchEnabled,
         local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled && !useBrowserConnectionStore().knownOffline,
         summary_model_id: modelId,
+        reasoning_effort: reasoningEffort,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,
@@ -1638,7 +1780,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.has-references-panel:not(.is-embedded) {
         @media (min-width: 960px) {
-            padding-right: 420px;
+            padding-right: var(--references-panel-width, 420px);
             box-sizing: border-box;
 
             .chat_scroll_box {
@@ -1658,7 +1800,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.has-sandbox-panel.has-references-panel:not(.is-embedded) {
         @media (min-width: 1400px) {
-            padding-right: calc(420px + var(--sandbox-panel-width, 420px));
+            padding-right: calc(var(--references-panel-width, 420px) + var(--sandbox-panel-width, 420px));
         }
 
         @media (max-width: 1399.98px) and (min-width: 960px) {
@@ -1757,6 +1899,7 @@ onBeforeRouteUpdate((to, from, next) => {
     padding: 8px 0 0;
     box-sizing: border-box;
     overflow-y: auto;
+    // Keep native message bounce without chaining scroll to the outer page.
     overscroll-behavior-y: contain;
     scroll-padding-bottom: var(--chat-composer-height, 0px);
     scrollbar-gutter: stable;
@@ -1787,20 +1930,27 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
-// One scroll viewport spans the messages and composer, so the scrollbar reaches
-// the bottom of the chat column. The composer stays in flow to reserve its own
-// height, and sticks to the bottom while reading earlier messages.
+// Keep the full-height message scrollbar and reserve space below the last
+// message for the composer, which sits outside the bouncing scroll viewport.
 .chat_scroll_content {
     display: flex;
     flex-direction: column;
     min-height: 100%;
+
+    // Use an in-flow spacer so the content ResizeObserver also detects composer
+    // height changes and keeps the last message visible when following replies.
+    &::after {
+        content: '';
+        flex: 0 0 var(--chat-composer-height, 0px);
+    }
 }
 
 .chat_composer {
-    position: sticky;
+    position: absolute;
     bottom: 0;
+    left: 0;
+    right: var(--chat-scrollbar-gutter, 0px);
     z-index: 12;
-    flex-shrink: 0;
     padding: 16px 0 max(8px, env(safe-area-inset-bottom));
     background: var(--td-bg-color-container);
 }
@@ -2006,5 +2156,18 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-enter-from,
 .sq-fade-leave-to {
     opacity: 0;
+}
+</style>
+
+<style lang="less">
+.chat-rewind-popconfirm {
+    max-width: 260px;
+
+    .t-popconfirm__content,
+    .t-popup__content {
+        max-width: 260px;
+        white-space: normal;
+        line-height: 1.5;
+    }
 }
 </style>

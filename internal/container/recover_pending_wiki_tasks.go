@@ -34,16 +34,24 @@ func recoverPendingWikiTasks(db *gorm.DB, task interfaces.TaskEnqueuer) {
 		return
 	}
 	ctx := context.Background()
-	const activeKnowledgeBase = `EXISTS (
+	// The outer parentheses matter: the cleanup below negates this whole
+	// predicate with NOT, and `NOT EXISTS(...) AND EXISTS(...)` would parse
+	// as `(NOT EXISTS(...)) AND EXISTS(...)` — silently matching nothing.
+	const activeKnowledgeBase = `(EXISTS (
 		SELECT 1 FROM knowledge_bases kb
 		WHERE kb.id = task_pending_ops.scope_id
 			AND kb.tenant_id = task_pending_ops.tenant_id
 			AND kb.deleted_at IS NULL
-	)`
+	) AND EXISTS (
+		SELECT 1 FROM tenants t
+		WHERE t.id = task_pending_ops.tenant_id
+			AND t.deleted_at IS NULL
+	))`
 	wikiTaskTypes := []string{types.TypeWikiIngest, types.TypeWikiFinalize}
 
-	// Durable rows for a deleted/missing KB must not recreate ephemeral
-	// triggers at startup. Fail closed if this cleanup cannot be verified.
+	// Durable rows for a deleted/missing KB — or a soft-deleted tenant —
+	// must not recreate ephemeral triggers at startup. Fail closed if this
+	// cleanup cannot be verified.
 	cleanup := db.WithContext(ctx).
 		Where("scope = ? AND task_type IN ?", types.TaskScopeKnowledgeBase, wikiTaskTypes).
 		Where("NOT " + activeKnowledgeBase).
@@ -53,7 +61,9 @@ func recoverPendingWikiTasks(db *gorm.DB, task interfaces.TaskEnqueuer) {
 		return
 	}
 	if cleanup.RowsAffected > 0 {
-		logger.Infof(ctx, "[WikiRecovery] removed %d pending row(s) for deleted knowledge bases", cleanup.RowsAffected)
+		logger.Infof(ctx,
+			"[WikiRecovery] removed %d pending row(s) for deleted knowledge bases or tenants",
+			cleanup.RowsAffected)
 	}
 
 	var scopes []pendingWikiScope
@@ -72,9 +82,12 @@ func recoverPendingWikiTasks(db *gorm.DB, task interfaces.TaskEnqueuer) {
 		if scope.ScopeID == "" {
 			continue
 		}
+		// The batch plans its taxonomy in the trigger's language; take it
+		// from the queued ops rather than defaulting to the server's.
 		payload, err := json.Marshal(service.WikiIngestPayload{
 			TenantID:        scope.TenantID,
 			KnowledgeBaseID: scope.ScopeID,
+			Language:        service.WikiPendingLanguage(ctx, db, scope.TenantID, scope.ScopeID),
 		})
 		if err != nil {
 			logger.Warnf(ctx, "[WikiRecovery] marshal trigger for KB %s failed: %v", scope.ScopeID, err)

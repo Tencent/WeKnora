@@ -24,13 +24,20 @@ const (
 	SandboxTypeCube SandboxType = "cube"
 	// SandboxTypeE2B uses E2B's hosted MicroVM sandbox service.
 	SandboxTypeE2B SandboxType = "e2b"
+	// SandboxTypeHost runs commands on the user's own machine under
+	// OS-enforced restrictions (macOS Seatbelt, Windows restricted token).
+	// It is deliberately not named "local": the removed Local backend ran
+	// bare host processes with no isolation at all, and reusing that name
+	// would misrepresent this one.
+	SandboxTypeHost SandboxType = "host"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
 )
 
-// IsNamedSandboxBackendType reports whether raw can be stored as a user-facing
-// named sandbox backend. Cube, E2B and Docker are all session-persistent and
-// share the same workspace configuration surface.
+// IsNamedSandboxBackendType reports whether raw is a user-facing named sandbox
+// backend. Host is absent because it has no session-scoped instance to pin:
+// each command is a fresh local process. The same predicate is used by
+// resolveSandboxForExecution.
 func IsNamedSandboxBackendType(raw string) bool {
 	switch SandboxType(raw) {
 	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
@@ -158,6 +165,11 @@ var (
 	// again; the UI must get an explicit click first. Distinct from
 	// ErrNoLiveSessionSandbox, which means there is no binding to resume.
 	ErrSandboxPaused = errors.New("session sandbox is paused")
+	// ErrSessionRewindLocked means another rewind already holds the session.
+	ErrSessionRewindLocked = errors.New("sandbox: session rewind already in progress")
+	// ErrSessionTurnActive means a chat turn already holds the session lease,
+	// so rewind must not take the exclusive lock or reset the workspace.
+	ErrSessionTurnActive = errors.New("sandbox: session turn is active")
 	// ErrTerminalUnsupported is returned when the active backend cannot
 	// stream PTYs (Docker, a disabled manager). Distinct from
 	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,
@@ -443,7 +455,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeHost, SandboxTypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")

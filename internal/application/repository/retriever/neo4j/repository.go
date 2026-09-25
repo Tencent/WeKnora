@@ -17,6 +17,16 @@ type Neo4jRepository struct {
 	nodePrefix string
 }
 
+const (
+	// graphSearchMaxSeedNodes bounds how many entities a single graph search
+	// expands from. The match is a substring match, so this is the knob that
+	// keeps one vague entity name from pulling in the whole graph.
+	graphSearchMaxSeedNodes = 200
+	// graphSearchMaxRows bounds returned (node, relation) rows as a backstop
+	// for hub entities whose neighbourhood alone is huge.
+	graphSearchMaxRows = 2000
+)
+
 // NewNeo4jRepository creates a new Neo4j repository
 func NewNeo4jRepository(driver neo4j.Driver) interfaces.RetrieveGraphRepository {
 	return &Neo4jRepository{driver: driver, nodePrefix: "ENTITY"}
@@ -160,7 +170,11 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 	return nil
 }
 
-// SearchNode searches for nodes in the Neo4j repository
+// SearchNode searches for nodes in the Neo4j repository.
+//
+// The result set is bounded twice; graphSearchCypher owns the query, its
+// ordering and the parameters, so both caps can be pinned by a unit test
+// without a live database.
 func (n *Neo4jRepository) SearchNode(
 	ctx context.Context,
 	namespace types.NameSpace,
@@ -174,13 +188,7 @@ func (n *Neo4jRepository) SearchNode(
 	defer session.Close(ctx)
 
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		labelExpr := n.Label(namespace)
-		query := `
-			MATCH (n:` + labelExpr + `)-[r]-(m:` + labelExpr + `)
-			WHERE ANY(nodeText IN $nodes WHERE n.name CONTAINS nodeText)
-			RETURN n, r, m
-		`
-		params := map[string]interface{}{"nodes": nodes}
+		query, params := graphSearchCypher(n.Label(namespace), nodes)
 		result, err := tx.Run(ctx, query, params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to run query: %v", err)
@@ -218,6 +226,21 @@ func (n *Neo4jRepository) SearchNode(
 				Type:  relData.Type,
 			})
 		}
+		// Make truncation visible. A silent cap reads as "the graph has no more
+		// matches" when in fact candidates were dropped.
+		if len(graphData.Relation) >= graphSearchMaxRows {
+			logger.Warnf(ctx,
+				"graph search hit the row cap: %d nodes / %d relations returned "+
+					"(seed cap %d, row cap %d) — results are truncated; "+
+					"narrow the entity or raise graphSearchMaxRows",
+				len(graphData.Node), len(graphData.Relation),
+				graphSearchMaxSeedNodes, graphSearchMaxRows)
+		} else {
+			// Debug, not Info: this runs on the retrieval path for every query.
+			logger.Debugf(ctx, "graph search: %d nodes / %d relations (seed cap %d, row cap %d)",
+				len(graphData.Node), len(graphData.Relation),
+				graphSearchMaxSeedNodes, graphSearchMaxRows)
+		}
 		return graphData, nil
 	})
 	if err != nil {
@@ -225,6 +248,49 @@ func (n *Neo4jRepository) SearchNode(
 		return nil, err
 	}
 	return result.(*types.GraphData), nil
+}
+
+// graphSearchCypher builds the bounded graph-search query and its parameters
+// for one label expression and one set of entity names.
+//
+// The WHERE clause is a substring match, so a short entity name (or one that is
+// a component of many others) matches a large slice of the graph: without a
+// bound this returned 1309 nodes / 1917 relations for a single query, which
+// then exceeded the reranker's per-request limit and made chunk_merge walk the
+// entire set. Three rules keep the caps from deciding the result by accident:
+//
+//   - Only entities that have at least one relationship can seed an expansion —
+//     a relation-less match occupies one of the seed slots and then contributes
+//     nothing.
+//   - Exact name matches rank first, then the shortest names, then alphabetical
+//     order. Ordering by name alone lets an entity whose name *is* the query
+//     fall outside the cap once the substring matches exceed it.
+//   - The same key is carried into both LIMITs, so a truncated result keeps the
+//     neighbourhoods of the highest-ranked seeds rather than an arbitrary
+//     subset of the rows.
+func graphSearchCypher(labelExpr string, nodes []string) (string, map[string]interface{}) {
+	query := `
+		MATCH (n:` + labelExpr + `)
+		WHERE ANY(nodeText IN $nodes WHERE n.name CONTAINS nodeText)
+		  AND EXISTS { (n)--() }
+		WITH n,
+		     CASE WHEN n.name IN $nodes THEN 0 ELSE 1 END AS seed_rank,
+		     size(n.name) AS name_len,
+		     n.name AS name
+		ORDER BY seed_rank, name_len, name
+		LIMIT $maxSeedNodes
+		MATCH (n)-[r]-(m:` + labelExpr + `)
+		WITH n, r, m, seed_rank, name_len, name
+		ORDER BY seed_rank, name_len, name
+		LIMIT $maxRows
+		RETURN n, r, m
+	`
+	params := map[string]interface{}{
+		"nodes":        nodes,
+		"maxSeedNodes": graphSearchMaxSeedNodes,
+		"maxRows":      graphSearchMaxRows,
+	}
+	return query, params
 }
 
 func listI2listS(list []any) []string {

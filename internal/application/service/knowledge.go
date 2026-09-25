@@ -22,6 +22,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Error definitions for knowledge service operations
@@ -200,6 +202,30 @@ func attemptSuperseded(ctx context.Context, tracker SpanTracker, knowledgeID str
 	return tracker.LatestAttempt(ctx, knowledgeID) > attempt
 }
 
+// currentAttemptSuperseded reports whether a newer attempt has started than the
+// one this pipeline step runs under (see withAttempt).
+func (s *knowledgeService) currentAttemptSuperseded(ctx context.Context, knowledgeID string) bool {
+	return attemptSuperseded(ctx, s.tracker(), knowledgeID, attemptFromCtx(ctx))
+}
+
+// summaryStatusClosedExpr moves a summary that is still pending or processing
+// to closed, and leaves a finished one alone. For writes that end a parse run:
+// the run's summary task no longer exists to settle the status itself.
+func summaryStatusClosedExpr(closed string) clause.Expr {
+	return gorm.Expr("CASE WHEN summary_status IN (?, ?) THEN ? ELSE summary_status END",
+		types.SummaryStatusPending, types.SummaryStatusProcessing, closed)
+}
+
+// isInFlightParseStatus reports whether a parse run may still own queued or
+// running tasks for a knowledge in this status.
+func isInFlightParseStatus(status string) bool {
+	switch status {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	}
+	return false
+}
+
 // finalizeSubtaskDetachedTimeout bounds the detached decrement so a wedged DB
 // connection can't hang a worker goroutine forever in its terminal defer.
 const finalizeSubtaskDetachedTimeout = 10 * time.Second
@@ -237,12 +263,45 @@ func finalizeSubtaskDetached(
 	if !willDrain {
 		return
 	}
+	if err := releaseSubtaskSlot(ctx, repo, knowledgeID); err != nil {
+		logger.Errorf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v; "+
+			"row will be left to the housekeeping sweep", source, knowledgeID, err)
+	}
+}
+
+// subtaskSlotReleaseAttempts bounds the retry of one slot release. The
+// release is the only thing that drains the slot — the task has already
+// finished — so one transient DB error must not strand the row in
+// "finalizing". The decrement and promote commit together, so a failed
+// attempt rolled back and retrying it cannot drain twice.
+const (
+	subtaskSlotReleaseAttempts = 3
+	subtaskSlotReleaseBackoff  = 200 * time.Millisecond
+)
+
+// releaseSubtaskSlot releases one finalizing slot on a context detached from
+// the caller's cancellation (see finalizeSubtaskDetached), retrying transient
+// failures within finalizeSubtaskDetachedTimeout.
+func releaseSubtaskSlot(ctx context.Context, repo interfaces.KnowledgeRepository, knowledgeID string) error {
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
-	if _, _, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
-		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
-			source, knowledgeID, err)
+	var lastErr error
+	for attempt := 1; attempt <= subtaskSlotReleaseAttempts; attempt++ {
+		_, _, err := repo.FinalizeSubtask(dctx, knowledgeID)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt == subtaskSlotReleaseAttempts {
+			break
+		}
+		select {
+		case <-time.After(time.Duration(attempt) * subtaskSlotReleaseBackoff):
+		case <-dctx.Done():
+			return fmt.Errorf("%w (last error: %v)", dctx.Err(), lastErr)
+		}
 	}
+	return lastErr
 }
 
 // beginStage / endStage / failStage / skipStage are the by-name shims
@@ -397,25 +456,50 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 	return knowledge.ParseStatus == types.ParseStatusDeleting
 }
 
+// Pseudo-statuses isKnowledgeAborted reports when it could not learn the
+// row's state: the worker's context is done, or the read failed. The caller
+// must stop without cleaning up or writing its in-memory row back (a full-row
+// Save would clobber a cancel it never saw), and hand abortRetryErr to asynq.
+const (
+	abortStatusInterrupted = "interrupted"
+	abortStatusUnreadable  = "unreadable"
+)
+
+// abortRetryErr is what a pipeline step returns after bailing on status:
+// nil for a settled abort (cancelled / deleting), an error for an unknown
+// state so the task is retried instead of acked with the row in flight.
+func abortRetryErr(ctx context.Context, knowledgeID, status string) error {
+	switch status {
+	case abortStatusInterrupted:
+		return fmt.Errorf("knowledge %s: interrupted: %w", knowledgeID, context.Cause(ctx))
+	case abortStatusUnreadable:
+		return fmt.Errorf("knowledge %s: abort check could not read the row", knowledgeID)
+	}
+	return nil
+}
+
 // isKnowledgeAborted returns (true, status) when the knowledge has been
 // marked as deleting OR cancelled so async pipeline workers should bail
 // out. Status is returned so callers can branch on cleanup behavior:
 // deleting → existing cleanup of partial chunks/index applies;
 // cancelled → keep partially written data per user expectation.
 //
-// When the row is missing or unreadable we conservatively return
-// (true, ParseStatusDeleting): the existing deleting branch already
-// handles cleanup-or-no-op semantics safely.
+// Only a row that is really gone reads as deleting. A transient read error
+// must not — callers would wipe a live document's chunks and index — nor may
+// it read as "not aborted", or the caller's later full-row Save could
+// overwrite a cancel it failed to see. It reports abortStatusUnreadable.
 func (s *knowledgeService) isKnowledgeAborted(
 	ctx context.Context, tenantID uint64, knowledgeID string,
 ) (bool, string) {
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to check knowledge abort status (assuming deleted): %v", err)
+	switch {
+	case err == nil && knowledge == nil, errors.Is(err, repository.ErrKnowledgeNotFound):
 		return true, types.ParseStatusDeleting
-	}
-	if knowledge == nil {
-		return true, types.ParseStatusDeleting
+	case err != nil && ctx.Err() != nil:
+		return true, abortStatusInterrupted
+	case err != nil:
+		logger.Warnf(ctx, "Failed to check knowledge abort status for %s: %v", knowledgeID, err)
+		return true, abortStatusUnreadable
 	}
 	switch knowledge.ParseStatus {
 	case types.ParseStatusDeleting, types.ParseStatusCancelled:

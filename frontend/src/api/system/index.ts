@@ -37,7 +37,7 @@ export interface SystemInfo {
   db_version?: string
   /** Human-readable error message when the startup migration failed.
    *  When non-empty, the system info view should surface a troubleshooting
-   *  banner (see docs/migration-troubleshooting.md). */
+   *  banner (see website-docs/01-getting-started/05-troubleshooting.md#database-migrations). */
   db_migration_error?: string
   /** Server process boot time (RFC3339, UTC). */
   started_at?: string
@@ -117,7 +117,10 @@ export interface ParserEngineConfig {
   docreader_transport?: string
   mineru_endpoint?: string
   mineru_api_key?: string
-  // MinerU 自建参数
+  // MinerU 自建参数（协议自动识别：4.0+ 走 V1 API）
+  mineru_server_api_key?: string
+  mineru_tier?: string // flash / basic / standard / advanced，空为服务端默认
+  // 以下仅对 MinerU 3.x 及更早版本生效
   mineru_model?: string
   mineru_vlm_server_url?: string
   mineru_enable_formula?: boolean | null

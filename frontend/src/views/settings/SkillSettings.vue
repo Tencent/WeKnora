@@ -3,12 +3,20 @@
     <div class="section-header">
       <div class="section-header__title-row">
         <h2>{{ $t('settings.skills.title') }}</h2>
-        <t-tooltip :content="$t('settings.skills.helpTooltip')" placement="right"
+        <t-tooltip :content="skillText('helpTooltip')" placement="right"
           overlay-class-name="skill-settings__help-tooltip">
-          <t-icon name="help-circle" class="section-header__help" :aria-label="$t('settings.skills.helpTooltip')" />
+          <t-icon name="help-circle" class="section-header__help" :aria-label="skillText('helpTooltip')" />
         </t-tooltip>
       </div>
-      <p class="section-description">{{ $t('settings.skills.description') }}</p>
+      <p class="section-description">{{ skillText('description') }}</p>
+    </div>
+
+    <!-- Lite has no sandbox settings page, so its script kill switch is cleared here. -->
+    <div v-if="hostOnly && scriptsDisabled" class="skill-settings__scripts-off" role="status">
+      <p>{{ $t('settings.sandbox.scriptsDisabled') }}</p>
+      <t-button size="small" theme="primary" variant="outline" :loading="policySaving" @click="enableScripts">
+        {{ $t('settings.sandbox.enableScripts') }}
+      </t-button>
     </div>
 
     <div v-if="loading" class="loading-container">
@@ -17,7 +25,7 @@
 
     <template v-else>
       <div v-if="catalog.length === 0" class="empty-state">
-        <t-empty :description="$t('settings.skills.emptyDesc')" />
+        <t-empty :description="skillText('emptyDesc')" />
         <p v-if="skillConfigs.length === 0" class="empty-hint">
           {{ $t('settings.skills.emptyNoSandboxHint') }}
         </p>
@@ -25,7 +33,7 @@
           <t-button theme="primary" @click="openAdd">
             {{ $t('settings.skills.addSkill') }}
           </t-button>
-          <t-button v-if="skillConfigs.length === 0" theme="default" variant="outline"
+          <t-button v-if="skillConfigs.length === 0 && !hostOnly" theme="default" variant="outline"
             @click="uiStore.openSettings('sandbox')">
             {{ $t('settings.skills.goSandboxSettings') }}
           </t-button>
@@ -65,7 +73,7 @@
               </p>
               <div v-for="view in [installsView(item)]" :key="'installs'" class="skill-card__installs">
                 <span v-if="view.installs.length === 0 && !view.canAdd" class="skill-card__installs-label">
-                  {{ $t('settings.skills.noInstalls') }}
+                  {{ skillText('noInstalls') }}
                 </span>
                 <button v-else-if="!view.needsPanel" type="button" class="skill-card__chip"
                   :class="chipClass(item, view)"
@@ -222,7 +230,7 @@
       </template>
 
       <template v-else>
-        <section v-if="skillConfigs.length > 0" class="setting-drawer__section">
+        <section v-if="!hostOnly && skillConfigs.length > 0" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.skills.pickSandboxes') }}</h4>
           <p class="installer-model-hint">{{ $t('settings.skills.pickSandboxesHint') }}</p>
           <div class="sandbox-pick-list">
@@ -259,7 +267,7 @@
             </div>
           </div>
         </section>
-        <p v-else class="installer-model-hint">{{ $t('settings.skills.emptyNoSandboxHint') }}</p>
+        <p v-else-if="!hostOnly" class="installer-model-hint">{{ $t('settings.skills.emptyNoSandboxHint') }}</p>
 
         <section v-if="addTargetIds.length > 0" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillInstallerModel') }}</h4>
@@ -274,8 +282,8 @@
       :description="installDrawerDesc" :icon="SKILL_ICON" width="560px" :min-width="480" :max-width="760"
       storage-key="setting-drawer:width:skill-catalog-install" :confirm-loading="installing"
       :confirm-disabled="installConfirmDisabled" :confirm-text="installConfirmText" @confirm="onInstallDrawerConfirm">
-      <p v-if="installMode === 'install'" class="installer-model-hint">{{ $t('settings.skills.installToSandboxDesc') }}</p>
-      <section v-if="installPickRows.length > 0" class="setting-drawer__section">
+      <p v-if="installMode === 'install'" class="installer-model-hint">{{ skillText('installToSandboxDesc') }}</p>
+      <section v-if="!hostOnly && installPickRows.length > 0" class="setting-drawer__section">
         <div class="sandbox-pick-list">
           <div v-for="row in installPickRows" :key="row.cfg.id" class="sandbox-pick-row"
             :class="{ 'is-busy': row.busy, 'is-ready': row.ready }">
@@ -310,7 +318,7 @@
           </div>
         </div>
       </section>
-      <p v-else class="installer-model-hint">
+      <p v-else-if="!hostOnly" class="installer-model-hint">
         {{ installMode === 'upgrade' ? $t('settings.skills.noSandboxToUpgrade') : $t('settings.skills.noSandboxToInstall') }}
       </p>
       <section v-if="installTargetIds.length > 0" class="setting-drawer__section">
@@ -348,6 +356,7 @@ import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useConfigSkillInstallProgress } from '@/composables/useConfigSkillInstallProgress'
 import { SKILL_ICON } from '@/types/mention'
 import { useUIStore } from '@/stores/ui'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils'
 import {
   deleteSkillCatalog,
@@ -362,21 +371,43 @@ import {
 import { useSkillInstallerModel } from '@/composables/useSkillInstallerModel'
 import { installOutdated, installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import {
+  HOST_SKILL_TARGET_ID,
+  hostSkillTargetRecord,
+  hostSkillsOnly,
+  isHostSkillTarget,
+} from '@/utils/skillTarget'
+import {
   isNamedSandboxBackend,
   listSandboxConfigs,
+  setSandboxWorkspacePolicy,
   type SandboxConfigRecord,
 } from '@/api/system'
 
 const props = defineProps<{
   initialSandboxId?: string
 }>()
+const emit = defineEmits<{ count: [value: number] }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const uiStore = useUIStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const confirmDelete = useConfirmDelete()
+const hostOnly = computed(() => hostSkillsOnly(
+  deploymentCapabilities.isSupported('settings.sandbox.remote'),
+  deploymentCapabilities.isSupported('settings.sandbox.host'),
+))
+
+function skillText(key: string, params: Record<string, unknown> = {}) {
+  const hostKey = `settings.skills.host.${key}`
+  if (hostOnly.value && te(hostKey)) return t(hostKey, params)
+  return t(`settings.skills.${key}`, params)
+}
+const hostRecord = computed(() => hostSkillTargetRecord(t('settings.skills.hostTarget')))
 
 const loading = ref(false)
 const records = ref<SandboxConfigRecord[]>([])
+const scriptsDisabled = ref(false)
+const policySaving = ref(false)
 const catalog = ref<SkillCatalogItem[]>([])
 const focusedCatalogId = ref('')
 const deletingId = ref('')
@@ -425,7 +456,9 @@ let pollTimer: number | null = null
 let focusTimer: number | null = null
 
 const skillConfigs = computed(() =>
-  records.value.filter((record) => isNamedSandboxBackend(record.sandbox_type)),
+  hostOnly.value
+    ? [hostRecord.value]
+    : records.value.filter((record) => isNamedSandboxBackend(record.sandbox_type)),
 )
 
 const addBusy = computed(() => uploading.value || addingFromSource.value)
@@ -439,7 +472,7 @@ const addSteps = computed(() => [
 const addStepDescription = computed(() =>
   addStep.value === 0
     ? t('settings.skills.addStepRegisterDesc')
-    : t('settings.skills.addStepInstallDesc'),
+    : skillText('addStepInstallDesc'),
 )
 
 const addPrimaryLoading = computed(() =>
@@ -486,20 +519,20 @@ const addPickRows = computed(() =>
 const installDrawerTitle = computed(() =>
   installMode.value === 'upgrade'
     ? t('settings.skills.upgradeTitle')
-    : t('settings.skills.installToSandbox'),
+    : skillText('installToSandbox'),
 )
 
 const installDrawerDesc = computed(() => {
   const item = installCatalog.value
-  if (!item) return t('settings.skills.installToSandboxDesc')
-  if (installMode.value === 'upgrade') return t('settings.skills.upgradeDrawerDesc', { name: item.name })
-  return t('settings.skills.installDrawerDesc', { name: item.name })
+  if (!item) return skillText('installToSandboxDesc')
+  if (installMode.value === 'upgrade') return skillText('upgradeDrawerDesc', { name: item.name })
+  return skillText('installDrawerDesc', { name: item.name })
 })
 
 const manageDesc = computed(() => {
   const record = manageRecord.value
   if (!record) return ''
-  return t('settings.skills.manageDrawerDesc', { name: record.name })
+  return skillText('manageDrawerDesc', { name: record.name })
 })
 
 function liveInstalls(item: SkillCatalogItem): SkillCatalogInstall[] {
@@ -520,6 +553,7 @@ function targetsFor(item: SkillCatalogItem): SandboxConfigRecord[] {
 }
 
 function recordFor(id: string): SandboxConfigRecord | undefined {
+  if (hostOnly.value && id === HOST_SKILL_TARGET_ID) return hostRecord.value
   return records.value.find((record) => record.id === id)
 }
 
@@ -614,8 +648,8 @@ function pickedOnlyUpgrades(rows: SandboxPickRow[], ids: string[]): boolean {
 
 function pickConfirmText(rows: SandboxPickRow[], ids: string[]): string {
   return pickedOnlyUpgrades(rows, ids)
-    ? t('settings.skills.upgrade')
-    : t('settings.skills.installToSandbox')
+    ? skillText('upgrade')
+    : skillText('installToSandbox')
 }
 
 function sandboxPickPercent(row: SandboxPickRow): number | null {
@@ -763,9 +797,9 @@ function upgradeTooltip(item: SkillCatalogItem, view: ReturnType<typeof installs
 }
 
 function installSummary(item: SkillCatalogItem, view: ReturnType<typeof installsView>): string {
-  if (view.installs.length === 0) return t('settings.skills.installToSandbox')
+  if (view.installs.length === 0) return skillText('installToSandbox')
   if (view.installs.length === 1) {
-    return t('settings.skills.installedOnName', { name: installName(view.installs[0]) })
+    return skillText('installedOnName', { name: installName(view.installs[0]) })
   }
   return t('settings.skills.installedCount', { count: view.installs.length })
 }
@@ -787,7 +821,7 @@ function installSummaryTooltip(item: SkillCatalogItem, view: ReturnType<typeof i
         : `${cfg.name} · ${t('settings.skills.installPanelAvailable')}`,
     )
   }
-  if (lines.length === 0) return t('settings.skills.installToSandbox')
+  if (lines.length === 0) return skillText('installToSandbox')
   return lines.join('\n')
 }
 
@@ -836,13 +870,18 @@ function installEntryClass(item: SkillCatalogItem, inst: SkillCatalogInstall): s
   return 'skill-card__entry--ready'
 }
 
-function installName(inst: SkillCatalogInstall): string {
+function installTargetName(inst: { sandbox_config_id: string; sandbox_config_name?: string }): string {
+  if (isHostSkillTarget(inst.sandbox_config_id)) return t('settings.skills.hostTarget')
   return inst.sandbox_config_name || inst.sandbox_config_id
+}
+
+function installName(inst: SkillCatalogInstall): string {
+  return installTargetName(inst)
 }
 
 function installTooltip(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
   const parts = [
-    inst.sandbox_config_name || inst.sandbox_config_id,
+    installTargetName(inst),
     inst.sandbox_type ? backendLabel(inst.sandbox_type) : '',
     installChipStatus(item, inst) || installStatusText(inst),
   ].filter(Boolean)
@@ -857,11 +896,11 @@ function openCatalogFiles(item: SkillCatalogItem) {
 
 function askDelete(item: SkillCatalogItem) {
   if (!canDelete(item)) {
-    MessagePlugin.warning(t('settings.skills.deleteCatalogBlocked'))
+    MessagePlugin.warning(skillText('deleteCatalogBlocked'))
     return
   }
   confirmDelete({
-    body: t('settings.skills.deleteCatalogConfirm', { name: item.name }),
+    body: skillText('deleteCatalogConfirm', { name: item.name }),
     onConfirm: () => removeCatalog(item),
   })
 }
@@ -1171,6 +1210,7 @@ async function loadCatalog(silent = false) {
   try {
     const res = await listSkillCatalog()
     catalog.value = res?.data || []
+    emit('count', catalog.value.length)
   } catch (e: any) {
     if (!silent) MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))
   } finally {
@@ -1181,12 +1221,28 @@ async function loadCatalog(silent = false) {
 async function load() {
   loading.value = true
   try {
+    await deploymentCapabilities.ensureLoaded()
+    // Lite lists no configs but still reports the workspace script policy.
     const [configRes] = await Promise.all([listSandboxConfigs(), loadCatalog()])
-    records.value = configRes?.data || []
+    records.value = hostOnly.value ? [] : configRes?.data || []
+    scriptsDisabled.value = configRes?.workspace_scripts_disabled === true
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))
   } finally {
     loading.value = false
+  }
+}
+
+async function enableScripts() {
+  policySaving.value = true
+  try {
+    const res = await setSandboxWorkspacePolicy(false)
+    scriptsDisabled.value = res?.workspace_scripts_disabled === true
+    MessagePlugin.success(t('settings.sandbox.scriptsEnabled'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('settings.sandbox.policySaveFailed'))
+  } finally {
+    policySaving.value = false
   }
 }
 
@@ -1242,6 +1298,8 @@ watch(busyPickTargets, (targets) => {
 }, { immediate: true })
 
 onMounted(load)
+
+defineExpose({ openAdd })
 onUnmounted(() => {
   stopPoll()
   stopInstallProgress()
@@ -1256,6 +1314,23 @@ onUnmounted(() => {
 
 .skill-settings {
   width: 100%;
+}
+
+.skill-settings__scripts-off {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-warning-color-3);
+  border-radius: var(--app-radius-md);
+  background: var(--td-warning-color-1);
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-primary);
+  }
 }
 
 .section-header {

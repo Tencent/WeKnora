@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/filetransport"
@@ -33,8 +34,45 @@ type KnowledgeHandler struct {
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
+	chunkService      interfaces.ChunkService
+	systemSettingSvc  interfaces.SystemSettingService
+	userSvc           interfaces.UserService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
+	backlog           backlogProbe
+}
+
+// backlogProbe tells a backlogged document (work still queued) from a stuck
+// one; HousekeepingService implements it with the sweep's own probes.
+type backlogProbe interface {
+	QueuedWork(ctx context.Context, ids []string) (map[string]bool, error)
+}
+
+// stallHintAfter is how long an in-flight row may go without progress before
+// it gets a stall verdict; keep in step with PROCESSING_STALL_THRESHOLD_MS in
+// the frontend.
+const stallHintAfter = 20 * time.Minute
+
+// stallVerdicts probes ids (all quiet past stallHintAfter) and returns each
+// one's StallState. Nil when the probe is unavailable or failed: an unknown
+// row gets no verdict rather than being called stuck.
+func (h *KnowledgeHandler) stallVerdicts(ctx context.Context, ids []string) map[string]string {
+	if h.backlog == nil || len(ids) == 0 {
+		return nil
+	}
+	queued, err := h.backlog.QueuedWork(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "backlog probe failed: %v", err)
+		return nil
+	}
+	out := make(map[string]string, len(ids))
+	for _, id := range ids {
+		out[id] = types.StallStateStalled
+		if queued[id] {
+			out[id] = types.StallStateQueued
+		}
+	}
+	return out
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -44,15 +82,27 @@ func NewKnowledgeHandler(
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
+	chunkService interfaces.ChunkService,
+	systemSettingSvc interfaces.SystemSettingService,
+	userSvc interfaces.UserService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
+	housekeeping *service.HousekeepingService,
 ) *KnowledgeHandler {
+	var backlog backlogProbe
+	if housekeeping != nil {
+		backlog = housekeeping
+	}
 	return &KnowledgeHandler{
+		backlog:           backlog,
 		cfg:               cfg,
 		kgService:         kgService,
 		kbService:         kbService,
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
+		chunkService:      chunkService,
+		systemSettingSvc:  systemSettingSvc,
+		userSvc:           userSvc,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
 	}
@@ -676,6 +726,15 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 		"current_stage":   currentStageName,
 		"trace":           tree,
 	}
+	if isParseInFlight(knowledge.ParseStatus) {
+		last := spansLastActivity(knowledge.UpdatedAt, rows)
+		resp["last_activity_at"] = last
+		if time.Since(last) >= stallHintAfter {
+			if verdict := h.stallVerdicts(ctx, []string{knowledge.ID})[knowledge.ID]; verdict != "" {
+				resp["stall_state"] = verdict
+			}
+		}
+	}
 	if lastError := knowledgeSpansLastError(
 		currentAttempt,
 		latestAttempt,
@@ -731,6 +790,53 @@ func knowledgeSpansLastError(
 	}
 }
 
+// missingStageStatusFunc resolves a rowless stage against the real failure:
+// earlier → skipped, downstream → cancelled, none → the parse_status fallback (#3452).
+func missingStageStatusFunc(
+	stageRowByName map[string]*types.KnowledgeProcessingSpan, fallback string,
+) func(string) string {
+	failedIdx := -1
+	for i, name := range types.AllStages {
+		if row, ok := stageRowByName[name]; ok && row.Status == types.SpanStatusFailed {
+			failedIdx = i
+			break
+		}
+	}
+	if failedIdx < 0 {
+		return func(string) string { return fallback }
+	}
+
+	// Redundant with canonical order today; keeps holding if stages are reordered.
+	cancelled := map[string]bool{}
+	var markDependents func(string)
+	markDependents = func(stage string) {
+		for candidate, upstreams := range types.StageDependencies {
+			if cancelled[candidate] {
+				continue
+			}
+			for _, up := range upstreams {
+				if up == stage {
+					cancelled[candidate] = true
+					markDependents(candidate)
+					break
+				}
+			}
+		}
+	}
+	markDependents(types.AllStages[failedIdx])
+
+	stageIdx := make(map[string]int, len(types.AllStages))
+	for i, name := range types.AllStages {
+		stageIdx[name] = i
+	}
+	return func(name string) string {
+		if cancelled[name] || stageIdx[name] > failedIdx {
+			return types.SpanStatusCancelled
+		}
+		return types.SpanStatusSkipped
+	}
+}
+
 // buildSpanTree assembles a flat list of span rows into a parent-child
 // tree rooted at the (knowledge, attempt)'s root span. Missing canonical
 // stages are filled in with pending placeholders so the UI always renders
@@ -767,10 +873,16 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 		if r.Status == types.SpanStatusRunning && r.Kind == types.SpanKindStage && currentStage == "" {
 			currentStage = r.Name
 		}
-		if r.Status == types.SpanStatusFailed {
+		// Housekeeping's TASK_STALLED marks where a stuck run stopped;
+		// an older subtask failure must not hide it.
+		if r.Status == types.SpanStatusFailed &&
+			(lastFailure == nil || !isStallFailure(lastFailure) || isStallFailure(&r)) {
 			cp := r
 			lastFailure = &cp
 		}
+	}
+	if currentStage == "" {
+		currentStage = stageOfRunningSpan(rows)
 	}
 
 	// Pick the synthesized stage status from parse_status. Without this,
@@ -785,6 +897,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 		syntheticStatus = types.SpanStatusDone
 	case types.ParseStatusFailed:
 		syntheticStatus = types.SpanStatusFailed
+	case types.ParseStatusCancelled:
+		syntheticStatus = types.SpanStatusCancelled
 	}
 
 	// Synthesize root if no rows came back so the API contract stays
@@ -838,6 +952,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 	// per-stage timing was never recorded. Appended in AllStages order
 	// so the canonical stage layout is deterministic regardless of
 	// which rows are missing.
+	missingStageStatus := missingStageStatusFunc(stageRowByName, syntheticStatus)
 	for _, name := range types.AllStages {
 		if _, ok := stageRowByName[name]; ok {
 			continue
@@ -847,7 +962,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 			Attempt:     attempt,
 			Name:        name,
 			Kind:        types.SpanKindStage,
-			Status:      syntheticStatus,
+			Status:      missingStageStatus(name),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
@@ -875,6 +990,8 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
 // @Param        folder_path      query     string  false  "文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤"
 // @Param        folder_recursive query     bool    false  "为 true 时同时返回子文件夹内的文档"
+// @Param        sort_by      query     string  false  "排序字段: updated_at/created_at/file_name，默认 created_at"
+// @Param        sort_order   query     string  false  "排序方向: asc/desc，默认 desc"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -909,6 +1026,20 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+		SortBy: types.KnowledgeListSortField(
+			c.DefaultQuery("sort_by", string(types.KnowledgeListSortByCreatedAt)),
+		),
+		SortOrder: types.KnowledgeListSortOrder(
+			c.DefaultQuery("sort_order", string(types.KnowledgeListSortDescending)),
+		),
+	}
+	if !filter.SortBy.Valid() {
+		_ = c.Error(errors.NewBadRequestError("invalid sort_by: must be updated_at, created_at, or file_name"))
+		return
+	}
+	if !filter.SortOrder.Valid() {
+		_ = c.Error(errors.NewBadRequestError("invalid sort_order: must be asc or desc"))
+		return
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
@@ -939,7 +1070,9 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s page=%d page_size=%d effectiveTenantID=%d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s "+
+			"parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s "+
+			"sort_by=%s sort_order=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
 		secutils.SanitizeForLog(filter.Keyword),
@@ -950,6 +1083,8 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		secutils.SanitizeForLog(c.Query("end_time")),
 		secutils.SanitizeForLog(filter.FolderPath),
 		string(filter.FolderScope),
+		string(filter.SortBy),
+		string(filter.SortOrder),
 		pagination.Page,
 		pagination.PageSize,
 		effectiveTenantID,
@@ -975,6 +1110,234 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		"total":     result.Total,
 		"page":      result.Page,
 		"page_size": result.PageSize,
+	})
+}
+
+// ListImages lists the image assets of a knowledge base for the gallery view.
+//
+// @Summary      列出知识库图片资产
+// @Description  浏览某知识库内的全部图片资产，支持关键字搜索（caption/OCR 文本）、按图片属性筛选（attr_filters / attr_rules）与排序分页。
+// @Tags         knowledge
+// @Accept       json
+// @Produce      json
+// @Param        id          path      string  true  "知识库 ID"
+// @Param        page        query     int     false "页码，默认 1"
+// @Param        page_size   query     int     false "每页数量，默认 20，最大 1000"
+// @Param        keyword     query     string  false "关键字，对 search_in 指定字段做不区分大小写的子串匹配"
+// @Param        search_in   query     string  false "参与搜索的属性 ID（逗号分隔）；须为 in_searchfield=true"
+// @Param        sort_by     query     string  false "排序属性 ID；须为 in_sortfield=true，默认 created_at"
+// @Param        sort_order  query     string  false "排序方向：asc / desc，默认 desc"
+// @Param        is_enabled  query     bool    false "仅包含启用状态的图片"
+// @Param        attr_filters query    string  false "属性筛选 JSON，同一属性多值 OR、属性间 AND"
+// @Param        attr_rules  query     string  false "属性逐值裁决 JSON（off 隐藏 / on 强制显示，on 优先）"
+// @Success      200  {object}  map[string]interface{}  "图片资产分页列表"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/images [get]
+func (h *KnowledgeHandler) ListImages(c *gin.Context) {
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+
+	var pagination types.Pagination
+	if err := c.ShouldBindQuery(&pagination); err != nil {
+		logger.Error(ctx, "Failed to parse pagination parameters", err)
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	filter := &types.ImageListFilter{
+		Keyword:   strings.TrimSpace(c.Query("keyword")),
+		SortBy:    strings.TrimSpace(c.Query("sort_by")),
+		SortOrder: c.DefaultQuery("sort_order", "desc"),
+	}
+	if v := c.Query("is_enabled"); v != "" {
+		enabled := v == "true"
+		filter.IsEnabled = &enabled
+	}
+
+	// Every gallery attribute reference is validated against the resolved
+	// contract: a client may only search / sort / filter on fields whose
+	// usage flags allow it, so stale or hand-rolled callers cannot smuggle
+	// in fields the configuration no longer serves.
+	resolved := h.resolveGalleryConfig(ctx, kbID)
+	filterable, searchable, sortable := galleryEligibility(resolved)
+
+	// Attribute filters arrive as one JSON object keyed by namespaced
+	// attribute id ({"system:contain.text":["block"]}); values within one
+	// attribute are OR-ed, attributes are AND-ed.
+	if raw := c.Query("attr_filters"); raw != "" {
+		var attrFilters map[string][]string
+		if err := json.Unmarshal([]byte(raw), &attrFilters); err == nil && len(attrFilters) > 0 {
+			kept := make(map[string][]string, len(attrFilters))
+			for id, values := range attrFilters {
+				if filterable[id] && len(values) > 0 {
+					kept[id] = values
+				}
+			}
+			if len(kept) > 0 {
+				filter.AttrFilters = kept
+			}
+		}
+	}
+
+	// Attribute rules arrive as one JSON object keyed by namespaced
+	// attribute id, each holding a verdict per value
+	// ({"system:contain.text":{"block":"on","none":"off"}}). Only values
+	// the image actually carries take part; see AttrRules for the
+	// precedence between "on" and "off".
+	if raw := c.Query("attr_rules"); raw != "" {
+		var attrRules map[string]map[string]string
+		if err := json.Unmarshal([]byte(raw), &attrRules); err == nil && len(attrRules) > 0 {
+			kept := make(map[string]map[string]string, len(attrRules))
+			for id, verdicts := range attrRules {
+				if !filterable[id] || len(verdicts) == 0 {
+					continue
+				}
+				clean := make(map[string]string, len(verdicts))
+				for value, verdict := range verdicts {
+					switch verdict {
+					case "off", "on":
+						clean[value] = verdict
+					}
+				}
+				if len(clean) > 0 {
+					kept[id] = clean
+				}
+			}
+			if len(kept) > 0 {
+				filter.AttrRules = kept
+			}
+		}
+	}
+
+	// search_in: comma-separated namespaced attribute ids; ineligible ids
+	// are dropped, and an empty remainder falls back to the service default
+	// (builtin caption + ocr_text).
+	if raw := strings.TrimSpace(c.Query("search_in")); raw != "" {
+		var searchIn []string
+		for _, id := range strings.Split(raw, ",") {
+			id = strings.TrimSpace(id)
+			if id != "" && searchable[id] {
+				searchIn = append(searchIn, id)
+			}
+		}
+		filter.SearchIn = searchIn
+	}
+
+	// sort_by must be sort-eligible; anything else falls back to the
+	// service default (builtin created_at, descending).
+	if filter.SortBy != "" && !sortable[filter.SortBy] {
+		filter.SortBy = ""
+	}
+
+	result, err := h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &pagination, filter)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"data":      result.Data,
+		"total":     result.Total,
+		"page":      result.Page,
+		"page_size": result.PageSize,
+	})
+}
+
+// galleryEligibility extracts the per-attribute usage sets that incoming
+// query parameters are validated against, keyed by namespaced attribute id.
+func galleryEligibility(resolved *types.GalleryResolvedConfig) (filterable, searchable, sortable map[string]bool) {
+	filterable = map[string]bool{}
+	searchable = map[string]bool{}
+	sortable = map[string]bool{}
+	if resolved == nil {
+		return
+	}
+	for _, attr := range resolved.Attributes {
+		if attr.Usage.InFilter {
+			filterable[attr.ID] = true
+		}
+		if attr.Usage.InSearchField {
+			searchable[attr.ID] = true
+		}
+		if attr.Usage.InSortField {
+			sortable[attr.ID] = true
+		}
+	}
+	return
+}
+
+// resolveGalleryConfig merges the gallery configuration tiers for one
+// request: the system tier from system_settings ("gallery.policy"), the user
+// tier from the caller's saved preferences. The KB tier slot is reserved for
+// the per-KB config (not wired yet — the merge engine already accepts it).
+// A missing or malformed tier degrades to "no overrides", never to an error:
+// the gallery must render even on a half-configured deployment.
+func (h *KnowledgeHandler) resolveGalleryConfig(ctx context.Context, kbID string) *types.GalleryResolvedConfig {
+	var systemTier *types.GalleryPolicyTier
+	if h.systemSettingSvc != nil {
+		if row, err := h.systemSettingSvc.Get(ctx, "gallery.policy"); err == nil && row != nil {
+			if raw, err := row.AsString(); err == nil && strings.TrimSpace(raw) != "" {
+				tier := &types.GalleryPolicyTier{}
+				if err := json.Unmarshal([]byte(raw), tier); err == nil {
+					systemTier = tier
+				} else {
+					logger.Warnf(ctx, "gallery.policy is not valid JSON; ignoring: %v", err)
+				}
+			}
+		}
+	}
+
+	var userTier *types.GalleryPolicyTier
+	if h.userSvc != nil {
+		if userID, ok := types.UserIDFromContext(ctx); ok && userID != "" {
+			if u, err := h.userSvc.GetUserByID(ctx, userID); err == nil && u != nil && u.Preferences.Gallery != nil {
+				g := u.Preferences.Gallery
+				userTier = &types.GalleryPolicyTier{Mode: g.Mode, Status: g.Status}
+			}
+		}
+	}
+
+	return types.ResolveGalleryConfig(kbID, systemTier, nil, userTier)
+}
+
+// GetGalleryConfig serves the gallery's self-describing contract: which
+// attribute sources are live, every resolved attribute (definition + merged
+// usage + which tier decided it), and the caller's search activation state
+// (mode + per-field status). The frontend renders its filter panel, search
+// field checkboxes and sort dropdown purely from this response — no gallery
+// UI rule is hardcoded client-side.
+func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx = types.WithExecutionTenant(ctx, effectiveTenantID)
+
+	resolved := h.resolveGalleryConfig(ctx, kbID)
+	status := resolved.Status
+	if status == nil {
+		status = map[string]string{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"attribute_sources": resolved.AttributeSources,
+			"attributes":        resolved.Attributes,
+			"mode":              resolved.Mode,
+			"status":            status,
+		},
 	})
 }
 
@@ -1668,6 +2031,8 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		knowledges = filterKnowledgesByKBAllowSet(knowledges, allowedKBSet)
 	}
 
+	h.attachLastActivity(ctx, knowledges)
+
 	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
 		len(req.IDs), len(knowledges))
 
@@ -1675,6 +2040,99 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		"success": true,
 		"data":    knowledges,
 	})
+}
+
+func isStallFailure(span *types.KnowledgeProcessingSpan) bool {
+	return span.ErrorCode == errors.ErrCodeTaskStalled
+}
+
+// stageOfRunningSpan names the stage owning the newest running span, for the
+// window where no stage span is running but its work still is: post-process
+// closes its stage once summary / question / graph / wiki are fanned out.
+func stageOfRunningSpan(rows []types.KnowledgeProcessingSpan) string {
+	bySpanID := make(map[string]*types.KnowledgeProcessingSpan, len(rows))
+	for i := range rows {
+		bySpanID[rows[i].SpanID] = &rows[i]
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].Status != types.SpanStatusRunning || rows[i].Kind == types.SpanKindRoot {
+			continue
+		}
+		for span, depth := &rows[i], 0; span != nil && depth < 64; depth++ {
+			if span.Kind == types.SpanKindStage {
+				return span.Name
+			}
+			span = bySpanID[span.ParentSpanID]
+		}
+	}
+	return ""
+}
+
+// spansLastActivity is the latest of the row's updated_at and the listed
+// spans' writes.
+func spansLastActivity(updatedAt time.Time, rows []types.KnowledgeProcessingSpan) time.Time {
+	last := updatedAt
+	for _, row := range rows {
+		last = latestActivity(last, row.UpdatedAt)
+	}
+	return last
+}
+
+// attachLastActivity sets LastActivityAt on in-flight rows. updated_at only
+// moves at stage transitions, so the latest span write is folded in: it
+// advances with every subspan while a long stage is still working.
+func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []*types.Knowledge) {
+	var ids []string
+	for _, k := range knowledges {
+		if k != nil && isParseInFlight(k.ParseStatus) {
+			ids = append(ids, k.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var spanActivity map[string]time.Time
+	if h.spanRepo != nil {
+		var err error
+		if spanActivity, err = h.spanRepo.LastActivity(ctx, ids); err != nil {
+			logger.Warnf(ctx, "span last activity lookup failed: %v", err)
+		}
+	}
+	var quiet []*types.Knowledge
+	var quietIDs []string
+	for _, k := range knowledges {
+		if k == nil || !isParseInFlight(k.ParseStatus) {
+			continue
+		}
+		last := latestActivity(k.UpdatedAt, spanActivity[k.ID])
+		k.LastActivityAt = &last
+		if time.Since(last) >= stallHintAfter {
+			quiet = append(quiet, k)
+			quietIDs = append(quietIDs, k.ID)
+		}
+	}
+	verdicts := h.stallVerdicts(ctx, quietIDs)
+	for _, k := range quiet {
+		k.StallState = verdicts[k.ID]
+	}
+}
+
+func isParseInFlight(status string) bool {
+	switch status {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	}
+	return false
+}
+
+func latestActivity(times ...time.Time) time.Time {
+	var last time.Time
+	for _, t := range times {
+		if t.After(last) {
+			last = t
+		}
+	}
+	return last
 }
 
 // UpdateKnowledgeRequest defines the partial-update body for PUT /knowledge/:id.

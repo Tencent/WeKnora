@@ -18,11 +18,12 @@
 | `keyword` | string | 否 | 关键字 |
 | `search_field` | string | 否 | `standard_question`/`similar_questions`/`answers`（默认全字段） |
 | `sort_order` | string | 否 | `asc`（默认按更新时间倒序） |
+| `is_enabled` | bool | 否 | 按启用状态筛选：`true` 仅启用、`false` 仅停用，不传返回全部；其他取值返回 400 |
 
 响应：200 `{"success":true,"data":{分页 FAQEntry 列表}}`
 
 ```bash
-curl "$BASE/api/v1/knowledge-bases/kb-1/faq/entries?page=1" -H "Authorization: Bearer $TOKEN"
+curl "$BASE/api/v1/knowledge-bases/kb-1/faq/entries?page=1&is_enabled=false" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### GET /api/v1/knowledge-bases/:id/faq/entries/export
@@ -54,7 +55,7 @@ curl $BASE/api/v1/knowledge-bases/kb-1/faq/entries/12 -H "Authorization: Bearer 
 | `entries` | []FAQEntryPayload | 是（`binding:"required"`） | 批量条目 |
 | `mode` | string | 是（`binding:"oneof=append replace"`） | 追加或替换 |
 | `knowledge_id` | string | 否 | FAQ 知识实体 ID |
-| `task_id` | string | 否 | 自定义任务 ID |
+| `task_id` | string | 否 | 自定义任务 ID，仅允许字母、数字、`_`、`-`，最长 128 字符，否则返回 400 |
 | `dry_run` | bool | 否 | 仅校验不落库 |
 
 响应：200 `{"success":true,"data":{"task_id"}}`
@@ -156,8 +157,8 @@ curl -X DELETE $BASE/api/v1/knowledge-bases/kb-1/faq/entries -H "Authorization: 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `query_text` | string | 是（`binding:"required"`） | 查询 |
-| `vector_threshold` | float64 | 否 | 向量阈值 |
-| `match_count` | int | 否 | 默认 10，上限 200 |
+| `vector_threshold` | float64 | 否 | 向量阈值，默认 0.7 |
+| `match_count` | int | 否 | 默认 10，上限 50 |
 | `first_priority_tag_ids` / `second_priority_tag_ids` | []int64 | 否 | 标签优先级过滤 |
 | `only_recommended` | bool | 否 | 仅推荐条目 |
 
@@ -206,7 +207,7 @@ curl $BASE/api/v1/faq/import/progress/task-1 -H "X-API-Key: $API_KEY"
 | `folder_id` | string | 否 | 精确目录过滤（空串=根） |
 | `category_depth` | int | 否 | 目录深度 |
 | `page` / `page_size` | int | 否 | 分页（默认 1/20） |
-| `sort_by` / `sort_order` | string | 否 | 排序（默认 `updated_at` desc） |
+| `sort_by` / `sort_order` | string | 否 | 排序字段：`title`、`created_at`、`updated_at`、`page_type`、`wiki_path`、`sort_order`、`depth`，其他值按 `updated_at`；默认 `updated_at` desc |
 
 响应：200 `WikiPageListResponse`
 
@@ -263,7 +264,7 @@ curl -X PUT $BASE/api/v1/knowledgebase/kb-1/wiki/pages/overview -H "Authorizatio
 
 | 查询参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `version` | int | 否 | 传入时返回**该版本全文**（用于 diff），无效或 < 1 返回 400，找不到返回 404 |
+| `version` | int | 否 | 传入时返回**该版本全文**（用于 diff），无效或 < 1 返回 400，找不到返回 404（升级前写入的版本或已被保留策略清理的快照都没有全文，属正常情况） |
 | `limit` | int | 否 | 默认 50，上限 200；仅列表模式生效 |
 | `offset` | int | 否 | 分页偏移 |
 
@@ -458,4 +459,4 @@ curl -X PUT $BASE/api/v1/knowledgebase/kb-1/wiki/issues/i-1/status -H "Authoriza
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterFAQRoutes` 与 `RegisterWikiPageRoutes`。Handler：`internal/handler/faq.go`、`internal/handler/wiki_page.go`。
+路由注册：`internal/router/routes_knowledge.go` 的 `RegisterFAQRoutes` 与 `RegisterWikiPageRoutes`。Handler：`internal/handler/faq.go`、`internal/handler/wiki_page.go`。

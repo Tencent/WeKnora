@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -35,6 +37,7 @@ type CustomAgentHandler struct {
 	// sandboxConfigs validates an agent's sandbox backend selection. Optional —
 	// nil in partially-wired unit tests, where the selection is left unchecked.
 	sandboxConfigs sandboxConfigLookup
+	desktop        bool
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -44,6 +47,7 @@ func NewCustomAgentHandler(
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
 	userService interfaces.UserService,
 	sandboxConfigs *service.TenantSandboxConfigService,
+	host service.HostSandboxManager,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service:        service,
@@ -51,6 +55,7 @@ func NewCustomAgentHandler(
 		disabledRepo:   disabledRepo,
 		userService:    userService,
 		sandboxConfigs: sandboxConfigs,
+		desktop:        host.Desktop,
 	}
 }
 
@@ -104,6 +109,10 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	}
 	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
 		c.Error(err)
+		return
+	}
+	if err := normalizeAgentReasoningEffort(&req.Config); err != nil {
+		_ = c.Error(err)
 		return
 	}
 
@@ -370,6 +379,10 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	}
 	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
 		c.Error(err)
+		return
+	}
+	if err := normalizeAgentReasoningEffort(&req.Config); err != nil {
+		_ = c.Error(err)
 		return
 	}
 
@@ -732,6 +745,12 @@ func (h *CustomAgentHandler) validateAgentSandboxConfig(
 	ctx context.Context, cfg types.CustomAgentConfig,
 ) error {
 	configID := strings.TrimSpace(cfg.SandboxConfigID)
+	if h.desktop {
+		if configID != "" {
+			return errors.NewBadRequestError("Lite 不支持为智能体绑定沙箱配置")
+		}
+		return nil
+	}
 	if configID == "" || h.sandboxConfigs == nil {
 		// Empty means the deployment-wide default, which always exists.
 		return nil
@@ -748,6 +767,30 @@ func (h *CustomAgentHandler) validateAgentSandboxConfig(
 	if stored == nil {
 		return errors.NewBadRequestError("所选沙箱后端配置不存在，请重新选择")
 	}
+	return nil
+}
+
+// normalizeAgentReasoningEffort validates config.reasoning_effort and rewrites
+// it to its canonical spelling.
+//
+// Without this the field was stored verbatim and cast straight to
+// api.ReasoningEffort in agent/think.go and chat_pipeline/common.go. A typo
+// there does not disable thinking, it silently enables it: ReasoningEffort
+// wins over the legacy boolean and anything non-empty other than "off" counts
+// as enabled, so `"reasoning_effort": "hgih"` turns thinking on for a vendor
+// that then receives a level it rejects (or clamps in an unpredictable way).
+func normalizeAgentReasoningEffort(cfg *types.CustomAgentConfig) error {
+	if cfg == nil || cfg.ReasoningEffort == "" {
+		return nil
+	}
+	level, ok := api.ParseReasoningEffort(cfg.ReasoningEffort)
+	if !ok {
+		return errors.NewBadRequestError(
+			fmt.Sprintf("reasoning_effort must be one of %v", api.AllReasoningEfforts))
+	}
+	// Store the canonical value so EnsureDefaults and the editor never have to
+	// know about the accepted aliases ("none", "true", ...).
+	cfg.ReasoningEffort = string(level)
 	return nil
 }
 

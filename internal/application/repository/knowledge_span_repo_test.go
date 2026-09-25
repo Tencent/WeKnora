@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -279,4 +280,28 @@ func TestKnowledgeSpanRepo_ListAttemptIsolation(t *testing.T) {
 	all, err := repo.ListByAttempt(ctx, kid, 0)
 	require.NoError(t, err)
 	assert.Len(t, all, 2, "attempt=0 returns all attempts (used by housekeeping)")
+}
+
+func TestKnowledgeSpanRepo_LastActivity(t *testing.T) {
+	_, db := setupSpanTestRepo(t)
+	repo := NewKnowledgeSpanRepository(db)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	for i, at := range []time.Time{base, base.Add(7 * time.Minute), base.Add(3 * time.Minute)} {
+		require.NoError(t, db.Exec(
+			`INSERT INTO knowledge_processing_spans (knowledge_id, attempt, span_id, name, kind, status, updated_at)
+			 VALUES ('k-1', ?, ?, 'docreader', 'stage', 'running', ?)`, i+1, fmt.Sprintf("s-%d", i), at,
+		).Error)
+	}
+
+	got, err := repo.LastActivity(ctx, []string{"k-1", "k-none"})
+
+	require.NoError(t, err)
+	require.Contains(t, got, "k-1")
+	assert.True(t, got["k-1"].Equal(base.Add(7*time.Minute)), "got %s", got["k-1"])
+	assert.NotContains(t, got, "k-none")
+
+	empty, err := repo.LastActivity(ctx, nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }

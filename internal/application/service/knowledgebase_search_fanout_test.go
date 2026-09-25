@@ -587,18 +587,10 @@ func TestRetrieveFromStores_MultiGroupParallel_Concat(t *testing.T) {
 
 func TestRetrieveFromStores_MixedEngine_Normalizes(t *testing.T) {
 	t.Parallel()
-	// EngineAwareNormalizer policy in effect:
-	//   - ES / ElasticFaiss / OpenSearch / Weaviate / Postgres / SQLite /
-	//     Qdrant / TencentVectorDB / Doris surface non-negative cosine in
-	//     [0, 1] when the value reaches the normalizer (Lucene script_score
-	//     non-negative invariant for ES; k-NN plugin SpaceType.COSINESIMIL
-	//     pre-translation for OpenSearch; engine-internal conversions for
-	//     the rest) → passthrough via clamp01.
-	//   - Milvus is the only engine in this codebase that still surfaces
-	//     the raw signed cosine in [-1, 1] → cosine-shift via (score + 1) / 2.
-	//
-	// First sub-case below pins the ES passthrough; the Milvus sub-case
-	// pins the cosine-shift path so the [-1, 1] branch stays under coverage.
+	// EngineAwareNormalizer policy in effect: every driver reports cosine
+	// similarity (OpenSearch / Weaviate / Milvus L2 convert in the driver),
+	// so vector scores pass through clamp01, which only floors a negative
+	// cosine at 0 and guards NaN/Inf.
 	fakeES := &fakeRetrieveEngineService{
 		engineType: types.ElasticsearchRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType},
@@ -657,14 +649,16 @@ func TestRetrieveFromStores_MixedEngine_Normalizes(t *testing.T) {
 	assert.InDelta(t, 0.3, scoresByChunk2["es2"], 1e-9)
 	assert.InDelta(t, 0.8, scoresByChunk2["pg2"], 1e-9)
 
-	// Milvus cosine-shift coverage: raw -0.4 → (−0.4 + 1) / 2 = 0.3.
-	// Milvus is now the only engine in this switch that still uses the
-	// signed-cosine branch; without this case the [-1, 1] arm would be
-	// uncovered by the mixed-engine integration test.
+	// Milvus reports cosine like every other engine: 0.3 stays 0.3 (it used
+	// to be shifted to (0.3 + 1) / 2 = 0.65 and out-rank a PG hit at 0.6),
+	// and a negative cosine is floored at 0.
 	fakeMilvus := &fakeRetrieveEngineService{
 		engineType: types.MilvusRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType},
-		canned:     []*types.IndexWithScore{{ChunkID: "mv1", Score: -0.4}},
+		canned: []*types.IndexWithScore{
+			{ChunkID: "mv1", Score: 0.3},
+			{ChunkID: "mv2", Score: -0.4},
+		},
 	}
 	fakePG3 := &fakeRetrieveEngineService{
 		engineType: types.PostgresRetrieverEngineType,
@@ -684,6 +678,7 @@ func TestRetrieveFromStores_MixedEngine_Normalizes(t *testing.T) {
 		}
 	}
 	assert.InDelta(t, 0.3, scoresByChunk3["mv1"], 1e-9)
+	assert.InDelta(t, 0.0, scoresByChunk3["mv2"], 1e-9)
 	assert.InDelta(t, 0.8, scoresByChunk3["pg3"], 1e-9)
 }
 
@@ -890,7 +885,7 @@ func TestIterativeRetrieve_PropagatesTypedAppError(t *testing.T) {
 	}
 	s := &knowledgeBaseService{}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
-	results, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 10, "q")
+	results, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 10, "q", 50)
 	require.Error(t, err)
 	assert.Nil(t, results, "results must be nil so HybridSearch returns a clean error response")
 	app, ok := apperrors.IsAppError(err)
@@ -928,7 +923,8 @@ func TestApplyFAQPostProcessing_PropagatesError(t *testing.T) {
 		vectorResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("v%d", i)}
 	}
 	params := types.SearchParams{QueryText: "q", MatchCount: 10}
-	out, err := s.applyFAQPostProcessing(ctx, kb, chunks, vectorResults, groups, params, 5)
+	vectorLists := [][]*types.IndexWithScore{vectorResults}
+	out, err := s.applyFAQPostProcessing(ctx, kb, []*types.KnowledgeBase{kb}, chunks, vectorLists, groups, params, 5)
 	require.Error(t, err)
 	assert.Nil(t, out)
 	_, ok := apperrors.IsAppError(err)
@@ -1003,4 +999,42 @@ func TestRetrieveFromStores_IterativePattern_NoInternalRace(t *testing.T) {
 	for _, g := range groups {
 		assert.Equal(t, 50, g.BaseParams[0].TopK, "BaseParams TopK must stay immutable")
 	}
+}
+
+// The iterative FAQ path triggers when one vector list came back full, judged
+// per list: two short lists that together exceed matchCount must not trigger
+// it, and one full list must. The failing engine makes the iterative path
+// observable through its error.
+func TestApplyFAQPostProcessing_TriggerJudgesEachList(t *testing.T) {
+	t.Parallel()
+	bad := &fakeRetrieveEngineService{
+		engineType: types.PostgresRetrieverEngineType,
+		support:    []types.RetrieverType{types.VectorRetrieverType},
+		cannedErr:  stderrors.New("simulated retrieve failure"),
+	}
+	groups := []*storeGroup{
+		{Engine: buildBoundComposite(t, bad), BaseParams: vectorParams("q"), TopK: 5, KBIDs: []string{"kb-a"}},
+		{Engine: buildBoundComposite(t, bad), BaseParams: vectorParams("q"), TopK: 5, KBIDs: []string{"kb-b"}},
+	}
+	s := &knowledgeBaseService{chunkRepo: &tenantScopedFAQChunkRepo{}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	kb := &types.KnowledgeBase{ID: "kb-a", Type: types.KnowledgeBaseTypeFAQ, TenantID: 1}
+	chunks := []*types.IndexWithScore{{ChunkID: "c1", Score: 0.5}}
+	params := types.SearchParams{QueryText: "q", MatchCount: 10}
+	list := func(n int, prefix string) []*types.IndexWithScore {
+		out := make([]*types.IndexWithScore, n)
+		for i := range out {
+			out[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("%s%d", prefix, i)}
+		}
+		return out
+	}
+
+	short := [][]*types.IndexWithScore{list(3, "a"), list(3, "b")}
+	out, err := s.applyFAQPostProcessing(ctx, kb, []*types.KnowledgeBase{kb}, chunks, short, groups, params, 5)
+	require.NoError(t, err, "no list is full, so no deeper search")
+	assert.Equal(t, chunks, out)
+
+	full := [][]*types.IndexWithScore{list(5, "a"), list(1, "b")}
+	_, err = s.applyFAQPostProcessing(ctx, kb, []*types.KnowledgeBase{kb}, chunks, full, groups, params, 5)
+	require.Error(t, err, "a full list must trigger the iterative path")
 }

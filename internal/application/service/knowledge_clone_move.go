@@ -357,6 +357,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 			Metadata:        sourceChunk.Metadata,
 			ContentHash:     sourceChunk.ContentHash,
 			ImageInfo:       newImageInfo,
+			SourceLocators:  sourceChunk.SourceLocators,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}

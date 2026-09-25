@@ -1,6 +1,6 @@
 # WeKnora 产品介绍
 
-WeKnora（维娜拉）是腾讯开源的知识库问答系统，支持导入 PDF、Word、网页以及飞书、Notion、语雀等平台的资料。用户可以围绕这些资料提问，并通过回答中的引用查看原文。
+WeKnora（维娜拉）是腾讯开源的知识库问答系统，支持导入 PDF、Word、网页以及飞书、Notion、Confluence、语雀、钉钉等平台的资料。用户可以围绕这些资料提问，并通过回答中的引用查看原文。
 
 系统采用检索增强生成（RAG）：先解析文档并建立索引，再根据问题检索相关片段，由大模型生成回答。
 
@@ -17,7 +17,7 @@ WeKnora（维娜拉）是腾讯开源的知识库问答系统，支持导入 PDF
 | --- | --- |
 | 文档格式繁杂，PDF/扫描件/表格难以结构化 | 文档处理流程支持 PDF 版式分析、扫描件 OCR、Office 转换、网页抓取与图片描述，可选 OpenDataLoader/Docling 混合解析 |
 | 单一向量检索召回不稳 | 向量 + 关键词（BM25）混合检索，RRF 融合，Rerank 重排，可选知识图谱（GraphRAG）与 Wiki 导航 |
-| 模型绑定单一厂商 | 模型抽象层：Ollama 本地模型与 OpenAI 兼容远程接口均可，LLM / Embedding / Rerank / VLM / ASR 分类管理（见 `internal/types/model.go`） |
+| 模型绑定单一厂商 | 模型抽象层：Ollama 本地模型与数十家内置厂商（OpenAI 兼容、Anthropic Messages、Gemini 原生等协议）均可，LLM / Embedding / Rerank / VLM / ASR 分类管理，厂商与模型目录见[模型管理](../03-features/06-models.md) |
 | 数据安全与私有化 | 全栈可私有部署；敏感凭证（API Key 等）以 AES-256 落盘加密（`SYSTEM_AES_KEY`）；多租户隔离 + RBAC 角色鉴权 |
 | 多步骤任务与工具调用 | 内置 Agent（ReAct 多步推理）、MCP 工具接入、Agent Skills 沙箱执行、Web 搜索（SearXNG 等）、数据分析（对 CSV/Excel 执行 SQL） |
 | 团队协作 | 租户（工作空间）+ 成员角色 + 组织（Organization）跨租户知识库共享 + 邀请机制 |
@@ -47,7 +47,7 @@ WeKnora（维娜拉）是腾讯开源的知识库问答系统，支持导入 PDF
 | FAQ | 维护标准问、相似问、反例问和答案的问答条目，详见[FAQ 能力](../03-features/17-faq.md) |
 | Wiki 页面 WikiPage | 从文档生成的主题页面，带来源引用和页面链接，支持编辑与版本管理 |
 | 知识图谱 Entity / Relationship | 文档中的实体与关系，保存在 Neo4j，用于补充关联内容检索 |
-| 数据源 DataSource | 持续同步外部资料的连接。支持飞书、Lark、GitLab、IMA、Notion、语雀和 RSS，详见[数据源导入](../03-features/10-datasource.md) |
+| 数据源 DataSource | 持续同步外部资料的连接。支持飞书/Lark（知识库与云盘）、Notion、Confluence、语雀、钉钉文档、腾讯 IMA、GitLab 和 RSS，详见[数据源导入](../03-features/10-datasource.md) |
 | 检索配置 RetrievalConfig | 控制候选数量、匹配阈值、融合权重和重排结果，详见[检索引擎](../03-features/05-retrieval-engines.md) |
 
 ### 对话与智能体
@@ -107,14 +107,15 @@ flowchart TB
 
 ## 功能清单
 
-- **文档接入**：文件上传（PDF/Word/PPT/Excel/Markdown/HTML/图片/音频等）、URL 抓取、手写 Markdown、整目录上传、飞书 / Lark / Notion / 语雀 / RSS 定时同步。
+- **文档接入**：文件上传（PDF/Word/PPT/Excel/Markdown/HTML/EPUB/XMind/图片/音频等）、URL 抓取、手写 Markdown、整目录上传、飞书 / Lark / Notion / Confluence / 语雀 / 钉钉 / IMA / GitLab / RSS 定时同步。
 - **文档理解**：版式分析、扫描件 OCR、表格抽取、图片多模态描述（VLM）、音频转写（ASR）、按文件类型选择解析引擎（`ParserEngineRules`，可接 MinerU / OpenDataLoader）。
 - **索引管道**：可配置分块（含父子分块与自适应策略）、向量索引、关键词全文索引、FAQ 索引、Wiki 生成、知识图谱抽取、预生成问题（question generation）。
 - **检索**：向量 + BM25 混合检索、RRF 融合、Rerank 重排、查询改写与扩展、意图识别（greeting/chitchat/web_search 等，见 `config/prompt_templates/intent_prompts.yaml`）。
 - **问答与 Agent**：流式 SSE 问答、多轮上下文压缩、引用溯源；ReAct Agent（工具：`search_knowledge`、`read_document`、`list_documents`、`wiki_search`、`data_analysis` 等）、MCP 外部工具、Agent Skills（Docker、Cube 或 E2B 沙箱执行脚本）、Web 搜索。
-- **多租户与安全**：RBAC 角色鉴权（默认开启，`WEKNORA_TENANT_ENABLE_RBAC`）、审计日志（默认保留 90 天）、邀请制注册（`auth.registration_mode=invite_only`，也可用旧变量 `DISABLE_REGISTRATION=true`）、OIDC 单点登录、SSRF 防护、敏感字段 AES-256 加密。
+- **对话体验**：回答进行中追加要求、从任意历史提问分叉或原地回滚（带沙箱工作区检查点）、按会话调整思考强度，「产物」页跨会话汇总智能体生成的文件，详见[会话体验](../03-features/18-chat-experience.md)。
+- **多租户与安全**：RBAC 角色鉴权（默认开启，`WEKNORA_TENANT_ENABLE_RBAC`）、审计日志（默认保留 90 天）、邀请制注册（`auth.registration_mode=invite_only`，也可用旧变量 `DISABLE_REGISTRATION=true`）、OIDC 单点登录、SSRF 防护（可选仅白名单出站 `SSRF_DNS_WHITELIST_ONLY`）、敏感字段 AES-256 加密。界面提供简体中文、英文、日文、韩文和俄文。
 - **可观测性**：Langfuse 全链路追踪（LLM/Embedding/Rerank/VLM/ASR 调用与 token 统计）、健康检查、Swagger API 文档（`GIN_MODE=debug` 时）。
-- **生态**：REST API（`/api/v1`）+ API Key、独立 MCP Server（把 WeKnora 作为工具暴露给其他 Agent）、CLI（`cli/`）、微信小程序（`miniprogram/`）、浏览器插件渠道。
+- **生态**：REST API（`/api/v1`）+ API Key、内置 MCP Server（按空间创建端点，把 WeKnora 作为工具暴露给其他 Agent，见[MCP 集成](../03-features/08-mcp.md)）、CLI（`cli/`）、微信小程序（`miniprogram/`）、浏览器插件渠道、[本机浏览器](../05-clients/09-local-browser.md)（智能体通过 Chrome/Edge 扩展操作用户浏览器）。Lite 桌面版（macOS）可在本机沙箱中执行智能体命令。
 
 ## 系统组件一览
 
@@ -133,7 +134,7 @@ flowchart TB
 | 可选：minio | MinIO | profile `minio` | 9000 / 9001 | S3 兼容对象存储（`STORAGE_TYPE=minio`） |
 | 可选：searxng | SearXNG | profile `searxng` | 8888 | 自建 Web 搜索引擎 |
 | 可选：langfuse 栈 | Langfuse 3 + ClickHouse + MinIO | profile `langfuse` | 3000 | LLM 可观测性 |
-| 可选：mcp | Python | `mcp-server/`，profile `full` | 8082 | 将 WeKnora API 封装为 MCP Server |
+| 可选：mcp（已弃用） | Python | `mcp-server/`，profile `full` | 8082 | 旧版独立 MCP Server；新部署使用 app 内置的 MCP Server 端点 |
 | 可选：odl-hybrid | Docling | profile `odl-hybrid` | 5002 | OpenDataLoader PDF 混合解析后端 |
 
 ```mermaid
@@ -144,14 +145,15 @@ flowchart LR
     APP -- "gRPC :50051" --> DR["docreader (Python 文档解析)"]
     APP --> PG[("ParadeDB / PostgreSQL :5432 元数据 + 混合检索")]
     APP --> RD[("Redis :6379 流管理 + Asynq 队列")]
-    APP -. "docker run 按需" .-> SB["sandbox (Skills 沙箱)"]
+    APP -. "按需创建" .-> SB["sandbox (Docker / E2B / Cube 会话沙箱)"]
     APP -. "可选" .-> VDB[("Qdrant / Milvus / ES / OpenSearch / Doris ...")]
     APP -. "可选" .-> NEO[("Neo4j 知识图谱")]
     APP -. "可选" .-> OSS[("MinIO / COS / S3 / OSS / OBS / TOS 对象存储")]
     APP -. "可选" .-> SX["SearXNG Web 搜索 :8888"]
     APP -. "可选" .-> LF["Langfuse 可观测 :3000"]
     APP --> LLM["Ollama 本地模型 / OpenAI 兼容远程模型"]
-    MCPS["mcp-server :8082"] -- "REST" --> APP
+    MCPC["MCP 客户端 (Claude / Cursor 等)"] -- "/mcp/:endpoint_id" --> APP
+    MCPS["mcp-server :8082（已弃用）"] -. "REST" .-> APP
 ```
 
 ## 下一步

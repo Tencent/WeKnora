@@ -56,6 +56,7 @@ type QARequest struct {
 	Query               string             // User query text
 	AssistantMessageID  string             // Pre-created assistant message ID
 	SummaryModelID      string             // Optional model override; empty = use agent/KB default
+	ReasoningEffort     string             // Optional per-request override; empty = use agent default
 	CustomAgent         *CustomAgent       // Optional custom agent for config override
 	SharedAgentReadOnly bool               // True only when access came from an agent share; source-workspace writes are forbidden
 	KnowledgeBaseIDs    []string           // Knowledge base IDs to search (from request + @mentions)
@@ -76,4 +77,10 @@ type QARequest struct {
 	// persists accepted ones through this sink. A structural interface so
 	// neither package imports the other; handler-owned, nil for IM/embed.
 	SteerSink SteerSink
+	// TurnLeaseHeld reports that the caller already took the session's
+	// send-side turn lease (and already rejected the send if a rewind holds
+	// the session) before persisting this turn's messages. HTTP send does;
+	// IM/MCP, which call the QA services directly, do not and leave this
+	// false so the service takes the lease itself.
+	TurnLeaseHeld bool
 }
