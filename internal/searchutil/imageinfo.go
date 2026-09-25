@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -81,13 +82,46 @@ func collectImageInfoByChunkIDs(
 	chunkIDs []string,
 	listChildren func(parentIDs []string) ([]*types.Chunk, error),
 ) map[string]string {
+	info, _ := collectChildEvidence(chunkIDs, listChildren)
+	return info
+}
+
+// collectChildEvidence reads the image children of chunkIDs once and returns
+// their merged image_info JSON and, per chunk, the recognized text of each
+// scanned PDF page (1-based page → quote) taken from children that carry a
+// page locator. OCR text wins over a caption for the same page.
+func collectChildEvidence(
+	chunkIDs []string,
+	listChildren func(parentIDs []string) ([]*types.Chunk, error),
+) (map[string]string, map[string]map[int]string) {
 	if len(chunkIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	children, err := listChildren(chunkIDs)
 	if err != nil || len(children) == 0 {
-		return nil
+		return nil, nil
+	}
+
+	pageQuotes := make(map[string]map[int]string)
+	addPageQuote := func(targetID string, child *types.Chunk) {
+		quote := sourceloc.CleanQuote(child.Content)
+		if quote == "" {
+			return
+		}
+		for _, loc := range child.SourceLocators {
+			if loc.Type != types.SourceLocatorPDF || loc.Page <= 0 {
+				continue
+			}
+			pages, ok := pageQuotes[targetID]
+			if !ok {
+				pages = make(map[int]string)
+				pageQuotes[targetID] = pages
+			}
+			if _, taken := pages[loc.Page]; !taken || child.ChunkType == types.ChunkTypeImageOCR {
+				pages[loc.Page] = quote
+			}
+		}
 	}
 
 	type imageAgg struct {
@@ -141,6 +175,7 @@ func collectImageInfoByChunkIDs(
 		switch child.ChunkType {
 		case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption:
 			addInfo(child.ParentChunkID, child)
+			addPageQuote(child.ParentChunkID, child)
 		case types.ChunkTypeText:
 			textChildIDs = append(textChildIDs, child.ID)
 			textToParent[child.ID] = child.ParentChunkID
@@ -159,6 +194,7 @@ func collectImageInfoByChunkIDs(
 				}
 				if parentTextID, ok := textToParent[gc.ParentChunkID]; ok {
 					addInfo(parentTextID, gc)
+					addPageQuote(parentTextID, gc)
 				}
 			}
 		}
@@ -179,11 +215,13 @@ func collectImageInfoByChunkIDs(
 		}
 		out[id] = string(data)
 	}
-	return out
+	return out, pageQuotes
 }
 
 // EnrichSearchResultsImageInfo fills in ImageInfo for SearchResults that have
-// none by batch-querying child image chunks.
+// none by batch-querying child image chunks. The same children give scanned
+// PDF pages their recognized text as locator quotes, so a citation can be
+// matched to the page it came from.
 func EnrichSearchResultsImageInfo(
 	ctx context.Context,
 	chunkRepo interfaces.ChunkRepository,
@@ -193,7 +231,7 @@ func EnrichSearchResultsImageInfo(
 	var chunkIDs []string
 	seen := make(map[string]bool)
 	for _, r := range results {
-		if r.ImageInfo != "" {
+		if r.ImageInfo != "" && !needsPageQuotes(r.SourceLocators) {
 			continue
 		}
 		if !seen[r.ID] {
@@ -205,19 +243,54 @@ func EnrichSearchResultsImageInfo(
 		return
 	}
 
-	infoMap := CollectImageInfoByChunkIDs(ctx, chunkRepo, tenantID, chunkIDs)
-	if len(infoMap) == 0 {
-		return
-	}
+	infoMap, pageQuotes := collectChildEvidence(chunkIDs, func(parentIDs []string) ([]*types.Chunk, error) {
+		return chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
+	})
 
 	for _, r := range results {
-		if r.ImageInfo != "" {
-			continue
-		}
-		if merged, ok := infoMap[r.ID]; ok {
+		if merged, ok := infoMap[r.ID]; ok && r.ImageInfo == "" {
 			r.ImageInfo = merged
 		}
+		if pages, ok := pageQuotes[r.ID]; ok {
+			r.SourceLocators = withPageQuotes(r.SourceLocators, pages)
+		}
 	}
+}
+
+// needsPageQuotes reports whether a chunk has whole-page PDF locators without
+// usable text: the pages of a scanned PDF, whose chunk text is only the page
+// images.
+func needsPageQuotes(locators types.SourceLocators) bool {
+	for _, loc := range locators {
+		if loc.Type == types.SourceLocatorPDF && loc.Page > 0 && len(loc.BBox) == 0 && weakQuote(loc.Quote) {
+			return true
+		}
+	}
+	return false
+}
+
+func weakQuote(quote string) bool {
+	quote = strings.TrimSpace(quote)
+	return quote == "" || strings.HasPrefix(quote, "![")
+}
+
+// withPageQuotes returns a copy of locators whose textless page locators carry
+// the recognized text of their page.
+func withPageQuotes(locators types.SourceLocators, pages map[int]string) types.SourceLocators {
+	if !needsPageQuotes(locators) {
+		return locators
+	}
+	out := make(types.SourceLocators, len(locators))
+	copy(out, locators)
+	for i, loc := range out {
+		if loc.Type != types.SourceLocatorPDF || len(loc.BBox) != 0 || !weakQuote(loc.Quote) {
+			continue
+		}
+		if quote, ok := pages[loc.Page]; ok {
+			out[i].Quote = quote
+		}
+	}
+	return out
 }
 
 // MergeImageInfoJSON combines per-chunk image_info JSON strings (from

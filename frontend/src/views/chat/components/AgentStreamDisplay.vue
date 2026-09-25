@@ -654,6 +654,7 @@ import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
+import { citationAnchorText } from '@/utils/citationAnchor';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -2403,6 +2404,8 @@ const onRootClick = (e: Event) => {
       chunkId,
       documentTitle: title,
       knowledgeBaseId: kbId,
+      anchorText: citationAnchorText(kbEl),
+      openSource: !props.embeddedMode,
     })) {
       return;
     }
@@ -2488,6 +2491,8 @@ const onRootKeydown = (e: KeyboardEvent) => {
         chunkId,
         documentTitle: title,
         knowledgeBaseId: kbId,
+        anchorText: citationAnchorText(kbEl),
+        openSource: !props.embeddedMode,
       })) {
         return;
       }

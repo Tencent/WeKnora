@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -527,6 +528,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				StartAt:         pc.Start,
 				EndAt:           pc.End,
 				ChunkType:       types.ChunkTypeParentText,
+				SourceLocators:  pc.SourceLocators,
 			}
 		}
 		// Set prev/next links for parent chunks
@@ -567,6 +569,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			StartAt:         int(chunkData.Start),
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
+			SourceLocators:  chunkData.SourceLocators,
 		}
 
 		// Wire up ParentChunkID for child chunks
@@ -3740,19 +3743,18 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			return fmt.Errorf("audio transcription failed: %w", err)
 		}
 
-		var transcribedText string
-		if transcriptionResult != nil {
-			transcribedText = transcriptionResult.Text
-		}
+		transcribedText, timeBlocks := transcriptWithSegments(transcriptionResult)
 
 		if transcribedText == "" {
 			logger.Warn(ctx, "[ASR] Transcription returned empty text")
 			transcribedText = "[No speech detected in audio file]"
+			timeBlocks = nil
 		}
 
 		logger.Infof(ctx, "[ASR] Transcription completed, text length=%d", len(transcribedText))
 		// Replace the audio placeholder with the transcribed text
 		convertResult.MarkdownContent = transcribedText
+		convertResult.SourceBlocks = timeBlocks
 		convertResult.IsAudio = false
 		convertResult.AudioData = nil
 	}
@@ -3765,6 +3767,14 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// <img> tags to `![...](...)` and then escaping them in a later
 	// HTML→GFM pass. Line endings are normalized first so injected row
 	// breaks are plain LF.
+	// Source blocks were recorded against the parser's markdown; keep it so
+	// they can be re-aimed after the rewrites below.
+	var parsedMarkdown string
+	var sourceBlocks []types.SourceBlock
+	if convertResult != nil {
+		parsedMarkdown = convertResult.MarkdownContent
+		sourceBlocks = convertResult.SourceBlocks
+	}
 	sanitizeReadResult(convertResult)
 	if convertResult != nil {
 		convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
@@ -3808,6 +3818,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// unbound extracted image renders broken for org-shared KB viewers (#3342).
 	s.bindStoredImages(ctx, knowledge, storedImages)
 
+	var sourceIndex *sourceloc.Index
+	if convertResult != nil {
+		sourceIndex = buildSourceIndex(parsedMarkdown, sourceBlocks, convertResult.MarkdownContent, storedImages)
+	}
+
 	// Step 3: Split into chunks using Go chunker. Line endings and inline
 	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
@@ -3829,17 +3844,21 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		chunks = make([]types.ParsedChunk, len(pcResult.Children))
 		for i, c := range pcResult.Children {
 			chunks[i] = types.ParsedChunk{
-				Content:       c.Content,
-				ContextHeader: c.ContextHeader,
-				Seq:           c.Seq,
-				Start:         c.Start,
-				End:           c.End,
-				ParentIndex:   c.ParentIndex,
+				Content:        c.Content,
+				ContextHeader:  c.ContextHeader,
+				Seq:            c.Seq,
+				Start:          c.Start,
+				End:            c.End,
+				ParentIndex:    c.ParentIndex,
+				SourceLocators: sourceIndex.Locators(c.Start, c.End),
 			}
 		}
 		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
 		for i, p := range pcResult.Parents {
-			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
+			parentChunks[i] = types.ParsedParentChunk{
+				Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End,
+				SourceLocators: sourceIndex.Locators(p.Start, p.End),
+			}
 		}
 		processOpts.ParentChunks = parentChunks
 		logger.Infof(ctx, "Split document into %d parent + %d child chunks for knowledge %s",
@@ -3849,11 +3868,12 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		chunks = make([]types.ParsedChunk, len(splitChunks))
 		for i, c := range splitChunks {
 			chunks[i] = types.ParsedChunk{
-				Content:       c.Content,
-				ContextHeader: c.ContextHeader,
-				Seq:           c.Seq,
-				Start:         c.Start,
-				End:           c.End,
+				Content:        c.Content,
+				ContextHeader:  c.ContextHeader,
+				Seq:            c.Seq,
+				Start:          c.Start,
+				End:            c.End,
+				SourceLocators: sourceIndex.Locators(c.Start, c.End),
 			}
 		}
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
@@ -4015,6 +4035,9 @@ func (s *knowledgeService) convert(
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
+	}
+	if !isURL {
+		attachStructureBlocks(ctx, fileType, req.FileContent, result)
 	}
 	docOutput := types.JSONMap{
 		"text_length":  len(result.MarkdownContent),
@@ -4182,6 +4205,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			ImageSourceType: metadata["image_source_type"],
 			Attempt:         attempt,
 			ImageIndex:      idx,
+			SourceLocators:  img.SourceLocators,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

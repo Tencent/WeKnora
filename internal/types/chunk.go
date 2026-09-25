@@ -175,6 +175,10 @@ type Chunk struct {
 	// ContextHeader is a Markdown heading breadcrumb prepended when indexing.
 	// It is persisted so a later content edit can rebuild the same index input.
 	ContextHeader string `json:"-" gorm:"type:text"`
+	// SourceLocators point back into the original file (page and region,
+	// slide, sheet rows, ...) so citations can open the file at this chunk.
+	// Empty when the parser reported no positions.
+	SourceLocators SourceLocators `json:"source_locators,omitempty" gorm:"type:json"`
 }
 
 // ChunkRevision is an immutable snapshot of a superseded chunk revision.

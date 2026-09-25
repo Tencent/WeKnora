@@ -85,7 +85,7 @@ func (c *MinerUCloudReader) Read(ctx context.Context, req *types.ReadRequest) (*
 		return nil, fmt.Errorf("MinerU Cloud file upload: %w", err)
 	}
 
-	mdContent, imageRefs, err := c.pollBatchResult(ctx, batchID)
+	mdContent, imageRefs, contentList, err := c.pollBatchResult(ctx, batchID)
 	if err != nil {
 		return nil, fmt.Errorf("MinerU Cloud poll: %w", err)
 	}
@@ -95,6 +95,7 @@ func (c *MinerUCloudReader) Read(ctx context.Context, req *types.ReadRequest) (*
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
+		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
 	}, nil
 }
 
@@ -207,7 +208,9 @@ type extractResultItem struct {
 	FullZipURL string `json:"full_zip_url"`
 }
 
-func (c *MinerUCloudReader) pollBatchResult(ctx context.Context, batchID string) (string, []types.ImageRef, error) {
+func (c *MinerUCloudReader) pollBatchResult(
+	ctx context.Context, batchID string,
+) (string, []types.ImageRef, []byte, error) {
 	deadline := time.Now().Add(defaultCloudTimeout)
 	pollCount := 0
 	headers := map[string]string{
@@ -220,7 +223,7 @@ func (c *MinerUCloudReader) pollBatchResult(ctx context.Context, batchID string)
 		// cancelled ctx, so without this guard the loop busy-hammers the cloud
 		// API and floods logs until the deadline.
 		if err := ctx.Err(); err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		pollCount++
 
@@ -248,7 +251,7 @@ func (c *MinerUCloudReader) pollBatchResult(ctx context.Context, batchID string)
 		}
 
 		if state == "failed" {
-			return "", nil, fmt.Errorf("MinerU Cloud task failed: %s", item.ErrMsg)
+			return "", nil, nil, fmt.Errorf("MinerU Cloud task failed: %s", item.ErrMsg)
 		}
 
 		if state == "done" {
@@ -258,7 +261,7 @@ func (c *MinerUCloudReader) pollBatchResult(ctx context.Context, batchID string)
 		sleepCtx(ctx, defaultPollInterval)
 	}
 
-	return "", nil, fmt.Errorf("MinerU Cloud task timed out after %d polls", pollCount)
+	return "", nil, nil, fmt.Errorf("MinerU Cloud task timed out after %d polls", pollCount)
 }
 
 func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string, headers map[string]string) ([]extractResultItem, error) {
@@ -328,47 +331,54 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 
 // extractDoneResult extracts markdown and images from a completed batch item.
 // Prefers inline markdown/content fields; falls back to downloading full_zip_url.
-func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractResultItem) (string, []types.ImageRef, error) {
+func (c *MinerUCloudReader) extractDoneResult(
+	_ context.Context, item *extractResultItem,
+) (string, []types.ImageRef, []byte, error) {
 	text := firstNonEmpty(item.Markdown, item.Content, item.Text)
 	if text != "" {
 		logger.Infof(context.Background(), "[MinerUCloud] parsed (inline), length=%d", len(text))
-		return text, nil, nil
+		return text, nil, nil, nil
 	}
 
 	if item.FullZipURL == "" {
-		return "", nil, fmt.Errorf("MinerU Cloud state=done but no markdown/content or full_zip_url")
+		return "", nil, nil, fmt.Errorf("MinerU Cloud state=done but no markdown/content or full_zip_url")
 	}
 
-	md, imageRefs, err := downloadAndExtractZip(item.FullZipURL)
+	md, imageRefs, contentList, err := downloadAndExtractZip(item.FullZipURL)
 	if err != nil {
-		return "", nil, fmt.Errorf("extract zip: %w", err)
+		return "", nil, nil, fmt.Errorf("extract zip: %w", err)
 	}
 
 	logger.Infof(context.Background(), "[MinerUCloud] parsed (zip), markdown=%d chars, images=%d", len(md), len(imageRefs))
-	return md, imageRefs, nil
+	return md, imageRefs, contentList, nil
 }
 
 // --- ZIP handling ---
 
-func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
+// downloadAndExtractZip also returns the content_list of the package, if any.
+func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, []byte, error) {
 	if err := utils.ValidateURLForSSRF(zipURL); err != nil {
-		return "", nil, fmt.Errorf("zip URL blocked by SSRF check: %v", err)
+		return "", nil, nil, fmt.Errorf("zip URL blocked by SSRF check: %v", err)
 	}
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
 	resp, err := client.Get(zipURL)
 	if err != nil {
-		return "", nil, fmt.Errorf("download zip: %w", err)
+		return "", nil, nil, fmt.Errorf("download zip: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("download zip status %d", resp.StatusCode)
+		return "", nil, nil, fmt.Errorf("download zip status %d", resp.StatusCode)
 	}
 
 	zipData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("read zip body: %w", err)
+		return "", nil, nil, fmt.Errorf("read zip body: %w", err)
 	}
-	return extractMarkdownZip(zipData, "MinerUCloud")
+	md, imageRefs, err := extractMarkdownZip(zipData, "MinerUCloud")
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return md, imageRefs, minerUContentListFromZip(zipData), nil
 }
 
 // extractMarkdownZip reads the shallowest .md file of a MinerU result package

@@ -522,6 +522,9 @@ type ImageMultimodalPayload struct {
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
+	// SourceLocators place the image in the original file; copied onto the
+	// OCR and caption chunks built from it.
+	SourceLocators SourceLocators `json:"source_locators,omitempty"`
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.

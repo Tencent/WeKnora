@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -25,6 +26,7 @@ from docreader.proto.docreader_pb2 import (
     ReadStreamResponse,
     ListEnginesResponse,
     ParserEngineInfo,
+    SourceBlock,
 )
 from docreader.utils.request import init_logging_request_id, request_id_context
 
@@ -52,6 +54,31 @@ logger = logging.getLogger(__name__)
 logger.info("Initializing server logging, level=%s", _level_name)
 
 init_logging_request_id()
+
+
+def _source_blocks(document) -> list:
+    """Convert a document's source blocks to their wire form.
+
+    Malformed entries are skipped: positions are an optional extra and must
+    never fail a parse.
+    """
+    out = []
+    for block in getattr(document, "source_blocks", None) or []:
+        try:
+            start, end = int(block["start"]), int(block["end"])
+            locator = block["locator"]
+            if end <= start or start < 0 or not locator.get("type"):
+                continue
+            out.append(
+                SourceBlock(
+                    start=start,
+                    end=end,
+                    locator_json=json.dumps(locator, ensure_ascii=False),
+                )
+            )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return out
 
 
 def _resolve_images(
@@ -209,6 +236,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     metadata={k: _c(str(v)) for k, v in result.metadata.items()}
                     if result.metadata
                     else {},
+                    source_blocks=_source_blocks(result),
                 )
                 logger.info(
                     "Read response: content_len=%d, images=%d",
@@ -258,6 +286,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     if result.metadata
                     else {},
                     image_count=image_count,
+                    source_blocks=_source_blocks(result),
                 )
             )
 
