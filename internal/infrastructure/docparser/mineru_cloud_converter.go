@@ -23,6 +23,8 @@ import (
 
 const (
 	defaultPollInterval = 3 * time.Second
+	// defaultCloudTimeout bounds how long one batch is polled;
+	// WEKNORA_MINERU_CLOUD_TIMEOUT overrides it for documents that take longer.
 	defaultCloudTimeout = 600 * time.Second
 	defaultBaseURL      = "https://mineru.net/api/v4"
 )
@@ -32,6 +34,8 @@ const (
 type MinerUCloudReader struct {
 	apiKey        string
 	baseURL       string
+	timeout       time.Duration
+	pollInterval  time.Duration
 	model         string
 	formulaEnable bool
 	tableEnable   bool
@@ -44,6 +48,8 @@ func NewMinerUCloudReader(overrides map[string]string) *MinerUCloudReader {
 	return &MinerUCloudReader{
 		apiKey:        strings.TrimSpace(overrides["mineru_api_key"]),
 		baseURL:       defaultBaseURL,
+		timeout:       requestTimeoutFromEnv("WEKNORA_MINERU_CLOUD_TIMEOUT", defaultCloudTimeout),
+		pollInterval:  defaultPollInterval,
 		model:         stringOr(overrides["mineru_cloud_model"], "pipeline"),
 		formulaEnable: parseBoolOr(overrides["mineru_cloud_enable_formula"], true),
 		tableEnable:   parseBoolOr(overrides["mineru_cloud_enable_table"], true),
@@ -211,7 +217,7 @@ type extractResultItem struct {
 func (c *MinerUCloudReader) pollBatchResult(
 	ctx context.Context, batchID string,
 ) (string, []types.ImageRef, []byte, error) {
-	deadline := time.Now().Add(defaultCloudTimeout)
+	deadline := time.Now().Add(c.timeout)
 	pollCount := 0
 	headers := map[string]string{
 		"Authorization": "Bearer " + c.apiKey,
@@ -230,7 +236,7 @@ func (c *MinerUCloudReader) pollBatchResult(
 		items, err := c.fetchBatchStatus(ctx, batchID, headers)
 		if err != nil {
 			logger.Errorf(context.Background(), "[MinerUCloud] poll #%d failed: %v", pollCount, err)
-			sleepCtx(ctx, defaultPollInterval)
+			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
 
@@ -238,7 +244,7 @@ func (c *MinerUCloudReader) pollBatchResult(
 			if pollCount <= 3 || pollCount%10 == 0 {
 				logger.Infof(context.Background(), "[MinerUCloud] poll #%d: extract_result empty, retrying", pollCount)
 			}
-			sleepCtx(ctx, defaultPollInterval)
+			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
 
@@ -258,10 +264,10 @@ func (c *MinerUCloudReader) pollBatchResult(
 			return c.extractDoneResult(ctx, &item)
 		}
 
-		sleepCtx(ctx, defaultPollInterval)
+		sleepCtx(ctx, c.pollInterval)
 	}
 
-	return "", nil, nil, fmt.Errorf("MinerU Cloud task timed out after %d polls", pollCount)
+	return "", nil, nil, fmt.Errorf("MinerU Cloud task timed out after %s (%d polls)", c.timeout, pollCount)
 }
 
 func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string, headers map[string]string) ([]extractResultItem, error) {
