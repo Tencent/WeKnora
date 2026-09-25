@@ -28,6 +28,22 @@ type Invoker struct {
 	mu      sync.RWMutex
 	tenancy *tenancy.Service
 	plugins interfaces.PluginRepository
+	// tokens and hostURL give plugins granted Host API scopes a way back.
+	tokens  TokenIssuer
+	hostURL string
+}
+
+// TokenIssuer signs the Host API token of one call.
+type TokenIssuer interface {
+	Issue(pluginID, version string, tenantID uint64, scopes []string) (string, time.Time, error)
+}
+
+// SetHostAPI lets calls carry Host API access: where plugins reach WeKnora
+// and how their tokens are signed.
+func (iv *Invoker) SetHostAPI(tokens TokenIssuer, url string) {
+	iv.mu.Lock()
+	iv.tokens, iv.hostURL = tokens, url
+	iv.mu.Unlock()
 }
 
 // NewInvoker creates an Invoker; Bind completes it.
@@ -77,8 +93,15 @@ func (iv *Invoker) Envelope(
 		env.Context.Deadline = &d
 	}
 	iv.mu.RLock()
-	t, plugins := iv.tenancy, iv.plugins
+	t, plugins, tokens, hostURL := iv.tenancy, iv.plugins, iv.tokens, iv.hostURL
 	iv.mu.RUnlock()
+	if tokens != nil && hostURL != "" && env.Context.TenantID != 0 && len(m.Permissions.HostAPI) > 0 {
+		token, _, err := tokens.Issue(m.ID, m.Version, env.Context.TenantID, m.Permissions.HostAPI)
+		if err != nil {
+			return env, err
+		}
+		env.Context.Host = &pluginapi.HostAccess{URL: hostURL, Token: token}
+	}
 	if plugins != nil && len(m.Config.SystemSchema) > 0 {
 		sys, _, err := install.OpenSystemConfig(ctx, plugins, m)
 		if err != nil {

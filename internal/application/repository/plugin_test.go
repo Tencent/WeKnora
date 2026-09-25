@@ -93,3 +93,52 @@ func TestPluginTenantSettingUpsertColumns(t *testing.T) {
 	require.False(t, got.Enabled)
 	require.JSONEq(t, `{"region":"eu"}`, string(got.Config), "flipping the switch must keep the config")
 }
+
+func TestPluginKVRepository(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.PluginKV{}))
+	repo := NewPluginKVRepository(db)
+	ctx := context.Background()
+	put := func(tenant uint64, key, value string, expires *time.Time) {
+		t.Helper()
+		require.NoError(t, repo.Put(ctx, &types.PluginKV{
+			PluginID: "acme.x", TenantID: tenant, Key: key, Value: types.JSON(value),
+			ExpiresAt: expires, UpdatedAt: time.Now(),
+		}))
+	}
+	past := time.Now().Add(-time.Minute)
+	put(1, "cursor:a", `1`, nil)
+	put(1, "cursor:b", `2`, nil)
+	put(1, "cursor_x", `3`, nil) // "_" must not act as a LIKE wildcard
+	put(1, "old", `4`, &past)
+	put(2, "cursor:a", `99`, nil)
+	put(1, "cursor:a", `10`, nil) // upsert
+
+	got, err := repo.Get(ctx, "acme.x", 1, "cursor:a")
+	require.NoError(t, err)
+	require.JSONEq(t, `10`, string(got.Value))
+	got, err = repo.Get(ctx, "acme.x", 1, "old")
+	require.NoError(t, err)
+	require.Nil(t, got, "expired entries read as missing")
+
+	list, err := repo.List(ctx, "acme.x", 1, "cursor:", "", 10)
+	require.NoError(t, err)
+	require.Len(t, list, 2)
+	list, err = repo.List(ctx, "acme.x", 1, "cursor:", "cursor:a", 10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, "cursor:b", list[0].Key)
+
+	n, err := repo.Count(ctx, "acme.x", 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, n)
+	removed, err := repo.DeleteExpired(ctx, time.Now())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, removed)
+	ok, err := repo.Delete(ctx, "acme.x", 1, "cursor:b")
+	require.NoError(t, err)
+	require.True(t, ok)
+	got, _ = repo.Get(ctx, "acme.x", 2, "cursor:a")
+	require.JSONEq(t, `99`, string(got.Value), "tenants are separate partitions")
+}

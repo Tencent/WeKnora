@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -287,7 +288,19 @@ var egressPattern = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?)(
 // follows links anywhere). Private addresses stay unreachable either way.
 const EgressAnyHost = "*"
 
+// HostAPIScopes are the Host API scopes a plugin may ask for in
+// permissions.hostApi.
+var HostAPIScopes = []string{
+	// kv: the plugin's own key-value store in each tenant.
+	"kv",
+}
+
 func (m *Manifest) validatePermissions(add func(string, ...any)) {
+	for _, s := range m.Permissions.HostAPI {
+		if !slices.Contains(HostAPIScopes, s) {
+			add("permissions.hostApi %q is not a Host API scope (known: %s)", s, strings.Join(HostAPIScopes, ", "))
+		}
+	}
 	for _, e := range m.Permissions.Egress {
 		if e != EgressAnyHost && !egressPattern.MatchString(strings.ToLower(e)) {
 			add(

@@ -2,6 +2,10 @@ package container
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
@@ -13,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
 	"github.com/Tencent/WeKnora/internal/plugin/host"
+	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
@@ -48,6 +53,28 @@ type pluginActivators struct {
 // running before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
 	return []reconcile.Activator{a.Host, a.WebSearch, a.Connectors, a.Vendors, a.MCP, a.Skills}
+}
+
+// newPluginHostAPI serves the Host API and gives calls a way back to it: the
+// embedded host's plugins reach this node on loopback.
+func newPluginHostAPI(
+	cfg *config.Config, iv *activate.Invoker, repo interfaces.PluginKVRepository, cleaner interfaces.ResourceCleaner,
+) *hostapi.Handler {
+	issuer := hostapi.NewIssuerFromEnv()
+	url := strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_HOST_API_URL"))
+	if url == "" {
+		port := 8080
+		if cfg != nil && cfg.Server != nil && cfg.Server.Port > 0 {
+			port = cfg.Server.Port
+		}
+		url = fmt.Sprintf("http://127.0.0.1:%d", port)
+	}
+	iv.SetHostAPI(issuer, url)
+	kv := hostapi.NewKV(repo)
+	ctx, cancel := context.WithCancel(context.Background())
+	kv.StartSweeper(ctx, 10*time.Minute)
+	cleaner.RegisterWithName("PluginKVSweeper", func() error { cancel(); return nil })
+	return hostapi.NewHandler(issuer, kv)
 }
 
 // bindPluginActivators hands the activators what they need once the plugin

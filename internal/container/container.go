@@ -169,6 +169,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(activate.NewModelVendors))
 	must(container.Provide(pluginhost.NewManager))
 	must(container.Provide(newPluginInvoker))
+	must(container.Provide(repository.NewPluginKVRepository))
+	must(container.Provide(newPluginHostAPI))
 	must(container.Provide(activate.NewWebSearch))
 	must(container.Provide(activate.NewConnectors))
 	must(container.Provide(newMCPServiceRepository))
