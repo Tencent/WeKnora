@@ -15,6 +15,22 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+var syncScheduleParser = cron.NewParser(
+	cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+)
+
+// ValidateSyncSchedule accepts the same syntax as the scheduler. An empty
+// schedule disables automatic sync and remains valid for manual-only sources.
+func ValidateSyncSchedule(schedule string) error {
+	if schedule == "" {
+		return nil
+	}
+	if _, err := syncScheduleParser.Parse(schedule); err != nil {
+		return fmt.Errorf("invalid cron expression %q: %w", schedule, err)
+	}
+	return nil
+}
+
 // Scheduler manages cron-based periodic sync for data sources.
 //
 // robfig/cron fires at absolute wall-clock times (e.g. "0 0 * * * *" always fires
@@ -41,7 +57,7 @@ func NewScheduler(
 	taskEnqueuer interfaces.TaskEnqueuer,
 ) *Scheduler {
 	return &Scheduler{
-		cron: cron.New(cron.WithSeconds(), cron.WithChain(
+		cron: cron.New(cron.WithParser(syncScheduleParser), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
 		dsRepo:       dsRepo,
@@ -82,6 +98,13 @@ func (s *Scheduler) Stop() {
 
 // AddOrUpdate registers (or re-registers) a cron entry for the given data source.
 func (s *Scheduler) AddOrUpdate(ds *types.DataSource) error {
+	// Reject an invalid replacement before removing the working entry. Inactive
+	// sources must still be removable even if their stored schedule is invalid.
+	if ds.Status == types.DataSourceStatusActive {
+		if err := ValidateSyncSchedule(ds.SyncSchedule); err != nil {
+			return err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

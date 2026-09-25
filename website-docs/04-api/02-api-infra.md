@@ -376,11 +376,17 @@ curl $BASE/api/v1/datasource/ds-1 -H "Authorization: Bearer $TOKEN"
 
 用途：更新（`id/tenant_id/knowledge_base_id` 锁定为原值）。权限：Admin+。请求体同创建。
 
+PUT 整体替换数据源配置，不支持部分更新：请先 GET 详情，修改后回传完整对象（`name`、`type`、`config`、`sync_schedule`、`sync_mode`、`conflict_strategy`、`sync_deletions`、`sync_log_retention_days`、`status` 等）。`sync_schedule` 和 `sync_deletions` 总是按请求体写入：省略 `sync_schedule` 会清空为空字符串（仅手动同步，已有定时任务随之移除），省略 `sync_deletions` 即为 false；其他字段省略时是否保留原值不作保证。凭证不经本接口修改，请求体中的 `config.credentials` 会被忽略，保留已存凭证。
+
 响应：200 `DataSourceResponse`
 
 ```bash
 curl -X PUT $BASE/api/v1/datasource/ds-1 -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"name":"notion 同步 v2","type":"notion","knowledge_base_id":"kb-1","config":{}}'
+  -H 'Content-Type: application/json' \
+  -d '{"name":"notion 同步 v2","type":"notion","knowledge_base_id":"kb-1",
+       "config":{"type":"notion","resource_ids":["page-1"]},
+       "sync_schedule":"0 0 */6 * * *","sync_mode":"incremental","conflict_strategy":"overwrite",
+       "sync_deletions":true,"sync_log_retention_days":30,"status":"active"}'
 ```
 
 ### DELETE /api/v1/datasource/:id

@@ -1,4 +1,4 @@
-import { listModels, type ModelConfig } from '@/api/model'
+import type { ModelConfig } from '@/api/model'
 
 export interface TenantModelReadiness {
   chatCount: number
@@ -23,14 +23,5 @@ export function evaluateTenantModelReadiness(models: ModelConfig[]): TenantModel
     hasEmbedding,
     isReadyForDocumentKb: hasChat && hasEmbedding,
     isReadyForAgent: hasChat,
-  }
-}
-
-export async function fetchTenantModelReadiness(): Promise<TenantModelReadiness> {
-  try {
-    const models = await listModels()
-    return evaluateTenantModelReadiness(models || [])
-  } catch {
-    return evaluateTenantModelReadiness([])
   }
 }
