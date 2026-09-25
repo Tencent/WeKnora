@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   listGalleryImages,
@@ -10,12 +10,19 @@ import {
   type ImageListParams,
 } from '@/api/image-gallery'
 import { updateMyPreferences } from '@/api/auth'
+import EmptyState from '@/components/EmptyState.vue'
 import { galleryImageRequest } from './galleryImageSrc'
+import GalleryViewer, { type GalleryAttrRow } from './GalleryViewer.vue'
 
 const props = defineProps<{
   knowledgeBaseId: string
 }>()
 
+const emit = defineEmits<{
+  (e: 'open-source-doc', knowledgeId: string): void
+}>()
+
+const NS = 'knowledgeEditor.wikiBrowser.gallery'
 const { t, te } = useI18n()
 
 // ---------------------------------------------------------------------------
@@ -32,38 +39,23 @@ const keyword = ref('')
 const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 
-// The two scope switches in the toolbar row. Each has the same shape: the
-// inclusive position drops the constraint entirely, the custom position
-// opens the panel that edits it. "筛选：全显示" therefore really is a
-// switch — when it reads "全显示", no attribute constraint is sent at all.
-const searchScope = ref<'all' | 'custom'>('all')
-const filterScope = ref<'all' | 'custom'>('all')
+const filterPanelVisible = ref(false)
+const sortPanelVisible = ref(false)
+const scrollEl = ref<HTMLElement | null>(null)
 
-// Which settings panel is on screen. A panel opens as a popover under the
-// arrow that summoned it, and a pin moves it into the right-hand rail,
-// where the two panels take turns as tabs instead of both eating space.
-const openPanel = ref<'search' | 'filter' | ''>('')
-const pinnedPanel = ref<'search' | 'filter' | ''>('')
-const panelTab = ref<'search' | 'filter'>('search')
-// Where the floating panel hangs: captured from the arrow that opened it,
-// so it sits directly beneath that control instead of at a guessed spot.
-const panelPos = ref<{ top: number; left: number } | null>(null)
-const rootEl = ref<HTMLElement | null>(null)
-
-// Attribute selections: namespaced attr id -> selected allowed values (OR
-// within the attribute, AND across attributes). Free-text attributes have no
-// value list to pick from, so they carry their own literal selection.
+// Attribute selections for free-text ("keywords") attributes: namespaced attr
+// id -> literal values (OR within the attribute, AND across attributes).
 const attrSelections = ref<Record<string, string[]>>({})
 
 // Per-value verdicts, namespaced attr id -> value -> "off" | "on". An absent
-// key is the middle position: an image carrying that value stays exactly as
+// key is the neutral position: an image carrying that value stays exactly as
 // visible as it was, which is what makes the default state show everything.
 const attrVerdicts = ref<Record<string, Record<string, string>>>({})
 
 // ---------------------------------------------------------------------------
 // Gallery contract (self-describing, fetched once per mount)
 //
-// Everything the UI offers — filter panel sections, searchable fields, sort
+// Everything the UI offers — filter sections, searchable fields, sort
 // options — comes from the contract. No gallery rule is hardcoded here, so
 // new backend attributes and runtime policy edits light up on reload.
 // ---------------------------------------------------------------------------
@@ -92,17 +84,6 @@ const activeSearchIds = computed(() => {
 })
 
 // ---------------------------------------------------------------------------
-// Viewer state
-// ---------------------------------------------------------------------------
-const viewerOpen = ref(false)
-const viewerIndex = ref(0)
-const imageFailed = ref(false)
-
-const current = computed<ImageAsset | null>(() =>
-  viewerOpen.value && items.value.length ? items.value[viewerIndex.value] ?? null : null,
-)
-
-// ---------------------------------------------------------------------------
 // Image URL resolution
 //
 // Backend returns storage handles (local://, minio://, resource://, ...) which
@@ -112,11 +93,13 @@ const current = computed<ImageAsset | null>(() =>
 // ---------------------------------------------------------------------------
 const thumbUrls = ref<Record<string, string>>({})
 const thumbBroken = ref<Record<string, boolean>>({})
-const viewerUrl = ref('')
 // Object URLs keyed by the raw storage URL they were fetched for, so a
 // thumbnail and the viewer share one blob and a reload reuses what is already
 // on screen instead of fetching (and leaking) a fresh copy.
 const blobByRawUrl = new Map<string, string>()
+// Fetches in flight, so the grid and the viewer asking for the same image at
+// once share one request.
+const inflight = new Map<string, Promise<string>>()
 
 /** Revoke every cached object URL whose raw URL is not in keep. */
 function releaseBlobs(keep: Set<string> = new Set()): void {
@@ -127,19 +110,13 @@ function releaseBlobs(keep: Set<string> = new Set()): void {
   }
 }
 
-async function resolveImageSrc(rawUrl: string): Promise<string> {
+async function fetchBlobUrl(rawUrl: string): Promise<string> {
   const req = galleryImageRequest(rawUrl, props.knowledgeBaseId)
   if (!req) return rawUrl
-  const cached = blobByRawUrl.get(rawUrl)
-  if (cached) return cached
   try {
     const resp = await fetch(req.url, { headers: req.headers })
     if (!resp.ok) return rawUrl
-    const blob = await resp.blob()
-    // A concurrent resolve may have cached this URL meanwhile; keep one blob.
-    const raced = blobByRawUrl.get(rawUrl)
-    if (raced) return raced
-    const objectUrl = URL.createObjectURL(blob)
+    const objectUrl = URL.createObjectURL(await resp.blob())
     blobByRawUrl.set(rawUrl, objectUrl)
     return objectUrl
   } catch {
@@ -147,8 +124,15 @@ async function resolveImageSrc(rawUrl: string): Promise<string> {
   }
 }
 
-function thumbUrl(img: ImageAsset): string {
-  return thumbUrls.value[img.id] || img.url
+function resolveImageSrc(rawUrl: string): Promise<string> {
+  const cached = blobByRawUrl.get(rawUrl)
+  if (cached) return Promise.resolve(cached)
+  let pending = inflight.get(rawUrl)
+  if (!pending) {
+    pending = fetchBlobUrl(rawUrl).finally(() => inflight.delete(rawUrl))
+    inflight.set(rawUrl, pending)
+  }
+  return pending
 }
 
 async function resolveThumbnails(token: number) {
@@ -169,30 +153,6 @@ async function resolveThumbnails(token: number) {
 function onThumbError(id: string) {
   thumbBroken.value = { ...thumbBroken.value, [id]: true }
 }
-
-let viewerToken = 0
-
-watch(
-  () => current.value,
-  async (img) => {
-    if (!img) {
-      viewerUrl.value = ''
-      return
-    }
-    // Opening the viewer renders the <img> at once, while the blob the
-    // browser can actually display only exists after the proxy fetch below.
-    // In the meantime the element still shows the previous (or empty)
-    // source, whose error event flipped the failure flag — and the real
-    // image then arrived to a viewer already showing its failure state.
-    // The token keeps a stale fetch from winning a fast navigation race,
-    // and the flag is reset here, after the real source is in hand.
-    const token = ++viewerToken
-    const url = await resolveImageSrc(img.url)
-    if (token !== viewerToken) return
-    imageFailed.value = false
-    viewerUrl.value = url
-  },
-)
 
 // ---------------------------------------------------------------------------
 // Label helpers
@@ -275,34 +235,14 @@ function findAttrByRawName(name: string): GalleryResolvedAttr | undefined {
   return config.value.attributes.find((a) => a.name === name)
 }
 
-const currentAttrs = computed(() => {
-  if (!current.value) return [] as Array<{ key: string; label: string; value: string }>
-  return Object.entries(current.value.attrs).map(([name, raw]) => {
-    const attr = findAttrByRawName(name)
-    return {
-      key: name,
-      label: attr ? attrLabel(attr) : name,
-      value: displayObservedValue(attr, raw),
-    }
-  })
-})
-
 // ---------------------------------------------------------------------------
-// Filter verdicts
+// Filters
 //
-// One attribute value moves through three positions by click: neutral (leave
-// those images alone), "off" (hide them), "on" (show them whatever else says).
-// The middle position is the one a user starts at and returns to, so a value
-// the user never touched is absent from the map rather than stored as a word,
-// and never reaches the server.
+// One attribute value takes one of three positions: neutral (leave those
+// images alone), "off" (hide them), "on" (keep them even when another rule
+// hides them). A value the user never touched is absent from the map rather
+// than stored as a word, and never reaches the server.
 // ---------------------------------------------------------------------------
-// The filter panel's own switch: off means the verdicts are not imposed at
-// all, which is what the toolbar's 全显示 position shows.
-const filterScopeOn = computed({
-  get: () => filterScope.value === 'custom',
-  set: (on: boolean) => onFilterScopeChange(on ? 'custom' : 'all'),
-})
-
 const VERDICTS = ['default', 'off', 'on'] as const
 type Verdict = (typeof VERDICTS)[number]
 
@@ -319,229 +259,42 @@ const activeRules = computed(() => {
   return out
 })
 
+const activeSelections = computed(() =>
+  Object.fromEntries(Object.entries(attrSelections.value).filter(([, v]) => v.length)),
+)
+
+/** How many constraints narrow the list; the filter button shows it. */
+const activeFilterCount = computed(() => {
+  let n = Object.keys(activeSelections.value).length
+  for (const perValue of Object.values(activeRules.value)) n += Object.keys(perValue).length
+  if (searchMode.value === 'custom') n += 1
+  return n
+})
+
+const isNarrowed = computed(
+  () =>
+    !!keyword.value.trim() ||
+    Object.keys(activeRules.value).length > 0 ||
+    Object.keys(activeSelections.value).length > 0,
+)
+
 function verdictOf(attrId: string, value: string): Verdict {
   return (attrVerdicts.value[attrId]?.[value] as Verdict) || 'default'
 }
 
 function setVerdict(attrId: string, value: string, verdict: Verdict): void {
+  if (verdictOf(attrId, value) === verdict) return
   const perValue = { ...(attrVerdicts.value[attrId] || {}) }
   if (verdict === 'default') delete perValue[value]
   else perValue[value] = verdict
   attrVerdicts.value = { ...attrVerdicts.value, [attrId]: perValue }
-  // A verdict the user just expressed must take effect immediately: staying
-  // in "全显示" while the panel shows an off/on would silently ignore it.
-  // Clearing the last meaningful verdict returns to "全显示", since custom
-  // mode with no rules constrains nothing anyway.
-  const hasRules = Object.values(attrVerdicts.value).some((perValueInner) =>
-    Object.values(perValueInner).some((v) => v === 'off' || v === 'on'),
-  )
-  filterScope.value = hasRules ? 'custom' : 'all'
   resetPageAndReload()
 }
 
 function verdictLabel(v: Verdict): string {
-  if (v === 'off') return t('knowledgeEditor.wikiBrowser.gallery.verdictOff')
-  if (v === 'on') return t('knowledgeEditor.wikiBrowser.gallery.verdictOn')
-  return t('knowledgeEditor.wikiBrowser.gallery.verdictDefault')
-}
-
-// ---------------------------------------------------------------------------
-// Settings panels
-//
-// Both panels answer the same question — what may the gallery show — and both
-// open the same way: an arrow beside the toolbar control summons them as a
-// popover, and the pin on the panel's header moves it into the right-hand
-// rail. Pinning one keeps the other out of the rail, so the two never split
-// the image area between them.
-// ---------------------------------------------------------------------------
-function openSettingsPanel(panel: 'search' | 'filter', ev?: MouseEvent): void {
-  // A pinned rail already holds both panels as tabs; an arrow click merely
-  // turns to the requested one instead of spawning a second surface.
-  if (pinnedPanel.value) {
-    panelTab.value = panel
-    openPanel.value = ''
-    return
-  }
-  // The arrow is a toggle: a second press on the same arrow retracts the
-  // panel, which is also why its icon points up while the panel is out.
-  if (openPanel.value === panel) {
-    openPanel.value = ''
-    return
-  }
-  openPanel.value = panel
-  panelTab.value = panel
-  if (ev) updatePanelPosition(ev)
-}
-
-/** Anchor the floating panel just below the arrow that summoned it. */
-function updatePanelPosition(ev: MouseEvent): void {
-  const root = rootEl.value?.getBoundingClientRect()
-  const btn = (ev.currentTarget as HTMLElement | null)?.getBoundingClientRect()
-  if (!root || !btn) return
-  const width = 320
-  const left = Math.max(8, Math.min(btn.left - root.left, root.width - width - 12))
-  panelPos.value = { top: btn.bottom - root.top + 6, left }
-}
-
-const floatingStyle = computed(() =>
-  panelPos.value
-    ? { top: `${panelPos.value.top}px`, left: `${panelPos.value.left}px`, right: 'auto' }
-    : {},
-)
-
-// Any click landing outside the floating panel and outside the arrows closes
-// it: moving on to another toolbar control means leaving the panel. Clicks
-// inside the panel itself, and on the toggling arrows, are left alone.
-function onDocClick(e: MouseEvent): void {
-  if (!openPanel.value || pinnedPanel.value) return
-  const target = e.target as HTMLElement | null
-  if (!target) return
-  if (target.closest('.ig-panel-slot')) return
-  if (target.closest('.ig-scope-arrow')) return
-  openPanel.value = ''
-}
-
-function togglePin(panel: 'search' | 'filter'): void {
-  if (pinnedPanel.value === panel) {
-    pinnedPanel.value = ''
-    return
-  }
-  pinnedPanel.value = panel
-  panelTab.value = panel
-  openPanel.value = ''
-}
-
-function onFilterScopeChange(value: string | number | boolean): void {
-  filterScope.value = value === 'custom' ? 'custom' : 'all'
-  resetPageAndReload()
-}
-
-// ---------------------------------------------------------------------------
-// Loading
-// ---------------------------------------------------------------------------
-function buildParams(): ImageListParams {
-  const attrFilters: Record<string, string[]> = {}
-  for (const [id, values] of Object.entries(attrSelections.value)) {
-    if (values && values.length) attrFilters[id] = values
-  }
-  // The filter switch decides whether verdicts are imposed at all: reading
-  // "全显示" means the panel's verdicts are not applied, whatever is set in it.
-  const rules = filterScope.value === 'custom' ? activeRules.value : {}
-  const params: ImageListParams = {
-    keyword: keyword.value.trim() || undefined,
-    searchIn: activeSearchIds.value,
-    sortBy: sortBy.value || undefined,
-    sortOrder: sortOrder.value,
-    attrFilters: Object.keys(attrFilters).length ? attrFilters : undefined,
-    attrRules: Object.keys(rules).length ? rules : undefined,
-    page: page.value,
-    pageSize: pageSize.value,
-  }
-  return params
-}
-
-// Bumped by every listing, so a slower earlier response (a debounced search
-// overtaken by a page change) cannot overwrite the grid of a newer query.
-let listToken = 0
-
-async function reload() {
-  if (!props.knowledgeBaseId) return
-  const token = ++listToken
-  // Searching with every field switched off would silently fall back to the
-  // server default — not what a custom-mode user asked for. Short-circuit.
-  if (keyword.value.trim() && activeSearchIds.value.length === 0) {
-    items.value = []
-    total.value = 0
-    loading.value = false
-    return
-  }
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await listGalleryImages(props.knowledgeBaseId, buildParams())
-    if (token !== listToken) return
-    items.value = res.items
-    total.value = res.total
-    if (viewerOpen.value && viewerIndex.value >= res.items.length) closeViewer()
-    void resolveThumbnails(token)
-  } catch (e) {
-    if (token !== listToken) return
-    error.value = e instanceof Error ? e.message : String(e)
-    items.value = []
-    total.value = 0
-    thumbUrls.value = {}
-  } finally {
-    if (token === listToken) loading.value = false
-  }
-}
-
-function resetPageAndReload() {
-  page.value = 1
-  reload()
-}
-
-// ---------------------------------------------------------------------------
-// Personal state persistence (mode + per-field search toggles)
-// ---------------------------------------------------------------------------
-let prefsTimer: ReturnType<typeof setTimeout> | undefined
-function persistSearchPrefs() {
-  if (!configLoaded.value) return
-  if (prefsTimer) clearTimeout(prefsTimer)
-  prefsTimer = setTimeout(() => {
-    void updateMyPreferences({
-      gallery: { mode: searchMode.value, status: { ...searchStatus.value } },
-    })
-  }, 500)
-}
-
-// The search panel's master switch: on searches every eligible field, off
-// restricts the search to the fields the user switched on below it.
-const searchAllOn = computed({
-  get: () => searchMode.value === 'all',
-  set: (on: boolean) => onSearchModeChange(on ? 'all' : 'custom'),
-})
-
-function onSearchModeChange(value: string | number | boolean) {
-  searchMode.value = value === 'custom' ? 'custom' : 'all'
-  persistSearchPrefs()
-  resetPageAndReload()
-}
-
-// Reconcile the whole on/off map from one checkbox-group change, then
-// persist and re-query. In "all" mode every field is searched and the
-// checkboxes are only decorative (dimmed): touching one means the user
-// wants a custom selection, so the master switch drops to custom with
-// every field still on except the one just unticked.
-function onSearchFieldsChange(vals: Array<string | number | boolean>) {
-  const next: Record<string, string> = { ...searchStatus.value }
-  for (const attr of searchAttrs.value) {
-    next[attr.id] = vals.includes(attr.id) ? 'on' : 'off'
-  }
-  searchStatus.value = next
-  if (searchMode.value === 'all') searchMode.value = 'custom'
-  persistSearchPrefs()
-  resetPageAndReload()
-}
-
-// ---------------------------------------------------------------------------
-// Filter interactions
-// ---------------------------------------------------------------------------
-function onSearch() {
-  resetPageAndReload()
-}
-
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-function onSearchInput() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => resetPageAndReload(), 350)
-}
-
-function onAttrGroupChange(attrId: string, values: Array<string | number | boolean>) {
-  attrSelections.value = {
-    ...attrSelections.value,
-    [attrId]: values.map((v) => String(v)),
-  }
-  resetPageAndReload()
+  if (v === 'off') return t(`${NS}.verdictOff`)
+  if (v === 'on') return t(`${NS}.verdictOn`)
+  return t(`${NS}.verdictDefault`)
 }
 
 function onKeywordsInput(attrId: string, raw: string) {
@@ -557,67 +310,203 @@ function keywordsInputValue(attrId: string): string {
   return (attrSelections.value[attrId] || []).join(', ')
 }
 
-// Apply one verdict to every value of every value-typed filter attribute.
-// The "-" position clears all verdicts, which also drops the scope back to
-// "全显示": custom mode with no rules constrains nothing.
-function setAllVerdicts(verdict: Verdict): void {
-  const next: Record<string, Record<string, string>> = {}
-  for (const attr of filterAttrs.value) {
-    if (attr.type === 'keywords') continue
-    const perValue: Record<string, string> = { ...(attrVerdicts.value[attr.id] || {}) }
-    for (const v of attr.values || []) {
-      if (verdict === 'default') delete perValue[v.value]
-      else perValue[v.value] = verdict
-    }
-    if (Object.keys(perValue).length > 0) next[attr.id] = perValue
+/** Drop every constraint in the filter panel, search scope included. */
+function clearFilters(): void {
+  attrVerdicts.value = {}
+  attrSelections.value = {}
+  if (searchMode.value === 'custom') {
+    searchMode.value = 'all'
+    persistSearchPrefs()
   }
-  attrVerdicts.value = next
-  const hasRules = Object.values(next).some((perValue) =>
-    Object.values(perValue).some((v) => v === 'off' || v === 'on'),
-  )
-  filterScope.value = hasRules ? 'custom' : 'all'
   resetPageAndReload()
 }
 
-function hasActiveFilters(): boolean {
-  return !!keyword.value.trim() || Object.values(attrSelections.value).some((v) => v.length)
+/** The empty state's way back: forget the keyword as well. */
+function clearAll(): void {
+  keyword.value = ''
+  clearFilters()
+}
+
+// ---------------------------------------------------------------------------
+// Search scope (mode + per-field toggles, persisted as the user's own record)
+//
+// Ticking every field is the same as "all" mode, so the panel needs no
+// separate switch: the mode follows the ticks. The last ticked field cannot
+// be unticked — a search over no field would find nothing.
+// ---------------------------------------------------------------------------
+let prefsTimer: ReturnType<typeof setTimeout> | undefined
+function persistSearchPrefs() {
+  if (!configLoaded.value) return
+  if (prefsTimer) clearTimeout(prefsTimer)
+  prefsTimer = setTimeout(() => {
+    void updateMyPreferences({
+      gallery: { mode: searchMode.value, status: { ...searchStatus.value } },
+    })
+  }, 500)
+}
+
+function onSearchFieldToggle(attrId: string, checked: boolean) {
+  const on = new Set(activeSearchIds.value)
+  if (checked) on.add(attrId)
+  else on.delete(attrId)
+  const next: Record<string, string> = { ...searchStatus.value }
+  for (const attr of searchAttrs.value) next[attr.id] = on.has(attr.id) ? 'on' : 'off'
+  searchStatus.value = next
+  searchMode.value = on.size === searchAttrs.value.length ? 'all' : 'custom'
+  persistSearchPrefs()
+  if (keyword.value.trim()) resetPageAndReload()
+}
+
+function isLastSearchField(attrId: string): boolean {
+  const ids = activeSearchIds.value
+  return ids.length === 1 && ids[0] === attrId
+}
+
+// ---------------------------------------------------------------------------
+// Sort
+// ---------------------------------------------------------------------------
+const sortFieldLabel = computed(() => {
+  const attr = sortAttrs.value.find((a) => a.id === sortBy.value)
+  return attr ? attrLabel(attr) : ''
+})
+
+function selectSortField(id: string): void {
+  if (sortBy.value === id) return
+  sortBy.value = id
+  resetPageAndReload()
+}
+
+function selectSortOrder(order: 'asc' | 'desc'): void {
+  if (sortOrder.value === order) return
+  sortOrder.value = order
+  resetPageAndReload()
+}
+
+// ---------------------------------------------------------------------------
+// Loading
+// ---------------------------------------------------------------------------
+function buildParams(): ImageListParams {
+  const rules = activeRules.value
+  const selections = activeSelections.value
+  return {
+    keyword: keyword.value.trim() || undefined,
+    searchIn: activeSearchIds.value,
+    sortBy: sortBy.value || undefined,
+    sortOrder: sortOrder.value,
+    attrFilters: Object.keys(selections).length ? selections : undefined,
+    attrRules: Object.keys(rules).length ? rules : undefined,
+    page: page.value,
+    pageSize: pageSize.value,
+  }
+}
+
+// Bumped by every listing, so a slower earlier response (a debounced search
+// overtaken by a page change) cannot overwrite the grid of a newer query.
+let listToken = 0
+
+/**
+ * Fetch the current page. `focus` is where the viewer lands on the new page
+ * when it walked past a page edge; it is applied together with the new items
+ * so the viewer never renders a stale index against them.
+ */
+async function reload(focus?: 'first' | 'last') {
+  if (!props.knowledgeBaseId) return
+  const token = ++listToken
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await listGalleryImages(props.knowledgeBaseId, buildParams())
+    if (token !== listToken) return
+    items.value = res.items
+    total.value = res.total
+    if (focus && res.items.length) viewerIndex.value = focus === 'first' ? 0 : res.items.length - 1
+    else if (viewerOpen.value && viewerIndex.value >= res.items.length) closeViewer()
+    void resolveThumbnails(token)
+  } catch (e) {
+    if (token !== listToken) return
+    error.value = e instanceof Error ? e.message : String(e)
+    items.value = []
+    total.value = 0
+    thumbUrls.value = {}
+    closeViewer()
+  } finally {
+    if (token === listToken) loading.value = false
+  }
+}
+
+function resetPageAndReload() {
+  page.value = 1
+  scrollGridToTop()
+  reload()
+}
+
+function scrollGridToTop() {
+  scrollEl.value?.scrollTo({ top: 0 })
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => resetPageAndReload(), 350)
+}
+
+function onSearchNow() {
+  if (searchTimer) clearTimeout(searchTimer)
+  resetPageAndReload()
 }
 
 function onPageChange(next: number) {
   page.value = next
+  scrollGridToTop()
   reload()
 }
 
 // ---------------------------------------------------------------------------
 // Viewer
 // ---------------------------------------------------------------------------
+const viewerOpen = ref(false)
+const viewerIndex = ref(0)
+
 function openViewer(index: number) {
   viewerIndex.value = index
-  imageFailed.value = false
   viewerOpen.value = true
 }
 
 function closeViewer() {
-  viewerOpen.value = false
-}
-
-function prevImage() {
-  if (!items.value.length) return
-  viewerIndex.value = (viewerIndex.value - 1 + items.value.length) % items.value.length
-  imageFailed.value = false
-}
-
-function nextImage() {
-  if (!items.value.length) return
-  viewerIndex.value = (viewerIndex.value + 1) % items.value.length
-  imageFailed.value = false
-}
-
-function onViewerKey(e: KeyboardEvent) {
   if (!viewerOpen.value) return
-  if (e.key === 'Escape') closeViewer()
-  else if (e.key === 'ArrowLeft') prevImage()
-  else if (e.key === 'ArrowRight') nextImage()
+  viewerOpen.value = false
+  // The viewer may have walked onto another image, or another page; bring
+  // the card it stopped on into view so the grid picks up where it left off.
+  const index = viewerIndex.value
+  void nextTick(() => {
+    scrollEl.value
+      ?.querySelectorAll<HTMLElement>('.ig-card')
+      [index]?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+/** The viewer walked past the edge of this page: load the neighbour. */
+async function onViewerStep(delta: 1 | -1) {
+  const target = page.value + delta
+  if (target < 1 || (target - 1) * pageSize.value >= total.value) return
+  page.value = target
+  await reload(delta > 0 ? 'first' : 'last')
+}
+
+function onOpenSource(knowledgeId: string) {
+  closeViewer()
+  emit('open-source-doc', knowledgeId)
+}
+
+function attrRows(img: ImageAsset): GalleryAttrRow[] {
+  return Object.entries(img.attrs || {}).map(([name, raw]) => {
+    const attr = findAttrByRawName(name)
+    return {
+      key: name,
+      label: attr ? attrLabel(attr) : name,
+      value: displayObservedValue(attr, raw),
+    }
+  })
 }
 
 function sourceLabel(img: ImageAsset): string {
@@ -627,12 +516,7 @@ function sourceLabel(img: ImageAsset): string {
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
-onMounted(() => {
-  document.addEventListener('click', onDocClick)
-})
-
 onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocClick)
   if (searchTimer) clearTimeout(searchTimer)
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
@@ -650,7 +534,7 @@ let initToken = 0
 // everything scoped to the previous knowledge base is dropped first.
 async function initGallery() {
   const token = ++initToken
-  closeViewer()
+  viewerOpen.value = false
   items.value = []
   total.value = 0
   page.value = 1
@@ -658,12 +542,12 @@ async function initGallery() {
   sortBy.value = ''
   attrSelections.value = {}
   attrVerdicts.value = {}
-  filterScope.value = 'all'
   thumbUrls.value = {}
   thumbBroken.value = {}
   releaseBlobs()
   configLoaded.value = false
   config.value = { attribute_sources: [], attributes: [], mode: 'all', status: {} }
+  loading.value = true
   try {
     const cfg = await fetchGalleryConfig(props.knowledgeBaseId)
     if (token !== initToken) return
@@ -693,843 +577,740 @@ watch(
 </script>
 
 <template>
-  <div ref="rootEl" class="image-gallery" @keydown="onViewerKey">
-    <div class="ig-layout" :class="{ 'has-rail': !!pinnedPanel }">
-      <!--
-        One settings panel, two placements: pinning it moves it out of the
-        grid and into the right-hand rail, where the two panels take turns as
-        tabs. Only one can hold the rail, so the image area never has to share
-        its width with both of them.
-      -->
-      <aside
-        v-if="openPanel || pinnedPanel"
-        class="ig-panel-slot"
-        :class="{ 'is-floating': openPanel && !pinnedPanel }"
-        :style="openPanel && !pinnedPanel ? floatingStyle : undefined"
-      >
-        <div class="ig-panel-head">
-          <t-tabs v-model="panelTab" class="ig-panel-tabs">
-            <!-- Same order as the toolbar: search on the left, filter on the right. -->
-            <t-tab-panel value="search" :label="t('knowledgeEditor.wikiBrowser.gallery.panelSearch')" />
-            <t-tab-panel value="filter" :label="t('knowledgeEditor.wikiBrowser.gallery.panelFilter')" />
-          </t-tabs>
+  <div class="image-gallery">
+    <!-- Same shape as the documents tab: what is listed on the left, the
+         controls that narrow and order it on the right. -->
+    <div class="ig-toolbar">
+      <div class="ig-toolbar__summary">
+        <span class="ig-toolbar__title">{{ t(`${NS}.allImages`) }}</span>
+        <span v-if="configLoaded || total" class="ig-toolbar__count">
+          {{ t(isNarrowed ? `${NS}.countFiltered` : `${NS}.count`, { count: total }) }}
+        </span>
+      </div>
+
+      <div class="ig-toolbar__trailing">
+        <t-input
+          v-model="keyword"
+          :placeholder="t(`${NS}.searchPlaceholder`)"
+          :aria-label="t(`${NS}.searchPlaceholder`)"
+          clearable
+          class="ig-search"
+          @enter="onSearchNow"
+          @input="onSearchInput"
+          @clear="onSearchNow"
+        >
+          <template #prefix-icon><t-icon name="search" size="16px" /></template>
+        </t-input>
+
+        <t-popup
+          v-model:visible="filterPanelVisible"
+          trigger="click"
+          placement="bottom-right"
+          overlay-class-name="gallery-toolbar-popup"
+          :overlay-inner-style="{ padding: 0 }"
+        >
           <button
-            class="ig-pin"
-            :class="{ 'is-pinned': !!pinnedPanel }"
-            :title="pinnedPanel === panelTab ? t('knowledgeEditor.wikiBrowser.gallery.unpin') : t('knowledgeEditor.wikiBrowser.gallery.pin')"
-            @click="togglePin(panelTab)"
+            type="button"
+            class="ig-tool-btn"
+            :class="{ active: filterPanelVisible || activeFilterCount > 0 }"
+            :aria-expanded="filterPanelVisible"
           >
-            <t-icon :name="pinnedPanel === panelTab ? 'pin-filled' : 'pin'" />
+            <t-icon name="filter" size="16px" />
+            {{ t(`${NS}.filters`) }}
+            <span v-if="activeFilterCount" class="ig-tool-btn__count">{{ activeFilterCount }}</span>
           </button>
-        </div>
-
-        <div class="ig-panel-body">
-          <template v-if="panelTab === 'filter'">
-            <div class="ig-row">
-              <span class="ig-row-label">{{ t('knowledgeEditor.wikiBrowser.gallery.enableFilter') }}</span>
-              <t-switch v-model="filterScopeOn" />
-            </div>
-
-            <div v-if="filterAttrs.length" class="ig-attr-blocks">
-              <div v-for="attr in filterAttrs" :key="attr.id" class="ig-attr-block">
-                <div class="ig-attr-name" :title="attrDescription(attr)">{{ attrLabel(attr) }}</div>
-
-                <!--
-                  An attribute that declares values gets one row per value,
-                  each with three positions: leave the images carrying it
-                  alone, hide them, or force them back in.
-                -->
-                <div v-if="attr.type !== 'keywords'" class="ig-verdict-rows" :class="{ 'is-idle': !filterScopeOn }">
-                  <div v-for="v in attr.values || []" :key="v.value" class="ig-verdict-row">
-                    <t-tooltip :content="attrValueDescription(attr, v.value)">
-                      <span class="ig-verdict-value">{{ attrValueLabel(attr, v.value) }}</span>
-                    </t-tooltip>
-                    <div class="ig-verdict-group">
-                      <button
-                        v-for="verdict in VERDICTS"
-                        :key="verdict"
-                        type="button"
-                        class="ig-verdict"
-                        :class="['is-' + verdict, { 'is-active': verdictOf(attr.id, v.value) === verdict }]"
-                        @click="setVerdict(attr.id, v.value, verdict)"
-                      >
-                        {{ verdictLabel(verdict) }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <!--
-                  A free-text attribute has no value list to position, so it
-                  keeps the plain keyword box.
-                -->
-                <t-input
-                  v-else
-                  :value="keywordsInputValue(attr.id)"
-                  clearable
-                  class="ig-keywords"
-                  :placeholder="t('knowledgeEditor.wikiBrowser.gallery.keywordsPlaceholder')"
-                  @change="(v: string) => onKeywordsInput(attr.id, v)"
-                  @enter="(v: string) => onKeywordsInput(attr.id, v)"
-                />
-              </div>
-            </div>
-            <div v-else class="ig-no-attrs">{{ t('knowledgeEditor.wikiBrowser.gallery.noAttrs') }}</div>
-
-            <!--
-              One row to speak for every attribute at once: the same three
-              positions as a per-value row, applied to all of them in one
-              click.
-            -->
-            <div class="ig-row ig-apply-all">
-              <span class="ig-row-label">{{ t('knowledgeEditor.wikiBrowser.gallery.applyAll') }}</span>
-              <div class="ig-verdict-group">
-                <button
-                  v-for="verdict in VERDICTS"
-                  :key="verdict"
-                  type="button"
-                  class="ig-verdict"
-                  :class="['is-' + verdict]"
-                  @click="setAllVerdicts(verdict)"
-                >
-                  {{ verdictLabel(verdict) }}
+          <template #content>
+            <section class="ig-filter-panel" :aria-label="t(`${NS}.filters`)">
+              <header class="ig-filter-panel__header">
+                <strong>{{ t(`${NS}.filters`) }}</strong>
+                <button type="button" :disabled="!activeFilterCount" @click="clearFilters">
+                  {{ t(`${NS}.clearFilters`) }}
                 </button>
-              </div>
-            </div>
-          </template>
+              </header>
 
-          <template v-else>
-            <div class="ig-row">
-              <span class="ig-row-label">{{ t('knowledgeEditor.wikiBrowser.gallery.searchAll') }}</span>
-              <t-switch v-model="searchAllOn" />
-            </div>
-
-            <div v-if="searchAttrs.length">
-              <!--
-                The checkboxes stay visible next to the master switch like the
-                filter panel's verdicts do. In "all" mode they are dimmed —
-                every field is searched, so the ticks carry no weight — yet
-                still clickable: touching one drops the mode to custom. No
-                caption above them: showing and hiding it would shift them
-                when the switch is flipped.
-              -->
-              <t-checkbox-group
-                :value="activeSearchIds"
-                class="ig-search-fields"
-                :class="{ 'is-idle': searchMode === 'all' }"
-                @change="(vals: Array<string | number | boolean>) => onSearchFieldsChange(vals)"
-              >
-                <t-checkbox v-for="attr in searchAttrs" :key="attr.id" :value="attr.id" :label="attrLabel(attr)" />
-              </t-checkbox-group>
-            </div>
-          </template>
-        </div>
-      </aside>
-
-      <!-- Main content -->
-      <section class="ig-main">
-        <!--
-          Everything that controls the list sits on one horizontal bar, so
-          the image area below keeps all the vertical space it can get. The
-          two scope switches read as 全显示 / 自定义: the inclusive position
-          drops the constraint, and only the custom one has an arrow that
-          opens the panel editing it.
-        -->
-        <div class="ig-toolbar">
-          <t-input
-            v-model="keyword"
-            :placeholder="t('knowledgeEditor.wikiBrowser.gallery.searchPlaceholder')"
-            clearable
-            class="ig-search"
-            @enter="onSearch"
-            @input="onSearchInput"
-            @clear="onSearch"
-          >
-            <template #prefix-icon><t-icon name="search" /></template>
-          </t-input>
-
-          <div class="ig-scope">
-            <span class="ig-scope-name">{{ t('knowledgeEditor.wikiBrowser.gallery.searchScope') }}</span>
-            <!--
-              The scope word is a status, not a control: it names the mode
-              the search is in, and only the arrow beside it opens the panel
-              that changes it.
-            -->
-            <span class="ig-scope-value">
-              {{ searchScope === 'all' ? t('knowledgeEditor.wikiBrowser.gallery.scopeAll') : t('knowledgeEditor.wikiBrowser.gallery.scopeCustom') }}
-            </span>
-            <button
-              class="ig-scope-arrow"
-              :title="t('knowledgeEditor.wikiBrowser.gallery.editSearch')"
-              @click="openSettingsPanel('search', $event)"
-            >
-              <t-icon :name="openPanel === 'search' && !pinnedPanel ? 'chevron-up' : 'chevron-down'" />
-            </button>
-          </div>
-
-          <div class="ig-scope">
-            <span class="ig-scope-name">{{ t('knowledgeEditor.wikiBrowser.gallery.filterScope') }}</span>
-            <span class="ig-scope-value">
-              {{ filterScope === 'all' ? t('knowledgeEditor.wikiBrowser.gallery.filterOff') : t('knowledgeEditor.wikiBrowser.gallery.filterOn') }}
-            </span>
-            <button
-              class="ig-scope-arrow"
-              :title="t('knowledgeEditor.wikiBrowser.gallery.editFilter')"
-              @click="openSettingsPanel('filter', $event)"
-            >
-              <t-icon :name="openPanel === 'filter' && !pinnedPanel ? 'chevron-up' : 'chevron-down'" />
-            </button>
-          </div>
-
-          <span class="ig-scope-sep" />
-
-          <t-select v-if="sortAttrs.length" v-model="sortBy" class="ig-sort" @change="resetPageAndReload">
-            <t-option v-for="attr in sortAttrs" :key="attr.id" :value="attr.id" :label="attrLabel(attr)" />
-          </t-select>
-
-          <t-button theme="default" variant="outline" class="ig-order" @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'; resetPageAndReload()">
-            <t-icon :name="sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'" />
-            {{ sortOrder === 'asc' ? t('knowledgeEditor.wikiBrowser.gallery.orderAsc') : t('knowledgeEditor.wikiBrowser.gallery.orderDesc') }}
-          </t-button>
-
-          <span class="ig-count">{{ t('knowledgeEditor.wikiBrowser.gallery.count', { count: total }) }}</span>
-        </div>
-
-        <t-loading :loading="loading" class="ig-loading-area">
-          <div v-if="error" class="ig-error">{{ error }}</div>
-
-          <div v-else-if="!items.length" class="ig-empty">
-            {{ hasActiveFilters()
-              ? t('knowledgeEditor.wikiBrowser.gallery.emptyFiltered')
-              : t('knowledgeEditor.wikiBrowser.gallery.empty') }}
-          </div>
-
-          <div v-else class="ig-grid">
-            <button
-              v-for="(img, idx) in items"
-              :key="img.id"
-              type="button"
-              class="ig-card"
-              @click="openViewer(idx)"
-            >
-              <div class="ig-card-thumb">
-                <img
-                  v-if="!thumbBroken[img.id]"
-                  :src="thumbUrl(img)"
-                  :alt="img.caption"
-                  loading="lazy"
-                  @error="onThumbError(img.id)"
-                />
-                <div v-else class="ig-thumb-error">
-                  {{ t('knowledgeEditor.wikiBrowser.gallery.imageLoadError') }}
+              <div v-if="searchAttrs.length" class="ig-filter-section">
+                <div class="ig-filter-section__title">{{ t(`${NS}.searchIn`) }}</div>
+                <div class="ig-filter-section__hint">{{ t(`${NS}.searchInHint`) }}</div>
+                <div class="ig-search-fields">
+                  <t-checkbox
+                    v-for="attr in searchAttrs"
+                    :key="attr.id"
+                    :checked="activeSearchIds.includes(attr.id)"
+                    :disabled="isLastSearchField(attr.id)"
+                    :title="attrDescription(attr)"
+                    @change="(checked: boolean) => onSearchFieldToggle(attr.id, checked)"
+                  >
+                    {{ attrLabel(attr) }}
+                  </t-checkbox>
                 </div>
               </div>
-              <div class="ig-card-meta">
-                <div class="ig-card-caption">{{ img.caption || t('knowledgeEditor.wikiBrowser.gallery.noCaption') }}</div>
-                <div class="ig-card-source">{{ sourceLabel(img) }}</div>
+
+              <div v-if="filterAttrs.length" class="ig-filter-section">
+                <div class="ig-filter-section__title">{{ t(`${NS}.attrSection`) }}</div>
+                <div class="ig-filter-section__hint">{{ t(`${NS}.attrHint`) }}</div>
+                <div v-for="attr in filterAttrs" :key="attr.id" class="ig-attr">
+                  <div class="ig-attr__name">
+                    {{ attrLabel(attr) }}
+                    <t-tooltip v-if="attrDescription(attr)" :content="attrDescription(attr)">
+                      <t-icon name="help-circle" size="14px" class="ig-attr__help" />
+                    </t-tooltip>
+                  </div>
+                  <!-- A value list gets one row per value with the three
+                       positions side by side; a free-text attribute has
+                       nothing to position, so it keeps a keyword box. -->
+                  <template v-if="attr.type !== 'keywords'">
+                    <div v-for="v in attr.values || []" :key="v.value" class="ig-attr__row">
+                      <span class="ig-attr__value" :title="attrValueDescription(attr, v.value)">
+                        {{ attrValueLabel(attr, v.value) }}
+                      </span>
+                      <div class="ig-seg" role="radiogroup" :aria-label="attrValueLabel(attr, v.value)">
+                        <button
+                          v-for="verdict in VERDICTS"
+                          :key="verdict"
+                          type="button"
+                          role="radio"
+                          class="ig-seg__item"
+                          :class="['is-' + verdict, { active: verdictOf(attr.id, v.value) === verdict }]"
+                          :aria-checked="verdictOf(attr.id, v.value) === verdict"
+                          @click="setVerdict(attr.id, v.value, verdict)"
+                        >
+                          {{ verdictLabel(verdict) }}
+                        </button>
+                      </div>
+                    </div>
+                  </template>
+                  <t-input
+                    v-else
+                    :value="keywordsInputValue(attr.id)"
+                    clearable
+                    :placeholder="t(`${NS}.keywordsPlaceholder`)"
+                    @change="(v: string) => onKeywordsInput(attr.id, v)"
+                    @enter="(v: string) => onKeywordsInput(attr.id, v)"
+                  />
+                </div>
               </div>
-            </button>
-          </div>
-        </t-loading>
 
-        <t-pagination
-          v-if="total > pageSize"
-          :total="total"
-          :page-size="pageSize"
-          :current="page"
-          class="ig-pagination"
-          @current-change="onPageChange"
-        />
-      </section>
-    </div>
+              <div v-if="!searchAttrs.length && !filterAttrs.length" class="ig-filter-panel__empty">
+                {{ t(`${NS}.noAttrs`) }}
+              </div>
+            </section>
+          </template>
+        </t-popup>
 
-    <!-- Single-image viewer -->
-    <div v-if="viewerOpen && current" class="ig-viewer-overlay" @click.self="closeViewer">
-      <div class="ig-viewer">
-        <button class="ig-viewer-close" :title="t('knowledgeEditor.wikiBrowser.gallery.viewerClose')" @click="closeViewer">
-          <t-icon name="close" />
-        </button>
-        <button class="ig-nav ig-nav-prev" :title="t('knowledgeEditor.wikiBrowser.gallery.prev')" @click="prevImage">
-          <t-icon name="chevron-left" />
-        </button>
-
-        <div class="ig-viewer-image">
-          <!--
-            Rendered only once a displayable source exists: the raw
-            resource:// handle (or an empty string) would fire the error
-            handler and mask the image that is still being fetched.
-          -->
-          <img v-if="viewerUrl && !imageFailed" :src="viewerUrl" :alt="current.caption" @error="imageFailed = true" />
-          <div v-else-if="imageFailed" class="ig-viewer-image-error">{{ t('knowledgeEditor.wikiBrowser.gallery.imageLoadError') }}</div>
-        </div>
-
-        <button class="ig-nav ig-nav-next" :title="t('knowledgeEditor.wikiBrowser.gallery.next')" @click="nextImage">
-          <t-icon name="chevron-right" />
-        </button>
-
-        <aside class="ig-viewer-info">
-          <h3>{{ t('knowledgeEditor.wikiBrowser.gallery.attributes') }}</h3>
-          <div v-if="currentAttrs.length">
-            <div v-for="a in currentAttrs" :key="a.key" class="ig-info-row">
-              <span class="ig-info-key">{{ a.label }}</span>
-              <span class="ig-info-val">{{ a.value }}</span>
+        <t-popup
+          v-if="sortAttrs.length"
+          v-model:visible="sortPanelVisible"
+          trigger="click"
+          placement="bottom-right"
+          overlay-class-name="gallery-toolbar-popup"
+          :overlay-inner-style="{ padding: 0 }"
+        >
+          <button
+            type="button"
+            class="ig-tool-btn ig-sort-trigger"
+            :class="{ active: sortPanelVisible }"
+            :aria-label="`${t(`${NS}.sort`)}: ${sortFieldLabel}`"
+          >
+            <t-icon name="filter-sort" size="16px" />
+            <span class="ig-sort-trigger__label">{{ t(`${NS}.sort`) }} · {{ sortFieldLabel }}</span>
+            <t-icon :name="sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'" size="14px" />
+          </button>
+          <template #content>
+            <div class="ig-sort-panel" role="menu" :aria-label="t(`${NS}.sort`)">
+              <section class="ig-sort-group">
+                <div class="ig-sort-group__label">{{ t(`${NS}.sortField`) }}</div>
+                <div class="ig-sort-group__options">
+                  <button
+                    v-for="attr in sortAttrs"
+                    :key="attr.id"
+                    type="button"
+                    role="menuitemradio"
+                    class="ig-sort-option"
+                    :class="{ active: sortBy === attr.id }"
+                    :aria-checked="sortBy === attr.id"
+                    @click="selectSortField(attr.id)"
+                  >
+                    <span>{{ attrLabel(attr) }}</span>
+                    <t-icon v-if="sortBy === attr.id" name="check" size="14px" />
+                  </button>
+                </div>
+              </section>
+              <section class="ig-sort-group">
+                <div class="ig-sort-group__label">{{ t(`${NS}.sortOrder`) }}</div>
+                <div class="ig-sort-group__options">
+                  <button
+                    v-for="order in (['desc', 'asc'] as const)"
+                    :key="order"
+                    type="button"
+                    role="menuitemradio"
+                    class="ig-sort-option"
+                    :class="{ active: sortOrder === order }"
+                    :aria-checked="sortOrder === order"
+                    @click="selectSortOrder(order)"
+                  >
+                    <span>{{ t(order === 'asc' ? `${NS}.orderAsc` : `${NS}.orderDesc`) }}</span>
+                    <t-icon v-if="sortOrder === order" name="check" size="14px" />
+                  </button>
+                </div>
+              </section>
             </div>
-          </div>
-          <div v-else class="ig-info-muted">{{ t('knowledgeEditor.wikiBrowser.gallery.noAttrs') }}</div>
-
-          <h3>{{ t('knowledgeEditor.wikiBrowser.gallery.caption') }}</h3>
-          <p class="ig-info-text">{{ current.caption || t('knowledgeEditor.wikiBrowser.gallery.noCaption') }}</p>
-
-          <h3>{{ t('knowledgeEditor.wikiBrowser.gallery.ocr') }}</h3>
-          <p class="ig-info-text">{{ current.ocr_text || t('knowledgeEditor.wikiBrowser.gallery.noOcr') }}</p>
-
-          <h3>{{ t('knowledgeEditor.wikiBrowser.gallery.source') }}</h3>
-          <p class="ig-info-text">
-            {{ sourceLabel(current) }}
-            <span class="ig-info-sub">{{ current.knowledge_id }}</span>
-          </p>
-        </aside>
+          </template>
+        </t-popup>
       </div>
     </div>
+
+    <div ref="scrollEl" class="ig-scroll" :class="{ 'is-empty': !items.length }">
+      <t-loading :loading="loading" size="small" class="ig-loading">
+        <div v-if="error" class="ig-error">{{ error }}</div>
+
+        <EmptyState
+          v-else-if="!items.length && !loading"
+          icon="image"
+          :title="isNarrowed ? t(`${NS}.emptyFiltered`) : t(`${NS}.empty`)"
+          :description="isNarrowed ? '' : t(`${NS}.emptyHint`)"
+        >
+          <t-button v-if="isNarrowed" variant="outline" @click="clearAll">{{ t(`${NS}.clearFilters`) }}</t-button>
+        </EmptyState>
+
+        <div v-else class="ig-grid">
+          <button
+            v-for="(img, idx) in items"
+            :key="img.id"
+            type="button"
+            class="ig-card"
+            :class="{ 'is-disabled': !img.is_enabled }"
+            @click="openViewer(idx)"
+          >
+            <div class="ig-card__thumb">
+              <img
+                v-if="thumbUrls[img.id] && !thumbBroken[img.id]"
+                :src="thumbUrls[img.id]"
+                :alt="img.caption"
+                loading="lazy"
+                draggable="false"
+                @error="onThumbError(img.id)"
+              />
+              <div v-else-if="thumbBroken[img.id]" class="ig-card__broken">
+                <t-icon name="image-error" size="20px" />
+                <span>{{ t(`${NS}.imageLoadError`) }}</span>
+              </div>
+              <span v-if="!img.is_enabled" class="ig-card__badge">
+                {{ t(`${NS}.attr.builtin_is_enabled_value_false`) }}
+              </span>
+            </div>
+            <div class="ig-card__meta">
+              <div class="ig-card__caption" :class="{ 'is-empty': !img.caption }">
+                {{ img.caption || t(`${NS}.noCaption`) }}
+              </div>
+              <div class="ig-card__source" :title="sourceLabel(img)">
+                <t-icon name="file" size="12px" />
+                <span>{{ sourceLabel(img) }}</span>
+              </div>
+            </div>
+          </button>
+        </div>
+      </t-loading>
+    </div>
+
+    <div v-if="total > pageSize" class="ig-footer">
+      <t-pagination
+        :total="total"
+        :page-size="pageSize"
+        :current="page"
+        :show-page-size="false"
+        :total-content="false"
+        size="small"
+        @current-change="onPageChange"
+      />
+    </div>
+
+    <GalleryViewer
+      v-if="viewerOpen && items.length"
+      :items="items"
+      :index="viewerIndex"
+      :offset="(page - 1) * pageSize"
+      :total="total"
+      :loading="loading"
+      :thumb-urls="thumbUrls"
+      :resolve-src="resolveImageSrc"
+      :attr-rows="attrRows"
+      @select="(i: number) => (viewerIndex = i)"
+      @step="onViewerStep"
+      @close="closeViewer"
+      @open-source="onOpenSource"
+    />
   </div>
 </template>
 
-<style scoped>
+<style>
+/* Popups render outside the component, so their shell is styled unscoped;
+   same frame as the documents tab's filter popup. */
+.gallery-toolbar-popup .t-popup__content {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-xl);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 10%);
+}
+</style>
+
+<style scoped lang="less">
 .image-gallery {
-  position: relative;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 16px;
-  box-sizing: border-box;
-}
-
-.ig-layout {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: image-gallery;
 }
 
-/* A pinned panel takes the right column; the image area keeps the rest.
-   The panel precedes the main section in the DOM, so the columns it lands
-   in are pinned down explicitly instead of left to source order. */
-.ig-layout.has-rail {
-  grid-template-columns: minmax(0, 1fr) 300px;
-}
-.ig-layout.has-rail .ig-main {
-  grid-row: 1;
-  grid-column: 1;
-}
-.ig-layout.has-rail .ig-panel-slot {
-  grid-row: 1;
-  grid-column: 2;
-}
-
-/* -------------------------------------------------------------------------
-   Settings panel
-   One element, two placements: pinned it sits in the rail, otherwise it is
-   lifted out of the grid and floats over the image area near its toolbar
-   control. Keeping a single element means the two never drift apart.
-   ------------------------------------------------------------------------- */
-.ig-panel-slot {
-  display: none;
-  align-self: start;
-  max-height: 100%;
-}
-.ig-layout.has-rail .ig-panel-slot {
-  display: block;
-}
-
-.ig-panel-slot.is-floating {
-  display: block;
-  position: absolute;
-  top: 92px;
-  right: 28px;
-  width: 320px;
-  z-index: 20;
-  max-height: calc(100% - 120px);
-  overflow: auto;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-border);
-  border-radius: var(--td-radius-medium);
-  box-shadow: var(--td-shadow-card));
-}
-
-.ig-panel-head {
+// Mirrors .doc-filter-bar in KnowledgeBase.vue so switching tabs keeps the
+// toolbar in place.
+.ig-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  /* No bottom border here: the tab bar already draws one, and a second
-     divider under it just reads as visual noise. */
-}
-.ig-panel-tabs {
-  flex: 1 1 0;
-  min-width: 0;
-}
-.ig-pin {
-  /* The tab bar would otherwise stretch and shove the pin out of the head. */
+  justify-content: space-between;
+  gap: 16px;
   flex-shrink: 0;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &__summary {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    min-width: 0;
+    min-height: 32px;
+    line-height: 32px;
+  }
+
+  &__title {
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-md);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  &__count {
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-sm);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  &__trailing {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+}
+
+.ig-search {
+  width: 220px;
+  min-width: 100px;
+
+  :deep(.t-input) {
+    background: transparent;
+    border-color: var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
+    font-size: var(--app-text-md);
+  }
+}
+
+.ig-tool-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--app-radius-sm);
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
   background: transparent;
   color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-md);
+  white-space: nowrap;
   cursor: pointer;
-}
-.ig-pin:hover {
-  background: var(--td-bg-color-container-hover);
-}
-.ig-pin.is-pinned {
-  color: var(--td-brand-color);
+
+  &:hover,
+  &.active {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--app-focus-border);
+    outline-offset: 2px;
+  }
+
+  &__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 2px;
+    color: var(--td-brand-color);
+    font-weight: 600;
+    font-size: var(--app-text-xs);
+    font-variant-numeric: tabular-nums;
+  }
 }
 
-.ig-panel-body {
-  padding: 12px;
+.ig-sort-trigger {
+  max-width: 220px;
+
+  &__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
-.ig-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.ig-row-label {
-  font-size: var(--app-text-md);
+// Filter panel — same frame and type scale as .doc-filter-panel.
+.ig-filter-panel {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: min(600px, 80vh);
+  overflow-y: auto;
+  padding: 16px;
+  box-sizing: border-box;
   color: var(--td-text-color-primary);
-}
-.ig-hint {
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-placeholder);
-}
-.ig-attr-blocks {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.ig-attr-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ig-attr-name {
   font-size: var(--app-text-md);
-  font-weight: 600;
-  color: var(--td-text-color-primary);
+
+  button {
+    font: inherit;
+    cursor: pointer;
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+
+    strong {
+      font-size: var(--app-text-base);
+      font-weight: 600;
+    }
+
+    button {
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--td-text-color-secondary);
+      font-size: var(--app-text-sm);
+
+      &:hover:not(:disabled) { color: var(--td-brand-color); }
+      &:disabled { color: var(--td-text-color-disabled); cursor: default; }
+    }
+  }
+
+  &__empty {
+    padding: 8px 0;
+    color: var(--td-text-color-placeholder);
+  }
 }
-.ig-verdict-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+
+.ig-filter-section {
+  & + & {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--td-component-stroke);
+  }
+
+  &__title {
+    font-weight: 600;
+    line-height: 20px;
+  }
+
+  &__hint {
+    margin: 2px 0 10px;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-xs);
+    line-height: 17px;
+  }
 }
-/* A gated block reads as inactive: dimmed text and buttons, but still
-   clickable so the first touch can activate the master switch. */
-.ig-verdict-rows.is-idle,
-.ig-search-fields.is-idle {
-  opacity: 0.4;
-}
+
 .ig-search-fields {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.ig-verdict-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.ig-verdict-value {
-  font-size: var(--app-text-md);
-  color: var(--td-text-color-primary);
-  cursor: default;
-}
-.ig-verdict-group {
-  display: inline-flex;
-  border: 1px solid var(--td-component-border);
-  border-radius: var(--app-radius-sm);
-  overflow: hidden;
-}
-.ig-verdict {
-  min-width: 30px;
-  padding: 2px 6px;
-  border: none;
-  border-right: 1px solid var(--td-component-border);
-  background: var(--td-bg-color-container);
-  font-size: var(--app-text-sm);
-  line-height: 20px;
-  color: var(--td-text-color-secondary);
-  cursor: pointer;
-}
-.ig-verdict:last-child {
-  border-right: none;
-}
-.ig-verdict:hover {
-  background: var(--td-bg-color-container-hover);
-}
-.ig-verdict.is-active.is-default {
-  background: var(--td-bg-color-secondary);
-  color: var(--td-text-color-primary);
-  font-weight: 600;
-}
-.ig-verdict.is-active.is-off {
-  background: var(--td-error-color-1);
-  color: var(--td-error-color);
-  font-weight: 600;
-}
-.ig-verdict.is-active.is-on {
-  background: var(--td-success-color-1);
-  color: var(--td-success-color);
-  font-weight: 600;
-}
-
-/* Toolbar: one row, so nothing steals vertical space from the grid. */
-.ig-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
   flex-wrap: wrap;
-}
-.ig-search {
-  width: 200px;
-  max-width: 260px;
-}
-.ig-scope {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.ig-scope-name {
-  font-size: var(--app-text-md);
-  color: var(--td-text-color-secondary);
-  white-space: nowrap;
-}
-.ig-scope-value {
-  font-size: var(--app-text-md);
-  color: var(--td-text-color-primary);
-  white-space: nowrap;
-}
-.ig-scope-arrow {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--td-component-border);
-  border-radius: var(--td-radius-medium);
-  background: var(--td-bg-color-container);
-  color: var(--td-text-color-secondary);
-  cursor: pointer;
-}
-.ig-scope-arrow:hover:not(:disabled) {
-  border-color: var(--td-brand-color);
-  color: var(--td-brand-color);
-}
-.ig-scope-arrow:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.ig-scope-sep {
-  width: 1px;
-  height: 20px;
-  margin: 0 2px;
-  background: var(--td-component-border);
-}
-.ig-sort {
-  width: 140px;
-}
-.ig-order {
-  white-space: nowrap;
-}
-/* The button wraps its content in .t-button__text, an inline-flex box whose
-   default stretch pins the explicitly-sized 16px icon to the top of the 22px
-   line box, so the arrow reads as riding high; center it instead. */
-.ig-order :deep(.t-button__text) {
-  align-items: center;
-}
-.ig-count {
-  margin-left: auto;
-  font-size: var(--app-text-md);
-  color: var(--td-text-color-secondary);
-  white-space: nowrap;
+  gap: 4px 16px;
 }
 
-.ig-filter-group {
-  margin-bottom: 18px;
+.ig-attr {
+  & + & { margin-top: 12px; }
+
+  &__name {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+  }
+
+  &__help {
+    color: var(--td-text-color-placeholder);
+    cursor: help;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 32px;
+  }
+
+  &__value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
-.ig-filter-label {
-  display: block;
-  font-size: var(--app-text-md);
-  color: var(--td-text-color-secondary);
-  margin-bottom: 8px;
-}
-.ig-search-hint {
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-placeholder);
-  margin-top: 6px;
-}
-.ig-search-fields {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.ig-attr-filter {
-  margin-bottom: 12px;
-}
-.ig-attr-name {
-  font-size: var(--app-text-md);
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-.ig-no-attrs {
-  font-size: var(--app-text-md);
-}
-.ig-apply-all {
-  margin-top: 4px;
-}
-.ig-apply-all .ig-verdict-group {
+
+// Three-position switch, drawn like the documents tab's view toggle.
+.ig-seg {
+  display: inline-flex;
   flex-shrink: 0;
+  padding: 2px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+
+  &__item {
+    height: 24px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--app-radius-xs);
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+    white-space: nowrap;
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+    &:hover { color: var(--td-text-color-primary); }
+
+    &.active {
+      background: var(--td-bg-color-container);
+      color: var(--td-text-color-primary);
+      box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+    }
+
+    &.is-off.active { color: var(--td-error-color); }
+    &.is-on.active { color: var(--td-brand-color); }
+
+    &:focus-visible {
+      outline: 2px solid var(--app-focus-border);
+      outline-offset: 1px;
+    }
+  }
 }
 
-/* Main */
-.ig-main {
+// Sort panel — same shape as .document-sort-panel.
+.ig-sort-panel {
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  box-sizing: border-box;
+  color: var(--td-text-color-primary);
+}
+
+.ig-sort-group {
+  padding: 7px 6px 8px;
+
+  & + & { border-top: 1px solid var(--td-component-stroke); }
+
+  &__label {
+    padding: 0 4px 6px;
+    font-size: var(--app-text-md);
+    font-weight: 600;
+    line-height: 20px;
+  }
+
+  &__options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+}
+
+.ig-sort-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-md);
+  cursor: pointer;
+
+  &:hover { background: var(--td-bg-color-secondarycontainer); }
+
+  &.active {
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+}
+
+// Grid
+.ig-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 0;
+
+  &.is-empty {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.ig-loading {
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-.ig-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-  flex-wrap: wrap;
-}
-.ig-search {
-  flex: 1;
-  min-width: 220px;
-}
-.ig-sort {
-  width: 160px;
-}
-.ig-count {
-  font-size: var(--app-text-md);
-  color: var(--td-text-color-secondary);
-  white-space: nowrap;
-}
-.ig-loading-area {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-.ig-error {
-  color: var(--td-error-color);
-  padding: 16px 0;
-}
-.ig-empty {
-  color: var(--td-text-color-placeholder);
-  padding: 48px 0;
-  text-align: center;
 }
 
-/* Grid */
+.ig-error {
+  padding: 16px 0;
+  color: var(--td-error-color);
+}
+
 .ig-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
+  gap: 12px;
+  align-content: start;
 }
+
 .ig-card {
-  border: 1px solid var(--td-component-border);
-  border-radius: var(--app-radius-md);
-  overflow: hidden;
-  background: var(--td-bg-color-container);
-  cursor: pointer;
-  padding: 0;
-  text-align: left;
-  transition: box-shadow var(--app-motion-fast), transform var(--app-motion-fast);
   display: flex;
   flex-direction: column;
-}
-.ig-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  transform: translateY(-2px);
-}
-.ig-card-thumb {
-  aspect-ratio: 4 / 3;
-  background: #f3f3f3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-.ig-card-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.ig-thumb-error {
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-placeholder);
-  padding: 0 8px;
-  text-align: center;
-}
-.ig-card-meta {
-  padding: 8px 10px;
-}
-.ig-card-caption {
-  font-size: var(--app-text-md);
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.ig-card-source {
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-secondary);
-  margin-top: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ig-pagination {
-  margin-top: 16px;
-  justify-content: center;
-}
-
-/* Viewer */
-.ig-viewer-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.72);
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  box-sizing: border-box;
-}
-.ig-viewer {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1fr 340px;
-  gap: 0;
-  width: min(1100px, 96vw);
-  height: min(80vh, 760px);
-  background: var(--td-bg-color-container);
-  border-radius: var(--app-radius-xl);
-  overflow: hidden;
-}
-.ig-viewer-image {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #1a1a1a;
-  padding: 12px;
   min-width: 0;
-}
-.ig-viewer-image img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-.ig-viewer-image-error {
-  color: #ddd;
-}
-.ig-viewer-info {
-  padding: 20px;
-  overflow: auto;
-  border-left: 1px solid var(--td-component-border);
-}
-.ig-viewer-info h3 {
-  font-size: var(--app-text-md);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--td-text-color-secondary);
-  margin: 16px 0 8px;
-}
-.ig-viewer-info h3:first-child {
-  margin-top: 0;
-}
-.ig-info-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 0;
-  font-size: var(--app-text-base);
-}
-.ig-info-key {
-  color: var(--td-text-color-secondary);
-}
-.ig-info-val {
-  font-weight: 500;
-  text-align: right;
-}
-.ig-info-text {
-  font-size: var(--app-text-base);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-}
-.ig-info-muted {
-  color: var(--td-text-color-placeholder);
-  font-size: var(--app-text-base);
-}
-.ig-info-sub {
-  display: block;
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-placeholder);
-  margin-top: 2px;
-  word-break: break-all;
-}
-.ig-viewer-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-  border: none;
-  background: rgba(0, 0, 0, 0.45);
-  color: #fff;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%);
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--td-component-stroke) 55%, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgb(0 0 0 / 7%);
+
+    .ig-card__thumb img { transform: scale(1.03); }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--app-focus-border);
+    outline-offset: 2px;
+  }
+
+  &.is-disabled .ig-card__thumb img { opacity: 0.55; }
+
+  &__thumb {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: var(--td-bg-color-secondarycontainer);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform var(--app-motion-slow) ease;
+    }
+  }
+
+  &__broken {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-sm);
+    text-align: center;
+  }
+
+  &__badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 0 6px;
+    border-radius: var(--app-radius-xs);
+    background: rgb(0 0 0 / 55%);
+    color: #fff;
+    font-size: var(--app-text-xs);
+    line-height: 18px;
+  }
+
+  &__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px 12px;
+  }
+
+  &__caption {
+    display: -webkit-box;
+    min-height: calc(2 * 1.5em);
+    overflow: hidden;
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-md);
+    line-height: 1.5;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+
+    &.is-empty { color: var(--td-text-color-placeholder); }
+  }
+
+  &__source {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-sm);
+
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.ig-footer {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--td-component-stroke);
 }
-.ig-nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-  border: none;
-  background: rgba(0, 0, 0, 0.45);
-  color: #fff;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.ig-nav-prev {
-  left: 12px;
-}
-.ig-nav-next {
-  right: 352px;
+
+@container image-gallery (max-width: 780px) {
+  .ig-toolbar { flex-wrap: wrap; gap: 12px; }
+  .ig-toolbar__trailing { width: 100%; }
+  .ig-search { flex: 1; width: auto; }
 }
 </style>
