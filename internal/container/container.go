@@ -199,6 +199,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
 	must(container.Provide(mcp.NewMCPManager))
+	must(container.Invoke(registerMCPCleanup))
 	must(container.Provide(mcp.NewOAuthManager))
 
 	// Sandbox manager fallback is disabled; executable backends are resolved
@@ -1681,6 +1682,15 @@ func registerLangfuseCleanup(mgr *langfuse.Manager, cleaner interfaces.ResourceC
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return mgr.Shutdown(ctx)
+	})
+}
+
+// registerMCPCleanup closes MCP connections on shutdown, so remote servers see
+// their sessions end instead of waiting for them to time out.
+func registerMCPCleanup(mgr *mcp.MCPManager, cleaner interfaces.ResourceCleaner) {
+	cleaner.RegisterWithName("MCPManager", func() error {
+		mgr.Shutdown()
+		return nil
 	})
 }
 
