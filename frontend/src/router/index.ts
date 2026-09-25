@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { defineComponent } from 'vue'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
@@ -11,6 +12,11 @@ import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
+
+// views/platform/index.vue always mounts the settings modal and opens it when
+// the path is /platform/settings, so this route only has to own the URL.
+// Rendering Settings.vue here would mount a second, independent copy.
+const SettingsRouteOutlet = defineComponent({ name: 'SettingsRouteOutlet', render: () => null })
 
 function isLiteEdition(authStore: ReturnType<typeof useAuthStore>) {
   return authStore.isLiteMode || localStorage.getItem('weknora_lite_mode') === 'true'
@@ -99,7 +105,7 @@ const router = createRouter({
         {
           path: "settings",
           name: "settings",
-          component: () => import("../views/settings/Settings.vue"),
+          component: SettingsRouteOutlet,
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
