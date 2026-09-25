@@ -148,7 +148,7 @@ func (s *ImageMultimodalService) tracker() SpanTracker {
 }
 
 // Handle implements asynq handler for TypeImageMultimodal.
-func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) error {
+func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (retErr error) {
 	var payload types.ImageMultimodalPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("unmarshal image multimodal payload: %w", err)
@@ -163,11 +163,27 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// A reparse re-seeded the fan-in counter for its own images. Counting
+	// this stale image would drain a slot of the new run and finalize it
+	// before its images are done.
+	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
+		logger.Infof(ctx, "[ImageMultimodal] Attempt %d of %s superseded, dropping image %s",
+			payload.Attempt, payload.KnowledgeID, payload.ImageURL)
+		return nil
+	}
+
 	// Drop orphaned or user-aborted work before touching VLM. Missing
 	// knowledge/KB rows are permanent failures — retrying only burns queue
 	// capacity (asynq default MaxRetry=25 on legacy tasks).
 	drop, dropErr := s.shouldDropOrphanedMultimodal(ctx, &payload)
 	if dropErr != nil {
+		if isFinalAsynqAttempt(ctx) {
+			// No retry follows, so this image must still be counted or
+			// the parent never reaches post-process.
+			if err := s.checkAndFinalizeAllImages(ctx, payload); err != nil {
+				return errors.Join(dropErr, err)
+			}
+		}
 		return dropErr
 	}
 	if drop {
@@ -176,8 +192,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, payload.ImageURL)
 		// Still count this image toward the parent finalize gate so a task
 		// of dropped orphans cannot strand multimodal:pending forever.
-		s.checkAndFinalizeAllImages(ctx, payload)
-		return nil
+		return s.checkAndFinalizeAllImages(ctx, payload)
 	}
 
 	tracker := s.tracker()
@@ -195,7 +210,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	var handleErr error
 	defer func() {
 		if handleErr == nil || isFinalAsynqAttempt(ctx) {
-			s.checkAndFinalizeAllImages(ctx, payload)
+			if err := s.checkAndFinalizeAllImages(ctx, payload); err != nil && retErr == nil {
+				retErr = err
+			}
 		} else {
 			logger.Infof(ctx,
 				"[ImageMultimodal] Skip finalize on retryable error for %s (will count on last attempt)",
@@ -806,42 +823,57 @@ func multimodalPendingKey(knowledgeID string) string {
 	return fmt.Sprintf("multimodal:pending:%s", knowledgeID)
 }
 
-// checkAndFinalizeAllImages decrements the parent's pending-image counter and
-// enqueues post-process once the counter reaches zero.
-func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, payload types.ImageMultimodalPayload) {
-	if s.redisClient == nil {
-		s.enqueueKnowledgePostProcessTask(ctx, payload)
-		return
-	}
-
+// checkAndFinalizeAllImages counts one image of the parent knowledge and,
+// once every image is counted, hands the knowledge to post-process. An error
+// means post-process could not be enqueued; the caller must fail the task so
+// the row is not left in "processing" with nobody to move it on.
+func (s *ImageMultimodalService) checkAndFinalizeAllImages(
+	ctx context.Context, payload types.ImageMultimodalPayload,
+) error {
 	redisKey := multimodalPendingKey(payload.KnowledgeID)
 
-	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
-	if err != nil && err != redis.Nil {
-		// Redis hiccup must not strand the parent knowledge. Best-effort:
-		// enqueue post-process anyway. KnowledgePostProcess is idempotent
-		// (it transitions parse_status processing → completed under a row
-		// guard), so a duplicate triggered by a sibling image is harmless.
-		// The alternative — silently returning — is what produced the
-		// "permanently stuck" reports we are fixing here.
-		logger.Warnf(ctx,
-			"[ImageMultimodal] Decrement failed for %s (%v); fallback-enqueueing post-process",
-			payload.KnowledgeID, err)
-		s.enqueueKnowledgePostProcessTask(ctx, payload)
-		return
+	var pendingCount int64
+	if s.redisClient == nil {
+		pendingCount = liteMultimodalDecrBy(redisKey, 1)
+	} else {
+		var err error
+		pendingCount, err = s.redisClient.Decr(ctx, redisKey).Result()
+		if err != nil && err != redis.Nil {
+			// Redis hiccup must not strand the parent knowledge. Best-effort:
+			// enqueue post-process anyway. KnowledgePostProcess is idempotent
+			// (it transitions parse_status processing → completed under a row
+			// guard), so a duplicate triggered by a sibling image is harmless.
+			// The alternative — silently returning — is what produced the
+			// "permanently stuck" reports we are fixing here.
+			logger.Warnf(ctx,
+				"[ImageMultimodal] Decrement failed for %s (%v); fallback-enqueueing post-process",
+				payload.KnowledgeID, err)
+			return s.enqueueKnowledgePostProcessTask(ctx, payload)
+		}
 	}
 
-	if pendingCount <= 0 {
-		logger.Infof(ctx, "[ImageMultimodal] All images processed for knowledge %s. Finalizing...", payload.KnowledgeID)
+	if pendingCount > 0 {
+		return nil
+	}
+	logger.Infof(ctx, "[ImageMultimodal] All images processed for knowledge %s. Finalizing...", payload.KnowledgeID)
+	// Enqueue before dropping the counter: a retry of this task then finds
+	// the key at or below zero and enqueues again.
+	if err := s.enqueueKnowledgePostProcessTask(ctx, payload); err != nil {
+		return err
+	}
+	if s.redisClient == nil {
+		liteMultimodalDel(redisKey)
+	} else {
 		s.redisClient.Del(ctx, redisKey)
-
-		s.enqueueKnowledgePostProcessTask(ctx, payload)
 	}
+	return nil
 }
 
-func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Context, payload types.ImageMultimodalPayload) {
+func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(
+	ctx context.Context, payload types.ImageMultimodalPayload,
+) error {
 	if s.taskEnqueuer == nil {
-		return
+		return nil
 	}
 
 	taskPayload := types.KnowledgePostProcessPayload{
@@ -849,19 +881,22 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 		KnowledgeID:     payload.KnowledgeID,
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		Language:        payload.Language,
+		// Lets post-process skip itself when a reparse superseded the run.
+		Attempt: payload.Attempt,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to marshal post process payload: %v", err)
-		return
+		return fmt.Errorf("marshal post process payload: %w", err)
 	}
 
 	task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
 		knowledgePostProcessTaskOptions()...)
-	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to enqueue post process task for %s: %v", payload.KnowledgeID, err)
-	} else {
-		logger.Infof(ctx, "[ImageMultimodal] Enqueued post process task for %s", payload.KnowledgeID)
+	if err := enqueueWithRetry(ctx, s.taskEnqueuer, task); err != nil {
+		logger.Errorf(ctx, "[ImageMultimodal] Failed to enqueue post process task for %s: %v", payload.KnowledgeID, err)
+		return err
 	}
+	logger.Infof(ctx, "[ImageMultimodal] Enqueued post process task for %s", payload.KnowledgeID)
+	return nil
 }

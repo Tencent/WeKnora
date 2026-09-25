@@ -1452,6 +1452,16 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
             delete traceAvailableById[item.id];
             }
         });
+        // A requested row the batch no longer returns is gone (deleted
+        // elsewhere, replaced by a data-source sync). Left in the list it
+        // kept its in-flight status, so its spinner and this poll never ended.
+        const returnedIds = new Set((result.data as KnowledgeCard[]).map(item => item.id));
+        const goneIds = new Set(analyzeList.map(item => item.id).filter(id => !returnedIds.has(id)));
+        if (goneIds.size > 0) {
+          const before = cardList.value.length;
+          cardList.value = cardList.value.filter(card => !goneIds.has(card.id));
+          total.value = Math.max(0, total.value - (before - cardList.value.length));
+        }
       }
       if (shouldRefreshWikiStatus) {
         void fetchWikiStatusOnce();
