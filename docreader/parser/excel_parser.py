@@ -21,7 +21,11 @@ from docreader.parser.excel_convert import (
     normalize_excel_bytes,
 )
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
-from docreader.parser.xlsx_repair import repair_xlsx_bytes, sanitize_xlsx_styles
+from docreader.parser.xlsx_repair import (
+    repair_xlsx_bytes,
+    sanitize_xlsx_styles,
+    strip_unreadable_ranges_xlsx,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +209,9 @@ def _prepare_xlsx_bytes(data: bytes) -> bytes:
     repaired = repair_xlsx_bytes(data)
     if repaired is not None:
         data = repaired
+    readable = strip_unreadable_ranges_xlsx(data)
+    if readable is not None:
+        data = readable
     try:
         return fill_merged_cells_xlsx(data)
     except TypeError:
