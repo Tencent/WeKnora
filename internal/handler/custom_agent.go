@@ -37,6 +37,7 @@ type CustomAgentHandler struct {
 	// sandboxConfigs validates an agent's sandbox backend selection. Optional —
 	// nil in partially-wired unit tests, where the selection is left unchecked.
 	sandboxConfigs sandboxConfigLookup
+	desktop        bool
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -46,6 +47,7 @@ func NewCustomAgentHandler(
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
 	userService interfaces.UserService,
 	sandboxConfigs *service.TenantSandboxConfigService,
+	host service.HostSandboxManager,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service:        service,
@@ -53,6 +55,7 @@ func NewCustomAgentHandler(
 		disabledRepo:   disabledRepo,
 		userService:    userService,
 		sandboxConfigs: sandboxConfigs,
+		desktop:        host.Desktop,
 	}
 }
 
@@ -742,6 +745,12 @@ func (h *CustomAgentHandler) validateAgentSandboxConfig(
 	ctx context.Context, cfg types.CustomAgentConfig,
 ) error {
 	configID := strings.TrimSpace(cfg.SandboxConfigID)
+	if h.desktop {
+		if configID != "" {
+			return errors.NewBadRequestError("Lite 不支持为智能体绑定沙箱配置")
+		}
+		return nil
+	}
 	if configID == "" || h.sandboxConfigs == nil {
 		// Empty means the deployment-wide default, which always exists.
 		return nil

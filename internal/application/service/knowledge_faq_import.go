@@ -1975,7 +1975,12 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: updated similar questions (answers changed): %v", updatedQuestions)
 	}
 
-	// 3. 删除不再存在的相似问索引
+	// 3. 删除不再存在的相似问索引，以及即将重建的旧索引。
+	// 不能依赖 BatchIndex 覆盖同一 SourceID：ES v8、Qdrant 等引擎每次写入
+	// 生成新文档 ID，不先删会留下内容过期的重复条目。
+	for _, info := range indexInfoToUpdate {
+		sourceIDsToDelete = append(sourceIDsToDelete, info.SourceID)
+	}
 	if len(sourceIDsToDelete) > 0 {
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleting %d obsolete sourceIDs: %v", len(sourceIDsToDelete), sourceIDsToDelete)
 		if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil {
@@ -2675,8 +2680,8 @@ func (s *knowledgeService) executeFAQMergeOperations(
 			return mergedCount, fmt.Errorf("failed to batch save merged chunks: %w", err)
 		}
 
-		// 4. 重建索引（EFPutDocument 会自动覆盖相同 SourceID）
-		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, mergedChunks, embeddingModel, false, false); err != nil {
+		// 4. 重建索引。先删旧索引：ES v8、Qdrant 等引擎不会覆盖相同 SourceID。
+		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, mergedChunks, embeddingModel, false, true); err != nil {
 			return mergedCount, fmt.Errorf("failed to re-index merged chunks: %w", err)
 		}
 

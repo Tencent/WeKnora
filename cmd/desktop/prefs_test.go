@@ -7,8 +7,66 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDesktopSigningKeyKeepsExistingAESHMAC(t *testing.T) {
+	dir := t.TempDir()
+	aes := "abcdefghijklmnopqrstuvwxyz123456"
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
+	t.Setenv("JWT_SECRET", "weknora-jwt-secret")
+	t.Setenv("SYSTEM_AES_KEY", aes)
+	require.Equal(t, aes, string(utils.SystemHMACKey()))
+	require.NoError(t, ensureDesktopSigningKeyInDir(dir))
+	require.Equal(t, aes, string(utils.SystemHMACKey()))
+	_, err := os.Stat(filepath.Join(dir, "signing.key"))
+	require.True(t, os.IsNotExist(err), "the AES key must not be copied into signing.key")
+	require.NotEqual(t, aes, os.Getenv("JWT_SECRET"))
+	require.GreaterOrEqual(t, len(os.Getenv("JWT_SECRET")), 32)
+}
+
+func TestDesktopLocalFilesDir(t *testing.T) {
+	require.Equal(t, filepath.Join("/Users/dev", ".weknora", "data", "files"), desktopLocalFilesDir("/Users/dev"))
+}
+
+func TestUseDesktopFilesDirReplacesDockerDefault(t *testing.T) {
+	require.True(t, useDesktopFilesDir(""))
+	require.True(t, useDesktopFilesDir("/data/files"))
+	require.True(t, useDesktopFilesDir("./data/files"))
+	require.False(t, useDesktopFilesDir("/Users/dev/custom-files"))
+}
+
+func TestConfigureDesktopFileStorageUsesHomeWeKnora(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", "/data/files")
+	configureDesktopFileStorage("")
+	require.Equal(t, filepath.Join(home, ".weknora", "data", "files"), os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	info, err := os.Stat(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+}
+
+func TestLegacyDesktopFilesDirFollowsTheOldResolution(t *testing.T) {
+	appSupport := "/Users/dev/Library/Application Support/WeKnora"
+	require.Equal(t, filepath.Join(appSupport, "data", "files"), legacyDesktopFilesDir("", appSupport))
+	require.Equal(t, filepath.Join(appSupport, "data", "files"), legacyDesktopFilesDir("/data/files", appSupport))
+	require.Equal(t, filepath.Join(appSupport, "custom", "files"), legacyDesktopFilesDir("custom/files", appSupport))
+}
+
+func TestConfigureDesktopFileStorageMigratesFromTheBundleDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", "custom/files")
+	old := filepath.Join(home, "Library", "Application Support", "WeKnora", "custom", "files")
+	require.NoError(t, os.MkdirAll(filepath.Join(old, "1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(old, "1", "a.txt"), []byte("a"), 0o600))
+
+	configureDesktopFileStorage("/Applications/WeKnora.app/Contents/MacOS/WeKnora")
+
+	require.FileExists(t, filepath.Join(home, ".weknora", "data", "files", "1", "a.txt"))
+}
 
 func TestEnsureDesktopLiteEditionOverridesDefaultStandard(t *testing.T) {
 	old := handler.Edition

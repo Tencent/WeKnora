@@ -718,3 +718,45 @@ func TestChatStream_MalformedToolCallFailsTheStream(t *testing.T) {
 	assert.True(t, sawError, "a dropped tool call must surface as an error")
 	assert.Equal(t, "ok", answer.String(), "decoding stops at the bad chunk")
 }
+
+// A body that runs out without [DONE] or any finish_reason is what a proxy
+// cutting the connection mid-answer looks like; it must not read as a stop.
+// [DONE] alone stays a clean end, since some vendors never send finish_reason.
+func TestChatStream_EOFWithoutFinishReasonIsIncomplete(t *testing.T) {
+	cases := []struct {
+		name, tail, want string
+	}{
+		{"cut off", "", types.FinishReasonIncomplete},
+		{
+			"finish reason without DONE",
+			"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n", "stop",
+		},
+		{"DONE without finish reason", "data: [DONE]\n\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				head := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\n"
+				_, _ = w.Write([]byte(head + tc.tail))
+			}))
+			defer server.Close()
+
+			c := New(Config{
+				Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
+				Settings: api.DefaultOpenAICompletions(),
+			})
+			ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+			require.NoError(t, err)
+			var last types.StreamResponse
+			for chunk := range ch {
+				require.NotEqual(t, types.ResponseTypeError, chunk.ResponseType, chunk.Content)
+				if chunk.Done && chunk.ResponseType == types.ResponseTypeAnswer {
+					last = chunk
+				}
+			}
+			assert.Equal(t, tc.want, last.FinishReason)
+		})
+	}
+}

@@ -61,8 +61,20 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		logger.Debugf(ctx, "skipping extract entity, neo4j is disabled")
 		return next()
 	}
+	// QUERY_UNDERSTAND has already classified the turn. Entities only feed the
+	// knowledge-base graph search, so a greeting or chit-chat turn that skips
+	// KB retrieval must not pay for this second LLM call.
+	if !chatManage.NeedsRetrieval() {
+		logger.Debugf(ctx, "skipping extract entity, intent %q needs no KB retrieval", chatManage.Intent)
+		return next()
+	}
 
+	// Prefer the rewritten query: it resolves pronouns and ellipsis from the
+	// conversation, which the raw follow-up question lacks.
 	query := chatManage.Query
+	if rewritten := strings.TrimSpace(chatManage.RewriteQuery); rewritten != "" {
+		query = rewritten
+	}
 
 	model, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
 	if err != nil {

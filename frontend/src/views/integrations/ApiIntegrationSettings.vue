@@ -702,6 +702,7 @@ import {
 } from '@/config/apiKeyCapabilities'
 import { normalizeAPIKeyKnowledgeBaseIDs } from './apiKeyScope'
 import { consumeApiPlaygroundSSE } from './apiPlaygroundSSE'
+import { docsUrl } from '@/utils/docsUrl'
 
 const { t } = useI18n()
 
@@ -1431,7 +1432,7 @@ const saveDesktopPort = async () => {
 }
 
 function openApiDoc() {
-  window.open('https://github.com/Tencent/WeKnora/blob/main/website-docs/04-api/01-api-overview.md', '_blank')
+  window.open(docsUrl('apiOverview'), '_blank')
 }
 
 function openCreateAPIKeyDialog() {

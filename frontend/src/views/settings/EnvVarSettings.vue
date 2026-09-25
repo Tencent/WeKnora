@@ -2,9 +2,9 @@
   <div class="env-settings">
     <div class="section-header">
       <div class="section-header__titlewrap">
-        <h2>{{ t('envVarSettings.title') }}</h2>
+        <h2>{{ envText('title') }}</h2>
         <t-popup placement="bottom-start" trigger="hover" :overlay-inner-style="{ maxWidth: '380px' }">
-          <button type="button" class="hint-trigger" :aria-label="t('envVarSettings.helpAria')">
+          <button type="button" class="hint-trigger" :aria-label="envText('helpAria')">
             <t-icon name="help-circle" size="16px" />
           </button>
           <template #content>
@@ -15,13 +15,13 @@
               </div>
               <div class="hint-popover__block">
                 <p class="hint-popover__title">{{ t('envVarSettings.introRuntimeTitle') }}</p>
-                <p class="hint-popover__text">{{ t('envVarSettings.introRuntimeBody') }}</p>
+                <p class="hint-popover__text">{{ envText('introRuntimeBody') }}</p>
               </div>
             </div>
           </template>
         </t-popup>
       </div>
-      <p class="section-description">{{ t('envVarSettings.description') }}</p>
+      <p class="section-description">{{ envText('description') }}</p>
     </div>
 
     <p v-if="loading" class="env-state">{{ t('envVarSettings.loading') }}</p>
@@ -200,8 +200,8 @@
       <section class="env-section env-section--aside">
         <header class="env-section__head env-section__head--row">
           <div>
-            <h3>{{ t('envVarSettings.sandboxTitle') }}</h3>
-            <p>{{ t('envVarSettings.sandboxHint') }}</p>
+            <h3>{{ envText('sandboxTitle') }}</h3>
+            <p>{{ envText('sandboxHint') }}</p>
           </div>
           <t-button
             v-if="!addingSandbox"
@@ -274,7 +274,7 @@
                 <path d="M2.5 6.5h13" stroke="currentColor" stroke-width="1.2" />
                 <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
               </svg>
-              <h4>{{ configLabel(group) }}</h4>
+              <h4>{{ configLabel(group, t('settings.skills.hostTarget')) }}</h4>
             </div>
             <p v-if="group.description" class="env-group__desc" :title="group.description">
               {{ group.description }}
@@ -310,7 +310,7 @@
                     </t-button>
                     <t-popconfirm
                       theme="warning"
-                      :content="t('envVarSettings.deleteConfirm', { name: entry.name })"
+                      :content="envText('deleteConfirm', { name: entry.name })"
                       :confirm-btn="{ content: t('envVarSettings.delete'), theme: 'danger' }"
                       :cancel-btn="{ content: t('common.cancel') }"
                       @confirm="deleteSandbox(group.sandbox_config_id, entry.name)"
@@ -387,6 +387,8 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { hostSkillsOnly } from '@/utils/skillTarget'
 import {
   deleteMySandboxEnv,
   deleteMySkillEnv,
@@ -413,7 +415,17 @@ import {
   statusOf,
 } from './envVarState'
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
+const hostOnly = computed(() => hostSkillsOnly(
+  deploymentCapabilities.isSupported('settings.sandbox.remote'),
+  deploymentCapabilities.isSupported('settings.sandbox.host'),
+))
+function envText(key: string, params: Record<string, unknown> = {}) {
+  const hostKey = `envVarSettings.host.${key}`
+  if (hostOnly.value && te(hostKey)) return t(hostKey, params)
+  return t(`envVarSettings.${key}`, params)
+}
 
 const STATUS_LABEL: Record<EnvVarSource, string> = {
   unset: 'envVarSettings.statusUnset',
@@ -430,7 +442,7 @@ const sandboxCards = computed(() => sandboxGroupsWithVars(groups.value))
 const multipleSandboxes = computed(() => groups.value.length > 1)
 const sandboxOptions = computed(() =>
   groups.value.map((group) => ({
-    label: configLabel(group),
+    label: configLabel(group, t('settings.skills.hostTarget')),
     value: group.sandbox_config_id,
   })),
 )
@@ -485,7 +497,7 @@ async function load() {
     groups.value = sortedConfigGroups(res?.data || [])
   } catch (e: any) {
     groups.value = []
-    loadError.value = e?.message || t('envVarSettings.loadFailed')
+    loadError.value = e?.message || envText('loadFailed')
   } finally {
     loading.value = false
   }
@@ -581,7 +593,7 @@ async function saveNewSandboxRow() {
   }
   const name = sandboxDraft.name.trim()
   if (!isValidEnvName(name)) {
-    MessagePlugin.error(t('envVarSettings.nameInvalid'))
+    MessagePlugin.error(envText('nameInvalid'))
     return
   }
   if (group.vars?.some((v) => v.name === name)) {

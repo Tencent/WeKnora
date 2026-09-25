@@ -770,7 +770,7 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 	var sp *index.CustomAnnParam
 	if params.Threshold > 0 {
 		ann := index.NewCustomAnnParam()
-		ann.WithRadius(params.Threshold)
+		ann.WithRadius(m.similarityToMetric(params.Threshold))
 		sp = &ann
 	}
 	searchOption := client.NewSearchOption(collectionName, params.TopK, []entity.Vector{entity.FloatVector(params.Embedding)})
@@ -794,6 +794,9 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 	if err != nil {
 		log.Errorf("[Milvus] Failed to convert result set: %v", err)
 		return nil, fmt.Errorf("failed to convert result set: %w", err)
+	}
+	for i := range scores {
+		scores[i] = m.metricToSimilarity(scores[i])
 	}
 	results, err := buildMilvusIndexResults(sets, scores, types.MatchTypeEmbedding)
 	if err != nil {
@@ -1329,4 +1332,26 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 		}
 	}
 	return docs, scores, nil
+}
+
+// metricToSimilarity converts a raw vector-search score into cosine
+// similarity, the scale callers rank and threshold on. IP and COSINE already
+// are for the L2-normalized embeddings WeKnora indexes. Milvus L2 returns
+// the squared Euclidean distance (smaller is better), which for unit vectors
+// is 2 - 2cos; passing it through ranked the farthest hits first.
+func (m *milvusRepository) metricToSimilarity(score float64) float64 {
+	if m.metricType == entity.L2 {
+		return 1 - score/2
+	}
+	return score
+}
+
+// similarityToMetric converts a cosine-similarity threshold into the range
+// search radius of the configured metric: a lower bound on IP / COSINE, an
+// upper bound on the squared L2 distance.
+func (m *milvusRepository) similarityToMetric(similarity float64) float64 {
+	if m.metricType == entity.L2 {
+		return 2 * (1 - similarity)
+	}
+	return similarity
 }

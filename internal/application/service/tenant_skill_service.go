@@ -77,6 +77,10 @@ type TenantSkillService struct {
 	streams  interfaces.StreamManager
 	messages interfaces.MessageRepository
 
+	// host is Lite's OS sandbox. The zero value keeps the standard edition on
+	// the remote-config path; Desktop plus SkillsAvailable accepts "host".
+	host HostSandboxManager
+
 	now func() time.Time
 
 	// sourceHTTP pulls remote skill archives. Nil means the package SSRF-safe
@@ -131,6 +135,7 @@ func NewTenantSkillService(
 	redisClient *redis.Client,
 	streams interfaces.StreamManager,
 	messages interfaces.MessageRepository,
+	host HostSandboxManager,
 ) *TenantSkillService {
 	return &TenantSkillService{
 		skills:            skillsRepo,
@@ -145,6 +150,7 @@ func NewTenantSkillService(
 		redis:             redisClient,
 		streams:           streams,
 		messages:          messages,
+		host:              host,
 		now:               time.Now,
 		cleanupTimeout:    installCleanupTimeout,
 		snapshotRetention: skillSnapshotRetention,

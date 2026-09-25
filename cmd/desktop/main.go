@@ -33,6 +33,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
+	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/joho/godotenv"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -42,7 +43,8 @@ import (
 // It bypasses Wails' built-in CSS-variable-based drag detection (which uses
 // getComputedStyle and has timing/inheritance issues with dynamic SPA content)
 // and instead uses robust DOM-traversal via el.closest() plus a Y-position
-// fallback for the macOS title-bar region on layout containers. The "drag"
+// fallback for the top 40px of a layout container, including its children.
+// The "drag"
 // message is sent directly through the WKWebView script-message bridge,
 // which the native Objective-C handler in WailsContext.m converts to
 // [NSWindow performWindowDragWithEvent:].
@@ -65,11 +67,12 @@ window.addEventListener('dragstart', function(e){
   e.preventDefault();
 }, true);
 
-var TITLEBAR_H=38;
+var TITLEBAR_H=40;
 
 // We specifically look for Wails' inline style attributes injected by Vue,
-// and custom drag classes, avoiding generic headers like .section-header
-var dragSel='.logo_row,.menu_top,.drag-region,[data-wails-drag],' +
+// and custom drag classes, avoiding generic headers like .section-header.
+// .chat-topbar is the window top on the conversation page.
+var dragSel='.logo_row,.menu_top,.chat-topbar,.drag-region,[data-wails-drag],' +
   '[style*="--wails-draggable: drag"],[style*="--wails-draggable:drag"]';
 
 var noDragSel='button,a,input,select,textarea,[role="button"],' +
@@ -97,11 +100,21 @@ function isLayoutEl(el){
   return tag==='BODY'||tag==='HTML';
 }
 
+function inTitlebar(el,y){
+  if(y>TITLEBAR_H)return false;
+  var node=el;
+  while(node&&node instanceof Element){
+    if(isLayoutEl(node))return true;
+    node=node.parentElement;
+  }
+  return false;
+}
+
 function shouldDrag(el,y){
   if(!(el instanceof Element))return false;
   if(el.closest(noDragSel))return false;
   if(el.closest(dragSel))return true;
-  if(y<=TITLEBAR_H&&isLayoutEl(el))return true;
+  if(inTitlebar(el,y))return true;
   return false;
 }
 
@@ -112,8 +125,27 @@ window.addEventListener('mousedown',function(e){
   }
   if(e.button!==0||e.detail!==1)return;
   if(!shouldDrag(target,e.clientY))return;
-  e.preventDefault();
-  sendDrag();
+  // The session title renames on double-click. Wait until the pointer
+  // actually moves so that click still lands; other top-bar hits drag now.
+  var defer=target.closest&&target.closest('.chat-header__title');
+  if(!defer){
+    e.preventDefault();
+    sendDrag();
+    return;
+  }
+  var x=e.clientX,y=e.clientY;
+  function move(ev){
+    if(Math.abs(ev.clientX-x)<4&&Math.abs(ev.clientY-y)<4)return;
+    cleanup();
+    sendDrag();
+  }
+  function up(){cleanup();}
+  function cleanup(){
+    window.removeEventListener('mousemove',move,true);
+    window.removeEventListener('mouseup',up,true);
+  }
+  window.addEventListener('mousemove',move,true);
+  window.addEventListener('mouseup',up,true);
 },true);
 
 // Intercept external link clicks and window.open so they open in the system browser
@@ -162,12 +194,17 @@ func main() {
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
 	// We need to change the working directory to the Resources folder where our configs are.
 	execPath, errPath := os.Executable()
+	// A packaged .app keeps config under Contents/Resources. wails dev also
+	// runs from a .app, but that bundle has no copied config; stay in the
+	// repo and use config/ there.
 	if errPath == nil && strings.Contains(execPath, ".app/Contents/MacOS") {
 		resPath := filepath.Join(filepath.Dir(filepath.Dir(execPath)), "Resources")
-		_ = os.Chdir(resPath)
-	} else if _, err := os.Stat(filepath.Join("config", "config.yaml")); os.IsNotExist(err) {
-		// wails build 生成绑定时 cwd 多为 cmd/desktop，LoadConfig 默认找 ./config/config.yaml；
-		// 仓库实际配置在 <repo>/config/，向上两级即可。
+		if _, err := os.Stat(filepath.Join(resPath, "config", "config.yaml")); err == nil {
+			_ = os.Chdir(resPath)
+		}
+	}
+	if _, err := os.Stat(filepath.Join("config", "config.yaml")); os.IsNotExist(err) {
+		// wails dev 的 cwd 是 cmd/desktop。仓库配置在上两级。
 		repoRoot := filepath.Clean(filepath.Join("..", ".."))
 		if _, err := os.Stat(filepath.Join(repoRoot, "config", "config.yaml")); err == nil {
 			_ = os.Chdir(repoRoot)
@@ -176,7 +213,15 @@ func main() {
 
 	// Load .env explicitly for the desktop app so DB_DRIVER gets loaded
 	_ = godotenv.Load()
+	// wails dev picks up the repo .env, which may ask for Redis streams
+	// without REDIS_ADDR. go-redis then dials localhost:6379 and aborts
+	// startup. Lite has no Redis; keep the in-memory stream manager.
+	if strings.TrimSpace(os.Getenv("REDIS_ADDR")) == "" &&
+		strings.EqualFold(strings.TrimSpace(os.Getenv("STREAM_MANAGER_TYPE")), stream.TypeRedis) {
+		_ = os.Setenv("STREAM_MANAGER_TYPE", stream.TypeMemory)
+	}
 	configureDesktopStorage(execPath)
+	configureDesktopFileStorage(execPath)
 	logger.ConfigureFromEnv()
 
 	// Set Gin mode
@@ -188,11 +233,12 @@ func main() {
 	// Mute Gin's per-route registration spam; replaced by a single
 	// summary printed after router build.
 	runtime.SilenceGinRouteSpam()
-	runtime.LogStartupEnv(context.Background())
-
+	// Provision the signing key first so the startup banner reflects it
+	// instead of warning about a key the desktop is about to create.
 	if err := ensureDesktopSigningKey(); err != nil {
 		panic(fmt.Sprintf("initialize desktop signing key: %v", err))
 	}
+	runtime.LogStartupEnv(context.Background())
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
@@ -339,7 +385,7 @@ func main() {
 
 	// Wait for the backend URL to be set
 	targetURL, _ := url.Parse(app.backendURL)
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy := desktopAPIProxy(targetURL)
 
 	// Start Wails application
 	// We use a Reverse Proxy to seamlessly proxy Wails' frontend to our Go backend
@@ -400,17 +446,88 @@ func configureDesktopStorage(execPath string) {
 	migrateLegacyDesktopData(legacyResourcesDir, targetDataDir)
 
 	dbPath := resolveDesktopDataPath(os.Getenv("DB_PATH"), filepath.Join("data", "weknora.db"), appSupportDir)
-	filesPath := resolveDesktopDataPath(os.Getenv("LOCAL_STORAGE_BASE_DIR"), filepath.Join("data", "files"), appSupportDir)
 
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		logger.Warnf(context.Background(), "Failed to create desktop DB directory %s: %v", filepath.Dir(dbPath), err)
 	}
-	if err := os.MkdirAll(filesPath, 0o755); err != nil {
-		logger.Warnf(context.Background(), "Failed to create desktop files directory %s: %v", filesPath, err)
-	}
 
 	_ = os.Setenv("DB_PATH", dbPath)
+}
+
+// configureDesktopFileStorage points Lite file uploads at ~/.weknora/data/files.
+// wails dev is not always inside a packaged .app, so this runs for every
+// desktop process. An explicit absolute directory is kept; the Docker default
+// /data/files is not writable on macOS and is replaced. Uploads move over from
+// wherever the previous build kept them.
+func configureDesktopFileStorage(execPath string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		logger.Warnf(context.Background(), "Failed to resolve home dir for file storage: %v", err)
+		return
+	}
+	filesPath := desktopLocalFilesDir(home)
+	raw := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	if !useDesktopFilesDir(raw) {
+		return
+	}
+	if appSupport, err := defaultMacAppSupportDir(execPath); err == nil {
+		migrateDesktopFiles(legacyDesktopFilesDir(raw, appSupport), filesPath)
+	}
+	if err := os.MkdirAll(filesPath, 0o755); err != nil {
+		logger.Warnf(context.Background(), "Failed to create desktop files directory %s: %v", filesPath, err)
+		return
+	}
 	_ = os.Setenv("LOCAL_STORAGE_BASE_DIR", filesPath)
+}
+
+func desktopLocalFilesDir(home string) string {
+	return filepath.Join(home, ".weknora", "data", "files")
+}
+
+func useDesktopFilesDir(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return true
+	}
+	cleaned := filepath.Clean(trimmed)
+	switch cleaned {
+	case "/data/files", "data/files", filepath.Join(".", "data", "files"):
+		return true
+	default:
+		return !filepath.IsAbs(cleaned)
+	}
+}
+
+// legacyDesktopFilesDir is where the previous build stored uploads: raw
+// resolved under the bundle's Application Support dir, or its data/files
+// default when raw is empty or the absolute Docker default.
+func legacyDesktopFilesDir(raw, appSupportDir string) string {
+	if filepath.IsAbs(strings.TrimSpace(raw)) {
+		raw = ""
+	}
+	return resolveDesktopDataPath(raw, filepath.Join("data", "files"), appSupportDir)
+}
+
+func migrateDesktopFiles(oldDir, newDir string) {
+	if filepath.Clean(oldDir) == filepath.Clean(newDir) {
+		return
+	}
+	info, err := os.Stat(oldDir)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	if _, err := os.Stat(newDir); err == nil {
+		logger.Warnf(context.Background(),
+			"Desktop files already exist at %s; leaving %s in place", newDir, oldDir)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(newDir), 0o755); err != nil {
+		logger.Warnf(context.Background(), "Failed to create %s: %v", filepath.Dir(newDir), err)
+		return
+	}
+	if err := os.Rename(oldDir, newDir); err != nil {
+		logger.Warnf(context.Background(), "Failed to migrate desktop files from %s to %s: %v", oldDir, newDir, err)
+	}
 }
 
 func defaultMacAppSupportDir(execPath string) (string, error) {
@@ -440,6 +557,26 @@ func resolveDesktopDataPath(rawPath, defaultRelativePath, appSupportDir string) 
 	}
 	trimmed = strings.TrimPrefix(trimmed, "."+string(filepath.Separator))
 	return filepath.Join(appSupportDir, filepath.Clean(trimmed))
+}
+
+// desktopAPIProxy forwards the webview to the loopback Gin server. Pairing
+// needs the API listener as Host so the link cannot be aimed at another
+// machine. Other routes keep the page Host (wails.localhost), which OIDC
+// callbacks and embed origin checks still compare against.
+func desktopAPIProxy(target *url.URL) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(target)
+			r.SetXForwarded()
+			if !isBrowserPairingRequest(r.In) {
+				r.Out.Host = r.In.Host
+			}
+		},
+	}
+}
+
+func isBrowserPairingRequest(req *http.Request) bool {
+	return req != nil && req.URL != nil && req.Method == http.MethodPost && req.URL.Path == "/api/v1/me/browser"
 }
 
 // desktopBackendListenAddr returns the TCP address for the embedded Gin server (Wails desktop).
