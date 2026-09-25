@@ -9,14 +9,19 @@ from docreader.parser.pdf_parser import (
     _filter_reading_columns,
     _group_lines,
     _is_artifact_column,
+    _chars_to_layout_markdown,
     _join_line_glyphs,
+    _looks_like_numeric_table_columns,
     _merge_orphan_punctuation_lines,
+    _page_chars,
     _point_in_boxes,
+    _postprocess_pdf_text,
     _segments_to_markdown,
     _select_embedded_images,
     _should_prefer_plain,
     _split_columns,
     _strip_repeating_lines,
+    _tail_looks_like_numeric_table,
 )
 
 
@@ -146,6 +151,23 @@ class ReadingOrderTest(unittest.TestCase):
         chars = [_char("A", 100, 110, 700, 712), _char("B", 110, 120, 700, 712)]
         self.assertEqual(_join_line_glyphs(chars), "AB")
 
+    def test_join_line_glyphs_keeps_kerning_gaps_inside_numbers(self):
+        # Right-aligned PDF table cells often add a small gap between digit
+        # glyphs.  It is not a word boundary.
+        chars = [
+            _char("1", 0, 4, 0, 10),
+            _char("2", 7, 11, 0, 10),
+            _char("4", 14, 18, 0, 10),
+        ]
+        self.assertEqual(_join_line_glyphs(chars), "124")
+
+    def test_join_line_glyphs_keeps_large_numeric_cell_gap(self):
+        chars = [
+            _char("1", 0, 4, 0, 10),
+            _char("2", 20, 24, 0, 10),
+        ]
+        self.assertEqual(_join_line_glyphs(chars), "1 2")
+
 
 class HeadingDetectionTest(unittest.TestCase):
     def test_promotes_large_line_to_heading(self):
@@ -172,8 +194,57 @@ class HiddenTextFilterTest(unittest.TestCase):
         self.assertTrue(_point_in_boxes(5.0, 5.0, boxes))
         self.assertFalse(_point_in_boxes(20.0, 5.0, boxes))
 
+    def test_page_chars_reports_filtered_off_page_glyphs(self):
+        class FakeTextPage:
+            chars = [
+                ("visible", (10.0, 10.0, 20.0, 20.0)),
+                ("hidden", (-20.0, 10.0, -10.0, 20.0)),
+            ]
+
+            def count_chars(self):
+                return len(self.chars)
+
+            def get_charbox(self, index):
+                return self.chars[index][1]
+
+            def get_text_range(self, index, length=1):
+                return self.chars[index][0][0]
+
+        class FakePage:
+            def get_size(self):
+                return 100.0, 100.0
+
+            def get_objects(self):
+                return []
+
+        class FakeRaw:
+            FPDF_PAGEOBJ_TEXT = 1
+
+        chars, width, filtered = _page_chars(
+            FakeTextPage(), FakePage(), FakeRaw(), return_filter_info=True
+        )
+        self.assertEqual(width, 100.0)
+        self.assertEqual(len(chars), 1)
+        self.assertTrue(filtered)
+
 
 class MarginColumnFilterTest(unittest.TestCase):
+    @staticmethod
+    def _table_chars(rows):
+        chars = []
+        for i, (label, value) in enumerate(rows):
+            y = 700 - i * 40
+            for j, ch in enumerate(label):
+                chars.append(_char(ch, 50 + j * 8, 56 + j * 8, y, y + 10))
+            if value is not None:
+                for j, ch in enumerate(value):
+                    chars.append(_char(ch, 500 + j * 8, 506 + j * 8, y, y + 10))
+        for j, ch in enumerate("ITEM"):
+            chars.append(_char(ch, 50 + j * 8, 56 + j * 8, 740, 750))
+        for j, ch in enumerate("QUANTITY"):
+            chars.append(_char(ch, 500 + j * 8, 506 + j * 8, 740, 750))
+        return chars
+
     def test_drops_narrow_vertical_margin_column(self):
         # Mimics arXiv sidebar: narrow x span, one glyph per line.
         margin = [
@@ -194,6 +265,61 @@ class MarginColumnFilterTest(unittest.TestCase):
         right = [_char("R", 400, 500, 700 - i * 12, 712 - i * 12) for i in range(4)]
         cols = _filter_reading_columns(left + right, scale=12.0, width=600.0)
         self.assertEqual(len(cols), 2)
+
+    def test_numeric_table_hint_requires_aligned_value_column(self):
+        # A narrow quantity column aligned with labels is a table, not a
+        # margin watermark.  The hint is consumed before artifact filtering.
+        chars = []
+        for i, label in enumerate(("ITEM", "Aster", "Willow")):
+            y = 700 - i * 40
+            for j, ch in enumerate(label):
+                chars.append(_char(ch, 50 + j * 8, 56 + j * 8, y, y + 10))
+        for i, value in enumerate(("QUANTITY", "124", "237")):
+            y = 700 - i * 40
+            for j, ch in enumerate(value):
+                chars.append(_char(ch, 500 + j * 8, 506 + j * 8, y, y + 10))
+        self.assertTrue(
+            _looks_like_numeric_table_columns(chars, scale=10.0, width=600.0)
+        )
+
+    def test_numeric_table_keeps_rows_and_drops_unrelated_artifact_column(self):
+        chars = self._table_chars([("Aster", "124"), ("Willow", "237")])
+        chars.extend(
+            _char(c, 20, 28, 500 - i * 14, 512 - i * 14)
+            for i, c in enumerate("0202luJ22")
+        )
+        text = _chars_to_layout_markdown(chars, scale=10.0, width=600.0)
+        self.assertIn("Aster 124", text)
+        self.assertIn("Willow 237", text)
+        self.assertNotIn("0202luJ22", text)
+
+    def test_numeric_table_hint_does_not_match_two_text_columns(self):
+        left = [_char("L", 50, 150, 700 - i * 12, 712 - i * 12) for i in range(4)]
+        right = [_char("R", 400, 500, 700 - i * 12, 712 - i * 12) for i in range(4)]
+        self.assertFalse(
+            _looks_like_numeric_table_columns(left + right, scale=12.0, width=600.0)
+        )
+
+    def test_layout_keeps_repeated_values_and_empty_cells_in_rows(self):
+        repeated = _chars_to_layout_markdown(
+            self._table_chars(
+                [("Aster", "1"), ("Willow", "1")]
+            ),
+            scale=10.0,
+            width=600.0,
+        )
+        self.assertIn("Aster 1", repeated)
+        self.assertIn("Willow 1", repeated)
+
+        with_empty = _chars_to_layout_markdown(
+            self._table_chars(
+                [("Aster", None), ("Willow", "237")]
+            ),
+            scale=10.0,
+            width=600.0,
+        )
+        self.assertIn("Aster", with_empty)
+        self.assertIn("Willow 237", with_empty)
 
 
 class PunctuationMergeTest(unittest.TestCase):
@@ -260,6 +386,46 @@ class PdfTextSanitizeTest(unittest.TestCase):
         self.assertNotIn("arXiv:", out)
         self.assertIn("Body text.", out)
 
+    def test_preserves_numeric_body_run_without_chart_context(self):
+        raw = "Quantity\n124\n237\n68\n91\nEnd of inventory."
+        out = _postprocess_pdf_text(raw)
+        for value in ("124", "237", "68", "91"):
+            self.assertIn(value, out)
+
+    def test_preserves_numeric_body_run_with_chart_context_when_header_is_present(self):
+        raw = "Quantity\n124\n237\n68\n91\ntraining error"
+        out = _postprocess_pdf_text(raw)
+        for value in ("124", "237", "68", "91"):
+            self.assertIn(value, out)
+
+    def test_numeric_header_and_rows_are_a_table_tail(self):
+        self.assertTrue(_tail_looks_like_numeric_table(["Body", "Quantity", "124", "237"]))
+
+    def test_preserves_repeated_single_digit_values(self):
+        from docreader.parser.pdf_parser import _postprocess_pdf_text
+
+        raw = "ITEM QUANTITY\nAster 1\nWillow 1\nHazel 1"
+        out = _postprocess_pdf_text(raw)
+        self.assertIn("Aster 1", out)
+        self.assertIn("Willow 1", out)
+        self.assertIn("Hazel 1", out)
+
+    def test_keeps_ambiguous_middle_page_number(self):
+        from docreader.parser.pdf_parser import _postprocess_pdf_text
+
+        out = _postprocess_pdf_text("Body\n124\nMore body\n2")
+        self.assertIn("124", out)
+        # An unlabelled edge number is ambiguous too, so retain it.  The
+        # existing arXiv-header regression covers the explicit cleanup case.
+        self.assertIn("\n2", out)
+
+    def test_keeps_numeric_table_before_figure_caption(self):
+        raw = "Header\nAster 124\nWillow 237\nFigure 1. Chart\nAfter"
+        out = _postprocess_pdf_text(raw)
+        self.assertIn("Aster 124", out)
+        self.assertIn("Willow 237", out)
+        self.assertIn("Figure 1. Chart", out)
+
 
 class PlainWellFormedTest(unittest.TestCase):
     def test_academic_plain_skips_layout(self):
@@ -287,6 +453,23 @@ class LayoutQualityFallbackTest(unittest.TestCase):
         plain = "Hello world"
         layout = "Hello world"
         self.assertFalse(_should_prefer_plain(plain, layout))
+
+    def test_prefers_plain_when_layout_splits_numeric_table_columns(self):
+        plain = "ITEM QUANTITY\nAster 124\nWillow 237"
+        layout = "ITEM\nAster\nWillow\nQUANTITY\n1 24\n237"
+        self.assertTrue(_should_prefer_plain(plain, layout))
+
+    def test_prefers_plain_when_layout_substitutes_a_numeric_value(self):
+        plain = "ITEM QUANTITY\nAster 124\nWillow 237"
+        layout = "ITEM QUANTITY\nAster 124\nWillow 999"
+        self.assertTrue(_should_prefer_plain(plain, layout))
+
+    def test_does_not_prefer_plain_numeric_rows_without_table_hint(self):
+        plain = "Method 2020\nDataset 2021"
+        layout = "Method\nDataset\n2020\n2021"
+        self.assertFalse(
+            _should_prefer_plain(plain, layout, allow_structured_rows=False)
+        )
 
 
 class ResNetPaperFigureTest(unittest.TestCase):
