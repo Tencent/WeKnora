@@ -2717,6 +2717,19 @@ export default {
       parseCurrentKnowledgeBaseFailed: 'Failed to parse current knowledge base'
     }
   },
+  schemaForm: {
+    errors: {
+      required: 'This field is required',
+      type: 'Invalid value',
+      enum: 'Not one of the allowed values',
+      min_length: 'Too short',
+      max_length: 'Too long',
+      pattern: 'Does not match the expected format',
+      minimum: 'Value is too small',
+      maximum: 'Value is too large',
+      format: 'Enter a full address such as https://example.com'
+    }
+  },
   common: {
     add: 'Add',
     me: 'Me',

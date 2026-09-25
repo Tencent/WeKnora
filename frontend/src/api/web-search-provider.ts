@@ -1,3 +1,4 @@
+import type { ConfigSchema } from '@/components/schema-form/schema'
 import { get, post, put, del } from '@/utils/request'
 
 // WebSearchProviderEntity represents a configured web search provider instance
@@ -37,6 +38,8 @@ export interface WebSearchProviderTypeInfo {
   description?: string
   docs_url?: string
   config_fields?: WebSearchProviderConfigField[]
+  // The parameters form as a config schema; the settings drawer renders it.
+  config_schema?: ConfigSchema
 }
 
 export interface WebSearchProviderConfigField {

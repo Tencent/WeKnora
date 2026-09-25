@@ -2717,6 +2717,19 @@ export default {
       parseCurrentKnowledgeBaseFailed: '現在のナレッジベースの解析に失敗しました'
     }
   },
+  schemaForm: {
+    errors: {
+      required: 'この項目は必須です',
+      type: '値が正しくありません',
+      enum: '選択可能な値ではありません',
+      min_length: '短すぎます',
+      max_length: '長すぎます',
+      pattern: '形式が正しくありません',
+      minimum: '値が小さすぎます',
+      maximum: '値が大きすぎます',
+      format: 'https://example.com のような完全なアドレスを入力してください'
+    }
+  },
   common: {
     add: '追加',
     me: '自分',

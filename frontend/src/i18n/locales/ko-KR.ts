@@ -5239,6 +5239,19 @@ export default {
     belongsToOrg: '스페이스: ',
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
+  schemaForm: {
+    errors: {
+      required: '필수 항목입니다',
+      type: '값이 올바르지 않습니다',
+      enum: '허용된 값이 아닙니다',
+      min_length: '너무 짧습니다',
+      max_length: '너무 깁니다',
+      pattern: '형식이 올바르지 않습니다',
+      minimum: '값이 너무 작습니다',
+      maximum: '값이 너무 큽니다',
+      format: 'https://example.com 과 같은 전체 주소를 입력하세요'
+    }
+  },
   common: {
     add: '추가',
     me: '나',

@@ -5241,6 +5241,19 @@ export default {
     belongsToOrg: '所属空间：',
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
+  schemaForm: {
+    errors: {
+      required: '此项为必填',
+      type: '格式不正确',
+      enum: '不是可选的值',
+      min_length: '长度过短',
+      max_length: '长度过长',
+      pattern: '格式不符合要求',
+      minimum: '数值过小',
+      maximum: '数值过大',
+      format: '请输入完整的地址，如 https://example.com'
+    }
+  },
   common: {
     add: '添加',
     me: '我',
