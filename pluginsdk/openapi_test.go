@@ -11,12 +11,14 @@ import (
 // The OpenAPI description and the SDK's routes must list the same endpoints,
 // so a protocol change cannot land in one and not the other.
 func TestOpenAPIMatchesRoutes(t *testing.T) {
-	spec, err := os.ReadFile("pluginapi/openapi.yaml")
+	raw, err := os.ReadFile("pluginapi/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows checkouts may carry CRLF line endings.
+	spec := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	var documented []string
-	for _, m := range regexp.MustCompile(`(?m)^  (/v1/[^:]+):$`).FindAllStringSubmatch(string(spec), -1) {
+	for _, m := range regexp.MustCompile(`(?m)^  (/v1/[^:]+):$`).FindAllStringSubmatch(spec, -1) {
 		documented = append(documented, m[1])
 	}
 	src, err := os.ReadFile("plugin.go")
