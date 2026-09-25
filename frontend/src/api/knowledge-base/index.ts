@@ -72,6 +72,156 @@ export function listKnowledgeBases(params?: {
 //                       (deleted row, registry miss, transient infra
 //                       failure). Operators recover via the global
 //                       Vector Stores settings page.
+// ---------------------------------------------------------------------------
+// Image attribute observation (route 3). Mirrors backend types in
+// internal/types/image_attrs.go. The backend registry is the single source of
+// truth; the frontend fetches it from GET /image-attrs/schema and renders the
+// attribute panel dynamically. The types/constants below mirror the v1 shape
+// so the UI still compiles and can render a fallback before the schema loads.
+// ---------------------------------------------------------------------------
+
+// One allowed value of an image attribute.
+//
+// Display text is split for the same reasons the gallery splits it: `label` is
+// what fits on a checkbox or a table cell, `description` is the sentence that
+// explains the value where there is room. `value` stays the raw machine value.
+export interface ImageAttrValue {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+// One observable image attribute, as returned by the schema endpoint. The
+// registry is authoritative for both the behaviour and the wording: label,
+// description and the per-value texts are what the settings panel shows to an
+// operator who does not read identifiers like "contain.text".
+export interface ImageAttrSpec {
+  name: string;
+  type: 'extent' | 'presence';
+  values?: ImageAttrValue[];
+  question: string;
+  label: string;
+  description?: string;
+  consumers?: string[];
+}
+
+// One attribute match: attribute `prop` equals `is`.
+export interface ImageAttrCondition {
+  prop: string;
+  is: string;
+}
+
+// The OCR clause of the attribute -> work policy.
+export interface ImageOCRAction {
+  on: ImageAttrCondition[];
+  on_unobserved: boolean;
+}
+
+// The attribute -> work policy sent back to the API (snake_case JSON).
+export interface ImageActionsConfig {
+  ocr: ImageOCRAction;
+}
+
+// Canonical registry + built-in actions returned by GET /image-attrs/schema.
+export interface ImageAttrSchema {
+  version: string;
+  prompt: string;
+  attributes: ImageAttrSpec[];
+  default_actions: ImageActionsConfig;
+}
+
+// Mirrors backend types.DefaultImageActions. The schema endpoint returns the
+// authoritative copy; this is the fallback used before the schema loads (e.g.
+// in create mode, where no knowledge base id exists yet to query).
+export const DEFAULT_IMAGE_ACTIONS: ImageActionsConfig = {
+  ocr: {
+    on: [
+      { prop: 'contain.text', is: 'block' },
+      { prop: 'contain.data_visual', is: 'true' },
+    ],
+    on_unobserved: true,
+  },
+};
+
+// Display-only fallback used before a KB exists (create mode) so the panel can
+// render without a network call. It mirrors the registry for layout and wording
+// only; the endpoint response is authoritative whenever it loads.
+export const FALLBACK_IMAGE_ATTR_SCHEMA: ImageAttrSchema = {
+  version: 'attrs/2',
+  prompt: 'observe/1',
+  attributes: [
+    {
+      name: 'contain.text',
+      type: 'extent',
+      values: [
+        { value: 'none', label: 'None', description: 'no text at all' },
+        { value: 'sparse', label: 'Sparse', description: 'a few words — a logo, a road sign, a single label' },
+        { value: 'block', label: 'Block', description: 'a block of body text — a screenshot, a table, a document page' },
+      ],
+      question: '',
+      label: 'Text in the image',
+      description: 'How much body text the picture itself carries.',
+      consumers: ['ocr'],
+    },
+    {
+      name: 'contain.data_visual',
+      type: 'presence',
+      values: [
+        { value: 'true', label: 'Yes', description: 'a chart, graph or diagram with plotted values' },
+        { value: 'false', label: 'No', description: 'a photo, drawing, icon or decoration' },
+      ],
+      question: '',
+      label: 'Data visual',
+      description: 'Whether the picture conveys data as a chart, graph, diagram or infographic.',
+      consumers: ['ocr'],
+    },
+  ],
+  default_actions: DEFAULT_IMAGE_ACTIONS,
+};
+
+// Mirrors backend types.MergeImageActions: a custom OCR.On replaces the default
+// OCR.On wholesale (the "on" list is a unit); a config that only sets
+// on_unobserved keeps the default On. The result is what the form seeds with
+// and what makes an empty custom table safe to open.
+export function mergeImageActions(
+  custom?: ImageActionsConfig | null,
+): ImageActionsConfig {
+  if (custom && custom.ocr && custom.ocr.on && custom.ocr.on.length > 0) {
+    return { ocr: { on: custom.ocr.on, on_unobserved: custom.ocr.on_unobserved } };
+  }
+  return {
+    ocr: {
+      on: DEFAULT_IMAGE_ACTIONS.ocr.on.map((c) => ({ ...c })),
+      on_unobserved: DEFAULT_IMAGE_ACTIONS.ocr.on_unobserved,
+    },
+  };
+}
+
+// Fetch the canonical image-attribute registry + default actions from the
+// backend. The registry drives the attribute panel; the default actions seed
+// the OCR-condition display.
+export async function fetchImageAttrSchema(kbId: string): Promise<ImageAttrSchema> {
+  // The registry is global, not per-KB. The backend exposes it at a top-level
+  // route, the same shape as the other read-only KB-editor helpers
+  // (GET /api/v1/chunker/preview, GET /api/v1/system/parser-engines). kbId is
+  // kept in the signature for callers that pass KB context.
+  void kbId;
+  const res = await get<{ success: boolean; data: ImageAttrSchema }>(
+    `/api/v1/image-attrs/schema`,
+  );
+  return res.data;
+}
+
+// Mirrors backend types.ImageProcessingConfig (snake_case JSON). The UI edits
+// the attribute-observation switch and the on_unobserved toggle; saving sends
+// the snapshot back with those fields updated so API-side settings survive a
+// UI edit.
+export interface ImageProcessingConfig {
+  model_id?: string;
+  image_actions?: ImageActionsConfig;
+  image_attrs_enabled?: boolean;
+}
+
 export type VectorStoreSource = 'env' | 'user' | 'shared' | 'unavailable';
 export type VectorStoreStatus = 'available' | 'unavailable';
 
@@ -88,6 +238,7 @@ export function createKnowledgeBase(data: {
   description?: string;
   type?: 'document' | 'faq';
   chunking_config?: any;
+  image_processing_config?: ImageProcessingConfig;
   embedding_model_id?: string;
   summary_model_id?: string;
   auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
@@ -144,7 +295,7 @@ export function updateKnowledgeBase(id: string, data: {
   description?: string;
   config?: {
     chunking_config?: any;
-    image_processing_config?: any;
+    image_processing_config?: ImageProcessingConfig;
     faq_config?: any;
     wiki_config?: {
       synthesis_model_id?: string;

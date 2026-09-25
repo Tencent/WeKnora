@@ -510,6 +510,10 @@ type ImageMultimodalPayload struct {
 	ChunkID         string `json:"chunk_id"`         // parent text chunk
 	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
 	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
+	// EnableOCR and EnableCaption are whole-task switches applied on top of the
+	// image-action policy: a step runs only when both this switch and the
+	// policy allow it. Normal parsing leaves both true and lets the observed
+	// attributes decide.
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
 	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
@@ -522,6 +526,20 @@ type ImageMultimodalPayload struct {
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
+	// ImageAttrsEnabled selects which image pipeline the task runs — see
+	// PipelineModeFor and the PipelineMode constants. True is the
+	// attribute-observed pipeline: the describe round also observes image
+	// attributes, and the attribute policy decides whether OCR runs for it.
+	// False is the upstream behaviour: a plain caption, then OCR, no attribute
+	// observation. In flight tasks enqueued before the field existed read
+	// false, which is what they were enqueued for — the reason the flag travels
+	// in the payload rather than being re-read from the knowledge base at handle
+	// time.
+	ImageAttrsEnabled bool `json:"image_attrs_enabled,omitempty"`
+	// ImageActions is the attribute→work table, resolved from the KB config at
+	// enqueue time. A task without it — one already in flight when attribute
+	// observation shipped — falls back to the conservative policy: run OCR.
+	ImageActions ImageActionsConfig `json:"image_actions,omitempty"`
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.

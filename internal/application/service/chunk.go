@@ -5,9 +5,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -207,6 +209,93 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 
 	logger.Infof(ctx, "Retrieved %d chunks out of %d total chunks", len(chunks), total)
 	return types.NewPageResult(total, page, chunks), nil
+}
+
+// ListImagesByKnowledgeBaseID lists one page of a KB's image assets. Each image
+// is one entry of a chunk's image_info array (a chunk may hold several),
+// de-duplicated by URL. The repository answers from the chunk_images
+// projection, so filtering, sorting and paging cost one indexed query and the
+// total reflects the filter.
+func (s *chunkService) ListImagesByKnowledgeBaseID(
+	ctx context.Context,
+	kbID string,
+	page *types.Pagination,
+	filter *types.ImageListFilter,
+) (*types.PageResult, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+
+	rows, total, err := s.chunkRepository.ListImageAssets(ctx, tenantID, kbID, buildImageAssetQuery(filter, page))
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID, "tenant_id": tenantID})
+		return nil, err
+	}
+
+	assets := make([]types.ImageAsset, 0, len(rows))
+	for _, row := range rows {
+		attrs := map[string]any{}
+		if err := json.Unmarshal([]byte(row.AttrsJSON), &attrs); err != nil || attrs == nil {
+			attrs = map[string]any{}
+		}
+		assets = append(assets, types.ImageAsset{
+			ID:          row.ChunkID + "#" + strconv.Itoa(row.ImageIndex),
+			ChunkID:     row.ChunkID,
+			KnowledgeID: row.KnowledgeID,
+			ChunkType:   row.ChunkType,
+			URL:         row.URL,
+			OriginalURL: row.OriginalURL,
+			Caption:     row.Caption,
+			OCRText:     row.OCRText,
+			Attrs:       attrs,
+			IsEnabled:   row.IsEnabled,
+			Status:      row.Status,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+		})
+	}
+
+	// Resolve the human-readable name of each source knowledge item in one
+	// batch so the viewer can show "来源" without a per-image round trip.
+	sourceNames := resolveImageAssetSourceNames(ctx, s, tenantID, assets)
+	for i := range assets {
+		assets[i].SourceName = sourceNames[assets[i].KnowledgeID]
+	}
+	return types.NewPageResult(total, page, assets), nil
+}
+
+// resolveImageAssetSourceNames maps each distinct KnowledgeID among the assets
+// to its knowledge item's display name. Missing items (deleted) simply yield an
+// empty name, and the UI falls back to the raw KnowledgeID.
+func resolveImageAssetSourceNames(
+	ctx context.Context,
+	s *chunkService,
+	tenantID uint64,
+	assets []types.ImageAsset,
+) map[string]string {
+	names := make(map[string]string)
+	ids := make([]string, 0, len(assets))
+	seenID := make(map[string]bool)
+	for _, a := range assets {
+		if a.KnowledgeID == "" || seenID[a.KnowledgeID] {
+			continue
+		}
+		seenID[a.KnowledgeID] = true
+		ids = append(ids, a.KnowledgeID)
+	}
+	if len(ids) == 0 || s.knowledgeRepo == nil {
+		return names
+	}
+	items, err := s.knowledgeRepo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"knowledge_ids": ids,
+			"error":         err.Error(),
+		}, "failed to resolve image source names")
+		return names
+	}
+	for _, item := range items {
+		names[item.ID] = item.Title
+	}
+	return names
 }
 
 // updateChunk updates a chunk

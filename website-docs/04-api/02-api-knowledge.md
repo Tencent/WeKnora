@@ -21,7 +21,7 @@
 | `type` | string | 否 | `document`（默认）/`faq`/`wiki` |
 | `embedding_model_id` | string | 否 | Embedding 模型 ID |
 | `chunking_config` | object | 否 | 分块配置（chunk_size/overlap/separators/strategy…） |
-| `image_processing_config` | object | 否 | 图像处理（多模态）配置 |
+| `image_processing_config` | object | 否 | 图片属性观察配置：`model_id` / `image_attrs_enabled` / `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`） |
 | `storage_provider_config` | object | 否 | 存储配置 |
 | `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |
 | `faq_config` / `wiki_config` / `extract_config` / `indexing_strategy` | object | 否 | 类型相关配置 |
