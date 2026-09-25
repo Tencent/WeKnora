@@ -211,13 +211,11 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 	return types.NewPageResult(total, page, chunks), nil
 }
 
-// ListImagesByKnowledgeBaseID enumerates the image assets of a KB. Each image is
-// projected from a chunk's image_info array (a chunk may hold several images),
-// de-duplicated by URL, then filtered by keyword / attribute / enabled state,
-// sorted, and paginated in memory. In-memory filtering keeps the repo query
-// backend-agnostic (sqlite in tests, postgres in production) and correct for the
-// JSON attribute maps; a KB's image population is small enough for this to be
-// cheap. Pagination is applied after filtering so the page reflects the filter.
+// ListImagesByKnowledgeBaseID lists one page of a KB's image assets. Each image
+// is one entry of a chunk's image_info array (a chunk may hold several),
+// de-duplicated by URL. De-duplication, keyword / attribute / enabled-state
+// filtering, sorting and paging all run in the database, so only the page's
+// rows are read and decoded, and the total reflects the filter.
 func (s *chunkService) ListImagesByKnowledgeBaseID(
 	ctx context.Context,
 	kbID string,
@@ -226,55 +224,38 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 ) (*types.PageResult, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	chunks, err := s.chunkRepository.ListImageChunksByKnowledgeBaseID(ctx, tenantID, kbID)
+	rows, total, err := s.chunkRepository.ListImageAssets(ctx, tenantID, kbID, buildImageAssetQuery(filter, page))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID, "tenant_id": tenantID})
 		return nil, err
 	}
 
-	assets := make([]types.ImageAsset, 0, len(chunks))
-	seen := make(map[string]bool)
-	for _, chunk := range chunks {
-		if chunk.ImageInfo == "" {
+	assets := make([]types.ImageAsset, 0, len(rows))
+	for _, row := range rows {
+		var info galleryImageInfo
+		if err := json.Unmarshal([]byte(row.ImageJSON), &info); err != nil {
+			logger.Warnf(ctx, "gallery: skip undecodable image %s#%d: %v", row.ChunkID, row.ImageIndex, err)
 			continue
 		}
-		var infos []galleryImageInfo
-		if err := json.Unmarshal([]byte(chunk.ImageInfo), &infos); err != nil || len(infos) == 0 {
-			continue
+		attrs := info.Attrs.Attrs
+		if attrs == nil {
+			attrs = map[string]any{}
 		}
-		for i, info := range infos {
-			key := info.URL
-			if key == "" {
-				key = info.OriginalURL
-			}
-			if key == "" {
-				key = chunk.ID + "#" + strconv.Itoa(i)
-			}
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-
-			attrs := info.Attrs.Attrs
-			if attrs == nil {
-				attrs = map[string]any{}
-			}
-			assets = append(assets, types.ImageAsset{
-				ID:          chunk.ID + "#" + strconv.Itoa(i),
-				ChunkID:     chunk.ID,
-				KnowledgeID: chunk.KnowledgeID,
-				ChunkType:   string(chunk.ChunkType),
-				URL:         info.URL,
-				OriginalURL: info.OriginalURL,
-				Caption:     info.Caption,
-				OCRText:     info.OCRText,
-				Attrs:       attrs,
-				IsEnabled:   chunk.IsEnabled,
-				Status:      chunk.Status,
-				CreatedAt:   chunk.CreatedAt,
-				UpdatedAt:   chunk.UpdatedAt,
-			})
-		}
+		assets = append(assets, types.ImageAsset{
+			ID:          row.ChunkID + "#" + strconv.Itoa(row.ImageIndex),
+			ChunkID:     row.ChunkID,
+			KnowledgeID: row.KnowledgeID,
+			ChunkType:   row.ChunkType,
+			URL:         info.URL,
+			OriginalURL: info.OriginalURL,
+			Caption:     info.Caption,
+			OCRText:     info.OCRText,
+			Attrs:       attrs,
+			IsEnabled:   row.IsEnabled,
+			Status:      row.Status,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+		})
 	}
 
 	// Resolve the human-readable name of each source knowledge item in one
@@ -283,21 +264,7 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 	for i := range assets {
 		assets[i].SourceName = sourceNames[assets[i].KnowledgeID]
 	}
-
-	assets = filterImageAssets(assets, filter)
-
-	sortImageAssets(assets, filter)
-
-	total := int64(len(assets))
-	start := (page.GetPage() - 1) * page.GetPageSize()
-	if start < 0 || start >= len(assets) {
-		return types.NewPageResult(total, page, []types.ImageAsset{}), nil
-	}
-	end := start + page.GetPageSize()
-	if end > len(assets) {
-		end = len(assets)
-	}
-	return types.NewPageResult(total, page, assets[start:end]), nil
+	return types.NewPageResult(total, page, assets), nil
 }
 
 // resolveImageAssetSourceNames maps each distinct KnowledgeID among the assets

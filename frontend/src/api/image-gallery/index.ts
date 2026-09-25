@@ -5,9 +5,9 @@ import { get } from '@/utils/request';
 //
 // The gallery lists every image asset inside a knowledge base. An "asset" is a
 // single rendered image projected from a chunk's `image_info` array (a document
-// chunk can carry several images). The backend does keyword / attribute /
-// enabled-state filtering and sorting in memory, then paginates — image sets
-// per KB are small, and this keeps the code backend-agnostic (sqlite/postgres).
+// chunk can carry several images). The backend de-duplicates, filters by
+// keyword / attribute / enabled state, sorts and paginates in the database, so
+// a page costs the same however many images the KB holds.
 //
 // What the gallery shows (filters, searchable fields, sort options) is NOT
 // hardcoded here: GET /knowledge-bases/:id/gallery-config returns the

@@ -77,3 +77,59 @@ type ImageListFilter struct {
 	// IsEnabled, when non-nil, restricts to chunks with that enabled state.
 	IsEnabled *bool
 }
+
+// ImageAssetField names one value of an image the gallery query can search,
+// filter or sort on. Exactly one of the two is set.
+type ImageAssetField struct {
+	// Builtin is one of the builtin source's fields: "caption", "ocr_text",
+	// "created_at", "updated_at" or "is_enabled".
+	Builtin string
+	// Attr is a source-local attribute name read from image_info attrs
+	// (e.g. "contain.text").
+	Attr string
+}
+
+// ImageAssetValueSet pairs a field with a set of raw values.
+type ImageAssetValueSet struct {
+	Field  ImageAssetField
+	Values []string
+}
+
+// ImageAssetQuery is the storage-neutral form of one gallery page request. The
+// service translates namespaced attribute ids into fields; the repository
+// compiles it into SQL, so de-duplication, filtering, sorting and paging all
+// run in the database and only the requested page leaves it.
+type ImageAssetQuery struct {
+	// Keyword is matched, lowercased, as a substring of the SearchFields'
+	// values joined by spaces. Empty disables the keyword match.
+	Keyword      string
+	SearchFields []ImageAssetField
+	// AttrFilters are AND-ed across sets and OR-ed within one; an image
+	// without a value for the field is not constrained by it.
+	AttrFilters []ImageAssetValueSet
+	// OnRules / OffRules are the per-value verdicts: an image carrying an
+	// "off" value is hidden unless it also carries an "on" value.
+	OnRules  []ImageAssetValueSet
+	OffRules []ImageAssetValueSet
+	// IsEnabled, when non-nil, restricts to chunks with that enabled state.
+	IsEnabled *bool
+	SortField ImageAssetField
+	SortDesc  bool
+	Offset    int
+	Limit     int
+}
+
+// ImageAssetRow is one de-duplicated image as the repository returns it: the
+// owning chunk's columns plus the raw JSON of the image's image_info entry.
+type ImageAssetRow struct {
+	ChunkID     string    `gorm:"column:chunk_id"`
+	KnowledgeID string    `gorm:"column:knowledge_id"`
+	ChunkType   string    `gorm:"column:chunk_type"`
+	IsEnabled   bool      `gorm:"column:is_enabled"`
+	Status      int       `gorm:"column:status"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at"`
+	ImageIndex  int       `gorm:"column:image_index"`
+	ImageJSON   string    `gorm:"column:image_json"`
+	TotalCount  int64     `gorm:"column:total_count"`
+}
