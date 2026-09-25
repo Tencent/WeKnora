@@ -931,6 +931,9 @@ func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSe
 	if request.MatchCount < 0 {
 		return nil, fmt.Errorf("match_count must not be negative")
 	}
+	if request.MatchCount > types.MaxRequestedResults {
+		return nil, fmt.Errorf("match_count must not exceed %d", types.MaxRequestedResults)
+	}
 	if request.DisableVectorMatch && request.DisableKeywordsMatch {
 		return nil, fmt.Errorf("disable_vector_match and disable_keywords_match cannot both be true")
 	}

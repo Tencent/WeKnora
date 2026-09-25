@@ -49,13 +49,14 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 			mode = "semantic"
 		}
 		output := r.modelKnowledgeOutput(mode, mapsValue(result.Data["results"]), result.Output)
-		return r.annotateModeFallbacks(output, result.Data)
+		return annotateSearchNotes(r.annotateModeFallbacks(output, result.Data), result.Data)
 	case "knowledge_chunks_list":
 		return r.modelKnowledgeChunksOutput(result.Data, result.Output)
 	case "document_info":
 		return r.modelDocumentInfoOutput(result.Data, result.Output)
 	case "graph_query_results":
-		return r.modelKnowledgeOutput("graph", mapsValue(result.Data["results"]), result.Output)
+		return annotateGraphResult(
+			r.modelKnowledgeOutput("graph", mapsValue(result.Data["results"]), result.Output), result.Data)
 	case "web_search_results":
 		return r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output)
 	case "database_query":
@@ -291,6 +292,66 @@ func (r *sourceRegistry) annotateModeFallbacks(output string, data map[string]in
 	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
 }
 
+// matchAddsToContent reports whether a match snippet tells the model
+// anything the chunk's content does not: it does when there is no content
+// (a snippet-only view), or when the snippet is not an excerpt of it.
+// Rendering an excerpt next to the full content repeated up to 800
+// characters per row.
+func matchAddsToContent(match, content string) bool {
+	if content == "" {
+		return true
+	}
+	excerpt := strings.TrimSpace(match)
+	for _, marker := range []string{"...", "…"} {
+		excerpt = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(excerpt, marker), marker))
+	}
+	return excerpt != "" && !strings.Contains(content, excerpt)
+}
+
+// annotateGraphResult adds the graph relations and any per-knowledge-base
+// failures to a graph query's chunk view. Both lived only in Output, which
+// the model never sees once there are chunk rows to render.
+func annotateGraphResult(output string, data map[string]interface{}) string {
+	relations := mapsValue(data["relations"])
+	failures := stringSliceValue(data["errors"])
+	if (len(relations) == 0 && len(failures) == 0) || !strings.HasSuffix(output, "</retrieval>") {
+		return output
+	}
+	var b strings.Builder
+	for _, rel := range relations {
+		fmt.Fprintf(&b, "  <relation source=\"%s\" type=\"%s\" target=\"%s\" />\n",
+			escapeAttr(stringValue(rel, "source")), escapeAttr(stringValue(rel, "type")),
+			escapeAttr(stringValue(rel, "target")))
+	}
+	for _, failure := range failures {
+		fmt.Fprintf(&b, "  <error>%s</error>\n", escapeText(failure))
+	}
+	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
+// annotateSearchNotes tells the model what a search result does not show:
+// how many lower-ranked results were left out to fit the tool output budget
+// (so it narrows the query or lowers the limit instead of concluding nothing
+// else matched), and which knowledge bases could not be searched (so a
+// failure is not read as an absence of evidence).
+func annotateSearchNotes(output string, data map[string]interface{}) string {
+	omitted := intValue(data, "omitted_for_budget")
+	failures := stringSliceValue(data["partial_failures"])
+	if (omitted <= 0 && len(failures) == 0) || !strings.HasSuffix(output, "</retrieval>") {
+		return output
+	}
+	var b strings.Builder
+	if omitted > 0 {
+		fmt.Fprintf(&b, "  <omitted count=\"%d\" reason=\"output_budget\">Lower-ranked results were left out to "+
+			"fit the output size. Narrow the query or lower limit to see them.</omitted>\n", omitted)
+	}
+	for _, failure := range failures {
+		fmt.Fprintf(&b, "  <partial_failure>%s — these knowledge bases were not searched.</partial_failure>\n",
+			escapeText(failure))
+	}
+	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
 func viewForRow(row map[string]interface{}, mode string) string {
 	if stringValue(row, "content") != "" {
 		return "full"
@@ -357,6 +418,9 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 		fmt.Fprintf(&footer, "  <matches query=\"%s\" count=\"%d\"", escapeAttr(query), intValue(data, "match_count"))
 		if boolValue(data, "truncated") {
 			footer.WriteString(" truncated=\"true\"")
+			if _, ok := data["next_offset"]; ok {
+				fmt.Fprintf(&footer, " next_offset=\"%d\"", intValue(data, "next_offset"))
+			}
 		}
 		footer.WriteString(" />\n")
 	} else if _, ok := data["next_offset"]; ok {
@@ -480,7 +544,10 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk, info map[string]int
 			if chunk.question != "" {
 				fmt.Fprintf(&b, "      <question>%s</question>\n", escapeText(chunk.question))
 			}
-			if chunk.match != "" {
+			// Deep reads keep the snippet: it locates the hit inside a long
+			// chunk. Search rows are chunk-sized, so an excerpt of the content
+			// shown beside it only repeats it.
+			if chunk.match != "" && (mode == "deep_read" || matchAddsToContent(chunk.match, chunk.content)) {
 				fmt.Fprintf(&b, "      <match>%s</match>\n", escapeText(chunk.match))
 			}
 			if chunk.content != "" {

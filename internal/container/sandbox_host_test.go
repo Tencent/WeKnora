@@ -36,6 +36,30 @@ type unavailableBackend struct{ stubBackend }
 func (unavailableBackend) Available() error { return errUnsupportedForTest }
 
 // An unsupported platform must stay off rather than run unsandboxed.
+func TestFinishHostSandboxOmitsManagerWhenPartsMissing(t *testing.T) {
+	out := finishHostSandbox(nil, "")
+	require.True(t, out.Desktop)
+	require.Nil(t, out.Manager)
+	require.False(t, out.SkillsAvailable())
+}
+
+func TestFinishHostSandboxKeepsChatWhenSkillTreeCannotOpen(t *testing.T) {
+	parts := buildHostSandbox(hostSandboxDeps{
+		newBackend: func() (localsandbox.Backend, error) { return stubBackend{}, nil },
+		homeDir:    "/Users/dev",
+		appDataDir: "/Users/dev/App Support/WeKnora",
+	})
+	require.NotNil(t, parts)
+	require.NotNil(t, parts.manager)
+
+	out := finishHostSandbox(parts, "relative-not-absolute")
+	require.True(t, out.Desktop)
+	require.Equal(t, parts.manager, out.Manager)
+	require.Nil(t, out.SkillTree)
+	require.Nil(t, out.SkillInstaller)
+	require.False(t, out.SkillsAvailable())
+}
+
 func TestHostSandboxManagerNilWhenBackendUnavailable(t *testing.T) {
 	require.Nil(t, buildHostSandboxManager(hostSandboxDeps{
 		newBackend: func() (localsandbox.Backend, error) { return nil, errUnsupportedForTest },
@@ -50,6 +74,10 @@ func TestHostSandboxManagerNilWhenAvailableFails(t *testing.T) {
 
 func TestDefaultHostSessionRootUsesWeKnoraLite(t *testing.T) {
 	require.Equal(t, "/Users/dev/Documents/WeKnoraLite", defaultHostSessionRoot("/Users/dev"))
+}
+
+func TestDefaultHostSkillsRootIsDotWeknora(t *testing.T) {
+	require.Equal(t, "/Users/dev/.weknora/skills", defaultHostSkillsRoot("/Users/dev"))
 }
 
 func TestHostSandboxManagerEnabledWhenBackendAvailable(t *testing.T) {

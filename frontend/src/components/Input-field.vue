@@ -30,6 +30,8 @@ import {
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
+import { hostSkillsOnly, mentionSkillTargetId } from '@/utils/skillTarget';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
@@ -64,6 +66,7 @@ const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const {
   agents,
   disabledOwnAgentIds,
@@ -1424,9 +1427,17 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
       // The scope makes a shared agent's skills resolve in its owner's
-      // workspace, where they are actually installed.
+      // workspace, where they are actually installed. Lite agents store no
+      // sandbox config id; their skills live on the host target.
+      await deploymentCapabilities.ensureLoaded();
       await editorResources.ensureSkills(
-        currentAgentConfig.value?.sandbox_config_id,
+        mentionSkillTargetId(
+          hostSkillsOnly(
+            deploymentCapabilities.isSupported('settings.sandbox.remote'),
+            deploymentCapabilities.isSupported('settings.sandbox.host'),
+          ),
+          currentAgentConfig.value?.sandbox_config_id,
+        ),
         currentAgentScope.value,
       );
       skillItems = editorResources.skills

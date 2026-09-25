@@ -208,7 +208,7 @@
 | `max_documents` / `max_query_chars` / `max_document_chars` / `max_request_chars` | int | 0（不限） | 单次请求的文档数、查询长度、单篇长度与总长度上限，超出自动分批 |
 | `max_concurrency` | int | 0（使用默认） | 分批后同时发出的请求数 |
 | `accepts_truncate_prompt_tokens` | bool | false | 服务是否支持 vLLM 的 `truncate_prompt_tokens` |
-| `request_timeout_seconds` | int | 0（不单独限制） | 单次请求超时（秒） |
+| `request_timeout_seconds` | int | 0（默认 60 秒） | 单次请求超时（秒）；超时按调用失败处理，检索回退为召回顺序 |
 | `extra_body` | object | 空 | 附加到每次请求的字段 |
 
 **语音识别模型**

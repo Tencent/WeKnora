@@ -502,9 +502,10 @@ func (s *ImageMultimodalService) indexChunks(
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
-			// Backends without a column default store an unset flag as
-			// disabled, and every retrieval filters those rows out.
-			IsEnabled: true,
+			// Engines other than Postgres store the zero value verbatim and
+			// filter on is_enabled = true, so leaving this unset made OCR and
+			// caption chunks unsearchable there.
+			IsEnabled: chunk.IsEnabled,
 		})
 	}
 

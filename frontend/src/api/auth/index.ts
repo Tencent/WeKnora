@@ -293,21 +293,34 @@ export async function register(data: RegisterRequest): Promise<RegisterResponse>
 /**
  * Lite 版自动初始化（创建默认用户/空间 + 签发令牌）
  */
-export async function autoSetup(): Promise<LoginResponse> {
-  try {
-    const nativeApp = (window as any).go?.main?.App
-    if (!nativeApp?.GetAutoSetupToken) return { success: false, message: 'Desktop authentication required' }
-    const token = await nativeApp.GetAutoSetupToken()
-    const response = await post('/api/v1/auth/auto-setup', {}, {
-      headers: { 'X-WeKnora-Desktop-Token': token },
-    })
-    return response as unknown as LoginResponse
-  } catch (error: any) {
-    return {
-      success: false,
-      message: error.message || 'Auto-setup unavailable'
+let autoSetupPromise: Promise<LoginResponse> | null = null
+
+export function autoSetup(): Promise<LoginResponse> {
+  if (autoSetupPromise) return autoSetupPromise
+
+  const request = (async () => {
+    try {
+      const nativeApp = (window as any).go?.main?.App
+      if (!nativeApp?.GetAutoSetupToken) return { success: false, message: 'Desktop authentication required' }
+      const token = await nativeApp.GetAutoSetupToken()
+      const response = await post('/api/v1/auth/auto-setup', {}, {
+        headers: { 'X-WeKnora-Desktop-Token': token },
+      })
+      return response as unknown as LoginResponse
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message || 'Auto-setup unavailable'
+      }
     }
-  }
+  })()
+
+  autoSetupPromise = request
+  void request.then(
+    () => { if (autoSetupPromise === request) autoSetupPromise = null },
+    () => { if (autoSetupPromise === request) autoSetupPromise = null },
+  )
+  return request
 }
 
 /**

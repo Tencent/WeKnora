@@ -391,9 +391,23 @@ func (r *knowledgeRepository) GetKnowledgeBatch(
 	ctx context.Context, tenantID uint64, ids []string,
 ) ([]*types.Knowledge, error) {
 	var knowledge []*types.Knowledge
-	if err := r.db.WithContext(ctx).Debug().
+	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND id IN ?", tenantID, ids).
 		Find(&knowledge).Error; err != nil {
+		return nil, err
+	}
+	return knowledge, nil
+}
+
+// GetKnowledgeBatchByIDOnly gets knowledge in batch without a tenant filter.
+func (r *knowledgeRepository) GetKnowledgeBatchByIDOnly(
+	ctx context.Context, ids []string,
+) ([]*types.Knowledge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var knowledge []*types.Knowledge
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&knowledge).Error; err != nil {
 		return nil, err
 	}
 	return knowledge, nil

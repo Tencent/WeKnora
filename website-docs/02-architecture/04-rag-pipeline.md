@@ -186,20 +186,20 @@ pipeline = types.NewPipelineBuilder().
 
 - 输入组合分三种：纯文本（chat model）、文本+图片、纯图片（优先用支持视觉的 chat model，否则 `VLMModelID`）。
 - Prompt 来自 `config/prompt_templates/rewrite.yaml`（system + user 对），可被 Agent 级 `RewritePromptSystem`/`RewritePromptUser` 覆盖；占位符 `{conversation}` / `{query}` / `{language}` 由 `types.RenderPromptPlaceholders` 渲染。
-- 模型要求输出 JSON：`{"rewrite_query":"...","intent":"kb_search","image_description":"..."}`；解析容错（markdown 包裹、字段别名、OCR 字段合并），JSON 完全解析失败时把原文当作改写结果并默认 `kb_search`。
-- 意图枚举（`types.QueryIntent`）：`kb_search`、`web_search`、`greeting`、`chitchat`、`follow_up`、`image_only`、`doc_only`、`summarize`、`clarification`。`NeedsKBRetrieval()` 仅对 `kb_search`/`clarification`/`summarize`/空值返回 true；`ChatManage.NeedsRetrieval()` 对 `web_search` 额外看 `WebSearchEnabled`。**后续所有检索类插件都以 `NeedsRetrieval()` 作为跳过条件**。
+- 模型要求输出 JSON：`{"rewrite_query":"...","intent":"kb_search","image_description":"..."}`；解析容错（markdown 包裹、字段别名、OCR 字段合并）；回复被输出上限截断时，按字段抢救已写出的 `rewrite_query`、`intent` 与半截 `image_description`；完全无法解析时保留原始查询，意图为空（按需要检索处理）。带图片的轮次输出上限为 2048 token（prompt 要求把 OCR 全文放进 `image_description`）。
+- 意图枚举（`types.QueryIntent`）：`kb_search`、`web_search`、`greeting`、`chitchat`、`follow_up`、`image_only`、`doc_only`、`summarize`、`clarification`。模型给出的意图先经 `types.NormalizeQueryIntent` 归一（忽略大小写与 `-`/空格，如 `KB-Search` → `kb_search`），不认识的标签按空值处理。`NeedsKBRetrieval()` 仅对 `kb_search`/`clarification`/`summarize`/空值返回 true；`ChatManage.NeedsRetrieval()` 对 `web_search` 额外看 `WebSearchEnabled`（未开启时走意图提示词，告知用户当前不能联网搜索）。**后续所有检索类插件都以 `NeedsRetrieval()` 作为跳过条件**。
 - 非检索意图时 `applyIntentPromptOverride` 用 `config/prompt_templates/intent_prompts.yaml`（模板 id 与意图值一一对应，如 `greeting`）或 Agent 覆盖设置 `SystemPromptOverride`。
 - 图片描述异步回写到 user 消息的 `Images[0].Caption`（供下一轮历史使用）。
 - 可用 `QueryUnderstandModelID` 为该阶段单独指定小模型，失败回退 `ChatModelID`。
 
-**PluginExtractEntity**（`extract_entity.go`）在链内层执行：仅当 `NEO4J_ENABLE=true` 且检索范围内存在 `ExtractConfig.Enabled` 的知识库时，用 `config.ExtractManager.ExtractEntity` 模板（`graph_extraction.yaml`）调用 LLM 抽取查询实体，写入 `chatManage.Entity` / `EntityKBIDs` / `EntityKnowledge`，供 `ENTITY_SEARCH` 使用。
+**PluginExtractEntity**（`extract_entity.go`）在链内层执行：仅当 `NEO4J_ENABLE=true`、本轮意图需要知识库检索（寒暄、闲聊等不调用）且检索范围内存在 `ExtractConfig.Enabled` 的知识库时，优先用改写后的查询，用 `config.ExtractManager.ExtractEntity` 模板（`graph_extraction.yaml`）调用 LLM 抽取查询实体，写入 `chatManage.Entity` / `EntityKBIDs` / `EntityKnowledge`，供 `ENTITY_SEARCH` 使用。
 
 ### CHUNK_SEARCH_PARALLEL — 并行检索（chunk + 图谱实体） {#_3-3-chunk-search-parallel-—-并行检索-chunk-图谱实体}
 
 `search_parallel.go`。`NeedsRetrieval()` 为假直接跳过。否则将 `chatManage` `Clone()` 两份，用 `RunParallel` 并发执行：
 
 - `chunk_search`：内部（未注册的）`PluginSearch.OnEvent(CHUNK_SEARCH, ...)`；
-- `entity_search`：有实体时执行 `PluginSearchEntity.OnEvent(ENTITY_SEARCH, ...)`，在 Neo4j 中按 `NameSpace{KnowledgeBase, Knowledge}` 并行 `SearchNode`，将命中的图节点/关系转换为 SearchResult 并组装 `GraphResult`。
+- `entity_search`：有实体时执行 `PluginSearchEntity.OnEvent(ENTITY_SEARCH, ...)`，在 Neo4j 中按 `NameSpace{KnowledgeBase, Knowledge}` 并行 `SearchNode`，将命中的图节点/关系转换为 SearchResult 并组装 `GraphResult`。分块与文档按 ID 查询（不限当前工作空间，组织共享知识库的图谱命中也能解析），只保留属于本轮检索范围内知识库、仍启用且文档存在的分块，最多 30 条；图谱命中没有检索分（`Score=0`），重排时用模型分代替。
 
 两路结果合并后 `removeDuplicateResults` 去重（按 chunk ID + 内容签名 `searchutil.BuildContentSignature`）。两路都空时返回 `ErrSearchNothing`。
 
@@ -210,20 +210,20 @@ pipeline = types.NewPipelineBuilder().
    - 组内无标签/文档约束的整库目标合并为**一次** `HybridSearch` 调用（`params.KnowledgeBaseIDs` 携带多库），带约束的目标逐个 `searchSingleTarget`（携带 `KnowledgeIDs`/`TagIDs`/`ScopeTagIDs`，且显式圈定范围的目标可 `DisableRecallThresholds` 关闭召回阈值）；
 2. **Web 搜索** `searchWebIfEnabled`：`WebSearchEnabled` 时用租户/Agent 解析出的 `WebSearchProviderID` 调用 `webSearchService.Search`，结果经 `searchutil.ConvertWebSearchResults` 转为 SearchResult（URL 作为 ID，`KnowledgeSource="web_search"`）。
 
-**查询扩展**（`query_expansion.go`）：`EnableQueryExpansion` 且初次召回数少于 `EmbeddingTopK` 时触发。不调用 LLM，本地生成查询变体（去停用词、词序调整、关键短语抽取等）。中文分词走 `types.Jieba.CutForSearch`：连续汉字段落整体交给 jieba 切成词，中英文/数字混排按脚本切换分段处理，不再退化成「一个汉字一个 token」；停用词与长度过滤按 rune 计数，避免多字节字符被误判为单字符，对每个（变体 × SearchTarget）组合并发（信号量上限 16）执行 `HybridSearch`，关键词阈值放宽为原值的 0.8，TopK 放大为 `max(EmbeddingTopK, RerankTopK) * 2`。
+**查询扩展**（`query_expansion.go`）：`EnableQueryExpansion` 且初次召回数少于 `EmbeddingTopK` 时触发。不调用 LLM，本地生成查询变体（去停用词、词序调整、关键短语抽取等）。中文分词走 `types.Jieba.CutForSearch`：连续汉字段落整体交给 jieba 切成词，中英文/数字混排按脚本切换分段处理，不再退化成「一个汉字一个 token」；停用词与长度过滤按 rune 计数，避免多字节字符被误判为单字符，对每个（变体 × SearchTarget）组合并发（信号量上限 16）执行**只走关键词**的 `HybridSearch`（变体只在关键词侧增加召回，向量侧与原查询几乎相同，不再为每个变体重新 embedding），关键词阈值放宽为原值的 0.8，TopK 放大为 `max(EmbeddingTopK, RerankTopK) * 2`；关键词检索被关闭时不做扩展。
 
 ### CHUNK_RERANK — 重排、复合打分、MMR、Wiki 加权 {#_3-4-chunk-rerank-—-重排、复合打分、mmr、wiki-加权}
 
 **PluginRerank**（`rerank.go`，720 行）：
 
 1. **Passage 清洗** `cleanPassageForRerank`：重排模型做的是语义相似度，Markdown 结构语法是噪声。代码块与 `$$...$$` 公式块**只脱掉围栏、保留内部正文**（早期实现整块删除，纯代码或纯公式的候选会被清成空串而丢分）；HTML 标签、图片引用、链接标记（保留文字）、裸 URL、表格分隔行（数据行转逗号拼接）、标题/引用/加粗/列表标记按序剥离，最后压缩多余空行。
-2. **Passage 增强** `getEnrichedPassage`：拼入 `ImageInfo` 的 Caption/OCR 文本与 `ChunkMetadata` 中的生成问题（GeneratedQuestions）。
+2. **Passage 增强** `getEnrichedPassage`：拼入 `ImageInfo` 的 Caption/OCR 文本与 `ChunkMetadata` 中的生成问题（GeneratedQuestions）；与正文相同的图片文本（OCR / 描述分块自身）不重复拼接。模型配置了单篇或单次请求长度上限时，超长 passage 从尾部截到上限；候选按检索分最多取 200 条送去打分。
 3. 调用 `rerankModel.Rerank(ctx, RewriteQuery, passages)`，按 `RerankThreshold` 过滤：
    - 全部低于阈值且 top1 ≥ `rerankFallbackMinScore`（默认 0.15；用户显式圈定标签/文档范围时为 0，保留权威范围的最佳候选）→ 保留 top1 兜底；
    - 无结果且阈值 > 0.3 → **阈值降级**重试一次（`threshold * 0.7`，下限 0.3）；
-   - Rerank API 失败 → 回退原始检索结果继续管线。
-4. **复合打分** `compositeScore`：`0.6*模型分 + 0.3*检索基础分 + 0.1*来源权重`（web_search 来源权重 0.95，其余 1.0），clamp 到 [0,1]。基础分/模型分记录在 `Metadata["base_score"]` / `["model_score"]`。早期版本还会乘一个「越靠文档前部越高」的位置先验（±0.05），因为它与分块编辑后的偏移变化耦合且收益不明确，已被移除。
-5. **FAQ 加权**：`FAQPriorityEnabled` 且 `FAQScoreBoost > 1.0` 时，FAQ chunk 分数乘以 boost（上限 1.0），记 `Metadata["faq_boosted"]`。
+   - Rerank 模型加载失败（被删除、配置错误）或 API 失败（含默认 60 秒超时）→ 回退原始检索结果继续管线。
+4. **复合打分** `compositeScore`：`0.6*模型分 + 0.3*检索基础分 + 0.1*来源权重`（web_search 来源权重 0.95，其余 1.0），clamp 到 [0,1]。图谱实体检索命中的 chunk 没有检索分，基础分用模型分代替。基础分/模型分/复合分记录在 `Metadata["base_score"]` / `["model_score"]` / `["composite_score"]`。早期版本还会乘一个「越靠文档前部越高」的位置先验（±0.05），因为它与分块编辑后的偏移变化耦合且收益不明确，已被移除。
+5. **FAQ 加权**：`FAQPriorityEnabled` 且 `FAQScoreBoost > 1.0` 时，FAQ chunk 分数乘以 boost，记 `Metadata["faq_boosted"]`。结果不封顶到 1.0——封顶会让高分 FAQ 全部并列 1.0，彼此顺序退化为 tie-breaker。
 6. **MMR 多样性选择** `applyMMR`（λ=0.7，k=`RerankTopK`）：`mmr = 0.7*relevance - 0.3*max_jaccard_redundancy`，用 `searchutil.TokenizeSimple` + `Jaccard` 并行预计算 token 集合，迭代贪心选出 `RerankResult`。
 
 **PluginMemoryAffinity**（`memory_affinity.go`）注册在链的最内层，同样先 `next()` 再后置处理：对该调用者过往回答中至少引用过 2 次的文档，按使用次数对数增长加权，最高 ×1.15，只用于在相近候选之间打破平局。随后才轮到 WikiBoost 的后置加权。
@@ -238,14 +238,14 @@ pipeline = types.NewPipelineBuilder().
 
 `merge.go` 的 `OnEvent` 注释即流程说明：
 
-1. **选择输入**：优先 `RerankResult`，为空则回退 `SearchResult`（按分排序）；
+1. **选择输入**：优先 `RerankResult`，为空则回退 `SearchResult`（按分排序并截到 `RerankTopK`，避免对全部召回结果做回表和扩展）；
 2. **去重**：ID + 内容签名；
-3. **注入历史引用**（`merge_history.go`）：从最近一轮带引用的历史取 `KnowledgeReferences`，与当前查询做 Jaccard 相似度过滤（阈值 0.15），分数打 0.6 折，最多注入 3 条，标记 `MatchTypeHistory`；
+3. **注入历史引用**（`merge_history.go`）：从最近一轮带引用的历史取 `KnowledgeReferences`，按引用覆盖了多少查询词过滤（重合系数 `|q∩c|/min(|q|,|c|)` ≥ 0.3；Jaccard 除以并集，约 8 个词的查询对上几百词的分块永远到不了阈值），分数打 0.6 折，最多注入 3 条，标记 `MatchTypeHistory`；
 4. **父子块解析** `resolveParentChunks`：text 子块与 image_ocr/image_caption/image_vector 子块都用**当前** parent_text 内容补齐上下文；图片 Markdown 的收窄靠稳定的图片 URL（`PruneMarkdownImagesByImageInfo`）而不是解析器坐标；ImageInfo 严格限定在命中的 text 子块，避免图片密集的父块把兄弟页面的 OCR 全部灌进上下文。image → text → parent_text 这条链只在确实命中图片结果时才多查一次祖父块；
 5. **分组顺序合并** `groupAndMergeCurrentContent`：按 `KnowledgeID + ChunkType` 分组，组内按 `ChunkIndex` 排序后 `mergeSequentialChunks`——序号连续、或一方内容包含另一方时用 `searchutil.JoinChunkContent` 拼接，保留最高分，`SubChunkID` 记录被合并块，`mergeImageInfo` 按 URL 去重合并图片信息；
 6. **FAQ 答案填充**（`merge_faq.go`）：FAQ 类型 chunk 批量回表读 `FAQMetadata`，重写 Content 为 `Q: 标准问题 + Answer: 答案列表`；
-7. **短上下文邻居扩展**（`merge_expand.go`）：text 块内容不足 350 字符时，批量取 `PreChunkID`/`NextChunkID` 邻居拼接至最长 850 字符；
-8. 扩展引入的新重复**再合并一次**，最终去重 + `removePartialOverlaps`（归一化包含判断 / token 重合率 ≥ 0.85 的跨库近重复删除，低分者被删）。
+7. **短上下文邻居扩展**（`merge_expand.go`）：text 块内容不足 350 字符时，批量取 `PreChunkID`/`NextChunkID` 邻居拼接至最长约 850 字符。命中块本身完整保留，剩余长度分给紧挨着它的前文末尾与后文开头；邻居必须属于同一文档，组织共享知识库的分块同样可以扩展；
+8. 扩展引入的新重复**再合并一次**，最终去重 + `removePartialOverlaps`（归一化包含判断 / token 重合率 ≥ 0.85 的跨库近重复删除，低分者被删；重合率只在两者 token 数相差不超过 3 倍时比较，避免长网页或父块"覆盖"短分块；每条文本只分词一次）。
 
 结果写入 `chatManage.MergeResult`。
 
@@ -267,7 +267,7 @@ pipeline = types.NewPipelineBuilder().
 
 - `utils.ValidateInput` 校验查询安全性（注入防护）；
 - 非检索意图路径：仍走 `ContextTemplate` 渲染（`contexts` 为空），以注入 `current_time` 等运行时元数据；
-- **FAQ 优先策略**：`FAQPriorityEnabled` 时把 FAQ 与文档结果分为 `source type="faq" priority="high"` 与 `source type="document" priority="supplementary"` 两个分节；最高分 FAQ ≥ `FAQDirectAnswerThreshold` 时其 context 标记 `match="exact"`（提示模型可直接采纳该答案）；
+- **FAQ 优先策略**：`FAQPriorityEnabled` 时把 FAQ 与文档结果分为 `source type="faq" priority="high"` 与 `source type="document" priority="supplementary"` 两个分节；第一条加权前得分（`composite_score`，未重排时为检索分）≥ `FAQDirectAnswerThreshold` 的 FAQ，其 context 标记 `match="exact"`（提示模型可直接采纳该答案）。比较加权前的分数，是为了不让 FAQ/Wiki/记忆加权把中等匹配抬过阈值；
 - 普通路径按 `context id="N"` 顺序编号包裹每个增强后的 passage（`getEnrichedPassageForChat` 会把 ImageInfo 以 Markdown 图片+描述内联进内容）；
 - 头部 `buildDocumentHeader` 输出去重后的文档元信息（title/description）；
 - 渲染 `SummaryConfig.ContextTemplate`（来自 `config/prompt_templates/context_template.yaml`），占位符 `{query}` / `{contexts}` / `{language}`；追加图片描述（非视觉模型）、引用上下文 `QuotedContext`、附件 prompt；
@@ -488,9 +488,10 @@ sequenceDiagram
 6. **fan-out**（`knowledgebase_search_fanout.go`）：单组直查零开销；多组用 `errgroup` 并发（上限 4），每组超时 `MULTI_STORE_RETRIEVE_TIMEOUT_SEC`（默认 30s），all-or-nothing 失败策略；结果跨引擎类型时用 `EngineAwareNormalizer` 把向量分归一化到 [0,1]（详见检索引擎文档）。
 7. **融合**（`knowledgebase_search_fusion.go`）：
    - 仅向量或仅关键词 → `deduplicateByScore`（按 chunk 保留最高分）；
-   - 混合 → **加权 RRF**：`score = vectorWeight/(k+vectorRank) + keywordWeight/(k+keywordRank)`，`k` 与权重来自租户 `RetrievalConfig`（有缺省值），rank 基于各自检索器返回顺序（1-indexed），对分数尺度免疫。
+   - 混合 → **加权 RRF**：`score = vectorWeight/(k+vectorRank) + keywordWeight/(k+keywordRank)`，再除以理论最大值 `(vectorWeight+keywordWeight)/(k+1)` 归一化到 [0,1]；`k` 与权重来自租户 `RetrievalConfig`（有缺省值），rank 在每个检索结果列表内按分数单独计算（1-indexed），chunk 取最好名次；
+   - 三条路径输出都在 [0,1]（向量为 cosine 相似度），不同检索调用的结果可以一起排序。
 8. **FAQ 命中策略**（`knowledgebase_search_faq.go`，仅 FAQ 类型 KB）：
-   - **迭代检索**：去重后不足 `MatchCount` 且首轮已打满 → 从 `TopK*3` 起最多 5 轮翻倍扩大 TopK 重检索，跨 store 组统一生效，chunk 数据缓存避免重复回表；种子与每轮增长均封顶 `maxRetrievalPoolSize`，触顶即停（再迭代只会重发同一个查询）；
+   - **迭代检索**（主 KB 为 FAQ 库时）：去重后不足 `MatchCount` 且有某个向量结果列表已打满 → 从首轮深度的 2 倍起最多 5 轮翻倍扩大 TopK 重检索，跨 store 组统一生效，每轮按首轮相同的方式融合（分数尺度一致），chunk 数据缓存避免重复回表；种子与每轮增长均封顶 `maxRetrievalPoolSize`，首轮已到上限则不迭代，触顶即停；
    - **负例问题过滤**：查询与 FAQ 的 `NegativeQuestions` 精确匹配（小写去空格）即剔除该条——支持"这个问题不要用这条 FAQ 答"的运营配置。
 9. 截断到 `MatchCount` 后 `processSearchResults` 补全 chunk 元数据（管线场景 `SkipContextEnrichment=true`，上下文组装留给 merge 阶段）。
 

@@ -365,7 +365,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		pinner *service.SessionSandboxPinner,
 		host service.HostSandboxManager,
 	) *service.HostSessionResolver {
-		return service.NewHostSessionResolver(pinner, host.Manager)
+		return service.NewHostSessionResolver(pinner, host.Manager, host.Desktop)
 	}))
 	must(container.Provide(func(
 		mgr sandbox.Manager,

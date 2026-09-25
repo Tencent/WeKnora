@@ -176,3 +176,12 @@ test('a skill whose previous version still runs stays selectable during and afte
   assert.match(source, /installsAnUpgrade\(skill\) \? \$t\('settings\.skills\.upgrade'\) : \$t\('agent\.editor\.installShort'\)/)
   assert.match(source, /return skill\.upgradable \|\| Boolean\(skill\.servedNote\)/)
 })
+
+test('retrieval strategy settings are hidden in agent mode, where search_knowledge ignores them', () => {
+  // search_knowledge reads the global retrieval configuration; showing the
+  // per-agent thresholds in agent mode let users tune values with no effect.
+  assert.match(source, /v-show="currentSection === 'retrieval' && hasKnowledgeBase && !isAgentMode"/)
+  assert.match(source, /if \(hasKnowledgeBase\.value && !isAgentMode\.value\) \{\s*items\.push\(\{ key: 'retrieval'/)
+  const modeWatch = source.match(/watch\(isAgentMode, \(isAgent\) => \{([\s\S]*?)^\}\);/m)?.[1] ?? ''
+  assert.match(modeWatch, /isAgent && \([^)]*currentSection\.value === 'retrieval'/)
+})
