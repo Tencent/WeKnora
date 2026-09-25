@@ -4,7 +4,7 @@
 
 ## 后端与模板
 
-空间命名配置可选择 Docker、CubeSandbox、E2B，本文说明这三类后端的部署。桌面客户端另有依赖操作系统隔离能力的 `host` 后端，不属于服务端命名配置；旧 `local` 宿主机进程后端已移除。Docker 直接使用 Engine API；E2B 使用控制面 REST 与 envd 数据面；Cube 保留专用适配器处理模板和网络策略。
+空间命名配置可选择 Docker、CubeSandbox、E2B，本文说明这三类后端的部署。Lite 桌面客户端另有依赖操作系统隔离能力的 `host` 后端，不属于服务端命名配置，构建要求见下文 [Lite 本机沙箱](#lite-本机沙箱)；旧 `local` 宿主机进程后端已移除。Docker 直接使用 Engine API；E2B 使用控制面 REST 与 envd 数据面；Cube 保留专用适配器处理模板和网络策略。
 
 标准镜像由 `docker/Dockerfile.sandbox` 定义，包含 Python 3.12、Node.js 20、Bash、jq 与 `/workspace`。命令和文件操作默认使用沙箱内 root；保留 UID 1000 的 `user` 供显式按账号执行。跨会话隔离由容器或远端沙箱提供，不能把工作目录约定解释为 root 的文件权限限制。
 
@@ -67,7 +67,20 @@ Cube guest DNS 属于模板配置。更改 DNS/镜像后需重建模板才会进
 | 安装依赖失败 | 默认拒绝出站时是否放行软件源；技能安装与会话使用同一网络策略 |
 | 重连后状态丢失 | Redis 是否共享、TTL 是否到期、技能更新是否触发重建 |
 
-## 图形桌面
+## 交互终端与图形桌面
+
+对话侧栏的终端和桌面都通过 WebSocket 连接会话沙箱，仅 Cube/E2B 支持，Docker 后端不提供。浏览器不能在 WebSocket 握手里携带认证头，因此都先用已登录的 POST 换取两分钟有效的短期票据，再把票据放在握手 query 中：
+
+| 能力 | 取票据 | WebSocket |
+| --- | --- | --- |
+| 终端 | `POST /api/v1/sessions/:session_id/sandbox/terminal-ticket` | `GET /api/v1/sessions/:id/sandbox/terminal?ticket=...` |
+| 桌面 | `POST /api/v1/sessions/:session_id/sandbox/desktop-ticket` | `GET /api/v1/sessions/:id/sandbox/desktop?ticket=...` |
+
+入口代理必须为这两个路径转发 WebSocket Upgrade、放宽读超时，并避免在访问日志中记录 ticket query。标准 frontend Nginx 已为 `^/api/v1/sessions/[^/]+/sandbox/(terminal|desktop)$` 配置不含 query 的日志格式；自定义 Ingress 需自行处理。终端连上后，服务端大约每分钟复核一次登录状态、空间成员和会话归属，退出登录或被移出空间会断开终端。接口参数见[终端 API](../04-api/02-api-sandbox-skills.md#会话交互终端)与[桌面 API](../04-api/02-api-chat.md#sandbox-desktop)。
+
+终端和桌面在无操作时按配置的 `terminal_idle_disconnect_sec` 断开（默认 900 秒，最短 60 秒，最长 24 小时），之后沙箱按提供商 TTL 暂停。终端以键盘输入和 PTY 输出计活动，桌面以键鼠计活动。
+
+### 图形桌面
 
 仅 Cube/E2B 桌面模板支持对话侧栏桌面。首次打开时由后端启动桌面进程；配置需选择桌面模板并设置 `desktop_enabled`。技能已安装后不能原地切换底模。
 
@@ -75,11 +88,21 @@ Cube guest DNS 属于模板配置。更改 DNS/镜像后需重建模板才会进
 浏览器 noVNC → WeKnora 票据中继 → 提供商网关 → websockify :6080 → 本机 x11vnc :5900
 ```
 
-浏览器不持有沙箱 API Key、入站 token 或 websockify 密码。先通过已登录的 `POST /sessions/:session_id/sandbox/desktop-ticket` 获取两分钟有效的一次性票据，再连接桌面 WebSocket；票据仅可消费一次。接口前缀为 `/api/v1`，完整定义见[会话 API](../04-api/02-api-chat.md)。
-
-代理需要支持 WebSocket，并避免在访问日志中记录票据 query。标准 frontend Nginx 已为桌面路径配置不含 query 的日志格式。Cube 桌面模板的 `exposedPorts` 只暴露 envd 的 49983，**不要把 6080 加入宿主机 NAT**，桌面必须经过网关与 WeKnora 中继。
+浏览器不持有沙箱 API Key、入站 token 或 websockify 密码。桌面票据仅可消费一次，完整定义见[会话 API](../04-api/02-api-chat.md#sandbox-desktop)。Cube 桌面模板的 `exposedPorts` 只暴露 envd 的 49983，**不要把 6080 加入宿主机 NAT**，桌面必须经过网关与 WeKnora 中继。
 
 每个会话同时只允许一条桌面中继，多副本槽位由 Redis 协调。沙箱重建后以 `SANDBOX_REBUILT` 提醒断开，不能把新桌面当成保留了原临时文件的旧实例。空闲判断使用 RFB 键鼠活动，截图请求不算用户操作。
+
+## Lite 本机沙箱
+
+`host` 后端只编译进带 `desktop` 构建标签的 Lite 桌面程序（`cmd/desktop/wails.json` 的 `build:tags`），服务端和单二进制 Lite 不包含。它在未选沙箱配置的会话中运行命令，用法见[技能目录与沙箱](../03-features/22-skills-sandbox.md#lite-host)。
+
+| 平台 | 状态 |
+| --- | --- |
+| macOS | 使用系统 `sandbox-exec`（Seatbelt）执行每条命令；启动时检测不可用则不启用 |
+| Windows | 尚未实现，报告不可用，不会退化为无隔离执行 |
+| Linux | 不支持 |
+
+每条命令都是新的本机进程，没有会话级实例，因此不写入会话的沙箱绑定，也不做工作区检查点。用户通过系统目录选择框批准的项目目录保存在 `desktop-prefs.json` 的 `project_dirs`；会话只能绑定列表中的目录本身，不能绑定其子目录或手工输入的路径。`approval_mode` 当前只支持 `auto`（在工作区内自由读写、禁止联网），写入其他值会被拒绝。偏好文件位置见[桌面客户端](../05-clients/05-desktop.md#_5-偏好设置存储-cmd-desktop-prefs-go)。
 
 ## 开发验证
 

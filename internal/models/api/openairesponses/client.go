@@ -370,9 +370,11 @@ func (c *Client) processStream(
 	reader := api.NewSSEReader(body)
 	st := &streamState{toolIndex: map[string]int{}, argsSeen: map[string]bool{}}
 
+	// response.completed / response.incomplete return before either caller,
+	// so reaching finish means the terminal event never arrived.
 	finish := func() {
 		assembler.ReasoningMetadata = reasoningMetadata(st.reasoningItems)
-		assembler.End(ch)
+		assembler.EndAtEOF(ch)
 	}
 
 	for {

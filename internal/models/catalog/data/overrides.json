@@ -405,13 +405,6 @@
         }
       },
       {
-        "id": "qwen3-rerank",
-        "type": "Rerank",
-        "compat": {
-          "unsupported_reason": "qwen3-rerank speaks a different protocol (/compatible-api/v1/reranks, flat request, results at the top level) that no protocol package implements yet"
-        }
-      },
-      {
         "id": "qwen3-asr-flash",
         "type": "ASR",
         "compat": {

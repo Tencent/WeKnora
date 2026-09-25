@@ -755,3 +755,29 @@ func TestValidateConfigMaxIterationsUnlimited(t *testing.T) {
 	tooHigh := &types.AgentConfig{MaxIterations: MAX_ITERATIONS + 1}
 	require.Error(t, s.ValidateConfig(tooHigh))
 }
+
+func TestValidInstallDirUsesTheHostVersionsRoot(t *testing.T) {
+	versions := "/Users/dev/.weknora/skills/.versions"
+	s := &agentService{hostSkillVersionsRoot: versions}
+
+	host := &types.AgentConfig{SandboxConfigID: sandbox.HostSkillTargetID}
+	host.EnableSkillInstallMode(types.BuiltinSkillInstallerID, versions+"/pdf-2")
+	dir, ok := s.validInstallDir(host)
+	require.True(t, ok)
+	require.Equal(t, versions+"/pdf-2", dir)
+
+	escaped := &types.AgentConfig{SandboxConfigID: sandbox.HostSkillTargetID}
+	escaped.EnableSkillInstallMode(types.BuiltinSkillInstallerID, "/Users/dev/My Project")
+	_, ok = s.validInstallDir(escaped)
+	require.False(t, ok)
+
+	remote := &types.AgentConfig{SandboxConfigID: "cfg-1"}
+	remote.EnableSkillInstallMode(types.BuiltinSkillInstallerID, sandbox.SkillsImageRoot+"/pdf")
+	dir, ok = s.validInstallDir(remote)
+	require.True(t, ok)
+	require.Equal(t, sandbox.SkillsImageRoot+"/pdf", dir)
+
+	noRoot := &agentService{}
+	_, ok = noRoot.validInstallDir(host)
+	require.False(t, ok)
+}

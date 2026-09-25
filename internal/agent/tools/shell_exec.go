@@ -342,6 +342,41 @@ func NewInstallShellExecTool(
 	}
 }
 
+// NewHostInstallShellExecTool is the Lite installer's shell: commands run as
+// the desktop user under an install-only OS sandbox, and versionDir is the
+// only directory they may write.
+func NewHostInstallShellExecTool(
+	executor SandboxInstallCommandExecutor, versionDir string,
+) *ShellExecTool {
+	base := shellExecTool
+	base.description = hostInstallShellExecDescription(versionDir)
+	return &ShellExecTool{
+		BaseTool:       base,
+		executor:       installShellExecutor{inner: executor},
+		installMode:    true,
+		workDirRoots:   []string{versionDir},
+		defaultWorkDir: versionDir,
+		defaultTimeout: shellExecMaxTimeout,
+	}
+}
+
+func hostInstallShellExecDescription(dir string) string {
+	return `Run a shell command on this computer to install one skill.
+
+## Working Directory
+- Every command already starts in ` + "`" + dir + "`" + `, the skill you are installing.
+  Use RELATIVE paths: ` + "`ls -la scripts/`" + `, ` + "`uv venv --seed .venv`" + `.
+- This directory is the only place you can write. Package caches are already
+  redirected into it.
+
+## Rules
+- Commands run as the current user inside an OS sandbox, without root privileges.
+  Do not use sudo, brew install, npm -g, or pip install --user: they are blocked.
+- The network is open for downloading this skill's dependencies only.
+- Execution is synchronous (no nohup or trailing &). Each command has a 10-minute budget.
+- Non-zero exit_code is a command result: read stderr before retrying.`
+}
+
 // installShellExecDescription replaces the session-agent "use write_sandbox_file"
 // guidance. That tool is not registered in install mode, and the files this
 // agent must write sit under the skills image root, which write_sandbox_file

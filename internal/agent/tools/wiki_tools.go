@@ -261,6 +261,13 @@ func pageIntersectsKnowledgeIDs(page *types.WikiPage, allowed map[string]bool) b
 	return false
 }
 
+const (
+	// wikiScopedSearchOverfetch and wikiScopedSearchMaxFetch bound how many
+	// pages a scoped wiki_search asks for before filtering by scope.
+	wikiScopedSearchOverfetch = 5
+	wikiScopedSearchMaxFetch  = 100
+)
+
 func pagePassesWikiScope(
 	ctx context.Context,
 	page *types.WikiPage,
@@ -879,14 +886,23 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			if kbID == "" {
 				continue
 			}
-			pages, err := t.wikiService.SearchPages(ctx, kbID, pattern, params.Limit)
+			// A document- or tag-scoped search filters pages after the store
+			// returns them, so asking for exactly limit pages let
+			// out-of-scope pages fill the page and hide in-scope ones ranked
+			// just below. Over-fetch, then keep the first limit in scope.
+			fetchLimit := params.Limit
+			if _, hasKnowledgeFilter := scopeKnowledgeFilter(sc); hasKnowledgeFilter || len(sc.TagIDs) > 0 {
+				fetchLimit = max(params.Limit, min(params.Limit*wikiScopedSearchOverfetch, wikiScopedSearchMaxFetch))
+			}
+			kept := 0
+			pages, err := t.wikiService.SearchPages(ctx, kbID, pattern, fetchLimit)
 			if err != nil {
 				searchErrors = append(searchErrors, fmt.Sprintf("Wiki search %q failed in KB %s: %v", query, kbID, err))
 				continue
 			}
 			successfulSearchCalls++
 			for _, p := range pages {
-				if p == nil {
+				if p == nil || kept >= params.Limit {
 					continue
 				}
 				passesScope, scopeErr := pagePassesWikiScope(ctx, p, sc, fetchTags)
@@ -908,6 +924,7 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 					continue
 				}
 				actualKBID := kbID
+				kept++
 				allHits = append(allHits, searchHit{page: p, kbID: actualKBID})
 				t.routes.rememberPage(p, actualKBID)
 				foundKBs[p.Slug] = append(foundKBs[p.Slug], actualKBID)
@@ -916,9 +933,15 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 				registerLinkedSlugs(foundKBs, p, actualKBID)
 			}
 		}
-		_ = filteredCount // reserved for future debug surface
-
 		if len(allHits) == 0 {
+			if filteredCount > 0 {
+				// Say why the result is empty: pages matched, but none cites
+				// the selected documents or tags.
+				allOutputs = append(allOutputs, fmt.Sprintf(
+					"<search_results count=\"0\" query=\"%s\" filtered_out_of_scope=\"%d\" />",
+					query, filteredCount))
+				continue
+			}
 			allOutputs = append(allOutputs, fmt.Sprintf("<search_results count=\"0\" query=\"%s\" />", query))
 			continue
 		}

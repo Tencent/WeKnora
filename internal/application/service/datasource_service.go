@@ -1396,7 +1396,13 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				return isUpdate, fmt.Errorf("marshal datasource metadata: %w", mErr)
 			}
 			created.Metadata = types.JSON(metadataBytes)
-			if uErr := s.knowledgeService.GetRepository().UpdateKnowledge(ctx, created); uErr != nil {
+			// Only the metadata column: the processing task is already
+			// queued, and a full-row save of this snapshot could put
+			// parse_status back to "pending" under a worker that has moved
+			// it on, which then skips post-process and strands the row.
+			if uErr := s.knowledgeService.GetRepository().UpdateKnowledgeColumn(
+				ctx, created.ID, "metadata", created.Metadata,
+			); uErr != nil {
 				return isUpdate, fmt.Errorf("attach datasource metadata: %w", uErr)
 			}
 		}

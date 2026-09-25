@@ -11,6 +11,7 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -94,6 +95,9 @@ func (s *TenantSkillService) ListCatalog(
 	unattached := make([]*types.TenantSkillEntity, 0)
 	for _, row := range installs {
 		if row == nil {
+			continue
+		}
+		if s.host.Desktop && !sandbox.IsHostSkillTarget(row.SandboxConfigID) {
 			continue
 		}
 		if row.CatalogID != "" {
@@ -181,6 +185,11 @@ func installView(
 		BundleSHA256:    row.BundleSHA256,
 		Served:          ServedInfoOf(row),
 		UpdatedAt:       row.UpdatedAt,
+	}
+	if sandbox.IsHostSkillTarget(row.SandboxConfigID) {
+		v.SandboxConfigName = hostSkillTargetName
+		v.SandboxType = string(sandbox.SandboxTypeHost)
+		return v
 	}
 	if cfg := configByID[row.SandboxConfigID]; cfg != nil {
 		v.SandboxConfigName = cfg.Name

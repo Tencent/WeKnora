@@ -249,3 +249,36 @@ func TestStreamLeavesEmptyNaturalStopUnchanged(t *testing.T) {
 	}, 2*time.Second, 5*time.Millisecond)
 	require.Equal(t, []event.AgentFinalAnswerData{{Done: true}}, bus.finalAnswerEvents())
 }
+
+func TestStreamReportsIncompleteAsError(t *testing.T) {
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "partial"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: types.FinishReasonIncomplete},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-incomplete"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(
+		context.Background(), types.CHAT_COMPLETION_STREAM, chatManage,
+		func() *PluginError { return nil },
+	))
+
+	errorMessage := func() string {
+		bus.mu.Lock()
+		defer bus.mu.Unlock()
+		for _, evt := range bus.events {
+			if data, ok := evt.Data.(event.ErrorData); ok {
+				return data.Error
+			}
+		}
+		return ""
+	}
+	require.Eventually(t, func() bool { return errorMessage() != "" }, 2*time.Second, 5*time.Millisecond)
+	require.Equal(t, types.StreamEndedEarlyError, errorMessage())
+	for _, answer := range bus.finalAnswerEvents() {
+		require.False(t, answer.Done, "a cut-off stream must not close the answer as complete")
+	}
+}

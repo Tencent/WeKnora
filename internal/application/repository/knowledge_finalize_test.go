@@ -234,6 +234,62 @@ func TestFinalizeSubtask_DecrementClampedAtZero(t *testing.T) {
 	assert.Equal(t, 0, count, "pending_subtasks_count must be clamped at zero")
 }
 
+// A row no longer in finalizing (cancelled, failed by housekeeping) only has
+// its counter decremented: reaching zero must not promote it to completed.
+func TestFinalizeSubtask_NonFinalizingRowOnlyDecrements(t *testing.T) {
+	for _, status := range []string{types.ParseStatusCancelled, types.ParseStatusFailed, types.ParseStatusProcessing} {
+		t.Run(status, func(t *testing.T) {
+			db := setupKnowledgeTestDB(t)
+			repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+			id := insertKnowledgeWithStatus(t, db, status, false)
+			require.NoError(t, db.Exec(`UPDATE knowledges SET pending_subtasks_count = 1 WHERE id = ?`, id).Error)
+
+			count, promoted, err := repo.FinalizeSubtask(context.Background(), id)
+
+			require.NoError(t, err)
+			assert.False(t, promoted)
+			assert.Zero(t, count)
+			got, n := reloadKnowledgeRow(t, db, id)
+			assert.Equal(t, status, got)
+			assert.Zero(t, n)
+		})
+	}
+}
+
+// Decrement and promote commit together: a promote that failed after its
+// decrement had committed left the counter at zero with nobody left to
+// promote the row. A failed promote must roll the decrement back so the
+// retried release drains the same slot again.
+func TestFinalizeSubtask_FailedPromoteRollsBackDecrement(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	id := insertProcessingKnowledge(t, db)
+	_, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+		CREATE TRIGGER refuse_promote BEFORE UPDATE OF parse_status ON knowledges
+		WHEN NEW.parse_status = 'completed'
+		BEGIN SELECT RAISE(ABORT, 'promote refused'); END
+	`).Error)
+
+	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+
+	require.ErrorContains(t, err, "promote refused")
+	assert.False(t, promoted)
+	status, count := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count, "the decrement must roll back with the failed promote")
+
+	require.NoError(t, db.Exec(`DROP TRIGGER refuse_promote`).Error)
+	_, promoted, err = repo.FinalizeSubtask(ctx, id)
+	require.NoError(t, err)
+	assert.True(t, promoted, "the retried release drains and promotes")
+	status, count = reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	assert.Zero(t, count)
+}
+
 // TestSetFinalizingAndFinalizeSubtask_ClearStaleErrorMessage is the
 // regression test for stale error_message: a row that failed once keeps
 // error_message set, and both entering finalizing (a new attempt) and
