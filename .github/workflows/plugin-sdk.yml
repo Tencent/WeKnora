@@ -1,0 +1,44 @@
+name: Plugin SDK
+
+# Builds and tests the pluginsdk/ Go module (extension protocol, Go SDK,
+# client and conformance suite) on every push / PR that touches it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pluginsdk/**'
+      - '.github/workflows/plugin-sdk.yml'
+  pull_request:
+    paths:
+      - 'pluginsdk/**'
+      - '.github/workflows/plugin-sdk.yml'
+
+defaults:
+  run:
+    working-directory: pluginsdk
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache-dependency-path: pluginsdk/go.mod
+      - name: go build
+        run: go build ./...
+      - name: go test
+        run: go test -race ./...
+      - name: go vet
+        run: go vet ./...
