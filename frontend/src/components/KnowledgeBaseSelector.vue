@@ -65,7 +65,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
-import { listKnowledgeBases } from '@/api/knowledge-base'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { useI18n } from 'vue-i18n'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 
@@ -95,6 +95,7 @@ const settingsStore = useSettingsStore()
 // 本地状态
 const searchQuery = ref('')
 const highlightedIndex = ref(0)
+const chatResources = useChatResourcesStore()
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const searchInput = ref<HTMLInputElement | null>(null)
 const kbList = ref<HTMLElement | null>(null)
@@ -164,8 +165,8 @@ const close = () => {
 
 const loadKnowledgeBases = async () => {
   try {
-    const res: any = await listKnowledgeBases()
-    if (res?.data && Array.isArray(res.data)) knowledgeBases.value = res.data
+    await chatResources.ensureKnowledgeBases()
+    knowledgeBases.value = chatResources.rawKnowledgeBases as KnowledgeBase[]
   } catch (e) {
     console.error(t('knowledgeBase.loadingFailed'), e)
   }

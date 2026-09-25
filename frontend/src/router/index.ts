@@ -3,7 +3,7 @@ import { defineComponent } from 'vue'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
-import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
+import { autoSetup, userInfoFromApi } from '@/api/auth'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
@@ -269,56 +269,9 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
     authStore.setRefreshToken(storedRefreshToken)
   }
 
-  try {
-    const response = await getCurrentUser()
-    const user = response.data?.user
-    if (!response.success || !user) {
-      return false
-    }
-
-    authStore.setUser(userInfoFromApi(user, response.data?.tenant?.id))
-
-    const tenant = response.data?.tenant
-    if (tenant) {
-      authStore.setTenant({
-        id: String(tenant.id) || '',
-        name: tenant.name || '',
-        owner_id: tenant.owner_id || user.id || '',
-        description: tenant.description,
-        status: tenant.status,
-        business: tenant.business,
-        storage_quota: tenant.storage_quota,
-        storage_used: tenant.storage_used,
-        created_at: tenant.created_at || new Date().toISOString(),
-        updated_at: tenant.updated_at || new Date().toISOString(),
-      })
-    } else {
-      authStore.setTenant(null)
-    }
-
-    // Refresh memberships on every page load — same reason as
-    // App.vue's syncOIDCUserContext: without this the auth store
-    // would only ever see the snapshot from the original /auth/login
-    // call, so role changes (and tenant-switch role lookups) would
-    // be silently stale until the user logged out and back in.
-    const memberships = response.data?.memberships
-    if (Array.isArray(memberships)) {
-      authStore.setMemberships(memberships)
-    }
-
-    const canCreateTenant = response.data?.capabilities?.can_create_tenant
-    if (typeof canCreateTenant === 'boolean') {
-      authStore.setCanCreateTenant(canCreateTenant)
-    }
-
-    authStore.setAutoAcceptInvitation(
-      response.data?.capabilities?.auto_accept_invitation === true,
-    )
-
-    return true
-  } catch {
-    return false
-  }
+  // /auth/me 的落库逻辑只在 auth store 里维护一份（user / tenant / memberships /
+  // capabilities），这里只负责先把 token 放进 store。请求本身与启动、侧栏共用去重。
+  return authStore.refreshFromAuthMe()
 }
 
 let autoSetupAttempted = false
