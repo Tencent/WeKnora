@@ -67,7 +67,10 @@ func (c *Connector) pickerSpaces(ctx context.Context, client *client, cfg config
 			delete(c.spaceCache.entries, key)
 		}
 	}
-	c.spaceCache.entries[key] = cachedSpaces{values: append([]space(nil), spaces...), expires: now.Add(pickerSpaceCacheTTL)}
+	c.spaceCache.entries[key] = cachedSpaces{
+		values:  append([]space(nil), spaces...),
+		expires: now.Add(pickerSpaceCacheTTL),
+	}
 	c.spaceCache.mu.Unlock()
 	return spaces, nil
 }
@@ -129,7 +132,8 @@ func (c *Connector) ListResources(
 				metadata["hierarchy_limitation"] = "cloud_top_level_containers"
 			}
 			out = append(out, types.Resource{
-				ExternalID: s.ID, Name: s.Name, Type: "space", URL: client.resourceURL(s.Links.WebUI), HasChildren: true,
+				ExternalID: s.ID, Name: s.Name, Type: "space",
+				URL: client.resourceURL(s.Links.WebUI), HasChildren: true,
 				Metadata: metadata,
 			})
 		}
@@ -152,7 +156,7 @@ func (c *Connector) ListResources(
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("Confluence space %s is unavailable", ref.SpaceID)
+		return nil, fmt.Errorf("confluence space %s is unavailable", ref.SpaceID)
 	}
 	var pages []page
 	if ref.Kind == resourceSpace {
@@ -188,7 +192,11 @@ func pageResource(client *client, s space, parentID string, p page) types.Resour
 // a deleted page, an unavailable space, or a malformed id skips just its own
 // reveal path instead of failing every saved selection; the sync path keeps
 // its strict validation in buildSyncPlan.
-func (c *Connector) ResolveResourceAncestors(ctx context.Context, ds *types.DataSourceConfig, resourceIDs []string) ([]string, error) {
+func (c *Connector) ResolveResourceAncestors(
+	ctx context.Context,
+	ds *types.DataSourceConfig,
+	resourceIDs []string,
+) ([]string, error) {
 	client, _, err := c.configured(ds)
 	if err != nil {
 		return nil, err
@@ -314,6 +322,10 @@ func (c *Connector) fetchStream(
 	if err != nil {
 		return nil, err
 	}
+	currentRoots := make(map[string]bool, len(plan.Roots))
+	for _, root := range plan.Roots {
+		currentRoots[root.ResourceID] = true
+	}
 	baseline, next := prepareSyncCursors(old, forceFull)
 	// A prior successful body is reusable when ownership moves to a different
 	// selected root and this run cannot fetch the new body. Keep that version in
@@ -331,6 +343,7 @@ func (c *Connector) fetchStream(
 	// per scope root so existing cursor JSON remains compatible.
 	seenPages := make(map[string]struct{})
 	incompleteRoots := make(map[string]bool)
+	incompleteSpaces := make([]space, 0)
 	for _, root := range plan.Roots {
 		resourceID, s := root.ResourceID, root.Space
 		var pages []page
@@ -345,13 +358,18 @@ func (c *Connector) fetchStream(
 		}
 		priorPages := baseline.SpacePages[resourceID]
 		if !complete {
-			logger.Warnf(ctx, "[Confluence] space %s listing was cut short; checking unlisted pages before deleting", s.Key)
+			logger.Warnf(
+				ctx,
+				"[Confluence] space %s listing was cut short; checking unlisted pages before deleting",
+				s.Key,
+			)
 			incompleteRoots[resourceID] = true
+			incompleteSpaces = append(incompleteSpaces, s)
 		}
 		if next.SpacePages[resourceID] == nil {
 			next.SpacePages[resourceID] = map[string]string{}
 		}
-		if len(pages) == 0 && len(priorPages) > 0 {
+		if complete && len(pages) == 0 && len(priorPages) > 0 {
 			return nil, fmt.Errorf(
 				"refusing Confluence mirror deletion in %s: listing returned 0 pages against a %d-page baseline",
 				s.Key, len(priorPages),
@@ -364,8 +382,10 @@ func (c *Connector) fetchStream(
 			if _, duplicate := seenPages[summary.ID]; duplicate {
 				// The first scope already owns the emitted document; preserve this
 				// root's version record so a later selection change stays incremental.
-				if version, ok := priorPages[summary.ID]; ok {
-					next.SpacePages[resourceID][summary.ID] = version
+				if !forceFull {
+					if version, ok := priorPages[summary.ID]; ok {
+						next.SpacePages[resourceID][summary.ID] = version
+					}
 				}
 				continue
 			}
@@ -390,18 +410,22 @@ func (c *Connector) fetchStream(
 				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
 					return nil, emitErr
 				}
-				if prior, ok := priorVersionByPage[summary.ID]; ok {
-					next.SpacePages[resourceID][summary.ID] = prior
+				if !forceFull {
+					if prior, ok := priorVersionByPage[summary.ID]; ok {
+						next.SpacePages[resourceID][summary.ID] = prior
+					}
 				}
 				continue
 			}
-			item, err := markdownItem(client, resourceID, summary, full)
+			item, err := markdownItem(ctx, client, resourceID, summary, full)
 			if err != nil {
 				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
 					return nil, emitErr
 				}
-				if prior, ok := priorVersionByPage[summary.ID]; ok {
-					next.SpacePages[resourceID][summary.ID] = prior
+				if !forceFull {
+					if prior, ok := priorVersionByPage[summary.ID]; ok {
+						next.SpacePages[resourceID][summary.ID] = prior
+					}
 				}
 				continue
 			}
@@ -413,22 +437,12 @@ func (c *Connector) fetchStream(
 				return nil, err
 			}
 		}
-		if !complete {
-			if err := reconcileUnlisted(ctx, client, h, s, resourceID, priorPages, seenPages, &next); err != nil {
-				return nil, err
-			}
-		}
 	}
-	// A root can disappear when a user changes a whole-space selection to a
-	// page subtree. Reconcile all previous owners only after every current scope
-	// has enumerated successfully (an enumeration error returned above emits no
-	// tombstones). This is deliberately global: a page moving between roots must
-	// remain present when any current root still contains it.
+	// Reconcile previous owners only after every current scope has been enumerated.
+	// A page may move between roots, so a missing page must be checked against every
+	// scope whose listing was cut short before a tombstone can be emitted.
 	previousPages := make(map[string]string)
 	for owner, pages := range baseline.SpacePages {
-		if incompleteRoots[owner] {
-			continue
-		}
 		for id := range pages {
 			if _, exists := previousPages[id]; !exists {
 				previousPages[id] = owner
@@ -436,22 +450,57 @@ func (c *Connector) fetchStream(
 		}
 	}
 	missing := make([]string, 0)
+	probeCount := 0
 	for id := range previousPages {
-		if _, present := seenPages[id]; !present {
-			missing = append(missing, id)
+		if _, present := seenPages[id]; present {
+			continue
 		}
+		owner := previousPages[id]
+		for _, s := range incompleteSpaces {
+			if probeCount >= maxDeletionProbes {
+				return nil, fmt.Errorf(
+					"Confluence deletion reconciliation deferred: more than %d pages need verification",
+					maxDeletionProbes,
+				)
+			}
+			probeCount++
+			present, err := client.pageInSpace(ctx, id, s.Key)
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				return nil, fmt.Errorf(
+					"Confluence deletion reconciliation deferred: could not verify page %s in space %s: %w",
+					id, s.Key, err,
+				)
+			}
+			if present {
+				version := baseline.SpacePages[owner][id]
+				if next.SpacePages[s.ID] == nil {
+					next.SpacePages[s.ID] = make(map[string]string)
+				}
+				next.SpacePages[s.ID][id] = version
+				seenPages[id] = struct{}{}
+				break
+			}
+		}
+		if _, present := seenPages[id]; present {
+			continue
+		}
+		missing = append(missing, id)
 	}
-	// Protect every historical scope, including roots which were removed from
-	// the selection. A configuration change must not silently turn a broad
-	// mirror deletion into hundreds of tombstones; a later explicit confirmation
-	// policy can decide how to release this guard.
+	// Protect still-selected roots from a suspiciously large shrink. Removed
+	// roots are an explicit scope change, so their out-of-scope pages can be
+	// tombstoned once every current scope has been enumerated safely.
 	owners := make([]string, 0, len(baseline.SpacePages))
 	for owner := range baseline.SpacePages {
 		owners = append(owners, owner)
 	}
 	sort.Strings(owners)
 	for _, owner := range owners {
-		if incompleteRoots[owner] {
+		// A deliberate scope change may remove most of an old root. The guard is
+		// only for unexpected shrinkage of a still-selected, completely listed root.
+		if !currentRoots[owner] || incompleteRoots[owner] {
 			continue
 		}
 		pages := baseline.SpacePages[owner]
@@ -470,7 +519,11 @@ func (c *Connector) fetchStream(
 	}
 	sort.Strings(missing)
 	for _, id := range missing {
-		if err := h.Emit(ctx, types.FetchedItem{ExternalID: id, IsDeleted: true, SourceResourceID: previousPages[id], Metadata: map[string]string{"channel": types.ChannelConfluence}}); err != nil {
+		deleted := types.FetchedItem{
+			ExternalID: id, IsDeleted: true, SourceResourceID: previousPages[id],
+			Metadata: map[string]string{"channel": types.ChannelConfluence},
+		}
+		if err := h.Emit(ctx, deleted); err != nil {
 			return nil, err
 		}
 		// Drop the tombstoned page before checkpointing so the cursor records
@@ -495,45 +548,6 @@ func (c *Connector) fetchStream(
 	next.FullSync = false
 	next.FullSyncBaseline = nil
 	return next.syncCursor(), nil
-}
-
-func reconcileUnlisted(ctx context.Context, c *client, h datasource.StreamHandler, s space, resourceID string, priorPages map[string]string, seen map[string]struct{}, next *cursor) error {
-	probed := 0
-	for id, version := range priorPages {
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		if probed >= maxDeletionProbes {
-			next.SpacePages[resourceID][id] = version
-			continue
-		}
-		probed++
-		present, err := c.pageInSpace(ctx, id, s.Key)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			logger.Warnf(ctx, "[Confluence] space %s: could not check unlisted page %s, keeping it: %v", s.Key, id, err)
-			next.SpacePages[resourceID][id] = version
-			continue
-		}
-		if present {
-			next.SpacePages[resourceID][id] = version
-			continue
-		}
-		if err := emitDeleted(ctx, h, next, resourceID, id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func emitDeleted(ctx context.Context, h datasource.StreamHandler, next *cursor, resourceID, id string) error {
-	if err := h.Emit(ctx, types.FetchedItem{ExternalID: id, IsDeleted: true, SourceResourceID: resourceID, Metadata: map[string]string{"channel": types.ChannelConfluence}}); err != nil {
-		return err
-	}
-	delete(next.SpacePages[resourceID], id)
-	return h.Checkpoint(ctx, next.syncCursor())
 }
 
 func failedPageItem(resourceID string, summary page, err error) types.FetchedItem {
@@ -574,8 +588,18 @@ func classifyConfluenceError(err error) (code, reason string) {
 	return "confluence_sync_failed", "Confluence page could not be synced; see server logs"
 }
 
-func markdownItem(client *client, resourceID string, summary page, full pageBody) (types.FetchedItem, error) {
+func markdownItem(
+	ctx context.Context,
+	client *client,
+	resourceID string,
+	summary page,
+	full pageBody,
+) (types.FetchedItem, error) {
 	html := full.Body.View.Value
+	// Inline same-origin private Confluence images as data URIs so the generic
+	// docparser image pipeline can persist them and rewrite to resource:// URLs.
+	// Best-effort: a failed image keeps its original src and never fails the page.
+	html = newAssetResolver(client).Resolve(ctx, html)
 	markdown, err := htmltomd.ConvertString(html)
 	if err != nil {
 		return types.FetchedItem{}, err

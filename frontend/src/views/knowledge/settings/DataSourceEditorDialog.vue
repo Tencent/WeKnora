@@ -482,12 +482,14 @@ const visibleTree = computed(() => {
       result.push({ resource: r, depth })
       if (r.has_children && expandedResourceIds.value.has(r.external_id)) {
         walk(childrenMap.value.get(r.external_id) || [], depth + 1)
-        // Expanded Confluence Cloud spaces cannot expose pages living under
-        // top-level folders (no listing API); surface that limitation right
-        // below the space's children instead of silently hiding those pages.
-        if (r.metadata?.hierarchy_limitation === 'cloud_top_level_containers') {
-          result.push({ resource: r, depth: depth + 1, noticeAfter: true })
-        }
+      }
+      // Keep this visible after an empty root listing is recognized as a leaf.
+      if (
+        r.metadata?.hierarchy_limitation === 'cloud_top_level_containers' &&
+        (expandedResourceIds.value.has(r.external_id) ||
+          (!r.has_children && loadedChildrenIds.value.has(r.external_id)))
+      ) {
+        result.push({ resource: r, depth: depth + 1, noticeAfter: true })
       }
     }
   }

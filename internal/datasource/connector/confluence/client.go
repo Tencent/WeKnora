@@ -699,6 +699,13 @@ func cloudDirectChildrenEndpoint(kind, id string) (string, error) {
 // Page-only picker. Containers remain connector-internal and are traversed
 // until the next visible Page is found.
 func (c *client) visibleCloudPageChildren(ctx context.Context, pageID string) ([]page, error) {
+	return c.walkCloudPageHierarchy(ctx, pageID, false)
+}
+
+// walkCloudPageHierarchy traverses Cloud's mixed content tree through
+// direct-children endpoints. Picker expansion stops at visible pages, while a
+// sync walk continues through them to return the complete page subtree.
+func (c *client) walkCloudPageHierarchy(ctx context.Context, pageID string, descendPages bool) ([]page, error) {
 	type queuedNode struct {
 		id, kind string
 		depth    int
@@ -706,6 +713,10 @@ func (c *client) visibleCloudPageChildren(ctx context.Context, pageID string) ([
 	queue := []queuedNode{{id: pageID, kind: "page"}}
 	visited := map[string]struct{}{"page:" + pageID: {}}
 	pages := make([]page, 0)
+	nodeLimit := maxTransparentTraversalNodes
+	if descendPages {
+		nodeLimit = maxTraversalNodes
+	}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
@@ -729,18 +740,27 @@ func (c *client) visibleCloudPageChildren(ctx context.Context, pageID string) ([
 			if _, exists := visited[key]; exists {
 				continue
 			}
-			if len(visited) >= maxTransparentTraversalNodes {
+			if len(visited) >= nodeLimit {
 				return nil, fmt.Errorf(
-					"confluence Cloud transparent traversal exceeds %d nodes",
-					maxTransparentTraversalNodes,
+					"confluence Cloud hierarchy traversal exceeds %d nodes",
+					nodeLimit,
 				)
 			}
 			visited[key] = struct{}{}
 			if kind == "page" {
 				pages = append(pages, child)
-				continue
+				if !descendPages {
+					continue
+				}
 			}
-			if current.depth >= maxTransparentTraversalDepth {
+			depth := 0
+			if kind != "page" {
+				depth = current.depth + 1
+				if current.kind == "page" {
+					depth = 1
+				}
+			}
+			if depth > maxTransparentTraversalDepth {
 				return nil, fmt.Errorf(
 					"confluence Cloud transparent traversal exceeds depth %d",
 					maxTransparentTraversalDepth,
@@ -749,7 +769,7 @@ func (c *client) visibleCloudPageChildren(ctx context.Context, pageID string) ([
 			if _, err := cloudDirectChildrenEndpoint(kind, child.ID); err != nil {
 				return nil, err
 			}
-			queue = append(queue, queuedNode{id: child.ID, kind: kind, depth: current.depth + 1})
+			queue = append(queue, queuedNode{id: child.ID, kind: kind, depth: depth})
 		}
 	}
 	return pages, nil
@@ -784,8 +804,9 @@ func (c *client) pageAncestors(ctx context.Context, s space, pageID string) ([]p
 }
 
 // pageSubtree uses direct-child traversal for Server/DC because that endpoint
-// is stable across supported versions. Cloud uses descendants so pages below a
-// non-page hierarchical container are not silently omitted.
+// is stable across supported versions. Cloud uses the same complete
+// mixed-content hierarchy walk as the picker, but continues through visible
+// pages to include every page in the selected subtree.
 func (c *client) pageSubtree(ctx context.Context, s space, pageID string) ([]page, error) {
 	full, err := c.pageDetail(ctx, pageID)
 	if err != nil {
@@ -800,22 +821,15 @@ func (c *client) pageSubtree(ctx context.Context, s space, pageID string) ([]pag
 	}
 	root := full
 	if c.cfg.cloud() {
-		descendants, err := c.listCloudHierarchy(ctx, "/api/v2/pages/"+url.PathEscape(pageID)+"/descendants?limit=250")
+		descendants, err := c.walkCloudPageHierarchy(ctx, pageID, true)
 		if err != nil {
 			return nil, err
 		}
 		out := []page{root}
-		seen := map[string]bool{root.ID: true}
 		for _, descendant := range descendants {
-			if descendant.Kind != "" && descendant.Kind != "page" {
-				continue
-			}
-			if descendant.ID == "" || seen[descendant.ID] {
-				continue
-			}
-			// Descendant responses are intentionally compact and may lack a
-			// version. Hydrate each page before version comparison; an unknown
-			// version must never be treated as an unchanged stable token.
+			// Direct-child responses are intentionally compact. Hydrate each page
+			// before version comparison; an unknown version must never be treated
+			// as an unchanged stable token.
 			detail, err := c.pageDetail(ctx, descendant.ID)
 			if err != nil {
 				return nil, err
@@ -823,10 +837,6 @@ func (c *client) pageSubtree(ctx context.Context, s space, pageID string) ([]pag
 			if detail.SpaceID != s.ID {
 				return nil, fmt.Errorf("page %s does not belong to space %s", descendant.ID, s.ID)
 			}
-			if len(seen) >= maxTraversalNodes {
-				return nil, fmt.Errorf("confluence page subtree exceeds %d nodes", maxTraversalNodes)
-			}
-			seen[descendant.ID] = true
 			out = append(out, detail)
 		}
 		return out, nil

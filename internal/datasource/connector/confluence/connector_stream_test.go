@@ -247,10 +247,11 @@ func cloudStreamConfig() *types.DataSourceConfig {
 }
 
 type captureHandler struct {
-	items        []types.FetchedItem
-	checkpoints  []*types.SyncCursor
-	emitErr      error
-	succeedFirst int
+	items           []types.FetchedItem
+	checkpoints     []*types.SyncCursor
+	emitErr         error
+	succeedFirst    int
+	checkpointErrAt int
 }
 
 func (h *captureHandler) Emit(_ context.Context, item types.FetchedItem) error {
@@ -265,6 +266,9 @@ func (h *captureHandler) Emit(_ context.Context, item types.FetchedItem) error {
 }
 
 func (h *captureHandler) Checkpoint(_ context.Context, c *types.SyncCursor) error {
+	if h.checkpointErrAt > 0 && len(h.checkpoints)+1 == h.checkpointErrAt {
+		return errors.New("checkpoint failed")
+	}
 	raw, _ := json.Marshal(c)
 	var stored types.SyncCursor
 	_ = json.Unmarshal(raw, &stored)
@@ -473,25 +477,44 @@ func TestFetchStreamRefusesMassDeletionInSurvivingScope(t *testing.T) {
 	}
 }
 
-func TestFetchStreamRefusesMassDeletionWhenSelectionShrinks(t *testing.T) {
+func TestFetchStreamAllowsExplicitSpaceToSubtreeShrink(t *testing.T) {
 	prior := make(map[string]string, 100)
 	for i := 0; i < 100; i++ {
 		prior[fmt.Sprintf("p%03d", i)] = "v:1"
 	}
-	// The user narrows a whole-space selection down to a single page subtree.
-	// This is still a broad mirror deletion and requires an explicit release
-	// policy rather than silently emitting one hundred tombstones.
+	// The user deliberately narrows a whole-space selection down to a page
+	// subtree. The mass-deletion guard must only protect a surviving root.
 	api := &streamAPI{pages: []streamPage{{id: "erp", title: "ERP", version: 2}}}
 	ds := streamConfig()
 	ds.ResourceIDs = []string{"page:1:erp"}
 	h := &captureHandler{}
-	_, err := newStreamConnector(api).FetchStream(context.Background(), ds, streamCursor(prior), h)
-	if err == nil {
-		t.Fatal("selection shrink unexpectedly bypassed the mass-deletion guard")
+	next, err := newStreamConnector(api).FetchStream(context.Background(), ds, streamCursor(prior), h)
+	if err != nil {
+		t.Fatalf("explicit scope shrink: %v", err)
 	}
-	for _, item := range h.items {
-		if item.IsDeleted {
-			t.Fatalf("selection shrink emitted tombstone: %#v", h.items)
+	if len(h.items) != len(prior)+1 || h.items[0].ExternalID != "erp" {
+		t.Fatalf("scope shrink items = %d, want selected page plus %d tombstones", len(h.items), len(prior))
+	}
+	deleted := 0
+	for _, item := range h.items[1:] {
+		if !item.IsDeleted {
+			t.Fatalf("scope shrink emitted a non-tombstone outside the new scope: %#v", item)
+		}
+		deleted++
+	}
+	if deleted != len(prior) {
+		t.Fatalf("scope shrink tombstones = %d, want %d", deleted, len(prior))
+	}
+	decoded := decodeCursor(next)
+	if len(decoded.SpacePages) != 1 || decoded.SpacePages["page:1:erp"]["erp"] != "v:2" {
+		t.Fatalf("scope shrink cursor retained cancelled roots: %#v", decoded.SpacePages)
+	}
+	if _, oldRootPresent := decoded.SpacePages["1"]; oldRootPresent {
+		t.Fatalf("cancelled space root returned to cursor: %#v", decoded.SpacePages)
+	}
+	for _, item := range h.items[1:] {
+		if item.SourceResourceID != "1" {
+			t.Fatalf("tombstone source = %q, want old root 1", item.SourceResourceID)
 		}
 	}
 }
@@ -567,6 +590,50 @@ func TestFetchFullStreamResumesFromCheckpoint(t *testing.T) {
 	}
 	if decoded := decodeCursor(next); decoded.FullSync || decoded.SpacePages["1"]["p2"] != "v:1" {
 		t.Fatalf("completed resume cursor = %#v", decoded)
+	}
+}
+
+func TestFetchFullStreamRetryRefetchesFailedPage(t *testing.T) {
+	pages := []streamPage{
+		{id: "p1", title: "One", version: 1},
+		{id: "p2", title: "Broken then healthy", version: 2},
+		{id: "p3", title: "Three", version: 1},
+	}
+	api := &streamAPI{pages: pages, bodyStatus: map[string]int{"p2": http.StatusForbidden}}
+	first := &captureHandler{checkpointErrAt: 2}
+	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1", "p3": "v:1"})
+	_, err := newStreamConnector(api).FetchFullStream(context.Background(), streamConfig(), old, first)
+	if err == nil {
+		t.Fatal("interrupted full sync unexpectedly succeeded")
+	}
+	if len(first.checkpoints) != 1 {
+		t.Fatalf("first full-sync checkpoints = %d; want one successful checkpoint", len(first.checkpoints))
+	}
+	checkpoint := decodeCursor(first.checkpoints[0])
+	if !checkpoint.FullSync || checkpoint.FullSyncBaseline["1"]["p2"] != "v:1" ||
+		checkpoint.SpacePages["1"]["p2"] != "" {
+		t.Fatalf("failed page was not left pending in the full-sync checkpoint: %#v", checkpoint)
+	}
+
+	resumeAPI := &streamAPI{pages: pages}
+	second := &captureHandler{}
+	next, err := newStreamConnector(resumeAPI).FetchFullStream(
+		context.Background(), streamConfig(), first.checkpoints[0], second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumeAPI.bodyCalls != 2 {
+		t.Fatalf("retry fetched %d bodies, want failed p2 and uncheckpointed p3", resumeAPI.bodyCalls)
+	}
+	if len(second.items) != 2 || second.items[0].ExternalID != "p2" || second.items[1].ExternalID != "p3" {
+		t.Fatalf("retry items = %#v; failed page was skipped", second.items)
+	}
+	decoded := decodeCursor(next)
+	if decoded.FullSync || decoded.FullSyncBaseline != nil || len(decoded.SpacePages) != 1 ||
+		decoded.SpacePages["1"]["p1"] != "v:1" || decoded.SpacePages["1"]["p2"] != "v:2" ||
+		decoded.SpacePages["1"]["p3"] != "v:1" {
+		t.Fatalf("completed full-sync cursor = %#v", decoded)
 	}
 }
 
@@ -1015,6 +1082,69 @@ func TestVisibleCloudPageChildrenTraversesContainers(t *testing.T) {
 	}
 }
 
+func TestCloudPageSubtreeWalksDeepMixedHierarchy(t *testing.T) {
+	api := &streamAPI{}
+	client := &client{
+		cfg: config{edition: editionCloud, baseURL: "https://confluence.test/wiki"},
+		http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodGet {
+				return nil, fmt.Errorf("unexpected method %s", req.Method)
+			}
+			switch req.URL.Path {
+			case "/wiki/api/v2/pages/root":
+				return api.jsonResponse(map[string]any{"id": "root", "spaceId": "1"})
+			case "/wiki/api/v2/pages/p1":
+				return api.jsonResponse(map[string]any{
+					"id": "p1", "spaceId": "1", "version": map[string]any{"number": 2},
+				})
+			case "/wiki/api/v2/pages/p2":
+				return api.jsonResponse(map[string]any{
+					"id": "p2", "spaceId": "1", "version": map[string]any{"number": 3},
+				})
+			case "/wiki/api/v2/pages/p3":
+				return api.jsonResponse(map[string]any{
+					"id": "p3", "spaceId": "1", "version": map[string]any{"number": 4},
+				})
+			case "/wiki/api/v2/pages/root/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "p1", "type": "page", "title": "First page"},
+					map[string]any{"id": "folder", "type": "folder", "title": "Folder"},
+				}})
+			case "/wiki/api/v2/pages/p1/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "db", "type": "database", "title": "Database"},
+				}})
+			case "/wiki/api/v2/folders/folder/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "p2", "type": "page", "title": "Second page"},
+				}})
+			case "/wiki/api/v2/databases/db/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "p3", "type": "page", "title": "Deep page"},
+				}})
+			case "/wiki/api/v2/pages/p2/direct-children", "/wiki/api/v2/pages/p3/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{}})
+			default:
+				return nil, fmt.Errorf("unexpected endpoint: %s", req.URL.String())
+			}
+		})},
+	}
+
+	pages, err := client.pageSubtree(context.Background(), space{ID: "1"}, "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"root", "p1", "p2", "p3"}
+	if len(pages) != len(want) {
+		t.Fatalf("subtree pages = %#v; want IDs %v", pages, want)
+	}
+	for i, id := range want {
+		if pages[i].ID != id || pages[i].SpaceID != "1" {
+			t.Fatalf("subtree page[%d] = %#v; want ID %q in space 1", i, pages[i], id)
+		}
+	}
+}
+
 func TestFetchStreamChecksUnlistedPagesWhenServerListingNeverEnds(t *testing.T) {
 	api := &streamAPI{
 		endlessNext: true,
@@ -1039,5 +1169,85 @@ func TestFetchStreamChecksUnlistedPagesWhenServerListingNeverEnds(t *testing.T) 
 	pages := decodeCursor(got).SpacePages["1"]
 	if pages["p1"] != "v:2" || pages["kept"] != "v:1" || len(pages) != 2 {
 		t.Fatalf("cursor pages = %#v", pages)
+	}
+}
+
+func TestFetchStreamDoesNotRestoreCancelledRootForPageFoundByPartialProbe(t *testing.T) {
+	api := &streamAPI{
+		endlessNext: true,
+		probe: map[string]probeReply{
+			"kept": {status: http.StatusOK, spaceKey: "ENG"},
+		},
+	}
+	h := &captureHandler{}
+	old := (&cursor{SpacePages: map[string]map[string]string{
+		"page:1:old-root": {"kept": "v:1"},
+	}}).syncCursor()
+	next, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.items) != 0 {
+		t.Fatalf("confirmed-present page emitted items: %#v", h.items)
+	}
+	decoded := decodeCursor(next)
+	if len(decoded.SpacePages) != 1 || decoded.SpacePages["1"]["kept"] != "v:1" {
+		t.Fatalf("reconciled cursor = %#v; expected only the current root", decoded.SpacePages)
+	}
+	if _, oldRootPresent := decoded.SpacePages["page:1:old-root"]; oldRootPresent {
+		t.Fatalf("cancelled root was restored to cursor: %#v", decoded.SpacePages)
+	}
+}
+
+func TestFetchStreamDoesNotTombstoneWhenPartialListingProbeFails(t *testing.T) {
+	api := &streamAPI{
+		endlessNext: true,
+		probe: map[string]probeReply{
+			"gone":    {status: http.StatusNotFound},
+			"unknown": {status: http.StatusForbidden},
+		},
+	}
+	h := &captureHandler{}
+	old := streamCursor(map[string]string{"gone": "v:1", "unknown": "v:1"})
+	_, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
+	if err == nil {
+		t.Fatal("unverified partial-listing candidate unexpectedly completed reconciliation")
+	}
+	for _, item := range h.items {
+		if item.IsDeleted {
+			t.Fatalf("probe failure allowed a tombstone: %#v", h.items)
+		}
+	}
+	if len(h.checkpoints) != 0 {
+		t.Fatalf("probe failure checkpointed reconciliation: %#v", h.checkpoints)
+	}
+	if api.probeCalls == 0 {
+		t.Fatal("empty incomplete listing was rejected before checking prior pages")
+	}
+}
+
+func TestFetchStreamDefersWhenPartialListingProbeBudgetIsExhausted(t *testing.T) {
+	prior := make(map[string]string, maxDeletionProbes+1)
+	probes := make(map[string]probeReply, maxDeletionProbes+1)
+	for i := 0; i <= maxDeletionProbes; i++ {
+		id := fmt.Sprintf("p%03d", i)
+		prior[id] = "v:1"
+		probes[id] = probeReply{status: http.StatusNotFound}
+	}
+	api := &streamAPI{endlessNext: true, probe: probes}
+	h := &captureHandler{}
+	_, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), streamCursor(prior), h)
+	if err == nil {
+		t.Fatal("partial listing with unverified candidates unexpectedly completed")
+	}
+	if api.probeCalls != maxDeletionProbes {
+		t.Fatalf("existence probes = %d; want capped at %d", api.probeCalls, maxDeletionProbes)
+	}
+	if len(h.items) != 0 || len(h.checkpoints) != 0 {
+		t.Fatalf(
+			"probe budget exhaustion emitted or checkpointed reconciliation: items=%#v checkpoints=%#v",
+			h.items,
+			h.checkpoints,
+		)
 	}
 }
