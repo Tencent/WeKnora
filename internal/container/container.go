@@ -78,6 +78,7 @@ import (
 	pluginmanifest "github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
+	pluginremote "github.com/Tencent/WeKnora/internal/plugin/remote"
 	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -168,6 +169,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(activate.NewSkills))
 	must(container.Provide(activate.NewModelVendors))
 	must(container.Provide(pluginhost.NewManager))
+	must(container.Provide(pluginremote.NewManager))
 	must(container.Provide(newPluginInvoker))
 	must(container.Provide(repository.NewPluginKVRepository))
 	must(container.Provide(newPluginHostAPI))
@@ -1840,12 +1842,13 @@ func newPluginRegistry(
 	})
 }
 
-// newPluginDrivers returns the drivers that run plugins: builtins and
-// declarative packages today; host, remote and kubernetes drivers join this
-// set.
+// newPluginDrivers returns the drivers that run plugins: builtins,
+// declarative packages, the embedded host and remote services; a kubernetes
+// driver joins this set.
 func newPluginDrivers(reg *pluginregistry.Registry, r *reconcile.Reconciler) *plugindriver.Set {
 	return plugindriver.NewSet(plugindriver.NewBuiltin(reg.Plugin),
-		r.Driver(pluginmanifest.RuntimeDeclarative), r.Driver(pluginmanifest.RuntimeHost))
+		r.Driver(pluginmanifest.RuntimeDeclarative), r.Driver(pluginmanifest.RuntimeHost),
+		r.Driver(pluginmanifest.RuntimeRemote))
 }
 
 // installPluginGate gives the integration handlers the tenant plugin switches,

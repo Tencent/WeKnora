@@ -34,4 +34,15 @@ func TestEnvelopeCarriesHostAccessOnlyForGrantedPlugins(t *testing.T) {
 	if env, _ := iv.Envelope(context.Background(), granted, nil); env.Context.Host != nil {
 		t.Fatal("a call without a tenant must get no token")
 	}
+
+	remote := *granted
+	remote.Runtime.Type = manifest.RuntimeRemote
+	if env, _ := iv.Envelope(ctx, &remote, nil); env.Context.Host != nil {
+		t.Fatal("a remote plugin must not be sent to this node's loopback address")
+	}
+	iv.SetPublicHostAPI("https://weknora.example.com")
+	if env, _ := iv.Envelope(ctx, &remote, nil); env.Context.Host == nil ||
+		env.Context.Host.URL != "https://weknora.example.com" {
+		t.Fatalf("remote envelope = %+v", env.Context)
+	}
 }

@@ -248,7 +248,7 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 		kill()
 		return nil, fmt.Errorf("read plugin manifest: %w", err)
 	}
-	if err := checkServedManifest(p.spec.m, m); err != nil {
+	if err := CheckServedManifest(p.spec.m, m); err != nil {
 		c.Close()
 		kill()
 		return nil, err
@@ -256,14 +256,14 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 	return &launched{cmd: cmd, client: c, exited: exited}, nil
 }
 
-// checkServedManifest makes sure the process is the package that was
+// CheckServedManifest makes sure a running plugin is the package that was
 // installed and serves what the manifest promised.
-func checkServedManifest(want *manifest.Manifest, got *pluginapi.Manifest) error {
+func CheckServedManifest(want *manifest.Manifest, got *pluginapi.Manifest) error {
 	if got.ID != want.ID || got.Version != want.Version {
-		return fmt.Errorf("process reports %s@%s, the package is %s@%s", got.ID, got.Version, want.ID, want.Version)
+		return fmt.Errorf("plugin reports %s@%s, the package is %s@%s", got.ID, got.Version, want.ID, want.Version)
 	}
 	if got.APIVersion != pluginapi.APIVersion {
-		return fmt.Errorf("process speaks %q, this WeKnora speaks %q", got.APIVersion, pluginapi.APIVersion)
+		return fmt.Errorf("plugin speaks %q, this WeKnora speaks %q", got.APIVersion, pluginapi.APIVersion)
 	}
 	for point, contribs := range want.Contributes {
 		if info, ok := manifest.LookupPoint(point); !ok || info.Declarative {
@@ -275,7 +275,7 @@ func checkServedManifest(want *manifest.Manifest, got *pluginapi.Manifest) error
 		}
 		for _, c := range contribs {
 			if !served[c.ID] {
-				return fmt.Errorf("plugin.yaml declares %s/%s but the process does not serve it", point, c.ID)
+				return fmt.Errorf("plugin.yaml declares %s/%s but the plugin does not serve it", point, c.ID)
 			}
 		}
 	}

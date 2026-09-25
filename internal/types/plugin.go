@@ -22,8 +22,12 @@ type InstalledPlugin struct {
 	DesiredState  string `json:"desired_state" gorm:"type:varchar(16)"`
 	Runtime       string `json:"runtime" gorm:"type:varchar(32)"`
 	// GrantedPerms is the manifest permissions an administrator accepted.
-	GrantedPerms JSON      `json:"granted_perms" gorm:"type:json"`
-	SystemConfig JSON      `json:"system_config,omitempty" gorm:"type:json"`
+	GrantedPerms JSON `json:"granted_perms" gorm:"type:json"`
+	SystemConfig JSON `json:"system_config,omitempty" gorm:"type:json"`
+	// RemoteURL is where a remote plugin is served; RemoteSecret (sealed)
+	// signs the calls to it. Other runtimes leave both empty.
+	RemoteURL    string    `json:"remote_url,omitempty" gorm:"type:varchar(1024)"`
+	RemoteSecret string    `json:"-"                    gorm:"type:text"`
 	CreatedBy    string    `json:"created_by" gorm:"type:varchar(36)"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`

@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 func newService(t *testing.T) (*Service, *plugintest.MemRepo, *plugintest.MemStore, *registry.Registry) {
@@ -159,5 +160,76 @@ func TestInstallHostPlugins(t *testing.T) {
 	if _, err := s.Inspect(ctx, hostPackage(t, "python", here)); !isInvalid(err) ||
 		!strings.Contains(err.Error(), "must be binaries") {
 		t.Fatalf("want an unsupported kind error, got %v", err)
+	}
+}
+
+func remotePackage(t *testing.T, version string) []byte {
+	return plugintest.Zip(t, map[string]string{
+		"plugin.yaml": "schemaVersion: 1\nid: acme.remote\nversion: " + version +
+			"\napiVersion: weknora.plugin/v1\n" +
+			"name: { en-US: ACME Remote }\npublisher: { id: acme }\nruntime: { type: remote }\n" +
+			"contributes:\n  webSearch:\n    - { id: search, name: ACME Search }\n",
+	})
+}
+
+func TestInstallRemotePlugins(t *testing.T) {
+	ctx := context.Background()
+	utils.SetSSRFWhitelistFromRaw("plugins.example.com")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	s, repo, _, _ := newService(t)
+
+	if _, err := s.Install(ctx, Request{Data: remotePackage(t, "1.0.0")}); !isInvalid(err) ||
+		!strings.Contains(err.Error(), "URL of its service") {
+		t.Fatalf("want a missing URL error, got %v", err)
+	}
+	refused := []string{"http://127.0.0.1:9000", "ftp://plugins.example.com", "https://u:p@plugins.example.com"}
+	for _, u := range refused {
+		if _, err := s.Install(ctx, Request{Data: remotePackage(t, "1.0.0"), RemoteURL: u}); !isInvalid(err) {
+			t.Errorf("RemoteURL %s = %v, want refusal", u, err)
+		}
+	}
+
+	view, err := s.Install(ctx, Request{
+		Data: remotePackage(t, "1.0.0"), RemoteURL: "https://plugins.example.com/acme/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.IssuedSecret) != 64 || view.RemoteURL != "https://plugins.example.com/acme" {
+		t.Fatalf("view = %+v", view)
+	}
+	row, _ := repo.GetPlugin(ctx, "acme.remote")
+	if plain, _ := utils.DecryptStoredSecret(row.RemoteSecret); !strings.HasPrefix(row.RemoteSecret, utils.EncPrefix) ||
+		plain != view.IssuedSecret {
+		t.Fatalf("stored secret %q does not seal the issued one", row.RemoteSecret)
+	}
+	first := view.IssuedSecret
+
+	view, err = s.Install(ctx, Request{Data: remotePackage(t, "1.1.0")})
+	if err != nil || view.IssuedSecret != "" || view.RemoteURL != "https://plugins.example.com/acme" {
+		t.Fatalf("upgrade must keep the URL and secret: %+v, %v", view, err)
+	}
+
+	view, err = s.RotateSecret(ctx, "acme.remote")
+	if err != nil || len(view.IssuedSecret) != 64 || view.IssuedSecret == first {
+		t.Fatalf("rotate = %+v, %v", view, err)
+	}
+	if view, err = s.SetRemoteURL(ctx, "acme.remote", "https://plugins.example.com/v2"); err != nil ||
+		view.RemoteURL != "https://plugins.example.com/v2" || view.IssuedSecret != "" {
+		t.Fatalf("move = %+v, %v", view, err)
+	}
+	if _, err := s.SetRemoteURL(ctx, "acme.remote", "http://10.0.0.1"); !isInvalid(err) {
+		t.Fatalf("private URL = %v", err)
+	}
+
+	if _, err := s.Install(ctx, Request{Data: plugintest.KitPackage(t, "1.0.0")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RotateSecret(ctx, "acme.kit"); !isInvalid(err) {
+		t.Fatalf("rotating a declarative plugin = %v", err)
+	}
+	if _, err := s.RotateSecret(ctx, "acme.none"); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("rotating a missing plugin = %v", err)
 	}
 }

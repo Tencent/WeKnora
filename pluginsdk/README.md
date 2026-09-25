@@ -144,3 +144,32 @@ In Go tests, run `conformance.Run` against `httptest.NewServer(p.Handler())`.
 In WeKnora: **System administration → Plugin management → Install plugin**.
 Upload the `.wkp` or give its URL, review what it adds and reaches, and
 install. Each workspace then enables it under **Settings → Plugins**.
+
+## Running as a remote service
+
+A plugin can also run as a service you deploy yourself, for instance in its
+own container or on another team's cluster. Its package then carries only
+`plugin.yaml` (plus schemas):
+
+```yaml
+runtime: { type: remote }
+```
+
+1. **Install.** Give the service URL when installing. WeKnora checks the
+   service's `/v1/manifest` against the package: same ID, version and
+   contributions.
+2. **Keep the secret.** Installing shows a signing secret once. Start the
+   service with it as `WEKNORA_PLUGIN_SECRET` (and `WEKNORA_PLUGIN_ADDR`,
+   default `:8080`). The SDK rejects requests without a valid signature.
+3. **Private hosts.** A service on a private network must be listed in
+   WeKnora's `SSRF_WHITELIST`.
+4. **Host API.** Remote plugins get a Host API token only when
+   `WEKNORA_PLUGIN_HOST_API_URL` tells WeKnora its address as the service
+   sees it.
+
+The plugin detail page changes the URL and rotates the secret. After a
+rotation, calls fail until the service has the new secret.
+
+Upgrade the service and the package together. While the service reports a
+version other than the active package, calls are refused and the plugin
+shows as degraded.

@@ -28,9 +28,11 @@ type Invoker struct {
 	mu      sync.RWMutex
 	tenancy *tenancy.Service
 	plugins interfaces.PluginRepository
-	// tokens and hostURL give plugins granted Host API scopes a way back.
-	tokens  TokenIssuer
-	hostURL string
+	// tokens and hostURL give plugins granted Host API scopes a way back;
+	// remote plugins, off this node, use publicHostURL.
+	tokens        TokenIssuer
+	hostURL       string
+	publicHostURL string
 }
 
 // TokenIssuer signs the Host API token of one call.
@@ -43,6 +45,14 @@ type TokenIssuer interface {
 func (iv *Invoker) SetHostAPI(tokens TokenIssuer, url string) {
 	iv.mu.Lock()
 	iv.tokens, iv.hostURL = tokens, url
+	iv.mu.Unlock()
+}
+
+// SetPublicHostAPI is where remote plugins reach the Host API. Without it
+// their calls carry no Host API access.
+func (iv *Invoker) SetPublicHostAPI(url string) {
+	iv.mu.Lock()
+	iv.publicHostURL = url
 	iv.mu.Unlock()
 }
 
@@ -94,6 +104,9 @@ func (iv *Invoker) Envelope(
 	}
 	iv.mu.RLock()
 	t, plugins, tokens, hostURL := iv.tenancy, iv.plugins, iv.tokens, iv.hostURL
+	if m.Runtime.Type == manifest.RuntimeRemote {
+		hostURL = iv.publicHostURL
+	}
 	iv.mu.RUnlock()
 	if tokens != nil && hostURL != "" && env.Context.TenantID != 0 && len(m.Permissions.HostAPI) > 0 {
 		token, _, err := tokens.Issue(m.ID, m.Version, env.Context.TenantID, m.Permissions.HostAPI)

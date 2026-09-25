@@ -1,0 +1,2 @@
+ALTER TABLE plugins DROP COLUMN IF EXISTS remote_secret;
+ALTER TABLE plugins DROP COLUMN IF EXISTS remote_url;

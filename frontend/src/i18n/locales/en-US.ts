@@ -2736,7 +2736,8 @@ export default {
   pluginAdmin: {
     runtime: {
       declarative: 'Declarative',
-      host: 'Local process'
+      host: 'Local process',
+      remote: 'Remote service'
     },
     title: 'Plugin management',
     description: 'Install and manage plugins for the whole platform. Every workspace sees an installed plugin, and each one enables it for itself; disabling a plugin here unloads it on every node.',
@@ -2780,6 +2781,13 @@ export default {
       hostApi: 'WeKnora API',
       events: 'Events'
     },
+    secret: {
+      title: 'Plugin signing secret',
+      description: 'Set this secret as the plugin service\'s WEKNORA_PLUGIN_SECRET environment variable; the service uses it to verify that requests come from WeKnora. It is shown only once and cannot be viewed again after you close this.',
+      copy: 'Copy',
+      copied: 'Copied',
+      done: 'I have saved it'
+    },
     install: {
       title: 'Install plugin',
       description: 'Upload a .wkp package or give its download URL, review it, then install.',
@@ -2794,6 +2802,9 @@ export default {
       fileHint: 'A .wkp file (a zip with plugin.yaml), up to 64 MB.',
       urlLabel: 'Download URL',
       urlHint: 'The server downloads this URL; private network addresses are refused.',
+      remoteUrlLabel: 'Service URL',
+      remoteUrlHint: 'The plugin service\'s HTTP(S) address. Private network hosts must be listed in SSRF_WHITELIST.',
+      remoteUrlKeep: 'On an upgrade, leave empty to keep the current URL',
       reviewSection: 'Review before installing',
       noPermissions: 'This plugin asks for no extra permissions.',
       configNotice: 'This plugin needs configuration: platform settings are in its details after installing, and workspace admins fill in workspace settings in Plugins.',
@@ -2836,7 +2847,16 @@ export default {
       uninstall: 'Uninstall plugin',
       uninstallConfirm: 'Uninstall? Every node unloads the plugin right away.',
       uninstalled: 'Plugin uninstalled',
-      uninstallFailed: 'Uninstall failed'
+      uninstallFailed: 'Uninstall failed',
+      remote: 'Remote service',
+      remoteUrl: 'Service URL',
+      editUrl: 'Change',
+      urlSaved: 'Service URL updated',
+      urlSaveFailed: 'Failed to update the service URL',
+      rotateSecret: 'Rotate secret',
+      rotateHint: 'Issues a new signing secret. Calls to the service fail until it is given the new one.',
+      rotateConfirm: 'Rotate the secret? The old one stops working immediately.',
+      rotateFailed: 'Failed to rotate the secret'
     }
   },
   pluginCenter: {

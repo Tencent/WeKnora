@@ -5254,7 +5254,8 @@ export default {
   pluginAdmin: {
     runtime: {
       declarative: '선언형',
-      host: '로컬 프로세스'
+      host: '로컬 프로세스',
+      remote: '원격 서비스'
     },
     title: '플러그인 관리',
     description: '플랫폼 전체의 플러그인을 설치하고 관리합니다. 설치된 플러그인은 모든 워크스페이스에 보이며 각 워크스페이스가 직접 활성화합니다. 여기서 비활성화하면 모든 노드에서 언로드됩니다.',
@@ -5298,6 +5299,13 @@ export default {
       hostApi: 'WeKnora API',
       events: '이벤트'
     },
+    secret: {
+      title: '플러그인 서명 비밀 키',
+      description: '이 비밀 키를 플러그인 서비스의 환경 변수 WEKNORA_PLUGIN_SECRET으로 설정하세요. 서비스는 이를 사용해 요청이 WeKnora에서 온 것인지 확인합니다. 이번에만 표시되며 닫은 후에는 다시 볼 수 없습니다.',
+      copy: '복사',
+      copied: '복사했습니다',
+      done: '저장했습니다'
+    },
     install: {
       title: '플러그인 설치',
       description: '.wkp 패키지를 업로드하거나 다운로드 URL을 입력하고, 검토한 뒤 설치합니다.',
@@ -5312,6 +5320,9 @@ export default {
       fileHint: '.wkp 파일(plugin.yaml이 포함된 zip), 최대 64 MB.',
       urlLabel: '다운로드 URL',
       urlHint: '서버가 이 URL에서 다운로드합니다. 사설 네트워크 주소는 거부됩니다.',
+      remoteUrlLabel: '서비스 URL',
+      remoteUrlHint: '플러그인 서비스의 HTTP(S) 주소입니다. 사설 네트워크 호스트는 SSRF_WHITELIST에 추가해야 합니다.',
+      remoteUrlKeep: '업그레이드 시 비워 두면 현재 URL을 계속 사용합니다',
       reviewSection: '설치 전 검토',
       noPermissions: '이 플러그인은 추가 권한을 요청하지 않습니다.',
       configNotice: '이 플러그인은 설정이 필요합니다. 플랫폼 설정은 설치 후 상세 화면에서, 워크스페이스 설정은 각 워크스페이스 관리자가 플러그인 센터에서 입력합니다.',
@@ -5354,7 +5365,16 @@ export default {
       uninstall: '플러그인 제거',
       uninstallConfirm: '제거할까요? 모든 노드에서 즉시 언로드됩니다.',
       uninstalled: '플러그인을 제거했습니다',
-      uninstallFailed: '제거하지 못했습니다'
+      uninstallFailed: '제거하지 못했습니다',
+      remote: '원격 서비스',
+      remoteUrl: '서비스 URL',
+      editUrl: '변경',
+      urlSaved: '서비스 URL을 업데이트했습니다',
+      urlSaveFailed: '서비스 URL을 업데이트하지 못했습니다',
+      rotateSecret: '비밀 키 교체',
+      rotateHint: '새 서명 비밀 키를 발급합니다. 서비스에 새 키를 설정하기 전까지 호출이 실패합니다.',
+      rotateConfirm: '비밀 키를 교체할까요? 이전 키는 즉시 무효화됩니다.',
+      rotateFailed: '비밀 키를 교체하지 못했습니다'
     }
   },
   pluginCenter: {

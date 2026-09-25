@@ -63,6 +63,34 @@
         </ul>
       </section>
 
+      <section v-if="plugin.runtime === 'remote'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.detail.remote') }}</h4>
+        <div class="remote-row">
+          <span class="remote-row__label">{{ t('pluginAdmin.detail.remoteUrl') }}</span>
+          <template v-if="editingUrl">
+            <t-input v-model="urlDraft" size="small" class="remote-row__input" :disabled="savingUrl" @enter="saveUrl" />
+            <t-button size="small" theme="primary" :loading="savingUrl" :disabled="!isPackageUrl(urlDraft)" @click="saveUrl">
+              {{ t('common.save') }}
+            </t-button>
+            <t-button size="small" variant="text" :disabled="savingUrl" @click="editingUrl = false">
+              {{ t('common.cancel') }}
+            </t-button>
+          </template>
+          <template v-else>
+            <code class="remote-row__value">{{ plugin.remote_url }}</code>
+            <t-button size="small" variant="text" theme="primary" @click="startEditUrl">
+              {{ t('pluginAdmin.detail.editUrl') }}
+            </t-button>
+          </template>
+        </div>
+        <div class="danger-row">
+          <span class="form-desc">{{ t('pluginAdmin.detail.rotateHint') }}</span>
+          <t-popconfirm :content="t('pluginAdmin.detail.rotateConfirm')" @confirm="rotate">
+            <t-button variant="outline" :loading="rotating">{{ t('pluginAdmin.detail.rotateSecret') }}</t-button>
+          </t-popconfirm>
+        </div>
+      </section>
+
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.detail.versions') }}</h4>
         <ul class="line-list">
@@ -119,6 +147,8 @@ import { getPlugin, type PluginInstance } from '@/api/plugin'
 import {
   activatePluginVersion,
   getPluginSystemConfig,
+  rotatePluginSecret,
+  setPluginRemoteUrl,
   uninstallPlugin,
   updatePluginSystemConfig,
   type InstalledPlugin,
@@ -130,6 +160,7 @@ import {
   contributionLines,
   formatBytes,
   hasSystemConfig,
+  isPackageUrl,
   shortDigest,
   sortVersions,
 } from '../pluginManagementState'
@@ -156,6 +187,10 @@ const configErrors = ref<FieldError[]>([])
 const saving = ref(false)
 const activating = ref('')
 const uninstalling = ref(false)
+const editingUrl = ref(false)
+const urlDraft = ref('')
+const savingUrl = ref(false)
+const rotating = ref(false)
 
 const formatDate = (s: string) => (s ? new Date(s).toLocaleString(locale.value) : '')
 
@@ -188,6 +223,7 @@ watch(
   () => [props.visible, props.plugin?.id, props.plugin?.active_version, props.plugin?.desired_state] as const,
   ([visible, id]) => {
     if (!visible || !id) return
+    editingUrl.value = false
     void loadNodes(id)
     void loadConfig(id)
   },
@@ -223,6 +259,40 @@ async function activate(version: string) {
     MessagePlugin.error(e?.message || t('pluginAdmin.detail.activateFailed'))
   } finally {
     activating.value = ''
+  }
+}
+
+function startEditUrl() {
+  urlDraft.value = props.plugin?.remote_url ?? ''
+  editingUrl.value = true
+}
+
+async function saveUrl() {
+  if (!props.plugin || !isPackageUrl(urlDraft.value)) return
+  savingUrl.value = true
+  try {
+    const res = await setPluginRemoteUrl(props.plugin.id, urlDraft.value.trim())
+    editingUrl.value = false
+    emit('changed', res.data)
+    MessagePlugin.success(t('pluginAdmin.detail.urlSaved'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('pluginAdmin.detail.urlSaveFailed'))
+  } finally {
+    savingUrl.value = false
+  }
+}
+
+// The new secret travels in the changed plugin; the page shows it once.
+async function rotate() {
+  if (!props.plugin) return
+  rotating.value = true
+  try {
+    const res = await rotatePluginSecret(props.plugin.id)
+    emit('changed', res.data)
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('pluginAdmin.detail.rotateFailed'))
+  } finally {
+    rotating.value = false
   }
 }
 
@@ -316,6 +386,29 @@ async function uninstall() {
   font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+.remote-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--app-text-sm);
+
+  &__label {
+    color: var(--td-text-color-secondary);
+  }
+
+  &__value {
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-primary);
+    word-break: break-all;
+  }
+
+  &__input {
+    flex: 1;
+    min-width: 200px;
+  }
 }
 
 .danger-row {

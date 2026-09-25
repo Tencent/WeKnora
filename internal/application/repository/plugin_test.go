@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -39,12 +41,15 @@ func TestPluginRepository(t *testing.T) {
 	require.NoError(t, repo.SavePlugin(ctx, p))
 	p.ActiveVersion = "1.1.0"
 	p.DesiredState = types.PluginStateDisabled
+	p.RemoteURL, p.RemoteSecret = "https://plugins.example.com", "enc:v1:x"
 	require.NoError(t, repo.SavePlugin(ctx, p), "save is an upsert")
 
 	got, err = repo.GetPlugin(ctx, "acme.kit")
 	require.NoError(t, err)
 	require.Equal(t, "1.1.0", got.ActiveVersion)
 	require.Equal(t, types.PluginStateDisabled, got.DesiredState)
+	require.Equal(t, "https://plugins.example.com", got.RemoteURL)
+	require.Equal(t, "enc:v1:x", got.RemoteSecret)
 
 	versions, err := repo.ListVersions(ctx, "acme.kit")
 	require.NoError(t, err)
@@ -141,4 +146,18 @@ func TestPluginKVRepository(t *testing.T) {
 	require.True(t, ok)
 	got, _ = repo.Get(ctx, "acme.x", 2, "cursor:a")
 	require.JSONEq(t, `99`, string(got.Value), "tenants are separate partitions")
+}
+
+// A column added to installed plugins must be saved on update too, or
+// changing it silently does nothing.
+func TestPluginUpdateColumnsCoverTheTable(t *testing.T) {
+	s, err := schema.Parse(&types.InstalledPlugin{}, &sync.Map{}, schema.NamingStrategy{})
+	require.NoError(t, err)
+	for _, name := range s.DBNames {
+		switch name {
+		case "id", "created_at", "created_by":
+			continue
+		}
+		require.Contains(t, pluginUpdateColumns, name, "SavePlugin does not update %s", name)
+	}
 }

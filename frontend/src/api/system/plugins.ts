@@ -51,15 +51,20 @@ export interface InstalledPlugin {
   manifest?: PluginManifest
   versions: PluginVersion[]
   node?: PluginNodeStatus
+  /** Where a remote plugin's service runs. */
+  remote_url?: string
+  /** A remote plugin's new signing secret, only in the response that issued it. */
+  issuedSecret?: string
 }
 
 /** A package to inspect or install: an uploaded file or a URL. */
 export type PackageSource = { file: File } | { url: string }
 
-function packageForm(file: File, digest?: string) {
+function packageForm(file: File, digest?: string, remoteUrl?: string) {
   const form = new FormData()
   form.append('file', file)
   if (digest) form.append('digest', digest)
+  if (remoteUrl) form.append('remote_url', remoteUrl)
   return form
 }
 
@@ -81,14 +86,21 @@ export function inspectPluginPackage(source: PackageSource) {
   return post<{ data: PluginPreview }>(`${BASE}/inspect`, { url: source.url }, { timeout: PACKAGE_TIMEOUT })
 }
 
-/** Installs the package reviewed with inspect; digest pins it to that package. */
-export function installPluginPackage(source: PackageSource, digest: string) {
+/**
+ * Installs the package reviewed with inspect; digest pins it to that package.
+ * A remote plugin also needs the URL of its service (optional on upgrades).
+ */
+export function installPluginPackage(source: PackageSource, digest: string, remoteUrl?: string) {
   if ('file' in source) {
-    return postUpload(BASE, packageForm(source.file, digest), undefined, { timeout: PACKAGE_TIMEOUT }) as Promise<{
-      data: InstalledPlugin
-    }>
+    return postUpload(BASE, packageForm(source.file, digest, remoteUrl), undefined, {
+      timeout: PACKAGE_TIMEOUT,
+    }) as Promise<{ data: InstalledPlugin }>
   }
-  return post<{ data: InstalledPlugin }>(BASE, { url: source.url, digest }, { timeout: PACKAGE_TIMEOUT })
+  return post<{ data: InstalledPlugin }>(
+    BASE,
+    { url: source.url, digest, remote_url: remoteUrl || undefined },
+    { timeout: PACKAGE_TIMEOUT },
+  )
 }
 
 export function setInstalledPluginEnabled(id: string, enabled: boolean) {
@@ -97,6 +109,15 @@ export function setInstalledPluginEnabled(id: string, enabled: boolean) {
 
 export function activatePluginVersion(id: string, version: string) {
   return put<{ data: InstalledPlugin }>(`${BASE}/${encodeURIComponent(id)}/active-version`, { version })
+}
+
+export function setPluginRemoteUrl(id: string, url: string) {
+  return put<{ data: InstalledPlugin }>(`${BASE}/${encodeURIComponent(id)}/remote-url`, { url })
+}
+
+/** Issues a new signing secret; the response carries it in issuedSecret. */
+export function rotatePluginSecret(id: string) {
+  return post<{ data: InstalledPlugin }>(`${BASE}/${encodeURIComponent(id)}/secret/rotate`, {})
 }
 
 export function uninstallPlugin(id: string) {

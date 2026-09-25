@@ -21,8 +21,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
+	"github.com/Tencent/WeKnora/internal/plugin/remote"
 	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/pluginsdk/client"
 )
 
 // newPluginPackageStore keeps plugin packages in the deployment's object
@@ -41,6 +43,7 @@ type pluginActivators struct {
 	dig.In
 
 	Host       *host.Manager
+	Remote     *remote.Manager
 	WebSearch  *activate.WebSearch
 	Connectors *activate.Connectors
 	Parsers    *activate.Parsers
@@ -50,19 +53,23 @@ type pluginActivators struct {
 	Invoker    *activate.Invoker
 }
 
-// list orders the activators: the host first, so a code plugin's process is
-// running before anything routes calls to it.
+// list orders the activators: the runtimes first, so a code plugin is
+// reachable before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
-	return []reconcile.Activator{a.Host, a.WebSearch, a.Connectors, a.Parsers, a.Vendors, a.MCP, a.Skills}
+	return []reconcile.Activator{
+		a.Host, a.Remote, a.WebSearch, a.Connectors, a.Parsers, a.Vendors, a.MCP, a.Skills,
+	}
 }
 
 // newPluginHostAPI serves the Host API and gives calls a way back to it: the
-// embedded host's plugins reach this node on loopback.
+// embedded host's plugins reach this node on loopback, remote plugins only
+// through WEKNORA_PLUGIN_HOST_API_URL.
 func newPluginHostAPI(
 	cfg *config.Config, iv *activate.Invoker, repo interfaces.PluginKVRepository, cleaner interfaces.ResourceCleaner,
 ) *hostapi.Handler {
 	issuer := hostapi.NewIssuerFromEnv()
 	url := strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_HOST_API_URL"))
+	iv.SetPublicHostAPI(url)
 	if url == "" {
 		port := 8080
 		if cfg != nil && cfg.Server != nil && cfg.Server.Port > 0 {
@@ -90,8 +97,24 @@ func bindPluginActivators(
 	skills.SetPluginSkills(a.Skills)
 }
 
-// newPluginInvoker reaches code plugins through this node's plugin host.
-func newPluginInvoker(h *host.Manager) *activate.Invoker { return activate.NewInvoker(h) }
+// newPluginInvoker reaches code plugins through this node's plugin host or,
+// for remote ones, at their registered URLs.
+func newPluginInvoker(h *host.Manager, r *remote.Manager) *activate.Invoker {
+	return activate.NewInvoker(pluginClients{host: h, remote: r})
+}
+
+// pluginClients finds a code plugin in whichever runtime loaded it.
+type pluginClients struct {
+	host   *host.Manager
+	remote *remote.Manager
+}
+
+func (c pluginClients) Client(pluginID string) (*client.Client, error) {
+	if c.remote.Owns(pluginID) {
+		return c.remote.Client(pluginID)
+	}
+	return c.host.Client(pluginID)
+}
 
 func newMCPServiceRepository(db *gorm.DB, plugins *activate.MCPServers) interfaces.MCPServiceRepository {
 	return plugins.Repository(repository.NewMCPServiceRepository(db))
@@ -119,13 +142,18 @@ func newPluginInstaller(
 
 // startPluginReconciler loads installed plugins before the server takes
 // traffic, then keeps this node in step with the others.
-func startPluginReconciler(r *reconcile.Reconciler, hostManager *host.Manager, cleaner interfaces.ResourceCleaner) {
+func startPluginReconciler(
+	r *reconcile.Reconciler, hostManager *host.Manager, remoteManager *remote.Manager,
+	cleaner interfaces.ResourceCleaner,
+) {
 	hostManager.SetReporter(r)
+	remoteManager.SetReporter(r)
 	ctx, cancel := context.WithCancel(context.Background())
 	r.Start(ctx)
 	cleaner.RegisterWithName("PluginReconciler", func() error {
 		cancel()
 		hostManager.Close()
+		remoteManager.Close()
 		return nil
 	})
 }

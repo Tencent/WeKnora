@@ -114,6 +114,16 @@ export function installedState(p: InstalledPlugin): InstalledState {
 export const EGRESS_ANY_HOST = '*'
 
 /** Whether a string can be sent as a package URL. */
+/**
+ * Whether the install drawer can go ahead with a remote plugin's service URL:
+ * a new install needs one, an upgrade may keep the registered one.
+ */
+export function remoteUrlReady(preview: { manifest: { runtime?: { type: string } }; change: string } | null, raw: string) {
+  if (preview?.manifest.runtime?.type !== 'remote') return true
+  if (raw.trim() === '') return preview.change !== 'install'
+  return isPackageUrl(raw)
+}
+
 export function isPackageUrl(raw: string): boolean {
   try {
     const u = new URL(raw.trim())
