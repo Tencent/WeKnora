@@ -305,8 +305,9 @@ func (c *Client) KnowledgeQAStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if dataBuffer != "" {
-				data := completeSSEData(dataBuffer)
+			// A bare `data:` frame carries no payload; skip it rather than
+			// failing the stream on an empty JSON document.
+			if data := completeSSEData(dataBuffer); data != "" {
 				debugLogger.Debug("sse_data_processing", "data", data, "event_type", eventType)
 				var streamResponse StreamResponse
 				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
@@ -324,9 +325,9 @@ func (c *Client) KnowledgeQAStream(
 				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
 					return NewSSEStreamError(streamResponse.Content)
 				}
-				dataBuffer = ""
-				eventType = ""
 			}
+			dataBuffer = ""
+			eventType = ""
 			continue
 		}
 
@@ -387,8 +388,7 @@ func (c *Client) ContinueStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if dataBuffer != "" && eventType == "message" {
-				data := completeSSEData(dataBuffer)
+			if data := completeSSEData(dataBuffer); data != "" && eventType == "message" {
 				var streamResponse StreamResponse
 				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)

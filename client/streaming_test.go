@@ -59,10 +59,10 @@ func TestProcessAgentSSEStream_MultilineDataFrame(t *testing.T) {
 }
 
 func TestKnowledgeQAStream_MultilineDataFrame(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data:{\"response_type\":\"answer\",\n")
-		fmt.Fprint(w, "data:\"content\":\"hello\",\"done\":false}\n\n")
+		_, _ = fmt.Fprint(w, "data:{\"response_type\":\"answer\",\n")
+		_, _ = fmt.Fprint(w, "data:\"content\":\"hello\",\"done\":false}\n\n")
 	}))
 	defer srv.Close()
 
@@ -85,11 +85,11 @@ func TestKnowledgeQAStream_MultilineDataFrame(t *testing.T) {
 }
 
 func TestContinueStream_MultilineDataFrame(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "event:message\n")
-		fmt.Fprint(w, "data:{\"response_type\":\"answer\",\n")
-		fmt.Fprint(w, "data:\"content\":\"hello\",\"done\":false}\n\n")
+		_, _ = fmt.Fprint(w, "event:message\n")
+		_, _ = fmt.Fprint(w, "data:{\"response_type\":\"answer\",\n")
+		_, _ = fmt.Fprint(w, "data:\"content\":\"hello\",\"done\":false}\n\n")
 	}))
 	defer srv.Close()
 
@@ -107,6 +107,71 @@ func TestContinueStream_MultilineDataFrame(t *testing.T) {
 	}
 	if got.ResponseType != ResponseTypeAnswer || got.Content != "hello" {
 		t.Fatalf("response = %#v, want answer content hello", got)
+	}
+}
+
+// emptyDataFrameStream wraps a bare `data:` frame between two real events;
+// the empty frame must be skipped, not parsed as JSON.
+const emptyDataFrameStream = "data:{\"response_type\":\"answer\",\"content\":\"a\"}\n\n" +
+	"data:\n\n" +
+	"data:{\"response_type\":\"answer\",\"content\":\"b\"}\n\n"
+
+func TestProcessAgentSSEStream_SkipsEmptyDataFrame(t *testing.T) {
+	c := &Client{}
+	var got []string
+	err := c.processAgentSSEStream(strings.NewReader(emptyDataFrameStream), func(resp *AgentStreamResponse) error {
+		got = append(got, resp.Content)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("empty SSE data frame aborted the stream: %v", err)
+	}
+	if strings.Join(got, ",") != "a,b" {
+		t.Fatalf("contents = %v, want [a b]", got)
+	}
+}
+
+func TestKnowledgeQAStream_SkipsEmptyDataFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, emptyDataFrameStream)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var got []string
+	err := c.KnowledgeQAStream(context.Background(), "sess", &KnowledgeQARequest{Query: "q"},
+		func(e *StreamResponse) error {
+			got = append(got, e.Content)
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("empty SSE data frame aborted the stream: %v", err)
+	}
+	if strings.Join(got, ",") != "a,b" {
+		t.Fatalf("contents = %v, want [a b]", got)
+	}
+}
+
+func TestContinueStream_SkipsEmptyDataFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event:message\n"+
+			strings.ReplaceAll(emptyDataFrameStream, "\n\n", "\n\nevent:message\n"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var got []string
+	err := c.ContinueStream(context.Background(), "sess", "msg", func(e *StreamResponse) error {
+		got = append(got, e.Content)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("empty SSE data frame aborted the stream: %v", err)
+	}
+	if strings.Join(got, ",") != "a,b" {
+		t.Fatalf("contents = %v, want [a b]", got)
 	}
 }
 
