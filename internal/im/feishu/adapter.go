@@ -1097,8 +1097,11 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 // reaches the card we must download each referenced image and re-upload it to
 // Feishu to obtain a usable image_key.
 
-// feishuMarkdownImageRe matches a markdown image whose target is an http(s) URL.
-var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\((https?://[^)\s]+)\)`)
+// feishuMarkdownImageRe matches every markdown image. Only http(s) targets can
+// be uploaded to an image_key; unresolved internal handles (resource://,
+// local://, minio://, …) are not valid Feishu image keys, so
+// resolveMarkdownImages degrades them instead of leaving ![]() in the card.
+var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)\)`)
 
 // feishuMarkdownLinkRe matches a markdown link whose target is an http(s) URL.
 // Applied after image stripping so signed image URLs are not left as links.
@@ -1128,26 +1131,47 @@ func imageCacheKey(rawURL string) string {
 }
 
 // resolveMarkdownImages replaces the URL inside every ![alt](httpURL) with a
-// Feishu image_key. On failure it degrades the image to a plain text link so the
-// rest of the card still renders instead of failing the whole update.
+// Feishu image_key. On failure, or when the storage resolver left an internal
+// handle unresolved, it degrades the image so the rest of the card still
+// renders instead of failing the whole update. HTTP(S) targets become a
+// markdown link (Feishu accepts only http/https hrefs); other schemes become
+// plain text, because [text](resource://…) is also rejected as an illegal link.
 func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, content string) string {
 	if !strings.Contains(content, "![") {
 		return content
 	}
+	fallback := func(alt, rawURL string) string {
+		if alt == "" {
+			alt = a.region.ImageFallbackLabel
+		}
+		if isHTTPImageURL(rawURL) {
+			return fmt.Sprintf("[%s](%s)", alt, rawURL)
+		}
+		return alt
+	}
 	return feishuMarkdownImageRe.ReplaceAllStringFunc(content, func(match string) string {
 		sub := feishuMarkdownImageRe.FindStringSubmatch(match)
+		if len(sub) < 3 {
+			return match
+		}
 		alt, rawURL := sub[1], sub[2]
+		if !isHTTPImageURL(rawURL) {
+			return fallback(alt, rawURL)
+		}
 		imgKey, err := a.imageKeyForURL(ctx, accessToken, rawURL)
 		if err != nil || imgKey == "" {
 			logger.Warnf(ctx, "[%s] image upload failed, degrading to link: url=%s err=%v", a.region.Label, rawURL, err)
-			label := alt
-			if label == "" {
-				label = a.region.ImageFallbackLabel
-			}
-			return fmt.Sprintf("[%s](%s)", label, rawURL)
+			return fallback(alt, rawURL)
 		}
 		return fmt.Sprintf("![%s](%s)", alt, imgKey)
 	})
+}
+
+// isHTTPImageURL reports whether rawURL is an http(s) URL. Scheme match is
+// case-insensitive: IM rewrite may emit HTTPS:// from a configured proxy domain.
+func isHTTPImageURL(rawURL string) bool {
+	lower := strings.ToLower(rawURL)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
 // imageKeyForURL returns a Feishu image_key for the given URL, uploading it if
