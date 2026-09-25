@@ -23,6 +23,9 @@ type langfuseReranker struct {
 func (l *langfuseReranker) GetModelName() string { return l.inner.GetModelName() }
 func (l *langfuseReranker) GetModelID() string   { return l.inner.GetModelID() }
 
+// MaxPassageRunes forwards the wrapped reranker's limit.
+func (l *langfuseReranker) MaxPassageRunes(query string) int { return MaxPassageRunes(l.inner, query) }
+
 func (l *langfuseReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {

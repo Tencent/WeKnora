@@ -190,6 +190,29 @@ func EnrichSearchResultsImageInfo(
 	tenantID uint64,
 	results []*types.SearchResult,
 ) {
+	enrichSearchResultsImageInfo(results, func(chunkIDs []string) map[string]string {
+		return CollectImageInfoByChunkIDs(ctx, chunkRepo, tenantID, chunkIDs)
+	})
+}
+
+// EnrichSearchResultsImageInfoOnly is the shared-KB variant of
+// EnrichSearchResultsImageInfo for results that may come from an org-shared
+// KB owned by another workspace. The result IDs must already be authorized
+// (they come from retrieval over KBs the caller may read).
+func EnrichSearchResultsImageInfoOnly(
+	ctx context.Context,
+	chunkRepo interfaces.ChunkRepository,
+	results []*types.SearchResult,
+) {
+	enrichSearchResultsImageInfo(results, func(chunkIDs []string) map[string]string {
+		return CollectImageInfoByChunkIDsOnly(ctx, chunkRepo, chunkIDs)
+	})
+}
+
+func enrichSearchResultsImageInfo(
+	results []*types.SearchResult,
+	collect func(chunkIDs []string) map[string]string,
+) {
 	var chunkIDs []string
 	seen := make(map[string]bool)
 	for _, r := range results {
@@ -205,7 +228,7 @@ func EnrichSearchResultsImageInfo(
 		return
 	}
 
-	infoMap := CollectImageInfoByChunkIDs(ctx, chunkRepo, tenantID, chunkIDs)
+	infoMap := collect(chunkIDs)
 	if len(infoMap) == 0 {
 		return
 	}

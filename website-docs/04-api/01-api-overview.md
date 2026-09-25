@@ -254,19 +254,19 @@ X-Accel-Buffering: no
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | 设为 `false` 关闭 rerank，结果保持召回顺序 |
 | `model_id` | string | 见下文 | rerank 模型 ID（`GET /models` 里 `type` 为 `Rerank` 的模型）。ID 不存在、未激活或不是 rerank 模型时返回 400，不会悄悄换成别的模型 |
-| `top_k` | int | 接口的返回条数 | rerank 后最多保留几条；负数返回 400 |
+| `top_k` | int | 接口的返回条数 | rerank 后最多保留几条；负数或超过 200 返回 400 |
 | `threshold` | float | 空间检索配置里的 `rerank_threshold`（未配置时 0.2） | 模型分数下限；`0` 和负数都是合法值 |
 
 不传 `model_id` 时依次使用：空间检索配置里的 `rerank_model_id` → 空间里第一个 rerank 模型。都没有时不做 rerank，按召回顺序返回，`meta.rerank.outcome` 为 `no_model`。
 
 rerank 的过程和问答链路、智能推理的 `search_knowledge` 工具共用同一套实现（`internal/reranking`）：
 
-1. 送给模型打分的文本 = 文档标题 + 去掉 Markdown 标记的分块正文 + 图片描述与 OCR 文本 + 生成的问题。FAQ 条目不加标题。
+1. 送给模型打分的文本 = 文档标题 + 去掉 Markdown 标记的分块正文 + 图片描述与 OCR 文本 + 生成的问题。FAQ 条目不加标题。模型配置了单篇或单次请求长度上限（`max_document_chars` / `max_request_chars`）时，超长的文本从尾部截到上限再送出，先截掉的是附加的图片文本和生成问题；不会因为一条超长文本让整批打分失败。
 2. 保留分数不低于 `threshold` 的结果。如果一条都没有、而 `threshold` 高于 0.3，就把阈值降到 `max(threshold×0.7, 0.3)` 再筛一次。还是没有的话，最高分不低于 0.15 时只保留这一条，否则返回空列表。
 3. 排序分 = `0.6×模型分 + 0.3×召回分 + 0.1×来源权重`；结果的 `metadata` 里带 `model_score` 和 `base_score`。
 4. 用 MMR（λ=0.7）从中挑出 `top_k` 条，降低内容重复。
 
-`hybrid-search` 开启 rerank 时，候选池是融合后排名前 `max(top_k, 50)` 的分块，所以 `match_count` 很小也有足够的候选给模型挑。
+`hybrid-search` 开启 rerank 时，召回深度至少与 `top_k` 相同，候选池是融合后排名前 `max(top_k, 50)` 的分块，所以 `match_count` 很小也有足够的候选给模型挑。
 
 rerank 模型加载失败或调用出错时，请求不会失败，而是按召回顺序返回，并在 `meta.rerank` 里写明原因。
 

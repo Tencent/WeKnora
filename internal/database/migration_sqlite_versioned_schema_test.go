@@ -22,6 +22,7 @@ var versionedSQLiteTables = []string{
 	"task_dead_letters",
 	"system_settings",
 	"model_catalog_configs",
+	"chunk_images",
 	"knowledge_processing_spans",
 	"knowledge_tag_relations",
 	"browser_devices",
@@ -67,7 +68,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 31
+const expectedSQLiteMigrationVersion = 32
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

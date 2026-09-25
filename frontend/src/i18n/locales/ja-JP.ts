@@ -2999,8 +2999,8 @@ export default {
       duplicate: '複製'
     },
     pin: {
-      pin: '先頭に固定',
-      unpin: '固定を解除',
+              pin: '先頭に固定',
+              unpin: '固定を解除',
       pinSuccess: '固定しました',
       unpinSuccess: '固定を解除しました',
       failed: '操作に失敗しました'
@@ -3462,6 +3462,71 @@ export default {
       editingBadge: '編集中',
       pageActions: 'ページ操作',
       tabDocuments: 'ドキュメント',
+      tabGallery: 'ギャラリー',
+      gallery: {
+        panelFilter: 'フィルター設定',
+        panelSearch: '検索設定',
+        enableFilter: 'フィルター有効',
+        searchAll: '全フィールド検索',
+        verdictDefault: '-',
+        verdictOff: 'off',
+        verdictOn: 'on',
+        searchScope: '検索範囲',
+        scopeAll: 'すべて',
+        scopeCustom: 'カスタム',
+        filterScope: 'フィルター',
+        filterOff: 'すべて表示',
+        filterOn: 'カスタム',
+        editSearch: '検索設定を開く',
+        editFilter: 'フィルター設定を開く',
+        pin: '右側に固定',
+        unpin: '固定を解除',
+        title: 'ギャラリー',
+        searchPlaceholder: '画像の内容を検索',
+        sortByLabel: '並べ替え',
+        orderAsc: '昇順',
+        orderDesc: '降順',
+        filtersTitle: 'フィルター',
+        searchFields: '検索フィールド',
+        modeAll: 'すべてのフィールド',
+        modeCustom: 'カスタム',
+        keywordsPlaceholder: 'キーワードはカンマで区切る',
+        applyAll: '全属性に一括設定',
+        count: '{count} 枚の画像',
+        empty: 'このナレッジベースに画像はまだありません',
+        emptyFiltered: '現在のフィルターに一致する画像はありません',
+        attrSection: '画像属性',
+        noAttrs: '画像属性はありません',
+        attributes: '属性',
+        caption: '説明',
+        ocr: 'OCR テキスト',
+        source: 'ソース',
+        noCaption: '説明なし',
+        noOcr: 'OCR テキストなし',
+        chunkType: '種類',
+        viewerClose: '閉じる',
+        prev: '前へ',
+        next: '次へ',
+        openSource: 'ソース文書を開く',
+        imageLoadError: '画像の読み込みに失敗しました',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: '説明',
+          builtin_caption_description: 'モデルが生成した画像の説明',
+          builtin_ocr_text: 'OCR テキスト',
+          builtin_ocr_text_description: 'OCR で画像から抽出した文字',
+          builtin_created_at: '作成日時',
+          builtin_created_at_description: '所属ドキュメントチャンクの作成日時',
+          builtin_updated_at: '更新日時',
+          builtin_updated_at_description: '所属ドキュメントチャンクの最終更新日時',
+          builtin_is_enabled: '有効状態',
+          builtin_is_enabled_description: '所属ドキュメントチャンクが検索対象かどうか',
+          builtin_is_enabled_value_true: '有効',
+          builtin_is_enabled_value_false: '無効',
+        },
+      },
       tabGraph: 'グラフ',
       tabGraphTip: 'Wikiページ間のリンクを表したグラフ（ページリンクグラフ）です。「ナレッジベース設定 → ナレッジグラフ」で設定する、LLMが抽出するエンティティ・リレーションのナレッジグラフとは異なります。',
       searchPlaceholder: 'Wikiページを検索...',
@@ -3879,7 +3944,16 @@ export default {
         descriptionLanguageAuto: 'ドキュメントの言語に従う',
         customInstructionsLabel: '画像処理の指示',
         customInstructionsDescription: 'OCRとMarkdown出力の仕様は固定したまま、視覚的に優先する対象を追加できます',
-        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…'
+        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…',
+        imageAttrsLabel: '画像属性の観察',
+        imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
+        imageAttrsSchemaLabel: '観察可能な画像属性',
+        imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
+        imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
+        imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
+        imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
+        imageAttrsOcrOnUnobservedDesc: 'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
+        imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
   },
@@ -7009,7 +7083,7 @@ export default {
       empty: 'MCP エンドポイントはまだありません',
       disabled: '停止中',
       cardSummary: '{tools} 個のツール · {scope}',
-      scopeAll: 'すべてのナレッジベース',
+              scopeAll: 'すべてのナレッジベース',
       scopeCount: '{count} 個のナレッジベース',
       create: 'エンドポイントを作成',
       editTitle: 'MCP エンドポイントを編集',
@@ -7657,5 +7731,28 @@ export default {
     capabilityRequired: '権限を1つ以上選択してください',
     loadFailed: 'プラットフォームAPIキーの読み込みに失敗しました',
     createFailed: 'プラットフォームAPIキーの作成に失敗しました'
+  },
+  // 観察属性の表示文言。属性名で索引し、ここでは翻訳のみを担当します。
+  // 属性名のドットはアンダースコアにエスケープします（contain.text → contain_text）——
+  // vue-i18n はキーをドットで辿るため、リテラルの 'contain.text' は解決できません。
+  // 未翻訳の属性はバックエンド登録表の説明にフォールバックします。
+  imageAttr: {
+    contain_text: {
+      label: '画像内のテキスト量',
+      description: '画像自体がどれだけ本文テキストを含むか。テキスト読み取りのために別途 OCR を行う価値があるかを判断します。',
+      values: {
+        none: { label: 'テキストなし', description: 'テキストは一切含まれていません' },
+        sparse: { label: 'わずかな文字', description: 'わずかな文字のみ —— ロゴ、道路標識、単一のラベル' },
+        block: { label: 'まとまった本文', description: 'まとまった本文 —— スクリーンショット、表、文書ページ' }
+      }
+    },
+    contain_data_visual: {
+      label: 'データ可視化',
+      description: '画像がグラフ・図表・ダイアグラム・インフォグラフィックとしてデータを伝えているか。文字が少なく見えても OCR の対象に残します。',
+      values: {
+        'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
+        'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
+      }
+    }
   }
 }

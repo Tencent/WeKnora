@@ -803,10 +803,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
 	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+		// Counts only, no policy claims: whether a given image is OCR'd is
+		// decided per image once its attributes are observed, so a boolean here
+		// would assert something the pipeline has not decided yet — and would
+		// drift from what actually happened.
 		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
-			"image_count":    len(options.StoredImages),
-			"enable_ocr":     true,
-			"enable_caption": true,
+			"image_count": len(options.StoredImages),
 		})
 		if err := s.enqueueImageMultimodalTasks(
 			ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata,
@@ -4256,6 +4258,13 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		counterSeeded = true
 	}
 
+	// Resolve the image pipeline settings once for the whole fan-out: the image
+	// action policy and the pipeline switch travel with each task so the worker
+	// needs no second config lookup, and so a task keeps the policy it was
+	// enqueued with even if the knowledge base is reconfigured meanwhile.
+	overrides, _ := knowledge.ProcessOverrides()
+	eff := ResolveProcessConfig(kb, overrides)
+
 	enqueued := 0
 	for idx, img := range images {
 		// Match image to the ParsedChunk whose content contains the image URL.
@@ -4272,17 +4281,19 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 
 		payload := types.ImageMultimodalPayload{
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: kb.ID,
-			ChunkID:         chunkID,
-			ImageURL:        img.ServingURL,
-			EnableOCR:       true,
-			EnableCaption:   true,
-			Language:        lang,
-			ImageSourceType: metadata["image_source_type"],
-			Attempt:         attempt,
-			ImageIndex:      idx,
+			TenantID:          knowledge.TenantID,
+			KnowledgeID:       knowledge.ID,
+			KnowledgeBaseID:   kb.ID,
+			ChunkID:           chunkID,
+			ImageURL:          img.ServingURL,
+			EnableOCR:         true,
+			EnableCaption:     true,
+			ImageAttrsEnabled: eff.ImageAttrsEnabled,
+			ImageActions:      eff.ImageActions,
+			Language:          lang,
+			ImageSourceType:   metadata["image_source_type"],
+			Attempt:           attempt,
+			ImageIndex:        idx,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

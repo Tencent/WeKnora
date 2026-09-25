@@ -61,6 +61,7 @@ func (p *PluginLoadHistory) OnEvent(ctx context.Context,
 	}
 
 	chatManage.History = historyList
+	chatManage.HistoryLoaded = true
 
 	pipelineInfo(ctx, "LoadHistory", "output", map[string]interface{}{
 		"session_id":     chatManage.SessionID,

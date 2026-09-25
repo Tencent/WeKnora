@@ -2999,8 +2999,8 @@ export default {
       duplicate: 'Duplicate'
     },
     pin: {
-      pin: 'Pin to Top',
-      unpin: 'Unpin',
+              pin: 'Pin to Top',
+              unpin: 'Unpin',
       pinSuccess: 'Pinned',
       unpinSuccess: 'Unpinned',
       failed: 'Operation failed'
@@ -3462,6 +3462,71 @@ export default {
       editingBadge: 'Editing',
       pageActions: 'Page actions',
       tabDocuments: 'Documents',
+      tabGallery: 'Gallery',
+      gallery: {
+        panelFilter: 'Filter',
+        panelSearch: 'Search',
+        enableFilter: 'Enable filter',
+        searchAll: 'Search all fields',
+        verdictDefault: '-',
+        verdictOff: 'off',
+        verdictOn: 'on',
+        searchScope: 'Search scope',
+        scopeAll: 'All',
+        scopeCustom: 'Custom',
+        filterScope: 'Filter',
+        filterOff: 'Show all',
+        filterOn: 'Custom',
+        editSearch: 'Open search settings',
+        editFilter: 'Open filter settings',
+        pin: 'Pin to the right',
+        unpin: 'Unpin',
+        title: 'Gallery',
+        searchPlaceholder: 'Search image content',
+        sortByLabel: 'Sort by',
+        orderAsc: 'Ascending',
+        orderDesc: 'Descending',
+        filtersTitle: 'Filters',
+        searchFields: 'Search fields',
+        modeAll: 'All fields',
+        modeCustom: 'Custom',
+        keywordsPlaceholder: 'Separate keywords with commas',
+        applyAll: 'Apply to all attributes',
+        count: '{count} images',
+        empty: 'No images in this knowledge base yet',
+        emptyFiltered: 'No images match the current filters',
+        attrSection: 'Image attributes',
+        noAttrs: 'No image attributes available',
+        attributes: 'Attributes',
+        caption: 'Caption',
+        ocr: 'OCR text',
+        source: 'Source',
+        noCaption: 'No caption',
+        noOcr: 'No OCR text',
+        chunkType: 'Type',
+        viewerClose: 'Close',
+        prev: 'Previous',
+        next: 'Next',
+        openSource: 'Open source document',
+        imageLoadError: 'Image failed to load',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: 'Caption',
+          builtin_caption_description: 'The model-generated description of the image.',
+          builtin_ocr_text: 'OCR text',
+          builtin_ocr_text_description: 'Text extracted from the image by OCR.',
+          builtin_created_at: 'Created time',
+          builtin_created_at_description: 'When the owning document chunk was created.',
+          builtin_updated_at: 'Updated time',
+          builtin_updated_at_description: 'When the owning document chunk was last updated.',
+          builtin_is_enabled: 'Enabled',
+          builtin_is_enabled_description: 'Whether the owning document chunk takes part in retrieval.',
+          builtin_is_enabled_value_true: 'Enabled',
+          builtin_is_enabled_value_false: 'Disabled',
+        },
+      },
       tabGraph: 'Graph',
       tabGraphTip: 'A graph of links between Wiki pages (page-link graph). This is NOT the same as the LLM-extracted entity-relationship Knowledge Graph configured under "KB Settings → Knowledge Graph".',
       searchPlaceholder: 'Search wiki pages...',
@@ -3879,7 +3944,16 @@ export default {
         descriptionLanguageAuto: 'Follow document language',
         customInstructionsLabel: 'Image Processing Instructions',
         customInstructionsDescription: 'Add visual priorities while OCR and Markdown output contracts remain fixed',
-        customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…'
+        customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…',
+        imageAttrsLabel: 'Image attribute observation',
+        imageAttrsDescription: 'When on, each image is first observed for attributes and described, then the attributes decide whether an OCR round runs for the text in the image. When off, the basic mode applies: every image is described and OCR runs for all of them',
+        imageAttrsSchemaLabel: 'Observable image attributes',
+        imageAttrsSchemaDescription: 'The model observes the attributes below (defined by the backend registry) to drive the OCR policy',
+        imageAttrsOcrConditions: 'Trigger OCR based on the observed attribute conditions',
+        imageAttrsOcrConditionsDesc: 'When the observed attributes match the conditions below, OCR runs on the image',
+        imageAttrsOcrOnUnobserved: 'Run OCR when image-attribute observation fails',
+        imageAttrsOcrOnUnobservedDesc: 'When the model fails to observe the image attributes correctly, OCR runs by default so body text is never lost; turn off to skip. (A small vision model such as 4B, or custom image-instruction prompts that conflict with the system prompt, can cause the observation to fail; 8B and above rarely fail, so leaving this on is recommended)',
+        imagePipelineKbNote: 'Defaults follow the knowledge base settings; adjust them for this task'
       }
     }
   },
@@ -7009,7 +7083,7 @@ export default {
       empty: 'No MCP endpoints yet',
       disabled: 'Disabled',
       cardSummary: '{tools} tools · {scope}',
-      scopeAll: 'All knowledge bases',
+              scopeAll: 'All knowledge bases',
       scopeCount: '{count} knowledge bases',
       create: 'New endpoint',
       editTitle: 'Edit MCP endpoint',
@@ -7657,5 +7731,34 @@ export default {
     capabilityRequired: 'Select at least one capability',
     loadFailed: 'Failed to load platform API keys',
     createFailed: 'Failed to create platform API key'
+  },
+  // Display text for the observed image attributes, keyed by attribute name.
+  // Attribute names escape their dots (contain.text → contain_text) because
+  // vue-i18n walks a key segment by segment on the dots, so a literal
+  // 'contain.text' key would never resolve. An attribute without a translation
+  // falls back to the registry's own wording.
+  //
+  // Every value carries a short label for compact controls (a filter
+  // checkbox) and a description for wherever there is room (a tooltip). One
+  // bundle therefore serves both the settings panel and the image gallery,
+  // including the gallery's fallback for attributes it does not declare.
+  imageAttr: {
+    contain_text: {
+      label: 'Text in the image',
+      description: 'How much body text the picture itself carries. Decides whether reading its text is worth a separate OCR pass.',
+      values: {
+        none: { label: 'None', description: 'no text at all' },
+        sparse: { label: 'Sparse', description: 'a few words — a logo, a road sign, a single label' },
+        block: { label: 'Block', description: 'a block of body text — a screenshot, a table, a document page' }
+      }
+    },
+    contain_data_visual: {
+      label: 'Data visual',
+      description: 'Whether the picture conveys data as a chart, graph, diagram or infographic. Such images keep their labels on the OCR path even when the text looks sparse.',
+      values: {
+        'true': { label: 'Yes', description: 'a chart, graph or diagram with plotted values' },
+        'false': { label: 'No', description: 'a photo, drawing, icon or decoration' }
+      }
+    }
   }
 }
