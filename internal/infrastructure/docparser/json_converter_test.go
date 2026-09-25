@@ -580,6 +580,35 @@ func TestSimpleFormatReader_JSON_Invalid(t *testing.T) {
 	})
 }
 
+func TestValidateJSONContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    string
+		wantErr string
+	}{
+		{name: "object", data: `{"a":1}`},
+		{name: "array", data: `[1,2]`},
+		{name: "bom object", data: "\ufeff{\"a\":1}"},
+		{name: "empty", data: "", wantErr: "empty JSON content"},
+		{name: "jsonc", data: "{\n// x\n}", wantErr: "invalid JSON content"},
+		{name: "truncated", data: `{"a":`, wantErr: "invalid JSON content"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateJSONContent([]byte(tt.data))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateJSONContent() err = %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("ValidateJSONContent() err = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestIsSimpleFormat_JSON(t *testing.T) {
 	cases := []struct {
 		input string

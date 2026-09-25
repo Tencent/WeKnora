@@ -1054,6 +1054,12 @@ export default {
     prereqStep3Brief_lark_drive: "앱 권한 구성",
     prereqStep3Desc_lark_drive: "drive:drive:readonly, drive:export:readonly, docx:document:readonly 권한 활성화",
     prereqOpenConsole_yuque: 'Yuque Token 설정으로 이동',
+    yuqueFolderModeLabel: '폴더 구조',
+    yuqueFolderModeToc: 'Yuque 목차대로 계층 구성',
+    yuqueFolderModeNone: '루트에 평면 배치',
+    yuqueFolderModeHint: 'Yuque 목차 계층에 따라 문서를 배치합니다. 참고: 이후 지식베이스에서 직접 옮긴 폴더는 해당 문서가 다음에 동기화될 때 Yuque 구조로 덮어써집니다.',
+    yuqueTOCOnly: 'Yuque 목차에 표시되는 문서만 동기화',
+    yuqueTOCOnlyHint: '"Yuque 목차대로 계층 구성"을 선택해야 동작합니다. 이미 지식베이스에 있는 문서는 그대로 유지되며, Yuque 목차에 없는 문서는 새로 추가되지 않을 뿐 삭제되지 않습니다.',
     prereqBarText_dingtalk: '처음 사용하시나요? 클릭하여 DingTalk 앱 설정 가이드를 확인하세요',
     prereqStep1Brief_dingtalk: '기업 내부 앱 생성',
     prereqStep1Desc_dingtalk: 'DingTalk Open Platform에서 기업 내부 앱을 생성하고 Client ID와 Client Secret을 복사하세요.',
@@ -1125,6 +1131,9 @@ export default {
       feedUrlsHint: '한 줄에 하나씩 RSS / Atom 피드 주소를 입력하세요. 여러 개를 함께 입력할 수 있습니다.',
       authHeaders: '사용자 지정 헤더 (선택)',
       authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
+    },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud는 아직 스페이스 최상위 폴더 등 컨테이너 아래의 페이지를 여기에 나열할 수 없습니다. 스페이스 전체를 선택하면 함께 동기화됩니다.'
     },
     connectorDesc: {
       feishu: '페이슈 위키에서 문서, 스프레드시트, 파일 동기화',

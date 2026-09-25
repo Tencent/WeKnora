@@ -783,3 +783,107 @@ func TestUpdateIssueStatus_ScopedToKnowledgeBase(t *testing.T) {
 	// databases count matched rows, and updated_at changes anyway.
 	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
 }
+
+func TestSearchAcross_RanksTitleAboveContentAndStaysInRequestedKBs(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	titleHit := makeWikiPage("kb-b", "entity/wangxin", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	titleHit.Title = "王新"
+	titleHit.Content = "unrelated body"
+	titleHit.UpdatedAt = time.Now().Add(-time.Hour)
+
+	contentHit := makeWikiPage("kb-a", "entity/huawei", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	contentHit.Title = "华为"
+	contentHit.Content = "mentions 王新 in passing"
+	contentHit.UpdatedAt = time.Now()
+
+	archived := makeWikiPage("kb-a", "entity/wangxin-old", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.Title = "王新"
+
+	outside := makeWikiPage("kb-c", "entity/wangxin-other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	outside.Title = "王新"
+
+	for _, p := range []*types.WikiPage{titleHit, contentHit, archived, outside} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	pages, err := repo.SearchAcross(ctx, []string{"kb-a", "kb-b"}, "王新", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+	assert.Equal(t, titleHit.ID, pages[0].ID, "title match in another KB must outrank a newer body mention")
+	assert.Equal(t, contentHit.ID, pages[1].ID)
+}
+
+func TestSearch_UsesSharedAcrossQueryForSingleKB(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	hit := makeWikiPage("kb-a", "concept/deploy", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	hit.Title = "部署"
+	miss := makeWikiPage("kb-b", "concept/deploy-other", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	miss.Title = "部署"
+	require.NoError(t, repo.Create(ctx, hit))
+	require.NoError(t, repo.Create(ctx, miss))
+
+	pages, err := repo.Search(ctx, "kb-a", "部署", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, hit.ID, pages[0].ID)
+}
+
+func TestSearchAcross_ClampsLimit(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		p := makeWikiPage("kb-a", "entity/p"+strconv.Itoa(i), types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+		p.Title = "match-term"
+		p.UpdatedAt = time.Now().Add(time.Duration(i) * time.Minute)
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	pages, err := repo.SearchAcross(ctx, []string{"kb-a"}, "match-term", 2)
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+
+	empty, err := repo.SearchAcross(ctx, nil, "match-term", 10)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}
+
+func TestSearchAcross_SQLiteLikeEscapesWildcards(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	literalPct := makeWikiPage("kb-a", "entity/pct", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	literalPct.Title = "100% done"
+	other := makeWikiPage("kb-a", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	other.Title = "other page"
+	literalUnderscore := makeWikiPage("kb-a", "entity/under", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	literalUnderscore.Title = "a_b"
+	plain := makeWikiPage("kb-a", "entity/plain", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	plain.Title = "axb"
+	for _, p := range []*types.WikiPage{literalPct, other, literalUnderscore, plain} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	pages, err := repo.SearchAcross(ctx, []string{"kb-a"}, "%", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalPct.ID, pages[0].ID)
+
+	pages, err = repo.SearchAcross(ctx, []string{"kb-a"}, "100%", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalPct.ID, pages[0].ID)
+
+	pages, err = repo.SearchAcross(ctx, []string{"kb-a"}, "a_b", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalUnderscore.ID, pages[0].ID)
+}

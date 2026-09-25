@@ -258,7 +258,6 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import {
-  listWebSearchProviders,
   listWebSearchProviderTypes,
   createWebSearchProvider,
   updateWebSearchProvider,
@@ -288,10 +287,12 @@ import CredentialResource, {
 } from '@/components/credentials/CredentialResource.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { providerLogo } from './providerLogos'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const chatResources = useChatResourcesStore()
 const confirmDelete = useConfirmDelete()
 
 // ===== State =====
@@ -456,12 +457,12 @@ const onProviderTypeChange = () => {
   formErrors.value = []
 }
 
+// 走 chatResources 的共享快照并强刷：增删改之后对话输入栏读到的就是最新列表，
+// 不需要它再监听设置弹窗关闭去重拉。
 const loadProviderEntities = async () => {
   try {
-    const response = await listWebSearchProviders()
-    if (response.data && Array.isArray(response.data)) {
-      providerEntities.value = response.data
-    }
+    await chatResources.ensureWebSearchProviders(true)
+    providerEntities.value = chatResources.webSearchProviders
   } catch (error) {
     console.error('Failed to load provider entities:', error)
   }
