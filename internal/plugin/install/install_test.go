@@ -3,6 +3,7 @@ package install
 import (
 	"context"
 	"errors"
+	"os"
 	goruntime "runtime"
 	"strings"
 	"testing"
@@ -157,9 +158,34 @@ func TestInstallHostPlugins(t *testing.T) {
 		!strings.Contains(err.Error(), "no build for this server") {
 		t.Fatalf("want a missing build error, got %v", err)
 	}
-	if _, err := s.Inspect(ctx, hostPackage(t, "python", here)); !isInvalid(err) ||
-		!strings.Contains(err.Error(), "must be binaries") {
+	if _, err := s.Inspect(ctx, hostPackage(t, "node", here)); !isInvalid(err) ||
+		!strings.Contains(err.Error(), "binaries or python") {
 		t.Fatalf("want an unsupported kind error, got %v", err)
+	}
+}
+
+func TestInstallPythonPlugins(t *testing.T) {
+	ctx := context.Background()
+	s, _, _, _ := newService(t)
+	pkg := func(files map[string]string) []byte {
+		files["plugin.yaml"] = "schemaVersion: 1\nid: acme.py\nversion: 1.0.0\napiVersion: weknora.plugin/v1\n" +
+			"name: { en-US: ACME Py }\npublisher: { id: acme }\n" +
+			"runtime: { type: host, kind: python, entry: main.py }\n" +
+			"contributes:\n  webSearch:\n    - { id: search, name: ACME Search }\n"
+		return plugintest.Zip(t, files)
+	}
+	if _, err := s.Inspect(ctx, pkg(map[string]string{})); !isInvalid(err) ||
+		!strings.Contains(err.Error(), "no main.py") {
+		t.Fatalf("want a missing entry error, got %v", err)
+	}
+	t.Setenv("WEKNORA_PLUGIN_PYTHON", "no-such-python-here")
+	if _, err := s.Inspect(ctx, pkg(map[string]string{"main.py": "print()"})); !isInvalid(err) ||
+		!strings.Contains(err.Error(), "no-such-python-here") {
+		t.Fatalf("want a missing interpreter error, got %v", err)
+	}
+	t.Setenv("WEKNORA_PLUGIN_PYTHON", os.Args[0]) // any executable will do
+	if _, err := s.Inspect(ctx, pkg(map[string]string{"main.py": "print()"})); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -1,17 +1,21 @@
 name: Plugin SDK
 
 # Builds and tests the pluginsdk/ Go module (extension protocol, Go SDK,
-# client and conformance suite) on every push / PR that touches it.
+# client and conformance suite) and the Python SDK in pluginsdk/python on
+# every push / PR that touches them. The Go conformance suite also runs the
+# Python SDK's test plugin.
 
 on:
   push:
     branches: [main]
     paths:
       - 'pluginsdk/**'
+      - 'examples/plugins/notebooks/**'
       - '.github/workflows/plugin-sdk.yml'
   pull_request:
     paths:
       - 'pluginsdk/**'
+      - 'examples/plugins/notebooks/**'
       - '.github/workflows/plugin-sdk.yml'
 
 defaults:
@@ -36,9 +40,38 @@ jobs:
         with:
           go-version: '1.26'
           cache-dependency-path: pluginsdk/go.mod
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - name: go build
         run: go build ./...
       - name: go test
         run: go test -race ./...
       - name: go vet
         run: go vet ./...
+
+  python:
+    name: python ${{ matrix.python }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: '3.9' }
+          - { os: ubuntu-latest, python: '3.13' }
+          - { os: windows-latest, python: '3.13' }
+    defaults:
+      run:
+        working-directory: pluginsdk/python
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: unittest
+        run: python -W error::ResourceWarning -m unittest discover -s tests -v
+      - name: example plugin
+        working-directory: examples/plugins/notebooks
+        run: python -m unittest -v test_main
+      - name: build the package
+        run: python -m pip install build && python -m build

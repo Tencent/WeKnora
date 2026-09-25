@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,12 +53,40 @@ type spec struct {
 	dir string // extracted package
 }
 
-// entryPath resolves runtime.entry for this machine inside the package.
-func entryPath(m *manifest.Manifest, dir string) (string, error) {
-	rel := strings.NewReplacer("{os}", runtime.GOOS, "{arch}", runtime.GOARCH).Replace(m.Runtime.Entry)
-	if runtime.GOOS == "windows" && filepath.Ext(rel) == "" {
+// Kinds of host plugin this host runs.
+const (
+	KindBinary = "binary"
+	KindPython = "python"
+)
+
+// Supported reports whether this host runs a kind of host plugin.
+func Supported(kind string) bool { return kind == KindBinary || kind == KindPython }
+
+// PythonCommand is the interpreter python plugins run with:
+// WEKNORA_PLUGIN_PYTHON, or python3 (python on Windows) from PATH.
+func PythonCommand() string {
+	if c := strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_PYTHON")); c != "" {
+		return c
+	}
+	if runtime.GOOS == "windows" {
+		return "python"
+	}
+	return "python3"
+}
+
+// EntryName is runtime.entry resolved for this machine: {os} and {arch}
+// filled in, and .exe added for Windows binaries.
+func EntryName(rt manifest.Runtime) string {
+	rel := strings.NewReplacer("{os}", runtime.GOOS, "{arch}", runtime.GOARCH).Replace(rt.Entry)
+	if rt.Kind == KindBinary && runtime.GOOS == "windows" && path.Ext(rel) == "" {
 		rel += ".exe"
 	}
+	return rel
+}
+
+// entryPath resolves runtime.entry for this machine inside the package.
+func entryPath(m *manifest.Manifest, dir string) (string, error) {
+	rel := EntryName(m.Runtime)
 	p, err := utils.SafeJoinUnderBase(dir, rel)
 	if err != nil {
 		return "", fmt.Errorf("runtime.entry %q: %w", m.Runtime.Entry, err)
@@ -67,6 +97,9 @@ func entryPath(m *manifest.Manifest, dir string) (string, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("runtime.entry %s is not a file", rel)
+	}
+	if m.Runtime.Kind != KindBinary {
+		return p, nil
 	}
 	// Packages are extracted without modes; the entry has to be executable.
 	if err := os.Chmod(p, 0o755); err != nil {
@@ -154,10 +187,10 @@ func randomToken() string {
 // childEnv is the plugin's whole environment. It is built from scratch so
 // WeKnora's own secrets (database, AES key, vendor keys) never reach plugin
 // code.
-func (p *process) childEnv(socket, token string) []string {
+func (p *process) childEnv(network, socket, token string) []string {
 	env := []string{
 		pluginapi.EnvSocket + "=" + socket,
-		pluginapi.EnvNetwork + "=unix",
+		pluginapi.EnvNetwork + "=" + network,
 		pluginapi.EnvToken + "=" + token,
 		pluginapi.EnvPluginID + "=" + p.spec.m.ID,
 		pluginapi.EnvPluginVersion + "=" + p.spec.m.Version,
@@ -177,18 +210,59 @@ func (p *process) childEnv(socket, token string) []string {
 			env = append(env, k+"="+v)
 		}
 	}
+	if p.spec.m.Runtime.Kind == KindPython {
+		// Dependencies are vendored into the package; the extracted package
+		// is shared, so no bytecode is written into it.
+		env = append(env,
+			"PYTHONPATH="+filepath.Join(p.spec.dir, "vendor")+string(os.PathListSeparator)+p.spec.dir,
+			"PYTHONDONTWRITEBYTECODE=1",
+			"PYTHONIOENCODING=utf-8",
+		)
+	}
 	return env
+}
+
+// listenAddress is where the plugin is told to listen: a private unix
+// socket, or a loopback port for Python on Windows, which has no unix
+// sockets.
+func (p *process) listenAddress() (network, address string) {
+	if p.spec.m.Runtime.Kind == KindPython && runtime.GOOS == "windows" {
+		return "tcp", "127.0.0.1:0"
+	}
+	return "unix", filepath.Join(p.sockDir, "p.sock")
+}
+
+// loopback reports whether a TCP handshake names this machine.
+func loopback(hs pluginapi.Handshake) bool {
+	if hs.Network != "tcp" {
+		return true
+	}
+	host, _, err := net.SplitHostPort(hs.Address)
+	ip := net.ParseIP(host)
+	return err == nil && ip != nil && ip.IsLoopback()
+}
+
+// command runs the entry: directly for binaries, with the interpreter for
+// python plugins (-s: without the user's site-packages, -u: unbuffered so
+// the handshake is not held back).
+func (p *process) command(entry string) *exec.Cmd {
+	if p.spec.m.Runtime.Kind == KindPython {
+		return exec.Command(PythonCommand(), "-s", "-u", entry)
+	}
+	return exec.Command(entry)
 }
 
 // launch starts the child and waits for handshake, health and a manifest
 // that matches the installed package.
 func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
-	socket := filepath.Join(p.sockDir, "p.sock")
-	_ = os.Remove(socket)
+	network, socket := p.listenAddress()
+	if network == "unix" {
+		_ = os.Remove(socket)
+	}
 	token := randomToken()
-	cmd := exec.Command(entry)
+	cmd := p.command(entry)
 	cmd.Dir = p.spec.dir
-	cmd.Env = p.childEnv(socket, token)
+	cmd.Env = p.childEnv(network, socket, token)
 	configureChild(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -230,9 +304,9 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 		kill()
 		return nil, ctx.Err()
 	}
-	if hs.Network == "unix" && hs.Address != socket {
+	if hs.Network != network || (network == "unix" && hs.Address != socket) || !loopback(hs) {
 		kill()
-		return nil, fmt.Errorf("plugin listens on %s, not the socket it was given", hs.Address)
+		return nil, fmt.Errorf("plugin listens on %s %s, not where it was told", hs.Network, hs.Address)
 	}
 	c := client.ForHandshake(hs, client.Bearer(token))
 	cctx, cancel := context.WithTimeout(ctx, healthTimeout)

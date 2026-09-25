@@ -10,6 +10,9 @@ connectors and document parsers that run as their own process. The module has no
 | `client` | Call a plugin, as WeKnora does. |
 | `conformance`, `cmd/weknora-plugin-conformance` | Check that a plugin speaks the protocol. |
 
+Writing Python? [`python/`](python/README.md) is the same SDK for Python
+3.9+, with only the standard library.
+
 ## A connector in 30 lines
 
 ```go
@@ -119,6 +122,11 @@ A few rules the manifest and host enforce:
 
 - **Binaries.** Build one per platform into `bin/<os>-<arch>/`; WeKnora
   runs the build for its own OS and architecture.
+- **Python.** A plugin can instead be Python source:
+  - Declare `runtime: { type: host, kind: python, entry: main.py }`.
+  - WeKnora runs the entry with its own `python3` (or
+    `WEKNORA_PLUGIN_PYTHON`).
+  - `vendor/` and the package root are on `PYTHONPATH`.
 - **Environment.** The process gets no environment from WeKnora beyond the
   `WEKNORA_PLUGIN_*` variables.
 - **Outbound traffic.** It goes through the host's egress proxy, which
@@ -128,8 +136,11 @@ A few rules the manifest and host enforce:
   (`acme.notes/notes`); for connectors and web search that must stay within
   50 characters.
 
-See `examples/plugins/rss` (a connector) and `examples/plugins/subtitles` (a
-parser using the Host API) for complete plugins with their `package.sh`.
+Complete plugins with their `package.sh`:
+
+- `examples/plugins/rss`: a connector.
+- `examples/plugins/subtitles`: a parser using the Host API.
+- `examples/plugins/notebooks`: a parser written in Python.
 
 ## Testing
 

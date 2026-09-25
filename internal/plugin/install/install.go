@@ -14,7 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path"
+	"os/exec"
 	goruntime "runtime"
 	"sort"
 	"strings"
@@ -23,6 +23,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -53,20 +54,25 @@ var supportedRuntimes = map[manifest.RuntimeType]bool{
 }
 
 // checkHostRuntime makes sure this server can run a host plugin: a binary
-// built for its OS and architecture. Other kinds need a host image that
-// carries their interpreter.
+// built for its OS and architecture, or a Python entry and an interpreter.
 func checkHostRuntime(p *pkg.Package) error {
 	rt := p.Manifest.Runtime
-	if rt.Kind != "binary" {
-		return invalid("runtime.kind %q is not supported yet; host plugins must be binaries", rt.Kind)
+	if !host.Supported(rt.Kind) {
+		return invalid("runtime.kind %q is not supported yet; host plugins must be binaries or python", rt.Kind)
 	}
-	entry := strings.NewReplacer("{os}", goruntime.GOOS, "{arch}", goruntime.GOARCH).Replace(rt.Entry)
-	if goruntime.GOOS == "windows" && path.Ext(entry) == "" {
-		entry += ".exe"
-	}
+	entry := host.EntryName(rt)
 	if _, ok := p.ReadFile(entry); !ok {
-		return invalid("the package has no build for this server (%s/%s): %s is missing",
-			goruntime.GOOS, goruntime.GOARCH, entry)
+		if rt.Kind == host.KindBinary {
+			return invalid("the package has no build for this server (%s/%s): %s is missing",
+				goruntime.GOOS, goruntime.GOARCH, entry)
+		}
+		return invalid("the package has no %s (runtime.entry)", entry)
+	}
+	if rt.Kind == host.KindPython {
+		if _, err := exec.LookPath(host.PythonCommand()); err != nil {
+			return invalid("python plugins need %s on this server; install it or set WEKNORA_PLUGIN_PYTHON",
+				host.PythonCommand())
+		}
 	}
 	return nil
 }

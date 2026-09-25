@@ -1,0 +1,22 @@
+schemaVersion: 1
+id: weknora-examples.notebooks
+version: 1.0.0
+apiVersion: weknora.plugin/v1
+name: { en-US: Jupyter notebooks, zh-CN: Jupyter 笔记本 }
+description:
+  en-US: Parse Jupyter notebooks into Markdown with their code, text outputs and charts. Written in Python.
+  zh-CN: 把 Jupyter 笔记本解析为 Markdown，保留代码、文本输出和图表。用 Python 编写。
+publisher: { id: weknora-examples, name: WeKnora examples }
+homepage: https://github.com/Tencent/WeKnora/tree/main/examples/plugins/notebooks
+license: MIT
+runtime: { type: host, kind: python, entry: main.py }
+config:
+  tenant: schemas/tenant.yaml
+contributes:
+  parsers:
+    - id: ipynb
+      name: { en-US: Jupyter notebooks, zh-CN: Jupyter 笔记本 }
+      description:
+        en-US: Markdown and code cells, text outputs and PNG/JPEG charts
+        zh-CN: Markdown 与代码单元格、文本输出和 PNG/JPEG 图表
+      fileTypes: [ipynb]
