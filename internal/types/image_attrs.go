@@ -15,10 +15,25 @@ const (
 // AttrSpec is one observable image attribute. The registry is the single source
 // of truth for which attributes exist this release; adding an attribute is one
 // line here plus a decision clause, and never a struct change elsewhere. That
-// is what makes "add an attribute = add a row" a real, low-risk operation.
-//
-// AttrValue is one allowed value of an attribute: the raw value plus the
-// words to show for it.
+// is what makes "add an attribute = add a row" a real, low-risk operation. The
+// same row also carries the attribute's display text. The settings panel that
+// explains the attributes to a non-technical operator is rendered from these
+// fields, so adding an attribute needs no frontend change either: Label,
+// Description and the per-value texts travel to the UI through the schema
+// endpoint. An attribute is always accompanied by a short label for compact
+// spaces and a sentence for places with room.
+type AttrSpec struct {
+	Name        string      `json:"name"`                  // stable key, e.g. "contain.text"
+	Type        AttrType    `json:"type"`                  // extent | presence
+	Values      []AttrValue `json:"values,omitempty"`      // ordered low->high for extent attrs
+	Question    string      `json:"question"`              // sentence shown to the model in the describe round
+	Label       string      `json:"label"`                 // human-readable name for the settings panel
+	Description string      `json:"description,omitempty"` // one line explaining what the attribute measures
+	Consumers   []string    `json:"consumers,omitempty"`   // downstream steps that read this attribute
+}
+
+// AttrValue is one allowed value of an attribute: the raw value plus the words
+// to show for it.
 //
 // Display text is split in two on purpose. Label is the short name that fits
 // on a filter checkbox or a table cell; Description is the sentence that
@@ -27,25 +42,9 @@ const (
 // its translations on top (see imageAttrDisplay in the web app) and falls
 // back to these strings for anything not translated yet.
 type AttrValue struct {
-	Value       string `json:"value"`                  // raw machine value, never localized
-	Label       string `json:"label"`                  // short on-screen name
-	Description string `json:"description,omitempty"`  // sentence explaining the value
-}
-
-// The same row also carries the attribute's display text. The settings panel
-// that explains the attributes to a non-technical operator is rendered from
-// these fields, so adding an attribute needs no frontend change either: Label,
-// Description and the per-value texts travel to the UI through the schema
-// endpoint. An attribute is always accompanied by a short label for compact
-// spaces and a sentence for places with room.
-type AttrSpec struct {
-	Name        string      `json:"name"`             // stable key, e.g. "contain.text"
-	Type        AttrType    `json:"type"`             // extent | presence
-	Values      []AttrValue `json:"values,omitempty"` // ordered low->high for extent attrs
-	Question    string      `json:"question"`         // sentence shown to the model in the describe round
-	Label       string      `json:"label"`            // human-readable name for the settings panel
-	Description string      `json:"description,omitempty"` // one line explaining what the attribute measures
-	Consumers   []string    `json:"consumers,omitempty"`   // downstream steps that read this attribute
+	Value       string `json:"value"`                 // raw machine value, never localized
+	Label       string `json:"label"`                 // short on-screen name
+	Description string `json:"description,omitempty"` // sentence explaining the value
 }
 
 // ImageAttrRegistry is the canonical, ordered list of observed attributes for
@@ -61,7 +60,7 @@ var ImageAttrRegistry = []AttrSpec{
 		Values: []AttrValue{
 			{Value: "none", Label: "None", Description: "no text at all"},
 			{Value: "sparse", Label: "Sparse", Description: "a few words — a logo, a road sign, a single label"},
-			{Value: "block", Label: "Block", Description: "a block of body text — a screenshot, a table, a document page"},
+			{Value: "block", Label: "Block", Description: "a block of body text: screenshot, table, document page"},
 		},
 		Question: "How much body text does the image carry? Answer exactly one of: " +
 			"none (no text), sparse (a few words such as a logo or a road sign), " +

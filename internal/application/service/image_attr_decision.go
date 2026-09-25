@@ -27,9 +27,11 @@ import (
 // text_screenshot / table / chart / other run OCR.
 func DecideOCR(attrs types.ImageAttrs, actions types.ImageActionsConfig) bool {
 	if len(actions.OCR.On) == 0 {
-		// No condition can be evaluated, so the run is entirely on the
-		// conservative clause.
-		return actions.OCR.OnUnobserved
+		// An empty condition list is never a resolved policy (ResolveImageActions
+		// always fills it), only a payload that carries none — its zero-value
+		// OnUnobserved=false would silently drop OCR. Fall back to the built-in
+		// table, the same conservative policy the payload field promises.
+		actions = types.DefaultImageActions()
 	}
 	incomplete := false
 	for _, cond := range actions.OCR.On {

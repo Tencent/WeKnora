@@ -17,11 +17,7 @@ func init() {
 		for _, spec := range ImageAttrRegistry {
 			values := make([]GalleryAttrValue, 0, len(spec.Values))
 			for _, value := range spec.Values {
-				values = append(values, GalleryAttrValue{
-					Value:       value.Value,
-					Label:       value.Label,
-					Description: value.Description,
-				})
+				values = append(values, GalleryAttrValue(value))
 			}
 			defs = append(defs, GalleryAttrDef{
 				Name:        spec.Name,
