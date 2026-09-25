@@ -239,13 +239,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	return handleErr
 }
 
-// processImage runs the unified image action loop for one image. The selector
-// plans rounds from the payload switches; the dispatcher runs each round
-// (observation and caption share one VLM call); the result processor reads the
-// observation and, when the OCR policy wants it, appends an OCR round. The
-// observation must be known before any OCR call is spent — that ordering is
-// what makes "observe first, then act" possible: an image whose text is
-// reliably absent does not pay for OCR.
+// processImage runs one image pipeline for one image. The pipeline is chosen
+// from the payload switches and owns the whole control flow; this function only
+// hands it the run context and closes the span afterwards. The observation must
+// be known before any OCR call is spent — that ordering is what makes "observe
+// first, then act" possible: an image whose text is reliably absent does not pay
+// for OCR.
 //
 // An observation (describe) failure is not fatal. The attributes then stay at
 // their conservative defaults, which keeps OCR running, so a model that cannot
@@ -266,6 +265,10 @@ func (s *ImageMultimodalService) processImage(
 	// If the parent stage row is missing (legacy in-flight task, or the
 	// upstream code shipped without span tracking), the tracker is a no-op so
 	// we silently fall back to the existing counter-based finalize semantics.
+	// The pipeline is picked before the span opens so the trace row can say
+	// which one produced this image.
+	pipeline := selectImagePipeline(payload.ImageAttrsEnabled)
+
 	var imgSpan *Span
 	if payload.Attempt > 0 {
 		parent := tracker.LookupStage(ctx, payload.KnowledgeID, payload.Attempt, types.StageMultimodal)
@@ -278,13 +281,10 @@ func (s *ImageMultimodalService) processImage(
 				"image_url":         payload.ImageURL,
 				"image_source_type": payload.ImageSourceType,
 				"parent_chunk_id":   payload.ChunkID,
-				// Which pipeline the trace is looking at: observation_driven
-				// (a describe round that also observes the attributes, then OCR
-				// only if the policy says so) or caption_ocr (caption then OCR,
-				// no observation). Reading image_info alone cannot tell a
-				// caption_ocr run from an observation_driven run that skipped
-				// OCR.
-				"pipeline": string(types.PipelineModeFor(payload.ImageAttrsEnabled)),
+				// Which pipeline ran. Reading image_info alone cannot tell a
+				// caption_ocr run from an ob_cap_ocr run that observed and then
+				// skipped OCR.
+				"pipeline": string(pipeline.ID()),
 			})
 		}
 	}
@@ -326,37 +326,25 @@ func (s *ImageMultimodalService) processImage(
 		OriginalURL: payload.ImageURL,
 	}
 
-	// --- Unified action loop: the decision + dispatch half of the image
-	// pipeline framework. Every image step is a normal action (caption,
-	// observation, ocr). The selector plans rounds from the payload switches;
-	// the dispatcher runs each round (observation + caption share one VLM call);
-	// the result processor reads the observation and, when OCR is wanted,
-	// appends an ocr round - the "observe, decide, then act" closure. The VLM
-	// transport here is a direct-call shim; PR-E routes it through a request
-	// manager without touching this dispatch logic.
 	if !payload.ImageAttrsEnabled && !payload.EnableOCR {
 		// Caption+OCR mode with OCR off: recorded so the trace explains the
 		// missing OCR chunk rather than leaving it to be inferred from an
-		// absence.
+		// absence. This one is family-level — it says nothing about which
+		// actions ran — so it stays here instead of living inside a pipeline.
 		out["ocr_skipped"] = "disabled"
 	}
-	plan := selectImageActionRounds(payload)
-	for i := 0; i < len(plan); i++ {
-		round := plan[i]
-		s.executeActionRound(ctx, payload, vlmModel, imgBytes, vlmCfg, &imageInfo, out, round)
-		// Result processor: only an observation round feeds the OCR decision.
-		if round.Contains(types.ActionObservation) {
-			ocrWanted := payload.EnableOCR && DecideOCR(imageInfo.Attrs, payload.ImageActions)
-			out["attr_policy"] = types.JSONMap{"ocr": ocrWanted}
-			out["image_attrs"] = imageInfo.Attrs.Attrs
-			if ocrWanted {
-				plan = append(plan, ActionRound{Actions: []types.ActionKind{types.ActionOCR}})
-			} else {
-				logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (attrs=%v)",
-					payload.ImageURL, imageInfo.Attrs.Attrs)
-				out["ocr_skipped"] = "attr_policy"
-			}
-		}
+	// The pipeline runs to completion, including the decision it makes about
+	// OCR. Nothing below re-reads its result except the chunk building that
+	// follows.
+	if err := pipeline.Run(ctx, &runContext{
+		payload:    payload,
+		model:      vlmModel,
+		imageBytes: imgBytes,
+		vlmCfg:     vlmCfg,
+		imageInfo:  &imageInfo,
+		out:        out,
+	}); err != nil {
+		return err
 	}
 
 	// Build child chunks for OCR and caption results
@@ -479,49 +467,6 @@ func applyImageObservation(
 	imageInfo.Caption = description
 	out["caption_chars"] = len([]rune(description))
 	out["caption_preview"] = previewText(description, 200)
-}
-
-// runImageOCR runs the second pipeline round: text extraction at full
-// resolution. Both pipelines share it — the observation-driven one reaches it
-// only when the attribute policy allows it, caption+OCR mode runs it for every
-// image.
-func (s *ImageMultimodalService) runImageOCR(
-	ctx context.Context,
-	payload *types.ImageMultimodalPayload,
-	vlmModel vlm.VLM,
-	imgBytes []byte,
-	imageInfo *types.ImageInfo,
-	out types.JSONMap,
-	vlmCfg types.VLMConfig,
-) {
-	// The OCR prompt is system-owned: knowledge base custom instructions must
-	// never reach it, or free-form business rules compete with the "No text
-	// content" contract and poison image_ocr chunks. buildVLMOCRPrompt picks
-	// the scanned-PDF or default prompt and ignores vlmCfg on purpose.
-	prompt := buildVLMOCRPrompt(payload.ImageSourceType, vlmCfg)
-	if payload.ImageSourceType == "scanned_pdf" {
-		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
-		out["ocr_prompt"] = "scanned_pdf"
-	} else {
-		out["ocr_prompt"] = "default"
-	}
-
-	ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-	if ocrErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-		out["ocr_error"] = ocrErr.Error()
-		return
-	}
-	ocrText = sanitizeOCRText(ocrText)
-	if ocrText != "" {
-		imageInfo.OCRText = ocrText
-		out["ocr_chars"] = len([]rune(ocrText))
-		out["ocr_preview"] = previewText(ocrText, 200)
-	} else {
-		logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
-		out["ocr_chars"] = 0
-		out["ocr_skipped"] = "empty_or_invalid"
-	}
 }
 
 // shouldDropOrphanedMultimodal reports whether the task should exit without
