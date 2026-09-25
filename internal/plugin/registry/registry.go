@@ -51,17 +51,56 @@ func (r *Registry) Register(m *manifest.Manifest) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	if _, ok := r.plugins[m.ID]; ok {
 		return fmt.Errorf("plugin %s is already registered", m.ID)
 	}
-	// Check every key before touching the index so a failure leaves nothing
-	// half registered.
+	if err := r.checkKeysLocked(m, ""); err != nil {
+		return err
+	}
+	r.addLocked(m)
+	return nil
+}
+
+// Replace swaps the registered plugin with the same ID for m in one step, or
+// registers m if the ID is new: an upgrade never leaves a window where the
+// plugin's contributions are missing. Builtins cannot be replaced.
+func (r *Registry) Replace(m *manifest.Manifest) error {
+	if err := m.Validate(); err != nil {
+		return fmt.Errorf("plugin %s: %w", m.ID, err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if old, ok := r.plugins[m.ID]; ok && old.Builtin {
+		return fmt.Errorf("builtin plugin %s cannot be replaced", m.ID)
+	}
+	if err := r.checkKeysLocked(m, m.ID); err != nil {
+		return err
+	}
+	r.removeLocked(m.ID)
+	r.addLocked(m)
+	return nil
+}
+
+// Unregister removes a plugin and its contributions. Builtins cannot be
+// removed; removing an unknown ID is a no-op.
+func (r *Registry) Unregister(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if m, ok := r.plugins[id]; ok && m.Builtin {
+		return fmt.Errorf("builtin plugin %s cannot be removed", id)
+	}
+	r.removeLocked(id)
+	return nil
+}
+
+// checkKeysLocked verifies that m's IDs and aliases are free, ignoring the
+// entries of the plugin being replaced.
+func (r *Registry) checkKeysLocked(m *manifest.Manifest, replacing string) error {
 	pending := make(map[manifest.Point]map[string]string)
 	for _, info := range manifest.Points() {
 		for _, c := range m.Contributes[info.Point] {
 			for _, key := range lookupKeys(m.ID, c) {
-				if owner, ok := r.index[info.Point][key]; ok {
+				if owner, ok := r.index[info.Point][key]; ok && owner.PluginID != replacing {
 					return fmt.Errorf("%s %q of plugin %s collides with %s",
 						info.Point, key, m.ID, owner.QualifiedID)
 				}
@@ -75,7 +114,10 @@ func (r *Registry) Register(m *manifest.Manifest) error {
 			}
 		}
 	}
+	return nil
+}
 
+func (r *Registry) addLocked(m *manifest.Manifest) {
 	r.plugins[m.ID] = m
 	for _, info := range manifest.Points() {
 		for _, c := range m.Contributes[info.Point] {
@@ -96,7 +138,29 @@ func (r *Registry) Register(m *manifest.Manifest) error {
 			}
 		}
 	}
-	return nil
+}
+
+func (r *Registry) removeLocked(id string) {
+	if _, ok := r.plugins[id]; !ok {
+		return
+	}
+	delete(r.plugins, id)
+	for point, list := range r.entries {
+		kept := list[:0]
+		for _, e := range list {
+			if e.PluginID != id {
+				kept = append(kept, e)
+			}
+		}
+		r.entries[point] = kept
+	}
+	for _, idx := range r.index {
+		for key, e := range idx {
+			if e.PluginID == id {
+				delete(idx, key)
+			}
+		}
+	}
 }
 
 func lookupKeys(pluginID string, c manifest.Contribution) []string {

@@ -140,9 +140,31 @@ type Contribution struct {
 	// InstanceSchema points at the JSON Schema of one instance's
 	// configuration (one data source, one IM channel).
 	InstanceSchema string `json:"instanceSchema,omitempty" yaml:"instanceSchema"`
+	// Path is a file or directory inside the package: the skill directory
+	// (skills) or the vendor definition JSON (modelVendors).
+	Path string `json:"path,omitempty" yaml:"path"`
+	// MCP describes a remote MCP server (mcpServers).
+	MCP *MCPServer `json:"mcp,omitempty" yaml:"mcp"`
 	// Extra carries point-specific metadata the generic fields do not cover.
 	Extra map[string]any `json:"extra,omitempty" yaml:"extra"`
 }
+
+// MCPServer is a remote MCP server a plugin contributes.
+type MCPServer struct {
+	URL string `json:"url" yaml:"url"`
+	// Transport is "sse" or "http-streamable" (the default).
+	Transport string `json:"transport,omitempty" yaml:"transport"`
+	// Headers are sent on every request. A value may reference tenant
+	// plugin configuration as ${config.<key>}, which is how a plugin asks
+	// each workspace for its own API key.
+	Headers map[string]string `json:"headers,omitempty" yaml:"headers"`
+}
+
+// MCP transports a plugin may declare.
+const (
+	MCPTransportSSE            = "sse"
+	MCPTransportHTTPStreamable = "http-streamable"
+)
 
 // QualifiedID is the cluster-wide ID of a contribution: "<plugin>/<local>".
 func QualifiedID(pluginID, localID string) string {
@@ -204,6 +226,11 @@ func (m *Manifest) Validate() error {
 	if m.Name.IsZero() {
 		add("name is required")
 	}
+	if m.Engines.WeKnora != "" {
+		if _, err := parseRange(m.Engines.WeKnora); err != nil {
+			add("engines.weknora: %v", err)
+		}
+	}
 	m.validateRuntime(add)
 	m.validateContributions(add)
 	return errors.Join(errs...)
@@ -248,6 +275,9 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 		if !info.ThirdParty && !m.Builtin {
 			add("contributes.%s is not open to third-party plugins yet", point)
 		}
+		if m.Runtime.Type == RuntimeDeclarative && !info.Declarative {
+			add("contributes.%s needs code; declarative plugins cannot contribute to it", point)
+		}
 		seen := make(map[string]bool, len(list))
 		for i, c := range list {
 			where := fmt.Sprintf("contributes.%s[%d]", point, i)
@@ -264,6 +294,7 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 			if len(c.Aliases) > 0 && !m.Builtin {
 				add("%s.aliases may only be declared by builtin plugins", where)
 			}
+			validateDeclarative(point, c, m.Builtin, where, add)
 			for _, alias := range c.Aliases {
 				// Aliases share the ID alphabet, which has no '/', so an
 				// alias can never shadow a qualified ID.
@@ -273,4 +304,46 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 			}
 		}
 	}
+}
+
+// validateDeclarative checks the fields a declarative contribution needs.
+// Builtins describe their implementation in code instead.
+func validateDeclarative(point Point, c Contribution, builtin bool, where string, add func(string, ...any)) {
+	if builtin {
+		return
+	}
+	switch point {
+	case PointSkills, PointModelVendors:
+		if c.Path == "" {
+			add("%s.path is required", where)
+		} else if !isPackagePath(c.Path) {
+			add("%s.path %q must be a relative path inside the package", where, c.Path)
+		}
+	case PointMCPServers:
+		if c.MCP == nil || c.MCP.URL == "" {
+			add("%s.mcp.url is required", where)
+			return
+		}
+		if !strings.HasPrefix(c.MCP.URL, "https://") && !strings.HasPrefix(c.MCP.URL, "http://") {
+			add("%s.mcp.url must be an http(s) URL", where)
+		}
+		switch c.MCP.Transport {
+		case "", MCPTransportSSE, MCPTransportHTTPStreamable:
+		default:
+			add("%s.mcp.transport must be sse or http-streamable", where)
+		}
+	}
+}
+
+// isPackagePath reports whether p stays inside the package root.
+func isPackagePath(p string) bool {
+	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
+		return false
+	}
+	for _, part := range strings.Split(p, "/") {
+		if part == ".." {
+			return false
+		}
+	}
+	return true
 }

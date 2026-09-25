@@ -130,3 +130,40 @@ func TestEnabledFilterFailsOpen(t *testing.T) {
 		t.Fatal("unreadable switches must not hide integrations")
 	}
 }
+
+func TestInstalledPluginsWaitForTenantOptIn(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	kit := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion, ID: "acme.kit", Version: "1.0.0", Name: manifest.Text("Kit", nil),
+		Publisher: manifest.Publisher{ID: "acme"}, Runtime: manifest.Runtime{Type: manifest.RuntimeDeclarative},
+		Contributes: manifest.Contributions{
+			manifest.PointMCPServers: {{
+				ID: "search", Name: manifest.Text("Search", nil),
+				MCP: &manifest.MCPServer{URL: "https://mcp.acme.example/mcp"},
+			}},
+		},
+	}
+	if err := s.registry.Register(kit); err != nil {
+		t.Fatal(err)
+	}
+	if s.ContributionEnabled(ctx, 1, manifest.PointMCPServers, "acme.kit/search") {
+		t.Fatal("an installed plugin must start disabled in every tenant")
+	}
+	if !s.ContributionEnabled(ctx, 1, manifest.PointConnectors, "feishu") {
+		t.Fatal("builtins start enabled")
+	}
+	list, _ := s.List(ctx, 1)
+	for _, p := range list {
+		if p.Manifest.ID == "acme.kit" && p.Enabled {
+			t.Fatal("List must report the installed plugin as disabled")
+		}
+	}
+	if err := s.SetEnabled(ctx, 1, "acme.kit", true, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.ContributionEnabled(ctx, 1, manifest.PointMCPServers, "acme.kit/search") ||
+		s.ContributionEnabled(ctx, 2, manifest.PointMCPServers, "acme.kit/search") {
+		t.Fatal("opting in applies to that tenant only")
+	}
+}

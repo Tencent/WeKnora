@@ -23,3 +23,17 @@ type PluginGate interface {
 	// does not know count as enabled, leaving existence to the domain.
 	EnabledFilter(ctx context.Context, tenantID uint64) func(point manifest.Point, id string) bool
 }
+
+// PluginRepository stores installed (non-builtin) plugins and their versions.
+type PluginRepository interface {
+	ListPlugins(ctx context.Context) ([]types.InstalledPlugin, error)
+	// GetPlugin returns (nil, nil) when the plugin is not installed.
+	GetPlugin(ctx context.Context, id string) (*types.InstalledPlugin, error)
+	SavePlugin(ctx context.Context, p *types.InstalledPlugin) error
+	// DeletePlugin removes the plugin and every stored version.
+	DeletePlugin(ctx context.Context, id string) error
+	ListVersions(ctx context.Context, pluginID string) ([]types.PluginVersion, error)
+	// GetVersion returns (nil, nil) when the version is not stored.
+	GetVersion(ctx context.Context, pluginID, version string) (*types.PluginVersion, error)
+	SaveVersion(ctx context.Context, v *types.PluginVersion) error
+}

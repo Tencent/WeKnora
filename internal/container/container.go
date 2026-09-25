@@ -73,6 +73,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
+	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/router"
@@ -584,8 +585,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(plugintenancy.NewService))
 	must(container.Provide(func(s *plugintenancy.Service) interfaces.PluginGate { return s }))
 	must(container.Invoke(installPluginGate))
+	must(container.Provide(repository.NewPluginRepository))
+	must(container.Provide(newPluginPackageStore))
+	must(container.Provide(newPluginReconciler))
+	must(container.Invoke(startPluginReconciler))
+	must(container.Provide(newPluginInstaller))
 	must(container.Provide(newPluginDrivers))
 	must(container.Provide(handler.NewPluginHandler))
+	must(container.Provide(handler.NewPluginAdminHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read
@@ -1818,10 +1825,11 @@ func newPluginRegistry(
 	})
 }
 
-// newPluginDrivers returns the drivers that run plugin code. Only builtins
-// exist today; host, remote and kubernetes drivers join this set.
-func newPluginDrivers(reg *pluginregistry.Registry) *plugindriver.Set {
-	return plugindriver.NewSet(plugindriver.NewBuiltin(reg.Plugin))
+// newPluginDrivers returns the drivers that run plugins: builtins and
+// declarative packages today; host, remote and kubernetes drivers join this
+// set.
+func newPluginDrivers(reg *pluginregistry.Registry, r *reconcile.Reconciler) *plugindriver.Set {
+	return plugindriver.NewSet(plugindriver.NewBuiltin(reg.Plugin), r.Driver())
 }
 
 // installPluginGate gives the integration handlers the tenant plugin switches,
