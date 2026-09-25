@@ -205,6 +205,28 @@ const form = ref({
   sync_deletions: true,
 })
 
+// Yuque folder layout. The key lives in the raw settings bag, and a data source
+// created before this control existed carries no folder_mode at all — the
+// getter therefore reports the connector's own default (flat) rather than
+// rendering the select blank. Writing back is a no-op until the user picks
+// something, so opening an existing source can never change its behaviour.
+const yuqueFolderMode = computed({
+  get: () => (form.value.config.settings?.folder_mode === 'toc' ? 'toc' : 'none'),
+  set: (mode: string) => {
+    form.value.config.settings = { ...form.value.config.settings, folder_mode: mode }
+  },
+})
+
+// toc_only is an admission filter, and the connector only reads the table of
+// contents when folder_mode is 'toc' — under the flat layout the flag has no
+// effect at all, which is why the control is disabled there.
+const yuqueTOCOnly = computed({
+  get: () => form.value.config.settings?.toc_only === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, toc_only: on }
+  },
+})
+
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
@@ -853,6 +875,12 @@ function selectType(def: ConnectorDef) {
   form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
   if (def.type === 'confluence') {
     form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
+  }
+  // A new Yuque source opts into the book's folder hierarchy. Only on create:
+  // an existing source keeps what it was built with, so the "folder layout is
+  // owned by the connector" caveat never applies to sources that predate it.
+  if (def.type === 'yuque' && !isEdit.value) {
+    form.value.config.settings = { ...form.value.config.settings, folder_mode: 'toc' }
   }
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
@@ -1920,6 +1948,47 @@ const drawerConfirmText = computed(() => {
         <div class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
         </div>
+      </section>
+
+      <!-- Yuque only: how synced documents are laid out, and what may be admitted. -->
+      <section v-if="form.type === 'yuque'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.yuqueFolderModeLabel') }}</h4>
+        <div class="form-item form-item--flat">
+          <div
+            class="option-group"
+            role="radiogroup"
+            :aria-label="t('datasource.yuqueFolderModeLabel')"
+          >
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': yuqueFolderMode === 'toc' }"
+              role="radio"
+              :aria-checked="yuqueFolderMode === 'toc'"
+              @click="yuqueFolderMode = 'toc'"
+            >
+              {{ t('datasource.yuqueFolderModeToc') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': yuqueFolderMode === 'none' }"
+              role="radio"
+              :aria-checked="yuqueFolderMode === 'none'"
+              @click="yuqueFolderMode = 'none'"
+            >
+              {{ t('datasource.yuqueFolderModeNone') }}
+            </button>
+          </div>
+        </div>
+        <p class="form-desc">{{ t('datasource.yuqueFolderModeHint') }}</p>
+
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="yuqueTOCOnly" :disabled="yuqueFolderMode !== 'toc'">
+            {{ t('datasource.yuqueTOCOnly') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.yuqueTOCOnlyHint') }}</p>
       </section>
     </template>
   </SettingDrawer>
