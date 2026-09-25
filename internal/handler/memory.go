@@ -398,7 +398,7 @@ func (h *MemoryHandler) Export(c *gin.Context) {
 	// active memories only, while superseded and archived rows accumulate
 	// without limit, so a long-lived store holds far more than its capacity and
 	// the export quietly returned a prefix of it.
-	var items []*types.MemoryItem
+	items := make([]*types.MemoryItem, 0)
 	var total int64
 	for {
 		page, pageTotal, err := h.memoryService.ListItems(ctx, "", memoryExportPageSize, len(items))
@@ -415,14 +415,34 @@ func (h *MemoryHandler) Export(c *gin.Context) {
 			break
 		}
 	}
+	learningDocs, err := h.memoryService.LearningDocuments(ctx, "", nil, memoryExportMaxItems+1)
+	if err != nil {
+		h.fail(c, err, "Failed to export learning profile")
+		return
+	}
+	learningDocsTruncated := len(learningDocs) > memoryExportMaxItems
+	if learningDocsTruncated {
+		learningDocs = learningDocs[:memoryExportMaxItems]
+	}
+	if learningDocs == nil {
+		learningDocs = make([]*types.MemoryDocView, 0)
+	}
 	c.Header("Content-Disposition", `attachment; filename="weknora-memories.json"`)
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"total":   total,
-		// Say so rather than letting a partial file look complete. Only the
-		// safety ceiling can trigger this, so it stays false in practice.
+		"success":   true,
+		"total":     total,
 		"truncated": int64(len(items)) < total,
 		"data":      items,
+		// Say so rather than letting a partial file look complete. Only the
+		// safety ceiling can trigger this, so it stays false in practice.
+		"learning_profile": gin.H{
+			"schema_version":               1,
+			"knowledge_node":               "wiki_page",
+			"evidence_kind":                "answer_source_use",
+			"max_score_without_assessment": 80,
+			"documents":                    learningDocs,
+			"documents_truncated":          learningDocsTruncated,
+		},
 	})
 }
 
