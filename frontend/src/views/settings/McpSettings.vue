@@ -25,7 +25,10 @@
                   <t-icon name="tools" size="14px" />
                 </div>
                 <h3 class="service-card__title" :title="service.name">{{ service.name }}</h3>
-                <span v-if="service.is_builtin" class="service-card__builtin">{{ $t('mcpSettings.builtin') }}</span>
+                <span v-if="service.plugin_id" class="service-card__builtin" :title="service.plugin_id">
+                  {{ $t('mcpSettings.fromPlugin') }}
+                </span>
+                <span v-else-if="service.is_builtin" class="service-card__builtin">{{ $t('mcpSettings.builtin') }}</span>
                 <div v-if="authStore.hasRole('admin')" class="service-card__actions">
                   <button type="button" class="service-card__icon-btn" :title="$t('common.edit')"
                     :aria-label="`${service.name} · ${$t('common.edit')}`" @click="handleEdit(service)">
@@ -38,6 +41,10 @@
                   </button>
                 </div>
               </div>
+              <p v-if="service.plugin_error" class="service-card__plugin-error" :title="service.plugin_error">
+                <t-icon name="error-circle" size="14px" />
+                {{ $t('mcpSettings.pluginNotConfigured') }}
+              </p>
               <p v-if="serviceUsage(service)" class="service-card__desc" :title="serviceUsage(service)">
                 {{ serviceUsage(service).replace(/\s+/g, ' ') }}
               </p>
@@ -66,7 +73,7 @@
                   <span class="service-card__type">{{ getTransportTypeLabel(service.transport_type) }}</span>
                 </div>
                 <component :is="authStore.hasRole('admin') && !service.is_builtin ? 'button' : 'span'"
-                  class="service-card__status" :class="{ 'is-enabled': service.enabled || service.is_builtin }"
+                  class="service-card__status" :class="{ 'is-enabled': isOn(service) }"
                   :type="authStore.hasRole('admin') && !service.is_builtin ? 'button' : undefined"
                   :role="authStore.hasRole('admin') && !service.is_builtin ? 'switch' : undefined"
                   :aria-checked="authStore.hasRole('admin') && !service.is_builtin ? service.enabled : undefined"
@@ -76,7 +83,7 @@
                   @click="handleToggleEnabled(service)">
                   <t-loading v-if="togglingIds.has(service.id)" size="12px" />
                   <span v-else class="service-card__status-dot" aria-hidden="true" />
-                  {{ $t(service.enabled || service.is_builtin ? 'common.on' : 'common.off') }}
+                  {{ $t(isOn(service) ? 'common.on' : 'common.off') }}
                 </component>
               </div>
             </div>
@@ -136,6 +143,9 @@ const currentService = ref<MCPService | null>(null)
 const dialogInitialStep = ref<0 | 1>(0)
 const togglingIds = ref(new Set<string>())
 const serviceUsage = (service: MCPService) => service.usage_instructions?.trim() || service.description?.trim() || ''
+// Builtin services are always on; a plugin service is on once the workspace
+// has configured the plugin.
+const isOn = (service: MCPService) => service.enabled || (!!service.is_builtin && !service.plugin_id)
 
 // Load MCP services
 const loadServices = async () => {
@@ -388,6 +398,15 @@ defineExpose({ openAdd: handleAdd })
   font-size: var(--app-text-sm);
   line-height: 1.35;
   color: var(--td-text-color-placeholder);
+}
+
+.service-card__plugin-error {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: var(--app-text-sm);
+  color: var(--td-warning-color);
 }
 
 .service-card__type {

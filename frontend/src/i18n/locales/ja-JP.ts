@@ -1879,6 +1879,8 @@ export default {
       },
     },
     skills: {
+      pluginSection: '有効なプラグインから',
+      pluginSectionHint: 'プラグインが提供するスキルを選んでライブラリに追加し、他のスキルと同様にサンドボックスへインストールできます。',
       title: 'スキル管理',
       description: 'スキルはワークスペースのカタログに登録されます。まず登録し、その後1つ以上のサンドボックスにインストールしてください。エージェントは、自身のサンドボックスで準備完了しているスキルのみ有効化できます。',
       helpTooltip: 'カタログのスキルは、どこかにインストールされている必要はありません。スクリプトは、エージェントが使用するサンドボックスイメージにスキルがインストールされて初めて実行されます。Docker、Cube、E2Bのイメージには互換性がないため、サンドボックスごとにインストールしてください。',
@@ -2729,10 +2731,117 @@ export default {
       parseCurrentKnowledgeBaseFailed: '現在のナレッジベースの解析に失敗しました'
     }
   },
+  pluginAdmin: {
+    title: 'プラグイン管理',
+    description: 'プラットフォーム全体のプラグインをインストール・管理します。インストールしたプラグインはすべてのワークスペースに表示され、各ワークスペースで個別に有効化します。ここで無効にすると全ノードでアンロードされます。',
+    installButton: 'プラグインをインストール',
+    empty: 'インストール済みのプラグインはありません',
+    loadFailed: 'インストール済みプラグインの読み込みに失敗しました',
+    saveFailed: '保存に失敗しました',
+    enabledToast: 'プラットフォーム全体で有効にしました',
+    disabledToast: 'プラットフォーム全体で無効にしました',
+    platformSwitch: 'プラットフォーム全体で有効／無効',
+    publisher: '発行者',
+    contributions: '提供する機能',
+    permissions: '権限と外部アクセス',
+    state: {
+      running: '稼働中',
+      failed: '読み込み失敗',
+      disabled: '無効',
+      pending: '読み込み中'
+    },
+    nodeState: {
+      ready: '準備完了',
+      starting: '起動中',
+      degraded: '異常',
+      stopped: '未読み込み'
+    },
+    source: {
+      upload: 'アップロード',
+      url: 'URL'
+    },
+    change: {
+      install: '新規インストール',
+      upgrade: 'v{from} からアップグレード',
+      downgrade: 'v{from} からダウングレード',
+      reinstall: '再インストール'
+    },
+    permission: {
+      remote: 'リモートサービス',
+      egress: 'ネットワーク送信',
+      hostApi: 'WeKnora API',
+      events: 'イベント'
+    },
+    install: {
+      title: 'プラグインをインストール',
+      description: '.wkp パッケージをアップロードするかダウンロード URL を指定し、確認してからインストールします。',
+      sourceSection: 'パッケージ',
+      mode: {
+        upload: 'ファイルをアップロード',
+        url: 'URL から'
+      },
+      fileLabel: 'パッケージファイル',
+      chooseFile: 'ファイルを選択',
+      noFile: 'ファイル未選択',
+      fileHint: '.wkp ファイル（plugin.yaml を含む zip）、最大 64 MB。',
+      urlLabel: 'ダウンロード URL',
+      urlHint: 'サーバーがこの URL からダウンロードします。プライベートネットワークのアドレスは拒否されます。',
+      reviewSection: 'インストール前の確認',
+      noPermissions: 'このプラグインは追加の権限を要求しません。',
+      configNotice: 'このプラグインには設定が必要です。プラットフォーム設定はインストール後の詳細で、ワークスペース設定は各ワークスペース管理者がプラグインセンターで入力します。',
+      tenantNotice: 'インストール後、プラグインはすべてのワークスペースに表示されますが、ワークスペース管理者が有効にするまで無効です。',
+      digest: 'パッケージダイジェスト',
+      inspect: 'パッケージを確認',
+      confirm: {
+        install: 'インストール',
+        upgrade: 'アップグレード',
+        downgrade: '旧バージョンをインストール',
+        reinstall: '再インストール'
+      },
+      inspectFailed: 'パッケージを読み込めませんでした',
+      failed: 'インストールに失敗しました',
+      done: '{name} をインストールしました'
+    },
+    detail: {
+      overview: '概要',
+      runtime: 'ランタイム',
+      source: '取得元',
+      homepage: 'ホームページ',
+      license: 'ライセンス',
+      engines: '対応バージョン',
+      nodes: 'ノード',
+      noNodes: 'このプラグインを読み込んでいるノードはありません',
+      versions: 'バージョン',
+      active: '使用中',
+      activate: 'このバージョンに切り替え',
+      rollback: 'このバージョンにロールバック',
+      activateConfirm: 'v{version} を使用中のバージョンにしますか？すべてのノードで再読み込みされます。',
+      activated: 'v{version} に切り替えました',
+      activateFailed: 'バージョンの切り替えに失敗しました',
+      systemConfig: 'プラットフォーム設定',
+      systemConfigHint: 'すべてのワークスペースに適用されます（サービスリージョンや共通の認証情報など）。',
+      configLoadFailed: 'プラットフォーム設定の読み込みに失敗しました',
+      configSaved: 'プラットフォーム設定を保存しました',
+      configSaveFailed: 'プラットフォーム設定の保存に失敗しました',
+      danger: 'アンインストール',
+      uninstallHint: 'プラグインと保存済みの全バージョンを削除します。各ワークスペースのスイッチと設定は保持され、再インストールすると復元されます。',
+      uninstall: 'プラグインをアンインストール',
+      uninstallConfirm: 'アンインストールしますか？すべてのノードで直ちにアンロードされます。',
+      uninstalled: 'プラグインをアンインストールしました',
+      uninstallFailed: 'アンインストールに失敗しました'
+    }
+  },
   pluginCenter: {
+    installed: 'インストール済み',
+    configure: '設定',
+    configTitle: '{name} の設定',
+    configDescription: 'このワークスペースでプラグインを使うための設定（API キーなど）。シークレットは暗号化して保存され、再表示されません。',
+    configLoadFailed: 'プラグイン設定の読み込みに失敗しました',
+    configSaved: 'プラグイン設定を保存しました',
+    configSaveFailed: 'プラグイン設定の保存に失敗しました',
     navGroup: '拡張',
     title: 'プラグイン',
-    description: 'このデプロイが提供するすべてのプラグイン（組み込みを含む）を表示し、このワークスペースで有効／無効にします。無効にしたプラグインの連携は種類一覧から消えて新規作成できなくなりますが、既存のものは引き続き動作します。',
+    description: 'このデプロイが提供するすべてのプラグイン（組み込みと、システム管理者がインストールしたもの）。このワークスペースで有効化・無効化できます。無効にしたプラグインの連携は種類一覧から外れ新規作成できなくなりますが、既存のものは引き続き動作します。インストールされたプラグインは、ワークスペース管理者が有効にするまで無効です。',
     searchPlaceholder: 'プラグイン名・ID・連携を検索',
     allPoints: 'すべて',
     empty: '一致するプラグインはありません',
@@ -2750,7 +2859,9 @@ export default {
       imChannels: 'IM チャネル',
       webSearch: 'Web 検索',
       tools: 'エージェントツール',
-      parsers: 'ドキュメント解析'
+      parsers: 'ドキュメント解析',
+      skills: 'スキル',
+      mcpServers: 'MCP サーバー'
     }
   },
   schemaForm: {
@@ -5388,6 +5499,8 @@ export default {
     }
   },
   mcpSettings: {
+    fromPlugin: 'プラグイン',
+    pluginNotConfigured: 'プラグインが未設定です。プラグインセンターで設定してから使用してください',
     addUsageInstructions: "使用方法を追加",
     noUsageInstructions: "使用方法は未入力です",
     title: 'MCPサービス',
