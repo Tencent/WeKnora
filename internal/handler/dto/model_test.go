@@ -371,6 +371,7 @@ func TestNewModelResponseReportsEmbeddingInputModalities(t *testing.T) {
 			caps := NewModelResponse(viewer, tc.model).Capabilities
 			require.NotNil(t, caps)
 			assert.Equal(t, tc.image, slices.Contains(caps.Input, "image"), "input=%v", caps.Input)
+			assert.Empty(t, caps.ThinkingLevels, "an embedding model does not think")
 		})
 	}
 }
