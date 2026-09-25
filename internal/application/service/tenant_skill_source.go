@@ -106,22 +106,34 @@ func (s *TenantSkillService) InstallSkillFromSource(
 		return "", err
 	}
 
-	if strings.HasPrefix(source, pluginSkillSourcePrefix) {
-		if s.pluginSkills == nil {
-			return "", fmt.Errorf("%w: plugins are not available", ErrSkillSourceInvalid)
-		}
-		archive, err := s.pluginSkills.Archive(ctx, tenantID, source)
-		if err != nil {
-			return "", fmt.Errorf("%w: %v", ErrSkillSourceInvalid, err)
-		}
-		return s.installSkillArchive(ctx, tenantID, configID, archive, skillArchiveUploaded)
-	}
-
-	bundle, archive, err := fetchNormalizedSkillBundle(ctx, source, s.sourceHTTP)
+	bundle, archive, err := s.resolveSkillSource(ctx, tenantID, source)
 	if err != nil {
 		return "", err
 	}
 	return s.installParsedSkill(ctx, tenantID, configID, bundle, archive, skillArchiveUploaded)
+}
+
+// resolveSkillSource turns a source into a parsed bundle: a skill of an
+// installed plugin the workspace enabled ("plugin:<plugin>/<skill>"), or a
+// public skill fetched over the network.
+func (s *TenantSkillService) resolveSkillSource(
+	ctx context.Context, tenantID uint64, source string,
+) (*SkillBundle, []byte, error) {
+	if !strings.HasPrefix(source, pluginSkillSourcePrefix) {
+		return fetchNormalizedSkillBundle(ctx, source, s.sourceHTTP)
+	}
+	if s.pluginSkills == nil {
+		return nil, nil, fmt.Errorf("%w: plugins are not available", ErrSkillSourceInvalid)
+	}
+	archive, err := s.pluginSkills.Archive(ctx, tenantID, source)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %v", ErrSkillSourceInvalid, err)
+	}
+	bundle, err := ParseSkillBundle(archive)
+	if err != nil {
+		return nil, nil, err
+	}
+	return bundle, archive, nil
 }
 
 func skillSourceHTTPClient(override *http.Client) *http.Client {
