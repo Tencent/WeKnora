@@ -1113,21 +1113,10 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	})
 }
 
-// ListKnowledgeFolders godoc
-// @Summary      获取知识库文件夹目录树
-// @Description  返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数
-// @Tags         知识管理
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string  true  "知识库ID"
-// @Success      200  {object}  map[string]interface{}  "目录树"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Security     Bearer
-// @Security     ApiKeyAuth
 // ListImages lists the image assets of a knowledge base for the gallery view.
 //
 // @Summary      列出知识库图片资产
-// @Description  浏览某知识库内的全部图片资产，支持关键字搜索（caption/OCR 文本）、按图片属性筛选（attr_<name> 查询参数）与排序分页。
+// @Description  浏览某知识库内的全部图片资产，支持关键字搜索（caption/OCR 文本）、按图片属性筛选（attr_filters / attr_rules）与排序分页。
 // @Tags         knowledge
 // @Accept       json
 // @Produce      json
@@ -1140,6 +1129,9 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Param        sort_order  query     string  false "排序方向：asc / desc，默认 desc"
 // @Param        is_enabled  query     bool    false "仅包含启用状态的图片"
 // @Param        attr_filters query    string  false "属性筛选 JSON，同一属性多值 OR、属性间 AND"
+// @Param        attr_rules  query     string  false "属性逐值裁决 JSON（off 隐藏 / on 强制显示，on 优先）"
+// @Success      200  {object}  map[string]interface{}  "图片资产分页列表"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/images [get]
@@ -1349,6 +1341,17 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 	})
 }
 
+// ListKnowledgeFolders godoc
+// @Summary      获取知识库文件夹目录树
+// @Description  返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "目录树"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge/folders [get]
 func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	ctx := c.Request.Context()

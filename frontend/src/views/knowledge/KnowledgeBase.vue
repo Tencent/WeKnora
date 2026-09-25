@@ -2324,7 +2324,9 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       <!-- Image Gallery (4th tab) -->
       <ImageGallery v-if="activeKbTab === 'gallery' && kbId" :knowledge-base-id="kbId" />
 
-      <template v-if="activeKbTab === 'documents'">
+      <!-- wiki/graph tabs only exist on wiki KBs; a stale tab (?tab= or one
+           carried over from a previous KB) falls back to documents. -->
+      <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
         <div class="knowledge-main">
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"

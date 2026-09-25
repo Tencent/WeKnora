@@ -95,6 +95,10 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	}
 	if overrides.ImageActions != nil {
 		base := eff.ImageActions
+		// Same rule as types.MergeImageActions: the OCR clause is a unit keyed
+		// on a non-empty On. OnUnobserved is a plain bool, so an override that
+		// omits On cannot tell "false" from "unset" and is ignored rather than
+		// flipping the conservative default.
 		if len(overrides.ImageActions.OCR.On) > 0 {
 			base.OCR = overrides.ImageActions.OCR
 		}

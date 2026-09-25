@@ -237,11 +237,13 @@ func sortImageAssets(assets []types.ImageAsset, filter *types.ImageListFilter) {
 		}
 	}
 	sort.SliceStable(assets, func(i, j int) bool {
-		less := galleryAssetLess(assets[i], assets[j], sortBy)
+		// Swap the operands for desc rather than negating: !less would report
+		// equal keys as ordered both ways and break the strict weak ordering
+		// the stable sort (and therefore stable paging) relies on.
 		if sortOrder == "desc" {
-			return !less
+			return galleryAssetLess(assets[j], assets[i], sortBy)
 		}
-		return less
+		return galleryAssetLess(assets[i], assets[j], sortBy)
 	})
 }
 

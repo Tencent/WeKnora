@@ -113,7 +113,19 @@ const current = computed<ImageAsset | null>(() =>
 const thumbUrls = ref<Record<string, string>>({})
 const thumbBroken = ref<Record<string, boolean>>({})
 const viewerUrl = ref('')
-const createdBlobs = new Set<string>()
+// Object URLs keyed by the raw storage URL they were fetched for, so a
+// thumbnail and the viewer share one blob and a reload reuses what is already
+// on screen instead of fetching (and leaking) a fresh copy.
+const blobByRawUrl = new Map<string, string>()
+
+/** Revoke every cached object URL whose raw URL is not in keep. */
+function releaseBlobs(keep: Set<string> = new Set()): void {
+  for (const [raw, objectUrl] of blobByRawUrl) {
+    if (keep.has(raw)) continue
+    URL.revokeObjectURL(objectUrl)
+    blobByRawUrl.delete(raw)
+  }
+}
 
 function isRenderable(url: string): boolean {
   return !!url && !/^(resource|provider|storage):\/\//i.test(url)
@@ -121,6 +133,8 @@ function isRenderable(url: string): boolean {
 
 async function resolveImageSrc(rawUrl: string): Promise<string> {
   if (!rawUrl || isRenderable(rawUrl)) return rawUrl
+  const cached = blobByRawUrl.get(rawUrl)
+  if (cached) return cached
   const req = buildProtectedFileRequest(rawUrl, {
     mode: 'knowledgeBase',
     kbId: props.knowledgeBaseId,
@@ -130,8 +144,11 @@ async function resolveImageSrc(rawUrl: string): Promise<string> {
     const resp = await fetch(req.url, { headers: req.headers })
     if (!resp.ok) return rawUrl
     const blob = await resp.blob()
+    // A concurrent resolve may have cached this URL meanwhile; keep one blob.
+    const raced = blobByRawUrl.get(rawUrl)
+    if (raced) return raced
     const objectUrl = URL.createObjectURL(blob)
-    createdBlobs.add(objectUrl)
+    blobByRawUrl.set(rawUrl, objectUrl)
     return objectUrl
   } catch {
     return rawUrl
@@ -142,20 +159,17 @@ function thumbUrl(img: ImageAsset): string {
   return thumbUrls.value[img.id] || img.url
 }
 
-async function resolveThumbnails() {
-  const prev = thumbUrls.value
+async function resolveThumbnails(token: number) {
+  const imgs = items.value
+  const urls = await Promise.all(imgs.map((img) => resolveImageSrc(img.url)))
+  // A newer listing owns the grid now; its own pass maps the thumbnails.
+  if (token !== listToken) return
   const next: Record<string, string> = {}
-  for (const img of items.value) {
-    next[img.id] = await resolveImageSrc(img.url)
-  }
+  imgs.forEach((img, i) => {
+    next[img.id] = urls[i]
+  })
   // Revoke blob URLs that are no longer on screen to avoid leaks.
-  for (const id of Object.keys(prev)) {
-    const prevUrl = prev[id]
-    if (!(id in next) && createdBlobs.has(prevUrl)) {
-      URL.revokeObjectURL(prevUrl)
-      createdBlobs.delete(prevUrl)
-    }
-  }
+  releaseBlobs(new Set(imgs.map((img) => img.url)))
   thumbUrls.value = next
   thumbBroken.value = {}
 }
@@ -434,30 +448,38 @@ function buildParams(): ImageListParams {
   return params
 }
 
+// Bumped by every listing, so a slower earlier response (a debounced search
+// overtaken by a page change) cannot overwrite the grid of a newer query.
+let listToken = 0
+
 async function reload() {
   if (!props.knowledgeBaseId) return
+  const token = ++listToken
   // Searching with every field switched off would silently fall back to the
   // server default — not what a custom-mode user asked for. Short-circuit.
   if (keyword.value.trim() && activeSearchIds.value.length === 0) {
     items.value = []
     total.value = 0
+    loading.value = false
     return
   }
   loading.value = true
   error.value = ''
   try {
     const res = await listGalleryImages(props.knowledgeBaseId, buildParams())
+    if (token !== listToken) return
     items.value = res.items
     total.value = res.total
     if (viewerOpen.value && viewerIndex.value >= res.items.length) closeViewer()
-    void resolveThumbnails()
+    void resolveThumbnails(token)
   } catch (e) {
+    if (token !== listToken) return
     error.value = e instanceof Error ? e.message : String(e)
     items.value = []
     total.value = 0
     thumbUrls.value = {}
   } finally {
-    loading.value = false
+    if (token === listToken) loading.value = false
   }
 }
 
@@ -619,24 +641,63 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
+  if (searchTimer) clearTimeout(searchTimer)
+  // Orphan any in-flight listing so it cannot map new blobs after unmount.
+  listToken++
+  releaseBlobs()
 })
 
-onMounted(async () => {
+// Newest first unless the contract no longer offers it; picking by id keeps
+// the default independent of source registration order.
+const DEFAULT_SORT_ID = 'builtin:created_at'
+
+let initToken = 0
+
+// Loads the contract and the first page for the current knowledge base. It
+// also runs on a knowledge base switch: the component instance is reused, so
+// everything scoped to the previous knowledge base is dropped first.
+async function initGallery() {
+  const token = ++initToken
+  closeViewer()
+  items.value = []
+  total.value = 0
+  page.value = 1
+  keyword.value = ''
+  sortBy.value = ''
+  attrSelections.value = {}
+  attrVerdicts.value = {}
+  filterScope.value = 'all'
+  thumbUrls.value = {}
+  thumbBroken.value = {}
+  releaseBlobs()
+  configLoaded.value = false
+  config.value = { attribute_sources: [], attributes: [], mode: 'all', status: {} }
   try {
     const cfg = await fetchGalleryConfig(props.knowledgeBaseId)
+    if (token !== initToken) return
     config.value = cfg
     searchMode.value = cfg.mode
     searchStatus.value = { ...cfg.status }
     configLoaded.value = true
   } catch {
+    if (token !== initToken) return
     // Degraded mode: no contract, no attribute UI — builtin listing and
     // default search still work.
   }
   if (!sortBy.value && sortAttrs.value.length) {
-    sortBy.value = sortAttrs.value[0].id
+    sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id ?? sortAttrs.value[0].id
   }
   await reload()
-})
+}
+
+onMounted(initGallery)
+
+watch(
+  () => props.knowledgeBaseId,
+  (next, prev) => {
+    if (next && next !== prev) void initGallery()
+  },
+)
 </script>
 
 <template>
