@@ -128,6 +128,9 @@ func startProcess(sp spec, onState func(State, error)) (*process, error) {
 		p.setState(StateStopped, err)
 		return nil, err
 	}
+	// Ready before Activate returns: callers route to the plugin right away.
+	p.setClient(first.client)
+	p.setState(StateReady, nil)
 	go p.supervise(ctx, entry, first)
 	return p, nil
 }
