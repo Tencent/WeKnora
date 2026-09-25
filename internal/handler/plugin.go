@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
@@ -19,12 +20,21 @@ import (
 type PluginHandler struct {
 	registry *registry.Registry
 	tenancy  *tenancy.Service
+	drivers  *driver.Set
 }
 
 // NewPluginHandler creates a PluginHandler. Without a tenancy service every
-// plugin reads as enabled.
-func NewPluginHandler(registry *registry.Registry, tenancy *tenancy.Service) *PluginHandler {
-	return &PluginHandler{registry: registry, tenancy: tenancy}
+// plugin reads as enabled; without drivers no instance status is reported.
+func NewPluginHandler(registry *registry.Registry, tenancy *tenancy.Service, drivers *driver.Set) *PluginHandler {
+	return &PluginHandler{registry: registry, tenancy: tenancy, drivers: drivers}
+}
+
+// PluginDetailDTO is one plugin with where and how its code runs.
+type PluginDetailDTO struct {
+	tenancy.TenantPlugin
+	Instances []driver.InstanceStatus `json:"instances"`
+	// InstanceError explains an empty Instances (no driver, lookup failed).
+	InstanceError string `json:"instanceError,omitempty"`
 }
 
 // tenantPlugins returns every plugin with the caller tenant's switch.
@@ -91,11 +101,27 @@ func (h *PluginHandler) GetPlugin(c *gin.Context) {
 	}
 	for _, p := range plugins {
 		if p.Manifest.ID == c.Param("id") {
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": p})
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": h.detail(c, p)})
 			return
 		}
 	}
 	_ = c.Error(errors.NewNotFoundError("plugin not found"))
+}
+
+func (h *PluginHandler) detail(c *gin.Context, p tenancy.TenantPlugin) PluginDetailDTO {
+	out := PluginDetailDTO{TenantPlugin: p, Instances: []driver.InstanceStatus{}}
+	if h.drivers == nil {
+		return out
+	}
+	d, err := h.drivers.For(p.Manifest.Runtime.Type)
+	if err == nil {
+		out.Instances, err = d.Status(c.Request.Context(), p.Manifest.ID)
+	}
+	if err != nil {
+		out.InstanceError = err.Error()
+		out.Instances = []driver.InstanceStatus{}
+	}
+	return out
 }
 
 // SetPluginEnabledRequest turns a plugin on or off for the workspace.

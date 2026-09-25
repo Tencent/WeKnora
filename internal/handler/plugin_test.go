@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
@@ -39,7 +40,7 @@ func newPluginHandlerTestRouter(t *testing.T) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
-	h := NewPluginHandler(reg, nil)
+	h := NewPluginHandler(reg, nil, driver.NewSet(driver.NewBuiltin(reg.Plugin)))
 	r.GET("/plugins", h.ListPlugins)
 	r.GET("/plugins/contributions", h.ListContributions)
 	r.GET("/plugins/:id", h.GetPlugin)
@@ -100,8 +101,17 @@ func TestPluginHandlerErrors(t *testing.T) {
 	if code := getJSON(t, r, "/plugins/contributions?point=widgets", nil); code != http.StatusBadRequest {
 		t.Fatalf("unknown point status = %d, want 400", code)
 	}
-	if code := getJSON(t, r, "/plugins/weknora.feishu", nil); code != http.StatusOK {
+	var detail struct {
+		Data struct {
+			Enabled   bool                    `json:"enabled"`
+			Instances []driver.InstanceStatus `json:"instances"`
+		} `json:"data"`
+	}
+	if code := getJSON(t, r, "/plugins/weknora.feishu", &detail); code != http.StatusOK {
 		t.Fatalf("get plugin status = %d", code)
+	}
+	if !detail.Data.Enabled || len(detail.Data.Instances) != 1 || detail.Data.Instances[0].State != driver.StateReady {
+		t.Fatalf("builtin plugin detail = %+v", detail.Data)
 	}
 }
 
@@ -143,7 +153,7 @@ func TestPluginHandlerTogglesPluginsPerTenant(t *testing.T) {
 		}
 	}
 	settings := &memPluginSettings{rows: map[string]types.PluginTenantSetting{}}
-	h := NewPluginHandler(reg, tenancy.NewService(reg, settings))
+	h := NewPluginHandler(reg, tenancy.NewService(reg, settings), nil)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler(), func(c *gin.Context) { c.Set(types.TenantIDContextKey.String(), uint64(7)) })
