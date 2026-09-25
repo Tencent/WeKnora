@@ -129,7 +129,10 @@ def _rewrite_zip(
     return out.getvalue()
 
 
-STYLES_PART_SUFFIX = "styles.xml"
+# The one stylesheet openpyxl reads (openpyxl.xml.constants.ARC_STYLE). Match
+# it exactly: a suffix match also hits xl/richData/richStyles.xml (Excel 365
+# in-cell images / data types), which carries no fills.
+STYLES_PART = "xl/styles.xml"
 _REPLACEMENT_FILL = b'<fill><patternFill patternType="none"/></fill>'
 _FILLS_BLOCK_RE = re.compile(rb"<fills\b[^>]*>.*?</fills>", re.S)
 # Case-insensitive so wrong-case <Fill>…</Fill> entries are caught too.
@@ -172,13 +175,9 @@ def _sanitize_xlsx_styles(content: bytes) -> bytes | None:
         return None
 
     with zipfile.ZipFile(io.BytesIO(content)) as zin:
-        names = _normalized_names(zin.namelist())
-        styles_path = next(
-            (n for n in names if n.lower().endswith(STYLES_PART_SUFFIX)), None
-        )
-        if styles_path is None:
+        if STYLES_PART not in zin.namelist():
             return None
-        styles = zin.read(styles_path)
+        styles = zin.read(STYLES_PART)
 
         block = _FILLS_BLOCK_RE.search(styles)
         if block is None:
@@ -205,4 +204,4 @@ def _sanitize_xlsx_styles(content: bytes) -> bytes | None:
         )
 
         patched = styles[: block.start()] + patched_block + styles[block.end():]
-        return _rewrite_zip(zin, lambda files: {**files, styles_path: patched})
+        return _rewrite_zip(zin, lambda files: {**files, STYLES_PART: patched})

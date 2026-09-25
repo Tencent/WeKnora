@@ -7,7 +7,11 @@ reproduces the production failure without an original file.
 """
 
 import io
+import os
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -15,6 +19,7 @@ from unittest.mock import patch
 import openpyxl
 import pandas as pd
 
+from docreader.parser import xlsx_repair
 from docreader.parser.excel_parser import _prepare_xlsx_bytes
 from docreader.parser.markitdown_parser import StdMarkitdownParser
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
@@ -55,6 +60,23 @@ def _with_first_fill_replaced(workbook: bytes, fragment: bytes) -> bytes:
                     b"<fill>.*?</fill>", fragment, data, count=1, flags=re.S
                 )
             zout.writestr(item, data)
+    return out.getvalue()
+
+
+def _with_rich_styles_part(workbook: bytes) -> bytes:
+    """Add the xl/richData/richStyles.xml part Excel 365 writes for in-cell
+    images / data types; its name also ends in ``styles.xml``."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(workbook)) as zin, zipfile.ZipFile(
+        out, "w", zipfile.ZIP_DEFLATED
+    ) as zout:
+        for item in zin.infolist():
+            zout.writestr(item, zin.read(item.filename))
+        zout.writestr(
+            "xl/richData/richStyles.xml",
+            b'<richStyleSheet xmlns="http://schemas.microsoft.com/office/'
+            b'spreadsheetml/2017/richdata2"/>',
+        )
     return out.getvalue()
 
 
@@ -106,6 +128,51 @@ class TestSanitizeXlsxStyles(unittest.TestCase):
                 num_fills = len(re.findall(rb"<fill[ />]", styles))
                 self.assertIsNotNone(count)
                 self.assertEqual(int(count.group(1)), num_fills)
+
+    def test_workbook_stylesheet_is_picked_over_rich_styles_part(self):
+        fixture = _with_rich_styles_part(
+            _with_first_fill_replaced(
+                _workbook_bytes(), CRASHING_FILLS["empty-self-closing"]
+            )
+        )
+        sanitized = sanitize_xlsx_styles(fixture)
+        self.assertIsNotNone(sanitized)
+        openpyxl.load_workbook(io.BytesIO(sanitized), data_only=True)
+
+    def test_stylesheet_choice_does_not_depend_on_hash_seed(self):
+        # Zip member names are str, so any set-ordered lookup changes with
+        # PYTHONHASHSEED; run the sanitizer under several seeds.
+        fixture = _with_rich_styles_part(
+            _with_first_fill_replaced(
+                _workbook_bytes(), CRASHING_FILLS["empty-self-closing"]
+            )
+        )
+        repo_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(xlsx_repair.__file__)))
+        )
+        script = (
+            "import sys\n"
+            "from docreader.parser.xlsx_repair import sanitize_xlsx_styles\n"
+            "data = open(sys.argv[1], 'rb').read()\n"
+            "sys.exit(0 if sanitize_xlsx_styles(data) is not None else 1)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "rich.xlsx")
+            with open(path, "wb") as handle:
+                handle.write(fixture)
+            for seed in range(8):
+                with self.subTest(seed=seed):
+                    env = {
+                        **os.environ,
+                        "PYTHONHASHSEED": str(seed),
+                        "PYTHONPATH": os.pathsep.join(
+                            filter(None, [repo_root, os.environ.get("PYTHONPATH")])
+                        ),
+                    }
+                    result = subprocess.run(
+                        [sys.executable, "-c", script, path], env=env
+                    )
+                    self.assertEqual(result.returncode, 0)
 
     def test_crashing_forms_raise_without_the_fix(self):
         for name, fragment in CRASHING_FILLS.items():
