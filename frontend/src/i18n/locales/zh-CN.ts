@@ -845,7 +845,7 @@ export default {
       empty: '暂无 MCP 端点',
       disabled: '已停用',
       cardSummary: '{tools} 个工具 · {scope}',
-      scopeAll: '全部知识库',
+              scopeAll: '全部知识库',
       scopeCount: '{count} 个知识库',
       create: '新建端点',
       editTitle: '编辑 MCP 端点',
@@ -4078,7 +4078,16 @@ export default {
         descriptionLanguageAuto: '自动跟随文档语言',
         customInstructionsLabel: '图片解析要求',
         customInstructionsDescription: '补充需要重点识别的视觉信息，OCR 和 Markdown 格式协议保持不变',
-        customInstructionsPlaceholder: '例如：重点识别设备铭牌、型号、告警代码和表格中的单位…'
+        customInstructionsPlaceholder: '例如：重点识别设备铭牌、型号、告警代码和表格中的单位…',
+        imageAttrsLabel: '图片属性观察',
+        imageAttrsDescription: '开启后，解析时对每张图片先「观察属性＋描述」，再按属性决定是否对图内文字再跑一轮 OCR；关闭则沿用基础模式：所有图片逐张描述并全部 OCR',
+        imageAttrsSchemaLabel: '可观察的图片属性',
+        imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',
+        imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
+        imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
+        imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
+        imageAttrsOcrOnUnobservedDesc: '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
+        imagePipelineKbNote: '默认跟随知识库设置，可针对本次任务调整'
       },
       tableMetadataInstructions: {
         label: '表格元数据生成要求',
@@ -4444,6 +4453,71 @@ export default {
       editingBadge: '编辑中',
       pageActions: '页面操作',
       tabDocuments: '文档',
+      tabGallery: '图库',
+      gallery: {
+        panelFilter: '筛选设置',
+        panelSearch: '搜索设置',
+        enableFilter: '开启筛选',
+        searchAll: '搜索全部字段',
+        verdictDefault: '-',
+        verdictOff: 'off',
+        verdictOn: 'on',
+        searchScope: '搜索范围',
+        scopeAll: '全部',
+        scopeCustom: '自定义',
+        filterScope: '筛选',
+        filterOff: '全显示',
+        filterOn: '自定义',
+        editSearch: '打开搜索设置',
+        editFilter: '打开筛选设置',
+        pin: '固定到右侧',
+        unpin: '取消固定',
+        title: '图库',
+        searchPlaceholder: '搜索图片内容',
+        sortByLabel: '排序',
+        orderAsc: '升序',
+        orderDesc: '降序',
+        filtersTitle: '筛选',
+        searchFields: '搜索字段',
+        modeAll: '全部字段',
+        modeCustom: '自定义',
+        keywordsPlaceholder: '多个关键词用逗号分隔',
+        applyAll: '全部属性统一设置',
+        count: '{count} 张图片',
+        empty: '该知识库暂无可浏览的图片',
+        emptyFiltered: '没有符合当前筛选条件的图片',
+        attrSection: '图片属性',
+        noAttrs: '暂无图片属性',
+        attributes: '属性',
+        caption: '描述',
+        ocr: 'OCR 文本',
+        source: '来源',
+        noCaption: '无描述',
+        noOcr: '无 OCR 文本',
+        chunkType: '类型',
+        viewerClose: '关闭',
+        prev: '上一张',
+        next: '下一张',
+        openSource: '打开来源文档',
+        imageLoadError: '图片加载失败',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: '描述',
+          builtin_caption_description: '模型生成的图片描述',
+          builtin_ocr_text: 'OCR 文本',
+          builtin_ocr_text_description: 'OCR 从图片中提取的文字',
+          builtin_created_at: '创建时间',
+          builtin_created_at_description: '所属文档片段的创建时间',
+          builtin_updated_at: '更新时间',
+          builtin_updated_at_description: '所属文档片段的最后更新时间',
+          builtin_is_enabled: '启用状态',
+          builtin_is_enabled_description: '所属文档片段是否参与检索',
+          builtin_is_enabled_value_true: '已启用',
+          builtin_is_enabled_value_false: '已停用',
+        },
+      },
       tabGraph: '图谱',
       tabGraphTip: 'Wiki 页面之间的引用关系图（即页面链接图谱），与「知识库设置 → 知识图谱」中基于 LLM 抽取的实体-关系图谱不是同一个概念',
       searchPlaceholder: '搜索 Wiki 页面...',
@@ -4944,8 +5018,8 @@ export default {
       sharedReadonly: '共享给我 · 仅查看'
     },
     pin: {
-      pin: '置顶',
-      unpin: '取消置顶',
+              pin: '置顶',
+              unpin: '取消置顶',
       pinSuccess: '已置顶',
       unpinSuccess: '已取消置顶',
       failed: '操作失败'
@@ -7668,5 +7742,28 @@ export default {
     myChats: '我的对话',
     apiChats: 'API 会话',
     noSessions: '暂无对话'
+  },
+  // 图片属性的展示文案，按属性名索引（后端注册表给出属性名，这里只做翻译）。
+  // 注意：属性名里的点号要转义成下划线（contain.text → contain_text）——vue-i18n 按点号
+  // 逐段下钻，写成字面量 'contain.text' 的键永远取不到。
+  // 未翻译的属性会回落到后端注册表自带的说明，所以新增属性不会显示成空行。
+  imageAttr: {
+    contain_text: {
+      label: '图中文字量',
+      description: '图片自身承载多少正文文字，决定是否值得为它单独跑一轮 OCR。',
+      values: {
+        none: { label: '无文字', description: '完全没有文字' },
+        sparse: { label: '少量文字', description: '只有少量文字 —— 图标、路牌、单个标签' },
+        block: { label: '成段正文', description: '成段正文 —— 截图、表格、文档页面' }
+      }
+    },
+    contain_data_visual: {
+      label: '数据可视化',
+      description: '图片是否以图表、曲线、示意图或信息图的方式承载数据；这类图即使看起来文字很少，也会保留在 OCR 路径上。',
+      values: {
+        'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
+        'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
+      }
+    }
   }
 }

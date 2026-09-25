@@ -653,6 +653,31 @@ func (s *userService) UpdateUserPreferences(
 			merged.LastActiveTenantID = &v
 		}
 	}
+	if patch.Gallery != nil {
+		// Whole-object replace per key: the gallery sends its complete
+		// current state (mode + full status map) on every change, so there
+		// is no meaningful partial-merge within the block. Values are
+		// clamped so a stray client cannot bloat the column or poison the
+		// mode.
+		g := merged.Gallery
+		if g == nil {
+			g = &types.GalleryUserPrefs{}
+		}
+		if patch.Gallery.Mode == types.GalleryModeAll || patch.Gallery.Mode == types.GalleryModeCustom {
+			g.Mode = patch.Gallery.Mode
+		}
+		if patch.Gallery.Status != nil {
+			status := make(map[string]string, len(patch.Gallery.Status))
+			for id, v := range patch.Gallery.Status {
+				if (v == types.GalleryStatusOn || v == types.GalleryStatusOff) &&
+					len(id) <= 128 && len(status) < 200 {
+					status[id] = v
+				}
+			}
+			g.Status = status
+		}
+		merged.Gallery = g
+	}
 
 	user.Preferences = merged
 	user.UpdatedAt = time.Now()

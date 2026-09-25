@@ -22,6 +22,7 @@ var versionedSQLiteTables = []string{
 	"task_dead_letters",
 	"system_settings",
 	"model_catalog_configs",
+	"chunk_images",
 	"knowledge_processing_spans",
 	"knowledge_tag_relations",
 	"browser_devices",

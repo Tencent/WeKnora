@@ -778,10 +778,12 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	}
 	if req.Config != nil {
 		probe := &types.KnowledgeBase{
-			ChunkingConfig:        req.Config.ChunkingConfig,
-			ImageProcessingConfig: req.Config.ImageProcessingConfig,
-			WikiConfig:            req.Config.WikiConfig,
-			ProfileConfig:         req.Config.ProfileConfig,
+			ChunkingConfig: req.Config.ChunkingConfig,
+			WikiConfig:     req.Config.WikiConfig,
+			ProfileConfig:  req.Config.ProfileConfig,
+		}
+		if req.Config.ImageProcessingConfig != nil {
+			probe.ImageProcessingConfig = *req.Config.ImageProcessingConfig
 		}
 		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
 			c.Error(err)
@@ -1329,5 +1331,24 @@ func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    targets,
+	})
+}
+
+// GetImageAttrsSchema returns the canonical image-attribute registry for this
+// release. It is the single source of truth that drives the frontend attribute
+// panel — both the attributes and their display text (label, description, the
+// meaning of each value) — so adding an attribute later is a backend-only
+// change (one registry row) and the UI follows automatically. Read-only; the
+// registry is global, not per-KB, so it carries no KB id and only the Viewer
+// role is required.
+func (h *KnowledgeBaseHandler) GetImageAttrsSchema(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"version":         types.ImageAttrSchemaVersion,
+			"prompt":          types.ImageAttrPromptVersion,
+			"attributes":      types.ImageAttrRegistry,
+			"default_actions": types.DefaultImageActions(),
+		},
 	})
 }

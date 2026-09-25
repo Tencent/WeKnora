@@ -845,7 +845,7 @@ export default {
       empty: 'Конечных точек MCP пока нет',
       disabled: 'Отключена',
       cardSummary: 'Инструментов: {tools} · {scope}',
-      scopeAll: 'Все базы знаний',
+              scopeAll: 'Все базы знаний',
       scopeCount: 'Баз знаний: {count}',
       create: 'Новая конечная точка',
       editTitle: 'Изменить конечную точку MCP',
@@ -4076,7 +4076,16 @@ export default {
         descriptionLanguageAuto: 'Следовать языку документа',
         customInstructionsLabel: 'Инструкции обработки изображений',
         customInstructionsDescription: 'Добавьте визуальные приоритеты, сохраняя правила OCR и Markdown',
-        customInstructionsPlaceholder: 'Например: распознавать шильдики, модели, коды ошибок и единицы таблиц…'
+        customInstructionsPlaceholder: 'Например: распознавать шильдики, модели, коды ошибок и единицы таблиц…',
+        imageAttrsLabel: 'Наблюдение атрибутов изображений',
+        imageAttrsDescription: 'Когда включено, каждое изображение сначала наблюдается на атрибуты и описывается, затем атрибуты решают, нужен ли OCR текста в изображении. Когда выключено — базовый режим: каждое изображение описывается и распознаётся',
+        imageAttrsSchemaLabel: 'Наблюдаемые атрибуты изображений',
+        imageAttrsSchemaDescription: 'Модель наблюдает перечисленные ниже атрибуты (определены реестром бэкенда), чтобы управлять политикой OCR',
+        imageAttrsOcrConditions: 'Запуск OCR по наблюдаемым условиям атрибутов',
+        imageAttrsOcrConditionsDesc: 'Когда наблюдаемые атрибуты соответствуют условиям ниже, для изображения выполняется OCR',
+        imageAttrsOcrOnUnobserved: 'Запускать OCR при сбое наблюдения атрибутов изображения',
+        imageAttrsOcrOnUnobservedDesc: 'Если модель не смогла корректно наблюдать атрибуты изображения, OCR по умолчанию всё равно выполняется, чтобы не потерять текст; выключите, чтобы пропустить. (Небольшая визуальная модель вроде 4B или пользовательские инструкции к изображениям, конфликтующие с системным промптом, могут привести к сбою наблюдения; модели 8B и выше ошибаются редко, поэтому отключать не рекомендуется)',
+        imagePipelineKbNote: 'По умолчанию следуют настройкам базы знаний; можно изменить для этой задачи'
       },
       tableMetadataInstructions: {
         label: 'Инструкции метаданных таблиц',
@@ -4442,6 +4451,71 @@ export default {
       editingBadge: 'Редактирование',
       pageActions: 'Действия со страницей',
       tabDocuments: 'Документы',
+      tabGallery: 'Галерея',
+      gallery: {
+        panelFilter: 'Фильтр',
+        panelSearch: 'Поиск',
+        enableFilter: 'Включить фильтр',
+        searchAll: 'Искать во всех полях',
+        verdictDefault: '-',
+        verdictOff: 'off',
+        verdictOn: 'on',
+        searchScope: 'Область поиска',
+        scopeAll: 'Все',
+        scopeCustom: 'Вручную',
+        filterScope: 'Фильтр',
+        filterOff: 'Показывать все',
+        filterOn: 'Вручную',
+        editSearch: 'Открыть настройки поиска',
+        editFilter: 'Открыть настройки фильтра',
+        pin: 'Закрепить справа',
+        unpin: 'Открепить',
+        title: 'Галерея',
+        searchPlaceholder: 'Поиск по содержимому изображений',
+        sortByLabel: 'Сортировка',
+        orderAsc: 'По возрастанию',
+        orderDesc: 'По убыванию',
+        filtersTitle: 'Фильтры',
+        searchFields: 'Поля поиска',
+        modeAll: 'Все поля',
+        modeCustom: 'Свои поля',
+        keywordsPlaceholder: 'Разделяйте ключевые слова запятыми',
+        applyAll: 'Применить ко всем атрибутам',
+        count: '{count} изображений',
+        empty: 'В этой базе знаний пока нет изображений',
+        emptyFiltered: 'Нет изображений, соответствующих фильтрам',
+        attrSection: 'Атрибуты изображения',
+        noAttrs: 'Атрибуты изображения отсутствуют',
+        attributes: 'Атрибуты',
+        caption: 'Описание',
+        ocr: 'OCR-текст',
+        source: 'Источник',
+        noCaption: 'Нет описания',
+        noOcr: 'Нет OCR-текста',
+        chunkType: 'Тип',
+        viewerClose: 'Закрыть',
+        prev: 'Назад',
+        next: 'Вперёд',
+        openSource: 'Открыть исходный документ',
+        imageLoadError: 'Не удалось загрузить изображение',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: 'Описание',
+          builtin_caption_description: 'Описание изображения, сгенерированное моделью.',
+          builtin_ocr_text: 'OCR-текст',
+          builtin_ocr_text_description: 'Текст, извлечённый из изображения OCR.',
+          builtin_created_at: 'Время создания',
+          builtin_created_at_description: 'Когда был создан фрагмент исходного документа.',
+          builtin_updated_at: 'Время изменения',
+          builtin_updated_at_description: 'Когда фрагмент исходного документа был изменён последний раз.',
+          builtin_is_enabled: 'Состояние',
+          builtin_is_enabled_description: 'Участвует ли фрагмент исходного документа в поиске.',
+          builtin_is_enabled_value_true: 'Включено',
+          builtin_is_enabled_value_false: 'Отключено',
+        },
+      },
       tabGraph: 'Граф',
       tabGraphTip: 'Граф связей между Wiki-страницами (граф ссылок страниц). Это НЕ то же самое, что граф знаний на основе сущностей и отношений, настраиваемый в «Настройки БЗ → Граф знаний».',
       searchPlaceholder: 'Поиск Wiki-страниц...',
@@ -4942,8 +5016,8 @@ export default {
       sharedReadonly: 'Доступно мне · Только просмотр'
     },
     pin: {
-      pin: 'Закрепить',
-      unpin: 'Открепить',
+              pin: 'Закрепить',
+              unpin: 'Открепить',
       pinSuccess: 'Закреплено',
       unpinSuccess: 'Откреплено',
       failed: 'Операция не удалась'
@@ -7666,5 +7740,28 @@ export default {
     myChats: 'Мои чаты',
     apiChats: 'Сессии API',
     noSessions: 'Пока нет диалогов'
+  },
+  // Тексты для наблюдаемых атрибутов изображения, с ключом по имени атрибута.
+  // Точки в имени атрибута экранируются подчёркиванием (contain.text → contain_text):
+  // vue-i18n разбирает ключ по точкам, поэтому литеральный ключ 'contain.text'
+  // никогда не найдётся. Атрибут без перевода отображается описанием из реестра.
+  imageAttr: {
+    contain_text: {
+      label: 'Количество текста на изображении',
+      description: 'Сколько основного текста содержит само изображение. Определяет, стоит ли запускать для него отдельный проход OCR.',
+      values: {
+        none: { label: 'Нет текста', description: 'текста нет' },
+        sparse: { label: 'Немного текста', description: 'несколько слов —— логотип, дорожный знак, одна надпись' },
+        block: { label: 'Блок текста', description: 'блок основного текста —— скриншот, таблица, страница документа' }
+      }
+    },
+    contain_data_visual: {
+      label: 'Визуализация данных',
+      description: 'Передаёт ли изображение данные в виде графика, диаграммы, схемы или инфографики. Такие изображения остаются в очереди OCR, даже если текста на вид немного.',
+      values: {
+        'true': { label: 'Да', description: 'да —— график, диаграмма или схема' },
+        'false': { label: 'Нет', description: 'нет —— фото, рисунок, значок или декор' }
+      }
+    }
   }
 }

@@ -845,7 +845,7 @@ export default {
       empty: '아직 MCP 엔드포인트가 없습니다',
       disabled: '비활성',
       cardSummary: '도구 {tools}개 · {scope}',
-      scopeAll: '모든 지식 베이스',
+              scopeAll: '모든 지식 베이스',
       scopeCount: '지식 베이스 {count}개',
       create: '새 엔드포인트',
       editTitle: 'MCP 엔드포인트 편집',
@@ -4076,7 +4076,16 @@ export default {
         descriptionLanguageAuto: '문서 언어 자동 사용',
         customInstructionsLabel: '이미지 처리 지침',
         customInstructionsDescription: 'OCR 및 Markdown 형식은 유지하면서 시각적 우선순위를 추가합니다',
-        customInstructionsPlaceholder: '예: 명판, 모델 번호, 경고 코드 및 표 단위를 중점적으로 인식…'
+        customInstructionsPlaceholder: '예: 명판, 모델 번호, 경고 코드 및 표 단위를 중점적으로 인식…',
+        imageAttrsLabel: '이미지 속성 관찰',
+        imageAttrsDescription: '켜면 각 이미지를 먼저 속성 관찰+설명한 뒤, 속성에 따라 이미지 내 텍스트에 OCR을 실행할지 결정합니다. 끄면 기본 모드: 모든 이미지를 하나씩 설명하고 모두 OCR합니다',
+        imageAttrsSchemaLabel: '관찰 가능한 이미지 속성',
+        imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',
+        imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
+        imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
+        imageAttrsOcrOnUnobserved: '이미지 속성 관찰에 실패해도 OCR 실행',
+        imageAttrsOcrOnUnobservedDesc: '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
+        imagePipelineKbNote: '기본값은 지식베이스 설정을 따르며 이번 작업에 맞게 조정할 수 있습니다'
       },
       tableMetadataInstructions: {
         label: '테이블 메타데이터 지침',
@@ -4442,6 +4451,71 @@ export default {
       editingBadge: '편집 중',
       pageActions: '페이지 작업',
       tabDocuments: '문서',
+      tabGallery: '갤러리',
+      gallery: {
+        panelFilter: '필터 설정',
+        panelSearch: '검색 설정',
+        enableFilter: '필터 사용',
+        searchAll: '전체 필드 검색',
+        verdictDefault: '-',
+        verdictOff: 'off',
+        verdictOn: 'on',
+        searchScope: '검색 범위',
+        scopeAll: '전체',
+        scopeCustom: '사용자 지정',
+        filterScope: '필터',
+        filterOff: '전체 표시',
+        filterOn: '사용자 지정',
+        editSearch: '검색 설정 열기',
+        editFilter: '필터 설정 열기',
+        pin: '오른쪽에 고정',
+        unpin: '고정 해제',
+        title: '갤러리',
+        searchPlaceholder: '이미지 내용 검색',
+        sortByLabel: '정렬',
+        orderAsc: '오름차순',
+        orderDesc: '내림차순',
+        filtersTitle: '필터',
+        searchFields: '검색 필드',
+        modeAll: '전체 필드',
+        modeCustom: '사용자 지정',
+        keywordsPlaceholder: '쉼표로 키워드 구분',
+        applyAll: '모든 속성에 일괄 적용',
+        count: '{count}개의 이미지',
+        empty: '이 지식 베이스에는 아직 이미지가 없습니다',
+        emptyFiltered: '현재 필터와 일치하는 이미지가 없습니다',
+        attrSection: '이미지 속성',
+        noAttrs: '사용 가능한 이미지 속성이 없습니다',
+        attributes: '속성',
+        caption: '설명',
+        ocr: 'OCR 텍스트',
+        source: '출처',
+        noCaption: '설명 없음',
+        noOcr: 'OCR 텍스트 없음',
+        chunkType: '유형',
+        viewerClose: '닫기',
+        prev: '이전',
+        next: '다음',
+        openSource: '출처 문서 열기',
+        imageLoadError: '이미지를 불러오지 못했습니다',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: '설명',
+          builtin_caption_description: '모델이 생성한 이미지 설명',
+          builtin_ocr_text: 'OCR 텍스트',
+          builtin_ocr_text_description: 'OCR 로 이미지에서 추출한 텍스트',
+          builtin_created_at: '생성 시간',
+          builtin_created_at_description: '소유 문서 조각이 생성된 시각',
+          builtin_updated_at: '수정 시간',
+          builtin_updated_at_description: '소유 문서 조각이 마지막으로 수정된 시각',
+          builtin_is_enabled: '활성 상태',
+          builtin_is_enabled_description: '소유 문서 조각이 검색에 참여하는지 여부',
+          builtin_is_enabled_value_true: '활성화',
+          builtin_is_enabled_value_false: '비활성화',
+        },
+      },
       tabGraph: '그래프',
       tabGraphTip: 'Wiki 페이지 간의 링크 관계 그래프(페이지 링크 그래프)입니다. \'지식 베이스 설정 → 지식 그래프\'에서 구성하는 LLM 기반 엔티티-관계 지식 그래프와는 다른 개념입니다.',
       searchPlaceholder: 'Wiki 페이지 검색...',
@@ -4942,8 +5016,8 @@ export default {
       sharedReadonly: '공유받음 · 읽기 전용'
     },
     pin: {
-      pin: '상단 고정',
-      unpin: '고정 해제',
+              pin: '상단 고정',
+              unpin: '고정 해제',
       pinSuccess: '상단에 고정됨',
       unpinSuccess: '고정 해제됨',
       failed: '작업 실패'
@@ -7666,5 +7740,28 @@ export default {
     myChats: '내 대화',
     apiChats: 'API 세션',
     noSessions: '대화가 없습니다'
+  },
+  // 관찰 속성의 표시 문구. 속성 이름으로 색인하며 여기서는 번역만 담당합니다.
+  // 속성 이름의 점은 밑줄로 이스케이프합니다(contain.text → contain_text) —— vue-i18n 은
+  // 키를 점 단위로 순회하므로 리터럴 'contain.text' 키는 해석되지 않습니다.
+  // 번역이 없는 속성은 백엔드 등록표의 설명으로 대체됩니다.
+  imageAttr: {
+    contain_text: {
+      label: '이미지 내 텍스트 양',
+      description: '이미지 자체가 담고 있는 본문 텍스트의 양입니다. 텍스트를 읽기 위해 별도 OCR을 돌릴 가치가 있는지 판단합니다.',
+      values: {
+        none: { label: '텍스트 없음', description: '텍스트가 전혀 없습니다' },
+        sparse: { label: '약간의 글자', description: '약간의 글자만 —— 로고, 도로 표지판, 단일 라벨' },
+        block: { label: '문단 단위 본문', description: '문단 단위 본문 —— 스크린샷, 표, 문서 페이지' }
+      }
+    },
+    contain_data_visual: {
+      label: '데이터 시각화',
+      description: '이미지가 차트, 그래프, 도표, 인포그래픽으로 데이터를 전달하는지 여부입니다. 글자가 적어 보여도 OCR 대상으로 유지합니다.',
+      values: {
+        'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
+        'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
+      }
+    }
   }
 }
