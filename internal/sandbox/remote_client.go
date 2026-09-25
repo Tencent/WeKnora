@@ -49,6 +49,14 @@ type RemoteConnectRequest struct {
 	TrafficAccessToken string
 }
 
+// RemoteSessionConnector connects and checks lifecycle state using the same
+// provider handle. It avoids Get (which itself connects on Cube/E2B) followed
+// by another Connect. Terminal/missing sandboxes must return classified errors;
+// transient failures must never authorize replacement of a session's sandbox.
+type RemoteSessionConnector interface {
+	ConnectSession(context.Context, RemoteConnectRequest) (RemoteSandboxHandle, error)
+}
+
 // RemoteTimeoutMode describes how the remote provider should treat the
 // requested idle timeout.
 type RemoteTimeoutMode string
@@ -438,6 +446,14 @@ type RemoteSandboxCapabilities struct {
 	// reject terminal features with an unsupported-backend error instead of
 	// failing after the WebSocket is upgraded.
 	SupportsTerminals bool
+
+	// SupportsDesktop is true when the provider can relay a WebSocket to a
+	// non-envd data-plane port inside the sandbox, which is what the VNC
+	// desktop needs (websockify on 6080). It is separate from
+	// SupportsTerminals: the terminal rides envd's PTY service, the desktop
+	// rides a raw port through the gateway. Docker is false — not because it
+	// cannot, but because it is not scheduled.
+	SupportsDesktop bool
 }
 
 // RemoteSandboxClient is the contract SessionBoundManager talks to. All

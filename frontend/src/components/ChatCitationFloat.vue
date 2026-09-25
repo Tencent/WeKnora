@@ -1,6 +1,7 @@
 <template>
   <Teleport to="body">
-    <div v-if="float.visible" class="chat-citation-float" :style="{ top: `${float.top}px`, left: `${float.left}px` }"
+    <div v-if="float.visible" class="chat-citation-float" :class="{ 'chat-citation-float--kb': float.type === 'kb' }"
+      :style="{ top: `${float.top}px`, left: `${float.left}px` }"
       @mouseenter="onEnter?.()" @mouseleave="onLeave?.()">
       <template v-if="float.type === 'web'">
         <div class="chat-citation-float__title">{{ float.title || float.url }}</div>

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -99,7 +100,7 @@ func IsEmbedSessionToken(token string) bool {
 }
 
 // SignEmbedSessionHandle binds a chat session id to its embed channel with an
-// HMAC keyed by the channel's (server-only) publish token. The handle is handed
+// HMAC keyed by a server-only deployment secret. The handle is handed
 // to the widget at session-creation time and must be presented on every history
 // load / chat call. Because the session id travels in the request path (and can
 // land in access logs), this signature — sent in a header, never logged — is the
@@ -109,8 +110,12 @@ func SignEmbedSessionHandle(ch *types.EmbedChannel, sessionID string) string {
 	if ch == nil || strings.TrimSpace(sessionID) == "" {
 		return ""
 	}
-	mac := hmac.New(sha256.New, []byte(ch.PublishToken))
-	mac.Write([]byte(ch.ID + "|" + sessionID))
+	key := utils.SystemHMACKey()
+	if len(key) == 0 {
+		return ""
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte("embed-session:v2|" + ch.PublishToken + "|" + ch.ID + "|" + sessionID))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 

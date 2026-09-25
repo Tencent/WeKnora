@@ -1,6 +1,6 @@
 {
   "name": "knowledage-base",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
+    "@novnc/novnc": "^1.7.0",
     "@types/dompurify": "^3.2.0",
     "@types/papaparse": "^5.5.2",
     "@vue-office/pptx": "^1.0.1",
@@ -33,6 +34,7 @@
     "mermaid": "^11.15.0",
     "pagefind": "^1.5.2",
     "papaparse": "^5.5.3",
+    "pdfjs-dist": "^6.3.289",
     "pinia": "^3.0.4",
     "swiper": "^12.1.4",
     "tdesign-icons-vue-next": "0.4.4",
@@ -43,7 +45,7 @@
     "vue-router": "^4.5.0",
     "vue-virtual-scroller": "^2.0.0-beta.8",
     "webpack": "^5.106.2",
-    "xlsx": "file:./packages/xlsx-0.20.2.tgz"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",

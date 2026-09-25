@@ -233,8 +233,13 @@ func (m *Manager) InternalHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "preview":
 		result.Data, err = m.Preview(ctx, input.Scope, input.Session)
-	case "idle":
-		err = m.Idle(ctx, input.Scope, input.Session)
+	case "finish_turn":
+		keepOpen, valid := input.Params["keep_open"].(bool)
+		if !valid {
+			err = errors.New("keep_open must be a boolean")
+		} else {
+			err = m.FinishTurn(ctx, input.Scope, input.Session, keepOpen)
+		}
 	case "focus":
 		err = m.Focus(ctx, input.Scope, input.Session)
 	case "forget":

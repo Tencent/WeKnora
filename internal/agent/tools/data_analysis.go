@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"io"
 	"os"
 	"regexp"
 	"strings"
+
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -17,11 +18,24 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
+// DataAnalysisTableName is the only table name the model needs to know when
+// querying a CSV/Excel document through data_analysis. Each document is loaded
+// into a physical DuckDB table named after its knowledge ID; that name is
+// never shown to the model. Every query runs on a private connection where
+// "dataset" is a temporary view over the selected document, so the model
+// references the same fixed identifier for every document and the knowledge
+// ID never has to appear inside SQL text.
+const DataAnalysisTableName = "dataset"
+
 var dataAnalysisTool = BaseTool{
 	name: ToolDataAnalysis,
-	description: "Use this tool when the knowledge is CSV or Excel files. It loads the data into memory and executes SQL for data analysis. " +
-		"For Excel files with multiple sheets, every sheet is loaded into the same table and the source sheet name is exposed as a '__sheet_name' column so you can filter/aggregate per sheet. " +
-		"If the user's question requires data statistics, convert the question into SQL and execute it.",
+	description: "Use this tool when the knowledge is CSV or Excel files. It loads the document into DuckDB " +
+		"and executes a read-only SQL query for data analysis. The selected document is always exposed as " +
+		"the single table \"" + DataAnalysisTableName + "\"; write SQL against that table name and never put " +
+		"the document ID inside the SQL. For Excel files with multiple sheets, every sheet is loaded into " +
+		"the same table and the source sheet name is exposed as a '__sheet_name' column so you can " +
+		"filter/aggregate per sheet. If the user's question requires data statistics, convert the " +
+		"question into SQL and execute it.",
 	schema: utils.GenerateSchema[DataAnalysisInput](),
 }
 
@@ -104,7 +118,7 @@ func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
 
 type DataAnalysisInput struct {
 	KnowledgeID string `json:"knowledge_id" jsonschema:"short dN document ID to query"`
-	Sql         string `json:"sql" jsonschema:"SQL to be executed on knowledge"`
+	SQL         string `json:"sql" jsonschema:"Read-only SELECT executed on the document. Reference the document as the table \"dataset\" (for example SELECT COUNT(*) FROM dataset); it is the only table available"` //nolint:lll // jsonschema tag
 }
 
 type DataAnalysisTool struct {
@@ -229,48 +243,36 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	// Replace knowledge ID with table name
-	input.Sql = strings.ReplaceAll(input.Sql, input.KnowledgeID, schema.TableName)
-	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.Sql, schema); len(fixes) > 0 {
+	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.SQL, schema); len(fixes) > 0 {
 		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote SQL identifiers for session %s: %v", t.sessionID, fixes)
-		input.Sql = rewrittenSQL
+		input.SQL = rewrittenSQL
 	}
 
 	// Check if this is a read-only query
-	normalizedSQL := strings.TrimSpace(strings.ToLower(input.Sql))
-	isReadOnly := strings.HasPrefix(normalizedSQL, "select") ||
-		strings.HasPrefix(normalizedSQL, "show") ||
-		strings.HasPrefix(normalizedSQL, "describe") ||
-		strings.HasPrefix(normalizedSQL, "explain") ||
-		strings.HasPrefix(normalizedSQL, "pragma")
+	normalizedSQL := strings.TrimSpace(strings.ToLower(input.SQL))
+	isReadOnly := strings.HasPrefix(normalizedSQL, "select")
 
 	if !isReadOnly {
 		// Reject modification queries
-		logger.Warnf(ctx, "[Tool][DataAnalysis] Modification query rejected for session %s: %s", t.sessionID, input.Sql)
+		logger.Warnf(ctx, "[Tool][DataAnalysis] Modification query rejected for session %s: %s", t.sessionID, input.SQL)
 		return &types.ToolResult{
 			Success: false,
-			Error:   "DuckDB tool only supports read-only queries (SELECT, SHOW, DESCRIBE, EXPLAIN, PRAGMA). Modification operations (INSERT, UPDATE, DELETE, CREATE, DROP, etc.) are not allowed.",
+			Error: "DuckDB tool only supports read-only SELECT queries. " +
+				"Modification operations and configuration statements are not allowed.",
 		}, fmt.Errorf("modification queries are not allowed")
 	}
 
-	// Validate SQL with comprehensive security checks
-	// IMPORTANT: Must enable validateSelectStmt to block RangeFunction attacks
-	_, validation := utils.ValidateSQL(input.Sql,
-		utils.WithAllowedTables(schema.TableName),
-		utils.WithSingleStatement(),      // Block multiple statements
-		utils.WithNoDangerousFunctions(), // Block dangerous functions
-	)
-	if !validation.Valid {
-		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, validation.Errors)
+	if err := validateDataAnalysisSQL(input.SQL, schema); err != nil {
+		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, err)
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("SQL validation failed: %v", validation.Errors),
-		}, fmt.Errorf("SQL validation failed: %v", validation.Errors)
+			Error:   err.Error(),
+		}, err
 	}
 
-	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, input.Sql)
+	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, input.SQL)
 	// Execute single query and get results
-	results, err := t.executeSingleQuery(ctx, input.Sql)
+	results, err := t.executeSingleQuery(ctx, input.SQL, schema.TableName)
 	if err != nil {
 		if suggestion := buildMissingColumnSuggestion(err, schema); suggestion != "" {
 			return &types.ToolResult{
@@ -284,7 +286,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	queryOutput := t.formatQueryResults(results, input.Sql)
+	queryOutput := t.formatQueryResults(results, input.SQL)
 	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s", len(results), t.sessionID)
 	return &types.ToolResult{
 		Success: true,
@@ -292,7 +294,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		Data: map[string]interface{}{
 			"rows":         results,
 			"row_count":    len(results),
-			"query":        input.Sql,
+			"query":        input.SQL,
 			"display_type": ToolDataAnalysis,
 			"session_id":   t.sessionID,
 		},
@@ -309,8 +311,68 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 //   - []string: merged column names (existing + new columns, deduplicated)
 //   - []map[string]string: query results
 //   - error: any error that occurred during execution
-func (t *DataAnalysisTool) executeSingleQuery(ctx context.Context, sqlQuery string) ([]map[string]string, error) {
-	rows, err := t.db.QueryContext(ctx, sqlQuery)
+//
+// validateDataAnalysisSQL enforces the read-only, single-table contract. The
+// model-facing DataAnalysisTableName and the physical table are both accepted
+// so that internal callers (ingest sampling, older stored schema summaries)
+// keep working; a query against anything else is rejected with an error that
+// names the table the model should have used.
+func validateDataAnalysisSQL(sqlQuery string, schema *TableSchema) error {
+	// IMPORTANT: Must enable validateSelectStmt to block RangeFunction attacks
+	_, validation := utils.ValidateSQL(sqlQuery,
+		utils.WithAllowedTables(DataAnalysisTableName, schema.TableName),
+		utils.WithSelectOnly(),
+		utils.WithSingleStatement(),      // Block multiple statements
+		utils.WithNoDangerousFunctions(), // Block dangerous functions
+	)
+	if validation.Valid {
+		return nil
+	}
+	for _, validationErr := range validation.Errors {
+		if validationErr.Type == "table_not_allowed" {
+			return fmt.Errorf(
+				"SQL validation failed: %s. The selected document is exposed as the single table %q; "+
+					"write the query against that table name and pass the document only through knowledge_id",
+				validationErr.Message, DataAnalysisTableName,
+			)
+		}
+	}
+	return fmt.Errorf("SQL validation failed: %v", validation.Errors)
+}
+
+// executeSingleQuery runs a validated query on a dedicated connection where
+// DataAnalysisTableName is a temporary view over the document's physical
+// table. Temporary objects are connection-local in DuckDB, so concurrent
+// sessions analysing different documents never observe each other's view; the
+// view is replaced on entry and dropped on exit so a pooled connection carries
+// nothing over to its next user.
+func (t *DataAnalysisTool) executeSingleQuery(
+	ctx context.Context, sqlQuery string, physicalTable string,
+) ([]map[string]string, error) {
+	conn, err := t.db.Conn(ctx)
+	if err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to acquire connection: %v", err)
+		return nil, fmt.Errorf("failed to acquire database connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	viewSQL := fmt.Sprintf(
+		`CREATE OR REPLACE TEMPORARY VIEW "%s" AS SELECT * FROM "%s"`,
+		DataAnalysisTableName, physicalTable,
+	)
+	if _, err := conn.ExecContext(ctx, viewSQL); err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to expose table '%s' as %s: %v",
+			physicalTable, DataAnalysisTableName, err)
+		return nil, fmt.Errorf("failed to expose document table: %w", err)
+	}
+	defer func() {
+		dropSQL := fmt.Sprintf(`DROP VIEW IF EXISTS "%s"`, DataAnalysisTableName)
+		if _, err := conn.ExecContext(context.WithoutCancel(ctx), dropSQL); err != nil {
+			logger.Warnf(ctx, "[Tool][DataAnalysis] Failed to drop temporary view %s: %v", DataAnalysisTableName, err)
+		}
+	}()
+
+	rows, err := conn.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: %v", err)
 		return nil, fmt.Errorf("query execution failed: %w", err)
@@ -768,10 +830,12 @@ func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
 	return "k_" + strings.ReplaceAll(knowledge.ID, "-", "_")
 }
 
-// buildSchemaDescription builds a formatted schema description
+// Description builds the model-facing schema description. It names the table
+// as DataAnalysisTableName, the identifier the model must use in SQL; the
+// physical TableName stays internal.
 func (t *TableSchema) Description() string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Table name: %s\n", t.TableName))
+	fmt.Fprintf(&builder, "Table name: %s\n", DataAnalysisTableName)
 	builder.WriteString(fmt.Sprintf("Columns: %d\n", len(t.Columns)))
 	builder.WriteString(fmt.Sprintf("Rows: %d\n\n", t.RowCount))
 	builder.WriteString("Column info:\n")

@@ -109,6 +109,13 @@ type KnowledgeBase struct {
 	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
 	// AutoTagConfig controls asynchronous association of existing tags after parsing.
 	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config" gorm:"type:json"`
+	// ProfileConfig controls automatic generation of the knowledge-base
+	// description from per-document profiles (document knowledge bases only).
+	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config" gorm:"column:profile_config;type:json"` //nolint:lll // one-line struct tag
+	// GeneratedProfile is the machine-generated description: a gist, merged
+	// topics, typical questions and the aggregate snapshot they came from. It
+	// never overwrites the user-authored Description; both are shown to agents.
+	GeneratedProfile *KnowledgeBaseProfile `yaml:"generated_profile" json:"generated_profile,omitempty" gorm:"column:generated_profile;type:json"` //nolint:lll // one-line struct tag
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
@@ -152,14 +159,24 @@ type KnowledgeBase struct {
 type KnowledgeBaseConfig struct {
 	// Chunking configuration
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"`
-	// Image processing configuration
-	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config"`
+	// Image processing configuration.
+	//
+	// nil means "no change" when updating, the same contract IndexingStrategy
+	// uses. A request that does not mention this field must leave the image
+	// settings alone: the attribute-observation switch and the attribute policy
+	// are things a knowledge base accumulates, and a client that predates them
+	// would otherwise reset the lot on any save. Sending an object — empty
+	// included — replaces the whole configuration.
+	ImageProcessingConfig *ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config"`
 	// FAQ configuration (only for FAQ type knowledge bases)
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"`
 	// Wiki configuration (only for wiki-enabled knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"`
 	// AutoTagConfig controls optional automatic association of existing KB tags.
 	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config"`
+	// ProfileConfig controls optional automatic knowledge-base description
+	// generation. nil means "no change" when updating.
+	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config"`
 	// IndexingStrategy controls which indexing pipelines are active.
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
@@ -523,6 +540,19 @@ func ParseProviderScheme(filePath string) string {
 type ImageProcessingConfig struct {
 	// Model ID
 	ModelID string `yaml:"model_id" json:"model_id"`
+	// ImageActions overrides the built-in attribute→work table (see
+	// DefaultImageActions). A nil value keeps the conservative default: run OCR
+	// for block text, data visuals, and unobserved images.
+	ImageActions *ImageActionsConfig `yaml:"image_actions,omitempty" json:"image_actions,omitempty"`
+	// ImageAttrsEnabled turns the attribute-observed image pipeline on for this
+	// knowledge base. It is off by default on purpose, so upgrading an
+	// existing deployment never changes what happens to documents already
+	// being ingested: with it off every image is described and OCR'd exactly
+	// as before. When on, the describe round also observes image attributes and
+	// the attribute policy decides whether OCR runs for it. A single upload can
+	// override it per document through
+	// KnowledgeProcessOverrides.ImageAttrsEnabled.
+	ImageAttrsEnabled bool `yaml:"image_attrs_enabled,omitempty" json:"image_attrs_enabled,omitempty"` //nolint:lll // one-line struct tag
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value
@@ -737,6 +767,7 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	}
 	if kb.Type != KnowledgeBaseTypeDocument {
 		kb.AutoTagConfig = nil
+		kb.ProfileConfig = nil
 	} else if kb.AutoTagConfig != nil {
 		kb.AutoTagConfig.Normalize()
 	}
@@ -804,14 +835,25 @@ func (kb *KnowledgeBase) Capabilities() KBCapabilities {
 
 // MarshalJSON augments the default JSON encoding of KnowledgeBase with a computed
 // `capabilities` field so clients (agent editor) can filter KBs by feature.
-// It preserves all existing fields verbatim.
+//
+// The legacy inline credentials (storage_config secret_id / secret_key and
+// vlm_config api_key) are withheld. Their DB columns are written by
+// StorageConfig.Value / VLMConfig.Value, so persistence is unaffected, while
+// every JSON rendering of a KB is an API or tool response — including the
+// lists shown to org-share receivers, who must never see the owner's keys.
+// Clients only need these fields' presence, which /initialization/config
+// reports separately.
 func (kb *KnowledgeBase) MarshalJSON() ([]byte, error) {
 	type alias KnowledgeBase
+	redacted := *kb
+	redacted.StorageConfig.SecretID = ""
+	redacted.StorageConfig.SecretKey = ""
+	redacted.VLMConfig.APIKey = ""
 	aux := struct {
 		*alias
 		Capabilities KBCapabilities `json:"capabilities"`
 	}{
-		alias:        (*alias)(kb),
+		alias:        (*alias)(&redacted),
 		Capabilities: kb.Capabilities(),
 	}
 	return json.Marshal(aux)

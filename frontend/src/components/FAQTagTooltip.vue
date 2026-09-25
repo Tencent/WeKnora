@@ -174,10 +174,10 @@ watch(showTooltip, (newVal) => {
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   box-shadow: 0 0 8px 0 rgba(0, 0, 0, 0.08);
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 400;
   line-height: 1.6;
   word-break: break-word;
@@ -279,7 +279,7 @@ watch(showTooltip, (newVal) => {
 .tooltip-content {
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 400;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -288,7 +288,7 @@ watch(showTooltip, (newVal) => {
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease;
 }
 
 .fade-enter-from {

@@ -17,9 +17,12 @@ import (
 // row id is an implementation detail of the installed-skill source.
 type SkillEnvResolver interface {
 	// ResolveEnv returns the values to inject and the names of any required
-	// variable that neither the admin nor this caller has filled in. An empty
-	// skillName asks for the caller's config-wide variables alone. The caller's
-	// identity is taken from ctx, never from a parameter.
+	// variable that neither the admin, this caller, nor the sandbox config's
+	// create-time env_vars has filled in. Create-time names satisfy required
+	// but are not in the returned map: they were baked into the sandbox at
+	// creation and must not be re-injected per exec. An empty skillName asks
+	// for the caller's config-wide variables alone. The caller's identity is
+	// taken from ctx, never from a parameter.
 	ResolveEnv(ctx context.Context, skillName string) (env map[string]string, missing []string, err error)
 }
 

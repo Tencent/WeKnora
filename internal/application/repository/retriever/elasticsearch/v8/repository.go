@@ -403,6 +403,39 @@ func (e *elasticsearchRepository) Retrieve(ctx context.Context,
 	return nil, err
 }
 
+// vectorScoreScriptSource scores every document by its cosine similarity to the
+// query vector, floored at 0. Lucene rejects negative final script_score values
+// ("script_score script returned an invalid score ... Must be a non-negative
+// score!"), so an unclamped negative cosine — which occurs whenever any stored
+// vector points away from the query — fails the entire search request with a
+// 400 (all shards failed) instead of merely ranking that document last. The
+// floor keeps the score in the [0, 1] range the shared retriever score
+// normalizer documents for this engine; documents clamped to 0 fall below any
+// positive min_score threshold.
+var vectorScoreScriptSource = "Math.max(cosineSimilarity(params.query_vector, 'embedding'), 0.0)"
+
+// buildVectorScriptScoreQuery wraps the cosine-similarity scoring script in a
+// script_score query over the request's base filter conditions.
+func (e *elasticsearchRepository) buildVectorScriptScoreQuery(
+	params typesLocal.RetrieveParams,
+) (*types.ScriptScoreQuery, error) {
+	queryVectorJSON, err := json.Marshal(params.Embedding)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal query embedding: %w", err)
+	}
+	minScore := float32(params.Threshold)
+	return &types.ScriptScoreQuery{
+		Query: types.Query{Bool: &types.BoolQuery{Filter: e.getBaseConds(params)}},
+		Script: types.Script{
+			Source: &vectorScoreScriptSource,
+			Params: map[string]json.RawMessage{
+				"query_vector": json.RawMessage(queryVectorJSON),
+			},
+		},
+		MinScore: &minScore,
+	}, nil
+}
+
 // VectorRetrieve performs vector similarity search using cosine similarity
 // Returns a slice of RetrieveResult containing matching documents
 func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
@@ -412,26 +445,10 @@ func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
 	log.Infof("[Elasticsearch] Vector retrieval: dim=%d, topK=%d, threshold=%.4f",
 		len(params.Embedding), params.TopK, params.Threshold)
 
-	filter := e.getBaseConds(params)
-
-	// Build script scoring query with cosine similarity
-	queryVectorJSON, err := json.Marshal(params.Embedding)
+	scriptScore, err := e.buildVectorScriptScoreQuery(params)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Failed to marshal query vector: %v", err)
-		return nil, fmt.Errorf("failed to marshal query embedding: %w", err)
-	}
-
-	scoreSource := "cosineSimilarity(params.query_vector, 'embedding')"
-	minScore := float32(params.Threshold)
-	scriptScore := &types.ScriptScoreQuery{
-		Query: types.Query{Bool: &types.BoolQuery{Filter: filter}},
-		Script: types.Script{
-			Source: &scoreSource,
-			Params: map[string]json.RawMessage{
-				"query_vector": json.RawMessage(queryVectorJSON),
-			},
-		},
-		MinScore: &minScore,
+		return nil, err
 	}
 	// Exclude embedding field from source to reduce response size
 	sourceFilter := &types.SourceFilter{
@@ -540,6 +557,14 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	}, nil
 }
 
+// copySourceDoc decodes a source row for CopyIndices. IsEnabled shadows the
+// embedded field so a row written before is_enabled existed, which retrieval
+// treats as enabled, can be told apart from an explicit false.
+type copySourceDoc struct {
+	elasticsearchRetriever.VectorEmbedding
+	IsEnabled *bool `json:"is_enabled"`
+}
+
 // CopyIndices 复制索引数据
 func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 	sourceKnowledgeBaseID string,
@@ -560,13 +585,13 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 		return nil
 	}
 
-	// Build query parameters
-	params := typesLocal.RetrieveParams{
-		KnowledgeBaseIDs: []string{sourceKnowledgeBaseID},
-	}
-
-	// Build base query conditions
-	filter := e.getBaseConds(params)
+	// Scan every row of the source knowledge base. getBaseConds is not used
+	// here because it drops disabled rows, which must be copied as disabled.
+	filter := []types.Query{{Terms: &types.TermsQuery{
+		TermsQuery: map[string]types.TermsQueryField{
+			e.idField("knowledge_base_id"): []string{sourceKnowledgeBaseID},
+		},
+	}}}
 
 	// Set batch processing parameters
 	batchSize := 500
@@ -600,7 +625,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 
 		for _, hit := range searchResponse.Hits.Hits {
 			// Parse source document
-			var sourceDoc elasticsearchRetriever.VectorEmbedding
+			var sourceDoc copySourceDoc
 			if err := json.Unmarshal(hit.Source_, &sourceDoc); err != nil {
 				log.Errorf("[Elasticsearch] Failed to parse source index data: %v", err)
 				continue
@@ -622,11 +647,6 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				continue
 			}
 
-			// Save embedding vector to embeddingMap
-			if len(sourceDoc.Embedding) > 0 {
-				embeddingMap[targetChunkID] = sourceDoc.Embedding
-			}
-
 			// Handle SourceID transformation for generated questions
 			// Generated questions have SourceID format: {chunkID}-{questionID}
 			// Regular chunks have SourceID == ChunkID
@@ -643,6 +663,12 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				targetSourceID = uuid.New().String()
 			}
 
+			// BatchSave looks embeddings up by SourceID, so key by the target
+			// SourceID; rows of one chunk would collide on the chunk ID.
+			if len(sourceDoc.Embedding) > 0 {
+				embeddingMap[targetSourceID] = sourceDoc.Embedding
+			}
+
 			// Create new index information
 			indexInfo := &typesLocal.IndexInfo{
 				Content:         sourceDoc.Content,
@@ -651,6 +677,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				ChunkID:         targetChunkID,
 				KnowledgeID:     targetKnowledgeID,
 				KnowledgeBaseID: targetKnowledgeBaseID,
+				IsEnabled:       sourceDoc.IsEnabled == nil || *sourceDoc.IsEnabled,
 			}
 
 			indexInfoList = append(indexInfoList, indexInfo)

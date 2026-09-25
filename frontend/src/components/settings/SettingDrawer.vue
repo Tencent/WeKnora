@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="drawerVisible && resizable" class="setting-drawer-resize-handle"
+    <div v-if="drawerVisible && resizable && !maximized" class="setting-drawer-resize-handle"
       :class="{ 'setting-drawer-resize-handle--active': drawerResizing }"
       :style="{ right: `${drawerWidthPx}px`, '--setting-drawer-travel': `${drawerWidthPx}px` }"
       role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
@@ -31,7 +31,20 @@
               <slot name="subtitle">{{ description }}</slot>
             </div>
           </div>
-          <div :id="headerActionsId" class="setting-drawer__header-actions"><slot name="header-actions" /></div>
+          <div class="setting-drawer__header-tools">
+            <div :id="headerActionsId" class="setting-drawer__header-actions"><slot name="header-actions" /></div>
+            <t-tooltip v-if="maximizable" :content="maximized ? t('common.exitFullscreen') : t('common.fullscreen')" placement="bottom">
+              <button
+                type="button"
+                class="setting-drawer__maximize"
+                :aria-label="maximized ? t('common.exitFullscreen') : t('common.fullscreen')"
+                :aria-pressed="maximized"
+                @click="maximized = !maximized"
+              >
+                <t-icon :name="maximized ? 'fullscreen-exit' : 'fullscreen'" />
+              </button>
+            </t-tooltip>
+          </div>
         </div>
         <div v-if="$slots['header-extra']" class="setting-drawer__header-extra">
           <slot name="header-extra" />
@@ -43,13 +56,16 @@
       <slot />
     </div>
     <template v-if="!hideFooter" #footer>
+      <div v-if="$slots['footer-extra']" class="setting-drawer__footer-extra">
+        <slot name="footer-extra" />
+      </div>
       <div class="setting-drawer__footer">
         <div class="setting-drawer__footer-left">
           <slot name="footer-left" />
         </div>
         <div class="setting-drawer__footer-right">
           <slot name="footer-right">
-            <t-button theme="default" variant="outline" @click="handleCancel">
+            <t-button theme="default" variant="outline" :disabled="cancelDisabled" @click="handleCancel">
               {{ cancelText || t('common.cancel') }}
             </t-button>
             <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
@@ -71,7 +87,7 @@ export const SETTING_DRAWER_HEADER_ACTIONS_ID: InjectionKey<string> = Symbol('se
 </script>
 
 <script setup lang="ts">
-import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted } from 'vue'
+import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
@@ -94,12 +110,19 @@ interface Props {
   minWidth?: number
   maxWidth?: number
   /**
+   * Show a maximize toggle in the header. Content-heavy drawers (the Markdown
+   * editor) need more room than `maxWidth` allows; while maximized the drawer
+   * spans the viewport and the drag handle steps aside.
+   */
+  maximizable?: boolean
+  /**
    * localStorage key used to remember the user's chosen width. Set to '' to
    * disable persistence. Default key is namespaced per-consumer using the
    * drawer title.
    */
   storageKey?: string
   confirmLoading?: boolean
+  cancelDisabled?: boolean
   confirmDisabled?: boolean
   confirmText?: string
   cancelText?: string
@@ -116,8 +139,10 @@ const props = withDefaults(defineProps<Props>(), {
   resizable: true,
   minWidth: 480,
   maxWidth: 1200,
+  maximizable: false,
   storageKey: '',
   confirmLoading: false,
+  cancelDisabled: false,
   confirmDisabled: false,
   confirmText: '',
   cancelText: '',
@@ -190,7 +215,18 @@ const drawerWidthPx = computed(() =>
   clampWidth(userWidthPx.value ?? parseWidthToPx(props.width)),
 )
 
-const effectiveWidth = computed(() => `${drawerWidthPx.value}px`)
+// ---------- maximize ----------
+const maximized = ref(false)
+
+// Leaving the drawer maximized would surprise the next caller of the same
+// storage key, so the toggle lives for one open.
+watch(drawerVisible, (val) => {
+  if (!val) maximized.value = false
+})
+
+const effectiveWidth = computed(() =>
+  maximized.value ? `${viewportWidth.value}px` : `${drawerWidthPx.value}px`,
+)
 
 const persistWidth = (width: number) => {
   const next = clampWidth(width)
@@ -294,21 +330,20 @@ const handleCancel = () => {
   gap: 10px;
   flex: 1;
   min-width: 0;
-  padding: 2px 0;
 }
 
 .setting-drawer__header-icon {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(7, 192, 95, 0.1);
+  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   color: var(--td-brand-color);
-  font-size: 16px;
-  transition: background 0.2s ease;
+  font-size: var(--app-text-lg);
+  transition: background var(--app-motion-base) ease;
 }
 
 .setting-drawer__header-text {
@@ -319,11 +354,45 @@ const handleCancel = () => {
   min-width: 0;
 }
 
+.setting-drawer__header-tools {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.setting-drawer__maximize {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-lg);
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
+}
+
 .setting-drawer__header-actions {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  margin-left: auto;
 
   &:empty {
     display: none;
@@ -340,7 +409,7 @@ const handleCancel = () => {
 }
 
 .setting-drawer__title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
@@ -350,7 +419,7 @@ const handleCancel = () => {
 }
 
 .setting-drawer__subtitle {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-secondary);
 }
@@ -418,7 +487,7 @@ const handleCancel = () => {
 }
 
 .setting-drawer__body :deep(.setting-drawer__section-title) {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 4px;
@@ -440,6 +509,12 @@ const handleCancel = () => {
 }
 
 /* ---------- Footer ---------- */
+.setting-drawer__footer-extra {
+  margin-bottom: 12px;
+  min-width: 0;
+  text-align: left;
+}
+
 .setting-drawer__footer {
   display: flex;
   align-items: center;
@@ -481,7 +556,10 @@ const handleCancel = () => {
   }
 
   .t-drawer__header {
-    padding: 14px 18px;
+    // 72px 的抽屉头在一屏设置里太重：图标 32px、上下各 14px，再加标题与副标题
+    // 两行。收到 60px（图标 28px、内边距 10px）够了，标题字号刻意不动——再小
+    // 就和正文里的字段标签一样大，层级会塌。
+    padding: 10px 18px;
     border-bottom: 1px solid var(--td-component-stroke);
   }
 
@@ -530,7 +608,7 @@ const handleCancel = () => {
   border-radius: 1px;
   background: var(--td-component-border);
   opacity: 0.55;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 }
 
 .setting-drawer-resize-handle:hover .setting-drawer-resize-line,

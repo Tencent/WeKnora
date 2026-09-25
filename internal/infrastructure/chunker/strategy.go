@@ -314,8 +314,8 @@ func runTier(tier StrategyTier, text string, cfg SplitterConfig, profile *DocPro
 }
 
 // ensureDefaults fills in zero-value config fields with sane defaults.
-// Mirrors buildSplitterConfig in internal/application/service/knowledge.go
-// so direct callers of this package get the same numbers.
+// NormalizeSplitterConfig also uses these defaults so service callers and
+// direct callers of this package get the same numbers.
 //
 // When cfg.TokenLimit is set, ChunkSize is clamped to the character budget
 // that fits within that token limit (with a 10% safety factor). This makes

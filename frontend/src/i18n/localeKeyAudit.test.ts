@@ -291,3 +291,19 @@ test('locale messages compile with vue-i18n syntax rules', () => {
   )
   assert.deepEqual(summary, [], summary.slice(0, 20).join('\n'))
 })
+
+test('DingTalk configuration and sync failures remain localized after pruning', () => {
+  const keys = [
+    'connector.dingtalk', 'connectorDesc.dingtalk',
+    'field.clientId', 'field.clientSecret', 'field.operatorId', 'field.operatorIdHint',
+    'prereqBarText_dingtalk', 'prereqOpenConsole_dingtalk',
+    ...[1, 2, 3].flatMap(step => [`prereqStep${step}Brief_dingtalk`, `prereqStep${step}Desc_dingtalk`]),
+    'syncError.dingtalk_document_failed', 'syncError.dingtalk_resource_failed',
+  ].map(key => `datasource.${key}`)
+  for (const key of keys) {
+    assert.ok(referencedKeys.has(key), `pruning would remove ${key}`)
+    for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
+      assert.equal(typeof getLocaleValueAtPath(bundle, key), 'string', `${locale}: missing ${key}`)
+    }
+  }
+})

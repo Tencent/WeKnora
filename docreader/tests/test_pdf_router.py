@@ -15,11 +15,13 @@ from docreader.parser.pdf_parser import (
     _merge_orphan_punctuation_lines,
     _page_chars,
     _point_in_boxes,
+    _postprocess_pdf_text,
     _segments_to_markdown,
     _select_embedded_images,
     _should_prefer_plain,
     _split_columns,
     _strip_repeating_lines,
+    _tail_looks_like_numeric_table,
 )
 
 
@@ -374,12 +376,19 @@ class PdfTextSanitizeTest(unittest.TestCase):
         self.assertIn("Body text.", out)
 
     def test_preserves_numeric_body_run_without_chart_context(self):
-        from docreader.parser.pdf_parser import _postprocess_pdf_text
-
         raw = "Quantity\n124\n237\n68\n91\nEnd of inventory."
         out = _postprocess_pdf_text(raw)
         for value in ("124", "237", "68", "91"):
             self.assertIn(value, out)
+
+    def test_preserves_numeric_body_run_with_chart_context_when_header_is_present(self):
+        raw = "Quantity\n124\n237\n68\n91\ntraining error"
+        out = _postprocess_pdf_text(raw)
+        for value in ("124", "237", "68", "91"):
+            self.assertIn(value, out)
+
+    def test_numeric_header_and_rows_are_a_table_tail(self):
+        self.assertTrue(_tail_looks_like_numeric_table(["Body", "Quantity", "124", "237"]))
 
     def test_preserves_repeated_single_digit_values(self):
         from docreader.parser.pdf_parser import _postprocess_pdf_text
@@ -400,8 +409,6 @@ class PdfTextSanitizeTest(unittest.TestCase):
         self.assertIn("\n2", out)
 
     def test_keeps_numeric_table_before_figure_caption(self):
-        from docreader.parser.pdf_parser import _postprocess_pdf_text
-
         raw = "Header\nAster 124\nWillow 237\nFigure 1. Chart\nAfter"
         out = _postprocess_pdf_text(raw)
         self.assertIn("Aster 124", out)
@@ -439,6 +446,11 @@ class LayoutQualityFallbackTest(unittest.TestCase):
     def test_prefers_plain_when_layout_splits_numeric_table_columns(self):
         plain = "ITEM QUANTITY\nAster 124\nWillow 237"
         layout = "ITEM\nAster\nWillow\nQUANTITY\n1 24\n237"
+        self.assertTrue(_should_prefer_plain(plain, layout))
+
+    def test_prefers_plain_when_layout_substitutes_a_numeric_value(self):
+        plain = "ITEM QUANTITY\nAster 124\nWillow 237"
+        layout = "ITEM QUANTITY\nAster 124\nWillow 999"
         self.assertTrue(_should_prefer_plain(plain, layout))
 
     def test_does_not_prefer_plain_numeric_rows_without_table_hint(self):

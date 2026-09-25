@@ -627,6 +627,17 @@ func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
 	}, nil
 }
 
+// vectorScoreScriptSource scores every document by its cosine similarity to the
+// query vector, floored at 0. Lucene rejects negative final script_score values
+// ("script_score script returned an invalid score ... Must be a non-negative
+// score!"), so an unclamped negative cosine — which occurs whenever any stored
+// vector points away from the query — fails the entire search request with a
+// 400 (all shards failed) instead of merely ranking that document last. The
+// floor keeps the score in the [0, 1] range the shared retriever score
+// normalizer documents for this engine; documents clamped to 0 fall below any
+// positive min_score threshold.
+var vectorScoreScriptSource = "Math.max(cosineSimilarity(params.query_vector,'embedding'), 0.0)"
+
 // buildVectorSearchQuery builds the vector search query JSON
 func (e *elasticsearchRepository) buildVectorSearchQuery(ctx context.Context,
 	params typesLocal.RetrieveParams,
@@ -651,7 +662,7 @@ func (e *elasticsearchRepository) buildVectorSearchQuery(ctx context.Context,
 					},
 				},
 				"script": map[string]interface{}{
-					"source": "cosineSimilarity(params.query_vector,'embedding')",
+					"source": vectorScoreScriptSource,
 					"params": map[string]interface{}{
 						"query_vector": params.Embedding,
 					},
@@ -986,11 +997,6 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 		return nil
 	}
 
-	// Build query parameters
-	retrieveParams := typesLocal.RetrieveParams{
-		KnowledgeBaseIDs: []string{sourceKnowledgeBaseID},
-	}
-
 	// Set batch processing parameters
 	batchSize := 500
 	from := 0
@@ -998,7 +1004,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 
 	for {
 		// Query source data batch
-		hitsList, err := e.querySourceBatch(ctx, retrieveParams, from, batchSize)
+		hitsList, err := e.querySourceBatch(ctx, sourceKnowledgeBaseID, from, batchSize)
 		if err != nil {
 			return err
 		}
@@ -1011,7 +1017,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 		log.Infof("[ElasticsearchV7] Found %d source index data, batch start position: %d", len(hitsList), from)
 
 		// Process the batch and create index information
-		indexInfoList, err := e.processSourceBatch(ctx, hitsList, sourceToTargetKBIDMap,
+		indexInfoList, embeddingMap, err := e.processSourceBatch(ctx, hitsList, sourceToTargetKBIDMap,
 			sourceToTargetChunkIDMap, targetKnowledgeBaseID)
 		if err != nil {
 			return err
@@ -1019,7 +1025,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 
 		// Save processed indices
 		if len(indexInfoList) > 0 {
-			err := e.saveCopiedIndices(ctx, indexInfoList)
+			err := e.saveCopiedIndices(ctx, indexInfoList, embeddingMap)
 			if err != nil {
 				return err
 			}
@@ -1044,16 +1050,20 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 
 // querySourceBatch queries a batch of source data
 func (e *elasticsearchRepository) querySourceBatch(ctx context.Context,
-	retrieveParams typesLocal.RetrieveParams, from int, batchSize int,
+	sourceKnowledgeBaseID string, from int, batchSize int,
 ) ([]interface{}, error) {
 	log := logger.GetLogger(ctx)
 
-	// Build query request safely
-	filterJSON := e.getBaseConds(retrieveParams)
-	var filter map[string]interface{}
-	if err := json.Unmarshal([]byte(filterJSON), &filter); err != nil {
-		log.Errorf("[ElasticsearchV7] Failed to parse base conditions: %v", err)
-		filter = map[string]interface{}{}
+	// Scan every row of the source knowledge base. getBaseConds is not used
+	// here because it drops disabled rows, which must be copied as disabled.
+	filter := map[string]interface{}{
+		"bool": map[string]interface{}{
+			"filter": []map[string]interface{}{{
+				"terms": map[string]interface{}{
+					e.idField("knowledge_base_id"): []string{sourceKnowledgeBaseID},
+				},
+			}},
+		},
 	}
 
 	queryBody := map[string]interface{}{
@@ -1110,13 +1120,14 @@ func (e *elasticsearchRepository) querySourceBatch(ctx context.Context,
 	return hitsList, nil
 }
 
-// processSourceBatch processes a batch of source data and creates index information
+// processSourceBatch processes a batch of source data and creates index information,
+// returning the embeddings keyed by target SourceID (the key BatchSave looks up)
 func (e *elasticsearchRepository) processSourceBatch(ctx context.Context,
 	hitsList []interface{},
 	sourceToTargetKBIDMap map[string]string,
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
-) ([]*typesLocal.IndexInfo, error) {
+) ([]*typesLocal.IndexInfo, map[string][]float32, error) {
 	log := logger.GetLogger(ctx)
 
 	// Prepare index information for batch save
@@ -1135,12 +1146,12 @@ func (e *elasticsearchRepository) processSourceBatch(ctx context.Context,
 		if indexInfo != nil {
 			indexInfoList = append(indexInfoList, indexInfo)
 			if embeddingVector != nil {
-				embeddingMap[indexInfo.ChunkID] = embeddingVector
+				embeddingMap[indexInfo.SourceID] = embeddingVector
 			}
 		}
 	}
 
-	return indexInfoList, nil
+	return indexInfoList, embeddingMap, nil
 }
 
 // processSingleHit processes a single hit and creates index information
@@ -1260,7 +1271,9 @@ func (e *elasticsearchRepository) processSingleHit(ctx context.Context,
 }
 
 // saveCopiedIndices saves the copied indices
-func (e *elasticsearchRepository) saveCopiedIndices(ctx context.Context, indexInfoList []*typesLocal.IndexInfo) error {
+func (e *elasticsearchRepository) saveCopiedIndices(ctx context.Context,
+	indexInfoList []*typesLocal.IndexInfo, embeddingMap map[string][]float32,
+) error {
 	log := logger.GetLogger(ctx)
 
 	if len(indexInfoList) == 0 {
@@ -1270,11 +1283,6 @@ func (e *elasticsearchRepository) saveCopiedIndices(ctx context.Context, indexIn
 
 	// Prepare additional params with embedding map
 	additionalParams := make(map[string]any)
-	embeddingMap := make(map[string][]float32)
-
-	// No need to extract embeddings from metadata as they're not stored there
-	// We'll use the embeddings directly from the embedding map created in processSourceBatch
-
 	if len(embeddingMap) > 0 {
 		additionalParams["embedding"] = embeddingMap
 		log.Infof("[ElasticsearchV7] Found %d embeddings to save", len(embeddingMap))

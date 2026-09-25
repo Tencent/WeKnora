@@ -170,7 +170,7 @@ const formatDate = (dateStr: string): string => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   /* Align with title start (after index column) */
   padding-left: 34px;
@@ -184,7 +184,7 @@ const formatDate = (dateStr: string): string => {
   display: inline-flex;
   align-items: center;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-primary);
@@ -192,7 +192,7 @@ const formatDate = (dateStr: string): string => {
 }
 
 .group-count {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -222,7 +222,7 @@ const formatDate = (dateStr: string): string => {
 }
 
 .result-index {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
@@ -237,7 +237,7 @@ const formatDate = (dateStr: string): string => {
   flex: 1;
   text-decoration: none;
   color: var(--td-text-color-primary);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color);
@@ -249,7 +249,7 @@ const formatDate = (dateStr: string): string => {
 }
 
 .result-title {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 1.4;
   color: inherit;
@@ -272,7 +272,7 @@ const formatDate = (dateStr: string): string => {
   flex: 1;
   
   .result-title {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     line-height: 1.4;
     color: var(--td-text-color-primary);
@@ -286,7 +286,7 @@ const formatDate = (dateStr: string): string => {
   margin-top: 4px;
   padding-top: 4px;
   border-top: 1px solid var(--td-bg-color-secondarycontainer);
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   color: var(--td-text-color-placeholder);
   
   .meta-item {
@@ -296,7 +296,7 @@ const formatDate = (dateStr: string): string => {
   }
   
   .meta-icon {
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
   }
 }
 
@@ -304,10 +304,10 @@ const formatDate = (dateStr: string): string => {
   padding: 16px;
   text-align: center;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-style: italic;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: 1px dashed var(--td-component-stroke);
 }
 </style>

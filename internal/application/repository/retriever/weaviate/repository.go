@@ -2,11 +2,12 @@ package weaviate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/google/uuid"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
+	"github.com/weaviate/weaviate-go-client/v5/weaviate/fault"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/filters"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/graphql"
 	"github.com/weaviate/weaviate/entities/models"
@@ -150,13 +152,33 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 		}
 		//创建collection
 		if err = w.client.Schema().ClassCreator().WithClass(&classObj).Do(ctx); err != nil {
-			log.Errorf("[Weaviate] Failed to create collection: %v", err)
-			return fmt.Errorf("failed to create collection: %w", err)
+			// The first batches written at a new dimension are saved by several
+			// workers at once, so another one (or another replica) may have
+			// created the class since our check. Weaviate refuses the losing
+			// create with 422, worded differently depending on where it lost,
+			// so look again rather than parse the message. The class is
+			// created whole, so if it exists there is nothing left to do.
+			if isUnprocessableEntity(err) {
+				exists, _ = w.client.Schema().ClassExistenceChecker().WithClassName(collectionName).Do(ctx)
+			}
+			if !exists {
+				log.Errorf("[Weaviate] Failed to create collection: %v", err)
+				return fmt.Errorf("failed to create collection: %w", err)
+			}
+			log.Infof("[Weaviate] Collection %s was created concurrently", collectionName)
+		} else {
+			log.Infof("[Weaviate] Successfully created collection %s", collectionName)
 		}
-		log.Infof("[Weaviate] Successfully created collection %s", collectionName)
 	}
 	w.initializedCollections.Store(dimension, true)
 	return nil
+}
+
+// isUnprocessableEntity reports whether err is Weaviate answering 422, which is
+// how it refuses a schema change it cannot apply.
+func isUnprocessableEntity(err error) bool {
+	var clientErr *fault.WeaviateClientError
+	return errors.As(err, &clientErr) && clientErr.StatusCode == http.StatusUnprocessableEntity
 }
 
 func (w *weaviateRepository) EngineType() types.RetrieverEngineType {
@@ -562,7 +584,13 @@ func (w *weaviateRepository) VectorRetrieve(ctx context.Context,
 
 	where := w.getBaseFilter(params)
 	limit := params.TopK
-	scoreThreshold := float32(params.Threshold)
+	// Weaviate's certainty is (1 + cos) / 2; callers pass a cosine
+	// similarity threshold, the scale every other engine uses. A zero
+	// threshold means no filtering, so it stays 0 rather than becoming 0.5.
+	var scoreThreshold float32
+	if params.Threshold > 0 {
+		scoreThreshold = float32((1 + params.Threshold) / 2)
+	}
 	fields := getEmbeddingFields()
 	result, err := w.client.GraphQL().Get().WithClassName(collectionName).
 		WithWhere(where).
@@ -929,7 +957,9 @@ func parseGraphQLResponse(items []interface{}, collectionName string, matchType 
 			if matchType == types.MatchTypeKeywords {
 				score = 1.0
 			} else {
-				score = s
+				// certainty = (1 + cos) / 2; report cosine similarity so
+				// scores compare with the other engines and thresholds.
+				score = 2*s - 1
 			}
 		}
 
@@ -1034,31 +1064,4 @@ func fromWeaviateVectorEmbedding(id string,
 		Score:           embedding.Score,
 		MatchType:       matchType,
 	}
-}
-
-// tokenizeQuery splits a query string into tokens for OR-based full-text search.
-// It uses jieba for professional Chinese word segmentation.
-func tokenizeQuery(query string) []string {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil
-	}
-
-	// Use jieba for segmentation (search mode for better recall)
-	words := types.Jieba.CutForSearch(query, true)
-
-	// Filter and deduplicate
-	seen := make(map[string]bool)
-	result := make([]string, 0, len(words))
-	for _, word := range words {
-		word = strings.TrimSpace(strings.ToLower(word))
-		// Skip empty, single-char, and already seen words
-		if utf8.RuneCountInString(word) < 2 || seen[word] {
-			continue
-		}
-		seen[word] = true
-		result = append(result, word)
-	}
-
-	return result
 }

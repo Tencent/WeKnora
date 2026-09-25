@@ -324,20 +324,35 @@ function schedulePromptNudge() {
     }, PTY_PROMPT_NUDGE_DELAY_MS);
 }
 
+// v-show 把终端藏起来时容器是 0×0。FitAddon 仍可能算出 2×1 并送到 PTY，
+// 切回终端 tab 时 bash 还停在那组尺寸上，看起来像没连上。尺寸不够就不动。
+function containerHasPtySize() {
+    const el = containerRef.value;
+    return !!el && el.clientWidth >= 20 && el.clientHeight >= 20;
+}
+
 function applyFit() {
-    if (!xterm) return;
+    if (!xterm || !containerHasPtySize()) return;
     try {
         fitAddon?.fit();
     } catch {
         // fit 在容器尺寸为 0 时会抛错，忽略即可。
+        return;
     }
+    if (xterm.cols < 2 || xterm.rows < 2) return;
     terminal.resize(xterm.cols, xterm.rows);
     xterm.refresh(0, xterm.rows - 1);
 }
 
 function fitAndFocus() {
-    applyFit();
-    xterm?.focus();
+    // v-show 刚打开时 nextTick 里布局可能还没完成，再等两帧再 fit。
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (unmounted) return;
+            applyFit();
+            xterm?.focus();
+        });
+    });
 }
 
 defineExpose({
@@ -353,7 +368,7 @@ defineExpose({
     display: flex;
     flex-direction: column;
     background: var(--td-bg-color-container);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     overflow: hidden;
     cursor: text;
 }
@@ -403,22 +418,13 @@ defineExpose({
 
 .sandbox-terminal__overlay-text {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.6;
     white-space: pre-line;
 }
 
 .sandbox-terminal__spinner {
-    animation: sandbox-terminal-spin 0.9s linear infinite;
+    animation: wk-spin 0.9s linear infinite;
 }
 
-@keyframes sandbox-terminal-spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
-}
 </style>

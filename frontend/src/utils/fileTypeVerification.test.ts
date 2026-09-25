@@ -14,3 +14,13 @@ test('shouldRejectKnowledgeFileType preserves dynamic whitelist behavior', () =>
   assert.equal(shouldRejectKnowledgeFileType('page.html', ['pdf']), true)
   assert.equal(shouldRejectKnowledgeFileType('page.html', []), false)
 })
+
+test('XMind uploads work before engine discovery and respect discovered capabilities', () => {
+  for (const filename of ['architecture.xmind', 'ARCHITECTURE.XMIND']) {
+    assert.equal(shouldRejectKnowledgeFileType(filename), false)
+    assert.equal(shouldRejectKnowledgeFileType(filename, []), false)
+    assert.equal(shouldRejectKnowledgeFileType(filename, new Set()), false)
+    assert.equal(shouldRejectKnowledgeFileType(filename, ['pdf', 'xmind']), false)
+    assert.equal(shouldRejectKnowledgeFileType(filename, ['pdf']), true)
+  }
+})

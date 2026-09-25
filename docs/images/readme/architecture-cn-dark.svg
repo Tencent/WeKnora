@@ -1,0 +1,197 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1038" width="1600" height="1038" role="img" aria-label="WeKnora architecture"><rect width="1600" height="1038" fill="none"/>
+<rect x="40" y="40" width="340" height="732" rx="18" fill="#0b1220" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<text x="64" y="86" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" letter-spacing="2" fill="#d9a94f">01 / ACCESS</text>
+<text x="64" y="124" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="600" fill="#e6ecf5">客户端与渠道</text>
+<rect x="60" y="158" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="76" y="178" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(86 188) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4M6 7h5m-5 3h3"/></g>
+<text x="140" y="197" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">Web UI</text>
+<text x="140" y="225" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">Vue 3 · HTTP / SSE</text>
+<rect x="60" y="258" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="76" y="278" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(86 288) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="m6 8 4 4-4 4m7 0h5"/></g>
+<text x="140" y="297" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">API · CLI · SDK</text>
+<text x="140" y="325" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">API Key 按能力授权</text>
+<rect x="60" y="358" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="76" y="378" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(86 388) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="7" rx="1"/><rect x="2" y="16" width="8" height="6" rx="1"/><rect x="14" y="16" width="8" height="6" rx="1"/><path d="M12 9v4m-6 3v-3h12v3"/></g>
+<text x="140" y="397" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">IM 频道</text>
+<text x="140" y="425" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">企业微信 · 飞书 · Slack 等</text>
+<rect x="60" y="458" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="76" y="478" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(86 488) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7-5 5 5 5m10-10 5 5-5 5m-3-14-4 18"/></g>
+<text x="140" y="497" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">网站嵌入</text>
+<text x="140" y="525" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">Widget · 域名白名单</text>
+<rect x="60" y="558" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="76" y="578" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(86 588) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v5m6-5v5M6 7h12v4a6 6 0 0 1-12 0V7Zm6 10v5"/></g>
+<text x="140" y="597" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">MCP 客户端</text>
+<text x="140" y="625" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">Streamable HTTP</text>
+<rect x="60" y="658" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="76" y="678" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(86 688) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M6 6.5h.01M9 6.5h.01"/><path d="m11 13 6 2.5-2.6.9-.9 2.6Z"/></g>
+<text x="140" y="697" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">本机浏览器</text>
+<text x="140" y="725" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">BrowserSkill · WebSocket</text>
+<rect x="1220" y="40" width="340" height="732" rx="18" fill="#0b1220" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<text x="1244" y="86" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" letter-spacing="2" fill="#d9a94f">03 / SERVICES</text>
+<text x="1244" y="124" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="600" fill="#e6ecf5">运行时服务</text>
+<rect x="1240" y="158" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1256" y="178" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(1266 188) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H5v20h14V7l-5-5Zm0 0v5h5M8 12h8m-8 4h6"/></g>
+<text x="1320" y="197" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">文档解析</text>
+<text x="1320" y="225" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">docreader · gRPC</text>
+<rect x="1240" y="258" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1256" y="278" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(1266 288) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5v10l-9 5-9-5V7l9-5Zm0 10 9-5M12 12 3 7m9 5v10"/><path d="m7 4.8 10 5.5"/></g>
+<text x="1320" y="297" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">会话沙箱</text>
+<text x="1320" y="325" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">Docker · E2B · Cube</text>
+<rect x="1240" y="358" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1256" y="378" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(1266 388) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 5-10 5L2 7l10-5Zm-10 10 10 5 10-5M2 17l10 5 10-5"/></g>
+<text x="1320" y="397" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">模型服务</text>
+<text x="1320" y="425" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">27 家厂商 · Ollama</text>
+<rect x="1240" y="458" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1256" y="478" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(1266 488) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 8h5M8 11h3"/></g>
+<text x="1320" y="497" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">联网搜索</text>
+<text x="1320" y="525" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">Bing · 博查 · SearXNG 等</text>
+<rect x="1240" y="558" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1256" y="578" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(1266 588) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v5m6-5v5M6 7h12v4a6 6 0 0 1-12 0V7Zm6 10v5"/></g>
+<text x="1320" y="597" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">外部 MCP 服务</text>
+<text x="1320" y="625" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">工具 · OAuth2</text>
+<rect x="1240" y="658" width="300" height="88" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1256" y="678" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(1266 688) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h7l2 3h9v10H3V7Zm3 0V3h11l3 3v4"/><path d="M7 14h10m-10 3h6"/></g>
+<text x="1320" y="697" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#e6ecf5">数据源</text>
+<text x="1320" y="725" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">飞书 · Confluence 等</text>
+<rect x="420" y="40" width="760" height="732" rx="18" fill="#0b1220" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<text x="444" y="86" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" letter-spacing="2" fill="#d9a94f">02 / WEKNORA APP</text>
+<text x="444" y="124" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="600" fill="#e6ecf5">WeKnora 主服务</text>
+<text x="1156" y="86" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="16" letter-spacing="2" fill="#9aaac0">GO · GIN · ASYNQ</text>
+<rect x="440.0" y="158" width="229.33333333333334" height="252" rx="14" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="460.0" y="178" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(470.0 188) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 8h5M8 11h3"/></g>
+<text x="460.0" y="262" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="600" fill="#e6ecf5">RAG 问答</text>
+<text x="460.0" y="298" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">查询理解</text>
+<text x="460.0" y="328" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">混合检索</text>
+<text x="460.0" y="358" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">重排序</text>
+<text x="460.0" y="388" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">流式生成 · 引用</text>
+<rect x="685.3333333333334" y="158" width="229.33333333333334" height="252" rx="14" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="705.3333333333334" y="178" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(715.3333333333334 188) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6"/><circle cx="12" cy="2.5" r=".5"/></g>
+<text x="705.3333333333334" y="262" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="600" fill="#e6ecf5">Agent 推理</text>
+<text x="705.3333333333334" y="298" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">ReAct 多步推理</text>
+<text x="705.3333333333334" y="328" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">工具 · 技能 · MCP</text>
+<text x="705.3333333333334" y="358" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">沙箱执行</text>
+<text x="705.3333333333334" y="388" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">长期记忆</text>
+<rect x="930.6666666666667" y="158" width="229.33333333333334" height="252" rx="14" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="950.6666666666667" y="178" width="48" height="48" rx="10" fill="#1a2436"/>
+<g transform="translate(960.6666666666667 188) scale(1.1666666666666667)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15"/><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3"/></g>
+<text x="950.6666666666667" y="262" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" font-weight="600" fill="#e6ecf5">自动 Wiki</text>
+<text x="950.6666666666667" y="298" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">页面生成与维护</text>
+<text x="950.6666666666667" y="328" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">知识图谱</text>
+<text x="950.6666666666667" y="358" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">人工编辑</text>
+<text x="950.6666666666667" y="388" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#a9b6c9">版本回滚</text>
+<rect x="440" y="474" width="720" height="158" rx="14" fill="#161f30" stroke="#685638" stroke-width="2"/>
+<path d="M554.6666666666666 474V414" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M548.6666666666666 423L554.6666666666666 414L560.6666666666666 423" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M800.0 474V414" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M794.0 423L800.0 414L806.0 423" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1045.3333333333335 474V414" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M1039.3333333333335 423L1045.3333333333335 414L1051.3333333333335 423" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="683.0" y="426" width="234.0" height="32" rx="16" fill="#0b1220" stroke="#685638" stroke-width="1.5"/>
+<text x="800.0" y="448" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#e8c176">三种能力共享同一知识库</text>
+<text x="460" y="512" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="600" fill="#e6ecf5">知识处理流水线</text>
+<rect x="460.0" y="530" width="91.66666666666667" height="44" rx="9" fill="#101a2b" stroke="#685638" stroke-width="1.5"/>
+<text x="505.8333333333333" y="559" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e6ecf5">导入</text>
+<g transform="translate(555.6666666666666 543) scale(0.75)" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></g>
+<rect x="577.6666666666666" y="530" width="91.66666666666667" height="44" rx="9" fill="#101a2b" stroke="#685638" stroke-width="1.5"/>
+<text x="623.5" y="559" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e6ecf5">解析</text>
+<g transform="translate(673.3333333333333 543) scale(0.75)" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></g>
+<rect x="695.3333333333334" y="530" width="91.66666666666667" height="44" rx="9" fill="#101a2b" stroke="#685638" stroke-width="1.5"/>
+<text x="741.1666666666667" y="559" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e6ecf5">分块</text>
+<g transform="translate(791.0 543) scale(0.75)" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></g>
+<rect x="813.0" y="530" width="91.66666666666667" height="44" rx="9" fill="#101a2b" stroke="#685638" stroke-width="1.5"/>
+<text x="858.8333333333334" y="559" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e6ecf5">向量化</text>
+<g transform="translate(908.6666666666666 543) scale(0.75)" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></g>
+<rect x="930.6666666666667" y="530" width="91.66666666666667" height="44" rx="9" fill="#101a2b" stroke="#685638" stroke-width="1.5"/>
+<text x="976.5000000000001" y="559" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e6ecf5">索引</text>
+<g transform="translate(1026.3333333333335 543) scale(0.75)" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></g>
+<rect x="1048.3333333333335" y="530" width="91.66666666666667" height="44" rx="9" fill="#101a2b" stroke="#685638" stroke-width="1.5"/>
+<text x="1094.1666666666667" y="559" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e6ecf5">富化</text>
+<text x="460" y="610" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#9aaac0">摘要、问题、图谱与标签由异步任务队列分阶段处理</text>
+<rect x="440.0" y="648.0" width="354.0" height="46.0" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(458.0 658.0) scale(1.0833333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 4v6c0 5-5 8-9 10-4-2-9-5-9-10V6l9-4Z"/><path d="m8 12 3 3 5-6"/></g>
+<text x="498.0" y="678.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="600" fill="#e6ecf5">空间与权限</text>
+<text x="612.0" y="678.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">RBAC · 审计日志</text>
+<rect x="806.0" y="648.0" width="354.0" height="46.0" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(824.0 658.0) scale(1.0833333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 5-10 5L2 7l10-5Zm-10 10 10 5 10-5M2 17l10 5 10-5"/></g>
+<text x="864.0" y="678.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="600" fill="#e6ecf5">模型目录</text>
+<text x="958.0" y="678.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">27 家厂商</text>
+<rect x="440.0" y="706.0" width="354.0" height="46.0" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(458.0 716.0) scale(1.0833333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="1"/><rect x="3" y="14" width="18" height="7" rx="1"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5m-5 11h5"/></g>
+<text x="498.0" y="736.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="600" fill="#e6ecf5">任务队列</text>
+<text x="592.0" y="736.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">Worker 池治理</text>
+<rect x="806.0" y="706.0" width="354.0" height="46.0" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(824.0 716.0) scale(1.0833333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M6 15l4-5 4 3 6-8"/><circle cx="10" cy="10" r="1"/><circle cx="14" cy="13" r="1"/></g>
+<text x="864.0" y="736.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="600" fill="#e6ecf5">可观测性</text>
+<text x="958.0" y="736.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">Langfuse 追踪</text>
+<path d="M360 202.0H398" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M360 302.0H398" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M360 402.0H398" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M360 502.0H398" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M360 602.0H398" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M360 702.0H398" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M398 202.0V702.0" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M398 284.0H417" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M408 278.0L417 284.0L408 290.0" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="398" cy="284.0" r="4" fill="#d9a94f"/>
+<path d="M1183 284.0H1202" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M1202 202.0V702.0" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<circle cx="1202" cy="284.0" r="4" fill="#d9a94f"/>
+<path d="M1202 202.0H1237" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M1228 196.0L1237 202.0L1228 208.0" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1202 302.0H1237" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M1228 296.0L1237 302.0L1228 308.0" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1202 402.0H1237" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M1228 396.0L1237 402.0L1228 408.0" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1202 502.0H1237" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M1228 496.0L1237 502.0L1228 508.0" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1202 602.0H1237" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M1228 596.0L1237 602.0L1228 608.0" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1202 702.0H1237" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M1228 696.0L1237 702.0L1228 708.0" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="40" y="822" width="1520" height="176" rx="18" fill="#0b1220" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<text x="64" y="900.0" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" letter-spacing="2" fill="#d9a94f">04 / STORAGE</text>
+<text x="64" y="938.0" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="600" fill="#e6ecf5">存储</text>
+<rect x="270.0" y="842" width="200.0" height="136" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(288.0 860) scale(1.0)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+<text x="322.0" y="880" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="600" fill="#e6ecf5">PostgreSQL</text>
+<text x="288.0" y="914" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">业务数据 · BM25 ·</text>
+<text x="288.0" y="938" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">pgvector</text>
+<rect x="484.0" y="842" width="200.0" height="136" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(502.0 860) scale(1.0)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+<text x="536.0" y="880" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="600" fill="#e6ecf5">Redis</text>
+<text x="502.0" y="914" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">任务队列 · 流 · 限流</text>
+<rect x="698.0" y="842" width="200.0" height="136" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(716.0 860) scale(1.0)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+<text x="750.0" y="880" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="600" fill="#e6ecf5">向量库</text>
+<text x="716.0" y="914" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">ES · Qdrant ·</text>
+<text x="716.0" y="938" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">Milvus 等（可选）</text>
+<rect x="912.0" y="842" width="200.0" height="136" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(930.0 860) scale(1.0)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+<text x="964.0" y="880" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="600" fill="#e6ecf5">对象存储</text>
+<text x="930.0" y="914" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">本地 · MinIO · COS ·</text>
+<text x="930.0" y="938" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">S3 等</text>
+<rect x="1126.0" y="842" width="200.0" height="136" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(1144.0 860) scale(1.0)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+<text x="1178.0" y="880" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="600" fill="#e6ecf5">Neo4j</text>
+<text x="1144.0" y="914" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">知识图谱（可选）</text>
+<rect x="1340.0" y="842" width="200.0" height="136" rx="12" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<g transform="translate(1358.0 860) scale(1.0)" fill="none" stroke="#d9a94f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+<text x="1392.0" y="880" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="600" fill="#e6ecf5">Langfuse</text>
+<text x="1358.0" y="914" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="17" fill="#a9b6c9">链路追踪（可选）</text>
+<path d="M800.0 775V839" fill="none" stroke="#d9a94f" stroke-width="2" stroke-linecap="round" opacity=".85"/>
+<path d="M794.0 830L800.0 839L806.0 830" fill="none" stroke="#d9a94f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

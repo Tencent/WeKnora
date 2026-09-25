@@ -24,13 +24,20 @@ const (
 	SandboxTypeCube SandboxType = "cube"
 	// SandboxTypeE2B uses E2B's hosted MicroVM sandbox service.
 	SandboxTypeE2B SandboxType = "e2b"
+	// SandboxTypeHost runs commands on the user's own machine under
+	// OS-enforced restrictions (macOS Seatbelt, Windows restricted token).
+	// It is deliberately not named "local": the removed Local backend ran
+	// bare host processes with no isolation at all, and reusing that name
+	// would misrepresent this one.
+	SandboxTypeHost SandboxType = "host"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
 )
 
-// IsNamedSandboxBackendType reports whether raw can be stored as a user-facing
-// named sandbox backend. Cube, E2B and Docker are all session-persistent and
-// share the same workspace configuration surface.
+// IsNamedSandboxBackendType reports whether raw is a user-facing named sandbox
+// backend. Host is absent because it has no session-scoped instance to pin:
+// each command is a fresh local process. The same predicate is used by
+// resolveSandboxForExecution.
 func IsNamedSandboxBackendType(raw string) bool {
 	switch SandboxType(raw) {
 	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
@@ -61,6 +68,42 @@ const (
 	// refused" — E2B gets away with that image because its own builder injects
 	// envd, and the Docker backend never needs one.
 	DefaultCubeTemplateImage = "wechatopenai/weknora-sandbox:main-cube"
+
+	// DefaultDesktopDockerImage is the XFCE/x11vnc/websockify variant of
+	// DefaultDockerImage (target "desktop" of docker/Dockerfile.sandbox).
+	// E2B desktop templates are built from it. The Docker backend does not
+	// consume this tag yet.
+	DefaultDesktopDockerImage = "wechatopenai/weknora-sandbox:main-desktop"
+
+	// DefaultCubeDesktopTemplateImage is DefaultDesktopDockerImage plus Cube
+	// envd (target "desktop-cube"). amd64 only, same reason as the cube target.
+	DefaultCubeDesktopTemplateImage = "wechatopenai/weknora-sandbox:main-desktop-cube"
+
+	// DesktopWebsockifyPort is websockify inside the sandbox. WeKnora dials
+	// it through the provider gateway (Host "{port}-{id}.{domain}"), not by
+	// publishing the port on the host NIC. x11vnc stays on 127.0.0.1:5900
+	// with no RFB password; the Basic-auth check lives on websockify.
+	DesktopWebsockifyPort = 6080
+
+	// DesktopWebsockifyPath is websockify's WebSocket endpoint. The image
+	// hosts no HTML UI, so GET / answers 405 by design.
+	DesktopWebsockifyPath = "/websockify"
+
+	// DesktopStartScript is the idempotent lazy-start entry point baked into
+	// the desktop images. It is re-run on every desktop connect: that is what
+	// heals a sandbox after pause/resume.
+	DesktopStartScript = "/usr/local/bin/start-desktop.sh"
+
+	// DesktopSecretPath holds the per-sandbox websockify Basic-auth password.
+	// It is read by the backend and never sent to the browser.
+	DesktopSecretPath = "/run/desktop/secret"
+
+	// DesktopBasicAuthUser is the fixed username half of that credential.
+	DesktopBasicAuthUser = "weknora"
+
+	// The two commands the backend Execs around DesktopStartScript live in
+	// desktop_scripts.go as embedded .sh files:
+	// DesktopEnsureCmd and DesktopResetListenersCmd.
 
 	// CubeEnvdPort is the port envd listens on inside a Cube sandbox. It carries
 	// the readiness probe as well as every exec and filesystem call, and the
@@ -93,6 +136,10 @@ const (
 	DefaultE2BSandboxTTL = 5 * time.Minute
 	// DefaultE2BHTTPTimeout bounds a single HTTP call to the E2B API.
 	DefaultE2BHTTPTimeout = 30 * time.Second
+	// DefaultE2BSandboxDomain is go-e2b's built-in sandbox routing domain.
+	// Named E2B configs may omit sandbox_domain (config_required.go); envd
+	// then uses this value, and DialDesktop must too.
+	DefaultE2BSandboxDomain = "e2b.app"
 )
 
 // Common errors
@@ -111,13 +158,18 @@ var (
 	// Unlike Execute, these entry points never provision: creating a sandbox
 	// needs the agent's config-pin context, which they do not carry.
 	ErrNoLiveSessionSandbox = errors.New("session has no live sandbox")
-	// ErrSandboxPaused is returned by lookup-only terminal opens when the
-	// session has a bound sandbox that is not confirmed running (paused,
-	// transitioning, or missing from the provider list). Connect would
-	// resume a paused instance and start billing again; the UI must get
-	// an explicit click first. Distinct from ErrNoLiveSessionSandbox,
-	// which means there is no binding to resume.
+	// ErrSandboxPaused is returned by lookup-only terminal and desktop
+	// opens when the session has a bound sandbox that is not confirmed
+	// running (paused, transitioning, or missing from the provider list).
+	// Connect / Exec would resume a paused instance and start billing
+	// again; the UI must get an explicit click first. Distinct from
+	// ErrNoLiveSessionSandbox, which means there is no binding to resume.
 	ErrSandboxPaused = errors.New("session sandbox is paused")
+	// ErrSessionRewindLocked means another rewind already holds the session.
+	ErrSessionRewindLocked = errors.New("sandbox: session rewind already in progress")
+	// ErrSessionTurnActive means a chat turn already holds the session lease,
+	// so rewind must not take the exclusive lock or reset the workspace.
+	ErrSessionTurnActive = errors.New("sandbox: session turn is active")
 	// ErrTerminalUnsupported is returned when the active backend cannot
 	// stream PTYs (Docker, a disabled manager). Distinct from
 	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,
@@ -253,6 +305,11 @@ type Config struct {
 	// go without input or PTY output before the WebSocket is closed. Zero
 	// is treated as DefaultTerminalIdleDisconnect at use time.
 	TerminalIdleDisconnect time.Duration
+
+	// DesktopEnabled mirrors TenantSandboxConfig.DesktopEnabled: this
+	// config's template is a desktop image. The desktop endpoint refuses
+	// with DESKTOP_UNSUPPORTED when it is false, before touching a sandbox.
+	DesktopEnabled bool
 
 	// AllowPrivateEndpoints is the per-workspace outbound policy for this
 	// connection. Link-local addresses are blocked regardless.
@@ -398,7 +455,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeHost, SandboxTypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")

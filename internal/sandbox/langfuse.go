@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
+	"github.com/gorilla/websocket"
 )
 
 const sandboxSpanPreviewRunes = 256
@@ -16,7 +17,8 @@ const sandboxSpanPreviewRunes = 256
 // the caller has no parent trace.
 //
 // Snapshot capability is forwarded: wrapping must not hide RemoteSnapshotManager
-// from SnapshotManagerFrom.
+// from SnapshotManagerFrom, and CreateForkSnapshot must still reach Docker's
+// fork namespace.
 func wrapLangfuseRemoteClient(inner RemoteSandboxClient) RemoteSandboxClient {
 	if inner == nil {
 		return nil
@@ -66,6 +68,18 @@ func (c *langfuseRemoteClient) Connect(
 		"sandbox_id": req.SandboxID,
 	}, nil)
 	handle, err := c.inner.Connect(ctx, req)
+	span.Finish(sandboxHandleOut(handle), nil, err)
+	return handle, err
+}
+
+func (c *langfuseRemoteClient) ConnectSession(
+	ctx context.Context, req RemoteConnectRequest,
+) (RemoteSandboxHandle, error) {
+	ctx, span := startSandboxSpan(ctx, "sandbox.connect", map[string]interface{}{
+		"sandbox_id":  req.SandboxID,
+		"check_state": true,
+	}, nil)
+	handle, err := connectRemoteSession(ctx, c.inner, req)
 	span.Finish(sandboxHandleOut(handle), nil, err)
 	return handle, err
 }
@@ -207,6 +221,29 @@ func (c *langfuseSnapshotClient) CreateSnapshot(
 	return ref, err
 }
 
+func (c *langfuseSnapshotClient) CreateForkSnapshot(
+	ctx context.Context, sandboxID string, name string,
+) (RemoteSnapshotRef, error) {
+	if creator, ok := c.inner.(forkSnapshotCreator); ok {
+		ctx, span := startSandboxSpan(ctx, "sandbox.create_fork_snapshot", map[string]interface{}{
+			"sandbox_id": sandboxID,
+			"name":       name,
+		}, nil)
+		ref, err := creator.CreateForkSnapshot(ctx, sandboxID, name)
+		span.Finish(map[string]interface{}{"snapshot_id": ref.ID}, nil, err)
+		return ref, err
+	}
+	inner, ok := c.inner.(RemoteSnapshotManager)
+	if !ok {
+		return RemoteSnapshotRef{}, &RemoteError{
+			Kind:    RemoteErrorKindUnsupported,
+			Op:      "CreateForkSnapshot",
+			Message: "inner client has no snapshot manager",
+		}
+	}
+	return inner.CreateSnapshot(ctx, sandboxID, name)
+}
+
 func (c *langfuseSnapshotClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 	inner, ok := c.inner.(RemoteSnapshotManager)
 	if !ok {
@@ -308,8 +345,46 @@ func (c *langfuseRemoteClient) OpenTerminal(
 	return session, err
 }
 
+// DialDesktop forwards the desktop capability so wrapping does not hide
+// RemoteDesktopManager from DesktopManagerFrom.
+//
+// It lives on the base decorator (not on a dedicated one like
+// langfuseSnapshotClient) so *every* wrapping shape exposes the capability:
+// langfuseSnapshotClient embeds this type, so it inherits the method.
+// Whether a backend actually supports desktops stays delegated to the inner
+// client's SupportsDesktop flag, which the *From helpers check.
+func (c *langfuseRemoteClient) DialDesktop(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	opts RemoteDesktopOptions,
+) (*websocket.Conn, error) {
+	inner, ok := c.inner.(RemoteDesktopManager)
+	if !ok {
+		return nil, &RemoteError{
+			Kind:    RemoteErrorKindUnsupported,
+			Op:      "DialDesktop",
+			Message: "inner client has no desktop manager",
+		}
+	}
+	ctx, span := startSandboxSpan(ctx, "sandbox.dial_desktop", sandboxHandleOut(handle), nil)
+	conn, err := inner.DialDesktop(ctx, handle, opts)
+	span.Finish(sandboxHandleOut(handle), nil, err)
+	return conn, err
+}
+
+func (c *langfuseRemoteClient) StartDesktopTTLRefresh(ctx context.Context, handle RemoteSandboxHandle) {
+	inner, ok := c.inner.(RemoteDesktopTTLRefresher)
+	if !ok {
+		return
+	}
+	inner.StartDesktopTTLRefresh(ctx, handle)
+}
+
 var (
-	_ RemoteSandboxClient   = (*langfuseRemoteClient)(nil)
-	_ RemoteSnapshotManager = (*langfuseSnapshotClient)(nil)
-	_ RemoteTerminalManager = (*langfuseRemoteClient)(nil)
+	_ RemoteSandboxClient       = (*langfuseRemoteClient)(nil)
+	_ RemoteSnapshotManager     = (*langfuseSnapshotClient)(nil)
+	_ forkSnapshotCreator       = (*langfuseSnapshotClient)(nil)
+	_ RemoteTerminalManager     = (*langfuseRemoteClient)(nil)
+	_ RemoteDesktopManager      = (*langfuseRemoteClient)(nil)
+	_ RemoteDesktopTTLRefresher = (*langfuseRemoteClient)(nil)
 )

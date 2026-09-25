@@ -117,6 +117,10 @@ type skillResponse struct {
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 
+	// Served is the previous version that keeps running while this install
+	// is in flight or after it failed.
+	Served *service.SkillServedInfo `json:"served,omitempty"`
+
 	Envs []skillEnvResponse `json:"envs,omitempty"`
 }
 
@@ -164,6 +168,7 @@ func toSkillResponse(e *types.TenantSkillEntity) skillResponse {
 		InstallMessageID:    e.InstallMessageID,
 		CreatedAt:           e.CreatedAt,
 		UpdatedAt:           e.UpdatedAt,
+		Served:              service.ServedInfoOf(e),
 		Envs:                toSkillEnvResponses(e.Envs),
 	}
 }
@@ -666,17 +671,12 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 		h.emit(c, terminal)
 		return
 	}
-	if events == nil {
-		// Nothing publishes progress without Redis. One frame stating the
-		// durable status is all this connection can ever say.
-		h.emit(c, skillInstallEvent{
-			Stage:  skill.Status,
-			Status: skill.Status,
-			Log:    "live progress is unavailable; poll the skill for its status",
-			Done:   true,
-		})
-		return
-	}
+	// events is nil without Redis: nothing is ever published. A done frame
+	// here would mean the run finished, and the client would reload and
+	// subscribe again for as long as the row stays in progress. A receive on
+	// a nil channel never fires, so the poll below is what notices the row
+	// leaving installing or removing — the same fallback a dropped
+	// subscription already uses.
 
 	poll := time.NewTicker(h.pollInterval)
 	defer poll.Stop()

@@ -511,3 +511,26 @@ class ExcelParserTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExcelSourceBlocksTest(unittest.TestCase):
+    def test_rows_carry_sheet_and_row_number(self):
+        import io
+
+        import openpyxl
+
+        from docreader.parser.excel_parser import ExcelParser
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "明细"
+        ws["B3"] = "螺栓"
+        ws["A5"] = "合计"
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        doc = ExcelParser(file_name="a.xlsx", file_type="xlsx").parse_into_text(buf.getvalue())
+        rows = [(b["locator"]["sheet"], b["locator"]["row_start"]) for b in doc.source_blocks]
+        self.assertEqual(rows, [("明细", 3), ("明细", 5)])
+        first = doc.source_blocks[0]
+        self.assertEqual(doc.content[first["start"]:first["end"]], "B: 螺栓\n")

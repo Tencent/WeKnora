@@ -135,13 +135,20 @@ export interface DocumentInfoDocument {
     type_icon?: string;
 }
 
+// Emitted by list_documents (paged) and by the retired get_document_info tool
+// still present in stored chat history.
 export interface DocumentInfoData {
     display_type: 'document_info';
     documents?: DocumentInfoDocument[];
-    total_docs: number;
-    requested: number;
+    total_docs?: number;
+    requested?: number;
     errors?: string[];
     title?: string;
+    // list_documents pagination
+    page?: number;
+    page_size?: number;
+    next_page?: number;
+    knowledge_base_id?: string;
 }
 
 // Graph query results data
@@ -289,15 +296,55 @@ export interface GrepResultsData {
     max_results: number;
 }
 
-// Knowledge chunks list data (list_knowledge_chunks tool)
+// Chunk row inside a knowledge_chunks_list payload. `role` / `match_snippet`
+// are only set by read_document in query mode (in-document search).
+export interface KnowledgeChunksListChunk {
+    index?: number;
+    chunk_id?: string;
+    chunk_index?: number;
+    content?: string;
+    knowledge_id?: string;
+    knowledge_base_id?: string;
+    chunk_type?: string;
+    role?: 'match' | 'context_before' | 'context_after' | 'focus';
+    match_snippet?: string;
+}
+
+// Document metadata attached to a read_document result.
+export interface KnowledgeChunksListDocument {
+    knowledge_id?: string;
+    title?: string;
+    type?: string;
+    source?: string;
+    file_name?: string;
+    file_type?: string;
+    file_size?: number;
+    parse_status?: string;
+    chunk_count?: number;
+    description?: string;
+    metadata?: Record<string, any>;
+}
+
+// Knowledge chunks list data (read_document tool; also emitted by the retired
+// list_knowledge_chunks / wiki_read_source_doc tools still present in stored
+// chat history)
 export interface KnowledgeChunksListData {
     display_type: 'knowledge_chunks_list';
     knowledge_id?: string;
     knowledge_title?: string;
     total_chunks?: number;
     fetched_chunks?: number;
+    chunks?: KnowledgeChunksListChunk[];
+    document?: KnowledgeChunksListDocument;
+    // Pagination (offset-based for read_document, page-based for legacy tools)
+    offset?: number;
+    next_offset?: number;
     page?: number;
     page_size?: number;
+    // read_document query mode (in-document search)
+    query?: string;
+    match_count?: number;
+    truncated?: boolean;
     faq_question?: string;
     faq_id?: string;
     single_chunk?: boolean;

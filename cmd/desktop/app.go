@@ -2,16 +2,22 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync/atomic"
+
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App holds Wails-bound state for the desktop shell.
 type App struct {
 	ctx           context.Context
+	setupToken    string
 	backendURL    string
 	apiLanBaseURL string
 	listenPublic  bool
 	shutdownCh    chan struct{}
+	pickingDir    atomic.Bool
 }
 
 // NewApp creates a new App application struct.
@@ -81,4 +87,49 @@ func (a *App) AutoCheckForUpdates() {
 	if a.ctx != nil {
 		checkUpdate(a.ctx, desktopAboutVersion(), false, true)
 	}
+}
+
+// GetAutoSetupToken exposes the per-process capability only through the native bridge.
+func (a *App) GetAutoSetupToken() string { return a.setupToken }
+
+// GetApprovalMode returns the machine-local sandbox approval mode.
+func (a *App) GetApprovalMode() string {
+	return LoadApprovalMode()
+}
+
+// SetApprovalMode persists the approval mode. Unshipped modes ("ask", "full")
+// are rejected; currently only "auto" can be stored.
+func (a *App) SetApprovalMode(mode string) error {
+	return SaveApprovalMode(mode)
+}
+
+// GetProjectDirs returns the user-approved project directories.
+func (a *App) GetProjectDirs() []string {
+	return LoadProjectDirs()
+}
+
+// RemoveProjectDir drops one approved directory. The only way to add a
+// directory is PickProjectDir; typed replacement of the whole list is not
+// an authorization path.
+func (a *App) RemoveProjectDir(dir string) error {
+	return removeApprovedProjectDir(dir)
+}
+
+// PickProjectDir opens the system directory picker and appends the result to
+// the approved list. Users must pick a folder this way; typed paths are not
+// an authorization path.
+func (a *App) PickProjectDir() (string, error) {
+	if !a.pickingDir.CompareAndSwap(false, true) {
+		return "", fmt.Errorf("a folder picker is already open")
+	}
+	defer a.pickingDir.Store(false)
+
+	dir, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title:                "Select Project Directory",
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	return appendApprovedProjectDir(dir)
 }

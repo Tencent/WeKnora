@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -162,30 +163,33 @@ func dataKeys(data map[string]interface{}) []string {
 
 // toolDisplayNames maps internal tool names to user-friendly display labels.
 var toolDisplayNames = map[string]string{
-	agenttools.ToolDiscoverMCPTools:         "查看外部工具",
-	agenttools.ToolCallMCPTool:              "调用外部工具",
-	agenttools.ToolThinking:                 "深度思考",
-	agenttools.ToolTodoWrite:                "制定计划",
-	agenttools.ToolGrepChunks:               "关键词搜索",
-	agenttools.ToolKnowledgeSearch:          "知识搜索",
-	agenttools.ToolListKnowledgeChunks:      "查看文档分块",
-	agenttools.ToolQueryKnowledgeGraph:      "查询知识图谱",
-	agenttools.ToolGetDocumentInfo:          "获取文档信息",
-	agenttools.ToolSearchConversations:      "回顾历史对话",
-	agenttools.ToolSearchMemory:             "查询长期记忆",
-	agenttools.ToolDatabaseQuery:            "查询数据",
-	agenttools.ToolDataAnalysis:             "数据分析",
-	agenttools.ToolDataSchema:               "查看数据结构",
-	agenttools.ToolWebSearch:                "搜索网页",
-	agenttools.ToolWebFetch:                 "获取网页",
-	agenttools.LegacyToolExecuteSkillScript: "执行技能脚本",
-	agenttools.LegacyToolReadSkill:          "读取技能",
-	agenttools.ToolReadFile:                 "读取文件",
-	agenttools.ToolListSandboxFiles:         "列出沙箱文件",
-	agenttools.LegacyToolReadSandboxFile:    "读取沙箱文件",
-	agenttools.ToolWriteSandboxFile:         "写入沙箱文件",
-	agenttools.ToolEditSandboxFile:          "编辑沙箱文件",
-	agenttools.ToolShellExec:                "执行沙箱命令",
+	agenttools.ToolDiscoverMCPTools:          "查看外部工具",
+	agenttools.ToolCallMCPTool:               "调用外部工具",
+	agenttools.ToolThinking:                  "深度思考",
+	agenttools.ToolTodoWrite:                 "制定计划",
+	agenttools.ToolSearchKnowledge:           "检索知识库",
+	agenttools.ToolReadDocument:              "阅读文档",
+	agenttools.ToolListDocuments:             "浏览文档列表",
+	agenttools.ToolQueryKnowledgeGraph:       "查询知识图谱",
+	agenttools.LegacyToolGrepChunks:          "关键词搜索",
+	agenttools.LegacyToolKnowledgeSearch:     "知识搜索",
+	agenttools.LegacyToolListKnowledgeChunks: "查看文档分块",
+	agenttools.LegacyToolGetDocumentInfo:     "获取文档信息",
+	agenttools.ToolSearchConversations:       "回顾历史对话",
+	agenttools.ToolSearchMemory:              "查询长期记忆",
+	agenttools.ToolDatabaseQuery:             "查询数据",
+	agenttools.ToolDataAnalysis:              "数据分析",
+	agenttools.ToolDataSchema:                "查看数据结构",
+	agenttools.ToolWebSearch:                 "搜索网页",
+	agenttools.ToolWebFetch:                  "获取网页",
+	agenttools.LegacyToolExecuteSkillScript:  "执行技能脚本",
+	agenttools.LegacyToolReadSkill:           "读取技能",
+	agenttools.ToolReadFile:                  "读取文件",
+	agenttools.ToolListSandboxFiles:          "列出沙箱文件",
+	agenttools.LegacyToolReadSandboxFile:     "读取沙箱文件",
+	agenttools.ToolWriteSandboxFile:          "写入沙箱文件",
+	agenttools.ToolEditSandboxFile:           "编辑沙箱文件",
+	agenttools.ToolShellExec:                 "执行沙箱命令",
 }
 
 // toolHintSensitiveArgs lists tools whose arguments should NOT be shown in hints
@@ -312,6 +316,18 @@ func (e *AgentEngine) executeToolCallsParallel(
 		}
 		readCtx := gCtx
 		g.Go(func() error {
+			// The registry recovers panics inside tool execution; this guards
+			// the bookkeeping around it, which would otherwise crash the
+			// process from a goroutine nothing above can recover.
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf(ctx, "[Agent][Round-%d] Tool call %s panicked: %v\n%s",
+						round, tc.Function.Name, r, debug.Stack())
+					mu.Lock()
+					results[i] = panickedToolCall(tc, i)
+					mu.Unlock()
+				}
+			}()
 			toolCall := e.runToolCall(readCtx, tc, i, iteration, round, sessionID, assistantMessageID)
 			mu.Lock()
 			results[i] = toolCall
@@ -326,6 +342,21 @@ func (e *AgentEngine) executeToolCallsParallel(
 	for _, toolCall := range results {
 		step.ToolCalls = append(step.ToolCalls, toolCall)
 		e.emitToolOutcome(ctx, toolCall, iteration, sessionID)
+	}
+}
+
+// panickedToolCall is the failed record for a call whose handling panicked, so
+// the round still returns one result per tool call the model issued.
+func panickedToolCall(tc types.LLMToolCall, i int) types.ToolCall {
+	return types.ToolCall{
+		ID:               agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i),
+		Name:             tc.Function.Name,
+		Args:             map[string]any{"_raw": tc.Function.Arguments},
+		ProviderMetadata: tc.ProviderMetadata,
+		Result: &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("tool %s failed with an internal error", tc.Function.Name),
+		},
 	}
 }
 

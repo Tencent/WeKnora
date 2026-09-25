@@ -28,6 +28,7 @@ from docreader.config import CONFIG
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.concurrency import parser_worker_limit
+from docreader.parser.source_locator import PageGeometry, page_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,12 @@ MAX_FIGURE_HEIGHT_RATIO = _env_float("DOCREADER_PDF_MAX_FIGURE_HEIGHT_RATIO", 0.
 # with a low-quality or misleading text layer (web-print, scanned, image-heavy).
 # Can be overridden per-upload via parser_engine_overrides.pdf_force_scanned.
 FORCE_SCANNED_PDF = _env_bool("DOCREADER_PDF_FORCE_SCANNED", False)
+
+# --- Source locators ---------------------------------------------------------
+# Record where each paragraph of a native text page sits on the page, so a
+# citation can open the PDF there and outline the paragraph. Costs one glyph
+# pass per text page; disable to only record page numbers.
+SOURCE_BOXES = _env_bool("DOCREADER_PDF_SOURCE_BOXES", True)
 
 # pdfium / Adobe text layers often emit U+FFFE for missing hyphenation or ligatures.
 _PDF_ARTIFACT_RE = re.compile(r"[\u00ad\u200b-\u200f\ufeff\ufffe\uffff]")
@@ -271,7 +278,10 @@ def _strip_chart_text_debris(text: str) -> str:
                 _CHART_CONTEXT_RE.search(lines[k])
                 for k in range(context_start, context_end)
             )
-            if j - i >= 3 and has_chart_context:
+            table_context = _tail_looks_like_numeric_table(
+                lines[max(0, i - 2) : min(len(lines), j + 2)]
+            )
+            if j - i >= 3 and has_chart_context and not table_context:
                 i = j
                 continue
         out.append(lines[i])
@@ -350,12 +360,21 @@ def _strip_lines_above_figure_captions(text: str) -> str:
 def _tail_looks_like_numeric_table(lines: list) -> bool:
     """Detect labelled or alternating label/value rows at the text tail."""
     tail = lines[-10:]
-    if len(_structured_numeric_rows("\n".join(tail))) >= 2:
+    rows = _structured_numeric_rows("\n".join(tail))
+    if rows and rows[-1][0] >= len(tail) - 2:
         return True
 
     numeric = re.compile(
         r"^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?$"
     )
+    for index, header in enumerate(tail[:-2]):
+        if (
+            header.strip()
+            and any(char.isalpha() for char in header)
+            and numeric.fullmatch(tail[index + 1].strip())
+            and numeric.fullmatch(tail[index + 2].strip())
+        ):
+            return True
     pairs = 0
     for label, value in zip(tail, tail[1:]):
         label = label.strip()
@@ -714,12 +733,15 @@ def _point_in_boxes(x: float, y: float, boxes: list) -> bool:
     return False
 
 
-def _page_chars(textpage, page, raw, *, return_filter_info: bool = False) -> tuple:
+def _page_chars(
+    textpage, page, raw, loose: bool = False, *, return_filter_info: bool = False
+) -> tuple:
     """Return ``(chars, page_width)`` with hidden/off-page glyphs filtered.
 
     Working at the glyph level (instead of pdfium rect segments) keeps mixed
     CJK + Latin/number lines in their true left-to-right order, which the
-    rect-level ``get_text_bounded`` API scrambles.
+    rect-level ``get_text_bounded`` API scrambles. ``loose`` boxes span the
+    font's ascent to descent, so every glyph of a line shares one height.
 
     When ``return_filter_info`` is true, a third value reports whether any
     non-newline source glyph was discarded.  Callers can then avoid falling
@@ -734,9 +756,10 @@ def _page_chars(textpage, page, raw, *, return_filter_info: bool = False) -> tup
 
     chars: list = []
     source_count = 0
+    filtered_count = 0
     for i in range(n):
         try:
-            left, bottom, right, top = textpage.get_charbox(i)
+            left, bottom, right, top = textpage.get_charbox(i, loose=loose)
         except Exception:
             source_count += 1
             continue
@@ -748,12 +771,14 @@ def _page_chars(textpage, page, raw, *, return_filter_info: bool = False) -> tup
         y0, y1 = (bottom, top) if bottom <= top else (top, bottom)
         if FILTER_HIDDEN_TEXT:
             if x1 < 0 or x0 > width or y1 < 0 or y0 > height:
+                filtered_count += 1
                 continue  # off-page glyph
             if invisible and _point_in_boxes((x0 + x1) / 2, (y0 + y1) / 2, invisible):
+                filtered_count += 1
                 continue  # covered by an invisible text object
-        chars.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "ch": ch})
+        chars.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "ch": ch, "i": i})
     if return_filter_info:
-        return chars, width, len(chars) < source_count
+        return chars, width, filtered_count > 0
     return chars, width
 
 
@@ -761,6 +786,23 @@ def _page_has_invisible_text(page, raw) -> bool:
     """Whether ``page`` contains text objects hidden from normal rendering."""
     if not FILTER_HIDDEN_TEXT:
         return False
+
+
+def _page_has_filtered_text(page, raw) -> bool:
+    """Whether layout filtering would discard hidden or off-page glyphs."""
+    if not FILTER_HIDDEN_TEXT:
+        return False
+    if _page_has_invisible_text(page, raw):
+        return True
+    textpage = None
+    try:
+        textpage = page.get_textpage()
+        _, _, filtered = _page_chars(textpage, page, raw, return_filter_info=True)
+        return filtered
+    except Exception:
+        return False
+    finally:
+        _close_pdfium_resource(textpage)
     try:
         return bool(_collect_invisible_boxes(page, raw))
     except Exception:
@@ -942,7 +984,8 @@ def _looks_like_numeric_table_columns(
                 any(abs(y - other_y) <= tolerance for other_y in label_ys)
                 for y in value_ys
             )
-            if aligned >= 1:
+            required_alignment = max(2, (len(value_ys) + 1) // 2)
+            if aligned >= required_alignment:
                 return True
     return False
 
@@ -1212,7 +1255,7 @@ def _should_prefer_plain(
         plain_values = Counter(_normalized_numeric_value(row[2]) for row in plain_rows)
         layout_values = Counter(_normalized_numeric_value(row[2]) for row in layout_rows)
         missing_values = sum((plain_values - layout_values).values())
-        if missing_values and len(layout_rows) < len(plain_rows):
+        if missing_values:
             return True
         if not missing_values and len(plain_rows) >= len(layout_rows):
             # Both paths retained the values, but the plain stream keeps the
@@ -1278,6 +1321,81 @@ def _extract_layout_text(page, raw, *, return_metadata: bool = False):
     if return_metadata:
         return result, filtered, table_hint
     return result
+
+
+# A visual line is cut where a gap wider than one glyph height coincides with
+# a jump in the text stream: the gutter between two columns, not a word space.
+LINE_SEGMENT_GAP_RATIO = 1.0
+LINE_SEGMENT_STREAM_JUMP = 8
+LINE_SEGMENT_MIN_CHARS = 3
+
+
+def _split_line_at_gaps(line: dict) -> list:
+    """Cut a visual line where it crosses from one column into another.
+
+    Narrow two-column gutters (ACL/IEEE papers leave ~16pt) and anything that
+    spans them (a title, a wide table) defeat the full-height gutter search,
+    so glyphs of both columns land in one line; each side must be placed and
+    boxed on its own. Columns are far apart in the text stream while glyphs of
+    one line are consecutive, which keeps wide justified word spaces intact.
+    """
+    whole = [{"text": line["text"], "bbox": line["bbox"]}]
+    chars = [c for c in line["chars"] if not c["ch"].isspace()]
+    if len(chars) < 2 * LINE_SEGMENT_MIN_CHARS:
+        return whole
+    min_gap = max(max(c["y1"] - c["y0"] for c in chars), 1.0) * LINE_SEGMENT_GAP_RATIO
+    segments: list = [[chars[0]]]
+    for prev, cur in zip(chars, chars[1:]):
+        jump = abs(cur.get("i", 0) - prev.get("i", 0))
+        if cur["x0"] - prev["x1"] > min_gap and jump > LINE_SEGMENT_STREAM_JUMP:
+            segments.append([cur])
+        else:
+            segments[-1].append(cur)
+    if len(segments) == 1 or any(len(seg) < LINE_SEGMENT_MIN_CHARS for seg in segments):
+        return whole
+    out = []
+    for seg in segments:
+        text = _join_line_glyphs(seg)
+        if text.strip():
+            out.append({"text": text, "bbox": _chars_bbox(seg)})
+    return out or whole
+
+
+def _page_line_boxes(page, raw) -> list:
+    """Visual lines of a text page as ``{"text", "bbox"}`` in PDF points.
+
+    Lines are grouped per column so a two-column page does not fuse the
+    columns' glyphs into one line. Any failure yields no lines, which only
+    downgrades the page's locators to page numbers.
+    """
+    textpage = None
+    try:
+        textpage = page.get_textpage()
+        # Tight glyph boxes put "a" and "d" at different heights, which splits
+        # one line of text into fragments by letter shape.
+        chars, width = _page_chars(textpage, page, raw, loose=True)
+        if not chars:
+            return []
+        heights = [c["y1"] - c["y0"] for c in chars if c["y1"] - c["y0"] > 0]
+        scale = (statistics.median(heights) if heights else 1.0) or 1.0
+        lines = []
+        for col in _split_columns(chars, scale, width):
+            for ln in _group_lines_with_chars(col):
+                lines.extend(_split_line_at_gaps(ln))
+        return lines
+    except Exception:
+        logger.debug("line box extraction failed", exc_info=True)
+        return []
+    finally:
+        _close_pdfium_resource(textpage)
+
+
+def _page_geometry(page):
+    try:
+        return PageGeometry(page.get_cropbox(), page.get_rotation())
+    except Exception:
+        logger.debug("page geometry unavailable", exc_info=True)
+        return None
 
 
 def _effective_scale(page, scale: float, max_edge: int) -> float:
@@ -1685,10 +1803,23 @@ class PDFScannedParser(BaseParser):
                 finally:
                     _close_pdfium_resource(pdf)
 
+            source_blocks = []
+            offset = 0
             for i in range(page_count):
                 page_filename = f"{base_name}_page_{i+1}.jpg"
                 ref_path = f"images/{page_filename}"
-                markdown_lines.append(f"![{page_filename}]({ref_path})")
+                line = f"![{page_filename}]({ref_path})"
+                if markdown_lines:
+                    offset += 2
+                markdown_lines.append(line)
+                source_blocks.append(
+                    {
+                        "start": offset,
+                        "end": offset + len(line),
+                        "locator": {"type": "pdf", "page": i + 1},
+                    }
+                )
+                offset += len(line)
                 images[ref_path] = base64.b64encode(rendered[i]).decode("utf-8")
 
             text = "\n\n".join(markdown_lines)
@@ -1699,6 +1830,7 @@ class PDFScannedParser(BaseParser):
                     "image_source_type": "scanned_pdf",
                     "page_count": page_count,
                 },
+                source_blocks=source_blocks,
             )
         except Exception as e:
             logger.exception("PDFScannedParser failed to parse PDF: %s", e)
@@ -1791,9 +1923,12 @@ class PDFParser(BaseParser):
             texts: list = []
             classes: list = []
             vector_clips: dict = {}
+            line_boxes: dict = {}
+            geometries: dict = {}
             for i in range(page_count):
                 page = pdf[i]
                 try:
+                    geometries[i] = _page_geometry(page)
                     plain = _extract_page_text(page)
                     ratio = _page_image_area_ratio(page, pdfium_r)
                     cls = _classify_page(ratio, len(plain.strip()))
@@ -1801,7 +1936,7 @@ class PDFParser(BaseParser):
                     # native text pages; scanned pages are rendered, not read.
                     if cls == "text" and LAYOUT_ORDERING:
                         plain_well_formed = _plain_is_well_formed(plain)
-                        if plain_well_formed and not _page_has_invisible_text(
+                        if plain_well_formed and not _page_has_filtered_text(
                             page, pdfium_r
                         ):
                             text = plain
@@ -1839,6 +1974,8 @@ class PDFParser(BaseParser):
                             for ref_path, b64, _y, _cap in clips:
                                 images[ref_path] = b64
                     text = _postprocess_pdf_text(text)
+                    if cls == "text" and SOURCE_BOXES:
+                        line_boxes[i] = _page_line_boxes(page, pdfium_r)
                     if cls == "text" and vector_clips.get(i):
                         text = _inject_figure_markdown_before_captions(
                             text, vector_clips[i]
@@ -1879,27 +2016,60 @@ class PDFParser(BaseParser):
         finally:
             _close_pdfium_resource(pdf)
 
-        # Assemble markdown in reading order.
+        # Assemble markdown in reading order, recording where each page's
+        # text lands so citations can point back at the page (and paragraph).
         embedded_count = 0
         vector_figure_count = 0
         blocks = []
+        source_blocks = []
+        offset = 0
+
+        def place(part: str) -> int:
+            nonlocal offset
+            if blocks:
+                offset += 2  # the "\n\n" separator
+            start = offset
+            blocks.append(part)
+            offset += len(part)
+            return start
+
         for i in range(page_count):
+            page_only = {"type": "pdf", "page": i + 1}
             if classes[i] == "scanned":
                 page_filename = f"{base_name}_page_{i+1}.jpg"
-                blocks.append(f"![{page_filename}](images/{page_filename})")
+                part = f"![{page_filename}](images/{page_filename})"
+                start = place(part)
+                source_blocks.append(
+                    {"start": start, "end": start + len(part), "locator": page_only}
+                )
             else:
                 stripped = texts[i].strip()
                 if stripped:
-                    blocks.append(stripped)
+                    start = place(stripped)
+                    source_blocks.extend(
+                        page_blocks(
+                            stripped,
+                            start,
+                            i + 1,
+                            line_boxes.get(i) or [],
+                            geometries.get(i),
+                        )
+                    )
                 vector_figure_count += len(vector_clips.get(i, []))
                 page_images = list(embedded.get(i, []))
                 page_images.sort(key=lambda item: item[2], reverse=True)
                 for ref_path, _b64, _y in page_images:
                     fname = os.path.basename(ref_path)
-                    blocks.append(f"![{fname}]({ref_path})")
+                    part = f"![{fname}]({ref_path})"
+                    start = place(part)
+                    source_blocks.append(
+                        {"start": start, "end": start + len(part), "locator": dict(page_only)}
+                    )
                     embedded_count += 1
 
-        content_text = "\n\n".join(blocks).strip()
+        # Every part is already stripped, so the join needs no trimming and
+        # the recorded offsets stay exact.
+        content_text = "\n\n".join(blocks)
 
         metadata = {
             "page_count": page_count,
@@ -1920,4 +2090,9 @@ class PDFParser(BaseParser):
             embedded_count,
             len(content_text),
         )
-        return Document(content=content_text, images=images, metadata=metadata)
+        return Document(
+            content=content_text,
+            images=images,
+            metadata=metadata,
+            source_blocks=source_blocks,
+        )

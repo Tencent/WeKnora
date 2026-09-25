@@ -64,7 +64,11 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id/attachments/:attachment_id/preview", handler.PreviewTemporaryDocument)
 		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
 		sessions.POST("/:session_id/stop", handler.StopSession)
+		sessions.POST("/:session_id/fork", handler.ForkSession)
+		sessions.POST("/:session_id/rewind", handler.RewindSession)
 		sessions.POST("/:session_id/sandbox/terminal-ticket", handler.IssueSandboxTerminalTicket)
+		sessions.POST("/:session_id/sandbox/desktop-ticket", handler.IssueSandboxDesktopTicket)
+		sessions.POST("/:session_id/sandbox/desktop/activity", handler.ReportSandboxDesktopActivity)
 		sessions.GET("/:id/local-browser", handler.BrowserSkillConnection)
 		sessions.POST("/:session_id/local-browser", handler.BrowserSkillConnection)
 		// Mid-run message injection: append a user message to the turn that is
@@ -105,6 +109,21 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id/artifacts", handler.ListSessionArtifacts)
 		sessions.GET("/:id/messages/:message_id/artifacts", handler.ListMessageArtifacts)
 		sessions.GET("/:id/messages/:message_id/artifacts/:index/download", handler.DownloadMessageArtifact)
+		// Deleting reclaims the stored bytes, so it is owner-only: unlike the
+		// download above it does not honour shared-agent read access.
+		sessions.DELETE("/:id/messages/:message_id/artifacts/:index", handler.DeleteMessageArtifact)
+	}
+
+	// Cross-session artifact library. Same guards as /sessions: the rows come
+	// from the caller's own sessions, and downloads go back through the
+	// per-session endpoint above.
+	artifacts := g.apiKeyGroup(r.Group("/artifacts", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
+	{
+		artifacts.GET("", handler.ListArtifactLibrary)
+		// The artifact to delete is addressed by query parameters rather than a
+		// path: the library row already carries session_id/message_id/index, and
+		// a path would have to repeat the /sessions tree under a second prefix.
+		artifacts.DELETE("", handler.DeleteLibraryArtifact)
 	}
 }
 
@@ -147,4 +166,17 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 // /sessions/:id (gin requires identical wildcard names per tree).
 func RegisterSandboxTerminalRoutes(r *gin.Engine, sessionHandler *session.Handler) {
 	r.GET("/api/v1/sessions/:id/sandbox/terminal", sessionHandler.SandboxTerminalWS)
+}
+
+// RegisterSandboxDesktopRoutes registers the desktop relay WebSocket.
+//
+// Registered BEFORE the global auth middleware for the same reason as the
+// terminal: a browser WebSocket handshake cannot carry Authorization, so a
+// one-shot session-bound ticket travels in the query string. Unlike the
+// terminal's JWT the desktop ticket is an opaque random string consumed with
+// GETDEL, so a leaked URL is worth one handshake at most.
+//
+// The wildcard is :id to match /sessions/:id in the same radix tree.
+func RegisterSandboxDesktopRoutes(r *gin.Engine, sessionHandler *session.Handler) {
+	r.GET("/api/v1/sessions/:id/sandbox/desktop", sessionHandler.SandboxDesktopWS)
 }

@@ -7,13 +7,15 @@ import { repoVersionLabel } from './version'
 
 const root = resolve(import.meta.dirname, '..')
 
-const sections: { dir: string; label: string }[] = [
+const sections: { dir: string; label: string; newestFirst?: boolean }[] = [
   { dir: '01-getting-started', label: '快速开始' },
   { dir: '02-architecture', label: '架构' },
   { dir: '03-features', label: '功能模块' },
   { dir: '04-api', label: 'API 参考' },
   { dir: '05-clients', label: '客户端' },
   { dir: '06-development', label: '开发指南' },
+  // 每个版本一页（v0.8.2.md），最新版本排在最前
+  { dir: '07-releases', label: '版本发布', newestFirst: true },
 ]
 
 /** 侧边栏条目文字：取正文一级标题，去掉冗余前后缀 */
@@ -27,10 +29,19 @@ function itemText(dir: string, file: string): string {
     .trim()
 }
 
-function itemsOf(dir: string): DefaultTheme.SidebarItem[] {
-  return readdirSync(resolve(root, dir))
-    .filter((f) => f.endsWith('.md'))
-    .sort()
+/** 版本号按数字比较，v0.10.0 排在 v0.9.0 之后 */
+function compareVersions(a: string, b: string): number {
+  const parts = (f: string) => f.replace(/^v|\.md$/g, '').split('.').map(Number)
+  const [x, y] = [parts(a), parts(b)]
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0)
+  }
+  return 0
+}
+
+function itemsOf(dir: string, newestFirst = false): DefaultTheme.SidebarItem[] {
+  const files = readdirSync(resolve(root, dir)).filter((f) => f.endsWith('.md'))
+  return (newestFirst ? files.sort(compareVersions).reverse() : files.sort())
     .map((f) => ({
       text: itemText(dir, f),
       link: `/${dir}/${f.replace(/\.md$/, '')}`,
@@ -40,7 +51,7 @@ function itemsOf(dir: string): DefaultTheme.SidebarItem[] {
 const sidebar: DefaultTheme.SidebarItem[] = sections.map((s) => ({
   text: s.label,
   collapsed: false,
-  items: itemsOf(s.dir),
+  items: itemsOf(s.dir, s.newestFirst),
 }))
 
 /** 本地搜索默认按空白分词，中文整段会被当作一个词，这里退化为字粒度切分 */
@@ -58,7 +69,6 @@ function tokenize(text: string): string[] {
 }
 
 const repo = 'https://github.com/Tencent/WeKnora'
-const site = 'https://weknora.weixin.qq.com'
 
 export default withMermaid(
   defineConfig({
@@ -68,12 +78,17 @@ export default withMermaid(
     lang: 'zh-CN',
     base: '/docs/',
     cleanUrls: true,
+    appearance: { storageKey: 'vitepress-theme-appearance' },
     lastUpdated: true,
-    srcExclude: ['README.md'],
+    srcExclude: ['README.md', 'MIGRATION.md', 'homepage/**', 'shared/**', 'scripts/**', 'deploy/**', 'static-site/**', 'releases/**'],
     metaChunk: true,
+    transformPageData(pageData) {
+      // The shared masthead replaces the default documentation navbar.
+      pageData.frontmatter.navbar = false
+    },
 
     head: [
-      ['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }],
+      ['link', { rel: 'icon', href: '/docs/favicon.ico', type: 'image/x-icon' }],
       ['meta', { name: 'theme-color', content: '#101f38' }],
       ['meta', { property: 'og:type', content: 'website' }],
       ['meta', { property: 'og:title', content: 'WeKnora 文档' }],
@@ -100,18 +115,10 @@ export default withMermaid(
     },
 
     themeConfig: {
-      logo: { light: '/logo-mark.svg', dark: '/logo-mark-dark.svg', alt: 'WeKnora' },
+      logoLink: { link: '/', target: '_self' },
       siteTitle: 'WeKnora',
 
-      nav: [
-        { text: '快速开始', link: '/01-getting-started/01-introduction', activeMatch: '/01-getting-started/' },
-        { text: '架构', link: '/02-architecture/01-overview', activeMatch: '/02-architecture/' },
-        { text: '功能', link: '/03-features/01-tenant-auth', activeMatch: '/03-features/' },
-        { text: 'API', link: '/04-api/01-api-overview', activeMatch: '/04-api/' },
-        { text: '客户端', link: '/05-clients/01-frontend', activeMatch: '/05-clients/' },
-        { text: '开发', link: '/06-development/01-dev-guide', activeMatch: '/06-development/' },
-        { text: '官网', link: site },
-      ],
+      nav: [],
 
       weknoraVersion: repoVersionLabel,
 

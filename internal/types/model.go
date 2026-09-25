@@ -44,6 +44,7 @@ const (
 	ModelUsageBindingVLMModel             ModelUsageBinding = "vlm_model"
 	ModelUsageBindingASRModel             ModelUsageBinding = "asr_model"
 	ModelUsageBindingWikiSynthesisModel   ModelUsageBinding = "wiki_synthesis_model"
+	ModelUsageBindingAutoTagModel         ModelUsageBinding = "auto_tag_model"
 	ModelUsageBindingChatModel            ModelUsageBinding = "chat_model"
 	ModelUsageBindingRerankModel          ModelUsageBinding = "rerank_model"
 	ModelUsageBindingQueryUnderstandModel ModelUsageBinding = "query_understand_model"
@@ -152,6 +153,37 @@ type ModelParameters struct {
 	// WeKnoraCloud 厂商专用凭证
 	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
+	// Spec overrides the catalog entry for this row: protocol, capability
+	// flags and the flat protocol compat object. Everything omitted is
+	// inherited from the vendor catalog (see internal/models/catalog).
+	Spec *ModelSpecOverride `yaml:"spec,omitempty" json:"spec,omitempty"`
+}
+
+// ModelSpecOverride is the per-row slice of a catalog model entry that an
+// operator may pin from the UI or YAML. Compat is the flat protocol-specific
+// object decoded by internal/models/runtime/compat.go using the API settings.
+type ModelSpecOverride struct {
+	API             string             `yaml:"api,omitempty"               json:"api,omitempty"`
+	Reasoning       *bool              `yaml:"reasoning,omitempty"         json:"reasoning,omitempty"`
+	Input           []string           `yaml:"input,omitempty"             json:"input,omitempty"`
+	ContextWindow   int                `yaml:"context_window,omitempty"    json:"context_window,omitempty"`
+	MaxOutputTokens int                `yaml:"max_output_tokens,omitempty" json:"max_output_tokens,omitempty"`
+	ThinkingLevels  map[string]*string `yaml:"thinking_levels,omitempty"   json:"thinking_levels,omitempty"`
+	// Compat is a plain object so it round-trips through both JSON (API,
+	// database column) and YAML (builtin_models.yaml).
+	Compat map[string]any `yaml:"compat,omitempty" json:"compat,omitempty"`
+}
+
+// CompatJSON renders Compat for the catalog decoder; nil when unset.
+func (o *ModelSpecOverride) CompatJSON() json.RawMessage {
+	if o == nil || len(o.Compat) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(o.Compat)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 // Per-response redaction for Model now lives in dto.NewModelResponse. The

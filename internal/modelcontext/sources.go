@@ -298,7 +298,9 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 		processToolResult := out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name))
 		if out[i].Role == "assistant" || processToolResult {
 			out[i].Content = r.CompactPublicCitations(out[i].Content, false)
+			reasoningBefore := out[i].ReasoningContent
 			out[i].ReasoningContent = r.CompactPublicCitations(out[i].ReasoningContent, false)
+			dropStaleReasoningSignature(&out[i], reasoningBefore)
 		}
 		if len(out[i].MultiContent) > 0 {
 			out[i].MultiContent = append([]chat.MessageContentPart(nil), out[i].MultiContent...)
@@ -480,7 +482,7 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool)
 		r.RegisterDocument(value)
 	case spaceDocumentRef:
 		// Stored refs use "knowledgeID|title"; only the ID part is durable.
-		r.RegisterDocument(strings.TrimSpace(strings.SplitN(value, "|", 2)[0]))
+		r.RegisterDocument(types.WikiSourceKnowledgeID(value))
 	case spaceKnowledgeBase:
 		r.RegisterKnowledgeBase(value)
 	case spaceWeb:
@@ -490,6 +492,8 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool)
 		if parsed, err := url.Parse(value); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 			r.registerWeb(value, "", evidence)
 		}
+	case spaceAnySource:
+		// Decode-only: a bare "id" never registers a new source.
 	}
 }
 

@@ -24,6 +24,18 @@ test('xterm palette keeps prompt green but ls directories blue', () => {
   assert.doesNotMatch(prompt, /\]\\w\\\[/)
 })
 
+test('hidden terminal does not resize the live PTY to a zero-size fit', () => {
+  assert.match(terminal, /function containerHasPtySize/)
+  assert.match(terminal, /clientWidth >= 20/)
+  assert.match(terminal, /clientHeight >= 20/)
+  const start = terminal.indexOf('function applyFit')
+  const end = terminal.indexOf('function fitAndFocus')
+  assert.ok(start >= 0 && end > start)
+  const applyFit = terminal.slice(start, end)
+  assert.match(applyFit, /containerHasPtySize\(\)/)
+  assert.match(applyFit, /xterm\.cols < 2 \|\| xterm\.rows < 2/)
+})
+
 test('PTY output attaches after the first fit so FitAddon cannot wipe the prompt', () => {
   const start = terminal.indexOf('function mountTerminal')
   const end = terminal.indexOf('function unmountTerminal')

@@ -1369,8 +1369,8 @@ func (s *wikiPageService) ListIssues(ctx context.Context, kbID string, slug stri
 }
 
 // UpdateIssueStatus updates an issue's status
-func (s *wikiPageService) UpdateIssueStatus(ctx context.Context, issueID string, status string) error {
-	return s.repo.UpdateIssueStatus(ctx, issueID, status)
+func (s *wikiPageService) UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error {
+	return s.repo.UpdateIssueStatus(ctx, kbID, issueID, status)
 }
 
 // --- Folder tree (wiki_folders) ---

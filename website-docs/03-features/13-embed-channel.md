@@ -1,6 +1,6 @@
 # 网页嵌入（Embed Channel）
 
-嵌入渠道用于在官网或帮助中心提供知识库问答挂件。创建渠道并绑定智能体后，将生成的脚本加入网页，访客无需 WeKnora 账号即可对话。
+嵌入渠道用于在官网或帮助中心提供知识库问答挂件。创建渠道并绑定智能体后，将生成的脚本加入网页，访客无需 WeKnora 账号即可对话。访客的检索范围和模型完全由渠道绑定的智能体决定：服务端会丢弃请求里的知识库、文档、标签、@提及、技能和模型覆盖。
 
 在「设置 → 网页嵌入」新建渠道，绑定智能体并设置允许嵌入的域名，然后复制接入代码。公开使用前应配置域名白名单和限流，限制访问来源与请求量。
 
@@ -46,6 +46,8 @@ publish token 只保存在业务后端，页面通过 `data-token-endpoint` 指�
 ```
 
 业务后端实现该 endpoint：服务端持有 `em_` token，调用 `POST /api/v1/embed/{channel_id}/exchange` 换取 `ems_` 短效 token 并返回 `{ "token": "ems_...", "expiresIn": 1800 }`。挂件会在约 80% TTL 时（不早于 30 秒）自动刷新 token（见 `weknora-widget.js` 中的 `scheduleRefresh`）。**publish token 永不到达浏览器。**
+
+换取接口必须先验证业务侧 Session/JWT 的有效性和访客访问权；仅判断 Cookie 或 Authorization 头是否存在不构成身份验证。服务端调用 exchange 时须手动发送与渠道白名单一致的业务宿主 `Origin`，例如 `Origin: https://shop.example.com`；不要把 WeKnora 的管理 Token 暴露给访客。
 
 其余可选属性：`data-base-url`（默认从 script src 推导）、`data-width` / `data-height`（面板尺寸，默认 400×600）、`data-sandbox`（iframe sandbox 策略；跨域嵌入时自动加 `allow-scripts allow-forms allow-popups allow-modals allow-same-origin`）。
 
@@ -99,11 +101,27 @@ publish token 只保存在业务后端，页面通过 `data-token-endpoint` 指�
 
 1. 按 `channel_id` 查渠道，校验 token 与 `publish_token` 匹配，或在 Redis（key `embed:session:{token}`）中查到 session token 归属该渠道；
 2. 校验渠道 `enabled`；
-3. 校验请求 `Origin` 命中 `allowed_origins`（空列表拒绝一切；`*` 仅开发模式；`*.example.com` 后缀通配；其余精确匹配、大小写不敏感）；
+3. 允许 iframe 内的同源 API 请求；跨源 API 请求及安全模式服务端 exchange 的 `Origin` 需命中 `allowed_origins`。空白名单仍拒绝一切；宿主限制由嵌入 HTML 的 CSP 执行；
 4. 限流（Redis Lua 脚本，滑动窗口）：
    - 单 IP 每分钟 ≤ `RateLimitPerMinute`；
    - 渠道全局每分钟 ≤ `max(RateLimitPerMinute × 20, 120)`——防止攻击者轮换 IP 绕过单 IP 限流；
    - 渠道每日总量 ≤ `RateLimitPerDay`。
+
+### 宿主来源与部署
+
+A 网站嵌入 B 的 WeKnora 时，白名单填 A。标准 Nginx 使用 `/api/v1/embed-frame-policy` 获取渠道策略（无需 token，仅返回 CSP，不返回渠道配置），并在 `/embed/:channelId` 的 HTML 响应中设置 `frame-ancestors`；Lite 使用同一策略。该页面不缓存，策略获取失败时不返回嵌入 HTML。
+
+升级时，过去仅填 B 的渠道需改填实际宿主 A，并同时更新前后端。自定义反向代理需保留 CSP、原始 Host（含端口）、协议及 `Sec-Fetch-Site`。白名单限制浏览器嵌入，不能代替访客认证或阻止持有 token 的非浏览器客户端；此类访问控制使用安全模式和限流。
+
+#### 独立子域（可选） {#embed-subdomain}
+
+默认 embed 页面和管理端共用域名即可。需要独立入口或 Cookie 隔离时，可以把 embed 页面放在 `https://embed.example.com`，管理端留在 `https://app.example.com`，业务宿主为 `https://shop.example.com`。
+
+管理端通过 `frontend/public/config.js` 的 `window.__RUNTIME_CONFIG__.EMBED_BASE_URL` 指定 embed 源站，或使用构建期 `VITE_EMBED_BASE_URL`；留空则跟随当前页面 origin。修改后确认生成的 Widget/iframe 代码指向新地址。
+
+独立 Nginx server 只提供 `/embed/*`、`/weknora-widget.js`、`/assets/*` 和必要的后端代理，不挂管理端 `index.html`。保留标准 `frontend/nginx.conf` 中 `/embed/` 的 `auth_request`、内部 `/_embed-frame-policy` 和 CSP 响应头：获取策略失败时必须拒绝返回页面，网关/CDN 不应缓存或丢弃该策略。
+
+白名单仍填写实际业务宿主 `https://shop.example.com`，安全模式 exchange 声明相同 Origin；不需要为正常同源聊天请求额外加入 embed 源站。Widget 在宿主与 embed 不同源时自动添加 iframe sandbox。验证时从实际宿主打开页面，检查 iframe、API、CSP 和生成代码，不能只在管理端预览。
 
 ### Token 交换（安全模式核心）
 
@@ -185,7 +203,7 @@ type EmbedChannel struct {
 | `name` | string | — | 渠道显示名称 |
 | `enabled` | bool | `true` | 渠道开关，关闭后所有公开接口拒绝访问 |
 | `agent_id` | string | `builtin-quick-answer` | 绑定的 Agent，决定知识库范围与对话能力 |
-| `allowed_origins` | string[] | — | **必填至少一项**。支持三种形式：完整 `http(s)://` Origin、子域名通配 `*.example.com`、全通配 `*`（仅开发模式允许，生产环境拒绝） |
+| `allowed_origins` | string[] | — | **必填至少一项，填写嵌入宿主 A，不是 WeKnora 地址 B**。支持三种形式：完整 `http(s)://` Origin（不含路径、查询参数）、子域名通配 `*.example.com`（只匹配子域，不含 `example.com` 本身；未写端口时匹配任意端口）、全通配 `*`（`GIN_MODE=release` 时拒绝保存，仅供开发） |
 | `welcome_message` | string | 空 | 打开挂件时的欢迎语 |
 | `rate_limit_per_minute` | int | `30` | 单 IP 每分钟请求上限 |
 | `rate_limit_per_day` | int | `10000` | 渠道级每日请求总量上限 |
@@ -202,7 +220,7 @@ type EmbedChannel struct {
 
 ### 管理 API（需登录鉴权）
 
-由 `RegisterEmbedChannelRoutes`（`internal/router/router.go`）注册，支持 API Key 的 `ManageChannels` 能力：
+由 `RegisterEmbedChannelRoutes`（`internal/router/routes_agent.go`）注册，支持 API Key 的 `ManageChannels` 能力：
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -284,7 +302,7 @@ sequenceDiagram
 
 ### 安全要点小结
 
-- **Origin 白名单**：`allowed_origins` 为空时拒绝所有请求；`*` 通配仅开发模式可用；支持 `*.example.com` 子域名通配。
+- **宿主白名单**：嵌入 HTML 设置渠道级 `CSP frame-ancestors`，限制所有祖先页面；iframe 内同源 API 正常放行。`allowed_origins` 为空时拒绝所有请求；`*` 仅开发模式可用；支持 `*.example.com` 子域名通配。同源管理端预览允许。
 - **双 token 体系**：安全模式下 publish token 不出服务端，浏览器只持有 30 分钟短效 `ems_` token。
 - **会话签名**：`X-Embed-Session` HMAC 签名把会话绑定到（渠道、会话、当前 publish token）三元组，轮换 token 即可全量吊销。
 - **三层限流**：单 IP/分钟、渠道/分钟（20 倍单 IP、下限 120）、渠道/天，Redis Lua 原子实现。
@@ -302,7 +320,8 @@ sequenceDiagram
 | 匿名会话/Token | `internal/application/service/embed_session.go` |
 | Webhook 分发 | `internal/application/service/embed_webhook.go` |
 | 鉴权中间件 | `internal/middleware/embed_auth.go` |
-| 路由注册 | `internal/router/router.go`（`RegisterEmbedPublicRoutes` / `RegisterEmbedChannelRoutes`） |
+| 路由注册 | `internal/router/routes_agent.go`（`RegisterEmbedPublicRoutes` / `RegisterEmbedChannelRoutes` / 嵌入页 CSP 策略） |
+| 宿主来源规则 | `internal/embedpolicy/origin.go` |
 | 挂件加载器（SDK） | `frontend/public/weknora-widget.js` |
 | 嵌入页 SPA 入口 | `frontend/src/embed-main.ts`、`frontend/src/composables/useEmbedBridge.ts`、`useEmbedChatSession.ts` |
 | 数据库迁移 | `migrations/versioned/000060_embed_channels.up.sql` |

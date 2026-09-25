@@ -93,6 +93,7 @@ class ExcelParser(BaseParser):
         """
         chunks: List[Chunk] = []
         text: List[str] = []
+        source_blocks: List[dict] = []
         start, end = 0, 0
 
         excel_file = _open_excel_file(content, file_type=self.file_type)
@@ -107,8 +108,10 @@ class ExcelParser(BaseParser):
             # Remove rows where all values are NaN (completely empty rows)
             df.dropna(how="all", inplace=True)
 
-            # Process each row in the DataFrame
-            for _, row in df.iterrows():
+            # Process each row in the DataFrame. The index is the 0-based
+            # sheet row (rows are read from row 1 and dropped rows keep
+            # their labels), so index + 1 is the row number users see.
+            for row_index, row in df.iterrows():
                 page_content = []
                 # Build key-value pairs for non-null values
                 for k, v in row.items():
@@ -128,10 +131,29 @@ class ExcelParser(BaseParser):
                 chunks.append(
                     Chunk(content=content_row, seq=len(chunks), start=start, end=end)
                 )
+                try:
+                    row_number = int(row_index) + 1
+                except (TypeError, ValueError):
+                    row_number = 0
+                if row_number > 0:
+                    source_blocks.append(
+                        {
+                            "start": start,
+                            "end": end,
+                            "locator": {
+                                "type": "sheet",
+                                "sheet": str(excel_sheet_name),
+                                "row_start": row_number,
+                                "row_end": row_number,
+                            },
+                        }
+                    )
                 start = end
 
         # Combine all text and return as Document
-        return Document(content="".join(text), chunks=chunks)
+        return Document(
+            content="".join(text), chunks=chunks, source_blocks=source_blocks
+        )
 
 
 def _read_sheet_dataframe(

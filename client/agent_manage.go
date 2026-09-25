@@ -165,10 +165,12 @@ type CreateAgentRequest struct {
 // UpdateAgentRequest represents the request to update an agent.
 // JSON field names mirror internal/handler.UpdateAgentRequest.
 type UpdateAgentRequest struct {
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	Avatar      string       `json:"avatar"`
-	Config      *AgentConfig `json:"config"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Avatar is omitted when nil to preserve the stored value. A pointer to
+	// an empty string explicitly clears the avatar.
+	Avatar *string      `json:"avatar,omitempty"`
+	Config *AgentConfig `json:"config"`
 }
 
 // AgentResponse represents the API response containing a single agent
@@ -303,6 +305,7 @@ type SuggestedQuestion struct {
 	Question        string `json:"question"`                    // Question text
 	Source          string `json:"source"`                      // Source: "faq", "document", or "agent_config"
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"` // Source knowledge base ID
+	KnowledgeID     string `json:"knowledge_id,omitempty"`      // Source document ID (faq/document sources)
 }
 
 // SuggestedQuestionsRequest represents the options for getting suggested questions
