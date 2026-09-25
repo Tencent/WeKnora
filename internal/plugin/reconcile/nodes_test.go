@@ -8,6 +8,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -45,7 +46,7 @@ func TestNodesConvergeThroughRedis(t *testing.T) {
 		nodes, err := a.NodeStatuses(ctx, "acme.kit")
 		return err == nil && len(nodes) == 2
 	})
-	instances, err := b.Driver().Status(ctx, "acme.kit")
+	instances, err := b.Driver(manifest.RuntimeDeclarative).Status(ctx, "acme.kit")
 	if err != nil || len(instances) != 2 || instances[0].State != "ready" {
 		t.Fatalf("instances = %+v, %v", instances, err)
 	}

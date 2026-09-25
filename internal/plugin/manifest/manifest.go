@@ -238,6 +238,7 @@ func (m *Manifest) Validate() error {
 		}
 	}
 	m.validateRuntime(add)
+	m.validatePermissions(add)
 	m.validateContributions(add)
 	return errors.Join(errs...)
 }
@@ -248,8 +249,11 @@ func (m *Manifest) validateRuntime(add func(string, ...any)) {
 		if !m.Builtin {
 			add("runtime.type %q is reserved for builtin plugins", RuntimeBuiltin)
 		}
-	case RuntimeDeclarative, RuntimeRemote, RuntimeKubernetes:
+	case RuntimeDeclarative:
+	case RuntimeRemote, RuntimeKubernetes:
+		m.validateAPIVersion(add)
 	case RuntimeHost:
+		m.validateAPIVersion(add)
 		switch m.Runtime.Kind {
 		case "binary", "python", "node":
 		default:
@@ -260,6 +264,30 @@ func (m *Manifest) validateRuntime(add func(string, ...any)) {
 		}
 	default:
 		add("runtime.type %q is not one of builtin, declarative, host, remote, kubernetes", m.Runtime.Type)
+	}
+}
+
+// ExtensionAPIVersion is the extension protocol this build speaks
+// (pluginsdk/pluginapi.APIVersion).
+const ExtensionAPIVersion = "weknora.plugin/v1"
+
+func (m *Manifest) validateAPIVersion(add func(string, ...any)) {
+	if m.Builtin {
+		return
+	}
+	if m.APIVersion != ExtensionAPIVersion {
+		add("apiVersion must be %q for code plugins, got %q", ExtensionAPIVersion, m.APIVersion)
+	}
+}
+
+// egressPattern is a host name, optionally with a leading "*." wildcard.
+var egressPattern = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
+
+func (m *Manifest) validatePermissions(add func(string, ...any)) {
+	for _, e := range m.Permissions.Egress {
+		if !egressPattern.MatchString(strings.ToLower(e)) {
+			add("permissions.egress %q must be a host name such as api.example.com or *.example.com", e)
+		}
 	}
 }
 

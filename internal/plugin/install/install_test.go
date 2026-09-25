@@ -3,6 +3,7 @@ package install
 import (
 	"context"
 	"errors"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -126,4 +127,37 @@ func TestFetchURLRefusesPrivateAddresses(t *testing.T) {
 func isInvalid(err error) bool {
 	var ie *InvalidError
 	return errors.As(err, &ie)
+}
+
+func hostPackage(t *testing.T, kind, binPath string) []byte {
+	return plugintest.Zip(t, map[string]string{
+		"plugin.yaml": "schemaVersion: 1\nid: acme.search\nversion: 1.0.0\napiVersion: weknora.plugin/v1\n" +
+			"name: { en-US: ACME Search }\npublisher: { id: acme }\n" +
+			"runtime: { type: host, kind: " + kind + ", entry: \"bin/{os}-{arch}/search\" }\n" +
+			"permissions: { egress: [api.acme.example] }\n" +
+			"contributes:\n  webSearch:\n    - { id: search, name: ACME Search }\n",
+		binPath: "binary",
+	})
+}
+
+func TestInstallHostPlugins(t *testing.T) {
+	ctx := context.Background()
+	s, _, _, _ := newService(t)
+	name := "search"
+	if goruntime.GOOS == "windows" {
+		name += ".exe"
+	}
+	here := "bin/" + goruntime.GOOS + "-" + goruntime.GOARCH + "/" + name
+	p, err := s.Inspect(ctx, hostPackage(t, "binary", here))
+	if err != nil || p.Manifest.Permissions.Egress[0] != "api.acme.example" {
+		t.Fatalf("Inspect = %+v, %v", p, err)
+	}
+	if _, err := s.Inspect(ctx, hostPackage(t, "binary", "bin/plan9-mips/search")); !isInvalid(err) ||
+		!strings.Contains(err.Error(), "no build for this server") {
+		t.Fatalf("want a missing build error, got %v", err)
+	}
+	if _, err := s.Inspect(ctx, hostPackage(t, "python", here)); !isInvalid(err) ||
+		!strings.Contains(err.Error(), "must be binaries") {
+		t.Fatalf("want an unsupported kind error, got %v", err)
+	}
 }

@@ -117,7 +117,7 @@ func TestOpenRejectsBadPackages(t *testing.T) {
 				"config/tenant.yaml":     tenantSchema,
 				"skills/triage/SKILL.md": "x",
 			},
-			want: "not open to third-party plugins",
+			want: "contributes.connectors needs code",
 		},
 	}
 	for name, c := range cases {

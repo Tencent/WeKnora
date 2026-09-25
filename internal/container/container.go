@@ -73,6 +73,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
 	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
+	pluginhost "github.com/Tencent/WeKnora/internal/plugin/host"
+	pluginmanifest "github.com/Tencent/WeKnora/internal/plugin/manifest"
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
@@ -165,6 +167,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(activate.NewMCPServers))
 	must(container.Provide(activate.NewSkills))
 	must(container.Provide(activate.NewModelVendors))
+	must(container.Provide(pluginhost.NewManager))
 	must(container.Provide(newMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -1835,7 +1838,8 @@ func newPluginRegistry(
 // declarative packages today; host, remote and kubernetes drivers join this
 // set.
 func newPluginDrivers(reg *pluginregistry.Registry, r *reconcile.Reconciler) *plugindriver.Set {
-	return plugindriver.NewSet(plugindriver.NewBuiltin(reg.Plugin), r.Driver())
+	return plugindriver.NewSet(plugindriver.NewBuiltin(reg.Plugin),
+		r.Driver(pluginmanifest.RuntimeDeclarative), r.Driver(pluginmanifest.RuntimeHost))
 }
 
 // installPluginGate gives the integration handlers the tenant plugin switches,

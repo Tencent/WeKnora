@@ -36,9 +36,9 @@ type PointInfo struct {
 // infrastructure owned by WeKnora itself, not extension points.
 var points = []PointInfo{
 	{Point: PointModelVendors, ThirdParty: true, Declarative: true},
-	{Point: PointConnectors},
+	{Point: PointConnectors, ThirdParty: true},
 	{Point: PointIMChannels},
-	{Point: PointWebSearch},
+	{Point: PointWebSearch, ThirdParty: true},
 	{Point: PointTools},
 	{Point: PointParsers},
 	{Point: PointSkills, ThirdParty: true, Declarative: true},

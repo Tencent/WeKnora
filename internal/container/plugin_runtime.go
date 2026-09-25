@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
+	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
@@ -34,13 +35,16 @@ func newPluginPackageStore(cfg *config.Config) (reconcile.PackageStore, error) {
 type pluginActivators struct {
 	dig.In
 
+	Host    *host.Manager
 	MCP     *activate.MCPServers
 	Skills  *activate.Skills
 	Vendors *activate.ModelVendors
 }
 
+// list orders the activators: the host first, so a code plugin's process is
+// running before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
-	return []reconcile.Activator{a.Vendors, a.MCP, a.Skills}
+	return []reconcile.Activator{a.Host, a.Vendors, a.MCP, a.Skills}
 }
 
 // bindPluginActivators hands the activators what they need once the plugin
@@ -80,8 +84,13 @@ func newPluginInstaller(
 
 // startPluginReconciler loads installed plugins before the server takes
 // traffic, then keeps this node in step with the others.
-func startPluginReconciler(r *reconcile.Reconciler, cleaner interfaces.ResourceCleaner) {
+func startPluginReconciler(r *reconcile.Reconciler, hostManager *host.Manager, cleaner interfaces.ResourceCleaner) {
+	hostManager.SetReporter(r)
 	ctx, cancel := context.WithCancel(context.Background())
 	r.Start(ctx)
-	cleaner.RegisterWithName("PluginReconciler", func() error { cancel(); return nil })
+	cleaner.RegisterWithName("PluginReconciler", func() error {
+		cancel()
+		hostManager.Close()
+		return nil
+	})
 }
