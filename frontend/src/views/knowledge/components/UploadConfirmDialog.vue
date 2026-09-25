@@ -763,8 +763,10 @@ const { t, te } = useI18n()
 const imageAttrDisplays = computed(() =>
   displaySchema.value.attributes.map((attr) => imageAttrDisplay(attr, t, te)),
 )
+// The conditions this upload actually runs with: a list customised through the
+// API is shown as is, otherwise mergeImageActions filled in the default.
 const imageAttrConditionDisplays = computed(() =>
-  displaySchema.value.default_actions.ocr.on.map((cond) =>
+  uiState.value.imageActions.ocr.on.map((cond) =>
     imageAttrConditionDisplay(cond, displaySchema.value, t, te),
   ),
 )
@@ -1292,7 +1294,9 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
     image_attrs_enabled: state.imageAttrsEnabled,
     image_actions: {
       ocr: {
-        on: displaySchema.value.default_actions.ocr.on,
+        // The KB's own conditions (mergeImageActions keeps a custom list), so
+        // an upload never swaps an API-customised table for the default one.
+        on: state.imageActions.ocr.on,
         on_unobserved: state.imageActions.ocr.on_unobserved,
       },
     },

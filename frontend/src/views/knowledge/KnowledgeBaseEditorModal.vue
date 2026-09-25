@@ -571,6 +571,7 @@ import {
   type ImageAttrSchema,
   type KnowledgeBaseProfile,
 } from '@/api/knowledge-base'
+import { buildImageProcessingConfig } from '@/utils/imageProcessingConfig'
 import { imageAttrDisplay, imageAttrConditionDisplay } from '@/utils/imageAttrDisplay'
 
 // The image-attribute registry, fetched from the backend (single source of
@@ -619,8 +620,10 @@ const { t, te } = useI18n()
 const imageAttrDisplays = computed(() =>
   displaySchema.value.attributes.map((attr) => imageAttrDisplay(attr, t, te)),
 )
+// The conditions the knowledge base actually runs with: a list customised through the
+// API is shown as is, otherwise mergeImageActions filled in the default.
 const imageAttrConditionDisplays = computed(() =>
-  displaySchema.value.default_actions.ocr.on.map((cond) =>
+  (formData.value.imageActions as ImageActionsConfig).ocr.on.map((cond) =>
     imageAttrConditionDisplay(cond, displaySchema.value, t, te),
   ),
 )
@@ -1448,24 +1451,15 @@ const buildSubmitData = () => {
   }
 
   // 图片属性观察配置：后端是整体替换语义（payload 不带该字段 = 保持不变）。
-  // UI 编辑观察开关 + on_unobserved 兜底，其余字段（model_id 等）从快照原样带走；
-  // 整体与快照一致时不发，保持请求最小。后端 MergeImageActions 只有在校验到 on
-  // 非空时才整体采用自定义 OCR 动作，故 on_unobserved 必须连同 on 一起回传，否则
-  // 兜底开关会被默认值覆盖。on 取自后端注册表（displaySchema，单一事实源），始终
-  // 反映当前版本的默认触发条件；on_unobserved 才是 UI 真正可编辑的旋钮。
+  // UI 只编辑观察开关与 on_unobserved；快照里用 API 自定义过的 on 原样保留，
+  // 没有自定义时才取注册表默认值。合并规则见 buildImageProcessingConfig。
   {
-    const snap = formData.value.imageProcessingConfigSnapshot || {}
-    const built = {
-      ...snap,
-      image_attrs_enabled: formData.value.imageAttrsEnabled,
-      image_actions: {
-        ocr: {
-          on: displaySchema.value.default_actions.ocr.on,
-          on_unobserved: formData.value.imageActions.ocr.on_unobserved,
-        },
-      },
-    }
-    if (JSON.stringify(built) !== JSON.stringify(snap)) {
+    const built = buildImageProcessingConfig(formData.value.imageProcessingConfigSnapshot, {
+      imageAttrsEnabled: formData.value.imageAttrsEnabled,
+      onUnobserved: formData.value.imageActions.ocr.on_unobserved,
+      defaultOn: displaySchema.value.default_actions.ocr.on,
+    })
+    if (built) {
       data.image_processing_config = built
     }
   }
