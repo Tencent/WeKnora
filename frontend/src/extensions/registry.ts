@@ -1,5 +1,8 @@
 import { shallowReactive } from 'vue'
 
+/** Plugin ID of what every WeKnora build ships (builtin contributions). */
+export const CORE_PLUGIN_ID = 'weknora.core'
+
 /** Anything a registry holds is addressed by a unique key. */
 export interface Keyed {
   key: string

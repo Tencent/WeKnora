@@ -5,8 +5,7 @@ import type { SettingsRoleKey } from '@/config/settingsAccess'
 
 import { createRegistry } from './registry'
 
-/** Plugin ID of the settings every WeKnora build ships. */
-export const CORE_PLUGIN_ID = 'weknora.core'
+export { CORE_PLUGIN_ID } from './registry'
 
 /** How a section is drawn in the settings sidebar. */
 export type SettingsNavIcon =
