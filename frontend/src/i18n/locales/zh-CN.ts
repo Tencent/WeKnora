@@ -1039,6 +1039,12 @@ export default {
     prereqStep3Brief_dingtalk: '填写操作人 Union ID',
     prereqStep3Desc_dingtalk: '填写有权访问目标知识库的钉钉用户 Union ID',
     prereqOpenConsole_dingtalk: '前往钉钉开放平台配置',
+    prereqBarText_outline: '首次使用？点击查看 Outline Token 配置指引',
+    prereqStep1Brief_outline: '创建 Outline API Token',
+    prereqStep1Desc_outline: '打开 Outline → Settings → API Tokens → New token，创建后仅显示一次，请立即复制',
+    prereqStep2Brief_outline: '（可选）私有化部署请填写 Base URL',
+    prereqStep2Desc_outline: '公有云留空即可；私有化部署填写实例地址，例如 https://docs.example.com',
+    prereqOpenConsole_outline: '打开 Outline API Token 设置',
     prereqBarText_ima: '首次使用？点击查看腾讯 IMA OpenAPI 授权指引',
     prereqStep1Brief_ima: '开通 IMA 智能体接入',
     prereqStep1Desc_ima: '登录 https://ima.qq.com/agent-interface 并申请 OpenAPI 接入',
@@ -1093,7 +1099,8 @@ export default {
     resourceType: {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
-      book: '语雀知识库'
+      book: '语雀知识库',
+      collection: 'Outline 集合'
     },
     scheduleHuman: {
       '30min': '每 30 分钟',
@@ -1138,7 +1145,8 @@ export default {
       dingtalk: '同步钉钉知识库中的在线文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
-      gitlab: '同步 GitLab 项目中的文件'
+      gitlab: '同步 GitLab 项目中的文件',
+      outline: '同步 Outline 集合中的文档（云端或私有化部署）',
     },
     connector: {
       feishu: '飞书',
@@ -1151,7 +1159,8 @@ export default {
       dingtalk: '钉钉文档',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      outline: 'Outline',
     },
     logDetail: {
       startTime: '开始时间',
@@ -7144,6 +7153,7 @@ export default {
     channelYuque: '语雀',
     channelGitLab: 'GitLab',
     channelIma: '腾讯 IMA',
+    channelOutline: 'Outline',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',

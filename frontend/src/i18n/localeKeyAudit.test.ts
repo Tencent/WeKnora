@@ -307,3 +307,18 @@ test('DingTalk configuration and sync failures remain localized after pruning', 
     }
   }
 })
+
+test('Outline configuration keys remain localized after pruning', () => {
+  const keys = [
+    'connector.outline', 'connectorDesc.outline',
+    'prereqBarText_outline', 'prereqOpenConsole_outline',
+    ...[1, 2].flatMap(step => [`prereqStep${step}Brief_outline`, `prereqStep${step}Desc_outline`]),
+    'resourceType.collection',
+  ].map(key => `datasource.${key}`)
+  for (const key of keys) {
+    assert.ok(referencedKeys.has(key), `pruning would remove ${key}`)
+    for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
+      assert.equal(typeof getLocaleValueAtPath(bundle, key), 'string', `${locale}: missing ${key}`)
+    }
+  }
+})

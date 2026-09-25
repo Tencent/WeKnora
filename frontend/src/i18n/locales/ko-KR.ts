@@ -1061,6 +1061,12 @@ export default {
     prereqStep3Brief_dingtalk: '운영자 Union ID 입력',
     prereqStep3Desc_dingtalk: '대상 지식베이스에 접근할 수 있는 DingTalk 사용자의 Union ID를 입력하세요.',
     prereqOpenConsole_dingtalk: 'DingTalk 개발자 콘솔 열기',
+    prereqBarText_outline: '처음이신가요? Outline 토큰 설정 안내를 확인하세요',
+    prereqStep1Brief_outline: 'Outline API 토큰 생성',
+    prereqStep1Desc_outline: 'Outline → Settings → API Tokens → New token. 생성 시 한 번만 표시되므로 즉시 복사하세요',
+    prereqStep2Brief_outline: '(선택) 자체 호스팅이면 Base URL 입력',
+    prereqStep2Desc_outline: '클라우드는 비워 두세요. 자체 호스팅은 인스턴스 주소(예: https://docs.example.com)를 입력합니다',
+    prereqOpenConsole_outline: 'Outline API 토큰 설정 열기',
     prereqBarText_ima: '처음 사용하시나요? 클릭하여 Tencent IMA OpenAPI 설정 가이드를 확인하세요',
     prereqStep1Brief_ima: 'IMA 에이전트 OpenAPI 액세스 활성화',
     prereqStep1Desc_ima: 'https://ima.qq.com/agent-interface 에 로그인하여 OpenAPI 액세스를 신청하세요',
@@ -1091,7 +1097,8 @@ export default {
     resourceType: {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
-      book: 'Yuque 지식베이스'
+      book: 'Yuque 지식베이스',
+      collection: 'Outline 컬렉션'
     },
     scheduleHuman: {
       '30min': '30분마다',
@@ -1136,7 +1143,8 @@ export default {
       dingtalk: 'DingTalk 지식베이스의 온라인 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
-      gitlab: 'GitLab 프로젝트의 파일 동기화'
+      gitlab: 'GitLab 프로젝트의 파일 동기화',
+      outline: 'Outline 컬렉션의 문서를 동기화합니다(클라우드 또는 자체 호스팅)',
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -1149,7 +1157,8 @@ export default {
       dingtalk: 'DingTalk 문서',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      outline: 'Outline',
     },
     logDetail: {
       startTime: '시작 시간',
@@ -7142,6 +7151,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelOutline: 'Outline',
     channelUpload: '업로드',
     channelManual: '수동',
     channelUrl: '웹',
