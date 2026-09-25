@@ -68,7 +68,7 @@ class PageBlocksTest(unittest.TestCase):
 
 class WireTest(unittest.TestCase):
     def test_source_blocks_serialize_and_skip_malformed(self):
-        from docreader.main import _source_blocks
+        from docreader.source_wire import source_blocks_to_proto
 
         doc = Document(
             content="abc",
@@ -78,13 +78,9 @@ class WireTest(unittest.TestCase):
                 {"start": 0, "end": 1},
             ],
         )
-        wire = _source_blocks(doc)
+        wire = source_blocks_to_proto(doc)
         self.assertEqual(len(wire), 1)
         self.assertEqual(json.loads(wire[0].locator_json), {"type": "pdf", "page": 1})
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class LocateColumnsTest(unittest.TestCase):
@@ -141,3 +137,7 @@ class SplitLineAtGapsTest(unittest.TestCase):
         chars = [(ch, 10 + 5 * k, k) for k, ch in enumerate("wide")]
         chars += [(ch, 60 + 5 * k, 5 + k) for k, ch in enumerate("space")]
         self.assertEqual(len(_split_line_at_gaps(self._line(chars))), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
