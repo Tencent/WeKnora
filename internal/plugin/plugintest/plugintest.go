@@ -157,7 +157,7 @@ func KitPackageWith(t testing.TB, version, skillBody string, manifestLines ...st
 	manifest += "contributes:\n  skills:\n    - { id: triage, name: Triage, path: skills/triage }\n"
 	return Zip(t, map[string]string{
 		"plugin.yaml":            manifest,
-		"skills/triage/SKILL.md": "---\nname: triage\n---\n" + skillBody,
+		"skills/triage/SKILL.md": "---\nname: triage\ndescription: Triage issues by severity.\n---\n" + skillBody,
 	})
 }
 

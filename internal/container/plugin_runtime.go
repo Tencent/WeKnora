@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
@@ -33,17 +34,24 @@ func newPluginPackageStore(cfg *config.Config) (reconcile.PackageStore, error) {
 type pluginActivators struct {
 	dig.In
 
-	MCP *activate.MCPServers
+	MCP     *activate.MCPServers
+	Skills  *activate.Skills
+	Vendors *activate.ModelVendors
 }
 
 func (a pluginActivators) list() []reconcile.Activator {
-	return []reconcile.Activator{a.MCP}
+	return []reconcile.Activator{a.Vendors, a.MCP, a.Skills}
 }
 
 // bindPluginActivators hands the activators what they need once the plugin
 // services exist.
-func bindPluginActivators(a pluginActivators, t *plugintenancy.Service, repo interfaces.PluginRepository) {
+func bindPluginActivators(
+	a pluginActivators, t *plugintenancy.Service, repo interfaces.PluginRepository,
+	skills *service.TenantSkillService,
+) {
 	a.MCP.Bind(t, repo)
+	a.Skills.Bind(t)
+	skills.SetPluginSkills(a.Skills)
 }
 
 func newMCPServiceRepository(db *gorm.DB, plugins *activate.MCPServers) interfaces.MCPServiceRepository {
@@ -67,7 +75,7 @@ func newPluginInstaller(
 	store reconcile.PackageStore,
 	r *reconcile.Reconciler,
 ) *install.Service {
-	return install.NewService(repo, store, r, handler.Version)
+	return install.NewService(repo, store, r, handler.Version).WithChecks(activate.CheckModelVendors)
 }
 
 // startPluginReconciler loads installed plugins before the server takes

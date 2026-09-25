@@ -163,6 +163,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	// Installed plugins' MCP servers are listed alongside stored services.
 	must(container.Provide(activate.NewMCPServers))
+	must(container.Provide(activate.NewSkills))
+	must(container.Provide(activate.NewModelVendors))
 	must(container.Provide(newMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))

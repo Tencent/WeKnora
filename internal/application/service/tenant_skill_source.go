@@ -106,6 +106,17 @@ func (s *TenantSkillService) InstallSkillFromSource(
 		return "", err
 	}
 
+	if strings.HasPrefix(source, pluginSkillSourcePrefix) {
+		if s.pluginSkills == nil {
+			return "", fmt.Errorf("%w: plugins are not available", ErrSkillSourceInvalid)
+		}
+		archive, err := s.pluginSkills.Archive(ctx, tenantID, source)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrSkillSourceInvalid, err)
+		}
+		return s.installSkillArchive(ctx, tenantID, configID, archive, skillArchiveUploaded)
+	}
+
 	bundle, archive, err := fetchNormalizedSkillBundle(ctx, source, s.sourceHTTP)
 	if err != nil {
 		return "", err

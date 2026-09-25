@@ -58,6 +58,17 @@ type Service struct {
 	sync        Syncer
 	hostVersion string
 	client      *http.Client
+	checks      []PackageCheck
+}
+
+// PackageCheck is a domain's install-time verdict on a package, such as
+// whether its model vendor definitions would load.
+type PackageCheck func(*pkg.Package) error
+
+// WithChecks adds install-time package checks.
+func (s *Service) WithChecks(checks ...PackageCheck) *Service {
+	s.checks = append(s.checks, checks...)
+	return s
 }
 
 // NewService creates a Service. hostVersion is the running WeKnora version
@@ -146,6 +157,11 @@ func (s *Service) open(data []byte) (*pkg.Package, error) {
 	}
 	if err := p.Manifest.CheckEngines(s.hostVersion); err != nil {
 		return nil, &InvalidError{Err: err}
+	}
+	for _, check := range s.checks {
+		if err := check(p); err != nil {
+			return nil, &InvalidError{Err: err}
+		}
 	}
 	return p, nil
 }
