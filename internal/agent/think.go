@@ -559,6 +559,7 @@ func (e *AgentEngine) callLLMWithRetry(
 		*messagesPtr = compacted
 		messages = agenttools.SanitizeMessages(compacted)
 		e.lastSentMsgCount = len(compacted)
+		e.snapshotContextUsage(ctx, state, messages, tools, 0)
 		response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
 	}
 

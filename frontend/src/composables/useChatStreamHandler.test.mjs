@@ -146,6 +146,25 @@ test('a replayed injection reuses the persisted row instead of duplicating it', 
 // Remote stop used to mark the assistant done and leave the overlay chips
 // in place. The parent owns steerQueue, so the stream handler has to say
 // the generation stopped.
+test('context_usage merges a live snapshot onto the in-flight message', () => {
+  const start = source.indexOf("case 'context_usage': {")
+  const block = source.slice(start, source.indexOf("case 'tool_approval_required':", start))
+  assert.notEqual(start, -1)
+  const message = { is_completed: false, usage: { prompt_tokens: 10 } }
+  const process = vm.runInNewContext(
+    ts.transpile(`(data, dataPayload) => { switch ('context_usage') { ${block} } }`),
+    { message },
+  )
+  const live = { total: 50, window: 200000, conversation: 40 }
+  process({ usage: { context: live } }, {})
+  assert.equal(message.usage.prompt_tokens, 10)
+  assert.deepEqual(message.usage.context, live)
+})
+
+test('agent chunks treat context_usage as an in-flight agent event', () => {
+  assert.match(source, /data\.response_type === 'context_usage'/)
+})
+
 test('agent and non-agent stop notify onGenerationStopped', () => {
   assert.match(source, /onGenerationStopped\?: \(\) => void/)
 

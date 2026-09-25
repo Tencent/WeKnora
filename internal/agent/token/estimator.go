@@ -147,23 +147,42 @@ func (e *Estimator) EstimateString(s string) int {
 // on every assistant turn. Leaving them out reproduces exactly the
 // under-measurement described above, one replayed turn at a time.
 func (e *Estimator) EstimateMessage(msg *chat.Message) int {
-	tokens := perMessageOverhead
-	tokens += e.EstimateString(msg.Role)
-	tokens += e.EstimateString(msg.Content)
-	tokens += e.EstimateString(msg.Name)
-	tokens += e.EstimateString(msg.ToolCallID)
-	tokens += e.EstimateString(msg.ReasoningContent)
-	tokens += e.EstimateReasoningArtifacts(msg)
-	tokens += e.estimateImageParts(msg)
+	parts := e.EstimateMessageParts(msg)
+	return parts.Reasoning + parts.Rest
+}
 
+// RequestOverhead is the per-request tail EstimateMessages adds on top of the
+// per-message sum. Callers that already walked each message add this instead
+// of tokenizing the history again.
+func (e *Estimator) RequestOverhead() int { return perConversationTail }
+
+// MessageParts splits a message estimate into its reasoning half and
+// everything else. Context attribution reports reasoning separately because
+// it is the one part of an assistant message a user can act on, and on
+// thinking models it routinely dwarfs the visible reply.
+type MessageParts struct {
+	Reasoning int
+	Rest      int
+}
+
+// EstimateMessageParts returns the same total as EstimateMessage, split so the
+// caller can attribute reasoning on its own.
+func (e *Estimator) EstimateMessageParts(msg *chat.Message) MessageParts {
+	reasoning := e.EstimateString(msg.ReasoningContent)
+	rest := perMessageOverhead
+	rest += e.EstimateString(msg.Role)
+	rest += e.EstimateString(msg.Content)
+	rest += e.EstimateString(msg.Name)
+	rest += e.EstimateString(msg.ToolCallID)
+	rest += e.EstimateReasoningArtifacts(msg)
+	rest += e.estimateImageParts(msg)
 	for _, tc := range msg.ToolCalls {
-		tokens += e.EstimateString(tc.Function.Name)
-		tokens += e.EstimateString(tc.Function.Arguments)
-		tokens += e.estimateProviderMetadata(tc.ProviderMetadata)
-		tokens += perToolCallOverhead
+		rest += e.EstimateString(tc.Function.Name)
+		rest += e.EstimateString(tc.Function.Arguments)
+		rest += e.estimateProviderMetadata(tc.ProviderMetadata)
+		rest += perToolCallOverhead
 	}
-
-	return tokens
+	return MessageParts{Reasoning: reasoning, Rest: rest}
 }
 
 // EstimateReasoningArtifacts counts the opaque provider state replayed with an

@@ -99,6 +99,58 @@ func TestEstimateMessageCountsReasoningContent(t *testing.T) {
 		e.EstimateMessage(&thinking)-e.EstimateMessage(&plain), 2)
 }
 
+// Context attribution reports reasoning as its own bucket: it is the one part
+// of an assistant message a user can act on (turn thinking off) and it routinely
+// dwarfs the rest. Splitting it out must not change what EstimateMessage counts.
+func TestEstimateMessagePartsSplitsReasoningFromTheRest(t *testing.T) {
+	e, err := NewEstimator()
+	assert.NoError(t, err)
+
+	msg := chat.Message{
+		Role:             "assistant",
+		Content:          "short visible reply",
+		ReasoningContent: strings.Repeat("private chain of thought. ", 200),
+	}
+
+	parts := e.EstimateMessageParts(&msg)
+
+	assert.Greater(t, parts.Reasoning, 0)
+	assert.Greater(t, parts.Rest, 0)
+	assert.Greater(t, parts.Reasoning, parts.Rest,
+		"thinking models send back far more reasoning than reply")
+	assert.Equal(t, e.EstimateString(msg.ReasoningContent), parts.Reasoning)
+	assert.Equal(t, e.EstimateMessage(&msg), parts.Reasoning+parts.Rest,
+		"the split must be exhaustive, or attribution silently drops tokens")
+}
+
+func TestRequestOverheadIsTheGapBetweenTheMessageSumAndEstimateMessages(t *testing.T) {
+	e, err := NewEstimator()
+	assert.NoError(t, err)
+
+	msgs := []chat.Message{
+		{Role: "system", Content: "You are a helpful assistant."},
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there!", ReasoningContent: "thought"},
+	}
+	sum := 0
+	for i := range msgs {
+		sum += e.EstimateMessage(&msgs[i])
+	}
+	assert.Equal(t, 3, e.RequestOverhead())
+	assert.Equal(t, sum+e.RequestOverhead(), e.EstimateMessages(msgs))
+}
+
+func TestEstimateMessagePartsChargesNoReasoningWhenAbsent(t *testing.T) {
+	e, err := NewEstimator()
+	assert.NoError(t, err)
+
+	msg := chat.Message{Role: "user", Content: "hello"}
+	parts := e.EstimateMessageParts(&msg)
+
+	assert.Zero(t, parts.Reasoning)
+	assert.Equal(t, e.EstimateMessage(&msg), parts.Rest)
+}
+
 // Providers bill images by tile count, so neither a short https:// URL nor a
 // megabyte data URI says anything useful about the cost.
 func TestEstimateMessageCountsImages(t *testing.T) {

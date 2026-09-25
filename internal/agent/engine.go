@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
+	"github.com/Tencent/WeKnora/internal/agent/contextusage"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -80,6 +81,14 @@ type AgentEngine struct {
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
 	workspaceLayout   sandbox.WorkspaceLayout
+	// promptSectionTokens is the per-section cost of this run's system prompt,
+	// frozen when the prompt was assembled. Attribution reads it instead of
+	// searching the rendered text, so a later skill install cannot invent a
+	// bucket the model never saw.
+	promptSectionTokens map[string]int
+	// attributor accumulates this turn's locked buckets. Nil until the first
+	// snapshot; reset at Execute so a turn never inherits the previous one.
+	attributor *contextusage.Attributor
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -196,10 +205,48 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
+	e.promptSectionTokens = make(map[string]int, len(sections))
 	for _, section := range sections {
+		content := strings.TrimSpace(section.Content)
 		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
+		if content == "" {
+			continue
+		}
+		e.promptSectionTokens[section.Name] = e.tokenEstimator.EstimateString(content)
 	}
 	return renderSystemPromptSections(sections)
+}
+
+// contextAttributor is this turn's attribution state. It is created lazily so
+// direct snapshot calls in tests do not need a full Execute.
+func (e *AgentEngine) contextAttributor() *contextusage.Attributor {
+	if e.attributor == nil {
+		e.attributor = contextusage.New(e.tokenEstimator, e.contextWindowTokens(), e.compactionThreshold())
+	}
+	return e.attributor
+}
+
+func (e *AgentEngine) compactionThreshold() int {
+	if e == nil || e.compactor == nil {
+		return 0
+	}
+	return e.compactor.Settings().Threshold()
+}
+
+func (e *AgentEngine) contextWindowTokens() int {
+	// The ring's window and its compaction tick have to share one window.
+	// The compactor already normalized the value the threshold is subtracted from.
+	// With no compactor, use the same helper the history loader uses.
+	if e != nil && e.compactor != nil {
+		if window := e.compactor.Settings().MaxContextTokens; window > 0 {
+			return window
+		}
+	}
+	var cfg *types.AgentConfig
+	if e != nil {
+		cfg = e.config
+	}
+	return HistoryTokenBudget(cfg)
 }
 
 // SetMemoryPrompt supplies the long-term memory envelope for this run. Empty
@@ -369,6 +416,7 @@ func (e *AgentEngine) Execute(
 		// never has to look past its first page for one.
 		TurnUsage: types.TokenUsage{ContextTokenScale: e.config.ContextTokenScale},
 	}
+	e.attributor = nil
 
 	// Build system prompt using progressive RAG prompt
 	// If skills are enabled, include skills metadata (Level 1 - Progressive Disclosure)
@@ -778,7 +826,8 @@ func (e *AgentEngine) runReActIteration(
 
 	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
 		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
-	e.logContextPrediction(ctx, round, *messagesPtr, tools, currentTokens)
+	snap := e.snapshotContextUsage(ctx, state, *messagesPtr, tools, 0)
+	e.logContextPrediction(ctx, round, *messagesPtr, tools, currentTokens, snap)
 	common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
 		"iteration":      state.CurrentRound,
 		"round":          round,
@@ -810,6 +859,7 @@ func (e *AgentEngine) runReActIteration(
 			round, resp.FinishReason, resp.Usage.CompletionTokens, e.getCompletionTokenBudget())
 		*messagesPtr = e.forceCompaction(ctx, *messagesPtr, round)
 		e.lastSentMsgCount = len(*messagesPtr)
+		e.snapshotContextUsage(ctx, state, *messagesPtr, tools, 0)
 		resp, err = e.callLLMWithRetry(ctx, messagesPtr, tools, state, query, state.CurrentRound, sessionID)
 		if err != nil {
 			retErr = err
@@ -826,6 +876,7 @@ func (e *AgentEngine) runReActIteration(
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
 		state.TurnUsage.Accumulate(response.Usage)
+		e.recalibrateContextUsage(state, response.Usage.PromptTokens)
 		logger.Infof(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d, "+
 			"cache_read=%d, cache_write=%d, cache_hit_rate=%.1f%%, cache_status=%s",
 			round, response.Usage.PromptTokens,
@@ -833,6 +884,7 @@ func (e *AgentEngine) runReActIteration(
 			response.Usage.CacheReadTokens, response.Usage.CacheWriteTokens,
 			response.Usage.PromptCacheHitRate(), response.Usage.CacheStatus)
 	}
+	e.publishContextUsage(ctx, state)
 
 	// Every round in a row that the provider cut off at the completion cap.
 	// A truncated *answer* already ends the turn in analyzeResponse, so a run

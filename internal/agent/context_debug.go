@@ -112,18 +112,25 @@ func (b contextBreakdown) String() string {
 
 // logContextPrediction records what this round expects the request to cost,
 // broken down by source, alongside the threshold it is being judged against.
+// The summary and the drift warning reuse the attribution snapshot, which
+// already walked the history. The per-message breakdown is a second walk and
+// only runs when debug logging will actually print it.
 func (e *AgentEngine) logContextPrediction(
-	ctx context.Context, round int, messages []chat.Message, tools []chat.Tool, predicted int,
+	ctx context.Context, round int, messages []chat.Message, tools []chat.Tool,
+	predicted int, usage types.ContextUsage,
 ) {
 	settings := e.compactor.Settings()
-	b := e.breakdownContext(messages, tools)
-
-	messagesEst := b.Total - b.ToolSchemas
+	messagesEst := usage.Total - usage.Tools - usage.MCP
+	if messagesEst < 0 {
+		messagesEst = 0
+	}
 	logger.Debugf(ctx, "[Agent][Round-%d][ctx] predicted=%d (baseline_usage=%d + delta) "+
 		"| messages=%d tool_schemas=%d request=%d | threshold=%d window=%d keep_recent=%d",
-		round, predicted, contextTokensFromUsage(e.lastUsage), messagesEst, b.ToolSchemas, b.Total,
+		round, predicted, contextTokensFromUsage(e.lastUsage), messagesEst, usage.Tools+usage.MCP, usage.Total,
 		settings.Threshold(), settings.MaxContextTokens, settings.KeepRecentTokens)
-	logger.Debugf(ctx, "[Agent][Round-%d][ctx] breakdown: %s", round, b)
+	if logger.DebugEnabled(ctx) {
+		logger.Debugf(ctx, "[Agent][Round-%d][ctx] breakdown: %s", round, e.breakdownContext(messages, tools))
+	}
 
 	// Compaction's predicted size is the messages-only (or usage+delta) figure.
 	// The independent check has to use the same accounting: with a usage
@@ -132,7 +139,7 @@ func (e *AgentEngine) logContextPrediction(
 	// how a 12k chat with 105k of tool schemas looked like an 8× miss.
 	compare := messagesEst
 	if contextTokensFromUsage(e.lastUsage) > 0 {
-		compare = b.Total
+		compare = usage.Total
 	}
 	if predicted > 0 && compare > 0 {
 		if ratio := float64(predicted) / float64(compare); ratio > 1.5 || ratio < 0.67 {

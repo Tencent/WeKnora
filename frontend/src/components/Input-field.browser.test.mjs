@@ -48,3 +48,42 @@ test('a chat turn does not request the local browser while the extension is know
     /local_browser_enabled:\s*!props\.embeddedMode && agentEnabled && useSettingsStoreInstance\.isLocalBrowserEnabled && !useBrowserConnectionStore\(\)\.knownOffline/,
   )
 })
+
+test('context usage ring sits immediately left of the model selector', () => {
+  const ring = inputField.indexOf('<ContextUsageRing')
+  const composerEnd = inputField.indexOf('class="composer-end"')
+  const model = inputField.indexOf('<!-- 模型显示 -->')
+  assert.notEqual(ring, -1)
+  assert.notEqual(composerEnd, -1)
+  assert.ok(composerEnd < ring && ring < model)
+  assert.match(inputField, /v-if="!embeddedMode && contextUsage"/)
+  assert.match(inputField, /:usage="contextUsage"/)
+  assert.match(chatPage, /:context-usage="latestContextUsage"/)
+})
+
+test('context usage ring matches the 28px composer icon buttons', () => {
+  const ring = readFileSync(new URL('./ContextUsageRing.vue', import.meta.url), 'utf8')
+  const css = ring.slice(ring.indexOf('.context-usage-ring {'), ring.indexOf('.context-usage-ring__track'))
+  assert.match(css, /width: 28px/)
+  assert.match(css, /height: 28px/)
+  assert.match(css, /width: 18px/)
+  assert.match(css, /height: 18px/)
+  assert.match(ring, /viewBox="0 0 18 18"/)
+})
+
+test('context usage sits on the composer and the thread scrollbar stays clear of it', () => {
+  assert.match(chatPage, /:context-usage="latestContextUsage"/)
+  assert.match(chatPage, /scrollbar-width: thin/)
+  assert.match(chatPage, /scrollbar-gutter: stable/)
+  assert.match(chatPage, /scrollbar-color: var\(--td-component-stroke\) transparent/)
+  assert.doesNotMatch(chatPage, /scrollbar-width: auto/)
+
+  const composer = chatPage.slice(
+    chatPage.indexOf('.chat_composer {'),
+    chatPage.indexOf('.is-embedded .chat_composer'),
+  )
+  assert.match(composer, /position: absolute/)
+  assert.match(composer, /^\s*bottom: 0;/m)
+  assert.match(composer, /right: var\(--chat-scrollbar-gutter/)
+  assert.match(chatPage, /flex: 0 0 var\(--chat-composer-height, 0px\)/)
+})

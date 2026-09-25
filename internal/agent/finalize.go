@@ -101,8 +101,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		})
 	}
 
-	// The synthesis call is often the largest of the turn — fold its usage
-	// into the turn aggregate like every ReAct round.
+	// The synthesis call is often the last request of the turn, so its tokens
+	// count. Its prompt mix does not: it runs with ToolChoice=none, and
+	// reporting it would tell the user their tool definitions cost nothing.
 	if llmResult.Usage != nil {
 		state.TurnUsage.Accumulate(*llmResult.Usage)
 	}
@@ -176,15 +177,21 @@ func (e *AgentEngine) emitCompletionEvent(
 	logger.Infof(ctx, "Agent execution completed in %d rounds", state.CurrentRound)
 }
 
-// turnUsage returns the turn's aggregated LLM usage, or nil when no round
-// reported usage so the field stays absent from the completion event and the
-// persisted message alike.
+// turnUsage returns the turn's aggregated LLM usage plus the last request's
+// context snapshot. Nil only when neither billing tokens nor a snapshot exist.
+// A snapshot always carries Window, so context-only turns still emit usage.
 func turnUsage(state *types.AgentState) *types.TokenUsage {
-	// A token scale is worth persisting on its own: the next turn's history
-	// loading is calibrated by it even when this provider reported no total.
-	if state == nil || (state.TurnUsage.TotalTokens == 0 && state.TurnUsage.ContextTokenScale <= 0) {
+	if state == nil {
 		return nil
 	}
 	usage := state.TurnUsage
+	usage.Context = state.ContextUsage
+	// A token scale is worth persisting on its own: the next turn's history
+	// loading is calibrated by it even when this provider reported no total.
+	// A snapshot always carries Window, so context-only turns still emit usage.
+	if usage.TotalTokens == 0 && usage.ContextTokenScale <= 0 &&
+		usage.Context.Total == 0 && usage.Context.Window == 0 {
+		return nil
+	}
 	return &usage
 }

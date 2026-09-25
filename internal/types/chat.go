@@ -17,6 +17,32 @@ const (
 	PromptCacheStatusHit         PromptCacheStatus = "hit"
 )
 
+// ContextUsage attributes one LLM request's prompt tokens to the kind of
+// content that held them. Buckets always sum to Total, and Total is the
+// provider's prompt_tokens whenever it reported one. Nested on TokenUsage so
+// it persists in the existing messages.usage JSON column.
+//
+// The fields are ordered by how they are grouped for display: instructions,
+// tool definitions, dialogue, then totals.
+type ContextUsage struct {
+	SystemPrompt int `json:"system_prompt,omitempty"`
+	Memory       int `json:"memory,omitempty"`
+	Skills       int `json:"skills,omitempty"`
+	Tools        int `json:"tools,omitempty"`
+	MCP          int `json:"mcp,omitempty"`
+	Conversation int `json:"conversation,omitempty"`
+	Reasoning    int `json:"reasoning,omitempty"`
+	ToolResults  int `json:"tool_results,omitempty"`
+	Total        int `json:"total,omitempty"`
+	Window       int `json:"window,omitempty"`
+	// Threshold is the context size above which history gets compacted. It
+	// explains why compaction fires well before the window is full.
+	Threshold int `json:"threshold,omitempty"`
+	// Estimated marks a snapshot the provider never priced, so the numbers are
+	// the tokenizer's guess rather than a measured prompt_tokens split.
+	Estimated bool `json:"estimated,omitempty"`
+}
+
 // TokenUsage holds token consumption statistics returned by the model API.
 type TokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -35,6 +61,11 @@ type TokenUsage struct {
 	// turn's history loading and first compaction check are calibrated before
 	// any provider count of their own. Zero when the turn measured none.
 	ContextTokenScale float64 `json:"context_token_scale,omitempty"`
+	// Context is the last request's classified prompt breakdown. It is a
+	// snapshot, not a sum: Accumulate keeps the latest non-zero value.
+	// omitzero is required: encoding/json treats a zero struct as non-empty
+	// for omitempty, which would otherwise emit "context":{} on every usage.
+	Context ContextUsage `json:"context,omitempty,omitzero"`
 }
 
 // SetPromptCacheUsage normalizes provider-specific cache counters into the
@@ -99,6 +130,9 @@ func (u *TokenUsage) Accumulate(other TokenUsage) {
 	// A scale is a ratio, not a count: the newest measurement stands.
 	if other.ContextTokenScale > 0 {
 		u.ContextTokenScale = other.ContextTokenScale
+	}
+	if other.Context.Total > 0 || other.Context.Window > 0 {
+		u.Context = other.Context
 	}
 	switch {
 	case !u.CacheReported:
@@ -295,6 +329,9 @@ const (
 	// remembers — an answer that forgets an earlier instruction is otherwise
 	// indistinguishable from the model ignoring it.
 	ResponseTypeContextCompacted ResponseType = "context_compacted"
+	// ResponseTypeContextUsage is a live snapshot of the last LLM request's
+	// classified prompt mix, so the composer ring can update mid-turn.
+	ResponseTypeContextUsage ResponseType = "context_usage"
 	// ResponseTypeInstallPrompt is the instruction a skill install handed to
 	// the installer agent. Only the skill install transcript emits this, and
 	// it emits it first, so replaying the log alone shows what was asked for

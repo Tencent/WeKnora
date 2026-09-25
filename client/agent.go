@@ -63,7 +63,42 @@ const (
 	// AgentResponseTypeArtifactsPending is emitted while skill-generated files
 	// are still being collected after the answer has streamed.
 	AgentResponseTypeArtifactsPending AgentResponseType = "artifacts_pending"
+	// AgentResponseTypeContextUsage is a live snapshot of the last LLM
+	// request's classified prompt mix.
+	AgentResponseTypeContextUsage AgentResponseType = "context_usage"
 )
+
+// ContextUsage attributes one LLM request's prompt tokens to the kind of
+// content that held them. Buckets always sum to Total.
+type ContextUsage struct {
+	SystemPrompt int  `json:"system_prompt,omitempty"`
+	Memory       int  `json:"memory,omitempty"`
+	Skills       int  `json:"skills,omitempty"`
+	Tools        int  `json:"tools,omitempty"`
+	MCP          int  `json:"mcp,omitempty"`
+	Conversation int  `json:"conversation,omitempty"`
+	Reasoning    int  `json:"reasoning,omitempty"`
+	ToolResults  int  `json:"tool_results,omitempty"`
+	Total        int  `json:"total,omitempty"`
+	Window       int  `json:"window,omitempty"`
+	Threshold    int  `json:"threshold,omitempty"`
+	Estimated    bool `json:"estimated,omitempty"`
+}
+
+// TokenUsage is the turn or event usage payload on the agent stream.
+type TokenUsage struct {
+	PromptTokens      int          `json:"prompt_tokens"`
+	CompletionTokens  int          `json:"completion_tokens"`
+	TotalTokens       int          `json:"total_tokens"`
+	CachedTokens      int          `json:"cached_tokens,omitempty"`
+	CacheReadTokens   int          `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens  int          `json:"cache_write_tokens,omitempty"`
+	CacheMissTokens   int          `json:"cache_miss_tokens,omitempty"`
+	CacheReported     bool         `json:"cache_reported"`
+	CacheStatus       string       `json:"cache_status,omitempty"`
+	ContextTokenScale float64      `json:"context_token_scale,omitempty"`
+	Context           ContextUsage `json:"context,omitempty,omitzero"`
+}
 
 // AgentStreamResponse agent streaming response
 type AgentStreamResponse struct {
@@ -73,6 +108,8 @@ type AgentStreamResponse struct {
 	Done                bool                   `json:"done"`                 // Whether completed
 	KnowledgeReferences []*SearchResult        `json:"knowledge_references"` // Knowledge references
 	Data                map[string]interface{} `json:"data,omitempty"`       // Additional event data
+	// Usage is turn totals on complete; context_usage events carry Context.
+	Usage *TokenUsage `json:"usage,omitempty"`
 }
 
 // AgentEventCallback is called for each streaming event

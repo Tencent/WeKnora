@@ -161,6 +161,30 @@ func TestSkillDirectoryRequiresReaderAndEscapesMetadata(t *testing.T) {
 	require.NotContains(t, BuildSystemPromptWithOptions(nil, false, options, "Install"), "Available skills:")
 }
 
+func TestSkillsPromptSectionTokensFrozenAtBuild(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	registry := tools.NewToolRegistry()
+	registry.RegisterTool(newCountingTool("read_file"))
+	engine.toolRegistry = registry
+
+	mgr := skills.NewManager(&skills.ManagerConfig{Enabled: true}, nil)
+	mgr.WithTenantSource(skills.NewTenantSkillSource([]*types.TenantSkillEntity{
+		{Name: "pdf-tools", Status: types.SkillStatusReady, Enabled: true, Description: "PDF helpers"},
+	}, nil))
+	require.NoError(t, mgr.Initialize(t.Context()))
+	engine.SetSkillsManager(mgr)
+
+	prompt := engine.buildSystemPrompt(t.Context())
+	skillsTokens := engine.promptSectionTokens["skills"]
+	require.Greater(t, skillsTokens, 0)
+	require.Contains(t, prompt, "pdf-tools")
+
+	// A live rebuild would drop the skills section without read_file.
+	engine.toolRegistry = tools.NewToolRegistry()
+	require.Equal(t, skillsTokens, engine.promptSectionTokens["skills"],
+		"skills section tokens must stay frozen from the assembled prompt, not a live rebuild")
+}
+
 func TestDefaultTemplatesComposeWithBrowserCitationsAndOutputPolicy(t *testing.T) {
 	data, err := os.ReadFile("../../config/prompt_templates/agent_system_prompt.yaml")
 	require.NoError(t, err)

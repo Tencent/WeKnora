@@ -678,6 +678,14 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         })
         break
       }
+      case 'context_usage': {
+        const incoming = (data as any).usage || (dataPayload as any)?.usage
+        const context = incoming?.context
+        if (context) {
+          message.usage = { ...(message.usage || {}), context }
+        }
+        break
+      }
       case 'tool_approval_required': {
         if (!message.agentEventStream) message.agentEventStream = []
         const d = dataPayload || {}
@@ -1182,6 +1190,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'reflection' ||
       data.response_type === 'artifacts_pending' ||
       data.response_type === 'context_compacted' ||
+      data.response_type === 'context_usage' ||
       data.response_type === 'user_message_injected'
 
     const activeAssistant = getTrailingIncompleteAssistant()
