@@ -9,6 +9,7 @@
       :secret-mode="secretMode"
       :errors="errors"
       :disabled="disabled"
+      :context="context"
       @update:value="set(field.key, $event)"
     >
       <template #secret="slotProps"><slot name="secret" v-bind="slotProps" /></template>
@@ -44,6 +45,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
+  HIDDEN_WIDGET,
   inGroup,
   isPlainObject,
   isVisible,
@@ -66,6 +68,8 @@ const props = defineProps<{
   secretMode: 'input' | 'slot'
   errors?: FieldError[]
   disabled?: boolean
+  /** Values "$"-prefixed x-visible-if keys read. */
+  context?: ConfigValue
 }>()
 
 const emit = defineEmits<{ 'update:value': [value: ConfigValue] }>()
@@ -77,7 +81,10 @@ const text = useSchemaText()
 
 const fields = computed(() =>
   orderedFields(props.schema).filter(
-    f => isVisible(f.schema, props.value) && (props.path !== '' || inGroup(f.schema, props.group)),
+    f =>
+      f.schema['x-widget'] !== HIDDEN_WIDGET &&
+      isVisible(f.schema, props.value, props.context) &&
+      (props.path !== '' || inGroup(f.schema, props.group)),
   ),
 )
 

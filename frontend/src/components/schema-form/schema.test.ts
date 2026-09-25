@@ -151,3 +151,15 @@ test('schemaAt follows dotted paths', () => {
   assert.equal(schemaAt(zhipu, 'extra_config.missing'), undefined)
   assert.equal(schemaAt(zhipu, 'api_key.deeper'), undefined)
 })
+
+test('"$" keys in x-visible-if read the context', () => {
+  const s: ConfigSchema = {
+    type: 'object',
+    required: ['signing_secret'],
+    properties: { signing_secret: { type: 'string', 'x-visible-if': { $mode: 'webhook' } } },
+  }
+  assert.equal(isVisible(s.properties!.signing_secret, {}, { mode: 'webhook' }), true)
+  assert.equal(isVisible(s.properties!.signing_secret, { mode: 'webhook' }, { mode: 'websocket' }), false)
+  assert.deepEqual(validateConfig(s, {}, { context: { mode: 'websocket' } }), [])
+  assert.deepEqual(validateConfig(s, {}, { context: { mode: 'webhook' } }), [{ path: 'signing_secret', code: 'required' }])
+})

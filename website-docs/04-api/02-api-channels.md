@@ -63,9 +63,29 @@ curl $BASE/api/v1/agents/agent-1/im-channels -H "Authorization: Bearer $TOKEN"
 curl $BASE/api/v1/im-channels -H "Authorization: Bearer $TOKEN"
 ```
 
+### GET /api/v1/im-channels/platforms
+
+用途：已注册的 IM 平台目录。每项含 `id`、`name`、`modes`（支持的接入模式，第一个为默认）、`supports_thread`、`links`（控制台与文档链接）和 `config_schema`（凭证表单：JSON Schema 子集，`x-secret` 标记密钥字段，仅适用于某种模式的字段带 `x-visible-if: {"$mode": "webhook"}`）。权限：Viewer+。
+
+响应：200 `{"success":true,"data":[PlatformInfo]}`
+
+```bash
+curl $BASE/api/v1/im-channels/platforms -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/im-channels/:id
+
+用途：读取单个渠道供编辑，含凭证：普通字段为原值，已设置的密钥字段返回 `***`。权限：Admin+。
+
+响应：200 `{"data":{IMChannel}}`
+
+```bash
+curl $BASE/api/v1/im-channels/ch-1 -H "Authorization: Bearer $TOKEN"
+```
+
 ### PUT /api/v1/im-channels/:id
 
-用途：更新渠道（局部更新：`name/mode/output_mode/locale/session_mode/knowledge_base_id/credentials/enabled/agent_id` 均可选；`knowledge_base_id` 传空字符串解除关联，`locale` 传空字符串恢复默认语言）。权限：Admin+。
+用途：更新渠道（局部更新：`name/mode/output_mode/locale/session_mode/knowledge_base_id/credentials/enabled/agent_id` 均可选；`knowledge_base_id` 传空字符串解除关联，`locale` 传空字符串恢复默认语言）。`credentials` 按字段合并：未传的字段保留原值，密钥字段传空字符串或 `***` 也保留原值，普通字段传空字符串即清空；传 `{}` 不做任何改动。权限：Admin+。
 
 响应：200 `{"data":{IMChannel}}`
 

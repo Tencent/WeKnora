@@ -310,6 +310,9 @@ func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler, g
 	channels := g.apiKeyGroup(r.Group("/im-channels"), apiKeyManageChannels(apiKeyFullAccess()))
 	{
 		channels.GET("", g.Viewer(), imHandler.ListAllIMChannels)
+		channels.GET("/platforms", g.Viewer(), imHandler.ListIMPlatforms)
+		// Credentials for the editor, secrets redacted — Admin+ like updates.
+		channels.GET("/:id", g.Admin(), imHandler.GetIMChannel)
 		channels.PUT("/:id", g.Admin(), imHandler.UpdateIMChannel)
 		channels.DELETE("/:id", g.Admin(), imHandler.DeleteIMChannel)
 		channels.POST("/:id/toggle", g.Admin(), imHandler.ToggleIMChannel)

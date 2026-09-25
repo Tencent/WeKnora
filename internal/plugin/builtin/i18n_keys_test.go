@@ -9,12 +9,14 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// backendSchemaKeysFile lists the frontend locale keys builtin config schemas
-// name in x-i18n-keys. The frontend i18n audit treats them as used, so pruning
+// backendSchemaKeysFile lists the frontend locale keys the backend names:
+// x-i18n-keys in builtin config schemas, IM platform link titles and mode
+// hints. The frontend i18n audit treats them as used, so pruning
 // never drops a label only the backend references.
 const backendSchemaKeysFile = "../../../frontend/src/i18n/backendSchemaKeys.ts"
 
@@ -41,6 +43,17 @@ func TestBackendSchemaKeysAreListedForTheFrontend(t *testing.T) {
 	}
 	for _, meta := range datasource.ListAvailableConnectors() {
 		collectI18nKeys(meta.ConfigSchema, used)
+	}
+	for _, info := range im.KnownPlatformInfos() {
+		collectI18nKeys(info.ConfigSchema, used)
+		for _, link := range info.Links {
+			if link.TitleKey != "" {
+				used[link.TitleKey] = true
+			}
+		}
+		if info.ModeHintKey != "" {
+			used[info.ModeHintKey] = true
+		}
 	}
 
 	data, err := os.ReadFile(filepath.FromSlash(backendSchemaKeysFile))

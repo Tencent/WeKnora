@@ -55,8 +55,9 @@ type Schema struct {
 	// responses, and kept when an update sends the redaction back.
 	Secret bool `json:"x-secret,omitempty"`
 	// Widget picks the form control (password, textarea, select, switch,
-	// tags, code, kv, model-select, kb-select, ...). Empty means the
-	// frontend picks from the type.
+	// headers, ...). Empty means the frontend picks from the type; "hidden"
+	// keeps a field out of the form while still declaring it (a secret set
+	// by another flow, such as WeChat's QR binding).
 	Widget      string `json:"x-widget,omitempty"`
 	Placeholder string `json:"x-placeholder,omitempty"`
 	// I18n carries localized title / description / placeholder:

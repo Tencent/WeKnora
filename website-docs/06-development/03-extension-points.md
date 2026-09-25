@@ -593,7 +593,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 }
 ```
 
-4. 渠道配置持久化在 `im_channels` 表，会话映射在 `im_channel_sessions`；前端渠道管理页需增加对应平台的配置表单。
+4. 在 `internal/im/platforms.go` 的 `platformInfos` 登记平台元数据：支持的接入模式（默认在前）、是否支持话题、控制台链接，以及用 config schema 描述的凭证字段（密钥标 `Secret`，仅某种模式使用的字段用 `VisibleIf: {"$mode": ...}`）。前端渠道管理页按 `/im-channels/platforms` 渲染，无需改表单；引用的前端文案 key 加进 `frontend/src/i18n/backendSchemaKeys.ts`，平台图标放 `frontend/src/assets/img/im/`。渠道配置持久化在 `im_channels` 表，会话映射在 `im_channel_sessions`。
 
 ---
 

@@ -49,6 +49,9 @@ export interface FieldError {
   message?: string
 }
 
+/** x-widget value that keeps a declared field out of the form. */
+export const HIDDEN_WIDGET = 'hidden'
+
 /** Same value the backend sends for a set secret. */
 export const REDACTED_SECRET = '***'
 
@@ -89,11 +92,22 @@ export function schemaAt(schema: ConfigSchema, path: string): ConfigSchema | und
   return node
 }
 
-/** x-visible-if: every listed sibling must equal the given value. */
-export function isVisible(schema: ConfigSchema, siblings: ConfigValue | undefined): boolean {
+/**
+ * x-visible-if: every listed sibling must equal the given value. Keys that
+ * start with "$" ("$mode") are read from context instead: values of the object
+ * the configuration lives in, such as an IM channel's mode.
+ */
+export function isVisible(
+  schema: ConfigSchema,
+  siblings: ConfigValue | undefined,
+  context?: ConfigValue,
+): boolean {
   const cond = schema['x-visible-if']
   if (!cond) return true
-  return Object.entries(cond).every(([key, want]) => looselyEqual(siblings?.[key], want))
+  return Object.entries(cond).every(([key, want]) => {
+    const got = key.startsWith('$') ? context?.[key.slice(1)] : siblings?.[key]
+    return looselyEqual(got, want)
+  })
 }
 
 /** Whether a field belongs to a group filter; no filter shows everything. */
@@ -165,6 +179,8 @@ export function secretPaths(schema: ConfigSchema, prefix = ''): string[] {
 export interface ValidateOptions {
   /** Skip secret fields entirely (they are edited elsewhere, e.g. /credentials). */
   skipSecrets?: boolean
+  /** Values "$"-prefixed x-visible-if keys read (see isVisible). */
+  context?: ConfigValue
 }
 
 /**
@@ -190,7 +206,7 @@ function validateObject(
   opts: ValidateOptions,
 ) {
   for (const { key, schema: prop, required } of orderedFields(schema)) {
-    if (!isVisible(prop, value)) continue
+    if (!isVisible(prop, value, opts.context)) continue
     if (opts.skipSecrets && prop['x-secret']) continue
     const fieldPath = path ? `${path}.${key}` : key
     const v = value[key]

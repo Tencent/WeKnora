@@ -1,9 +1,44 @@
-// Locale keys that builtin config schemas name in x-i18n-keys (web search
-// provider parameters, data source credentials). Only the backend references
-// them, so the i18n audit counts this list as used; otherwise pruning would
+// Locale keys the backend names: x-i18n-keys in builtin config schemas (web
+// search parameters, data source and IM credentials), IM platform link titles
+// and mode hints. Only the backend references them, so the i18n audit counts this list as used; otherwise pruning would
 // drop the labels. internal/plugin/builtin/i18n_keys_test.go keeps it in step
 // with the backend, sorted.
 export const BACKEND_SCHEMA_I18N_KEYS = [
+  'agentEditor.im.dingtalkCardTemplateId',
+  'agentEditor.im.dingtalkCardTemplateIdHint',
+  'agentEditor.im.dingtalkConsole',
+  'agentEditor.im.feishuAPIBaseURLHint',
+  'agentEditor.im.feishuConsole',
+  'agentEditor.im.larkConsole',
+  'agentEditor.im.mattermostConsole',
+  'agentEditor.im.mattermostModeHint',
+  'agentEditor.im.mattermostPostToMain',
+  'agentEditor.im.mattermostPostToMainHint',
+  'agentEditor.im.qqbotAPIBaseURLHint',
+  'agentEditor.im.qqbotConsole',
+  'agentEditor.im.qqbotGatewayURLHint',
+  'agentEditor.im.slackConsole',
+  'agentEditor.im.telegramConsole',
+  'agentEditor.im.wecomAPIBaseURLHint',
+  'agentEditor.im.wecomConsole',
+  'agentEditor.im.wecomWSEndpointHint',
+  'agentEditor.im.yunzhijiaAllowedHostSuffix',
+  'agentEditor.im.yunzhijiaAllowedHostSuffixHint',
+  'agentEditor.im.yunzhijiaAppCredentialHint',
+  'agentEditor.im.yunzhijiaAppId',
+  'agentEditor.im.yunzhijiaAppIdPlaceholder',
+  'agentEditor.im.yunzhijiaAppSecret',
+  'agentEditor.im.yunzhijiaAppSecretPlaceholder',
+  'agentEditor.im.yunzhijiaImageDoc',
+  'agentEditor.im.yunzhijiaModeHint',
+  'agentEditor.im.yunzhijiaRobotDoc',
+  'agentEditor.im.yunzhijiaSecret',
+  'agentEditor.im.yunzhijiaSecretHint',
+  'agentEditor.im.yunzhijiaSecretPlaceholder',
+  'agentEditor.im.yunzhijiaSendMsgUrl',
+  'agentEditor.im.yunzhijiaSendMsgUrlHint',
+  'agentEditor.im.yunzhijiaTimeout',
+  'agentEditor.im.yunzhijiaTimeoutHint',
   'credential.inputPlaceholder',
   'datasource.field.apiToken',
   'datasource.field.appId',

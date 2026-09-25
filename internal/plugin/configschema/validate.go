@@ -49,49 +49,70 @@ func (e FieldErrors) Error() string {
 // configuration written by a newer version still validates. A required field
 // hidden by x-visible-if is not required.
 func Validate(s *Schema, value map[string]any) FieldErrors {
+	return ValidateInContext(s, value, nil)
+}
+
+// ValidateInContext is Validate for a configuration that lives inside a larger
+// object: x-visible-if keys starting with "$" ("$mode") are read from ctx
+// (without the "$") instead of from sibling fields. An IM channel's
+// credentials depend on the channel's mode this way.
+func ValidateInContext(s *Schema, value, ctx map[string]any) FieldErrors {
 	var errs FieldErrors
-	validateObject(s, value, "", &errs)
+	v := &validator{ctx: ctx, errs: &errs}
+	v.object(s, value, "")
 	if len(errs) == 0 {
 		return nil
 	}
 	return errs
 }
 
-func validateObject(s *Schema, value map[string]any, path string, errs *FieldErrors) {
+// validator carries the context through one validation.
+type validator struct {
+	ctx  map[string]any
+	errs *FieldErrors
+}
+
+func (vd *validator) object(s *Schema, value map[string]any, path string) {
+	errs := vd.errs
 	required := make(map[string]bool, len(s.Required))
 	for _, k := range s.Required {
 		required[k] = true
 	}
 	for _, key := range s.OrderedKeys() {
 		prop := s.Properties[key]
-		if !visible(prop, value) {
+		if !visible(prop, value, vd.ctx) {
 			continue
 		}
 		fieldPath := joinPath(path, key)
-		v, present := value[key]
-		if !present || v == nil || v == "" {
+		val, present := value[key]
+		if !present || val == nil || val == "" {
 			if required[key] {
 				*errs = append(*errs, FieldError{fieldPath, CodeRequired, "is required"})
 			}
 			continue
 		}
-		validateValue(prop, v, fieldPath, errs)
+		vd.value(prop, val, fieldPath)
 	}
 }
 
-// visible evaluates x-visible-if against sibling values.
-func visible(s *Schema, siblings map[string]any) bool {
+// visible evaluates x-visible-if against sibling values, or against ctx for
+// "$"-prefixed keys.
+func visible(s *Schema, siblings, ctx map[string]any) bool {
 	for key, want := range s.VisibleIf {
-		if !looselyEqual(siblings[key], want) {
+		got := siblings[key]
+		if name, fromCtx := strings.CutPrefix(key, "$"); fromCtx {
+			got = ctx[name]
+		}
+		if !looselyEqual(got, want) {
 			return false
 		}
 	}
 	return true
 }
 
-func validateValue(s *Schema, v any, path string, errs *FieldErrors) {
+func (vd *validator) value(s *Schema, v any, path string) {
 	add := func(code, format string, args ...any) {
-		*errs = append(*errs, FieldError{path, code, fmt.Sprintf(format, args...)})
+		*vd.errs = append(*vd.errs, FieldError{path, code, fmt.Sprintf(format, args...)})
 	}
 	switch s.Type {
 	case TypeObject:
@@ -100,7 +121,7 @@ func validateValue(s *Schema, v any, path string, errs *FieldErrors) {
 			add(CodeType, "must be an object")
 			return
 		}
-		validateObject(s, obj, path, errs)
+		vd.object(s, obj, path)
 		return
 	case TypeArray:
 		items, ok := v.([]any)
@@ -109,7 +130,7 @@ func validateValue(s *Schema, v any, path string, errs *FieldErrors) {
 			return
 		}
 		for i, item := range items {
-			validateValue(s.Items, item, fmt.Sprintf("%s[%d]", path, i), errs)
+			vd.value(s.Items, item, fmt.Sprintf("%s[%d]", path, i))
 		}
 		return
 	case TypeString:

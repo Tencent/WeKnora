@@ -244,3 +244,21 @@ func TestOpenWithoutKey(t *testing.T) {
 		t.Fatalf("legacy plaintext = %v, %v", legacy, err)
 	}
 }
+
+func TestValidateInContextReadsDollarKeysFromContext(t *testing.T) {
+	s := Object().
+		Set("bot_token", &Schema{Type: TypeString}, true).
+		Set("signing_secret", &Schema{Type: TypeString, VisibleIf: map[string]any{"$mode": "webhook"}}, true)
+	value := map[string]any{"bot_token": "x"}
+	if errs := ValidateInContext(s, value, map[string]any{"mode": "websocket"}); errs != nil {
+		t.Fatalf("websocket mode hides the webhook secret: %v", errs)
+	}
+	errs := ValidateInContext(s, value, map[string]any{"mode": "webhook"})
+	if len(errs) != 1 || errs[0].Path != "signing_secret" {
+		t.Fatalf("webhook mode requires the signing secret, got %v", errs)
+	}
+	// Without a context the field is hidden, never wrongly required.
+	if errs := Validate(s, value); errs != nil {
+		t.Fatalf("Validate without context: %v", errs)
+	}
+}

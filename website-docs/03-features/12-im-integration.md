@@ -118,7 +118,9 @@ flowchart LR
 | `POST /api/v1/agents/:id/im-channels` | 为 Agent 创建渠道（校验 platform 合法性、填充默认 mode/output_mode） |
 | `GET /api/v1/agents/:id/im-channels` | 列出 Agent 的渠道（不含凭据） |
 | `GET /api/v1/im-channels` | 租户内跨 Agent 渠道总览 |
-| `PUT /api/v1/im-channels/:id` | 局部更新（name/mode/output_mode/locale/session_mode/knowledge_base_id/credentials/enabled/agent_id）；`knowledge_base_id` 传空字符串即解除文件知识库 |
+| `GET /api/v1/im-channels/platforms` | 已注册平台目录：接入模式、控制台链接与凭证表单 Schema（前端按它渲染凭证表单） |
+| `GET /api/v1/im-channels/:id` | 读取单个渠道供编辑（Admin+），密钥字段返回 `***` |
+| `PUT /api/v1/im-channels/:id` | 局部更新（name/mode/output_mode/locale/session_mode/knowledge_base_id/credentials/enabled/agent_id）；`knowledge_base_id` 传空字符串即解除文件知识库；`credentials` 按字段合并，密钥传空或 `***` 保留原值 |
 | `DELETE /api/v1/im-channels/:id` | 删除 |
 | `POST /api/v1/im-channels/:id/toggle` | 启用/停用 |
 | `POST /api/v1/wechat/qrcode`、`POST /api/v1/wechat/qrcode/status` | 微信（iLink）扫码绑定：生成二维码并轮询状态 |

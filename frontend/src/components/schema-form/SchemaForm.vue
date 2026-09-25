@@ -8,6 +8,7 @@
       :secret-mode="secretMode"
       :errors="errors"
       :disabled="disabled"
+      :context="context"
       @update:value="$emit('update:modelValue', $event)"
     >
       <template #secret="slotProps"><slot name="secret" v-bind="slotProps" /></template>
@@ -36,8 +37,10 @@ withDefaults(
     secretMode?: 'input' | 'slot'
     errors?: FieldError[]
     disabled?: boolean
+    /** Values "$"-prefixed x-visible-if keys read, e.g. { mode } for IM credentials. */
+    context?: ConfigValue
   }>(),
-  { group: undefined, secretMode: 'input', errors: () => [], disabled: false },
+  { group: undefined, secretMode: 'input', errors: () => [], disabled: false, context: undefined },
 )
 
 defineEmits<{ 'update:modelValue': [value: ConfigValue] }>()
