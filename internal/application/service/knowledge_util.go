@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -128,10 +129,18 @@ func ValidateJSONUploadContent(fileName string, file *multipart.FileHeader) erro
 	if err != nil {
 		return err
 	}
-	if err := docparser.ValidateJSONContent(data); err != nil {
+	// The upload queue shows this message verbatim, so localize it here rather
+	// than in docparser, whose error text is shared with the async JSON reader.
+	switch err := docparser.ValidateJSONContent(data); {
+	case err == nil:
+		return nil
+	case errors.Is(err, docparser.ErrEmptyJSONContent):
+		return werrors.NewBadRequestError("JSON 文件内容为空")
+	case errors.Is(err, docparser.ErrInvalidJSONContent):
+		return werrors.NewBadRequestError("JSON 文件内容无效，请检查格式")
+	default:
 		return werrors.NewBadRequestError(err.Error())
 	}
-	return nil
 }
 
 // calculateFileHash calculates MD5 hash of a file
