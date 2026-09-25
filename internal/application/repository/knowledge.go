@@ -653,10 +653,17 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 // across PostgreSQL and SQLite. The promote UPDATE's WHERE clause
 // (parse_status='finalizing' AND pending_subtasks_count=0) makes it
 // safe to run from any number of concurrent callers — at most one wins.
+// Both run in one transaction: a promote that failed after its decrement
+// committed left the counter at zero with nobody left to promote the row.
 func (r *knowledgeRepository) FinalizeSubtask(
 	ctx context.Context, id string,
 ) (int, bool, error) {
-	promoted, err := finalizeSubtask(r.db.WithContext(ctx), id)
+	var promoted bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		promoted, err = finalizeSubtask(tx, id)
+		return err
+	})
 	if err != nil {
 		return 0, false, err
 	}
