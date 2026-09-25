@@ -80,6 +80,13 @@ export interface ConnectorMeta {
   required_permissions?: string[]
   // Credential form: describes config.credentials for this connector.
   config_schema?: ConfigSchema
+  // Settings form (config.settings) for connectors whose settings UI is
+  // not built in, such as plugin connectors.
+  settings_schema?: ConfigSchema
+  // Localized name / description of plugin connectors, keyed by locale.
+  names?: Record<string, string>
+  descriptions?: Record<string, string>
+  plugin_id?: string
 }
 
 export interface Resource {

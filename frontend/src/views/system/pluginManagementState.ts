@@ -95,13 +95,23 @@ export function sortVersions(list: readonly PluginVersion[]): PluginVersion[] {
 }
 
 /** Overall state of an installed plugin on the node that answered. */
-export type InstalledState = 'running' | 'failed' | 'disabled' | 'pending'
+export type InstalledState = 'running' | 'degraded' | 'failed' | 'disabled' | 'pending'
 
 export function installedState(p: InstalledPlugin): InstalledState {
   if (p.desired_state === 'disabled') return 'disabled'
   if (!p.node) return 'pending'
-  return p.node.state === 'ready' ? 'running' : 'failed'
+  switch (p.node.state) {
+    case 'ready':
+      return 'running'
+    case 'degraded':
+      return 'degraded'
+    default:
+      return 'failed'
+  }
 }
+
+/** The egress grant meaning any public host. */
+export const EGRESS_ANY_HOST = '*'
 
 /** Whether a string can be sent as a package URL. */
 export function isPackageUrl(raw: string): boolean {

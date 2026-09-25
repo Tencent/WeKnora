@@ -67,6 +67,7 @@ test('installedState reads desired state and the node report', () => {
   assert.equal(installedState(base), 'pending')
   assert.equal(installedState({ ...base, node: { version: '1', state: 'ready', updatedAt: '' } }), 'running')
   assert.equal(installedState({ ...base, node: { version: '1', state: 'failed', updatedAt: '' } }), 'failed')
+  assert.equal(installedState({ ...base, node: { version: '1', state: 'degraded', updatedAt: '' } }), 'degraded')
 })
 
 test('isPackageUrl and hasSystemConfig', () => {

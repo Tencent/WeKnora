@@ -288,9 +288,10 @@ import CredentialResource, {
 } from '@/components/credentials/CredentialResource.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
+import { pickLocale } from '@/utils/localizedText'
 import { providerLogo } from './providerLogos'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
@@ -397,7 +398,7 @@ const drawerClass = computed(() => {
 // list card showed for the same provider id.
 const drawerLogo = computed(() => {
   const id = providerForm.value.provider
-  return id ? providerLogo('websearch', id) : null
+  return id ? resolveLogo(id) ?? null : null
 })
 
 const drawerLogoStyle = computed((): Record<string, string> => {
@@ -423,7 +424,13 @@ const providerInitial = (providerId: string) => {
 }
 
 // 见 VectorStoreSettings 的同名注释：返回 --logo-url 给 ::before 用 mask 渲染。
-const resolveLogo = (providerId: string) => providerLogo('websearch', providerId)
+// Plugin provider types carry their own icon.
+const resolveLogo = (providerId: string) => {
+  const bundled = providerLogo('websearch', providerId)
+  if (bundled) return bundled
+  const icon = providerTypes.value.find((p) => p.id === providerId)?.icon
+  return icon ? { mode: 'color' as const, url: icon } : undefined
+}
 
 const badgeClass = (providerId: string) => {
   const m = resolveLogo(providerId)?.mode
@@ -469,7 +476,11 @@ const loadProviderEntities = async () => {
 
 const loadProviderTypes = async () => {
   try {
-    providerTypes.value = await listWebSearchProviderTypes()
+    // Plugin provider types name themselves per locale.
+    providerTypes.value = (await listWebSearchProviderTypes()).map((pt) => ({
+      ...pt,
+      name: pickLocale(pt.names, locale.value) || pt.name,
+    }))
   } catch (error) {
     console.error('Failed to load provider types:', error)
   }

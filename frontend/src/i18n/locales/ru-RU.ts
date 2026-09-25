@@ -5243,6 +5243,10 @@ export default {
     noCompatibleKbForAgent: 'Инструменты текущего агента не соответствуют возможностям ни одной базы знаний в области видимости — нечего упомянуть.'
   },
   pluginAdmin: {
+    runtime: {
+      declarative: 'Декларативный',
+      host: 'Локальный процесс'
+    },
     title: 'Управление плагинами',
     description: 'Установка и управление плагинами всей платформы. Установленный плагин виден всем рабочим пространствам, и каждое включает его самостоятельно; отключение здесь выгружает плагин на всех узлах.',
     installButton: 'Установить плагин',
@@ -5256,6 +5260,7 @@ export default {
     contributions: 'Что добавляет',
     permissions: 'Разрешения и внешний доступ',
     state: {
+      degraded: 'Перезапуск',
       running: 'Работает',
       failed: 'Ошибка загрузки',
       disabled: 'Отключён',
@@ -5278,6 +5283,7 @@ export default {
       reinstall: 'Переустановка'
     },
     permission: {
+      anyHost: 'Любой публичный хост',
       remote: 'Удалённый сервис',
       egress: 'Исходящая сеть',
       hostApi: 'API WeKnora',
@@ -7306,6 +7312,8 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: 'Загрузка',
+    channelRss: 'RSS',
+    channelExternal: 'Внешний источник',
     channelManual: 'Вручную',
     channelUrl: 'Веб',
     channelUnknown: 'Неизвестно',

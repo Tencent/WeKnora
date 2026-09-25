@@ -70,7 +70,15 @@ async function fixture({ configured = true, create = false } = {}) {
     exports,
     require(name: string) {
       if (name === 'vue') return require('vue')
-      if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
+      if (name === 'vue-i18n') {
+        return { useI18n: () => ({ t: (key: string) => key, te: () => true, locale: { value: 'en-US' } }) }
+      }
+      if (name === './connectorLabels') {
+        return {
+          connectorName: (d: { type: string }) => `datasource.connector.${d.type}`,
+          connectorDescription: (d: { type: string }) => `datasource.connectorDesc.${d.type}`,
+        }
+      }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { warning() {}, success() {}, error() {} } }
       if (name === '@/api/datasource') return api
       if (name === '@/components/schema-form/schema') return schemaModule

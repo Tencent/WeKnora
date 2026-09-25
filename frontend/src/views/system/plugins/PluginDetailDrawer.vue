@@ -19,7 +19,7 @@
           <dt>{{ t('pluginAdmin.publisher') }}</dt>
           <dd>{{ manifest?.publisher.name || manifest?.publisher.id }}</dd>
           <dt>{{ t('pluginAdmin.detail.runtime') }}</dt>
-          <dd>{{ plugin.runtime }}</dd>
+          <dd>{{ te(`pluginAdmin.runtime.${plugin.runtime}`) ? t(`pluginAdmin.runtime.${plugin.runtime}`) : plugin.runtime }}</dd>
           <dt>{{ t('pluginAdmin.detail.source') }}</dt>
           <dd>
             {{ t(`pluginAdmin.source.${plugin.source?.kind ?? 'upload'}`) }}
@@ -141,7 +141,7 @@ const emit = defineEmits<{
   removed: [id: string]
 }>()
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 
 const manifest = computed(() => props.plugin?.manifest)
 const title = computed(() => (manifest.value ? localizedText(manifest.value.name, locale.value) : props.plugin?.id ?? ''))
