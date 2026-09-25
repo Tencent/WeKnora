@@ -625,6 +625,10 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			// Engines other than Postgres store the zero value verbatim and
+			// filter on is_enabled = true, so leaving this unset made OCR and
+			// caption chunks unsearchable there.
+			IsEnabled: chunk.IsEnabled,
 		})
 	}
 

@@ -27,6 +27,44 @@ func TestBrowserSkillNeedsConnectionNotSandbox(t *testing.T) {
 	require.ErrorContains(t, err, "owner mismatch")
 }
 
+type browserScopeManager struct {
+	browserLifecycleManager
+	scopes []browserskill.Scope
+}
+
+func (m *browserScopeManager) Call(
+	ctx context.Context, s browserskill.Scope, session, method string, params map[string]any,
+) (json.RawMessage, error) {
+	m.scopes = append(m.scopes, s)
+	return m.browserLifecycleManager.Call(ctx, s, session, method, params)
+}
+
+// A shared agent executes in its owner's workspace; the browser must still be
+// the one the asking member paired in their own workspace.
+func TestBrowserSkillScopeFollowsCallerInSharedAgent(t *testing.T) {
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
+	shared := types.WithExecutionTenant(ctx, 99)
+	own := browserskill.Scope{Tenant: 7, User: "alice"}
+	require.Equal(t, own, BrowserSkillScope(ctx))
+	require.Equal(t, own, BrowserSkillScope(shared))
+
+	manager := &browserScopeManager{}
+	tool := NewBrowserSkillTool(nil, BrowserSkillScope(shared), "chat")
+	tool.manager = manager
+	result, err := tool.Execute(shared, json.RawMessage(`{"method":"observe"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []browserskill.Scope{own}, manager.scopes)
+
+	bob := types.WithExecutionTenant(context.WithValue(ctx, types.UserIDContextKey, "bob"), 99)
+	_, err = tool.Execute(bob, json.RawMessage(`{"method":"observe"}`))
+	require.ErrorContains(t, err, "owner mismatch")
+	_, err = tool.Execute(context.WithValue(ctx, types.TenantIDContextKey, uint64(8)),
+		json.RawMessage(`{"method":"observe"}`))
+	require.ErrorContains(t, err, "owner mismatch", "another workspace's member must not drive this browser")
+}
+
 func TestBrowserWaitRequiresDocumentedDuration(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")

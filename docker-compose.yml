@@ -318,7 +318,7 @@ services:
       # credentials on whitelisted BE hosts.
       - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio}
       # 仅允许白名单出站（默认关闭）。开启前请把所有需要访问的地址加入白名单，
-      # 见 docs/QA.md「仅允许白名单出站」。
+      # 见 website-docs/01-getting-started/04-configuration.md「开启 SSRF_DNS_WHITELIST_ONLY 之前」。
       - SSRF_DNS_WHITELIST_ONLY=${SSRF_DNS_WHITELIST_ONLY:-}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}

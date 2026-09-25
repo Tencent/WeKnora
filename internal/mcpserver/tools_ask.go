@@ -2,7 +2,9 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,11 +43,20 @@ func askTool() mcp.Tool {
 }
 
 type askReference struct {
-	KnowledgeID    string  `json:"knowledge_id"`
-	KnowledgeTitle string  `json:"knowledge_title,omitempty"`
-	ChunkID        string  `json:"chunk_id"`
-	Score          float64 `json:"score,omitempty"`
-	Excerpt        string  `json:"excerpt"`
+	KnowledgeID    string     `json:"knowledge_id"`
+	KnowledgeTitle string     `json:"knowledge_title,omitempty"`
+	ChunkID        string     `json:"chunk_id"`
+	Score          float64    `json:"score,omitempty"`
+	Excerpt        string     `json:"excerpt"`
+	Images         []askImage `json:"images,omitempty"`
+}
+
+// Keep image references separate from the truncated excerpt. OriginalURL is
+// parser provenance, not a serving URL, and must not be exposed as a fallback.
+type askImage struct {
+	URL     string `json:"url"`
+	Caption string `json:"caption,omitempty"`
+	OCRText string `json:"ocr_text,omitempty"`
 }
 
 func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -93,6 +104,11 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 				title = r.KnowledgeID
 			}
 			fmt.Fprintf(&b, "[%d] %s (document %s)\n", i+1, title, r.KnowledgeID)
+			for _, img := range r.Images {
+				// Preserve image references for text-only MCP hosts as well.
+				// strconv.Quote, unlike json.Marshal, keeps & < > literal.
+				fmt.Fprintf(&b, "  Image: %s\n", strconv.Quote(img.URL))
+			}
 		}
 		fmt.Fprintf(&b, "\nsession_id: %s", session.ID)
 		text = b.String()
@@ -400,7 +416,7 @@ const askExcerptMaxRunes = 300
 
 func summarizeReferences(refs []*types.SearchResult) []askReference {
 	out := make([]askReference, 0, len(refs))
-	seen := map[string]struct{}{}
+	seen := map[string]int{}
 	for _, r := range refs {
 		if r == nil {
 			continue
@@ -409,21 +425,69 @@ func summarizeReferences(refs []*types.SearchResult) []askReference {
 		if key == "" {
 			key = r.KnowledgeID + ":" + fmt.Sprint(r.ChunkIndex)
 		}
-		if _, dup := seen[key]; dup {
+		if index, dup := seen[key]; dup {
+			out[index].Images = summarizeReferenceImages(r.ImageInfo, out[index].Images)
 			continue
 		}
-		seen[key] = struct{}{}
-		excerpt := strings.TrimSpace(r.Content)
-		if runes := []rune(excerpt); len(runes) > askExcerptMaxRunes {
-			excerpt = string(runes[:askExcerptMaxRunes]) + "…"
-		}
+		seen[key] = len(out)
 		out = append(out, askReference{
 			KnowledgeID:    r.KnowledgeID,
 			KnowledgeTitle: r.KnowledgeTitle,
 			ChunkID:        r.ID,
 			Score:          r.Score,
-			Excerpt:        excerpt,
+			Excerpt:        truncateExcerpt(strings.TrimSpace(r.Content)),
+			Images:         summarizeReferenceImages(r.ImageInfo, nil),
 		})
+	}
+	return out
+}
+
+// truncateExcerpt cuts at askExcerptMaxRunes but never inside a storage
+// reference: half a handle is unusable and would only cost a failed lookup.
+// Whole image references are kept in askReference.Images instead.
+func truncateExcerpt(excerpt string) string {
+	runes := []rune(excerpt)
+	if len(runes) <= askExcerptMaxRunes {
+		return excerpt
+	}
+	cut := len(string(runes[:askExcerptMaxRunes]))
+	for _, loc := range types.StorageReferencePattern.FindAllStringIndex(excerpt, -1) {
+		if loc[0] >= cut {
+			break
+		}
+		if cut < loc[1] {
+			cut = loc[0]
+			break
+		}
+	}
+	return excerpt[:cut] + "…"
+}
+
+func summarizeReferenceImages(raw string, out []askImage) []askImage {
+	var infos []types.ImageInfo
+	if err := json.Unmarshal([]byte(raw), &infos); err != nil {
+		return out
+	}
+	seen := make(map[string]int, len(out)+len(infos))
+	for i, img := range out {
+		seen[img.URL] = i
+	}
+	for _, info := range infos {
+		url := strings.TrimSpace(info.URL)
+		if url == "" {
+			continue
+		}
+		if index, dup := seen[url]; dup {
+			if out[index].Caption == "" {
+				out[index].Caption = info.Caption
+			}
+			if out[index].OCRText == "" {
+				out[index].OCRText = info.OCRText
+			}
+			continue
+		}
+		seen[url] = len(out)
+		out = append(out, askImage{URL: url, Caption: info.Caption, OCRText: info.OCRText})
 	}
 	return out
 }

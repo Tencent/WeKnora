@@ -88,7 +88,7 @@ func (s *agentService) sessionSandboxInputStore(
 	mgr, _, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		tenantID, sessionID, agentSandboxConfigID, s.sandboxPolicy,
-		withLiteHostSandbox(s.hostSandbox),
+		withLiteHostSandbox(s.hostSandbox), withLiteDesktop(s.hostDesktop),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)

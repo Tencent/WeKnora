@@ -7,7 +7,7 @@
 WeKnora 有两种任务执行模式，通过部署形态选择：
 
 - **asynq 模式（标准部署）**：任务经 `asynq.Client` 序列化为 JSON payload 写入 Redis 队列，由多个独立的 `asynq.Server`（worker pool）消费。`internal/router/task.go` 中 `RunAsynqServer()` 构建统一的 `asynq.ServeMux` 并在 6 个 pool 上运行。
-- **Lite 模式（单机 / macOS App，无 Redis）**：`internal/router/sync_task.go` 的 `SyncTaskExecutor` 实现同一个 `interfaces.TaskEnqueuer` 接口，`Enqueue` 直接把任务派发到 goroutine 执行，支持 `ProcessIn`（延迟）与 `MaxRetry` 选项；重试为线性退避（`attempt * 5s`，上限 30s）。
+- **Lite 模式（单机 / macOS App，无 Redis）**：`internal/router/sync_task.go` 的 `SyncTaskExecutor` 实现同一个 `interfaces.TaskEnqueuer` 接口，`Enqueue` 直接把任务派发到 goroutine 执行，支持 `ProcessIn`（延迟）与 `MaxRetry` 选项；重试为线性退避（`attempt * 5s`，上限 30s）。handler 内的 panic 会被捕获并按失败处理，不会导致进程退出。
 
 ```go
 // internal/router/sync_task.go
@@ -168,19 +168,21 @@ flowchart LR
 
     subgraph MW["ServeMux 中间件链 (安装顺序)"]
         M1["1. asynqdl 死信中间件<br/>(最先安装, 看到原始错误)"]
-        M2["2. backgroundTaskMiddleware<br/>(标记后台任务, 模型并发治理)"]
-        M3["3. langfuse.AsynqMiddleware<br/>(trace 续接 + SPAN 包裹)"]
+        M1b["2. asynqdl.RecoverMiddleware<br/>(panic 转为任务错误)"]
+        M2["3. backgroundTaskMiddleware<br/>(标记后台任务, 模型并发治理)"]
+        M3["4. langfuse.AsynqMiddleware<br/>(trace 续接 + SPAN 包裹)"]
     end
     Workers --> MW --> H["业务 Handler<br/>(KnowledgeService.ProcessDocument 等)"]
 ```
 
 ### 中间件治理 {#_4-3-中间件治理}
 
-`RunAsynqServer`（`internal/router/task.go`）在同一个 mux 上按顺序安装三个中间件：
+`RunAsynqServer`（`internal/router/task.go`）在同一个 mux 上按顺序安装四个中间件：
 
 1. **`asynqdl.MiddlewareWithCallback`（死信）** — 必须最先安装，以便看到 handler 返回的原始错误（后续中间件可能转换错误）。见[失败重试与死信处理](#_7-失败重试与死信处理)。
-2. **`backgroundTaskMiddleware`** — 对每个任务 context 打 `types.WithBackgroundTask` 标记，使 per-model 聊天并发治理器（chat concurrency governor）对 ingestion/enrichment 的 LLM 调用限流，但不影响交互式用户聊天。
-3. **`langfuse.AsynqMiddleware`** — Langfuse 关闭时为直通；开启时续接上游 HTTP trace 或新开独立 trace，将 handler 执行包成 SPAN。
+2. **`asynqdl.RecoverMiddleware`** — 把 handler 的 panic 转为普通任务错误。asynq 自身只在所有中间件之外恢复 panic，不经过它时死信回调看不到错误，最后一次尝试的文档会一直停在 `processing`。
+3. **`backgroundTaskMiddleware`** — 对每个任务 context 打 `types.WithBackgroundTask` 标记，使 per-model 聊天并发治理器（chat concurrency governor）对 ingestion/enrichment 的 LLM 调用限流，但不影响交互式用户聊天。
+4. **`langfuse.AsynqMiddleware`** — Langfuse 关闭时为直通；开启时续接上游 HTTP trace 或新开独立 trace，将 handler 执行包成 SPAN。
 
 ### 重试退避策略 {#_4-4-重试退避策略}
 
@@ -255,7 +257,8 @@ stateDiagram-v2
 - 取消流程分三阶段（`cancelMatchingTasks`）：① 先删干净排队态；② 快照 active 任务后调用 `Inspector.CancelProcessing` 发信号，并在 1s 的 settle 窗口内轮询（25ms 间隔）删除因 `context.Canceled` 转入 retry 的记录（`deleteCancelledTransitions`）；③ 再扫一遍排队态，兜住取消期间新入队的下游任务。
 - `CancelTasksForKnowledgeBase`：KB 删除后的孤儿任务清理；`kb:delete` 与 `index:delete` 明确排除（它们携带快照、负责真正的存储清理，删掉会泄漏资源）。clone/move 的语义 KB 字段（`source_id`/`target_id`/`source_kb_id`/`target_kb_id`）也参与匹配。
 - 一切均为 best-effort：Redis 抖动时记 Warn 日志并吞掉，取消 API 依然返回成功。
-- `HasQueuedTasksForKnowledge`：只读探测，housekeeping 清扫用它区分"积压但未孤儿"的行，避免误标 failed。
+- `HasQueuedTasksForKnowledge`：只读探测，housekeeping 清扫用它区分"积压但未孤儿"的行，避免误标 failed。`HasQueuedDeleteTasksForKnowledge` 专门匹配 `knowledge:list_delete` 的批量 payload，供删除卡死恢复使用。
+- `QueuedKnowledgeIDs`：一次扫描全部队列，返回仍被排队任务引用的知识 ID 集合；知识列表接口据此给出 `stall_state`（`queued` / `stalled`），结果缓存 60 秒并在并发请求间共享，扫描失败不缓存。
 
 ### 运维面板（SystemAdmin Runtime Dashboard） {#_6-2-运维面板-systemadmin-runtime-dashboard}
 
@@ -264,7 +267,7 @@ stateDiagram-v2
 - 任务动作由 `runtimeTaskActions` 状态检查约束：`cancel`（pending/active/scheduled/retry 且可取消类型）、`run_now`（scheduled/retry/archived，asynq 保留重试计数）、`delete`（仅 archived）；另有 `PurgeArchivedRuntimeTasks` 一键清空单队列 archived 集合。
 - `WorkerServerStats()`：读取 asynq server 心跳（并发、活跃 worker 数、状态、队列权重），跨副本聚合后区分"配置的单实例容量"与"实际集群容量"。
 
-对应 HTTP API（`internal/router/router.go`，SystemAdmin + 平台 API Key capability 门控）：
+对应 HTTP API（`internal/router/routes_auth_tenant.go`，SystemAdmin + 平台 API Key capability 门控）：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -280,14 +283,15 @@ stateDiagram-v2
 - 只在**最后一次尝试**失败时（`isFinalAttempt`：`retried >= max_retry`）写一行 `task_dead_letters`，避免瞬时抖动每次都产生一行。
 - `buildDeadLetter` 用宽容的 `payloadProbe` 从任意 payload 提取 `tenant_id` / `knowledge_base_id` / `kb_id` / `knowledge_id` / `source_kb_id`，`inferScope` 按"爆炸半径"推断 scope（`knowledge_base` > `knowledge` > `tenant` > `unknown`）。payload 原样保留（可用于将来重放），`last_error` 截断到 8KB。
 - 插入是 best-effort：DB 失败只记日志，原始任务错误始终原样向 asynq 上抛（进入 archived）。
-- `OnDeadLetter` 回调（`internal/router/task.go` 的 `newDeadLetterKnowledgeFailer`）：`document:process` / `knowledge:post_process` / `manual:process` 耗尽重试时，单条 UPDATE 把知识行 `parse_status=failed` + `error_message` 一并写入（避免半更新），并调用 `SpanTracker.FinalizeAttempt` 关闭对应 attempt 的根 span，让时间线不再显示"进行中"。`knowledge:list_delete` 有专门分支 `markKnowledgeListDeleteFailed`。`image:multimodal` 不标记父知识失败（finalize-on-last-attempt 已保证进度）。回调用 `context.Background()` 执行且 panic 被捕获，绝不改变原始任务错误。
+- `OnDeadLetter` 回调（`internal/router/task.go` 的 `newDeadLetterKnowledgeFailer`）：`document:process` / `knowledge:post_process` / `manual:process` 耗尽重试时，仅当知识行仍处于 `pending` / `processing` / `finalizing` 且租户、知识库与 payload 一致时，以一次条件更新把 `parse_status=failed` + `error_message` 一并写入（避免半更新，也不会覆盖已取消或删除的行；以 `SkipRetry` 结束的任务不触发），并调用 `SpanTracker.FinalizeAttempt` 关闭对应 attempt 的根 span，让时间线不再显示"进行中"。`knowledge:list_delete` 有专门分支 `markKnowledgeListDeleteFailed`。`image:multimodal` 不标记父知识失败（finalize-on-last-attempt 已保证进度）。回调用 `context.Background()` 执行且 panic 被捕获，绝不改变原始任务错误。
 
 ### 持久化任务队列与服务级死信（`internal/application/repository/task_queue.go`） {#_7-2-持久化任务队列与服务级死信-internal-application-repository-task-queue-go}
 
 `task_pending_ops` 表是 Redis list 队列的持久化替代（重启不丢、无 TTL 驱逐），队列身份是 `(task_type, scope, scope_id)` 三元组，目前主要消费者是 Wiki ingest：
 
-- `Enqueue` / `EnqueueIfKnowledgeBaseActive`：后者在事务中用 Postgres `SHARE` 行锁校验 KB 仍存活，防止 KB 软删后仍写入新的持久化工作。
-- `ClaimBatch`：按 `dedup_key`（=文档）**整组**原子认领。核心不变量：同一文档的多个 op（如 ingest 后跟 retract）绝不拆到两个并发批次；有新鲜 claim（`claimed_at >= staleBefore`）的 key 整体跳过，晚到的兄弟 op 等待持有者完成或 claim 过期。Postgres 上用每个 key 的 anchor 行 `FOR UPDATE SKIP LOCKED` 保证并发认领者拿到**不相交**的 key 集；SQLite（Lite/测试）依赖单写者引擎。
+- `Enqueue` / `EnqueueIfKnowledgeBaseActive`：后者在事务中用 Postgres `SHARE` 行锁校验 KB 仍存活、且所属租户未被软删除，防止 KB 或租户删除后仍写入新的持久化工作。
+- **已删除租户**：租户删除只做软删除，其知识库与 `task_pending_ops` 行仍在。服务启动恢复时会清理已软删除租户的待处理行；Wiki ingest / finalize 任务在调用模型前检查租户是否存活，租户已删除则丢弃该知识库的队列，不再产生模型请求。
+- `ClaimBatch`：按 `dedup_key`（=文档）**整组**原子认领。核心不变量：同一文档的多个 op（如 ingest 后跟 retract）绝不拆到两个并发批次；有新鲜 claim（`claimed_at >= staleBefore`）的 key 整体跳过，晚到的兄弟 op 等待持有者完成或 claim 过期。Postgres 上用每个 key 的 anchor 行 `FOR UPDATE SKIP LOCKED` 保证并发认领者拿到**不相交**的 key 集；SQLite（Lite/测试）依赖单写者引擎。认领顺序为 `fail_count` 升序、同失败次数内按入队先后：反复失败的文档不会一直排在队首，新文档不会被饿死（Lite 模式的 `PeekBatch` 同序）。
 - `IncrFailCount`（`UPDATE ... RETURNING` 单往返原子自增）配合服务侧上限（wiki 的 `wikiMaxFailRetries`）：超限后该 op 从 `task_pending_ops` 移入 `task_dead_letters`（`internal/application/service/wiki_ingest.go` 直接 `deadLetterRepo.Insert`）。
 - `ReleaseByIDs` / `DeleteByIDs` / `DeleteByScope` / `DeleteByDedupKey` / `PendingCount` 提供释放、消费确认、KB 生命周期清理与积压观测。
 
@@ -295,7 +299,18 @@ stateDiagram-v2
 
 ### 兜底：housekeeping 清扫 {#_7-3-兜底-housekeeping-清扫}
 
-`internal/application/service/knowledge_housekeeping.go`：cron 每 5 分钟（`0 */5 * * * *`）扫描卡在 `pending`/`processing`/`finalizing` 超过 stale 阈值的知识行并标记 failed。这是 asynq 重试、死信回调、multimodal finalize 之外的最后防线（worker 被 kill 在 handler 中间、defer 没跑到等场景）。清扫结合 span 心跳、`updated_at` 与 `TaskInspector.HasQueuedTasksForKnowledge`，避免误杀"积压但未孤儿"的行。可用 `WEKNORA_HOUSEKEEPING_ENABLED=false` 关闭。
+`internal/application/service/knowledge_housekeeping.go`：cron 每 5 分钟（`0 */5 * * * *`）运行一轮，是 asynq 重试、死信回调、multimodal finalize 之外的最后防线（worker 被 kill 在 handler 中间、defer 没跑到等场景）。可用 `WEKNORA_HOUSEKEEPING_ENABLED=false` 关闭。
+
+阈值为 `max(1h, WEKNORA_DOCUMENT_PROCESS_TIMEOUT) + 10min`。每轮包含：
+
+| 清扫 | 对象 | 处理 |
+| --- | --- | --- |
+| 解析卡死 | `pending` / `processing` / `finalizing` 超过阈值，span 心跳也超过阈值，且 asynq 队列和 Wiki 持久队列中都没有相关任务 | 置 `failed`，`error_message` 写明停在哪个阶段及最后进展时间；最新一次 attempt 中未结束的 span 以 `TASK_STALLED` 关闭（卡住的阶段为 `failed`，其余为 `cancelled`） |
+| 摘要卡死 | `summary_status = processing` 超过 1 小时 | `summary_status` 置 `failed` |
+| 删除卡死 | `deleting` 超过阈值，且队列中没有覆盖它的删除任务 | 置 `failed` 并写明原因，文档重新可见、可再次删除；队列探测失败则顺延 |
+| Wiki 队列重新触发 | 只因 Wiki 持久队列未消费而停在 `finalizing` 的文档 | 为对应知识库重新入队 Wiki 触发任务，每个知识库每个阈值周期最多一次 |
+
+持续出现"tasks still queued (backpressure, not stuck)"日志说明瓶颈在队列容量，应调大对应 worker pool 并发，而不是怀疑巡检误判。
 
 ## 事件总线（`internal/event`） {#_8-事件总线-internal-event}
 

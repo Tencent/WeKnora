@@ -9,10 +9,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -44,8 +46,9 @@ var searchKnowledgeTool = BaseTool{
 		"profile fits the question. When nothing passes the relevance check, rephrase with terms the documents " +
 		"would use; repeating the same query in another mode usually does not help. For identifiers, error " +
 		"codes or exact names retry with mode=keyword.\n" +
-		"Every chunk carries a cN handle and belongs to a dN document. Use read_document(id=dN) to read the " +
-		"surrounding context or the whole document. Retrieval matches chunk text; the relevance model also " +
+		"Every chunk carries a cN handle and belongs to a dN document. Use read_document(id=cN, context=k) to " +
+		"read the text around a chunk, and read_document(id=dN) to read a document from its start. Retrieval " +
+		"matches chunk text; the relevance model also " +
 		"sees the document title. To find a document by its title or file name use list_documents(keyword=...).",
 	schema: json.RawMessage(`{
   "type": "object",
@@ -228,15 +231,28 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		"[Tool][SearchKnowledge] query=%q mode=%s limit=%d top_k=%d targets=%d kbs=%d",
 		query, mode, limit, topK, len(searchTargets), len(kbIDs))
 
-	allResults := t.concurrentSearchByTargets(ctx, query, mode, kbModes, searchTargets, kbList,
-		topK, vectorThreshold, keywordThreshold, kbTypeMap)
+	allResults, searchFailures, searchCalls, embedFallbacks := t.concurrentSearchByTargets(ctx, query, mode,
+		kbModes, searchTargets, kbList, topK, vectorThreshold, keywordThreshold, kbTypeMap)
+	// A hybrid search that ran keyword-only is reported like any other mode
+	// fallback, so an empty result is not read as "no semantic match".
+	for kbID, reason := range embedFallbacks {
+		kbModes[kbID] = kbSearchMode{mode: SearchModeKeyword, fallback: true, reason: reason}
+	}
+	// A failed search is not an empty one. Reporting "no matching chunks"
+	// when the vector store timed out or the embedding call failed made the
+	// model conclude the knowledge base has no answer.
+	if searchCalls > 0 && len(searchFailures) >= searchCalls {
+		msg := "Knowledge search failed: " + strings.Join(searchFailures, "; ") +
+			". The knowledge bases were not searched, so this is not evidence that they lack the answer."
+		return &types.ToolResult{Success: false, Output: msg, Error: msg}, nil
+	}
 
 	deduplicated := t.deduplicateResults(allResults)
 
 	ranked := deduplicated
 	rerankRejected := 0
 	if t.rerankModel != nil && len(deduplicated) > 0 {
-		reranked, err := t.rerankResults(ctx, query, deduplicated)
+		reranked, err := t.rerankResults(ctx, query, deduplicated, mode == SearchModeKeyword)
 		if err != nil {
 			logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank failed, using retrieval order: %v", err)
 		} else {
@@ -248,11 +264,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	if len(ranked) > 0 {
-		mmrK := len(ranked)
-		if mmrK > retrievalLimit {
-			mmrK = retrievalLimit
-		}
-		if selected := t.applyMMR(ctx, ranked, mmrK, 0.7); len(selected) > 0 {
+		if selected := selectMMR(ctx, ranked, min(len(ranked), retrievalLimit)); len(selected) > 0 {
 			ranked = selected
 		}
 	}
@@ -292,7 +304,13 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
-	result := t.formatOutput(ctx, final, kbIDs, query, mode)
+	result, omitted := t.formatWithinBudget(ctx, final, kbIDs, query, mode)
+	if omitted > 0 {
+		result.Data["omitted_for_budget"] = omitted
+	}
+	if len(searchFailures) > 0 {
+		result.Data["partial_failures"] = searchFailures
+	}
 	annotateModeFallback(result.Data, mode, kbModes)
 	if rerankRejected > 0 {
 		result.Data["rerank_rejected"] = rerankRejected
@@ -301,6 +319,33 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		result.Output = emptySearchStatement(query, result.Data, len(kbIDs))
 	}
 	return result, nil
+}
+
+// formatWithinBudget renders results, dropping the lowest-ranked ones until
+// the rendering fits in four fifths of the tool output budget, and reports
+// how many were dropped. The model reads a view rebuilt from Data, which the
+// registry's output truncation does not reach, so 30 full chunks used to go
+// into the context whatever the budget. The best result is always kept.
+func (t *SearchKnowledgeTool) formatWithinBudget(
+	ctx context.Context,
+	results []*searchResultWithMeta,
+	kbIDs []string,
+	query, mode string,
+) (*types.ToolResult, int) {
+	budget := OutputBudget(ctx) * 4 / 5
+	kept := results
+	result := t.formatOutput(ctx, kept, kbIDs, query, mode)
+	for len(kept) > 1 {
+		size := utf8.RuneCountInString(result.Output)
+		if size <= budget {
+			break
+		}
+		// Shrink in proportion to the overshoot, at least one row per round.
+		n := min(len(kept)-1, max(1, len(kept)*budget/size))
+		kept = kept[:n]
+		result = t.formatOutput(ctx, kept, kbIDs, query, mode)
+	}
+	return result, len(results) - len(kept)
 }
 
 // emptySearchStatement describes an empty result, including any mode
@@ -316,13 +361,25 @@ func emptySearchStatement(query string, data map[string]interface{}, kbCount int
 		msg = fmt.Sprintf("No chunk passed the relevance check for %q (mode=%s) in %d knowledge base(s): "+
 			"retrieval found %d candidate chunks but the relevance model scored none of them as answering the "+
 			"query. Repeating the same query in another mode usually will not help; rephrase with terms the "+
-			"documents would use. For identifiers, error codes or exact names retry with mode=keyword.",
+			"documents would use.",
 			query, mode, kbCount, rejected)
+		if mode != SearchModeKeyword {
+			msg += " For identifiers, error codes or exact names retry with mode=keyword."
+		}
+	} else if mode == SearchModeKeyword {
+		msg += " No chunk contains these exact terms; try the terms the documents would use, or mode=hybrid " +
+			"with a natural-language question."
 	}
 	fallbacks, _ := data["mode_fallbacks"].([]map[string]interface{})
 	for _, fb := range fallbacks {
 		msg += fmt.Sprintf(" Knowledge base %v was searched with mode=%v (%v).",
 			fb["knowledge_base_id"], fb["mode"], fb["reason"])
+	}
+	// An empty result renders from this text alone, so a failed search in
+	// part of the scope must be stated here, or it reads as "not found".
+	if failures, _ := data["partial_failures"].([]string); len(failures) > 0 {
+		msg += " Some knowledge bases could not be searched, so this is not evidence that they lack the " +
+			"answer: " + strings.Join(failures, "; ") + "."
 	}
 	return msg
 }
@@ -446,7 +503,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	topK int,
 	vectorThreshold, keywordThreshold float64,
 	kbTypeMap map[string]string,
-) []*searchResultWithMeta {
+) (_ []*searchResultWithMeta, failures []string, calls int, embedFallbacks map[string]string) {
 	// Filter out non-searchable KBs (wiki-only / graph-only). Feeding a
 	// wiki-only KB into HybridSearch causes spurious "model ID cannot be
 	// empty" errors because such KBs have no EmbeddingModelID configured.
@@ -478,7 +535,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			st.KnowledgeBaseID)
 	}
 	if len(filteredTargets) == 0 {
-		return nil
+		return nil, nil, 0, nil
 	}
 	searchTargets = filteredTargets
 
@@ -494,6 +551,28 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	allResults := make([]*searchResultWithMeta, 0)
+	// fail records one search that returned an error, or a search that
+	// could not run; calls counts every search attempted.
+	fail := func(kbIDs []string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		failures = append(failures, fmt.Sprintf("%v: %v", kbIDs, err))
+	}
+	attempt := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+	}
+	// fallBack records a hybrid knowledge base searched by keyword only
+	// because the query embedding failed.
+	fallBack := func(kbID string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if embedFallbacks == nil {
+			embedFallbacks = make(map[string]string)
+		}
+		embedFallbacks[kbID] = fmt.Sprintf("query embedding failed, semantic search skipped: %v", err)
+	}
 	collect := func(rows []*types.SearchResult, usedMode string) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -522,15 +601,41 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			}
 			// Compute embedding once for this (model, query) pair
 			var queryEmbedding []float32
+			var embedErr error
 			if modelKey != "" && needsEmbedding {
 				emb, err := t.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, query)
 				if err != nil {
 					logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to pre-compute embedding for model %s: %v",
 						modelKey, err)
+					embedErr = err
 				} else {
 					queryEmbedding = emb
 				}
 			}
+			// Without a query embedding every vector search would re-embed
+			// (with retries) and fail again. Hybrid targets fall back to
+			// keyword search, as the chat pipeline does; vector-only targets
+			// cannot run and are reported as failed.
+			groupModeFor := func(kbID string) (string, bool) {
+				m, ok := modeFor(kbID)
+				if embedErr != nil && m == SearchModeHybrid {
+					return SearchModeKeyword, ok
+				}
+				return m, ok
+			}
+			runnable := targets[:0:0]
+			for _, st := range targets {
+				if m, _ := groupModeFor(st.KnowledgeBaseID); embedErr != nil && m == SearchModeSemantic {
+					attempt()
+					fail([]string{st.KnowledgeBaseID}, fmt.Errorf("query embedding failed: %w", embedErr))
+					continue
+				}
+				if m, _ := modeFor(st.KnowledgeBaseID); embedErr != nil && m == SearchModeHybrid {
+					fallBack(st.KnowledgeBaseID, embedErr)
+				}
+				runnable = append(runnable, st)
+			}
+			targets = runnable
 
 			// Separate full-KB targets (combinable per retrieval mode) from
 			// specific-knowledge targets.
@@ -538,7 +643,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			var knowledgeTargets []*types.SearchTarget
 			for _, st := range targets {
 				if st.Type == types.SearchTargetTypeKnowledgeBase && len(st.TagIDs) == 0 {
-					m, _ := modeFor(st.KnowledgeBaseID)
+					m, _ := groupModeFor(st.KnowledgeBaseID)
 					fullKBIDsByMode[m] = append(fullKBIDsByMode[m], st.KnowledgeBaseID)
 				} else {
 					knowledgeTargets = append(knowledgeTargets, st)
@@ -550,6 +655,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 				innerWg.Add(1)
 				go func(usedMode string, fullKBIDs []string) {
 					defer innerWg.Done()
+					attempt()
 					kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], types.SearchParams{
 						QueryText:            query,
 						QueryEmbedding:       queryEmbedding,
@@ -559,10 +665,16 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						KeywordThreshold:     keywordThreshold,
 						DisableVectorMatch:   usedMode == SearchModeKeyword,
 						DisableKeywordsMatch: usedMode == SearchModeSemantic,
+						// Neighbor, parent and related chunks came back as
+						// extra rows that were never retrieved, tripling the
+						// rerank input; read_document(cN, context=k) serves
+						// surrounding text on demand.
+						SkipContextEnrichment: true,
 					})
 					if err != nil {
 						logger.Warnf(ctx, "[Tool][SearchKnowledge] Combined search failed for KBs %v: %v",
 							fullKBIDs, err)
+						fail(fullKBIDs, err)
 						return
 					}
 					collect(kbResults, usedMode)
@@ -574,7 +686,8 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 				innerWg.Add(1)
 				go func() {
 					defer innerWg.Done()
-					usedMode, _ := modeFor(st.KnowledgeBaseID)
+					attempt()
+					usedMode, _ := groupModeFor(st.KnowledgeBaseID)
 					stVectorThreshold, stKeywordThreshold := st.RecallThresholds(vectorThreshold, keywordThreshold)
 					kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, types.SearchParams{
 						QueryText:            query,
@@ -587,9 +700,15 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						ScopeTagIDs:          st.ScopeTagIDs,
 						DisableVectorMatch:   usedMode == SearchModeKeyword,
 						DisableKeywordsMatch: usedMode == SearchModeSemantic,
+						// Neighbor, parent and related chunks came back as
+						// extra rows that were never retrieved, tripling the
+						// rerank input; read_document(cN, context=k) serves
+						// surrounding text on demand.
+						SkipContextEnrichment: true,
 					})
 					if err != nil {
 						logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to search KB %s: %v", st.KnowledgeBaseID, err)
+						fail([]string{st.KnowledgeBaseID}, err)
 						return
 					}
 					collect(kbResults, usedMode)
@@ -599,184 +718,108 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 		}(modelKey, targets)
 	}
 	wg.Wait()
-	return allResults
+	return allResults, failures, calls, embedFallbacks
 }
 
-// rerankResults applies reranking to all search results (including FAQ entries)
-// using the configured rerank model, then filters by threshold and applies
-// composite scoring so MMR/sorting uses a single score scale.
+// rerankResults scores all search results (including FAQ entries) with the
+// configured rerank model through the shared rerank stage, keeping those
+// that pass the threshold with composite scores, best first.
 //
 // A failed rerank call degrades to the raw retrieval order. An empty result
-// after threshold filtering is kept empty: filterRerankRankResults already
-// preserves the top candidate down to agentRerankFallbackMinScore, so reaching
-// zero means even the best match is below that floor.
+// is kept empty: the shared stage already preserves the top candidate down to
+// its fallback floor, so reaching zero means even the best match is below it.
+//
+// In keyword mode the rerank model only orders the hits. The exact-term
+// match is the evidence, and rerank models score a bare identifier such as
+// ERR_4012 low against the chunk that defines it, so filtering rejected
+// every hit and the empty result sent the model back to keyword mode again.
 func (t *SearchKnowledgeTool) rerankResults(
 	ctx context.Context,
 	query string,
 	results []*searchResultWithMeta,
+	orderOnly bool,
 ) ([]*searchResultWithMeta, error) {
 	if len(results) == 0 || t.rerankModel == nil {
 		return results, nil
 	}
 
-	rankResults, err := t.rerankScores(ctx, query, results)
-	if err != nil {
-		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %v", err)
+	rows := make([]*types.SearchResult, len(results))
+	for i, r := range results {
+		rows[i] = r.SearchResult
+	}
+	threshold := t.rerankThreshold()
+	if orderOnly {
+		threshold = math.Inf(-1)
+	}
+	res := reranking.Rerank(ctx, t.rerankModel, query, rows, reranking.Options{
+		Threshold:        threshold,
+		FallbackMinScore: reranking.FallbackMinScore(t.searchTargets.HasRecallThresholdOverride()),
+		MaxCandidates:    reranking.DefaultMaxCandidates,
+	})
+	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %s",
+			res.Diagnostics.Error)
 		return results, nil
 	}
 
-	threshold := t.rerankThreshold()
-	reranked := t.applyModelRerankScores(
-		results,
-		rankResults,
-		threshold,
-		t.searchTargets.HasRecallThresholdOverride(),
-	)
-	logger.Infof(ctx, "[Tool][SearchKnowledge] Reranked %d/%d results above threshold %.2f",
-		len(reranked), len(results), threshold)
+	reranked := make([]*searchResultWithMeta, 0, len(res.Results))
+	for i, row := range res.Results {
+		withMeta := *results[res.Indices[i]]
+		withMeta.SearchResult = row
+		reranked = append(reranked, &withMeta)
+	}
+	logger.Infof(ctx, "[Tool][SearchKnowledge] Reranked %d/%d results above threshold %.2f (%s)",
+		len(reranked), len(results), threshold, res.Diagnostics.Outcome)
 	return reranked, nil
 }
 
-func (t *SearchKnowledgeTool) getFAQMetadata(
-	ctx context.Context,
-	chunkID string,
-	cache map[string]*types.FAQChunkMetadata,
-) (*types.FAQChunkMetadata, error) {
-	if chunkID == "" || t.chunkService == nil {
+// faqMetadataFromResult parses FAQ metadata carried on the search result.
+// Retrieval already loaded the chunk, including its metadata; re-reading it
+// per hit cost one query each and, being tenant scoped, failed for FAQ KBs
+// shared from another workspace, which then rendered as plain chunks without
+// their answers.
+func faqMetadataFromResult(result *types.SearchResult) (*types.FAQChunkMetadata, error) {
+	if result == nil || len(result.ChunkMetadata) == 0 {
 		return nil, nil
 	}
-	if meta, ok := cache[chunkID]; ok {
-		return meta, nil
-	}
-	chunk, err := t.chunkService.GetChunkByID(ctx, chunkID)
-	if err != nil {
-		cache[chunkID] = nil
-		return nil, err
-	}
-	if chunk == nil {
-		cache[chunkID] = nil
-		return nil, nil
-	}
-	meta, err := chunk.FAQMetadata()
-	if err != nil {
-		cache[chunkID] = nil
-		return nil, err
-	}
-	cache[chunkID] = meta
-	return meta, nil
-}
-
-// rerankScores scores the candidates with the configured rerank model and
-// returns the raw relevance scores, leaving threshold filtering and composite
-// scoring to the caller.
-func (t *SearchKnowledgeTool) rerankScores(
-	ctx context.Context,
-	query string,
-	results []*searchResultWithMeta,
-) ([]rerank.RankResult, error) {
-	passages := make([]string, len(results))
-	for i, result := range results {
-		passages[i] = t.rerankPassage(ctx, result.SearchResult)
-	}
-	rerankResp, err := t.rerankModel.Rerank(ctx, query, passages)
-	if err != nil {
-		return nil, fmt.Errorf("rerank call failed: %w", err)
-	}
-	return rerankResp, nil
-}
-
-// rerankPassage is the text the rerank model scores: the document title
-// followed by the enriched chunk. A chunk rarely restates what its document
-// is about, so without the title a passage from "Show HN: Echo - ... using
-// open-weight models" scored 0.002 against "Echo open-weight models reduce
-// cost" and 0.45 with it. FAQ entries carry their own question instead.
-func (t *SearchKnowledgeTool) rerankPassage(ctx context.Context, result *types.SearchResult) string {
-	passage := t.getEnrichedPassage(ctx, result)
-	title := strings.TrimSpace(result.KnowledgeTitle)
-	if title == "" || result.ChunkType == string(types.ChunkTypeFAQ) {
-		return passage
-	}
-	return title + "\n\n" + passage
+	return (&types.Chunk{Metadata: result.ChunkMetadata}).FAQMetadata()
 }
 
 func (t *SearchKnowledgeTool) rerankThreshold() float64 {
 	if t.config != nil && t.config.Conversation != nil && t.config.Conversation.RerankThreshold > 0 {
 		return t.config.Conversation.RerankThreshold
 	}
-	return 0.3
+	return reranking.DefaultThreshold
 }
 
-const agentRerankFallbackMinScore = 0.15
-
-func filterRerankRankResults(
-	rankResults []rerank.RankResult,
-	threshold float64,
-	preserveTop bool,
-) []rerank.RankResult {
-	if len(rankResults) == 0 {
-		return nil
-	}
-	filtered := make([]rerank.RankResult, 0, len(rankResults))
-	for _, r := range rankResults {
-		if r.RelevanceScore >= threshold {
-			filtered = append(filtered, r)
-		}
-	}
-	if len(filtered) == 0 {
-		top := rankResults[0]
-		for _, r := range rankResults[1:] {
-			if r.RelevanceScore > top.RelevanceScore {
-				top = r
-			}
-		}
-		if preserveTop || top.RelevanceScore >= agentRerankFallbackMinScore {
-			return []rerank.RankResult{top}
-		}
-	}
-	return filtered
-}
-
-func (t *SearchKnowledgeTool) applyModelRerankScores(
-	originals []*searchResultWithMeta,
-	rankResults []rerank.RankResult,
-	threshold float64,
-	preserveTop bool,
-) []*searchResultWithMeta {
-	filtered := filterRerankRankResults(rankResults, threshold, preserveTop)
-	out := make([]*searchResultWithMeta, 0, len(filtered))
-	for _, rr := range filtered {
-		if rr.Index < 0 || rr.Index >= len(originals) {
-			continue
-		}
-		newResult := *originals[rr.Index]
-		baseScore := newResult.Score
-		modelScore := rr.RelevanceScore
-		newResult.Score = t.compositeScore(&newResult, modelScore, baseScore)
-		out = append(out, &newResult)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Score > out[j].Score
-	})
-	return out
-}
-
-// deduplicateResults removes duplicate chunks, keeping the first occurrence.
-// Uses multiple keys (ID, parent chunk ID, knowledge+index) and a content
-// signature for near-duplicate detection. Input order is preserved.
+// deduplicateResults removes duplicate chunks. Uses the chunk ID, the
+// document position of text chunks and a content signature for near-duplicate
+// detection, and returns the survivors best score first.
+//
+// Rows are visited best score first (stable), so of two duplicates the
+// better-scored one survives rather than whichever search returned first.
+// Sibling chunks under one parent are distinct text and are kept: keying on
+// the parent dropped the child that held the answer whenever a sibling
+// arrived first. The document-position key applies to text chunks only;
+// image and FAQ chunks all carry chunk_index 0, so it collapsed every image
+// chunk of a document, and the document's first text chunk, into one row.
 func (t *SearchKnowledgeTool) deduplicateResults(results []*searchResultWithMeta) []*searchResultWithMeta {
 	seen := make(map[string]bool)
 	contentSig := make(map[string]bool)
 	uniqueResults := make([]*searchResultWithMeta, 0, len(results))
 
+	ordered := make([]*searchResultWithMeta, 0, len(results))
 	for _, r := range results {
-		if r == nil || r.SearchResult == nil {
-			continue
+		if r != nil && r.SearchResult != nil {
+			ordered = append(ordered, r)
 		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Score > ordered[j].Score })
+
+	for _, r := range ordered {
 		keys := []string{r.ID}
-		if r.ParentChunkID != "" {
-			keys = append(keys, "parent:"+r.ParentChunkID)
-		}
-		if r.KnowledgeID != "" {
+		isText := r.ChunkType == "" || r.ChunkType == string(types.ChunkTypeText)
+		if r.KnowledgeID != "" && isText {
 			keys = append(keys, fmt.Sprintf("kb:%s#%d", r.KnowledgeID, r.ChunkIndex))
 		}
 		dup := false
@@ -876,13 +919,12 @@ func (t *SearchKnowledgeTool) formatOutput(
 	writeKnowledgeMetadataHeader(&ob, results)
 
 	formattedResults := make([]map[string]interface{}, 0, len(results))
-	faqMetadataCache := make(map[string]*types.FAQChunkMetadata)
 	queries := []string{query}
 
 	for i, result := range results {
 		var faqMeta *types.FAQChunkMetadata
 		if result.KnowledgeBaseType == types.KnowledgeBaseTypeFAQ {
-			meta, err := t.getFAQMetadata(ctx, result.ID, faqMetadataCache)
+			meta, err := faqMetadataFromResult(result.SearchResult)
 			if err != nil {
 				logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load FAQ metadata for chunk %s: %v",
 					result.ID, err)
@@ -973,8 +1015,9 @@ func (t *SearchKnowledgeTool) formatOutput(
 	return &types.ToolResult{Success: true, Output: ob.String(), Data: data}
 }
 
-// getEnrichedPassage merges chunk content with image captions / OCR text so
-// the reranker and MMR see the same evidence the model will.
+// getEnrichedPassage merges the raw chunk content with image captions / OCR
+// text. The pattern filter matches against it, so unlike the rerank passage
+// it keeps markdown, URLs and other literal text a grep may target.
 func (t *SearchKnowledgeTool) getEnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 	if result.ImageInfo == "" {
 		return result.Content
@@ -1006,90 +1049,19 @@ func (t *SearchKnowledgeTool) getEnrichedPassage(ctx context.Context, result *ty
 	return combinedText + strings.Join(imageTexts, "\n")
 }
 
-// compositeScore calculates a composite score considering multiple factors
-func (t *SearchKnowledgeTool) compositeScore(
-	result *searchResultWithMeta,
-	modelScore, baseScore float64,
-) float64 {
-	// Source weight: web_search results get slightly lower weight
-	sourceWeight := 1.0
-	if strings.ToLower(result.KnowledgeSource) == "web_search" {
-		sourceWeight = 0.95
+// selectMMR reduces redundancy among results through the shared MMR stage.
+func selectMMR(ctx context.Context, results []*searchResultWithMeta, k int) []*searchResultWithMeta {
+	rows := make([]*types.SearchResult, len(results))
+	for i, r := range results {
+		rows[i] = r.SearchResult
 	}
-
-	// Position prior: slightly favor chunks earlier in the document
-	positionPrior := 1.0
-	if result.StartAt >= 0 && result.EndAt > result.StartAt {
-		positionRatio := 1.0 - float64(result.StartAt)/float64(result.EndAt+1)
-		positionPrior += t.clampFloat(positionRatio, -0.05, 0.05)
-	}
-
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
-	if composite < 0 {
-		composite = 0
-	}
-	if composite > 1 {
-		composite = 1
-	}
-	return composite
-}
-
-func (t *SearchKnowledgeTool) clampFloat(v, minV, maxV float64) float64 {
-	return searchutil.ClampFloat(v, minV, maxV)
-}
-
-// applyMMR applies Maximal Marginal Relevance to reduce redundancy.
-func (t *SearchKnowledgeTool) applyMMR(
-	ctx context.Context,
-	results []*searchResultWithMeta,
-	k int,
-	lambda float64,
-) []*searchResultWithMeta {
-	if k <= 0 || len(results) == 0 {
+	picks := reranking.SelectMMR(ctx, rows, k, reranking.DefaultMMRLambda)
+	if picks == nil {
 		return nil
 	}
-
-	selected := make([]*searchResultWithMeta, 0, k)
-	candidates := make([]*searchResultWithMeta, len(results))
-	copy(candidates, results)
-
-	tokenSets := make([]map[string]struct{}, len(candidates))
-	for i, r := range candidates {
-		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
-	}
-
-	// Incremental form: maxRedundancy[i] caches candidate i's maximum jaccard
-	// against everything selected so far, so each round only needs one
-	// comparison per remaining candidate. Selection output is identical to
-	// the naive form, including tie-breaking.
-	maxRedundancy := make([]float64, len(candidates))
-	for len(selected) < k && len(candidates) > 0 {
-		bestIdx := 0
-		bestScore := -1.0
-		for i, r := range candidates {
-			mmr := lambda*r.Score - (1.0-lambda)*maxRedundancy[i]
-			if mmr > bestScore {
-				bestScore = mmr
-				bestIdx = i
-			}
-		}
-		selected = append(selected, candidates[bestIdx])
-		chosenTokens := tokenSets[bestIdx]
-		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
-		maxRedundancy = append(maxRedundancy[:bestIdx], maxRedundancy[bestIdx+1:]...)
-		for i := range candidates {
-			maxRedundancy[i] = math.Max(maxRedundancy[i], t.jaccard(tokenSets[i], chosenTokens))
-		}
+	selected := make([]*searchResultWithMeta, len(picks))
+	for i, p := range picks {
+		selected[i] = results[p]
 	}
 	return selected
-}
-
-func (t *SearchKnowledgeTool) tokenizeSimple(text string) map[string]struct{} {
-	return searchutil.TokenizeSimple(text)
-}
-
-func (t *SearchKnowledgeTool) jaccard(a, b map[string]struct{}) float64 {
-	return searchutil.Jaccard(a, b)
 }

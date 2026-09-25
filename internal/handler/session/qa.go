@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/stream"
@@ -53,6 +54,7 @@ type qaRequestContext struct {
 	mcpServiceIDs         []string
 	skillNames            []string
 	summaryModelID        string
+	reasoningEffort       string
 	localBrowserEnabled   bool
 	webSearchEnabled      bool
 	mentionedItems        types.MentionedItems
@@ -107,6 +109,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		Query:               rc.query,
 		AssistantMessageID:  rc.assistantMessage.ID,
 		SummaryModelID:      rc.summaryModelID,
+		ReasoningEffort:     rc.reasoningEffort,
 		CustomAgent:         rc.customAgent,
 		SharedAgentReadOnly: rc.sharedAgentReadOnly,
 		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
@@ -150,6 +153,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		logger.Error(ctx, "Failed to parse request data", err)
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
+
+	level, validEffort := api.ParseReasoningEffort(request.ReasoningEffort)
+	if !validEffort {
+		return nil, nil, errors.NewBadRequestError(
+			fmt.Sprintf("reasoning_effort must be one of %v", api.AllReasoningEfforts),
+		)
+	}
+	request.ReasoningEffort = string(level)
 
 	// Validate syntax before session lookup or QA work, preserving the original
 	// query text. KnowledgeQA applies its XSS-pattern check later in the chat
@@ -431,6 +442,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
+		reasoningEffort:       request.ReasoningEffort,
 		webSearchEnabled:      request.WebSearchEnabled,
 		localBrowserEnabled:   request.LocalBrowserEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
@@ -802,7 +814,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 
 // SearchKnowledge godoc
 // @Summary      知识搜索
-// @Description  在知识库中搜索（不使用LLM总结）
+// @Description  在知识库中搜索（不使用LLM总结）。与产品内问答使用同一检索流程（召回、rerank、合并），外部检索首选；可覆盖召回参数与 rerank
 // @Tags         问答
 // @Accept       json
 // @Produce      json
@@ -875,6 +887,11 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	opts, err := knowledgeSearchOptions(&request)
+	if err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 
 	logger.Infof(
 		ctx,
@@ -886,18 +903,51 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
+	retrieval, err := h.sessionService.SearchKnowledge(
+		ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query, opts,
+	)
 	if err != nil {
+		// Typed AppErrors (e.g. an unknown rerank model_id) keep their code.
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
-	logger.Infof(ctx, "Knowledge search completed, found %d results", len(searchResults))
+	logger.Infof(ctx, "Knowledge search completed, found %d results", len(retrieval.Results))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    rewriter.CopyReferences(ctx, searchResults),
+		"data":    rewriter.CopyReferences(ctx, retrieval.Results),
+		"meta":    retrieval.Meta,
 	})
+}
+
+// knowledgeSearchOptions validates the retrieval overrides of a
+// knowledge-search request.
+func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSearchOptions, error) {
+	if request.MatchCount < 0 {
+		return nil, fmt.Errorf("match_count must not be negative")
+	}
+	if request.MatchCount > types.MaxRequestedResults {
+		return nil, fmt.Errorf("match_count must not exceed %d", types.MaxRequestedResults)
+	}
+	if request.DisableVectorMatch && request.DisableKeywordsMatch {
+		return nil, fmt.Errorf("disable_vector_match and disable_keywords_match cannot both be true")
+	}
+	if err := request.Rerank.Validate(); err != nil {
+		return nil, err
+	}
+	return &types.KnowledgeSearchOptions{
+		VectorThreshold:      request.VectorThreshold,
+		KeywordThreshold:     request.KeywordThreshold,
+		MatchCount:           request.MatchCount,
+		DisableKeywordsMatch: request.DisableKeywordsMatch,
+		DisableVectorMatch:   request.DisableVectorMatch,
+		Rerank:               request.Rerank,
+	}, nil
 }
 
 // KnowledgeQA godoc
@@ -1765,6 +1815,7 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		AgentID:             reqCtx.reqAgentID,
 		AgentEnabled:        agentEnabled,
 		ModelID:             reqCtx.summaryModelID,
+		ReasoningEffort:     reqCtx.reasoningEffort,
 		KnowledgeBaseIDs:    reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:        reqCtx.knowledgeIDs,
 		TagIDs:              reqCtx.tagIDs,

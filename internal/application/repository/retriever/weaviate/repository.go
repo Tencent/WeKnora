@@ -561,7 +561,13 @@ func (w *weaviateRepository) VectorRetrieve(ctx context.Context,
 
 	where := w.getBaseFilter(params)
 	limit := params.TopK
-	scoreThreshold := float32(params.Threshold)
+	// Weaviate's certainty is (1 + cos) / 2; callers pass a cosine
+	// similarity threshold, the scale every other engine uses. A zero
+	// threshold means no filtering, so it stays 0 rather than becoming 0.5.
+	var scoreThreshold float32
+	if params.Threshold > 0 {
+		scoreThreshold = float32((1 + params.Threshold) / 2)
+	}
 	fields := getEmbeddingFields()
 	result, err := w.client.GraphQL().Get().WithClassName(collectionName).
 		WithWhere(where).
@@ -928,7 +934,9 @@ func parseGraphQLResponse(items []interface{}, collectionName string, matchType 
 			if matchType == types.MatchTypeKeywords {
 				score = 1.0
 			} else {
-				score = s
+				// certainty = (1 + cos) / 2; report cosine similarity so
+				// scores compare with the other engines and thresholds.
+				score = 2*s - 1
 			}
 		}
 

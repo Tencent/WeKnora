@@ -43,6 +43,7 @@ type SystemHandler struct {
 	documentReader   interfaces.DocumentReader
 	tenantSvc        interfaces.TenantService
 	userSvc          interfaces.UserService
+	modelCatalogSvc  *service.ModelCatalogService
 	systemSettingSvc interfaces.SystemSettingService
 	apiKeySvc        interfaces.TenantAPIKeyService
 	// auditSvc is optional — when nil, emitAdminAudit no-ops so unit
@@ -75,6 +76,7 @@ func NewSystemHandler(cfg *config.Config,
 	tenantSvc interfaces.TenantService,
 	userSvc interfaces.UserService,
 	systemSettingSvc interfaces.SystemSettingService,
+	modelCatalogSvc *service.ModelCatalogService,
 	apiKeySvc interfaces.TenantAPIKeyService,
 	auditSvc interfaces.AuditLogService,
 	taskInspector interfaces.TaskInspector,
@@ -89,6 +91,7 @@ func NewSystemHandler(cfg *config.Config,
 		tenantSvc:          tenantSvc,
 		userSvc:            userSvc,
 		systemSettingSvc:   systemSettingSvc,
+		modelCatalogSvc:    modelCatalogSvc,
 		apiKeySvc:          apiKeySvc,
 		auditSvc:           auditSvc,
 		taskInspector:      taskInspector,

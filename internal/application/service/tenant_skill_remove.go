@@ -92,6 +92,10 @@ func (s *TenantSkillService) runRemove(
 		return nil
 	}
 
+	if sandbox.IsHostSkillTarget(configID) {
+		return s.runHostRemove(ctx, tenantID, configID, skillID, existing)
+	}
+
 	// The image directory is the skill name, and SkillDirFor is what refuses a
 	// name that would escape the skills root. Resolved before any sandbox work
 	// so a bad name costs nothing; the guard at the rm itself is what keeps

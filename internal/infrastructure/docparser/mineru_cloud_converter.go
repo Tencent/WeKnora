@@ -9,8 +9,8 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -350,8 +350,6 @@ func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractRe
 
 // --- ZIP handling ---
 
-var imgRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
-
 func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 	if err := utils.ValidateURLForSSRF(zipURL); err != nil {
 		return "", nil, fmt.Errorf("zip URL blocked by SSRF check: %v", err)
@@ -370,7 +368,12 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("read zip body: %w", err)
 	}
+	return extractMarkdownZip(zipData, "MinerUCloud")
+}
 
+// extractMarkdownZip reads the shallowest .md file of a MinerU result package
+// and the images it references, via markdown or inline HTML <img> syntax.
+func extractMarkdownZip(zipData []byte, logLabel string) (string, []types.ImageRef, error) {
 	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return "", nil, fmt.Errorf("open zip: %w", err)
@@ -406,8 +409,7 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 	// Extract referenced images
 	var imageRefs []types.ImageRef
 	seen := map[string]bool{}
-	for _, match := range imgRefPattern.FindAllStringSubmatch(mdText, -1) {
-		imgPath := match[1]
+	for _, imgPath := range extractImageRefsFromContent(mdText) {
 		if strings.HasPrefix(imgPath, "http://") || strings.HasPrefix(imgPath, "https://") || strings.HasPrefix(imgPath, "data:") {
 			continue
 		}
@@ -418,13 +420,13 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 
 		resolved := resolveInZip(imgPath, mdDir, entries)
 		if resolved == nil {
-			logger.Errorf(context.Background(), "[MinerUCloud] image not found in zip: %s", imgPath)
+			logger.Errorf(context.Background(), "[%s] image not found in zip: %s", logLabel, imgPath)
 			continue
 		}
 
 		imgData, err := readZipEntryBytes(resolved)
 		if err != nil {
-			logger.Errorf(context.Background(), "[MinerUCloud] failed to read zip image %s: %v", imgPath, err)
+			logger.Errorf(context.Background(), "[%s] failed to read zip image %s: %v", logLabel, imgPath, err)
 			continue
 		}
 
@@ -449,14 +451,19 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 }
 
 func resolveInZip(imgPath, mdDir string, entries map[string]*zip.File) *zip.File {
-	normalized := strings.ReplaceAll(imgPath, "\\", "/")
-	if f, ok := entries[normalized]; ok {
-		return f
+	candidates := []string{strings.ReplaceAll(imgPath, "\\", "/")}
+	if decoded, err := url.PathUnescape(candidates[0]); err == nil && decoded != candidates[0] {
+		candidates = append(candidates, decoded)
 	}
-	if mdDir != "" && mdDir != "." {
-		joined := mdDir + "/" + normalized
-		if f, ok := entries[joined]; ok {
+	for _, c := range candidates {
+		c = strings.TrimPrefix(c, "./")
+		if f, ok := entries[c]; ok {
 			return f
+		}
+		if mdDir != "" && mdDir != "." {
+			if f, ok := entries[mdDir+"/"+c]; ok {
+				return f
+			}
 		}
 	}
 	return nil

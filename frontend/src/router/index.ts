@@ -7,18 +7,10 @@ import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
+import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
-const AUTO_SETUP_FAILED_KEY = 'weknora_auto_setup_failed'
-
-function shouldTryAutoSetup() {
-  return localStorage.getItem(AUTO_SETUP_FAILED_KEY) !== 'true'
-}
-
-function markAutoSetupFailed() {
-  localStorage.setItem(AUTO_SETUP_FAILED_KEY, 'true')
-}
 
 function isLiteEdition(authStore: ReturnType<typeof useAuthStore>) {
   return authStore.isLiteMode || localStorage.getItem('weknora_lite_mode') === 'true'
@@ -140,6 +132,12 @@ const router = createRouter({
           meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'settings.sandbox' }
         },
         {
+          path: "toolbox/:section?",
+          name: "toolbox",
+          component: () => import("../views/toolbox/Toolbox.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
           path: "agents",
           name: "agentList",
           component: () => import("../views/agent/AgentList.vue"),
@@ -227,19 +225,28 @@ const router = createRouter({
 
 // 持久化 auto-setup / login 返回的认证信息到 store
 function persistLoginResponse(authStore: ReturnType<typeof useAuthStore>, response: any) {
-  if (response.user && response.tenant && response.token) {
-    authStore.setUser(userInfoFromApi(response.user, response.tenant.id))
+  const activeTenant = response.active_tenant || response.tenant
+  if (response.user && response.token) {
+    const homeTenantId = response.user.tenant_id ?? activeTenant?.id ?? ''
+    authStore.setUser(userInfoFromApi(response.user, homeTenantId))
     authStore.setToken(response.token)
     if (response.refresh_token) {
       authStore.setRefreshToken(response.refresh_token)
     }
-    authStore.setTenant({
-      id: String(response.tenant.id) || '',
-      name: response.tenant.name || '',
-      owner_id: response.user.id || '',
-      created_at: response.tenant.created_at || new Date().toISOString(),
-      updated_at: response.tenant.updated_at || new Date().toISOString()
-    })
+    if (activeTenant) {
+      authStore.setTenant({
+        id: String(activeTenant.id) || '',
+        name: activeTenant.name || '',
+        owner_id: response.user.id || '',
+        created_at: activeTenant.created_at || new Date().toISOString(),
+        updated_at: activeTenant.updated_at || new Date().toISOString()
+      })
+    } else {
+      authStore.setTenant(null)
+    }
+    if (Array.isArray(response.memberships)) {
+      authStore.setMemberships(response.memberships)
+    }
   }
 }
 
@@ -322,6 +329,13 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
+  // Preserve bookmarks for tools that have moved out of Settings.
+  if (to.path === '/platform/settings' && isToolboxSection(to.query.section)) {
+    next({ ...toolboxLocation(to.query.section,
+      typeof to.query.sandboxId === 'string' ? to.query.sandboxId : undefined), replace: true })
+    return
+  }
+
   // Lite：硬刷新后若落在默认首页，恢复本次会话中最后访问的 /platform 子路径
   if (!liteDeepLinkRestoreDone) {
     liteDeepLinkRestoreDone = true
@@ -378,8 +392,9 @@ router.beforeEach(async (to, from, next) => {
         return
       }
 
-      if (!autoSetupAttempted && shouldTryAutoSetup()) {
+      if (!autoSetupAttempted) {
         autoSetupAttempted = true
+        localStorage.removeItem('weknora_auto_setup_failed')
         try {
           const response = await autoSetup()
           if (response.success) {
@@ -387,11 +402,9 @@ router.beforeEach(async (to, from, next) => {
             authStore.setLiteMode(true)
             next(to.fullPath)
             return
-          } else {
-            markAutoSetupFailed()
           }
         } catch {
-          markAutoSetupFailed()
+          // Auto-setup may be unavailable outside the native Lite shell.
         }
       }
       next('/login')

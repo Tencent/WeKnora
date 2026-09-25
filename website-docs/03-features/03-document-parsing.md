@@ -115,8 +115,8 @@ sequenceDiagram
 
 | 引擎 | 文件类型 | 说明 |
 | --- | --- | --- |
-| `builtin` | `docx`(Docx2Parser)、`doc`(DocParser)、`pdf`(PDFParser)、`md`/`markdown`(MarkdownParser)、`xlsx`/`xls`(ExcelParser)、`epub`(EPUBParser)、`html`/`htm`(HTMLParser)、`mhtml`(MHTMLParser)、`jpg`/`jpeg`/`png`/`gif`/`bmp`/`tiff`/`webp`(ImageParser) | 内置解析引擎 |
-| `markitdown` | `md`、`markdown`、`pdf`、`docx`、`doc`、`pptx`、`ppt`、`xlsx`、`xls`、`csv`（全部 MarkitdownParser） | 微软 MarkItDown 库。**PPT/PPTX 只有该引擎支持** |
+| `builtin` | `docx`(Docx2Parser)、`doc`(DocParser)、`pdf`(PDFParser)、`md`/`markdown`(MarkdownParser)、`xlsx`/`xls`(ExcelParser)、`pptx`/`ppt`(MarkitdownParser)、`epub`(EPUBParser)、`html`/`htm`(HTMLParser)、`mhtml`(MHTMLParser)、`xmind`(XMindParser)、`jpg`/`jpeg`/`png`/`gif`/`bmp`/`tiff`/`webp`(ImageParser) | 内置解析引擎；PPT/PPTX 复用 MarkItDown 解析器 |
+| `markitdown` | `md`、`markdown`、`pdf`、`docx`、`doc`、`pptx`、`ppt`、`xlsx`、`xls`、`csv`（全部 MarkitdownParser） | 微软 MarkItDown 库 |
 | `opendataloader` | `pdf`(OpenDataLoaderParser) | OpenDataLoader PDF 版面分析，需 Java 11+；`check_available` 探测 java、Python 包及 hybrid 服务健康 |
 
 调度规则（`get_parser_class`）：请求指定的引擎若不支持该文件类型，**自动回退 `builtin` 引擎**；builtin 也没有则抛 `ValueError("Unsupported file type")`。
@@ -178,7 +178,7 @@ sequenceDiagram
 2. `_parse_with_antiword`：`antiword` 命令行纯文本提取（通过 `SandboxExecutor` 执行，强制注入代理环境变量，默认 `http://128.0.0.1:1` 的"黑洞代理"阻断子进程意外外联）；
 3. `_parse_with_textract`：**已禁用**（textract 存在 SSRF 漏洞，代码保留但注释掉）。
 
-**依赖**：LibreOffice（soffice）、antiword（镜像内已装）；查找路径支持 `LIBREOFFICE_PATH`/`ANTIWORD_PATH` 环境变量。**局限**：无 LibreOffice 时退化为 antiword 纯文本（无图片、无表格结构）。
+**依赖**：LibreOffice（soffice）、antiword（镜像内已装）；查找路径支持 `LIBREOFFICE_PATH`/`ANTIWORD_PATH` 环境变量。外部命令默认 60 秒超时；超时后会终止整个进程组（包括 soffice 派生的子进程），避免残留进程占住 docreader worker。**局限**：无 LibreOffice 时退化为 antiword 纯文本（无图片、无表格结构）。
 
 #### docx2_parser.py 与 docx_parser.py 的区别 {#_3-3-docx2-parser-py-与-docx-parser-py-的区别}
 
@@ -223,7 +223,7 @@ PPT 系列**没有独立解析器**，由 `MarkitdownParser` 处理，这两个�
 `PipelineParser.create(MarkdownTableFormatter, MarkdownImageBase64)`：
 
 - **`MarkdownTableFormatter`**：编码自动检测（`endecode.decode_bytes`：utf-8 → gb18030 → gb2312 → gbk → big5 → ascii → latin-1）后规范化表格——统一 `| cell |` 间距与对齐标记，`normalize_spurious_table_prefixes` 修 MarkItDown 产出的假空行/分隔行前缀，并给无表头的 Word 表格补 `| --- |` GFM 分隔行。
-- **`MarkdownImageBase64`**：把 `![alt](data:image/xxx;base64,...)` 内嵌图抽出为 `images/<uuid>.<ext>` 引用 + `Document.images` 数据（MIME 子类型支持 `x-emf` 这类带连字符的格式）。
+- **`MarkdownImageBase64`**：把 `![alt](data:image/xxx;base64,...)` 内嵌图抽出为 `images/<uuid>.<ext>` 引用 + `Document.images` 数据（MIME 子类型支持 `x-emf` 这类带连字符的格式）。无法解码的图片（如 base64 后紧跟中文图片标题）会被跳过并记录日志，不会导致整篇文档解析失败。
 
 该解析器也是 MarkitdownParser / WebParser 流水线的公共后处理阶段。
 
@@ -248,6 +248,10 @@ PPT 系列**没有独立解析器**，由 `MarkitdownParser` 处理，这两个�
 - `HTMLToMarkdownParser` 先用 `BeautifulSoup(content, "lxml")` 解码原始字节——先看 BOM 与 HTML 内的 charset 声明，再交给统一的 Markdown 转换；
 - HTML → Markdown 复用 `MHTMLParser.html_to_markdown()`，但传入 `extract_images=False`（本地 HTML 文件没有 MIME 附件可抽）、`strip_internal_links=False`（保留站内链接）、`fallback_to_raw_html=False`（转换不出内容时返回空而不是塞一整块 ```` ```html ````）；
 - 正文中通过 `<img src="http://...">` 引用的远程图片由 Go 侧补齐：`internal/infrastructure/docparser/image_resolver.go` 会带 SSRF 校验下载这些远程图片并转存到对象存储，再重写引用，使其与本地上传的图片走同一套 OCR / caption 流程。
+
+#### xmind_parser.py — XMindParser（.xmind 思维导图）
+
+读取 XMind 压缩包中的 `content.json`（新版）或 `content.xml`（旧版），单个内容文件上限 32 MiB。每个画布输出为一个 `# 画布标题` 小节，主题层级转为缩进的 Markdown 列表，纯文本备注以引用块附在对应主题下，多个画布之间用 `---` 分隔。不提取图片；没有可渲染主题时解析失败。
 
 #### epub_parser.py — EPUBParser（.epub 电子书） {#_3-11-epub-parser-py-—-epubparser-epub-电子书}
 
@@ -286,6 +290,8 @@ flowchart TD
     H -- "epub" --> EP["EPUBParser (ebooklib → ZIP 回退)"]
     H -- "html / htm" --> HT["HTMLParser (BeautifulSoup + markdownify)"]
     H -- "mhtml" --> MH["MHTMLParser"]
+    H -- "pptx / ppt" --> PT["MarkitdownParser (LibreOffice 归一化 + 媒体补图)"]
+    H -- "xmind" --> XM["XMindParser (主题大纲 + 备注)"]
     H -- "jpg/png/gif/bmp/tiff/webp" --> IM["ImageParser (整图内联, 不做 OCR)"]
     H -- "其他" --> ERR["ValueError: Unsupported file type"]
 ```
@@ -301,7 +307,9 @@ docreader 侧的图片契约非常简单：每个解析器把图片以 `Document
 - unary `Read`：`_resolve_images()` 把全部图片 base64 解码为 `ImageRef.image_data` **内联字节**一次性返回（`image_dir_path` 恒为空——历史上"写共享卷目录"的模式已废弃，注释明确 *"The Go App is solely responsible for persisting images to the configured storage backend (local/minio/cos/tos)"*）；
 - streaming `ReadStream`：`_iter_image_refs()` 逐张 yield，边发边 `pop` 释放内存。
 
-Go 侧接手后（`internal/infrastructure/docparser/image_resolver.go`）：将 inline bytes 上传对象存储、把 markdown 中的 `images/...` 引用重写为存储 URL；随后 `internal/application/service/image_multimodal.go` 依据 metadata 的 `image_source_type` 决策——`scanned_pdf` 的整页图走 OCR（带专用 `ocr_prompt`），普通插图走 VLM caption。该服务有两条管线（处理轨迹里 `pipeline` 分别记为 `caption_ocr` / `observation_driven`）：历史管线（KB 未开启 `image_attrs_enabled`）对每张图各发一次描述、各发一次 OCR；属性观察管线（开启后）第一轮先用同一张图的「属性观察＋描述」结果确定属性（`contain.text` / `contain.data_visual`），再由代码纯函数 `DecideOCR` 按 KB 的 `image_actions` 决定该图是否值得再跑 OCR——`contain.text ∈ {sparse, none}` 且已确认观察、且 `data_visual == false` 的图默认只留描述、不花 OCR。两条管线的**图片理解都在 Go 侧**。**docreader 内没有任何 VLM 调用**；`models/read_config.py` 中的 `vlm_config`/`storage_config` 字段只是为了老构造函数签名兼容而保留的空壳（"Legacy config kept for backward compatibility"）。
+Go 侧接手后（`internal/infrastructure/docparser/image_resolver.go`）：将 inline bytes 上传对象存储、把 markdown 中的 `images/...` 引用重写为存储 URL；随后 `internal/application/service/image_multimodal.go` 依据 metadata 的 `image_source_type` 决策——`scanned_pdf` 的整页图走 OCR（带专用 `ocr_prompt`），普通插图走 VLM caption。该服务有两条管线（处理轨迹里 `pipeline` 分别记为 `caption_ocr` / `observation_driven`）：历史管线（KB 未开启 `image_attrs_enabled`）对每张图各发一次描述、各发一次 OCR；属性观察管线（开启后）第一轮先用同一张图的「属性观察＋描述」结果确定属性（`contain.text` / `contain.data_visual`），再由代码纯函数 `DecideOCR` 按 KB 的 `image_actions` 决定该图是否值得再跑 OCR——`contain.text ∈ {sparse, none}` 且已确认观察、且 `data_visual == false` 的图默认只留描述、不花 OCR。两条管线的**图片理解都在 Go 侧**。知识库配置的图片解析自定义指令（`vlm_config.custom_instructions`）只追加到描述提示词（属性观察管线里即「属性观察＋描述」提示词），不进入 OCR 提示词，以免干扰 OCR 的输出约定（如无文字图片应回复 `No text content`）。
+
+各解析引擎输出中的内联 HTML `<table>`（常见于 MinerU、PaddleOCR-VL 与 VLM OCR）会在分块前统一转换为 Markdown 表格；含合并单元格等无法转换的表格保留 HTML，但每行单独成行，保证分块器能在行边界切分。**docreader 内没有任何 VLM 调用**；`models/read_config.py` 中的 `vlm_config`/`storage_config` 字段只是为了老构造函数签名兼容而保留的空壳（"Legacy config kept for backward compatibility"）。
 
 ---
 
@@ -358,6 +366,18 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `DOCREADER_PDF_RENDER_VECTOR_FIGURES` | true | 将矢量图表区域渲染为 JPEG |
 | `DOCREADER_PDF_WORD_GAP_WIDTH_RATIO` / `_MARGIN_COL_WIDTH_RATIO` / `_MIN_HEADING_LINE_CHARS` 等 | 0.4 / 0.12 / 8 | 版面重建微调参数（详见源码常量区） |
 
+#### Go 侧解析超时
+
+以下环境变量作用于 Go 主服务，而不是 docreader 容器：
+
+| 环境变量 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` | Go duration | `2h` | 单个文档处理任务的总超时 |
+| `WEKNORA_DOCREADER_CALL_TIMEOUT` | Go duration | `30m` | 单次 docreader 调用超时，须小于文档处理超时 |
+| `WEKNORA_PADDLEOCR_VL_TIMEOUT` | Go duration | `1000s` | 自建 PaddleOCR-VL 引擎的 HTTP 请求超时；空值、无效值或非正数使用默认值 |
+
+处理大文件时从内到外逐级留出余量，例如 PaddleOCR-VL `90m`、docreader `100m`、文档处理 `2h`。
+
 #### 安全与其他 {#_6-3-安全与其他}
 
 | 环境变量 | 说明 |
@@ -365,6 +385,7 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `GRPC_AUTH_TOKEN` | 设置后启用 token 认证（metadata `authorization: Bearer <token>`） |
 | `GRPC_TLS_ENABLED` / `GRPC_TLS_CERT` / `GRPC_TLS_KEY` / `GRPC_TLS_CA` / `GRPC_MTLS_REQUIRE_CLIENT_CERT` | TLS / mTLS，配置无效时拒绝启动 |
 | `SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA` | SSRF 白名单（逗号分隔，支持 `*.suffix` 与 CIDR） |
+| `SSRF_DNS_WHITELIST_ONLY` | 设为 `true` 时只允许访问白名单中的主机名，不在白名单内的主机在 DNS 解析前即被拒绝；与 Go 主服务使用同一开关 |
 | `LOG_LEVEL` | 日志级别（默认 INFO；日志格式含 request_id 与耗时，见 `utils/request.py`） |
 | `LIBREOFFICE_PATH` / `ANTIWORD_PATH` | soffice / antiword 可执行文件路径覆盖 |
 
@@ -393,7 +414,7 @@ Python 依赖（`pyproject.toml` + `uv.lock` 锁定）：`grpcio`、`pypdfium2`�
 - **单实例纵向调优**：CPU 富余时调大 `DOCREADER_PDF_RENDER_PARALLELISM`（单文档渲染提速近线性）与 `DOCREADER_GRPC_MAX_WORKERS`（非 PDF 格式可真并发）；内存受限时优先保证 Go 侧走 `ReadStream`（默认行为）。
 - **大文件**：`MAX_FILE_SIZE_MB` 需 Go 客户端与 docreader **两端同步调整**；扫描件页图大小受 `DOCREADER_PDF_RENDER_MAX_EDGE`/`_DPI`/`_JPEG_QUALITY` 三个旋钮控制。
 - **JVM/浏览器类负载隔离**：OpenDataLoader 每次解析拉起 JVM、WebParser 每次拉起 WebKit，均为重进程；`DOCREADER_ODL_MAX_WORKERS`、`DOCREADER_MARKITDOWN_MAX_WORKERS` 默认 1 是保守值，资源充足可放宽或设 ≤0 关闭限流。ODL hybrid 服务（`Dockerfile.odl-hybrid`）应独立部署并配置 `DOCREADER_ODL_HYBRID_URL`。
-- **超时保护**：Go 侧务必配置 `docreader_call_timeout`（`internal/config/config.go`），否则挂死的 docreader 会长时间占用入库 worker。
+- **超时保护**：Go 侧的 `WEKNORA_DOCREADER_CALL_TIMEOUT`（配置文件 `docreader_call_timeout`，默认 30 分钟）限制单次 docreader 调用，防止挂死的 docreader 长时间占用入库 worker；大文件解析需要更久时，同步调大文档处理超时（见 [Go 侧解析超时](#go-侧解析超时)）。
 - **安全基线**：生产环境开启 `GRPC_AUTH_TOKEN`（≥16 字节）+ `GRPC_TLS_ENABLED`；不设置时服务会以明文 + 无鉴权模式启动并打印 WARNING。
 
 ---
@@ -421,7 +442,7 @@ docker build -f docker/Dockerfile.app --build-arg WITH_ANYDOC=0 -t weknora-app .
 # 或在 .env 里设 WITH_ANYDOC=0 再 docker compose build
 ```
 
-显式解析规则优先。未配置规则时，已链接 anydoc 且它支持的复杂格式默认优先走 anydoc；简单格式继续用 Go SimpleFormatReader。未链接 anydoc 的 PPT/PPTX 默认回退 markitdown。需要固定引擎时，可在知识库解析设置中显式指定，而不依赖部署的编译选项。
+显式解析规则优先。未配置规则时，已链接 anydoc 且它支持的复杂格式默认优先走 anydoc；PDF 除外，默认仍走 builtin（anydoc 只抽取 PDF 文字层，会丢失图片、表格和版面，而 builtin 能逐页识别扫描页并交给 OCR）。简单格式继续用 Go SimpleFormatReader。未链接 anydoc 的 PPT/PPTX 默认回退 markitdown。需要固定引擎时，可在知识库解析设置中显式指定（包括把 `pdf` 指定给 anydoc），而不依赖部署的编译选项。
 
 #### 能力边界 {#_8-2-能力边界}
 
@@ -439,12 +460,42 @@ docker build -f docker/Dockerfile.app --build-arg WITH_ANYDOC=0 -t weknora-app .
 | `internal/infrastructure/docparser/engines.go` | 引擎注册（元数据 + Reader 工厂） |
 | `third_party/anydoc-go/` | vendored 的上游 Go 绑定与 C ABI shim（来源与本地改动见该目录 README） |
 
+### MinerU 自建引擎（Go 进程直连，不经 docreader） {#mineru-self-hosted}
+
+`mineru` 引擎由 Go App 直接调用自建的 MinerU 服务（`internal/infrastructure/docparser/mineru_converter.go`）。MinerU 4.0 删除了旧的 `/file_parse` 接口，改为 V1 API，因此 WeKnora 在每次解析前先请求 `GET {mineru_endpoint}/v1/health`，按结果选择协议：
+
+| 探测结果 | 协议 | 流程 |
+| --- | --- | --- |
+| `200` 且 `status=ok` | V1（MinerU ≥ 4.0，`mineru_v1_client.go`） | `POST /v1/uploads` → 按返回的 `upload_url` 上传字节 → `POST /v1/uploads/{id}/complete` → `POST /v1/parse/jobs`（只请求 `zip` 产物）→ 轮询 `GET /v1/parse/jobs/{id}` → `GET /v1/files/{id}/content` 下载 zip，取其中的 `markdown.md` 与 `images/` |
+| `404` / `405` | 旧版（MinerU ≤ 3.x） | `POST /file_parse`，同步返回 Markdown 与 base64 图片 |
+| `503` 带错误结构 | V1，但服务未就绪 | 直接报错（常见于模型预加载失败），不回退旧协议 |
+
+升级 MinerU 不需要改 WeKnora 的配置。两套协议的参数对应关系：
+
+| 设置项（`ParserEngineConfig`） | MinerU ≥ 4.0 | MinerU ≤ 3.x |
+| --- | --- | --- |
+| `mineru_endpoint` | V1 服务地址（如 `http://mineru:8000`） | 同左 |
+| `mineru_server_api_key` | 服务以 `--api-key` 启动时作为 `Authorization: Bearer` 发送 | 不使用 |
+| `mineru_tier` | `tier`：`flash` / `basic` / `standard` / `advanced`；留空由服务端选默认档位（优先 `standard`） | 不使用 |
+| `mineru_parse_method` | `ocr_mode`（`auto` / `txt` / `ocr`） | `parse_method` |
+| `mineru_model`、`mineru_vlm_server_url`、`mineru_enable_formula`、`mineru_enable_table`、`mineru_language` | 忽略（4.0 已删除这些参数；VLM 地址改在 MinerU 的 `config.yaml` 里配置） | 原样发送 |
+
+V1 流程的几个细节：
+
+- 上传时附带 `sha256sum`，服务端已有相同文件时直接复用，不再传字节。
+- 只有 `upload_url` 与 `mineru_endpoint` 同源（scheme、host、端口都相同）时才附带 API Key；跨源地址（如官方 API 下发的预签名对象存储 URL）不带 Key，并照常经过 SSRF 校验。
+- 轮询从 2 秒开始指数退避，最长 30 秒一次；总时长与旧版一样是 1000 秒。超时或调用方取消时，会发 `DELETE /v1/parse/jobs/{id}` 取消服务端任务。
+- MinerU V1 服务的上传、任务状态都存在进程内存里，服务重启后正在轮询的任务会返回 404，本次解析直接失败。
+- 「测试连接」在 V1 服务上额外请求一次需要鉴权的 `GET /v1/parse/jobs?limit=1`，用来发现 API Key 缺失或错误（`/v1/health` 本身不校验 Key）。
+
+`mineru_cloud`（mineru.net）目前仍走 `/api/v4/file-urls/batch` 批量接口，不受 4.0 自建服务变化影响。
+
 ---
 
 ### 附：关键事实速查
 
 - **对外接口**：仅 gRPC，端口 `50051`（`DOCREADER_GRPC_PORT`/`PORT`），RPC：`Read` / `ReadStream` / `ListEngines` + 标准 Health 服务。
-- **docreader 直接支持的文件格式全集**：`pdf`、`docx`、`doc`、`xlsx`、`xls`（markitdown 引擎额外含 `pptx`、`ppt`、`csv`）、`md`/`markdown`、`epub`、`html`/`htm`、`mhtml`、图片 `jpg/jpeg/png/gif/bmp/tiff/webp`，以及 URL 网页抓取；`txt`/`csv`/`json`/图片/音频在主链路中由 Go 侧 `SimpleFormatReader` 原生处理，不经过本服务。
+- **docreader 直接支持的文件格式全集**：`pdf`、`docx`、`doc`、`xlsx`、`xls`、`pptx`、`ppt`、`xmind`（markitdown 引擎额外含 `csv`）、`md`/`markdown`、`epub`、`html`/`htm`、`mhtml`、图片 `jpg/jpeg/png/gif/bmp/tiff/webp`，以及 URL 网页抓取；`txt`/`csv`/`json`/图片/音频在主链路中由 Go 侧 `SimpleFormatReader` 原生处理，不经过本服务。
 - **OCR / VLM**：docreader 内部零 OCR、零 VLM；扫描页与插图作为图片回传，OCR（PaddleOCR-VL）与 caption 由 Go App 完成。
 - **图片回传**：inline bytes（`ImageRef.image_data`），持久化到 local/minio/cos/tos 由 Go 负责。
 - **分块**：生产路径在 Go 侧 chunker；Python `TextSplitter`（512/80）仅为 sidecar 保留并与 Go 对齐。

@@ -83,7 +83,7 @@ import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
@@ -93,6 +93,13 @@ const router = useRouter();
 const route = useRoute();
 const usemenuStore = useMenuStore();
 const settingsStore = useSettingsStore();
+onBeforeRouteLeave((to) => {
+    // The first send carries the draft into its new session; abandoning the
+    // composer must not make this a default for the next conversation.
+    if (!to.path.startsWith('/platform/chat/') || !usemenuStore.isFirstSession) {
+        settingsStore.reasoningEffortOverride = '';
+    }
+});
 const uiStore = useUIStore();
 const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const { t } = useI18n();

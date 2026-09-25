@@ -566,9 +566,11 @@ const isFirstEnter = ref(true);
 const loading = ref(false);
 const sessionActivity = useSessionActivityStore();
 const activitySessionId = ref('');
-watch([activitySessionId, isReplying, isStreaming, isImRecovering, currentAssistantMessageId], () => {
+watch([activitySessionId, isReplying, isImRecovering, currentAssistantMessageId], () => {
     if (props.embeddedMode || !activitySessionId.value) return;
-    sessionActivity.update(activitySessionId.value, isReplying.value || isStreaming.value || isImRecovering.value, currentAssistantMessageId.value);
+    // SSE may stay connected after a stop/complete event. The sidebar tracks
+    // generation, not the transport, just like the composer's Stop button.
+    sessionActivity.update(activitySessionId.value, isReplying.value || isImRecovering.value, currentAssistantMessageId.value);
 }, { flush: 'sync' });
 const historyLoading = ref(true);
 const historyLoadingMore = ref(false);
@@ -948,7 +950,7 @@ const {
         const lastMessage = findLastMessage(
             (message) => message.role === 'assistant' && !message.is_completed
         );
-        const locallyRunning = isReplying.value || isStreaming.value || isImRecovering.value;
+        const locallyRunning = isReplying.value || isImRecovering.value;
         // History reload can finish after sendMsg already marked this session
         // running. Do not clear that marker just because the snapshot's last
         // message still looks completed. A scanned incomplete assistant counts: a
@@ -1367,6 +1369,7 @@ const attachSteerFollowUp = async (completedAssistantId) => {
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
     if (composerLocked.value) return
+    const reasoningEffort = props.embeddedMode ? undefined : (useSettingsStoreInstance.reasoningEffortOverride || undefined);
     stopStream();
     prepareForNewOutgoingMessage();
     activitySessionId.value = String(session_id.value);
@@ -1536,6 +1539,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         web_search_enabled: webSearchEnabled,
         local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled && !useBrowserConnectionStore().knownOffline,
         summary_model_id: modelId,
+        reasoning_effort: reasoningEffort,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,

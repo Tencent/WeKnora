@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -252,5 +254,114 @@ func TestFormatOutputRowsCarryHandlesAndSnippets(t *testing.T) {
 	}
 	if strings.Contains(res.Output, "already_seen") || strings.Contains(res.Output, "retrieval_statistics") {
 		t.Fatalf("legacy annotations must be gone: %s", res.Output)
+	}
+}
+
+// A shared FAQ KB belongs to another workspace, so re-reading the chunk with
+// the caller's tenant fails. The answers must come from the metadata the
+// retrieval result already carries; the tool has no chunk service here.
+func TestFormatOutputRendersFAQFromResultMetadata(t *testing.T) {
+	chunk := &types.Chunk{}
+	if err := chunk.SetFAQMetadata(&types.FAQChunkMetadata{
+		StandardQuestion: "How do refunds work?",
+		Answers:          []string{"Refunds are issued within 7 days."},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tool := &SearchKnowledgeTool{}
+	results := []*searchResultWithMeta{
+		{
+			SearchResult: &types.SearchResult{
+				ID: "faq-1", KnowledgeID: "faq-doc", Content: "How do refunds work?", Score: 0.9,
+				ChunkMetadata: chunk.Metadata,
+			},
+			KnowledgeBaseID: "kb-faq", KnowledgeBaseType: types.KnowledgeBaseTypeFAQ,
+		},
+	}
+	res := tool.formatOutput(context.Background(), results, []string{"kb-faq"}, "refunds", SearchModeHybrid)
+	rows, ok := res.Data["results"].([]map[string]interface{})
+	if !ok || len(rows) != 1 {
+		t.Fatalf("results rows = %#v", res.Data["results"])
+	}
+	answers, _ := rows[0]["faq_answers"].([]string)
+	if len(answers) != 1 || answers[0] != "Refunds are issued within 7 days." {
+		t.Fatalf("faq answers = %#v", rows[0]["faq_answers"])
+	}
+	if !strings.Contains(res.Output, "<faq ") {
+		t.Fatalf("FAQ hit should render as <faq>: %q", res.Output)
+	}
+}
+
+// The model reads a view rebuilt from Data, which registry truncation does not
+// reach, so the tool fits its own rows to the output budget, keeps the best
+// ones, and says how many it left out.
+func TestFormatWithinBudgetDropsLowestRankedRows(t *testing.T) {
+	tool := &SearchKnowledgeTool{}
+	results := make([]*searchResultWithMeta, 10)
+	for i := range results {
+		results[i] = &searchResultWithMeta{
+			SearchResult: &types.SearchResult{
+				ID: fmt.Sprintf("c%d", i), KnowledgeID: "doc", ChunkIndex: i,
+				Content: strings.Repeat("内容", 500), Score: 1 - float64(i)/10,
+			},
+			KnowledgeBaseID: "kb-1",
+		}
+	}
+	ctx := WithOutputBudget(context.Background(), 5000)
+
+	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "q", SearchModeHybrid)
+	rows, _ := res.Data["results"].([]map[string]interface{})
+	if omitted == 0 || len(rows)+omitted != 10 {
+		t.Fatalf("rows=%d omitted=%d", len(rows), omitted)
+	}
+	if rows[0]["chunk_id"] != "c0" {
+		t.Fatalf("best row not kept first: %v", rows[0]["chunk_id"])
+	}
+	if n := utf8.RuneCountInString(res.Output); n > 4000 && len(rows) > 1 {
+		t.Fatalf("output has %d runes with %d rows, over the 4000-rune share of the budget", n, len(rows))
+	}
+
+	// A single row is always kept, even over budget.
+	single, omittedSingle := tool.formatWithinBudget(ctx, results[:1], []string{"kb-1"}, "q", SearchModeHybrid)
+	if omittedSingle != 0 || single.Data["count"] != 1 {
+		t.Fatalf("single row dropped: omitted=%d count=%v", omittedSingle, single.Data["count"])
+	}
+}
+
+func TestDeduplicateResultsKeepsSiblingsImagesAndBestScore(t *testing.T) {
+	tool := &SearchKnowledgeTool{}
+	row := func(
+		id, knowledgeID string, index int, chunkType, parent, content string, score float64,
+	) *searchResultWithMeta {
+		return &searchResultWithMeta{SearchResult: &types.SearchResult{
+			ID: id, KnowledgeID: knowledgeID, ChunkIndex: index, ChunkType: chunkType,
+			ParentChunkID: parent, Content: content, Score: score,
+		}}
+	}
+	ocr := string(types.ChunkTypeImageOCR)
+	in := []*searchResultWithMeta{
+		// Siblings under one parent are different text.
+		row("child-a", "d1", 3, "", "p1", "first child", 0.4),
+		row("child-b", "d1", 4, "", "p1", "second child", 0.9),
+		// Image chunks all carry chunk_index 0.
+		row("img-1", "d1", 0, ocr, "", "ocr one", 0.5),
+		row("img-2", "d1", 0, ocr, "", "ocr two", 0.5),
+		row("text-0", "d1", 0, "", "", "intro", 0.3),
+		// The same chunk from two searches: the better score wins.
+		row("dup", "d2", 1, "", "", "dup text", 0.2),
+		row("dup", "d2", 1, "", "", "dup text", 0.8),
+	}
+	out := tool.deduplicateResults(in)
+	got := map[string]float64{}
+	for _, r := range out {
+		got[r.ID] = r.Score
+	}
+	for _, id := range []string{"child-a", "child-b", "img-1", "img-2", "text-0", "dup"} {
+		if _, ok := got[id]; !ok {
+			t.Fatalf("%s dropped; kept %v", id, got)
+		}
+	}
+	if len(out) != 6 || got["dup"] != 0.8 || out[0].ID != "child-b" {
+		t.Fatalf("dedup = %v (first %s)", got, out[0].ID)
 	}
 }
