@@ -2,6 +2,7 @@ package activate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -147,9 +148,11 @@ func TestPluginConnector(t *testing.T) {
 		Credentials: map[string]any{"token": "t-1"},
 		Settings:    map[string]any{"feed_urls": "https://a.example/rss\nhttps://b.example/rss"},
 	}
-	if err := conn.Validate(ctx, &types.DataSourceConfig{Credentials: map[string]any{"token": "t-1"}}); err == nil ||
-		!strings.Contains(err.Error(), "feed_urls is required") {
-		t.Fatalf("Validate without settings = %v", err)
+	err = conn.Validate(ctx, &types.DataSourceConfig{Credentials: map[string]any{"token": "t-1"}})
+	var pe *pluginapi.Error
+	if err == nil || err.Error() != "feed_urls is required" ||
+		!errors.As(err, &pe) || pe.Code != pluginapi.CodeInvalidConfig {
+		t.Fatalf("Validate without settings = %v; want the plugin's message with its code reachable", err)
 	}
 	if err := conn.Validate(ctx, cfg); err != nil {
 		t.Fatalf("Validate: %v", err)

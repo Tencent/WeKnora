@@ -96,19 +96,43 @@ func (iv *Invoker) Envelope(
 	return env, nil
 }
 
+// callError presents a plugin's error by its message, the way WeKnora's own
+// errors read in the UI; the protocol code stays reachable through
+// errors.As(err, **pluginapi.Error).
+type callError struct {
+	pluginID string
+	err      *pluginapi.Error
+}
+
+func (e *callError) Error() string {
+	if e.err.Code == pluginapi.CodeUnavailable {
+		return "plugin " + e.pluginID + " is unavailable: " + e.err.Message
+	}
+	return e.err.Message
+}
+
+func (e *callError) Unwrap() error { return e.err }
+
+func present(pluginID string, err error) error {
+	if pe, ok := pluginapi.AsError(err); ok {
+		return &callError{pluginID: pluginID, err: pe}
+	}
+	return err
+}
+
 // Call makes a unary call to a plugin.
 func (iv *Invoker) Call(
 	ctx context.Context, m *manifest.Manifest, path string, instance map[string]any, input, out any,
 ) error {
 	c, err := iv.clients.Client(m.ID)
 	if err != nil {
-		return err
+		return present(m.ID, err)
 	}
 	env, err := iv.Envelope(ctx, m, instance)
 	if err != nil {
 		return err
 	}
-	return c.Call(ctx, path, env, input, out)
+	return present(m.ID, c.Call(ctx, path, env, input, out))
 }
 
 // Stream makes a streaming call to a plugin.
@@ -118,11 +142,12 @@ func (iv *Invoker) Stream(
 ) ([]byte, error) {
 	c, err := iv.clients.Client(m.ID)
 	if err != nil {
-		return nil, err
+		return nil, present(m.ID, err)
 	}
 	env, err := iv.Envelope(ctx, m, instance)
 	if err != nil {
 		return nil, err
 	}
-	return c.Stream(ctx, path, env, input, fn)
+	end, err := c.Stream(ctx, path, env, input, fn)
+	return end, present(m.ID, err)
 }
