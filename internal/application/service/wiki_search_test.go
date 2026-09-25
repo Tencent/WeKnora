@@ -139,6 +139,21 @@ func TestSearchPagesAcross_ForeignTenantWithoutShareIsNotFound(t *testing.T) {
 	assert.Equal(t, apperrors.ErrNotFound, app.Code)
 }
 
+func TestSearchPagesAcross_ForeignTenantNonWikiWithoutShareIsNotFound(t *testing.T) {
+	ctx, svc, _ := setupWikiSearchService(t, map[string]*types.KnowledgeBase{
+		"kb-foreign-doc": {
+			ID: "kb-foreign-doc", TenantID: 99,
+			IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+		},
+	}, &wikiSearchShareService{})
+
+	_, err := svc.SearchPagesAcross(ctx, []string{"kb-foreign-doc"}, "q", 10)
+	require.Error(t, err)
+	app, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, apperrors.ErrNotFound, app.Code)
+}
+
 func TestSearchPagesAcross_ForeignTenantWithShareOK(t *testing.T) {
 	ctx, svc, repo := setupWikiSearchService(t, map[string]*types.KnowledgeBase{
 		"kb-foreign": makeWikiSearchKB("kb-foreign", 99),

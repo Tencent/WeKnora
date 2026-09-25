@@ -1073,17 +1073,21 @@ func (s *wikiPageService) SearchPagesAcross(
 		if !ok {
 			return nil, apperrors.NewNotFoundError("knowledge base not found")
 		}
-		if !kb.IsWikiEnabled() {
-			return nil, apperrors.NewBadRequestError("Wiki feature is not enabled for this knowledge base")
-		}
 		authorized = append(authorized, kb)
 	}
 
 	if types.CallerFromContext(ctx).TenantID == 0 {
 		return nil, apperrors.NewUnauthorizedError("tenant id is required")
 	}
+	// Authorize before inspecting KB settings so an unauthorized caller gets
+	// the same NotFound for a foreign KB regardless of its wiki setting.
 	if err := access.AuthorizeKBAccess(ctx, s.kbShareService, authorized); err != nil {
 		return nil, err
+	}
+	for _, kb := range authorized {
+		if !kb.IsWikiEnabled() {
+			return nil, apperrors.NewBadRequestError("Wiki feature is not enabled for this knowledge base")
+		}
 	}
 
 	pages, err := s.repo.SearchAcross(ctx, ids, query, limit)
