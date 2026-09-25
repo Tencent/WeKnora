@@ -995,6 +995,7 @@ export default {
     resourceHint: '동기화할 공간/폴더를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
+    typesLoadFailed: '데이터 소스 유형을 불러오지 못했습니다',
     noResources: '동기화 가능한 위키 공간을 찾을 수 없습니다',
     noResourcesDesc: '앱이 콘텐츠를 가져오려면 그룹 채팅을 통해 위키 접근 권한을 얻어야 합니다',
     noResourcesDesc_notion: '앱이 콘텐츠를 가져오려면 Notion 페이지 접근 권한이 필요합니다',
@@ -5808,6 +5809,18 @@ export default {
     baseUrlLabel: '인스턴스 URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'API 키를 입력하세요',
+    configFields: {
+      searchEngine: '검색 엔진',
+      searchEngineDesc: 'Zhipu 검색 엔진과 요청당 요금 등급을 선택합니다.',
+      searchStd: '기본 · ¥0.01/회',
+      searchPro: '프로 · ¥0.03/회',
+      searchSogou: 'Sogou · ¥0.05/회',
+      searchQuark: 'Quark · ¥0.05/회',
+      contentSize: '요약 길이',
+      contentSizeDesc: '보통은 간결한 요약을, 자세히는 더 많은 맥락을 반환합니다.',
+      contentMedium: '보통',
+      contentHigh: '자세히'
+    },
     toasts: {
       providerCreated: '검색 엔진 프로바이더가 생성되었습니다',
       providerUpdated: '검색 엔진 프로바이더가 업데이트되었습니다',

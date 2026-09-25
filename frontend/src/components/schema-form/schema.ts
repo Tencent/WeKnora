@@ -79,6 +79,16 @@ export function orderedFields(schema: ConfigSchema | undefined): SchemaField[] {
     .map(key => ({ key, schema: props[key], required: required.has(key) }))
 }
 
+/** The schema node at a dotted path ("auth.token"), or undefined. */
+export function schemaAt(schema: ConfigSchema, path: string): ConfigSchema | undefined {
+  let node: ConfigSchema | undefined = schema
+  for (const key of path.split('.')) {
+    node = node?.properties?.[key]
+    if (!node) return undefined
+  }
+  return node
+}
+
 /** x-visible-if: every listed sibling must equal the given value. */
 export function isVisible(schema: ConfigSchema, siblings: ConfigValue | undefined): boolean {
   const cond = schema['x-visible-if']

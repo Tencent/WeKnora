@@ -304,9 +304,11 @@ curl -X POST $BASE/api/v1/web-search-providers/wsp-1/test -H "Authorization: Bea
 
 ### GET /api/v1/datasource/types
 
-用途：可用连接器目录。权限：Viewer+。
+用途：可创建的连接器目录，只含当前部署已注册的连接器。权限：Viewer+。
 
-响应：200 `[{type,name,description,icon,priority,auth_type,capabilities}]`
+响应：200 `[{type,name,description,icon,priority,auth_type,capabilities,doc_url,permission_doc_url,permission_page_url,required_permissions,config_schema}]`
+
+`config_schema` 用 JSON Schema 子集描述该连接器 `config.credentials` 的字段，`x-secret: true` 标记的字段为密钥；前端按它渲染凭证表单。`doc_url`、`permission_*`、`required_permissions` 是凭证表单旁的接入指引。
 
 ```bash
 curl $BASE/api/v1/datasource/types -H "Authorization: Bearer $TOKEN"

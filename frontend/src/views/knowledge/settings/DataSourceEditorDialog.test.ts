@@ -9,6 +9,8 @@ import ts from 'typescript'
 import { createRenderer, h, nextTick, reactive, ref } from 'vue'
 
 const require = createRequire(import.meta.url)
+// The dialog validates credentials with the real schema helpers.
+const schemaModule = require('../../../components/schema-form/schema.ts')
 const filename = fileURLToPath(new URL('./DataSourceEditorDialog.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
 const script = compileScript(descriptor, { id: 'datasource-editor-test' }).content
@@ -22,6 +24,20 @@ async function fixture({ configured = true, create = false } = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
   let storedToken = configured ? 'expired-token' : ''
   const api = {
+    // Same credential form the backend serves for GitLab.
+    async getConnectorTypes() {
+      return [{
+        type: 'gitlab',
+        config_schema: {
+          type: 'object',
+          required: ['base_url', 'access_token'],
+          properties: {
+            base_url: { type: 'string', title: 'GitLab URL', 'x-order': 1 },
+            access_token: { type: 'string', title: 'Personal access token', 'x-secret': true, 'x-order': 2 },
+          },
+        },
+      }]
+    },
     async validateCredentials(type: string, credentials: Record<string, string>) {
       calls.push({ method: 'validateCredentials', args: [type, { ...credentials }] })
       if (credentials.access_token !== 'rotated-token') throw new Error('gitlab API /user: status 401')
@@ -57,6 +73,10 @@ async function fixture({ configured = true, create = false } = {}) {
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { warning() {}, success() {}, error() {} } }
       if (name === '@/api/datasource') return api
+      if (name === '@/components/schema-form/schema') return schemaModule
+      if (name === '@/components/schema-form/useSchemaText') {
+        return { useSchemaText: () => (schema: { title?: string }) => schema.title ?? '' }
+      }
       return { default: {} }
     },
     URL, console,
@@ -150,10 +170,24 @@ test('an existing data source with no saved credentials tests the entered token'
 test('new GitLab data sources continue to test credentials without persistence', async () => {
   const f = await fixture({ create: true })
   try {
-    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'gitlab'))
+    await f.vm.loadConnectorTypes()
+    f.vm.selectType(f.vm.connectorTypes.find((def: any) => def.type === 'gitlab'))
     await f.replace()
     await f.vm.testConnection()
     assert.equal(f.vm.testResult, 'success')
     assert.deepEqual(f.calls.map(call => call.method), ['validateCredentials'])
+  } finally { f.close() }
+})
+
+test('a missing required credential blocks the connection test and marks the field', async () => {
+  const f = await fixture({ create: true })
+  try {
+    await f.vm.loadConnectorTypes()
+    f.vm.selectType(f.vm.connectorTypes.find((def: any) => def.type === 'gitlab'))
+    f.vm.form.config.credentials = { base_url: 'https://gitlab.example.com' }
+    await nextTick() // the user typed before clicking; edits clear old errors
+    await f.vm.testConnection()
+    assert.deepEqual(f.calls, [], 'nothing reaches the backend')
+    assert.deepEqual(JSON.stringify(f.vm.credentialErrors), JSON.stringify([{ path: 'access_token', code: 'required' }]))
   } finally { f.close() }
 })

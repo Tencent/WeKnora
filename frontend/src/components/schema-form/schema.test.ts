@@ -8,6 +8,7 @@ import {
   isVisible,
   orderedFields,
   resolveText,
+  schemaAt,
   secretPaths,
   validateConfig,
   applyDefaults,
@@ -142,4 +143,11 @@ test('validateConfig mirrors the backend rules', () => {
     { path: 'token', code: 'min_length' },
   ])
   assert.deepEqual(validateConfig(hidden, { mode: 'basic', size: 11 }), [{ path: 'size', code: 'maximum' }])
+})
+
+test('schemaAt follows dotted paths', () => {
+  assert.equal(schemaAt(zhipu, 'extra_config.content_size')?.default, 'medium')
+  assert.equal(schemaAt(zhipu, 'api_key')?.['x-secret'], true)
+  assert.equal(schemaAt(zhipu, 'extra_config.missing'), undefined)
+  assert.equal(schemaAt(zhipu, 'api_key.deeper'), undefined)
 })

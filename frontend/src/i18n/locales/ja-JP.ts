@@ -2249,6 +2249,18 @@ export default {
     baseUrlLabel: 'インスタンスURL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'APIキーを入力',
+    configFields: {
+      searchEngine: '検索エンジン',
+      searchEngineDesc: 'Zhipu の検索エンジンとリクエストごとの料金プランを選択します。',
+      searchStd: 'スタンダード · ¥0.01/回',
+      searchPro: 'プロ · ¥0.03/回',
+      searchSogou: 'Sogou · ¥0.05/回',
+      searchQuark: 'Quark · ¥0.05/回',
+      contentSize: '要約の長さ',
+      contentSizeDesc: '中は簡潔な要約、詳細はより多くの文脈を返します。',
+      contentMedium: '中',
+      contentHigh: '詳細'
+    },
     toasts: {
       providerCreated: '検索プロバイダを作成しました',
       providerUpdated: '検索プロバイダを更新しました',
@@ -6871,6 +6883,7 @@ export default {
     resourceHint: '同期するスペースまたはフォルダを選択してください',
     untitled: '無題',
     resourceLoadFailed: 'リソースの読み込みに失敗しました',
+    typesLoadFailed: 'データソースの種類を読み込めませんでした',
     noResources: 'Wikiスペースが見つかりません',
     noResourcesDesc: 'コンテンツを取得するには、グループチャット経由でアプリにWikiのアクセス権限を付与する必要があります',
     noResourcesDesc_notion: 'コンテンツを取得するには、アプリにNotionページのアクセス権限が必要です',

@@ -995,6 +995,7 @@ export default {
     resourceHint: 'Выберите пространства или папки для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
+    typesLoadFailed: 'Не удалось загрузить типы источников данных',
     noResources: 'Пространства вики не найдены',
     noResourcesDesc: 'Приложению требуется доступ к вики через групповой чат для получения контента',
     noResourcesDesc_notion: 'Приложению требуются права доступа к странице Notion для получения контента',
@@ -5808,6 +5809,18 @@ export default {
     baseUrlLabel: 'URL экземпляра',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'Введите API-ключ',
+    configFields: {
+      searchEngine: 'Поисковая система',
+      searchEngineDesc: 'Выберите поисковую систему Zhipu и тариф за запрос.',
+      searchStd: 'Стандарт · ¥0.01/запрос',
+      searchPro: 'Pro · ¥0.03/запрос',
+      searchSogou: 'Sogou · ¥0.05/запрос',
+      searchQuark: 'Quark · ¥0.05/запрос',
+      contentSize: 'Объём сводки',
+      contentSizeDesc: 'Средний — краткие сводки; подробный — больше контекста.',
+      contentMedium: 'Средний',
+      contentHigh: 'Подробный'
+    },
     toasts: {
       providerCreated: 'Поисковый провайдер создан',
       providerUpdated: 'Поисковый провайдер обновлён',

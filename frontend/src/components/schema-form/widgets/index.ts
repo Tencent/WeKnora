@@ -1,6 +1,7 @@
 import type { Component } from 'vue'
 
 import type { ConfigSchema } from '../schema'
+import HeadersWidget from './HeadersWidget.vue'
 import NumberWidget from './NumberWidget.vue'
 import PasswordWidget from './PasswordWidget.vue'
 import SelectWidget from './SelectWidget.vue'
@@ -19,6 +20,8 @@ const widgets = new Map<string, Component>([
   ['number', NumberWidget],
   ['select', SelectWidget],
   ['switch', SwitchWidget],
+  // "Name: Value" lines edited as rows (RSS auth headers).
+  ['headers', HeadersWidget],
 ])
 
 export function registerWidget(name: string, component: Component) {

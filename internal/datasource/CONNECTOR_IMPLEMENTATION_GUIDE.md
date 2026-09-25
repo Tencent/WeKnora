@@ -360,6 +360,16 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 }
 ```
 
+### Credential form
+
+Describe the connector's `credentials` in `connectorForms`
+(`internal/datasource/connector_forms.go`): a config schema for the fields
+(mark secrets with `Secret`, use `VisibleIf` for fields that depend on
+another one) plus the setup-guide links and required permissions. The
+frontend renders the form from `GET /api/v1/datasource/types`, so no frontend
+change is needed. Frontend locale keys named in `I18nKeys` must be listed in
+`frontend/src/i18n/backendSchemaKeys.ts`; a test enforces it.
+
 ## Step 8: Test Your Connector
 
 ```go

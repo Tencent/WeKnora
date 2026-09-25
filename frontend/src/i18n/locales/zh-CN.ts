@@ -997,6 +997,7 @@ export default {
     resourceHint: '选择要同步的内容空间/文件夹',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
+    typesLoadFailed: '加载数据源类型失败',
     noResources: '未找到可同步的知识库空间',
     noResourcesDesc: '应用需要通过群聊获得知识库访问权限才能拉取内容',
     noResourcesDesc_notion: '应用需要获得 Notion 页面的访问权限才能拉取内容',
@@ -5810,6 +5811,18 @@ export default {
     baseUrlLabel: '实例地址',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: '请输入 API 密钥',
+    configFields: {
+      searchEngine: '搜索引擎',
+      searchEngineDesc: '选择智谱搜索引擎及对应的单次调用价格档位。',
+      searchStd: '基础版 · ¥0.01/次',
+      searchPro: '高级版 · ¥0.03/次',
+      searchSogou: '搜狗 · ¥0.05/次',
+      searchQuark: '夸克 · ¥0.05/次',
+      contentSize: '摘要长度',
+      contentSizeDesc: '中等返回精简摘要；详细返回更多上下文。',
+      contentMedium: '中等',
+      contentHigh: '详细'
+    },
     toasts: {
       providerCreated: '搜索引擎配置已创建',
       providerUpdated: '搜索引擎配置已更新',

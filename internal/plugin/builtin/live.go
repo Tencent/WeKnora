@@ -33,26 +33,7 @@ func CollectSources(live Live) Sources {
 		src.ModelVendors = append(src.ModelVendors, p.Definition)
 	}
 	if live.Connectors != nil {
-		registered := toSet(live.Connectors.List())
-		metas := datasource.ListAvailableConnectors()
-		// The metadata table is a map, so equal priorities come back in
-		// random order; break ties by type to keep the listing stable.
-		sort.SliceStable(metas, func(i, j int) bool {
-			if metas[i].Priority != metas[j].Priority {
-				return metas[i].Priority < metas[j].Priority
-			}
-			return metas[i].Type < metas[j].Type
-		})
-		for _, meta := range metas {
-			if registered[meta.Type] {
-				src.Connectors = append(src.Connectors, meta)
-				delete(registered, meta.Type)
-			}
-		}
-		// A connector registered without metadata still shows up.
-		for _, t := range sortedKeys(registered) {
-			src.Connectors = append(src.Connectors, datasource.ConnectorMetadata{Type: t, Name: t, Priority: 1000})
-		}
+		src.Connectors = live.Connectors.Metadata()
 	}
 	for _, p := range live.IMPlatforms {
 		src.IMPlatforms = append(src.IMPlatforms, im.LookupPlatformInfo(p))
