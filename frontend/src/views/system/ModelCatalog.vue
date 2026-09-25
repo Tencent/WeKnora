@@ -462,8 +462,9 @@ async function commit(overlay: CatalogOverlay, message = t('modelCatalog.publish
   try {
     state.value = await publishModelCatalog({ version: state.value.version, baseline: state.value.baseline, overlay })
     providersStore.reset()
-    // Model responses contain resolved catalog capabilities as well.
-    chatResources.invalidate('models')
+    // Model responses contain resolved catalog capabilities as well. The
+    // chat input only loads models on mount, so refetch the snapshot now.
+    void chatResources.ensureModels(true).catch(() => {})
     MessagePlugin.success(message)
     return true
   } catch (e: any) {

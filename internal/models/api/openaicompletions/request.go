@@ -392,6 +392,9 @@ func (c *Client) applyThinking(body map[string]any, opts *api.Options, stream bo
 		}
 	case api.ThinkingFormatChatTemplateKwargs:
 		body["chat_template_kwargs"] = map[string]any{"enable_thinking": enabled}
+		if effort != "" {
+			body[effortField] = effort
+		}
 	case api.ThinkingFormatOpenRouter:
 		if enabled {
 			reasoning := map[string]any{}

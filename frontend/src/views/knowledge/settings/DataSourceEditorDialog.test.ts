@@ -205,3 +205,25 @@ test('an existing Yuque data source on the TOC layout reports it', async () => {
     assert.equal(f.vm.yuqueFolderMode, 'toc')
   } finally { f.close() }
 })
+
+test('Cloud hierarchy limitation stays visible after an empty space expansion', async () => {
+  const f = await fixture()
+  try {
+    f.vm.resources = [{
+      external_id: 'space-1',
+      name: 'Cloud space',
+      type: 'space',
+      has_children: true,
+      metadata: { hierarchy_limitation: 'cloud_top_level_containers' },
+    }]
+    f.vm.expandedResourceIds = new Set(['space-1'])
+    await nextTick()
+    assert.equal(f.vm.visibleTree.some((row: any) => row.noticeAfter), true)
+
+    f.vm.expandedResourceIds = new Set()
+    f.vm.loadedChildrenIds = new Set(['space-1'])
+    f.vm.resources = [{ ...f.vm.resources[0], has_children: false }]
+    await nextTick()
+    assert.equal(f.vm.visibleTree.some((row: any) => row.noticeAfter), true)
+  } finally { f.close() }
+})

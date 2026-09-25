@@ -76,6 +76,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, ErrInvalidFileType
 	}
 
+	// JSON content validation stays in the HTTP upload handler (and
+	// ReplaceKnowledgeFile), not here: datasource sync may have already
+	// deleted the previous knowledge for this external_id, and IM swallows
+	// create errors — an early 400 would drop the document with no failed row.
+
 	// Calculate file hash for deduplication
 	logger.Info(ctx, "Calculating file hash")
 	hash, err := calculateFileHash(file)
