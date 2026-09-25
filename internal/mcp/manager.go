@@ -245,23 +245,46 @@ func (m *MCPManager) CloseClient(serviceID string) error {
 	return nil
 }
 
-// CloseAll closes all clients
+// closeAllTimeout bounds CloseAll. Disconnecting a remote transport can mean
+// a request to the server, and one that stopped answering must not hold up
+// process exit.
+var closeAllTimeout = 5 * time.Second
+
+// CloseAll closes all clients. The clients are detached under the lock and
+// disconnected concurrently outside it, so one slow server neither serializes
+// the rest nor blocks callers waiting on the lock; whatever has not finished
+// within closeAllTimeout is abandoned.
 func (m *MCPManager) CloseAll() {
 	m.clientsMu.Lock()
-	defer m.clientsMu.Unlock()
 	for key, pending := range m.connecting {
 		pending.cancel()
 		delete(m.connecting, key)
 	}
-
-	for serviceID, client := range m.clients {
-		if err := client.Disconnect(); err != nil {
-			logger.GetLogger(m.ctx).Errorf("Failed to disconnect MCP client %s: %v", serviceID, err)
-		}
-	}
-
+	clients := m.clients
 	m.clients = make(map[string]MCPClient)
-	logger.GetLogger(m.ctx).Info("All MCP clients closed")
+	m.clientsMu.Unlock()
+
+	var wg sync.WaitGroup
+	for key, client := range clients {
+		wg.Add(1)
+		go func(key string, client MCPClient) {
+			defer wg.Done()
+			if err := client.Disconnect(); err != nil {
+				logger.GetLogger(m.ctx).Errorf("Failed to disconnect MCP client %s: %v", key, err)
+			}
+		}(key, client)
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		logger.GetLogger(m.ctx).Info("All MCP clients closed")
+	case <-time.After(closeAllTimeout):
+		logger.GetLogger(m.ctx).Warnf("MCP clients still disconnecting after %s; abandoning them", closeAllTimeout)
+	}
 }
 
 // Shutdown gracefully shuts down the manager
