@@ -7142,6 +7142,9 @@ export default {
       authHeaders: 'Custom headers (optional)',
       authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud cannot list pages stored directly under top-level folders in this space; selecting the whole space still syncs them.'
+    },
     comingSoon: 'Coming soon',
     docHint: 'Get credentials at:',
     openDoc: 'Open documentation',
@@ -7178,6 +7181,12 @@ export default {
     prereqStep3Brief_lark_drive: 'Configure app permissions',
     prereqStep3Desc_lark_drive: 'Enable drive:drive:readonly, drive:export:readonly, docx:document:readonly permissions',
     prereqOpenConsole_yuque: 'Open Yuque Token settings',
+    yuqueFolderModeLabel: 'Folder structure',
+    yuqueFolderModeToc: 'Mirror the Yuque TOC',
+    yuqueFolderModeNone: 'Keep everything flat',
+    yuqueFolderModeHint: 'Files documents by their Yuque table-of-contents path. Note: folder moves made in the knowledge base afterwards are overwritten by the Yuque structure the next time that document syncs.',
+    yuqueTOCOnly: 'Sync only documents visible in the Yuque TOC',
+    yuqueTOCOnlyHint: 'Requires the "Mirror the Yuque TOC" layout. Documents already in the knowledge base are untouched — one the Yuque TOC does not list is simply no longer added, never deleted.',
     prereqBarText_dingtalk: 'First time? Click to see the DingTalk app setup guide',
     prereqStep1Brief_dingtalk: 'Create an internal enterprise app',
     prereqStep1Desc_dingtalk: 'Create an internal app in DingTalk Open Platform and copy its Client ID and Client Secret.',

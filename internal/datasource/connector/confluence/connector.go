@@ -3,10 +3,14 @@ package confluence
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -21,11 +25,63 @@ var (
 
 // Connector implements datasource.StreamingConnector for Confluence.
 type Connector struct {
-	newClient func(config) (*client, error)
+	newClient  func(config) (*client, error)
+	spaceCache spaceCache
+}
+
+const pickerSpaceCacheTTL = time.Minute
+
+type spaceCache struct {
+	mu      sync.Mutex
+	entries map[string]cachedSpaces
+}
+
+type cachedSpaces struct {
+	values  []space
+	expires time.Time
 }
 
 // NewConnector creates a Confluence connector.
 func NewConnector() *Connector { return &Connector{newClient: newClient} }
+
+func (c *Connector) pickerSpaces(ctx context.Context, client *client, cfg config) ([]space, error) {
+	key := pickerSpaceCacheKey(cfg)
+	now := time.Now()
+	c.spaceCache.mu.Lock()
+	if cached, ok := c.spaceCache.entries[key]; ok && now.Before(cached.expires) {
+		values := append([]space(nil), cached.values...)
+		c.spaceCache.mu.Unlock()
+		return values, nil
+	}
+	c.spaceCache.mu.Unlock()
+	spaces, err := client.spaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.spaceCache.mu.Lock()
+	if c.spaceCache.entries == nil {
+		c.spaceCache.entries = make(map[string]cachedSpaces)
+	}
+	for key, cached := range c.spaceCache.entries {
+		if !now.Before(cached.expires) {
+			delete(c.spaceCache.entries, key)
+		}
+	}
+	c.spaceCache.entries[key] = cachedSpaces{
+		values:  append([]space(nil), spaces...),
+		expires: now.Add(pickerSpaceCacheTTL),
+	}
+	c.spaceCache.mu.Unlock()
+	return spaces, nil
+}
+
+// pickerSpaceCacheKey partitions cached space visibility by every credential
+// component that can affect permissions. The secret is fingerprinted so it
+// never becomes a map key retained in process memory or appears in diagnostics.
+func pickerSpaceCacheKey(cfg config) string {
+	fingerprint := sha256.Sum256([]byte(cfg.secret))
+	return cfg.edition + "\x00" + cfg.baseURL + "\x00" + cfg.username + "\x00" + fmt.Sprintf("%x", fingerprint)
+}
 
 // Type returns the connector type identifier.
 func (*Connector) Type() string { return types.ConnectorTypeConfluence }
@@ -52,13 +108,95 @@ func (c *Connector) Validate(ctx context.Context, ds *types.DataSourceConfig) er
 	return client.ping(ctx)
 }
 
-// ListResources returns the Confluence spaces the credentials can see.
+// ListResources exposes a lazy Space → Page tree. It never scans a whole
+// space merely to render the picker.
 func (c *Connector) ListResources(
 	ctx context.Context, ds *types.DataSourceConfig, parentID string,
 ) ([]types.Resource, error) {
-	if parentID != "" {
-		return nil, nil
+	client, cfg, err := c.configured(ds)
+	if err != nil {
+		return nil, err
 	}
+	if parentID == "" {
+		spaces, err := c.pickerSpaces(ctx, client, cfg)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]types.Resource, 0, len(spaces))
+		for _, s := range spaces {
+			metadata := map[string]interface{}{"space_key": s.Key}
+			if cfg.cloud() {
+				// Cloud cannot enumerate a space's top-level folders, so pages under
+				// them are unselectable in the picker; the frontend surfaces this
+				// limitation when the space is expanded.
+				metadata["hierarchy_limitation"] = "cloud_top_level_containers"
+			}
+			out = append(out, types.Resource{
+				ExternalID: s.ID, Name: s.Name, Type: "space",
+				URL: client.resourceURL(s.Links.WebUI), HasChildren: true,
+				Metadata: metadata,
+			})
+		}
+		return out, nil
+	}
+	ref, err := parseResourceID(parentID)
+	if err != nil {
+		return nil, err
+	}
+	spaces, err := c.pickerSpaces(ctx, client, cfg)
+	if err != nil {
+		return nil, err
+	}
+	var selected space
+	found := false
+	for _, s := range spaces {
+		if s.ID == ref.SpaceID {
+			selected, found = s, true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("confluence space %s is unavailable", ref.SpaceID)
+	}
+	var pages []page
+	if ref.Kind == resourceSpace {
+		pages, err = client.topLevelPages(ctx, selected)
+	} else {
+		if ref.Kind == resourcePage {
+			if err := client.validatePageOwnership(ctx, selected, ref.PageID); err != nil {
+				return nil, fmt.Errorf("validate Confluence page %s: %w", ref.PageID, err)
+			}
+		}
+		pages, err = client.directChildPages(ctx, selected, ref.PageID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list Confluence resources under %s: %w", parentID, err)
+	}
+	out := make([]types.Resource, 0, len(pages))
+	for _, p := range pages {
+		out = append(out, pageResource(client, selected, parentID, p))
+	}
+	return out, nil
+}
+
+func pageResource(client *client, s space, parentID string, p page) types.Resource {
+	return types.Resource{
+		ExternalID: makePageResourceID(s.ID, p.ID), ParentID: parentID, Name: p.Title, Type: "page",
+		URL: client.resourceURL(p.Links.WebUI), HasChildren: true,
+		Metadata: map[string]interface{}{"space_id": s.ID, "page_id": p.ID},
+	}
+}
+
+// ResolveResourceAncestors expands only the O(depth) path required to reveal
+// persisted page selections in the lazy picker. Resolution is best effort:
+// a deleted page, an unavailable space, or a malformed id skips just its own
+// reveal path instead of failing every saved selection; the sync path keeps
+// its strict validation in buildSyncPlan.
+func (c *Connector) ResolveResourceAncestors(
+	ctx context.Context,
+	ds *types.DataSourceConfig,
+	resourceIDs []string,
+) ([]string, error) {
 	client, _, err := c.configured(ds)
 	if err != nil {
 		return nil, err
@@ -67,23 +205,45 @@ func (c *Connector) ListResources(
 	if err != nil {
 		return nil, err
 	}
-	out := make([]types.Resource, 0, len(spaces))
+	byID := make(map[string]space, len(spaces))
 	for _, s := range spaces {
-		out = append(out, types.Resource{
-			ExternalID:  s.ID,
-			Name:        s.Name,
-			Type:        "space",
-			URL:         client.resourceURL(s.Links.WebUI),
-			HasChildren: false,
-			Metadata:    map[string]interface{}{"space_key": s.Key},
-		})
+		byID[s.ID] = s
+	}
+	seen, out := map[string]bool{}, []string{}
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, id := range resourceIDs {
+		ref, err := parseResourceID(id)
+		if err != nil {
+			logger.Warnf(ctx, "skip malformed Confluence resource %q during ancestor resolution: %v", id, err)
+			continue
+		}
+		if ref.Kind == resourceSpace {
+			continue
+		}
+		s, ok := byID[ref.SpaceID]
+		if !ok {
+			logger.Warnf(ctx, "skip Confluence resource %s: space %s is unavailable", id, ref.SpaceID)
+			continue
+		}
+		ancestors, err := client.pageAncestors(ctx, s, ref.PageID)
+		if err != nil {
+			logger.Warnf(ctx, "skip Confluence resource %s during ancestor resolution: %v", id, err)
+			continue
+		}
+		add(s.ID)
+		for _, ancestor := range ancestors {
+			if ancestor.Kind != "" && ancestor.Kind != "page" {
+				continue
+			}
+			add(makePageResourceID(s.ID, ancestor.ID))
+		}
 	}
 	return out, nil
-}
-
-// ResolveResourceAncestors is a no-op: Confluence spaces are a flat list.
-func (*Connector) ResolveResourceAncestors(context.Context, *types.DataSourceConfig, []string) ([]string, error) {
-	return nil, nil
 }
 
 // FetchAll syncs every selected space. Deletion reconciliation needs FetchStream.
@@ -158,50 +318,89 @@ func (c *Connector) fetchStream(
 	if err != nil {
 		return nil, err
 	}
-	spaces, err := client.spaces(ctx)
+	plan, err := c.buildSyncPlan(ctx, client, ds.ResourceIDs)
 	if err != nil {
-		return nil, fmt.Errorf("list Confluence spaces: %w", err)
+		return nil, err
 	}
-	byID := make(map[string]space, len(spaces))
-	for _, s := range spaces {
-		byID[s.ID] = s
+	currentRoots := make(map[string]bool, len(plan.Roots))
+	for _, root := range plan.Roots {
+		currentRoots[root.ResourceID] = true
 	}
 	baseline, next := prepareSyncCursors(old, forceFull)
-	for _, resourceID := range ds.ResourceIDs {
-		s, found := byID[resourceID]
-		if !found {
-			return nil, fmt.Errorf(
-				"selected Confluence space %s is unavailable; refusing destructive reconciliation",
-				resourceID,
-			)
+	// A prior successful body is reusable when ownership moves to a different
+	// selected root and this run cannot fetch the new body. Keep that version in
+	// the new root rather than dropping it during ownership reconciliation.
+	priorVersionByPage := make(map[string]string)
+	for _, pages := range baseline.SpacePages {
+		for id, version := range pages {
+			if _, exists := priorVersionByPage[id]; !exists {
+				priorVersionByPage[id] = version
+			}
 		}
-		pages, complete, err := client.pages(ctx, s)
+	}
+	// A page may be returned by multiple overlapping roots (for example during
+	// a configuration change). Fetch it once, while retaining a cursor entry
+	// per scope root so existing cursor JSON remains compatible.
+	seenPages := make(map[string]struct{})
+	incompleteRoots := make(map[string]bool)
+	incompleteSpaces := make([]space, 0)
+	for _, root := range plan.Roots {
+		resourceID, s := root.ResourceID, root.Space
+		var pages []page
+		complete := true
+		if root.Kind == syncWholeSpace {
+			pages, complete, err = client.pages(ctx, s)
+		} else {
+			pages, err = client.pageSubtree(ctx, s, root.PageID)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("list pages in Confluence space %s: %w", s.Key, err)
+			return nil, fmt.Errorf("list pages in Confluence scope %s: %w", resourceID, err)
 		}
+		priorPages := baseline.SpacePages[resourceID]
 		if !complete {
-			logger.Warnf(ctx,
-				"[Confluence] space %s: listing stopped after %d empty pages that still linked onward; "+
-					"listed %d pages, checking unlisted ones one by one before deleting",
-				s.Key, maxEmptyServerPages, len(pages))
+			logger.Warnf(
+				ctx,
+				"[Confluence] space %s listing was cut short; checking unlisted pages before deleting",
+				s.Key,
+			)
+			incompleteRoots[resourceID] = true
+			incompleteSpaces = append(incompleteSpaces, s)
 		}
-		priorPages, hadBaseline := baseline.SpacePages[resourceID]
 		if next.SpacePages[resourceID] == nil {
 			next.SpacePages[resourceID] = map[string]string{}
 		}
-		seen := make(map[string]struct{}, len(pages))
+		if complete && len(pages) == 0 && len(priorPages) > 0 {
+			return nil, fmt.Errorf(
+				"refusing Confluence mirror deletion in %s: listing returned 0 pages against a %d-page baseline",
+				s.Key, len(priorPages),
+			)
+		}
 		for _, summary := range pages {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			seen[summary.ID] = struct{}{}
-			version := pageVersion(summary)
-			if forceFull {
-				if next.SpacePages[resourceID][summary.ID] == version {
+			if _, duplicate := seenPages[summary.ID]; duplicate {
+				// The first scope already owns the emitted document; preserve this
+				// root's version record so a later selection change stays incremental.
+				if !forceFull {
+					if version, ok := priorPages[summary.ID]; ok {
+						next.SpacePages[resourceID][summary.ID] = version
+					}
+				}
+				continue
+			}
+			seenPages[summary.ID] = struct{}{}
+			version, versionKnown := pageVersion(summary)
+			// An unknown version cannot prove a page unchanged, so it must
+			// always refresh the body instead of skipping on a stable "t:".
+			if versionKnown {
+				if forceFull {
+					if next.SpacePages[resourceID][summary.ID] == version {
+						continue
+					}
+				} else if priorPages[summary.ID] == version {
 					continue
 				}
-			} else if priorPages[summary.ID] == version {
-				continue
 			}
 			full, err := client.body(ctx, summary.ID)
 			if err != nil {
@@ -211,12 +410,22 @@ func (c *Connector) fetchStream(
 				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
 					return nil, emitErr
 				}
+				if !forceFull {
+					if prior, ok := priorVersionByPage[summary.ID]; ok {
+						next.SpacePages[resourceID][summary.ID] = prior
+					}
+				}
 				continue
 			}
-			item, err := markdownItem(client, resourceID, summary, full)
+			item, err := markdownItem(ctx, client, resourceID, summary, full)
 			if err != nil {
 				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
 					return nil, emitErr
+				}
+				if !forceFull {
+					if prior, ok := priorVersionByPage[summary.ID]; ok {
+						next.SpacePages[resourceID][summary.ID] = prior
+					}
 				}
 				continue
 			}
@@ -228,99 +437,117 @@ func (c *Connector) fetchStream(
 				return nil, err
 			}
 		}
-		if !complete {
-			if err := reconcileUnlisted(ctx, client, h, s, resourceID, priorPages, seen, &next); err != nil {
-				return nil, err
-			}
-		} else if hadBaseline {
-			if len(pages) == 0 && len(priorPages) > 0 {
-				return nil, fmt.Errorf(
-					"refusing Confluence mirror deletion in %s: listing returned 0 pages against a %d-page baseline",
-					s.Key, len(priorPages),
-				)
-			}
-			missing := 0
-			for id := range priorPages {
-				if _, exists := seen[id]; !exists {
-					missing++
-				}
-			}
-			if missing >= 20 && missing*100 >= len(priorPages)*80 {
-				return nil, fmt.Errorf(
-					"refusing Confluence mirror deletion in %s: %d/%d pages disappeared",
-					s.Key, missing, len(priorPages),
-				)
-			}
-			for id := range priorPages {
-				if _, exists := seen[id]; exists {
-					continue
-				}
-				if err := emitDeleted(ctx, h, &next, resourceID, id); err != nil {
-					return nil, err
-				}
+	}
+	// Reconcile previous owners only after every current scope has been enumerated.
+	// A page may move between roots, so a missing page must be checked against every
+	// scope whose listing was cut short before a tombstone can be emitted.
+	previousPages := make(map[string]string)
+	for owner, pages := range baseline.SpacePages {
+		for id := range pages {
+			if _, exists := previousPages[id]; !exists {
+				previousPages[id] = owner
 			}
 		}
 	}
+	missing := make([]string, 0)
+	probeCount := 0
+	for id := range previousPages {
+		if _, present := seenPages[id]; present {
+			continue
+		}
+		owner := previousPages[id]
+		for _, s := range incompleteSpaces {
+			if probeCount >= maxDeletionProbes {
+				return nil, fmt.Errorf(
+					"Confluence deletion reconciliation deferred: more than %d pages need verification",
+					maxDeletionProbes,
+				)
+			}
+			probeCount++
+			present, err := client.pageInSpace(ctx, id, s.Key)
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				return nil, fmt.Errorf(
+					"Confluence deletion reconciliation deferred: could not verify page %s in space %s: %w",
+					id, s.Key, err,
+				)
+			}
+			if present {
+				version := baseline.SpacePages[owner][id]
+				if next.SpacePages[s.ID] == nil {
+					next.SpacePages[s.ID] = make(map[string]string)
+				}
+				next.SpacePages[s.ID][id] = version
+				seenPages[id] = struct{}{}
+				break
+			}
+		}
+		if _, present := seenPages[id]; present {
+			continue
+		}
+		missing = append(missing, id)
+	}
+	// Protect still-selected roots from a suspiciously large shrink. Removed
+	// roots are an explicit scope change, so their out-of-scope pages can be
+	// tombstoned once every current scope has been enumerated safely.
+	owners := make([]string, 0, len(baseline.SpacePages))
+	for owner := range baseline.SpacePages {
+		owners = append(owners, owner)
+	}
+	sort.Strings(owners)
+	for _, owner := range owners {
+		// A deliberate scope change may remove most of an old root. The guard is
+		// only for unexpected shrinkage of a still-selected, completely listed root.
+		if !currentRoots[owner] || incompleteRoots[owner] {
+			continue
+		}
+		pages := baseline.SpacePages[owner]
+		missingInRoot := 0
+		for id := range pages {
+			if _, present := seenPages[id]; !present {
+				missingInRoot++
+			}
+		}
+		if len(pages) > 0 && missingInRoot >= 20 && missingInRoot*100 >= len(pages)*80 {
+			return nil, fmt.Errorf(
+				"refusing Confluence mirror deletion: %d/%d previously synced pages would be removed from scope %s",
+				missingInRoot, len(pages), owner,
+			)
+		}
+	}
+	sort.Strings(missing)
+	for _, id := range missing {
+		deleted := types.FetchedItem{
+			ExternalID: id, IsDeleted: true, SourceResourceID: previousPages[id],
+			Metadata: map[string]string{"channel": types.ChannelConfluence},
+		}
+		if err := h.Emit(ctx, deleted); err != nil {
+			return nil, err
+		}
+		// Drop the tombstoned page before checkpointing so the cursor records
+		// the deletion itself; an interrupted run resumes with the remaining
+		// candidates instead of re-emitting completed tombstones.
+		removePageOwnership(&next, id)
+		if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
+			return nil, err
+		}
+	}
+	// Commit exactly the current ownership roots only after reconciliation. This
+	// removes cancelled scopes while keeping the on-disk cursor field compatible.
+	committedRoots := make(map[string]map[string]string, len(plan.Roots))
+	for _, root := range plan.Roots {
+		if pages := next.SpacePages[root.ResourceID]; pages != nil {
+			committedRoots[root.ResourceID] = pages
+		} else {
+			committedRoots[root.ResourceID] = map[string]string{}
+		}
+	}
+	next.SpacePages = committedRoots
 	next.FullSync = false
 	next.FullSyncBaseline = nil
 	return next.syncCursor(), nil
-}
-
-// reconcileUnlisted handles the pages a cut-short listing did not return. The
-// listing proves nothing about them, so each one is looked up on its own and
-// deleted only when Confluence confirms it is gone from the space. Pages that
-// are still there, could not be checked, or exceed the per-run probe budget
-// stay tracked with their prior version and are checked again next run.
-func reconcileUnlisted(
-	ctx context.Context,
-	c *client,
-	h datasource.StreamHandler,
-	s space,
-	resourceID string,
-	priorPages map[string]string,
-	seen map[string]struct{},
-	next *cursor,
-) error {
-	probed := 0
-	for id, version := range priorPages {
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		if probed >= maxDeletionProbes {
-			next.SpacePages[resourceID][id] = version
-			continue
-		}
-		probed++
-		present, err := c.pageInSpace(ctx, id, s.Key)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			logger.Warnf(ctx, "[Confluence] space %s: could not check unlisted page %s, keeping it: %v", s.Key, id, err)
-			next.SpacePages[resourceID][id] = version
-			continue
-		}
-		if present {
-			next.SpacePages[resourceID][id] = version
-			continue
-		}
-		if err := emitDeleted(ctx, h, next, resourceID, id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func emitDeleted(ctx context.Context, h datasource.StreamHandler, next *cursor, resourceID, id string) error {
-	deleted := types.FetchedItem{
-		ExternalID: id, IsDeleted: true, SourceResourceID: resourceID,
-		Metadata: map[string]string{"channel": types.ChannelConfluence},
-	}
-	if err := h.Emit(ctx, deleted); err != nil {
-		return err
-	}
-	delete(next.SpacePages[resourceID], id)
-	return h.Checkpoint(ctx, next.syncCursor())
 }
 
 func failedPageItem(resourceID string, summary page, err error) types.FetchedItem {
@@ -361,8 +588,18 @@ func classifyConfluenceError(err error) (code, reason string) {
 	return "confluence_sync_failed", "Confluence page could not be synced; see server logs"
 }
 
-func markdownItem(client *client, resourceID string, summary page, full pageBody) (types.FetchedItem, error) {
+func markdownItem(
+	ctx context.Context,
+	client *client,
+	resourceID string,
+	summary page,
+	full pageBody,
+) (types.FetchedItem, error) {
 	html := full.Body.View.Value
+	// Inline same-origin private Confluence images as data URIs so the generic
+	// docparser image pipeline can persist them and rewrite to resource:// URLs.
+	// Best-effort: a failed image keeps its original src and never fails the page.
+	html = newAssetResolver(client).Resolve(ctx, html)
 	markdown, err := htmltomd.ConvertString(html)
 	if err != nil {
 		return types.FetchedItem{}, err

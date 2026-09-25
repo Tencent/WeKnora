@@ -1032,6 +1032,12 @@ export default {
     prereqStep3Brief_yuque: '（可选）企业版填写 Base URL',
     prereqStep3Desc_yuque: '公有云用户无需填写；语雀企业版或私有部署请填写企业域名',
     prereqOpenConsole_yuque: '前往语雀 Token 设置',
+    yuqueFolderModeLabel: '目录结构',
+    yuqueFolderModeToc: '按语雀目录分层',
+    yuqueFolderModeNone: '平铺在根目录',
+    yuqueFolderModeHint: '按语雀的目录层级放置文档。注意：之后在知识库里手动调整的目录，会在该文档下次同步时被覆盖回语雀的结构。',
+    yuqueTOCOnly: '只同步语雀目录中可见的文档',
+    yuqueTOCOnlyHint: '需要先选择「按语雀目录分层」。已经同步进知识库的文档不受影响——语雀中不在目录里的文档只是不再新增，不会被删除。',
     prereqBarText_dingtalk: '首次使用？点击查看钉钉应用配置指引',
     prereqStep1Brief_dingtalk: '创建企业内部应用',
     prereqStep1Desc_dingtalk: '在钉钉开放平台创建企业内部应用，并获取 Client ID 和 Client Secret',
@@ -1127,6 +1133,9 @@ export default {
       feedUrlsHint: '每行一个 RSS / Atom 订阅源地址，支持同时填写多个',
       authHeaders: '自定义请求头（可选）',
       authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
+    },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud 暂不支持在此列出空间顶层文件夹等容器下的页面；选择整个空间仍会同步它们。'
     },
     connectorDesc: {
       feishu: '同步飞书知识库中的文档、表格、文件',
