@@ -43,19 +43,35 @@ func TestMergeWebSearchConfigForUpdate_PreservesRedactedSecrets(t *testing.T) {
 func TestMergeParserEngineConfigForUpdate_PreservesRedactedSecrets(t *testing.T) {
 	existing := &ParserEngineConfig{
 		MinerUAPIKey:          "mineru-secret",
+		MinerUServerAPIKey:    "mineru-server-secret",
 		PaddleOCRVLCloudToken: "paddle-secret",
 		MinerUEndpoint:        "http://mineru",
 	}
 	incoming := &ParserEngineConfig{
 		MinerUAPIKey:          RedactedSecretPlaceholder,
+		MinerUServerAPIKey:    RedactedSecretPlaceholder,
 		PaddleOCRVLCloudToken: RedactedSecretPlaceholder,
 		MinerUEndpoint:        "http://mineru-new",
 	}
 	merged := MergeParserEngineConfigForUpdate(incoming, existing)
 	require.NotNil(t, merged)
 	assert.Equal(t, "mineru-secret", merged.MinerUAPIKey)
+	assert.Equal(t, "mineru-server-secret", merged.MinerUServerAPIKey)
 	assert.Equal(t, "paddle-secret", merged.PaddleOCRVLCloudToken)
 	assert.Equal(t, "http://mineru-new", merged.MinerUEndpoint)
+}
+
+func TestParserEngineConfigForResponse_MasksMinerUSecrets(t *testing.T) {
+	cfg := &ParserEngineConfig{
+		MinerUAPIKey:       "mineru-secret",
+		MinerUServerAPIKey: "mineru-server-secret",
+		MinerUEndpoint:     "http://mineru",
+	}
+	resp := ParserEngineConfigForResponse(cfg, true)
+	require.NotNil(t, resp)
+	assert.Equal(t, RedactedSecretPlaceholder, resp.MinerUAPIKey)
+	assert.Equal(t, RedactedSecretPlaceholder, resp.MinerUServerAPIKey)
+	assert.Equal(t, "http://mineru", resp.MinerUEndpoint)
 }
 
 func TestMergeParserEngineConfigForUpdate_PreservesLegacyChatParserRules(t *testing.T) {

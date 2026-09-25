@@ -93,8 +93,8 @@
           <t-popconfirm
             theme="warning"
             attach="body"
-            :content="$t('settings.skills.manageUninstallConfirm', { name: managedSkill?.name || '' })"
-            :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
+            :content="hostCopy('settings.skills.manageUninstallConfirm', 'manageUninstallConfirm', { name: managedSkill?.name || '' })"
+            :confirm-btn="{ content: hostCopy('settings.skills.manageUninstall', 'manageUninstall'), theme: 'danger' }"
             :cancel-btn="{ content: $t('common.cancel') }"
             placement="bottom-right"
             @confirm="managedSkill && removeSkill(managedSkill)"
@@ -107,13 +107,13 @@
               :disabled="!managedSkill || isBusy(managedSkill)"
               :loading="!!managedSkill && deletingId === managedSkill.id"
             >
-              {{ $t('settings.skills.manageUninstall') }}
+              {{ hostCopy('settings.skills.manageUninstall', 'manageUninstall') }}
             </t-button>
           </t-popconfirm>
         </Teleport>
         <div v-if="uninstallDone" class="skill-manage__done">
           <t-icon name="check-circle-filled" size="22px" />
-          <p>{{ $t('settings.sandbox.skillRemoveDone', { name: uninstallingName }) }}</p>
+          <p>{{ hostCopy('settings.sandbox.skillRemoveDone', 'removeDone', { name: uninstallingName }) }}</p>
         </div>
         <template v-else-if="managedSkill && isRemoving(managedSkill)">
           <section class="skill-manage__section skill-manage__section--remove">
@@ -134,10 +134,27 @@
           </section>
         </template>
         <template v-else-if="managedSkill">
+          <p v-if="managedServedNote" class="skill-manage__served">{{ managedServedNote }}</p>
+          <div v-if="managedUpgradeHint" class="skill-manage__row skill-manage__row--upgrade">
+            <div class="skill-manage__info">
+              <label>{{ $t('settings.skills.upgradeRowTitle') }}</label>
+              <p>{{ managedUpgradeHint }}</p>
+            </div>
+            <div class="skill-manage__controls">
+              <t-button
+                theme="primary"
+                size="small"
+                :loading="upgradingId === managedSkill.id"
+                @click="managedSkill && upgradeSkill(managedSkill)"
+              >
+                {{ $t('settings.skills.upgrade') }}
+              </t-button>
+            </div>
+          </div>
           <div class="skill-manage__row">
             <div class="skill-manage__info">
               <label>{{ $t('settings.skills.manageEnable') }}</label>
-              <p>{{ $t('settings.sandbox.skillDisableHint') }}</p>
+              <p>{{ hostCopy('settings.sandbox.skillDisableHint', 'disableHint') }}</p>
             </div>
             <div class="skill-manage__controls">
               <t-switch
@@ -147,7 +164,7 @@
                 @change="(v: any) => managedSkill && toggleEnabled(managedSkill, Boolean(v))"
               />
               <t-tooltip
-                v-if="managedSkill.status === 'failed'"
+                v-if="managedSkill.status === 'failed' && !managedUpgradable"
                 :content="$t('settings.sandbox.skillRetryHint')"
                 placement="top"
               >
@@ -172,7 +189,7 @@
           </ul>
           <section v-if="skillHasDeclaredEnvs(managedSkill)" class="skill-manage__section">
             <h4>{{ $t('settings.sandbox.skillEnv.toggle') }}</h4>
-            <p class="skill-envs__hint">{{ $t('settings.sandbox.skillEnv.workspaceHint') }}</p>
+            <p class="skill-envs__hint">{{ hostCopy('settings.sandbox.skillEnv.workspaceHint', 'envWorkspaceHint') }}</p>
             <div class="skill-envs__rows">
               <div v-for="(env, envIdx) in managedSkill.envs" :key="env.name" class="skill-envs__row">
                 <div class="skill-envs__meta">
@@ -255,7 +272,7 @@
               :session-id="managedSkill.install_session_id || ''"
               :message-id="managedSkill.install_message_id || ''"
               :live="managedSkill.status === 'installing'"
-              :can-retry="managedSkill.status === 'ready' || managedSkill.status === 'failed'"
+              :can-retry="(managedSkill.status === 'ready' || managedSkill.status === 'failed') && !managedUpgradable"
               @restarted="loadSkills()"
             />
           </section>
@@ -309,7 +326,7 @@
                   {{ cardStatusText(skill) }}
                 </span>
                 <div class="skill-card__actions">
-                  <t-tooltip :content="$t('settings.sandbox.skillDisableHint')" placement="top">
+                  <t-tooltip :content="hostCopy('settings.sandbox.skillDisableHint', 'disableHint')" placement="top">
                     <t-switch
                       size="small"
                       :value="skill.enabled"
@@ -361,7 +378,7 @@
                             </t-button>
                           </header>
                           <div class="skill-env-popup__body">
-                            <p class="skill-envs__hint">{{ $t('settings.sandbox.skillEnv.workspaceHint') }}</p>
+                            <p class="skill-envs__hint">{{ hostCopy('settings.sandbox.skillEnv.workspaceHint', 'envWorkspaceHint') }}</p>
                             <div class="skill-envs__rows">
                               <div v-for="(env, envIdx) in skill.envs" :key="env.name" class="skill-envs__row">
                                 <div class="skill-envs__meta">
@@ -553,7 +570,7 @@
                     theme="warning"
                     attach="body"
                     :content="deleteHint"
-                    :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
+                    :confirm-btn="{ content: hostCopy('settings.skills.manageUninstall', 'manageUninstall'), theme: 'danger' }"
                     :cancel-btn="{ content: $t('common.cancel') }"
                     placement="top-right"
                     @confirm="removeSkill(skill)"
@@ -562,7 +579,7 @@
                       type="button"
                       class="skill-card__icon-btn skill-card__icon-btn--danger"
                       :disabled="deletingId === skill.id"
-                      :aria-label="$t('settings.skills.manageUninstall')"
+                      :aria-label="hostCopy('settings.skills.manageUninstall', 'manageUninstall')"
                     >
                       <t-icon name="delete" size="14px" />
                     </button>
@@ -625,6 +642,8 @@ import {
   type ConfigSkill,
   type SandboxConfigRecord,
 } from '@/api/system'
+import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill'
+import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
 import {
   MAX_ENV_VALUE_BYTES,
@@ -648,10 +667,14 @@ const props = withDefaults(defineProps<{
   mode?: 'install' | 'list'
   hideAdd?: boolean
   focusSkillId?: string
+  // The workspace definition the focused skill was installed from. Only the
+  // catalog knows a newer version exists, so without it no upgrade is offered.
+  catalogItem?: SkillCatalogItem | null
 }>(), {
   mode: 'list',
   hideAdd: false,
   focusSkillId: '',
+  catalogItem: null,
 })
 
 const emit = defineEmits<{
@@ -662,7 +685,13 @@ const emit = defineEmits<{
   installed: [skillId: string]
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+function hostCopy(base: string, hostSuffix: string, params: Record<string, unknown> = {}) {
+  const hostKey = `settings.skills.host.${hostSuffix}`
+  if (props.record?.sandbox_type === 'host' && te(hostKey)) return t(hostKey, params)
+  return t(base, params)
+}
 const headerActionsTarget = inject(SETTING_DRAWER_HEADER_ACTIONS_ID, '')
 
 const loading = ref(false)
@@ -674,6 +703,7 @@ const skills = ref<ConfigSkill[]>([])
 const togglingId = ref('')
 const deletingId = ref('')
 const retryingId = ref('')
+const upgradingId = ref('')
 const stoppingId = ref('')
 const uninstallingId = ref('')
 const uninstallingName = ref('')
@@ -704,7 +734,9 @@ const {
 } = useConfigSkillInstallProgress({
   retainProgress: true,
   onDone() {
-    void loadSkills()
+    // A silent refresh. The non-silent path turns the loading mask on for
+    // every completion, which flashes the whole progress drawer.
+    void loadSkills(true)
     void refreshImage()
   },
 })
@@ -781,6 +813,36 @@ const visibleSkills = computed(() => {
 
 const managedSkill = computed(() =>
   props.focusSkillId ? (visibleSkills.value[0] || null) : null,
+)
+
+// An install the catalog has moved past is offered the upgrade and not the
+// retries: both of those replay the archive this install is pinned to, which
+// is exactly the version the operator came here to leave behind.
+const managedUpgradable = computed(() => {
+  const skill = managedSkill.value
+  const catalog = props.catalogItem
+  return Boolean(skill && catalog && installUpgradable(catalog, skill))
+})
+
+const managedUpgradeHint = computed(() => {
+  const skill = managedSkill.value
+  const catalog = props.catalogItem
+  if (!skill || !catalog || !managedUpgradable.value) return ''
+  const versions = upgradeVersions(catalog, skill)
+  if (skill.status === 'failed') {
+    return versions
+      ? t('settings.skills.upgradeRowHintFailedVersions', versions)
+      : t('settings.skills.upgradeRowHintFailed')
+  }
+  return versions
+    ? t('settings.skills.upgradeRowHintVersions', versions)
+    : t('settings.skills.upgradeRowHint')
+})
+
+// While this install runs or after it failed, the sandbox keeps running the
+// previous version, which is worth saying next to a spinner or an error.
+const managedServedNote = computed(() =>
+  managedSkill.value ? servedPreviousText(t, managedSkill.value) : '',
 )
 
 const showHeaderUninstall = computed(() => {
@@ -1024,10 +1086,14 @@ const REMOVE_STAGE_I18N: Record<string, string> = {
 
 function progressStageText(skill: ConfigSkill): string {
   const ev = progressEvent(skill.id)
+  if (props.record?.sandbox_type === 'host') {
+    if (ev?.stage === 'sandbox_ready') return hostCopy('settings.sandbox.skillRemoveStage.sandbox_ready', 'removeSandboxReady')
+    if (ev?.stage === 'removed') return hostCopy('settings.sandbox.skillRemoveStage.removed', 'removeRemoved')
+  }
   const stageKey = ev?.stage ? REMOVE_STAGE_I18N[ev.stage] : ''
   if (stageKey) return t(stageKey)
   if (skill.status === 'removing' || deletingId.value === skill.id) {
-    return t('settings.sandbox.skillRemoveWaiting')
+    return hostCopy('settings.sandbox.skillRemoveWaiting', 'removeWaiting')
   }
   return ev?.log || ''
 }
@@ -1104,7 +1170,7 @@ function followProgress(skillId: string) {
 }
 
 async function refreshImage() {
-  if (!props.record) return
+  if (!props.record || props.record.sandbox_type === 'host') return
   const generation = panelGeneration
   try {
     const res = await getSandboxConfigById(props.record.id)
@@ -1303,6 +1369,35 @@ async function retrySkill(skill: ConfigSkill) {
   }
 }
 
+// An upgrade is the catalog install onto this one sandbox. The retry above
+// cannot do it: it replays the archive this sandbox already runs.
+async function upgradeSkill(skill: ConfigSkill) {
+  const catalog = props.catalogItem
+  if (!props.record || !catalog) return
+  const configId = props.record.id
+  const generation = panelGeneration
+  upgradingId.value = skill.id
+  forgetProgress(skill.id)
+  try {
+    const res = await installSkillCatalog(catalog.id, [configId])
+    if (generation !== panelGeneration) return
+    const refused = res?.data?.errors?.[configId]
+    if (refused) {
+      MessagePlugin.error(refused)
+      return
+    }
+    MessagePlugin.success(t('settings.skills.upgradeAccepted'))
+    await loadSkills()
+    if (generation !== panelGeneration) return
+    followProgress(skill.id)
+  } catch (e: any) {
+    if (generation !== panelGeneration) return
+    MessagePlugin.error(e?.message || t('settings.sandbox.skillUploadFailed'))
+  } finally {
+    if (generation === panelGeneration) upgradingId.value = ''
+  }
+}
+
 async function stopSkill(skill: ConfigSkill) {
   if (!props.record) return
   const generation = panelGeneration
@@ -1370,6 +1465,7 @@ watch(
       skills.value = []
       loading.value = false
       retryingId.value = ''
+      upgradingId.value = ''
       stoppingId.value = ''
       deletingId.value = ''
       uninstallingId.value = ''
@@ -1419,7 +1515,7 @@ onUnmounted(() => {
 
 .installer-model-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1433,10 +1529,10 @@ onUnmounted(() => {
   width: 100%;
   min-height: 44px;
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, background var(--app-motion-base) ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1459,7 +1555,7 @@ onUnmounted(() => {
 
   &--large {
     min-height: 180px;
-    border-radius: 12px;
+    border-radius: var(--app-radius-xl);
     border-width: 2px;
   }
 }
@@ -1498,11 +1594,11 @@ onUnmounted(() => {
 }
 
 .file-upload-area--large .upload-primary-text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
 }
 
 .file-upload-area--large .upload-secondary-text {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .upload-icon {
@@ -1520,18 +1616,18 @@ onUnmounted(() => {
 }
 
 .upload-primary-text {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .upload-secondary-text {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
 .upload-file-name {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-brand-color);
 }
@@ -1542,7 +1638,7 @@ onUnmounted(() => {
 
 .upload-hint {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   line-height: 1.5;
 }
@@ -1561,7 +1657,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   margin: 10px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 
   &::before,
@@ -1617,6 +1713,23 @@ onUnmounted(() => {
   gap: 16px;
 }
 
+.skill-manage__served {
+  margin: 0;
+  padding: var(--app-space-2) var(--app-space-3);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+}
+
+.skill-manage__row--upgrade {
+  align-items: center;
+  padding: var(--app-space-2) var(--app-space-3);
+  border-radius: var(--app-radius-sm);
+  background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
+}
+
 .skill-manage__controls {
   display: flex;
   align-items: center;
@@ -1630,14 +1743,14 @@ onUnmounted(() => {
   label {
     display: block;
     margin-bottom: 4px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   p {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -1653,7 +1766,7 @@ onUnmounted(() => {
 
   h4 {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -1669,7 +1782,7 @@ onUnmounted(() => {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     line-height: 1;
     color: var(--td-brand-color);
@@ -1687,7 +1800,7 @@ onUnmounted(() => {
 
 .skill-manage__remove-stage {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1698,11 +1811,11 @@ onUnmounted(() => {
   align-items: flex-start;
   gap: 10px;
   padding: 8px 0 4px;
-  color: var(--td-success-color, var(--td-brand-color));
+  color: var(--td-success-color);
 
   p {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.55;
     color: var(--td-text-color-primary);
   }
@@ -1710,7 +1823,7 @@ onUnmounted(() => {
 
 .skill-envs__hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1735,17 +1848,17 @@ onUnmounted(() => {
 }
 
 .skill-envs__name {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-  font-size: 12px;
+  font-family: var(--td-font-family-mono);
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   overflow-wrap: anywhere;
 }
 
 .skill-envs__tag {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
 }
@@ -1761,7 +1874,7 @@ onUnmounted(() => {
 }
 
 .skill-envs__desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1793,14 +1906,14 @@ onUnmounted(() => {
   gap: 12px;
   padding: 14px 14px 14px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
 
   &--focused {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 168, 112, 0.18));
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
   }
 
   &--bare {
@@ -1843,14 +1956,14 @@ onUnmounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -1899,7 +2012,7 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
@@ -1914,17 +2027,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
   padding: 1px 8px 1px 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 16px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
 
   &--on {
-    color: var(--td-success-color-7, #118053);
+    color: var(--td-success-color-7);
 
     .skill-card__status-dot {
-      background: var(--td-success-color, #118053);
+      background: var(--td-success-color);
     }
   }
 
@@ -1945,10 +2058,10 @@ onUnmounted(() => {
   }
 
   &--failed {
-    color: var(--td-warning-color-7, #b85c00);
+    color: var(--td-warning-color-7);
 
     .skill-card__status-dot {
-      background: var(--td-warning-color, #e37318);
+      background: var(--td-warning-color);
     }
   }
 }
@@ -2001,7 +2114,7 @@ onUnmounted(() => {
   color: var(--td-text-color-placeholder);
   cursor: pointer;
   line-height: 0;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   :deep(.t-icon) {
     display: block;
@@ -2027,7 +2140,7 @@ onUnmounted(() => {
   }
 
   &--danger:hover:not(:disabled) {
-    background: var(--td-error-color-1, var(--td-bg-color-secondarycontainer));
+    background: var(--td-error-color-1);
     color: var(--td-error-color);
   }
 }
@@ -2042,7 +2155,7 @@ onUnmounted(() => {
 }
 
 .skill-card__type {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 1.3;
   color: var(--td-text-color-placeholder);
@@ -2056,14 +2169,14 @@ onUnmounted(() => {
   overflow: hidden;
   min-width: 0;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-secondary);
 }
 
 .skill-card__log {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 }
@@ -2071,7 +2184,7 @@ onUnmounted(() => {
 .skill-card__error {
   margin: 2px 0 0;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   word-break: break-word;
   list-style: none;
@@ -2106,7 +2219,7 @@ onUnmounted(() => {
     padding: 0 !important;
     width: 420px;
     max-width: min(420px, calc(100vw - 32px));
-    border-radius: 10px !important;
+    border-radius: var(--app-radius-lg) !important;
     background: var(--td-bg-color-container) !important;
     border: 1px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -2135,7 +2248,7 @@ onUnmounted(() => {
   }
 
   &__title {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     line-height: 1.35;
     color: var(--td-text-color-primary);
@@ -2149,7 +2262,7 @@ onUnmounted(() => {
     align-items: center;
     gap: 6px;
     margin-top: 2px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 1.4;
     color: var(--td-text-color-placeholder);
   }
@@ -2217,7 +2330,7 @@ onUnmounted(() => {
 
   .skill-envs__hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -2243,17 +2356,17 @@ onUnmounted(() => {
   }
 
   .skill-envs__name {
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-    font-size: 12px;
+    font-family: var(--td-font-family-mono);
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-primary);
     overflow-wrap: anywhere;
   }
 
   .skill-envs__tag {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 18px;
     padding: 0 8px;
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
   }
@@ -2269,7 +2382,7 @@ onUnmounted(() => {
   }
 
   .skill-envs__desc {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }

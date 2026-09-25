@@ -153,7 +153,7 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 				ToolCalls: []types.ToolCall{
 					{
 						ID:   "call_1",
-						Name: agenttools.ToolKnowledgeSearch,
+						Name: agenttools.ToolSearchKnowledge,
 						Args: map[string]interface{}{"query": "foo"},
 						Result: &types.ToolResult{
 							Success: true,
@@ -187,7 +187,7 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 	assert.Equal(t, "Let me search.", got[0].Content)
 	if assert.Len(t, got[0].ToolCalls, 1) {
 		assert.Equal(t, "call_1", got[0].ToolCalls[0].ID)
-		assert.Equal(t, agenttools.ToolKnowledgeSearch, got[0].ToolCalls[0].Function.Name)
+		assert.Equal(t, agenttools.ToolSearchKnowledge, got[0].ToolCalls[0].Function.Name)
 		assert.Contains(t, got[0].ToolCalls[0].Function.Arguments, "foo")
 	}
 	// 2. tool result paired with the call ID
@@ -214,7 +214,7 @@ func TestBuildAssistantHistoryMessages_SkipsPipelineTimelineToolCalls(t *testing
 				ToolCalls: []types.ToolCall{
 					{
 						ID:     types.PipelineToolCallIDPrefix + "abc",
-						Name:   agenttools.ToolKnowledgeSearch,
+						Name:   agenttools.ToolSearchKnowledge,
 						Args:   map[string]interface{}{"query": "你好"},
 						Result: &types.ToolResult{Success: true, Output: "未检索到相关内容"},
 					},
@@ -245,7 +245,7 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 				ToolCalls: []types.ToolCall{
 					{
 						ID:   "call_err",
-						Name: agenttools.ToolKnowledgeSearch,
+						Name: agenttools.ToolSearchKnowledge,
 						Args: map[string]interface{}{"query": "x"},
 						Result: &types.ToolResult{
 							Success: false,
@@ -264,7 +264,7 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 		Role:       "tool",
 		Content:    "Error: kb unreachable",
 		ToolCallID: "call_err",
-		Name:       agenttools.ToolKnowledgeSearch,
+		Name:       agenttools.ToolSearchKnowledge,
 	}, got[1])
 }
 
@@ -323,7 +323,7 @@ func TestBuildTurnBodyMessages_KeepsMidRunUsersInPlace(t *testing.T) {
 				Timestamp: firstStep,
 				ToolCalls: []types.ToolCall{{
 					ID:     "call_a",
-					Name:   agenttools.ToolKnowledgeSearch,
+					Name:   agenttools.ToolSearchKnowledge,
 					Args:   map[string]interface{}{"query": "A"},
 					Result: &types.ToolResult{Success: true, Output: "found A"},
 				}},
@@ -334,7 +334,7 @@ func TestBuildTurnBodyMessages_KeepsMidRunUsersInPlace(t *testing.T) {
 				Timestamp: secondStep,
 				ToolCalls: []types.ToolCall{{
 					ID:     "call_b",
-					Name:   agenttools.ToolKnowledgeSearch,
+					Name:   agenttools.ToolSearchKnowledge,
 					Args:   map[string]interface{}{"query": "B"},
 					Result: &types.ToolResult{Success: true, Output: "found B"},
 				}},
@@ -377,7 +377,7 @@ func TestBuildTurnBodyMessages_LateMidRunUserPrecedesAnswer(t *testing.T) {
 			Timestamp: step,
 			ToolCalls: []types.ToolCall{{
 				ID:     "call_a",
-				Name:   agenttools.ToolKnowledgeSearch,
+				Name:   agenttools.ToolSearchKnowledge,
 				Result: &types.ToolResult{Success: true, Output: "found"},
 			}},
 		}},
@@ -398,13 +398,13 @@ func TestBuildTurnBodyMessages_LateMidRunUserPrecedesAnswer(t *testing.T) {
 // dropped — every other tool (KB search, web search, MCP tools…) must survive.
 func TestFilterNonTerminalToolCalls(t *testing.T) {
 	in := []types.ToolCall{
-		{Name: agenttools.ToolKnowledgeSearch},
+		{Name: agenttools.ToolSearchKnowledge},
 		{Name: "final_answer"},
 		{Name: agenttools.ToolWebSearch},
 	}
 	out := filterNonTerminalToolCalls(in)
 	if assert.Len(t, out, 2) {
-		assert.Equal(t, agenttools.ToolKnowledgeSearch, out[0].Name)
+		assert.Equal(t, agenttools.ToolSearchKnowledge, out[0].Name)
 		assert.Equal(t, agenttools.ToolWebSearch, out[1].Name)
 	}
 }
@@ -424,7 +424,7 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 				ReasoningContent: "model's chain of thought",
 				ToolCalls: []types.ToolCall{{
 					ID:               "call_1",
-					Name:             agenttools.ToolKnowledgeSearch,
+					Name:             agenttools.ToolSearchKnowledge,
 					Args:             map[string]interface{}{"query": "foo"},
 					ProviderMetadata: types.ToolCallMetadata{"google": json.RawMessage(`{"thought_signature":"gemini-history-signature"}`)},
 					Result: &types.ToolResult{
@@ -448,6 +448,78 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 	// Tool message and final answer message must NOT carry reasoning_content.
 	assert.Empty(t, got[1].ReasoningContent)
 	assert.Empty(t, got[2].ReasoningContent)
+}
+
+// TestBuildAssistantHistoryMessages_ReplaysFinalAnswerReasoning covers the
+// common shape the tool-round replay missed: a turn that ends with a plain
+// answer and no tool calls.
+//
+// The engine records that closing round as an ordinary step, artifacts and
+// all, but buildAgentStepMessages emits nothing for a step without tool calls,
+// so everything the provider needs back — the OpenAI Responses encrypted
+// reasoning items, a DeepSeek/MiMo reasoning_content, an Anthropic thinking
+// signature — used to end at the turn boundary.
+func TestBuildAssistantHistoryMessages_ReplaysFinalAnswerReasoning(t *testing.T) {
+	items := json.RawMessage(`[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"}]`)
+	msg := &types.Message{
+		Role:    "assistant",
+		Content: "<think>leaked</think>The answer is 42.",
+		AgentSteps: types.AgentSteps{
+			{
+				Iteration:          0,
+				Thought:            "The answer is 42.",
+				ReasoningContent:   "checking the arithmetic",
+				ReasoningSignature: "sig-1",
+				ReasoningMetadata:  types.ProviderMetadata{"openai_responses_reasoning": items},
+			},
+		},
+	}
+	got := buildAssistantHistoryMessages(msg)
+	require.Len(t, got, 1)
+	assert.Equal(t, "assistant", got[0].Role)
+	// The think tags stay out of the visible answer; the artifacts ride in
+	// their own fields, which is where the providers read them.
+	assert.Equal(t, "The answer is 42.", got[0].Content)
+	assert.Equal(t, "checking the arithmetic", got[0].ReasoningContent)
+	assert.Equal(t, "sig-1", got[0].ReasoningSignature)
+	assert.JSONEq(t, string(items), string(got[0].ReasoningMetadata["openai_responses_reasoning"]))
+}
+
+// TestBuildAssistantHistoryMessages_FinalAnswerDoesNotDuplicateReasoning pins
+// the other half: artifacts buildAgentStepMessages already replayed must not be
+// repeated on the final message. A round that issued tool calls, and a round
+// whose text was already emitted as an intermediate answer, both carry their
+// own assistant message.
+func TestBuildAssistantHistoryMessages_FinalAnswerDoesNotDuplicateReasoning(t *testing.T) {
+	toolRound := types.AgentStep{
+		Thought:          "Let me search.",
+		ReasoningContent: "tool round thinking",
+		ToolCalls: []types.ToolCall{{
+			ID:     "call_1",
+			Name:   agenttools.ToolSearchKnowledge,
+			Args:   map[string]interface{}{"query": "foo"},
+			Result: &types.ToolResult{Success: true, Output: "doc A"},
+		}},
+	}
+	withTools := buildAssistantHistoryMessages(&types.Message{
+		Role: "assistant", Content: "Found it.", AgentSteps: types.AgentSteps{toolRound},
+	})
+	require.Len(t, withTools, 3)
+	assert.Equal(t, "tool round thinking", withTools[0].ReasoningContent)
+	assert.Empty(t, withTools[2].ReasoningContent, "the tool round already replayed its own artifacts")
+
+	steered := buildAssistantHistoryMessages(&types.Message{
+		Role: "assistant", Content: "Shorter answer.",
+		AgentSteps: types.AgentSteps{{
+			Thought:            "Long answer.",
+			IntermediateAnswer: true,
+			ReasoningContent:   "intermediate round thinking",
+		}},
+	})
+	require.Len(t, steered, 2)
+	assert.Equal(t, "intermediate round thinking", steered[0].ReasoningContent)
+	assert.Empty(t, steered[1].ReasoningContent,
+		"the intermediate answer already carries this step's artifacts")
 }
 
 func TestMCPProxyHistoryRetainsProtocolCallAndTarget(t *testing.T) {

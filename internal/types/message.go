@@ -240,10 +240,34 @@ type MessageArtifact struct {
 	SourcePath  string    `json:"source_path"`            // Absolute path inside the sandbox (used for diff)
 	ModTime     time.Time `json:"mod_time"`               // Sandbox-side modification time (used for diff)
 	CreatedAt   time.Time `json:"created_at"`             // When WeKnora persisted the blob
+	// DeletedAt marks a file the user deleted. The entry stays in the list
+	// rather than being removed because its position IS the download address
+	// (msg.Artifacts[index]); dropping it would shift every later file's index
+	// and hand an old link the wrong blob. Keeping it also keeps the entry in
+	// ArtifactCollector's de-duplication set, so the next collect does not
+	// re-attach the very file that was deleted — its sandbox mtime has not
+	// moved. Clients filter these out; the bytes are already reclaimed.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
+
+// Deleted reports whether the user deleted this artifact.
+func (a MessageArtifact) Deleted() bool { return a.DeletedAt != nil }
 
 // MessageArtifacts is a slice of MessageArtifact for database storage.
 type MessageArtifacts []MessageArtifact
+
+// Live returns the artifacts the user has not deleted, preserving order. The
+// caller loses the positional index, so use it for counting and display only —
+// anything that addresses an artifact for download must index the full slice.
+func (m MessageArtifacts) Live() MessageArtifacts {
+	out := make(MessageArtifacts, 0, len(m))
+	for _, a := range m {
+		if !a.Deleted() {
+			out = append(out, a)
+		}
+	}
+	return out
+}
 
 // Value implements the driver.Valuer interface for database serialization
 func (m MessageArtifacts) Value() (driver.Value, error) {
@@ -363,7 +387,11 @@ type Message struct {
 	// Skill-generated files produced during this assistant turn (assistant messages only).
 	// Populated by ArtifactCollector after the sandbox finishes, referenced by the
 	// artifact download endpoint. Empty for user messages and turns without skills.
-	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"type:jsonb;column:artifacts"`
+	//
+	// Stored in the message_artifacts table, not on the message row: the message
+	// repository loads it with every message it returns and writes it whenever it
+	// is non-nil on create or update. A nil slice leaves the stored rows alone.
+	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"-"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// Whether this response is a fallback (no knowledge base match found)
@@ -406,6 +434,11 @@ type Message struct {
 	// failed checkpoint must never block the reply). A message without a
 	// checkpoint cannot serve as a fork point with sandbox state.
 	SandboxCheckpoint *SandboxCheckpoint `json:"sandbox_checkpoint,omitempty" gorm:"type:jsonb"`
+	// ContextCheckpoint is the agent compaction summary covering this turn
+	// and every turn before it (see ContextCheckpoint). Assistant messages
+	// only; nil unless a later turn's compaction ended exactly here. Internal
+	// to history loading, so it stays out of API responses.
+	ContextCheckpoint *ContextCheckpoint `json:"-" gorm:"type:jsonb;column:context_checkpoint"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp

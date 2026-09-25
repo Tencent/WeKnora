@@ -13,7 +13,7 @@
         margin: 16px 0;
         padding: 16px;
         background: var(--td-bg-color-secondarycontainer);
-        border-radius: 8px;
+        border-radius: var(--app-radius-md);
         overflow-x: auto;
         text-align: center;
 
@@ -33,8 +33,8 @@
         font-weight: bold;
         color: var(--td-text-color-primary);
         font-family: var(--app-font-family);
-        transition: all 0.2s ease-out;
-        font-size: 20px;
+        transition: all var(--app-motion-base) ease-out;
+        font-size: var(--app-text-3xl);
     }
 
     .hljs-title,
@@ -91,22 +91,22 @@
     ol,
     dl,
     table {
-        font-size: 14px;
+        font-size: var(--app-text-base);
         margin: 10px 0;
         font-family: var(--app-font-family);
     }
 
     h2 {
-        font-size: 18px;
+        font-size: var(--app-text-2xl);
     }
 
     h3 {
-        font-size: 16px;
+        font-size: var(--app-text-xl);
         font-weight: 500;
     }
 
     summary {
-        font-size: 14px;
+        font-size: var(--app-text-base);
         cursor: pointer;
     }
 
@@ -208,7 +208,7 @@
     table {
         padding: 0;
         word-break: initial;
-        /* border-radius: 4px; */
+        /* border-radius: var(--app-radius-xs); */
         border-collapse: collapse;
         border-spacing: 0;
         width: 100%;
@@ -257,7 +257,7 @@
     }
 
     figure {
-        border-radius: 8px;
+        border-radius: var(--app-radius-md);
         margin-left: 0;
         margin-right: 0;
         background: var(--td-bg-color-container);
@@ -271,7 +271,7 @@
 
     @media print {
         html {
-            font-size: 13px;
+            font-size: var(--app-text-md);
         }
 
         table,
@@ -367,7 +367,7 @@
     }
 
     .code-tooltip {
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
         border: 1px solid var(--td-component-stroke);
         background-color: var(--td-bg-color-secondarycontainer);
     }
@@ -387,11 +387,11 @@
     h6.md-end-block.md-heading:after {
         color: var(--td-text-color-disabled) !important;
         border: 1px solid;
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
         position: absolute;
         left: -2.5rem;
         float: left;
-        font-size: 14px;
+        font-size: var(--app-text-base);
         padding-left: 4px;
         padding-right: 5px;
         vertical-align: bottom;

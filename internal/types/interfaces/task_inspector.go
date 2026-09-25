@@ -44,6 +44,26 @@ type TaskInspector interface {
 	// span/updated_at checks remain authoritative there.
 	HasQueuedTasksForKnowledge(ctx context.Context, knowledgeID string) (bool, error)
 
+	// QueuedKnowledgeIDs returns every knowledge ID that a pending /
+	// scheduled / retry / active task of those same types references, in
+	// one pass over the queues — for answering many documents at once
+	// where HasQueuedTasksForKnowledge would rescan per document. Unlike
+	// that probe it returns list errors instead of reading them as "no
+	// match". Lite mode returns an empty set.
+	QueuedKnowledgeIDs(ctx context.Context) (map[string]struct{}, error)
+
+	// HasQueuedDeleteTasksForKnowledge reports whether any pending /
+	// scheduled / retry / active knowledge:list_delete task still covers
+	// the given knowledge ID. The delete sweep calls it before recovering
+	// a stranded "deleting" row: the delete task is enqueued with a batch
+	// payload (knowledge_ids list) that the per-parse matcher above cannot
+	// see, so without this probe the sweep could not tell a stranded delete
+	// from one that is merely backlogged behind a busy maintenance queue.
+	//
+	// Same fail-safe contract: (false, err) on backend error, callers defer;
+	// Lite mode always returns false — inline deletes never queue.
+	HasQueuedDeleteTasksForKnowledge(ctx context.Context, knowledgeID string) (bool, error)
+
 	// QueueStats returns a read-only depth snapshot for every queue this
 	// application enqueues into, for the System Admin runtime dashboard.
 	//

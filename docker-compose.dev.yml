@@ -2,7 +2,7 @@
 services:
   # 只启动依赖的基础设施服务
   postgres:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: paradedb/paradedb:v0.22.6-pg17
     container_name: WeKnora-postgres-dev
     ports:
       - "${DB_PORT:-5432}:5432"
@@ -15,7 +15,7 @@ services:
     networks:
       - WeKnora-network-dev
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 10s
       retries: 3
@@ -82,7 +82,7 @@ services:
       - full
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: WeKnora-minio-dev
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -122,7 +122,7 @@ services:
   # OpenSearch k-NN (Phase 3 driver). Single-node dev profile with the
   # security plugin disabled → plain HTTP on :9200, no auth/TLS. The image
   # bundles the opensearch-knn plugin. For production use a secured,
-  # multi-node cluster. See docs/dev/opensearch-integration-test.md.
+  # multi-node cluster. See website-docs/03-features/05-retrieval-engines.md.
   opensearch:
     image: opensearchproject/opensearch:3.3.2
     container_name: WeKnora-opensearch-dev
@@ -255,6 +255,7 @@ services:
       # docreader 对外 HTTP 抓取的 SSRF 白名单（逗号分隔；与 app 共用同名变量）
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
       - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-}
+      - SSRF_DNS_WHITELIST_ONLY=${SSRF_DNS_WHITELIST_ONLY:-}
       # ========== gRPC 服务端 TLS / 认证 ==========
       - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
       - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
@@ -381,7 +382,7 @@ services:
   # ---------------------------------------------------------------------------
   # 复用 dev 已有的 ParadeDB 镜像，不额外拉 postgres 镜像
   langfuse-db-init:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: paradedb/paradedb:v0.22.6-pg17
     container_name: WeKnora-langfuse-db-init-dev
     depends_on:
       postgres:
@@ -437,7 +438,7 @@ services:
       - full
 
   langfuse-minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: WeKnora-langfuse-minio-dev
     restart: unless-stopped
     entrypoint: sh

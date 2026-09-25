@@ -245,6 +245,10 @@ func RegisterSystemRoutes(
 	handler *handler.SystemHandler,
 	g *rbacGuards,
 ) {
+	// JWT-only: this pops a native dialog on the Lite machine. API keys must
+	// not trigger it. Undeclared for the API-key gate, so keys are denied.
+	r.POST("/system/host-project-dir", g.Viewer(), handler.PickHostProjectDir)
+
 	systemRoutes := g.apiKeyGroup(r.Group("/system"), apiKeyManageVectorStores(apiKeyFullAccess()))
 	{
 		systemRoutes.With(apiKeyAny()).GET("/capabilities", g.Viewer(), handler.GetDeploymentCapabilities)
@@ -284,6 +288,12 @@ func RegisterSystemAdminRoutes(
 	// the guard, so adding new endpoints can't accidentally drop the gate.
 	adminRoutes := r.Group("/system/admin", g.SystemAdmin())
 	{
+		// Catalog mutation is reserved to authenticated system-admin users.
+		// API keys remain default-denied by the API-key gate.
+		adminRoutes.GET("/model-catalog", handler.GetModelCatalog)
+		adminRoutes.POST("/model-catalog/preview", handler.PreviewModelCatalog)
+		adminRoutes.PUT("/model-catalog", handler.PublishModelCatalog)
+
 		// P0: SystemAdmin role management
 		adminRoutes.POST("/promote", handler.PromoteUserToSystemAdmin)
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)

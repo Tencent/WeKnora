@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,7 @@ import (
 // processing/finalizing/completed columns the helpers care about.
 const knowledgesTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledges (
+    profile TEXT,
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
@@ -232,6 +234,62 @@ func TestFinalizeSubtask_DecrementClampedAtZero(t *testing.T) {
 	assert.Equal(t, 0, count, "pending_subtasks_count must be clamped at zero")
 }
 
+// A row no longer in finalizing (cancelled, failed by housekeeping) only has
+// its counter decremented: reaching zero must not promote it to completed.
+func TestFinalizeSubtask_NonFinalizingRowOnlyDecrements(t *testing.T) {
+	for _, status := range []string{types.ParseStatusCancelled, types.ParseStatusFailed, types.ParseStatusProcessing} {
+		t.Run(status, func(t *testing.T) {
+			db := setupKnowledgeTestDB(t)
+			repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+			id := insertKnowledgeWithStatus(t, db, status, false)
+			require.NoError(t, db.Exec(`UPDATE knowledges SET pending_subtasks_count = 1 WHERE id = ?`, id).Error)
+
+			count, promoted, err := repo.FinalizeSubtask(context.Background(), id)
+
+			require.NoError(t, err)
+			assert.False(t, promoted)
+			assert.Zero(t, count)
+			got, n := reloadKnowledgeRow(t, db, id)
+			assert.Equal(t, status, got)
+			assert.Zero(t, n)
+		})
+	}
+}
+
+// Decrement and promote commit together: a promote that failed after its
+// decrement had committed left the counter at zero with nobody left to
+// promote the row. A failed promote must roll the decrement back so the
+// retried release drains the same slot again.
+func TestFinalizeSubtask_FailedPromoteRollsBackDecrement(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	id := insertProcessingKnowledge(t, db)
+	_, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+		CREATE TRIGGER refuse_promote BEFORE UPDATE OF parse_status ON knowledges
+		WHEN NEW.parse_status = 'completed'
+		BEGIN SELECT RAISE(ABORT, 'promote refused'); END
+	`).Error)
+
+	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+
+	require.ErrorContains(t, err, "promote refused")
+	assert.False(t, promoted)
+	status, count := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count, "the decrement must roll back with the failed promote")
+
+	require.NoError(t, db.Exec(`DROP TRIGGER refuse_promote`).Error)
+	_, promoted, err = repo.FinalizeSubtask(ctx, id)
+	require.NoError(t, err)
+	assert.True(t, promoted, "the retried release drains and promotes")
+	status, count = reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	assert.Zero(t, count)
+}
+
 // TestSetFinalizingAndFinalizeSubtask_ClearStaleErrorMessage is the
 // regression test for stale error_message: a row that failed once keeps
 // error_message set, and both entering finalizing (a new attempt) and
@@ -419,4 +477,47 @@ func TestUpdateActiveDeletingKnowledgeColumns_GuardsStateAndSoftDelete(t *testin
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	status, _ = reloadKnowledgeRow(t, db, deletedDeletingID)
 	assert.Equal(t, types.ParseStatusDeleting, status)
+}
+
+func TestCompleteProcessingWithoutSubtasks(t *testing.T) {
+	for _, tc := range []struct {
+		status  string
+		deleted bool
+		want    bool
+	}{
+		{types.ParseStatusProcessing, false, true},
+		{types.ParseStatusCancelled, false, false},
+		{types.ParseStatusDeleting, false, false},
+		{types.ParseStatusCompleted, false, false},
+		{types.ParseStatusFinalizing, false, false},
+		{types.ParseStatusProcessing, true, false},
+	} {
+		t.Run(tc.status+"/deleted="+fmt.Sprint(tc.deleted), func(t *testing.T) {
+			db := setupKnowledgeTestDB(t)
+			repo := NewKnowledgeRepository(db)
+			id := insertKnowledgeWithStatus(t, db, tc.status, tc.deleted)
+			require.NoError(t, db.Exec(
+				`UPDATE knowledges SET summary_status = 'pending', error_message = 'old error' WHERE id = ?`, id,
+			).Error)
+			completed, err := repo.CompleteProcessingWithoutSubtasks(context.Background(), id)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, completed)
+			status, count := reloadKnowledgeRow(t, db, id)
+			var summary string
+			require.NoError(t, db.Raw(`SELECT summary_status FROM knowledges WHERE id = ?`, id).Scan(&summary).Error)
+			if tc.want {
+				require.Equal(t, types.ParseStatusCompleted, status)
+				require.Zero(t, count)
+				require.Equal(t, types.SummaryStatusNone, summary)
+				require.Empty(t, reloadKnowledgeErrorMessage(t, db, id))
+				completed, err = repo.CompleteProcessingWithoutSubtasks(context.Background(), id)
+				require.NoError(t, err)
+				require.False(t, completed, "duplicate delivery must not complete twice")
+			} else {
+				require.Equal(t, tc.status, status)
+				require.Equal(t, types.SummaryStatusPending, summary)
+				require.Equal(t, "old error", reloadKnowledgeErrorMessage(t, db, id))
+			}
+		})
+	}
 }

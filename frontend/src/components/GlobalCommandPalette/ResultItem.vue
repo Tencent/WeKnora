@@ -73,7 +73,7 @@ const onHover = (e: MouseEvent) => {
   gap: 10px;
   width: 100%;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: none;
   background: transparent;
   cursor: pointer;
@@ -107,7 +107,7 @@ const onHover = (e: MouseEvent) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   line-height: 20px;
   white-space: nowrap;
@@ -116,7 +116,7 @@ const onHover = (e: MouseEvent) => {
 }
 
 .cmdk-item__badge {
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 500;
@@ -124,7 +124,7 @@ const onHover = (e: MouseEvent) => {
   line-height: 1.4;
 
   &--vector {
-    background: rgba(7, 192, 95, 0.1);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     color: var(--td-brand-color);
   }
 
@@ -141,14 +141,14 @@ const onHover = (e: MouseEvent) => {
 
 .cmdk-item__score {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
 }
 
 .cmdk-item__subtitle {
   margin-top: 2px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-text-color-secondary);
   display: -webkit-box;
@@ -170,7 +170,7 @@ const onHover = (e: MouseEvent) => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   color: var(--td-text-color-placeholder);
   opacity: 0.55;
   transition: opacity 0.1s;

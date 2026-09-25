@@ -258,6 +258,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.AgentStep:
     properties:
+      intermediate_answer:
+        description: |-
+          IntermediateAnswer preserves a plain answer followed by a loop-end steer.
+          The canonical final answer is still stored in Message.Content.
+        type: boolean
       iteration:
         description: Iteration number (0-indexed)
         type: integer
@@ -278,6 +283,13 @@ definitions:
         description: Tools called in this step (Act phase)
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall'
+        type: array
+      user_messages_before:
+        description: |-
+          UserMessagesBefore records consumed steer rows in delivery order, before
+          this model response. Unlike timestamps, this remains unambiguous on replay.
+        items:
+          type: string
         type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.AnswerStrategy:
@@ -829,7 +841,7 @@ definitions:
       context_template_id:
         description: |-
           ContextTemplateID references a template ID in prompt_templates/ YAML files.
-          If set and ContextTemplate is empty, the template content will be resolved at startup.
+          If set and ContextTemplate is empty, the template content is resolved at request time for saved agents.
         type: string
       data_analysis_enabled:
         description: |-
@@ -876,7 +888,7 @@ definitions:
           this factor
         type: number
       history_turns:
-        description: Number of history turns to keep in context
+        description: Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window
         type: integer
       image_storage_provider:
         description: |-
@@ -1030,7 +1042,7 @@ definitions:
       system_prompt_id:
         description: |-
           SystemPromptID references a template ID in prompt_templates/ YAML files.
-          If set and SystemPrompt is empty, the template content will be resolved at startup.
+          If set and SystemPrompt is empty, the template content is resolved at request time for saved agents.
         type: string
       temperature:
         description: Temperature for LLM (0-1)
@@ -1886,6 +1898,9 @@ definitions:
         type: array
       question_generation_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
+      summary_enabled:
+        description: SummaryEnabled defaults to true when omitted for backward compatibility.
+        type: boolean
       vlm_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
     type: object
@@ -2362,6 +2377,15 @@ definitions:
       role:
         description: 'Message role: "user", "assistant", "system"'
         type: string
+      sandbox_checkpoint:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SandboxCheckpoint'
+        description: |-
+          SandboxCheckpoint is the git commit this assistant turn produced in the
+          session sandbox's /workspace. Nil for user messages, for turns that ran
+          without a sandbox, and for turns whose commit failed (best-effort — a
+          failed checkpoint must never block the reply). A message without a
+          checkpoint cannot serve as a fork point with sandbox state.
       session_id:
         description: ID of the session this message belongs to
         type: string
@@ -2387,6 +2411,9 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageArtifact:
     properties:
+      content_hash:
+        description: SHA-256 of the persisted bytes
+        type: string
       created_at:
         description: When WeKnora persisted the blob
         type: string
@@ -2903,6 +2930,13 @@ definitions:
           10)'
         type: integer
     type: object
+  github_com_Tencent_WeKnora_internal_types.QuestionOrigin:
+    properties:
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig:
     properties:
       follow_ups:
@@ -3261,6 +3295,15 @@ definitions:
       use_ssl:
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_types.SandboxCheckpoint:
+    properties:
+      commit_sha:
+        type: string
+      committed_at:
+        type: string
+      sandbox_id:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.SandboxNetworkPolicy:
     properties:
       allow_out:
@@ -3453,6 +3496,13 @@ definitions:
       description:
         description: Description
         type: string
+      forked_from_message_id:
+        description: |-
+          ForkedFromMessageID is the user or assistant message, IN THE PARENT
+          SESSION, that the fork branched at. For a user point, messages strictly
+          before it were copied here. For an assistant point, that answer is
+          included so the branch continues after it.
+        type: string
       id:
         description: ID
         type: string
@@ -3476,6 +3526,13 @@ definitions:
           that reopening the session can restore the original request context to
           the chat UI. Stored in the legacy sessions.agent_config JSONB column to
           avoid a new migration; the shape used today is `SessionLastRequestState`.
+      parent_session_id:
+        description: |-
+          ParentSessionID names the session this one was forked from. Empty for
+          ordinary sessions. Deliberately not a foreign key: the parent may be
+          deleted while the branch lives on, and a branch must not cascade away
+          with it. A dangling value simply renders as an ordinary session.
+        type: string
       pinned_at:
         description: PinnedAt records when the session was pinned; nil when not pinned.
         type: string
@@ -3517,6 +3574,8 @@ definitions:
         items:
           type: string
         type: array
+      local_browser_enabled:
+        type: boolean
       mcp_service_ids:
         items:
           type: string
@@ -3942,6 +4001,14 @@ definitions:
           DefaultTimeoutSec is the per-execution timeout in seconds. 0 uses the
           program's built-in default.
         type: integer
+      desktop_enabled:
+        description: |-
+          DesktopEnabled declares that this config's base template is a desktop
+          image (XFCE + x11vnc + websockify). It is NOT a second template: a
+          config has exactly one boot target, and skill snapshots stack on top of
+          this base generation after generation. Flipping it changes the base, so
+          any installed skills must be rebuilt from the new one.
+        type: boolean
       docker:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig'
       e2b:
@@ -3984,10 +4051,11 @@ definitions:
         type: string
       terminal_idle_disconnect_sec:
         description: |-
-          TerminalIdleDisconnectSec is how long an interactive terminal may go
-          without keystrokes or PTY output before WeKnora closes the connection
-          so the sandbox can pause on its provider TTL. 0 uses the built-in
-          default (15 minutes). Not an identity field.
+          TerminalIdleDisconnectSec is how long an interactive terminal or
+          desktop may go without user activity before WeKnora closes the
+          connection so the sandbox can pause on its provider TTL. Terminal
+          counts keystrokes and PTY output; desktop counts mouse and keyboard.
+          0 uses the built-in default (15 minutes). Not an identity field.
         type: integer
       volume_mount:
         allOf:
@@ -4018,6 +4086,13 @@ definitions:
         type: integer
       completion_tokens:
         type: integer
+      context_token_scale:
+        description: |-
+          ContextTokenScale is provider prompt tokens per cl100k-estimated token,
+          measured over the turn's rounds. Persisted with the turn so the next
+          turn's history loading and first compaction check are calibrated before
+          any provider count of their own. Zero when the turn measured none.
+        type: number
       prompt_tokens:
         type: integer
       total_tokens:
@@ -4218,6 +4293,10 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.UserPreferences:
     properties:
+      browser_search_instructions:
+        description: BrowserSearchInstructions customizes browser search for this
+          user. Nil/empty uses the platform default.
+        type: string
       last_active_tenant_id:
         description: |-
           LastActiveTenantID remembers the last workspace the user actively
@@ -5944,6 +6023,11 @@ definitions:
   internal_handler.UpdateAgentRequest:
     properties:
       avatar:
+        description: |-
+          Avatar travels as a pointer so an omitted field can be told apart from
+          an explicit clear: nil keeps the stored avatar, a pointer to "" wipes
+          it. As a plain string the two cases were indistinguishable, so a caller
+          that PUT only a config silently zeroed the avatar and still got a 200.
         type: string
       config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig'
@@ -6268,6 +6352,9 @@ definitions:
     type: object
   internal_handler.updateMyPreferencesRequest:
     properties:
+      browser_search_instructions:
+        maxLength: 4000
+        type: string
       last_active_tenant_id:
         description: |-
           LastActiveTenantID lets clients persist "after a fresh login,
@@ -6334,6 +6421,9 @@ definitions:
         items:
           type: string
         type: array
+      local_browser_enabled:
+        description: Browser source
+        type: boolean
       mcp_service_ids:
         description: Per-request MCP services selected via @mention
         items:
@@ -6347,6 +6437,11 @@ definitions:
       query:
         description: Query text for knowledge base search
         type: string
+      question_origin:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionOrigin'
+        description: QuestionOrigin is the knowledge source of a picked suggested
+          question.
       skill_names:
         description: Per-request Skills selected via @mention
         items:
@@ -6377,6 +6472,21 @@ definitions:
       title:
         description: Title for the session (optional)
         type: string
+    type: object
+  internal_handler_session.ForkSessionRequest:
+    properties:
+      message_id:
+        description: |-
+          MessageID is the message to branch at. A user message copies history
+          strictly before it (the client prefills that question). An assistant
+          message copies history through that answer so the branch continues after it.
+        type: string
+      title:
+        description: Title is optional. Empty falls back to the source title plus
+          a suffix.
+        type: string
+    required:
+    - message_id
     type: object
   internal_handler_session.GenerateTitleRequest:
     properties:
@@ -6453,6 +6563,30 @@ definitions:
         items:
           type: string
         type: array
+    required:
+    - query
+    type: object
+  internal_handler_session.SteerMessageRequest:
+    properties:
+      channel:
+        type: string
+      delivery:
+        description: Delivery is "after" (default) or "inject". See the constants
+          above.
+        type: string
+      expected_assistant_message_id:
+        description: |-
+          Optional for older clients. New clients pin delivery to the run they see
+          and supply a stable ID so a consume event may precede the HTTP response.
+        type: string
+      mentioned_items:
+        items:
+          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
+        type: array
+      query:
+        type: string
+      steer_id:
+        type: string
     required:
     - query
     type: object
@@ -6972,7 +7106,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
+      description: Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，首次及后续启动均须通过桌面原生凭据认证，免除手动注册/登录流程
       produces:
       - application/json
       responses:
@@ -9761,16 +9895,16 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "403":
           description: Forbidden
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
           description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "401":
-          description: Unauthorized
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "429":
@@ -11810,11 +11944,194 @@ paths:
       summary: Get wiki statistics
       tags:
       - Wiki
+  /mcp-endpoints:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 端点列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取 MCP 端点列表
+      tags:
+      - MCP端点
+    post:
+      consumes:
+      - application/json
+      description: 为当前工作空间发布一个 MCP 端点，响应中的 token 只返回一次
+      parameters:
+      - description: 端点配置：name、description、enabled、knowledge_base_ids、tools 等
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建的端点，含一次性 token
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 创建 MCP 端点
+      tags:
+      - MCP端点
+  /mcp-endpoints/{endpoint_id}:
+    delete:
+      parameters:
+      - description: 端点 ID
+        in: path
+        name: endpoint_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 端点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除 MCP 端点
+      tags:
+      - MCP端点
+    get:
+      parameters:
+      - description: 端点 ID
+        in: path
+        name: endpoint_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 端点详情
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 端点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取 MCP 端点详情
+      tags:
+      - MCP端点
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 端点 ID
+        in: path
+        name: endpoint_id
+        required: true
+        type: string
+      - description: 要更新的字段，未提供的字段保持不变
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的端点
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 端点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 更新 MCP 端点
+      tags:
+      - MCP端点
+  /mcp-endpoints/{endpoint_id}/rotate-token:
+    post:
+      description: 生成新令牌并立即作废旧令牌，响应中的 token 只返回一次
+      parameters:
+      - description: 端点 ID
+        in: path
+        name: endpoint_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 含新 token 的端点
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 端点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 轮换 MCP 端点令牌
+      tags:
+      - MCP端点
+  /mcp-endpoints/tools:
+    get:
+      description: 返回工作空间 MCP 端点可勾选的工具清单、分组和默认勾选项
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 工具目录
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取 MCP 端点工具目录
+      tags:
+      - MCP端点
   /mcp-services:
     get:
       consumes:
       - application/json
-      description: 获取当前空间的所有MCP服务
+      description: 获取当前空间的所有MCP服务（含已保存工具目录数量）
       produces:
       - application/json
       responses:
@@ -12067,7 +12384,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
+      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要
+        Admin。
       parameters:
       - description: MCP服务ID
         in: path
@@ -13711,23 +14029,17 @@ paths:
       - 组织管理
   /organizations/{id}/search-tenants:
     get:
-      description: 按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重
       parameters:
       - description: 组织ID
         in: path
         name: id
         required: true
         type: string
-      - description: 搜索关键词（空间名）
+      - description: Exact workspace ID
         in: query
         name: q
         required: true
         type: string
-      - default: 10
-        description: 返回数量限制
-        in: query
-        name: limit
-        type: integer
       produces:
       - application/json
       responses:
@@ -13736,13 +14048,9 @@ paths:
           schema:
             additionalProperties: true
             type: object
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 搜索可邀请的空间
+      summary: Resolve a workspace ID for invitation
       tags:
       - 组织管理
   /organizations/{id}/search-users:
@@ -14858,6 +15166,73 @@ paths:
       summary: 取消置顶会话
       tags:
       - 会话
+  /sessions/{id}/steer:
+    get:
+      description: 刷新页面后用来恢复输入框上方的队列。没有正在运行的 turn 时返回空列表。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出当前运行中尚未消费的排队消息
+      tags:
+      - 问答
+  /sessions/{id}/steer/{steer_id}:
+    delete:
+      description: 从当前运行的排队列表里去掉一条，不再注入也不再作为 follow-up 发出。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 排队消息 ID
+        in: path
+        name: steer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除一条排队中的消息
+      tags:
+      - 问答
   /sessions/{session_id}/artifacts:
     get:
       description: 返回本会话中所有 assistant 消息产生的技能产物元数据（不含 URL）
@@ -14882,6 +15257,49 @@ paths:
       security:
       - Bearer: []
       summary: 列出会话生成的产物文件
+      tags:
+      - 会话
+  /sessions/{session_id}/fork:
+    post:
+      consumes:
+      - application/json
+      description: 从指定的用户或助手消息处分叉出一个新会话。用户消息：复制其之前的历史并预填该问题；助手消息：复制含该回答在内的历史，从该轮沙箱状态继续。
+      parameters:
+      - description: 源会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 分叉请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.ForkSessionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 新会话
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误 / 分叉点角色不支持
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 会话或消息不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 源会话正在生成中
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 分叉会话
       tags:
       - 会话
   /sessions/{session_id}/messages/{message_id}/artifacts:
@@ -14983,6 +15401,89 @@ paths:
       summary: 置顶会话
       tags:
       - 会话
+  /sessions/{session_id}/steer:
+    post:
+      consumes:
+      - application/json
+      description: 向运行中的 agent turn 追加用户消息（after 排队 / inject 注入）。无活 turn 时返回 new_run。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 追加消息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.SteerMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queued | new_run
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 会话不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 向运行中的对话追加消息
+      tags:
+      - 问答
+  /sessions/{session_id}/steer/{steer_id}/inject:
+    post:
+      description: 把一条 delivery=after 的排队消息改为 inject，运行中的 agent 会在下一轮边界读到它。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 排队消息 ID
+        in: path
+        name: steer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queued | new_run
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 将排队消息改为立即注入
+      tags:
+      - 问答
   /sessions/{session_id}/stop:
     post:
       consumes:

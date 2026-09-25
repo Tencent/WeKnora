@@ -240,28 +240,7 @@ func (l *remoteSessionLifecycle) connectBinding(
 	key SessionSandboxKey,
 	binding SessionSandboxBinding,
 ) (RemoteSandboxHandle, bool, error) {
-	summary, err := l.client.Get(ctx, binding.SandboxID)
-	if err != nil {
-		if CanReplaceRemoteBinding(err) {
-			return nil, true, nil
-		}
-		return nil, false, fmt.Errorf("get bound remote sandbox: %w", err)
-	}
-	if summary == nil {
-		return nil, false, errors.New("remote sandbox Get returned nil summary")
-	}
-	if summary.ID != binding.SandboxID {
-		return nil, false, fmt.Errorf(
-			"remote sandbox Get returned ID %q for binding %q",
-			summary.ID,
-			binding.SandboxID,
-		)
-	}
-	if summary.State == RemoteStateTerminal {
-		return nil, true, nil
-	}
-
-	handle, err := l.client.Connect(ctx, RemoteConnectRequest{
+	handle, err := connectRemoteSession(ctx, l.client, RemoteConnectRequest{
 		SandboxID:          binding.SandboxID,
 		TrafficAccessToken: binding.TrafficAccessToken,
 	})

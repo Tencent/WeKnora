@@ -59,9 +59,18 @@ type runtimeTestInspector struct{}
 func (runtimeTestInspector) CancelTasksForKnowledge(context.Context, string) (int, int, error) {
 	return 0, 0, nil
 }
+func (runtimeTestInspector) HasQueuedDeleteTasksForKnowledge(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (runtimeTestInspector) HasQueuedTasksForKnowledge(context.Context, string) (bool, error) {
 	return false, nil
 }
+
+func (runtimeTestInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
 func (runtimeTestInspector) QueueStats(context.Context) ([]types.QueueStat, bool, error) {
 	return []types.QueueStat{}, true, nil
 }

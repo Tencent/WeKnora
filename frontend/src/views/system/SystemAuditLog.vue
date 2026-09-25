@@ -617,6 +617,8 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .system-audit-log {
   width: 100%;
   display: flex;
@@ -625,7 +627,7 @@ onUnmounted(() => {
 }
 
 .section-header {
-  margin-bottom: 20px;
+  .settings-section-header();
 }
 
 .audit-page-header {
@@ -637,16 +639,9 @@ onUnmounted(() => {
 
 .audit-page-header h2 {
   margin: 0 0 8px;
-  font-size: 20px;
+  font-size: var(--app-text-3xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
-}
-
-.section-description {
-  margin: 0;
-  color: var(--td-text-color-secondary);
-  font-size: 14px;
-  line-height: 1.5;
 }
 
 .rq-refresh {
@@ -658,14 +653,14 @@ onUnmounted(() => {
   height: 20px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: color var(--app-motion-base) cubic-bezier(0.16, 1, 0.3, 1), background var(--app-motion-base) cubic-bezier(0.16, 1, 0.3, 1);
 
   :deep(.t-icon) {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   &:hover:not(:disabled) {
@@ -684,17 +679,7 @@ onUnmounted(() => {
 }
 
 .rq-refresh-spin {
-  animation: rq-refresh-rotate 0.8s linear infinite;
-}
-
-@keyframes rq-refresh-rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  animation: wk-spin 0.8s linear infinite;
 }
 
 .audit-page-body {
@@ -741,13 +726,13 @@ onUnmounted(() => {
   justify-content: center;
   gap: 10px;
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
 .audit-end-hint {
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-disabled);
   padding: 8px 0 14px;
   margin: 0;
@@ -760,12 +745,12 @@ onUnmounted(() => {
   line-height: 1.3;
 
   .audit-time-date {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .audit-time-clock {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     font-variant-numeric: tabular-nums;
@@ -780,7 +765,7 @@ onUnmounted(() => {
   min-width: 0;
 
   .audit-actor-name {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -789,7 +774,7 @@ onUnmounted(() => {
   }
 
   .audit-actor-role {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 }
@@ -803,17 +788,17 @@ onUnmounted(() => {
   padding: 2px 0;
 
   .audit-target-key {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     word-break: break-all;
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
   }
 
   .audit-target-diff {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     word-break: break-all;
     line-height: 1.4;
   }
@@ -840,7 +825,7 @@ onUnmounted(() => {
   dt {
     margin: 0;
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     white-space: nowrap;
   }
@@ -848,7 +833,7 @@ onUnmounted(() => {
   dd {
     margin: 0;
     color: var(--td-text-color-primary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
     word-break: break-all;
   }
@@ -857,12 +842,12 @@ onUnmounted(() => {
 .audit-detail-json {
   margin: 0;
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: min(420px, 50vh);
@@ -870,18 +855,18 @@ onUnmounted(() => {
 }
 
 .mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
 }
 
 .data-table-shell {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-container);
 
   &:deep(thead th) {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     background-color: var(--td-bg-color-secondarycontainer) !important;
   }
 

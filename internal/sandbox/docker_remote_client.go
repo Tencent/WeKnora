@@ -419,6 +419,14 @@ func (c *DockerRemoteClient) Connect(
 	}, nil
 }
 
+// ConnectSession already gets the lifecycle state from Connect's container
+// inspection, including terminal detection and resuming a stopped container.
+func (c *DockerRemoteClient) ConnectSession(
+	ctx context.Context, req RemoteConnectRequest,
+) (RemoteSandboxHandle, error) {
+	return c.Connect(ctx, req)
+}
+
 // dockerStartReadyTimeout bounds how long Create/Connect/Exec wait for PID 1
 // after the daemon has accepted a start. The window is milliseconds on a
 // healthy daemon; this is only the ceiling for a wedged one.

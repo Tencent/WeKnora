@@ -83,6 +83,20 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.With(apiKeyFullAccess()).DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
 	}
 
+	// Image gallery: list every image asset of a KB (read-only, Viewer+).
+	// Lives directly under /knowledge-bases/:id so it parallels /knowledge,
+	// /faq and /tags rather than nesting under /knowledge (documents).
+	kbImages := g.apiKeyGroup(r.Group("/knowledge-bases/:id"), apiKeyRetrieve(apiKeyFullAccess()))
+	kbImagesRead := kbImages.With(apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		kbImagesRead.GET("/images", g.Viewer(), g.KBAccessRead("id"), handler.ListImages)
+		// Self-describing gallery contract: live attribute sources, the
+		// resolved attribute list (definitions + merged usage) and the
+		// caller's search activation state. Per-KB because KB-defined
+		// attribute sources resolve against :id.
+		kbImagesRead.GET("/gallery-config", g.Viewer(), g.KBAccessRead("id"), handler.GetGalleryConfig)
+	}
+
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
 	kgrp := r.Group("/knowledge")
 	k := g.apiKeyGroup(kgrp, apiKeyIngest(apiKeyFullAccess()))
@@ -215,6 +229,9 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// 以调用者「自身」租户(c.Keys，未被 KBAccess 改写)校验 kb.TenantID，
 		// 把删除锁死为「所有者租户 + Admin」，共享 editor 无法删除源 KB。
 		kbManagement.PUT("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeBase)
+		// 立即重新生成知识库 AI 描述 — 与更新知识库同档鉴权；同步执行一次小模型调用。
+		kbManagement.POST("/:id/profile/generate", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"),
+			handler.GenerateKnowledgeBaseProfile)
 		kbManagement.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
 		// Pin state is now per-(user, kb) (migration 000050). Anyone with
@@ -245,6 +262,20 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)
 	}
+}
+
+// RegisterImageAttrRoutes wires the global, read-only image-attribute registry
+// that drives the KB editor's attribute panel.
+//
+// The registry is a single source of truth, so adding an attribute is a
+// backend-only change (one registry row) and the UI follows automatically. It
+// carries no KB id and needs only the Viewer role, so — like the other
+// read-only KB-editor helpers GET /chunker/preview and GET
+// /system/parser-engines — it is mounted at the top level rather than under
+// the /knowledge-bases collection.
+func RegisterImageAttrRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
+	g.apiKeyRoute(r, http.MethodGet, "/image-attrs/schema",
+		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.GetImageAttrsSchema)
 }
 
 // RegisterKnowledgeBaseActivityRoutes exposes the read-only per-KB activity

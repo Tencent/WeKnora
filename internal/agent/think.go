@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -21,10 +22,14 @@ import (
 type streamLLMResult struct {
 	Content          string
 	ReasoningContent string // accumulated reasoning content, kept separate from answer
-	ToolCalls        []types.LLMToolCall
-	Usage            *types.TokenUsage
-	FinishReason     string // actual finish_reason from LLM (captured from last stream chunk)
-	StreamError      string // error message from stream (e.g., timeout), kept separate from Content
+	// ReasoningSignature / ReasoningMetadata arrive on the closing chunk's
+	// Data and must be persisted with the step for replay.
+	ReasoningSignature string
+	ReasoningMetadata  types.ProviderMetadata
+	ToolCalls          []types.LLMToolCall
+	Usage              *types.TokenUsage
+	FinishReason       string // actual finish_reason from LLM (captured from last stream chunk)
+	StreamError        string // error message from stream (e.g., timeout), kept separate from Content
 }
 
 // streamLLMToEventBus streams LLM response through EventBus (generic method)
@@ -53,6 +58,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 
 	// Model-context encoding owns codec ordering and temporary-handle lifecycle.
 	messages = e.modelContext.EncodeMessages(messages)
+	reportModelContextLeaks(ctx, "Agent", e.modelContext, messages)
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
@@ -131,6 +137,12 @@ func (e *AgentEngine) streamLLMToEventBus(
 		if chunk.FinishReason != "" {
 			result.FinishReason = chunk.FinishReason
 		}
+		if sig, ok := chunk.Data["reasoning_signature"].(string); ok && sig != "" {
+			result.ReasoningSignature = sig
+		}
+		if md, ok := chunk.Data["reasoning_metadata"].(types.ProviderMetadata); ok && len(md) > 0 {
+			result.ReasoningMetadata = md
+		}
 
 		if emitFunc != nil {
 			emitFunc(&chunk, result.Content)
@@ -171,6 +183,12 @@ func (e *AgentEngine) streamLLMToEventBus(
 	// logs name the actual condition.
 	if stalled.Load() {
 		result.StreamError = fmt.Sprintf("LLM stream stalled: no output for %s", stallTimeout)
+	}
+	// The provider layer closes a body that ran out without a finish reason
+	// as an incomplete answer rather than an error chunk; for a round that is
+	// the same broken stream and goes down the same retry path.
+	if result.StreamError == "" && result.FinishReason == types.FinishReasonIncomplete {
+		result.StreamError = types.StreamEndedEarlyError
 	}
 
 	// Stream diagnostic summary: helps identify non-streaming patterns
@@ -255,6 +273,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		MaxCompletionTokens: budget,
 		Tools:               tools,
 		Thinking:            e.config.Thinking,
+		ReasoningEffort:     chat.SanitizeReasoningEffort(ctx, e.config.ReasoningEffort, "agent config"),
 		ParallelToolCalls:   &parallelToolCalls,
 		PromptCacheKey:      sessionID,
 	}
@@ -454,11 +473,13 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	}
 
 	resp := &types.ChatResponse{
-		Content:          fullContent,
-		ReasoningContent: llmResult.ReasoningContent,
-		ToolCalls:        llmResult.ToolCalls,
-		FinishReason:     finishReason,
-		AnswerStreamed:   answerStreamed,
+		Content:            fullContent,
+		ReasoningContent:   llmResult.ReasoningContent,
+		ReasoningSignature: llmResult.ReasoningSignature,
+		ReasoningMetadata:  llmResult.ReasoningMetadata,
+		ToolCalls:          llmResult.ToolCalls,
+		FinishReason:       finishReason,
+		AnswerStreamed:     answerStreamed,
 	}
 	if answerStreamed {
 		resp.AnswerEventID = answerID
@@ -553,7 +574,15 @@ func (e *AgentEngine) callLLMWithRetry(
 			retryDelay := time.Duration(retry) * time.Second
 			logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
 				round, retry, maxLLMRetries, retryDelay, err)
-			time.Sleep(retryDelay)
+			// A stop pressed during the backoff ends the turn now rather than
+			// after the delay and one more doomed request.
+			select {
+			case <-ctx.Done():
+			case <-time.After(retryDelay):
+			}
+			if ctx.Err() != nil {
+				break
+			}
 
 			response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
 			if err == nil || !isTransientError(err) {
@@ -623,4 +652,18 @@ func (e *AgentEngine) callLLMWithRetry(
 	}
 
 	return response, nil
+}
+
+// reportModelContextLeaks logs any durable identifier that survived encoding.
+// Each line names the producing role or tool so the leak can be fixed at its
+// source; see modelcontext/leaks.go.
+func reportModelContextLeaks(
+	ctx context.Context, scope string, registry *modelcontext.Registry, messages []chat.Message,
+) {
+	leaks := registry.LeakedIdentifiers(messages)
+	if len(leaks) == 0 {
+		return
+	}
+	logger.Warnf(ctx, "[%s][ModelContext] %d message field(s) carry raw identifiers after encoding: %s",
+		scope, len(leaks), modelcontext.SummarizeLeaks(leaks))
 }

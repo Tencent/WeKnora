@@ -182,3 +182,43 @@ func TestAppendSteerEventsDeduplicatesClientIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestDropMessageStreamsRemovesEventsSteerAndLiveRun(t *testing.T) {
+	mgr := NewMemoryStreamManager()
+	ctx := context.Background()
+	require.NoError(t, mgr.AppendEvent(ctx, "sess", "a-1", interfaces.StreamEvent{ID: "e1"}))
+	require.NoError(t, mgr.AppendSteerEvents(ctx, "sess", "a-1", []interfaces.StreamEvent{{ID: "s1"}}))
+	require.NoError(t, mgr.SetLiveRun(ctx, "sess", "a-1", "req"))
+
+	require.NoError(t, mgr.DropMessageStreams(ctx, "sess", []string{"a-1"}))
+
+	events, _, err := mgr.GetEvents(ctx, "sess", "a-1", 0)
+	require.NoError(t, err)
+	require.Empty(t, events)
+	steer, _, err := mgr.GetSteerEvents(ctx, "sess", "a-1", 0)
+	require.NoError(t, err)
+	require.Empty(t, steer)
+	liveID, _, err := mgr.GetLiveRun(ctx, "sess")
+	require.NoError(t, err)
+	require.Empty(t, liveID)
+}
+
+func TestRedisDropMessageStreamsRemovesEventsSteerAndLiveRun(t *testing.T) {
+	mgr, _ := newTestRedisStreamManager(t, time.Hour)
+	ctx := context.Background()
+	require.NoError(t, mgr.AppendEvent(ctx, "sess", "a-1", interfaces.StreamEvent{ID: "e1"}))
+	require.NoError(t, mgr.AppendSteerEvents(ctx, "sess", "a-1", []interfaces.StreamEvent{{ID: "s1"}}))
+	require.NoError(t, mgr.SetLiveRun(ctx, "sess", "a-1", "req"))
+
+	require.NoError(t, mgr.DropMessageStreams(ctx, "sess", []string{"a-1"}))
+
+	events, _, err := mgr.GetEvents(ctx, "sess", "a-1", 0)
+	require.NoError(t, err)
+	require.Empty(t, events)
+	steer, _, err := mgr.GetSteerEvents(ctx, "sess", "a-1", 0)
+	require.NoError(t, err)
+	require.Empty(t, steer)
+	liveID, _, err := mgr.GetLiveRun(ctx, "sess")
+	require.NoError(t, err)
+	require.Empty(t, liveID)
+}

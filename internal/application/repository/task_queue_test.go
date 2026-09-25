@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS task_dead_letters (
 
 const taskQueueKnowledgeBaseTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledge_bases (
+    profile_config TEXT,
+    generated_profile TEXT,
     id         VARCHAR(64) PRIMARY KEY,
     tenant_id  INTEGER NOT NULL,
     deleted_at DATETIME
@@ -61,11 +63,14 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 
 const taskQueueKnowledgeTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledges (
+    profile TEXT,
     id                     VARCHAR(64) PRIMARY KEY,
     tenant_id              INTEGER NOT NULL,
     knowledge_base_id      VARCHAR(64) NOT NULL,
     parse_status           VARCHAR(32) NOT NULL,
     pending_subtasks_count INTEGER NOT NULL DEFAULT 0,
+    error_message          TEXT,
+    processed_at           DATETIME,
     updated_at             DATETIME,
     deleted_at             DATETIME
 );
@@ -233,8 +238,9 @@ func TestTaskPendingOps_Enqueue_RejectsMissingFields(t *testing.T) {
 }
 
 // TestTaskPendingOps_PeekBatch_ScopedAndOrdered verifies PeekBatch only
-// returns rows for the matching tuple, in id ASC order, and respects
-// the limit.
+// returns rows for the matching tuple, least-failed then id ASC (which
+// is insertion order when every row is still fail_count = 0), and
+// respects the limit.
 func TestTaskPendingOps_PeekBatch_ScopedAndOrdered(t *testing.T) {
 	db := setupTaskQueueTestDB(t)
 	repo := NewTaskPendingOpsRepository(db)
@@ -267,6 +273,37 @@ func TestTaskPendingOps_PeekBatch_ScopedAndOrdered(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "k6", got[0].DedupKey)
+}
+
+// TestTaskPendingOps_PeekBatch_PrefersLeastFailed is the Lite-mode twin
+// of TestTaskPendingOps_ClaimBatch_PrefersLeastFailed: peekPendingList
+// still uses PeekBatch, and a retried row keeps its original (lowest)
+// id, so a pure id sort would starve never-attempted work the same way.
+func TestTaskPendingOps_PeekBatch_PrefersLeastFailed(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	hot := makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "hot", nil)
+	require.NoError(t, repo.Enqueue(ctx, hot))
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "fresh", nil)))
+
+	_, err := repo.IncrFailCount(ctx, hot.ID)
+	require.NoError(t, err)
+
+	next, err := repo.PeekBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1)
+	require.NoError(t, err)
+	require.Len(t, next, 1)
+	assert.Equal(t, "fresh", next[0].DedupKey,
+		"a retried document must not starve a never-attempted one")
+
+	both, err := repo.PeekBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 2)
+	require.NoError(t, err)
+	require.Len(t, both, 2)
+	assert.Equal(t, "fresh", both[0].DedupKey)
+	assert.Equal(t, "hot", both[1].DedupKey,
+		"a retried document must still be returned after untried work")
 }
 
 // TestTaskPendingOps_DeleteByIDs_RemovesOnlyTargets verifies the
@@ -348,19 +385,38 @@ func TestTaskPendingOps_DeleteByScope_RejectsMissingScope(t *testing.T) {
 func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 	db := setupTaskQueueTestDB(t)
 	require.NoError(t, db.Exec(`CREATE TABLE knowledge_bases (
+    profile_config TEXT,
+    generated_profile TEXT,
 		id VARCHAR(64) PRIMARY KEY,
 		tenant_id INTEGER NOT NULL,
 		deleted_at DATETIME
 	)`).Error)
 	require.NoError(t, db.Exec(
-		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?)",
-		"kb-active", 1, "kb-deleted", 1, time.Now(),
+		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?), (?, ?, NULL)",
+		"kb-active", 1, "kb-deleted", 1, time.Now(), "kb-t2", 2,
+	).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE tenants (
+		id INTEGER PRIMARY KEY,
+		deleted_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO tenants (id, deleted_at) VALUES (?, NULL), (?, ?)",
+		1, 2, time.Now(),
 	).Error)
 
 	repo := NewTaskPendingOpsRepository(db)
 	guard, ok := repo.(interfaces.TaskPendingOpsKnowledgeBaseGuard)
 	require.True(t, ok)
+	liveness, ok := repo.(interfaces.TaskPendingOpsTenantLiveness)
+	require.True(t, ok, "task pending repository must expose tenant liveness for wiki task guards")
 	ctx := context.Background()
+
+	activeTenant, err := liveness.HasActiveTenant(ctx, 1)
+	require.NoError(t, err)
+	assert.True(t, activeTenant)
+	deletedTenant, err := liveness.HasActiveTenant(ctx, 2)
+	require.NoError(t, err)
+	assert.False(t, deletedTenant)
 
 	accepted, err := guard.EnqueueIfKnowledgeBaseActive(ctx,
 		makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-active", "ingest", "active", nil))
@@ -386,6 +442,10 @@ func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 		{name: "tenant mismatch", op: &types.TaskPendingOp{
 			TenantID: 2, TaskType: types.TypeWikiIngest, Scope: types.TaskScopeKnowledgeBase,
 			ScopeID: "kb-active", Op: "ingest", DedupKey: "wrong-tenant",
+		}},
+		{name: "deleted tenant with live KB", op: &types.TaskPendingOp{
+			TenantID: 2, TaskType: types.TypeWikiIngest, Scope: types.TaskScopeKnowledgeBase,
+			ScopeID: "kb-t2", Op: "ingest", DedupKey: "deleted-tenant",
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -524,6 +584,53 @@ func TestTaskPendingOps_ClaimBatch_MarksAndReturnsDisjoint(t *testing.T) {
 	third, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, stale)
 	require.NoError(t, err)
 	assert.Len(t, third, 0)
+}
+
+// TestTaskPendingOps_ClaimBatch_PrefersLeastFailed guards the starvation fix.
+// A retried document keeps its ORIGINAL id — requeueFailedOps releases the
+// claim rather than moving the row, so the fail_count budget keeps counting
+// down — which under a pure `id ASC` ordering let it park at the head of the
+// queue while never-attempted documents sat behind it. Observed on a real
+// 87-document KB: four re-run documents held the head and all forty
+// never-started ones waited. Selection must drain untried work first, without
+// stranding a document that keeps failing.
+func TestTaskPendingOps_ClaimBatch_PrefersLeastFailed(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	// "hot" is enqueued FIRST, so it owns the lowest id.
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "hot", nil)))
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "fresh", nil)))
+
+	stale := time.Now().Add(-time.Hour)
+
+	// Replay the retry path on "hot": claim it, bump fail_count, release it
+	// back to the pool exactly as requeueFailedOps does.
+	first, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, stale)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Equal(t, "hot", first[0].DedupKey)
+	_, err = repo.IncrFailCount(ctx, first[0].ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.ReleaseByIDs(ctx, []int64{first[0].ID}))
+
+	// "hot" holds the lower id but has a failure on record; the
+	// never-attempted document must be selected ahead of it.
+	next, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, stale)
+	require.NoError(t, err)
+	require.Len(t, next, 1)
+	assert.Equal(t, "fresh", next[0].DedupKey,
+		"a retried document must not starve a never-attempted one")
+
+	// The retried document still gets its turn once nothing fresher remains.
+	last, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 1, stale)
+	require.NoError(t, err)
+	require.Len(t, last, 1)
+	assert.Equal(t, "hot", last[0].DedupKey,
+		"a retried document must eventually be picked up, not stranded")
 }
 
 // TestTaskPendingOps_ClaimBatch_KeepsSameKeyTogether verifies the
@@ -834,4 +941,99 @@ func TestTaskDeadLetter_DeleteByID_IsIdempotent(t *testing.T) {
 	rows, _, err := repo.ListByScope(ctx, "knowledge_base", "kb", "", 10)
 	require.NoError(t, err)
 	assert.Len(t, rows, 0)
+}
+
+func setupDrainTest(t *testing.T) (*gorm.DB, interfaces.TaskPendingOpsRepository, interfaces.TaskPendingOpsDrainer) {
+	t.Helper()
+	db := setupTaskQueueTestDB(t)
+	require.NoError(t, db.Exec(taskQueueKnowledgeTestDDL).Error)
+	repo := NewTaskPendingOpsRepository(db)
+	drainer, ok := repo.(interfaces.TaskPendingOpsDrainer)
+	require.True(t, ok)
+	return db, repo, drainer
+}
+
+func insertFinalizingKnowledge(t *testing.T, db *gorm.DB, id string, pending int) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, tenant_id, knowledge_base_id, parse_status, pending_subtasks_count)
+		 VALUES (?, 1, 'kb-1', ?, ?)`, id, types.ParseStatusFinalizing, pending,
+	).Error)
+}
+
+func wikiLane(scopeID, op, dedup string) *types.TaskPendingOp {
+	return makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, scopeID, op, dedup, []byte(`{}`))
+}
+
+// Draining releases each drained document's slot once, and leaves alone any
+// document a live batch holds, even through an unclaimed row of its own.
+func TestTaskPendingOps_DrainUnclaimedAndReleaseSparesLiveDocuments(t *testing.T) {
+	db, repo, drainer := setupDrainTest(t)
+	ctx := context.Background()
+	for _, op := range []*types.TaskPendingOp{
+		wikiLane("kb-1", "ingest", "k-unclaimed"),
+		wikiLane("kb-1", "ingest", "k-unclaimed"),
+		wikiLane("kb-1", "ingest", "k-stale"),
+		wikiLane("kb-1", "ingest", "k-live"),
+		wikiLane("kb-1", "ingest", "k-live"), // enqueued after the live claim
+		wikiLane("kb-1", "retract", "k-retract-live"),
+		wikiLane("kb-1", "ingest", "k-retract-live"),
+		wikiLane("kb-1", "retract", "k-retract"),
+		wikiLane("kb-2", "ingest", "k-other-kb"),
+	} {
+		require.NoError(t, repo.Enqueue(ctx, op))
+	}
+	staleBefore := time.Now().Add(-time.Hour)
+	claim := func(where string, at time.Time) {
+		require.NoError(t, db.Exec(`UPDATE task_pending_ops SET claimed_at = ? WHERE `+where, at).Error)
+	}
+	claim(`dedup_key = 'k-stale'`, staleBefore.Add(-time.Minute))
+	claim(`id = (SELECT MIN(id) FROM task_pending_ops WHERE dedup_key = 'k-live')`, time.Now())
+	claim(`dedup_key = 'k-retract-live' AND op = 'retract'`, time.Now())
+	insertFinalizingKnowledge(t, db, "k-unclaimed", 1)
+	insertFinalizingKnowledge(t, db, "k-stale", 2)
+	insertFinalizingKnowledge(t, db, "k-live", 1)
+	insertFinalizingKnowledge(t, db, "k-retract-live", 1)
+
+	keys, err := drainer.DrainUnclaimedAndRelease(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1",
+		"ingest", staleBefore)
+
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"k-unclaimed", "k-stale"}, keys)
+	var left []string
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Order("dedup_key").Pluck("dedup_key", &left).Error)
+	assert.Equal(t, []string{"k-live", "k-live", "k-other-kb", "k-retract", "k-retract-live", "k-retract-live"}, left)
+
+	type row struct {
+		ID                   string
+		ParseStatus          string
+		PendingSubtasksCount int
+	}
+	var rows []row
+	require.NoError(t, db.Raw(
+		`SELECT id, parse_status, pending_subtasks_count FROM knowledges ORDER BY id`,
+	).Scan(&rows).Error)
+	assert.Equal(t, []row{
+		{ID: "k-live", ParseStatus: types.ParseStatusFinalizing, PendingSubtasksCount: 1},
+		{ID: "k-retract-live", ParseStatus: types.ParseStatusFinalizing, PendingSubtasksCount: 1},
+		{ID: "k-stale", ParseStatus: types.ParseStatusFinalizing, PendingSubtasksCount: 1},
+		{ID: "k-unclaimed", ParseStatus: types.ParseStatusCompleted, PendingSubtasksCount: 0},
+	}, rows)
+}
+
+// A failed release rolls the delete back, so the retry still finds the ops.
+func TestTaskPendingOps_DrainUnclaimedAndReleaseRollsBackOnReleaseFailure(t *testing.T) {
+	db, repo, drainer := setupDrainTest(t)
+	ctx := context.Background()
+	require.NoError(t, repo.Enqueue(ctx, wikiLane("kb-1", "ingest", "k-1")))
+	require.NoError(t, db.Exec(`DROP TABLE knowledges`).Error)
+
+	keys, err := drainer.DrainUnclaimedAndRelease(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1",
+		"ingest", time.Now().Add(-time.Hour))
+
+	require.Error(t, err)
+	assert.Empty(t, keys)
+	var count int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
 }

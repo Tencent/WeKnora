@@ -915,3 +915,14 @@ func TestSkillImageFingerprintIsStableAndDiscriminating(t *testing.T) {
 	require.NotEqual(t, a, SkillImageFingerprint("cube", "key-2", "https://a.example.com"))
 	require.NotEqual(t, a, SkillImageFingerprint("e2b", "key-1", "https://a.example.com"))
 }
+
+func TestParseSandboxTypeAcceptsHost(t *testing.T) {
+	got, err := ParseSandboxType("host")
+	require.NoError(t, err)
+	require.Equal(t, SandboxTypeHost, got)
+}
+
+// host carries no endpoint or credential, so a bare config is complete.
+func TestHostConfigNeedsNoProviderFields(t *testing.T) {
+	require.Empty(t, MissingRequiredFields(&Config{Type: SandboxTypeHost}))
+}

@@ -20,6 +20,7 @@ export type FilePreviewKind =
   | 'audio'
   | 'video'
   | 'mermaid'
+  | 'epub'
   | 'unsupported'
 
 export type FilePreviewSniff = {
@@ -52,6 +53,7 @@ register('html', ['html', 'htm', 'xhtml'])
 register('audio', ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'oga', 'aac', 'opus', 'weba'])
 register('video', ['mp4', 'webm', 'ogv', 'm4v', 'mov'])
 register('mermaid', ['mmd', 'mermaid'])
+register('epub', ['epub'])
 register('text', [
   'txt', 'text', 'log', 'out', 'err',
   'json', 'jsonc', 'json5', 'geojson', 'ipynb', 'jsonl', 'ndjson', 'har',
@@ -83,6 +85,7 @@ const MIME_BY_EXT: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   doc: 'application/msword',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  epub: 'application/epub+zip',
   ppt: 'application/vnd.ms-powerpoint',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   xls: 'application/vnd.ms-excel',
@@ -225,6 +228,7 @@ const DEFAULT_EXT_BY_KIND: Record<FilePreviewKind, string> = {
   audio: 'mp3',
   video: 'mp4',
   mermaid: 'mmd',
+  epub: 'epub',
   unsupported: '',
 }
 

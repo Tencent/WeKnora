@@ -226,8 +226,8 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 		defer cancelEnsure()
 	}
 	allowProvision := terminalFlagParam(c.Query("provision"))
-	provisionID := h.terminalProvisionConfigID(ensureCtx, c, allowProvision)
-	desktop, err := h.desktopService.EnsureSessionDesktop(ensureCtx, sessionID, provisionID)
+	provision := h.terminalProvisionPin(ensureCtx, c, allowProvision)
+	desktop, err := h.desktopService.EnsureSessionDesktop(ensureCtx, sessionID, provision)
 	if err != nil {
 		if slotHold != nil && slotHold.Err() != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": desktopErrBusy})

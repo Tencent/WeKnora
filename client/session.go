@@ -207,18 +207,30 @@ type ImageAttachment struct {
 	Caption string `json:"caption,omitempty"` // VLM analysis result
 }
 
+// QuestionOrigin names the knowledge source a suggested question was generated
+// from (SuggestedQuestion.KnowledgeBaseID / KnowledgeID). Send it with the
+// question the user picked: the agent searches that source before answering.
+// It is a hint inside the request's retrieval scope and never widens it; for an
+// agent that retrieves only on @mention, it selects the origin base when the
+// agent may read it.
+type QuestionOrigin struct {
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	KnowledgeID     string `json:"knowledge_id,omitempty"`
+}
+
 // KnowledgeQARequest knowledge Q&A request
 type KnowledgeQARequest struct {
-	Query            string            `json:"query"`              // Query text for knowledge base search
-	KnowledgeBaseIDs []string          `json:"knowledge_base_ids"` // Selected knowledge base IDs for this request
-	KnowledgeIDs     []string          `json:"knowledge_ids"`      // Selected knowledge IDs for this request
-	AgentEnabled     bool              `json:"agent_enabled"`      // Whether agent mode is enabled for this request
-	AgentID          string            `json:"agent_id"`           // Selected custom agent ID for this request
-	WebSearchEnabled bool              `json:"web_search_enabled"` // Whether web search is enabled for this request
-	SummaryModelID   string            `json:"summary_model_id"`   // Optional summary model ID (overrides session default)
-	DisableTitle     bool              `json:"disable_title"`      // Whether to disable auto title generation
-	Images           []ImageAttachment `json:"images,omitempty"`   // Attached images for multimodal chat
-	Channel          string            `json:"channel,omitempty"`  // Source channel: "web", "api", "im", etc.
+	Query            string            `json:"query"`                     // Query text for knowledge base search
+	KnowledgeBaseIDs []string          `json:"knowledge_base_ids"`        // Selected knowledge base IDs for this request
+	KnowledgeIDs     []string          `json:"knowledge_ids"`             // Selected knowledge IDs for this request
+	AgentEnabled     bool              `json:"agent_enabled"`             // Whether agent mode is enabled for this request
+	AgentID          string            `json:"agent_id"`                  // Selected custom agent ID for this request
+	WebSearchEnabled bool              `json:"web_search_enabled"`        // Whether web search is enabled for this request
+	SummaryModelID   string            `json:"summary_model_id"`          // Optional summary model ID (overrides session default)
+	DisableTitle     bool              `json:"disable_title"`             // Whether to disable auto title generation
+	Images           []ImageAttachment `json:"images,omitempty"`          // Attached images for multimodal chat
+	Channel          string            `json:"channel,omitempty"`         // Source channel: "web", "api", "im", etc.
+	QuestionOrigin   *QuestionOrigin   `json:"question_origin,omitempty"` // Source of a picked suggested question
 }
 
 // LLMToolCall represents a function/tool call from the LLM
@@ -467,12 +479,22 @@ type SearchKnowledgeRequest struct {
 	KnowledgeIDs     []string        `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
 	TagIDs           []string        `json:"tag_ids,omitempty"`            // Tag IDs for filtering within a single KB
 	MentionedItems   []MentionedItem `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
+
+	// Optional overrides of the tenant retrieval config.
+	VectorThreshold      *float64       `json:"vector_threshold,omitempty"`       // Minimum vector similarity
+	KeywordThreshold     *float64       `json:"keyword_threshold,omitempty"`      // Minimum keyword score
+	MatchCount           int            `json:"match_count,omitempty"`            // Number of results to return
+	DisableKeywordsMatch bool           `json:"disable_keywords_match,omitempty"` // Vector recall only
+	DisableVectorMatch   bool           `json:"disable_vector_match,omitempty"`   // Keyword recall only
+	Rerank               *RerankOptions `json:"rerank,omitempty"`                 // Rerank override
 }
 
 // SearchKnowledgeResponse search results response
 type SearchKnowledgeResponse struct {
 	Success bool            `json:"success"`
 	Data    []*SearchResult `json:"data"`
+	// Meta reports what the rerank stage did.
+	Meta *RetrievalMeta `json:"meta,omitempty"`
 }
 
 // SearchKnowledge performs knowledge base search without LLM summarization.
@@ -482,6 +504,20 @@ func (c *Client) SearchKnowledge(
 	request *SearchKnowledgeRequest,
 	opts ...ResourceURLOptions,
 ) ([]*SearchResult, error) {
+	response, err := c.SearchKnowledgeDetailed(ctx, request, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// SearchKnowledgeDetailed performs knowledge base search and returns the
+// whole response, including the rerank diagnostics in Meta.
+func (c *Client) SearchKnowledgeDetailed(
+	ctx context.Context,
+	request *SearchKnowledgeRequest,
+	opts ...ResourceURLOptions,
+) (*SearchKnowledgeResponse, error) {
 	debugLogger.Debug("search_knowledge_start",
 		"knowledge_base_ids", request.KnowledgeBaseIDs,
 		"knowledge_ids", request.KnowledgeIDs,
@@ -514,5 +550,5 @@ func (c *Client) SearchKnowledge(
 	}
 
 	debugLogger.Debug("search_knowledge_completed", "result_count", len(response.Data))
-	return response.Data, nil
+	return &response, nil
 }

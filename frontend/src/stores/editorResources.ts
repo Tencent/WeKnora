@@ -12,7 +12,13 @@ import {
   type SystemInfo,
 } from '@/api/system'
 import { listMCPServices, type MCPService } from '@/api/mcp-service'
-import { listSkillCatalog, listSkills, type SkillCatalogItem, type SkillInfo } from '@/api/skill'
+import {
+  listSkillCatalog,
+  listSkills,
+  type AgentScope,
+  type SkillCatalogItem,
+  type SkillInfo,
+} from '@/api/skill'
 import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
 import { isStorageConfigDenied } from './storageEngineAccess'
@@ -57,6 +63,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   const storageStatus = ref<StorageEngineStatusItem[]>([])
   const storageAllowedProviders = ref<string[]>([])
   const mcpServices = ref<MCPService[]>([])
+  const mcpServicesScope = ref('')
   const skills = ref<SkillInfo[]>([])
   const skillsAvailable = ref(false)
   const skillsConfigId = ref('')
@@ -114,21 +121,44 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     )
   }
 
-  async function ensureMcpServices(force = false): Promise<void> {
+  async function ensureMcpServices(agent?: AgentScope, force = false): Promise<void> {
+    const key = scopeKey('', agent)
+    if (key !== mcpServicesScope.value) {
+      force = true
+    }
     return runOnce('mcpServices', force, async () => {
-      const list = await listMCPServices()
+      mcpServicesScope.value = key
+      const list = await listMCPServices(agent)
       mcpServices.value = Array.isArray(list) ? list : []
       loadedAt.value.mcpServices = Date.now()
     })
   }
 
-  async function ensureSkills(sandboxConfigId?: string, force = false): Promise<void> {
+  // A shared agent's skills and MCP services live in its owner's workspace and
+  // are an entirely different set from this workspace's. The cache key has to
+  // carry the agent, or switching agents would leave another workspace's
+  // entries in the @ picker.
+  function scopeKey(configId: string, agent?: AgentScope): string {
+    if (!agent?.agentId || !agent?.sourceTenantId) return configId
+    return `${configId}@${agent.sourceTenantId}:${agent.agentId}`
+  }
+
+  async function ensureSkills(
+    sandboxConfigId?: string,
+    agent?: AgentScope,
+    force = false,
+  ): Promise<void> {
     const configId = sandboxConfigId?.trim() || ''
-    if (configId !== skillsConfigId.value) {
+    const key = scopeKey(configId, agent)
+    if (key !== skillsConfigId.value) {
       force = true
     }
     return runOnce('skills', force, async () => {
-      skillsConfigId.value = configId
+      skillsConfigId.value = key
+      // No sandbox config means no skills, for a shared agent too: its config
+      // id is part of the agent config this caller already holds. The backend
+      // re-reads it from the agent, so what is sent here only has to be
+      // non-empty when the agent actually has one.
       if (!configId) {
         skillsAvailable.value = false
         skills.value = []
@@ -136,7 +166,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
         return
       }
       try {
-        const skillsRes = await listSkills(configId)
+        const skillsRes = await listSkills(configId, agent)
         skillsAvailable.value = skillsRes.skills_available !== false
         skills.value = skillsRes.data && skillsRes.data.length > 0 ? skillsRes.data : []
       } catch {
@@ -206,7 +236,9 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   /** 智能体编辑器打开时预取的依赖（不含 IM channels / 单 KB shares） */
   async function prefetchAgentEditorDeps(force = false): Promise<void> {
     await Promise.all([
-      ensureMcpServices(force),
+      // The editor only edits this workspace's agents, so its MCP services
+      // are this workspace's too.
+      ensureMcpServices(undefined, force),
       ensureAgentTypePresets(force),
       ensurePromptTemplates(force),
       ensureStorageEngine(force),
@@ -222,6 +254,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       storageStatus.value = []
       storageAllowedProviders.value = []
       mcpServices.value = []
+      mcpServicesScope.value = ''
       skills.value = []
       skillsAvailable.value = false
       skillsConfigId.value = ''

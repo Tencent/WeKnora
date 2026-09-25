@@ -522,6 +522,64 @@ func (s *messageService) GetSessionArtifacts(
 	return s.messageRepo.GetSessionArtifacts(ctx, sessionID)
 }
 
+// artifactLibraryMaxPageSize caps one library page; the page renders a card
+// per row, so larger pages only cost bandwidth.
+const artifactLibraryMaxPageSize = 100
+
+// ListArtifactLibrary lists the latest version of every artifact in the
+// sessions the caller can see. Scope follows ListSessions for its default
+// (unfiltered) view: the caller's own sessions plus legacy tenant-level ones.
+func (s *messageService) ListArtifactLibrary(
+	ctx context.Context, query *types.ArtifactLibraryQuery,
+) (*types.PageResult, error) {
+	if query == nil {
+		query = &types.ArtifactLibraryQuery{}
+	}
+	query.TenantID = types.MustTenantIDFromContext(ctx)
+	query.UserID = types.SessionOwnerIDFromContext(ctx)
+	pagination := &types.Pagination{Page: query.Page, PageSize: query.PageSize}
+	query.Page = pagination.GetPage()
+	query.PageSize = min(pagination.GetPageSize(), artifactLibraryMaxPageSize)
+	pagination.PageSize = query.PageSize
+	query.FileTypes = normalizeArtifactFileTypes(query.FileTypes)
+
+	items, total, err := s.messageRepo.ListArtifactLibrary(ctx, query)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": query.TenantID,
+			"user_id":   query.UserID,
+		})
+		return nil, err
+	}
+	for _, item := range items {
+		if handle, ok := types.ParseResourcePath(item.URL); ok {
+			item.Handle = types.BuildResourcePath(handle)
+		}
+	}
+	return types.NewPageResult(total, pagination, items), nil
+}
+
+// normalizeArtifactFileTypes lower-cases extensions and adds the leading dot
+// the collector stores ("pdf" and ".PDF" both become ".pdf").
+func normalizeArtifactFileTypes(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, raw := range in {
+		ext := strings.ToLower(strings.TrimSpace(raw))
+		if ext == "" {
+			continue
+		}
+		if !strings.HasPrefix(ext, ".") {
+			ext = "." + ext
+		}
+		if !seen[ext] {
+			seen[ext] = true
+			out = append(out, ext)
+		}
+	}
+	return out
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Message Search (Hybrid: Keyword + KB Vector Search)
 // ─────────────────────────────────────────────────────────────────────────────

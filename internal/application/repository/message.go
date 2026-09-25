@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -27,7 +28,13 @@ func NewMessageRepository(db *gorm.DB) interfaces.MessageRepository {
 func (r *messageRepository) CreateMessage(
 	ctx context.Context, message *types.Message,
 ) (*types.Message, error) {
-	if err := r.db.WithContext(ctx).Create(message).Error; err != nil {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(message).Error; err != nil {
+			return err
+		}
+		return insertMessageArtifacts(tx, []*types.Message{message})
+	})
+	if err != nil {
 		return nil, err
 	}
 	return message, nil
@@ -41,6 +48,9 @@ func (r *messageRepository) GetMessage(
 	if err := r.db.WithContext(ctx).Where(
 		"id = ? AND session_id = ?", messageID, sessionID,
 	).First(&message).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifacts(ctx, r.db, &message); err != nil {
 		return nil, err
 	}
 	return &message, nil
@@ -59,6 +69,9 @@ func (r *messageRepository) GetMessagesBySession(
 	if err := r.db.WithContext(ctx).Where("session_id = ?", sessionID).
 		Order("created_at ASC, id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
 		return nil, err
 	}
 	return messages, nil
@@ -87,7 +100,31 @@ func (r *messageRepository) GetRecentMessagesBySession(
 		}
 		return cmp
 	})
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
 	return messages, nil
+}
+
+// SessionHasIncompleteAssistant reports whether any assistant message in the
+// session is still generating. Rewind uses this instead of paging oldest
+// messages, so a late incomplete turn is not hidden behind a 1000-row window.
+func (r *messageRepository) SessionHasIncompleteAssistant(
+	ctx context.Context, sessionID string,
+) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	var id string
+	err := r.db.WithContext(ctx).Model(&types.Message{}).
+		Select("id").
+		Where("session_id = ? AND role = ? AND is_completed = ?", sessionID, "assistant", false).
+		Limit(1).
+		Scan(&id).Error
+	if err != nil {
+		return false, err
+	}
+	return id != "", nil
 }
 
 // GetMessagesBySessionBeforeTime retrieves messages from a session created before a specific time
@@ -110,6 +147,9 @@ func (r *messageRepository) GetMessagesBySessionBeforeTime(
 		}
 		return cmp
 	})
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
 	return messages, nil
 }
 
@@ -127,6 +167,9 @@ func (r *messageRepository) ListMessagesBySessionAfterTime(
 	if err := query.Order("created_at ASC").Limit(limit).Find(&messages).Error; err != nil {
 		return nil, err
 	}
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
 	return messages, nil
 }
 
@@ -137,8 +180,34 @@ func (r *messageRepository) ListMessagesBySessionAfterCursor(ctx context.Context
 	if !cursor.At.IsZero() || cursor.ID != "" {
 		query = query.Where("created_at > ? OR (created_at = ? AND id > ?)", cursor.At, cursor.At, cursor.ID)
 	}
-	err := query.Order("created_at ASC, id ASC").Limit(limit).Find(&messages).Error
-	return messages, err
+	if err := query.Order("created_at ASC, id ASC").Limit(limit).Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
+// ListMessagesBySessionBeforeCursor pages a session backwards: up to limit
+// messages sorting strictly before the (before, beforeID) cursor, newest first.
+// A zero cursor starts from the newest message. The ID tie-breaker keeps a page
+// boundary from skipping messages that share a timestamp.
+func (r *messageRepository) ListMessagesBySessionBeforeCursor(
+	ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+) ([]*types.Message, error) {
+	var messages []*types.Message
+	query := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
+	if !before.IsZero() || beforeID != "" {
+		query = query.Where("created_at < ? OR (created_at = ? AND id < ?)", before, before, beforeID)
+	}
+	if err := query.Order("created_at DESC, id DESC").Limit(limit).Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
+	return messages, nil
 }
 
 // ListMessagesBySessionUpTo returns every message of a session that sorts
@@ -159,14 +228,89 @@ func (r *messageRepository) ListMessagesBySessionUpTo(
 		Find(&messages).Error; err != nil {
 		return nil, err
 	}
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
 	return messages, nil
 }
 
-// UpdateMessage updates an existing message.
+// ListAssistantCheckpointsUpTo returns the assistant messages strictly before
+// the (boundary, boundaryID) cursor, oldest first, carrying only the columns
+// that identify a workspace checkpoint.
+//
+// Rewind asks "does kept history still reach a commit SHA, and did it contain
+// an assistant turn at all". ListMessagesBySessionUpTo can answer that, but it
+// selects every column and joins artifacts for the whole conversation to do
+// so. This is the same question against a fraction of the rows and bytes.
+func (r *messageRepository) ListAssistantCheckpointsUpTo(
+	ctx context.Context, sessionID string, boundary time.Time, boundaryID string,
+) ([]*types.Message, error) {
+	var messages []*types.Message
+	if err := r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Select("id", "session_id", "role", "created_at", "sandbox_checkpoint").
+		Where("session_id = ? AND role = ?", sessionID, "assistant").
+		Where("created_at < ? OR (created_at = ? AND id < ?)", boundary, boundary, boundaryID).
+		Order("created_at ASC, id ASC").
+		Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
+// UpdateMessage updates an existing message. Artifacts are rewritten only
+// when message.Artifacts is non-nil (see writeMessageArtifacts).
 func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Message) error {
-	return r.db.WithContext(ctx).Model(&types.Message{}).Where(
-		"id = ? AND session_id = ?", message.ID, message.SessionID,
-	).Updates(message).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&types.Message{}).Where(
+			"id = ? AND session_id = ?", message.ID, message.SessionID,
+		).Updates(message).Error; err != nil {
+			return err
+		}
+		return writeMessageArtifacts(tx, message)
+	})
+}
+
+// DeleteMessagesFrom soft-deletes every message of a session at or after the
+// (boundary, boundaryID) composite cursor and returns the deleted rows, oldest
+// first, so the caller can clean up what hangs off them.
+//
+// inclusive selects the rewind semantics: a user rewind point is dropped along
+// with everything after it (the client prefills that question back into the
+// composer), while an assistant rewind point survives and the conversation
+// resumes after it. The cursor is composite for the same reason
+// ListMessagesBySessionUpTo is — two messages written in the same millisecond
+// are ordered by ID, so the cut is reproducible.
+//
+// The read and the delete share one transaction: the returned rows must be
+// exactly the rows that went away, or the cleanup that follows would act on a
+// different set than the conversation lost.
+func (r *messageRepository) DeleteMessagesFrom(
+	ctx context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
+) ([]*types.Message, error) {
+	condition := "created_at > ? OR (created_at = ? AND id > ?)"
+	if inclusive {
+		condition = "created_at > ? OR (created_at = ? AND id >= ?)"
+	}
+
+	var deleted []*types.Message
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		scope := func() *gorm.DB {
+			return tx.Where("session_id = ?", sessionID).
+				Where(condition, boundary, boundary, boundaryID)
+		}
+		if err := scope().Order("created_at ASC, id ASC").Find(&deleted).Error; err != nil {
+			return err
+		}
+		if len(deleted) == 0 {
+			return nil
+		}
+		return scope().Delete(&types.Message{}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return deleted, nil
 }
 
 // DeleteMessage deletes a message
@@ -182,6 +326,9 @@ func (r *messageRepository) GetFirstMessageOfUser(ctx context.Context, sessionID
 	if err := r.db.WithContext(ctx).Where(
 		"session_id = ? and role = ?", sessionID, "user",
 	).Order("created_at ASC").First(&message).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifacts(ctx, r.db, &message); err != nil {
 		return nil, err
 	}
 	return &message, nil
@@ -202,6 +349,9 @@ func (r *messageRepository) GetMessageByRequestID(
 			return nil, nil
 		}
 		return nil, result.Error
+	}
+	if err := attachArtifacts(ctx, r.db, &message); err != nil {
+		return nil, err
 	}
 
 	return &message, nil
@@ -245,6 +395,9 @@ func (r *messageRepository) SearchMessagesByKeyword(
 	}
 
 	if err := query.Order("messages.created_at DESC").Limit(limit).Find(&results).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifactsWithSession(ctx, r.db, results); err != nil {
 		return nil, err
 	}
 
@@ -299,6 +452,9 @@ func (r *messageRepository) GetMessagesByKnowledgeIDs(
 		Find(&results).Error; err != nil {
 		return nil, err
 	}
+	if err := attachArtifactsWithSession(ctx, r.db, results); err != nil {
+		return nil, err
+	}
 	return results, nil
 }
 
@@ -319,6 +475,9 @@ func (r *messageRepository) GetMessagesByRequestIDs(
 		Where("messages.session_id = ?", sessionID).
 		Where("messages.request_id IN ?", requestIDs).
 		Find(&results).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifactsWithSession(ctx, r.db, results); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -356,6 +515,49 @@ func (r *messageRepository) UpdateMessageRenderedContent(ctx context.Context, se
 		Update("rendered_content", renderedContent).Error
 }
 
+// UpdateMessageContextCheckpoint updates only the context_checkpoint column, so
+// it cannot race a full-row write of the same message. A write that matches no
+// row (the turn was deleted, or the ID is not this session's assistant
+// message) is an error rather than a silent success.
+func (r *messageRepository) UpdateMessageContextCheckpoint(
+	ctx context.Context, sessionID, messageID string, checkpoint *types.ContextCheckpoint,
+) error {
+	result := r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Where("id = ? AND session_id = ? AND role = 'assistant'", messageID, sessionID).
+		Update("context_checkpoint", checkpoint)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("no assistant message %s in session %s", messageID, sessionID)
+	}
+	return nil
+}
+
+// GetLatestContextCheckpoint returns the newest checkpointed assistant message.
+// Only the identity and ordering columns come back with the checkpoint: the
+// caller matches it against turns it has already loaded. It walks
+// idx_messages_session_created_id backwards and stops at the first
+// checkpointed row, which in a compacting session is a recent one.
+func (r *messageRepository) GetLatestContextCheckpoint(
+	ctx context.Context, sessionID string,
+) (*types.Message, error) {
+	var messages []*types.Message
+	if err := r.db.WithContext(ctx).
+		Select("id", "session_id", "request_id", "role", "created_at", "context_checkpoint").
+		Where("session_id = ? AND role = 'assistant' AND context_checkpoint IS NOT NULL", sessionID).
+		Order("created_at DESC, id DESC").
+		Limit(1).
+		Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if len(messages) == 0 {
+		return nil, nil
+	}
+	return messages[0], nil
+}
+
 // DeleteMessagesBySessionID deletes all messages belonging to a session (soft delete)
 func (r *messageRepository) DeleteMessagesBySessionID(ctx context.Context, sessionID string) error {
 	return r.db.WithContext(ctx).Where("session_id = ?", sessionID).Delete(&types.Message{}).Error
@@ -369,43 +571,6 @@ func (r *messageRepository) UpdateMessageKnowledgeID(
 		Model(&types.Message{}).
 		Where("id = ?", messageID).
 		Update("knowledge_id", knowledgeID).Error
-}
-
-// GetSessionArtifacts returns every skill-produced MessageArtifact recorded
-// against any assistant message of the session, in creation order.
-//
-// Projection is scoped to the artifacts JSONB column plus created_at (used
-// to order the flattened output). Assistant messages without artifacts (the
-// common case) contribute an empty slice and cost nothing extra.
-func (r *messageRepository) GetSessionArtifacts(
-	ctx context.Context, sessionID string,
-) (types.MessageArtifacts, error) {
-	if sessionID == "" {
-		return nil, nil
-	}
-	var rows []struct {
-		Artifacts types.MessageArtifacts `gorm:"column:artifacts"`
-		CreatedAt time.Time              `gorm:"column:created_at"`
-	}
-	if err := r.db.WithContext(ctx).
-		Model(&types.Message{}).
-		Select("artifacts", "created_at").
-		Where("session_id = ? AND deleted_at IS NULL", sessionID).
-		Order("created_at ASC").
-		Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return types.MessageArtifacts{}, nil
-	}
-	result := make(types.MessageArtifacts, 0, len(rows))
-	for _, row := range rows {
-		if len(row.Artifacts) == 0 {
-			continue
-		}
-		result = append(result, row.Artifacts...)
-	}
-	return result, nil
 }
 
 // RewriteSandboxCheckpoints retargets copied checkpoints onto the forked
@@ -436,39 +601,6 @@ func (r *messageRepository) RewriteSandboxCheckpoints(
 			Model(&types.Message{}).
 			Where("id = ? AND session_id = ?", message.ID, sessionID).
 			Update("sandbox_checkpoint", updated).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// RecordRestoredArtifactMtime updates ModTime (and ContentHash) on artifacts
-// in this session whose source path matches a same-content sandbox restore.
-func (r *messageRepository) RecordRestoredArtifactMtime(
-	ctx context.Context, sessionID, sourcePath string, mod time.Time, hash string,
-) error {
-	if sessionID == "" || sourcePath == "" {
-		return nil
-	}
-	var messages []*types.Message
-	if err := r.db.WithContext(ctx).
-		Select("id", "session_id", "artifacts").
-		Where("session_id = ?", sessionID).
-		Find(&messages).Error; err != nil {
-		return err
-	}
-	for _, message := range messages {
-		if message == nil {
-			continue
-		}
-		updated, changed := message.Artifacts.WithRestoredMtime(sourcePath, mod, hash)
-		if !changed {
-			continue
-		}
-		if err := r.db.WithContext(ctx).
-			Model(&types.Message{}).
-			Where("id = ? AND session_id = ?", message.ID, sessionID).
-			Update("artifacts", updated).Error; err != nil {
 			return err
 		}
 	}

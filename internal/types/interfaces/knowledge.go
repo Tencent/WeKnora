@@ -264,6 +264,9 @@ type KnowledgeRepository interface {
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
 	DeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
+	// GetKnowledgeBatchByIDOnly returns knowledge by IDs without tenant filter
+	// (for shared-KB resolution; callers check permissions on every row).
+	GetKnowledgeBatchByIDOnly(ctx context.Context, ids []string) ([]*types.Knowledge, error)
 	// CheckKnowledgeExists checks if knowledge already exists.
 	// For file types, check by fileHash or (fileName+fileSize).
 	// For URL types, check by URL.
@@ -326,6 +329,9 @@ type KnowledgeRepository interface {
 	// whether the transition took place (false when the row's parse_status
 	// was no longer "processing", e.g. user cancelled / deleted in flight).
 	SetFinalizing(ctx context.Context, id string, expectedSubtasks int) (bool, error)
+	// CompleteProcessingWithoutSubtasks atomically completes a still-processing
+	// document that has no enrichment tasks, without overriding cancel/delete.
+	CompleteProcessingWithoutSubtasks(ctx context.Context, id string) (bool, error)
 	// CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base.
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.
@@ -369,4 +375,8 @@ type KnowledgeRepository interface {
 	GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error)
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.
 	DeleteKnowledgeTagRelations(ctx context.Context, knowledgeID string) error
+	// ListKnowledgeProfileRows returns the lightweight projection used to
+	// aggregate a knowledge-base description: every enabled document that has
+	// finished parsing (completed or finalizing), without content columns.
+	ListKnowledgeProfileRows(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeProfileRow, error)
 }

@@ -1,6 +1,6 @@
 # 数据源导入（Data Source）
 
-数据源将飞书、Notion、语雀等平台的内容持续同步到知识库。连接建立后，可按计划获取新增与修改；来源删除的内容按同步配置处理。
+数据源将飞书、Notion、Confluence、语雀等平台的内容持续同步到知识库。连接建立后，可按计划获取新增与修改；来源删除的内容按同步配置处理。
 
 数据源在知识库中配置。打开目标知识库的编辑设置，进入「数据源」页签，新建连接并填写凭据，然后选择同步范围与周期。首次同步获取完整内容，后续同步根据连接器能力增量更新。
 
@@ -22,7 +22,19 @@
 
 ## 选择连接器
 
-飞书、Lark、Notion 和语雀用于同步协作文档，GitLab 用于同步仓库中的文档目录，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章。各连接器支持的格式、认证与删除检测见参考部分。
+| 连接器 | 类型标识 | 同步对象 |
+| --- | --- | --- |
+| 飞书 / Lark 知识库 | `feishu` / `lark` | Wiki 空间与节点 |
+| 飞书云盘 / Lark Drive | `feishu_drive` / `lark_drive` | 指定云盘文件夹，见[飞书云盘接入](24-feishu-drive.md) |
+| Notion | `notion` | 页面与数据库 |
+| Confluence | `confluence` | Server / Data Center 或 Cloud 空间中的页面 |
+| 语雀 | `yuque` | 知识库文档 |
+| 钉钉文档 | `dingtalk` | 知识库、文件夹与在线文档 |
+| 腾讯 IMA | `ima` | 知识库中的文件与笔记 |
+| GitLab | `gitlab` | 仓库指定分支/标签下的目录 |
+| RSS / Atom | `rss` | 订阅源文章 |
+
+各连接器支持的格式、认证与删除检测见参考部分。
 
 ## 检查变更与失败
 
@@ -36,7 +48,7 @@
 
 | | Feishu / Lark | Notion | Yuque（语雀） | RSS / Atom |
 | --- | --- | --- | --- | --- |
-| 源码目录 | `internal/datasource/connector/feishu/` | `connector/notion/` | `connector/yuque/` | `connector/rss/` |
+| 源码目录 | `internal/datasource/connector/feishu/wiki/`（共享 `feishu/core/`） | `connector/notion/` | `connector/yuque/` | `connector/rss/` |
 | 类型标识 | `feishu` / `lark` | `notion` | `yuque` | `rss` |
 | 认证方式 | 企业自建应用 `app_id` + `app_secret`（tenant_access_token） | Internal Integration Token（`api_key`） | 个人/团队 Token（`api_token`，`X-Auth-Token` 头） | 无认证或自定义请求头（`auth_headers`） |
 | 凭据字段 | `app_id`、`app_secret`、`base_url`（可选覆盖） | `api_key`（`base_url` 走 Settings） | `api_token`、`base_url`（私有化部署可选） | `auth_headers`（可选，属凭据）；`feed_urls` 属 Settings |
@@ -48,19 +60,21 @@
 | 限流应对 | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试 | — | 每次 `GetDocDetail` 间隔 300ms（个人 token 约 100 req/5min） | — |
 | 部分失败 | 单文档失败生成带错误 metadata 的占位条目，继续同步 | 单页失败记日志跳过 | 单文档失败生成占位条目 | 单 feed 失败 → `PartialFetchError`；全部失败才算 fail |
 
-#### Feishu / Lark（`connector/feishu/`）
+#### Feishu / Lark（`connector/feishu/wiki/`）
 
-飞书与 Lark（国际版 open.larksuite.com）是部署在两朵隔离云上的同一产品，Wiki/docx/drive API 完全一致，因此**共用同一份连接器代码**，由 `region.go` 中的 `Region` 结构选择云端（`RegionFeishu` / `RegionLark`，分别对应类型 `feishu` / `lark`、API 域名 `open.feishu.cn` / `open.larksuite.com`）。`base_url` 凭据字段可显式覆盖（兼容历史上把 feishu 连接器指向 larksuite 的存量数据源）。
+云盘应用权限、文件夹授权、资源选择和 `FEISHU_DOCX_PARSE_MODE` 取舍见[飞书云盘接入](24-feishu-drive.md)。默认 export 与 blocks 模式的图片、附件语义不同；开启同步删除时会删除当前数据源对应的知识条目。
 
-- **认证**（`client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
+飞书与 Lark（国际版 open.larksuite.com）是部署在两朵隔离云上的同一产品，Wiki/docx/drive API 完全一致，因此**共用同一份连接器代码**，由 `feishu/core/region.go` 中的 `Region` 结构选择云端（`RegionFeishu` / `RegionLark`，分别对应类型 `feishu` / `lark`、API 域名 `open.feishu.cn` / `open.larksuite.com`）。`base_url` 凭据字段可显式覆盖（兼容历史上把 feishu 连接器指向 larksuite 的存量数据源）。
+
+- **认证**（`core/client.go`）：`POST /open-apis/auth/v3/tenant_access_token/internal` 换取 tenant_access_token，带互斥锁缓存与过期刷新。
 - **资源列举**（`ListResources`）：三级懒加载——`parentID==""` 列 Wiki 空间；`parentID==spaceID` 列空间顶层节点；`parentID=="spaceID:nodeToken"` 列该节点子节点。早期版本会预先递归整棵树，大 Wiki 会超时（issue #1672），现在递归只发生在同步时。`ResolveResourceAncestors` 通过 `GetWikiNode` 的 `parent_node_token` 逐级上溯，O(depth) 回显深层勾选。
 - **内容抓取**（`fetchNodeContent`）按 `obj_type` 分派：
   - `docx`/`doc` → 异步导出 API（`POST /drive/v1/export_tasks`）导出 `.docx`；
   - `sheet`/`bitable` → 导出 `.xlsx`；
   - `file` → drive 原文件下载（PDF/Word/图片等）；
   - `mindnote`/`slides` → **跳过**（无内容读取 API），并通过 `fetchTally` 统计输出 `discovered/fetched/failed/skipped_unsupported by_type` 摘要日志，解释"发现 13 篇为何只同步了 3 篇"（issue #2136）。
-- **增量逻辑**：游标 `feishuCursor.SpaceNodeTimes`（`resourceID → nodeToken → editTime`）。变更判定用 `obj_edit_time`（文档内容编辑时间），而**不是** `node_edit_time`（只反映改标题/挪位置）。抓取失败的节点**不推进游标**（保留旧 editTime，下次必然 prev != current 而重试），避免瞬时导出失败导致文档被永久跳过。
-- **FetchStream**：统一全量/增量路径（cursor==nil 即全量），每处理 `feishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `feishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
+- **增量逻辑**：游标 `FeishuCursor.SpaceNodeTimes`（`resourceID → nodeToken → editTime`）。变更判定用 `obj_edit_time`（文档内容编辑时间），而**不是** `node_edit_time`（只反映改标题/挪位置）。抓取失败的节点**不推进游标**（保留旧 editTime，下次必然 prev != current 而重试），避免瞬时导出失败导致文档被永久跳过。
+- **FetchStream**：统一全量/增量路径（cursor==nil 即全量），每处理 `FeishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `FeishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
 - **错误分类**（`feishuFailure`）：把原始错误归类为稳定 i18n code（`feishu_auth_or_permission` / `feishu_rate_limited` / `feishu_timeout` / `feishu_server_unavailable` / `feishu_api_error`(+code) / `sync_failed`），前端本地化展示；原始 status/body/log_id 只留在服务端日志。
 
 #### GitLab（`connector/gitlab/`）
@@ -69,7 +83,7 @@
 
 `config.settings.projects` 为非空数组，每项包含字符串 project_id、可选 ref 和 paths。ref 留空使用默认分支；paths 留空选整个仓库，目录使用相对路径与正斜杠。先验证凭据并浏览资源，再保存定时同步。
 
-流式同步支持恢复检查点；增量通过仓库提交差异更新文件，源端删除按 sync_deletions 处理。选择的仓库文件仍经过 WeKnora 文件类型、大小与解析引擎校验，并非所有代码或二进制文件都可直接入库。
+流式同步支持恢复检查点；增量通过仓库提交差异更新文件，源端删除按 sync_deletions 处理。选择的仓库文件仍经过 WeKnora 文件类型、大小与解析引擎校验，并非所有代码或二进制文件都可直接入库。不同路径下内容完全相同的文件（如各子目录的 README 模板）会作为独立知识保留，重复判定只在同一数据源、同一文件路径内生效。
 
 ```json
 {"credentials":{"base_url":"https://gitlab.example.com","access_token":"<token>"},"settings":{"projects":[{"project_id":"123","ref":"main","paths":["docs"]}]}}
@@ -77,7 +91,7 @@
 
 #### 腾讯 IMA（`connector/ima/`）
 
-填写 credentials.client_id 和 api_key；base_url 可选，默认 `https://ima.qq.com`。资源树列出该凭据可见的 IMA 知识库与目录，选择结果保存为 config.resource_ids。源端授权失败或资源不可见时，先检查 IMA 凭据及知识库访问权。
+填写 credentials.client_id 和 api_key；base_url 可选，默认 `https://ima.qq.com`。资源列表是该凭据可见的 IMA 知识库（扁平列表，不展开目录），选择结果保存为 config.resource_ids；同步时递归遍历所选知识库中的全部子文件夹。源端授权失败或资源不可见时，先检查 IMA 凭据及知识库访问权。
 
 可下载文件进入文档解析，网页类按 URL 获取；笔记通过 note OpenAPI 读取正文。AI 会话和视频解析没有可用正文读取入口，会被跳过。支持全量与增量同步：按知识库、父目录和标题建立稳定身份，同名文件替换后 media_id 改变会触发更新；完整列举成功后才检测删除。
 
@@ -94,6 +108,35 @@
 - **抓取**：`fetchPage` 递归处理页面——`GetBlockChildrenAll` 拉块 → `BlocksToMarkdown`（`markdown.go`）转 Markdown；`file_upload` 型文件块先 `ResolveBlock` 换临时下载 URL；**附件**（PDF 等，图片除外——图片已以 `![](url)` 内联在 Markdown 中）作为独立条目下载入库；`child_page` / `child_database` 块递归下钻。数据库两种形态：整库渲染成一张 Markdown 表格（`buildDatabaseItem`，含每条记录的块内容附录），数据库记录单独出现时按"属性列表 + 块内容"渲染（`buildRecordItem`）。属性提取 `propertyToString` 通用地跟随 `type` 链，覆盖全部 22 种属性类型；属性名按字母序排序保证增量比对的确定性。
 - **增量逻辑**：首次同步（游标为空）直接委托 `FetchAll` 并用返回条目的 `UpdatedAt` 构建游标；后续同步 `discoverAllResources` 用 Search API + BFS 圈定选中根下的全部后代，逐页比对 `last_edited_time`。数据库走 `fetchDatabaseIncremental`：任一记录变更就整表重建。
 - **删除与取消勾选的区分**：源端消失的页面报 `IsDeleted`；仍可见但因用户取消勾选祖先而不再可达的页面进入 excluded 集合，**不会**被误报为删除。`computeExcludedSet` 同时保证"用户从未见过的新页面"不被排除——选中的父节点仍会自动带上新子页面。
+
+#### Confluence（`connector/confluence/`）
+
+支持 Confluence Server / Data Center 与 Confluence Cloud，均使用 HTTP Basic 认证。
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `edition` | 否 | `server`（默认，Server / Data Center）或 `cloud` |
+| `base_url` | 是 | Confluence 地址，缺少协议时补 `https://`；Cloud 填 `https://<站点>.atlassian.net` 时自动补 `/wiki` |
+| `username` | 是 | Server/DC 用户名；Cloud 为 Atlassian 账号邮箱 |
+| `password` | Server/DC 必填 | Server/DC 账号密码 |
+| `api_token` | Cloud 必填 | 在 Atlassian 账号的 API tokens 页面创建 |
+
+`edition`、`base_url`、`username` 不属于密钥，界面会同时写入 Settings 以便编辑时回显；`password` / `api_token` 只存加密凭据。
+
+<Screenshot
+  src="/screenshots/datasource-confluence.png"
+  caption="Confluence 数据源：版本选择与凭据填写"
+  hint="数据源编辑弹窗选中 Confluence，展示「Confluence 版本」下拉（Server / Data Center、Cloud）、地址、用户名与 Cloud API 令牌字段，以及测试连接后的空间选择列表。" />
+
+- **范围**：资源列表是凭据可见的空间（扁平列表），至少选择一个空间；同步空间内全部已发布页面，不导入附件和博客文章。
+- **内容**：取页面渲染后的 HTML 转为 Markdown（每页一个 `.md` 条目），正文为空时仅保留标题。条目 metadata 带 `space_key`、`space_name`、`page_id`，有作者时带 `creator`。
+- **增量**：按页面版本号比对，版本未变的页面跳过。实现了流式同步，每页入库后保存游标；全量同步的中途游标同时保留上次的页面基线，任务重试可续传，也能继续对账删除。
+- **删除保护**：所选空间不可访问、页面列表为空而上次有内容，或本次消失的页面不少于 20 个且占上次页面数 80% 以上时，整次同步报错，不执行删除。开启同步删除后，其余情况下消失的页面按删除处理。
+- **错误**：单页失败生成带错误信息的占位条目并继续；错误码为 `confluence_auth_or_permission`、`confluence_not_found`、`confluence_rate_limited`、`confluence_server_unavailable`、`confluence_api_error`、`confluence_sync_failed`，原始响应只记服务端日志。
+
+```json
+{"credentials":{"edition":"cloud","base_url":"https://team.atlassian.net","username":"me@example.com","api_token":"<token>"},"resource_ids":["<space-id>"]}
+```
 
 #### Yuque 语雀（`connector/yuque/`）
 
@@ -121,7 +164,7 @@
 
 ### 数据源生命周期与 REST API
 
-路由注册在 `internal/router/router.go` 的 `RegisterDataSourceRoutes`（读操作 Viewer+，写操作 Admin+）：
+路由注册在 `internal/router/routes_infra.go` 的 `RegisterDataSourceRoutes`（列表、详情、同步日志为 Viewer+，其余操作 Admin+；API Key 需 `manage_datasources` 或 full-access）：
 
 | 方法与路径 | 权限 | 说明 |
 | --- | --- | --- |
@@ -135,8 +178,8 @@
 | `PUT /api/v1/datasource/:id/credentials` | Admin | 原子替换凭据（见[凭据加密存储](#凭据加密存储)） |
 | `DELETE /api/v1/datasource/:id/credentials/:field` | Admin | 清空凭据（field 只接受 `credentials`） |
 | `POST /api/v1/datasource/:id/validate` | Admin | 对已存数据源做连接测试；失败置 `status=error`，成功清除 error 状态 |
-| `GET /api/v1/datasource/:id/resources?parent_id=` | Viewer | 列出外部系统可选资源（parent_id 支持懒加载展开） |
-| `POST /api/v1/datasource/:id/resource-ancestors` | Viewer | 解析选中资源的祖先链（编辑时回显深层勾选） |
+| `GET /api/v1/datasource/:id/resources?parent_id=` | Admin | 列出外部系统可选资源（parent_id 支持懒加载展开） |
+| `POST /api/v1/datasource/:id/resource-ancestors` | Admin | 解析选中资源的祖先链（编辑时回显深层勾选） |
 | `POST /api/v1/datasource/:id/sync` | Admin | 手动触发同步（创建 SyncLog + 入队 Asynq 任务） |
 | `POST /api/v1/datasource/:id/pause` / `resume` | Admin | 暂停/恢复（同时移除/重挂 cron） |
 | `GET /api/v1/datasource/:id/logs`、`GET /api/v1/datasource/logs/:log_id` | Viewer | 同步历史 |
@@ -177,7 +220,7 @@ flowchart LR
 
 - **防御性取消**：数据源或知识库已被删除时，把 SyncLog 置为 `canceled` 并返回 nil（不再重试）。
 - **两条抓取路径**：连接器实现了 `StreamingConnector` 走 `processSyncStreaming`（流式）；否则按 `ForceFull || SyncMode==full` 走 `FetchAll`，或带上 `ParseSyncCursor()` 的游标走 `FetchIncremental`（批量）。
-- **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。
+- **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。实现了 `FullStreamingConnector` 的连接器（目前为 Confluence）在全量同步时改走 `FetchFullStream`：重新抓取全部条目，同时保留旧游标作为删除对账基线。
 - **入库核心 `applyFetchedItem` → `ingestItem`**：
   - `IsDeleted=true` 且 `sync_deletions=true` 时，按租户、知识库、数据源 ID 和 external_id 查找并真实删除对应知识；关闭同步删除则保留已有知识。删除能力还取决于连接器是否提供可靠的删除检测；
   - 有 `Content` 字节 → 包装成 `multipart.FileHeader` 走 `KnowledgeService.CreateKnowledgeFromFile`（完整文档解析流水线）；只有 `URL` → 走 `CreateKnowledgeFromURL` 由 WeKnora 下载解析；
@@ -207,7 +250,7 @@ sequenceDiagram
     Q-->>S: ProcessSync(payload)
     S->>DB: 加载 DataSource / SyncLog / 校验 KB 存在
     S->>S: ParseConfig() 解密凭据
-    alt "StreamingConnector（Feishu/Lark/GitLab）"
+    alt "StreamingConnector（Feishu/Lark、GitLab、Confluence）"
         S->>C: FetchStream(config, cursor, handler)
         loop "遍历 Wiki 节点"
             C->>EXT: ListWikiNodesRecursive / ExportAndDownload
@@ -218,7 +261,7 @@ sequenceDiagram
             S->>DB: 持久化 LastSyncCursor + SyncLog 进度
         end
         C-->>S: 最终 cursor
-    else "批量连接器（Notion/Yuque/RSS）"
+    else "批量连接器（Notion/Yuque/钉钉/IMA/RSS）"
         S->>C: FetchAll 或 FetchIncremental(cursor)
         C->>EXT: 列表 + 拉取变更内容
         EXT-->>C: 文档 / Markdown
@@ -321,26 +364,27 @@ type StreamingConnector interface {
 }
 ```
 
-任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark 和 GitLab 连接器均实现了 `StreamingConnector`。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
+任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark（知识库与云盘）、GitLab 和 Confluence 连接器实现了 `StreamingConnector`；Confluence 另实现 `FullStreamingConnector`，全量同步也能对账删除。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
 
 #### ConnectorRegistry：注册与查找
 
 `ConnectorRegistry` 是简单的 `map[string]Connector` 注册表。实际注册发生在 `internal/container/container.go` 的 `initConnectorRegistry()`：
 
 ```go
-registry.Register(feishuConnector.NewConnector(feishuConnector.RegionFeishu))  // feishu
-registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark))    // lark（国际版，同一实现不同 Region）
-registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive))             // feishu_drive
-registry.Register(drive.NewDriveConnector(core.RegionLarkDrive))               // lark_drive
-registry.Register(notionConnector.NewConnector())                              // notion
-registry.Register(yuqueConnector.NewConnector())                               // yuque
-registry.Register(dingtalkConnector.NewConnector())                            // dingtalk
-registry.Register(imaConnector.NewConnector())                                 // ima
-registry.Register(rssConnector.NewConnector())                                 // rss
-registry.Register(gitlabConnector.NewConnector())                              // gitlab
+registry.Register(wiki.NewConnector(core.RegionFeishu))             // feishu
+registry.Register(wiki.NewConnector(core.RegionLark))               // lark（国际版，同一实现不同 Region）
+registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive))  // feishu_drive
+registry.Register(drive.NewDriveConnector(core.RegionLarkDrive))    // lark_drive
+registry.Register(notionConnector.NewConnector())                   // notion
+registry.Register(confluenceConnector.NewConnector())               // confluence
+registry.Register(yuqueConnector.NewConnector())                    // yuque
+registry.Register(dingtalkConnector.NewConnector())                 // dingtalk
+registry.Register(imaConnector.NewConnector())                      // ima
+registry.Register(rssConnector.NewConnector())                      // rss
+registry.Register(gitlabConnector.NewConnector())                   // gitlab
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（Confluence、GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

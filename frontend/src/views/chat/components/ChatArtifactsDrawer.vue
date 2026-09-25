@@ -462,23 +462,23 @@ onUnmounted(() => {
 
 .artifact-drawer-header-icon {
     flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    border-radius: 9px;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--app-radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(7, 192, 95, 0.1);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     color: var(--td-brand-color);
-    font-size: 16px;
+    font-size: var(--app-text-lg);
 }
 
 .artifact-drawer-header-title {
     min-width: 0;
     flex: 1;
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1.4;
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    line-height: 20px;
     color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -501,7 +501,7 @@ onUnmounted(() => {
     gap: 8px;
     padding: 48px 16px;
     color: var(--td-text-color-placeholder);
-    font-size: 13px;
+    font-size: var(--app-text-md);
 }
 
 .artifact-list {
@@ -516,7 +516,7 @@ onUnmounted(() => {
     gap: 10px;
     padding: 10px 4px;
     border-bottom: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
 
     &:last-child {
         border-bottom: none;
@@ -539,14 +539,14 @@ onUnmounted(() => {
     flex-shrink: 0;
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
 }
 
 .artifact-body {
@@ -555,7 +555,7 @@ onUnmounted(() => {
 }
 
 .artifact-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     letter-spacing: 0.01em;
     line-height: 1.35;
@@ -567,7 +567,7 @@ onUnmounted(() => {
 
 .artifact-meta {
     margin-top: 2px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.3;
     color: var(--td-text-color-placeholder);
     display: flex;
@@ -615,7 +615,7 @@ onUnmounted(() => {
     border-radius: 1px;
     background: var(--td-component-border);
     opacity: 0.55;
-    transition: opacity 0.15s ease, background 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 }
 
 .artifact-preview-resize-handle:hover .artifact-preview-resize-line,
@@ -628,8 +628,18 @@ onUnmounted(() => {
 <style lang="less">
 .chat-artifacts-drawer.t-drawer {
     .t-drawer__header {
-        padding: 16px 20px;
+        height: var(--app-chat-header-height);
+        min-height: var(--app-chat-header-height);
+        padding: 0 12px;
+        border-bottom: 1px solid var(--td-component-stroke);
+        flex-shrink: 0;
         font-weight: normal;
+    }
+
+    .t-drawer__close-btn {
+        top: calc((var(--app-chat-header-height) - 28px) / 2);
+        width: 28px;
+        height: 28px;
     }
 
     .t-drawer__body {
@@ -641,12 +651,6 @@ onUnmounted(() => {
     .t-drawer__content-wrapper,
     .t-drawer__content {
         height: 100%;
-    }
-
-    .t-drawer__header {
-        padding: 14px 18px;
-        border-bottom: 1px solid var(--td-component-stroke);
-        flex-shrink: 0;
     }
 
     .t-drawer__body {

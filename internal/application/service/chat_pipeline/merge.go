@@ -80,10 +80,10 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	mergedChunks := p.groupAndMergeCurrentContent(ctx, searchResult)
 
 	// Step 6: Populate FAQ answers
-	mergedChunks = p.populateFAQAnswers(ctx, chatManage, mergedChunks)
+	mergedChunks = p.populateFAQAnswers(ctx, mergedChunks)
 
 	// Step 7: Expand short contexts
-	mergedChunks = p.expandShortContextWithNeighbors(ctx, chatManage, mergedChunks)
+	mergedChunks = p.expandShortContextWithNeighbors(ctx, mergedChunks)
 
 	// Step 7.5: Re-merge overlapping ranges introduced by expansion
 	mergedChunks = p.groupAndMergeCurrentContent(ctx, mergedChunks)
@@ -97,17 +97,34 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 }
 
 // selectInputResults picks rerank results if available, falling back to search
-// results sorted by score descending.
+// results sorted by score descending and cut to RerankTopK. Without the cut,
+// a turn whose rerank did not run (no model, model unavailable, API error)
+// resolved parents, FAQ answers and neighbors for every search hit — up to
+// hundreds with query expansion and per-document targets — before top-k
+// dropped most of them.
 func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
 	if len(chatManage.RerankResult) > 0 {
 		return chatManage.RerankResult
 	}
-	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
-		"reason": "empty_rerank_result",
-	})
 	result := chatManage.SearchResult
-	sort.Slice(result, func(i, j int) bool {
+	sort.SliceStable(result, func(i, j int) bool {
 		return result[i].Score > result[j].Score
+	})
+	if k := chatManage.RerankTopK; k > 0 && len(result) > k {
+		// Graph hits have no retrieval score (0) and would always fall
+		// below the cut; entity search already bounds how many it adds.
+		kept := result[:k:k]
+		for _, r := range result[k:] {
+			if r.MatchType == types.MatchTypeGraph {
+				kept = append(kept, r)
+			}
+		}
+		result = kept
+	}
+	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
+		"reason":    "empty_rerank_result",
+		"input_cnt": len(chatManage.SearchResult),
+		"kept_cnt":  len(result),
 	})
 	return result
 }
@@ -224,17 +241,6 @@ func (p *PluginMerge) resolveParentChunks(
 		return results
 	}
 
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	if tenantID == 0 && chatManage != nil {
-		tenantID = chatManage.TenantID
-	}
-	if tenantID == 0 {
-		pipelineWarn(ctx, "Merge", "parent_resolve_skip", map[string]interface{}{
-			"reason": "missing_tenant",
-		})
-		return results
-	}
-
 	// Collect unique parent chunk IDs
 	parentIDs := make(map[string]struct{})
 	for _, r := range results {
@@ -247,12 +253,17 @@ func (p *PluginMerge) resolveParentChunks(
 		return results
 	}
 
-	// Batch fetch parent chunks
+	// Batch fetch parent chunks. The lookup is intentionally not tenant
+	// scoped: retrieval results can come from an org-shared KB whose chunks
+	// belong to the sharing workspace, and a caller-tenant filter made every
+	// parent (and the image_info enrichment that hangs off it) invisible for
+	// shared hits (#3342). The IDs come from retrieval results, not client
+	// input, matching ListChunksByIDOnly's existing shared-KB usage.
 	ids := make([]string, 0, len(parentIDs))
 	for id := range parentIDs {
 		ids = append(ids, id)
 	}
-	parentChunks, err := p.chunkRepo.ListChunksByID(ctx, tenantID, ids)
+	parentChunks, err := p.chunkRepo.ListChunksByIDOnly(ctx, ids)
 	if err != nil {
 		pipelineWarn(ctx, "Merge", "parent_resolve_failed", map[string]interface{}{
 			"error": err.Error(),
@@ -294,7 +305,7 @@ func (p *PluginMerge) resolveParentChunks(
 			grandparentIDs = append(grandparentIDs, parent.ParentChunkID)
 		}
 		if len(grandparentIDs) > 0 {
-			grandparents, fetchErr := p.chunkRepo.ListChunksByID(ctx, tenantID, grandparentIDs)
+			grandparents, fetchErr := p.chunkRepo.ListChunksByIDOnly(ctx, grandparentIDs)
 			if fetchErr != nil {
 				pipelineWarn(ctx, "Merge", "grandparent_fetch_failed", map[string]interface{}{
 					"error": fetchErr.Error(),
@@ -307,11 +318,12 @@ func (p *PluginMerge) resolveParentChunks(
 		}
 	}
 
-	// Batch-fetch image_info scoped to matched text children only.
+	// Batch-fetch image_info scoped to matched text children only. Not
+	// tenant scoped, for the same shared-KB reason as the parent fetch above.
 	textChildIDs := collectScopedTextChildIDs(results, parentMap)
 	var scopedImageInfo map[string]string
 	if len(textChildIDs) > 0 {
-		scopedImageInfo = searchutil.CollectImageInfoByChunkIDs(ctx, p.chunkRepo, tenantID, textChildIDs)
+		scopedImageInfo = searchutil.CollectImageInfoByChunkIDsOnly(ctx, p.chunkRepo, textChildIDs)
 	}
 
 	for _, r := range results {

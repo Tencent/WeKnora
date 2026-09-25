@@ -3,6 +3,7 @@ package confluence
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,14 @@ const (
 	maxErrorResponseRunes       = 1000
 	maxRetryDelay               = 60 * time.Second
 	maxPaginationHops           = 10000
+	// maxEmptyServerPages bounds how far a Server/Data Center page listing
+	// follows _links.next through empty pages. Some builds keep returning
+	// next past the end of a space (#3596); permission filtering can also
+	// empty one page mid-listing, so a single empty page is not the end.
+	maxEmptyServerPages = 3
+	// maxDeletionProbes caps how many unlisted pages one sync looks up
+	// individually after a cut-short listing; the rest wait for the next run.
+	maxDeletionProbes = 200
 )
 
 type apiError struct {
@@ -299,7 +308,11 @@ func withCloudPageQuery(next string) string {
 	return parsed.String()
 }
 
-func (c *client) pages(ctx context.Context, s space) ([]page, error) {
+// pages lists every current page in a space. complete is false when a Server
+// listing was cut short after maxEmptyServerPages empty pages that still
+// linked onward; the caller must not treat pages missing from such a listing
+// as deleted.
+func (c *client) pages(ctx context.Context, s space) (pages []page, complete bool, err error) {
 	if c.cfg.cloud() {
 		var all []page
 		start := "/api/v2/spaces/" + url.PathEscape(s.ID) + "/pages?status=current&depth=all&limit=250"
@@ -323,27 +336,64 @@ func (c *client) pages(ctx context.Context, s space) ([]page, error) {
 			}
 			return next, nil
 		})
-		return all, err
+		return all, true, err
 	}
 	var all []page
-	err := c.paginate(ctx, serverSpacePagesEndpoint(s.Key), func(pageURL string) (string, error) {
+	complete = true
+	emptyPages := 0
+	err = c.paginate(ctx, serverSpacePagesEndpoint(s.Key), func(pageURL string) (string, error) {
 		var result serverSpacePageList
 		if err := c.get(ctx, pageURL, &result); err != nil {
 			return "", err
 		}
-		for _, listed := range result.pages() {
+		listedPages := result.pages()
+		for _, listed := range listedPages {
 			if listed.Space.Key == "" {
 				listed.Space.Key, listed.Space.Name = s.Key, s.Name
 			}
 			all = append(all, listed)
 		}
 		next := result.nextLink()
-		if next != "" {
-			next = withServerPageExpand(next)
+		if next == "" {
+			return "", nil
 		}
-		return next, nil
+		if len(listedPages) > 0 {
+			emptyPages = 0
+		} else {
+			emptyPages++
+			if emptyPages >= maxEmptyServerPages {
+				complete = false
+				return "", nil
+			}
+		}
+		return withServerPageExpand(next), nil
 	})
-	return all, err
+	return all, complete, err
+}
+
+// pageInSpace reports whether a Server page is still a current page of the
+// space. Confluence answers 404 for a page that was deleted or moved to the
+// trash; a page that is no longer current or now belongs to another space is
+// gone from this one too, matching what a complete listing would omit.
+func (c *client) pageInSpace(ctx context.Context, id, spaceKey string) (bool, error) {
+	var result struct {
+		Status string `json:"status"`
+		Space  struct {
+			Key string `json:"key"`
+		} `json:"space"`
+	}
+	err := c.get(ctx, "/rest/api/content/"+url.PathEscape(id)+"?expand=space", &result)
+	var apiErr *apiError
+	if errors.As(err, &apiErr) && apiErr.status == http.StatusNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if result.Status != "" && result.Status != "current" {
+		return false, nil
+	}
+	return result.Space.Key == "" || result.Space.Key == spaceKey, nil
 }
 
 func (c *client) body(ctx context.Context, id string) (pageBody, error) {

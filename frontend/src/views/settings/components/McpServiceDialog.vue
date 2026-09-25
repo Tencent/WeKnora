@@ -2,7 +2,8 @@
   <SettingDrawer
     :visible="dialogVisible"
     :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
-    :class="`mcp-drawer mcp-drawer--${formData.transport_type}`"
+    class="mcp-drawer"
+    icon="tools"
     :confirm-loading="submitting"
     :confirm-disabled="metadataBusy || generatingUsage || (step === 1 && !toolsSynced)"
     :confirm-text="t(step === 0 ? 'mcpMetadata.saveNext' : 'common.save')"
@@ -14,25 +15,18 @@
     @confirm="step === 0 ? handleNext() : handleSubmit()"
     @cancel="handleClose"
   >
-    <!--
-      Header icon — 抽屉通过 transport 类型区分连接配置：
-      transport_type 决定图标和容器配色。SSE 绿、HTTP-Streamable 蓝。
-      非 scoped 块 .mcp-drawer--{transport} 注入背景与文字色，currentColor
-      让 t-icon 跟着染色。
-    -->
-    <template #headerIcon>
-      <t-icon :name="transportIcon" />
-    </template>
-
-    <!-- 副标题：transport 类型名 + 启用状态 mini chip -->
+    <!-- 副标题：编辑时显示已保存服务的 transport 与启用状态；新建时还没有状态可展示 -->
     <template #subtitle>
-      <span>{{ transportLabel }}</span>
-      <span
-        class="subtitle-tag"
-        :class="formData.enabled ? 'subtitle-tag--ok' : 'subtitle-tag--muted'"
-      >
-        {{ formData.enabled ? t('mcpSettings.enabled', '已启用') : t('mcpSettings.disabled', '已禁用') }}
-      </span>
+      <template v-if="mode === 'edit'">
+        <span>{{ transportLabel }}</span>
+        <span
+          class="subtitle-tag"
+          :class="formData.enabled ? 'subtitle-tag--ok' : 'subtitle-tag--muted'"
+        >
+          {{ formData.enabled ? t('mcpSettings.enabled', '已启用') : t('mcpSettings.disabled', '已禁用') }}
+        </span>
+      </template>
+      <template v-else>{{ t('mcpServiceDialog.addDesc') }}</template>
     </template>
 
     <template #header-extra>
@@ -703,10 +697,6 @@ async function handleRevokeOAuth() {
 
 // Header icon name + transport label, mirrored from McpSettings list cards
 // so the list-card → drawer hand-off stays visually continuous.
-const transportIcon = computed(() => {
-  return formData.value.transport_type === 'http-streamable' ? 'link' : 'cast'
-})
-
 const transportLabel = computed(() => {
   return formData.value.transport_type === 'http-streamable' ? 'HTTP Streamable' : 'SSE'
 })
@@ -1028,7 +1018,7 @@ const handleClose = () => {
   gap: 8px;
   min-width: 0;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   /* Only the steps that draw a connector need to absorb the leftover width. */
   &:not(:last-child) {
@@ -1063,7 +1053,7 @@ const handleClose = () => {
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
       outline-offset: 2px;
-      border-radius: 4px;
+      border-radius: var(--app-radius-xs);
     }
   }
 }
@@ -1077,7 +1067,7 @@ const handleClose = () => {
   flex-shrink: 0;
   border: 1px solid currentColor;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   line-height: 1;
 
@@ -1096,7 +1086,7 @@ const handleClose = () => {
 
 .mcp-step__title {
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1175,7 +1165,7 @@ const handleClose = () => {
     border: none;
     background: none;
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
 
@@ -1196,13 +1186,13 @@ const handleClose = () => {
   }
 
   &__textarea :deep(textarea) {
-    font-family: var(--td-font-family-mono, monospace);
-    font-size: 12px;
+    font-family: var(--td-font-family-mono);
+    font-size: var(--app-text-sm);
   }
 
   &__error {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-error-color);
   }
 
@@ -1236,7 +1226,7 @@ const handleClose = () => {
 
 .oauth-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
@@ -1244,7 +1234,7 @@ const handleClose = () => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -1260,7 +1250,7 @@ const handleClose = () => {
 
 .form-desc {
   margin: 4px 0 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 
@@ -1274,7 +1264,7 @@ const handleClose = () => {
 :deep(.t-textarea),
 :deep(.t-input-number) {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 // 隐藏 t-form 默认 form-item 容器 — 走自定义 .form-item / .form-label
@@ -1290,7 +1280,7 @@ const handleClose = () => {
   padding: 3px;
   background: var(--td-bg-color-component);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .source-option {
@@ -1301,13 +1291,13 @@ const handleClose = () => {
   height: 28px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   line-height: 1;
-  transition: all 0.15s ease;
+  transition: all var(--app-motion-fast) ease;
 
   &:hover:not(.is-active) {
     color: var(--td-text-color-primary);
@@ -1324,7 +1314,7 @@ const handleClose = () => {
 }
 
 .source-option__icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   flex-shrink: 0;
 }
 
@@ -1358,14 +1348,14 @@ const handleClose = () => {
 }
 
 .number-input__unit {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   user-select: none;
 }
 
 // ---- footer-left 测试按钮的状态 icon ----
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 
   &.available {
@@ -1384,7 +1374,7 @@ const handleClose = () => {
   padding: 0 6px;
   margin-left: 6px;
   height: 16px;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 500;
   border-radius: 3px;
 
@@ -1416,14 +1406,5 @@ const handleClose = () => {
 
   .setting-drawer__section-title { margin: 0; }
   &:last-child { border-bottom: 0; padding-bottom: 0; }
-}
-.mcp-drawer--sse .setting-drawer__header-icon {
-  background: rgba(17, 128, 83, 0.12);
-  color: #118053;
-}
-
-.mcp-drawer--http-streamable .setting-drawer__header-icon {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
 }
 </style>

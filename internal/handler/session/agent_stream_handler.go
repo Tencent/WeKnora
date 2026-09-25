@@ -42,6 +42,7 @@ type AgentStreamHandler struct {
 	ttfbLogged         bool      // Guards one-shot TTFB log on first answer chunk
 	assistantMessage   *types.Message
 	streamManager      interfaces.StreamManager
+	completionEvent    *interfaces.StreamEvent // Published only after the final message is persisted.
 
 	eventBus *event.EventBus
 
@@ -272,14 +273,14 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	}
 	h.mu.Unlock()
 
-	// Send SSE response (both success and failure)
+	// Send SSE response (both success and failure). A failed tool execution is
+	// still a tool result: response_type=error is reserved for internal agent
+	// failures (handleError), while tool failures are reported through
+	// response_type=tool_result with success=false in the metadata.
 	responseType := types.ResponseTypeToolResult
 	content := agenttools.StreamContentForToolResult(data.ToolName, data.Success, data.Error, data.Data)
-	if !data.Success {
-		responseType = types.ResponseTypeError
-		if content == "" && data.Error != "" {
-			content = data.Error
-		}
+	if !data.Success && content == "" && data.Error != "" {
+		content = data.Error
 	}
 
 	// Build metadata including tool result data for rich frontend rendering
@@ -580,6 +581,13 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	if data.IsFallback {
 		metadata["is_fallback"] = true
 	}
+	// The completion cap cut this answer off. Carried on every chunk and on
+	// the Done marker: a live-streamed answer only learns of the cap at the
+	// close, and the metadata is persisted with the stream event so a replay
+	// still shows the notice.
+	if data.Truncated {
+		metadata["truncated"] = true
+	}
 	h.mu.Unlock()
 
 	// Append this chunk to stream (frontend will accumulate by event ID)
@@ -768,22 +776,33 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// persisted without artifacts. Collect is a no-op when either the
 		// collector wasn't wired in, no sandbox is bound, or no files were
 		// produced — those cases must not disturb the completion path.
+		//
+		// Layouts without a separate output tree must not be collected
+		// (scanning Root would upload the whole project). Remote backends keep
+		// skills.ArtifactOutputDir(), or layout.OutputDir when advertised.
 		var previous types.MessageArtifacts
 		if h.artifactCollector != nil {
 			collectCtx := context.WithoutCancel(h.ctx)
-			artifacts, err := h.artifactCollector.CollectWithNotify(
-				collectCtx,
-				h.sessionID,
-				h.assistantMessageID,
-				h.tenantID,
-				skills.ArtifactOutputDir(),
-				h.emitArtifactsPending,
-			)
-			if err != nil {
-				logger.GetLogger(h.ctx).Warnf(
-					"artifact collect failed session=%s message=%s: %v",
-					h.sessionID, h.assistantMessageID, err,
+			var artifacts types.MessageArtifacts
+			if collectDir, skip := h.artifactCollector.CollectTarget(collectCtx, h.sessionID); !skip {
+				if collectDir == "" {
+					collectDir = skills.ArtifactOutputDir()
+				}
+				var err error
+				artifacts, err = h.artifactCollector.CollectWithNotify(
+					collectCtx,
+					h.sessionID,
+					h.assistantMessageID,
+					h.tenantID,
+					collectDir,
+					h.emitArtifactsPending,
 				)
+				if err != nil {
+					logger.GetLogger(h.ctx).Warnf(
+						"artifact collect failed session=%s message=%s: %v",
+						h.sessionID, h.assistantMessageID, err,
+					)
+				}
 			}
 
 			// Resolve the files the answer names against this turn's artifacts
@@ -869,7 +888,9 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		}
 	}
 
-	// Send completion event to stream manager so SSE can detect completion
+	// Prepare completion metadata. Publishing must wait for the caller to save
+	// Content/AgentSteps/Artifacts: message-scoped file requests authorize against
+	// that persisted output as soon as the client receives this event.
 	completeData := map[string]interface{}{
 		"total_steps":       data.TotalSteps,
 		"total_duration_ms": data.TotalDurationMs,
@@ -890,7 +911,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	if turnUsage != nil {
 		completeData["usage"] = turnUsage
 	}
-	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+	h.completionEvent = &interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeComplete,
 		Content:   "",
@@ -898,10 +919,24 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		Timestamp: time.Now(),
 		Data:      completeData,
 		Usage:     turnUsage,
-	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf("Append complete event to stream failed: %v", err)
 	}
 
+	return nil
+}
+
+// publishCompletion is called only after UpdateMessage succeeds. Keep it
+// separate from handleComplete so steering handoff and final persistence retain
+// their existing order, including on cancellation and quick-answer turns.
+func (h *AgentStreamHandler) publishCompletion(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.completionEvent == nil {
+		return nil
+	}
+	if err := h.streamManager.AppendEvent(ctx, h.sessionID, h.assistantMessageID, *h.completionEvent); err != nil {
+		return err
+	}
+	h.completionEvent = nil
 	return nil
 }
 

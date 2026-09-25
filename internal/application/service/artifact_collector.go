@@ -9,7 +9,7 @@
 //
 // Contract:
 //   - Never delete files from the sandbox — skills can share files across
-//     turns; deletion would break that (spec §2, "不清空输出目录").
+//     turns; deletion would break that ("不清空输出目录").
 //   - Never lazy-create a sandbox: the collector reads from an already-live
 //     sandbox and returns an empty slice when none exists.
 //   - Best-effort: individual errors are logged and skipped, never returned,
@@ -88,9 +88,8 @@ const (
 	artifactBindingRelation  = types.ResourceRelationArtifact
 )
 
-// ArtifactCollector implements the "drain sandbox artifacts on turn
-// completion" step described in
-// docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md §4.
+// ArtifactCollector drains skill-generated files from the sandbox when a
+// turn completes.
 type ArtifactCollector struct {
 	source      SandboxArtifactSource
 	fileService interfaces.FileService
@@ -105,6 +104,10 @@ type ArtifactCollector struct {
 	// nil keeps the process-wide source for every workspace.
 	resolver sandbox.TenantSandboxResolver
 	pinner   *SessionSandboxPinner
+	// host answers "is this an unpinned host session?" so Collect can drain
+	// Lite workspaces that never write a sandbox pin. Optional: nil keeps
+	// the remote "no pin, nothing to attach" path.
+	host *HostSessionResolver
 	// fallbackMgr is the deployment-wide SessionBoundManager. Sentinel pins
 	// ("-") resolve to it rather than a per-config manager.
 	fallbackMgr sandbox.Manager
@@ -144,6 +147,7 @@ func NewArtifactCollectorFromSandboxManager(
 	sandboxMgr sandbox.Manager,
 	sandboxResolver sandbox.TenantSandboxResolver,
 	pinner *SessionSandboxPinner,
+	host *HostSessionResolver,
 	fileService interfaces.FileService,
 	repo interfaces.MessageRepository,
 	catalog interfaces.ResourceCatalog,
@@ -164,6 +168,7 @@ func NewArtifactCollectorFromSandboxManager(
 	)
 	collector.resolver = sandboxResolver
 	collector.pinner = pinner
+	collector.host = host
 	collector.fallbackMgr = sandboxMgr
 	return collector
 }
@@ -178,17 +183,17 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	if c.resolver == nil {
 		return c.source
 	}
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	configID, err := sandboxConfigForExistingSandbox(ctx, c.pinner, sessionID)
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
+	pin, err := sandboxConfigForExistingSandbox(ctx, c.pinner, sessionID)
 	if err != nil {
 		logger.Warnf(ctx, "[ArtifactCollector] read sandbox pin failed: %v", err)
 		return nil
 	}
-	if configID == "" {
-		return nil
+	if pin.IsZero() {
+		return c.hostSessionSource(ctx, sessionID)
 	}
 	mgr, err := resolveTenantSandboxForConfig(
-		ctx, c.resolver, c.fallbackMgr, tenantID, configID, nil,
+		ctx, c.resolver, c.fallbackMgr, pin.TenantOr(sessionTenantID), pin.ConfigID, nil,
 	)
 	if err != nil {
 		// Refusing to read is the safe failure: substituting another backend
@@ -204,10 +209,62 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	if source, ok := mgr.(SandboxArtifactSource); ok {
 		return source
 	}
-	if configID == types.SandboxConfigIDGlobalDefault {
+	if pin.ConfigID == types.SandboxConfigIDGlobalDefault {
 		return c.source
 	}
 	return nil
+}
+
+func (c *ArtifactCollector) hostSessionSource(ctx context.Context, sessionID string) SandboxArtifactSource {
+	if c.host == nil {
+		return nil
+	}
+	mgr := c.host.HostManagerFor(ctx, sessionID)
+	if mgr == nil {
+		return nil
+	}
+	if source, ok := mgr.(SandboxArtifactSource); ok {
+		return source
+	}
+	return nil
+}
+
+// CollectTarget reports the directory Collect should scan for this session,
+// and whether collection must be skipped entirely.
+//
+// skip is true when collecting would scan the user's project: the backend
+// advertised a workspace with no separate output tree, OutputDir is Root, or
+// the layout provider failed. A nil source is also skip: there is nothing to
+// drain, and skip=false would let the caller fill /workspace/output. An empty
+// dir with skip false means the backend advertises no layout at all — the
+// caller's remote default applies.
+//
+// The directory and the skip decision come from one lookup on purpose. Asking
+// twice re-resolved the session's sandbox (a pin read plus a manager resolve)
+// and let the two answers disagree: a second lookup that failed after the
+// first succeeded returned no directory, sending a host session's collection
+// back to the remote /workspace/output.
+func (c *ArtifactCollector) CollectTarget(ctx context.Context, sessionID string) (string, bool) {
+	if c == nil {
+		return "", true
+	}
+	source := c.sessionSource(ctx, sessionID)
+	if source == nil {
+		return "", true
+	}
+	provider, ok := source.(sandbox.SessionWorkspaceLayoutProvider)
+	if !ok || provider == nil {
+		return "", false
+	}
+	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+	if err != nil {
+		return "", true
+	}
+	layout = layout.Normalized()
+	if layout.Root == "" || layout.OutputDir == "" || layout.OutputDir == layout.Root {
+		return "", true
+	}
+	return layout.OutputDir, false
 }
 
 // newBoundedConfig fills in defaults so callers can pass a zero
@@ -306,6 +363,7 @@ func (c *ArtifactCollector) collect(
 
 	logger.Infof(ctx, "[ArtifactCollector] begin session=%s dir=%s", sessionID, outputDir)
 
+	ctx = sandbox.WithSessionFileOperation(ctx)
 	entries, err := source.ListSessionFiles(ctx, sessionID, outputDir)
 	if err != nil {
 		logger.Warnf(ctx, "[ArtifactCollector] list sandbox files failed: session=%s dir=%s err=%v",
@@ -377,6 +435,10 @@ func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) 
 		return set
 	}
 	for _, p := range prev {
+		if p.Deleted() {
+			set.rememberDeleted(p)
+			continue
+		}
 		set.remember(p)
 	}
 	return set
@@ -550,6 +612,10 @@ func (c *ArtifactCollector) bindArtifactResource(ctx context.Context, ref, messa
 // sandbox back at an earlier commit, so every unchanged file is de-duplicated
 // out of that turn's own artifact list — and the reference still has to be bound
 // to that file's stable handle.
+//
+// Files the user deleted are filtered out: they are still in the store as
+// tombstones so loadKnownSet will not re-collect them, but an answer must not
+// resolve a name to a file whose bytes are gone.
 func (c *ArtifactCollector) SessionArtifacts(ctx context.Context, sessionID string) types.MessageArtifacts {
 	if c == nil || c.store == nil || sessionID == "" {
 		return nil
@@ -559,7 +625,7 @@ func (c *ArtifactCollector) SessionArtifacts(ctx context.Context, sessionID stri
 		logger.Warnf(ctx, "Read session artifacts failed: %v", err)
 		return nil
 	}
-	return previous
+	return types.MessageArtifacts(previous).Live()
 }
 
 // BindArtifactsToMessage makes messageID an owner of each artifact's resource
@@ -637,6 +703,26 @@ func (k *artifactKnownSet) remember(art types.MessageArtifact) {
 	if art.SourcePath != "" {
 		k.byPath[art.SourcePath] = append(k.byPath[art.SourcePath], art)
 	}
+}
+
+// rememberDeleted registers a tombstone: a file the user deleted, whose sandbox
+// copy may still be sitting there untouched.
+//
+// Only the (path, mtime) key goes in. That is what stops an unchanged sandbox
+// file being re-collected, which is the whole reason tombstones stay in the
+// known set. The content hash is deliberately left out, and so is byPath: those
+// two drive the same-content short circuit in knownSameContent, and a turn that
+// rewrites the file with identical bytes is a genuine regeneration the user
+// should get back — not a restore to skip. Keeping the hash here would make a
+// deleted file impossible to reproduce byte-for-byte ever again.
+func (k *artifactKnownSet) rememberDeleted(art types.MessageArtifact) {
+	if k == nil {
+		return
+	}
+	if k.keys == nil {
+		k.keys = map[string]struct{}{}
+	}
+	k.keys[artifactKey(art.SourcePath, art.ModTime)] = struct{}{}
 }
 
 func (k *artifactKnownSet) seenMtime(path string, mod time.Time) bool {

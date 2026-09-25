@@ -43,12 +43,24 @@ message ImageRef {
   bytes  image_data = 5;     // inline bytes fallback
 }
 
+// SourceBlock ties a range of markdown_content to the place in the original
+// file it was parsed from, so a citation can open the file there.
+message SourceBlock {
+  // Unicode code point offsets into markdown_content, end exclusive.
+  uint32 start = 1;
+  uint32 end = 2;
+  // JSON-encoded locator: {"type":"pdf","page":3,"bbox":[x0,y0,x1,y1]}
+  // with ordinals 1-based and bbox as fractions of the page, origin top-left.
+  string locator_json = 3;
+}
+
 message ReadResponse {
   string markdown_content = 1;
   repeated ImageRef image_refs = 2;
   string image_dir_path = 3;
   map<string, string> metadata = 4;
   string error = 5;
+  repeated SourceBlock source_blocks = 6;
 }
 
 // Metadata header for a streamed read. Sent exactly once, before any image.
@@ -58,6 +70,7 @@ message ReadStreamMeta {
   map<string, string> metadata = 3;
   string error = 4;
   uint32 image_count = 5; // best-effort total image count (0 if unknown)
+  repeated SourceBlock source_blocks = 6;
 }
 
 // One frame of a ReadStream. The first frame carries `meta`; every subsequent
