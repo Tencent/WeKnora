@@ -259,6 +259,12 @@ func (c *Compactor) streamSummary(
 	var sb strings.Builder
 	streamErr := ""
 	for {
+		// select picks at random among ready cases, and a provider closes its
+		// stream once the turn's context is cancelled, so a stopped turn could
+		// otherwise read as a completed (partial) summary.
+		if err := ctx.Err(); err != nil {
+			return "", "", err
+		}
 		select {
 		case <-ctx.Done():
 			return "", "", ctx.Err()
@@ -266,6 +272,9 @@ func (c *Compactor) streamSummary(
 			return "", "", fmt.Errorf("summarization stalled: no output for %s", timeout)
 		case chunk, ok := <-stream:
 			if !ok {
+				if err := ctx.Err(); err != nil {
+					return "", "", err
+				}
 				if streamErr != "" {
 					return "", finishReason, fmt.Errorf("summarization stream error: %s", streamErr)
 				}
