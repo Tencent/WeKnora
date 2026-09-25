@@ -40,18 +40,18 @@ const publicAuthRateLimitMax = 30
 const publicAuthRateLimitCleanupInterval = 2 * time.Minute
 
 type ipBucket struct {
-	mu         sync.Mutex
 	timestamps []time.Time
 }
 
 type ipRateLimiter struct {
 	window  time.Duration
 	max     int
-	buckets sync.Map // string (IP) -> *ipBucket
+	mu      sync.Mutex
+	buckets map[string]*ipBucket // IP -> bucket; protected by mu
 }
 
 func newIPRateLimiter(window time.Duration, max int) *ipRateLimiter {
-	l := &ipRateLimiter{window: window, max: max}
+	l := &ipRateLimiter{window: window, max: max, buckets: make(map[string]*ipBucket)}
 	go l.cleanupLoop()
 	return l
 }
@@ -64,13 +64,18 @@ func (l *ipRateLimiter) allow(ip string) bool {
 	if ip == "" {
 		ip = "_unknown_"
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	now := time.Now()
 	cutoff := now.Add(-l.window)
-
-	val, _ := l.buckets.LoadOrStore(ip, &ipBucket{})
-	b := val.(*ipBucket)
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	if l.buckets == nil {
+		l.buckets = make(map[string]*ipBucket)
+	}
+	b := l.buckets[ip]
+	if b == nil {
+		b = &ipBucket{}
+		l.buckets[ip] = b
+	}
 
 	kept := b.timestamps[:0]
 	for _, t := range b.timestamps {
@@ -90,18 +95,21 @@ func (l *ipRateLimiter) cleanupLoop() {
 	t := time.NewTicker(publicAuthRateLimitCleanupInterval)
 	defer t.Stop()
 	for range t.C {
-		cutoff := time.Now().Add(-l.window)
-		l.buckets.Range(func(k, v any) bool {
-			b := v.(*ipBucket)
-			b.mu.Lock()
-			drop := len(b.timestamps) == 0 ||
-				b.timestamps[len(b.timestamps)-1].Before(cutoff)
-			b.mu.Unlock()
-			if drop {
-				l.buckets.Delete(k)
-			}
-			return true
-		})
+		l.cleanupOnce(time.Now().Add(-l.window))
+	}
+}
+
+// cleanupOnce uses the same lock as allow so a request cannot update a bucket
+// between the idle check and deletion, or append to an already deleted bucket.
+func (l *ipRateLimiter) cleanupOnce(cutoff time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for k, b := range l.buckets {
+		drop := len(b.timestamps) == 0 ||
+			b.timestamps[len(b.timestamps)-1].Before(cutoff)
+		if drop {
+			delete(l.buckets, k)
+		}
 	}
 }
 
