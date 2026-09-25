@@ -1,0 +1,706 @@
+package modelcontext
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+func TestRegistryOwnsEncodingOrderForSummarySlugs(t *testing.T) {
+	const knowledgeID = "36283d3d-a495-40d2-a13f-e925fc322996"
+	registry := NewRegistry(true)
+	require.Equal(t, "d1", registry.RegisterDocument(knowledgeID))
+
+	messages := registry.EncodeMessages([]chat.Message{{
+		Role:    "tool",
+		Content: "[[summary/" + knowledgeID + "|Summary]] document=" + knowledgeID,
+	}})
+	require.Contains(t, messages[0].Content, "[[res://0001|Summary]]")
+	require.Contains(t, messages[0].Content, "document=d1")
+	require.NotContains(t, messages[0].Content, "summary/d1")
+
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "wiki_read_source_doc",
+		Arguments: `{"slugs":["res://0001"],"knowledge_id":"d1"}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"slugs":["summary/`+knowledgeID+`"],"knowledge_id":"`+knowledgeID+`"}`, calls[0].Function.Arguments)
+	require.JSONEq(t, `{"slugs":["res://0001"],"knowledge_id":"d1"}`, calls[0].ModelArguments)
+	require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+	require.Empty(t, calls[0].UnresolvedHandles)
+	persisted, err := json.Marshal(calls[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(persisted), `"res://0001"`)
+	require.NotContains(t, string(persisted), `"d1"`)
+	require.NotContains(t, string(persisted), ArgumentResolutionResolved)
+}
+
+func TestRegistryProtocolOwnsResourceHandleRules(t *testing.T) {
+	prompt := NewRegistry(true).ProtocolPrompt()
+	require.Contains(t, prompt, "Source handling protocol")
+	require.Contains(t, prompt, "Resource handle protocol")
+	require.Contains(t, prompt, "res://NNNN")
+}
+
+func TestOutputFilesAreRenderedOnlyForLiveModelResults(t *testing.T) {
+	result := &types.ToolResult{Success: true, Output: "generated", OutputFiles: []string{"sandbox:比赛信息.pptx"}}
+	registry := NewRegistry(true)
+	require.Equal(t, "generated\nOutput files: `sandbox:比赛信息.pptx`", registry.ModelToolResultForTool("shell_exec", result))
+	require.Equal(t, "generated", result.Output)
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	var restored types.ToolResult
+	require.NoError(t, json.Unmarshal(encoded, &restored))
+	require.Equal(t, "generated", registry.ModelToolResultForTool("shell_exec", &restored))
+	result.Success = false
+	result.Error = "timeout"
+	require.Contains(t, registry.ModelToolResultForTool("shell_exec", result), "sandbox:比赛信息.pptx")
+}
+
+func TestEmptyOutputInspectionIsExplicitOnlyInLiveModelResults(t *testing.T) {
+	for _, registry := range []*Registry{NewRegistry(true), nil} {
+		result := &types.ToolResult{Success: true, Output: "page-1.png", OutputFiles: []string{}}
+		modelOutput := registry.ModelToolResultForTool("shell_exec", result)
+		require.Equal(t, "page-1.png\nOutput files: none identified by this call.", modelOutput)
+		require.NotContains(t, modelOutput, "sandbox:page-1.png")
+		encoded, err := json.Marshal(result)
+		require.NoError(t, err)
+		var restored types.ToolResult
+		require.NoError(t, json.Unmarshal(encoded, &restored))
+		require.Equal(t, "page-1.png", registry.ModelToolResultForTool("shell_exec", &restored))
+		result.Success = false
+		result.Error = "command timed out"
+		modelOutput = registry.ModelToolResultForTool("shell_exec", result)
+		require.Contains(t, modelOutput, "command timed out")
+		require.Contains(t, modelOutput, "Output files: none identified by this call.")
+		result.OutputFiles = nil
+		require.NotContains(t, registry.ModelToolResultForTool("shell_exec", result), "Output files:")
+	}
+}
+
+func TestRegistryAuditsUnresolvedAndPartiallyResolvedToolHandles(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterKnowledgeBase("kb-real")
+
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "knowledge_search",
+		Arguments: `{"knowledge_base_ids":["b1","b99"],"query":"b98","asset":"res://0099"}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+
+	require.JSONEq(t,
+		`{"knowledge_base_ids":["kb-real","b99"],"query":"b98","asset":"res://0099"}`,
+		calls[0].Function.Arguments,
+	)
+	require.Equal(t, ArgumentResolutionPartiallyResolved, calls[0].ArgumentResolution)
+	require.Equal(t, []string{"b99", "res://0099"}, calls[0].UnresolvedHandles)
+	// Alias-shaped free text is not an ID and must not be reported as a source
+	// resolution failure.
+	require.NotContains(t, calls[0].UnresolvedHandles, "b98")
+}
+
+func TestRegistryAuditsUnchangedJSONFormattingAsUnchanged(t *testing.T) {
+	registry := NewRegistry(true)
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{Arguments: `{ "query": "hello" }`}}}
+	registry.DecodeToolCalls(calls)
+	require.Equal(t, ArgumentResolutionUnchanged, calls[0].ArgumentResolution)
+}
+
+func TestRegistryDecodesKnownHandlesEmbeddedInBuiltInSQL(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterDocument("doc-real")
+	registry.RegisterKnowledgeBase("kb-real")
+	calls := []types.LLMToolCall{{
+		Function: types.FunctionCall{
+			Name:      "database_query",
+			Arguments: `{"sql":"SELECT * FROM knowledges WHERE id = 'd1' AND knowledge_base_id = 'b1'"}`,
+		},
+	}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t,
+		`{"sql":"SELECT * FROM knowledges WHERE id = 'doc-real' AND knowledge_base_id = 'kb-real'"}`,
+		calls[0].Function.Arguments,
+	)
+	require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+}
+
+func TestRegistryOnlyDecodesQuotedSQLHandlesAndRejectsUnknownOnes(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterDocument("doc-real")
+
+	calls := []types.LLMToolCall{{
+		Function: types.FunctionCall{
+			Name:      "database_query",
+			Arguments: `{"sql":"SELECT d1.id FROM documents d1 WHERE d1.id = 'd1' AND d1.parent_id = 'd99'"}`,
+		},
+	}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t,
+		`{"sql":"SELECT d1.id FROM documents d1 WHERE d1.id = 'doc-real' AND d1.parent_id = 'd99'"}`,
+		calls[0].Function.Arguments,
+	)
+	require.Equal(t, []string{"d99"}, calls[0].UnresolvedHandles)
+	require.Equal(t, ArgumentResolutionPartiallyResolved, calls[0].ArgumentResolution)
+}
+
+func TestRegistryReplaysStructuredAndPrivateHandlesWithoutAliasDrift(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterDocument("doc-real")
+	registry.RegisterKnowledgeBase("kb-real")
+	registry.ModelToolResultForTool("wiki_read_issue", &types.ToolResult{
+		Success: true,
+		Output:  `{"id":"issue-real","knowledge_base_id":"kb-real","suspected_knowledge_ids":["doc-real"]}`,
+	})
+
+	messages := []chat.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []chat.ToolCall{{Function: chat.FunctionCall{
+				Name:      "database_query",
+				Arguments: `{"sql":"SELECT * FROM knowledges WHERE id = 'doc-real' AND knowledge_base_id = 'kb-real'"}`,
+			}}},
+		},
+		{
+			Role:    "tool",
+			Name:    "wiki_read_issue",
+			Content: `{"id":"issue-real","knowledge_base_id":"kb-real","suspected_knowledge_ids":["doc-real"]}`,
+		},
+		{
+			Role: "assistant",
+			ToolCalls: []chat.ToolCall{{Function: chat.FunctionCall{
+				Name:      "wiki_update_issue",
+				Arguments: `{"issue_id":"issue-real","status":"resolved"}`,
+			}}},
+		},
+	}
+
+	first := registry.EncodeMessages(messages)
+	require.JSONEq(t,
+		`{"sql":"SELECT * FROM knowledges WHERE id = 'd1' AND knowledge_base_id = 'b1'"}`,
+		first[0].ToolCalls[0].Function.Arguments,
+	)
+	require.JSONEq(t,
+		`{"id":"i1","knowledge_base_id":"b1","suspected_knowledge_ids":["d1"]}`,
+		first[1].Content,
+	)
+	require.JSONEq(t, `{"issue_id":"i1","status":"resolved"}`, first[2].ToolCalls[0].Function.Arguments)
+
+	second := registry.EncodeMessages(first)
+	require.JSONEq(t, first[0].ToolCalls[0].Function.Arguments, second[0].ToolCalls[0].Function.Arguments)
+	require.JSONEq(t, first[1].Content, second[1].Content)
+	require.JSONEq(t, first[2].ToolCalls[0].Function.Arguments, second[2].ToolCalls[0].Function.Arguments)
+}
+
+func TestRegistryOwnsWikiIssueHandles(t *testing.T) {
+	registry := NewRegistry(true)
+	modelResult := registry.ModelToolResultForTool("wiki_read_issue", &types.ToolResult{
+		Success: true,
+		Output:  `[{"id":"issue-uuid","knowledge_base_id":"kb-real","suspected_knowledge_ids":["doc-real"],"slug":"concept/a","status":"pending"}]`,
+	})
+	require.JSONEq(t, `[{"id":"i1","knowledge_base_id":"b1","suspected_knowledge_ids":["d1"],"slug":"concept/a","status":"pending"}]`, modelResult)
+
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "wiki_update_issue",
+		Arguments: `{"issue_id":"i1","status":"resolved"}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"issue_id":"issue-uuid","status":"resolved"}`, calls[0].Function.Arguments)
+	require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+
+	decoder := registry.StreamDecoder()
+	got := decoder.Feed("updated i") + decoder.Feed("1 successfully") + decoder.Flush()
+	require.Equal(t, "updated issue-uuid successfully", got)
+}
+
+func TestRegistryDecodesWikiReadIssueHandleArgument(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.ModelToolResultForTool("wiki_read_issue", &types.ToolResult{
+		Success: true,
+		Output:  `[{"id":"issue-uuid","slug":"concept/a","status":"pending"}]`,
+	})
+
+	// The wiki_read_issue schema instructs the model to pass the short iN
+	// handle back as issue_id; it must resolve to the durable issue ID before
+	// the tool executes.
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "wiki_read_issue",
+		Arguments: `{"issue_id":"i1"}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"issue_id":"issue-uuid"}`, calls[0].Function.Arguments)
+	require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+	require.Empty(t, calls[0].UnresolvedHandles)
+
+	unknown := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "wiki_read_issue",
+		Arguments: `{"issue_id":"i9"}`,
+	}}}
+	registry.DecodeToolCalls(unknown)
+	require.Equal(t, ArgumentResolutionUnresolved, unknown[0].ArgumentResolution)
+	require.Equal(t, []string{"i9"}, unknown[0].UnresolvedHandles)
+}
+
+func TestRegistryReportsUnknownWikiIssueHandle(t *testing.T) {
+	registry := NewRegistry(true)
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "wiki_update_issue",
+		Arguments: `{"issue_id":"i9","status":"resolved"}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.Equal(t, ArgumentResolutionUnresolved, calls[0].ArgumentResolution)
+	require.Equal(t, []string{"i9"}, calls[0].UnresolvedHandles)
+}
+
+func TestRegistryDoesNotApplyBuiltInFieldPoliciesToDynamicTools(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterDocument("doc-real")
+	registry.RegisterWeb("https://example.com", "Example")
+	registry.ModelToolResultForTool("wiki_read_issue", &types.ToolResult{
+		Success: true,
+		Output:  `{"id":"issue-real"}`,
+	})
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "dynamic_mcp_tool",
+		Arguments: `{"issue_id":"i1","knowledge_id":"d1","url":"w1","sql":"SELECT 'd1'"}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"issue_id":"i1","knowledge_id":"d1","url":"w1","sql":"SELECT 'd1'"}`, calls[0].Function.Arguments)
+	require.Equal(t, ArgumentResolutionUnchanged, calls[0].ArgumentResolution)
+	require.Empty(t, calls[0].UnresolvedHandles)
+
+	messages := registry.EncodeMessages([]chat.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []chat.ToolCall{{Function: chat.FunctionCall{
+				Name:      "dynamic_mcp_tool",
+				Arguments: `{"knowledge_id":"doc-real"}`,
+			}}},
+		},
+		{
+			Role:    "tool",
+			Name:    "dynamic_mcp_tool",
+			Content: `<knowledge_id>mcp-owned-id</knowledge_id> doc-real`,
+		},
+	})
+	require.JSONEq(t, `{"knowledge_id":"doc-real"}`, messages[0].ToolCalls[0].Function.Arguments)
+	require.Equal(t, `<knowledge_id>mcp-owned-id</knowledge_id> doc-real`, messages[1].Content)
+
+	modelOutput := registry.ModelToolResultForTool("dynamic_mcp_tool", &types.ToolResult{
+		Success: true,
+		Output:  `<knowledge_id>mcp-owned-id</knowledge_id> doc-real`,
+	})
+	require.Equal(t, `<knowledge_id>mcp-owned-id</knowledge_id> doc-real`, modelOutput)
+}
+
+func TestRegistryCompactsKnownIDsInBuiltInValidationErrors(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterDocument("doc-real")
+	registry.RegisterKnowledgeBase("kb-real")
+
+	got := registry.ModelToolResultForTool("wiki_write_page", &types.ToolResult{
+		Success: false,
+		Error:   "document doc-real belongs to knowledge base kb-real",
+	})
+	require.Equal(t, "Error: document d1 belongs to knowledge base b1", got)
+}
+
+func TestModelToolResultForTool_failedSkillScriptKeepsStdout(t *testing.T) {
+	registry := NewRegistry(true)
+	stdout := `{"chart":{"success":false,"error":{"error":"X轴字段不存在：工作项目","available":["name","value"]}}}`
+	got := registry.ModelToolResultForTool("execute_skill_script", &types.ToolResult{
+		Success: false,
+		Output:  "=== Script Execution: smart-charts/scripts/cli.py ===\n\n## Standard Output\n\n```\n" + stdout + "\n```\n",
+		Error:   "Script exited with code 1\n\n[Analyze the error above and try a different approach.]",
+	})
+	require.Contains(t, got, "X轴字段不存在：工作项目")
+	require.Contains(t, got, "available")
+	require.Contains(t, got, "Error: Script exited with code 1")
+}
+
+func TestRegistryCompactsDatabaseQueryIDColumnsForBuiltInFollowUps(t *testing.T) {
+	registry := NewRegistry(true)
+	modelOutput := registry.ModelToolResultForTool("database_query", &types.ToolResult{
+		Success: true,
+		Output:  "knowledge_id | knowledge_base_id\ndoc-real | kb-real",
+		Data: map[string]interface{}{
+			"display_type": "database_query",
+			"rows": []map[string]interface{}{{
+				"knowledge_id":      "doc-real",
+				"knowledge_base_id": "kb-real",
+			}},
+		},
+	})
+	require.Contains(t, modelOutput, "d1 | b1")
+
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{
+		Name:      "wiki_read_source_doc",
+		Arguments: `{"knowledge_id":"d1"}`,
+	}}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"knowledge_id":"doc-real"}`, calls[0].Function.Arguments)
+}
+
+func TestRegistryDecodesCanonicalArgumentsForEveryBuiltInReferenceTool(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterDocument("doc-real")
+	registry.RegisterKnowledgeBase("kb-real")
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real", KnowledgeID: "doc-real", KnowledgeBaseID: "kb-real"})
+	registry.RegisterWeb("https://example.com/page", "Example")
+	registry.EncodeMessages([]chat.Message{{Role: "user", Content: "summary/00000000-0000-0000-0000-000000000001"}})
+	registry.ModelToolResultForTool("wiki_read_issue", &types.ToolResult{Success: true, Output: `{"id":"issue-real"}`})
+
+	tests := []struct {
+		name string
+		tool string
+		raw  string
+		want string
+	}{
+		{"knowledge search KB", "knowledge_search", `{"queries":["d1"],"knowledge_base_ids":["b1"]}`, `{"queries":["d1"],"knowledge_base_ids":["kb-real"]}`},
+		{"list document", "list_knowledge_chunks", `{"knowledge_id":"d1"}`, `{"knowledge_id":"doc-real"}`},
+		{"list chunk", "list_knowledge_chunks", `{"chunk_id":"c1"}`, `{"chunk_id":"chunk-real"}`},
+		{"document info", "get_document_info", `{"knowledge_ids":["d1"],"faq_ids":["c1"]}`, `{"knowledge_ids":["doc-real"],"faq_ids":["chunk-real"]}`},
+		{"knowledge graph", "query_knowledge_graph", `{"knowledge_base_ids":["b1"],"query":"topic"}`, `{"knowledge_base_ids":["kb-real"],"query":"topic"}`},
+		{
+			"data analysis SQL", "data_analysis",
+			`{"knowledge_id":"d1","sql":"SELECT COUNT(*) FROM dataset WHERE label = 'd1'"}`,
+			`{"knowledge_id":"doc-real","sql":"SELECT COUNT(*) FROM dataset WHERE label = 'd1'"}`,
+		},
+		{"data schema", "data_schema", `{"knowledge_id":"d1"}`, `{"knowledge_id":"doc-real"}`},
+		{"database SQL", "database_query", `{"sql":"SELECT * FROM chunks WHERE knowledge_base_id='b1'"}`, `{"sql":"SELECT * FROM chunks WHERE knowledge_base_id='kb-real'"}`},
+		{"web fetch", "web_fetch", `{"items":[{"url":"w1"}]}`, `{"items":[{"url":"https://example.com/page"}]}`},
+		{"wiki source", "wiki_read_source_doc", `{"knowledge_id":"d1"}`, `{"knowledge_id":"doc-real"}`},
+		{"wiki source refs", "wiki_write_page", `{"slug":"res://0001","source_refs":["d1"]}`, `{"slug":"summary/00000000-0000-0000-0000-000000000001","source_refs":["doc-real"]}`},
+		{"wiki suspected refs", "wiki_flag_issue", `{"slug":"concept/a","suspected_knowledge_ids":["d1"]}`, `{"slug":"concept/a","suspected_knowledge_ids":["doc-real"]}`},
+		{"wiki search KB", "wiki_search", `{"queries":["topic"],"knowledge_base_id":"b1"}`, `{"queries":["topic"],"knowledge_base_id":"kb-real"}`},
+		{"wiki issue", "wiki_update_issue", `{"issue_id":"i1","status":"resolved"}`, `{"issue_id":"issue-real","status":"resolved"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: test.tool, Arguments: test.raw}}}
+			registry.DecodeToolCalls(calls)
+			require.JSONEq(t, test.want, calls[0].Function.Arguments)
+			require.NotEqual(t, ArgumentResolutionUnresolved, calls[0].ArgumentResolution)
+		})
+	}
+}
+
+func TestModelToolResultProtectsSummarySlugBeforeSourceCompaction(t *testing.T) {
+	const knowledgeID = "07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
+	const kbID = "250368ff-f5a2-4e9e-868a-07bc9b857c44"
+	registry := NewRegistry(true)
+	registry.RegisterDocument(knowledgeID)
+	registry.RegisterKnowledgeBase(kbID)
+
+	got := registry.ModelToolResult(&types.ToolResult{
+		Success: true, Output: "<knowledge_base_id>" + kbID + "</knowledge_base_id>\n" +
+			"<link>[[summary/" + knowledgeID + "|Summary]]</link>\n" +
+			"<knowledge_id>" + knowledgeID + "</knowledge_id>",
+	})
+	require.Contains(t, got, "[[res://0001|Summary]]")
+	require.Contains(t, got, "<knowledge_base_id>b1</knowledge_base_id>")
+	require.Contains(t, got, "<knowledge_id>d1</knowledge_id>")
+	require.NotContains(t, got, "summary/d1")
+}
+
+func TestRegistryStreamDecoderRestoresSplitResourceAndCitationHandles(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.EncodeMessages([]chat.Message{{Role: "user", Content: "resource://AbCdEfGhIjKlMnOpQrStUv"}})
+	registry.RegisterChunk(ChunkReference{
+		ChunkID:         "chunk-real",
+		KnowledgeID:     "doc-real",
+		KnowledgeBaseID: "kb-real",
+		DocumentTitle:   "Doc",
+	})
+
+	decoder := registry.StreamDecoder()
+	got := decoder.Feed("image res://0") +
+		decoder.Feed("001 claim <ref id=\"c") +
+		decoder.Feed("1\"/>") + decoder.Flush()
+	require.Contains(t, got, "resource://AbCdEfGhIjKlMnOpQrStUv")
+	require.Contains(t, got, `chunk_id="chunk-real"`)
+}
+
+func TestRegistryDropsUnknownResourceHandlesFromCompleteAndStreamOutput(t *testing.T) {
+	registry := NewRegistry(true)
+	require.Equal(t, "broken ", registry.DecodeOutputText("broken res://9999"))
+
+	decoder := registry.StreamDecoder()
+	got := decoder.Feed("broken res:/") + decoder.Feed("/99") + decoder.Feed("99 end") + decoder.Flush()
+	require.Equal(t, "broken  end", got)
+}
+
+func TestHandleTableRoundTripAndIsolation(t *testing.T) {
+	chunks := NewHandleTable("c", 3, 0)
+	require.Equal(t, "c000", chunks.Register("chunk-a"))
+	require.Equal(t, "c000", chunks.Register("chunk-a"))
+	require.Equal(t, "c001", chunks.Register("chunk-b"))
+	require.Equal(t, "chunk-b", mustResolve(t, chunks, "c001"))
+
+	slugs := NewHandleTable("ref-", 0, 1)
+	require.Equal(t, "ref-1", slugs.Register("summary/uuid"))
+	require.Equal(t, "summary/uuid", mustResolve(t, slugs, "ref-1"))
+	require.Equal(t, "", mustNotResolve(t, slugs, "c000"))
+}
+
+func TestHandleTableKnownTextRoundTrip(t *testing.T) {
+	table := NewHandleTable("i", 0, 1)
+	require.Equal(t, "i1", table.Register("issue-uuid"))
+	require.Equal(t, "read i1", table.EncodeKnownText("read issue-uuid"))
+	require.Equal(t, "read issue-uuid", table.DecodeKnownText("read i1"))
+	require.Equal(t, "read issue-$1", func() string {
+		literal := NewHandleTable("i", 0, 1)
+		literal.Register("issue-$1")
+		return literal.DecodeKnownText("read i1")
+	}())
+}
+
+func mustResolve(t *testing.T, table *HandleTable, handle string) string {
+	t.Helper()
+	value, ok := table.Resolve(handle)
+	require.True(t, ok)
+	return value
+}
+
+func mustNotResolve(t *testing.T, table *HandleTable, handle string) string {
+	t.Helper()
+	value, ok := table.Resolve(handle)
+	require.False(t, ok)
+	return value
+}
+
+func TestMCPBridgeKeepsExternalSchemasAndArgumentsOpaque(t *testing.T) {
+	registry := NewRegistry(true)
+	for _, name := range []string{"discover_mcp_tools", "call_mcp_tool"} {
+		require.True(t, HasToolPolicy(name))
+		raw := `{"arguments":{"knowledge_id":"d1","issue_id":"i1","url":"w1"},"tool_ref":"mcpt_abc"}`
+		calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: name, Arguments: raw}}}
+		registry.DecodeToolCalls(calls)
+		require.JSONEq(t, raw, calls[0].Function.Arguments)
+		require.Empty(t, calls[0].UnresolvedHandles)
+		schema := `{"input_schema":{"properties":{"knowledge_id":{"const":"d1"}}}}`
+		require.Equal(
+			t,
+			schema,
+			registry.ModelToolResultForTool(name, &types.ToolResult{Success: true, Output: schema}),
+		)
+	}
+}
+
+func TestCitationPolicyDoesNotSuppressRequestedResourcesOrBreakOutputFormat(t *testing.T) {
+	disabled := NewRegistry(false).ProtocolPrompt()
+	require.Contains(t, disabled, "Source citations are disabled")
+	require.Contains(t, disabled, "a URL explicitly requested by the user")
+	require.Contains(t, disabled, "downloadable deliverables")
+	require.NotContains(t, disabled, "Do not output <ref>, <kb>, <web>, raw source URLs")
+	enabled := NewRegistry(true).ProtocolPrompt()
+	require.Contains(t, enabled, "do not break a required schema")
+}
+
+func TestRegistryDecodesReadDocumentIDAgainstBothHandleTables(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterDocument("doc-real")
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real", KnowledgeID: "doc-real", KnowledgeBaseID: "kb-real"})
+	registry.RegisterKnowledgeBase("kb-real")
+
+	for _, tc := range []struct{ name, tool, raw, want string }{
+		{
+			"read document by dN", "read_document",
+			`{"id":"d1","offset":20}`, `{"id":"doc-real","offset":20}`,
+		},
+		{
+			"read document by cN", "read_document",
+			`{"id":"c1","context":2}`, `{"id":"chunk-real","context":2}`,
+		},
+		{
+			"read document query stays literal", "read_document",
+			`{"id":"d1","query":"d1 c1"}`, `{"id":"doc-real","query":"d1 c1"}`,
+		},
+		{
+			"search knowledge KB", "search_knowledge",
+			`{"query":"b1","knowledge_base_ids":["b1"]}`, `{"query":"b1","knowledge_base_ids":["kb-real"]}`,
+		},
+		{
+			"list documents KB", "list_documents",
+			`{"knowledge_base_id":"b1","keyword":"b1"}`, `{"knowledge_base_id":"kb-real","keyword":"b1"}`,
+		},
+		{
+			"wiki search KBs", "wiki_search",
+			`{"query":"topic","knowledge_base_ids":["b1"]}`, `{"query":"topic","knowledge_base_ids":["kb-real"]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: tc.tool, Arguments: tc.raw}}}
+			registry.DecodeToolCalls(calls)
+			require.JSONEq(t, tc.want, calls[0].Function.Arguments)
+			require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+		})
+	}
+
+	// A bare "id" on a tool without the read_document contract is opaque.
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: "thinking", Arguments: `{"id":"d1"}`}}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"id":"d1"}`, calls[0].Function.Arguments)
+
+	unknown := []types.LLMToolCall{{Function: types.FunctionCall{Name: "read_document", Arguments: `{"id":"d9"}`}}}
+	registry.DecodeToolCalls(unknown)
+	require.Equal(t, ArgumentResolutionUnresolved, unknown[0].ArgumentResolution)
+	require.Equal(t, []string{"d9"}, unknown[0].UnresolvedHandles)
+}
+
+func TestModelOutputRendersReadDocumentHeaderAndNavigation(t *testing.T) {
+	registry := NewRegistry(true)
+	paged := registry.ModelToolResultForTool("read_document", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type":    "knowledge_chunks_list",
+		"knowledge_id":    "doc-real",
+		"knowledge_title": "Engine Manual",
+		"total_chunks":    12,
+		"fetched_chunks":  2,
+		"offset":          4,
+		"next_offset":     6,
+		"document": map[string]interface{}{
+			"knowledge_id": "doc-real", "title": "Engine Manual", "source": "File Upload", "file_type": "pdf",
+			"parse_status": "completed", "chunk_count": 12, "description": "How the engine works",
+			"metadata": map[string]interface{}{"region": "EU", "author": "Ada"},
+		},
+		"chunks": []map[string]interface{}{
+			{"chunk_id": "chunk-4", "chunk_index": 4, "content": "four", "knowledge_base": "kb-real"},
+			{"chunk_id": "chunk-5", "chunk_index": 5, "content": "five", "knowledge_base": "kb-real"},
+		},
+	}})
+	require.Contains(t, paged, `<retrieval type="knowledge" mode="deep_read">`)
+	require.Contains(t, paged, `<document id="d1" kb="b1" title="Engine Manual">`)
+	require.Contains(t, paged, `<info source="File Upload" file_type="pdf" parse_status="completed" chunk_count="12">`)
+	require.Contains(t, paged, `<description>How the engine works</description>`)
+	require.Contains(t, paged, `<metadata>author: Ada; region: EU</metadata>`)
+	require.Contains(t, paged, `<chunk id="c1" index="4" view="full">`)
+	require.Contains(t, paged, `<pagination next_offset="6" remaining="6" />`)
+	require.NotContains(t, paged, "doc-real")
+
+	matched := registry.ModelToolResultForTool("read_document", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type":    "knowledge_chunks_list",
+		"knowledge_id":    "doc-real",
+		"knowledge_title": "Engine Manual",
+		"total_chunks":    12,
+		"fetched_chunks":  3,
+		"query":           "psionic",
+		"match_count":     1,
+		"truncated":       false,
+		"document":        map[string]any{"knowledge_id": "doc-real", "title": "Engine Manual", "chunk_count": 12},
+		"chunks": []map[string]interface{}{
+			{"chunk_id": "chunk-3", "chunk_index": 3, "content": "three", "role": "context_before"},
+			{
+				"chunk_id": "chunk-4", "chunk_index": 4, "content": "psionic four",
+				"role": "match", "match_snippet": "... psionic ...",
+			},
+			{"chunk_id": "chunk-5", "chunk_index": 5, "content": "five", "role": "context_after"},
+		},
+	}})
+	require.Contains(t, matched, `role="match"`)
+	require.Contains(t, matched, `role="context_before"`)
+	require.Contains(t, matched, `<match>... psionic ...</match>`)
+	require.Contains(t, matched, `<matches query="psionic" count="1" />`)
+	require.NotContains(t, matched, "<pagination")
+
+	empty := registry.ModelToolResultForTool("read_document", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type":    "knowledge_chunks_list",
+		"knowledge_id":    "doc-real",
+		"knowledge_title": "Engine Manual",
+		"total_chunks":    12,
+		"fetched_chunks":  0,
+		"query":           "absent",
+		"match_count":     0,
+		"document":        map[string]any{"knowledge_id": "doc-real", "title": "Engine Manual", "chunk_count": 12},
+		"chunks":          []map[string]interface{}{},
+	}})
+	require.Contains(t, empty, `<document id="d1" title="Engine Manual">`)
+	require.Contains(t, empty, `<matches query="absent" count="0" />`)
+	require.Contains(t, empty, "<hint>No chunk contains every word of the query.")
+}
+
+func TestModelOutputRendersDocumentListWithPagination(t *testing.T) {
+	registry := NewRegistry(true)
+	out := registry.ModelToolResultForTool("list_documents", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type":      "document_info",
+		"knowledge_base_id": "kb-real",
+		"total_docs":        int64(3),
+		"page":              1,
+		"page_size":         2,
+		"next_page":         2,
+		"documents": []map[string]interface{}{
+			{
+				"knowledge_id": "doc-a", "title": "Alpha", "file_type": "pdf", "parse_status": "completed",
+				"updated_at": "2026-03-04T05:06:07Z", "description": "First",
+			},
+			{"knowledge_id": "doc-b", "title": "Beta", "file_type": "md", "parse_status": "completed"},
+		},
+	}})
+	require.Contains(t, out, `<documents kb="b1" total="3" page="1" next_page="2">`)
+	require.Contains(t, out,
+		`<document id="d1" title="Alpha" file_type="pdf" parse_status="completed" updated_at="2026-03-04">`)
+	require.Contains(t, out, `<description>First</description>`)
+	require.Contains(t, out, `<document id="d2" title="Beta"`)
+	require.NotContains(t, out, "doc-a")
+	require.NotContains(t, out, "kb-real")
+}
+
+func TestModelOutputReportsSearchModeAndFallbacks(t *testing.T) {
+	registry := NewRegistry(true)
+	row := map[string]interface{}{
+		"chunk_id": "chunk-1", "knowledge_id": "doc-1", "knowledge_base_id": "kb-faq",
+		"knowledge_title": "FAQ", "content": "reset the device",
+	}
+	keyword := registry.ModelToolResultForTool("search_knowledge", &types.ToolResult{
+		Success: true, Data: map[string]any{
+			"display_type": "search_results", "mode": "keyword", "results": []map[string]interface{}{row},
+		},
+	})
+	require.Contains(t, keyword, `<retrieval type="knowledge" mode="keyword">`)
+
+	const faqReason = "FAQ bases are indexed for semantic search only"
+	fallback := registry.ModelToolResultForTool("search_knowledge", &types.ToolResult{
+		Success: true, Data: map[string]any{
+			"display_type": "search_results", "mode": "semantic", "requested_mode": "keyword",
+			"results": []map[string]interface{}{row},
+			"mode_fallbacks": []map[string]interface{}{
+				{"knowledge_base_id": "kb-faq", "mode": "semantic", "reason": faqReason},
+			},
+		},
+	})
+	require.Contains(t, fallback, `<retrieval requested_mode="keyword" type="knowledge" mode="semantic">`)
+	require.Contains(t, fallback,
+		`<mode_fallback kb="b1" mode="semantic" reason="FAQ bases are indexed for semantic search only" />`)
+	require.NotContains(t, fallback, "kb-faq")
+
+	legacy := registry.ModelToolResultForTool("knowledge_search", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type": "search_results", "results": []map[string]interface{}{row},
+	}})
+	require.Contains(t, legacy, `mode="semantic"`, "legacy knowledge_search payloads were semantic")
+}
+
+func TestDecodeResponseDropsSignatureWhenReasoningIsDecoded(t *testing.T) {
+	registry := NewRegistry(true)
+	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
+	// The handle only exists after the outbound half assigned it.
+	registry.EncodeMessages([]chat.Message{{Role: "assistant", Content: ref}})
+
+	decoded := &types.ChatResponse{
+		Content:            "done",
+		ReasoningContent:   "read res://0001",
+		ReasoningSignature: "anthropic-messages:sig",
+	}
+	registry.DecodeResponse(decoded)
+	require.Equal(t, "read "+ref, decoded.ReasoningContent)
+	require.Empty(t, decoded.ReasoningSignature, "decoded text is no longer what the provider signed")
+
+	untouched := &types.ChatResponse{
+		Content:            "done",
+		ReasoningContent:   "no handles here",
+		ReasoningSignature: "anthropic-messages:sig",
+	}
+	registry.DecodeResponse(untouched)
+	require.Equal(t, "anthropic-messages:sig", untouched.ReasoningSignature)
+}

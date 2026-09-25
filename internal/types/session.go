@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,6 +46,8 @@ type SummaryConfig struct {
 	MaxCompletionTokens int `json:"max_completion_tokens"`
 	// Thinking - whether to enable thinking mode
 	Thinking *bool `json:"thinking"`
+	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // ContextCompressionStrategy represents the strategy for context compression
@@ -97,6 +100,52 @@ type Session struct {
 	// avoid a new migration; the shape used today is `SessionLastRequestState`.
 	LastRequestState *SessionLastRequestState `json:"last_request_state,omitempty" gorm:"column:agent_config;type:jsonb"`
 
+	// SandboxConfigID pins which sandbox config this session's CURRENT live
+	// sandbox was created on. Empty means no live sandbox;
+	// SandboxConfigIDGlobalDefault means the deployment-wide default config.
+	//
+	// This is an ephemeral pin that dies with the sandbox, not a permanent
+	// owner: sessions outlive sandboxes by months, so treating it as
+	// permanent would make "no session references this config" never true.
+	SandboxConfigID string `json:"sandbox_config_id,omitempty" gorm:"type:varchar(36)"`
+
+	// SandboxConfigTenantID names the workspace that owns SandboxConfigID.
+	// Sandbox configs are keyed by (tenant, id), so the id above is not an
+	// address on its own: a shared agent's sandbox lives on ITS OWNER's config
+	// while this session belongs to the borrower, and resolving that config
+	// under the borrower finds nothing.
+	//
+	// Zero means "this session's own tenant", which covers every sandbox
+	// created by an agent the session's workspace owns, plus pins written
+	// before the column existed.
+	SandboxConfigTenantID uint64 `json:"-" gorm:"column:sandbox_config_tenant_id;type:bigint;default:0"`
+
+	// HostWorkspaceDir is the user-selected project directory this session
+	// operates in, for the WeKnora Lite host sandbox only. Empty means the session
+	// gets an auto-allocated workspace instead.
+	//
+	// Written once at creation and never updated: re-pointing a live session
+	// at a different directory would leave its transcript describing files
+	// that are no longer there. Standard edition never writes it.
+	HostWorkspaceDir string `json:"host_workspace_dir,omitempty" gorm:"type:varchar(1024)"`
+
+	// ParentSessionID names the session this one was forked from. Empty for
+	// ordinary sessions. Deliberately not a foreign key: the parent may be
+	// deleted while the branch lives on, and a branch must not cascade away
+	// with it. A dangling value simply renders as an ordinary session.
+	ParentSessionID string `json:"parent_session_id,omitempty" gorm:"type:varchar(36);index"`
+
+	// ForkedFromMessageID is the user or assistant message, IN THE PARENT
+	// SESSION, that the fork branched at. For a user point, messages strictly
+	// before it were copied here. For an assistant point, that answer is
+	// included so the branch continues after it.
+	ForkedFromMessageID string `json:"forked_from_message_id,omitempty" gorm:"type:varchar(36)"`
+
+	// ForkBootstrap holds the one-shot sandbox provisioning instructions for a
+	// forked session. Nil for ordinary sessions and for forks that have
+	// already provisioned. See types.ForkBootstrap.
+	ForkBootstrap *ForkBootstrap `json:"-" gorm:"type:jsonb;column:fork_bootstrap"`
+
 	// // Strategy configuration
 	// KnowledgeBaseID   string              `json:"knowledge_base_id"`                    // 关联的知识库ID
 	// MaxRounds         int                 `json:"max_rounds"`                           // 多轮保持轮数
@@ -118,6 +167,12 @@ type Session struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 
+	// IMPlatform is the originating IM platform (e.g. "feishu", "wecom") when
+	// this session is bound to an IM channel. It is not stored on the sessions
+	// table (it lives in im_channel_sessions) and is populated on read so the
+	// Web console can classify a session's origin folder without a list query.
+	IMPlatform string `json:"im_platform,omitempty" gorm:"-"`
+
 	// Association relationship, not stored in the database
 	Messages []Message `json:"-" gorm:"foreignKey:SessionID"`
 }
@@ -127,11 +182,89 @@ func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
 	return nil
 }
 
+// SandboxConfigOwner returns the workspace SandboxConfigID must be looked up
+// in. Sandbox configs are keyed by (tenant, id), so the two always travel
+// together; a shared agent's sandbox lives on the LENDING workspace's config
+// while the session belongs to the borrower. Zero falls back to the session's
+// own tenant, which is right for every sandbox an own agent created and for
+// pins written before the owner was recorded.
+func (s *Session) SandboxConfigOwner() uint64 {
+	if s == nil {
+		return 0
+	}
+	if s.SandboxConfigTenantID != 0 {
+		return s.SandboxConfigTenantID
+	}
+	return s.TenantID
+}
+
+// SessionSourceAPI is the source filter that lists every session created via a
+// tenant API key across the whole tenant. It is an admin-only view: the service
+// layer requires Admin+ and drops the per-user owner scope so a tenant
+// Owner/admin can observe API-key traffic that is otherwise isolated per key.
+const SessionSourceAPI = "api"
+
+// SessionSourceWeb is the source filter for a user's own Web-console chats.
+const SessionSourceWeb = "web"
+
+// SessionListSourceRequiresAdmin reports whether a session-list source filter
+// exposes tenant-wide channel traffic (API / IM / embed) in the Web console.
+func SessionListSourceRequiresAdmin(source string) bool {
+	src := strings.TrimSpace(source)
+	if src == "" || strings.EqualFold(src, SessionSourceWeb) {
+		return false
+	}
+	return true
+}
+
+// SessionRequiresAdminConsoleRead reports whether a session row is channel-
+// managed traffic that non-admin web users must not open from the console.
+func SessionRequiresAdminConsoleRead(s *Session, imPlatform string) bool {
+	if s == nil {
+		return false
+	}
+	if IsAPISessionOwnerID(s.UserID) {
+		return true
+	}
+	if strings.HasPrefix(s.Description, EmbedSessionMarkerPrefix) ||
+		strings.HasPrefix(s.UserID, PrincipalEmbedSession+":") {
+		return true
+	}
+	// Defence in depth for skill maintenance transcripts: the listing hides
+	// them, and this keeps a leaked session id from being opened by a
+	// non-admin who happens to own the row.
+	if IsSkillMaintenanceDescription(s.Description) {
+		return true
+	}
+	return strings.TrimSpace(imPlatform) != ""
+}
+
+// IsSkillMaintenanceDescription reports whether description is the reserved
+// prefix that hides skill-install sessions from the console list.
+func IsSkillMaintenanceDescription(description string) bool {
+	return strings.HasPrefix(description, SkillMaintenanceSessionMarker)
+}
+
+// SanitizeClientSessionDescription keeps the skill-maintenance marker off
+// client-writable descriptions. A row that is already a maintenance session
+// keeps its stored description so a PUT cannot un-hide it; any other row
+// drops a planted marker rather than accepting it.
+func SanitizeClientSessionDescription(incoming, existing string) string {
+	if IsSkillMaintenanceDescription(existing) {
+		return existing
+	}
+	if IsSkillMaintenanceDescription(incoming) {
+		return ""
+	}
+	return incoming
+}
+
 // SessionListQuery bundles the parameters for listing sessions.
 // UserID empty means "tenant-wide" (used by API-key callers / legacy rows).
 // Keyword matches title ILIKE '%keyword%'.
 // Source values: "web" (user chats, no IM/embed), "embed" / "embed:{channelID}",
-// or an IM platform name (e.g. "feishu", "wechat").
+// "api" (all API-key sessions, Admin+ only), or an IM platform name
+// (e.g. "feishu", "wechat"). IM and embed sources are also Admin+ only.
 // AgentID currently only filters sessions that have an IM channel mapping.
 type SessionListQuery struct {
 	TenantID uint64
@@ -199,16 +332,18 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 // to the frontend by GetSession so the chat input can restore the same agent,
 // model, KB scope, etc. the user had selected last time.
 type SessionLastRequestState struct {
-	AgentID          string         `json:"agent_id,omitempty"`
-	AgentEnabled     bool           `json:"agent_enabled"`
-	ModelID          string         `json:"model_id,omitempty"`
-	KnowledgeBaseIDs []string       `json:"knowledge_base_ids,omitempty"`
-	KnowledgeIDs     []string       `json:"knowledge_ids,omitempty"`
-	TagIDs           []string       `json:"tag_ids,omitempty"`
-	MCPServiceIDs    []string       `json:"mcp_service_ids,omitempty"`
-	SkillNames       []string       `json:"skill_names,omitempty"`
-	MentionedItems   MentionedItems `json:"mentioned_items,omitempty"`
-	WebSearchEnabled bool           `json:"web_search_enabled"`
+	AgentID             string         `json:"agent_id,omitempty"`
+	AgentEnabled        bool           `json:"agent_enabled"`
+	ModelID             string         `json:"model_id,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
+	KnowledgeBaseIDs    []string       `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs        []string       `json:"knowledge_ids,omitempty"`
+	TagIDs              []string       `json:"tag_ids,omitempty"`
+	MCPServiceIDs       []string       `json:"mcp_service_ids,omitempty"`
+	SkillNames          []string       `json:"skill_names,omitempty"`
+	MentionedItems      MentionedItems `json:"mentioned_items,omitempty"`
+	LocalBrowserEnabled bool           `json:"local_browser_enabled"`
+	WebSearchEnabled    bool           `json:"web_search_enabled"`
 }
 
 // Value implements driver.Valuer for SessionLastRequestState (JSONB).

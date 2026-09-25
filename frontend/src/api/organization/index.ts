@@ -89,6 +89,8 @@ export interface SharedKnowledgeBase {
     type: string
     knowledge_count?: number
     chunk_count?: number
+    created_at?: string
+    updated_at?: string
   }
   share_id: string
   organization_id: string
@@ -311,6 +313,8 @@ export interface SharedAgentInfo {
   shared_at: string
   shared_by_user_id?: string
   shared_by_username?: string
+  /** 由后端在源空间解析，不与当前空间的搜索引擎列表比较 */
+  web_search_ready: boolean
   /** 当前用户是否已停用该共享智能体（仅影响本人对话下拉显示） */
   disabled_by_me?: boolean
 }
@@ -736,8 +740,8 @@ export async function listOrgAgentShares(orgId: string): Promise<ApiResponse<Lis
 
 /**
  * Search candidate tenants for inviting to organization (excludes tenants
- * already in the org). The endpoint matches by tenant name, username, or
- * email and de-duplicates results by tenant_id.
+ * already in the org). The endpoint resolves one exact workspace ID; it does not expose
+ * global workspace-name, username, or email search.
  */
 export async function searchTenantsForInvite(
   orgId: string,

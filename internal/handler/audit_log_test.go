@@ -100,6 +100,9 @@ func TestAuditLogHandler_PassesQueryFiltersThrough(t *testing.T) {
 			if q.ActorUserID != "u-probing" {
 				t.Fatalf("expected actor=u-probing, got %q", q.ActorUserID)
 			}
+			if !q.UnscopedOnly {
+				t.Fatalf("tenant audit feed must exclude resource-scoped activity rows")
+			}
 			return nil, nil
 		},
 	}
@@ -151,6 +154,81 @@ func TestAuditLogHandler_InvalidTenantIDReturns400(t *testing.T) {
 	newAuditHandlerTestRouter(svc).ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for non-numeric tenant id, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func newKBActivityHandlerTestRouter(
+	t *testing.T,
+	svc interfaces.AuditLogService,
+	callerTenantID uint64,
+	kb *types.KnowledgeBase,
+	userID string,
+	role types.TenantRole,
+) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.Use(func(c *gin.Context) {
+		c.Set(types.TenantIDContextKey.String(), callerTenantID)
+		c.Set(middleware.KBAccessContextKey, &middleware.KBAccess{KnowledgeBase: kb})
+		ctx := context.WithValue(c.Request.Context(), types.UserIDContextKey, userID)
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	h := NewAuditLogHandler(svc)
+	r.GET("/knowledge-bases/:id/activity", h.ListKnowledgeBaseActivity)
+	return r
+}
+
+func TestKnowledgeBaseActivityHandler_UsesKBScope(t *testing.T) {
+	svc := &stubAuditService{list: func(_ context.Context, tenantID uint64, q *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
+		if tenantID != 7 || q.ScopeType != "knowledge_base" || q.ScopeID != "kb-1" {
+			t.Fatalf("unexpected scope: tenant=%d type=%q id=%q", tenantID, q.ScopeType, q.ScopeID)
+		}
+		if q.AfterID != 30 || q.Limit != 10 || q.Outcome != types.AuditOutcomePartial {
+			t.Fatalf("unexpected filters: %+v", q)
+		}
+		return []*types.AuditLog{{ID: 21, TenantID: 7, ScopeType: q.ScopeType, ScopeID: q.ScopeID}}, nil
+	}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/activity?after_id=30&limit=10&outcome=partial", nil)
+	newKBActivityHandlerTestRouter(t, svc, 7,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "creator"},
+		"creator", types.TenantRoleViewer).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestKnowledgeBaseActivityHandler_BlocksSharedWorkspace(t *testing.T) {
+	svc := &stubAuditService{list: func(_ context.Context, _ uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
+		t.Fatal("audit list must not be called for a shared workspace")
+		return nil, nil
+	}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/activity", nil)
+	newKBActivityHandlerTestRouter(t, svc, 8,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "creator"},
+		"creator", types.TenantRoleOwner).ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestKnowledgeBaseActivityHandler_RequiresCreatorOrAdmin(t *testing.T) {
+	svc := &stubAuditService{list: func(_ context.Context, _ uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
+		t.Fatal("audit list must not be called for ordinary members")
+		return nil, nil
+	}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/activity", nil)
+	newKBActivityHandlerTestRouter(t, svc, 7,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "creator"},
+		"other", types.TenantRoleContributor).ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 

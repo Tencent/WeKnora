@@ -8,7 +8,7 @@ sheets and handles various Excel formats using pandas.
 import logging
 import re
 from io import BytesIO
-from typing import List
+from typing import Any, List
 
 import pandas as pd
 
@@ -64,6 +64,16 @@ class ExcelParser(BaseParser):
         Name: John,Age: 30,City: NYC
         Name: Jane,Age: 25,City: LA
     """
+
+    def __init__(
+        self,
+        file_name: str = "",
+        file_type: str | None = None,
+        xlsx_first_row_as_header: Any = False,
+        **kwargs: Any,
+    ):
+        super().__init__(file_name=file_name, file_type=file_type, **kwargs)
+        self.xlsx_first_row_as_header = _parse_bool(xlsx_first_row_as_header)
     
     def parse_into_text(self, content: bytes) -> Document:
         """Parse Excel file bytes into a Document object.
@@ -83,18 +93,25 @@ class ExcelParser(BaseParser):
         """
         chunks: List[Chunk] = []
         text: List[str] = []
+        source_blocks: List[dict] = []
         start, end = 0, 0
 
         excel_file = _open_excel_file(content, file_type=self.file_type)
         
         # Process each sheet in the Excel file
         for excel_sheet_name in excel_file.sheet_names:
-            df = _read_sheet_dataframe(excel_file, excel_sheet_name)
+            df = _read_sheet_dataframe(
+                excel_file,
+                excel_sheet_name,
+                xlsx_first_row_as_header=self.xlsx_first_row_as_header,
+            )
             # Remove rows where all values are NaN (completely empty rows)
             df.dropna(how="all", inplace=True)
 
-            # Process each row in the DataFrame
-            for _, row in df.iterrows():
+            # Process each row in the DataFrame. The index is the 0-based
+            # sheet row (rows are read from row 1 and dropped rows keep
+            # their labels), so index + 1 is the row number users see.
+            for row_index, row in df.iterrows():
                 page_content = []
                 # Build key-value pairs for non-null values
                 for k, v in row.items():
@@ -114,30 +131,74 @@ class ExcelParser(BaseParser):
                 chunks.append(
                     Chunk(content=content_row, seq=len(chunks), start=start, end=end)
                 )
+                try:
+                    row_number = int(row_index) + 1
+                except (TypeError, ValueError):
+                    row_number = 0
+                if row_number > 0:
+                    source_blocks.append(
+                        {
+                            "start": start,
+                            "end": end,
+                            "locator": {
+                                "type": "sheet",
+                                "sheet": str(excel_sheet_name),
+                                "row_start": row_number,
+                                "row_end": row_number,
+                            },
+                        }
+                    )
                 start = end
 
         # Combine all text and return as Document
-        return Document(content="".join(text), chunks=chunks)
+        return Document(
+            content="".join(text), chunks=chunks, source_blocks=source_blocks
+        )
 
 
-def _read_sheet_dataframe(excel_file: pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
+def _read_sheet_dataframe(
+    excel_file: pd.ExcelFile,
+    sheet_name: str,
+    xlsx_first_row_as_header: bool = False,
+) -> pd.DataFrame:
     """Read a worksheet into a DataFrame with stable column labels."""
     from openpyxl.utils import get_column_letter
 
-    # XLSX is preprocessed (merge fill); use A/B/C column letters and keep row 1 as data.
-    if excel_file.engine == "openpyxl":
-        df = excel_file.parse(sheet_name=sheet_name, header=None)
-        df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
-        return df
+    # Keep row 1 as data by default for both XLSX and legacy XLS. Users can
+    # explicitly restore the historical behavior where row 1 supplies semantic
+    # labels for every row.
+    df = excel_file.parse(sheet_name=sheet_name, header=None)
+    if xlsx_first_row_as_header and len(df.index) >= 2:
+        df.columns = _stable_header_labels(df.iloc[0].tolist())
+        return df.iloc[1:].copy()
 
-    df = excel_file.parse(sheet_name=sheet_name, header=0)
-    if df.empty:
-        df = excel_file.parse(sheet_name=sheet_name, header=None)
-        df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
-    elif any(str(col).startswith("Unnamed:") for col in df.columns):
-        df = excel_file.parse(sheet_name=sheet_name, header=None)
-        df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
+    df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
     return df
+
+
+def _stable_header_labels(values: List[object]) -> List[str]:
+    """Build non-empty, unique labels from an explicitly selected header row."""
+    from openpyxl.utils import get_column_letter
+
+    labels: List[str] = []
+    counts: dict[str, int] = {}
+    for index, value in enumerate(values, start=1):
+        label = ""
+        if pd.notna(value) and not _is_image_function(value):
+            label = str(value).strip()
+        if not label:
+            label = get_column_letter(index)
+
+        count = counts.get(label, 0) + 1
+        counts[label] = count
+        labels.append(label if count == 1 else f"{label}_{count}")
+    return labels
+
+
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _prepare_xlsx_bytes(data: bytes) -> bytes:

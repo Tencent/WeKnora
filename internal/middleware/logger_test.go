@@ -1,6 +1,9 @@
 package middleware
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSanitizeBody(t *testing.T) {
 	cases := []struct {
@@ -8,6 +11,12 @@ func TestSanitizeBody(t *testing.T) {
 		in   string
 		want string
 	}{
+		{
+			name: "browser device credentials",
+			in: `{"pairing_link":"wss://example.com/#secret",` +
+				`"next_token":"new-secret","deviceToken":"device-secret"}`,
+			want: `{"pairing_link":"***","next_token":"***","deviceToken":"***"}`,
+		},
 		{
 			name: "camelCase apiKey",
 			in:   `{"modelName":"gpt-5.2","apiKey":"sk-secret-123","provider":"azure_openai"}`,
@@ -39,6 +48,11 @@ func TestSanitizeBody(t *testing.T) {
 			want: `{"password":"***","token":"***"}`,
 		},
 		{
+			name: "sandbox terminal handshake ticket in JSON body",
+			in:   `{"success":true,"data":{"ticket":"eyJhbGciOiJIUzI1NiJ9.payload.signature","expires_in":120}}`,
+			want: `{"success":true,"data":{"ticket":"***","expires_in":120}}`,
+		},
+		{
 			name: "snake_case new_password and old_password",
 			in:   `{"email":"alice@example.com","new_password":"FreshPass9","old_password":"OldPass9"}`,
 			want: `{"email":"alice@example.com","new_password":"***","old_password":"***"}`,
@@ -53,6 +67,11 @@ func TestSanitizeBody(t *testing.T) {
 			in:   `{"baseUrl":"https://example.com","modelName":"gpt"}`,
 			want: `{"baseUrl":"https://example.com","modelName":"gpt"}`,
 		},
+		{
+			name: "OAuth authorization response fields",
+			in:   `{"authorization_url":"https://idp.example/authorize?state=secret","authorization_attempt":"secret-state"}`,
+			want: `{"authorization_url":"***","authorization_attempt":"***"}`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -62,5 +81,28 @@ func TestSanitizeBody(t *testing.T) {
 				t.Errorf("sanitizeBody(%q)\n got: %s\nwant: %s", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSanitizeQuery(t *testing.T) {
+	got := sanitizeQuery("code=secret-code&state=secret-state&next=%2Fsettings&state=second")
+	want := "code=%2A%2A%2A&next=%2Fsettings&state=%2A%2A%2A"
+	if got != want {
+		t.Fatalf("sanitizeQuery() = %q, want %q", got, want)
+	}
+}
+
+// The sandbox terminal presents its handshake credential as a query parameter
+// because a browser WebSocket upgrade cannot carry Authorization. Holding that
+// value for its TTL is enough to open a shell in the session's sandbox, so the
+// redaction is a security boundary, not cosmetics.
+func TestSanitizeQueryRedactsTerminalTicket(t *testing.T) {
+	got := sanitizeQuery("ticket=eyJhbGciOiJIUzI1NiJ9.payload.signature&provision=1&cols=120")
+	want := "cols=120&provision=1&ticket=%2A%2A%2A"
+	if got != want {
+		t.Fatalf("sanitizeQuery() = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "signature") {
+		t.Fatalf("sanitizeQuery() leaked the ticket: %q", got)
 	}
 }

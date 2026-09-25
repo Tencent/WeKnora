@@ -24,6 +24,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -37,7 +38,10 @@ const (
 	channelVersion = "weknora-1.0.0"
 )
 
-var ilinkHTTPClient = &http.Client{Timeout: 30 * time.Second}
+var ilinkHTTPClient = secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+	Timeout:      30 * time.Second,
+	MaxRedirects: 5,
+})
 
 // BuildCDNDownloadURL constructs a CDN download URL from an encrypt_query_param.
 func BuildCDNDownloadURL(encryptQueryParam string) string {
@@ -144,6 +148,9 @@ func (a *Adapter) SendTyping(ctx context.Context, incoming *im.IncomingMessage) 
 func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io.ReadCloser, string, error) {
 	if msg.FileKey == "" {
 		return nil, "", fmt.Errorf("no file URL in message")
+	}
+	if err := secutils.ValidateURLForSSRF(msg.FileKey); err != nil {
+		return nil, "", fmt.Errorf("file URL rejected by SSRF policy: %w", err)
 	}
 
 	fileName := msg.FileName

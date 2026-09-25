@@ -15,16 +15,19 @@
             :aria-label="t('system.globalSettings.runtime.autoRefresh')"
           />
         </label>
-        <t-button
-          variant="outline"
-          size="small"
-          :loading="loading"
+        <button
+          type="button"
+          class="rq-refresh"
           :disabled="loading"
+          :title="t('system.globalSettings.runtime.refresh')"
+          :aria-label="t('system.globalSettings.runtime.refresh')"
           @click="reload"
         >
-          <template #icon><t-icon name="refresh" /></template>
-          {{ t('system.globalSettings.runtime.refresh') }}
-        </t-button>
+          <t-icon
+            :name="loading ? 'loading' : 'refresh'"
+            :class="{ 'rq-refresh-spin': loading }"
+          />
+        </button>
       </div>
     </header>
 
@@ -336,15 +339,34 @@
           <h4 class="setting-drawer__section-title">
             {{ t('system.globalSettings.runtime.tasks.listTitle', { state: taskStateLabel(taskState) }) }}
           </h4>
-          <t-button
-            variant="text"
-            size="small"
-            :loading="tasksLoading && !tasksLoadingMore"
-            @click="reloadRuntimeTasks"
-          >
-            <template #icon><t-icon name="refresh" /></template>
-            {{ t('system.globalSettings.runtime.refresh') }}
-          </t-button>
+          <div class="rq-failed-section-actions">
+            <t-popconfirm
+              v-if="taskState === 'archived' && tasks.length > 0"
+              theme="danger"
+              :content="t('system.globalSettings.runtime.tasks.purgeArchivedConfirm', { count: taskStateCount(taskQueue, 'archived') })"
+              @confirm="purgeArchivedTasks"
+            >
+              <t-button
+                variant="text"
+                size="small"
+                theme="danger"
+                :loading="purging"
+                :disabled="Boolean(taskActionID)"
+              >
+                <template #icon><t-icon name="clear" /></template>
+                {{ t('system.globalSettings.runtime.tasks.purgeArchived') }}
+              </t-button>
+            </t-popconfirm>
+            <t-button
+              variant="text"
+              size="small"
+              :loading="tasksLoading && !tasksLoadingMore"
+              @click="reloadRuntimeTasks"
+            >
+              <template #icon><t-icon name="refresh" /></template>
+              {{ t('system.globalSettings.runtime.refresh') }}
+            </t-button>
+          </div>
         </div>
 
         <div v-if="tasksLoading && tasks.length === 0" class="rq-failed-loading">
@@ -494,6 +516,7 @@ import {
   getRuntimeTasks,
   getRuntimeQueues,
   mutateRuntimeTask,
+  purgeArchivedRuntimeTasks,
   type ModelRuntimeStat,
   type QueueStat,
   type RuntimeTask,
@@ -528,6 +551,7 @@ const tasksHasMore = ref(false)
 const tasksSentinelRef = ref<HTMLElement | null>(null)
 const taskActionID = ref('')
 const taskAction = ref<RuntimeTaskAction | ''>('')
+const purging = ref(false)
 
 const TASK_PAGE_SIZE = 20
 const taskStates: RuntimeTaskState[] = ['active', 'pending', 'scheduled', 'retry', 'archived', 'completed']
@@ -857,6 +881,22 @@ async function runTaskAction(task: RuntimeTask, action: RuntimeTaskAction) {
   }
 }
 
+async function purgeArchivedTasks() {
+  const queue = taskQueue.value?.name
+  if (!queue || purging.value) return
+  purging.value = true
+  try {
+    const { deleted } = await purgeArchivedRuntimeTasks(queue)
+    MessagePlugin.success(t('system.globalSettings.runtime.tasks.purgeArchivedSuccess', { count: deleted }))
+    await Promise.all([reloadRuntimeTasks(), load(false)])
+    taskQueue.value = queues.value.find((item) => item.name === queue) ?? taskQueue.value
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('system.globalSettings.runtime.tasks.purgeArchivedError'))
+  } finally {
+    purging.value = false
+  }
+}
+
 async function load(showSpinner: boolean) {
   if (showSpinner) loading.value = true
   try {
@@ -948,7 +988,7 @@ onUnmounted(() => {
   gap: 10px;
   color: var(--td-text-color-secondary);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .rq-header {
@@ -961,7 +1001,7 @@ onUnmounted(() => {
   h2 {
     margin: 0 0 8px;
     color: var(--td-text-color-primary);
-    font-size: 22px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     line-height: 1.3;
     letter-spacing: -0.01em;
@@ -971,7 +1011,7 @@ onUnmounted(() => {
     max-width: 560px;
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.6;
     text-wrap: pretty;
   }
@@ -984,13 +1024,51 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.rq-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: color var(--app-motion-base) cubic-bezier(0.16, 1, 0.3, 1), background var(--app-motion-base) cubic-bezier(0.16, 1, 0.3, 1);
+
+  :deep(.t-icon) {
+    font-size: var(--app-text-sm);
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &:active:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+}
+
+.rq-refresh-spin {
+  animation: wk-spin 0.8s linear infinite;
+}
+
 .rq-auto-refresh {
   display: flex;
   align-items: center;
   gap: 7px;
   min-height: 32px;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -1000,7 +1078,7 @@ onUnmounted(() => {
   height: 6px;
   border-radius: 50%;
   background: var(--td-text-color-placeholder);
-  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
 
   &--active {
     background: var(--td-success-color);
@@ -1020,7 +1098,7 @@ onUnmounted(() => {
   gap: 1px;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-component-stroke);
 
   :deep(.t-skeleton) {
@@ -1037,7 +1115,7 @@ onUnmounted(() => {
   min-height: 112px;
   padding: 20px 22px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
 }
 
@@ -1046,7 +1124,7 @@ onUnmounted(() => {
   width: 44px;
   height: 44px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-container);
 }
@@ -1057,14 +1135,14 @@ onUnmounted(() => {
   gap: 5px;
 
   strong {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
   }
 
   span {
     max-width: 560px;
     color: var(--td-text-color-secondary);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.55;
   }
 }
@@ -1081,7 +1159,7 @@ onUnmounted(() => {
   gap: 28px;
   margin-bottom: 30px;
   padding: 13px 16px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 }
 
@@ -1091,7 +1169,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 9px;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1101,10 +1179,10 @@ onUnmounted(() => {
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-brand-color);
   background: var(--td-bg-color-container);
-  font-size: 15px;
+  font-size: var(--app-text-lg);
 }
 
 .rq-overview-metrics {
@@ -1126,7 +1204,7 @@ onUnmounted(() => {
 
 .rq-metric-value {
   color: var(--td-text-color-primary);
-  font-size: 20px;
+  font-size: var(--app-text-3xl);
   font-weight: 600;
   line-height: 1.1;
   letter-spacing: -0.02em;
@@ -1135,7 +1213,7 @@ onUnmounted(() => {
 
 .rq-metric-label {
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.35;
   white-space: nowrap;
 }
@@ -1158,7 +1236,7 @@ onUnmounted(() => {
   gap: 8px;
   margin: 0 0 6px;
   color: var(--td-text-color-primary);
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 1.35;
   user-select: none;
@@ -1183,7 +1261,7 @@ onUnmounted(() => {
   p {
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
   }
 }
@@ -1192,9 +1270,9 @@ onUnmounted(() => {
   flex-shrink: 0;
   margin-top: 2px;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   white-space: nowrap;
   background: var(--td-bg-color-secondarycontainer);
@@ -1213,7 +1291,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 16px 18px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
 }
 
@@ -1226,7 +1304,7 @@ onUnmounted(() => {
 
 .rq-pool-name {
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   line-height: 1.35;
 }
@@ -1243,7 +1321,7 @@ onUnmounted(() => {
 .rq-pool-desc {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   text-wrap: pretty;
 }
@@ -1252,7 +1330,7 @@ onUnmounted(() => {
   display: block;
   margin-top: 4px;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
 }
 
@@ -1270,7 +1348,7 @@ onUnmounted(() => {
   p {
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
   }
 }
@@ -1281,7 +1359,7 @@ onUnmounted(() => {
   gap: 5px;
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1292,7 +1370,7 @@ onUnmounted(() => {
   margin-bottom: 14px;
   padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
 }
 
@@ -1302,9 +1380,9 @@ onUnmounted(() => {
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   color: var(--td-error-color);
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   background: color-mix(in srgb, var(--td-error-color) 10%, transparent);
 }
 
@@ -1319,7 +1397,7 @@ onUnmounted(() => {
 .rq-failed-notice__title {
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
@@ -1328,14 +1406,14 @@ onUnmounted(() => {
 .rq-failed-notice__desc {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
 .rq-failed-guide-desc {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.6;
 }
 
@@ -1360,10 +1438,10 @@ onUnmounted(() => {
   color: var(--td-text-color-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.2;
   white-space: nowrap;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover:not(.is-active) {
     color: var(--td-text-color-primary);
@@ -1399,7 +1477,7 @@ onUnmounted(() => {
 .rq-task-state-option__count {
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -1426,6 +1504,13 @@ onUnmounted(() => {
   }
 }
 
+.rq-failed-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 .rq-failed-loading {
   display: flex;
   min-height: 180px;
@@ -1433,7 +1518,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 10px;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .rq-failed-error-state {
@@ -1443,9 +1528,9 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   background: var(--td-bg-color-container);
 }
@@ -1458,9 +1543,9 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 10px;
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .rq-queue-cell {
@@ -1473,7 +1558,7 @@ onUnmounted(() => {
 .rq-queue-name {
   overflow: hidden;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -1486,7 +1571,7 @@ onUnmounted(() => {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
 }
 
@@ -1538,7 +1623,7 @@ onUnmounted(() => {
   height: 18px;
   padding: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 .rq-backlog {
@@ -1549,7 +1634,7 @@ onUnmounted(() => {
 
   small {
     color: var(--td-text-color-placeholder);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     white-space: nowrap;
   }
 }
@@ -1559,7 +1644,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   white-space: nowrap;
 
   i {
@@ -1595,13 +1680,13 @@ onUnmounted(() => {
 .data-table-shell.rq-table-shell {
   overflow-x: auto;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background-color: var(--td-bg-color-container);
 
   &:deep(thead th) {
     height: 40px;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     letter-spacing: 0.01em;
     white-space: nowrap;
@@ -1612,7 +1697,7 @@ onUnmounted(() => {
     height: 56px;
     padding-top: 10px;
     padding-bottom: 10px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-variant-numeric: tabular-nums;
   }
 
@@ -1634,14 +1719,14 @@ onUnmounted(() => {
 .rq-footnote {
   margin: 12px 0 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
 .rq-failed-list-panel {
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
 }
 
@@ -1672,21 +1757,21 @@ onUnmounted(() => {
   gap: 6px;
   min-width: 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
 }
 
 .rq-failed-row-type {
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .rq-task-state-pill {
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   background: var(--td-bg-color-secondarycontainer);
 
   &--active {
@@ -1737,7 +1822,7 @@ onUnmounted(() => {
   dt {
     margin: 0;
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     white-space: nowrap;
   }
@@ -1747,7 +1832,7 @@ onUnmounted(() => {
     overflow: hidden;
     color: var(--td-text-color-secondary);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 1.45;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1757,17 +1842,17 @@ onUnmounted(() => {
 .rq-failed-row-unknown {
   margin: 2px 0 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
 }
 
 .rq-failed-row-error {
   margin: 8px 0 0;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -1802,7 +1887,7 @@ onUnmounted(() => {
 
 .rq-failed-list-status {
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   text-align: center;
   font-variant-numeric: tabular-nums;

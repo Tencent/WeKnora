@@ -154,17 +154,19 @@
             <div class="option-chips">
               <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.mode === 'websocket' }"
-                :disabled="formData.platform === 'mattermost'" @click="formData.mode = 'websocket'">
-                WebSocket
+                :disabled="formData.platform === 'mattermost'"
+                @click="formData.mode = 'websocket'">
+                {{ formData.platform === 'dingtalk' ? 'Stream' : 'WebSocket' }}
               </button>
-              <button type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
+              <button v-if="formData.platform !== 'dingtalk' && formData.platform !== 'qqbot'" type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
                 @click="formData.mode = 'webhook'">
                 Webhook
               </button>
             </div>
             <p class="form-desc">
               {{ formData.platform === 'mattermost' ? $t('agentEditor.im.mattermostModeHint') :
-                $t('agentEditor.im.modeHint') }}
+                formData.platform === 'yunzhijia' ? $t('agentEditor.im.yunzhijiaModeHint') :
+                  $t('agentEditor.im.modeHint') }}
             </p>
           </div>
 
@@ -202,6 +204,12 @@
               </button>
             </div>
             <p class="form-desc">{{ $t('agentEditor.im.sessionModeHint') }}</p>
+          </div>
+
+          <div class="form-item">
+            <label class="form-label">{{ $t('agentEditor.im.replyLanguage') }}</label>
+            <t-select v-model="formData.locale" :options="localeOptions" />
+            <p class="form-desc">{{ $t('agentEditor.im.replyLanguageHint') }}</p>
           </div>
         </section>
 
@@ -311,6 +319,11 @@
               <div class="form-item">
                 <label class="form-label">App Secret</label>
                 <t-input v-model="formData.credentials.app_secret" type="password" placeholder="App Secret" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Base URL</label>
+                <t-input v-model="formData.credentials.api_base_url" placeholder="https://open.feishu.cn" />
+                <p class="form-desc">{{ $t('agentEditor.im.feishuAPIBaseURLHint') }}</p>
               </div>
               <template v-if="formData.mode === 'webhook'">
                 <div class="form-item">
@@ -472,6 +485,57 @@
                 </div>
               </div>
             </template>
+
+            <!-- Yunzhijia credentials -->
+            <template v-if="formData.platform === 'yunzhijia'">
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaSendMsgUrl') }}</label>
+                <t-input v-model="formData.credentials.send_msg_url"
+                  placeholder="https://www.yunzhijia.com/gateway/robot/webhook/send?yzjtype=0&yzjtoken=..." />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaSendMsgUrlHint') }}
+                  <a href="https://www.yunzhijia.com/opendocs/docs.html#/guide/im/robot" target="_blank"
+                    rel="noopener noreferrer" class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaRobotDoc') }}
+                  </a>
+                </p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
+                <t-input v-model="formData.credentials.secret" type="password"
+                  :placeholder="$t('agentEditor.im.yunzhijiaSecretPlaceholder')" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaSecretHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppId') }}</label>
+                <t-input v-model="formData.credentials.app_id"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppIdPlaceholder')" />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaAppCredentialHint') }}
+                  <a href="https://www.yunzhijia.com/developers/" target="_blank" rel="noopener noreferrer"
+                    class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaImageDoc') }}
+                  </a>
+                </p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppSecret') }}</label>
+                <t-input v-model="formData.credentials.app_secret" type="password"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppSecretPlaceholder')" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaTimeout') }}</label>
+                <t-input-number v-model="formData.credentials.timeout_seconds" placeholder="10" :min="1" :max="60"
+                  style="width: 100%;" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaTimeoutHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaAllowedHostSuffix') }}</label>
+                <t-input v-model="formData.credentials.allowed_webhook_host_suffix" placeholder="yunzhijia.com" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaAllowedHostSuffixHint') }}</p>
+              </div>
+            </template>
+
             <!-- WeChat credentials (QR code binding) -->
             <template v-if="formData.platform === 'wechat'">
               <p class="form-desc">{{ $t('agentEditor.im.wechatHint') }}</p>
@@ -526,6 +590,8 @@
 import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { copyWithToast } from '@/utils/clipboard';
+import { normalizeOptionalString } from '@/utils/optionalString';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listAgents,
@@ -545,8 +611,10 @@ import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
 import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
 import qqbotLogo from '@/assets/img/im/qqbot.png';
+import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
 
 type IMPlatform = IMChannel['platform'];
+type IMLocale = NonNullable<IMChannel['locale']>;
 
 const PLATFORM_LOGO: Record<string, string> = {
   wecom: wecomLogo,
@@ -558,6 +626,7 @@ const PLATFORM_LOGO: Record<string, string> = {
   mattermost: mattermostLogo,
   wechat: wechatLogo,
   qqbot: qqbotLogo,
+  yunzhijia: yunzhijiaLogo,
 };
 
 const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[platform] || '' : '');
@@ -609,6 +678,16 @@ const platformOptions = computed(() => ([
   { value: 'mattermost' as IMPlatform, label: t('agentEditor.im.mattermost'), logo: mattermostLogo },
   { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
   { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
+  { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
+]));
+
+const localeOptions = computed(() => ([
+  { value: '' as IMLocale, label: t('agentEditor.im.replyLanguageDefault') },
+  { value: 'zh-CN' as IMLocale, label: '简体中文' },
+  { value: 'en-US' as IMLocale, label: 'English' },
+  { value: 'ja-JP' as IMLocale, label: '日本語' },
+  { value: 'ko-KR' as IMLocale, label: '한국어' },
+  { value: 'ru-RU' as IMLocale, label: 'Русский' },
 ]));
 
 // Feishu and Lark are the same product on separate clouds, so each has its own
@@ -667,6 +746,7 @@ const formData = ref({
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket' | 'longpoll',
   output_mode: 'stream' as 'stream' | 'full',
+  locale: '' as IMLocale,
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
@@ -719,12 +799,13 @@ function resolvedChannelName(): string {
 }
 
 function platformSupportsThread(platform: string): boolean {
-  return ['slack', 'mattermost', 'feishu', 'lark', 'telegram'].includes(platform);
+  return ['slack', 'mattermost', 'feishu', 'lark', 'telegram', 'yunzhijia'].includes(platform);
 }
 
 watch(
   () => formData.value.platform,
   (p) => {
+    if (p === 'dingtalk' || p === 'qqbot') formData.value.mode = 'websocket';
     if (p === 'mattermost') {
       formData.value.mode = 'webhook';
       if (typeof formData.value.credentials.post_to_main !== 'boolean') {
@@ -756,12 +837,31 @@ function onPlatformChange(val: string | number | boolean) {
   if (val === 'wechat') {
     formData.value.mode = 'longpoll';
     formData.value.output_mode = 'full';
+  } else if (val === 'mattermost' || val === 'yunzhijia') {
+    formData.value.mode = 'webhook';
+    formData.value.output_mode = 'stream';
+    if (val === 'yunzhijia') {
+      formData.value.credentials = {
+        timeout_seconds: 10,
+        allowed_webhook_host_suffix: 'yunzhijia.com',
+      };
+    }
   } else {
     formData.value.mode = 'websocket';
     formData.value.output_mode = 'stream';
   }
   if (!channelNameTouched.value) {
     formData.value.name = defaultChannelName(String(val));
+  }
+}
+
+function normalizeYunzhijiaCredentials() {
+  if (formData.value.platform !== 'yunzhijia') return;
+  if (!formData.value.credentials.allowed_webhook_host_suffix) {
+    formData.value.credentials.allowed_webhook_host_suffix = 'yunzhijia.com';
+  }
+  if (!formData.value.credentials.timeout_seconds) {
+    formData.value.credentials.timeout_seconds = 10;
   }
 }
 
@@ -861,25 +961,7 @@ function getCallbackUrl(channel: IMChannel): string {
 }
 
 async function copyUrl(channel: IMChannel) {
-  const text = getCallbackUrl(channel);
-  try {
-    await navigator.clipboard.writeText(text);
-    MessagePlugin.success(t('common.copySuccess'));
-  } catch {
-    const el = document.createElement('textarea');
-    el.value = text;
-    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(el);
-    if (ok) {
-      MessagePlugin.success(t('common.copySuccess'));
-    } else {
-      MessagePlugin.error(t('common.copyFailed'));
-    }
-  }
+  await copyWithToast(getCallbackUrl(channel), 'common.copySuccess');
 }
 
 function openCreate() {
@@ -920,10 +1002,12 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     name: fullChannel.name,
     mode: fullChannel.mode,
     output_mode: fullChannel.output_mode,
+    locale: fullChannel.locale || '',
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
   };
+  normalizeYunzhijiaCredentials();
   showCreateDialog.value = true;
 }
 
@@ -943,6 +1027,7 @@ function resetForm() {
     name: defaultChannelName('wecom'),
     mode: 'websocket',
     output_mode: 'stream',
+    locale: '',
     session_mode: 'user',
     knowledge_base_id: '',
     credentials: defaultCredentials(),
@@ -957,14 +1042,24 @@ async function handleSave() {
       MessagePlugin.warning(t('agentEditor.im.wechatScanBind'));
       return;
     }
+    if (formData.value.platform === 'yunzhijia') {
+      // normalize fills in the default allowed host suffix, so only the send URL
+      // needs explicit validation here.
+      normalizeYunzhijiaCredentials();
+      if (!String(formData.value.credentials.send_msg_url || '').trim()) {
+        MessagePlugin.warning(t('agentEditor.im.yunzhijiaSendMsgUrlRequired'));
+        return;
+      }
+    }
 
     if (editingChannel.value) {
       await updateIMChannel(editingChannel.value.id, {
         name: resolvedChannelName(),
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        locale: formData.value.locale,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: formData.value.knowledge_base_id,
+        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
         ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
@@ -981,8 +1076,9 @@ async function handleSave() {
         name: resolvedChannelName(),
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        locale: formData.value.locale,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: formData.value.knowledge_base_id,
+        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.createSuccess'));
@@ -1060,7 +1156,7 @@ onUnmounted(() => {
   gap: 6px;
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -1089,7 +1185,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   border: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-placeholder);
@@ -1109,7 +1205,7 @@ onUnmounted(() => {
 }
 
 .im-step-check {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .im-step-body {
@@ -1136,7 +1232,7 @@ onUnmounted(() => {
 
 .mono-text-input :deep(input) {
   font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .drawer-form {
@@ -1152,7 +1248,7 @@ onUnmounted(() => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -1189,9 +1285,14 @@ onUnmounted(() => {
 
 .form-desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-placeholder);
+
+  .doc-link {
+    margin-left: 4px;
+    color: var(--td-brand-color);
+  }
 }
 
 .option-chips {
@@ -1199,7 +1300,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 4px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 }
 
@@ -1208,12 +1309,12 @@ onUnmounted(() => {
   background: transparent;
   color: var(--td-text-color-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.3;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
   white-space: nowrap;
 
   &:hover:not(:disabled) {
@@ -1262,7 +1363,7 @@ onUnmounted(() => {
   label {
     display: block;
     margin: 0 0 4px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.4;
@@ -1270,7 +1371,7 @@ onUnmounted(() => {
 
   .desc {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     color: var(--td-text-color-placeholder);
   }
@@ -1284,8 +1385,9 @@ onUnmounted(() => {
 .platform-link-hint {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 
@@ -1306,12 +1408,12 @@ onUnmounted(() => {
   padding: 12px 16px;
   background: rgba(7, 193, 96, 0.06);
   border: 1px solid rgba(7, 193, 96, 0.2);
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
 
   .bound-icon {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     color: #07c160;
   }
 }
@@ -1340,7 +1442,7 @@ onUnmounted(() => {
   width: 200px;
   height: 200px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   // QR code images are always black-on-white; force white background
   // so the code remains scannable in dark mode.
@@ -1367,15 +1469,15 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 
   .refresh-icon {
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
   }
 }
 
 .qr-hint {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   text-align: center;
 }
@@ -1383,7 +1485,7 @@ onUnmounted(() => {
 
 <style lang="less">
 .im-channel-drawer .setting-drawer__header-icon:has(.drawer-platform-icon) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 

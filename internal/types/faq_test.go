@@ -99,7 +99,7 @@ func TestCalculateFAQContentHash_TraditionalSimplifiedInvariant(t *testing.T) {
 		Answers:          []string{"请联系客服"},
 	}
 	meta2 := &FAQChunkMetadata{
-		StandardQuestion: "如何退款", // simplified
+		StandardQuestion: "如何退款",            // simplified
 		Answers:          []string{"請聯繫客服"}, // traditional in answers — answers only sanitize, not normalize
 	}
 

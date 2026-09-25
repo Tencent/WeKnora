@@ -51,6 +51,8 @@ spec:
               value: {{ .Values.app.env.GIN_MODE | quote }}
             - name: TZ
               value: {{ .Values.app.env.TZ | quote }}
+            - name: MAX_FILE_SIZE_MB
+              value: {{ .Values.global.maxFileSizeMB | quote }}
             # Database configuration
             - name: DB_DRIVER
               value: "postgres"
@@ -99,11 +101,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: JWT_SECRET
-            - name: TENANT_AES_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "weknora.secretName" . }}
-                  key: TENANT_AES_KEY
             - name: SYSTEM_AES_KEY
               valueFrom:
                 secretKeyRef:
@@ -124,10 +121,17 @@ spec:
               value: {{ .Values.app.env.AUTO_RECOVER_DIRTY | quote }}
             - name: CONCURRENCY_POOL_SIZE
               value: {{ .Values.app.env.CONCURRENCY_POOL_SIZE | quote }}
-            - name: ENABLE_GRAPH_RAG
-              value: {{ .Values.app.env.ENABLE_GRAPH_RAG | quote }}
+            # Docker sandbox is off unless the deployer opts in. A workspace
+            # admin who can save a Docker config can create containers on
+            # whatever Engine API this process can reach (often host root).
+            - name: WEKNORA_SANDBOX_DOCKER_ENABLED
+              value: {{ .Values.app.env.WEKNORA_SANDBOX_DOCKER_ENABLED | default "false" | quote }}
             {{- if .Values.neo4j.enabled }}
             # Neo4j configuration (for GraphRAG)
+            # NEO4J_ENABLE 是知识图谱的唯一开关（Go 代码认它，不认 ENABLE_GRAPH_RAG）。
+            # neo4j.enabled=true 时自动注入，无需用户单独设置。
+            - name: NEO4J_ENABLE
+              value: "true"
             - name: NEO4J_URI
               value: "bolt://neo4j:7687"
             - name: NEO4J_USERNAME

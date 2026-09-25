@@ -26,8 +26,10 @@ export function isAgentWebSearchEnabled(config: AgentWebSearchConfig | undefined
 export function isAgentWebSearchReady(
   config: AgentWebSearchConfig | undefined,
   providers: WebSearchProviderEntity[],
+  sourceWorkspaceReady?: boolean,
 ): boolean {
   if (!isAgentWebSearchEnabled(config)) return false;
+  if (sourceWorkspaceReady !== undefined) return sourceWorkspaceReady;
   return resolveAgentWebSearchProviderId(config, providers) !== null;
 }
 

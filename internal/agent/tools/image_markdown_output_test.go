@@ -28,11 +28,13 @@ func TestLLMToolOutputsUseMarkdownImages(t *testing.T) {
 		ImageInfo:  string(imageInfo),
 	}
 
-	listOutput := (&ListKnowledgeChunksTool{}).buildOutput("knowledge-1", "测试文档", 1, 1, []*types.Chunk{chunk})
-	wikiOutput := enrichChunkContent(chunk)
+	readOutput := (&ReadDocumentTool{}).buildOutput(
+		&types.Knowledge{ID: "knowledge-1", Title: "测试文档"}, 1, []readChunkRow{{chunk: chunk}}, "",
+	)
+	enrichedOutput := enrichChunkContent(chunk)
 	for name, output := range map[string]string{
-		"list_knowledge_chunks": listOutput,
-		"wiki_read_source_doc":  wikiOutput,
+		"read_document":        readOutput,
+		"enrich_chunk_content": enrichedOutput,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if !strings.Contains(output, "![目标说话人提取流程图](resource://AbCdEfGhIjKlMnOpQrStUv)") {

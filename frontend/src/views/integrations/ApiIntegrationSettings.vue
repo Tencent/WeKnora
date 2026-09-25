@@ -160,6 +160,14 @@
                           <t-button
                             shape="square"
                             variant="text"
+                            :title="$t('integrations.api.editApiKeyScope')"
+                            @click="openEditAPIKeyScope(key)"
+                          >
+                            <t-icon name="edit-1" />
+                          </t-button>
+                          <t-button
+                            shape="square"
+                            variant="text"
                             :title="$t('integrations.api.copy')"
                             @click="copy(key.api_key)"
                           >
@@ -555,6 +563,110 @@
       </div>
     </SettingDrawer>
 
+    <SettingDrawer
+      :visible="apiKeyScopeDialogVisible"
+      class="api-key-edit-drawer"
+      :title="$t('integrations.api.editApiKeyScope')"
+      :description="$t('integrations.api.editApiKeyScopeDesc', { name: editingAPIKey?.name || '' })"
+      icon="edit-1"
+      width="560px"
+      :min-width="440"
+      :max-width="760"
+      storage-key="setting-drawer:width:api-key-scope"
+      :confirm-text="$t('common.save')"
+      :confirm-loading="apiKeyScopeSaving"
+      @update:visible="(v: boolean) => apiKeyScopeDialogVisible = v"
+      @confirm="saveAPIKeyConfiguration"
+    >
+      <div class="api-key-dialog">
+        <div class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyName') }}</label>
+          </div>
+          <t-input
+            v-model="editingAPIKeyForm.name"
+            :placeholder="$t('integrations.api.apiKeyNamePlaceholder')"
+          />
+        </div>
+
+        <div class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyAccessType') }}</label>
+          </div>
+          <t-radio-group v-model="editingAPIKeyAccessMode" class="mode-radio api-key-access-type-radio">
+            <t-radio-button value="scoped">{{ $t('integrations.api.apiKeyScopedAccess') }}</t-radio-button>
+            <t-radio-button value="full">{{ $t('integrations.api.capabilityTenantFull') }}</t-radio-button>
+          </t-radio-group>
+          <p class="scope-hint">
+            {{
+              editingAPIKeyFullAccessEnabled
+                ? $t('integrations.api.capabilityTenantFullHint')
+                : $t('integrations.api.apiKeyAccessTypeHint')
+            }}
+          </p>
+        </div>
+
+        <div v-if="!editingAPIKeyFullAccessEnabled" class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyCapabilities') }}</label>
+          </div>
+          <div class="api-key-capability-list">
+            <div
+              v-for="group in apiKeyCapabilityGroups"
+              :key="group.key"
+              class="api-key-capability-group"
+            >
+              <div class="api-key-capability-group__header">
+                <span>{{ $t(group.labelKey) }}</span>
+                <t-button
+                  size="small"
+                  variant="text"
+                  @click="toggleEditingCapabilityGroup(group, !editingCapabilityGroupAllSelected(group))"
+                >
+                  {{
+                    editingCapabilityGroupAllSelected(group)
+                      ? $t('integrations.api.apiKeyCapabilityClearGroup')
+                      : $t('integrations.api.apiKeyCapabilitySelectGroup')
+                  }}
+                </t-button>
+              </div>
+              <div class="api-key-capability-group__items">
+                <div
+                  v-for="capability in group.capabilities"
+                  :key="capability.value"
+                  class="api-key-capability-item"
+                >
+                  <t-checkbox
+                    :model-value="editingCapabilitySelections[capability.value]"
+                    @change="editingCapabilitySelections[capability.value] = Boolean($event)"
+                  >
+                    {{ $t(capability.labelKey) }}
+                  </t-checkbox>
+                  <p class="scope-hint">{{ $t(capability.hintKey) }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="editingKnowledgeScopeApplies" class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</label>
+          </div>
+          <t-select
+            v-model="editingAPIKeyForm.knowledge_base_ids"
+            multiple
+            filterable
+            clearable
+            :loading="knowledgeBasesLoading"
+            :options="knowledgeBaseOptions"
+            :placeholder="$t('integrations.api.apiKeyKnowledgeScopePlaceholder')"
+          />
+          <p class="scope-hint">{{ $t('integrations.api.editApiKeyScopeHint') }}</p>
+        </div>
+      </div>
+    </SettingDrawer>
+
   </div>
 </template>
 
@@ -562,6 +674,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import { getCurrentUser } from '@/api/auth'
 import { listAgents, BUILTIN_SMART_REASONING_ID, type CustomAgent } from '@/api/agent'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
@@ -571,6 +684,7 @@ import {
   createAPIPrincipalTestToken,
   getAPIPrincipalConfig,
   listTenantAPIKeys,
+  updateTenantAPIKey,
   updateAPIPrincipalConfig,
   type APIPrincipalConfig,
   type APIPrincipalMode,
@@ -579,6 +693,16 @@ import {
 } from '@/api/tenant'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { getApiBaseUrl } from '@/utils/api-base'
+import {
+  DEFAULT_TENANT_API_KEY_CAPABILITIES,
+  KB_SCOPED_API_KEY_CAPABILITIES,
+  TENANT_API_KEY_CAPABILITIES,
+  TENANT_API_KEY_CAPABILITY_GROUPS,
+  type ApiKeyCapabilityGroup,
+} from '@/config/apiKeyCapabilities'
+import { normalizeAPIKeyKnowledgeBaseIDs } from './apiKeyScope'
+import { consumeApiPlaygroundSSE } from './apiPlaygroundSSE'
+import { docsUrl } from '@/utils/docsUrl'
 
 const { t } = useI18n()
 
@@ -595,6 +719,9 @@ const apiKeys = ref<TenantAPIKey[]>([])
 const apiKeysLoading = ref(false)
 const apiKeyDialogVisible = ref(false)
 const apiKeyCreating = ref(false)
+const apiKeyScopeDialogVisible = ref(false)
+const apiKeyScopeSaving = ref(false)
+const editingAPIKey = ref<TenantAPIKey | null>(null)
 const knowledgeBasesLoading = ref(false)
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
 const secretInput = ref('')
@@ -622,92 +749,10 @@ const form = reactive({
   require_direct_header: false,
 })
 
-type ApiKeyCapabilityOption = {
-  value: TenantAPIKeyCapability
-  labelKey: string
-  hintKey: string
-}
-type ApiKeyCapabilityGroup = {
-  key: string
-  labelKey: string
-  capabilities: ApiKeyCapabilityOption[]
-}
-
-const API_KEY_CAPABILITIES: TenantAPIKeyCapability[] = [
-  'retrieve',
-  'chat',
-  'read_agents',
-  'ingest',
-  'manage_kbs',
-  'message_history',
-  'manage_agents',
-  'manage_mcp_services',
-  'manage_datasources',
-  'manage_models',
-  'manage_vector_stores',
-  'manage_storage_backends',
-  'manage_web_search',
-  'manage_channels',
-  'run_evaluations',
-  'manage_members',
-  'manage_spaces',
-  'manage_tenant_settings',
-]
-
-const DEFAULT_API_KEY_CAPABILITIES = new Set<TenantAPIKeyCapability>(['retrieve', 'chat', 'read_agents'])
-const KB_SCOPED_CAPABILITIES = new Set<TenantAPIKeyCapability>([
-  'retrieve',
-  'chat',
-  'ingest',
-  'manage_kbs',
-  'manage_agents',
-  'manage_datasources',
-])
-
-const apiKeyCapabilityGroups: ApiKeyCapabilityGroup[] = [
-  {
-    key: 'knowledge',
-    labelKey: 'integrations.api.apiKeyCapabilityGroupKnowledge',
-    capabilities: [
-      { value: 'retrieve', labelKey: 'integrations.api.capabilityRetrieve', hintKey: 'integrations.api.capabilityRetrieveHint' },
-      { value: 'chat', labelKey: 'integrations.api.capabilityChat', hintKey: 'integrations.api.capabilityChatHint' },
-      { value: 'ingest', labelKey: 'integrations.api.capabilityIngest', hintKey: 'integrations.api.capabilityIngestHint' },
-      { value: 'manage_kbs', labelKey: 'integrations.api.capabilityManageKbs', hintKey: 'integrations.api.capabilityManageKbsHint' },
-      { value: 'message_history', labelKey: 'integrations.api.capabilityMessageHistory', hintKey: 'integrations.api.capabilityMessageHistoryHint' },
-    ],
-  },
-  {
-    key: 'automation',
-    labelKey: 'integrations.api.apiKeyCapabilityGroupAutomation',
-    capabilities: [
-      { value: 'read_agents', labelKey: 'integrations.api.capabilityReadAgents', hintKey: 'integrations.api.capabilityReadAgentsHint' },
-      { value: 'manage_agents', labelKey: 'integrations.api.capabilityManageAgents', hintKey: 'integrations.api.capabilityManageAgentsHint' },
-      { value: 'manage_mcp_services', labelKey: 'integrations.api.capabilityManageMcpServices', hintKey: 'integrations.api.capabilityManageMcpServicesHint' },
-      { value: 'manage_datasources', labelKey: 'integrations.api.capabilityManageDatasources', hintKey: 'integrations.api.capabilityManageDatasourcesHint' },
-    ],
-  },
-  {
-    key: 'collaboration',
-    labelKey: 'integrations.api.apiKeyCapabilityGroupCollaboration',
-    capabilities: [
-      { value: 'manage_members', labelKey: 'integrations.api.capabilityManageMembers', hintKey: 'integrations.api.capabilityManageMembersHint' },
-      { value: 'manage_spaces', labelKey: 'integrations.api.capabilityManageSpaces', hintKey: 'integrations.api.capabilityManageSpacesHint' },
-    ],
-  },
-  {
-    key: 'tenant',
-    labelKey: 'integrations.api.apiKeyCapabilityGroupTenant',
-    capabilities: [
-      { value: 'manage_models', labelKey: 'integrations.api.capabilityManageModels', hintKey: 'integrations.api.capabilityManageModelsHint' },
-      { value: 'manage_vector_stores', labelKey: 'integrations.api.capabilityManageVectorStores', hintKey: 'integrations.api.capabilityManageVectorStoresHint' },
-      { value: 'manage_storage_backends', labelKey: 'integrations.api.capabilityManageStorageBackends', hintKey: 'integrations.api.capabilityManageStorageBackendsHint' },
-      { value: 'manage_web_search', labelKey: 'integrations.api.capabilityManageWebSearch', hintKey: 'integrations.api.capabilityManageWebSearchHint' },
-      { value: 'manage_channels', labelKey: 'integrations.api.capabilityManageChannels', hintKey: 'integrations.api.capabilityManageChannelsHint' },
-      { value: 'run_evaluations', labelKey: 'integrations.api.capabilityRunEvaluations', hintKey: 'integrations.api.capabilityRunEvaluationsHint' },
-      { value: 'manage_tenant_settings', labelKey: 'integrations.api.capabilityManageTenantSettings', hintKey: 'integrations.api.capabilityManageTenantSettingsHint' },
-    ],
-  },
-]
+const API_KEY_CAPABILITIES = TENANT_API_KEY_CAPABILITIES
+const DEFAULT_API_KEY_CAPABILITIES = DEFAULT_TENANT_API_KEY_CAPABILITIES
+const KB_SCOPED_CAPABILITIES = KB_SCOPED_API_KEY_CAPABILITIES
+const apiKeyCapabilityGroups = TENANT_API_KEY_CAPABILITY_GROUPS
 
 const capabilitySelections = reactive<Record<TenantAPIKeyCapability, boolean>>(
   API_KEY_CAPABILITIES.reduce((acc, capability) => {
@@ -715,6 +760,49 @@ const capabilitySelections = reactive<Record<TenantAPIKeyCapability, boolean>>(
     return acc
   }, {} as Record<TenantAPIKeyCapability, boolean>),
 )
+
+const editingCapabilitySelections = reactive<Record<TenantAPIKeyCapability, boolean>>(
+  API_KEY_CAPABILITIES.reduce((acc, capability) => {
+    acc[capability] = false
+    return acc
+  }, {} as Record<TenantAPIKeyCapability, boolean>),
+)
+
+const editingAPIKeyForm = reactive({
+  name: '',
+  knowledge_base_ids: [] as string[],
+  tenant_full_enabled: false,
+  expires_at_unix: undefined as number | undefined,
+})
+
+const editingAPIKeyFullAccessEnabled = computed(() => editingAPIKeyForm.tenant_full_enabled)
+const editingAPIKeyAccessMode = computed<'scoped' | 'full'>({
+  get: () => (editingAPIKeyForm.tenant_full_enabled ? 'full' : 'scoped'),
+  set: (value) => {
+    editingAPIKeyForm.tenant_full_enabled = value === 'full'
+  },
+})
+const editingSelectedCapabilities = computed(() => (
+  API_KEY_CAPABILITIES.filter((capability) => editingCapabilitySelections[capability])
+))
+const editingKnowledgeScopeApplies = computed(() => (
+  !editingAPIKeyFullAccessEnabled.value
+  && editingSelectedCapabilities.value.some((capability) => KB_SCOPED_CAPABILITIES.has(capability))
+))
+
+watch(editingKnowledgeScopeApplies, (applies) => {
+  if (!applies) editingAPIKeyForm.knowledge_base_ids = []
+})
+
+function editingCapabilityGroupAllSelected(group: ApiKeyCapabilityGroup): boolean {
+  return group.capabilities.every((capability) => editingCapabilitySelections[capability.value])
+}
+
+function toggleEditingCapabilityGroup(group: ApiKeyCapabilityGroup, selected: boolean) {
+  group.capabilities.forEach((capability) => {
+    editingCapabilitySelections[capability.value] = selected
+  })
+}
 
 const apiKeyForm = reactive({
   name: '',
@@ -775,7 +863,7 @@ function toggleCapabilityGroup(group: ApiKeyCapabilityGroup, selected: boolean) 
 // Full-access keys already cover every capability, so no capability badges for them.
 function keyCapabilityLabels(key: TenantAPIKey): string[] {
   if (key.full_access) return []
-  const labels: Record<TenantAPIKeyCapability, string> = {
+  const labels: Partial<Record<TenantAPIKeyCapability, string>> = {
     retrieve: t('integrations.api.capabilityRetrieve'),
     chat: t('integrations.api.capabilityChat'),
     read_agents: t('integrations.api.capabilityReadAgents'),
@@ -1222,20 +1310,7 @@ async function saveIfNeeded(options: { showSuccess?: boolean } = {}) {
 }
 
 async function copy(text: string) {
-  if (!text) return
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-  } else {
-    const textArea = document.createElement('textarea')
-    textArea.value = text
-    textArea.style.position = 'fixed'
-    textArea.style.opacity = '0'
-    document.body.appendChild(textArea)
-    textArea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textArea)
-  }
-  MessagePlugin.success(t('integrations.api.copySuccess'))
+  await copyWithToast(text, 'integrations.api.copySuccess')
 }
 
 async function tryLoadWailsApiBaseURL() {
@@ -1357,7 +1432,7 @@ const saveDesktopPort = async () => {
 }
 
 function openApiDoc() {
-  window.open('https://github.com/Tencent/WeKnora/blob/main/docs/api/README.md', '_blank')
+  window.open(docsUrl('apiOverview'), '_blank')
 }
 
 function openCreateAPIKeyDialog() {
@@ -1374,6 +1449,10 @@ function openCreateAPIKeyDialog() {
 async function createScopedAPIKey() {
   if (!apiKeyForm.name.trim()) {
     MessagePlugin.error(t('integrations.api.apiKeyNameRequired'))
+    return
+  }
+  if (!apiKeyFullAccessEnabled.value && selectedCapabilities().length === 0) {
+    MessagePlugin.error(t('integrations.api.apiKeyCapabilitiesRequired'))
     return
   }
   apiKeyCreating.value = true
@@ -1397,6 +1476,59 @@ async function createScopedAPIKey() {
     MessagePlugin.error(err?.message || t('integrations.api.createApiKeyFailed'))
   } finally {
     apiKeyCreating.value = false
+  }
+}
+
+// 打开编辑器时复制服务端配置，取消操作不会污染列表中的原始数据。
+function openEditAPIKeyScope(key: TenantAPIKey) {
+  editingAPIKey.value = key
+  editingAPIKeyForm.name = key.name
+  editingAPIKeyForm.tenant_full_enabled = key.full_access
+  editingAPIKeyForm.knowledge_base_ids = normalizeAPIKeyKnowledgeBaseIDs(key.knowledge_base_ids)
+  const expiresAt = key.expires_at ? Date.parse(key.expires_at) : Number.NaN
+  editingAPIKeyForm.expires_at_unix = Number.isNaN(expiresAt)
+    ? undefined
+    : Math.floor(expiresAt / 1000)
+  const currentCapabilities = new Set(key.capabilities || [])
+  API_KEY_CAPABILITIES.forEach((capability) => {
+    editingCapabilitySelections[capability] = currentCapabilities.has(capability)
+  })
+  apiKeyScopeDialogVisible.value = true
+  void loadKnowledgeBaseOptions()
+}
+
+// 保存完整配置后刷新列表，确保鉴权范围与界面立即一致。
+async function saveAPIKeyConfiguration() {
+  const key = editingAPIKey.value
+  if (!key) return
+  if (!editingAPIKeyForm.name.trim()) {
+    MessagePlugin.error(t('integrations.api.apiKeyNameRequired'))
+    return
+  }
+  if (!editingAPIKeyFullAccessEnabled.value && editingSelectedCapabilities.value.length === 0) {
+    MessagePlugin.error(t('integrations.api.apiKeyCapabilitiesRequired'))
+    return
+  }
+  apiKeyScopeSaving.value = true
+  try {
+    const resp = await updateTenantAPIKey(tenantId.value, key.id, {
+      name: editingAPIKeyForm.name.trim(),
+      full_access: editingAPIKeyFullAccessEnabled.value,
+      capabilities: editingAPIKeyFullAccessEnabled.value ? [] : editingSelectedCapabilities.value,
+      knowledge_base_ids: editingKnowledgeScopeApplies.value ? editingAPIKeyForm.knowledge_base_ids : [],
+      expires_at_unix: editingAPIKeyForm.expires_at_unix,
+    })
+    if (!resp.success || !resp.data) {
+      throw new Error(resp.message || t('integrations.api.updateApiKeyScopeFailed'))
+    }
+    apiKeyScopeDialogVisible.value = false
+    editingAPIKey.value = null
+    MessagePlugin.success(t('integrations.api.updateApiKeyScopeSuccess'))
+    await loadAPIKeys()
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('integrations.api.updateApiKeyScopeFailed'))
+  } finally {
+    apiKeyScopeSaving.value = false
   }
 }
 
@@ -1424,9 +1556,10 @@ async function deleteScopedAPIKey(id: number) {
   await loadAPIKeys()
 }
 
-function formatKeyKnowledgeScope(ids: string[] = []) {
-  if (!ids.length) return t('integrations.api.allKnowledgeBases')
-  const names = ids.map((id) => knowledgeBases.value.find((kb) => kb.id === id)?.name || id)
+function formatKeyKnowledgeScope(ids: readonly string[] | null | undefined) {
+  const normalizedIDs = normalizeAPIKeyKnowledgeBaseIDs(ids)
+  if (!normalizedIDs.length) return t('integrations.api.allKnowledgeBases')
+  const names = normalizedIDs.map((id) => knowledgeBases.value.find((kb) => kb.id === id)?.name || id)
   return names.join(', ')
 }
 
@@ -1477,26 +1610,6 @@ function formatJSON(value: unknown) {
   } catch {
     return String(value)
   }
-}
-
-function extractAnswerFromSSE(raw: string) {
-  const chunks: string[] = []
-  raw.split('\n').forEach((line) => {
-    if (!line.startsWith('data:')) return
-    const payload = line.slice(5).trim()
-    if (!payload || payload === '[DONE]') return
-    try {
-      const parsed = JSON.parse(payload)
-      const type = parsed?.response_type || parsed?.type
-      const content = parsed?.content
-      if (type === 'answer' && typeof content === 'string') {
-        chunks.push(content)
-      }
-    } catch {
-      // Keep raw stream visible even when an event is not JSON.
-    }
-  })
-  return chunks.join('')
 }
 
 async function readResponseBody(resp: Response) {
@@ -1587,19 +1700,16 @@ async function runPlayground() {
       throw new Error(t('integrations.api.playgroundNoStream'))
     }
 
-    const reader = chatResp.body.getReader()
-    const decoder = new TextDecoder()
-    let raw = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      raw += decoder.decode(value, { stream: true })
+    const result = await consumeApiPlaygroundSSE(chatResp.body, ({ raw, answer }) => {
       playground.stream_output = compactText(raw)
-      playground.final_answer = extractAnswerFromSSE(raw)
+      playground.final_answer = answer
+    })
+    playground.stream_output = compactText(result.raw)
+    playground.final_answer = result.answer
+    if (result.status === 'failed') {
+      playground.chat_status = 'failed'
+      throw new Error(result.error || t('integrations.api.playgroundFailed'))
     }
-    raw += decoder.decode()
-    playground.stream_output = compactText(raw)
-    playground.final_answer = extractAnswerFromSSE(raw)
     playground.chat_status = 'success'
     MessagePlugin.success(t('integrations.api.playgroundSuccess', {
       ms: Math.round(performance.now() - startedAt),
@@ -1687,7 +1797,7 @@ onBeforeUnmount(stopPlayground)
 }
 
 .link-icon {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .desktop-api-control {
@@ -1707,7 +1817,7 @@ onBeforeUnmount(stopPlayground)
 
   :deep(input) {
     font-family: var(--app-font-family-mono);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 }
 
@@ -1738,7 +1848,7 @@ onBeforeUnmount(stopPlayground)
     display: block;
     margin-bottom: 6px;
     color: var(--td-text-color-primary);
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 1.4;
   }
@@ -1746,7 +1856,7 @@ onBeforeUnmount(stopPlayground)
   p {
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
   }
 }
@@ -1759,7 +1869,7 @@ onBeforeUnmount(stopPlayground)
   display: flex;
   flex-direction: column;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   overflow: hidden;
 }
@@ -1771,7 +1881,7 @@ onBeforeUnmount(stopPlayground)
   gap: 8px;
   min-height: 88px;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .api-key-table-wrap {
@@ -1796,14 +1906,14 @@ onBeforeUnmount(stopPlayground)
   th {
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     line-height: 1.4;
   }
 
   td {
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.45;
   }
 
@@ -1857,7 +1967,7 @@ onBeforeUnmount(stopPlayground)
   display: block;
   min-width: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1869,7 +1979,7 @@ onBeforeUnmount(stopPlayground)
   max-width: 100%;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1892,10 +2002,10 @@ onBeforeUnmount(stopPlayground)
   height: 24px;
   padding: 0 9px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   line-height: 22px;
   overflow: hidden;
@@ -1922,10 +2032,10 @@ onBeforeUnmount(stopPlayground)
   max-width: 100%;
   height: 22px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: color-mix(in srgb, var(--td-success-color) 10%, var(--td-bg-color-container));
   color: var(--td-success-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 20px;
   overflow: hidden;
@@ -1957,7 +2067,7 @@ onBeforeUnmount(stopPlayground)
   gap: 12px;
   min-height: 24px;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
@@ -2012,7 +2122,7 @@ onBeforeUnmount(stopPlayground)
       align-items: center;
       gap: 8px;
       color: var(--td-text-color-primary);
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       line-height: 1.45;
 
@@ -2029,14 +2139,14 @@ onBeforeUnmount(stopPlayground)
     p {
       margin: 2px 0 0;
       color: var(--td-text-color-placeholder);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       line-height: 1.5;
     }
   }
 
   :deep(.t-input),
   :deep(.t-select__wrap) {
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
   }
 
   :deep(.t-input) {
@@ -2055,7 +2165,7 @@ onBeforeUnmount(stopPlayground)
 .scope-hint {
   margin: 8px 0 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
 }
 
@@ -2071,14 +2181,14 @@ onBeforeUnmount(stopPlayground)
     display: block;
     margin-bottom: 6px;
     color: var(--td-text-color-primary);
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
   }
 
   p {
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
   }
 }
@@ -2086,7 +2196,7 @@ onBeforeUnmount(stopPlayground)
 .principal-section__scope {
   margin-top: 6px !important;
   color: var(--td-text-color-placeholder) !important;
-  font-size: 12px !important;
+  font-size: var(--app-text-sm) !important;
 }
 
 .mode-radio {
@@ -2105,7 +2215,7 @@ onBeforeUnmount(stopPlayground)
 .mode-callout {
   position: relative;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: 1px solid var(--td-component-stroke);
   background: var(--td-bg-color-secondarycontainer);
   overflow: hidden;
@@ -2122,7 +2232,7 @@ onBeforeUnmount(stopPlayground)
       display: block;
       margin-bottom: 5px;
       color: var(--td-text-color-primary);
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 600;
       line-height: 1.4;
     }
@@ -2131,7 +2241,7 @@ onBeforeUnmount(stopPlayground)
     p {
       margin: 0;
       color: var(--td-text-color-secondary);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       line-height: 1.6;
     }
   }
@@ -2141,7 +2251,7 @@ onBeforeUnmount(stopPlayground)
   display: flex;
   flex-direction: column;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   overflow: hidden;
 }
@@ -2163,7 +2273,7 @@ onBeforeUnmount(stopPlayground)
     label {
       display: block;
       color: var(--td-text-color-primary);
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 600;
       line-height: 1.4;
     }
@@ -2171,7 +2281,7 @@ onBeforeUnmount(stopPlayground)
     p {
       margin: 5px 0 0;
       color: var(--td-text-color-placeholder);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       line-height: 1.5;
     }
   }
@@ -2224,7 +2334,7 @@ onBeforeUnmount(stopPlayground)
 
 .secret-saved-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-warning-color);
 }
@@ -2257,7 +2367,7 @@ onBeforeUnmount(stopPlayground)
   }
 
   :deep(.t-tabs__nav-item) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     height: 36px;
     line-height: 36px;
     color: var(--td-text-color-secondary);
@@ -2275,7 +2385,7 @@ onBeforeUnmount(stopPlayground)
 
 .code-panel {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   overflow: hidden;
 
@@ -2290,7 +2400,7 @@ onBeforeUnmount(stopPlayground)
   }
 
   &__label {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     color: var(--td-text-color-secondary);
   }
@@ -2314,7 +2424,7 @@ onBeforeUnmount(stopPlayground)
     padding: 10px 12px;
     overflow: auto;
     font-family: var(--app-font-family-mono);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-primary);
     background: transparent;
@@ -2323,7 +2433,7 @@ onBeforeUnmount(stopPlayground)
 
 .mono-input :deep(input) {
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .fixed-header-name {
@@ -2331,18 +2441,18 @@ onBeforeUnmount(stopPlayground)
   max-width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   overflow-wrap: anywhere;
 }
 
 .mono-textarea :deep(.t-textarea__inner) {
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .playground-entry {
@@ -2352,7 +2462,7 @@ onBeforeUnmount(stopPlayground)
   gap: 16px;
   padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 
   &__info {
@@ -2362,14 +2472,14 @@ onBeforeUnmount(stopPlayground)
       display: block;
       margin-bottom: 4px;
       color: var(--td-text-color-primary);
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
     }
 
     p {
       margin: 0;
       color: var(--td-text-color-secondary);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       line-height: 1.5;
     }
   }
@@ -2389,7 +2499,7 @@ onBeforeUnmount(stopPlayground)
 .drawer-form-label {
   display: block;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   line-height: 1.4;
 }
@@ -2397,7 +2507,7 @@ onBeforeUnmount(stopPlayground)
 .drawer-form-desc {
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   &--error {
@@ -2408,14 +2518,14 @@ onBeforeUnmount(stopPlayground)
 .footer-test-message {
   min-width: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
 }
 
 .playground-empty {
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.6;
 }
 
@@ -2427,7 +2537,7 @@ onBeforeUnmount(stopPlayground)
 
 .playground-step {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   overflow: hidden;
 
@@ -2440,7 +2550,7 @@ onBeforeUnmount(stopPlayground)
     border-bottom: 1px solid var(--td-component-stroke);
     background: var(--td-bg-color-container);
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
   }
 
@@ -2451,7 +2561,7 @@ onBeforeUnmount(stopPlayground)
     overflow: auto;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family-mono);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
@@ -2492,14 +2602,14 @@ onBeforeUnmount(stopPlayground)
     display: block;
     margin-bottom: 4px;
     color: var(--td-text-color-primary);
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
   }
 
   p {
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
   }
 }

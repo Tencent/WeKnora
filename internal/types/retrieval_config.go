@@ -37,10 +37,22 @@ type RetrievalConfig struct {
 	RRFKeywordWeight float64 `json:"rrf_keyword_weight,omitempty"`
 }
 
+// DefaultRetrievalTopK is the retrieval depth used when a caller supplies no
+// usable TopK / MatchCount. HybridSearch also floors its over-retrieval pool
+// at this value, so the fallback and the pool it draws from stay in step by
+// construction rather than by two independently maintained literals.
+const DefaultRetrievalTopK = 50
+
+// MaxRequestedResults caps the result counts a retrieval API caller may ask
+// for (knowledge-search match_count, rerank.top_k). knowledge-search runs one
+// search per scoped document or tag set and reranks every candidate, so an
+// unbounded count multiplied into tens of thousands of billed rerank passages.
+const MaxRequestedResults = 200
+
 // GetEffectiveEmbeddingTopK returns EmbeddingTopK with a fallback default.
 func (c *RetrievalConfig) GetEffectiveEmbeddingTopK() int {
 	if c == nil || c.EmbeddingTopK <= 0 {
-		return 50
+		return DefaultRetrievalTopK
 	}
 	return c.EmbeddingTopK
 }

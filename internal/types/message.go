@@ -35,6 +35,60 @@ type MentionedItem struct {
 	SkillName string `json:"skill_name"` // Preloaded agent skill name
 }
 
+// MapString reads a string from a JSON-decoded map.
+func MapString(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// MentionedItemsFromRaw rebuilds typed mentions from the JSON-safe shape
+// stored on steer events and similar maps.
+func MentionedItemsFromRaw(raw interface{}) MentionedItems {
+	list, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make(MentionedItems, 0, len(list))
+	for _, item := range list {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		out = append(out, MentionedItem{
+			ID:        MapString(m, "id"),
+			Name:      MapString(m, "name"),
+			Type:      MapString(m, "type"),
+			KBType:    MapString(m, "kb_type"),
+			KBID:      MapString(m, "kb_id"),
+			KBName:    MapString(m, "kb_name"),
+			ServiceID: MapString(m, "service_id"),
+			SkillName: MapString(m, "skill_name"),
+		})
+	}
+	return out
+}
+
+// MentionedItemsToRaw converts typed mentions into plain values that survive
+// Redis JSON round-trips without a second unmarshal type on the read side.
+func MentionedItemsToRaw(items MentionedItems) []interface{} {
+	out := make([]interface{}, 0, len(items))
+	for _, item := range items {
+		out = append(out, map[string]interface{}{
+			"id":         item.ID,
+			"name":       item.Name,
+			"type":       item.Type,
+			"kb_type":    item.KBType,
+			"kb_id":      item.KBID,
+			"kb_name":    item.KBName,
+			"service_id": item.ServiceID,
+			"skill_name": item.SkillName,
+		})
+	}
+	return out
+}
+
 // MessageImage represents an image attached to a chat message
 type MessageImage struct {
 	URL     string `json:"url"`
@@ -128,7 +182,7 @@ func (attachments MessageAttachments) BuildPrompt() string {
 			sb.WriteString("\n</content>\n")
 
 			if att.IsTruncated {
-				sb.WriteString(fmt.Sprintf("<note>This legacy upload has a total of %d lines and only its first 500 lines are available.</note>\n",
+				sb.WriteString(fmt.Sprintf("<note>This attachment was truncated for prompt-size safety; only a prefix is available. The original content has %d lines.</note>\n",
 					att.LineCount))
 			}
 		} else {
@@ -166,6 +220,111 @@ func (m *MessageAttachments) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, m)
+}
+
+// MessageArtifact represents a file produced by a skill script during a chat
+// turn. Unlike MessageAttachment (which stores files uploaded by the user),
+// MessageArtifact records files that the sandbox generated on the model's
+// behalf and that WeKnora has persisted to its file service so the user can
+// download them after the sandbox is reaped.
+//
+// SourcePath + ModTime is the cheap identity for an unchanged sandbox file.
+// When mtime moves, ArtifactCollector compares content hashes so a git
+// checkout cannot duplicate a blob and a same-size rewrite still attaches.
+type MessageArtifact struct {
+	URL         string    `json:"url"`                    // Storage URL (provider://path); persisted, not sent to client
+	FileName    string    `json:"file_name"`              // Original filename inside the sandbox
+	FileType    string    `json:"file_type"`              // File extension (e.g., ".pptx", ".pdf")
+	FileSize    int64     `json:"file_size"`              // File size in bytes
+	ContentHash string    `json:"content_hash,omitempty"` // SHA-256 of the persisted bytes
+	SourcePath  string    `json:"source_path"`            // Absolute path inside the sandbox (used for diff)
+	ModTime     time.Time `json:"mod_time"`               // Sandbox-side modification time (used for diff)
+	CreatedAt   time.Time `json:"created_at"`             // When WeKnora persisted the blob
+	// DeletedAt marks a file the user deleted. The entry stays in the list
+	// rather than being removed because its position IS the download address
+	// (msg.Artifacts[index]); dropping it would shift every later file's index
+	// and hand an old link the wrong blob. Keeping it also keeps the entry in
+	// ArtifactCollector's de-duplication set, so the next collect does not
+	// re-attach the very file that was deleted — its sandbox mtime has not
+	// moved. Clients filter these out; the bytes are already reclaimed.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+}
+
+// Deleted reports whether the user deleted this artifact.
+func (a MessageArtifact) Deleted() bool { return a.DeletedAt != nil }
+
+// MessageArtifacts is a slice of MessageArtifact for database storage.
+type MessageArtifacts []MessageArtifact
+
+// Live returns the artifacts the user has not deleted, preserving order. The
+// caller loses the positional index, so use it for counting and display only —
+// anything that addresses an artifact for download must index the full slice.
+func (m MessageArtifacts) Live() MessageArtifacts {
+	out := make(MessageArtifacts, 0, len(m))
+	for _, a := range m {
+		if !a.Deleted() {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// Value implements the driver.Valuer interface for database serialization
+func (m MessageArtifacts) Value() (driver.Value, error) {
+	if m == nil {
+		return json.Marshal([]MessageArtifact{})
+	}
+	return json.Marshal(m)
+}
+
+// Scan implements the sql.Scanner interface for database deserialization
+func (m *MessageArtifacts) Scan(value interface{}) error {
+	if value == nil {
+		*m = make(MessageArtifacts, 0)
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		*m = make(MessageArtifacts, 0)
+		return nil
+	}
+	return json.Unmarshal(b, m)
+}
+
+// WithRestoredMtime stamps sandbox mtime onto the artifact at sourcePath
+// whose ContentHash already matches. Used after a fork checkout so later
+// collects can skip by path+mtime. Other versions at the same path —
+// including empty-hash legacy rows — are left alone. The returned slice is a
+// copy.
+func (m MessageArtifacts) WithRestoredMtime(sourcePath string, mod time.Time, hash string) (MessageArtifacts, bool) {
+	if len(m) == 0 || sourcePath == "" || hash == "" {
+		return m, false
+	}
+	out := make(MessageArtifacts, len(m))
+	copy(out, m)
+	changed := false
+	for i := range out {
+		if out[i].SourcePath != sourcePath {
+			continue
+		}
+		// Empty hashes are not a match: a restore must not stamp every
+		// historical version at this path. Only the row whose content
+		// already hashed to `hash` gets the new mtime.
+		if out[i].ContentHash != hash {
+			continue
+		}
+		if out[i].ModTime.Equal(mod) {
+			continue
+		}
+		out[i].ModTime = mod
+		changed = true
+	}
+	return out, changed
 }
 
 // MentionedItems is a slice of MentionedItem for database storage
@@ -213,24 +372,36 @@ type Message struct {
 	// Message role: "user", "assistant", "system"
 	Role string `json:"role"`
 	// References to knowledge chunks used in the response
-	KnowledgeReferences References `json:"knowledge_references"  gorm:"type:json,column:knowledge_references"`
+	KnowledgeReferences References `json:"knowledge_references"  gorm:"type:json;column:knowledge_references"`
 	// Agent execution steps (only for assistant messages generated by agent)
 	// This contains the detailed reasoning process and tool calls made by the agent
 	// Stored for user history display, but NOT included in LLM context to avoid redundancy
-	AgentSteps AgentSteps `json:"agent_steps,omitempty" gorm:"type:jsonb,column:agent_steps"`
+	AgentSteps AgentSteps `json:"agent_steps,omitempty" gorm:"type:jsonb;column:agent_steps"`
 	// Mentioned knowledge bases and files (for user messages)
 	// Stores the @mentioned items when user sends a message
-	MentionedItems MentionedItems `json:"mentioned_items,omitempty" gorm:"type:jsonb,column:mentioned_items"`
+	MentionedItems MentionedItems `json:"mentioned_items,omitempty" gorm:"type:jsonb;column:mentioned_items"`
 	// Attached images with OCR/Caption text (for user messages)
 	Images MessageImages `json:"images,omitempty" gorm:"type:jsonb;column:images"`
 	// Attached files (documents, audio, etc., for user messages)
 	Attachments MessageAttachments `json:"attachments,omitempty" gorm:"type:jsonb;column:attachments"`
+	// Skill-generated files produced during this assistant turn (assistant messages only).
+	// Populated by ArtifactCollector after the sandbox finishes, referenced by the
+	// artifact download endpoint. Empty for user messages and turns without skills.
+	//
+	// Stored in the message_artifacts table, not on the message row: the message
+	// repository loads it with every message it returns and writes it whenever it
+	// is non-nil on create or update. A nil slice leaves the stored rows alone.
+	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"-"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// Whether this response is a fallback (no knowledge base match found)
 	IsFallback bool `json:"is_fallback,omitempty"`
 	// Agent total execution duration in milliseconds (from query start to answer start)
 	AgentDurationMs int64 `json:"agent_duration_ms,omitempty" gorm:"column:agent_duration_ms;default:0"`
+	// LLM token usage aggregated across every round of the turn that produced this
+	// assistant message. Persisted so history reads can attribute cost after the
+	// live stream is gone; NULL (nil) for user messages and pre-feature rows.
+	Usage *TokenUsage `json:"usage,omitempty" gorm:"type:jsonb;column:usage"`
 	// RenderedContent stores the full RAG-augmented user message (with retrieved context)
 	// sent to the LLM. Used to preserve retrieval context across conversation turns.
 	// Empty for non-retrieval intents or assistant messages.
@@ -252,6 +423,22 @@ type Message struct {
 	// KnowledgeID links this message to a Knowledge entry in the chat history knowledge base
 	// Used for vector search indexing: when set, the message content has been indexed as a Knowledge passage
 	KnowledgeID string `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`
+	// UsedMemories records which long-term memories were injected into this
+	// answer, so the chat UI can show them and let the user delete one on the
+	// spot. Persisted rather than only streamed so reopening a conversation
+	// still explains what the answer saw.
+	UsedMemories UsedMemories `json:"used_memories,omitempty" gorm:"type:jsonb;column:used_memories"`
+	// SandboxCheckpoint is the git commit this assistant turn produced in the
+	// session sandbox's /workspace. Nil for user messages, for turns that ran
+	// without a sandbox, and for turns whose commit failed (best-effort — a
+	// failed checkpoint must never block the reply). A message without a
+	// checkpoint cannot serve as a fork point with sandbox state.
+	SandboxCheckpoint *SandboxCheckpoint `json:"sandbox_checkpoint,omitempty" gorm:"type:jsonb"`
+	// ContextCheckpoint is the agent compaction summary covering this turn
+	// and every turn before it (see ContextCheckpoint). Assistant messages
+	// only; nil unless a later turn's compaction ended exactly here. Internal
+	// to history loading, so it stays out of API responses.
+	ContextCheckpoint *ContextCheckpoint `json:"-" gorm:"type:jsonb;column:context_checkpoint"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp
@@ -271,9 +458,16 @@ type MessageExecutionContext struct {
 	TagScopes             []TagScope                `json:"tag_scopes,omitempty"`
 	MCPServiceIDs         []string                  `json:"mcp_service_ids,omitempty"`
 	SkillNames            []string                  `json:"skill_names,omitempty"`
+	LocalBrowserEnabled   bool                      `json:"local_browser_enabled,omitempty"`
 	WebSearchEnabled      bool                      `json:"web_search_enabled"`
 	Locale                string                    `json:"locale,omitempty"`
 	SuggestionAttribution *SuggestionAttribution    `json:"suggestion_attribution,omitempty"`
+	// LangfuseTraceparent is the W3C traceparent of the originating chat
+	// request. Follow-up suggestion generation often runs on a later HTTP
+	// call (or after the SSE handler has already finished the root span);
+	// without this the LLM wrapper auto-creates an orphan chat.completion
+	// trace instead of nesting under the agent turn.
+	LangfuseTraceparent string `json:"langfuse_traceparent,omitempty"`
 }
 
 func (c MessageExecutionContext) Value() (driver.Value, error) {
@@ -353,6 +547,9 @@ func (m *Message) BeforeCreate(tx *gorm.DB) (err error) {
 	if m.Attachments == nil {
 		m.Attachments = make(MessageAttachments, 0)
 	}
+	if m.Artifacts == nil {
+		m.Artifacts = make(MessageArtifacts, 0)
+	}
 	return nil
 }
 
@@ -378,6 +575,10 @@ type MessageSearchParams struct {
 	Limit int `json:"limit"`
 	// Filter by specific session IDs (optional, empty means all sessions)
 	SessionIDs []string `json:"session_ids"`
+	// OwnerID restricts results to sessions belonging to one person. It is set
+	// from the caller's identity rather than from the request body: conversation
+	// search must not be a way to read a colleague's private chats.
+	OwnerID string `json:"-"`
 }
 
 // MessageWithSession extends Message with session title for search results

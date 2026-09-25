@@ -59,6 +59,105 @@
       </div>
       </template>
 
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.advanced.autoTag.label') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.description') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch v-model="localAutoTag.enabled" size="medium" @change="emitAutoTag" />
+        </div>
+      </div>
+
+      <div v-if="localAutoTag.enabled" class="subsection">
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.autoTag.modelLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.modelDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <ModelSelector
+              model-type="KnowledgeQA"
+              :selected-model-id="localAutoTag.modelId"
+              :all-models="allModels"
+              clearable
+              :placeholder="$t('knowledgeEditor.advanced.autoTag.modelPlaceholder')"
+              @update:selected-model-id="(value: string) => { localAutoTag.modelId = value; emitAutoTag() }"
+            />
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.autoTag.maxTagsLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.maxTagsDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-input-number
+              v-model="localAutoTag.maxTags"
+              :min="1"
+              :max="10"
+              :step="1"
+              theme="normal"
+              style="width: 120px;"
+              @change="emitAutoTag"
+            />
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.autoTag.skipIfTaggedLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.autoTag.skipIfTaggedDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-switch v-model="localAutoTag.skipIfTagged" size="medium" @change="emitAutoTag" />
+          </div>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.advanced.profile.label') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.advanced.profile.description') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch v-model="localProfile.enabled" size="medium" @change="emitProfile" />
+        </div>
+      </div>
+
+      <div v-if="localProfile.enabled" class="subsection">
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.profile.modelLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.profile.modelDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <ModelSelector
+              model-type="KnowledgeQA"
+              :selected-model-id="localProfile.modelId"
+              :all-models="allModels"
+              clearable
+              :placeholder="$t('knowledgeEditor.advanced.profile.modelPlaceholder')"
+              @update:selected-model-id="(value: string) => { localProfile.modelId = value; emitProfile() }"
+            />
+          </div>
+        </div>
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.profile.instructionsLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.profile.instructionsDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-textarea
+              v-model="localProfile.customInstructions"
+              :placeholder="$t('knowledgeEditor.advanced.profile.instructionsPlaceholder')"
+              :maxlength="2000"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              @change="emitProfile"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="setting-row setting-row-vertical">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.advanced.tableMetadataInstructions.label') }}</label>
@@ -81,6 +180,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import ModelSelector from '@/components/ModelSelector.vue'
 
 interface QuestionGenerationConfig {
   enabled: boolean
@@ -88,8 +188,23 @@ interface QuestionGenerationConfig {
   customInstructions?: string
 }
 
+interface AutoTagConfig {
+  enabled: boolean
+  modelId: string
+  maxTags: number
+  skipIfTagged: boolean
+}
+
+interface ProfileConfig {
+  enabled: boolean
+  modelId: string
+  customInstructions: string
+}
+
 interface Props {
   questionGeneration?: QuestionGenerationConfig
+  autoTag?: AutoTagConfig
+  profileConfig?: ProfileConfig
   ragEnabled?: boolean
   allModels?: any[]
   embedded?: boolean
@@ -102,8 +217,24 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:questionGeneration': [value: QuestionGenerationConfig]
+  'update:autoTag': [value: AutoTagConfig]
+  'update:profileConfig': [value: ProfileConfig]
   'update:tableMetadataInstructions': [value: string]
 }>()
+
+const localProfile = ref<ProfileConfig>(
+  props.profileConfig
+    ? { ...props.profileConfig }
+    : { enabled: false, modelId: '', customInstructions: '' }
+)
+
+watch(() => props.profileConfig, (newVal) => {
+  if (newVal) localProfile.value = { ...newVal }
+}, { deep: true })
+
+const emitProfile = () => {
+  emit('update:profileConfig', { ...localProfile.value })
+}
 
 const localQuestionGeneration = ref<QuestionGenerationConfig>(
   props.questionGeneration
@@ -111,11 +242,25 @@ const localQuestionGeneration = ref<QuestionGenerationConfig>(
     : { enabled: false, questionCount: 3, customInstructions: '' }
 )
 
+const localAutoTag = ref<AutoTagConfig>(
+  props.autoTag ? { ...props.autoTag } : { enabled: false, modelId: '', maxTags: 3, skipIfTagged: true }
+)
+
 watch(() => props.questionGeneration, (newVal) => {
   if (newVal) {
     localQuestionGeneration.value = { customInstructions: '', ...newVal }
   }
 }, { deep: true })
+
+watch(() => props.autoTag, (newVal) => {
+  if (newVal) localAutoTag.value = { ...newVal }
+}, { deep: true })
+
+const emitAutoTag = () => {
+  if (!localAutoTag.value.maxTags) localAutoTag.value.maxTags = 3
+  localAutoTag.value.maxTags = Math.min(10, Math.max(1, Math.trunc(localAutoTag.value.maxTags)))
+  emit('update:autoTag', { ...localAutoTag.value })
+}
 
 const handleQuestionGenerationToggle = () => {
   if (!localQuestionGeneration.value.enabled) {
@@ -138,14 +283,14 @@ const handleQuestionGenerationChange = () => {
   margin-bottom: 20px;
 
   h2 {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 6px 0;
   }
 
   .section-description {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -176,7 +321,7 @@ const handleQuestionGenerationChange = () => {
   padding-right: 24px;
 
   label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 500;
     color: var(--td-text-color-primary);
     display: block;
@@ -184,14 +329,14 @@ const handleQuestionGenerationChange = () => {
   }
 
   .desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
 
   .hint {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     margin: 6px 0 0 0;
     line-height: 1.5;
@@ -227,7 +372,7 @@ const handleQuestionGenerationChange = () => {
   padding: 16px 20px;
   margin: 12px 0 0 0;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border-left: 3px solid var(--td-brand-color);
   position: relative;
 }

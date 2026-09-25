@@ -42,7 +42,7 @@ func (f *fakeChatService) CreateSession(_ context.Context, req *sdk.CreateSessio
 	return &sdk.Session{ID: "sess_auto", Title: req.Title}, nil
 }
 
-func (f *fakeChatService) KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error) error {
+func (f *fakeChatService) KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error, opts ...sdk.ResourceURLOptions) error {
 	f.streamCalled = true
 	f.gotSessionID = sessionID
 	f.gotRequest = req

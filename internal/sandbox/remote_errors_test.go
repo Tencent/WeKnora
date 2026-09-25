@@ -1,0 +1,272 @@
+package sandbox
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
+
+func TestRemoteBindingDecision(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		replace  bool
+		preserve bool
+	}{
+		{name: "nil", err: nil},
+		{
+			name:     "not found",
+			err:      NewRemoteError(SandboxTypeCube, "Get", RemoteErrorKindNotFound, "gone", nil),
+			replace:  true,
+			preserve: false,
+		},
+		{
+			name:     "terminal",
+			err:      NewRemoteError(SandboxTypeCube, "Get", RemoteErrorKindTerminal, "terminated", nil),
+			replace:  true,
+			preserve: false,
+		},
+		{
+			name:     "authentication",
+			err:      NewRemoteError(SandboxTypeCube, "Connect", RemoteErrorKindAuthentication, "denied", nil),
+			preserve: true,
+		},
+		{
+			name:     "invalid request",
+			err:      NewRemoteError(SandboxTypeCube, "Create", RemoteErrorKindInvalidRequest, "bad template", nil),
+			preserve: true,
+		},
+		{
+			name:     "unsupported",
+			err:      NewRemoteError(SandboxTypeCube, "Connect", RemoteErrorKindUnsupported, "no reconnect", nil),
+			preserve: true,
+		},
+		{
+			name:     "conflict",
+			err:      NewRemoteError(SandboxTypeCube, "Delete", RemoteErrorKindConflict, "busy", nil),
+			preserve: true,
+		},
+		{
+			name:     "capacity",
+			err:      NewRemoteError(SandboxTypeCube, "Create", RemoteErrorKindCapacity, "full", nil),
+			preserve: true,
+		},
+		{
+			name:     "timeout",
+			err:      NewRemoteError(SandboxTypeCube, "Get", RemoteErrorKindTimeout, "deadline", nil),
+			preserve: true,
+		},
+		{
+			name:     "unavailable",
+			err:      NewRemoteError(SandboxTypeCube, "Health", RemoteErrorKindUnavailable, "offline", nil),
+			preserve: true,
+		},
+		{
+			name:     "internal",
+			err:      NewRemoteError(SandboxTypeCube, "List", RemoteErrorKindInternal, "unknown", nil),
+			preserve: true,
+		},
+		{
+			name:     "wrapped terminal",
+			err:      fmt.Errorf("probe failed: %w", NewRemoteError(SandboxTypeCube, "Get", RemoteErrorKindTerminal, "dead", nil)),
+			replace:  true,
+			preserve: false,
+		},
+		{
+			name:     "unclassified defaults to preserve",
+			err:      errors.New("provider returned an unknown error"),
+			preserve: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := CanReplaceRemoteBinding(tt.err); got != tt.replace {
+				t.Fatalf("CanReplaceRemoteBinding() = %v, want %v", got, tt.replace)
+			}
+		})
+	}
+}
+
+func TestRemoteErrorRetainsCause(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("connection reset")
+	err := NewRemoteError(
+		SandboxTypeCube,
+		"Connect",
+		RemoteErrorKindUnavailable,
+		"control plane unavailable",
+		cause,
+	)
+
+	if !errors.Is(err, cause) {
+		t.Fatal("RemoteError must retain its provider-native cause")
+	}
+	if got, want := err.Error(), "cube Connect: unavailable: control plane unavailable: connection reset"; got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestRemoteErrorDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	remote := NewRemoteError(
+		SandboxTypeCube, "Exec", RemoteErrorKindAuthentication,
+		"HTTP 403", errors.New("forbidden"),
+	)
+	remote.StatusCode = 403
+	got := RemoteErrorDiagnostics(remote)
+	if got != "authentication op=Exec http=403 HTTP 403" {
+		t.Fatalf("RemoteErrorDiagnostics() = %q", got)
+	}
+	if RemoteErrorDiagnostics(errors.New("plain")) != "plain" {
+		t.Fatal("expected plain error text")
+	}
+}
+
+func TestIsRemoteDirAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	cubeSeedErr := NewRemoteError(
+		SandboxTypeCube, "MakeDir", RemoteErrorKindInternal,
+		"failed to make dir /opt/weknora/tenant/skills/sk-1: directory already exists: /opt/weknora/tenant/skills/sk-1",
+		nil,
+	)
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "cube envd already exists", err: cubeSeedErr, want: true},
+		{
+			name: "wrapped cube error",
+			err:  fmt.Errorf("sandbox: create install directory: %w", cubeSeedErr),
+			want: true,
+		},
+		{
+			name: "e2b conflict already exists",
+			err: NewRemoteError(
+				SandboxTypeE2B, "MakeDir", RemoteErrorKindConflict, "already exists", nil,
+			),
+			want: true,
+		},
+		{
+			name: "unrelated internal",
+			err:  NewRemoteError(SandboxTypeCube, "MakeDir", RemoteErrorKindInternal, "disk full", nil),
+			want: false,
+		},
+		{
+			name: "conflict without already exists",
+			err:  NewRemoteError(SandboxTypeCube, "Delete", RemoteErrorKindConflict, "busy", nil),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsRemoteDirAlreadyExists(tt.err); got != tt.want {
+				t.Fatalf("IsRemoteDirAlreadyExists() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsRemoteConflict(t *testing.T) {
+	t.Parallel()
+
+	if IsRemoteConflict(nil) {
+		t.Fatal("nil is not a conflict")
+	}
+	conflict := NewRemoteError(SandboxTypeE2B, "DeleteSnapshot", RemoteErrorKindConflict, "busy", nil)
+	if !IsRemoteConflict(conflict) {
+		t.Fatal("Conflict kind must match")
+	}
+	invalid := NewRemoteError(
+		SandboxTypeE2B, "DeleteSnapshot", RemoteErrorKindInvalidRequest, "bad id", nil,
+	)
+	if IsRemoteConflict(invalid) {
+		t.Fatal("InvalidRequest must not match")
+	}
+}
+
+func TestSnapshotDeleteKindPromotesInUseToConflict(t *testing.T) {
+	t.Parallel()
+
+	inUse := "cannot delete template 'upfvuzpq0q6foo1mkpbkl' because there are paused sandboxes using it"
+	jsonBody := `e2b: status 400: {"code":400,"message":"` + inUse + `"}`
+
+	tests := []struct {
+		name string
+		op   string
+		kind RemoteErrorKind
+		msg  string
+		want RemoteErrorKind
+	}{
+		{
+			name: "e2b paused sandboxes 400",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  inUse,
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "json-wrapped e2b 400",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  jsonBody,
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "cube delete template",
+			op:   "DeleteTemplate",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  "cannot delete template x because there are sandboxes using it",
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "cube 130409 runtime refs as 500",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInternal,
+			msg: "unavailable: CubeMaster returned error code 130409: template attempt is already in progress: " +
+				"snapshot snap-6a6707d7b51246c68ad643ee still has 2 active runtime ref(s): a@host, b@host (HTTP 500)",
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "already conflict stays conflict",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindConflict,
+			msg:  "image is in use",
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "generic 400 stays invalid",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  "invalid snapshot id",
+			want: RemoteErrorKindInvalidRequest,
+		},
+		{
+			name: "other ops are unchanged",
+			op:   "Create",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  inUse,
+			want: RemoteErrorKindInvalidRequest,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := snapshotDeleteKind(tt.op, tt.kind, tt.msg); got != tt.want {
+				t.Fatalf("snapshotDeleteKind() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

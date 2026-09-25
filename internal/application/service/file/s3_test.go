@@ -1,9 +1,52 @@
 package file
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/utils"
+	"github.com/aws/aws-sdk-go-v2/aws"
 )
+
+func TestNewS3Client_Credentials(t *testing.T) {
+	t.Run("static credentials remain supported", func(t *testing.T) {
+		svc, err := newS3Client("", "static-ak", "static-sk", "bucket", "us-east-1", "", false)
+		if err != nil {
+			t.Fatalf("newS3Client() error = %v", err)
+		}
+		got, err := svc.client.Options().Credentials.Retrieve(context.Background())
+		if err != nil {
+			t.Fatalf("Retrieve() error = %v", err)
+		}
+		if got.AccessKeyID != "static-ak" || got.SecretAccessKey != "static-sk" {
+			t.Fatalf("unexpected credentials: access key %q", got.AccessKeyID)
+		}
+	})
+
+	t.Run("empty keys use the AWS default credential chain", func(t *testing.T) {
+		t.Setenv("AWS_ACCESS_KEY_ID", "role-ak")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "role-sk")
+		svc, err := newS3Client("", "", "", "bucket", "us-east-1", "", false)
+		if err != nil {
+			t.Fatalf("newS3Client() error = %v", err)
+		}
+		got, err := svc.client.Options().Credentials.Retrieve(context.Background())
+		if err != nil {
+			t.Fatalf("Retrieve() error = %v", err)
+		}
+		if got.AccessKeyID != "role-ak" || got.SecretAccessKey != "role-sk" {
+			t.Fatalf("default credential chain returned access key %q", got.AccessKeyID)
+		}
+	})
+
+	t.Run("partial static credentials are rejected", func(t *testing.T) {
+		_, err := newS3Client("", "only-ak", "", "bucket", "us-east-1", "", false)
+		if err == nil {
+			t.Fatal("newS3Client() expected an error")
+		}
+	})
+}
 
 func TestNewS3Client_PathStyleForCompatibleEndpoints(t *testing.T) {
 	tests := []struct {
@@ -49,6 +92,61 @@ func TestNewS3Client_EmptyEndpoint(t *testing.T) {
 	endpoint := ""
 	if endpoint != "" {
 		t.Fatal("expected empty endpoint to skip custom configuration")
+	}
+}
+
+func TestNewS3Client_RequestChecksumCalculation(t *testing.T) {
+	const (
+		compatibleEndpoint = "https://s3-compatible.example.com"
+		awsEndpoint        = "https://s3.us-east-1.amazonaws.com"
+	)
+
+	// Keep the test independent of the developer's AWS profile while checking
+	// that a standard AWS endpoint still honors the SDK-resolved default.
+	t.Setenv("AWS_REQUEST_CHECKSUM_CALCULATION", "when_supported")
+	t.Setenv("SSRF_WHITELIST", "s3-compatible.example.com,s3.us-east-1.amazonaws.com")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+	standard, err := newS3Client("", "ak", "sk", "bucket", "us-east-1", "", false)
+	if err != nil {
+		t.Fatalf("newS3Client() with empty endpoint error = %v", err)
+	}
+	wantStandard := standard.client.Options().RequestChecksumCalculation
+
+	tests := []struct {
+		name     string
+		endpoint string
+		want     aws.RequestChecksumCalculation
+	}{
+		{
+			name:     "empty endpoint preserves standard AWS setting",
+			endpoint: "",
+			want:     wantStandard,
+		},
+		{
+			name:     "AWS endpoint preserves standard AWS setting",
+			endpoint: awsEndpoint,
+			want:     wantStandard,
+		},
+		{
+			name:     "S3-compatible endpoint calculates checksum only when required",
+			endpoint: compatibleEndpoint,
+			want:     aws.RequestChecksumCalculationWhenRequired,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, err := newS3Client(tt.endpoint, "ak", "sk", "bucket", "us-east-1", "", false)
+			if err != nil {
+				t.Fatalf("newS3Client() error = %v", err)
+			}
+			got := svc.client.Options().RequestChecksumCalculation
+			if got != tt.want {
+				t.Errorf("RequestChecksumCalculation = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

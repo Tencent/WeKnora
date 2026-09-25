@@ -3,6 +3,8 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,12 +27,16 @@ const (
 	ChannelWechat           = "wechat"            // WeChat
 	ChannelWecom            = "wecom"             // WeCom (企业微信)
 	ChannelFeishu           = "feishu"            // Feishu / Lark
+	ChannelFeishuDrive      = "feishu_drive"      // Feishu Drive (云盘)
+	ChannelLarkDrive        = "lark_drive"        // Lark Drive (international)
 	ChannelDingtalk         = "dingtalk"          // DingTalk
 	ChannelSlack            = "slack"             // Slack
 	ChannelIM               = "im"                // Generic IM channel
 	ChannelNotion           = "notion"            // Notion
+	ChannelConfluence       = "confluence"        // Atlassian Confluence
 	ChannelYuque            = "yuque"             // Yuque (语雀)
 	ChannelRSS              = "rss"               // RSS / Atom feed
+	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
 )
 
 // Knowledge parse status constants
@@ -104,6 +110,54 @@ type KnowledgeListFilter struct {
 	UpdatedFrom time.Time
 	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
 	UpdatedTo time.Time
+	// FolderPath is the folder navigated to in the sidebar tree. It is only
+	// applied when FolderScope is not FolderScopeAny, so the empty string can
+	// unambiguously mean "the knowledge base root".
+	FolderPath string
+	// FolderScope selects whether FolderPath matches exactly or includes
+	// descendant folders. FolderScopeAny (the default) ignores folders.
+	FolderScope KnowledgeFolderScope
+	// SortBy 指定列表排序字段；公开列表接口会显式提供默认值。
+	SortBy KnowledgeListSortField
+	// SortOrder 指定升序或降序；零值与 desc 等价。
+	SortOrder KnowledgeListSortOrder
+}
+
+// KnowledgeListSortField 是知识文件列表允许使用的排序字段。
+type KnowledgeListSortField string
+
+const (
+	// KnowledgeListSortByUpdatedAt 表示按最后更新时间排序。
+	KnowledgeListSortByUpdatedAt KnowledgeListSortField = "updated_at"
+	// KnowledgeListSortByCreatedAt 表示按创建时间排序。
+	KnowledgeListSortByCreatedAt KnowledgeListSortField = "created_at"
+	// KnowledgeListSortByFileName 表示按展示文件名排序。
+	KnowledgeListSortByFileName KnowledgeListSortField = "file_name"
+)
+
+// Valid 返回排序字段是否属于公开接口允许的白名单。
+func (field KnowledgeListSortField) Valid() bool {
+	switch field {
+	case KnowledgeListSortByUpdatedAt, KnowledgeListSortByCreatedAt, KnowledgeListSortByFileName:
+		return true
+	default:
+		return false
+	}
+}
+
+// KnowledgeListSortOrder 是知识文件列表允许使用的排序方向。
+type KnowledgeListSortOrder string
+
+const (
+	// KnowledgeListSortAscending 表示按升序排列。
+	KnowledgeListSortAscending KnowledgeListSortOrder = "asc"
+	// KnowledgeListSortDescending 表示按降序排列。
+	KnowledgeListSortDescending KnowledgeListSortOrder = "desc"
+)
+
+// Valid 返回排序方向是否属于公开接口允许的白名单。
+func (order KnowledgeListSortOrder) Valid() bool {
+	return order == KnowledgeListSortAscending || order == KnowledgeListSortDescending
 }
 
 // Knowledge represents a knowledge entity in the system.
@@ -124,6 +178,9 @@ type Knowledge struct {
 	Title string `json:"title"`
 	// Description of the knowledge
 	Description string `json:"description"`
+	// DescriptionSpecified distinguishes an explicitly supplied empty description
+	// from an omitted field in partial update requests.
+	DescriptionSpecified bool `json:"-" gorm:"-"`
 	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
 	Source string `json:"source"             gorm:"type:varchar(2048)"`
 	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
@@ -136,12 +193,23 @@ type Knowledge struct {
 	PendingSubtasksCount int `json:"pending_subtasks_count" gorm:"type:int;not null;default:0"`
 	// Summary status for async summary generation
 	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none"`
+	// Profile is the structured companion of Description: a one-line gist,
+	// topic keywords, a document type and one typical question. It is produced
+	// by the same model call as the summary and feeds the knowledge-base
+	// level description aggregation. nil when no summary has been generated.
+	Profile *KnowledgeProfile `json:"profile,omitempty" gorm:"column:profile;type:json"`
 	// Enable status of the knowledge
 	EnableStatus string `json:"enable_status"`
 	// ID of the embedding model
 	EmbeddingModelID string `json:"embedding_model_id"`
 	// File name of the knowledge
 	FileName string `json:"file_name"`
+	// FolderPath is the canonical relative directory this entry belongs to
+	// inside the knowledge base, e.g. "docs/spec" for a folder upload of
+	// "docs/spec/design.md". Empty means the knowledge base root. It is a
+	// display/navigation concern only: it never affects where the file is
+	// physically stored (see FilePath).
+	FolderPath string `json:"folder_path"        gorm:"type:varchar(1024);not null;default:''"`
 	// File type of the knowledge
 	FileType string `json:"file_type"`
 	// File size of the knowledge
@@ -154,6 +222,9 @@ type Knowledge struct {
 	StorageSize int64 `json:"storage_size"`
 	// Metadata of the knowledge
 	Metadata JSON `json:"metadata"           gorm:"type:json"`
+	// CustomMetadata is user-authored descriptive metadata. It is deliberately
+	// separate from Metadata, which contains internal ingestion state and IDs.
+	CustomMetadata JSON `json:"custom_metadata" gorm:"type:json;not null"`
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
 	// Creation time of the knowledge
@@ -168,6 +239,48 @@ type Knowledge struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+	// Most recent processing progress (row or span write) for an in-flight
+	// row, so clients can tell a slow stage from a stalled one. Not stored.
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty" gorm:"-"`
+	// Verdict on an in-flight row gone quiet: StallStateQueued (its work is
+	// still queued, i.e. backlogged) or StallStateStalled (nothing left to
+	// run it). Empty while it is progressing or the probe failed. Not stored.
+	StallState string `json:"stall_state,omitempty" gorm:"-"`
+}
+
+// Stall verdicts for Knowledge.StallState.
+const (
+	StallStateQueued  = "queued"
+	StallStateStalled = "stalled"
+)
+
+// CustomMetadataText returns stable human-readable metadata for summaries and
+// document-scoped model context. Internal ingestion metadata is intentionally
+// excluded.
+func (k *Knowledge) CustomMetadataText() string {
+	if k == nil || len(k.CustomMetadata) == 0 {
+		return ""
+	}
+	var values map[string]interface{}
+	if err := json.Unmarshal(k.CustomMetadata, &values); err != nil || len(values) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if values[key] == nil {
+			continue
+		}
+		value := strings.TrimSpace(fmt.Sprint(values[key]))
+		if strings.TrimSpace(key) != "" && value != "" {
+			lines = append(lines, fmt.Sprintf("%s: %s", strings.TrimSpace(key), value))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // GetMetadata returns the metadata as a map[string]string.
@@ -186,10 +299,17 @@ func (k *Knowledge) GetMetadata() map[string]string {
 	return metadata
 }
 
-// BeforeCreate hook generates a UUID for new Knowledge entities before they are created.
+// BeforeCreate initializes required defaults for new Knowledge entities.
 func (k *Knowledge) BeforeCreate(tx *gorm.DB) (err error) {
 	if k.ID == "" {
 		k.ID = uuid.New().String()
+	}
+	// JSON.Value returns SQL NULL for an empty value. PostgreSQL's column
+	// default is not applied when GORM explicitly inserts that NULL, so keep the
+	// application-side representation aligned with the NOT NULL database
+	// invariant for every knowledge creation path.
+	if len(k.CustomMetadata) == 0 {
+		k.CustomMetadata = JSON(`{}`)
 	}
 	return nil
 }
@@ -275,6 +395,9 @@ func (k *Knowledge) ManualMetadata() (*ManualKnowledgeMetadata, error) {
 	return &metadata, nil
 }
 
+// KnowledgeTransferMetadataKey is reserved for server-owned transfer recovery state.
+const KnowledgeTransferMetadataKey = "_knowledge_transfer"
+
 // SetManualMetadata sets manual knowledge metadata onto the knowledge instance.
 func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	if meta == nil {
@@ -284,6 +407,23 @@ func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	jsonValue, err := meta.ToJSON()
 	if err != nil {
 		return err
+	}
+	// Manual processing may finish before the move worker acknowledges its
+	// task. Preserve the recovery marker when updating manual content/status.
+	old, err := k.Metadata.Map()
+	if err != nil {
+		return err
+	}
+	if state, ok := old[KnowledgeTransferMetadataKey]; ok {
+		fields, err := jsonValue.Map()
+		if err != nil {
+			return err
+		}
+		fields[KnowledgeTransferMetadataKey] = state
+		jsonValue, err = json.Marshal(fields)
+		if err != nil {
+			return err
+		}
 	}
 	k.Metadata = jsonValue
 	return nil
@@ -404,8 +544,13 @@ func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
 type KnowledgeCheckParams struct {
 	// File parameters
 	FileName string
+	// FileType scopes file-hash deduplication; callers checking file uploads should set it.
+	FileType string
 	FileSize int64
 	FileHash string
+	// When both are set, file deduplication is scoped to this source item.
+	DataSourceID string
+	ExternalID   string
 	// URL parameters
 	URL string
 	// Text passage parameters

@@ -122,6 +122,34 @@ echo "WEKNORA_API_KEY=your_api_key_here" >> .env
 }
 ```
 
+#### 从文本创建知识
+```json
+{
+  "tool": "create_knowledge_from_text",
+  "arguments": {
+    "kb_id": "my-knowledge-base",
+    "title": "注意力机制摘要",
+    "content": "# 注意力机制\n\n注意力机制允许模型在处理序列时动态分配权重...",
+    "status": "publish"
+  }
+}
+```
+
+#### 更新手工知识
+```json
+{
+  "tool": "update_knowledge_from_text",
+  "arguments": {
+    "knowledge_id": "know_789012",
+    "title": "注意力机制摘要（修订版）",
+    "content": "# 注意力机制\n\n这里是修订后的 Markdown 内容...",
+    "status": "publish"
+  }
+}
+```
+
+省略 `title` 或传空字符串会保留原标题；将 `status` 设为 `draft` 可只保存内容而不重新索引。
+
 #### 列出知识
 ```json
 {
@@ -397,7 +425,7 @@ python main.py --verbose
 }
 ```
 
-项目仓库: https://github.com/NannaOlympicBroadcast/WeKnoraMCP
+项目仓库: https://github.com/Tencent/WeKnora/tree/main/mcp-server
 
 ### 与其他 MCP 客户端集成
 参考各客户端的文档，配置服务器启动命令和环境变量。

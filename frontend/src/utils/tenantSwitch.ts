@@ -12,7 +12,7 @@ const SAFE_FALLBACK_PATH = '/platform/knowledge-bases'
 
 /**
  * Return the URL to navigate to after a tenant switch. 目前始终返回 KB 列表
- * 作为登陆页，保留函数签名是为了未来需要按路由做特殊处理时留个口子。
+ * 作为登录页，保留函数签名是为了未来需要按路由做特殊处理时留个口子。
  */
 export function tenantSwitchTargetPath(_currentPath: string): string {
   return SAFE_FALLBACK_PATH

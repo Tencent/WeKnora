@@ -3,6 +3,7 @@
  */
 
 import DOMPurify from 'dompurify';
+import { applyProtectedFile, responseFileName, RESOURCE_PREVIEW_EVENT, type LoadedProtectedFile } from './protectedResource.ts';
 import type { Config, NodeHook } from 'dompurify';
 import {
   domPurifySecurityHooks,
@@ -10,14 +11,16 @@ import {
   markdownDomPurifyConfig,
   markdownDomPurifySecurityHooks,
 } from './markdownDomPurify.ts';
+import {
+  buildProtectedFileRequest,
+  isProtectedFileProxyPath,
+  isProviderFileURL,
+  PROVIDER_SCHEME_PATTERN,
+  resolveProtectedFileAccess,
+  type ProtectedFileAccessContext,
+} from './protectedFileAccess.ts';
 
 const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-const PROVIDER_SCHEME_PATTERN = 'resource|local|minio|cos|tos|s3|oss|ks3|obs';
-const PROVIDER_FILE_SCHEME_RE = new RegExp(`^(${PROVIDER_SCHEME_PATTERN}):\\/\\/\\S+$`, 'i');
-const STORAGE_BACKEND_FILE_SCHEME_RE = new RegExp(
-  `^storage:\\/\\/[0-9A-Za-z_-]+\\/(${PROVIDER_SCHEME_PATTERN}):\\/\\/\\S+$`,
-  'i',
-);
 const PROVIDER_IMG_SRC_RE = new RegExp(
   `<img\\b([^>]*?)\\ssrc=(["'])(${PROVIDER_SCHEME_PATTERN}):(?:\\/\\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\\2([^>]*)>`,
   'gi',
@@ -31,6 +34,8 @@ type SecurityHooks = {
   beforeSanitizeElements: NodeHook;
   afterSanitizeElements: NodeHook;
 };
+
+const DOCUMENT_PREVIEW_IMAGE_ATTRS = ['loading', 'decoding', 'fetchpriority'] as const;
 
 function sanitizeWithSecurityHooks(
   html: string,
@@ -67,6 +72,7 @@ const DOMPurifyConfig = {
   // 允许的属性
   ALLOWED_ATTR: [
     'href', 'title', 'alt', 'src', 'class', 'id', 'style', 'data-protected-src', 'data-img-loading',
+    'data-artifact-index', 'data-protected-resource', 'download',
     'target', 'rel', 'width', 'height', 'open',
     'type', 'aria-label', 'disabled', 'role', 'tabindex',
     // Mermaid SVG 支持的属性
@@ -114,6 +120,47 @@ export function sanitizeHTML(html: string): string {
   }
 }
 
+export function applyDocumentPreviewImageAttributes(currentNode: Node): void {
+  if (!('tagName' in currentNode) || !('setAttribute' in currentNode)) return;
+  const element = currentNode as Element;
+  if (element.tagName !== 'IMG') return;
+  element.setAttribute('loading', 'lazy');
+  element.setAttribute('decoding', 'async');
+  element.setAttribute('fetchpriority', 'low');
+}
+
+const documentPreviewDomPurifyConfig = {
+  ...DOMPurifyConfig,
+  ADD_ATTR: [...DOCUMENT_PREVIEW_IMAGE_ATTRS],
+};
+
+const documentPreviewSecurityHooks: SecurityHooks = {
+  beforeSanitizeElements: domPurifySecurityHooks.beforeSanitizeElements,
+  afterSanitizeElements: (currentNode) => {
+    domPurifySecurityHooks.afterSanitizeElements(currentNode);
+    applyDocumentPreviewImageAttributes(currentNode);
+  },
+};
+
+/** Sanitize DocumentPreview Markdown and enforce a single image loading policy. */
+export function sanitizeDocumentPreviewHTML(html: string): string {
+  if (!html || typeof html !== 'string') {
+    return '';
+  }
+
+  try {
+    const preparedHTML = protectProviderImageSrcInHTML(html);
+    return sanitizeWithSecurityHooks(
+      preparedHTML,
+      documentPreviewDomPurifyConfig as unknown as Config,
+      documentPreviewSecurityHooks,
+    );
+  } catch (error) {
+    console.error('Document preview HTML sanitization failed:', error);
+    return escapeHTML(html);
+  }
+}
+
 /** Sanitize assistant markdown HTML (code/mermaid toolbars, KaTeX, SVG). */
 export function sanitizeMarkdownHTML(html: string): string {
   if (!html || typeof html !== 'string') {
@@ -133,24 +180,44 @@ export function sanitizeMarkdownHTML(html: string): string {
   }
 }
 
+function isRasterProtectedImage(file: LoadedProtectedFile): boolean {
+  return file.blob.type.startsWith('image/') && !file.blob.type.includes('svg');
+}
+
+function imageAltFromTag(before: string, after: string): string {
+  const match = `${before} ${after}`.match(/\salt=(["'])(.*?)\1/i);
+  return match?.[2] ?? '';
+}
+
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/</g, '&lt;');
+}
+
+function buildProtectedFileCardTag(file: LoadedProtectedFile, source: string, alt: string): string {
+  const name = file.fileName || alt || 'download';
+  const label = alt || name;
+  return `<a href="${escapeAttr(file.blobURL)}" download="${escapeAttr(name)}" class="protected-resource-card" data-protected-resource="${escapeAttr(source)}" title="${escapeAttr(name)}">${escapeHTML(label)}</a>`;
+}
+
 function buildProtectedImageTag(
   before: string,
   quote: string,
   protectedSrc: string,
   after: string,
 ): string {
-  // A definitive 404 should not leave a skeleton behind. Streaming
-  // re-renders call this function repeatedly, so remember the missing
-  // source until the explicit end-of-stream retry clears the cache.
-  if (protectedFileMissingSources.has(protectedSrc)) {
-    return '';
-  }
-  // Reuse the already-hydrated blob if we have one, so repeated re-renders
-  // (typewriter streaming) keep the same stable image instead of flashing
-  // back to the placeholder every frame.
-  const cachedBlobURL = protectedFileBlobBySource.get(protectedSrc);
-  if (cachedBlobURL) {
-    return `<img${before} src=${quote}${cachedBlobURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
+  // Reuse the already-hydrated file if we have one, so repeated re-renders
+  // (typewriter streaming) keep the same stable image or download card
+  // instead of flashing back to the placeholder every frame.
+  const cached = protectedFileBySource.get(protectedSrc);
+  if (cached) {
+    if (isRasterProtectedImage(cached)) {
+      return `<img${before} src=${quote}${cached.blobURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
+    }
+    return buildProtectedFileCardTag(cached, protectedSrc, imageAltFromTag(before, after));
   }
   // Not hydrated yet: render the 1x1 placeholder but tag it so CSS can give
   // it a stable skeleton box. Otherwise width:auto/height:auto collapse the
@@ -190,11 +257,6 @@ function decodeProviderURL(raw: string): string {
     .replace(/&quot;/g, '"');
 }
 
-function isProviderFileURL(url: string): boolean {
-  const trimmed = url.trim();
-  return PROVIDER_FILE_SCHEME_RE.test(trimmed) || STORAGE_BACKEND_FILE_SCHEME_RE.test(trimmed);
-}
-
 function providerSourceFromImageSrc(src: string): string | null {
   const decodedSrc = decodeProviderURL(src);
   if (isProviderFileURL(decodedSrc)) {
@@ -204,10 +266,7 @@ function providerSourceFromImageSrc(src: string): string | null {
   try {
     const baseURL = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
     const url = new URL(decodedSrc, baseURL);
-    const isFileProxy =
-      url.pathname === '/files' ||
-      /^\/api\/v1\/embed\/[^/]+\/files$/.test(url.pathname);
-    if (!isFileProxy) {
+    if (!isProtectedFileProxyPath(url.pathname)) {
       return null;
     }
 
@@ -367,16 +426,25 @@ export function createSafeImage(src: string, alt: string = '', title: string = '
 }
 
 type ProtectedFileLoadResult =
-  | { status: 'loaded'; blobURL: string }
+  | ({ status: 'loaded' } & LoadedProtectedFile)
   | { status: 'missing' }
   | { status: 'failed' };
 
+type HiddenProtectedImage = {
+  display: string;
+  parent: HTMLElement | null;
+  parentDisplay: string;
+};
+
 type ProtectedFileCacheState = {
-  blobByRequest: Map<string, string>;
-  blobBySource: Map<string, string>;
-  missingSources: Set<string>;
+  blobByRequest: Map<string, LoadedProtectedFile>;
+  fileBySource: Map<string, LoadedProtectedFile>;
+  missingRequests: Set<string>;
   failures: Map<string, number>;
   inflight: Map<string, Promise<ProtectedFileLoadResult>>;
+  retryGeneration: number;
+  imageRequests: WeakMap<HTMLImageElement, string>;
+  hiddenImages: WeakMap<HTMLImageElement, HiddenProtectedImage>;
 };
 
 // Keep object URLs alive across Vite hot updates. A hot update replaces this
@@ -385,27 +453,30 @@ type ProtectedFileCacheState = {
 const protectedFileCacheState = (() => {
   const fresh = (): ProtectedFileCacheState => ({
     blobByRequest: new Map(),
-    blobBySource: new Map(),
-    missingSources: new Set(),
+    fileBySource: new Map(),
+    missingRequests: new Set(),
     failures: new Map(),
     inflight: new Map(),
+    retryGeneration: 0,
+    imageRequests: new WeakMap(),
+    hiddenImages: new WeakMap(),
   });
   if (typeof window === 'undefined') return fresh();
   const scope = window as typeof window & {
-    __weknoraProtectedFileCacheV1__?: ProtectedFileCacheState;
+    __weknoraProtectedFileCacheV4__?: ProtectedFileCacheState;
   };
-  scope.__weknoraProtectedFileCacheV1__ ||= fresh();
-  return scope.__weknoraProtectedFileCacheV1__;
+  scope.__weknoraProtectedFileCacheV4__ ||= fresh();
+  return scope.__weknoraProtectedFileCacheV4__;
 })();
 
 const protectedFileBlobCache = protectedFileCacheState.blobByRequest;
-// Blob URL keyed by the protected source URL (e.g. `local://...`). Once an image
-// has been hydrated, re-renders of the same markdown can emit the blob src
-// directly instead of the placeholder. Without this, the typewriter re-renders
-// the answer every frame, recreating each <img> as a placeholder that hydration
-// only restores a microtask later — which reads as a per-frame flicker.
-const protectedFileBlobBySource = protectedFileCacheState.blobBySource;
-const protectedFileMissingSources = protectedFileCacheState.missingSources;
+// File keyed by the protected source URL (e.g. `resource://...`). Once an
+// image or download card has been hydrated, re-renders of the same markdown
+// can emit the blob src / card HTML directly instead of the placeholder.
+const protectedFileBySource = protectedFileCacheState.fileBySource;
+// A 404 may mean a temporary message ID was not found, not that the resource
+// is missing in every message/workspace. Cache it only under that request.
+const protectedFileMissingRequests = protectedFileCacheState.missingRequests;
 // Throttle retries of failed file fetches. During streaming the same markdown
 // is re-rendered on every chunk, producing brand-new <img> elements (so the
 // per-element `authHydrated` flag is reset each time). Without throttling a
@@ -415,30 +486,8 @@ const protectedFileMissingSources = protectedFileCacheState.missingSources;
 const protectedFileFailureCache = protectedFileCacheState.failures;
 const protectedFileInflight = protectedFileCacheState.inflight;
 const PROTECTED_FILE_RETRY_COOLDOWN_MS = 5000;
-
-function getProtectedFileRequestHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  try {
-    const token = (localStorage.getItem('weknora_token') || '').trim();
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const selectedTenantId = (localStorage.getItem('weknora_selected_tenant_id') || '').trim();
-    if (selectedTenantId) {
-      // Always attach when a selected tenant is set. Same rationale as
-      // utils/request.ts / api/chat/streame.ts: the
-      // "selectedTenantId === defaultTenantId → skip" short-circuit
-      // silently drops the header whenever any code path writes the
-      // active tenant into weknora_tenant, leaving authenticated file
-      // fetches landing on the home tenant.
-      headers['X-Tenant-ID'] = selectedTenantId;
-    }
-  } catch {
-    // ignore localStorage read errors
-  }
-  return headers;
-}
+const protectedImageRequests = protectedFileCacheState.imageRequests;
+const hiddenProtectedImages = protectedFileCacheState.hiddenImages;
 
 /**
  * 将 Markdown 里通过 /files 代理的图片，改为用带鉴权 Header 的 fetch 拉取后再显示。
@@ -449,8 +498,11 @@ function getProtectedFileRequestHeaders(): Record<string, string> {
  * 的图片可以立即重新尝试加载，而无需等待冷却窗口结束。
  */
 export function clearProtectedFileFailureCache(): void {
+  // An earlier request can still be in flight when completion arrives. Its
+  // failure must get one fresh attempt against the newly persisted message.
+  protectedFileCacheState.retryGeneration++;
   protectedFileFailureCache.clear();
-  protectedFileMissingSources.clear();
+  protectedFileMissingRequests.clear();
 }
 
 function protectedImageSource(img: HTMLImageElement): string {
@@ -462,41 +514,99 @@ function protectedImageSource(img: HTMLImageElement): string {
 function forEachProtectedImageWithSource(
   root: ParentNode,
   sourceURL: string,
+  requestKey: string,
   callback: (img: HTMLImageElement) => void,
 ): void {
   root.querySelectorAll<HTMLImageElement>('img[data-protected-src]').forEach((candidate) => {
-    if (protectedImageSource(candidate) === sourceURL) callback(candidate);
+    if (protectedImageRequests.get(candidate) === requestKey && protectedImageSource(candidate) === sourceURL) callback(candidate);
   });
 }
 
-function removeMissingProtectedImages(root: ParentNode, sourceURL: string): void {
-  forEachProtectedImageWithSource(root, sourceURL, (img) => {
-    const parent = img.parentElement;
-    img.remove();
-    // Markdown emits a dedicated paragraph for a standalone image. Remove that
-    // wrapper too so a missing image leaves no vertical placeholder/gap.
-    if (parent?.tagName === 'P' && !parent.textContent?.trim() && parent.children.length === 0) {
-      parent.remove();
+function hideMissingProtectedImages(root: ParentNode, sourceURL: string, requestKey: string): void {
+  forEachProtectedImageWithSource(root, sourceURL, requestKey, (img) => {
+    // Keep the node addressable for completion/scope retries. v-stable-html
+    // skips unchanged HTML, so removing it would make a settled 404 permanent
+    // even after failure state is cleared and the resource becomes readable.
+    if (!hiddenProtectedImages.has(img)) {
+      const parent = img.parentElement;
+      const standalone = parent?.tagName === 'P' && !parent.textContent?.trim() && parent.children.length === 1
+        ? parent : null;
+      hiddenProtectedImages.set(img, {
+        display: img.style.display, parent: standalone, parentDisplay: standalone?.style.display || '',
+      });
     }
+    img.style.display = 'none';
+    img.setAttribute('data-protected-hidden', '1');
+    const parent = hiddenProtectedImages.get(img)?.parent;
+    if (parent) {
+      parent.style.display = 'none';
+      parent.setAttribute('data-protected-hidden', '1');
+    }
+    img.dataset.authHydrated = '0';
   });
 }
 
-function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, blobURL: string): void {
-  forEachProtectedImageWithSource(root, sourceURL, (img) => {
-    img.src = blobURL;
+function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, file: LoadedProtectedFile, requestKey: string): void {
+  forEachProtectedImageWithSource(root, sourceURL, requestKey, (img) => {
+    const hidden = hiddenProtectedImages.get(img);
+    if (hidden) {
+      img.style.display = hidden.display;
+      img.removeAttribute('data-protected-hidden');
+      if (hidden.parent) {
+        hidden.parent.style.display = hidden.parentDisplay;
+        hidden.parent.removeAttribute('data-protected-hidden');
+      }
+      hiddenProtectedImages.delete(img);
+    }
+    if (!isRasterProtectedImage(file)) {
+      applyProtectedFile(img, file, sourceURL);
+      return;
+    }
+    img.src = file.blobURL;
     img.dataset.authHydrated = '1';
     img.removeAttribute('data-img-loading');
   });
 }
 
+function ensureProtectedResourceCardClicks(): void {
+  if (typeof window === 'undefined') return;
+  const scope = window as typeof window & { __weknoraProtectedCardClicks__?: boolean };
+  if (scope.__weknoraProtectedCardClicks__) return;
+  scope.__weknoraProtectedCardClicks__ = true;
+  window.addEventListener('click', (event) => {
+    const target = event.target as Element | null;
+    const link = target?.closest?.('a.protected-resource-card');
+    if (!(link instanceof HTMLAnchorElement)) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const source = link.dataset.protectedResource || '';
+    const file = protectedFileBySource.get(source);
+    if (!file) return;
+    const preview = new CustomEvent(RESOURCE_PREVIEW_EVENT, {
+      detail: file,
+      cancelable: true,
+    });
+    if (!window.dispatchEvent(preview)) event.preventDefault();
+    event.stopPropagation();
+  }, true);
+}
+
+/**
+ * 将内容里的受保护图片（resource:// 等）通过对应的文件代理带鉴权拉取，
+ * 再以 blob URL 替换显示。
+ *
+ * 走哪条代理由 {@link resolveProtectedFileAccess} 决定：应用入口注册的默认
+ * 上下文（如嵌入应用的 Embed 平面）优先，组件只在同一鉴权平面内用
+ * `access` 细化作用域（如知识库）。
+ */
 export async function hydrateProtectedFileImages(
   root: ParentNode | null | undefined,
-  embed?: { channelId: string; token: string },
-  kbId?: string,
+  access?: ProtectedFileAccessContext,
 ): Promise<void> {
   if (!root || typeof window === 'undefined') {
     return;
   }
+
+  ensureProtectedResourceCardClicks();
 
   const images = root.querySelectorAll<HTMLImageElement>(
     'img[data-protected-src], img[src^="resource://"], img[src^="storage://"], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
@@ -505,11 +615,7 @@ export async function hydrateProtectedFileImages(
     return;
   }
 
-  // Embed visitors carry no Bearer/tenant context; route through the
-  // embed-scoped file proxy (auth via the Embed header, tenant from the channel).
-  const headers = embed
-    ? { Authorization: `Embed ${embed.token}` }
-    : getProtectedFileRequestHeaders();
+  const resolvedAccess = resolveProtectedFileAccess(access);
 
   await Promise.all(Array.from(images).map(async (img) => {
     const normalizedSourceURL = normalizeProtectedImageElement(img);
@@ -519,47 +625,33 @@ export async function hydrateProtectedFileImages(
     if (!sourceURL) {
       return;
     }
-    if (img.dataset.authHydrated === '1') {
+    // A null request means this source cannot be fetched under the current
+    // access context (not a storage path, or the embed token has not arrived
+    // yet). Leave the placeholder so a later pass can retry.
+    const request = buildProtectedFileRequest(sourceURL, resolvedAccess);
+    if (!request) {
+      img.dataset.authHydrated = '0';
       return;
     }
-    if (protectedFileMissingSources.has(sourceURL)) {
-      removeMissingProtectedImages(root, sourceURL);
+    const { url: requestURL, headers } = request;
+    const requestKey = JSON.stringify([requestURL, headers]);
+    if (img.dataset.authHydrated === '1' && src.startsWith('blob:') && protectedImageRequests.get(img) === requestKey) {
+      return;
+    }
+    protectedImageRequests.set(img, requestKey);
+    if (protectedFileMissingRequests.has(requestKey)) {
+      hideMissingProtectedImages(root, sourceURL, requestKey);
       return;
     }
     img.dataset.authHydrated = '1';
 
-    const isProviderScheme = isProviderFileURL(sourceURL);
-    // When a KB context is known, route through the KB-scoped proxy. It is
-    // authorized via RequireKBAccess (own / org-shared / agent-visible) and
-    // serves objects owned by the KB's source tenant — so images in a shared
-    // KB (local://<owner-tenant>/...) load for the borrowing tenant, which the
-    // tenant-scoped /files route rejects as a cross-tenant path.
-    const fileProxyBase = embed
-      ? `/api/v1/embed/${embed.channelId}/files`
-      : kbId
-        ? `/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/files`
-        : '/files';
-    const requestURL = isProviderScheme
-      ? `${fileProxyBase}?${new URLSearchParams({ file_path: sourceURL }).toString()}`
-      : sourceURL;
-
-    const isProxyRequest =
-      requestURL.includes('file_path=') &&
-      (requestURL.startsWith('/files?') ||
-        /^\/api\/v1\/knowledge-bases\/[^/]+\/files\?/.test(requestURL) ||
-        /^\/api\/v1\/embed\/[^/]+\/files\?/.test(requestURL));
-    if (!isProxyRequest) {
-      img.dataset.authHydrated = '0';
-      return;
-    }
-
-    const cachedBlobURL = protectedFileBlobCache.get(requestURL);
+    const cachedBlobURL = protectedFileBlobCache.get(requestKey);
     if (cachedBlobURL) {
-      applyHydratedProtectedImage(root, sourceURL, cachedBlobURL);
+      applyHydratedProtectedImage(root, sourceURL, cachedBlobURL, requestKey);
       return;
     }
 
-    const lastFailure = protectedFileFailureCache.get(requestURL);
+    const lastFailure = protectedFileFailureCache.get(requestKey);
     if (lastFailure !== undefined && Date.now() - lastFailure < PROTECTED_FILE_RETRY_COOLDOWN_MS) {
       img.dataset.authHydrated = '0';
       return;
@@ -569,48 +661,55 @@ export async function hydrateProtectedFileImages(
     // The previous Set-based de-dupe made later components return immediately;
     // only the component that started the fetch was updated, leaving all other
     // occurrences stuck on the transparent placeholder forever.
-    let loadTask = protectedFileInflight.get(requestURL);
+    let loadTask = protectedFileInflight.get(requestKey);
     if (!loadTask) {
       loadTask = (async (): Promise<ProtectedFileLoadResult> => {
-        try {
-          const resp = await fetch(requestURL, {
-            method: 'GET',
-            headers,
-            credentials: 'include',
-          });
-          if (!resp.ok) {
-            if (resp.status === 404) {
-              protectedFileFailureCache.set(requestURL, Date.now());
-              return { status: 'missing' };
+        for (let attempt = 0; ; attempt++) {
+          const generation = protectedFileCacheState.retryGeneration;
+          try {
+            const resp = await fetch(requestURL, {
+              method: 'GET',
+              headers,
+              credentials: 'include',
+            });
+            if (!resp.ok) {
+              if (attempt === 0 && generation !== protectedFileCacheState.retryGeneration) continue;
+              if (resp.status === 404) {
+                protectedFileFailureCache.set(requestKey, Date.now());
+                return { status: 'missing' };
+              }
+              throw new Error(`HTTP ${resp.status}`);
             }
-            throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            const blobURL = URL.createObjectURL(blob);
+            const file = { blobURL, blob, fileName: responseFileName(resp.headers.get("Content-Disposition"), sourceURL) };
+            protectedFileBlobCache.set(requestKey, file);
+            protectedFileFailureCache.delete(requestKey);
+            return { status: 'loaded', ...file };
+          } catch (error) {
+            if (attempt === 0 && generation !== protectedFileCacheState.retryGeneration) continue;
+            console.warn('[security] hydrateProtectedFileImages failed:', error);
+            protectedFileFailureCache.set(requestKey, Date.now());
+            return { status: 'failed' };
           }
-          const blob = await resp.blob();
-          const blobURL = URL.createObjectURL(blob);
-          protectedFileBlobCache.set(requestURL, blobURL);
-          protectedFileFailureCache.delete(requestURL);
-          return { status: 'loaded', blobURL };
-        } catch (error) {
-          console.warn('[security] hydrateProtectedFileImages failed:', error);
-          protectedFileFailureCache.set(requestURL, Date.now());
-          return { status: 'failed' };
-        } finally {
-          protectedFileInflight.delete(requestURL);
         }
-      })();
-      protectedFileInflight.set(requestURL, loadTask);
+      })().finally(() => protectedFileInflight.delete(requestKey));
+      protectedFileInflight.set(requestKey, loadTask);
     }
 
     const result = await loadTask;
+    // A late response for an old message ID must not remove or overwrite an
+    // image that has since been reauthorized under its persisted message ID.
+    if (protectedImageRequests.get(img) !== requestKey) return;
     if (result.status === 'loaded') {
-      protectedFileBlobBySource.set(sourceURL, result.blobURL);
-      protectedFileMissingSources.delete(sourceURL);
-      applyHydratedProtectedImage(root, sourceURL, result.blobURL);
+      protectedFileBySource.set(sourceURL, result);
+      protectedFileMissingRequests.delete(requestKey);
+      applyHydratedProtectedImage(root, sourceURL, result, requestKey);
       return;
     }
     if (result.status === 'missing') {
-      protectedFileMissingSources.add(sourceURL);
-      removeMissingProtectedImages(root, sourceURL);
+      protectedFileMissingRequests.add(requestKey);
+      hideMissingProtectedImages(root, sourceURL, requestKey);
       return;
     }
     if (result.status === 'failed') {

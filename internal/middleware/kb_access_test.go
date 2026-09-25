@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
@@ -32,13 +33,12 @@ func (s *stubKBLookup) GetKnowledgeBaseByID(_ context.Context, id string) (*type
 }
 
 // stubKBShareForGuard implements just the methods the guard touches —
-// CheckTenantKBPermission and GetKBSourceTenant. The other methods on
+// CheckTenantKBPermission. The other methods on
 // the interface panic so any unintended new dependency surfaces
 // immediately.
 type stubKBShareForGuard struct {
 	permission map[string]types.OrgMemberRole
 	shared     map[string]bool
-	source     map[string]uint64
 }
 
 func (s *stubKBShareForGuard) CheckTenantKBPermission(_ context.Context, kbID string, _ uint64, _ types.TenantRole) (types.OrgMemberRole, bool, error) {
@@ -49,48 +49,57 @@ func (s *stubKBShareForGuard) CheckTenantKBPermission(_ context.Context, kbID st
 }
 
 func (s *stubKBShareForGuard) GetKBSourceTenant(_ context.Context, kbID string) (uint64, error) {
-	if v, ok := s.source[kbID]; ok {
-		return v, nil
-	}
-	return 0, errors.New("not found")
+	panic("the loaded KB already carries its authoritative tenant")
 }
 
 func (s *stubKBShareForGuard) ShareKnowledgeBase(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) UpdateSharePermission(context.Context, string, types.OrgMemberRole, string, uint64) error {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) RemoveShare(context.Context, string, string, uint64) error {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharesByKnowledgeBase(context.Context, string, uint64) ([]*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharesByOrganization(context.Context, string) ([]*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharedKnowledgeBases(context.Context, uint64, types.TenantRole) ([]*types.SharedKnowledgeBaseInfo, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharedKnowledgeBasesInOrganization(context.Context, string, uint64, types.TenantRole) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharedKnowledgeBaseIDsByOrganizations(context.Context, []string, uint64) (map[string][]string, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) GetShare(context.Context, string) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) GetShareByKBAndOrg(context.Context, string, string) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) HasTenantKBPermission(context.Context, string, uint64, types.TenantRole, types.OrgMemberRole) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) CountSharesByKnowledgeBaseIDs(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) CountByOrganizations(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
@@ -109,7 +118,7 @@ type stubAgentShareForGuard struct {
 	kbsViaSomeAgent map[string]bool
 }
 
-func (s *stubAgentShareForGuard) GetSharedAgentForTenant(_ context.Context, _ uint64, _ types.TenantRole, agentID string) (*types.CustomAgent, error) {
+func (s *stubAgentShareForGuard) GetSharedAgentForTenant(_ context.Context, _ uint64, _ types.TenantRole, agentID string, _ ...uint64) (*types.CustomAgent, error) {
 	return s.agents[agentID], nil
 }
 
@@ -120,36 +129,47 @@ func (s *stubAgentShareForGuard) TenantCanAccessKBViaSomeSharedAgent(_ context.C
 func (s *stubAgentShareForGuard) ShareAgent(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) RemoveShare(context.Context, string, string, uint64) error {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharesByAgent(context.Context, string, uint64) ([]*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharesByOrganization(context.Context, string) ([]*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharedAgents(context.Context, uint64, types.TenantRole) ([]*types.SharedAgentInfo, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharedAgentsInOrganization(context.Context, string, uint64, types.TenantRole) ([]*types.OrganizationSharedAgentItem, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharedAgentsInOrganizations(context.Context, []string, uint64, types.TenantRole) (map[string][]*types.OrganizationSharedAgentItem, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) SetSharedAgentDisabledByMe(context.Context, uint64, string, uint64, bool) error {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) GetShare(context.Context, string) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) GetShareByAgentAndOrg(context.Context, string, string) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) GetShareByAgentIDForTenant(context.Context, uint64, string, uint64) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) CountByOrganizations(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
@@ -157,14 +177,15 @@ func (s *stubAgentShareForGuard) CountByOrganizations(context.Context, []string)
 // guardOpts collects optional knobs for runGuard. Keeps the call site
 // readable when most tests only care about a couple of dimensions.
 type guardOpts struct {
-	agentID    string                  // ?agent_id query param
-	agentShare *stubAgentShareForGuard // nil means "no agent-share service"
+	agentID             string                  // ?agent_id query param
+	agentSourceTenantID string                  // ?agent_source_tenant_id query param
+	agentShare          *stubAgentShareForGuard // nil means "no agent-share service"
 }
 
 // runGuard fires a single request through the guard and returns the
 // gin recorder + the kb access (if any) the guard stashed. Defaults
-// to EnableRBAC=true; the EnableRBAC=false fail-open path has its own
-// dedicated tests further below.
+// to EnableRBAC=true; the guard ignores the flag, which the EnableRBAC=false
+// tests further below pin down.
 func runGuard(
 	t *testing.T,
 	tenantID uint64,
@@ -181,8 +202,15 @@ func runGuard(
 	c.Params = gin.Params{{Key: "id", Value: kbID}}
 
 	url := "/"
+	query := make([]string, 0, 2)
 	if opts.agentID != "" {
-		url = "/?agent_id=" + opts.agentID
+		query = append(query, "agent_id="+opts.agentID)
+	}
+	if opts.agentSourceTenantID != "" {
+		query = append(query, "agent_source_tenant_id="+opts.agentSourceTenantID)
+	}
+	if len(query) > 0 {
+		url = "/?" + strings.Join(query, "&")
 	}
 	req := httptest.NewRequest("GET", url, nil)
 	ctx := context.WithValue(req.Context(), types.TenantIDContextKey, tenantID)
@@ -268,7 +296,6 @@ func TestRequireKBAccess_SharedKB_RewritesTenantContext(t *testing.T) {
 	share := &stubKBShareForGuard{
 		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleEditor},
 		shared:     map[string]bool{"kb-shared": true},
-		source:     map[string]uint64{"kb-shared": 200},
 	}
 	_, c := runGuard(t, 100, "kb-shared",
 		types.OrgRoleEditor,
@@ -288,7 +315,6 @@ func TestRequireKBAccess_SharedKB_PermissionBelowMin_Aborts(t *testing.T) {
 	share := &stubKBShareForGuard{
 		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer},
 		shared:     map[string]bool{"kb-shared": true},
-		source:     map[string]uint64{"kb-shared": 200},
 	}
 	_, c := runGuard(t, 100, "kb-shared",
 		types.OrgRoleEditor, // require Editor
@@ -478,9 +504,10 @@ func TestRequireKBAccess_AgentShare_SpecificAgent_TenantMismatch(t *testing.T) {
 
 // ---------- EnableRBAC=false rollout window ----------
 
-func TestRequireKBAccess_Forbidden_FailOpenWhenRBACDisabled(t *testing.T) {
-	// Same scenario as PermissionBelowMin (which aborts when enforcing),
-	// but with EnableRBAC=false the guard logs and passes through.
+func TestRequireKBAccess_Forbidden_EnforcedEvenWhenRBACDisabled(t *testing.T) {
+	// Same scenario as PermissionBelowMin. The EnableRBAC=false rollout
+	// window relaxes roles inside a workspace; it must not open another
+	// workspace's KB, since handlers behind this guard load by ID.
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -491,7 +518,6 @@ func TestRequireKBAccess_Forbidden_FailOpenWhenRBACDisabled(t *testing.T) {
 	share := &stubKBShareForGuard{
 		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer},
 		shared:     map[string]bool{"kb-shared": true},
-		source:     map[string]uint64{"kb-shared": 200},
 	}
 	kbsvc := &stubKBLookup{kbs: map[string]*types.KnowledgeBase{
 		"kb-shared": {ID: "kb-shared", TenantID: 200},
@@ -504,7 +530,7 @@ func TestRequireKBAccess_Forbidden_FailOpenWhenRBACDisabled(t *testing.T) {
 		cfgRBAC(false), // enforcement off
 	)
 	guard(c)
-	require.False(t, c.IsAborted(), "guard must pass through when EnableRBAC is off")
+	require.True(t, c.IsAborted(), "cross-workspace access stays denied when EnableRBAC is off")
 	_ = rec
 }
 
@@ -529,4 +555,19 @@ func TestRequireKBAccess_NotFound_FiresEvenWhenRBACDisabled(t *testing.T) {
 	guard(c)
 	require.True(t, c.IsAborted(), "404 still fires with enforcement off")
 	_ = rec
+}
+
+func TestRequireKBAccess_InvalidAgentSourceTenantID(t *testing.T) {
+	_, c := runGuard(t, 100, "kb-1",
+		types.OrgRoleViewer,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 200},
+		nil,
+		guardOpts{
+			agentID:             "agent-1",
+			agentSourceTenantID: "not-a-number",
+			agentShare:          &stubAgentShareForGuard{},
+		},
+	)
+	require.True(t, c.IsAborted())
+	require.NotEmpty(t, c.Errors)
 }

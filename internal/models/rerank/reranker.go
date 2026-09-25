@@ -1,12 +1,23 @@
+// Package rerank adapts rerank protocols to application batching and score semantics.
 package rerank
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
+	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
+	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+
+	// modelruntime.Resolve answers from the vendor catalog, which is empty until
+	// the vendor packages have run their init. Without this import every row
+	// resolves to the generic vendor: LKEAP and Volcengine would lose their
+	// signed clients and Aliyun its native protocol.
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -20,6 +31,26 @@ type Reranker interface {
 
 	// GetModelID returns the model ID
 	GetModelID() string
+}
+
+// PassageLimiter is implemented by rerankers whose vendor documents how large
+// a document may be. The rerank stage builds its passages itself (title,
+// chunk body, captions, OCR text, generated questions), so it can fit them to
+// the limit instead of letting one oversized candidate fail the whole
+// request, which the protocol layer rightly refuses to truncate on its own.
+type PassageLimiter interface {
+	// MaxPassageRunes returns the longest document, in runes, one request
+	// can carry beside query. 0 means no documented limit.
+	MaxPassageRunes(query string) int
+}
+
+// MaxPassageRunes reports r's passage limit for query, or 0 when r documents
+// none.
+func MaxPassageRunes(r Reranker, query string) int {
+	if limiter, ok := r.(PassageLimiter); ok {
+		return limiter.MaxPassageRunes(query)
+	}
+	return 0
 }
 
 type RankResult struct {
@@ -84,7 +115,8 @@ type RerankerConfig struct {
 	ModelName   string
 	Source      types.ModelSource
 	ModelID     string
-	Provider    string // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
+	Provider    string                   // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
+	Spec        *types.ModelSpecOverride `json:"spec,omitempty"`
 	ExtraConfig map[string]string
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
@@ -106,6 +138,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *RerankerConfig {
 		ModelName:     m.Name,
 		Source:        m.Source,
 		Provider:      m.Parameters.Provider,
+		Spec:          m.Parameters.Spec,
 		ExtraConfig:   m.Parameters.ExtraConfig,
 		CustomHeaders: m.Parameters.CustomHeaders,
 		AppID:         appID,
@@ -125,43 +158,65 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 	return wrapRerankerLangfuse(r, nil)
 }
 
-// customHeaderSetter 表示支持注入自定义 HTTP header 的 reranker 实现。
-type customHeaderSetter interface {
-	SetCustomHeaders(map[string]string)
-}
-
+// newReranker resolves the catalog and returns the protocol client for the
+// configured model, wrapped in the shared batching and score-scaling layer.
+// It mirrors chat.NewRemoteChat: the vendor's facts decide the protocol, the
+// URL and the credential, and this function knows no vendor names.
 func newReranker(config *RerankerConfig) (Reranker, error) {
-	// Use provider field if set, otherwise detect from URL using provider registry
-	providerName := provider.ProviderName(config.Provider)
-	if providerName == "" {
-		providerName = provider.DetectProvider(config.BaseURL)
+	if config == nil {
+		return nil, fmt.Errorf("rerank config is nil")
+	}
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider:  config.Provider,
+		Model:     config.ModelName,
+		BaseURL:   config.BaseURL,
+		ModelType: types.ModelTypeRerank,
+		Extra:     config.ExtraConfig,
+		Override:  config.Spec,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRerankBaseURL(resolved.BaseURL); err != nil {
+		return nil, err
 	}
 
-	var (
-		reranker Reranker
-		err      error
-	)
-	switch providerName {
-	case provider.ProviderAliyun:
-		reranker, err = NewAliyunReranker(config)
-	case provider.ProviderZhipu:
-		reranker, err = NewZhipuReranker(config)
-	case provider.ProviderJina:
-		reranker, err = NewJinaReranker(config)
-	case provider.ProviderNvidia:
-		reranker, err = NewNvidiaReranker(config)
-	case provider.ProviderWeKnoraCloud:
-		reranker, err = NewWeKnoraCloudReranker(config)
-	case provider.ProviderLKEAP:
-		reranker, err = NewLKEAPReranker(config)
+	vendor := resolved.Vendor
+	endpoint, err := resolved.Endpoint(types.ModelTypeRerank, modelruntime.Connection{
+		ModelID:     config.ModelID,
+		Credentials: api.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
+		Headers:     config.CustomHeaders,
+		Extra:       config.ExtraConfig,
+		Client:      newRerankHTTPClient(time.Duration(resolved.Rerank.RequestTimeout) * time.Second),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var client api.Reranker
+	switch resolved.RerankAPI {
+	case api.RerankCohere:
+		client = cohererank.New(cohererank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankDashScope:
+		client = dashscoperank.New(dashscoperank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankNIM:
+		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankTencentLKEAP:
+		client, err = newLKEAPClient(config, resolved)
+	case api.RerankVolcengineKnowledge:
+		client, err = newVolcengineClient(config, resolved)
 	default:
-		reranker, err = NewOpenAIReranker(config)
+		return nil, fmt.Errorf("unsupported rerank api %q for provider %s", resolved.RerankAPI, vendor.ID)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if setter, ok := reranker.(customHeaderSetter); ok {
-		setter.SetCustomHeaders(config.CustomHeaders)
-	}
-	return reranker, nil
+
+	return &protocolReranker{
+		inner:     client,
+		settings:  resolved.Rerank,
+		endpoint:  resolved.BaseURL,
+		modelName: config.ModelName,
+		modelID:   config.ModelID,
+	}, nil
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSyncLogs, type SyncLog } from '@/api/datasource'
+import { getSyncLogs, type SyncLog, type SyncItemError } from '@/api/datasource'
 
 const props = defineProps<{
   dataSourceId: string
@@ -131,6 +131,30 @@ function hasPills(log: SyncLog) {
   return log.items_created > 0 || log.items_updated > 0 || log.items_deleted > 0 || log.items_skipped > 0 || log.items_failed > 0
 }
 
+// Cap the per-item failure list so a sync that failed thousands of documents
+// doesn't render an unbounded wall of text; the remainder is summarised.
+const FAILED_ITEMS_CAP = 50
+
+function failedItems(log: SyncLog): SyncItemError[] {
+  return (log.result?.errors || []).slice(0, FAILED_ITEMS_CAP)
+}
+
+// Render one failure sample. The backend sends a stable i18n `code` (+ params)
+// so the reason is localised to the viewer's language; `message` is the fallback
+// for old logs / codes this client doesn't know. The document title is kept
+// separate and prefixed as "title — reason".
+function formatSyncError(e: SyncItemError): string {
+  let reason = ''
+  if (e.code) {
+    const key = `datasource.syncError.${e.code}`
+    const localised = t(key, (e.params || {}) as Record<string, unknown>)
+    reason = localised === key ? (e.message || e.code) : localised
+  } else {
+    reason = e.message || ''
+  }
+  return e.title ? (reason ? `${e.title} — ${reason}` : e.title) : reason
+}
+
 // Group logs by date
 const groupedLogs = computed(() => {
   const groups: { date: string; logs: SyncLog[] }[] = []
@@ -253,8 +277,28 @@ const groupedLogs = computed(() => {
                   <span class="detail-label">{{ t('datasource.logMetric.total') }}</span>
                   <span>{{ log.items_total }}</span>
                 </div>
-                <div v-if="log.error_message" class="tl-error">
+                <!-- Localised failure summary; raw error_message only for a
+                     pure infra failure with no per-document detail. -->
+                <div v-if="log.items_failed > 0" class="tl-error">
+                  {{ t('datasource.logDetail.docsFailedSummary', { n: log.items_failed }) }}
+                </div>
+                <div v-else-if="log.error_message" class="tl-error">
                   {{ log.error_message }}
+                </div>
+
+                <!-- Per-item failures: which documents failed and why.
+                     The true count is items_failed (a bounded int); result.errors
+                     is only a capped sample the backend retains for display. -->
+                <div v-if="failedItems(log).length" class="tl-failed">
+                  <div class="tl-failed-title">
+                    {{ t('datasource.logDetail.failedItems') }} ({{ log.items_failed }})
+                  </div>
+                  <div v-for="(e, i) in failedItems(log)" :key="i" class="tl-failed-item" :title="formatSyncError(e)">
+                    {{ formatSyncError(e) }}
+                  </div>
+                  <div v-if="log.items_failed > failedItems(log).length" class="tl-failed-more">
+                    {{ t('datasource.logDetail.failedItemsMore', { n: (log.items_failed - failedItems(log).length) }) }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -286,7 +330,7 @@ const groupedLogs = computed(() => {
   justify-content: center;
   padding: 80px 0;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   gap: 12px;
 }
 
@@ -303,7 +347,7 @@ const groupedLogs = computed(() => {
   flex: 1;
   text-align: center;
   padding: 16px 8px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-border-level-1-color);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
@@ -313,7 +357,7 @@ const groupedLogs = computed(() => {
 }
 
 .stat-num {
-  font-size: 20px;
+  font-size: var(--app-text-3xl);
   font-weight: 700;
   color: var(--td-text-color-primary);
   line-height: 1.2;
@@ -324,7 +368,7 @@ const groupedLogs = computed(() => {
 .stat-num.error { color: var(--td-error-color); }
 
 .stat-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -342,7 +386,7 @@ const groupedLogs = computed(() => {
 }
 
 .timeline-date {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
   padding: 12px 0 8px 24px;
@@ -367,7 +411,7 @@ const groupedLogs = computed(() => {
 }
 
 .logs-load-more-text {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -421,8 +465,8 @@ const groupedLogs = computed(() => {
   flex: 1;
   min-width: 0;
   padding: 12px 14px;
-  border-radius: 10px;
-  transition: background 0.2s ease;
+  border-radius: var(--app-radius-lg);
+  transition: background var(--app-motion-base) ease;
 }
 
 .timeline-item:hover .tl-content {
@@ -436,25 +480,25 @@ const groupedLogs = computed(() => {
 }
 
 .tl-status {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
 }
 
 .tl-time {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-variant-numeric: tabular-nums;
 }
 
 .tl-duration {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   color: var(--td-text-color-placeholder);
   font-variant-numeric: tabular-nums;
   background: var(--td-bg-color-component);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 /* --- Pills --- */
@@ -466,9 +510,9 @@ const groupedLogs = computed(() => {
 }
 
 .pill {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   font-weight: 500;
   line-height: 18px;
   font-variant-numeric: tabular-nums;
@@ -493,7 +537,7 @@ const groupedLogs = computed(() => {
 .detail-row {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   line-height: 20px;
 }
@@ -505,12 +549,45 @@ const groupedLogs = computed(() => {
 .tl-error {
   margin-top: 8px;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-error-color-1);
   color: var(--td-error-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   word-break: break-word;
+}
+
+/* --- Per-item failure list --- */
+.tl-failed {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tl-failed-title {
+  font-size: var(--app-text-xs);
+  font-weight: 600;
+  color: var(--td-error-color);
+  margin-bottom: 2px;
+}
+
+.tl-failed-item {
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  padding: 2px 8px;
+  border-left: 2px solid var(--td-error-color-3);
+  background: var(--td-bg-color-container);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tl-failed-more {
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-placeholder);
+  padding: 2px 8px;
 }
 
 /* --- Drawer header --- */
@@ -522,7 +599,7 @@ const groupedLogs = computed(() => {
 }
 
 .logs-drawer-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
   overflow: hidden;

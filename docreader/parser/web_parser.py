@@ -15,8 +15,18 @@ from docreader.parser.chain_parser import PipelineParser
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.utils import endecode
 from docreader.utils.ssrf import is_ssrf_safe_url
+from docreader.utils.ssrf_proxy import SSRFProxy
 
 logger = logging.getLogger(__name__)
+
+
+class WebParseError(RuntimeError):
+    """Raised when a URL cannot be scraped or has no extractable content.
+
+    This must propagate as a parse failure. Returning the error string as
+    document body would index it as knowledge.
+    """
+
 
 _GOTO_TIMEOUT_MS = 30_000
 _NETWORK_IDLE_TIMEOUT_MS = 10_000
@@ -56,6 +66,7 @@ class _ScrapeResult:
     html: str
     visible_text: str
     page_title: str
+    error: str = ""
 
 
 def extract_markdown_from_html(html: str) -> Optional[str]:
@@ -124,7 +135,7 @@ async def read_visible_text(page: Page) -> str:
 
 
 async def install_ssrf_route_guard(page: Page) -> None:
-    """Block navigation/subresource requests to SSRF-restricted targets (incl. redirects)."""
+    """Reject initial URLs early; SSRFProxy enforces every actual connection."""
 
     async def handle_route(route) -> None:
         safe, reason = is_ssrf_safe_url(route.request.url)
@@ -167,23 +178,23 @@ class StdWebParser(BaseParser):
             url: The URL of the web page to scrape
 
         Returns:
-            HTML, visible text, and document title; empty fields on hard failure
+            HTML, visible text, and document title. On hard failure the
+            content fields are empty and ``error`` explains why.
         """
         logger.info(f"Starting web page scraping for URL: {url}")
-        empty = _ScrapeResult(html="", visible_text="", page_title="")
         safe, reason = is_ssrf_safe_url(url)
         if not safe:
             logger.error("URL blocked by SSRF guard before navigation: %s", reason)
-            return empty
+            return _ScrapeResult(
+                html="", visible_text="", page_title="",
+                error=f"URL blocked by SSRF guard: {reason}",
+            )
         try:
-            async with async_playwright() as p:
-                kwargs = {}
-                # Configure proxy if available
-                if self.proxy:
-                    kwargs["proxy"] = {"server": self.proxy}
+            async with SSRFProxy(self.proxy) as proxy, async_playwright() as p:
+                kwargs = {"proxy": {"server": proxy.url, "bypass": ""}}
                 logger.info("Launching WebKit browser")
                 browser = await p.webkit.launch(**kwargs)
-                page = await browser.new_page()
+                page = await browser.new_page(service_workers="block")
                 await install_ssrf_route_guard(page)
 
                 logger.info(f"Navigating to URL: {url}")
@@ -197,7 +208,10 @@ class StdWebParser(BaseParser):
                 except Exception as e:
                     logger.error(f"Error navigating to URL: {str(e)}")
                     await browser.close()
-                    return empty
+                    return _ScrapeResult(
+                        html="", visible_text="", page_title="",
+                        error=f"navigation failed: {e}",
+                    )
 
                 await wait_for_rendered_content(page)
 
@@ -223,7 +237,10 @@ class StdWebParser(BaseParser):
 
         except Exception as e:
             logger.error(f"Failed to scrape web page: {str(e)}")
-            return empty
+            return _ScrapeResult(
+                html="", visible_text="", page_title="",
+                error=f"scrape failed: {e}",
+            )
 
     def parse_into_text(self, content: bytes) -> Document:
         """Parse web page content into a Document object.
@@ -233,14 +250,22 @@ class StdWebParser(BaseParser):
 
         Returns:
             Document object containing the parsed markdown content
+
+        Raises:
+            WebParseError: If scraping fails or the page has no extractable
+                content. Callers must surface this as a parse failure rather
+                than indexing the error string as document body.
         """
         url = endecode.decode_bytes(content)
 
         logger.info(f"Scraping web page: {url}")
         scrape_result = asyncio.run(self.scrape(url))
-        if not scrape_result.html and not scrape_result.visible_text:
-            logger.error("Failed to scrape web page (no HTML or visible text)")
-            return Document(content=f"Error parsing web page: {url}")
+        if scrape_result.error or (
+            not scrape_result.html and not scrape_result.visible_text
+        ):
+            detail = scrape_result.error or "no HTML or visible text"
+            logger.error("Failed to scrape web page %s: %s", url, detail)
+            raise WebParseError(f"Failed to scrape web page: {url} ({detail})")
 
         md_text = extract_markdown_from_html(scrape_result.html)
         if not md_text:
@@ -255,8 +280,8 @@ class StdWebParser(BaseParser):
                 )
 
         if not md_text:
-            logger.error("Failed to parse web page")
-            return Document(content=f"Error parsing web page: {url}")
+            logger.error("Failed to parse web page: %s", url)
+            raise WebParseError(f"Failed to parse web page: {url}")
 
         metadata = {}
         title_match = re.search(r"^title:\s*(.+)", md_text, re.MULTILINE)

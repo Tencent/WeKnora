@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,11 +12,19 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
+
+// sandboxConfigLookup is the existence check an agent's sandbox selection needs.
+// Narrower than the full config service so this handler cannot grow a dependency
+// on config mutation.
+type sandboxConfigLookup interface {
+	Get(ctx context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error)
+}
 
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
@@ -25,6 +34,10 @@ type CustomAgentHandler struct {
 	// userService 仅用于 list 接口批量回填 creator_name，作用见
 	// KnowledgeBaseHandler.userService。
 	userService interfaces.UserService
+	// sandboxConfigs validates an agent's sandbox backend selection. Optional —
+	// nil in partially-wired unit tests, where the selection is left unchecked.
+	sandboxConfigs sandboxConfigLookup
+	desktop        bool
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -33,12 +46,16 @@ func NewCustomAgentHandler(
 	imService *im.Service,
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
 	userService interfaces.UserService,
+	sandboxConfigs *service.TenantSandboxConfigService,
+	host service.HostSandboxManager,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
-		service:      service,
-		imService:    imService,
-		disabledRepo: disabledRepo,
-		userService:  userService,
+		service:        service,
+		imService:      imService,
+		disabledRepo:   disabledRepo,
+		userService:    userService,
+		sandboxConfigs: sandboxConfigs,
+		desktop:        host.Desktop,
 	}
 }
 
@@ -52,10 +69,14 @@ type CreateAgentRequest struct {
 
 // UpdateAgentRequest defines the request body for updating an agent
 type UpdateAgentRequest struct {
-	Name        string                  `json:"name"`
-	Description string                  `json:"description"`
-	Avatar      string                  `json:"avatar"`
-	Config      types.CustomAgentConfig `json:"config"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Avatar travels as a pointer so an omitted field can be told apart from
+	// an explicit clear: nil keeps the stored avatar, a pointer to "" wipes
+	// it. As a plain string the two cases were indistinguishable, so a caller
+	// that PUT only a config silently zeroed the avatar and still got a 200.
+	Avatar *string                 `json:"avatar"`
+	Config types.CustomAgentConfig `json:"config"`
 }
 
 // CreateAgent godoc
@@ -86,6 +107,14 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
+		c.Error(err)
+		return
+	}
+	if err := normalizeAgentReasoningEffort(&req.Config); err != nil {
+		_ = c.Error(err)
+		return
+	}
 
 	// Build agent object
 	agent := &types.CustomAgent{
@@ -95,6 +124,13 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		Config:      req.Config,
 	}
 	agent.EnsureDefaults()
+	// The DB column (varchar(64)) has no application-level guard, so an
+	// oversized avatar used to reach postgres and come back as a raw driver
+	// 500. Reject it here with a 400 that names the limit.
+	if err := agent.ValidateAvatar(); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
@@ -111,7 +147,11 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 			c.Error(errors.NewBadRequestError(err.Error()))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Reached only after the typed sentinels and *errors.AppError
+		// above, so whatever lands here is a raw repository/driver error.
+		// Its text (SQLSTATE, column types) must not reach the client;
+		// the full detail is already logged above.
+		_ = c.Error(errors.NewInternalServerError("Failed to create agent"))
 		return
 	}
 
@@ -160,7 +200,11 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 			c.Error(appErr)
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Reached only after the typed sentinels and *errors.AppError above, so
+		// whatever lands here is a raw repository/driver error. Its text
+		// (SQLSTATE, column names) must not reach the client; the full detail
+		// is already logged above.
+		_ = c.Error(errors.NewInternalServerError("Failed to load agent"))
 		return
 	}
 
@@ -188,7 +232,11 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	agents, err := h.service.ListAgents(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Reached only after the typed sentinels and *errors.AppError above, so
+		// whatever lands here is a raw repository/driver error. Its text
+		// (SQLSTATE, column names) must not reach the client; the full detail
+		// is already logged above.
+		_ = c.Error(errors.NewInternalServerError("Failed to list agents"))
 		return
 	}
 
@@ -329,13 +377,33 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
+		c.Error(err)
+		return
+	}
+	if err := normalizeAgentReasoningEffort(&req.Config); err != nil {
+		_ = c.Error(err)
+		return
+	}
 
-	// Build agent object
+	// Only a sent avatar is validated: nil means the caller never touched the
+	// field, so there is no value to bound. Checking the length here is what
+	// turns an oversized avatar into a 400 that names the limit, instead of
+	// the 500 that used to carry the database's own varchar(64) complaint.
+	if req.Avatar != nil {
+		if err := (&types.CustomAgent{Avatar: *req.Avatar}).ValidateAvatar(); err != nil {
+			logger.Error(ctx, "Invalid avatar", err)
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+	}
+
+	// Build agent object. Avatar is deliberately absent here — it reaches the
+	// service as a separate pointer, so that "not sent" survives the trip.
 	agent := &types.CustomAgent{
 		ID:          id,
 		Name:        req.Name,
 		Description: req.Description,
-		Avatar:      req.Avatar,
 		Config:      req.Config,
 	}
 	agent.EnsureDefaults()
@@ -348,7 +416,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
 	// Update the agent
-	updatedAgent, err := h.service.UpdateAgent(ctx, agent)
+	updatedAgent, err := h.service.UpdateAgent(ctx, agent, req.Avatar)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,
@@ -360,8 +428,14 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 			c.Error(errors.NewForbiddenError("Cannot modify built-in agent"))
 		case service.ErrAgentNameRequired:
 			c.Error(errors.NewBadRequestError(err.Error()))
+		case service.ErrAgentKBScopeNotShareable:
+			_ = c.Error(errors.NewForbiddenError(err.Error()))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			// Reached only after the typed sentinels and *errors.AppError above, so
+			// whatever lands here is a raw repository/driver error. Its text
+			// (SQLSTATE, column names) must not reach the client; the full detail
+			// is already logged above.
+			_ = c.Error(errors.NewInternalServerError("Failed to update agent"))
 		}
 		return
 	}
@@ -428,7 +502,11 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 		case service.ErrCannotDeleteBuiltin:
 			c.Error(errors.NewForbiddenError("Cannot delete built-in agent"))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			// Reached only after the typed sentinels and *errors.AppError above, so
+			// whatever lands here is a raw repository/driver error. Its text
+			// (SQLSTATE, column names) must not reach the client; the full detail
+			// is already logged above.
+			_ = c.Error(errors.NewInternalServerError("Failed to delete agent"))
 		}
 		return
 	}
@@ -476,7 +554,11 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 		case service.ErrAgentNotFound:
 			c.Error(errors.NewNotFoundError("Agent not found"))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			// Reached only after the typed sentinels and *errors.AppError above, so
+			// whatever lands here is a raw repository/driver error. Its text
+			// (SQLSTATE, column names) must not reach the client; the full detail
+			// is already logged above.
+			_ = c.Error(errors.NewInternalServerError("Failed to copy agent"))
 		}
 		return
 	}
@@ -495,7 +577,11 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 		case service.ErrAgentNotFound:
 			c.Error(errors.NewNotFoundError("Agent not found"))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			// Reached only after the typed sentinels and *errors.AppError above, so
+			// whatever lands here is a raw repository/driver error. Its text
+			// (SQLSTATE, column names) must not reach the client; the full detail
+			// is already logged above.
+			_ = c.Error(errors.NewInternalServerError("Failed to copy agent"))
 		}
 		return
 	}
@@ -563,7 +649,7 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Param        knowledge_base_ids  query     string  false  "知识库ID列表（逗号分隔），覆盖智能体默认配置"
 // @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
 // @Param        tag_scopes          query     string  false  "带知识库归属的标签范围（JSON）"
-// @Param        limit               query     int     false  "返回数量上限（默认6）"
+// @Param        limit               query     int     false  "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）"
 // @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
 // @Failure      400                 {object}  errors.AppError         "请求参数错误"
 // @Failure      404                 {object}  errors.AppError         "智能体不存在"
@@ -608,7 +694,10 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	limit := 6
+	// limit == 0 signals "unspecified" so the service falls back to the agent's
+	// configured starter count. A provided value is passed through unchanged and
+	// bounded by the service's safety cap.
+	limit := 0
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
@@ -631,7 +720,11 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 			c.Error(appErr)
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Reached only after the typed sentinels and *errors.AppError above, so
+		// whatever lands here is a raw repository/driver error. Its text
+		// (SQLSTATE, column names) must not reach the client; the full detail
+		// is already logged above.
+		_ = c.Error(errors.NewInternalServerError("Failed to build suggested questions"))
 		return
 	}
 
@@ -641,6 +734,64 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 			"questions": questions,
 		},
 	})
+}
+
+// validateAgentSandboxConfig rejects a selection the workspace does not have.
+//
+// Checking at save time is what makes the mistake fixable: a dangling reference
+// only fails when the agent next runs a skill, mid-conversation, as an opaque
+// resolution error with no hint about which agent to edit.
+func (h *CustomAgentHandler) validateAgentSandboxConfig(
+	ctx context.Context, cfg types.CustomAgentConfig,
+) error {
+	configID := strings.TrimSpace(cfg.SandboxConfigID)
+	if h.desktop {
+		if configID != "" {
+			return errors.NewBadRequestError("Lite 不支持为智能体绑定沙箱配置")
+		}
+		return nil
+	}
+	if configID == "" || h.sandboxConfigs == nil {
+		// Empty means the deployment-wide default, which always exists.
+		return nil
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return errors.NewUnauthorizedError("Missing workspace context")
+	}
+	stored, err := h.sandboxConfigs.Get(ctx, tenantID, configID)
+	if err != nil {
+		return errors.NewInternalServerError("Failed to verify sandbox config").
+			WithDetails(err.Error())
+	}
+	if stored == nil {
+		return errors.NewBadRequestError("所选沙箱后端配置不存在，请重新选择")
+	}
+	return nil
+}
+
+// normalizeAgentReasoningEffort validates config.reasoning_effort and rewrites
+// it to its canonical spelling.
+//
+// Without this the field was stored verbatim and cast straight to
+// api.ReasoningEffort in agent/think.go and chat_pipeline/common.go. A typo
+// there does not disable thinking, it silently enables it: ReasoningEffort
+// wins over the legacy boolean and anything non-empty other than "off" counts
+// as enabled, so `"reasoning_effort": "hgih"` turns thinking on for a vendor
+// that then receives a level it rejects (or clamps in an unpredictable way).
+func normalizeAgentReasoningEffort(cfg *types.CustomAgentConfig) error {
+	if cfg == nil || cfg.ReasoningEffort == "" {
+		return nil
+	}
+	level, ok := api.ParseReasoningEffort(cfg.ReasoningEffort)
+	if !ok {
+		return errors.NewBadRequestError(
+			fmt.Sprintf("reasoning_effort must be one of %v", api.AllReasoningEfforts))
+	}
+	// Store the canonical value so EnsureDefaults and the editor never have to
+	// know about the accepted aliases ("none", "true", ...).
+	cfg.ReasoningEffort = string(level)
+	return nil
 }
 
 func authorizeAgentKnowledgeScope(ctx context.Context, cfg types.CustomAgentConfig) error {

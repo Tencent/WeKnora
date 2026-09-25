@@ -15,6 +15,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,6 +26,12 @@ import (
 // 返回的 cleanup 用 defer 调用即可。
 func newTestRepo(t *testing.T) (*dorisRepository, sqlmock.Sqlmock, *httptest.Server, func()) {
 	t.Helper()
+	// httptest binds to loopback, which production SSRF policy correctly blocks.
+	// Make that one test host explicit and restore the process-global policy when
+	// the test completes.
+	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
 
@@ -229,6 +236,108 @@ func TestPartialUpdateRows_FailureSurfaced(t *testing.T) {
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stream load failed")
+}
+
+func TestStreamLoadOnce_BlocksUnsafeTarget(t *testing.T) {
+	repo, _, _, cleanup := newTestRepo(t)
+	defer cleanup()
+
+	// Override the helper's loopback allowance: link-local metadata endpoints
+	// must be rejected before the HTTP client is called.
+	secutils.SetSSRFWhitelistFromRaw("")
+	repo.feHTTPBase = "http://169.254.169.254"
+
+	err := repo.streamLoadOnce(context.Background(), "t", []string{"id"},
+		[]map[string]any{{"id": "x"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked by SSRF validation")
+}
+
+func TestDorisStreamLoadHTTPClient_BlocksUnsafeRedirect(t *testing.T) {
+	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data", http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPut, server.URL, strings.NewReader("[]"))
+	require.NoError(t, err)
+	_, err = newDorisStreamLoadHTTPClient().Do(req)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, secutils.ErrSSRFRedirectBlocked)
+}
+
+func TestDorisStreamLoadHTTPClient_ForwardsAuthorizationToTrustedRedirect(t *testing.T) {
+	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+
+	var gotAuthorization, gotBody, gotColumns, gotMethod string
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get(headerAuthorization)
+		gotColumns = r.Header.Get("columns")
+		gotMethod = r.Method
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	fe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, be.URL, http.StatusTemporaryRedirect)
+	}))
+	defer fe.Close()
+
+	req, err := http.NewRequest(http.MethodPut, fe.URL, strings.NewReader("[]"))
+	require.NoError(t, err)
+	req.Header.Set(headerAuthorization, "Basic trusted-doris-credential")
+	req.Header.Set("columns", "id,content")
+
+	resp, err := newDorisStreamLoadHTTPClient().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, "Basic trusted-doris-credential", gotAuthorization)
+	assert.Equal(t, "[]", gotBody)
+	assert.Equal(t, "id,content", gotColumns)
+	assert.Equal(t, http.MethodPut, gotMethod)
+}
+
+func TestDorisStreamLoadHTTPClient_RedirectBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, target, whitelist string
+	}{
+		{"untrusted port", "https://8.8.8.8:8030/load", "https://8.8.8.8:8040/load", ""},
+		{"untrusted host", "https://8.8.8.8/load", "https://1.1.1.1/load", ""},
+		{"HTTPS downgrade", "https://127.0.0.1:8030/load", "http://127.0.0.1:8040/load", "127.0.0.1"},
+		{"invalid scheme", "http://127.0.0.1/load", "ftp://127.0.0.1/load", "127.0.0.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			secutils.SetSSRFWhitelistFromRaw(tc.whitelist)
+			t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+			source, err := http.NewRequest(http.MethodPut, tc.source, strings.NewReader("[]"))
+			require.NoError(t, err)
+			source.Header.Set(headerAuthorization, "Basic trusted-doris-credential")
+			target, err := http.NewRequest(http.MethodPut, tc.target, strings.NewReader("[]"))
+			require.NoError(t, err)
+			err = newDorisStreamLoadHTTPClient().CheckRedirect(target, []*http.Request{source})
+			require.ErrorIs(t, err, secutils.ErrSSRFRedirectBlocked)
+			assert.Empty(t, target.Header.Get(headerAuthorization))
+		})
+	}
+}
+
+func TestDorisStreamLoadHTTPClient_RedirectLimit(t *testing.T) {
+	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	req, err := http.NewRequest(http.MethodPut, "http://127.0.0.1/load", strings.NewReader("[]"))
+	require.NoError(t, err)
+	via := make([]*http.Request, secutils.DefaultSSRFSafeHTTPClientConfig().MaxRedirects)
+	for i := range via {
+		via[i] = req
+	}
+	require.ErrorContains(t, newDorisStreamLoadHTTPClient().CheckRedirect(req, via), "stopped after")
 }
 
 // ---------------------------------------------------------------------------

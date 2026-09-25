@@ -5,31 +5,164 @@ import (
 	"encoding/json"
 )
 
+// PromptCacheStatus distinguishes a real cache miss from providers that do not
+// expose prompt-cache accounting. Treating both as zero makes fleet-level hit
+// rate dashboards misleading.
+type PromptCacheStatus string
+
+const (
+	PromptCacheStatusUnsupported PromptCacheStatus = "unsupported"
+	PromptCacheStatusUnreported  PromptCacheStatus = "unreported"
+	PromptCacheStatusMiss        PromptCacheStatus = "miss"
+	PromptCacheStatusHit         PromptCacheStatus = "hit"
+)
+
 // TokenUsage holds token consumption statistics returned by the model API.
 type TokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
-	// CachedTokens is the subset of PromptTokens that hit a provider-side
-	// prompt cache. Populated from `usage.prompt_tokens_details.cached_tokens`
-	// in OpenAI-compatible responses.
-	//
-	// Whether this field is non-zero depends on the provider's caching mode:
-	//
-	//   - Implicit caching (OpenAI, Azure OpenAI, DeepSeek, …) — automatic.
-	//     The field populates whenever the prompt prefix matches a previous
-	//     request within the provider's cache TTL. No client-side opt-in.
-	//
-	//   - Explicit caching (Qwen on Aliyun, Anthropic Claude, …) — opt-in
-	//     required. The caller must attach `cache_control: {"type":
-	//     "ephemeral"}` to the relevant message or content block to make
-	//     the provider create and read the cache. Until that opt-in is
-	//     applied, CachedTokens stays zero even when the prompt prefix is
-	//     otherwise byte-stable.
-	//
-	// Omitted from JSON when zero so payloads stay quiet for providers
-	// that never populate it.
-	CachedTokens int `json:"cached_tokens,omitempty"`
+	// CachedTokens is the legacy alias for CacheReadTokens. It remains on the
+	// wire for compatibility with existing API consumers.
+	CachedTokens     int               `json:"cached_tokens,omitempty"`
+	CacheReadTokens  int               `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int               `json:"cache_write_tokens,omitempty"`
+	CacheMissTokens  int               `json:"cache_miss_tokens,omitempty"`
+	CacheReported    bool              `json:"cache_reported"`
+	CacheStatus      PromptCacheStatus `json:"cache_status,omitempty"`
+	// ContextTokenScale is provider prompt tokens per cl100k-estimated token,
+	// measured over the turn's rounds. Persisted with the turn so the next
+	// turn's history loading and first compaction check are calibrated before
+	// any provider count of their own. Zero when the turn measured none.
+	ContextTokenScale float64 `json:"context_token_scale,omitempty"`
+}
+
+// SetPromptCacheUsage normalizes provider-specific cache counters into the
+// shared usage model. promptTokens remains the provider's total input-token
+// count; read/write/miss are descriptive subsets and must not be added to it.
+func (u *TokenUsage) SetPromptCacheUsage(read, write, miss int, reported bool) {
+	if u == nil {
+		return
+	}
+	if read < 0 {
+		read = 0
+	}
+	if write < 0 {
+		write = 0
+	}
+	if miss < 0 {
+		miss = 0
+	}
+	u.CachedTokens = read
+	u.CacheReadTokens = read
+	u.CacheWriteTokens = write
+	u.CacheMissTokens = miss
+	u.CacheReported = reported
+	switch {
+	case !reported:
+		u.CacheStatus = PromptCacheStatusUnreported
+	case read > 0:
+		u.CacheStatus = PromptCacheStatusHit
+	default:
+		u.CacheStatus = PromptCacheStatusMiss
+	}
+}
+
+// MarkPromptCacheUnsupported marks a provider/model path that cannot report
+// provider-side prompt-cache usage.
+func (u *TokenUsage) MarkPromptCacheUnsupported() {
+	if u == nil {
+		return
+	}
+	u.SetPromptCacheUsage(0, 0, 0, false)
+	u.CacheStatus = PromptCacheStatusUnsupported
+}
+
+// Accumulate adds another call's usage into u, preserving the subset
+// semantics: prompt/completion/total and every cache counter sum
+// independently (cache counters stay subsets of the prompt count and are
+// never folded into it). CacheReported ORs, and the cache status is
+// recomputed from the combined counters so a single cache hit anywhere in
+// the accumulated calls reads as a hit.
+func (u *TokenUsage) Accumulate(other TokenUsage) {
+	if u == nil {
+		return
+	}
+	u.PromptTokens += other.PromptTokens
+	u.CompletionTokens += other.CompletionTokens
+	u.TotalTokens += other.TotalTokens
+	u.CachedTokens += other.CachedTokens
+	u.CacheReadTokens += other.CacheReadTokens
+	u.CacheWriteTokens += other.CacheWriteTokens
+	u.CacheMissTokens += other.CacheMissTokens
+	u.CacheReported = u.CacheReported || other.CacheReported
+	// A scale is a ratio, not a count: the newest measurement stands.
+	if other.ContextTokenScale > 0 {
+		u.ContextTokenScale = other.ContextTokenScale
+	}
+	switch {
+	case !u.CacheReported:
+		u.CacheStatus = mergeUnreportedCacheStatus(u.CacheStatus, other.CacheStatus)
+	case u.CacheReadTokens > 0:
+		u.CacheStatus = PromptCacheStatusHit
+	default:
+		u.CacheStatus = PromptCacheStatusMiss
+	}
+}
+
+// mergeUnreportedCacheStatus folds the statuses of never-reported usage.
+// "unsupported" survives only while every accumulated call was itself
+// classified unsupported — the first accumulation adopts the incoming
+// classification, and any later call that is not known-unsupported (an
+// unreported or unclassified one) degrades the aggregate to unreported.
+func mergeUnreportedCacheStatus(accumulated, incoming PromptCacheStatus) PromptCacheStatus {
+	if accumulated == "" {
+		if incoming == "" {
+			return PromptCacheStatusUnreported
+		}
+		return incoming
+	}
+	if accumulated == PromptCacheStatusUnsupported && incoming == PromptCacheStatusUnsupported {
+		return PromptCacheStatusUnsupported
+	}
+	return PromptCacheStatusUnreported
+}
+
+// PromptCacheHitRate returns cache-read tokens as a percentage of the
+// provider's prompt total. Zero when the prompt is empty. A ReAct turn that
+// reuses the system prefix therefore reads as a high hit rather than a miss.
+func (u TokenUsage) PromptCacheHitRate() float64 {
+	if u.PromptTokens <= 0 {
+		return 0
+	}
+	return float64(u.CacheReadTokens) / float64(u.PromptTokens) * 100
+}
+
+// Value persists the usage as a jsonb column (assistant messages carry the
+// turn's aggregate); nil writes SQL NULL. Mirrors the nullable-pointer
+// pattern APIPrincipalConfig uses.
+func (u *TokenUsage) Value() (driver.Value, error) {
+	if u == nil {
+		return nil, nil
+	}
+	return json.Marshal(u)
+}
+
+// Scan restores a jsonb usage column; NULL leaves the receiver zero-valued.
+func (u *TokenUsage) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return nil
+	}
+	return json.Unmarshal(b, u)
 }
 
 // LLMToolCall represents a function/tool call from the LLM
@@ -38,11 +171,26 @@ type LLMToolCall struct {
 	Type             string           `json:"type"` // "function"
 	Function         FunctionCall     `json:"function"`
 	ProviderMetadata ToolCallMetadata `json:"provider_metadata,omitempty"`
+
+	// ModelArguments and the resolution fields are request-local observability
+	// state. ModelArguments preserves the exact JSON emitted by the model while
+	// Function.Arguments is decoded to durable application identifiers before
+	// tool execution. These fields must never be sent back to a provider or
+	// persisted in chat history.
+	ModelArguments     string   `json:"-"`
+	ArgumentResolution string   `json:"-"`
+	UnresolvedHandles  []string `json:"-"`
 }
 
 // ToolCallMetadata carries provider-specific tool-call state that must round-trip
 // with the assistant tool call, without teaching core agent code vendor fields.
 type ToolCallMetadata map[string]json.RawMessage
+
+// ProviderMetadata carries opaque provider state attached to an assistant
+// turn as a whole (OpenAI Responses reasoning items, OpenRouter
+// reasoning_details, ...). Keyed by protocol / vendor namespace so several
+// providers can coexist on one persisted message without collisions.
+type ProviderMetadata map[string]json.RawMessage
 
 // FunctionCall represents the function details
 type FunctionCall struct {
@@ -55,10 +203,16 @@ type ChatResponse struct {
 	Content string `json:"content"`
 	// ReasoningContent 是支持思考链的模型（DeepSeek thinking、小米 MiMo、vLLM reasoning 等）
 	// 在本轮输出的推理内容。需要在后续多轮请求中原样回传给那些严格校验的供应商。
-	ReasoningContent string        `json:"reasoning_content,omitempty"`
-	ToolCalls        []LLMToolCall `json:"tool_calls,omitempty"`
-	FinishReason     string        `json:"finish_reason,omitempty"`
-	Usage            TokenUsage    `json:"usage"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// ReasoningSignature and ReasoningMetadata are the provider-issued
+	// artifacts that must be replayed together with ReasoningContent on the
+	// next turn (Anthropic thinking signatures, Gemini thought signatures,
+	// OpenAI Responses encrypted reasoning items).
+	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
+	ReasoningMetadata  ProviderMetadata `json:"reasoning_metadata,omitempty"`
+	ToolCalls          []LLMToolCall    `json:"tool_calls,omitempty"`
+	FinishReason       string           `json:"finish_reason,omitempty"`
+	Usage              TokenUsage       `json:"usage"`
 
 	// AnswerStreamed reports whether the user-facing answer text was already
 	// streamed live to the final-answer UI area during this round (i.e. the
@@ -88,6 +242,10 @@ const (
 	ResponseTypeToolCall ResponseType = "tool_call"
 	// Tool result response type (for agent tool results)
 	ResponseTypeToolResult ResponseType = "tool_result"
+	// ResponseTypeInstallOutput carries installer progress without completing a tool.
+	ResponseTypeInstallOutput ResponseType = "install_output"
+	// ResponseTypeCommandOutput updates the pending tool card without completing it.
+	ResponseTypeCommandOutput ResponseType = "command_output"
 	// Error response type
 	ResponseTypeError ResponseType = "error"
 	// Reflection response type (for agent reflection)
@@ -98,6 +256,11 @@ const (
 	ResponseTypeAgentQuery ResponseType = "agent_query"
 	// Complete response type (agent complete)
 	ResponseTypeComplete ResponseType = "complete"
+	// ResponseTypeArtifactsPending is sent while skill/sandbox output is being
+	// copied into persistent storage after the answer has already streamed.
+	// The UI shows a toolbar placeholder until ResponseTypeComplete carries
+	// the file list.
+	ResponseTypeArtifactsPending ResponseType = "artifacts_pending"
 	// ToolApprovalRequired: MCP tool marked dangerous — UI must collect user approval before execution continues
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
 	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay
@@ -109,9 +272,49 @@ const (
 	// MCPOAuthResolved: authorization completed / timed out / canceled;
 	// informational for UI replay.
 	ResponseTypeMCPOAuthResolved ResponseType = "mcp_oauth_resolved"
+	// MemoryRecalled: the long-term memories injected into this answer, so
+	// the UI can show and let the user delete what influenced it.
+	ResponseTypeMemoryRecalled ResponseType = "memory_recalled"
+	// ResponseTypeSteer is the per-run control signal a client POSTs while a
+	// turn is still running. It rides the same StreamManager keyspace as the
+	// stop event but in a dedicated sub-list (AppendSteerEvents/GetSteerEvents)
+	// so it never appears on the user-visible SSE stream. The running engine
+	// drains it at the next round boundary (SteerSink.PollSteer) or, when the
+	// loop has already exited, the run's teardown paths hand it to the next
+	// run — unless the turn was stopped, in which case it is discarded.
+	ResponseTypeSteer ResponseType = "steer"
+	// ResponseTypeUserMessageInjected is emitted on the user-visible stream
+	// right after a steered message was accepted into the running turn: a
+	// user-role DB row has been persisted under the run's request_id and the
+	// text was appended to the agent's message list. The frontend uses it to
+	// move the queued message out of the composer overlay and into the
+	// transcript.
+	ResponseTypeUserMessageInjected ResponseType = "user_message_injected"
+	// ResponseTypeContextCompacted is older conversation summarized away to
+	// fit the context window. Surfaced because it changes what the agent
+	// remembers — an answer that forgets an earlier instruction is otherwise
+	// indistinguishable from the model ignoring it.
+	ResponseTypeContextCompacted ResponseType = "context_compacted"
+	// ResponseTypeInstallPrompt is the instruction a skill install handed to
+	// the installer agent. Only the skill install transcript emits this, and
+	// it emits it first, so replaying the log alone shows what was asked for
+	// — the console does not have to read the durable prompt row to caption
+	// the run.
+	ResponseTypeInstallPrompt ResponseType = "install_prompt"
 )
 
 // StreamResponse stream response
+// FinishReasonIncomplete marks a stream that broke before the provider sent a
+// finish reason (read error, timeout, stall). Whatever content and tool calls
+// were collected are a partial response: callers must not treat them as a
+// completed turn.
+const FinishReasonIncomplete = "incomplete"
+
+// StreamEndedEarlyError is what a consumer reports for an answer that arrived
+// with FinishReasonIncomplete: the stream stopped before the provider said the
+// message was finished, most often because a proxy cut the connection.
+const StreamEndedEarlyError = "the model's response ended before it finished (connection interrupted)"
+
 type StreamResponse struct {
 	ID                  string                 `json:"id"`
 	ResponseType        ResponseType           `json:"response_type"`

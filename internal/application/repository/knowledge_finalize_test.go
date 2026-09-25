@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -21,6 +23,7 @@ import (
 // processing/finalizing/completed columns the helpers care about.
 const knowledgesTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledges (
+    profile TEXT,
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
@@ -32,6 +35,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     enable_status VARCHAR(50) NOT NULL DEFAULT 'enabled',
     embedding_model_id VARCHAR(64),
     file_name VARCHAR(255),
+    folder_path VARCHAR(1024) NOT NULL DEFAULT '',
     file_type VARCHAR(50),
     file_size BIGINT,
     file_path TEXT,
@@ -89,6 +93,30 @@ func reloadKnowledgeRow(t *testing.T, db *gorm.DB, id string) (status string, co
 	row := db.Raw(`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`, id).Row()
 	require.NoError(t, row.Scan(&status, &count))
 	return status, count
+}
+
+func reloadKnowledgeErrorMessage(t *testing.T, db *gorm.DB, id string) string {
+	t.Helper()
+	var msg string
+	require.NoError(t, db.Raw(`SELECT COALESCE(error_message, '') FROM knowledges WHERE id = ?`, id).Scan(&msg).Error)
+	return msg
+}
+
+func TestKnowledgeRepository_UpdateKnowledgeColumnsSanitizesErrorMessage(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	id := insertProcessingKnowledge(t, db)
+	invalid := "parse failed " + string([]byte{0xef, 0xbc, 0x2e})
+
+	require.NoError(t, repo.UpdateKnowledgeColumns(context.Background(), id, map[string]interface{}{
+		"error_message": invalid,
+	}))
+
+	got := reloadKnowledgeErrorMessage(t, db, id)
+	if !utf8.ValidString(got) {
+		t.Fatalf("persisted error_message is invalid UTF-8: % x", []byte(got))
+	}
+	assert.Equal(t, "parse failed .", got)
 }
 
 func insertKnowledgeWithStatus(t *testing.T, db *gorm.DB, status string, deleted bool) string {
@@ -206,6 +234,97 @@ func TestFinalizeSubtask_DecrementClampedAtZero(t *testing.T) {
 	assert.Equal(t, 0, count, "pending_subtasks_count must be clamped at zero")
 }
 
+// A row no longer in finalizing (cancelled, failed by housekeeping) only has
+// its counter decremented: reaching zero must not promote it to completed.
+func TestFinalizeSubtask_NonFinalizingRowOnlyDecrements(t *testing.T) {
+	for _, status := range []string{types.ParseStatusCancelled, types.ParseStatusFailed, types.ParseStatusProcessing} {
+		t.Run(status, func(t *testing.T) {
+			db := setupKnowledgeTestDB(t)
+			repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+			id := insertKnowledgeWithStatus(t, db, status, false)
+			require.NoError(t, db.Exec(`UPDATE knowledges SET pending_subtasks_count = 1 WHERE id = ?`, id).Error)
+
+			count, promoted, err := repo.FinalizeSubtask(context.Background(), id)
+
+			require.NoError(t, err)
+			assert.False(t, promoted)
+			assert.Zero(t, count)
+			got, n := reloadKnowledgeRow(t, db, id)
+			assert.Equal(t, status, got)
+			assert.Zero(t, n)
+		})
+	}
+}
+
+// Decrement and promote commit together: a promote that failed after its
+// decrement had committed left the counter at zero with nobody left to
+// promote the row. A failed promote must roll the decrement back so the
+// retried release drains the same slot again.
+func TestFinalizeSubtask_FailedPromoteRollsBackDecrement(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+	id := insertProcessingKnowledge(t, db)
+	_, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+		CREATE TRIGGER refuse_promote BEFORE UPDATE OF parse_status ON knowledges
+		WHEN NEW.parse_status = 'completed'
+		BEGIN SELECT RAISE(ABORT, 'promote refused'); END
+	`).Error)
+
+	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+
+	require.ErrorContains(t, err, "promote refused")
+	assert.False(t, promoted)
+	status, count := reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count, "the decrement must roll back with the failed promote")
+
+	require.NoError(t, db.Exec(`DROP TRIGGER refuse_promote`).Error)
+	_, promoted, err = repo.FinalizeSubtask(ctx, id)
+	require.NoError(t, err)
+	assert.True(t, promoted, "the retried release drains and promotes")
+	status, count = reloadKnowledgeRow(t, db, id)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	assert.Zero(t, count)
+}
+
+// TestSetFinalizingAndFinalizeSubtask_ClearStaleErrorMessage is the
+// regression test for stale error_message: a row that failed once keeps
+// error_message set, and both entering finalizing (a new attempt) and
+// promoting to completed (a successful finish) must clear it so the UI
+// no longer shows an outdated failure.
+func TestSetFinalizingAndFinalizeSubtask_ClearStaleErrorMessage(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	id := insertProcessingKnowledge(t, db)
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET error_message = ? WHERE id = ?`,
+		"Task interrupted due to application restart",
+		id,
+	).Error)
+
+	transitioned, err := repo.SetFinalizing(ctx, id, 1)
+	require.NoError(t, err)
+	require.True(t, transitioned)
+	assert.Empty(t, reloadKnowledgeErrorMessage(t, db, id),
+		"SetFinalizing must clear error_message from the previous attempt")
+
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET error_message = ? WHERE id = ?`,
+		"stale finalizing failure",
+		id,
+	).Error)
+	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+	require.NoError(t, err)
+	require.True(t, promoted)
+	assert.Empty(t, reloadKnowledgeErrorMessage(t, db, id),
+		"promotion to completed must clear error_message")
+}
+
 // TestUpdateKnowledge_DoesNotClobberPendingCounter is the regression test
 // for the original bug: a full-row Save with a stale in-memory counter
 // must not write that stale value back, otherwise it overwrites atomic
@@ -292,22 +411,63 @@ func TestUpdateActiveDeletingKnowledgeColumns_GuardsStateAndSoftDelete(t *testin
 	activeCompletedID := insertKnowledgeWithStatus(t, db, types.ParseStatusCompleted, false)
 	deletedDeletingID := insertKnowledgeWithStatus(t, db, types.ParseStatusDeleting, true)
 
-	updated, err := repo.UpdateActiveDeletingKnowledgeColumns(ctx, activeDeletingID, map[string]interface{}{
-		"parse_status":  types.ParseStatusFailed,
-		"error_message": "delete task exhausted retries",
-	})
+	require.NoError(
+		t,
+		db.Exec(
+			"UPDATE knowledges SET knowledge_base_id = ? WHERE id IN ?",
+			"delete-kb",
+			[]string{activeDeletingID, activeCompletedID, deletedDeletingID},
+		).Error,
+	)
+	for _, scope := range []struct {
+		tenant uint64
+		kb     string
+	}{{2, "delete-kb"}, {1, "other-kb"}, {0, "delete-kb"}, {1, ""}} {
+		updated, err := repo.UpdateActiveDeletingKnowledgeColumns(
+			ctx,
+			scope.tenant,
+			scope.kb,
+			activeDeletingID,
+			map[string]interface{}{"parse_status": types.ParseStatusFailed},
+		)
+		require.NoError(t, err)
+		require.False(t, updated)
+	}
+
+	updated, err := repo.UpdateActiveDeletingKnowledgeColumns(
+		ctx,
+		1,
+		"delete-kb",
+		activeDeletingID,
+		map[string]interface{}{
+			"parse_status":  types.ParseStatusFailed,
+			"error_message": "delete task exhausted retries",
+		},
+	)
 	require.NoError(t, err)
 	assert.True(t, updated)
 
-	updated, err = repo.UpdateActiveDeletingKnowledgeColumns(ctx, activeCompletedID, map[string]interface{}{
-		"parse_status": types.ParseStatusFailed,
-	})
+	updated, err = repo.UpdateActiveDeletingKnowledgeColumns(
+		ctx,
+		1,
+		"delete-kb",
+		activeCompletedID,
+		map[string]interface{}{
+			"parse_status": types.ParseStatusFailed,
+		},
+	)
 	require.NoError(t, err)
 	assert.False(t, updated)
 
-	updated, err = repo.UpdateActiveDeletingKnowledgeColumns(ctx, deletedDeletingID, map[string]interface{}{
-		"parse_status": types.ParseStatusFailed,
-	})
+	updated, err = repo.UpdateActiveDeletingKnowledgeColumns(
+		ctx,
+		1,
+		"delete-kb",
+		deletedDeletingID,
+		map[string]interface{}{
+			"parse_status": types.ParseStatusFailed,
+		},
+	)
 	require.NoError(t, err)
 	assert.False(t, updated)
 
@@ -317,4 +477,47 @@ func TestUpdateActiveDeletingKnowledgeColumns_GuardsStateAndSoftDelete(t *testin
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	status, _ = reloadKnowledgeRow(t, db, deletedDeletingID)
 	assert.Equal(t, types.ParseStatusDeleting, status)
+}
+
+func TestCompleteProcessingWithoutSubtasks(t *testing.T) {
+	for _, tc := range []struct {
+		status  string
+		deleted bool
+		want    bool
+	}{
+		{types.ParseStatusProcessing, false, true},
+		{types.ParseStatusCancelled, false, false},
+		{types.ParseStatusDeleting, false, false},
+		{types.ParseStatusCompleted, false, false},
+		{types.ParseStatusFinalizing, false, false},
+		{types.ParseStatusProcessing, true, false},
+	} {
+		t.Run(tc.status+"/deleted="+fmt.Sprint(tc.deleted), func(t *testing.T) {
+			db := setupKnowledgeTestDB(t)
+			repo := NewKnowledgeRepository(db)
+			id := insertKnowledgeWithStatus(t, db, tc.status, tc.deleted)
+			require.NoError(t, db.Exec(
+				`UPDATE knowledges SET summary_status = 'pending', error_message = 'old error' WHERE id = ?`, id,
+			).Error)
+			completed, err := repo.CompleteProcessingWithoutSubtasks(context.Background(), id)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, completed)
+			status, count := reloadKnowledgeRow(t, db, id)
+			var summary string
+			require.NoError(t, db.Raw(`SELECT summary_status FROM knowledges WHERE id = ?`, id).Scan(&summary).Error)
+			if tc.want {
+				require.Equal(t, types.ParseStatusCompleted, status)
+				require.Zero(t, count)
+				require.Equal(t, types.SummaryStatusNone, summary)
+				require.Empty(t, reloadKnowledgeErrorMessage(t, db, id))
+				completed, err = repo.CompleteProcessingWithoutSubtasks(context.Background(), id)
+				require.NoError(t, err)
+				require.False(t, completed, "duplicate delivery must not complete twice")
+			} else {
+				require.Equal(t, tc.status, status)
+				require.Equal(t, types.SummaryStatusPending, summary)
+				require.Equal(t, "old error", reloadKnowledgeErrorMessage(t, db, id))
+			}
+		})
+	}
 }

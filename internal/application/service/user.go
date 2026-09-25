@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,41 +34,54 @@ var (
 	jwtSecretOnce sync.Once
 	jwtSecret     string
 
+	// ErrUserEmailExists is returned by Register when the target entity's
+	// email already exists.
+	ErrUserEmailExists = errors.New("user with this email already exists")
+
+	// ErrUserUsernameExists is returned by Register when the target entity's
+	// username already exists.
+	ErrUserUsernameExists = errors.New("user with this username already exists")
+
+	// ErrUserIdentityConflict is returned by AdminCreateUser when only part
+	// of the requested identity (email or username) collides with an existing
+	// user, so a blind idempotent retry would return the wrong account.
+	ErrUserIdentityConflict = errors.New("email and username refer to conflicting existing identities")
+
 	// ErrPasswordPolicy is returned when a newly chosen password does not
 	// meet the product's public 8-32 character, letter-and-number contract.
 	// It is exported so HTTP handlers can translate the failure to a 400
 	// without exposing bcrypt or persistence errors.
-	ErrPasswordPolicy = errors.New("password must be 8-32 characters and contain at least one letter and one number")
+	ErrPasswordPolicy = errors.New(
+		"password must be 8-32 characters and contain at least one letter and one number")
+	// ErrComplexPasswordPolicy is returned when the runtime complex-password
+	// switch is on and the new password is missing a required character class.
+	ErrComplexPasswordPolicy = errors.New(
+		"password must be 8-32 characters and must contain uppercase and lowercase " +
+			"letters, numbers, and special characters")
+
+	// ErrInvalidOldPassword is returned by ChangePassword when the supplied
+	// current password does not match the stored hash. Handlers map this to
+	// a 400 so callers can prompt the user without treating it as a 500.
+	ErrInvalidOldPassword = errors.New("invalid old password")
+
+	// ErrSamePassword is returned when the new password equals the current
+	// one so callers can reject no-op rotations that would still revoke
+	// every session.
+	ErrSamePassword = errors.New("new password must differ from current password")
 )
 
-// ValidatePasswordPolicy keeps administrative password resets aligned with
-// the registration form's documented policy. Password bytes are never logged
-// or included in the returned error.
-func ValidatePasswordPolicy(password string) error {
-	length := utf8.RuneCountInString(password)
-	if length < 8 || length > 32 {
-		return ErrPasswordPolicy
-	}
-	hasLetter := false
-	hasNumber := false
-	for _, r := range password {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
-			hasLetter = true
-		case r >= '0' && r <= '9':
-			hasNumber = true
-		}
-	}
-	if !hasLetter || !hasNumber {
-		return ErrPasswordPolicy
-	}
-	return nil
-}
+// Machine-readable change-password failure reasons for HTTP details fields.
+const (
+	DetailInvalidOldPassword = "invalid_old_password"
+	DetailPasswordPolicy     = "password_policy"
+	DetailSamePassword       = "same_password"
+)
 
 // getJwtSecret retrieves the JWT secret from the environment, falling back to a securely generated random secret.
 func getJwtSecret() string {
 	jwtSecretOnce.Do(func() {
-		if envSecret := strings.TrimSpace(os.Getenv("JWT_SECRET")); envSecret != "" {
+		envSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+		if envSecret != "" && envSecret != "weknora-jwt-secret" && envSecret != "CHANGE-ME-jwt-secret" {
 			jwtSecret = envSecret
 			return
 		}
@@ -83,11 +98,12 @@ func getJwtSecret() string {
 
 // userService implements the UserService interface
 type userService struct {
-	userRepo      interfaces.UserRepository
-	tokenRepo     interfaces.AuthTokenRepository
-	tenantService interfaces.TenantService
-	memberService interfaces.TenantMemberService
-	config        *config.Config
+	userRepo         interfaces.UserRepository
+	tokenRepo        interfaces.AuthTokenRepository
+	tenantService    interfaces.TenantService
+	memberService    interfaces.TenantMemberService
+	config           *config.Config
+	systemSettingSvc interfaces.SystemSettingService
 }
 
 // NewUserService creates a new user service instance
@@ -97,14 +113,20 @@ func NewUserService(
 	tokenRepo interfaces.AuthTokenRepository,
 	tenantService interfaces.TenantService,
 	memberService interfaces.TenantMemberService,
+	systemSettingSvc interfaces.SystemSettingService,
 ) interfaces.UserService {
 	return &userService{
-		userRepo:      userRepo,
-		tokenRepo:     tokenRepo,
-		tenantService: tenantService,
-		memberService: memberService,
-		config:        configInfo,
+		userRepo:         userRepo,
+		tokenRepo:        tokenRepo,
+		tenantService:    tenantService,
+		memberService:    memberService,
+		config:           configInfo,
+		systemSettingSvc: systemSettingSvc,
 	}
+}
+
+func (s *userService) complexPasswordEnabled(ctx context.Context) bool {
+	return ResolveComplexPasswordEnabled(ctx, s.config, s.systemSettingSvc)
 }
 
 // Register creates a new user account
@@ -119,12 +141,12 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 	// Check if user already exists
 	existingUser, _ := s.userRepo.GetUserByEmail(ctx, req.Email)
 	if existingUser != nil {
-		return nil, errors.New("user with this email already exists")
+		return nil, ErrUserEmailExists
 	}
 
 	existingUser, _ = s.userRepo.GetUserByUsername(ctx, req.Username)
 	if existingUser != nil {
-		return nil, errors.New("user with this username already exists")
+		return nil, ErrUserUsernameExists
 	}
 
 	// Hash password
@@ -312,16 +334,21 @@ func (s *userService) buildMembershipsForUser(
 	if user == nil {
 		return []types.Membership{}
 	}
+	// Only synthesise a membership from User.TenantID when the membership
+	// service is entirely unavailable (partial DI graphs / legacy tests).
+	// Once ListByUser is reachable, an empty or fully-filtered result is
+	// authoritative: inventing a row from a stale users.tenant_id is what
+	// kept removed workspaces visible in the space switcher (#2586).
 	if s.memberService == nil {
 		return synthFallbackMembership(user, activeTenant)
 	}
 	rows, err := s.memberService.ListByUser(ctx, user.ID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list memberships for user %s: %v", user.ID, err)
-		return synthFallbackMembership(user, activeTenant)
+		return []types.Membership{}
 	}
 	if len(rows) == 0 {
-		return synthFallbackMembership(user, activeTenant)
+		return []types.Membership{}
 	}
 	// 收集需要批量查询名称的 tenant id（跳过 activeTenant 因为它已经在手）。
 	needsLookup := make([]uint64, 0, len(rows))
@@ -366,17 +393,18 @@ func (s *userService) buildMembershipsForUser(
 			Role:       m.Role,
 		})
 	}
-	if len(out) == 0 {
-		return synthFallbackMembership(user, activeTenant)
-	}
 	return out
 }
 
 // synthFallbackMembership returns a single-row membership list inferred
-// from User.TenantID. Used when the membership table has not been
-// populated yet (e.g. during the rollout window where the migration has
-// run but the auth middleware's auto-promotion hasn't fired) so the
-// response shape stays consistent.
+// from User.TenantID. Used only when the membership service itself is
+// unavailable (partial DI graphs in tests, or a rollout window where the
+// service has not been wired yet) so the response shape stays consistent.
+//
+// Callers that successfully queried tenant_members must NOT use this
+// helper: an empty membership list is authoritative and synthesising
+// from users.tenant_id would re-surface workspaces the user was removed
+// from (#2586).
 //
 // The fallback role is intentionally TenantRoleViewer (least privilege):
 // the login response only feeds UI rendering, and the backend re-derives
@@ -585,7 +613,7 @@ func (s *userService) RevokeSystemAdmin(ctx context.Context, userID, actorID str
 // UpdateUserPreferences applies a partial update over the user's
 // preferences blob. PATCH semantics: only keys present in `patch`
 // (non-nil pointer fields) replace the existing value; everything else
-// is preserved. This lets the front-end PUT only the toggle that
+// is preserved. This lets the front-end PUT only the preference that
 // changed without having to read-modify-write the whole struct, and
 // also makes the endpoint forward-compatible — older clients that
 // don't know about newer keys won't accidentally erase them.
@@ -600,9 +628,18 @@ func (s *userService) UpdateUserPreferences(
 	}
 
 	merged := user.Preferences
-	if patch.EnableMemory != nil {
-		v := *patch.EnableMemory
-		merged.EnableMemory = &v
+	if patch.BrowserSearchInstructions != nil {
+		value := strings.TrimSpace(*patch.BrowserSearchInstructions)
+		if utf8.RuneCountInString(value) > types.MaxBrowserSearchInstructionsLength {
+			return types.UserPreferences{}, fmt.Errorf(
+				"browser search instructions must not exceed %d characters",
+				types.MaxBrowserSearchInstructionsLength,
+			)
+		}
+		merged.BrowserSearchInstructions = nil
+		if value != "" && value != types.DefaultBrowserSearchInstructions {
+			merged.BrowserSearchInstructions = &value
+		}
 	}
 	if patch.LastActiveTenantID != nil {
 		// *0 = "forget my preference, fall back to home on next login";
@@ -615,6 +652,31 @@ func (s *userService) UpdateUserPreferences(
 			v := *patch.LastActiveTenantID
 			merged.LastActiveTenantID = &v
 		}
+	}
+	if patch.Gallery != nil {
+		// Whole-object replace per key: the gallery sends its complete
+		// current state (mode + full status map) on every change, so there
+		// is no meaningful partial-merge within the block. Values are
+		// clamped so a stray client cannot bloat the column or poison the
+		// mode.
+		g := merged.Gallery
+		if g == nil {
+			g = &types.GalleryUserPrefs{}
+		}
+		if patch.Gallery.Mode == types.GalleryModeAll || patch.Gallery.Mode == types.GalleryModeCustom {
+			g.Mode = patch.Gallery.Mode
+		}
+		if patch.Gallery.Status != nil {
+			status := make(map[string]string, len(patch.Gallery.Status))
+			for id, v := range patch.Gallery.Status {
+				if (v == types.GalleryStatusOn || v == types.GalleryStatusOff) &&
+					len(id) <= 128 && len(status) < 200 {
+					status[id] = v
+				}
+			}
+			g.Status = status
+		}
+		merged.Gallery = g
 	}
 
 	user.Preferences = merged
@@ -630,17 +692,29 @@ func (s *userService) DeleteUser(ctx context.Context, id string) error {
 	return s.userRepo.DeleteUser(ctx, id)
 }
 
-// ChangePassword changes user password
-func (s *userService) ChangePassword(ctx context.Context, userID string, oldPassword, newPassword string) error {
+// ChangePassword changes user password after verifying the current
+// credential. The new password must satisfy ValidatePasswordPolicy so
+// self-service rotation cannot introduce weaker passwords than
+// registration / admin reset allow. On success every outstanding session
+// is revoked so a stolen token cannot survive the rotation.
+func (s *userService) ChangePassword(ctx context.Context, userID, oldPassword, newPassword string) error {
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return err
 	}
 
-	// Verify old password
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword))
-	if err != nil {
-		return errors.New("invalid old password")
+	// Verify old password before policy checks so callers with a wrong
+	// current credential get a clear failure instead of a policy error.
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
+		return ErrInvalidOldPassword
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(newPassword)); err == nil {
+		return ErrSamePassword
+	}
+
+	if err := ValidatePasswordPolicy(newPassword, s.complexPasswordEnabled(ctx)); err != nil {
+		return err
 	}
 
 	// Hash new password
@@ -651,6 +725,10 @@ func (s *userService) ChangePassword(ctx context.Context, userID string, oldPass
 
 	user.PasswordHash = string(hashedPassword)
 	user.UpdatedAt = time.Now()
+	if user.Preferences.OidcOnlyLogin != nil && *user.Preferences.OidcOnlyLogin {
+		cleared := false
+		user.Preferences.OidcOnlyLogin = &cleared
+	}
 
 	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
 		return err
@@ -665,8 +743,8 @@ func (s *userService) ChangePassword(ctx context.Context, userID string, oldPass
 // credential. Authorization and the cannot-reset-self rule live at the system
 // admin HTTP boundary; this service owns the security-critical persistence and
 // session invalidation so no caller can accidentally update only one of them.
-func (s *userService) AdminResetPassword(ctx context.Context, userID string, newPassword string) error {
-	if err := ValidatePasswordPolicy(newPassword); err != nil {
+func (s *userService) AdminResetPassword(ctx context.Context, userID, newPassword string) error {
+	if err := ValidatePasswordPolicy(newPassword, s.complexPasswordEnabled(ctx)); err != nil {
 		return err
 	}
 
@@ -686,6 +764,107 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID string, new
 	}
 
 	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
+}
+
+// AdminCreateUser provisions a new local user on behalf of a SystemAdmin.
+//
+// An absent password generates a random one, returned exactly once.
+// Any provided password, must satisfy ValidatePasswordPolicy.
+//
+// Delegates to Register, so duplicate checks, tenant provisioning and Owner
+// membership bootstrapping match public registration.
+func (s *userService) AdminCreateUser(
+	ctx context.Context,
+	req *types.AdminCreateUserRequest,
+	provisioning types.TenantProvisioningMode,
+) (*types.User, string, error) {
+	if req == nil || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Email) == "" {
+		return nil, "", errors.New("username and email are required")
+	}
+
+	password := ""
+	generated := false
+	complexPasswordEnabled := s.complexPasswordEnabled(ctx)
+
+	if req.Password == nil {
+		randomPassword, err := generatePolicyCompliantPassword(complexPasswordEnabled)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to generate password: %w", err)
+		}
+		password = randomPassword
+		generated = true
+	} else {
+		password = *req.Password
+	}
+	// Generation triggers only on an absent password. Any provided
+	// value, empty or whitespace-only, is hashed byte-for-byte and must
+	// satisfy the password policy.
+	if err := ValidatePasswordPolicy(password, complexPasswordEnabled); err != nil {
+		return nil, "", err
+	}
+
+	user, err := s.Register(ctx, &types.RegisterRequest{
+		Username:           strings.TrimSpace(req.Username),
+		Email:              strings.TrimSpace(req.Email),
+		Password:           password,
+		TenantProvisioning: provisioning,
+	})
+	// WARN: idempotency is sequential only. Two concurrent creates of the
+	// same identity can race past Register's check; the loser gets a 500,
+	// and a retry resolves idempotently.
+	if err != nil {
+		// Register owns duplicate detection; on a duplicate we surface
+		// the existing row so the caller can respond idempotently. The
+		// sentinel names the colliding identity, so the lookup is
+		// targeted at exactly that key.
+		switch {
+		case errors.Is(err, ErrUserEmailExists):
+			return s.adminCreateUserOnDuplicate(
+				ctx, req, err,
+				func(ctx context.Context) (*types.User, error) {
+					return s.userRepo.GetUserByEmail(ctx, strings.TrimSpace(req.Email))
+				},
+			)
+		case errors.Is(err, ErrUserUsernameExists):
+			return s.adminCreateUserOnDuplicate(
+				ctx, req, err,
+				func(ctx context.Context) (*types.User, error) {
+					return s.userRepo.GetUserByUsername(ctx, strings.TrimSpace(req.Username))
+				},
+			)
+		}
+		return nil, "", err
+	}
+	if generated {
+		return user, password, nil
+	}
+	return user, "", nil
+}
+
+func (s *userService) adminCreateUserOnDuplicate(
+	ctx context.Context,
+	req *types.AdminCreateUserRequest,
+	dupErr error,
+	lookup func(context.Context) (*types.User, error),
+) (*types.User, string, error) {
+	existing, lookupErr := lookup(ctx)
+	if lookupErr != nil || existing == nil {
+		return nil, "", dupErr
+	}
+	if adminCreateIdentityMatches(existing, req.Username, req.Email) {
+		return existing, "", dupErr
+	}
+	return nil, "", ErrUserIdentityConflict
+}
+
+// adminCreateIdentityMatches reports whether an existing row is the exact
+// identity an admin create is idempotently retrying (both email and username).
+func adminCreateIdentityMatches(existing *types.User, username, email string) bool {
+	if existing == nil {
+		return false
+	}
+	return existing.Username == strings.TrimSpace(username) &&
+		existing.Email == strings.TrimSpace(email)
 }
 
 // ValidatePassword validates user password
@@ -780,6 +959,14 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 // token when a usable tenant is available (repairs partial
 // invitation/admin-assignment flows). resolveFirstMembershipTenant
 // best-effort persists the resolved tenant as the new home.
+//
+// When users.tenant_id is non-zero we still verify an active membership
+// still exists (mirroring resolveLoginTenantID's check on
+// LastActiveTenantID). A dangling home pointer is common after
+// RemoveMember: the membership row is soft-deleted but users.tenant_id
+// was historically left untouched, which made the removed workspace
+// reappear via synthFallbackMembership (#2586). Superusers that can
+// access every tenant skip the membership gate.
 func (s *userService) homeOrFirstMembershipTenant(ctx context.Context, user *types.User) uint64 {
 	if user == nil {
 		return 0
@@ -787,7 +974,42 @@ func (s *userService) homeOrFirstMembershipTenant(ctx context.Context, user *typ
 	if user.TenantID == 0 {
 		return s.resolveFirstMembershipTenant(ctx, user)
 	}
-	return user.TenantID
+	if user.CanAccessAllTenants || s.memberService == nil {
+		return user.TenantID
+	}
+	member, err := s.memberService.GetMembership(ctx, user.ID, user.TenantID)
+	if err == nil && member != nil && member.Status == types.TenantMemberStatusActive {
+		return user.TenantID
+	}
+	logger.Warnf(ctx,
+		"homeOrFirstMembershipTenant: user %s home tenant %d has no active membership, "+
+			"clearing stale home and re-resolving (err=%v)",
+		user.ID, user.TenantID, err)
+	s.clearStaleHomeTenant(ctx, user)
+	return s.resolveFirstMembershipTenant(ctx, user)
+}
+
+// clearStaleHomeTenant best-effort zeroes users.tenant_id (and a
+// LastActiveTenantID that pointed at the same workspace) after the home
+// membership is observed to be gone. Failures are logged but never
+// fail login: the in-memory user is already corrected for this request.
+func (s *userService) clearStaleHomeTenant(ctx context.Context, user *types.User) {
+	if user == nil {
+		return
+	}
+	staleHome := user.TenantID
+	user.TenantID = 0
+	if user.Preferences.LastActiveTenantID != nil && *user.Preferences.LastActiveTenantID == staleHome {
+		user.Preferences.LastActiveTenantID = nil
+	}
+	if s.userRepo == nil {
+		return
+	}
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		logger.Warnf(ctx,
+			"clearStaleHomeTenant: failed to persist cleared home for user %s (was tenant %d): %v",
+			user.ID, staleHome, err)
+	}
 }
 
 // resolveFirstMembershipTenant makes a tenantless identity usable when an
@@ -917,6 +1139,13 @@ func (s *userService) generateTokensForTenant(
 // The previous refresh token (if provided) is revoked so the old session
 // can no longer roll forward into the source tenant.
 //
+// On success the target is also recorded as the user's last-active-
+// tenant preference. Refresh tokens do not carry tenant_id, so
+// RefreshToken / the next login re-resolve from this preference;
+// a successful switch therefore has to persist it before minting
+// tokens. A write failure aborts the switch so we never return a
+// token pair whose later refresh would bounce to a different workspace.
+//
 // Returns ErrMembershipNotFound when the user is not a member of the
 // target tenant. Cross-tenant superuser access (CanAccessAllTenants)
 // is allowed without a membership row, mirroring the auth middleware's
@@ -954,6 +1183,14 @@ func (s *userService) SwitchTenant(
 		return nil, fmt.Errorf("load target workspace: %w", err)
 	}
 
+	// Persist before minting tokens so a 200 response is also a
+	// durable landing-preference update. RefreshToken re-reads this
+	// field; writing after issue would leave a window where access
+	// is scoped to targetTenantID but refresh falls back to home.
+	if err := s.recordLastActiveTenant(ctx, user, targetTenantID); err != nil {
+		return nil, fmt.Errorf("record last-active-tenant preference: %w", err)
+	}
+
 	accessToken, refreshToken, err := s.generateTokensForTenant(ctx, user, targetTenantID)
 	if err != nil {
 		return nil, fmt.Errorf("generate tokens: %w", err)
@@ -979,6 +1216,27 @@ func (s *userService) SwitchTenant(
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 	}, nil
+}
+
+// recordLastActiveTenant records tenantID as the user's last-active-
+// tenant preference so fresh logins and refresh-token rotations land
+// in the last activated workspace. Switching home writes the home ID
+// rather than clearing; resolveLoginTenantID treats *home the same as
+// nil today. (The SPA still sends 0 when switching home — landing is
+// equivalent unless home tenant_id is later rewritten while the old
+// home membership remains.) Errors are returned to the caller.
+func (s *userService) recordLastActiveTenant(ctx context.Context, user *types.User, tenantID uint64) error {
+	if user == nil || tenantID == 0 {
+		return nil
+	}
+	patch := types.UserPreferences{LastActiveTenantID: &tenantID}
+	merged, err := s.UpdateUserPreferences(ctx, user.ID, patch)
+	if err != nil {
+		return err
+	}
+	// Reflect the persisted preferences in the switch response.
+	user.Preferences = merged
+	return nil
 }
 
 // ValidateToken validates an access token. The second return value is
@@ -1011,6 +1269,9 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	if isRefreshTokenClaims(claims) {
 		return nil, 0, errors.New("refresh token cannot be used as access token")
 	}
+	if isSandboxTerminalTicketClaims(claims) {
+		return nil, 0, errors.New("terminal ticket cannot be used as access token")
+	}
 
 	// Check if token is revoked
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
@@ -1034,9 +1295,50 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	return user, activeTenantID, nil
 }
 
+func redactAuthToken(token *types.AuthToken) *types.AuthToken {
+	if token == nil {
+		return nil
+	}
+	cp := *token
+	cp.Token = ""
+	return &cp
+}
+
+// GetAccessTokenByValue looks up the stored token row for a JWT string.
+// The JWT itself is stripped so callers cannot log or re-play it.
+func (s *userService) GetAccessTokenByValue(ctx context.Context, tokenString string) (*types.AuthToken, error) {
+	tokenString = strings.TrimSpace(tokenString)
+	if tokenString == "" {
+		return nil, apprepo.ErrTokenNotFound
+	}
+	token, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
+	if err != nil {
+		return nil, err
+	}
+	return redactAuthToken(token), nil
+}
+
+// GetAccessTokenByID looks up a stored token row by primary key.
+func (s *userService) GetAccessTokenByID(ctx context.Context, id string) (*types.AuthToken, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, apprepo.ErrTokenNotFound
+	}
+	token, err := s.tokenRepo.GetTokenByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return redactAuthToken(token), nil
+}
+
 func isRefreshTokenClaims(claims jwt.MapClaims) bool {
 	tokenType, ok := claims["type"].(string)
 	return ok && tokenType == "refresh"
+}
+
+func isSandboxTerminalTicketClaims(claims jwt.MapClaims) bool {
+	tokenType, ok := claims["type"].(string)
+	return ok && tokenType == sandboxTerminalTicketType
 }
 
 func userIDFromSignedToken(tokenString string) (string, error) {
@@ -1193,6 +1495,8 @@ type oidcDiscoveryDocument struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserInfoEndpoint      string `json:"userinfo_endpoint"`
+	JwksURI               string `json:"jwks_uri"`
+	Issuer                string `json:"issuer"`
 }
 
 type oidcTokenResponse struct {
@@ -1231,6 +1535,9 @@ func validateOIDCEndpoints(cfg *config.OIDCAuthConfig) error {
 	if err := validateOIDCEndpoint("userinfo", cfg.UserInfoEndpoint, false); err != nil {
 		return err
 	}
+	if err := validateOIDCEndpoint("jwks", cfg.JwksURI, false); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1248,13 +1555,30 @@ func (s *userService) getOIDCConfig(ctx context.Context) (*config.OIDCAuthConfig
 	return &cfg, nil
 }
 
+func oidcNeedsDiscovery(cfg *config.OIDCAuthConfig) bool {
+	return strings.TrimSpace(cfg.AuthorizationEndpoint) == "" ||
+		strings.TrimSpace(cfg.TokenEndpoint) == "" ||
+		strings.TrimSpace(cfg.JwksURI) == "" ||
+		strings.TrimSpace(cfg.IssuerURL) == ""
+}
+
 func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OIDCAuthConfig) error {
-	if strings.TrimSpace(cfg.AuthorizationEndpoint) != "" && strings.TrimSpace(cfg.TokenEndpoint) != "" {
-		return validateOIDCEndpoints(cfg)
+	if oidcNeedsDiscovery(cfg) {
+		if strings.TrimSpace(cfg.DiscoveryURL) == "" {
+			if strings.TrimSpace(cfg.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.TokenEndpoint) == "" {
+				return errors.New("OIDC discovery_url or explicit endpoints are required")
+			}
+		} else if err := s.applyOIDCDiscoveryDocument(ctx, cfg); err != nil {
+			return err
+		}
 	}
-	if strings.TrimSpace(cfg.DiscoveryURL) == "" {
-		return errors.New("OIDC discovery_url or explicit endpoints are required")
+	if strings.TrimSpace(cfg.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.TokenEndpoint) == "" {
+		return errors.New("OIDC discovery document missing required endpoints")
 	}
+	return validateOIDCEndpoints(cfg)
+}
+
+func (s *userService) applyOIDCDiscoveryDocument(ctx context.Context, cfg *config.OIDCAuthConfig) error {
 	if err := validateOIDCEndpoint("discovery", cfg.DiscoveryURL, true); err != nil {
 		return err
 	}
@@ -1275,22 +1599,25 @@ func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OID
 	}
 
 	var doc oidcDiscoveryDocument
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
 		return fmt.Errorf("failed to decode OIDC discovery document: %w", err)
 	}
-	if cfg.AuthorizationEndpoint == "" {
+	if strings.TrimSpace(cfg.AuthorizationEndpoint) == "" {
 		cfg.AuthorizationEndpoint = doc.AuthorizationEndpoint
 	}
-	if cfg.TokenEndpoint == "" {
+	if strings.TrimSpace(cfg.TokenEndpoint) == "" {
 		cfg.TokenEndpoint = doc.TokenEndpoint
 	}
-	if cfg.UserInfoEndpoint == "" {
+	if strings.TrimSpace(cfg.UserInfoEndpoint) == "" {
 		cfg.UserInfoEndpoint = doc.UserInfoEndpoint
 	}
-	if cfg.AuthorizationEndpoint == "" || cfg.TokenEndpoint == "" {
-		return errors.New("OIDC discovery document missing required endpoints")
+	if strings.TrimSpace(cfg.JwksURI) == "" {
+		cfg.JwksURI = doc.JwksURI
 	}
-	return validateOIDCEndpoints(cfg)
+	if strings.TrimSpace(cfg.IssuerURL) == "" {
+		cfg.IssuerURL = doc.Issuer
+	}
+	return nil
 }
 
 func (s *userService) exchangeOIDCCode(ctx context.Context, cfg *config.OIDCAuthConfig, code, redirectURI string) (*oidcTokenResponse, error) {
@@ -1334,27 +1661,42 @@ func (s *userService) exchangeOIDCCode(ctx context.Context, cfg *config.OIDCAuth
 
 func (s *userService) resolveOIDCUserInfo(ctx context.Context, cfg *config.OIDCAuthConfig, tokenResp *oidcTokenResponse) (*types.OIDCUserInfo, error) {
 	claims := map[string]interface{}{}
+	verifiedFromIDToken := false
 
-	if strings.TrimSpace(tokenResp.IDToken) != "" {
-		idTokenClaims, err := decodeJWTClaims(tokenResp.IDToken)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to decode OIDC id_token claims: %v", err)
+	if idToken := strings.TrimSpace(tokenResp.IDToken); idToken != "" {
+		if strings.TrimSpace(cfg.JwksURI) == "" {
+			if strings.TrimSpace(cfg.UserInfoEndpoint) == "" || strings.TrimSpace(tokenResp.AccessToken) == "" {
+				return nil, errors.New("cannot verify OIDC id_token: no jwks_uri configured")
+			}
+			logger.Warnf(ctx, "OIDC id_token ignored: no jwks_uri configured; relying on userinfo endpoint")
 		} else {
+			idTokenClaims, err := s.verifyOIDCIDToken(ctx, cfg, idToken)
+			if err != nil {
+				return nil, fmt.Errorf("OIDC id_token verification failed: %w", err)
+			}
 			for k, v := range idTokenClaims {
 				claims[k] = v
 			}
+			verifiedFromIDToken = true
 		}
 	}
 
 	if strings.TrimSpace(cfg.UserInfoEndpoint) != "" && strings.TrimSpace(tokenResp.AccessToken) != "" {
 		userInfoClaims, err := s.fetchOIDCUserInfo(ctx, cfg.UserInfoEndpoint, tokenResp.AccessToken)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to fetch OIDC userinfo, fallback to id_token claims: %v", err)
+			if !verifiedFromIDToken {
+				return nil, fmt.Errorf("failed to fetch OIDC userinfo: %w", err)
+			}
+			logger.Warnf(ctx, "Failed to fetch OIDC userinfo, using verified id_token claims: %v", err)
 		} else {
 			for k, v := range userInfoClaims {
 				claims[k] = v
 			}
 		}
+	}
+
+	if len(claims) == 0 {
+		return nil, errors.New("OIDC provider returned no user claims")
 	}
 
 	info := &types.OIDCUserInfo{Claims: claims}
@@ -1430,6 +1772,13 @@ func (s *userService) provisionOIDCUser(
 	if err != nil {
 		return nil, fmt.Errorf("failed to auto-provision OIDC user: %w", err)
 	}
+
+	oidcOnly := true
+	user.Preferences.OidcOnlyLogin = &oidcOnly
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return nil, fmt.Errorf("failed to mark OIDC-only login preference: %w", err)
+	}
 	return user, nil
 }
 
@@ -1464,20 +1813,253 @@ func generateRandomString(length int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buffer), nil
 }
 
-func decodeJWTClaims(token string) (map[string]interface{}, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return nil, errors.New("invalid JWT format")
+func getRandomChar(charset string) (byte, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+	if err != nil {
+		return 0, err
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	return charset[n.Int64()], nil
+}
+
+func generateComplexPassword(length int) (string, error) {
+	if length < 4 {
+		return "", fmt.Errorf("password length must be at least 4")
+	}
+
+	password := make([]byte, 0, length)
+
+	c, err := getRandomChar(upperChars)
+	if err != nil {
+		return "", err
+	}
+	password = append(password, c)
+
+	c, err = getRandomChar(lowerChars)
+	if err != nil {
+		return "", err
+	}
+	password = append(password, c)
+
+	c, err = getRandomChar(digitChars)
+	if err != nil {
+		return "", err
+	}
+	password = append(password, c)
+
+	c, err = getRandomChar(passwordSpecialChars)
+	if err != nil {
+		return "", err
+	}
+	password = append(password, c)
+
+	for len(password) < length {
+		c, err = getRandomChar(allChars)
+		if err != nil {
+			return "", err
+		}
+		password = append(password, c)
+	}
+
+	// Fisher-Yates shuffle
+	for i := len(password) - 1; i > 0; i-- {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			return "", err
+		}
+
+		j := int(n.Int64())
+		password[i], password[j] = password[j], password[i]
+	}
+
+	return string(password), nil
+}
+
+// generatePolicyCompliantPassword returns a cryptographically random
+// password that satisfies ValidatePasswordPolicy.
+//
+// Simple policies may require regeneration (a single 32-char base64url
+// draw misses digits ~0.4% of the time). Complex policies are satisfied
+// in a single pass.
+func generatePolicyCompliantPassword(complexPasswordEnabled bool) (string, error) {
+	var password string
+	var err error
+	for {
+		if complexPasswordEnabled {
+			password, err = generateComplexPassword(16)
+		} else {
+			password, err = generateRandomString(24)
+		}
+
+		if err != nil {
+			return "", err
+		}
+
+		if ValidatePasswordPolicy(password, complexPasswordEnabled) == nil {
+			return password, nil
+		}
+	}
+}
+
+// oidcJWK / oidcJWKS model the subset of a JWKS document we need to rebuild an
+// RSA signing key. Only RSA keys are supported (the overwhelmingly common OIDC
+// id_token signing type); other key types are skipped during lookup.
+type oidcJWK struct {
+	Kty string `json:"kty"`
+	Kid string `json:"kid"`
+	Alg string `json:"alg"`
+	Use string `json:"use"`
+	N   string `json:"n"`
+	E   string `json:"e"`
+}
+
+type oidcJWKS struct {
+	Keys []oidcJWK `json:"keys"`
+}
+
+// rsaPublicKey rebuilds an *rsa.PublicKey from the base64url modulus/exponent of
+// a JWK (RFC 7518 §6.3.1).
+func decodeJWKBase64(value string) ([]byte, error) {
+	if b, err := base64.RawURLEncoding.DecodeString(value); err == nil && len(b) > 0 {
+		return b, nil
+	}
+	return base64.URLEncoding.DecodeString(value)
+}
+
+func (k oidcJWK) rsaPublicKey() (*rsa.PublicKey, error) {
+	if !strings.EqualFold(k.Kty, "RSA") {
+		return nil, fmt.Errorf("unsupported JWK key type: %s", k.Kty)
+	}
+	nBytes, err := decodeJWKBase64(k.N)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWK modulus: %w", err)
+	}
+	eBytes, err := decodeJWKBase64(k.E)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWK exponent: %w", err)
+	}
+	if len(nBytes) == 0 || len(eBytes) == 0 {
+		return nil, errors.New("empty JWK modulus or exponent")
+	}
+	eInt := new(big.Int).SetBytes(eBytes)
+	if !eInt.IsInt64() {
+		return nil, errors.New("invalid JWK exponent value")
+	}
+	e := int(eInt.Int64())
+	if e <= 0 {
+		return nil, errors.New("invalid JWK exponent value")
+	}
+	return &rsa.PublicKey{N: new(big.Int).SetBytes(nBytes), E: e}, nil
+}
+
+func (jwks *oidcJWKS) rsaKeyForKid(kid string) (*rsa.PublicKey, error) {
+	var usable []oidcJWK
+	for _, k := range jwks.Keys {
+		if k.Use != "" && !strings.EqualFold(k.Use, "sig") {
+			continue
+		}
+		if k.Kty != "" && !strings.EqualFold(k.Kty, "RSA") {
+			continue
+		}
+		if kid != "" && k.Kid != kid {
+			continue
+		}
+		if _, err := k.rsaPublicKey(); err != nil {
+			continue
+		}
+		usable = append(usable, k)
+	}
+	if kid != "" {
+		if len(usable) == 0 {
+			return nil, fmt.Errorf("no matching JWKS RSA key for kid %q", kid)
+		}
+		return usable[0].rsaPublicKey()
+	}
+	if len(usable) == 0 {
+		return nil, errors.New("no matching JWKS key for id_token")
+	}
+	if len(usable) > 1 {
+		return nil, errors.New("id_token missing kid and JWKS contains multiple RSA signing keys")
+	}
+	return usable[0].rsaPublicKey()
+}
+
+// fetchOIDCJWKS loads the provider's JWKS document over the SSRF-safe client.
+func (s *userService) fetchOIDCJWKS(ctx context.Context, jwksURI string) (*oidcJWKS, error) {
+	if err := validateOIDCEndpoint("jwks", jwksURI, true); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
 	if err != nil {
 		return nil, err
 	}
-	var claims map[string]interface{}
-	if err := json.Unmarshal(payload, &claims); err != nil {
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := newOIDCHTTPClient().Do(req)
+	if err != nil {
 		return nil, err
 	}
-	return claims, nil
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("JWKS request failed: status=%d", resp.StatusCode)
+	}
+
+	var jwks oidcJWKS
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&jwks); err != nil {
+		return nil, fmt.Errorf("failed to decode JWKS document: %w", err)
+	}
+	if len(jwks.Keys) == 0 {
+		return nil, errors.New("JWKS document contains no keys")
+	}
+	return &jwks, nil
+}
+
+const oidcIDTokenLeeway = 2 * time.Minute
+
+// verifyOIDCIDToken cryptographically verifies an OIDC id_token: it checks the
+// RSA signature against the provider's JWKS (matched by kid) and validates the
+// issuer, audience (client_id), expiry and subject. It returns the verified claims.
+func (s *userService) verifyOIDCIDToken(
+	ctx context.Context, cfg *config.OIDCAuthConfig, idToken string,
+) (map[string]interface{}, error) {
+	if strings.TrimSpace(cfg.JwksURI) == "" {
+		return nil, errors.New("cannot verify OIDC id_token: no jwks_uri configured")
+	}
+	if strings.TrimSpace(cfg.IssuerURL) == "" {
+		return nil, errors.New("cannot verify OIDC id_token: issuer is not configured")
+	}
+	if strings.TrimSpace(cfg.ClientID) == "" {
+		return nil, errors.New("cannot verify OIDC id_token: client_id is not configured")
+	}
+
+	jwks, err := s.fetchOIDCJWKS(ctx, cfg.JwksURI)
+	if err != nil {
+		return nil, err
+	}
+
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected id_token signing method: %v", token.Header["alg"])
+		}
+		kid, _ := token.Header["kid"].(string)
+		return jwks.rsaKeyForKid(kid)
+	}
+
+	claims := jwt.MapClaims{}
+	if _, err := jwt.NewParser(
+		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512"}),
+		jwt.WithExpirationRequired(),
+		jwt.WithLeeway(oidcIDTokenLeeway),
+		jwt.WithIssuer(strings.TrimSpace(cfg.IssuerURL)),
+		jwt.WithAudience(strings.TrimSpace(cfg.ClientID)),
+	).ParseWithClaims(idToken, claims, keyFunc); err != nil {
+		return nil, fmt.Errorf("id_token verification failed: %w", err)
+	}
+	verified := map[string]interface{}(claims)
+	if strings.TrimSpace(extractClaimAsString(verified, "sub")) == "" {
+		return nil, errors.New("id_token missing sub claim")
+	}
+	return verified, nil
 }
 
 func extractClaimAsString(claims map[string]interface{}, key string) string {

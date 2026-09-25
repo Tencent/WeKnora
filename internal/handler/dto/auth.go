@@ -4,13 +4,13 @@ import "github.com/Tencent/WeKnora/internal/types"
 
 // AuthLoginResponse is the HTTP-safe login / switch-tenant response shape.
 type AuthLoginResponse struct {
-	Success      bool              `json:"success"`
-	Message      string            `json:"message,omitempty"`
-	User         *types.User       `json:"user,omitempty"`
-	ActiveTenant *TenantResponse   `json:"active_tenant,omitempty"`
+	Success      bool               `json:"success"`
+	Message      string             `json:"message,omitempty"`
+	User         *types.User        `json:"user,omitempty"`
+	ActiveTenant *TenantResponse    `json:"active_tenant,omitempty"`
 	Memberships  []types.Membership `json:"memberships"`
-	Token        string            `json:"token,omitempty"`
-	RefreshToken string            `json:"refresh_token,omitempty"`
+	Token        string             `json:"token,omitempty"`
+	RefreshToken string             `json:"refresh_token,omitempty"`
 }
 
 // AuthOIDCCallbackResponse is the HTTP-safe OIDC callback payload shape.

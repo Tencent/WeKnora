@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -154,6 +155,27 @@ func NewDataTableSummaryTask(
 	logger.Infof(ctx, "enqueued data table summary task: id=%s queue=%s knowledge=%s",
 		info.ID, info.Queue, knowledgeID)
 	return nil
+}
+
+// enqueueDataTableSummaryIfNeeded enqueues table summary work for spreadsheet
+// imports. fileName is a fallback for older records whose FileType is empty.
+func enqueueDataTableSummaryIfNeeded(
+	ctx context.Context,
+	client interfaces.TaskEnqueuer,
+	tenantID uint64,
+	knowledgeID string,
+	fileName, fileType, summaryModelID, embeddingModelID string,
+) {
+	ft := normalizeFileExtension(fileType)
+	if ft == "" && fileName != "" {
+		ft = getFileType(fileName)
+	}
+	if !isDataTableFileType(ft) {
+		return
+	}
+	if err := NewDataTableSummaryTask(ctx, client, tenantID, knowledgeID, summaryModelID, embeddingModelID); err != nil {
+		logger.Warnf(ctx, "Failed to enqueue data table summary task for knowledge %s: %v", knowledgeID, err)
+	}
 }
 
 // ChunkExtractService is a service for extracting chunks
@@ -447,7 +469,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 
 	ctx = logger.WithRequestID(ctx, uuid.New().String())
 	ctx = logger.WithField(ctx, "knowledge", payload.KnowledgeID)
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 
 	logger.Infof(ctx, "Processing table extraction for knowledge: %s", payload.KnowledgeID)
 
@@ -456,6 +478,12 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	if err != nil {
 		return err
 	}
+
+	ctx, err = access.WithKBTaskWrite(ctx, resources.knowledgeBase, payload.TenantID)
+	if err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, resources.tenant)
 
 	// 3. 加载表格数据并生成摘要
 	chunks, err := s.processTableData(ctx, resources)
@@ -487,9 +515,17 @@ type extractionResources struct {
 // 思路：集中加载所有依赖，统一错误处理，避免分散的资源获取逻辑
 func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload DataTableSummaryPayload) (*extractionResources, error) {
 	// 获取并验证知识文件
-	knowledge, err := s.knowledgeService.GetKnowledgeByID(ctx, payload.KnowledgeID)
+	knowledge, err := s.knowledgeService.GetRepository().GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge: %v", err)
+		return nil, err
+	}
+
+	if knowledge == nil || knowledge.ID != payload.KnowledgeID || knowledge.TenantID != payload.TenantID {
+		return nil, fmt.Errorf("invalid table summary knowledge scope")
+	}
+	kb, err := knowledgeWriteKB(ctx, s.knowledgeBaseService, knowledge)
+	if err != nil {
 		return nil, err
 	}
 
@@ -521,13 +557,6 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		return nil, err
 	}
 
-	// Load the KB to discover its VectorStoreID binding so the factory can
-	// route to the bound store (or fall back to tenant engines if unbound).
-	kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
-	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge base for vector store lookup: %v", err)
-		return nil, err
-	}
 	var vectorStoreID *string
 	if kb != nil {
 		vectorStoreID = kb.VectorStoreID
@@ -613,7 +642,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	// 获取样本数据用于生成摘要
 	input := tools.DataAnalysisInput{
 		KnowledgeID: resources.knowledge.ID,
-		Sql:         fmt.Sprintf("SELECT * FROM \"%s\" LIMIT 10", tableSchema.TableName),
+		SQL:         fmt.Sprintf("SELECT * FROM \"%s\" LIMIT 10", tools.DataAnalysisTableName),
 	}
 	jsonData, err := json.Marshal(input)
 	if err != nil {
@@ -628,7 +657,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 
 	// 构建共用的schema和样本数据描述
 	schemaDesc := tableSchema.Description()
-	sampleDesc := s.buildSampleDataDescription(sampleResult, 10)
+	sampleDesc := s.buildSampleDataDescription(ctx, sampleResult, 10)
 
 	// 使用AI生成表格摘要和列描述
 	customInstructions := ""
@@ -639,7 +668,9 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 		}
 		customInstructions = ResolveProcessConfig(resources.knowledgeBase, processOverrides).ChunkingConfig.TableMetadataInstructions
 	}
-	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName,
+	// The stored summary is later shown to the model by data_schema, so it
+	// must name the model-facing table, never the physical knowledge-ID table.
+	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tools.DataAnalysisTableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate table description: %v", err)
@@ -647,7 +678,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	}
 	logger.Debugf(ctx, "table describe of knowledge %s: %s", resources.knowledge.ID, tableDescription)
 
-	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tableSchema.TableName,
+	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tools.DataAnalysisTableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate column descriptions: %v", err)
@@ -753,12 +784,12 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 	logger.Warnf(ctx, "Starting cleanup due to failure: %v", indexErr)
 
 	// 1. 更新知识状态为失败
-	resources.knowledge.ParseStatus = types.ParseStatusFailed
-	resources.knowledge.ErrorMessage = indexErr.Error()
-	if err := s.knowledgeService.UpdateKnowledge(ctx, resources.knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to update knowledge status: %v", err)
-	} else {
-		logger.Infof(ctx, "Updated knowledge %s status to failed", resources.knowledge.ID)
+	before, after := *resources.knowledge, *resources.knowledge
+	after.ParseStatus = types.ParseStatusFailed
+	after.ErrorMessage = indexErr.Error()
+	if err := s.knowledgeService.GetRepository().UpdateKnowledgeForTransfer(ctx, &before, &after); err != nil {
+		logger.Warnf(ctx, "Table summary cleanup skipped after knowledge changed: %v", err)
+		return
 	}
 
 	// 提取chunk IDs
@@ -769,7 +800,7 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 
 	// 删除已创建的chunks
 	if len(chunkIDs) > 0 {
-		if err := s.chunkService.DeleteChunks(ctx, chunkIDs); err != nil {
+		if err := s.chunkService.GetRepository().DeleteChunks(ctx, resources.knowledge.TenantID, chunkIDs); err != nil {
 			logger.Errorf(ctx, "Failed to delete chunks: %v", err)
 		} else {
 			logger.Infof(ctx, "Deleted %d chunks", len(chunkIDs))
@@ -839,12 +870,36 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 }
 
 // buildSampleDataDescription builds a formatted sample data description
-func (s *DataTableSummaryService) buildSampleDataDescription(sampleData *types.ToolResult, maxRows int) string {
+func (s *DataTableSummaryService) buildSampleDataDescription(ctx context.Context, sampleData *types.ToolResult, maxRows int) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("Sample data (first %d rows):\n", maxRows))
 
-	rows, ok := sampleData.Data["rows"].([]map[string]interface{})
-	if !ok {
+	if sampleData == nil || sampleData.Data == nil {
+		return builder.String()
+	}
+
+	rawRows, exists := sampleData.Data["rows"]
+	if !exists || rawRows == nil {
+		return builder.String()
+	}
+
+	// DataAnalysisTool returns []map[string]string. A decoded ToolResult can
+	// instead contain []map[string]interface{}, so normalize both shapes before
+	// serializing the sample rows.
+	var rows []interface{}
+	switch typedRows := rawRows.(type) {
+	case []map[string]string:
+		rows = make([]interface{}, len(typedRows))
+		for i, row := range typedRows {
+			rows[i] = row
+		}
+	case []map[string]interface{}:
+		rows = make([]interface{}, len(typedRows))
+		for i, row := range typedRows {
+			rows[i] = row
+		}
+	default:
+		logger.Warnf(ctx, "[TableSummary] Unsupported sample rows type: %T", rawRows)
 		return builder.String()
 	}
 

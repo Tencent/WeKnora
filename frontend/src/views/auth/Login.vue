@@ -177,6 +177,21 @@
       <div class="form-panel">
         <!-- Login Card -->
         <div class="form-card" v-if="!isRegisterMode">
+          <!-- invite_only 模式下共享链接停在登录卡，同样需要邀请上下文。 -->
+          <div v-if="inviteLookup" class="invite-banner">
+            <t-icon name="link" class="invite-banner__icon" />
+            <div class="invite-banner__text">
+              <div class="invite-banner__title">
+                {{ $t('inviteRegister.bannerTitle', { tenant: inviteLookup.tenant_name || '' }) }}
+              </div>
+              <div class="invite-banner__hint">
+                {{ $t('inviteRegister.bannerHintLogin') }}
+              </div>
+            </div>
+          </div>
+          <div v-else-if="inviteLookupError" class="invite-banner invite-banner--error">
+            {{ inviteLookupError }}
+          </div>
           <div class="form-header">
             <h2 class="form-title">{{ $t('auth.login') }}</h2>
             <p class="form-welcome">{{ $t('auth.subtitle') }}</p>
@@ -184,7 +199,8 @@
           </div>
 
           <div class="form-content">
-            <t-form ref="formRef" :data="formData" :rules="formRules" @submit="handleLogin" layout="vertical">
+            <t-form ref="formRef" :data="formData" :rules="formRules" @submit="handleLogin" layout="vertical"
+              label-align="top">
               <t-form-item :label="$t('auth.email')" name="email">
                 <t-input v-model="formData.email" :placeholder="$t('auth.emailPlaceholder')" type="text"
                   autocomplete="email" size="large" :disabled="loading" />
@@ -267,7 +283,7 @@
 
           <div class="form-content">
             <t-form ref="registerFormRef" :data="registerData" :rules="registerRules" @submit="handleRegister"
-              layout="vertical">
+              layout="vertical" label-align="top">
               <t-form-item :label="$t('auth.username')" name="username">
                 <t-input v-model="registerData.username" :placeholder="$t('auth.usernamePlaceholder')" size="large"
                   :disabled="loading" />
@@ -285,7 +301,8 @@
 
               <t-form-item :label="$t('auth.confirmPassword')" name="confirmPassword">
                 <t-input v-model="registerData.confirmPassword" :placeholder="$t('auth.confirmPasswordPlaceholder')"
-                  type="password" autocomplete="new-password" size="large" :disabled="loading" @enter="handleRegister" />
+                  type="password" autocomplete="new-password" size="large" :disabled="loading"
+                  @enter="handleRegister" />
               </t-form-item>
 
               <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
@@ -328,6 +345,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
+import { newPasswordRules } from '@/utils/passwordPolicy'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
@@ -402,6 +420,7 @@ const oidcProviderName = ref('')
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
 // In invite_only mode the link/card are hidden.
 const registrationEnabled = ref(true)
+const complexPasswordEnabled = ref(false)
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
 // the originating tenant + role and switch the form into a "register
@@ -419,7 +438,8 @@ const languageOptions = [
   { value: 'zh-CN', label: '简体中文', shortLabel: '中文', flag: '🇨🇳' },
   { value: 'en-US', label: 'English', shortLabel: 'EN', flag: '🇺🇸' },
   { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' },
-  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' }
+  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' },
+  { value: 'ja-JP', label: '日本語', shortLabel: '日本語', flag: '🇯🇵' }
 ]
 
 const currentLanguage = computed(() => locale.value)
@@ -454,10 +474,8 @@ const formRules = computed(() => ({
   password: [
     { required: true, message: t('auth.passwordRequired'), type: 'error' },
     { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-  ]
+    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' }
+  ],
 }))
 
 // Register form validation rules
@@ -476,13 +494,7 @@ const registerRules = computed(() => ({
     { required: true, message: t('auth.emailRequired'), type: 'error' },
     { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
-  password: [
-    { required: true, message: t('auth.passwordRequired'), type: 'error' },
-    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-  ],
+  password: newPasswordRules(t, complexPasswordEnabled.value),
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
     {
@@ -532,7 +544,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
 })
 
-const persistLoginResponse = async (response: any) => {
+const persistLoginResponse = async (response: any, skipRedirect = false) => {
   // Backend renamed `tenant` to `active_tenant` and added `memberships`
   // when tenant-level RBAC landed (issue #1303). The two are otherwise
   // identical — `active_tenant` is the tenant whose ID is encoded in the
@@ -583,6 +595,7 @@ const persistLoginResponse = async (response: any) => {
   // briefly when the deployment is invitation-only.
   await authStore.refreshFromAuthMe()
   await nextTick()
+  if (skipRedirect) return
   router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }
 
@@ -606,8 +619,10 @@ const loadAuthConfig = async () => {
   try {
     const response = await getAuthConfig()
     registrationEnabled.value = response.registration_mode !== 'invite_only'
+    complexPasswordEnabled.value = response.complex_password_enabled
   } catch {
     registrationEnabled.value = true
+    complexPasswordEnabled.value = false
   }
 }
 
@@ -622,12 +637,35 @@ const handleOIDCLogin = async () => {
       return
     }
 
+    // 跳转 IdP 会丢失 URL 中的 token，暂存到 sessionStorage，回调后由 App.vue 兑换。
+    if (inviteToken.value) {
+      sessionStorage.setItem('weknora_pending_invite_token', inviteToken.value)
+    }
     window.location.href = authorizationURL
   } catch (error: any) {
     console.error('OIDC 登录跳转失败:', error)
     MessagePlugin.error(error.message || t('auth.oidcLoginFailed'))
   } finally {
     oidcLoading.value = false
+  }
+}
+
+// 用 token 加入空间并进入应用。会话此时已有效，故即便 token 失效也照常进入（避免困在登录页）。
+const acceptAndEnter = async (token: string) => {
+  loading.value = true
+  try {
+    const result = await authStore.acceptInvitationByTokenAndRefresh(token)
+    if (result.ok) {
+      MessagePlugin.success(t('inviteRegister.joined'))
+    } else {
+      MessagePlugin.warning(t('inviteRegister.invalidBody'))
+    }
+  } catch {
+    MessagePlugin.warning(t('inviteRegister.invalidBody'))
+  } finally {
+    loading.value = false
+    await nextTick()
+    router.replace('/platform/knowledge-bases')
   }
 }
 
@@ -645,6 +683,12 @@ const handleLogin = async () => {
     })
 
     if (response.success) {
+      if (inviteToken.value) {
+        // 从邀请链接登录：持久化会话后兑换 token 并进入对应空间。
+        await persistLoginResponse(response, true)
+        await acceptAndEnter(inviteToken.value)
+        return
+      }
       await persistLoginResponse(response)
       notifyLoginSuccess(response, t, tm, formatRole, roleIcon)
     } else {
@@ -730,25 +774,37 @@ onMounted(async () => {
   if (tokenFromQuery) {
     inviteToken.value = tokenFromQuery
     inviteLookupLoading.value = true
+    // 1. 先校验 token：无效/过期则停在登录页报错，不进注册模式。
     try {
       const resp = await getInvitationByToken(tokenFromQuery)
       if (resp.success && resp.data) {
         inviteLookup.value = resp.data
-        // Token bypasses invite_only — show the register card even
-        // when self-service registration is otherwise disabled.
-        registrationEnabled.value = true
-        isRegisterMode.value = true
       } else {
         inviteLookupError.value = resp.message || t('inviteRegister.invalidBody')
+        loadOIDCConfig()
+        loadAuthConfig()
+        return
       }
     } catch {
       inviteLookupError.value = t('inviteRegister.invalidBody')
+      loadOIDCConfig()
+      loadAuthConfig()
+      return
     } finally {
       inviteLookupLoading.value = false
     }
-    // Don't run auto-setup when the user came in via an invite link —
-    // they're explicitly trying to register, not bootstrap a Lite
-    // single-user instance.
+
+    // 2. 已登录则直接兑换 token 进入空间（两种模式通用）。
+    if (authStore.isLoggedIn && (await authStore.refreshFromAuthMe())) {
+      await acceptAndEnter(tokenFromQuery)
+      return
+    }
+
+    // 3. 未登录：按注册模式决定界面。invite_only 停在登录页、登录后再兑换；self_serve 保持注册流程。
+    const cfg = await getAuthConfig()
+    const inviteOnly = cfg.registration_mode === 'invite_only'
+    registrationEnabled.value = !inviteOnly
+    isRegisterMode.value = !inviteOnly
     loadOIDCConfig()
     return
   }
@@ -758,20 +814,16 @@ onMounted(async () => {
     return
   }
 
-  const AUTO_SETUP_FAILED_KEY = 'weknora_auto_setup_failed'
-  if (localStorage.getItem(AUTO_SETUP_FAILED_KEY) !== 'true') {
-    try {
-      const response = await autoSetup()
-      if (response.success) {
-        authStore.setLiteMode(true)
-        await persistLoginResponse(response)
-        return
-      } else {
-        localStorage.setItem(AUTO_SETUP_FAILED_KEY, 'true')
-      }
-    } catch {
-      localStorage.setItem(AUTO_SETUP_FAILED_KEY, 'true')
+  localStorage.removeItem('weknora_auto_setup_failed')
+  try {
+    const response = await autoSetup()
+    if (response.success) {
+      authStore.setLiteMode(true)
+      await persistLoginResponse(response)
+      return
     }
+  } catch {
+    // Auto-setup may be unavailable outside the native Lite shell.
   }
 
   loadOIDCConfig()
@@ -1041,7 +1093,7 @@ onMounted(async () => {
 }
 
 .showcase-description {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   color: rgba(255, 255, 255, 0.8);
   margin: 0 0 28px 0;
   font-family: var(--app-font-family);
@@ -1061,7 +1113,7 @@ onMounted(async () => {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 20px;
   color: var(--td-text-color-anti);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   font-family: var(--app-font-family);
 }
@@ -1093,7 +1145,7 @@ onMounted(async () => {
     height: 10px;
     background: rgba(255, 255, 255, 0.5);
     opacity: 1;
-    transition: all 0.3s ease;
+    transition: all var(--app-motion-slow) ease;
     margin: 0 6px !important;
   }
 
@@ -1128,7 +1180,7 @@ onMounted(async () => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 40px 50px 100px 30px;
+  padding: 112px 50px 100px 30px;
   box-sizing: border-box;
   position: relative;
 }
@@ -1174,7 +1226,7 @@ onMounted(async () => {
   border: 1px solid rgba(255, 255, 255, 0.25);
   color: var(--td-text-color-anti);
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   font-family: var(--app-font-family);
   letter-spacing: 0.2px;
@@ -1205,7 +1257,7 @@ onMounted(async () => {
     color: var(--td-text-color-anti);
 
     .lang-flag-icon {
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       line-height: 1;
       flex-shrink: 0;
     }
@@ -1229,7 +1281,7 @@ onMounted(async () => {
   min-width: 160px;
   background: rgba(255, 255, 255, 0.97);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   overflow: hidden;
   z-index: 1000;
@@ -1241,12 +1293,12 @@ onMounted(async () => {
   gap: 10px;
   padding: 10px 14px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-family: var(--app-font-family);
   color: var(--td-text-color-primary);
 
   .lang-flag {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     flex-shrink: 0;
   }
 
@@ -1257,7 +1309,7 @@ onMounted(async () => {
   .check-icon {
     color: var(--td-success-color);
     font-weight: 700;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     flex-shrink: 0;
   }
 
@@ -1292,15 +1344,15 @@ onMounted(async () => {
   gap: 10px;
   padding: 12px 14px;
   margin-bottom: 20px;
-  border-radius: 10px;
-  background: var(--td-bg-color-container-hover, rgba(0, 0, 0, 0.03));
+  border-radius: var(--app-radius-lg);
+  background: var(--td-bg-color-container-hover);
   border: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-primary);
 }
 
 .invite-banner__icon {
   margin-top: 2px;
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   flex-shrink: 0;
   color: var(--td-text-color-secondary);
 }
@@ -1313,23 +1365,23 @@ onMounted(async () => {
 }
 
 .invite-banner__title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
 }
 
 .invite-banner__hint {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
 
 .invite-banner--error {
-  background: var(--td-error-color-1, rgba(220, 38, 38, 0.06));
-  border-color: var(--td-error-color-3, rgba(220, 38, 38, 0.2));
-  color: var(--td-error-color, #b91c1c);
-  font-size: 13px;
+  background: var(--td-error-color-1);
+  border-color: var(--td-error-color-3);
+  color: var(--td-error-color);
+  font-size: var(--app-text-md);
 }
 
 .form-header {
@@ -1338,7 +1390,7 @@ onMounted(async () => {
 }
 
 .form-title {
-  font-size: 24px;
+  font-size: var(--app-text-4xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 6px 0;
@@ -1346,7 +1398,7 @@ onMounted(async () => {
 }
 
 .form-welcome {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   margin: 0;
   font-family: var(--app-font-family);
@@ -1355,8 +1407,8 @@ onMounted(async () => {
 .form-hint {
   margin: 10px 0 0;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--td-success-color-light, rgba(7, 192, 95, 0.08));
+  border-radius: var(--app-radius-md);
+  background: var(--td-success-color-light);
   color: var(--td-brand-color-active);
   font-size: 12.5px;
   line-height: 1.5;
@@ -1373,7 +1425,7 @@ onMounted(async () => {
     text-align: center;
     margin: 4px 0 14px;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-family: var(--app-font-family);
 
     span {
@@ -1395,8 +1447,8 @@ onMounted(async () => {
 
   &__button {
     height: 46px;
-    border-radius: 8px;
-    font-size: 15px;
+    border-radius: var(--app-radius-md);
+    font-size: var(--app-text-lg);
     font-weight: 500;
     border-color: var(--td-brand-color);
     color: var(--td-brand-color);
@@ -1404,13 +1456,13 @@ onMounted(async () => {
     &:hover {
       border-color: var(--td-brand-color-active);
       color: var(--td-brand-color-active);
-      background: var(--td-success-color-light, rgba(7, 192, 95, 0.08));
+      background: var(--td-success-color-light);
     }
   }
 }
 
 .form-subtitle {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   margin: 0;
   font-family: var(--app-font-family);
@@ -1418,7 +1470,7 @@ onMounted(async () => {
 
 .form-content {
   :deep(.t-form-item__label) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     font-weight: 500;
     margin-bottom: 8px;
@@ -1429,13 +1481,13 @@ onMounted(async () => {
 
   :deep(.t-input) {
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-container);
-    transition: all 0.2s;
+    transition: all var(--app-motion-base);
 
     &:focus-within {
       border-color: var(--td-brand-color);
-      box-shadow: 0 0 0 3px rgba(7, 192, 95, 0.1);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     }
 
     &:hover {
@@ -1447,7 +1499,7 @@ onMounted(async () => {
       box-shadow: none !important;
       outline: none !important;
       background: transparent;
-      font-size: 15px;
+      font-size: var(--app-text-lg);
       font-family: var(--app-font-family);
 
       &:focus {
@@ -1478,8 +1530,8 @@ onMounted(async () => {
 
 .submit-button {
   height: 46px;
-  border-radius: 8px;
-  font-size: 16px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-xl);
   font-weight: 500;
   font-family: var(--app-font-family);
   margin: 20px 0 16px 0;
@@ -1490,7 +1542,7 @@ onMounted(async () => {
   margin: 4px 0 6px;
   text-align: center;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 
   span {
     position: relative;
@@ -1511,14 +1563,14 @@ onMounted(async () => {
 
 .oidc-button {
   height: 46px;
-  border-radius: 8px;
-  font-size: 15px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-lg);
   font-weight: 500;
 }
 
 .form-footer {
   text-align: center;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
   margin-top: 16px;
@@ -1530,7 +1582,7 @@ onMounted(async () => {
     text-decoration: none;
     margin-left: 4px;
     font-weight: 500;
-    transition: all 0.2s;
+    transition: all var(--app-motion-base);
 
     &:hover {
       color: var(--td-brand-color);
@@ -1553,7 +1605,7 @@ onMounted(async () => {
     display: flex;
     align-items: center;
     margin-bottom: 12px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
 
@@ -1570,7 +1622,7 @@ onMounted(async () => {
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       font-weight: 700;
       margin-right: 10px;
       flex-shrink: 0;
@@ -1593,7 +1645,7 @@ onMounted(async () => {
   }
 
   .showcase-subtitle {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
   }
 
   .header-logo {
@@ -1654,7 +1706,7 @@ onMounted(async () => {
   }
 
   .showcase-subtitle {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     margin-bottom: 24px;
   }
 
@@ -1682,7 +1734,7 @@ onMounted(async () => {
 
     .header-link {
       padding: 8px 12px;
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 
@@ -1714,11 +1766,11 @@ onMounted(async () => {
   }
 
   .showcase-subtitle {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .tag {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     padding: 6px 16px;
   }
 
@@ -1734,7 +1786,7 @@ onMounted(async () => {
 
     .header-link {
       padding: 7px 10px;
-      font-size: 11px;
+      font-size: var(--app-text-xs);
     }
   }
 

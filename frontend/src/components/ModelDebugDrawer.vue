@@ -58,7 +58,12 @@
             >
               <div class="model-option">
                 <span class="model-option__name">{{ modelLabel(model) }}</span>
-                <span class="model-option__meta">{{ vendorLabel(model) }}</span>
+                <span class="model-option__meta">
+                  {{ vendorLabel(model) }}
+                  <template v-if="modelHasContextWindow(model.type)">
+                    · {{ formatContextWindow(model.parameters?.context_window) }}
+                  </template>
+                </span>
               </div>
             </t-option>
           </t-select>
@@ -133,12 +138,24 @@
               :autosize="{ minRows: 2, maxRows: 4 }"
             />
           </div>
+          <!-- 思考强度：由模型 capabilities.thinking_levels 决定；不能思考的模型不显示 -->
           <div v-if="supportsThinking" class="form-item">
-            <label class="form-label">{{ $t('modelSettings.debug.thinking') }}</label>
-            <div class="switch-field">
-              <t-switch v-model="thinking" />
-              <span class="form-desc form-desc--inline">{{ $t('modelSettings.debug.thinkingDesc') }}</span>
-            </div>
+            <label class="form-label">{{ $t('modelSettings.debug.reasoningEffort') }}</label>
+            <t-select v-model="reasoningEffort" :popup-props="{ overlayClassName: 'reasoning-level-select-popup' }">
+              <t-option v-for="level in reasoningOptions" :key="level" :value="level" :label="$t(levelLabelKey(level))"
+                :show-overflow-tooltip="false">
+                <div class="reasoning-level-option">
+                  <span class="reasoning-level-option__title">{{ $t(levelLabelKey(level)) }}</span>
+                  <span class="reasoning-level-option__hint">{{ $t(levelDescriptionKey(level)) }}</span>
+                </div>
+              </t-option>
+            </t-select>
+            <p class="form-desc">
+              {{ $t('modelSettings.debug.reasoningEffortDesc') }}
+              <template v-if="selectedModel.capabilities?.thinking_format">
+                · <code>{{ selectedModel.capabilities.thinking_format }}</code>
+              </template>
+            </p>
           </div>
         </section>
 
@@ -192,12 +209,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { debugModel, type ModelConfig, type ModelDebugResult } from '@/api/model'
-import { modelSupportsThinking } from '@/utils/thinkingControl'
+import { fileSizeVerification } from '@/utils'
+import { useModelProvidersStore } from '@/stores/modelProviders'
+import {
+  clampLevel,
+  levelDescriptionKey,
+  levelEnablesThinking,
+  levelLabelKey,
+  modelCanThink,
+  supportedLevels,
+  type ReasoningLevel,
+} from '@/utils/reasoningEffort'
+import {
+  formatContextWindow,
+  modelHasContextWindow,
+} from '@/utils/contextWindow'
 
 const props = defineProps<{
   visible: boolean
@@ -208,7 +240,8 @@ const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
 }>()
 
-const { t, te } = useI18n()
+const { t, locale } = useI18n()
+const providersStore = useModelProvidersStore()
 const drawerVisible = computed({
   get: () => props.visible,
   set: value => emit('update:visible', value),
@@ -222,7 +255,7 @@ const input = ref('')
 const documentsText = ref('')
 const file = ref<File | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
-const thinking = ref(false)
+const reasoningEffort = ref<ReasoningLevel>('off')
 const temperature = ref(0.7)
 const topP = ref(1)
 const maxTokens = ref(1024)
@@ -240,7 +273,10 @@ let runSequence = 0
 const selectedModel = computed(() => props.models.find(model => model.id === selectedModelId.value))
 const filteredModels = computed(() => props.models.filter(model => model.type === selectedModelType.value))
 const isChat = computed(() => selectedModel.value?.type === 'KnowledgeQA')
-const supportsThinking = computed(() => selectedModel.value ? modelSupportsThinking(selectedModel.value) : false)
+// Thinking is offered only when the catalog says the model can think
+// (remote chat models carry `capabilities` computed by the backend).
+const supportsThinking = computed(() => modelCanThink(selectedModel.value?.capabilities))
+const reasoningOptions = computed(() => supportedLevels(selectedModel.value?.capabilities))
 const needsFile = computed(() => ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
 const documents = computed(() => documentsText.value.split('\n').map(item => item.trim()).filter(Boolean))
 const canRun = computed(() => {
@@ -278,8 +314,8 @@ const vendorLabel = (model: ModelConfig) => {
   const provider = model.parameters.provider || ''
   if (model.source === 'local') return 'Ollama'
   if (provider === 'generic') return t('modelSettings.source.custom')
-  const key = `model.editor.providers.${provider}.label`
-  return te(key) ? t(key) : provider || model.source
+  if (!provider) return model.source
+  return providersStore.labelFor(provider, String(locale.value || '')) || provider
 }
 
 const inputLabel = computed(() => {
@@ -310,6 +346,9 @@ const formattedResult = computed(() => {
 })
 
 const OBSERVATION_LABELS: Record<string, string> = {
+  api: 'modelSettings.debug.metrics.api',
+  thinking_format: 'modelSettings.debug.metrics.thinkingFormat',
+  requested_reasoning_effort: 'modelSettings.debug.metrics.requestedReasoningEffort',
   dimension: 'modelSettings.debug.metrics.dimension',
   result_count: 'modelSettings.debug.metrics.resultCount',
   answer_characters: 'modelSettings.debug.metrics.answerChars',
@@ -321,7 +360,16 @@ const OBSERVATION_LABELS: Record<string, string> = {
 
 const resultMetrics = computed(() => {
   if (!result.value?.observations) return []
-  const obs = result.value.observations
+  // Flatten the nested capabilities object the backend attaches so the
+  // effective thinking encoding shows up next to the protocol.
+  const raw = result.value.observations
+  const caps = raw.capabilities as { thinking_format?: unknown } | undefined
+  const obs: Record<string, unknown> = {
+    ...raw,
+    ...(caps && typeof caps === 'object' && caps.thinking_format !== undefined
+      ? { thinking_format: caps.thinking_format }
+      : {}),
+  }
   const keys = Object.keys(OBSERVATION_LABELS).filter(key => obs[key] !== undefined && obs[key] !== null)
   return keys.map(key => ({
     key,
@@ -333,6 +381,9 @@ const resultMetrics = computed(() => {
 const formatMetricValue = (key: string, value: unknown) => {
   if (typeof value === 'boolean') {
     return value ? t('common.yes') : t('common.no')
+  }
+  if (key === 'requested_reasoning_effort' && typeof value === 'string' && value) {
+    return t(levelLabelKey(value))
   }
   return String(value)
 }
@@ -353,7 +404,10 @@ const ensureDefaultSelection = () => {
 }
 
 watch(() => props.visible, visible => {
-  if (visible) ensureDefaultSelection()
+  if (visible) {
+    ensureDefaultSelection()
+    void providersStore.ensureLoaded('').catch(() => {})
+  }
 })
 
 watch(availableModelTypes, () => {
@@ -361,8 +415,8 @@ watch(availableModelTypes, () => {
 })
 
 watch(() => selectedModel.value?.id, () => {
-  if (!supportsThinking.value) thinking.value = false
-})
+  reasoningEffort.value = clampLevel(reasoningEffort.value, reasoningOptions.value)
+}, { immediate: true })
 
 watch(() => selectedModel.value?.type, () => {
   file.value = null
@@ -389,7 +443,14 @@ const selectModelType = (type: DebugModelType) => {
 
 const onNativeFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement
-  file.value = target.files?.[0] || null
+  const selectedFile = target.files?.[0] || null
+  if (selectedFile && fileSizeVerification(selectedFile)) {
+    target.value = ''
+    file.value = null
+    resetResult()
+    return
+  }
+  file.value = selectedFile
   resetResult()
 }
 
@@ -399,9 +460,9 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-const historyLabel = (thinkingValue: boolean) => {
-  if (supportsThinking.value) {
-    return thinkingValue ? t('modelSettings.debug.thinkOn') : t('modelSettings.debug.thinkOff')
+const historyLabel = (level: ReasoningLevel | null) => {
+  if (level) {
+    return `${t('modelSettings.debug.reasoningEffort')}: ${t(levelLabelKey(level))}`
   }
   return t('modelSettings.debug.runLabel', { n: runSequence })
 }
@@ -410,7 +471,7 @@ const runDebug = async () => {
   if (!selectedModel.value?.id || !canRun.value || running.value) return
   running.value = true
   try {
-    const thinkingValue = supportsThinking.value ? thinking.value : false
+    const level: ReasoningLevel | null = supportsThinking.value ? reasoningEffort.value : null
     const nextResult = await debugModel(selectedModel.value.id, {
       input: input.value.trim(),
       documents: documents.value,
@@ -420,13 +481,14 @@ const runDebug = async () => {
         temperature: temperature.value,
         top_p: topP.value,
         max_tokens: maxTokens.value,
-        thinking: thinkingValue,
+        // reasoning_effort is authoritative; the boolean keeps older backends working.
+        ...(level ? { reasoning_effort: level, thinking: levelEnablesThinking(level) } : { thinking: false }),
       } : {},
     })
     result.value = nextResult
     history.value.unshift({
       id: ++runSequence,
-      label: historyLabel(thinkingValue),
+      label: historyLabel(level),
       result: nextResult,
     })
     history.value = history.value.slice(0, 6)
@@ -440,13 +502,14 @@ const runDebug = async () => {
 
 const copyResult = async () => {
   if (!result.value) return
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(result.value, null, 2))
-    MessagePlugin.success(t('common.copied'))
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'))
-  }
+  await copyWithToast(JSON.stringify(result.value, null, 2), 'common.copied')
 }
+
+onBeforeUnmount(() => {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+})
 </script>
 
 <style scoped lang="less">
@@ -457,7 +520,7 @@ const copyResult = async () => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -465,7 +528,7 @@ const copyResult = async () => {
 
 .form-desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 
@@ -487,16 +550,16 @@ const copyResult = async () => {
   padding: 6px 12px;
   min-height: 32px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &__icon {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     flex-shrink: 0;
   }
 
@@ -505,7 +568,7 @@ const copyResult = async () => {
   }
 
   &:hover:not(.is-active) {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
     color: var(--td-text-color-primary);
   }
 
@@ -538,7 +601,7 @@ const copyResult = async () => {
   &__meta {
     flex-shrink: 0;
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 }
 
@@ -552,11 +615,9 @@ const copyResult = async () => {
   }
 }
 
-.switch-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
+.form-desc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-text-xs);
 }
 
 .file-picker {
@@ -583,12 +644,12 @@ const copyResult = async () => {
   gap: 8px;
   padding: 5px 10px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 
   &__label {
     color: var(--td-text-color-primary);
@@ -611,8 +672,8 @@ const copyResult = async () => {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-md);
 
   &--ok {
     background: var(--td-success-color-light);
@@ -639,7 +700,7 @@ const copyResult = async () => {
 
     span {
       color: var(--td-text-color-placeholder);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 }
@@ -653,16 +714,16 @@ const copyResult = async () => {
 
 .metric-chip {
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .result-error {
   margin: 10px 0 0;
   color: var(--td-error-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   white-space: pre-wrap;
 }
 
@@ -681,7 +742,7 @@ const copyResult = async () => {
   margin: 8px 0 0;
   padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -692,6 +753,40 @@ const copyResult = async () => {
 @media (max-width: 640px) {
   .parameter-grid {
     grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<!-- 非 scoped：t-select popup 渲染到 body 下 -->
+<style lang="less">
+.reasoning-level-select-popup {
+  padding: 4px;
+
+  .t-select-option {
+    height: auto !important;
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin: 2px 0;
+    white-space: normal;
+  }
+}
+
+.reasoning-level-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  min-width: 0;
+
+  &__title {
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    font-size: var(--app-text-sm);
+    color: var(--td-text-color-placeholder);
+    word-break: break-word;
   }
 }
 </style>

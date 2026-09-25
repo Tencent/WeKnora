@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -77,36 +78,6 @@ func (s *MCPOAuthSession) withAuthWaitTimeout(seconds int) *MCPOAuthSession {
 	}
 	s.AuthWaitTimeoutSeconds = seconds
 	return s
-}
-
-// oauthSessionForRegistration builds an OAuth session for tool discovery at agent startup.
-func oauthSessionForRegistration(ctx context.Context, sess *MCPOAuthSession, retryTimeout time.Duration) *MCPOAuthSession {
-	if sess == nil || sess.EventBus == nil {
-		return nil
-	}
-	approvalCtx := sess.ApprovalCtx
-	if approvalCtx == nil {
-		approvalCtx = ctx
-	}
-	userID := sess.UserID
-	if userID == "" {
-		principal, _ := types.PrincipalFromContext(ctx)
-		userID = principal.StorageID()
-	}
-	requestID := sess.RequestID
-	if requestID == "" {
-		requestID, _ = types.RequestIDFromContext(ctx)
-	}
-	return &MCPOAuthSession{
-		EventBus:               sess.EventBus,
-		SessionID:              sess.SessionID,
-		AssistantMessageID:     sess.AssistantMessageID,
-		UserID:                 userID,
-		RequestID:              requestID,
-		ApprovalCtx:            approvalCtx,
-		ExecTimeout:            retryTimeout,
-		AuthWaitTimeoutSeconds: sess.AuthWaitTimeoutSeconds,
-	}
 }
 
 // oauthWaiter is the subset of the approval gate used to pause while the user
@@ -269,6 +240,10 @@ func isAuthorizationRequired(err error) bool {
 		return false
 	}
 	if mcpclient.IsOAuthAuthorizationRequiredError(err) || mcpclient.IsAuthorizationRequiredError(err) {
+		return true
+	}
+	var reauth *mcp.OAuthReauthorizationRequiredError
+	if errors.As(err, &reauth) {
 		return true
 	}
 	msg := err.Error()

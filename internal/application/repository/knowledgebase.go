@@ -172,6 +172,27 @@ func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *t
 	return r.db.WithContext(ctx).Save(kb).Error
 }
 
+// UpdateKnowledgeBaseGeneratedProfile writes the generated_profile column
+// only. The rest of the row is left untouched so a settings save that lands
+// while a profile is being generated is not overwritten by the worker.
+func (r *knowledgeBaseRepository) UpdateKnowledgeBaseGeneratedProfile(
+	ctx context.Context, id string, profile *types.KnowledgeBaseProfile,
+) error {
+	if id == "" {
+		return errors.New("knowledge base ID cannot be empty")
+	}
+	var value interface{}
+	if profile != nil {
+		value = *profile
+	}
+	return r.db.WithContext(ctx).Model(&types.KnowledgeBase{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"generated_profile": value,
+			"updated_at":        time.Now(),
+		}).Error
+}
+
 // DeleteKnowledgeBase deletes a knowledge base
 func (r *knowledgeBaseRepository) DeleteKnowledgeBase(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.KnowledgeBase{}).Error
@@ -216,4 +237,38 @@ func (r *knowledgeBaseRepository) CountByModelID(
 	query = scopeKnowledgeBasesByModelID(query, modelID)
 	err := query.Count(&count).Error
 	return count, err
+}
+
+// ListModelUsages returns active knowledge bases that reference modelID. It
+// selects only the columns needed to identify the resource and its bindings;
+// GORM's default scope excludes soft-deleted rows.
+func (r *knowledgeBaseRepository) ListModelUsages(
+	ctx context.Context, tenantID uint64, modelID string,
+) ([]types.ModelUsageResource, error) {
+	rows := make([]*types.KnowledgeBase, 0)
+	query := r.db.WithContext(ctx).
+		Model(&types.KnowledgeBase{}).
+		Select(
+			"id", "name", "embedding_model_id", "summary_model_id",
+			"image_processing_config", "vlm_config", "asr_config", "wiki_config", "auto_tag_config",
+		).
+		Where("tenant_id = ?", tenantID)
+	query = scopeKnowledgeBasesByModelID(query, modelID)
+	if err := query.Order("name ASC, id ASC").Limit(types.ModelUsageListLimit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	usages := make([]types.ModelUsageResource, 0, len(rows))
+	for _, row := range rows {
+		bindings := knowledgeBaseModelUsageBindings(row, modelID)
+		if len(bindings) == 0 {
+			continue
+		}
+		usages = append(usages, types.ModelUsageResource{
+			ID:       row.ID,
+			Name:     row.Name,
+			Bindings: bindings,
+		})
+	}
+	return usages, nil
 }

@@ -16,6 +16,7 @@ import (
 // 兼容模式由 DORIS_COMPAT_MODE 决定：
 //   - legacy：UNIQUE KEY(id) + cosine_distance ANN + Stream Load partial update
 //   - inner_product_duplicate：DUPLICATE KEY(id) + normalized inner product + delete/insert rewrite
+//
 // 该设置在 embedding 表创建后不可直接互换；切换模式前需要重建这些表。
 //
 // 与 Qdrant/Milvus/Weaviate 一样，initializedTables 缓存"已确保存在"的维度，
@@ -32,9 +33,9 @@ type dorisRepository struct {
 	password string
 	database string
 
-	tableBaseName  string
-	bucketsNum     int // 0 -> default 10
-	replicationNum int // 0 -> default 1
+	tableBaseName       string
+	bucketsNum          int // 0 -> default 10
+	replicationNum      int // 0 -> default 1
 	compatModeRequested dorisCompatMode
 	compatModeResolved  dorisCompatMode
 	compatResolveOnce   sync.Once

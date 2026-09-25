@@ -1,6 +1,8 @@
 package im
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"testing"
 
 	"gorm.io/gorm"
@@ -35,6 +37,31 @@ func TestValidateSessionMode(t *testing.T) {
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateSessionMode(%q) error = %v, wantErr %v", tt.sessionMode, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestIMChannelNormalizesAndValidatesLocale(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		locale  string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty uses deployment default", locale: "", want: ""},
+		{name: "supported locale", locale: "ja-JP", want: "ja-JP"},
+		{name: "trims supported locale", locale: "  ko-KR  ", want: "ko-KR"},
+		{name: "rejects unsupported locale", locale: "fr-FR", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ch := &IMChannel{Locale: tt.locale}
+			err := ch.normalizeAndValidateLocale()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("normalizeAndValidateLocale() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if ch.Locale != tt.want && !tt.wantErr {
+				t.Fatalf("Locale = %q, want %q", ch.Locale, tt.want)
 			}
 		})
 	}
@@ -157,6 +184,44 @@ func TestComputeBotIdentity_LarkWithoutAppID(t *testing.T) {
 	ch := &IMChannel{Platform: "lark", Credentials: []byte(`{"app_secret":"s"}`)}
 	if got := ch.computeBotIdentity(); got != "" {
 		t.Errorf("identity = %q, want empty when app_id is missing", got)
+	}
+}
+
+func TestIMChannelComputeBotIdentity_YunzhijiaUsesYZJToken(t *testing.T) {
+	makeChannel := func(sendMsgURL string) *IMChannel {
+		return &IMChannel{
+			Platform: "yunzhijia",
+			Credentials: []byte(fmt.Sprintf(
+				`{"send_msg_url":%q}`,
+				sendMsgURL,
+			)),
+		}
+	}
+
+	first := makeChannel("https://open.yunzhijia.com/gateway/robot/webhook/send?yzjtoken=token-a&foo=1")
+	second := makeChannel("https://open.yunzhijia.com/gateway/robot/webhook/send?yzjtoken=token-b&foo=1")
+	firstWant := fmt.Sprintf("yunzhijia:%x", sha256.Sum256([]byte("token-a")))
+	secondWant := fmt.Sprintf("yunzhijia:%x", sha256.Sum256([]byte("token-b")))
+	if first.computeBotIdentity() != firstWant {
+		t.Errorf("first identity = %q, want %q", first.computeBotIdentity(), firstWant)
+	}
+	if second.computeBotIdentity() != secondWant {
+		t.Errorf("second identity = %q, want %q", second.computeBotIdentity(), secondWant)
+	}
+	if first.computeBotIdentity() == second.computeBotIdentity() {
+		t.Error("different yzjtoken values must produce different Yunzhijia bot identities")
+	}
+
+	sameTokenDifferentQuery := makeChannel(
+		"https://open.yunzhijia.com/gateway/robot/webhook/send?foo=2&yzjtoken=token-a",
+	)
+	if sameTokenDifferentQuery.computeBotIdentity() != first.computeBotIdentity() {
+		t.Error("same yzjtoken must produce the same Yunzhijia bot identity")
+	}
+
+	missingToken := makeChannel("https://open.yunzhijia.com/gateway/robot/webhook/send?foo=1")
+	if missingToken.computeBotIdentity() != "" {
+		t.Errorf("missing yzjtoken identity = %q, want empty", missingToken.computeBotIdentity())
 	}
 }
 

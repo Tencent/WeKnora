@@ -66,6 +66,9 @@ func (p *PluginWikiBoost) OnEvent(
 	// Confirm at least one search target is actually a wiki KB.
 	hasWikiKB := false
 	for _, target := range chatManage.SearchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
 		kb, err := p.kbService.GetKnowledgeBaseByIDOnly(ctx, target.KnowledgeBaseID)
 		if err == nil && kb != nil && kb.IsWikiEnabled() {
 			hasWikiKB = true

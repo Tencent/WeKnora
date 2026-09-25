@@ -22,6 +22,7 @@ const (
 	PlatformMattermost Platform = "mattermost"
 	PlatformWeChat     Platform = "wechat"
 	PlatformQQBot      Platform = "qqbot"
+	PlatformYunzhijia  Platform = "yunzhijia"
 )
 
 // SessionMode determines how IM sessions are resolved.
@@ -143,8 +144,9 @@ type Adapter interface {
 }
 
 // StreamSender is an optional interface that adapters can implement to support streaming replies.
-// When an adapter implements StreamSender, the IM service will push answer chunks in real-time
-// instead of waiting for the full answer.
+// In stream output mode the IM service pushes answer chunks in real time. In
+// full output mode it may use the same replaceable message only as a progress
+// placeholder, then replace it once with the completed answer.
 type StreamSender interface {
 	// StartStream initializes a streaming reply session (e.g., creates a streaming card).
 	// Returns a platform-specific stream ID for subsequent chunk/end calls.
@@ -161,10 +163,18 @@ type StreamSender interface {
 	EndStream(ctx context.Context, incoming *IncomingMessage, streamID string) error
 }
 
+// FullOutputProgressSender is an optional capability for adapters whose stream
+// starts with a visible placeholder that can safely be replaced once with the
+// completed answer. Full output never calls UpdateStreamContent.
+type FullOutputProgressSender interface {
+	StreamSender
+	SupportsFullOutputProgress() bool
+}
+
 // FileDownloader is an optional interface that adapters can implement to support
-// downloading file attachments from the IM platform. When the adapter implements
-// this interface and the IM channel has a knowledge_base_id configured, file
-// messages will be downloaded and saved to the specified knowledge base.
+// downloading file attachments from the IM platform. It allows file/image
+// messages to be supplied to QA as attachments; when a knowledge_base_id is
+// configured, the same capability also enables asynchronous knowledge-base save.
 type FileDownloader interface {
 	// DownloadFile downloads a file resource from the IM platform.
 	// Returns the file content reader, the resolved file name, and any error.

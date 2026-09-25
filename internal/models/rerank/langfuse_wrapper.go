@@ -6,8 +6,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 )
 
-const langfuseRerankPreviewDocs = 8
-const langfuseRerankMaxScores = 50
+const (
+	langfuseRerankPreviewDocs = 8
+	langfuseRerankMaxScores   = 50
+)
 
 // langfuseReranker wraps a Reranker and reports each rerank call as a
 // Langfuse generation observation. Rerankers don't return token usage, but
@@ -20,6 +22,9 @@ type langfuseReranker struct {
 
 func (l *langfuseReranker) GetModelName() string { return l.inner.GetModelName() }
 func (l *langfuseReranker) GetModelID() string   { return l.inner.GetModelID() }
+
+// MaxPassageRunes forwards the wrapped reranker's limit.
+func (l *langfuseReranker) MaxPassageRunes(query string) int { return MaxPassageRunes(l.inner, query) }
 
 func (l *langfuseReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	mgr := langfuse.GetManager()
@@ -41,10 +46,10 @@ func (l *langfuseReranker) Rerank(ctx context.Context, query string, documents [
 			"documents_preview": previewDocs(documents, langfuseRerankPreviewDocs),
 		},
 		Metadata: map[string]interface{}{
-			"model_id":        l.inner.GetModelID(),
-			"num_queries":     1,
-			"total_chars":     totalChars,
-			"avg_doc_chars":   avgDocChars(documents),
+			"model_id":      l.inner.GetModelID(),
+			"num_queries":   1,
+			"total_chars":   totalChars,
+			"avg_doc_chars": avgDocChars(documents),
 		},
 	})
 

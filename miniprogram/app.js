@@ -5,7 +5,8 @@ App({
       wx.setStorageSync("weknora_settings", {
         baseUrl: "http://localhost:8080",
         apiKey: "",
-        selectedKnowledgeBaseId: ""
+        selectedKnowledgeBaseId: "",
+        locale: "zh"
       });
     }
   }

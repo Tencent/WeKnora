@@ -5,14 +5,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+// TestMain whitelists loopback for the httptest servers and the default base
+// host so parseYuqueConfig does not resolve www.yuque.com over live DNS during
+// a unit test. Production keeps the default strict SSRF policy.
 func TestMain(m *testing.M) {
-	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost,www.yuque.com")
 	secutils.ResetSSRFWhitelistForTest()
 	os.Exit(m.Run())
 }
@@ -479,5 +483,33 @@ func TestConnector_ListResources_ContinuesOnGroupFailure(t *testing.T) {
 	}
 	if !names["Mine"] || !names["OK Book"] {
 		t.Errorf("expected Mine + OK Book, got %v", names)
+	}
+}
+
+func TestConnector_FetchAll_FileNamePolicy(t *testing.T) {
+	for _, tt := range []struct{ name, title, want string }{
+		{"punctuation and extension", " \tA/B.md ", " \tA_B.md .md"},
+		{"long title", strings.Repeat("测", 100), strings.Repeat("测", 66) + ".md"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeYuque()
+			defer f.Close()
+			f.handleJSON("/api/v2/repos/7/docs", 200, v2DocListResponse{Data: []v2Doc{{
+				ID: 101, Type: "Doc", Status: "1", Title: tt.title, ContentUpdatedAt: "2026-04-20T10:00:00Z",
+			}}})
+			f.handleJSON("/api/v2/repos/docs/101", 200, v2DocDetailResponse{Data: v2DocDetail{
+				ID: 101, Title: tt.title, Body: "# content", Format: "markdown", Status: "1",
+			}})
+			items, err := NewConnector().FetchAll(context.Background(), makeDSConfig(f, []string{"7"}), []string{"7"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 {
+				t.Fatalf("got %d items, want 1", len(items))
+			}
+			if items[0].Title != tt.title || items[0].FileName != tt.want {
+				t.Fatalf("title = %q, filename = %q; want %q, %q", items[0].Title, items[0].FileName, tt.title, tt.want)
+			}
+		})
 	}
 }

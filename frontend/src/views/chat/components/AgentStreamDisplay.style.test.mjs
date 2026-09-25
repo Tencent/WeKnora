@@ -3,9 +3,31 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import vm from 'node:vm'
+import { computed, reactive } from 'vue'
+import { isAssistantTurnComplete } from '../../../utils/steerStreamFork.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(here, 'AgentStreamDisplay.vue'), 'utf8')
+
+test('streamed responses do not mount a hidden Wiki drawer that steals composer focus', () => {
+  assert.match(source, /<t-drawer v-if="wikiDrawerVisible" v-model:visible="wikiDrawerVisible"/)
+})
+
+test('steer seals animation while keeping the preceding timeline open without completion', () => {
+  const stateBlock = source.slice(source.indexOf('const isConversationDone ='), source.indexOf('const streamingMermaidSvgCache ='))
+  const collapseBlock = source.slice(source.indexOf('const shouldShowCollapsedSteps ='), source.indexOf('// Once the steps collapse'))
+  const props = reactive({ ragMode: false, session: { steerForked: true, is_completed: true } })
+  const state = vm.runInNewContext(`${stateBlock}\n${collapseBlock}\n({ isConversationDone, isSegmentDone, shouldShowCollapsedSteps })`, {
+    props, computed, isAssistantTurnComplete, intermediateStepsCount: { value: 2 },
+  })
+  assert.equal(state.isSegmentDone.value, true)
+  assert.equal(state.isConversationDone.value, false)
+  assert.equal(state.shouldShowCollapsedSteps.value, false)
+  props.session.steerForked = false
+  assert.equal(state.isConversationDone.value, true)
+  assert.equal(state.shouldShowCollapsedSteps.value, true)
+})
 
 test('agent steps use compact muted timeline styling', () => {
   assert.match(source, /--agent-step-text-size:\s*14px/)
@@ -13,25 +35,30 @@ test('agent steps use compact muted timeline styling', () => {
   assert.match(source, /--agent-step-icon-color:\s*var\(--td-text-color-placeholder\)/)
   assert.match(source, /max-height:\s*none/)
   assert.match(source, /overflow-y:\s*visible/)
-  assert.match(source, /\.tree-root \.action-name\s*\{[\s\S]*font-size:\s*14px/)
+  assert.match(source, /\.tree-root \.action-name\s*\{[\s\S]*font-size:\s*(?:14px|var\(--app-text-base\))/)
   assert.match(source, /\.tree-child \.action-title-icon\s*\{[\s\S]*position:\s*absolute/)
   assert.match(source, /function maskIconStyle\(src: string, size = 18\)/)
   assert.match(source, /\.icon-mask\s*\{[\s\S]*background-color:\s*var\(--agent-step-icon-color\)/)
   assert.doesNotMatch(source, /\.action-title \.action-title-icon,\s*\n\s*\.icon-mask\s*\{/)
 })
 
-test('expanded agent step log hides raw thinking narration', () => {
-  assert.match(source, /visibleIntermediateEvents\s*=\s*computed/)
-  assert.match(source, /e\.type === 'thinking'\)\s*return false/)
-  assert.match(source, /e\.type === 'tool_call' && e\.tool_name === 'thinking'\)\s*return false/)
+test('expanded agent step log keeps model thinking in the tool timeline', () => {
+  assert.match(source, /visibleIntermediateEvents\s*=\s*computed\(\(\) => intermediateEvents\.value\)/)
   assert.match(source, /v-for="\(event, index\) in visibleIntermediateEvents"/)
 })
 
-test('streaming log also hides raw thinking narration', () => {
-  assert.match(source, /if \(!isConversationDone\.value\)\s*\{\s*return result\.filter/)
-  assert.match(source, /e\.type === 'thinking'\) return false/)
-  assert.match(source, /e\.type === 'tool_call' && e\.tool_name === 'thinking'\) return false/)
-  assert.doesNotMatch(source, /if \(!isConversationDone\.value\)\s*\{\s*return result;\s*\}/)
+test('streaming log renders reasoning alongside tool calls', () => {
+  assert.match(source, /if \(!isConversationDone\.value\)\s*\{\s*return result;\s*\}/)
+})
+
+test('expanded model reasoning stays inline without a separate thinking title', () => {
+  assert.match(source, /class="thinking-inline-content markdown-content"/)
+  assert.match(source, /class="thinking-inline-markdown" v-html="renderMarkdownContent\(event\.content\)"/)
+  assert.match(source, /event\.title && event\.content && isEventExpanded\(event\.event_id\)/)
+  assert.match(source, /\.thinking-inline-title\s*\{[\s\S]*align-items:\s*flex-start/)
+  assert.match(source, /\.thinking-inline-content\s*\{[\s\S]*margin-top:\s*0/)
+  assert.doesNotMatch(source, /\.thinking-inline-title > \.action-title-icon/)
+  assert.match(source, /\.tree-child \.thinking-event-card \.action-title\s*\{[\s\S]*position:\s*static/)
 })
 
 test('streaming tool log uses the same timeline structure', () => {
@@ -45,7 +72,7 @@ test('streaming tool log uses the same timeline structure', () => {
 test('final done row uses an existing common translation key', () => {
   assert.match(source, /t\('common\.finish'\)/)
   assert.doesNotMatch(source, /\$t\('common\.done'\)/)
-  assert.match(source, /'tree-child-last': !isConversationDone && index === visibleIntermediateEvents\.length - 1/)
+  assert.match(source, /'tree-child-last': !isSegmentDone && index === visibleIntermediateEvents\.length - 1/)
 })
 
 test('tool rows use line icon names instead of legacy asset masks', () => {
@@ -54,13 +81,19 @@ test('tool rows use line icon names instead of legacy asset masks', () => {
   assert.match(source, /wiki_search: 'agentEditor\.tools\.wikiSearch'/)
   assert.match(source, /wiki_read_page: 'agentEditor\.tools\.wikiReadPage'/)
   assert.match(source, /wiki_read_source_doc: 'agentStream\.tools\.wikiReadSourceDoc'/)
+  assert.match(source, /list_sandbox_files: 'agentStream\.tools\.listSandboxFiles'/)
+  assert.match(source, /read_sandbox_file: 'agentStream\.tools\.readSandboxFile'/)
+  assert.match(source, /write_sandbox_file: 'agentStream\.tools\.writeSandboxFile'/)
+  assert.match(source, /edit_sandbox_file: 'agentStream\.tools\.editSandboxFile'/)
+  assert.match(source, /getReadSkillTarget/)
+  assert.match(source, /tool_name === 'list_sandbox_files'/)
   assert.match(source, /toolName === 'get_document_content' \|\| toolName === 'wiki_read_source_doc'/)
   assert.doesNotMatch(source, /getToolIcon\(event\.tool_name\)/)
 })
 
 test('rag mode delegates pre-answer loading to pipeline and adds no row after answer starts', () => {
   assert.match(source, /if \(props\.ragMode \|\| hasAnswerStarted\.value\) return false/)
-  assert.match(source, /v-if="!ragMode \|\| displayEvents\.length > 0 \|\| showAgentActivityIndicator"/)
+  assert.match(source, /v-if="displayEvents\.length > 0 \|\| showMemoryRow \|\| showAgentActivityIndicator"/)
   assert.doesNotMatch(source, /ChatActivityIndicator/)
 })
 
@@ -87,14 +120,31 @@ test('only the collapsed root summary shows an expand chevron', () => {
   assert.doesNotMatch(source, /isEventExpanded\(event\.event_id\) \? 'chevron/)
 })
 
+// Recalled memory is one more thing the turn did before answering, so it rides
+// the same timeline as the steps instead of sitting in a card above them. It has
+// to travel into the collapsed tree with them, and appear exactly once.
+test('recalled memory rides the agent timeline as its leading row', () => {
+  const template = source.split('<script')[0]
+  assert.equal((template.match(/<ChatMemoryStep/g) || []).length, 2)
+  assert.match(template, /<div v-if="showIntermediateSteps" class="tree-children">\s*\n\s*<ChatMemoryStep/)
+  assert.match(template, /<ChatMemoryStep\s*\n\s*v-if="showMemoryRow"/)
+  assert.match(template, /<ChatMemoryStep[\s\S]*?:is-last="memoryIsLast"/)
+  assert.match(source, /!props\.ragMode && hasMemory\.value && !shouldShowCollapsedSteps\.value/)
+  assert.match(
+    source,
+    /const memoryIsLast = computed\([\s\S]*lastStreamingTimelineEventIndex\.value === -1/,
+  )
+})
+
 test('pending tool rows do not render an extra axis dot', () => {
   assert.doesNotMatch(source, /&\.action-pending\s*\{[\s\S]*&::after/)
 })
 
 test('agent mode shows a native placeholder before answer whenever nothing is pending', () => {
-  assert.match(source, /if \(isConversationDone\.value\) return false/)
+  assert.match(source, /if \(isSegmentDone\.value\) return false/)
   assert.match(source, /return !hasPendingStreamingActivity\.value/)
   assert.match(source, /const hasPendingStreamingActivity = computed/)
+  assert.match(source, /event\.thinking === true \|\| isThinkingActive\(event\.event_id\)/)
   assert.match(source, /event\.type === 'tool_approval_required' \|\| event\.type === 'mcp_oauth_required'/)
   assert.match(source, /class="action-card action-pending"/)
   assert.match(source, /t\('chat\.thinkingAlt'\)/)

@@ -7,8 +7,8 @@ import "testing"
 // DISABLE_REGISTRATION=true would block /auth/register at the handler layer
 // but leave /auth/config reporting self_serve, so the frontend would keep
 // showing the (broken) Register entry. Coercing registration_mode here keeps
-// both gates in sync, and matches the docs/RBAC说明.md "env always wins over
-// YAML" rule.
+// both gates in sync and preserves the environment-over-YAML precedence
+// documented in website-docs/03-features/01-tenant-auth.md.
 func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -99,6 +99,85 @@ func TestApplyAuthAndTenantDefaults_DefaultTenantMode(t *testing.T) {
 
 		if err := ValidateConfig(cfg); err == nil {
 			t.Fatal("ValidateConfig unexpectedly accepted an invalid default tenant mode")
+		}
+	})
+}
+
+// TestApplyAuthAndTenantDefaults_CrossTenantAccess is a regression test for the
+// env-binding gap: viper.AutomaticEnv has no SetEnvPrefix, so
+// WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS is never bound to the nested struct
+// automatically. applyAuthAndTenantDefaults must read it explicitly (like RBAC);
+// without that, only config.yaml's enable_cross_tenant_access would take effect
+// and the documented env override would be silently ignored.
+func TestApplyAuthAndTenantDefaults_CrossTenantAccess(t *testing.T) {
+	t.Run("environment true enables cross-tenant access", func(t *testing.T) {
+		t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "true")
+		cfg := &Config{Tenant: &TenantConfig{EnableCrossTenantAccess: false}}
+
+		applyAuthAndTenantDefaults(cfg)
+
+		if !cfg.Tenant.EnableCrossTenantAccess {
+			t.Fatal("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=true should enable cross-tenant access")
+		}
+	})
+
+	t.Run("environment false overrides yaml true", func(t *testing.T) {
+		t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "false")
+		cfg := &Config{Tenant: &TenantConfig{EnableCrossTenantAccess: true}}
+
+		applyAuthAndTenantDefaults(cfg)
+
+		if cfg.Tenant.EnableCrossTenantAccess {
+			t.Fatal("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=false should disable cross-tenant access")
+		}
+	})
+
+	t.Run("case-insensitive TRUE also enables", func(t *testing.T) {
+		t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "TRUE")
+		cfg := &Config{Tenant: &TenantConfig{EnableCrossTenantAccess: false}}
+
+		applyAuthAndTenantDefaults(cfg)
+
+		if !cfg.Tenant.EnableCrossTenantAccess {
+			t.Fatal("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=TRUE should enable cross-tenant access (case-insensitive)")
+		}
+	})
+
+	t.Run("unset leaves yaml value untouched", func(t *testing.T) {
+		t.Setenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS", "")
+		cfg := &Config{Tenant: &TenantConfig{EnableCrossTenantAccess: true}}
+
+		applyAuthAndTenantDefaults(cfg)
+
+		if !cfg.Tenant.EnableCrossTenantAccess {
+			t.Fatal("empty env should leave the YAML-provided cross-tenant access value untouched")
+		}
+	})
+}
+
+func TestApplyAuthAndTenantDefaults_ComplexPasswordEnabledEnv(t *testing.T) {
+	t.Run("1 enables via ParseBool", func(t *testing.T) {
+		t.Setenv("WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED", "1")
+		cfg := &Config{Auth: &AuthConfig{}}
+		applyAuthAndTenantDefaults(cfg)
+		if !cfg.Auth.ComplexPasswordEnabled {
+			t.Fatal("WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED=1 should enable complex passwords")
+		}
+	})
+	t.Run("false disables", func(t *testing.T) {
+		t.Setenv("WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED", "false")
+		cfg := &Config{Auth: &AuthConfig{ComplexPasswordEnabled: true}}
+		applyAuthAndTenantDefaults(cfg)
+		if cfg.Auth.ComplexPasswordEnabled {
+			t.Fatal("WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED=false should disable complex passwords")
+		}
+	})
+	t.Run("unset leaves yaml", func(t *testing.T) {
+		t.Setenv("WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED", "")
+		cfg := &Config{Auth: &AuthConfig{ComplexPasswordEnabled: true}}
+		applyAuthAndTenantDefaults(cfg)
+		if !cfg.Auth.ComplexPasswordEnabled {
+			t.Fatal("empty env should leave YAML complex-password flag untouched")
 		}
 	})
 }

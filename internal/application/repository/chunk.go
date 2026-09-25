@@ -14,6 +14,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrChunkRevisionConflict = errors.New("chunk revision conflict")
+
 // ErrChunkNotFound is returned when a chunk lookup finds no row. A typed
 // sentinel (matching the ErrXNotFound convention used by the other repos)
 // so callers can errors.Is it safely through wrapping — replacing the
@@ -31,33 +33,56 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 	return &chunkRepository{db: db}
 }
 
-// CreateChunks creates multiple chunks in batches.
-// Uses Omit("SeqID") so GORM won't include the auto-increment column in the
-// INSERT, which avoids MySQL generating ON DUPLICATE KEY UPDATE and the
-// resulting gap-lock deadlocks under concurrent writes.
-// A deadlock retry wrapper is kept as defense-in-depth for any remaining
-// edge cases on secondary unique indexes.
+// createChunksBatchSize is the number of rows per INSERT statement. Chunk rows
+// carry long text columns, so the batch is kept well below the bind-parameter
+// limits of the supported drivers while still amortizing round trips.
+const createChunksBatchSize = 500
+
+// updateChunksBatchSize bounds the rows per batch UPDATE so the bind-parameter
+// count (6 per row) stays far below the PostgreSQL limit of 65535.
+const updateChunksBatchSize = 1000
+
+// updateByIDsBatchSize bounds the IN list for UPDATE ... WHERE id IN (...).
+const updateByIDsBatchSize = 5000
+
+// CreateChunks creates multiple chunks in batches inside a single transaction.
+//
+// SourceContent is intentionally left empty on create. It records the parser
+// output only once a user edits the chunk (see chunkService.UpdateDocumentChunk,
+// which backfills it from Content on the first edit). Writing a copy of Content
+// for every chunk doubled the insert volume and the TOAST footprint for no
+// benefit.
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
-	}
-
-	db := r.db.WithContext(ctx)
-
-	// SQLite doesn't support autoIncrement on non-PK columns,
-	// so we must pre-assign SeqIDs manually (safe: single connection).
-	// PostgreSQL / MySQL use DB sequences — skip to avoid duplicate key
-	// races under concurrent inserts.
-	if db.Dialector.Name() == "sqlite" {
-		if err := types.AssignChunkSeqIDs(db, chunks); err != nil {
-			return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
+		chunk.ContextHeader = common.CleanInvalidUTF8(chunk.ContextHeader)
+		if chunk.SourceContent != "" {
+			chunk.SourceContent = common.CleanInvalidUTF8(chunk.SourceContent)
+		}
+		if chunk.IndexStatus == "" {
+			chunk.IndexStatus = "ready"
 		}
 	}
 
-	// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
-	// explicitly inserted, bypassing GORM's default value behavior.
-	// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
-	return db.Select("*").CreateInBatches(chunks, 100).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// SQLite doesn't support autoIncrement on non-PK columns, so SeqIDs are
+		// pre-assigned from MAX(seq_id). Doing it inside the write transaction
+		// keeps the read and the insert on the same connection.
+		// PostgreSQL uses a DB sequence — skip to avoid duplicate key races.
+		if tx.Name() == "sqlite" {
+			if err := types.AssignChunkSeqIDs(tx, chunks); err != nil {
+				return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
+			}
+		}
+
+		// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
+		// explicitly inserted, bypassing GORM's default value behavior.
+		// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
+		return tx.Select("*").CreateInBatches(chunks, createChunksBatchSize).Error
+	})
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID
@@ -151,6 +176,26 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
+// ListChunksByKnowledgeIDAndTypes lists a knowledge's chunks restricted to the
+// given chunk types. ListChunksByKnowledgeID is text-only by design, so callers
+// that also need summary / parent_text / image chunks come through here rather
+// than widening that query underneath its existing callers.
+func (r *chunkRepository) ListChunksByKnowledgeIDAndTypes(
+	ctx context.Context, tenantID uint64, knowledgeID string, chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	if len(chunkTypes) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN ?", tenantID, knowledgeID, chunkTypes).
+		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	ctx context.Context,
@@ -158,11 +203,12 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	knowledgeID string,
 	page *types.Pagination,
 	chunkType []types.ChunkType,
-	tagID string,
+	tagIDs []string,
 	keyword string,
 	searchField string,
 	sortOrder string,
 	knowledgeType string,
+	isEnabled *bool,
 ) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
 	var total int64
@@ -171,8 +217,11 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	baseFilter := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?)",
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
-		if tagID != "" {
-			db = db.Where("tag_id = ?", tagID)
+		if len(tagIDs) > 0 {
+			db = db.Where("tag_id IN ?", tagIDs)
+		}
+		if isEnabled != nil {
+			db = db.Where("is_enabled = ?", *isEnabled)
 		}
 		if keyword != "" {
 			like := "%" + keyword + "%"
@@ -274,6 +323,42 @@ func (r *chunkRepository) ListChunkByParentID(
 	return chunks, nil
 }
 
+// ListChunkNeighbors implements interfaces.ChunkRepository.
+func (r *chunkRepository) ListChunkNeighbors(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	chunkIndex int,
+	before int,
+	after int,
+	chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	base := func() *gorm.DB {
+		return r.db.WithContext(ctx).
+			Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?) AND is_enabled = ?",
+				tenantID, knowledgeID, chunkTypes,
+				[]int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true)
+	}
+	var preceding, following []*types.Chunk
+	if before > 0 {
+		if err := base().Where("chunk_index < ?", chunkIndex).
+			Order("chunk_index DESC").Limit(before).Find(&preceding).Error; err != nil {
+			return nil, err
+		}
+	}
+	if after > 0 {
+		if err := base().Where("chunk_index > ?", chunkIndex).
+			Order("chunk_index ASC").Limit(after).Find(&following).Error; err != nil {
+			return nil, err
+		}
+	}
+	out := make([]*types.Chunk, 0, len(preceding)+len(following))
+	for i := len(preceding) - 1; i >= 0; i-- {
+		out = append(out, preceding[i])
+	}
+	return append(out, following...), nil
+}
+
 func (r *chunkRepository) ListChunksByParentIDs(
 	ctx context.Context,
 	tenantID uint64,
@@ -291,11 +376,94 @@ func (r *chunkRepository) ListChunksByParentIDs(
 	return chunks, nil
 }
 
+// ListChunksByParentIDsOnly retrieves chunks by parent IDs without tenant
+// filter, for expansions whose parent IDs come from org-shared KB retrieval
+// results owned by another workspace (#3342).
+func (r *chunkRepository) ListChunksByParentIDsOnly(
+	ctx context.Context, parentIDs []string,
+) ([]*types.Chunk, error) {
+	if len(parentIDs) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("parent_chunk_id IN ?", parentIDs).
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // UpdateChunk updates a chunk using GORM Save, which updates ALL fields
 // except SeqID (auto-increment, must not be overwritten).
 // Make sure the chunk object is complete (e.g., fetched from DB) before calling this method.
 func (r *chunkRepository) UpdateChunk(ctx context.Context, chunk *types.Chunk) error {
 	return r.db.WithContext(ctx).Omit("SeqID").Save(chunk).Error
+}
+
+func (r *chunkRepository) CreateChunkRevision(ctx context.Context, revision *types.ChunkRevision) error {
+	return r.db.WithContext(ctx).Create(revision).Error
+}
+
+func (r *chunkRepository) SaveChunkRevision(
+	ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&types.Chunk{}).
+			Where("id = ? AND tenant_id = ? AND content_revision = ?", chunk.ID, chunk.TenantID, expectedRevision).
+			Updates(map[string]interface{}{
+				"content":          common.CleanInvalidUTF8(chunk.Content),
+				"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
+				"content_revision": chunk.ContentRevision,
+				"is_enabled":       chunk.IsEnabled,
+				"metadata":         chunk.Metadata,
+				"index_status":     chunk.IndexStatus,
+				"last_editor_id":   chunk.LastEditorID,
+				"updated_at":       chunk.UpdatedAt,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrChunkRevisionConflict
+		}
+		return tx.Create(revision).Error
+	})
+}
+
+func (r *chunkRepository) ListChunkRevisions(
+	ctx context.Context, tenantID uint64, chunkID string,
+) ([]*types.ChunkRevision, error) {
+	var revisions []*types.ChunkRevision
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND chunk_id = ?", tenantID, chunkID).
+		Order("revision DESC").Find(&revisions).Error
+	return revisions, err
+}
+
+func (r *chunkRepository) GetChunkRevision(
+	ctx context.Context, tenantID uint64, chunkID string, revision int,
+) (*types.ChunkRevision, error) {
+	var item types.ChunkRevision
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND chunk_id = ? AND revision = ?", tenantID, chunkID, revision).
+		First(&item).Error
+	return &item, err
+}
+
+// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
+func (r *chunkRepository) SaveChunks(ctx context.Context, chunks []*types.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, chunk := range chunks {
+			if err := tx.Omit("SeqID").Save(chunk).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // UpdateChunks updates chunks in batch using raw SQL for efficiency.
@@ -316,109 +484,127 @@ func (r *chunkRepository) UpdateChunk(ctx context.Context, chunk *types.Chunk) e
 //   - other fields not listed above
 //
 // If you need to update metadata or content_hash, use UpdateChunk (single) instead.
+//
+// On PostgreSQL the rows are joined against a VALUES list, so the statement
+// costs O(N) instead of the O(N²) of a CASE-per-column chain. Other dialects
+// run one small UPDATE per row inside a single transaction, which is also
+// O(N) and keeps the statement well within their bind-parameter limits.
 func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
 
-	// Build batch update SQL with CASE expressions
-	var ids []string
-	contentCases := make([]string, 0, len(chunks))
-	isEnabledCases := make([]string, 0, len(chunks))
-	tagIDCases := make([]string, 0, len(chunks))
-	flagsCases := make([]string, 0, len(chunks))
-	statusCases := make([]string, 0, len(chunks))
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for start := 0; start < len(chunks); start += updateChunksBatchSize {
+			end := start + updateChunksBatchSize
+			if end > len(chunks) {
+				end = len(chunks)
+			}
+			batch := chunks[start:end]
 
-	var contentArgs []interface{}
-	var isEnabledArgs []interface{}
-	var tagIDArgs []interface{}
-	var flagsArgs []interface{}
-	var statusArgs []interface{}
-
-	for _, chunk := range chunks {
-		ids = append(ids, chunk.ID)
-		content := common.CleanInvalidUTF8(chunk.Content)
-
-		contentCases = append(contentCases, "WHEN id = ? THEN ?")
-		contentArgs = append(contentArgs, chunk.ID, content)
-
-		// Convert bool to string for PostgreSQL compatibility
-		isEnabledStr := "false"
-		if chunk.IsEnabled {
-			isEnabledStr = "true"
+			var err error
+			if tx.Name() == "postgres" {
+				err = updateChunksPostgres(tx, batch)
+			} else {
+				err = updateChunksRowByRow(tx, batch)
+			}
+			if err != nil {
+				return err
+			}
 		}
-		isEnabledCases = append(isEnabledCases, "WHEN id = ? THEN ?")
-		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		return nil
+	})
+}
 
-		tagIDCases = append(tagIDCases, "WHEN id = ? THEN ?")
-		tagIDArgs = append(tagIDArgs, chunk.ID, chunk.TagID)
-
-		flagsCases = append(flagsCases, "WHEN id = ? THEN ?")
-		flagsArgs = append(flagsArgs, chunk.ID, fmt.Sprintf("%d", chunk.Flags))
-
-		statusCases = append(statusCases, "WHEN id = ? THEN ?")
-		statusArgs = append(statusArgs, chunk.ID, fmt.Sprintf("%d", chunk.Status))
-	}
-
-	// Build IN clause placeholders
-	inPlaceholders := make([]string, len(ids))
-	for i := range ids {
-		inPlaceholders[i] = "?"
-	}
-
-	// Combine args in correct order: content, is_enabled, tag_id, flags, status, then IN clause
-	var args []interface{}
-	args = append(args, contentArgs...)
-	args = append(args, isEnabledArgs...)
-	args = append(args, tagIDArgs...)
-	args = append(args, flagsArgs...)
-	args = append(args, statusArgs...)
-	for _, id := range ids {
-		args = append(args, id)
-	}
-
-	isPostgres := r.db.Dialector.Name() == "postgres"
-
-	var sql string
-	if isPostgres {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = (CASE %s END)::boolean,
-				tag_id = CASE %s END,
-				flags = (CASE %s END)::integer,
-				status = (CASE %s END)::integer,
-				updated_at = NOW()
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
-		)
-	} else {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = CASE %s END,
-				tag_id = CASE %s END,
-				flags = CASE %s END,
-				status = CASE %s END,
-				updated_at = datetime('now')
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
+// updateChunksPostgres issues a single UPDATE ... FROM (VALUES ...) statement.
+// Every value is cast explicitly so PostgreSQL can type the VALUES columns
+// without inspecting the bind parameters.
+func updateChunksPostgres(tx *gorm.DB, chunks []*types.Chunk) error {
+	rows := make([]string, 0, len(chunks))
+	args := make([]interface{}, 0, len(chunks)*6)
+	for _, chunk := range chunks {
+		rows = append(rows, "(?::varchar, ?::text, ?::boolean, ?::varchar, ?::integer, ?::integer)")
+		args = append(args,
+			chunk.ID,
+			common.CleanInvalidUTF8(chunk.Content),
+			chunk.IsEnabled,
+			chunk.TagID,
+			int(chunk.Flags),
+			chunk.Status,
 		)
 	}
 
-	return r.db.WithContext(ctx).Exec(sql, args...).Error
+	sql := fmt.Sprintf(`
+		UPDATE chunks AS c SET
+			content = v.content,
+			is_enabled = v.is_enabled,
+			tag_id = v.tag_id,
+			flags = v.flags,
+			status = v.status,
+			updated_at = NOW()
+		FROM (VALUES %s) AS v(id, content, is_enabled, tag_id, flags, status)
+		WHERE c.id = v.id
+	`, strings.Join(rows, ",\n"))
+
+	return tx.Exec(sql, args...).Error
+}
+
+// updateChunksRowByRow updates each chunk with its own statement. GORM sets
+// updated_at automatically for map-based Updates, which also sidesteps the
+// NOW() vs datetime('now') dialect difference.
+func updateChunksRowByRow(tx *gorm.DB, chunks []*types.Chunk) error {
+	for _, chunk := range chunks {
+		err := tx.Unscoped().Model(&types.Chunk{}).
+			Where("id = ?", chunk.ID).
+			Updates(map[string]interface{}{
+				"content":    common.CleanInvalidUTF8(chunk.Content),
+				"is_enabled": chunk.IsEnabled,
+				"tag_id":     chunk.TagID,
+				"flags":      int(chunk.Flags),
+				"status":     chunk.Status,
+			}).Error
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpdateChunkFieldsByIDs sets the same column values on every listed chunk
+// with one UPDATE per batch of IDs. Use it for uniform state transitions
+// (for example flipping status after indexing) instead of UpdateChunks, which
+// has to ship every row's content back to the database.
+//
+// fields maps column names to values. updated_at is set automatically.
+func (r *chunkRepository) UpdateChunkFieldsByIDs(
+	ctx context.Context, tenantID uint64, ids []string, fields map[string]interface{},
+) error {
+	if len(ids) == 0 || len(fields) == 0 {
+		return nil
+	}
+	updates := make(map[string]interface{}, len(fields)+1)
+	for column, value := range fields {
+		updates[column] = value
+	}
+	if _, ok := updates["updated_at"]; !ok {
+		updates["updated_at"] = time.Now()
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for start := 0; start < len(ids); start += updateByIDsBatchSize {
+			end := start + updateByIDsBatchSize
+			if end > len(ids) {
+				end = len(ids)
+			}
+			err := tx.Model(&types.Chunk{}).
+				Where("tenant_id = ? AND id IN ?", tenantID, ids[start:end]).
+				Updates(updates).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // DeleteChunk deletes a chunk by its ID
@@ -477,7 +663,7 @@ func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID ui
 func (r *chunkRepository) MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error {
 	return r.db.WithContext(ctx).Model(&types.Chunk{}).
 		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
-		Update("knowledge_base_id", targetKBID).Error
+		Updates(map[string]any{"knowledge_base_id": targetKBID, "tag_id": ""}).Error
 }
 
 // DeleteChunksByTagID deletes all chunks with the specified tag ID
@@ -658,10 +844,20 @@ func (r *chunkRepository) FindFAQChunkWithDuplicateQuestion(
 		return nil, nil
 	}
 
+	// Every non-deleted status counts, including ChunkStatusStored: a chunk that
+	// is written but not yet indexed is a sibling create still in flight, and
+	// skipping it lets a retried request insert a second row for the same
+	// question. Soft-deleted rows are excluded by GORM.
 	db := r.db.WithContext(ctx).
 		Select("id, metadata").
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status = ? AND id != ?",
-			tenantID, kbID, types.ChunkTypeFAQ, types.ChunkStatusIndexed, excludeChunkID)
+		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status IN (?) AND id != ?",
+			tenantID, kbID, types.ChunkTypeFAQ,
+			[]int{
+				int(types.ChunkStatusDefault),
+				int(types.ChunkStatusStored),
+				int(types.ChunkStatusIndexed),
+			},
+			excludeChunkID)
 
 	switch r.db.Name() {
 	case "mysql":
@@ -845,30 +1041,22 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 	newTagID *string,
 	excludeIDs []string,
 ) ([]string, error) {
-	// First, get the IDs of chunks that will be affected (for is_enabled sync)
+	if isEnabled == nil && setFlags == 0 && clearFlags == 0 && newTagID == nil {
+		return nil, nil
+	}
+	// Return every affected entry, including tag-only and flag-only changes.
+	// Callers use these IDs for index synchronization and subsequent patches.
 	var affectedIDs []string
-	if isEnabled != nil {
-		var chunks []*types.Chunk
-		query := r.db.WithContext(ctx).
-			Select("id").
-			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?",
-				tenantID, kbID, types.ChunkTypeFAQ)
-		if tagID != "" {
-			query = query.Where("tag_id = ?", tagID)
-		}
-
-		if len(excludeIDs) > 0 {
-			query = query.Where("id NOT IN ?", excludeIDs)
-		}
-
-		// Only get chunks that need to change
-		query = query.Where("is_enabled != ?", *isEnabled)
-		if err := query.Find(&chunks).Error; err != nil {
-			return nil, err
-		}
-		for _, c := range chunks {
-			affectedIDs = append(affectedIDs, c.ID)
-		}
+	selection := r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", tenantID, kbID, types.ChunkTypeFAQ)
+	if tagID != "" {
+		selection = selection.Where("tag_id = ?", tagID)
+	}
+	if len(excludeIDs) > 0 {
+		selection = selection.Where("id NOT IN ?", excludeIDs)
+	}
+	if err := selection.Pluck("id", &affectedIDs).Error; err != nil {
+		return nil, err
 	}
 
 	// Build update query
@@ -916,44 +1104,170 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 	return affectedIDs, nil
 }
 
+type chunkIDHash struct {
+	ID          string `gorm:"column:id"`
+	ContentHash string `gorm:"column:content_hash"`
+}
+
+const faqChunkDiffBatchSize = 5000
+
+// listFAQChunkIDHashesByKB loads id/content_hash pairs for all FAQ chunks in a KB.
+func (r *chunkRepository) listFAQChunkIDHashesByKB(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) ([]chunkIDHash, error) {
+	var all []chunkIDHash
+	var lastID string
+
+	for {
+		var batch []chunkIDHash
+		query := r.db.WithContext(ctx).Model(&types.Chunk{}).
+			Select("id, content_hash").
+			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?",
+				tenantID, kbID, types.ChunkTypeFAQ).
+			Order("id ASC").
+			Limit(faqChunkDiffBatchSize)
+		if lastID != "" {
+			query = query.Where("id > ?", lastID)
+		}
+		if err := query.Find(&batch).Error; err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		all = append(all, batch...)
+		lastID = batch[len(batch)-1].ID
+		if len(batch) < faqChunkDiffBatchSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+func diffFAQChunkIDsByContentHash(src, dst []chunkIDHash) (
+	chunksToAdd, chunksToDelete []string,
+	matched []types.FAQChunkSyncPair,
+) {
+	dstHashes := make(map[string]struct{}, len(dst))
+	dstIDByHash := make(map[string]string, len(dst))
+	dstIDsByHash := make(map[string][]string, len(dst))
+	for _, pair := range dst {
+		dstHashes[pair.ContentHash] = struct{}{}
+		if _, ok := dstIDByHash[pair.ContentHash]; !ok {
+			dstIDByHash[pair.ContentHash] = pair.ID
+		}
+		dstIDsByHash[pair.ContentHash] = append(dstIDsByHash[pair.ContentHash], pair.ID)
+	}
+	srcHashes := make(map[string]struct{}, len(src))
+	for _, pair := range src {
+		srcHashes[pair.ContentHash] = struct{}{}
+	}
+
+	for _, pair := range src {
+		if _, exists := dstHashes[pair.ContentHash]; !exists {
+			chunksToAdd = append(chunksToAdd, pair.ID)
+			continue
+		}
+		if dstID, ok := dstIDByHash[pair.ContentHash]; ok {
+			matched = append(matched, types.FAQChunkSyncPair{
+				SrcChunkID: pair.ID,
+				DstChunkID: dstID,
+			})
+		}
+	}
+	for _, pair := range dst {
+		if _, exists := srcHashes[pair.ContentHash]; !exists {
+			chunksToDelete = append(chunksToDelete, pair.ID)
+		}
+	}
+	for hash, ids := range dstIDsByHash {
+		if hash == "" || len(ids) <= 1 {
+			continue
+		}
+		if _, inSrc := srcHashes[hash]; !inSrc {
+			continue
+		}
+		canonical := dstIDByHash[hash]
+		for _, id := range ids {
+			if id != canonical {
+				chunksToDelete = append(chunksToDelete, id)
+			}
+		}
+	}
+	return chunksToAdd, chunksToDelete, matched
+}
+
 // FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.
 // Returns: chunksToAdd (IDs of chunks in src whose content_hash is not in dst),
 //
-//	chunksToDelete (IDs of chunks in dst whose content_hash is not in src)
+//	chunksToDelete (IDs of chunks in dst whose content_hash is not in src, plus
+//	duplicate dst chunks that share a content_hash with another dst chunk when
+//	that hash still exists in src)
 func (r *chunkRepository) FAQChunkDiff(
 	ctx context.Context,
 	srcTenantID uint64, srcKBID string,
 	dstTenantID uint64, dstKBID string,
-) (chunksToAdd []string, chunksToDelete []string, err error) {
-	// Get content_hash set from destination KB
-	dstHashSubQuery := r.db.Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", dstTenantID, dstKBID, types.ChunkTypeFAQ).
-		Select("content_hash")
-
-	// Find chunks in source that don't exist in destination (by content_hash)
-	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", srcTenantID, srcKBID, types.ChunkTypeFAQ).
-		Where("content_hash NOT IN (?)", dstHashSubQuery).
-		Pluck("id", &chunksToAdd).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, fmt.Errorf("failed to get chunks to add: %w", err)
+) (*types.FAQChunkDiffResult, error) {
+	srcPairs, err := r.listFAQChunkIDHashesByKB(ctx, srcTenantID, srcKBID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list source FAQ chunks: %w", err)
+	}
+	dstPairs, err := r.listFAQChunkIDHashesByKB(ctx, dstTenantID, dstKBID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list destination FAQ chunks: %w", err)
 	}
 
-	// Get content_hash set from source KB
-	srcHashSubQuery := r.db.Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", srcTenantID, srcKBID, types.ChunkTypeFAQ).
-		Select("content_hash")
+	add, del, matched := diffFAQChunkIDsByContentHash(srcPairs, dstPairs)
+	return &types.FAQChunkDiffResult{
+		ChunksToAdd:    add,
+		ChunksToDelete: del,
+		MatchedPairs:   matched,
+	}, nil
+}
 
-	// Find chunks in destination that don't exist in source (by content_hash)
-	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", dstTenantID, dstKBID, types.ChunkTypeFAQ).
-		Where("content_hash NOT IN (?)", srcHashSubQuery).
-		Pluck("id", &chunksToDelete).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, fmt.Errorf("failed to get chunks to delete: %w", err)
+// ListFAQChunkStatusByIDs loads status fields for FAQ clone sync.
+func (r *chunkRepository) ListFAQChunkStatusByIDs(
+	ctx context.Context,
+	tenantID uint64,
+	ids []string,
+) (map[string]*types.FAQChunkStatus, error) {
+	if len(ids) == 0 {
+		return map[string]*types.FAQChunkStatus{}, nil
 	}
-
-	return chunksToAdd, chunksToDelete, nil
+	const batchSize = 5000
+	var chunks []*types.Chunk
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var batch []*types.Chunk
+		if err := r.db.WithContext(ctx).
+			Select("id, tag_id, is_enabled, flags, metadata").
+			Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).
+			Find(&batch).Error; err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, batch...)
+	}
+	out := make(map[string]*types.FAQChunkStatus, len(chunks))
+	for _, chunk := range chunks {
+		strategy := types.AnswerStrategyAll
+		if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
+			strategy = meta.AnswerStrategy
+		}
+		out[chunk.ID] = &types.FAQChunkStatus{
+			ID:             chunk.ID,
+			TagID:          chunk.TagID,
+			IsEnabled:      chunk.IsEnabled,
+			Flags:          chunk.Flags,
+			AnswerStrategy: strategy,
+			Metadata:       chunk.Metadata,
+		}
+	}
+	return out, nil
 }
 
 // ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.
@@ -1074,4 +1388,18 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	}
 
 	return chunks, nil
+}
+
+func (r *chunkRepository) ListAllChunksByKnowledgeID(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Order("id ASC").
+		Find(&chunks).
+		Error
+	return chunks, err
 }

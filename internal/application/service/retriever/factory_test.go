@@ -259,8 +259,11 @@ func TestCreateRetrieveEngineForKB_OwnershipLookupError(t *testing.T) {
 	_, err := CreateRetrieveEngineForKB(context.Background(), registry, ownership, 1, &storeID)
 
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrVectorStoreNotFound),
-		"ownership infrastructure error must collapse to ErrVectorStoreNotFound; got %q", err)
+	assert.True(t, errors.Is(err, ErrVectorStoreUnavailable),
+		"a database failure says nothing about whether the store exists, so it must be "+
+			"retryable rather than the permanent not-found sentinel; got %q", err)
+	assert.False(t, errors.Is(err, ErrVectorStoreNotFound),
+		"async workers stop retrying on not-found, which would discard the task")
 }
 
 // ----- CreateRetrieveEngineFromPayload -----

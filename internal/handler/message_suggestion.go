@@ -136,6 +136,11 @@ func (h *MessageSuggestionHandler) writeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		c.Error(apperrors.NewNotFoundError("suggestions not found"))
+	// apperrors.ErrSessionNotFound is a bare errors.New (not wrapping
+	// gorm.ErrRecordNotFound), so it needs its own branch to surface as a 404
+	// instead of falling through to a misleading 500.
+	case errors.Is(err, apperrors.ErrSessionNotFound):
+		c.Error(apperrors.NewNotFoundError("session not found"))
 	case strings.Contains(err.Error(), "completed assistant"):
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 	case strings.Contains(err.Error(), "invalid suggestion event"),

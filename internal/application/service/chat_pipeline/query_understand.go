@@ -19,6 +19,7 @@ import (
 type PluginQueryUnderstand struct {
 	modelService   interfaces.ModelService
 	messageService interfaces.MessageService
+	memoryService  interfaces.MemoryService
 	config         *config.Config
 }
 
@@ -34,11 +35,13 @@ type queryUnderstandOutput struct {
 // and registers it with the event manager.
 func NewPluginQueryUnderstand(eventManager *EventManager,
 	modelService interfaces.ModelService, messageService interfaces.MessageService,
+	memoryService interfaces.MemoryService,
 	config *config.Config,
 ) *PluginQueryUnderstand {
 	res := &PluginQueryUnderstand{
 		modelService:   modelService,
 		messageService: messageService,
+		memoryService:  memoryService,
 		config:         config,
 	}
 	eventManager.Register(res)
@@ -80,7 +83,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	// --- Load and prepare conversation history ---
 	var historyList []*types.History
-	if len(chatManage.History) > 0 {
+	if len(chatManage.History) > 0 || chatManage.HistoryLoaded {
 		historyList = chatManage.History
 		pipelineInfo(ctx, "QueryUnderstand", "history_reused", map[string]interface{}{
 			"session_id": chatManage.SessionID,
@@ -100,7 +103,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	}
 
 	// --- Build prompts ---
-	systemContent, userContent := p.buildPrompts(chatManage, historyList)
+	systemContent, userContent := p.buildPrompts(ctx, chatManage, historyList)
 
 	userMsg := chat.Message{Role: "user", Content: userContent}
 	if useImages {
@@ -109,12 +112,16 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	maxTokens := 150
 	if useImages {
-		maxTokens = 500
+		// The image prompt asks for the full OCR text in image_description.
+		// At 500 tokens a text-heavy screenshot cut the JSON off, the parse
+		// failed, and the turn lost its rewrite, intent and description.
+		maxTokens = 2048
 	}
 
 	// --- Call model ---
 	thinking := false
-	response, err := rewriteModel.Chat(ctx, []chat.Message{
+	modelCtx := types.WithLLMCallMetadata(ctx, "query_rewrite", "")
+	response, err := rewriteModel.Chat(modelCtx, []chat.Message{
 		{Role: "system", Content: systemContent},
 		userMsg,
 	}, &chat.ChatOptions{
@@ -210,6 +217,7 @@ func (p *PluginQueryUnderstand) loadHistory(ctx context.Context, chatManage *typ
 	}
 
 	chatManage.History = historyList
+	chatManage.HistoryLoaded = true
 
 	if len(historyList) > 0 {
 		pipelineInfo(ctx, "QueryUnderstand", "history_ready", map[string]interface{}{
@@ -280,7 +288,9 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 }
 
 // buildPrompts constructs system and user prompts with placeholder replacement.
-func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, historyList []*types.History) (string, string) {
+func (p *PluginQueryUnderstand) buildPrompts(
+	ctx context.Context, chatManage *types.ChatManage, historyList []*types.History,
+) (string, string) {
 	userPrompt := p.config.Conversation.RewritePromptUser
 	if chatManage.RewritePromptUser != "" {
 		userPrompt = chatManage.RewritePromptUser
@@ -303,6 +313,7 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 	} else {
 		queryContent += "\n<no_document_attached />"
 	}
+	queryContent += p.memoryBackground(ctx, chatManage)
 
 	vals := types.PlaceholderValues{
 		"conversation": conversationText,
@@ -312,6 +323,58 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 
 	return types.RenderPromptPlaceholders(systemPrompt, vals),
 		types.RenderPromptPlaceholders(userPrompt, vals)
+}
+
+// memoryBackground gives the rewriter who is asking.
+//
+// This is the point where long-term memory stops being a paragraph appended to
+// the answer prompt and starts changing what gets retrieved. "How do I tune the
+// segmentation" is a different search for someone who works on medical imaging
+// than for someone who works on autonomous driving, and the only place that
+// difference can be applied is before retrieval runs.
+//
+// It is deliberately advisory rather than a filter. Memory narrows nothing and
+// excludes no knowledge base: a stale note about last quarter's project must
+// not be able to make this quarter's documents unreachable.
+func (p *PluginQueryUnderstand) memoryBackground(ctx context.Context, chatManage *types.ChatManage) string {
+	if p.memoryService == nil {
+		return ""
+	}
+	memCtx := p.memoryService.RetrievalContextFor(ctx)
+	if memCtx.Empty() {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n\n<asker_background note=\"背景仅用于消解指代和补全检索词，不要当作问题的一部分\">")
+	if memCtx.Background != "" {
+		b.WriteString("\n" + memCtx.Background)
+	}
+	if len(memCtx.Interests) > 0 {
+		b.WriteString("\n长期关注：" + strings.Join(memCtx.Interests, "、"))
+	}
+	if len(memCtx.Documents) > 0 {
+		b.WriteString("\n常查资料：" + strings.Join(memCtx.Documents, "、"))
+	}
+	b.WriteString("\n</asker_background>")
+
+	// Deliberately does not add to chatManage.UsedMemories. What this reads is
+	// the whole standing background, unfiltered — that is the right input for a
+	// rewriter, but reporting it would claim every turn recalled memories that
+	// have nothing to do with the question. Which memories this turn actually
+	// used is decided in MEMORY_RECALL, by relevance, and the profile entries
+	// here are already reported from there.
+	fields := map[string]interface{}{
+		"session_id": chatManage.SessionID,
+		"interests":  len(memCtx.Interests),
+		"documents":  len(memCtx.Documents),
+		"items":      len(memCtx.Items),
+	}
+	if len(memCtx.Interests) > 0 {
+		fields["interest_previews"] = memCtx.Interests
+	}
+	pipelineInfo(ctx, "QueryUnderstand", "memory_background", fields)
+	return b.String()
 }
 
 // parseOutput extracts the rewritten query, intent classification, and optional
@@ -324,7 +387,13 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 		return
 	}
 
-	if output, ok := parseStructuredQueryOutput(content); ok {
+	output, ok := parseStructuredQueryOutput(content)
+	if !ok {
+		// A reply cut off by the token cap is not valid JSON, but the fields
+		// the model wrote before the cut are still usable.
+		output, ok = salvageStructuredQueryOutput(content)
+	}
+	if ok {
 		if rewrite := strings.TrimSpace(output.RewriteQuery); rewrite != "" {
 			chatManage.RewriteQuery = rewrite
 		}
@@ -333,11 +402,46 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 		return
 	}
 
-	// If JSON parsing failed entirely, treat the raw text as the rewritten query
-	// and default to IntentKBSearch for safety.
-	if content != "" {
-		chatManage.RewriteQuery = content
+	// On parse failure, keep the original query and intent.
+}
+
+// salvageFieldPattern captures a JSON string field and its value, closed or
+// cut off at the end of the reply.
+var salvageFieldPattern = regexp.MustCompile(`"([a-z_]+)"\s*:\s*"((?:[^"\\]|\\.)*)("?)`)
+
+// salvageStructuredQueryOutput recovers the string fields of a truncated
+// structured reply. Complete fields are taken as they are. A field the reply
+// was cut inside keeps the text written so far only when it is the image
+// description, where a partial transcript still helps; a cut-off rewrite or
+// intent is dropped, since it would replace the user's complete query.
+func salvageStructuredQueryOutput(content string) (queryUnderstandOutput, bool) {
+	fields := make(map[string]json.RawMessage)
+	for _, m := range salvageFieldPattern.FindAllStringSubmatch(content, -1) {
+		if closed := m[3] != ""; !closed && !isImageDescriptionField(m[1]) {
+			continue
+		}
+		value := strings.TrimSuffix(m[2], "\\")
+		var decoded string
+		if err := json.Unmarshal([]byte(`"`+value+`"`), &decoded); err != nil {
+			continue
+		}
+		encoded, _ := json.Marshal(decoded)
+		fields[m[1]] = encoded
 	}
+	if len(fields) == 0 {
+		return queryUnderstandOutput{}, false
+	}
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return queryUnderstandOutput{}, false
+	}
+	return parseStructuredQueryOutputJSON(string(encoded))
+}
+
+// isImageDescriptionField reports whether key is one of the image description
+// aliases parseStructuredQueryOutputJSON accepts.
+func isImageDescriptionField(key string) bool {
+	return strings.HasPrefix(key, "image_") || key == "description"
 }
 
 func parseStructuredQueryOutput(raw string) (queryUnderstandOutput, bool) {
@@ -374,10 +478,7 @@ func parseStructuredQueryOutputJSON(content string) (queryUnderstandOutput, bool
 			"rewrite_query", "rewritten_query", "query", "question")),
 	}
 
-	intentStr := strings.TrimSpace(firstStringField(obj, "intent"))
-	if intentStr != "" {
-		out.Intent = types.QueryIntent(intentStr)
-	}
+	out.Intent = types.NormalizeQueryIntent(firstStringField(obj, "intent"))
 
 	desc := strings.TrimSpace(firstStringField(obj,
 		"image_description", "image_desc", "image_text", "image_ocr_text", "description"))

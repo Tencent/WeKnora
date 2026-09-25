@@ -28,9 +28,16 @@ type minioFileService struct {
 // Shared by NewMinioFileService (which also ensures the bucket exists) and
 // CheckMinioConnectivity (read-only probe).
 func newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName string, useSSL bool) (*minioFileService, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe MinIO endpoint: %w", err)
+	}
+	httpConfig := utils.DefaultSSRFSafeHTTPClientConfig()
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
 		Secure: useSSL,
+		Transport: &utils.SSRFValidatingRoundTripper{
+			Base: utils.NewSSRFSafeTransport(httpConfig),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize MinIO client: %w", err)
@@ -92,9 +99,12 @@ func CheckMinioConnectivity(ctx context.Context, endpoint, accessKeyID, secretAc
 }
 
 // parseMinioFilePath extracts the object name from a provider scheme: minio://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/minio://{bucket}/{objectKey} paths are
+// accepted too (see storageBackendInnerPath, #3151).
 func (s *minioFileService) parseMinioFilePath(filePath string) (string, error) {
 	// Provider scheme format: minio://{bucket}/{objectKey}
 	const prefix = "minio://"
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, prefix) {
 		return "", fmt.Errorf("invalid MinIO file path: %s", filePath)
 	}

@@ -17,12 +17,16 @@ func TestExtractQuoteContent(t *testing.T) {
 		},
 		{
 			name: "text message",
-			msg:  &botMessage{MsgType: "text", Text: struct{ Content string `json:"content"` }{Content: "hello world"}},
+			msg: &botMessage{MsgType: "text", Text: struct {
+				Content string `json:"content"`
+			}{Content: "hello world"}},
 			want: "hello world",
 		},
 		{
 			name: "voice with STT content",
-			msg:  &botMessage{MsgType: "voice", Voice: struct{ Content string `json:"content"` }{Content: "speech text"}},
+			msg: &botMessage{MsgType: "voice", Voice: struct {
+				Content string `json:"content"`
+			}{Content: "speech text"}},
 			want: "speech text",
 		},
 		{
@@ -54,11 +58,17 @@ func TestExtractQuoteContent(t *testing.T) {
 			name: "mixed text and image keeps only text",
 			msg: &botMessage{
 				MsgType: "mixed",
-				Mixed: struct{ MsgItem []botMixedItem `json:"msg_item"` }{
+				Mixed: struct {
+					MsgItem []botMixedItem `json:"msg_item"`
+				}{
 					MsgItem: []botMixedItem{
-						{MsgType: "text", Text: struct{ Content string `json:"content"` }{Content: "part1"}},
+						{MsgType: "text", Text: struct {
+							Content string `json:"content"`
+						}{Content: "part1"}},
 						{MsgType: "image"},
-						{MsgType: "text", Text: struct{ Content string `json:"content"` }{Content: "part2"}},
+						{MsgType: "text", Text: struct {
+							Content string `json:"content"`
+						}{Content: "part2"}},
 					},
 				},
 			},
@@ -68,7 +78,9 @@ func TestExtractQuoteContent(t *testing.T) {
 			name: "mixed with only images returns empty",
 			msg: &botMessage{
 				MsgType: "mixed",
-				Mixed: struct{ MsgItem []botMixedItem `json:"msg_item"` }{
+				Mixed: struct {
+					MsgItem []botMixedItem `json:"msg_item"`
+				}{
 					MsgItem: []botMixedItem{
 						{MsgType: "image"},
 					},
@@ -102,26 +114,34 @@ func TestIsQuoteFromBot(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "matching from.userid",
-			quote:   &botMessage{From: struct{ UserID string `json:"userid"` }{UserID: "bot123"}, AiBotID: ""},
+			name: "matching from.userid",
+			quote: &botMessage{From: struct {
+				UserID string `json:"userid"`
+			}{UserID: "bot123"}, AiBotID: ""},
 			aiBotID: "bot123",
 			want:    true,
 		},
 		{
-			name:    "matching aibotid",
-			quote:   &botMessage{From: struct{ UserID string `json:"userid"` }{UserID: "other"}, AiBotID: "bot123"},
+			name: "matching aibotid",
+			quote: &botMessage{From: struct {
+				UserID string `json:"userid"`
+			}{UserID: "other"}, AiBotID: "bot123"},
 			aiBotID: "bot123",
 			want:    true,
 		},
 		{
-			name:    "no match",
-			quote:   &botMessage{From: struct{ UserID string `json:"userid"` }{UserID: "user456"}, AiBotID: ""},
+			name: "no match",
+			quote: &botMessage{From: struct {
+				UserID string `json:"userid"`
+			}{UserID: "user456"}, AiBotID: ""},
 			aiBotID: "bot123",
 			want:    false,
 		},
 		{
-			name:    "empty aiBotID",
-			quote:   &botMessage{From: struct{ UserID string `json:"userid"` }{UserID: "bot123"}},
+			name: "empty aiBotID",
+			quote: &botMessage{From: struct {
+				UserID string `json:"userid"`
+			}{UserID: "bot123"}},
 			aiBotID: "",
 			want:    false,
 		},
@@ -149,8 +169,12 @@ func TestBuildQuotedMessage(t *testing.T) {
 			MsgID:   "msg-001",
 			MsgType: "text",
 			AiBotID: "bot1",
-			From:    struct{ UserID string `json:"userid"` }{UserID: "bot1"},
-			Text:    struct{ Content string `json:"content"` }{Content: "hello"},
+			From: struct {
+				UserID string `json:"userid"`
+			}{UserID: "bot1"},
+			Text: struct {
+				Content string `json:"content"`
+			}{Content: "hello"},
 		}
 		got := buildQuotedMessage(msg, "bot1")
 		if got == nil {
@@ -177,7 +201,9 @@ func TestBuildQuotedMessage(t *testing.T) {
 		msg := &botMessage{
 			MsgID:   "msg-img",
 			MsgType: "image",
-			From:    struct{ UserID string `json:"userid"` }{UserID: "user456"},
+			From: struct {
+				UserID string `json:"userid"`
+			}{UserID: "user456"},
 		}
 		got := buildQuotedMessage(msg, "bot1")
 		if got == nil {
@@ -195,7 +221,9 @@ func TestBuildQuotedMessage(t *testing.T) {
 		msg := &botMessage{
 			MsgID:   "msg-vid",
 			MsgType: "video",
-			From:    struct{ UserID string `json:"userid"` }{UserID: "user456"},
+			From: struct {
+				UserID string `json:"userid"`
+			}{UserID: "user456"},
 		}
 		got := buildQuotedMessage(msg, "bot1")
 		if got == nil {
@@ -210,8 +238,12 @@ func TestBuildQuotedMessage(t *testing.T) {
 		msg := &botMessage{
 			MsgID:   "msg-002",
 			MsgType: "text",
-			From:    struct{ UserID string `json:"userid"` }{UserID: "user456"},
-			Text:    struct{ Content string `json:"content"` }{Content: "question"},
+			From: struct {
+				UserID string `json:"userid"`
+			}{UserID: "user456"},
+			Text: struct {
+				Content string `json:"content"`
+			}{Content: "question"},
 		}
 		got := buildQuotedMessage(msg, "bot1")
 		if got == nil {

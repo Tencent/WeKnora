@@ -120,12 +120,12 @@ func TestWikiReadRoutesDenyCrossTenantKB(t *testing.T) {
 		"/api/v1/knowledgebase/kb-victim/wiki/pages/secret-page",
 		"/api/v1/knowledgebase/kb-victim/wiki/folders",
 		"/api/v1/knowledgebase/kb-victim/wiki/index",
-		"/api/v1/knowledgebase/kb-victim/wiki/log",
 		"/api/v1/knowledgebase/kb-victim/wiki/graph",
 		"/api/v1/knowledgebase/kb-victim/wiki/stats",
 		"/api/v1/knowledgebase/kb-victim/wiki/search?q=test",
 		"/api/v1/knowledgebase/kb-victim/wiki/lint",
 		"/api/v1/knowledgebase/kb-victim/wiki/issues",
+		"/api/v1/knowledgebase/kb-victim/wiki/revisions/secret-page",
 	}
 
 	for _, path := range paths {
@@ -136,6 +136,14 @@ func TestWikiReadRoutesDenyCrossTenantKB(t *testing.T) {
 			require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
 		})
 	}
+}
+
+func TestWikiOperationLogRouteIsRemoved(t *testing.T) {
+	engine := newWikiRouteTestEngine(t, 1, tenantKBLookupFixture())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledgebase/kb-allowed/wiki/log", nil)
+	engine.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNotFound, rec.Code, "body=%s", rec.Body.String())
 }
 
 func TestInitializationWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
@@ -189,6 +197,7 @@ func TestWikiWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/rebuild-links"},
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/auto-fix"},
 		{http.MethodPut, "/api/v1/knowledgebase/kb-other/wiki/issues/1/status"},
+		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/revert"},
 	}
 
 	for _, tc := range cases {

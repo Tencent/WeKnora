@@ -19,7 +19,7 @@
 // @securityDefinitions.apikey ApiKeyAuth
 // @in header
 // @name X-API-Key
-// @description 空间身份认证：输入 sk- 开头的 API Key
+// @description API Key 认证：空间 Key 固定访问所属空间；平台 Key 调用空间接口时需同时传 X-Tenant-ID
 package main
 
 import (
@@ -32,6 +32,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -67,6 +68,7 @@ func main() {
 		router *gin.Engine,
 		resourceCleaner interfaces.ResourceCleaner,
 		systemSettingSvc interfaces.SystemSettingService,
+		modelCatalogSvc *service.ModelCatalogService,
 	) error {
 		// Create HTTP server
 		server := &http.Server{
@@ -80,6 +82,7 @@ func main() {
 		}
 
 		ctx, done := context.WithCancel(context.Background())
+		modelCatalogSvc.Start(ctx)
 
 		// Start the system_settings pubsub subscriber. Runs in its own
 		// goroutine and exits when ctx is cancelled at shutdown. Best-

@@ -9,12 +9,12 @@ import (
 
 // mockStreamSender is a test double that records streaming calls.
 type mockStreamSender struct {
-	mu            sync.Mutex
-	started       bool
-	streamID      string
-	updates       []string
-	finalContent  string
-	ended         bool
+	mu           sync.Mutex
+	started      bool
+	streamID     string
+	updates      []string
+	finalContent string
+	ended        bool
 }
 
 func (m *mockStreamSender) StartStream(_ context.Context, _ *IncomingMessage) (string, error) {

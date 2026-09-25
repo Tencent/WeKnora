@@ -223,6 +223,31 @@ func TestClassifyFactoryError_TenantInfoMissingMaps(t *testing.T) {
 	assert.Equal(t, apperrors.ErrVectorStoreBindingInvalid, app.Code)
 }
 
+// A rebuild that runs out of time is reported as an unavailable store rather
+// than falling through as a raw error, which the handler would surface as an
+// internal failure. The store exists and the caller may succeed on a retry.
+func TestClassifyFactoryError_DeadlineExceededMapsTo2201(t *testing.T) {
+	t.Parallel()
+	err := classifyFactoryError(context.Background(),
+		context.DeadlineExceeded, 7, "store-id-y")
+	app, ok := apperrors.IsAppError(err)
+	require.True(t, ok, "expected AppError, got %T", err)
+	assert.Equal(t, apperrors.ErrVectorStoreUnavailable, app.Code)
+	if strings.Contains(app.Message, "store-id-y") {
+		t.Fatalf("AppError message leaked store UUID: %q", app.Message)
+	}
+}
+
+// A caller that walked away is left as-is: there is no response to shape, and
+// turning it into a store verdict would misreport why the work stopped.
+func TestClassifyFactoryError_CancellationPassesThrough(t *testing.T) {
+	t.Parallel()
+	err := classifyFactoryError(context.Background(), context.Canceled, 1, "x")
+	require.ErrorIs(t, err, context.Canceled)
+	_, ok := apperrors.IsAppError(err)
+	assert.False(t, ok, "a cancellation is not a store verdict")
+}
+
 func TestClassifyFactoryError_GenericErrorPassesThrough(t *testing.T) {
 	t.Parallel()
 	raw := stderrors.New("generic infra failure")
@@ -390,27 +415,35 @@ func (f *fakeRetrieveEngineService) Retrieve(ctx context.Context, p types.Retrie
 func (f *fakeRetrieveEngineService) Index(context.Context, embedding.Embedder, *types.IndexInfo, []types.RetrieverType) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) BatchIndex(context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) EstimateStorageSize(context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType) int64 {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) CopyIndices(context.Context, string, map[string]string, map[string]string, string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteByChunkIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteBySourceIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) DeleteByKnowledgeIDList(context.Context, []string, int, string) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) BatchUpdateChunkEnabledStatus(context.Context, map[string]bool) error {
 	panic("unused")
 }
+
 func (f *fakeRetrieveEngineService) BatchUpdateChunkTagID(context.Context, map[string]string) error {
 	panic("unused")
 }
@@ -430,14 +463,23 @@ func (r *fakeFanoutRegistry) Register(interfaces.RetrieveEngineService) error { 
 func (r *fakeFanoutRegistry) GetRetrieveEngineService(types.RetrieverEngineType) (interfaces.RetrieveEngineService, error) {
 	return nil, stderrors.New("not used in fan-out tests")
 }
+
 func (r *fakeFanoutRegistry) GetAllRetrieveEngineServices() []interfaces.RetrieveEngineService {
 	return nil
 }
+
 func (r *fakeFanoutRegistry) GetByStoreID(id string) (interfaces.RetrieveEngineService, error) {
 	if svc, ok := r.byStore[id]; ok {
 		return svc, nil
 	}
 	return nil, stderrors.New("store not registered")
+}
+
+// This fake never rebuilds a missing engine, so a miss stays a miss.
+func (r *fakeFanoutRegistry) GetOrLoadByStoreID(
+	_ context.Context, _ uint64, id string,
+) (interfaces.RetrieveEngineService, error) {
+	return r.GetByStoreID(id)
 }
 
 func buildBoundComposite(t *testing.T, svc interfaces.RetrieveEngineService) *retriever.CompositeRetrieveEngine {
@@ -545,18 +587,10 @@ func TestRetrieveFromStores_MultiGroupParallel_Concat(t *testing.T) {
 
 func TestRetrieveFromStores_MixedEngine_Normalizes(t *testing.T) {
 	t.Parallel()
-	// EngineAwareNormalizer policy in effect:
-	//   - ES / ElasticFaiss / OpenSearch / Weaviate / Postgres / SQLite /
-	//     Qdrant / TencentVectorDB / Doris surface non-negative cosine in
-	//     [0, 1] when the value reaches the normalizer (Lucene script_score
-	//     non-negative invariant for ES; k-NN plugin SpaceType.COSINESIMIL
-	//     pre-translation for OpenSearch; engine-internal conversions for
-	//     the rest) → passthrough via clamp01.
-	//   - Milvus is the only engine in this codebase that still surfaces
-	//     the raw signed cosine in [-1, 1] → cosine-shift via (score + 1) / 2.
-	//
-	// First sub-case below pins the ES passthrough; the Milvus sub-case
-	// pins the cosine-shift path so the [-1, 1] branch stays under coverage.
+	// EngineAwareNormalizer policy in effect: every driver reports cosine
+	// similarity (OpenSearch / Weaviate / Milvus L2 convert in the driver),
+	// so vector scores pass through clamp01, which only floors a negative
+	// cosine at 0 and guards NaN/Inf.
 	fakeES := &fakeRetrieveEngineService{
 		engineType: types.ElasticsearchRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType},
@@ -615,14 +649,16 @@ func TestRetrieveFromStores_MixedEngine_Normalizes(t *testing.T) {
 	assert.InDelta(t, 0.3, scoresByChunk2["es2"], 1e-9)
 	assert.InDelta(t, 0.8, scoresByChunk2["pg2"], 1e-9)
 
-	// Milvus cosine-shift coverage: raw -0.4 → (−0.4 + 1) / 2 = 0.3.
-	// Milvus is now the only engine in this switch that still uses the
-	// signed-cosine branch; without this case the [-1, 1] arm would be
-	// uncovered by the mixed-engine integration test.
+	// Milvus reports cosine like every other engine: 0.3 stays 0.3 (it used
+	// to be shifted to (0.3 + 1) / 2 = 0.65 and out-rank a PG hit at 0.6),
+	// and a negative cosine is floored at 0.
 	fakeMilvus := &fakeRetrieveEngineService{
 		engineType: types.MilvusRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType},
-		canned:     []*types.IndexWithScore{{ChunkID: "mv1", Score: -0.4}},
+		canned: []*types.IndexWithScore{
+			{ChunkID: "mv1", Score: 0.3},
+			{ChunkID: "mv2", Score: -0.4},
+		},
 	}
 	fakePG3 := &fakeRetrieveEngineService{
 		engineType: types.PostgresRetrieverEngineType,
@@ -642,6 +678,7 @@ func TestRetrieveFromStores_MixedEngine_Normalizes(t *testing.T) {
 		}
 	}
 	assert.InDelta(t, 0.3, scoresByChunk3["mv1"], 1e-9)
+	assert.InDelta(t, 0.0, scoresByChunk3["mv2"], 1e-9)
 	assert.InDelta(t, 0.8, scoresByChunk3["pg3"], 1e-9)
 }
 
@@ -743,7 +780,7 @@ func TestRetrieveFromStores_PerGroupTimeout(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // fakeKBShareForAuth implements just enough of KBShareService for the
-// authorizeKBAccess test matrix. Only HasTenantKBPermission is exercised;
+// authorizeKBAccess test matrix. Only CheckTenantKBPermission is exercised;
 // the embedded interface keeps the type assignable.
 type fakeKBShareForAuth struct {
 	// allowed maps kbID → tenantID → allowed. Mirrors the Plan 3 (#1303)
@@ -753,17 +790,10 @@ type fakeKBShareForAuth struct {
 	interfaces.KBShareService
 }
 
-func (f *fakeKBShareForAuth) HasTenantKBPermission(
-	_ context.Context, kbID string, callerTenantID uint64,
-	_ types.TenantRole, _ types.OrgMemberRole,
-) (bool, error) {
-	if f.err != nil {
-		return false, f.err
-	}
-	if perTenant, ok := f.allowed[kbID]; ok {
-		return perTenant[callerTenantID], nil
-	}
-	return false, nil
+func (f *fakeKBShareForAuth) CheckTenantKBPermission(
+	_ context.Context, kbID string, callerTenantID uint64, _ types.TenantRole,
+) (types.OrgMemberRole, bool, error) {
+	return types.OrgRoleViewer, f.allowed[kbID][callerTenantID], f.err
 }
 
 func ctxWithTenantForAuth(tenantID uint64) context.Context {
@@ -777,7 +807,7 @@ func TestAuthorizeKBAccess_SameTenantAllPass(t *testing.T) {
 		{ID: "kb-1", TenantID: 7},
 		{ID: "kb-2", TenantID: 7},
 	}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs)
 	require.NoError(t, err)
 }
 
@@ -793,7 +823,7 @@ func TestAuthorizeKBAccess_ForeignTenantWithShare_OK(t *testing.T) {
 		{ID: "kb-own", TenantID: 7},
 		{ID: "kb-foreign", TenantID: 99},
 	}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs)
 	require.NoError(t, err)
 }
 
@@ -808,7 +838,7 @@ func TestAuthorizeKBAccess_ForeignTenantNoShare_NotFound(t *testing.T) {
 	kbs := []*types.KnowledgeBase{
 		{ID: "kb-foreign", TenantID: 99},
 	}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs)
 	require.Error(t, err)
 	app, ok := apperrors.IsAppError(err)
 	require.True(t, ok, "expected typed AppError, got %T", err)
@@ -821,7 +851,7 @@ func TestAuthorizeKBAccess_PermissionLookupError_500(t *testing.T) {
 	share := &fakeKBShareForAuth{err: stderrors.New("share infra down")}
 	s := &knowledgeBaseService{kbShareService: share}
 	kbs := []*types.KnowledgeBase{{ID: "kb-foreign", TenantID: 99}}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), kbs)
 	require.Error(t, err)
 	app, ok := apperrors.IsAppError(err)
 	require.True(t, ok)
@@ -831,7 +861,7 @@ func TestAuthorizeKBAccess_PermissionLookupError_500(t *testing.T) {
 func TestAuthorizeKBAccess_EmptyKBs_OK(t *testing.T) {
 	t.Parallel()
 	s := &knowledgeBaseService{kbShareService: &fakeKBShareForAuth{}}
-	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), nil, 7)
+	err := s.authorizeKBAccess(ctxWithTenantForAuth(7), nil)
 	require.NoError(t, err)
 }
 
@@ -855,7 +885,7 @@ func TestIterativeRetrieve_PropagatesTypedAppError(t *testing.T) {
 	}
 	s := &knowledgeBaseService{}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
-	results, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 10, "q")
+	results, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 10, "q", 50)
 	require.Error(t, err)
 	assert.Nil(t, results, "results must be nil so HybridSearch returns a clean error response")
 	app, ok := apperrors.IsAppError(err)
@@ -893,7 +923,8 @@ func TestApplyFAQPostProcessing_PropagatesError(t *testing.T) {
 		vectorResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("v%d", i)}
 	}
 	params := types.SearchParams{QueryText: "q", MatchCount: 10}
-	out, err := s.applyFAQPostProcessing(ctx, kb, chunks, vectorResults, groups, params, 5)
+	vectorLists := [][]*types.IndexWithScore{vectorResults}
+	out, err := s.applyFAQPostProcessing(ctx, kb, []*types.KnowledgeBase{kb}, chunks, vectorLists, groups, params, 5)
 	require.Error(t, err)
 	assert.Nil(t, out)
 	_, ok := apperrors.IsAppError(err)
@@ -968,4 +999,42 @@ func TestRetrieveFromStores_IterativePattern_NoInternalRace(t *testing.T) {
 	for _, g := range groups {
 		assert.Equal(t, 50, g.BaseParams[0].TopK, "BaseParams TopK must stay immutable")
 	}
+}
+
+// The iterative FAQ path triggers when one vector list came back full, judged
+// per list: two short lists that together exceed matchCount must not trigger
+// it, and one full list must. The failing engine makes the iterative path
+// observable through its error.
+func TestApplyFAQPostProcessing_TriggerJudgesEachList(t *testing.T) {
+	t.Parallel()
+	bad := &fakeRetrieveEngineService{
+		engineType: types.PostgresRetrieverEngineType,
+		support:    []types.RetrieverType{types.VectorRetrieverType},
+		cannedErr:  stderrors.New("simulated retrieve failure"),
+	}
+	groups := []*storeGroup{
+		{Engine: buildBoundComposite(t, bad), BaseParams: vectorParams("q"), TopK: 5, KBIDs: []string{"kb-a"}},
+		{Engine: buildBoundComposite(t, bad), BaseParams: vectorParams("q"), TopK: 5, KBIDs: []string{"kb-b"}},
+	}
+	s := &knowledgeBaseService{chunkRepo: &tenantScopedFAQChunkRepo{}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	kb := &types.KnowledgeBase{ID: "kb-a", Type: types.KnowledgeBaseTypeFAQ, TenantID: 1}
+	chunks := []*types.IndexWithScore{{ChunkID: "c1", Score: 0.5}}
+	params := types.SearchParams{QueryText: "q", MatchCount: 10}
+	list := func(n int, prefix string) []*types.IndexWithScore {
+		out := make([]*types.IndexWithScore, n)
+		for i := range out {
+			out[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("%s%d", prefix, i)}
+		}
+		return out
+	}
+
+	short := [][]*types.IndexWithScore{list(3, "a"), list(3, "b")}
+	out, err := s.applyFAQPostProcessing(ctx, kb, []*types.KnowledgeBase{kb}, chunks, short, groups, params, 5)
+	require.NoError(t, err, "no list is full, so no deeper search")
+	assert.Equal(t, chunks, out)
+
+	full := [][]*types.IndexWithScore{list(5, "a"), list(1, "b")}
+	_, err = s.applyFAQPostProcessing(ctx, kb, []*types.KnowledgeBase{kb}, chunks, full, groups, params, 5)
+	require.Error(t, err, "a full list must trigger the iterative path")
 }

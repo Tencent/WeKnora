@@ -59,9 +59,18 @@ type runtimeTestInspector struct{}
 func (runtimeTestInspector) CancelTasksForKnowledge(context.Context, string) (int, int, error) {
 	return 0, 0, nil
 }
+func (runtimeTestInspector) HasQueuedDeleteTasksForKnowledge(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (runtimeTestInspector) HasQueuedTasksForKnowledge(context.Context, string) (bool, error) {
 	return false, nil
 }
+
+func (runtimeTestInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
 func (runtimeTestInspector) QueueStats(context.Context) ([]types.QueueStat, bool, error) {
 	return []types.QueueStat{}, true, nil
 }
@@ -83,6 +92,9 @@ type runtimeTaskTestInspector struct {
 	retriedTask         string
 	deletedTask         string
 	forceDeleted        string
+	purgedQueue         string
+	purgedCount         int
+	purgeErr            error
 	cancelKnowledge     string
 	cancelDeleted       int
 	mutatedQueue        string
@@ -193,6 +205,16 @@ func (r *runtimeTaskTestInspector) ForceDeleteRuntimeTask(
 	return true, r.forceDeleteErr
 }
 
+func (r *runtimeTaskTestInspector) PurgeArchivedRuntimeTasks(
+	_ context.Context, queue string,
+) (int, bool, error) {
+	r.purgedQueue = queue
+	if r.purgeErr != nil {
+		return 0, true, r.purgeErr
+	}
+	return r.purgedCount, true, nil
+}
+
 func TestGetRuntimeQueuesReportsIsolatedPoolCapacity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := &SystemHandler{
@@ -224,9 +246,9 @@ func TestGetRuntimeQueuesReportsIsolatedPoolCapacity(t *testing.T) {
 	}{
 		types.WorkerPoolCore:        {8, 2},
 		types.WorkerPoolPostProcess: {2, 1},
-		types.WorkerPoolEnrichment:  {12, 4},
+		types.WorkerPoolEnrichment:  {12, 5},
 		types.WorkerPoolMaintenance: {4, 2},
-		types.WorkerPoolShared:      {6, 6},
+		types.WorkerPoolShared:      {6, 7},
 		types.WorkerPoolWiki:        {8, 1},
 	}
 	if len(response.Pools) != len(want) {
@@ -396,6 +418,46 @@ func TestRuntimeTaskMutationsDelegateToInspector(t *testing.T) {
 	handler.MutateRuntimeTask(deleteCtx)
 	if deleteRecorder.Code != http.StatusOK || inspector.deletedTask != "task-2" {
 		t.Fatalf("delete failed: status=%d inspector=%+v", deleteRecorder.Code, inspector)
+	}
+}
+
+func TestPurgeArchivedRuntimeTasksDelegatesToInspector(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inspector := &runtimeTaskTestInspector{purgedCount: 7}
+	handler := &SystemHandler{taskInspector: inspector}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "queue", Value: types.QueueChatAttachment}}
+	ctx.Request = httptest.NewRequest(http.MethodDelete, "/archived", nil)
+
+	handler.PurgeArchivedRuntimeTasks(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if inspector.purgedQueue != types.QueueChatAttachment {
+		t.Fatalf("purged queue = %q, want %q", inspector.purgedQueue, types.QueueChatAttachment)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response["deleted"] != float64(7) {
+		t.Fatalf("deleted = %v, want 7", response["deleted"])
+	}
+}
+
+func TestPurgeArchivedRuntimeTasksRejectsUnknownQueue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &SystemHandler{taskInspector: &runtimeTaskTestInspector{}}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "queue", Value: "unknown"}}
+	ctx.Request = httptest.NewRequest(http.MethodDelete, "/archived", nil)
+
+	handler.PurgeArchivedRuntimeTasks(ctx)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 }
 

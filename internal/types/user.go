@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// UserPreferences holds per-user UI/feature preferences persisted server-side
+// UserPreferences holds per-user preferences persisted server-side
 // so they sync across devices/browsers. Fields are pointers so we can
 // distinguish "client didn't send this key" (leave existing value alone)
 // from "client explicitly set false" — the partial-update merge in
@@ -22,19 +22,20 @@ import (
 //
 // No DB DDL is required — preferences is a single jsonb column.
 type UserPreferences struct {
-	// EnableMemory mirrors the "开启记忆功能" switch in General Settings.
-	// nil  = preference never set (treat as feature default = false)
-	// *false / *true = user explicitly set the toggle.
-	EnableMemory *bool `json:"enable_memory,omitempty"`
+	// BrowserSearchInstructions customizes browser search for this user. Nil/empty uses the platform default.
+	BrowserSearchInstructions *string `json:"browser_search_instructions,omitempty"`
 
 	// LastActiveTenantID remembers the last workspace the user actively
 	// switched into, so a fresh login (new device, cleared browser, new
 	// refresh token) lands them back in that workspace instead of always
-	// bouncing to their home workspace. Login / RefreshToken validate that
+	// bouncing to their home workspace. Written by the SPA's preferences
+	// PUT and by service-level SwitchTenant (including when switching
+	// home, which stores the home ID). Login / RefreshToken validate that
 	// the workspace still exists and the user still has an active membership
 	// (or CanAccessAllTenants) before honouring this preference; an
 	// invalid pointer is best-effort cleared and the user falls back to
-	// home.
+	// home. Refresh JWT claims have no tenant_id, so RefreshToken
+	// re-resolves from this field.
 	//
 	// nil  = no preference (use user.TenantID, i.e. home)
 	// *0   = "clear preference" sentinel for the partial-update endpoint
@@ -42,6 +43,35 @@ type UserPreferences struct {
 	//        a stored *0 the same as nil.
 	// *N   = preferred workspace id.
 	LastActiveTenantID *uint64 `json:"last_active_tenant_id,omitempty"`
+
+	// OidcOnlyLogin is set server-side when an account is auto-provisioned
+	// via OIDC with a random password the user never received. The profile
+	// UI hides self-service password rotation until the user sets a known
+	// password via ChangePassword (which clears this flag).
+	OidcOnlyLogin *bool `json:"oidc_only_login,omitempty"`
+
+	// Gallery holds the user's image-gallery UI state: the search
+	// activation mode and the per-attribute search-field toggles. Written
+	// by the gallery's mode / checkbox interactions via the preferences
+	// PUT; read back by GET /knowledge-bases/:id/gallery-config so the
+	// gallery renders the same activation state on every device. Nil = the
+	// user never touched the gallery controls (mode defaults to "all").
+	Gallery *GalleryUserPrefs `json:"gallery,omitempty"`
+}
+
+// GalleryUserPrefs is the user-tier slice of the gallery configuration. The
+// full tier schema (types.GalleryPolicyTier) also allows usage overrides,
+// but those are admin/operator concerns; the user layer only records the
+// activation mode and which search fields they personally switched on.
+type GalleryUserPrefs struct {
+	// Mode is "all" (every search-eligible field active) or "custom"
+	// (per-field Status governs). Empty = "all".
+	Mode string `json:"mode,omitempty"`
+	// Status maps a namespaced attribute id ("builtin:caption") to
+	// "on"/"off". Only consulted in custom mode; an unrecorded field is
+	// off. Source-declared on/off does not exist — activation is always
+	// the user's own record.
+	Status map[string]string `json:"status,omitempty"`
 }
 
 // Value implements driver.Valuer so GORM persists UserPreferences as
@@ -95,7 +125,7 @@ type User struct {
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
 	// Whether the user is a system administrator (independent of workspace roles)
 	IsSystemAdmin bool `json:"is_system_admin" gorm:"default:false;index"`
-	// Per-user UI/feature preferences (memory toggle, future knobs).
+	// Per-user UI/feature preferences.
 	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
 	// driver.Valuer / sql.Scanner methods on UserPreferences.
 	Preferences UserPreferences `json:"preferences" gorm:"type:jsonb;not null;default:'{}'"`
@@ -191,6 +221,18 @@ type RegisterRequest struct {
 	// own tenancy semantics. Empty preserves the historical behaviour and is
 	// treated as create_personal by UserService.Register.
 	TenantProvisioning TenantProvisioningMode `json:"-"`
+}
+
+// AdminCreateUserRequest is the payload for a SystemAdmin provisioning a
+// new local user via POST /api/v1/system/admin/users/create.
+//
+// Password is optional: when absent (or null), the service generates a
+// random one and returns it exactly once. Any provided value, the
+// empty string included, is subject to the password policy.
+type AdminCreateUserRequest struct {
+	Username string  `json:"username" binding:"required,min=2,max=50"`
+	Email    string  `json:"email"    binding:"required,email"`
+	Password *string `json:"password"`
 }
 
 // TenantProvisioningMode controls what UserService.Register does after it

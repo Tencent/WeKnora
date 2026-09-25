@@ -1,12 +1,16 @@
 package service
 
-import "testing"
+import (
+	"regexp"
+	"strings"
+	"testing"
+)
 
 func TestSanitizeOCRText(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want string
+		want  string
 	}{
 		{
 			name:  "empty string",
@@ -76,7 +80,7 @@ func TestSanitizeOCRText(t *testing.T) {
 		{
 			name:  "HTML with substantial text content is converted",
 			input: "<div><h2>报告摘要</h2><p>本季度营收同比增长 15%，净利润达到 2.3 亿元。</p><table><tr><th>指标</th><th>数值</th></tr><tr><td>营收</td><td>10亿</td></tr></table></div>",
-			want:  "",  // placeholder; will be checked for non-empty
+			want:  "", // placeholder; will be checked for non-empty
 		},
 	}
 
@@ -184,6 +188,46 @@ func TestLooksLikeHTML(t *testing.T) {
 				t.Errorf("looksLikeHTML() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSanitizeOCRText_ConvertsInlineHTMLTable guards against a regression where
+// an HTML <table> embedded in a markdown body survived sanitization untouched:
+// the mixed content does not satisfy looksLikeHTML, so the old HTML-to-markdown
+// path never ran and the raw <table> markup reached the chunker.
+func TestSanitizeOCRText_ConvertsInlineHTMLTable(t *testing.T) {
+	para := "本季度公司整体经营情况保持稳定，营收与利润两项核心指标均实现同比增长。" +
+		"为了便于管理层快速了解经营成果，下表汇总了报告期内的主要财务数据，" +
+		"供后续经营分析、预算编制以及年度考核等工作参考使用，" +
+		"请结合实际业务情况综合判断，切勿脱离业务背景单独解读其中任何一项数字。"
+	tail := "以上数据均来自财务部门审核后的正式报表，统计口径与上一报告期保持一致，" +
+		"未发生会计政策变更或追溯调整。如有疑问请与财务部门联系确认，" +
+		"最终解释权归公司财务部门所有。"
+	input := "# 报告\n\n" + para + "\n\n" +
+		`<table><tr><th>指标</th><th>数值</th></tr>` +
+		`<tr><td>营收</td><td>10亿</td></tr>` +
+		`<tr><td>利润</td><td>2.3亿</td></tr></table>` +
+		"\n\n" + tail + "\n\n"
+
+	if looksLikeHTML(input) {
+		t.Fatalf("test input unexpectedly looks like HTML; the regression test must exercise the mixed-content path")
+	}
+
+	got := sanitizeOCRText(input)
+
+	if strings.Contains(got, "<table") {
+		t.Fatalf("expected inline HTML table to be converted, got:\n%s", got)
+	}
+	if !strings.Contains(got, "# 报告") || !strings.Contains(got, "最终解释权归公司财务部门所有。") {
+		t.Fatalf("expected surrounding markdown to be preserved, got:\n%s", got)
+	}
+	for _, want := range []string{"指标", "数值", "营收", "10亿", "利润", "2.3亿"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected converted table to retain %q, got:\n%s", want, got)
+		}
+	}
+	if !regexp.MustCompile(`\|[-:]{3,}\|`).MatchString(got) {
+		t.Fatalf("expected a GFM table separator row, got:\n%s", got)
 	}
 }
 

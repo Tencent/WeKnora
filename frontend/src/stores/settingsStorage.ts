@@ -20,6 +20,7 @@ type ReconcilableSettings = {
   selectedSkills?: unknown;
   selectedTools?: unknown;
   selectedFileKbMap?: unknown;
+  enableMemory?: unknown;
   isAgentEnabled: boolean;
   selectedAgentId?: string;
 };
@@ -29,7 +30,12 @@ function reconcileLoadedSettings<T extends ReconcilableSettings>(loaded: T): T {
   loaded.selectedMCPServices ||= [];
   loaded.selectedSkills ||= (loaded.selectedTools as string[] | undefined) || [];
   loaded.selectedFileKbMap ||= {};
-  if (reconcileBuiltinAgentMode(loaded)) {
+  const removedLegacyMemorySetting = Object.prototype.hasOwnProperty.call(loaded, "enableMemory");
+  if (removedLegacyMemorySetting) {
+    delete loaded.enableMemory;
+  }
+  const reconciledAgentMode = reconcileBuiltinAgentMode(loaded);
+  if (removedLegacyMemorySetting || reconciledAgentMode) {
     safeSetItem(SETTINGS_STORAGE_KEY, JSON.stringify(loaded));
   }
   return loaded;

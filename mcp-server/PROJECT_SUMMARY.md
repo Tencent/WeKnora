@@ -7,7 +7,7 @@
 ## 📁 项目结构
 
 ```
-WeKnoraMCP/
+WeKnora/mcp-server/
 ├── 📦 核心文件
 │   ├── __init__.py              # 包初始化文件
 │   ├── weknora_mcp_server.py   # MCP 服务器核心实现
@@ -25,7 +25,7 @@ WeKnoraMCP/
 │
 ├── 🧪 测试文件
 │   ├── test_module.py         # 模组功能测试
-│   └── test_imports.py        # 导入测试
+│   └── check_imports.py       # 手动导入检查
 │
 ├── 📚 文档文件
 │   ├── README.md              # 项目说明
@@ -272,6 +272,7 @@ python test_module.py            # 运行测试
 ---
 
 **项目状态**: ✅ 完成并可投入使用
-**项目仓库**: https://github.com/NannaOlympicBroadcast/WeKnoraMCP
+**项目仓库**: https://github.com/Tencent/WeKnora/tree/main/mcp-server
+**PyPI 包名**: `tencent-weknora-mcp`
 **最后更新**: 2025年10月
 **版本**: 1.0.0

@@ -51,6 +51,73 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// StreamHandler receives items and progress checkpoints emitted during a
+// streaming fetch. The service implements it to ingest each item as it arrives
+// (bounding memory to one item instead of the whole wiki) and to persist the
+// connector cursor at page boundaries, so a sync that times out mid-traversal
+// resumes from the last checkpoint instead of restarting from scratch
+// (Tencent/WeKnora#2136).
+type StreamHandler interface {
+	// Emit ingests a single fetched item. Returning an error aborts the
+	// stream: the connector stops fetching and propagates the error, since a
+	// failed ingest means the sync is failing and further API calls are wasted.
+	Emit(ctx context.Context, item types.FetchedItem) error
+
+	// Checkpoint persists the cursor reached so far. The cursor is only valid
+	// for the duration of the call (the connector may keep mutating its backing
+	// maps afterwards), so implementations must serialize it synchronously.
+	//
+	// The cursor MUST be a complete resumable snapshot, not a delta: resuming
+	// from it must reproduce all progress so far. This is what lets the service
+	// treat a checkpoint as a safe restart point and, for a full sync, drop the
+	// prior baseline without losing already-synced state.
+	Checkpoint(ctx context.Context, cursor *types.SyncCursor) error
+}
+
+// StreamingConnector is an optional interface. Connectors that implement it let
+// the service interleave fetch→ingest→checkpoint so a large sync persists
+// incrementally and resumes after a timeout, rather than holding every item in
+// memory and losing all progress on retry. Connectors that do not implement it
+// fall back to FetchAll / FetchIncremental unchanged.
+type StreamingConnector interface {
+	Connector
+
+	// FetchStream walks the configured resources starting from cursor (nil =
+	// from the beginning / full sync), calling h.Emit for each changed item and
+	// h.Checkpoint at page boundaries. It returns the final cursor for the next
+	// sync. Nodes already recorded in cursor at their current edit time are
+	// skipped, which is what makes a resumed sync converge.
+	FetchStream(
+		ctx context.Context, config *types.DataSourceConfig,
+		cursor *types.SyncCursor, h StreamHandler,
+	) (*types.SyncCursor, error)
+}
+
+// FullStreamingConnector lets a streaming connector re-fetch every item while
+// retaining the previous cursor exclusively for safe deletion reconciliation.
+type FullStreamingConnector interface {
+	StreamingConnector
+
+	FetchFullStream(
+		ctx context.Context, config *types.DataSourceConfig,
+		cursor *types.SyncCursor, h StreamHandler,
+	) (*types.SyncCursor, error)
+}
+
+// FullSyncWithCursor is optional. The batch sync path uses it for ForceFull and
+// sync_mode=full so a connector can re-fetch every document while still
+// reconciling deletions against the previous cursor. Connectors that omit it
+// keep FetchAll's no-cursor behaviour and therefore cannot emit deletions on a
+// full sync.
+type FullSyncWithCursor interface {
+	FetchAllFromCursor(
+		ctx context.Context,
+		config *types.DataSourceConfig,
+		resourceIDs []string,
+		cursor *types.SyncCursor,
+	) ([]types.FetchedItem, *types.SyncCursor, error)
+}
+
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
 	connectors map[string]Connector
@@ -123,6 +190,22 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
+	types.ConnectorTypeFeishuDrive: {
+		Type:         types.ConnectorTypeFeishuDrive,
+		Name:         "Feishu Drive (飞书云盘)",
+		Description:  "Sync documents and files from a Feishu Drive folder",
+		Priority:     0,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
+	types.ConnectorTypeLarkDrive: {
+		Type:         types.ConnectorTypeLarkDrive,
+		Name:         "Lark Drive",
+		Description:  "Sync documents and files from a Lark Drive folder",
+		Priority:     0,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 	types.ConnectorTypeNotion: {
 		Type:         types.ConnectorTypeNotion,
 		Name:         "Notion",
@@ -137,7 +220,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Description:  "Sync spaces and pages from Atlassian Confluence",
 		Priority:     2,
 		AuthType:     "api_key",
-		Capabilities: []string{"incremental"},
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeYuque: {
 		Type:         types.ConnectorTypeYuque,
@@ -146,6 +229,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Priority:     3,
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental"},
+	},
+	types.ConnectorTypeIMA: {
+		Type:         types.ConnectorTypeIMA,
+		Name:         "Tencent IMA (ima.qq.com)",
+		Description:  "Sync knowledge bases and documents from Tencent IMA",
+		Priority:     3,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeGitHub: {
 		Type:         types.ConnectorTypeGitHub,
@@ -174,10 +265,10 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	types.ConnectorTypeDingTalk: {
 		Type:         types.ConnectorTypeDingTalk,
 		Name:         "DingTalk (钉钉)",
-		Description:  "Sync documents and content from DingTalk",
+		Description:  "Sync online documents from DingTalk knowledge bases",
 		Priority:     7,
-		AuthType:     "api_key",
-		Capabilities: []string{"incremental"},
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeWebCrawler: {
 		Type:         types.ConnectorTypeWebCrawler,
@@ -210,6 +301,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Priority:     12,
 		AuthType:     "custom",
 		Capabilities: []string{"incremental"},
+	},
+	types.ConnectorTypeGitLab: {
+		Type:         types.ConnectorTypeGitLab,
+		Name:         "GitLab",
+		Description:  "Sync files from GitLab projects",
+		Priority:     8,
+		AuthType:     "token",
+		Capabilities: []string{"incremental", "hierarchical"},
 	},
 }
 

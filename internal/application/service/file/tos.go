@@ -36,10 +36,17 @@ func NewTosFileService(endpoint, region, accessKey, secretKey, bucketName, pathP
 
 // NewTosFileServiceWithTempBucket creates a TOS file service with optional temp bucket.
 func NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe TOS endpoint: %w", err)
+	}
+	httpConfig := utils.DefaultSSRFSafeHTTPClientConfig()
 	client, err := tos.NewClientV2(
 		endpoint,
 		tos.WithRegion(region),
 		tos.WithCredentials(tos.NewStaticCredentials(accessKey, secretKey)),
+		tos.WithHTTPTransport(&utils.SSRFValidatingRoundTripper{
+			Base: utils.NewSSRFSafeTransport(httpConfig),
+		}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize TOS client: %w", err)
@@ -58,6 +65,9 @@ func NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 			endpoint,
 			tos.WithRegion(tempRegion),
 			tos.WithCredentials(tos.NewStaticCredentials(accessKey, secretKey)),
+			tos.WithHTTPTransport(&utils.SSRFValidatingRoundTripper{
+				Base: utils.NewSSRFSafeTransport(httpConfig),
+			}),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize TOS temp client: %w", err)
@@ -87,10 +97,16 @@ func (s *tosFileService) CheckConnectivity(ctx context.Context) error {
 
 // CheckTosConnectivity tests TOS connectivity using the provided credentials.
 func CheckTosConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName string) error {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return fmt.Errorf("unsafe TOS endpoint: %w", err)
+	}
 	client, err := tos.NewClientV2(
 		endpoint,
 		tos.WithRegion(region),
 		tos.WithCredentials(tos.NewStaticCredentials(accessKey, secretKey)),
+		tos.WithHTTPTransport(&utils.SSRFValidatingRoundTripper{
+			Base: utils.NewSSRFSafeTransport(utils.DefaultSSRFSafeHTTPClientConfig()),
+		}),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize TOS client: %w", err)
@@ -139,7 +155,11 @@ func joinTOSObjectKey(parts ...string) string {
 	return strings.Join(filtered, "/")
 }
 
+// parseTOSFilePath extracts bucket and object key from: tos://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/tos://{bucket}/{objectKey} paths are
+// accepted too (see storageBackendInnerPath, #3151).
 func parseTOSFilePath(filePath string) (bucketName string, objectKey string, err error) {
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, tosScheme) {
 		return "", "", fmt.Errorf("invalid TOS file path: %s", filePath)
 	}

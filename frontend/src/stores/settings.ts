@@ -2,9 +2,9 @@ import { defineStore } from "pinia";
 import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
-import { updateMyPreferences, type UserPreferences } from "@/api/auth";
 import { isAgentStreamAgentId } from "@/utils/agent-mode";
 import { loadAndReconcileSettings } from "@/stores/settingsStorage";
+import { isReasoningLevel, type ReasoningLevel } from "@/utils/reasoningEffort";
 
 // 定义设置接口
 interface Settings {
@@ -22,8 +22,8 @@ interface Settings {
   selectedTools?: string[];
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
+  localBrowserEnabled: boolean; // Explicit source preference; composer activates it only while the extension is online
   webSearchEnabled: boolean;  // 网络搜索是否启用
-  enableMemory: boolean;      // 是否开启记忆功能
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
   selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源空间 ID（用于后端 model/KB/MCP 解析）
@@ -99,8 +99,8 @@ const defaultSettings: Settings = {
     baseUrl: "http://localhost:11434",
     enabled: true
   },
+  localBrowserEnabled: false,
   webSearchEnabled: false,  // 默认关闭网络搜索
-  enableMemory: false,       // 默认关闭记忆功能
   conversationModels: {
     summaryModelId: "",
     rerankModelId: "",
@@ -120,6 +120,8 @@ export const useSettingsStore = defineStore("settings", {
     _defaultsSnapshot: null as Settings | null,
     /** 正在从 session.last_request_state 恢复输入栏，避免 agent 切换 watch 覆盖 KB 选择 */
     _isApplyingSessionState: false,
+    // Session-only preference: never written into global settings/localStorage.
+    reasoningEffortOverride: '' as ReasoningLevel | '',
   }),
 
   getters: {
@@ -167,12 +169,10 @@ export const useSettingsStore = defineStore("settings", {
     // 获取模型配置
     modelConfig: (state) => state.settings.modelConfig || defaultSettings.modelConfig,
     
-    // 网络搜索是否启用
+    // 本轮查询来源
+    isLocalBrowserEnabled: (state) => state.settings.localBrowserEnabled === true,
     isWebSearchEnabled: (state) => state.settings.webSearchEnabled || false,
     
-    // 记忆功能是否启用
-    isMemoryEnabled: (state) => state.settings.enableMemory || false,
-
     // 是否自动检查并下载更新
     isAutoCheckUpdateEnabled: (state) => state.settings.autoCheckUpdate ?? true,
 
@@ -328,51 +328,15 @@ export const useSettingsStore = defineStore("settings", {
       return this.settings.selectedKnowledgeBases || [];
     },
     
-    // 启用/禁用网络搜索
+    // 本机浏览器与联网搜索可独立选择。
+    toggleLocalBrowser(enabled: boolean) {
+      this.settings.localBrowserEnabled = enabled;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
     toggleWebSearch(enabled: boolean) {
       this.settings.webSearchEnabled = enabled;
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-    },
-
-    // 启用/禁用记忆功能。
-    // 现在是"真用户级"开关：
-    //   - 本地缓存 (localStorage) 用作 UI 首屏 / 离线兜底；
-    //   - PUT /auth/me/preferences 是真正的持久化，跨设备/浏览器同步。
-    //
-    // 乐观更新：先翻本地状态让 UI 立刻响应，再异步写后端；失败则回滚 + throw
-    // 让调用方（GeneralSettings.vue 的 t-switch）可以提示并把开关复位。
-    async toggleMemory(enabled: boolean): Promise<void> {
-      const previous = !!this.settings.enableMemory;
-      this.settings.enableMemory = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-
-      try {
-        const resp = await updateMyPreferences({ enable_memory: enabled });
-        if (!resp.success) {
-          throw new Error(resp.message || "update failed");
-        }
-      } catch (err) {
-        // 回滚本地状态，让 UI 复位到旧值。
-        this.settings.enableMemory = previous;
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-        throw err;
-      }
-    },
-
-    // 从 /auth/me 或 /auth/login 返回的 user.preferences 同步到本地 settings。
-    // 调用方：authStore.setUser（每次登录 / 刷新 user / 切空间后都会触发）。
-    // 不写后端，纯本地状态 + localStorage 写入，避免把后端的值再原路 PUT 回去。
-    hydrateFromUserPreferences(prefs: UserPreferences | undefined | null) {
-      if (!prefs) return;
-      let changed = false;
-      if (typeof prefs.enable_memory === "boolean" &&
-          this.settings.enableMemory !== prefs.enable_memory) {
-        this.settings.enableMemory = prefs.enable_memory;
-        changed = true;
-      }
-      if (changed) {
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-      }
     },
 
     // 启用/禁用自动检查更新
@@ -465,8 +429,12 @@ export const useSettingsStore = defineStore("settings", {
       return this.settings.selectedFiles || [];
     },
 
-    /** Scope for suggested-questions API (KB / file / tag @mentions). */
-    getSuggestedQuestionsParams(limit = 6) {
+    /**
+     * Scope for suggested-questions API (KB / file / tag @mentions).
+     * Leave `limit` undefined to let the backend apply the agent's configured
+     * starter count; pass a number only to request a specific count.
+     */
+    getSuggestedQuestionsParams(limit?: number) {
       const selectedKBs = this.getSelectedKnowledgeBases();
       const selectedFiles = this.getSelectedFiles();
       const tags = this.settings.selectedTags || [];
@@ -491,11 +459,13 @@ export const useSettingsStore = defineStore("settings", {
     
     // 选择智能体（sourceTenantId 仅在使用共享智能体时传入）
     selectAgent(agentId: string, sourceTenantId?: string | null) {
+      this.reasoningEffortOverride = '';
       this.settings.selectedAgentId = agentId;
       this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
       // 智能体配置只决定是否具备网络搜索能力，不替用户决定是否在本轮使用。
       // 每次选择智能体都默认关闭，之后只能由用户从输入框主动开启。
       this.settings.webSearchEnabled = false;
+      this.settings.localBrowserEnabled = false;
       // 根据智能体类型自动切换 Agent 模式
       if (agentId === BUILTIN_QUICK_ANSWER_ID) {
         this.settings.isAgentEnabled = false;
@@ -538,11 +508,20 @@ export const useSettingsStore = defineStore("settings", {
 
     // 还原默认（如果有快照），用于离开会话或跨会话切换时。
     restoreDefaultsIfSnapshotted() {
+      this.reasoningEffortOverride = '';
       if (!this._defaultsSnapshot) return;
       this.settings = this._defaultsSnapshot;
       this._defaultsSnapshot = null;
       // 不写 localStorage：默认值在快照之前已经写过 localStorage，这里恢复
       // 的就是 localStorage 中既有的值，再写一次只会增加无意义的 IO。
+    },
+
+    // 新会话首条发送沿用 createChat 的输入态，不能被异步返回的空/旧记录覆盖。
+    // preserveDraft 必须在请求 session 详情之前捕获，而不是响应返回时读取。
+    hydrateSessionInputState(state: SessionLastRequestStatePayload | null | undefined, preserveDraft = false) {
+      if (!state || preserveDraft) return;
+      this.snapshotAsDefaultsIfNeeded();
+      this.applyLastRequestState(state);
     },
 
     // 根据 session.last_request_state 覆盖输入栏相关字段。
@@ -552,6 +531,7 @@ export const useSettingsStore = defineStore("settings", {
       if (!state) return;
       this._isApplyingSessionState = true;
       try {
+        this.reasoningEffortOverride = isReasoningLevel(state.reasoning_effort) ? state.reasoning_effort : '';
         if (typeof state.agent_enabled === "boolean") {
           this.settings.isAgentEnabled = state.agent_enabled;
         }
@@ -604,6 +584,7 @@ export const useSettingsStore = defineStore("settings", {
             .filter(item => item.type === "skill" && item.id)
             .map(item => item.skill_name || item.id);
         }
+        this.settings.localBrowserEnabled = state.local_browser_enabled === true;
         if (typeof state.web_search_enabled === "boolean") {
           this.settings.webSearchEnabled = state.web_search_enabled;
         }
@@ -626,6 +607,7 @@ export const useSettingsStore = defineStore("settings", {
 // 后端 sessions.last_request_state JSON 形状（与 SessionLastRequestState 对齐）。
 // 字段全部可选——历史会话或新建会话首发前的请求没有这条记录。
 export interface SessionLastRequestStatePayload {
+  reasoning_effort?: string;
   agent_id?: string;
   agent_enabled?: boolean;
   model_id?: string;
@@ -642,5 +624,6 @@ export interface SessionLastRequestStatePayload {
     kb_name?: string;
     skill_name?: string;
   }>;
+  local_browser_enabled?: boolean;
   web_search_enabled?: boolean;
 }

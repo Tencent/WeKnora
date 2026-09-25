@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -69,7 +70,7 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 	appID = params.AppID
 	appSecret = s.decryptAppSecret(params.AppSecret)
 
-	if provider.ProviderName(params.Provider) != provider.ProviderWeKnoraCloud {
+	if params.Provider != providers.WeKnoraCloudID {
 		return
 	}
 	if appID != "" && appSecret != "" {
@@ -374,23 +375,28 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 		return apperrors.NewBadRequestError("builtin models cannot be deleted")
 	}
 
-	kbCount, err := s.kbRepo.CountByModelID(ctx, tenantID, id)
+	usage, err := s.getModelUsageDetails(ctx, tenantID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id": id,
 		})
 		return err
 	}
-	agentCount, err := s.agentRepo.CountByModelID(ctx, tenantID, id)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id": id,
-		})
-		return err
-	}
-	if kbCount > 0 || agentCount > 0 {
-		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d", id, kbCount, agentCount)
-		return apperrors.NewBadRequestError(formatModelInUseMessage(kbCount, agentCount))
+	if usage.InUse() {
+		kbCount := usage.KnowledgeBaseTotal
+		if kbCount == 0 {
+			kbCount = int64(len(usage.KnowledgeBases))
+		}
+		agentCount := usage.AgentTotal
+		if agentCount == 0 {
+			agentCount = int64(len(usage.Agents))
+		}
+		memoryInUse := len(usage.LongTermMemory.Bindings) > 0
+		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d memory=%t", id, kbCount, agentCount, memoryInUse)
+		return apperrors.NewModelInUseError(
+			formatModelInUseMessage(kbCount, agentCount, memoryInUse),
+			usage,
+		)
 	}
 
 	// Delete model from repository
@@ -405,6 +411,73 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 
 	logger.Infof(ctx, "Model deleted successfully: %s", id)
 	return nil
+}
+
+func (s *modelService) getModelUsageDetails(
+	ctx context.Context, tenantID uint64, modelID string,
+) (types.ModelUsageDetails, error) {
+	details := types.ModelUsageDetails{
+		KnowledgeBases: make([]types.ModelUsageResource, 0),
+		Agents:         make([]types.ModelUsageResource, 0),
+		LongTermMemory: types.ModelUsageMemory{Bindings: make([]types.ModelUsageBinding, 0)},
+	}
+
+	kbCount, err := s.kbRepo.CountByModelID(ctx, tenantID, modelID)
+	if err != nil {
+		return details, err
+	}
+	details.KnowledgeBaseTotal = kbCount
+	if kbCount > 0 {
+		details.KnowledgeBases, err = s.kbRepo.ListModelUsages(ctx, tenantID, modelID)
+		if err != nil {
+			return details, err
+		}
+		if details.KnowledgeBases == nil {
+			details.KnowledgeBases = make([]types.ModelUsageResource, 0)
+		}
+	}
+
+	agentCount, err := s.agentRepo.CountByModelID(ctx, tenantID, modelID)
+	if err != nil {
+		return details, err
+	}
+	details.AgentTotal = agentCount
+	if agentCount > 0 {
+		details.Agents, err = s.agentRepo.ListModelUsages(ctx, tenantID, modelID)
+		if err != nil {
+			return details, err
+		}
+		if details.Agents == nil {
+			details.Agents = make([]types.ModelUsageResource, 0)
+		}
+	}
+
+	if s.tenantService == nil {
+		return details, nil
+	}
+	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		return details, err
+	}
+	if tenant == nil || tenant.MemoryConfig == nil {
+		return details, nil
+	}
+
+	// Both memory model pins have to be checked. Deleting either one leaves
+	// the workspace pointing at a model that no longer exists.
+	if strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == modelID {
+		details.LongTermMemory.Bindings = append(
+			details.LongTermMemory.Bindings,
+			types.ModelUsageBindingEmbeddingModel,
+		)
+	}
+	if strings.TrimSpace(tenant.MemoryConfig.ExtractModelID) == modelID {
+		details.LongTermMemory.Bindings = append(
+			details.LongTermMemory.Bindings,
+			types.ModelUsageBindingExtractModel,
+		)
+	}
+	return details, nil
 }
 
 // GetEmbeddingModel retrieves and initializes an embedding model instance
@@ -630,25 +703,20 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 	return sttModel, nil
 }
 
-func formatModelInUseMessage(kbCount, agentCount int64) string {
-	switch {
-	case kbCount > 0 && agentCount > 0:
-		return fmt.Sprintf(
-			"model is used by %d knowledge base(s) and %d agent(s); "+
-				"reconfigure or remove those references before deleting",
-			kbCount, agentCount,
-		)
-	case kbCount > 0:
-		return fmt.Sprintf(
-			"model is used by %d knowledge base(s); "+
-				"reconfigure or remove those references before deleting",
-			kbCount,
-		)
-	default:
-		return fmt.Sprintf(
-			"model is used by %d agent(s); "+
-				"reconfigure or remove those references before deleting",
-			agentCount,
-		)
+func formatModelInUseMessage(kbCount, agentCount int64, memory bool) string {
+	var parts []string
+	if kbCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d knowledge base(s)", kbCount))
 	}
+	if agentCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d agent(s)", agentCount))
+	}
+	if memory {
+		parts = append(parts, "long-term memory")
+	}
+	joined := strings.Join(parts, " and ")
+	return fmt.Sprintf(
+		"model is used by %s; reconfigure or remove those references before deleting",
+		joined,
+	)
 }

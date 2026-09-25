@@ -48,12 +48,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { MessagePlugin } from 'tdesign-vue-next';
 import {
   buildChatRequestDebugPayload,
   type ChatRequestDebugInfo,
 } from '@/utils/chatRequestDebug';
-import { copyTextToClipboard } from '@/utils/chatMessageShared';
+import { copyWithToast } from '@/utils/clipboard';
 
 const props = defineProps<{
   session: Record<string, unknown>;
@@ -97,13 +96,8 @@ const rows = computed(() => {
 });
 
 const copyAll = async () => {
-  try {
-    await copyTextToClipboard(buildChatRequestDebugPayload(debugInfo.value));
-    MessagePlugin.success(t('common.copied'));
-    visible.value = false;
-  } catch {
-    MessagePlugin.error(t('common.copyFailed'));
-  }
+  const ok = await copyWithToast(buildChatRequestDebugPayload(debugInfo.value), 'common.copied');
+  if (ok) visible.value = false;
 };
 </script>
 
@@ -111,7 +105,7 @@ const copyAll = async () => {
 .chat-request-info-popup {
   .t-popup__content {
     padding: 0;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     box-shadow: var(--td-shadow-2);
   }
 }
@@ -122,7 +116,7 @@ const copyAll = async () => {
   min-width: 260px;
   max-width: 360px;
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
 }
 
@@ -137,7 +131,7 @@ const copyAll = async () => {
 }
 
 .chat-request-card-title {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
 }
 
@@ -162,8 +156,8 @@ const copyAll = async () => {
 
 .chat-request-value {
   flex: 1;
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 11px;
+  font-family: var(--td-font-family-mono);
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-primary);
   word-break: break-all;
 }

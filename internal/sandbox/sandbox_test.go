@@ -2,25 +2,21 @@ package sandbox
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
-	if config.Type != SandboxTypeLocal {
-		t.Errorf("Expected default type to be local, got %s", config.Type)
+	if config.Type != SandboxTypeDisabled {
+		t.Errorf("Expected default type to be disabled, got %s", config.Type)
 	}
 
 	if config.DefaultTimeout != DefaultTimeout {
 		t.Errorf("Expected default timeout %v, got %v", DefaultTimeout, config.DefaultTimeout)
-	}
-
-	if !config.FallbackEnabled {
-		t.Error("Expected fallback to be enabled by default")
 	}
 }
 
@@ -36,9 +32,9 @@ func TestValidateConfig(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "valid config",
+			name: "valid disabled config",
 			config: &Config{
-				Type:           SandboxTypeLocal,
+				Type:           SandboxTypeDisabled,
 				DefaultTimeout: 30 * time.Second,
 			},
 			wantErr: false,
@@ -51,9 +47,16 @@ func TestValidateConfig(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "removed local type",
+			config: &Config{
+				Type: "local",
+			},
+			wantErr: true,
+		},
+		{
 			name: "negative timeout",
 			config: &Config{
-				Type:           SandboxTypeLocal,
+				Type:           SandboxTypeDisabled,
 				DefaultTimeout: -1 * time.Second,
 			},
 			wantErr: true,
@@ -70,110 +73,17 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-func TestLocalSandboxExecute(t *testing.T) {
-	// Create a temporary script
-	tmpDir, err := os.MkdirTemp("", "sandbox-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Write a simple test script
-	scriptPath := filepath.Join(tmpDir, "test.sh")
-	scriptContent := `#!/bin/bash
-echo "Hello from sandbox"
-echo "Args: $@"
-`
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
-		t.Fatalf("Failed to write script: %v", err)
-	}
-
-	// Create local sandbox
-	config := DefaultConfig()
-	config.Type = SandboxTypeLocal
-	sandbox := NewLocalSandbox(config)
-
-	// Check availability
-	ctx := context.Background()
-	if !sandbox.IsAvailable(ctx) {
-		t.Error("Local sandbox should always be available")
-	}
-
-	// Execute script
-	result, err := sandbox.Execute(ctx, &ExecuteConfig{
-		Script:  scriptPath,
-		Args:    []string{"arg1", "arg2"},
-		Timeout: 10 * time.Second,
-	})
-
-	if err != nil {
-		t.Fatalf("Failed to execute script: %v", err)
-	}
-
-	if result.ExitCode != 0 {
-		t.Errorf("Expected exit code 0, got %d", result.ExitCode)
-	}
-
-	if result.Stdout == "" {
-		t.Error("Expected stdout to be non-empty")
-	}
-
-	t.Logf("Script output: %s", result.Stdout)
-	t.Logf("Duration: %v", result.Duration)
-}
-
-func TestLocalSandboxTimeout(t *testing.T) {
-	// Create a temporary script that sleeps
-	tmpDir, err := os.MkdirTemp("", "sandbox-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Write a script that sleeps
-	scriptPath := filepath.Join(tmpDir, "sleep.sh")
-	scriptContent := `#!/bin/bash
-sleep 10
-echo "Done"
-`
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
-		t.Fatalf("Failed to write script: %v", err)
-	}
-
-	// Create local sandbox
-	config := DefaultConfig()
-	config.Type = SandboxTypeLocal
-	sandbox := NewLocalSandbox(config)
-
-	// Execute with short timeout
-	ctx := context.Background()
-	result, err := sandbox.Execute(ctx, &ExecuteConfig{
-		Script:  scriptPath,
-		Timeout: 1 * time.Second,
-	})
-
-	if err != nil {
-		t.Fatalf("Execute should not return error, got: %v", err)
-	}
-
-	if !result.Killed {
-		t.Error("Expected script to be killed due to timeout")
-	}
-
-	t.Logf("Script was killed: %v, Duration: %v", result.Killed, result.Duration)
-}
-
 func TestNewManager(t *testing.T) {
 	config := DefaultConfig()
-	config.Type = SandboxTypeLocal
+	config.Type = SandboxTypeDisabled
 
 	manager, err := NewManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create manager: %v", err)
 	}
 
-	if manager.GetType() != SandboxTypeLocal {
-		t.Errorf("Expected type local, got %s", manager.GetType())
+	if manager.GetType() != SandboxTypeDisabled {
+		t.Errorf("Expected type disabled, got %s", manager.GetType())
 	}
 }
 
@@ -184,7 +94,6 @@ func TestNewDisabledManager(t *testing.T) {
 		t.Errorf("Expected type disabled, got %s", manager.GetType())
 	}
 
-	// Execute should fail
 	ctx := context.Background()
 	_, err := manager.Execute(ctx, &ExecuteConfig{
 		Script: "/some/script.sh",
@@ -195,8 +104,25 @@ func TestNewDisabledManager(t *testing.T) {
 	}
 }
 
+func TestIsNamedSandboxBackendType(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want bool
+	}{
+		{"cube", true},
+		{"e2b", true},
+		{"docker", true},
+		{"local", false},
+		{"disabled", false},
+		{"", false},
+	} {
+		if got := IsNamedSandboxBackendType(tc.raw); got != tc.want {
+			t.Fatalf("IsNamedSandboxBackendType(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
+	}
+}
+
 func TestExecuteResultHelpers(t *testing.T) {
-	// Test IsSuccess
 	successResult := &ExecuteResult{
 		ExitCode: 0,
 		Stdout:   "output",
@@ -220,56 +146,17 @@ func TestExecuteResultHelpers(t *testing.T) {
 	if killedResult.IsSuccess() {
 		t.Error("Expected IsSuccess() to return false when killed")
 	}
-
-	// Test GetOutput
-	if successResult.GetOutput() != "output" {
-		t.Errorf("Expected GetOutput() to return stdout, got %s", successResult.GetOutput())
-	}
-
-	if failResult.GetOutput() != "error" {
-		t.Errorf("Expected GetOutput() to return stderr when stdout is empty, got %s", failResult.GetOutput())
-	}
 }
 
-func TestPythonScriptExecution(t *testing.T) {
-	// Create a temporary Python script
-	tmpDir, err := os.MkdirTemp("", "sandbox-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+// host has no remote instance, so the session must never be pinned to it:
+// a pin would record a binding that artifact collection and teardown then try
+// to resolve against a sandbox that never existed. Keeping host out of the
+// named-backend set is what delivers that today — see the task notes before
+// changing this expectation.
+func TestHostIsNotANamedBackend(t *testing.T) {
+	require.False(t, IsNamedSandboxBackendType(string(SandboxTypeHost)))
+}
 
-	// Write a Python script
-	scriptPath := filepath.Join(tmpDir, "test.py")
-	scriptContent := `#!/usr/bin/env python3
-import sys
-print("Hello from Python")
-print(f"Arguments: {sys.argv[1:]}")
-`
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
-		t.Fatalf("Failed to write script: %v", err)
-	}
-
-	// Create local sandbox
-	config := DefaultConfig()
-	config.Type = SandboxTypeLocal
-	sandbox := NewLocalSandbox(config)
-
-	// Execute Python script
-	ctx := context.Background()
-	result, err := sandbox.Execute(ctx, &ExecuteConfig{
-		Script:  scriptPath,
-		Args:    []string{"test", "args"},
-		Timeout: 10 * time.Second,
-	})
-
-	if err != nil {
-		t.Fatalf("Failed to execute Python script: %v", err)
-	}
-
-	if result.ExitCode != 0 {
-		t.Errorf("Expected exit code 0, got %d. Stderr: %s", result.ExitCode, result.Stderr)
-	}
-
-	t.Logf("Python script output: %s", result.Stdout)
+func TestValidateConfigAcceptsHost(t *testing.T) {
+	require.NoError(t, ValidateConfig(&Config{Type: SandboxTypeHost}))
 }

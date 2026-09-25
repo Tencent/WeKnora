@@ -99,6 +99,74 @@ func TestLanguageLocaleName(t *testing.T) {
 	}
 }
 
+func TestResolveLanguage(t *testing.T) {
+	ctxWithLocale := context.WithValue(context.Background(), LanguageContextKey, "ko-KR")
+
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		locale   string
+		envLang  string
+		expected string
+	}{
+		{"explicit locale wins over context", ctxWithLocale, "en-US", "", "en-US"},
+		{"blank locale falls back to context", ctxWithLocale, "", "", "ko-KR"},
+		{"whitespace locale falls back to context", ctxWithLocale, "   ", "", "ko-KR"},
+		{"no locale and no context falls back to default", context.Background(), "", "", "zh-CN"},
+		{"empty context value falls back to default", context.WithValue(
+			context.Background(), LanguageContextKey, ""), "", "", "zh-CN"},
+		{"deployment override wins over hardcoded default", context.Background(), "", "ru-RU", "ru-RU"},
+		{"explicit locale wins over deployment override", context.Background(), "ja-JP", "ru-RU", "ja-JP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envLang != "" {
+				t.Setenv("WEKNORA_LANGUAGE", tt.envLang)
+			}
+			if got := ResolveLanguage(tt.ctx, tt.locale); got != tt.expected {
+				t.Errorf("ResolveLanguage(_, %q) = %q, want %q", tt.locale, got, tt.expected)
+			}
+		})
+	}
+}
+
+// A missing language must never reach a prompt template: "Write in {{.Language}}"
+// renders as "Write in ." and lets the model choose the output language.
+func TestResolveLanguageNameNeverReturnsEmpty(t *testing.T) {
+	for _, ctx := range []context.Context{
+		context.Background(),
+		context.WithValue(context.Background(), LanguageContextKey, ""),
+	} {
+		if got := ResolveLanguageName(ctx, ""); got == "" {
+			t.Fatal("ResolveLanguageName returned an empty prompt language")
+		}
+	}
+	if got := ResolveLanguageName(context.Background(), "ko-KR"); got != "Korean" {
+		t.Errorf("ResolveLanguageName(_, %q) = %q, want %q", "ko-KR", got, "Korean")
+	}
+}
+
+// Wiki carries an already-resolved display name on each queued update, so
+// re-resolving it downstream must be a no-op rather than a reset to default.
+func TestResolveLanguageNameIsIdempotentOverDisplayNames(t *testing.T) {
+	for _, name := range []string{"Chinese (Simplified)", "English", "Korean"} {
+		if got := ResolveLanguageName(context.Background(), name); got != name {
+			t.Errorf("ResolveLanguageName(_, %q) = %q, want it unchanged", name, got)
+		}
+	}
+}
+
+func TestLanguageFromContextOrDefault(t *testing.T) {
+	if got := LanguageFromContextOrDefault(context.Background()); got != "zh-CN" {
+		t.Errorf("LanguageFromContextOrDefault(empty) = %q, want %q", got, "zh-CN")
+	}
+	ctx := context.WithValue(context.Background(), LanguageContextKey, "en-US")
+	if got := LanguageFromContextOrDefault(ctx); got != "en-US" {
+		t.Errorf("LanguageFromContextOrDefault(en-US) = %q, want %q", got, "en-US")
+	}
+}
+
 func TestMCPOAuthNonInteractive(t *testing.T) {
 	if IsMCPOAuthNonInteractive(nil) {
 		t.Fatal("nil context should not be non-interactive")
@@ -142,6 +210,29 @@ func TestLanguageFromContext(t *testing.T) {
 				t.Skip("skipping context-dependent test")
 			}
 		})
+	}
+}
+
+func TestLLMCallMetadataContext(t *testing.T) {
+	ctx := WithLLMCallMetadata(context.Background(), "wiki_page_modify", "abc123")
+	purpose, prefix := LLMCallMetadataFromContext(ctx)
+	if purpose != "wiki_page_modify" || prefix != "abc123" {
+		t.Fatalf("metadata = (%q, %q)", purpose, prefix)
+	}
+}
+
+func TestTaskRetryMetadataContext(t *testing.T) {
+	if _, _, ok := TaskRetryMetadataFromContext(nil); ok {
+		t.Fatal("nil context should not contain task retry metadata")
+	}
+	if _, _, ok := TaskRetryMetadataFromContext(context.Background()); ok {
+		t.Fatal("background context should not contain task retry metadata")
+	}
+
+	ctx := WithTaskRetryMetadata(context.Background(), 2, 3)
+	retried, maxRetry, ok := TaskRetryMetadataFromContext(ctx)
+	if !ok || retried != 2 || maxRetry != 3 {
+		t.Fatalf("retry metadata = (%d, %d, %v), want (2, 3, true)", retried, maxRetry, ok)
 	}
 }
 

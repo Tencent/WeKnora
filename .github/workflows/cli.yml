@@ -47,7 +47,7 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
       - name: go vet
         run: go vet ./...
-      - name: Check skill wire vocabulary
+      - name: Check agent-facing doc wire vocabulary
         if: runner.os == 'Linux'
         run: scripts/check-skill-wire-vocab.sh
       - name: Check for committed credentials in docs

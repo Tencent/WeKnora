@@ -9,6 +9,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// thinkingThoughtDescription is the schema description of the `thought`
+// argument; it is JSON-escaped already because it is spliced into the raw
+// schema literal below.
+const thinkingThoughtDescription = "Your current thinking step. Write in natural, user-friendly language. " +
+	"NEVER mention tool names (like \\\"search_knowledge\\\", \\\"read_document\\\", \\\"web_search\\\", etc.). " +
+	"Instead, describe actions in plain language (e.g., \\\"I'll search for key terms\\\" instead of " +
+	"\\\"I'll use search_knowledge\\\"). Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use)."
+
 var sequentialThinkingTool = BaseTool{
 	name: ToolThinking,
 	description: `A detailed tool for dynamic and reflective problem-solving through thoughts.
@@ -50,10 +58,12 @@ Each thought can build on, question, or revise previous insights as understandin
   * Hypothesis generation
   * Hypothesis verification
   
-  **CRITICAL - User-Friendly Thinking**: Write your thoughts in natural, user-friendly language. NEVER mention tool names (like "grep_chunks", "knowledge_search", "web_search", etc.) in your thinking process. Instead, describe your actions in plain language:
-  - ❌ BAD: "I'll use grep_chunks to search for keywords, then knowledge_search for semantic understanding"
+  **CRITICAL - User-Friendly Thinking**: Write your thoughts in natural, user-friendly language.
+  NEVER mention tool names (like "search_knowledge", "read_document", "web_search", etc.) in your thinking process.
+  Instead, describe your actions in plain language:
+  - ❌ BAD: "I'll use search_knowledge in keyword mode, then read_document for the details"
   - ✅ GOOD: "I'll start by searching for key terms in the knowledge base, then explore related concepts"
-  - ❌ BAD: "After grep_chunks returns results, I'll use knowledge_search"
+  - ❌ BAD: "After search_knowledge returns results, I'll call read_document"
   - ✅ GOOD: "After finding relevant documents, I'll search for semantically related content"
   
   Write thinking as if explaining your reasoning to a user, not documenting technical steps. Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use).
@@ -85,7 +95,7 @@ Each thought can build on, question, or revise previous insights as understandin
   "properties": {
     "thought": {
       "type": "string",
-      "description": "Your current thinking step. Write in natural, user-friendly language. NEVER mention tool names (like \"grep_chunks\", \"knowledge_search\", \"web_search\", etc.). Instead, describe actions in plain language (e.g., \"I'll search for key terms\" instead of \"I'll use grep_chunks\"). Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use)."
+      "description": "` + thinkingThoughtDescription + `"
     },
     "next_thought_needed": {
       "type": "boolean",

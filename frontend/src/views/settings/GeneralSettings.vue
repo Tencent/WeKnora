@@ -23,6 +23,7 @@
             <t-option value="en-US" :label="$t('language.enUS')">{{ $t('language.enUS') }}</t-option>
             <t-option value="ru-RU" :label="$t('language.ruRU')">{{ $t('language.ruRU') }}</t-option>
             <t-option value="ko-KR" :label="$t('language.koKR')">{{ $t('language.koKR') }}</t-option>
+            <t-option value="ja-JP" :label="$t('language.jaJP')">{{ $t('language.jaJP') }}</t-option>
           </t-select>
         </div>
       </div>
@@ -121,34 +122,6 @@
         </div>
       </div>
 
-      <!-- 记忆功能开关 -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('settings.enableMemory') }}</label>
-          <p class="desc">{{ $t('settings.enableMemoryDesc') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-switch
-            :value="isMemoryEnabled"
-            :disabled="!isNeo4jAvailable || memorySaving"
-            :loading="memorySaving"
-            @change="handleMemoryChange"
-          />
-        </div>
-      </div>
-      <t-alert
-        v-if="!isNeo4jAvailable"
-        theme="warning"
-        style="margin-top: -8px; margin-bottom: 16px;"
-      >
-        <template #message>
-          <div>{{ $t('settings.memoryRequiresNeo4j') }}</div>
-          <t-link theme="primary" href="https://github.com/Tencent/WeKnora/blob/main/docs/KnowledgeGraph.md" target="_blank">
-            {{ $t('settings.memoryHowToEnable') }}
-          </t-link>
-        </template>
-      </t-alert>
-
       <!-- 自动下载更新开关 (Lite edition only) -->
       <div class="setting-row" v-if="authStore.isLiteMode">
         <div class="setting-info">
@@ -171,7 +144,6 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
-import { getSystemInfo } from '@/api/system'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
 import {
   useFont,
@@ -232,18 +204,6 @@ const monoFontOptions = computed<{ value: MonoFontKey; label: string; preview: s
 const currentSansStack = computed(() => SANS_STACKS[localSansFont.value] ?? SANS_STACKS.system)
 const currentMonoStack = computed(() => MONO_STACKS[localMonoFont.value] ?? MONO_STACKS.system)
 
-// 系统信息
-const systemInfo = ref<any>(null)
-
-const isNeo4jAvailable = computed(() => {
-  return systemInfo.value?.graph_database_engine && systemInfo.value.graph_database_engine !== '未启用'
-})
-
-// 记忆功能状态：只读 computed（toggleMemory 现在是 async + 后端持久化，
-// 触发路径统一走 @change → handleMemoryChange，避免 v-model setter 二次调用）。
-const isMemoryEnabled = computed(() => settingsStore.isMemoryEnabled)
-const memorySaving = ref(false)
-
 // 自动检查更新状态
 const isAutoCheckUpdateEnabled = computed({
   get: () => settingsStore.isAutoCheckUpdateEnabled,
@@ -260,7 +220,7 @@ const isAutoCheckUpdateEnabled = computed({
 })
 
 // 初始化加载
-onMounted(async () => {
+onMounted(() => {
   // 从 localStorage 加载语言设置
   const savedLocale = localStorage.getItem('locale')
   if (savedLocale) {
@@ -268,18 +228,6 @@ onMounted(async () => {
     locale.value = savedLocale
   } else {
     localLanguage.value = locale.value
-  }
-
-  // 加载系统信息以检查 Neo4j 可用性
-  try {
-    const response = await getSystemInfo()
-    systemInfo.value = response.data
-    if (!isNeo4jAvailable.value && settingsStore.isMemoryEnabled) {
-      // Neo4j 不可用 → 兜底关掉。后端写入失败不打断主流程（页面级 best-effort）。
-      void settingsStore.toggleMemory(false).catch(() => {})
-    }
-  } catch (error) {
-    console.error('Failed to load system info:', error)
   }
 })
 
@@ -290,25 +238,6 @@ const handleLanguageChange = () => {
   MessagePlugin.success(t('language.languageSaved'))
     }
 
-// 处理记忆功能变化。
-// toggleMemory 是 async：先乐观写本地、再 PUT 后端；失败会回滚并 throw。
-// UI 在 saving 期间禁用开关 + 显示 loading，避免用户在请求未完成时反复点。
-const handleMemoryChange = async (val: boolean) => {
-  if (val && !isNeo4jAvailable.value) {
-    MessagePlugin.warning(t('settings.memoryRequiresNeo4j'))
-    return
-  }
-  memorySaving.value = true
-  try {
-    await settingsStore.toggleMemory(val)
-    MessagePlugin.success(t('common.success'))
-  } catch (err: any) {
-    MessagePlugin.error(err?.message || t('error.auth.updatePreferencesFailed'))
-  } finally {
-    memorySaving.value = false
-  }
-}
-
 // 处理主题变化
 const handleThemeChange = (val: ThemeMode) => {
   if (!setTheme(val)) {
@@ -317,7 +246,6 @@ const handleThemeChange = (val: ThemeMode) => {
     localTheme.value = currentTheme.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 // 处理字体变化
@@ -326,7 +254,6 @@ const handleSansFontChange = (val: FontKey) => {
     localSansFont.value = currentSans.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 const handleMonoFontChange = (val: MonoFontKey) => {
@@ -334,7 +261,6 @@ const handleMonoFontChange = (val: MonoFontKey) => {
     localMonoFont.value = currentMono.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 const handleFontSizeChange = (val: FontSizeKey) => {
@@ -342,31 +268,18 @@ const handleFontSizeChange = (val: FontSizeKey) => {
     localFontSize.value = currentSize.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .general-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 32px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .settings-group {
@@ -376,44 +289,15 @@ const handleFontSizeChange = (val: FontSizeKey) => {
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
+  .setting-row();
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 65%;
-  padding-right: 24px;
-
-  label {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    display: block;
-    margin-bottom: 4px;
-  }
-
-  .desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .setting-info();
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  .setting-control();
 }
 
 // When a font picker is rendered, stack the select on top of a live
@@ -432,7 +316,7 @@ const handleFontSizeChange = (val: FontSizeKey) => {
   border-radius: var(--td-radius-medium);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.4;
   text-align: left;
   box-sizing: border-box;

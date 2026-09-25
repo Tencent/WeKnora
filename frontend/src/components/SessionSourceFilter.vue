@@ -6,9 +6,9 @@
     <button ref="triggerRef" type="button" class="session-source-filter__trigger" :aria-expanded="open"
       aria-haspopup="listbox" @click.stop="toggleOpen">
       <span class="session-source-filter__leading">
-        <img v-if="!inline && currentOption?.logo" :src="currentOption.logo" :alt="currentOption.label"
+        <img v-if="currentOption?.logo" :src="currentOption.logo" :alt="currentOption.label"
           class="session-source-filter__logo" />
-        <t-icon v-else-if="!inline" :name="iconFor(currentOption)" class="session-source-filter__icon" size="14px" />
+        <t-icon v-else :name="iconFor(currentOption)" class="session-source-filter__icon" size="14px" />
         <span class="session-source-filter__label" :title="currentOption?.label">{{ currentOption?.label }}</span>
       </span>
       <t-icon v-if="inline" name="chevron-down" class="session-source-filter__chevron"
@@ -75,6 +75,7 @@ const currentOption = computed(() =>
 const iconFor = (item: SourceItem | undefined): string => {
   if (!item) return 'chat'
   if (item.value === DEFAULT_SESSION_BUCKET_KEY) return 'chat'
+  if (item.value === 'api') return 'server'
   if (item.value.startsWith('embed:')) return 'code'
   return 'link'
 }
@@ -153,7 +154,7 @@ onBeforeUnmount(() => {
     max-width: 100%;
 
     .session-source-filter__leading {
-      gap: 0;
+      gap: 4px;
       flex: 0 1 auto;
     }
   }
@@ -168,11 +169,11 @@ onBeforeUnmount(() => {
   min-height: 28px;
   padding: 4px 10px 4px 14px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   font-family: var(--app-font-family);
   text-align: left;
 
@@ -214,13 +215,13 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 18px;
   letter-spacing: 0.01em;
 
   .session-source-filter--inline .session-source-filter__trigger & {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 600;
     line-height: 16px;
     color: inherit;
@@ -246,7 +247,7 @@ onBeforeUnmount(() => {
   color: var(--td-text-color-placeholder);
 
   .session-source-filter--inline & {
-    font-size: 12px !important;
+    font-size: var(--app-text-sm) !important;
     color: var(--td-text-color-disabled);
   }
 }
@@ -254,7 +255,7 @@ onBeforeUnmount(() => {
 .session-source-filter__chevron {
   flex: 0 0 auto;
   color: var(--td-text-color-placeholder);
-  transition: transform 0.18s ease, color 0.15s ease;
+  transition: transform 0.18s ease, color var(--app-motion-fast) ease;
 
   &--open {
     transform: rotate(180deg);
@@ -264,7 +265,7 @@ onBeforeUnmount(() => {
   .session-source-filter--inline & {
     color: var(--td-text-color-disabled);
     opacity: 0.85;
-    font-size: 10px !important;
+    font-size: var(--app-text-2xs) !important;
   }
 }
 
@@ -274,10 +275,10 @@ onBeforeUnmount(() => {
   width: max-content;
   min-width: 108px;
   max-width: min(200px, calc(100vw - 16px));
-  padding: 3px;
+  padding: 4px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 7px;
-  background: var(--td-bg-color-sidebar, var(--td-bg-color-container));
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05), 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
@@ -285,16 +286,16 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  min-height: 28px;
-  padding: 4px 6px;
+  min-height: 32px;
+  padding: 6px 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-primary);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   font-family: var(--app-font-family);
   text-align: left;
   white-space: nowrap;
@@ -305,10 +306,10 @@ onBeforeUnmount(() => {
 
   &--active {
     background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
+    color: var(--td-brand-color);
 
     .session-source-filter__icon {
-      color: var(--td-text-color-secondary);
+      color: var(--td-brand-color);
     }
 
     .session-source-filter__logo {
@@ -319,17 +320,18 @@ onBeforeUnmount(() => {
 }
 
 .session-source-filter__option-label {
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 16px;
+  font-size: var(--app-text-base);
+  font-weight: 400;
+  line-height: 20px;
+  letter-spacing: normal;
 }
 
 .session-source-filter__check {
   flex: 0 0 13px;
   width: 13px;
   margin-left: 2px;
-  color: var(--td-text-color-placeholder);
-  font-size: 12px !important;
+  color: var(--td-brand-color);
+  font-size: var(--app-text-sm) !important;
   visibility: hidden;
 
   &--visible {

@@ -4,6 +4,8 @@ import (
 	stderrors "errors"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -12,10 +14,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 // Handler handles all HTTP requests related to conversation sessions
 type Handler struct {
+	browserSkill         *browserskill.Manager
 	messageService       interfaces.MessageService // Service for managing messages
 	suggestionService    interfaces.MessageSuggestionService
 	sessionService       interfaces.SessionService       // Service for managing sessions
@@ -27,11 +31,47 @@ type Handler struct {
 	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 	kbShareService       interfaces.KBShareService       // Service for resolving shared KB permissions
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
+	resourceCatalog      interfaces.ResourceCatalog
 	storageResolver      interfaces.StorageBackendResolver
 	modelService         interfaces.ModelService // Service for model management (VLM access)
-	userService          interfaces.UserService  // Service for resolving per-user preferences (e.g. enable_memory default)
 	attachmentProcessor  *AttachmentProcessor    // Processor for file attachments
 	temporaryDocuments   interfaces.TemporaryDocumentService
+	// artifactCollector drains skill-generated files from the session sandbox
+	// after an agent turn completes. May be nil when the sandbox backend does
+	// not support artifact collection; handlers must check before using.
+	artifactCollector *service.ArtifactCollector
+	// workspaceCheckpointer commits the sandbox /workspace at the end of each
+	// agent turn so session fork can roll back to a specific message. May be
+	// nil when the deployment has no sandbox backend.
+	workspaceCheckpointer *service.WorkspaceCheckpointer
+	// sandboxIDLookup resolves a session's bound sandbox without provisioning.
+	sandboxIDLookup SandboxIDLookup
+	memoryService   interfaces.MemoryService // Service for cross-session long-term memory
+	// userService / memberService back the sandbox terminal's self-contained
+	// handshake (browser WebSocket upgrades cannot send Authorization).
+	userService   interfaces.UserService
+	memberService interfaces.TenantMemberService
+	// terminalService opens PTYs on the sandbox bound to a session. It also
+	// owns first-use provisioning: the WS handshake carries the chat page's
+	// selected agent so the sandbox is created with the same config a
+	// conversation turn would use.
+	terminalService *service.SandboxTerminalService
+	desktopService  *service.SandboxDesktopService
+	desktopTickets  service.SandboxDesktopTicketStore
+	desktopLast     service.SandboxDesktopLastStore
+	// redis backs the distributed desktop slot. Nil in Lite mode, where the
+	// in-process limiter is the correct degradation.
+	redis *redis.Client
+	// forkService branches a session at a chosen user message. May be nil in
+	// deployments where fork is not wired; ForkSession checks.
+	forkService sessionForker
+	// rewindService truncates the current session at a chosen message. May
+	// be nil in deployments where rewind is not wired; RewindSession checks.
+	rewindService sessionRewinder
+	// approvedProjectDirs is the user-approved ProjectDirs list used to
+	// validate CreateSession's optional project_dir. Nil means none are
+	// approved, so a non-empty project_dir is rejected.
+	approvedProjectDirs HostProjectDirsLoader
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -47,29 +87,57 @@ func NewHandler(
 	agentShareService interfaces.AgentShareService,
 	kbShareService interfaces.KBShareService,
 	fileService interfaces.FileService,
+	resourceCatalog interfaces.ResourceCatalog,
 	storageResolver interfaces.StorageBackendResolver,
 	modelService interfaces.ModelService,
-	userService interfaces.UserService,
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
 	temporaryDocuments interfaces.TemporaryDocumentService,
+	artifactCollector *service.ArtifactCollector,
+	workspaceCheckpointer *service.WorkspaceCheckpointer,
+	sandboxIDLookup SandboxIDLookup,
+	memoryService interfaces.MemoryService,
+	userService interfaces.UserService,
+	memberService interfaces.TenantMemberService,
+	terminalService *service.SandboxTerminalService,
+	browserSkill *browserskill.Manager,
+	desktopService *service.SandboxDesktopService,
+	desktopTickets service.SandboxDesktopTicketStore,
+	desktopLast service.SandboxDesktopLastStore,
+	rdb *redis.Client,
+	forkService *service.SessionForkService,
+	rewindService *service.SessionRewindService,
+	approvedProjectDirs HostProjectDirsLoader,
 ) *Handler {
-	return &Handler{
-		sessionService:       sessionService,
-		messageService:       messageService,
-		suggestionService:    suggestionService,
-		streamManager:        streamManager,
-		config:               config,
-		knowledgebaseService: knowledgebaseService,
-		customAgentService:   customAgentService,
-		tenantService:        tenantService,
-		agentShareService:    agentShareService,
-		kbShareService:       kbShareService,
-		fileService:          fileService,
-		storageResolver:      storageResolver,
-		modelService:         modelService,
-		userService:          userService,
-		temporaryDocuments:   temporaryDocuments,
+	h := &Handler{
+		browserSkill:          browserSkill,
+		sessionService:        sessionService,
+		messageService:        messageService,
+		suggestionService:     suggestionService,
+		streamManager:         streamManager,
+		config:                config,
+		knowledgebaseService:  knowledgebaseService,
+		customAgentService:    customAgentService,
+		tenantService:         tenantService,
+		agentShareService:     agentShareService,
+		kbShareService:        kbShareService,
+		fileService:           fileService,
+		resourceCatalog:       resourceCatalog,
+		storageResolver:       storageResolver,
+		modelService:          modelService,
+		temporaryDocuments:    temporaryDocuments,
+		artifactCollector:     artifactCollector,
+		workspaceCheckpointer: workspaceCheckpointer,
+		sandboxIDLookup:       sandboxIDLookup,
+		memoryService:         memoryService,
+		userService:           userService,
+		memberService:         memberService,
+		terminalService:       terminalService,
+		desktopService:        desktopService,
+		desktopTickets:        desktopTickets,
+		desktopLast:           desktopLast,
+		redis:                 rdb,
+		approvedProjectDirs:   approvedProjectDirs,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
@@ -77,6 +145,13 @@ func NewHandler(
 			modelService,
 		),
 	}
+	if forkService != nil {
+		h.forkService = forkService
+	}
+	if rewindService != nil {
+		h.rewindService = rewindService
+	}
+	return h
 }
 
 // CreateSession godoc
@@ -118,11 +193,18 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		tenantID,
 	)
 
+	hostDir, ok := bindHostWorkspaceDir(request.ProjectDir, h.approvedDirs())
+	if !ok {
+		_ = c.Error(errors.NewBadRequestError("project_dir is not an approved project directory"))
+		return
+	}
+
 	// Create session object with base properties
 	createdSession := &types.Session{
-		TenantID:    tenantID.(uint64),
-		Title:       request.Title,
-		Description: request.Description,
+		TenantID:         tenantID.(uint64),
+		Title:            request.Title,
+		Description:      types.SanitizeClientSessionDescription(request.Description, ""),
+		HostWorkspaceDir: hostDir,
 	}
 	// Attach the calling user as the session owner when available.
 	// API-key callers scope sessions per external user when configured;
@@ -204,7 +286,7 @@ func (h *Handler) GetSession(c *gin.Context) {
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
 // @Param        keyword    query     string  false  "标题模糊搜索"
-// @Param        source     query     string  false  "来源过滤：web / feishu / wechat / slack / ..."
+// @Param        source     query     string  false  "来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM 渠道需 Admin+）"
 // @Param        agent_id   query     string  false  "按 Agent 过滤（仅对 IM 会话生效）"
 // @Success      200        {object}  map[string]interface{}  "会话列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
@@ -353,6 +435,8 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 		return
 	}
 
+	h.browserSkill.Forget(browserSkillScope(ctx), []string{id})
+
 	// Return success message
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -437,6 +521,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 			c.Error(errors.NewInternalServerError(err.Error()))
 			return
 		}
+		h.browserSkill.ForgetAll(browserSkillScope(ctx))
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "All sessions deleted successfully",
@@ -474,6 +559,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 		return
 	}
 
+	h.browserSkill.Forget(browserSkillScope(ctx), sanitizedIDs)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Sessions deleted successfully",

@@ -153,7 +153,7 @@
                     <span class="tag-tile__count">
                       {{
                         isFaq
-                          ? $t('knowledgeBase.tagManageFaqCount', { count: tag.knowledge_count || 0 })
+                          ? $t('knowledgeBase.tagManageFaqCount', { count: tag.chunk_count || 0 })
                           : $t('knowledgeBase.tagManageDocCount', { count: tag.knowledge_count || 0 })
                       }}
                     </span>
@@ -222,6 +222,7 @@ type TagRow = {
   seq_id: number;
   name: string;
   knowledge_count?: number;
+  chunk_count?: number;
 };
 
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
@@ -473,10 +474,10 @@ watch(searchQuery, (newVal, oldVal) => {
   width: 100%;
 
   :deep(.t-input) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     background-color: var(--td-bg-color-secondarycontainer);
     border-color: transparent;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     box-shadow: none !important;
 
     &:hover,
@@ -489,7 +490,7 @@ watch(searchQuery, (newVal, oldVal) => {
   }
 
   :deep(.t-input__inner) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   :deep(.t-input__prefix-icon) {
@@ -502,11 +503,11 @@ watch(searchQuery, (newVal, oldVal) => {
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-secondary);
 
   :deep(.t-icon) {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 
   &:hover:not(:disabled) {
@@ -545,10 +546,10 @@ watch(searchQuery, (newVal, oldVal) => {
   min-height: 44px;
   padding: 5px 6px 5px 8px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
   box-sizing: border-box;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &:hover:not(.tag-tile--editing):not(.tag-tile--skeleton) {
     border-color: var(--td-component-border);
@@ -600,7 +601,7 @@ watch(searchQuery, (newVal, oldVal) => {
 
   :deep(.t-input__inner) {
     padding: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
   }
 
@@ -623,7 +624,7 @@ watch(searchQuery, (newVal, oldVal) => {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -640,7 +641,7 @@ watch(searchQuery, (newVal, oldVal) => {
 }
 
 .tag-tile__name {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   line-height: 1.3;
   color: var(--td-text-color-primary);
@@ -650,7 +651,7 @@ watch(searchQuery, (newVal, oldVal) => {
 }
 
 .tag-tile__count {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.3;
   color: var(--td-text-color-placeholder);
   overflow: hidden;
@@ -663,7 +664,7 @@ watch(searchQuery, (newVal, oldVal) => {
   align-items: center;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--app-motion-instant) ease;
 }
 
 .tag-tile:hover .tag-tile__actions,
@@ -698,7 +699,7 @@ watch(searchQuery, (newVal, oldVal) => {
   padding-top: 8px;
 
   :deep(.t-button) {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 }

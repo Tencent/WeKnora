@@ -217,11 +217,12 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			}
 			yes, _ := cmd.Flags().GetBool("yes")
 			// Build the retry command from the flags the user actually passed.
-			// --add-kb/--remove-kb/--system-prompt-file/--config-file are excluded
-			// (multi-value / file-based — a precise single argv is impractical).
+			// Include list-shaped and file-path flags so exit-10 retry_argv reproduces
+			// the original update (BuildRetryArgv expands StringSlice as repeats).
 			retryCmd := cmdutil.BuildRetryArgv(cmd, []string{"weknora", "agent", "update", opts.AgentID},
-				"name", "description", "model", "system-prompt", "agent-mode",
-				"rerank-model", "temperature", "kb-selection-mode", "format")
+				"name", "description", "model", "system-prompt", "system-prompt-file",
+				"agent-mode", "rerank-model", "temperature", "add-kb", "remove-kb",
+				"kb-selection-mode", "config-file", "format")
 			if err := cmdutil.ConfirmWrite(f.Prompter(), yes, fopts.WantsJSON(), "update", "agent", opts.AgentID, "agent.update", retryCmd); err != nil {
 				return err
 			}
@@ -283,7 +284,6 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	})
 	return cmd
 }
-
 
 // editHasAnyFlag reports whether opts carries at least one surgical update
 // signal. Required-flag validation lives in runEdit (not PreRunE) so unit

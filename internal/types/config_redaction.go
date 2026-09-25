@@ -33,6 +33,9 @@ func ParserEngineConfigForResponse(cfg *ParserEngineConfig, maskSecrets bool) *P
 	if out.MinerUAPIKey != "" {
 		out.MinerUAPIKey = RedactedSecretPlaceholder
 	}
+	if out.MinerUServerAPIKey != "" {
+		out.MinerUServerAPIKey = RedactedSecretPlaceholder
+	}
 	if out.PaddleOCRVLCloudToken != "" {
 		out.PaddleOCRVLCloudToken = RedactedSecretPlaceholder
 	}
@@ -167,6 +170,7 @@ func MergeParserEngineConfigForUpdate(incoming, existing *ParserEngineConfig) *P
 		prev = *existing
 	}
 	out.MinerUAPIKey = PreserveIfRedacted(out.MinerUAPIKey, prev.MinerUAPIKey)
+	out.MinerUServerAPIKey = PreserveIfRedacted(out.MinerUServerAPIKey, prev.MinerUServerAPIKey)
 	out.PaddleOCRVLCloudToken = PreserveIfRedacted(out.PaddleOCRVLCloudToken, prev.PaddleOCRVLCloudToken)
 	// Chat attachment parser rules are configured per agent; preserve any legacy
 	// tenant-level rules when the settings UI omits this field on engine updates.
@@ -219,8 +223,16 @@ func MergeStorageEngineConfigForUpdate(incoming, existing *StorageEngineConfig) 
 		if existing != nil && existing.S3 != nil {
 			prev = *existing.S3
 		}
-		s3.AccessKey = PreserveIfRedacted(s3.AccessKey, prev.AccessKey)
-		s3.SecretKey = PreserveIfRedacted(s3.SecretKey, prev.SecretKey)
+		// Empty S3 credentials intentionally switch authentication to the AWS
+		// default credential chain. Only the response placeholder means "keep
+		// the stored value"; treating empty as preserve makes it impossible to
+		// migrate an existing static AK/SK configuration to IAM roles.
+		if s3.AccessKey == RedactedSecretPlaceholder {
+			s3.AccessKey = prev.AccessKey
+		}
+		if s3.SecretKey == RedactedSecretPlaceholder {
+			s3.SecretKey = prev.SecretKey
+		}
 		out.S3 = &s3
 	}
 	if out.OSS != nil {
@@ -254,4 +266,192 @@ func MergeStorageEngineConfigForUpdate(incoming, existing *StorageEngineConfig) 
 		out.OBS = &obs
 	}
 	return &out
+}
+
+// SandboxConfigForResponse returns a copy of cfg safe to serialize into an API
+// response. When maskSecrets is true every secret-bearing field is replaced
+// with RedactedSecretPlaceholder. Unset secrets stay empty so the UI can tell
+// "configured" apart from "not configured".
+func SandboxConfigForResponse(cfg *TenantSandboxConfig, maskSecrets bool) *TenantSandboxConfig {
+	if cfg == nil {
+		return nil
+	}
+	out := *cfg
+	if !maskSecrets {
+		return &out
+	}
+	if out.Cube != nil {
+		cube := *out.Cube
+		if cube.APIKey != "" {
+			cube.APIKey = RedactedSecretPlaceholder
+		}
+		out.Cube = &cube
+	}
+	if out.E2B != nil {
+		e2b := *out.E2B
+		if e2b.APIKey != "" {
+			e2b.APIKey = RedactedSecretPlaceholder
+		}
+		out.E2B = &e2b
+	}
+	// EnvVars values are encrypted at rest and may hold credentials, so they
+	// are masked as a class rather than by name.
+	if len(out.EnvVars) > 0 {
+		envVars := make(map[string]string, len(out.EnvVars))
+		for name, value := range out.EnvVars {
+			if value != "" {
+				value = RedactedSecretPlaceholder
+			}
+			envVars[name] = value
+		}
+		out.EnvVars = envVars
+	}
+	// Injected headers carry credentials, so they are masked as a class the
+	// same way EnvVars values are.
+	if out.Network != nil {
+		out.Network = out.Network.CloneWithSecrets(func(value string) string {
+			if value == "" {
+				return ""
+			}
+			return RedactedSecretPlaceholder
+		})
+	}
+	return &out
+}
+
+// MergeSandboxConfigForUpdate resolves redacted placeholders in incoming
+// against the currently stored config, so a client that never received the
+// real secret can submit the rest of the form without wiping it. Pointers
+// the editor does not own (SkillImage, VolumeMount) are kept from existing.
+func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *TenantSandboxConfig {
+	if incoming == nil {
+		return nil
+	}
+	out := *incoming
+
+	if out.Cube != nil {
+		cube := *out.Cube
+		var prev CubeSandboxConfig
+		if existing != nil && existing.Cube != nil {
+			prev = *existing.Cube
+		}
+		cube.APIKey = PreserveIfRedacted(cube.APIKey, prev.APIKey)
+		out.Cube = &cube
+	}
+	if out.E2B != nil {
+		e2b := *out.E2B
+		var prev E2BSandboxConfig
+		if existing != nil && existing.E2B != nil {
+			prev = *existing.E2B
+		}
+		e2b.APIKey = PreserveIfRedacted(e2b.APIKey, prev.APIKey)
+		out.E2B = &e2b
+	}
+	// Only keys present in incoming survive: deleting a row in the UI must
+	// actually remove the variable rather than silently restore it.
+	if len(out.EnvVars) > 0 {
+		envVars := make(map[string]string, len(out.EnvVars))
+		for name, value := range out.EnvVars {
+			prev := ""
+			if existing != nil {
+				prev = existing.EnvVars[name]
+			}
+			envVars[name] = PreserveIfRedacted(value, prev)
+		}
+		out.EnvVars = envVars
+	}
+
+	// Network is an editor-owned field, so incoming decides its shape; only
+	// the credential values fall back to what is stored. Unlike SkillImage,
+	// omitting it clears it — the admin deleting every rule must stick.
+	if out.Network != nil {
+		var prev *SandboxNetworkPolicy
+		if existing != nil {
+			prev = existing.Network
+		}
+		out.Network = mergeNetworkPolicyForUpdate(out.Network, prev)
+	}
+
+	// SkillImage and VolumeMount are owned by the install / volume paths, not
+	// by the sandbox settings form. The editor rebuilds the payload without
+	// either field, so copying incoming as-is would wipe a live snapshot on
+	// every runtime save and leave sessions booting the base template while the
+	// skill rows still claim ready. Reading them from the stored row instead —
+	// and clearing when there is no stored row — also means a crafted PUT can
+	// neither plant nor wipe a pointer.
+	out.SkillImage = nil
+	out.VolumeMount = nil
+	if existing != nil {
+		if existing.SkillImage != nil {
+			image := *existing.SkillImage
+			out.SkillImage = &image
+		}
+		if existing.VolumeMount != nil {
+			mount := *existing.VolumeMount
+			out.VolumeMount = &mount
+		}
+		// The runtime form omits skill_rollout. An empty incoming value must
+		// not reset a saved "new_session" choice; the skills panel sends the
+		// explicit next_turn token when the admin switches back.
+		if strings.TrimSpace(out.SkillRollout) == "" {
+			out.SkillRollout = existing.SkillRollout
+		}
+	}
+
+	return &out
+}
+
+// mergeNetworkPolicyForUpdate resolves redacted injected-header secrets in
+// incoming against existing. Rules are matched by the identity the admin sees:
+// a Cube inject by (rule name, header name), an E2B header by (host, header
+// name). A renamed rule therefore loses its stored secret, which is correct —
+// there is no way to tell a rename from a replacement.
+func mergeNetworkPolicyForUpdate(
+	incoming, existing *SandboxNetworkPolicy,
+) *SandboxNetworkPolicy {
+	if incoming == nil {
+		return nil
+	}
+	out := incoming.CloneWithSecrets(func(value string) string { return value })
+	// Inbound is always credential-required. Accept the wire field so old
+	// clients still decode, then drop it so it cannot persist or reopen.
+	out.AllowPublicInbound = false
+	if existing == nil {
+		return out
+	}
+
+	storedCube := make(map[string]string)
+	for _, rule := range existing.CubeRules {
+		for _, inject := range rule.Inject {
+			storedCube[networkSecretKey(rule.Name, inject.Header)] = inject.Secret
+		}
+	}
+	for i, rule := range out.CubeRules {
+		for j, inject := range rule.Inject {
+			prev := storedCube[networkSecretKey(rule.Name, inject.Header)]
+			out.CubeRules[i].Inject[j].Secret = PreserveIfRedacted(inject.Secret, prev)
+		}
+	}
+
+	storedE2B := make(map[string]string)
+	for _, rule := range existing.E2BHostRules {
+		for name, value := range rule.Headers {
+			storedE2B[networkSecretKey(rule.Host, name)] = value
+		}
+	}
+	for i, rule := range out.E2BHostRules {
+		for name, value := range rule.Headers {
+			prev := storedE2B[networkSecretKey(rule.Host, name)]
+			out.E2BHostRules[i].Headers[name] = PreserveIfRedacted(value, prev)
+		}
+	}
+	return out
+}
+
+// networkSecretKey is the identity the merge uses for one injected header.
+// Parent (rule name / host) and child (header name) are trimmed and folded so
+// a whitespace or HTTP-header case change is not treated as a rename that
+// drops the stored secret.
+func networkSecretKey(parent, child string) string {
+	return strings.ToLower(strings.TrimSpace(parent)) + "\x00" + strings.ToLower(strings.TrimSpace(child))
 }

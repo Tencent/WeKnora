@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/application/service/metric"
@@ -132,10 +133,37 @@ func (h *HookMetric) recordChatResponse(index int, chatResponse *types.ChatRespo
 
 // recordFinish finalizes metrics for a QA pair
 func (h *HookMetric) recordFinish(index int) {
-	// Prepare retrieval IDs from rerank results
-	retrievalIDs := make([]int, len(h.qaPairMetricList[index].rerankResult))
-	for i, r := range h.qaPairMetricList[index].rerankResult {
-		retrievalIDs[i] = r.ChunkIndex
+	// Prepare retrieval source: prefer rerank results, fall back to search results
+	retrievalSource := h.qaPairMetricList[index].rerankResult
+	if len(retrievalSource) == 0 {
+		retrievalSource = h.qaPairMetricList[index].searchResult
+	}
+
+	// Map retrieved chunks back to original passage IDs via content matching.
+	// ChunkIndex is the chunk's ordinal position in the knowledge base, which
+	// does NOT correspond to the dataset's passage IDs. Instead, we match each
+	// retrieved chunk's content against the ground truth passages to determine
+	// which passage it came from.
+	qaPair := h.qaPairMetricList[index].qaPair
+	retrievalIDs := make([]int, 0, len(retrievalSource))
+	seen := make(map[int]struct{})
+	for _, r := range retrievalSource {
+		if r.Content == "" {
+			continue
+		}
+		for i, passage := range qaPair.Passages {
+			if passage == "" {
+				continue
+			}
+			if strings.Contains(passage, r.Content) || strings.Contains(r.Content, passage) {
+				pid := qaPair.PIDs[i]
+				if _, ok := seen[pid]; !ok {
+					seen[pid] = struct{}{}
+					retrievalIDs = append(retrievalIDs, pid)
+				}
+				break
+			}
+		}
 	}
 
 	// Get generated text if available
@@ -146,10 +174,10 @@ func (h *HookMetric) recordFinish(index int) {
 
 	// Prepare metric input data
 	metricInput := &types.MetricInput{
-		RetrievalGT:    [][]int{h.qaPairMetricList[index].qaPair.PIDs},
+		RetrievalGT:    [][]int{qaPair.PIDs},
 		RetrievalIDs:   retrievalIDs,
 		GeneratedTexts: generatedTexts,
-		GeneratedGT:    h.qaPairMetricList[index].qaPair.Answer,
+		GeneratedGT:    qaPair.Answer,
 	}
 
 	// Thread-safe append of metrics

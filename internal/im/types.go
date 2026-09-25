@@ -1,8 +1,10 @@
 package im
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,6 +24,7 @@ type IMChannel struct {
 	Enabled         bool           `json:"enabled"     gorm:"not null;default:true"`
 	Mode            string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
 	OutputMode      string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
+	Locale          string         `json:"locale"            gorm:"type:varchar(16);not null;default:''"`
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
 	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
 	SessionMode     string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
@@ -47,6 +50,7 @@ type IMChannelSummary struct {
 	Enabled               bool      `json:"enabled"`
 	Mode                  string    `json:"mode"`
 	OutputMode            string    `json:"output_mode"`
+	Locale                string    `json:"locale"`
 	KnowledgeBaseID       string    `json:"knowledge_base_id"`
 	BotIdentity           string    `json:"bot_identity"`
 	SessionMode           string    `json:"session_mode"`
@@ -66,6 +70,7 @@ func SummarizeIMChannel(ch IMChannel) IMChannelSummary {
 		Enabled:               ch.Enabled,
 		Mode:                  ch.Mode,
 		OutputMode:            ch.OutputMode,
+		Locale:                ch.Locale,
 		KnowledgeBaseID:       ch.KnowledgeBaseID,
 		BotIdentity:           ch.BotIdentity,
 		SessionMode:           ch.SessionMode,
@@ -94,7 +99,7 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 		ch.ID = uuid.New().String()
 	}
 	if ch.Mode == "" {
-		if ch.Platform == "mattermost" {
+		if ch.Platform == "mattermost" || ch.Platform == "yunzhijia" {
 			ch.Mode = "webhook"
 		} else {
 			ch.Mode = "websocket"
@@ -107,6 +112,9 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 		ch.SessionMode = string(SessionModeUser)
 	}
 	if err := ch.validateSessionMode(); err != nil {
+		return err
+	}
+	if err := ch.normalizeAndValidateLocale(); err != nil {
 		return err
 	}
 	ch.BotIdentity = ch.computeBotIdentity()
@@ -122,8 +130,24 @@ func (ch *IMChannel) BeforeSave(tx *gorm.DB) error {
 	if err := ch.validateSessionMode(); err != nil {
 		return err
 	}
+	if err := ch.normalizeAndValidateLocale(); err != nil {
+		return err
+	}
 	ch.BotIdentity = ch.computeBotIdentity()
 	return nil
+}
+
+func (ch *IMChannel) normalizeAndValidateLocale() error {
+	locale := strings.TrimSpace(ch.Locale)
+	if locale == "" {
+		ch.Locale = ""
+		return nil
+	}
+	if normalized := types.NormalizeSupportedLocale(locale); normalized != "" {
+		ch.Locale = normalized
+		return nil
+	}
+	return fmt.Errorf("invalid locale: %s", locale)
 }
 
 // validateSessionMode checks that SessionMode holds a supported value.
@@ -199,6 +223,16 @@ func (ch *IMChannel) computeBotIdentity() string {
 	case "qqbot":
 		if appID := str("app_id"); appID != "" {
 			return "qqbot:" + appID
+		}
+	case "yunzhijia":
+		if sendMsgURL := str("send_msg_url"); sendMsgURL != "" {
+			parsed, err := url.Parse(sendMsgURL)
+			if err != nil {
+				return ""
+			}
+			if token := strings.TrimSpace(parsed.Query().Get("yzjtoken")); token != "" {
+				return fmt.Sprintf("yunzhijia:%x", sha256.Sum256([]byte(token)))
+			}
 		}
 	}
 	return ""

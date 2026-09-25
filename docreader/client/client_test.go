@@ -16,12 +16,26 @@ func init() {
 	log.Println("INFO: Initializing DocReader client tests")
 }
 
-func TestReadURL(t *testing.T) {
+func requireLiveDocReaderClient(t *testing.T) *Client {
+	t.Helper()
+
 	client, err := NewClient("localhost:50051")
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
+	t.Cleanup(func() { client.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := client.ListEngines(ctx, &proto.ListEnginesRequest{}); err != nil {
+		t.Skipf("DocReader gRPC server not available at localhost:50051: %v", err)
+	}
+
+	return client
+}
+
+func TestReadURL(t *testing.T) {
+	client := requireLiveDocReaderClient(t)
 	client.SetDebug(true)
 
 	startTime := time.Now()
@@ -47,11 +61,7 @@ func TestReadURL(t *testing.T) {
 }
 
 func TestReadFile(t *testing.T) {
-	client, err := NewClient("localhost:50051")
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
+	client := requireLiveDocReaderClient(t)
 	client.SetDebug(true)
 
 	fileContent, err := os.ReadFile("../testdata/test.md")

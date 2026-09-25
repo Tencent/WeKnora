@@ -92,8 +92,11 @@ type TemporaryDocumentTaskPayload struct {
 }
 
 type TemporaryDocumentCreateOptions struct {
-	ASRModelID   string `json:"asr_model_id,omitempty"`
-	ParserEngine string `json:"parser_engine,omitempty"`
+	// ResourceTenantID is the verified agent source workspace used to resolve
+	// parser/model dependencies. The document itself remains owned by TenantID.
+	ResourceTenantID uint64 `json:"resource_tenant_id,omitempty"`
+	ASRModelID       string `json:"asr_model_id,omitempty"`
+	ParserEngine     string `json:"parser_engine,omitempty"`
 	// VLMModelID enables image understanding (caption/OCR) during async parse.
 	// Images use it to produce real text content; scanned/image-only documents
 	// use it as an OCR fallback when ImageUnderstanding is on.

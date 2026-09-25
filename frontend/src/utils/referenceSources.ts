@@ -1,3 +1,5 @@
+import type { SourceLocator } from './sourceLocator'
+
 export type ReferenceItemKind = 'web' | 'document' | 'tool'
 
 export type KnowledgeReferenceLike = {
@@ -11,6 +13,12 @@ export type KnowledgeReferenceLike = {
   chunk_type?: string
   content?: string
   metadata?: Record<string, string>
+  /** Where the knowledge came from: an upload, "manual", or the imported URL. */
+  knowledge_source?: string
+  /** Positions of the chunk in the original file. */
+  source_locators?: SourceLocator[]
+  /** After merging a document's chunks: the first one with positions. */
+  source_chunk_id?: string
 }
 
 export type ReferenceListItem = {
@@ -18,12 +26,15 @@ export type ReferenceListItem = {
   kind: ReferenceItemKind
   index: number
   title: string
+  fileName?: string
   url?: string
   domain?: string
   faviconUrl?: string
   snippet?: string
   chunkId?: string
   chunkIds?: string[]
+  /** The chunk to open the original file at (summaries have no position). */
+  sourceChunkId?: string
   knowledgeId?: string
   knowledgeBaseId?: string
   content?: string
@@ -168,10 +179,12 @@ function buildDocumentItem(item: KnowledgeReferenceLike, index: number): Referen
   return {
     key: `doc:${documentKey}`,
     kind: 'document',
+    fileName: item.knowledge_filename,
     index,
     title,
     chunkId,
     chunkIds: item.chunk_ids,
+    sourceChunkId: item.source_chunk_id,
     knowledgeId: item.knowledge_id,
     knowledgeBaseId: item.knowledge_base_id,
     snippet: truncateText(item.content || '', 220) || undefined,
@@ -210,6 +223,7 @@ function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): KnowledgeRefer
     const key = getDocumentGroupKey(item, index)
     const content = String(item.content || '').trim()
     const chunkIds = Array.from(new Set([...(item.chunk_ids || []), ...(item.id ? [item.id] : [])]))
+    const located = item.id && item.source_locators?.length ? item.id : undefined
     const existing = groups.get(key)
 
     if (!existing) {
@@ -218,10 +232,12 @@ function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): KnowledgeRefer
         id: item.id || key,
         content_parts: content ? [content] : [],
         chunk_ids: chunkIds,
+        source_chunk_id: item.source_chunk_id || located,
       })
       return
     }
 
+    if (!existing.source_chunk_id && located) existing.source_chunk_id = located
     if (!existing.knowledge_id && item.knowledge_id) existing.knowledge_id = item.knowledge_id
     if (!existing.knowledge_title && item.knowledge_title) existing.knowledge_title = item.knowledge_title
     if (!existing.knowledge_filename && item.knowledge_filename) existing.knowledge_filename = item.knowledge_filename
@@ -319,6 +335,60 @@ export type ReferenceHighlightTarget = {
   documentTitle?: string
   knowledgeBaseId?: string
   key?: string
+  /** The answer sentence the citation supports. */
+  anchorText?: string
+  /** Open the cited document at the cited place instead of the list. */
+  openSource?: boolean
+}
+
+/** A cited chunk to show inside its original document. */
+export type ReferenceSourceTarget = {
+  chunkId: string
+  knowledgeId: string
+  knowledgeBaseId?: string
+  title?: string
+  fileName?: string
+  knowledgeSource?: string
+  chunkType?: string
+  /** The chunk's own text; absent when only its document is known. */
+  content?: string
+  locators?: SourceLocator[]
+  anchorText?: string
+}
+
+/**
+ * Resolve a citation to the document and chunk it points at. Web results,
+ * tool output and FAQ entries have no original file and resolve to null.
+ */
+export function resolveReferenceSource(
+  refs: KnowledgeReferenceLike[] | null | undefined,
+  target: ReferenceHighlightTarget | null | undefined,
+): ReferenceSourceTarget | null {
+  const chunkId = String(target?.chunkId || '').trim()
+  if (!chunkId) return null
+  const list = Array.isArray(refs) ? refs.filter(Boolean) : []
+  const exact = list.find((r) => r.id === chunkId)
+  const grouped = exact || list.find((r) => r.chunk_ids?.includes(chunkId))
+  let ref = grouped
+  if (!ref && target?.documentTitle) {
+    const key = resolveReferenceHighlightKey(list, target)
+    const item = key ? buildReferenceList(list).find((i) => i.key === key && i.kind === 'document') : undefined
+    if (item?.knowledgeId) ref = list.find((r) => r.knowledge_id === item.knowledgeId)
+  }
+  if (!ref?.knowledge_id || isWebReference(ref) || isToolReference(ref) || ref.chunk_type === 'faq') return null
+  return {
+    chunkId,
+    knowledgeId: ref.knowledge_id,
+    knowledgeBaseId: ref.knowledge_base_id,
+    title: ref.knowledge_title,
+    fileName: ref.knowledge_filename,
+    knowledgeSource: ref.knowledge_source,
+    chunkType: ref.chunk_type,
+    // A grouped match belongs to another chunk of the same document.
+    content: exact ? exact.content : undefined,
+    locators: exact ? exact.source_locators : undefined,
+    anchorText: target?.anchorText,
+  }
 }
 
 export function resolveReferenceHighlightKey(

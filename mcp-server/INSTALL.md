@@ -122,13 +122,14 @@ python main.py --check-only
 
 ### 项目结构
 ```
-WeKnoraMCP/
+WeKnora/mcp-server/
 ├── __init__.py              # 包初始化文件
 ├── main.py                  # 主入口点
 ├── run_server.py           # 原始启动脚本
 ├── weknora_mcp_server.py   # MCP 服务器实现
 ├── requirements.txt        # 依赖列表
 ├── setup.py               # 安装脚本
+├── pyproject.toml         # 项目元数据（PyPI: tencent-weknora-mcp）
 ├── MANIFEST.in            # 包含文件清单
 ├── LICENSE                # 许可证
 ├── README.md              # 项目说明
@@ -137,14 +138,13 @@ WeKnoraMCP/
 
 ### 添加新功能
 1. 在 `WeKnoraClient` 类中添加新的 API 方法
-2. 在 `handle_list_tools()` 中注册新工具
-3. 在 `handle_call_tool()` 中实现工具逻辑
-4. 更新文档和测试
+2. 用 `@mcp.tool()` 装饰器注册一个新工具函数：参数用类型标注（schema 自动生成），描述写在 docstring 里，函数体调用上面新增的客户端方法
+3. 更新文档和测试
 
 ### 测试
 ```bash
 # 运行基本测试
-python test_imports.py
+python check_imports.py
 
 # 测试环境配置
 python main.py --check-only
@@ -205,4 +205,4 @@ sudo systemctl start weknora-mcp
 1. 查看日志输出
 2. 检查环境配置
 3. 参考故障排除部分
-4. 提交 Issue 到项目仓库: https://github.com/NannaOlympicBroadcast/WeKnoraMCP/issues
+4. 提交 Issue 到项目仓库: https://github.com/Tencent/WeKnora/issues

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -68,6 +69,95 @@ func TestCountByModelID_KnowledgeBase(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 }
 
+func TestListModelUsages_KnowledgeBase(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewKnowledgeBaseRepository(db)
+	modelID := "all-kb-bindings"
+
+	allBindings := makeKB(nil)
+	allBindings.Name = "Zulu KB"
+	allBindings.EmbeddingModelID = modelID
+	allBindings.SummaryModelID = modelID
+	allBindings.ImageProcessingConfig = types.ImageProcessingConfig{ModelID: modelID}
+	allBindings.VLMConfig = types.VLMConfig{Enabled: true, ModelID: modelID}
+	allBindings.ASRConfig = types.ASRConfig{Enabled: true, ModelID: modelID}
+	allBindings.WikiConfig = &types.WikiConfig{SynthesisModelID: modelID}
+	allBindings.AutoTagConfig = &types.AutoTagConfig{Enabled: true, ModelID: modelID}
+	require.NoError(t, db.Create(allBindings).Error)
+
+	vlmOnly := makeKB(nil)
+	vlmOnly.Name = "Alpha KB"
+	vlmOnly.VLMConfig = types.VLMConfig{Enabled: true, ModelID: modelID}
+	require.NoError(t, db.Create(vlmOnly).Error)
+
+	otherTenant := makeKB(nil)
+	otherTenant.Name = "Other tenant"
+	otherTenant.TenantID = 2
+	otherTenant.EmbeddingModelID = modelID
+	require.NoError(t, db.Create(otherTenant).Error)
+
+	deleted := makeKB(nil)
+	deleted.Name = "Deleted KB"
+	deleted.EmbeddingModelID = modelID
+	require.NoError(t, db.Create(deleted).Error)
+	require.NoError(t, db.Delete(deleted).Error)
+
+	usages, err := repo.ListModelUsages(ctx, 1, modelID)
+	require.NoError(t, err)
+	require.Len(t, usages, 2)
+	assert.Equal(t, "Alpha KB", usages[0].Name)
+	assert.Equal(t, []types.ModelUsageBinding{types.ModelUsageBindingVLMModel}, usages[0].Bindings)
+	assert.Equal(t, "Zulu KB", usages[1].Name)
+	assert.Equal(t, []types.ModelUsageBinding{
+		types.ModelUsageBindingEmbeddingModel,
+		types.ModelUsageBindingSummaryModel,
+		types.ModelUsageBindingImageProcessingModel,
+		types.ModelUsageBindingVLMModel,
+		types.ModelUsageBindingASRModel,
+		types.ModelUsageBindingWikiSynthesisModel,
+		types.ModelUsageBindingAutoTagModel,
+	}, usages[1].Bindings)
+}
+
+func TestCountByModelID_KnowledgeBaseAutoTag(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewKnowledgeBaseRepository(db)
+	modelID := "auto-tag-model"
+
+	kb := makeKB(nil)
+	kb.AutoTagConfig = &types.AutoTagConfig{Enabled: true, ModelID: modelID}
+	require.NoError(t, db.Create(kb).Error)
+
+	count, err := repo.CountByModelID(ctx, 1, modelID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestListModelUsages_KnowledgeBaseRespectsLimit(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewKnowledgeBaseRepository(db)
+	modelID := "shared-embed"
+
+	for i := 0; i < types.ModelUsageListLimit+3; i++ {
+		kb := makeKB(nil)
+		kb.Name = fmt.Sprintf("KB %03d", i)
+		kb.EmbeddingModelID = modelID
+		require.NoError(t, db.Create(kb).Error)
+	}
+
+	usages, err := repo.ListModelUsages(ctx, 1, modelID)
+	require.NoError(t, err)
+	require.Len(t, usages, types.ModelUsageListLimit)
+	assert.Equal(t, "KB 000", usages[0].Name)
+
+	count, err := repo.CountByModelID(ctx, 1, modelID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(types.ModelUsageListLimit+3), count)
+}
+
 func TestCountByModelID_CustomAgent(t *testing.T) {
 	ctx := context.Background()
 	db := setupModelUsageTestDB(t)
@@ -110,4 +200,89 @@ func TestCountByModelID_CustomAgent(t *testing.T) {
 	count, err = repo.CountByModelID(ctx, 1, modelID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
+}
+
+func TestListModelUsages_CustomAgent(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewCustomAgentRepository(db)
+	modelID := "all-agent-bindings"
+
+	allBindings := &types.CustomAgent{
+		ID:       uuid.New().String(),
+		Name:     "Zulu agent",
+		TenantID: 1,
+		Config: types.CustomAgentConfig{
+			ModelID:                modelID,
+			RerankModelID:          modelID,
+			VLMModelID:             modelID,
+			ASRModelID:             modelID,
+			QueryUnderstandModelID: modelID,
+			QuestionSuggestions: &types.QuestionSuggestionConfig{
+				FollowUps: types.FollowUpSuggestionConfig{ModelID: modelID},
+			},
+		},
+	}
+	require.NoError(t, repo.CreateAgent(ctx, allBindings))
+
+	vlmOnly := &types.CustomAgent{
+		ID:       uuid.New().String(),
+		Name:     "Alpha agent",
+		TenantID: 1,
+		Config:   types.CustomAgentConfig{VLMModelID: modelID},
+	}
+	require.NoError(t, repo.CreateAgent(ctx, vlmOnly))
+
+	otherTenant := &types.CustomAgent{
+		ID: uuid.New().String(), Name: "Other tenant", TenantID: 2,
+		Config: types.CustomAgentConfig{ModelID: modelID},
+	}
+	require.NoError(t, repo.CreateAgent(ctx, otherTenant))
+
+	deleted := &types.CustomAgent{
+		ID: uuid.New().String(), Name: "Deleted agent", TenantID: 1,
+		Config: types.CustomAgentConfig{ModelID: modelID},
+	}
+	require.NoError(t, repo.CreateAgent(ctx, deleted))
+	require.NoError(t, repo.DeleteAgent(ctx, deleted.ID, deleted.TenantID))
+
+	usages, err := repo.ListModelUsages(ctx, 1, modelID)
+	require.NoError(t, err)
+	require.Len(t, usages, 2)
+	assert.Equal(t, "Alpha agent", usages[0].Name)
+	assert.Equal(t, []types.ModelUsageBinding{types.ModelUsageBindingVLMModel}, usages[0].Bindings)
+	assert.Equal(t, "Zulu agent", usages[1].Name)
+	assert.Equal(t, []types.ModelUsageBinding{
+		types.ModelUsageBindingChatModel,
+		types.ModelUsageBindingRerankModel,
+		types.ModelUsageBindingVLMModel,
+		types.ModelUsageBindingASRModel,
+		types.ModelUsageBindingQueryUnderstandModel,
+		types.ModelUsageBindingFollowUpModel,
+	}, usages[1].Bindings)
+}
+
+func TestCustomAgentSandboxConfigReferences(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewCustomAgentRepository(db)
+	configID := "sandbox-cfg-1"
+
+	require.NoError(t, db.Exec(
+		`INSERT INTO custom_agents (id, name, tenant_id, config) VALUES
+			(?, ?, ?, ?),
+			(?, ?, ?, ?),
+			(?, ?, ?, ?)`,
+		uuid.New().String(), "analysis-agent", 1, `{"sandbox_config_id":"sandbox-cfg-1"}`,
+		uuid.New().String(), "other-agent", 1, `{"sandbox_config_id":"sandbox-cfg-2"}`,
+		uuid.New().String(), "other-tenant-agent", 2, `{"sandbox_config_id":"sandbox-cfg-1"}`,
+	).Error)
+
+	count, err := repo.CountBySandboxConfigID(ctx, 1, configID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	names, err := repo.ListNamesBySandboxConfigID(ctx, 1, configID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"analysis-agent"}, names)
 }

@@ -15,9 +15,13 @@ import (
 // BuildRetryArgv assembles the directly-executable retry argv for a
 // confirmation-gated command: head (e.g. []string{"weknora","kb","update",id})
 // followed by each *changed* flag named in allow (as "--name", "value") in
-// pflag's visit order, plus a trailing "-y". Flags not in allow — multi-value
-// or file-based ones where a precise single argv is impractical — are skipped;
-// the human reconstructs those. Replaces the per-command build*RetryCmd helpers.
+// pflag's visit order, plus a trailing "-y".
+//
+// Slice-typed flags (StringSlice / StringArray) expand to repeated
+// "--name", "value" pairs so the argv is re-executable by shells and agents.
+// Scalar flags use f.Value.String(). Flags not in allow are skipped (callers
+// still exclude secrets / stdin-only values such as --api-key-stdin).
+// Replaces the per-command build*RetryCmd helpers.
 func BuildRetryArgv(c *cobra.Command, head []string, allow ...string) []string {
 	allowed := make(map[string]struct{}, len(allow))
 	for _, a := range allow {
@@ -25,9 +29,18 @@ func BuildRetryArgv(c *cobra.Command, head []string, allow ...string) []string {
 	}
 	parts := append([]string{}, head...)
 	c.Flags().Visit(func(f *pflag.Flag) {
-		if _, ok := allowed[f.Name]; ok {
-			parts = append(parts, "--"+f.Name, f.Value.String())
+		if _, ok := allowed[f.Name]; !ok {
+			return
 		}
+		// Expand multi-value flags as repeated --flag value pairs so retry_argv
+		// is directly executable (pflag's String() returns "[a,b]", which is not).
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			for _, v := range sv.GetSlice() {
+				parts = append(parts, "--"+f.Name, v)
+			}
+			return
+		}
+		parts = append(parts, "--"+f.Name, f.Value.String())
 	})
 	return append(parts, "-y")
 }

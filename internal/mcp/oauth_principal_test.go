@@ -81,6 +81,36 @@ func (r *fakeOAuthRepo) DeleteTokenForPrincipal(
 	return nil
 }
 
+func (r *fakeOAuthRepo) TryAcquireTokenRefreshLease(
+	_ context.Context,
+	tenantID uint64,
+	principal types.Principal,
+	serviceID, leaseID string,
+	leaseUntil time.Time,
+) (bool, error) {
+	row := r.tokens[fakeOAuthKey(tenantID, principal, serviceID)]
+	if row == nil || (row.RefreshLeaseUntil != nil && row.RefreshLeaseUntil.After(time.Now())) {
+		return false, nil
+	}
+	row.RefreshLeaseID = leaseID
+	row.RefreshLeaseUntil = &leaseUntil
+	return true, nil
+}
+
+func (r *fakeOAuthRepo) ReleaseTokenRefreshLease(
+	_ context.Context,
+	tenantID uint64,
+	principal types.Principal,
+	serviceID, leaseID string,
+) error {
+	row := r.tokens[fakeOAuthKey(tenantID, principal, serviceID)]
+	if row != nil && row.RefreshLeaseID == leaseID {
+		row.RefreshLeaseID = ""
+		row.RefreshLeaseUntil = nil
+	}
+	return nil
+}
+
 func TestDBTokenStoreUsesPrincipal(t *testing.T) {
 	repo := newFakeOAuthRepo()
 	principal := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:external-42"}
@@ -106,6 +136,24 @@ func TestDBTokenStoreUsesPrincipal(t *testing.T) {
 	require.Equal(t, "access", token.AccessToken)
 	require.Equal(t, "refresh", token.RefreshToken)
 	require.Equal(t, expiresAt, token.ExpiresAt)
+}
+
+func TestManagedTokenStoreLeavesRefreshToOAuthRuntime(t *testing.T) {
+	repo := newFakeOAuthRepo()
+	principal := types.Principal{Type: types.PrincipalWebUser, ID: "user-1"}
+	store := newManagedTokenStore(repo, 7, principal, "svc-1")
+	require.NoError(t, store.SaveToken(context.Background(), &transport.Token{
+		AccessToken:  "access",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(-time.Minute),
+	}))
+
+	token, err := store.GetToken(context.Background())
+	require.NoError(t, err)
+	require.True(t, token.ExpiresAt.IsZero(), "mcp-go must not race WeKnora's coordinated refresh")
+	row, err := repo.GetTokenForPrincipal(context.Background(), 7, principal, "svc-1")
+	require.NoError(t, err)
+	require.False(t, row.ExpiresAt.IsZero(), "the database must retain the real expiry for preflight checks")
 }
 
 func TestOAuthCacheKeyUsesPrincipalForOAuthServices(t *testing.T) {

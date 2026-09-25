@@ -76,6 +76,7 @@ type Span struct {
 	ParentSpanID string
 	Name         string
 	Kind         string
+	Status       string
 	StartedAt    time.Time
 }
 
@@ -279,6 +280,7 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 		SpanID:      rootID,
 		Name:        "knowledge_processing",
 		Kind:        types.SpanKindRoot,
+		Status:      types.SpanStatusRunning,
 		StartedAt:   now,
 	}, attempt, nil
 }
@@ -309,8 +311,8 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 		return nil
 	}
 	var (
-		rootID    string
-		existing  *types.KnowledgeProcessingSpan
+		rootID   string
+		existing *types.KnowledgeProcessingSpan
 	)
 	for i := range rows {
 		r := rows[i]
@@ -365,6 +367,7 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 			ParentSpanID: existing.ParentSpanID,
 			Name:         existing.Name,
 			Kind:         existing.Kind,
+			Status:       types.SpanStatusRunning,
 			StartedAt:    now,
 		}
 	}
@@ -394,6 +397,7 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 		ParentSpanID: rootID,
 		Name:         stage,
 		Kind:         types.SpanKindStage,
+		Status:       types.SpanStatusRunning,
 		StartedAt:    now,
 	}
 }
@@ -441,6 +445,7 @@ func (t *spanTracker) BeginSubSpan(ctx context.Context, parent *Span, name, kind
 		ParentSpanID: parent.SpanID,
 		Name:         name,
 		Kind:         kind,
+		Status:       types.SpanStatusRunning,
 		StartedAt:    now,
 	}
 }
@@ -578,6 +583,7 @@ func (t *spanTracker) LookupStage(ctx context.Context, knowledgeID string, attem
 			ParentSpanID: r.ParentSpanID,
 			Name:         r.Name,
 			Kind:         r.Kind,
+			Status:       r.Status,
 			StartedAt:    started,
 		}
 	}
@@ -611,6 +617,7 @@ func (t *spanTracker) LookupSpanByName(ctx context.Context, knowledgeID string, 
 			ParentSpanID: r.ParentSpanID,
 			Name:         r.Name,
 			Kind:         r.Kind,
+			Status:       r.Status,
 			StartedAt:    started,
 		}
 	}

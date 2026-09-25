@@ -4,13 +4,25 @@
       <aside
         v-if="visible"
         class="chat-references-panel"
-        :class="{ 'is-overlay': useOverlay, 'is-embedded': embeddedMode }"
+        :class="{ 'is-overlay': useOverlay, 'is-embedded': embeddedMode, 'is-source': !!sourceTarget }"
+        :style="panelStyle"
         role="complementary"
         :aria-label="panelTitle"
       >
         <header class="chat-references-panel__header">
           <div class="chat-references-panel__heading">
-            <h3 class="chat-references-panel__title">
+            <button
+              v-if="sourceTarget"
+              type="button"
+              class="chat-references-panel__back"
+              :aria-label="t('chat.referenceSourceBack')"
+              @click="backToList"
+            >
+              <t-icon name="chevron-left" size="16px" />
+              <span>{{ t('chat.referenceSourceBack') }}</span>
+              <span v-if="totalCount" class="chat-references-panel__count"> · {{ totalCount }}</span>
+            </button>
+            <h3 v-else class="chat-references-panel__title">
               {{ panelTitle }}<span v-if="totalCount" class="chat-references-panel__count"> · {{ totalCount }}</span>
             </h3>
           </div>
@@ -20,11 +32,19 @@
             :aria-label="t('common.close')"
             @click="close"
           >
-            <t-icon name="close" size="20px" />
+            <t-icon name="close" size="16px" />
           </button>
         </header>
 
-        <div ref="listElement" class="chat-references-panel__body">
+        <ChatReferenceSourceView
+          v-if="sourceTarget"
+          class="chat-references-panel__source"
+          :target="sourceTarget"
+          :active="visible"
+          @unavailable="onSourceUnavailable"
+        />
+
+        <div v-else ref="listElement" class="chat-references-panel__body">
           <div v-if="sections.length === 0" class="chat-references-panel__empty">
             {{ t('chat.referencesDrawerEmpty') }}
           </div>
@@ -33,6 +53,7 @@
             v-for="section in sections"
             :key="section.id"
             class="chat-references-panel__section"
+            :class="{ 'chat-references-panel__section--documents': section.id === 'documents' }"
           >
             <h4 v-if="sections.length > 1" class="chat-references-panel__section-title">
               {{ sectionTitle(section.id) }}
@@ -66,10 +87,20 @@
               >
                 <template v-if="item.kind === 'document'">
                   <div class="reference-item__document">
-                    <t-icon name="file" class="reference-item__doc-icon" />
+                    <ArtifactFileIcon :file-name="item.fileName || item.title" />
                     <div class="reference-item__document-main">
                       <div class="reference-item__title-row">
-                        <h5 class="reference-item__title">{{ item.title }}</h5>
+                        <h5 class="reference-item__title" :title="item.title">{{ item.title }}</h5>
+                        <button
+                          v-if="canOpenSource(item)"
+                          type="button"
+                          class="reference-item__open"
+                          :title="t('chat.referenceSourceView')"
+                          :aria-label="t('chat.referenceSourceView')"
+                          @click.stop="openItemSource(item)"
+                        >
+                          <t-icon name="file-search" size="14px" />
+                        </button>
                         <a
                           v-if="item.knowledgeBaseId && !embeddedMode"
                           class="reference-item__open"
@@ -110,7 +141,7 @@
 
                   <h5 v-if="shouldShowItemTitle(item)" class="reference-item__title">{{ item.title }}</h5>
 
-                  <p v-if="item.snippet && !expandedKeys.has(item.key)" class="reference-item__snippet">
+                  <p v-if="item.kind !== 'tool' && item.snippet && !expandedKeys.has(item.key)" class="reference-item__snippet">
                     {{ formatReferenceSnippet(item.snippet) }}
                   </p>
                   <div v-if="item.kind === 'tool' && item.content" class="reference-item__content">
@@ -135,10 +166,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import { REFERENCES_PANEL_WIDTH, useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
+import ChatReferenceSourceView from '@/components/ChatReferenceSourceView.vue'
 import {
   buildReferenceSections,
   formatReferenceSnippet,
@@ -164,12 +197,61 @@ const panelEntered = ref(false)
 const visible = computed(() => drawer?.visible.value ?? false)
 const references = computed(() => drawer?.references.value ?? [])
 const highlight = computed(() => drawer?.highlight.value ?? null)
+// The embed has no access to original files, so it always lists sources.
+const sourceTarget = computed(() => (props.embeddedMode ? null : drawer?.source.value ?? null))
+
+const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
+const onViewportResize = () => {
+  viewportWidth.value = window.innerWidth
+}
+onMounted(() => window.addEventListener('resize', onViewportResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onViewportResize))
+
+// Reading an original document needs more room than the source list.
+const panelWidth = computed(() => {
+  if (!sourceTarget.value) return REFERENCES_PANEL_WIDTH
+  return Math.max(480, Math.min(780, Math.round(viewportWidth.value * 0.46)))
+})
+
+watchEffect(() => {
+  if (drawer) drawer.panelWidth.value = panelWidth.value
+})
 
 const useOverlay = computed(() => {
   if (props.embeddedMode) return true
-  if (typeof window === 'undefined') return false
-  return window.innerWidth < (props.overlayBreakpoint ?? 960)
+  return viewportWidth.value < (props.overlayBreakpoint ?? 960)
 })
+
+const panelStyle = computed(() => {
+  if (!sourceTarget.value) return undefined
+  return { width: useOverlay.value ? 'min(760px, 100vw)' : `${panelWidth.value}px` }
+})
+
+function canOpenSource(item: ReferenceListItem) {
+  return !props.embeddedMode && item.kind === 'document' && !!item.knowledgeId && !!item.chunkId
+}
+
+function openItemSource(item: ReferenceListItem) {
+  if (!drawer || !item.knowledgeId || !item.chunkId) return
+  drawer.openSource({
+    chunkId: item.sourceChunkId || item.chunkId,
+    knowledgeId: item.knowledgeId,
+    knowledgeBaseId: item.knowledgeBaseId,
+    title: item.title,
+    fileName: item.fileName,
+  })
+}
+
+function backToList() {
+  drawer?.closeSource()
+  void nextTick(() => scrollToHighlight())
+}
+
+function onSourceUnavailable() {
+  // No original file to show (manual entry, FAQ, deleted file): fall back
+  // to the list with the cited card highlighted.
+  backToList()
+}
 
 const sections = computed(() => buildReferenceSections(references.value))
 const totalCount = computed(() => sections.value.reduce((sum, section) => sum + section.items.length, 0))
@@ -352,12 +434,40 @@ watch(visible, (open) => {
   }
 }
 
+.chat-references-panel__source {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-references-panel__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 6px 4px 2px;
+  border: 0;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+}
+
 .chat-references-panel__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px 16px 12px;
+  height: var(--app-chat-header-height);
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0 12px;
   border-bottom: 1px solid var(--td-component-stroke);
 }
 
@@ -370,10 +480,13 @@ watch(visible, (open) => {
 
 .chat-references-panel__title {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-secondary);
-  line-height: 1.4;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-references-panel__count {
@@ -385,19 +498,15 @@ watch(visible, (open) => {
   border: 0;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s ease, color 0.15s ease;
-
-  :deep(.t-icon) {
-    font-size: 20px;
-  }
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: color-mix(in srgb, var(--td-text-color-primary) 8%, var(--td-bg-color-secondarycontainer));
@@ -415,7 +524,7 @@ watch(visible, (open) => {
   padding: 24px 8px;
   text-align: center;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .chat-references-panel__section {
@@ -428,10 +537,15 @@ watch(visible, (open) => {
   margin-top: 16px;
 }
 
+.chat-references-panel__section--documents {
+  gap: 0;
+  padding-top: var(--app-space-2);
+}
+
 .chat-references-panel__section-title {
   margin: 0 0 8px;
   padding: 0 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
   text-transform: uppercase;
@@ -439,8 +553,8 @@ watch(visible, (open) => {
 }
 
 .reference-item {
-  border-radius: 12px;
-  transition: background-color 0.15s ease;
+  border-radius: var(--app-radius-xl);
+  transition: background-color var(--app-motion-fast) ease;
 
   &:hover:not(.is-highlighted) {
     background: color-mix(in srgb, var(--td-text-color-primary) 4%, transparent);
@@ -464,17 +578,49 @@ watch(visible, (open) => {
 
 .reference-item__document {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: var(--app-space-3);
   min-width: 0;
 }
 
-.reference-item__doc-icon {
-  flex-shrink: 0;
-  width: 18px;
-  margin-top: 3px;
-  font-size: 16px;
-  color: var(--td-text-color-primary);
+.reference-item--document {
+  border-radius: var(--app-radius-md);
+
+  &:hover:not(.is-highlighted) {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  .reference-item__body {
+    padding: 10px var(--app-space-2);
+    border-radius: inherit;
+
+    &:focus-visible {
+      outline: 2px solid var(--td-text-color-secondary);
+      outline-offset: -2px;
+    }
+  }
+
+  .reference-item__title {
+    display: block;
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .reference-item__snippet {
+    display: block;
+    margin-top: 2px;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-sm);
+    line-height: 1.3;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  &:has(.reference-item__content) .reference-item__document {
+    align-items: flex-start;
+  }
 }
 
 .reference-item__document-main {
@@ -494,14 +640,14 @@ watch(visible, (open) => {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   object-fit: cover;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
 }
 
 .reference-item__domain {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.35;
   color: var(--td-text-color-placeholder);
   overflow: hidden;
@@ -520,7 +666,7 @@ watch(visible, (open) => {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
@@ -534,13 +680,18 @@ watch(visible, (open) => {
 .reference-item__open {
   flex-shrink: 0;
   margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
   color: var(--td-text-color-placeholder);
   line-height: 1;
   opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 }
 
 .reference-item:hover .reference-item__open,
+.reference-item:focus-within .reference-item__open,
 .reference-item.is-highlighted .reference-item__open {
   opacity: 1;
 }
@@ -551,7 +702,7 @@ watch(visible, (open) => {
 
 .reference-item__snippet {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   display: -webkit-box;
@@ -562,7 +713,7 @@ watch(visible, (open) => {
 
 .reference-item__content {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
   white-space: pre-wrap;
@@ -594,7 +745,7 @@ watch(visible, (open) => {
 }
 
 .references-backdrop-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity var(--app-motion-slow) ease;
 }
 
 .references-backdrop-enter-from,

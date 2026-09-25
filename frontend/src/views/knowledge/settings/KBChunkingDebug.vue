@@ -224,6 +224,9 @@ interface Props {
     chunkSize: number
     chunkOverlap: number
     separators: string[]
+    enableParentChild: boolean
+    parentChunkSize: number
+    childChunkSize: number
     strategy?: string
     tokenLimit?: number
     languages?: string[]
@@ -285,6 +288,9 @@ const runPreview = async () => {
         chunk_size: props.config.chunkSize,
         chunk_overlap: props.config.chunkOverlap,
         separators: props.config.separators,
+        enable_parent_child: props.config.enableParentChild,
+        parent_chunk_size: props.config.parentChunkSize,
+        child_chunk_size: props.config.childChunkSize,
         strategy: props.config.strategy ?? '',
         token_limit: props.config.tokenLimit ?? 0,
         languages: props.config.languages ?? []
@@ -404,7 +410,7 @@ const tierTheme = (tier: StrategyTier) => {
 }
 
 .section-title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
@@ -416,7 +422,7 @@ const tierTheme = (tier: StrategyTier) => {
   flex-wrap: wrap;
 
   .presets-label {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     margin-right: 4px;
   }
@@ -424,7 +430,7 @@ const tierTheme = (tier: StrategyTier) => {
   .preset-chip {
     --td-comp-paddinglr-s: 8px;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
 
     &:hover {
       color: var(--td-brand-color);
@@ -450,8 +456,8 @@ const tierTheme = (tier: StrategyTier) => {
   gap: 10px;
   padding: 12px 14px;
   background: var(--td-bg-color-container-hover);
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
 }
 
@@ -461,14 +467,14 @@ const tierTheme = (tier: StrategyTier) => {
   gap: 10px;
   padding: 12px 14px;
   background: var(--td-error-color-light);
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-md);
   color: var(--td-error-color);
 
   .error-icon {
     flex-shrink: 0;
     margin-top: 2px;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 
   strong {
@@ -497,7 +503,7 @@ const tierTheme = (tier: StrategyTier) => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .result-label {
@@ -514,7 +520,7 @@ const tierTheme = (tier: StrategyTier) => {
 
 .fallback-warning {
   color: var(--td-warning-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .profile-grid {
@@ -524,7 +530,7 @@ const tierTheme = (tier: StrategyTier) => {
   margin-bottom: 16px;
   background: var(--td-component-stroke);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   overflow: hidden;
 }
 
@@ -535,7 +541,7 @@ const tierTheme = (tier: StrategyTier) => {
 }
 
 .cell-value {
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-primary);
@@ -544,7 +550,7 @@ const tierTheme = (tier: StrategyTier) => {
 
 .cell-label {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
 }
 
@@ -556,15 +562,15 @@ const tierTheme = (tier: StrategyTier) => {
   margin-bottom: 12px;
   padding: 10px 14px;
   background: var(--td-bg-color-container-hover);
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   font-variant-numeric: tabular-nums;
 
   .stats-count strong {
     margin-right: 4px;
     color: var(--td-text-color-primary);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
   }
 
@@ -576,7 +582,7 @@ const tierTheme = (tier: StrategyTier) => {
 .truncation-hint {
   margin-left: auto;
   color: var(--td-warning-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .chunks-list {
@@ -590,10 +596,10 @@ const tierTheme = (tier: StrategyTier) => {
 
 .chunk-card {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
   overflow: hidden;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
 
   &.expanded {
     border-color: var(--td-brand-color-light-active);
@@ -611,7 +617,7 @@ const tierTheme = (tier: StrategyTier) => {
   background: var(--td-bg-color-container-hover);
   border: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   text-align: left;
 
@@ -646,7 +652,7 @@ const tierTheme = (tier: StrategyTier) => {
 .chunk-pos {
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-family: var(--td-font-family-mono, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
+  font-family: var(--td-font-family-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -657,9 +663,9 @@ const tierTheme = (tier: StrategyTier) => {
   padding: 2px 8px;
   background: var(--td-brand-color-light);
   color: var(--td-brand-color);
-  border-radius: 10px;
-  font-size: 11px;
-  font-family: var(--td-font-family-mono, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
+  border-radius: var(--app-radius-lg);
+  font-size: var(--app-text-xs);
+  font-family: var(--td-font-family-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -668,9 +674,9 @@ const tierTheme = (tier: StrategyTier) => {
 .chunk-toggle {
   margin-left: auto;
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   color: var(--td-text-color-secondary);
-  transition: transform 0.15s ease;
+  transition: transform var(--app-motion-fast) ease;
 
   &.open {
     transform: rotate(180deg);
@@ -690,7 +696,7 @@ const tierTheme = (tier: StrategyTier) => {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--td-text-color-primary);
-  font-family: var(--td-font-family-mono, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
+  font-family: var(--td-font-family-mono);
 }
 
 // Collapsed preview: clamp the visible lines so each card stays compact, but

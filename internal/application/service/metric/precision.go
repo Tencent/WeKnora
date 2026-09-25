@@ -21,11 +21,11 @@ func (r *PrecisionMetric) Compute(metricInput *types.MetricInput) float64 {
 	// Convert ground truth to sets for efficient lookup
 	gtSets := SliceMap(gts, ToSet)
 	// Precision = retrieved items that are in ground truth / total retrieved items
-	// In the test cases, ground truth is a list of sets. 
+	// In the test cases, ground truth is a list of sets.
 	// We compute precision per ground truth set, and average them.
 	// But actually, precision is typically |retrieved ∩ relevant| / |retrieved|.
 	// Let's sum the precisions for each ground truth set and average them.
-	
+
 	if len(gts) == 0 {
 		return 0.0
 	}

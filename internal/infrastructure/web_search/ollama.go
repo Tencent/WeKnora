@@ -35,8 +35,9 @@ func NewOllamaProvider(params types.WebSearchProviderParameters) (interfaces.Web
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Ollama provider")
 	}
-	client := &http.Client{
-		Timeout: defaultOllamaTimeout,
+	client, err := NewSearchHTTPClient(defaultOllamaTimeout, params.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("create Ollama HTTP client: %w", err)
 	}
 	return &OllamaProvider{
 		client:  client,

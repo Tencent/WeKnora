@@ -79,3 +79,46 @@ func TestMCPOAuthRepositoryLegacyUserTokenUsesWebPrincipal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "legacy-token", token.AccessToken)
 }
+
+func TestMCPOAuthRepositoryRefreshLeaseHasSingleOwner(t *testing.T) {
+	repo := newMCPOAuthTestRepo(t)
+	ctx := context.Background()
+	principal := types.Principal{Type: types.PrincipalWebUser, ID: "u1"}
+	require.NoError(t, repo.SaveTokenForPrincipal(ctx, &types.MCPOAuthToken{
+		TenantID:      7,
+		UserID:        principal.StorageID(),
+		PrincipalType: principal.Type,
+		PrincipalID:   principal.ID,
+		ServiceID:     "svc1",
+		AccessToken:   "access",
+		RefreshToken:  "refresh",
+		ExpiresAt:     time.Now().Add(-time.Minute),
+	}))
+
+	first, err := repo.TryAcquireTokenRefreshLease(
+		ctx, 7, principal, "svc1", "lease-1", time.Now().Add(time.Minute),
+	)
+	require.NoError(t, err)
+	require.True(t, first)
+
+	second, err := repo.TryAcquireTokenRefreshLease(
+		ctx, 7, principal, "svc1", "lease-2", time.Now().Add(time.Minute),
+	)
+	require.NoError(t, err)
+	require.False(t, second)
+
+	// A non-owner cannot release the current owner's lease.
+	require.NoError(t, repo.ReleaseTokenRefreshLease(ctx, 7, principal, "svc1", "lease-2"))
+	second, err = repo.TryAcquireTokenRefreshLease(
+		ctx, 7, principal, "svc1", "lease-2", time.Now().Add(time.Minute),
+	)
+	require.NoError(t, err)
+	require.False(t, second)
+
+	require.NoError(t, repo.ReleaseTokenRefreshLease(ctx, 7, principal, "svc1", "lease-1"))
+	second, err = repo.TryAcquireTokenRefreshLease(
+		ctx, 7, principal, "svc1", "lease-2", time.Now().Add(time.Minute),
+	)
+	require.NoError(t, err)
+	require.True(t, second)
+}

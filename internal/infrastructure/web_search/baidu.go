@@ -39,8 +39,9 @@ func NewBaiduProvider(params types.WebSearchProviderParameters) (interfaces.WebS
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Baidu provider")
 	}
-	client := &http.Client{
-		Timeout: defaultBaiduTimeout,
+	client, err := NewSearchHTTPClient(defaultBaiduTimeout, params.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("create Baidu HTTP client: %w", err)
 	}
 	return &BaiduProvider{
 		client:  client,

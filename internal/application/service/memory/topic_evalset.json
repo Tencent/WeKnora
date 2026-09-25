@@ -1,0 +1,102 @@
+{
+  "description": "Whether two topic labels name the same subject. Merging is the decision that cannot be reviewed by reading the prompt: too strict and one subject spreads across rows that never reach the promotion threshold, too loose and every specific question in a domain collapses into one useless bucket. These are the pairs that mark the boundary. Every example here is invented — none of it comes from a real workspace, and none of it should.",
+  "cases": [
+    {
+      "name": "rephrasing",
+      "tracked": "门店排班管理",
+      "incoming": "店员班次安排",
+      "same": true,
+      "why": "两个说法指的是同一件事，只是用词不同。词面几乎不重叠，只有模型层能判。"
+    },
+    {
+      "name": "elaboration",
+      "tracked": "连锁门店排班管理",
+      "incoming": "门店排班管理",
+      "same": true,
+      "why": "一方比另一方少一个限定词，说的仍是同一件事。"
+    },
+    {
+      "name": "harmless qualifier",
+      "tracked": "订单接口限流",
+      "incoming": "订单接口限流问题",
+      "same": true,
+      "why": "「问题」不改变主题本身。"
+    },
+    {
+      "name": "abbreviation",
+      "tracked": "CI 流水线",
+      "incoming": "持续集成流水线",
+      "same": true,
+      "why": "缩写和全称是同一件事，词面上却几乎没有重叠。"
+    },
+    {
+      "name": "specific lookup inside a broad subject",
+      "tracked": "仓库入库流程",
+      "incoming": "三号仓库上月入库单号",
+      "same": false,
+      "why": "确实属于同一领域，但这是一次具体查询，不是同一个长期关注点。把它折进去会让关注面变成一个什么都装的桶。"
+    },
+    {
+      "name": "different question in the same domain",
+      "tracked": "订单接口限流",
+      "incoming": "订单接口鉴权",
+      "same": false,
+      "why": "同一个接口的两件不同的事。"
+    },
+    {
+      "name": "hyponym",
+      "tracked": "后端架构选型",
+      "incoming": "订单接口限流调优",
+      "same": false,
+      "why": "下位概念不是同一件事，否则一个宽泛主题会吸收整个领域。"
+    },
+    {
+      "name": "two aspects of one thing",
+      "tracked": "年度审计资料准备",
+      "incoming": "年度审计问询回复",
+      "same": false,
+      "why": "同一件事的两个不同阶段，关心的是不同的东西。线上真实出现过这类被合并。"
+    },
+    {
+      "name": "broad subject versus a lookup in it",
+      "tracked": "年会组织",
+      "incoming": "年会报名信息查询",
+      "same": false,
+      "why": "组织一场活动和查询谁报了名，是两件不同的事。线上真实出现过这类被合并。"
+    },
+    {
+      "name": "unrelated",
+      "tracked": "门店排班管理",
+      "incoming": "订单接口限流",
+      "same": false,
+      "why": "毫无关系，任何一层都不该合并。"
+    },
+    {
+      "name": "same word different field",
+      "tracked": "图像分割模型调参",
+      "incoming": "数据库分库分表",
+      "same": false,
+      "why": "共享一个「分」字不构成任何关系。"
+    }
+  ],
+  "granularity": {
+    "note": "主题必须是能复现的「领域」，不是单个问题。标签里带上人名、编号、日期、版本、数量，就只能匹配它自己：计数一次之后永远停在 1，阈值形同虚设。",
+    "cases": [
+      {
+        "question": "三号仓库上个月的入库单号有哪些？",
+        "good": "仓库入库单查询",
+        "bad": "三号仓库2026年3月入库单号查询记录"
+      },
+      {
+        "question": "v2.3 版本 orders 接口的分页参数默认值是多少？",
+        "good": "订单接口用法",
+        "bad": "v2.3版本orders接口分页参数默认值查询"
+      },
+      {
+        "question": "结算平台的商务怎么联系？",
+        "good": "结算平台",
+        "bad": "结算平台商务联系方式查询记录"
+      }
+    ]
+  }
+}

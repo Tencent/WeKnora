@@ -1,16 +1,13 @@
 import { ref, reactive } from "vue";
 import { storeToRefs } from "pinia";
-import { formatStringDate, kbFileTypeVerification } from "../utils/index";
-import { MessagePlugin } from "tdesign-vue-next";
+import { formatStringDate } from "../utils/index";
 import {
-  uploadKnowledgeFile,
   listKnowledgeFiles,
   getKnowledgeDetails,
-  delKnowledgeDetails,
   getKnowledgeDetailsCon,
+  type ListKnowledgeFilesParams,
 } from "@/api/knowledge-base/index";
 import { knowledgeStore } from "@/stores/knowledge";
-import { useUIStore } from "@/stores/ui";
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
@@ -34,23 +31,16 @@ export default function (knowledgeBaseId?: string) {
     summary_status: "",
     parse_status: "",
     error_message: "",
+	custom_metadata: {} as Record<string, unknown>,
     chunkLoading: false,
     chunkLoadError: "",
     tags: [] as Array<{ id: string; name: string; color?: string }>,
   });
   let knowledgeListGeneration = 0;
+  let chunkRequestGeneration = 0;
+  let activeKnowledgeId = '';
   const getKnowled = (
-    query: {
-      page: number;
-      page_size: number;
-      tag_ids?: string;
-      keyword?: string;
-      file_type?: string;
-      parse_status?: string;
-      source?: string;
-      start_time?: string;
-      end_time?: string;
-    } = { page: 1, page_size: 35 },
+    query: ListKnowledgeFilesParams = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
     const targetKbId = kbId || knowledgeBaseId;
@@ -75,6 +65,7 @@ export default function (knowledgeBaseId?: string) {
         original_file_name: item.file_name,
         display_name: displayName,
         file_name: displayName,
+        folder_path: item.folder_path || '',
         updated_at: formatStringDate(new Date(item.updated_at)),
         isMore: false,
         file_type: fileTypeSource ? String(fileTypeSource).toLocaleUpperCase() : '',
@@ -90,38 +81,6 @@ export default function (knowledgeBaseId?: string) {
       })
       .catch(() => {});
   };
-  const delKnowledge = (index: number, item: any, onSuccess?: () => void) => {
-    cardList.value[index].isMore = false;
-    moreIndex.value = -1;
-    return delKnowledgeDetails(item.id)
-      .then(async (result: any) => {
-        if (result.success) {
-          MessagePlugin.info(t('knowledgeBase.deleteSuccess'));
-          if (onSuccess) {
-            onSuccess();
-          } else {
-            // 后端已将单条删除放入异步队列，立即拉列表仍可能包含待删项；
-            // 短轮询直到列表与后端一致或超时。
-            const maxPolls = 30;
-            const delayMs = 400;
-            for (let i = 0; i < maxPolls; i++) {
-              await getKnowled();
-              const stillPresent = (cardList.value || []).some((c: any) => c.id === item.id);
-              if (!stillPresent) break;
-              await new Promise<void>((r) => setTimeout(r, delayMs));
-            }
-          }
-          return true;
-        } else {
-          MessagePlugin.error(t('knowledgeBase.deleteFailed'));
-          return false;
-        }
-      })
-      .catch(() => {
-        MessagePlugin.error(t('knowledgeBase.deleteFailed'));
-        return false;
-      });
-  };
   const openMore = (index: number) => {
     moreIndex.value = index;
   };
@@ -130,52 +89,9 @@ export default function (knowledgeBaseId?: string) {
       moreIndex.value = -1;
     }
   };
-  const requestMethod = (file: any, uploadInput: any) => {
-    if (!(file instanceof File) || !uploadInput) {
-      MessagePlugin.error(t('error.invalidFileType'));
-      return;
-    }
-    
-    if (kbFileTypeVerification(file)) {
-      return;
-    }
-    
-    // 获取当前知识库ID
-    let currentKbId: string | undefined = (route.params as any)?.kbId as string;
-    if (!currentKbId && typeof window !== 'undefined') {
-      const match = window.location.pathname.match(/knowledge-bases\/([^/]+)/);
-      if (match?.[1]) currentKbId = match[1];
-    }
-    if (!currentKbId) {
-      currentKbId = knowledgeBaseId;
-    }
-    if (!currentKbId) {
-      MessagePlugin.error(t('error.missingKbId'));
-      return;
-    }
-    
-    // 获取当前选中的标签 ID
-    const uiStore = useUIStore();
-    const tagIdsToUpload = uiStore.selectedTagIds.length > 0 ? [...uiStore.selectedTagIds] : undefined;
-
-    uploadKnowledgeFile(currentKbId, { file, tag_ids: tagIdsToUpload })
-      .then((result: any) => {
-        if (result.success) {
-          MessagePlugin.info(t('knowledgeBase.uploadSuccess'));
-          getKnowled({ page: 1, page_size: 35 }, currentKbId);
-        } else {
-          const errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
-          MessagePlugin.error(result.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
-        }
-        uploadInput.value.value = "";
-      })
-      .catch((err: any) => {
-        const errorMessage = err.error?.message || err.message || t('knowledgeBase.uploadFailed');
-        MessagePlugin.error(err.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
-        uploadInput.value.value = "";
-      });
-  };
   const getCardDetails = (item: any) => {
+    activeKnowledgeId = item.id;
+    chunkRequestGeneration++;
     Object.assign(details, {
       title: "",
       time: "",
@@ -189,6 +105,7 @@ export default function (knowledgeBaseId?: string) {
       summary_status: "",
       parse_status: "",
       error_message: "",
+	  custom_metadata: {},
       chunkLoadError: "",
       tags: item?.tags ? [...item.tags] : [],
     });
@@ -208,6 +125,7 @@ export default function (knowledgeBaseId?: string) {
             summary_status: data.summary_status || '',
             parse_status: data.parse_status || '',
             error_message: data.error_message || '',
+			custom_metadata: data.custom_metadata || {},
             tags: data.tags?.length ? data.tags : (item?.tags || []),
           });
         }
@@ -217,21 +135,22 @@ export default function (knowledgeBaseId?: string) {
   };
   
   const getfDetails = (id: string, page: number) => {
+    const requestGeneration = ++chunkRequestGeneration;
     details.chunkLoading = true;
     details.chunkLoadError = "";
     getKnowledgeDetailsCon(id, page)
       .then((result: any) => {
+        if (requestGeneration !== chunkRequestGeneration || activeKnowledgeId !== id) return;
         if (result.success && result.data) {
           const { data, total: totalResult } = result;
-          if (page === 1) {
-            details.md = data;
-          } else {
-            details.md.push(...data);
-          }
+          details.md = data;
           details.total = totalResult;
+        } else {
+          details.chunkLoadError = result?.message || result?.error?.message || t('knowledgeBase.chunkLoadFailed');
         }
       })
       .catch((err: any) => {
+        if (requestGeneration !== chunkRequestGeneration || activeKnowledgeId !== id) return;
         details.chunkLoadError = err?.message || t('knowledgeBase.chunkLoadFailed');
         console.error("[ChunkLoad] failed", {
           knowledgeId: id,
@@ -240,7 +159,9 @@ export default function (knowledgeBaseId?: string) {
         });
       })
       .finally(() => {
-        details.chunkLoading = false;
+        if (requestGeneration === chunkRequestGeneration) {
+          details.chunkLoading = false;
+        }
       });
   };
   return {
@@ -248,10 +169,8 @@ export default function (knowledgeBaseId?: string) {
     moreIndex,
     getKnowled,
     details,
-    delKnowledge,
     openMore,
     onVisibleChange,
-    requestMethod,
     getCardDetails,
     total,
     getfDetails,

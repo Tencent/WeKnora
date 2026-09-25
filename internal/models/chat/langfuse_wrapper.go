@@ -25,16 +25,13 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 		return l.inner.Chat(ctx, messages, opts)
 	}
 
+	purpose, prefixFingerprint := types.LLMCallMetadataFromContext(ctx)
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:            "chat.completion",
 		Model:           l.inner.GetModelName(),
 		Input:           buildLangfuseMessages(messages),
 		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata: map[string]interface{}{
-			"model_id":  l.inner.GetModelID(),
-			"streaming": false,
-			"has_tools": opts != nil && len(opts.Tools) > 0,
-		},
+		Metadata:        buildLangfuseChatMetadata(l.inner.GetModelID(), purpose, prefixFingerprint, false, opts),
 	})
 
 	resp, err := l.inner.Chat(genCtx, messages, opts)
@@ -57,16 +54,13 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		return l.inner.ChatStream(ctx, messages, opts)
 	}
 
+	purpose, prefixFingerprint := types.LLMCallMetadataFromContext(ctx)
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:            "chat.completion.stream",
 		Model:           l.inner.GetModelName(),
 		Input:           buildLangfuseMessages(messages),
 		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata: map[string]interface{}{
-			"model_id":  l.inner.GetModelID(),
-			"streaming": true,
-			"has_tools": opts != nil && len(opts.Tools) > 0,
-		},
+		Metadata:        buildLangfuseChatMetadata(l.inner.GetModelID(), purpose, prefixFingerprint, true, opts),
 	})
 
 	ch, err := l.inner.ChatStream(genCtx, messages, opts)
@@ -108,7 +102,11 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 				usage = resp.Usage
 			}
 			if len(resp.ToolCalls) > 0 {
-				toolCalls = resp.ToolCalls
+				// The downstream model-context registry decodes arguments in
+				// place before tool execution. Snapshot the provider payload so
+				// the generation observation remains the exact model output and
+				// cannot be changed through the shared slice backing array.
+				toolCalls = snapshotLangfuseToolCalls(resp.ToolCalls)
 			}
 			if resp.FinishReason != "" {
 				finishReason = resp.FinishReason
@@ -122,6 +120,52 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		gen.Finish(output, convertUsage(usage), nil)
 	}()
 	return wrapped, nil
+}
+
+func snapshotLangfuseToolCalls(toolCalls []types.LLMToolCall) []types.LLMToolCall {
+	return append([]types.LLMToolCall(nil), toolCalls...)
+}
+
+const (
+	langfuseDiscoverMCPTool = "discover_mcp_tools"
+	langfuseMCPCatalogRunes = 8000
+)
+
+func buildLangfuseChatMetadata(
+	modelID, purpose, prefixFingerprint string,
+	streaming bool,
+	opts *ChatOptions,
+) map[string]interface{} {
+	meta := map[string]interface{}{
+		"model_id":                  modelID,
+		"streaming":                 streaming,
+		"has_tools":                 opts != nil && len(opts.Tools) > 0,
+		"call_purpose":              purpose,
+		"prompt_prefix_fingerprint": prefixFingerprint,
+	}
+	if opts == nil || len(opts.Tools) == 0 {
+		return meta
+	}
+	names := make([]string, 0, len(opts.Tools))
+	for _, tool := range opts.Tools {
+		names = append(names, tool.Function.Name)
+		if tool.Function.Name == langfuseDiscoverMCPTool && tool.Function.Description != "" {
+			meta["mcp_catalog"] = truncateLangfuseText(tool.Function.Description, langfuseMCPCatalogRunes)
+		}
+	}
+	meta["tool_names"] = names
+	return meta
+}
+
+func truncateLangfuseText(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 func buildLangfuseMessages(messages []Message) []map[string]interface{} {
@@ -179,11 +223,8 @@ func buildLangfuseModelParams(opts *ChatOptions) map[string]interface{} {
 	if opts.TopP != 0 {
 		params["top_p"] = opts.TopP
 	}
-	if opts.MaxTokens > 0 {
-		params["max_tokens"] = opts.MaxTokens
-	}
-	if opts.MaxCompletionTokens > 0 {
-		params["max_completion_tokens"] = opts.MaxCompletionTokens
+	if budget := opts.CompletionBudget(); budget > 0 {
+		params["max_completion_tokens"] = budget
 	}
 	if opts.FrequencyPenalty != 0 {
 		params["frequency_penalty"] = opts.FrequencyPenalty
@@ -211,10 +252,13 @@ func convertUsage(u *types.TokenUsage) *langfuse.TokenUsage {
 		return nil
 	}
 	return &langfuse.TokenUsage{
-		Input:  u.PromptTokens,
-		Output: u.CompletionTokens,
-		Total:  u.TotalTokens,
-		Unit:   "TOKENS",
+		Input:      u.PromptTokens,
+		Output:     u.CompletionTokens,
+		Total:      u.TotalTokens,
+		CacheRead:  u.CacheReadTokens,
+		CacheWrite: u.CacheWriteTokens,
+		CacheMiss:  u.CacheMissTokens,
+		Unit:       "TOKENS",
 	}
 }
 

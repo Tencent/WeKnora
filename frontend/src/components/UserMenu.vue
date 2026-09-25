@@ -32,7 +32,9 @@
     <Transition name="dropdown">
       <div v-if="menuVisible" class="user-dropdown" @click.stop>
         <!-- 弹出菜单：账号（头像+昵称）／当前空间（名称+权限）；底部侧栏样式不改。 -->
-        <div v-if="userName" class="dropdown-user-header">
+        <div v-if="userName" class="dropdown-user-header is-clickable" role="button" tabindex="0"
+          @click="handleQuickNav('userprofile')" @keydown.enter.prevent="handleQuickNav('userprofile')"
+          @keydown.space.prevent="handleQuickNav('userprofile')">
           <div class="dropdown-user-avatar">
             <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
             <span v-else class="dropdown-user-avatar-placeholder">{{ userInitial }}</span>
@@ -47,6 +49,7 @@
                 </button>
               </t-tooltip>
             </div>
+            <span v-if="userEmail" class="dropdown-user-email">{{ userEmail }}</span>
           </div>
         </div>
 
@@ -70,38 +73,24 @@
             :title="$t('tenant.switcher.menuLabel')" />
         </div>
         <div class="menu-divider"></div>
-        <!-- QuickNav 入口与 Settings 的最低角色对齐：members/models/websearch/mcp/api
-             分别对应 viewer/viewer/admin/admin/owner（详情见 Settings.vue 的
-             SECTION_MIN_ROLE）。低角色用户看到这些入口点进去也只能看到
-             role-denied 兜底页，索性藏起来。 -->
-        <div v-if="canSeeQuickNav('members')" class="menu-item" @click="handleQuickNav('members')">
+        <!-- 账号与空间是头像菜单的核心上下文；基础设施类配置统一收进「全部设置」。 -->
+        <div class="menu-item" @click="handleQuickNav('general')">
+          <t-icon name="user" class="menu-icon" />
+          <span>{{ $t('general.personalSettings') }}</span>
+        </div>
+        <div v-if="!authStore.isLiteMode" class="menu-item" @click="handleQuickNav('tenant')">
+          <t-icon name="user-circle" class="menu-icon" />
+          <span>{{ $t('settings.workspaceSettings') }}</span>
+        </div>
+        <!-- “管理”类快捷入口只对真正具备写权限的人展示。只读名册和模型列表
+             仍可从「全部设置」进入，避免 viewer 看到名不副实的管理入口。 -->
+        <div v-if="canManageMembers" class="menu-item" @click="handleQuickNav('members')">
           <t-icon name="usergroup" class="menu-icon" />
           <span>{{ $t('tenantMember.title') }}</span>
         </div>
-        <div v-if="canSeeQuickNav('models')" class="menu-item" @click="handleQuickNav('models')">
+        <div v-if="canManageModels" class="menu-item" @click="handleQuickNav('models')">
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('websearch')" class="menu-item" @click="handleQuickNav('websearch')">
-          <svg width="16" height="16" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
-            class="menu-icon svg-icon">
-            <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-            <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
-              stroke-linecap="round" />
-            <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
-              stroke-linecap="round" />
-          </svg>
-          <span>{{ $t('settings.webSearchConfig') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('mcp')" class="menu-item" @click="handleQuickNav('mcp')">
-          <t-icon name="tools" class="menu-icon" />
-          <span>{{ $t('settings.mcpService') }}</span>
-        </div>
-        <div v-if="canSeeQuickNav('integration-api')" class="menu-item" @click="handleQuickNav('integration-api')">
-          <t-icon name="secured" class="menu-icon" />
-          <span>{{ $t('integrations.tabs.api') }}</span>
         </div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="handleSettings">
@@ -116,10 +105,19 @@
         -->
         <div v-if="authStore.isSystemAdmin" class="menu-item" @click="handleSystemAdmin">
           <t-icon name="server" class="menu-icon" />
-          <span>{{ $t('settings.system') }}</span>
+          <span>{{ $t('settings.navGroups.systemAdministration') }}</span>
         </div>
-        <!-- 切换空间入口在下拉「当前空间」区块 hover；此处仅为分隔线与菜单项。 -->
         <div class="menu-divider"></div>
+        <div class="menu-item" @click="openDocs">
+          <t-icon name="help-circle" class="menu-icon" />
+          <span class="menu-text-with-icon">
+            <span>{{ $t('general.helpAndDocs') }}</span>
+            <svg class="menu-external-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path fill="currentColor"
+                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
+            </svg>
+          </span>
+        </div>
         <div class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
           <t-icon name="logo-github" class="menu-icon" />
           <span class="menu-text-with-icon">
@@ -216,7 +214,8 @@ import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 import { openNewUserGuide } from '@/config/contextualGuides'
-
+import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
+import { docsUrl } from '@/utils/docsUrl'
 const { t } = useI18n()
 
 const router = useRouter()
@@ -247,20 +246,16 @@ const showTenantIdentityLine = computed(() => {
   return (authStore.memberships ?? []).length > 1
 })
 
-// 与 Settings.vue 的 SECTION_MIN_ROLE 同步；这里只挂 quickNav 直接跳转的
-// 那 4 项。改这张表前请同步 Settings.vue 的对照注释。
-const QUICKNAV_MIN_ROLE: Record<string, 'viewer' | 'contributor' | 'admin' | 'owner'> = {
-  members: 'viewer',
-  models: 'viewer',
-  websearch: 'admin',
-  mcp: 'admin',
-  'integration-api': 'owner',
-}
-const canSeeQuickNav = (key: string): boolean => {
-  if (authStore.canAccessAllTenants) return true
-  return authStore.hasRole(QUICKNAV_MIN_ROLE[key] ?? 'viewer')
-}
-
+// 快捷入口使用“管理能力”而不是页面最低可见角色：成员名册和模型列表允许
+// viewer 浏览，但头像菜单里的“管理”入口只服务实际能执行管理操作的角色。
+const canManageMembers = computed(() =>
+  authStore.canAccessAllTenants || authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members),
+)
+const canManageModels = computed(() =>
+  authStore.canAccessAllTenants ||
+  authStore.isSystemAdmin ||
+  authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models),
+)
 const menuRef = ref<HTMLElement>()
 const tenantMenuItemRef = ref<HTMLElement>()
 const menuVisible = ref(false)
@@ -293,18 +288,7 @@ const toggleMenu = () => {
 const handleQuickNav = (section: string) => {
   menuVisible.value = false
   uiStore.openSettings()
-  if (section === 'integration-api') {
-    router.push({ path: '/platform/settings', query: { section: 'integrations', tab: 'api' } })
-  } else {
-    router.push('/platform/settings')
-  }
-
-  // 延迟一下，确保设置页面已经渲染
-  setTimeout(() => {
-    // 触发设置页面切换到对应section
-    const event = new CustomEvent('settings-nav', { detail: { section } })
-    window.dispatchEvent(event)
-  }, 100)
+  router.push({ path: '/platform/settings', query: { section } })
 }
 
 // 打开设置
@@ -314,11 +298,9 @@ const handleSettings = () => {
   router.push('/platform/settings')
 }
 
-// Open the platform administration area inside the standard Settings
-// modal. The admin roster lives at the top of the global-settings
-// pane (as a tag-input row) so we route straight there; this is the
-// only system-admin section now. Gated by SYSTEM_ADMIN_SECTIONS in
-// Settings.vue.
+// Open the platform administration group inside the standard Settings
+// modal. Global settings is the group's landing page; task queues, platform
+// API keys and the audit log remain available beside it in the settings nav.
 const handleSystemAdmin = () => {
   menuVisible.value = false
   uiStore.openSettings('system-global')
@@ -510,6 +492,11 @@ const reopenGuide = () => {
   openNewUserGuide()
 }
 
+const openDocs = () => {
+  menuVisible.value = false
+  window.open(docsUrl('home'), '_blank')
+}
+
 // 打开 GitHub
 const openGithub = () => {
   menuVisible.value = false
@@ -631,9 +618,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 8px 6px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--app-motion-base);
   background: transparent;
 
   &:hover {
@@ -655,7 +642,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: width 0.2s ease, height 0.2s ease;
+  transition: width var(--app-motion-base) ease, height var(--app-motion-base) ease;
 
   img {
     width: 100%;
@@ -665,7 +652,7 @@ onUnmounted(() => {
 
   .avatar-placeholder {
     color: var(--td-text-color-anti);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 600;
     line-height: 1;
   }
@@ -681,7 +668,7 @@ onUnmounted(() => {
   justify-content: center;
 
   .user-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     white-space: nowrap;
@@ -690,7 +677,7 @@ onUnmounted(() => {
   }
 
   .user-email {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -698,7 +685,7 @@ onUnmounted(() => {
   }
 
   .user-tenant-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--td-text-color-primary);
@@ -714,7 +701,7 @@ onUnmounted(() => {
     gap: 4px;
     margin-top: 0;
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.35;
     color: var(--td-text-color-secondary);
 
@@ -743,10 +730,10 @@ onUnmounted(() => {
 }
 
 .dropdown-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   color: var(--td-text-color-secondary);
   flex-shrink: 0;
-  transition: transform 0.2s;
+  transition: transform var(--app-motion-base);
 }
 
 .user-dropdown {
@@ -757,7 +744,7 @@ onUnmounted(() => {
   right: -5px;
   margin-bottom: 6px;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
   border: 1px solid var(--td-component-stroke);
   overflow: hidden;
@@ -772,6 +759,17 @@ onUnmounted(() => {
   gap: 6px;
   padding: 9px 12px;
   min-width: 0;
+
+  &.is-clickable {
+    cursor: pointer;
+    transition: background-color var(--app-motion-fast) ease;
+
+    &:hover,
+    &:focus-visible {
+      background: var(--td-bg-color-container-hover);
+      outline: none;
+    }
+  }
 
   .dropdown-user-avatar {
     width: 24px;
@@ -793,7 +791,7 @@ onUnmounted(() => {
 
     .dropdown-user-avatar-placeholder {
       color: var(--td-text-color-anti);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       font-weight: 600;
       line-height: 1;
     }
@@ -818,10 +816,20 @@ onUnmounted(() => {
   .dropdown-user-name {
     flex: 1;
     min-width: 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dropdown-user-email {
+    min-width: 0;
+    font-size: var(--app-text-sm);
+    line-height: 1.35;
+    color: var(--td-text-color-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -837,11 +845,11 @@ onUnmounted(() => {
     margin: 0;
     padding: 0;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: transparent;
     color: var(--td-text-color-placeholder);
     cursor: pointer;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
     &:hover {
       background: var(--td-bg-color-container-hover);
@@ -858,11 +866,11 @@ onUnmounted(() => {
   padding: 9px 12px;
   border-top: 1px solid var(--td-component-stroke);
   background: transparent;
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
   min-width: 0;
 
   >.menu-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-secondary);
     flex-shrink: 0;
   }
@@ -889,7 +897,7 @@ onUnmounted(() => {
   }
 
   .dropdown-tenant-panel-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.35;
@@ -900,16 +908,16 @@ onUnmounted(() => {
 
   .dropdown-tenant-panel-trail {
     flex-shrink: 0;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-placeholder);
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
   }
 
   .dropdown-tenant-panel-role {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.35;
     color: var(--td-text-color-secondary);
     min-width: 0;
@@ -930,8 +938,8 @@ onUnmounted(() => {
   gap: 10px;
   padding: 9px 12px;
   cursor: pointer;
-  transition: all 0.2s;
-  font-size: 14px;
+  transition: all var(--app-motion-base);
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
 
   &:hover {
@@ -959,10 +967,10 @@ onUnmounted(() => {
     }
 
     .menu-chevron {
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       color: var(--td-text-color-placeholder);
       flex-shrink: 0;
-      transition: transform 0.15s;
+      transition: transform var(--app-motion-fast);
     }
 
     &.is-open {
@@ -975,7 +983,7 @@ onUnmounted(() => {
   }
 
   .menu-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-secondary);
 
     &.svg-icon {
@@ -990,7 +998,7 @@ onUnmounted(() => {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 15px;
+      font-size: var(--app-text-lg);
       line-height: 1;
       flex-shrink: 0;
       color: inherit;
@@ -1017,11 +1025,11 @@ onUnmounted(() => {
 
   .menu-new-badge {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     font-weight: 600;
     line-height: 1.2;
     padding: 2px 5px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: var(--td-brand-color-light);
     color: var(--td-brand-color);
     letter-spacing: 0.02em;
@@ -1037,7 +1045,7 @@ onUnmounted(() => {
     height: 16px;
     color: var(--td-text-color-disabled);
     flex-shrink: 0;
-    transition: color 0.2s ease;
+    transition: color var(--app-motion-base) ease;
     pointer-events: none;
   }
 
@@ -1061,7 +1069,7 @@ onUnmounted(() => {
 // 下拉动画
 .dropdown-enter-active,
 .dropdown-leave-active {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--app-motion-base) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .dropdown-enter-from,
@@ -1091,7 +1099,7 @@ onUnmounted(() => {
   flex-direction: column;
   background: var(--td-bg-color-container);
   border: 0.5px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
   // Pointer bridge so the user can slide off the menu item onto the panel
   // without hitting the gap and triggering mouseleave-hide.
@@ -1100,7 +1108,7 @@ onUnmounted(() => {
 
   .tenant-submenu-header {
     padding: 8px 12px 6px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 600;
     color: var(--td-text-color-secondary);
     border-bottom: 0.5px solid var(--td-component-stroke);
@@ -1116,9 +1124,9 @@ onUnmounted(() => {
     align-items: center;
     gap: 8px;
     padding: 7px 8px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background var(--app-motion-fast);
 
     &:hover {
       background: var(--td-bg-color-secondarycontainer);
@@ -1138,12 +1146,12 @@ onUnmounted(() => {
   .tenant-submenu-item-avatar {
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: var(--td-bg-color-secondarycontainer);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     color: var(--td-text-color-secondary);
     flex-shrink: 0;
@@ -1163,7 +1171,7 @@ onUnmounted(() => {
   }
 
   .tenant-submenu-item-name {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -1184,7 +1192,7 @@ onUnmounted(() => {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-placeholder);
 
     .tenant-submenu-item-role-icon {
@@ -1196,11 +1204,11 @@ onUnmounted(() => {
 
   .tenant-submenu-item-badge {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     font-weight: 600;
     line-height: 1.2;
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: var(--td-bg-color-component);
     color: var(--td-text-color-secondary);
   }
@@ -1232,7 +1240,7 @@ onUnmounted(() => {
   .tenant-submenu-empty {
     padding: 12px 10px;
     text-align: center;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 
@@ -1243,19 +1251,19 @@ onUnmounted(() => {
     padding: 8px 10px;
     margin: 3px 4px 5px;
     border-top: .5px solid var(--td-component-stroke);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
     color: var(--td-brand-color);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
-    transition: background 0.15s;
+    transition: background var(--app-motion-fast);
 
     &:hover {
-      background: rgba(7, 192, 95, 0.08);
+      background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     }
 
     .tenant-submenu-create-icon {
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       flex-shrink: 0;
     }
 
@@ -1264,7 +1272,7 @@ onUnmounted(() => {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 }

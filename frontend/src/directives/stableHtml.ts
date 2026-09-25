@@ -37,6 +37,13 @@ function morphImage(current: HTMLImageElement, next: HTMLImageElement): void {
     && current.naturalWidth > 1
     && (sameProtectedSource || sameIdentity || sameProtectedAlt);
 
+  if (sameProtectedSource && current.hasAttribute('data-protected-hidden')) {
+    // The authenticated loader keeps missing images addressable for the final
+    // retry. Do not reveal their 1px placeholder between streaming patches.
+    syncAttributes(current, next, new Set(['style', 'data-protected-hidden']));
+    return;
+  }
+
   if (keepDecodedImage) {
     // Never write the placeholder src (or loading flags) over an image Chrome
     // has already decoded. More importantly, leave this exact DOM node attached
@@ -53,6 +60,27 @@ function morphImage(current: HTMLImageElement, next: HTMLImageElement): void {
   syncAttributes(current, next);
 }
 
+function isMermaidCanvas(el: Element): boolean {
+  return el.classList.contains('chat-mermaid-block__canvas')
+    || (el.tagName === 'PRE' && el.classList.contains('mermaid'));
+}
+
+function mermaidCanvasHasSvg(el: Element): boolean {
+  return !!el.querySelector('svg');
+}
+
+function morphMermaidCanvas(current: Element, next: Element): void {
+  // Incoming HTML from marked still has mermaid source. Keep a diagram that
+  // was already painted so typewriter / stream ticks cannot flash it back
+  // into a fenced code block.
+  if (mermaidCanvasHasSvg(current) && !mermaidCanvasHasSvg(next)) {
+    syncAttributes(current, next, new Set(['data-mermaid']));
+    return;
+  }
+  syncAttributes(current, next);
+  morphChildren(current, next);
+}
+
 function morphNode(current: Node, next: Node): void {
   if (current.nodeType === Node.TEXT_NODE || current.nodeType === Node.COMMENT_NODE) {
     if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
@@ -65,8 +93,23 @@ function morphNode(current: Node, next: Node): void {
     morphImage(currentElement, nextElement);
     return;
   }
+  if (isMermaidCanvas(currentElement) && isMermaidCanvas(nextElement)) {
+    morphMermaidCanvas(currentElement, nextElement);
+    return;
+  }
 
-  syncAttributes(currentElement, nextElement);
+  // Standalone missing images hide their empty paragraph as well. Preserve it
+  // only while the next paragraph still contains that exact image and no text.
+  const currentImage = currentElement.firstElementChild;
+  const nextImage = nextElement.firstElementChild;
+  const keepHiddenParagraph = currentElement.tagName === 'P'
+    && currentElement.hasAttribute('data-protected-hidden')
+    && nextElement.children.length === 1 && !nextElement.textContent?.trim()
+    && nextImage?.tagName === 'IMG'
+    && Boolean(currentImage?.getAttribute('data-protected-src'))
+    && currentImage?.getAttribute('data-protected-src') === nextImage?.getAttribute('data-protected-src');
+  syncAttributes(currentElement, nextElement,
+    keepHiddenParagraph ? new Set(['style', 'data-protected-hidden']) : undefined);
   morphChildren(currentElement, nextElement);
 }
 

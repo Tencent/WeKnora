@@ -27,7 +27,6 @@ type EmbedChannel struct {
 	ShowSuggestedQuestions bool           `json:"show_suggested_questions"  gorm:"not null;default:true"`
 	WidgetPosition         string         `json:"widget_position"           gorm:"type:varchar(32);not null;default:'bottom-right'"`
 	AllowWebSearch         bool           `json:"allow_web_search"          gorm:"not null;default:false"`
-	AllowMemory            bool           `json:"allow_memory"              gorm:"not null;default:false"`
 	AllowFileUpload        bool           `json:"allow_file_upload"         gorm:"not null;default:false"`
 	DefaultLocale          string         `json:"default_locale"            gorm:"type:varchar(16);not null;default:''"`
 	WebhookURL             string         `json:"webhook_url"               gorm:"type:varchar(512);not null;default:''"`
@@ -119,7 +118,6 @@ type EmbedChannelPublicConfig struct {
 	AllowedOrigins         []string `json:"allowed_origins,omitempty"`
 	WidgetPosition         string   `json:"widget_position,omitempty"`
 	AllowWebSearch         bool     `json:"allow_web_search"`
-	AllowMemory            bool     `json:"allow_memory"`
 	AllowFileUpload        bool     `json:"allow_file_upload"`
 	// AgentWebSearchEnabled reflects whether the bound agent has web search configured.
 	AgentWebSearchEnabled bool `json:"agent_web_search_enabled"`
@@ -128,22 +126,10 @@ type EmbedChannelPublicConfig struct {
 	DefaultLocale           string `json:"default_locale,omitempty"`
 }
 
-// Supported embed UI locales.
-var supportedEmbedLocales = map[string]struct{}{
-	"zh-CN": {},
-	"en-US": {},
-	"ko-KR": {},
-	"ru-RU": {},
-}
-
 // NormalizeEmbedDefaultLocale returns a supported locale tag or empty string
 // (meaning follow browser / host widget locale).
 func NormalizeEmbedDefaultLocale(locale string) string {
-	locale = strings.TrimSpace(locale)
-	if _, ok := supportedEmbedLocales[locale]; ok {
-		return locale
-	}
-	return ""
+	return NormalizeSupportedLocale(locale)
 }
 
 // EmbedSessionMarkerPrefix tags sessions created through an embed channel.

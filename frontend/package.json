@@ -1,6 +1,6 @@
 {
   "name": "knowledage-base",
-  "version": "0.7.0",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,23 +10,31 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
-    "test": "tsx --test"
+    "test": "tsx --test",
+    "check-i18n": "tsx --test src/i18n/localeKeyAudit.test.ts",
+    "scan-i18n-gaps": "tsx src/i18n/localeGapScan.ts",
+    "regenerate-i18n-locales": "tsx src/i18n/regeneratePrunedLocales.ts"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
+    "@novnc/novnc": "^1.7.0",
     "@types/dompurify": "^3.2.0",
     "@types/papaparse": "^5.5.2",
     "@vue-office/pptx": "^1.0.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "axios": "^1.16.0",
     "docx-preview": "^0.3.7",
     "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1",
+    "jszip": "3.10.1",
     "katex": "^0.16.45",
     "marked": "^17.0.5",
     "marked-katex-extension": "^5.1.8",
     "mermaid": "^11.15.0",
     "pagefind": "^1.5.2",
     "papaparse": "^5.5.3",
+    "pdfjs-dist": "^6.3.289",
     "pinia": "^3.0.4",
     "swiper": "^12.1.4",
     "tdesign-icons-vue-next": "0.4.4",
@@ -37,7 +45,7 @@
     "vue-router": "^4.5.0",
     "vue-virtual-scroller": "^2.0.0-beta.8",
     "webpack": "^5.106.2",
-    "xlsx": "file:./packages/xlsx-0.20.2.tgz"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",
@@ -45,6 +53,7 @@
     "@vitejs/plugin-vue": "6.0.6",
     "@vitejs/plugin-vue-jsx": "5.1.5",
     "@vue/tsconfig": "^0.9.1",
+    "@xmldom/xmldom": "0.9.12",
     "less": "^4.6.4",
     "less-loader": "^12.3.2",
     "npm-run-all2": "^8.0.4",

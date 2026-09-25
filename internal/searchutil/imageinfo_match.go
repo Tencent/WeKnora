@@ -30,8 +30,8 @@ func SliceContentByDocumentRange(content string, contentStartAt, rangeStart, ran
 	return string(runes[relStart:relEnd])
 }
 
-// ImageURLsInContent returns the set of image URLs referenced as Markdown
-// images in content.
+// ImageURLsInContent returns the set of image URLs referenced by content,
+// covering both Markdown image links and HTML <img> tags with a quoted src.
 func ImageURLsInContent(content string) map[string]bool {
 	urls := make(map[string]bool)
 	for _, match := range MarkdownImageRegex.FindAllStringSubmatch(content, -1) {
@@ -40,12 +40,24 @@ func ImageURLsInContent(content string) map[string]bool {
 		}
 		urls[match[2]] = true
 	}
+	// Screenshots embedded as HTML count as present in the content too.
+	// Collecting only Markdown links would make the image_info filters treat an
+	// HTML-only passage as holding no images at all and drop every entry.
+	for _, match := range HTMLImageSrcRegex.FindAllStringSubmatch(content, -1) {
+		if len(match) <= HTMLImageSrcURLGroup {
+			continue
+		}
+		if src := strings.TrimSpace(match[HTMLImageSrcURLGroup]); src != "" {
+			urls[src] = true
+		}
+	}
 	return urls
 }
 
 // FilterImageInfoByContentURLs keeps only image_info entries whose URL or
-// OriginalURL appears as a Markdown image in content. Returns empty string
-// when nothing matches or imageInfoJSON is invalid.
+// OriginalURL is referenced by content, as either a Markdown image link or an
+// HTML <img> tag. Returns empty string when nothing matches or imageInfoJSON
+// is invalid.
 func FilterImageInfoByContentURLs(content string, imageInfoJSON string) string {
 	if imageInfoJSON == "" {
 		return ""
@@ -67,8 +79,58 @@ func FilterImageInfoByContentURLs(content string, imageInfoJSON string) string {
 	return marshalImageInfos(filtered)
 }
 
-// FilterImageInfoByMatchRange keeps image_info entries whose Markdown image
-// reference falls within the document rune range [matchStart, matchEnd).
+// ImageURLsFromInfo returns every current and original URL represented by an
+// image_info payload.
+func ImageURLsFromInfo(imageInfoJSON string) map[string]bool {
+	urls := make(map[string]bool)
+	if imageInfoJSON == "" {
+		return urls
+	}
+	var infos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfoJSON), &infos); err != nil {
+		return urls
+	}
+	for _, info := range infos {
+		if info.URL != "" {
+			urls[info.URL] = true
+		}
+		if info.OriginalURL != "" {
+			urls[info.OriginalURL] = true
+		}
+	}
+	return urls
+}
+
+// PruneMarkdownImagesByImageInfo keeps only Markdown images represented by
+// the chunk-scoped image metadata. This is stable after text edits because it
+// matches durable image URLs instead of parser character offsets.
+func PruneMarkdownImagesByImageInfo(content, imageInfoJSON string) string {
+	allowed := make(map[string]bool)
+	if imageInfoJSON != "" {
+		var infos []types.ImageInfo
+		if err := json.Unmarshal([]byte(imageInfoJSON), &infos); err == nil {
+			for _, info := range infos {
+				if info.URL != "" {
+					allowed[info.URL] = true
+				}
+				if info.OriginalURL != "" {
+					allowed[info.OriginalURL] = true
+				}
+			}
+		}
+	}
+	filtered := MarkdownImageRegex.ReplaceAllStringFunc(content, func(image string) string {
+		match := MarkdownImageRegex.FindStringSubmatch(image)
+		if len(match) >= 3 && allowed[match[2]] {
+			return image
+		}
+		return ""
+	})
+	return collapseBlankLines(filtered)
+}
+
+// FilterImageInfoByMatchRange keeps image_info entries whose image reference
+// falls within the document rune range [matchStart, matchEnd).
 // Used when parent content is expanded for context but multimodal enrichment
 // should only cover the retrieved child window.
 func FilterImageInfoByMatchRange(

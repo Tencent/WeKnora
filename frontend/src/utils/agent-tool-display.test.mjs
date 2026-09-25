@@ -12,6 +12,9 @@ const t = (key, params) => {
   if (key === 'agentStream.search.foundResultsFromFiles') {
     return `found ${params?.count} from ${params?.files} files`
   }
+  if (key === 'agentStream.search.candidatesBelowThreshold') {
+    return `matched ${params?.count}, none relevant`
+  }
   if (key === 'agentStream.ragPipeline.searchingWithQuery') {
     return `searching ${params?.query}`
   }
@@ -21,6 +24,27 @@ const t = (key, params) => {
 test('getAgentToolIconName maps rag pipeline tools', () => {
   assert.equal(getAgentToolIconName('query_understand'), 'ai-search')
   assert.equal(getAgentToolIconName('knowledge_search'), 'data-search')
+})
+
+test('getAgentToolIconName maps the consolidated knowledge tools and their retired names alike', () => {
+  assert.equal(getAgentToolIconName('search_knowledge'), 'data-search')
+  assert.equal(getAgentToolIconName('search_knowledge', 'web'), 'internet')
+  assert.equal(getAgentToolIconName('read_document'), 'file-search')
+  assert.equal(getAgentToolIconName('list_documents'), 'file-search')
+  assert.equal(getAgentToolIconName('list_knowledge_chunks'), 'file-search')
+  assert.equal(getAgentToolIconName('get_document_info'), 'file-search')
+})
+
+test('getAgentToolIconName maps sandbox shell tools to the terminal icon', () => {
+  assert.equal(getAgentToolIconName('shell_exec'), 'terminal')
+})
+
+test('getAgentToolIconName maps skill and sandbox file tools', () => {
+  assert.equal(getAgentToolIconName('read_file'), 'file')
+  assert.equal(getAgentToolIconName('read_skill'), 'file')
+  assert.equal(getAgentToolIconName('list_sandbox_files'), 'folder')
+  assert.equal(getAgentToolIconName('read_sandbox_file'), 'file')
+  assert.equal(getAgentToolIconName('execute_skill_script'), 'code')
 })
 
 test('getAgentToolIconName maps Wiki tools to semantic search and reading icons', () => {
@@ -56,6 +80,20 @@ test('getKnowledgeSearchSummaryHtml includes file count when present', () => {
     kb_counts: { a: 1, b: 2 },
   })
   assert.match(html, /found <strong>2<\/strong> from <strong>2<\/strong> files/)
+})
+
+// Candidates that all fell below the relevance threshold never reached the
+// answer, so the row must not read like a plain empty search: the difference
+// points at the threshold rather than at the knowledge base.
+test('getKnowledgeSearchSummaryHtml distinguishes filtered candidates from an empty search', () => {
+  assert.match(
+    getKnowledgeSearchSummaryHtml(t, { count: 0, candidate_count: 10 }),
+    /matched <strong>10<\/strong>, none relevant/,
+  )
+  assert.equal(
+    getKnowledgeSearchSummaryHtml(t, { count: 0, candidate_count: 0 }),
+    'agentStream.search.noResults',
+  )
 })
 
 test('getRagPipelineStepTitle uses query-aware search labels', () => {

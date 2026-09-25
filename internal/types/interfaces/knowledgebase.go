@@ -95,6 +95,12 @@ type KnowledgeBaseService interface {
 	//   - Possible errors such as not existing, insufficient permissions, search engine errors, etc.
 	HybridSearch(ctx context.Context, id string, params types.SearchParams) ([]*types.SearchResult, error)
 
+	// HybridSearchWithRerank is HybridSearch plus the optional rerank stage
+	// requested by params.Rerank, returning rerank diagnostics beside the
+	// results. It serves the hybrid-search API; internal callers rerank on
+	// their own and use HybridSearch.
+	HybridSearchWithRerank(ctx context.Context, id string, params types.SearchParams) (*types.RetrievalResult, error)
+
 	// GetQueryEmbedding computes the query embedding using the embedding model
 	// associated with the given knowledge base. This allows callers to pre-compute
 	// and reuse embeddings across multiple KBs that share the same model.
@@ -225,6 +231,11 @@ type KnowledgeBaseRepository interface {
 	// CountByModelID counts active KBs in the tenant that reference the given
 	// model ID in any model-binding field (embedding, summary, VLM, ASR, etc.).
 	CountByModelID(ctx context.Context, tenantID uint64, modelID string) (int64, error)
+	// ListModelUsages returns the minimal active KB projections that reference
+	// the model, with every matching binding merged per object. Implementations
+	// must cap the result at types.ModelUsageListLimit; callers that need the
+	// untruncated size should use CountByModelID.
+	ListModelUsages(ctx context.Context, tenantID uint64, modelID string) ([]types.ModelUsageResource, error)
 	// SetUserKBPin inserts or removes a row in user_kb_pins for the given
 	// (tenant, user, kb) triple. Returns the resulting pinned_at (nil when
 	// pinned=false) and an error. The tenant_id is captured to support
@@ -233,6 +244,10 @@ type KnowledgeBaseRepository interface {
 	SetUserKBPin(
 		ctx context.Context, tenantID uint64, userID string, kbID string, pinned bool,
 	) (pinnedAt *time.Time, err error)
+	// UpdateKnowledgeBaseGeneratedProfile writes only the generated_profile
+	// column so a background regeneration never races a concurrent settings
+	// save on the rest of the row.
+	UpdateKnowledgeBaseGeneratedProfile(ctx context.Context, id string, profile *types.KnowledgeBaseProfile) error
 
 	// ListUserKBPinIDs returns the kb_id → pinned_at map of every KB the
 	// given user has personally pinned in this tenant. Used by the list

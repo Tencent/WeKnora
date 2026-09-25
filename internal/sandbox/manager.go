@@ -47,32 +47,16 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		m.sandbox = &disabledSandbox{}
 		return nil
 
-	case SandboxTypeDocker:
-		dockerSandbox := NewDockerSandbox(m.config)
-		if dockerSandbox.IsAvailable(ctx) {
-			m.sandbox = dockerSandbox
-			// Pre-pull the sandbox image asynchronously so it's ready before first use
-			go func() {
-				if err := dockerSandbox.EnsureImage(context.Background()); err != nil {
-					log.Printf("[sandbox] failed to pre-pull image %s: %v", m.config.DockerImage, err)
-				} else {
-					log.Printf("[sandbox] image %s is ready", m.config.DockerImage)
-				}
-			}()
-			return nil
-		}
-
-		// Fallback to local if enabled
-		if m.config.FallbackEnabled {
-			m.sandbox = NewLocalSandbox(m.config)
-			return nil
-		}
-
-		return fmt.Errorf("docker is not available and fallback is disabled")
-
-	case SandboxTypeLocal:
-		m.sandbox = NewLocalSandbox(m.config)
-		return nil
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
+		// Session-scoped remote backends are only reachable through
+		// SessionBoundManager, which owns the authoritative binding.
+		// DefaultManager exposes stateless semantics that cannot preserve
+		// per-session state, so we refuse the construction and let
+		// NewManagerFromType route the caller to NewSessionBoundManager.
+		return fmt.Errorf(
+			"sandbox: %s backend must be constructed via NewSessionBoundManager",
+			m.config.Type,
+		)
 
 	default:
 		return fmt.Errorf("unknown sandbox type: %s", m.config.Type)
@@ -95,9 +79,19 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 		return nil, ErrSandboxDisabled
 	}
 
+	effective := config
+	if config != nil && len(m.config.EnvVars) > 0 {
+		copy := *config
+		copy.Env = cloneMetadata(m.config.EnvVars)
+		for key, value := range config.Env {
+			copy.Env[key] = value
+		}
+		effective = &copy
+	}
+
 	// Perform security validation unless explicitly skipped
-	if !config.SkipValidation {
-		if err := m.validateExecution(config); err != nil {
+	if effective != nil && !effective.SkipValidation {
+		if err := runScriptValidation(m.validator, effective); err != nil {
 			log.Printf("[sandbox] Security validation failed: %v", err)
 			return &ExecuteResult{
 				ExitCode: -1,
@@ -107,12 +101,16 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 		}
 	}
 
-	return sandbox.Execute(ctx, config)
+	return sandbox.Execute(ctx, effective)
 }
 
-// validateExecution performs comprehensive security validation on the execution config
-func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
-	if m.validator == nil {
+// runScriptValidation is the package-level helper that DefaultManager and
+// SessionBoundManager share for pre-execution security checks. Extracting
+// it avoids duplicating the same script/args/stdin validation logic across
+// two Manager implementations while keeping the ScriptValidator private to
+// the manager that owns it.
+func runScriptValidation(validator *ScriptValidator, config *ExecuteConfig) error {
+	if validator == nil || config == nil {
 		return nil
 	}
 
@@ -128,13 +126,11 @@ func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
 
 	// Validate script content
 	if scriptContent != "" {
-		result := m.validator.ValidateScript(scriptContent)
+		result := validator.ValidateScript(scriptContent)
 		if !result.Valid {
-			// Log all validation errors
 			for _, verr := range result.Errors {
 				log.Printf("[sandbox] Validation error: %s", verr.Error())
 			}
-			// Return the first error
 			if len(result.Errors) > 0 {
 				return result.Errors[0]
 			}
@@ -144,7 +140,7 @@ func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
 
 	// Validate arguments
 	if len(config.Args) > 0 {
-		result := m.validator.ValidateArgs(config.Args)
+		result := validator.ValidateArgs(config.Args)
 		if !result.Valid {
 			for _, verr := range result.Errors {
 				log.Printf("[sandbox] Arg validation error: %s", verr.Error())
@@ -158,7 +154,7 @@ func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
 
 	// Validate stdin
 	if config.Stdin != "" {
-		result := m.validator.ValidateStdin(config.Stdin)
+		result := validator.ValidateStdin(config.Stdin)
 		if !result.Valid {
 			for _, verr := range result.Errors {
 				log.Printf("[sandbox] Stdin validation error: %s", verr.Error())
@@ -224,13 +220,19 @@ func (s *disabledSandbox) IsAvailable(ctx context.Context) bool {
 
 // NewManagerFromType creates a sandbox manager with the specified type.
 // dockerImage is optional; if empty, the default image is used.
-func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage string) (Manager, error) {
+//
+// Session-scoped backends (Cube, E2B, Docker) route to SessionBoundManager,
+// which keeps one persistent sandbox per SessionID; Disabled routes to
+// DefaultManager. Both satisfy Manager.
+func NewManagerFromType(sandboxType string, dockerImage string) (Manager, error) {
 	var sType SandboxType
 	switch sandboxType {
 	case "docker":
 		sType = SandboxTypeDocker
-	case "local":
-		sType = SandboxTypeLocal
+	case "cube":
+		sType = SandboxTypeCube
+	case "e2b":
+		sType = SandboxTypeE2B
 	case "disabled", "":
 		sType = SandboxTypeDisabled
 	default:
@@ -239,12 +241,36 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 
 	config := DefaultConfig()
 	config.Type = sType
-	config.FallbackEnabled = fallbackEnabled
 	if dockerImage != "" {
 		config.DockerImage = dockerImage
 	}
 
-	return NewManager(config)
+	var client RemoteSandboxClient
+	var err error
+	switch sType {
+	case SandboxTypeCube:
+		if client, err = NewCubeRemoteClient(config); err != nil {
+			return nil, fmt.Errorf("sandbox: build Cube client: %w", err)
+		}
+	case SandboxTypeE2B:
+		if client, err = NewE2BRemoteClient(config); err != nil {
+			return nil, fmt.Errorf("sandbox: build E2B client: %w", err)
+		}
+	case SandboxTypeDocker:
+		applyDockerRuntimeDefaults(config)
+		if client, err = NewDockerRemoteClient(config); err != nil {
+			return nil, fmt.Errorf("sandbox: build Docker client: %w", err)
+		}
+	}
+	if client == nil {
+		return NewManager(config)
+	}
+	return NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:  config,
+		Client:  client,
+		Store:   NewMemorySessionSandboxBindingStore(),
+		Checker: PermissiveSessionExistenceChecker{},
+	})
 }
 
 // NewDisabledManager creates a manager that rejects all execution requests

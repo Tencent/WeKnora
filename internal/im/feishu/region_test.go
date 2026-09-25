@@ -55,7 +55,7 @@ func TestAdapterAPI_UsesRegionHost(t *testing.T) {
 		{RegionLark, "https://open.larksuite.com/open-apis/"},
 	}
 	for _, c := range cases {
-		a := NewAdapter(c.region, "cli_app", "secret", "", "")
+		a, _ := NewAdapter(c.region, "cli_app", "secret", "", "", "")
 
 		got := a.api("/open-apis/im/v1/messages/%s/reply", "om_1")
 		want := c.wantPrefix + "im/v1/messages/om_1/reply"
@@ -71,11 +71,62 @@ func TestAdapterAPI_UsesRegionHost(t *testing.T) {
 }
 
 func TestAdapterPlatform_FollowsRegion(t *testing.T) {
-	if got := NewAdapter(RegionFeishu, "a", "b", "", "").Platform(); got != im.PlatformFeishu {
+	aFeishu, _ := NewAdapter(RegionFeishu, "a", "b", "", "", "")
+	if got := aFeishu.Platform(); got != im.PlatformFeishu {
 		t.Errorf("Feishu adapter Platform() = %q, want %q", got, im.PlatformFeishu)
 	}
-	if got := NewAdapter(RegionLark, "a", "b", "", "").Platform(); got != im.PlatformLark {
+	aLark, _ := NewAdapter(RegionLark, "a", "b", "", "", "")
+	if got := aLark.Platform(); got != im.PlatformLark {
 		t.Errorf("Lark adapter Platform() = %q, want %q", got, im.PlatformLark)
+	}
+}
+
+// A custom api_base_url overrides the region's Open Platform host, so internal
+// deployments can route Feishu API calls through a reverse proxy.
+func TestAdapterAPI_BaseURLOverride(t *testing.T) {
+	a := &Adapter{apiBaseURL: "https://feishu-proxy.example.internal"}
+	got := a.api("/open-apis/im/v1/messages/%s/reply", "om_1")
+	want := "https://feishu-proxy.example.internal/open-apis/im/v1/messages/om_1/reply"
+	if got != want {
+		t.Errorf("override api() = %q, want %q", got, want)
+	}
+}
+
+// NewAdapter falls back to the region default when api_base_url is empty, and
+// the region default itself passes validation (no SSRF check on the default).
+func TestNewAdapter_FallbackAndTrim(t *testing.T) {
+	a, err := NewAdapter(RegionFeishu, "a", "b", "", "", "")
+	if err != nil {
+		t.Fatalf("NewAdapter empty api_base_url: %v", err)
+	}
+	if a.apiBaseURL != RegionFeishu.OpenBaseURL {
+		t.Errorf("fallback apiBaseURL = %q, want %q", a.apiBaseURL, RegionFeishu.OpenBaseURL)
+	}
+	// The region default value also passes (treated as "no override").
+	a2, err := NewAdapter(RegionFeishu, "a", "b", "", "", RegionFeishu.OpenBaseURL)
+	if err != nil {
+		t.Fatalf("NewAdapter default api_base_url: %v", err)
+	}
+	if a2.apiBaseURL != RegionFeishu.OpenBaseURL {
+		t.Errorf("default apiBaseURL = %q", a2.apiBaseURL)
+	}
+}
+
+// validateAPIBaseURL rejects non-http(s) schemes; empty and the region default
+// are allowed without further checks.
+func TestValidateAPIBaseURL(t *testing.T) {
+	defaults := RegionFeishu.OpenBaseURL
+	if err := validateAPIBaseURL("", defaults); err != nil {
+		t.Errorf("empty should be allowed: %v", err)
+	}
+	if err := validateAPIBaseURL(defaults, defaults); err != nil {
+		t.Errorf("default should be allowed: %v", err)
+	}
+	if err := validateAPIBaseURL("ftp://example.com", defaults); err == nil {
+		t.Error("ftp scheme should be rejected")
+	}
+	if err := validateAPIBaseURL("gopher://example.com", defaults); err == nil {
+		t.Error("gopher scheme should be rejected")
 	}
 }
 

@@ -33,7 +33,9 @@ func TestDownloadFileFromURLBlocksRedirectToLoopback(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected redirect to loopback to be blocked")
 	}
-	if !strings.Contains(err.Error(), "redirect blocked") && !strings.Contains(err.Error(), "connection blocked") {
+	if !strings.Contains(err.Error(), "redirect blocked") &&
+		!strings.Contains(err.Error(), "connection blocked") &&
+		!strings.Contains(err.Error(), "outbound request blocked") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

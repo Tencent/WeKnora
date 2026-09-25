@@ -44,7 +44,7 @@ func TestFormatIMToolLine_grepPatterns(t *testing.T) {
 			"patterns": []any{"文明", "策略"},
 		},
 		Data: map[string]interface{}{
-			"total_matches": float64(5),
+			"total_matches":  float64(5),
 			"document_count": float64(2),
 		},
 	})
@@ -99,5 +99,20 @@ func TestIMGetQueryText_joinsUniqueQueries(t *testing.T) {
 	})
 	if got != "foo，bar" {
 		t.Fatalf("query text = %q", got)
+	}
+}
+
+func TestFormatIMToolLine_writeSandboxPendingShowsDiffStat(t *testing.T) {
+	line := FormatIMToolLine(IMToolStep{
+		ToolName: "write_sandbox_file",
+		Pending:  true,
+		Arguments: map[string]any{
+			"path":          "/workspace/output/a.py",
+			"added_lines":   12,
+			"removed_lines": 0,
+		},
+	})
+	if line != "写入沙箱文件：「/workspace/output/a.py」... +12" {
+		t.Fatalf("pending write line = %q", line)
 	}
 }

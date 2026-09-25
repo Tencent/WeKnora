@@ -14,11 +14,14 @@ import (
 // Limit is capped at 100 inside the repository regardless of caller
 // input — keeps unbounded scans off the table.
 type AuditLogQuery struct {
-	AfterID     uint64
-	Limit       int
-	Action      types.AuditAction
-	Outcome     types.AuditOutcome
-	ActorUserID string
+	AfterID      uint64
+	Limit        int
+	Action       types.AuditAction
+	Outcome      types.AuditOutcome
+	ActorUserID  string
+	ScopeType    string
+	ScopeID      string
+	UnscopedOnly bool
 }
 
 // AuditLogRepository is the storage primitive for the audit table.

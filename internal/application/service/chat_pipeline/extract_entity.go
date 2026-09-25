@@ -61,8 +61,20 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		logger.Debugf(ctx, "skipping extract entity, neo4j is disabled")
 		return next()
 	}
+	// QUERY_UNDERSTAND has already classified the turn. Entities only feed the
+	// knowledge-base graph search, so a greeting or chit-chat turn that skips
+	// KB retrieval must not pay for this second LLM call.
+	if !chatManage.NeedsRetrieval() {
+		logger.Debugf(ctx, "skipping extract entity, intent %q needs no KB retrieval", chatManage.Intent)
+		return next()
+	}
 
+	// Prefer the rewritten query: it resolves pronouns and ellipsis from the
+	// conversation, which the raw follow-up question lacks.
 	query := chatManage.Query
+	if rewritten := strings.TrimSpace(chatManage.RewriteQuery); rewritten != "" {
+		query = rewritten
+	}
 
 	model, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
 	if err != nil {
@@ -151,6 +163,9 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	return next()
 }
 
+// Graph extraction can return many nodes and relations; 4096 tokens can truncate the JSON payload.
+const entityExtractionMaxTokens = 8192
+
 // Extractor is a struct for extracting entities
 type Extractor struct {
 	chat     chat.Chat
@@ -171,7 +186,7 @@ func NewExtractor(
 		template: template,
 		chatOpt: &chat.ChatOptions{
 			Temperature: 0.3,
-			MaxTokens:   4096,
+			MaxTokens:   entityExtractionMaxTokens,
 			Thinking:    &think,
 		},
 	}
@@ -184,7 +199,8 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 	// logger.Debugf(ctx, "chat system: %s", generator.System(ctx))
 	// logger.Debugf(ctx, "chat user: %s", generator.User(ctx, content))
 
-	chatResponse, err := e.chat.Chat(ctx, generator.Render(ctx, content), e.chatOpt)
+	modelCtx := types.WithLLMCallMetadata(ctx, "entity_extraction", "")
+	chatResponse, err := e.chat.Chat(modelCtx, generator.Render(ctx, content), e.chatOpt)
 	if err != nil {
 		logger.Errorf(ctx, "failed to chat: %v", err)
 		return nil, err

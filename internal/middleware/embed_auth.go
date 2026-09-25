@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/embedpolicy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -31,9 +32,6 @@ const (
 	// the per-IP cap is tiny.
 	embedGlobalMinuteFloor = 120
 )
-
-// EmbedChannelContextKey stores the authenticated embed channel on the request context.
-const EmbedChannelContextKey types.ContextKey = "EmbedChannel"
 
 var (
 	embedLimiterOnce sync.Once
@@ -120,7 +118,7 @@ func EmbedAuth(
 		}
 
 		origin := requestOrigin(c)
-		if !originAllowed(origin, ch.AllowedOriginsList()) {
+		if !embedRequestOriginAllowed(c, origin, ch.AllowedOriginsList()) {
 			logger.Warnf(c.Request.Context(), "[embed_auth] origin %q not allowed for channel %s", origin, channelID)
 			c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
 			c.Abort()
@@ -162,30 +160,17 @@ func EmbedAuth(
 			TenantID: ch.TenantID,
 			IsActive: true,
 		}
-		principal := types.Principal{
-			Type: types.PrincipalEmbedChannel,
-			ID:   fmt.Sprintf("%d:%s", ch.TenantID, ch.ID),
-		}
-
-		c.Set(types.TenantIDContextKey.String(), ch.TenantID)
-		c.Set(types.TenantInfoContextKey.String(), tenant)
-		c.Set(types.UserContextKey.String(), user)
-		c.Set(types.UserIDContextKey.String(), user.ID)
-		c.Set(types.PrincipalContextKey.String(), principal)
-		c.Set(types.TenantRoleContextKey.String(), types.TenantRoleViewer)
-		c.Set(types.SystemAdminContextKey.String(), false)
-		c.Set(string(EmbedChannelContextKey), ch)
-
-		ctx := c.Request.Context()
-		ctx = context.WithValue(ctx, types.TenantIDContextKey, ch.TenantID)
-		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
-		ctx = context.WithValue(ctx, types.UserContextKey, user)
-		ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
-		ctx = types.WithPrincipal(ctx, principal)
-		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
-		ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
-		ctx = context.WithValue(ctx, EmbedChannelContextKey, ch)
-		c.Request = c.Request.WithContext(ctx)
+		applyAuthSession(c, authSession{
+			User: user,
+			Principal: types.Principal{
+				Type: types.PrincipalEmbedChannel,
+				ID:   fmt.Sprintf("%d:%s", ch.TenantID, ch.ID),
+			},
+			TenantID: ch.TenantID,
+			Tenant:   tenant,
+			Role:     types.TenantRoleViewer,
+			Extra:    map[types.ContextKey]any{types.EmbedChannelContextKey: ch},
+		})
 		c.Next()
 	}
 }
@@ -219,35 +204,44 @@ func requestOrigin(c *gin.Context) string {
 	return u.Scheme + "://" + u.Host
 }
 
-func originAllowed(origin string, allowed []string) bool {
-	// Empty allowlist rejects all origins. Management create/update requires at
-	// least one origin; legacy rows with [] must be fixed before going live.
-	if len(allowed) == 0 {
+// API calls execute inside the embed document, so their browser origin is the
+// embed server, not its parent. Parent restrictions belong to the HTML CSP.
+// Cross-origin API clients and server-side exchanges still use the allowlist.
+func embedRequestOriginAllowed(c *gin.Context, origin string, allowed []string) bool {
+	if embedpolicy.FrameAncestors(allowed) == "frame-ancestors 'none'" {
 		return false
 	}
-	if origin == "" {
+	normalized, originErr := embedpolicy.NormalizeOrigin(origin)
+	// Fetch Metadata is browser-controlled and survives reverse-proxy host/port
+	// rewriting. Non-browser callers can forge it, just as they can forge Origin;
+	// neither replaces the channel token or the rate limits.
+	// A same-origin GET may omit both Origin and Referer under no-referrer.
+	if c.GetHeader("Sec-Fetch-Site") == "same-origin" && (origin == "" || originErr == nil) {
+		return true
+	}
+	if originErr != nil {
 		return false
 	}
-	for _, pattern := range allowed {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
-		}
-		if pattern == "*" || strings.EqualFold(pattern, origin) {
+	// HTTP deployments and older webviews may omit Fetch Metadata. Compare with
+	// the transport origin; the frontend proxy preserves Host including its port.
+	scheme := "http"
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	if expected, err := embedpolicy.NormalizeOrigin(scheme + "://" + c.Request.Host); err == nil {
+		if normalized == expected {
 			return true
 		}
-		if strings.HasPrefix(pattern, "*.") {
-			suffix := strings.TrimPrefix(pattern, "*")
-			if strings.HasSuffix(origin, suffix) {
-				return true
-			}
-		}
 	}
-	return false
+	return originAllowed(origin, allowed)
+}
+
+func originAllowed(origin string, allowed []string) bool {
+	return embedpolicy.Allows(origin, allowed)
 }
 
 // EmbedChannelFromContext returns the authenticated embed channel, if any.
 func EmbedChannelFromContext(ctx context.Context) (*types.EmbedChannel, bool) {
-	ch, ok := ctx.Value(EmbedChannelContextKey).(*types.EmbedChannel)
+	ch, ok := ctx.Value(types.EmbedChannelContextKey).(*types.EmbedChannel)
 	return ch, ok && ch != nil
 }

@@ -36,7 +36,8 @@ func configureLLMDebugLog() {
 		dir = "llm_debug"
 	}
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// Records hold full prompts and model replies: keep them to the service user.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		fmt.Fprintf(os.Stderr, "llm_debug: failed to create dir %s: %v\n", dir, err)
 		return
 	}
@@ -101,7 +102,7 @@ func LLMDebugLog(ctx context.Context, record *LLMCallRecord) {
 	defer llmDebug.mu.Unlock()
 
 	path := filepath.Join(llmDebug.dir, filename)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "llm_debug: open %s: %v\n", path, err)
 		return
@@ -110,9 +111,28 @@ func LLMDebugLog(ctx context.Context, record *LLMCallRecord) {
 	_, _ = f.WriteString(text)
 }
 
+// maxDebugFilenameID bounds the request-id part of a debug file name, well
+// inside the 255-byte name limit of common filesystems.
+const maxDebugFilenameID = 128
+
+// buildFilename derives the debug file name from the request id. The id comes
+// from the client's X-Request-ID header, so everything outside a plain
+// identifier alphabet is replaced: a "../" in it must not pick the directory
+// the record is written to.
 func buildFilename(reqID string) string {
-	if reqID != "" {
-		return reqID + ".log"
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, reqID)
+	if len(safe) > maxDebugFilenameID {
+		safe = safe[:maxDebugFilenameID]
+	}
+	if strings.Trim(safe, "_") != "" {
+		return safe + ".log"
 	}
 	return time.Now().Format("20060102_150405.000") + ".log"
 }
@@ -163,7 +183,7 @@ func extractRequestID(ctx context.Context) string {
 
 // LLMCallRecord holds all information for one model API call.
 type LLMCallRecord struct {
-	CallType string        // "Chat", "Chat Stream", "Embedding", "Rerank", "VLM"
+	CallType string // "Chat", "Chat Stream", "Embedding", "Rerank", "VLM"
 	Model    string
 	Duration time.Duration
 	Sections []RecordSection

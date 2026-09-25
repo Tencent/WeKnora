@@ -232,6 +232,22 @@ func TestInvitationService_Create_RejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestInvitationService_Create_APIKeyCannotInviteOwner(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KeyID:        1,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityManageMembers)},
+	})
+
+	_, err := svc.Create(ctx, 1, "u-bob", types.TenantRoleOwner, nil, "")
+	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
+		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Fatalf("API key owner invitation must not be persisted, got %d rows", len(repo.rows))
+	}
+}
+
 func TestInvitationService_Create_RejectsAlreadyActiveMember(t *testing.T) {
 	svc, _, memberSvc := newInvitationSvc()
 	ctx := context.Background()
@@ -461,6 +477,22 @@ func TestInvitationService_CreateShareLink_RejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestInvitationService_CreateShareLink_APIKeyCannotAssignOwner(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KeyID:        1,
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityManageMembers)},
+	})
+
+	_, _, err := svc.CreateShareLink(ctx, 1, types.TenantRoleOwner, nil, "")
+	if !errors.Is(err, ErrAPIKeyCannotAssignOwner) {
+		t.Fatalf("want ErrAPIKeyCannotAssignOwner, got %v", err)
+	}
+	if len(repo.rows) != 0 {
+		t.Fatalf("API key owner invite link must not be persisted, got %d rows", len(repo.rows))
+	}
+}
+
 func TestInvitationService_LookupByToken_RejectsUnknownToken(t *testing.T) {
 	svc, _, _ := newInvitationSvc()
 	if _, err := svc.LookupByToken(context.Background(), "nonexistent"); !errors.Is(err, ErrInvitationTokenInvalid) {
@@ -526,6 +558,66 @@ func TestInvitationService_AcceptByToken_AllowsMultipleUsers(t *testing.T) {
 	}
 }
 
+func TestInvitationService_AcceptByToken_ReconcilesDirectInvitation(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	ctx := context.Background()
+	direct, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create direct invitation: %v", err)
+	}
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create share link: %v", err)
+	}
+
+	if _, err := svc.AcceptByToken(ctx, plain, "u-alice"); err != nil {
+		t.Fatalf("accept by token: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, direct.ID)
+	if err != nil {
+		t.Fatalf("get direct invitation: %v", err)
+	}
+	if got.Status != types.TenantInvitationStatusAccepted {
+		t.Fatalf("direct invitation must be reconciled as accepted, got %s", got.Status)
+	}
+	pending, err := svc.CountPendingByInvitee(ctx, "u-alice")
+	if err != nil {
+		t.Fatalf("count pending: %v", err)
+	}
+	if pending != 0 {
+		t.Fatalf("joined user must not retain an actionable invitation, got %d", pending)
+	}
+}
+
+func TestInvitationService_AcceptByToken_ReconcilesDirectInvitationForExistingMember(t *testing.T) {
+	svc, repo, memberSvc := newInvitationSvc()
+	ctx := context.Background()
+	direct, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create direct invitation: %v", err)
+	}
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create share link: %v", err)
+	}
+	if _, err := memberSvc.AddMember(ctx, "u-alice", 1, types.TenantRoleViewer, nil); err != nil {
+		t.Fatalf("seed membership: %v", err)
+	}
+
+	if _, err := svc.AcceptByToken(ctx, plain, "u-alice"); err != nil {
+		t.Fatalf("idempotent accept by token: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, direct.ID)
+	if err != nil {
+		t.Fatalf("get direct invitation: %v", err)
+	}
+	if got.Status != types.TenantInvitationStatusAccepted {
+		t.Fatalf("direct invitation must be reconciled for an existing member, got %s", got.Status)
+	}
+}
+
 func TestInvitationService_AcceptByToken_RevokedTokenRejected(t *testing.T) {
 	svc, _, _ := newInvitationSvc()
 	ctx := context.Background()
@@ -550,5 +642,35 @@ func TestInvitationService_AcceptByToken_RequiresUserID(t *testing.T) {
 	}
 	if _, err := svc.AcceptByToken(ctx, plain, ""); err == nil {
 		t.Fatalf("empty user id must be rejected")
+	}
+}
+
+func TestInvitationService_MarkPendingAcceptedIfExists_NoPending(t *testing.T) {
+	svc, _, _ := newInvitationSvc()
+	ctx := context.Background()
+	if err := svc.MarkPendingAcceptedIfExists(ctx, 1, "u-alice"); err != nil {
+		t.Fatalf("MarkPendingAcceptedIfExists: %v", err)
+	}
+}
+
+func TestInvitationService_MarkPendingAcceptedIfExists_FlipsPendingRow(t *testing.T) {
+	svc, invRepo, _ := newInvitationSvc()
+	ctx := context.Background()
+	inv, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if inv.Status != types.TenantInvitationStatusPending {
+		t.Fatalf("want pending, got %s", inv.Status)
+	}
+	if err := svc.MarkPendingAcceptedIfExists(ctx, 1, "u-alice"); err != nil {
+		t.Fatalf("MarkPendingAcceptedIfExists: %v", err)
+	}
+	got, err := invRepo.GetByID(ctx, inv.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Status != types.TenantInvitationStatusAccepted {
+		t.Fatalf("want accepted, got %s", got.Status)
 	}
 }

@@ -41,6 +41,9 @@ func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types
 	if service.TransportType == types.MCPTransportStdio {
 		return fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
 	}
+	if err := mcp.ValidateServiceOutboundURLs(service); err != nil {
+		return err
+	}
 
 	// Set default advanced config if not provided
 	if service.AdvancedConfig == nil {
@@ -116,7 +119,11 @@ func (s *mcpServiceService) ListMCPServicesByIDs(
 }
 
 // UpdateMCPService updates an MCP service
-func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types.MCPService) error {
+func (s *mcpServiceService) UpdateMCPService(
+	ctx context.Context,
+	service *types.MCPService,
+	updateFields map[string]bool,
+) error {
 	// Check if service exists
 	existing, err := s.mcpServiceRepo.GetByID(ctx, service.TenantID, service.ID)
 	if err != nil {
@@ -140,6 +147,10 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	// Stdio transport is disabled for security reasons
 	if finalTransportType == types.MCPTransportStdio {
 		return fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
+	}
+
+	if updateFields["usage_instructions"] {
+		existing.UsageInstructions = service.UsageInstructions
 	}
 
 	// Store old enabled state BEFORE any updates
@@ -195,12 +206,12 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		// Only overwrite OAuth config when explicitly provided, so a partial
 		// PUT that carries only custom_headers does not wipe an existing
 		// auth_type / scopes. (Empty/absent is treated as "no change".)
-		if service.AuthConfig.AuthType != types.MCPAuthNone {
+		if updateFields["auth_type"] || service.AuthConfig.AuthType != types.MCPAuthNone {
 			existing.AuthConfig.AuthType = service.AuthConfig.AuthType
 		}
 		// APIKeyHeader is non-secret; empty means "use default X-API-Key", so a
 		// partial PUT that omits it is treated as no-change (mirrors scopes).
-		if service.AuthConfig.APIKeyHeader != "" {
+		if updateFields["api_key_header"] || service.AuthConfig.APIKeyHeader != "" {
 			existing.AuthConfig.APIKeyHeader = service.AuthConfig.APIKeyHeader
 		}
 		if service.AuthConfig.Scopes != nil {
@@ -211,43 +222,40 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		}
 	}
 
-	// Merge updates: only update fields that are provided (non-zero or explicitly set)
-	// This ensures that false values for enabled field are properly updated
-	// Handler ensures that service.Enabled is only set if "enabled" key exists in the request
-	// So we can safely update enabled field if service.Name is empty (indicating partial update)
-	// or if we're updating other fields (indicating full update)
-	// For enabled field, we'll update it if this is a partial update (only enabled) or if it's explicitly set
-	if service.Name == "" {
-		// Partial update - only update enabled field.
-		existing.Enabled = service.Enabled
-	} else {
-		// Full update - update all fields including enabled
+	// Scalar zero values cannot distinguish omission from an explicit update,
+	// so use the handler's field-presence map for name, description, and enabled.
+	if updateFields["name"] {
 		existing.Name = service.Name
-		if service.Description != existing.Description {
-			existing.Description = service.Description
-		}
+	}
+	if updateFields["description"] {
+		existing.Description = service.Description
+	}
+	if updateFields["enabled"] {
 		existing.Enabled = service.Enabled
-		if service.TransportType != "" {
-			existing.TransportType = service.TransportType
-		}
-		if service.URL != nil {
-			existing.URL = service.URL
-		}
-		if service.StdioConfig != nil {
-			existing.StdioConfig = service.StdioConfig
-		}
-		if service.EnvVars != nil {
-			existing.EnvVars = service.EnvVars
-		}
-		if service.Headers != nil {
-			existing.Headers = service.Headers
-		}
-		if service.AdvancedConfig != nil {
-			existing.AdvancedConfig = service.AdvancedConfig
-		}
+	}
+	if service.TransportType != "" {
+		existing.TransportType = service.TransportType
+	}
+	if service.URL != nil {
+		existing.URL = service.URL
+	}
+	if service.StdioConfig != nil {
+		existing.StdioConfig = service.StdioConfig
+	}
+	if service.EnvVars != nil {
+		existing.EnvVars = service.EnvVars
+	}
+	if service.Headers != nil {
+		existing.Headers = service.Headers
+	}
+	if service.AdvancedConfig != nil {
+		existing.AdvancedConfig = service.AdvancedConfig
 	}
 
 	// Update timestamp
+	if err := mcp.ValidateServiceOutboundURLs(existing); err != nil {
+		return err
+	}
 	existing.UpdatedAt = time.Now()
 
 	if err := s.mcpServiceRepo.Update(ctx, existing); err != nil {

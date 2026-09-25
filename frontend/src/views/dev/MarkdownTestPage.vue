@@ -130,15 +130,15 @@ import {
   renderChatMarkdown,
 } from '@/utils/chatMarkdownRenderer';
 import {
+  appendMermaidSvgCache,
   ensureMermaidInitialized,
   enhanceMarkdownContainer,
-  renderMermaidToSvg,
   createMermaidCodeRenderer,
 } from '@/utils/mermaidShared';
 import {
   replaceIncompleteMermaidWithPlaceholder,
   prepareStreamingMermaidMarkdown,
-  extractFirstMermaidCode,
+  extractMermaidCodes,
   injectCachedMermaidSvg,
 } from '@/utils/chatMessageShared';
 
@@ -362,15 +362,62 @@ graph TD
 >
 > It can span multiple paragraphs.
 
+\`\`\`mermaid
+sequenceDiagram
+    participant Driver as 驾驶员 (Driver)
+    participant HMI as 人机交互界面 (HMI/Cluster)
+    participant ADAS as 组合驾驶辅助系统 (ADAS ECU)
+    participant Sensor as 传感器/定位模块
+    participant Cloud as 云端服务平台 (可选)
+
+    Note over ADAS, Sensor: 阶段1：正常运行与监控
+    Driver->>Sensor: 车辆正常行驶中
+    Sensor->>ADAS: 状态数据 (环境、定位、车辆状态)
+    ADAS-->>Driver: 维持组合驾驶辅助状态 (显示图标正常)
+
+    Note over ADAS, Sensor: 阶段2：触发接管条件
+    alt 系统检测到需接管场景
+        Sensor->>ADAS: 检测条件满足 (如: 地图数据缺失/限速变化/系统故障/驾驶员分心)
+        ADAS->>HMI: 发送接管请求信号 (HOR Signal)
+        
+        Note right of HMI: 阶段3：分级提醒策略 (符合国标要求)
+        HMI-->>Driver: 视觉提示 (仪表盘图标闪烁/颜色变化)
+        HMI-->>Driver: 听觉提示 (轻柔蜂鸣声)
+        
+        ADAS->>HMI: 增强提醒 (若驾驶员无响应)
+        HMI-->>Driver: 强视觉警告 (红色边框/文字)
+        HMI-->>Driver: 强听觉警告 (连续急促蜂鸣)
+        HMI-->>Driver: 触觉提示 (方向盘震动/座椅振动)
+    end
+
+    Note over Driver, ADAS: 阶段4：驾驶员响应处理
+    alt 驾驶员及时接管
+        Driver->>HMI: 手握方向盘动作 (Torque/Grip Detection)
+        HMI->>ADAS: 确认驾驶员介入信号
+        ADAS-->>Driver: 退出自动驾驶，切换至人工驾驶模式
+        ADAS->>HMI: 清除警告提示
+    else 驾驶员未响应
+        alt 达到最后接管时限 (e.g., T+5s)
+            ADAS->>ADAS: 启动最小风险策略 (MRM/MLR)
+            ADAS->>HMI: 触发紧急减速/停车提示
+            HMI-->>Driver: 紧急警告 (最高级别)
+            ADAS->>Sensor: 执行安全停车动作 (靠边、刹车、双闪)
+        end
+    end
+
+    Note over Cloud, Driver: 阶段5：数据记录与上报
+    ADAS->>Cloud: 上传接管事件数据 (时间、原因、驾驶员响应)
+    Note right of Cloud: 用于事故定责与算法优化
+\`\`\`
+
 Done.`;
 
 const streamBuffer = ref('');
 const isStreaming = ref(false);
 const streamSpeed = ref(30);
 const customInput = ref('');
-const streamMermaidSvgHtml = ref('');
+const streamMermaidSvgHtml = ref<string[]>([]);
 let streamTimer: ReturnType<typeof setInterval> | null = null;
-let streamMermaidRenderId = 0;
 let streamMermaidRenderTask: Promise<void> | null = null;
 
 // Pre-render static fixtures once so streaming ticks do not reset other sections.
@@ -388,21 +435,26 @@ const streamHtml = computed(() => renderStreamMarkdown(streamBuffer.value));
 const customHtml = computed(() => render(customInput.value));
 
 const cacheStreamMermaidSvg = async () => {
-  if (streamMermaidSvgHtml.value) return;
-
-  const code = extractFirstMermaidCode(streamBuffer.value);
-  if (!code) return;
+  const codes = extractMermaidCodes(streamBuffer.value);
+  if (codes.length <= streamMermaidSvgHtml.value.length) return;
 
   if (!streamMermaidRenderTask) {
     streamMermaidRenderTask = (async () => {
-      const svg = await renderMermaidToSvg(code, `mermaid-stream-${++streamMermaidRenderId}`);
-      if (svg) streamMermaidSvgHtml.value = svg;
+      streamMermaidSvgHtml.value = await appendMermaidSvgCache(
+        extractMermaidCodes(streamBuffer.value),
+        streamMermaidSvgHtml.value,
+        'mermaid-stream',
+      );
     })().finally(() => {
       streamMermaidRenderTask = null;
     });
   }
 
   await streamMermaidRenderTask;
+
+  if (extractMermaidCodes(streamBuffer.value).length > streamMermaidSvgHtml.value.length) {
+    await cacheStreamMermaidSvg();
+  }
 };
 
 const startStream = () => {
@@ -423,7 +475,7 @@ const startStream = () => {
 const resetStream = () => {
   if (streamTimer) clearInterval(streamTimer);
   streamBuffer.value = '';
-  streamMermaidSvgHtml.value = '';
+  streamMermaidSvgHtml.value = [];
   streamMermaidRenderTask = null;
   isStreaming.value = false;
 };
@@ -476,32 +528,32 @@ watch(customInput, () => {
 }
 
 .page-title {
-  font-size: 24px;
+  font-size: var(--app-text-4xl);
   font-weight: 700;
   margin-bottom: 4px;
 }
 
 .page-desc {
-  color: var(--td-text-color-secondary, #666);
-  font-size: 14px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-base);
   margin-bottom: 32px;
 }
 
 .test-section {
   margin-bottom: 36px;
-  border-bottom: 1px solid var(--td-component-stroke, #e5e5e5);
+  border-bottom: 1px solid var(--td-component-stroke);
   padding-bottom: 24px;
 
   h2 {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     font-weight: 600;
     margin-bottom: 12px;
   }
 }
 
 .test-hint {
-  font-size: 13px;
-  color: var(--td-text-color-secondary, #999);
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
   margin-bottom: 8px;
 }
 
@@ -510,11 +562,11 @@ watch(customInput, () => {
 }
 
 .test-raw {
-  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+  background: var(--td-bg-color-secondarycontainer);
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   overflow-x: auto;
 
   code {
@@ -525,9 +577,9 @@ watch(customInput, () => {
 
 .test-rendered {
   padding: 8px 12px;
-  border: 1px solid var(--td-component-stroke, #e5e5e5);
-  border-radius: 6px;
-  background: var(--td-bg-color-container, #fff);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-container);
 }
 
 .stream-controls {
@@ -539,14 +591,14 @@ watch(customInput, () => {
 
 .btn {
   padding: 4px 16px;
-  border: 1px solid var(--td-component-stroke, #ccc);
-  border-radius: 4px;
-  background: var(--td-bg-color-container, #fff);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-xs);
+  background: var(--td-bg-color-container);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   &:hover {
-    background: var(--td-bg-color-container-hover, #f0f0f0);
+    background: var(--td-bg-color-container-hover);
   }
 
   &:disabled {
@@ -556,7 +608,7 @@ watch(customInput, () => {
 }
 
 .speed-label {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -570,9 +622,9 @@ watch(customInput, () => {
   width: 100%;
   padding: 10px;
   font-family: var(--app-font-family-mono);
-  font-size: 13px;
-  border: 1px solid var(--td-component-stroke, #ccc);
-  border-radius: 6px;
+  font-size: var(--app-text-md);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-sm);
   resize: vertical;
   box-sizing: border-box;
   margin-bottom: 12px;
@@ -588,7 +640,7 @@ watch(customInput, () => {
   }
 
   .action-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.55;
     color: var(--td-text-color-secondary);
   }

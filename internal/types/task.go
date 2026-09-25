@@ -29,19 +29,23 @@ const (
 // name "low" so tasks enqueued by older releases remain consumable during a
 // rolling deployment. New code uses the business-semantic constant.
 const (
-	QueueDefault     = "default"
+	QueueDefault = "default"
 	// QueueChatAttachment carries session-scoped chat attachment parsing. It
 	// lives in the core pool but with a higher weight than QueueDefault so
 	// interactive chat uploads are not starved by knowledge-base batch imports.
 	QueueChatAttachment = "chat_attachment"
 	QueuePostProcess    = "postprocess"
-	QueueSummary     = "summary"
-	QueueMultimodal  = "multimodal"
-	QueueGraph       = "graph"
-	QueueQuestion    = "question"
-	QueueSync        = "sync"
-	QueueMaintenance = "low"
-	QueueWiki        = "wiki"
+	QueueSummary        = "summary"
+	QueueMultimodal     = "multimodal"
+	QueueGraph          = "graph"
+	QueueQuestion       = "question"
+	QueueSync           = "sync"
+	QueueMaintenance    = "low"
+	QueueWiki           = "wiki"
+	// QueueMemory carries debounced long-term memory distillation. It sits in
+	// the enrichment pool because it is a background LLM call whose latency
+	// nobody is waiting on.
+	QueueMemory = "memory"
 )
 
 // QueueDefinition is the single source of truth for queue topology. Worker
@@ -69,11 +73,12 @@ var queueDefinitions = []QueueDefinition{
 		TypeKnowledgePostProcess,
 	}},
 	{Name: QueueSummary, Pool: WorkerPoolEnrichment, Weight: 2, SharedWeight: 2, TaskTypes: []string{
-		TypeSummaryGeneration, TypeDataTableSummary,
+		TypeSummaryGeneration, TypeDataTableSummary, TypeKnowledgeAutoTag, TypeKnowledgeBaseProfile,
 	}},
 	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeImageMultimodal}},
 	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeChunkExtract}},
 	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeQuestionGeneration}},
+	{Name: QueueMemory, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeMemoryExtract}},
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
@@ -241,12 +246,37 @@ const (
 	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
 	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
 	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
+	TypeKnowledgeAutoTag         = "knowledge:auto_tag"         // 文档自动关联知识库已有标签
+	TypeKnowledgeBaseProfile     = "kb:profile"                 // 知识库描述（画像）生成任务
 	TypeManualProcess            = "manual:process"             // 手工知识更新任务（cleanup + 重新索引）
 	TypeDataSourceSync           = "datasource:sync"            // 数据源同步任务
 	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
 	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
+	// TypeMemoryExtract 长期记忆抽取任务（会话轮次防抖后异步执行）
+	TypeMemoryExtract = "memory:extract"
 )
+
+// MemoryExtractPayload carries everything the background distillation task
+// needs. Scope (tenant + subject) travels in the payload rather than being
+// read from the worker context: asynq and the Lite executor both start from a
+// bare context, so anything the request knew and the payload does not carry is
+// simply gone by the time the handler runs.
+type MemoryExtractPayload struct {
+	TracingContext
+	TenantID  uint64 `json:"tenant_id"`
+	SubjectID string `json:"subject_id"`
+	SessionID string `json:"session_id"`
+	// MessageID is the assistant message that closed the triggering turn. It
+	// bounds the extraction window and is stored as the source of any item
+	// produced, so every memory can be traced back to a real message.
+	MessageID string `json:"message_id"`
+	// ChatModelID is the model the conversation itself used. The extraction
+	// task falls back to it when MemoryConfig.ExtractModelID is blank, which
+	// is what the settings UI promises.
+	ChatModelID string `json:"chat_model_id,omitempty"`
+	Language    string `json:"language,omitempty"`
+}
 
 // ExtractChunkPayload represents the extract chunk task payload
 type ExtractChunkPayload struct {
@@ -305,6 +335,8 @@ type FAQImportPayload struct {
 	Mode        string            `json:"mode"`
 	DryRun      bool              `json:"dry_run"`     // dry run 模式只验证不导入
 	EnqueuedAt  int64             `json:"enqueued_at"` // 任务入队时间戳，用于区分同一 TaskID 的不同次提交
+	InstanceID  string            `json:"instance_id,omitempty"`
+	Initiator   TaskInitiator     `json:"initiator,omitempty"`
 }
 
 // QuestionGenerationPayload represents the question generation task payload
@@ -358,6 +390,10 @@ type SummaryGenerationPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	Language        string `json:"language,omitempty"`
+	// Refresh marks an independently queued refresh after document metadata or
+	// chunk edits. Refresh tasks are not part of the parse attempt's pending
+	// subtask counter and update existing summary chunks in place.
+	Refresh bool `json:"refresh,omitempty"`
 	// Attempt links this task to the parent parse attempt so the worker
 	// can record a postprocess.summary subspan under the right attempt's
 	// postprocess stage. See QuestionGenerationPayload.Attempt notes.
@@ -367,10 +403,15 @@ type SummaryGenerationPayload struct {
 // KBClonePayload represents the knowledge base clone task payload
 type KBClonePayload struct {
 	TracingContext
-	TenantID uint64 `json:"tenant_id"`
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id"`
-	TargetID string `json:"target_id"`
+	TenantID  uint64        `json:"tenant_id"`
+	TaskID    string        `json:"task_id"`
+	SourceID  string        `json:"source_id"`
+	TargetID  string        `json:"target_id"`
+	Initiator TaskInitiator `json:"initiator,omitempty"`
+	// New clone destinations are reserved by the server at admission and
+	// created by the worker once. Retries retain both ID and creator.
+	CreateTarget bool   `json:"create_target,omitempty"`
+	CreatorID    string `json:"creator_id,omitempty"`
 }
 
 // IndexDeletePayload represents the index delete task payload
@@ -393,6 +434,7 @@ type KBDeletePayload struct {
 	TracingContext
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
+	DataSourceIDs    []string                `json:"data_source_ids,omitempty"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 	// VectorStoreID is the bound store snapshot taken at enqueue time (before
 	// soft-delete) so the async worker can resolve the right store. nil means
@@ -403,27 +445,32 @@ type KBDeletePayload struct {
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
+	TenantID        uint64        `json:"tenant_id"`
+	KnowledgeIDs    []string      `json:"knowledge_ids"`
+	Initiator       TaskInitiator `json:"initiator,omitempty"`
+	KnowledgeBaseID string        `json:"knowledge_base_id,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
 type KnowledgeListReparsePayload struct {
 	TracingContext
-	TenantID      uint64                     `json:"tenant_id"`
-	KnowledgeIDs  []string                   `json:"knowledge_ids"`
-	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	KnowledgeBaseID string                     `json:"knowledge_base_id,omitempty"`
+	TenantID        uint64                     `json:"tenant_id"`
+	KnowledgeIDs    []string                   `json:"knowledge_ids"`
+	ProcessConfig   *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	Initiator       TaskInitiator              `json:"initiator,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload
 type KnowledgeMovePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	TaskID       string   `json:"task_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
-	SourceKBID   string   `json:"source_kb_id"`
-	TargetKBID   string   `json:"target_kb_id"`
-	Mode         string   `json:"mode"` // "reuse_vectors" or "reparse"
+	TenantID     uint64        `json:"tenant_id"`
+	TaskID       string        `json:"task_id"`
+	KnowledgeIDs []string      `json:"knowledge_ids"`
+	SourceKBID   string        `json:"source_kb_id"`
+	TargetKBID   string        `json:"target_kb_id"`
+	Mode         string        `json:"mode"` // "reuse_vectors" or "reparse"
+	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task
@@ -463,6 +510,10 @@ type ImageMultimodalPayload struct {
 	ChunkID         string `json:"chunk_id"`         // parent text chunk
 	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
 	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
+	// EnableOCR and EnableCaption are whole-task switches applied on top of the
+	// image-action policy: a step runs only when both this switch and the
+	// policy allow it. Normal parsing leaves both true and lets the observed
+	// attributes decide.
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
 	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
@@ -475,6 +526,23 @@ type ImageMultimodalPayload struct {
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
+	// ImageAttrsEnabled selects which image pipeline the task runs — see
+	// PipelineModeFor and the PipelineMode constants. True is the
+	// attribute-observed pipeline: the describe round also observes image
+	// attributes, and the attribute policy decides whether OCR runs for it.
+	// False is the upstream behaviour: a plain caption, then OCR, no attribute
+	// observation. In flight tasks enqueued before the field existed read
+	// false, which is what they were enqueued for — the reason the flag travels
+	// in the payload rather than being re-read from the knowledge base at handle
+	// time.
+	ImageAttrsEnabled bool `json:"image_attrs_enabled,omitempty"`
+	// ImageActions is the attribute→work table, resolved from the KB config at
+	// enqueue time. A task without it — one already in flight when attribute
+	// observation shipped — falls back to the conservative policy: run OCR.
+	ImageActions ImageActionsConfig `json:"image_actions,omitempty"`
+	// SourceLocators place the image in the original file; copied onto the
+	// OCR and caption chunks built from it.
+	SourceLocators SourceLocators `json:"source_locators,omitempty"`
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.
@@ -485,6 +553,28 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
 	Attempt         int    `json:"attempt,omitempty"`
+}
+
+// KnowledgeAutoTagPayload identifies a document whose parsed content should be
+// classified against the latest set of existing tags in its knowledge base.
+type KnowledgeAutoTagPayload struct {
+	TracingContext
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeID     string `json:"knowledge_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Language        string `json:"language,omitempty"`
+	Attempt         int    `json:"attempt,omitempty"`
+}
+
+// KnowledgeBaseProfilePayload asks the worker to rebuild the generated
+// description of one knowledge base from its current document profiles.
+// Force bypasses the aggregate-hash short circuit (manual regeneration).
+type KnowledgeBaseProfilePayload struct {
+	TracingContext
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Language        string `json:"language,omitempty"`
+	Force           bool   `json:"force,omitempty"`
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

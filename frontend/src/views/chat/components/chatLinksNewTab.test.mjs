@@ -57,6 +57,23 @@ test('agent citations recover drawer references from retrieval tool events', () 
   )
 })
 
+test('wiki tool results use the right-side references drawer', () => {
+  assert.match(
+    agentStream,
+    /toolName === 'wiki_search' \|\| toolName === 'wiki_read_page'[\s\S]*?parseWikiToolReferences/,
+  )
+  assert.match(
+    agentStream,
+    /toolName === 'list_knowledge_chunks' \|\| toolName === 'wiki_read_source_doc'/,
+  )
+  assert.match(
+    agentStream,
+    /const isReferenceDrawerTool =[\s\S]*?toolName === 'wiki_search'[\s\S]*?toolName === 'wiki_read_page'[\s\S]*?toolName === 'wiki_read_source_doc'/,
+  )
+  assert.match(agentStream, /WIKI_EDIT_TOOL_NAMES\.has\(String\(toolName \|\| ''\)\)/)
+  assert.match(agentStream, /WIKI_ISSUE_TOOL_NAMES\.has\(String\(toolName \|\| ''\)\)/)
+})
+
 test('citation highlighting waits for drawer entry and only scrolls its own body', () => {
   assert.match(referenceDrawer, /@after-enter="handlePanelAfterEnter"/)
   assert.match(referenceDrawer, /if \(!panelEntered\.value\) return/)
@@ -67,6 +84,7 @@ test('citation highlighting waits for drawer entry and only scrolls its own body
 test('references drawer smoothly shifts the chat area while opening', () => {
   assert.match(referenceDrawer, /\.chat-references-panel \{[\s\S]*?position: fixed;/)
   assert.match(chatView, /'has-references-panel': referencesDrawerVisible/)
-  assert.match(chatView, /transition: padding-right 0\.3s cubic-bezier\(0\.22, 0\.61, 0\.36, 1\)/)
-  assert.match(chatView, /&\.has-references-panel:not\(\.is-embedded\)[\s\S]*?padding-right:\s*420px/)
+  assert.match(chatView, /transition: padding-right (?:0\.3s|var\(--app-motion-slow\)) cubic-bezier\(0\.22, 0\.61, 0\.36, 1\)/)
+  // The panel widens while showing an original document; 420px is the list width.
+  assert.match(chatView, /&\.has-references-panel:not\(\.is-embedded\)[\s\S]*?padding-right:\s*var\(--references-panel-width, 420px\)/)
 })

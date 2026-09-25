@@ -23,6 +23,8 @@ function fallbackText(type: string) {
       return 'N'
     case 'yuque':
       return 'Y'
+    case 'ima':
+      return 'I'
     default:
       return type.slice(0, 1).toUpperCase() || '?'
   }
@@ -56,7 +58,7 @@ function fallbackText(type: string) {
 }
 
 .ds-type-icon--inline {
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-component);
 }
 
@@ -66,7 +68,7 @@ function fallbackText(type: string) {
 }
 
 .ds-type-icon--inline .ds-type-icon-fallback {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
 }
@@ -85,7 +87,7 @@ function fallbackText(type: string) {
 }
 
 .ds-type-icon--badge .ds-type-icon-fallback {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   letter-spacing: 0.02em;
   color: inherit;

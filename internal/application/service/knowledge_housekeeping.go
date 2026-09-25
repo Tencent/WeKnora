@@ -20,12 +20,15 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -42,26 +45,46 @@ type HousekeepingService struct {
 	// inspector lets the sweep distinguish a genuinely orphaned row from
 	// one whose enrichment subtasks are merely backlogged behind a busy
 	// queue (no span heartbeat yet because no worker has picked them up).
-	// nil-safe — a nil inspector disables the queue check and the sweep
-	// falls back to the span/updated_at heuristics alone.
+	// nil-safe — a nil inspector disables only the transient queue check.
+	// Durable Wiki ownership in task_pending_ops is always probed through db,
+	// so the sweep never falls back to the span/updated_at heuristics alone.
 	inspector interfaces.TaskInspector
+	// task re-arms the wiki trigger for rows kept alive only by a durable
+	// Wiki op, which a lost trigger would otherwise strand. nil disables it.
+	task interfaces.TaskEnqueuer
 
 	mu      sync.Mutex
 	started bool
+
+	kickMu    sync.Mutex
+	wikiKicks map[string]time.Time
+
+	queuedMu  sync.Mutex
+	queuedIDs map[string]struct{}
+	queuedAt  time.Time
 }
+
+// queuedProbeTTL bounds how often QueuedWork rescans the queue; clients poll
+// far more often than a backlog changes.
+const queuedProbeTTL = time.Minute
 
 // NewHousekeepingService constructs a HousekeepingService. It does NOT start
 // the cron — call Start in the application bootstrap so a misconfigured
 // cron schedule cannot prevent the rest of the service from coming up.
 func NewHousekeepingService(
-	db *gorm.DB, cfg *config.Config, inspector interfaces.TaskInspector,
+	db *gorm.DB, cfg *config.Config, inspector interfaces.TaskInspector, task interfaces.TaskEnqueuer,
 ) *HousekeepingService {
 	return &HousekeepingService{
 		db:        db,
 		cfg:       cfg,
 		inspector: inspector,
+		task:      task,
+		wikiKicks: make(map[string]time.Time),
+		// SkipIfStillRunning: a sweep over a large backlog can outlast the
+		// 5-minute tick, and overlapping sweeps only repeat the same scans.
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
+			cron.SkipIfStillRunning(cron.DefaultLogger),
 		)),
 	}
 }
@@ -144,7 +167,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		return
 	}
 
-	stuck := h.filterByLastSpanActivity(ctx, candidates, cutoff)
+	stuck, heartbeat := h.filterByLastSpanActivity(ctx, candidates, cutoff)
 	spanSkipped := len(candidates) - len(stuck)
 
 	// Second-stage gate: a row can have a stale span heartbeat yet still
@@ -155,28 +178,22 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// positive users hit under heavy upload bursts. Drop any candidate
 	// that still has a queued/active task referencing it; only rows with
 	// nothing left in the queue are treated as genuinely orphaned.
-	stuck, queueSkipped := h.filterOutQueued(ctx, stuck)
+	stuck, queueSkipped, wikiHeld := h.filterOutQueued(ctx, stuck)
+	// A Wiki op protects its row only for so long. Re-arming covers a lost
+	// trigger, but a consumer that fails before claiming anything never
+	// consumes the op, and the row would sit in "finalizing" forever.
+	wikiHeld, wikiExpired := splitExpiredWikiHolds(wikiHeld, heartbeat, time.Now().Add(-wikiHoldLimit))
+	queueSkipped -= len(wikiExpired)
+	stuck = append(stuck, wikiExpired...)
+	h.rearmWikiTriggers(ctx, wikiHeld, threshold)
 
 	if len(stuck) > 0 {
-		stuckIDs := make([]string, 0, len(stuck))
-		for _, k := range stuck {
-			stuckIDs = append(stuckIDs, k.ID)
-		}
-		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
-			Where("id IN ? AND parse_status IN ?", stuckIDs,
-				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
-			Updates(map[string]interface{}{
-				"parse_status":           types.ParseStatusFailed,
-				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
-				"pending_subtasks_count": 0,
-			})
-		if res.Error != nil {
-			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed: %v", res.Error)
-		} else if res.RowsAffected > 0 {
+		if recovered := h.recoverStalled(ctx, stuck, heartbeat, threshold); recovered > 0 {
 			logger.Infof(ctx, "[Housekeeping] recovered %d stuck knowledge rows (threshold=%s)",
-				res.RowsAffected, threshold)
+				recovered, threshold)
 		}
 	}
+	h.dropExpiredWikiOps(ctx, wikiExpired)
 	if spanSkipped > 0 {
 		// Visibility into "we considered killing N rows but their
 		// span tree showed they're still progressing". Ops can grep
@@ -209,6 +226,154 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	} else if resSummary.RowsAffected > 0 {
 		logger.Infof(ctx, "[Housekeeping] recovered %d stuck summary rows", resSummary.RowsAffected)
 	}
+	h.recoverStrandedPendingSummaries(ctx, summaryCutoff)
+
+	// Sweep C: rows stuck in "deleting" whose delete task no longer exists
+	// (issues #3338/#3345). The delete dead-letter callback only recovers
+	// rows that are still "deleting" when retries exhaust; a worker death
+	// mid-delete or a lost queue leaves the row hidden from the document
+	// list forever. Same recovery contract as Sweep A: flip to failed with
+	// a clear error so the row becomes visible and actionable (the user's
+	// delete intent can then be retried; the delete executor is idempotent
+	// and plans by row ID, so a late-arriving task still finishes cleanly).
+	//
+	// Liveness gate: a backlogged delete is not stranded — probe the queue
+	// for a live knowledge:list_delete covering the row before touching it.
+	// A nil inspector (nothing wired at all) defers every candidate to the
+	// next sweep: we cannot tell backlog from orphan without it, and
+	// wrongly failing a live delete is visible to users, while waiting one
+	// more interval is not. A probe error defers that single row.
+	if h.inspector != nil {
+		var strandedDeletes []types.Knowledge
+		if err := h.db.WithContext(ctx).
+			Where("parse_status = ? AND updated_at < ?", types.ParseStatusDeleting, cutoff).
+			Find(&strandedDeletes).Error; err != nil {
+			logger.Warnf(ctx, "[Housekeeping] deleting candidate query failed: %v", err)
+		} else {
+			recoveredDeletes := int64(0)
+			for _, k := range strandedDeletes {
+				queued, err := h.inspector.HasQueuedDeleteTasksForKnowledge(ctx, k.ID)
+				if err != nil {
+					logger.Warnf(ctx,
+						"[Housekeeping] delete-task probe failed for %s: %v (deferring to next sweep)",
+						k.ID, err)
+					continue
+				}
+				if queued {
+					continue
+				}
+				res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+					Where("id = ? AND parse_status = ?", k.ID, types.ParseStatusDeleting).
+					Updates(map[string]interface{}{
+						"parse_status":  types.ParseStatusFailed,
+						"error_message": "delete task stranded (no queued/active delete task) > " + threshold.String() + ", recovered by housekeeping",
+					})
+				if res.Error != nil {
+					logger.Warnf(ctx, "[Housekeeping] delete sweep update failed for %s: %v", k.ID, res.Error)
+					continue
+				}
+				recoveredDeletes += res.RowsAffected
+			}
+			if recoveredDeletes > 0 {
+				logger.Infof(ctx,
+					"[Housekeeping] recovered %d stranded deleting row(s) (threshold=%s)",
+					recoveredDeletes, threshold)
+			}
+		}
+	}
+}
+
+// wikiHoldLimit bounds how long a durable Wiki ingest op keeps its row out of
+// the stuck sweep. It is far above any healthy Wiki backlog wait; past it the
+// op is treated as one its consumer will never take.
+const wikiHoldLimit = 48 * time.Hour
+
+// splitExpiredWikiHolds separates Wiki-held rows whose last progress (row
+// update or span heartbeat) predates cutoff.
+func splitExpiredWikiHolds(
+	held []types.Knowledge, heartbeat map[string]time.Time, cutoff time.Time,
+) (kept, expired []types.Knowledge) {
+	for _, k := range held {
+		last := k.UpdatedAt
+		if beat, ok := heartbeat[k.ID]; ok && beat.After(last) {
+			last = beat
+		}
+		if last.Before(cutoff) {
+			expired = append(expired, k)
+			continue
+		}
+		kept = append(kept, k)
+	}
+	return kept, expired
+}
+
+// dropExpiredWikiOps deletes the Wiki ingest ops of rows the sweep just failed
+// past wikiHoldLimit, so the consumer does not later spend a model call on a
+// document that is no longer waiting for it.
+func (h *HousekeepingService) dropExpiredWikiOps(ctx context.Context, expired []types.Knowledge) {
+	if len(expired) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(expired))
+	for _, k := range expired {
+		ids = append(ids, k.ID)
+	}
+	res := h.db.WithContext(ctx).
+		Where("task_type = ? AND scope = ? AND op = ? AND dedup_key IN ?",
+			wikiTaskType, wikiTaskScope, WikiOpIngest, ids).
+		Where("dedup_key IN (?)", h.db.Model(&types.Knowledge{}).Select("id").
+			Where("id IN ? AND parse_status = ?", ids, types.ParseStatusFailed)).
+		Delete(&types.TaskPendingOp{})
+	if res.Error != nil {
+		logger.Warnf(ctx, "[Housekeeping] dropping expired wiki ops failed: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		logger.Infof(ctx, "[Housekeeping] dropped %d wiki ingest op(s) held past %s", res.RowsAffected, wikiHoldLimit)
+	}
+}
+
+// recoverStrandedPendingSummaries fails summaries left "pending" on rows
+// whose parse run is over. Only the summary task moves a summary out of
+// "pending"; when it gives up without writing a status (knowledge base or
+// model gone, a refresh failing before it starts) the row keeps a summary
+// spinner, and the UI polls it, forever. A row whose summary task is still
+// queued is a backlog and is left alone.
+func (h *HousekeepingService) recoverStrandedPendingSummaries(ctx context.Context, cutoff time.Time) {
+	var rows []types.Knowledge
+	if err := h.db.WithContext(ctx).Select("id").
+		Where("summary_status = ? AND parse_status IN ? AND updated_at < ?",
+			types.SummaryStatusPending,
+			[]string{types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled},
+			cutoff).
+		Find(&rows).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] pending summary query failed: %v", err)
+		return
+	}
+	var recovered int64
+	for _, k := range rows {
+		if h.inspector != nil {
+			queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
+			if err != nil {
+				logger.Warnf(ctx, "[Housekeeping] summary queue probe failed for %s: %v (deferring)", k.ID, err)
+				continue
+			}
+			if queued {
+				continue
+			}
+		}
+		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+			Where("id = ? AND summary_status = ?", k.ID, types.SummaryStatusPending).
+			Update("summary_status", types.SummaryStatusFailed)
+		if res.Error != nil {
+			logger.Warnf(ctx, "[Housekeeping] pending summary update failed for %s: %v", k.ID, res.Error)
+			continue
+		}
+		recovered += res.RowsAffected
+	}
+	if recovered > 0 {
+		logger.Infof(ctx, "[Housekeeping] recovered %d stranded pending summary row(s)", recovered)
+	}
 }
 
 // filterByLastSpanActivity returns the subset of candidates whose most
@@ -216,9 +381,11 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 // with no span rows at all also pass through (they're lite-mode or
 // pre-instrumentation tasks; the simple updated_at check already proved
 // them stuck and we have no heartbeat to override that).
-func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, candidates []types.Knowledge, cutoff time.Time) []types.Knowledge {
+func (h *HousekeepingService) filterByLastSpanActivity(
+	ctx context.Context, candidates []types.Knowledge, cutoff time.Time,
+) ([]types.Knowledge, map[string]time.Time) {
 	if len(candidates) == 0 {
-		return candidates
+		return candidates, nil
 	}
 	ids := make([]string, 0, len(candidates))
 	for _, k := range candidates {
@@ -248,11 +415,11 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 		// heartbeat (so all candidates are "stuck"). This matches
 		// the previous-version behaviour and never under-recovers.
 		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (will fail safe and recover all candidates)", err)
-		return candidates
+		return candidates, nil
 	}
 	heartbeat := make(map[string]time.Time, len(beats))
 	for _, b := range beats {
-		if t, ok := parseHeartbeatTime(b.LastSeen); ok {
+		if t, ok := apprepo.ParseAggregateTime(b.LastSeen); ok {
 			heartbeat[b.KnowledgeID] = t
 		}
 	}
@@ -265,26 +432,280 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 		}
 		out = append(out, k)
 	}
-	return out
+	return out, heartbeat
 }
 
-// filterOutQueued returns the subset of candidates that have NO task left
-// in the queue backend, plus a count of how many were dropped because a
-// task still references them. A dropped candidate is "backlogged, not
-// orphaned" — its enrichment subtasks are waiting for a worker, so the
-// missing span heartbeat is expected and recovering it would be a false
-// positive. When no inspector is wired (nil) the gate is a pass-through
-// so behaviour matches the pre-existing span-only sweep. On inspector
-// error we fail safe by KEEPING the candidate as stuck (recover it),
-// matching the span heartbeat query's fail-safe direction.
+// recoverStalled fails each stuck row with a message naming where it stalled
+// and when it last made progress, and closes its open spans so the timeline
+// points at that spot instead of spinning. heartbeat is nil when the span
+// heartbeat query failed; the message then gives no time rather than the
+// row's updated_at, which can predate the last span write. Returns rows
+// recovered.
+func (h *HousekeepingService) recoverStalled(
+	ctx context.Context, stuck []types.Knowledge, heartbeat map[string]time.Time, threshold time.Duration,
+) int64 {
+	ids := make([]string, 0, len(stuck))
+	for _, k := range stuck {
+		ids = append(ids, k.ID)
+	}
+	sites := h.locateStalls(ctx, ids)
+
+	var recovered int64
+	for _, k := range stuck {
+		site := sites[k.ID]
+		msg := stallMessage(k, site, heartbeat, threshold)
+		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+			Where("id = ? AND parse_status IN ?", k.ID,
+				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
+			Updates(map[string]interface{}{
+				"parse_status":           types.ParseStatusFailed,
+				"error_message":          msg,
+				"pending_subtasks_count": 0,
+				// The run's summary task is gone with it; leaving the
+				// summary pending keeps a spinner on a failed row.
+				"summary_status": summaryStatusClosedExpr(types.SummaryStatusFailed),
+			})
+		if res.Error != nil {
+			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed for %s: %v", k.ID, res.Error)
+			continue
+		}
+		if res.RowsAffected == 0 {
+			continue
+		}
+		recovered += res.RowsAffected
+		if site != nil {
+			h.closeStalledSpans(ctx, k.ID, site, msg)
+		}
+	}
+	return recovered
+}
+
+// stallSite is where a stuck row stopped, read from its latest attempt.
+type stallSite struct {
+	// stages the run stalled in, in pipeline order.
+	stages []string
+	// tasks names the stalled spans when they are below a finished stage,
+	// e.g. postprocess.summary while the row sits in finalizing.
+	tasks []string
+	// open holds the attempt's pending/running spans; those in failed are
+	// marked failed, the rest cancelled.
+	open   []types.KnowledgeProcessingSpan
+	failed map[int64]bool
+}
+
+// locateStalls finds each row's stall site. The stalled spans are the running
+// stages; when no stage is running (post-process closes its stage once the
+// enrichment tasks are fanned out) they are the innermost running spans, and
+// the stage is the one they belong to. Best-effort: a query error yields no
+// sites and the rows are still failed.
+func (h *HousekeepingService) locateStalls(ctx context.Context, ids []string) map[string]*stallSite {
+	var rows []types.KnowledgeProcessingSpan
+	if err := h.db.WithContext(ctx).
+		Select("id", "knowledge_id", "attempt", "span_id", "parent_span_id", "name", "kind", "status", "started_at").
+		Where("knowledge_id IN ?", ids).
+		Order("id").
+		Find(&rows).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] stalled span query failed: %v", err)
+		return nil
+	}
+	latest := make(map[string]int, len(ids))
+	for _, r := range rows {
+		if r.Attempt > latest[r.KnowledgeID] {
+			latest[r.KnowledgeID] = r.Attempt
+		}
+	}
+	byKnowledge := make(map[string][]types.KnowledgeProcessingSpan, len(ids))
+	for _, r := range rows {
+		if r.Attempt == latest[r.KnowledgeID] {
+			byKnowledge[r.KnowledgeID] = append(byKnowledge[r.KnowledgeID], r)
+		}
+	}
+	sites := make(map[string]*stallSite, len(byKnowledge))
+	for kid, spans := range byKnowledge {
+		sites[kid] = stallSiteOf(spans)
+	}
+	return sites
+}
+
+func stallSiteOf(spans []types.KnowledgeProcessingSpan) *stallSite {
+	bySpanID := make(map[string]types.KnowledgeProcessingSpan, len(spans))
+	runningChildren := make(map[string]int)
+	for _, sp := range spans {
+		bySpanID[sp.SpanID] = sp
+		if sp.Status == types.SpanStatusRunning && sp.ParentSpanID != "" {
+			runningChildren[sp.ParentSpanID]++
+		}
+	}
+	stageOf := func(sp types.KnowledgeProcessingSpan) string {
+		for depth := 0; depth < 64; depth++ {
+			if sp.Kind == types.SpanKindStage {
+				return sp.Name
+			}
+			parent, ok := bySpanID[sp.ParentSpanID]
+			if !ok {
+				return ""
+			}
+			sp = parent
+		}
+		return ""
+	}
+
+	site := &stallSite{failed: make(map[int64]bool)}
+	var stalled []types.KnowledgeProcessingSpan
+	for _, sp := range spans {
+		if sp.Status == types.SpanStatusPending || sp.Status == types.SpanStatusRunning {
+			site.open = append(site.open, sp)
+		}
+		if sp.Status == types.SpanStatusRunning && sp.Kind == types.SpanKindStage {
+			stalled = append(stalled, sp)
+		}
+	}
+	if len(stalled) == 0 {
+		for _, sp := range spans {
+			innermost := runningChildren[sp.SpanID] == 0
+			if sp.Status == types.SpanStatusRunning && sp.Kind != types.SpanKindRoot && innermost {
+				stalled = append(stalled, sp)
+				site.tasks = append(site.tasks, sp.Name)
+			}
+		}
+	}
+	seen := make(map[string]bool)
+	for _, sp := range stalled {
+		site.failed[sp.ID] = true
+		if stage := stageOf(sp); stage != "" {
+			seen[stage] = true
+		}
+	}
+	for _, stage := range types.AllStages {
+		if seen[stage] {
+			site.stages = append(site.stages, stage)
+		}
+	}
+	return site
+}
+
+// stallMessage is the error_message for a recovered row, e.g. "task stuck in
+// finalizing at postprocess stage (postprocess.summary): no progress since
+// 2026-09-22T09:37:54Z (> 2h10m0s), recovered by housekeeping".
+func stallMessage(
+	k types.Knowledge, site *stallSite, heartbeat map[string]time.Time, threshold time.Duration,
+) string {
+	where := ""
+	if site != nil && len(site.stages) > 0 {
+		where = " at " + strings.Join(site.stages, "/") + " stage"
+		if len(site.tasks) > 0 {
+			tasks := site.tasks
+			if len(tasks) > 3 {
+				tasks = append(tasks[:3:3], "…")
+			}
+			where += " (" + strings.Join(tasks, ", ") + ")"
+		}
+	}
+	if heartbeat == nil {
+		return fmt.Sprintf("task stuck in %s%s: no progress for > %s, recovered by housekeeping",
+			k.ParseStatus, where, threshold)
+	}
+	last := k.UpdatedAt
+	if beat, ok := heartbeat[k.ID]; ok && beat.After(last) {
+		last = beat
+	}
+	return fmt.Sprintf("task stuck in %s%s: no progress since %s (> %s), recovered by housekeeping",
+		k.ParseStatus, where, last.UTC().Format(time.RFC3339), threshold)
+}
+
+// closeStalledSpans fails the site's stalled spans and cancels its other open
+// spans, all with TASK_STALLED and a duration, the way FailSpan closes a span.
+// Best-effort: the row is already failed.
+func (h *HousekeepingService) closeStalledSpans(
+	ctx context.Context, knowledgeID string, site *stallSite, msg string,
+) {
+	now := time.Now()
+	for _, sp := range site.open {
+		status := types.SpanStatusCancelled
+		if site.failed[sp.ID] {
+			status = types.SpanStatusFailed
+		}
+		var durationMs int64
+		if sp.StartedAt != nil {
+			durationMs = now.Sub(*sp.StartedAt).Milliseconds()
+		}
+		if err := h.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+			Where("id = ? AND status IN ?", sp.ID, []string{types.SpanStatusPending, types.SpanStatusRunning}).
+			Updates(map[string]interface{}{
+				"status":        status,
+				"error_code":    werrors.ErrCodeTaskStalled,
+				"error_message": msg,
+				"finished_at":   now,
+				"duration_ms":   durationMs,
+				"updated_at":    now,
+			}).Error; err != nil {
+			logger.Warnf(ctx, "[Housekeeping] close stalled span %s of %s failed: %v", sp.SpanID, knowledgeID, err)
+		}
+	}
+}
+
+// filterOutQueued returns the subset of candidates that have NO work left
+// in either the durable pending-op table or the queue backend, plus a count
+// of how many were dropped because work still references them. A dropped
+// candidate is "backlogged, not orphaned" — its enrichment subtasks are
+// waiting for a worker, so the missing span heartbeat is expected and
+// recovering it would be a false positive.
+//
+// The asynq inspector alone cannot answer this for Wiki. Wiki ingest work is
+// durable per document in task_pending_ops (dedup_key = knowledge ID), while
+// asynq only carries a per-KB wake-up trigger whose payload has no knowledge
+// ID — and TypeWikiIngest is deliberately absent from the inspector's
+// taskTypesForKnowledgeCancel set anyway. So HasQueuedTasksForKnowledge
+// structurally reports "nothing queued" for a document whose only outstanding
+// work is a queued Wiki ingest, and the sweep force-fails a perfectly healthy
+// row. Probe the durable table directly before consulting the inspector.
+//
+// When no inspector is wired (nil) the durable gate still applies; only the
+// transient queue check is skipped. On probe error we fail safe, but in
+// opposite directions by design: an inspector error KEEPS the candidate as
+// stuck (matching the span heartbeat query), whereas a durable-table error
+// DEFERS every candidate to the next sweep — we cannot tell backlog from
+// orphan without it, and wrongly failing a live document is not recoverable
+// by the user, while waiting one more interval is.
 func (h *HousekeepingService) filterOutQueued(
 	ctx context.Context, candidates []types.Knowledge,
-) (kept []types.Knowledge, skipped int) {
-	if h.inspector == nil || len(candidates) == 0 {
-		return candidates, 0
+) (kept []types.Knowledge, skipped int, wikiHeld []types.Knowledge) {
+	if len(candidates) == 0 {
+		return candidates, 0, nil
 	}
+
+	ids := make([]string, 0, len(candidates))
+	for _, k := range candidates {
+		ids = append(ids, k.ID)
+	}
+	var durableIDs []string
+	if err := h.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("task_type = ? AND scope = ? AND op = ? AND dedup_key IN ?",
+			wikiTaskType, wikiTaskScope, WikiOpIngest, ids).
+		Distinct("dedup_key").
+		Pluck("dedup_key", &durableIDs).Error; err != nil {
+		logger.Warnf(ctx,
+			"[Housekeeping] durable queue probe failed: %v (deferring %d candidate(s))",
+			err, len(candidates))
+		return candidates[:0], len(candidates), nil
+	}
+	durable := make(map[string]struct{}, len(durableIDs))
+	for _, id := range durableIDs {
+		durable[id] = struct{}{}
+	}
+
 	out := candidates[:0]
 	for _, k := range candidates {
+		if _, ok := durable[k.ID]; ok {
+			skipped++
+			wikiHeld = append(wikiHeld, k)
+			continue
+		}
+		if h.inspector == nil {
+			out = append(out, k)
+			continue
+		}
 		queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
 		if err != nil {
 			logger.Warnf(ctx,
@@ -298,31 +719,103 @@ func (h *HousekeepingService) filterOutQueued(
 		}
 		out = append(out, k)
 	}
-	return out, skipped
+	return out, skipped, wikiHeld
 }
 
-// parseHeartbeatTime accepts the timestamp formats Postgres and SQLite
-// emit for a TIMESTAMP column read back through MAX(). Returns false if
-// none parse — the caller treats unparseable rows as "no heartbeat",
-// which fails safe (the row gets recovered as stuck rather than
-// silently preserved).
-func parseHeartbeatTime(s string) (time.Time, bool) {
-	if s == "" {
-		return time.Time{}, false
+// QueuedWork reports which of ids still have work waiting in the queue or in
+// the durable Wiki table, i.e. are backlogged rather than stuck, using the
+// same probes as the sweep. The queue side is one shared scan (see
+// queuedSnapshot), so answering a whole page costs one DB query. An error
+// means the answer is unknown.
+func (h *HousekeepingService) QueuedWork(ctx context.Context, ids []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(ids))
+	if len(ids) == 0 {
+		return out, nil
 	}
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05.999999",
-		"2006-01-02 15:04:05",
-	} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, true
+	var durableIDs []string
+	if err := h.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("task_type = ? AND scope = ? AND op = ? AND dedup_key IN ?",
+			wikiTaskType, wikiTaskScope, WikiOpIngest, ids).
+		Distinct("dedup_key").
+		Pluck("dedup_key", &durableIDs).Error; err != nil {
+		return nil, fmt.Errorf("durable queue probe: %w", err)
+	}
+	queued, err := h.queuedSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		_, out[id] = queued[id]
+	}
+	for _, id := range durableIDs {
+		out[id] = true
+	}
+	return out, nil
+}
+
+// queuedSnapshot returns the knowledge IDs referenced by queued tasks. One
+// scan of the whole queue serves every caller for queuedProbeTTL; concurrent
+// callers wait for the scan in flight rather than starting their own. A
+// failed scan is not cached.
+func (h *HousekeepingService) queuedSnapshot(ctx context.Context) (map[string]struct{}, error) {
+	if h.inspector == nil {
+		return nil, nil
+	}
+	h.queuedMu.Lock()
+	defer h.queuedMu.Unlock()
+	if h.queuedIDs != nil && time.Since(h.queuedAt) < queuedProbeTTL {
+		return h.queuedIDs, nil
+	}
+	ids, err := h.inspector.QueuedKnowledgeIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("queue probe: %w", err)
+	}
+	h.queuedIDs, h.queuedAt = ids, time.Now()
+	return ids, nil
+}
+
+// rearmWikiTriggers enqueues one wiki ingest trigger per KB whose stale rows
+// are held only by durable Wiki ops. The trigger is ephemeral: once lost (or
+// archived after its retries), nothing wakes the consumer until a restart or
+// another upload, and the row sits in "finalizing" indefinitely. A KB is
+// re-armed at most once per threshold so a genuine backlog is not flooded.
+func (h *HousekeepingService) rearmWikiTriggers(
+	ctx context.Context, held []types.Knowledge, threshold time.Duration,
+) {
+	if h.task == nil || len(held) == 0 {
+		return
+	}
+	h.kickMu.Lock()
+	defer h.kickMu.Unlock()
+	now := time.Now()
+	for kbID, last := range h.wikiKicks {
+		if now.Sub(last) >= threshold {
+			delete(h.wikiKicks, kbID)
 		}
 	}
-	return time.Time{}, false
+	rearmed := 0
+	for _, k := range held {
+		if k.KnowledgeBaseID == "" {
+			continue
+		}
+		if _, recent := h.wikiKicks[k.KnowledgeBaseID]; recent {
+			continue
+		}
+		triggerCtx := ctx
+		if lang := WikiPendingLanguage(ctx, h.db, k.TenantID, k.KnowledgeBaseID); lang != "" {
+			triggerCtx = context.WithValue(ctx, types.LanguageContextKey, lang)
+		}
+		if err := enqueueWikiIngestTrigger(triggerCtx, h.task, k.TenantID, k.KnowledgeBaseID); err != nil {
+			logger.Warnf(ctx, "[Housekeeping] re-arm wiki trigger for KB %s failed: %v", k.KnowledgeBaseID, err)
+			continue
+		}
+		h.wikiKicks[k.KnowledgeBaseID] = now
+		rearmed++
+	}
+	if rearmed > 0 {
+		logger.Infof(ctx, "[Housekeeping] re-armed wiki ingest trigger for %d knowledge base(s)", rearmed)
+	}
 }
 
 // staleThreshold returns how long a "processing" row may sit untouched

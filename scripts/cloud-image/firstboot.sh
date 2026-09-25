@@ -60,7 +60,6 @@ DB_PWD=$(genpw)
 REDIS_PWD=$(genpw)
 JWT=$(genpw)$(genpw)
 SYS_AES=$(gen32)
-TENANT_AES=$(gen32)
 
 # 用 | 作 sed 分隔符避免冲突; 仅替换以 KEY= 开头的行
 replace() {
@@ -76,7 +75,6 @@ replace DB_PASSWORD     "${DB_PWD}"
 replace REDIS_PASSWORD  "${REDIS_PWD}"
 replace JWT_SECRET      "${JWT}"
 replace SYSTEM_AES_KEY  "${SYS_AES}"
-replace TENANT_AES_KEY  "${TENANT_AES}"
 replace GIN_MODE        "release"
 
 # 把 prepare.sh 阶段记录在 .cloud-image-meta 里的 WEKNORA_REF 还原为 .env 的
@@ -124,7 +122,6 @@ cat >"${CRED_FILE}" <<INFO
   REDIS_PASSWORD  = ${REDIS_PWD}
   JWT_SECRET      = ${JWT}
   SYSTEM_AES_KEY  = ${SYS_AES}
-  TENANT_AES_KEY  = ${TENANT_AES}
 
 注意:
   - 本文件只反映首启时刻的密钥, 后续以 ${ENV_FILE} 为准。

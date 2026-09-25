@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -51,6 +52,9 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 	if c.token == "" {
 		return &types.ReadResult{Error: "PaddleOCR-VL Cloud token is not configured"}, nil
 	}
+	if err := utils.ValidateURLForSSRF(c.baseURL); err != nil {
+		return &types.ReadResult{Error: fmt.Sprintf("PaddleOCR-VL Cloud base URL blocked by SSRF policy: %v", err)}, nil
+	}
 
 	content := req.FileContent
 	if len(content) == 0 {
@@ -70,10 +74,12 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud poll: %w", err)
 	}
 
-	mdContent, imagesURL, err := c.fetchResults(jsonlURL)
+	mdContent, imagesURL, layoutUnits, err := c.fetchResults(jsonlURL)
 	if err != nil {
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud fetch results: %w", err)
 	}
+
+	mdContent = NormalizeHTMLTables(mdContent)
 
 	imageRefs := c.downloadImages(mdContent, imagesURL)
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
@@ -84,6 +90,7 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
+		SourceBlocks:    paddleOCRVLSourceBlocks(mdContent, layoutUnits, req.FileType),
 	}, nil
 }
 
@@ -247,35 +254,32 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 
 type paddleOCRVLCloudResultLine struct {
 	Result struct {
-		LayoutParsingResults []struct {
-			Markdown struct {
-				Text   string            `json:"text"`
-				Images map[string]string `json:"images"`
-			} `json:"markdown"`
-		} `json:"layoutParsingResults"`
+		LayoutParsingResults []paddleOCRVLPage `json:"layoutParsingResults"`
 	} `json:"result"`
 }
 
-func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[string]string, error) {
+func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[string]string, []sourceloc.Unit, error) {
 	if err := utils.ValidateURLForSSRF(jsonlURL); err != nil {
-		return "", nil, fmt.Errorf("jsonl URL blocked by SSRF check: %v", err)
+		return "", nil, nil, fmt.Errorf("jsonl URL blocked by SSRF check: %v", err)
 	}
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
 	resp, err := client.Get(jsonlURL)
 	if err != nil {
-		return "", nil, fmt.Errorf("download jsonl: %w", err)
+		return "", nil, nil, fmt.Errorf("download jsonl: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("download jsonl status %d", resp.StatusCode)
+		return "", nil, nil, fmt.Errorf("download jsonl status %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("read jsonl body: %w", err)
+		return "", nil, nil, fmt.Errorf("read jsonl body: %w", err)
 	}
 
 	texts := make([]string, 0)
 	images := make(map[string]string)
+	var units []sourceloc.Unit
+	pageNumber := 0
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -287,6 +291,8 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 			continue
 		}
 		for _, p := range parsed.Result.LayoutParsingResults {
+			pageNumber++
+			units = append(units, paddleOCRVLPageUnits(pageNumber, p)...)
 			if t := strings.TrimSpace(p.Markdown.Text); t != "" {
 				texts = append(texts, p.Markdown.Text)
 			}
@@ -299,7 +305,7 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL Cloud] fetched %d page(s), images=%d", len(texts), len(images))
-	return strings.Join(texts, "\n\n"), images, nil
+	return strings.Join(texts, "\n\n"), images, units, nil
 }
 
 // downloadImages fetches each referenced image URL and builds ImageRef entries.

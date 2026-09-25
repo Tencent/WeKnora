@@ -1,7 +1,49 @@
 import { get, post, postUpload, put, del } from '../../utils/request';
 import i18n from '@/i18n'
+import { ModelInUseError, modelInUseErrorFromRequest } from './modelUsage'
+
+export * from './modelUsage'
 
 const t = (key: string) => i18n.global.t(key)
+
+// Protocol-neutral thinking level. Mirrors internal/models/api.ReasoningEffort.
+export type ReasoningEffortLevel =
+  | 'off'
+  | 'auto'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+
+// Catalog view of a saved chat/VLM model. Mirrors internal/models/catalog.Capabilities.
+// thinking_levels: empty array = the model cannot be asked to think.
+export interface ModelCapabilities {
+  provider: string;
+  api: string;
+  cataloged: boolean;
+  reasoning: boolean;
+  thinking_levels: ReasoningEffortLevel[];
+  thinking_format: string;
+  input?: string[];
+  context_window?: number;
+  max_output_tokens?: number;
+  max_tokens_field?: string;
+}
+
+// Per-row override of a catalog entry. Mirrors internal/types.ModelSpecOverride.
+// compat is the flat, protocol-specific object defined in
+// internal/models/api/*_settings.go (free-form JSON).
+export interface ModelSpecOverride {
+  api?: string;
+  reasoning?: boolean;
+  input?: string[];
+  context_window?: number;
+  max_output_tokens?: number;
+  thinking_levels?: Record<string, string | null>;
+  compat?: Record<string, unknown>;
+}
 
 // 模型类型定义
 export interface ModelConfig {
@@ -28,6 +70,9 @@ export interface ModelConfig {
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+    // 对话/VLM 的上下文窗口（token）。0 或不填表示使用后端默认 200000。
+    context_window?: number;
+    max_output_tokens?: number;
     // 后台任务（入库/富化）对该模型的并发上限，按模型 ID 全副本共享。
     // 0 或不填表示沿用全局默认（model.max_concurrency）；仅对 chat/embedding/vllm 生效。
     max_concurrency?: number;
@@ -37,7 +82,12 @@ export interface ModelConfig {
     // kept on the type so create-mode payloads can still carry them in the
     // initial POST body.
     app_secret?: string;
+    // Per-model catalog override (protocol, limits, protocol compat knobs).
+    spec?: ModelSpecOverride;
   };
+  // Catalog view (chat / VLM remote models only): protocol, thinking levels,
+  // context window. Computed by the backend from provider + name + overrides.
+  capabilities?: ModelCapabilities;
   is_default?: boolean;
   is_builtin?: boolean;
   status?: string;
@@ -135,11 +185,25 @@ export function deleteModel(id: string): Promise<void> {
         if (response.success) {
           resolve();
         } else {
+          const conflict = modelInUseErrorFromRequest(response)
+          if (conflict) {
+            reject(conflict)
+            return
+          }
           reject(new Error(response.message || t('error.model.deleteFailed')));
         }
       })
       .catch((error: any) => {
         console.error('Failed to delete model:', error);
+        if (error instanceof ModelInUseError) {
+          reject(error)
+          return
+        }
+        const conflict = modelInUseErrorFromRequest(error)
+        if (conflict) {
+          reject(conflict)
+          return
+        }
         reject(error);
       });
   });
@@ -151,6 +215,8 @@ export interface ModelDebugOptions {
   top_p?: number
   max_tokens?: number
   thinking?: boolean
+  // Graded thinking level; takes precedence over the boolean when set.
+  reasoning_effort?: ReasoningEffortLevel | string
 }
 
 export interface ModelDebugResult {

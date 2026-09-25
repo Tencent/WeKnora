@@ -2,7 +2,7 @@
 services:
   # 只启动依赖的基础设施服务
   postgres:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: paradedb/paradedb:v0.22.6-pg17
     container_name: WeKnora-postgres-dev
     ports:
       - "${DB_PORT:-5432}:5432"
@@ -15,7 +15,7 @@ services:
     networks:
       - WeKnora-network-dev
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 10s
       retries: 3
@@ -82,7 +82,7 @@ services:
       - full
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: WeKnora-minio-dev
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -122,7 +122,7 @@ services:
   # OpenSearch k-NN (Phase 3 driver). Single-node dev profile with the
   # security plugin disabled → plain HTTP on :9200, no auth/TLS. The image
   # bundles the opensearch-knn plugin. For production use a secured,
-  # multi-node cluster. See docs/dev/opensearch-integration-test.md.
+  # multi-node cluster. See website-docs/03-features/05-retrieval-engines.md.
   opensearch:
     image: opensearchproject/opensearch:3.3.2
     container_name: WeKnora-opensearch-dev
@@ -247,26 +247,80 @@ services:
     volumes:
       - docreader-tmp-dev:/tmp/docreader
     environment:
+      # ========== 基础 ==========
       - TZ=${TZ:-Asia/Shanghai}
+      - LOG_LEVEL=${LOG_LEVEL:-}
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
-      - DOCREADER_PDF_FORCE_SCANNED=${DOCREADER_PDF_FORCE_SCANNED:-false}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
+      # docreader 对外 HTTP 抓取的 SSRF 白名单（逗号分隔；与 app 共用同名变量）
+      - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-}
+      - SSRF_DNS_WHITELIST_ONLY=${SSRF_DNS_WHITELIST_ONLY:-}
+      # ========== gRPC 服务端 TLS / 认证 ==========
+      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
+      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
+      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
+      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
+      - GRPC_TLS_SERVER_NAME=${GRPC_TLS_SERVER_NAME:-}
+      # true 时强制要求客户端证书（mTLS）
+      - GRPC_MTLS_REQUIRE_CLIENT_CERT=${GRPC_MTLS_REQUIRE_CLIENT_CERT:-false}
+      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
+      # ========== gRPC 服务参数 ==========
+      - DOCREADER_GRPC_MAX_WORKERS=${DOCREADER_GRPC_MAX_WORKERS:-4}
+      - DOCREADER_GRPC_MAX_FILE_SIZE_MB=${DOCREADER_GRPC_MAX_FILE_SIZE_MB:-${MAX_FILE_SIZE_MB:-50}}
+      - DOCREADER_GRPC_PORT=${DOCREADER_GRPC_PORT:-50051}
+      # ========== 解析通用 ==========
+      - DOCREADER_DOCX_MAX_PAGES=${DOCREADER_DOCX_MAX_PAGES:-0}
+      - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
+      # 出站 HTTP/HTTPS 代理（抓取网页 / 远程图片时）
+      - DOCREADER_EXTERNAL_HTTP_PROXY=${DOCREADER_EXTERNAL_HTTP_PROXY:-}
+      - DOCREADER_EXTERNAL_HTTPS_PROXY=${DOCREADER_EXTERNAL_HTTPS_PROXY:-}
+      # ========== OpenDataLoader hybrid ==========
       - DOCREADER_ODL_MAX_WORKERS=${DOCREADER_ODL_MAX_WORKERS:-1}
       - DOCREADER_ODL_HYBRID=${DOCREADER_ODL_HYBRID:-off}
       - DOCREADER_ODL_HYBRID_URL=${DOCREADER_ODL_HYBRID_URL:-http://odl-hybrid:5002}
       - DOCREADER_ODL_HYBRID_MODE=${DOCREADER_ODL_HYBRID_MODE:-auto}
       - DOCREADER_ODL_HYBRID_FALLBACK=${DOCREADER_ODL_HYBRID_FALLBACK:-false}
       - DOCREADER_ODL_MARKDOWN_WITH_HTML=${DOCREADER_ODL_MARKDOWN_WITH_HTML:-false}
-      - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
+      # ========== PDF 渲染 ==========
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
+      # 单个 PDF 内部扫描页渲染并行进程数（pdfium 非线程安全）。留空走代码默认 min(4,cpu)，
+      # 避免在低核容器上过度并行（写死数值会覆盖 CPU 感知逻辑）。
+      - DOCREADER_PDF_RENDER_PARALLELISM=${DOCREADER_PDF_RENDER_PARALLELISM:-}
       - DOCREADER_PDF_RENDER_DPI=${DOCREADER_PDF_RENDER_DPI:-200}
-      - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-90}
-      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
-      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
-      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
-      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
-      - GRPC_TLS_SERVER_NAME=${GRPC_TLS_SERVER_NAME:-}
-      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
+      # JPEG 质量（代码默认 85；compose 此前误写 90，已对齐）
+      - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-85}
+      # 渲染页图最大长边像素（防超大页撑爆 gRPC 消息上限；密集中文建议 >=1600）
+      - DOCREADER_PDF_RENDER_MAX_EDGE=${DOCREADER_PDF_RENDER_MAX_EDGE:-2000}
+      # 强制 PDF 全页按扫描件解析（文本层差但可 OCR 时；速度/成本上升）
+      - DOCREADER_PDF_FORCE_SCANNED=${DOCREADER_PDF_FORCE_SCANNED:-false}
+      # ========== PDF 版式 / 文本调优 ==========
+      # glyph 间距超过 median 字宽的多少倍时插空格（默认 0.4）
+      - DOCREADER_PDF_WORD_GAP_WIDTH_RATIO=${DOCREADER_PDF_WORD_GAP_WIDTH_RATIO:-0.4}
+      # 丢弃窄边栏（arXiv 侧栏）的页宽比例阈值（默认 0.12）
+      - DOCREADER_PDF_MARGIN_COL_WIDTH_RATIO=${DOCREADER_PDF_MARGIN_COL_WIDTH_RATIO:-0.12}
+      - DOCREADER_PDF_MIN_HEADING_LINE_CHARS=${DOCREADER_PDF_MIN_HEADING_LINE_CHARS:-8}
+      # 清理 U+FFFE/软连字符、剥离矢量图轴文字、图表区按 JPEG 渲染
+      - DOCREADER_PDF_SANITIZE_TEXT=${DOCREADER_PDF_SANITIZE_TEXT:-true}
+      - DOCREADER_PDF_STRIP_CHART_DEBRIS=${DOCREADER_PDF_STRIP_CHART_DEBRIS:-true}
+      - DOCREADER_PDF_RENDER_VECTOR_FIGURES=${DOCREADER_PDF_RENDER_VECTOR_FIGURES:-true}
+      - DOCREADER_PDF_DETECT_HEADINGS=${DOCREADER_PDF_DETECT_HEADINGS:-}
+      - DOCREADER_PDF_LAYOUT_ORDERING=${DOCREADER_PDF_LAYOUT_ORDERING:-}
+      - DOCREADER_PDF_FILTER_HIDDEN_TEXT=${DOCREADER_PDF_FILTER_HIDDEN_TEXT:-}
+      # 扫描件判定：图片面积占比 >= 此值视为扫描页（默认留空走代码默认）
+      - DOCREADER_PDF_SCAN_IMAGE_RATIO=${DOCREADER_PDF_SCAN_IMAGE_RATIO:-}
+      - DOCREADER_PDF_SCAN_MIN_CHARS=${DOCREADER_PDF_SCAN_MIN_CHARS:-}
+      # 嵌入图片抽取
+      - DOCREADER_PDF_EXTRACT_EMBEDDED_IMAGES=${DOCREADER_PDF_EXTRACT_EMBEDDED_IMAGES:-}
+      - DOCREADER_PDF_EMBED_MIN_PIXELS=${DOCREADER_PDF_EMBED_MIN_PIXELS:-}
+      - DOCREADER_PDF_EMBED_MIN_AREA_RATIO=${DOCREADER_PDF_EMBED_MIN_AREA_RATIO:-}
+      - DOCREADER_PDF_EMBED_REPEAT_PAGE_FRAC=${DOCREADER_PDF_EMBED_REPEAT_PAGE_FRAC:-}
+      - DOCREADER_PDF_EMBED_MAX_IMAGES=${DOCREADER_PDF_EMBED_MAX_IMAGES:-}
+      # 图表区识别
+      - DOCREADER_PDF_MIN_CHART_REGION_AREA=${DOCREADER_PDF_MIN_CHART_REGION_AREA:-}
+      - DOCREADER_PDF_MIN_CHART_REGION_CHARS=${DOCREADER_PDF_MIN_CHART_REGION_CHARS:-}
+      - DOCREADER_PDF_MAX_CHART_REGION_AREA=${DOCREADER_PDF_MAX_CHART_REGION_AREA:-}
+      - DOCREADER_PDF_MAX_FIGURE_HEIGHT_RATIO=${DOCREADER_PDF_MAX_FIGURE_HEIGHT_RATIO:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s
@@ -328,7 +382,7 @@ services:
   # ---------------------------------------------------------------------------
   # 复用 dev 已有的 ParadeDB 镜像，不额外拉 postgres 镜像
   langfuse-db-init:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: paradedb/paradedb:v0.22.6-pg17
     container_name: WeKnora-langfuse-db-init-dev
     depends_on:
       postgres:
@@ -384,7 +438,7 @@ services:
       - full
 
   langfuse-minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: WeKnora-langfuse-minio-dev
     restart: unless-stopped
     entrypoint: sh

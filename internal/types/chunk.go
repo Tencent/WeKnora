@@ -96,6 +96,12 @@ type ImageInfo struct {
 	Caption string `json:"caption"`
 	// 图片OCR文本
 	OCRText string `json:"ocr_text"`
+	// Attrs 是描述轮给出的图片属性观察结果（取值见 ImageAttrs / ImageAttrRegistry）。
+	// 只记录模型确实回答了的属性：观察失败或取值非法的属性不会写入默认值，而是直接缺键，
+	// 因此读取方必须用 ImageAttrs.Observed 区分「未观察到」与「观察到了负值」。
+	// 该字段以 JSON 存储在 chunks.image_info 中，无需迁移；属性观察能力上线前写入的
+	// 行会缺省为空，读取方必须容忍空值。
+	Attrs ImageAttrs `json:"attrs,omitempty"`
 }
 
 // VideoInfo 表示与 Chunk 关联的视频信息
@@ -125,6 +131,16 @@ type Chunk struct {
 	TagID string `json:"tag_id"                   gorm:"type:varchar(36);index"`
 	// Actual text content of the chunk
 	Content string `json:"content"`
+	// SourceContent is the immutable parser output. Legacy rows are lazily
+	// backfilled from Content on the first manual edit.
+	SourceContent string `json:"-"`
+	// ContentRevision is incremented for every user edit or rollback.
+	ContentRevision int `json:"content_revision" gorm:"not null;default:0"`
+	// IndexStatus reports whether the current content is reflected in the
+	// retrieval stores: ready | processing | failed.
+	IndexStatus string `json:"index_status" gorm:"type:varchar(16);not null;default:'ready'"`
+	// LastEditorID records the actor that produced the current revision.
+	LastEditorID string `json:"last_editor_id" gorm:"type:varchar(64);not null;default:''"`
 	// Index position of the chunk in the original document
 	ChunkIndex int `json:"chunk_index"`
 	// Whether the chunk is enabled, can be used to temporarily disable certain chunks
@@ -153,7 +169,7 @@ type Chunk struct {
 	// Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
 	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
-	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
+	ContentHash string `json:"content_hash"             gorm:"type:varchar(64)"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
 	// Chunk creation time
@@ -162,11 +178,30 @@ type Chunk struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete marker, supports data recovery
 	DeletedAt gorm.DeletedAt `json:"deleted_at"               gorm:"index"`
-	// ContextHeader is an in-memory-only context string (e.g. a Markdown
-	// heading breadcrumb) that the indexing pipeline prepends to Content
-	// when generating embeddings. NOT persisted — populated by the chunker
-	// during initial splitting and discarded after indexing.
-	ContextHeader string `json:"-" gorm:"-"`
+	// ContextHeader is a Markdown heading breadcrumb prepended when indexing.
+	// It is persisted so a later content edit can rebuild the same index input.
+	ContextHeader string `json:"-" gorm:"type:text"`
+	// SourceLocators point back into the original file (page and region,
+	// slide, sheet rows, ...) so citations can open the file at this chunk.
+	// Empty when the parser reported no positions.
+	SourceLocators SourceLocators `json:"source_locators,omitempty" gorm:"type:json"`
+}
+
+// ChunkRevision is an immutable snapshot of a superseded chunk revision.
+// The current content lives on Chunk; this table stores prior versions.
+type ChunkRevision struct {
+	ID              string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64    `json:"tenant_id" gorm:"index"`
+	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
+	KnowledgeID     string    `json:"knowledge_id" gorm:"type:varchar(36);index"`
+	ChunkID         string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_chunk_revision"`
+	Revision        int       `json:"revision" gorm:"uniqueIndex:idx_chunk_revision"`
+	Content         string    `json:"content" gorm:"type:text"`
+	IsEnabled       bool      `json:"is_enabled"`
+	EditorID        string    `json:"editor_id" gorm:"type:varchar(64)"`
+	EditSource      string    `json:"edit_source" gorm:"type:varchar(16)"`
+	EditedAt        time.Time `json:"edited_at"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // EmbeddingContent returns the chunk content with ContextHeader prepended

@@ -5,14 +5,40 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // MarkdownImageRegex matches Markdown image links: ![alt](url)
 var MarkdownImageRegex = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+
+// HTMLImageSrcRegex matches an HTML <img> tag with a quoted src attribute.
+// Documents that rely on surrounding markup for layout embed their screenshots
+// this way, so image-derived text has to be matched back to these tags as well
+// as to Markdown image links.
+//
+// Submatches: 1 = attributes before src, 2 = the src value, 3 = attributes
+// after. Callers index the value through HTMLImageSrcURLGroup rather than
+// assuming a position.
+//
+// src must be preceded by whitespace so that data-src and other hyphenated
+// attribute names are not mistaken for it — matching those would capture a
+// lazy-loading placeholder and leave the real src unvisited. An unquoted src
+// and a srcset-only tag are deliberately out of scope; both are rare in
+// authored documents and matching them reliably needs an HTML parser.
+//
+// Both this package and the document parser share this one definition. Two
+// copies would be free to drift, and an image the parser stores but the
+// enricher cannot match back is exactly the kind of gap this exists to close.
+var HTMLImageSrcRegex = regexp.MustCompile(`(?i)<img\b([^>]*?)\ssrc\s*=\s*['"]([^'"]+)['"]([^>]*)>`)
+
+// HTMLImageSrcURLGroup is the submatch index of the src value in
+// HTMLImageSrcRegex.
+const HTMLImageSrcURLGroup = 2
 
 // CollectImageInfoByChunkIDs collects merged image_info JSON for each given
 // chunk ID by querying child chunks (image_ocr / image_caption). It supports
@@ -21,6 +47,11 @@ var MarkdownImageRegex = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
 //   - If chunkIDs are parent_text chunks, their children are text chunks
 //     whose children are image chunks → two queries.
 //
+// Disabled children are skipped at both levels. Removing an image from a chunk
+// disables its image_ocr / image_caption children (syncEditedChunkImages), and
+// disabling a text chunk disables them too; honoring that flag here is what
+// keeps a deleted image out of retrieval, summaries and model context.
+//
 // Returns a map of input chunkID → merged image_info JSON string.
 func CollectImageInfoByChunkIDs(
 	ctx context.Context,
@@ -28,13 +59,69 @@ func CollectImageInfoByChunkIDs(
 	tenantID uint64,
 	chunkIDs []string,
 ) map[string]string {
+	return collectImageInfoByChunkIDs(chunkIDs, func(parentIDs []string) ([]*types.Chunk, error) {
+		return chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
+	})
+}
+
+// CollectImageInfoByChunkIDsOnly is the shared-KB variant of
+// CollectImageInfoByChunkIDs: the chunk IDs can belong to an org-shared KB
+// owned by another workspace, so the child lookup must not filter by the
+// caller's tenant (#3342).
+func CollectImageInfoByChunkIDsOnly(
+	ctx context.Context,
+	chunkRepo interfaces.ChunkRepository,
+	chunkIDs []string,
+) map[string]string {
+	return collectImageInfoByChunkIDs(chunkIDs, func(parentIDs []string) ([]*types.Chunk, error) {
+		return chunkRepo.ListChunksByParentIDsOnly(ctx, parentIDs)
+	})
+}
+
+func collectImageInfoByChunkIDs(
+	chunkIDs []string,
+	listChildren func(parentIDs []string) ([]*types.Chunk, error),
+) map[string]string {
+	info, _ := collectChildEvidence(chunkIDs, listChildren)
+	return info
+}
+
+// collectChildEvidence reads the image children of chunkIDs once and returns
+// their merged image_info JSON and, per chunk, the recognized text of each
+// scanned PDF page (1-based page → quote) taken from children that carry a
+// page locator. OCR text wins over a caption for the same page.
+func collectChildEvidence(
+	chunkIDs []string,
+	listChildren func(parentIDs []string) ([]*types.Chunk, error),
+) (map[string]string, map[string]map[int]string) {
 	if len(chunkIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	children, err := chunkRepo.ListChunksByParentIDs(ctx, tenantID, chunkIDs)
+	children, err := listChildren(chunkIDs)
 	if err != nil || len(children) == 0 {
-		return nil
+		return nil, nil
+	}
+
+	pageQuotes := make(map[string]map[int]string)
+	addPageQuote := func(targetID string, child *types.Chunk) {
+		quote := sourceloc.CleanQuote(child.Content)
+		if quote == "" {
+			return
+		}
+		for _, loc := range child.SourceLocators {
+			if loc.Type != types.SourceLocatorPDF || loc.Page <= 0 {
+				continue
+			}
+			pages, ok := pageQuotes[targetID]
+			if !ok {
+				pages = make(map[int]string)
+				pageQuotes[targetID] = pages
+			}
+			if _, taken := pages[loc.Page]; !taken || child.ChunkType == types.ChunkTypeImageOCR {
+				pages[loc.Page] = quote
+			}
+		}
 	}
 
 	type imageAgg struct {
@@ -82,9 +169,13 @@ func CollectImageInfoByChunkIDs(
 	textToParent := make(map[string]string)
 
 	for _, child := range children {
+		if !child.IsEnabled {
+			continue
+		}
 		switch child.ChunkType {
 		case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption:
 			addInfo(child.ParentChunkID, child)
+			addPageQuote(child.ParentChunkID, child)
 		case types.ChunkTypeText:
 			textChildIDs = append(textChildIDs, child.ID)
 			textToParent[child.ID] = child.ParentChunkID
@@ -92,14 +183,18 @@ func CollectImageInfoByChunkIDs(
 	}
 
 	if len(textChildIDs) > 0 {
-		grandChildren, err := chunkRepo.ListChunksByParentIDs(ctx, tenantID, textChildIDs)
+		grandChildren, err := listChildren(textChildIDs)
 		if err == nil {
 			for _, gc := range grandChildren {
+				if !gc.IsEnabled {
+					continue
+				}
 				if gc.ChunkType != types.ChunkTypeImageOCR && gc.ChunkType != types.ChunkTypeImageCaption {
 					continue
 				}
 				if parentTextID, ok := textToParent[gc.ParentChunkID]; ok {
 					addInfo(parentTextID, gc)
+					addPageQuote(parentTextID, gc)
 				}
 			}
 		}
@@ -120,21 +215,48 @@ func CollectImageInfoByChunkIDs(
 		}
 		out[id] = string(data)
 	}
-	return out
+	return out, pageQuotes
 }
 
 // EnrichSearchResultsImageInfo fills in ImageInfo for SearchResults that have
-// none by batch-querying child image chunks.
+// none by batch-querying child image chunks. The same children give scanned
+// PDF pages their recognized text as locator quotes, so a citation can be
+// matched to the page it came from.
 func EnrichSearchResultsImageInfo(
 	ctx context.Context,
 	chunkRepo interfaces.ChunkRepository,
 	tenantID uint64,
 	results []*types.SearchResult,
 ) {
+	enrichSearchResultsImageInfo(results, func(parentIDs []string) ([]*types.Chunk, error) {
+		return chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
+	})
+}
+
+// EnrichSearchResultsImageInfoOnly is the shared-KB variant of
+// EnrichSearchResultsImageInfo for results that may come from an org-shared
+// KB owned by another workspace. The result IDs must already be authorized
+// (they come from retrieval over KBs the caller may read).
+func EnrichSearchResultsImageInfoOnly(
+	ctx context.Context,
+	chunkRepo interfaces.ChunkRepository,
+	results []*types.SearchResult,
+) {
+	enrichSearchResultsImageInfo(results, func(parentIDs []string) ([]*types.Chunk, error) {
+		return chunkRepo.ListChunksByParentIDsOnly(ctx, parentIDs)
+	})
+}
+
+func enrichSearchResultsImageInfo(
+	results []*types.SearchResult,
+	listChildren func(parentIDs []string) ([]*types.Chunk, error),
+) {
 	var chunkIDs []string
 	seen := make(map[string]bool)
 	for _, r := range results {
-		if r.ImageInfo != "" {
+		// Results that already carry image info only need their children
+		// again when they are scanned pages waiting for recognized text.
+		if r.ImageInfo != "" && !scannedPagesOnly(r.SourceLocators) {
 			continue
 		}
 		if !seen[r.ID] {
@@ -146,19 +268,67 @@ func EnrichSearchResultsImageInfo(
 		return
 	}
 
-	infoMap := CollectImageInfoByChunkIDs(ctx, chunkRepo, tenantID, chunkIDs)
-	if len(infoMap) == 0 {
-		return
-	}
+	infoMap, pageQuotes := collectChildEvidence(chunkIDs, listChildren)
 
 	for _, r := range results {
-		if r.ImageInfo != "" {
-			continue
-		}
-		if merged, ok := infoMap[r.ID]; ok {
+		if merged, ok := infoMap[r.ID]; ok && r.ImageInfo == "" {
 			r.ImageInfo = merged
 		}
+		if pages, ok := pageQuotes[r.ID]; ok {
+			r.SourceLocators = withPageQuotes(r.SourceLocators, pages)
+		}
 	}
+}
+
+// needsPageQuotes reports whether a chunk has whole-page PDF locators without
+// usable text: the pages of a scanned PDF, whose chunk text is only the page
+// images.
+func needsPageQuotes(locators types.SourceLocators) bool {
+	for _, loc := range locators {
+		if loc.Type == types.SourceLocatorPDF && loc.Page > 0 && len(loc.BBox) == 0 && weakQuote(loc.Quote) {
+			return true
+		}
+	}
+	return false
+}
+
+// scannedPagesOnly reports whether every locator is a textless whole PDF
+// page, as for a scanned PDF. An embedded figure inside a text page also
+// yields a textless page locator, but its chunk has boxed text locators too.
+func scannedPagesOnly(locators types.SourceLocators) bool {
+	if len(locators) == 0 {
+		return false
+	}
+	for _, loc := range locators {
+		if loc.Type != types.SourceLocatorPDF || loc.Page <= 0 || len(loc.BBox) != 0 || !weakQuote(loc.Quote) {
+			return false
+		}
+	}
+	return true
+}
+
+func weakQuote(quote string) bool {
+	quote = strings.TrimSpace(quote)
+	return quote == "" || strings.HasPrefix(quote, "![")
+}
+
+// withPageQuotes returns a copy of locators whose textless page locators carry
+// the recognized text of their page.
+func withPageQuotes(locators types.SourceLocators, pages map[int]string) types.SourceLocators {
+	if !needsPageQuotes(locators) {
+		return locators
+	}
+	out := make(types.SourceLocators, len(locators))
+	copy(out, locators)
+	for i, loc := range out {
+		if loc.Type != types.SourceLocatorPDF || len(loc.BBox) != 0 || !weakQuote(loc.Quote) {
+			continue
+		}
+		if quote, ok := pages[loc.Page]; ok {
+			out[i].Quote = quote
+		}
+	}
+	return out
 }
 
 // MergeImageInfoJSON combines per-chunk image_info JSON strings (from
@@ -193,6 +363,39 @@ func MergeImageInfoJSON(perChunk map[string]string) string {
 		return ""
 	}
 	return string(data)
+}
+
+// ClearImageInfoTextMatchingBody removes the OCR or caption field that exactly
+// matches recognized from image_info. Merge re-attaches that body onto Content
+// for image_ocr / image_caption hits; chat enrichment would otherwise inject
+// the same text again from ImageInfo.
+func ClearImageInfoTextMatchingBody(imageInfoJSON, recognized, chunkType string) string {
+	if imageInfoJSON == "" || recognized == "" {
+		return imageInfoJSON
+	}
+	var infos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfoJSON), &infos); err != nil || len(infos) == 0 {
+		return imageInfoJSON
+	}
+	changed := false
+	for i := range infos {
+		switch chunkType {
+		case string(types.ChunkTypeImageOCR):
+			if infos[i].OCRText == recognized {
+				infos[i].OCRText = ""
+				changed = true
+			}
+		case string(types.ChunkTypeImageCaption):
+			if infos[i].Caption == recognized {
+				infos[i].Caption = ""
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return imageInfoJSON
+	}
+	return marshalImageInfos(infos)
 }
 
 // EnrichContentWithImageInfo embeds image info as XML tags into text content.
@@ -288,22 +491,52 @@ func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) str
 		}
 	}
 
-	content = MarkdownImageRegex.ReplaceAllStringFunc(content, func(markdownImage string) string {
-		match := MarkdownImageRegex.FindStringSubmatch(markdownImage)
-		if len(match) < 3 {
-			return markdownImage
+	// Screenshots embedded as HTML carry their image_info the same way as
+	// Markdown links: without covering both, a document that keeps its images in
+	// <img> tags reaches the model as bare markup with the caption and OCR text
+	// stripped out, even though the analysis ran and the entry is right here.
+	//
+	// Both syntaxes are located against the ORIGINAL content and spliced in one
+	// right-to-left pass. Running one regex over the other's output would let a
+	// metadata block that itself quotes an image reference be rescanned, cutting
+	// the OCR sentence in half and injecting the same block twice.
+	type injection struct {
+		at   int
+		text string
+	}
+	var injections []injection
+
+	// trim is applied to HTML only. An attribute value may be padded, while a
+	// Markdown target is looked up exactly as written so that the keys this
+	// function matches on stay the ones it has always matched on.
+	appendFor := func(locs [][]int, urlGroup int, trim bool) {
+		for _, loc := range locs {
+			start, end := loc[2*urlGroup], loc[2*urlGroup+1]
+			if start < 0 {
+				continue
+			}
+			key := content[start:end]
+			if trim {
+				key = strings.TrimSpace(key)
+			}
+			imgInfo, found := imageInfoMap[key]
+			if !found || imgInfo == nil {
+				continue
+			}
+			metadata := buildImageInfoMarkdownMetadata(imgInfo)
+			if metadata == "" {
+				continue
+			}
+			injections = append(injections, injection{at: loc[1], text: "\n\n" + metadata})
 		}
-		imgURL := match[2]
-		imgInfo, found := imageInfoMap[imgURL]
-		if !found || imgInfo == nil {
-			return markdownImage
-		}
-		metadata := buildImageInfoMarkdownMetadata(imgInfo)
-		if metadata == "" {
-			return markdownImage
-		}
-		return markdownImage + "\n\n" + metadata
-	})
+	}
+	appendFor(MarkdownImageRegex.FindAllStringSubmatchIndex(content, -1), 2, false)
+	appendFor(HTMLImageSrcRegex.FindAllStringSubmatchIndex(content, -1), HTMLImageSrcURLGroup, true)
+
+	sort.Slice(injections, func(i, j int) bool { return injections[i].at > injections[j].at })
+	for _, inj := range injections {
+		content = content[:inj.at] + inj.text + content[inj.at:]
+	}
 	return content
 }
 

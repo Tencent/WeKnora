@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -36,20 +37,32 @@ type AgentQARequest struct {
 	MCPServiceIDs    []string          `json:"mcp_service_ids,omitempty"`    // Optional MCP service allow list (deprecated)
 	Images           []ImageAttachment `json:"images,omitempty"`             // Attached images for multimodal chat
 	Channel          string            `json:"channel,omitempty"`            // Source channel: "web", "api", "im", etc.
+	QuestionOrigin   *QuestionOrigin   `json:"question_origin,omitempty"`    // Source of a picked suggested question
 }
 
 // AgentResponseType defines the type of agent response
 type AgentResponseType string
 
 const (
-	AgentResponseTypeThinking   AgentResponseType = "thinking"
-	AgentResponseTypeToolCall   AgentResponseType = "tool_call"
+	// AgentResponseTypeThinking is emitted while the agent is reasoning.
+	AgentResponseTypeThinking AgentResponseType = "thinking"
+	// AgentResponseTypeToolCall is emitted when the agent invokes a tool.
+	AgentResponseTypeToolCall AgentResponseType = "tool_call"
+	// AgentResponseTypeToolResult is emitted when a tool returns.
 	AgentResponseTypeToolResult AgentResponseType = "tool_result"
+	// AgentResponseTypeReferences is emitted with knowledge references.
 	AgentResponseTypeReferences AgentResponseType = "references"
-	AgentResponseTypeAnswer     AgentResponseType = "answer"
+	// AgentResponseTypeAnswer is emitted for answer tokens.
+	AgentResponseTypeAnswer AgentResponseType = "answer"
+	// AgentResponseTypeReflection is emitted for agent reflection.
 	AgentResponseTypeReflection AgentResponseType = "reflection"
-	AgentResponseTypeError      AgentResponseType = "error"
-	AgentResponseTypeComplete   AgentResponseType = "complete"
+	// AgentResponseTypeError is emitted when the agent fails.
+	AgentResponseTypeError AgentResponseType = "error"
+	// AgentResponseTypeComplete is emitted when the agent run has finished.
+	AgentResponseTypeComplete AgentResponseType = "complete"
+	// AgentResponseTypeArtifactsPending is emitted while skill-generated files
+	// are still being collected after the answer has streamed.
+	AgentResponseTypeArtifactsPending AgentResponseType = "artifacts_pending"
 )
 
 // AgentStreamResponse agent streaming response
@@ -77,8 +90,10 @@ func (c *Client) AgentQAStream(ctx context.Context, sessionID string, query stri
 }
 
 // AgentQAStreamWithRequest performs agent-based Q&A with SSE streaming using the full request payload.
+// Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
 func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	sessionID string, request *AgentQARequest, callback AgentEventCallback,
+	opts ...ResourceURLOptions,
 ) error {
 	if request == nil {
 		return fmt.Errorf("agent QA request cannot be nil")
@@ -88,7 +103,11 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	}
 
 	path := fmt.Sprintf("/api/v1/agent-chat/%s", sessionID)
-	resp, err := c.doRequestStream(ctx, http.MethodPost, path, request, nil)
+	queryParams := url.Values{}
+	if len(opts) > 0 {
+		applyResourceURLQuery(queryParams, &opts[0])
+	}
+	resp, err := c.doRequestStream(ctx, http.MethodPost, path, request, queryParams)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}

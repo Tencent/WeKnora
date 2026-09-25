@@ -34,7 +34,7 @@ type ListOptions struct {
 
 // ListService is the narrow SDK surface this command depends on.
 type ListService interface {
-	LoadMessages(ctx context.Context, sessionID string, limit int, beforeTime *time.Time) ([]sdk.Message, error)
+	LoadMessages(ctx context.Context, sessionID string, limit int, beforeTime *time.Time, opts ...sdk.ResourceURLOptions) ([]sdk.Message, error)
 }
 
 // NewCmdList builds `weknora message list --session <id>`.

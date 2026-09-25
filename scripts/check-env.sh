@@ -98,10 +98,7 @@ if [ "$STORAGE_TYPE" = "tos" ]; then
 fi
 
 if [ "$STORAGE_TYPE" = "s3" ]; then
-    check_var "S3_ENDPOINT"
     check_var "S3_REGION"
-    check_var "S3_ACCESS_KEY"
-    check_var "S3_SECRET_KEY"
     check_var "S3_BUCKET_NAME"
 fi
 

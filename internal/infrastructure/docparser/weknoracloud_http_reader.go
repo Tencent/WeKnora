@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 )
 
@@ -39,20 +40,15 @@ func NewWeKnoraCloudSignedDocumentReader(appID, apiKey string) (*WeKnoraCloudSig
 	if apiKey == "" {
 		return nil, fmt.Errorf("WeKnoraCloud apiKey is required")
 	}
+	clientCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	clientCfg.Timeout = 500 * time.Minute
 	return &WeKnoraCloudSignedDocumentReader{
 		appID:               appID,
 		apiKey:              apiKey,
 		initialPollInterval: 500 * time.Millisecond,
 		maxPollInterval:     10 * time.Second,
 		pollTimeout:         20 * time.Minute,
-		client: &http.Client{
-			Timeout: 500 * time.Minute,
-			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     90 * time.Second,
-				MaxIdleConnsPerHost: 5,
-			},
-		},
+		client:              secutils.NewSSRFSafeHTTPClient(clientCfg),
 	}, nil
 }
 

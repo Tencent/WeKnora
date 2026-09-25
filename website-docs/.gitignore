@@ -1,0 +1,13 @@
+!.vitepress/
+!.dockerignore
+!.nvmrc
+.vitepress/cache/
+.vitepress/dist/
+**/node_modules/
+homepage/.next/
+homepage/out/
+static-site/
+releases/
+*.tsbuildinfo
+.shots/
+.DS_Store

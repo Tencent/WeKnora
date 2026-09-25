@@ -1,21 +1,45 @@
 import { MessagePlugin } from "tdesign-vue-next";
 import i18n from '@/i18n';
+import { shouldRejectKnowledgeFileType } from "./fileTypeVerification";
 
 // 声明全局运行时配置类型
 declare global {
   interface Window {
     __RUNTIME_CONFIG__?: {
       MAX_FILE_SIZE_MB?: number;
+      MAX_SKILL_BUNDLE_SIZE_MB?: number;
+      DEFAULT_LOCALE?: string;
     };
   }
 }
 
+function positiveMegabytes(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
 // 从运行时配置获取最大文件大小(MB)，支持 Docker 环境动态配置
 // 优先级：运行时配置 > 构建时环境变量 > 默认值 50MB
-export const MAX_FILE_SIZE_MB = window.__RUNTIME_CONFIG__?.MAX_FILE_SIZE_MB
-  || Number(import.meta.env.VITE_MAX_FILE_SIZE_MB) 
-  || 50;
-const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+export const MAX_FILE_SIZE_MB = positiveMegabytes(
+  window.__RUNTIME_CONFIG__?.MAX_FILE_SIZE_MB ?? import.meta.env.VITE_MAX_FILE_SIZE_MB,
+  50,
+)
+export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+// Skill zips are larger than knowledge files (GitHub zipballs, ppt-master).
+// Never below the knowledge cap; ceiling matches the Go uncompressed archive cap.
+export const MAX_SKILL_BUNDLE_SIZE_MB = Math.min(
+  512,
+  Math.max(
+    positiveMegabytes(
+      window.__RUNTIME_CONFIG__?.MAX_SKILL_BUNDLE_SIZE_MB
+        ?? import.meta.env.VITE_MAX_SKILL_BUNDLE_SIZE_MB,
+      256,
+    ),
+    MAX_FILE_SIZE_MB,
+  ),
+)
+export const MAX_SKILL_BUNDLE_SIZE_BYTES = MAX_SKILL_BUNDLE_SIZE_MB * 1024 * 1024
 
 export function generateRandomString(length: number) {
   let result = "";
@@ -40,32 +64,25 @@ export function formatStringDate(date: any) {
     year + "-" + month + "-" + day + " " + hour + ":" + minute + ":" + second
   );
 }
-const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "epub", "mhtml", "jpg", "jpeg", "png", "csv", "xlsx", "xls", "mp3", "wav", "m4a", "flac", "ogg"]);
+/** Returns true when the file exceeds the deploy-time upload limit. */
+export function fileSizeVerification(file: Pick<File, 'size'>, silent = false) {
+  if (file.size <= MAX_FILE_SIZE_BYTES) return false;
+  if (!silent) {
+    MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
+  }
+  return true;
+}
 
 /**
  * Returns true when the file should be **rejected**.
  * @param validTypes - override the default extension whitelist with a dynamic set (e.g. from engine registry).
  */
 export function kbFileTypeVerification(file: any, silent = false, validTypes?: Set<string> | string[]) {
-  const provided = validTypes
-    ? (validTypes instanceof Set ? validTypes : new Set(validTypes))
-    : undefined;
-  // An empty whitelist means the engine registry hasn't loaded yet; fall back to
-  // the default set rather than rejecting every file.
-  const allowed = provided && provided.size > 0 ? provided : DEFAULT_VALID_TYPES;
-
-  const type = file.name.substring(file.name.lastIndexOf(".") + 1).toLowerCase();
-  if (!allowed.has(type)) {
+  if (shouldRejectKnowledgeFileType(file.name, validTypes)) {
     if (!silent) {
       MessagePlugin.error(i18n.global.t('error.unsupportedFileType'));
     }
     return true;
   }
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    if (!silent) {
-      MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
-    }
-    return true;
-  }
-  return false;
+  return fileSizeVerification(file, silent);
 }

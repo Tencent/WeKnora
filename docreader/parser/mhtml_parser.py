@@ -8,6 +8,7 @@ import email
 import html
 import logging
 import os
+from email.header import decode_header
 from urllib.parse import unquote, urljoin, urlparse
 import uuid
 from typing import Dict
@@ -27,6 +28,52 @@ _AD_DOMAINS = (
     "analytics",
     "pixel",
 )
+
+_UNKNOWN_8BIT = frozenset({"unknown-8bit", "unknown"})
+
+
+def _header_str(value) -> str:
+    """Normalize a MIME header to str, recovering 8-bit UTF-8 bytes.
+
+    ``email.message_from_bytes`` uses compat32 by default. Browser-saved
+    ``.mhtml`` files often store raw UTF-8 in headers such as Content-Location.
+    Those values come back as ``email.header.Header`` with charset
+    ``unknown-8bit``: ``.strip()`` / ``.lower()`` raise AttributeError, and
+    ``str(Header)`` replaces the bytes with U+FFFD so image aliases no longer
+    match the HTML body.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        try:
+            return value.encode("ascii", "surrogateescape").decode("utf-8")
+        except UnicodeError:
+            return value
+    try:
+        chunks = decode_header(value)
+    except (TypeError, ValueError, LookupError, UnicodeError):
+        return str(value)
+
+    parts: list[str] = []
+    for chunk, charset in chunks:
+        if isinstance(chunk, bytes):
+            encoding = (charset or "utf-8").lower()
+            if encoding in _UNKNOWN_8BIT:
+                encoding = "utf-8"
+            try:
+                parts.append(chunk.decode(encoding, errors="replace"))
+            except LookupError:
+                parts.append(chunk.decode("utf-8", errors="replace"))
+        elif chunk:
+            try:
+                parts.append(
+                    chunk.encode("ascii", "surrogateescape").decode("utf-8")
+                )
+            except UnicodeError:
+                parts.append(chunk)
+    return "".join(parts)
 
 
 class MHTMLParser(BaseParser):
@@ -49,7 +96,7 @@ class MHTMLParser(BaseParser):
 
         for part in msg.walk():
             content_type = part.get_content_type()
-            location = part.get("Content-Location", "")
+            location = _header_str(part.get("Content-Location", ""))
 
             if content_type == "text/html":
                 payload = part.get_payload(decode=True)
@@ -83,7 +130,7 @@ class MHTMLParser(BaseParser):
         html_content = main_html["content"]
 
         try:
-            markdown_text = self._html_to_markdown(
+            markdown_text = self.html_to_markdown(
                 html_content,
                 image_aliases=image_aliases,
                 base_location=main_html.get("location", ""),
@@ -103,9 +150,10 @@ class MHTMLParser(BaseParser):
             return {}
 
         def is_ad(location: str) -> bool:
-            if not location:
+            loc = _header_str(location)
+            if not loc:
                 return False
-            loc = location.lower()
+            loc = loc.lower()
             return any(ad in loc for ad in _AD_DOMAINS)
 
         non_ad = sorted(
@@ -118,18 +166,22 @@ class MHTMLParser(BaseParser):
             return non_ad[0]
 
         largest = max(html_parts, key=lambda part: part["size"])
-        logger.warning("Only ad content found, using largest: %d bytes", largest["size"])
+        logger.warning(
+            "Only ad content found, using largest: %d bytes", largest["size"]
+        )
         return largest
 
     @staticmethod
-    def _add_image_aliases(image_aliases: Dict[str, str], part, image_path: str) -> None:
+    def _add_image_aliases(
+        image_aliases: Dict[str, str], part, image_path: str
+    ) -> None:
         """Register the refs an MHTML document may use for an image part."""
         for raw in (
             part.get("Content-Location", ""),
             part.get("Content-ID", ""),
             part.get("X-Attachment-Id", ""),
         ):
-            raw = raw.strip()
+            raw = _header_str(raw).strip()
             if not raw:
                 continue
             values = {raw, html.unescape(raw), unquote(html.unescape(raw))}
@@ -159,7 +211,7 @@ class MHTMLParser(BaseParser):
     ) -> str:
         """Choose a stable image path when the MHTML part exposes a filename."""
         ext = cls._image_extension(content_type)
-        location = (part.get("Content-Location", "") or "").strip()
+        location = _header_str(part.get("Content-Location", "")).strip()
         filename = cls._filename_from_content_location(location)
         if not filename:
             return f"images/{uuid.uuid4().hex}{ext}"
@@ -181,7 +233,7 @@ class MHTMLParser(BaseParser):
 
     @staticmethod
     def _filename_from_content_location(location: str) -> str:
-        decoded = unquote(html.unescape(location.strip()))
+        decoded = unquote(html.unescape(_header_str(location).strip()))
         if not decoded or decoded.lower().startswith("cid:"):
             return ""
         path = urlparse(decoded).path or decoded
@@ -192,19 +244,30 @@ class MHTMLParser(BaseParser):
             return ""
         return filename
 
-    def _html_to_markdown(
+    def html_to_markdown(
         self,
         html_content: str,
         image_aliases: Dict[str, str] | None = None,
         base_location: str = "",
+        *,
+        strip_internal_links: bool = True,
+        fallback_to_raw_html: bool = True,
     ) -> str:
+        """Convert HTML to Markdown with explicit link and fallback policies."""
+
+        def raw_html_fallback() -> str:
+            if not fallback_to_raw_html:
+                return ""
+            return f"```html\n{html_content[:50000]}\n```"
+
         try:
             from markdownify import markdownify as md
 
             soup = BeautifulSoup(html_content, "lxml")
             for tag in soup(["script", "style", "noscript", "iframe"]):
                 tag.decompose()
-            self._strip_internal_links(soup)
+            if strip_internal_links:
+                self._strip_internal_links(soup)
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_location)
             text_fallback = soup.get_text(separator="\n", strip=True)
@@ -214,14 +277,23 @@ class MHTMLParser(BaseParser):
                 logger.warning("Markdown empty, falling back to text extraction")
                 return text_fallback
             if not result:
-                return f"```html\n{html_content[:50000]}\n```"
+                return raw_html_fallback()
             return result
         except ImportError:
             logger.warning("markdownify not available, returning raw HTML")
-            return f"```html\n{html_content}\n```"
+            return raw_html_fallback()
         except Exception as e:
             logger.error("HTML to Markdown conversion failed: %s", e)
-            return f"```html\n{html_content}\n```"
+            return raw_html_fallback()
+
+    def _html_to_markdown(
+        self,
+        html_content: str,
+        image_aliases: Dict[str, str] | None = None,
+        base_location: str = "",
+    ) -> str:
+        """Backward-compatible wrapper for existing internal callers and tests."""
+        return self.html_to_markdown(html_content, image_aliases, base_location)
 
     @staticmethod
     def _normalize_markdown(markdown_text: str) -> str:

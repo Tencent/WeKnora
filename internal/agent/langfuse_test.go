@@ -8,6 +8,61 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func TestBuildToolSpanInputKeepsModelAndResolvedArguments(t *testing.T) {
+	tc := types.LLMToolCall{
+		ID: "call-1",
+		Function: types.FunctionCall{
+			Name:      "wiki_read_page",
+			Arguments: `{"knowledge_base_id":"kb-real","slugs":["summary/uuid"]}`,
+		},
+		ModelArguments:     `{"knowledge_base_id":"b1","slugs":["res://0001"]}`,
+		ArgumentResolution: "resolved",
+	}
+	resolved := map[string]any{
+		"knowledge_base_id": "kb-real",
+		"slugs":             []interface{}{"summary/uuid"},
+	}
+	got := buildToolSpanInput(tc, resolved, false)
+
+	if !reflect.DeepEqual(got["model_arguments"], map[string]interface{}{
+		"knowledge_base_id": "b1",
+		"slugs":             []interface{}{"res://0001"},
+	}) {
+		t.Fatalf("model_arguments = %#v", got["model_arguments"])
+	}
+	if !reflect.DeepEqual(got["resolved_arguments"], resolved) {
+		t.Fatalf("resolved_arguments = %#v", got["resolved_arguments"])
+	}
+	if got["argument_resolution"] != "resolved" {
+		t.Fatalf("argument_resolution = %#v", got["argument_resolution"])
+	}
+}
+
+func TestBuildToolSpanInputRedactsBothArgumentViews(t *testing.T) {
+	tc := types.LLMToolCall{
+		ID:                 "call-sensitive",
+		Function:           types.FunctionCall{Arguments: `{"sql":"select secret","knowledge_base_id":"kb-real"}`},
+		ModelArguments:     `{"sql":"select secret","knowledge_base_id":"b1"}`,
+		ArgumentResolution: "resolved",
+		UnresolvedHandles:  []string{"d99"},
+	}
+	got := buildToolSpanInput(tc, map[string]any{"sql": "select secret", "knowledge_base_id": "kb-real"}, true)
+
+	if _, ok := got["model_arguments"]; ok {
+		t.Fatal("sensitive model arguments leaked")
+	}
+	if _, ok := got["resolved_arguments"]; ok {
+		t.Fatal("sensitive resolved arguments leaked")
+	}
+	wantKeys := []string{"knowledge_base_id", "sql"}
+	if !reflect.DeepEqual(got["model_arg_keys"], wantKeys) || !reflect.DeepEqual(got["resolved_arg_keys"], wantKeys) {
+		t.Fatalf("redacted keys = model:%v resolved:%v", got["model_arg_keys"], got["resolved_arg_keys"])
+	}
+	if got["unresolved_handle_count"] != 1 {
+		t.Fatalf("unresolved_handle_count = %#v", got["unresolved_handle_count"])
+	}
+}
+
 // TestTruncateForLangfuse verifies rune-aware truncation.
 // We specifically check CJK and ASCII inputs to ensure the "…" marker is
 // appended exactly once without splitting multi-byte characters.

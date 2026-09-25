@@ -4,14 +4,14 @@ import "testing"
 
 func TestNormalizeSlugForCompare(t *testing.T) {
 	cases := map[string]string{
-		"shang-hai-tower":     "shanghaitower",
-		"shanghai-tower":      "shanghaitower",
-		"SHANG-HAI-TOWER":     "shanghaitower",
-		"under_score_slug":    "underscoreslug",
+		"shang-hai-tower":       "shanghaitower",
+		"shanghai-tower":        "shanghaitower",
+		"SHANG-HAI-TOWER":       "shanghaitower",
+		"under_score_slug":      "underscoreslug",
 		"entity/shanghai-tower": "entity/shanghaitower",
-		"":                    "",
-		"---":                 "",
-		"中文-slug":             "中文slug",
+		"":                      "",
+		"---":                   "",
+		"中文-slug":               "中文slug",
 	}
 	for input, want := range cases {
 		t.Run(input, func(t *testing.T) {

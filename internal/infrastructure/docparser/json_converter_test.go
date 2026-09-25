@@ -506,13 +506,13 @@ func TestJsonToMarkdown_RealisticLargeNestedConfig(t *testing.T) {
 	rules := make(map[string]interface{})
 	for i := 0; i < 30; i++ {
 		rules[fmt.Sprintf("rule_%02d", i)] = map[string]interface{}{
-			"pattern": strings.Repeat("pattern", 10),
-			"action":  "allow",
+			"pattern":  strings.Repeat("pattern", 10),
+			"action":   "allow",
 			"priority": i,
 		}
 	}
 	config := map[string]interface{}{
-		"version": "3.0",
+		"version":  "3.0",
 		"metadata": map[string]interface{}{"author": "admin", "updated": "2026-03-24"},
 		"firewall": map[string]interface{}{
 			"enabled": true,

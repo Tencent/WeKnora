@@ -11,9 +11,11 @@ import (
 )
 
 var dataSchemaTool = BaseTool{
-	name:        ToolDataSchema,
-	description: "Use this tool to get the schema information of a CSV or Excel file loaded into DuckDB. It returns the table name, columns, and row count.",
-	schema:      utils.GenerateSchema[DataSchemaInput](),
+	name: ToolDataSchema,
+	description: "Use this tool to get the schema information of a CSV or Excel file loaded into DuckDB. " +
+		"It returns the columns and row count. When querying the document with data_analysis, " +
+		"reference it as the table \"" + DataAnalysisTableName + "\".",
+	schema: utils.GenerateSchema[DataSchemaInput](),
 }
 
 type DataSchemaInput struct {
@@ -25,6 +27,17 @@ type DataSchemaTool struct {
 	knowledgeService interfaces.KnowledgeService
 	chunkRepo        interfaces.ChunkRepository
 	targetChunkTypes []types.ChunkType
+	searchTargets    types.SearchTargets
+	scopeEnforced    bool
+}
+
+// WithSearchTargets enables Agent request-scope authorization. An Agent turn
+// with no search target must reject every document rather than fall back to
+// the unrestricted service-owned lookup.
+func (t *DataSchemaTool) WithSearchTargets(searchTargets types.SearchTargets) *DataSchemaTool {
+	t.searchTargets = searchTargets
+	t.scopeEnforced = true
+	return t
 }
 
 func NewDataSchemaTool(knowledgeService interfaces.KnowledgeService, chunkRepo interfaces.ChunkRepository, targetChunkTypes ...types.ChunkType) *DataSchemaTool {
@@ -50,8 +63,17 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	}
 
 	// Get knowledge to get TenantID (use IDOnly to support cross-tenant shared KB)
-	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, input.KnowledgeID)
-	if err != nil {
+	var knowledge *types.Knowledge
+	var err error
+	if t.scopeEnforced {
+		knowledge, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService)
+	} else {
+		knowledge, err = t.knowledgeService.GetKnowledgeByIDOnly(ctx, input.KnowledgeID)
+	}
+	if err != nil || knowledge == nil {
+		if err == nil {
+			err = fmt.Errorf("knowledge service returned an empty result")
+		}
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to get knowledge '%s': %v", input.KnowledgeID, err),
@@ -65,6 +87,7 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		Page:     1,
 		PageSize: 100, // Should be enough for schema chunks
 	}
+	enabled := true
 
 	chunks, _, err := t.chunkRepo.ListPagedChunksByKnowledgeID(
 		ctx,
@@ -72,11 +95,12 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		input.KnowledgeID,
 		page,
 		chunkTypes,
-		"", // tagID
-		"", // keyword
-		"", // searchField
-		"", // sortOrder
-		"", // knowledgeType
+		nil, // tagIDs
+		"",  // keyword
+		"",  // searchField
+		"",  // sortOrder
+		"",  // knowledgeType
+		&enabled,
 	)
 	if err != nil {
 		return &types.ToolResult{
@@ -101,7 +125,10 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}, fmt.Errorf("no schema info found")
 	}
 
-	output := fmt.Sprintf("%s\n\n%s", summaryContent, columnContent)
+	output := fmt.Sprintf(
+		"%s\n\n%s\n\nQuery this document with data_analysis as the table %q.",
+		summaryContent, columnContent, DataAnalysisTableName,
+	)
 
 	return &types.ToolResult{
 		Success: true,

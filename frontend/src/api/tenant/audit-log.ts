@@ -13,7 +13,7 @@ export type AuditAction =
   | 'rbac.access_denied'
   | string // forward-compat: future namespaces shouldn't break the type
 
-export type AuditOutcome = 'success' | 'denied'
+export type AuditOutcome = 'accepted' | 'success' | 'failed' | 'partial' | 'canceled' | 'denied'
 
 // AuditLog mirrors internal/types/audit_log.go. `details` is the JSONB
 // blob — for role changes it carries `{"old_role":..., "new_role":...}`,
@@ -26,6 +26,8 @@ export interface AuditLog {
   actor_user_id: string
   actor_role: string
   action: AuditAction
+  scope_type: string
+  scope_id: string
   target_type: string
   target_id: string
   target_user_id: string

@@ -159,9 +159,33 @@ function needsConnectionTest(): boolean {
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
+function hydrateConfluenceCredentialsFromSettings() {
+  if (form.value.type !== 'confluence') return
+  const settings = form.value.config.settings || {}
+  const creds = form.value.config.credentials || {}
+  form.value.config.credentials = {
+    ...creds,
+    edition: creds.edition || settings.edition || 'server',
+    base_url: creds.base_url || settings.base_url || '',
+    username: creds.username || settings.username || '',
+  }
+}
+
+function syncConfluencePublicFieldsToSettings() {
+  if (form.value.type !== 'confluence') return
+  const creds = form.value.config.credentials || {}
+  form.value.config.settings = {
+    ...(form.value.config.settings || {}),
+    ...(creds.edition ? { edition: creds.edition } : {}),
+    ...(creds.base_url ? { base_url: creds.base_url } : {}),
+    ...(creds.username ? { username: creds.username } : {}),
+  }
+}
+
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
   replaceCredentialsMode.value = true
+  hydrateConfluenceCredentialsFromSettings()
   testResult.value = ''
   testErrorMsg.value = ''
 }
@@ -195,6 +219,152 @@ const loadingChildrenIds = ref(new Set<string>())
 // Notion populate parent_id on the first call). In that case expanding a node
 // never needs an extra request.
 const treeFullyLoaded = ref(false)
+
+// Drive (云盘) root input: the Drive connectors have no "list spaces" API, so
+// the user must supply a root folder_token. We collect it here, write it into
+// form.config.resource_ids as the single root, then loadResources lists its
+// children. See 飞书云盘数据源设计.md §5.2 / ADR-0004.
+const driveFolderToken = ref('')
+// 必填校验的内联错误文案：非空时输入框显示 error 状态 + 下方 tips,
+// 替代全局 MessagePlugin,与表单字段的就地校验风格一致。
+const driveFolderTokenError = ref('')
+const driveRootLoaded = ref(false)
+const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
+const isGitLabConnector = (type: string) => type === 'gitlab'
+
+interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
+const gitlabProjects = ref<GitLabProjectInput[]>([])
+function syncGitLabProjectsToSettings() {
+  if (!isGitLabConnector(form.value.type)) return
+  form.value.config.settings.projects = gitlabProjects.value
+    .filter(project => project.project_id.trim())
+    .map(project => ({
+      project_id: project.project_id.trim(), ref: project.ref.trim(),
+      paths: project.pathsText.split(/[\n,]/).map(path => path.trim()).filter(Boolean),
+    }))
+}
+function addGitLabProject() { gitlabProjects.value.push({ project_id: '', ref: '', pathsText: '' }) }
+function removeGitLabProject(index: number) { gitlabProjects.value.splice(index, 1); syncGitLabProjectsToSettings() }
+
+// extractDriveFolderToken accepts either a bare folder_token or a Drive folder
+// URL (https://xxx.feishu.cn/drive/folder/<token> or the Lark equivalent
+// https://xxx.larksuite.com/drive/folder/<token>) and returns the token.
+// Matching is path-based, host-agnostic. Trims surrounding whitespace.
+// Returns "" when nothing usable is found.
+function extractDriveFolderToken(input: string): string {
+  const raw = (input || '').trim()
+  if (!raw) return ''
+  // Bare token: no scheme, no slash - use as-is.
+  if (!raw.includes('://') && !raw.includes('/')) return raw
+  // URL form: extract the segment after /drive/folder/.
+  const match = raw.match(/\/drive\/folder\/([^/?#]+)/)
+  if (match && match[1]) return match[1]
+  // Fallback: last path segment of a URL, or the raw string.
+  try {
+    const u = new URL(raw)
+    const segs = u.pathname.split('/').filter(Boolean)
+    return segs[segs.length - 1] || raw
+  } catch {
+    return raw
+  }
+}
+
+// loadDriveRoot writes the user-supplied folder_token (or the token extracted
+// from a pasted URL) as the root resource_id, then lists the root's children
+// so the lazy-load tree can populate. On failure it classifies the error so the
+// user gets an actionable hint (e.g. share the folder with the app) instead of
+// a raw Feishu error body.
+async function loadDriveRoot() {
+  const token = extractDriveFolderToken(driveFolderToken.value)
+  if (!token) {
+    driveFolderTokenError.value = t('datasource.drive.folderTokenRequired')
+    return
+  }
+  driveFolderTokenError.value = ''
+  // Normalize the input so the user sees the extracted token, not the full URL.
+  driveFolderToken.value = token
+  form.value.config.resource_ids = [token]
+  driveRootLoaded.value = false
+  loadingResources.value = true
+  try {
+    if (!tempDsId.value) {
+      const res = await createDataSource({
+        ...form.value,
+        knowledge_base_id: props.kbId,
+        status: 'paused',
+      } as any)
+      const created = res?.data || res
+      tempDsId.value = created.id
+    } else {
+      // Edit mode OR a previously-created temp row: persist the new folder_token
+      // so listResources sees the updated config. Previously this branch skipped
+      // updates in edit mode, leaving listResources reading the old folder_token.
+      await updateDataSource(tempDsId.value, {
+        ...form.value,
+        knowledge_base_id: props.kbId,
+      } as any)
+    }
+
+    const res = await listResources(tempDsId.value)
+    resources.value = res?.data || res || []
+    if (resources.value.length > 0) {
+      // Mirror loadResources' tree initialization: index parents that already
+      // arrived with children and auto-expand them.
+      const parentsWithChildren = new Set<string>()
+      for (const r of resources.value) {
+        if (r.parent_id) parentsWithChildren.add(r.parent_id)
+      }
+      loadedChildrenIds.value = parentsWithChildren
+      loadingChildrenIds.value = new Set<string>()
+      treeFullyLoaded.value = parentsWithChildren.size > 0
+      expandedResourceIds.value = new Set(
+        resources.value
+          .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
+          .map(r => r.external_id),
+      )
+      driveRootLoaded.value = true
+      // In edit mode, reveal pre-existing selections that live below the
+      // (not-yet-expanded) tree so they are visible and checked - mirrors
+      // loadResources' behavior for non-Drive connectors.
+      if (isEdit.value && !treeFullyLoaded.value) {
+        const loaded = new Set(resources.value.map(r => r.external_id))
+        const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+        if (hidden.length > 0) void revealExistingSelections(hidden)
+      }
+    }
+  } catch (e: any) {
+    MessagePlugin.error(classifyDriveLoadError(e))
+  }
+  loadingResources.value = false
+}
+
+// classifyDriveLoadError turns a raw Drive list error into an actionable i18n
+// message. The Feishu list API returns 403 with code=1061004 when the app has
+// not been shared the target folder; without this the user sees "forbidden"
+// and has no idea what to do.
+function classifyDriveLoadError(e: any): string {
+  const raw = String(e?.message || e?.error || '')
+  const lower = raw.toLowerCase()
+  // 403 / forbidden / 1061004 -> the app lacks access to this specific folder;
+  // the user must share it with the app's group in Feishu Drive.
+  if (
+    lower.includes('status=403') ||
+    lower.includes('forbidden') ||
+    lower.includes('"code":1061004') ||
+    lower.includes('code=1061004')
+  ) {
+    return t('datasource.drive.loadForbiddenHint')
+  }
+  // 401 / auth -> app credentials wrong or app lacks the drive scopes.
+  if (lower.includes('status=401') || lower.includes('auth') || lower.includes('1061005')) {
+    return t('datasource.drive.loadAuthHint')
+  }
+  // Invalid / not-found folder_token.
+  if (lower.includes('1061003') || lower.includes('not found')) {
+    return t('datasource.drive.loadNotFoundHint')
+  }
+  return raw || t('datasource.resourceLoadFailed')
+}
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
@@ -366,6 +536,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
       { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
   {
@@ -386,6 +557,45 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
       { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    // Feishu Drive (云盘) mode: sync documents/files under a user-supplied Drive
+    // folder_token. Same auth as the wiki connector but no wiki:wiki:readonly
+    // scope - Drive only needs drive + export + docx.
+    type: 'feishu_drive',
+    available: true,
+    docUrl: 'https://open.feishu.cn/app',
+    permissionDocUrl: 'https://open.feishu.cn/document/server-docs/docs/drive-v1/file/list',
+    permissionPageUrl: 'https://open.feishu.cn/app',
+    requiredPermissions: [
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    // Lark Drive: international counterpart of feishu_drive.
+    type: 'lark_drive',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/server-docs/docs/drive-v1/file/list',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: [
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.larksuite.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
   {
@@ -397,6 +607,20 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     requiredPermissions: [],
     fields: [
       { key: 'api_key', labelKey: 'datasource.field.integrationToken', placeholder: 'ntn_xxxx', secret: true },
+    ],
+  },
+  {
+    type: 'confluence',
+    available: true,
+    docUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionDocUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionPageUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com or https://team.atlassian.net/wiki' },
+      { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: 'name or email' },
+      { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true },
+      { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true },
     ],
   },
   {
@@ -415,6 +639,38 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com/document/development/knowledge-base-overview',
+    permissionDocUrl: 'https://open.dingtalk.com/document/development/get-knowledge-base-list',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'Wiki.Workspace.Read',
+      'Wiki.Node.Read',
+      'Storage.File.Read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: 'dingxxxxxxxx' },
+      { key: 'client_secret', labelKey: 'datasource.field.clientSecret', placeholder: '', secret: true },
+      { key: 'operator_id', labelKey: 'datasource.field.operatorId', placeholder: '', hintKey: 'datasource.field.operatorIdHint' },
+    ],
+  },
+  {
+    // Tencent IMA (ima.qq.com). Uses the OpenAPI at /openapi/wiki/v1 with two
+    // static headers (ima-openapi-clientid + ima-openapi-apikey); no OAuth.
+    type: 'ima',
+    available: true,
+    docUrl: 'https://ima.qq.com/agent-interface',
+    permissionDocUrl: 'https://ima.qq.com/agent-interface',
+    permissionPageUrl: 'https://ima.qq.com/agent-interface',
+    requiredPermissions: [],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.imaClientId', placeholder: '', secret: true },
+      { key: 'api_key', labelKey: 'datasource.field.imaApiKey', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://ima.qq.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
@@ -425,10 +681,28 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
+  {
+    type: 'gitlab', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.gitlab.baseUrl', placeholder: 'https://gitlab.example.com' },
+      { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
+    ],
+  },
 ])
 
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+
+const displayedCredentialFields = computed(() => {
+  const fields = currentDef.value?.fields || []
+  if (form.value.type !== "confluence") return fields
+
+  return fields.filter((field) => {
+    if (field.key === "password") return form.value.config.credentials.edition !== "cloud"
+    if (field.key === "api_token") return form.value.config.credentials.edition === "cloud"
+    return true
+  })
+})
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
@@ -455,7 +729,11 @@ watch(visible, async (v) => {
   loadedChildrenIds.value = new Set()
   loadingChildrenIds.value = new Set()
   treeFullyLoaded.value = false
+  driveFolderToken.value = ''
+  driveFolderTokenError.value = ''
+  driveRootLoaded.value = false
   rssAuthHeaders.value = []
+  gitlabProjects.value = []
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -482,6 +760,25 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    if (isGitLabConnector(form.value.type)) {
+      const savedProjects = Array.isArray(form.value.config.settings.projects) ? form.value.config.settings.projects : []
+      gitlabProjects.value = savedProjects.map((project: any) => ({
+        project_id: String(project.project_id || ''), ref: String(project.ref || ''),
+        pathsText: Array.isArray(project.paths) ? project.paths.join('\n') : '',
+      }))
+    }
+    // Pre-fill the Drive root folder_token from the saved resource_ids so the
+    // user sees what they previously entered. driveRootLoaded stays false: the
+    // tree has not been listed yet, and clicking "load" triggers listResources
+    // + revealExistingSelections so pre-existing selections are revealed.
+    if (isDriveConnector(form.value.type)) {
+      const rids = form.value.config?.resource_ids || []
+      if (rids.length > 0) {
+        // resource_id is "folderToken" or "folderToken:fileToken"; the root is
+        // the first segment.
+        driveFolderToken.value = rids[0].split(':')[0]
+      }
+    }
     tempDsId.value = props.dataSource.id
   } else {
     replaceCredentialsMode.value = false
@@ -535,17 +832,22 @@ function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
-  form.value.config.credentials = {}
+  form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
+  if (def.type === 'confluence') {
+    form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
+  }
+  if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
 }
 
-// --- Test connection (stateless, no DB write) ---
+// --- Test connection ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
   if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    const fields = currentDef.value?.fields || []
+    const fields = displayedCredentialFields.value
     for (const f of fields) {
       if (f.optional || f.fieldType === 'custom_headers') continue
       if (!form.value.config.credentials[f.key]) {
@@ -559,7 +861,10 @@ async function testConnection() {
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
+    // The main update endpoint ignores credentials. Only use the saved
+    // connection when keeping its credentials; test replacements directly
+    // without persisting them until the user saves the data source.
+    if (isEdit.value && tempDsId.value && !needsConnectionTest()) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
         knowledge_base_id: props.kbId,
@@ -587,6 +892,7 @@ async function testConnection() {
 async function loadResources() {
   loadingResources.value = true
   try {
+    syncConfluencePublicFieldsToSettings()
     if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
@@ -741,7 +1047,7 @@ function validateStep1Fields(): boolean {
     return true
   }
 
-  const fields = currentDef.value?.fields || []
+  const fields = displayedCredentialFields.value
   for (const f of fields) {
     if (f.optional || f.fieldType === 'custom_headers') continue
     if (!form.value.config.credentials[f.key]) {
@@ -760,8 +1066,35 @@ async function nextStep() {
       if ((testResult.value as string) !== 'success') return
     }
   }
+  if (step.value === 2 && isDriveConnector(form.value.type)) {
+    // folder_token 是 Drive 连接器的必填项：为空就地标错并留在本步,
+    // 不允许带着空 token 进入同步策略。
+    if (!driveFolderToken.value.trim()) {
+      driveFolderTokenError.value = t('datasource.drive.folderTokenRequired')
+      return
+    }
+    driveFolderTokenError.value = ''
+  }
+  if (step.value === 2 && isGitLabConnector(form.value.type)) {
+    syncGitLabProjectsToSettings()
+    if (!gitlabProjects.value.some(project => project.project_id.trim())) {
+      MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
+      return
+    }
+  }
   step.value++
   if (step.value === 2) {
+    // Drive connectors need a user-supplied folder_token before listing.
+    // In edit mode with a saved folder_token, auto-load so the saved tree
+    // (and any pre-existing selections) are revealed without an extra click.
+    // In create mode (no folder_token yet), just show the placeholder.
+    if (isDriveConnector(form.value.type)) {
+      if (!driveRootLoaded.value && driveFolderToken.value.trim()) {
+        void loadDriveRoot()
+      }
+      return
+    }
+    if (isGitLabConnector(form.value.type)) return
     loadResources()
   }
 }
@@ -780,6 +1113,8 @@ function prevStep() {
 // commitCredentialsIfNeeded). Sending an empty map keeps the backend
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
+  syncGitLabProjectsToSettings()
+  syncConfluencePublicFieldsToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -793,6 +1128,7 @@ function buildConfigPayload(): Record<string, unknown> {
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
   if (!isEdit.value || !replaceCredentialsMode.value) return true
   syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
   )
@@ -963,7 +1299,7 @@ const drawerConfirmText = computed(() => {
     v-model:visible="visible"
     :title="drawerTitle"
     :description="drawerDescription"
-    :class="form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer'"
+    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 && !isGitLabConnector(form.type) }]"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
     :confirm-loading="submitting || (step === 1 && testing)"
@@ -1220,8 +1556,15 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <template v-else-if="credentialsInputVisible">
+          <div v-if="form.type === 'confluence'" class="form-item">
+            <label class="form-label">{{ t('datasource.field.confluenceEdition') }}</label>
+            <t-select v-model="form.config.credentials.edition">
+              <t-option value="server" :label="t('datasource.field.confluenceEditionServer')" />
+              <t-option value="cloud" :label="t('datasource.field.confluenceEditionCloud')" />
+            </t-select>
+          </div>
           <div
-            v-for="field in currentDef?.fields || []"
+            v-for="field in displayedCredentialFields"
             :key="field.key"
             class="form-item"
           >
@@ -1299,9 +1642,68 @@ const drawerConfirmText = computed(() => {
 
     <!-- Step 2: Select resources -->
     <section v-if="step === 2" class="setting-drawer__section ds-resource-section">
+      <template v-if="isGitLabConnector(form.type)">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.gitlab.projects') }}</h4>
+        <p class="ds-resource-hint">{{ t('datasource.gitlab.projectsHint') }}</p>
+        <div class="gitlab-project-list">
+          <div v-for="(project, index) in gitlabProjects" :key="index" class="gitlab-project-row">
+            <div class="gitlab-project-row__header">
+              <strong>{{ t('datasource.gitlab.project') }} {{ index + 1 }}</strong>
+              <t-button variant="text" size="small" theme="danger" @click="removeGitLabProject(index)"><t-icon name="delete" /></t-button>
+            </div>
+            <label class="form-label required">{{ t('datasource.gitlab.projectId') }}</label>
+            <t-input v-model="project.project_id" :placeholder="t('datasource.gitlab.projectIdPlaceholder')" />
+            <label class="form-label">{{ t('datasource.gitlab.ref') }}</label>
+            <t-input v-model="project.ref" :placeholder="t('datasource.gitlab.refPlaceholder')" />
+            <label class="form-label">{{ t('datasource.gitlab.paths') }}</label>
+            <t-textarea v-model="project.pathsText" :placeholder="t('datasource.gitlab.pathsPlaceholder')" :autosize="{ minRows: 2, maxRows: 5 }" />
+          </div>
+          <t-button variant="outline" @click="addGitLabProject"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitlab.addProject') }}</t-button>
+        </div>
+      </template>
+      <template v-else>
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
-      <div v-if="loadingResources" class="ds-loading-center"><t-loading /></div>
+
+      <!-- Drive (云盘) root input: shown alongside the tree (not as a switch).
+           The user supplies a folder_token (or a Drive folder URL) and clicks
+           "load"; the tree below stays as a placeholder until load succeeds.
+           Other connectors skip this and go straight to the tree. -->
+      <div v-if="isDriveConnector(form.type)" class="drive-folder-input">
+        <label class="drive-folder-input__label required">
+          {{ t('datasource.drive.folderTokenLabel') }}
+          <t-tooltip :content="t('datasource.drive.rootNotSupportedHint')" placement="top">
+            <t-icon name="help-circle" class="drive-folder-input__help" />
+          </t-tooltip>
+        </label>
+        <div class="drive-folder-input__row">
+          <t-input
+            v-model="driveFolderToken"
+            :placeholder="t('datasource.drive.folderTokenPlaceholder')"
+            :status="driveFolderTokenError ? 'error' : 'default'"
+            :tips="driveFolderTokenError ? driveFolderTokenError : t('datasource.drive.shareHint')"
+            clearable
+            @enter="loadDriveRoot"
+            @input="driveFolderTokenError = ''"
+          />
+          <t-button theme="primary" :loading="loadingResources" @click="loadDriveRoot">
+            {{ t('datasource.drive.load') }}
+          </t-button>
+        </div>
+      </div>
+
+      <!-- Drive placeholder before the first load: the tree cannot render until
+           a folder_token is supplied and loaded. Non-Drive connectors never hit
+           this branch. -->
+      <div
+        v-if="isDriveConnector(form.type) && !driveRootLoaded && !loadingResources"
+        class="ds-resource-empty ds-drive-placeholder"
+      >
+        <p class="ds-empty-title">{{ t('datasource.drive.placeholderTitle') }}</p>
+        <p class="ds-empty-desc">{{ t('datasource.drive.placeholderDesc') }}</p>
+      </div>
+
+      <div v-else-if="loadingResources" class="ds-loading-center"><t-loading /></div>
       <div v-else-if="resources.length > 0" class="resource-picker">
         <div class="resource-picker__toolbar">
           <span class="resource-picker__count">
@@ -1421,6 +1823,7 @@ const drawerConfirmText = computed(() => {
           </a>
         </div>
       </div>
+      </template>
     </section>
 
     <!-- Step 3: Sync strategy -->
@@ -1509,7 +1912,7 @@ const drawerConfirmText = computed(() => {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -1538,7 +1941,7 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   border: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-placeholder);
@@ -1558,7 +1961,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-step-check {
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .ds-loading-center {
@@ -1595,12 +1998,12 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-type-name {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .ds-type-soon {
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-component);
   padding: 1px 6px;
@@ -1608,7 +2011,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-type-desc {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
@@ -1618,14 +2021,14 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   flex-wrap: wrap;
 }
 
 .inline-alert__icon {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
 }
@@ -1639,11 +2042,11 @@ const drawerConfirmText = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   white-space: nowrap;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .inline-alert__action:hover {
@@ -1669,12 +2072,12 @@ const drawerConfirmText = computed(() => {
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   text-align: left;
   cursor: pointer;
-  transition: color 0.12s ease;
+  transition: color var(--app-motion-instant) ease;
 }
 
 .ds-setup-guide__toggle:hover,
@@ -1711,7 +2114,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-setup-step {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-primary);
 }
@@ -1729,7 +2132,7 @@ const drawerConfirmText = computed(() => {
 
 .ds-perm-tag {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   padding: 1px 5px;
   margin: 2px 4px 2px 0;
   border-radius: 3px;
@@ -1743,7 +2146,7 @@ const drawerConfirmText = computed(() => {
   align-items: center;
   gap: 4px;
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .credential-faux-input {
@@ -1753,14 +2156,14 @@ const drawerConfirmText = computed(() => {
   height: 32px;
   padding: 0 4px 0 12px;
   background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-border, var(--td-component-stroke));
-  border-radius: 6px;
-  font-size: 13px;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-md);
+  transition: border-color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 }
 
 .credential-faux-input:hover {
-  border-color: var(--td-brand-color-hover, var(--td-brand-color));
+  border-color: var(--td-brand-color-hover);
 }
 
 .credential-faux-input.is-empty {
@@ -1796,7 +2199,7 @@ const drawerConfirmText = computed(() => {
 
 .credential-status-icon {
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
 }
 
 .credential-status-icon.success {
@@ -1821,8 +2224,8 @@ const drawerConfirmText = computed(() => {
 .credential-actions :deep(.t-button--variant-text) {
   height: 24px;
   padding: 0 8px;
-  font-size: 12px;
-  border-radius: 4px;
+  font-size: var(--app-text-sm);
+  border-radius: var(--app-radius-xs);
 }
 
 .action-divider {
@@ -1840,7 +2243,7 @@ const drawerConfirmText = computed(() => {
 .credential-edit-actions :deep(.t-button) {
   height: 28px;
   padding: 0 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .form-item {
@@ -1852,14 +2255,14 @@ const drawerConfirmText = computed(() => {
 }
 
 .form-item--flat :deep(.t-checkbox__label) {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
 
 .form-label {
   display: block;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   margin-bottom: 6px;
   color: var(--td-text-color-primary);
@@ -1876,13 +2279,13 @@ const drawerConfirmText = computed(() => {
 
 .form-desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
 
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 }
 
@@ -1895,7 +2298,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .footer-test-message {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   flex: 1;
   min-width: 0;
@@ -1919,7 +2322,81 @@ const drawerConfirmText = computed(() => {
 
 .ds-resource-hint {
   margin: -8px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+/* Drive (云盘) root folder_token input - shown before the lazy-load tree. */
+.drive-folder-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--td-border-level-1-color);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-container);
+}
+
+.drive-folder-input__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+
+  /* 与 .form-label.required 一致的红星必填标记 */
+  &.required::before {
+    content: '*';
+    color: var(--td-error-color);
+    font-weight: 500;
+    line-height: 1;
+  }
+}
+
+.drive-folder-input__help {
+  font-size: var(--app-text-lg);
+  color: var(--td-text-color-placeholder);
+  cursor: help;
+
+  &:hover {
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.drive-folder-input__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 20px
+}
+
+/* Drive tree placeholder: shown before the first successful load. */
+.ds-drive-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 120px;
+  padding: 24px 12px;
+  border: 1px dashed var(--td-border-level-2-color);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-page);
+  text-align: center;
+}
+
+.ds-drive-placeholder .ds-empty-title {
+  margin: 0;
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+}
+
+.ds-drive-placeholder .ds-empty-desc {
+  margin: 0;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -1940,7 +2417,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .resource-picker__count {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -1956,10 +2433,10 @@ const drawerConfirmText = computed(() => {
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: color 0.12s ease;
+  transition: color var(--app-motion-instant) ease;
 }
 
 .resource-picker__action:hover,
@@ -1970,7 +2447,7 @@ const drawerConfirmText = computed(() => {
 
 .resource-picker__action-sep {
   color: var(--td-text-color-disabled);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   user-select: none;
 }
 
@@ -1993,9 +2470,9 @@ const drawerConfirmText = computed(() => {
   min-height: 34px;
   margin-bottom: 2px;
   padding: 5px 8px 5px calc(8px + var(--depth) * 14px);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background var(--app-motion-instant) ease;
 }
 
 .resource-picker__row:last-child {
@@ -2021,11 +2498,11 @@ const drawerConfirmText = computed(() => {
   justify-content: center;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--app-motion-instant) ease, color var(--app-motion-instant) ease;
 }
 
 .resource-picker__expand:hover,
@@ -2039,13 +2516,13 @@ const drawerConfirmText = computed(() => {
   width: 16px;
   height: 16px;
   border-radius: 3px;
-  border: 1.5px solid var(--td-component-border, var(--td-component-stroke));
+  border: 1.5px solid var(--td-component-border);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--app-motion-instant) ease, border-color var(--app-motion-instant) ease;
 }
 
 .resource-picker__check.is-checked,
@@ -2081,7 +2558,7 @@ const drawerConfirmText = computed(() => {
 
 .resource-picker__name {
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   color: var(--td-text-color-primary);
   white-space: nowrap;
@@ -2091,10 +2568,10 @@ const drawerConfirmText = computed(() => {
 
 .resource-picker__type {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   line-height: 1;
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   color: var(--td-text-color-placeholder);
   background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
 }
@@ -2106,14 +2583,14 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-empty-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 4px;
 }
 
 .ds-empty-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   margin: 0 0 16px;
 }
@@ -2131,7 +2608,7 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   line-height: 1.5;
 }
@@ -2143,7 +2620,7 @@ const drawerConfirmText = computed(() => {
   border: 1px solid var(--td-component-stroke);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -2168,7 +2645,7 @@ const drawerConfirmText = computed(() => {
 
 .custom-headers-desc {
   margin: 0 0 10px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -2198,7 +2675,7 @@ const drawerConfirmText = computed(() => {
     height: 32px;
     padding: 0;
     color: var(--td-text-color-placeholder);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     transition: all 0.18s ease;
 
     &:hover {
@@ -2213,11 +2690,11 @@ const drawerConfirmText = computed(() => {
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   cursor: pointer;
-  transition: color 0.12s ease;
+  transition: color var(--app-motion-instant) ease;
 }
 
 .ds-empty-retry:hover,
@@ -2234,7 +2711,7 @@ const drawerConfirmText = computed(() => {
   padding: 3px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   width: fit-content;
   max-width: 100%;
 }
@@ -2246,15 +2723,15 @@ const drawerConfirmText = computed(() => {
   padding: 4px 10px;
   min-height: 28px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.3;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
 }
 
 .option-pill:hover {
@@ -2272,14 +2749,35 @@ const drawerConfirmText = computed(() => {
   color: var(--td-text-color-primary);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
 }
+
+.gitlab-project-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.gitlab-project-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-container);
+}
+
+.gitlab-project-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 </style>
 
 <!--
-  Drawer header logo — same white badge as list cards / StorageEngineSettings.
+  Drawer header logo — same white badge as the data-source list cards.
 -->
 <style lang="less">
 .datasource-editor-drawer .setting-drawer__header-icon:has(.datasource-header-icon__img) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 
@@ -2288,5 +2786,46 @@ const drawerConfirmText = computed(() => {
   width: 24px;
   height: 24px;
   object-fit: contain;
+}
+
+/* Step 2「选择范围」:整步不滚动 —— token 输入区固定,下方资源区域
+   (占位 / 加载 / 空态 / 目录树)撑满抽屉剩余高度,树列表内部滚动。 */
+.ds-fixed-step {
+  .t-drawer__body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .setting-drawer__body {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .ds-resource-section {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .resource-picker,
+  .ds-drive-placeholder,
+  .ds-loading-center,
+  .ds-resource-empty {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .ds-loading-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .resource-picker__list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
 }
 </style>

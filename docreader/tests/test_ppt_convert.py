@@ -19,23 +19,31 @@ PPTX_SAMPLE = TESTDATA / "pptx" / "en_marker.pptx"
 
 class TestPptConvert(unittest.TestCase):
     def test_legacy_ppt_magic(self):
+        if not LEGACY_PPT.is_file():
+            self.skipTest("legacy PPT fixture not available")
         content = LEGACY_PPT.read_bytes()
         self.assertTrue(is_ole_compound(content))
         self.assertFalse(is_zip_openxml(content))
         self.assertTrue(needs_ppt_to_pptx_conversion(content, "ppt"))
 
     def test_pptx_does_not_need_conversion(self):
+        if not PPTX_SAMPLE.is_file():
+            self.skipTest("PPTX fixture not available")
         content = PPTX_SAMPLE.read_bytes()
         self.assertTrue(is_zip_openxml(content))
         self.assertFalse(needs_ppt_to_pptx_conversion(content, "pptx"))
 
     def test_normalize_pptx_passthrough(self):
+        if not PPTX_SAMPLE.is_file():
+            self.skipTest("PPTX fixture not available")
         content = PPTX_SAMPLE.read_bytes()
         out, ext = normalize_ppt_bytes(content, "pptx")
         self.assertEqual(out, content)
         self.assertEqual(ext, ".pptx")
 
     def test_legacy_ppt_requires_soffice(self):
+        if not LEGACY_PPT.is_file():
+            self.skipTest("legacy PPT fixture not available")
         if not shutil.which("soffice"):
             with self.assertRaises(ValueError) as ctx:
                 normalize_ppt_bytes(LEGACY_PPT.read_bytes(), "ppt")

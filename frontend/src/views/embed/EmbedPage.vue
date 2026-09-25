@@ -53,11 +53,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import EmbedChatView from '@/views/embed/EmbedChatView.vue'
 import { useEmbedBridge } from '@/composables/useEmbedBridge'
+import { setDefaultProtectedFileAccess } from '@/utils/protectedFileAccess'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -77,6 +78,20 @@ const {
   hostContext,
   startNewSession,
 } = useEmbedBridge(channelId)
+
+// An embed visitor has no Bearer/tenant credentials, so every protected file in
+// this document must go through the channel-scoped proxy. Registering the plane
+// once here keeps deeply nested renderers (agent stream, references, wiki
+// drawer) from having to thread the channel/token down as props.
+watchEffect(() => {
+  setDefaultProtectedFileAccess(
+    channelId.value && token.value
+      ? { mode: 'embed', channelId: channelId.value, token: token.value }
+      : null,
+  )
+})
+
+onUnmounted(() => setDefaultProtectedFileAccess(null))
 
 const handleNewChat = () => {
   // The current session is already empty — reuse it instead of spawning yet
@@ -161,7 +176,7 @@ watch(headerTitle, (title) => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   overflow: hidden;
   /* 子组件（含 AgentStreamDisplay）内凡用 --td-brand-color 的 loading / 强调色均跟随渠道主题 */
   --td-brand-color: var(--embed-primary, var(--td-brand-color));
@@ -198,14 +213,14 @@ watch(headerTitle, (title) => {
     justify-content: center;
     width: 36px;
     height: 36px;
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     flex-shrink: 0;
     background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     color: var(--td-brand-color);
   }
 
   &__avatar {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     line-height: 1;
   }
 
@@ -225,7 +240,7 @@ watch(headerTitle, (title) => {
 
   &__title {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 1.35;
     color: var(--td-text-color-primary);
@@ -236,7 +251,7 @@ watch(headerTitle, (title) => {
 
   &__subtitle {
     margin: 2px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.4;
     color: var(--td-text-color-secondary);
     overflow: hidden;

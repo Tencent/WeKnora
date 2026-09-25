@@ -44,6 +44,26 @@ type TaskInspector interface {
 	// span/updated_at checks remain authoritative there.
 	HasQueuedTasksForKnowledge(ctx context.Context, knowledgeID string) (bool, error)
 
+	// QueuedKnowledgeIDs returns every knowledge ID that a pending /
+	// scheduled / retry / active task of those same types references, in
+	// one pass over the queues — for answering many documents at once
+	// where HasQueuedTasksForKnowledge would rescan per document. Unlike
+	// that probe it returns list errors instead of reading them as "no
+	// match". Lite mode returns an empty set.
+	QueuedKnowledgeIDs(ctx context.Context) (map[string]struct{}, error)
+
+	// HasQueuedDeleteTasksForKnowledge reports whether any pending /
+	// scheduled / retry / active knowledge:list_delete task still covers
+	// the given knowledge ID. The delete sweep calls it before recovering
+	// a stranded "deleting" row: the delete task is enqueued with a batch
+	// payload (knowledge_ids list) that the per-parse matcher above cannot
+	// see, so without this probe the sweep could not tell a stranded delete
+	// from one that is merely backlogged behind a busy maintenance queue.
+	//
+	// Same fail-safe contract: (false, err) on backend error, callers defer;
+	// Lite mode always returns false — inline deletes never queue.
+	HasQueuedDeleteTasksForKnowledge(ctx context.Context, knowledgeID string) (bool, error)
+
 	// QueueStats returns a read-only depth snapshot for every queue this
 	// application enqueues into, for the System Admin runtime dashboard.
 	//
@@ -62,6 +82,24 @@ type TaskInspector interface {
 	// replicas. The runtime dashboard uses them to aggregate actual cluster
 	// capacity and busy workers for each configured pool.
 	WorkerServerStats(ctx context.Context) (stats []types.WorkerServerStat, supported bool, err error)
+}
+
+// KnowledgeBaseTaskCanceller is the optional queue-cleanup capability used
+// when a knowledge base is deleted. It is separate from TaskInspector so
+// lightweight test doubles and queue backends that cannot inspect tasks do
+// not need to implement knowledge-base-wide scanning.
+type KnowledgeBaseTaskCanceller interface {
+	// CancelTasksForKnowledgeBase removes pending/scheduled/retry tasks
+	// associated with kbID and signals matching active workers to stop.
+	// knowledgeIDs covers batch tasks whose payload references documents but
+	// does not carry the parent knowledge-base ID. dataSourceIDs covers sync
+	// tasks whose payload only identifies a data source.
+	CancelTasksForKnowledgeBase(
+		ctx context.Context,
+		kbID string,
+		knowledgeIDs []string,
+		dataSourceIDs []string,
+	) (deleted int, cancelled int, err error)
 }
 
 // RuntimeTaskInspector is the optional operator surface implemented by queue
@@ -83,4 +121,12 @@ type RuntimeTaskInspector interface {
 	// operator-facing AllowedActions. Used when the business row is already
 	// gone but a retry/pending task survived (orphan cleanup).
 	ForceDeleteRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)
+	// PurgeArchivedRuntimeTasks removes every archived (finally-failed) task
+	// from one queue in a single call and returns how many records were
+	// deleted. It only ever touches the archived (dead-letter) set, so live
+	// pending/active/scheduled/retry tasks are never affected. Business state
+	// is intentionally left untouched: archived tasks have already had their
+	// document status flipped to "failed" on their last retry, mirroring the
+	// semantics of deleting archived records one by one.
+	PurgeArchivedRuntimeTasks(ctx context.Context, queue string) (deleted int, supported bool, err error)
 }

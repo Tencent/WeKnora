@@ -1,14 +1,16 @@
 package types
 
-import "maps"
+import (
+	"maps"
+	"strings"
+)
 
 // PipelineRequest holds immutable configuration set once at the request entry point.
 type PipelineRequest struct {
-	SessionID    string `json:"session_id"`
-	UserID       string `json:"user_id"`
-	Query        string `json:"query,omitempty"`
-	EnableMemory bool   `json:"enable_memory"`
-	MaxRounds    int    `json:"max_rounds"`
+	SessionID string `json:"session_id"`
+	UserID    string `json:"user_id"`
+	Query     string `json:"query,omitempty"`
+	MaxRounds int    `json:"max_rounds"`
 
 	// Knowledge base retrieval parameters
 	KnowledgeBaseIDs []string      `json:"knowledge_base_ids"`
@@ -18,6 +20,10 @@ type PipelineRequest struct {
 	KeywordThreshold float64       `json:"keyword_threshold"`
 	EmbeddingTopK    int           `json:"embedding_top_k"`
 	VectorDatabase   string        `json:"vector_database"`
+	// DisableVectorMatch / DisableKeywordsMatch turn off one recall path for
+	// every search target. Set by the knowledge-search API.
+	DisableVectorMatch   bool `json:"disable_vector_match,omitempty"`
+	DisableKeywordsMatch bool `json:"disable_keywords_match,omitempty"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -115,6 +121,9 @@ type PipelineState struct {
 	RewriteQuery string      `json:"rewrite_query,omitempty"`
 	Intent       QueryIntent `json:"intent,omitempty"`
 	History      []*History  `json:"history,omitempty"`
+	// HistoryLoaded records that History was fetched this turn, so an empty
+	// History (a first turn) is not fetched again by a later stage.
+	HistoryLoaded bool `json:"-"`
 
 	SearchResult         []*SearchResult   `json:"-"`
 	RerankResult         []*SearchResult   `json:"-"`
@@ -129,6 +138,14 @@ type PipelineState struct {
 	ImageDescription     string            `json:"-"`
 	QuotedContext        string            `json:"-"` // Quoted message text, injected at LLM prompt stage
 	SystemPromptOverride string            `json:"-"`
+	// MemoryPrompt is the long-term memory envelope appended to the system
+	// prompt for this turn, empty when memory is off or nothing matched.
+	MemoryPrompt string `json:"-"`
+	// UsedMemories mirrors MemoryPrompt in structured form so the answer can
+	// tell the user which memories it saw.
+	UsedMemories UsedMemories `json:"-"`
+	// RerankDiagnostics records what the rerank stage did this turn.
+	RerankDiagnostics *RerankDiagnostics `json:"-"`
 }
 
 // PipelineContext holds runtime context for the current pipeline execution.
@@ -150,12 +167,31 @@ type ChatManage struct {
 // NeedsRetrieval returns true when the current pipeline execution should
 // run the retrieval stages (search, rerank, merge, etc.).
 // For IntentWebSearch, retrieval is only needed if web search is enabled;
-// for all other intents it delegates to QueryIntent.NeedsKBRetrieval().
+// otherwise the intent prompt (intent_prompts.yaml "web_search") tells the
+// user web search is unavailable. All other intents delegate to
+// QueryIntent.NeedsKBRetrieval().
 func (c *ChatManage) NeedsRetrieval() bool {
 	if c.Intent == IntentWebSearch {
 		return c.WebSearchEnabled
 	}
 	return c.Intent.NeedsKBRetrieval()
+}
+
+// NormalizeQueryIntent maps a model-produced intent label onto a known
+// intent. Case and separators are forgiven ("KB-Search" → kb_search); an
+// unknown label becomes the empty intent, which retrieves. Taking the label
+// verbatim turned any unexpected value into "no retrieval", so the answer
+// was generated without the knowledge base and without an error.
+func NormalizeQueryIntent(raw string) QueryIntent {
+	label := strings.ToLower(strings.TrimSpace(raw))
+	label = strings.NewReplacer("-", "_", " ", "_").Replace(label)
+	switch intent := QueryIntent(label); intent {
+	case IntentKBSearch, IntentWebSearch, IntentGreeting, IntentChitchat, IntentFollowUp,
+		IntentImageOnly, IntentDocOnly, IntentSummarize, IntentClarification:
+		return intent
+	default:
+		return ""
+	}
 }
 
 // Clone creates a deep copy of the ChatManage object.
@@ -204,7 +240,6 @@ func (c *ChatManage) Clone() *ChatManage {
 			Query:                    c.Query,
 			SessionID:                c.SessionID,
 			UserID:                   c.UserID,
-			EnableMemory:             c.EnableMemory,
 			MaxRounds:                c.MaxRounds,
 			KnowledgeBaseIDs:         knowledgeBaseIDs,
 			KnowledgeIDs:             knowledgeIDs,
@@ -213,6 +248,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			KeywordThreshold:         c.KeywordThreshold,
 			EmbeddingTopK:            c.EmbeddingTopK,
 			VectorDatabase:           c.VectorDatabase,
+			DisableVectorMatch:       c.DisableVectorMatch,
+			DisableKeywordsMatch:     c.DisableKeywordsMatch,
 			RerankModelID:            c.RerankModelID,
 			RerankTopK:               c.RerankTopK,
 			RerankThreshold:          c.RerankThreshold,
@@ -250,6 +287,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			ImageDescription:     c.ImageDescription,
 			QuotedContext:        c.QuotedContext,
 			SystemPromptOverride: c.SystemPromptOverride,
+			MemoryPrompt:         c.MemoryPrompt,
+			UsedMemories:         append(UsedMemories(nil), c.UsedMemories...),
 			RenderedContexts:     c.RenderedContexts,
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,
@@ -263,6 +302,7 @@ type EventType string
 
 const (
 	LOAD_HISTORY           EventType = "load_history"
+	MEMORY_RECALL          EventType = "memory_recall"
 	QUERY_UNDERSTAND       EventType = "query_understand"
 	CHUNK_SEARCH           EventType = "chunk_search"
 	CHUNK_SEARCH_PARALLEL  EventType = "chunk_search_parallel"
@@ -275,8 +315,6 @@ const (
 	CHAT_COMPLETION        EventType = "chat_completion"
 	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream"
 	FILTER_TOP_K           EventType = "filter_top_k"
-	MEMORY_RETRIEVAL       EventType = "memory_retrieval"
-	MEMORY_STORAGE         EventType = "memory_storage"
 )
 
 // PipelineBuilder dynamically assembles a pipeline as an ordered list of EventTypes.
@@ -321,9 +359,7 @@ var Pipeline = map[string][]EventType{
 	},
 	"chat_history_stream": {
 		LOAD_HISTORY,
-		MEMORY_RETRIEVAL,
 		CHAT_COMPLETION_STREAM,
-		MEMORY_STORAGE,
 	},
 	"rag": {
 		CHUNK_SEARCH,

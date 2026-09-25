@@ -3,9 +3,6 @@ package dingtalk
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,7 +23,10 @@ import (
 )
 
 // httpClient is a shared HTTP client with a reasonable timeout for DingTalk API calls.
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+var httpClient = secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+	Timeout:      15 * time.Second,
+	MaxRedirects: 5,
+})
 
 // apiBaseURL is the DingTalk OpenAPI host. Overridable in tests.
 var apiBaseURL = "https://api.dingtalk.com"
@@ -86,37 +86,10 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 	return false
 }
 
-// VerifyCallback verifies the DingTalk webhook signature (HmacSHA256).
+// VerifyCallback refuses the legacy HTTP protocol because its timestamp-only
+// signature cannot authenticate the message body. Stream events use the SDK.
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
-	if a.clientSecret == "" {
-		return nil
-	}
-
-	timestamp := c.GetHeader("Timestamp")
-	sign := c.GetHeader("Sign")
-	if timestamp == "" || sign == "" {
-		return fmt.Errorf("missing timestamp or sign header")
-	}
-
-	ts, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid timestamp: %w", err)
-	}
-	diff := time.Now().UnixMilli() - ts
-	if diff > 3600*1000 || diff < -3600*1000 {
-		return fmt.Errorf("timestamp expired")
-	}
-
-	stringToSign := timestamp + "\n" + a.clientSecret
-	h := hmac.New(sha256.New, []byte(a.clientSecret))
-	h.Write([]byte(stringToSign))
-	expectedSign := base64.StdEncoding.EncodeToString(h.Sum(nil))
-
-	if !hmac.Equal([]byte(sign), []byte(expectedSign)) {
-		return fmt.Errorf("invalid signature")
-	}
-
-	return nil
+	return fmt.Errorf("DingTalk HTTP callbacks are disabled; use Stream mode")
 }
 
 // DingTalk callback message structure.
@@ -169,6 +142,86 @@ type fileMessageContent struct {
 	DownloadCode        string `json:"downloadCode"`
 	PictureDownloadCode string `json:"pictureDownloadCode"`
 	FileName            string `json:"fileName"`
+}
+
+// richTextMessageContent is the payload DingTalk sends for msgtype=richText.
+// Text and pictures are interleaved in their original display order. The
+// unified IM message currently carries one downloadable file, so we retain the
+// first picture while preserving all text fragments for the QA query.
+type richTextMessageContent struct {
+	RichText []richTextElement `json:"richText"`
+}
+
+type richTextElement struct {
+	Text                string `json:"text"`
+	Type                string `json:"type"`
+	DownloadCode        string `json:"downloadCode"`
+	PictureDownloadCode string `json:"pictureDownloadCode"`
+}
+
+type parsedRichText struct {
+	Text         string
+	DownloadCode string
+	PictureCount int
+}
+
+func parseRichTextContent(msgtype string, content json.RawMessage) (parsedRichText, bool) {
+	if !strings.EqualFold(strings.TrimSpace(msgtype), "richText") {
+		return parsedRichText{}, false
+	}
+
+	var payload richTextMessageContent
+	if len(content) == 0 || json.Unmarshal(content, &payload) != nil {
+		return parsedRichText{}, false
+	}
+
+	textParts := make([]string, 0, len(payload.RichText))
+	result := parsedRichText{}
+	for _, item := range payload.RichText {
+		if text := strings.TrimSpace(item.Text); text != "" {
+			textParts = append(textParts, text)
+		}
+
+		code := pictureDownloadCode(item)
+		if code == "" {
+			continue
+		}
+		result.PictureCount++
+		if result.DownloadCode == "" {
+			result.DownloadCode = code
+		}
+	}
+	result.Text = strings.Join(textParts, "\n")
+	return result, true
+}
+
+func pictureDownloadCode(item richTextElement) string {
+	if !strings.EqualFold(strings.TrimSpace(item.Type), "picture") {
+		return ""
+	}
+	if item.DownloadCode != "" {
+		return item.DownloadCode
+	}
+	return item.PictureDownloadCode
+}
+
+type audioMessageContent struct {
+	Recognition string `json:"recognition"`
+}
+
+func parseAudioContent(msgtype string, content json.RawMessage) (string, bool) {
+	if !strings.EqualFold(strings.TrimSpace(msgtype), "audio") {
+		return "", false
+	}
+	var payload audioMessageContent
+	if len(content) == 0 || json.Unmarshal(content, &payload) != nil {
+		return "", false
+	}
+	text := strings.TrimSpace(payload.Recognition)
+	if text == "" {
+		return "", false
+	}
+	return text, true
 }
 
 // parseFileContent maps a DingTalk msgtype + content object to WeKnora's file
@@ -283,6 +336,7 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 
 	extra := map[string]string{
 		"session_webhook": msg.SessionWebhook,
+		"raw_msgtype":     msg.Msgtype,
 	}
 	incoming := &im.IncomingMessage{
 		Platform:  im.PlatformDingtalk,
@@ -294,11 +348,16 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 		Extra:     extra,
 	}
 
-	if msgType, fileName, downloadCode, ok := parseFileContent(msg.Msgtype, msg.Content); ok {
+	if rich, ok := parseRichTextContent(msg.Msgtype, msg.Content); ok {
+		applyRichText(incoming, extra, rich, msg.MsgID, msg.RobotCode)
+	} else if msgType, fileName, downloadCode, ok := parseFileContent(msg.Msgtype, msg.Content); ok {
 		incoming.MessageType = msgType
 		incoming.FileName = defaultFileName(msgType, fileName, msg.MsgID)
 		incoming.FileKey = downloadCode
 		extra["robot_code"] = msg.RobotCode
+	} else if text, ok := parseAudioContent(msg.Msgtype, msg.Content); ok {
+		incoming.MessageType = im.MessageTypeText
+		incoming.Content = text
 	} else {
 		incoming.MessageType = im.MessageTypeText
 		if msg.Text != nil {
@@ -306,6 +365,42 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 		}
 	}
 	return incoming
+}
+
+func applyRichText(
+	incoming *im.IncomingMessage,
+	extra map[string]string,
+	rich parsedRichText,
+	msgID, robotCode string,
+) {
+	incoming.Content = rich.Text
+	if rich.DownloadCode != "" {
+		incoming.MessageType = im.MessageTypeImage
+	} else {
+		incoming.MessageType = im.MessageTypeText
+	}
+
+	if rich.PictureCount == 0 {
+		return
+	}
+	extra["rich_text_picture_count"] = strconv.Itoa(rich.PictureCount)
+	if rich.DownloadCode == "" {
+		return
+	}
+	incoming.FileKey = rich.DownloadCode
+	incoming.FileName = defaultFileName(im.MessageTypeImage, "", msgID)
+	extra["robot_code"] = robotCode
+	if rich.PictureCount > 1 {
+		incoming.Content = appendDroppedPictureHint(incoming.Content, rich.PictureCount)
+	}
+}
+
+func appendDroppedPictureHint(text string, pictureCount int) string {
+	hint := fmt.Sprintf("（该消息共 %d 张图片，当前仅处理第一张）", pictureCount)
+	if strings.TrimSpace(text) == "" {
+		return hint
+	}
+	return text + "\n" + hint
 }
 
 // defaultFileName gives picture messages (which carry no fileName) a name with a
@@ -371,6 +466,7 @@ func streamToIncoming(data *chatbot.BotCallbackDataModel, fallbackRobotCode stri
 
 	extra := map[string]string{
 		"session_webhook": data.SessionWebhook,
+		"raw_msgtype":     data.Msgtype,
 	}
 	incoming := &im.IncomingMessage{
 		Platform:  im.PlatformDingtalk,
@@ -391,11 +487,16 @@ func streamToIncoming(data *chatbot.BotCallbackDataModel, fallbackRobotCode stri
 		}
 	}
 
-	if msgType, fileName, downloadCode, ok := parseFileContent(data.Msgtype, contentRaw); ok {
+	if rich, ok := parseRichTextContent(data.Msgtype, contentRaw); ok {
+		applyRichText(incoming, extra, rich, data.MsgId, fallbackRobotCode)
+	} else if msgType, fileName, downloadCode, ok := parseFileContent(data.Msgtype, contentRaw); ok {
 		incoming.MessageType = msgType
 		incoming.FileName = defaultFileName(msgType, fileName, data.MsgId)
 		incoming.FileKey = downloadCode
 		extra["robot_code"] = fallbackRobotCode
+	} else if text, ok := parseAudioContent(data.Msgtype, contentRaw); ok {
+		incoming.MessageType = im.MessageTypeText
+		incoming.Content = text
 	} else {
 		incoming.MessageType = im.MessageTypeText
 		incoming.Content = strings.TrimSpace(data.Text.Content)
@@ -420,6 +521,14 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 }
 
 func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, content string) error {
+	u, err := url.Parse(webhookURL)
+	if err != nil || u.Scheme != "https" || u.Host != "oapi.dingtalk.com" ||
+		u.User != nil || u.Path != "/robot/sendBySession" {
+		return fmt.Errorf("untrusted dingtalk session webhook")
+	}
+	if err := secutils.ValidateURLForSSRF(webhookURL); err != nil {
+		return fmt.Errorf("dingtalk sessionWebhook rejected by SSRF policy: %w", err)
+	}
 	body := map[string]interface{}{
 		"msgtype": "markdown",
 		"markdown": map[string]string{

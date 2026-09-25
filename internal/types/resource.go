@@ -1,6 +1,8 @@
 package types
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +18,24 @@ const (
 	ResourceStateDeleted        = "deleted"
 	ResourceLifecyclePersistent = "persistent"
 	ResourceLifecycleTemporary  = "temporary"
+)
+
+// Resource binding owner types. A binding is a claim on a stored object: the
+// bytes live as long as at least one owner still claims them, which is what
+// lets a chat answer be saved into the knowledge base without copying its
+// files, and lets either copy be deleted without breaking the other.
+const (
+	ResourceOwnerKnowledge         = "knowledge"
+	ResourceOwnerMessage           = "message"
+	ResourceOwnerTemporaryDocument = "temporary_document"
+)
+
+// Resource binding relations describe why an owner claims a resource.
+const (
+	ResourceRelationSourceFile     = "source_file"
+	ResourceRelationExtractedImage = "extracted_image"
+	ResourceRelationArtifact       = "artifact"
+	ResourceRelationAttachment     = "attachment"
 )
 
 // StoredResource is the stable application identity of one stored object. PhysicalPath
@@ -60,6 +80,13 @@ func (r *StoredResource) BeforeCreate(_ *gorm.DB) error {
 		r.State = ResourceStateActive
 	}
 	return nil
+}
+
+// MessageFileBindings contains authoritative file origins for an authorized message.
+// MessageArtifact requires an explicit artifact binding to that exact message.
+type MessageFileBindings struct {
+	KnowledgeBaseIDs []string
+	MessageArtifact  bool
 }
 
 // ResourceBinding connects a resource to a domain object that owns or uses it.
@@ -121,11 +148,49 @@ func ParseResourcePath(value string) (string, bool) {
 	if len(handle) != ResourceHandleLength {
 		return "", false
 	}
-	for _, char := range handle {
-		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
-			(char < '0' || char > '9') && char != '_' && char != '-' {
+	for i := 0; i < len(handle); i++ {
+		if !isResourceHandleChar(handle[i]) {
 			return "", false
 		}
 	}
 	return handle, true
+}
+
+func isResourceHandleChar(char byte) bool {
+	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') || char == '_' || char == '-'
+}
+
+var resourceReferenceRE = regexp.MustCompile(
+	ResourceScheme + `[A-Za-z0-9_-]{` + strconv.Itoa(ResourceHandleLength) + `}`,
+)
+
+// ScanResourceReferences returns every distinct resource:// reference embedded
+// in text, in order of first appearance.
+//
+// Rich text (a chat answer, a manual knowledge document) is the only place a
+// reference's owner can be discovered after the fact: the body is what gets
+// copied between a message and a knowledge entry, so re-binding on copy starts
+// by reading the handles back out of it.
+func ScanResourceReferences(text string) []string {
+	if !strings.Contains(text, ResourceScheme) {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var refs []string
+	for _, span := range resourceReferenceRE.FindAllStringIndex(text, -1) {
+		// A longer run of handle characters is not a 22-char handle with
+		// trailing text — it is a different (invalid) token, and binding the
+		// truncated prefix would attach the wrong file.
+		if span[1] < len(text) && isResourceHandleChar(text[span[1]]) {
+			continue
+		}
+		ref := text[span[0]:span[1]]
+		if _, exists := seen[ref]; exists {
+			continue
+		}
+		seen[ref] = struct{}{}
+		refs = append(refs, ref)
+	}
+	return refs
 }

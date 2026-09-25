@@ -33,22 +33,23 @@
   -->
   <div class="system-settings">
     <div class="section-header">
-      <div class="section-header-row">
+      <div class="section-header__titlewrap">
         <h2>{{ t('system.globalSettings.title') }}</h2>
-        <!-- Platform audit-log entry. SystemAdmin already gated the
-             whole view via meta.requiresSystemAdmin (router/index.ts)
-             so we don't re-check role here — every visitor of this
-             page is eligible. Mirrors the audit button placement in
-             tenant settings (frontend/src/views/settings/TenantMembers.vue). -->
-        <t-button
-          variant="text"
-          size="small"
-          class="header-audit-btn"
-          @click="openAuditDrawer"
-        >
-          <template #icon><t-icon name="history" /></template>
-          {{ t('system.globalSettings.audit.tabLabel') }}
-        </t-button>
+        <t-popup placement="bottom-start" trigger="hover" :overlay-inner-style="{ maxWidth: '420px' }">
+          <button type="button" class="hint-trigger" :aria-label="t('system.globalSettings.priorityHint.disclosure')">
+            <t-icon name="info-circle" size="16px" />
+          </button>
+          <template #content>
+            <div class="hint-popover">
+              <p class="hint-popover__title">{{ t('system.globalSettings.priorityHint.disclosure') }}</p>
+              <ul class="hint-popover__list">
+                <li>{{ t('system.globalSettings.priorityHint.tier1') }}</li>
+                <li>{{ t('system.globalSettings.priorityHint.tier2') }}</li>
+                <li>{{ t('system.globalSettings.priorityHint.tier3') }}</li>
+              </ul>
+            </div>
+          </template>
+        </t-popup>
       </div>
       <p class="section-description">
         {{ t('system.globalSettings.description') }}
@@ -65,77 +66,30 @@
     </div>
 
     <template v-else>
-      <div class="settings-overview">
-        <div class="auto-save-note">
-          <t-icon name="check-circle" />
-          <span>{{ t('system.globalSettings.autoSaveHint') }}</span>
-        </div>
-        <div class="settings-overview-tags" aria-live="polite">
-          <t-tag theme="success" variant="light" size="small">
-            {{ t('system.globalSettings.summary.overridden', { count: overriddenCount }) }}
-          </t-tag>
-          <t-tag theme="warning" variant="light" size="small">
-            {{ t('system.globalSettings.summary.restart', { count: restartRequiredCount }) }}
-          </t-tag>
-        </div>
-      </div>
-
-      <!-- Resolver details matter, but are secondary to finding the setting
-           itself. Keep them one click away instead of occupying the first
-           viewport on every visit. Native details/summary also gives us a
-           keyboard-accessible disclosure without extra state. -->
-      <details class="config-source-details">
-        <summary>
-          <span class="config-source-summary">
-            <t-icon name="info-circle" />
-            {{ t('system.globalSettings.priorityHint.disclosure') }}
-          </span>
-          <t-icon name="chevron-down" class="config-source-chevron" />
-        </summary>
-        <ul class="priority-hint-list">
-          <li>{{ t('system.globalSettings.priorityHint.tier1') }}</li>
-          <li>{{ t('system.globalSettings.priorityHint.tier2') }}</li>
-          <li>{{ t('system.globalSettings.priorityHint.tier3') }}</li>
-        </ul>
-      </details>
-
       <t-tabs v-model="activeSettingsSection" class="settings-section-tabs">
         <t-tab-panel value="access" :label="sectionTabLabel('access')" />
         <t-tab-panel value="tenant" :label="sectionTabLabel('tenant')" />
         <t-tab-panel value="runtime" :label="sectionTabLabel('runtime')" />
         <t-tab-panel value="security" :label="sectionTabLabel('security')" />
-        <t-tab-panel
-          v-if="hasUnknownSettings"
-          value="other"
-          :label="sectionTabLabel('other')"
-        />
+        <t-tab-panel v-if="hasUnknownSettings" value="other" :label="sectionTabLabel('other')" />
       </t-tabs>
 
-      <section class="settings-section-panel" :aria-labelledby="`settings-section-${activeSettingsSection}`">
-        <div class="settings-section-intro">
-          <div>
-            <h3 :id="`settings-section-${activeSettingsSection}`">{{ activeSectionTitle }}</h3>
-            <p>{{ activeSectionDescription }}</p>
-          </div>
+      <section class="settings-section-panel" :aria-label="activeSectionTitle">
+        <div class="settings-section-intro"
+          :class="{ 'settings-section-intro--runtime': activeSettingsSection === 'runtime' }">
+          <p>{{ activeSectionDescription }}</p>
           <t-tag v-if="activeSettingsSection === 'runtime'" theme="warning" variant="light" size="small">
             {{ t('system.globalSettings.sections.runtime.restartHint') }}
           </t-tag>
         </div>
 
-        <div
-          v-if="activeSettingsSection === 'runtime'"
-          class="runtime-table-header"
-          aria-hidden="true"
-        >
+        <div v-if="activeSettingsSection === 'runtime'" class="runtime-table-header" aria-hidden="true">
           <span>{{ t('system.globalSettings.runtimeTable.setting') }}</span>
           <span>{{ t('system.globalSettings.runtimeTable.value') }}</span>
         </div>
 
-        <div
-          class="settings-group"
-          :class="{ 'settings-group--runtime': activeSettingsSection === 'runtime' }"
-        >
-      <!--
+        <div class="settings-group" :class="{ 'settings-group--runtime': activeSettingsSection === 'runtime' }">
+          <!--
         System-admins management. Visually identical to SSRF whitelist
         (a tag-input with one entry per email). NOT a system_setting
         row — it's backed by the user table via promote/revoke APIs.
@@ -146,50 +100,38 @@
         that can't be removed is worse than not showing it).
       -->
           <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--admin">
-        <div class="setting-info">
+            <div class="setting-info">
               <div class="setting-label">
-            <span>{{ t('system.globalSettings.admins.label') }}</span>
+                <span>{{ t('system.globalSettings.admins.label') }}</span>
                 <t-tag theme="danger" variant="light" size="small" class="setting-badge">
                   {{ t('system.globalSettings.badgeHighRisk') }}
                 </t-tag>
               </div>
-          <p class="desc">{{ t('system.globalSettings.admins.description') }}</p>
-        </div>
-        <div class="setting-control">
-          <div class="setting-control-row">
-            <t-popconfirm
-              v-model:visible="adminPopconfirm.visible"
-              :content="adminPopconfirm.content"
-              :theme="adminPopconfirm.theme"
-              :confirm-btn="adminPopconfirm.confirmBtn"
-              :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
-              :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS"
-              placement="left"
-              @confirm="adminPopconfirm.finish(true)"
-              @cancel="adminPopconfirm.finish(false)"
-              @visible-change="adminPopconfirm.onVisibleChange"
-            >
-              <div class="setting-control-anchor">
-                <t-tag-input
-                  v-model="adminEmails"
-                  :placeholder="t('system.globalSettings.admins.placeholder')"
-                      :aria-label="t('system.globalSettings.admins.label')"
-                  :disabled="adminBusy"
-                  class="setting-input setting-input--wide"
-                  clearable
-                  @change="onAdminsChange"
-                />
-              </div>
-            </t-popconfirm>
+              <p class="desc">{{ t('system.globalSettings.admins.description') }}</p>
+            </div>
+            <div class="setting-control">
+              <div class="setting-control-row">
+                <t-popconfirm v-model:visible="adminPopconfirm.visible" :content="adminPopconfirm.content"
+                  :theme="adminPopconfirm.theme" :confirm-btn="adminPopconfirm.confirmBtn"
+                  :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
+                  :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS" placement="left" @confirm="adminPopconfirm.finish(true)"
+                  @cancel="adminPopconfirm.finish(false)" @visible-change="adminPopconfirm.onVisibleChange">
+                  <div class="setting-control-anchor">
+                    <t-tag-input v-model="adminEmails" :placeholder="t('system.globalSettings.admins.placeholder')"
+                      :aria-label="t('system.globalSettings.admins.label')" :disabled="adminBusy"
+                      class="setting-input setting-input--wide" clearable @change="onAdminsChange" />
+                  </div>
+                </t-popconfirm>
                 <div v-if="adminBusy" class="setting-save-state" role="status">
                   <t-loading size="small" />
                   <span>{{ t('system.globalSettings.saving') }}</span>
                 </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--password-reset">
+          <!-- Keep the reset request and its submit lock alive across tab changes. -->
+          <div v-show="activeSettingsSection === 'access'" class="setting-row setting-row--password-reset">
             <div class="setting-info">
               <div class="setting-label">
                 <span>{{ t('system.globalSettings.passwordReset.label') }}</span>
@@ -200,64 +142,60 @@
               <p class="desc">{{ t('system.globalSettings.passwordReset.description') }}</p>
             </div>
             <div class="setting-control">
-              <t-button
-                theme="danger"
-                variant="text"
-                class="password-reset-trigger"
-                @click="openPasswordResetDialog"
-              >
-                <template #icon><t-icon name="lock-on" /></template>
-                {{ t('system.globalSettings.passwordReset.action') }}
-              </t-button>
+              <ResetPasswordDialog v-model:visible="passwordResetVisible" :active="activeSettingsSection === 'access'"
+                @announced="saveAnnouncement = $event">
+                <t-button theme="danger" variant="text" class="password-reset-trigger">
+                  <template #icon><t-icon name="lock-on" /></template>
+                  {{ t('system.globalSettings.passwordReset.action') }}
+                </t-button>
+              </ResetPasswordDialog>
             </div>
           </div>
 
-      <div
-            v-for="item in activeSectionSettings"
-        :key="item.key"
-        class="setting-row"
-      >
-        <div class="setting-info">
+          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--create-user">
+            <div class="setting-info">
               <div class="setting-label">
-            <span>{{ keyLabel(item.key) }}</span>
-            <t-tag
-              v-if="item.requires_restart"
-              theme="warning"
-              variant="light"
-              size="small"
-              class="setting-badge"
-            >{{ t('system.globalSettings.badgeRequiresRestart') }}</t-tag>
-            <t-tag
-              v-if="item.is_secret"
-              theme="primary"
-              variant="light"
-              size="small"
-              class="setting-badge"
-            >{{ t('system.globalSettings.badgeSecret') }}</t-tag>
-            <t-tag
-                  v-if="isHighImpactKey(item.key)"
-                  theme="danger"
-                  variant="light"
-                  size="small"
-                  class="setting-badge"
-                >{{ t('system.globalSettings.badgeHighRisk') }}</t-tag>
-                <t-tag
-              v-if="hasOverride(item)"
-              theme="success"
-              variant="light"
-              size="small"
-              class="setting-badge"
-              :title="t('system.globalSettings.badgeOverrideTooltip')"
-            >{{ t('system.globalSettings.badgeOverride') }}</t-tag>
+                <span>{{ t('system.globalSettings.createUser.label') }}</span>
+                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
+                  {{ t('system.globalSettings.badgeHighRisk') }}
+                </t-tag>
               </div>
-          <p v-if="settingDescription(item)" class="desc">{{ settingDescription(item) }}</p>
-          <div v-if="modifiedMeta(item)" class="setting-meta">
-            {{ t('system.globalSettings.modifiedAt', { value: modifiedMeta(item) }) }}
+              <p class="desc">{{ t('system.globalSettings.createUser.description') }}</p>
+            </div>
+            <div class="setting-control">
+              <CreateUserDialog v-model:visible="createUserVisible" @announced="saveAnnouncement = $event">
+                <t-button theme="primary" variant="text" class="create-user-trigger">
+                  <template #icon><t-icon name="user-add" /></template>
+                  {{ t('system.globalSettings.createUser.action') }}
+                </t-button>
+              </CreateUserDialog>
+            </div>
           </div>
-        </div>
 
-        <div class="setting-control">
-          <!--
+          <div v-for="item in activeSectionSettings" :key="item.key" class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">
+                <span>{{ keyLabel(item.key) }}</span>
+                <t-tag v-if="item.requires_restart" theme="warning" variant="light" size="small"
+                  class="setting-badge">{{
+                    t('system.globalSettings.badgeRequiresRestart') }}</t-tag>
+                <t-tag v-if="item.is_secret" theme="primary" variant="light" size="small" class="setting-badge">{{
+                  t('system.globalSettings.badgeSecret') }}</t-tag>
+                <t-tag v-if="isHighImpactKey(item.key)" theme="danger" variant="light" size="small"
+                  class="setting-badge">{{
+                    t('system.globalSettings.badgeHighRisk') }}</t-tag>
+                <t-tag v-if="hasOverride(item)" theme="success" variant="light" size="small" class="setting-badge"
+                  :title="t('system.globalSettings.badgeOverrideTooltip')">{{ t('system.globalSettings.badgeOverride')
+                  }}</t-tag>
+              </div>
+              <p v-if="settingDescription(item)" class="desc">{{ settingDescription(item) }}</p>
+              <div v-if="modifiedMeta(item)" class="setting-meta">
+                {{ t('system.globalSettings.modifiedAt', { value: modifiedMeta(item) }) }}
+              </div>
+            </div>
+
+            <div class="setting-control">
+              <!--
             Two-row layout: input + spinner on top, secondary actions
             (currently just Reset) on a second row below, right-aligned
             under the input. We tried inlining the reset button on the
@@ -266,116 +204,75 @@
             the primary control visually clean while still placing the
             action close to the value it affects.
           -->
-          <div class="setting-control-row">
-          <t-popconfirm
-            v-if="hasEnum(item) && isHighRiskKey(item.key)"
-            v-model:visible="highRiskPopconfirm.visible"
-            :content="highRiskPopconfirm.content"
-            :theme="highRiskPopconfirm.theme"
-            :confirm-btn="highRiskPopconfirm.confirmBtn"
-            :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
-            :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS"
-            placement="left"
-            @confirm="highRiskPopconfirm.finish(true)"
-            @cancel="highRiskPopconfirm.finish(false)"
-            @visible-change="highRiskPopconfirm.onVisibleChange"
-          >
-            <div class="setting-control-anchor">
-              <t-select
-                v-model="editValues[item.key]"
-                :options="enumOptions(item)"
-                    :aria-label="keyLabel(item.key)"
-                :disabled="savingKey === item.key"
-                class="setting-input"
-                @change="onHighRiskSelectChange(item)"
-              />
-            </div>
-          </t-popconfirm>
-          <t-select
-            v-else-if="hasEnum(item)"
-            v-model="editValues[item.key]"
-            :options="enumOptions(item)"
-                :aria-label="keyLabel(item.key)"
-            :disabled="savingKey === item.key"
-            class="setting-input"
-            @change="onChange(item)"
-          />
-          <t-switch
-            v-else-if="item.value_type === 'bool'"
-            v-model="editValues[item.key]"
-                :aria-label="keyLabel(item.key)"
-            :disabled="savingKey === item.key"
-            @change="onChange(item)"
-          />
-          <t-input-number
-            v-else-if="item.value_type === 'int'"
-            v-model="editValues[item.key]"
-            :placeholder="placeholderFor(item)"
-                :aria-label="keyLabel(item.key)"
-            :disabled="savingKey === item.key"
-            theme="normal"
-            :step="1"
-            :min="minimumFor(item)"
-            class="setting-input"
-            @blur="onChange(item)"
-          />
-          <t-popconfirm
-            v-else-if="item.value_type === 'string_list' && item.key === 'ssrf.whitelist'"
-            v-model:visible="ssrfPopconfirm.visible"
-            :content="ssrfPopconfirm.content"
-            :theme="ssrfPopconfirm.theme"
-            :confirm-btn="ssrfPopconfirm.confirmBtn"
-            :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
-            :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS"
-            placement="left"
-            @confirm="ssrfPopconfirm.finish(true)"
-            @cancel="ssrfPopconfirm.finish(false)"
-            @visible-change="ssrfPopconfirm.onVisibleChange"
-          >
-            <div class="setting-control-anchor">
-              <t-tag-input
-                :key="`ssrf-tag-${ssrfTagInputKey()}`"
-                :model-value="ssrfWhitelistModelValue()"
-                :placeholder="emptyListPlaceholder"
-                    :aria-label="keyLabel(item.key)"
-                :disabled="savingKey === item.key"
-                class="setting-input setting-input--wide"
-                clearable
-                @update:model-value="onSsrfWhitelistModelUpdate"
-              />
-            </div>
-          </t-popconfirm>
-          <t-input
-            v-else
-            v-model="editValues[item.key]"
-            :placeholder="placeholderFor(item)"
-                :aria-label="keyLabel(item.key)"
-            :disabled="savingKey === item.key"
-            class="setting-input"
-            clearable
-            @blur="onChange(item)"
-          />
+              <div class="setting-control-row">
+                <t-popconfirm v-if="hasEnum(item) && isHighRiskKey(item.key)"
+                  v-model:visible="highRiskPopconfirm.visible" :content="highRiskPopconfirm.content"
+                  :theme="highRiskPopconfirm.theme" :confirm-btn="highRiskPopconfirm.confirmBtn"
+                  :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
+                  :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS" placement="left"
+                  @confirm="highRiskPopconfirm.finish(true)" @cancel="highRiskPopconfirm.finish(false)"
+                  @visible-change="highRiskPopconfirm.onVisibleChange">
+                  <div class="setting-control-anchor">
+                    <t-select v-model="editValues[item.key]" :options="enumOptions(item)"
+                      :aria-label="keyLabel(item.key)" :disabled="savingKey === item.key" class="setting-input"
+                      @change="onHighRiskSelectChange(item)" />
+                  </div>
+                </t-popconfirm>
+                <t-select v-else-if="hasEnum(item)" v-model="editValues[item.key]" :options="enumOptions(item)"
+                  :aria-label="keyLabel(item.key)" :disabled="savingKey === item.key" class="setting-input"
+                  @change="onChange(item)" />
+                <t-popconfirm v-else-if="item.value_type === 'bool' && isHighRiskKey(item.key)"
+                  v-model:visible="highRiskPopconfirm.visible" :content="highRiskPopconfirm.content"
+                  :theme="highRiskPopconfirm.theme" :confirm-btn="highRiskPopconfirm.confirmBtn"
+                  :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
+                  :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS" placement="left"
+                  @confirm="highRiskPopconfirm.finish(true)" @cancel="highRiskPopconfirm.finish(false)"
+                  @visible-change="highRiskPopconfirm.onVisibleChange">
+                  <div class="setting-control-anchor">
+                    <t-switch v-model="editValues[item.key]" :aria-label="keyLabel(item.key)"
+                      :disabled="savingKey === item.key" @change="onHighRiskBoolChange(item)" />
+                  </div>
+                </t-popconfirm>
+                <t-switch v-else-if="item.value_type === 'bool'" v-model="editValues[item.key]"
+                  :aria-label="keyLabel(item.key)" :disabled="savingKey === item.key" @change="onChange(item)" />
+                <t-input-number v-else-if="item.value_type === 'int'" v-model="editValues[item.key]"
+                  :placeholder="placeholderFor(item)" :aria-label="keyLabel(item.key)"
+                  :disabled="savingKey === item.key" theme="normal" :step="1" :min="minimumFor(item)"
+                  class="setting-input" @blur="onChange(item)" />
+                <t-popconfirm v-else-if="item.value_type === 'string_list' && item.key === 'ssrf.whitelist'"
+                  v-model:visible="ssrfPopconfirm.visible" :content="ssrfPopconfirm.content"
+                  :theme="ssrfPopconfirm.theme" :confirm-btn="ssrfPopconfirm.confirmBtn"
+                  :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
+                  :popup-props="PROGRAMMATIC_POPCONFIRM_PROPS" placement="left" @confirm="ssrfPopconfirm.finish(true)"
+                  @cancel="ssrfPopconfirm.finish(false)" @visible-change="ssrfPopconfirm.onVisibleChange">
+                  <div class="setting-control-anchor">
+                    <t-tag-input :key="`ssrf-tag-${ssrfTagInputKey()}`" :model-value="ssrfWhitelistModelValue()"
+                      :placeholder="emptyListPlaceholder" :aria-label="keyLabel(item.key)"
+                      :disabled="savingKey === item.key" class="setting-input setting-input--wide" clearable
+                      @update:model-value="onSsrfWhitelistModelUpdate" />
+                  </div>
+                </t-popconfirm>
+                <t-input v-else v-model="editValues[item.key]" :placeholder="placeholderFor(item)"
+                  :aria-label="keyLabel(item.key)" :disabled="savingKey === item.key" class="setting-input" clearable
+                  @blur="onChange(item)" />
 
-          <!--
+                <!--
             Per-row saving spinner. Appears next to the control while
             a PUT is in flight; the controls stay disabled (see
             :disabled bindings above) so concurrent edits can't race.
           -->
-              <div v-if="savingKey === item.key" class="setting-save-state" role="status">
-                <t-loading size="small" />
-                <span>{{ t('system.globalSettings.saving') }}</span>
+                <div v-if="savingKey === item.key" class="setting-save-state" role="status">
+                  <t-loading size="small" />
+                  <span>{{ t('system.globalSettings.saving') }}</span>
+                </div>
+                <div v-else-if="savedKey === item.key" class="setting-save-state setting-save-state--success"
+                  role="status">
+                  <t-icon name="check-circle-filled" />
+                  <span>{{ t('system.globalSettings.saved') }}</span>
+                </div>
               </div>
-              <div
-                v-else-if="savedKey === item.key"
-                class="setting-save-state setting-save-state--success"
-                role="status"
-              >
-                <t-icon name="check-circle-filled" />
-                <span>{{ t('system.globalSettings.saved') }}</span>
-              </div>
-          </div>
 
-          <!--
+              <!--
             Reset-to-default lives on the row below the input, right-
             aligned under it. Hidden entirely for virtual (ENV / default)
             rows so the layout collapses to a single row in the common
@@ -383,11 +280,8 @@
             override exists, so the button only appears where it can do
             something.
           -->
-          <div
-            v-if="hasOverride(item) || hasBulkAction(item)"
-            class="setting-control-actions"
-          >
-            <!--
+              <div v-if="hasOverride(item) || hasBulkAction(item)" class="setting-control-actions">
+                <!--
               Per-key bulk action. Currently only one key
               (tenant.default_storage_quota_gb) carries one — clicking
               writes the current setting value onto every existing
@@ -398,267 +292,42 @@
               when the row is dirty because applying a not-yet-saved
               value would confuse "what just happened".
             -->
-            <t-popconfirm
-              v-if="hasBulkAction(item)"
-              :content="bulkActionConfirmBody(item)"
-              :confirm-btn="{ content: t('system.globalSettings.bulkApply.confirmBtn'), theme: 'primary' }"
-              :cancel-btn="{ content: t('system.globalSettings.confirm.cancelBtn') }"
-              placement="left"
-              @confirm="runBulkAction(item)"
-            >
-              <t-button
-                variant="text"
-                size="small"
-                :disabled="savingKey === item.key || isDirty(item)"
-                :title="t('system.globalSettings.bulkApply.tooltip')"
-                class="setting-bulk-btn"
-              >
-                <template #icon><t-icon name="usergroup" /></template>
-                {{ t('system.globalSettings.bulkApply.label') }}
-              </t-button>
-            </t-popconfirm>
+                <t-popconfirm v-if="hasBulkAction(item)" :content="bulkActionConfirmBody(item)"
+                  :confirm-btn="{ content: t('system.globalSettings.bulkApply.confirmBtn'), theme: 'primary' }"
+                  :cancel-btn="{ content: t('system.globalSettings.confirm.cancelBtn') }" placement="left"
+                  @confirm="runBulkAction(item)">
+                  <t-button variant="text" size="small" :disabled="savingKey === item.key || isDirty(item)"
+                    :title="t('system.globalSettings.bulkApply.tooltip')" class="setting-bulk-btn">
+                    <template #icon><t-icon name="usergroup" /></template>
+                    {{ t('system.globalSettings.bulkApply.label') }}
+                  </t-button>
+                </t-popconfirm>
 
-            <t-popconfirm
-              v-if="hasOverride(item)"
-              :content="t('system.globalSettings.reset.confirmBody', { label: keyLabel(item.key) })"
-              :confirm-btn="{ content: t('system.globalSettings.reset.confirmBtn'), theme: 'warning' }"
-              :cancel-btn="{ content: t('system.globalSettings.confirm.cancelBtn') }"
-              placement="left"
-              @confirm="resetSetting(item)"
-            >
-              <t-button
-                variant="text"
-                size="small"
-                :disabled="savingKey === item.key"
-                :title="t('system.globalSettings.reset.tooltip')"
-                class="setting-reset-btn"
-              >
-                <template #icon><t-icon name="refresh" /></template>
-                {{ t('system.globalSettings.reset.label') }}
-              </t-button>
-            </t-popconfirm>
+                <t-popconfirm v-if="hasOverride(item)"
+                  :content="t('system.globalSettings.reset.confirmBody', { label: keyLabel(item.key) })"
+                  :confirm-btn="{ content: t('system.globalSettings.reset.confirmBtn'), theme: 'warning' }"
+                  :cancel-btn="{ content: t('system.globalSettings.confirm.cancelBtn') }" placement="left"
+                  @confirm="resetSetting(item)">
+                  <t-button variant="text" size="small" :disabled="savingKey === item.key"
+                    :title="t('system.globalSettings.reset.tooltip')" class="setting-reset-btn">
+                    <template #icon><t-icon name="refresh" /></template>
+                    {{ t('system.globalSettings.reset.label') }}
+                  </t-button>
+                </t-popconfirm>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
         </div>
       </section>
       <div class="sr-only" role="status" aria-live="polite">{{ saveAnnouncement }}</div>
     </template>
-    <t-dialog
-      v-model:visible="passwordResetVisible"
-      :header="t('system.globalSettings.passwordReset.dialogTitle')"
-      width="440px"
-      placement="center"
-      dialog-class-name="password-reset-dialog"
-      :confirm-btn="{
-        content: t('system.globalSettings.passwordReset.confirmBtn'),
-        theme: 'danger',
-        loading: passwordResetSubmitting,
-      }"
-      :cancel-btn="{
-        content: t('system.globalSettings.confirm.cancelBtn'),
-        variant: 'outline',
-      }"
-      :close-on-overlay-click="!passwordResetSubmitting"
-      :close-btn="!passwordResetSubmitting"
-      @confirm="submitPasswordReset"
-      @close="resetPasswordResetForm"
-    >
-      <t-alert
-        theme="warning"
-        :message="t('system.globalSettings.passwordReset.warning')"
-        class="password-reset-warning"
-      />
-      <t-form
-        ref="passwordResetFormRef"
-        :data="passwordResetForm"
-        :rules="passwordResetRules"
-        label-align="top"
-        class="password-reset-form"
-      >
-        <t-form-item :label="t('system.globalSettings.passwordReset.emailLabel')" name="email">
-          <t-input
-            v-model="passwordResetForm.email"
-            type="email"
-            clearable
-            autocomplete="off"
-            :disabled="passwordResetSubmitting"
-            :placeholder="t('system.globalSettings.passwordReset.emailPlaceholder')"
-          />
-        </t-form-item>
-        <t-form-item :label="t('system.globalSettings.passwordReset.newPasswordLabel')" name="newPassword">
-          <t-input
-            v-model="passwordResetForm.newPassword"
-            type="password"
-            autocomplete="new-password"
-            :disabled="passwordResetSubmitting"
-            :placeholder="t('system.globalSettings.passwordReset.newPasswordPlaceholder')"
-          >
-            <template #prefix-icon><t-icon name="lock-on" /></template>
-          </t-input>
-        </t-form-item>
-        <t-form-item :label="t('system.globalSettings.passwordReset.confirmPasswordLabel')" name="confirmPassword">
-          <t-input
-            v-model="passwordResetForm.confirmPassword"
-            type="password"
-            autocomplete="new-password"
-            :disabled="passwordResetSubmitting"
-            :placeholder="t('system.globalSettings.passwordReset.confirmPasswordPlaceholder')"
-            @enter="submitPasswordReset"
-          >
-            <template #prefix-icon><t-icon name="lock-on" /></template>
-          </t-input>
-        </t-form-item>
-      </t-form>
-    </t-dialog>
-
-    <!-- Platform audit-log drawer. Lazy-loaded on first open; closing
-         and reopening doesn't re-fetch (refresh is explicit via the
-         button inside the drawer). Backend route is SystemAdmin-gated,
-         and this whole view is too, so we don't bother with a role
-         check — any visitor here is eligible to read the feed. -->
-    <t-drawer
-      v-model:visible="auditDrawerVisible"
-      :header="t('system.globalSettings.audit.tabLabel')"
-      drawer-class-name="system-settings-audit-drawer"
-      size="880px"
-      :footer="false"
-      placement="right"
-      destroy-on-close
-    >
-      <div class="audit-drawer-inner audit-panel audit-panel--drawer">
-        <div class="audit-header">
-          <span class="audit-desc">{{ t('system.globalSettings.audit.description') }}</span>
-          <t-button
-            variant="text"
-            size="small"
-            class="audit-refresh-btn"
-            :loading="auditLoading"
-            :disabled="auditLoading"
-            @click="reloadAuditLog"
-          >
-            <template #icon><t-icon name="refresh" /></template>
-            {{ t('system.globalSettings.audit.refresh') }}
-          </t-button>
-        </div>
-
-        <div class="audit-drawer-fill">
-          <div v-if="auditError" class="audit-drawer-branch audit-drawer-branch--error">
-            <div class="error-inline">
-              <t-alert theme="error" :message="auditError">
-                <template #operation>
-                  <t-button size="small" @click="reloadAuditLog">
-                    {{ t('system.globalSettings.audit.retry') }}
-                  </t-button>
-                </template>
-              </t-alert>
-            </div>
-          </div>
-
-          <div
-            v-else-if="!auditLoading && auditEntries.length === 0"
-            class="audit-drawer-branch audit-drawer-branch--empty empty-state empty-state--audit"
-          >
-            <t-empty :description="t('system.globalSettings.audit.empty')" />
-          </div>
-
-          <div v-else class="audit-scroll-area narrow-scrollbar audit-drawer-branch" ref="auditScrollRoot">
-            <div class="data-table-shell audit-table-shell">
-              <t-table
-                row-key="id"
-                :data="auditEntries"
-                :columns="auditColumns"
-                size="medium"
-                hover
-                expand-on-row-click
-                :expanded-row-keys="auditExpandedRowKeys"
-                @expand-change="onAuditExpandChange"
-              >
-                <template #created_at="{ row }">
-                  <div class="audit-time">
-                    <span class="audit-time-date">{{ formatAuditDatePart(row.created_at) }}</span>
-                    <span class="audit-time-clock">{{ formatAuditTimePart(row.created_at) }}</span>
-                  </div>
-                </template>
-                <template #actor="{ row }">
-                  <div class="audit-actor">
-                    <span class="audit-actor-name">
-                      {{ row.actor_user_id ? auditActorLabel(row.actor_user_id) :
-                        t('system.globalSettings.audit.systemActor') }}
-                    </span>
-                    <span v-if="row.actor_role" class="audit-actor-role">
-                      {{ auditActorRoleLabel(row.actor_role) }}
-                    </span>
-                  </div>
-                </template>
-                <template #action="{ row }">
-                  <t-tag :theme="auditActionTheme(row.action)" size="small" variant="light-outline">
-                    {{ formatAuditAction(row.action) }}
-                  </t-tag>
-                </template>
-                <template #target="{ row }">
-                  <div class="audit-target">
-                    <span v-if="auditTargetKey(row)" class="audit-target-key">{{ auditTargetKey(row) }}</span>
-                    <span v-if="auditTargetDiff(row)" class="audit-target-diff">{{ auditTargetDiff(row) }}</span>
-                    <span v-else-if="!auditTargetKey(row)" class="audit-target-empty">—</span>
-                  </div>
-                </template>
-                <template #outcome="{ row }">
-                  <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small" variant="light">
-                    {{ t('system.globalSettings.audit.outcome.' + row.outcome) }}
-                  </t-tag>
-                </template>
-                <template #expandedRow="{ row }">
-                  <div class="audit-expanded">
-                    <div class="audit-expanded-grid">
-                      <div class="audit-expanded-cell">
-                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.actorId') }}</span>
-                        <span class="audit-expanded-value mono">{{ row.actor_user_id || '—' }}</span>
-                      </div>
-                      <div v-if="row.target_user_id" class="audit-expanded-cell">
-                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetUserId') }}</span>
-                        <span class="audit-expanded-value mono">{{ row.target_user_id }}</span>
-                      </div>
-                      <div v-if="row.target_type" class="audit-expanded-cell">
-                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetType') }}</span>
-                        <span class="audit-expanded-value mono">{{ row.target_type }}</span>
-                      </div>
-                      <div v-if="row.target_id" class="audit-expanded-cell">
-                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetId') }}</span>
-                        <span class="audit-expanded-value mono">{{ row.target_id }}</span>
-                      </div>
-                    </div>
-                    <div class="audit-expanded-details">
-                      <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.details') }}</span>
-                      <pre class="audit-expanded-json mono">{{ auditDetailsJSON(row) }}</pre>
-                    </div>
-                  </div>
-                </template>
-              </t-table>
-            </div>
-
-            <div ref="auditLoadSentinelEl" class="audit-load-sentinel" aria-hidden="true" />
-
-            <div v-if="auditLoading && auditEntries.length > 0" class="audit-loading-more">
-              <t-loading size="small" />
-              <span>{{ t('system.globalSettings.audit.loading') }}</span>
-            </div>
-
-            <p v-if="!auditHasMore && auditEntries.length > 0 && !auditLoading" class="audit-end-hint">
-              {{ t('system.globalSettings.audit.end') }}
-            </p>
-          </div>
-        </div>
-      </div>
-    </t-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
-import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
 import {
   listSystemSettings,
   updateSystemSetting,
@@ -667,16 +336,17 @@ import {
   listSystemAdmins,
   promoteUserToSystemAdmin,
   revokeSystemAdmin,
-  resetUserPassword,
-  listSystemAuditLog,
   type SystemSettingItem,
-  type AuditLog,
-  type AuditAction,
-  type AuditOutcome,
 } from '@/api/system'
+import CreateUserDialog from './CreateUserDialog.vue'
+import ResetPasswordDialog from './ResetPasswordDialog.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
+import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
 
 const authStore = useAuthStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const currentUserId = computed(() => authStore.currentUserId)
 
 const { t, tm, te, locale } = useI18n()
@@ -694,7 +364,12 @@ function keyLabel(k: string): string {
 // user-facing copy lives in i18n (system.globalSettings.keyDescriptions.*).
 function settingDescription(item: { key: string; description?: string }): string {
   const path = `system.globalSettings.keyDescriptions.${item.key}`
-  if (te(path)) return t(path) as string
+  if (te(path)) {
+    if (path === 'system.globalSettings.keyDescriptions.auth.complex_password_enabled') {
+      return t(path, { specialChars: PASSWORD_SPECIAL_CHARS }) as string
+    }
+    return t(path) as string
+  }
   return item.description ?? ''
 }
 
@@ -702,12 +377,14 @@ function settingDescription(item: { key: string; description?: string }): string
 // PUT. ssrf.whitelist is not here — it uses per-tag confirm instead.
 const HIGH_RISK_KEYS = new Set<string>([
   'auth.registration_mode',
+  'sandbox.docker_enabled',
 ])
 
 const HIGH_IMPACT_KEYS = new Set<string>([
   'auth.registration_mode',
   'tenant.auto_create_api_key',
   'ssrf.whitelist',
+  'sandbox.docker_enabled',
 ])
 
 function isHighRiskKey(key: string): boolean {
@@ -799,6 +476,7 @@ type SettingsSection = 'access' | 'tenant' | 'runtime' | 'security' | 'other'
 const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly string[]> = {
   access: [
     'auth.registration_mode',
+    'auth.complex_password_enabled',
     'auth.default_tenant_mode',
     'tenant.self_service_creation_enabled',
     'tenant.max_owned_per_user',
@@ -806,6 +484,7 @@ const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly 
   tenant: [
     'tenant.default_storage_quota_gb',
     'tenant.auto_create_api_key',
+    'tenant.auto_accept_invitation',
   ],
   runtime: [
     'asynq.core_concurrency',
@@ -816,12 +495,12 @@ const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly 
     'asynq.wiki_concurrency',
     'model.max_concurrency',
   ],
-  security: ['ssrf.whitelist'],
+  security: ['ssrf.whitelist', 'sandbox.docker_enabled'],
 }
 
 const activeSettingsSection = ref<SettingsSection>('access')
 const knownSettingKeys = new Set(Object.values(SETTINGS_SECTION_KEYS).flat())
-const settingsByKey = computed(() => new Map(settings.value.map((item) => [item.key, item])))
+const settingsByKey = computed<Map<string, SystemSettingItem>>(() => new Map(settings.value.map((item) => [item.key, item])))
 const unknownSettings = computed(() => settings.value.filter((item) => !knownSettingKeys.has(item.key)))
 const hasUnknownSettings = computed(() => unknownSettings.value.length > 0)
 
@@ -845,8 +524,6 @@ const activeSectionDescription = computed(() =>
   t(`system.globalSettings.sections.${activeSettingsSection.value}.description`),
 )
 
-const overriddenCount = computed(() => settings.value.filter(hasOverride).length)
-const restartRequiredCount = computed(() => settings.value.filter((item) => item.requires_restart).length)
 
 function sectionTabLabel(section: SettingsSection): string {
   const count = section === 'other'
@@ -880,72 +557,11 @@ const adminEmails = ref<string[]>([])
 const adminEmailToId = ref<Record<string, string>>({})
 const adminBusy = ref(false)
 
+// Access-row popups each live in their own dialog component
+// (CreateUserDialog.vue / ResetPasswordDialog.vue, same Access row);
+// only their visibility is owned here.
 const passwordResetVisible = ref(false)
-const passwordResetSubmitting = ref(false)
-const passwordResetFormRef = ref<FormInstanceFunctions>()
-const passwordResetForm = reactive({
-  email: '',
-  newPassword: '',
-  confirmPassword: '',
-})
-const passwordResetRules: Record<string, FormRule[]> = {
-  email: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.emailRequired'), trigger: 'blur' },
-    { email: true, message: t('system.globalSettings.passwordReset.validation.emailInvalid'), trigger: 'blur' },
-  ],
-  newPassword: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.passwordRequired'), trigger: 'blur' },
-    { min: 8, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
-    { max: 32, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
-    { pattern: /[a-zA-Z]/, message: t('system.globalSettings.passwordReset.validation.passwordLetter'), trigger: 'blur' },
-    { pattern: /\d/, message: t('system.globalSettings.passwordReset.validation.passwordNumber'), trigger: 'blur' },
-  ],
-  confirmPassword: [
-    { required: true, message: t('system.globalSettings.passwordReset.validation.confirmRequired'), trigger: 'blur' },
-    {
-      validator: (value: string) => value === passwordResetForm.newPassword,
-      message: t('system.globalSettings.passwordReset.validation.passwordMismatch'),
-      trigger: 'blur',
-    },
-  ],
-}
-
-function resetPasswordResetForm() {
-  passwordResetForm.email = ''
-  passwordResetForm.newPassword = ''
-  passwordResetForm.confirmPassword = ''
-  passwordResetFormRef.value?.clearValidate?.()
-}
-
-async function openPasswordResetDialog() {
-  resetPasswordResetForm()
-  passwordResetVisible.value = true
-  await nextTick()
-  passwordResetFormRef.value?.clearValidate?.()
-}
-
-async function submitPasswordReset() {
-  if (passwordResetSubmitting.value) return
-  const valid = await passwordResetFormRef.value?.validate?.()
-  if (valid !== true) return
-
-  passwordResetSubmitting.value = true
-  try {
-    await resetUserPassword({
-      email: passwordResetForm.email.trim(),
-      new_password: passwordResetForm.newPassword,
-    })
-    saveAnnouncement.value = t('system.globalSettings.passwordReset.success')
-    MessagePlugin.success(t('system.globalSettings.passwordReset.success'))
-    passwordResetVisible.value = false
-  } catch (err: any) {
-    const msg = err?.message || t('system.globalSettings.passwordReset.failed')
-    saveAnnouncement.value = msg
-    MessagePlugin.error(msg)
-  } finally {
-    passwordResetSubmitting.value = false
-  }
-}
+const createUserVisible = ref(false)
 
 // Guards ssrf.whitelist while an async confirm roundtrip is in flight.
 const listConfirmBusyKey = ref<string | null>(null)
@@ -1047,16 +663,7 @@ async function snapSsrfWhitelistToSaved(item: SystemSettingItem) {
 }
 
 function isDirty(item: SystemSettingItem): boolean {
-  const cur = editValues[item.key]
-  const orig = item.value
-  if (Array.isArray(cur) && Array.isArray(orig)) {
-    if (cur.length !== orig.length) return true
-    for (let i = 0; i < cur.length; i++) {
-      if (cur[i] !== orig[i]) return true
-    }
-    return false
-  }
-  return cur !== orig
+  return isSettingValueDirty(editValues[item.key], item.value)
 }
 
 function formatDate(isoString: string): string {
@@ -1110,7 +717,9 @@ async function loadSettings() {
 // onChange persists non-SSRF settings. SSRF whitelist and system admins
 // have dedicated handlers with inline popconfirm.
 async function onChange(item: SystemSettingItem) {
-  if (!isDirty(item)) return
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
+  if (!currentItem) return
+  if (!isDirty(currentItem)) return
 
   // SSRF whitelist gets the per-entry confirm flow — same shape as the
   // admin tag-input above. Adding or removing each host/CIDR is its
@@ -1118,19 +727,21 @@ async function onChange(item: SystemSettingItem) {
   // the egress firewall), so we ask once per delta instead of once
   // per "save". This matches the operator's mental model: every tag
   // they touch is acknowledged on its own.
-  await persistSetting(item)
+  await persistSetting(currentItem)
 }
 
 async function onHighRiskSelectChange(item: SystemSettingItem) {
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
+  if (!currentItem) return
   const newValue = editValues[item.key]
-  if (newValue === item.value) return
+  if (!isDirty(currentItem)) return
 
   // Revert the select immediately so cancel leaves the saved value
   // visible; re-apply only after the inline popconfirm is confirmed.
-  editValues[item.key] = item.value
+  editValues[item.key] = currentItem.value
 
   const ok = await highRiskPopconfirm.ask({
-    content: highRiskConfirmBody(item, newValue),
+    content: highRiskConfirmBody(currentItem, newValue),
     theme: 'danger',
     confirmBtn: {
       content: t('system.globalSettings.confirm.confirmBtn'),
@@ -1140,7 +751,34 @@ async function onHighRiskSelectChange(item: SystemSettingItem) {
   if (!ok) return
 
   editValues[item.key] = newValue
-  await persistSetting(item)
+  await persistSetting(currentItem)
+}
+
+async function onHighRiskBoolChange(item: SystemSettingItem) {
+  const currentItem = resolveCurrentSetting(settingsByKey.value, item.key)
+  if (!currentItem) return
+  const newValue = editValues[item.key]
+  if (!isDirty(currentItem)) return
+
+  editValues[item.key] = currentItem.value
+  if (newValue !== true) {
+    editValues[item.key] = newValue
+    await persistSetting(currentItem)
+    return
+  }
+
+  const ok = await highRiskPopconfirm.ask({
+    content: t('system.globalSettings.confirm.bodySandboxDockerEnabled'),
+    theme: 'danger',
+    confirmBtn: {
+      content: t('system.globalSettings.confirm.confirmBtn'),
+      theme: 'danger',
+    },
+  })
+  if (!ok) return
+
+  editValues[item.key] = true
+  await persistSetting(currentItem)
 }
 
 function confirmSsrfListEntryChange(
@@ -1249,6 +887,11 @@ function hasBulkAction(item: SystemSettingItem): boolean {
   return item.key === 'tenant.default_storage_quota_gb'
 }
 
+async function refreshSandboxDockerCapability(key: string) {
+  if (key !== 'sandbox.docker_enabled') return
+  await deploymentCapabilities.ensureLoaded(true)
+}
+
 function bulkActionConfirmBody(item: SystemSettingItem): string {
   // Use the canonical (saved) value, not the in-progress edit, so the
   // operator sees exactly what will be written. The button is disabled
@@ -1295,6 +938,7 @@ async function resetSetting(item: SystemSettingItem) {
     await loadSettings()
     markSettingSaved(item)
     MessagePlugin.success(t('system.globalSettings.reset.success'))
+    await refreshSandboxDockerCapability(item.key)
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.reset.failed')
     saveAnnouncement.value = msg
@@ -1321,6 +965,7 @@ async function persistSetting(item: SystemSettingItem) {
       : updated.value
     markSettingSaved(updated)
     MessagePlugin.success(t('system.globalSettings.messages.saveSuccess'))
+    await refreshSandboxDockerCapability(item.key)
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.messages.saveFailed')
     saveAnnouncement.value = msg
@@ -1465,801 +1110,70 @@ onMounted(() => {
   loadAdmins()
 })
 
-// ---- Platform audit log (system-scope, tenant_id=0) ---------------------
-//
-// Wired against GET /api/v1/system/admin/audit-log (SystemAdmin only).
-// The drawer mirrors the structural choices of the tenant audit drawer
-// in frontend/src/views/settings/TenantMembers.vue: cursor-paged by
-// descending id, lazy-loaded on first open, infinite-scroll via an
-// IntersectionObserver pinned to the scroll root. Refresh is explicit
-// via a button inside the drawer so closing/reopening doesn't quietly
-// fire a new fetch the operator didn't ask for.
-
-const auditDrawerVisible = ref(false)
-const auditEntries = ref<AuditLog[]>([])
-const auditLoading = ref(false)
-const auditError = ref('')
-const auditCursor = ref<number>(0) // 0 = "from the top"
-const auditHasMore = ref(true)
-const auditLoadedOnce = ref(false)
-const AUDIT_PAGE_SIZE = 50
-
-const auditScrollRoot = ref<HTMLElement | null>(null)
-const auditLoadSentinelEl = ref<HTMLElement | null>(null)
-let auditScrollObserver: IntersectionObserver | null = null
-
-// We render a stacked "date / time" cell rather than ellipsing a single
-// flat string — the screenshot review surfaced that the joined form
-// reads as a wall of identical timestamps when 50 events fall in the
-// same minute. A two-line cell also frees horizontal space for the
-// (much more important) target diff column.
-
-const auditColumns = computed(() => [
-  { colKey: 'created_at', title: t('system.globalSettings.audit.columns.time'), width: 120 },
-  { colKey: 'actor', title: t('system.globalSettings.audit.columns.actor'), width: 180 },
-  { colKey: 'action', title: t('system.globalSettings.audit.columns.action'), width: 150 },
-  {
-    colKey: 'target',
-    title: t('system.globalSettings.audit.columns.target'),
-    // No fixed width / no ellipsis: this is where the diff content
-    // lives, and clipping it to "..." negates the entire reason we
-    // synthesise the cell in the first place. CSS handles wrapping.
-    minWidth: 240,
-  },
-  { colKey: 'outcome', title: t('system.globalSettings.audit.columns.outcome'), width: 80, align: 'center' as const },
-])
-
-// Two helpers feeding the stacked time cell. Falling back to the raw
-// string keeps the table readable when Intl chokes on a malformed
-// timestamp (shouldn't happen, but cheap to defend).
-function formatAuditDatePart(s: string | undefined): string {
-  if (!s) return '-'
-  try {
-    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date(s))
-  } catch {
-    return s
-  }
-}
-
-function formatAuditTimePart(s: string | undefined): string {
-  if (!s) return ''
-  try {
-    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).format(new Date(s))
-  } catch {
-    return ''
-  }
-}
-
-// Action chip colour: promote is reassuring green; revoke / setting
-// change are worth a second look (warning orange); denied / access
-// rejections show danger so an operator can scan a chronological feed
-// and immediately spot abuse.
-function auditActionTheme(
-  action: AuditAction,
-): 'success' | 'warning' | 'danger' | 'primary' | 'default' {
-  switch (action) {
-    case 'system.admin_promoted':
-      return 'success'
-    case 'system.admin_revoked':
-    case 'system.setting_changed':
-    case 'system.queue_task_retried':
-    case 'system.queue_task_run_now':
-      return 'warning'
-    case 'system.user_password_reset':
-    case 'system.queue_task_deleted':
-    case 'system.queue_task_cancelled':
-      return 'danger'
-    case 'rbac.access_denied':
-      return 'danger'
-    default:
-      return 'default'
-  }
-}
-
-function auditOutcomeTheme(o: AuditOutcome): 'success' | 'danger' | 'default' {
-  if (o === 'denied') return 'danger'
-  if (o === 'success') return 'success'
-  return 'default'
-}
-
-// i18n 键名含点号（system.setting_changed）。用 t(path) 会按路径拆开解析，
-// 无法命中 system.globalSettings.audit.action['system.*'] — 必须 tm + 字面量键。
-function formatAuditAction(action: AuditAction): string {
-  const bag = tm('system.globalSettings.audit.action') as unknown
-  if (bag !== null && typeof bag === 'object' && typeof (bag as Record<string, string>)[action] === 'string') {
-    return (bag as Record<string, string>)[action]
-  }
-  return action
-}
-
-// Actor display: most system-admin operations are performed by humans
-// whose username we don't have a local mirror of. The audit row only
-// carries the UUID, so we fall back to a short prefix for readability.
-// If the actor is the current user, we resolve to their own profile.
-function auditActorLabel(userId: string): string {
-  const me = authStore.user
-  if (me && me.id === userId) {
-    return me.username?.trim() || me.email?.trim() || userId.slice(0, 8)
-  }
-  return userId.slice(0, 8)
-}
-
-function auditActorRoleLabel(role: string): string {
-  const key = `system.globalSettings.audit.actorRole.${role}`
-  if (te(key)) return t(key)
-  return role
-}
-
-// Target rendering is split into two pieces so the table cell can
-// show a structural "subject" (key / user) on its own line and the
-// value diff on a second, monospaced line — far more legible than a
-// single concatenated string clipped by ellipsis.
-
-function auditDetailsObject(row: AuditLog): Record<string, unknown> | null {
-  if (row.details && typeof row.details === 'object') {
-    return row.details as Record<string, unknown>
-  }
-  return null
-}
-
-// First line of the target cell — the thing being acted on.
-//   - setting_changed (regular key): the registry key
-//   - setting_changed (bulk apply):  i18n label "(bulk) default storage quota"
-//   - admin_promoted/revoked:        username (email) of the affected user
-function auditTargetKey(row: AuditLog): string {
-  const details = auditDetailsObject(row)
-  if (row.action === 'system.setting_changed') {
-    if (row.target_type === 'tenant_storage_quota') {
-      return t('system.globalSettings.audit.target.bulkQuota')
-    }
-    if (details && typeof details.key === 'string' && details.key) return details.key
-    return row.target_id || row.target_type || ''
-  }
-  if (
-    row.action === 'system.admin_promoted'
-    || row.action === 'system.admin_revoked'
-    || row.action === 'system.user_password_reset'
-  ) {
-    if (!details) return row.target_user_id ? row.target_user_id.slice(0, 8) : ''
-    const name = typeof details.target_username === 'string' ? details.target_username : ''
-    const mail = typeof details.target_email === 'string' ? details.target_email : ''
-    if (name && mail) return `${name} (${mail})`
-    return name || mail || (row.target_user_id ? row.target_user_id.slice(0, 8) : '')
-  }
-  if (
-    row.action === 'system.queue_task_retried'
-    || row.action === 'system.queue_task_run_now'
-    || row.action === 'system.queue_task_cancelled'
-    || row.action === 'system.queue_task_deleted'
-  ) {
-    const queue = details && typeof details.queue === 'string' ? details.queue : ''
-    const taskID = details && typeof details.task_id === 'string' ? details.task_id : row.target_id
-    return queue && taskID ? `${queue}:${taskID}` : taskID || queue
-  }
-  if (row.target_user_id) return row.target_user_id.slice(0, 8)
-  if (row.target_id) {
-    return row.target_type ? `${row.target_type}:${row.target_id}` : row.target_id
-  }
-  return ''
-}
-
-// Second line — the change diff. Returns an empty string when there
-// is no meaningful diff to display (the expanded row still surfaces
-// the raw JSON for forensics).
-function auditTargetDiff(row: AuditLog): string {
-  const details = auditDetailsObject(row)
-  if (!details) return ''
-  if (row.action === 'system.setting_changed') {
-    if (row.target_type === 'tenant_storage_quota') {
-      const affected = typeof details.affected === 'number' ? details.affected : null
-      const gb = typeof details.quota_gb === 'number' ? details.quota_gb : null
-      if (affected !== null && gb !== null) {
-        return t('system.globalSettings.audit.target.bulkQuotaDiff', {
-          count: String(affected),
-          gb: String(gb),
-        })
-      }
-      return ''
-    }
-    return formatSettingDiff(details)
-  }
-  if (row.action === 'system.admin_promoted' && typeof details.idempotent === 'boolean') {
-    if (details.idempotent === true) {
-      return t('system.globalSettings.audit.target.promoteIdempotent')
-    }
-    return ''
-  }
-  if (row.action === 'system.admin_revoked' && typeof details.changed === 'boolean') {
-    if (details.changed === false) {
-      return t('system.globalSettings.audit.target.revokeNoop')
-    }
-    return ''
-  }
-  if (row.action === 'rbac.access_denied' && typeof details.required_role === 'string') {
-    return t('system.globalSettings.audit.target.requiredRole', { role: details.required_role })
-  }
-  return ''
-}
-
-const SETTING_DIFF_MAX_LEN = 80
-function formatSettingDiff(details: Record<string, unknown>): string {
-  const fmt = (v: unknown): string => {
-    if (v === null || v === undefined) {
-      return t('system.globalSettings.audit.target.valueNull')
-    }
-    if (typeof v === 'string') return v
-    if (typeof v === 'number' || typeof v === 'boolean') return String(v)
-    try {
-      return JSON.stringify(v)
-    } catch {
-      return String(v)
-    }
-  }
-  const truncate = (s: string): string =>
-    s.length > SETTING_DIFF_MAX_LEN ? s.slice(0, SETTING_DIFF_MAX_LEN - 1) + '…' : s
-  const oldStr = truncate(fmt(details.old_value))
-  const newStr = truncate(fmt(details.new_value))
-  if (oldStr === newStr) return ''
-  return `${oldStr} → ${newStr}`
-}
-
-// Expanded row state — local set of row ids the user has opened.
-// We keep it ephemeral (not persisted) so reopening the drawer always
-// shows a clean, collapsed view.
-const auditExpandedRowKeys = ref<number[]>([])
-
-function onAuditExpandChange(value: (string | number)[]) {
-  // t-table calls back with the *new* full list of expanded keys.
-  // Normalise to numbers because AuditLog.id is always a number.
-  auditExpandedRowKeys.value = value
-    .map((v) => (typeof v === 'number' ? v : Number(v)))
-    .filter((v) => Number.isFinite(v))
-}
-
-function auditDetailsJSON(row: AuditLog): string {
-  if (row.details === null || row.details === undefined) return '{}'
-  if (typeof row.details === 'string') return row.details
-  try {
-    return JSON.stringify(row.details, null, 2)
-  } catch {
-    return String(row.details)
-  }
-}
-
-async function loadAuditLog(reset: boolean) {
-  if (auditLoading.value) return
-  if (!reset && !auditHasMore.value) return
-
-  auditLoading.value = true
-  auditError.value = ''
-  try {
-    const resp = await listSystemAuditLog({
-      after_id: reset ? undefined : auditCursor.value || undefined,
-      limit: AUDIT_PAGE_SIZE,
-    })
-    if (resp.success) {
-      const rows = resp.data || []
-      auditEntries.value = reset ? rows : [...auditEntries.value, ...rows]
-      auditCursor.value = resp.next_cursor || 0
-      // Same convention as tenant audit: next_cursor=0 means "no
-      // older rows", regardless of whether the current page was empty.
-      auditHasMore.value = !!resp.next_cursor && rows.length > 0
-      auditLoadedOnce.value = true
-    } else {
-      auditError.value = resp.message || t('system.globalSettings.audit.errors.generic')
-    }
-  } catch (err: any) {
-    const status = err?.status
-    if (status === 403) {
-      auditError.value = t('system.globalSettings.audit.forbidden')
-    } else {
-      auditError.value = err?.message || t('system.globalSettings.audit.errors.generic')
-    }
-  } finally {
-    auditLoading.value = false
-  }
-}
-
-function detachAuditInfiniteScroll() {
-  auditScrollObserver?.disconnect()
-  auditScrollObserver = null
-}
-
-function attachAuditInfiniteScroll() {
-  detachAuditInfiniteScroll()
-  const root = auditScrollRoot.value
-  const sentinel = auditLoadSentinelEl.value
-  if (!root || !sentinel) return
-
-  auditScrollObserver = new IntersectionObserver(
-    (entries) => {
-      const hitBottom = entries.some((e) => e.isIntersecting)
-      if (!hitBottom || !auditHasMore.value || auditLoading.value) return
-      void loadAuditLog(false)
-    },
-    { root, rootMargin: '100px 0px', threshold: 0 },
-  )
-  auditScrollObserver.observe(sentinel)
-}
-
-function reloadAuditLog() {
-  auditCursor.value = 0
-  auditHasMore.value = true
-  loadAuditLog(true)
-}
-
-function openAuditDrawer() {
-  auditDrawerVisible.value = true
-  if (!auditLoadedOnce.value) {
-    loadAuditLog(true)
-  }
-}
-
-watch(
-  auditDrawerVisible,
-  async (open) => {
-    if (!open) {
-      detachAuditInfiniteScroll()
-      return
-    }
-    await nextTick()
-    attachAuditInfiniteScroll()
-  },
-  { flush: 'post' },
-)
-
-watch(
-  () => auditError.value,
-  async () => {
-    if (!auditDrawerVisible.value) return
-    await nextTick()
-    if (!auditError.value) {
-      attachAuditInfiniteScroll()
-      return
-    }
-    detachAuditInfiniteScroll()
-  },
-  { flush: 'post' },
-)
-
 onUnmounted(() => {
-  detachAuditInfiniteScroll()
   if (savedKeyTimer) clearTimeout(savedKeyTimer)
 })
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .system-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 24px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
-/* Title + audit-log entry sit on the same row, parallel to the layout
-   used in tenant member settings — keeps secondary actions anchored to
-   the section header instead of floating loose above content. */
-.section-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-
-  h2 {
-    margin: 0;
-  }
-}
-
-.header-audit-btn {
-  flex-shrink: 0;
-}
-
-/* ===== Audit drawer (mirrors TenantMembers.vue's audit panel) =========
-   Kept scoped to this view rather than extracted to a shared component:
-   the two pages render distinct action labels and target formatters,
-   and a generic <AuditLogPanel> would have to thread enough props
-   through to make the abstraction more expensive than the duplication.
-   Revisit if a third audit surface appears. */
-.audit-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding-top: 8px;
-}
-
-.audit-panel--drawer {
-  padding-top: 0;
-}
-
-.audit-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--td-bg-color-secondarycontainer);
-  padding: 12px 16px;
-  border-radius: 8px;
-  gap: 12px;
-
-  .audit-desc {
-    flex: 1;
-    min-width: 0;
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-  }
-
-  .audit-refresh-btn {
-    flex-shrink: 0;
-  }
-}
-
-.audit-drawer-inner {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  gap: 14px;
-  min-height: 0;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.audit-drawer-fill {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.audit-drawer-branch {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.audit-drawer-branch--error {
-  justify-content: center;
-
-  .error-inline {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 20px 0 8px;
-  }
-}
-
-.audit-drawer-branch--empty.empty-state--audit {
-  flex: 1 1 auto;
-  justify-content: center;
-  align-items: center;
-  padding: 24px 12px;
-  min-height: 0;
-}
-
-.audit-scroll-area {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.audit-load-sentinel {
-  height: 1px;
-  width: 100%;
-  pointer-events: none;
-}
-
-.audit-loading-more {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 12px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
-
-.audit-end-hint {
-  text-align: center;
-  font-size: 12px;
-  color: var(--td-text-color-disabled);
-  padding: 8px 0 14px;
-  margin: 0;
-}
-
-.audit-time {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  line-height: 1.3;
-
-  .audit-time-date {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-  }
-
-  .audit-time-clock {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    font-variant-numeric: tabular-nums;
-  }
-}
-
-.audit-actor {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  line-height: 1.3;
-  min-width: 0;
-
-  .audit-actor-name {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .audit-actor-role {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-  }
-}
-
-.audit-target {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  line-height: 1.35;
-  min-width: 0;
-  padding: 2px 0;
-
-  .audit-target-key {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    word-break: break-all;
-    font-family: var(--td-font-family-mono, monospace);
-  }
-
-  .audit-target-diff {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
-    word-break: break-all;
-    line-height: 1.4;
-  }
-
-  .audit-target-empty {
-    color: var(--td-text-color-placeholder);
-  }
-}
-
-/* Expanded row: surfaces the raw audit row context (UUIDs, target
-   type/id, full details JSON) so an investigator never has to hop to
-   psql for the verbatim event. Background steps off-card to make the
-   nested context visually distinct from the table rows. */
-.audit-expanded {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--td-bg-color-container-hover);
-}
-
-.audit-expanded-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px 18px;
-}
-
-.audit-expanded-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.audit-expanded-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--td-text-color-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.audit-expanded-value {
-  font-size: 12px;
-  color: var(--td-text-color-primary);
-  word-break: break-all;
-}
-
-.audit-expanded-details {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.audit-expanded-json {
-  margin: 0;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--td-text-color-primary);
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 280px;
-  overflow: auto;
-}
-
-.mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-}
-
-.data-table-shell {
-  overflow-x: auto;
-  border-radius: 10px;
-  border: 1px solid var(--td-component-stroke);
-  background-color: var(--td-bg-color-container);
-
-  &:deep(thead th) {
-    font-weight: 600;
-    font-size: 13px;
-    background-color: var(--td-bg-color-secondarycontainer) !important;
-  }
-
-  &:deep(.t-table td),
-  &:deep(.t-table th) {
-    padding-top: 14px;
-    padding-bottom: 14px;
-    /* Center the cell content vertically: most rows have at least one
-       single-line tag column (action / outcome), and a top-aligned
-       layout floats those chips above the multi-line target cell —
-       middle keeps the row's visual weight unified. */
-    vertical-align: middle;
-  }
-}
-
-/* Audit-specific table polish: no zebra stripes (the per-row "key /
-   diff" stack already provides enough separation between rows; stripes
-   on top read as visual noise), softer hover, denser separator. */
-.audit-table-shell {
-  /* Sticky table head: long audit feeds (50+ rows) lose the column
-     labels once the user scrolls, which makes "what's this column?"
-     a constant relearn. The drawer's outer scroll container is
-     `.audit-scroll-area`, so `top: 0` here pins thead to that
-     container's top. z-index keeps it above row hover/expand
-     backgrounds, and the explicit background plus bottom border
-     prevent row content bleeding through during scroll. */
-  &:deep(thead th) {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    box-shadow: inset 0 -1px 0 var(--td-component-stroke);
-  }
-
-  &:deep(.t-table tbody tr:hover > td) {
-    background-color: var(--td-bg-color-container-hover);
-  }
-
-  &:deep(.t-table tbody tr.t-table__expanded-row > td) {
-    padding: 0 !important;
-    background-color: transparent;
-  }
-
-  &:deep(.t-table__expandable-icon-cell) {
-    width: 36px;
-  }
-}
-
-.settings-overview {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-  min-height: 24px;
-}
-
-.auto-save-note {
+.section-header__titlewrap {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-
-  .t-icon {
-    color: var(--td-success-color);
-  }
 }
 
-.settings-overview-tags {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.config-source-details {
-  margin-bottom: 18px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
-  background: var(--td-bg-color-container);
-
-  summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 38px;
-    padding: 0 12px;
-    cursor: pointer;
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    list-style: none;
-
-    &::-webkit-details-marker {
-      display: none;
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color-focus);
-      outline-offset: 2px;
-    }
-  }
-
-  &[open] {
-    background: var(--td-bg-color-secondarycontainer);
-
-    .config-source-chevron {
-      transform: rotate(180deg);
-    }
-  }
-}
-
-.config-source-summary {
+.hint-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  font-weight: 500;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: var(--app-radius-xs);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: help;
+  line-height: 1;
 
-  .t-icon {
+  &:hover,
+  &:focus-visible {
     color: var(--td-brand-color);
   }
 }
 
-.config-source-chevron {
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
+.hint-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hint-popover__title {
+  margin: 0;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
+  font-weight: 600;
+}
+
+.hint-popover__list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: var(--app-text-sm);
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+  list-style: disc;
+
+  li+li {
+    margin-top: 4px;
+  }
 }
 
 .settings-section-tabs {
@@ -2287,19 +1201,16 @@ onUnmounted(() => {
   padding: 0 0 12px;
   border-bottom: 1px solid var(--td-component-stroke);
 
-  h3 {
-    margin: 0 0 4px;
-    font-size: 16px;
-    line-height: 1.4;
-    color: var(--td-text-color-primary);
-  }
-
   p {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
+}
+
+.settings-section-intro--runtime {
+  border-bottom: none;
 }
 
 .runtime-table-header {
@@ -2307,7 +1218,7 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: 24px;
   padding: 10px 16px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
@@ -2338,12 +1249,12 @@ onUnmounted(() => {
   }
 
   .setting-label {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .desc {
     max-width: 620px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   .setting-control {
@@ -2352,19 +1263,6 @@ onUnmounted(() => {
 
   .setting-input {
     width: 210px;
-  }
-}
-
-.priority-hint-list {
-  margin: 0;
-  padding: 0 36px 12px 34px;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--td-text-color-primary);
-  list-style: disc;
-
-  li + li {
-    margin-top: 4px;
   }
 }
 
@@ -2386,7 +1284,7 @@ onUnmounted(() => {
   gap: 5px;
   flex-shrink: 0;
   min-width: 52px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -2417,7 +1315,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 60px 0;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 // Skeleton mirrors GeneralSettings.vue 1:1 so the two panes feel like
@@ -2434,21 +1332,11 @@ onUnmounted(() => {
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
+  .setting-row();
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 65%;
-  padding-right: 24px;
+  .setting-info();
 }
 
 .setting-label {
@@ -2456,7 +1344,7 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 500;
   color: var(--td-text-color-primary);
   margin-bottom: 4px;
@@ -2468,7 +1356,7 @@ onUnmounted(() => {
 }
 
 .desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   margin: 0;
   line-height: 1.5;
@@ -2477,14 +1365,12 @@ onUnmounted(() => {
 
 .setting-meta {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
-  display: flex;
+  .setting-control();
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
@@ -2518,14 +1404,18 @@ onUnmounted(() => {
   width: 320px;
 }
 
-.password-reset-trigger {
+.password-reset-trigger,
+.create-user-trigger {
   min-width: 112px;
   height: 32px;
   padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+}
+
+.password-reset-trigger {
   color: var(--td-error-color);
   background: var(--td-error-color-light);
-  border: 1px solid transparent;
-  border-radius: 6px;
 
   &:hover {
     color: var(--td-error-color-hover);
@@ -2539,12 +1429,7 @@ onUnmounted(() => {
   }
 }
 
-.password-reset-warning {
-  margin-bottom: 20px;
-}
-
 @media (max-width: 860px) {
-  .settings-overview,
   .settings-section-intro {
     align-items: flex-start;
     flex-direction: column;
@@ -2555,7 +1440,7 @@ onUnmounted(() => {
   }
 
   .settings-group--runtime {
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
 
     .setting-row {
       display: flex;
@@ -2603,118 +1488,5 @@ onUnmounted(() => {
   .desc {
     max-width: none;
   }
-}
-</style>
-
-<style lang="less">
-/* The dialog is teleported to body, so its visual shell cannot be
-   styled from the scoped block above. Keep this class specific to the
-   password-reset flow instead of changing every TDesign dialog. */
-.password-reset-dialog {
-  padding: 0;
-  overflow: hidden;
-  border-color: var(--td-component-stroke);
-  border-radius: 12px;
-  box-shadow:
-    0 12px 32px rgba(15, 23, 42, 0.12),
-    0 2px 8px rgba(15, 23, 42, 0.08);
-
-  .t-dialog__header {
-    min-height: 64px;
-    padding: 0 24px;
-    font-size: 18px;
-    line-height: 26px;
-    border-bottom: 1px solid var(--td-component-stroke);
-  }
-
-  .t-dialog__close {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    justify-content: center;
-    border-radius: 6px;
-  }
-
-  .t-dialog__body {
-    padding: 20px 24px 4px;
-  }
-
-  .password-reset-warning {
-    padding: 12px 14px;
-    border-radius: 8px;
-
-    .t-alert__content {
-      font-size: 13px;
-      line-height: 20px;
-    }
-  }
-
-  .password-reset-form {
-    .t-form__item {
-      margin-bottom: 16px;
-    }
-
-    .t-form__label--top {
-      min-height: 28px;
-      padding: 0;
-      font-size: 14px;
-      line-height: 22px;
-    }
-
-    .t-input {
-      border-radius: 6px;
-    }
-  }
-
-  .t-dialog__footer {
-    box-sizing: border-box;
-    padding: 16px 24px 20px;
-    border-top: 1px solid var(--td-component-stroke);
-
-    .t-button {
-      min-width: 88px;
-      border-radius: 6px;
-    }
-  }
-}
-
-@media (max-width: 480px) {
-  .password-reset-dialog {
-    width: calc(100vw - 24px) !important;
-
-    .t-dialog__header {
-      min-height: 56px;
-      padding: 0 20px;
-      font-size: 17px;
-    }
-
-    .t-dialog__body {
-      padding: 16px 20px 4px;
-    }
-
-    .t-dialog__footer {
-      padding: 14px 20px 18px;
-    }
-  }
-}
-
-/* t-drawer teleports its content-wrapper to body, so the height-chain
-   needed for the internal scroll area must be declared globally. Same
-   pattern as `.tenant-members-audit-drawer` in TenantMembers.vue. */
-.t-drawer.system-settings-audit-drawer.t-drawer--right .t-drawer__content-wrapper--right {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  max-height: 100vh;
-  height: 100%;
-}
-
-.t-drawer.system-settings-audit-drawer .t-drawer__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  overflow: hidden !important;
 }
 </style>

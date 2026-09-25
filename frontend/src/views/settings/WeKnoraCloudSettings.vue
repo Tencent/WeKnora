@@ -208,6 +208,7 @@ import { ref, computed, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { saveWeKnoraCloudCredentials, getWeKnoraCloudStatus, createModel, listModels } from '@/api/model'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { testEmbeddingModel } from '@/api/initialization'
 import {
   WKC_MODEL_KINDS,
@@ -220,6 +221,7 @@ import {
 } from '@/utils/weknoraCloudModels'
 
 const { t } = useI18n()
+const chatResources = useChatResourcesStore()
 
 const form = ref({ appId: '', appSecret: '' })
 const saving = ref(false)
@@ -253,6 +255,7 @@ const refreshExistingKinds = async () => {
   try {
     const models = await listModels()
     existingKinds.value = existingWkcKinds(models)
+    chatResources.replaceModels(models)
   } catch {
     existingKinds.value = new Set()
   }
@@ -364,26 +367,14 @@ onMounted(async () => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .weknoracloud-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 24px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0 0 10px 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .credential-warning {
@@ -391,14 +382,14 @@ onMounted(async () => {
   background: #fff7ed;
   border: 1px solid #fed7aa;
   border-left: 3px solid #f97316;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   padding: 12px 16px;
   display: flex;
   align-items: flex-start;
   gap: 10px;
 
   .warning-text {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: #9a3412;
     line-height: 1.5;
   }
@@ -407,11 +398,11 @@ onMounted(async () => {
 .credential-status {
   margin-bottom: 20px;
   padding: 10px 14px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   &.unconfigured {
     background: var(--td-bg-color-secondarycontainer);
@@ -439,16 +430,9 @@ onMounted(async () => {
 }
 
 .setting-row {
-  display: flex;
+  .setting-row();
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
 
   &.action-row {
     padding-top: 20px;
@@ -456,34 +440,18 @@ onMounted(async () => {
 }
 
 .setting-info {
-  flex: 1;
-  min-width: 0;
-
-  .setting-label {
-    display: block;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    margin-bottom: 4px;
-  }
-
-  .setting-desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .setting-info();
 }
 
 .setting-control {
-  flex-shrink: 0;
+  .setting-control();
 }
 
 .models-section {
   margin-bottom: 24px;
   padding: 16px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
 
   &--disabled {
@@ -497,14 +465,14 @@ onMounted(async () => {
 
   &__title {
     margin: 0 0 6px;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   &__desc {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
     color: var(--td-text-color-secondary);
   }
@@ -520,12 +488,12 @@ onMounted(async () => {
     align-items: center;
     gap: 6px;
     margin: 14px 0 0;
-    font-size: 13px;
-    color: var(--td-success-color, #2ba471);
+    font-size: var(--app-text-md);
+    color: var(--td-success-color);
   }
 
   &__ready-icon {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     flex-shrink: 0;
   }
 }
@@ -561,18 +529,18 @@ onMounted(async () => {
   }
 
   &__label {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     min-width: 88px;
   }
 
   &__id {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     background: var(--td-bg-color-secondarycontainer);
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
   }
 
   &__action {
@@ -580,7 +548,7 @@ onMounted(async () => {
   }
 
   &__pending {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 }
@@ -589,18 +557,18 @@ onMounted(async () => {
   padding: 14px 16px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 
   .hint-title {
     margin: 0 0 8px 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-placeholder);
   }
 
   .hint-text {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     line-height: 1.8;
   }

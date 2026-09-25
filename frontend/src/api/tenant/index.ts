@@ -85,13 +85,21 @@ export type TenantAPIKeyCapability =
   | 'manage_members'
   | 'manage_spaces'
   | 'manage_tenant_settings'
+  | 'system_tenants_read'
+  | 'system_tenants_manage'
+  | 'system_settings_read'
+  | 'system_settings_manage'
+  | 'system_runtime_read'
+  | 'system_runtime_manage'
+  | 'system_audit_read'
 
 export interface TenantAPIKey {
   id: number
+  scope_type?: 'tenant' | 'platform'
   name: string
   api_key: string
   full_access: boolean
-  knowledge_base_ids: string[]
+  knowledge_base_ids: string[] | null
   capabilities?: TenantAPIKeyCapability[]
   last_used_at?: string
   expires_at?: string
@@ -107,6 +115,14 @@ export interface CreateTenantAPIKeyPayload {
   full_access?: boolean
   knowledge_base_ids?: string[]
   capabilities?: TenantAPIKeyCapability[]
+  expires_at_unix?: number
+}
+
+export interface UpdateTenantAPIKeyPayload {
+  name: string
+  full_access: boolean
+  knowledge_base_ids: string[]
+  capabilities: TenantAPIKeyCapability[]
   expires_at_unix?: number
 }
 
@@ -215,6 +231,23 @@ export async function createTenantAPIKey(
     return {
       success: false,
       message: error.message || t('error.tenant.createApiKeyFailed'),
+    }
+  }
+}
+
+/** 更新已创建租户 API Key 的授权范围和其他可配置属性。 */
+export async function updateTenantAPIKey(
+  tenantId: number,
+  keyId: number,
+  payload: UpdateTenantAPIKeyPayload,
+): Promise<{ success: boolean; data?: TenantAPIKey; message?: string }> {
+  try {
+    const response = await put(`/api/v1/tenants/${tenantId}/api-keys/${keyId}`, payload)
+    return response as unknown as { success: boolean; data?: TenantAPIKey; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('integrations.api.updateApiKeyScopeFailed'),
     }
   }
 }

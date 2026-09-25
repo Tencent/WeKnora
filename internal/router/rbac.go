@@ -231,6 +231,14 @@ func apiKeyFullAccess() middleware.APIKeyRoutePolicy {
 	return middleware.APIKeyRoutePolicy{RequireFullAccess: true}
 }
 
+func apiKeyPlatform(capabilities ...types.APIKeyCapability) middleware.APIKeyRoutePolicy {
+	policy := middleware.APIKeyRoutePolicy{PlatformOnly: true}
+	for _, capability := range capabilities {
+		policy = policy.WithCapability(capability)
+	}
+	return policy
+}
+
 // apiKeyRetrieve grants read/search access to knowledge-base data.
 func apiKeyRetrieve(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityRetrieve)
@@ -375,6 +383,10 @@ func (a *apiKeyRouteGroup) POST(rel string, h ...gin.HandlerFunc) gin.IRoutes {
 
 func (a *apiKeyRouteGroup) PUT(rel string, h ...gin.HandlerFunc) gin.IRoutes {
 	return a.handle(http.MethodPut, rel, h...)
+}
+
+func (a *apiKeyRouteGroup) PATCH(rel string, h ...gin.HandlerFunc) gin.IRoutes {
+	return a.handle(http.MethodPatch, rel, h...)
 }
 
 func (a *apiKeyRouteGroup) DELETE(rel string, h ...gin.HandlerFunc) gin.IRoutes {
@@ -534,7 +546,7 @@ func (g *rbacGuards) PathTenantMatch() gin.HandlerFunc {
 // validateAndGetKnowledgeBase helpers that used to be re-implemented
 // in chunk.go, faq.go, tag.go, knowledge.go and knowledgebase.go;
 // the share-fallback logic now lives in exactly one place
-// (middleware/kb_access.go).
+// (application/access/knowledgebase.go).
 
 // KBAccessRead gates a KB-scoped read route on the caller having at
 // least Viewer-level access. The agent-share fallback only activates

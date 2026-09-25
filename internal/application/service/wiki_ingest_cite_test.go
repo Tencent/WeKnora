@@ -156,10 +156,10 @@ func TestSplitChunksIntoCitationBatches_RespectsBudgetAndOrder(t *testing.T) {
 		t.Errorf("batch order = %v, want %v", seen, wantOrder)
 	}
 
-	// Verify alias → id map is populated per batch with unique aliases.
+	// Verify the typed handle table is populated per batch.
 	for bi, b := range batches {
-		if len(b.aliasToID) != len(b.chunks) {
-			t.Errorf("batch %d alias count %d != chunk count %d", bi, len(b.aliasToID), len(b.chunks))
+		if b.handles.Len() != len(b.chunks) {
+			t.Errorf("batch %d handle count %d != chunk count %d", bi, b.handles.Len(), len(b.chunks))
 		}
 	}
 }

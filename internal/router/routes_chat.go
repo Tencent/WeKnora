@@ -1,0 +1,182 @@
+package router
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/handler/session"
+)
+
+// RegisterMessageRoutes 注册消息相关的路由。
+//
+// Per-session ownership is already enforced inside each handler (the
+// user must own the session). We add Viewer+ here so non-members
+// (e.g. revoked accounts retained in the tenant for audit) cannot
+// reach the endpoints at all once RBAC is on.
+func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, g *rbacGuards) {
+	// Message history is tenant-wide and not attributable to a KB, so it is
+	// a full-access surface for API keys by default. The narrow
+	// exceptions are explicit capabilities:
+	//   - chat: load/delete messages inside the caller's own session, where
+	//     ownership is enforced by the message service.
+	//   - message_history: search/read tenant chat-history metadata without
+	//     granting every other full-access API.
+	messages := g.apiKeyGroup(r.Group("/messages"), apiKeyFullAccess())
+	chatMessages := messages.With(apiKeyChat(apiKeyFullAccess()))
+	historyMessages := messages.With(apiKeyMessageHistory(apiKeyFullAccess()))
+	{
+		historyMessages.POST("/search", g.Viewer(), handler.SearchMessages)
+		historyMessages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
+		chatMessages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
+		chatMessages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
+	}
+}
+
+// RegisterSessionRoutes 注册路由。
+//
+// Sessions are per-user resources; the handler enforces user ownership.
+// We gate at Viewer+ to keep non-members out once RBAC is on, matching
+// the message routes above. A future refactor can introduce
+// per-session ownership in the middleware layer the same way KB/agent
+// routes do today.
+func RegisterSessionRoutes(
+	r *gin.RouterGroup,
+	handler *session.Handler,
+	suggestionHandler *handler.MessageSuggestionHandler,
+	g *rbacGuards,
+) {
+	// Sessions are per-user chat state, not knowledge-base content. The
+	// chat capability lets a scoped key run the full conversation flow
+	// (create/manage its own sessions) without full tenant access.
+	sessions := g.apiKeyGroup(r.Group("/sessions", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
+	{
+		sessions.POST("", handler.CreateSession)
+		sessions.DELETE("/batch", handler.BatchDeleteSessions)
+		sessions.GET("/:id", handler.GetSession)
+		sessions.GET("", handler.GetSessionsByTenant)
+		sessions.PUT("/:id", handler.UpdateSession)
+		sessions.DELETE("/:id", handler.DeleteSession)
+		sessions.DELETE("/:id/messages", handler.ClearSessionMessages)
+		sessions.POST("/:session_id/generate_title", handler.GenerateTitle)
+		sessions.POST("/:session_id/attachments", handler.UploadTemporaryDocument)
+		sessions.GET("/:id/attachments", handler.ListTemporaryDocuments)
+		sessions.GET("/:id/attachments/:attachment_id", handler.GetTemporaryDocument)
+		sessions.GET("/:id/attachments/:attachment_id/preview", handler.PreviewTemporaryDocument)
+		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
+		sessions.POST("/:session_id/stop", handler.StopSession)
+		sessions.POST("/:session_id/fork", handler.ForkSession)
+		sessions.POST("/:session_id/rewind", handler.RewindSession)
+		sessions.POST("/:session_id/sandbox/terminal-ticket", handler.IssueSandboxTerminalTicket)
+		sessions.POST("/:session_id/sandbox/desktop-ticket", handler.IssueSandboxDesktopTicket)
+		sessions.POST("/:session_id/sandbox/desktop/activity", handler.ReportSandboxDesktopActivity)
+		sessions.GET("/:id/local-browser", handler.BrowserSkillConnection)
+		sessions.POST("/:session_id/local-browser", handler.BrowserSkillConnection)
+		// Mid-run message injection: append a user message to the turn that is
+		// currently generating. Accepts even when no run is live (the client
+		// then falls back to a normal send), mirroring StopSession's ownership
+		// rules.
+		sessions.POST("/:session_id/steer", handler.SteerMessage)
+		sessions.GET("/:id/steer", handler.ListSteerMessages)
+		sessions.DELETE("/:id/steer/:steer_id", handler.DeleteSteerMessage)
+		sessions.POST("/:session_id/steer/:steer_id/inject", handler.PromoteSteerMessage)
+		// POST and DELETE share this path but gin maintains a separate radix tree
+		// per HTTP verb, and the existing trees use different wildcard names
+		// (POST uses :session_id, DELETE uses :id). Use whatever matches each
+		// tree to avoid "wildcard conflicts" panic at route registration.
+		sessions.POST("/:session_id/pin", handler.PinSession)
+		sessions.DELETE("/:id/pin", handler.UnpinSession)
+		// 继续接收活跃流
+		sessions.GET("/continue-stream/:session_id", handler.ContinueStream)
+		if suggestionHandler != nil {
+			// Gin requires wildcard names to be identical within the same HTTP-method
+			// radix tree. Existing GET session routes use :id, so keep that name here.
+			sessions.GET("/:id/messages/:message_id/suggestions", suggestionHandler.Get)
+			sessions.POST("/:session_id/messages/:message_id/suggestions", suggestionHandler.Ensure)
+			sessions.POST("/:session_id/suggestion-events", suggestionHandler.RecordEvent)
+		}
+
+		// Skill-generated file artifacts. The list endpoints only expose
+		// metadata; the actual bytes are streamed via /artifacts/:index/download
+		// so the storage URL never appears on the wire.
+		//
+		// NOTE: gin builds a separate radix tree per HTTP verb but every
+		// path in the same tree must share the same wildcard name. The GET
+		// tree already binds :id via /sessions/:id (GetSession); reusing
+		// :id here (instead of :session_id) avoids the
+		// "wildcard conflicts" panic at route registration. The handlers
+		// read the URL param via c.Param("session_id") with a fallback to
+		// c.Param("id") for exactly this reason.
+		sessions.GET("/:id/artifacts", handler.ListSessionArtifacts)
+		sessions.GET("/:id/messages/:message_id/artifacts", handler.ListMessageArtifacts)
+		sessions.GET("/:id/messages/:message_id/artifacts/:index/download", handler.DownloadMessageArtifact)
+		// Deleting reclaims the stored bytes, so it is owner-only: unlike the
+		// download above it does not honour shared-agent read access.
+		sessions.DELETE("/:id/messages/:message_id/artifacts/:index", handler.DeleteMessageArtifact)
+	}
+
+	// Cross-session artifact library. Same guards as /sessions: the rows come
+	// from the caller's own sessions, and downloads go back through the
+	// per-session endpoint above.
+	artifacts := g.apiKeyGroup(r.Group("/artifacts", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
+	{
+		artifacts.GET("", handler.ListArtifactLibrary)
+		// The artifact to delete is addressed by query parameters rather than a
+		// path: the library row already carries session_id/message_id/index, and
+		// a path would have to repeat the /sessions tree under a second prefix.
+		artifacts.DELETE("", handler.DeleteLibraryArtifact)
+	}
+}
+
+// RegisterChatRoutes 注册路由。Chat endpoints are tenant-member usage
+// surfaces; Viewer+ is sufficient because per-session/per-agent
+// authorisation is enforced inside the handlers.
+func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
+	// These POST routes append messages and run generation, so a scoped key
+	// needs the explicit chat capability unless it has full tenant access.
+	knowledgeChat := g.apiKeyGroup(r.Group("/knowledge-chat", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
+	{
+		knowledgeChat.POST("/:session_id", handler.KnowledgeQA)
+	}
+
+	// Agent-based chat
+	agentChat := g.apiKeyGroup(r.Group("/agent-chat", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
+	{
+		agentChat.POST("/:session_id", handler.AgentQA)
+	}
+
+	// 新增知识检索接口，不需要session_id
+	knowledgeSearch := g.apiKeyGroup(r.Group("/knowledge-search", g.Viewer()), apiKeyRetrieve(apiKeyFullAccess()))
+	{
+		knowledgeSearch.POST("", handler.SearchKnowledge)
+	}
+}
+
+// RegisterSandboxTerminalRoutes registers the interactive-terminal WebSocket.
+//
+// Like the IM callback routes this is registered BEFORE the global auth
+// middleware: a browser WebSocket handshake cannot carry the
+// Authorization / X-API-Key headers, so a short-lived session-bound ticket
+// travels in the ticket query parameter. The handler authenticates itself
+// via service.ParseSandboxTerminalTicket + CheckSandboxTerminalAuth +
+// middleware.AttachAuthenticatedUser (not the 24h access JWT). The ticket
+// is bound to the minting access-token id; the open PTY rechecks that
+// token, user, membership, and session ownership about once a minute.
+//
+// The wildcard is :id because this GET joins the same radix tree as
+// /sessions/:id (gin requires identical wildcard names per tree).
+func RegisterSandboxTerminalRoutes(r *gin.Engine, sessionHandler *session.Handler) {
+	r.GET("/api/v1/sessions/:id/sandbox/terminal", sessionHandler.SandboxTerminalWS)
+}
+
+// RegisterSandboxDesktopRoutes registers the desktop relay WebSocket.
+//
+// Registered BEFORE the global auth middleware for the same reason as the
+// terminal: a browser WebSocket handshake cannot carry Authorization, so a
+// one-shot session-bound ticket travels in the query string. Unlike the
+// terminal's JWT the desktop ticket is an opaque random string consumed with
+// GETDEL, so a leaked URL is worth one handshake at most.
+//
+// The wildcard is :id to match /sessions/:id in the same radix tree.
+func RegisterSandboxDesktopRoutes(r *gin.Engine, sessionHandler *session.Handler) {
+	r.GET("/api/v1/sessions/:id/sandbox/desktop", sessionHandler.SandboxDesktopWS)
+}

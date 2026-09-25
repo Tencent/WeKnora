@@ -88,11 +88,8 @@ func sortSearchResultsDeterministically(results []*types.SearchResult) {
 		if left.ChunkType != right.ChunkType {
 			return left.ChunkType < right.ChunkType
 		}
-		if left.StartAt != right.StartAt {
-			return left.StartAt < right.StartAt
-		}
-		if left.EndAt != right.EndAt {
-			return left.EndAt < right.EndAt
+		if left.ChunkIndex != right.ChunkIndex {
+			return left.ChunkIndex < right.ChunkIndex
 		}
 		return left.ID < right.ID
 	})

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -28,8 +29,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
@@ -44,7 +43,9 @@ type SystemHandler struct {
 	documentReader   interfaces.DocumentReader
 	tenantSvc        interfaces.TenantService
 	userSvc          interfaces.UserService
+	modelCatalogSvc  *service.ModelCatalogService
 	systemSettingSvc interfaces.SystemSettingService
+	apiKeySvc        interfaces.TenantAPIKeyService
 	// auditSvc is optional — when nil, emitAdminAudit no-ops so unit
 	// tests that wire a partial container still compile. In production
 	// the dig graph always provides one.
@@ -63,6 +64,9 @@ type SystemHandler struct {
 	// singleton tenant.StorageEngineConfig. Optional — nil in partially-wired
 	// unit tests, in which case only the legacy config is consulted.
 	storageBackendRepo interfaces.StorageBackendRepository
+	sandboxConfigSvc   sandboxConfigService
+	// startup snapshot for GET /system/capabilities; bound in router.NewRouter.
+	deploymentCapabilities DeploymentCapabilitiesData
 }
 
 // NewSystemHandler creates a new system handler
@@ -72,10 +76,13 @@ func NewSystemHandler(cfg *config.Config,
 	tenantSvc interfaces.TenantService,
 	userSvc interfaces.UserService,
 	systemSettingSvc interfaces.SystemSettingService,
+	modelCatalogSvc *service.ModelCatalogService,
+	apiKeySvc interfaces.TenantAPIKeyService,
 	auditSvc interfaces.AuditLogService,
 	taskInspector interfaces.TaskInspector,
 	knowledgeSvc interfaces.KnowledgeService,
 	storageBackendRepo interfaces.StorageBackendRepository,
+	sandboxConfigSvc *service.TenantSandboxConfigService,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:                cfg,
@@ -84,11 +91,150 @@ func NewSystemHandler(cfg *config.Config,
 		tenantSvc:          tenantSvc,
 		userSvc:            userSvc,
 		systemSettingSvc:   systemSettingSvc,
+		modelCatalogSvc:    modelCatalogSvc,
+		apiKeySvc:          apiKeySvc,
 		auditSvc:           auditSvc,
 		taskInspector:      taskInspector,
 		knowledgeSvc:       knowledgeSvc,
 		storageBackendRepo: storageBackendRepo,
+		sandboxConfigSvc:   sandboxConfigSvc,
 	}
+}
+
+type platformAPIKeyCreateRequest struct {
+	Name         string   `json:"name"`
+	Capabilities []string `json:"capabilities"`
+	ExpiresAt    *int64   `json:"expires_at_unix"`
+}
+
+// ListPlatformAPIKeys godoc
+// @Summary      List platform API keys
+// @Description  Lists non-workspace API keys. Full tokens are always masked. Human SystemAdmin only.
+// @Tags         System Admin
+// @Produce      json
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys [get]
+func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
+	keys, err := h.apiKeySvc.ListPlatformAPIKeys(c.Request.Context())
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to list platform API keys").WithDetails(err.Error()))
+		return
+	}
+	response := make([]tenantAPIKeyResponse, 0, len(keys))
+	for _, key := range keys {
+		item := tenantAPIKeyForResponse(key)
+		item.APIKey = maskManagedAPIKey(key.APIKey)
+		response = append(response, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": response})
+}
+
+// CreatePlatformAPIKey godoc
+// @Summary      Create a platform API key
+// @Description  Creates a capability-scoped key that may target any workspace through X-Tenant-ID. The plaintext token is returned once. Human SystemAdmin only.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body platformAPIKeyCreateRequest true "Platform API key"
+// @Success      201 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys [post]
+func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
+	var req platformAPIKeyCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		c.Error(apperrors.NewValidationError("name is required"))
+		return
+	}
+	capabilities := types.NormalizeAPIKeyCapabilities(types.StringArray(req.Capabilities))
+	if len(capabilities) == 0 || len(capabilities) != len(req.Capabilities) {
+		c.Error(apperrors.NewValidationError("valid capabilities are required"))
+		return
+	}
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		value := time.Unix(*req.ExpiresAt, 0).UTC()
+		if !value.After(time.Now().UTC()) {
+			c.Error(apperrors.NewValidationError("expires_at_unix must be in the future"))
+			return
+		}
+		expiresAt = &value
+	}
+	result, err := h.apiKeySvc.CreateAPIKey(c.Request.Context(), interfaces.TenantAPIKeyCreateRequest{
+		ScopeType:    types.APIKeyScopePlatform,
+		Name:         req.Name,
+		Capabilities: []string(capabilities),
+		ExpiresAt:    expiresAt,
+	})
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("Failed to create platform API key").WithDetails(err.Error()))
+		return
+	}
+	item := tenantAPIKeyForResponse(result.APIKey)
+	item.APIKey = maskManagedAPIKey(result.Token)
+	h.emitAPIKeyAudit(c.Request.Context(), types.AuditActionSystemAPIKeyCreated, result.APIKey)
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    tenantAPIKeyCreateResponse{tenantAPIKeyResponse: item, Token: result.Token},
+	})
+}
+
+// DeletePlatformAPIKey godoc
+// @Summary      Revoke a platform API key
+// @Description  Immediately revokes a platform API key. Human SystemAdmin only.
+// @Tags         System Admin
+// @Produce      json
+// @Param        key_id path int true "API key ID"
+// @Success      200 {object} map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/api-keys/{key_id} [delete]
+func (h *SystemHandler) DeletePlatformAPIKey(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("key_id"), 10, 64)
+	if err != nil || id == 0 {
+		c.Error(apperrors.NewBadRequestError("Invalid API key ID"))
+		return
+	}
+	if err := h.apiKeySvc.RevokePlatformAPIKey(c.Request.Context(), id); err != nil {
+		c.Error(apperrors.NewNotFoundError("Platform API key not found"))
+		return
+	}
+	h.emitAPIKeyAudit(c.Request.Context(), types.AuditActionSystemAPIKeyRevoked, &types.TenantAPIKey{ID: id})
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func maskManagedAPIKey(token string) string {
+	token = strings.TrimSpace(token)
+	if len(token) <= 12 {
+		return "***"
+	}
+	return token[:7] + "..." + token[len(token)-4:]
+}
+
+func (h *SystemHandler) emitAPIKeyAudit(ctx context.Context, action types.AuditAction, key *types.TenantAPIKey) {
+	if h.auditSvc == nil || key == nil {
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	details, _ := json.Marshal(map[string]any{
+		"scope_type":   types.APIKeyScopePlatform,
+		"capabilities": key.Capabilities,
+	})
+	_ = h.auditSvc.Log(ctx, &types.AuditLog{
+		TenantID: 0, ActorUserID: actorID, ActorRole: systemAuditActorRole(ctx),
+		Action: action, TargetType: "api_key", TargetID: strconv.FormatUint(key.ID, 10),
+		Outcome: types.AuditOutcomeSuccess, Details: types.JSON(details),
+	})
+}
+
+func systemAuditActorRole(ctx context.Context) string {
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.IsPlatform() {
+		return "platform_api_key"
+	}
+	return "system_admin"
 }
 
 // emitAdminAudit writes one audit row for a system-admin lifecycle event
@@ -120,7 +266,7 @@ func (h *SystemHandler) emitAdminAudit(
 		// events (matches AuditActionSystemSettingChanged).
 		TenantID:    0,
 		ActorUserID: actorID,
-		ActorRole:   "system_admin",
+		ActorRole:   systemAuditActorRole(ctx),
 		Action:      action,
 		TargetType:  "user",
 		Outcome:     types.AuditOutcomeSuccess,
@@ -724,59 +870,16 @@ func storageEndpointHost(endpoint string) string {
 	return endpoint
 }
 
-// isBlockedStorageEndpoint checks whether a storage endpoint resolves to a dangerous
-// address (cloud metadata, loopback, link-local). Unlike the stricter isSSRFSafeURL,
-// this allows private IPs since MinIO is commonly deployed on internal networks.
-// It also respects the SSRF_WHITELIST environment variable for whitelisted hosts.
+// isBlockedStorageEndpoint keeps the legacy handler contract while delegating
+// to the same fail-closed SSRF policy used by the storage clients themselves.
+// Private storage endpoints must be explicitly whitelisted by an operator.
 func isBlockedStorageEndpoint(endpoint string) (bool, string) {
-	host := storageEndpointHost(endpoint)
-	if host == "" {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
 		return true, "无效的地址"
 	}
-
-	// Check SSRF whitelist first – whitelisted hosts bypass the block check.
-	if secutils.IsSSRFWhitelisted(host) {
-		return false, ""
-	}
-
-	hostLower := strings.ToLower(host)
-
-	blockedHosts := []string{
-		"metadata.google.internal",
-		"metadata.tencentyun.com",
-		"metadata.aws.internal",
-	}
-	for _, bh := range blockedHosts {
-		if hostLower == bh {
-			return true, "该地址不允许访问"
-		}
-	}
-
-	checkIP := func(ip net.IP) (bool, string) {
-		if ip.IsLoopback() {
-			return true, "不允许访问本地回环地址"
-		}
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return true, "不允许访问链路本地地址"
-		}
-		if ip.IsUnspecified() {
-			return true, "无效的地址"
-		}
-		return false, ""
-	}
-
-	if ip := net.ParseIP(host); ip != nil {
-		return checkIP(ip)
-	}
-
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return false, ""
-	}
-	for _, ip := range ips {
-		if blocked, reason := checkIP(ip); blocked {
-			return blocked, reason
-		}
+	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+		return true, secutils.FormatSSRFError("存储 Endpoint", endpoint, err)
 	}
 	return false, ""
 }
@@ -848,7 +951,7 @@ func (h *SystemHandler) isS3Configured(c *gin.Context) bool {
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
 		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.S3 != nil {
 			s3Conf := tenant.StorageEngineConfig.S3
-			return s3Conf.Endpoint != "" && s3Conf.Region != "" && s3Conf.AccessKey != "" && s3Conf.SecretKey != "" && s3Conf.BucketName != ""
+			return s3Conf.Region != "" && s3Conf.BucketName != "" && (s3Conf.AccessKey == "") == (s3Conf.SecretKey == "")
 		}
 	}
 	return false
@@ -890,15 +993,7 @@ func (h *SystemHandler) checkMinio(c *gin.Context, ctx context.Context, cfg *typ
 		// If bucket does not exist, auto-create it
 		if strings.Contains(errMsg, "does not exist") && cfg.BucketName != "" {
 			logger.Info(ctx, "Storage check: bucket does not exist, attempting auto-creation", "bucket", cfg.BucketName)
-			minioClient, clientErr := minio.New(endpoint, &minio.Options{
-				Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
-				Secure: cfg.UseSSL,
-			})
-			if clientErr != nil {
-				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Failed to create MinIO client: %s", sanitizeStorageCheckError(clientErr))}})
-				return
-			}
-			if mkErr := minioClient.MakeBucket(ctx, cfg.BucketName, minio.MakeBucketOptions{}); mkErr != nil {
+			if _, mkErr := file.NewMinioFileService(endpoint, accessKeyID, secretAccessKey, cfg.BucketName, cfg.UseSSL); mkErr != nil {
 				logger.Error(ctx, "Storage check: failed to create bucket", "bucket", cfg.BucketName, "error", mkErr)
 				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Failed to auto-create Bucket '%s': %s", cfg.BucketName, sanitizeStorageCheckError(mkErr))}})
 				return
@@ -994,15 +1089,21 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "未提供 S3 配置"}})
 		return
 	}
-	if cfg.Endpoint == "" || cfg.Region == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
-		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Endpoint、Region、Access Key、Secret Key、Bucket 名称不能为空"}})
+	if cfg.Region == "" || cfg.BucketName == "" {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Region、Bucket 名称不能为空"}})
+		return
+	}
+	if (cfg.AccessKey == "") != (cfg.SecretKey == "") {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Access Key 与 Secret Key 必须同时填写或同时留空（使用 AWS 默认凭证链）"}})
 		return
 	}
 
-	if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
-		logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
-		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
-		return
+	if cfg.Endpoint != "" {
+		if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
+			logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
+			return
+		}
 	}
 
 	err := file.CheckS3Connectivity(ctx, cfg.Endpoint, cfg.AccessKey, cfg.SecretKey, cfg.BucketName, cfg.Region)
@@ -1010,7 +1111,7 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 		logger.Errorf(ctx, "Storage check: S3 connectivity failed, bucket: %s, error: %v", cfg.BucketName, err)
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "403") {
-			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查静态密钥或 AWS IAM Role / 默认凭证链权限"}})
 			return
 		}
 		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "NotFound") {
@@ -1453,7 +1554,8 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 		return
 	}
 	req.Email = strings.TrimSpace(req.Email)
-	if err := service.ValidatePasswordPolicy(req.NewPassword); err != nil {
+
+	if err := service.ValidatePasswordPolicy(req.NewPassword, h.complexPasswordEnabled(ctx)); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -1470,7 +1572,7 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 	}
 
 	if err := h.userSvc.AdminResetPassword(ctx, user.ID, req.NewPassword); err != nil {
-		if errors.Is(err, service.ErrPasswordPolicy) {
+		if service.IsPasswordPolicyError(err) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1486,6 +1588,98 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 		"sessions_revoked": true,
 	})
 	c.JSON(http.StatusOK, gin.H{"message": "Password reset successfully"})
+}
+
+// CreateSystemUserResponse is the payload returned by
+// POST /api/v1/system/admin/users/create. GeneratedPassword is populated
+// exactly once, only when the server minted a random password (`password`
+// omitted or null), and is never logged, audited, or retrievable again.
+type CreateSystemUserResponse struct {
+	User *types.UserInfo `json:"user"`
+	// GeneratedPassword is the plaintext password when the server
+	// auto-generated one. Absent when the caller supplied the password.
+	GeneratedPassword string `json:"generated_password,omitempty"`
+}
+
+// CreateSystemUser godoc
+// @Summary      Create a new user (SystemAdmin)
+// @Description  Provision a new local user account (SystemAdmin only).
+// @Description  When `password` is omitted or null, a cryptographically random
+// @Description  password is generated (OIDC-style crypto/rand + base64url)
+// @Description  and returned once in the response body. Any provided value,
+// @Description  including empty string, is policy-checked. Tenant provisioning
+// @Description  follows the shared auth.default_tenant_mode policy.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body types.AdminCreateUserRequest true "User creation request"
+// @Success      201  {object}  CreateSystemUserResponse  "User created successfully"
+// @Success      200  {object}  CreateSystemUserResponse  "Identity already exists, returns the existing user"
+// @Failure      400  {object}  map[string]interface{}  "Invalid request or weak password"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Failure      409  {object}  map[string]interface{}  "Email and username refer to conflicting identities"
+// @Failure      500  {object}  map[string]interface{}  "Internal error"
+// @Router       /system/admin/users/create [post]
+func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req types.AdminCreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user creation request"})
+		return
+	}
+	req.Username = secutils.SanitizeForLog(strings.TrimSpace(req.Username))
+	req.Email = secutils.SanitizeForLog(strings.TrimSpace(req.Email))
+	// Password is intentionally NOT trimmed or sanitized.
+	if req.Username == "" || req.Email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username and email are required"})
+		return
+	}
+	// Binding's min=2/max=50 ran on the raw JSON, re-check the trimmed value.
+	if n := utf8.RuneCountInString(req.Username); n < 2 || n > 50 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username must be 2-50 characters"})
+		return
+	}
+
+	user, generatedPassword, err := h.userSvc.AdminCreateUser(ctx, &req, h.resolveDefaultTenantMode(ctx))
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserEmailExists) || errors.Is(err, service.ErrUserUsernameExists):
+			if user == nil {
+				logger.Errorf(ctx, "Duplicate identity error without a resolved user: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+				return
+			}
+			logger.Infof(ctx, "Create user noop (identity already exists, ID: %s)", user.ID)
+			h.emitAdminAudit(ctx, types.AuditActionSystemUserCreated, user, map[string]any{
+				"target_email":       user.Email,
+				"target_username":    user.Username,
+				"password_generated": false,
+				"idempotent":         true,
+			})
+			c.JSON(http.StatusOK, CreateSystemUserResponse{User: user.ToUserInfo()})
+		case errors.Is(err, service.ErrPasswordPolicy):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrUserIdentityConflict):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		default:
+			logger.Errorf(ctx, "Failed to create user: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		}
+		return
+	}
+
+	logger.Infof(ctx, "System admin created user %s (ID: %s)", user.Username, user.ID)
+	h.emitAdminAudit(ctx, types.AuditActionSystemUserCreated, user, map[string]any{
+		"target_email":       user.Email,
+		"target_username":    user.Username,
+		"password_generated": generatedPassword != "",
+		"idempotent":         false,
+	})
+	c.JSON(http.StatusCreated, CreateSystemUserResponse{
+		User:              user.ToUserInfo(),
+		GeneratedPassword: generatedPassword,
+	})
 }
 
 // ============================================================================
@@ -1773,7 +1967,7 @@ func (h *SystemHandler) emitQueueTaskAudit(
 	_ = h.auditSvc.Log(ctx, &types.AuditLog{
 		TenantID:    0,
 		ActorUserID: actorID,
-		ActorRole:   "system_admin",
+		ActorRole:   systemAuditActorRole(ctx),
 		Action:      action,
 		TargetType:  targetType,
 		TargetID:    targetID,
@@ -1925,6 +2119,43 @@ func (h *SystemHandler) purgeOrphanRuntimeTask(
 // @Router       /system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action} [post]
 func (h *SystemHandler) MutateRuntimeTask(c *gin.Context) {
 	h.mutateRuntimeTask(c, types.RuntimeTaskAction(c.Param("action")))
+}
+
+// PurgeArchivedRuntimeTasks clears every archived (finally-failed) task in one
+// queue. It only touches the archived dead-letter set — live pending/active/
+// scheduled/retry tasks are untouched — and mirrors single-record delete
+// semantics by leaving business state as-is (archived tasks already had their
+// document status flipped to "failed" on their last retry).
+// @Summary      Purge all archived tasks in a queue
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Success      200 {object} map[string]interface{}
+// @Router       /system/admin/runtime/queues/{queue}/archived [delete]
+func (h *SystemHandler) PurgeArchivedRuntimeTasks(c *gin.Context) {
+	queue := c.Param("queue")
+	if !isKnownRuntimeQueue(queue) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid queue"})
+		return
+	}
+	inspector, supported := h.taskInspector.(interfaces.RuntimeTaskInspector)
+	if !supported {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	deleted, available, err := inspector.PurgeArchivedRuntimeTasks(c.Request.Context(), queue)
+	if !available {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "purge archived queue tasks queue=%s: %v", queue, err)
+		c.JSON(http.StatusConflict, gin.H{"error": "Archived tasks could not be purged"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueArchivedPurged, queue, "",
+		map[string]string{"deleted": strconv.Itoa(deleted)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "deleted": deleted})
 }
 
 func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
@@ -2122,7 +2353,7 @@ func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
 		_ = h.auditSvc.Log(ctx, &types.AuditLog{
 			TenantID:    0,
 			ActorUserID: actorID,
-			ActorRole:   "system_admin",
+			ActorRole:   systemAuditActorRole(ctx),
 			Action:      types.AuditActionSystemSettingChanged,
 			TargetType:  "tenant_storage_quota",
 			TargetID:    "all",

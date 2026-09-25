@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -56,6 +57,31 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
 	})
 	require.True(t, effOn.ChunkingConfig.EnableParentChild)
+}
+
+// The attribute-observed pipeline switch follows the knowledge base until a
+// single upload overrides it, either way. The default is off: a knowledge base
+// that never heard of attribute observation keeps describing and OCR-ing every
+// image exactly as it did before the pipeline existed.
+func TestResolveProcessConfig_ImageAttrsOverride(t *testing.T) {
+	t.Parallel()
+
+	kbOff := &types.KnowledgeBase{}
+	kbOn := &types.KnowledgeBase{}
+	kbOn.ImageProcessingConfig.ImageAttrsEnabled = true
+
+	require.False(t, ResolveProcessConfig(kbOff, nil).ImageAttrsEnabled,
+		"attribute observation must be off for a knowledge base that never enabled it")
+	require.True(t, ResolveProcessConfig(kbOn, nil).ImageAttrsEnabled,
+		"the knowledge base's switch must survive a nil override")
+
+	require.True(t, ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
+		ImageAttrsEnabled: processConfigBoolPtr(true),
+	}).ImageAttrsEnabled, "a single upload must be able to turn attribute observation on")
+
+	require.False(t, ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
+		ImageAttrsEnabled: processConfigBoolPtr(false),
+	}).ImageAttrsEnabled, "a single upload must be able to turn attribute observation off")
 }
 
 func TestResolveProcessConfig_GraphDisabled(t *testing.T) {
@@ -129,6 +155,7 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) {
 	t.Parallel()
 
+	xlsxFirstRowAsHeader := true
 	kb := &types.KnowledgeBase{
 		ChunkingConfig: types.ChunkingConfig{
 			ParserEngineRules: []types.ParserEngineRule{
@@ -139,10 +166,96 @@ func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) 
 	overrides := &types.KnowledgeProcessOverrides{
 		ParserEngineRules: []types.ParserEngineRule{
 			{FileTypes: []string{"pdf"}, Engine: "mineru"},
+			{
+				FileTypes:            []string{"xlsx", "xls"},
+				Engine:               "builtin",
+				XLSXFirstRowAsHeader: &xlsxFirstRowAsHeader,
+			},
 		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.Equal(t, "mineru", eff.ChunkingConfig.ResolveParserEngine("pdf"))
+	xlsxRule := eff.ChunkingConfig.ResolveParserEngineRule("xlsx")
+	require.NotNil(t, xlsxRule)
+	require.Equal(t, "builtin", xlsxRule.Engine)
+	require.Equal(t, &xlsxFirstRowAsHeader, xlsxRule.XLSXFirstRowAsHeader)
+}
+
+func TestApplyParserRuleOverrides_XLSXFirstRowAsHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{true, false} {
+		enabled := enabled
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			config := types.ChunkingConfig{
+				ParserEngineRules: []types.ParserEngineRule{{
+					FileTypes:            []string{"xlsx", "xls"},
+					Engine:               "builtin",
+					XLSXFirstRowAsHeader: &enabled,
+				}},
+			}
+			overrides := map[string]string{"tenant_option": "preserved"}
+
+			applyParserRuleOverrides(overrides, config, "xlsx")
+
+			require.Equal(t, strconv.FormatBool(enabled), overrides[xlsxFirstRowAsHeaderOverride])
+			require.Equal(t, "preserved", overrides["tenant_option"])
+		})
+	}
+}
+
+func TestApplyParserRuleOverrides_XLSFileType(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx", "xls"},
+			Engine:               "builtin",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, "xls")
+
+	require.Equal(t, "true", overrides[xlsxFirstRowAsHeaderOverride])
+}
+
+func TestApplyParserRuleOverrides_NormalizesFileTypeCase(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx"},
+			Engine:               "builtin",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, ".XLSX")
+
+	require.Equal(t, "true", overrides[xlsxFirstRowAsHeaderOverride])
+}
+
+func TestApplyParserRuleOverrides_SkipsNonBuiltinEngine(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx"},
+			Engine:               "markitdown",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, "xlsx")
+
+	require.NotContains(t, overrides, xlsxFirstRowAsHeaderOverride)
 }
 
 func TestResolveProcessConfig_ParserEngineRulesReplaced(t *testing.T) {
@@ -307,7 +420,7 @@ func TestValidateProcessOverrides_NonMediaFileTypes(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestValidateProcessOverrides_COSIncompleteForImage(t *testing.T) {
+func TestValidateProcessOverrides_ImageAllowsStorageFallback(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{
@@ -321,7 +434,66 @@ func TestValidateProcessOverrides_COSIncompleteForImage(t *testing.T) {
 	kb.SetStorageProvider("cos")
 
 	err := ValidateProcessOverrides(ctx, kb, &types.KnowledgeProcessOverrides{}, []string{"png"})
+	require.NoError(t, err)
+}
+
+func TestResolveFileImportProcessConfig_ImageRequiresVLM(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	_, err := resolveFileImportProcessConfig(context.Background(), kb, "png", nil, nil)
 	require.Error(t, err)
+	var badReq *werrors.AppError
+	require.ErrorAs(t, err, &badReq)
+}
+
+func TestResolveFileImportProcessConfig_AudioRequiresASR(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ASRConfig: types.ASRConfig{Enabled: false},
+	}
+	_, err := resolveFileImportProcessConfig(context.Background(), kb, "mp3", nil, nil)
+	require.Error(t, err)
+}
+
+// The regression behind #2447: spreadsheets must clear the shared import gate
+// even when the caller sends no per-import overrides.
+func TestResolveFileImportProcessConfig_SpreadsheetAllowedWithoutOverrides(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{ChunkSize: 512}}
+	for _, ext := range []string{"xlsx", "xls", "csv"} {
+		eff, err := resolveFileImportProcessConfig(context.Background(), kb, ext, nil, nil)
+		require.NoErrorf(t, err, "ext=%s", ext)
+		require.Equal(t, 512, eff.ChunkingConfig.ChunkSize)
+	}
+}
+
+func TestResolveFileImportProcessConfig_RejectsUnsupportedAndUndeterminable(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	for _, ext := range []string{"exe", "mp4", "", unknownFileType} {
+		_, err := resolveFileImportProcessConfig(context.Background(), kb, ext, nil, nil)
+		require.Errorf(t, err, "ext=%s should be rejected", ext)
+	}
+}
+
+// ApplyKnowledgeProcessOverrides stays scoped to overrides: import-time file
+// type gating belongs to resolveFileImportProcessConfig, so callers that pass
+// no overrides (reparse, connector sync) keep their existing behaviour.
+func TestApplyKnowledgeProcessOverrides_NoOverridesSkipsImportGate(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	knowledge := &types.Knowledge{}
+	_, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge, nil, []string{"png"}, nil)
+	require.NoError(t, err)
 }
 
 func TestMergeParserEngineOverrides(t *testing.T) {
@@ -377,4 +549,80 @@ func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
 	require.Equal(t, 512/5, child.ChunkOverlap)
 	require.Equal(t, base.Separators, parent.Separators)
 	require.Equal(t, base.Separators, child.Separators)
+}
+
+// A knowledge base can override the OCR action wholesale, and a single upload
+// can override it again on top of what the knowledge base already decided. The
+// built-in action table is complete, so a knowledge base that only flips one
+// condition stays a small configuration.
+func TestResolveProcessConfig_ImageActionsOverride(t *testing.T) {
+	t.Parallel()
+
+	kbActions := &types.ImageActionsConfig{
+		OCR: types.ImageOCRAction{
+			On: []types.ImageAttrCondition{
+				{Prop: "contain.text", Is: "block"},
+				{Prop: "contain.data_visual", Is: "true"},
+			},
+			OnUnobserved: false,
+		},
+	}
+	kb := &types.KnowledgeBase{
+		ImageProcessingConfig: types.ImageProcessingConfig{
+			ImageAttrsEnabled: true,
+			ImageActions:      kbActions,
+		},
+	}
+
+	// nil override: the knowledge base's custom action wins.
+	eff := ResolveProcessConfig(kb, nil)
+	require.True(t, eff.ImageAttrsEnabled)
+	require.False(t, eff.ImageActions.OCR.OnUnobserved,
+		"the knowledge base's action must override the built-in default")
+
+	// An upload override rewrites the OCR action wholesale: the knowledge
+	// base's OnUnobserved=false is replaced by the upload's true.
+	eff = ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ImageActions: &types.ImageActionsConfig{
+			OCR: types.ImageOCRAction{
+				On:           []types.ImageAttrCondition{{Prop: "contain.text", Is: "block"}},
+				OnUnobserved: true,
+			},
+		},
+	})
+	require.True(t, eff.ImageActions.OCR.OnUnobserved,
+		"an upload action override must replace the whole OCR action, not merge")
+	require.Len(t, eff.ImageActions.OCR.On, 1,
+		"the upload's OCR.On replaces the knowledge base's list")
+
+	// With neither a KB config nor an override, the resolved action is the
+	// complete built-in default.
+	eff = ResolveProcessConfig(&types.KnowledgeBase{}, nil)
+	require.Equal(t, types.DefaultImageActions(), eff.ImageActions,
+		"the resolved action table must stay complete with no input")
+	require.False(t, eff.ImageAttrsEnabled)
+}
+
+func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {
+	kb := &types.KnowledgeBase{}
+	require.True(t, ResolveProcessConfig(kb, nil).SummaryEnabled)
+	for _, tc := range []struct {
+		name  string
+		value *bool
+		want  bool
+	}{
+		{"omitted", nil, true},
+		{"enabled", processConfigBoolPtr(true), true},
+		{"disabled", processConfigBoolPtr(false), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			knowledge := &types.Knowledge{}
+			_, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge,
+				&types.KnowledgeProcessOverrides{SummaryEnabled: tc.value}, nil, nil)
+			require.NoError(t, err)
+			overrides, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			require.Equal(t, tc.want, ResolveProcessConfig(kb, overrides).SummaryEnabled)
+		})
+	}
 }

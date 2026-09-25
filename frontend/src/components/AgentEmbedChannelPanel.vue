@@ -397,6 +397,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { copyWithToast } from '@/utils/clipboard'
 import { useAuthStore } from '@/stores/auth'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import EmbedChannelPreview from '@/components/EmbedChannelPreview.vue'
@@ -537,6 +538,7 @@ const defaultLocaleOptions = computed(() => ([
   { label: '简体中文', value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
   { label: '한국어', value: 'ko-KR' },
+  { label: '日本語', value: 'ja-JP' },
   { label: 'Русский', value: 'ru-RU' },
 ]))
 
@@ -749,8 +751,7 @@ const copyToken = async (ch: EmbedChannel) => {
     MessagePlugin.warning(t('embedPublish.tokenHint'))
     return
   }
-  await navigator.clipboard.writeText(token)
-  MessagePlugin.success(t('embedPublish.tokenCopied'))
+  await copyWithToast(token, 'embedPublish.tokenCopied')
 }
 
 const iframeSnippet = (ch: EmbedChannel) => {
@@ -1035,15 +1036,11 @@ async function openPreviewForChannel(
 }
 
 const copySecureServerExample = async () => {
-  if (!secureServerExample.value) return
-  await navigator.clipboard.writeText(secureServerExample.value)
-  MessagePlugin.success(t('embedPublish.copied'))
+  await copyWithToast(secureServerExample.value, 'embedPublish.copied')
 }
 
 const copyDrawerSnippet = async () => {
-  if (!drawerSnippet.value) return
-  await navigator.clipboard.writeText(drawerSnippet.value)
-  MessagePlugin.success(t('embedPublish.copied'))
+  await copyWithToast(drawerSnippet.value, 'embedPublish.copied')
 }
 
 const performRotate = async (id: string) => {
@@ -1112,7 +1109,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   gap: 6px;
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   padding: 0;
   border: none;
@@ -1151,7 +1148,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   border: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-placeholder);
@@ -1171,7 +1168,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 }
 
 .im-step-check {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .im-step-body {
@@ -1193,7 +1190,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -1205,7 +1202,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 
 .form-desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-placeholder);
 
@@ -1270,7 +1267,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   label {
     display: block;
     margin: 0 0 4px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.4;
@@ -1278,7 +1275,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 
   .desc {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     color: var(--td-text-color-placeholder);
 
@@ -1299,7 +1296,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   border: 1px dashed var(--td-component-stroke);
 
@@ -1307,12 +1304,12 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
     flex-shrink: 0;
     margin-top: 1px;
     color: var(--td-brand-color);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 
   p {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -1324,20 +1321,20 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   gap: 10px;
   margin-top: 12px;
   padding: 12px 14px;
-  border-radius: 8px;
-  background: var(--td-warning-color-1, #fff7e6);
-  border: 1px solid var(--td-warning-color-3, #ffd591);
+  border-radius: var(--app-radius-md);
+  background: var(--td-warning-color-1);
+  border: 1px solid var(--td-warning-color-3);
 
   &__icon {
     flex-shrink: 0;
     margin-top: 1px;
-    color: var(--td-warning-color, #e37318);
-    font-size: 16px;
+    color: var(--td-warning-color);
+    font-size: var(--app-text-xl);
   }
 
   p {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -1377,14 +1374,14 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 
   &__title {
     margin: 0 0 4px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   &__desc {
     margin: 0 0 12px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -1403,7 +1400,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 
 .mono-text-input :deep(input) {
   font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .snippet-tabs {
@@ -1414,7 +1411,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   }
 
   :deep(.t-tabs__nav-item) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     height: 36px;
     line-height: 36px;
   }
@@ -1426,7 +1423,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 
 .snippet-scenario {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-secondary);
 }
@@ -1434,22 +1431,22 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 .snippet-note {
   margin: 0 0 10px;
   padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-secondary);
-  background: color-mix(in srgb, var(--td-warning-color, #ed7b2f) 8%, var(--td-bg-color-container));
-  border: 1px solid color-mix(in srgb, var(--td-warning-color, #ed7b2f) 20%, transparent);
+  background: color-mix(in srgb, var(--td-warning-color) 8%, var(--td-bg-color-container));
+  border: 1px solid color-mix(in srgb, var(--td-warning-color) 20%, transparent);
 }
 
 .snippet-note--ok {
-  background: color-mix(in srgb, var(--td-success-color, #2ba471) 8%, var(--td-bg-color-container));
-  border-color: color-mix(in srgb, var(--td-success-color, #2ba471) 20%, transparent);
+  background: color-mix(in srgb, var(--td-success-color) 8%, var(--td-bg-color-container));
+  border-color: color-mix(in srgb, var(--td-success-color) 20%, transparent);
 }
 
 .code-panel {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   overflow: hidden;
 
@@ -1464,7 +1461,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   }
 
   &__label {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     color: var(--td-text-color-secondary);
   }
@@ -1480,7 +1477,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
     margin: 0;
     padding: 10px 12px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-all;
@@ -1492,7 +1489,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 
 .widget-preview {
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   padding: 6px;
   background: var(--td-bg-color-secondarycontainer);
   width: 100%;
@@ -1501,7 +1498,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 .preview-surface {
   position: relative;
   height: 88px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
   overflow: hidden;
@@ -1517,7 +1514,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   border: none;
   border-radius: 50%;
   color: #fff;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   line-height: 1;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
   cursor: default;

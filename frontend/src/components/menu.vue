@@ -1,5 +1,5 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
+    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed, 'aside_box--resizing': uiStore.sidebarResizing }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
@@ -52,8 +52,10 @@
         <!-- 空间选择器：仅在用户可切换空间时显示 -->
         <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
 
-        <!-- 折叠时右侧拖拽展开手柄 -->
-        <div v-if="uiStore.sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
+        <!-- 侧栏边缘拖拽调宽，拖窄时自动收缩 -->
+        <PanelResizeHandle edge="right" :label="t('knowledgeStages.resizeDrawer')"
+            :value="uiStore.sidebarDisplayWidth" :min="SIDEBAR_COLLAPSED_WIDTH" :max="SIDEBAR_MAX_WIDTH"
+            @start="startSidebarResize" @resize="resizeSidebar" @end="uiStore.sidebarResizing = false" />
 
         <!-- 上半部分：新对话吸顶 + 知识库/智能体/共享空间/历史会话随滚动一起滚走 -->
         <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
@@ -85,7 +87,7 @@
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
@@ -94,6 +96,18 @@
                                     class="menu-pending-badge"
                                     :title="t('organization.settings.pendingJoinRequestsBadge')">{{
                                         orgStore.totalPendingJoinRequestCount }}</span>
+                                <span v-if="item.path === 'toolbox' && toolboxPreview.length" class="menu-toolbox-stack"
+                                    :title="toolboxPreview.map((tool) => tool.key === 'browserconnection' && browserStackStatus
+                                        ? `${t(tool.title)} (${t(`localBrowser.${browserStackStatus}`)})` : t(tool.title)).join(' · ')">
+                                    <span v-for="tool in toolboxPreview" :key="tool.key" class="menu-toolbox-stack__item">
+                                        <template v-if="tool.key === 'browserconnection'">
+                                            <BrowserIcon width="12" height="12" />
+                                            <i v-if="browserStackStatus" class="menu-toolbox-stack__status"
+                                                :class="`is-${browserStackStatus}`" aria-hidden="true" />
+                                        </template>
+                                        <t-icon v-else :name="tool.icon" size="12px" />
+                                    </span>
+                                </span>
                             </template>
                         </div>
                     </div>
@@ -101,9 +115,12 @@
             </div>
 
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-if="!uiStore.sidebarCollapsed"
-                :class="{ 'submenu--scope-fallback': showSessionScopeFallback }">
-                <div v-if="showSessionScopeFallback" class="session-list-scope-fallback">
+            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+                <!-- Stable, always-mounted source filter: reserving its row here
+                     (instead of embedding it in the first date group, which
+                     appears/disappears while a bucket loads) prevents the
+                     top-right control from jumping when switching session type. -->
+                <div v-if="showSessionSourceFilter && !batchMode" class="session-list-scope-header">
                     <SessionSourceFilter inline :emphasized="sessionScopeFilterPinned" :sources="sessionSourceOptions"
                         :current="activeSessionBucketKey" @select="switchSessionBucket" />
                 </div>
@@ -130,24 +147,22 @@
                         <div class="submenu_empty">{{ t('menu.noSessions') }}</div>
                     </template>
                     <template v-else>
-                        <template v-for="(group, groupIndex) in filteredGroupedSessions" :key="group.key">
-                            <div v-if="group.label" class="timeline_header session-list-row session-list-row--flat"
-                                :class="{ 'timeline_header--with-scope': groupIndex === 0 && showSessionSourceFilter && !batchMode }">
+                        <template v-for="group in filteredGroupedSessions" :key="group.key">
+                            <div v-if="group.label" class="timeline_header session-list-row session-list-row--flat">
                                 <span class="session-list-row__body">
                                     <span class="timeline_header-label">{{ group.label }}</span>
                                 </span>
-                                <SessionSourceFilter v-if="groupIndex === 0 && showSessionSourceFilter && !batchMode"
-                                    inline :emphasized="sessionScopeFilterPinned" :sources="sessionSourceOptions"
-                                    :current="activeSessionBucketKey" @select="switchSessionBucket" />
                             </div>
                             <div v-for="subitem in group.items" :key="subitem.id"
-                                class="submenu_item_p session-chat-row" :class="{
+                                class="submenu_item_p session-chat-row" :data-session-id="subitem.id" :class="{
                                     'session-chat-row--active': !batchMode && subitem.path === currentSecondpath,
                                     'session-chat-row--selected': batchMode && batchSelectedIds.includes(subitem.id),
+                                    'session-chat-row--revealed': revealedSessionId === subitem.id,
                                 }">
                                 <div class="session-list-row session-list-row--flat">
                                     <div class="session-list-row__body">
                                         <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
+                                            :running="Boolean(sessionActivityEntries[subitem.id])"
                                             :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
                                             :menu-options="buildSessionMenuOptions(subitem)"
                                             @navigate="gotopage(subitem.path)"
@@ -168,27 +183,26 @@
                     </template>
                 </div>
             </div>
-
-            <!-- 批量管理底部操作条 -->
-            <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
-                <div class="batch-footer-left">
-                    <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
-                        @change="toggleBatchSelectAll">
-                        {{ t('batchManage.selectAll') }}
-                    </t-checkbox>
-                </div>
-                <div class="batch-footer-right">
-                    <t-button size="small" variant="text" @click="exitBatchMode">
-                        {{ t('batchManage.cancel') }}
-                    </t-button>
-                    <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
-                        :loading="batchDeleting" @click="handleInlineBatchDelete">
-                        {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
-                    </t-button>
-                </div>
-            </div>
         </div>
 
+        <!-- 批量管理底部操作条：固定在侧栏底部、用户头像上方 -->
+        <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+            <div class="batch-footer-left">
+                <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
+                    @change="toggleBatchSelectAll">
+                    {{ t('batchManage.selectAll') }}
+                </t-checkbox>
+            </div>
+            <div class="batch-footer-right">
+                <t-button size="small" variant="text" @click="exitBatchMode">
+                    {{ t('batchManage.cancel') }}
+                </t-button>
+                <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
+                    :loading="batchDeleting" @click="handleInlineBatchDelete">
+                    {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
+                </t-button>
+            </div>
+        </div>
 
         <!-- 下半部分：用户菜单 -->
         <div class="menu_bottom">
@@ -202,10 +216,12 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, batchDelSessions, deleteAllSessions } from "@/api/chat/index";
+import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
 import SessionSidebarRow from './SessionSidebarRow.vue';
+import PanelResizeHandle from './PanelResizeHandle.vue';
+import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '@/utils/sidebarWidth';
 import {
     clearSession,
     removeSession,
@@ -248,7 +264,12 @@ import {
 } from './sessionSidebarSourceFilter';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
+import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { useAuthStore } from '@/stores/auth';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
+import { TOOLBOX_ITEMS, canAccessToolboxSection } from '@/config/toolbox';
+import BrowserIcon from '@/components/icons/BrowserIcon.vue';
+import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
 import { useCommandPaletteStore } from '@/stores/commandPalette';
@@ -287,9 +308,28 @@ const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
+const sessionActivity = useSessionActivityStore();
+const { entries: sessionActivityEntries } = storeToRefs(sessionActivity);
+let sessionActivityTimer: ReturnType<typeof setInterval> | undefined;
 const authStore = useAuthStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
+const toolboxPreview = computed(() => TOOLBOX_ITEMS.filter((item) => canAccessToolboxSection(item.key, {
+    currentTenantRole: authStore.currentTenantRole,
+    canAccessAllTenants: authStore.canAccessAllTenants,
+    hasRole: (role) => authStore.hasRole(role),
+    isSupported: (capability) => deploymentCapabilities.isSupported(capability),
+})));
 const orgStore = useOrganizationStore();
 const uiStore = useUIStore();
+const browserConnection = useBrowserConnectionStore();
+const browserStackStatus = computed(() => {
+    if (!uiStore.sidebarBrowserStatus) return '';
+    if (!browserConnection.loaded || !browserConnection.enabled || !browserConnection.device) return '';
+    return browserConnection.connected ? 'connected' : 'offline';
+});
+watch(() => uiStore.sidebarBrowserStatus && toolboxPreview.value.some((tool) => tool.key === 'browserconnection'), (visible) => {
+    if (visible && !browserConnection.loaded) browserConnection.refresh().catch(() => {});
+}, { immediate: true });
 const commandPaletteStore = useCommandPaletteStore();
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
@@ -405,6 +445,10 @@ const isMenuItemActive = (itemPath: string): boolean => {
                 currentRoute === 'knowledgeBaseSettings';
         case 'agents':
             return currentRoute === 'agentList';
+        case 'toolbox':
+            return currentRoute === 'toolbox';
+        case 'artifacts':
+            return currentRoute === 'artifactLibrary';
         case 'organizations':
             return currentRoute === 'organizationList';
         case 'creatChat':
@@ -433,19 +477,14 @@ const getIconActiveState = (itemPath: string) => {
 };
 
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
+const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'artifacts', 'agents', 'toolbox', 'organizations']);
+
 const topMenuItems = computed<MenuItem[]>(() => {
-    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) =>
-        item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
-    );
+    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => TOP_MENU_PATHS.has(item.path));
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
-    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
-            return false;
-        }
-        return true;
-    });
+    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => !TOP_MENU_PATHS.has(item.path));
 });
 
 // 当前知识库信息
@@ -480,14 +519,44 @@ const filteredGroupedSessions = computed(() => {
     );
 });
 
-const showSessionScopeFallback = computed(() => {
-    if (!showSessionSourceFilter.value || batchMode.value) return false;
-    if (sessionListBooting.value && !hasAnySession.value) return true;
-    const bucket = activeBucket.value;
-    if (bucket?.loading && !bucket.loaded && filteredGroupedSessions.value.length === 0) return true;
-    if (bucket?.loaded && filteredGroupedSessions.value.length === 0) return true;
-    return false;
+// Only a locally created fork requests attention; loading history and switching
+// between existing sessions must not replay the entrance animation.
+const pendingForkRevealId = ref('');
+const revealedSessionId = ref('');
+let forkRevealTimer: ReturnType<typeof setTimeout> | undefined;
+usemenuStore.$onAction(({ name, args, after }) => {
+    if (name !== 'updataMenuChildren' || !args[0]?.parent_session_id) return;
+    const sessionId = String(args[0].id);
+    after(() => { pendingForkRevealId.value = sessionId; });
 });
+
+watch(
+    () => {
+        const id = pendingForkRevealId.value;
+        return id && !uiStore.sidebarCollapsed && currentSecondpath.value === `chat/${id}`
+            && filteredGroupedSessions.value.some((group) => group.items.some((item) => item.id === id))
+            ? id : '';
+    },
+    (id) => {
+        if (!id) return;
+        const container = scrollContainer.value;
+        const row = Array.from(container?.querySelectorAll<HTMLElement>('[data-session-id]') ?? [])
+            .find((element) => element.dataset.sessionId === id);
+        if (!container || !row) return;
+
+        // Reveal within the sidebar only, without moving the conversation pane.
+        const bounds = container.getBoundingClientRect();
+        const rowBounds = row.getBoundingClientRect();
+        if (rowBounds.top < bounds.top) container.scrollTop += rowBounds.top - bounds.top;
+        else if (rowBounds.bottom > bounds.bottom) container.scrollTop += rowBounds.bottom - bounds.bottom;
+
+        clearTimeout(forkRevealTimer);
+        revealedSessionId.value = id;
+        pendingForkRevealId.value = '';
+        forkRevealTimer = setTimeout(() => { revealedSessionId.value = ''; }, 350);
+    },
+    { flush: 'post' },
+);
 
 const refreshSessionListScrollability = async () => {
     await nextTick();
@@ -617,20 +686,20 @@ const buildSessionMenuOptions = (item: any) => {
         options.push({
             content: t('menu.unpin'),
             value: 'unpin',
-            prefixIcon: () => h(TIcon, { name: 'pin-filled', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin-filled' }),
         });
     } else {
         options.push({
             content: t('menu.pin'),
             value: 'pin',
-            prefixIcon: () => h(TIcon, { name: 'pin', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin' }),
         });
     }
     options.push(
-        { content: t('menu.renameSession'), value: 'rename', prefixIcon: () => h(TIcon, { name: 'edit-1', size: '16px' }) },
-        { content: t('menu.clearMessages'), value: 'clearMessages', prefixIcon: () => h(TIcon, { name: 'clear', size: '16px' }) },
-        { content: t('menu.batchManage'), value: 'batchManage', prefixIcon: () => h(TIcon, { name: 'queue', size: '16px' }) },
-        { content: t('upload.deleteRecord'), value: 'delete', theme: 'error', prefixIcon: () => h(TIcon, { name: 'delete', size: '16px' }) },
+        { content: t('menu.renameSession'), value: 'rename', prefixIcon: () => h(TIcon, { name: 'edit-1' }) },
+        { content: t('menu.clearMessages'), value: 'clearMessages', prefixIcon: () => h(TIcon, { name: 'clear' }) },
+        { content: t('menu.batchManage'), value: 'batchManage', prefixIcon: () => h(TIcon, { name: 'queue' }) },
+        { content: t('upload.deleteRecord'), value: 'delete', theme: 'error', prefixIcon: () => h(TIcon, { name: 'delete' }) },
     );
     return options;
 };
@@ -702,6 +771,8 @@ const mapSessionRow = (item: any) => ({
     pinned_at: item.pinned_at || null,
     im_platform: item.im_platform || '',
     description: item.description || '',
+    user_id: item.user_id || '',
+    parent_session_id: item.parent_session_id || '',
 });
 
 const syncMenuStoreFromBuckets = () => {
@@ -722,6 +793,8 @@ const menuChildToSessionRow = (item: Record<string, unknown>): SessionForGroupin
         updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
         im_platform: typeof item.im_platform === 'string' ? item.im_platform : '',
         description: typeof item.description === 'string' ? item.description : '',
+        user_id: typeof item.user_id === 'string' ? item.user_id : '',
+        parent_session_id: typeof item.parent_session_id === 'string' ? item.parent_session_id : '',
     };
 };
 
@@ -754,7 +827,9 @@ const rebuildBucketDefinitions = () => buildBucketDefinitions(
         web: t('menu.myChats'),
         imPlatform: (platform) => t(`agentEditor.im.${platform}`),
         embedChannel: (name) => name,
+        api: t('menu.apiChats'),
     },
+    { includeAdminChannelBuckets: authStore.hasRole('admin') },
 );
 
 /** 首屏轻量探测各渠道是否有会话（page_size=1 只取 total），避免展示空文件夹 */
@@ -835,6 +910,27 @@ const syncActiveBucketFromChat = async (sessionId: string | undefined) => {
             ?.find((item) => item.id === sessionId);
         if (fromStore) {
             bucketKey = originGroupKey(resolveSessionOrigin(menuChildToSessionRow(fromStore)));
+        }
+    }
+    // On a hard refresh only the web bucket is loaded, so a session opened from
+    // any other folder (IM, embed, or the admin-only API folder) isn't in any
+    // bucket or the menu store. Fetch its detail and classify its origin folder
+    // so the sidebar stays in sync with the chat pane instead of snapping back
+    // to "my chats". Only switch when that folder is actually present.
+    if (!bucketKey) {
+        try {
+            const res: any = await getSession(sessionId);
+            const candidate = originGroupKey(resolveSessionOrigin({
+                id: sessionId,
+                im_platform: res?.data?.im_platform || '',
+                description: res?.data?.description || '',
+                user_id: res?.data?.user_id || '',
+            }));
+            if (sessionBuckets.value[candidate]) {
+                bucketKey = candidate;
+            }
+        } catch {
+            // Fall through: leave the default bucket active on lookup failure.
         }
     }
     if (!bucketKey || bucketKey === activeSessionBucketKey.value) return;
@@ -936,6 +1032,7 @@ const loadSessionOriginMeta = async () => {
 const handleSessionMutation = (event: Event) => {
     const detail = (event as CustomEvent<SessionMutationDetail>).detail;
     if (!detail?.sessionId) return;
+    if (detail.removed || detail.messagesCleared) sessionActivity.update(detail.sessionId, false);
     if (detail.patch) {
         updateSessionInBuckets(detail.sessionId, {
             ...detail.patch,
@@ -952,6 +1049,7 @@ const handleSessionMutation = (event: Event) => {
 };
 
 onMounted(async () => {
+    sessionActivityTimer = setInterval(() => { void sessionActivity.refresh(); }, 5000);
     const routeName = typeof route.name === 'string' ? route.name : (route.name ? String(route.name) : '')
     currentpath.value = routeName;
     if (route.params.chatid) {
@@ -978,12 +1076,15 @@ onMounted(async () => {
         await syncActiveBucketFromChat(initialChatId);
     }
     // 若组织列表未加载则拉取一次，用于侧栏「待审批」角标
-    if (orgStore.organizations.length === 0) {
+    if (deploymentCapabilities.isSupported('organizations') && orgStore.organizations.length === 0) {
         orgStore.fetchOrganizations();
     }
 });
 
 onUnmounted(() => {
+    clearInterval(sessionActivityTimer);
+    clearTimeout(forkRevealTimer);
+    sessionActivity.clear();
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
 });
 
@@ -1017,6 +1118,8 @@ let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
+let artifactIcon = ref('artifact.svg');
+let toolboxIcon = ref('toolbox.svg');
 let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
 const getIcon = (path: string) => {
@@ -1025,6 +1128,7 @@ const getIcon = (path: string) => {
     const creatChatActiveState = getIconActiveState('creatChat');
     const settingsActiveState = getIconActiveState('settings');
     const agentsActiveState = route.name === 'agentList';
+    const artifactsActiveState = route.name === 'artifactLibrary';
     const organizationsActiveState = route.name === 'organizationList';
 
     // 知识库图标：只在知识库页面显示绿色
@@ -1032,6 +1136,11 @@ const getIcon = (path: string) => {
 
     // 智能体图标：只在智能体页面显示绿色
     agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
+
+    // 产物图标：只在产物页面显示绿色
+    artifactIcon.value = artifactsActiveState ? 'artifact-green.svg' : 'artifact.svg';
+
+    toolboxIcon.value = route.name === 'toolbox' ? 'toolbox-green.svg' : 'toolbox.svg';
 
     // 组织图标：只在组织页面显示绿色
     organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
@@ -1123,24 +1232,19 @@ const mouseenteMenu = (path: string) => {
 const mouseleaveMenu = (path: string) => {
 }
 
-const onDragHandleMouseDown = (e: MouseEvent) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const expandThreshold = 40
-
-    const onMouseMove = (ev: MouseEvent) => {
-        if (ev.clientX - startX > expandThreshold) {
-            uiStore.expandSidebar()
-            cleanup()
-        }
+let sidebarResizeStartWidth = 0
+const startSidebarResize = () => {
+    sidebarResizeStartWidth = uiStore.sidebarDisplayWidth
+    uiStore.sidebarResizing = true
+}
+const resizeSidebar = (delta: number, keyboard: boolean) => {
+    if (keyboard && uiStore.sidebarCollapsed && delta > 0) {
+        uiStore.expandSidebar()
+    } else if (keyboard && uiStore.sidebarWidth === SIDEBAR_MIN_WIDTH && delta < 0) {
+        uiStore.collapseSidebar()
+    } else {
+        uiStore.resizeSidebar(sidebarResizeStartWidth + delta)
     }
-    const onMouseUp = () => cleanup()
-    const cleanup = () => {
-        document.removeEventListener('mousemove', onMouseMove)
-        document.removeEventListener('mouseup', onMouseUp)
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
 }
 
 
@@ -1154,8 +1258,9 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     --sidebar-icon-gap: 8px;
     --sidebar-text-inset: calc(var(--sidebar-inset-x) + var(--sidebar-icon-size) + var(--sidebar-icon-gap)); // 40px
 
-    min-width: 260px;
-    width: 260px;
+    min-width: 0;
+    width: var(--sidebar-width, 260px);
+    flex-shrink: 0;
     padding: 8px 6px 6px;
     background: var(--td-bg-color-sidebar);
     box-sizing: border-box;
@@ -1164,7 +1269,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
        scaled, so at "large" the sidebar would extend past the window. The
        ancestor chain (html/body/#app/.main) is already height: 100%. */
     height: 100%;
-    overflow: hidden;
+    overflow: visible;
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--td-component-stroke);
@@ -1177,6 +1282,10 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         padding-top: 30px;
     }
 
+    &--resizing {
+        transition: none;
+    }
+
     &--collapsed {
         min-width: 60px;
         width: 60px;
@@ -1185,7 +1294,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
         .menu_item {
             justify-content: center;
-            padding: 9px 0;
+            padding: 7px 0;
 
             .menu_item-box {
                 justify-content: center;
@@ -1225,27 +1334,13 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         flex-shrink: 0;
         cursor: pointer;
         color: var(--td-text-color-secondary);
-        border-radius: 4px;
-        transition: background-color 0.2s ease;
+        border-radius: var(--app-radius-xs);
+        transition: background-color var(--app-motion-base) ease;
         box-sizing: border-box;
 
         &:hover {
             background: var(--td-bg-color-container-hover);
             color: var(--td-text-color-primary);
-        }
-    }
-
-    .sidebar-drag-handle {
-        position: absolute;
-        top: 0;
-        right: -3px;
-        width: 6px;
-        height: 100%;
-        cursor: ew-resize;
-        z-index: 10;
-
-        &:hover {
-            background: var(--td-brand-color-light);
         }
     }
 
@@ -1273,23 +1368,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         }
     }
 
-    .logo_img {
-        margin-left: 24px;
-        width: 30px;
-        height: 30px;
-        margin-right: 7.25px;
-    }
-
-    .logo_txt {
-        transform: rotate(0.049deg);
-        color: var(--td-text-color-primary);
-        font-family: "TencentSans";
-        font-size: 24.12px;
-        font-style: normal;
-        font-weight: W7;
-        line-height: 21.7px;
-    }
-
     .menu_top {
         flex: 1;
         display: flex;
@@ -1305,7 +1383,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         // Claude 风格细滚动条：默认透明，悬浮时显示一条圆角细灰条
         scrollbar-width: thin;
         scrollbar-color: transparent transparent;
-        transition: scrollbar-color 0.2s ease;
+        transition: scrollbar-color var(--app-motion-base) ease;
 
         &::-webkit-scrollbar {
             width: 6px;
@@ -1317,20 +1395,20 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
         &::-webkit-scrollbar-thumb {
             background-color: transparent;
-            border-radius: 6px;
-            transition: background-color 0.2s ease;
+            border-radius: var(--app-radius-sm);
+            transition: background-color var(--app-motion-base) ease;
         }
 
         &:hover {
-            scrollbar-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18)) transparent;
+            scrollbar-color: var(--td-scrollbar-color) transparent;
 
             &::-webkit-scrollbar-thumb {
-                background-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18));
+                background-color: var(--td-scrollbar-color);
             }
         }
 
         &::-webkit-scrollbar-thumb:hover {
-            background-color: var(--td-scrollbar-hover-color, rgba(0, 0, 0, 0.32));
+            background-color: var(--td-scrollbar-hover-color);
         }
     }
 
@@ -1355,32 +1433,12 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
 
-    .upload-file-wrap {
-        padding: 6px;
-        border-radius: 3px;
-        height: 32px;
-        width: 32px;
-        box-sizing: border-box;
-    }
-
-    .upload-file-wrap:hover {
-        background-color: var(--td-brand-color-light);
-        color: var(--td-brand-color);
-
-    }
-
-    .upload-file-icon {
-        width: 20px;
-        height: 20px;
-        color: var(--td-text-color-secondary);
-    }
-
     .active-upload {
         color: var(--td-brand-color);
     }
 
     .menu_item_active {
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
         background: var(--td-bg-color-secondarycontainer) !important;
 
         .menu_icon,
@@ -1397,23 +1455,17 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         }
     }
 
-    .menu_p {
-        height: 46px;
-        padding: 3px 0;
-        box-sizing: border-box;
-    }
-
     .menu_item {
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        height: 38px;
-        padding: 8px 10px 8px var(--sidebar-inset-x);
+        height: 34px;
+        padding: 6px 10px 6px var(--sidebar-inset-x);
         box-sizing: border-box;
-        margin-bottom: 2px;
-        border-radius: 4px;
-        transition: background-color 0.2s ease;
+        margin-bottom: 1px;
+        border-radius: var(--app-radius-xs);
+        transition: background-color var(--app-motion-base) ease;
 
         .menu_item-box {
             display: flex;
@@ -1421,7 +1473,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         }
 
         &:hover {
-            border-radius: 4px;
+            border-radius: var(--app-radius-xs);
             background: var(--td-bg-color-container-hover);
 
             .menu_icon,
@@ -1449,7 +1501,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         color: var(--td-text-color-primary);
         text-overflow: ellipsis;
         font-family: var(--app-font-family);
-        font-size: 14px;
+        font-size: var(--app-text-base);
         font-style: normal;
         font-weight: 600;
         line-height: 20px;
@@ -1460,8 +1512,9 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .submenu {
+        position: relative;
         font-family: var(--app-font-family);
-        font-size: 14px;
+        font-size: var(--app-text-base);
         font-style: normal;
         min-width: 0;
         padding-top: 3px;
@@ -1469,7 +1522,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
     :deep(.submenu_pin_icon) {
         color: inherit;
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         margin-right: 4px;
         vertical-align: middle;
         flex-shrink: 0;
@@ -1486,7 +1539,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         // 悬浮或选中时恢复彩色，交互时才引人注意。
         filter: grayscale(1);
         opacity: 0.55;
-        transition: filter 0.15s ease, opacity 0.15s ease;
+        transition: filter var(--app-motion-fast) ease, opacity var(--app-motion-fast) ease;
     }
 
     :deep(.submenu_item:hover .submenu_source_icon),
@@ -1536,7 +1589,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
     .timeline_header {
         font-family: var(--app-font-family);
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         font-weight: 600;
         color: var(--td-text-color-disabled);
         padding-top: 4px;
@@ -1550,48 +1603,33 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         white-space: nowrap;
     }
 
-    .timeline_header--with-scope {
-        justify-content: space-between;
-        gap: 10px;
-
-        :deep(.session-source-filter--inline) {
-            flex: 0 1 auto;
-            min-width: 0;
-            max-width: 52%;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-        }
-
-        &:hover :deep(.session-source-filter--inline),
-        &:focus-within :deep(.session-source-filter--inline),
-        :deep(.session-source-filter--inline.session-source-filter--emphasized) {
-            opacity: 1;
-        }
-    }
-
-    .submenu--scope-fallback {
-        position: relative;
-        padding-top: 18px;
-    }
-
-    .session-list-scope-fallback {
+    // Stable filter control: always mounted and absolutely pinned to the list's
+    // top-right so it visually sits on the first row (e.g. beside "近30天") and
+    // never jumps when switching session type reloads a bucket. It overlays the
+    // empty right side of the first header row, so it needs no reserved height.
+    .session-list-scope-header {
         position: absolute;
-        top: 1px;
+        top: 4px;
         right: 10px;
-        z-index: 1;
+        z-index: 2;
         display: flex;
         justify-content: flex-end;
         max-width: calc(100% - var(--sidebar-inset-x) - 10px);
 
         :deep(.session-source-filter--inline) {
+            flex: 0 1 auto;
+            min-width: 0;
+            max-width: 100%;
             opacity: 0;
-            transition: opacity 0.15s ease;
+            transition: opacity var(--app-motion-fast) ease;
         }
+    }
 
-        &:hover :deep(.session-source-filter--inline),
-        :deep(.session-source-filter--inline.session-source-filter--emphasized) {
-            opacity: 1;
-        }
+    .submenu:hover .session-list-scope-header :deep(.session-source-filter--inline),
+    .session-list-scope-header:hover :deep(.session-source-filter--inline),
+    .session-list-scope-header:focus-within :deep(.session-source-filter--inline),
+    .session-list-scope-header :deep(.session-source-filter--inline.session-source-filter--emphasized) {
+        opacity: 1;
     }
 
     .submenu_item_p {
@@ -1602,8 +1640,13 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
         &.session-chat-row .session-list-row {
             min-height: 30px;
-            border-radius: 6px;
-            transition: background 0.15s ease, color 0.15s ease;
+            padding-right: 6px;
+            border-radius: var(--app-radius-sm);
+            transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+        }
+
+        &.session-chat-row--revealed {
+            animation: session-fork-enter 280ms ease-out both;
         }
 
         &.session-chat-row:hover .session-list-row {
@@ -1613,9 +1656,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
                 color: var(--td-text-color-primary);
             }
 
-            :deep(.menu-more-wrap) {
-                opacity: 1;
-            }
         }
 
         &.session-chat-row--active .session-list-row {
@@ -1628,14 +1668,10 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             :deep(.menu-more) {
                 color: var(--td-text-color-primary);
             }
-
-            :deep(.menu-more-wrap) {
-                opacity: 1;
-            }
         }
 
         &.session-chat-row--selected .session-list-row {
-            background: rgba(7, 192, 95, 0.05);
+            background: color-mix(in srgb, var(--td-brand-color) 5%, transparent);
         }
     }
 
@@ -1646,7 +1682,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         align-items: center;
         color: var(--td-text-color-primary);
         font-weight: 400;
-        font-size: 14px;
+        font-size: var(--app-text-base);
         line-height: 20px;
         height: 100%;
         width: 100%;
@@ -1663,6 +1699,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             overflow: hidden;
         }
 
+        .session-running-indicator {
+            flex: 0 0 16px;
+            flex-shrink: 0;
+        }
+
         .submenu_title-text {
             flex: 1 1 auto;
             min-width: 0;
@@ -1672,8 +1713,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         }
 
         .menu-more-wrap {
-            opacity: 0;
-            transition: opacity 0.2s ease;
+            transition: opacity var(--app-motion-base) ease;
             flex-shrink: 0;
         }
 
@@ -1704,9 +1744,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 }
 
 .batch-inline-footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -1718,7 +1755,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     .batch-footer-left {
         display: flex;
         align-items: center;
-        font-size: 13px;
+        font-size: var(--app-text-md);
         color: var(--td-text-color-placeholder);
     }
 
@@ -1726,81 +1763,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         display: flex;
         align-items: center;
         gap: 6px;
-    }
-}
-
-/* 知识库下拉菜单样式 */
-.kb-dropdown-icon {
-    margin-left: auto;
-    color: var(--td-text-color-secondary);
-    transition: transform 0.3s ease, color 0.2s ease;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-
-    &.rotate-180 {
-        transform: rotate(180deg);
-    }
-
-    &:hover {
-        color: var(--td-brand-color);
-    }
-
-    &.active {
-        color: var(--td-brand-color);
-    }
-
-    &.active:hover {
-        color: var(--td-brand-color-active);
-    }
-
-    svg {
-        width: 12px;
-        height: 12px;
-        transition: inherit;
-    }
-}
-
-.kb-dropdown-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--td-bg-color-container);
-    border: 1px solid var(--td-component-stroke);
-    border-radius: 6px;
-    box-shadow: var(--td-shadow-2);
-    z-index: 1000;
-    max-height: 200px;
-    overflow-y: auto;
-}
-
-.kb-dropdown-item {
-    padding: 8px 16px;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-    font-size: 14px;
-    color: var(--td-text-color-primary);
-
-    &:hover {
-        background-color: var(--td-bg-color-container-hover);
-    }
-
-    &.active {
-        background-color: var(--td-brand-color-light);
-        color: var(--td-brand-color);
-        font-weight: 500;
-    }
-
-    &:first-child {
-        border-radius: 6px 6px 0 0;
-    }
-
-    &:last-child {
-        border-radius: 0 0 6px 6px;
     }
 }
 
@@ -1815,7 +1777,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 .submenu_empty {
     padding: 24px 14px;
     text-align: center;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     user-select: none;
 }
@@ -1836,9 +1798,9 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     height: 26px;
     flex-shrink: 0;
     cursor: pointer;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     color: var(--td-text-color-secondary);
-    transition: background-color 0.2s ease;
+    transition: background-color var(--app-motion-base) ease;
     box-sizing: border-box;
 
     &:hover {
@@ -1860,13 +1822,96 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     white-space: nowrap;
 
     .cmdk-tip-label {
-        font-size: 13px;
+        font-size: var(--app-text-md);
     }
 
     .cmdk-tip-keys {
-        font-size: 13px;
+        font-size: var(--app-text-md);
         opacity: 0.6;
         letter-spacing: 0.5px;
+    }
+}
+
+.menu-toolbox-stack {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.menu-toolbox-stack__item {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    box-sizing: border-box;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 50%;
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-secondary);
+    rotate: var(--stack-rotate, 0deg);
+    --stack-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: menu-toolbox-stack-in 420ms var(--stack-spring) both;
+    animation-delay: var(--stack-delay, 0ms);
+    transition:
+        margin var(--app-motion-slow) var(--stack-spring),
+        rotate var(--app-motion-slow) var(--stack-spring),
+        translate var(--app-motion-slow) var(--stack-spring),
+        color var(--app-motion-base) ease,
+        box-shadow var(--app-motion-base) ease;
+    transition-delay: var(--stack-delay, 0ms);
+
+    & + & {
+        margin-left: -6px;
+    }
+
+    &:nth-child(1) { z-index: 3; --stack-rotate: -10deg; }
+    &:nth-child(2) { z-index: 2; --stack-delay: 50ms; }
+    &:nth-child(3) { z-index: 1; --stack-rotate: 10deg; --stack-delay: 100ms; }
+}
+
+.menu-toolbox-stack__status {
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 6px;
+    height: 6px;
+    border-radius: var(--app-radius-pill);
+    box-shadow: 0 0 0 1.5px var(--td-bg-color-container);
+
+    &.is-connected {
+        background: var(--td-success-color);
+    }
+
+    &.is-offline {
+        background: var(--td-warning-color);
+    }
+}
+
+@keyframes menu-toolbox-stack-in {
+    from {
+        opacity: 0;
+        scale: 0.4;
+    }
+}
+
+.menu_item:hover .menu-toolbox-stack__item {
+    color: var(--td-text-color-primary);
+    rotate: 0deg;
+    translate: 0 -1px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.menu_item:hover .menu-toolbox-stack__item + .menu-toolbox-stack__item {
+    margin-left: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .menu-toolbox-stack__item {
+        animation: none;
+        transition: color var(--app-motion-base) ease;
     }
 }
 
@@ -1878,7 +1923,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     border-radius: 9px;
     background: rgba(250, 173, 20, 0.2);
     color: var(--td-warning-color);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 600;
     line-height: 18px;
     text-align: center;
@@ -1887,6 +1932,17 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
 .menu_box {
     position: relative;
+}
+
+@keyframes session-fork-enter {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .aside_box .submenu_item_p.session-chat-row--revealed {
+        animation: none;
+    }
 }
 </style>
 <style lang="less">
@@ -1947,10 +2003,10 @@ html[theme-mode="dark"] .aside_box .menu_item_active .menu_icon img.icon {
     .t-popconfirm__content {
         background: var(--td-bg-color-container);
         border: 1px solid var(--td-component-stroke);
-        border-radius: 6px;
+        border-radius: var(--app-radius-sm);
         box-shadow: var(--td-shadow-3);
         padding: 12px 16px;
-        font-size: 14px;
+        font-size: var(--app-text-base);
         color: var(--td-text-color-primary);
         max-width: 200px;
     }

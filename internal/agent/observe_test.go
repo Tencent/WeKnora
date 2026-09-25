@@ -7,13 +7,66 @@ import (
 	"testing"
 	"time"
 
+	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/llmreference"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestToolResultBudgetBounds(t *testing.T) {
+	assert.Equal(t, maxToolResultTokens, toolResultBudget(0))
+	assert.Equal(t, minToolResultTokens, toolResultBudget(10_000))
+	assert.Equal(t, 20_000, toolResultBudget(100_000))
+	assert.Equal(t, maxToolResultTokens, toolResultBudget(1_000_000))
+}
+
+func TestTrimToolResultsKeepsNewestAndPairing(t *testing.T) {
+	estimator, err := agenttoken.NewEstimator()
+	require.NoError(t, err)
+
+	messages := []chat.Message{
+		{Role: "user", Content: "the question"},
+		{
+			Role: "assistant",
+			ToolCalls: []chat.ToolCall{
+				{ID: "call-1", Type: "function"},
+				{ID: "call-2", Type: "function"},
+				{ID: "call-3", Type: "function"},
+			},
+		},
+		{Role: "tool", Name: "one", ToolCallID: "call-1", Content: strings.Repeat("alpha beta gamma ", 1000)},
+		{Role: "tool", Name: "two", ToolCallID: "call-2", Content: strings.Repeat("delta epsilon zeta ", 1000)},
+		{Role: "tool", Name: "three", ToolCallID: "call-3", Content: strings.Repeat("newest result ", 100)},
+	}
+	latestCost := estimator.EstimateMessage(&messages[4])
+	markerOne := messages[2]
+	markerOne.Content = compactedToolResultMarker(markerOne.Content)
+	markerTwo := messages[3]
+	markerTwo.Content = compactedToolResultMarker(markerTwo.Content)
+	budget := latestCost + estimator.EstimateMessage(&markerOne) + estimator.EstimateMessage(&markerTwo)
+
+	trimmed, changed := trimToolResultsToBudget(messages, estimator, budget)
+
+	require.True(t, changed)
+	assert.Contains(t, trimmed[2].Content, "Tool result compacted")
+	assert.Contains(t, trimmed[3].Content, "Tool result compacted")
+	assert.Equal(t, messages[4].Content, trimmed[4].Content, "newest result should be kept in full")
+	assert.Equal(t, messages[1].ToolCalls, trimmed[1].ToolCalls, "assistant tool-call pairing must remain intact")
+	assert.Equal(t,
+		strings.Repeat("alpha beta gamma ", 1000),
+		messages[2].Content,
+		"input messages must not be mutated",
+	)
+
+	total := 0
+	for _, idx := range []int{2, 3, 4} {
+		total += estimator.EstimateMessage(&trimmed[idx])
+	}
+	assert.LessOrEqual(t, total, budget)
+}
 
 // TestAnalyzeResponse_ToolCall_DoesNotTerminate is a regression guard: the
 // agent has no dedicated terminal tool — any round that requests tool calls is
@@ -28,7 +81,7 @@ func TestAnalyzeResponse_ToolCall_DoesNotTerminate(t *testing.T) {
 				ID:   "call-1",
 				Type: "function",
 				Function: types.FunctionCall{
-					Name:      agenttools.ToolKnowledgeSearch,
+					Name:      agenttools.ToolSearchKnowledge,
 					Arguments: `{"query": "hi"}`,
 				},
 			},
@@ -164,35 +217,25 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 	})
 }
 
-func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *testing.T) {
-	engine := &AgentEngine{}
+func TestAppendToolResultsKeepsImageOutputPolicyInStableSystemPrefix(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.systemPromptTemplate = "Custom agent prompt."
 	prior := []chat.Message{
-		{Role: "system", Content: "Custom agent prompt."},
+		{Role: "system", Content: engine.buildSystemPrompt(t.Context())},
 		{Role: "user", Content: "解释流程"},
 	}
-	step := types.AgentStep{
-		ToolCalls: []types.ToolCall{{
-			ID:   "call-image",
-			Name: "knowledge_search",
-			Result: &types.ToolResult{
-				Success: true,
-				Output:  "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)",
-			},
-		}},
-	}
-
+	step := types.AgentStep{ToolCalls: []types.ToolCall{{
+		ID: "call-image", Name: "knowledge_search",
+		Result: &types.ToolResult{Success: true, Output: "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)"},
+	}}}
 	out := engine.appendToolResults(prior, step)
 	require.Len(t, out, 4)
-	assert.Contains(t, out[0].Content, "Custom agent prompt.")
-	assert.Contains(t, out[0].Content, agentRetrievedImageRequirementMarker)
-	assert.Contains(t, out[0].Content, "MUST include at least one relevant Markdown image")
-	assert.Contains(t, out[0].Content, "ASCII half-width parentheses")
+	assert.Equal(t, prior[0], out[0], "the system prefix stays stable after retrieval")
+	assert.Contains(t, out[0].Content, types.SourcedAnswerOutputPrompt)
 	assert.Equal(t, "tool", out[3].Role)
-	assert.Contains(t, out[3].Content, "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
-
-	// A later image-bearing step must not duplicate the system requirement.
+	assert.Contains(t, out[3].Content, "![流程图](res://0001)")
 	out = engine.appendToolResults(out, step)
-	assert.Equal(t, 1, strings.Count(out[0].Content, agentRetrievedImageRequirementMarker))
+	require.Len(t, out, 6, "image results append no synthetic user instruction")
 }
 
 func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
@@ -204,14 +247,53 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 			Title:       "Report.pdf",
 			FileType:    "pdf",
 		}},
+		nil,
 	)
 
 	assert.Contains(t, block, "<pinned_documents")
 	assert.Contains(t, block, `knowledge_id="kid-1"`)
 	assert.Contains(t, block, `title="Report.pdf"`)
 	assert.Contains(t, block, `file_type="pdf"`)
-	assert.Contains(t, block, "list_knowledge_chunks")
+	assert.NotContains(t, block, "<note>")
+	assert.Contains(t, runtimePromptContract, "Honor the current pinned-document scope")
 	assert.NotContains(t, block, "<must_use>")
+}
+
+func TestBuildRuntimeContextBlock_QuestionOrigin(t *testing.T) {
+	origin := &QuestionOriginInfo{
+		KnowledgeBaseID:   "kb-1",
+		KnowledgeBaseName: "TEST",
+		Document:          &SelectedDocumentInfo{KnowledgeID: "kid-1", Title: "Corners <SSAO>"},
+	}
+	block := buildRuntimeContextBlock("sess-1", nil, nil, origin)
+	assert.Contains(t, block, `<question_origin knowledge_base_id="kb-1" name="TEST">`)
+	assert.Contains(t, block, `<document knowledge_id="kid-1" title="Corners &lt;SSAO&gt;" />`)
+	assert.Contains(t, block, "Search it before answering")
+
+	baseOnly := buildRuntimeContextBlock("sess-1", nil, nil, &QuestionOriginInfo{KnowledgeBaseID: "kb-1"})
+	assert.Contains(t, baseOnly, `<question_origin knowledge_base_id="kb-1">`, "an unknown name is omitted, not empty")
+	assert.NotContains(t, baseOnly, "<document")
+
+	assert.NotContains(t, buildRuntimeContextBlock("sess-1", nil, nil, nil), "question_origin")
+}
+
+// The origin's raw IDs must reach the model as handles it can pass to
+// search_knowledge / read_document, never as durable IDs.
+func TestRenderUserTurnContent_QuestionOriginUsesHandles(t *testing.T) {
+	engine := &AgentEngine{
+		modelContext:       modelcontext.NewRegistry(true),
+		knowledgeBasesInfo: []*KnowledgeBaseInfo{{ID: "kb-real-id", Name: "TEST"}},
+		questionOrigin: &QuestionOriginInfo{
+			KnowledgeBaseID:   "kb-real-id",
+			KnowledgeBaseName: "TEST",
+			Document:          &SelectedDocumentInfo{KnowledgeID: "doc-real-id", Title: "Corners"},
+		},
+	}
+	out := engine.RenderUserTurnContent("sess-1", "为什么在比较图形时需要谨慎处理？")
+	assert.Contains(t, out, `<question_origin knowledge_base_id="b1" name="TEST">`)
+	assert.Contains(t, out, `<document knowledge_id="d1" title="Corners" />`)
+	assert.NotContains(t, out, "kb-real-id")
+	assert.NotContains(t, out, "doc-real-id")
 }
 
 func TestBuildMustUseBlock_MCPAndSkills(t *testing.T) {
@@ -231,7 +313,7 @@ func TestBuildMustUseBlock_MCPAndSkills(t *testing.T) {
 	assert.NotContains(t, block, "<instruction>")
 	assert.Contains(t, block, "Must use MCP tools whose names start with mcp_chemdb_")
 	assert.Contains(t, block, "@ChemDB")
-	assert.Contains(t, block, `Must call read_skill(skill_name="data-analysis")`)
+	assert.Contains(t, block, `Must call read_file(path="skill://data-analysis/SKILL.md")`)
 	assert.Contains(t, block, `@Skill "data-analysis"`)
 }
 
@@ -257,7 +339,7 @@ func TestBuildMustUseBlock_SkipsMCPWithoutTools(t *testing.T) {
 		}},
 		[]*PinnedSkillInfo{{Name: "data-analysis"}},
 	)
-	assert.Contains(t, block, `Must call read_skill(skill_name="data-analysis")`)
+	assert.Contains(t, block, `Must call read_file(path="skill://data-analysis/SKILL.md")`)
 	assert.NotContains(t, block, "DisabledMCP")
 }
 
@@ -274,7 +356,7 @@ func TestRenderUserTurnContent_IncludesScopeBlocks(t *testing.T) {
 
 func TestBuildMessagesWithLLMContextRegistersBoundScopeBeforeFirstModelCall(t *testing.T) {
 	engine := &AgentEngine{
-		sourceRefs: llmreference.NewRegistry(),
+		modelContext: modelcontext.NewRegistry(true),
 		knowledgeBasesInfo: []*KnowledgeBaseInfo{{
 			ID:   "kb-real-id",
 			Name: "Docs",
@@ -298,7 +380,7 @@ func TestBuildMessagesWithLLMContextRegistersBoundScopeBeforeFirstModelCall(t *t
 	assert.Contains(t, userContent, `knowledge_base id="b1"`)
 	assert.Contains(t, userContent, `knowledge_id="d1"`)
 	assert.Contains(t, userContent, `knowledge_id="d2"`)
-	assert.Equal(t, "c1", engine.sourceRefs.ChunkAlias("chunk-real-id"))
+	assert.Equal(t, "c1", engine.modelContext.ChunkHandle("chunk-real-id"))
 	assert.NotContains(t, userContent, "kb-real-id")
 	assert.NotContains(t, userContent, "chunk-real-id")
 	assert.NotContains(t, userContent, "doc-real-id")
@@ -336,4 +418,177 @@ func TestBuildMustUseBlock_SanitizesNamesIntoSingleLine(t *testing.T) {
 	)
 	// The injected newline must be neutralized so it cannot forge a new line.
 	assert.NotContains(t, block, "evil\nMust call")
+}
+
+func TestIsLengthFinishReason(t *testing.T) {
+	assert.True(t, isLengthFinishReason("length"))
+	assert.True(t, isLengthFinishReason("max_tokens"))
+	assert.True(t, isLengthFinishReason("MAX_OUTPUT_TOKENS"))
+	assert.False(t, isLengthFinishReason("stop"))
+	assert.False(t, isLengthFinishReason("tool_calls"))
+}
+
+func newEngineWithTool(t *testing.T, name string) (*AgentEngine, *countingTool) {
+	t.Helper()
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	tool := newCountingTool(name)
+	engine.toolRegistry.RegisterTool(tool)
+	return engine, tool
+}
+
+// "length" alone does not mean the window is full — it usually means the model
+// used the budget we gave it. Retrying those would burn a round reproducing the
+// same truncation, so only a response that stopped short of its own budget
+// counts as something compaction can fix.
+func TestResponseHitContextLimitOnlyWhenShortOfItsOwnBudget(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{}, withMaxCompletionTokens(8192))
+
+	stoppedShort := &types.ChatResponse{
+		FinishReason: "length",
+		Usage:        types.TokenUsage{CompletionTokens: 120},
+	}
+	require.True(t, engine.responseHitContextLimit(stoppedShort))
+
+	usedFullBudget := &types.ChatResponse{
+		FinishReason: "length",
+		Usage:        types.TokenUsage{CompletionTokens: 8192},
+	}
+	require.False(t, engine.responseHitContextLimit(usedFullBudget))
+
+	// Without usage there is nothing to compare against, so this must not
+	// classify every ordinary truncation as an overflow.
+	require.False(t, engine.responseHitContextLimit(&types.ChatResponse{FinishReason: "length"}))
+
+	require.False(t, engine.responseHitContextLimit(&types.ChatResponse{
+		FinishReason: "stop",
+		Usage:        types.TokenUsage{CompletionTokens: 10},
+	}))
+	require.False(t, engine.responseHitContextLimit(nil))
+}
+
+// A response cut off at the completion-token cap must not have any of its tool
+// calls executed: the arguments stop mid-serialization, and a truncated
+// write_sandbox_file lands a half-written file while still reporting success.
+func TestExecuteToolCalls_LengthFinish_RefusesEveryCallWithoutExecuting(t *testing.T) {
+	engine, tool := newEngineWithTool(t, "write_sandbox_file")
+
+	step := &types.AgentStep{}
+	engine.executeToolCalls(
+		context.Background(),
+		&types.ChatResponse{
+			FinishReason: "length",
+			ToolCalls: []types.LLMToolCall{
+				{ID: "call-1", Function: types.FunctionCall{
+					Name: "write_sandbox_file", Arguments: `{"path":"/workspace/output/a.html","content":"<htm`,
+				}},
+			},
+		},
+		step, 0, "sess-1", "msg-1",
+	)
+
+	assert.Equal(t, 0, tool.calls, "a truncated call must never reach the tool")
+	require.Len(t, step.ToolCalls, 1)
+	assert.False(t, step.ToolCalls[0].Result.Success)
+	assert.Contains(t, step.ToolCalls[0].Result.Error, "was not executed")
+	assert.Contains(t, step.ToolCalls[0].Result.Error, "smaller calls")
+}
+
+// A stream that breaks mid-argument never reports finish_reason=length, so the
+// refusal has to come from the repair step noticing it closed the payload off.
+func TestExecuteToolCalls_TruncatedArgsWithoutFinishReason_Refuses(t *testing.T) {
+	engine, tool := newEngineWithTool(t, "write_sandbox_file")
+
+	step := &types.AgentStep{}
+	engine.executeToolCalls(
+		context.Background(),
+		&types.ChatResponse{
+			ToolCalls: []types.LLMToolCall{
+				{ID: "call-1", Function: types.FunctionCall{
+					Name: "write_sandbox_file", Arguments: `{"path":"/workspace/output/a.html","content":"<html><body`,
+				}},
+			},
+		},
+		step, 0, "sess-1", "msg-1",
+	)
+
+	assert.Equal(t, 0, tool.calls)
+	require.Len(t, step.ToolCalls, 1)
+	assert.False(t, step.ToolCalls[0].Result.Success)
+	assert.Contains(t, step.ToolCalls[0].Result.Error, "was not executed")
+}
+
+// Well-formed arguments must still run — the refusal keys on truncation, not on
+// having gone through the repair path at all.
+func TestExecuteToolCalls_CompleteArgs_StillExecute(t *testing.T) {
+	engine, tool := newEngineWithTool(t, "write_sandbox_file")
+
+	step := &types.AgentStep{}
+	engine.executeToolCalls(
+		context.Background(),
+		&types.ChatResponse{
+			FinishReason: "tool_calls",
+			ToolCalls: []types.LLMToolCall{
+				{ID: "call-1", Function: types.FunctionCall{
+					Name: "write_sandbox_file", Arguments: `{"path":"/workspace/output/a.html","content":"<html>"}`,
+				}},
+			},
+		},
+		step, 0, "sess-1", "msg-1",
+	)
+
+	assert.Equal(t, 1, tool.calls)
+	require.Len(t, step.ToolCalls, 1)
+	assert.True(t, step.ToolCalls[0].Result.Success)
+}
+
+func TestBuildMustUseBlockMCPDirectory(t *testing.T) {
+	block := buildMustUseBlock([]*PinnedMCPServiceInfo{{ID: "orders", Name: "Orders", Discoverable: true}}, nil)
+	assert.Contains(t, block, `discover_mcp_tools(mode="list_tools", server_id="orders")`)
+	assert.Contains(t, block, "call_mcp_tool")
+	assert.NotContains(t, block, "names start with")
+}
+
+func TestMCPProxyTargetDoesNotRewriteModelHistory(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	target := &types.ToolCallTarget{
+		Name:        "mcp_orders_get",
+		Args:        map[string]any{"id": "42"},
+		ServiceName: "Orders",
+		ToolName:    "get",
+	}
+	call := types.ToolCall{
+		ID:     "proxy-call",
+		Name:   "call_mcp_tool",
+		Args:   map[string]any{"tool_ref": "mcpt_ref", "arguments": map[string]any{"id": "42"}},
+		Target: target,
+		Result: &types.ToolResult{Success: true, Output: "ok"},
+	}
+	messages := engine.appendToolResults(nil, types.AgentStep{ToolCalls: []types.ToolCall{call}})
+	require.Len(t, messages, 2)
+	require.Equal(t, "call_mcp_tool", messages[0].ToolCalls[0].Function.Name)
+	require.Contains(t, messages[0].ToolCalls[0].Function.Arguments, "tool_ref")
+	require.Equal(t, "proxy-call", messages[1].ToolCallID)
+	require.Equal(t, "call_mcp_tool", messages[1].Name)
+	require.Equal(t, "mcp_orders_get", call.ExecutionName())
+	require.Equal(t, "42", call.ExecutionArgs()["id"])
+}
+
+func TestMCPDiscoveryCompactionNeverReturnsPartialSchema(t *testing.T) {
+	estimator, err := agenttoken.NewEstimator()
+	require.NoError(t, err)
+	msg := chat.Message{
+		Role:       "tool",
+		Name:       agenttools.ToolDiscoverMCPTools,
+		ToolCallID: "describe-id",
+		Content: `{"input_schema":{"description":"` + strings.Repeat(
+			"schema ",
+			5000,
+		) + `","required":["critical"]}}`,
+	}
+	compacted := compactToolMessage(msg, 300, estimator)
+	require.Equal(t, msg.ToolCallID, compacted.ToolCallID)
+	require.NotContains(t, compacted.Content, "input_schema")
+	require.NotContains(t, compacted.Content, "required")
+	require.Contains(t, compacted.Content, "partial schema")
 }

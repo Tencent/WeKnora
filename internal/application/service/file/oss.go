@@ -34,19 +34,25 @@ const ossScheme = "oss://"
 
 // newOSSClient creates an OSS client using the official Aliyun SDK v2.
 func newOSSClient(endpoint, region, accessKey, secretKey string) (*oss.Client, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe OSS endpoint: %w", err)
+	}
 	creds := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
 
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(creds).
 		WithRegion(region).
-		WithEndpoint(endpoint)
+		WithEndpoint(endpoint).
+		WithHttpClient(objectStorageHTTPClient())
 
 	return oss.NewClient(cfg), nil
 }
 
 // ossEnsureBucket checks if the bucket exists and creates it if missing.
 func ossEnsureBucket(client *oss.Client, bucketName string) error {
-	exists, err := client.IsBucketExist(context.Background(), bucketName)
+	headCtx, cancel := objectStorageSetupContext()
+	exists, err := client.IsBucketExist(headCtx, bucketName)
+	cancel()
 	if err != nil {
 		return fmt.Errorf("failed to check OSS bucket: %w", err)
 	}
@@ -54,7 +60,9 @@ func ossEnsureBucket(client *oss.Client, bucketName string) error {
 		return nil
 	}
 
-	_, err = client.PutBucket(context.Background(), &oss.PutBucketRequest{
+	createCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	_, err = client.PutBucket(createCtx, &oss.PutBucketRequest{
 		Bucket: oss.Ptr(bucketName),
 	})
 	if err != nil {
@@ -119,7 +127,9 @@ func CheckOssConnectivity(ctx context.Context, endpoint, region, accessKey, secr
 		return err
 	}
 
-	exists, err := client.IsBucketExist(ctx, bucketName)
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	exists, err := client.IsBucketExist(checkCtx, bucketName)
 	if err != nil {
 		return fmt.Errorf("failed to check OSS bucket: %w", err)
 	}
@@ -130,7 +140,10 @@ func CheckOssConnectivity(ctx context.Context, endpoint, region, accessKey, secr
 }
 
 // parseOssFilePath extracts bucket and object key from: oss://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/oss://{bucket}/{objectKey} paths are
+// accepted too (see storageBackendInnerPath, #3151).
 func parseOssFilePath(filePath string) (bucketName string, objectKey string, err error) {
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, ossScheme) {
 		return "", "", fmt.Errorf("invalid OSS file path: %s", filePath)
 	}
@@ -175,6 +188,9 @@ func (s *ossFileService) SaveFile(ctx context.Context,
 	if contentType == "" {
 		contentType = utils.GetContentTypeByExt(ext)
 	}
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 
 	// Use Uploader for files > 10MB (auto multipart with concurrent uploads)
 	const multipartThreshold = 10 * 1024 * 1024
@@ -230,6 +246,8 @@ func (s *ossFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		objectName = fmt.Sprintf("exports/%d/%s%s", tenantID, uuid.New().String(), ext)
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err = client.PutObject(ctx, &oss.PutObjectRequest{
 		Bucket:      oss.Ptr(targetBucket),
 		Key:         oss.Ptr(objectName),
@@ -260,6 +278,8 @@ func (s *ossFileService) CopyFile(ctx context.Context,
 	ext := filepath.Ext(srcPath)
 	destKey := fmt.Sprintf("%s%d/%s/%s%s", s.pathPrefix, tenantID, knowledgeID, uuid.New().String(), ext)
 
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err = s.client.CopyObject(ctx, &oss.CopyObjectRequest{
 		Bucket:       oss.Ptr(s.bucketName),
 		Key:          oss.Ptr(destKey),
@@ -292,15 +312,17 @@ func (s *ossFileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 		client = s.client
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
 	resp, err := client.GetObject(ctx, &oss.GetObjectRequest{
 		Bucket: oss.Ptr(bucketName),
 		Key:    oss.Ptr(objectName),
 	})
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to get file from OSS: %w", err)
 	}
 
-	return resp.Body, nil
+	return objectStorageBoundReader(resp.Body, cancel), nil
 }
 
 // DeleteFile removes a file from OSS.
@@ -320,6 +342,8 @@ func (s *ossFileService) DeleteFile(ctx context.Context, filePath string) error 
 		client = s.client
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err = client.DeleteObject(ctx, &oss.DeleteObjectRequest{
 		Bucket: oss.Ptr(bucketName),
 		Key:    oss.Ptr(objectName),

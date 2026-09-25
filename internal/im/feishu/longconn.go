@@ -24,8 +24,10 @@ type LongConnClient struct {
 }
 
 // NewLongConnClient creates a long connection client on the given region's cloud.
+// apiBaseURL overrides the SDK's bootstrap domain (empty uses the region
+// default); set it to a reverse-proxy origin for private/internal deployments.
 // When a message arrives, it converts it to IncomingMessage and calls handler.
-func NewLongConnClient(region Region, appID, appSecret string, handler MessageHandler) *LongConnClient {
+func NewLongConnClient(region Region, appID, appSecret, apiBaseURL string, handler MessageHandler) *LongConnClient {
 	// Long connection mode does not require verificationToken or encryptKey;
 	// those are only used for webhook signature verification and decryption.
 	eventHandler := dispatcher.NewEventDispatcher("", "").
@@ -39,13 +41,19 @@ func NewLongConnClient(region Region, appID, appSecret string, handler MessageHa
 
 	sdkLogger := &feishuLoggerAdapter{region: region, appID: appID}
 
-	// WithDomain points the SDK at the region's cloud. It defaults to
-	// open.feishu.cn, so Lark apps would otherwise fail to authenticate.
+	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
+	if apiBaseURL == "" {
+		apiBaseURL = region.OpenBaseURL
+	}
+
+	// WithDomain points the SDK at the region's cloud (open.feishu.cn by
+	// default). apiBaseURL overrides it for deployments that reach Feishu
+	// through a reverse proxy.
 	wsClient := larkws.NewClient(appID, appSecret,
 		larkws.WithEventHandler(eventHandler),
 		larkws.WithAutoReconnect(true),
 		larkws.WithLogger(sdkLogger),
-		larkws.WithDomain(region.OpenBaseURL),
+		larkws.WithDomain(apiBaseURL),
 	)
 
 	return &LongConnClient{region: region, appID: appID, wsClient: wsClient}
@@ -262,7 +270,8 @@ func convertImageEvent(
 }
 
 // convertPostEvent handles rich-text (post) message type.
-// Extracts all plain text content and treats it as a text query for QA.
+// Extracts plain text and the first embedded image so mixed posts can use the
+// same attachment pipeline as standalone image messages.
 func convertPostEvent(
 	region Region, msg *larkim.EventMessage,
 	openID, chatID string, chatType im.ChatType, messageID string,
@@ -271,7 +280,7 @@ func convertPostEvent(
 		return nil
 	}
 
-	// Post content structure: {"title":"...", "content":[[{"tag":"text","text":"..."},{"tag":"a","href":"...","text":"..."}]]}
+	// Post content structure: {"title":"...", "content":[[{"tag":"text","text":"..."},{"tag":"img","image_key":"..."}]]}
 	var postContent struct {
 		Title   string              `json:"title"`
 		Content [][]json.RawMessage `json:"content"`
@@ -281,6 +290,7 @@ func convertPostEvent(
 	}
 
 	var textParts []string
+	imageKey := ""
 	if postContent.Title != "" {
 		textParts = append(textParts, postContent.Title)
 	}
@@ -289,8 +299,9 @@ func convertPostEvent(
 		var lineText strings.Builder
 		for _, elem := range line {
 			var tag struct {
-				Tag  string `json:"tag"`
-				Text string `json:"text"`
+				Tag      string `json:"tag"`
+				Text     string `json:"text"`
+				ImageKey string `json:"image_key"`
 			}
 			if err := json.Unmarshal(elem, &tag); err != nil {
 				continue
@@ -298,6 +309,10 @@ func convertPostEvent(
 			switch tag.Tag {
 			case "text", "a":
 				lineText.WriteString(tag.Text)
+			case "img":
+				if imageKey == "" {
+					imageKey = tag.ImageKey
+				}
 			case "at":
 				// Skip @mentions
 			}
@@ -320,18 +335,27 @@ func convertPostEvent(
 	}
 
 	content = strings.TrimSpace(content)
-	if content == "" {
+	if content == "" && imageKey == "" {
 		return nil
+	}
+
+	messageType := im.MessageTypeText
+	fileName := ""
+	if imageKey != "" {
+		messageType = im.MessageTypeImage
+		fileName = imageKey + ".png"
 	}
 
 	return &im.IncomingMessage{
 		Platform:    region.Platform,
-		MessageType: im.MessageTypeText,
+		MessageType: messageType,
 		UserID:      openID,
 		ChatID:      chatID,
 		ChatType:    chatType,
 		Content:     content,
 		MessageID:   messageID,
+		FileKey:     imageKey,
+		FileName:    fileName,
 	}
 }
 

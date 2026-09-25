@@ -5,14 +5,15 @@ import (
 	"strings"
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 )
 
 var (
-	htmlTagPattern       = regexp.MustCompile(`<[^>]+>`)
-	codeBlockPattern     = regexp.MustCompile("(?s)^\\s*```[a-zA-Z]*\\s*\n(.*?)\n\\s*```\\s*$")
-	htmlDocPattern       = regexp.MustCompile(`(?i)^\s*(<\!DOCTYPE|<html|<body|<div|<p[\s>]|<table|<h[1-6][\s>])`)
-	multipleNewlines     = regexp.MustCompile(`\n{3,}`)
-	knownEmptyReplies    = []string{
+	htmlTagPattern    = regexp.MustCompile(`<[^>]+>`)
+	codeBlockPattern  = regexp.MustCompile("(?s)^\\s*```[a-zA-Z]*\\s*\n(.*?)\n\\s*```\\s*$")
+	htmlDocPattern    = regexp.MustCompile(`(?i)^\s*(<\!DOCTYPE|<html|<body|<div|<p[\s>]|<table|<h[1-6][\s>])`)
+	multipleNewlines  = regexp.MustCompile(`\n{3,}`)
+	knownEmptyReplies = []string{
 		"无文字内容",
 		"无法识别",
 		"no text",
@@ -48,6 +49,13 @@ func sanitizeOCRText(raw string) string {
 			return ""
 		}
 	}
+
+	// Convert inline HTML <table> blocks to GFM tables. This is a safe no-op
+	// when no <table> is present, so it runs unconditionally: a markdown body
+	// with an embedded HTML table does not satisfy looksLikeHTML (it neither
+	// starts with a tag nor is dominated by tag characters), yet leaving the
+	// raw markup in place makes the chunker split inside table rows.
+	text = docparser.NormalizeHTMLTables(text)
 
 	if isKnownEmptyReply(text) {
 		return ""

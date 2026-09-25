@@ -83,7 +83,8 @@ var markdownImagePattern = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
 
 var temporaryDocumentExtensions = map[string]struct{}{
 	".docx": {}, ".doc": {}, ".pdf": {}, ".ppt": {}, ".pptx": {}, ".epub": {}, ".mhtml": {},
-	".xlsx": {}, ".xls": {},
+	".xmind": {},
+	".xlsx":  {}, ".xls": {},
 	".md": {}, ".markdown": {}, ".txt": {}, ".csv": {}, ".json": {}, ".xml": {}, ".yaml": {}, ".yml": {}, ".log": {}, ".html": {},
 	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".bmp": {}, ".tiff": {}, ".webp": {},
 	".mp3": {}, ".wav": {}, ".m4a": {}, ".flac": {}, ".ogg": {}, ".aac": {},
@@ -93,15 +94,24 @@ var temporaryTextExtensions = map[string]struct{}{
 	".md": {}, ".markdown": {}, ".txt": {}, ".csv": {}, ".json": {}, ".xml": {}, ".yaml": {}, ".yml": {}, ".log": {},
 }
 
+// sessionAttachmentLookup is the message-store surface Get/OpenFile need to
+// authorize a parent-session temporary document after a fork. Fork copies
+// attachment IDs onto the new messages but leaves the temporary_documents
+// row on the parent; preview still has to work from the fork session id.
+type sessionAttachmentLookup interface {
+	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)
+}
+
 type temporaryDocumentService struct {
-	repo            interfaces.TemporaryDocumentRepository
-	fileService     interfaces.FileService
-	resourceCatalog interfaces.ResourceCatalog
-	documentReader  interfaces.DocumentReader
-	imageResolver   *docparser.ImageResolver
-	modelService    interfaces.ModelService
-	tenantService   interfaces.TenantService
-	taskEnqueuer    interfaces.TaskEnqueuer
+	repo               interfaces.TemporaryDocumentRepository
+	fileService        interfaces.FileService
+	resourceCatalog    interfaces.ResourceCatalog
+	documentReader     interfaces.DocumentReader
+	imageResolver      *docparser.ImageResolver
+	modelService       interfaces.ModelService
+	tenantService      interfaces.TenantService
+	taskEnqueuer       interfaces.TaskEnqueuer
+	sessionAttachments sessionAttachmentLookup
 }
 
 func NewTemporaryDocumentService(
@@ -113,11 +123,13 @@ func NewTemporaryDocumentService(
 	modelService interfaces.ModelService,
 	tenantService interfaces.TenantService,
 	taskEnqueuer interfaces.TaskEnqueuer,
+	messages interfaces.MessageRepository,
 ) interfaces.TemporaryDocumentService {
 	return &temporaryDocumentService{
 		repo: repo, fileService: fileService, resourceCatalog: resourceCatalog,
 		documentReader: documentReader, imageResolver: imageResolver,
 		modelService: modelService, tenantService: tenantService, taskEnqueuer: taskEnqueuer,
+		sessionAttachments: messages,
 	}
 }
 
@@ -150,7 +162,11 @@ func (s *temporaryDocumentService) Create(
 		return nil, fmt.Errorf("unsafe file name: %w", err)
 	}
 	ext := strings.ToLower(filepath.Ext(baseName))
-	if !s.supportsExtension(ctx, tenantID, ext) {
+	resourceTenantID := options.ResourceTenantID
+	if resourceTenantID == 0 {
+		resourceTenantID = tenantID
+	}
+	if !s.supportsExtension(ctx, resourceTenantID, ext) {
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
 	maxSize := secutils.GetMaxFileSizeMB() * 1024 * 1024
@@ -185,7 +201,7 @@ func (s *temporaryDocumentService) Create(
 		return nil, fmt.Errorf("create attachment record: %w", err)
 	}
 	if s.resourceCatalog != nil {
-		if err := s.resourceCatalog.Bind(ctx, resourceRef, "temporary_document", document.ID, "source_file"); err != nil {
+		if err := s.resourceCatalog.Bind(ctx, resourceRef, types.ResourceOwnerTemporaryDocument, document.ID, types.ResourceRelationSourceFile); err != nil {
 			_ = s.repo.DeleteScoped(ctx, tenantID, sessionID, document.ID)
 			_ = s.fileService.DeleteFile(ctx, resourceRef)
 			return nil, fmt.Errorf("bind attachment resource: %w", err)
@@ -238,11 +254,11 @@ func (s *temporaryDocumentService) supportsExtension(ctx context.Context, tenant
 }
 
 func (s *temporaryDocumentService) Get(ctx context.Context, tenantID uint64, sessionID, documentID string) (*types.TemporaryDocument, error) {
-	return s.repo.GetScoped(ctx, tenantID, sessionID, documentID)
+	return s.resolveInSession(ctx, tenantID, sessionID, documentID)
 }
 
 func (s *temporaryDocumentService) OpenFile(ctx context.Context, tenantID uint64, sessionID, documentID string) (io.ReadCloser, string, error) {
-	document, err := s.repo.GetScoped(ctx, tenantID, sessionID, documentID)
+	document, err := s.resolveInSession(ctx, tenantID, sessionID, documentID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -254,6 +270,52 @@ func (s *temporaryDocumentService) OpenFile(ctx context.Context, tenantID uint64
 		return nil, "", err
 	}
 	return file, document.FileName, nil
+}
+
+// resolveInSession finds a temporary document the caller may read from this
+// session. Composer uploads live on temporary_documents.session_id; forked
+// history keeps the parent's document id on copied messages, so a scoped miss
+// falls back to tenant+id when that id appears on this session's messages.
+func (s *temporaryDocumentService) resolveInSession(
+	ctx context.Context, tenantID uint64, sessionID, documentID string,
+) (*types.TemporaryDocument, error) {
+	document, err := s.repo.GetScoped(ctx, tenantID, sessionID, documentID)
+	if err != nil || document != nil {
+		return document, err
+	}
+	document, err = s.repo.GetByID(ctx, tenantID, documentID)
+	if err != nil || document == nil {
+		return document, err
+	}
+	if document.SessionID == sessionID {
+		return document, nil
+	}
+	ok, authErr := s.sessionReferencesAttachment(ctx, sessionID, documentID)
+	if authErr != nil {
+		return nil, authErr
+	}
+	if !ok {
+		return nil, nil
+	}
+	return document, nil
+}
+
+func (s *temporaryDocumentService) sessionReferencesAttachment(
+	ctx context.Context, sessionID, documentID string,
+) (bool, error) {
+	if s == nil || s.sessionAttachments == nil || sessionID == "" || documentID == "" {
+		return false, nil
+	}
+	attachments, err := s.sessionAttachments.GetSessionAttachments(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("authorize forked attachment: %w", err)
+	}
+	for _, attachment := range attachments {
+		if attachment.ID == documentID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *temporaryDocumentService) List(ctx context.Context, tenantID uint64, sessionID string) ([]*types.TemporaryDocument, error) {
@@ -288,9 +350,15 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 	if err := s.repo.MarkProcessing(ctx, payload.TenantID, payload.DocumentID, startedAt); err != nil {
 		return err
 	}
-	// Ensure model resolution (VLM/ASR) has a tenant ID in context.
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
-	if tenant, tenantErr := s.tenantService.GetTenantByID(ctx, payload.TenantID); tenantErr == nil && tenant != nil {
+	// The attachment row and file remain scoped to payload.TenantID, while
+	// parser/model dependencies may belong to a verified shared-agent source.
+	resourceTenantID := payload.TenantID
+	var options types.TemporaryDocumentCreateOptions
+	if json.Unmarshal(document.ProcessingOptions, &options) == nil && options.ResourceTenantID != 0 {
+		resourceTenantID = options.ResourceTenantID
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, resourceTenantID)
+	if tenant, tenantErr := s.tenantService.GetTenantByID(ctx, resourceTenantID); tenantErr == nil && tenant != nil {
 		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 	}
 	content, images, metadata, parseErr := s.parse(ctx, document)
@@ -316,6 +384,8 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 		return nil
 	}
 	content = common.CleanInvalidUTF8(content)
+	content = chunker.NormalizeLineEndings(content)
+	content = docparser.NormalizeHTMLTables(content)
 	lang := chunker.DetectLanguage(content)
 	cfg := chunker.DefaultConfig()
 	cfg.Strategy = chunker.StrategyAuto
@@ -384,16 +454,21 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
 		request.ParserEngineOverrides = tenant.ParserEngineConfig.ToOverridesMap()
 	}
-	var result *types.ReadResult
-	if docparser.IsSimpleFormat(ext) && (request.ParserEngine == "" || request.ParserEngine == "auto") {
-		result, err = (&docparser.SimpleFormatReader{}).Read(ctx, request)
-	} else if s.documentReader != nil {
-		result, err = s.documentReader.Read(ctx, request)
-	} else {
-		err = fmt.Errorf("document reader is not configured")
+	deps := docparser.ReaderDeps{Overrides: request.ParserEngineOverrides, Remote: s.documentReader}
+	if s.tenantService != nil {
+		deps.WeKnoraCloudCredentials = s.tenantService.GetWeKnoraCloudCredentials
 	}
+	reader, err := docparser.NewReader(ctx, parserEngine, strings.TrimPrefix(ext, "."), false, deps)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("parse document: %w", err)
+	}
+	result, err := reader.Read(ctx, request)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("parse document: %w", err)
+	}
+	if result != nil && result.MarkdownContent != "" {
+		result.MarkdownContent = chunker.NormalizeLineEndings(result.MarkdownContent)
+		result.MarkdownContent = docparser.NormalizeHTMLTables(result.MarkdownContent)
 	}
 	// Capture raw page-image bytes before ResolveAndStore stores/rewrites them,
 	// so the VLM OCR fallback for scanned documents has bytes to work with.
@@ -414,7 +489,7 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 			for _, image := range stored {
 				images = append(images, types.TemporaryDocumentImage{OriginalRef: image.OriginalRef, URL: image.ServingURL, MimeType: image.MimeType})
 				if s.resourceCatalog != nil {
-					_ = s.resourceCatalog.Bind(ctx, image.ServingURL, "temporary_document", document.ID, "extracted_image")
+					_ = s.resourceCatalog.Bind(ctx, image.ServingURL, types.ResourceOwnerTemporaryDocument, document.ID, types.ResourceRelationExtractedImage)
 				}
 			}
 		}
@@ -598,7 +673,7 @@ func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantI
 			continue
 		}
 		seen[documentID] = struct{}{}
-		document, err := s.repo.GetScoped(ctx, tenantID, sessionID, documentID)
+		document, err := s.resolveInSession(ctx, tenantID, sessionID, documentID)
 		if err != nil {
 			return nil, err
 		}

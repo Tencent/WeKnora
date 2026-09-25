@@ -51,6 +51,122 @@ func TestDataSourceRepositoryUpdateSyncStateClearsErrorMessage(t *testing.T) {
 	require.NotNil(t, stored.LastSyncAt)
 }
 
+func TestDataSourceRepositoryUpdatePersistsDisabledSyncDeletions(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+
+	ds := &types.DataSource{
+		ID:              "ds-sync-deletions",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Feishu",
+		Type:            types.ConnectorTypeFeishu,
+		SyncDeletions:   true,
+	}
+	require.NoError(t, repo.Create(ctx, ds))
+
+	ds.SyncDeletions = false
+	require.NoError(t, repo.Update(ctx, ds))
+	assert.False(t, ds.SyncDeletions)
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.False(t, stored.SyncDeletions)
+
+	ds.SyncDeletions = true
+	require.NoError(t, repo.Update(ctx, ds))
+	assert.True(t, ds.SyncDeletions)
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.True(t, stored.SyncDeletions)
+}
+
+func TestDataSourceRepositoryCreatePersistsDisabledSyncDeletions(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+
+	ds := &types.DataSource{
+		ID:              "ds-create-sync-deletions",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Feishu",
+		Type:            types.ConnectorTypeFeishu,
+		SyncDeletions:   false,
+	}
+	require.NoError(t, repo.Create(ctx, ds))
+	assert.False(t, ds.SyncDeletions, "Create must not leave the in-memory field hydrated to the GORM default")
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.False(t, stored.SyncDeletions)
+
+	// A later Updates() on the same pointer must not persist the hydrated default.
+	ds.Name = "Renamed"
+	require.NoError(t, repo.Update(ctx, ds))
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.False(t, stored.SyncDeletions)
+	assert.Equal(t, "Renamed", stored.Name)
+}
+
+func TestDataSourceRepositoryCreatePersistsEnabledSyncDeletions(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+
+	ds := &types.DataSource{
+		ID:              "ds-create-sync-deletions-enabled",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Feishu",
+		Type:            types.ConnectorTypeFeishu,
+		SyncDeletions:   true,
+	}
+	require.NoError(t, repo.Create(ctx, ds))
+	assert.True(t, ds.SyncDeletions)
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	assert.True(t, stored.SyncDeletions)
+}
+
+func TestDataSourceRepositoryDeleteSoftDeletesOnSQLite(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	ctx := context.Background()
+
+	target := &types.DataSource{
+		ID:              "ds-delete-target",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Delete target",
+		Type:            types.ConnectorTypeFeishu,
+	}
+	other := &types.DataSource{
+		ID:              "ds-delete-other",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Other data source",
+		Type:            types.ConnectorTypeFeishu,
+	}
+	require.NoError(t, repo.Create(ctx, target))
+	require.NoError(t, repo.Create(ctx, other))
+
+	require.NoError(t, repo.Delete(ctx, target.ID))
+
+	var deleted types.DataSource
+	require.NoError(t, db.Unscoped().First(&deleted, "id = ?", target.ID).Error)
+	assert.True(t, deleted.DeletedAt.Valid)
+
+	found, err := repo.FindByID(ctx, target.ID)
+	assert.Error(t, err)
+	assert.Nil(t, found)
+
+	untouched, err := repo.FindByID(ctx, other.ID)
+	require.NoError(t, err)
+	assert.Equal(t, other.ID, untouched.ID)
+}
+
 func TestSyncLogRepositoryUpdateResultClearsErrorMessage(t *testing.T) {
 	db := setupDataSourceRepoTestDB(t)
 	repo := NewSyncLogRepository(db)

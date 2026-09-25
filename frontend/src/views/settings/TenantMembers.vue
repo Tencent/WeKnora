@@ -9,7 +9,7 @@
       <div class="section-header-row">
         <div class="section-header-titlewrap">
           <h2>{{ $t('tenantMember.title') }}</h2>
-          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="permissions-popup-overlay"
+          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="wk-popover permissions-popup-overlay"
             :overlay-inner-style="permissionsPopupInnerStyle">
             <button type="button" class="permissions-trigger-btn" :aria-label="$t('tenantMember.permissions.title')"
               :title="$t('tenantMember.permissions.iconHint')">
@@ -54,7 +54,7 @@
         {{ $t('tenantMember.sectionDescription') }}
         <a
           class="doc-link"
-          href="https://github.com/Tencent/WeKnora/blob/main/docs/RBAC%E8%AF%B4%E6%98%8E.md"
+          :href="docsUrl('tenantAuth')"
           target="_blank"
           rel="noopener noreferrer"
         >
@@ -198,7 +198,7 @@
               </t-input>
             </div>
             <t-popup v-if="canManage" v-model="invitePopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="member-invite-popup-overlay">
+              destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
               <t-button theme="primary" variant="outline" shape="square" size="small" class="members-list-add-btn"
                 :title="$t('tenantMember.add.button')" :aria-label="$t('tenantMember.add.button')">
                 <template #icon><t-icon name="user-add" /></template>
@@ -247,7 +247,7 @@
                  popup so the two flows live side-by-side: "I know who"
                  (email input) vs "I don't" (one link, group chat). -->
             <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="member-invite-popup-overlay">
+              destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
               <t-button theme="default" variant="outline" shape="square" size="small" class="members-list-add-btn"
                 :title="$t('tenantInvitation.shareLink.button')"
                 :aria-label="$t('tenantInvitation.shareLink.button')">
@@ -380,8 +380,10 @@
     <!-- Audit log drawer. Only rendered for Admin+ because the backend
          route is g.Admin()-gated; rendering it for lower roles would
          just produce an unhelpful 403. Lazy-loaded on first open. -->
-    <t-drawer v-if="canViewAudit" v-model:visible="auditDrawerVisible" :header="$t('tenantMember.audit.tabLabel')"
-      drawer-class-name="tenant-members-audit-drawer" size="880px" :footer="false" placement="right" destroy-on-close>
+    <SettingDrawer v-if="canViewAudit" v-model:visible="auditDrawerVisible"
+      :title="$t('tenantMember.audit.tabLabel')" width="1120px" :min-width="720" :max-width="1600"
+      storage-key="setting-drawer:width:tenant-members-audit" :hide-footer="true"
+      drawer-class-name="tenant-members-audit-drawer">
       <div class="audit-drawer-inner audit-panel audit-panel--drawer">
         <div class="audit-header">
           <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
@@ -506,7 +508,7 @@
           </div>
         </div>
       </div>
-    </t-drawer>
+    </SettingDrawer>
   </div>
 </template>
 
@@ -514,7 +516,11 @@
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { copyWithToast } from '@/utils/clipboard'
 import { useAuthStore } from '@/stores/auth'
+import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
+import { auditActionLabel } from '@/i18n/auditActionLabel'
 import {
   listMembers,
   updateMemberRole,
@@ -529,6 +535,7 @@ import {
   revokeInvitation,
   type TenantInvitation,
 } from '@/api/tenant/invitations'
+import { docsUrl } from '@/utils/docsUrl'
 import {
   listAuditLog,
   type AuditLog,
@@ -1052,11 +1059,7 @@ function auditOutcomeTheme(o: AuditOutcome): 'success' | 'danger' | 'default' {
 // i18n 键名含点号（rbac.member_added）。用 t(path) 会按路径拆开解析，
 // 无法命中 tenantMember.audit.action['rbac.*'] — 必须用 tm + 字面量键。
 function formatAuditAction(action: AuditAction): string {
-  const bag = tm('tenantMember.audit.action') as unknown
-  if (bag !== null && typeof bag === 'object' && typeof (bag as Record<string, string>)[action] === 'string') {
-    return (bag as Record<string, string>)[action]
-  }
-  return action
+  return auditActionLabel({ tm }, AUDIT_ACTION_I18N_ROOTS.tenantMember, action)
 }
 
 // Resolve a user id to a display label: prefer current页的 members，
@@ -1267,13 +1270,7 @@ function absoluteInviteURL(raw: string): string {
 }
 
 async function copyText(text: string) {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    MessagePlugin.success(t('tenantInvitation.copied'))
-  } catch {
-    MessagePlugin.error(t('tenantInvitation.copyFailed'))
-  }
+  await copyWithToast(text, 'tenantInvitation.copied', 'tenantInvitation.copyFailed')
 }
 
 async function submitShareLink() {
@@ -1302,10 +1299,16 @@ const addConfirmRoleLabel = computed(() => t('tenantMember.role.' + addForm.role
 
 // submitAdd is wired to the popup footer primary CTA. On step='form' it
 // validates and swaps to summary; on step='confirm' it fires the API.
+// With auto-accept the action is a direct add, so we skip the invitation
+// confirm step entirely and fire the API right after validation.
 async function submitAdd() {
   if (addDialogStep.value === 'form') {
     const valid = await addFormRef.value?.validate?.()
     if (valid !== true) return
+    if (authStore.autoAcceptInvitation) {
+      await sendInvitation(addForm.email.trim(), addForm.role)
+      return
+    }
     addDialogStep.value = 'confirm'
     return
   }
@@ -1317,11 +1320,12 @@ function goBackToForm() {
   addDialogStep.value = 'form'
 }
 
-// dialogConfirmLabel drives the primary action label across the two steps.
+// dialogConfirmLabel: "Send" on the confirm step, or when auto-accept makes
+// the form step a direct add; otherwise "Send invitation".
 const dialogConfirmLabel = computed(() =>
-  addDialogStep.value === 'form'
-    ? t('tenantInvitation.inviteSubmit')
-    : t('tenantInvitation.confirmSend'),
+  addDialogStep.value === 'confirm' || authStore.autoAcceptInvitation
+    ? t('tenantInvitation.confirmSend')
+    : t('tenantInvitation.inviteSubmit'),
 )
 
 // sendInvitation actually fires the create-invitation API call.
@@ -1330,10 +1334,18 @@ async function sendInvitation(email: string, role: TenantRole) {
   try {
     const resp = await createInvitation(activeTenantId.value, { email, role })
     if (resp.success) {
-      invitationsPage.value = 1
-      await loadInvitations()
+      // auto-accept returns a member (user_id) instead of an invitation (id)
+      const autoJoined = !!resp.data && 'user_id' in resp.data
       invitePopupVisible.value = false
-      MessagePlugin.success(t('tenantInvitation.inviteSuccess'))
+      if (autoJoined) {
+        // The invitee is already a member — refresh the roster so they
+        // appear immediately. No toast: the new row is the feedback.
+        await loadMembers()
+      } else {
+        invitationsPage.value = 1
+        await loadInvitations()
+        MessagePlugin.success(t('tenantInvitation.inviteSuccess'))
+      }
     } else {
       MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
     }
@@ -1455,6 +1467,8 @@ watch(
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .tenant-members {
   width: 100%;
 }
@@ -1468,7 +1482,7 @@ watch(
 
   .member-name {
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1476,7 +1490,7 @@ watch(
   }
 
   .member-email {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.35;
     color: var(--td-text-color-secondary);
     overflow: hidden;
@@ -1486,23 +1500,7 @@ watch(
 }
 
 .section-header {
-  margin-bottom: 20px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-    letter-spacing: -0.02em;
-  }
-
-  .section-description {
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    line-height: 1.55;
-    margin: 6px 0 0 0;
-    max-width: 52rem;
-  }
+  .settings-section-header();
 }
 
 .section-header-row {
@@ -1516,8 +1514,13 @@ watch(
 .section-header-titlewrap {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
+
+  h2 {
+    margin: 0;
+    line-height: 1.25;
+  }
 }
 
 /* 顶部右侧的「审计日志」入口。t-button variant="text" 自带颜色
@@ -1571,16 +1574,22 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  line-height: 0;
+  transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
+
+  :deep(.t-icon) {
+    display: block;
+  }
 
   &:hover {
     background-color: var(--td-bg-color-secondarycontainer);
@@ -1618,7 +1627,7 @@ watch(
 }
 
 .members-list-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -1632,16 +1641,16 @@ watch(
   min-width: 22px;
   height: 20px;
   padding: 0 7px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background-color: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   line-height: 1;
 }
 
 .members-list-filter-hint {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -1687,13 +1696,13 @@ watch(
 
 .data-table-shell {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-container);
 
   &:deep(thead th) {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   &:deep(.t-table td),
@@ -1767,13 +1776,13 @@ watch(
     margin-bottom: 16px;
 
     .permissions-compact-title {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
 
     .permissions-compact-desc {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
     }
   }
@@ -1786,10 +1795,10 @@ watch(
 
   .perm-role-block {
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     padding: 14px 16px;
     background: var(--td-bg-color-container);
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
 
     &.is-me {
       border-color: var(--td-brand-color);
@@ -1800,19 +1809,19 @@ watch(
       display: flex;
       align-items: center;
       gap: 6px;
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
       margin-bottom: 12px;
 
       .me-badge {
         margin-left: auto;
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         font-weight: 500;
         color: var(--td-brand-color);
         padding: 2px 8px;
         background: var(--td-brand-color-light);
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
       }
     }
 
@@ -1825,7 +1834,7 @@ watch(
         display: flex;
         align-items: flex-start;
         gap: 6px;
-        font-size: 13px;
+        font-size: var(--app-text-md);
         line-height: 1.5;
 
         .t-icon {
@@ -1865,11 +1874,11 @@ watch(
       margin-bottom: 10px;
 
       .permissions-compact-title {
-        font-size: 13px;
+        font-size: var(--app-text-md);
       }
 
       .permissions-compact-desc {
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         line-height: 1.4;
       }
     }
@@ -1881,15 +1890,15 @@ watch(
 
     .perm-role-block {
       padding: 8px 10px;
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
 
       .perm-role-tag {
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         margin-bottom: 6px;
         gap: 4px;
 
         .me-badge {
-          font-size: 10px;
+          font-size: var(--app-text-2xs);
           padding: 1px 5px;
         }
       }
@@ -1898,7 +1907,7 @@ watch(
         gap: 3px;
 
         .perm-item {
-          font-size: 11px;
+          font-size: var(--app-text-xs);
           line-height: 1.35;
           gap: 4px;
 
@@ -1932,7 +1941,7 @@ watch(
 }
 
 .member-invite-popup-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 12px;
@@ -1952,7 +1961,7 @@ watch(
 .invite-confirm-body {
   padding: 4px 0 8px;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.6;
 }
 
@@ -1982,10 +1991,10 @@ watch(
   min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-page);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   outline: none;
 }
@@ -2024,22 +2033,22 @@ watch(
   }
 
   .pending-invitations-title {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   .pending-invitations-desc {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .pending-invitations-empty {
     padding: 10px 12px;
     border: 1px dashed var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     background: var(--td-bg-color-container);
   }
 
@@ -2076,13 +2085,13 @@ watch(
   justify-content: space-between;
   background: var(--td-bg-color-secondarycontainer);
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   gap: 12px;
 
   .audit-desc {
     flex: 1;
     min-width: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
   }
 
@@ -2150,13 +2159,13 @@ watch(
   justify-content: center;
   gap: 10px;
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
 .audit-end-hint {
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-disabled);
   padding: 8px 0 14px;
   margin: 0;
@@ -2169,12 +2178,12 @@ watch(
   line-height: 1.3;
 
   .audit-time-date {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .audit-time-clock {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     font-variant-numeric: tabular-nums;
@@ -2189,7 +2198,7 @@ watch(
   min-width: 0;
 
   .audit-actor-name {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -2198,7 +2207,7 @@ watch(
   }
 
   .audit-actor-role {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 }
@@ -2212,15 +2221,15 @@ watch(
   padding: 2px 0;
 
   .audit-target-key {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     word-break: break-all;
   }
 
   .audit-target-diff {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     word-break: break-all;
     line-height: 1.4;
   }
@@ -2231,8 +2240,8 @@ watch(
 }
 
 .audit-path {
-  font-family: var(--td-font-family-mono, monospace);
-  font-size: 12px;
+  font-family: var(--td-font-family-mono);
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   word-break: break-all;
 
@@ -2269,7 +2278,7 @@ watch(
 }
 
 .audit-expanded-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-secondary);
   text-transform: uppercase;
@@ -2277,7 +2286,7 @@ watch(
 }
 
 .audit-expanded-value {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   word-break: break-all;
 }
@@ -2291,12 +2300,12 @@ watch(
 .audit-expanded-json {
   margin: 0;
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 280px;
@@ -2304,29 +2313,132 @@ watch(
 }
 
 .mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
 }
 </style>
 
 <style lang="less">
+/* 权限说明弹出层（t-popup 挂到 body，须全局样式） */
+.permissions-popup-overlay {
+  z-index: 3050 !important;
+
+  .permissions-compact.permissions-compact--popover {
+    padding: 12px 14px;
+    margin: 0;
+    max-height: min(392px, calc(65vh - 8px));
+    overflow-x: hidden;
+    overflow-y: auto;
+
+    .permissions-compact-header {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-bottom: 10px;
+
+      .permissions-compact-title {
+        font-size: var(--app-text-md);
+        font-weight: 600;
+        color: var(--td-text-color-primary);
+      }
+
+      .permissions-compact-desc {
+        font-size: var(--app-text-sm);
+        line-height: 1.45;
+        color: var(--td-text-color-secondary);
+      }
+    }
+
+    .permissions-compact-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .perm-role-block {
+      border: 1px solid var(--td-component-stroke);
+      border-radius: var(--app-radius-sm);
+      padding: 8px 10px;
+      background: var(--td-bg-color-container);
+
+      &.is-me {
+        border-color: var(--td-brand-color);
+        background: var(--td-brand-color-light);
+      }
+
+      .perm-role-tag {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: var(--app-text-sm);
+        font-weight: 600;
+        color: var(--td-text-color-primary);
+        margin-bottom: 6px;
+
+        .me-badge {
+          margin-left: auto;
+          font-size: var(--app-text-2xs);
+          font-weight: 500;
+          color: var(--td-brand-color);
+          padding: 1px 5px;
+          background: var(--td-brand-color-light);
+          border-radius: var(--app-radius-xs);
+        }
+      }
+
+      .perm-items {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+
+        .perm-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 4px;
+          font-size: var(--app-text-xs);
+          line-height: 1.35;
+          color: var(--td-text-color-secondary);
+
+          .t-icon {
+            margin-top: 1px;
+            flex-shrink: 0;
+          }
+
+          &.has .t-icon {
+            color: var(--td-brand-color);
+          }
+
+          &.no {
+            color: var(--td-text-color-disabled);
+
+            .t-icon {
+              color: var(--td-text-color-disabled);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+:root[theme-mode='dark'] .permissions-popup-overlay .t-popup__content {
+  background: rgba(36, 36, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.28) !important;
+}
+
+@media (max-width: 480px) {
+  .permissions-popup-overlay .permissions-compact.permissions-compact--popover .permissions-compact-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* t-popup 挂到 body，需全局样式；z-index 需高于设置全屏遮罩（2000）。 */
 .member-invite-popup-overlay {
   z-index: 3050 !important;
 
-  .t-popup__content {
-    padding: 14px 16px !important;
-    min-width: 300px;
-    max-width: min(392px, calc(100vw - 24px));
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  }
 }
 
 :root[theme-mode='dark'] .member-invite-popup-overlay .t-popup__content {
@@ -2348,7 +2460,7 @@ watch(
     gap: 8px;
   }
   .role-option-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
   }
 }
@@ -2358,6 +2470,7 @@ watch(
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  max-width: 100vw;
   max-height: 100vh;
   height: 100%;
 }
@@ -2369,5 +2482,10 @@ watch(
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden !important;
+}
+
+.t-drawer.tenant-members-audit-drawer .setting-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 </style>

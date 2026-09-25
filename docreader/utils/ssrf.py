@@ -126,6 +126,21 @@ def _load_whitelist() -> Tuple[FrozenSet[str], Tuple[str, ...], Tuple[Union[ipad
     return frozenset(exact_hosts), tuple(suffix_hosts), tuple(cidr_nets)
 
 
+def _whitelist_only_enabled() -> bool:
+    """Whether SSRF_DNS_WHITELIST_ONLY makes the whitelist the whole egress
+    policy: a host outside it is refused before any DNS query (#3378).
+
+    Parsed like the Go side: 1/t/true enable it, 0/f/false disable it, and a
+    non-empty value that is neither enables it — silently leaving an egress
+    lockdown off because someone wrote "yes" is the one failure mode this
+    control must not have.
+    """
+    raw = os.environ.get("SSRF_DNS_WHITELIST_ONLY", "").strip()
+    if not raw:
+        return False
+    return raw.lower() not in {"0", "f", "false"}
+
+
 def _is_whitelisted(hostname: str) -> bool:
     lowered = hostname.lower()
     exact_hosts, suffix_hosts, cidr_nets = _load_whitelist()
@@ -161,6 +176,42 @@ def _is_restricted_ip(ip: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -
             if isinstance(net, ipaddress.IPv4Network) and ip in net:
                 return f"restricted range {net}"
     if isinstance(ip, ipaddress.IPv6Address):
+        embedded_ipv4 = ip.ipv4_mapped
+        if embedded_ipv4 is not None:
+            reason = _is_restricted_ip(embedded_ipv4)
+            if reason:
+                return f"IPv4-mapped {reason}"
+        if ip.sixtofour is not None:
+            reason = _is_restricted_ip(ip.sixtofour)
+            if reason:
+                return f"6to4-embedded {reason}"
+        if ip.teredo is not None:
+            server_ip, client_ip = ip.teredo
+            for label, embedded_ip in (("server", server_ip), ("client", client_ip)):
+                reason = _is_restricted_ip(embedded_ip)
+                if reason:
+                    return f"Teredo {label} embeds {reason}"
+        # NAT64's well-known prefix (64:ff9b::/96, RFC 6052) and the deprecated
+        # IPv4-compatible form (::a.b.c.d) also carry a plain IPv4 address, but
+        # ipaddress exposes no accessor for either, so is_private and
+        # .sixtofour never see the payload. Without these two branches
+        # ::169.254.169.254 reads as an ordinary public IPv6 address.
+        # Mirrors internal/ipclass on the Go side.
+        packed = ip.packed
+        # RFC 8215 local-use NAT64 has deployment-specific IPv4 layouts.
+        # Reject the entire /48, matching internal/ipclass, on every Python version.
+        if packed[:6] == b"\x00\x64\xff\x9b\x00\x01":
+            return "local-use NAT64 translation address"
+        if packed[0:4] == b"\x00\x64\xff\x9b" and packed[4:12] == bytes(8):
+            reason = _is_restricted_ip(ipaddress.IPv4Address(packed[12:16]))
+            if reason:
+                return f"NAT64-embedded {reason}"
+        if packed[0:12] == bytes(12):
+            # :: and ::1 already returned above; ::ffff:a.b.c.d is handled by
+            # the ipv4_mapped branch.
+            reason = _is_restricted_ip(ipaddress.IPv4Address(packed[12:16]))
+            if reason:
+                return f"IPv4-compatible {reason}"
         # Site-local (fec0::/10)
         if (ip.packed[0] == 0xFE) and (ip.packed[1] & 0xC0) == 0xC0:
             return "site-local IPv6 address"
@@ -210,6 +261,15 @@ def is_ssrf_safe_url(raw_url: str) -> Tuple[bool, str]:
     if _is_whitelisted(hostname_lower):
         return True, ""
 
+    # Whitelist-only mode stops here: everything below resolves the name, and
+    # a host outside the whitelist must not reach DNS at all (#3378).
+    if _whitelist_only_enabled():
+        return (
+            False,
+            f"host is not in the SSRF whitelist: {hostname_lower} "
+            "(SSRF_DNS_WHITELIST_ONLY is on; add it to SSRF_WHITELIST to allow it)",
+        )
+
     if hostname_lower in RESTRICTED_HOSTNAMES:
         return False, f"hostname {hostname_lower} is restricted"
 
@@ -238,7 +298,10 @@ def is_ssrf_safe_url(raw_url: str) -> Tuple[bool, str]:
                 f"hostname {hostname_lower} resolves to restricted IP {resolved_ip}: {reason}",
             )
 
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        return False, f"invalid port: {exc}"
     if port is not None and str(port) in BLOCKED_PORTS:
         return False, f"port {port} is blocked for security reasons"
 

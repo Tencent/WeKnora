@@ -4,23 +4,13 @@
       <div class="workspace-mark" aria-hidden="true">
         <t-icon name="system-sum" size="30px" />
       </div>
-      <h1>
-        {{
-          $t(
-            authStore.canCreateTenant
-              ? 'auth.workspaceOnboarding.title'
-              : 'auth.workspaceOnboarding.inviteOnlyTitle',
-          )
-        }}
-      </h1>
-      <p class="workspace-description">
-        {{
-          $t(
-            authStore.canCreateTenant
-              ? 'auth.workspaceOnboarding.description'
-              : 'auth.workspaceOnboarding.inviteOnlyDescription',
-          )
-        }}
+      <h1 v-if="authStore.canCreateTenant">{{ $t('auth.workspaceOnboarding.title') }}</h1>
+      <h1 v-else>{{ $t('auth.workspaceOnboarding.inviteOnlyTitle') }}</h1>
+      <p v-if="authStore.canCreateTenant" class="workspace-description">
+        {{ $t('auth.workspaceOnboarding.description') }}
+      </p>
+      <p v-else class="workspace-description">
+        {{ $t('auth.workspaceOnboarding.inviteOnlyDescription') }}
       </p>
 
       <div v-if="policyLoading" class="policy-loading">
@@ -61,14 +51,11 @@
         </div>
       </template>
 
-      <p v-if="!policyLoading && !policyLoadFailed" class="workspace-help">
-        {{
-          $t(
-            authStore.canCreateTenant
-              ? 'auth.workspaceOnboarding.help'
-              : 'auth.workspaceOnboarding.inviteOnlyHelp',
-          )
-        }}
+      <p v-if="!policyLoading && !policyLoadFailed && authStore.canCreateTenant" class="workspace-help">
+        {{ $t('auth.workspaceOnboarding.help') }}
+      </p>
+      <p v-else-if="!policyLoading && !policyLoadFailed" class="workspace-help">
+        {{ $t('auth.workspaceOnboarding.inviteOnlyHelp') }}
       </p>
       <button class="logout-link" type="button" @click="handleLogout">
         {{ $t('auth.logout') }}
@@ -204,13 +191,13 @@ h1 {
   min-height: 52px;
   margin-bottom: 18px;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .policy-error {
   flex-wrap: wrap;
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   color: var(--td-error-color);
   background: var(--td-error-color-light);
 }
@@ -218,7 +205,7 @@ h1 {
 .invite-only-notice {
   padding: 12px 16px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-secondarycontainer);
   line-height: 1.5;
@@ -231,7 +218,7 @@ h1 {
 
 .workspace-help {
   margin: 24px 0 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .logout-link {

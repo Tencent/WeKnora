@@ -32,7 +32,7 @@ func (f *flowEmbedSvc) ListByAgent(context.Context, uint64, string) ([]*types.Em
 func (f *flowEmbedSvc) ListByTenant(context.Context, uint64) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
-func (f *flowEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
+func (f *flowEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
 	return nil, nil
 }
 func (f *flowEmbedSvc) GetOwnedChannel(_ context.Context, tenantID uint64, id string) (*types.EmbedChannel, error) {
@@ -184,7 +184,9 @@ func TestEmbedExchangeFlowIntegration(t *testing.T) {
 
 func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	ch := &types.EmbedChannel{AgentID: "agent-embed-42"}
-	body := `{"query":"hello","agent_id":"client-override","web_search_enabled":true}`
+	body := `{"query":"hello","agent_id":"client-override","agent_source_tenant_id":84,"web_search_enabled":true,` +
+		`"knowledge_ids":["doc-x"],"tag_ids":["tag-x"],"mentioned_items":[{"id":"kb-x","type":"kb"}],` +
+		`"skill_names":["s"],"summary_model_id":"model-x","question_origin":{"knowledge_base_id":"kb-x"}}`
 
 	patched, err := patchEmbedChatPayload(strings.NewReader(body), ch, false)
 	if err != nil {
@@ -200,6 +202,10 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	if payload["query"] != "hello" {
 		t.Fatalf("query = %v, want preserved client field", payload["query"])
 	}
+	if _, ok := payload[types.AgentSourceTenantIDParam]; ok {
+		t.Fatalf("agent_source_tenant_id = %v, want dropped so the channel agent stays local",
+			payload[types.AgentSourceTenantIDParam])
+	}
 	if payload["web_search_enabled"] != false {
 		t.Fatalf("web_search_enabled = %v, want false", payload["web_search_enabled"])
 	}
@@ -210,11 +216,23 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	if !ok || len(kbIDs) != 0 {
 		t.Fatalf("knowledge_base_ids = %v, want empty slice", payload["knowledge_base_ids"])
 	}
+	// Explicit targets and a model override would reach any KB or model of
+	// the channel workspace by ID.
+	for _, key := range []string{"knowledge_ids", "tag_ids", "mentioned_items", "skill_names"} {
+		if values, ok := payload[key].([]any); !ok || len(values) != 0 {
+			t.Fatalf("%s = %v, want empty", key, payload[key])
+		}
+	}
+	for _, key := range []string{"summary_model_id", "question_origin"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("%s = %v, want dropped", key, payload[key])
+		}
+	}
 }
 
 func TestPatchEmbedChatPayloadWebSearchRequiresClientOptIn(t *testing.T) {
 	ch := &types.EmbedChannel{AgentID: "agent-1", AllowWebSearch: true}
-	body := `{"query":"hello","web_search_enabled":false,"enable_memory":true}`
+	body := `{"query":"hello","web_search_enabled":false}`
 
 	patched, err := patchEmbedChatPayload(strings.NewReader(body), ch, false)
 	if err != nil {
@@ -226,9 +244,6 @@ func TestPatchEmbedChatPayloadWebSearchRequiresClientOptIn(t *testing.T) {
 	}
 	if payload["web_search_enabled"] != false {
 		t.Fatalf("web_search_enabled = %v, want false when visitor did not opt in", payload["web_search_enabled"])
-	}
-	if payload["enable_memory"] != false {
-		t.Fatalf("enable_memory = %v, want false (embed memory is disabled)", payload["enable_memory"])
 	}
 
 	bodyOn := `{"query":"hello","web_search_enabled":true}`

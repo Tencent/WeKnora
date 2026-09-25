@@ -89,8 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { MessagePlugin } from 'tdesign-vue-next'
-import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
 import { useRouter } from 'vue-router'
 import { CHROME_EXTENSION_URL } from '@/config/integrations'
 import { useApiBaseUrlDisplay } from '@/composables/useApiBaseUrlDisplay'
@@ -98,7 +97,6 @@ import { useUIStore } from '@/stores/ui'
 import IntegrationLandingLayout from './IntegrationLandingLayout.vue'
 import IntegrationExternalCta from './IntegrationExternalCta.vue'
 
-const { t } = useI18n()
 const router = useRouter()
 const uiStore = useUIStore()
 const { apiBaseUrlDisplay } = useApiBaseUrlDisplay()
@@ -119,18 +117,11 @@ const openChromeStore = () => {
 }
 
 const openApiSettings = () => {
-  router.push({ path: '/platform/settings', query: { section: 'integrations', tab: 'api' } })
+  router.push({ path: '/platform/settings', query: { section: 'integration-api' } })
   uiStore.openSettings('integration-api')
 }
 
 const copyApiUrl = async () => {
-  const text = apiBaseUrlDisplay.value
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    MessagePlugin.success(t('integrations.chrome.copySuccess'))
-  } catch {
-    MessagePlugin.success(t('integrations.chrome.copySuccess'))
-  }
+  await copyWithToast(apiBaseUrlDisplay.value, 'integrations.chrome.copySuccess')
 }
 </script>

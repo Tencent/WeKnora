@@ -3,6 +3,7 @@ package agentcmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -81,7 +82,7 @@ func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeEditSvc{
 		getResp: &sdk.Agent{
-			ID: "ag_abc", Name: "Original", Description: "Keep me",
+			ID: "ag_abc", Name: "Original", Description: "Keep me", Avatar: "🤖",
 			Config: &sdk.AgentConfig{ModelID: "model-x", Temperature: 0.7, KnowledgeBases: []string{"kb_a"}},
 		},
 		updateResp: &sdk.Agent{ID: "ag_abc"},
@@ -96,6 +97,11 @@ func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {
 	require.NotNil(t, svc.updateReq)
 	assert.Equal(t, "Original", svc.updateReq.Name, "Name must round-trip unchanged")
 	assert.Equal(t, "Updated", svc.updateReq.Description)
+	body, err := json.Marshal(svc.updateReq)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &fields))
+	assert.NotContains(t, fields, "avatar", "an unrelated edit must not clear the avatar")
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "model-x", svc.updateReq.Config.ModelID, "ModelID must round-trip")
 	assert.Equal(t, []string{"kb_a"}, svc.updateReq.Config.KnowledgeBases, "KBs must round-trip")
@@ -323,4 +329,33 @@ func TestAgentEdit_RequiresConfirmation(t *testing.T) {
 	// retry argv must include -y and the agent id
 	assert.Contains(t, ce.RetryArgv, "-y")
 	assert.Contains(t, ce.RetryArgv, "ag_abc")
+}
+
+// TestAgentEdit_RetryArgvPreservesAddKB is a regression for #2597: exit-10
+// retry_argv must keep --add-kb / --remove-kb / --config-file so re-running
+// after human approval reproduces the original update.
+func TestAgentEdit_RetryArgvPreservesAddKB(t *testing.T) {
+	iostreams.SetForTest(t) // non-TTY
+	f := &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return nil, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+	// Avoid --config-file / --system-prompt-file here: PreRunE opens paths and
+	// would fail before ConfirmWrite. Those flags still go through the same
+	// BuildRetryArgv scalar path covered in cmdutil tests.
+	root := withRootHarnessAgent(NewCmdEdit(f),
+		"ag_abc", "--add-kb", "kb_new", "--remove-kb", "kb_old", "--format", "json")
+	err := root.Execute()
+	require.Error(t, err)
+	var ce *cmdutil.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, ce.Code)
+	// pflag Visit is lexicographical among changed flags.
+	assert.Equal(t, []string{
+		"weknora", "agent", "update", "ag_abc",
+		"--add-kb", "kb_new",
+		"--format", "json",
+		"--remove-kb", "kb_old",
+		"-y",
+	}, ce.RetryArgv)
 }

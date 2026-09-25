@@ -1,0 +1,664 @@
+# API 参考：知识库与知识
+
+创建知识库，导入与管理文档，并查询处理进度、复制或移动内容。
+
+权限速记：读路由为 Viewer+ 且需对 KB 有 read 权限（自有/组织共享/共享 Agent 可见）；写路由为“KB 创建者 OR Admin+”且需 write 权限。API key：读需 `retrieve`，内容写需 `ingest`，KB 生命周期需 `manage_kbs`（均可被 full-access 覆盖），并受 KB 白名单约束。
+
+分块、标签与分块预览接口（`/chunks`、`/knowledge-bases/:id/tags`、`/chunker/preview`）在[分块与标签](./02-api-chunks.md)。
+
+## 知识库（/api/v1/knowledge-bases）
+
+### POST /api/v1/knowledge-bases
+
+用途：创建知识库。权限：Contributor+；API key `manage_kbs`/full。Handler: `internal/handler/knowledgebase.go`
+
+请求体（`types.KnowledgeBase`）：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 名称 |
+| `description` | string | 否 | 描述 |
+| `type` | string | 否 | `document`（默认）/`faq`/`wiki` |
+| `embedding_model_id` | string | 否 | Embedding 模型 ID |
+| `chunking_config` | object | 否 | 分块配置（chunk_size/overlap/separators/strategy…） |
+| `image_processing_config` | object | 否 | 图片属性观察配置：`model_id` / `image_attrs_enabled` / `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`） |
+| `storage_provider_config` | object | 否 | 存储配置 |
+| `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |
+| `faq_config` / `wiki_config` / `extract_config` / `indexing_strategy` | object | 否 | 类型相关配置 |
+| `summary_model_id` | string | 否 | 摘要模型，也是自动标签和 AI 描述的默认模型 |
+| `auto_tag_config` / `profile_config` | object | 否 | 自动标签、AI 知识库描述（仅 document 类型，见下文） |
+
+响应：201 `{"success":true,"data":{KnowledgeBase}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":"产品文档","type":"document"}'
+```
+
+### 自动标签与 AI 描述配置
+
+创建知识库时 `auto_tag_config`、`profile_config` 位于顶层；更新时放在 `config.auto_tag_config`、`config.profile_config`。两者仅 document 知识库支持，默认 enabled=false。
+
+`auto_tag_config`（自动标签）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `enabled` | bool | false | 解析后异步从已有标签中选择 |
+| `model_id` | string | 空 | 为空时使用知识库 `summary_model_id` |
+| `max_tags` | int | 3 | 每篇最多关联数量，上限 10 |
+| `skip_if_tagged` | bool | true | 已有标签则跳过；false 允许补充标签 |
+
+开启后对新解析/重新解析的文档生效，不自动扫描全部旧文档。无候选标签或无可用模型时不阻断入库。
+
+`profile_config`（AI 知识库描述）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `enabled` | bool | false | 开启后，文档新增、删除、移动或摘要更新会自动刷新 `generated_profile` |
+| `model_id` | string | 空 | 为空时使用知识库 `summary_model_id` |
+| `custom_instructions` | string | 空 | 追加到生成提示词的补充要求 |
+
+`generated_profile` 为只读字段，由系统写入，不覆盖手写 `description`；也可通过下文的 `profile/generate` 立即生成。更新示例：
+
+```bash
+curl -X PUT "$BASE/api/v1/knowledge-bases/kb-1" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"产品文档","config":{"auto_tag_config":{"enabled":true,"max_tags":3,"skip_if_tagged":true}}}'
+```
+
+### GET /api/v1/knowledge-bases
+
+用途：知识库列表。权限：Viewer+；API key `retrieve`/full。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 否 | 过滤某共享 Agent 可见的 KB |
+| `agent_source_tenant_id` | uint64 | 否 | 同名 Agent 被多个空间共享时，指定来源空间；取值会与共享关系校验，非法值直接 400 |
+| `creator` | string | 否 | `mine` / `others` |
+
+响应：200 `{"success":true,"data":[KnowledgeBase],"total","page","page_size"}`
+
+```bash
+curl $BASE/api/v1/knowledge-bases -H "X-API-Key: $API_KEY"
+```
+
+### GET /api/v1/knowledge-bases/:id
+
+用途：知识库详情（共享 KB 携带 `my_permission`）。权限：Viewer+，KB read。查询参数：`agent_id`（可选）。
+
+响应：200 `{"success":true,"data":{KnowledgeBase}}`
+
+```bash
+curl $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /api/v1/knowledge-bases/:id
+
+用途：更新知识库。权限：创建者 OR Admin+，KB write；API key `manage_kbs`/full。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是（`binding:"required"`） | 名称 |
+| `description` | string | 否 | 描述 |
+| `config` | object | 否 | 局部配置更新：`chunking_config`、`image_processing_config`、`faq_config`、`wiki_config`、`auto_tag_config`、`profile_config`、`indexing_strategy` |
+
+响应：200 `{"success":true,"data":{KnowledgeBase}}`
+
+```bash
+curl -X PUT $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":"产品文档 v2"}'
+```
+
+### DELETE /api/v1/knowledge-bases/:id
+
+用途：删除知识库（锁定为属主空间 + Admin；共享 editor 不可删）。权限：创建者 OR Admin+，KB write；API key `manage_kbs`/full。
+
+响应：200 `{"success":true,"message":"Knowledge base deleted successfully"}`
+
+```bash
+curl -X DELETE $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /api/v1/knowledge-bases/:id/pin
+
+用途：置顶/取消置顶（按用户维度存储）。权限：Viewer+，KB read。无请求体。
+
+响应：200 `{"success":true,"data":{KnowledgeBase(is_pinned 已切换)}}`
+
+```bash
+curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/knowledge-bases/:id/hybrid-search（兼容 GET）
+
+用途：KB 内的底层召回（向量+关键词），默认不做 rerank，返回召回分；可选开启 rerank。适合评测召回、传预计算向量等需要控制原始召回的场景，一般的检索请用 [`knowledge-search`](./02-api-chat.md)，选择方法见[检索接口怎么选](./01-api-overview.md#retrieval-api)。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。
+
+查询参数：`resource_urls=handle|public`（`public` 把结果 `content` / `image_info` 里的 `resource://` 换成可加载直链，详见 [API 总览](./01-api-overview.md)）。
+
+请求体（`types.SearchParams`）：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `query_text` | string | 条件必填 | 查询文本（除非提供 `query_embedding`；开启 rerank 时必填） |
+| `query_embedding` | []float32 | 否 | 预计算向量 |
+| `vector_threshold` / `keyword_threshold` | float64 | 否 | 匹配阈值 |
+| `match_count` | int | 否 | 返回条数上限（默认 50） |
+| `disable_keywords_match` / `disable_vector_match` | bool | 否 | 关闭某一路召回 |
+| `knowledge_base_ids` | []string | 否 | 一次检索多个知识库，路径上的 `:id` 必须在其中；这些知识库的 embedding 模型必须相同，否则返回 400 |
+| `knowledge_ids` | []string | 否 | 限定知识条目 |
+| `tag_ids` | []string | 否 | 标签过滤（OR） |
+| `only_recommended` | bool | 否 | FAQ 仅推荐条目 |
+| `skip_context_enrichment` | bool | 否 | 跳过父块/上下文补齐 |
+| `rerank` | object | 否 | 传入即开启 rerank（`{}` 使用空间配置的模型），字段见 [rerank 对象](./01-api-overview.md#retrieval-api) |
+
+响应：200 `{"success":true,"data":[SearchResult]}`；带 `rerank` 时多一个 `meta.rerank`（见 [meta.rerank 诊断](./01-api-overview.md#retrieval-api)）。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/hybrid-search?resource_urls=public" -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"query_text":"退款流程","match_count":5}'
+
+# 固定召回参数，再用指定模型 rerank
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/hybrid-search -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query_text":"退款流程","vector_threshold":0.3,"match_count":5,"rerank":{"model_id":"rr-1","threshold":0.2}}'
+```
+
+### POST /api/v1/knowledge-bases/copy
+
+用途：跨 KB 拷贝内容（异步任务）。权限：Contributor+；API key `manage_kbs`/full（源/目标 KB 白名单在 handler 校验）。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `source_id` | string | 是（`binding:"required"`） | 源 KB |
+| `target_id` | string | 否 | 目标 KB（为空则自动创建） |
+| `task_id` | string | 否 | 自定义任务 ID |
+
+响应：200 `{"success":true,"data":{"task_id","source_id","target_id","message"}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/copy -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"source_id":"kb-1"}'
+```
+
+### POST /api/v1/knowledge-bases/:id/duplicate
+
+用途：创建 KB 副本（仅复制设置，不复制内容/索引/分享）。权限：Contributor+，源 KB read；API key `manage_kbs`/full。无请求体。
+
+响应：201 `{"success":true,"data":{"source_id","target_id","message","knowledge_base":{...}}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/duplicate -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/knowledge-bases/:id/profile/generate
+
+用途：立即重新生成知识库的 AI 描述（`generated_profile`），同步执行一次文档画像聚合和一次小模型调用，不修改手写 `description`。权限：与更新知识库相同（创建者/Admin 且 KB write）；API key `manage_kbs`/full。无请求体。仅 document 类型；未配置模型返回 400。
+
+响应：200 `{"success":true,"data":{"gist","topics":[...],"typical_questions":[...],"stats":{"document_count",...},"status":"ready","model_id","generated_at"}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/profile/generate -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge-bases/copy/progress/:task_id
+
+用途：查询拷贝进度（任务按空间隔离）。权限：Viewer+；API key `retrieve`/`manage_kbs`/full。
+
+响应：200 `{"success":true,"data":{status,progress,message,...}}`
+
+```bash
+curl $BASE/api/v1/knowledge-bases/copy/progress/task-1 -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge-bases/:id/move-targets
+
+用途：列出可作为移动目标的 KB（同类型/同 embedding）。权限：Viewer+，KB read。
+
+响应：200 `{"success":true,"data":[KnowledgeBase]}`
+
+```bash
+curl $BASE/api/v1/knowledge-bases/kb-1/move-targets -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge-bases/:id/files
+
+用途：KB 范围文件代理（渲染共享 KB 内容中的图片；上下文 tenant 已被重写为 KB 属主）。权限：Viewer+，KB read；KB 受限 key 拒绝，全空间 `retrieve`/full key 放行。注册于 `serveKBScopedFiles`（`internal/router/files.go`）。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `file_path` | string | 是 | `provider://...` 存储路径（禁止 `..`） |
+
+响应：200 文件流（`Content-Type` 按扩展名推断；`Cache-Control: private`）。
+
+```bash
+curl "$BASE/api/v1/knowledge-bases/kb-1/files?file_path=local://1/exports/chart.png" \
+  -H "Authorization: Bearer $TOKEN" -o chart.png
+```
+
+## 知识（KB 内容，/api/v1/knowledge-bases/:id/knowledge 与 /api/v1/knowledge）
+
+### POST /api/v1/knowledge-bases/:id/knowledge/file
+
+用途：上传文件创建知识。权限：KB 创建者 OR Admin+，KB write；API key `ingest`/full。Handler: `internal/handler/knowledge.go`
+
+multipart/form-data 字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `file` | file | 是 | 上传文件 |
+| `fileName` | string | 否 | 覆盖显示名 |
+| `metadata` | JSON 字符串 | 否 | 自定义元数据 |
+| `enable_multimodel` | bool | 否 | 多模态处理开关 |
+| `tag_ids` | string | 否 | 逗号分隔标签 ID |
+| `channel` | string | 否 | 摄取渠道 |
+| `process_config` | JSON 字符串 | 否 | 解析配置覆盖（KnowledgeProcessOverrides），见下表 |
+
+`process_config` 常用字段（均可选，省略时沿用知识库配置）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `summary_enabled` | bool | true | 是否为本次导入的文档生成摘要；关闭后解析、索引及其他处理照常执行 |
+| `parser_engine_rules` | []object | 知识库配置 | 按文件类型指定解析引擎 |
+| `parser_engine_overrides` | map[string]string | 空 | 引擎参数，如 `pdf_force_scanned` |
+| `chunking_config` | object | 知识库配置 | 分块参数 |
+| `enable_multimodel` / `vlm_config` / `asr_config` | - | 知识库配置 | 多模态与语音识别 |
+| `question_generation_config` | object | 知识库配置 | 问题生成 |
+| `graph_enabled` / `extract_config` | - | 知识库配置 | 图谱抽取 |
+
+响应：200 `{"success":true,"data":{Knowledge}}`；重复文件返回 409 且 `data` 为已存在的 Knowledge。正在删除或解析失败的同名文件不计为重复。
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/file \
+  -H "X-API-Key: $API_KEY" -F 'file=@./manual.pdf' -F 'enable_multimodel=true'
+```
+
+### POST /api/v1/knowledge-bases/:id/knowledge/url
+
+用途：从 URL 抓取创建知识。权限/API key 同上。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `url` | string | 是（`binding:"required"`） | 抓取地址 |
+| `file_name` / `file_type` / `title` | string | 否 | 覆盖信息 |
+| `enable_multimodel` | *bool | 否 | 多模态开关 |
+| `tag_ids` | []string | 否 | 标签 |
+| `channel` | string | 否 | 渠道 |
+| `process_config` | object | 否 | 解析覆盖 |
+
+响应：201 `{"success":true,"data":{Knowledge}}`；重复 URL 返回 409。
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/url -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"url":"https://example.com/doc"}'
+```
+
+### POST /api/v1/knowledge-bases/:id/knowledge/manual
+
+用途：创建手工（Markdown）知识。权限/API key 同上。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `title` | string | 否 | 标题 |
+| `content` | string | 否 | Markdown 内容 |
+| `status` | string | 否 | `draft` / `publish` |
+| `tag_ids` | []string | 否 | 标签 |
+| `channel` | string | 否 | 渠道 |
+| `process_config` | object | 否 | 解析覆盖 |
+
+响应：200 `{"success":true,"data":{Knowledge}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/manual -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"title":"FAQ 汇总","content":"# 内容","status":"publish"}'
+```
+
+### GET /api/v1/knowledge-bases/:id/knowledge
+
+用途：KB 下知识列表。权限：Viewer+，KB read；API key `retrieve`/full。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `page` / `page_size` | int | 否 | 分页（默认 1/20） |
+| `tag_ids` | string | 否 | 逗号分隔标签（OR） |
+| `keyword` | string | 否 | 关键字 |
+| `file_type` | string | 否 | 文件类型过滤 |
+| `parse_status` | string | 否 | `pending/processing/completed/failed` |
+| `source` | string | 否 | 渠道或 `manual`/`url` |
+| `start_time` / `end_time` | string | 否 | RFC3339，按 `updated_at` 过滤 |
+| `folder_path` | string | 否 | 按文件夹筛选；空字符串表示知识库根目录，不传则不按文件夹过滤 |
+| `folder_recursive` | bool | 否 | 与 `folder_path` 配合，为 `true` 时包含子文件夹中的文档 |
+| `sort_by` | string | 否 | 排序字段：`updated_at`、`created_at` 或 `file_name`；默认 `created_at` |
+| `sort_order` | string | 否 | 排序方向：`asc` 或 `desc`；默认 `desc` |
+
+未传排序参数时按 `created_at desc` 排序，取值不在上述范围内返回 400。使用 `updated_at` 时，重新解析、编辑或状态变化会影响顺序；使用 `file_name` 时按展示文件名忽略大小写排序，文件名为空会依次回退到标题和来源。相同排序值按知识 ID 排序，保证翻页结果稳定。
+
+响应：200 `{"success":true,"data":[Knowledge],"total","page","page_size"}`
+
+```bash
+curl "$BASE/api/v1/knowledge-bases/kb-1/knowledge?page=1&parse_status=completed" -H "X-API-Key: $API_KEY"
+```
+
+### POST /api/v1/knowledge-bases/:id/knowledge/batch-download
+
+用途：把同一知识库中的多个文档原始文件打包为 ZIP 下载。权限与单文件下载相同：Contributor+ 且 KB write（组织共享 Viewer 不可下载）；API key `retrieve`/full。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `ids` | []string | 是 | 知识 ID 列表，1～200 个 |
+
+行为：
+
+- 原始文件合计不超过 512 MiB，超出返回 400；
+- 没有原始文件的条目（如网页导入）会被跳过；所选条目都没有原始文件时返回 400；
+- ZIP 内保留知识库文件夹结构，重名文件自动加序号；
+- 任一 ID 不存在或不属于该知识库返回 404，读取失败返回 500，不会生成缺文件的压缩包；
+- 同一实例同时最多处理 4 个批量下载，超出返回 429。
+
+响应：200 `application/zip` 文件流，文件名形如 `knowledge-files-20260923-150405.zip`。
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/batch-download \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"ids":["k-1","k-2"]}' -o knowledge-files.zip
+```
+
+### GET /api/v1/knowledge-bases/:id/knowledge/folders
+
+用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，历史 `file_name` 中的路径已回填到该字段）。权限：Viewer+ + KBAccessRead。
+
+响应：200 `{"success":true,"data":[{FolderNode}]}`
+
+```bash
+curl $BASE/api/v1/knowledge-bases/kb-1/knowledge/folders -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /api/v1/knowledge-bases/:id/knowledge/folders
+
+用途：重命名或移动文件夹，连同其所有子目录一起改路径。目标路径已存在时两个文件夹合并；不允许移动到自己的子目录下。权限：KB owner 或 Admin+ + KBAccessWrite。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `from` | string | 是 | 原路径 |
+| `to` | string | 是 | 新路径 |
+
+响应：200 `{"success":true}`
+
+```bash
+curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/knowledge/folders -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"from":"设计文档/旧版","to":"归档/设计文档"}'
+```
+
+### DELETE /api/v1/knowledge-bases/:id/knowledge
+
+用途：清空 KB 全部内容（破坏性）。权限：Admin+，KB write；API key 仅 full-access。
+
+响应：200 `{"success":true,"message":"Knowledge base contents clear task submitted","data":{"deleted_count":N}}`
+
+```bash
+curl -X DELETE $BASE/api/v1/knowledge-bases/kb-1/knowledge -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge/batch
+
+用途：按 ID 批量获取知识（跨 KB，handler 自行校验访问）。权限：Viewer+；API key `retrieve`/full。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `ids` | []string | 是 | 知识 ID（可重复传参或逗号分隔） |
+| `kb_id` | string | 否 | 限定 KB |
+| `agent_id` | string | 否 | 共享 Agent 范围 |
+| `agent_source_tenant_id` | uint64 | 否 | 共享 Agent 的来源空间选择器，与共享关系校验 |
+
+响应：200 `{"success":true,"data":[Knowledge]}`。处于 `pending`/`processing`/`finalizing` 的知识额外带 `last_activity_at`（RFC3339），取行的 `updated_at` 与该知识所有 span 最近一次写入中较晚的一个。超过 20 分钟无进展的知识再带 `stall_state`：`queued` 表示仍有任务在 asynq 队列或 Wiki 持久队列中等待（积压），`stalled` 表示已无任务可推进它（疑似卡住）。判定与 housekeeping 的积压判定相同；队列侧是一次全队列扫描，所有请求共享、缓存 60 秒。探测失败时不返回 `stall_state`，前端按普通解析中显示。
+
+```bash
+curl "$BASE/api/v1/knowledge/batch?ids=k-1&ids=k-2" -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge/:id
+
+用途：知识详情。权限：Viewer+，父 KB read。
+
+响应：200 `{"success":true,"data":{Knowledge}}`
+
+```bash
+curl $BASE/api/v1/knowledge/k-1 -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge/:id/stages 与 GET /api/v1/knowledge/:id/spans
+
+用途：解析阶段/trace（两条路径同一 handler `GetKnowledgeSpans`）。权限：Viewer+，父 KB read。查询参数：`attempt`（int，0=最新一次）。
+
+响应：200 `{"success":true,"data":{"knowledge_id","attempt","latest_attempt","parse_status","current_stage","last_activity_at","stall_state","trace":{...},"last_error":{...}}}`
+
+`last_activity_at` 只在解析进行中返回，取行的 `updated_at` 与本次 attempt 各 span 最近一次写入中较晚的一个；`stall_state` 含义同上。`current_stage` 是仍在运行的阶段；没有运行中的阶段时（如 `finalizing`，后处理阶段已关闭、摘要等子任务仍在跑），取仍在运行的子 span 所属的阶段。被 housekeeping 判定卡死的知识，其卡住位置的 span 会以 `TASK_STALLED` 标为失败，`last_error` 优先指向它。
+
+```bash
+curl $BASE/api/v1/knowledge/k-1/spans -H "Authorization: Bearer $TOKEN"
+```
+
+### DELETE /api/v1/knowledge/:id
+
+用途：删除知识（异步）。权限：KB 创建者 OR Admin+，KB write；API key `ingest`/full。
+
+响应：200 `{"success":true,"message":"Delete task submitted","data":{"task_id"}}`
+
+```bash
+curl -X DELETE $BASE/api/v1/knowledge/k-1 -H "X-API-Key: $API_KEY"
+```
+
+### PUT /api/v1/knowledge/:id
+
+用途：更新知识元信息。权限同上。请求体（`types.Knowledge` 子集）：`title`、`description`、`tags`、`custom_metadata`（均可选）。description 省略保持原摘要，显式空字符串清空摘要，非空值保存手工摘要；界面可在文档内容页编辑。
+
+`custom_metadata` 是用户自填的描述性元数据（与系统内部使用的 `metadata` 分开存放，migration `000078`），校验规则见 `internal/application/service/knowledge.go`：
+
+| 约束 | 值 |
+| --- | --- |
+| 字段数 | ≤ 20 |
+| 键长度 | 1-64 字符，不能为空白 |
+| 值类型 | string / number / boolean / null |
+| 值长度 | ≤ 1000 字符 |
+
+整体覆盖式更新（传入的对象替换原有对象）。元数据发生变化且该文档已有摘要时，会自动入队一次摘要刷新（`summary_status` 转为 `pending`）。元数据文本会参与摘要生成与文档级模型上下文（`Knowledge.CustomMetadataText()`）。
+
+响应：200 `{"success":true,"message":"Knowledge updated successfully","data":{Knowledge}}`
+
+```bash
+curl -X PUT $BASE/api/v1/knowledge/k-1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"新标题","custom_metadata":{"部门":"研发中心","密级":"内部","版本":3}}'
+```
+
+### POST /api/v1/knowledge/:id/regenerate-summary
+
+用途：在分块内容或自定义元数据被编辑后，重新生成该文档的摘要。权限：KB owner 或 Admin+，且对父 KB 有 write 权限。
+
+行为分两种：文档此前没有摘要（`summary_status` 为空或 `none`）时同步触发一次生成；已有摘要时改为入队刷新任务，`summary_status` 转为 `pending`，由 `knowledge_summary_refresh.go` 异步执行。
+
+响应：200 `{"success":true,"data":{Knowledge}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge/k-1/regenerate-summary -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /api/v1/knowledge/manual/:id
+
+用途：更新手工知识内容（`ManualKnowledgePayload` 子集：`title/content/status/...`）。权限同上。
+
+响应：200 `{"success":true,"data":{Knowledge}}`
+
+```bash
+curl -X PUT $BASE/api/v1/knowledge/manual/k-1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"content":"# 更新内容","status":"publish"}'
+```
+
+### POST /api/v1/knowledge/:id/reparse
+
+用途：重新解析知识。权限同上。请求体（可选）：`{"process_config":{...}}`。
+
+响应：200 `{"success":true,"message":"Reparse task submitted","data":{Knowledge}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge/k-1/reparse -H "X-API-Key: $API_KEY"
+```
+
+### POST /api/v1/knowledge/:id/cancel-parse
+
+用途：取消解析。权限同上。无请求体。
+
+响应：200 `{"success":true,"message":"Knowledge parse cancelled","data":{Knowledge}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge/k-1/cancel-parse -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge/:id/download
+
+用途：下载原始源文件（比预览更严格：Contributor+ 且 KB write；组织共享 Viewer 不可下载源文件）。API key `retrieve`/full。
+
+响应：200 二进制流（`application/octet-stream`）。
+
+```bash
+curl -OJ $BASE/api/v1/knowledge/k-1/download -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge/:id/preview
+
+用途：预览解析后的文件内容。权限：Viewer+，KB read。
+
+响应：200 预览流（文本/HTML）。
+
+```bash
+curl $BASE/api/v1/knowledge/k-1/preview -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /api/v1/knowledge/image/:id/:chunk_id
+
+用途：更新某分块的图片信息（caption/OCR 等）。权限：KB 创建者 OR Admin+，KB write。路径参数：`id` 知识 ID、`chunk_id` 分块 ID。请求体为图片信息 JSON。
+
+响应：200 `{"success":true,...}`
+
+```bash
+curl -X PUT $BASE/api/v1/knowledge/image/k-1/c-1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"caption":"架构图"}'
+```
+
+### GET /api/v1/knowledge/search
+
+用途：跨 KB 文件搜索（会话 @文件 选择器）。权限：Viewer+；API key `retrieve`/full。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `keyword` / `query` | string | 条件必填 | 关键字（两者等价）；为空时必须传 `recent=true`，否则返回 400 |
+| `file_types` | string | 否 | 逗号分隔的扩展名过滤，如 `csv,xlsx` |
+| `offset` / `limit` | int | 否 | 分页；`limit` 默认 20，范围 1～100 |
+| `recent` | bool | 否 | 关键字为空时返回最近文件 |
+| `agent_id` | string | 否 | 共享 Agent 范围 |
+| `agent_source_tenant_id` | uint64 | 否 | 共享 Agent 的来源空间选择器，与共享关系校验 |
+
+响应：200 `{"success":true,"data":[Knowledge],"has_more":bool,"total":N}`
+
+```bash
+curl "$BASE/api/v1/knowledge/search?keyword=报告&limit=20" -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/knowledge/move/progress/:task_id
+
+用途：查询移动任务进度。权限：Viewer+；API key `retrieve`/full。
+
+响应：200 `{"success":true,"data":{MoveProgress}}`
+
+```bash
+curl $BASE/api/v1/knowledge/move/progress/task-1 -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /api/v1/knowledge/tags
+
+用途：批量更新知识标签。权限：Contributor+；API key `ingest`/full（KB 白名单在 handler 校验）。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `updates` | map[string][]string | 是（`binding:"required,min=1"`） | knowledge_id → tag_ids |
+| `kb_id` | string | 否 | 限定 KB |
+
+响应：200 `{"success":true}`
+
+```bash
+curl -X PUT $BASE/api/v1/knowledge/tags -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"updates":{"k-1":["t-1"]},"kb_id":"kb-1"}'
+```
+
+### POST /api/v1/knowledge/batch-reparse
+
+用途：批量重解析。权限：Contributor+；API key `ingest`/full。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `kb_id` | string | 是（`binding:"required"`） | KB ID |
+| `ids` | []string | 是（`binding:"required"`） | 知识 ID 列表 |
+| `process_config` | object | 否 | 解析覆盖 |
+
+响应：200 `{"success":true,"message":"Batch reparse task submitted","data":{"task_id"}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge/batch-reparse -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"kb_id":"kb-1","ids":["k-1","k-2"]}'
+```
+
+### POST /api/v1/knowledge/batch-delete
+
+用途：批量删除（≤200 条）。权限：Contributor+；API key `ingest`/full。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `kb_id` | string | 是（`binding:"required"`） | KB ID |
+| `ids` | []string | 是（`binding:"required"`） | 知识 ID 列表（≤200） |
+
+响应：200 `{"success":true,"message":"Batch delete task submitted","data":{"task_id","deleted_count"}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge/batch-delete -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"kb_id":"kb-1","ids":["k-1"]}'
+```
+
+### POST /api/v1/knowledge/folder
+
+用途：把若干文档归类到指定文件夹（只改归类，不动知识库归属，也不重新解析）。权限：Contributor+ / API key `ingest`。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `kb_id` | string | 是 | 知识库 ID |
+| `knowledge_ids` | []string | 是 | 待移动的文档 |
+| `folder_path` | string | 否 | 目标文件夹；空字符串表示移回知识库根目录 |
+
+响应：200 `{"success":true}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge/folder -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"kb_id":"kb-1","knowledge_ids":["k-1","k-2"],"folder_path":"设计文档"}'
+```
+
+### POST /api/v1/knowledge/move
+
+用途：跨 KB 移动知识（异步）。权限：Contributor+；API key `ingest`/full（源+目标 KB 均需在白名单）。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `knowledge_ids` | []string | 是（`binding:"required,min=1"`） | 待移动知识 |
+| `source_kb_id` | string | 是（`binding:"required"`） | 源 KB |
+| `target_kb_id` | string | 是（`binding:"required"`） | 目标 KB |
+| `mode` | string | 是（`binding:"required,oneof=reuse_vectors reparse"`） | 复用向量或重解析 |
+
+响应：200 `{"success":true,"data":{"task_id","source_kb_id","target_kb_id","knowledge_count","message"}}`
+
+```bash
+curl -X POST $BASE/api/v1/knowledge/move -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"knowledge_ids":["k-1"],"source_kb_id":"kb-1","target_kb_id":"kb-2","mode":"reuse_vectors"}'
+```
+
+## 实现参考
+
+路由注册：`internal/router/routes_knowledge.go` 的 `RegisterKnowledgeBaseRoutes`、`RegisterKnowledgeRoutes`。Handler：`internal/handler/knowledgebase.go`、`internal/handler/knowledge.go`。

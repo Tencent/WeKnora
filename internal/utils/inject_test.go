@@ -424,13 +424,14 @@ func TestInjectAndConditions(t *testing.T) {
 			name:   "existing WHERE with ORDER BY",
 			sql:    "SELECT id, title FROM knowledges WHERE parse_status = 'completed' ORDER BY created_at DESC LIMIT 10",
 			filter: "knowledges.tenant_id = 123",
-			want:   "SELECT id, title FROM knowledges WHERE knowledges.tenant_id = 123 AND (parse_status = 'completed') ORDER BY created_at DESC LIMIT 10",
+			want: "SELECT id, title FROM knowledges WHERE knowledges.tenant_id = 123 " +
+				"AND parse_status = 'completed' ORDER BY created_at DESC LIMIT 10",
 		},
 		{
 			name:   "existing WHERE without tail clauses",
 			sql:    "SELECT id FROM knowledges WHERE enable_status = 'enabled'",
 			filter: "knowledges.deleted_at IS NULL",
-			want:   "SELECT id FROM knowledges WHERE knowledges.deleted_at IS NULL AND (enable_status = 'enabled')",
+			want:   "SELECT id FROM knowledges WHERE knowledges.deleted_at IS NULL AND enable_status = 'enabled'",
 		},
 		{
 			name:   "no WHERE with ORDER BY",
@@ -478,6 +479,51 @@ func TestValidateAndSecureSQL_WithStructuredSearchScopes(t *testing.T) {
 		if !strings.Contains(securedSQL, want) {
 			t.Fatalf("secured SQL missing %q:\n%s", want, securedSQL)
 		}
+	}
+}
+
+func TestValidateAndSecureSQL_WithChunkEnabledFilter(t *testing.T) {
+	securedSQL, validation, err := ValidateAndSecureSQL(
+		"SELECT c.id, c.content FROM chunks c WHERE c.chunk_type = 'faq'",
+		WithChunkEnabledFilter(),
+	)
+	if err != nil {
+		t.Fatalf("ValidateAndSecureSQL() error = %v", err)
+	}
+	if !validation.Valid {
+		t.Fatalf("expected validation to pass, got %#v", validation.Errors)
+	}
+	if !strings.Contains(securedSQL, "c.is_enabled = true") {
+		t.Fatalf("secured SQL must exclude disabled chunks:\n%s", securedSQL)
+	}
+}
+
+// A scope carrying both a document whitelist and a tag filter must apply both.
+// Emitting only one of them would admit rows the other excludes.
+func TestValidateAndSecureSQL_ScopeCombinesDocumentAndTagFilters(t *testing.T) {
+	securedSQL, validation, err := ValidateAndSecureSQL(
+		"SELECT id FROM chunks",
+		WithSearchScopes([]SearchScope{
+			{KnowledgeBaseID: "kb-1", KnowledgeIDs: []string{"doc-1"}, TagIDs: []string{"tag-a"}},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("ValidateAndSecureSQL() error = %v", err)
+	}
+	if !validation.Valid {
+		t.Fatalf("expected validation to pass, got %#v", validation.Errors)
+	}
+	for _, want := range []string{
+		"chunks.knowledge_base_id = 'kb-1'",
+		"chunks.knowledge_id IN ('doc-1')",
+		"ktr.tag_id IN ('tag-a')",
+	} {
+		if !strings.Contains(securedSQL, want) {
+			t.Fatalf("secured SQL missing %q:\n%s", want, securedSQL)
+		}
+	}
+	if strings.Contains(securedSQL, " OR ") {
+		t.Fatalf("a single scope must not be split into alternatives:\n%s", securedSQL)
 	}
 }
 

@@ -139,20 +139,32 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 		logger.Infof(ctx, "No new chunk found")
 		return next()
 	}
-	chunks, err := p.chunkRepo.ListChunksByID(ctx, types.MustTenantIDFromContext(ctx), chunkIDs)
+	// Graph hits from an org-shared KB belong to the sharing workspace, so
+	// the lookups are not tenant scoped (as for parents, #3342). The graph
+	// namespaces are the KBs in this turn's scope; a chunk is only used when
+	// its row belongs to one of them.
+	allowedKBs := make(map[string]bool, len(knowledgeBaseIDs)+len(entityKnowledge))
+	for _, id := range knowledgeBaseIDs {
+		allowedKBs[id] = true
+	}
+	for _, kbID := range entityKnowledge {
+		allowedKBs[kbID] = true
+	}
+	listed, err := p.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list chunks, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()
 	}
+	chunks := make([]*types.Chunk, 0, len(listed))
 	knowledgeIDs := []string{}
-	for _, chunk := range chunks {
+	for _, chunk := range listed {
+		if chunk == nil || !allowedKBs[chunk.KnowledgeBaseID] {
+			continue
+		}
+		chunks = append(chunks, chunk)
 		knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
 	}
-	knowledges, err := p.knowledgeRepo.GetKnowledgeBatch(
-		ctx,
-		types.MustTenantIDFromContext(ctx),
-		knowledgeIDs,
-	)
+	knowledges, err := p.knowledgeRepo.GetKnowledgeBatchByIDOnly(ctx, knowledgeIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list knowledge, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()
@@ -164,10 +176,15 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	}
 	var entityResults []*types.SearchResult
 	for _, chunk := range chunks {
-		searchResult := chunk2SearchResult(chunk, knowledgeMap[chunk.KnowledgeID])
-		entityResults = append(entityResults, searchResult)
+		// A chunk can outlive its soft-deleted document, and a disabled
+		// chunk must not come back through the graph either.
+		knowledge := knowledgeMap[chunk.KnowledgeID]
+		if knowledge == nil || !chunk.IsEnabled {
+			continue
+		}
+		entityResults = append(entityResults, chunk2SearchResult(chunk, knowledge))
 	}
-	searchutil.EnrichSearchResultsImageInfo(ctx, p.chunkRepo, types.MustTenantIDFromContext(ctx), entityResults)
+	searchutil.EnrichSearchResultsImageInfoOnly(ctx, p.chunkRepo, entityResults)
 	chatManage.SearchResult = append(chatManage.SearchResult, entityResults...)
 	// remove duplicate results
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
@@ -184,6 +201,9 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	return next()
 }
 
+// maxEntityChunks bounds the chunks graph entity search adds to a turn.
+const maxEntityChunks = 30
+
 // filterSeenChunk filters seen chunks from the graph
 func filterSeenChunk(ctx context.Context, graph *types.GraphData, searchResult []*types.SearchResult) []string {
 	seen := map[string]bool{}
@@ -195,6 +215,12 @@ func filterSeenChunk(ctx context.Context, graph *types.GraphData, searchResult [
 	chunkIDs := []string{}
 	for _, node := range graph.Node {
 		for _, chunkID := range node.Chunks {
+			// Every chunk of every matched node was fetched and passed on;
+			// entity search runs on an empty result list, so nothing was
+			// ever filtered as seen. Cap it.
+			if len(chunkIDs) >= maxEntityChunks {
+				break
+			}
 			if seen[chunkID] {
 				continue
 			}
@@ -206,18 +232,25 @@ func filterSeenChunk(ctx context.Context, graph *types.GraphData, searchResult [
 	return chunkIDs
 }
 
-// chunk2SearchResult converts a chunk to a search result
+// chunk2SearchResult converts a chunk to a search result.
+//
+// Graph hits come from entity lookups, not similarity search, so they have no
+// retrieval score. They used to carry a fixed 1.0, which ranked them above
+// every scored hit whenever rerank did not run. With 0 they fill the slots
+// scored hits leave; when rerank runs, CompositeScore substitutes the model
+// score for the missing retrieval score.
 func chunk2SearchResult(chunk *types.Chunk, knowledge *types.Knowledge) *types.SearchResult {
 	return &types.SearchResult{
 		ID:                chunk.ID,
 		Content:           chunk.Content,
+		ContentRevision:   chunk.ContentRevision,
 		KnowledgeID:       chunk.KnowledgeID,
 		ChunkIndex:        chunk.ChunkIndex,
 		KnowledgeTitle:    knowledge.Title,
 		StartAt:           chunk.StartAt,
 		EndAt:             chunk.EndAt,
 		Seq:               chunk.ChunkIndex,
-		Score:             1.0,
+		Score:             0,
 		MatchType:         types.MatchTypeGraph,
 		Metadata:          knowledge.GetMetadata(),
 		ChunkType:         string(chunk.ChunkType),
@@ -228,5 +261,6 @@ func chunk2SearchResult(chunk *types.Chunk, knowledge *types.Knowledge) *types.S
 		KnowledgeChannel:  knowledge.Channel,
 		ChunkMetadata:     chunk.Metadata,
 		KnowledgeBaseID:   knowledge.KnowledgeBaseID,
+		SourceLocators:    chunk.SourceLocators,
 	}
 }

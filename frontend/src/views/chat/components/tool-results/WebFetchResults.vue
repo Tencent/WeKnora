@@ -22,7 +22,12 @@
             <span v-else class="result-domain">{{ $t('chat.unknownLink') }}</span>
           </div>
           <div class="result-meta">
-            <span v-if="item.method" class="meta-pill">{{ formatMethod(item.method) }}</span>
+            <span
+              v-if="itemStatus(item)"
+              class="meta-pill"
+              :class="statusClass(item)"
+            >{{ statusLabel(item) }}</span>
+            <span v-if="item.method" class="meta-pill method">{{ formatMethod(item.method) }}</span>
             <span v-if="item.content_length" class="meta-text">{{ $t('chat.contentLengthLabel', { value: formatLength(item.content_length) }) }}</span>
             <t-icon
               :name="isExpanded(index) ? 'chevron-up' : 'chevron-down'"
@@ -45,21 +50,36 @@
                 <span v-else>{{ $t('chat.notProvided') }}</span>
               </span>
             </div>
-            <div v-if="item.prompt" class="info-field">
-              <span class="field-label">{{ $t('chat.promptLabel') }}</span>
-              <span class="field-value">{{ item.prompt }}</span>
-            </div>
           </div>
 
-          <div v-if="item.error" class="info-section">
+          <div v-if="itemError(item)" class="info-section">
             <div class="info-section-title error">{{ $t('chat.errorMessageLabel') }}</div>
-            <div class="full-content error-text">{{ item.error }}</div>
+            <div v-if="item.error_code" class="info-field">
+              <span class="field-label">{{ $t('chat.webFetchErrorCode') }}</span>
+              <span class="field-value">{{ item.error_code }}</span>
+            </div>
+            <div v-if="item.retryable !== undefined" class="info-field">
+              <span class="field-label">{{ $t('chat.webFetchRetryable') }}</span>
+              <span class="field-value">{{ item.retryable ? $t('common.yes') : $t('common.no') }}</span>
+            </div>
+            <div class="full-content error-text">{{ itemError(item) }}</div>
           </div>
 
-          <div v-else>
+          <div v-else-if="isSuccessItem(item)">
             <div v-if="item.summary" class="info-section">
               <div class="info-section-title">{{ $t('chat.summaryLabel') }}</div>
               <div class="full-content">{{ item.summary }}</div>
+            </div>
+
+            <div v-else-if="item.summary_status === 'failed'" class="info-section">
+              <div class="info-section-title error">{{ $t('chat.webFetchSummaryFailed') }}</div>
+              <div v-if="item.summary_error_code" class="info-field">
+                <span class="field-label">{{ $t('chat.webFetchErrorCode') }}</span>
+                <span class="field-value">{{ item.summary_error_code }}</span>
+              </div>
+              <div v-if="item.summary_error_message" class="full-content error-text">
+                {{ item.summary_error_message }}
+              </div>
             </div>
 
             <div v-if="item.raw_content" class="info-section">
@@ -68,6 +88,10 @@
                 <span class="raw-length" v-if="item.content_length">
                   （{{ formatLength(item.content_length) }}）
                 </span>
+              </div>
+              <div v-if="item.offset !== undefined" class="info-field">
+                {{ $t('chat.webFetchContentRange', { start: item.offset, end: item.offset + (item.returned_chars ?? 0), total: item.content_length }) }}
+                <span v-if="item.truncated"> · {{ $t('chat.webFetchPartialContent') }}</span>
               </div>
               <div v-if="isRawExpanded(index)" class="full-content">
                 {{ item.raw_content }}
@@ -116,6 +140,40 @@ watch(
   },
   { immediate: true }
 );
+
+const itemStatus = (item: WebFetchResultItem): string | undefined => item.status;
+
+const isSuccessItem = (item: WebFetchResultItem): boolean => {
+  return !item.status || item.status === 'success';
+};
+
+const itemError = (item: WebFetchResultItem): string => {
+  return item.error_message || item.error || '';
+};
+
+const statusLabel = (item: WebFetchResultItem): string => {
+  switch (item.status) {
+    case 'failed':
+      return t('chat.webFetchStatusFailed');
+    case 'skipped':
+      return t('chat.webFetchStatusSkipped');
+    case 'success':
+      return t('chat.webFetchStatusSuccess');
+    default:
+      return t('chat.webFetchStatusSuccess');
+  }
+};
+
+const statusClass = (item: WebFetchResultItem): string => {
+  switch (item.status) {
+    case 'failed':
+      return 'status-failed';
+    case 'skipped':
+      return 'status-skipped';
+    default:
+      return 'status-success';
+  }
+};
 
 const toggleCard = (index: number) => {
   if (expandedCards.value.has(index)) {
@@ -192,7 +250,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 }
 
 .result-index {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
 }
@@ -202,10 +260,10 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
   align-items: center;
   gap: 4px;
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   text-decoration: none;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color);
@@ -214,7 +272,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 }
 
 .result-domain {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
@@ -223,16 +281,34 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
   display: inline-flex;
   align-items: center;
   padding: 2px 6px;
-  border-radius: 999px;
-  background: rgba(7, 192, 95, 0.08);
-  color: var(--td-success-color);
-  font-size: 10px;
+  border-radius: var(--app-radius-pill);
+  font-size: var(--app-text-2xs);
   font-weight: 600;
   line-height: 1.4;
+
+  &.status-success {
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+    color: var(--td-success-color);
+  }
+
+  &.status-failed {
+    background: var(--td-error-color-light);
+    color: var(--td-error-color);
+  }
+
+  &.status-skipped {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--td-text-color-secondary);
+  }
+
+  &.method {
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+    color: var(--td-success-color);
+  }
 }
 
 .meta-text {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
 }
 
@@ -250,7 +326,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 }
 
 .raw-length {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   margin-left: 4px;
   font-weight: normal;
@@ -270,4 +346,3 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
   color: var(--td-error-color);
 }
 </style>
-

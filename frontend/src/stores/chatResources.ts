@@ -1,15 +1,22 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { listKnowledgeBases, getKnowledgeBaseById } from '@/api/knowledge-base'
 import { listAgents, type CustomAgent } from '@/api/agent'
 import { listModels, type ModelConfig } from '@/api/model'
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider'
+import { isNamedSandboxBackend, listSandboxConfigs, type SandboxConfigRecord } from '@/api/system'
 import { useOrganizationStore } from '@/stores/organization'
+import { getCurrentLanguage } from '@/utils/request'
+import {
+  isLocalizedCacheFresh,
+  shouldCommitLocalizedGeneration,
+  shouldReuseLocalizedInflight,
+} from './localizedResourceCache'
 
 /** 空间级资源缓存 TTL */
 const CACHE_TTL_MS = 60_000
 
-type ResourceKey = 'knowledgeBases' | 'agents' | 'models' | 'webSearchProviders'
+type ResourceKey = 'knowledgeBases' | 'agents' | 'models' | 'webSearchProviders' | 'sandboxConfigs'
 
 export type ListCreatorFilter = 'all' | 'mine' | 'others'
 
@@ -27,6 +34,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   const disabledOwnAgentIds = ref<string[]>([])
   const allModels = ref<ModelConfig[]>([])
   const webSearchProviders = ref<WebSearchProviderEntity[]>([])
+  const sandboxConfigs = ref<SandboxConfigRecord[]>([])
 
   const loadedAt = ref<Partial<Record<ResourceKey, number>>>({})
   const inflight = new Map<ResourceKey, Promise<void>>()
@@ -38,6 +46,9 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   // 自己是否仍是最新的那次，避免误清正在飞行的句柄。
   let kbAllGen = 0
   let agentsAllGen = 0
+  // 模型列表同样用代际挡住过期的 inflight：设置页保存后会 replaceModels，
+  // 不能让保存前发出的 ensureModels 把旧列表写回来。
+  let modelsGen = 0
 
   const agentKbCache = new Map<string, { at: number; data: any[] }>()
   const agentKbInflight = new Map<string, Promise<any[]>>()
@@ -47,10 +58,36 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   const validKnowledgeBases = computed(() => rawKnowledgeBases.value.filter(isKbModelReady))
   const chatModels = computed(() => allModels.value.filter((m) => m.type === 'KnowledgeQA'))
 
+  // 内置智能体名称/描述由后端按 Accept-Language 本地化返回；切换 UI 语言后
+  // 旧缓存必须立即失效，否则要等 TTL 过期或强刷才能看到正确语言。
+  // agentsLoadedLocale 必须是「请求发起时」的语言，不能在 await 之后再读当前语言。
+  let agentsLoadedLocale = ''
+  let agentsAllInflightLocale = ''
+
   function isFresh(key: ResourceKey): boolean {
-    const at = loadedAt.value[key]
-    return !!at && Date.now() - at < CACHE_TTL_MS
+    const at = loadedAt.value[key] ?? 0
+    if (key === 'agents') {
+      return isLocalizedCacheFresh(at, agentsLoadedLocale, getCurrentLanguage(), CACHE_TTL_MS)
+    }
+    return at > 0 && Date.now() - at < CACHE_TTL_MS
   }
+
+  function bumpAgentsGeneration() {
+    agentsAllGen++
+    agentsAllInflight = null
+    agentsAllInflightLocale = ''
+  }
+
+  watch(
+    () => getCurrentLanguage(),
+    (locale) => {
+      if (agentsLoadedLocale && agentsLoadedLocale !== locale) {
+        delete loadedAt.value.agents
+        agentsLoadedLocale = ''
+        bumpAgentsGeneration()
+      }
+    },
+  )
 
   async function runOnce(key: ResourceKey, force: boolean, loader: () => Promise<void>): Promise<void> {
     if (!force && isFresh(key)) return
@@ -123,12 +160,20 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       return { data: res.data || [], disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
     }
 
+    const locale = getCurrentLanguage()
     if (!force && isFresh('agents')) {
       return { data: agents.value, disabled_own_agent_ids: disabledOwnAgentIds.value }
     }
-    if (!force && agentsAllInflight) return agentsAllInflight
+    if (
+      !force &&
+      shouldReuseLocalizedInflight(!!agentsAllInflight, agentsAllInflightLocale, locale)
+    ) {
+      return agentsAllInflight as Promise<{ data: CustomAgent[]; disabled_own_agent_ids: string[] }>
+    }
 
     const gen = ++agentsAllGen
+    const requestLocale = locale
+    agentsAllInflightLocale = requestLocale
     agentsAllInflight = (async () => {
       try {
         const [agentsRes] = await Promise.all([
@@ -137,12 +182,19 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
         ])
         const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
         const data = res.data || []
-        agents.value = data
-        disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
-        loadedAt.value.agents = Date.now()
-        return { data, disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
+        const disabled = res.disabled_own_agent_ids || []
+        if (shouldCommitLocalizedGeneration(gen, agentsAllGen)) {
+          agents.value = data
+          disabledOwnAgentIds.value = disabled
+          loadedAt.value.agents = Date.now()
+          agentsLoadedLocale = requestLocale
+        }
+        return { data, disabled_own_agent_ids: disabled }
       } finally {
-        if (agentsAllGen === gen) agentsAllInflight = null
+        if (shouldCommitLocalizedGeneration(gen, agentsAllGen)) {
+          agentsAllInflight = null
+          agentsAllInflightLocale = ''
+        }
       }
     })()
     return agentsAllInflight
@@ -154,10 +206,20 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
 
   async function ensureModels(force = false): Promise<void> {
     return runOnce('models', force, async () => {
+      const gen = ++modelsGen
       const models = await listModels()
+      if (gen !== modelsGen) return
       allModels.value = Array.isArray(models) ? models : []
       loadedAt.value.models = Date.now()
     })
+  }
+
+  /** 用刚拉到的列表覆盖缓存（模型增删改之后调用，避免 60s TTL 把旧窗口大小继续展示）。 */
+  function replaceModels(models: ModelConfig[]) {
+    modelsGen++
+    inflight.delete('models')
+    allModels.value = Array.isArray(models) ? models : []
+    loadedAt.value.models = Date.now()
   }
 
   /** @deprecated 使用 ensureModels；保留别名供对话输入栏调用 */
@@ -174,6 +236,30 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     })
   }
 
+  /**
+   * 沙箱后端配置，供智能体编辑器的后端选择器使用。
+   *
+   * 不进 prefetchChatInput：只有编辑智能体时才需要，而对话输入栏用不到，
+   * 没必要让每次首屏都多打一次请求。
+   *
+   * 失败只吞掉不抛：这是可选资源——拿不到就只剩「不启用沙箱」一项，
+   * 智能体照样能编辑保存。调用方通常把它和一堆必需资源放在同一个
+   * Promise.all 里，若在这里抛出，整个编辑器的依赖加载都会连坐
+   * （技能可用性拿不到 ⇒ 技能配置分组直接消失）。
+   */
+  async function ensureSandboxConfigs(force = false): Promise<void> {
+    return runOnce('sandboxConfigs', force, async () => {
+      try {
+        const res = await listSandboxConfigs()
+        const rows = Array.isArray(res?.data) ? res.data : []
+        sandboxConfigs.value = rows.filter((cfg) => isNamedSandboxBackend(cfg.sandbox_type))
+      } catch {
+        sandboxConfigs.value = []
+      }
+      loadedAt.value.sandboxConfigs = Date.now()
+    })
+  }
+
   /** 并行预取对话输入栏及列表页常用的空间级资源 */
   async function prefetchChatInput(force = false): Promise<void> {
     const orgStore = useOrganizationStore()
@@ -186,25 +272,29 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     ])
   }
 
-  async function ensureAgentKnowledgeBases(agentId: string, force = false): Promise<any[]> {
-    const cached = agentKbCache.get(agentId)
+  async function ensureAgentKnowledgeBases(agentId: string, sourceTenantId?: string, force = false): Promise<any[]> {
+    const cacheKey = `${agentId}:${sourceTenantId || 'current'}`
+    const cached = agentKbCache.get(cacheKey)
     if (!force && cached && Date.now() - cached.at < CACHE_TTL_MS) {
       return cached.data
     }
-    const existing = agentKbInflight.get(agentId)
+    const existing = agentKbInflight.get(cacheKey)
     if (existing) return existing
 
     const p = (async () => {
       try {
-        const res: any = await listKnowledgeBases({ agent_id: agentId })
+        const res: any = await listKnowledgeBases({
+          agent_id: agentId,
+          agent_source_tenant_id: sourceTenantId,
+        })
         const list = res?.data && Array.isArray(res.data) ? res.data : []
-        agentKbCache.set(agentId, { at: Date.now(), data: list })
+        agentKbCache.set(cacheKey, { at: Date.now(), data: list })
         return list
       } finally {
-        agentKbInflight.delete(agentId)
+        agentKbInflight.delete(cacheKey)
       }
     })()
-    agentKbInflight.set(agentId, p)
+    agentKbInflight.set(cacheKey, p)
     return p
   }
 
@@ -254,12 +344,15 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       disabledOwnAgentIds.value = []
       allModels.value = []
       webSearchProviders.value = []
+      sandboxConfigs.value = []
       agentKbCache.clear()
       // 同时丢弃所有 inflight 句柄，否则失效后仍在飞行的请求会把旧数据写回缓存。
       inflight.clear()
       agentKbInflight.clear()
       kbAllInflight = null
-      agentsAllInflight = null
+      agentsLoadedLocale = ''
+      bumpAgentsGeneration()
+      modelsGen++
       invalidateKnowledgeBaseDetail()
       return
     }
@@ -274,7 +367,11 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       invalidateKnowledgeBaseDetail()
     }
     if (keys.includes('agents')) {
-      agentsAllInflight = null
+      agentsLoadedLocale = ''
+      bumpAgentsGeneration()
+    }
+    if (keys.includes('models')) {
+      modelsGen++
     }
   }
 
@@ -286,14 +383,17 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     allModels,
     chatModels,
     webSearchProviders,
+    sandboxConfigs,
     isFresh,
     fetchKnowledgeBasesForList,
     fetchAgentsForList,
     ensureKnowledgeBases,
     ensureAgents,
     ensureModels,
+    replaceModels,
     ensureChatModels,
     ensureWebSearchProviders,
+    ensureSandboxConfigs,
     ensureAgentKnowledgeBases,
     prefetchChatInput,
     fetchKnowledgeBaseById,

@@ -262,7 +262,7 @@ func (c *Connector) walk(
 				Title:            d.Title,
 				Content:          []byte(detail.Body),
 				ContentType:      "text/markdown",
-				FileName:         sanitizeFileName(d.Title) + ".md",
+				FileName:         datasource.SanitizeFileName(d.Title) + ".md",
 				URL:              buildDocURL(cfg.GetBaseURL(), detail.Book.Namespace, d.Slug),
 				UpdatedAt:        parseContentUpdatedAt(d.ContentUpdatedAt),
 				SourceResourceID: bookIDStr,

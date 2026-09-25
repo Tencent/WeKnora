@@ -8,6 +8,7 @@ from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
 from docreader.parser.concurrency import parser_worker_limit
+from docreader.parser.docx_merge import fill_vertical_merged_cells_docx
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.ppt_convert import normalize_ppt_bytes
 from docreader.parser.pptx_media import (
@@ -43,7 +44,9 @@ class StdMarkitdownParser(BaseParser):
             content, ext = normalize_ppt_bytes(content, ft)
             pptx_bytes = content
             ft = "pptx"
-        elif ext and not ext.startswith("."):
+        elif ft == "docx":
+            content = fill_vertical_merged_cells_docx(content)
+        if ext and not ext.startswith("."):
             ext = "." + ext
 
         with parser_worker_limit("markitdown", CONFIG.markitdown_max_workers):
@@ -61,7 +64,9 @@ class StdMarkitdownParser(BaseParser):
             text, images = attach_pptx_media_to_markdown(text, pptx_bytes)
         return Document(content=text, images=images)
 
-    def _convert_markitdown(self, content: bytes, ext: str | None, *, keep_data_uris: bool):
+    def _convert_markitdown(
+        self, content: bytes, ext: str | None, *, keep_data_uris: bool
+    ):
         try:
             return self.markitdown.convert(
                 io.BytesIO(content),

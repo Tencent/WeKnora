@@ -200,12 +200,27 @@ func (m *Manager) reestablishParentSpan(ctx context.Context) context.Context {
 // trace is present, OTel creates a fresh root (mirroring StartGeneration's
 // auto-trace behaviour). Returns a ctx whose active span is this span.
 func (m *Manager) StartSpan(ctx context.Context, opts SpanOptions) (context.Context, *Span) {
+	return m.startSpan(ctx, opts, true)
+}
+
+// StartChildSpan records a low-level operation only when its caller is already
+// traced. Polling and housekeeping must not create a new trace for every RPC;
+// their operation-level caller owns the trace boundary instead.
+func (m *Manager) StartChildSpan(ctx context.Context, opts SpanOptions) (context.Context, *Span) {
+	ctx = m.reestablishParentSpan(ctx)
+	if !trace.SpanContextFromContext(ctx).IsValid() {
+		return ctx, &Span{manager: m}
+	}
+	return m.startSpan(ctx, opts, false)
+}
+
+func (m *Manager) startSpan(ctx context.Context, opts SpanOptions, createTrace bool) (context.Context, *Span) {
 	if !m.Enabled() {
 		return ctx, &Span{manager: m}
 	}
 	ctx = m.reestablishParentSpan(ctx)
 	var autoTrace *Trace
-	if _, ok := traceFromCtx(ctx); !ok {
+	if _, ok := traceFromCtx(ctx); !ok && createTrace {
 		// No active trace: open a shallow root so the span isn't orphaned.
 		// Hold the handle so Finish can End it — otherwise the root span is
 		// never exported and this span's parent points at a missing span.
@@ -344,8 +359,12 @@ func jsonAttr(key string, v interface{}) attribute.KeyValue {
 		return attribute.KeyValue{Key: attribute.Key(key)}
 	}
 	b, err := json.Marshal(v)
-	if err != nil || len(b) == 0 || string(b) == "null" {
+	if err != nil {
 		logger.Warnf(context.Background(), "[Langfuse] marshal attr %s failed: %v", key, err)
+		return attribute.KeyValue{Key: attribute.Key(key)}
+	}
+	if len(b) == 0 || string(b) == "null" {
+		// Optional structured fields are often unset; omit rather than warn.
 		return attribute.KeyValue{Key: attribute.Key(key)}
 	}
 	return attribute.String(key, string(b))

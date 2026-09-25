@@ -6,23 +6,24 @@
   justify-content: flex-start;
   gap: 4px;
   margin-top: 6px;
-  margin-left: -7px;
-  min-height: 30px;
+  margin-left: -6px;
+  min-height: 28px;
   color: var(--td-text-color-primary);
 
+  // 与用户消息的操作键、输入框控制键同规格：28px、6px 圆角
   :deep(.t-button) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     min-width: auto;
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     border: none;
-    border-radius: 8px;
+    border-radius: var(--app-radius-sm);
     background: transparent;
     color: var(--td-text-color-secondary);
-    transition: background-color 0.15s ease, color 0.15s ease;
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
     .t-button__content {
       display: inline-flex !important;
@@ -44,7 +45,7 @@
       opacity: 1;
       align-items: center;
       justify-content: center;
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       width: 16px;
       height: 16px;
       flex-shrink: 0;
@@ -89,6 +90,88 @@
   }
 }
 
+.answer-toolbar__artifact {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.answer-toolbar__artifact.is-arrived {
+  animation: artifact-toolbar-arrive 0.7s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+.answer-toolbar__artifact.is-collecting .t-button {
+  color: var(--td-text-color-placeholder);
+  cursor: wait;
+}
+
+.answer-toolbar__artifact-spinner {
+  animation: wk-spin 0.8s linear infinite;
+}
+
+@keyframes artifact-toolbar-arrive {
+  0% {
+    transform: scale(0.82);
+  }
+
+  55% {
+    transform: scale(1.12);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.answer-toolbar__artifact-count {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+  font-size: var(--app-text-2xs);
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.answer-toolbar__artifact.is-arrived .answer-toolbar__artifact-count {
+  animation: artifact-count-arrive 0.7s cubic-bezier(0.22, 1.4, 0.36, 1);
+}
+
+@keyframes artifact-count-arrive {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+
+  60% {
+    transform: scale(1.28);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answer-toolbar__artifact.is-arrived,
+  .answer-toolbar__artifact.is-arrived .answer-toolbar__artifact-count {
+    animation: none;
+  }
+}
+
 .answer-toolbar__follow-up-loading {
   display: inline-flex;
   align-items: center;
@@ -98,7 +181,7 @@
   padding-left: 9px;
   border-left: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   white-space: nowrap;
 
@@ -106,7 +189,7 @@
     flex: none;
     width: 14px;
     height: 14px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .answer-toolbar__follow-up-label {
@@ -164,7 +247,7 @@
   width: clamp(150px, 30vw, 260px);
   max-width: 100%;
   aspect-ratio: 4 / 3;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid rgba(175, 190, 210, 0.55);
   background: linear-gradient(
     145deg,

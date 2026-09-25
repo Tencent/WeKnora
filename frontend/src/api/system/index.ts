@@ -1,4 +1,28 @@
-import { get, post, put, del } from '@/utils/request'
+import { get, post, put, del, patch, postUpload } from '@/utils/request'
+import type { CreatedTenantAPIKey, TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
+
+export interface CreatePlatformAPIKeyPayload {
+  name: string
+  capabilities: TenantAPIKeyCapability[]
+  expires_at_unix?: number
+}
+
+export async function listPlatformAPIKeys(): Promise<{ success: boolean; data?: TenantAPIKey[] }> {
+  return await get('/api/v1/system/admin/api-keys') as unknown as { success: boolean; data?: TenantAPIKey[] }
+}
+
+export async function createPlatformAPIKey(
+  payload: CreatePlatformAPIKeyPayload,
+): Promise<{ success: boolean; data?: CreatedTenantAPIKey }> {
+  return await post('/api/v1/system/admin/api-keys', payload) as unknown as {
+    success: boolean
+    data?: CreatedTenantAPIKey
+  }
+}
+
+export async function deletePlatformAPIKey(keyId: number): Promise<{ success: boolean }> {
+  return await del(`/api/v1/system/admin/api-keys/${keyId}`) as unknown as { success: boolean }
+}
 
 export interface SystemInfo {
   version: string
@@ -13,12 +37,26 @@ export interface SystemInfo {
   db_version?: string
   /** Human-readable error message when the startup migration failed.
    *  When non-empty, the system info view should surface a troubleshooting
-   *  banner (see docs/migration-troubleshooting.md). */
+   *  banner (see website-docs/01-getting-started/05-troubleshooting.md#database-migrations). */
   db_migration_error?: string
   /** Server process boot time (RFC3339, UTC). */
   started_at?: string
   /** Seconds since process start. */
   uptime_seconds?: number
+}
+
+export interface DeploymentCapability {
+  supported: boolean
+  reason?: string
+}
+
+export interface DeploymentCapabilitiesResponse {
+  edition: string
+  capabilities: Record<string, DeploymentCapability>
+}
+
+export function getDeploymentCapabilities(): Promise<{ data: DeploymentCapabilitiesResponse }> {
+  return get('/api/v1/system/capabilities')
 }
 
 export interface PlaceholderDefinition {
@@ -72,16 +110,22 @@ export interface ParserEngineInfo {
 }
 
 /** 解析引擎配置（引擎连接参数存空间；聊天附件解析策略在智能体中配置） */
+export type MinerUParseMethod = 'auto' | 'ocr' | 'txt'
+
 export interface ParserEngineConfig {
   docreader_addr?: string
   docreader_transport?: string
   mineru_endpoint?: string
   mineru_api_key?: string
-  // MinerU 自建参数
+  // MinerU 自建参数（协议自动识别：4.0+ 走 V1 API）
+  mineru_server_api_key?: string
+  mineru_tier?: string // flash / basic / standard / advanced，空为服务端默认
+  // 以下仅对 MinerU 3.x 及更早版本生效
   mineru_model?: string
   mineru_vlm_server_url?: string
   mineru_enable_formula?: boolean | null
   mineru_enable_table?: boolean | null
+  mineru_parse_method?: MinerUParseMethod
   mineru_enable_ocr?: boolean | null
   mineru_language?: string
   // MinerU 云 API 参数
@@ -153,9 +197,9 @@ export interface StorageEngineConfig {
     path_prefix: string
   }
   s3: {
-    endpoint: string
+    endpoint: string // optional for standard AWS S3
     region: string
-    access_key: string
+    access_key: string // both keys empty => AWS default credential chain
     secret_key: string
     bucket_name: string
     path_prefix: string
@@ -333,6 +377,49 @@ export interface ResetUserPasswordRequest {
 export async function resetUserPassword(req: ResetUserPasswordRequest): Promise<{ message: string }> {
   const response = await post('/api/v1/system/admin/users/reset-password', req)
   return response as unknown as { message: string }
+}
+
+export interface CreateSystemUserRequest {
+  /** 2-50 characters. */
+  username: string
+  /** Must be a valid email address. */
+  email: string
+  /**
+   * Optional. Omit the key (or send null) to have the server generate a
+   * random password, returned exactly once in `generated_password`.
+   * Any provided value (including empty string) is subject to the
+   * password policy and can be rejected.
+   */
+  password?: string
+}
+
+export interface CreateSystemUserResponse {
+  user: SystemAdminUser
+  /**
+   * Present only when the request omitted `password` (or sent null): the
+   * server-minted plaintext password, returned exactly once and could not
+   * be fetched again.
+   */
+  generated_password?: string
+}
+
+export interface CreateSystemUserResult extends CreateSystemUserResponse {
+  /**
+   * True only when this call created the account (HTTP 201), false on the
+   * idempotent 200 retry (identity already existed).
+   */
+  created: boolean
+}
+
+/**
+ * Provision a new local user account (SystemAdmin only).
+ * The backend answers 201 on create and 200 on the idempotent retry with
+ * the same CreateSystemUserResponse body. The status is projected onto
+ * `created`.
+ */
+export async function createSystemUser(req: CreateSystemUserRequest): Promise<CreateSystemUserResult> {
+  const response = await post<CreateSystemUserResponse>('/api/v1/system/admin/users/create', req)
+  return { ...response, created: response.$httpStatus === 201 }
 }
 
 // ---- System Settings (P1) ----
@@ -626,4 +713,551 @@ export async function mutateRuntimeTask(
   await post(
     `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/tasks/${encodeURIComponent(taskID)}/actions/${encodeURIComponent(action)}`,
   )
+}
+
+/**
+ * Clear every archived (finally-failed) task in one queue in a single call.
+ * Only touches the archived dead-letter set — live tasks are never affected.
+ * Backend: DELETE /api/v1/system/admin/runtime/queues/{queue}/archived.
+ * Returns the object directly (no {data: ...} wrapping, see request.ts).
+ */
+export async function purgeArchivedRuntimeTasks(
+  queue: string,
+): Promise<{ success: boolean; deleted: number }> {
+  const response = await del(
+    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/archived`,
+  )
+  return response as unknown as { success: boolean; deleted: number }
+}
+
+// --- Sandbox backend configuration (per workspace) ---
+
+export interface SandboxVolumeMountConfig {
+  enabled: boolean
+  mount_path?: string
+  provider?: string
+  volume_id?: string
+  volume_name?: string
+  volume_owner_fingerprint?: string
+}
+
+export interface SandboxCubeConfig {
+  api_url?: string
+  proxy_url?: string
+  sandbox_domain?: string
+  api_key?: string
+  template_id?: string
+  http_timeout_sec?: number
+  cube_sandbox_ttl_seconds?: number
+  dns_servers?: string[]
+}
+
+export interface SandboxE2BConfig {
+  api_url?: string
+  proxy_url?: string
+  sandbox_domain?: string
+  api_key?: string
+  template_id?: string
+  http_timeout_sec?: number
+  e2b_sandbox_ttl_seconds?: number
+}
+
+export interface SandboxSkillImage {
+  snapshot_id?: string
+  generation?: number
+  built_at?: string
+  base_template_id?: string
+  owner_fingerprint?: string
+}
+
+export interface SandboxConfig {
+  sandbox_type?: string
+  default_timeout_sec?: number
+  terminal_idle_disconnect_sec?: number
+  desktop_enabled?: boolean
+  allow_private_endpoints?: boolean
+  env_vars?: Record<string, string>
+  volume_mount?: SandboxVolumeMountConfig
+  skill_image?: SandboxSkillImage
+  skill_rollout?: 'next_turn' | 'new_session'
+  network?: SandboxNetworkPolicy
+  cube?: SandboxCubeConfig
+  e2b?: SandboxE2BConfig
+  docker?: SandboxDockerConfig
+}
+
+/** Docker backend: one daemon, one long-lived container per session. */
+export interface SandboxDockerConfig {
+  image?: string
+  host?: string
+  tls_cert_path?: string
+  cpu_limit?: number
+  memory_limit_mb?: number
+  pids_limit?: number
+  network_mode?: string
+  runtime?: string
+  idle_ttl_seconds?: number
+  http_timeout_sec?: number
+}
+
+/** One injected credential header on a Cube L7 rule. */
+export interface SandboxCubeHeaderInject {
+  header: string
+  /** Masked as '***' in responses; send the placeholder back to keep it. */
+  secret?: string
+  /** Defaults to '${SECRET}' server-side. */
+  format?: string
+}
+
+/** One CubeEgress L7 rule. Match fields are AND-ed; methods are OR-ed. */
+export interface SandboxCubeEgressRule {
+  name: string
+  scheme?: string
+  sni?: string
+  host?: string
+  methods?: string[]
+  path?: string
+  /** Absent means allow. A deny rule still needs host or sni. */
+  deny?: boolean
+  audit?: string
+  inject?: SandboxCubeHeaderInject[]
+}
+
+/** One E2B per-host request transform. host must also be in allow_out. */
+export interface SandboxE2BHostRule {
+  host: string
+  /** Values are masked as '***' in responses. */
+  headers?: Record<string, string>
+}
+
+/**
+ * Network policy for every sandbox created from this config. Absent fields
+ * mean egress allowed. Inbound is always credential-required:
+ * allow_public_inbound is accepted then ignored/cleared.
+ */
+export interface SandboxNetworkPolicy {
+  deny_egress_by_default?: boolean
+  /** Ignored. Inbound is always credential-required. */
+  allow_public_inbound?: boolean
+  allow_out?: string[]
+  deny_out?: string[]
+  cube_rules?: SandboxCubeEgressRule[]
+  e2b_host_rules?: SandboxE2BHostRule[]
+}
+
+/** `ok: null` means the probe was not executed in this run. */
+export interface SandboxCheckItem {
+  name: string
+  ok: boolean | null
+  message?: string
+  /** Stable code for why a probe was skipped; localized by the caller. */
+  reason?: string
+  latency_ms?: number
+}
+
+export interface SandboxCheckResult {
+  ok: boolean
+  provider: string
+  checks: SandboxCheckItem[]
+  capabilities?: Record<string, boolean>
+}
+
+export interface SandboxTemplate {
+  id: string
+  name: string
+  status?: string
+  version?: string
+  image?: string
+  created_at?: string
+  updated_at?: string
+  standard: boolean
+  /** XFCE sibling of `standard`. The admin picks one ID as this config's boot target. */
+  desktop?: boolean
+  /** The provider's own explanation for a failed build, when it reports one. */
+  error?: string
+  instance_type?: string
+  network_type?: string
+  allow_internet_access?: boolean
+}
+
+export interface SandboxTemplateCatalog {
+  templates: SandboxTemplate[]
+  standard_template_id?: string
+  desktop_template_id?: string
+  provisioned: boolean
+}
+
+/** One named sandbox backend config. Credentials arrive masked. */
+export interface SandboxConfigRecord {
+  id: string
+  name: string
+  description?: string
+  sandbox_type: string
+  config: SandboxConfig
+  created_at: string
+  updated_at: string
+}
+
+/** Create/update payload. */
+export interface SandboxConfigUpsert {
+  name: string
+  description?: string
+  config: SandboxConfig
+}
+
+/**
+ * What a config currently holds. `sandbox_count` comes from the provider, so a
+ * non-zero value is authoritative: identity edits and deletion are refused
+ * until it reaches zero.
+ *
+ * `unverifiable` means the provider could not be reached, so the count is
+ * UNKNOWN rather than zero — never render it as "0 sandboxes".
+ */
+export interface SandboxInventory {
+  sandbox_count: number
+  session_ids?: string[]
+  agent_names?: string[]
+  unverifiable?: boolean
+}
+
+/** Sandbox backends managed as named workspace configurations. */
+export const NAMED_SANDBOX_BACKEND_TYPES = ['cube', 'e2b', 'docker'] as const
+
+export function isNamedSandboxBackend(type: string): boolean {
+  return (NAMED_SANDBOX_BACKEND_TYPES as readonly string[]).includes(type)
+}
+
+/** Returns every sandbox config of the workspace. No config means disabled. */
+export function listSandboxConfigs(): Promise<{
+  data: SandboxConfigRecord[]
+  workspace_scripts_disabled?: boolean
+}> {
+  return get('/api/v1/sandbox-configs') as unknown as Promise<{
+    data: SandboxConfigRecord[]
+    workspace_scripts_disabled?: boolean
+  }>
+}
+
+export function setSandboxWorkspacePolicy(scriptsDisabled: boolean): Promise<{
+  workspace_scripts_disabled: boolean
+}> {
+  return put('/api/v1/sandbox-configs/workspace-policy', {
+    scripts_disabled: scriptsDisabled,
+  }) as unknown as Promise<{ workspace_scripts_disabled: boolean }>
+}
+
+export function createSandboxConfig(
+  payload: SandboxConfigUpsert,
+): Promise<{ data: SandboxConfigRecord }> {
+  return post('/api/v1/sandbox-configs', payload) as unknown as Promise<{
+    data: SandboxConfigRecord
+  }>
+}
+
+export function getSandboxConfigById(id: string): Promise<{ data: SandboxConfigRecord }> {
+  return get(`/api/v1/sandbox-configs/${id}`) as unknown as Promise<{
+    data: SandboxConfigRecord
+  }>
+}
+
+export function updateSandboxConfigById(
+  id: string,
+  payload: SandboxConfigUpsert,
+): Promise<{ data: SandboxConfigRecord }> {
+  return put(`/api/v1/sandbox-configs/${id}`, payload) as unknown as Promise<{
+    data: SandboxConfigRecord
+  }>
+}
+
+/**
+ * `force` only overrides an inventory the backend could not verify; it never
+ * overrides sandboxes the backend can actually see. Ask for it exclusively in
+ * response to a `sandbox_inventory_unverifiable` conflict.
+ */
+export function deleteSandboxConfig(id: string, force = false): Promise<void> {
+  const query = force ? '?force=true' : ''
+  return del(`/api/v1/sandbox-configs/${id}${query}`) as unknown as Promise<void>
+}
+
+export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxInventory }> {
+  return get(`/api/v1/sandbox-configs/${id}/sandboxes`) as unknown as Promise<{
+    data: SandboxInventory
+  }>
+}
+
+/**
+ * Fetch templates using the connection currently entered in the drawer.
+ * `ensure_standard` starts a provider-side CLI build when that WeKnora
+ * template is missing. `ensure_desktop` does the same for the XFCE image, but
+ * the settings UI only sends it when the admin clicks Create — listing must
+ * not provision a desktop template as a side effect. `replace_standard` /
+ * `replace_desktop` rebuild the matching template so a new spec (DNS, image)
+ * can take effect; they require `config_id`. The returned building item can
+ * be polled through the same endpoint.
+ */
+export function querySandboxTemplates(payload: {
+  config: SandboxConfig
+  config_id?: string
+  ensure_standard?: boolean
+  replace_standard?: boolean
+  ensure_desktop?: boolean
+  replace_desktop?: boolean
+}): Promise<{ data: SandboxTemplateCatalog }> {
+  return post('/api/v1/sandbox-configs/templates/query', payload) as unknown as Promise<{
+    data: SandboxTemplateCatalog
+  }>
+}
+
+/**
+ * Probe a sandbox configuration without saving it. Redacted secrets are
+ * resolved server-side, so pass `config_id` alongside an edited `config` to
+ * test unsaved changes without retyping an API key. Omit `config` to probe a
+ * stored config as-is.
+ *
+ * `deep` additionally creates and destroys one sandbox, which is the only way
+ * to validate the template ID, Cube's proxy data plane and outbound egress.
+ * It consumes real sandbox time.
+ */
+export function checkSandboxConfig(payload: {
+  config?: SandboxConfig
+  config_id?: string
+  deep?: boolean
+}): Promise<{ data: SandboxCheckResult }> {
+  return post('/api/v1/system/sandbox-check', payload) as unknown as Promise<{
+    data: SandboxCheckResult
+  }>
+}
+
+/**
+ * The two refusals a save or a delete can hit. They mean opposite things:
+ * `sandboxes_still_live` says the backend counted live sandboxes, so the only
+ * ways forward are ending the owning sessions or creating a second config;
+ * `sandbox_inventory_unverifiable` says the backend is unreachable, so nothing
+ * could be counted — the one case a force delete may override.
+ */
+export type SandboxConflictCode =
+  | 'sandboxes_still_live'
+  | 'sandbox_inventory_unverifiable'
+  | 'skill_snapshot_blocks_template'
+
+export interface SandboxConflict {
+  code: SandboxConflictCode
+  message?: string
+  /** Present for `sandboxes_still_live`; there is nothing to report otherwise. */
+  inventory?: SandboxInventory
+}
+
+/**
+ * Reads a sandbox-config conflict out of a rejected request, or returns null
+ * when the failure is anything else.
+ *
+ * The interceptor spreads the response body onto the rejection, so the code
+ * sits at `err.error.code`. Parsing it in one place keeps callers from
+ * hard-coding that shape — and from confusing the two conflicts, which drive
+ * different recovery paths in the UI.
+ */
+export function parseSandboxConflict(err: unknown): SandboxConflict | null {
+  if (typeof err !== 'object' || err === null) return null
+  const detail = (err as { error?: { code?: string; message?: string; data?: SandboxInventory } }).error
+  if (!detail || typeof detail !== 'object') return null
+  if (
+    detail.code !== 'sandboxes_still_live' &&
+    detail.code !== 'sandbox_inventory_unverifiable' &&
+    detail.code !== 'skill_snapshot_blocks_template'
+  ) {
+    return null
+  }
+  return { code: detail.code, message: detail.message, inventory: detail.data }
+}
+
+// --- Agent skills installed onto a sandbox config's image ---
+
+export type ConfigSkillStatus = 'installing' | 'ready' | 'failed' | 'removing' | 'removed'
+
+/**
+ * One environment variable the skill's installer declared. `is_set` reports
+ * whether a workspace-wide value exists; the value itself is never returned,
+ * so an editor can show that something is stored but not what.
+ */
+export interface ConfigSkillEnv {
+  name: string
+  description?: string
+  required?: boolean
+  is_set: boolean
+}
+
+export interface ConfigSkill {
+  id: string
+  name: string
+  version?: string
+  description?: string
+  enabled: boolean
+  status: ConfigSkillStatus | string
+  error?: string
+  bundle_sha256?: string
+  installed_snapshot_id?: string
+  // Locators for this skill's most recent install conversation. Absent for
+  // skills installed before transcripts existed, which is how the drawer
+  // decides whether to offer the "view install" entry point.
+  install_session_id?: string
+  install_message_id?: string
+  // Present while a newer install is in flight or has failed and the sandbox
+  // still runs the previous version.
+  served?: { version?: string }
+  created_at: string
+  updated_at: string
+  // Absent for a skill whose installer declared nothing, which is how the
+  // panel decides whether to offer the environment variable editor at all.
+  envs?: ConfigSkillEnv[]
+}
+
+export interface ConfigSkillInstallEvent {
+  percent: number
+  stage: string
+  log?: string
+  status?: string
+  done: boolean
+}
+
+export function listConfigSkills(configId: string): Promise<{ data: ConfigSkill[] }> {
+  return get(`/api/v1/sandbox-configs/${configId}/skills`) as unknown as Promise<{ data: ConfigSkill[] }>
+}
+
+export function uploadConfigSkill(
+  configId: string, file: File, onProgress?: (percent: number) => void,
+): Promise<{ data: { skill_id: string } }> {
+  const form = new FormData()
+  form.append('file', file)
+  return postUpload(`/api/v1/sandbox-configs/${configId}/skills`, form, (e: any) => {
+    if (e.total) onProgress?.(Math.round((e.loaded * 100) / e.total))
+  }, { timeout: 5 * 60 * 1000 })
+}
+
+export function installConfigSkillFromSource(
+  configId: string,
+  payload: { source: string },
+): Promise<{ data: { skill_id: string } }> {
+  return post(`/api/v1/sandbox-configs/${configId}/skills`, payload, {
+    timeout: 2 * 60 * 1000,
+  }) as unknown as Promise<{ data: { skill_id: string } }>
+}
+
+// Retries an install from the archive the server already stores, so a failure
+// that had nothing to do with the bundle does not send the operator looking
+// for the original zip or registry URL.
+export function reinstallConfigSkill(
+  configId: string,
+  skillId: string,
+  instructions = '',
+): Promise<{ data: { skill_id: string } }> {
+  return post(
+    `/api/v1/sandbox-configs/${configId}/skills/${skillId}/reinstall`,
+    { instructions },
+  ) as unknown as Promise<{ data: { skill_id: string } }>
+}
+
+// Aborts an in-flight install so retry/uninstall become available.
+// After a process restart the row may still say installing with nothing running.
+export function stopConfigSkill(
+  configId: string,
+  skillId: string,
+): Promise<{ data: ConfigSkill }> {
+  return post(
+    `/api/v1/sandbox-configs/${configId}/skills/${skillId}/stop`,
+    {},
+  ) as unknown as Promise<{ data: ConfigSkill }>
+}
+
+/**
+ * Partial update: an absent field is left alone. `envs` names only the
+ * variables to write — an entry with an empty string clears the stored value
+ * while keeping the declaration, and undeclared names are ignored server-side.
+ */
+export function patchConfigSkill(
+  configId: string,
+  skillId: string,
+  payload: { enabled?: boolean; envs?: Record<string, string> },
+): Promise<{ data: ConfigSkill }> {
+  return patch(`/api/v1/sandbox-configs/${configId}/skills/${skillId}`, payload) as unknown as Promise<{
+    data: ConfigSkill
+  }>
+}
+
+export function deleteConfigSkill(
+  configId: string,
+  skillId: string,
+): Promise<{ data: { skill_id: string } }> {
+  return del(`/api/v1/sandbox-configs/${configId}/skills/${skillId}`) as unknown as Promise<{
+    data: { skill_id: string }
+  }>
+}
+
+export function getConfigSkill(
+  configId: string,
+  skillId: string,
+): Promise<{ data: ConfigSkill }> {
+  return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}`) as unknown as Promise<{
+    data: ConfigSkill
+  }>
+}
+
+export function configSkillInstallEventsUrl(configId: string, skillId: string): string {
+  return `/api/v1/sandbox-configs/${configId}/skills/${skillId}/install-events`
+}
+
+// The installer agent's own transcript: its prompt, thinking, commands and
+// their output, replayed from the start and then followed live. Answers 404
+// once the event log has expired, which is the signal to read the durable
+// message history instead.
+export function configSkillTranscriptUrl(configId: string, skillId: string): string {
+  return `/api/v1/sandbox-configs/${configId}/skills/${skillId}/transcript`
+}
+
+export interface ConfigSkillFileEntry {
+  path: string
+  size: number
+}
+
+export interface ConfigSkillFileContent {
+  path: string
+  size: number
+  encoding: 'utf-8' | 'base64' | 'binary' | string
+  content?: string
+  media_type?: string
+  truncated?: boolean
+  binary?: boolean
+}
+
+export function listConfigSkillFiles(
+  configId: string,
+  skillId: string,
+): Promise<{ data: ConfigSkillFileEntry[] }> {
+  return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/files`) as unknown as Promise<{
+    data: ConfigSkillFileEntry[]
+  }>
+}
+
+export function getConfigSkillFile(
+  configId: string,
+  skillId: string,
+  path: string,
+): Promise<{ data: ConfigSkillFileContent }> {
+  return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/files/content`, {
+    params: { path },
+  }) as unknown as Promise<{ data: ConfigSkillFileContent }>
+}
+
+export interface SkillInstallGuidanceState {
+  accepting: boolean
+  messages: Array<{ id: string; content: string; status: 'pending' | 'injected' | 'unprocessed' }>
+}
+
+export function getConfigSkillGuidance(configId: string, skillId: string) {
+  return get(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/guidance`) as unknown as Promise<{ data: SkillInstallGuidanceState }>
+}
+
+export function steerConfigSkill(configId: string, skillId: string, payload: {
+  expected_message_id: string; steer_id: string; content: string
+}) {
+  return post(`/api/v1/sandbox-configs/${configId}/skills/${skillId}/guidance`, payload)
 }

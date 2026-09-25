@@ -35,8 +35,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 -- Primary list query: newest-first cursor pagination per tenant. Using id
 -- (BIGSERIAL, monotonic) as the cursor sidesteps the duplicate-timestamp
--- tie-breaking that a created_at cursor would require — same approach as
--- wiki_log_entries (migration 000040).
+-- tie-breaking that a created_at cursor would require.
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id_desc
     ON audit_logs (tenant_id, id DESC);
 

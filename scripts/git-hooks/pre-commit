@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Fast checks on staged files (PR checklist + gofmt). Mirrors app.yml formatting gate.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=scripts/git-hooks/common.sh
+source "$ROOT/scripts/git-hooks/common.sh"
+
+if hook_skip; then
+  exit 0
+fi
+
+cd "$ROOT"
+
+log_step "pre-commit"
+
+check_whitespace --cached
+
+staged_go=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && staged_go+=("$line")
+done < <(git diff --cached --name-only --diff-filter=ACMR -- '*.go' ':!cli/**' || true)
+
+if [[ ${#staged_go[@]} -gt 0 ]]; then
+  go_files=()
+  for f in "${staged_go[@]}"; do
+    go_files+=("$ROOT/$f")
+  done
+  check_gofmt_files write "${go_files[@]}"
+
+  if command -v golangci-lint >/dev/null 2>&1; then
+    # Lint only what differs from HEAD (staged + unstaged in those packages).
+    run_golangci_if_available HEAD
+  fi
+fi
+
+log_ok "pre-commit passed"

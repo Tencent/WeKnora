@@ -8,15 +8,13 @@ import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import KBInfoPopover from '@/components/KBInfoPopover.vue';
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
-import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
-import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
+import { permissionCanEditKB, permissionCanManageKB } from '@/utils/kbPermission';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
-const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const authStore = useAuthStore();
@@ -27,33 +25,61 @@ import {
   batchQueryKnowledge,
   listKnowledgeTags,
   updateKnowledgeTagBatch,
-  uploadKnowledgeFile,
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
+  batchDownloadKnowledge,
+  delKnowledgeDetails,
   batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  listKnowledgeFolders,
+  moveKnowledgeToFolder,
+  renameKnowledgeFolder,
+  downKnowledgeDetails,
+  type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
+import { isBatchDownloadableKnowledge } from './knowledgeDownloadFileName';
+import { waitForKnowledgeDeletion } from '@/utils/knowledgeDeletion';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
-import TagEditDialog from './components/TagEditDialog.vue';
-import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
+import KbFolderTree from './components/KbFolderTree.vue';
+import BatchTagDialog from './components/BatchTagDialog.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
+import { useUploadTasksStore } from '@/stores/uploadTasks';
 import WikiBrowser from './wiki/WikiBrowser.vue';
+import ImageGallery from './gallery/ImageGallery.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
   isKnowledgeParseInFlight,
   knowledgeNeedsStatusPolling,
   shouldRefreshWikiStatusAfterKnowledgePoll,
 } from './wikiStatusRefresh';
+import { stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
+import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
+import {
+  buildUploadFileName,
+  canMoveFolderTo,
+  folderBreadcrumbs as buildFolderBreadcrumbs,
+  folderPathExists as folderExistsInTree,
+  isFilteringDocuments,
+  ROOT_FOLDER_PATH,
+} from './folderTree';
+import {
+  DEFAULT_DOCUMENT_SORT,
+  DOCUMENT_SORT_OPTIONS,
+  getDocumentSortOption,
+  getDocumentSortParams,
+  type DocumentSortOption,
+  type DocumentSortValue,
+} from './documentSorting';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
@@ -62,12 +88,11 @@ const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
-const uploading = ref(false);
 const kbLoading = ref(false);
 const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled);
-const validTabs = ['documents', 'wiki', 'graph'] as const
+const validTabs = ['documents', 'wiki', 'graph', 'gallery'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
@@ -84,6 +109,27 @@ const wikiIndexingTip = computed(() => {
   if (!wikiIsIndexing.value) return ''
   return t('knowledgeEditor.wikiBrowser.queueStatus', { count: wikiStatus.value.pendingTasks || 0 })
 })
+// The views of this knowledge base, in header order. Wiki and graph only
+// exist on wiki KBs; a stale wiki/graph tab on another KB renders documents,
+// so the header marks documents active then too.
+const kbViewTabs = computed(() => {
+  const w = 'knowledgeEditor.wikiBrowser'
+  const tabs: Array<{ key: KbTab; icon: string; label: string; tip: string; indexing?: boolean }> = [
+    { key: 'documents', icon: 'file', label: t(`${w}.tabDocuments`), tip: t(`${w}.tabDocumentsTip`) },
+  ]
+  if (isWiki.value) {
+    const indexing = wikiIsIndexing.value
+    tabs.push(
+      { key: 'wiki', icon: 'book-open', label: 'Wiki', tip: indexing ? wikiIndexingTip.value : t(`${w}.tabWikiTip`), indexing },
+      { key: 'graph', icon: 'relation', label: t(`${w}.tabGraph`), tip: indexing ? wikiIndexingTip.value : t(`${w}.tabGraphTip`), indexing },
+    )
+  }
+  tabs.push({ key: 'gallery', icon: 'image', label: t(`${w}.tabGallery`), tip: t(`${w}.tabGalleryTip`) })
+  return tabs
+})
+const shownKbTab = computed<KbTab>(() =>
+  kbViewTabs.value.some((tab) => tab.key === activeKbTab.value) ? activeKbTab.value : 'documents',
+)
 const onWikiStatusChange = (payload: { pendingTasks: number; isActive: boolean; pendingIssues: number }) => {
   wikiStatus.value = payload
 }
@@ -256,6 +302,11 @@ const currentSharedKb = computed(() =>
 // in the share list is the authoritative signal.
 const isViaShare = computed(() => !!currentSharedKb.value);
 
+// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB).
+// Declared first: the canEdit / canManage gates below treat an explicit
+// cross-tenant grant as the single source of truth.
+const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+
 // Can edit: when accessed via an organization share, ONLY the share grant
 // counts — even if the current user happens to be the original creator of
 // the KB. The backend's RBAC middleware authorizes based on the active
@@ -263,24 +314,37 @@ const isViaShare = computed(() => !!currentSharedKb.value);
 // different tenant context will be 403'd on write. Otherwise: KB creator
 // (any role) or tenant Admin+ in the home tenant.
 //
+// A resolved cross-tenant permission (org share or shared-agent visibility,
+// already capped server-side by effective = min(share, org_role, tenant_role))
+// outranks every local signal: without this priority rule a personal-workspace
+// admin browsing a read-only shared KB saw edit entries that only led to 403s
+// (#3098).
+//
 // hasRole('contributor') is intentionally NOT here — being a Contributor
 // in a tenant does not by itself grant edit on someone else's KB.
 const canEdit = computed(() => {
+  const permission = effectiveKBPermission.value;
+  if (permission) return permissionCanEditKB(permission);
   if (isViaShare.value) return orgStore.canEditKB(kbId.value, false);
   if (isOwner.value) return true;
   if (authStore.hasRole('admin')) return true;
   return orgStore.canEditKB(kbId.value, false);
 });
 
-// Can manage (delete, settings, etc.): same isViaShare-first rule. For
+// Can manage (delete, settings, etc.): same permission-first rule. For
 // shared KBs only an 'admin' share grant qualifies — editor/viewer (and
 // even being the creator viewed via share) never grant delete/settings.
 const canManage = computed(() => {
+  const permission = effectiveKBPermission.value;
+  if (permission) return permissionCanManageKB(permission);
   if (isViaShare.value) return orgStore.canManageKB(kbId.value, false);
   if (isOwner.value) return true;
   if (authStore.hasRole('admin')) return true;
   return orgStore.canManageKB(kbId.value, false);
 });
+
+// The activity feed exposes owner-side actor and configuration summaries.
+// It lives in KB settings (KnowledgeBaseEditorModal) for Owner/Admin in the home tenant.
 
 // Can mutate knowledge (move / batch-delete): the backend gate for these
 // two endpoints is g.Contributor(), so the caller MUST be Contributor+
@@ -297,11 +361,18 @@ const canMutateKnowledge = computed(() => {
   return authStore.hasRole('contributor');
 });
 
-// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
-const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+// Downloading returns the original source file, which is intentionally more
+// restrictive than viewing parsed content or using the preview tab. A tenant
+// Viewer can never download; for cross-tenant KBs the effective share
+// permission must additionally be Editor or Admin.
+const canDownloadKnowledge = computed(() => {
+  if (!authStore.hasRole('contributor')) return false;
+  const permission = effectiveKBPermission.value;
+  return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
+});
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
-let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
+let { cardList, total, moreIndex, details, getKnowled, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
 
 const showKbDetailContextualGuide = computed(() => {
   return Boolean(kbId.value)
@@ -334,14 +405,6 @@ function clearTraceAvailabilityCache() {
 // UI should treat the row as "in flight" rather than terminal.
 function isParseInFlight(status?: string): boolean {
   return isKnowledgeParseInFlight(status);
-}
-
-function isTraceMenuVisible(item: KnowledgeCard): boolean {
-  if (!item?.id) return false;
-  if (isParseInFlight(item.parse_status)) {
-    return true;
-  }
-  return traceAvailableById[item.id] === true;
 }
 
 async function probeTraceAvailable(item: KnowledgeCard) {
@@ -393,8 +456,8 @@ type DocViewMode = 'grid' | 'list';
 const VIEW_MODE_KEY = 'weknora.kb.docs.viewMode';
 const initViewMode = (): DocViewMode => {
   try {
-    return localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'grid';
-  } catch { return 'grid'; }
+    return localStorage.getItem(VIEW_MODE_KEY) === 'grid' ? 'grid' : 'list';
+  } catch { return 'list'; }
 };
 const viewMode = ref<DocViewMode>(initViewMode());
 watch(viewMode, (v) => {
@@ -407,6 +470,85 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchTagging = ref(false);
+const batchDownloading = ref(false);
+let batchDownloadController: AbortController | undefined;
+
+const MAX_BATCH_DOWNLOAD_FILES = 200;
+const MAX_BATCH_DOWNLOAD_BYTES = 512 * 1024 * 1024;
+
+const handleBatchDownload = async () => {
+  if (batchDownloading.value || batchDeleting.value || batchReparsing.value || batchTagging.value || selectedIds.value.size === 0) return;
+  const selected = Array.from(selectedIds.value);
+  const itemsById = new Map((cardList.value || []).map((item) => [item.id, item]));
+  const ids = selected.filter((id) => isBatchDownloadableKnowledge(itemsById.get(id)));
+  const skipped = selected.length - ids.length;
+  if (ids.length === 0) {
+    MessagePlugin.warning(t('knowledgeBase.batchDownloadNoFiles'));
+    return;
+  }
+  if (ids.length > MAX_BATCH_DOWNLOAD_FILES) {
+    MessagePlugin.warning(t('knowledgeBase.batchDownloadHint'));
+    return;
+  }
+  let knownBytes = 0;
+  for (const id of ids) {
+    const size = Number(itemsById.get(id)?.file_size);
+    if (Number.isFinite(size) && size > 0) knownBytes += size;
+  }
+  if (knownBytes > MAX_BATCH_DOWNLOAD_BYTES) {
+    MessagePlugin.warning(t('knowledgeBase.batchDownloadTooLarge'));
+    return;
+  }
+  if (skipped > 0) {
+    MessagePlugin.warning(t('knowledgeBase.batchDownloadSkipped', { count: skipped }));
+  }
+  const controller = new AbortController();
+  batchDownloadController = controller;
+  batchDownloading.value = true;
+  try {
+    const blob = await batchDownloadKnowledge(kbId.value, ids, controller.signal);
+    if (controller.signal.aborted) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `knowledge-files-${Date.now()}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // 延迟释放，给浏览器留出开始保存文件的时间。
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    MessagePlugin.success(t('knowledgeBase.batchDownloadStarted'));
+  } catch (error: any) {
+    if (!controller.signal.aborted) {
+      MessagePlugin.error(error?.message || t('knowledgeBase.batchDownloadFailed'));
+    }
+  } finally {
+    if (batchDownloadController === controller) {
+      batchDownloading.value = false;
+      batchDownloadController = undefined;
+    }
+  }
+};
+watch(kbId, () => batchDownloadController?.abort());
+onUnmounted(() => batchDownloadController?.abort());
+const batchTagDialogVisible = ref(false);
+const batchTagPreSelectedIds = computed(() => {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return [];
+  const cards = ids
+    .map((id) => cardList.value.find((c) => c.id === id))
+    .filter((c): c is KnowledgeCard => Boolean(c));
+  if (cards.length === 0) return [];
+  const firstTagIds = new Set((cards[0].tags || []).map((t) => t.id));
+  for (let i = 1; i < cards.length; i++) {
+    const cur = new Set((cards[i].tags || []).map((t) => t.id));
+    for (const tid of firstTagIds) {
+      if (!cur.has(tid)) firstTagIds.delete(tid);
+    }
+  }
+  return Array.from(firstTagIds);
+});
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -446,7 +588,7 @@ const awaitBatchReparseReflection = async (ids: string[]) => {
 };
 
 const confirmBatchReparse = async () => {
-  if (batchReparsing.value || batchDeleting.value || selectedIds.value.size === 0) return;
+  if (batchReparsing.value || batchDeleting.value || batchDownloading.value || selectedIds.value.size === 0) return;
   const allIds = Array.from(selectedIds.value);
   const ids = allIds.filter((id) => {
     const item = cardList.value.find((c) => c.id === id);
@@ -480,21 +622,16 @@ const confirmBatchReparse = async () => {
   }
 };
 
-const tagFilterPanelVisible = ref(false);
-const tagFilterTriggerHover = ref(false);
-const tagFilterCleared = ref(false);
-const tagManageDrawerVisible = ref(false);
-
-const showTagFilterClear = computed(
-  () => selectedTagIds.value.length > 0 && tagFilterTriggerHover.value,
-);
-
-const isTagFilterPlaceholder = computed(
-  () => selectedTagIds.value.length === 0 && tagFilterCleared.value,
-);
 
 const selectedTagIds = ref<string[]>([]);
+const selectedTagNames = ref<Record<string, string>>({});
 const tagList = ref<any[]>([]);
+// Keep selected tags reachable even when the search or loaded page changes.
+const filterTagOptions = computed(() => [
+  ...tagList.value,
+  ...selectedTagIds.value.filter(id => !tagList.value.some(tag => tag.id === id))
+    .map(id => ({ id, name: selectedTagNames.value[id] || t('knowledgeBase.columnTag') })),
+]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
 const TAG_PAGE_SIZE = 50;
@@ -547,8 +684,12 @@ const sourceOptions = computed(() => [
   { label: t('knowledgeBase.sourceApi'), value: 'api' },
   { label: t('knowledgeBase.sourceBrowserExtension'), value: 'browser_extension' },
   { label: t('knowledgeBase.channelFeishu'), value: 'feishu' },
+  { label: t('knowledgeBase.channelFeishuDrive'), value: 'feishu_drive' },
   { label: t('knowledgeBase.channelNotion'), value: 'notion' },
   { label: t('knowledgeBase.channelYuque'), value: 'yuque' },
+  { label: t('knowledgeBase.channelConfluence'), value: 'confluence' },
+  { label: t('knowledgeBase.channelGitLab'), value: 'gitlab' },
+  { label: t('knowledgeBase.channelIma'), value: 'ima' },
   { label: t('knowledgeBase.channelWechat'), value: 'wechat' },
   { label: t('knowledgeBase.channelWecom'), value: 'wecom' },
   { label: t('knowledgeBase.channelDingtalk'), value: 'dingtalk' },
@@ -557,8 +698,111 @@ const sourceOptions = computed(() => [
 ]);
 // Date range as [start, end] in "YYYY-MM-DD" form (t-date-range-picker default).
 const updatedTimeRange = ref<string[]>([]);
+const filtersExpanded = ref(false);
+const activeFilterCount = computed(() =>
+  [selectedFileType.value, selectedParseStatus.value, selectedSource.value,
+    updatedTimeRange.value?.some(Boolean)].filter(Boolean).length + selectedTagIds.value.length,
+);
+const clearDocumentFilters = () => {
+  selectedFileType.value = '';
+  selectedParseStatus.value = '';
+  selectedSource.value = '';
+  updatedTimeRange.value = [];
+  handleTagFilterChange([]);
+};
 // Disable any date after today so users cannot filter into the future.
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
+const documentSortPanelVisible = ref(false);
+const selectedDocumentSort = ref<DocumentSortValue>(DEFAULT_DOCUMENT_SORT);
+
+const documentSortOptionLabel = (option: DocumentSortOption) => {
+  switch (option.labelKey) {
+    case 'earliestUpdated':
+      return t('knowledgeBase.sort.earliestUpdated');
+    case 'newestCreated':
+      return t('knowledgeBase.sort.newestCreated');
+    case 'earliestCreated':
+      return t('knowledgeBase.sort.earliestCreated');
+    case 'nameAscending':
+      return t('knowledgeBase.sort.nameAscending');
+    case 'nameDescending':
+      return t('knowledgeBase.sort.nameDescending');
+    default:
+      return t('knowledgeBase.sort.recentlyUpdated');
+  }
+};
+
+const documentSortGroups = computed(() => [
+  {
+    key: 'updated_at',
+    label: t('knowledgeBase.sort.updatedTime'),
+    description: t('knowledgeBase.sort.updatedTimeDescription'),
+    options: DOCUMENT_SORT_OPTIONS.filter((option) => option.sortBy === 'updated_at'),
+  },
+  {
+    key: 'created_at',
+    label: t('knowledgeBase.sort.createdTime'),
+    description: t('knowledgeBase.sort.createdTimeDescription'),
+    options: DOCUMENT_SORT_OPTIONS.filter((option) => option.sortBy === 'created_at'),
+  },
+  {
+    key: 'file_name',
+    label: t('knowledgeBase.sort.fileName'),
+    description: t('knowledgeBase.sort.fileNameDescription'),
+    options: DOCUMENT_SORT_OPTIONS.filter((option) => option.sortBy === 'file_name'),
+  },
+]);
+
+const activeDocumentSortLabel = computed(() => {
+  const option = getDocumentSortOption(selectedDocumentSort.value);
+  const group = documentSortGroups.value.find((item) => item.key === option.sortBy);
+  return `${group?.label || ''} · ${documentSortOptionLabel(option)}`;
+});
+
+// ── Folder tree (documents uploaded as a folder keep their relative path) ──
+// The directory sidebar is now the sole folder navigation and starts expanded.
+const FOLDER_TREE_COLLAPSED_KEY = 'weknora.kbDirectorySidebarCollapsed';
+const readStoredFlag = (key: string, fallback = false) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : raw === 'true';
+  } catch {
+    return fallback;
+  }
+};
+const writeStoredFlag = (key: string, value: boolean) => {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // Private-mode storage failures must not break navigation.
+  }
+};
+const folderTree = ref<KnowledgeFolderTree | null>(null);
+const folderTreeLoading = ref(false);
+// The folder being browsed; ROOT_FOLDER_PATH ('') is the knowledge base top
+// level, a real node of the tree rather than a separate mode.
+const selectedFolderPath = ref<string>(ROOT_FOLDER_PATH);
+const folderTreeCollapsed = ref(readStoredFlag(FOLDER_TREE_COLLAPSED_KEY));
+const hasFolders = computed(() => (folderTree.value?.folders?.length ?? 0) > 0);
+// The folder column only earns its space once the knowledge base actually has
+// folders, so knowledge bases filled with single-file uploads look unchanged.
+const showFolderTree = computed(() => !isFAQ.value && hasFolders.value);
+// Browsing lists one folder's own contents; filtering searches its whole
+// subtree. There is no mode switch: the list follows what the user is doing.
+const isFiltering = computed(() =>
+  isFilteringDocuments({
+    keyword: docSearchKeyword.value,
+    tagIds: selectedTagIds.value,
+    fileType: selectedFileType.value,
+    parseStatus: selectedParseStatus.value,
+    source: selectedSource.value,
+    timeRange: updatedTimeRange.value,
+  }),
+);
+// A row's folder is worth showing only when the list can span folders.
+const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
+const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
+
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
   return {
@@ -569,8 +813,27 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    ...getDocumentSortParams(selectedDocumentSort.value),
+    folder_path: selectedFolderPath.value,
+    // Filtering searches descendants; browsing shows this folder's documents.
+    folder_recursive: isFiltering.value,
   };
 });
+
+const handleDocumentSortSelect = (value: DocumentSortValue) => {
+  documentSortPanelVisible.value = false;
+  if (selectedDocumentSort.value === value) return;
+
+  selectedDocumentSort.value = value;
+  clearSelection();
+  resetPage();
+  if (knowledgeScroll.value) {
+    knowledgeScroll.value.scrollTop = 0;
+  }
+  if (kbId.value && !isFAQ.value) {
+    loadKnowledgeFiles(kbId.value);
+  }
+};
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -578,62 +841,7 @@ const tagMap = computed<Record<string, any>>(() => {
   });
   return map;
 });
-const sidebarCategoryCount = computed(() => tagTotal.value || tagList.value.length);
-const sidebarTags = computed(() => {
-  const list = tagList.value;
-  const selectedIds = selectedTagIds.value;
-  if (selectedIds.length === 0) {
-    return list;
-  }
-  const missing = selectedIds
-    .filter((id) => !list.some((tag) => tag.id === id))
-    .map((id) => tagMap.value[id])
-    .filter(Boolean);
-  if (missing.length === 0) {
-    return list;
-  }
-  return [...missing, ...list];
-});
 
-const activeTagFilterLabel = computed(() => {
-  if (selectedTagIds.value.length === 0) {
-    return tagFilterCleared.value
-      ? t('knowledgeBase.tagFilterPlaceholder')
-      : t('knowledgeBase.allTags');
-  }
-  if (selectedTagIds.value.length === 1) {
-    const id = selectedTagIds.value[0];
-    return tagMap.value[id]?.name || t('knowledgeBase.allTags');
-  }
-  return t('knowledgeBase.tagFilterMulti', { count: selectedTagIds.value.length });
-});
-
-const activeTagFilterTitle = computed(() => {
-  if (selectedTagIds.value.length === 0) {
-    return t('knowledgeBase.tagFilterTitle');
-  }
-  const names = selectedTagIds.value
-    .map((id) => tagMap.value[id]?.name)
-    .filter(Boolean);
-  return names.length > 0 ? names.join('、') : t('knowledgeBase.tagFilterTitle');
-});
-
-const isTagFilterActive = (tagId: string) => selectedTagIds.value.includes(tagId);
-
-// 标签编辑弹窗
-const tagEditDialogVisible = ref(false);
-const tagEditTarget = ref<KnowledgeCard | null>(null);
-
-function openTagEditDialog(item: KnowledgeCard) {
-  tagEditTarget.value = item;
-  tagEditDialogVisible.value = true;
-}
-
-function onTagEditConfirm(tagIds: string[]) {
-  if (tagEditTarget.value) {
-    handleKnowledgeTagChange(tagEditTarget.value.id, tagIds);
-  }
-}
 const getPageSize = () => {
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
   const itemHeight = 148;
@@ -641,12 +849,6 @@ const getPageSize = () => {
   pageSize = Math.max(35, itemsInView);
 }
 getPageSize()
-// 直接调用 API 获取知识库文件列表
-const getTagName = (tagId?: string | number) => {
-  if (!tagId && tagId !== 0) return '';
-  const key = String(tagId);
-  return tagMap.value[key]?.name || '';
-};
 
 const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
   if (!kbIdValue) return Promise.resolve();
@@ -668,6 +870,103 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
 };
 
 const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
+
+const loadFolderTree = async (kbIdValue: string) => {
+  if (!kbIdValue || isFAQ.value) {
+    folderTree.value = null;
+    return;
+  }
+  folderTreeLoading.value = true;
+  try {
+    const res: any = await listKnowledgeFolders(kbIdValue);
+    if (!isCurrentKb(kbIdValue)) return;
+    folderTree.value = (res?.data as KnowledgeFolderTree) || null;
+    // A folder can disappear (its last document was deleted or moved); fall
+    // back to the root instead of leaving an empty, unreachable view.
+    if (!folderExistsInTree(folderTree.value?.folders || [], selectedFolderPath.value)) {
+      selectedFolderPath.value = ROOT_FOLDER_PATH;
+    }
+  } catch (error) {
+    if (!isCurrentKb(kbIdValue)) return;
+    console.error('Failed to load knowledge folders', error);
+    folderTree.value = null;
+  } finally {
+    if (isCurrentKb(kbIdValue)) {
+      folderTreeLoading.value = false;
+    }
+  }
+};
+
+const handleFolderSelect = (path: string) => {
+  if (selectedFolderPath.value === path) return;
+  selectedFolderPath.value = path;
+};
+
+// ── Re-filing documents and renaming folders ──
+// folder_path is display-only, so both operations are a plain column update:
+// nothing is re-parsed, re-chunked or re-embedded.
+
+// Flat folder list shared by every "move to folder" picker.
+const folderOptions = computed(() => {
+  const result: Array<{ path: string; name: string; depth: number }> = [];
+  const walk = (nodes: KnowledgeFolderTree['folders'], depth: number) => {
+    nodes.forEach((node) => {
+      result.push({ path: node.path, name: node.name, depth });
+      walk(node.children || [], depth + 1);
+    });
+  };
+  walk(folderTree.value?.folders || [], 0);
+  return result;
+});
+
+const moveKnowledgeIntoFolder = async (ids: string[], folderPath: string) => {
+  if (!kbId.value || ids.length === 0) return;
+  try {
+    await moveKnowledgeToFolder(kbId.value, ids, folderPath);
+    MessagePlugin.success(t('knowledgeBase.moveToFolder.success', { count: ids.length }));
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    await loadKnowledgeFiles(kbId.value);
+    await loadFolderTree(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.moveToFolder.failed'));
+  }
+};
+
+const handleFolderRename = async ({ from, to }: { from: string; to: string }) => {
+  if (!kbId.value || !to || from === to) return;
+  if (!canMoveFolderTo(from, to)) {
+    MessagePlugin.warning(t('knowledgeBase.folderTree.renameInvalid'));
+    return;
+  }
+  try {
+    const res: any = await renameKnowledgeFolder(kbId.value, from, to);
+    const movedCount = res?.data?.moved_count ?? 0;
+    if (movedCount === 0) {
+      MessagePlugin.warning(t('knowledgeBase.folderTree.renameFailed'));
+      await loadFolderTree(kbId.value);
+      return;
+    }
+    MessagePlugin.success(t('knowledgeBase.folderTree.renameSuccess'));
+    // Follow the folder to its new path so the user stays where they were.
+    if (selectedFolderPath.value === from) {
+      selectedFolderPath.value = to;
+    } else if (selectedFolderPath.value.startsWith(`${from}/`)) {
+      selectedFolderPath.value = to + selectedFolderPath.value.slice(from.length);
+    }
+    resetPage();
+    await loadKnowledgeFiles(kbId.value);
+    await loadFolderTree(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.folderTree.renameFailed'));
+  }
+};
+
+const handleFolderTreeCollapsedChange = (value: boolean) => {
+  folderTreeCollapsed.value = value;
+  writeStoredFlag(FOLDER_TREE_COLLAPSED_KEY, value);
+};
 
 const loadTags = async (kbIdValue: string, reset = false) => {
   if (!kbIdValue) {
@@ -731,6 +1030,9 @@ const loadTags = async (kbIdValue: string, reset = false) => {
 };
 
 const handleTagFilterChange = (tagIds: string[]) => {
+  selectedTagNames.value = Object.fromEntries(tagIds.map(id => [
+    id, tagMap.value[id]?.name || selectedTagNames.value[id] || t('knowledgeBase.columnTag'),
+  ]));
   selectedTagIds.value = tagIds;
   // 同步更新 store 中的 selectedTagIds，供 menu.vue 上传时使用
   uiStore.clearSelectedTagIds();
@@ -738,68 +1040,13 @@ const handleTagFilterChange = (tagIds: string[]) => {
   resetPage();
 };
 
-const handleTagRowClick = (tagId: string) => {
-  const next = new Set(selectedTagIds.value);
-  if (next.has(tagId)) {
-    next.delete(tagId);
-  } else {
-    next.add(tagId);
-  }
-  if (next.size > 0) {
-    tagFilterCleared.value = false;
-  }
-  handleTagFilterChange([...next]);
-};
-
-const clearTagFilter = () => {
-  tagFilterCleared.value = true;
-  handleTagFilterChange([]);
-};
-
-const openTagManageDrawer = () => {
-  tagFilterPanelVisible.value = false;
-  tagManageDrawerVisible.value = true;
-};
-
-const openTagManageFromEditDialog = () => {
-  tagEditDialogVisible.value = false;
-  tagManageDrawerVisible.value = true;
-};
-
-const onTagManageChanged = (payload?: { deletedTagId?: string }) => {
-  if (!kbId.value) return;
+const onTagCatalogChanged = (payload?: { deletedTagId?: string }) => {
   void loadTags(kbId.value, true);
-  if (payload?.deletedTagId && selectedTagIds.value.includes(payload.deletedTagId)) {
-    selectedTagIds.value = [];
-    handleTagFilterChange([]);
-    resetPage();
-    loadKnowledgeFiles(kbId.value);
-    return;
-  }
   if (payload?.deletedTagId) {
-    void (async () => {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      if (!kbId.value) return;
-      resetPage();
-      await loadKnowledgeFiles(kbId.value);
-      await loadTags(kbId.value, true);
-    })();
-    return;
+    handleTagFilterChange(selectedTagIds.value.filter(id => id !== payload.deletedTagId));
   }
   resetPage();
-  loadKnowledgeFiles(kbId.value);
-};
-
-const handleKnowledgeTagChange = async (knowledgeId: string, tagIds: string[]) => {
-  try {
-    await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIds } });
-    MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
-    resetPage(); // Reset page counter to 1 when reloading files after tag change
-    loadKnowledgeFiles(kbId.value);
-    loadTags(kbId.value, true);
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
-  }
+  void loadKnowledgeFiles(kbId.value);
 };
 
 const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
@@ -816,15 +1063,17 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
 
     kbInfo.value = data;
     selectedTagIds.value = [];
-    tagFilterCleared.value = false;
+    selectedTagNames.value = {};
     uiStore.clearSelectedTagIds();
     // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
     uiStore.clearSelectedTagIds();
     if (!isFAQ.value) {
       loadKnowledgeFiles(targetKbId);
+      void loadFolderTree(targetKbId);
     } else {
       cardList.value = [];
       total.value = 0;
+      folderTree.value = null;
     }
     loadTags(targetKbId, true);
   } catch (error) {
@@ -899,6 +1148,8 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     tagSearchQuery.value = '';
     tagPage.value = 1;
     uiStore.clearSelectedTagIds();
+    folderTree.value = null;
+    selectedFolderPath.value = ROOT_FOLDER_PATH;
   }
   loadKnowledgeBaseInfo(newKbId);
 }, { immediate: true });
@@ -953,15 +1204,31 @@ watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
   }
 }, { deep: true });
 
+// 切换目录只改变列表范围，行为与其他筛选一致。浏览态与筛选态之间的切换由各筛选项
+// 自身的 watcher 触发刷新，这里不重复请求。
+watch(selectedFolderPath, () => {
+  if (!kbId.value || isFAQ.value) return;
+  clearSelection();
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
+});
+
 // 监听文件上传事件
 const handleFileUploaded = (event: CustomEvent) => {
   const uploadedKbId = event.detail.kbId;
   console.log('接收到文件上传事件，上传的知识库ID:', uploadedKbId, '当前知识库ID:', kbId.value);
   if (uploadedKbId && uploadedKbId === kbId.value && !isFAQ.value) {
+    // Mid-batch refreshes (settled === false) only bring new rows and folders
+    // in, and are skipped once the user scrolled past the first page because
+    // reloading resets the list to it. The batch's final event refreshes fully.
+    const midBatch = event.detail.settled === false;
+    if (midBatch && page > 1) return;
     console.log('匹配当前知识库，开始刷新文件列表');
     // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
     resetPage(); // Reset page counter when reloading files after upload
     loadKnowledgeFiles(uploadedKbId);
+    void loadFolderTree(uploadedKbId);
+    if (midBatch) return;
     loadTags(uploadedKbId);
     // 启动几次探测，尽快让面包屑的"索引中"亮起。
     scheduleWikiStatusProbes();
@@ -980,6 +1247,16 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
   }
 };
 
+// Global file drops are captured by the platform shell. Route them back into
+// the same confirmation flow as the page upload button so tags and per-batch
+// processing settings are never skipped.
+const handleKnowledgeFileDrop = (event: CustomEvent) => {
+  const eventKbId = event.detail?.kbId;
+  const files = Array.isArray(event.detail?.files) ? event.detail.files : [];
+  if (eventKbId !== kbId.value || isFAQ.value || files.length === 0) return;
+  handleUploadSourceFiles(files);
+};
+
 // Auto-open document detail when navigated with ?knowledge_id=xxx.
 // Note: this runs both when the KB page mounts with a query param AND when a
 // subsequent in-page navigation (e.g. from the global command palette) only
@@ -990,18 +1267,37 @@ const pendingKnowledgeId = ref<string | null>(
   (route.query.knowledge_id as string) || null
 );
 
-const tryAutoOpenDocument = () => {
-  if (!pendingKnowledgeId.value || !cardList.value?.length) return;
+let autoOpenRequest = 0;
+
+const tryAutoOpenDocument = async () => {
+  if (!pendingKnowledgeId.value) return;
   const targetId = pendingKnowledgeId.value;
   pendingKnowledgeId.value = null;
+  const request = ++autoOpenRequest;
   const card = cardList.value.find((c: KnowledgeCard) => c.id === targetId);
-  if (card) {
-    nextTick(() => openCardDetails(card));
-  } else {
-    nextTick(() => {
-      openCardDetails({ id: targetId } as KnowledgeCard);
-    });
+
+  // The current card list only contains the folder being browsed. A document
+  // opened from chat references may live in any nested folder, so resolve its
+  // folder from the detail endpoint before opening the drawer. Otherwise the
+  // drawer opens correctly while the page misleadingly remains at KB root.
+  let target = card || ({ id: targetId } as KnowledgeCard);
+  try {
+    const response: any = await getKnowledgeDetails(targetId);
+    if (request !== autoOpenRequest) return;
+    const detail = response?.data || response;
+    if (detail && typeof detail === 'object') {
+      target = { ...target, ...detail, id: targetId } as KnowledgeCard;
+      selectedFolderPath.value = detail.folder_path || ROOT_FOLDER_PATH;
+    }
+  } catch (error) {
+    // Keep the previous ID-only fallback: getCardDetails will surface the
+    // normal detail loading error, while links to root-level files still work.
+    console.error('Failed to resolve referenced document folder', error);
   }
+
+  if (request !== autoOpenRequest) return;
+  await nextTick();
+  openCardDetails(target);
 };
 
 // React to later ?knowledge_id= changes on the same KB route (no remount).
@@ -1010,8 +1306,6 @@ watch(
   (newId) => {
     if (typeof newId !== 'string' || !newId) return;
     pendingKnowledgeId.value = newId;
-    // cardList is almost always already loaded at this point; if not, the
-    // cardList watcher below will pick it up.
     tryAutoOpenDocument();
   },
 );
@@ -1033,12 +1327,14 @@ onMounted(() => {
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
   if (timeout !== null) {
@@ -1050,8 +1346,8 @@ watch(() => cardList.value, (newValue) => {
   if (isFAQ.value) return;
   docListLoading.value = false;
 
-  // Auto-open document if navigated with ?knowledge_id=xxx
-  if (pendingKnowledgeId.value && newValue?.length) {
+  // Auto-open document if navigated with ?knowledge_id=xxx.
+  if (pendingKnowledgeId.value) {
     tryAutoOpenDocument();
   }
 
@@ -1063,7 +1359,8 @@ watch(() => cardList.value, (newValue) => {
     timeout = null;
   }
   if (analyzeList.length) {
-    updateStatus(analyzeList)
+    // The deep watch refires as stalled_minutes ticks; keep the backoff.
+    updateStatus(analyzeList, pollDelayFor(analyzeList))
   }
 
 }, { deep: true })
@@ -1084,6 +1381,11 @@ type KnowledgeCard = {
   metadata?: any;
   error_message?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
+  last_activity_at?: string;
+  // Minutes without progress while in flight; 0 unless it looks stuck.
+  stalled_minutes?: number;
+  // Server verdict on a quiet row: 'queued' (backlogged) or 'stalled'.
+  stall_state?: string;
 };
 // needsStatusPolling decides whether a card row is still "in flight"
 // enough that the doc list should keep refreshing it. Keep in sync with
@@ -1095,7 +1397,14 @@ const needsStatusPolling = (item: KnowledgeCard) => {
   return knowledgeNeedsStatusPolling(item);
 };
 
-const updateStatus = (analyzeList: KnowledgeCard[]) => {
+// Back off once every in-flight row looks stuck: nothing is moving, and a
+// page left open on it should not keep hammering the batch endpoint.
+const pollDelayFor = (items: KnowledgeCard[]) =>
+  items.length > 0 && items.every(item => (item.stalled_minutes ?? 0) > 0)
+    ? STALLED_POLL_INTERVAL_MS
+    : 1500;
+
+const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
@@ -1108,7 +1417,6 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
   }
   timeout = setTimeout(() => {
     batchQueryKnowledge(query).then((result: any) => {
-      let hasChanges = false;
       let shouldRefreshWikiStatus = false;
       if (result.success && result.data) {
         (result.data as KnowledgeCard[]).forEach((item: KnowledgeCard) => {
@@ -1124,6 +1432,11 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
             }
           }
 
+          const card = cardList.value[index];
+          card.last_activity_at = item.last_activity_at;
+          card.stall_state = item.stall_state;
+          card.stalled_minutes = stalledMinutes({ parse_status: parseStatus, last_activity_at: item.last_activity_at });
+
           if (cardList.value[index].parse_status !== parseStatus ||
             cardList.value[index].summary_status !== item.summary_status ||
             cardList.value[index].description !== item.description) {
@@ -1137,9 +1450,18 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
             cardList.value[index].summary_status = item.summary_status;
             cardList.value[index].description = item.description;
             delete traceAvailableById[item.id];
-            hasChanges = true;
-          }
+            }
         });
+        // A requested row the batch no longer returns is gone (deleted
+        // elsewhere, replaced by a data-source sync). Left in the list it
+        // kept its in-flight status, so its spinner and this poll never ended.
+        const returnedIds = new Set((result.data as KnowledgeCard[]).map(item => item.id));
+        const goneIds = new Set(analyzeList.map(item => item.id).filter(id => !returnedIds.has(id)));
+        if (goneIds.size > 0) {
+          const before = cardList.value.length;
+          cardList.value = cardList.value.filter(card => !goneIds.has(card.id));
+          total.value = Math.max(0, total.value - (before - cardList.value.length));
+        }
       }
       if (shouldRefreshWikiStatus) {
         void fetchWikiStatusOnce();
@@ -1149,16 +1471,16 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
       // The watch will clear this timeout if it triggers.
       const stillPending = cardList.value.filter(needsStatusPolling);
       if (stillPending.length > 0) {
-        updateStatus(stillPending);
+        updateStatus(stillPending, pollDelayFor(stillPending));
       }
     }).catch((_err) => {
       // 错误处理
       const stillPending = cardList.value.filter(needsStatusPolling);
       if (stillPending.length > 0) {
-        updateStatus(stillPending);
+        updateStatus(stillPending, pollDelayFor(stillPending));
       }
     });
-  }, 1500);
+  }, delay);
 };
 
 
@@ -1187,19 +1509,7 @@ const closeCardMoreMenu = (index: number) => {
 
 const confirmDeleteKnowledge = (index: number, item: KnowledgeCard) => {
   closeCardMoreMenu(index);
-  const deletedId = item?.id;
-  delKnowledge(index, item, async () => {
-    resetPage();
-    const maxPolls = 30;
-    const delayMs = 400;
-    for (let i = 0; i < maxPolls; i++) {
-      await loadKnowledgeFiles(kbId.value);
-      const stillPresent = (cardList.value || []).some((c: KnowledgeCard) => c.id === deletedId);
-      if (!stillPresent) break;
-      await new Promise<void>((r) => setTimeout(r, delayMs));
-    }
-    loadTags(kbId.value, true);
-  });
+  void deleteKnowledgeDocuments([item.id], () => delKnowledgeDetails(item.id), false);
 };
 
 const onReparseMenuClick = (index: number, item: KnowledgeCard) => {
@@ -1260,6 +1570,7 @@ const handleMoveConfirm = async () => {
       moveSubmitting.value = false;
       resetPage(); // Reset page counter when reloading files after move
       loadKnowledgeFiles(kbId.value);
+      void loadFolderTree(kbId.value);
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.moveFailed'));
@@ -1285,6 +1596,7 @@ const startMovePoll = (taskId: string) => {
         }
         resetPage(); // Reset page counter when reloading files after move completion
         loadKnowledgeFiles(kbId.value);
+        void loadFolderTree(kbId.value);
       } else if (data.status === 'failed') {
         stopMovePoll();
         moveSubmitting.value = false;
@@ -1307,15 +1619,9 @@ const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: s
   if (savedKbId === kbId.value && !isFAQ.value) {
     resetPage(); // Reset page counter when reloading files after manual edit
     loadKnowledgeFiles(savedKbId);
+    void loadFolderTree(savedKbId);
   }
 };
-
-const documentTitle = computed(() => {
-  if (kbInfo.value?.name) {
-    return `${kbInfo.value.name} · ${t('knowledgeEditor.document.title')}`;
-  }
-  return t('knowledgeEditor.document.title');
-});
 
 const ensureDocumentKbReady = () => {
   if (isFAQ.value) {
@@ -1344,136 +1650,46 @@ const ensureDocumentKbReady = () => {
   return true;
 };
 
-
-const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
-const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
-
 const uploadConfirmStore = useUploadConfirmStore();
 
-const getFolderUploadFileName = (file: File) => {
-  const relativePath = (file as any).webkitRelativePath;
-  if (!relativePath) return undefined;
-  const pathParts = relativePath.split('/');
-  if (pathParts.length <= 2) return undefined;
-  const subPath = pathParts.slice(1, -1).join('/');
-  return `${subPath}/${file.name}`;
-};
+const uploadTasksStore = useUploadTasksStore();
 
-const showUploadResultMessages = (
-  successCount: number,
-  failCount: number,
-  totalCount: number,
-  mode: 'document' | 'folder',
-) => {
-  if (mode === 'folder') {
-    if (failCount === 0) {
-      MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }));
-    } else if (successCount > 0) {
-      MessagePlugin.warning(t('knowledgeBase.uploadPartialSuccess', { success: successCount, fail: failCount }));
-    } else {
-      MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
-    }
-    return;
-  }
-
-  if (totalCount === 1) {
-    if (successCount === 1) {
-      MessagePlugin.success(t('knowledgeBase.uploadSuccess'));
-    }
-    return;
-  }
-
-  if (failCount === 0) {
-    MessagePlugin.success(t('knowledgeBase.allUploadSuccess', { count: successCount }));
-  } else if (successCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.partialUploadSuccess', { success: successCount, fail: failCount }));
-  } else {
-    MessagePlugin.error(t('knowledgeBase.allUploadFailed', { count: failCount }));
-  }
-};
-
-const executeUploadBatch = async (
+// Hands the batch to the global upload queue, which runs the transfers,
+// reports progress in its floating panel and refreshes this page as files land.
+const enqueueUploads = (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides } = {},
+  options: {
+    processConfig?: KnowledgeProcessOverrides;
+    tagIds?: string[];
+    /** Destination folder confirmed in the upload dialog; '' is the root. */
+    targetFolder?: string;
+  } = {},
 ) => {
   const targetKbId = kbId.value;
-  if (!targetKbId || files.length === 0) {
-    return { successCount: 0, failCount: files.length };
-  }
-
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
-  let successCount = 0;
-  let failCount = 0;
-  const totalCount = files.length;
-  const hasFolderPaths = files.some((file) => {
-    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-    return !!relativePath && relativePath.split('/').length > 2;
+  if (!targetKbId || files.length === 0) return;
+  const targetFolder = options.targetFolder || ROOT_FOLDER_PATH;
+  uploadTasksStore.enqueue({
+    kbId: targetKbId,
+    kbName: kbInfo.value?.name || '',
+    targetFolder,
+    tagIds: options.tagIds,
+    processConfig: options.processConfig,
+    uploads: files.map(file => ({ file, fileName: buildUploadFileName(file, targetFolder) })),
   });
-
-  for (const file of files) {
-    try {
-      const uploadData: {
-        file: File
-        tag_ids?: string[]
-        fileName?: string
-        process_config?: KnowledgeProcessOverrides
-      } = { file, tag_ids: tagIdsToUpload };
-
-      const fileName = getFolderUploadFileName(file);
-      if (fileName) uploadData.fileName = fileName;
-      if (options.processConfig) {
-        uploadData.process_config = options.processConfig;
-      }
-
-      const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
-      const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
-      if (isSuccess) {
-        successCount++;
-      } else {
-        failCount++;
-        if (totalCount === 1) {
-          let errorMessage = t('knowledgeBase.uploadFailed');
-          if (responseData?.error?.message) {
-            errorMessage = responseData.error.message;
-          } else if (responseData?.message) {
-            errorMessage = responseData.message;
-          }
-          if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
-            errorMessage = t('knowledgeBase.fileExists');
-          }
-          MessagePlugin.error(errorMessage);
-        }
-      }
-    } catch (error: any) {
-      failCount++;
-      if (totalCount === 1) {
-        let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
-        if (error?.code === 'duplicate_file') {
-          errorMessage = t('knowledgeBase.fileExists');
-        }
-        MessagePlugin.error(errorMessage);
-      }
-    }
-  }
-
-  if (successCount > 0) {
-    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId },
-    }));
-  }
-
-  showUploadResultMessages(successCount, failCount, totalCount, hasFolderPaths ? 'folder' : 'document');
-  return { successCount, failCount };
 };
 
-const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
+const executeUrlImport = async (
+  url: string,
+  processConfig?: KnowledgeProcessOverrides,
+  tagIds?: string[],
+) => {
   const targetKbId = kbId.value;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
   }
 
-  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
+  const tagIdsToUpload = tagIds && tagIds.length > 0 ? [...tagIds] : undefined;
   try {
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
@@ -1515,20 +1731,18 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const files = result.files || [];
   const urls = result.urls || [];
   const processConfig = result.processConfig;
+  const tagIds = result.tagIds || [];
 
   if (files.length > 0) {
-    const hasFolderPaths = files.some((file) => {
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-      return !!relativePath && relativePath.split('/').length > 2;
+    enqueueUploads(files, {
+      processConfig,
+      tagIds,
+      targetFolder: result.targetFolder || ROOT_FOLDER_PATH,
     });
-    if (hasFolderPaths) {
-      MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
-    }
-    await executeUploadBatch(files, { processConfig });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig);
+    await executeUrlImport(url, processConfig, tagIds);
   }
 };
 
@@ -1539,10 +1753,15 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
     const result = await uploadConfirmStore.open({
       mode: 'file',
       kbInfo: kbInfo.value,
+      tagIds: [...selectedTagIds.value],
       files,
       urls,
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
+      // Pre-fill the destination with the folder being browsed; the dialog shows
+      // it and lets the user pick another folder (or the root) before confirming.
+      targetFolder: selectedFolderPath.value,
+      folderOptions: folderOptions.value,
     });
     await handleUploadConfirmResult(result);
   } catch {
@@ -1719,6 +1938,18 @@ const getDoc = (page: number) => {
   getfDetails(details.id, page)
 };
 
+const syncDocumentSummaryState = (state: { id?: string; summary_status?: string; description?: string }) => {
+  if (!state?.id) return;
+  const card = cardList.value.find((item: KnowledgeCard) => item.id === state.id);
+  if (!card) return;
+  if (typeof state.summary_status === 'string' && state.summary_status) {
+    card.summary_status = state.summary_status;
+  }
+  if (typeof state.description === 'string') {
+    card.description = state.description;
+  }
+};
+
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
   const items = cardList.value || [];
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
@@ -1794,7 +2025,7 @@ const {
   itemSelector: '.knowledge-card[data-select-id], .doc-list-row[data-select-id]',
   selectedIds,
   getItemId: (el) => el.dataset.selectId || null,
-  enabled: computed(() => canEdit.value && !isFAQ.value && cardList.value.length > 0),
+  enabled: computed(() => (canEdit.value || canDownloadKnowledge.value) && !isFAQ.value && cardList.value.length > 0),
   onSelectionStart: () => {
     batchMode.value = true;
   },
@@ -1815,35 +2046,111 @@ const openKnowledgeItem = (item: KnowledgeCard) => {
   openCardDetails(item);
 };
 
-const confirmBatchDelete = async () => {
-  if (batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
-  const ids = Array.from(selectedIds.value);
-  const deletedIdSet = new Set(ids);
+// Stop observing a previous KB when navigating, including away and back.
+let deleteGeneration = 0;
+watch(kbId, () => {
+  deleteGeneration++;
+  batchDeleting.value = false;
+});
+onUnmounted(() => { deleteGeneration++; });
+
+const deleteKnowledgeDocuments = async (
+  ids: string[],
+  submit: () => Promise<any>,
+  batch: boolean,
+) => {
+  if (batchDeleting.value || batchReparsing.value || batchDownloading.value || ids.length === 0) return;
+  const targetKbId = kbId.value;
+  const generation = ++deleteGeneration;
+  const isActive = () => generation === deleteGeneration && isCurrentKb(targetKbId);
   batchDeleting.value = true;
+  let submitted = false;
   try {
-    const res: any = await batchDeleteKnowledge(kbId.value, ids);
-    if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
+    const res = await submit();
+    if (!isActive()) return;
+    if (!res?.success) {
+      MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
+      return;
+    }
+    submitted = true;
+    MessagePlugin.info(t('knowledgeBase.deleteSubmitted'));
+    if (batch) {
       clearSelection();
       batchMode.value = false;
-      resetPage();
-      // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
-      const maxPolls = 30;
-      const delayMs = 400;
-      for (let i = 0; i < maxPolls; i++) {
-        await loadKnowledgeFiles(kbId.value);
-        const stillPresent = (cardList.value || []).some((c: KnowledgeCard) => deletedIdSet.has(c.id));
-        if (!stillPresent) break;
-        await new Promise<void>((r) => setTimeout(r, delayMs));
-      }
-      loadTags(kbId.value, true);
+    }
+    const result = await waitForKnowledgeDeletion(
+      ids,
+      async (queryIds) => {
+        const query = new URLSearchParams();
+        queryIds.forEach(id => query.append('ids', id));
+        return await batchQueryKnowledge(query.toString(), targetKbId) as any;
+      },
+      { isActive },
+    );
+    if (!isActive() || result === 'cancelled') return;
+    if (result === 'completed') {
+      MessagePlugin.success(batch
+        ? t('knowledgeBase.batchDeleteSuccess', { count: ids.length })
+        : t('knowledgeBase.deleteSuccess'));
+    } else if (result === 'failed') {
+      MessagePlugin.error(t('knowledgeBase.deleteTaskFailed'));
     } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
+      MessagePlugin.info(t('knowledgeBase.deletePending'));
     }
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
+    if (!isActive()) return;
+    if (submitted) {
+      MessagePlugin.warning(t('knowledgeBase.deleteStatusUnavailable'));
+    } else {
+      MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
+    }
   } finally {
-    batchDeleting.value = false;
+    if (isActive()) {
+      batchDeleting.value = false;
+      if (submitted) {
+        resetPage();
+        await loadKnowledgeFiles(targetKbId);
+        if (isActive()) {
+          void loadTags(targetKbId, true);
+          void loadFolderTree(targetKbId);
+        }
+      }
+    }
+  }
+};
+
+const confirmBatchDelete = () => {
+  const targetKbId = kbId.value;
+  const ids = Array.from(selectedIds.value);
+  return deleteKnowledgeDocuments(ids, () => batchDeleteKnowledge(targetKbId, ids), true);
+};
+
+const handleBatchTag = () => {
+  if (batchDeleting.value || batchReparsing.value || batchTagging.value || batchDownloading.value || selectedIds.value.size === 0) return;
+  batchTagDialogVisible.value = true;
+};
+
+const onBatchTagConfirm = async (tagIds: string[]) => {
+  if (batchTagging.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  const updateMap: Record<string, string[]> = {};
+  for (const id of ids) {
+    updateMap[id] = tagIds;
+  }
+  batchTagging.value = true;
+  try {
+    await updateKnowledgeTagBatch({ updates: updateMap });
+    MessagePlugin.success(t('knowledgeBase.batchTagSuccess', { count: ids.length }));
+    batchTagDialogVisible.value = false;
+    clearSelection();
+    batchMode.value = false;
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+    loadTags(kbId.value, true);
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchTagFailed'));
+  } finally {
+    batchTagging.value = false;
   }
 };
 
@@ -1858,12 +2165,34 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
   }
 };
 
+const downloadKnowledge = async (item: KnowledgeCard) => {
+  if (!item?.id) return;
+  try {
+    const file = await downKnowledgeDetails(item.id);
+    const objectUrl = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    const fileName = resolveKnowledgeDownloadFileName(item);
+    link.style.display = 'none';
+    link.href = objectUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    nextTick(() => {
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    });
+  } catch {
+    MessagePlugin.error(t('file.downloadFailed'));
+  }
+};
+
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') {
     if (isParseInFlight(item.parse_status)) return onReparseMenuClick(idx, item);
@@ -1878,10 +2207,11 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
@@ -1925,37 +2255,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     loadKnowledgeBaseInfo(kbIdValue, true);
   }
 };
-
-const getTitle = (session_id: string, value: string) => {
-  const now = new Date().toISOString();
-  let obj = {
-    title: t('knowledgeBase.newSession'),
-    path: `chat/${session_id}`,
-    id: session_id,
-    isMore: false,
-    isNoTitle: true,
-    created_at: now,
-    updated_at: now
-  };
-  usemenuStore.updataMenuChildren(obj);
-  usemenuStore.changeIsFirstSession(true);
-  usemenuStore.changeFirstQuery(value);
-  router.push(`/platform/chat/${session_id}`);
-};
-
-async function createNewSession(value: string): Promise<void> {
-  // Session 不再和知识库绑定，直接创建 Session
-  createSessions({}).then(res => {
-    if (res.data && res.data.id) {
-      getTitle(res.data.id, value);
-    } else {
-      // 错误处理
-      console.error(t('knowledgeBase.createSessionFailed'));
-    }
-  }).catch(error => {
-    console.error(t('knowledgeBase.createSessionError'), error);
-  });
-}
 </script>
 
 <template>
@@ -1990,42 +2289,30 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <template v-if="isWiki">
-                <span :class="['breadcrumb-tab', { active: activeKbTab === 'documents' }]"
-                  @click="activeKbTab = 'documents'">{{ $t('knowledgeEditor.wikiBrowser.tabDocuments') }}</span>
-                <span class="breadcrumb-tab-sep">/</span>
-                <span :class="['breadcrumb-tab', { active: activeKbTab === 'wiki', indexing: wikiIsIndexing }]"
-                  @click="activeKbTab = 'wiki'">
-                  Wiki
-                  <t-tooltip v-if="wikiIsIndexing" :content="wikiIndexingTip" placement="bottom">
-                    <t-loading size="small" class="breadcrumb-tab-indicator" />
-                  </t-tooltip>
-                </span>
-                <span class="breadcrumb-tab-sep">/</span>
-                <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.tabGraphTip')" placement="bottom">
-                  <span :class="['breadcrumb-tab', { active: activeKbTab === 'graph', indexing: wikiIsIndexing }]"
-                    @click="activeKbTab = 'graph'">
-                    {{ $t('knowledgeEditor.wikiBrowser.tabGraph') }}
-                    <t-tooltip v-if="wikiIsIndexing" :content="wikiIndexingTip" placement="bottom">
-                      <t-loading size="small" class="breadcrumb-tab-indicator" />
-                    </t-tooltip>
-                  </span>
+              <div class="kb-view-tabs" role="tablist" :aria-label="$t('knowledgeEditor.wikiBrowser.viewTabs')">
+                <t-tooltip v-for="tab in kbViewTabs" :key="tab.key" :content="tab.tip" placement="bottom">
+                  <button type="button" role="tab" class="kb-view-tab"
+                    :class="{ active: shownKbTab === tab.key, indexing: tab.indexing }"
+                    :aria-selected="shownKbTab === tab.key" @click="activeKbTab = tab.key">
+                    <t-loading v-if="tab.indexing" size="small" class="kb-view-tab__indicator" />
+                    <t-icon v-else :name="tab.icon" size="16px" />
+                    <span>{{ tab.label }}</span>
+                  </button>
                 </t-tooltip>
-              </template>
-              <span v-else class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
+              </div>
             </h2>
             <!-- 标题行右侧的动作锚点：聚拢"信息"和"设置"两个圆形按钮。 -->
             <div class="kb-title-actions">
               <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
                 :supported-file-types="[...supportedFileTypes]" />
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
-                <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
+                <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.settings')" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
                 </button>
               </t-tooltip>
             </div>
           </div>
-          <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
+          <p v-if="kbInfo?.description" class="document-subtitle">{{ kbInfo.description }}</p>
           <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
             <t-icon name="info-circle" class="parser-hint-icon" />
             <span>{{$t('knowledgeBase.unsupportedTypesHint', {
@@ -2049,167 +2336,161 @@ async function createNewSession(value: string): Promise<void> {
           @view-graph="onViewWikiInGraph" />
       </div>
 
-      <template v-if="activeKbTab === 'documents' || !isWiki">
+      <!-- Image Gallery (4th tab) -->
+      <ImageGallery v-if="activeKbTab === 'gallery' && kbId" :knowledge-base-id="kbId" @open-source-doc="openSourceDoc" />
+
+      <!-- wiki/graph tabs only exist on wiki KBs; a stale tab (?tab= or one
+           carried over from a previous KB) falls back to documents. -->
+      <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
         <div class="knowledge-main">
+          <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
+            :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"
+            @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
+            @rename="handleFolderRename" />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
-                <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
-                  clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
-                  @enter="loadKnowledgeFiles(kbId)">
-                  <template #prefix-icon>
-                    <t-icon name="search" size="16px" />
+                <nav class="doc-folder-path" :aria-label="$t('knowledgeBase.folderTree.title')">
+                  <button v-if="showFolderTree && folderTreeCollapsed" type="button" class="doc-folder-path__tree-toggle"
+                    :aria-expanded="false" :title="$t('knowledgeBase.folderTree.expand')"
+                    :aria-label="$t('knowledgeBase.folderTree.expand')"
+                    @click="handleFolderTreeCollapsedChange(false)">
+                    <t-icon name="view-list" size="16px" />
+                  </button>
+                  <button v-if="folderBreadcrumbs.length" type="button" class="doc-folder-path__crumb" :title="kbInfo?.name" @click="handleFolderSelect('')">
+                    {{ kbInfo?.name }}
+                  </button>
+                  <span v-else class="doc-folder-path__crumb is-current" :title="kbInfo?.name" aria-current="page">{{ kbInfo?.name }}</span>
+                  <template v-for="(crumb, index) in folderBreadcrumbs" :key="crumb.path">
+                    <t-icon name="chevron-right" class="doc-folder-path__sep" />
+                    <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current" :title="crumb.name" aria-current="page">{{ crumb.name }}</span>
+                    <button v-else type="button" class="doc-folder-path__crumb" :title="crumb.name" @click="handleFolderSelect(crumb.path)">{{ crumb.name }}</button>
                   </template>
-                </t-input>
-                <div class="doc-filter-bar__filters">
-                <t-popup v-model:visible="tagFilterPanelVisible" trigger="click" placement="bottom-left"
-                  overlay-class-name="tag-filter-popup" :overlay-inner-style="{ padding: 0 }">
-                  <template #content>
-                    <div class="tag-filter-panel" @click.stop>
-                      <div class="tag-filter-panel__header">
-                        <div class="tag-filter-panel__title">
-                          <span>{{ $t('knowledgeBase.tagFilterTitle') }}</span>
-                          <span class="tag-filter-panel__count">({{ sidebarCategoryCount }})</span>
-                        </div>
-                      </div>
-                      <div class="tag-search-bar">
-                        <t-input v-model.trim="tagSearchQuery" size="small"
-                          :placeholder="$t('knowledgeBase.tagSearchPlaceholder')" clearable>
-                          <template #prefix-icon>
-                            <t-icon name="search" size="14px" />
-                          </template>
-                        </t-input>
-                      </div>
-                      <div class="tag-filter-panel__body">
-                        <template v-if="tagLoading && !sidebarTags.length">
-                          <div class="tag-filter-chips">
-                            <div v-for="n in 8" :key="'skel-tag-' + n" class="tag-filter-chip-skeleton">
-                              <t-skeleton animation="gradient"
-                                :row-col="[{ width: '56px', height: '24px', type: 'rect' }]" />
-                            </div>
+                  <span v-if="!docListLoading" class="doc-folder-path__count">{{ $t(isFiltering ? 'knowledgeBase.folderTree.filteredCount' : 'knowledgeBase.documentCount', { count: total }) }}</span>
+                  <t-tooltip v-if="showFolderTree && isFiltering" :content="$t('knowledgeBase.folderTree.searchingSubtree')">
+                    <t-icon name="info-circle" class="doc-folder-path__sep" />
+                  </t-tooltip>
+                </nav>
+                <div class="doc-filter-bar__trailing">
+                  <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
+                    :aria-label="$t('knowledgeBase.docSearchPlaceholder')" clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
+                    @enter="loadKnowledgeFiles(kbId)">
+                    <template #prefix-icon>
+                      <t-icon name="search" size="16px" />
+                    </template>
+                  </t-input>
+                  <t-popup v-model:visible="filtersExpanded" trigger="click" placement="bottom-right"
+                    overlay-class-name="document-filter-popup" :overlay-inner-style="{ padding: 0 }">
+                    <button type="button" class="doc-filter-toggle" :class="{ active: filtersExpanded || activeFilterCount > 0 }"
+                      :aria-expanded="filtersExpanded" aria-controls="document-filters">
+                      <t-icon name="filter" size="16px" />
+                      {{ $t('knowledgeBase.filters') }}
+                      <span v-if="activeFilterCount" class="doc-filter-count">{{ activeFilterCount }}</span>
+                    </button>
+                    <template #content>
+                      <section id="document-filters" class="doc-filter-panel" :aria-label="$t('knowledgeBase.filters')">
+                        <header class="doc-filter-panel__header">
+                          <strong>{{ $t('knowledgeBase.filters') }}</strong>
+                          <button type="button" :disabled="!activeFilterCount" @click="clearDocumentFilters">{{ $t('knowledgeBase.clearFilters') }}</button>
+                        </header>
+                        <div class="doc-filter-panel__fields">
+                          <div class="doc-filter-field">
+                            <span>{{ $t('knowledgeBase.fileTypeFilter') }}</span>
+                            <t-select v-model="selectedFileType" :options="fileTypeOptions" :placeholder="$t('knowledgeBase.fileTypeFilter')" clearable />
                           </div>
-                        </template>
-                        <template v-else>
-                          <div class="tag-filter-chips">
-                            <button
-                              v-for="tag in sidebarTags"
-                              :key="tag.id"
-                              type="button"
-                              class="tag-filter-chip"
-                              :class="{ active: isTagFilterActive(tag.id) }"
-                              :title="`${tag.name} (${tag.knowledge_count || 0})`"
-                              @click="handleTagRowClick(tag.id)"
-                            >
-                              <span class="tag-filter-chip__label">{{ tag.name }}</span>
-                              <span class="tag-filter-chip__count">{{ tag.knowledge_count || 0 }}</span>
+                          <div class="doc-filter-field">
+                            <span>{{ $t('knowledgeBase.parseStatusFilter') }}</span>
+                            <t-select v-model="selectedParseStatus" :options="parseStatusOptions" :placeholder="$t('knowledgeBase.parseStatusFilter')" clearable />
+                          </div>
+                          <div class="doc-filter-field">
+                            <span>{{ $t('knowledgeBase.sourceFilter') }}</span>
+                            <t-select v-model="selectedSource" :options="sourceOptions" :placeholder="$t('knowledgeBase.sourceFilter')" clearable />
+                          </div>
+                          <div class="doc-filter-field">
+                            <span>{{ $t('knowledgeBase.columnUpdatedAt') }}</span>
+                            <t-date-range-picker v-model="updatedTimeRange"
+                              :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
+                              :disable-date="disableFutureDate" clearable allow-input />
+                          </div>
+                        </div>
+                        <div class="doc-filter-tags">
+                          <div class="doc-filter-tags__heading">
+                            <span>{{ $t('knowledgeBase.columnTag') }}<span v-if="selectedTagIds.length" class="doc-filter-tags__count">{{ selectedTagIds.length }}</span></span>
+                          </div>
+                          <t-input v-model.trim="tagSearchQuery" :placeholder="$t('knowledgeBase.tagSearchPlaceholder')" clearable>
+                            <template #prefix-icon><t-icon name="search" size="14px" /></template>
+                          </t-input>
+                          <div class="doc-filter-tags__list">
+                            <t-loading v-if="tagLoading && !tagList.length" size="small" />
+                            <t-checkbox v-for="tag in filterTagOptions" :key="tag.id" class="doc-filter-tag" :title="tag.name"
+                              :checked="selectedTagIds.includes(tag.id)"
+                              @change="(checked: boolean) => handleTagFilterChange(checked ? [...selectedTagIds, tag.id] : selectedTagIds.filter(id => id !== tag.id))">
+                              <span>{{ tag.name }}</span>
+                            </t-checkbox>
+                            <span v-if="!tagLoading && !filterTagOptions.length" class="doc-filter-tags__empty">{{ $t(tagSearchQuery ? 'knowledgeBase.tagEmptyResult' : 'knowledgeBase.noTags') }}</span>
+                          </div>
+                          <t-button v-if="tagHasMore" variant="text" size="small" :loading="tagLoadingMore" @click="kbId && loadTags(kbId)">{{ $t('tenant.loadMore') }}</t-button>
+                        </div>
+                      </section>
+                    </template>
+                  </t-popup>
+                  <button v-if="viewMode === 'grid' && (canDownloadKnowledge || canMutateKnowledge) && cardList.length"
+                    type="button" class="doc-filter-toggle doc-batch-toggle" :class="{ active: batchMode }" :aria-pressed="batchMode"
+                    :disabled="batchDeleting || batchReparsing || batchTagging || batchDownloading"
+                    @click="toggleBatchMode">
+                    <t-icon :name="batchMode ? 'close' : 'check-rectangle'" size="16px" />
+                    {{ $t(batchMode ? 'common.cancel' : 'menu.batchManage') }}
+                  </button>
+                  <t-popup v-model:visible="documentSortPanelVisible" trigger="click" placement="bottom-right"
+                    overlay-class-name="document-sort-popup" :overlay-inner-style="{ padding: 0 }">
+                    <template #content>
+                      <div class="document-sort-panel" role="menu" :aria-label="$t('knowledgeBase.sort.title')">
+                        <section v-for="group in documentSortGroups" :key="group.key" class="document-sort-group">
+                          <div class="document-sort-group__heading">
+                            <div class="document-sort-group__label">{{ group.label }}</div>
+                            <div class="document-sort-group__description">{{ group.description }}</div>
+                          </div>
+                          <div class="document-sort-group__options">
+                            <button v-for="option in group.options" :key="option.value" type="button"
+                              class="document-sort-option"
+                              :class="{ active: selectedDocumentSort === option.value }"
+                              role="menuitemradio" :aria-checked="selectedDocumentSort === option.value"
+                              @click.stop="handleDocumentSortSelect(option.value)">
+                              <span>{{ documentSortOptionLabel(option) }}</span>
+                              <t-icon v-if="selectedDocumentSort === option.value" name="check" size="14px" />
                             </button>
                           </div>
-                          <div v-if="!sidebarTags.length" class="tag-empty-state">
-                            {{ $t('knowledgeBase.tagEmptyResult') }}
-                          </div>
-                          <div v-if="tagHasMore" class="tag-load-more">
-                            <t-button variant="text" size="small" :loading="tagLoadingMore"
-                              @click.stop="kbId && loadTags(kbId)">
-                              {{ $t('tenant.loadMore') }}
-                            </t-button>
-                          </div>
-                        </template>
+                        </section>
                       </div>
-                      <div v-if="canEdit" class="tag-filter-panel__footer">
-                        <t-button variant="text" size="small" class="tag-manage-link" @click="openTagManageDrawer">
-                          {{ $t('knowledgeBase.tagManageLink') }}
-                        </t-button>
-                      </div>
-                    </div>
-                  </template>
-                  <div class="doc-filter-field">
-                    <button type="button" class="doc-tag-filter-trigger doc-filter-field__control"
-                      :class="{ open: tagFilterPanelVisible, 'is-placeholder': isTagFilterPlaceholder }"
-                      :aria-label="$t('knowledgeBase.tagFilterTitle')"
-                      :title="activeTagFilterTitle"
-                      @mouseenter="tagFilterTriggerHover = true"
-                      @mouseleave="tagFilterTriggerHover = false">
-                      <span class="doc-tag-filter-trigger__prefix" aria-hidden="true">
-                        <t-icon name="discount" size="16px" />
+                    </template>
+                    <button type="button" class="doc-sort-trigger" :class="{ active: documentSortPanelVisible }"
+                      :title="`${$t('knowledgeBase.sort.title')}: ${activeDocumentSortLabel}`"
+                      :aria-label="`${$t('knowledgeBase.sort.title')}: ${activeDocumentSortLabel}`">
+                      <t-icon name="filter-sort" size="16px" />
+                      <span class="doc-sort-trigger__label">
+                        {{ $t('knowledgeBase.sort.title') }} · {{ activeDocumentSortLabel }}
                       </span>
-                      <span class="doc-tag-filter-trigger__label">{{ activeTagFilterLabel }}</span>
-                      <span class="doc-tag-filter-trigger__suffix">
-                        <span
-                          v-if="showTagFilterClear"
-                          class="t-input__suffix t-input__suffix-icon t-input__clear"
-                          :aria-label="$t('common.clear')"
-                          @click.stop="clearTagFilter"
-                          @mousedown.stop
-                        >
-                          <t-icon name="close-circle-filled" class="t-input__suffix-clear" />
-                        </span>
-                        <t-icon
-                          v-else
-                          name="chevron-down"
-                          size="16px"
-                          class="doc-tag-filter-trigger__caret"
-                          :class="{ open: tagFilterPanelVisible }"
-                        />
-                      </span>
-                    </button>
-                  </div>
-                </t-popup>
-                <div class="doc-filter-field">
-                  <t-select v-model="selectedFileType" :options="fileTypeOptions"
-                    :placeholder="$t('knowledgeBase.fileTypeFilter')" class="doc-type-select doc-filter-field__control"
-                    clearable>
-                    <template #prefixIcon>
-                      <t-icon name="file" size="16px" />
-                    </template>
-                  </t-select>
-                </div>
-                <div class="doc-filter-field">
-                  <t-select v-model="selectedParseStatus" :options="parseStatusOptions"
-                    :placeholder="$t('knowledgeBase.parseStatusFilter')" class="doc-type-select doc-filter-field__control"
-                    clearable>
-                    <template #prefixIcon>
-                      <t-icon name="check-circle" size="16px" />
-                    </template>
-                  </t-select>
-                </div>
-                <div class="doc-filter-field">
-                  <t-select v-model="selectedSource" :options="sourceOptions"
-                    :placeholder="$t('knowledgeBase.sourceFilter')" class="doc-type-select doc-filter-field__control"
-                    clearable>
-                    <template #prefixIcon>
-                      <t-icon name="link" size="16px" />
-                    </template>
-                  </t-select>
-                </div>
-                <div class="doc-filter-field doc-filter-field--wide">
-                  <t-date-range-picker v-model="updatedTimeRange"
-                    :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
-                    :disable-date="disableFutureDate" class="doc-date-range doc-filter-field__control" clearable
-                    allow-input>
-                    <template #prefixIcon>
-                      <t-icon name="time" size="16px" />
-                    </template>
-                  </t-date-range-picker>
-                </div>
-                </div>
-                <div class="doc-filter-bar__trailing">
+                      <t-icon name="chevron-down" size="14px" class="doc-sort-trigger__caret"
+                        :class="{ open: documentSortPanelVisible }" />
+                      </button>
+                    </t-popup>
                   <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
                     <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
                       <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'grid' }"
-                        @click="viewMode = 'grid'" :aria-pressed="viewMode === 'grid'">
+                        :aria-label="$t('knowledgeBase.viewModeGrid')" @click="viewMode = 'grid'" :aria-pressed="viewMode === 'grid'">
                         <t-icon name="view-module" size="16px" />
                       </button>
                     </t-tooltip>
                     <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
                       <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'list' }"
-                        @click="viewMode = 'list'" :aria-pressed="viewMode === 'list'">
+                        :aria-label="$t('knowledgeBase.viewModeList')" @click="viewMode = 'list'" :aria-pressed="viewMode === 'list'">
                         <t-icon name="view-list" size="16px" />
                       </button>
                     </t-tooltip>
                   </div>
                   <div v-if="canEdit" class="doc-filter-actions">
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
-                      :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
+                      :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
                       :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
                       @url="handleUploadSourceUrl" @manual="handleManualCreate" />
@@ -2217,13 +2498,21 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </div>
               <div class="doc-scroll-container"
-                :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
+                :class="{
+                  'is-empty': !cardList.length && !docListLoading,
+                  'is-marquee-active': docMarqueeVisible,
+                }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
                 <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
                   :style="docMarqueeBoxStyle" aria-hidden="true" />
                 <!-- 文档骨架屏 -->
-                <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
+                <div v-if="docListLoading && !cardList.length && viewMode === 'list'" class="doc-list-skeleton">
+                  <div v-for="n in 8" :key="n" class="doc-list-skeleton-row">
+                    <t-skeleton animation="gradient" :row-col="[[{ width: '32px', height: '38px', type: 'rect' }, { width: '55%', height: '16px' }]]" />
+                  </div>
+                </div>
+                <div v-else-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
                     <div class="card-content">
                       <div class="card-content-nav">
@@ -2239,25 +2528,29 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </div>
                 <template v-else-if="cardList.length && viewMode === 'grid'">
-                  <DocumentCardView
+                  <DocumentCardView :kb-id="kbId"
                     :items="cardList"
+                    :folder-options="folderOptions"
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
+                    :can-download="canDownloadKnowledge"
                     :can-mutate-knowledge="canMutateKnowledge"
                     :trace-available-by-id="traceAvailableById"
-                    :tag-list="tagList"
                     :move-menu-mode="moveMenuMode"
                     :move-target-kbs="moveTargetKbs"
                     :move-targets-loading="moveTargetsLoading"
                     :move-selected-target-name="moveSelectedTargetName"
                     :move-mode="moveMode"
                     :move-submitting="moveSubmitting"
+                    :show-folder-path="showDocumentFolderPath"
                     @open="(item: any) => openKnowledgeItem(item)"
+                    @open-folder="handleFolderSelect"
+                    @move-to-folder="(item: any, path: string) => moveKnowledgeIntoFolder([item.id], path)"
                     @toggle-checkbox="onCardGridCheckboxChange"
                     @menu-visible-change="(visible: boolean, item: any) => onCardMoreVisibleChange(visible, item)"
                     @action="(action: any, item: any) => handleCardAction(action, item)"
-                    @tag-edit="(item: any) => openTagEditDialog(item)"
+                    @tags-changed="onTagCatalogChanged"
                     @move-select-target="(kb: any) => handleMoveSelectTarget(kb)"
                     @move-back="handleMoveBack"
                     @move-confirm="handleMoveConfirm"
@@ -2265,8 +2558,9 @@ async function createNewSession(value: string): Promise<void> {
                   />
                 </template>
                 <template v-else-if="cardList.length && viewMode === 'list'">
-                  <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
-                    :can-edit="canEdit" :can-mutate-knowledge="canMutateKnowledge"
+                  <DocumentListView :kb-id="kbId" :items="cardList" :folder-options="folderOptions"
+                    :selected-ids="selectedIds"
+                    :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
                     :move-target-kbs="moveTargetKbs"
@@ -2274,10 +2568,13 @@ async function createNewSession(value: string): Promise<void> {
                     :move-selected-target-name="moveSelectedTargetName"
                     :move-mode="moveMode"
                     :move-submitting="moveSubmitting"
+                    :show-folder-path="showDocumentFolderPath"
+                    @open-folder="handleFolderSelect"
+                    @move-to-folder="(item: any, path: string) => moveKnowledgeIntoFolder([item.id], path)"
                     @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll" @action="(action: any, item: any) => handleListAction(action, item)"
                     @probe-trace="(item: any) => probeTraceAvailable(item)"
-                    @tag-edit="(item: any) => openTagEditDialog(item)"
+                    @tags-changed="onTagCatalogChanged"
                     @move-select-target="(kb: any) => handleMoveSelectTarget(kb)"
                     @move-back="handleMoveBack"
                     @move-confirm="handleMoveConfirm"
@@ -2286,14 +2583,24 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
                 <template v-else-if="!docListLoading">
                   <div class="doc-empty-state">
-                    <EmptyKnowledge />
+                    <p v-if="hasFolders || selectedFolderPath || isFiltering" class="doc-empty-folder">
+                      {{ isFiltering
+                        ? $t('knowledgeBase.folderTree.emptySearch')
+                        : $t('knowledgeBase.folderTree.emptyFolder') }}
+                    </p>
+                    <EmptyKnowledge v-else />
                   </div>
                 </template>
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
-                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
-                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
+                  :reparse-loading="batchReparsing" :tag-loading="batchTagging" :download-loading="batchDownloading"
+                  :can-download="canDownloadKnowledge" :can-mutate="canMutateKnowledge"
+                  :visible="batchMode || selectedIds.size > 0"
+                  :show-move-to-folder="canEdit" :folder-options="folderOptions"
+                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @batch-tag="handleBatchTag" @download="handleBatchDownload" @select-loaded="toggleSelectAll(true)"
+                  @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)" />
               </div>
             </div>
           </div>
@@ -2301,8 +2608,9 @@ async function createNewSession(value: string): Promise<void> {
       </template>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
-      <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit" :kbId="kbId"
-        @closeDoc="closeDoc" @getDoc="getDoc">
+      <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
+        :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
+        @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
       </DocContent>
     </div>
   </template>
@@ -2319,114 +2627,88 @@ async function createNewSession(value: string): Promise<void> {
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
 
-  <!-- 标签编辑弹窗 -->
-  <TagEditDialog :visible="tagEditDialogVisible"
-    :knowledge-name="tagEditTarget?.display_name || tagEditTarget?.file_name || tagEditTarget?.title || ''"
-    :kb-id="kbId" :tag-list="tagList" :selected-tags="tagEditTarget?.tags || []" :can-manage="canEdit"
-    @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)"
-    @open-manage="openTagManageFromEditDialog" />
+  <!-- 批量打标签弹窗 -->
+  <BatchTagDialog @tags-changed="onTagCatalogChanged" :visible="batchTagDialogVisible"
+    :count="selectedIds.size" :kb-id="kbId"
+    :pre-selected-tag-ids="batchTagPreSelectedIds"
+    :confirm-loading="batchTagging"
+    @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm" />
 
-  <KbTagManageDrawer
-    v-model:visible="tagManageDrawerVisible"
-    :kb-id="kbId"
-    :is-faq="isFAQ"
-    @changed="onTagManageChanged"
-  />
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
-.tag-filter-popup {
-  z-index: 5500 !important;
+.document-filter-popup .t-popup__content {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-xl);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 10%);
 }
 
-.tag-filter-popup .t-popup__content {
-  padding: 0 !important;
-  border-radius: 8px !important;
-  background: var(--td-bg-color-container) !important;
-  border: 0.5px solid var(--td-component-stroke) !important;
-  box-shadow:
-    0 0 0 0.5px rgba(0, 0, 0, 0.03),
-    0 2px 4px rgba(0, 0, 0, 0.04),
-    0 8px 24px rgba(0, 0, 0, 0.1) !important;
-}
-
-.tag-more-popup .tag-menu {
-  display: flex;
-  flex-direction: column;
-}
-
-.tag-more-popup .tag-menu-item {
-  display: flex;
-  align-items: center;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: 14px;
-  font-weight: 400;
-}
-
-.tag-more-popup .tag-menu-item .menu-icon {
-  margin-right: 8px;
-  font-size: 16px;
-}
-
-.tag-more-popup .tag-menu-item:hover {
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-primary);
-}
 </style>
 <style scoped lang="less">
 .knowledge-layout {
   display: flex;
   flex-direction: column;
-  margin: 0 16px 0 4px;
-  gap: 20px;
+  margin: 0 16px 0 0;
+  gap: 16px;
   height: 100%;
   flex: 1;
   width: 100%;
   min-width: 0;
-  padding: 24px 32px 0px;
+  padding: 20px 28px 0;
   box-sizing: border-box;
 }
 
-// Breadcrumb tab switch (文档/Wiki in breadcrumb)
-.breadcrumb-tab {
-  cursor: pointer;
-  color: var(--td-text-color-placeholder);
-  font-weight: 400;
-  transition: color 0.15s;
+// View switch (文档 / Wiki / 图谱 / 画廊): a segmented control after the
+// breadcrumb, drawn like the documents tab's view toggle so the four views
+// read as siblings rather than as another breadcrumb level.
+.kb-view-tabs {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  margin-left: 2px;
+  padding: 3px;
+  border-radius: var(--app-radius-lg);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.kb-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-text-color-primary);
   }
 
   &.active {
+    background: var(--td-bg-color-container);
     color: var(--td-brand-color);
     font-weight: 600;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
   }
 
-  &.indexing {
+  &:focus-visible {
+    outline: 2px solid var(--app-focus-border);
+    outline-offset: 1px;
+  }
+
+  &__indicator {
+    display: inline-flex;
     color: var(--td-brand-color);
   }
-}
-
-.breadcrumb-tab-indicator {
-  display: inline-flex;
-  align-items: center;
-  color: var(--td-brand-color);
-  font-size: 12px;
-  line-height: 1;
-}
-
-.breadcrumb-tab-sep {
-  margin: 0 6px;
-  color: var(--td-text-color-disabled);
-  font-weight: 400;
 }
 
 .wiki-main-area {
@@ -2435,7 +2717,7 @@ async function createNewSession(value: string): Promise<void> {
   overflow: hidden;
 }
 
-// 与列表页一致：浅灰底圆角区，左侧筛选为白底卡片
+// Directory navigation and the document content share the available width.
 .knowledge-main {
   display: flex;
   flex: 1;
@@ -2444,218 +2726,22 @@ async function createNewSession(value: string): Promise<void> {
   border: none;
 }
 
-// 标签筛选浮层：点击工具栏入口展开，不占文档列表横向空间
-.tag-filter-panel {
-  width: 320px;
-  max-width: min(320px, calc(100vw - 32px));
-  max-height: min(70vh, 480px);
-  display: flex;
-  flex-direction: column;
-  padding: 12px 14px;
-  box-sizing: border-box;
-  font-size: 12px;
-  color: var(--td-text-color-primary);
-
-  .tag-filter-panel__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-    padding: 0;
-    color: var(--td-text-color-primary);
-  }
-
-  .tag-filter-panel__title {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-  }
-
-  .tag-filter-panel__count {
-    font-size: 12px;
-    color: var(--td-text-color-placeholder);
-    font-weight: 400;
-  }
-
-  .tag-search-bar {
-    margin-bottom: 10px;
-    padding: 0;
-
-    :deep(.t-input) {
-      font-size: 13px;
-      background-color: var(--td-bg-color-secondarycontainer);
-      border-color: transparent;
-      border-radius: 6px;
-      box-shadow: none !important;
-
-      &:hover,
-      &:focus,
-      &.t-is-focused {
-        border-color: var(--td-component-border);
-        background-color: var(--td-bg-color-container);
-        box-shadow: none !important;
-      }
-    }
-
-    :deep(.t-input__inner) {
-      font-size: 13px;
-    }
-
-    :deep(.t-input__prefix-icon) {
-      margin-right: 0;
-    }
-  }
-
-  .tag-filter-panel__body {
-    display: flex;
+@media (max-width: 1000px) {
+  .knowledge-main {
     flex-direction: column;
-    gap: 8px;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    scrollbar-width: thin;
-
-    &::-webkit-scrollbar {
-      width: 4px;
+    :deep(.kb-folder-tree) {
+      width: 100%;
+      max-height: 200px;
+      padding: 0 0 12px;
+      margin: 0 0 16px;
+      border-right: 0;
+      border-bottom: 1px solid var(--td-component-stroke);
     }
-
-    &::-webkit-scrollbar-thumb {
-      border-radius: 2px;
-      background: var(--td-scrollbar-color);
-    }
-  }
-
-  .tag-filter-chips {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 6px;
-  }
-
-  .tag-filter-chip-skeleton {
-    flex-shrink: 0;
-  }
-
-  .tag-filter-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    box-sizing: border-box;
-    max-width: 100%;
-    height: 24px;
-    padding: 0 8px;
-    border: 1px solid var(--td-component-stroke);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: 11px;
-    font-weight: 400;
-    line-height: 24px;
-    cursor: pointer;
-    outline: none;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-    -webkit-font-smoothing: antialiased;
-
-    &:hover:not(.active) {
-      border-color: var(--td-component-border);
-      background: var(--td-bg-color-secondarycontainer);
-      color: var(--td-text-color-primary);
-    }
-
-    &:focus-visible {
-      box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-component-stroke) 60%, transparent);
-    }
-
-    &.active {
-      border-color: color-mix(in srgb, var(--td-brand-color) 35%, var(--td-component-stroke));
-      color: var(--td-brand-color);
-      font-weight: 500;
-      background-color: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-
-      .tag-filter-chip__count {
-        color: color-mix(in srgb, var(--td-brand-color) 72%, var(--td-text-color-secondary));
-      }
-
-      &:hover {
-        background-color: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-      }
-    }
-  }
-
-  .tag-filter-chip__label {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 120px;
-  }
-
-  .tag-filter-chip__count {
-    flex-shrink: 0;
-    font-size: 10px;
-    font-weight: 400;
-    font-variant-numeric: tabular-nums;
-    color: var(--td-text-color-placeholder);
-
-    &::before {
-      content: '·';
-      margin-right: 2px;
-      opacity: 0.65;
-    }
-  }
-
-  .tag-filter-panel__footer {
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid var(--td-component-stroke);
-    display: flex;
-    justify-content: flex-start;
-
-    :deep(.tag-manage-link.t-button) {
-      padding: 0;
-      height: auto;
-      min-height: 0;
-      font-size: 13px;
-      color: var(--td-text-color-secondary);
-      border: none !important;
-      background: transparent !important;
-      box-shadow: none !important;
-      transition: color 0.15s ease;
-
-      &:hover,
-      &:focus-visible {
-        color: var(--td-brand-color) !important;
-        background: transparent !important;
-        border-color: transparent !important;
-        text-decoration: none;
-      }
-    }
-  }
-
-  .tag-load-more {
-    display: flex;
-    justify-content: center;
-    padding-top: 2px;
-
-    :deep(.t-button) {
-      padding: 0;
-      font-size: 12px;
-      color: var(--td-text-color-placeholder);
-    }
-  }
-
-  .tag-empty-state {
-    text-align: center;
-    padding: 6px 0;
-    color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    :deep(.kb-folder-tree__header) { height: 28px; padding-bottom: 4px; }
   }
 }
+
+// 标签筛选浮层：点击工具栏入口展开，不占文档列表横向空间
 
 .tag-content {
   flex: 1;
@@ -2674,256 +2760,289 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   position: relative;
-  /* 作为批量工具栏悬浮的定位上下文 */
+  container-type: inline-size;
+  container-name: doc-card-area;
 }
 
+// One navigation row; filters open in a single anchored panel.
 .doc-filter-bar {
-  padding: 0 0 12px 0;
-  flex-shrink: 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    'search trailing'
-    'filters filters';
-  gap: 8px 12px;
+  display: flex;
   align-items: center;
-
-  .doc-search-input {
-    grid-area: search;
-    min-width: 0;
-    width: 100%;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  &__trailing { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .doc-search-input { width: 220px; min-width: 100px; }
+  :deep(.doc-search-input .t-input) {
+    background: transparent;
+    border-color: var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
+    font-size: var(--app-text-md);
   }
-
-  &__filters {
-    grid-area: filters;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
-
-    &::-webkit-scrollbar {
-      height: 4px;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background-color: rgba(0, 0, 0, 0.15);
-      border-radius: 2px;
-    }
-  }
-
-  &__trailing {
-    grid-area: trailing;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  @media (min-width: 1280px) {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    gap: 12px;
-
-    &__filters {
-      flex: 0 1 auto;
-      overflow-x: visible;
-    }
-  }
-
-  .doc-filter-field {
-    width: 140px;
-    flex-shrink: 0;
-
-    &--wide {
-      width: 280px;
-    }
-
-    &__control {
-      width: 100%;
-    }
-  }
-
-  .doc-tag-filter-trigger {
-    display: inline-flex;
-    align-items: center;
-    box-sizing: border-box;
-    width: 100%;
+  .doc-filter-actions :deep(.content-bar-icon-btn) {
     height: 32px;
-    padding: 0 8px;
-    border: 1px solid transparent;
-    border-radius: var(--td-radius-default);
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
-    transition: background 0.2s ease, border-color 0.2s ease;
-
-    &:hover,
-    &.open {
-      background: var(--td-bg-color-secondarycontainer);
-      border-color: transparent;
-    }
-
-    &.is-placeholder {
-      color: var(--td-text-color-placeholder);
-    }
-
-    &__prefix {
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      margin-right: var(--td-comp-margin-s);
-      color: var(--td-text-color-placeholder);
-    }
-
-    &__label {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      text-align: left;
-    }
-
-    &__suffix {
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      margin-left: var(--td-comp-margin-s);
-
-      :deep(.t-input__suffix) {
-        margin-left: 0;
-      }
-
-      :deep(.t-input__suffix-clear) {
-        font-size: 16px;
-      }
-    }
-
-    &__caret {
-      flex-shrink: 0;
-      color: var(--td-text-color-placeholder);
-      transition: transform 0.2s ease, color 0.2s ease;
-
-      &.open {
-        color: var(--td-brand-color);
-        transform: rotate(180deg);
-      }
-    }
+    padding: 0 12px;
+    border-radius: var(--app-radius-md);
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
+    &:hover { background: var(--td-brand-color-hover); }
   }
-
-  @media (min-width: 1280px) {
-    .doc-search-input {
-      flex: 1 1 220px;
-      min-width: 220px;
-    }
-  }
-
-  .doc-type-select {
-    width: 100%;
-  }
-
-  .doc-date-range {
-    width: 100%;
-
-    // TDesign focuses both the outer popup reference and inner inputs, which
-    // visually stacks into a "double border" — drop the inner shadow.
-    :deep(.t-input--focused),
-    :deep(.t-is-focused) {
-      box-shadow: none;
-    }
-  }
-
-  .doc-view-toggle {
-    flex-shrink: 0;
+}
+.doc-folder-path {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  line-height: 20px;
+  flex-wrap: wrap;
+  &__tree-toggle {
     display: inline-flex;
     align-items: center;
-    padding: 2px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 6px;
-    gap: 0;
-
-    .doc-view-toggle-btn {
-      width: 28px;
-      height: 24px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border: 0;
-      background: transparent;
-      border-radius: 4px;
-      color: var(--td-text-color-secondary, #888);
-      cursor: pointer;
-      transition: background-color 0.12s ease, color 0.12s ease;
-
-      &:hover {
-        color: var(--td-text-color-primary, #232323);
-      }
-
-      &.active {
-        background: var(--td-bg-color-container, #fff);
-        color: var(--td-brand-color, #0052d9);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-      }
-    }
-  }
-
-  .doc-filter-actions {
+    justify-content: center;
     flex-shrink: 0;
+    align-self: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    font: inherit;
+    font-size: var(--app-text-md);
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    &:hover { background: var(--td-bg-color-container-hover); color: var(--td-text-color-primary); }
+  }
+  &__crumb {
+    max-width: 160px;
+    padding: 6px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font: inherit;
+    font-size: var(--app-text-md);
+    line-height: 20px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    &:is(button):hover { color: var(--td-brand-color); }
+    &.is-current { color: var(--td-text-color-primary); font-weight: 600; cursor: default; }
+  }
+  &__count { padding: 6px 0; line-height: 20px; margin-left: 6px; color: var(--td-text-color-placeholder); font-size: var(--app-text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  &__sep, &__scope { align-self: center; flex-shrink: 0; color: var(--td-text-color-placeholder); font-size: var(--app-text-sm); }
+}
+.doc-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-md);
+  white-space: nowrap;
+  cursor: pointer;
+  &:hover, &.active { background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary); }
+}
+.doc-filter-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px;
+  padding: 0 2px; color: var(--td-brand-color); font-weight: 600;
+  font-size: var(--app-text-xs); font-variant-numeric: tabular-nums;
+}
+.doc-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-md);
+  padding: 2px;
+  .doc-view-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--app-radius-xs);
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    &:hover { color: var(--td-text-color-primary); }
+    &.active { background: var(--td-bg-color-container); color: var(--td-brand-color); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+  }
+}
+.doc-filter-panel {
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: min(600px, 80vh);
+  overflow-y: auto;
+  padding: 16px;
+  box-sizing: border-box;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
+  button { font: inherit; cursor: pointer; }
+  &__header {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+    strong { font-size: var(--app-text-base); font-weight: 600; }
+    button { border: 0; padding: 0; background: transparent; color: var(--td-text-color-secondary); font-size: var(--app-text-sm); }
+    button:disabled { color: var(--td-text-color-disabled); cursor: default; }
+  }
+  &__fields { display: flex; flex-direction: column; gap: 10px; }
+  .doc-filter-field {
+    display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px;
+    > span { color: var(--td-text-color-secondary); font-size: var(--app-text-sm); }
+    :deep(.t-date-range-picker) { width: 100%; }
+  }
+}
 
-    :deep(.content-bar-icon-btn) {
-      color: var(--td-text-color-secondary);
-      background: transparent;
-      border: none;
+.document-sort-panel {
+  width: 330px;
+  max-width: min(330px, calc(100vw - 32px));
+  padding: 6px;
+  box-sizing: border-box;
+  color: var(--td-text-color-primary);
+}
 
-      &:hover {
-        color: var(--td-brand-color);
-        background: var(--td-bg-color-secondarycontainer);
-      }
-    }
+.document-sort-group {
+  padding: 7px 6px 8px;
+
+  & + & {
+    border-top: 1px solid var(--td-component-stroke);
   }
 
-  :deep(.t-input) {
-    font-size: 13px;
-    background-color: var(--td-bg-color-secondarycontainer);
-    border-color: transparent;
-    border-radius: 6px;
-    box-shadow: none !important;
-
-    &:hover,
-    &:focus,
-    &.t-is-focused {
-      border-color: var(--td-brand-color);
-      background-color: var(--td-bg-color-container);
-      box-shadow: none !important;
-    }
+  &__heading {
+    padding: 0 4px 6px;
   }
 
-  :deep(.t-select) {
-    .t-input {
-      font-size: 13px;
-      background-color: var(--td-bg-color-secondarycontainer);
-      border-color: transparent;
-      border-radius: 6px;
-      box-shadow: none !important;
-
-      &:hover,
-      &.t-is-focused {
-        border-color: var(--td-brand-color);
-        background-color: var(--td-bg-color-container);
-        box-shadow: none !important;
-      }
-    }
+  &__label {
+    font-size: var(--app-text-md);
+    line-height: 20px;
+    font-weight: 600;
   }
+
+  &__description {
+    margin-top: 1px;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-xs);
+    line-height: 17px;
+  }
+
+  &__options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+}
+
+.document-sort-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-md);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.active {
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+}
+.doc-filter-tags {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--td-component-stroke);
+  &__heading {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+    button { padding: 0; border: 0; background: transparent; color: var(--td-text-color-secondary); font-size: var(--app-text-sm); }
+  }
+  &__count { margin-left: 6px; color: var(--td-text-color-placeholder); font-variant-numeric: tabular-nums; }
+  &__list { display: flex; flex-direction: column; gap: 2px; max-height: 168px; overflow-y: auto; margin-top: 8px; }
+  &__empty { color: var(--td-text-color-placeholder); padding: 8px 0; }
+}
+.doc-filter-tag {
+  display: flex; align-items: center; flex-shrink: 0; width: 100%; min-height: 28px; margin: 0;
+  padding: 4px 6px; box-sizing: border-box; border-radius: var(--app-radius-xs);
+  &:hover { background: var(--td-bg-color-container-hover); }
+  :deep(.t-checkbox__label) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :deep(.t-checkbox__input) { flex-shrink: 0; }
+}
+.doc-batch-toggle {
+  &:disabled { cursor: not-allowed; opacity: 0.5; }
+  &.active { color: var(--app-selection-text); border-color: var(--td-component-border); background: var(--app-selection-bg); }
+}
+.doc-filter-bar button:focus-visible, .doc-filter-panel button:focus-visible {
+  outline: 2px solid var(--app-focus-border); outline-offset: 2px;
+}
+.doc-list-skeleton-row { padding: 16px 40px; }
+@container doc-card-area (max-width: 780px) {
+  .doc-filter-bar { flex-wrap: wrap; gap: 12px; }
+  .doc-filter-bar__trailing { width: 100%; }
+  .doc-filter-bar .doc-search-input { flex: 1; width: auto; }
+}
+
+.doc-sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-md);
+  cursor: pointer;
+
+  &:hover,
+  &.active {
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__caret {
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+
+    &.open { transform: rotate(180deg); }
+  }
+}
+
+@container doc-card-area (max-width: 540px) {
+  .doc-filter-bar__trailing { flex-wrap: wrap; }
+  .doc-filter-bar .doc-search-input { flex: 1 0 100%; }
 }
 
 .doc-scroll-container {
@@ -2965,16 +3084,14 @@ async function createNewSession(value: string): Promise<void> {
   }
 }
 
-/* 批量条悬浮在滚动区底部，不挤占列表高度 */
+/* Reserve space for the batch actions so the last document stays reachable. */
 .doc-batch-bar-anchor {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 12px;
+  position: relative;
+  flex-shrink: 0;
   z-index: 6;
   display: flex;
   justify-content: center;
-  padding: 0 16px;
+  padding: 12px 0 0;
   pointer-events: none;
 
   &>* {
@@ -3015,9 +3132,11 @@ async function createNewSession(value: string): Promise<void> {
   .document-breadcrumb {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
+    row-gap: 8px;
     margin: 0;
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -3033,8 +3152,9 @@ async function createNewSession(value: string): Promise<void> {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    border-radius: 6px;
-    transition: all 0.12s ease;
+    white-space: nowrap;
+    border-radius: var(--app-radius-sm);
+    transition: all var(--app-motion-instant) ease;
 
     &:hover:not(:disabled) {
       color: var(--td-success-color);
@@ -3050,8 +3170,8 @@ async function createNewSession(value: string): Promise<void> {
       padding-right: 6px;
 
       :deep(.t-icon) {
-        font-size: 14px;
-        transition: transform 0.12s ease;
+        font-size: var(--app-text-base);
+        transition: transform var(--app-motion-instant) ease;
       }
 
       &:hover:not(:disabled) {
@@ -3063,7 +3183,7 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .breadcrumb-separator {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
   }
 
@@ -3076,7 +3196,7 @@ async function createNewSession(value: string): Promise<void> {
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     font-weight: 600;
     line-height: 32px;
   }
@@ -3085,7 +3205,7 @@ async function createNewSession(value: string): Promise<void> {
     margin: 0;
     color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 400;
     line-height: 20px;
   }
@@ -3096,10 +3216,10 @@ async function createNewSession(value: string): Promise<void> {
     gap: 4px;
     margin: 2px 0 0;
     color: var(--td-warning-color);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.4;
     cursor: pointer;
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
 
     &:hover {
       color: var(--td-warning-color-active);
@@ -3110,7 +3230,7 @@ async function createNewSession(value: string): Promise<void> {
     }
 
     .parser-hint-icon {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       flex-shrink: 0;
     }
 
@@ -3127,10 +3247,10 @@ async function createNewSession(value: string): Promise<void> {
     gap: 4px;
     margin: 2px 0 0;
     color: var(--td-warning-color);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.4;
     cursor: pointer;
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
 
     &:hover {
       color: var(--td-warning-color-active);
@@ -3141,7 +3261,7 @@ async function createNewSession(value: string): Promise<void> {
     }
 
     .warning-icon {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       flex-shrink: 0;
     }
 
@@ -3154,9 +3274,6 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 
-.document-upload-input {
-  display: none;
-}
 
 .kb-settings-button {
   width: 30px;
@@ -3169,7 +3286,7 @@ async function createNewSession(value: string): Promise<void> {
   justify-content: center;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   padding: 0;
 
   &:hover:not(:disabled) {
@@ -3184,119 +3301,8 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   :deep(.t-icon) {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
   }
-}
-
-.tag-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-
-  .tag-filter-label {
-    color: var(--td-text-color-placeholder);
-    font-size: 14px;
-  }
-}
-
-.card-tag-selector {
-  display: flex;
-  align-items: center;
-
-  .card-tag-chips {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    flex-wrap: nowrap;
-    cursor: pointer;
-  }
-
-  .card-tag-overflow {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 18px;
-    min-width: 18px;
-    padding: 0 5px;
-    border-radius: 999px;
-    border: 1px solid var(--td-component-stroke);
-    color: var(--td-text-color-placeholder);
-    font-size: 10px;
-    line-height: 1;
-    cursor: pointer;
-    transition: all 0.2s ease;
-
-    &:hover {
-      border-color: var(--td-brand-color);
-      color: var(--td-brand-color);
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-
-  :deep(.t-tag) {
-    cursor: pointer;
-    max-width: 120px;
-    height: 18px;
-    line-height: 18px;
-    border-radius: 999px;
-    border-color: var(--td-component-stroke);
-    color: var(--td-text-color-secondary);
-    padding: 0 6px;
-    background: transparent;
-    transition: all 0.2s ease;
-
-    &:hover {
-      border-color: var(--td-brand-color);
-      color: var(--td-brand-color-active);
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-
-  .tag-text {
-    display: inline-block;
-    max-width: 80px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    vertical-align: middle;
-    font-size: 11px;
-  }
-
-  .card-tag-add {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    height: 18px;
-    padding: 0 6px;
-    border-radius: 999px;
-    border: 1px dashed var(--td-component-stroke);
-    color: var(--td-text-color-placeholder);
-    font-size: 11px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-
-    .t-icon {
-      font-size: 12px;
-    }
-
-    &:hover {
-      border-color: var(--td-brand-color);
-      color: var(--td-brand-color-active);
-      background: var(--td-bg-color-secondarycontainer);
-      border-style: solid;
-    }
-  }
-}
-
-
-.card-bottom-right {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  overflow: hidden;
 }
 
 .faq-manager-wrapper {
@@ -3305,46 +3311,6 @@ async function createNewSession(value: string): Promise<void> {
   padding: 24px 32px;
   overflow-y: auto;
   margin: 0 16px 0 4px;
-}
-
-@media (max-width: 1250px) and (min-width: 1045px) {
-  .answers-input {
-    transform: translateX(-329px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 654px !important;
-  }
-}
-
-@media (max-width: 1045px) {
-  .answers-input {
-    transform: translateX(-250px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 500px !important;
-  }
-}
-
-@media (max-width: 750px) {
-  .answers-input {
-    transform: translateX(-182px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 340px !important;
-  }
-}
-
-@media (max-width: 600px) {
-  .answers-input {
-    transform: translateX(-164px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 300px !important;
-  }
 }
 
 @keyframes contentFadeIn {
@@ -3363,8 +3329,8 @@ async function createNewSession(value: string): Promise<void> {
   box-sizing: border-box;
   display: grid;
   // 文档卡片信息量较大（标题 + 摘要 + 标签/类型），保持稍宽的最小列宽，避免一行塞太多导致内容拥挤。
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 10px;
   align-content: flex-start;
   width: 100%;
 
@@ -3381,7 +3347,7 @@ async function createNewSession(value: string): Promise<void> {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 10px 14px 8px;
+    padding: 10px;
   }
 
   .card-content-nav {
@@ -3412,327 +3378,27 @@ async function createNewSession(value: string): Promise<void> {
   min-height: 100%;
 }
 
-
-.card-menu {
-  display: flex;
-  flex-direction: column;
-  min-width: 140px;
-  gap: 1px;
-}
-
-.card-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-  color: var(--td-text-color-primary);
-  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
-  border-radius: 6px;
-  font-size: 14px;
-  line-height: 20px;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &:active {
-    background: var(--td-bg-color-container-active);
-    transform: scale(0.98);
-  }
-
-  .icon {
-    font-size: 16px;
-    color: var(--td-text-color-secondary);
-    transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
-  }
-
-  &:hover .icon {
-    color: var(--td-text-color-primary);
-  }
-
-  &.danger {
-    color: var(--td-error-color-6);
-    margin-top: 4px;
-    position: relative;
-
-    &::before {
-      content: '';
-      position: absolute;
-      top: -3px;
-      left: 8px;
-      right: 8px;
-      height: 1px;
-      background: var(--td-component-stroke);
-    }
-
-    .icon {
-      color: var(--td-error-color-6);
-    }
-
-    &:hover {
-      background: var(--td-error-color-1);
-      color: var(--td-error-color-6);
-
-      .icon {
-        color: var(--td-error-color-6);
-      }
-    }
-
-    &:active {
-      background: var(--td-error-color-2);
-    }
-  }
-}
-
-.move-menu {
-  min-width: 220px;
-  max-width: 280px;
-  max-height: 360px;
-  overflow-y: auto;
-
-  .move-menu-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    border-bottom: 1px solid var(--td-component-stroke);
-    cursor: pointer;
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-  }
-
-  .move-menu-loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px 0;
-  }
-
-  .move-menu-empty {
-    padding: 12px 16px;
-    font-size: 12px;
-    color: var(--td-text-color-placeholder);
-    text-align: center;
-    line-height: 1.5;
-  }
-
-  .move-target-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .move-target-count {
-    font-size: 12px;
-    color: var(--td-text-color-placeholder);
-  }
-
-  .move-confirm-body {
-    padding: 8px;
-
-    .move-target-info {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 8px;
-      background: var(--td-bg-color-container-hover);
-      border-radius: 6px;
-      font-size: 13px;
-      color: var(--td-text-color-secondary);
-      margin-bottom: 8px;
-    }
-
-    .move-mode-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 6px;
-      padding: 6px 8px;
-      border-radius: 6px;
-      cursor: pointer;
-      margin-bottom: 4px;
-
-      &:hover {
-        background: var(--td-bg-color-container-hover);
-      }
-
-      &.active {
-        background: var(--td-brand-color-light);
-      }
-
-      .move-mode-text {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-
-        .move-mode-label {
-          font-size: 13px;
-          font-weight: 500;
-          color: var(--td-text-color-primary);
-        }
-
-        .move-mode-desc {
-          font-size: 11px;
-          color: var(--td-text-color-placeholder);
-          line-height: 1.4;
-        }
-      }
-    }
-
-    .move-confirm-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      margin-top: 8px;
-    }
-  }
-}
-
-.card-draft {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  flex-shrink: 0;
-}
-
-.card-draft-tip {
-  color: var(--td-warning-color);
-  font-size: 11px;
-}
-
 .knowledge-card {
-  min-width: 240px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--td-component-border);
-  height: 136px;
-  border-radius: 8px;
+  height: 164px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
-
-  /* 仅在批量管理模式下渲染 checkbox，常态下不占位，避免标题在 hover 时右滑 */
-  .card-nav-check {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 29px;
-    margin-right: 8px;
-    cursor: pointer;
-
-    .card-select-checkbox {
-      margin: 0;
-      line-height: 0;
-
-      :deep(.t-checkbox) {
-        align-items: center;
-      }
-
-      :deep(.t-checkbox__label) {
-        display: none !important;
-        width: 0 !important;
-        min-width: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-      }
-
-      :deep(.t-checkbox__input) {
-        margin: 0;
-      }
-
-      :deep(.t-checkbox__input-wrapper) {
-        margin: 0;
-      }
-    }
-  }
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background-color var(--app-motion-base) ease;
 
   .card-content {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 10px 14px 8px;
-  }
-
-  .card-analyze {
-    flex-shrink: 0;
-    height: 52px;
-    display: flex;
-    align-items: flex-start;
-  }
-
-  .card-analyze-loading {
-    display: block;
-    color: var(--td-brand-color);
-    font-size: 14px;
-    margin-top: 2px;
-  }
-
-  .card-analyze-txt {
-    color: var(--td-brand-color);
-    font-family: var(--app-font-family);
-    font-size: 11px;
-    margin-left: 8px;
-  }
-
-  // In-flight / failed: only status text + trace icon open the drawer.
-  .card-analyze-trace {
-    height: auto;
-    min-height: 0;
-    align-items: center;
-    gap: 2px;
-  }
-
-  .card-analyze-trace-link {
-    cursor: pointer;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-
-  .card-analyze-trace-btn {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0;
-    padding: 2px;
-    border: none;
-    background: transparent;
-    color: var(--td-brand-color);
-    cursor: pointer;
-    line-height: 1;
-    border-radius: 4px;
-
-    :deep(.t-icon) {
-      font-size: 14px;
-    }
-
-    &:hover {
-      background: var(--td-bg-color-component-hover);
-    }
-  }
-
-  .card-analyze.failure .card-analyze-trace-btn {
-    color: var(--td-error-color);
-  }
-
-  .failure {
-    color: var(--td-error-color);
+    padding: 12px;
   }
 
   .card-content-nav {
@@ -3741,62 +3407,6 @@ async function createNewSession(value: string): Promise<void> {
     align-items: flex-start;
     gap: 0;
     margin-bottom: 6px;
-  }
-
-  .card-content-title {
-    flex: 1;
-    min-width: 0;
-    height: 24px;
-    line-height: 24px;
-    display: inline-block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    margin-right: 8px;
-  }
-
-  .more-wrap {
-    flex-shrink: 0;
-    display: flex;
-    width: 25px;
-    height: 25px;
-    justify-content: center;
-    align-items: center;
-    border-radius: 5px;
-    cursor: pointer;
-  }
-
-  .more-wrap:hover {
-    background: var(--td-component-stroke);
-  }
-
-  .more-icon {
-    width: 14px;
-    height: 14px;
-  }
-
-  .active-more {
-    background: var(--td-component-stroke);
-  }
-
-  .card-content-txt {
-    flex: 1;
-    min-height: 0;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    overflow: hidden;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 19px;
   }
 
   .card-bottom {
@@ -3813,35 +3423,6 @@ async function createNewSession(value: string): Promise<void> {
     border-top: 1px solid var(--td-component-stroke);
   }
 
-  .card-time {
-    flex-shrink: 0;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: 12px;
-    font-weight: 400;
-    white-space: nowrap;
-  }
-
-  .card-type {
-    flex-shrink: 0;
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 11px;
-    font-weight: 500;
-    padding: 0;
-    background: transparent;
-    letter-spacing: 0.02em;
-  }
-}
-
-.card-bottom-right {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  overflow: hidden;
 }
 
 .knowledge-card:hover {
@@ -3849,224 +3430,4 @@ async function createNewSession(value: string): Promise<void> {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
 }
 
-/* 悬停知识卡片时跟随鼠标的详情气泡 */
-.knowledge-card-hover-popover {
-  position: fixed;
-  z-index: 9999;
-  pointer-events: none;
-  min-width: 220px;
-  max-width: 360px;
-  padding: 12px 14px;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  font-family: var(--app-font-family);
-  transition: opacity 0.15s ease;
-  will-change: transform;
-
-  /* 防止气泡内容抖动 */
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
-
-  .card-popover-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin-bottom: 8px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .card-popover-status {
-    font-size: 12px;
-    margin-bottom: 6px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-
-    &.parsing {
-      color: var(--td-brand-color);
-    }
-
-    &.failure {
-      color: var(--td-error-color);
-    }
-
-    &.draft {
-      color: var(--td-warning-color);
-    }
-  }
-
-  .card-popover-desc {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-    line-height: 1.5;
-    margin-bottom: 8px;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 5;
-    line-clamp: 5;
-    overflow: hidden;
-  }
-
-  .card-popover-error-msg {
-    display: block;
-    margin-top: 4px;
-    font-size: 11px;
-    color: var(--td-error-color);
-    opacity: 0.95;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 280px;
-  }
-
-  .card-popover-source {
-    font-size: 11px;
-    color: var(--td-brand-color);
-    margin-bottom: 6px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-  }
-
-  .card-popover-extra {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-    font-size: 11px;
-    color: var(--td-text-color-secondary);
-    margin-bottom: 6px;
-  }
-
-  .card-popover-created,
-  .card-popover-size {
-    flex-shrink: 0;
-  }
-
-  .card-popover-meta {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    font-size: 11px;
-    color: var(--td-text-color-secondary);
-  }
-
-  .card-popover-channel {
-    padding: 1px 6px;
-    background: var(--td-warning-color-light);
-    color: var(--td-warning-color);
-    border-radius: 4px;
-  }
-
-  .card-popover-tags {
-    display: inline-flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px;
-    max-width: 100%;
-  }
-
-  .card-popover-tag-chip {
-    max-width: 120px;
-    height: 18px;
-    line-height: 18px;
-    border-radius: 999px;
-    border-color: var(--td-component-stroke);
-    color: var(--td-text-color-secondary);
-    padding: 0 6px;
-    background: transparent;
-
-    .tag-text {
-      display: inline-block;
-      max-width: 80px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      vertical-align: middle;
-      font-size: 11px;
-    }
-  }
-
-  .card-popover-type {
-    padding: 1px 6px;
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-    border-radius: 4px;
-  }
-
-  .card-popover-hint {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--td-component-stroke);
-    font-size: 11px;
-    color: var(--td-text-color-secondary);
-  }
-}
-
-.url-import-form {
-  padding: 8px 0;
-
-  .url-input-label {
-    color: var(--td-text-color-primary);
-    font-size: 14px;
-    font-weight: 500;
-    margin-bottom: 8px;
-  }
-
-  .url-input-tip {
-    color: var(--td-text-color-secondary);
-    font-size: 12px;
-    margin-top: 8px;
-    line-height: 1.5;
-  }
-}
-
-.knowledge-card-upload {
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: 14px;
-  font-weight: 400;
-  cursor: pointer;
-
-  .btn-upload {
-    margin: 33px auto 0;
-    width: 112px;
-    height: 32px;
-    border: 1px solid var(--td-component-border);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 24px;
-  }
-
-  .svg-icon-download {
-    margin-right: 8px;
-  }
-}
-
-.upload-described {
-  color: var(--td-text-color-disabled);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  font-weight: 400;
-  text-align: center;
-  display: block;
-  width: 188px;
-  margin: 0 auto;
-}
-
-.del-card {
-  vertical-align: middle;
-}
 </style>

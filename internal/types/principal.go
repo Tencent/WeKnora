@@ -9,16 +9,36 @@ import (
 const (
 	PrincipalWebUser         = "web_user"
 	PrincipalAPITenant       = "api_tenant"
+	PrincipalAPIPlatform     = "api_platform"
 	PrincipalAPIExternalUser = "api_external_user"
 	PrincipalIMUser          = "im_user"
 	PrincipalEmbedChannel    = "embed_channel"
 	PrincipalEmbedSession    = "embed_session"
 	PrincipalEmbedVisitor    = "embed_visitor"
+	PrincipalMCPEndpoint     = "mcp_endpoint"
 )
 
 // EmbedVisitorHeader is sent by the embed widget to identify a browser visitor
 // across chat sessions within the same channel.
 const EmbedVisitorHeader = "X-Embed-Visitor"
+
+// SessionOwnerAPITenantKeyPrefix prefixes sessions.user_id for rows created by a
+// tenant API key. The full owner id is "api_tenant_key:<tenantID>:<keyID>", so a
+// LIKE '<prefix>%' selects every API-key session in the tenant.
+const SessionOwnerAPITenantKeyPrefix = "api_tenant_key:"
+
+// SessionOwnerAPIExternalUserPrefix prefixes sessions.user_id for rows created
+// by a tenant API key whose request resolved an external-user identity. The
+// remainder is "<tenantID>:<externalUserID>".
+const SessionOwnerAPIExternalUserPrefix = PrincipalAPIExternalUser + ":"
+
+// IsAPISessionOwnerID reports whether a stored session owner was produced by
+// a tenant API-key request, with or without an external-user identity.
+func IsAPISessionOwnerID(ownerID string) bool {
+	ownerID = strings.TrimSpace(ownerID)
+	return strings.HasPrefix(ownerID, SessionOwnerAPITenantKeyPrefix) ||
+		strings.HasPrefix(ownerID, SessionOwnerAPIExternalUserPrefix)
+}
 
 // Principal represents the terminal caller for per-subject isolation features.
 // It is intentionally separate from UserID: many principals, such as IM users
@@ -88,6 +108,15 @@ func EmbedVisitorIDFromContext(ctx context.Context) string {
 }
 
 // EmbedSessionPrincipal identifies a single embed visitor chat session.
+// MCPEndpointPrincipal identifies calls made through a workspace MCP
+// endpoint. Sessions and messages created by the ask tool are owned by it.
+func MCPEndpointPrincipal(tenantID uint64, endpointID string) Principal {
+	return Principal{
+		Type: PrincipalMCPEndpoint,
+		ID:   fmt.Sprintf("%d:%s", tenantID, endpointID),
+	}
+}
+
 func EmbedSessionPrincipal(tenantID uint64, channelID, sessionID string) Principal {
 	return Principal{
 		Type: PrincipalEmbedSession,
@@ -156,15 +185,22 @@ func MCPOAuthPrincipalFromContext(ctx context.Context) Principal {
 // caller. API external users and embed chat sessions use principal-derived IDs;
 // tenant API keys are isolated per key id; MCP OAuth token storage uses
 // MCPOAuthPrincipalFromContext (visitor-level for embed).
+//
+// PrincipalMCPEndpoint must resolve to StorageID() too: the MCP `ask` tool
+// creates its session with `MCPEndpointPrincipal(...).StorageID()` and then
+// looks it up through this function. Without the case below the lookup falls
+// through to the raw user id ("mcp-<endpointID>"), which never matches the
+// stored owner ("mcp_endpoint:<tenantID>:<endpointID>"), so every ask call
+// failed with "failed to create user message: session not found".
 func SessionOwnerIDFromContext(ctx context.Context) string {
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Type {
-		case PrincipalAPIExternalUser, PrincipalEmbedSession:
+		case PrincipalAPIExternalUser, PrincipalEmbedSession, PrincipalMCPEndpoint:
 			return p.StorageID()
 		case PrincipalAPITenant:
 			if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && scope.KeyID > 0 {
 				if tenantID, ok := TenantIDFromContext(ctx); ok && tenantID > 0 {
-					return fmt.Sprintf("api_tenant_key:%d:%d", tenantID, scope.KeyID)
+					return fmt.Sprintf("%s%d:%d", SessionOwnerAPITenantKeyPrefix, tenantID, scope.KeyID)
 				}
 			}
 		}

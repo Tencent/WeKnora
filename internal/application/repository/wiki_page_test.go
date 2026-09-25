@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -42,9 +43,54 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     page_metadata     TEXT DEFAULT '{}',
     aliases           TEXT DEFAULT '[]',
     version           INTEGER NOT NULL DEFAULT 1,
+    last_edit_source  VARCHAR(16) NOT NULL DEFAULT '',
+    last_editor_id    VARCHAR(64) NOT NULL DEFAULT '',
     created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at        DATETIME
+);
+`
+
+// wikiPageRevisionsTestDDL mirrors the production wiki_page_revisions DDL
+// (migrations/versioned/000075_wiki_page_revisions.up.sql) for SQLite.
+const wikiPageRevisionsTestDDL = `
+CREATE TABLE IF NOT EXISTS wiki_page_revisions (
+    id                VARCHAR(36) PRIMARY KEY,
+    tenant_id         INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    page_id           VARCHAR(36) NOT NULL,
+    slug              VARCHAR(255) NOT NULL,
+    version           INTEGER NOT NULL,
+    title             VARCHAR(512) NOT NULL DEFAULT '',
+    page_type         VARCHAR(32) NOT NULL DEFAULT 'summary',
+    status            VARCHAR(32) NOT NULL DEFAULT 'published',
+    content           TEXT NOT NULL DEFAULT '',
+    summary           TEXT NOT NULL DEFAULT '',
+    aliases           TEXT DEFAULT '[]',
+    edit_source       VARCHAR(16) NOT NULL DEFAULT '',
+    editor_id         VARCHAR(64) NOT NULL DEFAULT '',
+    edited_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_page_revisions_page_version
+    ON wiki_page_revisions (page_id, version);
+`
+
+// wikiPageIssuesTestDDL mirrors the production wiki_page_issues DDL for SQLite.
+const wikiPageIssuesTestDDL = `
+CREATE TABLE IF NOT EXISTS wiki_page_issues (
+    id                      VARCHAR(36) PRIMARY KEY,
+    tenant_id               INTEGER NOT NULL,
+    knowledge_base_id      VARCHAR(36) NOT NULL,
+    slug                    VARCHAR(255) NOT NULL,
+    issue_type              VARCHAR(50) NOT NULL,
+    description             TEXT NOT NULL,
+    suspected_knowledge_ids TEXT,
+    status                  VARCHAR(20) NOT NULL DEFAULT 'pending',
+    reported_by             VARCHAR(100) NOT NULL,
+    created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at              DATETIME
 );
 `
 
@@ -71,6 +117,13 @@ func setupWikiPagesTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(wikiPagesTestDDL).Error)
 	require.NoError(t, db.Exec(wikiFoldersTestDDL).Error)
+	require.NoError(t, db.Exec(wikiPageIssuesTestDDL).Error)
+	for _, stmt := range strings.Split(strings.TrimSpace(wikiPageRevisionsTestDDL), ";") {
+		if strings.TrimSpace(stmt) == "" {
+			continue
+		}
+		require.NoError(t, db.Exec(stmt).Error)
+	}
 	return db
 }
 
@@ -143,6 +196,53 @@ func TestList_WikiPathSortReturnsCategorizedPagesFirst(t *testing.T) {
 	assert.Equal(t, "entity/001-root", got[2].Slug)
 }
 
+// TestList_CategoryPathFilterMatchesOnSQLite protects the directory view on the
+// SQLite build: the sidebar loads a folder's pages with category_path +
+// category_depth, and StringArray is stored as a BLOB there, so a plain
+// equality against a TEXT bind never matched and every folder listed empty.
+func TestList_CategoryPathFilterMatchesOnSQLite(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	entity, published := types.WikiPageTypeEntity, types.WikiPageStatusPublished
+	pages := []*types.WikiPage{
+		makeCategorizedWikiPage("kb-c", "entity/in-ai", entity, published, "AI"),
+		makeCategorizedWikiPage("kb-c", "entity/in-ai-llm", entity, published, "AI", "LLM"),
+		makeCategorizedWikiPage("kb-c", "entity/in-people", entity, published, "人物"),
+		makeWikiPage("kb-c", "entity/root", entity, published),
+	}
+	for _, p := range pages {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	depth := 1
+	got, total, err := repo.List(ctx, &types.WikiPageListRequest{
+		KnowledgeBaseID: "kb-c",
+		PageType:        types.WikiPageTypeEntity,
+		CategoryPath:    types.StringArray{"AI"},
+		CategoryDepth:   &depth,
+		Page:            1,
+		PageSize:        10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, "entity/in-ai", got[0].Slug)
+
+	got, total, err = repo.List(ctx, &types.WikiPageListRequest{
+		KnowledgeBaseID: "kb-c",
+		PageType:        types.WikiPageTypeEntity,
+		CategoryPath:    types.StringArray{"人物"},
+		Page:            1,
+		PageSize:        10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, "entity/in-people", got[0].Slug)
+}
+
 // TestFolderTree_CRUDAndChildListing exercises the wiki_folders repository:
 // child listing ordered by sort_order/name, find-by-name, page counting under
 // a folder, and that ListDistinctCategoryPaths reflects the folder paths.
@@ -205,6 +305,14 @@ func TestFolderTree_CRUDAndChildListing(t *testing.T) {
 	pages, err := repo.ListPagesByFolderIDs(ctx, "kb-f", []string{"f-ai", "f-llm"})
 	require.NoError(t, err)
 	assert.Len(t, pages, 3)
+
+	// Repository deletion re-checks emptiness atomically, so a concurrent page
+	// move / child create cannot slip between the service check and soft delete.
+	err = repo.DeleteFolder(ctx, "kb-f", "f-ai")
+	assert.ErrorIs(t, err, ErrWikiFolderNotEmpty)
+	require.NoError(t, repo.DeleteFolder(ctx, "kb-f", "f-people"))
+	_, err = repo.GetFolderByID(ctx, "kb-f", "f-people")
+	assert.ErrorIs(t, err, ErrWikiFolderNotFound)
 }
 
 // TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived verifies
@@ -298,6 +406,45 @@ func TestListByTypeLight_EmptyType_ReturnsZero(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+func TestListPagesCursorExcludesArchivedPages(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	mk := func(id, slug, status string) *types.WikiPage {
+		page := makeWikiPage("kb-lint", slug, types.WikiPageTypeConcept, status)
+		page.ID = id
+		return page
+	}
+	pages := []*types.WikiPage{
+		mk("001", "concept/live-a", types.WikiPageStatusPublished),
+		mk("002", "concept/archived", types.WikiPageStatusArchived),
+		mk("003", "concept/live-b", types.WikiPageStatusDraft),
+		mk("004", "concept/other-kb", types.WikiPageStatusPublished),
+	}
+	pages[3].KnowledgeBaseID = "kb-other"
+	for _, p := range pages {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	first, next, err := repo.ListPagesCursor(ctx, "kb-lint", "", 1)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	assert.Equal(t, "concept/live-a", first[0].Slug)
+	assert.Equal(t, "001", next)
+
+	second, next, err := repo.ListPagesCursor(ctx, "kb-lint", next, 1)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	assert.Equal(t, "concept/live-b", second[0].Slug)
+	assert.Equal(t, "003", next)
+
+	third, next, err := repo.ListPagesCursor(ctx, "kb-lint", next, 1)
+	require.NoError(t, err)
+	assert.Empty(t, third)
+	assert.Empty(t, next)
+}
+
 // TestListByTypeLight_ClampsLimit verifies the [1, 200] clamp. We don't
 // want a client passing limit=100000 and forcing the DB to return a
 // multi-MB response.
@@ -323,4 +470,316 @@ func TestListByTypeLight_ClampsLimit(t *testing.T) {
 	clampedEntries, _, err := repo.ListByTypeLight(ctx, "kb-cap", types.WikiPageTypeEntity, 5000, 0)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(clampedEntries), 200)
+}
+
+func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	orphan := makeWikiPage("kb-orphans", "entity/orphan", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	orphan.InLinks = types.StringArray{}
+	linked := makeWikiPage("kb-orphans", "entity/linked", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	linked.InLinks = types.StringArray{"entity/source"}
+	indexPage := makeWikiPage("kb-orphans", "index", types.WikiPageTypeIndex, types.WikiPageStatusPublished)
+	indexPage.InLinks = types.StringArray{}
+	otherKB := makeWikiPage("kb-other", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	otherKB.InLinks = types.StringArray{}
+
+	for _, p := range []*types.WikiPage{orphan, linked, indexPage, otherKB} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	got, err := repo.CountOrphans(ctx, "kb-orphans")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), got)
+}
+
+func TestWikiStatsQueriesExcludeArchivedPages(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	live := makeWikiPage("kb-stats", "entity/live", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	live.InLinks = types.StringArray{"index"}
+	live.OutLinks = types.StringArray{"concept/live-target"}
+	archived := makeWikiPage("kb-stats", "entity/archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.InLinks = types.StringArray{}
+	archived.OutLinks = types.StringArray{"concept/archived-target"}
+	indexPage := makeWikiPage("kb-stats", "index", types.WikiPageTypeIndex, types.WikiPageStatusPublished)
+	indexPage.InLinks = types.StringArray{}
+	otherKB := makeWikiPage("kb-other", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+
+	for _, p := range []*types.WikiPage{live, archived, indexPage, otherKB} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	counts, err := repo.CountByType(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), counts[types.WikiPageTypeEntity])
+	assert.Equal(t, int64(1), counts[types.WikiPageTypeIndex])
+
+	orphans, err := repo.CountOrphans(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), orphans)
+
+	pages, err := repo.ListAll(ctx, "kb-stats")
+	require.NoError(t, err)
+	assert.Len(t, pages, 2)
+	for _, page := range pages {
+		assert.NotEqual(t, types.WikiPageStatusArchived, page.Status)
+		assert.Equal(t, "kb-stats", page.KnowledgeBaseID)
+	}
+}
+
+// makeWikiRevision builds a snapshot row for the given page state.
+func makeWikiRevision(page *types.WikiPage, version int, editSource string) *types.WikiPageRevision {
+	return &types.WikiPageRevision{
+		ID:              uuid.New().String(),
+		TenantID:        page.TenantID,
+		KnowledgeBaseID: page.KnowledgeBaseID,
+		PageID:          page.ID,
+		Slug:            page.Slug,
+		Version:         version,
+		Title:           page.Title,
+		PageType:        page.PageType,
+		Status:          page.Status,
+		Content:         "content of v" + strconv.Itoa(version),
+		EditSource:      editSource,
+		EditedAt:        time.Now(),
+		CreatedAt:       time.Now(),
+	}
+}
+
+func countWikiRevisions(t *testing.T, db *gorm.DB, pageID string) int64 {
+	t.Helper()
+	var n int64
+	require.NoError(t, db.Model(&types.WikiPageRevision{}).Where("page_id = ?", pageID).Count(&n).Error)
+	return n
+}
+
+func TestUpdateWithRevisionRollsBackSnapshotOnVersionConflict(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	page := makeWikiPage("kb-tx", "concept/tx", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	require.NoError(t, repo.Create(ctx, page))
+
+	// Simulate a writer working from a stale read: it expects v1 while the
+	// row has already moved on.
+	require.NoError(t, db.Model(&types.WikiPage{}).Where("id = ?", page.ID).
+		Update("version", 7).Error)
+
+	stale := *page
+	stale.Version = 1
+	stale.Content = "loser body"
+	err := repo.UpdateWithRevision(ctx, &stale, makeWikiRevision(page, 1, types.WikiEditSourceUser))
+
+	require.ErrorIs(t, err, ErrWikiPageConflict)
+	assert.Equal(t, 1, stale.Version, "a rejected write must not leave a bumped version behind")
+	assert.Zero(t, countWikiRevisions(t, db, page.ID),
+		"the snapshot must roll back with the failed update, or history would list a still-current version")
+}
+
+func TestUpdateWithRevisionIgnoresDuplicateSnapshot(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	page := makeWikiPage("kb-dup", "concept/dup", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	require.NoError(t, repo.Create(ctx, page))
+	require.NoError(t, repo.UpdateWithRevision(ctx, page, makeWikiRevision(page, 1, types.WikiEditSourceUser)))
+	require.Equal(t, 2, page.Version)
+
+	// A concurrent writer that already snapshotted v1 must not fail here.
+	again := *page
+	again.Version = 2
+	require.NoError(t, repo.UpdateWithRevision(ctx, &again, makeWikiRevision(page, 1, types.WikiEditSourceUser)))
+	assert.Equal(t, int64(1), countWikiRevisions(t, db, page.ID))
+}
+
+func TestPruneRevisionsKeepsHumanEditsUntilHardCap(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	page := makeWikiPage("kb-prune", "concept/prune", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	require.NoError(t, repo.Create(ctx, page))
+
+	// v1 is a human edit buried under a long tail of pipeline rewrites.
+	require.NoError(t, db.Create(makeWikiRevision(page, 1, types.WikiEditSourceUser)).Error)
+	require.NoError(t, db.Create(makeWikiRevision(page, 2, types.WikiEditSourceAgent)).Error)
+	for v := 3; v <= 120; v++ {
+		require.NoError(t, db.Create(makeWikiRevision(page, v, types.WikiEditSourcePipeline)).Error)
+	}
+
+	// Soft cap only: pipeline snapshots below v71 go, the two authored ones stay.
+	require.NoError(t, repo.PruneRevisions(ctx, types.WikiRevisionPruneRequest{
+		PageID:          page.ID,
+		KeepFromVersion: 121 - types.WikiMaxRevisionsPerPage,
+		PrunableSources: types.WikiPrunableEditSources,
+	}))
+	for _, v := range []int{1, 2} {
+		_, err := repo.GetRevision(ctx, page.KnowledgeBaseID, page.ID, v)
+		require.NoError(t, err, "authored v%d must survive pipeline churn", v)
+	}
+	_, err := repo.GetRevision(ctx, page.KnowledgeBaseID, page.ID, 3)
+	require.ErrorIs(t, err, ErrWikiPageNotFound)
+	assert.Equal(t, int64(types.WikiMaxRevisionsPerPage+2), countWikiRevisions(t, db, page.ID))
+
+	// Hard cap ignores authorship.
+	require.NoError(t, repo.PruneRevisions(ctx, types.WikiRevisionPruneRequest{
+		PageID:              page.ID,
+		KeepFromVersion:     121 - types.WikiMaxRevisionsPerPage,
+		PrunableSources:     types.WikiPrunableEditSources,
+		HardKeepFromVersion: 100,
+	}))
+	_, err = repo.GetRevision(ctx, page.KnowledgeBaseID, page.ID, 1)
+	require.ErrorIs(t, err, ErrWikiPageNotFound)
+	assert.Equal(t, int64(21), countWikiRevisions(t, db, page.ID))
+}
+
+func TestDeleteRevisionsByPageOnlyTouchesThatPage(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	victim := makeWikiPage("kb-del", "concept/victim", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	bystander := makeWikiPage("kb-del", "concept/bystander", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	require.NoError(t, repo.Create(ctx, victim))
+	require.NoError(t, repo.Create(ctx, bystander))
+	require.NoError(t, db.Create(makeWikiRevision(victim, 1, types.WikiEditSourceUser)).Error)
+	require.NoError(t, db.Create(makeWikiRevision(bystander, 1, types.WikiEditSourceUser)).Error)
+
+	require.NoError(t, repo.DeleteRevisionsByPage(ctx, victim.ID))
+	assert.Zero(t, countWikiRevisions(t, db, victim.ID))
+	assert.Equal(t, int64(1), countWikiRevisions(t, db, bystander.ID))
+
+	// An empty id must not turn into a table-wide delete.
+	require.NoError(t, repo.DeleteRevisionsByPage(ctx, ""))
+	assert.Equal(t, int64(1), countWikiRevisions(t, db, bystander.ID))
+}
+
+func TestDeleteByKnowledgeBaseIDScopesSoftAndHardDeletes(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	victim := makeWikiPage("kb-victim", "concept/victim", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	otherKB := makeWikiPage("kb-other", "concept/other", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	otherTenant := makeWikiPage(
+		"kb-victim", "concept/other-tenant", types.WikiPageTypeConcept, types.WikiPageStatusPublished,
+	)
+	otherTenant.TenantID = 2
+	for _, p := range []*types.WikiPage{victim, otherKB, otherTenant} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+	require.NoError(t, db.Create(makeWikiRevision(victim, 1, types.WikiEditSourceUser)).Error)
+	require.NoError(t, db.Create(makeWikiRevision(otherKB, 1, types.WikiEditSourceUser)).Error)
+	require.NoError(t, db.Create(makeWikiRevision(otherTenant, 1, types.WikiEditSourceUser)).Error)
+
+	victimFolder := &types.WikiFolder{
+		ID: "f-victim", TenantID: 1, KnowledgeBaseID: "kb-victim",
+		Name: "victim", Path: "victim", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	otherFolder := &types.WikiFolder{
+		ID: "f-other", TenantID: 1, KnowledgeBaseID: "kb-other",
+		Name: "other", Path: "other", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, repo.CreateFolder(ctx, victimFolder))
+	require.NoError(t, repo.CreateFolder(ctx, otherFolder))
+
+	victimIssue := &types.WikiPageIssue{
+		ID: "i-victim", TenantID: 1, KnowledgeBaseID: "kb-victim",
+		Slug: victim.Slug, IssueType: "lint", Description: "victim",
+		ReportedBy: "test", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	otherIssue := &types.WikiPageIssue{
+		ID: "i-other", TenantID: 1, KnowledgeBaseID: "kb-other",
+		Slug: otherKB.Slug, IssueType: "lint", Description: "other",
+		ReportedBy: "test", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, repo.CreateIssue(ctx, victimIssue))
+	require.NoError(t, repo.CreateIssue(ctx, otherIssue))
+
+	// Empty kbID must not become a table-wide delete.
+	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, 1, ""))
+	require.NoError(t, repo.DeleteFoldersByKnowledgeBaseID(ctx, 1, ""))
+	require.NoError(t, repo.DeleteRevisionsByKnowledgeBaseID(ctx, 1, ""))
+	require.NoError(t, repo.DeleteIssuesByKnowledgeBaseID(ctx, 1, ""))
+	_, err := repo.GetBySlug(ctx, "kb-victim", victim.Slug)
+	require.NoError(t, err)
+
+	// Wrong tenant must not touch the victim tenant's rows.
+	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, 99, "kb-victim"))
+	require.NoError(t, repo.DeleteFoldersByKnowledgeBaseID(ctx, 99, "kb-victim"))
+	require.NoError(t, repo.DeleteRevisionsByKnowledgeBaseID(ctx, 99, "kb-victim"))
+	require.NoError(t, repo.DeleteIssuesByKnowledgeBaseID(ctx, 99, "kb-victim"))
+	_, err = repo.GetBySlug(ctx, "kb-victim", victim.Slug)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, 1, "kb-victim"))
+	require.NoError(t, repo.DeleteFoldersByKnowledgeBaseID(ctx, 1, "kb-victim"))
+	require.NoError(t, repo.DeleteRevisionsByKnowledgeBaseID(ctx, 1, "kb-victim"))
+	require.NoError(t, repo.DeleteIssuesByKnowledgeBaseID(ctx, 1, "kb-victim"))
+
+	_, err = repo.GetBySlug(ctx, "kb-victim", victim.Slug)
+	require.ErrorIs(t, err, ErrWikiPageNotFound)
+	_, err = repo.GetFolderByID(ctx, "kb-victim", "f-victim")
+	require.ErrorIs(t, err, ErrWikiFolderNotFound)
+	issues, err := repo.ListIssues(ctx, "kb-victim", "", "")
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+	assert.Zero(t, countWikiRevisions(t, db, victim.ID))
+
+	// Soft-deleted rows remain when queried without the GORM deleted_at filter.
+	var pageCount, folderCount, issueCount int64
+	require.NoError(t, db.Unscoped().Model(&types.WikiPage{}).
+		Where("id = ?", victim.ID).Count(&pageCount).Error)
+	require.NoError(t, db.Unscoped().Model(&types.WikiFolder{}).
+		Where("id = ?", "f-victim").Count(&folderCount).Error)
+	require.NoError(t, db.Unscoped().Model(&types.WikiPageIssue{}).
+		Where("id = ?", "i-victim").Count(&issueCount).Error)
+	assert.Equal(t, int64(1), pageCount)
+	assert.Equal(t, int64(1), folderCount)
+	assert.Equal(t, int64(1), issueCount)
+
+	// Other KB and other tenant are untouched.
+	_, err = repo.GetBySlug(ctx, "kb-other", otherKB.Slug)
+	require.NoError(t, err)
+	_, err = repo.GetBySlug(ctx, "kb-victim", otherTenant.Slug)
+	require.NoError(t, err)
+	_, err = repo.GetFolderByID(ctx, "kb-other", "f-other")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), countWikiRevisions(t, db, otherKB.ID))
+	assert.Equal(t, int64(1), countWikiRevisions(t, db, otherTenant.ID))
+	otherIssues, err := repo.ListIssues(ctx, "kb-other", "", "")
+	require.NoError(t, err)
+	require.Len(t, otherIssues, 1)
+}
+
+// Issue IDs are listed to readers of a KB; updating one must be scoped to the
+// KB the caller was authorized for.
+func TestUpdateIssueStatus_ScopedToKnowledgeBase(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	require.NoError(t, db.Create(&types.WikiPageIssue{
+		ID: "issue-1", TenantID: 7, KnowledgeBaseID: "kb-a", Slug: "page", Status: "pending",
+	}).Error)
+	repo := &wikiPageRepository{db: db}
+	status := func() string {
+		var got string
+		require.NoError(t, db.Raw(`SELECT status FROM wiki_page_issues WHERE id = 'issue-1'`).Scan(&got).Error)
+		return got
+	}
+
+	err := repo.UpdateIssueStatus(context.Background(), "kb-b", "issue-1", "resolved")
+	require.ErrorIs(t, err, ErrWikiIssueNotFound)
+	assert.Equal(t, "pending", status())
+
+	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
+	assert.Equal(t, "resolved", status())
+	// Setting the same status again is not "not found": both supported
+	// databases count matched rows, and updated_at changes anyway.
+	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
 }

@@ -2,7 +2,7 @@ export const domPurifyForbidTags = ['script', 'style', 'object', 'embed', 'form'
 export const domPurifyForbidAttr = ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'] as const;
 
 export const domPurifyAllowedUriRegexp =
-  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|blob):|(?:resource|storage|local|minio|cos|tos|s3|oss|ks3|obs):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|blob):|data:image\/|(?:resource|storage|local|minio|cos|tos|s3|oss|ks3|obs):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
 
 /** Shared DOMPurify security options (FORBID_*, URI scheme, DOM flags). */
 export const domPurifySecurityOptions = {
@@ -57,6 +57,11 @@ export const markdownDomPurifySecurityHooks = {
     if (!('tagName' in currentNode) || !('getAttribute' in currentNode)) return;
     const element = currentNode as Element;
     if (element.tagName === 'A' && element.getAttribute('href')) {
+      const className = element.getAttribute('class') || '';
+      if (/\bprotected-resource-card\b/.test(className) || element.hasAttribute('download')) {
+        element.removeAttribute('target');
+        return;
+      }
       element.setAttribute('rel', 'noopener noreferrer');
       element.setAttribute('target', '_blank');
     }
@@ -79,6 +84,7 @@ export const markdownDomPurifyConfig = {
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
     'data-chunk-id', 'data-doc', 'data-slug', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src', 'data-img-loading',
+    'data-artifact-index', 'data-protected-resource', 'download',
     'width', 'height', 'style', 'id', 'type', 'aria-label', 'data-mermaid', 'disabled',
     'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
     'stroke-dasharray', 'stroke-dashoffset', 'stroke-miterlimit', 'stroke-opacity',

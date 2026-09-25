@@ -235,17 +235,40 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	if p.documentReader == nil {
 		return fmt.Errorf("DocumentReader not configured")
 	}
-	
+
 	normalizedType := strings.TrimPrefix(fileType, ".")
 
-	result, err := p.documentReader.Read(ctx, &types.ReadRequest{
+	parserEngine := ""
+	if v := ctx.Value(types.ChatParserEngineContextKey); v != nil {
+		if s, ok := v.(string); ok {
+			parserEngine = s
+		}
+	}
+	overrides := getParserEngineOverridesFromContext(ctx)
+
+	// Engines that parse in this process (anydoc, MinerU, ...) are resolved
+	// through the registry so a chat attachment honours the same engine rules
+	// as an ingested document. Anything the registry cannot build here — a
+	// cloud engine whose credentials this path cannot resolve — falls back to
+	// the docreader, which is where every engine name went before.
+	reader, err := docparser.NewReader(ctx, parserEngine, normalizedType, false, docparser.ReaderDeps{
+		Overrides: overrides,
+		Remote:    p.documentReader,
+	})
+	if err != nil {
+		logger.Warnf(ctx, "parser engine %q unusable for this attachment, using docreader: %v", parserEngine, err)
+		reader = p.documentReader
+	}
+
+	result, err := reader.Read(ctx, &types.ReadRequest{
 		FileContent:           data,
 		FileName:              fileName,
 		FileType:              normalizedType,
-		ParserEngineOverrides: getParserEngineOverridesFromContext(ctx),
+		ParserEngine:          parserEngine,
+		ParserEngineOverrides: overrides,
 	})
 	if err != nil {
-		return fmt.Errorf("DocumentReader failed: %w", err)
+		return fmt.Errorf("document parsing failed: %w", err)
 	}
 
 	// Resolve embedded image refs to storage URLs.

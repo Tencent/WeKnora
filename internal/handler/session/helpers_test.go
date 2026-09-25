@@ -1,10 +1,13 @@
 package session
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTagScopesFromMentionedItems(t *testing.T) {
@@ -51,4 +54,84 @@ func TestValidateUnscopedTagIDs(t *testing.T) {
 	assert.NoError(t, validateUnscopedTagIDs([]string{"tag-9"}, []string{"kb-1"}))
 	assert.Error(t, validateUnscopedTagIDs([]string{"tag-9"}, []string{"kb-1", "kb-2"}))
 	assert.Error(t, validateUnscopedTagIDs([]string{"tag-9"}, nil))
+}
+
+// TestSearchResultFromMap_RoundTrip simulates the Redis round trip: a
+// *types.SearchResult is serialized to JSON, deserialized into a generic map,
+// and rebuilt via searchResultFromMap. All fields, including metadata, must
+// survive.
+func TestSearchResultFromMap_RoundTrip(t *testing.T) {
+	original := &types.SearchResult{
+		ID:                   "chunk-1",
+		Content:              "first part\nsecond part",
+		KnowledgeID:          "knowledge-1",
+		ChunkIndex:           3,
+		KnowledgeTitle:       "title",
+		StartAt:              10,
+		EndAt:                20,
+		Seq:                  2,
+		Score:                4.5,
+		ChunkType:            "text",
+		ParentChunkID:        "parent-1",
+		ImageInfo:            `[{"url":"cdn.example.com"}]`,
+		KnowledgeFilename:    "doc.txt",
+		KnowledgeSource:      "upload",
+		KnowledgeDescription: "desc",
+		KnowledgeBaseID:      "kb-1",
+		Metadata:             map[string]string{"page": "3"},
+		SourceLocators: types.SourceLocators{
+			{Type: types.SourceLocatorPDF, Page: 4, BBox: []float64{0.1, 0.2, 0.9, 0.3}, Quote: "q"},
+		},
+	}
+
+	raw, err := json.Marshal(original)
+	require.NoError(t, err)
+	var refMap map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw, &refMap))
+
+	got := searchResultFromMap(refMap)
+
+	assert.Equal(t, original.ID, got.ID)
+	assert.Equal(t, original.Content, got.Content)
+	assert.Equal(t, original.KnowledgeID, got.KnowledgeID)
+	assert.Equal(t, original.ChunkIndex, got.ChunkIndex)
+	assert.Equal(t, original.KnowledgeTitle, got.KnowledgeTitle)
+	assert.Equal(t, original.StartAt, got.StartAt)
+	assert.Equal(t, original.EndAt, got.EndAt)
+	assert.Equal(t, original.Seq, got.Seq)
+	assert.Equal(t, original.Score, got.Score)
+	assert.Equal(t, original.ChunkType, got.ChunkType)
+	assert.Equal(t, original.ParentChunkID, got.ParentChunkID)
+	assert.Equal(t, original.ImageInfo, got.ImageInfo)
+	assert.Equal(t, original.KnowledgeFilename, got.KnowledgeFilename)
+	assert.Equal(t, original.KnowledgeSource, got.KnowledgeSource)
+	assert.Equal(t, original.KnowledgeDescription, got.KnowledgeDescription)
+	assert.Equal(t, original.KnowledgeBaseID, got.KnowledgeBaseID)
+	assert.Equal(t, original.Metadata, got.Metadata)
+	assert.Equal(t, original.SourceLocators, got.SourceLocators)
+}
+
+func TestCreateAgentQueryEventIncludesPersistedTimestamps(t *testing.T) {
+	userAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	assistantAt := time.Date(2026, 1, 2, 3, 4, 6, 0, time.UTC)
+
+	evt := createAgentQueryEvent("sess-1", "asst-1", "user-1", userAt, assistantAt)
+
+	assert.Equal(t, types.ResponseTypeAgentQuery, evt.Type)
+	assert.Equal(t, "sess-1", evt.Data["session_id"])
+	assert.Equal(t, "asst-1", evt.Data["assistant_message_id"])
+	assert.Equal(t, "user-1", evt.Data["user_message_id"])
+	assert.Equal(t, userAt.Format(time.RFC3339Nano), evt.Data["user_created_at"])
+	assert.Equal(t, assistantAt.Format(time.RFC3339Nano), evt.Data["assistant_created_at"])
+}
+
+func TestCreateAgentQueryEventOmitsZeroTimestamps(t *testing.T) {
+	evt := createAgentQueryEvent("sess-1", "asst-1", "", time.Time{}, time.Time{})
+
+	_, hasUserID := evt.Data["user_message_id"]
+	_, hasUserAt := evt.Data["user_created_at"]
+	_, hasAssistantAt := evt.Data["assistant_created_at"]
+	assert.False(t, hasUserID)
+	assert.False(t, hasUserAt)
+	assert.False(t, hasAssistantAt)
 }

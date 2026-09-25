@@ -1,10 +1,58 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"testing"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
+
+func TestPruneEmptyFolderChainsDeletesOnlyEmptyCandidateAncestors(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	now := time.Now()
+	createFolder := func(id, parentID, name, path string, depth int) {
+		require.NoError(t, repo.CreateFolder(ctx, &types.WikiFolder{
+			ID: id, TenantID: 1, KnowledgeBaseID: "kb-prune", ParentID: parentID,
+			Name: name, Path: path, Depth: depth, CreatedAt: now, UpdatedAt: now,
+		}))
+	}
+	createFolder("topic", "", "Topic", "Topic", 1)
+	createFolder("empty-leaf", "topic", "Empty", "Topic/Empty", 2)
+	createFolder("occupied-leaf", "topic", "Occupied", "Topic/Occupied", 2)
+	createFolder("empty-chain", "", "Empty chain", "Empty chain", 1)
+	createFolder("empty-chain-leaf", "empty-chain", "Leaf", "Empty chain/Leaf", 2)
+	createFolder("unrelated-empty", "", "Keep me", "Keep me", 1)
+
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-1", TenantID: 1, KnowledgeBaseID: "kb-prune", Slug: "entity/occupied",
+		Title: "Occupied", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
+		FolderID: "occupied-leaf", Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	deleted, err := svc.PruneEmptyFolderChains(ctx, "kb-prune", []string{"empty-leaf", "empty-chain-leaf"})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"empty-leaf", "empty-chain-leaf", "empty-chain"}, deleted)
+
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "topic")
+	require.NoError(t, err, "ancestor with another occupied child must remain")
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "occupied-leaf")
+	require.NoError(t, err)
+	_, err = repo.GetFolderByID(ctx, "kb-prune", "unrelated-empty")
+	require.NoError(t, err, "empty folders outside the affected chains must remain")
+}
 
 func TestStripWikiInlineChunkCitations(t *testing.T) {
 	input := "[**橡皮障夹**](#)**钳**\n\n夹钳是用于夹持橡皮障夹的专用器械[c003]。手柄便于操作 [c003]。多个来源[c003, c1000]。"
@@ -20,6 +68,38 @@ func TestStripWikiInlineChunkCitationsPreservesOrdinaryMarkdown(t *testing.T) {
 	if got := stripWikiInlineChunkCitations(input); got != input {
 		t.Fatalf("stripWikiInlineChunkCitations() changed ordinary Markdown: %q", got)
 	}
+}
+
+func TestUpdateWikiPagePersistsAndClearsAliases(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	page, err := svc.CreatePage(ctx, &types.WikiPage{
+		TenantID: 1, KnowledgeBaseID: "kb-alias", Slug: "concept/alias",
+		Title: "Alias", Summary: "summary", Content: "content",
+		PageType: types.WikiPageTypeConcept, Aliases: types.StringArray{"old"},
+	})
+	require.NoError(t, err)
+
+	page.Aliases = types.StringArray{"new", "alternate"}
+	updated, err := svc.UpdatePage(ctx, page)
+	require.NoError(t, err)
+	require.Equal(t, types.StringArray{"new", "alternate"}, updated.Aliases)
+	require.Equal(t, 2, updated.Version)
+
+	updated.Aliases = types.StringArray{}
+	cleared, err := svc.UpdatePage(ctx, updated)
+	require.NoError(t, err)
+	require.Empty(t, cleared.Aliases)
+	require.Equal(t, 3, cleared.Version)
+
+	stored, err := svc.GetPageBySlug(ctx, "kb-alias", "concept/alias")
+	require.NoError(t, err)
+	require.Empty(t, stored.Aliases)
 }
 
 func TestParseOutLinks(t *testing.T) {
@@ -91,6 +171,60 @@ func TestParseOutLinks(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRepairContentLinks(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	const kbID = "kb-repair"
+	now := time.Now()
+
+	seed := func(slug, title, pageType string) {
+		require.NoError(t, repo.Create(ctx, &types.WikiPage{
+			ID: uuid.New().String(), TenantID: 1, KnowledgeBaseID: kbID,
+			Slug: slug, Title: title, PageType: pageType,
+			Status: types.WikiPageStatusPublished, Version: 1,
+			CreatedAt: now, UpdatedAt: now,
+		}))
+	}
+
+	// Real summary page (clean UUID slug) + a distractor summary + an entity.
+	realSummary := "summary/07a20bb1-a662-47cf-9929-06fb5d5b5b5e"
+	seed(realSummary, "Weknora 试错记录.md - Summary", types.WikiPageTypeSummary)
+	seed("summary/fcadcaab-e094-4037-b71c-9edfdcdba058", "Another Doc - Summary", types.WikiPageTypeSummary)
+	seed("entity/mongodb", "MongoDB", types.WikiPageTypeEntity)
+
+	t.Run("mangled uuid summary link repaired via bigram", func(t *testing.T) {
+		// One hex digit inserted into the last group — 404s on exact lookup.
+		content := "See [[summary/07a20bb1-a662-47cf-9929-06fb14d5b14b14e|Weknora 试错记录.md - Summary]] for context."
+		got, changed, err := svc.RepairContentLinks(ctx, kbID, "synthesis/notes", content)
+		require.NoError(t, err)
+		require.True(t, changed, "expected the mangled summary link to be rewritten")
+		require.Contains(t, got, "[["+realSummary+"|Weknora 试错记录.md - Summary]]")
+		require.NotContains(t, got, "06fb14d5b14b14e")
+	})
+
+	t.Run("live links untouched", func(t *testing.T) {
+		content := "Fine: [[entity/mongodb]] and [[" + realSummary + "]]."
+		got, changed, err := svc.RepairContentLinks(ctx, kbID, "synthesis/notes", content)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, content, got)
+	})
+
+	t.Run("unresolvable dead link left as-is, never stripped", func(t *testing.T) {
+		// A future entity page that doesn't exist and isn't similar to anything.
+		content := "Pending: [[entity/some-brand-new-topic|New Topic]]."
+		got, changed, err := svc.RepairContentLinks(ctx, kbID, "synthesis/notes", content)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, content, got, "unresolvable links must be preserved verbatim, not stripped")
+	})
 }
 
 func TestNormalizeSlug(t *testing.T) {
@@ -309,6 +443,36 @@ func TestComputeGraphSubset_OverviewTruncatesByLinkCount(t *testing.T) {
 	}
 }
 
+func TestComputeGraphSubset_MarksFamiliarSourcePages(t *testing.T) {
+	pages := makeGraphFixture()
+	pages[0].SourceRefs = types.StringArray{"doc-1|排班手册"}
+	pages[1].SourceRefs = types.StringArray{"doc-2"}
+
+	got, err := computeGraphSubset(pages, &types.WikiGraphRequest{
+		Mode:                 types.WikiGraphModeOverview,
+		Limit:                0,
+		FamiliarKnowledgeIDs: []string{"doc-1"},
+	})
+	if err != nil {
+		t.Fatalf("computeGraphSubset: %v", err)
+	}
+	familiar := map[string]bool{}
+	for _, n := range got.Nodes {
+		if n.Familiar {
+			familiar[n.Slug] = true
+		}
+	}
+	if !familiar["hub"] {
+		t.Errorf("hub sources doc-1, want familiar, got %v", familiar)
+	}
+	if familiar["a"] {
+		t.Errorf("a sources a different document, must not light up")
+	}
+	if got.Meta.FamiliarCount != 1 {
+		t.Errorf("FamiliarCount = %d, want 1", got.Meta.FamiliarCount)
+	}
+}
+
 // TestComputeGraphSubset_OverviewUncapped ensures the Limit<=0 escape hatch
 // still works for internal callers (wiki lint) that need every page.
 func TestComputeGraphSubset_OverviewUncapped(t *testing.T) {
@@ -440,4 +604,105 @@ func TestComputeGraphSubset_EgoRejectsMissingCenter(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error for missing center slug")
 	}
+}
+
+func TestFindPagesByNormalizedTitleMatchesWhitespace(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	now := time.Now()
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-kong", TenantID: 1, KnowledgeBaseID: "kb-id", Slug: "entity/confucius",
+		Title: "孔 子", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-fable", TenantID: 1, KnowledgeBaseID: "kb-id", Slug: "concept/yuyan",
+		Title: "《寓言》", PageType: types.WikiPageTypeConcept, Status: types.WikiPageStatusPublished,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	pages, err := svc.FindPagesByNormalizedTitle(ctx, "kb-id", types.WikiPageTypeEntity, "孔子")
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	require.Equal(t, "entity/confucius", pages[0].Slug)
+
+	none, err := svc.FindPagesByNormalizedTitle(ctx, "kb-id", types.WikiPageTypeConcept, "寓言")
+	require.NoError(t, err)
+	require.Empty(t, none, "punctuation-significant titles must stay distinct")
+
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-mencius", TenantID: 1, KnowledgeBaseID: "kb-id", Slug: "entity/mencius",
+		Title: "孟子", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+	batched, err := svc.FindPagesByNormalizedTitles(ctx, "kb-id", types.WikiPageTypeEntity, []string{"孔子", "孟子", "孔子"})
+	require.NoError(t, err)
+	require.Len(t, batched, 2)
+	slugs := []string{batched[0].Slug, batched[1].Slug}
+	require.ElementsMatch(t, []string{"entity/confucius", "entity/mencius"}, slugs)
+}
+
+func TestNormalizeWikiHierarchyKeepsFolderBackedPathVerbatim(t *testing.T) {
+	page := &types.WikiPage{
+		Slug:         "concept/plan",
+		Title:        "将计就计",
+		PageType:     types.WikiPageTypeConcept,
+		FolderID:     "folder-concepts",
+		CategoryPath: types.StringArray{"概念", " 概念 ", "Concepts", ""},
+	}
+
+	normalizeWikiHierarchy(page)
+
+	want := types.StringArray{"概念", "概念", "Concepts"}
+	require.Equal(t, want, page.CategoryPath)
+	require.Equal(t, 3, page.Depth)
+	require.Equal(t, "concept/概念/概念/Concepts/将计就计", page.WikiPath)
+}
+
+func TestMovePageIntoTypeLabelNamedFolderKeepsHierarchy(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil)
+	now := time.Now()
+
+	folder, err := svc.CreateFolder(ctx, "kb-move", 1, types.WikiFolderRootID, "概念")
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		ID: "page-plan", TenantID: 1, KnowledgeBaseID: "kb-move", Slug: "concept/plan",
+		Title: "将计就计", PageType: types.WikiPageTypeConcept, Status: types.WikiPageStatusPublished,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	moved, err := svc.MovePage(ctx, "kb-move", "concept/plan", folder.ID)
+	require.NoError(t, err)
+	require.Equal(t, folder.ID, moved.FolderID)
+
+	stored, err := repo.GetBySlug(ctx, "kb-move", "concept/plan")
+	require.NoError(t, err)
+	require.Equal(t, folder.ID, stored.FolderID)
+	require.Equal(t, types.StringArray{"概念"}, stored.CategoryPath)
+	require.Equal(t, 1, stored.Depth)
+	require.Equal(t, "concept/概念/将计就计", stored.WikiPath)
+
+	// Reading the page back through ListPages must not strip the folder name
+	// either: the directory tree places pages by these fields.
+	folderID := folder.ID
+	listed, err := svc.ListPages(ctx, &types.WikiPageListRequest{
+		KnowledgeBaseID: "kb-move",
+		FolderID:        &folderID,
+	})
+	require.NoError(t, err)
+	require.Len(t, listed.Pages, 1)
+	require.Equal(t, types.StringArray{"概念"}, listed.Pages[0].CategoryPath)
+	require.Equal(t, 1, listed.Pages[0].Depth)
+	require.Equal(t, "concept/概念/将计就计", listed.Pages[0].WikiPath)
 }

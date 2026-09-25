@@ -7,15 +7,24 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/im"
 )
+
+func useTestHTTPClient(t *testing.T) {
+	t.Helper()
+	original := httpClient
+	httpClient = &http.Client{Timeout: 5 * time.Second}
+	t.Cleanup(func() { httpClient = original })
+}
 
 // TestDownloadFile_EndToEnd drives the full DownloadFile orchestration against a
 // fake DingTalk OpenAPI: access-token fetch → messageFiles/download (downloadCode
 // → temporary downloadUrl) → GET the temp URL for the bytes. This covers the HTTP
 // path that the pure-function unit tests deliberately skip (issue #1771).
 func TestDownloadFile_EndToEnd(t *testing.T) {
+	useTestHTTPClient(t)
 	fileBytes := []byte("%PDF-1.7 fake product spec bytes")
 
 	var downloadReq map[string]string
@@ -89,6 +98,7 @@ func TestDownloadFile_EndToEnd(t *testing.T) {
 // TestDownloadFile_TempURLError verifies a non-200 from the temporary download
 // URL surfaces as an error rather than silently returning empty content.
 func TestDownloadFile_TempURLError(t *testing.T) {
+	useTestHTTPClient(t)
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -121,6 +131,7 @@ func TestDownloadFile_TempURLError(t *testing.T) {
 }
 
 func TestDownloadFile_SSRFRejected(t *testing.T) {
+	useTestHTTPClient(t)
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

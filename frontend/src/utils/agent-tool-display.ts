@@ -119,7 +119,19 @@ export function getKnowledgeSearchSummaryHtml(
 
   const results = toolData.results
   const count = (Array.isArray(results) ? results.length : 0) || Number(toolData.count) || 0
-  if (count === 0) return t('agentStream.search.noResults')
+  if (count === 0) {
+    // Retrieval found candidates but none cleared the relevance threshold, so the
+    // turn answered from the fallback with nothing retrieved in its context. Say
+    // that rather than "no matching content": the difference is what tells you to
+    // look at the threshold instead of the knowledge base.
+    const candidateCount = Number(toolData.candidate_count) || 0
+    if (candidateCount > 0) {
+      return t('agentStream.search.candidatesBelowThreshold', {
+        count: `<strong>${candidateCount}</strong>`,
+      })
+    }
+    return t('agentStream.search.noResults')
+  }
 
   const searchSource = getRetrievalSearchSource(null, toolData)
   const webCount = Number(toolData.web_count) || 0

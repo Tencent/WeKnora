@@ -1,0 +1,1558 @@
+// Package sandbox: Cube adapter for the provider-neutral RemoteSandboxClient.
+//
+// CubeRemoteClient implements RemoteSandboxClient on top of the Cube SDK and
+// envd transport. Callers speak RemoteSandboxClient; Cube-specific types,
+// HTTP status codes, and workarounds never leak past this file — every return
+// value is either a neutral DTO or a RemoteError with a stable Kind.
+package sandbox
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/gorilla/websocket"
+	cubesandbox "github.com/tencentcloud/CubeSandbox/sdk/go"
+)
+
+// CubeRemoteClient implements RemoteSandboxClient on top of the Cube SDK and
+// envd transport. It is the only Cube backend the manager and lifecycle
+// coordinator see.
+type CubeRemoteClient struct {
+	config        *Config
+	client        *cubesandbox.Client
+	sandboxDomain string
+	httpTimeout   time.Duration
+
+	// wsDialer reaches non-envd data-plane ports (the desktop's websockify
+	// on 6080). It is nil only if construction could not attach a pool
+	// dialer, which DialDesktop reports as unsupported.
+	wsDialer *WebsocketDialer
+
+	// inboundTokens is the same registry wsDialer reads. Cube's SDK already
+	// stamps envd HTTP with Sandbox.TrafficAccessToken, so exec never needed
+	// a Put here; DialDesktop does.
+	inboundTokens *InboundTokenRegistry
+}
+
+// NewCubeRemoteClient constructs a Cube-backed RemoteSandboxClient using the
+// SDK default HTTP clients (separate control/data pools). Suitable for the
+// process-wide default manager and for throwaway connectivity probes, neither
+// of which benefits from an externally owned pool.
+func NewCubeRemoteClient(config *Config) (*CubeRemoteClient, error) {
+	return NewCubeRemoteClientWithPool(config, nil)
+}
+
+// NewCubeRemoteClientWithPool builds a client whose connections come from a
+// caller-owned pool. Named configs construct a client per request, so the pool
+// is what keeps connections alive across requests; it routes control-plane
+// traffic onto the transport shared with E2B while preserving the SDK's
+// proxy dial rewrite for the data plane. A nil pool keeps the SDK defaults.
+func NewCubeRemoteClientWithPool(
+	config *Config,
+	pool *SandboxGatewayTransportPool,
+) (*CubeRemoteClient, error) {
+	if config == nil {
+		return nil, errors.New("cube remote client config is required")
+	}
+	httpTimeout := config.CubeHTTPTimeout
+	if httpTimeout <= 0 {
+		httpTimeout = DefaultCubeHTTPTimeout
+	}
+	sdkCfg := cubesandbox.Config{
+		APIURL:         config.CubeAPIURL,
+		APIKey:         config.CubeAPIKey,
+		TemplateID:     config.CubeTemplate,
+		SandboxDomain:  config.CubeSandboxDomain,
+		Timeout:        config.CubeHTTPTimeout,
+		RequestTimeout: config.CubeHTTPTimeout,
+	}
+
+	if proxyHost, proxyPort, proxyScheme, ok := parseProxyURL(config.CubeProxyURL); ok {
+		sdkCfg.ProxyNodeIP = proxyHost
+		sdkCfg.ProxyPortHTTP = proxyPort
+		sdkCfg.ProxyScheme = proxyScheme
+	}
+
+	if pool == nil {
+		pool = NewSandboxGatewayTransportPoolWithPolicy(nil, OutboundURLPolicy{
+			AllowPrivate: config.AllowPrivateEndpoints,
+		})
+	}
+	// Route both planes through the existing gateway pool while correcting
+	// the SDK's root-default filesystem identity. The timeout lives in the
+	// transport rather than on http.Client so PTY streams, which ride
+	// /process.Process/ and hold the response body open for the life of the
+	// terminal, are not cut off at CubeHTTPTimeout.
+	routingConfig := *config
+	routingConfig.Type = SandboxTypeCube
+	httpClient := &http.Client{
+		Transport: &cubeFilesystemTransport{next: pool.RoundTripperFor(&routingConfig), timeout: httpTimeout},
+	}
+	opts := []cubesandbox.ClientOption{cubesandbox.WithHTTPClient(httpClient)}
+
+	// Built from routingConfig for the same reason RoundTripperFor is: Type
+	// is normalised to cube there, so gatewayEndpointFor reads the Cube
+	// fields even if the caller left Type unset.
+	wsDialer := pool.WebsocketDialerFor(&routingConfig)
+
+	return &CubeRemoteClient{
+		config: config,
+		client: cubesandbox.NewClient(
+			sdkCfg,
+			opts...,
+		),
+		sandboxDomain: config.CubeSandboxDomain,
+		httpTimeout:   httpTimeout,
+		wsDialer:      wsDialer,
+		inboundTokens: pool.InboundTokens(),
+	}, nil
+}
+
+// cubeRemoteHandle is the RemoteSandboxHandle Cube returns. It wraps the SDK's
+// *cubesandbox.Sandbox directly; all envd calls (WriteFile / RunCommand / …)
+// dispatch through sb. Metadata is cached at creation time so Metadata()
+// can return it without a network round-trip.
+type cubeRemoteHandle struct {
+	sb       *cubesandbox.Sandbox
+	metadata map[string]string
+}
+
+func (h *cubeRemoteHandle) ID() string {
+	if h == nil || h.sb == nil {
+		return ""
+	}
+	return h.sb.SandboxID
+}
+
+func (h *cubeRemoteHandle) Provider() RemoteProvider { return SandboxTypeCube }
+
+func (h *cubeRemoteHandle) Metadata() map[string]string {
+	if h == nil {
+		return nil
+	}
+	return cloneMetadata(h.metadata)
+}
+
+// TrafficAccessToken implements RemoteInboundTokenCarrier. Cube issues this
+// only at create time and never repeats it on connect or resume, so the
+// lifecycle has to persist it alongside the binding.
+func (h *cubeRemoteHandle) TrafficAccessToken() string {
+	if h == nil || h.sb == nil {
+		return ""
+	}
+	return h.sb.TrafficAccessToken
+}
+
+// --- RemoteSandboxClient ------------------------------------------------------
+
+func (c *CubeRemoteClient) Provider() RemoteProvider { return SandboxTypeCube }
+
+func (c *CubeRemoteClient) Capabilities() RemoteSandboxCapabilities {
+	return RemoteSandboxCapabilities{
+		SupportsReconnect:             true,
+		SupportsMetadata:              true,
+		SupportsListSandboxes:         true,
+		SupportsPauseResume:           true,
+		SupportsTimeoutRefresh:        true,
+		SupportsFilesystemEnumeration: true,
+		// Cube stores snapshots as templates, so a snapshot ID can be handed
+		// straight back as CreateOptions.TemplateID.
+		SupportsSnapshots: true,
+		// CreateOptions still has no volume-mount field; skills ride on
+		// snapshots instead, so this stays false.
+		SupportsVolumes: false,
+		// envd exposes an interactive PTY service that the Cube SDK wraps.
+		SupportsTerminals: true,
+		// CubeProxy routes any {port}-{id}.{domain} authority, so 6080
+		// (websockify) is reachable with the same inbound token as envd.
+		SupportsDesktop: true,
+	}
+}
+
+func (c *CubeRemoteClient) Health(ctx context.Context) error {
+	if _, err := c.client.Health(ctx); err != nil {
+		logger.Errorf(ctx, "cube remote client health check failed: %v", err)
+		return normalizeCubeError("Health", err)
+	}
+	return nil
+}
+
+func (c *CubeRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate, error) {
+	items, err := c.client.ListTemplates(ctx)
+	if err != nil {
+		return nil, normalizeCubeError("ListTemplates", err)
+	}
+	// Cube stores snapshots in the same template store that GET /templates
+	// returns, so skill-image snapshots would otherwise show up in the
+	// settings "pick a base template" step. Subtract them; E2B's catalog
+	// already keeps the two lists apart.
+	snapshotIDs := c.cubeSnapshotIDsForCatalog(ctx)
+	result := make([]RemoteTemplate, 0, len(items))
+	for _, item := range items {
+		if cubeTemplateIsSnapshot(item.TemplateID, snapshotIDs) {
+			continue
+		}
+		name := strings.TrimSpace(item.Name)
+		// Cube only reports a name when the template carries an alias, so fall
+		// back to the image before falling back to the opaque ID: recognising
+		// our own template is what keeps EnsureStandardTemplate idempotent.
+		standard, desktop := classifyWeKnoraTemplate(name, item.ImageInfo)
+		if name == "" {
+			switch {
+			case desktop:
+				name = DesktopTemplateName
+			case standard:
+				name = StandardTemplateName
+			default:
+				name = item.TemplateID
+			}
+		}
+		result = append(result, RemoteTemplate{
+			ID:                  item.TemplateID,
+			Name:                name,
+			Status:              normalizeCubeTemplateStatus(item.Status),
+			Version:             item.Version,
+			Image:               item.ImageInfo,
+			CreatedAt:           item.CreatedAt,
+			Standard:            standard,
+			Desktop:             desktop,
+			Error:               strings.TrimSpace(item.LastError),
+			InstanceType:        item.InstanceType,
+			NetworkType:         item.NetworkType,
+			AllowInternetAccess: item.AllowInternetAccess,
+		})
+	}
+	return result, nil
+}
+
+// cubeSnapshotIDsForCatalog lists snapshot IDs so ListTemplates can hide them.
+// A listing failure must not fail the catalog: the settings UI still needs
+// real templates, and cubeTemplateIsSnapshot still drops the snap- prefix.
+func (c *CubeRemoteClient) cubeSnapshotIDsForCatalog(ctx context.Context) map[string]struct{} {
+	refs, err := c.ListSnapshots(ctx, "")
+	if err != nil {
+		logger.Warnf(ctx, "cube ListTemplates: listing snapshots to exclude them failed: %v", err)
+		return nil
+	}
+	out := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		if id := strings.TrimSpace(ref.ID); id != "" {
+			out[id] = struct{}{}
+		}
+	}
+	return out
+}
+
+func cubeTemplateIsSnapshot(templateID string, snapshotIDs map[string]struct{}) bool {
+	id := strings.TrimSpace(templateID)
+	if id == "" {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(id), "snap-") {
+		return true
+	}
+	_, ok := snapshotIDs[id]
+	return ok
+}
+
+// EnsureStandardTemplate makes the cluster hold exactly one WeKnora template.
+// A healthy or still-building one is returned as is; a failed one is rebuilt in
+// place. If CubeMaster refuses the redo, the failed card is returned as-is;
+// ReplaceStandardTemplate (the settings-page "delete and rebuild" action) is
+// what actually replaces it.
+func (c *CubeRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var failed *RemoteTemplate
+	for i := range items {
+		if !items[i].Standard {
+			continue
+		}
+		if !IsTemplateBuildFailed(items[i].Status) {
+			return &items[i], nil
+		}
+		if failed == nil {
+			failed = &items[i]
+		}
+	}
+	if failed != nil {
+		return c.rebuildStandardTemplate(ctx, *failed)
+	}
+	return c.buildStandardTemplate(ctx)
+}
+
+// ReplaceStandardTemplate applies the current spec to the cluster's WeKnora
+// template. Cube bakes DNS into the template, so a READY template only picks
+// up a settings change via rebuild (preferred: same ID) or a replacement.
+//
+// The previous template is left in the catalog. Deleting it here would race
+// persistSpawnTemplateID: sessions would target a missing ID for the rest of
+// the build, and a persist failure would leave every config pointing at a
+// template that no longer exists. Callers persist a READY replacement first,
+// then DeleteSupersededStandardTemplates.
+func (c *CubeRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var current *RemoteTemplate
+	for i := range items {
+		if !items[i].Standard || strings.TrimSpace(items[i].ID) == "" {
+			continue
+		}
+		item := items[i]
+		if current == nil {
+			current = &item
+			continue
+		}
+		if IsTemplateBuildFailed(current.Status) && !IsTemplateBuildFailed(item.Status) {
+			current = &item
+		}
+	}
+	if current != nil {
+		rebuilt, err := c.tryRebuildStandardTemplate(ctx, *current)
+		if err == nil {
+			return rebuilt, nil
+		}
+		logger.Warnf(ctx,
+			"cube in-place rebuild of standard template %s failed: %v; building a replacement",
+			current.ID, err)
+	}
+	return c.buildStandardTemplate(ctx)
+}
+
+// EnsureDesktopTemplate returns the cluster's WeKnora desktop template,
+// rebuilding a failed one or building it when absent. A cluster may hold
+// both the CLI and desktop templates; the admin picks which ID a config boots.
+func (c *CubeRemoteClient) EnsureDesktopTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var failed *RemoteTemplate
+	for i := range items {
+		if !items[i].Desktop {
+			continue
+		}
+		if !IsTemplateBuildFailed(items[i].Status) {
+			return &items[i], nil
+		}
+		if failed == nil {
+			failed = &items[i]
+		}
+	}
+	if failed != nil {
+		return c.rebuildDesktopTemplate(ctx, *failed)
+	}
+	return c.buildDesktopTemplate(ctx)
+}
+
+// ReplaceDesktopTemplate applies the current spec to the cluster's desktop
+// template. Same persist-then-delete contract as ReplaceStandardTemplate.
+func (c *CubeRemoteClient) ReplaceDesktopTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var current *RemoteTemplate
+	for i := range items {
+		if !items[i].Desktop || strings.TrimSpace(items[i].ID) == "" {
+			continue
+		}
+		item := items[i]
+		if current == nil {
+			current = &item
+			continue
+		}
+		if IsTemplateBuildFailed(current.Status) && !IsTemplateBuildFailed(item.Status) {
+			current = &item
+		}
+	}
+	if current != nil {
+		rebuilt, err := c.tryRebuildDesktopTemplate(ctx, *current)
+		if err == nil {
+			return rebuilt, nil
+		}
+		logger.Warnf(ctx,
+			"cube in-place rebuild of desktop template %s failed: %v; building a replacement",
+			current.ID, err)
+	}
+	return c.buildDesktopTemplate(ctx)
+}
+
+// DeleteSupersededDesktopTemplates drops desktop templates other than keepID.
+func (c *CubeRemoteClient) DeleteSupersededDesktopTemplates(ctx context.Context, keepID string) error {
+	keepID = strings.TrimSpace(keepID)
+	if keepID == "" {
+		return cubeInvalidRequest("DeleteSupersededDesktopTemplates", "template ID is required", nil)
+	}
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if !item.Desktop || strings.TrimSpace(item.ID) == "" || item.ID == keepID {
+			continue
+		}
+		logger.Infof(ctx, "cube deleting superseded desktop template %s", item.ID)
+		if err := c.client.DeleteTemplate(ctx, item.ID); err != nil {
+			if normalized := normalizeCubeError("DeleteTemplate", err); !IsRemoteNotFound(normalized) {
+				logger.Warnf(ctx, "cube delete of replaced desktop template %s failed: %v", item.ID, err)
+			}
+		}
+	}
+	return nil
+}
+
+// DeleteSupersededStandardTemplates drops WeKnora templates other than keepID.
+func (c *CubeRemoteClient) DeleteSupersededStandardTemplates(ctx context.Context, keepID string) error {
+	keepID = strings.TrimSpace(keepID)
+	if keepID == "" {
+		return cubeInvalidRequest("DeleteSupersededStandardTemplates", "template ID is required", nil)
+	}
+	items, err := c.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if !item.Standard || strings.TrimSpace(item.ID) == "" || item.ID == keepID {
+			continue
+		}
+		logger.Infof(ctx, "cube deleting superseded standard template %s", item.ID)
+		if err := c.client.DeleteTemplate(ctx, item.ID); err != nil {
+			if normalized := normalizeCubeError("DeleteTemplate", err); !IsRemoteNotFound(normalized) {
+				logger.Warnf(ctx, "cube delete of replaced template %s failed: %v", item.ID, err)
+			}
+		}
+	}
+	return nil
+}
+
+// rebuildStandardTemplate restarts the build of a template that already exists,
+// keeping its ID so a retry never adds to the catalog.
+func (c *CubeRemoteClient) rebuildStandardTemplate(
+	ctx context.Context,
+	current RemoteTemplate,
+) (*RemoteTemplate, error) {
+	rebuilt, err := c.tryRebuildStandardTemplate(ctx, current)
+	if err != nil {
+		// The failed template is still in the catalog; returning it lets the
+		// settings page show lastError instead of 500ing the whole query.
+		logger.Warnf(ctx, "cube rebuild of standard template %s failed: %v", current.ID, err)
+		return &current, nil
+	}
+	return rebuilt, nil
+}
+
+func (c *CubeRemoteClient) tryRebuildStandardTemplate(
+	ctx context.Context,
+	current RemoteTemplate,
+) (*RemoteTemplate, error) {
+	logger.Infof(ctx, "cube rebuilding standard template %s in place (%s)",
+		current.ID, current.Status)
+	job, err := c.client.RebuildTemplate(ctx, current.ID, c.standardTemplateSpec())
+	if err != nil {
+		return nil, normalizeCubeError("RebuildTemplate", err)
+	}
+	rebuilt := current
+	rebuilt.Status = normalizeCubeTemplateStatus(job.Status)
+	if rebuilt.Status == "" {
+		rebuilt.Status = "building"
+	}
+	rebuilt.Error = strings.TrimSpace(job.ErrorMessage)
+	if strings.TrimSpace(job.TemplateID) != "" {
+		rebuilt.ID = job.TemplateID
+	}
+	return &rebuilt, nil
+}
+
+func (c *CubeRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	job, err := c.client.BuildTemplate(ctx, cubesandbox.BuildTemplateOptions{
+		Image: DefaultCubeTemplateImage,
+		Extra: c.standardTemplateSpec(),
+	})
+	if err != nil {
+		// Creating is best-effort from the settings query: a 500 here would
+		// hide the catalog, including any other templates the admin could pick.
+		logger.Warnf(ctx, "cube standard template create failed: %v", err)
+		return &RemoteTemplate{
+			Name:     StandardTemplateName,
+			Status:   "failed",
+			Image:    DefaultCubeTemplateImage,
+			Standard: true,
+			Error:    err.Error(),
+		}, nil
+	}
+	status := normalizeCubeTemplateStatus(job.Status)
+	if status == "" {
+		status = "building"
+	}
+	return &RemoteTemplate{
+		ID:       job.TemplateID,
+		Name:     StandardTemplateName,
+		Status:   status,
+		Image:    DefaultCubeTemplateImage,
+		Standard: true,
+		Error:    strings.TrimSpace(job.ErrorMessage),
+	}, nil
+}
+
+func (c *CubeRemoteClient) rebuildDesktopTemplate(
+	ctx context.Context,
+	current RemoteTemplate,
+) (*RemoteTemplate, error) {
+	rebuilt, err := c.tryRebuildDesktopTemplate(ctx, current)
+	if err != nil {
+		logger.Warnf(ctx, "cube rebuild of desktop template %s failed: %v", current.ID, err)
+		return &current, nil
+	}
+	return rebuilt, nil
+}
+
+func (c *CubeRemoteClient) tryRebuildDesktopTemplate(
+	ctx context.Context,
+	current RemoteTemplate,
+) (*RemoteTemplate, error) {
+	logger.Infof(ctx, "cube rebuilding desktop template %s in place (%s)",
+		current.ID, current.Status)
+	job, err := c.client.RebuildTemplate(ctx, current.ID, c.desktopTemplateSpec())
+	if err != nil {
+		return nil, normalizeCubeError("RebuildTemplate", err)
+	}
+	rebuilt := current
+	rebuilt.Status = normalizeCubeTemplateStatus(job.Status)
+	if rebuilt.Status == "" {
+		rebuilt.Status = "building"
+	}
+	rebuilt.Error = strings.TrimSpace(job.ErrorMessage)
+	rebuilt.Desktop = true
+	rebuilt.Standard = false
+	if strings.TrimSpace(job.TemplateID) != "" {
+		rebuilt.ID = job.TemplateID
+	}
+	return &rebuilt, nil
+}
+
+func (c *CubeRemoteClient) buildDesktopTemplate(ctx context.Context) (*RemoteTemplate, error) {
+	job, err := c.client.BuildTemplate(ctx, cubesandbox.BuildTemplateOptions{
+		Image: DefaultCubeDesktopTemplateImage,
+		Extra: c.desktopTemplateSpec(),
+	})
+	if err != nil {
+		logger.Warnf(ctx, "cube desktop template create failed: %v", err)
+		return &RemoteTemplate{
+			Name:    DesktopTemplateName,
+			Status:  "failed",
+			Image:   DefaultCubeDesktopTemplateImage,
+			Desktop: true,
+			Error:   err.Error(),
+		}, nil
+	}
+	status := normalizeCubeTemplateStatus(job.Status)
+	if status == "" {
+		status = "building"
+	}
+	return &RemoteTemplate{
+		ID:      job.TemplateID,
+		Name:    DesktopTemplateName,
+		Status:  status,
+		Image:   DefaultCubeDesktopTemplateImage,
+		Desktop: true,
+		Error:   strings.TrimSpace(job.ErrorMessage),
+	}, nil
+}
+
+// normalizeCubeTemplateStatus projects Cube's catalog verbs onto the same
+// ready/building/failed set the settings UI and the other backends already use.
+// Cube reports an in-progress create-from-image as RUNNING, which would
+// otherwise render as "unknown" and stop the wizard from polling.
+func normalizeCubeTemplateStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ready", "available", "complete", "completed", "success", "succeeded":
+		return "ready"
+	case "running", "building", "waiting", "pending", "queued", "processing":
+		return "building"
+	case "failed", "failure", "error", "cancelled", "canceled":
+		return "failed"
+	default:
+		return strings.ToLower(strings.TrimSpace(status))
+	}
+}
+
+func (c *CubeRemoteClient) standardTemplateSpec() map[string]any {
+	var dns []string
+	if c != nil && c.config != nil {
+		dns, _ = NormalizeCubeDNSServers(c.config.CubeDNSServers)
+	}
+	return cubeStandardTemplateSpec(dns)
+}
+
+// templateSpec picks the spec this config's template is built from.
+// Config.DesktopEnabled is the single switch.
+func (c *CubeRemoteClient) desktopTemplateSpec() map[string]any {
+	var dns []string
+	if c != nil && c.config != nil {
+		dns, _ = NormalizeCubeDNSServers(c.config.CubeDNSServers)
+	}
+	return cubeDesktopTemplateSpec(dns)
+}
+
+// cubeStandardTemplateSpec is the single definition of how the WeKnora template
+// is built. Both the first build and every rebuild send it verbatim — the
+// rebuild endpoint takes a raw payload rather than BuildTemplateOptions, and
+// two hand-kept copies of the spec would eventually disagree.
+func cubeStandardTemplateSpec(dns []string) map[string]any {
+	spec := map[string]any{
+		"image":             DefaultCubeTemplateImage,
+		"name":              StandardTemplateName,
+		"writableLayerSize": "1G",
+		"exposedPorts":      []uint16{CubeEnvdPort},
+		// Cube defaults to probing envd, but naming the probe keeps the reason
+		// this image must ship envd visible at the call site.
+		"probePort": uint16(CubeEnvdPort),
+		"probePath": CubeEnvdHealthPath,
+		// Without this the template's "公网访问" stays empty and sandboxes
+		// boot with no outbound route, even if Create sets the same flag.
+		"allowInternetAccess": true,
+	}
+	if len(dns) > 0 {
+		spec["dns"] = append([]string(nil), dns...)
+	}
+	return spec
+}
+
+// cubeDesktopTemplateSpec is the desktop sibling of cubeStandardTemplateSpec.
+// It is a separate function rather than a flag on that one so a change to the
+// standard template can never silently alter the desktop's exposed ports.
+//
+// 6080 is deliberately not in exposedPorts. Cube maps that list through eBPF
+// static NAT on the host NIC, which bypasses CubeProxy. WeKnora already
+// reaches websockify the same way it reaches envd: CubeProxy Host
+// "{port}-{id}.{domain}" plus the inbound token. Publishing 6080 on the host
+// would let anyone who can read /run/desktop/secret (the agent Execs as
+// root) skip the ticket relay, idle disconnect, and audit trail. websockify
+// Basic auth stays as defence in depth on the overlay path.
+func cubeDesktopTemplateSpec(dns []string) map[string]any {
+	spec := map[string]any{
+		"image": DefaultCubeDesktopTemplateImage,
+		"name":  DesktopTemplateName,
+		// The standard 1G is too small once XFCE is installed.
+		"writableLayerSize": "8G",
+		"exposedPorts":      []uint16{CubeEnvdPort},
+		// The build probe still goes to envd: websockify is lazily started
+		// and is deliberately not running at template-build time.
+		"probePort":           uint16(CubeEnvdPort),
+		"probePath":           CubeEnvdHealthPath,
+		"allowInternetAccess": true,
+		// Cubebox runs the image ENTRYPOINT (cube-entrypoint.sh). That
+		// script tees envd onto /var/log/envd.log; on the packed desktop
+		// rootfs the write fails and the :49983 probe is connection
+		// refused. Starting envd as PID 1 is equivalent (no user CMD) and
+		// was verified READY on the 2026-09-10 cluster.
+		"command": []string{"/usr/bin/envd"},
+		"args":    []string{"-port", strconv.Itoa(CubeEnvdPort), "-isnotfc"},
+	}
+	if len(dns) > 0 {
+		spec["dns"] = append([]string(nil), dns...)
+	}
+	return spec
+}
+
+func (c *CubeRemoteClient) Create(
+	ctx context.Context,
+	request RemoteCreateRequest,
+) (RemoteSandboxHandle, error) {
+	if strings.TrimSpace(request.TemplateID) == "" {
+		return nil, cubeInvalidRequest("Create", "template ID is required", nil)
+	}
+	timeout, err := cubeTimeout(request.Timeout)
+	if err != nil {
+		return nil, cubeInvalidRequest("Create", err.Error(), err)
+	}
+	action := request.Timeout.Action
+	autoResume := request.Timeout.AutoResume
+	if action == "" {
+		action = RemoteOnTimeoutKill
+	}
+	if action != RemoteOnTimeoutKill && action != RemoteOnTimeoutPause {
+		return nil, cubeInvalidRequest(
+			"Create",
+			fmt.Sprintf("unsupported timeout action %q", action),
+			nil,
+		)
+	}
+	if request.Timeout.AutoResume && action != RemoteOnTimeoutPause {
+		return nil, cubeInvalidRequest(
+			"Create",
+			"auto resume requires pause on timeout",
+			nil,
+		)
+	}
+	network := request.Network
+	if network.AllowInternetAccess == nil {
+		defaultOn := true
+		network.AllowInternetAccess = &defaultOn
+	}
+	// Deliberately the opposite of Cube's own default. Cube leaves the
+	// sandbox URL reachable by anyone who knows the ID; WeKnora closes it and
+	// relies on the per-sandbox traffic token, which the SDK attaches to
+	// data-plane requests for us. Do not change this to true.
+	if network.AllowPublicTraffic == nil {
+		defaultClosed := false
+		network.AllowPublicTraffic = &defaultClosed
+	}
+	opts := cubesandbox.CreateOptions{
+		TemplateID:          request.TemplateID,
+		Timeout:             timeout,
+		EnvVars:             cloneMetadata(request.EnvVars),
+		Metadata:            cloneMetadata(request.Metadata),
+		AllowInternetAccess: network.AllowInternetAccess,
+		Network: cubesandbox.NetworkOptions{
+			AllowPublicTraffic: network.AllowPublicTraffic,
+			AllowOut:           append([]string(nil), network.AllowOut...),
+			DenyOut:            append([]string(nil), network.DenyOut...),
+			Rules:              toCubeEgressRules(network.CubeRules),
+		},
+	}
+	// The SDK omits allowInternetAccess for any non-false value, in which
+	// case the server falls back to the template's default. Keep the
+	// adapter's provider-positive default explicit on the wire.
+	if *network.AllowInternetAccess {
+		opts.Extra = map[string]any{"allowInternetAccess": true}
+	}
+	if action != "" {
+		if opts.Extra == nil {
+			opts.Extra = make(map[string]any)
+		}
+		opts.Extra["lifecycle"] = map[string]any{
+			"onTimeout":  string(action),
+			"autoResume": autoResume,
+		}
+	}
+	sb, err := c.client.Create(ctx, opts)
+	if err != nil {
+		return nil, normalizeCubeError("Create", err)
+	}
+	if sb == nil || sb.SandboxID == "" {
+		return nil, errors.New("cube api: create sandbox: empty sandboxID")
+	}
+	logCubeSandboxCreated(ctx, c, sb, network.AllowPublicTraffic)
+	c.registerInboundToken(sb.SandboxID, sb.TrafficAccessToken)
+	return &cubeRemoteHandle{
+		sb:       sb,
+		metadata: cloneMetadata(request.Metadata),
+	}, nil
+}
+
+func (c *CubeRemoteClient) Connect(
+	ctx context.Context,
+	request RemoteConnectRequest,
+) (RemoteSandboxHandle, error) {
+	sandboxID := strings.TrimSpace(request.SandboxID)
+	if sandboxID == "" {
+		return nil, cubeInvalidRequest("Connect", "sandbox ID is required", nil)
+	}
+	sb, err := c.client.Connect(ctx, sandboxID)
+	if err != nil {
+		return nil, normalizeCubeError("Connect", err)
+	}
+	if sb == nil || sb.SandboxID == "" {
+		return nil, NewRemoteError(
+			SandboxTypeCube, "Connect", RemoteErrorKindInternal,
+			"cube returned an empty sandbox handle", nil,
+		)
+	}
+	// Cube does not repeat the traffic token on connect, so without this the
+	// SDK would stop sending the header and every exec would 403.
+	if sb.TrafficAccessToken == "" {
+		sb.TrafficAccessToken = request.TrafficAccessToken
+	}
+	c.registerInboundToken(sb.SandboxID, sb.TrafficAccessToken)
+	return &cubeRemoteHandle{sb: sb}, nil
+}
+
+// ConnectSession reuses the connected SDK handle for the lifecycle probe.
+func (c *CubeRemoteClient) ConnectSession(ctx context.Context, req RemoteConnectRequest) (RemoteSandboxHandle, error) {
+	handle, err := c.Connect(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	info, err := handle.(*cubeRemoteHandle).sb.GetInfo(ctx)
+	if err != nil {
+		return nil, normalizeCubeError("ConnectSession", err)
+	}
+	if info == nil {
+		return nil, NewRemoteError(SandboxTypeCube, "ConnectSession", RemoteErrorKindNotFound, "sandbox not found", nil)
+	}
+	if err := validateSessionSummary(c.Provider(), req.SandboxID, cubeRemoteSummary(*info)); err != nil {
+		return nil, err
+	}
+	return handle, nil
+}
+
+func (c *CubeRemoteClient) Get(
+	ctx context.Context,
+	sandboxID string,
+) (*RemoteSandboxSummary, error) {
+	if strings.TrimSpace(sandboxID) == "" {
+		return nil, cubeInvalidRequest("Get", "sandbox ID is required", nil)
+	}
+	sb, err := c.client.Connect(ctx, sandboxID)
+	if err != nil {
+		return nil, normalizeCubeError("Get", err)
+	}
+	info, err := sb.GetInfo(ctx)
+	if err != nil {
+		if isSDKNotFound(err) {
+			return nil, NewRemoteError(
+				SandboxTypeCube, "Get", RemoteErrorKindNotFound,
+				"sandbox not found", nil,
+			)
+		}
+		return nil, normalizeCubeError("Get", err)
+	}
+	if info == nil {
+		return nil, NewRemoteError(
+			SandboxTypeCube, "Get", RemoteErrorKindNotFound,
+			"sandbox not found", nil,
+		)
+	}
+	return cubeRemoteSummary(*info), nil
+}
+
+func (c *CubeRemoteClient) List(
+	ctx context.Context,
+	filter RemoteListFilter,
+) ([]RemoteSandboxSummary, error) {
+	sandboxInfos, err := c.client.List(ctx)
+	if err != nil {
+		return nil, normalizeCubeError("List", err)
+	}
+	result := make([]RemoteSandboxSummary, 0, len(sandboxInfos))
+	for _, summary := range sandboxInfos {
+		converted := cubeRemoteSummary(summary)
+		if !metadataMatches(converted.Metadata, filter.Metadata) ||
+			!StateMatches(converted.State, filter.States) {
+			continue
+		}
+		result = append(result, *converted)
+	}
+	return result, nil
+}
+
+func (c *CubeRemoteClient) Delete(ctx context.Context, sandboxID string) error {
+	if strings.TrimSpace(sandboxID) == "" {
+		return cubeInvalidRequest("Delete", "sandbox ID is required", nil)
+	}
+	sb, err := c.client.Connect(ctx, sandboxID)
+	if err != nil {
+		return normalizeCubeError("Delete", err)
+	}
+	if err := sb.Kill(ctx); err != nil {
+		return normalizeCubeError("Delete", err)
+	}
+	return nil
+}
+
+func (c *CubeRemoteClient) Exec(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	request RemoteExecRequest,
+) (*RemoteExecResult, error) {
+	sb, err := cubeHandleSandbox("Exec", handle)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(request.Command) == "" {
+		return nil, cubeInvalidRequest("Exec", "command is required", nil)
+	}
+	if request.Shell && len(request.Args) != 0 {
+		return nil, cubeInvalidRequest(
+			"Exec", "shell execution cannot include argv arguments", nil,
+		)
+	}
+	if request.Timeout < 0 {
+		return nil, cubeInvalidRequest("Exec", "execution timeout cannot be negative", nil)
+	}
+	if request.User == "" {
+		request.User = DefaultSandboxExecUser
+	}
+
+	execCtx := ctx
+	cancel := func() {}
+	if request.Timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, request.Timeout)
+	}
+	defer cancel()
+
+	line := request.Command
+	if !request.Shell {
+		line = buildShellLine(request.Command, request.Args)
+	}
+	if request.Stdin != "" {
+		line = wrapWithStdin(line, request.Stdin)
+	}
+	envs := cloneMetadata(request.Env)
+	if envs == nil {
+		envs = map[string]string{}
+	}
+
+	logCubeDataPlaneExec(ctx, c, sb, request.User, line)
+
+	startedAt := time.Now()
+	// User comes from the neutral request rather than being hardcoded, so the
+	// account a Cube exec lands on matches the other backends. The default is
+	// now root (see DefaultSandboxExecUser); the shared-volume concern that
+	// once made root here a footgun no longer applies under
+	// one-session-one-sandbox.
+	sdkResult, execErr := sb.Commands().Run(execCtx, line, cubesandbox.CommandOptions{
+		Timeout: request.Timeout,
+		Envs:    envs,
+		Cwd:     request.WorkDir,
+		User:    request.User,
+	})
+	duration := time.Since(startedAt)
+
+	if execErr != nil {
+		if request.Timeout > 0 &&
+			errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+			return &RemoteExecResult{
+				Duration: duration,
+				Killed:   true,
+				ExitCode: -1,
+			}, nil
+		}
+		normalized := normalizeCubeError("Exec", execErr)
+		logger.Warnf(ctx,
+			"[CubeRemote] data-plane exec failed sandbox=%s detail=%s",
+			sb.SandboxID, RemoteErrorDiagnostics(normalized),
+		)
+		return nil, normalized
+	}
+	if sdkResult == nil {
+		return nil, NewRemoteError(
+			SandboxTypeCube, "Exec", RemoteErrorKindInternal,
+			"cube returned an empty command result", nil,
+		)
+	}
+	return &RemoteExecResult{
+		Stdout:   sdkResult.Stdout,
+		Stderr:   sdkResult.Stderr,
+		ExitCode: sdkResult.ExitCode,
+		Duration: duration,
+	}, nil
+}
+
+func (c *CubeRemoteClient) WriteFile(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	path string,
+	content []byte,
+) error {
+	sb, err := cubeHandleSandbox("WriteFile", handle)
+	if err != nil {
+		return err
+	}
+	if err := sb.Files().Write(ctx, path, content); err != nil {
+		return normalizeCubeError("WriteFile", err)
+	}
+	return nil
+}
+
+func (c *CubeRemoteClient) ReadFile(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	path string,
+) ([]byte, error) {
+	sb, err := cubeHandleSandbox("ReadFile", handle)
+	if err != nil {
+		return nil, err
+	}
+	content, err := sb.Files().Read(ctx, path)
+	if err != nil {
+		return nil, normalizeCubeError("ReadFile", err)
+	}
+	return []byte(content), nil
+}
+
+func (c *CubeRemoteClient) ListDir(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	path string,
+) ([]RemoteDirEntry, error) {
+	sb, err := cubeHandleSandbox("ListDir", handle)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		path = "/"
+	}
+	entries, err := sb.Files().List(ctx, path)
+	if err != nil {
+		return nil, normalizeCubeError("ListDir", err)
+	}
+	result := make([]RemoteDirEntry, 0, len(entries))
+	for _, e := range entries {
+		result = append(result, RemoteDirEntry{
+			Name:    e.Name,
+			Path:    e.Path,
+			Type:    cubeRemoteEntryType(normaliseFileType(e.Type)),
+			Size:    e.Size,
+			ModTime: cubeModTime(e.ModifiedTime),
+		})
+	}
+	return result, nil
+}
+
+// normaliseFileType maps envd's proto enum strings ("FILE_TYPE_FILE",
+// "FILE_TYPE_DIRECTORY", …) onto the short lowercase names WeKnora already
+// stores.
+func normaliseFileType(t string) string {
+	switch strings.ToUpper(t) {
+	case "FILE_TYPE_FILE", "FILE":
+		return "file"
+	case "FILE_TYPE_DIRECTORY", "DIRECTORY":
+		return "directory"
+	case "FILE_TYPE_SYMLINK", "SYMLINK":
+		return "symlink"
+	default:
+		if t == "" {
+			return ""
+		}
+		return strings.ToLower(t)
+	}
+}
+
+func (c *CubeRemoteClient) MakeDir(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	dir string,
+) error {
+	sb, err := cubeHandleSandbox("MakeDir", handle)
+	if err != nil {
+		return err
+	}
+	return makeDirTree(dir, func(component string) error {
+		_, err := sb.Files().MakeDir(ctx, component)
+		return normalizeCubeError("MakeDir", err)
+	})
+}
+
+func (c *CubeRemoteClient) Remove(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	path string,
+) error {
+	sb, err := cubeHandleSandbox("Remove", handle)
+	if err != nil {
+		return err
+	}
+	if err := sb.Files().Remove(ctx, path); err != nil {
+		return normalizeCubeError("Remove", err)
+	}
+	return nil
+}
+
+func (c *CubeRemoteClient) Stat(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	path string,
+) (*RemoteStatEntry, error) {
+	sb, err := cubeHandleSandbox("Stat", handle)
+	if err != nil {
+		return nil, err
+	}
+	entry, err := sb.Files().Stat(ctx, path)
+	if err != nil {
+		if isSDKNotFound(err) {
+			return nil, NewRemoteError(
+				SandboxTypeCube, "Stat", RemoteErrorKindNotFound,
+				"path not found", nil,
+			)
+		}
+		return nil, normalizeCubeError("Stat", err)
+	}
+	if entry == nil {
+		return nil, NewRemoteError(
+			SandboxTypeCube, "Stat", RemoteErrorKindNotFound,
+			"path not found", nil,
+		)
+	}
+	return &RemoteStatEntry{
+		Path:    entry.Path,
+		Type:    cubeRemoteEntryType(normaliseFileType(entry.Type)),
+		Size:    entry.Size,
+		ModTime: cubeModTime(entry.ModifiedTime),
+	}, nil
+}
+
+// CreateSnapshot snapshots a running sandbox. Cube exposes this on *Sandbox,
+// so we connect by ID first (same shape as Delete).
+func (c *CubeRemoteClient) CreateSnapshot(
+	ctx context.Context, sandboxID string, name string,
+) (RemoteSnapshotRef, error) {
+	if strings.TrimSpace(sandboxID) == "" {
+		return RemoteSnapshotRef{}, cubeInvalidRequest("CreateSnapshot", "sandbox ID is required", nil)
+	}
+	sb, err := c.client.Connect(ctx, sandboxID)
+	if err != nil {
+		return RemoteSnapshotRef{}, normalizeCubeError("CreateSnapshot", err)
+	}
+	info, err := sb.CreateSnapshot(ctx, strings.TrimSpace(name))
+	if err != nil {
+		return RemoteSnapshotRef{}, normalizeCubeError("CreateSnapshot", err)
+	}
+	if info == nil || strings.TrimSpace(info.SnapshotID) == "" {
+		return RemoteSnapshotRef{}, cubeInvalidRequest(
+			"CreateSnapshot", "provider returned an empty snapshot ID", nil)
+	}
+	return RemoteSnapshotRef{ID: info.SnapshotID, Names: info.Names}, nil
+}
+
+// DeleteSnapshot removes a snapshot. Cube returns an API error for a missing
+// template; we map not-found to success so cleanup is idempotent.
+func (c *CubeRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	if strings.TrimSpace(snapshotID) == "" {
+		return cubeInvalidRequest("DeleteSnapshot", "snapshot ID is required", nil)
+	}
+	if err := c.client.DeleteSnapshot(ctx, snapshotID); err != nil {
+		normalized := normalizeCubeError("DeleteSnapshot", err)
+		if IsRemoteNotFound(normalized) {
+			return nil
+		}
+		return normalized
+	}
+	return nil
+}
+
+// ListSnapshots pages through every snapshot, optionally filtered by source
+// sandbox. Used only by the orphan-reconciliation task.
+func (c *CubeRemoteClient) ListSnapshots(
+	ctx context.Context, sandboxID string,
+) ([]RemoteSnapshotRef, error) {
+	var (
+		out   []RemoteSnapshotRef
+		token string
+		seen  = map[string]struct{}{"": {}}
+	)
+	for {
+		page, next, err := c.client.ListSnapshots(ctx, cubesandbox.ListSnapshotsOptions{
+			SandboxID: strings.TrimSpace(sandboxID),
+			Limit:     100,
+			NextToken: token,
+		})
+		if err != nil {
+			return nil, normalizeCubeError("ListSnapshots", err)
+		}
+		for _, item := range page {
+			out = append(out, RemoteSnapshotRef{ID: item.SnapshotID, Names: item.Names})
+		}
+		if next == "" {
+			return out, nil
+		}
+		// A provider/SDK bug that repeats a pagination token (the same one,
+		// or a cycle A→B→A) would otherwise spin forever and block skill-
+		// image orphan cleanup. Fail fast instead of hanging until cancel.
+		if _, dup := seen[next]; dup {
+			return nil, cubeInvalidRequest("ListSnapshots",
+				"provider returned a repeated pagination token", nil)
+		}
+		seen[next] = struct{}{}
+		token = next
+	}
+}
+
+// --- helpers -----------------------------------------------------------------
+
+// isSDKNotFound spots the SDK's "resource missing" errors without having to
+// import its internal error types. Both explicit NotFoundError values and
+// textual "not found" mentions in wrapped errors are recognised.
+func isSDKNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nfe *cubesandbox.NotFoundError
+	if errors.As(err, &nfe) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "no such file") ||
+		strings.Contains(lower, "sandbox_not_found") ||
+		strings.Contains(lower, "http 404")
+}
+
+func cubeTimeout(policy RemoteTimeoutPolicy) (*time.Duration, error) {
+	switch policy.Mode {
+	case "", RemoteTimeoutServerDefault:
+		return nil, nil
+	case RemoteTimeoutExplicit:
+		value := policy.Value
+		if value < 0 {
+			value = cubesandbox.NeverTimeout
+		}
+		return &value, nil
+	default:
+		return nil, fmt.Errorf("unsupported timeout mode %q", policy.Mode)
+	}
+}
+
+// cubeHandleSandbox extracts the SDK *cubesandbox.Sandbox from an opaque
+// RemoteSandboxHandle. Returns an error when the handle is nil, not Cube,
+// or has an empty sandbox ID.
+func cubeHandleSandbox(op string, handle RemoteSandboxHandle) (*cubesandbox.Sandbox, error) {
+	cubeHandle, ok := handle.(*cubeRemoteHandle)
+	if !ok || cubeHandle == nil || cubeHandle.sb == nil ||
+		strings.TrimSpace(cubeHandle.sb.SandboxID) == "" {
+		return nil, cubeInvalidRequest(op, "handle was not issued by Cube", nil)
+	}
+	return cubeHandle.sb, nil
+}
+
+// cubeRemoteSummary converts the SDK's SandboxInfo (from List / GetInfo) into
+// the provider-neutral RemoteSandboxSummary DTO.
+func cubeRemoteSummary(info cubesandbox.SandboxInfo) *RemoteSandboxSummary {
+	out := &RemoteSandboxSummary{
+		ID:         info.SandboxID,
+		TemplateID: info.TemplateID,
+		State:      normalizeCubeState(info.State),
+		RawState:   info.State,
+		Metadata:   cloneMetadata(info.Metadata),
+		StartedAt:  info.StartedAt,
+	}
+	if info.EndAt != nil {
+		out.EndAt = *info.EndAt
+	}
+	return out
+}
+
+// parseProxyURL turns "http://127.0.0.1:80" into ("127.0.0.1", 80, "http").
+// A missing port defaults to 80/443 depending on the scheme; an unparseable
+// URL returns ok=false so callers can fall back to the SDK's defaults.
+func parseProxyURL(raw string) (host string, port int, scheme string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", 0, "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "", 0, "", false
+	}
+	scheme = strings.ToLower(parsed.Scheme)
+	if scheme == "" {
+		scheme = "http"
+	}
+	h, p, err := net.SplitHostPort(parsed.Host)
+	if err != nil {
+		h = parsed.Host
+		if scheme == "https" {
+			p = "443"
+		} else {
+			p = "80"
+		}
+	}
+	portInt, err := strconv.Atoi(p)
+	if err != nil || portInt <= 0 {
+		return "", 0, "", false
+	}
+	return h, portInt, scheme, true
+}
+
+// buildShellLine turns argv into a single shell-safe command line. It matches
+// the semantics of the old hand-rolled path, which relied on envd's bash to
+// resolve `python3` (or similar) against $PATH inside the sandbox image.
+func buildShellLine(cmd string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, ShellQuote(cmd))
+	for _, a := range args {
+		parts = append(parts, ShellQuote(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// wrapWithStdin funnels a caller-supplied stdin payload into the child
+// process by prepending a heredoc. This keeps the SDK's Commands.Run contract
+// (which does not take an explicit stdin argument) usable in the rare case
+// callers actually need to pipe data.
+func wrapWithStdin(line, stdin string) string {
+	// Use a heredoc delimiter unlikely to appear in caller data.
+	const delim = "WEKNORA_STDIN_EOF"
+	// Escape lines containing the delimiter defensively.
+	safe := strings.ReplaceAll(stdin, delim, "")
+	return "cat <<'" + delim + "' | " + line + "\n" + safe + "\n" + delim
+}
+
+func normalizeCubeState(state string) RemoteSandboxState {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "running", "available":
+		return RemoteStateRunning
+	case "paused":
+		return RemoteStatePaused
+	case "pending", "creating", "provisioning", "starting", "pausing", "resuming":
+		return RemoteStateTransitioning
+	case "killing", "killed", "terminated", "stopped", "deleted", "failed", "error":
+		return RemoteStateTerminal
+	default:
+		return RemoteStateUnknown
+	}
+}
+
+func cubeRemoteEntryType(entryType string) RemoteDirEntryType {
+	switch strings.ToLower(strings.TrimSpace(entryType)) {
+	case "file":
+		return RemoteEntryFile
+	case "directory", "dir":
+		return RemoteEntryDir
+	default:
+		return RemoteEntryOther
+	}
+}
+
+func cubeModTime(value string) time.Time {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+func StateMatches(candidate RemoteSandboxState, allowed []RemoteSandboxState) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, state := range allowed {
+		if candidate == state {
+			return true
+		}
+	}
+	return false
+}
+
+func cubeInvalidRequest(op, message string, cause error) error {
+	return NewRemoteError(
+		SandboxTypeCube, op, RemoteErrorKindInvalidRequest, message, cause,
+	)
+}
+
+// normalizeCubeError projects a Cube-native error (SDK sentinel, APIError,
+// net.Error, context cancellation) onto a RemoteError with a stable Kind. The
+// original error is preserved via errors.Unwrap for diagnostics.
+func normalizeCubeError(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("cube %s: %w", op, err)
+	}
+
+	kind := RemoteErrorKindInternal
+	status := 0
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		kind = RemoteErrorKindTimeout
+	case errors.Is(err, cubesandbox.ErrAuthentication):
+		kind = RemoteErrorKindAuthentication
+	case errors.Is(err, cubesandbox.ErrTemplateNotFound):
+		if op == "DeleteSnapshot" || op == "DeleteTemplate" {
+			kind = RemoteErrorKindNotFound
+		} else {
+			kind = RemoteErrorKindInvalidRequest
+		}
+	case errors.Is(err, cubesandbox.ErrSandboxNotFound):
+		kind = RemoteErrorKindNotFound
+	default:
+		var pathNotFound *cubesandbox.NotFoundError
+		var apiErr *cubesandbox.APIError
+		var netErr net.Error
+		switch {
+		case errors.As(err, &pathNotFound):
+			kind = RemoteErrorKindNotFound
+		case errors.As(err, &apiErr):
+			kind = httpErrorKind(op, apiErr.StatusCode)
+			status = apiErr.StatusCode
+		case errors.As(err, &netErr) && netErr.Timeout():
+			kind = RemoteErrorKindTimeout
+		case errors.As(err, &netErr):
+			kind = RemoteErrorKindUnavailable
+		}
+	}
+	kind = snapshotDeleteKind(op, kind, err.Error())
+	remoteErr := NewRemoteError(SandboxTypeCube, op, kind, err.Error(), err)
+	remoteErr.StatusCode = status
+	return remoteErr
+}
+
+// logCubeSandboxCreated records create-time data-plane fields operators need
+// when exec fails with a generic auth error. Token values are never logged.
+func logCubeSandboxCreated(
+	ctx context.Context,
+	client *CubeRemoteClient,
+	sb *cubesandbox.Sandbox,
+	allowPublicTraffic *bool,
+) {
+	if sb == nil || client == nil {
+		return
+	}
+	publicTraffic := "server_default"
+	if allowPublicTraffic != nil {
+		publicTraffic = fmt.Sprintf("%t", *allowPublicTraffic)
+	}
+	logger.Infof(ctx,
+		"[CubeRemote] sandbox created id=%s template=%s domain=%s envd_host=%s "+
+			"api_url=%s proxy_url=%s api_key=%s envd_token=%s traffic_token=%s "+
+			"allow_public_traffic=%s",
+		sb.SandboxID,
+		sb.TemplateID,
+		cubeSandboxDomain(client, sb),
+		sb.GetHost(CubeEnvdPort),
+		client.config.CubeAPIURL,
+		client.config.CubeProxyURL,
+		cubeCredentialPresence(client.config.CubeAPIKey),
+		cubeCredentialPresence(sb.EnvdAccessToken),
+		cubeCredentialPresence(sb.TrafficAccessToken),
+		publicTraffic,
+	)
+}
+
+func logCubeDataPlaneExec(
+	ctx context.Context,
+	client *CubeRemoteClient,
+	sb *cubesandbox.Sandbox,
+	execUser, commandLine string,
+) {
+	if sb == nil || client == nil {
+		return
+	}
+	logger.Infof(ctx,
+		"[CubeRemote] data-plane exec sandbox=%s envd_host=%s exec_user=%s "+
+			"api_key=%s envd_token=%s traffic_token=%s cmd=%q",
+		sb.SandboxID,
+		sb.GetHost(CubeEnvdPort),
+		strings.TrimSpace(execUser),
+		cubeCredentialPresence(client.config.CubeAPIKey),
+		cubeCredentialPresence(sb.EnvdAccessToken),
+		cubeCredentialPresence(sb.TrafficAccessToken),
+		commandLine,
+	)
+}
+
+func cubeSandboxDomain(client *CubeRemoteClient, sb *cubesandbox.Sandbox) string {
+	if sb != nil && strings.TrimSpace(sb.Domain) != "" {
+		return sb.Domain
+	}
+	if client != nil && client.sandboxDomain != "" {
+		return client.sandboxDomain
+	}
+	return ""
+}
+
+func cubeCredentialPresence(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "absent"
+	}
+	return "present"
+}
+
+func (c *CubeRemoteClient) registerInboundToken(sandboxID, token string) {
+	if c == nil || c.inboundTokens == nil {
+		return
+	}
+	c.inboundTokens.Put(sandboxID, token)
+}
+
+// toCubeEgressRules maps the neutral L7 rules onto the SDK's shape. Deny rules
+// are forwarded too: sending them is what makes the target reachable by
+// CubeEgress, which is the only component that can answer a request-level 403.
+func toCubeEgressRules(rules []RemoteCubeEgressRule) []cubesandbox.Rule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]cubesandbox.Rule, 0, len(rules))
+	for _, rule := range rules {
+		converted := cubesandbox.Rule{
+			Name: rule.Name,
+			Match: cubesandbox.Match{
+				SNI:    rule.SNI,
+				Host:   rule.Host,
+				Method: append([]string(nil), rule.Methods...),
+				Path:   rule.Path,
+				Scheme: rule.Scheme,
+			},
+			Action: cubesandbox.Action{Allow: rule.Allow, Audit: rule.Audit},
+		}
+		for _, inject := range rule.Inject {
+			converted.Action.Inject = append(converted.Action.Inject, cubesandbox.Inject{
+				Header: inject.Header,
+				Secret: inject.Secret,
+				Format: inject.Format,
+			})
+		}
+		out = append(out, converted)
+	}
+	return out
+}
+
+// DialDesktop opens a WebSocket to websockify inside the sandbox.
+//
+// It goes through the pool-owned dialer rather than building a URL here, so
+// the inbound-token registry, the gateway target, and the SSRF guard all come
+// from the one place that knows which pool this client belongs to.
+func (c *CubeRemoteClient) DialDesktop(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	opts RemoteDesktopOptions,
+) (*websocket.Conn, error) {
+	if c == nil || c.wsDialer == nil {
+		return nil, &RemoteError{
+			Kind:     RemoteErrorKindUnsupported,
+			Provider: SandboxTypeCube,
+			Op:       "DialDesktop",
+			Message:  "client was built without a gateway pool",
+		}
+	}
+	conn, err := dialSandboxDesktop(ctx, SandboxTypeCube, c.wsDialer, handle, opts)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+// StartDesktopTTLRefresh extends the Cube sandbox idle timeout while the
+// desktop relay is open. ctx must be the relay lifetime (WithoutCancel), not
+// DialDesktop's request context.
+func (c *CubeRemoteClient) StartDesktopTTLRefresh(ctx context.Context, handle RemoteSandboxHandle) {
+	if c == nil {
+		return
+	}
+	sb, err := cubeHandleSandbox("StartDesktopTTLRefresh", handle)
+	if err != nil {
+		return
+	}
+	ttl := cubeSandboxTTL(c.config)
+	startTerminalTTLRefresh(ctx, nil, ttl, func(rctx context.Context) error {
+		return sb.SetTimeout(rctx, ttl)
+	})
+}
+
+var (
+	_ RemoteSandboxClient          = (*CubeRemoteClient)(nil)
+	_ RemoteSnapshotManager        = (*CubeRemoteClient)(nil)
+	_ RemoteTemplateCatalog        = (*CubeRemoteClient)(nil)
+	_ RemoteDesktopTemplateCatalog = (*CubeRemoteClient)(nil)
+	_ RemoteDesktopManager         = (*CubeRemoteClient)(nil)
+	_ RemoteDesktopTTLRefresher    = (*CubeRemoteClient)(nil)
+	_ RemoteSandboxHandle          = (*cubeRemoteHandle)(nil)
+	_ RemoteInboundTokenCarrier    = (*cubeRemoteHandle)(nil)
+)
