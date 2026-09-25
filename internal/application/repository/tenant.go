@@ -121,10 +121,16 @@ func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenan
 // DeleteTenant soft-deletes the tenant and every active membership row
 // for that tenant in one transaction. Without the membership purge,
 // /auth/me still lists the defunct tenant (name lookup fails → UI shows
-// "#<id>").
+// "#<id>"). It also NULLs users.tenant_id for members whose home tenant
+// was the deleted one (NULL, not 0 — the column is nullable and FK-checked
+// in PostgreSQL, see userRepository.UpdateUser), so login never resolves
+// to a soft-deleted tenant.
 func (r *tenantRepository) DeleteTenant(ctx context.Context, id uint64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("tenant_id = ?", id).Delete(&types.TenantMember{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&types.User{}).Where("tenant_id = ?", id).UpdateColumn("tenant_id", nil).Error; err != nil {
 			return err
 		}
 		return tx.Where("id = ?", id).Delete(&types.Tenant{}).Error
