@@ -5242,6 +5242,30 @@ export default {
     belongsToOrg: '所属空间：',
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
+  pluginCenter: {
+    navGroup: '扩展',
+    title: '插件',
+    description: '查看当前部署提供的全部插件（含内置插件），并为本空间启用或停用。停用后，该插件的集成不再出现在类型列表中、不能新建，已有实例不受影响。',
+    searchPlaceholder: '搜索插件名称、ID 或集成',
+    allPoints: '全部',
+    empty: '没有匹配的插件',
+    builtin: '内置',
+    required: '必需',
+    requiredHint: 'WeKnora 运行所必需，不能停用',
+    adminOnly: '仅空间管理员可以启用或停用插件',
+    loadFailed: '加载插件列表失败',
+    saveFailed: '保存插件设置失败',
+    enabledToast: '插件已启用',
+    disabledToast: '插件已停用',
+    points: {
+      modelVendors: '模型厂商',
+      connectors: '数据源',
+      imChannels: 'IM 渠道',
+      webSearch: '联网搜索',
+      tools: 'Agent 工具',
+      parsers: '文档解析'
+    }
+  },
   schemaForm: {
     errors: {
       required: '此项为必填',

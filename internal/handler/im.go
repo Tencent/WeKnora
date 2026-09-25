@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -34,6 +35,7 @@ var invalidIMPlatformError = func() string {
 
 // IMHandler handles IM platform callback requests and channel CRUD.
 type IMHandler struct {
+	pluginGated
 	imService *im.Service
 }
 
@@ -85,7 +87,14 @@ func (h *IMHandler) GetIMChannel(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /im-channels/platforms [get]
 func (h *IMHandler) ListIMPlatforms(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.imService.PlatformInfos()})
+	enabled := h.pluginFilter(c)
+	platforms := make([]im.PlatformInfo, 0)
+	for _, p := range h.imService.PlatformInfos() {
+		if enabled(manifest.PointIMChannels, p.ID) {
+			platforms = append(platforms, p)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": platforms})
 }
 
 // ── Channel CRUD handlers ──
@@ -120,6 +129,10 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		return
 	}
 
+	if !h.pluginFilter(c)(manifest.PointIMChannels, req.Platform) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": disabledIntegrationError})
+		return
+	}
 	if !validIMPlatforms[req.Platform] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": invalidIMPlatformError})
 		return

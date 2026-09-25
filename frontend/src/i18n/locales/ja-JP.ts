@@ -2729,6 +2729,30 @@ export default {
       parseCurrentKnowledgeBaseFailed: '現在のナレッジベースの解析に失敗しました'
     }
   },
+  pluginCenter: {
+    navGroup: '拡張',
+    title: 'プラグイン',
+    description: 'このデプロイが提供するすべてのプラグイン（組み込みを含む）を表示し、このワークスペースで有効／無効にします。無効にしたプラグインの連携は種類一覧から消えて新規作成できなくなりますが、既存のものは引き続き動作します。',
+    searchPlaceholder: 'プラグイン名・ID・連携を検索',
+    allPoints: 'すべて',
+    empty: '一致するプラグインはありません',
+    builtin: '組み込み',
+    required: '必須',
+    requiredHint: 'WeKnora に必須のため無効にできません',
+    adminOnly: 'プラグインの有効化・無効化はワークスペース管理者のみ可能です',
+    loadFailed: 'プラグインを読み込めませんでした',
+    saveFailed: 'プラグイン設定を保存できませんでした',
+    enabledToast: 'プラグインを有効にしました',
+    disabledToast: 'プラグインを無効にしました',
+    points: {
+      modelVendors: 'モデルベンダー',
+      connectors: 'データソース',
+      imChannels: 'IM チャネル',
+      webSearch: 'Web 検索',
+      tools: 'エージェントツール',
+      parsers: 'ドキュメント解析'
+    }
+  },
   schemaForm: {
     errors: {
       required: 'この項目は必須です',

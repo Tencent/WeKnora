@@ -93,6 +93,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
+	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -598,6 +599,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
 	// Plugin catalog: builtins are described from what is registered above.
 	must(container.Provide(newPluginRegistry))
+	must(container.Provide(repository.NewPluginTenantSettingRepository))
+	must(container.Provide(plugintenancy.NewService))
+	must(container.Provide(func(s *plugintenancy.Service) interfaces.PluginGate { return s }))
+	must(container.Invoke(installPluginGate))
 	must(container.Provide(handler.NewPluginHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
@@ -1842,6 +1847,21 @@ func newPluginRegistry(
 		WebSearch:   webSearch,
 		IMPlatforms: imService.Platforms(),
 	})
+}
+
+// installPluginGate gives the integration handlers the tenant plugin switches,
+// so a disabled plugin's integrations drop out of type listings and cannot
+// back new instances.
+func installPluginGate(
+	gate interfaces.PluginGate,
+	models *handler.ModelHandler,
+	webSearch *handler.WebSearchProviderHandler,
+	dataSources *handler.DataSourceHandler,
+	imHandler *handler.IMHandler,
+) {
+	for _, h := range []interface{ SetPluginGate(interfaces.PluginGate) }{models, webSearch, dataSources, imHandler} {
+		h.SetPluginGate(gate)
+	}
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and

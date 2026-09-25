@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/plugin/configschema"
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -226,7 +227,11 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	// themselves (dto.NewModelResponse).
 	includeURLs := dto.CanViewIntegrationSecrets(ctx)
 	result := make([]ModelProviderDTO, 0, len(vendors))
+	enabled := h.pluginFilter(c)
 	for _, v := range vendors {
+		if !enabled(manifest.PointModelVendors, v.ID) {
+			continue
+		}
 		p := providerDTO(v, backendType, true)
 		if !includeURLs {
 			p.DefaultURLs = nil

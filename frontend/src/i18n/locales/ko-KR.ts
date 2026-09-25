@@ -5240,6 +5240,30 @@ export default {
     belongsToOrg: '스페이스: ',
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
+  pluginCenter: {
+    navGroup: '확장',
+    title: '플러그인',
+    description: '이 배포가 제공하는 모든 플러그인(내장 포함)을 보고 이 워크스페이스에서 켜거나 끕니다. 끈 플러그인의 연동은 유형 목록에서 사라지고 새로 만들 수 없지만 기존 연동은 계속 동작합니다.',
+    searchPlaceholder: '플러그인 이름, ID 또는 연동 검색',
+    allPoints: '전체',
+    empty: '일치하는 플러그인이 없습니다',
+    builtin: '내장',
+    required: '필수',
+    requiredHint: 'WeKnora에 필요한 플러그인이라 끌 수 없습니다',
+    adminOnly: '워크스페이스 관리자만 플러그인을 켜거나 끌 수 있습니다',
+    loadFailed: '플러그인을 불러오지 못했습니다',
+    saveFailed: '플러그인 설정을 저장하지 못했습니다',
+    enabledToast: '플러그인을 켰습니다',
+    disabledToast: '플러그인을 껐습니다',
+    points: {
+      modelVendors: '모델 공급사',
+      connectors: '데이터 소스',
+      imChannels: 'IM 채널',
+      webSearch: '웹 검색',
+      tools: '에이전트 도구',
+      parsers: '문서 파싱'
+    }
+  },
   schemaForm: {
     errors: {
       required: '필수 항목입니다',

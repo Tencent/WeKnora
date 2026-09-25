@@ -2729,6 +2729,30 @@ export default {
       parseCurrentKnowledgeBaseFailed: 'Failed to parse current knowledge base'
     }
   },
+  pluginCenter: {
+    navGroup: 'Extensions',
+    title: 'Plugins',
+    description: 'Every plugin this deployment provides, builtins included. Enable or disable them for this workspace: a disabled plugin\'s integrations leave the type lists and cannot be created, while existing ones keep working.',
+    searchPlaceholder: 'Search plugins, IDs or integrations',
+    allPoints: 'All',
+    empty: 'No matching plugins',
+    builtin: 'Builtin',
+    required: 'Required',
+    requiredHint: 'WeKnora needs this plugin; it cannot be disabled',
+    adminOnly: 'Only workspace admins can enable or disable plugins',
+    loadFailed: 'Failed to load plugins',
+    saveFailed: 'Failed to save the plugin setting',
+    enabledToast: 'Plugin enabled',
+    disabledToast: 'Plugin disabled',
+    points: {
+      modelVendors: 'Model vendors',
+      connectors: 'Data sources',
+      imChannels: 'IM channels',
+      webSearch: 'Web search',
+      tools: 'Agent tools',
+      parsers: 'Document parsing'
+    }
+  },
   schemaForm: {
     errors: {
       required: 'This field is required',

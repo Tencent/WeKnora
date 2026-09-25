@@ -37,7 +37,10 @@ test('groups keep their order and drop when empty', () => {
   const all = sections.map((s) => s.key)
   assert.deepEqual(
     groupSections(groups, sections.filter((s) => all.includes(s.key))).map((g) => g.key),
-    ['account', 'workspace', 'models_runtime', 'integrations', 'data_extensions', 'system_administration', 'platform'],
+    [
+      'account', 'workspace', 'models_runtime', 'integrations', 'data_extensions', 'plugins',
+      'system_administration', 'platform',
+    ],
   )
   assert.deepEqual(groupSections(groups, sections.filter((s) => s.key === 'system')).map((g) => g.key), ['platform'])
   assert.deepEqual(menu(all, 'account'), ['general', 'userprofile', 'mymemory', 'envvars'])

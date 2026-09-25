@@ -1,6 +1,7 @@
 package handler
 
 import (
+	stderrors "errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -8,6 +9,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
+	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // PluginHandler serves the read-only plugin catalog: every plugin this
@@ -15,11 +18,27 @@ import (
 // any other plugin.
 type PluginHandler struct {
 	registry *registry.Registry
+	tenancy  *tenancy.Service
 }
 
-// NewPluginHandler creates a PluginHandler.
-func NewPluginHandler(registry *registry.Registry) *PluginHandler {
-	return &PluginHandler{registry: registry}
+// NewPluginHandler creates a PluginHandler. Without a tenancy service every
+// plugin reads as enabled.
+func NewPluginHandler(registry *registry.Registry, tenancy *tenancy.Service) *PluginHandler {
+	return &PluginHandler{registry: registry, tenancy: tenancy}
+}
+
+// tenantPlugins returns every plugin with the caller tenant's switch.
+func (h *PluginHandler) tenantPlugins(c *gin.Context) ([]tenancy.TenantPlugin, error) {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if h.tenancy == nil || tenantID == 0 {
+		plugins := h.registry.Plugins()
+		out := make([]tenancy.TenantPlugin, 0, len(plugins))
+		for _, m := range plugins {
+			out = append(out, tenancy.TenantPlugin{Manifest: m, Enabled: true})
+		}
+		return out, nil
+	}
+	return h.tenancy.List(c.Request.Context(), tenantID)
 }
 
 // PluginContributionDTO is one contribution with the plugin providing it.
@@ -27,6 +46,8 @@ type PluginContributionDTO struct {
 	manifest.Contribution
 	PluginID    string `json:"pluginId"`
 	QualifiedID string `json:"qualifiedId"`
+	// Enabled reports whether the caller's tenant has the plugin enabled.
+	Enabled bool `json:"enabled"`
 }
 
 // PluginContributionsDTO groups contributions by extension point.
@@ -37,7 +58,7 @@ type PluginContributionsDTO struct {
 
 // ListPlugins godoc
 // @Summary      列出插件
-// @Description  列出当前进程已知的全部插件（含内置插件）及其贡献
+// @Description  列出当前进程已知的全部插件（含内置插件）、其贡献，以及当前空间是否启用
 // @Tags         Plugin
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}
@@ -45,7 +66,12 @@ type PluginContributionsDTO struct {
 // @Security     ApiKeyAuth
 // @Router       /plugins [get]
 func (h *PluginHandler) ListPlugins(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.registry.Plugins()})
+	plugins, err := h.tenantPlugins(c)
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("failed to load plugin settings"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": plugins})
 }
 
 // GetPlugin godoc
@@ -58,12 +84,62 @@ func (h *PluginHandler) ListPlugins(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /plugins/{id} [get]
 func (h *PluginHandler) GetPlugin(c *gin.Context) {
-	m, ok := h.registry.Plugin(c.Param("id"))
-	if !ok {
-		_ = c.Error(errors.NewNotFoundError("plugin not found"))
+	plugins, err := h.tenantPlugins(c)
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("failed to load plugin settings"))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": m})
+	for _, p := range plugins {
+		if p.Manifest.ID == c.Param("id") {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": p})
+			return
+		}
+	}
+	_ = c.Error(errors.NewNotFoundError("plugin not found"))
+}
+
+// SetPluginEnabledRequest turns a plugin on or off for the workspace.
+type SetPluginEnabledRequest struct {
+	Enabled *bool `json:"enabled" binding:"required"`
+}
+
+// SetPluginEnabled godoc
+// @Summary      启用或停用插件
+// @Description  为当前空间启用或停用插件；停用后其贡献不再出现在类型列表中、不能新建实例，已有实例不受影响。必需插件不能停用
+// @Tags         Plugin
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                   true  "插件 ID"
+// @Param        request  body      SetPluginEnabledRequest  true  "开关"
+// @Success      200      {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /plugins/{id}/enabled [put]
+func (h *PluginHandler) SetPluginEnabled(c *gin.Context) {
+	var req SetPluginEnabledRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("enabled is required"))
+		return
+	}
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if h.tenancy == nil || tenantID == 0 {
+		_ = c.Error(errors.NewBadRequestError("workspace context missing"))
+		return
+	}
+	userID, _ := c.Request.Context().Value(types.UserIDContextKey).(string)
+	err := h.tenancy.SetEnabled(c.Request.Context(), tenantID, c.Param("id"), *req.Enabled, userID)
+	switch {
+	case stderrors.Is(err, tenancy.ErrUnknownPlugin):
+		_ = c.Error(errors.NewNotFoundError("plugin not found"))
+		return
+	case stderrors.Is(err, tenancy.ErrRequiredPlugin):
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	case err != nil:
+		_ = c.Error(errors.NewInternalServerError("failed to save plugin setting"))
+		return
+	}
+	h.GetPlugin(c)
 }
 
 // ListContributions godoc
@@ -90,6 +166,15 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 		Points:        points,
 		Contributions: make(map[manifest.Point][]PluginContributionDTO, len(points)),
 	}
+	enabled := map[string]bool{}
+	plugins, err := h.tenantPlugins(c)
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("failed to load plugin settings"))
+		return
+	}
+	for _, p := range plugins {
+		enabled[p.Manifest.ID] = p.Enabled
+	}
 	for _, info := range points {
 		entries := h.registry.Contributions(info.Point)
 		list := make([]PluginContributionDTO, 0, len(entries))
@@ -98,6 +183,7 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 				Contribution: e.Contribution,
 				PluginID:     e.PluginID,
 				QualifiedID:  e.QualifiedID,
+				Enabled:      enabled[e.PluginID],
 			})
 		}
 		out.Contributions[info.Point] = list

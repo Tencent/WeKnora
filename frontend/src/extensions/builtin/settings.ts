@@ -14,6 +14,7 @@ import MemoryWorkspaceSettings from '@/views/settings/MemoryWorkspaceSettings.vu
 import ModelSettings from '@/views/settings/ModelSettings.vue'
 import OllamaSettings from '@/views/settings/OllamaSettings.vue'
 import ParserEngineSettings from '@/views/settings/ParserEngineSettings.vue'
+import PluginCenter from '@/views/settings/PluginCenter.vue'
 import SandboxSettings from '@/views/settings/SandboxSettings.vue'
 import StorageBackendSettings from '@/views/settings/StorageBackendSettings.vue'
 import SystemInfo from '@/views/settings/SystemInfo.vue'
@@ -49,6 +50,7 @@ const COMPONENTS: Record<string, Component> = {
   storage: StorageBackendSettings,
   sandbox: SandboxSettings,
   websearch: WebSearchSettings,
+  plugins: PluginCenter,
   'system-global': SystemSettings,
   'model-catalog': ModelCatalog,
   'runtime-queues': RuntimeQueues,

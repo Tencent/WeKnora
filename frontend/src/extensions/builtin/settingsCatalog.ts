@@ -29,13 +29,14 @@ export interface BuiltinSettingsSection {
   access: SettingsSectionAccess
 }
 
-/** Sidebar groups: account → workspace → models → integrations → data → system → platform. */
+/** Sidebar groups: account → workspace → models → integrations → data → plugins → system → platform. */
 export const BUILTIN_SETTINGS_GROUPS: BuiltinSettingsGroup[] = [
   { key: 'account', order: 10, label: 'settings.navGroups.account' },
   { key: 'workspace', order: 20, label: 'settings.navGroups.workspace' },
   { key: 'models_runtime', order: 30, label: 'settings.navGroups.modelsRuntime' },
   { key: 'integrations', order: 40, label: 'integrations.title' },
   { key: 'data_extensions', order: 50, label: 'settings.navGroups.dataExtensions' },
+  { key: 'plugins', order: 55, label: 'pluginCenter.navGroup' },
   { key: 'system_administration', order: 60, label: 'settings.navGroups.systemAdministration' },
   { key: 'platform', order: 70, label: 'settings.navGroups.platform' },
 ]
@@ -88,6 +89,10 @@ const ROWS: Record<string, Row[]> = {
     { key: 'storage', label: 'settings.storageEngine', icon: icon('cloud') },
     { key: 'sandbox', label: 'settings.sandbox.title', icon: { kind: 'builtin', name: 'sandbox' } },
     { key: 'websearch', label: 'settings.webSearchConfig', icon: { kind: 'builtin', name: 'globe' } },
+  ],
+  // Everyone can see which plugins the workspace has; only admins switch them.
+  plugins: [
+    { key: 'plugins', label: 'pluginCenter.title', icon: icon('app') },
   ],
   system_administration: [
     { key: 'system-global', label: 'settings.system', icon: icon('server') },
