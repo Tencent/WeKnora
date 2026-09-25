@@ -399,6 +399,43 @@ func TestAssetResolverCapsOccurrencesNotUniqueDownloads(t *testing.T) {
 	}
 }
 
+// largeTestImage is just under maxImageBytes, so a handful of them overflow
+// maxPageInlineBytes long before the per-page occurrence cap.
+var largeTestImage = bytes.Repeat([]byte("a"), int(maxImageBytes)-1024)
+
+func TestAssetResolverStopsInliningPastPageByteBudget(t *testing.T) {
+	rt := roundTripper(func(_ *http.Request) (*http.Response, error) {
+		return imageResp(http.StatusOK, "image/png", largeTestImage), nil
+	})
+	want := maxPageInlineBytes / len(testDataURI(largeTestImage))
+	total := want + 3
+	src := `<img src="/wiki/download/attachments/1/big.png">`
+	out := newAssetResolver(newImageTestClient(rt)).Resolve(context.Background(), strings.Repeat(src, total))
+
+	if got := strings.Count(out, "data:image/png;base64,"); got != want {
+		t.Fatalf("inlined %d copies, want %d within the %d-byte page budget", got, want, maxPageInlineBytes)
+	}
+	if got := strings.Count(out, "/wiki/download/attachments/1/big.png"); got != total-want {
+		t.Fatalf("expected %d copies past the budget to keep original src, got %d", total-want, got)
+	}
+}
+
+func TestAssetResolverDownloadCacheRespectsPageByteBudget(t *testing.T) {
+	rt := roundTripper(func(_ *http.Request) (*http.Response, error) {
+		return imageResp(http.StatusOK, "image/png", largeTestImage), nil
+	})
+	want := maxPageInlineBytes / len(testDataURI(largeTestImage))
+	urls := make([]string, 0, want+3)
+	for i := 0; i < want+3; i++ {
+		urls = append(urls, testBaseURL+"/download/attachments/1/img"+strings.Repeat("x", i+1)+".png")
+	}
+	cache := newAssetResolver(newImageTestClient(rt)).downloadAll(context.Background(), urls)
+
+	if len(cache) != want {
+		t.Fatalf("cached %d images, want %d within the %d-byte page budget", len(cache), want, maxPageInlineBytes)
+	}
+}
+
 func TestAssetResolverSharesCapWithExistingDataURIImages(t *testing.T) {
 	log := newReqLog()
 	rt := roundTripper(func(req *http.Request) (*http.Response, error) {

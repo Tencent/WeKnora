@@ -24,10 +24,20 @@ const (
 	// budget are collected, so the connector never emits more data URIs than the
 	// pipeline will keep.
 	maxPageImages = 30
+	// maxPageInlineBytes caps the total size of the data URIs one page may carry,
+	// both in the download cache and in the rewritten HTML. Without it an extreme
+	// page (maxPageImages occurrences of maxImageBytes images) would inline hundreds
+	// of MB of base64, copied again by every downstream conversion. Images past the
+	// budget keep their original src, like any other image the resolver skips.
+	maxPageInlineBytes = 50 << 20
 	// imageDownloadConcurrency bounds in-flight image downloads per page so an
 	// image-heavy page cannot exhaust HTTP connections or spike memory.
 	imageDownloadConcurrency = 4
 )
+
+// errImagePageBudget marks an image dropped because the page's inline budget
+// (maxPageInlineBytes) was already used up.
+var errImagePageBudget = errors.New("confluence page image budget exhausted")
 
 // imgTagRe matches a full <img ...> start tag, tolerating '>' inside quoted
 // attribute values. The \b keeps it from matching <image>.
@@ -81,9 +91,10 @@ func (r *assetResolver) Resolve(ctx context.Context, content string) string {
 	if len(cache) == 0 {
 		return content
 	}
-	inlined := 0
+	inlined, inlinedBytes := 0, 0
+	budgetSpent := false
 	return imgTagRe.ReplaceAllStringFunc(content, func(tag string) string {
-		if inlined >= available {
+		if inlined >= available || budgetSpent {
 			return tag
 		}
 		src, ok := extractImageSrc(tag)
@@ -98,7 +109,12 @@ func (r *assetResolver) Resolve(ctx context.Context, content string) string {
 		if dataURI == "" {
 			return tag
 		}
+		if inlinedBytes+len(dataURI) > maxPageInlineBytes {
+			budgetSpent = true
+			return tag
+		}
 		inlined++
+		inlinedBytes += len(dataURI)
 		return replaceImageSrc(tag, dataURI)
 	})
 }
@@ -155,10 +171,12 @@ func countDataURIImages(content string) int {
 }
 
 // downloadAll fetches each candidate with bounded concurrency and returns a
-// URL-keyed cache of the successful ones as data URIs. Failures are logged
+// URL-keyed cache of the successful ones as data URIs, holding at most
+// maxPageInlineBytes of them. Failures and images past the budget are logged
 // (redacted) and omitted, so the rewrite pass leaves their original src in place.
 func (r *assetResolver) downloadAll(ctx context.Context, urls []string) map[string]string {
 	cache := make(map[string]string, len(urls))
+	cachedBytes := 0
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, imageDownloadConcurrency)
@@ -178,8 +196,15 @@ func (r *assetResolver) downloadAll(ctx context.Context, urls []string) map[stri
 			}
 			uri := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
 			mu.Lock()
-			cache[abs] = uri
+			fits := cachedBytes+len(uri) <= maxPageInlineBytes
+			if fits {
+				cache[abs] = uri
+				cachedBytes += len(uri)
+			}
 			mu.Unlock()
+			if !fits {
+				logImageFailure(ctx, abs, errImagePageBudget)
+			}
 		}(u)
 	}
 	wg.Wait()
@@ -235,6 +260,8 @@ func logImageFailure(ctx context.Context, abs string, err error) {
 		reason = "non_image_content_type"
 	case errors.Is(err, errImageRedirectOffOrigin):
 		reason = "cross_origin_redirect"
+	case errors.Is(err, errImagePageBudget):
+		reason = "page_budget"
 	}
 	var api *apiError
 	if errors.As(err, &api) {
