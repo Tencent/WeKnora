@@ -66,6 +66,7 @@
 </template>
 
 <script setup lang="ts">
+import { pickLocale } from '@/utils/localizedText'
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { type ParserEngineInfo } from '@/api/system'
@@ -73,10 +74,13 @@ import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const editorResources = useEditorResourcesStore()
 
 function getEngineDisplayName(engineName: string): string {
+  // Plugin engines name themselves.
+  const names = parserEngines.value.find((e) => e.Name === engineName)?.DisplayNames
+  if (names) return pickLocale(names, locale.value) || names.default || engineName
   const key = `kbSettings.parser.engines.${engineName}.name`
   const translated = t(key)
   return translated !== key ? translated : engineName

@@ -43,6 +43,7 @@ type pluginActivators struct {
 	Host       *host.Manager
 	WebSearch  *activate.WebSearch
 	Connectors *activate.Connectors
+	Parsers    *activate.Parsers
 	MCP        *activate.MCPServers
 	Skills     *activate.Skills
 	Vendors    *activate.ModelVendors
@@ -52,7 +53,7 @@ type pluginActivators struct {
 // list orders the activators: the host first, so a code plugin's process is
 // running before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
-	return []reconcile.Activator{a.Host, a.WebSearch, a.Connectors, a.Vendors, a.MCP, a.Skills}
+	return []reconcile.Activator{a.Host, a.WebSearch, a.Connectors, a.Parsers, a.Vendors, a.MCP, a.Skills}
 }
 
 // newPluginHostAPI serves the Host API and gives calls a way back to it: the

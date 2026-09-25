@@ -1,0 +1,23 @@
+schemaVersion: 1
+id: weknora-examples.subtitles
+version: 1.0.0
+apiVersion: weknora.plugin/v1
+name: { en-US: Subtitles, zh-CN: 字幕解析 }
+description:
+  en-US: Parse SRT and WebVTT subtitles into a searchable transcript.
+  zh-CN: 把 SRT、WebVTT 字幕解析为可检索的文字稿。
+publisher: { id: weknora-examples, name: WeKnora examples }
+homepage: https://github.com/Tencent/WeKnora/tree/main/examples/plugins/subtitles
+license: MIT
+runtime: { type: host, kind: binary, entry: "bin/{os}-{arch}/subtitles" }
+permissions:
+  # Counts parsed files per workspace in the Host API key-value store.
+  hostApi: [kv]
+contributes:
+  parsers:
+    - id: subtitles
+      name: { en-US: Subtitles, zh-CN: 字幕解析 }
+      description:
+        en-US: SRT and WebVTT subtitles as a transcript with cue times
+        zh-CN: 带时间点的字幕文字稿
+      fileTypes: [srt, vtt]

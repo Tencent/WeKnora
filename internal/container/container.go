@@ -173,6 +173,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(newPluginHostAPI))
 	must(container.Provide(activate.NewWebSearch))
 	must(container.Provide(activate.NewConnectors))
+	must(container.Provide(activate.NewParsers))
 	must(container.Provide(newMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -1856,8 +1857,10 @@ func installPluginGate(
 	webSearch *handler.WebSearchProviderHandler,
 	dataSources *handler.DataSourceHandler,
 	imHandler *handler.IMHandler,
+	system *handler.SystemHandler,
 ) {
-	for _, h := range []interface{ SetPluginGate(interfaces.PluginGate) }{models, webSearch, dataSources, imHandler} {
+	gated := []interface{ SetPluginGate(interfaces.PluginGate) }{models, webSearch, dataSources, imHandler, system}
+	for _, h := range gated {
 		h.SetPluginGate(gate)
 	}
 }

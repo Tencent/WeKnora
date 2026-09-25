@@ -162,6 +162,33 @@ paths:
             application/x-ndjson:
               schema: { $ref: "#/components/schemas/Event" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/parsers/{id}/parse:
+    post:
+      summary: Parse a document into Markdown (DocReader.Read)
+      description: |
+        The file arrives as base64 content (or a URL). Answer Markdown and
+        the images it references; WeKnora stores the images and chunks the
+        text. A non-retryable error fails the document for good; a
+        retryable one (unavailable, rate_limited) is retried later.
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/ParseInput" } }
+      responses:
+        "200":
+          description: The parsed document
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties: { output: { $ref: "#/components/schemas/ParseOutput" } }
+        default: { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     hostToken: { type: http, scheme: bearer }
@@ -296,6 +323,29 @@ components:
         metadata: { type: object, additionalProperties: { type: string } }
         isDeleted: { type: boolean }
         sourceResourceId: { type: string }
+    ParseInput:
+      type: object
+      properties:
+        fileName: { type: string }
+        fileType: { type: string, description: "Lower-case extension without the dot" }
+        content: { type: string, contentEncoding: base64 }
+        url: { type: string }
+        title: { type: string }
+    ParseOutput:
+      type: object
+      required: [markdown]
+      properties:
+        markdown: { type: string }
+        images:
+          type: array
+          items:
+            type: object
+            required: [originalRef, data]
+            properties:
+              originalRef: { type: string }
+              mimeType: { type: string }
+              data: { type: string, contentEncoding: base64 }
+        metadata: { type: object, additionalProperties: { type: string } }
     Event:
       type: object
       required: [type]

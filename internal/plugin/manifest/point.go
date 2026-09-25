@@ -40,7 +40,7 @@ var points = []PointInfo{
 	{Point: PointIMChannels},
 	{Point: PointWebSearch, ThirdParty: true},
 	{Point: PointTools},
-	{Point: PointParsers},
+	{Point: PointParsers, ThirdParty: true},
 	{Point: PointSkills, ThirdParty: true, Declarative: true},
 	{Point: PointMCPServers, ThirdParty: true, Declarative: true},
 }

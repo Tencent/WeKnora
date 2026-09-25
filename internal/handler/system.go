@@ -24,6 +24,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	modellimiter "github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -38,6 +39,7 @@ type runtimeKnowledgeCanceller interface {
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
+	pluginGated
 	cfg              *config.Config
 	neo4jDriver      neo4j.Driver
 	documentReader   interfaces.DocumentReader
@@ -420,7 +422,18 @@ func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
-	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
+	// Engines of plugins the workspace has turned off leave the list.
+	enabled := h.pluginFilter(c)
+	visible := engines[:0]
+	for _, e := range engines {
+		if enabled(manifest.PointParsers, e.Name) {
+			visible = append(visible, e)
+		}
+	}
+	c.JSON(200, gin.H{
+		"code": 0, "msg": "success", "data": visible,
+		"docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected,
+	})
 }
 
 // ReconnectDocReader reconnects the document converter to a new (or same) DocReader address.
