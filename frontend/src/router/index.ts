@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { defineComponent } from 'vue'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
@@ -11,6 +12,11 @@ import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
+
+// views/platform/index.vue always mounts the settings modal and opens it when
+// the path is /platform/settings, so this route only has to own the URL.
+// Rendering Settings.vue here would mount a second, independent copy.
+const SettingsRouteOutlet = defineComponent({ name: 'SettingsRouteOutlet', render: () => null })
 
 function isLiteEdition(authStore: ReturnType<typeof useAuthStore>) {
   return authStore.isLiteMode || localStorage.getItem('weknora_lite_mode') === 'true'
@@ -99,10 +105,7 @@ const router = createRouter({
         {
           path: "settings",
           name: "settings",
-          // 设置弹窗由 platform 布局常驻的 <Settings /> 渲染（它同时看 route.path
-          // 与 uiStore.showSettingsModal）。这里不能再渲染一次 Settings.vue，否则
-          // 两个实例同时可见，每个设置面板的接口都会打两遍。
-          component: () => import("../views/settings/SettingsRouteView.vue"),
+          component: SettingsRouteOutlet,
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
