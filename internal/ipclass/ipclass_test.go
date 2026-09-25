@@ -31,7 +31,7 @@ func TestClassify(t *testing.T) {
 		{"interface-local multicast", "ff01::1", Multicast},
 		{"broadcast", "255.255.255.255", Reserved},
 		{"reserved 240/4", "240.0.0.1", Reserved},
-		{"benchmarking", "198.18.0.1", Reserved},
+		{"benchmarking (default Classify is strict)", "198.18.0.1", Reserved},
 		{"IETF assignments", "192.0.0.1", Reserved},
 		{"TEST-NET-1", "192.0.2.1", Documentation},
 		{"TEST-NET-2", "198.51.100.1", Documentation},
@@ -116,6 +116,7 @@ func TestIsPublic(t *testing.T) {
 		"fec0::1",
 		"2002:a9fe:a9fe::1",
 		"203.0.113.10",
+		"198.18.0.1", // RFC 2544 benchmarking — see TestClassifyWithPolicy
 	}
 	for _, raw := range nonPublic {
 		if IsPublic(net.ParseIP(raw)) {
@@ -126,5 +127,62 @@ func TestIsPublic(t *testing.T) {
 		if !IsPublic(net.ParseIP(raw)) {
 			t.Errorf("IsPublic(%s) = false, want true", raw)
 		}
+	}
+}
+
+// TestClassifyWithPolicy pins the new policy-aware behaviour: the RFC 2544
+// benchmarking range (198.18.0.0/15) is Reserved under StrictMode (the safe
+// default used by end-user URL guards and sandbox guards), and Public under
+// ProviderMode (used by configured model-provider URL guards so that
+// Shadowrocket and similar transparent proxies do not falsely block them).
+func TestClassifyWithPolicy(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		ip     string
+		policy Policy
+		want   Class
+	}{
+		// StrictMode: every restricted range is rejected.
+		{"strict 198.18.0.1", "198.18.0.1", StrictMode, Reserved},
+		{"strict 198.18.0.0", "198.18.0.0", StrictMode, Reserved},
+		{"strict 198.19.255.255", "198.19.255.255", StrictMode, Reserved},
+		{"strict 240.0.0.1 unchanged", "240.0.0.1", StrictMode, Reserved},
+		{"strict 198.51.100.1 unchanged", "198.51.100.1", StrictMode, Documentation},
+
+		// ProviderMode: only 198.18.0.0/15 is relaxed; nothing else moves.
+		{"provider 198.18.0.1 relaxed", "198.18.0.1", ProviderMode, Public},
+		{"provider 198.19.255.255 relaxed", "198.19.255.255", ProviderMode, Public},
+		{"provider 240.0.0.1 still rejected", "240.0.0.1", ProviderMode, Reserved},
+		{"provider 198.51.100.1 still documentation", "198.51.100.1", ProviderMode, Documentation},
+		{"provider 8.8.8.8 public", "8.8.8.8", ProviderMode, Public},
+		{"provider 10.0.0.1 still private", "10.0.0.1", ProviderMode, Private},
+		{"provider 127.0.0.1 still loopback", "127.0.0.1", ProviderMode, Loopback},
+
+		// ProviderMode must not change classification for ranges unrelated to
+		// the RFC 2544 benchmarking case. These pin the regression fence so
+		// future relaxations do not silently widen ProviderMode.
+		{"provider IPv6 ULA still private", "fd12:3456:789a::1", ProviderMode, Private},
+		{"provider IPv6 link-local still link-local", "fe80::1", ProviderMode, LinkLocal},
+		{"provider IPv4-mapped link-local still link-local", "::ffff:169.254.169.254", ProviderMode, LinkLocal},
+		{"provider cloud metadata still link-local", "169.254.169.254", ProviderMode, LinkLocal},
+		{"provider CGNAT still CGNAT", "100.64.0.1", ProviderMode, CGNAT},
+		{"provider IPv6 documentation still public (not in restricted table)", "2001:db8::1", ProviderMode, Public},
+		{"provider 6to4 public payload still public", "2002:0808:0808::1", ProviderMode, Public},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ip := net.ParseIP(tc.ip)
+			if ip == nil {
+				t.Fatalf("test case has an unparseable address: %s", tc.ip)
+			}
+			class, reason := ClassifyWithPolicy(ip, tc.policy)
+			if class != tc.want {
+				t.Fatalf("ClassifyWithPolicy(%s, %v) = %v (%q), want %v", tc.ip, tc.policy, class, reason, tc.want)
+			}
+		})
 	}
 }

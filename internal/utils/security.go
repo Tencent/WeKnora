@@ -284,7 +284,14 @@ var restrictedPorts = map[string]bool{
 // ranges are included in that: they are unroutable, and a user-supplied URL
 // has no legitimate reason to name one.
 func isRestrictedIP(ip net.IP) (bool, string) {
-	class, reason := ipclass.Classify(ip)
+	return isRestrictedIPWithPolicy(ip, ipclass.StrictMode)
+}
+
+// isRestrictedIPWithPolicy is isRestrictedIP under a classifier policy.
+// See ipclass.Policy for what ProviderMode relaxes; do not use it from
+// end-user URL guards.
+func isRestrictedIPWithPolicy(ip net.IP, policy ipclass.Policy) (bool, string) {
+	class, reason := ipclass.ClassifyWithPolicy(ip, policy)
 	if class == ipclass.Public {
 		return false, ""
 	}
@@ -340,6 +347,10 @@ func isIPLikeHostname(hostname string) bool {
 // - Cloud metadata endpoints
 // - Reserved hostnames (localhost, *.local, etc.)
 func isSSRFSafeURL(rawURL string) (bool, string) {
+	return isSSRFSafeURLWithPolicy(rawURL, ipclass.StrictMode)
+}
+
+func isSSRFSafeURLWithPolicy(rawURL string, policy ipclass.Policy) (bool, string) {
 	if rawURL == "" {
 		return false, "URL is empty"
 	}
@@ -405,9 +416,10 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 		return false, fmt.Sprintf("DNS resolution failed for hostname %s: cannot verify if it resolves to safe IP", hostname)
 	}
 
-	// Check if any resolved IP is restricted
+	// Check if any resolved IP is restricted (uses the supplied policy — see
+	// ipclass.Policy for why ProviderMode is appropriate here).
 	for _, resolvedIP := range ips {
-		if restricted, reason := isRestrictedIP(resolvedIP); restricted {
+		if restricted, reason := isRestrictedIPWithPolicy(resolvedIP, policy); restricted {
 			return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
 		}
 	}
@@ -775,7 +787,8 @@ func newSSRFCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request)
 // remain necessary to pin DNS answers and cover transports that cannot accept
 // this wrapper directly.
 type SSRFValidatingRoundTripper struct {
-	Base http.RoundTripper
+	Base   http.RoundTripper
+	Policy ipclass.Policy
 }
 
 func (t *SSRFValidatingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -785,10 +798,18 @@ func (t *SSRFValidatingRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	if t == nil || t.Base == nil {
 		return nil, fmt.Errorf("outbound request blocked: base transport is required")
 	}
-	if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
+	if err := validateURLForSSRFForOutboundWithPolicy(req.URL.String(), t.policy()); err != nil {
 		return nil, fmt.Errorf("outbound request blocked by SSRF policy: %w", err)
 	}
 	return t.Base.RoundTrip(req)
+}
+
+// policy returns the round tripper's policy, defaulting to StrictMode.
+func (t *SSRFValidatingRoundTripper) policy() ipclass.Policy {
+	if t == nil || t.Policy == 0 {
+		return ipclass.StrictMode
+	}
+	return t.Policy
 }
 
 // NewSSRFSafeHTTPClientWithTransport wraps a caller-supplied transport in an
@@ -798,12 +819,22 @@ func (t *SSRFValidatingRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 func NewSSRFSafeHTTPClientWithTransport(
 	config SSRFSafeHTTPClientConfig, transport http.RoundTripper,
 ) *http.Client {
+	return NewSSRFSafeHTTPClientWithTransportAndPolicy(config, transport, ipclass.StrictMode)
+}
+
+// NewSSRFSafeHTTPClientWithTransportAndPolicy is the policy-aware variant.
+// Provider clients (LLM, embedding, rerank, ASR, VLM) should pass
+// ipclass.ProviderMode so that transparent proxies returning 198.18.0.0/15 as
+// fake-IP answers do not falsely block configured model providers.
+func NewSSRFSafeHTTPClientWithTransportAndPolicy(
+	config SSRFSafeHTTPClientConfig, transport http.RoundTripper, policy ipclass.Policy,
+) *http.Client {
 	if transport == nil {
 		transport = NewSSRFSafeTransport(config)
 	}
 	return &http.Client{
 		Timeout:   config.Timeout,
-		Transport: &SSRFValidatingRoundTripper{Base: transport},
+		Transport: &SSRFValidatingRoundTripper{Base: transport, Policy: policy},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if config.SameOriginRedirectsOnly && len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
 				return fmt.Errorf("%w: cross-origin redirect is forbidden", ErrSSRFRedirectBlocked)
@@ -1301,6 +1332,17 @@ func parseHostForHint(rawURL string) (string, error) {
 //
 // Returns nil when the URL is safe, or an error describing the problem.
 func ValidateURLForSSRF(rawURL string) error {
+	return ValidateURLForSSRFWithPolicy(rawURL, ipclass.StrictMode)
+}
+
+// ValidateURLForSSRFWithPolicy runs SSRF validation under a classifier policy.
+// StrictMode (the default) treats every restricted range as unsafe and is the
+// right choice for end-user-supplied URLs. ProviderMode relaxes one range
+// (198.18.0.0/15, RFC 2544 benchmarking) so that transparent proxies like
+// Shadowrocket — which return that range as a fake-IP answer for configured
+// model-provider domains — do not falsely block them. ProviderMode is for
+// configured model provider base URLs only; do not use it for end-user input.
+func ValidateURLForSSRFWithPolicy(rawURL string, policy ipclass.Policy) error {
 	if rawURL == "" {
 		return nil // callers that require non-empty should validate separately
 	}
@@ -1339,8 +1381,8 @@ func ValidateURLForSSRF(rawURL string) error {
 		return err
 	}
 
-	// Delegate to the full SSRF validation (uses the normalised URL).
-	if safe, reason := isSSRFSafeURL(normalized); !safe {
+	// Delegate to the full SSRF validation (uses the normalised URL and policy).
+	if safe, reason := isSSRFSafeURLWithPolicy(normalized, policy); !safe {
 		return fmt.Errorf("SSRF validation failed: %s", reason)
 	}
 	return nil

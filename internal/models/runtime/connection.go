@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/ipclass"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -54,6 +55,7 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 	ep := api.Endpoint{
 		BaseURL: r.BaseURL, Model: r.RemoteModel, ModelID: c.ModelID,
 		Auth: v.AuthFunc(protocol, creds), Headers: headers, Client: c.Client,
+		SSRFPolicy: ipclass.ProviderMode,
 	}
 	if v.Endpoint != nil {
 		req := providers.EndpointRequest{

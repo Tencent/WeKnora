@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/googlegenai"
 	"github.com/Tencent/WeKnora/internal/models/api/openaicompletions"
 	"github.com/Tencent/WeKnora/internal/models/api/openairesponses"
+	"github.com/Tencent/WeKnora/internal/ipclass"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -174,7 +175,7 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 	}
 	vendor := resolved.Vendor
 	if resolved.BaseURL != "" {
-		if err := secutils.ValidateURLForSSRF(resolved.BaseURL); err != nil {
+		if err := secutils.ValidateURLForSSRFWithPolicy(resolved.BaseURL, ipclass.ProviderMode); err != nil {
 			return nil, fmt.Errorf("baseURL SSRF check failed: %w", err)
 		}
 	}

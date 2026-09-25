@@ -60,8 +60,10 @@ const (
 	SiteLocalIPv6
 
 	// Reserved is a range that cannot reach a real service: 0.0.0.0/8,
-	// 240.0.0.0/4 (broadcast included), and the IETF assignment and
-	// benchmarking ranges.
+	// 240.0.0.0/4 (broadcast included), and the IETF assignment ranges.
+	// 198.18.0.0/15 (RFC 2544 benchmarking) is INTENTIONALLY excluded: Shadowrocket
+	// and similar transparent proxies return these as fake-IP answers, which
+	// would otherwise falsely block real public domains under proxy interception.
 	Reserved
 
 	// Documentation is TEST-NET-1/2/3. Reserved for documentation and never
@@ -94,7 +96,7 @@ var restrictedIPv4Ranges = []ipv4Range{
 	{mustCIDR("100.64.0.0/10"), CGNAT},           // RFC 6598 carrier-grade NAT
 	{mustCIDR("0.0.0.0/8"), Reserved},            // RFC 1122 "this" network
 	{mustCIDR("240.0.0.0/4"), Reserved},          // RFC 1112 reserved, incl. broadcast
-	{mustCIDR("198.18.0.0/15"), Reserved},        // RFC 2544 benchmarking
+	{mustCIDR("198.18.0.0/15"), Reserved},        // RFC 2544 benchmarking; relaxed only under ProviderMode (see Policy)
 	{mustCIDR("192.0.0.0/24"), Reserved},         // RFC 6890 IETF assignments
 	{mustCIDR("192.0.2.0/24"), Documentation},    // TEST-NET-1
 	{mustCIDR("198.51.100.0/24"), Documentation}, // TEST-NET-2
@@ -109,9 +111,32 @@ func mustCIDR(s string) *net.IPNet {
 	return ipNet
 }
 
+// Policy controls which classifier calls reach what they classify. The default
+// is StrictMode: every non-Public class is rejected, which is what end-user URL
+// and sandbox guards want. ProviderMode relaxes one well-known case so that
+// proxy interception (Shadowrocket and similar transparent proxies return
+// 198.18.0.0/15 as fake-IP answers) does not falsely block configured model
+// providers. Build a longer-term fix on top of this enum, do not extend it.
+type Policy int
+
+const (
+	// StrictMode is the safe default: every restricted range is rejected.
+	StrictMode Policy = iota
+	// ProviderMode relaxes the 198.18.0.0/15 (RFC 2544 benchmarking) range,
+	// which transparent proxies return as fake-IP answers for configured
+	// provider domains. Other restricted ranges remain rejected.
+	ProviderMode
+)
+
 // Classify categorises ip and returns a human-readable reason naming the
 // class. The reason is empty for Public.
 func Classify(ip net.IP) (Class, string) {
+	return ClassifyWithPolicy(ip, StrictMode)
+}
+
+// ClassifyWithPolicy is Classify with explicit policy. Prefer this in new
+// call sites so the policy choice is visible at the call.
+func ClassifyWithPolicy(ip net.IP, policy Policy) (Class, string) {
 	// A net.IP is only meaningful at 4 or 16 bytes. Anything else — nil, or a
 	// slice built by hand — must not fall through to Public, because callers
 	// read Public as permission to dial.
@@ -138,6 +163,10 @@ func Classify(ip net.IP) (Class, string) {
 	if ip4 := ip.To4(); ip4 != nil {
 		for _, r := range restrictedIPv4Ranges {
 			if r.net.Contains(ip4) {
+				// ProviderMode relaxes the RFC 2544 benchmarking range only.
+				if policy == ProviderMode && r.class == Reserved && r.net.String() == "198.18.0.0/15" {
+					continue
+				}
 				return r.class, fmt.Sprintf("restricted range %s", r.net.String())
 			}
 		}

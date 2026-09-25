@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/ipclass"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -12,7 +13,7 @@ func validateRerankBaseURL(baseURL string) error {
 	if baseURL == "" {
 		return nil
 	}
-	if err := secutils.ValidateURLForSSRF(baseURL); err != nil {
+	if err := secutils.ValidateURLForSSRFWithPolicy(baseURL, ipclass.ProviderMode); err != nil {
 		return fmt.Errorf("base URL SSRF check failed: %w", err)
 	}
 	return nil
@@ -33,5 +34,7 @@ var sharedRerankHTTPTransport = secutils.NewSSRFSafeTransport(
 func newRerankHTTPClient(timeout time.Duration) *http.Client {
 	cfg := secutils.DefaultSSRFSafeHTTPClientConfig()
 	cfg.Timeout = timeout
-	return secutils.NewSSRFSafeHTTPClientWithTransport(cfg, sharedRerankHTTPTransport)
+	return secutils.NewSSRFSafeHTTPClientWithTransportAndPolicy(
+		cfg, sharedRerankHTTPTransport, ipclass.ProviderMode,
+	)
 }

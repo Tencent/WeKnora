@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/ipclass"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -33,26 +34,34 @@ type ssrfOutboundCacheEntry struct {
 // TTL so high-frequency clients do not repeat DNS lookups on every request.
 // Handler/input boundaries should keep calling ValidateURLForSSRF directly.
 func validateURLForSSRFForOutbound(rawURL string) error {
+	return validateURLForSSRFForOutboundWithPolicy(rawURL, ipclass.StrictMode)
+}
+
+// validateURLForSSRFForOutboundWithPolicy is the policy-aware variant; the
+// cache key includes the policy so a single origin can have at most one
+// cached entry per policy (Strict and Provider do not poison each other).
+func validateURLForSSRFForOutboundWithPolicy(rawURL string, policy ipclass.Policy) error {
 	if rawURL == "" {
 		return nil
 	}
 
 	cacheKey, ok := outboundSSRFCacheKey(rawURL)
 	if !ok {
-		return ValidateURLForSSRF(rawURL)
+		return ValidateURLForSSRFWithPolicy(rawURL, policy)
 	}
+	policyKey := cacheKey + "|" + policyName(policy)
 
 	now := time.Now()
-	if cached, ok := ssrfOutboundCache.Load(cacheKey); ok {
+	if cached, ok := ssrfOutboundCache.Load(policyKey); ok {
 		entry := cached.(*ssrfOutboundCacheEntry)
 		if now.Before(entry.expiresAt) {
 			return entry.err
 		}
-		ssrfOutboundCache.Delete(cacheKey)
+		ssrfOutboundCache.Delete(policyKey)
 	}
 
-	result, err, _ := ssrfOutboundValidateGroup.Do(cacheKey, func() (any, error) {
-		if cached, ok := ssrfOutboundCache.Load(cacheKey); ok {
+	result, err, _ := ssrfOutboundValidateGroup.Do(policyKey, func() (any, error) {
+		if cached, ok := ssrfOutboundCache.Load(policyKey); ok {
 			entry := cached.(*ssrfOutboundCacheEntry)
 			if time.Now().Before(entry.expiresAt) {
 				return entry.err, entry.err
@@ -60,8 +69,8 @@ func validateURLForSSRFForOutbound(rawURL string) error {
 		}
 
 		ssrfOutboundValidateMisses.Add(1)
-		validationErr := ValidateURLForSSRF(rawURL)
-		ssrfOutboundCache.Store(cacheKey, &ssrfOutboundCacheEntry{
+		validationErr := ValidateURLForSSRFWithPolicy(rawURL, policy)
+		ssrfOutboundCache.Store(policyKey, &ssrfOutboundCacheEntry{
 			err:       validationErr,
 			expiresAt: time.Now().Add(outboundSSRFValidationTTL),
 		})
@@ -74,6 +83,19 @@ func validateURLForSSRFForOutbound(rawURL string) error {
 		return validationErr
 	}
 	return nil
+}
+
+// policyName returns a stable string for use as a cache key suffix.
+// Keep it short and human-readable — it never reaches the wire.
+func policyName(p ipclass.Policy) string {
+	switch p {
+	case ipclass.ProviderMode:
+		return "provider"
+	case ipclass.StrictMode:
+		return "strict"
+	default:
+		return fmt.Sprintf("policy-%d", p)
+	}
 }
 
 func outboundSSRFCacheKey(rawURL string) (string, bool) {

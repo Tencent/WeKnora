@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/ipclass"
 )
 
 func TestOutboundSSRFValidationCacheReusesSameOrigin(t *testing.T) {
@@ -56,7 +58,8 @@ func TestOutboundSSRFValidationCacheExpires(t *testing.T) {
 	if !ok {
 		t.Fatal("expected cache key")
 	}
-	raw, ok := ssrfOutboundCache.Load(cacheKey)
+	policyKey := cacheKey + "|" + policyName(ipclass.StrictMode)
+	raw, ok := ssrfOutboundCache.Load(policyKey)
 	if !ok {
 		t.Fatal("expected cached entry")
 	}

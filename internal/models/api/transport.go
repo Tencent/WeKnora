@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/ipclass"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -57,7 +58,12 @@ var httpTransport = &http.Transport{
 }
 
 // HTTPClient is the shared SSRF-safe client every protocol uses.
-var HTTPClient = secutils.NewSSRFSafeHTTPClientWithTransport(
+// It runs under ipclass.ProviderMode because every protocol talks to a
+// configured model provider; transparent proxies returning 198.18.0.0/15 as
+// fake-IP answers must not falsely block them. End-user URL guards keep
+// using the StrictMode default.
+var HTTPClient = secutils.NewSSRFSafeHTTPClientWithTransportAndPolicy(
 	secutils.SSRFSafeHTTPClientConfig{Timeout: 0, MaxRedirects: 10},
 	httpTransport,
+	ipclass.ProviderMode,
 )

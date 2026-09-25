@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/ipclass"
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -59,6 +60,20 @@ type Endpoint struct {
 	Headers map[string]string
 	// Client is the HTTP client; nil uses the shared SSRF-safe client.
 	Client *http.Client
+	// SSRFPolicy is the classifier policy applied to outbound URL validation.
+	// Zero value (ipclass.StrictMode) is the safe default and is right for
+	// end-user-supplied URLs; configured model-provider URLs should set
+	// ipclass.ProviderMode so transparent proxies that return RFC 2544
+	// benchmarking IPs as fake-IP answers do not falsely block them.
+	SSRFPolicy ipclass.Policy
+}
+
+// ssrfPolicy returns the endpoint's policy, defaulting to StrictMode.
+func (e Endpoint) ssrfPolicy() ipclass.Policy {
+	if e.SSRFPolicy == 0 {
+		return ipclass.StrictMode
+	}
+	return e.SSRFPolicy
 }
 
 // Resolve builds the request URL from the endpoint description.
@@ -112,7 +127,7 @@ func (e Endpoint) NewRequest(ctx context.Context, url string, body any, stream b
 
 // newPost prepares an authenticated POST of an already-encoded body.
 func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentType string) (*http.Request, error) {
-	if err := secutils.ValidateURLForSSRF(url); err != nil {
+	if err := secutils.ValidateURLForSSRFWithPolicy(url, e.ssrfPolicy()); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
