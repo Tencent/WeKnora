@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,28 +15,121 @@ import (
 
 // MCPManager manages MCP client connections
 type MCPManager struct {
-	clients    map[string]MCPClient // cacheKey -> client
-	clientsMu  sync.RWMutex
-	connecting map[string]*pendingMCPConnection
-	oauthRepo  interfaces.MCPOAuthRepository
-	ctx        context.Context
-	cancel     context.CancelFunc
+	clients              map[string]MCPClient // cacheKey -> client
+	clientsMu            sync.RWMutex
+	connecting           map[string]*pendingMCPConnection
+	maxDynamicPerService int
+	maxDynamicTotal      int
+	oauthRepo            interfaces.MCPOAuthRepository
+	ctx                  context.Context
+	cancel               context.CancelFunc
 }
 
 // Connections to unrelated servers must not hold the manager lock during I/O.
 // Waiting callers may cancel independently; the connection belongs to the manager.
 type pendingMCPConnection struct {
-	done    chan struct{}
-	cancel  context.CancelFunc
-	client  MCPClient
-	err     error
-	version time.Time
+	done      chan struct{}
+	cancel    context.CancelFunc
+	client    MCPClient
+	err       error
+	version   time.Time
+	serviceID string
+	dynamic   bool
 }
 
 type managedMCPClient struct {
 	MCPClient
-	cancel  context.CancelFunc
-	version time.Time
+	cancel    context.CancelFunc
+	version   time.Time
+	serviceID string
+	usageMu   sync.Mutex
+	lastUsed  time.Time
+	active    int
+	dynamic   bool
+	retired   bool
+}
+
+func (c *managedMCPClient) begin() error {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.retired {
+		return fmt.Errorf("MCP connection expired; reconnect required")
+	}
+	c.active++
+	c.lastUsed = time.Now()
+	return nil
+}
+
+func (c *managedMCPClient) end() {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	c.active--
+	c.lastUsed = time.Now()
+}
+
+func (c *managedMCPClient) touch() {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	c.lastUsed = time.Now()
+}
+
+func (c *managedMCPClient) isAvailable() bool {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	return !c.retired
+}
+
+func (c *managedMCPClient) retireIdle(now time.Time) bool {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if !c.dynamic || c.active != 0 || now.Sub(c.lastUsed) < 2*time.Minute {
+		return false
+	}
+	c.retired = true
+	return true
+}
+
+func (c *managedMCPClient) Connect(ctx context.Context) error {
+	if err := c.begin(); err != nil {
+		return err
+	}
+	defer c.end()
+	return c.MCPClient.Connect(ctx)
+}
+func (c *managedMCPClient) Initialize(ctx context.Context) (*InitializeResult, error) {
+	if err := c.begin(); err != nil {
+		return nil, err
+	}
+	defer c.end()
+	return c.MCPClient.Initialize(ctx)
+}
+func (c *managedMCPClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
+	if err := c.begin(); err != nil {
+		return nil, err
+	}
+	defer c.end()
+	return c.MCPClient.ListTools(ctx)
+}
+func (c *managedMCPClient) ListResources(ctx context.Context) ([]*types.MCPResource, error) {
+	if err := c.begin(); err != nil {
+		return nil, err
+	}
+	defer c.end()
+	return c.MCPClient.ListResources(ctx)
+}
+func (c *managedMCPClient) CallTool(ctx context.Context, name string, args map[string]interface{}) (*CallToolResult, error) {
+	if err := c.begin(); err != nil {
+		return nil, err
+	}
+	defer c.end()
+	return c.MCPClient.CallTool(ctx, name, args)
+}
+func (c *managedMCPClient) ReadResource(ctx context.Context, uri string) (*ReadResourceResult, error) {
+	if err := c.begin(); err != nil {
+		return nil, err
+	}
+	defer c.end()
+	return c.MCPClient.ReadResource(ctx, uri)
 }
 
 func (c *managedMCPClient) Disconnect() error {
@@ -56,11 +150,13 @@ func NewMCPManager(oauthRepo interfaces.MCPOAuthRepository) *MCPManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	manager := &MCPManager{
-		clients:    make(map[string]MCPClient),
-		connecting: make(map[string]*pendingMCPConnection),
-		oauthRepo:  oauthRepo,
-		ctx:        ctx,
-		cancel:     cancel,
+		clients:              make(map[string]MCPClient),
+		connecting:           make(map[string]*pendingMCPConnection),
+		maxDynamicPerService: 512,
+		maxDynamicTotal:      2048,
+		oauthRepo:            oauthRepo,
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
 
 	// Start cleanup goroutine
@@ -70,8 +166,9 @@ func NewMCPManager(oauthRepo interfaces.MCPOAuthRepository) *MCPManager {
 }
 
 // cacheKey computes the connection-cache key for a service. OAuth services are
-// keyed per principal (each identity connects with its own token); all other
-// services share a single connection per service ID.
+// keyed per principal (each identity connects with its own token); other
+// static-header services share a connection per service ID. Dynamic headers
+// add the effective request scope in GetOrCreateClient.
 func cacheKey(service *types.MCPService, principal types.Principal) string {
 	if service.AuthConfig.IsOAuth() {
 		return service.ID + "\x00" + principal.Normalize().StorageID()
@@ -99,17 +196,20 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 		return nil, fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
 	}
 
-	var tenantID uint64
-	var principal types.Principal
+	config, err := PrepareClientConfig(ctx, service, m.oauthRepo)
+	if err != nil {
+		return nil, err
+	}
+	principal := config.Principal
 	if service.AuthConfig.IsOAuth() {
-		tenantID, _ = types.TenantIDFromContext(ctx)
-		principal, _ = types.PrincipalFromContext(ctx)
-		principal = types.MCPOAuthPrincipalFromContext(ctx)
 		if !principal.Valid() {
 			return nil, fmt.Errorf("principal context is required to connect to OAuth MCP service %s", service.Name)
 		}
 	}
 	key := cacheKey(service, principal)
+	if config.headerScope != "" {
+		key = service.ID + "\x00" + config.headerScope
+	}
 
 	m.clientsMu.Lock()
 	if err := m.ctx.Err(); err != nil {
@@ -118,7 +218,10 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 	}
 	if client, exists := m.clients[key]; exists && client.IsConnected() {
 		managed, owned := client.(*managedMCPClient)
-		if !owned || managed.version.Equal(service.UpdatedAt) {
+		if !owned || managed.version.Equal(service.UpdatedAt) && managed.isAvailable() {
+			if owned {
+				managed.touch()
+			}
 			m.clientsMu.Unlock()
 			return client, nil
 		}
@@ -132,10 +235,18 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 		pending = nil
 	}
 	if pending == nil {
+		if config.headerScope != "" {
+			m.removeDisconnectedClientsLocked(time.Now())
+			perService, total := m.dynamicCapacityLocked(service.ID)
+			if perService >= m.maxDynamicPerService || total >= m.maxDynamicTotal {
+				m.clientsMu.Unlock()
+				logger.GetLogger(ctx).Warnf("MCP dynamic connection capacity reached for service %s: service=%d total=%d", service.ID, perService, total)
+				return nil, fmt.Errorf("MCP dynamic connection capacity reached for service %s", service.Name)
+			}
+		}
 		lifeCtx, cancel := context.WithCancel(m.ctx)
-		pending = &pendingMCPConnection{done: make(chan struct{}), cancel: cancel, version: service.UpdatedAt}
+		pending = &pendingMCPConnection{done: make(chan struct{}), cancel: cancel, version: service.UpdatedAt, serviceID: service.ID, dynamic: config.headerScope != ""}
 		m.connecting[key] = pending
-		config := &ClientConfig{Service: service, TenantID: tenantID, Principal: principal, OAuthRepo: m.oauthRepo}
 		go m.connectClient(lifeCtx, key, config, pending)
 	}
 	m.clientsMu.Unlock()
@@ -166,7 +277,7 @@ func (m *MCPManager) connectClient(
 		}
 	}
 	if err == nil {
-		pending.client = &managedMCPClient{MCPClient: client, cancel: pending.cancel, version: pending.version}
+		pending.client = &managedMCPClient{MCPClient: client, cancel: pending.cancel, version: pending.version, serviceID: config.Service.ID, dynamic: config.headerScope != "", lastUsed: time.Now()}
 		m.clients[key] = pending.client
 	} else {
 		pending.err = err
@@ -206,15 +317,6 @@ func (m *MCPManager) initializeClient(
 	}
 
 	return nil
-}
-
-// GetClient gets an existing client
-func (m *MCPManager) GetClient(serviceID string) (MCPClient, bool) {
-	m.clientsMu.RLock()
-	defer m.clientsMu.RUnlock()
-
-	client, exists := m.clients[serviceID]
-	return client, exists
 }
 
 // CloseClient closes and removes all cached connections for a service. For
@@ -272,7 +374,7 @@ func (m *MCPManager) Shutdown() {
 
 // cleanupIdleConnections periodically cleans up disconnected clients
 func (m *MCPManager) cleanupIdleConnections() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -289,13 +391,41 @@ func (m *MCPManager) cleanupIdleConnections() {
 func (m *MCPManager) removeDisconnectedClients() {
 	m.clientsMu.Lock()
 	defer m.clientsMu.Unlock()
+	m.removeDisconnectedClientsLocked(time.Now())
+}
 
+func (m *MCPManager) removeDisconnectedClientsLocked(now time.Time) {
 	for serviceID, client := range m.clients {
-		if !client.IsConnected() {
+		managed, owned := client.(*managedMCPClient)
+		idle := owned && managed.retireIdle(now)
+		if idle || !client.IsConnected() {
+			_ = client.Disconnect()
 			delete(m.clients, serviceID)
 			logger.GetLogger(m.ctx).Infof("Removed disconnected MCP client: %s", serviceID)
 		}
 	}
+}
+
+// dynamicCapacityLocked counts live sessions and in-progress connections.
+// Caller holds clientsMu so concurrent new keys cannot exceed the limits.
+func (m *MCPManager) dynamicCapacityLocked(serviceID string) (perService, total int) {
+	for _, client := range m.clients {
+		if managed, ok := client.(*managedMCPClient); ok && managed.dynamic {
+			total++
+			if managed.serviceID == serviceID {
+				perService++
+			}
+		}
+	}
+	for _, pending := range m.connecting {
+		if pending.dynamic {
+			total++
+			if pending.serviceID == serviceID {
+				perService++
+			}
+		}
+	}
+	return perService, total
 }
 
 // GetActiveClients returns the number of active clients
@@ -317,11 +447,17 @@ func (m *MCPManager) ListActiveServices() []string {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 
+	seen := make(map[string]bool)
 	services := make([]string, 0, len(m.clients))
-	for serviceID, client := range m.clients {
+	for key, client := range m.clients {
 		if client.IsConnected() {
-			services = append(services, serviceID)
+			serviceID, _, _ := strings.Cut(key, "\x00")
+			if !seen[serviceID] {
+				seen[serviceID] = true
+				services = append(services, serviceID)
+			}
 		}
 	}
+	sort.Strings(services)
 	return services
 }

@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/mcp/headertemplate"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -18,6 +20,24 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestDynamicBusinessHeadersShareDirectoryButOAuthKeepsPrincipalScope(t *testing.T) {
+	service := &types.MCPService{Headers: types.MCPHeaders{"AAA": "{{request.headers.X-AAA}}"}}
+	base := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	base = types.WithPrincipal(base, types.Principal{Type: types.PrincipalWebUser, ID: "alice"})
+	withHeader := func(value string) context.Context {
+		return types.WithMCPHeaderContext(base, headertemplate.NewContext(nil, http.Header{"X-Aaa": {value}}))
+	}
+	for _, ctx := range []context.Context{base, withHeader("A"), withHeader("B")} {
+		principal, err := metadataPrincipal(ctx, service)
+		require.NoError(t, err)
+		require.Empty(t, principal)
+	}
+	service.AuthConfig = &types.MCPAuthConfig{AuthType: types.MCPAuthOAuth}
+	principal, err := metadataPrincipal(withHeader("A"), service)
+	require.NoError(t, err)
+	require.Equal(t, types.MCPOAuthPrincipalFromContext(base).StorageID(), principal)
+}
 
 func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")

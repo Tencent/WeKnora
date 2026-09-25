@@ -118,6 +118,22 @@ curl "$BASE/api/v1/agents/agent-1/suggested-questions?limit=6" -H "X-API-Key: $A
 
 空间级外部工具服务集成。读：Viewer+；写/测试/审批策略：Admin+。API key：`manage_mcp_services`/full。Handler: `internal/handler/mcp_service.go`
 
+`headers` 与 `auth_config.custom_headers` 支持动态值。新增业务 Header 名不需要修改 WeKnora 源码，例如：
+
+```json
+{
+  "headers": {
+    "AAA": "{{request.headers.X-AAA}}",
+    "X-Employee": "{{user.email ?? external.user_id ?? im.user_id}}",
+    "X-Department": "department:{{request.headers.X-Department}}"
+  }
+}
+```
+
+`request.headers.<名称>` 从当前 Web/API HTTP 请求读取同名 Header（不区分大小写）；原生企微没有此类入站 Header。可用的身份变量包括 `user.id`、`user.email`、`principal.id`、`principal.type`、`external.user_id`、`im.user_id`、`im.platform`、`tenant.id`。`external.user_id` 仅在空间配置 API Principal 并通过身份校验后可用；企微的 `im.user_id` 是当前适配器解析的发送者 ID（`userid` / `FromUserName`），不是独立的 `wxopenId`。
+
+`??` 依次选取首个非空值，模板可带静态前后缀；如需发送字面量 `{{`，写为 `\{{`。所有候选缺值时省略整个出站业务 Header，包括前后缀；入站多值、控制字符和受保护 Header 会被拒绝。固定 MCP 鉴权 Header 仍正常发送。动态连接按空间、调用主体及实际 Header 值隔离；非 OAuth 工具目录在空间内共用，OAuth 目录按授权主体隔离。设置页无业务 Header 时仍可尝试同步工具；上游若拒绝，可手动填写使用说明并保存为未同步状态。
+
 ### POST /api/v1/mcp-services
 
 用途：创建 MCP 服务。权限：Admin+。

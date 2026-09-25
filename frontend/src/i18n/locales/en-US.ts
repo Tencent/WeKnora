@@ -5582,6 +5582,7 @@ export default {
     "stale": "Connection or authentication settings changed. Refresh this old directory before models can use it.",
     "notSynced": "No tools synchronized yet. Fetch to save full descriptions and parameter definitions.",
     "syncRequired": "Connect and fetch tools first. Models can only use a synchronized directory.",
+    "unsyncedSaveHint": "You can enter usage instructions and save before tools are synchronized. A later request can discover the tools.",
     "needsRefresh": "Refresh required",
     "saved": "Saved directory",
     "syncedAt": "Last synchronized:",
@@ -5665,10 +5666,20 @@ export default {
     },
     customHeaders: {
       label: 'Custom Headers (optional)',
-      desc: 'HTTP headers attached to every MCP request, commonly used for enterprise gateway auth, tracing, etc.',
+      desc: 'HTTP headers for MCP requests. Values may reference user.email, external.user_id, im.user_id or request.headers.X-AAA; a missing value omits that header. Escape a literal template opener as documented in the API guide.',
       add: 'Add Header',
       keyPlaceholder: 'Header name',
-      valuePlaceholder: 'Header value'
+      valuePlaceholder: 'Header value',
+      insertVariable: 'Insert identity',
+      metadataContext: 'The workspace shares one tool directory; resolved business headers isolate connections. Settings omits missing business headers. If the upstream rejects discovery, enter usage instructions and save. Native IM has no request.headers values; use im.user_id.',
+      errors: {
+        invalidName: 'Enter a valid HTTP header name.',
+        duplicateName: 'Header names must be unique, ignoring case.',
+        invalidValue: 'Header values cannot contain control characters.',
+        unclosedExpression: 'A template expression has no closing delimiter.',
+        invalidVariable: 'The template contains an unsupported variable or expression.',
+        protectedHeader: 'Credentials, identity and transport headers cannot be read or set dynamically.'
+      }
     },
     codeImport: {
       toggle: 'Import from code',

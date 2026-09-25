@@ -2360,6 +2360,7 @@ export default {
     "stale": "연결 또는 인증 설정이 변경되었습니다. 모델이 사용하기 전에 목록을 새로 고치세요.",
     "notSynced": "아직 동기화되지 않았습니다. 가져오면 전체 설명과 매개변수 정의가 저장됩니다.",
     "syncRequired": "먼저 연결해서 Tools를 가져온 뒤 저장하세요. 모델은 동기화된 목록만 사용할 수 있습니다.",
+    "unsyncedSaveHint": "도구를 동기화하지 않아도 사용 설명을 직접 입력하고 저장할 수 있습니다. 이후 요청에서 도구를 검색할 수 있습니다.",
     "needsRefresh": "새로 고침 필요",
     "saved": "저장된 목록",
     "syncedAt": "동기화 시간:",
@@ -2443,10 +2444,20 @@ export default {
     },
     customHeaders: {
       label: '사용자 지정 헤더(선택 사항)',
-      desc: '모든 MCP 요청에 추가되는 HTTP 헤더로, 기업 게이트웨이 인증, 추적 등에 자주 사용됩니다.',
+      desc: 'MCP 요청에 추가되는 HTTP 헤더입니다. user.email, external.user_id, im.user_id, request.headers.X-AAA를 참조할 수 있으며 값이 없으면 헤더를 생략합니다. 템플릿 시작 기호를 문자로 보내는 방법은 API 문서를 참고하세요.',
       add: '헤더 추가',
       keyPlaceholder: '헤더 이름',
-      valuePlaceholder: '헤더 값'
+      valuePlaceholder: '헤더 값',
+      insertVariable: 'ID 변수 삽입',
+      metadataContext: '도구 목록은 작업 공간에서 공유하고 동적 헤더는 연결만 분리합니다. 설정 화면에는 없는 업무 헤더를 생략합니다. 서버가 도구 검색을 거부해도 사용 설명을 입력해 저장할 수 있습니다. 네이티브 IM에는 request.headers가 없으며 im.user_id를 사용할 수 있습니다.',
+      errors: {
+        invalidName: '올바른 HTTP 헤더 이름을 입력하세요.',
+        duplicateName: '헤더 이름은 대소문자를 구분하지 않고 고유해야 합니다.',
+        invalidValue: '헤더 값에는 제어 문자를 사용할 수 없습니다.',
+        unclosedExpression: '템플릿 식에 닫는 구분자가 없습니다.',
+        invalidVariable: '지원되지 않는 변수 또는 식이 포함되어 있습니다.',
+        protectedHeader: '자격 증명, ID 및 전송 헤더는 동적으로 읽거나 설정할 수 없습니다.'
+      }
     },
     toasts: {
       created: 'MCP 서비스가 생성되었습니다',
