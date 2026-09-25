@@ -276,6 +276,12 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 func RegisterImageAttrRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
 	g.apiKeyRoute(r, http.MethodGet, "/image-attrs/schema",
 		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.GetImageAttrsSchema)
+	// Same shape and the same audience as the schema above: a read-only list of
+	// what the settings panel can offer, with no KB id, so the Viewer role is
+	// enough. Mounted here rather than under /knowledge-bases because neither
+	// the list nor a pipeline id is knowledge-base-specific.
+	g.apiKeyRoute(r, http.MethodGet, "/image-pipelines",
+		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.GetImagePipelines)
 }
 
 // RegisterKnowledgeBaseActivityRoutes exposes the read-only per-KB activity

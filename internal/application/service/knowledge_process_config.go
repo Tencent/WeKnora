@@ -50,6 +50,8 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		ExtractConfig:            derefExtractConfig(kb.ExtractConfig),
 		ImageAttrsEnabled:        imageCfg.ImageAttrsEnabled,
 		ImageActions:             types.ResolveImageActions(imageCfg.ImageActions),
+		ImagePipelineID:          types.ResolveImagePipelineID(&imageCfg),
+		ImagePipelineParams:      imageCfg.ImagePipelineParams,
 	}
 	if overrides == nil {
 		return eff

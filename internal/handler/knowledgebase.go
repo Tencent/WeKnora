@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -1350,5 +1351,22 @@ func (h *KnowledgeBaseHandler) GetImageAttrsSchema(c *gin.Context) {
 			"attributes":      types.ImageAttrRegistry,
 			"default_actions": types.DefaultImageActions(),
 		},
+	})
+}
+
+// GetImagePipelines returns every registered image pipeline in the shape the
+// settings panel renders: id, name, and the fields each one owns. The panel
+// reads this instead of carrying a list of its own, so adding a pipeline is a
+// backend-only change — its fields arrive here already described, and no UI code
+// mentions the pipeline by name.
+//
+// The fields of two pipelines are deliberately allowed to share a key. Each is
+// private to the pipeline that declared it, which is why the knowledge base
+// stores them under that pipeline's own group rather than in one flat map.
+// Read-only, and global rather than per-KB, so only the Viewer role is required.
+func (h *KnowledgeBaseHandler) GetImagePipelines(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    service.ListImagePipelines(),
 	})
 }
