@@ -155,8 +155,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	}
 
 	logger.Infof(ctx,
-		"[ImageMultimodal] Processing image: chunk=%s, url=%s, ocr=%v, caption=%v, attrs=%v",
-		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption, payload.ImageAttrsEnabled)
+		"[ImageMultimodal] Processing image: chunk=%s, url=%s, attrs=%v",
+		payload.ChunkID, payload.ImageURL, payload.ImageAttrsEnabled)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -261,14 +261,14 @@ func (s *ImageMultimodalService) processImage(
 	tracker SpanTracker,
 	out types.JSONMap,
 ) error {
+	// Selected from the payload because a task in flight was enqueued for one
+	// pipeline and must not be re-routed by an edit made since; the id also
+	// lands on the trace, which reading image_info alone cannot do.
+	pipeline := selectImagePipeline(payload)
 	// Open a per-image subspan under the parent attempt's multimodal stage.
 	// If the parent stage row is missing (legacy in-flight task, or the
 	// upstream code shipped without span tracking), the tracker is a no-op so
 	// we silently fall back to the existing counter-based finalize semantics.
-	// The pipeline is picked before the span opens so the trace row can say
-	// which one produced this image.
-	pipeline := selectImagePipeline(payload.ImageAttrsEnabled)
-
 	var imgSpan *Span
 	if payload.Attempt > 0 {
 		parent := tracker.LookupStage(ctx, payload.KnowledgeID, payload.Attempt, types.StageMultimodal)
@@ -326,18 +326,13 @@ func (s *ImageMultimodalService) processImage(
 		OriginalURL: payload.ImageURL,
 	}
 
-	if !payload.ImageAttrsEnabled && !payload.EnableOCR {
-		// Caption+OCR mode with OCR off: recorded so the trace explains the
-		// missing OCR chunk rather than leaving it to be inferred from an
-		// absence. This one is family-level — it says nothing about which
-		// actions ran — so it stays here instead of living inside a pipeline.
-		out["ocr_skipped"] = "disabled"
-	}
 	// The pipeline runs to completion, including the decision it makes about
 	// OCR. Nothing below re-reads its result except the chunk building that
 	// follows.
 	if err := pipeline.Run(ctx, &runContext{
 		payload:    payload,
+		params:     payload.ImagePipelineParams,
+		declared:   pipeline.Fields(),
 		model:      vlmModel,
 		imageBytes: imgBytes,
 		vlmCfg:     vlmCfg,
@@ -369,7 +364,9 @@ func (s *ImageMultimodalService) processImage(
 		})
 	}
 
-	if payload.EnableCaption && imageInfo.Caption != "" {
+	// A caption that reached the slot came from an action this run executed, so
+	// an empty slot needs no second question asked of it.
+	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
 			ID:              uuid.New().String(),
 			TenantID:        payload.TenantID,

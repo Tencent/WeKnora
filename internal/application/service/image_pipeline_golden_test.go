@@ -29,24 +29,29 @@ var _ vlm.VLM = (*stubVLM)(nil)
 
 // runOneImagePipeline drives a whole pipeline for one image, exactly as
 // processImage does, and returns the run context plus the model it talked to.
-func runOneImagePipeline(t *testing.T, attrsEnabled, enableCaption, enableOCR bool) (*runContext, *stubVLM) {
+// params are the pipeline's private tunables, as the knowledge base would have
+// resolved them; an empty map means "whatever the pipeline defaults to".
+func runOneImagePipeline(t *testing.T, attrsEnabled bool, params map[string]any) (*runContext, *stubVLM) {
 	t.Helper()
 	model := &stubVLM{}
+	payload := &types.ImageMultimodalPayload{
+		ImageAttrsEnabled:   attrsEnabled,
+		ImagePipelineID:     types.ImagePipelineIDFor(attrsEnabled),
+		ImagePipelineParams: params,
+	}
+	pipeline := selectImagePipeline(payload)
+	if pipeline == nil {
+		t.Fatalf("no pipeline registered for attrsEnabled=%v", attrsEnabled)
+	}
 	r := &runContext{
-		payload: &types.ImageMultimodalPayload{
-			ImageAttrsEnabled: attrsEnabled,
-			EnableCaption:     enableCaption,
-			EnableOCR:         enableOCR,
-		},
+		payload:    payload,
+		params:     params,
+		declared:   pipeline.Fields(),
 		model:      model,
 		imageBytes: []byte("fake image bytes"),
 		vlmCfg:     types.VLMConfig{},
 		imageInfo:  &types.ImageInfo{},
 		out:        types.JSONMap{},
-	}
-	pipeline := selectImagePipeline(attrsEnabled)
-	if pipeline == nil {
-		t.Fatalf("no pipeline registered for attrsEnabled=%v", attrsEnabled)
 	}
 	if err := pipeline.Run(context.Background(), r); err != nil {
 		t.Fatalf("pipeline %s returned an error: %v", pipeline.ID(), err)
@@ -54,40 +59,82 @@ func runOneImagePipeline(t *testing.T, attrsEnabled, enableCaption, enableOCR bo
 	return r, model
 }
 
-// TestImagePipelineActionSequences pins the eight combinations of the two
-// whole-task switches onto the two pipelines. The sequence is the per-image
-// answer to "what did this image go through", so it is what a reader of a trace
-// replays when an image came out wrong.
+// TestImagePipelineActionSequences pins how the private switches of each
+// pipeline map onto the actions that run. The sequence is the per-image answer to
+// "what did this image go through", so it is what a reader of a trace replays
+// when an image came out wrong.
+//
+// The two pipelines own different keys on purpose: caption_ocr asks whether to
+// run a step, ob_cap_ocr asks whether OCR may be spent at all. Both default to
+// on, which is what an untouched knowledge base gets.
 func TestImagePipelineActionSequences(t *testing.T) {
 	cases := []struct {
 		name string
-		// attrs / caption / ocr are the payload switches
-		attrs, caption, ocr bool
-		pipeline            types.ImagePipelineID
-		want                []types.ImageActionID
-		wantVLMCalls        int
+		// attrs picks the pipeline; the other two are that pipeline's fields.
+		attrs        bool
+		caption, ocr bool
+		pipeline     types.ImagePipelineID
+		want         []types.ImageActionID
+		wantVLMCalls int
 	}{
-		{"observation, caption and OCR", true, true, true, types.ImagePipelineObCapOCR,
-			[]types.ImageActionID{types.ImageActionObservationCaption, types.ImageActionOCR}, 2},
-		{"observation and caption", true, true, false, types.ImagePipelineObCapOCR,
-			[]types.ImageActionID{types.ImageActionObservationCaption}, 1},
-		{"observation and OCR, caption off", true, false, true, types.ImagePipelineObCapOCR,
-			[]types.ImageActionID{types.ImageActionObservationCaption, types.ImageActionOCR}, 2},
-		{"observation only", true, false, false, types.ImagePipelineObCapOCR,
-			[]types.ImageActionID{types.ImageActionObservationCaption}, 1},
-		{"caption and OCR", false, true, true, types.ImagePipelineCaptionOCR,
-			[]types.ImageActionID{types.ImageActionCaption, types.ImageActionOCR}, 2},
-		{"caption only", false, true, false, types.ImagePipelineCaptionOCR,
-			[]types.ImageActionID{types.ImageActionCaption}, 1},
-		{"OCR only", false, false, true, types.ImagePipelineCaptionOCR,
-			[]types.ImageActionID{types.ImageActionOCR}, 1},
-		{"nothing at all", false, false, false, types.ImagePipelineCaptionOCR,
-			nil, 0},
+		{
+			"observation, caption and OCR", true, true, true, types.ImagePipelineObCapOCR,
+			[]types.ImageActionID{types.ImageActionObservationCaption, types.ImageActionOCR},
+			2,
+		},
+		{
+			"observation and caption", true, false, true, types.ImagePipelineObCapOCR,
+			[]types.ImageActionID{types.ImageActionObservationCaption, types.ImageActionOCR},
+			2,
+		},
+		{
+			"observation, caption kept", true, true, false, types.ImagePipelineObCapOCR,
+			[]types.ImageActionID{types.ImageActionObservationCaption},
+			1,
+		},
+		{
+			"observation, caption dropped", true, false, false, types.ImagePipelineObCapOCR,
+			[]types.ImageActionID{types.ImageActionObservationCaption},
+			1,
+		},
+		{
+			"caption and OCR", false, true, true, types.ImagePipelineCaptionOCR,
+			[]types.ImageActionID{types.ImageActionCaption, types.ImageActionOCR},
+			2,
+		},
+		{
+			"caption only", false, true, false, types.ImagePipelineCaptionOCR,
+			[]types.ImageActionID{types.ImageActionCaption},
+			1,
+		},
+		{
+			"OCR only", false, false, true, types.ImagePipelineCaptionOCR,
+			[]types.ImageActionID{types.ImageActionOCR},
+			1,
+		},
+		{
+			"nothing at all", false, false, false, types.ImagePipelineCaptionOCR,
+			nil, 0,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, model := runOneImagePipeline(t, tc.attrs, tc.caption, tc.ocr)
-			if got := selectImagePipeline(tc.attrs).ID(); got != tc.pipeline {
+			params := map[string]any{
+				obFieldKeyCaptureCaption:     tc.caption,
+				obFieldKeyAllowOCR:           tc.ocr,
+				captionFieldKeyEnableCaption: tc.caption,
+				captionFieldKeyEnableOCR:     tc.ocr,
+			}
+			if !tc.attrs {
+				// The observed pipeline ignores the caption_ocr keys and vice
+				// versa; each row only sets the ones its pipeline declares.
+				params = map[string]any{
+					captionFieldKeyEnableCaption: tc.caption,
+					captionFieldKeyEnableOCR:     tc.ocr,
+				}
+			}
+			r, model := runOneImagePipeline(t, tc.attrs, params)
+			if got := selectImagePipeline(r.payload).ID(); got != tc.pipeline {
 				t.Errorf("pipeline = %q, want %q", got, tc.pipeline)
 			}
 			if len(r.actions) != len(tc.want) {
@@ -105,11 +152,106 @@ func TestImagePipelineActionSequences(t *testing.T) {
 	}
 }
 
+// TestPipelineFieldsArePrivate is the contract the settings panel rests on: no
+// two pipelines may declare the same field key, because the knowledge base
+// stores them per pipeline and a collision would make one pipeline's panel
+// control another's run.
+func TestPipelineFieldsArePrivate(t *testing.T) {
+	seen := make(map[string]types.ImagePipelineID)
+	for _, spec := range ListImagePipelines() {
+		keys := make(map[string]bool)
+		for _, field := range spec.Fields {
+			if keys[field.Key] {
+				t.Errorf("pipeline %q declares field %q twice", spec.ID, field.Key)
+			}
+			keys[field.Key] = true
+			if field.Key == "" {
+				t.Errorf("pipeline %q declares a field with an empty key", spec.ID)
+				continue
+			}
+			if field.Default == nil {
+				t.Errorf("field %q of pipeline %q has no default, so the panel would show an unset toggle",
+					field.Key, spec.ID)
+			}
+			if field.Type != types.ImageFieldTypeBool &&
+				field.Type != types.ImageFieldTypeString &&
+				field.Type != types.ImageFieldTypeEnum {
+				t.Errorf("field %q of pipeline %q has an unknown type %q", field.Key, spec.ID, field.Type)
+			}
+			if other, dup := seen[field.Key]; dup && other != spec.ID {
+				t.Errorf("field %q is declared by both %q and %q; pipeline fields must not overlap",
+					field.Key, other, spec.ID)
+			}
+			seen[field.Key] = spec.ID
+		}
+	}
+}
+
+// TestListImagePipelinesMatchesRegistration pins that the endpoint's payload is
+// the registry itself: a pipeline registered but missing from the list, or
+// listed without the fields it declares, would leave the panel rendering a
+// control that the run never reads.
+func TestListImagePipelinesMatchesRegistration(t *testing.T) {
+	specs := ListImagePipelines()
+	if len(specs) < 2 {
+		t.Fatalf("list = %d pipelines, want at least the two registered", len(specs))
+	}
+	for _, spec := range specs {
+		registered, ok := imagePipelineRegistry[spec.ID]
+		if !ok {
+			t.Fatalf("list carries pipeline %q, which is not registered", spec.ID)
+		}
+		if spec.Name != registered.Name() {
+			t.Errorf("name of %q = %q, want %q", spec.ID, spec.Name, registered.Name())
+		}
+		if got := len(spec.Fields); got != len(registered.Fields()) {
+			t.Errorf("fields of %q = %d, want %d", spec.ID, got, len(registered.Fields()))
+		}
+	}
+}
+
+// TestParamFallsBackToDeclaredDefault pins that a knowledge base which never
+// set a tunable still runs with the pipeline's default rather than a zero value:
+// an unset map would otherwise silently mean "off" for every switch.
+func TestParamFallsBackToDeclaredDefault(t *testing.T) {
+	pipeline := imagePipelineRegistry[types.ImagePipelineCaptionOCR]
+	r := &runContext{out: types.JSONMap{}, imageInfo: &types.ImageInfo{}, declared: pipeline.Fields()}
+	if got := r.BoolParam(captionFieldKeyEnableOCR); got != true {
+		t.Errorf("BoolParam(%q) with no params = %v, want true (the declared default)",
+			captionFieldKeyEnableOCR, got)
+	}
+	// A key this pipeline never declared reads nil rather than panicking: an old
+	// stored config may carry parameters for a pipeline that has since changed.
+	if got := r.Param("no_such_field"); got != nil {
+		t.Errorf("Param(\"no_such_field\") = %v, want nil", got)
+	}
+}
+
+// TestUnknownPipelineFieldIsIgnored keeps a stale stored parameter harmless. A
+// knowledge base may carry a key the running pipeline no longer declares; it
+// must not leak into the trace snapshot nor change the run.
+func TestUnknownPipelineFieldIsIgnored(t *testing.T) {
+	r, model := runOneImagePipeline(t, false, map[string]any{
+		captionFieldKeyEnableCaption: true,
+		captionFieldKeyEnableOCR:     true,
+		"removed_by_a_later_release": true,
+	})
+	if len(model.prompts) != 2 {
+		t.Fatalf("VLM calls = %d (%v), want 2", len(model.prompts), model.prompts)
+	}
+	if _, leaked := r.out["params"].(types.JSONMap)["removed_by_a_later_release"]; leaked {
+		t.Error("an undeclared key must not reach the trace snapshot")
+	}
+}
+
 // TestObservationCaptionSharesOneCall is the point of the whole decomposition:
 // with attributes on, describing and observing is one action and therefore one
 // model request, and the standalone caption action is never scheduled.
 func TestObservationCaptionSharesOneCall(t *testing.T) {
-	r, model := runOneImagePipeline(t, true, true, false)
+	r, model := runOneImagePipeline(t, true, map[string]any{
+		obFieldKeyCaptureCaption: true,
+		obFieldKeyAllowOCR:       false,
+	})
 	if len(model.prompts) != 1 {
 		t.Fatalf("VLM calls = %d (%v), want 1 — observation and caption must share a request",
 			len(model.prompts), model.prompts)
@@ -135,7 +277,10 @@ func TestObservationCaptionSharesOneCall(t *testing.T) {
 // TestObservationPipelineTrace pins what a trace row says when OCR is skipped by
 // the attribute policy, which is the case image_info alone cannot explain.
 func TestObservationPipelineTrace(t *testing.T) {
-	r, _ := runOneImagePipeline(t, true, true, false)
+	r, _ := runOneImagePipeline(t, true, map[string]any{
+		obFieldKeyCaptureCaption: true,
+		obFieldKeyAllowOCR:       false,
+	})
 	if got := r.out["ocr_skipped"]; got != "attr_policy" {
 		t.Errorf(`out["ocr_skipped"] = %v, want "attr_policy"`, got)
 	}
@@ -147,7 +292,10 @@ func TestObservationPipelineTrace(t *testing.T) {
 // TestCaptionOcrTrace pins the plain path: both actions run and no policy field
 // is invented, because there is nothing to decide from.
 func TestCaptionOcrTrace(t *testing.T) {
-	r, _ := runOneImagePipeline(t, false, true, true)
+	r, _ := runOneImagePipeline(t, false, map[string]any{
+		captionFieldKeyEnableCaption: true,
+		captionFieldKeyEnableOCR:     true,
+	})
 	if r.imageInfo.Caption == "" {
 		t.Error("caption slot is empty after the caption action")
 	}

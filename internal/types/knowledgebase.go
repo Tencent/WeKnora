@@ -553,6 +553,33 @@ type ImageProcessingConfig struct {
 	// override it per document through
 	// KnowledgeProcessOverrides.ImageAttrsEnabled.
 	ImageAttrsEnabled bool `yaml:"image_attrs_enabled,omitempty" json:"image_attrs_enabled,omitempty"` //nolint:lll // one-line struct tag
+	// ImagePipelineID selects the image pipeline by id, so the choice the
+	// settings panel offers is the choice the backend runs. It is unset on
+	// knowledge bases configured before the field existed; those follow
+	// ImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always
+	// wins over the switch.
+	ImagePipelineID string `yaml:"image_pipeline,omitempty" json:"image_pipeline,omitempty"`
+	// ImagePipelineParams holds the tunables of ImagePipelineID, keyed by the
+	// field's own key. The map travels whole: a key a pipeline no longer
+	// declares is dropped when the run reads it, so an old stored config stays
+	// loadable rather than being rewritten on save.
+	ImagePipelineParams map[string]any `yaml:"image_pipeline_params,omitempty" json:"image_pipeline_params,omitempty"`
+}
+
+// ResolveImagePipelineID returns the pipeline id a knowledge base asks for. An
+// explicit ImagePipelineID wins; without one the old attribute-observation
+// switch still decides, so a knowledge base saved before the selector existed
+// runs the pipeline the switch pointed at. An id that no pipeline registers is
+// ignored here and falls back to the switch, which is what keeps a stored
+// config from pointing at a pipeline that has since been removed.
+func ResolveImagePipelineID(cfg *ImageProcessingConfig) ImagePipelineID {
+	if cfg == nil {
+		return ImagePipelineIDFor(false)
+	}
+	if id := strings.TrimSpace(cfg.ImagePipelineID); id != "" {
+		return ImagePipelineID(id)
+	}
+	return ImagePipelineIDFor(cfg.ImageAttrsEnabled)
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value

@@ -37,5 +37,7 @@ type EffectiveProcessConfig struct {
 	GraphEnabled             bool
 	ImageAttrsEnabled        bool
 	ImageActions             ImageActionsConfig
+	ImagePipelineID          ImagePipelineID
+	ImagePipelineParams      map[string]any
 	ExtractConfig            ExtractConfig
 }

@@ -63,29 +63,34 @@ type ImageActionSpec struct {
 	Fields []ImageFieldDef
 }
 
-// ImageFieldDef is one tunable of an action as the settings panel sees it.
+// ImageFieldDef is one tunable of an action as the settings panel sees it. Its
+// json tags are snake_case to match the rest of the image API, including the
+// enclosing ImagePipelineSpec.
 type ImageFieldDef struct {
 	// Key is the name the action reads with r.Param(key).
-	Key string
+	Key string `json:"key"`
 	// Type selects the control the panel renders.
-	Type ImageFieldType
+	Type ImageFieldType `json:"type"`
 	// Label and Description are written in the project's default language; the
 	// frontend overlays its translations and falls back to these.
-	Label       string
-	Description string
+	Label       string `json:"label"`
+	Description string `json:"description"`
 	// Default applies when the knowledge base does not override the field.
-	Default any
+	Default any `json:"default"`
 	// Options enumerates the allowed values of an enum field.
-	Options []string
+	Options []string `json:"options"`
 }
 
 // ImageFieldType is the control a tunable renders as.
 type ImageFieldType string
 
 const (
-	ImageFieldTypeBool   ImageFieldType = "bool"
+	// ImageFieldTypeBool renders as a switch or checkbox.
+	ImageFieldTypeBool ImageFieldType = "bool"
+	// ImageFieldTypeString renders as a text input.
 	ImageFieldTypeString ImageFieldType = "string"
-	ImageFieldTypeEnum   ImageFieldType = "enum"
+	// ImageFieldTypeEnum renders as a select over the field's Options.
+	ImageFieldTypeEnum ImageFieldType = "enum"
 )
 
 // SharedImageActions are the actions every pipeline starts from. They are
@@ -137,6 +142,23 @@ const (
 	// every image, with no observation and no policy.
 	ImagePipelineCaptionOCR ImagePipelineID = "caption_ocr"
 )
+
+// ImagePipelineSpec is how a pipeline presents itself to the settings panel.
+// The frontend reads this shape instead of knowing any pipeline by name, so
+// adding a pipeline is one registered file plus its translation, with no UI
+// change; Fields carry the same shapes the panel renders today.
+type ImagePipelineSpec struct {
+	// ID matches imagePipeline.ID(); it is what the knowledge base stores.
+	ID ImagePipelineID `json:"id"`
+	// Name is the human-readable label; the frontend overlays its translation
+	// and falls back to this text.
+	Name string `json:"name"`
+	// Fields are this pipeline's private tunables. The frontend renders one
+	// control per field and posts them back under the pipeline's own key, so
+	// two pipelines can each own a field named "enable_ocr" without either
+	// seeing the other's.
+	Fields []ImageFieldDef `json:"fields"`
+}
 
 // ImagePipelineIDFor maps the attribute-observation switch to a pipeline id, so
 // the trace label and the pipeline that actually runs can never disagree.

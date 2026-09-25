@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -36,10 +37,44 @@ func registerImagePipeline(p imagePipeline) {
 	imagePipelineRegistry[p.ID()] = p
 }
 
-// selectImagePipeline maps the attribute-observation switch onto the pipeline
-// that answers it. Both pipelines are registered by their own file's init().
-func selectImagePipeline(attrsEnabled bool) imagePipeline {
-	return imagePipelineRegistry[types.ImagePipelineIDFor(attrsEnabled)]
+// selectImagePipeline resolves the pipeline a task asked for. Both pipelines
+// register from their own file's init(). An empty or unregistered id falls back
+// to the attribute-observation switch: that is what a payload enqueued before
+// the pipeline field existed carries, and what a knowledge base saved before the
+// selector existed asks for. Falling back rather than failing keeps a stored id
+// that this build no longer ships from stranding its images.
+func selectImagePipeline(payload *types.ImageMultimodalPayload) imagePipeline {
+	fallback := types.ImagePipelineIDFor(payload.ImageAttrsEnabled)
+	id := payload.ImagePipelineID
+	if id == "" {
+		id = fallback
+	}
+	if p, ok := imagePipelineRegistry[id]; ok {
+		return p
+	}
+	return imagePipelineRegistry[fallback]
+}
+
+// ListImagePipelines renders every registered pipeline as the settings panel
+// sees it. Sorted by id so the panel's option order is stable and does not
+// follow package init order.
+func ListImagePipelines() []types.ImagePipelineSpec {
+	ids := make([]types.ImagePipelineID, 0, len(imagePipelineRegistry))
+	for id := range imagePipelineRegistry {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	specs := make([]types.ImagePipelineSpec, 0, len(ids))
+	for _, id := range ids {
+		p := imagePipelineRegistry[id]
+		specs = append(specs, types.ImagePipelineSpec{
+			ID:     p.ID(),
+			Name:   p.Name(),
+			Fields: p.Fields(),
+		})
+	}
+	return specs
 }
 
 // actionHandler is the executable half of an image action. There is deliberately
@@ -90,10 +125,73 @@ type runContext struct {
 	vlmCfg     types.VLMConfig
 	imageInfo  *types.ImageInfo
 	out        types.JSONMap
+	// params is this pipeline's private tunables, as resolved from the
+	// knowledge base. Nothing else may read it: a key understood by one
+	// pipeline says nothing about another's, so the key only has to be
+	// unambiguous within the pipeline that declared it.
+	params map[string]any
+	// declared is the pipeline's own imagePipeline.Fields(), carried along so
+	// an untouched key resolves to the default the panel promised rather than
+	// to a zero value. It is the same list the frontend renders.
+	declared []types.ImageFieldDef
 	// actions records the actions this run actually executed, in order. It is
 	// the per-image answer to "what did this image go through", which a trace
 	// row's pipeline label alone cannot tell.
 	actions []types.ImageActionID
+}
+
+// Param reads one private tunable, falling back to the default the pipeline
+// declared for it. A key the running pipeline never declared reads nil, which
+// is deliberate: a stored knowledge base may carry parameters for a pipeline
+// this build no longer has, and the run must not fail over a stale key.
+func (r *runContext) Param(key string) any {
+	if r.params != nil {
+		if v, ok := r.params[key]; ok && v != nil {
+			return v
+		}
+	}
+	for _, field := range r.declared {
+		if field.Key == key {
+			return field.Default
+		}
+	}
+	return nil
+}
+
+// BoolParam reads a boolean tunable. JSON hands a map[string]any an unmarshalled
+// "true" as a real bool, but a config written by hand may use a string, so both
+// are read; anything else falls back to the declared default.
+func (r *runContext) BoolParam(key string) bool {
+	switch v := r.Param(key).(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1" || v == "on"
+	}
+	return false
+}
+
+// ParamSnapshot renders the given keys as a plain map for the trace row.
+func (r *runContext) ParamSnapshot(keys ...string) types.JSONMap {
+	snapshot := make(types.JSONMap, len(keys))
+	for _, key := range keys {
+		if _, declared := r.fieldByKey(key); declared {
+			snapshot[key] = r.Param(key)
+		}
+	}
+	if len(snapshot) == 0 {
+		return nil
+	}
+	return snapshot
+}
+
+func (r *runContext) fieldByKey(key string) (types.ImageFieldDef, bool) {
+	for _, field := range r.declared {
+		if field.Key == key {
+			return field, true
+		}
+	}
+	return types.ImageFieldDef{}, false
 }
 
 // execute runs one action by id. A missing or unbound action costs that one
@@ -140,7 +238,12 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 		return nil
 	}
 	obs, ok := types.ParseImageAttrsResponse(raw)
-	applyImageObservation(r.imageInfo, obs.Attrs, obs.Description, r.out, r.payload.EnableCaption)
+	// Whether the description reaches the caption slot is this pipeline's
+	// business, so the observation reads its own key rather than a payload
+	// field. With the default it stays a by-product; turning it off observes
+	// the attributes and records nothing to caption.
+	applyImageObservation(r.imageInfo, obs.Attrs, obs.Description, r.out,
+		r.BoolParam(obFieldKeyCaptureCaption))
 	if !obs.Observed {
 		// The model ignored the attribute protocol — a user custom instruction
 		// may have derailed the format, or it answered in prose. Nothing is
