@@ -96,7 +96,6 @@ class HttpStatelessSmokeTest(unittest.TestCase):
         port = 19876
         env = {
             **os.environ,
-            "MCP_SERVER_AUTH_TOKEN": "test-token",
             "WEKNORA_API_KEY": "test-key",
         }
         proc = subprocess.Popen(
@@ -125,7 +124,7 @@ class HttpStatelessSmokeTest(unittest.TestCase):
                         "-D",
                         "-",
                         "-o",
-                        "/dev/null",
+                        os.devnull,
                         "-X",
                         "POST",
                         f"http://127.0.0.1:{port}/mcp",

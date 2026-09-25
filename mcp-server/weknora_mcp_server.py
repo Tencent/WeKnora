@@ -7,13 +7,12 @@ A Model Context Protocol server that provides access to the WeKnora knowledge ma
 
 import argparse
 import asyncio
+import contextvars
 import functools
 import json
 import logging
 import os
 import re
-import secrets
-import sys
 import threading
 from typing import Any, Dict
 
@@ -45,31 +44,70 @@ SSE_MESSAGE_PATH = "/sse/messages/"
 STREAMABLE_HTTP_STATELESS = True
 
 
-def network_transport_auth_token() -> str:
-    """Shared secret clients must present for SSE/HTTP transports."""
-    return os.getenv("MCP_SERVER_AUTH_TOKEN", "").strip()
+# Per-user backend API key, resolved from the inbound MCP request and applied
+# to every outbound WeKnora REST call made while handling that request. None
+# means "fall back to the process-wide WEKNORA_API_KEY".
+_per_user_api_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "weknora_per_user_api_key", default=None
+)
+
+# Inbound header (besides Authorization: Bearer) that may carry a per-user
+# WeKnora API key. Override with MCP_USER_API_KEY_HEADER.
+PER_USER_KEY_HEADER = (
+    os.getenv("MCP_USER_API_KEY_HEADER", "x-weknora-key").strip().lower()
+    or "x-weknora-key"
+)
+
+MAX_USER_KEY_LEN = 256
 
 
-def require_network_transport_auth(transport: str) -> str:
-    """SSE/HTTP must not start without a configured auth token."""
-    token = network_transport_auth_token()
-    if transport in ("sse", "http") and not token:
-        logger.error(
-            "MCP_SERVER_AUTH_TOKEN is required for %s transport. "
-            "Set a strong shared secret; clients must send "
-            "Authorization: Bearer <token> or X-MCP-Auth-Token.",
-            transport,
-        )
-        sys.exit(1)
-    return token
+def require_user_key_strict() -> bool:
+    """MCP_REQUIRE_USER_KEY=1 rejects requests that carry no per-user key."""
+    return os.getenv("MCP_REQUIRE_USER_KEY", "").strip().lower() in ("1", "true", "yes")
+
+
+def _validate_user_key(value: str) -> str | None:
+    """Return the trimmed key, or None when the value cannot be a real key."""
+    value = (value or "").strip()
+    if not value or len(value) > MAX_USER_KEY_LEN:
+        return None
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        return None
+    return value
+
+
+def warn_if_no_auth_sources(transport: str) -> None:
+    """Log guidance when a network transport has no usable auth path.
+
+    Without a per-user key the gateway falls back to WEKNORA_API_KEY; when
+    that is also unset the backend rejects every call (empty X-API-Key), so
+    this is a warning rather than a startup failure.
+    """
+    if transport not in ("sse", "http"):
+        return
+    if require_user_key_strict() or WEKNORA_API_KEY:
+        return
+    logger.warning(
+        "Neither MCP_REQUIRE_USER_KEY nor WEKNORA_API_KEY is configured: "
+        "requests without a per-user key will carry no backend credential "
+        "and the WeKnora backend will reject them."
+    )
 
 
 class MCPAuthMiddleware:
-    """ASGI middleware that gates network MCP transports behind a shared secret."""
+    """ASGI middleware that resolves the per-user WeKnora API key.
 
-    def __init__(self, app, token: str):
+    Any credential presented by the MCP client (Authorization: Bearer,
+    X-WeKnora-Key, or X-MCP-Auth-Token) is treated as that user's backend
+    API key and stored in a ContextVar for the request's execution; the
+    WeKnora backend verifies it (SHA-256 lookup in tenant_api_keys). A
+    credential that is present but malformed is rejected rather than
+    silently falling back to the process-wide key. Key values are never
+    logged.
+    """
+
+    def __init__(self, app):
         self.app = app
-        self.token = token
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
@@ -80,14 +118,8 @@ class MCPAuthMiddleware:
             k.decode("latin-1").lower(): v.decode("latin-1")
             for k, v in scope.get("headers", [])
         }
-        provided = ""
-        auth = headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            provided = auth[7:].strip()
-        elif "x-mcp-auth-token" in headers:
-            provided = headers["x-mcp-auth-token"]
-
-        if not provided or not secrets.compare_digest(provided, self.token):
+        allowed, user_key = self._authenticate(headers)
+        if not allowed:
             body = b'{"error":"unauthorized"}'
             await send(
                 {
@@ -99,7 +131,46 @@ class MCPAuthMiddleware:
             await send({"type": "http.response.body", "body": body})
             return
 
+        if user_key:
+            _per_user_api_key.set(user_key)
         await self.app(scope, receive, send)
+
+    def _authenticate(self, headers: dict) -> tuple[bool, str | None]:
+        """Return (allowed, per-user key or None).
+
+        Decision tree:
+        1. A credential carrier holds a well-formed key -> (True, key); the
+           backend is the authority on whether the key is real.
+        2. A carrier holds a malformed value -> (False, None): never fall
+           back to the process-wide key when the client clearly intended
+           to authenticate.
+        3. No credential at all -> reject under MCP_REQUIRE_USER_KEY,
+           otherwise (True, None) so stdio-style deployments and the env
+           fallback keep working.
+        """
+        for candidate in self._credential_candidates(headers):
+            key = _validate_user_key(candidate)
+            if key is None:
+                logger.warning(
+                    "Rejected malformed credential (length=%d)", len(candidate)
+                )
+                return False, None
+            return True, key
+        if require_user_key_strict():
+            return False, None
+        return True, None
+
+    @staticmethod
+    def _credential_candidates(headers: dict) -> list:
+        auth = headers.get("authorization", "")
+        candidates = []
+        if auth.lower().startswith("bearer "):
+            candidates.append(auth[7:])
+        if PER_USER_KEY_HEADER in headers:
+            candidates.append(headers[PER_USER_KEY_HEADER])
+        if "x-mcp-auth-token" in headers:
+            candidates.append(headers["x-mcp-auth-token"])
+        return candidates
 
 
 def _normalize_kb_entries(resp: object) -> list[Dict]:
@@ -163,6 +234,22 @@ class WeKnoraClient:
             self._session_local.session = self._new_session()
         return self._session_local.session
 
+    def _effective_api_key(self) -> str:
+        """Backend credential for the current request.
+
+        The per-user key (resolved by MCPAuthMiddleware) wins over the
+        process-wide key. Per-request header overrides keep thread-local
+        session default headers untouched — mutating those would leak one
+        user's key into another user's later request on the same thread.
+        """
+        return _per_user_api_key.get() or self.api_key
+
+    def _auth_headers(self, extra: dict | None = None) -> dict:
+        """Merge per-request headers, with the effective key on top."""
+        headers = dict(extra or {})
+        headers["X-API-Key"] = self._effective_api_key()
+        return headers
+
     def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Make a request to the WeKnora API
 
@@ -176,8 +263,13 @@ class WeKnoraClient:
         """
         url = f"{self.base_url}{endpoint}"
         try:
-            # Execute HTTP request with the specified method
-            response = self.session.request(method, url, **kwargs)
+            # Execute HTTP request with the specified method. headers are
+            # merged over the session defaults so the per-user API key
+            # overrides the process-wide one for this request only.
+            caller_headers = kwargs.pop("headers", None)
+            response = self.session.request(
+                method, url, headers=self._auth_headers(caller_headers), **kwargs
+            )
             # Raise exception for HTTP error status codes (4xx, 5xx)
             response.raise_for_status()
             # Parse and return JSON response
@@ -325,6 +417,7 @@ class WeKnoraClient:
             # (requests will set it automatically with boundary)
             headers = self.session.headers.copy()
             del headers["Content-Type"]
+            headers["X-API-Key"] = self._effective_api_key()
             # Use requests.post directly instead of session to avoid header conflicts
             response = requests.post(
                 f"{self.base_url}/knowledge-bases/{kb_id}/knowledge/file",
@@ -517,8 +610,11 @@ class WeKnoraClient:
             # POST with stream=True to receive server-sent events incrementally
             # Timeout: 10s to establish connection, WEKNORA_CHAT_TIMEOUT for reading response
             response = self.session.post(
-                url, json=body, stream=True,
+                url,
+                json=body,
+                stream=True,
                 timeout=(10, WEKNORA_CHAT_TIMEOUT),
+                headers=self._auth_headers(),
             )
             response.raise_for_status()
 
@@ -980,6 +1076,11 @@ async def chat(
         knowledge_base_ids=kb_ids,
         web_search_enabled=web_search_enabled,
     )
+    # run_in_executor does NOT propagate contextvars; wrap the call in the
+    # captured context so the per-user API key set by MCPAuthMiddleware
+    # reaches the outbound request inside the worker thread.
+    ctx = contextvars.copy_context()
+    fn = functools.partial(ctx.run, fn)
     # get_running_loop() is the correct API inside async functions.
     return await asyncio.get_running_loop().run_in_executor(None, fn)
 
@@ -1044,13 +1145,18 @@ async def agent_chat(
             logger.warning(
                 "agent_chat preflight KB check failed (non-fatal): %s", preflight_err
             )
+    # Same contextvars propagation as chat(): see the comment there.
+    ctx = contextvars.copy_context()
     fn = functools.partial(
-        client.agent_chat,
-        session_id,
-        query,
-        resolved_agent_id,
-        knowledge_base_ids=kb_ids,
-        web_search_enabled=web_search_enabled,
+        ctx.run,
+        functools.partial(
+            client.agent_chat,
+            session_id,
+            query,
+            resolved_agent_id,
+            knowledge_base_ids=kb_ids,
+            web_search_enabled=web_search_enabled,
+        ),
     )
     return await asyncio.get_running_loop().run_in_executor(None, fn)
 
@@ -1132,7 +1238,7 @@ async def run_stdio():
 async def run_sse(host: str, port: int):
     """Run the MCP server using SSE transport (legacy MCP clients)."""
     set_active_transport("sse")
-    auth_token = require_network_transport_auth("sse")
+    warn_if_no_auth_sources("sse")
     try:
         import uvicorn
     except ImportError as e:
@@ -1141,8 +1247,7 @@ async def run_sse(host: str, port: int):
         ) from e
 
     starlette_app = MCPAuthMiddleware(
-        mcp.sse_app(host=host, message_path=SSE_MESSAGE_PATH),
-        auth_token,
+        mcp.sse_app(host=host, message_path=SSE_MESSAGE_PATH)
     )
 
     logger.info("Starting SSE MCP server on %s:%d", host, port)
@@ -1156,7 +1261,7 @@ async def run_sse(host: str, port: int):
 async def run_http(host: str, port: int):
     """Run the MCP server using Streamable HTTP transport (MCP 2025-03-26 spec)."""
     set_active_transport("http")
-    auth_token = require_network_transport_auth("http")
+    warn_if_no_auth_sources("http")
     try:
         import uvicorn
     except ImportError as e:
@@ -1165,8 +1270,7 @@ async def run_http(host: str, port: int):
         ) from e
 
     starlette_app = MCPAuthMiddleware(
-        mcp.streamable_http_app(host=host, stateless_http=STREAMABLE_HTTP_STATELESS),
-        auth_token,
+        mcp.streamable_http_app(host=host, stateless_http=STREAMABLE_HTTP_STATELESS)
     )
 
     logger.info("Starting Streamable HTTP MCP server on %s:%d", host, port)
