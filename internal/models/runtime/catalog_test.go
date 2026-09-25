@@ -310,7 +310,9 @@ func TestResolve_BooleanThinkingSwitchHidesGradedLevels(t *testing.T) {
 
 	// Uncatalogued model on the generic vendor — a relay row. The empty level
 	// map's missing-key pass-through used to advertise six rungs here.
-	r, err := modelruntime.Resolve(modelruntime.Ref{Provider: "generic", Model: "glm-5.3", BaseURL: "https://relay.example.com/v1"})
+	r, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: "generic", Model: "glm-5.3", BaseURL: "https://relay.example.com/v1",
+	})
 	require.NoError(t, err)
 	assert.False(t, r.Cataloged)
 	assert.Equal(t, []api.ReasoningEffort{api.ReasoningOff, api.ReasoningAuto},
