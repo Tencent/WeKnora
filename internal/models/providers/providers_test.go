@@ -18,13 +18,13 @@ var expectedIDs = []string{
 	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
-	"openrouter", "litellm", "requesty",
+	"openrouter", "litellm", "requesty", "cheaperinference",
 	"jina", "nvidia", "novita", "gpustack",
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 27 {
-		t.Fatalf("expected 27 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 28 {
+		t.Fatalf("expected 28 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)
@@ -311,6 +311,10 @@ func TestFamilyExpectations(t *testing.T) {
 	if r := resolve(t, "volcengine", "doubao-seed-1-6-251015"); r.OpenAICompletions.MaxTokensField !=
 		"max_completion_tokens" {
 		t.Error("volcengine must keep max_completion_tokens")
+	}
+	if r := resolve(t, "cheaperinference", "gpt-5.4-mini"); r.OpenAICompletions.MaxTokensField != "max_tokens" ||
+		r.OpenAICompletions.SupportsTemperature || !r.OpenAICompletions.SupportsReasoningEffort {
+		t.Error("cheaperinference/gpt-5.4-mini should send max_tokens and reasoning_effort, and no temperature")
 	}
 	if r := resolve(t, "deepseek", "deepseek-reasoner"); r.ThinkingLevels.Supports(api.ReasoningOff) {
 		t.Error("deepseek/deepseek-reasoner should not allow thinking off")
