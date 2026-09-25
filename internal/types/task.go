@@ -527,7 +527,7 @@ type ImageMultimodalPayload struct {
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
 	// ImageAttrsEnabled selects which image pipeline the task runs — see
-	// PipelineModeFor and the PipelineMode constants. True is the
+	// types.ImagePipelineIDFor and the ImagePipelineID constants. True is the
 	// attribute-observed pipeline: the describe round also observes image
 	// attributes, and the attribute policy decides whether OCR runs for it.
 	// False is the upstream behaviour: a plain caption, then OCR, no attribute
