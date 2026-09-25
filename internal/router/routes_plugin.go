@@ -19,6 +19,9 @@ func RegisterPluginRoutes(r *gin.RouterGroup, h *handler.PluginHandler, g *rbacG
 		plugins.GET("/:id", g.Viewer(), h.GetPlugin)
 		// Turning a plugin off hides its integrations workspace-wide — Admin+.
 		plugins.PUT("/:id/enabled", g.Admin(), h.SetPluginEnabled)
+		// Workspace configuration carries credentials — Admin+ to read too.
+		plugins.GET("/:id/config", g.Admin(), h.GetPluginConfig)
+		plugins.PUT("/:id/config", g.Admin(), h.UpdatePluginConfig)
 	}
 }
 
@@ -36,5 +39,7 @@ func RegisterPluginAdminRoutes(r *gin.RouterGroup, h *handler.PluginAdminHandler
 		plugins.DELETE("/:id", h.UninstallPlugin)
 		plugins.PUT("/:id/enabled", h.SetInstalledPluginEnabled)
 		plugins.PUT("/:id/active-version", h.ActivatePluginVersion)
+		plugins.GET("/:id/config", h.GetPluginSystemConfig)
+		plugins.PUT("/:id/config", h.UpdatePluginSystemConfig)
 	}
 }

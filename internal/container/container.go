@@ -71,6 +71,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/plugin/activate"
 	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -160,7 +161,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(repository.NewModelCatalogRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
-	must(container.Provide(repository.NewMCPServiceRepository))
+	// Installed plugins' MCP servers are listed alongside stored services.
+	must(container.Provide(activate.NewMCPServers))
+	must(container.Provide(newMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
@@ -586,6 +589,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(func(s *plugintenancy.Service) interfaces.PluginGate { return s }))
 	must(container.Invoke(installPluginGate))
 	must(container.Provide(repository.NewPluginRepository))
+	must(container.Invoke(bindPluginActivators))
 	must(container.Provide(newPluginPackageStore))
 	must(container.Provide(newPluginReconciler))
 	must(container.Invoke(startPluginReconciler))

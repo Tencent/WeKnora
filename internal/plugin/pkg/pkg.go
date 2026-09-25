@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,9 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
+	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 )
 
@@ -97,7 +101,73 @@ func Open(data []byte) (*Package, error) {
 	if err := p.checkReferences(); err != nil {
 		return nil, err
 	}
+	if err := p.loadConfigSchemas(); err != nil {
+		return nil, err
+	}
 	return p, nil
+}
+
+// loadConfigSchemas parses the config schema files (JSON or YAML) into the
+// manifest and checks that every ${scope.key} a template uses is declared.
+func (p *Package) loadConfigSchemas() error {
+	m := p.Manifest
+	var errs []error
+	load := func(file string) (*configschema.Schema, json.RawMessage) {
+		if file == "" {
+			return nil, nil
+		}
+		raw, err := yamlToJSON(p.files[file])
+		if err != nil {
+			errs = append(errs, fmt.Errorf("config schema %s: %w", file, err))
+			return nil, nil
+		}
+		s, err := configschema.Parse(raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("config schema %s: %w", file, err))
+			return nil, nil
+		}
+		return s, raw
+	}
+	system, systemRaw := load(m.Config.System)
+	tenant, tenantRaw := load(m.Config.Tenant)
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	m.Config.SystemSchema, m.Config.TenantSchema = systemRaw, tenantRaw
+
+	declared := func(s *configschema.Schema, key string) bool {
+		return s != nil && s.Properties[key] != nil
+	}
+	for _, c := range m.Contributes[manifest.PointMCPServers] {
+		if c.MCP == nil {
+			continue
+		}
+		for name, value := range c.MCP.Headers {
+			for _, ref := range manifest.TemplateRefs(value) {
+				ok := (ref.Scope == manifest.ScopeConfig && declared(tenant, ref.Key)) ||
+					(ref.Scope == manifest.ScopeSystem && declared(system, ref.Key))
+				if !ok {
+					which := "config.tenant"
+					if ref.Scope == manifest.ScopeSystem {
+						which = "config.system"
+					}
+					errs = append(errs, fmt.Errorf(
+						"mcpServers.%s header %s uses ${%s.%s}, which the %s schema does not declare",
+						c.ID, name, ref.Scope, ref.Key, which))
+				}
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// yamlToJSON accepts a YAML (or JSON) document and returns it as JSON.
+func yamlToJSON(data []byte) (json.RawMessage, error) {
+	var v any
+	if err := yaml.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
 }
 
 // ReadFile returns one file of the package.

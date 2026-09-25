@@ -63,3 +63,33 @@ func TestPluginRepository(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, versions, "deleting a plugin removes its versions")
 }
+
+func TestPluginTenantSettingUpsertColumns(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.PluginTenantSetting{}))
+	repo := NewPluginTenantSettingRepository(db)
+	ctx := context.Background()
+
+	got, err := repo.Get(ctx, 1, "acme.kit")
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	require.NoError(t, repo.Upsert(ctx, &types.PluginTenantSetting{
+		TenantID: 1, PluginID: "acme.kit", Enabled: true, UpdatedAt: time.Now(),
+	}, "enabled"))
+	require.NoError(t, repo.Upsert(ctx, &types.PluginTenantSetting{
+		TenantID: 1, PluginID: "acme.kit", Enabled: false, Config: types.JSON(`{"region":"eu"}`), UpdatedAt: time.Now(),
+	}, "config"))
+	got, err = repo.Get(ctx, 1, "acme.kit")
+	require.NoError(t, err)
+	require.True(t, got.Enabled, "saving config must leave the switch alone")
+	require.JSONEq(t, `{"region":"eu"}`, string(got.Config))
+
+	require.NoError(t, repo.Upsert(ctx, &types.PluginTenantSetting{
+		TenantID: 1, PluginID: "acme.kit", Enabled: false, UpdatedAt: time.Now(),
+	}, "enabled"))
+	got, _ = repo.Get(ctx, 1, "acme.kit")
+	require.False(t, got.Enabled)
+	require.JSONEq(t, `{"region":"eu"}`, string(got.Config), "flipping the switch must keep the config")
+}

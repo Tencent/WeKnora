@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -115,23 +115,6 @@ func TestPluginHandlerErrors(t *testing.T) {
 	}
 }
 
-type memPluginSettings struct {
-	rows map[string]types.PluginTenantSetting
-}
-
-func (m *memPluginSettings) List(context.Context, uint64) ([]types.PluginTenantSetting, error) {
-	out := make([]types.PluginTenantSetting, 0, len(m.rows))
-	for _, r := range m.rows {
-		out = append(out, r)
-	}
-	return out, nil
-}
-
-func (m *memPluginSettings) Upsert(_ context.Context, s *types.PluginTenantSetting) error {
-	m.rows[s.PluginID] = *s
-	return nil
-}
-
 func TestPluginHandlerTogglesPluginsPerTenant(t *testing.T) {
 	reg := registry.New()
 	builtinPlugin := func(id string, required bool, point manifest.Point, localID string) *manifest.Manifest {
@@ -152,7 +135,7 @@ func TestPluginHandlerTogglesPluginsPerTenant(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	settings := &memPluginSettings{rows: map[string]types.PluginTenantSetting{}}
+	settings := &plugintest.MemTenantSettings{}
 	h := NewPluginHandler(reg, tenancy.NewService(reg, settings), nil)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

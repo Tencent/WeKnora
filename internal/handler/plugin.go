@@ -7,7 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/plugin/driver"
+	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
@@ -215,4 +218,82 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 		out.Contributions[info.Point] = list
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": out})
+}
+
+// configError maps a plugin configuration failure to an HTTP error.
+func configError(c *gin.Context, err error) {
+	var fields configschema.FieldErrors
+	switch {
+	case stderrors.As(err, &fields):
+		_ = c.Error(errors.NewBadRequestError(err.Error()).WithDetails(fields))
+	case stderrors.Is(err, tenancy.ErrUnknownPlugin), stderrors.Is(err, install.ErrNotInstalled):
+		_ = c.Error(errors.NewNotFoundError("plugin not found"))
+	case stderrors.Is(err, tenancy.ErrNoTenantConfig), stderrors.Is(err, install.ErrNoSystemConfig):
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+	default:
+		logger.Errorf(c.Request.Context(), "[plugin] configuration request failed: %v", err)
+		_ = c.Error(errors.NewInternalServerError("failed to handle plugin configuration"))
+	}
+}
+
+// PluginConfigRequest carries configuration values; secrets may be sent back
+// as "***" to keep them.
+type PluginConfigRequest struct {
+	Values map[string]any `json:"values"`
+}
+
+// GetPluginConfig godoc
+// @Summary      获取插件的空间配置
+// @Description  返回插件的空间级配置 Schema 和当前值（密钥脱敏为 ***）
+// @Tags         Plugin
+// @Produce      json
+// @Param        id   path      string  true  "插件 ID"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /plugins/{id}/config [get]
+func (h *PluginHandler) GetPluginConfig(c *gin.Context) {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if h.tenancy == nil || tenantID == 0 {
+		_ = c.Error(errors.NewBadRequestError("workspace context missing"))
+		return
+	}
+	cfg, err := h.tenancy.Config(c.Request.Context(), tenantID, c.Param("id"))
+	if err != nil {
+		configError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": cfg})
+}
+
+// UpdatePluginConfig godoc
+// @Summary      保存插件的空间配置
+// @Description  按插件声明的 Schema 校验并保存空间级配置；密钥加密存储，回传 *** 表示保持不变
+// @Tags         Plugin
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string               true  "插件 ID"
+// @Param        request  body      PluginConfigRequest  true  "配置"
+// @Success      200      {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /plugins/{id}/config [put]
+func (h *PluginHandler) UpdatePluginConfig(c *gin.Context) {
+	var req PluginConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("values are required"))
+		return
+	}
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if h.tenancy == nil || tenantID == 0 {
+		_ = c.Error(errors.NewBadRequestError("workspace context missing"))
+		return
+	}
+	userID, _ := c.Request.Context().Value(types.UserIDContextKey).(string)
+	cfg, err := h.tenancy.SetConfig(c.Request.Context(), tenantID, c.Param("id"), req.Values, userID)
+	if err != nil {
+		configError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": cfg})
 }

@@ -243,3 +243,46 @@ func (h *PluginAdminHandler) UninstallPlugin(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
+
+// GetPluginSystemConfig godoc
+// @Summary      获取插件的平台配置
+// @Description  返回插件的平台级配置 Schema 和当前值（密钥脱敏为 ***）
+// @Tags         System
+// @Produce      json
+// @Param        id   path      string  true  "插件 ID"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/plugins/{id}/config [get]
+func (h *PluginAdminHandler) GetPluginSystemConfig(c *gin.Context) {
+	cfg, err := h.service.GetSystemConfig(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		configError(c, err)
+		return
+	}
+	h.ok(c, cfg)
+}
+
+// UpdatePluginSystemConfig godoc
+// @Summary      保存插件的平台配置
+// @Description  按插件声明的 Schema 校验并保存平台级配置，对所有空间生效
+// @Tags         System
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string               true  "插件 ID"
+// @Param        request  body      PluginConfigRequest  true  "配置"
+// @Success      200      {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/plugins/{id}/config [put]
+func (h *PluginAdminHandler) UpdatePluginSystemConfig(c *gin.Context) {
+	var req PluginConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("values are required"))
+		return
+	}
+	cfg, err := h.service.SetSystemConfig(c.Request.Context(), c.Param("id"), req.Values)
+	if err != nil {
+		configError(c, err)
+		return
+	}
+	h.ok(c, cfg)
+}

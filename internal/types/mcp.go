@@ -39,9 +39,15 @@ type MCPService struct {
 	StdioConfig    *MCPStdioConfig    `json:"stdio_config,omitempty" gorm:"type:json"`     // Required for stdio transport
 	EnvVars        MCPEnvVars         `json:"env_vars,omitempty"     gorm:"type:json"`     // Environment variables for stdio
 	IsBuiltin      bool               `json:"is_builtin"             gorm:"default:false"` // Whether this is a builtin MCP service (visible to all workspaces)
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
-	DeletedAt      gorm.DeletedAt     `json:"deleted_at"             gorm:"index"`
+	// PluginID names the installed plugin providing the service; such
+	// services are never stored and read as builtin (read-only).
+	PluginID string `json:"plugin_id,omitempty" gorm:"-"`
+	// PluginError says why a plugin service is disabled, typically that the
+	// workspace has not configured the plugin yet.
+	PluginError string         `json:"plugin_error,omitempty" gorm:"-"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `json:"deleted_at"             gorm:"index"`
 }
 
 // EffectiveUsageInstructions preserves documentation on legacy services until

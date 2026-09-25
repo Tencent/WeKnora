@@ -26,14 +26,38 @@ func (m *memRepo) List(_ context.Context, tenantID uint64) ([]types.PluginTenant
 	return out, nil
 }
 
-func (m *memRepo) Upsert(_ context.Context, s *types.PluginTenantSetting) error {
+func (m *memRepo) Get(_ context.Context, tenantID uint64, pluginID string) (*types.PluginTenantSetting, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if r, ok := m.rows[tenantID][pluginID]; ok {
+		return &r, nil
+	}
+	return nil, nil
+}
+
+func (m *memRepo) Upsert(_ context.Context, s *types.PluginTenantSetting, columns ...string) error {
 	if m.rows == nil {
 		m.rows = map[uint64]map[string]types.PluginTenantSetting{}
 	}
 	if m.rows[s.TenantID] == nil {
 		m.rows[s.TenantID] = map[string]types.PluginTenantSetting{}
 	}
-	m.rows[s.TenantID][s.PluginID] = *s
+	row, exists := m.rows[s.TenantID][s.PluginID]
+	if !exists || len(columns) == 0 {
+		m.rows[s.TenantID][s.PluginID] = *s
+		return nil
+	}
+	for _, c := range columns {
+		switch c {
+		case "enabled":
+			row.Enabled = s.Enabled
+		case "config":
+			row.Config = s.Config
+		}
+	}
+	row.UpdatedBy, row.UpdatedAt = s.UpdatedBy, s.UpdatedAt
+	m.rows[s.TenantID][s.PluginID] = row
 	return nil
 }
 
@@ -165,5 +189,55 @@ func TestInstalledPluginsWaitForTenantOptIn(t *testing.T) {
 	if !s.ContributionEnabled(ctx, 1, manifest.PointMCPServers, "acme.kit/search") ||
 		s.ContributionEnabled(ctx, 2, manifest.PointMCPServers, "acme.kit/search") {
 		t.Fatal("opting in applies to that tenant only")
+	}
+}
+
+func TestTenantConfigRoundTrip(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	kit := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion, ID: "acme.kit", Version: "1.0.0", Name: manifest.Text("Kit", nil),
+		Publisher: manifest.Publisher{ID: "acme"}, Runtime: manifest.Runtime{Type: manifest.RuntimeDeclarative},
+		Config: manifest.ConfigSchemas{
+			TenantSchema: []byte(`{"type":"object","required":["api_key"],` +
+				`"properties":{"api_key":{"type":"string","x-secret":true},"region":{"type":"string"}}}`),
+		},
+		Contributes: manifest.Contributions{
+			manifest.PointMCPServers: {{
+				ID: "search", Name: manifest.Text("Search", nil),
+				MCP: &manifest.MCPServer{URL: "https://mcp.acme.example/mcp"},
+			}},
+		},
+	}
+	if err := s.registry.Register(kit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Config(ctx, 1, "weknora.feishu"); !errors.Is(err, ErrNoTenantConfig) {
+		t.Fatalf("want ErrNoTenantConfig, got %v", err)
+	}
+	if _, err := s.SetConfig(ctx, 1, "acme.kit", map[string]any{"region": "eu"}, "u1"); err == nil {
+		t.Fatal("a missing required secret must be rejected")
+	}
+	got, err := s.SetConfig(ctx, 1, "acme.kit", map[string]any{"api_key": "k-1", "region": "eu"}, "u1")
+	if err != nil || got.Values["api_key"] != "***" || got.Values["region"] != "eu" {
+		t.Fatalf("SetConfig = %+v, %v", got, err)
+	}
+	// Saving config must not flip the switch, and flipping the switch must
+	// keep the config.
+	if s.ContributionEnabled(ctx, 1, manifest.PointMCPServers, "acme.kit/search") {
+		t.Fatal("configuring must not enable the plugin")
+	}
+	if err := s.SetEnabled(ctx, 1, "acme.kit", true, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetConfig(ctx, 1, "acme.kit", map[string]any{"api_key": "***", "region": "us"}, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	values, _, err := s.OpenConfig(ctx, 1, "acme.kit")
+	if err != nil || values["api_key"] != "k-1" || values["region"] != "us" {
+		t.Fatalf("OpenConfig = %v, %v", values, err)
+	}
+	if !s.ContributionEnabled(ctx, 1, manifest.PointMCPServers, "acme.kit/search") {
+		t.Fatal("saving config must keep the plugin enabled")
 	}
 }

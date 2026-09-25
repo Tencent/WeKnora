@@ -175,3 +175,15 @@ func deepCopyValue(v any) any {
 		return v
 	}
 }
+
+// Update applies a client's edit to a stored (sealed) configuration: it keeps
+// secrets the client sent back redacted, validates the result and seals it
+// for storage. A validation failure is returned as FieldErrors.
+func Update(s *Schema, stored, incoming map[string]any) (map[string]any, error) {
+	plain, _ := OpenLenient(s, stored)
+	merged := Merge(s, plain, incoming)
+	if errs := Validate(s, merged); len(errs) > 0 {
+		return nil, errs
+	}
+	return Seal(s, merged)
+}

@@ -10,7 +10,11 @@ import (
 // PluginTenantSettingRepository stores per-tenant plugin switches.
 type PluginTenantSettingRepository interface {
 	List(ctx context.Context, tenantID uint64) ([]types.PluginTenantSetting, error)
-	Upsert(ctx context.Context, setting *types.PluginTenantSetting) error
+	// Get returns (nil, nil) when the tenant never changed the plugin.
+	Get(ctx context.Context, tenantID uint64, pluginID string) (*types.PluginTenantSetting, error)
+	// Upsert inserts the row, or updates only the given columns of an
+	// existing one (every column when none are given).
+	Upsert(ctx context.Context, setting *types.PluginTenantSetting, columns ...string) error
 }
 
 // PluginGate tells integrations which contributions a tenant has enabled.

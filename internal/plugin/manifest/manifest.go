@@ -6,6 +6,7 @@ package manifest
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -116,6 +117,10 @@ type Permissions struct {
 type ConfigSchemas struct {
 	System string `json:"system,omitempty" yaml:"system"`
 	Tenant string `json:"tenant,omitempty" yaml:"tenant"`
+	// SystemSchema and TenantSchema are the schema files' contents as JSON,
+	// filled in when a package is opened.
+	SystemSchema json.RawMessage `json:"systemSchema,omitempty" yaml:"-"`
+	TenantSchema json.RawMessage `json:"tenantSchema,omitempty" yaml:"-"`
 }
 
 // Contributions maps each extension point to what the plugin provides there.
@@ -154,9 +159,10 @@ type MCPServer struct {
 	URL string `json:"url" yaml:"url"`
 	// Transport is "sse" or "http-streamable" (the default).
 	Transport string `json:"transport,omitempty" yaml:"transport"`
-	// Headers are sent on every request. A value may reference tenant
-	// plugin configuration as ${config.<key>}, which is how a plugin asks
-	// each workspace for its own API key.
+	// Headers are sent on every request. A value may reference the
+	// workspace's plugin configuration as ${config.<key>} (how a plugin asks
+	// each workspace for its own API key) or the platform's as
+	// ${system.<key>}. The URL is fixed: configuration cannot redirect it.
 	Headers map[string]string `json:"headers,omitempty" yaml:"headers"`
 }
 
@@ -331,6 +337,12 @@ func validateDeclarative(point Point, c Contribution, builtin bool, where string
 		case "", MCPTransportSSE, MCPTransportHTTPStreamable:
 		default:
 			add("%s.mcp.transport must be sse or http-streamable", where)
+		}
+		if len(TemplateRefs(c.MCP.URL)) > 0 {
+			add("%s.mcp.url cannot reference configuration; only headers can", where)
+		}
+		for name, value := range c.MCP.Headers {
+			validateTemplate(value, fmt.Sprintf("%s.mcp.headers.%s", where, name), add)
 		}
 	}
 }

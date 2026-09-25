@@ -9,12 +9,19 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 )
 
+const tenantSchema = `type: object
+properties:
+  api_key: { type: string, title: API key, x-secret: true }
+required: [api_key]
+`
+
 const kitManifest = `schemaVersion: 1
 id: acme.kit
 version: 1.0.0
 name: { en-US: ACME Kit, zh-CN: ACME 工具包 }
 publisher: { id: acme }
 runtime: { type: declarative }
+config: { tenant: config/tenant.yaml }
 contributes:
   skills:
     - { id: triage, name: Triage, path: skills/triage }
@@ -47,6 +54,7 @@ func zipOf(t *testing.T, files map[string]string) []byte {
 func TestOpenValidPackage(t *testing.T) {
 	data := zipOf(t, map[string]string{
 		"plugin.yaml":             kitManifest,
+		"config/tenant.yaml":      tenantSchema,
 		"skills/triage/SKILL.md":  "---\nname: triage\n---\nTriage issues.",
 		"skills/triage/notes.txt": "x",
 	})
@@ -59,6 +67,9 @@ func TestOpenValidPackage(t *testing.T) {
 	}
 	if got := p.Files("skills/triage"); strings.Join(got, ",") != "skills/triage/SKILL.md,skills/triage/notes.txt" {
 		t.Fatalf("Files = %v", got)
+	}
+	if !strings.Contains(string(p.Manifest.Config.TenantSchema), `"x-secret":true`) {
+		t.Fatalf("tenant schema = %s", p.Manifest.Config.TenantSchema)
 	}
 	mcp := p.Manifest.Contributes[manifest.PointMCPServers][0].MCP
 	if mcp.Headers["Authorization"] != "Bearer ${config.api_key}" {
@@ -73,6 +84,7 @@ func TestOpenValidPackage(t *testing.T) {
 func TestOpenStripsSingleRootDirectory(t *testing.T) {
 	p, err := Open(zipOf(t, map[string]string{
 		"acme-kit-main/plugin.yaml":            kitManifest,
+		"acme-kit-main/config/tenant.yaml":     tenantSchema,
 		"acme-kit-main/skills/triage/SKILL.md": "x",
 	}))
 	if err != nil {
@@ -94,7 +106,7 @@ func TestOpenRejectsBadPackages(t *testing.T) {
 		"zip slip":    {files: map[string]string{"plugin.yaml": kitManifest, "../evil": "x"}, want: "escapes"},
 		"absolute":    {files: map[string]string{"plugin.yaml": kitManifest, "/etc/passwd": "x"}, want: "absolute"},
 		"missing skill": {
-			files: map[string]string{"plugin.yaml": kitManifest},
+			files: map[string]string{"plugin.yaml": kitManifest, "config/tenant.yaml": tenantSchema},
 			want:  "skill skills/triage/SKILL.md is not in the package",
 		},
 		"invalid manifest": {files: map[string]string{"plugin.yaml": "schemaVersion: 1\nid: Bad\n"}, want: "id"},
@@ -102,6 +114,7 @@ func TestOpenRejectsBadPackages(t *testing.T) {
 			files: map[string]string{
 				"plugin.yaml": strings.Replace(kitManifest,
 					"contributes:\n", "contributes:\n  connectors:\n    - { id: jira, name: Jira }\n", 1),
+				"config/tenant.yaml":     tenantSchema,
 				"skills/triage/SKILL.md": "x",
 			},
 			want: "not open to third-party plugins",

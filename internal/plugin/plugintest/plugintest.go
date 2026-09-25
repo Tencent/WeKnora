@@ -202,3 +202,64 @@ func Install(t testing.TB, repo *MemRepo, store *MemStore, data []byte, state st
 		ID: p.Manifest.ID, ActiveVersion: p.Manifest.Version, DesiredState: state, Runtime: "declarative",
 	})
 }
+
+// MemTenantSettings is an in-memory interfaces.PluginTenantSettingRepository.
+type MemTenantSettings struct {
+	mu   sync.Mutex
+	rows map[string]types.PluginTenantSetting
+}
+
+func tenantKey(tenantID uint64, pluginID string) string {
+	return fmt.Sprintf("%d/%s", tenantID, pluginID)
+}
+
+// List returns a tenant's rows.
+func (m *MemTenantSettings) List(_ context.Context, tenantID uint64) ([]types.PluginTenantSetting, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []types.PluginTenantSetting
+	for _, r := range m.rows {
+		if r.TenantID == tenantID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// Get returns (nil, nil) for a row never written.
+func (m *MemTenantSettings) Get(
+	_ context.Context, tenantID uint64, pluginID string,
+) (*types.PluginTenantSetting, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r, ok := m.rows[tenantKey(tenantID, pluginID)]; ok {
+		return &r, nil
+	}
+	return nil, nil
+}
+
+// Upsert inserts a row or updates the given columns.
+func (m *MemTenantSettings) Upsert(_ context.Context, s *types.PluginTenantSetting, columns ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.rows == nil {
+		m.rows = map[string]types.PluginTenantSetting{}
+	}
+	key := tenantKey(s.TenantID, s.PluginID)
+	row, ok := m.rows[key]
+	if !ok || len(columns) == 0 {
+		m.rows[key] = *s
+		return nil
+	}
+	for _, c := range columns {
+		switch c {
+		case "enabled":
+			row.Enabled = s.Enabled
+		case "config":
+			row.Config = s.Config
+		}
+	}
+	row.UpdatedBy, row.UpdatedAt = s.UpdatedBy, s.UpdatedAt
+	m.rows[key] = row
+	return nil
+}

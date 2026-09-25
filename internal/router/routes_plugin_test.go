@@ -25,6 +25,8 @@ func TestPluginInstallationRequiresSystemAdmin(t *testing.T) {
 		{http.MethodDelete, "/api/v1/system/admin/plugins/acme.kit"},
 		{http.MethodPut, "/api/v1/system/admin/plugins/acme.kit/enabled"},
 		{http.MethodPut, "/api/v1/system/admin/plugins/acme.kit/active-version"},
+		{http.MethodGet, "/api/v1/system/admin/plugins/acme.kit/config"},
+		{http.MethodPut, "/api/v1/system/admin/plugins/acme.kit/config"},
 	} {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			w := httptest.NewRecorder()

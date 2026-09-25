@@ -81,7 +81,7 @@ func (s *Service) SetEnabled(
 		Enabled:   enabled,
 		UpdatedBy: updatedBy,
 		UpdatedAt: time.Now(),
-	})
+	}, "enabled")
 }
 
 // enabledByDefault is a plugin's switch in a tenant that never set it:
