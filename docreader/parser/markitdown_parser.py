@@ -15,6 +15,7 @@ from docreader.parser.pptx_media import (
     attach_pptx_media_to_markdown,
     markdown_needs_pptx_media_attach,
 )
+from docreader.parser.xlsx_repair import strip_unreadable_ranges_xlsx
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,12 @@ class StdMarkitdownParser(BaseParser):
             ft = "pptx"
         elif ft == "docx":
             content = fill_vertical_merged_cells_docx(content)
+        elif ft == "xlsx":
+            # MarkItDown reads spreadsheets through pandas/openpyxl, so a range
+            # openpyxl cannot parse fails this engine the same way (#3599).
+            readable = strip_unreadable_ranges_xlsx(content)
+            if readable is not None:
+                content = readable
         if ext and not ext.startswith("."):
             ext = "." + ext
 

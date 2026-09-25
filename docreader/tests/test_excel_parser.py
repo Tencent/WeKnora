@@ -13,6 +13,7 @@ from openpyxl.chart import BarChart, Reference
 
 from docreader.parser.excel_convert import detect_excel_format, engine_for_format
 from docreader.parser.excel_parser import ExcelParser
+from docreader.parser.markitdown_parser import StdMarkitdownParser
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
 from docreader.parser.xlsx_repair import repair_xlsx_bytes, strip_unreadable_ranges_xlsx
 
@@ -197,6 +198,16 @@ class XlsxUnreadableRangesTest(unittest.TestCase):
             broken
         )
         self.assertIn("apple", document.content)
+
+    def test_markitdown_parser_reads_a_workbook_with_a_whole_column_validation(self):
+        broken = _xlsx_with_sheet_fragment(
+            f'<dataValidations count="1">{_validation("C:C")}</dataValidations>'
+        )
+        document = StdMarkitdownParser(
+            file_name="feishu.xlsx", file_type="xlsx"
+        ).parse_into_text(broken)
+        self.assertIn("apple", document.content)
+
 
 class XlsxRepairTest(unittest.TestCase):
     def test_repair_removes_phantom_shared_strings_reference(self):
