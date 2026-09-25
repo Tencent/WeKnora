@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -150,6 +151,10 @@ type WebSearchProviderTypeInfo struct {
 	DocsURL string `json:"docs_url,omitempty"`
 	// Provider-specific non-secret configuration rendered dynamically by the frontend.
 	ConfigFields []WebSearchProviderConfigField `json:"config_fields,omitempty"`
+	// ConfigSchema describes the provider parameters (the fields above plus
+	// the connection flags) as a config schema. Filled by
+	// GetWebSearchProviderTypes.
+	ConfigSchema *configschema.Schema `json:"config_schema,omitempty"`
 }
 
 // WebSearchProviderConfigField describes a non-secret provider-specific form field.
@@ -175,6 +180,14 @@ type WebSearchProviderConfigFieldOption struct {
 
 // GetWebSearchProviderTypes returns metadata for all supported provider types.
 func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
+	infos := webSearchProviderTypes()
+	for i := range infos {
+		infos[i].ConfigSchema = infos[i].BuildConfigSchema()
+	}
+	return infos
+}
+
+func webSearchProviderTypes() []WebSearchProviderTypeInfo {
 	return []WebSearchProviderTypeInfo{
 		{
 			ID: "brave", Name: "Brave Search", RequiresAPIKey: true, SupportsProxy: true,
