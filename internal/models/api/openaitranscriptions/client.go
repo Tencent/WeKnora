@@ -7,7 +7,7 @@
 // model: gpt-4o-transcribe and gpt-4o-mini-transcribe accept only json,
 // whisper-1 also serves verbose_json, SiliconFlow documents no such field at
 // all. json is the default everywhere it is documented, so nothing is sent
-// unless catalog.TranscriptionsSettings names a format.
+// unless api.TranscriptionsSettings names a format.
 //
 // https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create
 package openaitranscriptions
@@ -18,13 +18,12 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
-// Config is everything the client needs, already resolved by the catalog.
+// Config is everything the client needs, already resolved by the api.
 type Config struct {
 	Endpoint api.Endpoint
-	Settings catalog.TranscriptionsSettings
+	Settings api.TranscriptionsSettings
 	Retry    api.RetryPolicy
 }
 
@@ -54,7 +53,7 @@ func (c *Client) FormFields(language string) []api.FormField {
 	if format := c.cfg.Settings.ResponseFormat; format != "" {
 		fields = append(fields, api.FormField{Name: "response_format", Value: format})
 	}
-	if language != "" && c.cfg.Settings.LanguageParam == catalog.LanguageForm {
+	if language != "" && c.cfg.Settings.LanguageParam == api.LanguageForm {
 		fields = append(fields, api.FormField{Name: "language", Value: language})
 	}
 	return fields
@@ -94,7 +93,7 @@ func (c *Client) Transcribe(ctx context.Context, req api.TranscriptionRequest) (
 		return nil, err
 	}
 	endpoint := c.cfg.Endpoint
-	if req.Language != "" && c.cfg.Settings.LanguageParam == catalog.LanguageHeader {
+	if req.Language != "" && c.cfg.Settings.LanguageParam == api.LanguageHeader {
 		headers := make(map[string]string, len(endpoint.Headers)+1)
 		for k, v := range endpoint.Headers {
 			headers[k] = v

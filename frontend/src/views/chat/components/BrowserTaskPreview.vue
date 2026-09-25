@@ -56,13 +56,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { get, post } from '@/utils/request'
-import { useUIStore } from '@/stores/ui'
+import { useRouter } from 'vue-router'
+import { toolboxLocation } from '@/config/toolbox'
 import { browserActionLabel, browserPageAddress } from '@/utils/browserToolDisplay'
 import BrowserIcon from '@/components/icons/BrowserIcon.vue'
 import { useFloatingPreviewDrag } from '@/composables/useFloatingPreviewDrag'
 import { useDocumentPictureInPicture } from '@/composables/useDocumentPictureInPicture'
 const props = defineProps<{ sessionId: string }>()
-const { t } = useI18n(), uiStore = useUIStore()
+const { t } = useI18n(), router = useRouter()
 const status = ref({ enabled: false, selected: false, connected: false, paused: false, idle: false, needs_help: false, help_prompt: '', task_id: '', action: '', action_elapsed_ms: 0, page_url: '', last_error: '', stopping: false })
 const busy = ref(false), error = ref(''), preview = ref(''), previewStale = ref(false)
 const pageAddress = computed(() => browserPageAddress(status.value.page_url))
@@ -98,7 +99,7 @@ async function togglePictureInPicture() {
 function openBrowserSettings() {
   closePiP()
   window.focus()
-  uiStore.openSettings('browserconnection')
+  void router.push(toolboxLocation('browserconnection'))
 }
 
 let lastFrame = 0

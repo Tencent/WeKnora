@@ -28,7 +28,7 @@ try {
   const popup = await browser.newPage();
   await popup.goto(new URL('popup.html', worker.url()).href);
   await popup.locator('details summary').click();
-  // Official 0.3.0 unifies local/remote connection settings.
+  // The extension popup unifies local/remote connection settings.
   await popup.locator('[role="group"] button').nth(1).click();
   await popup.locator('#remote-pairing').fill(pairing);
   await popup.locator('form button[type="submit"]').click();

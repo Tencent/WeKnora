@@ -88,7 +88,7 @@ function selectOption(value: ResourceSortValue) {
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
@@ -168,7 +168,7 @@ function selectOption(value: ResourceSortValue) {
   height: 32px;
   padding: 0 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);

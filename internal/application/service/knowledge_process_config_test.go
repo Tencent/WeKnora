@@ -59,6 +59,31 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 	require.True(t, effOn.ChunkingConfig.EnableParentChild)
 }
 
+// The attribute-observed pipeline switch follows the knowledge base until a
+// single upload overrides it, either way. The default is off: a knowledge base
+// that never heard of attribute observation keeps describing and OCR-ing every
+// image exactly as it did before the pipeline existed.
+func TestResolveProcessConfig_ImageAttrsOverride(t *testing.T) {
+	t.Parallel()
+
+	kbOff := &types.KnowledgeBase{}
+	kbOn := &types.KnowledgeBase{}
+	kbOn.ImageProcessingConfig.ImageAttrsEnabled = true
+
+	require.False(t, ResolveProcessConfig(kbOff, nil).ImageAttrsEnabled,
+		"attribute observation must be off for a knowledge base that never enabled it")
+	require.True(t, ResolveProcessConfig(kbOn, nil).ImageAttrsEnabled,
+		"the knowledge base's switch must survive a nil override")
+
+	require.True(t, ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
+		ImageAttrsEnabled: processConfigBoolPtr(true),
+	}).ImageAttrsEnabled, "a single upload must be able to turn attribute observation on")
+
+	require.False(t, ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
+		ImageAttrsEnabled: processConfigBoolPtr(false),
+	}).ImageAttrsEnabled, "a single upload must be able to turn attribute observation off")
+}
+
 func TestResolveProcessConfig_GraphDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -524,6 +549,58 @@ func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
 	require.Equal(t, 512/5, child.ChunkOverlap)
 	require.Equal(t, base.Separators, parent.Separators)
 	require.Equal(t, base.Separators, child.Separators)
+}
+
+// A knowledge base can override the OCR action wholesale, and a single upload
+// can override it again on top of what the knowledge base already decided. The
+// built-in action table is complete, so a knowledge base that only flips one
+// condition stays a small configuration.
+func TestResolveProcessConfig_ImageActionsOverride(t *testing.T) {
+	t.Parallel()
+
+	kbActions := &types.ImageActionsConfig{
+		OCR: types.ImageOCRAction{
+			On: []types.ImageAttrCondition{
+				{Prop: "contain.text", Is: "block"},
+				{Prop: "contain.data_visual", Is: "true"},
+			},
+			OnUnobserved: false,
+		},
+	}
+	kb := &types.KnowledgeBase{
+		ImageProcessingConfig: types.ImageProcessingConfig{
+			ImageAttrsEnabled: true,
+			ImageActions:      kbActions,
+		},
+	}
+
+	// nil override: the knowledge base's custom action wins.
+	eff := ResolveProcessConfig(kb, nil)
+	require.True(t, eff.ImageAttrsEnabled)
+	require.False(t, eff.ImageActions.OCR.OnUnobserved,
+		"the knowledge base's action must override the built-in default")
+
+	// An upload override rewrites the OCR action wholesale: the knowledge
+	// base's OnUnobserved=false is replaced by the upload's true.
+	eff = ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ImageActions: &types.ImageActionsConfig{
+			OCR: types.ImageOCRAction{
+				On:           []types.ImageAttrCondition{{Prop: "contain.text", Is: "block"}},
+				OnUnobserved: true,
+			},
+		},
+	})
+	require.True(t, eff.ImageActions.OCR.OnUnobserved,
+		"an upload action override must replace the whole OCR action, not merge")
+	require.Len(t, eff.ImageActions.OCR.On, 1,
+		"the upload's OCR.On replaces the knowledge base's list")
+
+	// With neither a KB config nor an override, the resolved action is the
+	// complete built-in default.
+	eff = ResolveProcessConfig(&types.KnowledgeBase{}, nil)
+	require.Equal(t, types.DefaultImageActions(), eff.ImageActions,
+		"the resolved action table must stay complete with no input")
+	require.False(t, eff.ImageAttrsEnabled)
 }
 
 func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {

@@ -84,9 +84,12 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAu
 		return nil, fmt.Errorf("HTTP %d %s", resp.StatusCode, resp.Status)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read body failed: %w", err)
+	}
+	if int64(len(body)) > maxSize {
+		return nil, fmt.Errorf("response exceeds maximum size (%d bytes)", maxSize)
 	}
 	return body, nil
 }

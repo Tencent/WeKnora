@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -315,6 +316,18 @@ func (e *AgentEngine) executeToolCallsParallel(
 		}
 		readCtx := gCtx
 		g.Go(func() error {
+			// The registry recovers panics inside tool execution; this guards
+			// the bookkeeping around it, which would otherwise crash the
+			// process from a goroutine nothing above can recover.
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf(ctx, "[Agent][Round-%d] Tool call %s panicked: %v\n%s",
+						round, tc.Function.Name, r, debug.Stack())
+					mu.Lock()
+					results[i] = panickedToolCall(tc, i)
+					mu.Unlock()
+				}
+			}()
 			toolCall := e.runToolCall(readCtx, tc, i, iteration, round, sessionID, assistantMessageID)
 			mu.Lock()
 			results[i] = toolCall
@@ -329,6 +342,21 @@ func (e *AgentEngine) executeToolCallsParallel(
 	for _, toolCall := range results {
 		step.ToolCalls = append(step.ToolCalls, toolCall)
 		e.emitToolOutcome(ctx, toolCall, iteration, sessionID)
+	}
+}
+
+// panickedToolCall is the failed record for a call whose handling panicked, so
+// the round still returns one result per tool call the model issued.
+func panickedToolCall(tc types.LLMToolCall, i int) types.ToolCall {
+	return types.ToolCall{
+		ID:               agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i),
+		Name:             tc.Function.Name,
+		Args:             map[string]any{"_raw": tc.Function.Arguments},
+		ProviderMetadata: tc.ProviderMetadata,
+		Result: &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("tool %s failed with an internal error", tc.Function.Name),
+		},
 	}
 }
 

@@ -35,12 +35,13 @@ test('human handoff expands, stays reachable on narrow screens, focuses the brow
         if (id === '\0/fixture-entry.js') return `
           import {createApp} from 'vue'; import {createPinia} from 'pinia';
           import {createI18n} from 'vue-i18n'; import TDesign from 'tdesign-vue-next';
+          import {createRouter, createMemoryHistory} from 'vue-router';
           import 'tdesign-vue-next/es/style/index.css';
           import Preview from '/src/views/chat/components/BrowserTaskPreview.vue';
           import zh from '/src/i18n/locales/zh-CN.ts';
           window.fixtureActions=[];
           window.fixtureStatus={enabled:true,selected:true,connected:true,task_id:'fixture',needs_help:false};
-          createApp(Preview,{sessionId:'fixture'}).use(createPinia()).use(TDesign).use(createI18n({legacy:false,locale:'zh-CN',messages:{'zh-CN':zh}})).mount('#app');`
+          createApp(Preview,{sessionId:'fixture'}).use(createPinia()).use(createRouter({history:createMemoryHistory(),routes:[{path:'/:p(.*)*',component:{render:()=>null}}]})).use(TDesign).use(createI18n({legacy:false,locale:'zh-CN',messages:{'zh-CN':zh}})).mount('#app');`
       },
     }], resolve: {alias: {'@': root+'/src'}}, server: {host:'127.0.0.1',port:0},
   })

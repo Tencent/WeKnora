@@ -21,6 +21,11 @@ docker compose logs --tail=200 postgres redis
 | 升级后提示权限不足 | 核对当前空间角色、资源归属与 API Key 能力范围；见[认证与授权](../03-features/01-tenant-auth.md)。平台管理员与空间 Owner 不是同一个概念 |
 | Agent 提示模型未就绪 | 确认该智能体引用的模型仍存在且配置完整，执行模型连通性测试；见[模型管理](../03-features/06-models.md) |
 | 私网数据源、模型或向量库连接被拒绝 | 检查 SSRF 校验和端口策略；按[配置参考](04-configuration.md)仅放行需要的目标 |
+| 报错提示「仅允许白名单出站」 | 部署开启了 `SSRF_DNS_WHITELIST_ONLY`，不在白名单的主机在 DNS 解析前即被拒绝。把目标主机加入 `SSRF_WHITELIST` 或 `SSRF_WHITELIST_EXTRA` 后重建 app / docreader 容器，见[配置详解](04-configuration.md) |
+| 登录接口返回 HTML 404 | 检查 `SEARXNG_PORT` 是否与 `APP_PORT`（默认 8080）相同。Linux 上 SearXNG 绑定 `127.0.0.1:8080` 后，`localhost:8080` 的请求会先到 SearXNG。保持 SearXNG 使用 8888 或其他空闲端口 |
+| 拉取 MinIO 镜像提示 `pull access denied` | MinIO 已不再向 Docker Hub 发布镜像。当前 Compose 与 Helm 使用 `quay.io/minio/minio`；自定义编排文件需同步修改镜像地址 |
+| 升级后嵌入页面或签名链接失效（嵌入页提示 `embed session signing key is not configured`，启动日志有 `[startup-env] no usable signing key`） | 签名密钥取 `SYSTEM_SIGNING_KEY`，未设置时回退到 `SYSTEM_AES_KEY`；示例密钥和长度不足 16 的密钥不能签名。用 `openssl rand -hex 32` 生成并配置 `SYSTEM_SIGNING_KEY` 即可，**不要为此修改 `SYSTEM_AES_KEY`**，否则已保存的凭据无法解密。v0.8.2 更换了嵌入会话的签名算法，升级前签发的嵌入会话全部失效，访客需重新进入；多副本部署须使用同一个密钥 |
+| 升级后钉钉机器人不再回复 | v0.8.2 起钉钉只支持 Stream 模式，升级迁移会把 `webhook` 渠道改为 `websocket`。需在钉钉开发者后台为该应用开启 Stream 模式，见[IM 集成](../03-features/12-im-integration.md) |
 | 后台队列持续积压 | 结合最老任务等待时间、活跃 worker 和下游配额定位；提高 worker 数不会增加模型供应商配额，见[容量估算](../02-architecture/05-async-tasks.md#capacity-planning) |
 | 技能已加入目录却不可执行 | 目录收录和沙箱安装是两步；检查安装记录、智能体的沙箱选择与技能范围，见[技能目录与沙箱](../03-features/22-skills-sandbox.md) |
 | 升级后找不到 Local 沙箱 | `local` 后端已移除，重新配置 Docker、CubeSandbox 或 E2B；见[沙箱部署与排障](../06-development/04-sandbox-deployment.md) |
@@ -75,6 +80,16 @@ make migrate-up
 ```
 
 这里的 98 是示例，必须换成实际确认的版本，不能机械地把报错数字减一。初始迁移失败还需单独检查初始化状态。恢复后重启 app，确认系统信息不再显示错误，并验证受影响的功能。
+
+### 并发建索引中断
+
+迁移 `000106` 用 `CREATE INDEX CONCURRENTLY` 为 `messages` 建索引，构建期间不阻塞写入。若构建被中断（进程重启、超时、磁盘不足），会留下一个 INVALID 的 `idx_messages_session_created_id`，`IF NOT EXISTS` 不会重建它。先确认并删除该索引，再按上文恢复迁移状态后重跑：
+
+```sql
+SELECT indexrelid::regclass, indisvalid FROM pg_index
+WHERE indexrelid = 'idx_messages_session_created_id'::regclass;
+DROP INDEX CONCURRENTLY IF EXISTS idx_messages_session_created_id;
+```
 
 ### 磁盘不足与 Schema 差异
 

@@ -15,7 +15,10 @@ from docreader.parser.pptx_media import (
     attach_pptx_media_to_markdown,
     markdown_needs_pptx_media_attach,
 )
-from docreader.parser.xlsx_repair import strip_unreadable_ranges_xlsx
+from docreader.parser.xlsx_repair import (
+    sanitize_xlsx_styles,
+    strip_unreadable_ranges_xlsx,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +50,19 @@ class StdMarkitdownParser(BaseParser):
             ft = "pptx"
         elif ft == "docx":
             content = fill_vertical_merged_cells_docx(content)
-        elif ft == "xlsx":
-            # MarkItDown reads spreadsheets through pandas/openpyxl, so a range
-            # openpyxl cannot parse fails this engine the same way (#3599).
+        elif ft in ("xlsx", "xlsm"):
+            # MarkItDown reads spreadsheets through pandas/openpyxl, so the
+            # ranges openpyxl cannot parse (#3599) and the non-conforming
+            # styles.xml fills (#3637) that break the builtin ExcelParser break
+            # this engine too. Strip the ranges first: the fill repair alone
+            # would still leave the range TypeError. Both passes return None
+            # for clean workbooks.
             readable = strip_unreadable_ranges_xlsx(content)
             if readable is not None:
                 content = readable
+            sanitized = sanitize_xlsx_styles(content)
+            if sanitized is not None:
+                content = sanitized
         if ext and not ext.startswith("."):
             ext = "." + ext
 

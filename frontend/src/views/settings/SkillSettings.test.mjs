@@ -7,7 +7,7 @@ const source = readFileSync(new URL('./SkillSettings.vue', import.meta.url), 'ut
 test('skill settings lists the catalog instead of switching sandboxes', () => {
   assert.match(source, /listSkillCatalog/)
   assert.match(source, /settings\.skills\.addSkill/)
-  assert.match(source, /settings\.skills\.emptyDesc/)
+  assert.match(source, /skillText\('emptyDesc'\)/)
   assert.doesNotMatch(source, /sandbox-switcher/)
   assert.doesNotMatch(source, /noConfigsDesc/)
 })
@@ -32,7 +32,7 @@ test('catalog cards can install onto sandboxes and manage one install', () => {
   assert.match(source, /skill-card__chip/)
   assert.match(source, /skill-install-panel/)
   assert.match(source, /skill-card__installs/)
-  assert.match(source, /settings\.skills\.installedOnName/)
+  assert.match(source, /skillText\('installedOnName'/)
   assert.match(source, /settings\.skills\.installedCount/)
   assert.match(source, /skill-card__icon-btn/)
   assert.match(source, /FolderIcon/)

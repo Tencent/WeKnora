@@ -15,6 +15,7 @@ import (
 type stubKnowledgeBaseService struct {
 	kb      *types.KnowledgeBase
 	results []*types.SearchResult
+	err     error
 }
 
 func (s *stubKnowledgeBaseService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
@@ -64,7 +65,14 @@ func (s *stubKnowledgeBaseService) TogglePinKnowledgeBase(context.Context, strin
 }
 
 func (s *stubKnowledgeBaseService) HybridSearch(context.Context, string, types.SearchParams) ([]*types.SearchResult, error) {
-	return s.results, nil
+	return s.results, s.err
+}
+
+func (s *stubKnowledgeBaseService) HybridSearchWithRerank(
+	ctx context.Context, id string, params types.SearchParams,
+) (*types.RetrievalResult, error) {
+	results, err := s.HybridSearch(ctx, id, params)
+	return &types.RetrievalResult{Results: results}, err
 }
 
 func (s *stubKnowledgeBaseService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
@@ -171,7 +179,7 @@ func TestQueryKnowledgeGraph_ReportsConfiguredEntityAndRelationTypes(t *testing.
 	assert.Contains(t, result.Output, "审批流程")
 	assert.Contains(t, result.Output, "管理")
 	assert.Contains(t, result.Output, "审批")
-	assert.Contains(t, result.Output, "✓ Found 3 relevant results (deduplicated)")
+	assert.Contains(t, result.Output, "✓ Found 0 relations and 3 relevant chunks (deduplicated)")
 	assert.Contains(t, result.Output, "Result #1:")
 	assert.Contains(t, result.Output, "Result #2:")
 	assert.Contains(t, result.Output, "Result #3:")

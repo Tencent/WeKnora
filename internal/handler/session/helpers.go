@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -487,6 +488,14 @@ func searchResultFromMap(refMap map[string]interface{}) *types.SearchResult {
 			}
 		}
 		sr.Metadata = metadata
+	}
+	if raw, ok := refMap["source_locators"]; ok && raw != nil {
+		if b, err := json.Marshal(raw); err == nil {
+			var locators types.SourceLocators
+			if json.Unmarshal(b, &locators) == nil {
+				sr.SourceLocators = locators
+			}
+		}
 	}
 	return sr
 }

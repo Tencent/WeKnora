@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
@@ -86,11 +88,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/Tencent/WeKnora/internal/models/limiter" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	_ "github.com/Tencent/WeKnora/internal/models/vendors" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -115,9 +115,8 @@ import (
 //   - Configured container with all application dependencies registered
 func BuildContainer(container *dig.Container) *dig.Container {
 	// Deployment-level model catalog overlay (config/models.json, optional).
-	// Built-in vendors register themselves through the vendors package
-	// import; the overlay may add vendors or patch built-in ones.
-	if err := catalog.LoadOverlay(config.ConfigDir()); err != nil {
+	// Register providers explicitly, then validate and publish one catalog generation.
+	if err := modelruntime.Initialize(config.ConfigDir()); err != nil {
 		logger.Warnf(context.Background(), "Load models catalog overlay failed: %v", err)
 	}
 	ctx := context.Background()
@@ -174,6 +173,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewUserRepository))
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
+	must(container.Provide(repository.NewModelCatalogRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
@@ -199,6 +199,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
 	must(container.Provide(mcp.NewMCPManager))
+	must(container.Invoke(registerMCPCleanup))
 	must(container.Provide(mcp.NewOAuthManager))
 
 	// Sandbox manager fallback is disabled; executable backends are resolved
@@ -247,6 +248,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
+	must(container.Provide(service.NewModelCatalogService))
 	must(container.Provide(func(
 		repo repository.TenantSandboxConfigRepository,
 		agents interfaces.CustomAgentRepository,
@@ -364,7 +366,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		pinner *service.SessionSandboxPinner,
 		host service.HostSandboxManager,
 	) *service.HostSessionResolver {
-		return service.NewHostSessionResolver(pinner, host.Manager)
+		return service.NewHostSessionResolver(pinner, host.Manager, host.Desktop)
 	}))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
@@ -914,7 +916,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Post-migration: declarative built-in models from config/builtin_models.yaml (optional).
 		// The loader validates each row's catalog parameters through this hook;
 		// the wiring lives here because internal/types cannot import the catalog.
-		types.ValidateModelParameters = catalog.ValidateRow
+		types.ValidateModelParameters = modelruntime.ValidateRow
 		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.ConfigDir()); err != nil {
 			logger.Warnf(context.Background(), "Load builtin models config failed: %v", err)
 		}
@@ -1680,6 +1682,15 @@ func registerLangfuseCleanup(mgr *langfuse.Manager, cleaner interfaces.ResourceC
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return mgr.Shutdown(ctx)
+	})
+}
+
+// registerMCPCleanup closes MCP connections on shutdown, so remote servers see
+// their sessions end instead of waiting for them to time out.
+func registerMCPCleanup(mgr *mcp.MCPManager, cleaner interfaces.ResourceCleaner) {
+	cleaner.RegisterWithName("MCPManager", func() error {
+		mgr.Shutdown()
+		return nil
 	})
 }
 

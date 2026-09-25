@@ -67,6 +67,9 @@ type CreateKnowledgeQARequest struct {
 	SuggestionAttribution *types.SuggestionAttribution `json:"suggestion_attribution,omitempty"`
 	// QuestionOrigin is the knowledge source of a picked suggested question.
 	QuestionOrigin *types.QuestionOrigin `json:"question_origin,omitempty"`
+
+	// ReasoningEffort overrides thinking for this request; empty inherits the agent configuration.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // AttachmentUpload represents a file attachment upload from the client
@@ -84,6 +87,14 @@ type SearchKnowledgeRequest struct {
 	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
 	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
+
+	// Optional overrides of the tenant retrieval config. Omitted fields keep it.
+	VectorThreshold      *float64             `json:"vector_threshold,omitempty"`       // Minimum vector similarity
+	KeywordThreshold     *float64             `json:"keyword_threshold,omitempty"`      // Minimum keyword score
+	MatchCount           int                  `json:"match_count,omitempty"`            // Number of results to return
+	DisableKeywordsMatch bool                 `json:"disable_keywords_match,omitempty"` // Vector recall only
+	DisableVectorMatch   bool                 `json:"disable_vector_match,omitempty"`   // Keyword recall only
+	Rerank               *types.RerankOptions `json:"rerank,omitempty"`                 // Rerank override
 }
 
 // StopSessionRequest represents the stop session request

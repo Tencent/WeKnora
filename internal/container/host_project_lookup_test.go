@@ -83,3 +83,19 @@ func TestProjectLookupReturnsFalseForUnknownSession(t *testing.T) {
 	require.False(t, ok)
 	require.Empty(t, dir)
 }
+
+func TestProjectLookupPropagatesDatabaseErrors(t *testing.T) {
+	db := hostProjectLookupTestDB(t)
+	projectDir := t.TempDir()
+	insertHostSession(t, db, "sess-1", projectDir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	lookup := newHostProjectLookup(db, func() []string {
+		return []string{projectDir}
+	})
+	dir, ok, err := lookup.ProjectDirForSession(ctx, "sess-1")
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, ok)
+	require.Empty(t, dir)
+}

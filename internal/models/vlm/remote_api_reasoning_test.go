@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 )
 
 // newVLMChatTestServer emulates an OpenAI-compatible chat completions endpoint

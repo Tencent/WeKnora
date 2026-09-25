@@ -2,12 +2,12 @@
 
 MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 MCP 服务，也提供独立 MCP Server 供其他客户端调用：
 
-1. **WeKnora 作为 MCP 客户端**：在「MCP 服务」设置中接入任意外部 MCP server（SSE / Streamable HTTP），其工具通过目录按需加载到 Agent 的工具箱，供 Agent 在对话中调用。支持 API Key / Bearer / OAuth 2.0（含动态客户端注册与 PKCE）三种认证策略、按工具粒度的人工审批，以及会话内（in-conversation）OAuth 授权。
-2. **WeKnora 作为 MCP Server**：在「发布与集成 → MCP Server」中为当前空间创建一个或多个 MCP 端点，每个端点有独立的令牌、知识库范围和工具清单，Claude Desktop、Cursor、Claude Code、VS Code Copilot 等 MCP 客户端通过 Streamable HTTP 直接连接，无需额外部署进程。仓库 `mcp-server/` 目录下的 Python 服务是旧方案，已标记弃用。
+1. **WeKnora 作为 MCP 客户端**：在「工具箱 → MCP服务」中接入任意外部 MCP server（SSE / Streamable HTTP），其工具通过目录按需加载，供 Agent 在对话中调用。支持 API Key / Bearer / OAuth 2.0（含动态客户端注册与 PKCE）三种认证策略、按工具粒度的启停与人工审批，以及会话内（in-conversation）OAuth 授权。
+2. **WeKnora 作为 MCP Server**：在「设置 → 发布集成 → MCP Server」中为当前空间创建一个或多个 MCP 端点，每个端点有独立的令牌、知识库范围和工具清单，Claude Desktop、Cursor、Claude Code、VS Code Copilot 等 MCP 客户端通过 Streamable HTTP 直接连接，无需额外部署进程。仓库 `mcp-server/` 目录下的 Python 服务是旧方案，已标记弃用。
 
 接入外部服务可扩展 WeKnora 智能体的工具；运行 WeKnora MCP Server 可让外部客户端使用知识库检索、问答和管理能力。
 
-在「设置 → MCP 服务」新建服务，选择传输和认证方式，测试连接后在智能体中选择所需工具。需要控制写入或外发操作时，可为相应工具开启人工审批，调用前会显示确认卡片。
+空间 Admin 在侧边栏「工具箱 → MCP服务」新建服务（旧的「设置 → MCP 服务」链接会自动跳转到这里），填好连接后同步工具并写使用说明，再在智能体中选择所需服务。需要控制写入或外发操作时，可为相应工具开启人工审批，调用前会显示确认卡片。
 
 <Screenshot
   src="/screenshots/mcp-services.png"
@@ -20,15 +20,23 @@ MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 M
 
 ## 接入外部工具
 
-在 MCP 服务设置中添加服务地址，选择 SSE 或 Streamable HTTP 传输，并配置认证。测试连接后查看发现的工具，在智能体配置中选择需要的服务或工具。
+新建服务分两步：
 
-OAuth 服务按调用者分别授权。工具需要审批时，在对话中检查参数并确认；单独停用某个工具后，运行时不会执行该工具。WeKnora 的 MCP 客户端不支持 stdio 传输。
+1. **连接配置**：填写名称和服务 URL，选择 SSE 或 Streamable HTTP 传输，并配置认证（无 / 自定义 Header、API Key / Token、OAuth 2.0）和超时、重试。也可以用「从代码导入」粘贴标准 `mcpServers` JSON 自动填表；只含 `command` / `args` 的 stdio 配置不支持。保存后可测试连接；OAuth 服务点「去授权」时会先自动保存，再按当前用户发起授权。
+2. **工具与用途说明**：连接并拉取 Tools，系统会保存完整的工具描述和参数定义；再填写「使用说明」，说明服务用途、适用场景和关键约束。已同步工具后可点「AI 生成」，根据已启用的工具生成一段精简说明，检查后保存。工具列表中可逐个设置「启用工具」和「调用需审批」，修改即时生效，刷新目录不会覆盖这些设置。
+
+模型先读取服务的使用说明，再按需加载具体工具，所以使用说明直接影响 Agent 能否选对服务。OAuth 服务按调用者分别授权。工具需要审批时，在对话中检查参数并确认；单独停用某个工具后，运行时不会执行该工具。WeKnora 的 MCP 客户端不支持 stdio 传输。
 
 ## 供外部客户端调用
 
-在「设置 → 发布与集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，需要问答时再指定默认 Agent。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面同时给出 Cursor / VS Code / Claude Desktop 的 `mcpServers` 配置、Claude Code 的一行命令，以及仅支持 stdio 的客户端通过 `mcp-remote` 桥接的写法。
+在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面同时给出 Cursor / VS Code / Claude Desktop 的 `mcpServers` 配置、Claude Code 的一行命令，以及仅支持 stdio 的客户端通过 `mcp-remote` 桥接的写法。
 
 使用自定义反向代理时，除 `/api/` 外，还需将 `/mcp/` 原路径转发到 WeKnora 后端，保留 `Authorization` 和 MCP 协议头，并关闭响应缓冲、为长连接设置足够的读写超时。仓库自带的 Nginx、Vite 开发及预览配置已包含该代理，可直接使用网站域名连接，无需另行暴露后端 8080 端口。
+
+<Screenshot
+  src="/screenshots/mcp-server-endpoint.png"
+  caption="发布集成 → MCP Server：端点创建完成后的地址、令牌与客户端配置"
+  hint="新建端点后的结果页：一次性令牌与 /mcp/<endpoint_id> 地址、Cursor / Claude Desktop 的 mcpServers 配置与 Claude Code 命令；背景可见端点的知识库范围与四组工具勾选。" />
 
 一个空间可以创建多个端点。例如给客服团队一个只开检索和问答、只看两个知识库的端点，给内容团队另一个开了写入工具的端点。令牌可随时轮换，端点可随时停用，删除端点后使用它的客户端立即断开。
 
@@ -37,9 +45,15 @@ OAuth 服务按调用者分别授权。工具需要审批时，在对话中检�
 | 组 | 工具 | 说明 |
 |---|---|---|
 | 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；`search_knowledge` 用 `mode`（hybrid / semantic / keyword）选择检索方式并可设 `limit`（默认 10，上限 30）；`grep_chunks` 保持大小写不敏感的正则语义：从模式里提取字面词作为关键词索引的检索词（没有关键词索引的库改用语义索引取候选），再逐条用正则校验，返回的分块都匹配该模式；不含任何字面词的模式（如 `^\d+$`）会被拒绝；`read_document` 按 `offset` / `limit` 翻页，或用 `query` 在文档内查找短语 |
-| 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
+| 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent；未配置时使用内置快速问答），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
 | Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 的 `query` 保持原有的正则语义（大小写不敏感），不是合法正则的文本按字面匹配；`regex=false` 强制字面匹配，`regex=true` 要求合法正则 |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
+
+现有 MCP 工具的返回结果会复用 REST/IM 的资源链接转换：正文、Wiki 内容以及结构化数据中的图片引用，都会在权限校验后转换为可直接访问的 HTTP(S) 链接，不需要新增工具或修改端点工具清单。`ask` 的 `references[].images` 保留图片 URL、caption 和 OCR 文本，文本引用列表也包含图片链接，避免正文摘要截断后丢失图片信息。
+
+本地或私有存储请配置外部客户端可访问的 `APP_EXTERNAL_URL`，并确保反向代理转发 `/r/`。`resource://` 图片沿用有时效的 `/r/<token>` 链接；其他存储地址使用对应存储服务生成的 HTTP(S) URL。一次工具调用中同一资源只转换一次，返回链接不写回文档或会话记录。无法生成可访问链接时保留原引用，不中断文本结果。
+
+生成链接前会重新检查端点知识库范围、共享权限、资源所属空间和有效文档绑定，沿用知识库图片预览的权限规则；未限定知识库的端点按调用者可查看的知识库判断，因此 `ask` 通过智能体检索到的共享知识库图片同样可以转换；原始上传文件不会因为出现在结果文本中就获得下载链接。已有绑定的历史存储路径可以转换。对于缺少图片绑定的历史文档，需要由有权限的管理员重新解析文档，完成后重新检索；不能仅凭可编辑的正文或 `image_info` 自动补授文件权限。
 
 > **`grep_chunks` 的召回有上限。** 它基于索引取候选，每次最多 30 条，再用正则筛选，所以返回的每条都匹配模式，但不保证穷尽：库里存在的匹配也可能没进候选池。容易漏的情况有三类：`foo.*bar` 这类组合模式，候选按 foo、bar 的相关度排序，真正相邻出现的分块可能排不进前 30；`C++` 这类几乎只剩符号的模式，抽出的字面词只有 `C`，在索引里几乎没有区分度；没有关键词索引的库改用语义索引取候选，字面匹配更依赖运气。旧实现对 chunks 表做全表正则扫描，能保证"有就能找到"，但数据量大时代价过高，已经移除。需要在某篇文档里穷尽查找时，用 `read_document` 的 `query`，它会顺序扫完整篇文档。
 
@@ -141,7 +155,7 @@ type MCPService struct {
 
 > 注意：类型系统中仍保留 `MCPTransportStdio` 及 `StdioConfig`（`command` + `args`）字段，`mcp_tool.go` 中也有 stdio 的连接释放分支，但运行时创建 stdio 客户端的入口全部被拦截，实际可用的只有 SSE 与 Streamable HTTP。
 
-高级配置 `MCPAdvancedConfig`（默认值来自 `types.GetDefaultAdvancedConfig()`）：`timeout` 30 秒、`retry_count` 3、`retry_delay` 1 秒。`timeout` 同时作用于 HTTP client 超时和 initialize 握手超时（`manager.go` 中 initialize 超时上限 60 秒）。
+高级配置 `MCPAdvancedConfig`（默认值来自 `types.GetDefaultAdvancedConfig()`）：`timeout` 30 秒、`retry_count` 3、`retry_delay` 1 秒。`timeout` 同时作用于 HTTP client 超时和 initialize 握手超时（`manager.go` 中 initialize 超时上限 60 秒）。Agent 单次工具调用默认有 60 秒窗口；服务的 `timeout` 大于 60 秒时会相应延长该服务的 CallTool 窗口，小于 60 秒则不缩短（`internal/agent/tools/mcp_tool.go` 的 `callToolTimeout`）。
 
 #### 认证策略 {#_1-3-认证策略}
 
@@ -388,9 +402,9 @@ flowchart LR
 
 #### 数据模型与管理 API
 
-`mcp_endpoints` 表（PostgreSQL 迁移 `000102_mcp_endpoints`，SQLite `000022_mcp_endpoints`）每行一个端点：`tenant_id`、`name`、`enabled`、`token_hash`（SHA-256）、`token_hint`（前缀展示用）、`knowledge_base_ids`（空数组表示空间内全部）、`tools`（白名单）、`default_agent_id`、`rate_limit_per_minute`、`last_used_at`。类型定义在 `internal/types/mcp_endpoint.go`，工具目录在 `internal/types/mcp_endpoint_tools.go`。
+`mcp_endpoints` 表（PostgreSQL 迁移 `000102_mcp_endpoints`，SQLite `000022_mcp_endpoints`）每行一个端点：`tenant_id`、`name`、`description`、`enabled`、`token_hash`（SHA-256）、`token_hint`（前缀展示用）、`knowledge_base_ids`（空数组表示空间内全部）、`tools`（白名单）、`default_agent_id`（空为内置快速问答）、`rate_limit_per_minute`（默认 60，上限 6000）、`last_used_at`。类型定义在 `internal/types/mcp_endpoint.go`，工具目录在 `internal/types/mcp_endpoint_tools.go`。
 
-管理接口挂在 `/api/v1/mcp-endpoints`，读取需 Viewer，变更需 Admin，API Key 需要 `manage_channels` 能力：
+管理接口挂在 `/api/v1/mcp-endpoints`，读取需 Viewer，变更需 Admin，API Key 需要 `manage_channels` 能力（字段与示例见[MCP API](../04-api/02-api-agent-mcp.md#mcp-server-端点)）：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -571,11 +585,11 @@ SSE 与 HTTP 传输由 `MCPAuthMiddleware`（ASGI 中间件）统一鉴权：客
 
 | 工具名 | 参数 | 说明 |
 |---|---|---|
-| `create_knowledge_from_file` | `kb_id`\*, `file_path`\*, `enable_multimodel`(true) | 从服务器本地文件导入知识；路径经 `upload_paths.resolve_upload_file_path` 校验（见 2.6） |
+| `create_knowledge_from_file` | `kb_id`\*, `file_path`\*, `enable_multimodel`(true), `file_name` | 从服务器本地文件导入知识；`file_name` 可写成 `docs/spec/design.pdf` 这类带目录的名称，放入知识库对应文件夹；路径经 `upload_paths.resolve_upload_file_path` 校验（见 2.6） |
 | `create_knowledge_from_url` | `kb_id`\*, `url`\*, `enable_multimodel`(true) | 从网页 URL 导入知识 |
 | `create_knowledge_from_text` | kb_id、title、content 必填；tag_ids、status | 从 Markdown 建手工知识；status 默认 publish，draft 只保存 |
 | `update_knowledge_from_text` | knowledge_id、content 必填；title、status | 更新手工 Markdown；title 空保留原标题，publish 重新索引，draft 保存草稿 |
-| `list_knowledge` | `kb_id`\*, `page`(1), `page_size`(20) | 分页列出知识条目 |
+| `list_knowledge` | `kb_id`\*, `page`(1), `page_size`(20), `folder_path`, `folder_scope` | 分页列出知识条目；`folder_path` 按文件夹过滤（`""` 为根目录） |
 | `get_knowledge` | `knowledge_id`\* | 知识详情 |
 | `delete_knowledge` | `knowledge_id`\* | 删除知识 |
 
@@ -660,7 +674,7 @@ stdio 传输（Claude Desktop 的 `claude_desktop_config.json`）：
 
 远程部署（Docker / `--transport http`）时，客户端连接 `http://<host>:8000/mcp` 并携带 `Authorization: Bearer <MCP_SERVER_AUTH_TOKEN>`。
 
-顺带一提：WeKnora 主程序（第一部分）也可以作为 MCP 客户端接入这个 mcp-server——在「MCP 服务」中新建 Streamable HTTP 服务指向 `/mcp` 端点、认证方式选 Bearer 即可，从而让 WeKnora Agent 操作另一套 WeKnora 实例。
+顺带一提：WeKnora 主程序（第一部分）也可以作为 MCP 客户端接入这个 mcp-server——在「工具箱 → MCP服务」中新建 Streamable HTTP 服务指向 `/mcp` 端点，认证方式选「API Key / Token」，请求头名称填 `Authorization`，密钥值填 `Bearer <MCP_SERVER_AUTH_TOKEN>` 即可，从而让 WeKnora Agent 操作另一套 WeKnora 实例。
 
 #### 文件上传路径安全（upload_paths.py） {#_2-6-文件上传路径安全-upload-paths-py}
 

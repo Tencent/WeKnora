@@ -21,7 +21,11 @@ from docreader.parser.excel_convert import (
     normalize_excel_bytes,
 )
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
-from docreader.parser.xlsx_repair import repair_xlsx_bytes, strip_unreadable_ranges_xlsx
+from docreader.parser.xlsx_repair import (
+    repair_xlsx_bytes,
+    sanitize_xlsx_styles,
+    strip_unreadable_ranges_xlsx,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +97,7 @@ class ExcelParser(BaseParser):
         """
         chunks: List[Chunk] = []
         text: List[str] = []
+        source_blocks: List[dict] = []
         start, end = 0, 0
 
         excel_file = _open_excel_file(content, file_type=self.file_type)
@@ -107,8 +112,10 @@ class ExcelParser(BaseParser):
             # Remove rows where all values are NaN (completely empty rows)
             df.dropna(how="all", inplace=True)
 
-            # Process each row in the DataFrame
-            for _, row in df.iterrows():
+            # Process each row in the DataFrame. The index is the 0-based
+            # sheet row (rows are read from row 1 and dropped rows keep
+            # their labels), so index + 1 is the row number users see.
+            for row_index, row in df.iterrows():
                 page_content = []
                 # Build key-value pairs for non-null values
                 for k, v in row.items():
@@ -128,10 +135,29 @@ class ExcelParser(BaseParser):
                 chunks.append(
                     Chunk(content=content_row, seq=len(chunks), start=start, end=end)
                 )
+                try:
+                    row_number = int(row_index) + 1
+                except (TypeError, ValueError):
+                    row_number = 0
+                if row_number > 0:
+                    source_blocks.append(
+                        {
+                            "start": start,
+                            "end": end,
+                            "locator": {
+                                "type": "sheet",
+                                "sheet": str(excel_sheet_name),
+                                "row_start": row_number,
+                                "row_end": row_number,
+                            },
+                        }
+                    )
                 start = end
 
         # Combine all text and return as Document
-        return Document(content="".join(text), chunks=chunks)
+        return Document(
+            content="".join(text), chunks=chunks, source_blocks=source_blocks
+        )
 
 
 def _read_sheet_dataframe(
@@ -186,7 +212,17 @@ def _prepare_xlsx_bytes(data: bytes) -> bytes:
     readable = strip_unreadable_ranges_xlsx(data)
     if readable is not None:
         data = readable
-    return fill_merged_cells_xlsx(data)
+    try:
+        return fill_merged_cells_xlsx(data)
+    except TypeError:
+        # A non-conforming styles.xml (empty/malformed fills) makes openpyxl's
+        # load_workbook raise before pandas ever sees the file (#3637).
+        # sanitize_xlsx_styles returns None when the fills are clean, in which
+        # case the TypeError has a different cause and must propagate.
+        sanitized = sanitize_xlsx_styles(data)
+        if sanitized is None:
+            raise
+        return fill_merged_cells_xlsx(sanitized)
 
 
 def _open_excel_file(content: bytes, file_type: str | None = None) -> pd.ExcelFile:

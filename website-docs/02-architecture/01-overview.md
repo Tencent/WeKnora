@@ -32,14 +32,14 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | `dex` | `dex` / `full` | OIDC 测试用 IdP（配合 `OIDC_AUTH_ENABLE`） |
 | `langfuse-*`（web/worker/clickhouse/minio/db-init） | `langfuse` | 自建 LLM 可观测栈，复用 WeKnora 的 postgres（新建 `langfuse` 库）与 redis（DB 1） |
 
-此外，Go 后端还可直连未在 compose 内的外部引擎：Elasticsearch v7/v8、OpenSearch、腾讯云 VectorDB、火山 VikingDB，以及 8 种对象存储（local/MinIO/COS/TOS/S3/OSS/KS3/OBS）。
+此外，Go 后端还可直连未在 compose 内的外部引擎：Elasticsearch v7/v8、OpenSearch、腾讯云 VectorDB，以及 8 种对象存储（local/MinIO/COS/TOS/S3/OSS/KS3/OBS）。
 
 ### 部署形态 {#_1-3-部署形态}
 
 除标准 Docker Compose 部署外，仓库还支持：
 
 - **Lite 模式**：`DB_DRIVER=sqlite`（内置 sqlite-vec 向量扩展）+ 不配置 `REDIS_ADDR`（Asynq 退化为进程内 `SyncTaskExecutor`），单二进制运行，前端静态资源内嵌（`handler.Edition == "lite"` 时由 Go 进程直接托管）；
-- **桌面版**：`cmd/desktop` 基于 Wails v2 打包为桌面应用；
+- **桌面版**：`cmd/desktop` 基于 Wails v2 打包为桌面应用，会话可在本机操作系统沙箱中执行（目前仅 macOS，基于 Seatbelt）；
 - **Kubernetes**：`helm/` Chart；**裸机**：`deploy/` systemd 单元。
 
 ## 技术栈清单 {#_2-技术栈清单}
@@ -58,7 +58,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | 配置 | `github.com/spf13/viper` + `config/config.yaml` + 环境变量 | — |
 | 可观测 | OpenTelemetry + Langfuse（`internal/tracing/langfuse`） | LLM 调用级 trace |
 | gRPC | `google.golang.org/grpc` v1.81.0 | 调用 docreader |
-| LLM 接入 | 自研协议层 `internal/models/api`（OpenAI / Anthropic / Gemini / DashScope 等线格式各一个包）、Ollama、腾讯云 LKE SDK 等 | 27 家厂商由 `internal/models/vendors` 声明，见[模型管理](../03-features/06-models.md) |
+| LLM 接入 | 自研协议层 `internal/models/api`（OpenAI / Anthropic / Gemini / DashScope 等线格式各一个包）、Ollama、腾讯云 LKE SDK 等 | 27 家厂商由 `internal/models/providers` 声明，见[模型管理](../03-features/06-models.md) |
 | 向量/检索 | pgvector、ES v7/v8、OpenSearch、Qdrant、Milvus、Weaviate、Doris、腾讯 VectorDB、sqlite-vec | 由 `RETRIEVE_DRIVER` 与 `vector_stores` 表动态装配 |
 | 知识图谱 | `neo4j-go-driver/v6` | 可选 |
 | 数据分析 | DuckDB（`duckdb-go/v2`）、`pg_query_go` SQL 校验 | Agent 数据分析工具 |
@@ -79,9 +79,11 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | `app` → `postgres` | PostgreSQL wire（GORM/pgx） | 业务数据 + BM25 + pgvector |
 | `app` ↔ `redis` | RESP（支持 TLS） | ① Asynq 任务队列（文档解析/富化/Wiki/记忆等任务）；② SSE 流断线续传的 Stream Manager（`STREAM_MANAGER_TYPE`）；③ `system_settings` 变更 Pub/Sub；④ Embed 渠道限流；⑤ 分布式 per-model 并发信号量 |
 | `app` → `neo4j` | Bolt（`bolt://neo4j:7687`） | GraphRAG 实体/关系存取 |
-| `app` → `searxng` / Web 搜索 provider | HTTP | SSRF 白名单校验（`SSRF_WHITELIST_EXTRA` 默认放行 compose 内 `searxng,qdrant,milvus,weaviate,doris-fe,doris-be`） |
+| `app` → `searxng` / Web 搜索 provider | HTTP | SSRF 白名单校验（`SSRF_WHITELIST_EXTRA` 默认放行 compose 内 `searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio`；开启 `SSRF_DNS_WHITELIST_ONLY` 后只允许白名单出站） |
 | `app` → 向量库/对象存储/LLM 提供商 | 各自 SDK（HTTP/gRPC/MySQL 协议） | Doris 走 MySQL 协议 + Stream Load HTTP |
 | `app` → 沙箱后端 | Docker Engine API / Cube/E2B 控制面与数据面 | 会话执行、技能安装与文件产物；按空间沙箱配置选择 |
+| MCP 客户端 → `app` | Streamable HTTP（`/mcp/:endpoint_id`，每个端点独立 Bearer Token） | 内置 MCP Server，把空间的知识库检索等能力暴露给外部 MCP 客户端，见 [MCP 集成](../03-features/08-mcp.md) |
+| Chrome 扩展 ↔ `app` | WebSocket（`/api/v1/local-browser/extension`，远程部署须 WSS） | 本机浏览器能力：app 进程托管 BrowserSkill 守护进程，扩展在用户浏览器中执行网页任务，见[本机浏览器](../05-clients/09-local-browser.md) |
 | `app` ↔ IM 平台 | HTTP webhook / 长连接 SDK | 微信、企业微信、飞书、钉钉、Slack、Telegram、QQ、Mattermost、云之家（`internal/im/`） |
 
 ## 总体架构图 {#_4-总体架构图}
@@ -92,7 +94,8 @@ graph LR
         Browser["浏览器 (Vue3 SPA)"]
         Mini["微信小程序 (miniprogram/)"]
         CLI["CLI / Go SDK (cli/, client/)"]
-        MCPC["MCP 客户端 (mcp-server/)"]
+        MCPC["MCP 客户端 (内置端点 / mcp-server/)"]
+        EXTN["Chrome 扩展 (本机浏览器)"]
         IM["IM 平台 (微信/飞书/钉钉/Slack...)"]
     end
 
@@ -118,7 +121,8 @@ graph LR
     Browser -->|"HTTP / SSE"| FE
     Mini -->|"HTTP"| APP
     CLI -->|"HTTP"| APP
-    MCPC -->|"HTTP (X-API-Key)"| APP
+    MCPC -->|"Streamable HTTP / HTTP (X-API-Key)"| APP
+    EXTN -->|"WebSocket"| APP
     IM -->|"webhook / SDK 长连接"| APP
     FE -->|"反向代理 /api"| APP
     APP -->|"gRPC ReadStream"| DR
@@ -183,12 +187,12 @@ sequenceDiagram
 | `internal/` | Go 后端全部业务代码（分层结构见后端设计篇）：`handler`、`application/service`、`application/repository`、`container`（DI）、`router`、`middleware`、`types`、`agent`、`im`、`mcp`、`stream`、`sandbox` 等 |
 | `frontend/` | Vue3 + Vite + TDesign 的 Web 前端，构建产物由 NGINX 或 Lite 模式内嵌托管 |
 | `docreader/` | Python gRPC 文档解析微服务：`main.py` 服务端入口、`parser/` 25+ 解析器、`splitter/` 分割器、`proto/` 协议定义、独立 `Dockerfile.docreader` 构建 |
-| `cli/` | `weknora` 命令行工具（约 30 个子命令：部署、日志、备份、诊断等） |
+| `cli/` | `weknora` 命令行工具：知识库、文档、检索、会话、智能体、模型、MCP、技能等资源操作，以及 `doctor` 诊断，见 [CLI](../05-clients/02-cli.md) |
 | `client/` | Go SDK：以 HTTP 客户端形式封装 WeKnora API，供二次开发集成 |
 | `mcp-server/` | Python 实现的 MCP Server（`weknora_mcp_server.py`），把 WeKnora API 暴露为 MCP 工具给 Claude 等 MCP 客户端 |
 | `miniprogram/` | 微信小程序客户端（WXML/WXSS/JS） |
 | `migrations/` | golang-migrate 数据库迁移：`versioned/`（Postgres 主线 `NNNNNN_*.up/down.sql`）、`sqlite/`（Lite 模式）、`paradedb/`、`mysql/` |
-| `config/` | 运行配置：`config.yaml` 主配置、`builtin_agents.yaml` 内置 Agent、`agent_type_presets.yaml` Agent 预设、`builtin_models.yaml.example` 声明式内置模型、`prompt_templates/` 提示词模板 |
+| `config/` | 运行配置：`config.yaml` 主配置、`builtin_agents.yaml` 内置 Agent、`agent_type_presets.yaml` Agent 预设、`builtin_models.yaml.example` 声明式内置模型、`models.json.example` 模型厂商目录叠加、`prompt_templates/` 提示词模板 |
 | `docker/` | 各镜像 Dockerfile（app/docreader/sandbox/odl-hybrid）与 searxng 配置 |
 | `deploy/` | 裸机部署资源（systemd 服务单元等） |
 | `helm/` | Kubernetes Helm Chart（Chart.yaml / values.yaml / templates/） |
@@ -197,7 +201,7 @@ sequenceDiagram
 | `scripts/` | 构建/启动/迁移辅助脚本（如 `start_all.sh`；`build_frontend_dist.sh` 供 Lite / 桌面打包，UI 镜像由 `frontend/Dockerfile` 多阶段构建） |
 | `tests/`、`testdata/` | 集成测试与测试数据 |
 | `misc/` | 杂项（如 `dex-config.yaml` OIDC 测试配置） |
-| `packages/` | 预留的本地包目录 |
+| `packages/` | 独立发布的集成包，如 DeepSeek Harness 插件 `packages/dsh-weknora`，见 [DeepSeek Harness](../05-clients/08-deepseek-harness.md) |
 | `docs/` | 停止维护的旧文档；暂存 Swagger 生成包、发布资源和历史图片 |
 
 > 说明：Go 模块路径为 `github.com/Tencent/WeKnora`；根目录还包含 `docker-compose.yml`（生产编排）与 `docker-compose.dev.yml`（开发编排）、`Makefile`、`VERSION` 等。

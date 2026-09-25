@@ -14,7 +14,7 @@ test('composer browser button is disabled and opens settings when the extension 
   assert.match(button, /active: settingsStore\.isLocalBrowserEnabled && browserConnection\.online/)
   assert.match(button, /:aria-disabled="browserConnection\.knownOffline"/)
   assert.match(inputField, /if \(browserConnection\.knownOffline\) \{\s*openBrowserConnectionSettings\(\)/)
-  assert.match(inputField, /uiStore\.openSettings\('browserconnection'\)/)
+  assert.match(inputField, /router\.push\(toolboxLocation\('browserconnection'\)\)/)
   assert.match(inputField, /browserConnection\.watchStatus\(\)/)
   assert.match(inputField, /\$t\('localBrowser\.reconnectHint'\)|\$t\(browserSourceUnavailableHint\)/)
 })

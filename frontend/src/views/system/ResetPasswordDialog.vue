@@ -8,7 +8,7 @@
 -->
 <template>
   <t-popup :visible="visible && active" trigger="click" placement="left-top" destroy-on-close
-    overlay-class-name="wk-popover system-admin-action-popup-overlay" @visible-change="onVisibleChange">
+    overlay-class-name="wk-popover wk-popover--form system-admin-action-popup-overlay" @visible-change="onVisibleChange">
     <span class="system-admin-action-popup-anchor">
       <slot />
     </span>

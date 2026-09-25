@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -259,6 +260,13 @@ func pageIntersectsKnowledgeIDs(page *types.WikiPage, allowed map[string]bool) b
 	}
 	return false
 }
+
+const (
+	// wikiScopedSearchOverfetch and wikiScopedSearchMaxFetch bound how many
+	// pages a scoped wiki_search asks for before filtering by scope.
+	wikiScopedSearchOverfetch = 5
+	wikiScopedSearchMaxFetch  = 100
+)
 
 func pagePassesWikiScope(
 	ctx context.Context,
@@ -878,14 +886,23 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			if kbID == "" {
 				continue
 			}
-			pages, err := t.wikiService.SearchPages(ctx, kbID, pattern, params.Limit)
+			// A document- or tag-scoped search filters pages after the store
+			// returns them, so asking for exactly limit pages let
+			// out-of-scope pages fill the page and hide in-scope ones ranked
+			// just below. Over-fetch, then keep the first limit in scope.
+			fetchLimit := params.Limit
+			if _, hasKnowledgeFilter := scopeKnowledgeFilter(sc); hasKnowledgeFilter || len(sc.TagIDs) > 0 {
+				fetchLimit = max(params.Limit, min(params.Limit*wikiScopedSearchOverfetch, wikiScopedSearchMaxFetch))
+			}
+			kept := 0
+			pages, err := t.wikiService.SearchPages(ctx, kbID, pattern, fetchLimit)
 			if err != nil {
 				searchErrors = append(searchErrors, fmt.Sprintf("Wiki search %q failed in KB %s: %v", query, kbID, err))
 				continue
 			}
 			successfulSearchCalls++
 			for _, p := range pages {
-				if p == nil {
+				if p == nil || kept >= params.Limit {
 					continue
 				}
 				passesScope, scopeErr := pagePassesWikiScope(ctx, p, sc, fetchTags)
@@ -907,6 +924,7 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 					continue
 				}
 				actualKBID := kbID
+				kept++
 				allHits = append(allHits, searchHit{page: p, kbID: actualKBID})
 				t.routes.rememberPage(p, actualKBID)
 				foundKBs[p.Slug] = append(foundKBs[p.Slug], actualKBID)
@@ -915,9 +933,15 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 				registerLinkedSlugs(foundKBs, p, actualKBID)
 			}
 		}
-		_ = filteredCount // reserved for future debug surface
-
 		if len(allHits) == 0 {
+			if filteredCount > 0 {
+				// Say why the result is empty: pages matched, but none cites
+				// the selected documents or tags.
+				allOutputs = append(allOutputs, fmt.Sprintf(
+					"<search_results count=\"0\" query=\"%s\" filtered_out_of_scope=\"%d\" />",
+					query, filteredCount))
+				continue
+			}
 			allOutputs = append(allOutputs, fmt.Sprintf("<search_results count=\"0\" query=\"%s\" />", query))
 			continue
 		}
@@ -932,7 +956,7 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			t.seenSlugs[key] = true
 			t.mu.Unlock()
 
-			snippet := extractSnippet(p.Content, pattern)
+			snippet := searchutil.ExtractSnippet(p.Content, pattern)
 			snippetTag := ""
 			if snippet != "" {
 				snippetTag = fmt.Sprintf("\n<match_snippet>%s</match_snippet>", snippet)
@@ -1025,47 +1049,6 @@ func parseStringOrArray(val any) []string {
 		return res
 	}
 	return nil
-}
-
-func extractSnippet(content string, query string) string {
-	if content == "" || query == "" {
-		return ""
-	}
-	re, err := regexp.Compile("(?i)" + query)
-	if err != nil {
-		return ""
-	}
-	loc := re.FindStringIndex(content)
-	if loc == nil {
-		return ""
-	}
-
-	matchStr := content[loc[0]:loc[1]]
-	before := content[:loc[0]]
-	after := content[loc[1]:]
-
-	beforeRunes := []rune(before)
-	if len(beforeRunes) > 60 {
-		beforeRunes = beforeRunes[len(beforeRunes)-60:]
-	}
-
-	afterRunes := []rune(after)
-	if len(afterRunes) > 60 {
-		afterRunes = afterRunes[:60]
-	}
-
-	matchRunes := []rune(matchStr)
-	if len(matchRunes) > 100 {
-		matchRunes = append(matchRunes[:100], []rune("...")...)
-	}
-
-	snippet := string(beforeRunes) + string(matchRunes) + string(afterRunes)
-	snippet = strings.ReplaceAll(snippet, "\n", " ")
-	for strings.Contains(snippet, "  ") {
-		snippet = strings.ReplaceAll(snippet, "  ", " ")
-	}
-
-	return "... " + strings.TrimSpace(snippet) + " ..."
 }
 
 func truncateRunes(s string, maxRunes int) string {

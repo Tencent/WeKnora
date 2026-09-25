@@ -220,7 +220,7 @@
                       placement="top">
                       <div class="feature-badge"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
                           0) }}</span>
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
@@ -297,7 +297,7 @@
                       placement="top">
                       <div class="feature-badge"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || '-') : (kb.knowledge_count
                           || '-')
                         }}</span>
@@ -451,7 +451,7 @@
                       placement="top">
                       <div class="feature-badge"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
                           0) }}</span>
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
@@ -577,7 +577,7 @@
                       placement="top">
                       <div class="feature-badge"
                         :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
-                        <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'"
+                        <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'file'"
                           size="14px" />
                         <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ?
                           (shared.knowledge_base.chunk_count ??

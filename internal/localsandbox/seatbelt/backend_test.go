@@ -351,10 +351,10 @@ func TestSeatbeltDeniesWritingAppDataInsideWritableHome(t *testing.T) {
 	require.Equal(t, "keep", string(got))
 }
 
-// file-read* is blanket; /tmp and /var/folders must stay behind PrivateRoots
-// or the agent can read other apps' temp tokens. Workspace under a temp
-// fixture must still be writable after those denials.
-func TestSeatbeltDeniesReadingTmpAndVarFolders(t *testing.T) {
+// /tmp is open in the base profile for chat and install. /var/folders stays
+// behind PrivateRoots so per-user temp tokens there remain unreadable.
+// The workspace itself must still be writable.
+func TestSeatbeltAllowsTmpAndDeniesVarFolders(t *testing.T) {
 	backend, err := New()
 	require.NoError(t, err)
 	require.NoError(t, backend.Available())
@@ -387,8 +387,14 @@ func TestSeatbeltDeniesReadingTmpAndVarFolders(t *testing.T) {
 	require.Contains(t, out, "ok")
 
 	status, out = runSandboxedArgv(t, backend, p, append(noProfile, `cat `+tmpSecret), env)
-	require.NotEqual(t, 0, status.Code, out)
-	require.NotContains(t, out, "TMPSECRET")
+	require.Equal(t, 0, status.Code, out)
+	require.Contains(t, out, "TMPSECRET")
+
+	tmpOut := filepath.Join("/tmp", "weknora-seatbelt-out-"+t.Name())
+	t.Cleanup(func() { _ = os.Remove(tmpOut) })
+	status, out = runSandboxedArgv(t, backend, p, append(noProfile, `echo from-sandbox > `+tmpOut+` && cat `+tmpOut), env)
+	require.Equal(t, 0, status.Code, out)
+	require.Contains(t, out, "from-sandbox")
 
 	status, out = runSandboxedArgv(t, backend, p, append(noProfile, `cat `+vfSecret), env)
 	require.NotEqual(t, 0, status.Code, out)

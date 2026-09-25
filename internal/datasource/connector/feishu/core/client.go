@@ -304,6 +304,7 @@ func truncate(s string, maxLen int) string {
 func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 	var allSpaces []WikiSpace
 	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
 
 	for {
 		path := "/open-apis/wiki/v2/spaces?page_size=50"
@@ -330,6 +331,10 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 		if !resp.Data.HasMore || resp.Data.PageToken == "" {
 			break
 		}
+		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
+			return nil, fmt.Errorf("feishu wiki space pagination repeated page token %q", resp.Data.PageToken)
+		}
+		seenPageTokens[resp.Data.PageToken] = struct{}{}
 		pageToken = resp.Data.PageToken
 	}
 
@@ -342,6 +347,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeToken string) ([]WikiNode, error) {
 	var allNodes []WikiNode
 	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
 
 	for {
 		path := fmt.Sprintf("/open-apis/wiki/v2/spaces/%s/nodes?page_size=50", spaceID)
@@ -373,6 +379,10 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 		if !resp.Data.HasMore || resp.Data.PageToken == "" {
 			break
 		}
+		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
+			return nil, fmt.Errorf("feishu wiki node pagination repeated page token %q", resp.Data.PageToken)
+		}
+		seenPageTokens[resp.Data.PageToken] = struct{}{}
 		pageToken = resp.Data.PageToken
 	}
 
