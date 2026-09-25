@@ -220,7 +220,7 @@
 
 ## 内置厂商
 
-内置 27 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 28 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -247,6 +247,7 @@
 | OpenRouter | `openrouter` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
+| Cheaper Inference | `cheaperinference` | ✓ | | | ✓ | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
