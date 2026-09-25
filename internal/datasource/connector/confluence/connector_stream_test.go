@@ -31,6 +31,8 @@ type streamAPI struct {
 	pages         []streamPage
 	bodyCalls     int
 	bodyStatus    map[string]int
+	bodyHTML      map[string]string
+	imageCalls    int
 	listCalls     int
 	ancestorCalls int
 	spaceCalls    int
@@ -69,6 +71,15 @@ func (a *streamAPI) pageMaps() []any {
 func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 	path := req.URL.Path
 	switch {
+	case strings.HasPrefix(path, "/wiki/download/"):
+		a.imageCalls++
+		header := make(http.Header)
+		header.Set("Content-Type", "image/png")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     header,
+			Body:       io.NopCloser(bytes.NewReader([]byte("private-png-bytes"))),
+		}, nil
 	case path == "/wiki/rest/api/space":
 		a.spaceCalls++
 		return a.jsonResponse(map[string]any{
@@ -89,7 +100,9 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 			}
 			return a.jsonResponse(map[string]any{
 				"results": results,
-				"_links":  map[string]any{"next": fmt.Sprintf("/rest/api/space/ENG/content/page?limit=100&start=%d", a.listCalls*100)},
+				"_links": map[string]any{
+					"next": fmt.Sprintf("/rest/api/space/ENG/content/page?limit=100&start=%d", a.listCalls*100),
+				},
 			})
 		}
 		return a.jsonResponse(map[string]any{
@@ -103,9 +116,15 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 			return nil, errors.New("unexpected existence check for page " + id)
 		}
 		if reply.status != http.StatusOK {
-			return &http.Response{StatusCode: reply.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			return &http.Response{
+				StatusCode: reply.status,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("{}")),
+			}, nil
 		}
-		return a.jsonResponse(map[string]any{"id": id, "status": "current", "space": map[string]any{"key": reply.spaceKey}})
+		return a.jsonResponse(
+			map[string]any{"id": id, "status": "current", "space": map[string]any{"key": reply.spaceKey}},
+		)
 	case strings.HasPrefix(path, "/wiki/rest/api/content/") && strings.HasSuffix(path, "/child/page"):
 		return a.jsonResponse(map[string]any{"results": []any{}})
 	case strings.HasPrefix(path, "/wiki/rest/api/content/"):
@@ -121,7 +140,14 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 			id := strings.TrimPrefix(path, "/wiki/rest/api/content/")
 			for _, page := range a.pages {
 				if page.id == id {
-					return a.jsonResponse(map[string]any{"id": page.id, "title": page.title, "version": map[string]any{"number": page.version}, "space": map[string]any{"key": "ENG", "name": "Engineering"}})
+					return a.jsonResponse(
+						map[string]any{
+							"id":      page.id,
+							"title":   page.title,
+							"version": map[string]any{"number": page.version},
+							"space":   map[string]any{"key": "ENG", "name": "Engineering"},
+						},
+					)
 				}
 			}
 			return nil, errors.New("missing page")
@@ -178,13 +204,17 @@ func (a *streamAPI) pageBody(id string) (*http.Response, error) {
 	}
 	for _, page := range a.pages {
 		if page.id == id {
+			value := "<p>" + page.title + "</p>"
+			if custom, ok := a.bodyHTML[id]; ok {
+				value = custom
+			}
 			return a.jsonResponse(map[string]any{
 				"id": page.id, "title": page.title,
 				"spaceId": "1",
 				"version": map[string]any{"number": page.version, "by": map[string]any{"displayName": "Ada"}},
 				"space":   map[string]any{"key": "ENG", "name": "Engineering"},
 				"_links":  map[string]any{"webui": "/wiki/pages/" + page.id},
-				"body":    map[string]any{"view": map[string]any{"value": "<p>" + page.title + "</p>"}},
+				"body":    map[string]any{"view": map[string]any{"value": value}},
 			})
 		}
 	}
@@ -380,13 +410,16 @@ func TestFetchFullStreamTombstoneResumeSkipsCompletedDeletions(t *testing.T) {
 	if !deletionCheckpoint.FullSync {
 		t.Fatalf("mid-full-sync checkpoint lost the resume flag: %#v", deletionCheckpoint)
 	}
-	if baseline := deletionCheckpoint.FullSyncBaseline["1"]; baseline["p1"] != "v:1" || baseline["p2"] != "" || baseline["p3"] != "v:1" {
+	if baseline := deletionCheckpoint.FullSyncBaseline["1"]; baseline["p1"] != "v:1" || baseline["p2"] != "" ||
+		baseline["p3"] != "v:1" {
 		t.Fatalf("tombstone checkpoint did not advance the deletion baseline: %#v", deletionCheckpoint)
 	}
 
 	resumeAPI := &streamAPI{pages: api.pages}
 	second := &captureHandler{}
-	next, err := newStreamConnector(resumeAPI).FetchFullStream(context.Background(), streamConfig(), first.checkpoints[1], second)
+	next, err := newStreamConnector(
+		resumeAPI,
+	).FetchFullStream(context.Background(), streamConfig(), first.checkpoints[1], second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +433,8 @@ func TestFetchFullStreamTombstoneResumeSkipsCompletedDeletions(t *testing.T) {
 	if decoded.FullSync || decoded.FullSyncBaseline != nil {
 		t.Fatalf("completed full sync left resume fields set: %#v", decoded)
 	}
-	if decoded.SpacePages["1"]["p1"] != "v:1" || decoded.SpacePages["1"]["p2"] != "" || decoded.SpacePages["1"]["p3"] != "" {
+	if decoded.SpacePages["1"]["p1"] != "v:1" || decoded.SpacePages["1"]["p2"] != "" ||
+		decoded.SpacePages["1"]["p3"] != "" {
 		t.Fatalf("completed resume cursor = %#v", decoded)
 	}
 }
@@ -628,7 +662,8 @@ func TestListResourcesLoadsConfluencePagesLazily(t *testing.T) {
 	if err != nil || len(pages) != 1 {
 		t.Fatalf("top pages = %#v, %v", pages, err)
 	}
-	if pages[0].ExternalID != "page:1:p1" || pages[0].ParentID != "1" || pages[0].Type != "page" || !pages[0].HasChildren {
+	if pages[0].ExternalID != "page:1:p1" || pages[0].ParentID != "1" || pages[0].Type != "page" ||
+		!pages[0].HasChildren {
 		t.Fatalf("page resource = %#v", pages[0])
 	}
 	children, err := connector.ListResources(context.Background(), streamConfig(), "page:1:p1")
@@ -717,7 +752,8 @@ func TestFetchStreamReconcilesCancelledSpaceScope(t *testing.T) {
 		t.Fatalf("items = %#v", h.items)
 	}
 	decoded := decodeCursor(next)
-	if _, oldScopePresent := decoded.SpacePages["1"]; oldScopePresent || decoded.SpacePages["page:1:p1"]["p1"] != "v:2" {
+	if _, oldScopePresent := decoded.SpacePages["1"]; oldScopePresent ||
+		decoded.SpacePages["page:1:p1"]["p1"] != "v:2" {
 		t.Fatalf("cursor = %#v", decoded)
 	}
 }
@@ -763,7 +799,11 @@ func TestFetchStreamDoesNotDeleteWhenNewScopeCannotEnumerate(t *testing.T) {
 		originalTransport := c.http.Transport
 		c.http.Transport = roundTripper(func(req *http.Request) (*http.Response, error) {
 			if req.URL.Path == "/wiki/rest/api/content/p1" && req.URL.Query().Get("expand") == "version,space" {
-				return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("missing"))}, nil
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("missing")),
+				}, nil
 			}
 			return originalTransport.RoundTrip(req)
 		})
@@ -772,7 +812,12 @@ func TestFetchStreamDoesNotDeleteWhenNewScopeCannotEnumerate(t *testing.T) {
 	ds := streamConfig()
 	ds.ResourceIDs = []string{"page:1:p1"}
 	h := &captureHandler{}
-	_, err := connector.FetchStream(context.Background(), ds, streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"}), h)
+	_, err := connector.FetchStream(
+		context.Background(),
+		ds,
+		streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"}),
+		h,
+	)
 	if err == nil {
 		t.Fatal("scope enumeration failure unexpectedly succeeded")
 	}
@@ -785,18 +830,31 @@ func TestFetchStreamDoesNotDeleteWhenNewScopeCannotEnumerate(t *testing.T) {
 
 func TestBuildSyncPlanNormalizesOverlappingScopes(t *testing.T) {
 	api := &streamAPI{}
-	client := &client{cfg: config{baseURL: "https://confluence.test/wiki"}, http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
-		switch req.URL.Path {
-		case "/wiki/rest/api/space":
-			return api.jsonResponse(map[string]any{"results": []any{map[string]any{"id": 1, "key": "ENG", "name": "Engineering"}}})
-		case "/wiki/rest/api/content/parent":
-			return api.jsonResponse(map[string]any{"id": "parent", "space": map[string]any{"key": "ENG"}, "ancestors": []any{}})
-		case "/wiki/rest/api/content/child":
-			return api.jsonResponse(map[string]any{"id": "child", "space": map[string]any{"key": "ENG"}, "ancestors": []any{map[string]any{"id": "parent"}}})
-		default:
-			return nil, errors.New("unexpected endpoint: " + req.URL.String())
-		}
-	})}}
+	client := &client{
+		cfg: config{baseURL: "https://confluence.test/wiki"},
+		http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/wiki/rest/api/space":
+				return api.jsonResponse(
+					map[string]any{"results": []any{map[string]any{"id": 1, "key": "ENG", "name": "Engineering"}}},
+				)
+			case "/wiki/rest/api/content/parent":
+				return api.jsonResponse(
+					map[string]any{"id": "parent", "space": map[string]any{"key": "ENG"}, "ancestors": []any{}},
+				)
+			case "/wiki/rest/api/content/child":
+				return api.jsonResponse(
+					map[string]any{
+						"id":        "child",
+						"space":     map[string]any{"key": "ENG"},
+						"ancestors": []any{map[string]any{"id": "parent"}},
+					},
+				)
+			default:
+				return nil, errors.New("unexpected endpoint: " + req.URL.String())
+			}
+		})},
+	}
 	connector := NewConnector()
 	plan, err := connector.buildSyncPlan(context.Background(), client, []string{"page:1:child", "page:1:parent"})
 	if err != nil {
@@ -835,22 +893,29 @@ func TestListResourcesCloudStaysLazyWithContainerLimitation(t *testing.T) {
 	api := &streamAPI{}
 	var listDepths []string
 	conn := &Connector{newClient: func(cfg config) (*client, error) {
-		return &client{cfg: cfg, http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
-			switch req.URL.Path {
-			case "/wiki/api/v2/spaces":
-				return api.jsonResponse(map[string]any{"results": []any{map[string]any{"id": "1", "key": "ENG", "name": "Engineering"}}})
-			case "/wiki/api/v2/spaces/1/pages":
-				listDepths = append(listDepths, req.URL.Query().Get("depth"))
-				// depth=0 surfaces root pages only; the folder and the page nested
-				// inside it are unreachable through this endpoint (CONFCLOUD-84275).
-				return api.jsonResponse(map[string]any{"results": []any{
-					map[string]any{"id": "top", "type": "page", "title": "Top"},
-					map[string]any{"id": "folder", "type": "folder", "title": "Folder"},
-				}})
-			default:
-				return nil, errors.New("unexpected endpoint: " + req.URL.String())
-			}
-		})}}, nil
+		return &client{
+			cfg: cfg,
+			http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+				switch req.URL.Path {
+				case "/wiki/api/v2/spaces":
+					return api.jsonResponse(
+						map[string]any{
+							"results": []any{map[string]any{"id": "1", "key": "ENG", "name": "Engineering"}},
+						},
+					)
+				case "/wiki/api/v2/spaces/1/pages":
+					listDepths = append(listDepths, req.URL.Query().Get("depth"))
+					// depth=0 surfaces root pages only; the folder and the page nested
+					// inside it are unreachable through this endpoint (CONFCLOUD-84275).
+					return api.jsonResponse(map[string]any{"results": []any{
+						map[string]any{"id": "top", "type": "page", "title": "Top"},
+						map[string]any{"id": "folder", "type": "folder", "title": "Folder"},
+					}})
+				default:
+					return nil, errors.New("unexpected endpoint: " + req.URL.String())
+				}
+			})},
+		}, nil
 	}}
 	// Cloud spaces carry the limitation marker so the picker can explain why
 	// pages under top-level containers are not selectable.
@@ -878,27 +943,30 @@ func TestListResourcesCloudStaysLazyWithContainerLimitation(t *testing.T) {
 func TestResolveResourceAncestorsSkipsUnresolvableSelections(t *testing.T) {
 	api := &streamAPI{}
 	connector := &Connector{newClient: func(cfg config) (*client, error) {
-		return &client{cfg: cfg, http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
-			switch req.URL.Path {
-			case "/wiki/rest/api/space":
-				return api.jsonResponse(map[string]any{"results": []any{map[string]any{
-					"id": 1, "key": "ENG", "name": "Engineering",
-				}}})
-			case "/wiki/rest/api/content/alive":
-				return api.jsonResponse(map[string]any{
-					"id": "alive", "space": map[string]any{"key": "ENG"},
-					"ancestors": []any{map[string]any{"id": "parent"}},
-				})
-			case "/wiki/rest/api/content/gone":
-				return &http.Response{
-					StatusCode: http.StatusNotFound,
-					Header:     make(http.Header),
-					Body:       io.NopCloser(strings.NewReader("missing page")),
-				}, nil
-			default:
-				return nil, errors.New("unexpected endpoint: " + req.URL.String())
-			}
-		})}}, nil
+		return &client{
+			cfg: cfg,
+			http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+				switch req.URL.Path {
+				case "/wiki/rest/api/space":
+					return api.jsonResponse(map[string]any{"results": []any{map[string]any{
+						"id": 1, "key": "ENG", "name": "Engineering",
+					}}})
+				case "/wiki/rest/api/content/alive":
+					return api.jsonResponse(map[string]any{
+						"id": "alive", "space": map[string]any{"key": "ENG"},
+						"ancestors": []any{map[string]any{"id": "parent"}},
+					})
+				case "/wiki/rest/api/content/gone":
+					return &http.Response{
+						StatusCode: http.StatusNotFound,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader("missing page")),
+					}, nil
+				default:
+					return nil, errors.New("unexpected endpoint: " + req.URL.String())
+				}
+			})},
+		}, nil
 	}}
 	ancestors, err := connector.ResolveResourceAncestors(
 		context.Background(), streamConfig(),
@@ -915,24 +983,29 @@ func TestResolveResourceAncestorsSkipsUnresolvableSelections(t *testing.T) {
 
 func TestVisibleCloudPageChildrenTraversesContainers(t *testing.T) {
 	api := &streamAPI{}
-	client := &client{cfg: config{edition: editionCloud, baseURL: "https://confluence.test/wiki"}, http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
-		switch req.URL.Path {
-		case "/wiki/api/v2/pages/a/direct-children":
-			return api.jsonResponse(map[string]any{"results": []any{
-				map[string]any{"id": "b", "type": "page", "title": "B"},
-				map[string]any{"id": "folder", "type": "folder", "title": "Folder"},
-			}})
-		case "/wiki/api/v2/folders/folder/direct-children":
-			return api.jsonResponse(map[string]any{"results": []any{
-				map[string]any{"id": "c", "type": "page", "title": "C"},
-				map[string]any{"id": "db", "type": "database", "title": "DB"},
-			}})
-		case "/wiki/api/v2/databases/db/direct-children":
-			return api.jsonResponse(map[string]any{"results": []any{map[string]any{"id": "e", "type": "page", "title": "E"}}})
-		default:
-			return nil, errors.New("unexpected endpoint: " + req.URL.String())
-		}
-	})}}
+	client := &client{
+		cfg: config{edition: editionCloud, baseURL: "https://confluence.test/wiki"},
+		http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/wiki/api/v2/pages/a/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "b", "type": "page", "title": "B"},
+					map[string]any{"id": "folder", "type": "folder", "title": "Folder"},
+				}})
+			case "/wiki/api/v2/folders/folder/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "c", "type": "page", "title": "C"},
+					map[string]any{"id": "db", "type": "database", "title": "DB"},
+				}})
+			case "/wiki/api/v2/databases/db/direct-children":
+				return api.jsonResponse(
+					map[string]any{"results": []any{map[string]any{"id": "e", "type": "page", "title": "E"}}},
+				)
+			default:
+				return nil, errors.New("unexpected endpoint: " + req.URL.String())
+			}
+		})},
+	}
 	pages, err := client.visibleCloudPageChildren(context.Background(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -952,7 +1025,8 @@ func TestFetchStreamChecksUnlistedPagesWhenServerListingNeverEnds(t *testing.T) 
 		},
 	}
 	h := &captureHandler{}
-	got, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), streamCursor(map[string]string{"p1": "v:1", "gone": "v:1", "kept": "v:1"}), h)
+	old := streamCursor(map[string]string{"p1": "v:1", "gone": "v:1", "kept": "v:1"})
+	got, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
 	if err != nil {
 		t.Fatal(err)
 	}

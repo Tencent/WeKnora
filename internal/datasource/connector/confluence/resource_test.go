@@ -11,7 +11,11 @@ func TestParseResourceID(t *testing.T) {
 	if err != nil || page.Kind != resourcePage || page.SpaceID != "86802433" || page.PageID != "123456789" {
 		t.Fatalf("page = %#v, %v", page, err)
 	}
-	for _, id := range []string{"", "page:", "page:100", "page::200", "page:100:", "page:100:200:300", "node:86802433:folder-1", "space:100"} {
+	invalid := []string{
+		"", "page:", "page:100", "page::200", "page:100:", "page:100:200:300",
+		"node:86802433:folder-1", "space:100",
+	}
+	for _, id := range invalid {
 		if _, err := parseResourceID(id); err == nil {
 			t.Errorf("parseResourceID(%q) succeeded", id)
 		}

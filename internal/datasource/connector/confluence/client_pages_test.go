@@ -205,7 +205,7 @@ func TestTopLevelPagesCloudSurfacesRawAPIError(t *testing.T) {
 
 	srv := &client{cfg: config{baseURL: server.URL + "/wiki"}, http: server.Client()}
 	_, err = srv.topLevelPages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
-	if err == nil || !strings.Contains(err.Error(), "Confluence server does not support") {
+	if err == nil || !strings.Contains(err.Error(), "confluence server does not support") {
 		t.Fatalf("server error = %v; want the Server/DC navigation hint", err)
 	}
 }

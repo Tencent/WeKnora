@@ -46,7 +46,10 @@ func (c *Connector) buildSyncPlan(ctx context.Context, client *client, resourceI
 		}
 		s, ok := byID[ref.SpaceID]
 		if !ok {
-			return nil, fmt.Errorf("selected Confluence space %s is unavailable; refusing destructive reconciliation", ref.SpaceID)
+			return nil, fmt.Errorf(
+				"selected Confluence space %s is unavailable; refusing destructive reconciliation",
+				ref.SpaceID,
+			)
 		}
 		if ref.Kind == resourceSpace {
 			wholeSpaces[ref.SpaceID] = true
@@ -58,7 +61,13 @@ func (c *Connector) buildSyncPlan(ctx context.Context, client *client, resourceI
 		if err != nil {
 			return nil, fmt.Errorf("validate selected Confluence page %s: %w", ref.PageID, err)
 		}
-		pageRoots[resourceID] = syncRoot{ResourceID: resourceID, SpaceID: ref.SpaceID, Space: s, PageID: ref.PageID, Kind: syncPageSubtree}
+		pageRoots[resourceID] = syncRoot{
+			ResourceID: resourceID,
+			SpaceID:    ref.SpaceID,
+			Space:      s,
+			PageID:     ref.PageID,
+			Kind:       syncPageSubtree,
+		}
 		ancestorPaths[resourceID] = ancestors
 		for _, ancestor := range ancestors {
 			if ancestor.ID == ref.PageID {
