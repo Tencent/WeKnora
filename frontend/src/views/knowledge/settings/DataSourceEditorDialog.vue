@@ -449,6 +449,16 @@ async function ensureChildrenLoaded(id: string) {
         if (!existing.has(c.external_id)) merged.push(c)
       }
       resources.value = merged
+    } else {
+      // Connectors may conservatively advertise HasChildren to avoid an N+1
+      // probe. Once lazy loading proves this is a leaf, collapse it and retain
+      // that fact so another expand cannot trigger another empty request.
+      resources.value = resources.value.map(r => r.external_id === id
+        ? { ...r, has_children: false }
+        : r)
+      const expanded = new Set(expandedResourceIds.value)
+      expanded.delete(id)
+      expandedResourceIds.value = expanded
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
   } catch (e: any) {
@@ -466,12 +476,20 @@ async function ensureChildrenLoaded(id: string) {
 
 const visibleTree = computed(() => {
   const roots = resources.value.filter(r => !r.parent_id)
-  const result: { resource: Resource; depth: number }[] = []
+  const result: { resource: Resource; depth: number; noticeAfter?: boolean }[] = []
   function walk(items: Resource[], depth: number) {
     for (const r of items) {
       result.push({ resource: r, depth })
       if (r.has_children && expandedResourceIds.value.has(r.external_id)) {
         walk(childrenMap.value.get(r.external_id) || [], depth + 1)
+      }
+      // Keep this visible after an empty root listing is recognized as a leaf.
+      if (
+        r.metadata?.hierarchy_limitation === 'cloud_top_level_containers' &&
+        (expandedResourceIds.value.has(r.external_id) ||
+          (!r.has_children && loadedChildrenIds.value.has(r.external_id)))
+      ) {
+        result.push({ resource: r, depth: depth + 1, noticeAfter: true })
       }
     }
   }
@@ -1720,9 +1738,12 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
         <div class="resource-picker__list" role="tree">
+          <template
+            v-for="{ resource: r, depth, noticeAfter } in visibleTree"
+            :key="noticeAfter ? `${r.external_id}__notice` : r.external_id"
+          >
           <div
-            v-for="{ resource: r, depth } in visibleTree"
-            :key="r.external_id"
+            v-if="!noticeAfter"
             class="resource-picker__row"
             :class="{
               'is-checked': resourceRowState(r.external_id) === 'checked',
@@ -1787,6 +1808,14 @@ const drawerConfirmText = computed(() => {
               >{{ resourceTypeLabel(r.type) }}</span>
             </span>
           </div>
+          <p
+            v-else
+            class="resource-picker__notice"
+            :style="{ '--depth': depth }"
+          >
+            {{ t('datasource.confluence.cloudFolderLimitation') }}
+          </p>
+          </template>
         </div>
       </div>
       <div v-else class="ds-resource-empty">
@@ -2574,6 +2603,19 @@ const drawerConfirmText = computed(() => {
   border-radius: var(--app-radius-xs);
   color: var(--td-text-color-placeholder);
   background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
+}
+
+.resource-picker__notice {
+  --depth: 0;
+  margin: 0 0 2px;
+  padding: 4px 8px 4px calc(8px + var(--depth) * 14px);
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+.resource-picker__notice:last-child {
+  margin-bottom: 0;
 }
 
 /* --- Step 2: empty state --- */

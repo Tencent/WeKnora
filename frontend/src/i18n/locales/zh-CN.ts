@@ -1127,6 +1127,9 @@ export default {
       authHeaders: '自定义请求头（可选）',
       authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud 暂不支持在此列出空间顶层文件夹等容器下的页面；选择整个空间仍会同步它们。'
+    },
     connectorDesc: {
       feishu: '同步飞书知识库中的文档、表格、文件',
       lark: '同步 Lark 知识库中的文档、表格、文件（飞书国际版）',
