@@ -2,6 +2,7 @@ package web_search
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -31,6 +32,18 @@ func (r *Registry) Register(id string, factory ProviderFactory) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.factories[id] = factory
+}
+
+// Types returns the registered provider type IDs, sorted.
+func (r *Registry) Types() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.factories))
+	for id := range r.factories {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // CreateProvider creates a provider instance by type with the given parameters.

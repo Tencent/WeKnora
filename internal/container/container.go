@@ -91,6 +91,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
+	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -594,6 +596,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewMCPEndpointHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
+	// Plugin catalog: builtins are described from what is registered above.
+	must(container.Provide(newPluginRegistry))
+	must(container.Provide(handler.NewPluginHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read
@@ -1821,6 +1826,22 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("bocha", infra_web_search.NewBochaProvider)
 	registry.Register("brave", infra_web_search.NewBraveProvider)
 	registry.Register("serply", infra_web_search.NewSerplyProvider)
+}
+
+// newPluginRegistry builds the plugin registry from the builtins this process
+// has registered. It depends on the IM service so adapter factories are in
+// place before the platforms are read.
+func newPluginRegistry(
+	connectors *datasource.ConnectorRegistry,
+	webSearch *infra_web_search.Registry,
+	imService *imPkg.Service,
+) (*pluginregistry.Registry, error) {
+	return pluginbuiltin.NewRegistry(pluginbuiltin.Live{
+		Version:     handler.Version,
+		Connectors:  connectors,
+		WebSearch:   webSearch,
+		IMPlatforms: imService.Platforms(),
+	})
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and
