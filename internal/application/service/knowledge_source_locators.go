@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -33,9 +35,24 @@ func attachStructureBlocks(ctx context.Context, fileType string, data []byte, re
 		logger.Infof(ctx, "[SourceLocator] aligned %d %s blocks in %s", len(blocks), ft, time.Since(started))
 	case ft == "md" || ft == "markdown" || ft == "txt" || ft == "text":
 		if result.MarkdownContent == string(data) {
-			result.SourceBlocks = sourceloc.TextBlocks(result.MarkdownContent)
+			result.SourceBlocks = passThroughTextBlocks(result.MarkdownContent)
 		}
 	}
+}
+
+// passThroughTextBlocks maps a verbatim text original onto itself. Text
+// locators count from after a UTF-8 BOM, since viewers decode the file
+// without it; the blocks still cover the markdown, BOM included.
+func passThroughTextBlocks(content string) []types.SourceBlock {
+	body, hasBOM := strings.CutPrefix(content, "\ufeff")
+	blocks := sourceloc.TextBlocks(body)
+	if hasBOM {
+		for i := range blocks {
+			blocks[i].Start++
+			blocks[i].End++
+		}
+	}
+	return blocks
 }
 
 // transcriptWithSegments renders an ASR result with one line per timed
@@ -93,13 +110,24 @@ func buildSourceIndex(
 	if idx == nil {
 		return nil
 	}
+	// Visit the images in document order so rune offsets are counted in one
+	// pass over the markdown instead of once per image.
+	type placed struct{ image, at int }
+	var found []placed
 	for i := range images {
 		if images[i].ServingURL == "" {
 			continue
 		}
 		if at := strings.Index(final, images[i].ServingURL); at >= 0 {
-			images[i].SourceLocators = idx.LocatorsAt(len([]rune(final[:at])))
+			found = append(found, placed{image: i, at: at})
 		}
+	}
+	sort.Slice(found, func(a, b int) bool { return found[a].at < found[b].at })
+	bytePos, runePos := 0, 0
+	for _, f := range found {
+		runePos += utf8.RuneCountInString(final[bytePos:f.at])
+		bytePos = f.at
+		images[f.image].SourceLocators = idx.LocatorsAt(runePos)
 	}
 	return idx
 }

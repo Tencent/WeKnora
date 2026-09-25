@@ -54,7 +54,7 @@ func (r *Remapper) Map(pos int) int {
 		lineLen := r.lineLen(r.newStarts, r.newLen, j)
 		return r.newStarts[j] + min(pos-r.oldStarts[i], lineLen)
 	}
-	// Unpaired line: interpolate across the unpaired stretch around it.
+	// Unpaired line: find the unpaired stretch around it.
 	lo := i
 	for lo > 0 && r.pair[lo-1] < 0 {
 		lo--
@@ -63,6 +63,27 @@ func (r *Remapper) Map(pos int) int {
 	for hi+1 < len(r.pair) && r.pair[hi+1] < 0 {
 		hi++
 	}
+	// A stretch rewritten line for line (image references given new URLs)
+	// has as many lines on both sides: map each line onto its counterpart,
+	// so the drift of a whole-document interpolation cannot accumulate.
+	newLo, newHi := 0, len(r.newStarts)-1
+	if lo > 0 {
+		newLo = r.pair[lo-1] + 1
+	}
+	if hi+1 < len(r.pair) {
+		newHi = r.pair[hi+1] - 1
+	}
+	if newHi-newLo == hi-lo {
+		j := newLo + (i - lo)
+		oldLine := r.lineLen(r.oldStarts, r.oldLen, i)
+		newLine := r.lineLen(r.newStarts, r.newLen, j)
+		within := pos - r.oldStarts[i]
+		if within >= oldLine {
+			return r.newStarts[j] + newLine
+		}
+		return r.newStarts[j] + within*newLine/oldLine
+	}
+	// Otherwise interpolate across the stretch.
 	oldA := r.oldStarts[lo]
 	oldB := r.oldLen
 	if hi+1 < len(r.oldStarts) {

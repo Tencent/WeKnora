@@ -254,7 +254,9 @@ func enrichSearchResultsImageInfo(
 	var chunkIDs []string
 	seen := make(map[string]bool)
 	for _, r := range results {
-		if r.ImageInfo != "" && !needsPageQuotes(r.SourceLocators) {
+		// Results that already carry image info only need their children
+		// again when they are scanned pages waiting for recognized text.
+		if r.ImageInfo != "" && !scannedPagesOnly(r.SourceLocators) {
 			continue
 		}
 		if !seen[r.ID] {
@@ -288,6 +290,21 @@ func needsPageQuotes(locators types.SourceLocators) bool {
 		}
 	}
 	return false
+}
+
+// scannedPagesOnly reports whether every locator is a textless whole PDF
+// page, as for a scanned PDF. An embedded figure inside a text page also
+// yields a textless page locator, but its chunk has boxed text locators too.
+func scannedPagesOnly(locators types.SourceLocators) bool {
+	if len(locators) == 0 {
+		return false
+	}
+	for _, loc := range locators {
+		if loc.Type != types.SourceLocatorPDF || loc.Page <= 0 || len(loc.BBox) != 0 || !weakQuote(loc.Quote) {
+			return false
+		}
+	}
+	return true
 }
 
 func weakQuote(quote string) bool {

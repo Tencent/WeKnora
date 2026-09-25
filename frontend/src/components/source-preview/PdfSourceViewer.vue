@@ -39,7 +39,14 @@ const marks = reactive<Record<number, Mark[]>>({})
 const pdf = shallowRef<PdfDocument | null>(null)
 
 const pageElements = new Map<number, HTMLElement>()
-const rendered = new Map<number, { scale: number; task?: { cancel: () => void }; textLayer?: { cancel: () => void } }>()
+type RenderEntry = {
+  scale: number
+  task?: { cancel: () => void }
+  textLayer?: { cancel: () => void }
+  /** Settles once the canvas and text layer are in place (or abandoned). */
+  done?: Promise<void>
+}
+const rendered = new Map<number, RenderEntry>()
 const renderOrder: number[] = []
 const pageTexts = new Map<number, string>()
 let pdfjs: PdfJs | null = null
@@ -109,7 +116,11 @@ async function renderPage(pageNumber: number): Promise<void> {
   const page = await doc.getPage(pageNumber)
   const scale = renderScale(page)
   const existing = rendered.get(pageNumber)
-  if (existing && Math.abs(existing.scale - scale) < 0.01) return
+  if (existing && Math.abs(existing.scale - scale) < 0.01) {
+    // Wait for a render still in flight, so callers find its text layer.
+    await existing.done
+    return
+  }
   existing?.task?.cancel()
   existing?.textLayer?.cancel()
 
@@ -122,10 +133,24 @@ async function renderPage(pageNumber: number): Promise<void> {
   canvas.height = Math.floor(viewport.height * dpr)
   canvas.className = 'pdf-source-page__canvas'
 
-  const entry: { scale: number; task?: { cancel: () => void }; textLayer?: { cancel: () => void } } = { scale }
+  const entry: RenderEntry = { scale }
   rendered.set(pageNumber, entry)
   touchRendered(pageNumber)
+  entry.done = paintPage(pageNumber, page, el, canvas, viewport, dpr, entry)
+  await entry.done
+}
 
+async function paintPage(
+  pageNumber: number,
+  page: PdfPage,
+  el: HTMLElement,
+  canvas: HTMLCanvasElement,
+  viewport: ReturnType<PdfPage['getViewport']>,
+  dpr: number,
+  entry: RenderEntry,
+): Promise<void> {
+  const lib = pdfjs
+  if (!lib) return
   const task = page.render({
     canvas,
     viewport,
@@ -141,8 +166,8 @@ async function renderPage(pageNumber: number): Promise<void> {
 
   const textDiv = document.createElement('div')
   textDiv.className = 'textLayer'
-  el.style.setProperty('--scale-factor', String(scale))
-  el.style.setProperty('--total-scale-factor', String(scale))
+  el.style.setProperty('--scale-factor', String(entry.scale))
+  el.style.setProperty('--total-scale-factor', String(entry.scale))
   const oldCanvas = el.querySelector('.pdf-source-page__canvas')
   const oldText = el.querySelector('.textLayer')
   oldCanvas?.replaceWith(canvas)
@@ -150,7 +175,7 @@ async function renderPage(pageNumber: number): Promise<void> {
   oldText?.remove()
   canvas.after(textDiv)
 
-  const textLayer = new pdfjs.TextLayer({
+  const textLayer = new lib.TextLayer({
     textContentSource: page.streamTextContent(),
     container: textDiv,
     viewport,
@@ -255,6 +280,8 @@ async function markQuoteOnPage(pageNumber: number, quotes: string[], version: nu
   const quote = quotes.find((q) => findInText(text, q))
   if (!quote || version !== locateVersion) return null
   await renderPage(pageNumber)
+  // A concurrent render may have replaced the one awaited; wait for the live one.
+  await rendered.get(pageNumber)?.done
   if (version !== locateVersion) return null
   const el = pageElements.get(pageNumber)
   const layer = el?.querySelector('.textLayer')

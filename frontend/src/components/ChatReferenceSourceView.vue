@@ -102,6 +102,8 @@ const chunkContent = ref('')
 const chunkType = ref('')
 const meta = reactive({ fileName: '', fileType: '', knowledgeSource: '', knowledgeType: '', title: '' })
 let loadVersion = 0
+/** The knowledge whose file the preview currently shows. */
+let shownKnowledgeId = ''
 
 const displayName = computed(() => meta.fileName || props.target.fileName || props.target.title || '')
 const displayTitle = computed(() => props.target.title || meta.title || displayName.value)
@@ -195,12 +197,16 @@ function buildLocate(): SourceLocateRequest {
 
 async function load() {
   const version = ++loadVersion
-  mode.value = 'loading'
   status.value = 'idle'
   locatedPage.value = 0
   locate.value = null
-  await Promise.all([loadMeta(version), loadChunk(version)])
+  // Another citation in the open file: keep the preview mounted and only
+  // move the highlight, instead of downloading and rendering the file again.
+  const sameFile = mode.value === 'file' && shownKnowledgeId === props.target.knowledgeId
+  if (!sameFile) mode.value = 'loading'
+  await Promise.all([sameFile ? Promise.resolve() : loadMeta(version), loadChunk(version)])
   if (version !== loadVersion) return
+  shownKnowledgeId = props.target.knowledgeId
   const next = resolveMode()
   mode.value = next
   if (next === 'none') {

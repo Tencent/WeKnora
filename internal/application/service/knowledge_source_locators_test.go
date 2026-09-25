@@ -28,6 +28,17 @@ func TestAttachStructureBlocksForPassThroughText(t *testing.T) {
 	kept := &types.ReadResult{MarkdownContent: content, SourceBlocks: []types.SourceBlock{{Start: 0, End: 1}}}
 	attachStructureBlocks(context.Background(), "md", []byte(content), kept)
 	assert.Len(t, kept.SourceBlocks, 1)
+
+	// Viewers decode without the BOM, so text offsets start after it while
+	// the blocks still cover the markdown that holds it.
+	withBOM := "\ufeff正文一段\n\n正文二段"
+	bom := &types.ReadResult{MarkdownContent: withBOM}
+	attachStructureBlocks(context.Background(), "txt", []byte(withBOM), bom)
+	require.Len(t, bom.SourceBlocks, 2)
+	assert.Equal(t, 1, bom.SourceBlocks[0].Start)
+	assert.Equal(t, 0, bom.SourceBlocks[0].Locator.Start)
+	assert.Equal(t, 6, bom.SourceBlocks[1].Locator.Start)
+	assert.Equal(t, 7, bom.SourceBlocks[1].Start)
 }
 
 func TestTranscriptWithSegments(t *testing.T) {

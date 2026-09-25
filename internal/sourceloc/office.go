@@ -296,6 +296,8 @@ func drawingParagraphs(doc []byte) []string {
 // ---- xlsx / csv -----------------------------------------------------------
 
 // xlsxUnits lists every non-empty row of every sheet with its row number.
+// Rows are streamed so a large workbook is never materialized whole, and
+// reading stops once maxUnits rows are listed.
 func xlsxUnits(data []byte) ([]Unit, error) {
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
@@ -304,24 +306,37 @@ func xlsxUnits(data []byte) ([]Unit, error) {
 	defer func() { _ = f.Close() }()
 	var units []Unit
 	for _, sheet := range f.GetSheetList() {
-		rows, err := f.GetRows(sheet)
-		if err != nil {
-			continue
-		}
-		for r, cells := range rows {
-			text := strings.TrimSpace(strings.Join(cells, " "))
-			if text == "" {
-				continue
-			}
-			units = append(units, Unit{Text: text, Locator: types.SourceLocator{
-				Type: types.SourceLocatorSheet, Sheet: sheet, RowStart: r + 1, RowEnd: r + 1,
-			}})
-			if len(units) >= maxUnits {
-				return units, nil
-			}
+		units = appendSheetUnits(f, sheet, units)
+		if len(units) >= maxUnits {
+			break
 		}
 	}
 	return units, nil
+}
+
+// appendSheetUnits appends the non-empty rows of one sheet, up to maxUnits
+// units in total.
+func appendSheetUnits(f *excelize.File, sheet string, units []Unit) []Unit {
+	rows, err := f.Rows(sheet)
+	if err != nil {
+		return units
+	}
+	defer func() { _ = rows.Close() }()
+	// The iterator visits every row number, missing rows included.
+	for row := 1; rows.Next() && len(units) < maxUnits; row++ {
+		cells, err := rows.Columns()
+		if err != nil {
+			break
+		}
+		text := strings.TrimSpace(strings.Join(cells, " "))
+		if text == "" {
+			continue
+		}
+		units = append(units, Unit{Text: text, Locator: types.SourceLocator{
+			Type: types.SourceLocatorSheet, Sheet: sheet, RowStart: row, RowEnd: row,
+		}})
+	}
+	return units
 }
 
 // csvUnits lists every record of a CSV file as a row of its only sheet.

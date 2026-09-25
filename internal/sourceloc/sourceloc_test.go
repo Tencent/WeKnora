@@ -3,8 +3,10 @@ package sourceloc
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,6 +45,35 @@ func TestRemapBlocksDropsCollapsedBlocks(t *testing.T) {
 	out := RemapBlocks(blocks, "abc\ndef", "abc\ndef")
 	require.Len(t, out, 1)
 	assert.Equal(t, 3, out[0].End)
+}
+
+// A scanned PDF is only page images and blank lines, so no line survives the
+// image URL rewrite; each page must still land on its own line.
+func TestRemapBlocksKeepsRewrittenLinesOnTheirPages(t *testing.T) {
+	var oldLines, newLines []string
+	var blocks []types.SourceBlock
+	offset := 0
+	for page := 1; page <= 300; page++ {
+		line := fmt.Sprintf("![doc_page_%d.jpg](images/doc_page_%d.jpg)", page, page)
+		if page > 1 {
+			offset += 2
+		}
+		blocks = append(blocks, types.SourceBlock{
+			Start: offset, End: offset + len(line),
+			Locator: types.SourceLocator{Type: types.SourceLocatorPDF, Page: page},
+		})
+		offset += len(line)
+		oldLines = append(oldLines, line)
+		newLines = append(newLines, fmt.Sprintf("![doc_page_%d.jpg](local://1/images/0123456789abcdef.jpg)", page))
+	}
+	oldText, newText := strings.Join(oldLines, "\n\n"), strings.Join(newLines, "\n\n")
+	idx := NewIndex(newText, RemapBlocks(blocks, oldText, newText))
+	for i, line := range newLines {
+		at := strings.Index(newText, line) + strings.Index(line, "local://")
+		locs := idx.LocatorsAt(utf8.RuneCountInString(newText[:at]))
+		require.Len(t, locs, 1, "page %d", i+1)
+		assert.Equal(t, i+1, locs[0].Page)
+	}
 }
 
 func TestAlignPlacesUnitsInOrder(t *testing.T) {

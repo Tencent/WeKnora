@@ -47,3 +47,20 @@ func TestEnrichSearchResultsGivesScannedPagesTheirOCRText(t *testing.T) {
 		t.Fatalf("a boxed text locator must keep its quote, got %q", results[1].SourceLocators[0].Quote)
 	}
 }
+
+// A text page's chunk that already has its image info is not re-queried just
+// because an embedded figure left a textless page locator.
+func TestEnrichSearchResultsSkipsTextPagesWithImageInfo(t *testing.T) {
+	results := []*types.SearchResult{{
+		ID:        "text",
+		ImageInfo: `[{"url":"local://fig.png"}]`,
+		SourceLocators: types.SourceLocators{
+			{Type: types.SourceLocatorPDF, Page: 2, BBox: []float64{0, 0, 1, 0.5}, Quote: "body text"},
+			{Type: types.SourceLocatorPDF, Page: 2},
+		},
+	}}
+	enrichSearchResultsImageInfo(results, func(parentIDs []string) ([]*types.Chunk, error) {
+		t.Fatalf("unexpected child lookup for %v", parentIDs)
+		return nil, nil
+	})
+}

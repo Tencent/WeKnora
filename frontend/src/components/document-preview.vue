@@ -835,12 +835,17 @@ function locateAudio(request: SourceLocateRequest): SourceLocateResult {
   const audio = previewContent.value as HTMLAudioElement | null;
   const loc = request.locators.find((l) => l.type === 'time' && (l.end_ms || 0) > (l.start_ms || 0));
   if (!audio || !loc) return NOT_FOUND;
+  // Seek only; playback stays the reader's choice.
   const seek = () => {
     audio.currentTime = (loc.start_ms || 0) / 1000;
-    void audio.play().catch(() => {});
   };
-  if (audio.readyState >= 1) seek();
-  else audio.addEventListener('loadedmetadata', seek, { once: true });
+  if (audio.readyState >= 1) {
+    seek();
+  } else {
+    // A newer locate clears this, so an older citation cannot win the seek.
+    audio.addEventListener('loadedmetadata', seek, { once: true });
+    clearLocate.push(() => audio.removeEventListener('loadedmetadata', seek));
+  }
   audioRange.value = `${formatClock(loc.start_ms || 0)} – ${formatClock(loc.end_ms || 0)}`;
   audioQuote.value = loc.quote || '';
   return { found: true, precise: true };
