@@ -10,7 +10,7 @@ import {
   type ImageListParams,
 } from '@/api/image-gallery'
 import { updateMyPreferences } from '@/api/auth'
-import { buildProtectedFileRequest } from '@/utils/protectedFileAccess'
+import { galleryImageRequest } from './galleryImageSrc'
 
 const props = defineProps<{
   knowledgeBaseId: string
@@ -105,9 +105,9 @@ const current = computed<ImageAsset | null>(() =>
 // ---------------------------------------------------------------------------
 // Image URL resolution
 //
-// Backend returns `resource://` handles (internal storage handles) which the
-// browser cannot render directly. They must be fetched through the KB file
-// proxy (buildProtectedFileRequest) and turned into object URLs first.
+// Backend returns storage handles (local://, minio://, resource://, ...) which
+// the browser cannot render directly. They must be fetched through the KB file
+// proxy (galleryImageRequest) and turned into object URLs first.
 // Normal http(s) URLs pass through untouched.
 // ---------------------------------------------------------------------------
 const thumbUrls = ref<Record<string, string>>({})
@@ -127,19 +127,11 @@ function releaseBlobs(keep: Set<string> = new Set()): void {
   }
 }
 
-function isRenderable(url: string): boolean {
-  return !!url && !/^(resource|provider|storage):\/\//i.test(url)
-}
-
 async function resolveImageSrc(rawUrl: string): Promise<string> {
-  if (!rawUrl || isRenderable(rawUrl)) return rawUrl
+  const req = galleryImageRequest(rawUrl, props.knowledgeBaseId)
+  if (!req) return rawUrl
   const cached = blobByRawUrl.get(rawUrl)
   if (cached) return cached
-  const req = buildProtectedFileRequest(rawUrl, {
-    mode: 'knowledgeBase',
-    kbId: props.knowledgeBaseId,
-  })
-  if (!req) return rawUrl
   try {
     const resp = await fetch(req.url, { headers: req.headers })
     if (!resp.ok) return rawUrl
