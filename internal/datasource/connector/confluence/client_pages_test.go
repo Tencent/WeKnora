@@ -3,6 +3,7 @@ package confluence
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,7 +32,7 @@ func TestPagesUsesOfficialFlatListAndKeepsExpandOnNext(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
-	pages, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
+	pages, _, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +50,63 @@ func TestPagesUsesOfficialFlatListAndKeepsExpandOnNext(t *testing.T) {
 	}
 }
 
+func TestServerPagesStopAfterRepeatedEmptyPages(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		results := `[]`
+		if r.URL.Query().Get("start") == "" {
+			results = `[{"id": "1", "title": "Root", "version": {"number": 1}}]`
+		}
+		next := fmt.Sprintf("/rest/api/space/ENG/content/page?limit=100&start=%d", calls*100)
+		_, _ = fmt.Fprintf(w, `{"results": %s, "_links": {"next": %q}}`, results, next)
+	}))
+	t.Cleanup(server.Close)
+
+	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
+	pages, complete, err := c.pages(context.Background(), space{Key: "ENG", Name: "Engineering"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if complete {
+		t.Fatal("a listing cut short by empty pages must not report complete")
+	}
+	if len(pages) != 1 || pages[0].ID != "1" {
+		t.Fatalf("pages = %#v", pages)
+	}
+	if calls != 1+maxEmptyServerPages {
+		t.Fatalf("calls = %d, want %d", calls, 1+maxEmptyServerPages)
+	}
+}
+
+func TestServerPagesContinuePastOneEmptyPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("start") {
+		case "":
+			_, _ = w.Write([]byte(`{"results": [{"id": "1", "title": "A"}],
+				"_links": {"next": "/rest/api/space/ENG/content/page?limit=100&start=100"}}`))
+		case "100":
+			// Every page in this window was filtered out by permissions.
+			_, _ = w.Write([]byte(`{"results": [],
+				"_links": {"next": "/rest/api/space/ENG/content/page?limit=100&start=200"}}`))
+		default:
+			_, _ = w.Write([]byte(`{"results": [{"id": "2", "title": "B"}]}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
+	pages, complete, err := c.pages(context.Background(), space{Key: "ENG", Name: "Engineering"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete || len(pages) != 2 {
+		t.Fatalf("complete = %v, pages = %#v", complete, pages)
+	}
+}
+
 func TestPagesAcceptsNestedContentEnvelope(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -61,7 +119,7 @@ func TestPagesAcceptsNestedContentEnvelope(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
-	pages, err := c.pages(context.Background(), space{Key: "ENG", Name: "Engineering"})
+	pages, _, err := c.pages(context.Background(), space{Key: "ENG", Name: "Engineering"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +166,7 @@ func TestPagesCloudFollowsNextAndKeepsDepth(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	c := &client{cfg: config{baseURL: server.URL + "/wiki", edition: editionCloud}, http: server.Client()}
-	pages, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
+	pages, _, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,5 +175,36 @@ func TestPagesCloudFollowsNextAndKeepsDepth(t *testing.T) {
 	}
 	if len(depths) != 2 || depths[0] != "all" || depths[1] != "all" {
 		t.Fatalf("depth query = %#v", depths)
+	}
+}
+
+func TestPageInSpace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("expand") != "space" {
+			t.Errorf("expand = %q, want space", r.URL.Query().Get("expand"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/api/content/current":
+			_, _ = w.Write([]byte(`{"id": "current", "status": "current", "space": {"key": "ENG"}}`))
+		case "/rest/api/content/trashed":
+			_, _ = w.Write([]byte(`{"id": "trashed", "status": "trashed", "space": {"key": "ENG"}}`))
+		case "/rest/api/content/moved":
+			_, _ = w.Write([]byte(`{"id": "moved", "status": "current", "space": {"key": "OPS"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	c := &client{cfg: config{baseURL: server.URL}, http: server.Client()}
+	for id, want := range map[string]bool{"current": true, "trashed": false, "moved": false, "deleted": false} {
+		got, err := c.pageInSpace(context.Background(), id, "ENG")
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if got != want {
+			t.Errorf("pageInSpace(%s) = %v, want %v", id, got, want)
+		}
 	}
 }

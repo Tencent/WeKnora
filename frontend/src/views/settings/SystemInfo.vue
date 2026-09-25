@@ -198,6 +198,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getSystemInfo, type SystemInfo } from '@/api/system'
 import { useI18n } from 'vue-i18n'
+import { docsUrl } from '@/utils/docsUrl'
 
 const { t, locale } = useI18n()
 
@@ -245,8 +246,7 @@ function formatUptime(totalSeconds: number): string {
   return parts.join(' ')
 }
 
-const troubleshootingDocsURL =
-  'https://github.com/Tencent/WeKnora/blob/main/website-docs/01-getting-started/05-troubleshooting.md#database-migrations'
+const troubleshootingDocsURL = docsUrl('troubleshootingMigrations')
 
 // Pre-fills a new issue with the current migration error so users don't have to
 // paste it manually. Body is intentionally minimal — the bug template will fill

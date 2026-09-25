@@ -187,8 +187,7 @@ func TestStreamReportsEmptyLengthTruncation(t *testing.T) {
 	))
 
 	want := event.AgentFinalAnswerData{
-		Content: "Sorry, this answer hit the model's per-response output limit before any text was produced. " +
-			"Try narrowing the question, or raise max_completion_tokens.",
+		Content:   EmptyTruncatedAnswerFallback,
 		Done:      true,
 		Truncated: true,
 	}
@@ -225,7 +224,7 @@ func TestStreamMarksPartialLengthTruncation(t *testing.T) {
 			require.False(t, events[0].Truncated)
 			require.True(t, events[1].Done)
 			require.True(t, events[1].Truncated)
-			require.NotContains(t, events[1].Content, emptyTruncatedAnswerFallback)
+			require.NotContains(t, events[1].Content, EmptyTruncatedAnswerFallback)
 		})
 	}
 }
@@ -249,4 +248,37 @@ func TestStreamLeavesEmptyNaturalStopUnchanged(t *testing.T) {
 		return len(bus.finalAnswerEvents()) == 1
 	}, 2*time.Second, 5*time.Millisecond)
 	require.Equal(t, []event.AgentFinalAnswerData{{Done: true}}, bus.finalAnswerEvents())
+}
+
+func TestStreamReportsIncompleteAsError(t *testing.T) {
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "partial"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: types.FinishReasonIncomplete},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-incomplete"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(
+		context.Background(), types.CHAT_COMPLETION_STREAM, chatManage,
+		func() *PluginError { return nil },
+	))
+
+	errorMessage := func() string {
+		bus.mu.Lock()
+		defer bus.mu.Unlock()
+		for _, evt := range bus.events {
+			if data, ok := evt.Data.(event.ErrorData); ok {
+				return data.Error
+			}
+		}
+		return ""
+	}
+	require.Eventually(t, func() bool { return errorMessage() != "" }, 2*time.Second, 5*time.Millisecond)
+	require.Equal(t, types.StreamEndedEarlyError, errorMessage())
+	for _, answer := range bus.finalAnswerEvents() {
+		require.False(t, answer.Done, "a cut-off stream must not close the answer as complete")
+	}
 }

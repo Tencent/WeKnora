@@ -70,6 +70,34 @@ test('subscriptions deduplicate targets, isolate configurations and preserve req
   assert.ok(f.requests.every(request => request.options.signal.aborted))
 })
 
+test('an in-progress done frame does not complete the run', () => {
+  const f = fixture(), done: unknown[] = []
+  const state = f.create({ onDone: () => done.push(true) })
+  state.follow('a', 'skill')
+  f.send(0, {
+    percent: 0,
+    stage: 'installing',
+    status: 'installing',
+    log: 'live progress is unavailable; poll the skill for its status',
+    done: true,
+  })
+  assert.equal(done.length, 0)
+  state.follow('a', 'skill')
+  f.send(1, { percent: 100, stage: 'done', status: 'ready', done: true })
+  assert.deepEqual(done, [true])
+})
+
+test('a detached frame keeps following the run until it finishes', () => {
+  const f = fixture(), done: unknown[] = []
+  const state = f.create({ onDone: () => done.push(true) })
+  state.follow('a', 'skill')
+  f.send(0, { percent: 60, stage: 'detached', status: 'installing', done: true })
+  assert.equal(done.length, 0)
+  assert.equal(f.requests.length, 2)
+  f.send(1, { percent: 100, stage: 'done', status: 'ready', done: true })
+  assert.deepEqual(done, [true])
+})
+
 test('completion fires once and a reused skill ID clears the catalog progress before retry', () => {
   const f = fixture(), done: unknown[] = []
   const state = f.create({ onDone: (target, event) => done.push([target, event]) })

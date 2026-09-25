@@ -6,18 +6,32 @@
           <h2>{{ $t('modelSettings.title') }}</h2>
           <p class="section-description">{{ $t('modelSettings.description') }}</p>
         </div>
-        <t-button
-          v-if="authStore.hasRole('admin')"
-          type="button"
-          theme="primary"
-          variant="text"
-          size="medium"
-          class="model-test-trigger"
-          @click="showDebugDrawer = true"
-        >
-          <template #icon><play-circle-icon /></template>
-          {{ $t('modelSettings.actions.debugModel') }}
-        </t-button>
+        <div class="model-header-actions">
+          <t-button
+            v-if="authStore.isSystemAdmin"
+            type="button"
+            theme="primary"
+            variant="text"
+            size="medium"
+            class="model-test-trigger"
+            @click="uiStore.openSettings('model-catalog')"
+          >
+            <template #icon><t-icon name="control-platform" /></template>
+            {{ $t('modelCatalog.title') }}
+          </t-button>
+          <t-button
+            v-if="authStore.hasRole('admin')"
+            type="button"
+            theme="primary"
+            variant="text"
+            size="medium"
+            class="model-test-trigger"
+            @click="showDebugDrawer = true"
+          >
+            <template #icon><play-circle-icon /></template>
+            {{ $t('modelSettings.actions.debugModel') }}
+          </t-button>
+        </div>
       </div>
 
       <div class="builtin-models-hint" role="note">
@@ -27,7 +41,7 @@
             ? 'modelSettings.builtinModels.descriptionAdmin'
             : 'modelSettings.builtinModels.description') }}
         </p>
-        <a class="doc-link" href="https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/06-models.md" target="_blank"
+        <a class="doc-link" :href="docsUrl('models')" target="_blank"
           rel="noopener noreferrer">
           {{ $t('modelSettings.builtinModels.viewGuide') }}
           <t-icon name="link" class="link-icon" />
@@ -297,6 +311,7 @@ import { useUIStore } from '@/stores/ui'
 import { focusKbEditorSection } from '@/config/contextualGuides'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useModelProvidersStore } from '@/stores/modelProviders'
+import { docsUrl } from '@/utils/docsUrl'
 import {
   formatContextWindow,
   isDefaultContextWindow,
@@ -890,6 +905,13 @@ onMounted(() => {
 
 .section-header {
   .settings-section-header();
+}
+
+.model-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-shrink: 0;
 }
 
 .model-test-trigger {

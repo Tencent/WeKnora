@@ -106,6 +106,15 @@ func compileSeatbelt(p core.Policy) (seatbeltProgram, error) {
 		)
 	}
 
+	if len(p.WritableRoots) > 0 {
+		// Host temp opens with the first writable root, for chat and install
+		// alike. A policy with none (Ask mode before approval) must not write
+		// anywhere. /tmp is a symlink of /private/tmp and Seatbelt matches the
+		// resolved vnode, so both names are required. /var/folders stays closed.
+		writeAllows = append(writeAllows,
+			`(allow file-write* (subpath "/tmp") (subpath "/private/tmp"))`)
+	}
+
 	networkRules, err := seatbeltNetworkRules(p)
 	if err != nil {
 		return seatbeltProgram{}, err

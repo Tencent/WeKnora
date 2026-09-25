@@ -218,6 +218,7 @@ import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { getSession } from '@/api/chat/index'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { docsUrl } from '@/utils/docsUrl'
 import {
   deleteSandboxConfig,
   getSandboxConfigInventory,
@@ -238,7 +239,7 @@ const dockerBackendEnabled = computed(() =>
   deploymentCapabilities.isSupported('settings.sandbox.docker'),
 )
 
-const sandboxGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/website-docs/06-development/04-sandbox-deployment.md'
+const sandboxGuideUrl = docsUrl('sandboxDeployment')
 
 const backendTypes = [...NAMED_SANDBOX_BACKEND_TYPES]
 
@@ -569,8 +570,8 @@ async function forceRemove(record: SandboxConfigRecord) {
   await removeRecord(record, true)
 }
 
-onMounted(() => {
-  void deploymentCapabilities.ensureLoaded()
+onMounted(async () => {
+  await deploymentCapabilities.ensureLoaded()
   load()
 })
 </script>

@@ -2096,6 +2096,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 		nil,
 		&transcriptStreams{},
 		&transcriptMessages{},
+		HostSandboxManager{},
 	)
 	fx.svc.now = func() time.Time { return time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC) }
 	return fx
@@ -3307,9 +3308,9 @@ func (s *installSessionService) KnowledgeQAByEvent(context.Context, *types.ChatM
 }
 
 func (s *installSessionService) SearchKnowledge(
-	context.Context, []string, []string, []types.TagScope, string,
-) ([]*types.SearchResult, error) {
-	return nil, nil
+	context.Context, []string, []string, []types.TagScope, string, *types.KnowledgeSearchOptions,
+) (*types.RetrievalResult, error) {
+	return &types.RetrievalResult{}, nil
 }
 
 func (s *installSessionService) AgentQA(context.Context, *types.QARequest, *event.EventBus) error {

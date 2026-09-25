@@ -179,7 +179,16 @@ helm install weknora ./helm \
 | `frontend.enabled` | Enable frontend | `true` |
 | `frontend.replicaCount` | Number of replicas | `1` |
 | `frontend.image.repository` | Image repository | `wechatopenai/weknora-ui` |
-| `frontend.image.tag` | Image tag | `latest` |
+| `frontend.image.tag` | Image tag | `""` (uses appVersion) |
+
+### DocReader
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `docreader.enabled` | Enable DocReader | `true` |
+| `docreader.replicaCount` | Number of replicas | `1` |
+| `docreader.image.repository` | Image repository | `wechatopenai/weknora-docreader` |
+| `docreader.image.tag` | Image tag | `""` (uses appVersion) |
 
 ### PostgreSQL (ParadeDB)
 

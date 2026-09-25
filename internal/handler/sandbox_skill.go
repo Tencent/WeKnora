@@ -671,17 +671,12 @@ func (h *SandboxSkillHandler) InstallEvents(c *gin.Context) {
 		h.emit(c, terminal)
 		return
 	}
-	if events == nil {
-		// Nothing publishes progress without Redis. One frame stating the
-		// durable status is all this connection can ever say.
-		h.emit(c, skillInstallEvent{
-			Stage:  skill.Status,
-			Status: skill.Status,
-			Log:    "live progress is unavailable; poll the skill for its status",
-			Done:   true,
-		})
-		return
-	}
+	// events is nil without Redis: nothing is ever published. A done frame
+	// here would mean the run finished, and the client would reload and
+	// subscribe again for as long as the row stays in progress. A receive on
+	// a nil channel never fires, so the poll below is what notices the row
+	// leaving installing or removing — the same fallback a dropped
+	// subscription already uses.
 
 	poll := time.NewTicker(h.pollInterval)
 	defer poll.Stop()

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "metadata": [
+    {
+      "path": "../../internal/models/catalog/data/seed.json",
+      "description": "Pinned migration metadata; per-entry source links point to vendor documentation."
+    }
+  ],
+  "models_dev": {
+    "url": "https://models.dev/api.json",
+    "provider_map": {
+      "openai": "openai",
+      "anthropic": "anthropic",
+      "gemini": "google",
+      "deepseek": "deepseek",
+      "zhipu": "zhipuai",
+      "aliyun": "alibaba-cn",
+      "volcengine": "volcengine",
+      "moonshot": "moonshotai-cn",
+      "minimax": "minimax-cn",
+      "mimo": "xiaomi",
+      "siliconflow": "siliconflow-cn",
+      "modelscope": "modelscope",
+      "qiniu": "qiniu-ai",
+      "longcat": "longcat",
+      "novita": "novita-ai",
+      "nvidia": "nvidia",
+      "openrouter": "openrouter",
+      "requesty": "requesty"
+    }
+  }
+}

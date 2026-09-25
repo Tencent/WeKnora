@@ -1,6 +1,6 @@
 // Package openairesponses implements the OpenAI Responses wire protocol
 // (POST /responses). Every vendor-specific deviation is driven by
-// catalog.OpenAIResponsesSettings; this package contains no vendor names.
+// api.OpenAIResponsesSettings; this package contains no vendor names.
 package openairesponses
 
 import (
@@ -9,13 +9,12 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
-// Config is everything the client needs, already resolved by the catalog.
+// Config is everything the client needs, already resolved by the api.
 type Config struct {
 	Endpoint api.Endpoint
-	Settings catalog.OpenAIResponsesSettings
+	Settings api.OpenAIResponsesSettings
 	// ThinkingLevels maps neutral levels to the vendor vocabulary.
 	ThinkingLevels api.ThinkingLevelMap
 	// Reasoning marks a reasoning model: sampling parameters are dropped and

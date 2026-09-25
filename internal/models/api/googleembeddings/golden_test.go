@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +17,7 @@ const documentedResponse = `{"embeddings":[{"values":[0.1,0.2]},{"values":[0.3,0
 
 var retrievalTasks = map[string]string{"document": "RETRIEVAL_DOCUMENT", "query": "RETRIEVAL_QUERY"}
 
-func newClient(url, model string, settings catalog.EmbeddingsSettings, dims int) *Client {
+func newClient(url, model string, settings api.EmbeddingsSettings, dims int) *Client {
 	return New(Config{
 		Endpoint:   api.Endpoint{BaseURL: url, Model: model, Auth: api.HeaderAuth("x-goog-api-key", "k")},
 		Settings:   settings,
@@ -30,7 +29,7 @@ func newClient(url, model string, settings catalog.EmbeddingsSettings, dims int)
 // fully qualified models/{id}.
 func TestRequestBodyForATaskTypeModel(t *testing.T) {
 	c := newClient("https://generativelanguage.googleapis.com/v1beta", "gemini-embedding-001",
-		catalog.EmbeddingsSettings{
+		api.EmbeddingsSettings{
 			InputTypeField: "taskType", InputTypeValues: retrievalTasks,
 			DimensionsField: "outputDimensionality",
 		}, 768)
@@ -56,7 +55,7 @@ func TestRequestBodyForATaskTypeModel(t *testing.T) {
 // undocumented parameter, so a model that declares none sends none.
 func TestNoTaskTypeWhereTheModelHasNone(t *testing.T) {
 	c := newClient("https://generativelanguage.googleapis.com/v1beta", "gemini-embedding-2",
-		catalog.EmbeddingsSettings{}, 0)
+		api.EmbeddingsSettings{}, 0)
 	req := c.BuildRequestBody([]string{"a"}, api.EmbedDocument)["requests"].([]any)[0].(map[string]any)
 	assert.NotContains(t, req, "embedContentConfig", "no option declared, so no config object")
 	assert.NotContains(t, req, "taskType")
@@ -72,7 +71,7 @@ func TestPostsToTheModelsMethod(t *testing.T) {
 	defer server.Close()
 
 	// An id stored with the prefix must not become models/models/…
-	c := newClient(server.URL+"/v1beta", "models/gemini-embedding-001", catalog.EmbeddingsSettings{}, 0)
+	c := newClient(server.URL+"/v1beta", "models/gemini-embedding-001", api.EmbeddingsSettings{}, 0)
 	got, err := c.Embed(context.Background(), []string{"a", "b"}, api.EmbedDocument)
 	require.NoError(t, err)
 	assert.Equal(t, [][]float32{{0.1, 0.2}, {0.3, 0.4}}, got)
@@ -80,7 +79,7 @@ func TestPostsToTheModelsMethod(t *testing.T) {
 
 	// A row that chats through the OpenAI-compatible facade stores
 	// .../v1beta/openai; its embeddings still go to the native method.
-	c = newClient(server.URL+"/v1beta/openai/", "gemini-embedding-001", catalog.EmbeddingsSettings{}, 0)
+	c = newClient(server.URL+"/v1beta/openai/", "gemini-embedding-001", api.EmbeddingsSettings{}, 0)
 	_, err = c.Embed(context.Background(), []string{"a", "b"}, api.EmbedDocument)
 	require.NoError(t, err)
 	assert.Equal(t, "/v1beta/models/gemini-embedding-001:batchEmbedContents", path)
@@ -94,7 +93,7 @@ func TestShortReplyIsAnError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newClient(server.URL+"/v1beta", "gemini-embedding-001", catalog.EmbeddingsSettings{}, 0).
+	_, err := newClient(server.URL+"/v1beta", "gemini-embedding-001", api.EmbeddingsSettings{}, 0).
 		Embed(context.Background(), []string{"a", "b"}, api.EmbedDocument)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "1 embeddings for 2 inputs")

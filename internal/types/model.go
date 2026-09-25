@@ -161,7 +161,7 @@ type ModelParameters struct {
 
 // ModelSpecOverride is the per-row slice of a catalog model entry that an
 // operator may pin from the UI or YAML. Compat is the flat protocol-specific
-// object documented in internal/models/catalog/compat.go.
+// object decoded by internal/models/runtime/compat.go using the API settings.
 type ModelSpecOverride struct {
 	API             string             `yaml:"api,omitempty"               json:"api,omitempty"`
 	Reasoning       *bool              `yaml:"reasoning,omitempty"         json:"reasoning,omitempty"`

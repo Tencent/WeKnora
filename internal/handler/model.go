@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -759,7 +760,7 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 // validateCatalogParameters rejects protocol / compat overrides the catalog
 // cannot interpret (unknown extra_config.api, unknown compat keys, bad
 // reasoning levels) so a typo fails at save time instead of at the first
-// call. Every model type is checked; see catalog.ValidateRow.
+// call. Every model type is checked; see modelruntime.ValidateRow.
 func validateCatalogParameters(name string, modelType types.ModelType, params *types.ModelParameters) error {
-	return catalog.ValidateRow(name, modelType, params)
+	return modelruntime.ValidateRow(name, modelType, params)
 }

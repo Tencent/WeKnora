@@ -16,6 +16,14 @@ Viewer+；API Key 可读。返回 `{code:0,data:{edition,capabilities}}`，每�
 curl "$BASE/api/v1/system/capabilities" -H "Authorization: Bearer $TOKEN"
 ```
 
+`capabilities` 中的 `settings.sandbox.host` 表示当前部署能否使用本机操作系统沙箱，目前仅 macOS 原生桌面应用可能为 supported。
+
+### POST /api/v1/system/host-project-dir
+
+用途：在运行 WeKnora 的本机弹出系统文件夹选择框，供新会话绑定本机项目目录（v0.8.2 起，仅原生桌面应用）。权限：Viewer+，仅 JWT，API Key 一律拒绝。无请求体。
+
+响应：200 `{"code":0,"msg":"success","data":{"dir":"/Users/me/project"}}`，用户取消选择时 `dir` 为空字符串；非桌面部署返回 404。
+
 ### GET /api/v1/system/info
 
 用途：系统版本与引擎信息。权限：Viewer+。
@@ -271,3 +279,32 @@ curl $BASE/api/v1/system/admin/audit-log -H "Authorization: Bearer $TOKEN"
 ## 实现参考
 
 路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`。
+
+
+## 模型目录（/api/v1/system/admin/model-catalog）
+
+仅系统管理员用户会话可访问，API Key 不开放此组接口。
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `GET /system/admin/model-catalog` | 返回当前 `version`、`baseline`、管理员 `overlay`、最近 20 个历史版本，以及 `builtin` / `deployment` / `effective` 目录 |
+| `POST /system/admin/model-catalog/preview` | 校验覆盖文档并返回候选目录（仅 `effective` 与规范化后的 `overlay`，`history` / `builtin` / `deployment` 为 `null`），不持久化、不发布 |
+| `PUT /system/admin/model-catalog` | 校验、保存新版本并发布；审计仅记录版本元信息 |
+
+预览和发布使用相同请求体：
+
+```json
+{
+  "version": 0,
+  "baseline": "GET 返回的部署基线标识",
+  "overlay": {
+    "providers": {
+      "openai": {
+        "models": [{"id": "gpt-5", "context_window": 128000}]
+      }
+    }
+  }
+}
+```
+
+响应为未包装的目录状态对象。每个厂商条目额外带 `model_thinking_levels`（按对话模型 id 列出开启思考后可选的等级，已合并厂商映射与协议能力）和 `vendor_thinking_levels`（未单独配置等级的模型所用的厂商默认等级）。非法文档返回 400；版本过期或请求实例的部署基线不一致返回 409。发布先持久化再切换本实例，其他实例约 5 秒内同步。回滚使用历史 `overlay` 配合当前 `version` / `baseline` 再次发布。完整规则和限制见[模型管理](../03-features/06-models.md#系统管理员维护模型目录)。

@@ -30,6 +30,8 @@ import {
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
+import { hostSkillsOnly, mentionSkillTargetId } from '@/utils/skillTarget';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
@@ -52,6 +54,8 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequestItem } from '@/types/mention';
+import { toolboxLocation } from '@/config/toolbox';
+import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
 const route = useRoute();
 const router = useRouter();
@@ -62,6 +66,7 @@ const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const {
   agents,
   disabledOwnAgentIds,
@@ -869,7 +874,7 @@ const browserSourceUnavailableHint = computed(() => {
 });
 
 const openBrowserConnectionSettings = () => {
-  uiStore.openSettings('browserconnection');
+  void router.push(toolboxLocation('browserconnection'));
 };
 
 const toggleBrowserSource = () => {
@@ -1097,6 +1102,28 @@ const handleModelChange = (value: string | number | Array<string | number> | und
 const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
 });
+
+const reasoningLevels = computed(() => supportedLevels(selectedModel.value?.capabilities));
+const agentReasoningLevel = computed(() => clampLevel(
+  levelFromLegacy(currentAgentConfig.value?.thinking, currentAgentConfig.value?.reasoning_effort),
+  reasoningLevels.value,
+));
+// Show the effective level while leaving the request unset until the user
+// chooses a different level. Selecting the agent's level restores inheritance.
+const displayedReasoningLevel = computed(() => settingsStore.reasoningEffortOverride || agentReasoningLevel.value);
+const showReasoningSelector = ref(false);
+const selectReasoningLevel = (level: ReasoningLevel) => {
+  settingsStore.reasoningEffortOverride = level === agentReasoningLevel.value ? '' : level;
+  showReasoningSelector.value = false;
+};
+watch([selectedModel, reasoningLevels, () => settingsStore.reasoningEffortOverride, () => settingsStore._isApplyingSessionState], () => {
+  // Wait for model resources during session restoration. Once known, an
+  // unsupported override returns to inheritance instead of inventing a level.
+  if (!settingsStore._isApplyingSessionState && selectedModel.value && settingsStore.reasoningEffortOverride
+    && !reasoningLevels.value.includes(settingsStore.reasoningEffortOverride)) {
+    settingsStore.reasoningEffortOverride = '';
+  }
+}, { immediate: true, flush: 'sync' });
 
 // 模型展示名：本空间列表中有则用名称；若为共享智能体且其 model_id 不在本空间列表中则显示“共享智能体配置的模型”
 const selectedModelDisplayName = computed(() => {
@@ -1400,9 +1427,17 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
       // The scope makes a shared agent's skills resolve in its owner's
-      // workspace, where they are actually installed.
+      // workspace, where they are actually installed. Lite agents store no
+      // sandbox config id; their skills live on the host target.
+      await deploymentCapabilities.ensureLoaded();
       await editorResources.ensureSkills(
-        currentAgentConfig.value?.sandbox_config_id,
+        mentionSkillTargetId(
+          hostSkillsOnly(
+            deploymentCapabilities.isSupported('settings.sandbox.remote'),
+            deploymentCapabilities.isSupported('settings.sandbox.host'),
+          ),
+          currentAgentConfig.value?.sandbox_config_id,
+        ),
         currentAgentScope.value,
       );
       skillItems = editorResources.skills
@@ -1789,6 +1824,7 @@ const removeFile = (id: string) => {
 };
 
 const toggleModelSelector = () => {
+  showReasoningSelector.value = false;
   // 如果智能体锁定了模型，不允许打开选择器
   if (isModelLockedByAgent.value) {
     MessagePlugin.warning(t('input.modelLockedByAgent'));
@@ -1819,6 +1855,13 @@ const toggleModelSelector = () => {
 
 const closeModelSelector = () => {
   showModelSelector.value = false;
+};
+
+const handleReasoningVisibleChange = (visible: boolean) => {
+  if (!visible) return;
+  closeModelSelector();
+  showMention.value = false;
+  showAgentModeSelector.value = false;
 };
 
 // 关闭 Agent 模式选择器（点击外部）
@@ -2885,6 +2928,34 @@ defineExpose({
               </div>
             </div>
           </t-tooltip>
+          <t-popup v-if="reasoningLevels.length > 0" v-model:visible="showReasoningSelector"
+            trigger="click" placement="top-right" :disabled="composerLocked"
+            :overlay-inner-style="{ padding: '4px', borderRadius: 'var(--app-radius-lg)' }"
+            @visible-change="handleReasoningVisibleChange">
+            <button type="button" class="model-selector-trigger reasoning-effort-trigger"
+              :disabled="composerLocked" :class="{ disabled: composerLocked }"
+              :aria-label="`${$t('modelSettings.debug.reasoningEffort')}: ${$t(levelLabelKey(displayedReasoningLevel))}`"
+              :title="$t('modelSettings.debug.reasoningEffort')" aria-haspopup="menu" :aria-expanded="showReasoningSelector"
+              @keydown.esc="showReasoningSelector = false">
+              <span class="model-selector-name">{{ $t(levelLabelKey(displayedReasoningLevel)) }}</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
+                :class="{ rotate: showReasoningSelector }">
+                <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
+              </svg>
+            </button>
+            <template #content>
+              <div class="reasoning-effort-menu" role="menu" :aria-label="$t('modelSettings.debug.reasoningEffort')"
+                @keydown.esc="showReasoningSelector = false">
+                <div class="reasoning-effort-title" role="presentation">{{ $t('modelSettings.debug.reasoningEffort') }}</div>
+                <button v-for="level in reasoningLevels" :key="level" type="button" role="menuitemradio"
+                  class="reasoning-effort-option" :class="{ selected: level === displayedReasoningLevel }"
+                  :aria-checked="level === displayedReasoningLevel" @click="selectReasoningLevel(level)">
+                  <span>{{ $t(levelLabelKey(level)) }}</span>
+                  <t-icon v-if="level === displayedReasoningLevel" name="check" size="14px" />
+                </button>
+              </div>
+            </template>
+          </t-popup>
         </div>
 
         <Teleport to="body">
@@ -3736,6 +3807,58 @@ const getImgSrc = (url: string) => {
 }
 
 /* 模型显示样式 */
+.model-selector-trigger.reasoning-effort-trigger {
+  flex-shrink: 0;
+  min-width: 0;
+  box-sizing: content-box;
+  background: transparent;
+  font: inherit;
+}
+
+.reasoning-effort-menu {
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reasoning-effort-title {
+  padding: 6px 8px;
+  margin-bottom: 2px;
+  border-bottom: .5px solid var(--td-component-stroke);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.reasoning-effort-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover, &:focus-visible {
+    background: var(--td-bg-color-secondarycontainer-hover);
+  }
+
+  &.selected {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+}
+
 .model-display {
   display: flex;
   align-items: center;

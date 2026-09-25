@@ -1282,6 +1282,15 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 ) error {
 	clean := strings.TrimSpace(content)
 	if clean == "" {
+		// The caller already marked the row processing; with nothing to
+		// index no later stage would ever move it on.
+		if err := s.repo.UpdateKnowledgeColumns(ctx, knowledge.ID, map[string]interface{}{
+			"parse_status":  types.ParseStatusFailed,
+			"error_message": "manual knowledge content is empty",
+			"updated_at":    time.Now(),
+		}); err != nil {
+			return fmt.Errorf("mark empty manual knowledge %s failed: %w", knowledge.ID, err)
+		}
 		return nil
 	}
 

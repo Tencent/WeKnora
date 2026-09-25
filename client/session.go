@@ -479,12 +479,22 @@ type SearchKnowledgeRequest struct {
 	KnowledgeIDs     []string        `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
 	TagIDs           []string        `json:"tag_ids,omitempty"`            // Tag IDs for filtering within a single KB
 	MentionedItems   []MentionedItem `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
+
+	// Optional overrides of the tenant retrieval config.
+	VectorThreshold      *float64       `json:"vector_threshold,omitempty"`       // Minimum vector similarity
+	KeywordThreshold     *float64       `json:"keyword_threshold,omitempty"`      // Minimum keyword score
+	MatchCount           int            `json:"match_count,omitempty"`            // Number of results to return
+	DisableKeywordsMatch bool           `json:"disable_keywords_match,omitempty"` // Vector recall only
+	DisableVectorMatch   bool           `json:"disable_vector_match,omitempty"`   // Keyword recall only
+	Rerank               *RerankOptions `json:"rerank,omitempty"`                 // Rerank override
 }
 
 // SearchKnowledgeResponse search results response
 type SearchKnowledgeResponse struct {
 	Success bool            `json:"success"`
 	Data    []*SearchResult `json:"data"`
+	// Meta reports what the rerank stage did.
+	Meta *RetrievalMeta `json:"meta,omitempty"`
 }
 
 // SearchKnowledge performs knowledge base search without LLM summarization.
@@ -494,6 +504,20 @@ func (c *Client) SearchKnowledge(
 	request *SearchKnowledgeRequest,
 	opts ...ResourceURLOptions,
 ) ([]*SearchResult, error) {
+	response, err := c.SearchKnowledgeDetailed(ctx, request, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+// SearchKnowledgeDetailed performs knowledge base search and returns the
+// whole response, including the rerank diagnostics in Meta.
+func (c *Client) SearchKnowledgeDetailed(
+	ctx context.Context,
+	request *SearchKnowledgeRequest,
+	opts ...ResourceURLOptions,
+) (*SearchKnowledgeResponse, error) {
 	debugLogger.Debug("search_knowledge_start",
 		"knowledge_base_ids", request.KnowledgeBaseIDs,
 		"knowledge_ids", request.KnowledgeIDs,
@@ -526,5 +550,5 @@ func (c *Client) SearchKnowledge(
 	}
 
 	debugLogger.Debug("search_knowledge_completed", "result_count", len(response.Data))
-	return response.Data, nil
+	return &response, nil
 }
