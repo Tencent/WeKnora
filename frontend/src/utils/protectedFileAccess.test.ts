@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildProtectedFileFallbackRequest,
   buildProtectedFileRequest,
   isProtectedFileProxyPath,
   isProviderFileURL,
@@ -52,6 +53,23 @@ test('message access routes through the session-message-scoped proxy', () => {
   assert.equal(
     request?.url,
     `/api/v1/sessions/session%201/messages/message%2F1/files?file_path=${encodeURIComponent(RESOURCE)}`,
+  )
+})
+
+test('message access falls back to the tenant proxy when the server lacks the message route', () => {
+  const request = buildProtectedFileFallbackRequest(RESOURCE, {
+    mode: 'message',
+    sessionId: 'session 1',
+    messageId: 'message/1',
+  })
+
+  assert.equal(request?.url, `/files?file_path=${encodeURIComponent(RESOURCE)}`)
+})
+
+test('an embed context has no tenant-proxy fallback', () => {
+  assert.equal(
+    buildProtectedFileFallbackRequest(RESOURCE, { mode: 'embed', channelId: 'ch-1', token: 'tok-1' }),
+    null,
   )
 })
 
