@@ -661,6 +661,38 @@
         }
       }
     ],
+    "cheaperinference": [
+      {
+        "id": "gpt-5.4-mini",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "gpt-5.4",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "claude-sonnet-5",
+        "thinking_levels": {
+          "minimal": "low"
+        }
+      }
+    ],
     "deepseek": [
       {
         "id": "deepseek-v4-pro",
