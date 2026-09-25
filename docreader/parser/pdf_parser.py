@@ -893,12 +893,18 @@ def _is_artifact_column(chars: list, width: float) -> bool:
 def _filter_reading_columns(chars: list, scale: float, width: float) -> list:
     """Split into columns and drop margin / watermark strips."""
     cols = _split_columns(chars, scale, width)
-    if _looks_like_numeric_table_columns(chars, scale, width, cols):
+    table_pair = _find_numeric_table_columns(chars, scale, width, cols)
+    if table_pair is not None:
         # Keep aligned table cells in one visual stream so rows such as
         # ``Aster 124`` are not emitted as a label block followed by a value
         # block, while still dropping unrelated margin/artifact columns.
         # ``chars`` has already passed hidden/off-page filtering.
-        table_cols = [c for c in cols if not _is_artifact_column(c, width)]
+        value_col, label_col = table_pair
+        table_cols = [
+            c
+            for c in cols
+            if not _is_artifact_column(c, width) or c is value_col or c is label_col
+        ]
         if table_cols:
             return [[char for column in table_cols for char in column]]
         return [chars]
@@ -933,11 +939,18 @@ def _looks_like_numeric_table_columns(
     signal lets the caller choose the plain extractor only for that table-like
     shape instead of turning every numeric mismatch into a page-wide fallback.
     """
+    return _find_numeric_table_columns(chars, scale, width, columns) is not None
+
+
+def _find_numeric_table_columns(
+    chars: list, scale: float, width: float, columns: list | None = None
+) -> tuple[list, list] | None:
+    """Return the aligned value/label columns when a numeric table is found."""
     if not chars or width <= 0:
-        return False
+        return None
     cols = columns if columns is not None else _split_columns(chars, scale, width)
     if len(cols) < 2:
-        return False
+        return None
 
     for value_col in cols:
         span_ratio = _column_x_span(value_col) / width
@@ -1000,8 +1013,8 @@ def _looks_like_numeric_table_columns(
                 1 if len(value_ys) == 1 else max(2, (len(value_ys) + 1) // 2)
             )
             if aligned >= required_alignment:
-                return True
-    return False
+                return value_col, label_col
+    return None
 
 
 def _merge_orphan_punctuation_lines(lines: list) -> list:
