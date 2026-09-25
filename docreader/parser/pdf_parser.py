@@ -896,7 +896,11 @@ def _filter_reading_columns(chars: list, scale: float, width: float) -> list:
     if _looks_like_numeric_table_columns(chars, scale, width, cols):
         # Keep aligned table cells in one visual stream so rows such as
         # ``Aster 124`` are not emitted as a label block followed by a value
-        # block.  ``chars`` has already passed hidden/off-page filtering.
+        # block, while still dropping unrelated margin/artifact columns.
+        # ``chars`` has already passed hidden/off-page filtering.
+        table_cols = [c for c in cols if not _is_artifact_column(c, width)]
+        if table_cols:
+            return [[char for column in table_cols for char in column]]
         return [chars]
     kept = [c for c in cols if not _is_artifact_column(c, width)]
     if kept:

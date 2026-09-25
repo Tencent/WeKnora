@@ -282,6 +282,17 @@ class MarginColumnFilterTest(unittest.TestCase):
             _looks_like_numeric_table_columns(chars, scale=10.0, width=600.0)
         )
 
+    def test_numeric_table_keeps_rows_and_drops_unrelated_artifact_column(self):
+        chars = self._table_chars([("Aster", "124"), ("Willow", "237")])
+        chars.extend(
+            _char(c, 20, 28, 500 - i * 14, 512 - i * 14)
+            for i, c in enumerate("0202luJ22")
+        )
+        text = _chars_to_layout_markdown(chars, scale=10.0, width=600.0)
+        self.assertIn("Aster 124", text)
+        self.assertIn("Willow 237", text)
+        self.assertNotIn("0202luJ22", text)
+
     def test_numeric_table_hint_does_not_match_two_text_columns(self):
         left = [_char("L", 50, 150, 700 - i * 12, 712 - i * 12) for i in range(4)]
         right = [_char("R", 400, 500, 700 - i * 12, 712 - i * 12) for i in range(4)]
