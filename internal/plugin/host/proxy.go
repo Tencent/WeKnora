@@ -17,6 +17,7 @@ import (
 // permissions.egress patterns ("api.example.com", "*.atlassian.net"), which
 // the system administrator accepted at install time.
 type egressPolicy struct {
+	any      bool // "*": every public host
 	exact    map[string]bool
 	suffixes []string // ".atlassian.net"
 }
@@ -26,6 +27,10 @@ func newEgressPolicy(patterns []string) egressPolicy {
 	for _, raw := range patterns {
 		pat := strings.ToLower(strings.TrimSpace(raw))
 		if pat == "" {
+			continue
+		}
+		if pat == "*" {
+			p.any = true
 			continue
 		}
 		if rest, ok := strings.CutPrefix(pat, "*."); ok {
@@ -38,6 +43,10 @@ func newEgressPolicy(patterns []string) egressPolicy {
 }
 
 func (p egressPolicy) allows(host string) bool {
+	if p.any {
+		// The SSRF-safe dialer still refuses private addresses.
+		return true
+	}
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	if p.exact[host] {
 		return true

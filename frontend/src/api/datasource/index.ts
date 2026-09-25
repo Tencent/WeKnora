@@ -124,8 +124,12 @@ export function validateConnection(id: string) {
 }
 
 // Validate credentials without persisting (during creation or credential replacement).
-export function validateCredentials(type: string, credentials: Record<string, any>) {
-  return post('/api/v1/datasource/validate-credentials', { type, credentials })
+export function validateCredentials(
+  type: string,
+  credentials: Record<string, any>,
+  settings?: Record<string, any>,
+) {
+  return post('/api/v1/datasource/validate-credentials', { type, credentials, settings })
 }
 
 // listResources lists selectable resources for a data source. Pass parentId to

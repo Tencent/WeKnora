@@ -649,7 +649,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
 		_ = s.dsRepo.Update(ctx, ds)
-		return err
+		// Retrying cannot bring a connector back (its plugin was removed or
+		// disabled); the next scheduled or manual sync will try again.
+		return fmt.Errorf("%w: %w", asynq.SkipRetry, err)
 	}
 
 	// Parse configuration
@@ -1238,7 +1240,9 @@ func allFetchedItemsFailedError(result *types.SyncResult) error {
 }
 
 // ValidateCredentials tests connectivity using raw credentials without persisting anything.
-func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorType string, credentials map[string]interface{}) error {
+func (s *DataSourceService) ValidateCredentials(
+	ctx context.Context, connectorType string, credentials, settings map[string]interface{},
+) error {
 	connector, err := s.connectorRegistry.Get(connectorType)
 	if err != nil {
 		return err
@@ -1246,6 +1250,7 @@ func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorTy
 	config := &types.DataSourceConfig{
 		Type:        connectorType,
 		Credentials: credentials,
+		Settings:    settings,
 	}
 	if err := connector.Validate(ctx, config); err != nil {
 		return err

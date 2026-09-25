@@ -197,12 +197,24 @@ func TestEgressPatterns(t *testing.T) {
 			Contributes: Contributions{PointWebSearch: {{ID: "x", Name: Text("X", nil)}}},
 		}
 	}
-	if err := base("api.example.com", "*.atlassian.net").Validate(); err != nil {
+	if err := base("api.example.com", "*.atlassian.net", "*").Validate(); err != nil {
 		t.Fatalf("valid egress rejected: %v", err)
 	}
-	for _, bad := range []string{"*", "http://x.com", "x.com:443", "*.*.com", "10.0.0.0/8"} {
+	for _, bad := range []string{"**", "http://x.com", "x.com:443", "*.*.com", "10.0.0.0/8"} {
 		if err := base(bad).Validate(); err == nil || !strings.Contains(err.Error(), "permissions.egress") {
 			t.Errorf("egress %q: got %v", bad, err)
 		}
+	}
+}
+
+func TestStoredTypeIDLength(t *testing.T) {
+	m := &Manifest{
+		SchemaVersion: SchemaVersion, ID: "acme.a-rather-long-plugin-name", Version: "1.0.0",
+		APIVersion: ExtensionAPIVersion, Name: Text("X", nil), Publisher: Publisher{ID: "acme"},
+		Runtime:     Runtime{Type: RuntimeHost, Kind: "binary", Entry: "bin/x"},
+		Contributes: Contributions{PointConnectors: {{ID: "and-an-even-longer-connector-id", Name: Text("X", nil)}}},
+	}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "longer than the 50 characters") {
+		t.Fatalf("want a length error, got %v", err)
 	}
 }

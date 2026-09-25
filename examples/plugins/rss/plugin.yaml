@@ -1,0 +1,26 @@
+schemaVersion: 1
+id: weknora-examples.rss
+version: 1.0.0
+apiVersion: weknora.plugin/v1
+name: { en-US: RSS (plugin), zh-CN: RSS 订阅（插件版） }
+description:
+  en-US: Sync RSS, Atom and JSON feeds into a knowledge base. The builtin RSS connector, rebuilt as a code plugin.
+  zh-CN: 把 RSS、Atom、JSON Feed 同步到知识库。内置 RSS 连接器的插件实现。
+publisher: { id: weknora-examples, name: WeKnora examples }
+homepage: https://github.com/Tencent/WeKnora/tree/main/examples/plugins/rss
+license: MIT
+icon: icon.svg
+runtime: { type: host, kind: binary, entry: "bin/{os}-{arch}/rss" }
+permissions:
+  # Feed items link to pages anywhere; private addresses stay unreachable.
+  egress: ["*"]
+contributes:
+  connectors:
+    - id: rss
+      name: { en-US: RSS (plugin), zh-CN: RSS 订阅（插件版） }
+      description:
+        en-US: Articles from RSS, Atom and JSON feeds, as full text
+        zh-CN: 抓取 RSS、Atom、JSON Feed 的文章全文
+      icon: icon.svg
+      capabilities: [incremental, streaming]
+      instanceSchema: schemas/instance.yaml

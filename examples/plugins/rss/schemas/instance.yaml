@@ -1,0 +1,22 @@
+type: object
+required: [feed_urls]
+properties:
+  feed_urls:
+    type: string
+    title: Feed URLs
+    description: One feed per line
+    x-widget: textarea
+    x-group: settings
+    x-placeholder: https://example.com/feed.xml
+    x-i18n:
+      title: { zh-CN: 订阅地址 }
+      description: { zh-CN: 每行一个 }
+  auth_headers:
+    type: string
+    title: Request headers
+    description: "Optional, one per line as Name: Value; sent to feed URLs only"
+    x-secret: true
+    x-widget: textarea
+    x-i18n:
+      title: { zh-CN: 请求头 }
+      description: { zh-CN: "可选，每行一个，格式为 名称: 值；只发给订阅地址" }

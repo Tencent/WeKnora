@@ -2,8 +2,10 @@ package datasource
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -121,15 +123,21 @@ type FullSyncWithCursor interface {
 	) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
-// ConnectorRegistry manages the registration and lookup of available connectors
+// ConnectorRegistry manages the registration and lookup of available
+// connectors. Installed plugins add and remove connectors while the server
+// runs, so it is safe for concurrent use.
 type ConnectorRegistry struct {
+	mu         sync.RWMutex
 	connectors map[string]Connector
+	// plugins holds the metadata of connectors installed plugins registered.
+	plugins map[string]ConnectorMetadata
 }
 
 // NewConnectorRegistry creates a new connector registry
 func NewConnectorRegistry() *ConnectorRegistry {
 	return &ConnectorRegistry{
 		connectors: make(map[string]Connector),
+		plugins:    make(map[string]ConnectorMetadata),
 	}
 }
 
@@ -141,12 +149,51 @@ func (r *ConnectorRegistry) Register(connector Connector) error {
 	if connector.Type() == "" {
 		return ErrConnectorTypeEmpty
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.connectors[connector.Type()] = connector
 	return nil
 }
 
+// RegisterPlugin adds or replaces a plugin's connector with the metadata it
+// is listed under. It refuses to shadow a builtin connector.
+func (r *ConnectorRegistry) RegisterPlugin(connector Connector, meta ConnectorMetadata) error {
+	if connector == nil {
+		return ErrConnectorNil
+	}
+	t := connector.Type()
+	if t == "" {
+		return ErrConnectorTypeEmpty
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.connectors[t]; exists {
+		if _, isPlugin := r.plugins[t]; !isPlugin {
+			return fmt.Errorf("connector type %s already exists", t)
+		}
+	}
+	meta.Type = t
+	r.connectors[t] = connector
+	r.plugins[t] = meta
+	return nil
+}
+
+// Unregister removes a plugin's connector; builtins stay. Syncs already
+// running keep the connector they started with.
+func (r *ConnectorRegistry) Unregister(connectorType string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, isPlugin := r.plugins[connectorType]; !isPlugin {
+		return
+	}
+	delete(r.plugins, connectorType)
+	delete(r.connectors, connectorType)
+}
+
 // Get retrieves a connector by type
 func (r *ConnectorRegistry) Get(connectorType string) (Connector, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	connector, exists := r.connectors[connectorType]
 	if !exists {
 		return nil, ErrConnectorNotFound
@@ -156,6 +203,8 @@ func (r *ConnectorRegistry) Get(connectorType string) (Connector, error) {
 
 // List returns all registered connector types
 func (r *ConnectorRegistry) List() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	types := make([]string, 0, len(r.connectors))
 	for t := range r.connectors {
 		types = append(types, t)
@@ -182,6 +231,16 @@ type ConnectorMetadata struct {
 	// ConfigSchema describes DataSourceConfig.Credentials for this
 	// connector; the editor renders the credential form from it.
 	ConfigSchema *configschema.Schema `json:"config_schema,omitempty"`
+	// SettingsSchema describes DataSourceConfig.Settings (non-secret
+	// options) for connectors whose settings form is not built into the
+	// frontend, such as plugin connectors.
+	SettingsSchema *configschema.Schema `json:"settings_schema,omitempty"`
+	// Names and Descriptions localize Name and Description, keyed by
+	// locale, for plugin connectors (builtins use frontend locale keys).
+	Names        map[string]string `json:"names,omitempty"`
+	Descriptions map[string]string `json:"descriptions,omitempty"`
+	// PluginID names the installed plugin providing the connector.
+	PluginID string `json:"plugin_id,omitempty"`
 }
 
 // GetConnectorMetadata returns metadata for all available connectors
@@ -346,6 +405,8 @@ func ListAvailableConnectors() []ConnectorMetadata {
 // ListAvailableConnectors order. A registered connector without an entry in
 // ConnectorMetadataRegistry is listed last under its type.
 func (r *ConnectorRegistry) Metadata() []ConnectorMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]ConnectorMetadata, 0, len(r.connectors))
 	seen := make(map[string]bool, len(r.connectors))
 	for _, meta := range ListAvailableConnectors() {
@@ -362,6 +423,10 @@ func (r *ConnectorRegistry) Metadata() []ConnectorMetadata {
 	}
 	sort.Strings(rest)
 	for _, t := range rest {
+		if meta, ok := r.plugins[t]; ok {
+			out = append(out, meta)
+			continue
+		}
 		out = append(out, ConnectorMetadata{Type: t, Name: t, Priority: math.MaxInt32})
 	}
 	return out

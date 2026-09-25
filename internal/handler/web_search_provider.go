@@ -329,6 +329,9 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 func (h *WebSearchProviderHandler) ListProviderTypes(c *gin.Context) {
 	enabled := h.pluginFilter(c)
 	all := types.GetWebSearchProviderTypes()
+	if h.registry != nil {
+		all = append(all, h.registry.PluginTypes()...)
+	}
 	out := make([]types.WebSearchProviderTypeInfo, 0, len(all))
 	for _, info := range all {
 		if enabled(manifest.PointWebSearch, info.ID) {
@@ -405,6 +408,11 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 	var req TestProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	if !h.pluginFilter(c)(manifest.PointWebSearch, req.Provider) {
+		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
 		return
 	}
 

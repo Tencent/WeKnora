@@ -35,16 +35,19 @@ func newPluginPackageStore(cfg *config.Config) (reconcile.PackageStore, error) {
 type pluginActivators struct {
 	dig.In
 
-	Host    *host.Manager
-	MCP     *activate.MCPServers
-	Skills  *activate.Skills
-	Vendors *activate.ModelVendors
+	Host       *host.Manager
+	WebSearch  *activate.WebSearch
+	Connectors *activate.Connectors
+	MCP        *activate.MCPServers
+	Skills     *activate.Skills
+	Vendors    *activate.ModelVendors
+	Invoker    *activate.Invoker
 }
 
 // list orders the activators: the host first, so a code plugin's process is
 // running before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
-	return []reconcile.Activator{a.Host, a.Vendors, a.MCP, a.Skills}
+	return []reconcile.Activator{a.Host, a.WebSearch, a.Connectors, a.Vendors, a.MCP, a.Skills}
 }
 
 // bindPluginActivators hands the activators what they need once the plugin
@@ -54,9 +57,13 @@ func bindPluginActivators(
 	skills *service.TenantSkillService,
 ) {
 	a.MCP.Bind(t, repo)
+	a.Invoker.Bind(t, repo)
 	a.Skills.Bind(t)
 	skills.SetPluginSkills(a.Skills)
 }
+
+// newPluginInvoker reaches code plugins through this node's plugin host.
+func newPluginInvoker(h *host.Manager) *activate.Invoker { return activate.NewInvoker(h) }
 
 func newMCPServiceRepository(db *gorm.DB, plugins *activate.MCPServers) interfaces.MCPServiceRepository {
 	return plugins.Repository(repository.NewMCPServiceRepository(db))
