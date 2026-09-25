@@ -228,6 +228,29 @@ func EnrichSearchResultsImageInfo(
 	tenantID uint64,
 	results []*types.SearchResult,
 ) {
+	enrichSearchResultsImageInfo(results, func(parentIDs []string) ([]*types.Chunk, error) {
+		return chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
+	})
+}
+
+// EnrichSearchResultsImageInfoOnly is the shared-KB variant of
+// EnrichSearchResultsImageInfo for results that may come from an org-shared
+// KB owned by another workspace. The result IDs must already be authorized
+// (they come from retrieval over KBs the caller may read).
+func EnrichSearchResultsImageInfoOnly(
+	ctx context.Context,
+	chunkRepo interfaces.ChunkRepository,
+	results []*types.SearchResult,
+) {
+	enrichSearchResultsImageInfo(results, func(parentIDs []string) ([]*types.Chunk, error) {
+		return chunkRepo.ListChunksByParentIDsOnly(ctx, parentIDs)
+	})
+}
+
+func enrichSearchResultsImageInfo(
+	results []*types.SearchResult,
+	listChildren func(parentIDs []string) ([]*types.Chunk, error),
+) {
 	var chunkIDs []string
 	seen := make(map[string]bool)
 	for _, r := range results {
@@ -243,9 +266,7 @@ func EnrichSearchResultsImageInfo(
 		return
 	}
 
-	infoMap, pageQuotes := collectChildEvidence(chunkIDs, func(parentIDs []string) ([]*types.Chunk, error) {
-		return chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
-	})
+	infoMap, pageQuotes := collectChildEvidence(chunkIDs, listChildren)
 
 	for _, r := range results {
 		if merged, ok := infoMap[r.ID]; ok && r.ImageInfo == "" {

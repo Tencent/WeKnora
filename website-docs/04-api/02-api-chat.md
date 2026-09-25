@@ -428,7 +428,7 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 | `tag_ids` | []string | 否 | 标签过滤 |
 | `mentioned_items` | []object | 否 | 带 KB 范围的标签提及 |
 | `vector_threshold` / `keyword_threshold` | float | 否 | 召回阈值；省略时用空间检索配置（默认 0.15 / 0.3） |
-| `match_count` | int | 否 | 返回条数；省略时用空间配置的 `rerank_top_k`（默认 10）。召回深度会自动加大到不小于它 |
+| `match_count` | int | 否 | 返回条数，上限 200；省略时用空间配置的 `rerank_top_k`（默认 10）。召回深度会自动加大到不小于它 |
 | `disable_keywords_match` / `disable_vector_match` | bool | 否 | 关闭某一路召回；两个都为 `true` 返回 400 |
 | `rerank` | object | 否 | 覆盖 rerank 设置；`{"enabled":false}` 关闭 rerank。字段见 [rerank 对象](./01-api-overview.md#retrieval-api)。`rerank.top_k` 同时给出时优先于 `match_count` |
 

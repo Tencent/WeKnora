@@ -67,7 +67,7 @@ func TestRerankResults_modelErrorKeepsRawResults(t *testing.T) {
 	tool := newRerankTestTool(model)
 	results := newRerankTestResults()
 
-	out, err := tool.rerankResults(context.Background(), "query", results)
+	out, err := tool.rerankResults(context.Background(), "query", results, false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRerankResults_allBelowFallbackFloorReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	tool := newRerankTestTool(&stubReranker{scores: []float64{0.10, 0.04}})
 
-	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults())
+	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestRerankResults_keepsCandidatesAboveThreshold(t *testing.T) {
 	t.Parallel()
 	tool := newRerankTestTool(&stubReranker{scores: []float64{0.9, 0.05}})
 
-	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults())
+	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestRerankResults_withoutModelIsPassthrough(t *testing.T) {
 	tool := newRerankTestTool(nil)
 	results := newRerankTestResults()
 
-	out, err := tool.rerankResults(context.Background(), "query", results)
+	out, err := tool.rerankResults(context.Background(), "query", results, false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -175,5 +175,58 @@ func TestRerankThreshold_default(t *testing.T) {
 	tool := &SearchKnowledgeTool{}
 	if got := tool.rerankThreshold(); got != reranking.DefaultThreshold {
 		t.Fatalf("default threshold = %v, want %v", got, reranking.DefaultThreshold)
+	}
+}
+
+type failingSearchKBService struct {
+	stubKnowledgeBaseService
+	err error
+}
+
+func (s *failingSearchKBService) HybridSearch(
+	context.Context, string, types.SearchParams,
+) ([]*types.SearchResult, error) {
+	return nil, s.err
+}
+
+// A search that failed is not an empty search: the model must not read a
+// vector-store outage as "the knowledge base has no answer".
+func TestExecuteReportsSearchFailure(t *testing.T) {
+	t.Parallel()
+	tool := NewSearchKnowledgeTool(
+		&failingSearchKBService{err: errors.New("vector store unavailable")}, nil, nil,
+		types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 1}},
+		nil, &config.Config{Conversation: &config.ConversationConfig{}},
+	)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"refund policy"}`))
+	if err != nil || res == nil {
+		t.Fatalf("Execute: res=%+v err=%v", res, err)
+	}
+	if res.Success || !strings.Contains(res.Error, "vector store unavailable") ||
+		!strings.Contains(res.Error, "not evidence") {
+		t.Fatalf("failure not reported: %+v", res)
+	}
+}
+
+// In keyword mode the rerank model orders exact-term hits but does not reject
+// them: identifiers score low with rerank models.
+func TestRerankResults_keywordModeOrdersWithoutFiltering(t *testing.T) {
+	t.Parallel()
+	tool := newRerankTestTool(&stubReranker{scores: []float64{0.01, 0.05}})
+
+	out, err := tool.rerankResults(context.Background(), "ERR_4012", newRerankTestResults(), true)
+	if err != nil {
+		t.Fatalf("rerankResults returned error: %v", err)
+	}
+	if len(out) != 2 || out[0].ID != "c2" {
+		t.Fatalf("expected both hits ordered by model score, got %#v", out)
+	}
+}
+
+func TestEmptySearchStatementDoesNotSendKeywordModeBackToKeyword(t *testing.T) {
+	t.Parallel()
+	msg := emptySearchStatement("ERR_4012", map[string]interface{}{"mode": SearchModeKeyword}, 1)
+	if strings.Contains(msg, "retry with mode=keyword") {
+		t.Fatalf("keyword-mode statement suggests keyword mode: %q", msg)
 	}
 }

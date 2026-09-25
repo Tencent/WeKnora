@@ -84,7 +84,10 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	// Build final search results
 	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
 
-	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
+	// Results can come from org-shared KBs owned by another workspace; the
+	// chunks above were already permission checked, so look up their image
+	// children without the caller-tenant filter (#3342).
+	searchutil.EnrichSearchResultsImageInfoOnly(ctx, s.chunkRepo, searchResults)
 
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
@@ -353,6 +356,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		KnowledgeDescription:    knowledge.Description,
 		KnowledgeCustomMetadata: knowledge.CustomMetadataText(),
 		ChunkMetadata:           chunk.Metadata,
+		ContextHeader:           chunk.ContextHeader,
 		MatchedContent:          matchedContent,
 		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
 		SourceLocators:          chunk.SourceLocators,

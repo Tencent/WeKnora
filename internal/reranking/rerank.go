@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -30,6 +31,12 @@ const (
 	// at degradeFactor times itself, but never below degradeFloor.
 	degradeFloor  = 0.3
 	degradeFactor = 0.7
+
+	// DefaultMaxCandidates bounds how many candidates the chat pipeline and
+	// the agent tool send to the rerank model. Query expansion and
+	// per-document or per-tag targets each add a full retrieval list, and
+	// every candidate is a billed passage and a share of the latency.
+	DefaultMaxCandidates = 200
 )
 
 // FallbackMinScore returns the score the best candidate needs to survive an
@@ -54,8 +61,14 @@ type Options struct {
 	// FallbackMinScore is the score the best candidate needs to be kept when
 	// nothing passes the threshold. See FallbackMinScore().
 	FallbackMinScore float64
+	// MaxCandidates, when positive, reranks only the MaxCandidates rows with
+	// the highest retrieval score. Retrieval scores share one [0, 1] scale
+	// across searches, so the cut keeps the strongest candidates of each.
+	MaxCandidates int
 	// FAQScoreBoost, when above 1, multiplies the composite score of FAQ
-	// entries (capped at 1).
+	// entries, capped at 1 so scores stay on the [0, 1] scale. FAQs tied at
+	// the cap are ordered by their pre-boost score. Compare absolute
+	// thresholds against PreBoostScore.
 	FAQScoreBoost float64
 }
 
@@ -98,9 +111,10 @@ func Rerank(
 		},
 	}
 
+	keep := topByScore(results, opts.MaxCandidates)
 	candidateIdx := make([]int, 0, len(results))
 	for i, r := range results {
-		if r == nil {
+		if r == nil || (keep != nil && !keep[i]) {
 			continue
 		}
 		passage := ModelPassage(ctx, r)
@@ -116,6 +130,7 @@ func Rerank(
 		res.Diagnostics.Outcome = types.RerankOutcomeNoCandidates
 		return res
 	}
+	fitPassages(ctx, res.Passages, rerank.MaxPassageRunes(model, query))
 
 	scores, err := model.Rerank(ctx, query, res.Passages)
 	if err != nil {
@@ -158,7 +173,14 @@ func Rerank(
 	for i := range order {
 		order[i] = i
 	}
-	sort.SliceStable(order, func(a, b int) bool { return scored[order[a]].Score > scored[order[b]].Score })
+	sort.SliceStable(order, func(a, b int) bool {
+		sa, sb := scored[order[a]], scored[order[b]]
+		if sa.Score != sb.Score {
+			return sa.Score > sb.Score
+		}
+		// Boosted FAQs capped at 1 tie; keep them in relevance order.
+		return PreBoostScore(sa) > PreBoostScore(sb)
+	})
 	res.Scored = make([]*types.SearchResult, len(order))
 	sortedIdx := make([]int, len(order))
 	for i, o := range order {
@@ -184,6 +206,58 @@ func Rerank(
 	logger.Infof(ctx, "[Rerank] %d candidates -> %d results, outcome=%s threshold=%.3f effective=%.3f top=%.4f",
 		len(res.Candidates), len(res.Results), outcome, opts.Threshold, effective, res.Diagnostics.TopScore)
 	return res
+}
+
+// topByScore returns the positions of the limit highest-scoring rows, or nil
+// when limit is not positive or every row fits. Ties keep the earlier row.
+// Graph hits are always kept outside the limit: they carry no retrieval score
+// (CompositeScore substitutes the model score) and would otherwise always be
+// cut; their number is bounded where they are added.
+func topByScore(results []*types.SearchResult, limit int) map[int]bool {
+	if limit <= 0 || len(results) <= limit {
+		return nil
+	}
+	keep := make(map[int]bool, limit)
+	order := make([]int, 0, len(results))
+	for i, r := range results {
+		switch {
+		case r == nil:
+		case r.MatchType == types.MatchTypeGraph:
+			keep[i] = true
+		default:
+			order = append(order, i)
+		}
+	}
+	if len(order) <= limit {
+		return nil
+	}
+	sort.SliceStable(order, func(a, b int) bool { return results[order[a]].Score > results[order[b]].Score })
+	for _, i := range order[:limit] {
+		keep[i] = true
+	}
+	return keep
+}
+
+// fitPassages trims passages longer than limit runes (0 = no limit). A
+// passage is the title, then the chunk body, then captions, OCR text and
+// generated questions, so trimming the tail drops the least essential text
+// first. Vendors reject an oversized document, and the protocol layer fails
+// the whole request rather than truncate it, so a single chunk with a large
+// screenshot's OCR text used to cost every candidate its rerank score.
+func fitPassages(ctx context.Context, passages []string, limit int) {
+	if limit <= 0 {
+		return
+	}
+	trimmed := 0
+	for i, p := range passages {
+		if utf8.RuneCountInString(p) > limit {
+			passages[i] = string([]rune(p)[:limit])
+			trimmed++
+		}
+	}
+	if trimmed > 0 {
+		logger.Infof(ctx, "[Rerank] Trimmed %d passages to the model's %d-character limit", trimmed, limit)
+	}
 }
 
 // applyThreshold keeps the scores at or above opts.Threshold. When none
@@ -234,18 +308,24 @@ func bestScore(scores []rerank.RankResult) (rerank.RankResult, bool) {
 	return top, true
 }
 
+// CompositeScoreKey is the Metadata key holding a reranked row's composite
+// score before any boost (FAQ boost here, wiki or memory boosts later in the
+// chat pipeline) changes Score.
+const CompositeScoreKey = "composite_score"
+
 // scoredCopy returns a copy of r whose Score is the composite of the model
 // score and its retrieval score, recording both in Metadata.
 func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.SearchResult {
 	c := *r
 	c.Metadata = maps.Clone(r.Metadata)
 	if c.Metadata == nil {
-		c.Metadata = make(map[string]string, 2)
+		c.Metadata = make(map[string]string, 3)
 	}
 	base := r.Score
 	c.Metadata["base_score"] = strconv.FormatFloat(base, 'f', 4, 64)
 	c.Metadata["model_score"] = strconv.FormatFloat(modelScore, 'f', 4, 64)
 	c.Score = CompositeScore(&c, modelScore, base)
+	c.Metadata[CompositeScoreKey] = strconv.FormatFloat(c.Score, 'f', 4, 64)
 	if faqBoost > 1.0 && c.ChunkType == string(types.ChunkTypeFAQ) {
 		c.Metadata["faq_boosted"] = "true"
 		c.Metadata["faq_original_score"] = strconv.FormatFloat(c.Score, 'f', 4, 64)
@@ -255,12 +335,32 @@ func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.Sear
 }
 
 // CompositeScore blends the rerank model score with the retrieval score and a
-// source weight, clamped to [0, 1].
+// source weight, clamped to [0, 1]. Graph hits carry no retrieval score (they
+// come from entity lookups, not similarity search), so the model score stands
+// in for it rather than a made-up constant.
 func CompositeScore(r *types.SearchResult, modelScore, baseScore float64) float64 {
 	sourceWeight := 1.0
 	if strings.EqualFold(r.KnowledgeSource, "web_search") {
 		sourceWeight = 0.95
 	}
+	if r.MatchType == types.MatchTypeGraph {
+		baseScore = modelScore
+	}
 	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
 	return math.Min(math.Max(composite, 0), 1)
+}
+
+// PreBoostScore returns the score to compare against absolute thresholds such
+// as the FAQ direct-answer threshold: the composite score before any boost
+// when the row was reranked, and its retrieval score otherwise.
+func PreBoostScore(r *types.SearchResult) float64 {
+	if r == nil {
+		return 0
+	}
+	if v, ok := r.Metadata[CompositeScoreKey]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return r.Score
 }

@@ -43,6 +43,12 @@ type RetrievalConfig struct {
 // construction rather than by two independently maintained literals.
 const DefaultRetrievalTopK = 50
 
+// MaxRequestedResults caps the result counts a retrieval API caller may ask
+// for (knowledge-search match_count, rerank.top_k). knowledge-search runs one
+// search per scoped document or tag set and reranks every candidate, so an
+// unbounded count multiplied into tens of thousands of billed rerank passages.
+const MaxRequestedResults = 200
+
 // GetEffectiveEmbeddingTopK returns EmbeddingTopK with a fallback default.
 func (c *RetrievalConfig) GetEffectiveEmbeddingTopK() int {
 	if c == nil || c.EmbeddingTopK <= 0 {

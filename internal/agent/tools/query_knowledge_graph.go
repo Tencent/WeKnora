@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,9 +22,10 @@ type graphConfigSummary struct {
 var queryKnowledgeGraphTool = BaseTool{
 	name: ToolQueryKnowledgeGraph,
 	description: "Query the knowledge graph of graph-enabled knowledge bases to explore how entities relate " +
-		"(for example \"relationship between Docker and Kubernetes\"). Returns the chunks that carry those " +
-		"relationships with cN handles.\nUse search_knowledge for ordinary text retrieval and " +
-		"read_document(id=dN) to read a source in full.",
+		"(for example \"relationship between Docker and Kubernetes\"). Put the entity names in query. Returns " +
+		"the matching entities' relations and the chunks they were extracted from, then chunks found by text " +
+		"search, with cN handles.\nUse search_knowledge for ordinary text retrieval and " +
+		"read_document(id=cN, context=k) to read around a chunk.",
 	schema: utils.GenerateSchema[QueryKnowledgeGraphInput](),
 }
 
@@ -39,6 +42,65 @@ type QueryKnowledgeGraphTool struct {
 	scopeKnowledgeService interfaces.KnowledgeService
 	searchTargets         types.SearchTargets
 	scopeEnforced         bool
+	graphRepo             interfaces.RetrieveGraphRepository
+	chunkRepo             interfaces.ChunkRepository
+}
+
+// WithGraph lets the tool query the graph store for entities and relations.
+// Without it the tool only has text search, which is what it used to do in
+// every case: the tool never touched the graph, so a graph-only knowledge
+// base always answered "no relevant graph information".
+func (t *QueryKnowledgeGraphTool) WithGraph(
+	graphRepo interfaces.RetrieveGraphRepository, chunkRepo interfaces.ChunkRepository,
+) *QueryKnowledgeGraphTool {
+	t.graphRepo = graphRepo
+	t.chunkRepo = chunkRepo
+	return t
+}
+
+const (
+	// graphQueryMaxTerms bounds the entity-name terms sent to the graph store.
+	graphQueryMaxTerms = 8
+	// graphQueryMaxChunks bounds the evidence chunks loaded per knowledge base.
+	graphQueryMaxChunks = 10
+	// graphQueryMaxRelations bounds the relations returned to the model.
+	graphQueryMaxRelations = 30
+)
+
+// graphSearchTerms turns the query into entity-name terms. The graph store
+// matches node names by case-sensitive substring, so the whole query only
+// matches when it is itself an entity name; its words catch the entities a
+// question mentions ("Docker 和 Kubernetes 的关系" → Docker, Kubernetes).
+// Words keep their case: lowercased terms never matched "Docker".
+func graphSearchTerms(query string) []string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil
+	}
+	seen := map[string]bool{query: true}
+	var tokens []string
+	for _, word := range queryTerms(query) {
+		if !seen[word] {
+			seen[word] = true
+			tokens = append(tokens, word)
+		}
+	}
+	// Longer tokens are more specific entity candidates; sort for stability.
+	sort.SliceStable(tokens, func(i, j int) bool {
+		li, lj := len([]rune(tokens[i])), len([]rune(tokens[j]))
+		if li != lj {
+			return li > lj
+		}
+		return tokens[i] < tokens[j]
+	})
+	terms := []string{query}
+	for _, token := range tokens {
+		if len(terms) >= graphQueryMaxTerms {
+			break
+		}
+		terms = append(terms, token)
+	}
+	return terms
 }
 
 // WithKnowledgeScope enables document/tag-level result filtering for Agent
@@ -111,117 +173,174 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 
 	// Concurrently query all knowledge bases
 	type graphQueryResult struct {
-		kbID    string
-		kb      *types.KnowledgeBase
-		results []*types.SearchResult
-		err     error
+		kbID         string
+		kb           *types.KnowledgeBase
+		graphResults []*types.SearchResult // chunks the matched entities come from
+		textResults  []*types.SearchResult
+		relations    []*types.GraphRelation
+		warnings     []string // failures of one source while the other returned results
+		err          error
 	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	kbResults := make(map[string]*graphQueryResult)
+	terms := graphSearchTerms(query)
 
 	searchParams := types.SearchParams{
-		QueryText:  query,
-		MatchCount: 10,
+		QueryText:             query,
+		MatchCount:            10,
+		SkipContextEnrichment: true,
 	}
 
 	for _, kbID := range input.KnowledgeBaseIDs {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
+			res := &graphQueryResult{kbID: id}
+			defer func() {
+				mu.Lock()
+				kbResults[id] = res
+				mu.Unlock()
+			}()
 
 			// Get knowledge base to check graph configuration
 			kb, err := t.knowledgeService.GetKnowledgeBaseByIDOnly(ctx, id)
 			if err != nil {
-				mu.Lock()
-				kbResults[id] = &graphQueryResult{kbID: id, err: fmt.Errorf("failed to get knowledge base: %v", err)}
-				mu.Unlock()
+				res.err = fmt.Errorf("failed to get knowledge base: %v", err)
 				return
 			}
+			res.kb = kb
 
 			// Check if graph extraction is enabled
 			if kb.ExtractConfig == nil || (len(kb.ExtractConfig.Nodes) == 0 && len(kb.ExtractConfig.Relations) == 0) {
-				mu.Lock()
-				kbResults[id] = &graphQueryResult{kbID: id, err: fmt.Errorf("graph extraction not configured")}
-				mu.Unlock()
+				res.err = fmt.Errorf("graph extraction not configured")
 				return
 			}
 
-			// Query graph
-			results, err := t.knowledgeService.HybridSearch(ctx, id, searchParams)
+			var errs []string
+			graphResults, graph, err := t.queryGraph(ctx, id, terms)
 			if err != nil {
-				mu.Lock()
-				kbResults[id] = &graphQueryResult{kbID: id, kb: kb, err: fmt.Errorf("query failed: %v", err)}
-				mu.Unlock()
-				return
+				errs = append(errs, fmt.Sprintf("graph query failed: %v", err))
+			}
+			var relations []*types.GraphRelation
+			if graph != nil {
+				relations = graph.Relation
+			}
+			// Text search complements the graph: relations say how entities
+			// connect, text hits carry statements the extraction missed. A KB
+			// with no text index returns nothing here rather than an error.
+			textResults, err := t.knowledgeService.HybridSearch(ctx, id, searchParams)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("text search failed: %v", err))
 			}
 			if t.scopeEnforced {
-				results, err = filterSearchResultsInSearchTargets(
-					ctx, t.searchTargets, id, results, t.scopeKnowledgeService,
-				)
-				if err != nil {
-					mu.Lock()
-					kbResults[id] = &graphQueryResult{kbID: id, kb: kb, err: err}
-					mu.Unlock()
+				if graphResults, err = filterSearchResultsInSearchTargets(
+					ctx, t.searchTargets, id, graphResults, t.scopeKnowledgeService,
+				); err != nil {
+					res.err = err
 					return
 				}
+				if textResults, err = filterSearchResultsInSearchTargets(
+					ctx, t.searchTargets, id, textResults, t.scopeKnowledgeService,
+				); err != nil {
+					res.err = err
+					return
+				}
+				// The graph namespace is the whole knowledge base, so under a
+				// document or tag scope only relations between entities backed
+				// by an in-scope chunk may reach the model.
+				if !searchTargetsCoverWholeKB(t.searchTargets, id) {
+					relations = relationsBackedBy(graph, graphResults)
+				}
 			}
-
-			mu.Lock()
-			kbResults[id] = &graphQueryResult{kbID: id, kb: kb, results: results}
-			mu.Unlock()
+			res.graphResults, res.textResults, res.relations = graphResults, textResults, relations
+			if len(errs) > 0 && len(graphResults) == 0 && len(textResults) == 0 {
+				res.err = errors.New(strings.Join(errs, "; "))
+			} else {
+				res.warnings = errs
+			}
 		}(kbID)
 	}
 
 	wg.Wait()
 
-	// Collect and deduplicate results
-	seenChunks := make(map[string]*types.SearchResult)
-	var errors []string
+	// Collect and deduplicate results: graph evidence first (in entity
+	// order), then text hits by score.
+	seenChunks := make(map[string]bool)
+	var errs []string
 	graphConfigs := make(map[string]graphConfigSummary)
 	kbCounts := make(map[string]int)
+	var graphHits, textHits []*types.SearchResult
+	var relations []*types.GraphRelation
+	seenRelations := make(map[string]bool)
 
 	for _, kbID := range input.KnowledgeBaseIDs {
 		result := kbResults[kbID]
 		if result.err != nil {
-			errors = append(errors, fmt.Sprintf("KB %s: %v", kbID, result.err))
+			errs = append(errs, fmt.Sprintf("KB %s: %v", kbID, result.err))
 			continue
+		}
+		for _, warning := range result.warnings {
+			errs = append(errs, fmt.Sprintf("KB %s: %s", kbID, warning))
 		}
 
 		if result.kb != nil && result.kb.ExtractConfig != nil {
 			graphConfigs[kbID] = summarizeGraphConfig(result.kb.ExtractConfig)
 		}
 
-		kbCounts[kbID] = len(result.results)
-		for _, r := range result.results {
-			if _, seen := seenChunks[r.ID]; !seen {
-				seenChunks[r.ID] = r
+		kbCounts[kbID] = len(result.graphResults) + len(result.textResults)
+		for _, r := range result.graphResults {
+			if !seenChunks[r.ID] {
+				seenChunks[r.ID] = true
+				graphHits = append(graphHits, r)
+			}
+		}
+		for _, r := range result.textResults {
+			if !seenChunks[r.ID] {
+				seenChunks[r.ID] = true
+				textHits = append(textHits, r)
+			}
+		}
+		for _, rel := range result.relations {
+			key := rel.Node1 + "\x00" + rel.Type + "\x00" + rel.Node2
+			if !seenRelations[key] && len(relations) < graphQueryMaxRelations {
+				seenRelations[key] = true
+				relations = append(relations, rel)
 			}
 		}
 	}
 
-	// Convert map to slice and sort by score
-	allResults := make([]*types.SearchResult, 0, len(seenChunks))
-	for _, result := range seenChunks {
-		allResults = append(allResults, result)
+	sort.SliceStable(textHits, func(i, j int) bool {
+		return textHits[i].Score > textHits[j].Score
+	})
+	allResults := append(graphHits, textHits...)
+	relationData := make([]map[string]interface{}, 0, len(relations))
+	for _, rel := range relations {
+		relationData = append(relationData, map[string]interface{}{
+			"source": rel.Node1, "type": rel.Type, "target": rel.Node2,
+		})
 	}
 
-	sort.Slice(allResults, func(i, j int) bool {
-		return allResults[i].Score > allResults[j].Score
-	})
-
-	if len(allResults) == 0 {
+	if len(allResults) == 0 && len(relations) == 0 {
+		// The model reads an empty result from Output alone, so failures
+		// must be stated here or they read as "the graph has no such entity".
+		output := "No relevant graph information found."
+		if len(errs) > 0 {
+			output += " Some knowledge bases could not be queried: " + strings.Join(errs, "; ") + "."
+		}
 		return &types.ToolResult{
 			Success: true,
-			Output:  "No relevant graph information found.",
+			Output:  output,
 			Data: map[string]interface{}{
 				"knowledge_base_ids": input.KnowledgeBaseIDs,
 				"query":              query,
 				"results":            []interface{}{},
+				"relations":          relationData,
 				"graph_configs":      graphConfigsToData(graphConfigs),
 				"graph_config":       aggregateGraphConfig(graphConfigs),
-				"errors":             errors,
+				"errors":             errs,
+				"display_type":       "graph_query_results",
 			},
 		}, nil
 	}
@@ -230,12 +349,21 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	output := "=== Knowledge Graph Query ===\n\n"
 	output += fmt.Sprintf("📊 Query: %s\n", query)
 	output += fmt.Sprintf("🎯 Target Knowledge Bases: %v\n", input.KnowledgeBaseIDs)
-	output += fmt.Sprintf("✓ Found %d relevant results (deduplicated)\n\n", len(allResults))
+	output += fmt.Sprintf("✓ Found %d relations and %d relevant chunks (deduplicated)\n\n",
+		len(relations), len(allResults))
 
-	if len(errors) > 0 {
+	if len(errs) > 0 {
 		output += "=== ⚠️ Partial Failures ===\n"
-		for _, errMsg := range errors {
+		for _, errMsg := range errs {
 			output += fmt.Sprintf("  - %s\n", errMsg)
+		}
+		output += "\n"
+	}
+
+	if len(relations) > 0 {
+		output += "=== 🔗 Relations ===\n"
+		for _, rel := range relations {
+			output += fmt.Sprintf("  - %s --[%s]--> %s\n", rel.Node1, rel.Type, rel.Node2)
 		}
 		output += "\n"
 	}
@@ -314,7 +442,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	}
 
 	// Build structured graph data for frontend visualization
-	graphData := buildGraphVisualizationData(allResults)
+	graphData := buildGraphVisualizationData(allResults, relations)
 
 	return &types.ToolResult{
 		Success: true,
@@ -323,16 +451,154 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			"knowledge_base_ids": input.KnowledgeBaseIDs,
 			"query":              query,
 			"results":            formattedResults,
+			"relations":          relationData,
 			"count":              len(allResults),
 			"kb_counts":          kbCounts,
 			"graph_configs":      graphConfigsToData(graphConfigs),
 			"graph_config":       aggregateGraphConfig(graphConfigs),
 			"graph_data":         graphData,
 			"has_graph_config":   hasGraphConfig,
-			"errors":             errors,
+			"errors":             errs,
 			"display_type":       "graph_query_results",
 		},
 	}, nil
+}
+
+// queryGraph looks the query's entity terms up in kbID's graph and returns
+// the chunks the matched entities were extracted from, plus the matched graph
+// (entities and relations). With no graph store wired, or none configured
+// (the store answers nil), it returns nothing.
+func (t *QueryKnowledgeGraphTool) queryGraph(
+	ctx context.Context, kbID string, terms []string,
+) ([]*types.SearchResult, *types.GraphData, error) {
+	if t.graphRepo == nil || len(terms) == 0 {
+		return nil, nil, nil
+	}
+	graph, err := t.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: kbID}, terms)
+	if err != nil || graph == nil {
+		return nil, nil, err
+	}
+	chunkIDs := make([]string, 0, graphQueryMaxChunks)
+	seen := make(map[string]bool)
+	for _, node := range graph.Node {
+		for _, id := range node.Chunks {
+			if len(chunkIDs) >= graphQueryMaxChunks {
+				break
+			}
+			if id != "" && !seen[id] {
+				seen[id] = true
+				chunkIDs = append(chunkIDs, id)
+			}
+		}
+	}
+	if len(chunkIDs) == 0 || t.chunkRepo == nil {
+		return nil, graph, nil
+	}
+	// The graph namespace is the knowledge base, which the caller already
+	// authorized; a chunk ID is only trusted when its row belongs to it.
+	chunks, err := t.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
+	if err != nil {
+		return nil, graph, err
+	}
+	byID := make(map[string]*types.Chunk, len(chunks))
+	knowledgeIDs := make([]string, 0, len(chunks))
+	for _, c := range chunks {
+		if c != nil && c.KnowledgeBaseID == kbID && c.IsEnabled {
+			byID[c.ID] = c
+			knowledgeIDs = append(knowledgeIDs, c.KnowledgeID)
+		}
+	}
+	titles, err := t.knowledgeTitles(ctx, knowledgeIDs)
+	if err != nil {
+		return nil, graph, err
+	}
+	results := make([]*types.SearchResult, 0, len(byID))
+	for _, id := range chunkIDs {
+		c := byID[id]
+		if c == nil {
+			continue
+		}
+		// A chunk can outlive its soft-deleted document; titles holds only
+		// documents that still exist (nil when there is no way to check).
+		if _, exists := titles[c.KnowledgeID]; titles != nil && !exists {
+			continue
+		}
+		results = append(results, &types.SearchResult{
+			ID:              c.ID,
+			Content:         c.Content,
+			KnowledgeID:     c.KnowledgeID,
+			KnowledgeBaseID: c.KnowledgeBaseID,
+			KnowledgeTitle:  titles[c.KnowledgeID],
+			ChunkIndex:      c.ChunkIndex,
+			ChunkType:       string(c.ChunkType),
+			ParentChunkID:   c.ParentChunkID,
+			MatchType:       types.MatchTypeGraph,
+		})
+	}
+	return results, graph, nil
+}
+
+// knowledgeTitles returns the titles of the knowledge IDs that still exist.
+// It returns nil when no knowledge service is wired to look them up.
+func (t *QueryKnowledgeGraphTool) knowledgeTitles(ctx context.Context, ids []string) (map[string]string, error) {
+	if t.scopeKnowledgeService == nil {
+		return nil, nil
+	}
+	titles := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return titles, nil
+	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	knowledges, err := t.scopeKnowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load documents: %w", err)
+	}
+	for _, k := range knowledges {
+		if k != nil {
+			titles[k.ID] = k.Title
+		}
+	}
+	return titles, nil
+}
+
+// searchTargetsCoverWholeKB reports whether targets grant the whole of kbID
+// rather than some of its documents or tags.
+func searchTargetsCoverWholeKB(targets types.SearchTargets, kbID string) bool {
+	for _, target := range targets {
+		if target != nil && target.KnowledgeBaseID == kbID && searchTargetIsWholeKB(target) {
+			return true
+		}
+	}
+	return false
+}
+
+// relationsBackedBy keeps the graph's relations whose two entities were both
+// extracted from one of the evidence chunks. Entities whose chunks are not
+// among them cannot be shown to be in scope, so their relations are dropped.
+func relationsBackedBy(graph *types.GraphData, evidence []*types.SearchResult) []*types.GraphRelation {
+	if graph == nil || len(evidence) == 0 {
+		return nil
+	}
+	allowedChunks := make(map[string]bool, len(evidence))
+	for _, r := range evidence {
+		allowedChunks[r.ID] = true
+	}
+	allowedNodes := make(map[string]bool)
+	for _, node := range graph.Node {
+		for _, id := range node.Chunks {
+			if allowedChunks[id] {
+				allowedNodes[node.Name] = true
+				break
+			}
+		}
+	}
+	var relations []*types.GraphRelation
+	for _, rel := range graph.Relation {
+		if allowedNodes[rel.Node1] && allowedNodes[rel.Node2] {
+			relations = append(relations, rel)
+		}
+	}
+	return relations
 }
 
 func summarizeGraphConfig(config *types.ExtractConfig) graphConfigSummary {
@@ -429,14 +695,29 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
-// buildGraphVisualizationData builds structured data for graph visualization
-func buildGraphVisualizationData(results []*types.SearchResult) map[string]interface{} {
-	// Build a simple graph structure for frontend visualization
+// buildGraphVisualizationData builds structured data for graph visualization:
+// the entities and relations the graph returned, and the chunks.
+func buildGraphVisualizationData(
+	results []*types.SearchResult, relations []*types.GraphRelation,
+) map[string]interface{} {
 	nodes := make([]map[string]interface{}, 0)
 	edges := make([]map[string]interface{}, 0)
 
-	// Create nodes from results
 	seenEntities := make(map[string]bool)
+	addEntity := func(name string) {
+		if name == "" || seenEntities["entity:"+name] {
+			return
+		}
+		seenEntities["entity:"+name] = true
+		nodes = append(nodes, map[string]interface{}{"id": "entity:" + name, "label": name, "type": "entity"})
+	}
+	for _, rel := range relations {
+		addEntity(rel.Node1)
+		addEntity(rel.Node2)
+		edges = append(edges, map[string]interface{}{
+			"source": "entity:" + rel.Node1, "target": "entity:" + rel.Node2, "label": rel.Type,
+		})
+	}
 	for i, result := range results {
 		if !seenEntities[result.ID] {
 			nodes = append(nodes, map[string]interface{}{
