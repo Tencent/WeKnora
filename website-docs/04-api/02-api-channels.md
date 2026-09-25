@@ -28,9 +28,11 @@ API key：`manage_channels`/full。IM 渠道携带外部 bot 凭证：列表 Vie
 | --- | --- | --- | --- |
 | `platform` | string | 是 | `wecom/feishu/lark/slack/telegram/dingtalk/mattermost/wechat/qqbot/yunzhijia` |
 | `name` | string | 否 | 显示名 |
-| `mode` | string | 否 | `websocket`（默认）/`webhook`/`longpoll`（wechat 强制 longpoll） |
+| `mode` | string | 否 | `websocket`（默认；mattermost/yunzhijia 默认 `webhook`）/`webhook`/`longpoll`（wechat 强制 longpoll） |
 | `output_mode` | string | 否 | `stream`（默认）/`full`（wechat 强制 full） |
-| `knowledge_base_id` | string | 否 | 关联 KB |
+| `locale` | string | 否 | 回复语言：`zh-CN`/`en-US`/`ja-JP`/`ko-KR`/`ru-RU`；空（默认）使用部署默认语言（`WEKNORA_LANGUAGE`，未设置为 `zh-CN`）；其他值 400 |
+| `session_mode` | string | 否 | `user`（默认）/`thread` |
+| `knowledge_base_id` | string | 否 | 附件额外入库的 KB，须属于本空间，否则 400 |
 | `credentials` | object | 否 | 平台凭证 |
 | `enabled` | bool | 否 | 默认 true |
 
@@ -38,7 +40,7 @@ API key：`manage_channels`/full。IM 渠道携带外部 bot 凭证：列表 Vie
 
 ```bash
 curl -X POST $BASE/api/v1/agents/agent-1/im-channels -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"platform":"feishu","name":"飞书客服"}'
+  -H 'Content-Type: application/json' -d '{"platform":"feishu","name":"飞书客服","locale":"en-US"}'
 ```
 
 ### GET /api/v1/agents/:id/im-channels
@@ -63,7 +65,7 @@ curl $BASE/api/v1/im-channels -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/im-channels/:id
 
-用途：更新渠道（局部更新：`name/mode/output_mode/knowledge_base_id/credentials/enabled/agent_id` 均可选）。权限：Admin+。
+用途：更新渠道（局部更新：`name/mode/output_mode/locale/session_mode/knowledge_base_id/credentials/enabled/agent_id` 均可选；`knowledge_base_id` 传空字符串解除关联，`locale` 传空字符串恢复默认语言）。权限：Admin+。
 
 响应：200 `{"data":{IMChannel}}`
 
@@ -223,6 +225,22 @@ curl -X POST $BASE/api/v1/embed-channels/ec-1/preview-session -H "Authorization:
 
 ```bash
 curl $BASE/api/v1/embed-channels/ec-1/stats -H "Authorization: Bearer $TOKEN"
+```
+
+## Embed 嵌入页框架策略
+
+### GET /api/v1/embed-frame-policy
+
+用途：供 Nginx `auth_request` 子请求在返回 `/embed/:channel_id` 页面前获取该渠道的 `Content-Security-Policy: frame-ancestors`。免 token，只返回策略头，不返回渠道配置；响应 `Cache-Control: no-store`。
+
+| 请求头 | 必填 | 说明 |
+| --- | --- | --- |
+| `X-Embed-Page-URI` | 是 | 嵌入页的相对 URI，如 `/embed/<channel_id>` |
+
+响应：204 并带 CSP 头；渠道不存在、已停用、路径非法或白名单为空时 403。
+
+```bash
+curl -i $BASE/api/v1/embed-frame-policy -H "X-Embed-Page-URI: /embed/ec-1"
 ```
 
 ## Embed 公开路由（/api/v1/embed/:channel_id，EmbedAuth）
@@ -391,7 +409,7 @@ curl "$BASE/api/v1/embed/ec-1/files?file_path=local://1/exports/chart.png" \
 
 ## 文件服务
 
-实现于 `internal/router/router.go`（非 handler 包）。
+实现于 `internal/router/files.go`（非 handler 包）。
 
 ### GET /files
 
@@ -448,4 +466,4 @@ curl $BASE/r/abc123 -o file.png
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterIMRoutes`、`RegisterIMChannelRoutes`、`RegisterEmbedChannelRoutes`、`RegisterEmbedPublicRoutes`、`serveFilesWithResources`、`servePresignedFiles`、`servePresignedPreview`、`serveResourceGrants`。Handler：`internal/handler/im.go`、`internal/handler/wechat_qrcode.go`、`internal/handler/embed_channel.go`。
+路由注册：`internal/router/routes_agent.go` 的 `RegisterIMRoutes`、`RegisterIMChannelRoutes`、`RegisterEmbedChannelRoutes`、`RegisterEmbedPublicRoutes`；`internal/router/files.go` 的 `serveFilesWithResources`、`servePresignedFiles`、`servePresignedPreview`、`serveResourceGrants`。Handler：`internal/handler/im.go`、`internal/handler/wechat_qrcode.go`、`internal/handler/embed_channel.go`。

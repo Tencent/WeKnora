@@ -269,3 +269,50 @@ func TestBuildSpanTree_DocReaderFailureCancelsEverythingAfter(t *testing.T) {
 	}
 	a.NotContains(got, types.SpanStatusSkipped)
 }
+
+// Post-process closes its stage once the enrichment tasks are fanned out, so
+// the stage owning a still-running subspan is the current one.
+func TestBuildSpanTree_CurrentStageFallsBackToRunningSubspan(t *testing.T) {
+	rows := []types.KnowledgeProcessingSpan{
+		{SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusDone},
+		{
+			SpanID: "post", ParentSpanID: "root", Name: types.StagePostProcess,
+			Kind: types.SpanKindStage, Status: types.SpanStatusDone,
+		},
+		{
+			SpanID: "wiki", ParentSpanID: "post", Name: "postprocess.wiki",
+			Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning,
+		},
+		{
+			SpanID: "page", ParentSpanID: "wiki", Name: "postprocess.wiki.page[a]",
+			Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning,
+		},
+	}
+	_, currentStage, _ := buildSpanTree("kid", 1, rows, types.ParseStatusFinalizing)
+	assert.Equal(t, types.StagePostProcess, currentStage)
+}
+
+// A later subtask failure must not hide the stage housekeeping marked stalled.
+func TestBuildSpanTree_StallFailureWinsOverLaterFailures(t *testing.T) {
+	rows := []types.KnowledgeProcessingSpan{
+		{SpanID: "root", Name: "knowledge_processing", Kind: types.SpanKindRoot, Status: types.SpanStatusRunning},
+		{
+			SpanID: "mm", ParentSpanID: "root", Name: types.StageMultimodal, Kind: types.SpanKindStage,
+			Status: types.SpanStatusFailed, ErrorCode: "TASK_STALLED",
+		},
+		{
+			SpanID: "img0", ParentSpanID: "mm", Name: "multimodal.image[0]", Kind: types.SpanKindGeneration,
+			Status: types.SpanStatusFailed, ErrorCode: "MULTIMODAL_VLM_FAILED",
+		},
+	}
+	_, _, lastFailure := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
+	if assert.NotNil(t, lastFailure) {
+		assert.Equal(t, "mm", lastFailure.SpanID)
+	}
+
+	rows[1].ErrorCode = "UNKNOWN"
+	_, _, lastFailure = buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
+	if assert.NotNil(t, lastFailure) {
+		assert.Equal(t, "img0", lastFailure.SpanID, "without a stall, the latest failure still wins")
+	}
+}

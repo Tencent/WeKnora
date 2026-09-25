@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
@@ -171,6 +172,9 @@ func (s *sessionService) KnowledgeQA(
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
+	applyRequestReasoningEffort(
+		req.ReasoningEffort, &chatManage.SummaryConfig.Thinking, &chatManage.SummaryConfig.ReasoningEffort,
+	)
 
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall
@@ -827,12 +831,20 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 // SearchKnowledge performs knowledge base search without LLM summarization
 // knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 // knowledgeIDs: list of specific knowledge (file) IDs to search
+// opts: caller overrides of the tenant RetrievalConfig; nil keeps it
 func (s *sessionService) SearchKnowledge(ctx context.Context,
 	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string,
-) ([]*types.SearchResult, error) {
+	opts *types.KnowledgeSearchOptions,
+) (*types.RetrievalResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
 		knowledgeBaseIDs, knowledgeIDs, len(tagScopes), query)
+	if opts == nil {
+		opts = &types.KnowledgeSearchOptions{}
+	}
+	if opts.DisableVectorMatch && opts.DisableKeywordsMatch {
+		return nil, apperrors.NewBadRequestError("disable_vector_match and disable_keywords_match cannot both be true")
+	}
 
 	// Get tenant ID from context
 	tenantID, ok := types.TenantIDFromContext(ctx)
@@ -841,65 +853,145 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		return nil, fmt.Errorf("workspace ID not found in context")
 	}
 
-	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
-	if err != nil {
-		return nil, fmt.Errorf("build search targets: %w", err)
-	}
-
-	if len(searchTargets) == 0 {
-		logger.Warn(ctx, "No search targets available, returning empty results")
-		return []*types.SearchResult{}, nil
-	}
-
-	// Create default retrieval parameters — prefer tenant RetrievalConfig, fallback to built-in defaults
-	userID := types.SessionOwnerIDFromContext(ctx)
-
 	// Load tenant-level retrieval config (nil is safe — GetEffective* methods handle nil receiver)
 	var rc *types.RetrievalConfig
 	if tenant, err2 := s.tenantService.GetTenantByID(ctx, tenantID); err2 == nil {
 		rc = tenant.RetrievalConfig
 	}
 
+	// Resolve the rerank model before retrieving so a bad model_id costs
+	// nothing. No rerank object means "rerank with the tenant config", which
+	// is what this endpoint has always done.
+	rerankDisabled := opts.Rerank != nil && !opts.Rerank.IsEnabled()
+	var rerankModelID, rerankModelSource string
+	if !rerankDisabled {
+		requested := ""
+		if opts.Rerank != nil {
+			requested = opts.Rerank.ModelID
+		}
+		var err error
+		rerankModelID, rerankModelSource, err = resolveRerankModelID(ctx, s.modelService, requested, rc)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// A model that cannot be loaded degrades to the retrieval order, as on
+	// hybrid-search, instead of failing the search in the rerank stage.
+	var unavailable *types.RerankDiagnostics
+	if rerankModelID != "" {
+		if _, err := s.modelService.GetRerankModel(ctx, rerankModelID); err != nil {
+			logger.Warnf(ctx, "Rerank model %s unavailable, searching without rerank: %v", rerankModelID, err)
+			unavailable = &types.RerankDiagnostics{
+				Outcome: types.RerankOutcomeModelUnavailable,
+				ModelID: rerankModelID,
+				Error:   err.Error(),
+			}
+			rerankModelID = ""
+		}
+	}
+
+	// Build unified search targets (computed once, used throughout pipeline)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
+	if err != nil {
+		return nil, fmt.Errorf("build search targets: %w", err)
+	}
+
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
-			Query:            query,
-			UserID:           userID,
-			KnowledgeBaseIDs: knowledgeBaseIDs,
-			KnowledgeIDs:     knowledgeIDs,
-			SearchTargets:    searchTargets,
-			MaxRounds:        s.cfg.Conversation.MaxRounds,
-			EmbeddingTopK:    rc.GetEffectiveEmbeddingTopK(),
-			VectorThreshold:  rc.GetEffectiveVectorThreshold(),
-			KeywordThreshold: rc.GetEffectiveKeywordThreshold(),
-			RerankTopK:       rc.GetEffectiveRerankTopK(),
-			RerankThreshold:  rc.GetEffectiveRerankThreshold(),
+			Query:                query,
+			UserID:               types.SessionOwnerIDFromContext(ctx),
+			KnowledgeBaseIDs:     knowledgeBaseIDs,
+			KnowledgeIDs:         knowledgeIDs,
+			SearchTargets:        searchTargets,
+			MaxRounds:            s.cfg.Conversation.MaxRounds,
+			EmbeddingTopK:        rc.GetEffectiveEmbeddingTopK(),
+			VectorThreshold:      rc.GetEffectiveVectorThreshold(),
+			KeywordThreshold:     rc.GetEffectiveKeywordThreshold(),
+			DisableVectorMatch:   opts.DisableVectorMatch,
+			DisableKeywordsMatch: opts.DisableKeywordsMatch,
+			RerankModelID:        rerankModelID,
+			RerankTopK:           rc.GetEffectiveRerankTopK(),
+			RerankThreshold:      rc.GetEffectiveRerankThreshold(),
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery: query,
 		},
 	}
+	applyKnowledgeSearchOverrides(chatManage, opts)
 
-	// Get default models
-	models, err := s.modelService.ListModels(ctx)
+	results, err := s.runKnowledgeSearchPipeline(ctx, chatManage, len(searchTargets))
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get models: %v", err)
 		return nil, err
 	}
 
-	// Use rerank model from RetrievalConfig if set, otherwise auto-select the first available
-	if rc != nil && rc.RerankModelID != "" {
-		chatManage.RerankModelID = rc.RerankModelID
-	} else {
-		for _, model := range models {
-			if model == nil {
-				continue
-			}
-			if model.Type == types.ModelTypeRerank {
-				chatManage.RerankModelID = model.ID
-				break
-			}
+	diag := chatManage.RerankDiagnostics
+	switch {
+	case rerankDisabled:
+		diag = &types.RerankDiagnostics{Outcome: types.RerankOutcomeDisabled}
+	case unavailable != nil:
+		diag = unavailable
+		diag.Threshold, diag.EffectiveThreshold = chatManage.RerankThreshold, chatManage.RerankThreshold
+	case diag == nil:
+		// Retrieval found nothing, so the rerank stage never ran.
+		diag = &types.RerankDiagnostics{
+			Outcome:            types.RerankOutcomeNoCandidates,
+			ModelID:            rerankModelID,
+			Threshold:          chatManage.RerankThreshold,
+			EffectiveThreshold: chatManage.RerankThreshold,
 		}
+	}
+	diag.ModelSource = rerankModelSource
+	if rerankDisabled {
+		diag.ModelSource = ""
+	}
+	if rerankDisabled || unavailable != nil {
+		// The rerank stage did not run; the results are the retrieval order.
+		diag.CandidateCount = len(results)
+	}
+	diag.ResultCount = len(results)
+
+	logger.Infof(ctx, "Knowledge base search completed, found %d results, rerank outcome: %s",
+		len(results), diag.Outcome)
+	return &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag}}, nil
+}
+
+// applyKnowledgeSearchOverrides applies the caller's knowledge-search
+// overrides on top of the tenant RetrievalConfig defaults in chatManage.
+func applyKnowledgeSearchOverrides(chatManage *types.ChatManage, opts *types.KnowledgeSearchOptions) {
+	if opts.VectorThreshold != nil {
+		chatManage.VectorThreshold = *opts.VectorThreshold
+	}
+	if opts.KeywordThreshold != nil {
+		chatManage.KeywordThreshold = *opts.KeywordThreshold
+	}
+	// The final FILTER_TOP_K stage cuts to RerankTopK whether or not the
+	// rerank stage runs, so it is the result count. Recall must be at least
+	// as deep for the count to be reachable.
+	if opts.MatchCount > 0 {
+		chatManage.RerankTopK = opts.MatchCount
+	}
+	if opts.Rerank != nil {
+		if opts.Rerank.TopK > 0 {
+			chatManage.RerankTopK = opts.Rerank.TopK
+		}
+		if opts.Rerank.Threshold != nil {
+			chatManage.RerankThreshold = *opts.Rerank.Threshold
+		}
+	}
+	chatManage.EmbeddingTopK = max(chatManage.EmbeddingTopK, chatManage.RerankTopK)
+}
+
+// runKnowledgeSearchPipeline runs the retrieval-only pipeline stages and
+// returns the merged results. An empty search or an all-rejecting rerank is
+// an empty result, not an error.
+func (s *sessionService) runKnowledgeSearchPipeline(
+	ctx context.Context,
+	chatManage *types.ChatManage,
+	targetCount int,
+) ([]*types.SearchResult, error) {
+	if targetCount == 0 {
+		logger.Warn(ctx, "No search targets available, returning empty results")
+		return []*types.SearchResult{}, nil
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
@@ -940,8 +1032,6 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		}
 		logger.Infof(ctx, "Event %v triggered successfully", event)
 	}
-
-	logger.Infof(ctx, "Knowledge base search completed, found %d results", len(chatManage.MergeResult))
 	return chatManage.MergeResult, nil
 }
 
@@ -1188,6 +1278,10 @@ func (s *sessionService) consumeFallbackStream(
 			if response.Done {
 				response.Content += decoder.Flush()
 			}
+			truncated := response.Done && chatpipeline.IsLengthFinishReason(response.FinishReason)
+			if truncated && strings.TrimSpace(finalContent+response.Content) == "" {
+				response.Content = chatpipeline.EmptyTruncatedAnswerFallback
+			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
 				ID:        fallbackID,
@@ -1197,6 +1291,7 @@ func (s *sessionService) consumeFallbackStream(
 					Content:    response.Content,
 					Done:       response.Done,
 					IsFallback: true,
+					Truncated:  truncated,
 				},
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)

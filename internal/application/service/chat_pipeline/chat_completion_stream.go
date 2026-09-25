@@ -12,10 +12,13 @@ import (
 	"github.com/google/uuid"
 )
 
-const emptyTruncatedAnswerFallback = "Sorry, this answer hit the model's per-response output limit " +
+// EmptyTruncatedAnswerFallback explains an output-budget exhaustion with no answer text.
+const EmptyTruncatedAnswerFallback = "Sorry, this answer hit the model's per-response output limit " +
 	"before any text was produced. Try narrowing the question, or raise max_completion_tokens."
 
-func isLengthFinishReason(reason string) bool {
+// IsLengthFinishReason reports whether a provider ended a response because its
+// completion-token budget was exhausted.
+func IsLengthFinishReason(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case "length", "max_tokens", "max_output_tokens":
 		return true
@@ -190,6 +193,14 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					return
 				}
 
+				// A stream that stopped without a finish reason is a broken
+				// one, not a short answer: report it the way a read error is
+				// reported instead of closing the answer as complete.
+				if response.ResponseType == types.ResponseTypeAnswer && response.Done &&
+					response.FinishReason == types.FinishReasonIncomplete {
+					response.ResponseType = types.ResponseTypeError
+					response.Content = types.StreamEndedEarlyError
+				}
 				if response.ResponseType == types.ResponseTypeError {
 					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
 						"session_id": chatManage.SessionID,
@@ -247,9 +258,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					if strings.TrimSpace(response.Content) != "" {
 						answerProduced = true
 					}
-					truncated := response.Done && isLengthFinishReason(response.FinishReason)
+					truncated := response.Done && IsLengthFinishReason(response.FinishReason)
 					if truncated && !answerProduced {
-						response.Content = emptyTruncatedAnswerFallback
+						response.Content = EmptyTruncatedAnswerFallback
 						answerProduced = true
 					}
 					closeThinking()

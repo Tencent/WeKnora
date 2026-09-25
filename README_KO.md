@@ -1,72 +1,217 @@
 <p align="center">
-  <picture>
-    <img src="./docs/images/logo.png" alt="WeKnora Logo" height="120"/>
-  </picture>
+  <a href="https://weknora.weixin.qq.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/hero-ko-dark.svg">
+      <img src="./docs/images/readme/hero-ko-light.svg" alt="WeKnora: 답을 찾고, 지식을 실천으로. Tencent가 오픈소스로 공개한 엔터프라이즈 지식 관리 프레임워크입니다. 팀 자료를 모아 Q&A, 작업 실행, Wiki 정리에 활용합니다." width="100%">
+    </picture>
+  </a>
 </p>
 
 <p align="center">
-  <picture>
-    <a href="https://trendshift.io/repositories/15289" target="_blank">
-      <img src="https://trendshift.io/api/badge/repositories/15289" alt="Tencent/WeKnora | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/>
-    </a>
-  </picture>
-</p>
-<p align="center">
-    <a href="https://weknora.weixin.qq.com" target="_blank">
-        <img alt="공식 웹사이트" src="https://img.shields.io/badge/공식_웹사이트-WeKnora-4e6b99">
-    </a>
-    <a href="https://chatbot.weixin.qq.com" target="_blank">
-        <img alt="WeChat 대화 오픈 플랫폼" src="https://img.shields.io/badge/WeChat_대화_오픈_플랫폼-5ac725">
-    </a>
-    <a href="https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd" target="_blank">
-        <img alt="Chrome 확장 프로그램" src="https://img.shields.io/badge/Chrome_확장_프로그램-WeKnora-4285F4">
-    </a>
-    <a href="https://clawhub.ai/lyingbug/weknora" target="_blank">
-        <img alt="ClawHub Skill" src="https://img.shields.io/badge/ClawHub_Skill-WeKnora-ff6b35">
-    </a>
-    <a href="https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora" target="_blank">
-        <img alt="npm @wxg-prc-cpg/dsh-weknora" src="https://img.shields.io/npm/v/@wxg-prc-cpg/dsh-weknora?label=dsh-weknora">
-    </a>
-    <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE">
-        <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
-    </a>
-    <a href="./CHANGELOG.md">
-        <img alt="버전" src="https://img.shields.io/badge/version-0.8.0-2e6cc4?labelColor=d4eaf7">
-    </a>
+  <a href="https://weknora.weixin.qq.com"><img alt="공식 웹사이트" src="https://img.shields.io/badge/website-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="https://weknora.weixin.qq.com/docs/"><img alt="문서" src="https://img.shields.io/badge/docs-중국어-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="릴리스" src="https://img.shields.io/badge/release-v0.8.2-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./LICENSE"><img alt="라이선스" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
+  <br/>
+  <a href="https://chatbot.weixin.qq.com"><img alt="WeChat 대화 오픈 플랫폼" src="https://img.shields.io/badge/WeChat_Dialog-Open_Platform-07c160?style=flat-square&labelColor=101f38&logo=wechat&logoColor=white"></a>
+  <a href="https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd"><img alt="Chrome 확장 프로그램" src="https://img.shields.io/badge/Chrome-extension-4285f4?style=flat-square&labelColor=101f38&logo=googlechrome&logoColor=white"></a>
+  <a href="https://clawhub.ai/lyingbug/weknora"><img alt="ClawHub Skill" src="https://img.shields.io/badge/ClawHub-skill-ff6b35?style=flat-square&labelColor=101f38"></a>
+  <a href="https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora"><img alt="npm @wxg-prc-cpg/dsh-weknora" src="https://img.shields.io/npm/v/@wxg-prc-cpg/dsh-weknora?style=flat-square&label=dsh-weknora&labelColor=101f38&color=cb3837&logo=npm&logoColor=white"></a>
 </p>
 
 <p align="center">
-| <a href="./README.md"><b>English</b></a> | <a href="./README_CN.md"><b>简体中文</b></a> | <a href="./README_JA.md"><b>日本語</b></a> | <b>한국어</b> |
+  <a href="./README.md">English</a> · <a href="./README_CN.md">简体中文</a> · <a href="./README_JA.md">日本語</a> · <b>한국어</b>
 </p>
 
 <p align="center">
-  <h4 align="center">
-
-  [개요](#-개요) • [아키텍처](#️-아키텍처) • [핵심 기능](#-핵심-기능) • [시작하기](#-시작하기) • [API 레퍼런스](#-api-레퍼런스) • [개발자 가이드](#-개발자-가이드)
-
-  </h4>
+  <a href="#개요">개요</a> ·
+  <a href="#시작하기">시작하기</a> ·
+  <a href="#최신-업데이트">최신 업데이트</a> ·
+  <a href="#기능-개요">기능 개요</a> ·
+  <a href="#클라이언트와-생태계">클라이언트</a> ·
+  <a href="#문서">문서</a> ·
+  <a href="#개발자-가이드">개발자 가이드</a>
 </p>
 
-# 💡 WeKnora — 문서를 살아있는 지식으로: RAG · Agent 추론 · 자동 Wiki 통합 LLM 지식 프레임워크
+<p align="center">
+  <a href="https://trendshift.io/repositories/15289"><img src="https://trendshift.io/api/badge/repositories/15289" alt="Tencent/WeKnora | Trendshift" width="220" height="48"/></a>
+</p>
 
-## 📌 개요
+## 개요
 
-[**WeKnora**](https://weknora.weixin.qq.com)는 엔터프라이즈급 문서 이해, 시맨틱 검색, 자율 추론 시나리오를 위해 설계된 오픈소스 LLM 기반 지식 프레임워크입니다.
+[**WeKnora**](https://weknora.weixin.qq.com)는 엔터프라이즈 문서 이해, 시맨틱 검색, 추론을 위한 오픈소스 LLM 기반 지식 프레임워크입니다. 팀에 흩어진 문서를 한데 모아 검색하고 추론에 활용할 수 있게 하며, 자료가 바뀌면 함께 갱신합니다.
 
-본 프레임워크는 **세 가지 핵심 역량**을 중심으로 구성됩니다. 일상 검색에 최적화된 **RAG 기반 빠른 Q&A**, 지식 검색·MCP 도구·**스킬 카탈로그**·세션 지속 **Docker / E2B / Cube 샌드박스**·웹 검색을 자율적으로 오케스트레이션하여 복잡한 다단계 작업을 처리하는 **ReAct Agent 추론**, 그리고 Agent가 원본 문서에서 상호 연결된 마크다운 지식베이스와 인터랙티브 지식 그래프를 스스로 생성·유지하는 완전히 새로운 **Wiki 모드**(수동 편집·버전 이력·원클릭 롤백 지원)입니다. **크로스 세션 장기 메모리**는 당신이 누구이며 무엇을 반복해서 묻는지 기억합니다. 지식 가공 과정도 세밀하게 제어할 수 있습니다. **트리형 폴더**가 업로드 시의 디렉터리 구조를 그대로 유지하고, **청크 편집 및 버전 이력**을 통해 검색 청크를 문서처럼 수정·비교·롤백할 수 있습니다. 다양한 데이터 소스 연동(Feishu 지식베이스 / Feishu 클라우드 드라이브 / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS, 지속 확장 중), **웹사이트 임베드 Widget**으로 외부 사이트에 에이전트 게시, 프로그램 연동을 위한 **범위 지정 API 키 및 Principal 모델**, 워크스페이스별 **다중 인스턴스 스토리지 백엔드**, 20개 이상의 LLM 프로바이더 통합(LiteLLM 포함), Langfuse 기반 풀스택 관측 가능성과 **런타임 작업 큐 대시보드 + Worker 풀 거버넌스**, **엔터프라이즈 멀티 테넌트 RBAC(4단계 역할 매트릭스 + 리소스 소유권 + 테넌트 감사 로그)**, 완전 셀프호스팅이 가능한 모듈형 아키텍처를 결합하여, WeKnora는 흩어진 문서를 검색·추론 가능하며 지속적으로 진화하는 전용 지식 자산으로 탈바꿈시킵니다.
+https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
 
-Feishu, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가 데이터 소스 개발 중), PDF, Word, 이미지, Excel, XMind 등 10가지 이상의 문서 포맷을 처리합니다. WeChat Work, Feishu, Slack, Telegram 등의 IM 채널을 통해 Q&A 서비스를 직접 제공할 수 있습니다. 모델 레이어에서 OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, Ollama 등 주요 프로바이더를 지원합니다. Office 문서는 **anydoc**으로 프로세스 내 파싱할 수 있습니다. 전체 프로세스가 모듈화 설계되어 LLM, 벡터 DB, 스토리지 등 구성 요소를 유연하게 교체 가능하며, 로컬 및 프라이빗 클라우드 배포를 지원하여 데이터 완전 자체 관리가 가능합니다. 또한 WeKnora는 **Langfuse**와 원활하게 통합되어 Agent 추론, 토큰 사용량 및 파이프라인에 대한 포괄적인 관측 가능성(Observability)을 제공합니다.
+<p align="center"><sub>1분 52초 · 1080p · 내레이션 없음, 영어 화면 텍스트</sub></p>
 
-## ✨ 최신 업데이트
+자료 조회는 RAG, 다단계 작업은 Agent, 지식 정리는 Wiki로 합니다. 세 기능은 같은 지식베이스를 공유합니다.
 
-- **v0.8.0** — **스킬 샌드박스 런타임**(세션 지속 Docker / E2B / Cube 백엔드, 테넌트 단위 네트워크 정책; Local 호스트 프로세스 백엔드 제거; Docker는 옵트인); **테넌트 스킬 카탈로그**(ClawHub / SkillHub / git / zip에서 설치, 샌드박스별 스냅샷, 실시간 진행률, 파일 탐색/편집, 개인·워크스페이스 환경 변수); **크로스 세션 장기 메모리**(profile / preference / fact / task / interest, 확인이 필요한 자동 추출, `search_memory`); 프로세스 내 **anydoc** Office 파서; 공식 **DeepSeek Harness 플러그인** `@wxg-prc-cpg/dsh-weknora`; GitLab 및 Tencent IMA 데이터 소스; LiteLLM; Exa 및 Metaso 웹 검색; XMind 파싱; 채팅 산출물, 질문 개요, 타임스탬프; 컨텍스트 압축 및 프로바이더 Prompt Cache 마커. 또한 OIDC JWKS 검증, 선택적 복잡한 비밀번호, 문서 자동 태깅, 광범위한 샌드박스/보안 강화. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
-- **v0.7.2** — **공식 제품 문서 사이트** 공개(VitePress, 6개 섹션 약 50편으로 약 360개 API 엔드포인트와 약 150개 환경 변수를 다루며, 독립 Docker/Nginx 배포·빠른 시작 샘플 데이터·로컬 MCP 데모 포함); **지식베이스 폴더 트리**(업로드 경로를 독립 데이터로 저장하여 파일 관리자처럼 탐색·이름 변경·문서 재배치); **청크 편집 및 버전 이력**(UI에서 검색 청크 직접 편집, 버전별 diff와 롤백, 편집 후 인덱스 자동 재구축, 문서 커스텀 메타데이터); **Wiki 페이지 버전 이력**(스냅샷 + 라인 단위 diff + 원클릭 롤백 + 브라우저 내 수동 편집); **파일 직접 링크 모드** `resource_urls=public` / `RESOURCE_URL_MODE`(서드파티 앱이 인증 프록시를 다시 호출하지 않고 이미지와 파일을 렌더링); **Feishu 클라우드 드라이브 데이터 소스** 및 docx blocks API 동기화; 문서 일괄 태깅; **MCP Server 1.1.x**(mcp 2.x 고수준 API로 마이그레이션, 공식 PyPI 패키지 `tencent-weknora-mcp`, `create_knowledge_from_text`와 `list_shared_knowledge_bases` 추가로 총 29개 도구); AWS S3 기본 자격 증명 체인(IAM Role / IRSA); 로컬 HTML 업로드 파싱; QQBot Markdown 응답; app / frontend / docreader / mcp-server PR CI 검사 추가. 또한 router와 `modelcontext` 대규모 리팩터링, 리랭크·청킹 품질 개선 및 광범위한 안정성 수정. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
-- **v0.7.1** — 새로운 **Yunzhijia(云之家) IM 통합**(WebSocket + 이미지 메시지 + Markdown 응답); **Volcengine Rerank** 제공자(요청 자동 분할)와 **Zhipu AI 웹 검색** 제공자; 컨트롤 플레인 자동화를 위한 **플랫폼 범위 API 키**(테넌트 관리, 시스템 설정, 런타임 큐, 감사 로그); **KB 단위 활동 감사 추적**; FAQ 관리 강화(필터링, 태깅, 내보내기, 가져오기 결과 추적); **Langfuse OTLP/OTel 트레이싱** 마이그레이션 및 W3C traceparent 전파; 채팅 헤더 액션을 통한 원클릭 **Markdown 내보내기** 및 참조 드로어의 Wiki 도구 결과 표시; 프롬프트 캐시 가시성; 세션 채널 거버넌스(IM/임베드/API 세션을 관리자 범위로 분리); Feishu 대규모 Wiki 동기화 견고화; 레거시 Neo4j 대화 메모리 의존성 제거. 또한 광범위한 slug 무결성, SSRF 전송, 상태 동기화 강화. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
-- **v0.7.0** — 세분화된 **범위 지정 API 키 및 Principal 모델**(능력 단위 권한 + KB 단위 제한 + API 통합 플레이그라운드); **런타임 작업 큐 가시성 대시보드 및 Worker 풀 거버넌스**(단계별 풀 + 모델별 동시성 거버너 + 실패 작업 조사/재시도); **다중 인스턴스 스토리지 백엔드**(워크스페이스당 여러 스토리지 인스턴스, KB 단위 바인딩, 기본 인스턴스); **세션 범위 임시 첨부**(이미지/문서 비동기 파싱 + 통합 한도); 추천 질문 및 후속 질문; 안정적인 리소스 레지스트리 및 LLM 컨텍스트 별칭 압축; `@Skill / @MCP` 멘션 기반 범위 지정 Agent 런타임; 대화 중 MCP OAuth; QQBot 및 Lark(Feishu 국제판) IM 통합; Redis TLS; Requesty 모델 제공자 + Keenable 웹 검색; 테넌트리스 프로비저닝 및 제어된 셀프서비스 워크스페이스; 관리자 비밀번호 재설정; 지식 베이스 복제 플로우; `weknora` CLI v0.10. 또한 대규모 보안 강화(SSRF, 비밀 마스킹, SQL 검증, IDOR). 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
-- **v0.6.3** — 웹사이트 임베드 Widget 및 통합 센터(보안 모드 Token 교환 + 속도 제한); 채팅 경험 전면 개편(인용 팝오버, RAG 파이프라인 진행, 스트리밍 Markdown); 문서 다중 태그 및 일괄 reparse; Wiki 폴더 및 계층 탐색; RSS 데이터 소스; MCP OAuth2; EPUB / MHTML 파싱; Agent 모델 준비 상태 검사; 모델 디버거; 세션 소스 필터; 워크스페이스 삭제 UI. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
-- **v0.6.2** — 업로드 단위 파싱 설정(`process_config`) + 업로드 확인 대화상자; reparse 시 설정 덮어쓰기; `weknora` CLI v0.9(번들 Agent Skills, `session stop`, auth/profile 통합); KB 마키 선택 다중 선택; pgvector 1024차원 HNSW 인덱스; 채팅 리소스 Store 리팩터; Langfuse 단일 추적(Jaeger 제거). 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).
-- **v0.6.1** — 문서 파싱 추적 타임라인(Langfuse 스타일 Span 트리, 단계별 진행 표시 + 파싱 중단); OpenSearch 벡터 저장소 드라이버; YAML 선언형 내장 모델 구성; 시스템 관리자와 통합 플랫폼 설정 + 감사 로그; 신규 사용자 온보딩 가이드; 설정 UI 리디자인; `weknora` CLI v0.7 / v0.8(Agent 우선 와이어 프로토콜, NDJSON, `--dry-run`); OpenDataLoader 및 PaddleOCR-VL 파싱 엔진; MCP 서버 멀티 트랜스포트(stdio / SSE / HTTP); 모델별 사고 모드 설정; Tencent LKEAP 리랭크 + 네이티브 Gemini 임베딩 + MiniMax-M3. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md) 참고.
-- **v0.6.0** — 테넌트 RBAC(4단계 역할 매트릭스 `Owner` / `Admin` / `Contributor` / `Viewer` + KB 단위 소유 + 테넌트별 감사 로그), 테넌트 멤버 관리와 멀티 워크스페이스 UX, 셀프 서비스 워크스페이스 생성; `weknora` CLI v0.4 GA + `mcp serve`; 여러 벡터 저장소에 걸친 KB 검색 팬아웃; MCP / 데이터 소스 자격 증명 AES-256-GCM 암호화 + docreader gRPC TLS + Token; Zhipu 임베더와 화웨이 클라우드 OBS 추가; 서버 사이드 사용자 환경설정; Go 1.26.0. 자세한 내용은 [`docs/RBAC说明.md`](./docs/RBAC说明.md)과 [`CHANGELOG.md`](./CHANGELOG.md) 참고.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/capabilities-ko-dark.svg">
+  <img src="./docs/images/readme/capabilities-ko-light.svg" alt="01 RAG: 근거 있는 답변. 하이브리드 검색, 멀티모달 파싱, 원문 인용. 02 Agent: 지식과 도구로 작업 완료. 다단계 추론, 스킬과 샌드박스, 로컬 브라우저, MCP 도구, 장기 메모리. 03 Wiki: 문서를 Wiki로 정리. 자동 정리, 지식 그래프, 버전 롤백." width="100%">
+</picture>
+
+**Agent 도구 상자.** ClawHub / SkillHub / Git / ZIP에서 설치한 스킬은 세션 단위로 유지되는 Docker / E2B / Cube 샌드박스에서 실행되며, 채팅 옆에서 대화형 터미널과 그래픽 데스크톱을 열 수 있습니다. BrowserSkill 확장 프로그램으로 Agent가 사용자의 Chrome / Edge를 직접 조작하고, 외부 MCP 서비스(OAuth 지원)를 연결해 도구별로 활성화할 수 있습니다.
+
+그 밖에:
+
+- **메모리와 지식 정리**: 크로스 세션 장기 메모리가 사용자가 확인한 프로필, 선호, 사실을 보관합니다. 폴더 업로드는 원래 디렉터리 구조를 유지하고, 검색 청크는 편집·비교·롤백할 수 있습니다.
+- **데이터 소스와 포맷**: Feishu 지식베이스 / Feishu 클라우드 드라이브 / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS 자동 동기화(지속 확장 중). PDF, Word, 이미지, Excel, XMind 등 10가지 이상의 포맷을 지원하며, Office 문서는 anydoc으로 프로세스 내 파싱합니다.
+- **채널과 연동**: WeChat Work, Feishu, Slack, Telegram 등 IM에서 바로 Q&A, 웹사이트 임베드 Widget으로 외부 사이트에 에이전트 게시, 내장 MCP Server로 Cursor·Claude 등 AI 도구와 연결, 범위 지정 API 키와 Principal 모델로 프로그램 연동.
+- **모델**: 27개 내장 벤더와 자동 생성 모델 카탈로그. OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, Ollama 등을 지원합니다.
+- **권한과 운영**: 멀티 워크스페이스 RBAC(4단계 역할, 리소스 소유권, 워크스페이스 감사 로그), 워크스페이스별 다중 스토리지 인스턴스, 런타임 작업 큐 대시보드와 Worker 풀 거버넌스, Langfuse를 통한 Agent 단계·토큰 사용량·파이프라인 추적.
+- **배포**: LLM, 벡터 데이터베이스, 스토리지 백엔드를 모두 교체할 수 있습니다. 로컬이나 프라이빗 클라우드에 배포해 데이터를 자체 환경에 둘 수 있습니다.
+
+### 적용 시나리오
+
+| 시나리오 | 적용 사례 | 핵심 가치 |
+|---------|----------|----------|
+| **기업 지식 관리** | 내부 문서 검색, 규정 Q&A, 운영 매뉴얼 조회 | 지식 탐색 효율 향상, 교육 비용 절감 |
+| **학술 연구 분석** | 논문 검색, 연구 리포트 분석, 학술 자료 정리 | 문헌 조사 가속, 연구 의사결정 지원 |
+| **제품 기술 지원** | 제품 매뉴얼 Q&A, 기술 문서 검색, 트러블슈팅 | 고객 지원 품질 향상, 지원 부담 감소 |
+| **법무/컴플라이언스 검토** | 계약 조항 검색, 규제 정책 조회, 사례 분석 | 컴플라이언스 효율 향상, 법적 리스크 감소 |
+| **의료 지식 지원** | 의학 문헌 검색, 진료 가이드라인 조회, 증례 분석 | 임상 의사결정 지원, 진단 품질 향상 |
+
+## 시작하기
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <img src="./website-docs/homepage/public/docs/_home/brands/wechat-dialog.png" width="28" height="28" alt=""><br/>
+      <sub>온라인</sub><br/>
+      <b>WeChat 대화 오픈 플랫폼</b><br/>
+      지식베이스를 온라인으로 관리하고, Q&A 서비스를 공식계정·미니프로그램 등 WeChat 시나리오에 연결합니다.<br/><br/>
+      <a href="https://chatbot.weixin.qq.com/login">플랫폼 열기 →</a>
+    </td>
+    <td width="33%" valign="top">
+      <img src="./website-docs/homepage/public/docs/_home/brands/tencent-cloud.ico" width="28" height="28" alt=""><br/>
+      <sub>클라우드</sub><br/>
+      <b>Tencent Cloud Lighthouse</b><br/>
+      애플리케이션 템플릿으로 WeKnora를 배포하고 자신의 클라우드 서버에서 운영합니다.<br/><br/>
+      <a href="https://mc.tencent.com/s69nKCVz">Tencent Cloud에 배포 →</a>
+    </td>
+    <td width="33%" valign="top">
+      <img src="./docs/images/readme/icons/server.svg" width="28" height="28" alt=""><br/>
+      <sub>셀프 호스팅</sub><br/>
+      <b>자체 환경에 배포</b><br/>
+      Docker 또는 Kubernetes로 배포하고 모델, 스토리지, 네트워크를 직접 구성합니다.<br/><br/>
+      <a href="#docker-compose로-배포">Docker Compose로 배포 ↓</a>
+    </td>
+  </tr>
+</table>
+
+### Docker Compose로 배포
+
+[Docker](https://www.docker.com/), [Docker Compose](https://docs.docker.com/compose/), [Git](https://git-scm.com/)이 필요합니다.
+
+```bash
+git clone https://github.com/Tencent/WeKnora.git
+cd WeKnora
+cp .env.example .env    # 필요에 따라 .env 편집 (파일 내 주석 참고)
+docker compose pull     # 최신 이미지 가져오기
+docker compose up -d    # 코어 서비스 시작
+```
+
+시작 후 **[http://localhost](http://localhost)** 에 접속해 온보딩 가이드에 따라 설정하세요. 샘플 데이터를 사용하는 전체 과정은 [빠른 시작](https://weknora.weixin.qq.com/docs/01-getting-started/03-quickstart)(중국어)을 참고하세요.
+
+> [!TIP]
+> 로컬 Ollama 모델을 사용하려면 먼저 `ollama serve > /dev/null 2>&1 &` 를 실행하세요. Ollama 임베딩 모델 이름, `OLLAMA_BASE_URL`, RAM 안내는 [설정 문서](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration)를 참고하세요.
+
+| 서비스 | URL |
+|--------|-----|
+| Web UI | `http://localhost` |
+| 백엔드 API | `http://localhost:8080` |
+| Langfuse 트레이싱 | `http://localhost:3000` |
+
+### 선택 서비스
+
+`--profile` 플래그로 추가 컴포넌트를 활성화합니다. 여러 profile을 조합할 수 있습니다.
+
+| Profile | 설명 |
+|---------|------|
+| _(기본)_ | 코어 서비스 |
+| `full` | 전체 기능 |
+| `neo4j` | 지식 그래프 (Neo4j) |
+| `minio` | 오브젝트 스토리지 (MinIO) |
+| `langfuse` | 트레이싱 (Langfuse) |
+
+```bash
+docker compose --profile neo4j --profile minio pull
+docker compose --profile neo4j --profile minio up -d
+docker compose down     # 서비스 중지
+```
+
+### 업그레이드
+
+기존 배포가 있고 새 release를 다운로드한 경우:
+
+```bash
+# .env에서 WEKNORA_VERSION을 대상 버전(예: 0.8.2)으로 설정하거나 latest 유지
+docker compose pull     # WEKNORA_VERSION에 맞는 이미지 가져오기
+docker compose up -d    # 새 이미지로 컨테이너 재생성
+```
+
+> [!NOTE]
+> `docker compose up -d`만 실행하면 로컬 캐시 이미지가 재사용되어 Web UI 버전이 다운로드한 release와 일치하지 않을 수 있습니다. v0.8.0에서 업그레이드하기 전에 [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#upgrade-notes)를 확인하세요.
+
+### 기타 배포 방식
+
+| 방식 | 용도 |
+|------|------|
+| **Docker Compose** | 위의 표준 배포. 전체 기능, 다중 서비스 구성 |
+| **Kubernetes (Helm)** | 운영 클러스터. Chart는 [`helm/`](./helm)에 있습니다 |
+| **Lite 단일 바이너리** | 로컬 또는 저사양 환경, 외부 의존성 없음(SQLite + 인메모리 큐). 표준판과의 차이는 [Lite와 표준판 비교](./docs/LITE.md)(중국어) |
+| **데스크톱 앱** | GUI가 있는 Lite 런타임. 로그인 없이 시작하며 macOS에서는 호스트 샌드박스를 제공. 설치 파일이 아직 없으므로 소스에서 빌드하세요 |
+
+모든 배포 형태, 하드웨어 요구 사항, 배포 토폴로지는 [설치 가이드](https://weknora.weixin.qq.com/docs/01-getting-started/02-installation)를 참고하세요.
+
+> [!WARNING]
+> WeKnora는 로그인 인증을 제공하지만, 운영 환경 배포 시 아래 사항을 강력히 권장합니다.
+> - WeKnora 서비스를 공용 인터넷이 아닌 내부 / 사설 네트워크 환경에 배포
+> - 정보 유출 방지를 위해 서비스를 공용 네트워크에 직접 노출하지 않기
+> - 배포 환경에 적절한 방화벽 규칙 및 접근 제어 구성
+> - 보안 패치와 개선 사항 적용을 위해 최신 버전으로 정기 업데이트
+
+## 최신 업데이트
+
+### v0.8.2 <sub>· 2026-09-24 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2)</sub>
+
+에이전트가 사용자 컴퓨터의 브라우저를 조작할 수 있고, 지식베이스를 MCP로 다른 AI 도구에 공개할 수 있으며, 진행 중인 대화에 요구 사항을 추가하거나 분기·되감기할 수 있습니다.
+
+- **[로컬 브라우저(BrowserSkill)](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#local-browser)**: 오픈소스 BrowserSkill 확장 프로그램을 통해 에이전트가 사용자 자신의 Chrome / Edge를 조작합니다. 실시간 작업 미리보기, 일시정지 / 재개를 지원하며 로그인과 CAPTCHA는 사용자에게 인계합니다.
+- **[내장 MCP Server](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#mcp-server)**: 워크스페이스별 `/mcp/<endpoint_id>` 엔드포인트(Streamable HTTP). 엔드포인트마다 별도 토큰·지식베이스 범위·요청 제한·도구 그룹을 둡니다. Python 버전 `mcp-server/`는 지원 중단되었습니다.
+- **[대화 제어](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#conversation-control)**: 실행 중인 턴에 요구 사항 추가, 이전 질문에서 대화 분기, 샌드박스 체크포인트와 함께 제자리 되감기, 세션별 추론 강도. 생성된 파일은 새 산출물 라이브러리에 모입니다.
+- **[샌드박스](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#sandbox)**: 대화형 터미널과 그래픽 데스크톱, macOS Lite 호스트 샌드박스와 프로젝트 폴더, 스킬·MCP 서비스·브라우저 연결을 모은 사이드바 도구 상자.
+- **[모델](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#models)**: 재구축된 모델 카탈로그(27개 내장 벤더, 컨텍스트 윈도우·최대 출력·추론 단계·비전 지원 자동 채움). Agent 검색 도구를 `search_knowledge` / `read_document` / `list_documents`로 통합.
+- **[지식과 플랫폼](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#knowledge)**: Confluence 및 DingTalk Docs 데이터 소스, Bocha 및 Serply 웹 검색, 일본어 UI, IM 채널별 응답 언어, 화이트리스트 전용 외부 통신 모드.
+
+> [!IMPORTANT]
+> **호환성 변경:** DingTalk 채널은 Stream 모드만 지원하며, 샌드박스 명령은 기본적으로 `root`로 실행됩니다. [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#upgrade-notes)를 참고하세요.
+
+### v0.8.0 <sub>· [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.0)</sub>
+
+- **스킬 샌드박스 런타임**: 세션 지속 Docker / E2B / Cube 백엔드, 테넌트별 네트워크 정책. Local 호스트 프로세스 백엔드를 제거했고 Docker는 옵트인입니다.
+- **테넌트 스킬 카탈로그**: ClawHub / SkillHub / git / zip에서 설치, 샌드박스별 스냅샷, 실시간 진행 상황, 파일 탐색 / 편집, 개인·워크스페이스 환경 변수.
+- **크로스 세션 장기 메모리**: profile / preference / fact / task / interest, 확인 기반 자동 추출, `search_memory`.
+- **파싱과 데이터 소스**: 프로세스 내 anydoc Office 파서, GitLab 및 Tencent IMA 데이터 소스, XMind 파싱.
+- **생태계**: 공식 DeepSeek Harness 플러그인 `@wxg-prc-cpg/dsh-weknora`, LiteLLM, Exa 및 Metaso 웹 검색.
+- **채팅**: 채팅 산출물, 질문 개요, 타임스탬프, 컨텍스트 압축과 프로바이더 Prompt Cache 마커.
+- **보안**: OIDC JWKS 검증, 선택적 복잡 비밀번호, 문서 자동 태깅, 광범위한 샌드박스 / 보안 강화.
+
+<details>
+<summary><b>이전 버전(v0.2.0 – v0.7.2)</b></summary>
+
+<br/>
+
+- **v0.7.2** — 제품 문서 사이트, 지식베이스 폴더 트리, 청크 편집 및 버전 이력, Wiki 페이지 버전 이력, 바로 로드 가능한 파일 URL(`resource_urls=public`), Feishu 클라우드 드라이브 데이터 소스, 일괄 태깅, MCP Server 1.1(도구 29개), AWS S3 기본 자격 증명 체인.
+- **v0.7.1** — Yunzhijia IM, Volcengine 리랭크, Zhipu AI 웹 검색, 플랫폼 범위 API 키, KB 단위 활동 감사, FAQ 필터·태깅·내보내기, Langfuse OTLP 추적, 원클릭 Markdown 내보내기.
+- **v0.7.0** — 범위 지정 API 키와 Principal 모델, 작업 큐 대시보드와 Worker 풀 거버넌스, 워크스페이스당 여러 스토리지 인스턴스, 대화 임시 첨부, `@Skill / @MCP` 멘션, 대화 중 MCP OAuth, QQBot과 Lark IM, Redis TLS, `weknora` CLI v0.10.
+- **v0.6.3** — 웹사이트 임베드 Widget 및 통합 센터(보안 모드 Token 교환 + 속도 제한); 채팅 경험 전면 개편(인용 팝오버, RAG 파이프라인 진행, 스트리밍 Markdown); 문서 다중 태그 및 일괄 reparse; Wiki 폴더 및 계층 탐색; RSS 데이터 소스; MCP OAuth2; EPUB / MHTML 파싱; Agent 모델 준비 상태 검사; 모델 디버거; 세션 소스 필터; 워크스페이스 삭제 UI.
+- **v0.6.2** — 업로드 단위 파싱 설정(`process_config`) + 업로드 확인 대화상자; reparse 시 설정 덮어쓰기; `weknora` CLI v0.9(번들 Agent Skills, `session stop`, auth/profile 통합); KB 마키 선택 다중 선택; pgvector 1024차원 HNSW 인덱스; 채팅 리소스 Store 리팩터; Langfuse 단일 추적(Jaeger 제거).
+- **v0.6.1** — 문서 파싱 추적 타임라인(Langfuse 스타일 Span 트리, 단계별 진행 표시 + 파싱 중단); OpenSearch 벡터 저장소 드라이버; YAML 선언형 내장 모델 구성; 시스템 관리자와 통합 플랫폼 설정 + 감사 로그; 신규 사용자 온보딩 가이드; 설정 UI 리디자인; `weknora` CLI v0.7 / v0.8(Agent 우선 와이어 프로토콜, NDJSON, `--dry-run`); OpenDataLoader 및 PaddleOCR-VL 파싱 엔진; MCP 서버 멀티 트랜스포트(stdio / SSE / HTTP); 모델별 사고 모드 설정; Tencent LKEAP 리랭크 + 네이티브 Gemini 임베딩 + MiniMax-M3.
+- **v0.6.0** — 테넌트 RBAC(4단계 역할 매트릭스 `Owner` / `Admin` / `Contributor` / `Viewer` + KB 단위 소유 + 테넌트별 감사 로그), 테넌트 멤버 관리와 멀티 워크스페이스 UX, 셀프 서비스 워크스페이스 생성; `weknora` CLI v0.4 GA + `mcp serve`; 여러 벡터 저장소에 걸친 KB 검색 팬아웃; MCP / 데이터 소스 자격 증명 AES-256-GCM 암호화 + docreader gRPC TLS + Token; Zhipu 임베더와 화웨이 클라우드 OBS 추가; 서버 사이드 사용자 환경설정; Go 1.26.0. 자세한 내용은 [테넌트와 인증](https://weknora.weixin.qq.com/docs/03-features/01-tenant-auth)(중국어) 참고.
 - **v0.5.2** — Wiki 인제스트가 만 건 규모 KB 지원(작업 큐 + DLQ); MCP 휴먼인더루프 도구 승인; Anthropic / Apache Doris / Tencent VectorDB / Kingsoft Cloud KS3 / SearXNG 백엔드; 적응형 3단계 청킹 + 라이브 미리보기; 글로벌 ⌘K 명령 팔레트; Yuque 커넥터 + WeChat 미니프로그램; `weknora` CLI 프리뷰.
 - **v0.5.1** — 지식베이스 일괄 관리; 테넌트 전체 IM 채널 개요; 세션 검색 + 사용자 단위 핀; 모델 / 웹 검색 / MCP 통일 카드 설정; Agent별 LLM 타임아웃; 데스크탑 테넌트 전환.
 - **v0.5.0** — Wiki 모드 GA — Agent가 원본 문서에서 구조화·상호 연결된 Markdown Wiki 페이지와 지식 그래프 자동 생성, Wiki 브라우저 및 시각화 그래프를 UI에 탑재.
@@ -79,266 +224,218 @@ Feishu, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자
 - **v0.3.0** — 공유 스페이스; Agent Skills + 샌드박스 실행; 커스텀 Agent; 데이터 분석 Agent; 사고 모드; Bing / Google 검색; API Key 인증; Helm Chart; 한국어 i18n; Qdrant.
 - **v0.2.0** — Agent 모드(ReACT); 다중 타입 지식베이스(FAQ + 문서); 대화 전략 설정; DuckDuckGo 웹 검색; MCP 도구 통합; 새 UI + Agent 모드 전환; MQ 비동기 작업 관리.
 
+전체 변경 이력은 [`CHANGELOG.md`](./CHANGELOG.md)를 참고하세요.
 
-## 📱 기능 데모
+</details>
 
-<table>
-  <tr>
-    <td colspan="2" align="center"><b>🛠️ 스킬 샌드박스 대화 · Word 생성 및 미리보기</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="스킬 샌드박스 대화: Word 문서 생성 및 미리보기" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>📦 스킬 카탈로그 · E2B 샌드박스에 설치</b><br/><img src="./docs/images/skill-catalog.png" alt="워크스페이스 스킬 카탈로그: docx / pptx / pdf가 E2B에 설치됨" width="100%"></td>
-    <td width="50%" align="center"><b>🤖 Agent 모드 · 검색, 스킬 읽기, 샌드박스 파일 쓰기</b><br/><img src="./docs/images/agent-qa.png" alt="Agent가 지식베이스를 검색하고 docx 스킬을 읽은 뒤 샌드박스에 스크립트를 씀" width="100%"></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><b>💬 지능형 Q&A 대화</b><br/><img src="./docs/images/qa.png" alt="지능형 Q&A 대화" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>📖 Wiki 브라우저</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki 브라우저" width="100%"></td>
-    <td width="50%" align="center"><b>🕸️ Wiki 지식 그래프</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki 지식 그래프" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>🕘 Wiki 페이지 버전 이력 및 롤백</b><br/><img src="./docs/images/wiki-revision-history.png" alt="Wiki 페이지 버전 이력 및 롤백" width="100%"></td>
-    <td width="50%" align="center"><b>✂️ 청크 편집 및 버전 이력</b><br/><img src="./docs/images/kb-chunk-edit.png" alt="청크 편집 및 버전 이력" width="100%"></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><b>📁 폴더 트리 및 일괄 작업</b><br/><img src="./docs/images/kb-document-list.png" alt="지식베이스 폴더 트리 및 일괄 작업" width="100%"></td>
-    <td width="50%" align="center"><b>🔭 관측 가능성 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
-  </tr>
-</table>
+## 기능 데모
 
-## 🏗️ 아키텍처
+### 빠른 Q&A와 스마트 추론
 
-![weknora-architecture.png](./docs/images/architecture.png)
+**두 가지 질문 방식.** 빠른 Q&A는 지식베이스를 RAG로 검색해 답하고 참고한 출처를 표시합니다. 스마트 추론에서는 에이전트가 다단계 작업을 계획해 검색, 문서 읽기, 도구와 스킬 호출을 수행하며 각 단계를 대화에 보여 줍니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/18-chat-experience)
 
-문서 파싱, 벡터화, 검색부터 LLM 추론까지 전체 파이프라인을 모듈화하여 각 구성 요소를 유연하게 교체·확장 가능합니다. 로컬 / 프라이빗 클라우드 배포를 지원하며, 데이터 완전 자체 관리와 진입 장벽 없는 Web UI로 빠르게 시작할 수 있습니다.
+<a href="./docs/images/readme/spotlight-qa-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-qa-dark.webp">
+  <img src="./docs/images/readme/spotlight-qa-light.webp" alt="빠른 Q&A와 스마트 추론" width="100%">
+</picture>
+</a>
 
-## 📊 적용 시나리오
+### 로컬 브라우저
 
-| 시나리오 | 적용 사례 | 핵심 가치 |
-|---------|----------|----------|
-| **기업 지식 관리** | 내부 문서 검색, 규정 Q&A, 운영 매뉴얼 조회 | 지식 탐색 효율 향상, 교육 비용 절감 |
-| **학술 연구 분석** | 논문 검색, 연구 리포트 분석, 학술 자료 정리 | 문헌 조사 가속, 연구 의사결정 지원 |
-| **제품 기술 지원** | 제품 매뉴얼 Q&A, 기술 문서 검색, 트러블슈팅 | 고객 지원 품질 향상, 지원 부담 감소 |
-| **법무/컴플라이언스 검토** | 계약 조항 검색, 규제 정책 조회, 사례 분석 | 컴플라이언스 효율 향상, 법적 리스크 감소 |
-| **의료 지식 지원** | 의학 문헌 검색, 진료 가이드라인 조회, 증례 분석 | 임상 의사결정 지원, 진단 품질 향상 |
+**사용자 컴퓨터의 브라우저 조작.** Tencent가 오픈소스로 공개한 BrowserSkill 확장 프로그램으로 에이전트가 사용자의 Chrome이나 Edge에서 페이지를 열고 양식을 입력합니다. 로그인이나 CAPTCHA는 사용자에게 넘깁니다. [문서 →](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser)
 
-## 🧩 기능 개요
+<a href="./docs/images/readme/spotlight-browser-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-browser-dark.webp">
+  <img src="./docs/images/readme/spotlight-browser-light.webp" alt="로컬 브라우저" width="100%">
+</picture>
+</a>
 
-**지능형 대화**
+### 스킬과 샌드박스
 
-| 기능 | 상세 |
-|------|------|
-| 지능형 추론 | ReACT 점진적 멀티스텝 추론, 지식 검색·MCP 도구·스킬 샌드박스·웹 검색을 자율 오케스트레이션 |
-| 빠른 Q&A | 지식베이스 기반 RAG Q&A, 빠르고 정확한 답변 |
-| Wiki 모드 | Agent가 주도하여 원본 문서에서 구조화된 마크다운 Wiki 페이지를 자동 생성 및 유지 관리; 브라우저 내 수동 편집, 페이지 버전 이력, 라인 단위 diff 및 원클릭 롤백 |
-| 스킬 카탈로그와 샌드박스 | 워크스페이스 스킬 카탈로그(ClawHub / SkillHub / git / zip)를 세션 지속 Docker / E2B / Cube 샌드박스에 설치; `shell_exec`, 파일 도구, 산출물, 설정 단위 네트워크 정책; Local 호스트 프로세스 백엔드 제거 |
-| 장기 메모리 | 크로스 세션 메모리(profile / preference / fact / task / interest), 자동 추출, 사용자 확인, 온디맨드 `search_memory` |
-| 도구 호출 | 내장 도구, MCP 도구(OAuth2 원격 서비스·대화 중 OAuth 포함), 웹 검색; `@Skill / @MCP` 멘션으로 턴 단위 Agent 런타임 범위 지정 |
-| 대화 전략 | 온라인 프롬프트 편집, 검색 임계값 조정, 멀티턴 문맥 인식, Agent별 인용 출력 토글 |
-| 추천 질문 | 지식베이스 콘텐츠 기반 질문 자동 생성 및 답변 후 후속 질문 |
-| 임시 첨부 | 세션 범위로 이미지 / 문서를 업로드하고 비동기 파싱하여 일회성 Q&A에 사용(이미지 + 첨부 통합 한도) |
-| 인용 및 RAG 진행 | 인라인 인용 팝오버 및 인용 드로어(웹 / KB 소스 구분), 통합 Markdown 렌더링, RAG 파이프라인 단계별 진행 표시 |
-| 세션 관리 | 사이드바에서 소스별(Web / IM / 임베드) 세션 필터 및 그룹화, 세션 제목 인라인 이름 변경 지원 |
+**스킬을 실행하고 파일을 생성.** Docker, E2B, Cube를 지원합니다. 같은 세션의 여러 턴이 하나의 작업 공간을 공유하며, 생성된 파일은 미리 보고 내려받을 수 있습니다. 대화 옆에서 그래픽 데스크톱이나 대화형 터미널을 열어 에이전트의 각 단계를 확인하고, 필요하면 직접 이어받을 수 있습니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
 
-**지식 관리**
+<a href="./docs/images/readme/spotlight-sandbox-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-sandbox-dark.webp">
+  <img src="./docs/images/readme/spotlight-sandbox-light.webp" alt="스킬과 샌드박스" width="100%">
+</picture>
+</a>
 
-| 기능 | 상세 |
-|------|------|
-| 지식베이스 타입 | FAQ / 문서 / Wiki, 폴더 임포트·URL 임포트·다중 태그 관리·온라인 입력 |
-| 폴더 트리 | 폴더 업로드 시 원본 디렉터리 구조를 유지하고, 사이드바 트리 탐색·폴더 이름 변경·문서를 다른 폴더로 재배치 지원 |
-| 청크 편집 및 버전 | UI에서 검색 청크를 직접 편집하고 버전별 스냅샷·diff·원클릭 롤백, 편집 후 인덱스 자동 재구축; 생성 질문 추가·수정·삭제·재생성; 문서 커스텀 메타데이터 지원 |
-| 업로드 단위 파싱 설정 | 업로드 확인 대화상자 또는 `process_config` API로 파서·청킹·멀티모달(VLM / ASR)·그래프 추출·질문 생성을 배치 단위로 덮어쓰기; reparse 시 설정 변경 지원 |
-| 일괄 reparse | 여러 문서의 파싱을 한 번에 재큐잉, 배치 단위 `process_config` 지원 |
-| 데이터 소스 임포트 | Feishu 지식베이스 / Feishu 클라우드 드라이브 / Lark / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS 피드 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
-| 문서 포맷 | PDF / Word / Txt / Markdown / HTML / EPUB / MHTML / 이미지 / CSV / Excel / PPT / JSON / XMind |
-| 자동 태깅 | 파싱 후 지식베이스 기존 태그에서 일치 항목을 증분 연결(새 태그 생성·수동 태그 덮어쓰기 없음) |
-| 검색 전략 | BM25 희소 / Dense 밀집 / GraphRAG 그래프 강화 / 부모-자식 청킹 / pgvector HNSW 가속(1024차원) / 다차원 인덱싱 |
-| 일괄 선택 및 태깅 | KB 목록에서 마키(드래그) 다중 선택으로 일괄 reparse 및 일괄 태깅(공통 태그 자동 선택) |
-| E2E 테스트 | 전체 파이프라인 시각화, 리콜 적중률·BLEU / ROUGE 지표 평가 |
+### 도구 상자: MCP 서비스와 스킬
 
-**연동 및 확장**
+**에이전트가 쓰는 도구.** 외부 MCP 서비스를 연결하고, 켤 도구와 승인이 필요한 호출을 도구별로 고를 수 있습니다. 스킬은 ClawHub, SkillHub, Git, ZIP에서 설치해 워크스페이스에서 관리하고 여러 샌드박스에서 재사용합니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox)
 
-| 기능 | 상세 |
-|------|------|
-| LLM | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / LiteLLM / Ollama |
-| Embedding | Ollama / BGE / GTE / OpenAI 호환 API |
+<a href="./docs/images/readme/spotlight-toolbox-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-toolbox-dark.webp">
+  <img src="./docs/images/readme/spotlight-toolbox-light.webp" alt="도구 상자: MCP 서비스와 스킬" width="100%">
+</picture>
+</a>
+
+### 자동 Wiki
+
+**문서를 탐색 가능한 Wiki로.** Wiki를 켜면 지식베이스 문서에서 인물, 제품, 개념을 추출해 출처가 달린 페이지를 만들고 디렉터리별로 탐색할 수 있습니다. 지식 그래프에서 페이지 간 관계를 보고, 페이지를 직접 편집하며 변경 내역을 되돌릴 수 있습니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/14-wiki)
+
+<a href="./docs/images/readme/spotlight-wiki-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-wiki-dark.webp">
+  <img src="./docs/images/readme/spotlight-wiki-light.webp" alt="자동 Wiki" width="100%">
+</picture>
+</a>
+
+### 관측 가능성
+
+**추적과 런타임 모니터링.** Langfuse가 에이전트 각 단계의 추론, 도구 호출, 토큰 사용량을 추적합니다. 문서 파싱 타임라인은 단계별 진행 상황을 보여 주고, 작업 큐 대시보드는 대기 중이거나 실패한 작업을 나열합니다. [문서 →](https://weknora.weixin.qq.com/docs/03-features/16-observability)
+
+<a href="./docs/images/readme/spotlight-observability-light.webp">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/spotlight-observability-dark.webp">
+  <img src="./docs/images/readme/spotlight-observability-light.webp" alt="관측 가능성" width="100%">
+</picture>
+</a>
+
+## 아키텍처
+
+<a href="./docs/images/readme/architecture-ko-light.svg">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme/architecture-ko-dark.svg">
+  <img src="./docs/images/readme/architecture-ko-light.svg" alt="WeKnora 아키텍처: 클라이언트와 채널이 WeKnora 앱에 연결되고, RAG Q&A·Agent 추론·자동 Wiki가 같은 지식 처리 파이프라인을 공유. 앱은 런타임 서비스를 호출하고 PostgreSQL·Redis와 선택적 스토리지에 데이터를 저장" width="100%">
+</picture>
+</a>
+
+문서 파싱, 벡터화, 검색부터 LLM 추론까지 각 단계를 모듈화하여 구성 요소를 교체·확장할 수 있습니다. 로컬과 프라이빗 클라우드 배포를 지원하며 Web UI로 바로 시작할 수 있습니다. 자세히 보기: [아키텍처 개요](https://weknora.weixin.qq.com/docs/02-architecture/01-overview) · [RAG 파이프라인](https://weknora.weixin.qq.com/docs/02-architecture/04-rag-pipeline) · [확장 지점](https://weknora.weixin.qq.com/docs/06-development/03-extension-points)(중국어).
+
+## 기능 개요
+
+| 영역 | 주요 기능 |
+|------|-----------|
+| [Q&A와 Agent](https://weknora.weixin.qq.com/docs/03-features/07-agent) | 빠른 Q&A는 지식베이스에서 출처와 함께 답하고, 스마트 추론에서는 ReAct 에이전트가 지식베이스, 웹 검색, MCP 도구, 스킬, 로컬 브라우저를 조합합니다. 실행 중인 대화에 요구 사항 추가·분기·되감기, 세션을 넘는 [장기 메모리](https://weknora.weixin.qq.com/docs/03-features/23-memory) 지원 |
+| [Wiki](https://weknora.weixin.qq.com/docs/03-features/14-wiki) | 에이전트가 상호 연결된 Wiki 페이지와 지식 그래프를 생성. 브라우저 내 편집, 버전 diff 및 롤백 |
+| [스킬과 샌드박스](https://weknora.weixin.qq.com/docs/03-features/22-skills-sandbox) | ClawHub / SkillHub / Git / ZIP에서 설치하는 스킬 카탈로그. 세션 단위로 유지되는 Docker / E2B / Cube 샌드박스와 설정 단위 네트워크 정책. 채팅 옆 대화형 터미널과 그래픽 데스크톱 |
+| [지식베이스](https://weknora.weixin.qq.com/docs/03-features/02-knowledge-base) | FAQ·문서·Wiki 세 가지 유형. 폴더 트리, 청크 편집 및 버전 이력, 업로드 단위 파싱·청킹·멀티모달 설정, 자동 태깅 |
+| [검색](https://weknora.weixin.qq.com/docs/03-features/05-retrieval-engines) | 키워드 + 벡터 하이브리드 검색, 리랭크, 부모-자식 청킹, GraphRAG([Neo4j](https://weknora.weixin.qq.com/docs/03-features/09-knowledge-graph)). 리콜 적중률과 BLEU / ROUGE 기반 엔드투엔드 평가 |
+| [권한과 보안](https://weknora.weixin.qq.com/docs/03-features/01-tenant-auth) | 4단계 역할과 감사 로그를 갖춘 워크스페이스 RBAC, 범위 지정 API 키, OIDC, AES-256-GCM 자격 증명 암호화, SSRF 방지 아웃바운드 요청과 화이트리스트 전용 모드 |
+| [운영](https://weknora.weixin.qq.com/docs/03-features/16-observability) | Langfuse로 Agent 단계·토큰 사용량·파이프라인 추적, 문서 파싱 타임라인, Worker 풀을 갖춘 작업 큐 대시보드, 버전 업그레이드 시 자동 DB 마이그레이션 |
+
+### 지원 백엔드
+
+| 구성 요소 | 선택지 |
+|-----------|--------|
+| [LLM](https://weknora.weixin.qq.com/docs/03-features/06-models) | 27개 내장 벤더. OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama 등 |
+| Embedding | Ollama / BGE / GTE / Zhipu / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
-| 오브젝트 스토리지 | 로컬 / MinIO / AWS S3(IAM Role / IRSA 기본 자격 증명 체인 지원) / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS; **워크스페이스당 여러 스토리지 인스턴스**, KB 단위 바인딩 및 기본 인스턴스 |
-| IM 통합 | WeChat Work / Feishu / Lark(Feishu 국제판) / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
-| 웹사이트 임베드 | 임베드 Widget으로 에이전트 게시, 도메인 허용 목록·속도 제한·보안 모드 Token 교환 |
-| 웹 검색 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso |
-| API 통합 | 범위 지정 API 키(능력 단위 권한 + KB 단위 제한 + 스로틀링된 last_used 추적)와 API 통합 플레이그라운드; MCP OAuth 및 임베드 세션을 Principal 단위로 격리; `resource_urls=public`으로 바로 로드 가능한 파일 / 이미지 URL을 반환하여 인증 프록시 재호출 제거 |
-| MCP Server | 공식 PyPI 패키지 `tencent-weknora-mcp`, 29개 도구, stdio / SSE / HTTP 3가지 트랜스포트 지원 |
+| [오브젝트 스토리지](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | 로컬 / Tencent Cloud COS / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS |
+| [문서 포맷](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) | PDF / Word / PPT / Excel / CSV / TXT / Markdown / HTML / EPUB / MHTML / JSON / XMind / 이미지 |
+| [데이터 소스](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | Feishu 지식베이스 / Feishu 클라우드 드라이브 / Lark / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / RSS |
+| [IM 통합](https://weknora.weixin.qq.com/docs/03-features/12-im-integration) | WeChat Work / Feishu / Lark / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
+| [웹 검색](https://weknora.weixin.qq.com/docs/03-features/11-web-search) | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso / Bocha / Serply |
+| 배포 | Docker Compose / Kubernetes (Helm) / Lite 단일 바이너리 / 데스크톱 앱. 오프라인·프라이빗 클라우드 배포 지원. UI는 중국어 / 영어 / 일본어 / 한국어 / 러시아어 지원 |
 
-**플랫폼**
+## 클라이언트와 생태계
 
-| 기능 | 상세 |
-|------|------|
-| 배포 | 로컬 / Docker / Kubernetes (Helm), 프라이빗/오프라인 배포 지원 |
-| UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / 웹사이트 임베드 Widget / WeChat 미니 프로그램 |
-| 관측 가능성 | Langfuse(단일 추적 백엔드)로 ReAct 루프·토큰 소비·도구 호출·파이프라인 추적; Langfuse 스타일의 문서 파싱 추적 타임라인 내장으로 단계별 진행 표시; 시스템 관리자용 런타임 작업 큐 대시보드(큐 깊이·모델별 동시성·실패 작업 조사 및 수동 재시도) |
-| 작업 관리 | MQ 비동기 작업, 단계별 Worker 풀 거버넌스(core / 후처리 / enrichment / maintenance + 탄력적 공유 풀, Wiki 독립 풀)와 모델별 백그라운드 동시성 거버너; 버전 업그레이드 시 자동 DB 마이그레이션 |
-| 모델 관리 | 중앙 설정, YAML 선언형 내장 모델 구성, 지식베이스별 모델 선택, 모델별 사고 모드·Embedding 차원 덮어쓰기, 대화형 모델 디버거, 멀티테넌트 내장 모델 공유, WeKnora Cloud 호스팅 모델 및 문서 파싱 |
+| | 클라이언트 | 용도 |
+|:-:|----------|------|
+| <img src="./docs/images/readme/icons/terminal.svg" width="22" height="22" alt=""> | [**CLI `weknora`**](./cli/README.md) | Agent 우선 명령줄 도구. 전체 API를 다루며 엄선한 MCP 도구와 내장 Agent Skills 제공 |
+| <img src="./docs/images/readme/icons/plug.svg" width="22" height="22" alt=""> | [**내장 MCP Server**](https://weknora.weixin.qq.com/docs/03-features/08-mcp) | Streamable HTTP로 지식베이스를 Cursor, Claude 등 MCP 클라이언트에 공개. [`mcp-server/`](./mcp-server/MCP_CONFIG.md)의 Python 서버는 지원 중단 |
+| <img src="./website-docs/homepage/public/docs/_home/brands/browserskill.png" width="22" height="22" alt=""> | [**로컬 브라우저(BrowserSkill)**](https://weknora.weixin.qq.com/docs/05-clients/09-local-browser) | 에이전트가 사용자 자신의 Chrome / Edge를 조작 |
+| <img src="./website-docs/homepage/public/docs/_home/brands/chrome.svg" width="22" height="22" alt=""> | [**Chrome 확장 프로그램**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) | 텍스트, 이미지 또는 전체 페이지를 선택해 원클릭으로 지식 항목으로 저장. 복사/붙여넣기나 파일 업로드 불필요 |
+| <img src="./docs/images/readme/icons/phone.svg" width="22" height="22" alt=""> | [**WeChat 미니 프로그램**](./miniprogram/README.md) | 경량 모바일 클라이언트. API 설정, 지식베이스 선택, URL 임포트, WeChat에서 지식 Q&A |
+| <img src="./docs/images/readme/icons/skills.svg" width="22" height="22" alt=""> | [**ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) | ClawHub에 게시된 WeKnora 스킬. REST API로 문서 임포트, 하이브리드 검색, 지식 관리 |
+| <img src="./website-docs/homepage/public/docs/_home/brands/deepseek-color.svg" width="22" height="22" alt=""> | [**DeepSeek Harness 플러그인**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | `dsh` 코딩 에이전트에 읽기 전용 도구 4개(검색, 문서 읽기, 질문, 지식베이스 목록) 제공 |
+| <img src="./docs/images/readme/icons/code.svg" width="22" height="22" alt=""> | [**웹사이트 임베드 Widget**](https://weknora.weixin.qq.com/docs/03-features/13-embed-channel) | 에이전트를 외부 사이트에 게시 |
+| <img src="./docs/images/readme/icons/braces.svg" width="22" height="22" alt=""> | [**Go SDK**](https://weknora.weixin.qq.com/docs/05-clients/03-go-sdk) | 지식베이스·문서·세션 등의 CRUD와 SSE 스트리밍 Q&A |
+| <img src="./website-docs/homepage/public/docs/_home/brands/wechat-dialog.png" width="22" height="22" alt=""> | [**WeChat 대화 오픈 플랫폼**](https://chatbot.weixin.qq.com) | WeKnora 기반 호스팅 Q&A. 지식을 업로드하면 코드 없이 WeChat에 Q&A 서비스 게시 |
 
-## 🧩 Chrome 확장 프로그램
+### 명령줄 도구
 
-[**WeKnora Chrome 확장 프로그램**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)을 사용하면 브라우저에서 웹 콘텐츠를 WeKnora 지식베이스에 직접 캡처할 수 있습니다. 텍스트, 이미지 또는 전체 페이지를 선택하고 원클릭으로 지식 항목으로 저장 — 복사/붙여넣기나 파일 업로드 불필요.
-
-
-## 🦞 ClawHub Skill
-
-[**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora)은 ClawHub 플랫폼에 게시된 WeKnora 스킬입니다. 설치 후 WeKnora REST API를 통해 문서 업로드(파일 / URL / Markdown), 하이브리드 검색(벡터 + 키워드), 지식 항목 관리가 가능합니다.
-
-- **문서 임포트** — 에이전트를 통한 파일 업로드, 웹페이지 임포트, Markdown 지식 작성
-- **하이브리드 검색** — 단일 또는 다중 지식베이스에서 벡터 + 키워드 통합 검색
-- **지식 관리** — 프로그래밍 방식으로 지식 항목 조회, 편집, 삭제
-
-## 🐋 DeepSeek Harness 플러그인
-
-[**`@wxg-prc-cpg/dsh-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora)는 공식 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)(`dsh`) 플러그인입니다([문서](./packages/dsh-weknora/README.md)). harness 자체에는 검색·임베딩·지식베이스 기능이 없으므로, 이 플러그인이 코딩 에이전트에 사내 문서를 제공합니다. `dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`로 설치하고 배포 주소를 지정하면 네 개의 읽기 전용 도구가 에이전트 도구 목록에 나타납니다.
-
-- **`weknora_search`** — 하이브리드 검색. 원문 구절을 그대로 반환하며 각 항목에 재사용 가능한 `knowledge_id` 포함
-- **`weknora_read_document`** — 한 문서의 청크를 순서대로 재조합, 페이징 지원
-- **`weknora_ask`** — WeKnora가 직접 작성한 인용 포함 답변(RAG 또는 ReAct 파이프라인)
-- **`weknora_list_knowledge_bases`** — 지식베이스 이름과 id로 에이전트가 검색 범위를 스스로 좁힘
-
-
-## 🚀 시작하기
-
-### 🛠 사전 준비
-
-- [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
-- [Git](https://git-scm.com/)
-
-### 📦 설치 및 실행
+`weknora`는 터미널이나 AI 에이전트에서 API를 다루기 위한 공식 CLI입니다. **Agent 우선**으로 설계되어 모든 명령이 기본적으로 안정적인 JSON 엔벨로프를 출력하고(타입이 지정된 오류 코드는 종료 코드에 매핑), `--format text`로 사람이 읽기 좋은 형태로 표시합니다. 엄선한 MCP 도구(`weknora mcp serve`)를 제공하며 Agent Skills를 내장하고 있습니다.
 
 ```bash
-git clone https://github.com/Tencent/WeKnora.git
-cd WeKnora
-cp .env.example .env   # 필요에 따라 .env 편집 (파일 내 주석 참고)
-docker compose pull     # 최신 이미지 가져오기
-docker compose up -d    # 코어 서비스 시작
+weknora profile add prod --host https://kb.example.com --use
+weknora auth login
+weknora kb list
+weknora link --kb my-knowledge-base    # 현재 디렉터리 연결
+weknora doc upload notes.md
+weknora chat "설계 문서를 요약해 줘"
 ```
 
-시작 후 **http://localhost** 에 접속하여 바로 사용 가능합니다.
+헤드리스 / CI 환경에서는 `WEKNORA_API_KEY`와 `WEKNORA_HOST`를 설정하면 `auth login` 없이 사용할 수 있으며, 자격 증명이 디스크에 기록되지 않습니다. 설치와 5분 빠른 시작은 [`cli/README.md`](./cli/README.md), AI 에이전트가 의존하는 운영 규약은 [`cli/AGENTS.md`](./cli/AGENTS.md)를 참고하세요.
 
-> 로컬 Ollama 모델을 사용하려면 먼저 `ollama serve > /dev/null 2>&1 &` 를 실행하세요.
+## 문서
 
-### 🔄 업그레이드
+제품 문서는 **[weknora.weixin.qq.com/docs](https://weknora.weixin.qq.com/docs/)**(중국어)에 있습니다. 「입문 → 아키텍처 → 기능 → API → 클라이언트 → 개발」 6개 섹션으로 구성되며, 약 360개 API 엔드포인트, 약 150개 환경 변수, 9개 확장 지점을 다룹니다.
 
-기존 배포가 있고 새 release를 다운로드한 경우:
+| 여기서 시작 | |
+|------------|---|
+| [제품 소개](https://weknora.weixin.qq.com/docs/01-getting-started/01-introduction) | 기능 개요 |
+| [설치](https://weknora.weixin.qq.com/docs/01-getting-started/02-installation) | Docker Compose, Helm, Lite, 데스크톱 |
+| [설정](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | 환경 변수와 모델 설정 |
+| [문제 해결 FAQ](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | 자주 발생하는 문제와 해결 방법 |
+| [API 문서](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API 개요 |
+| [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2) | 버전별 변경 사항 |
+
+## 개발자 가이드
+
+코드를 자주 수정한다면 매번 Docker 이미지를 다시 빌드할 필요가 없습니다. 고속 개발 모드를 사용하세요.
 
 ```bash
-# .env에서 WEKNORA_VERSION을 대상 버전(예: 0.7.0)으로 설정하거나 latest 유지
-docker compose pull     # WEKNORA_VERSION에 맞는 이미지 가져오기
-docker compose up -d    # 새 이미지로 컨테이너 재생성
+make dev-start      # 인프라 시작
+make dev-app        # 백엔드 시작 (새 터미널)
+make dev-frontend   # 프론트엔드 시작 (새 터미널)
 ```
 
-> `docker compose up -d`만 실행하면 로컬 캐시 이미지가 재사용되어 Web UI 버전이 다운로드한 release와 일치하지 않을 수 있습니다.
+- 프론트엔드 변경 자동 핫리로드(재시작 불필요)
+- 백엔드 변경 빠른 재시작(5~10초, Air 핫리로드 지원)
+- Docker 이미지 재빌드 불필요
+- IDE 브레이크포인트 디버깅 지원
 
-### 🔧 선택 서비스 (Docker Compose Profile)
+자세한 내용은 [개발 환경 빠른 시작](https://weknora.weixin.qq.com/docs/06-development/01-dev-guide)(중국어)을 참고하세요.
 
-`--profile` 플래그로 추가 컴포넌트를 활성화합니다. 여러 profile 조합 가능:
+문서 사이트와 제품 홈페이지의 소스는 [`website-docs/`](./website-docs/README.md)에 있습니다. Node.js 24에서 `cd website-docs && npm run setup && npm run build && npm run preview`를 실행하면 둘 다 미리 볼 수 있습니다. 통합 정적 출력은 `/`에서 홈페이지를, `/docs/`에서 문서를 제공합니다. Nginx와 Docker 배포 방법은 해당 디렉터리의 README를 참고하세요.
 
-| Profile | 설명 | 명령어 |
-|---------|------|--------|
-| _(기본)_ | 코어 서비스 | `docker compose pull && docker compose up -d` |
-| `full` | 전체 기능 | `docker compose --profile full pull && docker compose --profile full up -d` |
-| `neo4j` | 지식 그래프 (Neo4j) | `docker compose --profile neo4j pull && docker compose --profile neo4j up -d` |
-| `minio` | 오브젝트 스토리지 (MinIO) | `docker compose --profile minio pull && docker compose --profile minio up -d` |
-| `langfuse` | 트레이싱 (Langfuse) | `docker compose --profile langfuse pull && docker compose --profile langfuse up -d` |
-
-조합 예시: `docker compose --profile neo4j --profile minio pull && docker compose --profile neo4j --profile minio up -d`
-
-서비스 중지: `docker compose down`
-
-### 🌐 서비스 주소
-
-| 서비스 | URL |
-|--------|-----|
-| Web UI | `http://localhost` |
-| 백엔드 API | `http://localhost:8080` |
-| Langfuse 트레이싱 | `http://localhost:3000` |
-
-## 문서 지식 그래프
-
-WeKnora는 문서를 지식 그래프로 변환해 문서 내 서로 다른 섹션 간 관계를 시각화할 수 있습니다. 지식 그래프 기능을 활성화하면 문서 내부의 시맨틱 연관 네트워크를 분석/구성하여 문서 이해를 돕고, 인덱싱과 검색에 구조화된 지원을 제공해 검색 결과의 관련성과 폭을 향상시킵니다.
-
-자세한 설정은 [지식 그래프 설정 가이드](./docs/KnowledgeGraph.md)를 참고하세요.
-
-## MCP 서버
-
-필요한 설정은 [MCP 설정 가이드](./mcp-server/MCP_CONFIG.md)를 참고하세요.
-
-## 🔌 WeChat 대화 오픈 플랫폼 사용
-
-WeKnora는 [WeChat 대화 오픈 플랫폼](https://chatbot.weixin.qq.com)의 핵심 기술 프레임워크로 사용되며, 보다 간편한 사용 방식을 제공합니다:
-
-- **노코드 배포**: 지식을 업로드하기만 하면 WeChat 생태계에서 지능형 Q&A 서비스를 빠르게 배포하여 "질문 즉시 응답" 경험을 구현
-- **효율적인 질문 관리**: 고빈도 질문의 분류 관리 지원, 풍부한 데이터 도구를 통해 정확하고 신뢰할 수 있으며 유지보수하기 쉬운 답변 제공
-- **WeChat 생태계 통합**: WeChat 공식계정, 미니프로그램 등 다양한 시나리오에 WeKnora의 Q&A 역량을 자연스럽게 통합
-
-
-## 📘 API 레퍼런스
-
-**공식 제품 문서**: [`website-docs/`](./website-docs/README.md) — 「입문 → 아키텍처 → 기능 → API → 클라이언트 → 개발」 6개 섹션으로 구성된 완전한 문서 세트로, 약 360개 API 엔드포인트, 약 150개 환경 변수, 9개 확장 지점을 다룹니다. 이 디렉터리는 VitePress 사이트이기도 하여 `cd website-docs && npm install && npm run dev`로 로컬 미리보기가 가능하며, 디렉터리 내 `Dockerfile`로 단독 배포할 수도 있습니다.
-
-문제 해결 FAQ: [문제 해결 FAQ](./docs/QA.md)
-
-상세 API 문서: [API Docs](./docs/api/README.md)
-
-제품 계획 및 예정 기능: [Roadmap](./docs/ROADMAP.md)
-
-## 🧭 개발자 가이드
-
-### ⚡ 고속 개발 모드(권장)
-
-코드를 자주 수정해야 한다면 **매번 Docker 이미지를 다시 빌드할 필요가 없습니다**. 고속 개발 모드를 사용하세요.
-
-```bash
-# 인프라 시작
-make dev-start
-
-# 백엔드 시작 (새 터미널)
-make dev-app
-
-# 프론트엔드 시작 (새 터미널)
-make dev-frontend
-```
-
-**개발 장점:**
-- ✅ 프론트엔드 변경 자동 핫리로드(재시작 불필요)
-- ✅ 백엔드 변경 빠른 재시작(5~10초, Air 핫리로드 지원)
-- ✅ Docker 이미지 재빌드 불필요
-- ✅ IDE 브레이크포인트 디버깅 지원
-
-**상세 문서:** [개발 환경 빠른 시작](./docs/开发指南.md)
-
-## 🤝 기여하기
+## 기여하기
 
 [Issue](https://github.com/Tencent/WeKnora/issues) 또는 Pull Request를 환영합니다.
 
-**절차:** Fork → 브랜치 생성 → 변경사항 커밋 → PR 생성
+- **절차:** Fork → 브랜치 생성 → 변경사항 커밋 → PR 생성
+- **규칙:** `gofmt`로 코드 포맷팅, [Conventional Commits](https://www.conventionalcommits.org/) 준수 (`feat:` / `fix:` / `docs:` / `test:` / `refactor:`)
 
-**규칙:** `gofmt`로 코드 포맷팅, [Conventional Commits](https://www.conventionalcommits.org/) 준수 (`feat:` / `fix:` / `docs:` / `test:` / `refactor:`)
+<details>
+<summary><b>변경 사항 검증</b></summary>
 
-## 🔒 보안 공지
+<br/>
 
-**중요:** v0.1.3부터 WeKnora는 시스템 보안 강화를 위해 로그인 인증 기능을 포함합니다. 운영 환경 배포 시 아래 사항을 강력히 권장합니다.
+범위가 좁은 PR은 먼저 변경한 범위를 검증하세요.
 
-- WeKnora 서비스를 공용 인터넷이 아닌 내부/사설 네트워크 환경에 배포
-- 잠재적 정보 유출 방지를 위해 서비스를 공용 네트워크에 직접 노출하지 않기
-- 배포 환경에 적절한 방화벽 규칙 및 접근 제어 구성
-- 보안 패치와 개선 사항 적용을 위해 최신 버전으로 정기 업데이트
+```bash
+git fetch origin main
+git diff --check origin/main...HEAD
+golangci-lint run --new-from-rev=origin/main ./...
+go test ./path/to/changed/package -count=1
+```
 
-## 👥 기여자
+커밋 전에 변경한 Go 파일에 `gofmt`를 실행하세요. 프론트엔드 변경은 `frontend/`에서 관련 테스트를 실행하고, TypeScript나 Vue 컴포넌트에 영향이 있다면 `npm run type-check`도 실행하세요.
 
-멋진 기여자 여러분께 감사드립니다:
+메인테이너가 사용하는 저장소 전체 검증 명령은 다음과 같습니다.
+
+```bash
+make fmt
+make lint
+make test
+```
+
+`make fmt`는 저장소 전체의 Go 코드를 포맷하므로 작업 트리가 깨끗할 때만 실행하고 생긴 diff를 확인하세요. 일부 전체 테스트는 로컬 인프라나 서비스 설정이 필요합니다. 관련 없는 기준선이나 환경 문제로 전체 검사가 실패하면, 실행한 명령과 오류를 PR에 적고 변경 범위의 대상 테스트가 통과함을 보여 주세요.
+
+</details>
+
+### 기여자
+
+모든 기여자 여러분께 감사드립니다.
 
 [![Contributors](https://contrib.rocks/image?repo=Tencent/WeKnora)](https://github.com/Tencent/WeKnora/graphs/contributors)
 
-## 📄 라이선스
+## 라이선스
 
-이 프로젝트는 [MIT License](./LICENSE)로 배포됩니다.
-적절한 저작권 고지를 유지하는 조건으로 코드를 자유롭게 사용, 수정, 배포할 수 있습니다.
+이 프로젝트는 [MIT License](./LICENSE)로 배포됩니다. 적절한 저작권 고지를 유지하는 조건으로 코드를 자유롭게 사용, 수정, 배포할 수 있습니다.

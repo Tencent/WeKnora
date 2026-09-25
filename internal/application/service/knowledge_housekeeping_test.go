@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -152,6 +153,19 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 		return false, f.err
 	}
 	return f.queued[knowledgeID], nil
+}
+
+func (f fakeTaskInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[string]struct{})
+	for id, queued := range f.queued {
+		if queued {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
 }
 
 func (f fakeTaskInspector) HasQueuedDeleteTasksForKnowledge(
@@ -482,4 +496,194 @@ func TestHousekeeping_NilInspectorDefersDeletingSweep(t *testing.T) {
 
 	status, _ := readKnowledgeStatus(t, db, "kid-nil-inspector")
 	assert.Equal(t, types.ParseStatusDeleting, status)
+}
+
+// A recovered row names the stage it stalled in and when it last moved, and
+// its open spans are closed so the timeline stops showing them as running.
+func TestHousekeeping_RecoveredRowNamesStalledStageAndClosesSpans(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	lastBeat := stale.Add(30 * time.Minute)
+	insertKnowledge(t, db, "kid-stalled", types.ParseStatusProcessing, stale)
+	insertSpan(t, db, "kid-stalled", 1, "doc-1", types.SpanStatusRunning, lastBeat)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_processing_spans
+		   (knowledge_id, attempt, span_id, parent_span_id, name, kind, status, updated_at)
+		 VALUES ('kid-stalled', 1, 'sub-1', 'doc-1', 'docreader.call', 'subspan', 'running', ?)`, stale,
+	).Error)
+
+	svc.runSweep(context.Background())
+
+	var status, errMsg string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, error_message FROM knowledges WHERE id = ?`, "kid-stalled",
+	).Row().Scan(&status, &errMsg))
+	assert.Equal(t, types.ParseStatusFailed, status)
+	assert.Contains(t, errMsg, "stuck in processing at docreader stage")
+	assert.Contains(t, errMsg, lastBeat.UTC().Format(time.RFC3339))
+
+	type spanState struct {
+		SpanID    string
+		Status    string
+		ErrorCode string
+	}
+	var spans []spanState
+	require.NoError(t, db.Raw(
+		`SELECT span_id, status, error_code FROM knowledge_processing_spans WHERE knowledge_id = ? ORDER BY span_id`,
+		"kid-stalled",
+	).Scan(&spans).Error)
+	assert.Equal(t, []spanState{
+		{SpanID: "doc-1", Status: types.SpanStatusFailed, ErrorCode: "TASK_STALLED"},
+		{SpanID: "sub-1", Status: types.SpanStatusCancelled, ErrorCode: "TASK_STALLED"},
+	}, spans)
+}
+
+func insertTreeSpan(
+	t *testing.T, db *gorm.DB, kid, spanID, parent, name, kind, status string, updatedAt time.Time,
+) {
+	t.Helper()
+	started := updatedAt.Add(-5 * time.Minute)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_processing_spans
+		   (knowledge_id, attempt, span_id, parent_span_id, name, kind, status, started_at, updated_at)
+		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+		kid, spanID, parent, name, kind, status, started, updatedAt,
+	).Error)
+}
+
+type stalledSpanRow struct {
+	SpanID     string
+	Status     string
+	ErrorCode  string
+	DurationMs int64
+}
+
+func stalledSpanRows(t *testing.T, db *gorm.DB, kid string) map[string]stalledSpanRow {
+	t.Helper()
+	var rows []stalledSpanRow
+	require.NoError(t, db.Raw(
+		`SELECT span_id, status, COALESCE(error_code, '') AS error_code, COALESCE(duration_ms, 0) AS duration_ms
+		 FROM knowledge_processing_spans WHERE knowledge_id = ?`, kid,
+	).Scan(&rows).Error)
+	out := make(map[string]stalledSpanRow, len(rows))
+	for _, r := range rows {
+		out[r.SpanID] = r
+	}
+	return out
+}
+
+// A row stuck in finalizing has its post-process stage already closed; the
+// stalled work is the enrichment subspans, which are what fail.
+func TestHousekeeping_FinalizingStallFailsTheRunningSubspan(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-fin", types.ParseStatusFinalizing, stale)
+	insertTreeSpan(t, db, "kid-fin", "root", "", "knowledge_processing", types.SpanKindRoot,
+		types.SpanStatusDone, stale)
+	insertTreeSpan(t, db, "kid-fin", "post", "root", types.StagePostProcess, types.SpanKindStage,
+		types.SpanStatusDone, stale)
+	insertTreeSpan(t, db, "kid-fin", "summary", "post", "postprocess.summary", types.SpanKindSubSpan,
+		types.SpanStatusRunning, stale)
+	insertTreeSpan(t, db, "kid-fin", "wiki", "post", "postprocess.wiki", types.SpanKindSubSpan,
+		types.SpanStatusPending, stale)
+
+	svc.runSweep(context.Background())
+
+	var errMsg string
+	require.NoError(t, db.Raw(`SELECT error_message FROM knowledges WHERE id = 'kid-fin'`).Scan(&errMsg).Error)
+	assert.Contains(t, errMsg, "stuck in finalizing at postprocess stage (postprocess.summary)")
+	spans := stalledSpanRows(t, db, "kid-fin")
+	assert.Equal(t, types.SpanStatusFailed, spans["summary"].Status)
+	assert.Equal(t, "TASK_STALLED", spans["summary"].ErrorCode)
+	assert.Positive(t, spans["summary"].DurationMs, "a closed span carries its duration")
+	assert.Equal(t, types.SpanStatusCancelled, spans["wiki"].Status)
+	assert.Equal(t, types.SpanStatusDone, spans["post"].Status, "finished spans are left alone")
+	assert.Equal(t, types.SpanStatusDone, spans["root"].Status)
+}
+
+// Two stages stalled together are both named, in pipeline order.
+func TestHousekeeping_NamesEveryStalledStageInOrder(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-two", types.ParseStatusProcessing, stale)
+	running := types.SpanStatusRunning
+	insertTreeSpan(t, db, "kid-two", "mm", "", types.StageMultimodal, types.SpanKindStage, running, stale)
+	insertTreeSpan(t, db, "kid-two", "emb", "", types.StageEmbedding, types.SpanKindStage, running, stale)
+
+	svc.runSweep(context.Background())
+
+	var errMsg string
+	require.NoError(t, db.Raw(`SELECT error_message FROM knowledges WHERE id = 'kid-two'`).Scan(&errMsg).Error)
+	assert.Contains(t, errMsg, "at embedding/multimodal stage")
+	spans := stalledSpanRows(t, db, "kid-two")
+	assert.Equal(t, types.SpanStatusFailed, spans["mm"].Status)
+	assert.Equal(t, types.SpanStatusFailed, spans["emb"].Status)
+}
+
+// Without a heartbeat the message gives no time: updated_at can predate the
+// last span write.
+func TestStallMessageOmitsTimeWithoutHeartbeat(t *testing.T) {
+	k := types.Knowledge{ID: "k", ParseStatus: types.ParseStatusProcessing, UpdatedAt: time.Now().Add(-5 * time.Hour)}
+	msg := stallMessage(k, &stallSite{stages: []string{types.StageDocReader}}, nil, 70*time.Minute)
+	assert.Equal(t,
+		"task stuck in processing at docreader stage: no progress for > 1h10m0s, recovered by housekeeping", msg)
+}
+
+// QueuedWork answers a whole batch from the durable Wiki table plus one shared
+// queue scan, reuses that scan across calls, and reports a failed scan as an
+// error without caching it.
+func TestHousekeeping_QueuedWorkSharesOneQueueScan(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	inspector := &countingTaskInspector{queued: map[string]bool{"k-queued": true}}
+	svc := newHousekeepingSvcWithInspector(db, inspector)
+	insertWikiPendingOp(t, db, "kb-1", "k-wiki")
+	ids := []string{"k-wiki", "k-queued"}
+	for i := 0; i < 40; i++ {
+		ids = append(ids, fmt.Sprintf("k-idle-%d", i))
+	}
+
+	got, err := svc.QueuedWork(context.Background(), ids)
+	require.NoError(t, err)
+	assert.Len(t, got, len(ids))
+	assert.True(t, got["k-wiki"])
+	assert.True(t, got["k-queued"])
+	assert.False(t, got["k-idle-39"])
+	assert.Equal(t, 1, inspector.scans, "one scan answers the whole batch")
+
+	_, err = svc.QueuedWork(context.Background(), []string{"k-queued"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, inspector.scans, "the scan is reused within its TTL")
+
+	svc.queuedAt = time.Now().Add(-2 * queuedProbeTTL)
+	inspector.err = errors.New("redis down")
+	_, err = svc.QueuedWork(context.Background(), []string{"k-queued"})
+	require.Error(t, err)
+	inspector.err = nil
+	_, err = svc.QueuedWork(context.Background(), []string{"k-queued"})
+	require.NoError(t, err)
+	assert.Equal(t, 3, inspector.scans, "a failed scan is not cached")
+}
+
+type countingTaskInspector struct {
+	fakeTaskInspector
+	queued map[string]bool
+	err    error
+	scans  int
+}
+
+func (f *countingTaskInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	f.scans++
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[string]struct{})
+	for id, queued := range f.queued {
+		if queued {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
 }

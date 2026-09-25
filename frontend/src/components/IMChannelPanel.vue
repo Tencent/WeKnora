@@ -205,6 +205,12 @@
             </div>
             <p class="form-desc">{{ $t('agentEditor.im.sessionModeHint') }}</p>
           </div>
+
+          <div class="form-item">
+            <label class="form-label">{{ $t('agentEditor.im.replyLanguage') }}</label>
+            <t-select v-model="formData.locale" :options="localeOptions" />
+            <p class="form-desc">{{ $t('agentEditor.im.replyLanguageHint') }}</p>
+          </div>
         </section>
 
         <section v-if="editingChannel && formData.mode === 'webhook'"
@@ -608,6 +614,7 @@ import qqbotLogo from '@/assets/img/im/qqbot.png';
 import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
 
 type IMPlatform = IMChannel['platform'];
+type IMLocale = NonNullable<IMChannel['locale']>;
 
 const PLATFORM_LOGO: Record<string, string> = {
   wecom: wecomLogo,
@@ -674,6 +681,15 @@ const platformOptions = computed(() => ([
   { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
 ]));
 
+const localeOptions = computed(() => ([
+  { value: '' as IMLocale, label: t('agentEditor.im.replyLanguageDefault') },
+  { value: 'zh-CN' as IMLocale, label: '简体中文' },
+  { value: 'en-US' as IMLocale, label: 'English' },
+  { value: 'ja-JP' as IMLocale, label: '日本語' },
+  { value: 'ko-KR' as IMLocale, label: '한국어' },
+  { value: 'ru-RU' as IMLocale, label: 'Русский' },
+]));
+
 // Feishu and Lark are the same product on separate clouds, so each has its own
 // open platform console. Bots must be created on the one matching the channel.
 const openPlatformConsole = computed(() =>
@@ -730,6 +746,7 @@ const formData = ref({
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket' | 'longpoll',
   output_mode: 'stream' as 'stream' | 'full',
+  locale: '' as IMLocale,
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
@@ -985,6 +1002,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     name: fullChannel.name,
     mode: fullChannel.mode,
     output_mode: fullChannel.output_mode,
+    locale: fullChannel.locale || '',
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
@@ -1009,6 +1027,7 @@ function resetForm() {
     name: defaultChannelName('wecom'),
     mode: 'websocket',
     output_mode: 'stream',
+    locale: '',
     session_mode: 'user',
     knowledge_base_id: '',
     credentials: defaultCredentials(),
@@ -1038,6 +1057,7 @@ async function handleSave() {
         name: resolvedChannelName(),
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        locale: formData.value.locale,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
@@ -1056,6 +1076,7 @@ async function handleSave() {
         name: resolvedChannelName(),
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        locale: formData.value.locale,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,

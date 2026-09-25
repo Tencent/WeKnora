@@ -43,6 +43,10 @@ func (r *recordingKBTaskInspector) HasQueuedTasksForKnowledge(context.Context, s
 	return false, nil
 }
 
+func (r *recordingKBTaskInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
 func (r *recordingKBTaskInspector) QueueStats(context.Context) ([]types.QueueStat, bool, error) {
 	return nil, true, nil
 }

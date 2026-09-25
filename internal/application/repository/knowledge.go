@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -195,6 +196,25 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	return query
 }
 
+// knowledgeListOrderClause 只从固定白名单生成排序语句，避免将请求参数直接拼入 SQL。
+func knowledgeListOrderClause(filter types.KnowledgeListFilter) string {
+	// 零值保留仓储层和公开接口原有的创建时间倒序行为。
+	column := "created_at"
+	switch filter.SortBy {
+	case types.KnowledgeListSortByUpdatedAt:
+		column = "updated_at"
+	case types.KnowledgeListSortByFileName:
+		// 与前端展示名称保持一致：文件名为空时依次使用标题和来源。
+		column = "LOWER(COALESCE(NULLIF(file_name, ''), NULLIF(title, ''), source))"
+	}
+
+	direction := "DESC"
+	if filter.SortOrder == types.KnowledgeListSortAscending {
+		direction = "ASC"
+	}
+	return fmt.Sprintf("%s %s", column, direction)
+}
+
 // ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination
 func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	ctx context.Context,
@@ -218,7 +238,9 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	}
 
 	if err := scope(r.db.WithContext(ctx)).
-		Order("created_at DESC").
+		Order(knowledgeListOrderClause(filter)).
+		// 相同排序值使用主键兜底，保证 OFFSET 分页顺序稳定。
+		Order("id ASC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).
 		Find(&knowledges).Error; err != nil {
@@ -369,9 +391,23 @@ func (r *knowledgeRepository) GetKnowledgeBatch(
 	ctx context.Context, tenantID uint64, ids []string,
 ) ([]*types.Knowledge, error) {
 	var knowledge []*types.Knowledge
-	if err := r.db.WithContext(ctx).Debug().
+	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND id IN ?", tenantID, ids).
 		Find(&knowledge).Error; err != nil {
+		return nil, err
+	}
+	return knowledge, nil
+}
+
+// GetKnowledgeBatchByIDOnly gets knowledge in batch without a tenant filter.
+func (r *knowledgeRepository) GetKnowledgeBatchByIDOnly(
+	ctx context.Context, ids []string,
+) ([]*types.Knowledge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var knowledge []*types.Knowledge
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&knowledge).Error; err != nil {
 		return nil, err
 	}
 	return knowledge, nil
@@ -631,10 +667,17 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 // across PostgreSQL and SQLite. The promote UPDATE's WHERE clause
 // (parse_status='finalizing' AND pending_subtasks_count=0) makes it
 // safe to run from any number of concurrent callers — at most one wins.
+// Both run in one transaction: a promote that failed after its decrement
+// committed left the counter at zero with nobody left to promote the row.
 func (r *knowledgeRepository) FinalizeSubtask(
 	ctx context.Context, id string,
 ) (int, bool, error) {
-	promoted, err := finalizeSubtask(r.db.WithContext(ctx), id)
+	var promoted bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		promoted, err = finalizeSubtask(tx, id)
+		return err
+	})
 	if err != nil {
 		return 0, false, err
 	}

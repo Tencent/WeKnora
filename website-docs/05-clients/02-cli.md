@@ -4,7 +4,18 @@ WeKnora CLI（命令名 `weknora`）用于管理知识库与文档、执行检�
 
 源码位于 `cli/`，是独立的 Go module（`github.com/Tencent/WeKnora/cli`），源码构建需要 Go 1.26+。命令入口为 `cli/cmd/root.go`。
 
-在控制台「设置 → 发布与集成 → CLI」可查看安装步骤，并复制当前部署的连接命令。服务地址保留反向代理路径前缀，末尾无需 `/api/v1`。连接后运行 `weknora doctor` 和 `weknora kb list`，确认服务与凭证可用。
+自 v0.8.2 起，控制台「设置 → 发布集成 → CLI」提供接入引导页，按当前部署生成可复制的命令：
+
+1. **安装**：从源码构建（需要 Git 与 Go 1.26+，示例适用于 macOS / Linux）；
+2. **连接**：`weknora profile add weknora --host '<当前服务地址>' --use && weknora auth login`，创建并启用名为 `weknora` 的 profile 后用邮箱和密码登录。服务地址保留反向代理路径前缀，末尾无需 `/api/v1`；已有同名 profile 时请换一个名称；
+3. **验证**：运行 `weknora doctor` 和 `weknora kb list`，确认服务与凭证可用。
+
+页面右侧另给出常用命令（上传、检索、问答、列出智能体）和 MCP 客户端配置示例（`"args": ["--profile", "weknora", "mcp", "serve"]`）。
+
+<Screenshot
+  src="/screenshots/integration-cli.png"
+  caption="设置 → 发布集成 → CLI：安装、连接与验证命令"
+  hint="展示设置中心左侧「发布集成」分组选中 CLI，右侧快速开始的三个步骤（安装 CLI / 连接当前服务 / 验证连接，连接命令中已填入当前服务地址），以及常用命令与 MCP 客户端配置示例。" />
 
 ## 总体架构
 
@@ -48,7 +59,7 @@ flowchart TB
 
 ### 从源码构建（当前受支持的安装方式）
 
-`cli/README.md` 明确说明：**从源码构建是目前受支持的安装方式**；预编译二进制、`go install`、CLI 的 Homebrew formula 计划随正式 tag 发布一同提供。
+目前受支持的安装方式是从源码构建，尚未提供预编译二进制或 `go install` 安装方式。
 
 ```bash
 git clone https://github.com/Tencent/WeKnora.git
@@ -496,7 +507,7 @@ WEKNORA_E2E_HOST=https://kb.example.com WEKNORA_E2E_TOKEN=eyJ... \
 
 ---
 
-## 分钟上手 {#_5-分钟上手}
+## 快速上手 {#_5-分钟上手}
 
 ```bash
 # 1. 注册服务器为 profile 并激活

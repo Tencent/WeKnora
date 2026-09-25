@@ -7,9 +7,22 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+// applyRequestReasoningEffort only changes runtime options, never the saved agent.
+// Empty requests preserve both the graded default and legacy Thinking boolean.
+func applyRequestReasoningEffort(override string, thinking **bool, effort *string) {
+	level, ok := api.ParseReasoningEffort(override)
+	if !ok || level == "" {
+		return
+	}
+	enabled := level.Enabled()
+	*thinking = &enabled
+	*effort = string(level)
+}
 
 // ---------------------------------------------------------------------------
 // Shared QA helpers: KB resolution, model resolution, retrieval tenant

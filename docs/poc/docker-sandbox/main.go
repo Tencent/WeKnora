@@ -1,4 +1,4 @@
-// PoC for docs/sandbox-docker-backend.md: can the Docker Engine API back the
+// Historical PoC: can the Docker Engine API back the
 // semantics WeKnora's RemoteSandboxClient contract requires (session-persistent
 // sandbox, exec, filesystem, metadata, lifecycle), plus the snapshot workflow
 // planned for E2B?

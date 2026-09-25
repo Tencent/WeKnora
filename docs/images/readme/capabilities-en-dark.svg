@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 644" width="1600" height="644" role="img">
+<rect x="1.0" y="1" width="512.6666666666666" height="642" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="40.0" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(52.0 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 8h5M8 11h3"/></g>
+<text x="474.66666666666663" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">01 / RAG</text>
+<text x="40.0" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">Answers you can check</text>
+<text x="40.0" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">Semantic and keyword search find the</text>
+<text x="40.0" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">relevant material. Every answer cites its</text>
+<text x="40.0" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">sources, and you can open the original</text>
+<text x="40.0" y="320" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">to verify.</text>
+<rect x="40.0" y="510" width="155.60000000000002" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="56.0" y="536" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Hybrid search</text>
+<rect x="205.60000000000002" y="510" width="200.2" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="221.60000000000002" y="536" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Multimodal parsing</text>
+<rect x="40.0" y="560" width="110.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="56.0" y="586" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Citations</text>
+<rect x="543.6666666666666" y="1" width="512.6666666666666" height="642" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="582.6666666666666" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(594.6666666666666 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6"/><circle cx="12" cy="2.5" r=".5"/></g>
+<text x="1017.3333333333333" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">02 / AGENT</text>
+<text x="582.6666666666666" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">Tasks done with knowledge</text>
+<text x="582.6666666666666" y="196" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">and tools</text>
+<text x="582.6666666666666" y="244" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">The agent searches knowledge bases</text>
+<text x="582.6666666666666" y="284" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">and the web, calls MCP tools and skills,</text>
+<text x="582.6666666666666" y="324" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">handles files and scripts in a sandbox,</text>
+<text x="582.6666666666666" y="364" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">operates the browser on your computer,</text>
+<text x="582.6666666666666" y="404" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">and remembers preferences you have</text>
+<text x="582.6666666666666" y="444" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">confirmed.</text>
+<rect x="582.6666666666666" y="510" width="118.8" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="598.6666666666666" y="536" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Multi-step</text>
+<rect x="711.4666666666667" y="510" width="179.2" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="727.4666666666667" y="536" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Skills &amp; sandbox</text>
+<rect x="582.6666666666666" y="560" width="156.8" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="598.6666666666666" y="586" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Local browser</text>
+<rect x="749.4666666666667" y="560" width="124.4" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="765.4666666666667" y="586" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">MCP tools</text>
+<rect x="883.8666666666667" y="560" width="104.19999999999999" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="899.8666666666667" y="586" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Memory</text>
+<rect x="1086.3333333333333" y="1" width="512.6666666666666" height="642" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1125.3333333333333" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(1137.3333333333333 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15"/><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3"/></g>
+<text x="1560.0" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">03 / WIKI</text>
+<text x="1125.3333333333333" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">Documents organized into a</text>
+<text x="1125.3333333333333" y="196" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">wiki</text>
+<text x="1125.3333333333333" y="244" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">Builds interlinked wiki pages and a</text>
+<text x="1125.3333333333333" y="284" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">knowledge graph from raw documents,</text>
+<text x="1125.3333333333333" y="324" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">with browsing, editing and version</text>
+<text x="1125.3333333333333" y="364" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#a9b6c9">rollback.</text>
+<rect x="1125.3333333333333" y="510" width="168.20000000000002" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1141.3333333333333" y="536" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Auto-organized</text>
+<rect x="1303.5333333333333" y="510" width="188.39999999999998" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1319.5333333333333" y="536" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Knowledge graph</text>
+<rect x="1125.3333333333333" y="560" width="108.80000000000001" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1141.3333333333333" y="586" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#e8c176">Rollback</text>
+</svg>

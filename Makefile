@@ -112,12 +112,14 @@ run: build
 test:
 	go test -v ./...
 
-# Vendor catalog: invariants, legacy-behaviour parity and vendor facts.
-# Run this after adding a vendor or editing any models.json.
-.PHONY: model-catalog-check
+# Generate reviewed metadata + protocol overrides, then verify every model.
+.PHONY: model-catalog-generate model-catalog-check
+model-catalog-generate:
+	python3 scripts/model-catalog/generate.py
+
 model-catalog-check:
-	go test ./internal/models/parity/ ./internal/models/vendors/ ./internal/models/catalog/ ./internal/models/api/... \
-		./internal/models/rerank/ ./internal/models/embedding/ ./internal/models/asr/
+	python3 scripts/model-catalog/generate.py --check
+	go test ./internal/models/...
 
 # Vendor catalog: report where our model metadata differs from models.dev.
 # Development aid only — nothing is fetched at runtime and nothing is written
@@ -367,5 +369,3 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
-
-

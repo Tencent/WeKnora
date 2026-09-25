@@ -127,6 +127,14 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	attempt := payload.Attempt
 	if attempt <= 0 {
 		attempt = s.tracker().LatestAttempt(ctx, payload.KnowledgeID)
+	} else if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, attempt) {
+		// A reparse started after this run. Entering finalizing here would
+		// seed the counter for subtasks that all drop themselves as
+		// superseded, and the new run's own post-process would then find
+		// the row already finalizing and skip its fan-out.
+		logger.Infof(ctx, "[KnowledgePostProcess] Attempt %d of %s superseded, skipping.",
+			attempt, payload.KnowledgeID)
+		return nil
 	}
 
 	// Close the multimodal stage span (parent enqueued it as "running"
@@ -315,7 +323,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				return errors.New("wiki post-process requires atomic finalizing handoff")
 			}
 			pendingOp, buildErr := newWikiIngestPendingOp(
-				ctx, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID,
+				withAttempt(ctx, attempt), payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID,
 			)
 			if buildErr != nil {
 				return buildErr
@@ -481,15 +489,12 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			logger.Warnf(ctx,
 				"[KnowledgePostProcess] Releasing %d un-enqueued subtask slot(s) for %s (planned=%d actual=%d)",
 				shortfall, payload.KnowledgeID, plannedOwned, actualOwned)
+			// Keep going past a failed release: stopping at the first error
+			// left every remaining slot without an owner.
 			for i := 0; i < shortfall; i++ {
-				rctx, cancel := context.WithTimeout(
-					context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
-				_, _, err := s.knowledgeRepo.FinalizeSubtask(rctx, payload.KnowledgeID)
-				cancel()
-				if err != nil {
-					logger.Warnf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",
+				if err := releaseSubtaskSlot(ctx, s.knowledgeRepo, payload.KnowledgeID); err != nil {
+					logger.Errorf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",
 						payload.KnowledgeID, err)
-					break
 				}
 			}
 		}

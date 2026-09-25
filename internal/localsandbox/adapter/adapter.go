@@ -118,6 +118,10 @@ func (a *Adapter) ExecShellCommand(
 		logger.Warnf(ctx, "[LocalSandbox] exec session=%s work_dir=%q: %v", sessionID, workDir, err)
 		return nil, err
 	}
+	return executeResult(ctx, sessionID, res), nil
+}
+
+func executeResult(ctx context.Context, sessionID string, res *localsandbox.RunResult) *sandbox.ExecuteResult {
 	out := &sandbox.ExecuteResult{
 		Stdout:   res.Stdout,
 		Stderr:   res.Stderr,
@@ -132,7 +136,7 @@ func (a *Adapter) ExecShellCommand(
 			sessionID, res.Denial.Reason, res.Denial.Path)
 		out.Stderr += "\n[sandbox] denied by workspace policy"
 	}
-	return out, nil
+	return out
 }
 
 func (a *Adapter) guard(
