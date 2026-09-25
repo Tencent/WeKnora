@@ -93,6 +93,61 @@ func TestResolveMarkdownImages_FallbackToLinkOnFailure(t *testing.T) {
 	}
 }
 
+func TestResolveMarkdownImages_InternalHandleFallsBackToPlainText(t *testing.T) {
+	a := &Adapter{region: RegionFeishu}
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "resource handle",
+			in:   "see ![diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) here",
+			want: "see diagram here",
+		},
+		{
+			name: "local scheme",
+			in:   "see ![shot](local://10000/exports/a.png) here",
+			want: "see shot here",
+		},
+		{
+			name: "empty alt uses region label",
+			in:   "![](resource://Zb2IrqfTdlCFkbUqFtmS5A)",
+			want: "图片",
+		},
+		{
+			name: "mixed internal and failed http",
+			in:   "![diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) and ![x](http://127.0.0.1/x.png)",
+			want: "diagram and [x](http://127.0.0.1/x.png)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := a.resolveMarkdownImages(context.Background(), "tok", tt.in)
+			if got != tt.want {
+				t.Errorf("fallback = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, "![") {
+				t.Errorf("failed image should not remain as image markdown: %q", got)
+			}
+			if strings.Contains(got, "resource://") || strings.Contains(got, "local://") {
+				t.Errorf("internal scheme must not remain in card markdown: %q", got)
+			}
+		})
+	}
+}
+
+func TestResolveMarkdownImages_UppercaseHTTPSchemeStillUploads(t *testing.T) {
+	a := &Adapter{region: RegionFeishu}
+	// IM rewrite may emit HTTPS://; loopback still fails SSRF and must degrade
+	// to a link rather than being treated as a non-HTTP handle.
+	got := a.resolveMarkdownImages(context.Background(), "tok", "![](HTTPS://127.0.0.1/x.png)")
+	want := "[图片](HTTPS://127.0.0.1/x.png)"
+	if got != want {
+		t.Errorf("uppercase scheme fallback = %q, want %q", got, want)
+	}
+}
+
 // An image with no alt text falls back to the region's own label, so Lark users
 // do not get a Chinese link label.
 func TestResolveMarkdownImages_FallbackLabelFollowsRegion(t *testing.T) {
@@ -387,6 +442,11 @@ func TestCardSummaryPreview(t *testing.T) {
 	}{
 		{name: "collapse whitespace", in: "  最终\n回答\t✅  ", want: "最终 回答 ✅"},
 		{name: "image keeps alt only", in: "![架构图](https://cdn.example/a.png?sig=secret) 说明", want: "架构图 说明"},
+		{
+			name: "resource image keeps alt only",
+			in:   "![diagram](resource://Zb2IrqfTdlCFkbUqFtmS5A) 说明",
+			want: "diagram 说明",
+		},
 		{name: "link keeps text only", in: "见 [文档](https://cdn.example/a.png?sig=secret) 说明", want: "见 文档 说明"},
 		{name: "unicode limit", in: strings.Repeat("界", 121), want: strings.Repeat("界", 120)},
 		{name: "empty", in: " \n\t ", want: ""},

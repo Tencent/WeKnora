@@ -159,8 +159,8 @@ frontend:
   image:
     # -- Image repository
     repository: wechatopenai/weknora-ui
-    # -- Image tag
-    tag: latest
+    # -- Image tag (defaults to Chart.appVersion if empty)
+    tag: ""
     # -- Image pull policy
     pullPolicy: IfNotPresent
 
@@ -206,8 +206,8 @@ docreader:
   image:
     # -- Image repository
     repository: wechatopenai/weknora-docreader
-    # -- Image tag
-    tag: latest
+    # -- Image tag (defaults to Chart.appVersion if empty)
+    tag: ""
     # -- Image pull policy
     pullPolicy: IfNotPresent
 

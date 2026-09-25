@@ -285,8 +285,38 @@ make fmt && make lint && make test
 
 ### GIN_MODE 与 Swagger {#_6-2-gin-mode-与-swagger}
 
-- `GIN_MODE=release` 时禁用 Swagger UI（`internal/router/router.go`）、并影响 embed channel 的安全行为；开发时不要设置或设为 `debug`。
-- `make docs` 生成 Swagger 后，启动服务访问 `http://localhost:8080/swagger/index.html`。
+- `GIN_MODE=release` 时禁用 Swagger UI（`internal/router/router.go`）、并影响 embed channel 的安全行为。本地源码开发可设为 `debug`；Docker Compose 未设置此变量时默认使用 `release`。
+- Swagger 由 **app 后端**提供。默认地址为 `http://localhost:8080/swagger/index.html`；Compose 中若修改了 `APP_PORT`，应使用该宿主机映射端口。前端端口（默认 `80`）和 Vite 开发端口（默认 `5173`）没有配置 `/swagger/` 代理。
+- 发布镜像已包含 Swagger 文档；只有修改接口注释、需要重新生成文档并构建后端时，才需要运行 `make docs`。
+
+#### Docker Compose 访问步骤
+
+在项目 `.env` 中设置 `GIN_MODE=debug`，然后重新创建 app 容器，使环境变量生效（仅执行 `docker compose restart app` 不会更新容器环境）：
+
+```bash
+docker compose up -d --no-deps --force-recreate app
+docker compose exec app printenv GIN_MODE
+docker compose port app 8080
+```
+
+确认第一条检查输出 `debug`，再用第二条检查显示的映射端口访问后端。例如输出 `0.0.0.0:8080` 时，本机访问 `http://localhost:8080/swagger/index.html`；从另一台机器访问时，将 `localhost` 替换为部署机器地址。排障结束后，将 `GIN_MODE` 恢复为 `release` 并重新创建 app 容器。
+
+#### 打开后空白或加载失败
+
+先检查请求是否到达后端（下面以默认后端端口 `8080` 为例）：
+
+```bash
+curl -i http://localhost:8080/swagger/index.html
+curl -i http://localhost:8080/swagger/doc.json
+```
+
+正常情况下，两者返回 `200`：前者是包含 `swagger-ui` 的 HTML，后者是包含 `swagger` 和 `paths` 字段的 JSON。
+
+| 现象 | 排查方向 |
+| --- | --- |
+| 状态码为 `200`，但 HTML 是普通前端页面（含 `<div id="app">`），页面空白或跳到登录页 | 请求落入了前端的 SPA 回退。改用 app 后端映射端口；登录前端不会为它增加 `/swagger/` 代理。 |
+| 后端返回 `401` 或 `404`，没有 Swagger UI | 核对访问端口以及容器内实际的 `GIN_MODE`；`release` 模式不注册 Swagger 路由，未匹配的请求可能进入认证中间件。 |
+| Swagger UI 出现，但提示无法加载 API 定义 | 单独检查同一后端的 `/swagger/doc.json` 响应；如使用自建反向代理，确保整个 `/swagger/` 路径及静态资源都被转发到 app。 |
 
 ### 数据库与迁移调试 {#_6-3-数据库与迁移调试}
 

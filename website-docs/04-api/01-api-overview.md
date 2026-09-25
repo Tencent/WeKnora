@@ -6,7 +6,7 @@ WeKnora HTTP API 使用 `/api/v1` 前缀，支持 JWT、API Key 和 Embed token 
 
 - 所有业务 API 挂载在 `/api/v1` 前缀下（`router.go` 中 `r.Group("/api/v1")`）。
 - 健康检查：`GET /health`（无需认证），返回 `{"status":"ok"}`。
-- Swagger UI：`GET /swagger/*any`，仅在非 `release` 模式（`GIN_MODE != release`）下注册。
+- Swagger UI：后端的 `/swagger/index.html`，仅在非 `release` 模式（`GIN_MODE != release`）下注册。Docker Compose 默认使用 `release`；启用步骤、后端端口和空白页排查见[开发指南](../06-development/01-dev-guide.md#_6-2-gin-mode-与-swagger)。
 - 认证之外的特殊路径：`GET|HEAD /r/:token`（短时效资源授权 URL）、`GET /files`（认证后文件代理）、`GET|HEAD /api/v1/files/presigned`（HMAC 签名 URL，无需认证）、`GET /api/v1/files/presigned-preview`（Admin 诊断）。
 
 ```
