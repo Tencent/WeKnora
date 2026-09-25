@@ -22,7 +22,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-const mineruTimeout = 1000 * time.Second // large docs can take a while
+// defaultMinerUTimeout bounds one self-hosted parse; WEKNORA_MINERU_TIMEOUT
+// overrides it for documents that take longer.
+const defaultMinerUTimeout = 1000 * time.Second // large docs can take a while
 
 var (
 	b64DataURIPattern     = regexp.MustCompile(`^data:image/(\w+);base64,(.+)$`)
@@ -35,6 +37,7 @@ var (
 // in-place MinerU upgrade needs no configuration change.
 type MinerUReader struct {
 	endpoint string
+	timeout  time.Duration
 	apiKey   string // V1 only: the server's --api-key
 	tier     string // V1 only: flash, basic, standard, advanced; "" = server default
 	// Legacy (<= 3.x) only; MinerU 4.0 dropped these request parameters.
@@ -57,6 +60,7 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 
 	c := &MinerUReader{
 		endpoint:      strings.TrimRight(overrides["mineru_endpoint"], "/"),
+		timeout:       requestTimeoutFromEnv("WEKNORA_MINERU_TIMEOUT", defaultMinerUTimeout),
 		apiKey:        strings.TrimSpace(overrides["mineru_server_api_key"]),
 		tier:          resolveMinerUTier(overrides["mineru_tier"]),
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
@@ -138,7 +142,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 }
 
 func (c *MinerUReader) readV1(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
-	client := newMinerUV1Client(c.endpoint, c.apiKey, mineruTimeout)
+	client := newMinerUV1Client(c.endpoint, c.apiKey, c.timeout)
 	mdContent, imageRefs, contentList, err := client.ParseWithLayout(ctx, req.FileContent,
 		minerUUploadFileName(req.FileName, req.FileType),
 		minerUV1ParseOptions{Tier: c.tier, OCRMode: c.parseMethod})
@@ -310,7 +314,7 @@ func (c *MinerUReader) callFileParse(
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
-		Timeout:      mineruTimeout,
+		Timeout:      c.timeout,
 		MaxRedirects: 5,
 	})
 	resp, err := client.Do(httpReq)

@@ -9,7 +9,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -37,27 +36,11 @@ type PaddleOCRVLReader struct {
 // NewPaddleOCRVLReader creates a reader from ParserEngineOverrides.
 func NewPaddleOCRVLReader(overrides map[string]string) *PaddleOCRVLReader {
 	return &PaddleOCRVLReader{
-		timeout:  paddleOCRVLRequestTimeout(),
+		timeout:  requestTimeoutFromEnv("WEKNORA_PADDLEOCR_VL_TIMEOUT", defaultPaddleOCRVLTimeout),
 		endpoint: strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
 		useSeal:  parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
 		useChart: parseBoolOr(overrides["paddleocr_vl_use_chart_recognition"], false),
 	}
-}
-
-// paddleOCRVLRequestTimeout bounds a self-hosted layout-parsing request.
-// The caller's context may impose an earlier deadline.
-func paddleOCRVLRequestTimeout() time.Duration {
-	value := strings.TrimSpace(os.Getenv("WEKNORA_PADDLEOCR_VL_TIMEOUT"))
-	if value == "" {
-		return defaultPaddleOCRVLTimeout
-	}
-	timeout, err := time.ParseDuration(value)
-	if err != nil || timeout <= 0 {
-		logger.Warnf(context.Background(), "Invalid WEKNORA_PADDLEOCR_VL_TIMEOUT %q; using %s",
-			value, defaultPaddleOCRVLTimeout)
-		return defaultPaddleOCRVLTimeout
-	}
-	return timeout
 }
 
 func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {

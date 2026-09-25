@@ -392,8 +392,10 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` | Go duration | `2h` | 单个文档处理任务的总超时 |
 | `WEKNORA_DOCREADER_CALL_TIMEOUT` | Go duration | `30m` | 单次 docreader 调用超时，须小于文档处理超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | Go duration | `1000s` | 自建 PaddleOCR-VL 引擎的 HTTP 请求超时；空值、无效值或非正数使用默认值 |
+| `WEKNORA_MINERU_TIMEOUT` | Go duration | `1000s` | 自建 MinerU 引擎的单次解析超时（V1 API 覆盖上传到下载的整个任务，旧版覆盖 `/file_parse` 请求）；空值、无效值或非正数使用默认值 |
+| `WEKNORA_MINERU_CLOUD_TIMEOUT` | Go duration | `600s` | MinerU 云端（mineru.net）轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
 
-处理大文件时从内到外逐级留出余量，例如 PaddleOCR-VL `90m`、docreader `100m`、文档处理 `2h`。
+处理大文件时从内到外逐级留出余量，例如 PaddleOCR-VL 或 MinerU `90m`、docreader `100m`、文档处理 `2h`。
 
 #### 安全与其他 {#_6-3-安全与其他}
 
@@ -501,7 +503,7 @@ V1 流程的几个细节：
 
 - 上传时附带 `sha256sum`，服务端已有相同文件时直接复用，不再传字节。
 - 只有 `upload_url` 与 `mineru_endpoint` 同源（scheme、host、端口都相同）时才附带 API Key；跨源地址（如官方 API 下发的预签名对象存储 URL）不带 Key，并照常经过 SSRF 校验。
-- 轮询从 2 秒开始指数退避，最长 30 秒一次；总时长与旧版一样是 1000 秒。超时或调用方取消时，会发 `DELETE /v1/parse/jobs/{id}` 取消服务端任务。
+- 轮询从 2 秒开始指数退避，最长 30 秒一次；总时长与旧版一样默认 1000 秒，可用 `WEKNORA_MINERU_TIMEOUT` 调整。超时或调用方取消时，会发 `DELETE /v1/parse/jobs/{id}` 取消服务端任务。
 - MinerU V1 服务的上传、任务状态都存在进程内存里，服务重启后正在轮询的任务会返回 404，本次解析直接失败。
 - 「测试连接」在 V1 服务上额外请求一次需要鉴权的 `GET /v1/parse/jobs?limit=1`，用来发现 API Key 缺失或错误（`/v1/health` 本身不校验 Key）。
 
