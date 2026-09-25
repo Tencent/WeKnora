@@ -199,8 +199,8 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 
 		// Build cursor from fetched items' UpdatedAt timestamps.
 		// Record-level edit times are tracked individually (object_type == "page").
-		// Database container IDs are also added so incremental sync can detect
-		// whether a database actually changed, avoiding full record queries every cycle.
+		// Database IDs are also added; record membership is established on the
+		// next incremental sync, including when reading a legacy cursor.
 		newEditTimes := make(map[string]time.Time)
 		for _, item := range items {
 			if item.Metadata["object_type"] == objectTypePage {
@@ -233,7 +233,16 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		pageByID[pages[i].ID] = &pages[i]
 	}
 
-	var changedItems []types.FetchedItem
+	dbSync := databaseSync{
+		connector: c, client: client, previous: &prevCursor,
+		editTimes: newEditTimes, visited: fetchVisited, membership: make(map[string][]string),
+	}
+	// Query databases before processing individual pages. Row deletions need not
+	// change the parent timestamp, and database records belong in the aggregate.
+	changedItems, err := dbSync.fetch(ctx, pages)
+	if err != nil {
+		return nil, nil, err
+	}
 	changedCount := 0
 
 	for pageID, newTime := range newEditTimes {
@@ -250,18 +259,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 			continue
 		}
 		logger.Debugf(ctx, "[Notion] changed: %s (%s, %s)", pg.Title, pg.ID, pg.Object)
-		if pg.isDatabase() {
-			// Incremental database sync: query records, diff against cursor,
-			// only fetch blocks for records whose edit time actually changed.
-			items, recordEditTimes := c.fetchDatabaseIncremental(ctx, client, pg.ID, prevCursor.PageEditTimes, fetchVisited)
-			changedItems = append(changedItems, items...)
-			// Merge record-level edit times into the cursor
-			for rid, rt := range recordEditTimes {
-				newEditTimes[rid] = rt
-			}
-		} else {
-			changedItems = append(changedItems, c.fetchPage(ctx, client, pg, fetchVisited)...)
-		}
+		changedItems = append(changedItems, c.fetchPage(ctx, client, pg, fetchVisited)...)
 	}
 
 	// Detect deletions. Only emit IsDeleted for pages that previously belonged
@@ -285,14 +283,17 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 
 	logger.Infof(ctx, "[Notion] incremental: %d changed, %d total items", changedCount, len(changedItems))
 
-	return changedItems, buildCursor(newEditTimes), nil
+	return changedItems, buildNotionCursor(notionCursor{
+		PageEditTimes: newEditTimes, DatabaseRecords: dbSync.membership,
+	}), nil
 }
 
 func buildCursor(editTimes map[string]time.Time) *types.SyncCursor {
+	return buildNotionCursor(notionCursor{PageEditTimes: editTimes})
+}
+
+func buildNotionCursor(cursorData notionCursor) *types.SyncCursor {
 	now := time.Now()
-	cursorData := notionCursor{
-		PageEditTimes: editTimes,
-	}
 	cursorBytes, _ := json.Marshal(cursorData)
 	var cursorMap map[string]interface{}
 	_ = json.Unmarshal(cursorBytes, &cursorMap)
@@ -415,7 +416,7 @@ func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *n
 	return items
 }
 
-// fetchDatabase syncs each database record as an individual knowledge item (full sync).
+// fetchDatabase syncs a database as a single table knowledge item (full sync).
 // Accepts either a data_source_id (from search) or database_id (from child_database blocks).
 func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id string, visited map[string]bool) []types.FetchedItem {
 	if visited[id] {
@@ -424,7 +425,7 @@ func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id 
 	visited[id] = true
 
 	records, dbTitle, queryID, err := c.queryDatabaseRecords(ctx, client, id)
-	if err != nil || len(records) == 0 {
+	if err != nil {
 		return nil
 	}
 	if queryID != "" && queryID != id {
@@ -438,60 +439,15 @@ func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id 
 		visited[record.ID] = true // Mark records as visited to avoid duplicate fetchPage calls
 	}
 
-	item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
+	item, err := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
+	if err != nil {
+		logger.Warnf(ctx, "[Notion] failed to build database %s: %v", id, err)
+		return nil
+	}
 	if item != nil {
 		return []types.FetchedItem{*item}
 	}
 	return nil
-}
-
-// fetchDatabaseIncremental syncs only changed records by comparing edit times against cursor.
-// Returns fetched items and a map of record_id → edit_time for cursor update.
-func (c *Connector) fetchDatabaseIncremental(ctx context.Context, client *notionClient, id string, prevEditTimes map[string]time.Time, visited map[string]bool) ([]types.FetchedItem, map[string]time.Time) {
-	if visited[id] {
-		return nil, nil
-	}
-	visited[id] = true
-
-	records, dbTitle, queryID, err := c.queryDatabaseRecords(ctx, client, id)
-	if err != nil {
-		return nil, nil
-	}
-	if queryID != "" && queryID != id {
-		if visited[queryID] {
-			return nil, nil
-		}
-		visited[queryID] = true
-	}
-
-	recordEditTimes := make(map[string]time.Time, len(records))
-	changedCount := 0
-
-	for _, record := range records {
-		visited[record.ID] = true // Mark records as visited to avoid duplicate fetchPage calls
-
-		if record.InTrash {
-			continue
-		}
-		recordEditTimes[record.ID] = record.LastEditedTime
-
-		prevTime, existed := prevEditTimes[record.ID]
-		if !existed || !record.LastEditedTime.Equal(prevTime) {
-			changedCount++
-		}
-	}
-
-	logger.Infof(ctx, "[Notion] database %s incremental: %d changed out of %d records", id, changedCount, len(records))
-
-	// Rebuild the entire database table if any record changed, or if we don't have previous times (first sync)
-	if changedCount > 0 || len(prevEditTimes) == 0 {
-		item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
-		if item != nil {
-			return []types.FetchedItem{*item}, recordEditTimes
-		}
-	}
-
-	return nil, recordEditTimes
 }
 
 // queryDatabaseRecords resolves the database ID and queries all records.
@@ -574,12 +530,13 @@ func (c *Connector) buildRecordItem(ctx context.Context, client *notionClient, r
 }
 
 // buildDatabaseItem converts a database into a single Markdown table document.
-func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient, id string, dbTitle string, records []notionPage) *types.FetchedItem {
-	if len(records) == 0 {
-		return nil
+func (c *Connector) buildDatabaseItem(
+	ctx context.Context, client *notionClient, id string, dbTitle string, records []notionPage,
+) (*types.FetchedItem, error) {
+	var propNames []string
+	if len(records) > 0 {
+		propNames = extractPropertySchema(records[0])
 	}
-
-	propNames := extractPropertySchema(records[0])
 
 	var content strings.Builder
 	title := dbTitle
@@ -632,7 +589,10 @@ func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient,
 
 		// Fetch blocks for the record, in case it has page content
 		blocks, err := client.GetBlockChildrenAll(ctx, record.ID)
-		if err == nil && len(blocks) > 0 {
+		if err != nil {
+			return nil, fmt.Errorf("fetch database record %s blocks: %w", record.ID, err)
+		}
+		if len(blocks) > 0 {
 			resolveFileUploads(ctx, client, blocks)
 			markdown, _ := BlocksToMarkdown(blocks)
 			if strings.TrimSpace(markdown) != "" {
@@ -647,7 +607,7 @@ func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient,
 
 	bodyStr := strings.TrimSpace(content.String())
 	if bodyStr == "" {
-		return nil
+		return nil, nil
 	}
 
 	updatedAt := time.Now()
@@ -667,7 +627,7 @@ func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient,
 			"channel":     types.ChannelNotion,
 			"object_type": objectTypeDatabase,
 		},
-	}
+	}, nil
 }
 
 // discoverAllResources uses the Search API to find all pages and data_sources,
