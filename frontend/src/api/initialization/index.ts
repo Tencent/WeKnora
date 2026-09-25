@@ -1,3 +1,4 @@
+import type { ConfigSchema } from '@/components/schema-form/schema';
 import { get, post, put } from '../../utils/request';
 import i18n from '@/i18n'
 import type { ModelCapabilities, ModelSpecOverride, ReasoningEffortLevel } from '../model'
@@ -661,6 +662,8 @@ export interface ModelProviderOption {
     defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
     modelTypes: string[]; // 支持的模型类型
     extraFields?: ModelProviderExtraField[];
+    // extraFields as a config schema over extra_config (secrets included).
+    configSchema?: ConfigSchema;
     credentialLabels?: ModelProviderCredentialLabel[];
     models?: ModelCatalogEntry[];
     thinking?: ModelProviderThinking;
