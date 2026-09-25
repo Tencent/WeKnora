@@ -759,7 +759,12 @@ def _page_chars(
     filtered_count = 0
     for i in range(n):
         try:
-            left, bottom, right, top = textpage.get_charbox(i, loose=loose)
+            try:
+                left, bottom, right, top = textpage.get_charbox(i, loose=loose)
+            except TypeError:
+                # Keep compatibility with the small PDFium test doubles and
+                # older pypdfium2 releases that do not expose ``loose``.
+                left, bottom, right, top = textpage.get_charbox(i)
         except Exception:
             source_count += 1
             continue
@@ -786,6 +791,12 @@ def _page_has_invisible_text(page, raw) -> bool:
     """Whether ``page`` contains text objects hidden from normal rendering."""
     if not FILTER_HIDDEN_TEXT:
         return False
+    try:
+        return bool(_collect_invisible_boxes(page, raw))
+    except Exception:
+        # A failed probe should not change the existing plain-text route.  The
+        # full glyph-level probe still runs whenever layout extraction is used.
+        return False
 
 
 def _page_has_filtered_text(page, raw) -> bool:
@@ -803,12 +814,6 @@ def _page_has_filtered_text(page, raw) -> bool:
         return False
     finally:
         _close_pdfium_resource(textpage)
-    try:
-        return bool(_collect_invisible_boxes(page, raw))
-    except Exception:
-        # A failed probe should not change the existing plain-text route.  The
-        # full glyph-level probe still runs whenever layout extraction is used.
-        return False
 
 
 def _find_split(items: list, axis: str, min_gap: float):
@@ -984,7 +989,12 @@ def _looks_like_numeric_table_columns(
                 any(abs(y - other_y) <= tolerance for other_y in label_ys)
                 for y in value_ys
             )
-            required_alignment = max(2, (len(value_ys) + 1) // 2)
+            # A table may contain an empty value cell. In that case the one
+            # remaining numeric row still carries enough evidence when its
+            # header and the label column share the same baseline.
+            required_alignment = (
+                1 if len(value_ys) == 1 else max(2, (len(value_ys) + 1) // 2)
+            )
             if aligned >= required_alignment:
                 return True
     return False
