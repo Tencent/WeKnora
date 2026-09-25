@@ -186,6 +186,22 @@ X-Accel-Buffering: no
 | `usage` | TokenUsage | `prompt_tokens/completion_tokens/total_tokens/cache_*` |
 | `finish_reason` | string | 结束原因 |
 
+`SearchResult`（`knowledge_references`、检索接口的结果）中的 `source_locators` 是该分块在原始文件中的位置，可据此在原文里定位引用（该功能上线前入库的文档为空）：
+
+| 字段 | 适用 `type` | 说明 |
+| --- | --- | --- |
+| `type` | — | `pdf` / `docx` / `slide` / `sheet` / `text` / `time` / `section` |
+| `page`、`bbox` | `pdf` | 页码（从 1 起）；`bbox` 为 `[x0,y0,x1,y1]`，相对页面宽高的比例，原点在页面左上角，可缺省 |
+| `block` | `docx` | 正文中第几个段落或表格（从 1 起） |
+| `slide` | `slide` | 第几张幻灯片（从 1 起） |
+| `sheet`、`row_start`、`row_end` | `sheet` | 工作表名（CSV 为空）与行号（从 1 起，同 Excel 行号） |
+| `start`、`end` | `text` | 原文件文本的字符区间（Unicode 码点） |
+| `start_ms`、`end_ms` | `time` | 音频时间区间（毫秒） |
+| `section`、`title` | `section` | EPUB 书脊中的第几项（从 1 起）及章节标题 |
+| `quote` | 全部 | 被引用的文字，最多 300 字 |
+
+取值为 0 的数值字段会省略。合并后的检索结果携带所合并分块位置的并集。
+
 流以 `response_type:"complete"`（`done:true`）终止；出错时以 `response_type:"error"`（`done:true`）终止。工具执行失败以 `tool_result`（`data.success=false`）返回，`error` 只表示整轮失败；回答因输出上限被截断时，`answer` 事件带 `data.truncated=true`。`continue-stream` 采用重放 + 100ms 轮询追增量的续传语义（`?message_id=` 必填）。
 
 ## 文件引用形式（resource_urls）

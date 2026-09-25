@@ -113,7 +113,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	logger.Infof(ctx, "[MinerU] Parsing file=%s size=%d via %s (legacy /file_parse)",
 		req.FileName, len(content), c.endpoint)
 
-	mdContent, imagesB64, err := c.callFileParse(ctx, content, req.FileName, req.FileType)
+	mdContent, imagesB64, contentList, err := c.callFileParse(ctx, content, req.FileName, req.FileType)
 	if err != nil {
 		return nil, fmt.Errorf("MinerU file_parse: %w", err)
 	}
@@ -133,12 +133,14 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
+		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
 	}, nil
 }
 
 func (c *MinerUReader) readV1(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	client := newMinerUV1Client(c.endpoint, c.apiKey, mineruTimeout)
-	mdContent, imageRefs, err := client.Parse(ctx, req.FileContent, minerUUploadFileName(req.FileName, req.FileType),
+	mdContent, imageRefs, contentList, err := client.ParseWithLayout(ctx, req.FileContent,
+		minerUUploadFileName(req.FileName, req.FileType),
 		minerUV1ParseOptions{Tier: c.tier, OCRMode: c.parseMethod})
 	if err != nil {
 		return nil, fmt.Errorf("MinerU V1: %w", err)
@@ -152,12 +154,16 @@ func (c *MinerUReader) readV1(ctx context.Context, req *types.ReadRequest) (*typ
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
+		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
 	}, nil
 }
 
 type mineruFileEntry struct {
 	MDContent string            `json:"md_content"`
 	Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
+	// ContentList is the layout block list (page and box per block), as a
+	// JSON array or a string holding one depending on the MinerU version.
+	ContentList json.RawMessage `json:"content_list"`
 }
 
 func minerUCleanFileType(fileType string) string {
@@ -239,12 +245,24 @@ func parseMinerUFileParseResponse(respBody []byte, uploadFileName string) (strin
 	return "", nil, "", nil
 }
 
+// minerUFileParseContentList returns the content_list of the result entry
+// that supplied the markdown.
+func minerUFileParseContentList(respBody []byte, resultKey string) json.RawMessage {
+	var envelope struct {
+		Results map[string]mineruFileEntry `json:"results"`
+	}
+	if json.Unmarshal(respBody, &envelope) != nil {
+		return nil
+	}
+	return envelope.Results[resultKey].ContentList
+}
+
 func (c *MinerUReader) callFileParse(
 	ctx context.Context,
 	content []byte,
 	fileName string,
 	fileType string,
-) (string, map[string]string, error) {
+) (string, map[string]string, json.RawMessage, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -278,16 +296,16 @@ func (c *MinerUReader) callFileParse(
 	// File part
 	part, err := writer.CreateFormFile("files", uploadFileName)
 	if err != nil {
-		return "", nil, fmt.Errorf("create form file: %w", err)
+		return "", nil, nil, fmt.Errorf("create form file: %w", err)
 	}
 	if _, err := part.Write(content); err != nil {
-		return "", nil, fmt.Errorf("write file content: %w", err)
+		return "", nil, nil, fmt.Errorf("write file content: %w", err)
 	}
 	writer.Close()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/file_parse", &body)
 	if err != nil {
-		return "", nil, fmt.Errorf("create request: %w", err)
+		return "", nil, nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
@@ -297,18 +315,18 @@ func (c *MinerUReader) callFileParse(
 	})
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", nil, fmt.Errorf("HTTP request: %w", err)
+		return "", nil, nil, fmt.Errorf("HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
+		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("read response body: %w", err)
+		return "", nil, nil, fmt.Errorf("read response body: %w", err)
 	}
 
 	// Dump raw response for debugging (truncate if too large)
@@ -327,15 +345,15 @@ func (c *MinerUReader) callFileParse(
 
 	mdContent, imagesB64, resultKey, err := parseMinerUFileParseResponse(respBody, uploadFileName)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if resultKey != "" {
 		logger.Infof(context.Background(), "[MinerU] Using response path: results.%s", resultKey)
-		return mdContent, imagesB64, nil
+		return mdContent, imagesB64, minerUFileParseContentList(respBody, resultKey), nil
 	}
 
 	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results")
-	return "", nil, nil
+	return "", nil, nil, nil
 }
 
 // processImages decodes base64 images from MinerU response and returns ImageRef list.

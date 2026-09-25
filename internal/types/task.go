@@ -540,6 +540,9 @@ type ImageMultimodalPayload struct {
 	// enqueue time. A task without it — one already in flight when attribute
 	// observation shipped — falls back to the conservative policy: run OCR.
 	ImageActions ImageActionsConfig `json:"image_actions,omitempty"`
+	// SourceLocators place the image in the original file; copied onto the
+	// OCR and caption chunks built from it.
+	SourceLocators SourceLocators `json:"source_locators,omitempty"`
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.
