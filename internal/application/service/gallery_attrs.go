@@ -19,21 +19,6 @@ import (
 // here.
 // ---------------------------------------------------------------------------
 
-// galleryImageInfo is the gallery's generic read model of one entry in a
-// chunk's image_info JSON array. It is deliberately local and free of the
-// attribute pipeline's types; the observations are read as a plain map.
-type galleryImageInfo struct {
-	URL         string `json:"url"`
-	OriginalURL string `json:"original_url"`
-	Caption     string `json:"caption"`
-	OCRText     string `json:"ocr_text"`
-	// Attrs mirrors the persisted observation envelope; the usable
-	// attribute map is nested one level down under "attrs".
-	Attrs struct {
-		Attrs map[string]any `json:"attrs"`
-	} `json:"attrs"`
-}
-
 // galleryBuiltinSourceID is the id of the builtin attribute source the types
 // package registers; its values come from asset fields, not image_info.
 const galleryBuiltinSourceID = "builtin"

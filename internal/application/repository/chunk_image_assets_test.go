@@ -22,8 +22,15 @@ import (
 //	docker run -d --rm -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=weknora -p 55432:5432 \
 //	  paradedb/paradedb:v0.22.6-pg17
 //	WEKNORA_REPOSITORY_TEST_POSTGRES_DSN=postgres://postgres:pg@localhost:55432/weknora?sslmode=disable
+//
+// Both runs apply the real chunk_images migration, so the triggers and the
+// backfill under test are the ones that ship.
 func imageAssetBackends(t *testing.T, fn func(t *testing.T, db *gorm.DB)) {
-	t.Run("sqlite", func(t *testing.T) { fn(t, setupChunkTestDB(t)) })
+	t.Run("sqlite", func(t *testing.T) {
+		db := setupChunkTestDB(t)
+		applyChunkImagesMigration(t, db)
+		fn(t, db)
+	})
 	t.Run("postgres", func(t *testing.T) {
 		dsn := os.Getenv("WEKNORA_REPOSITORY_TEST_POSTGRES_DSN")
 		if dsn == "" {
@@ -32,8 +39,23 @@ func imageAssetBackends(t *testing.T, fn func(t *testing.T, db *gorm.DB)) {
 		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		require.NoError(t, err)
 		require.NoError(t, db.AutoMigrate(&types.Chunk{}))
+		applyChunkImagesMigration(t, db)
 		fn(t, db)
 	})
+}
+
+// applyChunkImagesMigration runs the dialect's chunk_images up migration. It
+// is idempotent, which is also what lets a test re-run it to exercise the
+// backfill.
+func applyChunkImagesMigration(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	path := "../../../migrations/sqlite/000032_chunk_images.up.sql"
+	if db.Name() == "postgres" {
+		path = "../../../migrations/versioned/000113_chunk_images.up.sql"
+	}
+	sql, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(string(sql)).Error)
 }
 
 // imageFixture writes chunks for one fresh knowledge base; every test gets its
@@ -107,11 +129,7 @@ func rowURLs(t *testing.T, rows []types.ImageAssetRow) []string {
 	t.Helper()
 	urls := make([]string, 0, len(rows))
 	for _, r := range rows {
-		var img struct {
-			URL string `json:"url"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(r.ImageJSON), &img))
-		urls = append(urls, img.URL)
+		urls = append(urls, r.URL)
 	}
 	return urls
 }
@@ -141,7 +159,7 @@ func TestListImageAssets_DedupsAndExpandsArrays(t *testing.T) {
 			switch rowURLs(t, []types.ImageAssetRow{r})[0] {
 			case "local://a.png":
 				require.Equal(t, caption.ID, r.ChunkID)
-				require.Contains(t, r.ImageJSON, `"new"`)
+				require.Equal(t, "new", r.Caption)
 			case "local://c.png":
 				require.Equal(t, legacy.ID, r.ChunkID)
 				require.Equal(t, 1, r.ImageIndex)
@@ -160,12 +178,8 @@ func TestListImageAssets_SkipsForeignDeletedAndMalformedRows(t *testing.T) {
 		fx.addRaw("text", 0, `{"url":"local://object.png"}`)
 		other := newImageFixture(t, db)
 		other.add("image_caption", 0, fixtureImage{URL: "local://other-kb.png"})
-		if db.Name() == "sqlite" {
-			// postgres rejects malformed JSON at write time in practice
-			// (image_info is always produced by json.Marshal); sqlite must not
-			// abort the whole listing on one bad row.
-			fx.addRaw("text", 0, `[{"url": broken`)
-		}
+		// A malformed row must neither fail the chunk write nor the listing.
+		fx.addRaw("text", 0, `[{"url": broken`)
 
 		rows, total := fx.list(types.ImageAssetQuery{})
 		require.EqualValues(t, 1, total)
@@ -192,8 +206,10 @@ func TestListImageAssets_PagesStablyThroughTies(t *testing.T) {
 			require.EqualValues(t, 5, total, "offset %d", offset)
 			seen = append(seen, rowURLs(t, rows)...)
 		}
+		// Ties follow the sort direction, so newest-first walks the chunk's
+		// images from the last one, like images of separate chunks.
 		require.Equal(t, []string{
-			"local://p0.png", "local://p1.png", "local://p2.png", "local://p3.png", "local://p4.png",
+			"local://p4.png", "local://p3.png", "local://p2.png", "local://p1.png", "local://p0.png",
 		}, seen)
 
 		rows, total := fx.list(types.ImageAssetQuery{Offset: 10, Limit: 2})
@@ -219,6 +235,8 @@ func TestListImageAssets_KeywordSearch(t *testing.T) {
 			"LIKE wildcards in the keyword are literal")
 		require.Empty(t, search("50%", fieldCaption), "only the requested fields are searched")
 		require.Empty(t, search("local://"), "no searchable field means no match")
+		_, total := fx.list(types.ImageAssetQuery{Keyword: "local://"})
+		require.Zero(t, total, "and the total agrees")
 	})
 }
 
@@ -274,5 +292,81 @@ func TestListImageAssets_SortsByAttribute(t *testing.T) {
 		rows, _ := fx.list(types.ImageAssetQuery{SortField: fieldText})
 		require.Equal(t, []string{"local://u.png", "local://b.png", "local://s.png"}, rowURLs(t, rows),
 			"an image without the attribute sorts as the empty string")
+	})
+}
+
+func TestListImageAssets_TriggersFollowChunkWrites(t *testing.T) {
+	imageAssetBackends(t, func(t *testing.T, db *gorm.DB) {
+		fx := newImageFixture(t, db)
+		older := fx.add("image_ocr", 1, fixtureImage{URL: "local://a.png", Caption: "old"})
+		newer := fx.add("image_caption", 2, fixtureImage{URL: "local://a.png", Caption: "new"})
+		keep := fx.add("image_caption", 3, fixtureImage{URL: "local://b.png", Caption: "b"})
+		captions := func() []string {
+			rows, _ := fx.list(types.ImageAssetQuery{SortField: types.ImageAssetField{Builtin: "created_at"}})
+			out := make([]string, 0, len(rows))
+			for _, r := range rows {
+				out = append(out, r.Caption)
+			}
+			return out
+		}
+		require.Equal(t, []string{"new", "b"}, captions())
+
+		// A status-only write (no image change) still moves the image to the
+		// copy that is now the most recently updated.
+		require.NoError(t, db.Model(older).Updates(map[string]any{
+			"status": 2, "updated_at": fx.base.Add(time.Hour),
+		}).Error)
+		require.Equal(t, []string{"old", "b"}, captions())
+		require.NoError(t, db.Model(newer).Updates(map[string]any{
+			"status": 2, "updated_at": fx.base.Add(2 * time.Hour),
+		}).Error)
+		require.Equal(t, []string{"new", "b"}, captions())
+
+		// Soft-deleting the winning copy hands the image to the other copy.
+		require.NoError(t, db.Delete(newer).Error)
+		require.Equal(t, []string{"old", "b"}, captions())
+
+		// An edit to image_info shows up at once.
+		raw, _ := json.Marshal([]fixtureImage{{URL: "local://a.png", Caption: "edited"}})
+		require.NoError(t, db.Model(older).Update("image_info", string(raw)).Error)
+		require.Equal(t, []string{"edited", "b"}, captions())
+
+		// So does the enabled flag.
+		require.NoError(t, db.Model(keep).Update("is_enabled", false).Error)
+		disabled := false
+		rows, _ := fx.list(types.ImageAssetQuery{IsEnabled: &disabled})
+		require.Equal(t, []string{"local://b.png"}, rowURLs(t, rows))
+
+		// Moving a document to another knowledge base moves its images.
+		target := newImageFixture(t, db)
+		require.NoError(t, db.Model(keep).Update("knowledge_base_id", target.kbID).Error)
+		require.Equal(t, []string{"edited"}, captions())
+		rows, _ = target.list(types.ImageAssetQuery{})
+		require.Equal(t, []string{"local://b.png"}, rowURLs(t, rows))
+
+		// A hard delete removes the image entirely.
+		require.NoError(t, db.Unscoped().Delete(older).Error)
+		require.Empty(t, captions())
+	})
+}
+
+func TestListImageAssets_MigrationBackfillsExistingChunks(t *testing.T) {
+	imageAssetBackends(t, func(t *testing.T, db *gorm.DB) {
+		fx := newImageFixture(t, db)
+		fx.add("image_ocr", 1, fixtureImage{URL: "local://a.png", Caption: "old"})
+		fx.add("image_caption", 2, fixtureImage{URL: "local://a.png", Caption: "new"})
+		fx.add("text", 0, fixtureImage{URL: "local://b.png"}, fixtureImage{URL: "local://c.png"})
+		// Forget the projection, as a database that predates the migration.
+		require.NoError(t, db.Exec("DELETE FROM chunk_images WHERE knowledge_base_id = ?", fx.kbID).Error)
+		applyChunkImagesMigration(t, db)
+
+		rows, total := fx.list(types.ImageAssetQuery{})
+		require.EqualValues(t, 3, total)
+		require.ElementsMatch(t, []string{"local://a.png", "local://b.png", "local://c.png"}, rowURLs(t, rows))
+		for _, r := range rows {
+			if r.URL == "local://a.png" {
+				require.Equal(t, "new", r.Caption, "the backfill elects the most recently updated copy")
+			}
+		}
 	})
 }

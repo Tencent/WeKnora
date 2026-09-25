@@ -213,9 +213,9 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 
 // ListImagesByKnowledgeBaseID lists one page of a KB's image assets. Each image
 // is one entry of a chunk's image_info array (a chunk may hold several),
-// de-duplicated by URL. De-duplication, keyword / attribute / enabled-state
-// filtering, sorting and paging all run in the database, so only the page's
-// rows are read and decoded, and the total reflects the filter.
+// de-duplicated by URL. The repository answers from the chunk_images
+// projection, so filtering, sorting and paging cost one indexed query and the
+// total reflects the filter.
 func (s *chunkService) ListImagesByKnowledgeBaseID(
 	ctx context.Context,
 	kbID string,
@@ -232,13 +232,8 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 
 	assets := make([]types.ImageAsset, 0, len(rows))
 	for _, row := range rows {
-		var info galleryImageInfo
-		if err := json.Unmarshal([]byte(row.ImageJSON), &info); err != nil {
-			logger.Warnf(ctx, "gallery: skip undecodable image %s#%d: %v", row.ChunkID, row.ImageIndex, err)
-			continue
-		}
-		attrs := info.Attrs.Attrs
-		if attrs == nil {
+		attrs := map[string]any{}
+		if err := json.Unmarshal([]byte(row.AttrsJSON), &attrs); err != nil || attrs == nil {
 			attrs = map[string]any{}
 		}
 		assets = append(assets, types.ImageAsset{
@@ -246,10 +241,10 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 			ChunkID:     row.ChunkID,
 			KnowledgeID: row.KnowledgeID,
 			ChunkType:   row.ChunkType,
-			URL:         info.URL,
-			OriginalURL: info.OriginalURL,
-			Caption:     info.Caption,
-			OCRText:     info.OCRText,
+			URL:         row.URL,
+			OriginalURL: row.OriginalURL,
+			Caption:     row.Caption,
+			OCRText:     row.OCRText,
 			Attrs:       attrs,
 			IsEnabled:   row.IsEnabled,
 			Status:      row.Status,

@@ -5,24 +5,15 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
-	"gorm.io/gorm"
 )
 
-// ListImageAssets compiles one gallery page request into a single query:
-// expand every chunk's image_info array, keep one row per image (keyed by URL,
-// the most recently updated chunk wins), then filter, sort and page in the
-// database. Only the page's rows come back, and the total of the filtered set
-// rides along on each of them.
-//
-// image_info is a text column holding a JSON array. An image the multimodal
-// pipeline produced lives on its image_ocr and image_caption children with
-// identical JSON; chunks written before 2026-02 may carry several images on
-// one text chunk, which is why the array is expanded instead of reading [0].
-//
-// The expansion reduces each image to narrow scalars (dedup key, sort key and
-// one boolean for every filter) so de-duplication and sorting never carry the
-// image JSON, whose OCR text can run to kilobytes; the JSON is read back from
-// chunks for the page's rows only.
+// ListImageAssets returns one page of a knowledge base's images from
+// chunk_images, the projection of chunks.image_info that database triggers
+// maintain (migrations versioned/000113, sqlite/000032). An image copied onto
+// several chunks is listed once, as the copy no other copy beats (see
+// winnerClause), which an index probe per candidate row decides. A plain
+// listing therefore reads the page off the listing index and stops; filters
+// narrow the candidates before the probe.
 func (r *chunkRepository) ListImageAssets(
 	ctx context.Context, tenantID uint64, kbID string, q *types.ImageAssetQuery,
 ) ([]types.ImageAssetRow, int64, error) {
@@ -36,156 +27,100 @@ func (r *chunkRepository) ListImageAssets(
 	offset := max(q.Offset, 0)
 
 	d := imageAssetDialect{postgres: r.db.Name() == "postgres"}
-	filtered, args := d.filteredImageAssets(tenantID, kbID, q)
+	where, args, filtered := d.where(tenantID, kbID, q)
+	// Unfiltered, the total is the number of distinct images, which the
+	// copies index answers without probing every row.
+	count, countArgs := "SELECT COUNT(*) FROM chunk_images i WHERE "+where, args
+	if !filtered {
+		countArgs = args[:2]
+		// DISTINCT in a subquery, not COUNT(DISTINCT): postgres always sorts
+		// for the latter, while the former walks the copies index in order.
+		count = "SELECT COUNT(*) FROM (SELECT DISTINCT i.image_key FROM chunk_images i " +
+			"WHERE i.knowledge_base_id = ? AND i.tenant_id = ?) d"
+	}
 	dir := " ASC"
 	if q.SortDesc {
 		dir = " DESC"
 	}
-	order := "sort_key" + dir + ", chunk_id ASC, image_index ASC"
-	page := "SELECT chunk_id, image_index, ROW_NUMBER() OVER (ORDER BY " + order + ") AS ord, " +
-		"COUNT(*) OVER () AS total_count FROM (" + filtered + ") f ORDER BY ord LIMIT ? OFFSET ?"
-	query := "SELECT c.id AS chunk_id, c.knowledge_id, c.chunk_type, c.is_enabled, c.status, " +
-		"c.created_at, c.updated_at, p.image_index, " + d.element("c.image_info", "p.image_index") +
-		" AS image_json, p.total_count FROM (" + page + ") p JOIN chunks c ON c.id = p.chunk_id ORDER BY p.ord"
+	// Ties (every image of one chunk shares its timestamps) follow the sort
+	// direction, so a created_at listing is one backward walk of the index.
+	order := d.sortKey(q.SortField) + dir + ", i.chunk_id" + dir + ", i.image_index" + dir
+	query := "SELECT i.chunk_id, i.knowledge_id, i.chunk_type, i.is_enabled, i.status, i.created_at, " +
+		"i.updated_at, i.image_index, i.url, i.original_url, i.caption, i.ocr_text, " + d.attrsText() +
+		" AS attrs_json, (" + count + ") AS total_count " +
+		"FROM chunk_images i WHERE " + where + " ORDER BY " + order + " LIMIT ? OFFSET ?"
 
 	var rows []types.ImageAssetRow
-	var total int64
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if d.postgres {
-			// The planner assumes every jsonb_array_elements call yields 100
-			// rows, so it prices this query ~100x too high and JIT-compiles
-			// it; on a KB of 20k images that compilation alone costs more
-			// than the query. Most arrays hold a single image.
-			if err := tx.Exec("SET LOCAL jit = off").Error; err != nil {
-				return err
-			}
-		}
-		pageArgs := append(append([]any{}, args...), limit, offset)
-		if err := tx.Raw(query, pageArgs...).Scan(&rows).Error; err != nil {
-			return err
-		}
-		if len(rows) > 0 {
-			total = rows[0].TotalCount
-			return nil
-		}
-		if offset == 0 {
-			return nil
-		}
-		// A page past the end carries no row to read the total from.
-		return tx.Raw("SELECT COUNT(*) FROM ("+filtered+") f", args...).Scan(&total).Error
-	})
-	if err != nil {
+	pageArgs := make([]any, 0, len(countArgs)+len(args)+2)
+	pageArgs = append(append(append(pageArgs, countArgs...), args...), limit, offset)
+	if err := r.db.WithContext(ctx).Raw(query, pageArgs...).Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
-	return rows, total, nil
+	if len(rows) > 0 {
+		return rows, rows[0].TotalCount, nil
+	}
+	if offset == 0 {
+		return rows, 0, nil
+	}
+	// A page past the end carries no row to read the total from.
+	var total int64
+	err := r.db.WithContext(ctx).Raw(count, countArgs...).Scan(&total).Error
+	return rows, total, err
 }
 
-// imageAssetDialect holds the few expressions postgres and sqlite spell
-// differently: array expansion and JSON field extraction. Everything else in
-// the gallery query is shared SQL.
+// winnerClause keeps one copy per image: the one on the most recently updated
+// chunk, ties broken by chunk id and then array position. The copies index
+// serves the probe.
+const winnerClause = "NOT EXISTS (SELECT 1 FROM chunk_images o " +
+	"WHERE o.knowledge_base_id = i.knowledge_base_id AND o.tenant_id = i.tenant_id " +
+	"AND o.image_key = i.image_key AND (o.updated_at > i.updated_at " +
+	"OR (o.updated_at = i.updated_at AND (o.chunk_id < i.chunk_id " +
+	"OR (o.chunk_id = i.chunk_id AND o.image_index < i.image_index)))))"
+
+// imageAssetDialect holds the expressions postgres and sqlite spell
+// differently: reading the attrs JSON and matching the keyword.
 type imageAssetDialect struct {
 	postgres bool
 }
 
-// filteredImageAssets returns the de-duplicated, filtered image set as a
-// subquery of (chunk_id, image_index, sort_key), with its bind arguments in
-// order.
-//
-// It runs in two passes. The first expands every array but only extracts the
-// URL, so de-duplication sorts narrow rows. The second re-reads just the entry
-// that won for each image and evaluates the sort key and the filters on it:
-// filters judge the winning copy as if the duplicates had never existed, and
-// the keyword scan touches each image's text once instead of once per copy.
-func (d imageAssetDialect) filteredImageAssets(
+// where is the predicate selecting the query's images: the listed copy of
+// each image of the knowledge base that passes the filters. Filters judge the
+// listed copy, as if the other copies did not exist. Every clause is written
+// to be non-NULL, so the NOT in the verdict clause cannot turn an unobserved
+// image into a hidden one. filtered reports whether anything beyond the
+// knowledge base scope constrains the result.
+func (d imageAssetDialect) where(
 	tenantID uint64, kbID string, q *types.ImageAssetQuery,
-) (string, []any) {
-	index := "CAST(e.key AS INTEGER)"
-	expand := "FROM chunks c, json_each(CASE WHEN json_valid(c.image_info) THEN c.image_info ELSE '[]' END) AS e"
-	// sqlite has no LATERAL; filtering json_each on the key picks the entry.
-	reread := ", json_each(c.image_info) AS e"
-	rereadWhere := " AND e.key = w.image_index"
-	if d.postgres {
-		index = "(e.idx - 1)"
-		expand = "FROM chunks c CROSS JOIN LATERAL jsonb_array_elements(c.image_info::jsonb) " +
-			"WITH ORDINALITY AS e(img, idx)"
-		// OFFSET 0 keeps postgres from inlining the subquery, which would
-		// re-parse the JSON once per expression that reads the entry.
-		reread = " CROSS JOIN LATERAL (SELECT c.image_info::jsonb -> CAST(w.image_index AS INTEGER) AS img OFFSET 0) e"
-		rereadWhere = ""
-	}
-	dedupKey := "COALESCE(NULLIF(" + d.text("url") + ", ''), NULLIF(" + d.text("original_url") +
-		", ''), c.id || '#' || " + index + ")"
-	// The LIKE guard keeps non-array values out of the expansion; sqlite also
-	// swaps invalid JSON for an empty array above, because json_each aborts
-	// the whole statement on malformed input.
-	base := "SELECT c.id AS chunk_id, " + index + " AS image_index, c.created_at, c.updated_at, c.is_enabled, " +
-		dedupKey + " AS dedup_key " +
-		expand + " WHERE c.tenant_id = ? AND c.knowledge_base_id = ? AND c.deleted_at IS NULL " +
-		"AND c.image_info LIKE '[%'"
-	winners := "SELECT chunk_id, image_index, created_at, updated_at, is_enabled FROM (SELECT b.*, " +
-		"ROW_NUMBER() OVER (PARTITION BY dedup_key ORDER BY updated_at DESC, chunk_id ASC, image_index ASC) " +
-		"AS rn FROM (" + base + ") b) r WHERE rn = 1"
-	args := []any{tenantID, kbID}
-	if !readsImageEntry(q) {
-		// Timestamps and the enabled flag rode along with the winners, so a
-		// plain listing never goes back to the JSON.
-		where := "1 = 1"
-		if q.IsEnabled != nil {
-			where = "is_enabled = ?"
-			args = append(args, *q.IsEnabled)
-		}
-		sortKey := "created_at"
-		if f := q.SortField.Builtin; f == "updated_at" || f == "is_enabled" {
-			sortKey = f
-		}
-		return "SELECT chunk_id, image_index, " + sortKey + " AS sort_key FROM (" + winners + ") w WHERE " + where, args
-	}
-	keep, keepArgs := d.keep(q)
-	filtered := "SELECT w.chunk_id, w.image_index, " + d.sortKey(q.SortField) + " AS sort_key FROM (" +
-		winners + ") w JOIN chunks c ON c.id = w.chunk_id" + reread + " WHERE " + keep + rereadWhere
-	return filtered, append(args, keepArgs...)
-}
-
-// readsImageEntry reports whether the query filters or sorts on anything
-// stored inside the image entry, as opposed to the chunk's own columns.
-func readsImageEntry(q *types.ImageAssetQuery) bool {
-	if strings.TrimSpace(q.Keyword) != "" || len(q.AttrFilters) > 0 || len(q.OnRules) > 0 || len(q.OffRules) > 0 {
-		return true
-	}
-	switch q.SortField.Builtin {
-	case "created_at", "updated_at", "is_enabled":
-		return false
-	}
-	_, ok := (imageAssetDialect{}).value(q.SortField)
-	return ok
-}
-
-// keep is one boolean per image row that is true when the query's filters let
-// the image through. Every clause is written to be non-NULL, so the NOT in the
-// verdict clause cannot turn an unobserved image into a hidden one.
-func (d imageAssetDialect) keep(q *types.ImageAssetQuery) (string, []any) {
-	var clauses []string
-	var args []any
+) (sql string, args []any, filtered bool) {
+	clauses := []string{"i.knowledge_base_id = ?", "i.tenant_id = ?"}
+	args = []any{kbID, tenantID}
 	if q.IsEnabled != nil {
-		clauses = append(clauses, "c.is_enabled = ?")
+		clauses = append(clauses, "i.is_enabled = ?")
 		args = append(args, *q.IsEnabled)
 	}
 	if kw := strings.TrimSpace(q.Keyword); kw != "" {
-		parts := make([]string, 0, len(q.SearchFields))
+		pattern := "%" + escapeLikeKeyword(kw) + "%"
+		var matches []string
 		for _, f := range q.SearchFields {
-			if expr, ok := d.value(f); ok {
-				parts = append(parts, "COALESCE("+expr+", '')")
+			expr, ok := d.value(f)
+			if !ok {
+				continue
 			}
+			if d.postgres {
+				// ILIKE with the default backslash escape, the form the
+				// trigram indexes on caption / ocr_text can serve.
+				matches = append(matches, expr+" ILIKE ?")
+			} else {
+				// sqlite's LIKE folds ASCII case only, so non-ASCII keywords
+				// match case-sensitively there.
+				matches = append(matches, expr+" LIKE ? ESCAPE '"+likeEscapeChar+"'")
+			}
+			args = append(args, pattern)
 		}
-		if len(parts) == 0 {
-			clauses = append(clauses, "1 = 0")
-		} else {
-			// sqlite's LOWER only folds ASCII, so non-ASCII keywords match
-			// case-sensitively there; postgres folds per the database locale.
-			clauses = append(clauses,
-				"LOWER("+strings.Join(parts, " || ' ' || ")+") LIKE ? ESCAPE '"+likeEscapeChar+"'")
-			args = append(args, "%"+escapeLikeKeyword(strings.ToLower(kw))+"%")
+		if len(matches) == 0 {
+			matches = []string{"1 = 0"}
 		}
+		clauses = append(clauses, "("+strings.Join(matches, " OR ")+")")
 	}
 	for _, set := range q.AttrFilters {
 		expr, ok := d.value(set.Field)
@@ -207,10 +142,8 @@ func (d imageAssetDialect) keep(q *types.ImageAssetQuery) (string, []any) {
 		clauses = append(clauses, "(("+on+") OR NOT ("+off+"))")
 		args = append(append(args, onArgs...), offArgs...)
 	}
-	if len(clauses) == 0 {
-		return "(1 = 1)", nil
-	}
-	return "(" + strings.Join(clauses, " AND ") + ")", args
+	filtered = len(clauses) > 2
+	return strings.Join(append(clauses, winnerClause), " AND "), args, filtered
 }
 
 // anyCarries is true for an image carrying any of the sets' values. An image
@@ -229,34 +162,30 @@ func (d imageAssetDialect) anyCarries(sets []types.ImageAssetValueSet) (string, 
 	return strings.Join(clauses, " OR "), args
 }
 
-// sortKey is the value images are ordered by; ties fall back to chunk and
-// position so pages are deterministic (every image of one chunk shares its
-// timestamps). An image without a value for the field sorts as the empty
-// string.
+// sortKey is the value images are ordered by. An image without a value for
+// the field sorts as the empty string.
 func (d imageAssetDialect) sortKey(f types.ImageAssetField) string {
 	switch f.Builtin {
-	case "created_at", "updated_at":
-		return "c." + f.Builtin
-	case "is_enabled":
-		return "c.is_enabled"
+	case "created_at", "updated_at", "is_enabled":
+		return "i." + f.Builtin
 	}
 	if expr, ok := d.value(f); ok {
 		return "LOWER(COALESCE(" + expr + ", ''))"
 	}
-	return "c.created_at"
+	return "i.created_at"
 }
 
-// value is the normalized text of a field for one image row, NULL when the
-// image carries none. Booleans read as "true"/"false" on both backends, the
-// same form the gallery contract lists values in. Timestamps are sort-only:
-// they have no text form to search or filter on.
+// value is the normalized text of a field for one image, NULL when the image
+// carries none. Booleans read as "true"/"false" on both backends, the same
+// form the gallery contract lists values in. Timestamps are sort-only: they
+// have no text form to search or filter on.
 func (d imageAssetDialect) value(f types.ImageAssetField) (string, bool) {
 	switch f.Builtin {
 	case "":
 	case "caption", "ocr_text":
-		return d.text(f.Builtin), true
+		return "i." + f.Builtin, true
 	case "is_enabled":
-		return "(CASE WHEN c.is_enabled THEN 'true' ELSE 'false' END)", true
+		return "(CASE WHEN i.is_enabled THEN 'true' ELSE 'false' END)", true
 	default:
 		return "", false
 	}
@@ -267,25 +196,17 @@ func (d imageAssetDialect) value(f types.ImageAssetField) (string, bool) {
 		return "", false
 	}
 	if d.postgres {
-		return "(e.img->'attrs'->'attrs'->>'" + name + "')", true
+		return "(i.attrs->>'" + name + "')", true
 	}
-	path := `'$.attrs.attrs."` + name + `"'`
-	return "(CASE json_type(e.value, " + path + ") WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
-		"ELSE CAST(json_extract(e.value, " + path + ") AS TEXT) END)", true
+	path := `'$."` + name + `"'`
+	return "(CASE json_type(i.attrs, " + path + ") WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
+		"ELSE CAST(json_extract(i.attrs, " + path + ") AS TEXT) END)", true
 }
 
-// text extracts a top-level string field of the expanded image entry.
-func (d imageAssetDialect) text(key string) string {
+// attrsText reads the attrs column back as JSON text.
+func (d imageAssetDialect) attrsText() string {
 	if d.postgres {
-		return "(e.img->>'" + key + "')"
+		return "i.attrs::text"
 	}
-	return "json_extract(e.value, '$." + key + "')"
-}
-
-// element reads one entry of an image_info array back as JSON text.
-func (d imageAssetDialect) element(column, index string) string {
-	if d.postgres {
-		return "(" + column + "::jsonb -> CAST(" + index + " AS INTEGER))::text"
-	}
-	return "json_extract(" + column + ", '$[' || " + index + " || ']')"
+	return "i.attrs"
 }

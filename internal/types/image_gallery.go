@@ -119,8 +119,8 @@ type ImageAssetQuery struct {
 	Limit     int
 }
 
-// ImageAssetRow is one de-duplicated image as the repository returns it: the
-// owning chunk's columns plus the raw JSON of the image's image_info entry.
+// ImageAssetRow is one de-duplicated image as the repository returns it: a
+// chunk_images row, the owning chunk's columns plus the image entry's fields.
 type ImageAssetRow struct {
 	ChunkID     string    `gorm:"column:chunk_id"`
 	KnowledgeID string    `gorm:"column:knowledge_id"`
@@ -130,6 +130,11 @@ type ImageAssetRow struct {
 	CreatedAt   time.Time `gorm:"column:created_at"`
 	UpdatedAt   time.Time `gorm:"column:updated_at"`
 	ImageIndex  int       `gorm:"column:image_index"`
-	ImageJSON   string    `gorm:"column:image_json"`
-	TotalCount  int64     `gorm:"column:total_count"`
+	URL         string    `gorm:"column:url"`
+	OriginalURL string    `gorm:"column:original_url"`
+	Caption     string    `gorm:"column:caption"`
+	OCRText     string    `gorm:"column:ocr_text"`
+	// AttrsJSON is the observed attribute map as JSON text.
+	AttrsJSON  string `gorm:"column:attrs_json"`
+	TotalCount int64  `gorm:"column:total_count"`
 }
