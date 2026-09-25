@@ -410,12 +410,16 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 var salvageFieldPattern = regexp.MustCompile(`"([a-z_]+)"\s*:\s*"((?:[^"\\]|\\.)*)("?)`)
 
 // salvageStructuredQueryOutput recovers the string fields of a truncated
-// structured reply. Complete fields are taken as they are; the field the
-// reply was cut inside (usually the long image description) keeps the text
-// written so far.
+// structured reply. Complete fields are taken as they are. A field the reply
+// was cut inside keeps the text written so far only when it is the image
+// description, where a partial transcript still helps; a cut-off rewrite or
+// intent is dropped, since it would replace the user's complete query.
 func salvageStructuredQueryOutput(content string) (queryUnderstandOutput, bool) {
 	fields := make(map[string]json.RawMessage)
 	for _, m := range salvageFieldPattern.FindAllStringSubmatch(content, -1) {
+		if closed := m[3] != ""; !closed && !isImageDescriptionField(m[1]) {
+			continue
+		}
 		value := strings.TrimSuffix(m[2], "\\")
 		var decoded string
 		if err := json.Unmarshal([]byte(`"`+value+`"`), &decoded); err != nil {
@@ -432,6 +436,12 @@ func salvageStructuredQueryOutput(content string) (queryUnderstandOutput, bool) 
 		return queryUnderstandOutput{}, false
 	}
 	return parseStructuredQueryOutputJSON(string(encoded))
+}
+
+// isImageDescriptionField reports whether key is one of the image description
+// aliases parseStructuredQueryOutputJSON accepts.
+func isImageDescriptionField(key string) bool {
+	return strings.HasPrefix(key, "image_") || key == "description"
 }
 
 func parseStructuredQueryOutput(raw string) (queryUnderstandOutput, bool) {

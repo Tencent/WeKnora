@@ -165,6 +165,19 @@ func TestParseOutputSalvagesTruncatedReply(t *testing.T) {
 	}
 }
 
+// A rewrite cut off by the token cap must not replace the user's query.
+func TestParseOutputDropsTruncatedRewrite(t *testing.T) {
+	p := &PluginQueryUnderstand{}
+	cm := &types.ChatManage{}
+	p.parseOutput(cm, `{"intent":"kb_search","rewrite_query":"How do I configure the retention policy for arch`)
+	if cm.RewriteQuery != "" {
+		t.Fatalf("truncated rewrite adopted: %q", cm.RewriteQuery)
+	}
+	if cm.Intent != types.IntentKBSearch {
+		t.Fatalf("intent = %q", cm.Intent)
+	}
+}
+
 // An unexpected intent label no longer turns retrieval off.
 func TestParseOutputNormalizesIntent(t *testing.T) {
 	p := &PluginQueryUnderstand{}

@@ -412,7 +412,9 @@ func (t *ReadDocumentTool) readByQuery(
 	var total int64
 	var prev *types.Chunk
 	forceNext := false
-	page := offset/readDocumentScanPageSize + 1
+	// Start one chunk before offset so a match at offset still gets its
+	// preceding context, also when offset is the first chunk of a page.
+	page := max(offset-1, 0)/readDocumentScanPageSize + 1
 	nextOffset := -1
 	tenantID := t.tenantFor(knowledge)
 	// Stop collecting before the registry's head/tail truncation would cut

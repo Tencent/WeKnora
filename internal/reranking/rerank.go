@@ -66,10 +66,9 @@ type Options struct {
 	// across searches, so the cut keeps the strongest candidates of each.
 	MaxCandidates int
 	// FAQScoreBoost, when above 1, multiplies the composite score of FAQ
-	// entries. The result is not capped at 1: capping made every strong FAQ
-	// tie at exactly 1, so their order among themselves fell to the
-	// tie-breaker instead of relevance. Compare absolute thresholds against
-	// PreBoostScore.
+	// entries, capped at 1 so scores stay on the [0, 1] scale. FAQs tied at
+	// the cap are ordered by their pre-boost score. Compare absolute
+	// thresholds against PreBoostScore.
 	FAQScoreBoost float64
 }
 
@@ -174,7 +173,14 @@ func Rerank(
 	for i := range order {
 		order[i] = i
 	}
-	sort.SliceStable(order, func(a, b int) bool { return scored[order[a]].Score > scored[order[b]].Score })
+	sort.SliceStable(order, func(a, b int) bool {
+		sa, sb := scored[order[a]], scored[order[b]]
+		if sa.Score != sb.Score {
+			return sa.Score > sb.Score
+		}
+		// Boosted FAQs capped at 1 tie; keep them in relevance order.
+		return PreBoostScore(sa) > PreBoostScore(sb)
+	})
 	res.Scored = make([]*types.SearchResult, len(order))
 	sortedIdx := make([]int, len(order))
 	for i, o := range order {
@@ -204,13 +210,21 @@ func Rerank(
 
 // topByScore returns the positions of the limit highest-scoring rows, or nil
 // when limit is not positive or every row fits. Ties keep the earlier row.
+// Graph hits are always kept outside the limit: they carry no retrieval score
+// (CompositeScore substitutes the model score) and would otherwise always be
+// cut; their number is bounded where they are added.
 func topByScore(results []*types.SearchResult, limit int) map[int]bool {
 	if limit <= 0 || len(results) <= limit {
 		return nil
 	}
+	keep := make(map[int]bool, limit)
 	order := make([]int, 0, len(results))
 	for i, r := range results {
-		if r != nil {
+		switch {
+		case r == nil:
+		case r.MatchType == types.MatchTypeGraph:
+			keep[i] = true
+		default:
 			order = append(order, i)
 		}
 	}
@@ -218,7 +232,6 @@ func topByScore(results []*types.SearchResult, limit int) map[int]bool {
 		return nil
 	}
 	sort.SliceStable(order, func(a, b int) bool { return results[order[a]].Score > results[order[b]].Score })
-	keep := make(map[int]bool, limit)
 	for _, i := range order[:limit] {
 		keep[i] = true
 	}
@@ -316,7 +329,7 @@ func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.Sear
 	if faqBoost > 1.0 && c.ChunkType == string(types.ChunkTypeFAQ) {
 		c.Metadata["faq_boosted"] = "true"
 		c.Metadata["faq_original_score"] = strconv.FormatFloat(c.Score, 'f', 4, 64)
-		c.Score *= faqBoost
+		c.Score = math.Min(c.Score*faqBoost, 1.0)
 	}
 	return &c
 }

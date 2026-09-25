@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -80,25 +79,11 @@ func graphSearchTerms(query string) []string {
 	}
 	seen := map[string]bool{query: true}
 	var tokens []string
-	add := func(word string) {
-		word = strings.TrimSpace(word)
-		if len([]rune(word)) < 2 || seen[word] {
-			return
+	for _, word := range queryTerms(query) {
+		if !seen[word] {
+			seen[word] = true
+			tokens = append(tokens, word)
 		}
-		if _, stop := snippetStopwords[strings.ToLower(word)]; stop {
-			return
-		}
-		seen[word] = true
-		tokens = append(tokens, word)
-	}
-	for _, field := range strings.FieldsFunc(query, isSnippetSeparator) {
-		if searchutil.ContainsChinese(field) {
-			for _, word := range types.Jieba.CutForSearch(field, true) {
-				add(word)
-			}
-			continue
-		}
-		add(field)
 	}
 	// Longer tokens are more specific entity candidates; sort for stability.
 	sort.SliceStable(tokens, func(i, j int) bool {
@@ -193,6 +178,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		graphResults []*types.SearchResult // chunks the matched entities come from
 		textResults  []*types.SearchResult
 		relations    []*types.GraphRelation
+		warnings     []string // failures of one source while the other returned results
 		err          error
 	}
 
@@ -233,9 +219,13 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			}
 
 			var errs []string
-			graphResults, relations, err := t.queryGraph(ctx, id, terms)
+			graphResults, graph, err := t.queryGraph(ctx, id, terms)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("graph query failed: %v", err))
+			}
+			var relations []*types.GraphRelation
+			if graph != nil {
+				relations = graph.Relation
 			}
 			// Text search complements the graph: relations say how entities
 			// connect, text hits carry statements the extraction missed. A KB
@@ -257,10 +247,18 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 					res.err = err
 					return
 				}
+				// The graph namespace is the whole knowledge base, so under a
+				// document or tag scope only relations between entities backed
+				// by an in-scope chunk may reach the model.
+				if !searchTargetsCoverWholeKB(t.searchTargets, id) {
+					relations = relationsBackedBy(graph, graphResults)
+				}
 			}
 			res.graphResults, res.textResults, res.relations = graphResults, textResults, relations
 			if len(errs) > 0 && len(graphResults) == 0 && len(textResults) == 0 {
 				res.err = errors.New(strings.Join(errs, "; "))
+			} else {
+				res.warnings = errs
 			}
 		}(kbID)
 	}
@@ -282,6 +280,9 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		if result.err != nil {
 			errs = append(errs, fmt.Sprintf("KB %s: %v", kbID, result.err))
 			continue
+		}
+		for _, warning := range result.warnings {
+			errs = append(errs, fmt.Sprintf("KB %s: %s", kbID, warning))
 		}
 
 		if result.kb != nil && result.kb.ExtractConfig != nil {
@@ -464,12 +465,12 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 }
 
 // queryGraph looks the query's entity terms up in kbID's graph and returns
-// the chunks the matched entities were extracted from, plus their relations.
-// With no graph store wired, or none configured (the store answers nil), it
-// returns nothing.
+// the chunks the matched entities were extracted from, plus the matched graph
+// (entities and relations). With no graph store wired, or none configured
+// (the store answers nil), it returns nothing.
 func (t *QueryKnowledgeGraphTool) queryGraph(
 	ctx context.Context, kbID string, terms []string,
-) ([]*types.SearchResult, []*types.GraphRelation, error) {
+) ([]*types.SearchResult, *types.GraphData, error) {
 	if t.graphRepo == nil || len(terms) == 0 {
 		return nil, nil, nil
 	}
@@ -491,13 +492,13 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 		}
 	}
 	if len(chunkIDs) == 0 || t.chunkRepo == nil {
-		return nil, graph.Relation, nil
+		return nil, graph, nil
 	}
 	// The graph namespace is the knowledge base, which the caller already
 	// authorized; a chunk ID is only trusted when its row belongs to it.
 	chunks, err := t.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
 	if err != nil {
-		return nil, graph.Relation, err
+		return nil, graph, err
 	}
 	byID := make(map[string]*types.Chunk, len(chunks))
 	knowledgeIDs := make([]string, 0, len(chunks))
@@ -507,11 +508,19 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 			knowledgeIDs = append(knowledgeIDs, c.KnowledgeID)
 		}
 	}
-	titles := t.knowledgeTitles(ctx, knowledgeIDs)
+	titles, err := t.knowledgeTitles(ctx, knowledgeIDs)
+	if err != nil {
+		return nil, graph, err
+	}
 	results := make([]*types.SearchResult, 0, len(byID))
 	for _, id := range chunkIDs {
 		c := byID[id]
 		if c == nil {
+			continue
+		}
+		// A chunk can outlive its soft-deleted document; titles holds only
+		// documents that still exist (nil when there is no way to check).
+		if _, exists := titles[c.KnowledgeID]; titles != nil && !exists {
 			continue
 		}
 		results = append(results, &types.SearchResult{
@@ -526,26 +535,70 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 			MatchType:       types.MatchTypeGraph,
 		})
 	}
-	return results, graph.Relation, nil
+	return results, graph, nil
 }
 
-// knowledgeTitles returns document titles for knowledge IDs, best effort.
-func (t *QueryKnowledgeGraphTool) knowledgeTitles(ctx context.Context, ids []string) map[string]string {
+// knowledgeTitles returns the titles of the knowledge IDs that still exist.
+// It returns nil when no knowledge service is wired to look them up.
+func (t *QueryKnowledgeGraphTool) knowledgeTitles(ctx context.Context, ids []string) (map[string]string, error) {
+	if t.scopeKnowledgeService == nil {
+		return nil, nil
+	}
 	titles := make(map[string]string, len(ids))
-	if t.scopeKnowledgeService == nil || len(ids) == 0 {
-		return titles
+	if len(ids) == 0 {
+		return titles, nil
 	}
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	knowledges, err := t.scopeKnowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, ids)
 	if err != nil {
-		return titles
+		return nil, fmt.Errorf("failed to load documents: %w", err)
 	}
 	for _, k := range knowledges {
 		if k != nil {
 			titles[k.ID] = k.Title
 		}
 	}
-	return titles
+	return titles, nil
+}
+
+// searchTargetsCoverWholeKB reports whether targets grant the whole of kbID
+// rather than some of its documents or tags.
+func searchTargetsCoverWholeKB(targets types.SearchTargets, kbID string) bool {
+	for _, target := range targets {
+		if target != nil && target.KnowledgeBaseID == kbID && searchTargetIsWholeKB(target) {
+			return true
+		}
+	}
+	return false
+}
+
+// relationsBackedBy keeps the graph's relations whose two entities were both
+// extracted from one of the evidence chunks. Entities whose chunks are not
+// among them cannot be shown to be in scope, so their relations are dropped.
+func relationsBackedBy(graph *types.GraphData, evidence []*types.SearchResult) []*types.GraphRelation {
+	if graph == nil || len(evidence) == 0 {
+		return nil
+	}
+	allowedChunks := make(map[string]bool, len(evidence))
+	for _, r := range evidence {
+		allowedChunks[r.ID] = true
+	}
+	allowedNodes := make(map[string]bool)
+	for _, node := range graph.Node {
+		for _, id := range node.Chunks {
+			if allowedChunks[id] {
+				allowedNodes[node.Name] = true
+				break
+			}
+		}
+	}
+	var relations []*types.GraphRelation
+	for _, rel := range graph.Relation {
+		if allowedNodes[rel.Node1] && allowedNodes[rel.Node2] {
+			relations = append(relations, rel)
+		}
+	}
+	return relations
 }
 
 func summarizeGraphConfig(config *types.ExtractConfig) graphConfigSummary {

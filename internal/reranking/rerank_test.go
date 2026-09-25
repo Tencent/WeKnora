@@ -164,10 +164,10 @@ func TestRerank_topKAppliesMMRAndFAQBoost(t *testing.T) {
 	if len(res.Results) != 2 || len(res.Scored) != 3 {
 		t.Fatalf("results=%d scored=%d", len(res.Results), len(res.Scored))
 	}
-	// The FAQ entry is boosted from 0.67 to 1.005 and ranks first; its
-	// pre-boost score stays available for absolute thresholds.
+	// The FAQ entry is boosted from 0.67 to 1.005, capped at 1, and ranks
+	// first; its pre-boost score stays available for absolute thresholds.
 	top := res.Results[0]
-	if top.ID != "c3" || top.Metadata["faq_boosted"] != "true" || math.Abs(top.Score-1.005) > 1e-9 {
+	if top.ID != "c3" || top.Metadata["faq_boosted"] != "true" || math.Abs(top.Score-1.0) > 1e-9 {
 		t.Fatalf("FAQ boost not applied: %+v", top)
 	}
 	if got := PreBoostScore(top); math.Abs(got-0.67) > 1e-9 {
@@ -175,8 +175,8 @@ func TestRerank_topKAppliesMMRAndFAQBoost(t *testing.T) {
 	}
 }
 
-// Strong FAQ entries used to be capped at 1 and tie; their order must follow
-// relevance.
+// Strong FAQ entries are capped at 1 and tie; their order must still follow
+// relevance, and the boost must not leave the [0, 1] scale.
 func TestRerank_boostedFAQsKeepRelevanceOrder(t *testing.T) {
 	t.Parallel()
 	in := rows("faq weaker", "faq stronger")
@@ -185,8 +185,13 @@ func TestRerank_boostedFAQsKeepRelevanceOrder(t *testing.T) {
 	}
 	res := Rerank(context.Background(), &stubReranker{scores: []float64{0.9, 0.95}}, "q", in,
 		Options{Threshold: 0.3, FAQScoreBoost: 1.5})
-	if len(res.Results) != 2 || res.Results[0].ID != "c2" || res.Results[0].Score <= res.Results[1].Score {
+	if len(res.Results) != 2 || res.Results[0].ID != "c2" {
 		t.Fatalf("boosted FAQs lost their order: %+v / %+v", res.Results[0], res.Results[1])
+	}
+	for _, r := range res.Results {
+		if r.Score > 1 {
+			t.Fatalf("boosted score %v exceeds 1", r.Score)
+		}
 	}
 }
 

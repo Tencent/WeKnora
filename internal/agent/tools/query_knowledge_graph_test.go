@@ -15,6 +15,7 @@ import (
 type stubKnowledgeBaseService struct {
 	kb      *types.KnowledgeBase
 	results []*types.SearchResult
+	err     error
 }
 
 func (s *stubKnowledgeBaseService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
@@ -64,7 +65,7 @@ func (s *stubKnowledgeBaseService) TogglePinKnowledgeBase(context.Context, strin
 }
 
 func (s *stubKnowledgeBaseService) HybridSearch(context.Context, string, types.SearchParams) ([]*types.SearchResult, error) {
-	return s.results, nil
+	return s.results, s.err
 }
 
 func (s *stubKnowledgeBaseService) HybridSearchWithRerank(

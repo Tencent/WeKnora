@@ -88,3 +88,46 @@ func TestQueryKnowledgeGraph_QueriesTheGraph(t *testing.T) {
 	assert.Equal(t, "orchestrates", relations[0]["type"])
 	assert.Contains(t, result.Output, "Kubernetes --[orchestrates]--> Docker")
 }
+
+// The graph namespace is the whole knowledge base. Under a document scope,
+// relations between entities from out-of-scope documents must not reach the
+// model, and a failed text search is reported next to the graph evidence.
+func TestQueryKnowledgeGraph_ScopesRelationsToDocuments(t *testing.T) {
+	graphRepo := &stubGraphRepo{graph: &types.GraphData{
+		Node: []*types.GraphNode{
+			{Name: "Docker", Chunks: []string{"c-a"}},
+			{Name: "Kubernetes", Chunks: []string{"c-a"}},
+			{Name: "Secret", Chunks: []string{"c-b"}},
+		},
+		Relation: []*types.GraphRelation{
+			{Node1: "Kubernetes", Node2: "Docker", Type: "orchestrates"},
+			{Node1: "Secret", Node2: "Docker", Type: "leaks"},
+		},
+	}}
+	chunkRepo := &stubGraphChunkRepo{chunks: map[string]*types.Chunk{
+		"c-a": {ID: "c-a", KnowledgeBaseID: "kb-1", KnowledgeID: "doc-a", Content: "in scope", IsEnabled: true},
+		"c-b": {ID: "c-b", KnowledgeBaseID: "kb-1", KnowledgeID: "doc-b", Content: "out of scope", IsEnabled: true},
+	}}
+	tool := NewQueryKnowledgeGraphTool(&stubKnowledgeBaseService{
+		kb: &types.KnowledgeBase{ID: "kb-1", ExtractConfig: &types.ExtractConfig{
+			Enabled: true, Nodes: []*types.GraphNode{{Name: "技术"}},
+		}},
+		err: assert.AnError,
+	}, types.SearchTargets{{
+		Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1", KnowledgeIDs: []string{"doc-a"},
+	}}).WithGraph(graphRepo, chunkRepo)
+
+	args, err := json.Marshal(QueryKnowledgeGraphInput{KnowledgeBaseIDs: []string{"kb-1"}, Query: "Docker"})
+	require.NoError(t, err)
+	result, err := tool.Execute(context.Background(), args)
+	require.NoError(t, err)
+
+	relations, ok := result.Data["relations"].([]map[string]interface{})
+	require.True(t, ok)
+	require.Len(t, relations, 1)
+	assert.Equal(t, "orchestrates", relations[0]["type"])
+	assert.NotContains(t, result.Output, "Secret")
+	errs, _ := result.Data["errors"].([]string)
+	require.Len(t, errs, 1, "the failed text search is reported beside the graph hits")
+	assert.Contains(t, errs[0], "text search failed")
+}

@@ -231,8 +231,13 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		"[Tool][SearchKnowledge] query=%q mode=%s limit=%d top_k=%d targets=%d kbs=%d",
 		query, mode, limit, topK, len(searchTargets), len(kbIDs))
 
-	allResults, searchFailures, searchCalls := t.concurrentSearchByTargets(ctx, query, mode, kbModes,
-		searchTargets, kbList, topK, vectorThreshold, keywordThreshold, kbTypeMap)
+	allResults, searchFailures, searchCalls, embedFallbacks := t.concurrentSearchByTargets(ctx, query, mode,
+		kbModes, searchTargets, kbList, topK, vectorThreshold, keywordThreshold, kbTypeMap)
+	// A hybrid search that ran keyword-only is reported like any other mode
+	// fallback, so an empty result is not read as "no semantic match".
+	for kbID, reason := range embedFallbacks {
+		kbModes[kbID] = kbSearchMode{mode: SearchModeKeyword, fallback: true, reason: reason}
+	}
 	// A failed search is not an empty one. Reporting "no matching chunks"
 	// when the vector store timed out or the embedding call failed made the
 	// model conclude the knowledge base has no answer.
@@ -498,7 +503,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	topK int,
 	vectorThreshold, keywordThreshold float64,
 	kbTypeMap map[string]string,
-) (_ []*searchResultWithMeta, failures []string, calls int) {
+) (_ []*searchResultWithMeta, failures []string, calls int, embedFallbacks map[string]string) {
 	// Filter out non-searchable KBs (wiki-only / graph-only). Feeding a
 	// wiki-only KB into HybridSearch causes spurious "model ID cannot be
 	// empty" errors because such KBs have no EmbeddingModelID configured.
@@ -530,7 +535,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			st.KnowledgeBaseID)
 	}
 	if len(filteredTargets) == 0 {
-		return nil, nil, 0
+		return nil, nil, 0, nil
 	}
 	searchTargets = filteredTargets
 
@@ -557,6 +562,16 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 		mu.Lock()
 		defer mu.Unlock()
 		calls++
+	}
+	// fallBack records a hybrid knowledge base searched by keyword only
+	// because the query embedding failed.
+	fallBack := func(kbID string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if embedFallbacks == nil {
+			embedFallbacks = make(map[string]string)
+		}
+		embedFallbacks[kbID] = fmt.Sprintf("query embedding failed, semantic search skipped: %v", err)
 	}
 	collect := func(rows []*types.SearchResult, usedMode string) {
 		mu.Lock()
@@ -614,6 +629,9 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 					attempt()
 					fail([]string{st.KnowledgeBaseID}, fmt.Errorf("query embedding failed: %w", embedErr))
 					continue
+				}
+				if m, _ := modeFor(st.KnowledgeBaseID); embedErr != nil && m == SearchModeHybrid {
+					fallBack(st.KnowledgeBaseID, embedErr)
 				}
 				runnable = append(runnable, st)
 			}
@@ -700,7 +718,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 		}(modelKey, targets)
 	}
 	wg.Wait()
-	return allResults, failures, calls
+	return allResults, failures, calls, embedFallbacks
 }
 
 // rerankResults scores all search results (including FAQ entries) with the

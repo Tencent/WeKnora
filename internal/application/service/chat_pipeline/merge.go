@@ -111,7 +111,15 @@ func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.
 		return result[i].Score > result[j].Score
 	})
 	if k := chatManage.RerankTopK; k > 0 && len(result) > k {
-		result = result[:k]
+		// Graph hits have no retrieval score (0) and would always fall
+		// below the cut; entity search already bounds how many it adds.
+		kept := result[:k:k]
+		for _, r := range result[k:] {
+			if r.MatchType == types.MatchTypeGraph {
+				kept = append(kept, r)
+			}
+		}
+		result = kept
 	}
 	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
 		"reason":    "empty_rerank_result",

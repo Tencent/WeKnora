@@ -61,7 +61,13 @@ func (s *knowledgeBaseService) applyFAQPostProcessing(
 	}
 
 	// Filter by negative questions if not using iterative retrieval.
-	result := s.filterByNegativeQuestions(ctx, chunks, params.QueryText)
+	faqKBIDs := make(map[string]bool)
+	for _, k := range append([]*types.KnowledgeBase{kb}, scopeKBs...) {
+		if isFAQ(k) {
+			faqKBIDs[k.ID] = true
+		}
+	}
+	result := s.filterByNegativeQuestions(ctx, chunks, params.QueryText, faqKBIDs)
 	logger.Infof(ctx, "Result count after negative question filtering: %d", len(result))
 	return result, nil
 }
@@ -224,9 +230,13 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 }
 
 // filterByNegativeQuestions filters out chunks that match negative questions for FAQ knowledge bases.
+// Only candidates of the FAQ knowledge bases in faqKBIDs (or of an unknown
+// knowledge base) are looked up; document chunks in a mixed scope cannot carry
+// negative questions and are kept without loading their rows.
 func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 	chunks []*types.IndexWithScore,
 	queryText string,
+	faqKBIDs map[string]bool,
 ) []*types.IndexWithScore {
 	if len(chunks) == 0 {
 		return chunks
@@ -242,7 +252,12 @@ func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 	// Collect chunk IDs
 	chunkIDs := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
-		chunkIDs = append(chunkIDs, chunk.ChunkID)
+		if chunk.KnowledgeBaseID == "" || faqKBIDs[chunk.KnowledgeBaseID] {
+			chunkIDs = append(chunkIDs, chunk.ChunkID)
+		}
+	}
+	if len(chunkIDs) == 0 {
+		return chunks
 	}
 
 	// Batch fetch chunks to get negative questions. Shared-KB chunks belong to
@@ -266,7 +281,7 @@ func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 	for _, chunk := range chunks {
 		chunkData, ok := chunkMap[chunk.ChunkID]
 		if !ok {
-			// If chunk not found, keep it (shouldn't happen, but be safe)
+			// Not an FAQ candidate (not looked up), or not found: keep it
 			filteredChunks = append(filteredChunks, chunk)
 			continue
 		}
