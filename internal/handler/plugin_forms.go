@@ -114,7 +114,7 @@ func (h *PluginFormsHandler) Options(c *gin.Context) {
 		override.Tenant = mergeForm(m.Config.TenantSchema, stored, values)
 	case pluginapi.OptionsScopeInstance:
 		var err error
-		if instance, err = h.instanceValues(c, tenantID, req, values); err != nil {
+		if instance, err = h.instanceValues(c, tenantID, m.ID, req, values); err != nil {
 			h.fail(c, err)
 			return
 		}
@@ -173,10 +173,12 @@ func mergeForm(rawSchema json.RawMessage, stored, values map[string]any) map[str
 
 // instanceValues is the instance the form holds, with the stored instance's
 // secrets filled in where the form has none (forms never receive secrets).
+// Only an instance of this plugin's contribution lends its secrets.
 func (h *PluginFormsHandler) instanceValues(
-	c *gin.Context, tenantID uint64, req PluginOptionsRequest, values map[string]any,
+	c *gin.Context, tenantID uint64, pluginID string, req PluginOptionsRequest, values map[string]any,
 ) (map[string]any, error) {
-	point, _, _ := strings.Cut(req.Contribution, "/")
+	point, local, _ := strings.Cut(req.Contribution, "/")
+	qualified := manifest.QualifiedID(pluginID, local)
 	switch manifest.Point(point) {
 	case manifest.PointConnectors:
 		creds, _ := values["credentials"].(map[string]any)
@@ -185,7 +187,7 @@ func (h *PluginFormsHandler) instanceValues(
 		}
 		if req.InstanceID != "" {
 			ds, err := h.dataSources.FindByID(c.Request.Context(), req.InstanceID)
-			if err != nil || ds == nil || ds.TenantID != tenantID {
+			if err != nil || ds == nil || ds.TenantID != tenantID || ds.Type != qualified {
 				return nil, errInstanceNotFound
 			}
 			cfg, err := ds.ParseConfig()
@@ -215,7 +217,7 @@ func (h *PluginFormsHandler) instanceValues(
 		if key, _ := out["api_key"].(string); req.InstanceID != "" &&
 			(key == "" || key == types.RedactedSecretPlaceholder) {
 			p, err := h.webSearch.GetByID(c.Request.Context(), tenantID, req.InstanceID)
-			if err != nil || p == nil {
+			if err != nil || p == nil || string(p.Provider) != qualified {
 				return nil, errInstanceNotFound
 			}
 			out["api_key"] = p.Parameters.APIKey

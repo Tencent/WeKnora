@@ -382,8 +382,16 @@ func (r *Reconciler) unload(ctx context.Context, id string) {
 	logger.Infof(ctx, "[plugin] unloaded %s", id)
 }
 
-// extract writes the package under cacheDir/<digest>, once per digest.
+// extract writes the package under cacheDir/<digest>, once per digest. An
+// existing extraction is reused, so cacheDir must be private: in a shared
+// temp directory another user could plant a digest's files first.
 func (r *Reconciler) extract(p *pkg.Package) (string, error) {
+	if err := os.MkdirAll(r.cacheDir, 0o700); err != nil {
+		return "", err
+	}
+	if err := ensurePrivateDir(r.cacheDir); err != nil {
+		return "", fmt.Errorf("plugin cache %s: %w (set WEKNORA_PLUGIN_CACHE_DIR)", r.cacheDir, err)
+	}
 	dir := filepath.Join(r.cacheDir, strings.TrimPrefix(p.Digest, "sha256:"))
 	if _, err := os.Stat(filepath.Join(dir, pkg.ManifestFile)); err == nil {
 		return dir, nil

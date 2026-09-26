@@ -28,10 +28,12 @@ const PluginUIAssetsPrefix = "/api/v1/plugin-ui/assets"
 // nothing over the network (connect-src 'none'): everything goes through the
 // bridge. The page also runs in an iframe sandbox without
 // allow-same-origin, so it cannot read WeKnora's storage.
+// The sandbox directive keeps a page opened on its own (a link to its URL)
+// out of WeKnora's origin too, not only inside PluginFrame's iframe.
 const pluginPageCSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; " +
 	"style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; " +
 	"media-src 'self' data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; " +
-	"frame-ancestors 'self'"
+	"frame-ancestors 'self'; sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
 
 // maxUIRequestBody bounds what a page can send in one request.
 const maxUIRequestBody = 1 << 20
@@ -133,10 +135,12 @@ func (h *PluginUIHandler) Request(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	qualified := manifest.QualifiedID(pluginID, mount.Contribution.ID)
-	if h.tenancy != nil && !h.tenancy.ContributionEnabled(ctx, tenantID, mount.Point, qualified) {
-		_ = c.Error(errors.NewNotFoundError("the plugin is not enabled in this workspace"))
-		return
+	// Fails closed: the request carries workspace data to the plugin.
+	if h.tenancy != nil {
+		if on, err := h.tenancy.PluginEnabled(ctx, tenantID, pluginID); err != nil || !on {
+			_ = c.Error(errors.NewNotFoundError("the plugin is not enabled in this workspace"))
+			return
+		}
 	}
 	if need := types.TenantRole(mount.MinRole()); need != types.TenantRoleViewer && h.roleGuard != nil {
 		if h.roleGuard(need)(c); c.IsAborted() {

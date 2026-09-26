@@ -2,6 +2,8 @@ package host
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -71,14 +73,18 @@ type egressProxy struct {
 	ln       net.Listener
 	srv      *http.Server
 	dial     func(ctx context.Context, network, addr string) (net.Conn, error)
-	// direct are hosts WeKnora itself names (the Host API on another node):
-	// always allowed, and dialed without the public-address check, since
-	// they are usually on the internal network. A sandboxed plugin reaches
-	// them only through the proxy.
+	// direct are host:port addresses WeKnora itself names (the Host API on
+	// another node): always allowed, and dialed without the public-address
+	// check, since they are usually on the internal network. Only that port:
+	// other services on the same machine stay out of reach. A sandboxed
+	// plugin reaches them only through the proxy.
 	direct     map[string]bool
 	dialDirect func(ctx context.Context, network, addr string) (net.Conn, error)
 	logf       func(format string, args ...any)
-	wg         sync.WaitGroup
+	// auth is the Proxy-Authorization this plugin's process sends; other
+	// local processes (other plugins) cannot use its egress grants.
+	auth, secret string
+	wg           sync.WaitGroup
 }
 
 func startEgressProxy(
@@ -88,11 +94,14 @@ func startEgressProxy(
 	if err != nil {
 		return nil, fmt.Errorf("start egress proxy: %w", err)
 	}
+	secret := randomToken()
 	p := &egressProxy{
 		pluginID: pluginID, policy: newEgressPolicy(patterns), ln: ln,
 		dial: utils.SSRFSafeDialContext, logf: logf,
 		direct:     map[string]bool{},
 		dialDirect: (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+		auth:       "Basic " + base64.StdEncoding.EncodeToString([]byte(proxyUser+":"+secret)),
+		secret:     secret,
 	}
 	for _, h := range direct {
 		p.direct[strings.ToLower(h)] = true
@@ -106,8 +115,14 @@ func startEgressProxy(
 	return p, nil
 }
 
-// URL is the proxy address for the plugin's environment.
-func (p *egressProxy) URL() string { return "http://" + p.ln.Addr().String() }
+// proxyUser is the user name in the proxy URL; the password is per process.
+const proxyUser = "plugin"
+
+// URL is the proxy address for the plugin's environment, with the
+// credentials the proxy requires.
+func (p *egressProxy) URL() string {
+	return "http://" + proxyUser + ":" + p.secret + "@" + p.ln.Addr().String()
+}
 
 func (p *egressProxy) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -116,12 +131,26 @@ func (p *egressProxy) Close() {
 	p.wg.Wait()
 }
 
-// allows reports whether the plugin may reach host, and how to dial it.
-func (p *egressProxy) allows(host string) (func(ctx context.Context, network, addr string) (net.Conn, error), bool) {
-	if p.direct[strings.ToLower(strings.TrimSuffix(host, "."))] {
+// allows reports whether the plugin may reach host on port, and how to
+// dial it.
+func (p *egressProxy) allows(
+	host, port string,
+) (func(ctx context.Context, network, addr string) (net.Conn, error), bool) {
+	if p.direct[net.JoinHostPort(strings.ToLower(strings.TrimSuffix(host, ".")), port)] {
 		return p.dialDirect, true
 	}
 	return p.dial, p.policy.allows(host)
+}
+
+// authorized checks the request's proxy credentials.
+func (p *egressProxy) authorized(w http.ResponseWriter, r *http.Request) bool {
+	got := r.Header.Get("Proxy-Authorization")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(p.auth)) == 1 {
+		return true
+	}
+	w.Header().Set("Proxy-Authenticate", `Basic realm="weknora-plugin"`)
+	http.Error(w, "proxy authentication required", http.StatusProxyAuthRequired)
+	return false
 }
 
 func (p *egressProxy) deny(w http.ResponseWriter, host string) {
@@ -130,6 +159,9 @@ func (p *egressProxy) deny(w http.ResponseWriter, host string) {
 }
 
 func (p *egressProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !p.authorized(w, r) {
+		return
+	}
 	if r.Method == http.MethodConnect {
 		p.tunnel(w, r)
 		return
@@ -138,8 +170,14 @@ func (p *egressProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not a proxy request", http.StatusBadRequest)
 		return
 	}
-	host := r.URL.Hostname()
-	dial, ok := p.allows(host)
+	host, port := r.URL.Hostname(), r.URL.Port()
+	if port == "" {
+		port = "80"
+		if r.URL.Scheme == "https" {
+			port = "443"
+		}
+	}
+	dial, ok := p.allows(host, port)
 	if !ok {
 		p.deny(w, host)
 		return
@@ -168,12 +206,12 @@ func (p *egressProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // tunnel handles CONNECT, which HTTPS traffic uses: the proxy sees only the
 // host and port, which is what the policy needs.
 func (p *egressProxy) tunnel(w http.ResponseWriter, r *http.Request) {
-	host, _, err := net.SplitHostPort(r.Host)
+	host, port, err := net.SplitHostPort(r.Host)
 	if err != nil {
 		http.Error(w, "bad CONNECT target", http.StatusBadRequest)
 		return
 	}
-	dial, ok := p.allows(host)
+	dial, ok := p.allows(host, port)
 	if !ok {
 		p.deny(w, host)
 		return

@@ -52,7 +52,7 @@ const (
 type spec struct {
 	m   *manifest.Manifest
 	dir string // extracted package
-	// direct are hosts reached without the egress proxy.
+	// direct are host:port addresses reached without the egress proxy.
 	direct []string
 	// hostAPI is the loopback address of this node's Host API, relayed into
 	// a sandboxed plugin's network namespace.
@@ -191,8 +191,11 @@ func randomToken() string {
 }
 
 // childEnv is the plugin's whole environment. It is built from scratch so
-// WeKnora's own secrets (database, AES key, vendor keys) never reach plugin
-// code.
+// WeKnora's own secrets (database, AES key, vendor keys) are not handed to
+// plugin code. The plugin still runs as WeKnora's user: on Linux WeKnora
+// makes itself non-dumpable (hideFromPlugins) so its /proc environ stays
+// closed; elsewhere, and for files WeKnora's user can read, only a separate
+// user keeps a hostile plugin out.
 func (p *process) childEnv(network, socket, token string) []string {
 	env := []string{
 		pluginapi.EnvSocket + "=" + socket,

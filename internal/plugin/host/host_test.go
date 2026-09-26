@@ -305,7 +305,7 @@ func TestEgressProxyPassesDirectHosts(t *testing.T) {
 	}))
 	defer upstream.Close()
 	u, _ := url.Parse(upstream.URL)
-	p, err := startEgressProxy("acme.echo", []string{"*"}, []string{"127.0.0.1"}, t.Logf)
+	p, err := startEgressProxy("acme.echo", []string{"*"}, []string{u.Host}, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -126,6 +126,7 @@ func bindPluginActivators(
 	a.Invoker.Bind(t, repo)
 	a.Skills.Bind(t)
 	skills.SetPluginSkills(a.Skills)
+	a.Parsers.Bind(t)
 	chunker.SetPluginSplitter(activate.PluginChunker(a.Invoker, reg, t))
 	chatpipeline.SetExternalHooks(activate.NewPipelineHooks(a.Invoker, reg, t))
 	im.SetPluginPlatforms(activate.NewIMPlatforms(a.Invoker, reg))

@@ -73,7 +73,14 @@ func RunPluginHost(ctx context.Context) error {
 	// proxy.
 	hostAPI := strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_HOST_API_URL"))
 	if u, err := url.Parse(hostAPI); err == nil && u.Hostname() != "" {
-		mgr.SetDirectHosts(u.Hostname())
+		port := u.Port()
+		if port == "" {
+			port = "80"
+			if u.Scheme == "https" {
+				port = "443"
+			}
+		}
+		mgr.SetDirectHosts(net.JoinHostPort(u.Hostname(), port))
 	}
 	trusted, err := plugintrust.FromEnv()
 	if err != nil {

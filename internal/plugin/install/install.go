@@ -611,12 +611,33 @@ func (s *Service) Activate(ctx context.Context, id, version string) (*View, erro
 		}
 		perms, _ := json.Marshal(m.Permissions)
 		row.GrantedPerms = types.JSON(perms)
+		// Versions may run differently (host, then remote): the row says
+		// where the active one runs.
+		row.Runtime = string(m.Runtime.Type)
+		if m.Runtime.Type == manifest.RuntimeRemote && row.RemoteURL == "" {
+			return nil, invalid("version %s of %s is a remote plugin; install it with the URL of its service",
+				version, id)
+		}
+	}
+	var issued string
+	if (row.Runtime == string(manifest.RuntimeRemote) || row.Runtime == string(manifest.RuntimeKubernetes)) &&
+		row.RemoteSecret == "" {
+		if issued, err = s.issueSecret(row); err != nil {
+			return nil, err
+		}
+		if row.Runtime == string(manifest.RuntimeKubernetes) {
+			issued = "" // WeKnora hands it to the pods itself
+		}
 	}
 	row.ActiveVersion = version
 	if err := s.repo.SavePlugin(ctx, row); err != nil {
 		return nil, err
 	}
-	return s.apply(ctx, id)
+	view, err := s.apply(ctx, id)
+	if view != nil {
+		view.IssuedSecret = issued
+	}
+	return view, err
 }
 
 // Uninstall removes a plugin, its versions and their packages. Tenant

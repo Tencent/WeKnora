@@ -1269,6 +1269,7 @@ func (s *sessionService) consumeFallbackStream(
 	eventBus := chatManage.EventBus
 	var finalContent string
 	streamCompleted := false
+	appendixAdded := false
 	decoder := modelContext.StreamDecoder()
 
 	for response := range responseChan {
@@ -1282,7 +1283,10 @@ func (s *sessionService) consumeFallbackStream(
 			if truncated && strings.TrimSpace(finalContent+response.Content) == "" {
 				response.Content = chatpipeline.EmptyTruncatedAnswerFallback
 			}
-			if response.Done {
+			// Providers may send Done twice (finish_reason, then EOF); the
+			// hooks see the finished answer once.
+			if response.Done && !appendixAdded {
+				appendixAdded = true
 				response.Content += chatpipeline.AnswerAppendix(ctx, chatManage, finalContent+response.Content)
 			}
 			finalContent += response.Content

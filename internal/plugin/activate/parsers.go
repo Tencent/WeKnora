@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -24,6 +25,8 @@ const parseTimeout = 10 * time.Minute
 // their qualified IDs, next to the builtin engines and the docreader's.
 type Parsers struct {
 	iv *Invoker
+	// gate keeps a workspace's documents away from plugins it has off.
+	gate atomic.Pointer[PluginEnabledChecker]
 
 	mu         sync.Mutex
 	registered map[string][]string
@@ -34,6 +37,9 @@ func NewParsers(iv *Invoker) *Parsers {
 	return &Parsers{iv: iv, registered: map[string][]string{}}
 }
 
+// Bind supplies the tenant switches parses are checked against.
+func (a *Parsers) Bind(gate PluginEnabledChecker) { a.gate.Store(&gate) }
+
 // Name implements reconcile.Activator.
 func (a *Parsers) Name() string { return "parsers" }
 
@@ -42,7 +48,7 @@ func (a *Parsers) Activate(_ context.Context, l *reconcile.Loaded) error {
 	var ids []string
 	for _, c := range l.Manifest.Contributes[manifest.PointParsers] {
 		e := &pluginEngine{
-			iv: a.iv, m: l.Manifest, local: c.ID, name: manifest.QualifiedID(l.Manifest.ID, c.ID),
+			iv: a.iv, parsers: a, m: l.Manifest, local: c.ID, name: manifest.QualifiedID(l.Manifest.ID, c.ID),
 			description: c.Description.Default, names: displayNames(c.Name), fileTypes: c.FileTypes,
 		}
 		if err := docparser.RegisterPluginEngine(e); err != nil {
@@ -85,6 +91,7 @@ func displayNames(t manifest.LocalizedText) map[string]string {
 // pluginEngine is a plugin parser as a docparser engine.
 type pluginEngine struct {
 	iv          *Invoker
+	parsers     *Parsers
 	m           *manifest.Manifest
 	local, name string
 	description string
@@ -96,6 +103,13 @@ var (
 	_ docparser.EngineRegistration = (*pluginEngine)(nil)
 	_ docparser.PluginEngineInfo   = (*pluginEngine)(nil)
 )
+
+func (e *pluginEngine) gate() *PluginEnabledChecker {
+	if e.parsers == nil {
+		return nil
+	}
+	return e.parsers.gate.Load()
+}
 
 func (e *pluginEngine) Name() string                    { return e.name }
 func (e *pluginEngine) Description() string             { return e.description }
@@ -123,6 +137,14 @@ type remoteParser struct{ engine *pluginEngine }
 // plugin is down, rate limited) is returned as an error so the task is
 // retried; any other failure is final and reported in the result.
 func (r *remoteParser) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	if g := r.engine.gate(); g != nil {
+		// Engines are registered for every node; only workspaces that have
+		// the plugin on (and may see it) send it documents.
+		tenantID, _ := types.TenantIDFromContext(ctx)
+		if on, err := (*g).PluginEnabled(ctx, tenantID, r.engine.m.ID); err != nil || !on {
+			return &types.ReadResult{Error: fmt.Sprintf("plugin %s is off in this workspace", r.engine.m.ID)}, nil
+		}
+	}
 	ctx, cancel := withDefaultTimeout(ctx, parseTimeout)
 	defer cancel()
 	in := pluginapi.ParseInput{

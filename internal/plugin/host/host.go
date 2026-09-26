@@ -125,9 +125,9 @@ func (m *Manager) Runs(kind string) bool {
 	return m.kinds[kind]
 }
 
-// SetDirectHosts names hosts plugins reach without the egress proxy, such
-// as the Host API's when it is on another machine. It applies to processes
-// started afterwards.
+// SetDirectHosts names host:port addresses plugins reach without the
+// egress proxy, such as the Host API's when it is on another machine. It
+// applies to processes started afterwards.
 func (m *Manager) SetDirectHosts(hosts ...string) {
 	m.mu.Lock()
 	m.direct = append([]string(nil), hosts...)
