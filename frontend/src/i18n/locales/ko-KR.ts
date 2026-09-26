@@ -2017,6 +2017,8 @@ export default {
     retry: '재시도',
     unsupported: '이 파일 유형은 온라인 미리보기를 지원하지 않습니다',
     unsupportedHint: '파일을 다운로드하여 로컬 앱으로 열어주세요',
+    tooLarge: '이 스프레드시트는 안전하게 미리보기하기에 너무 큽니다',
+    tooLargeHint: '다운로드 버튼을 사용하여 로컬 스프레드시트 앱으로 열어주세요',
     zoomIn: '확대',
     zoomOut: '축소',
     fullscreen: '전체 화면',
