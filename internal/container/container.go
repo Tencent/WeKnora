@@ -1910,6 +1910,7 @@ func installPluginGate(
 // its own subpackage to keep this file focused on wiring.
 func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceCleaner) {
 	pluginbuiltin.RegisterIMAdapters(imService)
+	imService.OnAnswer(pluginevents.PublishAnswer)
 
 	// Load and start all enabled channels from database
 	if err := imService.LoadAndStartChannels(); err != nil {

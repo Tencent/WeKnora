@@ -270,3 +270,26 @@ func TestSubscribedNeedsCode(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishAnswer(t *testing.T) {
+	d, q, _, _ := setup(t)
+	SetDefault(d)
+	t.Cleanup(func() { SetDefault(nil) })
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "u1")
+	PublishAnswer(ctx, &types.Message{ID: "m", SessionID: "s", AgentID: "a", Content: "42"}, "why?")
+	tasks := q.take()
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(tasks))
+	}
+	var p payload
+	_ = json.Unmarshal(tasks[0].Payload(), &p)
+	var data pluginapi.ChatEventData
+	_ = json.Unmarshal(p.Event.Data, &data)
+	if p.PluginID != "acme.other" || p.Event.Type != pluginapi.EventChatAnswered ||
+		data != (pluginapi.ChatEventData{
+			SessionID: "s", MessageID: "m", AgentID: "a", UserID: "u1", Question: "why?", Answer: "42",
+		}) {
+		t.Fatalf("published %+v %+v", p, data)
+	}
+}

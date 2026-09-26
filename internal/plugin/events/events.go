@@ -79,6 +79,22 @@ func Publish(ctx context.Context, tenantID uint64, typ string, data any) {
 	}
 }
 
+// PublishAnswer raises chat.answered for a completed assistant message,
+// answering question, in the workspace and on behalf of the user ctx carries.
+// Every place that completes an answer (the web chat, IM channels, the MCP
+// server's ask tool) calls it once.
+func PublishAnswer(ctx context.Context, m *types.Message, question string) {
+	if m == nil {
+		return
+	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	userID, _ := types.UserIDFromContext(ctx)
+	Publish(ctx, tenantID, pluginapi.EventChatAnswered, pluginapi.ChatEventData{
+		SessionID: m.SessionID, MessageID: m.ID, AgentID: m.AgentID,
+		UserID: userID, Question: question, Answer: m.Content,
+	})
+}
+
 // subscribed reports whether a loaded plugin wants an event and can take
 // it (it has code).
 func subscribed(m *manifest.Manifest, typ string) bool {
