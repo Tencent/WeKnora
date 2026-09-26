@@ -7169,6 +7169,11 @@ export default {
     segment: '片段',
     chunkCount: '共 {count} 个片段',
     viewChunks: '查看分块',
+    chunkType: {
+      text: '文本切片',
+      imageOcr: '图片 OCR',
+      imageCaption: '图片描述',
+    },
     viewMerged: '全文',
     generatedQuestions: '辅助召回问题',
     viewParentContext: '查看父块上下文',

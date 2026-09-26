@@ -528,6 +528,15 @@ const CHUNK_PAGE_SIZE = KNOWLEDGE_CHUNK_PAGE_SIZE;
 const chunkPage = ref(1);
 const loadedChunkPage = ref(1);
 let pendingChunkPage: number | null = null;
+// Chunk type filter for the chunks view. The backend returns only `text`
+// chunks unless asked otherwise, so the selection is sent explicitly via
+// ?chunk_type= and the backend default stays untouched (see issue #2857).
+const chunkType = ref<'text' | 'image_ocr' | 'image_caption'>('text');
+const chunkTypeOptions = computed(() => [
+  { label: t('knowledgeBase.chunkType.text'), value: 'text' },
+  { label: t('knowledgeBase.chunkType.imageOcr'), value: 'image_ocr' },
+  { label: t('knowledgeBase.chunkType.imageCaption'), value: 'image_caption' },
+]);
 const isChunkPageTransition = computed(
   () => Boolean(props.details?.chunkLoading) && chunkPage.value !== loadedChunkPage.value,
 );
@@ -634,6 +643,7 @@ watch(() => props.details?.id, () => {
   chunkPage.value = 1;
   loadedChunkPage.value = 1;
   pendingChunkPage = null;
+  chunkType.value = 'text';
 });
 watch(() => props.details?.chunkLoading, (val) => {
   if (val === false && pendingChunkPage !== null) {
@@ -823,6 +833,17 @@ watch(() => props.details.md, () => {
 }, { immediate: true, deep: true, flush: 'post' })
 
 watch(() => viewMode.value, (mode) => {
+  // The merged/preview views render props.details.md, which holds whatever
+  // chunk type was last loaded. When leaving the chunks view with a non-text
+  // filter active, reset to text chunks so those views never render OCR or
+  // caption chunks as document text.
+  if (mode !== 'chunks' && chunkType.value !== 'text') {
+    chunkType.value = 'text';
+    chunkPage.value = 1;
+    loadedChunkPage.value = 1;
+    pendingChunkPage = null;
+    emit('getDoc', 1, 'text');
+  }
   if ((mode === 'chunks' || mode === 'merged') && props.visible) {
     runMarkdownPostRenderPipeline();
   }
@@ -1136,7 +1157,7 @@ const reloadChunksFromStart = () => {
   pendingChunkPage = 1;
   editingChunkId.value = '';
   chunkDraft.value = '';
-  emit('getDoc', 1);
+  emit('getDoc', 1, chunkType.value);
 };
 
 const handleChunkEditError = (error: any, fallbackMessage: string) => {
@@ -1563,7 +1584,14 @@ const downloadFile = () => {
 const handleChunkPageChange = (pageInfo: { current: number }) => {
   if (props.details?.chunkLoading || pageInfo.current === loadedChunkPage.value) return;
   pendingChunkPage = pageInfo.current;
-  emit('getDoc', pageInfo.current);
+  emit('getDoc', pageInfo.current, chunkType.value);
+};
+const handleChunkTypeChange = () => {
+  if (props.details?.chunkLoading) return;
+  chunkPage.value = 1;
+  loadedChunkPage.value = 1;
+  pendingChunkPage = null;
+  emit('getDoc', 1, chunkType.value);
 };
 
 </script>
@@ -1816,6 +1844,9 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
               </span>
             </div>
             <div class="view-mode-buttons">
+              <t-select v-if="viewMode === 'chunks'" v-model="chunkType" class="chunk-type-select" size="small"
+                :options="chunkTypeOptions" :auto-width="true" :borderless="false"
+                @change="handleChunkTypeChange" />
               <t-button v-if="canPreview()" size="small" :variant="viewMode === 'preview' ? 'base' : 'outline'"
                 :theme="viewMode === 'preview' ? 'primary' : 'default'" @click="viewMode = 'preview'"
                 class="view-mode-btn">
@@ -2161,6 +2192,10 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--td-component-stroke);
+}
+
+.chunk-type-select {
+  min-width: 120px;
 }
 
 .chunk-page-loading {
