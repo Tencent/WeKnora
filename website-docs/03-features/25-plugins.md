@@ -214,11 +214,33 @@ runtime:
   resources: { cpu: 500m, memory: 256Mi }
 ```
 
-- 设置 `WEKNORA_PLUGIN_K8S_NAMESPACE` 后启用（helm：`pluginKube.enabled`，会给 app 的 ServiceAccount 授予该命名空间内 Deployment、Service、Secret 的权限）；未设置时这类插件包不能安装。
-- 安装后 WeKnora 在该命名空间创建签名密钥 Secret、Deployment 和 Service，等滚动完成、校验服务的清单后开始调用；之后按远程插件的方式做健康检查。升级即滚动更新；轮换密钥会滚动重建 Pod；卸载会删除这三项资源。
+- 设置 `WEKNORA_PLUGIN_K8S_NAMESPACE` 后启用（helm：`pluginKube.enabled`，会给 app 的 ServiceAccount 授予该命名空间内 Deployment、Service、Secret、NetworkPolicy 的权限）；未设置时这类插件包不能安装。
+- 安装后 WeKnora 在该命名空间创建签名密钥 Secret、NetworkPolicy（开启出网控制时）、Deployment 和 Service，等滚动完成、校验服务的清单后开始调用；之后按远程插件的方式做健康检查。升级即滚动更新；轮换密钥会滚动重建 Pod；卸载会删除这些资源。
 - 容器以非 root 运行、不挂载 ServiceAccount 令牌。插件要回调 Host API 时，需设置 `WEKNORA_PLUGIN_HOST_API_URL`（helm 自动设置）。
 - WeKnora 不在集群内时，可用 `WEKNORA_PLUGIN_K8S_API`、`WEKNORA_PLUGIN_K8S_TOKEN`、`WEKNORA_PLUGIN_K8S_CA` 指定 API 地址与凭证，并用 `WEKNORA_PLUGIN_K8S_SERVICE_TYPE=NodePort` + `WEKNORA_PLUGIN_K8S_NODE_HOST` 经节点端口访问插件。
-- 目前每个插件一个副本、所有空间共用；`permissions.egress` 不会转成 NetworkPolicy，出网限制需在集群侧配置。
+- 目前每个插件一个副本、所有空间共用。
+
+#### 出网控制
+
+NetworkPolicy 只能按 IP 和端口放行，无法按域名放行，因此 `permissions.egress` 由 app 上的出口代理执行，NetworkPolicy 负责让插件绕不过这个代理：
+
+- app 在单独的端口（`WEKNORA_PLUGIN_K8S_EGRESS_PORT`，helm 默认 8090，加在 app Service 上）提供 HTTP(S) 出口代理。插件 Pod 的 `HTTP_PROXY` / `HTTPS_PROXY` 指向它，Host API 的地址列在 `NO_PROXY` 中直连。
+- 每个插件用自己的凭证访问代理：用户名是插件 ID，密码由 `SYSTEM_AES_KEY`（或 `JWT_SECRET`）按插件派生，放在插件的 Secret 中，不写进 Deployment。任一 app 副本都能校验，无需共享状态。
+- 代理按插件当前已安装版本的清单放行，规则与内嵌宿主相同：只放行 `permissions.egress` 声明的域名（`*.example.com`、`*` 同样适用），内网地址一律拒绝（`SSRF_WHITELIST` 例外）。凭证错误返回 407，插件未安装或域名未声明返回 403。
+- 每个插件有一个 NetworkPolicy：出方向只允许访问集群 DNS（UDP/TCP 53）和 app Pod 的 HTTP 端口（Host API）与代理端口；入方向只允许 app Pod 访问插件端口。忽略代理变量、直接连外网的代码会被拦下。
+- NetworkPolicy 需要集群的网络插件支持才会生效，例如 Calico、Cilium、k3s 自带的控制器；只装 flannel 时不生效，插件仍可绕过代理直连。
+- 插件详情的节点状态中显示出网控制方式：`networkPolicy`（NetworkPolicy + 代理）、`proxy`（只给了代理，不经代理的连接不受限）、`unmanaged`（未控制）。
+
+Helm 默认开启（`pluginKube.networkPolicy.enabled=true`），会自动设置下列变量；设为 `false` 时不创建 NetworkPolicy、也不给插件代理，插件直接访问网络，之前创建的 NetworkPolicy 会在插件下次加载时删除。集群 DNS 不是 `kube-system` 中带 `k8s-app=kube-dns` 标签的 Pod 时，用 `pluginKube.networkPolicy.dnsNamespaceLabels` / `dnsPodLabels` 调整。
+
+| 变量 | 说明 |
+| --- | --- |
+| `WEKNORA_PLUGIN_K8S_EGRESS_PORT` | app 提供出口代理的端口；设置后插件 Pod 经 `WEKNORA_PLUGIN_HOST_API_URL` 的主机名加该端口访问代理（需要设置 `WEKNORA_PLUGIN_HOST_API_URL`） |
+| `WEKNORA_PLUGIN_K8S_NETWORK_POLICY` | 设为 `1` 时为每个插件创建 NetworkPolicy；需要同时设置代理端口，且 WeKnora 运行在集群内（ClusterIP） |
+| `WEKNORA_PLUGIN_K8S_APP_LABELS` | app Pod 的标签（`key=value,...`），NetworkPolicy 据此放行 |
+| `WEKNORA_PLUGIN_K8S_APP_NAMESPACE` | app 所在的命名空间，默认取 Pod 自己的命名空间 |
+| `WEKNORA_PLUGIN_K8S_DNS_NAMESPACE_LABELS` | 集群 DNS 所在命名空间的标签，默认 `kubernetes.io/metadata.name=kube-system` |
+| `WEKNORA_PLUGIN_K8S_DNS_POD_LABELS` | 集群 DNS Pod 的标签，默认 `k8s-app=kube-dns`；`-` 表示放行该命名空间内所有 Pod |
 - 部署好的插件与远程插件能力相同：可以订阅事件、接收 Webhook、提供页面和表单的动态选项，插件详情中显示各节点的加载状态。
 
 ## 插件页面

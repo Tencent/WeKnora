@@ -628,6 +628,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(plugintrust.FromEnv))
 	must(container.Provide(newPluginReconciler))
 	must(container.Invoke(startPluginReconciler))
+	must(container.Invoke(startPluginEgressProxy))
 	must(container.Provide(newPluginInstaller))
 	must(container.Invoke(service.BindTenantPlugins))
 	must(container.Provide(newPluginDrivers))
@@ -1886,7 +1887,7 @@ func newPluginDrivers(
 		r.Driver(pluginmanifest.RuntimeRemote),
 	}
 	if kubeDriver != nil {
-		drivers = append(drivers, r.Driver(pluginmanifest.RuntimeKubernetes))
+		drivers = append(drivers, kubeDriver.Statuses(r.Driver(pluginmanifest.RuntimeKubernetes)))
 	}
 	return plugindriver.NewSet(drivers...)
 }

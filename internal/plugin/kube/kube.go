@@ -19,7 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -28,6 +30,8 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
+	"github.com/Tencent/WeKnora/internal/plugin/egress"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -64,6 +68,33 @@ type Config struct {
 	NodeHost    string
 	// ImagePullSecret, when set, is used to pull plugin images.
 	ImagePullSecret string
+	// HostAPIURL is where plugins reach the Host API
+	// (WEKNORA_PLUGIN_HOST_API_URL); pods reach it without the egress proxy.
+	HostAPIURL string
+	// EgressPort, when set, is the port app nodes serve the cluster egress
+	// proxy on (egress.ClusterProxy): plugin pods get it as HTTP(S)_PROXY, at
+	// the Host API's host, with their own credentials.
+	EgressPort int
+	// EgressKey derives each plugin's proxy password (egress.ProxyKey).
+	EgressKey []byte
+	// NetworkPolicy, when set, confines each plugin's pods with a
+	// NetworkPolicy to DNS and the app pods, so the egress proxy is their
+	// only way out.
+	NetworkPolicy *NetworkPolicy
+}
+
+// NetworkPolicy is what a plugin's NetworkPolicy lets its pods reach.
+type NetworkPolicy struct {
+	// AppNamespace and AppLabels select WeKnora's app pods: the Host API and
+	// the egress proxy, and the only callers of a plugin.
+	AppNamespace string
+	AppLabels    map[string]string
+	// AppPort is the port the app pods serve HTTP on (the Host API): a
+	// NetworkPolicy matches the pod's port, not the Service's.
+	AppPort int
+	// DNSNamespaceLabels and DNSPodLabels select the cluster DNS pods.
+	DNSNamespaceLabels map[string]string
+	DNSPodLabels       map[string]string
 }
 
 // ConfigFromEnv reads the configuration: WEKNORA_PLUGIN_K8S_NAMESPACE turns
@@ -82,6 +113,7 @@ func ConfigFromEnv() (*Config, error) {
 		NodeHost:        strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_K8S_NODE_HOST")),
 		ImagePullSecret: strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_K8S_IMAGE_PULL_SECRET")),
 		Insecure:        os.Getenv("WEKNORA_PLUGIN_K8S_INSECURE") == "1",
+		HostAPIURL:      strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_HOST_API_URL")),
 	}
 	if cfg.APIURL == "" {
 		host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
@@ -120,7 +152,130 @@ func ConfigFromEnv() (*Config, error) {
 	default:
 		return nil, fmt.Errorf("WEKNORA_PLUGIN_K8S_SERVICE_TYPE must be ClusterIP or NodePort, got %q", cfg.ServiceType)
 	}
+	if err := egressFromEnv(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// egressFromEnv reads how plugin pods reach the network:
+// WEKNORA_PLUGIN_K8S_EGRESS_PORT hands them the cluster egress proxy, and
+// WEKNORA_PLUGIN_K8S_NETWORK_POLICY=1 makes it their only way out.
+func egressFromEnv(cfg *Config) error {
+	if raw := strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_K8S_EGRESS_PORT")); raw != "" {
+		if cfg.EgressPort = EgressPortFromEnv(); cfg.EgressPort == 0 && raw != "0" {
+			return fmt.Errorf("WEKNORA_PLUGIN_K8S_EGRESS_PORT must be a port, got %q", raw)
+		}
+	}
+	if cfg.EgressPort > 0 && hostOf(cfg.HostAPIURL) == "" {
+		return errors.New("WEKNORA_PLUGIN_K8S_EGRESS_PORT needs WEKNORA_PLUGIN_HOST_API_URL: " +
+			"plugin pods reach the egress proxy at the Host API's host")
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_K8S_NETWORK_POLICY"))) {
+	case "", "0", "false":
+		return nil
+	}
+	if cfg.EgressPort == 0 {
+		return errors.New("WEKNORA_PLUGIN_K8S_NETWORK_POLICY needs WEKNORA_PLUGIN_K8S_EGRESS_PORT: " +
+			"the egress proxy is the plugins' only way out")
+	}
+	if cfg.ServiceType != "ClusterIP" {
+		return errors.New("WEKNORA_PLUGIN_K8S_NETWORK_POLICY needs WeKnora in the cluster (ClusterIP services)")
+	}
+	np := &NetworkPolicy{
+		AppNamespace: strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_K8S_APP_NAMESPACE")),
+		AppPort:      DefaultPort,
+	}
+	var err error
+	if np.AppLabels, err = labelsFromEnv("WEKNORA_PLUGIN_K8S_APP_LABELS", ""); err != nil {
+		return err
+	}
+	if len(np.AppLabels) == 0 {
+		return errors.New("WEKNORA_PLUGIN_K8S_NETWORK_POLICY needs WEKNORA_PLUGIN_K8S_APP_LABELS, " +
+			"the labels of WeKnora's app pods")
+	}
+	if np.AppNamespace == "" {
+		b, err := os.ReadFile(serviceAcct + "/namespace")
+		if err != nil {
+			return errors.New("WEKNORA_PLUGIN_K8S_NETWORK_POLICY needs WEKNORA_PLUGIN_K8S_APP_NAMESPACE outside a pod")
+		}
+		np.AppNamespace = strings.TrimSpace(string(b))
+	}
+	if np.DNSNamespaceLabels, err = labelsFromEnv("WEKNORA_PLUGIN_K8S_DNS_NAMESPACE_LABELS",
+		"kubernetes.io/metadata.name=kube-system"); err != nil {
+		return err
+	}
+	if np.DNSPodLabels, err = labelsFromEnv("WEKNORA_PLUGIN_K8S_DNS_POD_LABELS", "k8s-app=kube-dns"); err != nil {
+		return err
+	}
+	cfg.NetworkPolicy = np
+	return nil
+}
+
+// EgressPortFromEnv is WEKNORA_PLUGIN_K8S_EGRESS_PORT: the port app nodes
+// serve the cluster egress proxy on, or 0.
+func EgressPortFromEnv() int {
+	port, err := strconv.Atoi(strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_K8S_EGRESS_PORT")))
+	if err != nil || port < 0 || port > 65535 {
+		return 0
+	}
+	return port
+}
+
+// labelsFromEnv reads "key=value,key=value"; "-" is no labels.
+func labelsFromEnv(name, def string) (map[string]string, error) {
+	raw, ok := os.LookupEnv(name)
+	if raw = strings.TrimSpace(raw); !ok || raw == "" {
+		raw = def
+	}
+	out := map[string]string{}
+	if raw == "-" {
+		return out, nil
+	}
+	for _, kv := range strings.Split(raw, ",") {
+		if kv = strings.TrimSpace(kv); kv == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || strings.TrimSpace(k) == "" {
+			return nil, fmt.Errorf("%s: %q is not key=value", name, kv)
+		}
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return out, nil
+}
+
+func hostOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// proxyURL is the egress proxy a plugin's pods are handed, with the
+// plugin's credentials; empty when pods get no proxy.
+func (cfg *Config) proxyURL(pluginID string) string {
+	if cfg.EgressPort == 0 || len(cfg.EgressKey) == 0 || hostOf(cfg.HostAPIURL) == "" {
+		return ""
+	}
+	u := url.URL{
+		Scheme: "http", User: url.UserPassword(pluginID, egress.Password(cfg.EgressKey, pluginID)),
+		Host: net.JoinHostPort(hostOf(cfg.HostAPIURL), strconv.Itoa(cfg.EgressPort)),
+	}
+	return u.String()
+}
+
+// Egress is how the driver holds plugin pods to their egress grant.
+func (cfg *Config) Egress() driver.EgressMode {
+	switch {
+	case cfg.NetworkPolicy != nil:
+		return driver.EgressNetworkPolicy
+	case cfg.EgressPort > 0 && len(cfg.EgressKey) > 0:
+		return driver.EgressProxy
+	default:
+		return driver.EgressUnmanaged
+	}
 }
 
 // Endpoints is where the driver hands a deployed plugin over: the remote
@@ -224,6 +379,13 @@ func (d *Driver) Activate(ctx context.Context, l *reconcile.Loaded) error {
 	for _, obj := range Resources(d.cfg, m, name, secret) {
 		if err := d.apply(ctx, obj); err != nil {
 			return err
+		}
+	}
+	if d.cfg.NetworkPolicy == nil {
+		// A policy from when they were on would cut the pods off from the
+		// network now that they get no proxy.
+		if err := d.deleteResource(ctx, m.ID, networkPolicyPath(d.cfg.Namespace, name)); err != nil {
+			logger.Warnf(ctx, "[plugin] kubernetes %s: remove its network policy: %v", m.ID, err)
 		}
 	}
 	if ready, _, err := d.rolledOut(ctx, name); err == nil && ready {
@@ -339,11 +501,17 @@ func (d *Driver) Deactivate(ctx context.Context, pluginID string) error {
 	return err
 }
 
-// resourcePaths are the API paths of a plugin's resources, by name.
+// resourcePaths are the API paths of a plugin's resources, by name. The
+// NetworkPolicy goes last, so no pod outlives it.
 var resourcePaths = []string{
 	"/apis/apps/v1/namespaces/%s/deployments/%s",
 	"/api/v1/namespaces/%s/services/%s",
 	"/api/v1/namespaces/%s/secrets/%s",
+	"/apis/networking.k8s.io/v1/namespaces/%s/networkpolicies/%s",
+}
+
+func networkPolicyPath(namespace, name string) string {
+	return fmt.Sprintf(resourcePaths[3], namespace, name)
 }
 
 // deleteResources deletes the resources named name that belong to the
@@ -351,36 +519,43 @@ var resourcePaths = []string{
 func (d *Driver) deleteResources(ctx context.Context, pluginID, name string) error {
 	var errs []error
 	for _, p := range resourcePaths {
-		path := fmt.Sprintf(p, d.cfg.Namespace, name)
-		status, resp, err := d.do(ctx, http.MethodGet, path, "", nil)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		// Every node deactivates; a resource another node removed is fine.
-		if status == http.StatusNotFound {
-			continue
-		}
-		if status != http.StatusOK {
-			errs = append(errs, fmt.Errorf("read %s: HTTP %d", path, status))
-			continue
-		}
-		var obj struct {
-			Metadata struct {
-				Annotations map[string]string `json:"annotations"`
-			} `json:"metadata"`
-		}
-		if json.Unmarshal(resp, &obj) != nil || obj.Metadata.Annotations["weknora.plugin/id"] != pluginID {
-			continue
-		}
-		status, _, err = d.do(ctx, http.MethodDelete, path, "", nil)
-		if err != nil {
-			errs = append(errs, err)
-		} else if status >= 300 && status != http.StatusNotFound {
-			errs = append(errs, fmt.Errorf("delete %s: HTTP %d", path, status))
-		}
+		errs = append(errs, d.deleteResource(ctx, pluginID, fmt.Sprintf(p, d.cfg.Namespace, name)))
 	}
 	return errors.Join(errs...)
+}
+
+func (d *Driver) deleteResource(ctx context.Context, pluginID, path string) error {
+	status, resp, err := d.do(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return err
+	}
+	// Every node deactivates; a resource another node removed is fine.
+	if status == http.StatusNotFound {
+		return nil
+	}
+	// Without network policies the platform may not grant access to them.
+	if status == http.StatusForbidden && d.cfg.NetworkPolicy == nil && strings.Contains(path, "/networkpolicies/") {
+		return nil
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("read %s: HTTP %d", path, status)
+	}
+	var obj struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal(resp, &obj) != nil || obj.Metadata.Annotations["weknora.plugin/id"] != pluginID {
+		return nil
+	}
+	status, _, err = d.do(ctx, http.MethodDelete, path, "", nil)
+	if err != nil {
+		return err
+	}
+	if status >= 300 && status != http.StatusNotFound {
+		return fmt.Errorf("delete %s: HTTP %d", path, status)
+	}
+	return nil
 }
 
 // Object is one resource to apply: its API path and its manifest.
@@ -390,7 +565,9 @@ type Object struct {
 }
 
 // Resources are the objects a plugin runs as: a Secret with its signing
-// secret, a Deployment of its image and a Service in front of it.
+// secret (and egress proxy URL), the NetworkPolicy that confines it when
+// the platform asks for one, a Deployment of its image and a Service in
+// front of it.
 func Resources(cfg *Config, m *manifest.Manifest, name, secret string) []Object {
 	port := m.Runtime.Port
 	if port == 0 {
@@ -407,15 +584,37 @@ func Resources(cfg *Config, m *manifest.Manifest, name, secret string) []Object 
 			"annotations": map[string]any{"weknora.plugin/id": m.ID, "weknora.plugin/version": m.Version},
 		}
 	}
+	env := []any{
+		map[string]any{"name": "WEKNORA_PLUGIN_ADDR", "value": ":" + strconv.Itoa(port)},
+		map[string]any{"name": "WEKNORA_PLUGIN_SECRET", "valueFrom": map[string]any{
+			"secretKeyRef": map[string]any{"name": name, "key": "secret"},
+		}},
+	}
+	secretData := map[string]any{"secret": secret}
+	podAnnotations := map[string]any{
+		// A new version, or a rotated secret, rolls the pods.
+		"weknora.plugin/version": m.Version,
+		"weknora.plugin/secret":  shortHash(secret),
+	}
+	proxy := cfg.proxyURL(m.ID)
+	if proxy != "" {
+		// The proxy URL carries the plugin's credentials, so it stays in the
+		// Secret. The Host API is reached directly.
+		secretData["egress-proxy"] = proxy
+		for _, v := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+			env = append(env, map[string]any{"name": v, "valueFrom": map[string]any{
+				"secretKeyRef": map[string]any{"name": name, "key": "egress-proxy"},
+			}})
+		}
+		noProxy := strings.Join([]string{hostOf(cfg.HostAPIURL), "localhost", "127.0.0.1"}, ",")
+		env = append(env, map[string]any{"name": "NO_PROXY", "value": noProxy},
+			map[string]any{"name": "no_proxy", "value": noProxy})
+		podAnnotations["weknora.plugin/egress"] = shortHash(proxy)
+	}
 	container := map[string]any{
 		"name": "plugin", "image": m.Runtime.Image, "imagePullPolicy": "IfNotPresent",
 		"ports": []any{map[string]any{"name": "protocol", "containerPort": port}},
-		"env": []any{
-			map[string]any{"name": "WEKNORA_PLUGIN_ADDR", "value": ":" + strconv.Itoa(port)},
-			map[string]any{"name": "WEKNORA_PLUGIN_SECRET", "valueFrom": map[string]any{
-				"secretKeyRef": map[string]any{"name": name, "key": "secret"},
-			}},
-		},
+		"env":   env,
 		// Every protocol endpoint, health included, wants a signed request;
 		// the kubelet can only see that the port is open. WeKnora checks
 		// health and the manifest itself before it routes a call there.
@@ -450,15 +649,25 @@ func Resources(cfg *Config, m *manifest.Manifest, name, secret string) []Object 
 	}
 	selector := map[string]any{"app.kubernetes.io/name": name}
 	svcPort := map[string]any{"name": "protocol", "port": 80, "targetPort": port}
-	return []Object{
-		{
-			Path: fmt.Sprintf("/api/v1/namespaces/%s/secrets/%s", cfg.Namespace, name),
-			Body: map[string]any{
-				"apiVersion": "v1", "kind": "Secret", "metadata": meta(), "type": "Opaque",
-				"stringData": map[string]any{"secret": secret},
-			},
+	objs := []Object{{
+		Path: fmt.Sprintf("/api/v1/namespaces/%s/secrets/%s", cfg.Namespace, name),
+		Body: map[string]any{
+			"apiVersion": "v1", "kind": "Secret", "metadata": meta(), "type": "Opaque",
+			"stringData": secretData,
 		},
-		{
+	}}
+	if np := cfg.NetworkPolicy; np != nil {
+		// Before the Deployment: no pod starts unconfined.
+		objs = append(objs, Object{
+			Path: networkPolicyPath(cfg.Namespace, name),
+			Body: map[string]any{
+				"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": meta(),
+				"spec": np.spec(selector, port, cfg.EgressPort),
+			},
+		})
+	}
+	return append(objs,
+		Object{
 			Path: fmt.Sprintf("/apis/apps/v1/namespaces/%s/deployments/%s", cfg.Namespace, name),
 			Body: map[string]any{
 				"apiVersion": "apps/v1", "kind": "Deployment", "metadata": meta(),
@@ -466,24 +675,78 @@ func Resources(cfg *Config, m *manifest.Manifest, name, secret string) []Object 
 					"replicas": 1,
 					"selector": map[string]any{"matchLabels": selector},
 					"template": map[string]any{
-						"metadata": map[string]any{"labels": labels, "annotations": map[string]any{
-							// A new version, or a rotated secret, rolls the pods.
-							"weknora.plugin/version": m.Version,
-							"weknora.plugin/secret":  shortHash(secret),
-						}},
-						"spec": podSpec,
+						"metadata": map[string]any{"labels": labels, "annotations": podAnnotations},
+						"spec":     podSpec,
 					},
 				},
 			},
 		},
-		{
+		Object{
 			Path: fmt.Sprintf("/api/v1/namespaces/%s/services/%s", cfg.Namespace, name),
 			Body: map[string]any{
 				"apiVersion": "v1", "kind": "Service", "metadata": meta(),
 				"spec": map[string]any{"type": cfg.ServiceType, "selector": selector, "ports": []any{svcPort}},
 			},
 		},
+	)
+}
+
+// spec is the NetworkPolicy of a plugin's pods: only the app pods call in,
+// on the plugin's port; out, the pods reach DNS and the app pods' Host API
+// and egress proxy, which applies the plugin's grant.
+func (np *NetworkPolicy) spec(pods map[string]any, pluginPort, egressPort int) map[string]any {
+	app := map[string]any{
+		"namespaceSelector": map[string]any{
+			"matchLabels": map[string]any{"kubernetes.io/metadata.name": np.AppNamespace},
+		},
+		"podSelector": map[string]any{"matchLabels": stringMap(np.AppLabels)},
 	}
+	dns := map[string]any{"namespaceSelector": map[string]any{"matchLabels": stringMap(np.DNSNamespaceLabels)}}
+	if len(np.DNSPodLabels) > 0 {
+		dns["podSelector"] = map[string]any{"matchLabels": stringMap(np.DNSPodLabels)}
+	}
+	tcp := func(port int) map[string]any { return map[string]any{"protocol": "TCP", "port": port} }
+	return map[string]any{
+		"podSelector": map[string]any{"matchLabels": pods},
+		"policyTypes": []any{"Ingress", "Egress"},
+		"ingress":     []any{map[string]any{"from": []any{app}, "ports": []any{tcp(pluginPort)}}},
+		"egress": []any{
+			map[string]any{"to": []any{dns}, "ports": []any{
+				map[string]any{"protocol": "UDP", "port": 53}, tcp(53),
+			}},
+			map[string]any{"to": []any{app}, "ports": []any{tcp(np.AppPort), tcp(egressPort)}},
+		},
+	}
+}
+
+func stringMap(m map[string]string) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// Egress is how the driver holds plugin pods to their egress grant.
+func (d *Driver) Egress() driver.EgressMode { return d.cfg.Egress() }
+
+// Statuses reports the kubernetes plugins' instances as inner does (one per
+// node that loaded the plugin), with how their pods' egress is controlled.
+func (d *Driver) Statuses(inner driver.Driver) driver.Driver {
+	return egressStatus{Driver: inner, mode: d.Egress()}
+}
+
+type egressStatus struct {
+	driver.Driver
+	mode driver.EgressMode
+}
+
+func (s egressStatus) Status(ctx context.Context, pluginID string) ([]driver.InstanceStatus, error) {
+	out, err := s.Driver.Status(ctx, pluginID)
+	for i := range out {
+		out[i].Egress = s.mode
+	}
+	return out, err
 }
 
 func (d *Driver) apply(ctx context.Context, obj Object) error {

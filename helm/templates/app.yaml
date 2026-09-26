@@ -49,6 +49,11 @@ spec:
             - containerPort: 8080
               name: http
               protocol: TCP
+            {{- if and .Values.pluginKube.enabled .Values.pluginKube.networkPolicy.enabled }}
+            - containerPort: {{ .Values.pluginKube.networkPolicy.egressProxyPort }}
+              name: plugin-egress
+              protocol: TCP
+            {{- end }}
           env:
             # Application settings
             - name: GIN_MODE
@@ -144,6 +149,24 @@ spec:
             - name: WEKNORA_PLUGIN_K8S_IMAGE_PULL_SECRET
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.pluginKube.networkPolicy }}
+            {{- if .enabled }}
+            # Plugin pods reach only DNS and these pods, whose egress proxy
+            # holds them to their permissions.egress grant.
+            - name: WEKNORA_PLUGIN_K8S_EGRESS_PORT
+              value: {{ .egressProxyPort | quote }}
+            - name: WEKNORA_PLUGIN_K8S_NETWORK_POLICY
+              value: "1"
+            - name: WEKNORA_PLUGIN_K8S_APP_NAMESPACE
+              value: {{ $.Release.Namespace | quote }}
+            - name: WEKNORA_PLUGIN_K8S_APP_LABELS
+              value: {{ include "weknora.pluginAppLabels" $ | quote }}
+            - name: WEKNORA_PLUGIN_K8S_DNS_NAMESPACE_LABELS
+              value: {{ .dnsNamespaceLabels | quote }}
+            - name: WEKNORA_PLUGIN_K8S_DNS_POD_LABELS
+              value: {{ .dnsPodLabels | quote }}
+            {{- end }}
+            {{- end }}
             {{- end }}
             {{- if or .Values.pluginHost.enabled .Values.pluginKube.enabled }}
             # Plugins off the app pods (on plugin host pods, or kubernetes
@@ -226,4 +249,11 @@ spec:
       port: {{ .Values.app.service.port }}
       targetPort: http
       protocol: TCP
+    {{- if and .Values.pluginKube.enabled .Values.pluginKube.networkPolicy.enabled }}
+    # Kubernetes plugins' egress proxy.
+    - name: plugin-egress
+      port: {{ .Values.pluginKube.networkPolicy.egressProxyPort }}
+      targetPort: plugin-egress
+      protocol: TCP
+    {{- end }}
 {{- end }}

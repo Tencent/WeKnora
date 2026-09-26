@@ -206,3 +206,11 @@ plugins; plugin hosts let it bypass their egress proxy, so both use this.
 {{- define "weknora.pluginHostAPIURL" -}}
 http://app.{{ .Release.Namespace }}.svc:{{ .Values.app.service.port }}
 {{- end }}
+
+{{/*
+The app pods' labels as "key=value,...", for the kubernetes plugins'
+NetworkPolicy (the same labels as weknora.componentSelectorLabels).
+*/}}
+{{- define "weknora.pluginAppLabels" -}}
+app.kubernetes.io/name={{ include "weknora.name" . }},app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=app
+{{- end }}

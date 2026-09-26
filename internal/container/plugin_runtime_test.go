@@ -2,17 +2,25 @@ package container
 
 import (
 	"context"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Tencent/WeKnora/internal/plugin/egress"
 	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/hostpool"
+	"github.com/Tencent/WeKnora/internal/plugin/kube"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
+	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/remote"
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
@@ -110,5 +118,62 @@ func TestPipelineHooksFollowTheirBuiltinStages(t *testing.T) {
 	if hooks < at("NewPluginQueryUnderstand") || hooks < at("NewPluginFilterTopK") ||
 		hooks > at("NewPluginExtractEntity") {
 		t.Fatal("pipeline hooks must be registered after query understanding and before entity extraction")
+	}
+}
+
+// With the kubernetes driver and an egress port, every app node serves the
+// egress proxy; it asks for credentials and applies the plugin's grant.
+func TestPluginEgressProxyServes(t *testing.T) {
+	t.Setenv("JWT_SECRET", "cluster")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	t.Setenv("WEKNORA_PLUGIN_K8S_EGRESS_PORT", strconv.Itoa(port))
+
+	reg := pluginregistry.New()
+	if err := reg.Register(&manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion, ID: "acme.kube", Version: "1.0.0", APIVersion: pluginapi.APIVersion,
+		Name: manifest.Text("Kube", nil), Publisher: manifest.Publisher{ID: "acme"},
+		Runtime:     manifest.Runtime{Type: manifest.RuntimeKubernetes, Image: "x"},
+		Contributes: manifest.Contributions{manifest.PointWebSearch: {{ID: "x", Name: manifest.Text("X", nil)}}},
+		Permissions: manifest.Permissions{Egress: []string{"api.allowed.test"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cleaner := NewResourceCleaner()
+	if err := startPluginEgressProxy(nil, reg, cleaner); err != nil {
+		t.Fatalf("without the kubernetes driver: %v", err)
+	}
+	d, err := kube.New(&kube.Config{Namespace: "p", ServiceType: "ClusterIP"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := startPluginEgressProxy(d, reg, cleaner); err != nil {
+		t.Fatal(err)
+	}
+	defer cleaner.Cleanup(context.Background())
+
+	key, err := pluginEgressKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(user *url.Userinfo) int {
+		proxy := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", port), User: user}
+		c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}}
+		resp, err := c.Get("http://evil.test/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := get(nil); got != http.StatusProxyAuthRequired {
+		t.Fatalf("without credentials = %d", got)
+	}
+	if got := get(url.UserPassword("acme.kube", egress.Password(key, "acme.kube"))); got != http.StatusForbidden {
+		t.Fatalf("a host outside the grant = %d", got)
 	}
 }
