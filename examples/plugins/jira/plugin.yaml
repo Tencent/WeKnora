@@ -1,6 +1,6 @@
 schemaVersion: 1
 id: weknora-examples.jira
-version: 1.0.0
+version: 1.1.0
 apiVersion: weknora.plugin/v1
 name: { en-US: Jira, zh-CN: Jira }
 description:
@@ -19,8 +19,9 @@ permissions:
   # The OAuth API gateway and the sites themselves. WeKnora, not the plugin,
   # talks to auth.atlassian.com.
   egress: [api.atlassian.com, "*.atlassian.net"]
-  # Start data source syncs when Jira reports a change (the webhook below).
-  hostApi: [datasources]
+  # Start data source syncs when Jira reports a change (the webhook below),
+  # and note deleted issues for them in the key-value store.
+  hostApi: [datasources, kv]
 config:
   # The platform's Atlassian OAuth 2.0 (3LO) app. Without it, workspaces can
   # still connect with an API token.
@@ -59,8 +60,8 @@ contributes:
     - id: issues
       name: { en-US: Issue changes, zh-CN: 问题变更 }
       description:
-        en-US: "Register this URL in Jira (Settings → System → WebHooks) for issue created, updated and deleted events. Data sources syncing the issue's project then sync at once instead of waiting for their schedule."
-        zh-CN: "在 Jira（设置 → 系统 → WebHooks）中登记此地址，勾选问题创建、更新、删除事件。同步该问题所在项目的数据源会立即同步，而不必等待定时同步。"
+        en-US: "Register this URL in Jira (Settings → System → WebHooks) for issue created, updated and deleted events. Data sources syncing the issue's project then sync at once instead of waiting for their schedule, deleted issues included."
+        zh-CN: "在 Jira（设置 → 系统 → WebHooks）中登记此地址，勾选问题创建、更新、删除事件。同步该问题所在项目的数据源会立即同步（包括删除的问题），而不必等待定时同步。"
   skills:
     - id: jira-triage
       name: { en-US: Jira triage, zh-CN: Jira 问题分诊 }

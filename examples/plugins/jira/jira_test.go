@@ -43,10 +43,14 @@ type fakeJira struct {
 	mu     sync.Mutex
 	issues map[string]map[string]any // id → issue JSON
 	jql    []string
+	tz     string // the user's time zone, as /myself tells it
+	// searchesLeft, when positive, counts down searches until the token
+	// "expires" (401).
+	searchesLeft int
 }
 
 func newFakeJira(t *testing.T) *fakeJira {
-	f := &fakeJira{issues: map[string]map[string]any{}}
+	f := &fakeJira{issues: map[string]map[string]any{}, tz: "Asia/Shanghai"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /oauth/token/accessible-resources", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+oauthToken {
@@ -57,7 +61,9 @@ func newFakeJira(t *testing.T) *fakeJira {
 	})
 	api := http.NewServeMux()
 	api.HandleFunc("GET /rest/api/3/myself", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, myself{AccountID: "a1", DisplayName: "Me", TimeZone: "Asia/Shanghai"})
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		writeJSON(w, myself{AccountID: "a1", DisplayName: "Me", TimeZone: f.tz})
 	})
 	api.HandleFunc("GET /rest/api/3/project/search", func(w http.ResponseWriter, r *http.Request) {
 		all := []project{{Key: "ENG", Name: "Engineering"}, {Key: "OPS", Name: "Operations"}}
@@ -72,8 +78,8 @@ func newFakeJira(t *testing.T) *fakeJira {
 	api.HandleFunc("GET /rest/api/3/issue/{key}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		for _, is := range f.issues {
-			if is["key"] == r.PathValue("key") {
+		for id, is := range f.issues {
+			if is["key"] == r.PathValue("key") || id == r.PathValue("key") {
 				writeJSON(w, is)
 				return
 			}
@@ -136,6 +142,12 @@ func (f *fakeJira) search(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.searchesLeft > 0 {
+		if f.searchesLeft--; f.searchesLeft == 0 {
+			http.Error(w, `{"errorMessages":["token expired"]}`, http.StatusUnauthorized)
+			return
+		}
+	}
 	f.jql = append(f.jql, in.JQL)
 	key := ""
 	if m := projectClause.FindStringSubmatch(in.JQL); m != nil {
@@ -212,6 +224,7 @@ func (f *fakeJira) lastJQL() string {
 type run struct {
 	t      *testing.T
 	client *pluginclient.Client
+	host   *pluginapi.HostAccess // the Host API syncs get, if any
 }
 
 func newRun(t *testing.T) *run {
@@ -245,7 +258,7 @@ func (r *run) fetch(instance map[string]any, mode string, cursor *pluginapi.Curs
 	r.t.Helper()
 	var out fetched
 	end, err := r.client.Stream(context.Background(), pluginapi.ConnectorFetchPath("jira"),
-		pluginapi.Envelope{Config: pluginapi.Config{Instance: instance}},
+		pluginapi.Envelope{Context: pluginapi.Context{Host: r.host}, Config: pluginapi.Config{Instance: instance}},
 		pluginapi.FetchInput{Mode: mode, Cursor: cursor, ResourceIDs: projects},
 		func(ev pluginapi.Event) error {
 			switch ev.Type {
@@ -303,8 +316,8 @@ func TestSyncIsIncrementalAndReportsDeletions(t *testing.T) {
 	) != "101 ENG-1 Login fails|102 ENG-2 Slow search|103 ENG-3 Crash on save" {
 		t.Fatalf("full sync = %v", got)
 	}
-	if full.checkpoints != 2 {
-		t.Fatalf("a checkpoint per page, got %d", full.checkpoints)
+	if full.checkpoints != 3 {
+		t.Fatalf("a checkpoint per page and one at the end, got %d", full.checkpoints)
 	}
 	wantJQL := `project = "ENG" AND issuetype in ("Bug", "Odd \"type\"") AND (labels = x) ORDER BY updated ASC`
 	if jql := f.lastJQL(); jql != wantJQL {
@@ -393,7 +406,7 @@ func TestProblemsReachTheForm(t *testing.T) {
 		instance map[string]any
 		code     pluginapi.ErrorCode
 	}{
-		{"no account", map[string]any{"credentials": map[string]any{"auth": "oauth"}}, pluginapi.CodeInvalidConfig},
+		{"no account", map[string]any{"credentials": map[string]any{"auth": "oauth"}}, pluginapi.CodeUnauthorized},
 		{"site not granted", oauthInstance("cloud-2"), pluginapi.CodeInvalidConfig},
 		{
 			"expired token",

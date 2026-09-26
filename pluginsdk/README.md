@@ -378,6 +378,9 @@ Scopes:
   - `KVGet`, `KVPut` (optional TTL), `KVDelete` and `KVList`.
   - Keys up to 256 bytes, JSON values up to 64 KB, 10,000 keys per
     workspace.
+  - Keep a collection that grows as a key per entry and page through it
+    with `KVList` (key order). One value holding it all reaches the limit
+    sooner or later, and calls updating it at once overwrite each other.
 - `datasources`: the workspace's data sources of the plugin's own
   connectors.
   - `DataSources` lists them with their selected resources.
@@ -385,6 +388,9 @@ Scopes:
     running (answering `running`).
   - Pair it with a webhook so changes arrive at once instead of at the
     next scheduled sync; the Jira example does.
+  - An incremental sync reports what changed, and cannot see what was
+    deleted. The Jira example has its webhook note deleted issues in `kv`
+    for the sync to confirm and report.
 
 The token is valid for a few minutes: use `call.Host()` within the call and
 don't keep it.
