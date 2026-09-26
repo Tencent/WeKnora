@@ -32,10 +32,25 @@ var (
 	healthInterval        = 15 * time.Second
 	healthTimeout         = 5 * time.Second
 	unhealthyLimit        = 3
-	stopGrace             = 10 * time.Second
+	stopGrace             = stopGraceFromEnv()
 	restartBackoffFloor   = time.Second
 	restartBackoffCeiling = time.Minute
 )
+
+// envStopGrace is how long a stopping plugin may take to finish its calls
+// in flight before it is killed, e.g. "2m". The default outlasts the
+// SDKs' own drain on SIGTERM (60 seconds), so a plugin upgraded or
+// disabled mid-parse or mid-sync finishes the call.
+const envStopGrace = "WEKNORA_PLUGIN_STOP_GRACE"
+
+const defaultStopGrace = 65 * time.Second
+
+func stopGraceFromEnv() time.Duration {
+	if d, err := time.ParseDuration(strings.TrimSpace(os.Getenv(envStopGrace))); err == nil && d > 0 {
+		return d
+	}
+	return defaultStopGrace
+}
 
 // State of a supervised process.
 type State string

@@ -37,6 +37,9 @@ type StateReporter interface {
 type Manager struct {
 	reporter StateReporter
 	inFlight atomic.Int64
+	// stopping are replaced and deactivated processes finishing their
+	// calls in the background.
+	stopping sync.WaitGroup
 
 	mu    sync.Mutex
 	procs map[string]*process
@@ -188,23 +191,35 @@ func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
 	m.procs[id] = p
 	m.mu.Unlock()
 	if old != nil {
-		old.stop()
+		m.retire(old)
 	}
 	logger.Infof(ctx, "[plugin] host started %s %s", id, l.Manifest.Version)
 	return nil
 }
 
-// Deactivate implements reconcile.Activator: it stops the process.
+// Deactivate implements reconcile.Activator: it stops the process, which
+// finishes its calls in flight in the background.
 func (m *Manager) Deactivate(ctx context.Context, pluginID string) error {
 	m.mu.Lock()
 	p := m.procs[pluginID]
 	delete(m.procs, pluginID)
 	m.mu.Unlock()
 	if p != nil {
-		p.stop()
-		logger.Infof(ctx, "[plugin] host stopped %s", pluginID)
+		m.retire(p)
+		logger.Infof(ctx, "[plugin] host stopping %s", pluginID)
 	}
 	return nil
+}
+
+// retire stops a process no longer routed to without waiting for it: it
+// may take the stop grace period to finish its calls, and the reconciler
+// must not wait that long.
+func (m *Manager) retire(p *process) {
+	m.stopping.Add(1)
+	go func() {
+		defer m.stopping.Done()
+		p.stop()
+	}()
 }
 
 func (m *Manager) report(pluginID string, s State, err error) {
@@ -291,4 +306,5 @@ func (m *Manager) Close() {
 		}()
 	}
 	wg.Wait()
+	m.stopping.Wait()
 }
