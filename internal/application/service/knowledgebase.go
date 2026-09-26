@@ -497,6 +497,7 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	name string,
 	description string,
 	config *types.KnowledgeBaseConfig,
+	vlmConfig *types.VLMConfig,
 ) (*types.KnowledgeBase, error) {
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
@@ -568,6 +569,14 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 				kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
 			}
 		}
+	}
+	// Apply multimodal (vision) config only when the caller provided it,
+	// mirroring the nil-means-no-change semantics used above.
+	if vlmConfig != nil {
+		if kb.VLMConfig != *vlmConfig {
+			changedFields = append(changedFields, "vlm_config")
+		}
+		kb.VLMConfig = *vlmConfig
 	}
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
