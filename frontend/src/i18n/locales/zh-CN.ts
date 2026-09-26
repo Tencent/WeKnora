@@ -5436,6 +5436,21 @@ export default {
       minimum: '数值过小',
       maximum: '数值过大',
       format: '请输入完整的地址，如 https://example.com'
+    },
+    options: {
+      loading: '加载中…',
+      empty: '插件没有可选项',
+      retry: '重试',
+      failed: '加载可选项失败'
+    },
+    oauth: {
+      connected: '已连接',
+      notConnected: '未连接',
+      connect: '连接账号',
+      reconnect: '重新连接',
+      disconnect: '断开',
+      popupBlocked: '浏览器拦截了授权窗口，请允许弹出窗口后重试',
+      failed: '授权失败'
     }
   },
   common: {

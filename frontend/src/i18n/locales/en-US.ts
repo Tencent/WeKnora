@@ -2916,6 +2916,21 @@ export default {
       minimum: 'Value is too small',
       maximum: 'Value is too large',
       format: 'Enter a full address such as https://example.com'
+    },
+    options: {
+      loading: 'Loading…',
+      empty: 'The plugin offers no choices',
+      retry: 'Retry',
+      failed: 'Could not load the choices'
+    },
+    oauth: {
+      connected: 'Connected',
+      notConnected: 'Not connected',
+      connect: 'Connect',
+      reconnect: 'Reconnect',
+      disconnect: 'Disconnect',
+      popupBlocked: 'The browser blocked the sign-in window. Allow pop-ups and try again.',
+      failed: 'Authorization failed'
     }
   },
   common: {

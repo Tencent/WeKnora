@@ -2916,6 +2916,21 @@ export default {
       minimum: '値が小さすぎます',
       maximum: '値が大きすぎます',
       format: 'https://example.com のような完全なアドレスを入力してください'
+    },
+    options: {
+      loading: '読み込み中…',
+      empty: '選択肢がありません',
+      retry: '再試行',
+      failed: '選択肢を読み込めませんでした'
+    },
+    oauth: {
+      connected: '接続済み',
+      notConnected: '未接続',
+      connect: 'アカウントを接続',
+      reconnect: '再接続',
+      disconnect: '切断',
+      popupBlocked: 'ブラウザが認可ウィンドウをブロックしました。ポップアップを許可して再試行してください。',
+      failed: '認可に失敗しました'
     }
   },
   common: {

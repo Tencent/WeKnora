@@ -151,6 +151,69 @@ WeKnora answers 404 unless all of these hold:
 
 Bodies are limited to 1 MB, with 20 calls a second per URL.
 
+## Dynamic choices and OAuth
+
+Two schema keywords let a form ask the plugin while someone fills it in.
+
+**`x-options`** loads a field's choices from the plugin, for lists that
+depend on the account (projects, spaces, channels). It works on a string or
+an array of strings:
+
+```yaml
+project:
+  type: string
+  x-options: { name: projects, dependsOn: [site, token], search: true }
+```
+
+```go
+p.Options("projects", func(ctx context.Context, call *pluginsdk.Call, in pluginapi.OptionsInput) ([]pluginapi.Option, error) {
+	// call.Config holds what the form holds now, secrets included.
+	if call.Config.Tenant["token"] == nil {
+		return nil, pluginapi.InvalidConfig("enter the token first", map[string]string{"token": "required"})
+	}
+	return []pluginapi.Option{{Value: "p1", Label: "Project " + in.Query}}, nil
+})
+```
+
+- `in.Scope` is `system`, `tenant` or `instance`; the values are in the
+  matching part of `call.Config`.
+- Secrets the form shows redacted are filled in from the stored
+  configuration.
+- The form reloads the list when a `dependsOn` field changes. With
+  `search`, `in.Query` is what the user typed.
+- WeKnora does not check a saved value against the list; the plugin
+  should.
+
+**`x-oauth`** turns a string field into an account connection. WeKnora runs
+the OAuth 2.0 authorization code flow and keeps the tokens:
+
+```yaml
+config:
+  system: schemas/system.yaml     # client_id, client_secret (x-secret)
+# schemas/tenant.yaml
+account:
+  type: string
+  x-oauth:
+    authorizeUrl: https://auth.example.com/oauth/authorize
+    tokenUrl: https://auth.example.com/oauth/token
+    scopes: [read]
+    clientId: ${system.client_id}
+    clientSecret: ${system.client_secret}
+    pkce: true
+    params: { audience: api.example.com }   # extra authorize parameters
+```
+
+- The form shows a connect button that opens the provider's consent page.
+- The field stores `oauth:<connection>`. At call time the plugin receives a
+  fresh access token in its place; WeKnora refreshes it when it is about to
+  expire. A connection that can no longer be refreshed arrives as `""`, so
+  answer `unauthorized` then.
+- The platform registers the OAuth app with the provider, with the
+  redirect URI `<WeKnora address>/api/v1/plugin-oauth/callback`, and enters
+  its credentials in the plugin's platform configuration.
+- `tokenUrl` must be https. WeKnora calls it itself, so it needs no
+  `permissions.egress` entry.
+
 ## Calling back into WeKnora (Host API)
 
 A plugin that declares `permissions.hostApi` gets a short-lived token with
@@ -201,6 +264,10 @@ A few rules the manifest and host enforce:
 - **Outbound traffic.** It goes through the host's egress proxy, which
   forwards only to the hosts in `permissions.egress` and never to private
   addresses.
+- **Resources.** `runtime.resources: { cpu: "500m", memory: 512Mi }`
+  caps the process (Linux). Memory is always capped. CPU is capped only
+  when the platform delegates a cgroup to WeKnora
+  (`WEKNORA_PLUGIN_CGROUP`).
 - **IDs.** Contribution IDs are qualified with the plugin ID
   (`acme.notes/notes`); for connectors and web search that must stay within
   50 characters.

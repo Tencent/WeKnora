@@ -65,3 +65,14 @@ type PluginKVRepository interface {
 	// DeleteExpired removes entries that expired before now.
 	DeleteExpired(ctx context.Context, now time.Time) (int64, error)
 }
+
+// PluginOAuthRepository stores plugin OAuth connections.
+type PluginOAuthRepository interface {
+	Create(ctx context.Context, c *types.PluginOAuthConnection) error
+	// Get returns (nil, nil) when the connection does not exist for this
+	// plugin and tenant.
+	Get(ctx context.Context, pluginID string, tenantID uint64, id string) (*types.PluginOAuthConnection, error)
+	// UpdateToken saves a refreshed token unless another node refreshed it
+	// since prev (the UpdatedAt read); it reports whether it saved.
+	UpdateToken(ctx context.Context, c *types.PluginOAuthConnection, prev time.Time) (bool, error)
+}

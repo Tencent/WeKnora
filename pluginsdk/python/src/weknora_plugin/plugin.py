@@ -32,6 +32,7 @@ from .types import (
     SearchInput,
     SearchResult,
     EventDelivery,
+    OptionsInput,
     UIRequest,
     UIResponse,
     WebhookRequest,
@@ -167,6 +168,7 @@ ConfigValidator = Callable[[Call], None]
 UIHandler = Callable[[Call, UIRequest], Any]
 EventHandler = Callable[[Call, EventDelivery], None]
 WebhookHandler = Callable[[Call, WebhookRequest], Any]
+OptionsHandler = Callable[[Call, OptionsInput], Any]
 
 _ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers)/([^/]+)/([a-z-]+)$")
 
@@ -186,6 +188,7 @@ class Plugin:
         self._ui: Optional[UIHandler] = None
         self._events: Optional[EventHandler] = None
         self._webhooks: Dict[str, WebhookHandler] = {}
+        self._options: Dict[str, OptionsHandler] = {}
         #: Seconds serve() waits for calls in flight after SIGTERM.
         self.shutdown_timeout = 60.0
         if logger is None:
@@ -241,6 +244,13 @@ class Plugin:
         200. call is the workspace the URL belongs to."""
         return self._register(self._webhooks, id, fn)
 
+    def options(self, name: str, fn: Optional[OptionsHandler] = None) -> Any:
+        """Registers the choices behind x-options {name}: fn(call,
+        OptionsInput) returns a list of Option (or of (value, label)
+        pairs). call's config holds what the form holds now. Raise
+        invalid_config(...) when the form lacks what the list needs."""
+        return self._register(self._options, name, fn)
+
     def ui(self, fn: UIHandler) -> UIHandler:
         """Registers the handler behind the plugin's pages: fn(call,
         UIRequest) returns a UIResponse, or any JSON value for a 200."""
@@ -273,6 +283,7 @@ class Plugin:
             ("connectors", self._connectors),
             ("parsers", self._parsers),
             ("webhooks", self._webhooks),
+            ("options", self._options),
         ):
             if table:
                 contributes[point] = sorted(table)
@@ -306,6 +317,14 @@ class Plugin:
             else:
                 events = self._events
                 self._unary(h, body, lambda call, raw: events(call, from_wire(EventDelivery, raw)), empty=True)
+            return
+        if method == "POST" and path.startswith("/v1/options/"):
+            name = path[len("/v1/options/"):]
+            fn = self._options.get(name)
+            if fn is None:
+                h._send_error(PluginError(ErrorCode.NOT_FOUND, f"no options {name!r}"))
+            else:
+                self._unary(h, body, lambda call, raw: {"options": _options_output(fn(call, from_wire(OptionsInput, raw)))})
             return
         if method == "POST" and path.startswith("/v1/webhooks/"):
             hook = self._webhooks.get(path[len("/v1/webhooks/"):])
@@ -472,6 +491,17 @@ def _connector_call(c: Any, action: str, call: Call, raw: Any) -> Any:
     if resolve is None:
         return {"ancestors": []}
     return {"ancestors": list(resolve(call, cfg, list(raw.get("resourceIds") or [])) or [])}
+
+
+def _options_output(out: Any) -> list:
+    from .types import Option
+
+    result = []
+    for o in out or []:
+        if isinstance(o, (tuple, list)) and len(o) == 2:
+            o = Option(value=o[0], label=str(o[1]))
+        result.append(o)
+    return result
 
 
 def _webhook_output(out: Any) -> Any:

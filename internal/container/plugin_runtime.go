@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/hostpool"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/remote"
@@ -73,9 +74,10 @@ func (a pluginActivators) list() []reconcile.Activator {
 // (remote, on a plugin host) only through WEKNORA_PLUGIN_HOST_API_URL.
 func newPluginHostAPI(
 	cfg *config.Config, iv *activate.Invoker, repo interfaces.PluginKVRepository, cleaner interfaces.ResourceCleaner,
-	hooks *webhook.Tokens,
+	hooks *webhook.Tokens, oauth *pluginoauth.Service,
 ) *hostapi.Handler {
 	iv.SetWebhooks(hooks, webhook.PublicBase())
+	iv.SetOAuth(oauth)
 	issuer := hostapi.NewIssuerFromEnv()
 	// Plugins on this node always use loopback; the public address is for
 	// plugins elsewhere (remote, on a plugin host), which reach this node

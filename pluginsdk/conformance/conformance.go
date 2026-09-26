@@ -159,6 +159,17 @@ func Run(ctx context.Context, t Target) Report {
 			return protocolAnswer(t.Client.Call(ctx, pluginapi.EventsPath, envelope(), ev, nil))
 		})
 	}
+	for _, name := range m.Contributes["options"] {
+		check("options/"+name+" answers", func(ctx context.Context) error {
+			var out pluginapi.OptionsOutput
+			in := pluginapi.OptionsInput{Field: "field", Scope: pluginapi.OptionsScopeTenant}
+			err := t.Client.Call(ctx, pluginapi.OptionsPath(name), envelope(), in, &out)
+			if err == nil && out.Options == nil {
+				return fmt.Errorf("output has no options array")
+			}
+			return protocolAnswer(err)
+		})
+	}
 	for _, id := range m.Contributes["webhooks"] {
 		check("webhooks/"+id+" answers", func(ctx context.Context) error {
 			var out pluginapi.WebhookResponse

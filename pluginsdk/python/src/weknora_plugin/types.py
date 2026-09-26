@@ -312,3 +312,25 @@ class WebhookResponse:
     def __post_init__(self) -> None:
         if isinstance(self.body, str):
             self.body = self.body.encode()
+
+
+@dataclass
+class OptionsInput:
+    """Asks for one form field's choices (x-options). field is its dotted
+    path; scope is system, tenant or instance; contribution names the
+    instance's contribution ("connectors/jira"); query is what the user
+    typed."""
+
+    field: str = ""
+    scope: str = ""
+    contribution: str = ""
+    query: str = ""
+
+
+@dataclass
+class Option:
+    """One choice of a form field."""
+
+    value: Any
+    label: str
+    description: str = ""

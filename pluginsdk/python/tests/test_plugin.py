@@ -81,6 +81,7 @@ class PluginTest(unittest.TestCase):
                     "connectors": ["notes"],
                     "parsers": ["upper"],
                     "webhooks": ["inbox"],
+                    "options": ["projects"],
                     "ui": ["request"],
                     "events": ["handler"],
                 },
@@ -132,6 +133,13 @@ class PluginTest(unittest.TestCase):
         self.assertIn(("e1", "knowledge.ingested", 2, 7, "k1"), seen_events)
         status, body = self.c.call("/v1/events", dict(ev, type="knowledge.failed"))
         self.assertEqual((status, body["error"]["retryable"]), (503, True))
+
+    def test_options(self):
+        inp = {"field": "project", "scope": "tenant", "query": "x"}
+        status, body = self.c.call("/v1/options/projects", inp)
+        self.assertEqual((status, body["error"]["code"]), (400, "invalid_config"))
+        status, body = self.c.call("/v1/options/projects", inp, {"tenant": {"token": "t"}})
+        self.assertEqual(body["output"]["options"], [{"value": "p1", "label": "Project x"}, {"value": "p2", "label": "Other"}])
 
     def test_webhooks(self):
         body = base64.b64encode(b'{"a": 1}').decode()

@@ -123,6 +123,8 @@ import {
   type TenantPlugin,
 } from '@/api/plugin'
 import SchemaForm from '@/components/schema-form/SchemaForm.vue'
+import { pluginFormSource } from '@/components/schema-form/pluginSource'
+import { provideSchemaFormSource } from '@/components/schema-form/source'
 import { validateConfig, type ConfigSchema, type ConfigValue, type FieldError } from '@/components/schema-form/schema'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -210,6 +212,12 @@ const configErrors = ref<FieldError[]>([])
 const configLoading = ref(false)
 const configSaving = ref(false)
 const configWebhooks = ref<PluginWebhook[]>([])
+
+// x-options / x-oauth fields of the workspace configuration ask the plugin.
+provideSchemaFormSource(pluginFormSource({
+  target: () => (configPlugin.value ? { pluginId: configPlugin.value.manifest.id, scope: 'tenant' } : undefined),
+  values: () => configValues.value,
+}))
 const origin = window.location.origin
 
 async function openConfig(p: TenantPlugin) {

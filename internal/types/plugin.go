@@ -66,3 +66,26 @@ type PluginKV struct {
 
 // TableName pins the table so GORM's pluralizer cannot drift.
 func (PluginKV) TableName() string { return "plugin_kv" }
+
+// PluginOAuthConnection is an authorization a plugin form field made with
+// its OAuth button (x-oauth). The field holds "oauth:<ID>"; the tokens stay
+// here, sealed (enc:v1), and never reach the browser.
+type PluginOAuthConnection struct {
+	ID       string `json:"id"       gorm:"type:varchar(36);primaryKey"`
+	PluginID string `json:"pluginId" gorm:"type:varchar(128);index:idx_plugin_oauth_connections_owner"`
+	// TenantID is 0 for the platform (system configuration).
+	TenantID uint64 `json:"-"        gorm:"index:idx_plugin_oauth_connections_owner"`
+	// Scope, Contribution and Field find the x-oauth spec again when the
+	// token needs refreshing.
+	Scope        string     `json:"scope"        gorm:"type:varchar(16)"`
+	Contribution string     `json:"contribution" gorm:"type:varchar(160)"`
+	Field        string     `json:"field"        gorm:"type:varchar(256)"`
+	Token        string     `json:"-"            gorm:"type:text"`
+	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
+	CreatedBy    string     `json:"-"            gorm:"type:varchar(64)"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+// TableName pins the table so GORM's pluralizer cannot drift.
+func (PluginOAuthConnection) TableName() string { return "plugin_oauth_connections" }

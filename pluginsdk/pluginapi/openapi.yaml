@@ -218,6 +218,34 @@ paths:
                 required: [output]
                 properties: { output: { $ref: "#/components/schemas/UIResponse" } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/options/{name}:
+    post:
+      summary: List the choices of a form field (x-options)
+      description: |
+        The envelope config holds what the form holds now, stored secrets
+        filled in for fields the user did not change. Answer invalid_config
+        when the form lacks what the list needs. The manifest lists the
+        names under contributes.options.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/OptionsInput" } }
+      responses:
+        "200":
+          description: The choices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties: { output: { $ref: "#/components/schemas/OptionsOutput" } }
+        default: { $ref: "#/components/responses/Error" }
   /v1/events:
     post:
       summary: Receive an event the plugin subscribed to (permissions.events)
@@ -429,6 +457,27 @@ components:
               mimeType: { type: string }
               data: { type: string, contentEncoding: base64 }
         metadata: { type: object, additionalProperties: { type: string } }
+    OptionsInput:
+      type: object
+      required: [field, scope]
+      properties:
+        field: { type: string, description: Dotted path of the field }
+        scope: { enum: [system, tenant, instance] }
+        contribution: { type: string, description: '"<point>/<id>" when scope is instance' }
+        query: { type: string }
+    OptionsOutput:
+      type: object
+      required: [options]
+      properties:
+        options:
+          type: array
+          items:
+            type: object
+            required: [value, label]
+            properties:
+              value: {}
+              label: { type: string }
+              description: { type: string }
     EventDelivery:
       type: object
       required: [id, type, occurredAt, attempt]

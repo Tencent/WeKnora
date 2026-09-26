@@ -5434,6 +5434,21 @@ export default {
       minimum: '값이 너무 작습니다',
       maximum: '값이 너무 큽니다',
       format: 'https://example.com 과 같은 전체 주소를 입력하세요'
+    },
+    options: {
+      loading: '불러오는 중…',
+      empty: '선택할 수 있는 항목이 없습니다',
+      retry: '다시 시도',
+      failed: '선택 항목을 불러오지 못했습니다'
+    },
+    oauth: {
+      connected: '연결됨',
+      notConnected: '연결되지 않음',
+      connect: '계정 연결',
+      reconnect: '다시 연결',
+      disconnect: '연결 해제',
+      popupBlocked: '브라우저가 인증 창을 차단했습니다. 팝업을 허용한 뒤 다시 시도하세요.',
+      failed: '인증에 실패했습니다'
     }
   },
   common: {

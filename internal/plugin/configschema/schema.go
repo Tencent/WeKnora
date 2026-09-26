@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 // Types a schema node may declare.
@@ -75,6 +76,40 @@ type Schema struct {
 	Order int `json:"x-order,omitempty"`
 	// ModelTypes limits a model vendor field to some model types.
 	ModelTypes []string `json:"x-model-types,omitempty"`
+	// Options fills a field's choices from the plugin (its
+	// /v1/options/{name} endpoint), for choices that depend on the
+	// account: projects, spaces, channels.
+	Options *OptionsSource `json:"x-options,omitempty"`
+	// OAuth makes a string field an authorization: the form shows a
+	// connect button, WeKnora runs the OAuth code flow and the field holds
+	// a reference WeKnora swaps for a fresh access token at call time.
+	OAuth *OAuthSpec `json:"x-oauth,omitempty"`
+}
+
+// OptionsSource names where a field's choices come from.
+type OptionsSource struct {
+	// Name is the plugin's options endpoint: /v1/options/{name}.
+	Name string `json:"name"`
+	// DependsOn lists dotted paths of fields whose values the choices
+	// depend on; the form reloads them when those change.
+	DependsOn []string `json:"dependsOn,omitempty"`
+	// Search asks the plugin with what the user types (large lists).
+	Search bool `json:"search,omitempty"`
+}
+
+// OAuthSpec is an OAuth 2.0 authorization code flow.
+type OAuthSpec struct {
+	AuthorizeURL string   `json:"authorizeUrl"`
+	TokenURL     string   `json:"tokenUrl"`
+	Scopes       []string `json:"scopes,omitempty"`
+	// ClientID and ClientSecret are usually ${system.<key>}: the OAuth app
+	// is registered once for the platform.
+	ClientID     string `json:"clientId"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+	// PKCE adds a code challenge (S256).
+	PKCE bool `json:"pkce,omitempty"`
+	// Params are extra authorize parameters (audience, prompt).
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // Object returns an empty object schema.
@@ -173,7 +208,43 @@ func (s *Schema) check(path string, errs *[]error) {
 			fail("oneOf entries must carry a const")
 		}
 	}
+	if o := s.Options; o != nil {
+		if !optionsNamePattern.MatchString(o.Name) {
+			fail("x-options.name must be lowercase letters, digits, '_' or '-'")
+		}
+		if s.Type != TypeString && (s.Type != TypeArray || s.Items == nil || s.Items.Type != TypeString) {
+			fail("x-options is only allowed on strings or arrays of strings")
+		}
+	}
+	if o := s.OAuth; o != nil {
+		if s.Type != TypeString {
+			fail("x-oauth is only allowed on strings")
+		}
+		if s.Secret {
+			fail("x-oauth fields hold a reference, not a secret; drop x-secret")
+		}
+		for name, u := range map[string]string{"authorizeUrl": o.AuthorizeURL, "tokenUrl": o.TokenURL} {
+			if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://localhost") {
+				fail("x-oauth.%s must be an https URL", name)
+			}
+		}
+		if o.ClientID == "" {
+			fail("x-oauth.clientId is required")
+		}
+	}
 }
+
+// OAuthRefPrefix starts the value of an x-oauth field: a reference to an
+// OAuth connection WeKnora keeps (its tokens never reach the browser).
+const OAuthRefPrefix = "oauth:"
+
+var oauthRefPattern = regexp.MustCompile(`^oauth:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// IsOAuthRef reports whether a value references an OAuth connection.
+func IsOAuthRef(v string) bool { return oauthRefPattern.MatchString(v) }
+
+// optionsNamePattern is an options endpoint name.
+var optionsNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 func (s *Schema) containsSecret() bool {
 	if s.Secret {
@@ -185,6 +256,26 @@ func (s *Schema) containsSecret() bool {
 		}
 	}
 	return s.Items != nil && s.Items.containsSecret()
+}
+
+// OAuthFields returns the x-oauth fields by dotted path. A nil schema has
+// none.
+func (s *Schema) OAuthFields() map[string]*OAuthSpec {
+	out := map[string]*OAuthSpec{}
+	if s == nil {
+		return out
+	}
+	var walk func(n *Schema, path string)
+	walk = func(n *Schema, path string) {
+		if n.OAuth != nil {
+			out[path] = n.OAuth
+		}
+		for key, p := range n.Properties {
+			walk(p, joinPath(path, key))
+		}
+	}
+	walk(s, "")
+	return out
 }
 
 // SecretPaths lists the dotted paths of every secret field, sorted.
