@@ -577,7 +577,7 @@ func ResolveImagePipelineID(cfg *ImageProcessingConfig) ImagePipelineID {
 		return ImagePipelineIDFor(false)
 	}
 	if id := strings.TrimSpace(cfg.ImagePipelineID); id != "" {
-		return ImagePipelineID(id)
+		return NormalizeImagePipelineID(ImagePipelineID(id))
 	}
 	return ImagePipelineIDFor(cfg.ImageAttrsEnabled)
 }

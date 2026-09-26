@@ -64,9 +64,9 @@ func runOneImagePipeline(t *testing.T, attrsEnabled bool, params map[string]any)
 // "what did this image go through", so it is what a reader of a trace replays
 // when an image came out wrong.
 //
-// The two pipelines own different keys on purpose: caption_ocr asks whether to
-// run a step, ob_cap_ocr asks whether OCR may be spent at all. Both default to
-// on, which is what an untouched knowledge base gets.
+// The two pipelines own different keys on purpose: the default pipeline asks
+// whether to run a step, ob_cap_ocr asks whether OCR may be spent at all. Both
+// default to on, which is what an untouched knowledge base gets.
 func TestImagePipelineActionSequences(t *testing.T) {
 	cases := []struct {
 		name string
@@ -98,22 +98,22 @@ func TestImagePipelineActionSequences(t *testing.T) {
 			1,
 		},
 		{
-			"caption and OCR", false, true, true, types.ImagePipelineCaptionOCR,
+			"caption and OCR", false, true, true, types.ImagePipelineDefault,
 			[]types.ImageActionID{types.ImageActionCaption, types.ImageActionOCR},
 			2,
 		},
 		{
-			"caption only", false, true, false, types.ImagePipelineCaptionOCR,
+			"caption only", false, true, false, types.ImagePipelineDefault,
 			[]types.ImageActionID{types.ImageActionCaption},
 			1,
 		},
 		{
-			"OCR only", false, false, true, types.ImagePipelineCaptionOCR,
+			"OCR only", false, false, true, types.ImagePipelineDefault,
 			[]types.ImageActionID{types.ImageActionOCR},
 			1,
 		},
 		{
-			"nothing at all", false, false, false, types.ImagePipelineCaptionOCR,
+			"nothing at all", false, false, false, types.ImagePipelineDefault,
 			nil, 0,
 		},
 	}
@@ -126,8 +126,8 @@ func TestImagePipelineActionSequences(t *testing.T) {
 				captionFieldKeyEnableOCR:     tc.ocr,
 			}
 			if !tc.attrs {
-				// The observed pipeline ignores the caption_ocr keys and vice
-				// versa; each row only sets the ones its pipeline declares.
+				// The observed pipeline ignores the default pipeline's keys and
+				// vice versa; each row only sets the ones its pipeline declares.
 				params = map[string]any{
 					captionFieldKeyEnableCaption: tc.caption,
 					captionFieldKeyEnableOCR:     tc.ocr,
@@ -214,7 +214,7 @@ func TestListImagePipelinesMatchesRegistration(t *testing.T) {
 // set a tunable still runs with the pipeline's default rather than a zero value:
 // an unset map would otherwise silently mean "off" for every switch.
 func TestParamFallsBackToDeclaredDefault(t *testing.T) {
-	pipeline := imagePipelineRegistry[types.ImagePipelineCaptionOCR]
+	pipeline := imagePipelineRegistry[types.ImagePipelineDefault]
 	r := &runContext{out: types.JSONMap{}, imageInfo: &types.ImageInfo{}, declared: pipeline.Fields()}
 	if got := r.BoolParam(captionFieldKeyEnableOCR); got != true {
 		t.Errorf("BoolParam(%q) with no params = %v, want true (the declared default)",
@@ -310,9 +310,9 @@ func TestObservationPipelineTrace(t *testing.T) {
 	}
 }
 
-// TestCaptionOcrTrace pins the plain path: both actions run and no policy field
-// is invented, because there is nothing to decide from.
-func TestCaptionOcrTrace(t *testing.T) {
+// TestDefaultPipelineTrace pins the plain path: both actions run and no policy
+// field is invented, because there is nothing to decide from.
+func TestDefaultPipelineTrace(t *testing.T) {
 	r, _ := runOneImagePipeline(t, false, map[string]any{
 		captionFieldKeyEnableCaption: true,
 		captionFieldKeyEnableOCR:     true,
@@ -340,8 +340,11 @@ func TestImagePipelineIDsAreStable(t *testing.T) {
 	if got := string(types.ImagePipelineObCapOCR); got != "ob_cap_ocr" {
 		t.Errorf(`pipeline id = %q, want "ob_cap_ocr"`, got)
 	}
-	if got := string(types.ImagePipelineCaptionOCR); got != "caption_ocr" {
-		t.Errorf(`pipeline id = %q, want "caption_ocr"`, got)
+	if got := string(types.ImagePipelineDefault); got != "default" {
+		t.Errorf(`pipeline id = %q, want "default"`, got)
+	}
+	if got := string(types.NormalizeImagePipelineID(types.ImagePipelineLegacyCaptionOCR)); got != "default" {
+		t.Errorf(`legacy id normalized = %q, want "default"`, got)
 	}
 }
 

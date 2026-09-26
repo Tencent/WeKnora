@@ -6,16 +6,22 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-func init() { registerImagePipeline(captionOcrPipeline{}) }
+func init() { registerImagePipeline(defaultPipeline{}) }
 
-// captionOcrPipeline is the plain path: caption every image, then OCR every
-// image, with no observation and no policy. The whole-task switches live in the
-// payload and gate each action here, so the pipeline stays a plain sequence.
-type captionOcrPipeline struct{}
+// defaultPipeline is the manual path: the switches on the panel decide which
+// parsing actions run, and each chosen action runs for every image, with no
+// observation and no policy. The id is "default" on purpose — it is what a
+// knowledge base falls back to when nothing else was picked, and it is where
+// every registered action becomes a manually selectable switch as they land.
+type defaultPipeline struct{}
 
-func (captionOcrPipeline) ID() types.ImagePipelineID { return types.ImagePipelineCaptionOCR }
+func (defaultPipeline) ID() types.ImagePipelineID { return types.ImagePipelineDefault }
 
-func (captionOcrPipeline) Name() string { return "Caption every image, then OCR every image" }
+func (defaultPipeline) Name() string { return "Manual: pick the parsing actions" }
+
+func (defaultPipeline) Description() string {
+	return "The user switches the parsing actions on or off to fit the task."
+}
 
 // Field keys of this pipeline. They are declared as constants because the
 // default lives in the same struct as the key: a panel that renders the field
@@ -29,7 +35,7 @@ const (
 // Fields declares the two switches the panel renders for this pipeline. Both
 // default to true, which is what a knowledge base configured before these
 // fields existed gets: caption and OCR, as before.
-func (captionOcrPipeline) Fields() []types.ImageFieldDef {
+func (defaultPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		{
 			Key:         captionFieldKeyEnableCaption,
@@ -42,17 +48,19 @@ func (captionOcrPipeline) Fields() []types.ImageFieldDef {
 			Key:         captionFieldKeyEnableOCR,
 			Type:        types.ImageFieldTypeBool,
 			Label:       "Enable OCR",
-			Description: "Extract the text every image carries, whether or not the image contains any.",
+			Description: "Extract the text that appears in the image.",
 			Default:     true,
 		},
 	}
 }
 
-func (captionOcrPipeline) Run(ctx context.Context, r *runContext) error {
+func (defaultPipeline) Run(ctx context.Context, r *runContext) error {
 	// Both switches belong to this pipeline alone. Neither is a whole-task
 	// limit: an image handled by another pipeline may skip its caption while
 	// this one still captures it, so the field names are only meaningful
 	// relative to this pipeline and are recorded under those same names.
+	// Switching both off is guarded in the panel; if an API caller does it
+	// anyway, the run simply records that nothing was configured to happen.
 	if r.BoolParam(captionFieldKeyEnableCaption) {
 		if err := r.execute(ctx, types.ImageActionCaption); err != nil {
 			return err

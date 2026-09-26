@@ -95,6 +95,16 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.ImageAttrsEnabled != nil {
 		eff.ImageAttrsEnabled = *overrides.ImageAttrsEnabled
 	}
+	if overrides.ImagePipelineID != nil {
+		// The pick and its params travel as one unit: params keyed for one
+		// pipeline say nothing to another, so an id without its params would
+		// silently run the new pipeline on the old pipeline's switches.
+		eff.ImagePipelineID = types.NormalizeImagePipelineID(*overrides.ImagePipelineID)
+		eff.ImagePipelineParams = overrides.ImagePipelineParams
+		// The explicit pick also decides the legacy switch, so the fallback
+		// path and the run agree on which pipeline this document asked for.
+		eff.ImageAttrsEnabled = eff.ImagePipelineID == types.ImagePipelineObCapOCR
+	}
 	if overrides.ImageActions != nil {
 		base := eff.ImageActions
 		// Same rule as types.MergeImageActions: the OCR clause is a unit keyed

@@ -138,10 +138,26 @@ const (
 	// The id promises that observation comes before the decision; it does not
 	// promise that those three actions are the whole story.
 	ImagePipelineObCapOCR ImagePipelineID = "ob_cap_ocr"
-	// ImagePipelineCaptionOCR is the plain path: caption every image, then OCR
-	// every image, with no observation and no policy.
-	ImagePipelineCaptionOCR ImagePipelineID = "caption_ocr"
+	// ImagePipelineDefault is the manual path: the user picks which parsing
+	// actions run, and each runs for every image with no observation and no
+	// policy. It is the fallback whenever nothing else has been chosen.
+	ImagePipelineDefault ImagePipelineID = "default"
+	// ImagePipelineLegacyCaptionOCR is the id ImagePipelineDefault carried
+	// before the panel was reworked. Stored configs may still name it, so it
+	// is normalized rather than honoured: see NormalizeImagePipelineID.
+	ImagePipelineLegacyCaptionOCR ImagePipelineID = "caption_ocr"
 )
+
+// NormalizeImagePipelineID maps a stored pipeline id onto the id this build
+// registers. A rename must not strand the knowledge bases that stored the old
+// spelling, so every id that once named a shipped pipeline keeps resolving to
+// its successor; unknown ids pass through unchanged and the caller falls back.
+func NormalizeImagePipelineID(id ImagePipelineID) ImagePipelineID {
+	if id == ImagePipelineLegacyCaptionOCR {
+		return ImagePipelineDefault
+	}
+	return id
+}
 
 // ImagePipelineSpec is how a pipeline presents itself to the settings panel.
 // The frontend reads this shape instead of knowing any pipeline by name, so
@@ -153,6 +169,9 @@ type ImagePipelineSpec struct {
 	// Name is the human-readable label; the frontend overlays its translation
 	// and falls back to this text.
 	Name string `json:"name"`
+	// Description tells the user how this pipeline works, shown under the
+	// pick. Like Name it is overlay-translated with this text as fallback.
+	Description string `json:"description"`
 	// Fields are this pipeline's private tunables. The frontend renders one
 	// control per field and posts them back under the pipeline's own key, so
 	// two pipelines can each own a field named "enable_ocr" without either
@@ -166,5 +185,5 @@ func ImagePipelineIDFor(attrsEnabled bool) ImagePipelineID {
 	if attrsEnabled {
 		return ImagePipelineObCapOCR
 	}
-	return ImagePipelineCaptionOCR
+	return ImagePipelineDefault
 }

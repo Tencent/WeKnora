@@ -20,6 +20,9 @@ type imagePipeline interface {
 	ID() types.ImagePipelineID
 	// Name is the human-readable name shown in the settings panel.
 	Name() string
+	// Description tells the user how the pipeline works, shown under the
+	// pick in the settings panel.
+	Description() string
 	// Fields are the tunables of this pipeline; nil means it has none yet.
 	Fields() []types.ImageFieldDef
 	// Run executes the pipeline.
@@ -45,7 +48,10 @@ func registerImagePipeline(p imagePipeline) {
 // that this build no longer ships from stranding its images.
 func selectImagePipeline(payload *types.ImageMultimodalPayload) imagePipeline {
 	fallback := types.ImagePipelineIDFor(payload.ImageAttrsEnabled)
-	id := payload.ImagePipelineID
+	// A stored id may name a pipeline by a spelling this build renamed; the
+	// normalization keeps such a config on its successor instead of dropping
+	// to the fallback silently.
+	id := types.NormalizeImagePipelineID(payload.ImagePipelineID)
 	if id == "" {
 		id = fallback
 	}
@@ -69,9 +75,10 @@ func ListImagePipelines() []types.ImagePipelineSpec {
 	for _, id := range ids {
 		p := imagePipelineRegistry[id]
 		specs = append(specs, types.ImagePipelineSpec{
-			ID:     p.ID(),
-			Name:   p.Name(),
-			Fields: p.Fields(),
+			ID:          p.ID(),
+			Name:        p.Name(),
+			Description: p.Description(),
+			Fields:      p.Fields(),
 		})
 	}
 	return specs

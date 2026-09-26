@@ -19,8 +19,14 @@ func (obCapOcrPipeline) ID() types.ImagePipelineID { return types.ImagePipelineO
 
 func (obCapOcrPipeline) Name() string { return "Observe, caption, then decide on OCR" }
 
+func (obCapOcrPipeline) Description() string {
+	return "Observe the image's attributes and describe it first, then decide " +
+		"from the attributes whether OCR is worth a pass, saving model calls."
+}
+
 // Field keys of this pipeline. They deliberately do not reuse the names of
-// caption_ocr's switches: this pipeline answers "may OCR be spent at all",
+// the default pipeline's switches: this pipeline answers "may OCR be spent at
+// all",
 // which is a ceiling on the policy rather than a step to run, and folding the
 // two into one field would make an image's fate depend on which pipeline it
 // happened to be handled by.
